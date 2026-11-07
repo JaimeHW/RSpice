@@ -1476,3 +1476,19 @@ B2 o 0 V=V(mid+)*2+V(a)-V(b)
     assert_close("V(o2)", op_voltage(&netlist, "o2"), 6.0, 1e-9);
     assert_close("V(o4)", op_voltage(&netlist, "o4"), 6.0, 1e-9);
 }
+
+// QSPICE: V(b)=0.3038914; LTspice: 0.3038917.
+#[test]
+fn a_model_name_may_join_a_digit_led_word_with_a_hyphen() {
+    let netlist = parse(
+        "* a diode model whose name ends in a hyphen and a digit-led word
+V1 a 0 5
+R1 a b 1k
+D1 b 0 CMDSH-4E
+.model CMDSH-4E D(Is=82.9n Rs=2.02 N=1.04)
+.op
+.end
+",
+    );
+    assert_close("V(b)", op_voltage(&netlist, "b"), 0.303_891_4, 1e-6);
+}

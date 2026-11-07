@@ -180,6 +180,15 @@ impl<'a> Lexer<'a> {
         Ok(tokens)
     }
 
+    /// Whether the character before the cursor ends a name, with no blank
+    /// between them.
+    fn follows_name_character(&self) -> bool {
+        self.input[..self.pos]
+            .chars()
+            .next_back()
+            .is_some_and(|before| before.is_alphanumeric() || before == '_')
+    }
+
     /// Skip horizontal whitespace (spaces and tabs, not newlines)
     ///
     /// `\x1A` is the DOS end-of-file marker. Model files written on DOS-era
@@ -214,7 +223,14 @@ impl<'a> Lexer<'a> {
                 if input.len() > 1 {
                     let next = input[1..].chars().next();
                     if matches!(next, Some('0'..='9')) {
-                        return self.parse_number_or_ident(input);
+                        let number = self.parse_number_or_ident(input);
+                        // A hyphen joined to the name before it, followed by
+                        // text that is no number, is part of that name: the
+                        // model `CMDSH-4E`.
+                        if number.is_err() && self.follows_name_character() {
+                            return Ok((TokenKind::Minus, 1));
+                        }
+                        return number;
                     }
                 }
                 Ok((TokenKind::Minus, 1))
