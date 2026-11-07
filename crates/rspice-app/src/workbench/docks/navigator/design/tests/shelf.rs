@@ -34,8 +34,8 @@ fn every_built_in_part_is_filed_once_and_no_two_rows_share_a_label() {
     let mut labels = HashSet::new();
     for row in &rows {
         assert!(
-            labels.insert(row.label()),
-            "two shelf rows are labelled {:?}",
+            labels.insert(row.label().to_lowercase()),
+            "two shelf rows are labelled {:?}, in some case",
             row.label()
         );
     }
@@ -69,6 +69,8 @@ fn every_built_in_part_is_filed_once_and_no_two_rows_share_a_label() {
         "zener",
         "tline",
         "cpline",
+        "hyst",
+        "s_h",
     ] {
         let descriptor = engine_only_xspice_devices()
             .iter()
@@ -78,6 +80,44 @@ fn every_built_in_part_is_filed_once_and_no_two_rows_share_a_label() {
             descriptor.category, None,
             "{duplicate} duplicates a native part and stays off the shelf"
         );
+    }
+}
+
+/// A listed code model never answers to a functional part's name: the shelf
+/// offers that part once. The event-driven digital models are the exception,
+/// as the event-driven twins of the analog-threshold gates and counter.
+#[test]
+fn no_listed_code_model_answers_to_a_functional_parts_name() {
+    let rows = ComponentCategory::ALL
+        .into_iter()
+        .flat_map(palette_rows)
+        .collect::<Vec<_>>();
+    let functional = rows
+        .iter()
+        .filter_map(|row| match row {
+            PaletteRow::Functional(descriptor) => Some(descriptor.display_name),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(!functional.is_empty());
+    for row in &rows {
+        let PaletteRow::Xspice(model) = row else {
+            continue;
+        };
+        if model.category == Some(ComponentCategory::DigitalEventDriven) {
+            continue;
+        }
+        for name in &functional {
+            assert!(
+                !model.display_name.eq_ignore_ascii_case(name)
+                    && !model
+                        .keywords
+                        .iter()
+                        .any(|keyword| keyword.eq_ignore_ascii_case(name)),
+                "the {} code model answers to the {name} part's name",
+                model.display_name
+            );
+        }
     }
 }
 
