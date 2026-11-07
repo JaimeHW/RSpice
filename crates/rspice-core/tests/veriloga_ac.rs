@@ -250,6 +250,9 @@ endmodule"#,
     let _ = std::fs::remove_file(model);
 }
 
+/// A noise power that is not a number fails the SP noise transaction (a
+/// negative one only contributes nothing), and the failed transaction must
+/// not publish the `$finish` its AC pass queued.
 #[test]
 fn sp_noise_failure_does_not_publish_a_pending_ac_finish() {
     let model = write_model(
@@ -264,7 +267,7 @@ analog begin
         if (analysis("ac")) $finish(2);
         if (analysis("noise")) begin
             if (bad_task) $finish(99);
-            else psd=-1;
+            else psd=sqrt(V(p,n)-1);
         end
     end
     if (early && analysis("ac") && !analysis("static")) $finish(1);
