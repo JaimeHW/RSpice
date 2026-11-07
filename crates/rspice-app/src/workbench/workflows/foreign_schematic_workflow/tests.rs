@@ -317,8 +317,8 @@ fn drawing_folder() -> PathBuf {
     std::fs::write(
         folder.join("filter.asc"),
         "Version 4\nSHEET 1 880 680\n\
-         WIRE 96 96 32 96\nWIRE 208 96 176 96\nWIRE 288 96 208 96\n\
-         FLAG 32 176 0\nFLAG 208 160 0\nFLAG 288 96 out\n\
+         WIRE 96 96 32 96\nWIRE 208 96 176 96\nWIRE 288 96 208 96\nWIRE 320 96 288 96\n\
+         FLAG 32 176 0\nFLAG 208 160 0\nFLAG 288 96 out\nFLAG 384 96 buffered\n\
          SYMBOL voltage 32 80 R0\nSYMATTR InstName V1\nSYMATTR Value PULSE(0 1 0 1n 1n 5m 10m)\n\
          SYMBOL res 192 80 R90\nSYMATTR InstName R1\nSYMATTR Value {R}\n\
          SYMBOL cap 192 96 R0\nSYMATTR InstName C1\nSYMATTR Value 1u\n\
@@ -351,6 +351,11 @@ fn an_imported_schematic_is_project_content_a_run_reads() {
     assert!(summary.contains("LTspice"), "{summary}");
 
     let model = &app.state.model;
+    let log = model
+        .log_buffer
+        .entries()
+        .map(|entry| entry.message.clone())
+        .collect::<Vec<_>>();
     let cells = model
         .library_manager
         .get_library(&library)
@@ -365,7 +370,11 @@ fn an_imported_schematic_is_project_content_a_run_reads() {
     assert_eq!(model.workspace.content.project.top_cell, "filter");
     assert_eq!(model.workspace.content.active_view.cell, "filter");
 
-    assert_eq!(model.sim_setup.active_plan_name().as_str(), "filter");
+    assert_eq!(
+        model.sim_setup.active_plan_name().as_str(),
+        "filter",
+        "{log:#?}"
+    );
     let plan = model
         .sim_setup
         .stable_analysis_plan()
@@ -434,11 +443,11 @@ fn an_imported_schematic_is_project_content_a_run_reads() {
         .collect::<Vec<_>>();
     assert_eq!(measurements, [".MEAS TRAN vmax MAX V(out)"]);
 
-    let mut checked = rspice_design::drc::DrcResult::new();
-    checked.completed = true;
-    app.state.model.design_checks.drc_results = Some(checked);
-    app.state.model.design_checks.drc_checked_version =
-        app.state.model.schematic.topology_version();
+    let checked = app
+        .state
+        .run_active_design_checks()
+        .expect("the imported schematic is checked");
+    assert!(!checked.has_errors(), "{checked:#?}");
     let prepared = crate::simulation::controller::SimulationController::new()
         .prepare_run_set_for_preflight(&app.state)
         .expect("the imported schematic prepares a run with no further step");

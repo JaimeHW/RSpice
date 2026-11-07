@@ -111,6 +111,80 @@ pub struct ForeignSymbolCell {
     pub location: Option<String>,
     /// The schematic that defines a hierarchical block's insides.
     pub schematic: Option<PathBuf>,
+    /// The model or subcircuit its instances write; `None` for a
+    /// hierarchical block.
+    pub model: Option<String>,
+    /// The instance line of a part whose device letter is not `X`.
+    pub template: Option<String>,
+    /// The file that defines its model, when one does: the cell then runs
+    /// through a `spice` view over that file.
+    pub source: Option<ForeignModelSource>,
+}
+
+/// A file, and the `.lib` section of it, that defines a cell's model.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForeignModelSource {
+    pub path: PathBuf,
+    pub section: Option<String>,
+}
+
+impl ForeignSymbolCell {
+    /// Takes the first of `files` whose text defines this cell's model as
+    /// its source, when it has none. Each file is `(path, section, text)`.
+    pub fn find_source(&mut self, files: &[(PathBuf, Option<String>, String)]) {
+        let Some(model) = self.model.as_deref().filter(|_| self.source.is_none()) else {
+            return;
+        };
+        let keyword = if self.template.is_some() {
+            ".model"
+        } else {
+            ".subckt"
+        };
+        self.source = files
+            .iter()
+            .find(|(_, _, text)| defines(text, keyword, model))
+            .map(|(path, section, _)| ForeignModelSource {
+                path: path.clone(),
+                section: section.clone(),
+            });
+    }
+}
+
+/// Whether a line of `text` opens `keyword name`.
+fn defines(text: &str, keyword: &str, name: &str) -> bool {
+    text.lines().any(|line| {
+        let mut words = line.split_ascii_whitespace();
+        words
+            .next()
+            .is_some_and(|word| word.eq_ignore_ascii_case(keyword))
+            && words
+                .next()
+                .is_some_and(|word| word.eq_ignore_ascii_case(name))
+    })
+}
+
+/// Moves every instance of a cell with a source file onto that cell's
+/// `spice` view, bound to the file.
+pub fn bind_instances_to_sources(
+    document: &mut SchematicDocument,
+    library: &str,
+    cells: &[ForeignSymbolCell],
+) {
+    for component in &mut document.components {
+        let Some(binding) = component.library_cell.as_mut() else {
+            continue;
+        };
+        let Some(source) = cells
+            .iter()
+            .filter(|cell| binding.library == library && binding.cell == cell.cell)
+            .find_map(|cell| cell.source.as_ref())
+        else {
+            continue;
+        };
+        binding.view = "spice".to_owned();
+        binding.source_path = Some(source.path.clone());
+        binding.model_section.clone_from(&source.section);
+    }
 }
 
 /// The imported schematic and everything that did not become sheet content.
@@ -538,8 +612,6 @@ impl Builder<'_> {
         pins: &[Point],
     ) {
         let label = self.symbol_label(symbol);
-        let cell_index = self.symbol_cell(symbol, definition, location, schematic.clone());
-        let cell = self.cells[cell_index].clone();
         let prefix = attribute(attributes, "Prefix")
             .map(str::trim)
             .filter(|prefix| !prefix.is_empty())
@@ -557,15 +629,13 @@ impl Builder<'_> {
             "X".to_owned()
         };
         let subcircuit = schematic.is_some();
-        let model = if subcircuit {
-            cell.cell.clone()
-        } else {
+        let written = (!subcircuit).then(|| {
             attribute(attributes, "Value")
                 .filter(|value| !value.trim().is_empty())
                 .or_else(|| attribute(attributes, "Value2"))
                 .map(spice_text)
                 .unwrap_or_else(|| symbol.base_name().to_owned())
-        };
+        });
         let mut words = Vec::new();
         for key in ["SpiceLine", "SpiceLine2"] {
             if let Some(text) = attribute(attributes, key).filter(|text| !text.trim().is_empty()) {
@@ -580,8 +650,18 @@ impl Builder<'_> {
         {
             words.extend(spice_tokens(&spice_text(value2)));
         }
-        let (model, model_words) = split_model(&model);
+        let (model, model_words) = written.as_deref().map(split_model).unwrap_or_default();
         words.splice(0..0, model_words);
+        // One cell per model: a cell's `spice` view runs one model.
+        let cell_index = self.symbol_cell(
+            symbol,
+            definition,
+            location,
+            schematic.clone(),
+            (!subcircuit).then_some(model.as_str()),
+        );
+        let cell = self.cells[cell_index].clone();
+        let model = if subcircuit { cell.cell.clone() } else { model };
         let params = words
             .iter()
             .filter(|word| word.contains('='))
@@ -600,6 +680,9 @@ impl Builder<'_> {
         if prefix != "X" {
             binding.netlist_template =
                 Some(format!("{prefix}{{name}} {{nodes}} {{model}} {{params}}"));
+            self.cells[cell_index]
+                .template
+                .clone_from(&binding.netlist_template);
             binding.parameter_order = params
                 .iter()
                 .filter_map(|word| word.split_once('=').map(|(key, _)| key.to_owned()))
@@ -619,7 +702,13 @@ impl Builder<'_> {
                             "{label}: its model file `{file}` is encrypted, so RSpice cannot read model `{model}`; the model is unresolved."
                         ));
                     }
-                    Some(found) => binding.source_path = Some(found.path),
+                    Some(found) => {
+                        self.cells[cell_index].source.get_or_insert(ForeignModelSource {
+                            path: found.path.clone(),
+                            section: None,
+                        });
+                        binding.source_path = Some(found.path);
+                    }
                     None => self.refuse(format!(
                         "{label}: its model file `{file}` was not found, so model `{model}` is unresolved."
                     )),
@@ -693,13 +782,15 @@ impl Builder<'_> {
         definition: &ForeignSymbolDefinition,
         location: Option<String>,
         schematic: Option<PathBuf>,
+        model: Option<&str>,
     ) -> usize {
         // QSPICE embeds a symbol per component, so two components under one
         // name may differ; their drawings decide.
         let key = format!(
-            "{}|{:?}",
+            "{}|{:?}|{}",
             symbol.symbol.to_ascii_lowercase(),
-            definition.pins
+            definition.pins,
+            model.unwrap_or_default().to_ascii_lowercase()
         );
         if let Some(index) = self.cell_index.get(&key) {
             return *index;
@@ -755,6 +846,9 @@ impl Builder<'_> {
             source_symbol: symbol.symbol.clone(),
             location,
             schematic,
+            model: model.map(str::to_owned),
+            template: None,
+            source: None,
         });
         let index = self.cells.len() - 1;
         self.cell_index.insert(key, index);
@@ -1130,6 +1224,7 @@ impl Builder<'_> {
 
     fn finish(mut self) -> ForeignImport {
         rebuild_connections_from_terminals(&mut self.document, &self.terminals);
+        bind_instances_to_sources(&mut self.document, self.library, &self.cells);
         let defined = defined_model_names(&foreign_directive_cards(&self.directives));
         let model_cards = self
             .models

@@ -19,7 +19,8 @@ pub use directives::{
 };
 pub use import::{
     ForeignDirective, ForeignImport, ForeignImportNotice, ForeignLibrary, ForeignModelFile,
-    ForeignNoticeSeverity, ForeignSymbolCell, ForeignSymbolSource, import_foreign_schematic,
+    ForeignModelSource, ForeignNoticeSeverity, ForeignSymbolCell, ForeignSymbolSource,
+    bind_instances_to_sources, import_foreign_schematic,
 };
 pub use installed::{InstalledForeignLibrary, is_encrypted};
 pub use ltspice::{parse_asc, parse_asy};

@@ -20,8 +20,8 @@ use std::path::{Path, PathBuf};
 
 use rspice_design::foreign_schematic::{
     ForeignCard, ForeignCardRole, ForeignLibrary, ForeignNoticeSeverity, ForeignSymbolCell,
-    ForeignTool, InstalledForeignLibrary, decode_foreign_text, foreign_directive_cards,
-    import_foreign_schematic, keep_directive_text, parse_asc, parse_qsch,
+    ForeignTool, InstalledForeignLibrary, bind_instances_to_sources, decode_foreign_text,
+    foreign_directive_cards, import_foreign_schematic, keep_directive_text, parse_asc, parse_qsch,
 };
 use rspice_design::schematic::document::SchematicDocument;
 use rspice_simulation_contract::design_variable::{
@@ -128,7 +128,8 @@ pub(crate) fn import_foreign_schematic_file(
             .map(|notice| (ForeignNoticeSeverity::Notice, notice)),
     );
 
-    let includes = resolve_includes(&access, &mut plan, &mut notices);
+    let mut includes = resolve_includes(&access, &mut plan, &mut notices);
+    bind_model_files(&mut tree, &library, &mut includes);
     keep_on_sheet(&mut tree.document, &plan, &mut notices);
 
     add_symbol_cells(&mut app.state, &library, &mut tree.cells)?;
@@ -303,6 +304,50 @@ fn rename_taken_cells(state: &AppState, library: &str, tree: &mut ImportedTree) 
 /// The model files the drawing's `.include` and `.lib` cards name, found
 /// where the source program looks. A file not found, or one only its vendor
 /// can read, leaves its card on the sheet.
+/// Binds each cell whose model an included file defines to that file, so
+/// the cell runs through a `spice` view over it, and adds every cell's file
+/// to the files the project binds as model libraries. A file is named as
+/// the model library that reads it names it, so the two agree.
+fn bind_model_files(
+    tree: &mut ImportedTree,
+    library: &str,
+    includes: &mut Vec<(PathBuf, Option<String>)>,
+) {
+    let files = includes
+        .iter()
+        .filter_map(|(path, section)| {
+            let bytes = std::fs::read(path).ok()?;
+            Some((
+                path.clone(),
+                section.clone(),
+                String::from_utf8_lossy(&bytes).into_owned(),
+            ))
+        })
+        .collect::<Vec<_>>();
+    for (cell, _) in &mut tree.cells {
+        cell.find_source(&files);
+        if let Some(source) = cell.source.as_mut() {
+            if let Ok(path) = std::fs::canonicalize(&source.path) {
+                source.path = path;
+            }
+            includes.push((source.path.clone(), source.section.clone()));
+        }
+    }
+    let cells = tree
+        .cells
+        .iter()
+        .map(|(cell, _)| cell.clone())
+        .collect::<Vec<_>>();
+    bind_instances_to_sources(&mut tree.document, library, &cells);
+    for document in tree
+        .cells
+        .iter_mut()
+        .filter_map(|(_, document)| document.as_mut())
+    {
+        bind_instances_to_sources(document, library, &cells);
+    }
+}
+
 fn resolve_includes(
     access: &InstalledForeignLibrary,
     plan: &mut ForeignPlan,
@@ -402,6 +447,9 @@ fn add_symbol_cells(
         let mut symbol = View::new("symbol", ViewType::Symbol);
         cell.symbol.store_in_view(&mut symbol)?;
         entry.add_view(symbol);
+        if let (Some(source), Some(model)) = (&cell.source, &cell.model) {
+            entry.add_view(spice_view(&cell, source, model)?);
+        }
         if let Some(document) = schematic {
             entry.add_view(View::new("schematic", ViewType::Schematic));
             blocks.push((CellViewRef::new(library, &cell.cell, "schematic"), document));
@@ -427,6 +475,37 @@ fn add_symbol_cells(
     }
     state.model.publish_project_library_mutation(mutation);
     Ok(())
+}
+
+/// The executable view of a cell whose model a file defines: the file, the
+/// model it names, its ports in instance-line order and, for a device letter
+/// other than `X`, its instance line.
+fn spice_view(
+    cell: &ForeignSymbolCell,
+    source: &rspice_design::foreign_schematic::ForeignModelSource,
+    model: &str,
+) -> Result<View, String> {
+    let mut view = View::new("spice", ViewType::Spice).with_path(source.path.clone());
+    let ports = serde_json::to_string(
+        &cell
+            .ports
+            .iter()
+            .map(|port| port.name.as_str())
+            .collect::<Vec<_>>(),
+    )
+    .map_err(|error| format!("the ports of cell {} cannot be stated: {error}", cell.cell))?;
+    view.metadata.insert("netlist.ports".to_owned(), ports);
+    view.metadata
+        .insert("netlist.model".to_owned(), model.to_owned());
+    if let Some(template) = &cell.template {
+        view.metadata
+            .insert("netlist.template".to_owned(), template.clone());
+    }
+    if let Some(section) = &source.section {
+        view.metadata
+            .insert("netlist.section".to_owned(), section.clone());
+    }
+    Ok(view)
 }
 
 /// A project whose top cell draws nothing simulates the imported cell; any
@@ -597,6 +676,11 @@ fn commit_plan(
     }
     let payload = crate::state::SimulationPlanPayload {
         design_variables: variables,
+        specs: plan
+            .measurements
+            .iter()
+            .map(|(_, definition)| definition.projected_entry())
+            .collect(),
         specification_definitions: plan
             .measurements
             .iter()
