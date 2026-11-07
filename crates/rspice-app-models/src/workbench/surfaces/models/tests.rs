@@ -38,7 +38,7 @@ const MODELS_BASELINES: [ModelsBaseline; 8] = [
         name: "models-01-symbols-cdf",
         page: ModelsPage::Symbols,
         scope: ModelsCatalogScope::Project,
-        fingerprint: "c64ec5da49222efa44b006cfa23ab7e3950c82cae7c7a458eab71cd49915a914",
+        fingerprint: "9fd816e617b78b3f95a857c8e8f38abfa4e10e71f4d161806769c8d150fb4ba0",
     },
     ModelsBaseline {
         name: "models-02-corners-sections",
@@ -56,7 +56,7 @@ const MODELS_BASELINES: [ModelsBaseline; 8] = [
         name: "models-04-include-graph",
         page: ModelsPage::Include,
         scope: ModelsCatalogScope::Project,
-        fingerprint: "e9b793c5e1eb34617bf05ee21ac42507ee99a7575aef2e8fe2a56da429f77a8a",
+        fingerprint: "84cb2c5dae5394744da52cf109f8bd67f9393b1c2e5bd247ff8ef8b13b9782d8",
     },
     ModelsBaseline {
         name: "models-05-qualification",
