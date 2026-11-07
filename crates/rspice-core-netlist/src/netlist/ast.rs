@@ -934,6 +934,13 @@ impl SpecialFunction {
         }
     }
 
+    /// The instance parameter that holds entry `index`, from 1, of the
+    /// `table(x1 y1 x2 y2 ...)` a VARISTOR may be given.
+    #[must_use]
+    pub fn table_entry(index: usize) -> String {
+        format!("TABLE[{index}]")
+    }
+
     /// The device a model token names, ignoring ASCII case.
     pub(crate) fn from_model_token(token: &str) -> Option<Self> {
         Self::ALL

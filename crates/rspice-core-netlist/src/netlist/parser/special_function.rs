@@ -75,6 +75,32 @@ pub(super) fn parse_special_function(
         }
         let raw_name = expect_ident(stream, line_num)?;
         let param_name = raw_name.to_ascii_uppercase();
+        if param_name == "TABLE" && stream.consume(&TokenKind::LParen) {
+            if function != SpecialFunction::Varistor {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!("{} {name} takes no table", function.ltspice_name()),
+                });
+            }
+            // `table(x1 y1 x2 y2 ...)`: one parameter per entry.
+            let mut index = 0;
+            loop {
+                skip_commas(stream);
+                if stream.consume(&TokenKind::RParen) {
+                    break;
+                }
+                let value =
+                    take_value(stream, params, defer_simple_param_refs).ok_or_else(|| {
+                        ParseError::Syntax {
+                            line: line_num,
+                            message: format!("Expected a value or ')' in the table of {name}"),
+                        }
+                    })?;
+                index += 1;
+                assign(SpecialFunction::table_entry(index), Some(value));
+            }
+            continue;
+        }
         if !stream.consume(&TokenKind::Equals) {
             assign(param_name, None);
             continue;

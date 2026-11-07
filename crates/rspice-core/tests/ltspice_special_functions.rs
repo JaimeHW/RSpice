@@ -749,6 +749,76 @@ A3 n 0 0 0 0 0 o3 0 VARISTOR rclamp=10
 }
 
 #[test]
+fn a_varistor_table_reads_its_breakdown_at_v2_minus_v1() {
+    // A3's breakdown is -3: it conducts everywhere and jumps at -3 V, where
+    // LTspice finds no operating point, so it runs on the positive side only.
+    let deck = |v: f64, negative_breakdown: bool| {
+        let a3 = if negative_breakdown {
+            "R3 in o3 1k
+A3 0 c 0 0 0 0 o3 0 VARISTOR table(0 0 1 -1 2 -2 3 -3 4 -4)
+"
+        } else {
+            ""
+        };
+        format!(
+            "* varistor tables
+V1 in 0 {v}
+Va a 0 10.5
+Vc c 0 3
+R1 in o1 1k
+A1 0 a 0 0 0 0 o1 0 VARISTOR table(.5 0 10.5 10)
+R2 in o2 1k
+A2 c 0 0 0 0 0 o2 0 VARISTOR table(-5 5 0 0) rclamp=10
+{a3}R4 in o4 1k
+X1 a o4 vt top=8
+.subckt vt a o top=10
+A1 0 a 0 0 0 0 o 0 VARISTOR table(.5 0 10.5 {{top}})
+.ends
+.op
+.end
+"
+        )
+    };
+    // LTspice 26.1.1 (.dc V1 -20 20 1, and .op at -12 without A3).
+    for (v, o1, o2, o3, o4) in [
+        (0.0, 0.0, 0.0, Some(-2.997_002_997_003), 0.0),
+        (5.0, 5.0, 3.019_801_980_198, Some(-2.992_007_992_008), 5.0),
+        (
+            12.0,
+            10.001_998_001_998,
+            3.089_108_910_891,
+            Some(-2.985_014_985_015),
+            8.003_996_003_996,
+        ),
+        (
+            20.0,
+            10.009_990_009_990,
+            3.168_316_831_683,
+            Some(-2.977_022_977_023),
+            8.011_988_011_988,
+        ),
+        (
+            -12.0,
+            -10.001_998_001_998,
+            -3.089_108_910_891,
+            None,
+            -8.003_996_003_996,
+        ),
+    ] {
+        let op = Engine::default()
+            .run_dc_op(&parse(&deck(v, o3.is_some())))
+            .expect("OP solves");
+        let node = |name: &str| op.try_voltage_named(name).unwrap();
+        assert_close(&format!("o1 at {v}"), node("o1"), o1, 1e-9);
+        assert_close(&format!("o2 at {v}"), node("o2"), o2, 1e-9);
+        if let Some(o3) = o3 {
+            assert_close(&format!("o3 at {v}"), node("o3"), o3, 1e-9);
+        }
+        assert_close(&format!("o4 at {v}"), node("o4"), o4, 1e-9);
+    }
+}
+
+#[test]
 fn ota_source_limit_is_also_spelled_isrc_and_isource() {
     let deck = "* ota source limit spellings
 V1 p 0 1

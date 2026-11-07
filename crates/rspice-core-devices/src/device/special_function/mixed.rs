@@ -20,7 +20,9 @@
 //! terminal 7 is `A·sin φ` and terminal 6 `A·cos φ`, each behind `Rout`.
 //!
 //! VARISTOR conducts from terminal 7 to the common only beyond the breakdown
-//! voltage `|V1 − V2|`, through `Rclamp`.
+//! voltage `|V1 − V2|`, through `Rclamp`. Given `table(x1 y1 x2 y2 ...)`,
+//! the breakdown is that table read at `V2 − V1` instead, linear between
+//! entries and held beyond the ends, as LTspice reads it.
 //!
 //! Each reads `Td` as LTspice does, without delaying anything.
 
@@ -193,6 +195,8 @@ impl Modulator {
 #[doc(hidden)]
 pub struct Varistor {
     pub rclamp: Value,
+    /// `(x, breakdown)` entries, `x` increasing, read at `V2 − V1`.
+    pub table: Option<Vec<(Value, Value)>>,
 }
 
 impl Varistor {
@@ -200,26 +204,67 @@ impl Varistor {
     pub fn from_params(params: &[(String, Value)]) -> Result<Self, SpecialFunctionError> {
         let mut p = InstanceParams::new("VARISTOR", params);
         let rclamp = positive("VARISTOR", "Rclamp", p.or("RCLAMP", 1.0)?)?;
+        let mut values = Vec::new();
+        while let Some(value) = p.get(&crate::netlist::SpecialFunction::table_entry(
+            values.len() + 1,
+        ))? {
+            values.push(value);
+        }
+        let table = if values.is_empty() {
+            None
+        } else {
+            require(values.len() % 2 == 0, || {
+                format!(
+                    "VARISTOR table needs x and breakdown pairs, not {} values",
+                    values.len()
+                )
+            })?;
+            let entries: Vec<(Value, Value)> =
+                values.chunks(2).map(|pair| (pair[0], pair[1])).collect();
+            require(entries.windows(2).all(|pair| pair[0].0 < pair[1].0), || {
+                "VARISTOR table x values must increase".to_string()
+            })?;
+            Some(entries)
+        };
         p.get("TD")?;
         p.finish()?;
-        Ok(Self { rclamp })
+        Ok(Self { rclamp, table })
+    }
+
+    /// The breakdown voltage and its partial with respect to `control`.
+    fn breakdown(&self, control: Value) -> (Value, Value) {
+        let Some(table) = &self.table else {
+            return (control.abs(), control.signum());
+        };
+        let x = -control;
+        let upper = table.partition_point(|&(at, _)| at <= x);
+        if upper == 0 {
+            return (table[0].1, 0.0);
+        }
+        if upper == table.len() {
+            return (table[upper - 1].1, 0.0);
+        }
+        let ((x0, y0), (x1, y1)) = (table[upper - 1], table[upper]);
+        let slope = (y1 - y0) / (x1 - x0);
+        (y0 + slope * (x - x0), -slope)
     }
 
     /// The current from terminal 7 through the device to the common at
-    /// `v`, with breakdown voltage `|control|`, and its partials with
-    /// respect to `v` and `control`.
+    /// `v`, and its partials with respect to `v` and `control`, `V1 − V2`.
+    /// Above the breakdown `b` the device conducts `(v − b)/Rclamp`, and
+    /// below `−b` it conducts `(v + b)/Rclamp`, in that order, so a negative
+    /// breakdown from a table conducts everywhere, as in LTspice.
     #[doc(hidden)]
     pub fn current(&self, v: Value, control: Value) -> (Value, Value, Value) {
-        let excess = v.abs() - control.abs();
-        if excess <= 0.0 {
-            return (0.0, 0.0, 0.0);
-        }
+        let (b, db) = self.breakdown(control);
         let g = 1.0 / self.rclamp;
-        (
-            excess.copysign(v) * g,
-            g,
-            -g * v.signum() * control.signum(),
-        )
+        if v > b {
+            ((v - b) * g, g, -g * db)
+        } else if v < -b {
+            ((v + b) * g, g, g * db)
+        } else {
+            (0.0, 0.0, 0.0)
+        }
     }
 }
 
@@ -266,6 +311,35 @@ mod tests {
         let (current, g, d_control) = varistor.current(-2.5, 2.0);
         assert!((current + 0.05).abs() < 1e-15);
         assert_eq!((g, d_control), (0.1, 0.1));
+    }
+
+    #[test]
+    fn a_varistor_table_sets_the_breakdown_from_v2_minus_v1() {
+        let table = |values: &[Value]| {
+            let pairs: Vec<(String, Value)> = values
+                .iter()
+                .enumerate()
+                .map(|(index, value)| {
+                    (
+                        crate::netlist::SpecialFunction::table_entry(index + 1),
+                        *value,
+                    )
+                })
+                .collect();
+            Varistor::from_params(&pairs)
+        };
+        // LTspice 26.1.1: table(.5 0 10.5 10) with V2 - V1 = 1 breaks down
+        // at 0.5, with V2 - V1 = -5 at 0 and with V2 - V1 = 20 at 10.
+        let varistor = table(&[0.5, 0.0, 10.5, 10.0]).unwrap();
+        assert_eq!(varistor.current(5.0, -1.0).0, 4.5);
+        assert_eq!(varistor.current(5.0, 5.0).0, 5.0);
+        assert_eq!(varistor.current(-20.0, -20.0).0, -10.0);
+        // table(0 0 1 -1 2 -2 3 -3 4 -4) with V2 - V1 = 3: breakdown -3.
+        let varistor = table(&[0.0, 0.0, 1.0, -1.0, 2.0, -2.0, 3.0, -3.0, 4.0, -4.0]).unwrap();
+        assert_eq!(varistor.current(-2.0, -3.0).0, 1.0);
+        assert_eq!(varistor.current(-5.0, -3.0).0, -8.0);
+        assert!(table(&[0.5, 0.0, 10.5]).is_err());
+        assert!(table(&[1.0, 0.0, 0.5, 1.0]).is_err());
     }
 
     #[test]
