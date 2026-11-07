@@ -30,6 +30,9 @@ fn authoritative_cell_instance_sheet(
     if binding.is_builtin_xspice() {
         return builtin_xspice_property_sheet(binding).map(Some);
     }
+    if binding.is_builtin_functional() {
+        return functional_property_sheet(binding).map(Some);
+    }
     if binding.is_generated_veriloga() {
         return generated_veriloga_property_sheet(binding).map(Some);
     }
@@ -224,6 +227,49 @@ fn builtin_xspice_property_sheet(
         }
         if parameter.required {
             definition = definition.required();
+        }
+        sheet.add(definition);
+    }
+    Ok(sheet)
+}
+
+/// A functional part's sheet: one row per subcircuit parameter, labelled in
+/// words, with its unit and the subcircuit's own default. A selector offers
+/// its named settings.
+fn functional_property_sheet(
+    binding: &crate::state::LibraryCellInstance,
+) -> Result<PropertySheet, String> {
+    let descriptor = crate::state::validate_builtin_functional_binding(binding)?;
+    let mut sheet = cell_instance_identity_sheet();
+    for (index, parameter) in descriptor.parameters.iter().enumerate() {
+        let (property_type, default) = if parameter.choices.is_empty() {
+            (
+                PropertyType::Expression,
+                PropertyValue::expression(parameter.default),
+            )
+        } else {
+            (
+                PropertyType::Enum,
+                PropertyValue::enumeration(
+                    parameter.default,
+                    parameter
+                        .choices
+                        .iter()
+                        .map(|choice| choice.label.to_owned())
+                        .collect(),
+                ),
+            )
+        };
+        let mut definition = PropertyDefinition::new(parameter.name)
+            .with_display_name(parameter.label)
+            .with_description(parameter.description)
+            .with_type(property_type)
+            .with_default(default)
+            .with_max_length(512)
+            .with_order(index as i32)
+            .with_category("Parameters");
+        if !parameter.unit.is_empty() {
+            definition = definition.with_unit(parameter.unit);
         }
         sheet.add(definition);
     }

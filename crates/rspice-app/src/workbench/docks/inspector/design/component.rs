@@ -67,6 +67,12 @@ pub(super) fn component_title_kind(component: &Component) -> String {
         return descriptor.display_name.to_owned();
     }
     if let Some(descriptor) = binding
+        .filter(|binding| binding.is_builtin_functional())
+        .and_then(|binding| crate::state::validate_builtin_functional_binding(binding).ok())
+    {
+        return descriptor.display_name.to_owned();
+    }
+    if let Some(descriptor) = binding
         .filter(|binding| binding.is_generated_veriloga())
         .and_then(|binding| crate::state::validate_generated_veriloga_binding(binding).ok())
     {
@@ -98,9 +104,10 @@ pub(super) fn identity_section(ui: &mut Ui, app: &mut RSpiceApp, component: &Com
     let instance_rejection = edit_row(ui, app, component, InlineEditField::Instance, "Instance");
     // A built-in or a generated module runs the model its contract names, and
     // the Model row under Simulation parameters states it; it has no value.
-    let runs_contract = component.library_cell.as_ref().is_some_and(|binding| {
-        binding.builtin_xspice.is_some() || binding.generated_veriloga.is_some()
-    });
+    let runs_contract = component
+        .library_cell
+        .as_ref()
+        .is_some_and(|binding| binding.is_executable_builtin());
     let value_rejection = if runs_contract {
         None
     } else {

@@ -549,19 +549,14 @@ fn compatible_builtin_xspice_symbol<'a>(
     component: &Component,
     library: &'a crate::SymbolLibrary,
 ) -> Option<(&'a crate::symbols::Symbol, f32, f32)> {
-    let contract = component.library_cell.as_ref()?.builtin_xspice.as_ref()?;
+    let asset = component.library_cell.as_ref()?.builtin_symbol_asset()?;
     let (width, height) = component.artwork_dimensions();
     let offsets = component.artwork_pin_offsets();
-    if !library.asset_matches_terminal_offsets(
-        &contract.symbol_asset,
-        width as f32,
-        height as f32,
-        &offsets,
-    ) {
+    if !library.asset_matches_terminal_offsets(asset, width as f32, height as f32, &offsets) {
         return None;
     }
     library
-        .get_asset(&contract.symbol_asset)
+        .get_asset(asset)
         .map(|symbol| (symbol, width as f32, height as f32))
 }
 

@@ -33,10 +33,10 @@ use crate::state::model_hub::{
 };
 use crate::state::model_library::{ModelLibrary, ModelSourceAuthority};
 use crate::state::{
-    ComponentType, LibraryCellInstance, LibraryCellPlacementCandidate, Tool,
-    builtin_xspice_library_binding, builtin_xspice_vector_ports, engine_only_xspice_devices,
-    generated_veriloga_devices, generated_veriloga_library_binding,
-    library_cell_placement_candidates,
+    ComponentType, FunctionalPartDescriptor, LibraryCellInstance, LibraryCellPlacementCandidate,
+    Tool, builtin_xspice_library_binding, builtin_xspice_vector_ports, engine_only_xspice_devices,
+    functional_library_binding, functional_part, generated_veriloga_devices,
+    generated_veriloga_library_binding, library_cell_placement_candidates,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -717,6 +717,8 @@ pub(super) enum ShelfEntry {
     LibraryPart(String),
     /// A built-in XSPICE code model, by its registry stable id.
     BuiltinXspice(String),
+    /// A functional part, by its catalog stable id.
+    Functional(String),
     /// A build-time generated Verilog-A model, by its model name.
     GeneratedVerilogA(String),
     /// A project-library cell view.
@@ -738,6 +740,9 @@ impl ShelfEntry {
     fn from_binding(binding: &LibraryCellInstance) -> Self {
         if let Some(xspice) = binding.builtin_xspice.as_ref() {
             return Self::BuiltinXspice(xspice.stable_id.clone());
+        }
+        if let Some(functional) = binding.builtin_functional.as_ref() {
+            return Self::Functional(functional.stable_id.clone());
         }
         if let Some(veriloga) = binding.generated_veriloga.as_ref() {
             return Self::GeneratedVerilogA(veriloga.model_name.clone());
@@ -766,6 +771,7 @@ impl ShelfEntry {
             Self::Variant(label) => format!("variant{SHELF_ENTRY_FIELD}{label}"),
             Self::LibraryPart(part) => format!("part{SHELF_ENTRY_FIELD}{part}"),
             Self::BuiltinXspice(id) => format!("xspice{SHELF_ENTRY_FIELD}{id}"),
+            Self::Functional(id) => format!("functional{SHELF_ENTRY_FIELD}{id}"),
             Self::GeneratedVerilogA(model) => format!("veriloga{SHELF_ENTRY_FIELD}{model}"),
             Self::Supply(name) => format!("supply{SHELF_ENTRY_FIELD}{name}"),
             Self::Cell {
@@ -790,6 +796,7 @@ impl ShelfEntry {
             "variant" => Self::Variant(fields.next()?.to_owned()),
             "part" => Self::LibraryPart(fields.next()?.to_owned()),
             "xspice" => Self::BuiltinXspice(fields.next()?.to_owned()),
+            "functional" => Self::Functional(fields.next()?.to_owned()),
             "veriloga" => Self::GeneratedVerilogA(fields.next()?.to_owned()),
             "supply" => Self::Supply(fields.next()?.to_owned()),
             "cell" => Self::Cell {
@@ -1105,6 +1112,17 @@ fn resolve_shelf_entry(
                 arm: ShelfArm::BuiltinXspice(id.clone()),
             })
         }
+        ShelfEntry::Functional(id) => {
+            let descriptor = functional_part(id)?;
+            Some(ShelfEntryRow {
+                entry: entry.clone(),
+                glyph: category_glyph(descriptor.category),
+                label: descriptor.display_name.to_owned(),
+                meta: None,
+                selected: placing_cell && functional_armed(pending, descriptor),
+                arm: ShelfArm::Cell(Box::new(functional_library_binding(descriptor))),
+            })
+        }
         ShelfEntry::GeneratedVerilogA(model) => {
             let descriptor = generated_veriloga_devices()
                 .iter()
@@ -1330,6 +1348,7 @@ pub(super) fn component_catalog(ui: &mut Ui, state: &mut AppState) -> Option<She
             for row in rows {
                 let clicked = match row {
                     PaletteRow::Primitive(entry) => primitive_row(ui, state, entry, 2),
+                    PaletteRow::Functional(descriptor) => functional_row(ui, state, descriptor, 2),
                     PaletteRow::Xspice(descriptor) => xspice_row(ui, state, descriptor, 2),
                     PaletteRow::Supply(entry) => supply_row(ui, state, entry, 2),
                 };
@@ -1747,6 +1766,51 @@ fn xspice_meta(descriptor: &CatalogXspiceDeviceDescriptor) -> Option<&'static st
     };
     (folded(descriptor.model_type) != folded(descriptor.display_name))
         .then_some(descriptor.model_type)
+}
+
+/// Whether the place tool holds `descriptor`'s binding.
+fn functional_armed(
+    pending: Option<&LibraryCellInstance>,
+    descriptor: &FunctionalPartDescriptor,
+) -> bool {
+    pending
+        .and_then(|binding| binding.builtin_functional.as_ref())
+        .is_some_and(|binding| binding.stable_id == descriptor.stable_id)
+}
+
+fn functional_row(
+    ui: &mut Ui,
+    state: &mut AppState,
+    descriptor: &'static FunctionalPartDescriptor,
+    level: usize,
+) -> Option<ShelfArm> {
+    let editor = &state.model.schematic.session.editor;
+    let selected = editor.tool == Tool::Place(ComponentType::CellInstance)
+        && functional_armed(
+            editor
+                .pending_library_cell
+                .as_ref()
+                .map(|pending| &pending.binding),
+            descriptor,
+        );
+    let response = shelf_part_row(
+        ui,
+        category_glyph(descriptor.category),
+        descriptor.display_name,
+        selected,
+        None,
+        level,
+    );
+    let binding = functional_library_binding(descriptor);
+    response.dnd_set_drag_payload(SchematicShelfDragPayload::library_cell(binding.clone()));
+    shelf_pin_context_menu(
+        &response,
+        state,
+        &ShelfEntry::Functional(descriptor.stable_id.to_owned()),
+    );
+    response
+        .clicked()
+        .then(|| ShelfArm::Cell(Box::new(binding)))
 }
 
 fn xspice_row(
@@ -2218,6 +2282,18 @@ pub(super) fn shelf_hits(
                     part_numbers: &[],
                 });
                 offer(&mut hits, rank, ShelfEntry::Supply(entry.name.to_owned()));
+            }
+            PaletteRow::Functional(descriptor) => {
+                let rank = query.rank(&ShelfTerms {
+                    label: descriptor.display_name,
+                    keywords: descriptor.keywords,
+                    part_numbers: &[],
+                });
+                offer(
+                    &mut hits,
+                    rank,
+                    ShelfEntry::Functional(descriptor.stable_id.to_owned()),
+                );
             }
             PaletteRow::Xspice(descriptor) => {
                 let mut part_numbers = vec![descriptor.model_type];

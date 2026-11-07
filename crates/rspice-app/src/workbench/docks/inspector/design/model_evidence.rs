@@ -91,6 +91,16 @@ pub(super) fn component_model_evidence(
                 ),
             };
         }
+        if binding.is_builtin_functional() {
+            return match crate::state::validate_builtin_functional_binding(binding) {
+                Ok(descriptor) => ComponentModelEvidence::resolved(descriptor.subcircuit),
+                Err(error) => ComponentModelEvidence::failed(
+                    binding.cell.clone(),
+                    Problem::Failure,
+                    format!("Model invalid: {error}"),
+                ),
+            };
+        }
         if binding.is_generated_veriloga() {
             return match crate::state::validate_generated_veriloga_binding(binding) {
                 Ok(descriptor) => ComponentModelEvidence::resolved(descriptor.model_name),

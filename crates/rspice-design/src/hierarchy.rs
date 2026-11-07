@@ -29,6 +29,7 @@ use crate::project_sources::{ProjectSourceId, ProjectSourceOwner, ProjectSourceR
 use crate::schematic::component::LibraryCellInstance;
 use crate::schematic::component_type::ComponentType;
 use crate::schematic::device_catalog::validate_builtin_xspice_binding;
+use crate::schematic::functional_catalog::validate_builtin_functional_binding;
 use crate::schematic::document::SchematicDocument;
 use crate::schematic::generated_veriloga_catalog::validate_generated_veriloga_binding;
 use crate::schematic::port::PortSpec;
@@ -813,9 +814,9 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
         // active configuration cannot turn a valid placement into an
         // unresolved L/C/V reference or silently substitute another view.
         if let Some(binding) = binding
-            && binding.is_builtin_xspice()
+            && (binding.is_builtin_xspice() || binding.is_builtin_functional())
         {
-            self.resolve_builtin_xspice(requested, binding, instance_path, depth, is_root);
+            self.resolve_builtin_leaf(requested, binding, instance_path, depth, is_root);
             return;
         }
         if let Some(binding) = binding
@@ -1099,7 +1100,10 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
         ancestors.pop();
     }
 
-    fn resolve_builtin_xspice(
+    /// Resolve a compiled built-in placement: an XSPICE code model or a
+    /// functional part. Both are leaves the engine owns, so neither a view
+    /// search nor a model section can apply to them.
+    fn resolve_builtin_leaf(
         &mut self,
         requested: CellViewRef,
         binding: &LibraryCellInstance,
@@ -1107,8 +1111,18 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
         depth: usize,
         is_root: bool,
     ) {
+        let functional = binding.is_builtin_functional();
+        let (kind, purpose, view) = if functional {
+            ("functional part", "built-in functional part", "functional")
+        } else {
+            ("XSPICE device", "built-in XSPICE code model", "xspice")
+        };
         let mut status = HierarchyBindingStatus::Resolved;
-        let mut diagnostic = validate_builtin_xspice_binding(binding).err();
+        let mut diagnostic = if functional {
+            validate_builtin_functional_binding(binding).err()
+        } else {
+            validate_builtin_xspice_binding(binding).err()
+        };
         if diagnostic.is_some() {
             status = HierarchyBindingStatus::Unresolved;
         }
@@ -1128,7 +1142,7 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
         {
             status = HierarchyBindingStatus::Unresolved;
             diagnostic = Some(format!(
-                "model section '{section}' at {instance_path} cannot be applied to a compiled built-in XSPICE device"
+                "model section '{section}' at {instance_path} cannot be applied to a compiled built-in {kind}"
             ));
         }
 
@@ -1152,9 +1166,9 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
             is_root,
             (status, diagnostic),
         );
-        row.purpose = "built-in XSPICE code model".to_owned();
-        row.view_search_order = vec!["xspice".to_owned()];
-        row.stop_view = Some("xspice".to_owned());
+        row.purpose = purpose.to_owned();
+        row.view_search_order = vec![view.to_owned()];
+        row.stop_view = Some(view.to_owned());
         row.model_section.clear();
         self.upsert(row, instance_path);
         if status.is_resolved() {

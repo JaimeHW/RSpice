@@ -1,0 +1,479 @@
+//! Functional parts: subcircuits of the embedded functional library, placed
+//! from the Component shelf as library cells.
+//!
+//! A functional part is data rather than a component type. Its subcircuit
+//! lives in the functional library the engine resolves by name; this table
+//! owns the rest of the part: its pins, artwork, the words a reader finds it
+//! by, its shelf group and its parameter sheet. Placement freezes the part's
+//! identity, pins and parameter names on the instance, and every later read
+//! revalidates them here, so a placement whose part has since changed shape
+//! fails closed instead of binding the wrong pins or parameters.
+
+use super::{
+    component::{BuiltinFunctionalInstance, LibraryCellInstance},
+    component_category::ComponentCategory,
+    port::{PortDirection, PortSpec},
+};
+
+/// One pin of a functional part, in subcircuit port order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FunctionalPin {
+    pub name: &'static str,
+    pub direction: PortDirection,
+}
+
+/// One named setting of a selector parameter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FunctionalChoice {
+    /// What the sheet offers and the instance stores.
+    pub label: &'static str,
+    /// What the instance card passes to the subcircuit.
+    pub value: &'static str,
+}
+
+/// One subcircuit parameter as the parameter sheet presents it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FunctionalParameter {
+    /// The subcircuit parameter, as the instance card spells it.
+    pub name: &'static str,
+    pub label: &'static str,
+    pub unit: &'static str,
+    /// The subcircuit's own default: for a selector, the label of the
+    /// choice whose value the subcircuit defaults to.
+    pub default: &'static str,
+    pub description: &'static str,
+    /// The settings of a selector parameter; empty for a numeric one.
+    pub choices: &'static [FunctionalChoice],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FunctionalPartDescriptor {
+    pub stable_id: &'static str,
+    pub display_name: &'static str,
+    /// The functional-library subcircuit the part instantiates.
+    pub subcircuit: &'static str,
+    pub pins: &'static [FunctionalPin],
+    pub symbol_asset: &'static str,
+    /// What a reader may type for this part on the Component shelf besides
+    /// its display name.
+    pub keywords: &'static [&'static str],
+    pub category: ComponentCategory,
+    pub parameters: &'static [FunctionalParameter],
+}
+
+const fn pin(name: &'static str, direction: PortDirection) -> FunctionalPin {
+    FunctionalPin { name, direction }
+}
+
+const fn number(
+    name: &'static str,
+    label: &'static str,
+    unit: &'static str,
+    default: &'static str,
+    description: &'static str,
+) -> FunctionalParameter {
+    FunctionalParameter {
+        name,
+        label,
+        unit,
+        default,
+        description,
+        choices: &[],
+    }
+}
+
+use PortDirection::{In, Out, Supply};
+
+const AMPLIFIER_PINS: &[FunctionalPin] = &[
+    pin("IN+", In),
+    pin("IN-", In),
+    pin("V+", Supply),
+    pin("V-", Supply),
+    pin("OUT", Out),
+];
+
+/// A general-purpose 10 MHz rail-to-rail CMOS voltage-feedback op-amp.
+const OP_AMP_PARAMETERS: &[FunctionalParameter] = &[
+    number(
+        "AVOL",
+        "Open-loop gain",
+        "V/V",
+        "200k",
+        "DC open-loop voltage gain.",
+    ),
+    number(
+        "GBW",
+        "Gain-bandwidth",
+        "Hz",
+        "10Meg",
+        "Frequency at which the single-pole open-loop gain falls to one.",
+    ),
+    number(
+        "SLEW",
+        "Slew rate",
+        "V/s",
+        "10Meg",
+        "Largest rate of change of the output, rising and falling.",
+    ),
+    number(
+        "VOS",
+        "Input offset voltage",
+        "V",
+        "0",
+        "Added to the non-inverting input.",
+    ),
+    number(
+        "IB",
+        "Input bias current",
+        "A",
+        "0",
+        "Mean of the currents flowing into the two inputs.",
+    ),
+    number(
+        "IOS",
+        "Input offset current",
+        "A",
+        "0",
+        "IN+ bias current less IN- bias current.",
+    ),
+    number(
+        "RIN",
+        "Input resistance",
+        "Ω",
+        "1T",
+        "Differential resistance between the inputs.",
+    ),
+    number(
+        "CIN",
+        "Input capacitance",
+        "F",
+        "2p",
+        "Differential capacitance between the inputs.",
+    ),
+    number(
+        "EN",
+        "Voltage noise",
+        "V/√Hz",
+        "10n",
+        "White input-referred voltage noise density.",
+    ),
+    number(
+        "ENK",
+        "Voltage noise corner",
+        "Hz",
+        "100",
+        "1/f corner of the voltage noise; 0 leaves it white.",
+    ),
+    number(
+        "IN",
+        "Current noise",
+        "A/√Hz",
+        "1f",
+        "White current noise density between the inputs.",
+    ),
+    number(
+        "INK",
+        "Current noise corner",
+        "Hz",
+        "0",
+        "1/f corner of the current noise; 0 leaves it white.",
+    ),
+    number(
+        "ROUT",
+        "Output resistance",
+        "Ω",
+        "50",
+        "Open-loop output resistance.",
+    ),
+    number(
+        "ISRC",
+        "Source current limit",
+        "A",
+        "25m",
+        "Largest current the output sources, drawn from V+.",
+    ),
+    number(
+        "ISNK",
+        "Sink current limit",
+        "A",
+        "25m",
+        "Largest current the output sinks, returned to V-.",
+    ),
+    number(
+        "HEADROOM",
+        "Rail headroom",
+        "V",
+        "0",
+        "How far inside each supply pin the output swing stops; 0 is rail-to-rail.",
+    ),
+    number(
+        "IQ",
+        "Quiescent current",
+        "A",
+        "1m",
+        "Supply current from V+ to V- with no load.",
+    ),
+];
+
+static FUNCTIONAL_PARTS: &[FunctionalPartDescriptor] = &[FunctionalPartDescriptor {
+    stable_id: "rspice.functional.opamp",
+    display_name: "Op-Amp",
+    subcircuit: "RSPICE_FN_OPAMP",
+    pins: AMPLIFIER_PINS,
+    symbol_asset: "functional_opamp.svg",
+    keywords: &[
+        "op amp",
+        "opamp",
+        "operational amplifier",
+        "amplifier",
+        "voltage feedback",
+    ],
+    category: ComponentCategory::AmplifiersComparators,
+    parameters: OP_AMP_PARAMETERS,
+}];
+
+/// Every functional part, in catalog order.
+pub fn functional_parts() -> &'static [FunctionalPartDescriptor] {
+    FUNCTIONAL_PARTS
+}
+
+/// The functional part a placement's frozen identity names.
+pub fn functional_part(stable_id: &str) -> Option<&'static FunctionalPartDescriptor> {
+    FUNCTIONAL_PARTS
+        .iter()
+        .find(|descriptor| descriptor.stable_id == stable_id)
+}
+
+/// The library-cell binding a new placement of `descriptor` carries.
+pub fn functional_library_binding(descriptor: &FunctionalPartDescriptor) -> LibraryCellInstance {
+    let ports = descriptor
+        .pins
+        .iter()
+        .map(|pin| PortSpec {
+            name: pin.name.to_owned(),
+            direction: pin.direction,
+        })
+        .collect::<Vec<_>>();
+    let mut binding = LibraryCellInstance::new("rspice", descriptor.subcircuit, "functional");
+    binding.module_name = Some(descriptor.subcircuit.to_owned());
+    binding.reference_prefix = Some("X".to_owned());
+    binding.parameter_order = descriptor
+        .parameters
+        .iter()
+        .map(|parameter| parameter.name.to_owned())
+        .collect();
+    binding.bind_interface(&ports);
+    binding.builtin_functional = Some(BuiltinFunctionalInstance {
+        stable_id: descriptor.stable_id.to_owned(),
+        subcircuit: descriptor.subcircuit.to_owned(),
+        symbol_asset: descriptor.symbol_asset.to_owned(),
+    });
+    binding
+}
+
+/// The part a functional placement still is, or why it no longer binds.
+pub fn validate_builtin_functional_binding(
+    binding: &LibraryCellInstance,
+) -> Result<&'static FunctionalPartDescriptor, String> {
+    let contract = binding
+        .builtin_functional
+        .as_ref()
+        .ok_or_else(|| "the placement is not a functional part".to_owned())?;
+    let descriptor = functional_part(&contract.stable_id).ok_or_else(|| {
+        format!(
+            "functional part '{}' is not part of this build",
+            contract.stable_id
+        )
+    })?;
+    let expected = functional_library_binding(descriptor);
+    let same_parameters = binding.parameter_order.len() == expected.parameter_order.len()
+        && binding
+            .parameter_order
+            .iter()
+            .zip(&expected.parameter_order)
+            .all(|(placed, current)| placed.eq_ignore_ascii_case(current));
+    if binding.builtin_functional != expected.builtin_functional
+        || binding.module_name != expected.module_name
+        || binding.terminal_order != expected.terminal_order
+        || binding.terminal_dirs != expected.terminal_dirs
+        || !same_parameters
+    {
+        return Err(format!(
+            "this {} was placed from an earlier revision of the part; replace it from the Component shelf",
+            descriptor.display_name
+        ));
+    }
+    Ok(descriptor)
+}
+
+/// The parameter text a placement's instance card carries: the parameters
+/// the instance sets, in sheet order, with each selector's label replaced by
+/// the value the subcircuit reads.
+pub fn functional_instance_parameters(
+    descriptor: &FunctionalPartDescriptor,
+    raw: &str,
+) -> Result<String, String> {
+    if raw.trim().is_empty() {
+        return Ok(String::new());
+    }
+    if raw.chars().any(char::is_control) {
+        return Err("parameter text contains a line break or control character".to_owned());
+    }
+    let parsed = super::replacement::parse_replacement_parameters_strict(raw)
+        .map_err(|error| error.to_string())?;
+    let mut written = Vec::new();
+    for parameter in descriptor.parameters {
+        let Some((_, value)) = parsed
+            .iter()
+            .find(|(key, _)| key.eq_ignore_ascii_case(parameter.name))
+        else {
+            continue;
+        };
+        let value = value.trim();
+        if value.is_empty()
+            || value.len() > 512
+            || value
+                .chars()
+                .any(|character| matches!(character, ';' | '$' | '#' | '\\'))
+        {
+            return Err(format!("{} has an empty or unsafe value", parameter.label));
+        }
+        let value = if parameter.choices.is_empty() {
+            value
+        } else {
+            parameter
+                .choices
+                .iter()
+                .find(|choice| choice.label.eq_ignore_ascii_case(value) || choice.value == value)
+                .map(|choice| choice.value)
+                .ok_or_else(|| {
+                    format!(
+                        "{} is '{value}'; it takes {}",
+                        parameter.label,
+                        parameter
+                            .choices
+                            .iter()
+                            .map(|choice| choice.label)
+                            .collect::<Vec<_>>()
+                            .join(" or ")
+                    )
+                })?
+        };
+        written.push(format!("{}={value}", parameter.name));
+    }
+    if let Some((key, _)) = parsed.iter().find(|(key, _)| {
+        !descriptor
+            .parameters
+            .iter()
+            .any(|parameter| parameter.name.eq_ignore_ascii_case(key))
+    }) {
+        return Err(format!(
+            "{} has no parameter '{key}'",
+            descriptor.display_name
+        ));
+    }
+    Ok(written
+        .into_iter()
+        .map(|parameter| format!(" {parameter}"))
+        .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rspice_core_netlist::netlist::{lexer::parse_spice_value_complete, parse_netlist};
+
+    #[test]
+    fn every_part_is_a_functional_library_subcircuit_with_its_pins_and_defaults() {
+        let library =
+            parse_netlist(rspice_core_base::builtin_lib::FUNCTIONAL_LIB).expect("library parses");
+        for descriptor in functional_parts() {
+            let subcircuit = library
+                .subcircuits
+                .iter()
+                .find(|subcircuit| subcircuit.name.eq_ignore_ascii_case(descriptor.subcircuit))
+                .unwrap_or_else(|| panic!("{} has no subcircuit", descriptor.display_name));
+            assert_eq!(
+                subcircuit.ports.len(),
+                descriptor.pins.len(),
+                "{} pins",
+                descriptor.display_name
+            );
+            assert_eq!(
+                subcircuit.params.len() + subcircuit.expr_params.len(),
+                descriptor.parameters.len(),
+                "{} parameters",
+                descriptor.display_name
+            );
+            for parameter in descriptor.parameters {
+                let default = subcircuit
+                    .params
+                    .iter()
+                    .find(|(name, _)| name.eq_ignore_ascii_case(parameter.name))
+                    .map(|(_, value)| *value)
+                    .unwrap_or_else(|| {
+                        panic!("{} has no {}", descriptor.subcircuit, parameter.name)
+                    });
+                let shown = if parameter.choices.is_empty() {
+                    parameter.default
+                } else {
+                    parameter
+                        .choices
+                        .iter()
+                        .find(|choice| choice.label == parameter.default)
+                        .map(|choice| choice.value)
+                        .expect("a selector defaults to one of its choices")
+                };
+                let shown = parse_spice_value_complete(shown)
+                    .unwrap_or_else(|_| panic!("{} default {shown}", parameter.name));
+                assert!(
+                    (shown - default).abs() <= 1e-12 * default.abs(),
+                    "{}.{}: the sheet shows {shown}, the subcircuit defaults to {default}",
+                    descriptor.subcircuit,
+                    parameter.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_placement_binds_and_revalidates_its_frozen_part() {
+        for descriptor in functional_parts() {
+            let binding = functional_library_binding(descriptor);
+            assert_eq!(
+                validate_builtin_functional_binding(&binding).map(|part| part.stable_id),
+                Ok(descriptor.stable_id)
+            );
+            let encoded = serde_json::to_string(&binding).expect("serializes");
+            let decoded: LibraryCellInstance =
+                serde_json::from_str(&encoded).expect("deserializes");
+            assert!(validate_builtin_functional_binding(&decoded).is_ok());
+
+            let mut reordered = binding.clone();
+            reordered.terminal_order.swap(0, 1);
+            assert!(validate_builtin_functional_binding(&reordered).is_err());
+            let mut renamed = binding;
+            renamed.parameter_order.pop();
+            assert!(validate_builtin_functional_binding(&renamed).is_err());
+        }
+    }
+
+    #[test]
+    fn instance_parameters_are_declared_ordered_and_selector_values() {
+        let op_amp = functional_part("rspice.functional.opamp").expect("op-amp");
+        assert_eq!(
+            functional_instance_parameters(op_amp, "slew=1Meg AVOL=1e5"),
+            Ok(" AVOL=1e5 SLEW=1Meg".to_owned())
+        );
+        assert_eq!(
+            functional_instance_parameters(op_amp, "  "),
+            Ok(String::new())
+        );
+        assert!(
+            functional_instance_parameters(op_amp, "GAIN=2")
+                .unwrap_err()
+                .contains("no parameter 'GAIN'")
+        );
+        assert!(functional_instance_parameters(op_amp, "AVOL=1;2").is_err());
+    }
+}

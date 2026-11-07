@@ -10,8 +10,9 @@ use std::collections::HashMap;
 use crate::state::{
     Component, ComponentType, Point, PropertyValue, SchematicReplacementParameter,
     SchematicReplacementTargetSpec, SchematicReplacementTerminal, SymbolResolver,
-    builtin_xspice_library_binding, engine_only_xspice_devices, generated_veriloga_devices,
-    generated_veriloga_library_binding, library_cell_placement_candidates,
+    builtin_xspice_library_binding, engine_only_xspice_devices, functional_library_binding,
+    functional_parts, generated_veriloga_devices, generated_veriloga_library_binding,
+    library_cell_placement_candidates,
 };
 
 use crate::workbench::app_state::AppState;
@@ -114,6 +115,7 @@ impl InstanceCatalogEntry {
 pub(crate) fn instance_catalog(state: &AppState) -> Vec<InstanceCatalogEntry> {
     let mut entries = primitive_entries(state);
     entries.extend(builtin_xspice_entries());
+    entries.extend(functional_entries());
     entries.extend(generated_veriloga_entries());
     entries.extend(library_entries(state));
     entries.sort_by(|left, right| {
@@ -170,6 +172,33 @@ fn generated_veriloga_entries() -> Vec<InstanceCatalogEntry> {
                     descriptor.module_name.to_owned(),
                 ],
             })
+        })
+        .collect()
+}
+
+fn functional_entries() -> Vec<InstanceCatalogEntry> {
+    functional_parts()
+        .iter()
+        .map(|descriptor| {
+            let binding = functional_library_binding(descriptor);
+            let terminal_names = binding.terminal_order.clone();
+            let template = Component::new(0, ComponentType::CellInstance, Point::origin())
+                .with_library_cell(binding);
+            InstanceCatalogEntry {
+                identity: descriptor.stable_id.to_owned(),
+                display: format!("{} · {} pin", descriptor.display_name, terminal_names.len()),
+                template,
+                terminal_names,
+                parameters: descriptor
+                    .parameters
+                    .iter()
+                    .map(|parameter| SchematicReplacementParameter::new(parameter.name))
+                    .collect(),
+                aliases: vec![
+                    descriptor.subcircuit.to_owned(),
+                    descriptor.display_name.to_owned(),
+                ],
+            }
         })
         .collect()
 }

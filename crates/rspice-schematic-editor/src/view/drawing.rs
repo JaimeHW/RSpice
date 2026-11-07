@@ -1021,22 +1021,12 @@ pub fn compatible_builtin_xspice_asset<'a>(
     component: &'a Component,
     library: &'a SymbolLibrary,
 ) -> Option<(&'a SymbolLibrary, &'a str, f32, f32)> {
-    let contract = component.library_cell.as_ref()?.builtin_xspice.as_ref()?;
+    let asset = component.library_cell.as_ref()?.builtin_symbol_asset()?;
     let (width, height) = component.artwork_dimensions();
     let offsets = component.artwork_pin_offsets();
     library
-        .asset_matches_terminal_offsets(
-            &contract.symbol_asset,
-            width as f32,
-            height as f32,
-            &offsets,
-        )
-        .then_some((
-            library,
-            contract.symbol_asset.as_str(),
-            width as f32,
-            height as f32,
-        ))
+        .asset_matches_terminal_offsets(asset, width as f32, height as f32, &offsets)
+        .then_some((library, asset, width as f32, height as f32))
 }
 
 /// Carry artwork leads out to terminals the drawing itself does not reach,

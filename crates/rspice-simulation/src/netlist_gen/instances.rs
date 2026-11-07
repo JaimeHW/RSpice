@@ -648,6 +648,14 @@ impl<'a> NetlistGenerator<'a> {
                         &instance_name,
                     );
                 }
+                if binding.is_builtin_functional() {
+                    return self.generate_functional_instance(
+                        component,
+                        &binding,
+                        &node_names,
+                        &instance_name,
+                    );
+                }
                 if binding.is_generated_veriloga() {
                     let descriptor =
                         match rspice_design::schematic::generated_veriloga_catalog::validate_generated_veriloga_binding(&binding) {
@@ -909,6 +917,53 @@ impl<'a> NetlistGenerator<'a> {
                 self.generate_xspice_instance(component, &node_names, &instance_name)
             }
         }
+    }
+
+    /// A functional part's card: an X line naming its functional-library
+    /// subcircuit, which the engine resolves with no include.
+    fn generate_functional_instance(
+        &mut self,
+        component: &Component,
+        binding: &rspice_design::schematic::component::LibraryCellInstance,
+        node_names: &[String],
+        instance_name: &str,
+    ) -> Option<String> {
+        use rspice_design::schematic::functional_catalog::{
+            functional_instance_parameters, validate_builtin_functional_binding,
+        };
+        let descriptor = match validate_builtin_functional_binding(binding) {
+            Ok(descriptor) => descriptor,
+            Err(error) => {
+                self.errors
+                    .push(format!("Functional part '{}' is not executable: {error}", component.name));
+                return None;
+            }
+        };
+        if node_names.len() != descriptor.pins.len() {
+            self.errors.push(format!(
+                "Functional part '{}' expects {} nodes for {}, found {}",
+                component.name,
+                descriptor.pins.len(),
+                descriptor.display_name,
+                node_names.len()
+            ));
+            return None;
+        }
+        let params = match functional_instance_parameters(descriptor, &component.params) {
+            Ok(params) => params,
+            Err(error) => {
+                self.errors.push(format!(
+                    "Functional part '{}' has invalid parameters: {error}",
+                    component.name
+                ));
+                return None;
+            }
+        };
+        Some(format!(
+            "{instance_name} {} {}{params}",
+            node_names.join(" "),
+            descriptor.subcircuit
+        ))
     }
 
     /// Parameter text for a subcircuit cell instance.

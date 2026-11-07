@@ -33,6 +33,7 @@ use rspice_design::schematic::deletion;
 mod design_note;
 mod design_projection;
 use rspice_design::schematic::device_catalog;
+use rspice_design::schematic::functional_catalog;
 use rspice_design::schematic::document;
 use rspice_design::schematic::document_policy;
 mod documentation_shape;
@@ -88,6 +89,10 @@ pub use device_catalog::{
     CatalogXspiceVectorPort, builtin_xspice_library_binding,
     builtin_xspice_library_binding_with_vector_widths, builtin_xspice_vector_ports,
     engine_only_xspice_devices, validate_builtin_xspice_binding,
+};
+pub use functional_catalog::{
+    FunctionalPartDescriptor, functional_library_binding, functional_part, functional_parts,
+    validate_builtin_functional_binding,
 };
 pub use document_policy::{
     NetNamingPolicy, SchematicDocumentPolicy, SchematicGridPitch, SchematicPageOrientation,

@@ -99,6 +99,10 @@ pub struct LibraryCellInstance {
     /// no source file or project-cell master.
     #[serde(default)]
     pub builtin_xspice: Option<BuiltinXspiceInstance>,
+    /// Executable functional-part binding: a subcircuit of the embedded
+    /// functional library, resolved by the engine with no source file.
+    #[serde(default)]
+    pub builtin_functional: Option<BuiltinFunctionalInstance>,
     /// Executable build-time generated Verilog-A binding. The frozen identity
     /// is revalidated against the running engine before editing or netlisting.
     #[serde(default)]
@@ -182,6 +186,18 @@ pub struct BuiltinXspiceInstance {
     pub ports: Vec<BuiltinXspicePortBinding>,
 }
 
+/// Frozen identity of one functional-part placement.
+///
+/// The pins and parameter names live on the binding itself; this names the
+/// part they were materialized from, so a revised part makes an old
+/// placement explicitly stale instead of silently rebinding its pins.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BuiltinFunctionalInstance {
+    pub stable_id: String,
+    pub subcircuit: String,
+    pub symbol_asset: String,
+}
+
 /// One code-model port and the schematic terminal indices that implement it.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BuiltinXspicePortBinding {
@@ -256,6 +272,7 @@ impl LibraryCellInstance {
             terminal_roles: Vec::new(),
             interface_bound: false,
             builtin_xspice: None,
+            builtin_functional: None,
             generated_veriloga: None,
         }
     }
@@ -268,8 +285,24 @@ impl LibraryCellInstance {
         self.generated_veriloga.is_some()
     }
 
+    pub fn is_builtin_functional(&self) -> bool {
+        self.builtin_functional.is_some()
+    }
+
     pub fn is_executable_builtin(&self) -> bool {
-        self.is_builtin_xspice() || self.is_generated_veriloga()
+        self.is_builtin_xspice() || self.is_builtin_functional() || self.is_generated_veriloga()
+    }
+
+    /// The authored artwork a compiled built-in placement draws with.
+    pub fn builtin_symbol_asset(&self) -> Option<&str> {
+        self.builtin_xspice
+            .as_ref()
+            .map(|contract| contract.symbol_asset.as_str())
+            .or_else(|| {
+                self.builtin_functional
+                    .as_ref()
+                    .map(|contract| contract.symbol_asset.as_str())
+            })
     }
 
     /// Bind this instance to the parameters its master declares, in emission

@@ -13,6 +13,7 @@ use rspice_design::schematic::device_catalog::{
     CatalogXspiceDeviceDescriptor, engine_only_xspice_devices,
 };
 use rspice_design::schematic::net_label::{NetLabelKind, SupplyGlyph};
+use rspice_design::schematic::functional_catalog::{FunctionalPartDescriptor, functional_parts};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ComponentPaletteEntry {
@@ -62,6 +63,7 @@ impl SupplyPaletteEntry {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PaletteRow {
     Primitive(&'static ComponentPaletteEntry),
+    Functional(&'static FunctionalPartDescriptor),
     Xspice(&'static CatalogXspiceDeviceDescriptor),
     Supply(&'static SupplyPaletteEntry),
 }
@@ -70,6 +72,7 @@ impl PaletteRow {
     pub fn label(self) -> &'static str {
         match self {
             Self::Primitive(entry) => entry.label,
+            Self::Functional(descriptor) => descriptor.display_name,
             Self::Xspice(descriptor) => descriptor.display_name,
             Self::Supply(entry) => entry.name,
         }
@@ -796,15 +799,22 @@ pub fn supply_palette() -> &'static [SupplyPaletteEntry] {
 }
 
 /// Every row filed under `category`: its native primitives in palette order,
-/// then its code models by name, then (for the connectivity group) the supply
-/// rails. A code model that duplicates a native part carries no group and is
-/// never listed; it stays valid in netlists.
+/// its functional parts in catalog order, then its code models by name, then
+/// (for the connectivity group) the supply rails. A code model that duplicates
+/// a native part carries no group and is never listed; it stays valid in
+/// netlists.
 pub fn palette_rows(category: ComponentCategory) -> Vec<PaletteRow> {
     let mut rows = PALETTE
         .iter()
         .filter(|section| section.category == category)
         .flat_map(|section| section.entries.iter().map(PaletteRow::Primitive))
         .collect::<Vec<_>>();
+    rows.extend(
+        functional_parts()
+            .iter()
+            .filter(|descriptor| descriptor.category == category)
+            .map(PaletteRow::Functional),
+    );
     let mut models = engine_only_xspice_devices()
         .iter()
         .filter(|descriptor| descriptor.category == Some(category))

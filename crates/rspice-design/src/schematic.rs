@@ -17,6 +17,7 @@ pub mod component_type;
 pub mod deletion;
 pub mod design_note;
 pub mod device_catalog;
+pub mod functional_catalog;
 pub mod device_descriptor;
 pub mod document;
 pub mod document_policy;
