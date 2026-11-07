@@ -113,6 +113,11 @@ const GO_TO_MATCHING_BRACKET: &[ShortcutBinding] = &[primary(
     ALL,
 )];
 const GO_TO_LINE: &[ShortcutBinding] = &[primary(chord(Key::G, true, false, false, "Ctrl+G"), ALL)];
+// F8 also steps through a drawing's violations; with a source editor focused
+// the editor's context outranks the workspace's, so the key follows focus.
+const NEXT_PROBLEM: &[ShortcutBinding] = &[primary(chord(Key::F8, false, false, false, "F8"), ALL)];
+const PREVIOUS_PROBLEM: &[ShortcutBinding] =
+    &[primary(chord(Key::F8, false, false, true, "Shift+F8"), ALL)];
 const FOLD_SELECTION: &[ShortcutBinding] = &[primary(
     chord(Key::OpenBracket, true, false, true, "Ctrl+Shift+["),
     ALL,
@@ -523,6 +528,8 @@ impl Command {
             | Self::MoveLineDown
             | Self::GoToMatchingBracket
             | Self::GoToLine
+            | Self::NextProblem
+            | Self::PreviousProblem
             | Self::FormatDocument
             | Self::FoldSelection
             | Self::UnfoldAtCaret
@@ -675,6 +682,8 @@ impl Command {
             Self::MoveLineDown => MOVE_LINE_DOWN,
             Self::GoToMatchingBracket => GO_TO_MATCHING_BRACKET,
             Self::GoToLine => GO_TO_LINE,
+            Self::NextProblem => NEXT_PROBLEM,
+            Self::PreviousProblem => PREVIOUS_PROBLEM,
             Self::FoldSelection => FOLD_SELECTION,
             Self::UnfoldAtCaret => UNFOLD_AT_CARET,
             Self::GoToDefinition => GO_TO_DEFINITION,

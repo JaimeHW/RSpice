@@ -66,6 +66,7 @@ fn a_source_route_to_a_departed_bundle_states_its_refusal() {
             bundle: crate::state::ProjectSourceId::new(),
             logical_path: std::sync::Arc::from("amp.va"),
             line: Some(3),
+            column: Some(1),
         });
 
     apply_pending(&context(), &mut app);
@@ -113,6 +114,7 @@ fn a_source_route_opens_its_document_in_the_editor_that_owns_it() {
             bundle: bundle_id,
             logical_path: std::sync::Arc::from(logical_path.as_str()),
             line: Some(2),
+            column: None,
         });
 
     apply_pending(&context(), &mut app);

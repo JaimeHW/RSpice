@@ -475,6 +475,10 @@ impl Command {
             | Self::UnfoldAtCaret
             | Self::FoldAll
             | Self::UnfoldAll => false,
+            // Every source editor can be stepped through, read-only or not.
+            Self::NextProblem | Self::PreviousProblem => {
+                state.workbench.active_source_editor.is_some()
+            }
             Self::GoToDefinition | Self::FindReferences => state
                 .workbench
                 .active_source_editor

@@ -14,8 +14,8 @@ use crate::ui::tokens::Tokens;
 use crate::ui::widgets::{Problem, paint_problem_mark};
 use crate::workbench::MessageId;
 use crate::workbench::documents::text_editor_commands::{
-    EditorSyntax, consume_standard_command, consume_structural_shortcut, show_go_to_line,
-    take_reveal_line,
+    EditorSyntax, consume_standard_command, consume_structural_shortcut, queue_caret_char_index,
+    queue_reveal_line, show_go_to_line, take_reveal_line,
 };
 
 const FONT_SIZE: f32 = 11.0;
@@ -62,6 +62,9 @@ pub struct CodeDocumentInteraction {
     /// The source well, for its right-click menu. An empty document is a
     /// plain text field with nothing to act on, and has none.
     pub response: Option<egui::Response>,
+    /// What a step to the next or previous finding found, for the page to
+    /// say on the status bar.
+    pub announcement: Option<String>,
 }
 
 pub fn show_code_document_interaction_versioned(
@@ -122,6 +125,231 @@ pub fn show_code_document_with_debug_versioned(
     )
 }
 
+/// Put the caret of the source editor `editor_id` on a one-based line and
+/// column the next time it is drawn, and scroll it into view. Every way to a
+/// place in a source document goes through here: a finding opened from
+/// Problems or the inspector, and F8 and Shift+F8.
+pub(crate) fn reveal_source_location(
+    context: &egui::Context,
+    editor_id: egui::Id,
+    line: usize,
+    column: usize,
+) {
+    queue_reveal_line(context, editor_id, line);
+    context.data_mut(|data| data.insert_temp(reveal_column_id(editor_id), column));
+}
+
+fn reveal_column_id(editor_id: egui::Id) -> egui::Id {
+    editor_id.with("reveal-column")
+}
+
+/// Ask the editor to move the caret from the start of the line a reveal just
+/// placed it on to the column queued with that reveal, kept within the line.
+pub(crate) fn queue_revealed_column(
+    context: &egui::Context,
+    editor_id: egui::Id,
+    source: &str,
+    line: usize,
+) {
+    let Some(column) =
+        context.data_mut(|data| data.remove_temp::<usize>(reveal_column_id(editor_id)))
+    else {
+        return;
+    };
+    let (start, width) = line_extent(source, line);
+    let offset = column.saturating_sub(1).min(width);
+    if offset > 0 {
+        queue_caret_char_index(context, editor_id, start + offset);
+    }
+}
+
+/// The character index a one-based line starts at in `source`, and its
+/// width in characters without its line ending.
+fn line_extent(source: &str, line: usize) -> (usize, usize) {
+    let mut lines = source.split('\n');
+    let start = lines
+        .by_ref()
+        .take(line.saturating_sub(1))
+        .map(|text| text.chars().count() + 1)
+        .sum::<usize>();
+    let width = lines
+        .next()
+        .map_or(0, |text| text.trim_end_matches('\r').chars().count());
+    (start, width)
+}
+
+/// The one-based line and column of a character index in `source`.
+fn caret_place(source: &str, char_index: usize) -> (usize, usize) {
+    source
+        .chars()
+        .take(char_index)
+        .fold((1, 1), |(line, column), character| {
+            if character == '\n' {
+                (line + 1, 1)
+            } else {
+                (line, column + 1)
+            }
+        })
+}
+
+/// A step to the next or the previous finding in the focused source
+/// document, from wherever its caret is. Both wrap at the document's ends.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProblemStep {
+    Next,
+    Previous,
+}
+
+/// The shortcuts and the palette raise a step; the page that draws the
+/// focused source editor hands it over just before drawing it.
+impl crate::workbench::framework::requests::Request for ProblemStep {
+    const DRAIN: crate::workbench::framework::requests::Drain =
+        crate::workbench::framework::requests::Drain::SourceEditor;
+}
+
+/// Hand `step` to the editor `editor_id`, which takes it the next time it is
+/// drawn.
+pub(crate) fn queue_problem_step(context: &egui::Context, editor_id: egui::Id, step: ProblemStep) {
+    context.data_mut(|data| data.insert_temp(problem_step_id(editor_id), step));
+    context.request_repaint();
+}
+
+/// The step queued for the editor `editor_id`, taken once.
+pub(crate) fn take_problem_step(
+    context: &egui::Context,
+    editor_id: egui::Id,
+) -> Option<ProblemStep> {
+    let id = problem_step_id(editor_id);
+    context.data_mut(|data| {
+        let step = data.get_temp::<ProblemStep>(id);
+        data.remove::<ProblemStep>(id);
+        step
+    })
+}
+
+fn problem_step_id(editor_id: egui::Id) -> egui::Id {
+    editor_id.with("problem-step")
+}
+
+fn reported_caret_id(editor_id: egui::Id) -> egui::Id {
+    editor_id.with("reported-caret")
+}
+
+/// The finding a step stopped on, and where it left the caret: a second
+/// step from there moves on from it, even past findings at the same place.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct LastProblemStep {
+    index: usize,
+    place: (usize, usize),
+}
+
+/// Which of `places` (one-based line and optional column, in source order)
+/// a step from the caret at `caret_index` lands on in the editor
+/// `editor_id`: the first finding after the caret, or the last before it,
+/// each wrapping to the other end. The caller moves the caret there.
+pub(crate) fn problem_step_index(
+    context: &egui::Context,
+    editor_id: egui::Id,
+    source: &str,
+    places: &[(usize, Option<usize>)],
+    caret_index: usize,
+    step: ProblemStep,
+) -> Option<usize> {
+    let count = places.len();
+    if count == 0 {
+        return None;
+    }
+    // Where the caret lands on a place: on its column, kept within the line,
+    // or at the line's start when the finding names no column.
+    let landing = |(line, column): (usize, Option<usize>)| {
+        let (_, width) = line_extent(source, line);
+        (line, column.map_or(1, |column| column.clamp(1, width + 1)))
+    };
+    let caret = caret_place(source, caret_index);
+    let last_id = editor_id.with("last-problem-step");
+    let last = context
+        .data(|data| data.get_temp::<LastProblemStep>(last_id))
+        .filter(|last| last.place == caret && last.index < count)
+        .map(|last| last.index);
+    let index = match (last, step) {
+        (Some(index), ProblemStep::Next) => (index + 1) % count,
+        (Some(index), ProblemStep::Previous) => (index + count - 1) % count,
+        (None, ProblemStep::Next) => places
+            .iter()
+            .position(|place| landing(*place) > caret)
+            .unwrap_or(0),
+        (None, ProblemStep::Previous) => places
+            .iter()
+            .rposition(|place| landing(*place) < caret)
+            .unwrap_or(count - 1),
+    };
+    context.data_mut(|data| {
+        data.insert_temp(
+            last_id,
+            LastProblemStep {
+                index,
+                place: landing(places[index]),
+            },
+        );
+    });
+    Some(index)
+}
+
+/// What a step says it reached: "Error 2 of 5, line 14: …".
+pub(crate) fn problem_step_announcement(
+    messages: crate::workbench::MessageCatalog,
+    severity: CodeEditorSeverity,
+    index: usize,
+    count: usize,
+    line: usize,
+    message: &str,
+) -> String {
+    messages.format(
+        MessageId::SourceDiagnosticStep,
+        &[
+            ("severity", &severity_title(severity, messages)),
+            ("index", &(index + 1).to_string()),
+            ("count", &count.to_string()),
+            ("line", &line.to_string()),
+            ("message", message),
+        ],
+    )
+}
+
+/// Move the caret of `editor_id` to the finding `step` reaches in this
+/// document, and say which it is.
+fn step_to_problem(
+    context: &egui::Context,
+    editor_id: egui::Id,
+    source: &str,
+    diagnostics: &crate::state::code_diagnostics::CodeDiagnosticView<'_>,
+    step: ProblemStep,
+    messages: crate::workbench::MessageCatalog,
+) -> String {
+    let located = diagnostics.located();
+    let places = located
+        .iter()
+        .map(|diagnostic| (diagnostic.line.unwrap_or(1), diagnostic.column))
+        .collect::<Vec<_>>();
+    let caret = context
+        .data(|data| data.get_temp::<usize>(reported_caret_id(editor_id)))
+        .unwrap_or(0);
+    let Some(index) = problem_step_index(context, editor_id, source, &places, caret, step) else {
+        return messages.text(MessageId::SourceDiagnosticNone);
+    };
+    let (line, column) = places[index];
+    reveal_source_location(context, editor_id, line, column.unwrap_or(1));
+    let diagnostic = located[index];
+    problem_step_announcement(
+        messages,
+        diagnostic.severity,
+        index,
+        located.len(),
+        line,
+        &diagnostic.message,
+    )
+}
+
 fn show_code_document_impl(
     ui: &mut Ui,
     editor_id: egui::Id,
@@ -136,8 +364,23 @@ fn show_code_document_impl(
     current_line: Option<usize>,
     breakpoints_enabled: bool,
 ) -> CodeDocumentInteraction {
-    let requested_line =
-        take_reveal_line(ui, editor_id, source).or_else(|| show_go_to_line(ui, editor_id, source));
+    let diagnostic_view = diagnostics.view(diagnostic_path);
+    // Before the reveal is taken, so the step lands in this frame.
+    let announcement = take_problem_step(ui.ctx(), editor_id).map(|step| {
+        step_to_problem(
+            ui.ctx(),
+            editor_id,
+            source,
+            &diagnostic_view,
+            step,
+            messages,
+        )
+    });
+    let revealed = take_reveal_line(ui, editor_id, source);
+    if let Some(line) = revealed {
+        queue_revealed_column(ui.ctx(), editor_id, source, line);
+    }
+    let requested_line = revealed.or_else(|| show_go_to_line(ui, editor_id, source));
     let tokens = Tokens::get(ui.ctx());
     let colors = tokens.color;
     let font = theme::mono(FONT_SIZE, FontWeight::Regular);
@@ -147,7 +390,6 @@ fn show_code_document_impl(
         CodeEditorLanguage::Yaml => EditorSyntax::Yaml,
         CodeEditorLanguage::Toml => EditorSyntax::Toml,
     };
-    let diagnostic_view = diagnostics.view(diagnostic_path);
     if source.len() >= VIRTUALIZATION_THRESHOLD_BYTES {
         let edited_lines = std::collections::HashSet::new();
         let accessible_label = messages.text(match (language, editable) {
@@ -207,32 +449,20 @@ fn show_code_document_impl(
             },
             |logical_line| {
                 diagnostic_view
-                    .severity_for_line(logical_line.saturating_add(1))
-                    .map(|severity| {
-                        format!(
-                            "{} diagnostic on this line.",
-                            messages.text(match severity {
-                                CodeEditorSeverity::Hint => MessageId::EditorAccessibleSeverityHint,
-                                CodeEditorSeverity::Info => {
-                                    MessageId::EditorAccessibleSeverityInformation
-                                }
-                                CodeEditorSeverity::Warning => {
-                                    MessageId::EditorAccessibleSeverityWarning
-                                }
-                                CodeEditorSeverity::Error => {
-                                    MessageId::EditorAccessibleSeverityError
-                                }
-                            })
-                        )
-                    })
+                    .worst_for_line(logical_line.saturating_add(1))
+                    .map(|diagnostic| line_diagnostic_description(diagnostic, messages))
             },
         );
+        ui.ctx().data_mut(|data| {
+            data.insert_temp(reported_caret_id(editor_id), output.cursor_char_index);
+        });
         return CodeDocumentInteraction {
             changed: output.changed,
             cursor_char_index: output.cursor_char_index,
             selected_char_range: output.selected_char_range,
             breakpoint_toggled: output.breakpoint_toggled,
             response: Some(output.response),
+            announcement,
         };
     }
     let standard_changed = consume_standard_command(ui, editor_id, source, editable);
@@ -390,6 +620,7 @@ fn show_code_document_impl(
         selected_char_range,
         breakpoint_toggled,
         response: None,
+        announcement,
     }
 }
 
@@ -579,6 +810,34 @@ fn append(job: &mut LayoutJob, text: &str, font: FontId, color: Color32, underli
     );
 }
 
+/// A finding's severity as the word that opens a sentence about it.
+pub(crate) fn severity_title(
+    severity: CodeEditorSeverity,
+    messages: crate::workbench::MessageCatalog,
+) -> String {
+    messages.text(match severity {
+        CodeEditorSeverity::Error => MessageId::SourceDiagnosticSeverityError,
+        CodeEditorSeverity::Warning => MessageId::SourceDiagnosticSeverityWarning,
+        CodeEditorSeverity::Info => MessageId::SourceDiagnosticSeverityInformation,
+        CodeEditorSeverity::Hint => MessageId::SourceDiagnosticSeverityHint,
+    })
+}
+
+/// What a screen reader hears for a source line that has a finding: its
+/// severity and its message, so the line says what is wrong with it.
+fn line_diagnostic_description(
+    diagnostic: &CodeEditorDiagnostic,
+    messages: crate::workbench::MessageCatalog,
+) -> String {
+    messages.format(
+        MessageId::EditorAccessibleLineDiagnostic,
+        &[
+            ("severity", &severity_title(diagnostic.severity, messages)),
+            ("message", &diagnostic.message),
+        ],
+    )
+}
+
 /// The gutter mark a diagnostic earns: only a warning or an error is marked.
 /// A note or a hint keeps its squiggle and leaves the gutter alone.
 const fn diagnostic_problem(severity: CodeEditorSeverity) -> Option<Problem> {
@@ -607,6 +866,46 @@ const fn diagnostic_color(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The character index of a one-based line and column in `source`, the
+    /// column kept within the line.
+    fn char_index_at(source: &str, line: usize, column: usize) -> usize {
+        let (start, width) = line_extent(source, line);
+        start + column.saturating_sub(1).min(width)
+    }
+
+    /// F8 from a caret goes to the first finding after it and Shift+F8 to
+    /// the last before it, both wrapping; two findings at one place are
+    /// stepped through one after the other rather than skipped.
+    #[test]
+    fn a_problem_step_moves_on_from_the_caret_and_through_shared_places() {
+        let context = egui::Context::default();
+        let editor = egui::Id::new("problem-step-test");
+        let source = "a\nbb = cc;\nd\n";
+        // Line 2 column 6 twice, then line 3 with no column.
+        let places = [(2, Some(6)), (2, Some(6)), (3, None)];
+        let caret_at = |line, column| char_index_at(source, line, column);
+        let step = |caret, step| {
+            problem_step_index(&context, editor, source, &places, caret, step)
+                .expect("a document with findings")
+        };
+
+        assert_eq!(step(caret_at(1, 1), ProblemStep::Next), 0);
+        // The caret now stands on the shared place: the second there is next.
+        assert_eq!(step(caret_at(2, 6), ProblemStep::Next), 1);
+        assert_eq!(step(caret_at(2, 6), ProblemStep::Next), 2);
+        assert_eq!(step(caret_at(3, 1), ProblemStep::Next), 0, "wraps");
+        // A caret the reader moved is stepped from where it now is.
+        assert_eq!(step(caret_at(3, 2), ProblemStep::Previous), 2);
+        assert_eq!(step(caret_at(1, 1), ProblemStep::Previous), 2, "wraps");
+        assert_eq!(
+            problem_step_index(&context, editor, source, &[], 0, ProblemStep::Next),
+            None
+        );
+        // A column past the line's end lands at its end.
+        assert_eq!(char_index_at(source, 2, 40), caret_at(2, 9));
+        assert_eq!(caret_place(source, caret_at(2, 6)), (2, 6));
+    }
 
     #[test]
     fn editor_geometry_matches_canonical_code_workspace() {

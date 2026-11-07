@@ -811,6 +811,9 @@ fn code_pane(
         }
         interaction
     }).inner;
+    if let Some(announcement) = interaction.announcement.clone() {
+        app.state.prompt(announcement);
+    }
     app.state.code.code_workspace.source_carets.insert(
         (bundle.id(), selected_path.to_owned()),
         interaction.cursor_char_index,

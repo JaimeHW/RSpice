@@ -2143,7 +2143,6 @@ const UNPUBLISHED_PAINTED_ROWS: &[&str] = &[
     "rspice-app/src/workbench/surfaces/simulate/workflows.rs::workflow_section_heading",
     "rspice-app/src/workbench/surfaces/stimulus/pwl.rs::table_header",
     "rspice-app/src/workbench/surfaces/verify/tuning.rs::tuning_waveform_preview",
-    "rspice-app/src/workbench/surfaces/veriloga.rs::source_editor",
     "rspice-results-ui/src/noise_contrib.rs::contributor_header",
     "rspice-results-ui/src/waves/expression_editor.rs::show",
     "rspice-schematic-editor/src/property_values.rs::render_value_editor",

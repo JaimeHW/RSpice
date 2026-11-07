@@ -26,7 +26,23 @@ pub(in crate::workbench) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             None
         }
     };
-    if let Some(VerilogAInspectorAction::UpdateSymbol) = action {
-        app.state.update_active_veriloga_symbol();
+    match action {
+        Some(VerilogAInspectorAction::UpdateSymbol) => app.state.update_active_veriloga_symbol(),
+        // The same road a finding in Problems takes, so the two agree on
+        // where the caret lands.
+        Some(VerilogAInspectorAction::RevealFinding {
+            bundle,
+            logical_path,
+            line,
+            column,
+        }) => app.state.model.diagnostics.request_route(
+            crate::workbench::app_state::diagnostic_store::DiagnosticRoute::CodeDocument {
+                bundle,
+                logical_path,
+                line: Some(line),
+                column,
+            },
+        ),
+        None => {}
     }
 }

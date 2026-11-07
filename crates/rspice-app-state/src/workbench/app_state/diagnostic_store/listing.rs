@@ -518,10 +518,7 @@ pub fn segment_row<'a>(segment: &Segment<'a>, index: usize) -> Option<Diagnostic
                     .as_deref()
                     .unwrap_or("workspace source")
                     .to_owned(),
-                location: diagnostic
-                    .line
-                    .map(|line| format!("line {}", line + 1))
-                    .unwrap_or_default(),
+                location: code_location(diagnostic),
                 message: diagnostic.message.as_ref(),
                 details: diagnostic.detail.as_ref(),
                 rule: "",
@@ -540,6 +537,7 @@ pub fn segment_row<'a>(segment: &Segment<'a>, index: usize) -> Option<Diagnostic
                         bundle,
                         logical_path: Arc::clone(path),
                         line: diagnostic.line,
+                        column: diagnostic.column,
                     }),
                 waiver_action: None,
             })
@@ -610,6 +608,16 @@ fn netlist_subject(diagnostic: &crate::state::netlist_diagnostics::Diagnostic) -
         || "netlist editor".to_owned(),
         |path| path.display().to_string(),
     )
+}
+
+/// Where a source finding is, in the editor's own numbering: a code
+/// diagnostic's line and column are one-based already.
+fn code_location(diagnostic: &rspice_vocabulary::diagnostics::SourceDiagnostic) -> String {
+    match (diagnostic.line, diagnostic.column) {
+        (Some(line), Some(column)) => format!("line {line} · column {column}"),
+        (Some(line), None) => format!("line {line}"),
+        (None, _) => String::new(),
+    }
 }
 
 /// Where in that document it is. An included source keeps its own line rather

@@ -397,6 +397,8 @@ impl Command {
             | Self::MoveLineDown
             | Self::GoToMatchingBracket
             | Self::GoToLine
+            | Self::NextProblem
+            | Self::PreviousProblem
             | Self::FormatDocument
             | Self::FoldSelection
             | Self::UnfoldAtCaret
@@ -1153,6 +1155,17 @@ impl Command {
             | Self::UnfoldAtCaret
             | Self::FoldAll
             | Self::UnfoldAll => {}
+            // The focused editor's page takes the step as it draws.
+            Self::NextProblem => app
+                .state
+                .workbench
+                .outbox
+                .push(crate::workbench::documents::code_workspace::ProblemStep::Next),
+            Self::PreviousProblem => app
+                .state
+                .workbench
+                .outbox
+                .push(crate::workbench::documents::code_workspace::ProblemStep::Previous),
             Self::GoToDefinition | Self::FindReferences | Self::RenameSymbol => {
                 if let Err(error) = crate::workbench::app::navigate_active_source(app, self) {
                     app.state.prompt(error);

@@ -239,18 +239,23 @@ pub fn show(ui: &mut Ui, state: &mut AppState) -> egui::Response {
             },
             |logical_line| {
                 diagnostics.severity_for_line(logical_line).map(|severity| {
-                    format!(
-                        "{} diagnostic on this line.",
-                        messages.text(match severity {
-                            DiagnosticSeverity::Hint => MessageId::EditorAccessibleSeverityHint,
-                            DiagnosticSeverity::Info => {
-                                MessageId::EditorAccessibleSeverityInformation
-                            }
-                            DiagnosticSeverity::Warning => {
-                                MessageId::EditorAccessibleSeverityWarning
-                            }
-                            DiagnosticSeverity::Error => MessageId::EditorAccessibleSeverityError,
-                        })
+                    messages.format(
+                        MessageId::EditorAccessibleLineSeverity,
+                        &[(
+                            "severity",
+                            &messages.text(match severity {
+                                DiagnosticSeverity::Hint => MessageId::EditorAccessibleSeverityHint,
+                                DiagnosticSeverity::Info => {
+                                    MessageId::EditorAccessibleSeverityInformation
+                                }
+                                DiagnosticSeverity::Warning => {
+                                    MessageId::EditorAccessibleSeverityWarning
+                                }
+                                DiagnosticSeverity::Error => {
+                                    MessageId::EditorAccessibleSeverityError
+                                }
+                            }),
+                        )],
                     )
                 })
             },

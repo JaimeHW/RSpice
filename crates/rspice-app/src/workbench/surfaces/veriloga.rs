@@ -208,16 +208,29 @@ fn source_editor(
     )
     .map_or(toolbar_content_right, |(status, problem)| {
         let galley = ui.painter().layout_no_wrap(
-            status,
+            status.clone(),
             theme::mono(tokens::FS_0, FontWeight::Medium),
             t.color.text_dim,
         );
         let mut left = toolbar_content_right - galley.size().x - 8.0;
-        ui.painter().galley(
+        let status_rect = egui::Rect::from_min_size(
             egui::pos2(left, toolbar.center().y - galley.size().y * 0.5),
-            galley,
-            t.color.text_dim,
+            galley.size(),
         );
+        ui.painter()
+            .galley(status_rect.min, galley, t.color.text_dim);
+        // A screen reader hears the strip change as it would a status bar:
+        // politely, once the reader is between words.
+        let status_response = ui.interact(
+            status_rect,
+            editor_id.with("compile-status"),
+            Sense::hover(),
+        );
+        ui.ctx().accesskit_node_builder(status_response.id, |node| {
+            node.set_role(egui::accesskit::Role::Status);
+            node.set_label(status);
+            node.set_live(egui::accesskit::Live::Polite);
+        });
         if let Some(problem) = problem {
             left -= PROBLEM_MARK_GAP;
             paint_problem_mark(
@@ -314,6 +327,9 @@ fn source_editor(
     // and its language group hidden through the editor published above.
     if let Some(response) = interaction.response.as_ref() {
         crate::workbench::chrome::title_bar::source_editor_context_menu(response, app);
+    }
+    if let Some(announcement) = interaction.announcement.clone() {
+        app.state.prompt(announcement);
     }
     if !editable {
         return;

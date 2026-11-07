@@ -35,6 +35,10 @@ pub use editor::{
     CodeEditorDiagnostic, CodeEditorLanguage, CodeEditorSeverity,
     show_code_document_interaction_versioned, show_code_document_with_debug_versioned,
 };
+pub(crate) use editor::{
+    ProblemStep, problem_step_announcement, problem_step_index, queue_problem_step,
+    queue_revealed_column, reveal_source_location, severity_title, take_problem_step,
+};
 pub(crate) use language_services::{
     CodeLanguageToolsState, LanguageServiceIndex, commit_language_rename, extent_words,
     format_language_document, open_language_tools_in_bundle,

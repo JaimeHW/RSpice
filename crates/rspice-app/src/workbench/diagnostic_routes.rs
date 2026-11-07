@@ -60,7 +60,8 @@ pub(crate) fn apply_pending(ctx: &Context, app: &mut RSpiceApp) {
             bundle,
             logical_path,
             line,
-        } => open_code_document(ctx, app, bundle, &logical_path, line),
+            column,
+        } => open_code_document(ctx, app, bundle, &logical_path, line, column),
         DiagnosticRoute::Repair(remediation) => apply_remediation(app, remediation),
         DiagnosticRoute::RunLogLine { run_sequence, line } => {
             crate::workbench::commands::result_navigation::show_run_line(
@@ -74,7 +75,7 @@ pub(crate) fn apply_pending(ctx: &Context, app: &mut RSpiceApp) {
 }
 
 /// Open the editor that owns a source bundle, select the document a finding
-/// is in, and put the caret on its line.
+/// is in, and put the caret on its line and column.
 ///
 /// The owner is what decides the destination: a Verilog-A bundle belongs to a
 /// cell view and is edited in the Design workspace showing that view, while
@@ -89,6 +90,7 @@ fn open_code_document(
     bundle: crate::state::ProjectSourceId,
     logical_path: &str,
     line: Option<usize>,
+    column: Option<usize>,
 ) {
     use crate::state::{ProjectSourceLanguage, ProjectSourceOwner};
     use crate::workbench::documents::code_workspace;
@@ -149,10 +151,11 @@ fn open_code_document(
         return;
     }
     if let Some(line) = line {
-        crate::workbench::documents::text_editor_commands::queue_reveal_line(
+        code_workspace::reveal_source_location(
             ctx,
             code_workspace::source_editor_id(language, bundle, logical_path),
             line,
+            column.unwrap_or(1),
         );
     }
 }

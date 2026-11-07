@@ -392,7 +392,7 @@ fn lines(
             }
             for related in row.related {
                 let route = related_route(row, related);
-                if related_line(ui, ends, related, route.is_some()) {
+                if related_line(ui, ends, related, route.as_ref()) {
                     actions.related = route;
                 }
             }
@@ -566,7 +566,8 @@ fn applicable_fix<'a>(
 /// Only a finding whose own route names a source bundle can say which editor
 /// holds the document a related location names; without that the location is
 /// still stated, as text, rather than offered as a jump that would land
-/// somewhere else.
+/// somewhere else. A source finding's places are one-based, so a zero line
+/// or column is one the finding did not name.
 fn related_route(
     row: &DiagnosticRow<'_>,
     related: &rspice_vocabulary::diagnostics::DiagnosticRelatedLocation,
@@ -575,7 +576,14 @@ fn related_route(
         Some(DiagnosticRoute::CodeDocument { bundle, .. }) => Some(DiagnosticRoute::CodeDocument {
             bundle: *bundle,
             logical_path: Arc::from(related.document_id.as_str()),
-            line: related.range.map(|range| range.start.line),
+            line: related
+                .range
+                .map(|range| range.start.line)
+                .filter(|line| *line > 0),
+            column: related
+                .range
+                .map(|range| range.start.column)
+                .filter(|column| *column > 0),
         }),
         Some(
             DiagnosticRoute::Anchor(_)
@@ -587,18 +595,27 @@ fn related_route(
     }
 }
 
-/// One related place. Returns true when the reader asked to go there.
+/// One related place, `route` being how to go there when it can be
+/// followed. Returns true when the reader asked to go there.
+///
+/// A place in a source document is numbered as its editor numbers it, from
+/// one; any other place is numbered from zero and shown from one.
 fn related_line(
     ui: &mut Ui,
     ends: &mut Ends,
     related: &rspice_vocabulary::diagnostics::DiagnosticRelatedLocation,
-    followable: bool,
+    route: Option<&DiagnosticRoute>,
 ) -> bool {
-    let position = related.range.map_or_else(String::new, |range| {
-        format!(" · line {}", range.start.line + 1)
-    });
+    let position = match route {
+        Some(DiagnosticRoute::CodeDocument { line, .. }) => {
+            line.map_or_else(String::new, |line| format!(" · line {line}"))
+        }
+        _ => related.range.map_or_else(String::new, |range| {
+            format!(" · line {}", range.start.line + 1)
+        }),
+    };
     let text = format!("{}{position} · {}", related.document_id, related.message);
-    place_line(ui, ends, &text, followable)
+    place_line(ui, ends, &text, route.is_some())
 }
 
 /// One place the finding names, with a verb to go there where it can be
@@ -653,12 +670,12 @@ mod tests {
             range: Some(DiagnosticRange {
                 start: DiagnosticPosition {
                     line: 41,
-                    column: 0,
+                    column: 5,
                     byte_offset: 0,
                 },
                 end: DiagnosticPosition {
                     line: 41,
-                    column: 4,
+                    column: 9,
                     byte_offset: 4,
                 },
             }),
@@ -700,6 +717,7 @@ mod tests {
                 bundle,
                 logical_path: Arc::from("models/top.va"),
                 line: Some(7),
+                column: Some(3),
             })),
             &related(),
         );
@@ -709,6 +727,7 @@ mod tests {
                 bundle,
                 logical_path: Arc::from("models/opamp.va"),
                 line: Some(41),
+                column: Some(5),
             }),
             "the related document and its own line, in the finding's bundle",
         );
@@ -759,6 +778,7 @@ mod tests {
             bundle: crate::state::ProjectSourceId::new(),
             logical_path: Arc::from("models/top.va"),
             line: None,
+            column: None,
         }));
         source.quick_fixes = &fixes;
         assert!(

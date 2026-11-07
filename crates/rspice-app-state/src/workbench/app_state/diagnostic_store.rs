@@ -175,7 +175,7 @@ pub enum DiagnosticRoute {
     /// A record the netlist editor owns, opened by its canonical identity.
     NetlistDiagnostic(uuid::Uuid),
     /// A source document a code editor owns: the bundle that holds it, its
-    /// logical path inside that bundle, and the zero-based line.
+    /// logical path inside that bundle, and the one-based line and column.
     ///
     /// The bundle rather than the language, because the bundle is what names
     /// the editor. A Verilog-A bundle belongs to a cell view and is edited in
@@ -187,6 +187,7 @@ pub enum DiagnosticRoute {
         bundle: crate::state::ProjectSourceId,
         logical_path: Arc<str>,
         line: Option<usize>,
+        column: Option<usize>,
     },
     /// The destination a blocking dispatch finding named for itself.
     Repair(PreflightRemediation),

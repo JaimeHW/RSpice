@@ -46,6 +46,90 @@ pub(super) fn publish_source_editor(
             ctx, editor.id, request,
         );
     }
+    if let Some(step) = app
+        .state
+        .workbench
+        .outbox
+        .take::<crate::workbench::documents::code_workspace::ProblemStep>()
+    {
+        crate::workbench::documents::code_workspace::queue_problem_step(ctx, editor.id, step);
+    }
+}
+
+/// Step the netlist editor's caret to the next or previous finding of the
+/// deck it shows, when F8 or Shift+F8 asked, and say which it reached.
+fn step_netlist_problem(ctx: &egui::Context, app: &mut RSpiceApp, editor_id: egui::Id) {
+    use crate::workbench::documents::code_workspace;
+
+    let Some(step) = code_workspace::take_problem_step(ctx, editor_id) else {
+        return;
+    };
+    let buffer = &app.state.model.simulation.source.netlist_content;
+    let diagnostics = std::sync::Arc::clone(&app.state.code.netlist.diagnostics);
+    // The buffer's own findings, in source order. A finding in an included
+    // file names no line of this buffer, so it is not stepped to.
+    let mut located = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.is_current())
+        .filter_map(|diagnostic| {
+            let line = diagnostic.line?;
+            let text = buffer.split('\n').nth(line)?;
+            // Zero-based byte column to one-based character column.
+            let column = diagnostic.column.map(|column| {
+                text.get(..column.min(text.len()))
+                    .map_or(column, |prefix| prefix.chars().count())
+                    + 1
+            });
+            Some((line + 1, column, diagnostic))
+        })
+        .collect::<Vec<_>>();
+    located.sort_by_key(|(line, column, _)| (*line, *column));
+    let places = located
+        .iter()
+        .map(|(line, column, _)| (*line, *column))
+        .collect::<Vec<_>>();
+    let messages = app.state.workbench.messages();
+    let Some(index) = code_workspace::problem_step_index(
+        ctx,
+        editor_id,
+        buffer,
+        &places,
+        app.state.code.netlist.cursor_char_index,
+        step,
+    ) else {
+        app.state
+            .prompt(messages.text(MessageId::SourceDiagnosticNone));
+        return;
+    };
+    let (line, column, diagnostic) = located[index];
+    let announcement = code_workspace::problem_step_announcement(
+        messages,
+        diagnostic.severity,
+        index,
+        located.len(),
+        line,
+        &diagnostic.message,
+    );
+    code_workspace::reveal_source_location(ctx, editor_id, line, column.unwrap_or(1));
+    app.state.prompt(announcement);
+}
+
+/// Hand a place revealed in the netlist editor to it the way this page asks
+/// for a line, with the caret then moved on to the place's column.
+fn reveal_in_netlist(ui: &Ui, app: &mut RSpiceApp, editor_id: egui::Id) {
+    let buffer = &app.state.model.simulation.source.netlist_content;
+    let Some(line) =
+        crate::workbench::documents::text_editor_commands::take_reveal_line(ui, editor_id, buffer)
+    else {
+        return;
+    };
+    crate::workbench::documents::code_workspace::queue_revealed_column(
+        ui.ctx(),
+        editor_id,
+        buffer,
+        line,
+    );
+    app.state.code.netlist.requested_line = Some(line);
 }
 
 pub(in crate::workbench) fn prepare_workspace(app: &mut RSpiceApp) {
@@ -177,11 +261,12 @@ pub(in crate::workbench) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
                 );
             }
         } else {
+            let editor_id = crate::workbench::documents::netlist_document::editor_id(&app.state);
             publish_source_editor(
                 ui.ctx(),
                 app,
                 crate::workbench::documents::text_editor_commands::ActiveSourceEditor {
-                    id: crate::workbench::documents::netlist_document::editor_id(&app.state),
+                    id: editor_id,
                     editable:
                         crate::workbench::documents::netlist_document::active_netlist_source_is_editable(
                             &app.state,
@@ -189,6 +274,8 @@ pub(in crate::workbench) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
                     navigable: true,
                 },
             );
+            step_netlist_problem(ui.ctx(), app, editor_id);
+            reveal_in_netlist(ui, app, editor_id);
             let response =
                 crate::workbench::documents::netlist_document::show_editor(ui, &mut app.state);
             crate::workbench::chrome::title_bar::source_editor_context_menu(&response, app);
@@ -1088,6 +1175,82 @@ mod tests {
     use egui::vec2;
 
     use super::*;
+
+    /// F8 in the netlist editor goes to the deck's next finding, on its
+    /// column, and Shift+F8 back; each says which finding it reached. A
+    /// finding of the deck's own file counts though it names that file.
+    #[test]
+    fn a_problem_step_in_the_deck_goes_to_the_finding_and_says_which() {
+        use crate::state::netlist_diagnostics::{Diagnostic, NetlistDiagnosticCollection};
+        use crate::workbench::documents::code_workspace::{ProblemStep, queue_problem_step};
+        use crate::workbench::documents::netlist_document;
+        use rspice_vocabulary::diagnostics::DiagnosticSeverity;
+
+        let deck = "deck\nR1 1 0 1k\nC1 1 0 1pp\n.end\n";
+        let mut app = RSpiceApp::test_instance();
+        app.state.model.workspace.content.netlist_source = Some(deck.to_owned());
+        app.state.model.simulation.source.netlist_content = deck.to_owned();
+        app.state.code.netlist.active_document = ActiveNetlistDocument::OwnedSource;
+        app.state.code.netlist.active_document_initialized = true;
+        let mut root = Diagnostic::current("lint", "UNITS", DiagnosticSeverity::Warning, "1pp");
+        root.source_path = Some(std::path::PathBuf::from("deck.cir"));
+        root.column = Some(7);
+        let root = root.with_line(Some(2));
+        let first = Diagnostic::current("lint", "NODE", DiagnosticSeverity::Error, "node 1")
+            .with_line(Some(1));
+        app.state.code.netlist.diagnostics = std::sync::Arc::new(
+            NetlistDiagnosticCollection::try_new(vec![root, first], deck)
+                .expect("the fixture collection is well formed"),
+        );
+        // These findings stand for the deck's validation: it is not re-run.
+        let revision = app.state.code.netlist.revision;
+        app.state.code.netlist.mark_validated_for_test(revision);
+
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(900.0, 600.0),
+            )),
+            ..Default::default()
+        };
+        let editor = netlist_document::editor_id(&app.state);
+        // The page's order: the step, the reveal it queued, then the editor.
+        let press = |app: &mut RSpiceApp, step: ProblemStep| {
+            for frame in 0..3 {
+                let _ = ctx.clone().run_ui(input.clone(), |ui| {
+                    if frame == 0 {
+                        ui.ctx().memory_mut(|memory| memory.request_focus(editor));
+                        queue_problem_step(ui.ctx(), editor, step);
+                    }
+                    step_netlist_problem(ui.ctx(), app, editor);
+                    reveal_in_netlist(ui, app, editor);
+                    netlist_document::show_editor(ui, &mut app.state);
+                });
+            }
+            let caret = app.state.code.netlist.cursor_char_index;
+            let before = deck.chars().take(caret).collect::<String>();
+            let line = before.matches('\n').count() + 1;
+            let column = before.chars().rev().take_while(|c| *c != '\n').count() + 1;
+            (
+                (line, column),
+                app.state.prompt_text().unwrap_or_default().to_owned(),
+            )
+        };
+
+        assert_eq!(
+            press(&mut app, ProblemStep::Next),
+            ((2, 1), "Error 1 of 2, line 2: node 1".to_owned())
+        );
+        assert_eq!(
+            press(&mut app, ProblemStep::Next),
+            ((3, 8), "Warning 2 of 2, line 3: 1pp".to_owned()),
+            "on the finding's column"
+        );
+        assert_eq!(press(&mut app, ProblemStep::Previous).0, (2, 1));
+        assert_eq!(press(&mut app, ProblemStep::Previous).0, (3, 8), "wraps");
+    }
 
     #[test]
     fn deterministic_netlist_format_preserves_line_ending_policy() {

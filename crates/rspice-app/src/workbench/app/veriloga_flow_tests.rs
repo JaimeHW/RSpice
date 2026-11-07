@@ -26,12 +26,14 @@ const PORTS: &str = "inp:in inn:in out:out gnd";
 /// difference above `gnd`.
 const MODULE: &str = "`include \"disciplines.vams\"\n\nmodule vcvs_gain(inp, inn, out, gnd);\n  input inp, inn;\n  output out;\n  inout gnd;\n  electrical inp, inn, out, gnd;\n  (* units=\"V/V\", desc=\"Voltage gain\" *) parameter real gain = 10 from (0:inf);\n  analog V(out, gnd) <+ gain * (V(inp) - V(inn));\nendmodule\n";
 
-/// Someone at the application: its egui context, the application, and what
-/// the last frame named for a screen reader, with where it drew each name.
+/// Someone at the application: its egui context, the application, what the
+/// last frame named for a screen reader, with where it drew each name, and
+/// what its live status regions said.
 struct User {
     ctx: egui::Context,
     app: RSpiceApp,
     named: Vec<(String, egui::Rect)>,
+    live: Vec<String>,
 }
 
 impl User {
@@ -43,6 +45,7 @@ impl User {
             ctx,
             app,
             named: Vec::new(),
+            live: Vec::new(),
         };
         user.app.symbol_library = crate::schematic::symbols::SymbolLibrary::load_embedded().ok();
         user.app.state.workbench.inspector_visible = true;
@@ -55,7 +58,12 @@ impl User {
     /// the run and the selection's cross-probe. The account, live session and
     /// autosave have no part in this flow.
     fn frame(&mut self, events: Vec<egui::Event>) {
-        let Self { ctx, app, named } = self;
+        let Self {
+            ctx,
+            app,
+            named,
+            live,
+        } = self;
         let output = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, SIZE)),
@@ -74,12 +82,19 @@ impl User {
             },
         );
         named.clear();
+        live.clear();
         for (_, node) in output
             .platform_output
             .accesskit_update
             .into_iter()
             .flat_map(|update| update.nodes)
         {
+            if node.role() == egui::accesskit::Role::Status
+                && node.live() == Some(egui::accesskit::Live::Polite)
+                && let Some(label) = node.label()
+            {
+                live.push(label.to_owned());
+            }
             let (Some(name), Some(bounds)) = (node.label().or_else(|| node.value()), node.bounds())
             else {
                 continue;
@@ -216,9 +231,10 @@ struct Device {
     view: CellViewRef,
 }
 
-/// Steps 1 to 7: a new project, the device created from the canvas, written,
-/// compiled, placed in the top schematic, wired and set to `gain=5`.
-fn wired_device() -> (User, Device) {
+/// Steps 1 and 2: a new project, and the device `cell` with `ports` created
+/// from its canvas. Returns the top schematic and the device's view, which
+/// the Design workspace shows.
+fn new_device(cell: &str, ports: &str) -> (User, CellViewRef, CellViewRef) {
     let mut user = User::new(RSpiceApp::test_instance());
 
     // 1. File → New project, not keeping the session's unsaved scratch work.
@@ -255,14 +271,34 @@ fn wired_device() -> (User, Device) {
         form.library, library,
         "the form offers the project's design library"
     );
-    form.name = CELL.to_owned();
-    form.ports = PORTS.to_owned();
+    form.name = cell.to_owned();
+    form.ports = ports.to_owned();
     user.settle();
     user.click("Create");
-    let view = CellViewRef::new(&library, CELL, "veriloga");
+    let view = CellViewRef::new(&library, cell, "veriloga");
     assert!(!user.app.state.code.new_veriloga_device.open);
     assert_eq!(user.app.state.model.workspace.content.active_view, view);
     assert_eq!(user.app.state.workbench.workspace, Workspace::Design);
+    (user, top, view)
+}
+
+/// Compile the open view as the toolbar's Compile does, and frame until the
+/// result is published.
+fn compile(user: &mut User) {
+    assert!(Command::CompileVerilogA.is_enabled(&user.app));
+    Command::CompileVerilogA.execute(&mut user.app);
+    user.wait_for("the compile result", |app| {
+        let veriloga = &app.state.code.code_workspace.veriloga;
+        veriloga.compile_request.is_none() && veriloga.pending.is_none()
+    });
+    user.settle();
+}
+
+/// Steps 1 to 7: a new project, the device created from the canvas, written,
+/// compiled, placed in the top schematic, wired and set to `gain=5`.
+fn wired_device() -> (User, Device) {
+    let (mut user, top, view) = new_device(CELL, PORTS);
+    let top_cell = top.cell.clone();
 
     // 3. The module.
     super::veriloga_interface_tests::edit_source(&mut user.app, MODULE);
@@ -270,12 +306,7 @@ fn wired_device() -> (User, Device) {
 
     // 4. Compile, which asks nothing: the next frame starts it, and the frame
     // loop publishes it.
-    assert!(Command::CompileVerilogA.is_enabled(&user.app));
-    Command::CompileVerilogA.execute(&mut user.app);
-    user.wait_for("the compile result", |app| {
-        let veriloga = &app.state.code.code_workspace.veriloga;
-        veriloga.compile_request.is_none() && veriloga.pending.is_none()
-    });
+    compile(&mut user);
     assert!(!user.app.state.application_modal_open());
     assert!(
         user.app
@@ -297,7 +328,6 @@ fn wired_device() -> (User, Device) {
             .receipt
             .is_some()
     );
-    user.settle();
 
     // 5. The cell's interface, symbol and parameters, and the offer.
     let cell = user
@@ -676,4 +706,219 @@ fn a_new_veriloga_device_runs_from_the_canvas_to_its_operating_point_and_back_fr
     let mut lock = path.as_os_str().to_os_string();
     lock.push(".rspice.lock");
     let _ = std::fs::remove_file(std::path::PathBuf::from(lock));
+}
+
+/// A behavioural op-amp as a reviewer writes it: both divisions are by
+/// quantities the parameter ranges keep positive, and the clip reassigns a
+/// variable assigned on every path just before it.
+const OPAMP: &str = r#"`include "constants.vams"
+`include "disciplines.vams"
+
+/* Behavioural op-amp macromodel:
+   single pole, slew limited, clipped to the rails. */
+module opamp_bhv(inp, inn, out, vdd, vss);
+  input inp, inn;
+  output out;
+  inout vdd, vss;
+  electrical inp, inn, out, vdd, vss, mid;
+
+  (* desc="Open-loop gain", units="V/V" *) parameter real a0 = 1e5 from (0:inf);
+  (* desc="Gain-bandwidth product", units="Hz" *) parameter real gbw = 10M from (0:inf);
+  (* desc="Slew rate", units="V/s" *) parameter real sr = 5M from (0:inf);
+  (* desc="Output resistance", units="Ohm" *) parameter real rout = 50 from (0:inf);
+  parameter integer clip = 1 from [0:1];
+
+  real vin, vslew, vtarget, tau;
+
+  analog begin
+    tau = a0 / (`M_TWO_PI * gbw);
+    vin = V(inp, inn);
+    (* integrator node *)
+    I(mid) <+ -a0 * vin;
+    I(mid) <+ V(mid) + tau * ddt(V(mid));
+    vslew = slew(V(mid), sr, -sr);
+    vtarget = vslew;
+    if (clip)
+      vtarget = min(max(vslew, V(vss)), V(vdd));
+    I(out) <+ (V(out) - vtarget) / rout;
+    I(inp, inn) <+ white_noise(4 * `P_K * $temperature * 1k, "input");
+  end
+endmodule
+"#;
+
+impl User {
+    /// Press and release `key`, as a keyboard does.
+    fn key(&mut self, key: egui::Key, modifiers: egui::Modifiers) {
+        for pressed in [true, false] {
+            self.frame(vec![egui::Event::Key {
+                key,
+                physical_key: Some(key),
+                pressed,
+                repeat: false,
+                modifiers,
+            }]);
+        }
+    }
+
+    /// The one-based line and column of the caret the Verilog-A editor last
+    /// reported.
+    fn caret(&self) -> (usize, usize) {
+        let selected =
+            crate::workbench::documents::code_workspace::selected_veriloga_source(&self.app)
+                .expect("a Verilog-A view is open");
+        let path = selected.document().logical_path().to_owned();
+        let source = selected
+            .bundle()
+            .file_content(&path)
+            .expect("the open document")
+            .to_owned();
+        let index = *self
+            .app
+            .state
+            .code
+            .code_workspace
+            .source_carets
+            .get(&(selected.bundle().id(), path))
+            .expect("the editor reported its caret");
+        source
+            .chars()
+            .take(index)
+            .fold((1, 1), |(line, column), character| {
+                if character == '\n' {
+                    (line + 1, 1)
+                } else {
+                    (line, column + 1)
+                }
+            })
+    }
+
+    fn prompt(&self) -> String {
+        self.app.state.prompt_text().unwrap_or_default().to_owned()
+    }
+}
+
+/// The reviewed op-amp compiles with nothing to say about its bounded
+/// divisions or its clip, and says so where a screen reader hears it. With two
+/// typos it fails on two errors, each listed on the line it is on, and each
+/// reached from Problems, from the inspector and with F8 and Shift+F8.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_reviewed_op_amp_compiles_clean_and_each_of_its_errors_is_reached_where_it_was_written() {
+    use crate::workbench::app_state::diagnostic_store::listing::listing;
+    use crate::workbench::documents::code_workspace::CodeEditorSeverity;
+
+    let (mut user, _, _) = new_device("opamp_bhv", "inp:in inn:in out:out vdd vss");
+    super::veriloga_interface_tests::edit_source(&mut user.app, OPAMP);
+    user.settle();
+    compile(&mut user);
+
+    let veriloga = &user.app.state.code.code_workspace.veriloga;
+    assert!(
+        veriloga.last_failure.is_empty(),
+        "a valid module compiles: {:#?}",
+        veriloga.last_failure
+    );
+    let receipt = veriloga.receipt.as_ref().expect("the module compiled");
+    let codes = receipt
+        .diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.code().to_owned())
+        .collect::<Vec<_>>();
+    for lint in [
+        "VA-CONVERGENCE-DIVISION",
+        "VA-HIDDEN-STATE-PARTIAL-ASSIGNMENT",
+    ] {
+        assert!(
+            !codes.iter().any(|code| code == lint),
+            "{lint} in {codes:?}"
+        );
+    }
+    let compiled = user.prompt();
+    assert!(
+        compiled.starts_with("Compiled opamp_bhv: 5 ports, 5 parameters"),
+        "{compiled:?}"
+    );
+    assert!(
+        user.live.contains(&compiled),
+        "a live status region says {compiled:?}: {:?}",
+        user.live
+    );
+
+    // `gbw` misspelt on line 21 and `vslew` on line 26.
+    let broken = OPAMP
+        .replace("vslew = slew(", "vslw = slew(")
+        .replace("* gbw)", "* gbww)");
+    super::veriloga_interface_tests::edit_source(&mut user.app, &broken);
+    user.settle();
+    compile(&mut user);
+    let failure = std::sync::Arc::clone(&user.app.state.code.code_workspace.veriloga.last_failure);
+    let mut errors = failure
+        .iter()
+        .filter(|diagnostic| diagnostic.severity == CodeEditorSeverity::Error)
+        .map(|diagnostic| {
+            (
+                diagnostic.line.expect("an error names its line"),
+                diagnostic.column.expect("an error names its column"),
+                diagnostic.message.to_string(),
+            )
+        })
+        .collect::<Vec<_>>();
+    errors.sort();
+    let places = errors
+        .iter()
+        .map(|(line, column, _)| (*line, *column))
+        .collect::<Vec<_>>();
+    assert_eq!(places, [(21, 29), (26, 5)], "{errors:#?}");
+    assert_eq!(user.prompt(), "Compile failed: 2 errors");
+    assert!(
+        user.live
+            .iter()
+            .any(|said| said == "Compile failed: 2 errors"),
+        "{:?}",
+        user.live
+    );
+    let (gbww, vslw) = (&errors[0].2, &errors[1].2);
+
+    // Problems lists the error on its own line, and opening it puts the
+    // caret on its line and column.
+    let row_route = {
+        let listed = listing(&user.app.state);
+        let row = (0..listed.len())
+            .filter_map(|index| listed.row(index))
+            .find(|row| row.message == gbww.as_str())
+            .expect("Problems lists the error");
+        assert_eq!(row.location, "line 21 · column 29");
+        row.route.clone().expect("the row opens where the error is")
+    };
+    user.app.state.model.diagnostics.request_route(row_route);
+    user.settle();
+    assert_eq!(user.caret(), (21, 29));
+
+    // F8 steps on through the document's findings and wraps; Shift+F8 steps
+    // back.
+    let path = crate::workbench::documents::code_workspace::selected_veriloga_source(&user.app)
+        .expect("a Verilog-A view is open")
+        .document()
+        .logical_path()
+        .to_owned();
+    let located = failure.view(Some(&path)).located().len();
+    user.key(egui::Key::F8, egui::Modifiers::NONE);
+    assert_eq!(user.caret(), (26, 5));
+    assert_eq!(
+        user.prompt(),
+        format!("Error 2 of {located}, line 26: {vslw}")
+    );
+    user.key(egui::Key::F8, egui::Modifiers::SHIFT);
+    assert_eq!(user.caret(), (21, 29));
+    assert_eq!(
+        user.prompt(),
+        format!("Error 1 of {located}, line 21: {gbww}")
+    );
+    user.key(egui::Key::F8, egui::Modifiers::SHIFT);
+    assert_eq!(user.caret(), (26, 5), "Shift+F8 wraps to the last");
+
+    // The inspector's row for an error is a button named for where it is,
+    // and pressing it puts the caret there.
+    user.click(&format!("Error at line 21, column 29: {gbww}"));
+    assert_eq!(user.caret(), (21, 29));
 }

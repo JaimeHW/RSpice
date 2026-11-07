@@ -14,11 +14,10 @@ use egui::{Align, Color32, Layout, Sense, Stroke, Ui, Vec2};
 use crate::product::ProjectId;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::Button;
+use crate::ui::widgets::{Button, StatusMark, paint_status_mark};
 use crate::workbench::design_system::{
-    Problem, WorkbenchIcon, code_inspector_section, paint_problem_mark, panel_bleed, panel_inset,
-    problem_line, property_row, property_row_control_columns, property_row_height,
-    property_row_problem,
+    Problem, code_inspector_section, paint_problem_mark, panel_bleed, panel_inset, problem_line,
+    property_row, property_row_control_columns, property_row_height, property_row_problem,
 };
 use crate::workbench::{MessageCatalog, MessageId};
 
@@ -123,10 +122,18 @@ pub(crate) fn veriloga_compile_status(
 }
 
 /// What the reader asked the inspector to do.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum VerilogAInspectorAction {
     /// Reconcile the cell's hand-edited symbol with the module's ports.
     UpdateSymbol,
+    /// Put the editor's caret where a finding is: the document of the
+    /// bundle that holds it, and its one-based line and column.
+    RevealFinding {
+        bundle: crate::state::ProjectSourceId,
+        logical_path: Arc<str>,
+        line: usize,
+        column: Option<usize>,
+    },
 }
 
 /// The inspector body: the module and where its ports stand, what the
@@ -142,7 +149,7 @@ pub(crate) fn show_veriloga_inspector(
     let t = Tokens::get(ui.ctx());
     ui.set_width(ui.available_width());
     let receipt = veriloga_receipt(state, project_id, selected);
-    let action = module_section(ui, state, selected, receipt, messages);
+    let mut action = module_section(ui, state, selected, receipt, messages);
     // Diagnostics exist only for a source the compiler has read. With neither
     // a receipt nor a refusal for this exact revision there is nothing to
     // list, and the strip already says the source needs a compile.
@@ -150,12 +157,25 @@ pub(crate) fn show_veriloga_inspector(
         || state
             .last_failure_token
             .is_some_and(|token| selected.matches_token(project_id, token));
-    if compiled {
-        diagnostics_section(
+    if compiled
+        && let Some(finding) = diagnostics_section(
             ui,
             &veriloga_diagnostics(state, project_id, selected),
             messages,
-        );
+        )
+        && let Some(line) = finding.line
+    {
+        // A finding in text read without a document name is in the root.
+        let logical_path = finding
+            .source_path
+            .clone()
+            .unwrap_or_else(|| Arc::from(selected.bundle().root().logical_path()));
+        action = Some(VerilogAInspectorAction::RevealFinding {
+            bundle: selected.bundle().id(),
+            logical_path,
+            line,
+            column: finding.column,
+        });
     }
     parameters_section(ui, receipt, messages, &t);
     action
@@ -536,16 +556,16 @@ fn value_column_button(ui: &mut Ui, label: &str) -> bool {
 }
 
 /// What the last compile of this source found. A clean compile has nothing to
-/// list, so it has no section.
+/// list, so it has no section. Returns the finding the reader activated.
 fn diagnostics_section(
     ui: &mut Ui,
     diagnostics: &CodeDiagnosticCollection,
     messages: MessageCatalog,
-) {
+) -> Option<CodeEditorDiagnostic> {
     const INSPECTOR_DIAGNOSTIC_PREVIEW: usize = 50;
 
     if diagnostics.is_empty() {
-        return;
+        return None;
     }
     let summary = diagnostics.summary();
     let error_count = summary.errors;
@@ -577,6 +597,7 @@ fn diagnostics_section(
             Some(Problem::Warning),
         )
     };
+    let mut activated = None;
     code_inspector_section(
         ui,
         &messages.text(MessageId::VerilogADiagnostics),
@@ -584,7 +605,9 @@ fn diagnostics_section(
         problem,
         |ui| {
             for diagnostic in diagnostics.iter().take(INSPECTOR_DIAGNOSTIC_PREVIEW) {
-                diagnostic_row(ui, diagnostic);
+                if diagnostic_row(ui, diagnostic, messages) {
+                    activated = Some(diagnostic.clone());
+                }
             }
             if diagnostics.len() > INSPECTOR_DIAGNOSTIC_PREVIEW {
                 let remaining = (diagnostics.len() - INSPECTOR_DIAGNOSTIC_PREVIEW).to_string();
@@ -595,6 +618,7 @@ fn diagnostics_section(
             }
         },
     );
+    activated
 }
 
 fn muted_row(ui: &mut Ui, text: &str) {
@@ -604,12 +628,22 @@ fn muted_row(ui: &mut Ui, text: &str) {
 /// Space above and below a diagnostic's two lines, inside the rule under it.
 const DIAGNOSTIC_PAD_Y: i8 = 8;
 
-fn diagnostic_row(ui: &mut Ui, diagnostic: &CodeEditorDiagnostic) {
+/// A finding as one row: its mark, message, detail, and where it is with the
+/// producer's code. A finding that names a line is a button that takes the
+/// editor's caret there. Returns true when it was activated.
+fn diagnostic_row(
+    ui: &mut Ui,
+    diagnostic: &CodeEditorDiagnostic,
+    messages: MessageCatalog,
+) -> bool {
     /// The side of the kit's problem mark, so a row's mark matches the one in
     /// the section header above it.
     use crate::ui::widgets::PROBLEM_MARK_SIDE as MARK_SIDE;
 
     let t = Tokens::get(ui.ctx());
+    let place = diagnostic_place(diagnostic);
+    // Painted under the row once its height is known: the hover wash.
+    let wash = ui.painter().add(egui::Shape::Noop);
     // On the panel inset: the body has set it already, so the row adds none.
     let inset = panel_inset(ui) as i8;
     let shown = egui::Frame::new()
@@ -626,8 +660,13 @@ fn diagnostic_row(ui: &mut Ui, diagnostic: &CodeEditorDiagnostic) {
                     CodeEditorSeverity::Warning => {
                         paint_problem_mark(ui.painter(), mark, Problem::Warning);
                     }
-                    CodeEditorSeverity::Hint | CodeEditorSeverity::Info => {
-                        WorkbenchIcon::Warning.paint(ui.painter(), icon, t.color.text_faint);
+                    // Advice is the kit's info mark in ink, not a status in
+                    // a colour: only a warning or an error earns colour.
+                    CodeEditorSeverity::Info => {
+                        paint_status_mark(ui.painter(), mark, StatusMark::Info, t.color.text_dim);
+                    }
+                    CodeEditorSeverity::Hint => {
+                        paint_status_mark(ui.painter(), mark, StatusMark::Info, t.color.text_faint);
                     }
                 }
                 ui.vertical(|ui| {
@@ -648,25 +687,94 @@ fn diagnostic_row(ui: &mut Ui, diagnostic: &CodeEditorDiagnostic) {
                         )
                         .wrap(),
                     );
-                    // The producer's code closes the row on its own baseline.
-                    // A code is identity, not prose: sharing a line with the
+                    // Where the finding is opens the last line and the
+                    // producer's code closes it, on their own baseline. A
+                    // code is identity, not prose: sharing a line with the
                     // message or the detail would squeeze whichever of them
                     // the reader actually came for.
-                    ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
-                        ui.label(
-                            egui::RichText::new(diagnostic.code())
-                                .font(theme::mono(tokens::FS_MICRO, FontWeight::Regular))
-                                .color(t.color.text_faint),
-                        );
+                    ui.horizontal(|ui| {
+                        if let Some(place) = &place {
+                            ui.label(
+                                egui::RichText::new(place)
+                                    .font(theme::mono(tokens::FS_MICRO, FontWeight::Regular))
+                                    .color(t.color.text_dim),
+                            );
+                        }
+                        ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                            ui.label(
+                                egui::RichText::new(diagnostic.code())
+                                    .font(theme::mono(tokens::FS_MICRO, FontWeight::Regular))
+                                    .color(t.color.text_faint),
+                            );
+                        });
                     });
                 });
             });
         });
+    let rect = shown.response.rect;
     ui.painter().hline(
-        shown.response.rect.x_range(),
-        shown.response.rect.bottom(),
+        rect.x_range(),
+        rect.bottom(),
         Stroke::new(1.0, t.color.border),
     );
+    let severity = super::severity_title(diagnostic.severity, messages);
+    let label = match (diagnostic.line, diagnostic.column) {
+        (Some(line), Some(column)) => messages.format(
+            MessageId::SourceDiagnosticAtColumn,
+            &[
+                ("severity", &severity),
+                ("line", &line.to_string()),
+                ("column", &column.to_string()),
+                ("message", &diagnostic.message),
+            ],
+        ),
+        (Some(line), None) => messages.format(
+            MessageId::SourceDiagnosticAtLine,
+            &[
+                ("severity", &severity),
+                ("line", &line.to_string()),
+                ("message", &diagnostic.message),
+            ],
+        ),
+        (None, _) => messages.format(
+            MessageId::SourceDiagnosticUnplaced,
+            &[("severity", &severity), ("message", &diagnostic.message)],
+        ),
+    };
+    // Registered after the row's text, so a press on the text reaches it.
+    let sense = if place.is_some() {
+        Sense::click()
+    } else {
+        Sense::hover()
+    };
+    let response = ui.interact(
+        rect,
+        ui.id()
+            .with(("diagnostic-row", diagnostic.canonical.diagnostic_id)),
+        sense,
+    );
+    let widget = if place.is_some() {
+        egui::WidgetType::Button
+    } else {
+        egui::WidgetType::Label
+    };
+    response.widget_info(|| egui::WidgetInfo::labeled(widget, ui.is_enabled(), &label));
+    if place.is_some() && response.hovered() {
+        ui.painter()
+            .set(wash, egui::Shape::rect_filled(rect, 0.0, t.color.bg_hover));
+    }
+    theme::paint_focus_ring(ui, &response, rect);
+    place.is_some() && response.clicked()
+}
+
+/// Where a finding is, as the row shows it: "21:29", or "21" when it names
+/// no column.
+fn diagnostic_place(diagnostic: &CodeEditorDiagnostic) -> Option<String> {
+    match (diagnostic.line, diagnostic.column) {
+        (Some(line), Some(column)) => Some(format!("{line}:{column}")),
+        (Some(line), None) => Some(line.to_string()),
+        (None, _) => None,
+    }
 }
 
 #[cfg(test)]
