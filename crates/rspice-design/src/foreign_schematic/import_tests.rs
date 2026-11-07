@@ -1308,6 +1308,56 @@ fn a_text_moved_off_a_body_lands_on_no_other_text() {
     }
 }
 
+/// A text that could stand clear only past other parts stays by its own
+/// part: the clearing moves a name or value at most across its own part's
+/// body, never along a row of other parts to stand beyond the last of them.
+#[test]
+fn a_text_with_no_clear_place_beside_its_part_stays_by_it() {
+    use crate::schematic::label_layout::{
+        INSTANCE_VALUE_WORLD, LayoutPoint, instance_label_layout, text_box,
+    };
+
+    // Upright resistors side by side, their bodies touching; the first one's
+    // value starts on its body and reads to the right, across the rest.
+    let mut drawing = String::from(
+        "Version 4\nSYMBOL res 0 0 R0\nWINDOW 3 16 32 Left 2\n\
+         SYMATTR InstName R1\nSYMATTR Value 1k\n",
+    );
+    for column in 1..10 {
+        drawing.push_str(&format!(
+            "SYMBOL res {} 0 R0\nSYMATTR InstName R{}\nSYMATTR Value 1k\n",
+            16 * column,
+            column + 1
+        ));
+    }
+    let imported = import_foreign_schematic(
+        &parse_asc(&drawing).expect("the drawing reads"),
+        "work",
+        &library(),
+    );
+    let part = imported
+        .document
+        .components
+        .iter()
+        .find(|part| part.name == "R1")
+        .expect("R1 is placed");
+    let (width, height) = part.symbol_dimensions();
+    let width = if part.rotation.is_vertical() {
+        height
+    } else {
+        width
+    } as f32;
+    let origin = LayoutPoint::new(part.pos.x as f32, part.pos.y as f32);
+    let layout = instance_label_layout(origin, 1.0, part);
+    let value = text_box(layout.value, &part.value, INSTANCE_VALUE_WORLD);
+    let middle = (value.min.x + value.max.x) * 0.5;
+    assert!(
+        (middle - origin.x).abs() <= width * 2.0,
+        "the value stands at {middle}, beside a {width} wide part at {}",
+        origin.x
+    );
+}
+
 /// An LTspice flag names its net away from the one side its wire or pin
 /// lead reaches it from: below a pin whose lead comes down to it, above one
 /// whose lead runs up from it, beyond either end of a wire. A flag on the

@@ -803,7 +803,15 @@ impl Builder<'_> {
                                 .map(|(_, rect)| rect)
                         }))
                         .collect::<Vec<_>>();
-                    let cleared = clear_of(position, origin, &text, size, &obstacles);
+                    // A text may cross its own part's body, and no further:
+                    // a text with no clear place beside its part stays by
+                    // it rather than wander off past other parts.
+                    let body = native_body(component);
+                    let reach = (
+                        body.max.x - body.min.x + own.max.x - own.min.x + 2.0 * LABEL_CLEARANCE,
+                        body.max.y - body.min.y + own.max.y - own.min.y + 2.0 * LABEL_CLEARANCE,
+                    );
+                    let cleared = clear_of(position, origin, &text, size, &obstacles, reach);
                     label.set(&mut self.document.components[index], piece, cleared);
                 }
             }
@@ -2406,13 +2414,14 @@ fn overlaps(a: LayoutRect, b: LayoutRect) -> bool {
 /// nearest place where it stands [`LABEL_CLEARANCE`] clear of every
 /// obstacle it would land on: the shortest such move, or the shortest of
 /// all four for a text centred on its anchor. A text with no such place
-/// within reach stays where it was.
+/// within `reach`, across and down, stays where it was.
 fn clear_of(
     position: LabelPosition,
     origin: Point,
     text: &str,
     size: f32,
     obstacles: &[LayoutRect],
+    reach: (f32, f32),
 ) -> LabelPosition {
     let LabelPosition::Placed {
         offset,
@@ -2466,9 +2475,13 @@ fn clear_of(
             text.max.y + direction.y as f32 * distance,
         ),
     };
-    let reach = |direction: Point| {
+    let limit = |direction: Point| if direction.x == 0 { reach.1 } else { reach.0 };
+    let clear_along = |direction: Point| {
         let mut distance = 0.0_f32;
         for _ in 0..=obstacles.len() {
+            if distance > limit(direction) {
+                return None;
+            }
             let landed = moved(direction, distance);
             match obstacles
                 .iter()
@@ -2482,7 +2495,7 @@ fn clear_of(
     };
     let Some((direction, distance)) = directions
         .into_iter()
-        .filter_map(|direction| reach(direction).map(|distance| (direction, distance)))
+        .filter_map(|direction| clear_along(direction).map(|distance| (direction, distance)))
         .min_by(|a, b| a.1.total_cmp(&b.1))
     else {
         return position;
