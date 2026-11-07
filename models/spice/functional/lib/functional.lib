@@ -377,3 +377,27 @@ A3 NV 0 0 0 0 0 NBO 0 SCHMITT VT={VDRM} VH=1m VHIGH=1 VLOW=0
 A4 NTG NLT NBO 0 0 0 NS 0 OR VHIGH=1 VLOW=0 TRISE={TON} TFALL={TON}
 RNS NS 0 1Meg NOISY=0
 .ends RSPICE_FN_TRIAC
+
+* IGBT. Pins: C G E.
+* A MOSFET channel feeding a PNP: the channel conducts above VTH with the
+* square-law transfer of a long channel, through the PNP emitter
+* junction's 0.7 V, and its transconductance is the one that puts VCESAT
+* across the device at ICR with 15 V on the gate. The PNP carries FTAIL of
+* the collector current; at turn-off that share decays with the stored
+* charge's time constant TAU, the current tail, while the channel's share
+* stops with the gate. CIES, COES and CRES are the input, output and
+* reverse-transfer capacitances. The defaults are a 600 V, 40 A part.
+.subckt RSPICE_FN_IGBT C G E VCESAT=1.8 ICR=40 VTH=5.5 CIES=2.2n COES=150p
++ CRES=50p TAU=150n FTAIL=0.25
+.func sp(x) {uramp(x)+ln(1+exp(-abs(x)))}
+.func ich(vov, vds) {vov*min(vds,vov)-min(vds,vov)^2/2}
+BM NM 0 V=ICR/((15-VTH)*(VCESAT-0.7)-(VCESAT-0.7)^2/2)*ich(0.1*sp((V(G,E)-VTH)/0.1), 26m*sp((V(C,E)-0.7)/26m))
+RNM NM 0 1Meg NOISY=0
+BT 0 NT I=1k*uramp(V(NM)-V(NT))
+CT NT 0 {TAU}
+RT NT 0 1
+BC C E I=(1-FTAIL)*V(NM)+FTAIL*V(NT)*tanh(sp((V(C,E)-0.7)/26m))
+CGE G E {CIES-CRES}
+CGC G C {CRES}
+CCE C E {COES-CRES}
+.ends RSPICE_FN_IGBT

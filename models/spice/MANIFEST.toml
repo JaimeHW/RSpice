@@ -9,11 +9,11 @@
 [summary]
 packs = 2
 files = 2
-bytes = 22931
+bytes = 24057
 models = 21
-subcircuits = 25
+subcircuits = 26
 models_top_level = 21
-subcircuits_top_level = 25
+subcircuits_top_level = 26
 shipped_packs = 1
 tiers = { own = 2 }
 
@@ -51,14 +51,14 @@ pin = ""
 spdx = "LicenseRef-RSpice"
 tier = "own"
 redistributable = true
-devices = ["opamp", "comparator", "timer", "logic", "crystal", "varistor", "fuse", "relay", "optocoupler", "diac", "scr", "triac"]
+devices = ["opamp", "comparator", "timer", "logic", "crystal", "varistor", "fuse", "relay", "optocoupler", "diac", "scr", "triac", "igbt"]
 corners = []
 entry = "lib/functional.lib"
 files = 1
-bytes = 18736
+bytes = 19862
 models = 0
-subcircuits = 24
+subcircuits = 25
 models_top_level = 0
-subcircuits_top_level = 24
+subcircuits_top_level = 25
 lib_sections = 0
 digest = ""

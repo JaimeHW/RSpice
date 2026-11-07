@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- IGBT: an insulated gate beside the channel bar, the emitter arrow
+     pointing out. Box 60x40, pins C(40,0), G(0,20), E(40,40). -->
+<svg viewBox="0 0 60 40" xmlns="http://www.w3.org/2000/svg">
+  <path d="M 0,20 H 24 M 24,12 V 28" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 28,10 V 30" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 28,15 L 40,8 V 0" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 28,25 L 40,32 V 40" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 40,32 L 35.2,31.7 L 37,28.5 Z" fill="#000000" stroke="none"/>
+</svg>

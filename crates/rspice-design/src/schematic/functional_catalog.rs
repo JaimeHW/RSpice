@@ -1023,6 +1023,7 @@ static FUNCTIONAL_PARTS: &[FunctionalPartDescriptor] = &[
     discrete::DIAC,
     discrete::SCR,
     discrete::TRIAC,
+    discrete::IGBT,
 ];
 
 /// Every functional part, in catalog order.

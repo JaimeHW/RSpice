@@ -712,3 +712,95 @@ pub(super) const TRIAC: FunctionalPartDescriptor = FunctionalPartDescriptor {
     preset: None,
     inputs: None,
 };
+
+const IGBT_PINS: &[FunctionalPin] = &[pin("C", InOut), pin("G", In), pin("E", InOut)];
+
+/// The gate on the left, the collector above and the emitter below, as a
+/// transistor is drawn.
+const IGBT_BLOCK: FunctionalBlock = FunctionalBlock {
+    height: 40,
+    pins: &[
+        (SymbolPinSide::Top, 10, -20),
+        (SymbolPinSide::Left, -30, 0),
+        (SymbolPinSide::Bottom, 10, 20),
+    ],
+};
+
+/// A 600 V, 40 A IGBT.
+const IGBT_PARAMETERS: &[FunctionalParameter] = &[
+    number(
+        "VCESAT",
+        "Saturation voltage",
+        "V",
+        "1.8",
+        "Collector-emitter voltage at the rated current with 15 V on the gate.",
+    ),
+    number(
+        "ICR",
+        "Rated current",
+        "A",
+        "40",
+        "Collector current at which the saturation voltage is VCESAT.",
+    ),
+    number(
+        "VTH",
+        "Gate threshold voltage",
+        "V",
+        "5.5",
+        "Gate-emitter voltage above which the channel conducts.",
+    ),
+    number(
+        "CIES",
+        "Input capacitance",
+        "F",
+        "2.2n",
+        "Gate capacitance with collector and emitter shorted: gate-emitter plus gate-collector.",
+    ),
+    number(
+        "COES",
+        "Output capacitance",
+        "F",
+        "150p",
+        "Collector capacitance with gate and emitter shorted: collector-emitter plus gate-collector.",
+    ),
+    number(
+        "CRES",
+        "Reverse transfer capacitance",
+        "F",
+        "50p",
+        "Gate-collector (Miller) capacitance.",
+    ),
+    number(
+        "TAU",
+        "Tail time constant",
+        "s",
+        "150n",
+        "Time constant with which the tail current decays after the gate turns off.",
+    ),
+    number(
+        "FTAIL",
+        "Tail fraction",
+        "",
+        "0.25",
+        "Share of the collector current the PNP carries, which forms the tail at turn-off.",
+    ),
+];
+
+pub(super) const IGBT: FunctionalPartDescriptor = FunctionalPartDescriptor {
+    stable_id: "rspice.functional.igbt",
+    display_name: "IGBT",
+    subcircuit: "RSPICE_FN_IGBT",
+    pins: IGBT_PINS,
+    symbol_asset: "functional_igbt.svg",
+    block: Some(IGBT_BLOCK),
+    keywords: &[
+        "igbt",
+        "insulated gate",
+        "insulated gate bipolar transistor",
+        "power switch",
+    ],
+    category: ComponentCategory::Semiconductors,
+    parameters: IGBT_PARAMETERS,
+    preset: None,
+    inputs: None,
+};

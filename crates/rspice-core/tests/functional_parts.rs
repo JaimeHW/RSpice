@@ -1375,3 +1375,35 @@ X2 a2 g2 0 RSPICE_FN_TRIAC
         .all(|(_, (a2, s))| (a2 - s).abs() < 1e-3);
     assert!(missed, "X2 fired below IGT");
 }
+
+#[test]
+fn igbt_saturates_at_vcesat_at_its_rated_current_and_turns_off_with_a_tail() {
+    // 15 V on the gate and 40 A through it: VCESAT. Then 300 V through
+    // 7.5 Ohm with the gate pulled off at 2 us: the channel's share stops
+    // with the gate and FTAIL of the current tails off with TAU.
+    let deck = "* igbt
+VG g 0 15
+VB1 b1 0 41.8
+RL1 b1 c 1
+X1 c g 0 RSPICE_FN_IGBT
+VB bus 0 300
+RL bus c2 7.5
+VG2 g2x 0 PULSE(15 0 2u 5n 5n 10 20)
+RG g2x g2 1
+X2 c2 g2 0 RSPICE_FN_IGBT
+.end
+";
+    let saturation = op_voltages(deck, &["c"])[0];
+    assert_close("VCESAT at 40 A", saturation, 1.8, 2e-3);
+    let tran = transient(deck, 3e-6, 1e-9);
+    let collector = |time: f64| (300.0 - value_at(&tran.time, waveform(&tran, "c2"), time)) / 7.5;
+    let on = collector(1.9e-6);
+    assert_close(
+        "tail start",
+        collector(2.05e-6),
+        0.25 * on * (-50.0f64 / 150.0).exp(),
+        0.02 * on,
+    );
+    let tau = 0.3e-6 / (collector(2.2e-6) / collector(2.5e-6)).ln();
+    assert_close("tail time constant", tau, 150e-9, 1.5e-9);
+}

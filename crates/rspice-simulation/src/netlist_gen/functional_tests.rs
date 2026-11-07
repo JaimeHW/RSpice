@@ -456,3 +456,15 @@ fn a_placed_triac_conducts_either_way_with_its_gate_driven_either_way() {
         assert!(across > 0.9 && across < 1.2, "{supply} V: {across}");
     }
 }
+
+#[test]
+fn a_placed_igbt_saturates_at_its_rated_current() {
+    // 15 V on the gate; 41.8 V through 1 Ohm puts 40 A through it.
+    let mut bench = Bench::default();
+    bench.primitive(ComponentType::VoltageSource, "VG", "15", &["g", "0"]);
+    bench.primitive(ComponentType::VoltageSource, "VB", "41.8", &["bus", "0"]);
+    bench.primitive(ComponentType::Resistor, "RL", "1", &["bus", "c"]);
+    bench.part("rspice.functional.igbt", "Q1", "", &["c", "g", "0"]);
+    let collector = bench.operating_point("c");
+    assert!((collector - 1.8).abs() < 2e-3, "{collector}");
+}
