@@ -12505,6 +12505,11 @@ mod tests {
                 "TC=1,2,3",
                 "TC=1,2, TEMP=4",
             ] {
+                // A resistor's `tc` is LTspice's polynomial of any length,
+                // whose coefficients blanks may separate.
+                if device.starts_with('R') && matches!(invalid, "TC=1 2" | "TC=1,2,3") {
+                    continue;
+                }
                 let deck = format!("invalid passive TC\n{device} {invalid}\n.end\n");
                 assert!(
                     Netlist::parse(&deck).is_err(),
