@@ -15,7 +15,11 @@
 //! - `delay(x,td[,tdmax])` launches `x` into a matched lossless line of delay
 //!   `td`. Its far end is `x(t-td)` with the operating point as the history
 //!   before time zero, `x·e^(-jω·td)` in AC; the line keeps the waveform
-//!   history and schedules the delayed breakpoints.
+//!   history and schedules the delayed breakpoints. A delay that reads the
+//!   circuit or time is a variable-delay source instead: it keeps the history
+//!   of `x`, back as far as `tdmax` when that is given, and reads it at
+//!   `t-td(t)`; a delay outside `[0, tdmax]` stops the simulation. In AC it is
+//!   `x·e^(-jω·td)` at the operating point's delay.
 //!
 //! `rand(x)`, `random(x)` and `white(x)` are pure functions of `x` and a seed.
 //! A call without its own seed is given the deck's `.options seed` here, so
@@ -358,11 +362,18 @@ fn realize(
         }
         _ => {
             let delay = &args[1];
-            if varies_during_simulation(delay) {
+            let maximum = args.get(2);
+            if let Some(value) = maximum.and_then(|text| parse_spice_value_complete(text).ok())
+                && !(value.is_finite() && value > 0.0)
+            {
                 return Err(fail(format!(
-                    "{label}() needs a delay fixed before the simulation starts; \
-                     '{delay}' reads the circuit or time"
+                    "{label}() maximum delay must be finite and positive, got {value}"
                 )));
+            }
+            if varies_during_simulation(delay) {
+                return Ok(variable_delay(
+                    owner, ordinal, form, input, delay, maximum, elements,
+                ));
             }
             let fixed = parse_spice_value_complete(delay).ok();
             if let Some(value) = fixed {
@@ -391,6 +402,62 @@ fn realize(
             Ok(delay_line(owner, ordinal, form, input, delay, elements))
         }
     }
+}
+
+/// Realize a delay that reads the circuit or time: private nodes carry the
+/// input, the delay and its bound, and a variable-delay source reads them.
+/// Returns the expression of its output.
+fn variable_delay(
+    owner: &str,
+    ordinal: usize,
+    form: SynthesizedTransferForm,
+    input: &str,
+    delay: &str,
+    maximum: Option<&String>,
+    elements: &mut Vec<Element>,
+) -> String {
+    let node = |role: &str| format!("{owner}.__{role}{ordinal}");
+    let source = |name: String, node: &str, expression: &str| Element {
+        name,
+        kind: ElementKind::BehavioralVoltage {
+            expression: expression.to_string(),
+            tc1: 0.0,
+            tc2: 0.0,
+            multiplicity: SourceMultiplicity::default(),
+        },
+        nodes: vec![node.to_string(), "0".to_string()],
+        provenance: ElementProvenance::GeneratedDynamicInternalNode {
+            owner: owner.to_string(),
+            form,
+            node: node.to_string(),
+        },
+    };
+    let (input_node, delay_node, output) = (node("DLYI"), node("DLYT"), node("DLYO"));
+    elements.push(source(node("BDLY"), &input_node, input));
+    elements.push(source(node("BDLT"), &delay_node, delay));
+    let maximum = maximum.map(|bound| {
+        let bound_node = node("DLYM");
+        elements.push(source(node("BDLM"), &bound_node, bound));
+        bound_node
+    });
+    elements.push(Element {
+        name: node("VDLY"),
+        kind: ElementKind::BehavioralVoltage {
+            expression: format!("V({input_node})"),
+            tc1: 0.0,
+            tc2: 0.0,
+            multiplicity: SourceMultiplicity::default(),
+        },
+        nodes: vec![output.clone(), "0".to_string()],
+        provenance: ElementProvenance::GeneratedVariableDelay {
+            owner: owner.to_string(),
+            node: output.clone(),
+            input: input_node,
+            delay: delay_node,
+            maximum,
+        },
+    });
+    format!("V({output})")
 }
 
 /// How long a generated delay line delays: a number, or an expression the

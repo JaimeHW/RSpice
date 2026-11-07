@@ -902,7 +902,8 @@ impl<'a> Flattener<'a> {
                 super::ElementProvenance::GeneratedDynamicInternalNode { owner, node, .. }
                 | super::ElementProvenance::GeneratedFrequencyResponseInput {
                     owner, node, ..
-                } => {
+                }
+                | super::ElementProvenance::GeneratedVariableDelay { owner, node, .. } => {
                     if !element
                         .nodes
                         .iter()
@@ -935,7 +936,8 @@ impl<'a> Flattener<'a> {
             let generated_owner = match &element.provenance {
                 super::ElementProvenance::GeneratedDynamicInternalNode { owner, .. }
                 | super::ElementProvenance::GeneratedDynamicStateDerivative { owner, .. }
-                | super::ElementProvenance::GeneratedFrequencyResponseInput { owner, .. } => {
+                | super::ElementProvenance::GeneratedFrequencyResponseInput { owner, .. }
+                | super::ElementProvenance::GeneratedVariableDelay { owner, .. } => {
                     Some(owner.as_str())
                 }
                 _ => None,
@@ -1916,6 +1918,21 @@ impl<'a> Flattener<'a> {
                     owner: self.remap_local_element_reference(owner, prefix),
                     node: self.qualify_hierarchy_name(prefix, node),
                     response: response.clone(),
+                },
+                super::ElementProvenance::GeneratedVariableDelay {
+                    owner,
+                    node,
+                    input,
+                    delay,
+                    maximum,
+                } => super::ElementProvenance::GeneratedVariableDelay {
+                    owner: self.remap_local_element_reference(owner, prefix),
+                    node: self.qualify_hierarchy_name(prefix, node),
+                    input: self.qualify_hierarchy_name(prefix, input),
+                    delay: self.qualify_hierarchy_name(prefix, delay),
+                    maximum: maximum
+                        .as_ref()
+                        .map(|maximum| self.qualify_hierarchy_name(prefix, maximum)),
                 },
             },
         }

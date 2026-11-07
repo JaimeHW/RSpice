@@ -48,6 +48,7 @@ mod model_resolution;
 mod model_safety;
 mod special_function;
 mod terminal_probes;
+mod variable_delay;
 pub(in crate::engine) use model_resolution::resolved_element_value_expression;
 use model_resolution::*;
 pub use model_resolution::{
@@ -6672,6 +6673,23 @@ impl Engine {
             // A parameter the element's model replaces while it is bound is
             // reported against this element and its card.
             let _binding = crate::notice::binding(&element.name, element_model_name(&element.kind));
+            if let crate::netlist::ElementProvenance::GeneratedVariableDelay {
+                owner,
+                input,
+                delay,
+                maximum,
+                ..
+            } = &element.provenance
+            {
+                variable_delay::build(
+                    &mut circuit,
+                    element,
+                    owner,
+                    (input, delay, maximum.as_deref()),
+                    self.config.temperature,
+                )?;
+                continue;
+            }
             match &element.kind {
                 ElementKind::SpecialFunction {
                     function,

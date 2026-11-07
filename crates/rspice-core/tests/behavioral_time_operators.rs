@@ -233,10 +233,93 @@ R2 o2 0 1k
     }
 }
 
+/// A delay that follows its own input, `1.5m + 0.5m·V(in)`.
+const VARYING_DELAY: &str = "delay(V(in),1.5m+0.5m*V(in),3m)";
+
+#[test]
+fn a_varying_delay_reads_the_history_at_its_own_delay() {
+    // QSPICE 2026: 0.625 at 3.5 ms, 1 at 4 ms and 0.71875 at 6 ms, the
+    // trapezoid read at t - td(t) with td following the input.
+    let deck = format!(
+        "* varying delay
+V1 in 0 {TRAPEZOID}
+B1 w 0 V={VARYING_DELAY}
+R1 w 0 1k
+.end
+"
+    );
+    assert!((op_voltage(&deck, "w") - 0.25).abs() < 1e-9);
+    let run = Transient::run(&deck, 10e-3, 1e-6);
+    for (t, want) in [(3.5e-3, 0.625), (4e-3, 1.0), (6e-3, 0.71875)] {
+        let got = run.at("w", t);
+        assert!(
+            (got - want).abs() < 2e-3,
+            "w at {t}: got {got}, want {want}"
+        );
+    }
+    for k in 1..200 {
+        let t = 10e-3 * f64::from(k) / 200.0;
+        let want = trapezoid((t - (1.5e-3 + 0.5e-3 * trapezoid(t))).max(0.0));
+        let got = run.at("w", t);
+        assert!(
+            (got - want).abs() < 5e-3,
+            "w at {t}: got {got}, want {want}"
+        );
+    }
+}
+
+#[test]
+fn a_varying_delay_linearizes_at_its_operating_point_delay() {
+    // QSPICE 2026 AC at 1 kHz: e^(-jω·0.2m) = 0.309017-0.951057j, and four
+    // times that for 2·V(in)² delayed by V(td)·V(in). The subcircuit lowers
+    // its own private delay.
+    let deck = "* varying delay ac
+V1 in 0 DC 1 AC 1
+Vt td 0 DC 0.2m
+B1 a 0 V=delay(V(in),V(td),1m)
+B2 c 0 V=delay(2*V(in)*V(in),V(td)*V(in),1m)
+X1 in x lag
+.subckt lag p q
+B1 q 0 V=delay(V(p),0.2m*V(p),1m)
+.ends
+.end
+";
+    let rotation = Complex64::from_polar(1.0, -2.0 * PI * 1e3 * 0.2e-3);
+    for (node, want) in [("a", rotation), ("c", 4.0 * rotation), ("x", rotation)] {
+        let got = ac(deck, node, 1e3);
+        assert!(
+            (got - want).norm() < 1e-9 * want.norm(),
+            "{node}: got {got}, want {want}"
+        );
+    }
+    assert!((op_voltage(deck, "c") - 2.0).abs() < 1e-9);
+}
+
+#[test]
+fn a_varying_delay_past_its_maximum_stops_the_transient() {
+    // QSPICE stops with "MAXDELAY was given as 0.0005 but that is less than
+    // the runtime delay encountered".
+    let deck = "* over maximum
+V1 in 0 SIN(0 1 1k)
+Vt td 0 PWL(0 0.1m 2m 0.6m)
+B1 o 0 V=delay(V(in),V(td),0.5m)
+.end
+";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let error = Engine::new(SimulationConfig::default())
+        .run_tran(&netlist, 2e-3, 1e-6)
+        .expect_err("refused")
+        .to_string();
+    assert!(error.contains("exceeds its maximum"), "{error}");
+}
+
 #[test]
 fn malformed_operator_calls_are_refused_by_name() {
     for (expression, needle) in [
-        ("delay(V(in),1m+1m*V(in))", "delay() needs a delay fixed"),
+        (
+            "delay(V(in),1m,0)",
+            "maximum delay must be finite and positive",
+        ),
         ("delay(V(in))", "delay() takes 2 to 3 arguments"),
         ("ddt(V(in),1)", "ddt() takes 1 to 1 arguments"),
         ("idt(V(in),0,0,1)", "idt() takes 1 to 3 arguments"),

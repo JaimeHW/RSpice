@@ -1573,7 +1573,8 @@ fn collect_output_node_namespace_from_elements_with_limits_and_abort(
 fn collect_output_element_nodes(element: &Element, nodes: &mut HashSet<String>) {
     match &element.provenance {
         super::ElementProvenance::GeneratedDynamicInternalNode { node: private, .. }
-        | super::ElementProvenance::GeneratedFrequencyResponseInput { node: private, .. } => {
+        | super::ElementProvenance::GeneratedFrequencyResponseInput { node: private, .. }
+        | super::ElementProvenance::GeneratedVariableDelay { node: private, .. } => {
             for node in &element.nodes {
                 if !node.eq_ignore_ascii_case(private) {
                     nodes.insert(canonical_symbol(node));

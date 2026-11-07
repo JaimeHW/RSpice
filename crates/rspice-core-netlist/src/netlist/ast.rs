@@ -225,6 +225,21 @@ pub enum ElementProvenance {
         node: String,
         response: FrequencyResponse,
     },
+    /// Behavioral voltage source standing for a `delay(x,td[,tdmax])` whose
+    /// delay varies during the simulation.
+    ///
+    /// Its expression is the undelayed input, the operating point and the
+    /// zero-delay limit; the engine builds it as a delay that keeps the
+    /// input's history. Every node named here is private to `owner`'s
+    /// lowering: `node` is the delayed output, `input` the input `x`, `delay`
+    /// the delay `td` in seconds and `maximum`, when given, the bound `tdmax`.
+    GeneratedVariableDelay {
+        owner: String,
+        node: String,
+        input: String,
+        delay: String,
+        maximum: Option<String>,
+    },
 }
 
 /// How a dynamic controlled source realized from existing elements was
