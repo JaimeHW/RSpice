@@ -1016,3 +1016,71 @@ X4 d 0 RSPICE_FN_VARISTOR VBREAK=33 RCLAMP=0.5
     let below = op_currents(deck, &["V3"])[0];
     assert!(below.abs() < 1e-9, "{below}");
 }
+
+/// When the default 1 A, 0.5 A²s fuse opens under a 12 V source whose load
+/// draws `current` through it from t = 0: where the voltage across it passes
+/// half the source.
+fn fuse_opening_time(current: f64, expected: f64) -> f64 {
+    let load = 12.0 / current - 0.1;
+    let deck = format!(
+        "* fuse at {current} A
+V1 in 0 PULSE(0 12 0 1u 1u 10 20)
+RL in a {load}
+X1 a 0 RSPICE_FN_FUSE
+.end
+"
+    );
+    let tran = transient(&deck, 1.5 * expected, expected / 2000.0);
+    rising_crossing(&tran.time, waveform(&tran, "a"), 6.0)
+}
+
+#[test]
+fn fuse_opens_at_its_melting_i2t_and_its_thermal_law() {
+    // The element melts after -tau ln(1 - (IRATED/I)^2), tau = I2T/IRATED^2:
+    // within a few percent of I2T/I^2 at five and ten times the rating, and
+    // 15% slower than it at twice the rating, where the element cools while
+    // it heats.
+    let tau = 0.5;
+    for (overload, adiabatic_tolerance) in [(5.0, 0.03), (10.0, 0.01)] {
+        let adiabatic = 0.5 / (overload * overload);
+        let opened = fuse_opening_time(overload, adiabatic);
+        assert_close(
+            "against I2T/I^2",
+            opened,
+            adiabatic,
+            adiabatic_tolerance * adiabatic,
+        );
+    }
+    let thermal = -tau * (1.0f64 - 0.25).ln();
+    assert_close(
+        "2x rating",
+        fuse_opening_time(2.0, thermal),
+        thermal,
+        0.01 * thermal,
+    );
+}
+
+#[test]
+fn fuse_stays_open_once_blown_and_carries_its_rating_indefinitely() {
+    // 3 A blows it near 59 ms; at 0.3 s the source falls to 0.5 A worth, yet
+    // the element stays open. Beside it, 0.95 A for ten time constants
+    // never melts the element.
+    let deck = "* fuse latch
+V1 in 0 PWL(0 0 1u 12 0.3 12 0.30001 2)
+RL in a 3.9
+X1 a 0 RSPICE_FN_FUSE
+V2 in2 0 PWL(0 0 1u 12)
+RL2 in2 b 12.5315789
+X2 b 0 RSPICE_FN_FUSE
+.end
+";
+    let tran = transient(deck, 5.0, 2e-4);
+    let a = waveform(&tran, "a");
+    let opened = rising_crossing(&tran.time, a, 6.0);
+    let thermal = -0.5 * (1.0f64 - 1.0 / 9.0).ln();
+    assert_close("3x rating", opened, thermal, 0.02 * thermal);
+    assert_close("open at 1 s", value_at(&tran.time, a, 1.0), 2.0, 1e-6);
+    assert_close("open at 5 s", value_at(&tran.time, a, 5.0), 2.0, 1e-6);
+    let b = waveform(&tran, "b");
+    assert_close("closed at 5 s", value_at(&tran.time, b, 5.0), 0.095, 1e-6);
+}

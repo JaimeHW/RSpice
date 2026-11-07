@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Fuse: the element's body with the fusible link running through it.
+     Box 60x20, pins A(0,10), B(60,10). -->
+<svg viewBox="0 0 60 20" xmlns="http://www.w3.org/2000/svg">
+  <path d="M 0,10 H 60" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 18,5 H 42 V 15 H 18 Z" fill="none" stroke="#000000" stroke-width="1" stroke-linejoin="round"/>
+</svg>

@@ -13,6 +13,7 @@ RSPICE_FN_BUF	subckt	subckt	rspice-functional	lib/functional.lib	120	0	top
 RSPICE_FN_COMPARATOR	subckt	subckt	rspice-functional	lib/functional.lib	54	0	top
 RSPICE_FN_COUNTER	subckt	subckt	rspice-functional	lib/functional.lib	196	0	top
 RSPICE_FN_CRYSTAL	subckt	subckt	rspice-functional	lib/functional.lib	232	0	top
+RSPICE_FN_FUSE	subckt	subckt	rspice-functional	lib/functional.lib	264	0	top
 RSPICE_FN_INV	subckt	subckt	rspice-functional	lib/functional.lib	117	0	top
 RSPICE_FN_NAND	subckt	subckt	rspice-functional	lib/functional.lib	126	0	top
 RSPICE_FN_NOR	subckt	subckt	rspice-functional	lib/functional.lib	132	0	top

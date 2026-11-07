@@ -354,3 +354,14 @@ fn a_placed_varistor_clamps_a_supply_through_its_source_resistance() {
     let expected = (430.0 + 800.0 * 0.56) / 1.56;
     assert!((out - expected).abs() < 1e-6, "{out} vs {expected}");
 }
+
+#[test]
+fn a_placed_fuse_drops_its_cold_resistance_times_its_current() {
+    // Half an amp through the default 1 A fuse, well inside its rating.
+    let mut bench = Bench::default();
+    bench.primitive(ComponentType::VoltageSource, "V1", "5", &["in", "0"]);
+    bench.primitive(ComponentType::Resistor, "RL", "9.9", &["in", "a"]);
+    bench.part("rspice.functional.fuse", "F1", "", &["a", "0"]);
+    let across = bench.operating_point("a");
+    assert!((across - 0.05).abs() < 1e-9, "{across}");
+}

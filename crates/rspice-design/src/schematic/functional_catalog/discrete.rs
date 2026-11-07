@@ -171,3 +171,63 @@ pub(super) const VARISTOR: FunctionalPartDescriptor = FunctionalPartDescriptor {
     preset: None,
     inputs: None,
 };
+
+/// A 1 A fast-acting fuse.
+const FUSE_PARAMETERS: &[FunctionalParameter] = &[
+    number(
+        "IRATED",
+        "Rated current",
+        "A",
+        "1",
+        "Current the fuse carries indefinitely: the element settles just short of melting.",
+    ),
+    number(
+        "I2T",
+        "Melting I²t",
+        "A²s",
+        "0.5",
+        "Heat at which the element melts; an overload I melts it after about I2T/I², which it approaches as the overload grows.",
+    ),
+    number(
+        "RCOLD",
+        "Cold resistance",
+        "Ω",
+        "0.1",
+        "Resistance of the intact element.",
+    ),
+    number(
+        "ROPEN",
+        "Open resistance",
+        "Ω",
+        "1G",
+        "Resistance once blown; the fuse never closes again.",
+    ),
+    number(
+        "TARC",
+        "Arcing time",
+        "s",
+        "100u",
+        "Time the element takes to go from intact to open once it melts.",
+    ),
+];
+
+pub(super) const FUSE: FunctionalPartDescriptor = FunctionalPartDescriptor {
+    stable_id: "rspice.functional.fuse",
+    display_name: "Fuse",
+    subcircuit: "RSPICE_FN_FUSE",
+    pins: TWO_TERMINAL_PINS,
+    symbol_asset: "functional_fuse.svg",
+    block: Some(TWO_TERMINAL_BLOCK),
+    keywords: &[
+        "fuse",
+        "blown",
+        "i2t",
+        "fast acting fuse",
+        "cartridge fuse",
+        "overcurrent",
+    ],
+    category: ComponentCategory::ProtectionElectromechanical,
+    parameters: FUSE_PARAMETERS,
+    preset: None,
+    inputs: None,
+};

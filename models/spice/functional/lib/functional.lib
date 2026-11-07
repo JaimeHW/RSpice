@@ -252,3 +252,21 @@ VBR NBR 0 {VBREAK}
 A1 NBR 0 0 0 0 0 A B VARISTOR RCLAMP={RCLAMP}
 CP A B {CP}
 .ends RSPICE_FN_VARISTOR
+
+* Fuse. Pins: A B.
+* The element heats as the square of its current and cools with the time
+* constant I2T/IRATED^2, so the rated current settles it just short of
+* melting and an overload I melts it after -I2T/IRATED^2*ln(1-(IRATED/I)^2),
+* which tends to I2T/I^2 as the overload grows. Once the heat reaches I2T
+* the element opens: over TARC its resistance rises from RCOLD to ROPEN, and
+* the integral that opens it never falls, so it stays open after the current
+* stops. The defaults are a 1 A fast-acting fuse.
+.subckt RSPICE_FN_FUSE A B IRATED=1 I2T=0.5 RCOLD=0.1 ROPEN=1G TARC=100u
+VS A N1 0
+BF N1 B I=V(N1,B)/(RCOLD*exp(min(max(V(NL),0),1)*ln(ROPEN/RCOLD)))
+BH 0 NTH I=I(VS)*I(VS)
+CTH NTH 0 1
+RTH NTH 0 {I2T/IRATED^2}
+BL NL 0 V=idt(max(stp(V(NTH)-I2T), stp(V(NL))*stp(1-V(NL)))/TARC)
+RNL NL 0 1Meg NOISY=0
+.ends RSPICE_FN_FUSE
