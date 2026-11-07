@@ -215,6 +215,8 @@ const QSPICE_DRAWING: &str = "«schematic
       «text (150,-200) 1 7 0 0x1000000 -1 -1 \"Vt=1.2\"»
       «text (100,-400) 1 7 0 0x1000000 -1 -1 \"Vh=50m\"»
       «text (0,100) 1 0 1 0x1000000 -1 -1 \"Qorvo\"»
+      «arc3p (0,-300) (0,300) (0,0) 0 0 0x1000000 -1 -1»
+      «arc3p (-200,-300) (300,0) (-100,200) 0 0 0x1000000 -1 -1»
       «pin (400,0) (0,0) 1 0 0 0x1000000 -1 \"Q\"»
       «pin (0,0) (0,0) 1 0 0 0x1000000 -1 \"¬Q\" \"¥\"»
     »
@@ -264,6 +266,27 @@ fn a_qsch_drawing_reads_its_components_nets_and_texts() {
     let gate_definition = gate.embedded.as_ref().expect("embedded");
     assert_eq!(gate_definition.symbol_type, "¥");
     assert_eq!(gate_definition.pins[1].name, "¬Q");
+    // A three-point arc runs around its third point: an AND gate's front is
+    // the circle through its ends, an OR gate's side the ellipse through
+    // its ends; the drawing is turned over, the sweep is not.
+    let point = ForeignPoint::new;
+    assert_eq!(
+        gate_definition.shapes,
+        [
+            ForeignShape::Arc([
+                point(-300, -300),
+                point(300, 300),
+                point(0, 300),
+                point(0, -300)
+            ]),
+            ForeignShape::Arc([
+                point(-534, -714),
+                point(334, 314),
+                point(-200, 300),
+                point(300, 0)
+            ]),
+        ]
+    );
 
     assert_eq!(drawing.flags[0].name, "0");
     assert_eq!(drawing.flags[1].name, "OUT");

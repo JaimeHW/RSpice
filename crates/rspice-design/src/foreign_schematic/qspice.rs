@@ -338,8 +338,43 @@ fn shape(keyword: &str, fields: &str, line: usize) -> Result<Vec<ForeignShape>, 
         ],
         // Turned over, a counter-clockwise sweep runs the other way.
         ("arc" | "arc3p", [a, b, c, d, ..]) => vec![ForeignShape::Arc([*a, *b, *d, *c])],
+        ("arc3p", [start, end, center]) => {
+            vec![ForeignShape::Arc(arc_around(*start, *end, *center))]
+        }
         _ => Vec::new(),
     })
+}
+
+/// The box and rays of QSPICE's three-point arc: counter-clockwise on screen
+/// from `start` to `end` around `center`, on the axis-aligned ellipse through
+/// both ends, or the circle between them when the ends fix no ellipse (an
+/// AND gate's front, an OR gate's back).
+fn arc_around(start: ForeignPoint, end: ForeignPoint, center: ForeignPoint) -> [ForeignPoint; 4] {
+    let (x1, y1) = (f64::from(start.x - center.x), f64::from(start.y - center.y));
+    let (x2, y2) = (f64::from(end.x - center.x), f64::from(end.y - center.y));
+    let determinant = x1 * x1 * y2 * y2 - x2 * x2 * y1 * y1;
+    let ellipse = (determinant.abs() > f64::EPSILON)
+        .then(|| {
+            (
+                (y2 * y2 - y1 * y1) / determinant,
+                (x1 * x1 - x2 * x2) / determinant,
+            )
+        })
+        .filter(|(across, down)| *across > 0.0 && *down > 0.0);
+    let (across, down) = match ellipse {
+        Some((across, down)) => (1.0 / across.sqrt(), 1.0 / down.sqrt()),
+        None => {
+            let radius = (x1.hypot(y1) + x2.hypot(y2)) / 2.0;
+            (radius, radius)
+        }
+    };
+    let (across, down) = (across.round() as i32, down.round() as i32);
+    [
+        ForeignPoint::new(center.x - across, center.y - down),
+        ForeignPoint::new(center.x + across, center.y + down),
+        start,
+        end,
+    ]
 }
 
 /// Every `(x,y)` in a record, turned over so y points down.
