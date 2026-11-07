@@ -597,7 +597,12 @@ const MAX_PUBLIC_ITEMS: usize = 5259;
 // `rand`/`random`/`white` samples as the behavioral VM. The functional-part
 // library (`builtin_lib::FUNCTIONAL_LIB`) adds one, which `rspice-core-netlist`
 // resolves subcircuits from. The census is 1,654, with no slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 1654;
+// `BuiltinVerilogAInstance::first_negative_noise_power` adds one: the
+// engine's generated noise collection (`rspice-core`
+// engine/transient/device_noise/processes.rs) warns once per instance and
+// process for a negative power, across every frequency and copy that
+// evaluates it. The census is 1,655, with no slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 1655;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
