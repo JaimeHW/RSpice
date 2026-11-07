@@ -140,7 +140,7 @@ RL out 0 10k
         .run_tran(&parse(&deck), 3e-6, 1e-9)
         .expect("transient solves");
     let wave = tran.try_voltage_waveform_named("out").expect("out solved");
-    let rising = rising_crossing(&tran.time, &wave, 1.0) - rising_crossing(&tran.time, &wave, -1.0);
+    let rising = rising_crossing(&tran.time, wave, 1.0) - rising_crossing(&tran.time, wave, -1.0);
     // LTspice 26.1.1 batch, UniversalOpAmp2 Slew=10Meg: 9.931 V/us over the
     // same crossings.
     assert_close("slew rate", 2.0 / rising, 10e6, 0.01 * 10e6);
@@ -344,10 +344,10 @@ RL2 shifted 0 100k
     let input = waveform(&tran, "in");
     for (node, offset) in [("out", 0.0), ("shifted", 5e-3)] {
         let output = waveform(&tran, node);
-        let rise = rising_crossing(&tran.time, &output, 2.5) - 1.5e-9;
-        let fall = falling_crossing(&tran.time, &output, 2.5) - 1.5e-9;
-        let rising = value_at(&tran.time, &input, rise);
-        let falling = value_at(&tran.time, &input, fall);
+        let rise = rising_crossing(&tran.time, output, 2.5) - 1.5e-9;
+        let fall = falling_crossing(&tran.time, output, 2.5) - 1.5e-9;
+        let rising = value_at(&tran.time, input, rise);
+        let falling = value_at(&tran.time, input, fall);
         assert_close("rising threshold", rising, 1.01 - offset, 0.2e-3);
         assert_close("falling threshold", falling, 0.99 - offset, 0.2e-3);
     }
@@ -371,10 +371,10 @@ RL out 0 100k
     let crossed_up = 1e-6 + 0.050_25e-9;
     let crossed_down = 6.0001e-6 + 0.050_25e-9;
     // The edge starts TPD after the crossing and is half done TRISE/2 later.
-    let at = |level| rising_crossing(&tran.time, &out, level);
+    let at = |level| rising_crossing(&tran.time, out, level);
     assert_close("rising delay", at(2.5) - crossed_up, 100e-9 + 5e-9, 0.2e-9);
     assert_close("10-90% rise", at(4.5) - at(0.5), 0.8 * 10e-9, 0.2e-9);
-    let at = |level| falling_crossing(&tran.time, &out, level);
+    let at = |level| falling_crossing(&tran.time, out, level);
     assert_close(
         "falling delay",
         at(2.5) - crossed_down,
@@ -480,7 +480,8 @@ fn ota_bias_input_sits_above_v_minus_and_its_current_returns_there() {
 fn gates_follow_their_truth_tables_at_their_levels() {
     // Every input pair on every two-input gate, and both levels on the
     // inverter and the buffer, unloaded: the output sits at its level.
-    let gates: [(&str, fn(bool, bool) -> bool); 5] = [
+    type Truth = fn(bool, bool) -> bool;
+    let gates: [(&str, Truth); 5] = [
         ("RSPICE_FN_AND2", |a, b| a && b),
         ("RSPICE_FN_NAND2", |a, b| !(a && b)),
         ("RSPICE_FN_OR2", |a, b| a || b),
