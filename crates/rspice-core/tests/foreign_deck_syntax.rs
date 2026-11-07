@@ -968,6 +968,49 @@ fn a_laplace_expression_reads_parameters_braced_or_bare() {
     }
 }
 
+// LTspice 26.1.1 batch, `.tran 0 60u 0 0.1u startup`: V1 DC 5 and I1 DC 1m
+// start the operating point at zero and rise linearly to their value at
+// exactly 20 us; the SIN, PULSE and PWL sources follow their waveforms from
+// t = 0. V(a), V(c), V(e), V(f) = 0, 0, 1, 1 at 0; 2.5, 0.5, 3, 1.4 at 10 us;
+// 5, 1, 3, 2.2 at 30 us. QSPICE accepts the word and ignores it.
+#[test]
+fn a_startup_transient_ramps_the_dc_sources_from_zero() {
+    let netlist = parse(
+        "startup\n\
+         V1 a 0 5\n\
+         R1 a 0 1k\n\
+         V2 b 0 SIN(1 1 100k)\n\
+         R2 b 0 1k\n\
+         I1 0 c 1m\n\
+         R3 c 0 1k\n\
+         I2 0 e PULSE(1m 3m 5u 1n 1n 100u 200u)\n\
+         R5 e 0 1k\n\
+         V4 f 0 PWL(0 1 50u 3)\n\
+         R6 f 0 1k\n\
+         .tran 0 60u 0 0.1u startup\n\
+         .end\n",
+    );
+    for (time, expected) in [
+        (0.0, [0.0, 1.0, 0.0, 1.0, 1.0]),
+        (10e-6, [2.5, f64::NAN, 0.5, 3.0, 1.4]),
+        (30e-6, [5.0, f64::NAN, 1.0, 3.0, 2.2]),
+    ] {
+        let values = tran_voltages(&netlist, 60e-6, time, &["a", "b", "c", "e", "f"]);
+        for ((node, value), expected) in ["a", "b", "c", "e", "f"].iter().zip(values).zip(expected)
+        {
+            if !expected.is_nan() {
+                assert_close(&format!("V({node}) at {time:e}"), value, expected, 1e-9);
+            }
+        }
+    }
+    assert_close(
+        "V(a) at the operating point",
+        op_voltage(&netlist, "a"),
+        5.0,
+        1e-12,
+    );
+}
+
 // QSPICE 2026 steps `V1 a 0 SIN(0 1 100k)` under `.tran 5u 5m` every
 // 0.24-0.8 us, whatever TSTEP is, and its waveform read between those points
 // stays within 7.85e-3 of the sine; LTspice 26.1.1 within 3.8e-2. Stepped at

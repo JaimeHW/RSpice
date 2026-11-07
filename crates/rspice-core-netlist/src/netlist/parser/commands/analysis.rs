@@ -28,6 +28,11 @@ pub(in crate::netlist::parser) struct AnalysisCardSink<'a> {
     pub(in crate::netlist::parser) options: &'a mut SimulationOptions,
 }
 
+/// How long LTspice's `.TRAN ... STARTUP` takes to bring a DC source from
+/// zero to its value: LTspice 26.1.1 reaches it at exactly 20 us, with a time
+/// point there.
+const LTSPICE_STARTUP_RAMP: Value = 20e-6;
+
 #[derive(Debug)]
 pub(super) struct ParsedAnalysisCard {
     analysis: Option<AnalysisCommand>,
@@ -36,6 +41,8 @@ pub(super) struct ParsedAnalysisCard {
     monte_carlo_source_card: Option<monte_carlo_identity::SourceCard>,
     output_request: Option<OutputRequest>,
     transient_noise: Option<TransientNoiseConfig>,
+    /// Whether a `.TRAN` card carries LTspice's `STARTUP`.
+    transient_startup: bool,
     /// The card's `ACTIMES=`/`CHECKPOINT=` state, with its line.
     small_signal_state: Option<(usize, SmallSignalStateSource)>,
     diagnostics: Vec<ParseDiagnostic>,
@@ -226,6 +233,7 @@ impl ParsedAnalysisCard {
         let mut monte_carlo_source_card = None;
         let mut output_request = None;
         let mut transient_noise = None;
+        let mut transient_startup = false;
         let mut collected_diagnostics = Vec::new();
         let diagnostics = &mut collected_diagnostics;
         match head {
@@ -410,8 +418,13 @@ impl ParsedAnalysisCard {
                 let start = try_positional_transient_value(stream, params);
                 let max_step = try_positional_transient_value(stream, params);
                 let mut uic = consume_uic_keyword(stream);
-                transient_noise =
-                    parse_transient_noise_keywords(stream, line_num, params, &mut uic)?;
+                transient_noise = parse_transient_noise_keywords(
+                    stream,
+                    line_num,
+                    params,
+                    &mut uic,
+                    &mut transient_startup,
+                )?;
 
                 analysis = Some(AnalysisCommand::Tran {
                     step,
@@ -517,6 +530,7 @@ impl ParsedAnalysisCard {
             monte_carlo_source_card,
             output_request,
             transient_noise,
+            transient_startup,
             small_signal_state,
             diagnostics: collected_diagnostics,
         };
@@ -577,6 +591,9 @@ impl ParsedAnalysisCard {
         }
         if let Some(noise) = self.transient_noise {
             sink.options.transient_noise = Some(noise);
+        }
+        if self.transient_startup {
+            sink.options.transient_startup_ramp = Some(LTSPICE_STARTUP_RAMP);
         }
         sink.diagnostics.extend(self.diagnostics);
         small_signal_state

@@ -1555,6 +1555,18 @@ fn check_netlist_source_resource_limits(
     check_build_abort(abort)
 }
 
+/// LTspice's `.TRAN ... STARTUP` rise for an independent source whose value
+/// is DC alone: zero at the transient's operating point, a straight line to
+/// its DC value at `ramp`, and that value from then on. The operating point
+/// and every small-signal analysis keep the DC value.
+fn startup_ramp(ramp: Option<Value>, dc_value: Value) -> Option<crate::netlist::SourceSpec> {
+    ramp.map(|ramp| crate::netlist::SourceSpec::Pwl {
+        points: vec![(0.0, 0.0), (ramp, dc_value)],
+        delay: 0.0,
+        repeat_from: None,
+    })
+}
+
 fn validate_source_inputs(
     source_name: &str,
     spec: &crate::netlist::SourceSpec,
@@ -7282,6 +7294,8 @@ impl Engine {
                         | crate::netlist::SourceSpec::TrRandom { .. } => Some(spec.clone()),
                         _ => None,
                     };
+                    let transient_spec = transient_spec
+                        .or_else(|| startup_ramp(netlist.options.transient_startup_ramp, dc_value));
                     circuit.voltage_sources.add_with_ac_spec_and_pwl_waveform(
                         element.name.clone(),
                         np,
@@ -7332,6 +7346,8 @@ impl Engine {
                         | crate::netlist::SourceSpec::TrRandom { .. } => Some(spec.clone()),
                         _ => None,
                     };
+                    let transient_spec = transient_spec
+                        .or_else(|| startup_ramp(netlist.options.transient_startup_ramp, dc_value));
                     circuit.current_sources.add_with_ac_spec_and_pwl_waveform(
                         element.name.clone(),
                         np,

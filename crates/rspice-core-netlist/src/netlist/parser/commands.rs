@@ -6553,6 +6553,19 @@ fn expect_positive_integer_value(
     }
 }
 
+/// Consume LTspice's `STARTUP` keyword on a `.TRAN` card.
+fn consume_startup_keyword(stream: &mut TokenStream) -> bool {
+    skip_commas(stream);
+    if let TokenKind::Ident(word) = &stream.peek().kind
+        && word.eq_ignore_ascii_case("STARTUP")
+        && !matches!(stream.peek_n(1).kind, TokenKind::Equals)
+    {
+        stream.advance();
+        return true;
+    }
+    false
+}
+
 /// Consume a trailing operating-point bypass keyword on a `.TRAN` card.
 pub(super) fn consume_uic_keyword(stream: &mut TokenStream) -> bool {
     skip_commas(stream);
@@ -6624,7 +6637,7 @@ fn bind_transient_noise_keyword<T>(
 }
 
 /// Parse the `.TRAN` card's transient-noise keyword family, in any order and
-/// interleaved with `UIC`/`NOOP`.
+/// interleaved with `UIC`/`NOOP` and LTspice's `STARTUP`.
 ///
 /// `NOISEFMAX=` is what turns transient device noise on; the other three
 /// modify a run that has it and are refused on their own, because a deck that
@@ -6634,6 +6647,7 @@ fn parse_transient_noise_keywords(
     line_num: usize,
     params: &ParamContext,
     uic: &mut bool,
+    startup: &mut bool,
 ) -> Result<Option<TransientNoiseConfig>, ParseError> {
     let mut fmax = None;
     let mut fmin = None;
@@ -6642,6 +6656,10 @@ fn parse_transient_noise_keywords(
     loop {
         if consume_uic_keyword(stream) {
             *uic = true;
+            continue;
+        }
+        if consume_startup_keyword(stream) {
+            *startup = true;
             continue;
         }
         let Some(keyword) = take_transient_noise_keyword(stream) else {

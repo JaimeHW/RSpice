@@ -5128,6 +5128,11 @@ pub struct SimulationOptions {
     pub transient_new_bp_stepping: Option<bool>,
     /// Transient source/code-model ramping time in seconds (default: disabled)
     pub ramptime: Option<Value>,
+    /// LTspice's `.TRAN ... STARTUP`: the time over which every independent
+    /// source whose value is DC alone rises linearly from zero at the
+    /// transient's operating point to its value. A source with a waveform
+    /// follows it from the start, as without.
+    pub transient_startup_ramp: Option<Value>,
     /// Ngspice XSPICE digital delay policy:
     /// 0 = default transport, 1 = default inertial,
     /// 2 = force transport, 3 = force inertial.
@@ -5450,6 +5455,9 @@ impl SimulationOptions {
         }
         if other.ramptime.is_some() {
             self.ramptime = other.ramptime;
+        }
+        if other.transient_startup_ramp.is_some() {
+            self.transient_startup_ramp = other.transient_startup_ramp;
         }
         if other.digital_delay_type.is_some() {
             self.digital_delay_type = other.digital_delay_type;
