@@ -217,6 +217,14 @@ pub(super) fn parse_command(
         ".ESAVE" => {
             options.xspice_event_trace_save = Some(parse_esave_command(stream, line_num)?);
         }
+        ".TOLERANCE" => {
+            let tolerance =
+                super::command_parsers::parse_tolerance_command(stream, line_num, params)?;
+            options
+                .part_tolerances
+                .retain(|existing| existing.parameter != tolerance.parameter);
+            options.part_tolerances.push(tolerance);
+        }
         ".FUNC" => {
             // Parse user-defined function: .FUNC name(arg1, arg2, ...) = expression
             parse_func_statement(stream, line_num, params, root_redefinitions)?;

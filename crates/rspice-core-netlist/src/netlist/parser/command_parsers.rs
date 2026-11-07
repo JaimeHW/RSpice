@@ -1829,6 +1829,62 @@ fn parse_small_signal_checkpoint(
     }
 }
 
+/// Parse `.TOLERANCE param rel [GAUSS [SIGMA n] | UNIFORM]`. A Gaussian
+/// tolerance is the 3σ bound unless `SIGMA` says otherwise; a later card for
+/// the same parameter replaces an earlier one.
+pub(super) fn parse_tolerance_command(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+) -> Result<PartTolerance, ParseError> {
+    let syntax = |message: String| ParseError::Syntax {
+        line: line_num,
+        message,
+    };
+    let parameter = expect_ident(stream, line_num)?.to_ascii_uppercase();
+    let relative = expect_value(stream, line_num, params)?;
+    if !relative.is_finite() || relative < 0.0 {
+        return Err(syntax(format!(
+            ".TOLERANCE {parameter} needs a finite non-negative relative tolerance"
+        )));
+    }
+    let mut distribution = PartToleranceDistribution::Gaussian { sigmas: 3.0 };
+    while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        match expect_ident(stream, line_num)?
+            .to_ascii_uppercase()
+            .as_str()
+        {
+            "GAUSS" | "GAUSSIAN" | "NORMAL" => {
+                distribution = PartToleranceDistribution::Gaussian { sigmas: 3.0 };
+            }
+            "UNIFORM" | "UNIF" => distribution = PartToleranceDistribution::Uniform,
+            "SIGMA" => {
+                stream.consume(&TokenKind::Equals);
+                let sigmas = expect_value(stream, line_num, params)?;
+                let PartToleranceDistribution::Gaussian { .. } = distribution else {
+                    return Err(syntax(
+                        ".TOLERANCE SIGMA applies to a Gaussian tolerance".into(),
+                    ));
+                };
+                if !sigmas.is_finite() || sigmas <= 0.0 {
+                    return Err(syntax(".TOLERANCE SIGMA must be positive".into()));
+                }
+                distribution = PartToleranceDistribution::Gaussian { sigmas };
+            }
+            other => {
+                return Err(syntax(format!(
+                    "Unexpected .TOLERANCE field '{other}': expected GAUSS, UNIFORM or SIGMA"
+                )));
+            }
+        }
+    }
+    Ok(PartTolerance {
+        parameter,
+        relative,
+        distribution,
+    })
+}
+
 /// Parse .MC command:
 /// .MC runs [START zero_based_index] [SEED n] [DIST GAUSS|UNIFORM|WORSTCASE] [SPREAD rel]
 /// [CONFIDENCE pct] [CI STUDENTT|BOOTSTRAP] [RESAMPLES n] [BOOTSEED n] [PARAMS p1 p2 ...]

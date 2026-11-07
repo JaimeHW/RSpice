@@ -9,6 +9,8 @@ use crate::{Netlist, Value};
 use std::collections::{HashMap, HashSet};
 
 #[cfg(test)]
+mod part_tolerance_tests;
+#[cfg(test)]
 mod temperature_tests;
 
 mod measurements;
@@ -395,7 +397,49 @@ impl Engine {
                 })
                 .collect()
         };
+        // A part tolerance states its own spread, so its parameter leaves the
+        // shared one and varies under either source by its own distribution.
+        // A worst-case study pushes each part to an end of its stated band.
+        let part_tolerances = &netlist.options.part_tolerances;
+        all_eligible_params.retain(|(name, _)| {
+            !part_tolerances
+                .iter()
+                .any(|tolerance| tolerance.parameter == *name)
+        });
         all_eligible_params.sort_by(|a, b| a.0.cmp(&b.0));
+        let mut part_draws = Vec::with_capacity(part_tolerances.len());
+        for tolerance in part_tolerances.iter().filter(|t| t.relative > 0.0) {
+            let nominal = netlist
+                .params
+                .get_complex(&tolerance.parameter)
+                .filter(|value| value.im == 0.0 && value.re.is_finite())
+                .ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        ".TOLERANCE names {}, which is not a real parameter of this circuit",
+                        tolerance.parameter
+                    ))
+                })?
+                .re;
+            let part_distribution = match tolerance.distribution {
+                _ if variation_source == MonteCarloVariationSource::ParameterTolerance
+                    && matches!(distribution, Distribution::WorstCase { .. }) =>
+                {
+                    Distribution::WorstCase {
+                        tolerance: tolerance.relative,
+                    }
+                }
+                crate::netlist::PartToleranceDistribution::Gaussian { sigmas } => {
+                    Distribution::Gaussian {
+                        sigma: tolerance.relative / sigmas,
+                    }
+                }
+                crate::netlist::PartToleranceDistribution::Uniform => Distribution::Uniform {
+                    tolerance: tolerance.relative,
+                },
+            };
+            part_distribution.validate()?;
+            part_draws.push((tolerance.parameter.clone(), nominal, part_distribution));
+        }
 
         if let Some(filter) = &normalized_filter {
             let available: HashSet<String> = all_eligible_params
@@ -416,7 +460,7 @@ impl Engine {
             }
         }
 
-        let monte_params: Vec<(String, Value)> = all_eligible_params
+        let shared_params: Vec<(String, Value)> = all_eligible_params
             .into_iter()
             .filter(|(name, _)| {
                 normalized_filter
@@ -426,11 +470,16 @@ impl Engine {
             })
             .collect();
 
-        if normalized_filter.is_some() && monte_params.is_empty() {
+        if normalized_filter.is_some() && shared_params.is_empty() {
             return Err(SimulationError::Circuit(
                 "Monte Carlo parameter filter did not match any eligible parameters".to_string(),
             ));
         }
+        let monte_params: Vec<(String, Value, Distribution)> = shared_params
+            .into_iter()
+            .map(|(name, nominal)| (name, nominal, distribution))
+            .chain(part_draws)
+            .collect();
 
         // Phase 1 (serial): draw every run's compact variation vector from
         // the seeded stream. Sampling order remains byte-identical across
@@ -449,7 +498,7 @@ impl Engine {
             // Advance precisely as the original batch did; retain and solve only
             // the requested range. Cancellation/deadlines also cover this phase.
             for _run in 0..first_trial {
-                for (_, nominal) in &monte_params {
+                for (_, nominal, distribution) in &monte_params {
                     if abort.is_aborted() {
                         return Err(SimulationError::from_abort(abort));
                     }
@@ -462,7 +511,7 @@ impl Engine {
                 }
                 let variations: Vec<Value> = monte_params
                     .iter()
-                    .map(|(_, nominal)| distribution.sample(&mut rng, *nominal))
+                    .map(|(_, nominal, distribution)| distribution.sample(&mut rng, *nominal))
                     .collect();
                 run_variations.push(variations);
             }
@@ -485,6 +534,20 @@ impl Engine {
                     )?;
                     if let Some(environment) = environment {
                         Self::apply_monte_carlo_environment(&mut materialized, environment, abort)?;
+                    }
+                    if !monte_params.is_empty() {
+                        let overrides = monte_params
+                            .iter()
+                            .zip(&run_variations[offset])
+                            .map(|((name, _, _), value)| (name.clone(), *value))
+                            .collect::<Vec<_>>();
+                        materialized = Self::create_perturbed_netlist_multi_with_limits_and_abort(
+                            &materialized,
+                            &overrides,
+                            resource_limits,
+                            abort,
+                        )?
+                        .0;
                     }
                     if has_spectre_statistics {
                         materialized.spectre_statistical_coordinate =
@@ -531,7 +594,7 @@ impl Engine {
                 let overrides = monte_params
                     .iter()
                     .zip(&run_variations[offset])
-                    .map(|((name, _), value)| (name.clone(), *value))
+                    .map(|((name, _, _), value)| (name.clone(), *value))
                     .collect::<Vec<_>>();
                 let (mut perturbed, _) =
                     Self::create_perturbed_netlist_multi_with_limits_and_abort(

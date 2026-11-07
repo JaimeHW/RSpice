@@ -4795,6 +4795,26 @@ pub enum WrealResolution {
     Maximum,
 }
 
+/// How a part tolerance spreads its parameter about the nominal value.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PartToleranceDistribution {
+    /// Normal, with the tolerance at `sigmas` standard deviations.
+    Gaussian { sigmas: Value },
+    /// Flat across nominal ± tolerance.
+    Uniform,
+}
+
+/// `.TOLERANCE param rel [GAUSS [SIGMA n] | UNIFORM]`: one parameter's own
+/// relative tolerance, the way a part's datasheet states it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PartTolerance {
+    /// Upper-case parameter name.
+    pub parameter: String,
+    /// Relative tolerance: 0.05 is ±5 %.
+    pub relative: Value,
+    pub distribution: PartToleranceDistribution,
+}
+
 /// Simulation options from .OPTIONS command
 ///
 /// Controls numerical parameters for simulation accuracy and convergence.
@@ -5082,6 +5102,9 @@ pub struct SimulationOptions {
     /// `None` keeps the default of recording every event net; `.save`
     /// selects analog outputs only and never limits event nets.
     pub xspice_event_trace_save: Option<EventSaveSelection>,
+    /// `.TOLERANCE` cards: parameters a Monte Carlo draws from each one's own
+    /// stated spread. Every other analysis reads them at their nominal value.
+    pub part_tolerances: Vec<PartTolerance>,
     /// Maximum Newton-Raphson iterations (default: 150)
     pub itl1: Option<usize>,
     /// DC transfer curve iterations (default: 50)
