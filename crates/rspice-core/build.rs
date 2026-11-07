@@ -28,6 +28,9 @@ struct GeneratedFile {
 }
 
 fn main() {
+    if env::var_os("CARGO_FEATURE_VERILOGA").is_some() {
+        emit_veriloga_compiler_identity();
+    }
     println!("cargo:rerun-if-env-changed=CARGO_FEATURE_VERILOGA_BUILTINS_BASE");
     if env::var_os("CARGO_FEATURE_VERILOGA_BUILTINS_BASE").is_none() {
         return;
@@ -168,6 +171,70 @@ fn collect_generated_files(generated_root: &Path) -> Result<BTreeSet<String>, St
 fn update_digest_record(hasher: &mut blake3::Hasher, bytes: &[u8]) {
     hasher.update(&(bytes.len() as u64).to_le_bytes());
     hasher.update(bytes);
+}
+
+/// The sources whose content decides what the Verilog-A compiler emits.
+const VERILOGA_COMPILER_SOURCES: &[&str] = &[
+    "../rspice-veriloga/Cargo.toml",
+    "../rspice-veriloga/build.rs",
+    "../rspice-veriloga/src",
+    "../rspice-veriloga-runtime/Cargo.toml",
+    "../rspice-veriloga-runtime/src",
+    "../../Cargo.lock",
+];
+
+/// Name the Verilog-A compiler this build links, for the compile cache.
+///
+/// A cached record or native image is the output of one compiler build and is
+/// read back only by that build: the identity covers every source file of the
+/// compiler and its runtime, the lock file that fixes their dependencies, the
+/// crate version and the target. Any edit to any of them is a different
+/// compiler, whose cache entries live under other names.
+fn emit_veriloga_compiler_identity() {
+    let mut hasher = blake3::Hasher::new();
+    for source in VERILOGA_COMPILER_SOURCES {
+        println!("cargo:rerun-if-changed={source}");
+        hash_source_tree(&mut hasher, Path::new(source), source).unwrap_or_else(|error| {
+            panic!("hashing the Verilog-A compiler sources failed: {error}")
+        });
+    }
+    for key in ["CARGO_PKG_VERSION", "TARGET", "CARGO_CFG_TARGET_FEATURE"] {
+        update_digest_record(&mut hasher, key.as_bytes());
+        update_digest_record(&mut hasher, env::var(key).unwrap_or_default().as_bytes());
+    }
+    println!(
+        "cargo:rustc-env=RSPICE_VERILOGA_COMPILER_IDENTITY={}",
+        hasher.finalize().to_hex()
+    );
+}
+
+/// Hash a file, or every file under a directory in path order, each under
+/// its path relative to the workspace layout so a rename is a change too.
+fn hash_source_tree(hasher: &mut blake3::Hasher, path: &Path, label: &str) -> Result<(), String> {
+    let metadata =
+        fs::metadata(path).map_err(|error| format!("inspect '{}': {error}", path.display()))?;
+    if metadata.is_file() {
+        let bytes =
+            fs::read(path).map_err(|error| format!("read '{}': {error}", path.display()))?;
+        update_digest_record(hasher, label.as_bytes());
+        update_digest_record(hasher, &bytes);
+        return Ok(());
+    }
+    let mut entries = fs::read_dir(path)
+        .map_err(|error| format!("list '{}': {error}", path.display()))?
+        .map(|entry| entry.map(|entry| entry.file_name()))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("list '{}': {error}", path.display()))?;
+    entries.sort();
+    for name in entries {
+        let name = name.to_string_lossy();
+        hash_source_tree(
+            hasher,
+            &path.join(name.as_ref()),
+            &format!("{label}/{name}"),
+        )?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

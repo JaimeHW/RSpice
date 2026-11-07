@@ -40,7 +40,7 @@ use std::sync::OnceLock;
 #[cfg(feature = "veriloga")]
 use std::sync::RwLock;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 pub(in crate::engine) mod data_dependencies;
 mod frequency_output;
@@ -72,6 +72,8 @@ use transmission_lines::*;
 use xspice_ports::*;
 #[cfg(feature = "veriloga")]
 mod veriloga_cache;
+#[cfg(feature = "veriloga")]
+mod veriloga_record;
 #[cfg(feature = "veriloga")]
 use veriloga_cache::normalize_model_key;
 #[cfg(feature = "veriloga")]
