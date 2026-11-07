@@ -394,3 +394,25 @@ fn a_placed_relay_switches_its_common_from_nc_to_no_when_its_coil_is_driven() {
         );
     }
 }
+
+#[test]
+fn a_placed_optocoupler_sinks_ctr_times_its_led_current() {
+    // 10 mA through the LED from 5 V and 385 Ohm; 2 mA through 1 kOhm,
+    // with 3 V left across the output, well out of saturation.
+    let mut bench = Bench::default();
+    bench.primitive(ComponentType::VoltageSource, "V1", "5", &["in", "0"]);
+    bench.primitive(ComponentType::Resistor, "RF", "385", &["in", "a"]);
+    bench.part(
+        "rspice.functional.optocoupler",
+        "U1",
+        "",
+        &["a", "0", "c", "0"],
+    );
+    bench.primitive(ComponentType::Resistor, "RL", "1k", &["in", "c"]);
+    let probes = bench.operating_points(&["a", "c"]);
+    let led = (5.0 - probes[0]) / 385.0;
+    assert!(
+        (5.0 - probes[1] - 0.2 * led * 1e3).abs() < 3e-3,
+        "{probes:?}"
+    );
+}

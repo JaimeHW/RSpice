@@ -294,3 +294,22 @@ RNM NM 0 1Meg NOISY=0
 BNO COM NO I=V(COM,NO)*exp(-(0.5+0.5*tanh(500*(V(NM)-0.5)))*ln(RON)-(0.5-0.5*tanh(500*(V(NM)-0.5)))*ln(ROFF))
 BNC COM NC I=V(COM,NC)*exp(-FORM*(0.5-0.5*tanh(500*(V(NM)-0.5)))*ln(RON)-(1-FORM*(0.5-0.5*tanh(500*(V(NM)-0.5))))*ln(ROFF))
 .ends RSPICE_FN_RELAY
+
+* Optocoupler. Pins: A K C E.
+* The LED conducts IFT at VF and, below VF, falls e-fold every 50 mV, as a
+* junction of emission coefficient 2 does, and above VF it rises through a
+* slope resistance of 50 mV*ln(2)/IFT. The phototransistor's collector current is CTR
+* times the LED current, settling with the time constant TAU, and saturates
+* as the collector-emitter voltage falls: at VCESAT it carries half that
+* current. CISO couples the LED's cathode to the emitter across the
+* isolation barrier. The defaults are a 4N25-class coupler.
+.subckt RSPICE_FN_OPTO A K C E CTR=0.2 VF=1.15 IFT=10m TAU=2u VCESAT=0.4 CISO=0.5p
+.func sp(x) {uramp(x)+ln(1+exp(-abs(x)))}
+VS A N1 0
+BD N1 K I=IFT/ln(2)*sp((V(N1,K)-VF)/50m)
+BP NP0 0 V=CTR*I(VS)
+RP NP0 NP 1
+CP NP 0 {TAU}
+BC C E I=V(NP)*tanh(0.549306*uramp(V(C,E))/VCESAT)
+CI K E {CISO}
+.ends RSPICE_FN_OPTO

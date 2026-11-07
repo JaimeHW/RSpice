@@ -6,7 +6,8 @@ use rspice_design_model::symbol_pin::SymbolPinSide;
 
 use super::{
     ComponentCategory, FunctionalBlock, FunctionalParameter, FunctionalPartDescriptor,
-    FunctionalPin, FunctionalPreset, FunctionalPresetChoice, InOut, choice, number, pin, selector,
+    FunctionalPin, FunctionalPreset, FunctionalPresetChoice, In, InOut, Out, choice, number, pin,
+    selector,
 };
 
 /// Two terminals on the block's centre line, one each side.
@@ -374,5 +375,88 @@ pub(super) const RELAY: FunctionalPartDescriptor = FunctionalPartDescriptor {
     category: ComponentCategory::ProtectionElectromechanical,
     parameters: RELAY_PARAMETERS,
     preset: Some(RELAY_PRESET),
+    inputs: None,
+};
+
+const OPTO_PINS: &[FunctionalPin] = &[pin("A", In), pin("K", In), pin("C", Out), pin("E", Out)];
+
+/// The LED's anode and cathode down the left edge, the phototransistor's
+/// collector and emitter down the right.
+const OPTO_BLOCK: FunctionalBlock = FunctionalBlock {
+    height: 40,
+    pins: &[
+        (SymbolPinSide::Left, -30, -10),
+        (SymbolPinSide::Left, -30, 10),
+        (SymbolPinSide::Right, 30, -10),
+        (SymbolPinSide::Right, 30, 10),
+    ],
+};
+
+/// A 4N25-class phototransistor coupler.
+const OPTO_PARAMETERS: &[FunctionalParameter] = &[
+    number(
+        "CTR",
+        "Current transfer ratio",
+        "",
+        "0.2",
+        "Collector current per unit of LED current while the phototransistor is out of saturation.",
+    ),
+    number(
+        "VF",
+        "LED forward voltage",
+        "V",
+        "1.15",
+        "LED voltage at the test current IFT.",
+    ),
+    number(
+        "IFT",
+        "LED test current",
+        "A",
+        "10m",
+        "LED current at which its forward voltage is VF.",
+    ),
+    number(
+        "TAU",
+        "Response time constant",
+        "s",
+        "2u",
+        "Time constant with which the collector current follows the LED current.",
+    ),
+    number(
+        "VCESAT",
+        "Saturation voltage",
+        "V",
+        "0.4",
+        "Collector-emitter voltage at which the output carries half of CTR times the LED current; the output saturates below it.",
+    ),
+    number(
+        "CISO",
+        "Isolation capacitance",
+        "F",
+        "0.5p",
+        "Capacitance across the isolation barrier, from the LED's cathode to the emitter.",
+    ),
+];
+
+pub(super) const OPTOCOUPLER: FunctionalPartDescriptor = FunctionalPartDescriptor {
+    stable_id: "rspice.functional.optocoupler",
+    display_name: "Optocoupler",
+    subcircuit: "RSPICE_FN_OPTO",
+    pins: OPTO_PINS,
+    symbol_asset: "functional_optocoupler.svg",
+    block: Some(OPTO_BLOCK),
+    keywords: &[
+        "opto",
+        "optocoupler",
+        "optoisolator",
+        "photocoupler",
+        "phototransistor",
+        "isolator",
+        "4n25",
+        "pc817",
+    ],
+    category: ComponentCategory::Semiconductors,
+    parameters: OPTO_PARAMETERS,
+    preset: None,
     inputs: None,
 };

@@ -1159,3 +1159,45 @@ RNC3 p nc3 1k
     let nc3 = waveform(&step, "nc3");
     assert!(nc3.iter().all(|&v| v > 5.0 - 1e-5));
 }
+
+#[test]
+fn optocoupler_collector_current_is_ctr_times_led_current_and_follows_it_with_tau() {
+    // 10 mA into the LED from 10 us: the collector, held 10 V above the
+    // emitter through 100 Ohm, settles at CTR x 10 mA = 2 mA and reaches
+    // 1 - 1/e of it TAU after the step. The LED drops VF at IFT, and a load
+    // asking half the photocurrent holds the output at VCESAT.
+    let deck = "* optocoupler
+IF1 0 a1 PULSE(0 10m 10u 1n 1n 50u 100u)
+RA1 a1 0 1Meg
+X1 a1 0 c1 0 RSPICE_FN_OPTO
+VCC vcc 0 10
+RL vcc c1 100
+VF2 a2 0 1.15
+X2 a2 0 c2 0 RSPICE_FN_OPTO
+VC2 c2 0 5
+IF3 0 a3 10m
+RA3 a3 0 1Meg
+X3 a3 0 c3 0 RSPICE_FN_OPTO
+IL3 c3 0 -1m
+.end
+";
+    let tran = transient(deck, 60e-6, 10e-9);
+    let collector = |at: f64| (10.0 - value_at(&tran.time, waveform(&tran, "c1"), at)) / 100.0;
+    assert_close("CTR x IF", collector(59e-6), 2e-3, 2e-6);
+    assert_close(
+        "response at TAU",
+        collector(12e-6) / collector(59e-6),
+        1.0 - (-1.0f64).exp(),
+        2e-3,
+    );
+    assert_close(
+        "VF at IFT",
+        value_at(&tran.time, waveform(&tran, "a1"), 59e-6),
+        1.15,
+        1e-3,
+    );
+    let currents = op_currents(deck, &["VC2"]);
+    assert_close("CTR x IFT at VF", -currents[0], 2e-3, 2e-6);
+    let saturated = op_voltages(deck, &["c3"])[0];
+    assert_close("VCESAT at half the photocurrent", saturated, 0.4, 1e-3);
+}
