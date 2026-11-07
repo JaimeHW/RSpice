@@ -258,6 +258,20 @@ R4 5 0 1K
     .collect();
     assert_crossings("state", &run.crossings("4", 0.5), &edges, 1e-9);
     assert_crossings("state==S1a", &run.crossings("5", 0.5), &edges, 1e-9);
+    // An output reading a node follows it from one accepted point to the
+    // next: the inverter is low while the input is high and high after.
+    for (time, expected) in [
+        (0.25e-3, 0.0),
+        (0.75e-3, 1.0),
+        (10.25e-3, 0.0),
+        (10.75e-3, 1.0),
+    ] {
+        let value = run.at("2", time);
+        assert!(
+            (value - expected).abs() < 1e-9,
+            "V(2) at {time} s = {value}"
+        );
+    }
 }
 
 #[test]
