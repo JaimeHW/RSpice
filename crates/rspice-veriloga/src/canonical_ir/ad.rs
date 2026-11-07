@@ -2050,6 +2050,23 @@ pub fn differentiate(
     }
 }
 
+/// Replace every `ddx` readback in `function` by the scalar arithmetic of its
+/// derivative, so an evaluator of primal values alone can read it.
+///
+/// Value ids stay valid: a readback is rewritten in place and the derivative
+/// arithmetic it reads is appended.
+pub(crate) fn resolve_ddx_readbacks(
+    function: &CfgFunction,
+) -> Result<CfgFunction, CfgValidationError> {
+    match resolve_ddx_primal_with_control(function, None, &NoPipelineControl) {
+        Ok(function) => Ok(function),
+        Err(DifferentiationError::Validation(error)) => Err(error),
+        Err(DifferentiationError::Cancelled(error)) => {
+            unreachable!("the no-op pipeline control cannot cancel: {error}")
+        }
+    }
+}
+
 pub(crate) enum DifferentiationError {
     Validation(CfgValidationError),
     Cancelled(PipelineCancelled),

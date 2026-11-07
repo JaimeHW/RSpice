@@ -2534,8 +2534,19 @@ impl CanonicalNoiseRuntimePlan {
                 table: lowered.table.iter().copied().map(place).collect(),
             });
         }
-        let (mut function, outputs, _) =
+        let (function, outputs, _) =
             crate::canonical_ir::cfg_opt::optimize_with_tracking(&cfg.function, &wanted, &[]);
+        // Noise is evaluated at the accepted operating point. A PSD that reads
+        // a model's own `ddx` gets the derivative the stamp uses there, and a
+        // `$limit`ed value is its converged argument, which is what the
+        // evaluator reads for one; neither needs any history.
+        let mut function = crate::canonical_ir::ad::resolve_ddx_readbacks(&function).map_err(
+            |error| {
+                NoisePlanFailure::Unlowerable(VmError::InvalidModel(format!(
+                    "grouped-noise PSD/exponent metadata derivative failed: {error}"
+                )))
+            },
+        )?;
         crate::canonical_ir::frequency::freeze_noise_primal(&mut function);
         for value in &function.values {
             use crate::canonical_ir::CfgValueKind;
@@ -2554,9 +2565,6 @@ impl CanonicalNoiseRuntimePlan {
                     | CfgValueKind::Cross { .. }
                     | CfgValueKind::Above { .. }
                     | CfgValueKind::Timer { .. }
-                    | CfgValueKind::Limit { .. }
-                    | CfgValueKind::LimitPrevious { .. }
-                    | CfgValueKind::Ddx { .. }
             ) {
                 return Err(NoisePlanFailure::Unlowerable(VmError::InvalidModel(
                     "grouped-noise PSD/exponent metadata reaches unsupported dynamic/history state"

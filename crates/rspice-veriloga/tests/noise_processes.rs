@@ -62,6 +62,83 @@ fn metadata_only_integrators_do_not_create_noise_transfer_poles() {
     }
 }
 
+/// A noise power that reads a `$limit`ed value, or the model's own `ddx`, is
+/// evaluated at the operating point: the limited value has converged to its
+/// argument there, and the derivative is the one the stamp uses. So a diode's
+/// shot and flicker powers are 2qI and kf*I at the bias it is solved at, and a
+/// power written from its conductance, 2q*vt*gd, is 2q*(I + is).
+#[test]
+fn noise_powers_read_a_limited_bias_and_its_derivative_at_the_operating_point() {
+    // constants.vams' default `P_Q (NIST 1998) and the runtime's k/q at 27 C.
+    const P_Q: f64 = 1.602176462e-19;
+    let vt: f64 = 300.15 * 1_380_649.0 / 16_021_766_340.0;
+    let (is, kf): (f64, f64) = (1e-14, 1e-12);
+    for limit in [
+        r#"$limit(V(a, c), "pnjlim", vt, vt*ln(vt/(`M_SQRT2*is)))"#,
+        "$limit(V(a, c), step_limit)",
+    ] {
+        let source = format!(
+            r#"`include "disciplines.vams"
+`include "constants.vams"
+module dio(a, c);
+    inout a, c; electrical a, c;
+    parameter real is = 1e-14 from (0:inf);
+    parameter real cj0 = 1p;
+    parameter real kf = 1e-12;
+    real id, gd, vd, vt;
+    analog function real step_limit;
+        input vnew, vold; real vnew, vold;
+        step_limit = (vnew - vold > 0.1) ? vold + 0.1 : vnew;
+    endfunction
+    analog begin
+        vt = $vt;
+        vd = {limit};
+        id = is*(limexp(vd/vt) - 1);
+        gd = ddx(id, V(a));
+        I(a, c) <+ id + ddt(cj0*vd);
+        I(a, c) <+ white_noise(2*`P_Q*abs(id), "shot");
+        I(a, c) <+ flicker_noise(kf*abs(id), 1.0, "flicker");
+        I(a, c) <+ white_noise(2*`P_Q*vt*gd, "conductance");
+    end
+endmodule
+"#
+        );
+        let report = VerilogACompiler::default()
+            .compile_runtime(&source, None)
+            .unwrap_or_else(|error| panic!("{limit}: {error}"));
+        let mut device = rspice_veriloga::device::VerilogADevice::try_new_with_canonical_ir(
+            "D1",
+            report.model,
+            &report.canonical_ir,
+            &[1, 0],
+        )
+        .unwrap();
+        device.try_set_analysis_type(3).unwrap();
+        // 0.6928878324 V is where `a08.cir` (5 V through 1 kOhm) solves.
+        for bias in [0.6928878324, 0.6, -0.5] {
+            let id = is * ((bias / vt).exp() - 1.0);
+            let processes = device
+                .try_noise_processes_at_frequency(&[bias], 1.0e3)
+                .unwrap_or_else(|error| panic!("{limit} at {bias} V: {error}"));
+            let names: Vec<_> = processes.iter().map(|process| process.name.as_str()).collect();
+            assert_eq!(names, ["shot", "flicker", "conductance"], "{limit}");
+            for (process, expected, exponent) in [
+                (&processes[0], 2.0 * P_Q * id.abs(), None),
+                (&processes[1], kf * id.abs(), Some(1.0)),
+                (&processes[2], 2.0 * P_Q * is * (bias / vt).exp(), None),
+            ] {
+                assert!(
+                    (process.psd / expected - 1.0).abs() < 1e-12,
+                    "{limit} at {bias} V: {} = {:e}, expected {expected:e}",
+                    process.name,
+                    process.psd
+                );
+                assert_eq!(process.exponent, exponent, "{}", process.name);
+            }
+        }
+    }
+}
+
 #[test]
 fn noise_replay_preserves_active_integrator_poles_at_zero_gain() {
     for route in [
