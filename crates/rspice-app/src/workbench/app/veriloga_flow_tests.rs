@@ -235,6 +235,34 @@ struct Device {
 /// from its canvas. Returns the top schematic and the device's view, which
 /// the Design workspace shows.
 fn new_device(cell: &str, ports: &str) -> (User, CellViewRef, CellViewRef) {
+    let (mut user, top) = new_project();
+    let library = top.library.clone();
+
+    // 2. A right-click on the empty canvas, then New Verilog-A device….
+    let canvas = user.expect("Schematic canvas");
+    user.press(canvas.center(), egui::PointerButton::Secondary);
+    user.settle();
+    user.click("New Verilog-A device…");
+    let form = &mut user.app.state.code.new_veriloga_device;
+    assert!(form.open, "the canvas row opens the form");
+    assert_eq!(
+        form.library, library,
+        "the form offers the project's design library"
+    );
+    form.name = cell.to_owned();
+    form.ports = ports.to_owned();
+    user.settle();
+    user.click("Create");
+    let view = CellViewRef::new(&library, cell, "veriloga");
+    assert!(!user.app.state.code.new_veriloga_device.open);
+    assert_eq!(user.app.state.model.workspace.content.active_view, view);
+    assert_eq!(user.app.state.workbench.workspace, Workspace::Design);
+    (user, top, view)
+}
+
+/// Step 1: File → New project. Returns the project's top schematic, which
+/// the Design workspace shows.
+fn new_project() -> (User, CellViewRef) {
     let mut user = User::new(RSpiceApp::test_instance());
 
     // 1. File → New project, not keeping the session's unsaved scratch work.
@@ -259,27 +287,7 @@ fn new_device(cell: &str, ports: &str) -> (User, CellViewRef, CellViewRef) {
     let top = CellViewRef::new(&library, &top_cell, "schematic");
     assert_eq!(user.app.state.model.workspace.content.active_view, top);
     assert_eq!(user.app.state.workbench.workspace, Workspace::Design);
-
-    // 2. A right-click on the empty canvas, then New Verilog-A device….
-    let canvas = user.expect("Schematic canvas");
-    user.press(canvas.center(), egui::PointerButton::Secondary);
-    user.settle();
-    user.click("New Verilog-A device…");
-    let form = &mut user.app.state.code.new_veriloga_device;
-    assert!(form.open, "the canvas row opens the form");
-    assert_eq!(
-        form.library, library,
-        "the form offers the project's design library"
-    );
-    form.name = cell.to_owned();
-    form.ports = ports.to_owned();
-    user.settle();
-    user.click("Create");
-    let view = CellViewRef::new(&library, cell, "veriloga");
-    assert!(!user.app.state.code.new_veriloga_device.open);
-    assert_eq!(user.app.state.model.workspace.content.active_view, view);
-    assert_eq!(user.app.state.workbench.workspace, Workspace::Design);
-    (user, top, view)
+    (user, top)
 }
 
 /// Compile the open view as the toolbar's Compile does, and frame until the
@@ -949,4 +957,112 @@ fn a_reviewed_op_amp_compiles_clean_and_each_of_its_errors_is_reached_where_it_w
     // and pressing it puts the caret there.
     user.click(&format!("Error at line 21, column 29: {gbww}"));
     assert_eq!(user.caret(), (21, 29));
+}
+
+/// Four compact models as their authors ship them, each a root with its
+/// includes beside it: the folder under `models/veriloga/cmc`, the root, and
+/// the module it declares.
+const CMC_ROOTS: [(&str, &str, &str); 4] = [
+    ("PSP104.1.0_vacode/vacode", "psp104.va", "PSP104VA"),
+    ("BSIM-CMG_112.1.0_04282026/code", "bsimcmg.va", "bsimcmg_va"),
+    ("505p5p0_va", "bjt505.va", "bjt505_va"),
+    ("diode_cmc_3.0_20250714/vacode", "diode_cmc.va", "DIODE_CMC"),
+];
+
+/// A compact model imports from its source folder by picking its root: the
+/// import reads every include from beside it, compiles, and is placed from
+/// the library shelf on the top schematic, each model one cell of its own.
+#[test]
+fn compact_models_import_from_their_source_folders_compile_and_place() {
+    use crate::state::workspace::ImportedInclude;
+    use crate::workbench::documents::code_workspace;
+
+    let (mut user, top) = new_project();
+    let models = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/veriloga/cmc");
+    for (index, (folder, root, module)) in CMC_ROOTS.into_iter().enumerate() {
+        let folder = models.join(folder);
+        let text = std::fs::read_to_string(folder.join(root)).expect("the root is readable");
+        Command::ImportVerilogA.execute(&mut user.app);
+        code_workspace::complete_veriloga_files_pick(
+            &mut user.app,
+            &[(root, &text)],
+            Some(&folder),
+        );
+        user.settle();
+        let form = user
+            .app
+            .state
+            .code
+            .code_workspace
+            .veriloga
+            .import_form
+            .clone()
+            .expect("the import form opens");
+        assert_eq!(
+            form.closure.missing().count(),
+            0,
+            "{root}: {:?}",
+            form.closure.files
+        );
+        let found = form
+            .closure
+            .files
+            .iter()
+            .filter(|file| file.include == ImportedInclude::Found)
+            .count();
+        assert!(found >= 4, "{root} brings its includes: {found}");
+        user.click("Create cells");
+        let view = user.app.state.model.workspace.content.active_view.clone();
+        assert_eq!(
+            (view.cell.as_str(), view.view.as_str()),
+            (module, "veriloga")
+        );
+
+        compile(&mut user);
+        let veriloga = &user.app.state.code.code_workspace.veriloga;
+        assert!(
+            veriloga.receipt.is_some(),
+            "{root} compiles: {:?}",
+            veriloga.last_failure
+        );
+
+        // The library shelf arms the cell as its row does, then a click on
+        // the top schematic places it.
+        let candidate = crate::state::library_cell_placement_candidates(
+            &user.app.state.model.library_manager,
+            &user.app.state.model.workspace,
+        )
+        .into_iter()
+        .find(|candidate| candidate.library == view.library && candidate.cell == view.cell)
+        .expect("the cell is on the shelf");
+        assert!(candidate.ready, "{root}: {}", candidate.unavailable_reason);
+        user.app.state.open_workspace_view(top.clone());
+        user.settle();
+        crate::workbench::app::schematic::placement::arm_library_cell_placement(
+            &mut user.app.state,
+            candidate.binding,
+        );
+        assert_eq!(user.app.state.model.workspace.content.active_view, top);
+        let canvas = user.expect("Schematic canvas");
+        let at = canvas.center() + egui::vec2(-240.0 + 160.0 * index as f32, 0.0);
+        user.press(at, egui::PointerButton::Primary);
+        user.settle();
+        user.app.state.model.schematic.cancel_tool();
+        let placed = user
+            .app
+            .state
+            .model
+            .schematic
+            .document()
+            .components
+            .iter()
+            .filter(|component| {
+                component
+                    .library_cell
+                    .as_ref()
+                    .is_some_and(|binding| binding.cell == module)
+            })
+            .count();
+        assert_eq!(placed, 1, "{module} is placed once");
+    }
 }
