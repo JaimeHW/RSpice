@@ -1522,3 +1522,46 @@ R8 q 0 100
     assert_close("V(d)", op_voltage(&netlist, "d"), 2.806_655, 1e-6);
     assert_close("V(e)", op_voltage(&netlist, "e"), 3.333_333, 1e-6);
 }
+
+// C1's charge 1u*x+0.5u*x² charges through 1k as -v-2ln(1-v) = t'/1ms, with
+// t' the time since the middle of the 1 us edge; LTspice lands within 3e-5
+// of it, QSPICE within 4e-4. C2 is a 2 uF capacitor read through V(k) and L1
+// a 1 H inductor at these currents. QSPICE: V(c)=0.221005, 0.393318,
+// 0.632029 and V(d)=0.606835, 0.368064, 0.135403 at 0.5, 1 and 2 ms;
+// LTspice agrees to 1e-6.
+#[test]
+fn a_capacitor_given_its_charge_and_an_inductor_given_its_flux() {
+    let netlist = parse(
+        "* charge-defined capacitors and a flux-defined inductor
+V1 a 0 PULSE(0 1 0 1u 1u 1 2)
+R1 a b 1k
+C1 b 0 Q=1u*x+0.5u*x*x
+Vk k 0 1
+R2 a c 1k
+C2 c 0 Q=x*1u*(1+V(k))
+R3 a d 1k
+L1 d 0 Flux=1*x+0.5*x*x*x
+.tran 1u 3m
+.end
+",
+    );
+    let exact_b = |time: f64| {
+        let target = (time - 0.5e-6) / 1e-3;
+        let mut v: f64 = 0.5;
+        for _ in 0..50 {
+            let residual = -v - 2.0 * (1.0 - v).ln() - target;
+            v -= residual / (-1.0 + 2.0 / (1.0 - v));
+        }
+        v
+    };
+    for (time, c, d) in [
+        (0.5e-3, 0.221_005, 0.606_835),
+        (1e-3, 0.393_318, 0.368_064),
+        (2e-3, 0.632_029, 0.135_403),
+    ] {
+        let values = tran_voltages(&netlist, 3e-3, time, &["b", "c", "d"]);
+        assert_close(&format!("V(b) at {time}"), values[0], exact_b(time), 5e-4);
+        assert_close(&format!("V(c) at {time}"), values[1], c, 2e-4);
+        assert_close(&format!("V(d) at {time}"), values[2], d, 2e-4);
+    }
+}

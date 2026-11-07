@@ -1276,6 +1276,16 @@ pub(super) fn parse_capacitor(
     let node_pos = expect_node(stream, line_num)?;
     let node_neg = expect_node(stream, line_num)?;
 
+    if take_state_function(
+        stream,
+        line_num,
+        elements,
+        params,
+        StateFunction::Charge,
+        (&name, &node_pos, &node_neg),
+    )? {
+        return Ok(());
+    }
     skip_optional_param_name(stream, "C");
     let tail = parse_passive_tail(
         stream,
@@ -1355,6 +1365,16 @@ pub(super) fn parse_inductor(
     let node_pos = expect_node(stream, line_num)?;
     let node_neg = expect_node(stream, line_num)?;
 
+    if take_state_function(
+        stream,
+        line_num,
+        elements,
+        params,
+        StateFunction::Flux,
+        (&name, &node_pos, &node_neg),
+    )? {
+        return Ok(());
+    }
     skip_optional_param_name(stream, "L");
     let tail = parse_passive_tail(
         stream,
@@ -9730,6 +9750,132 @@ pub(super) fn behavioral_expr_token_fragment(token: &TokenKind) -> Option<String
         TokenKind::Other(c) => Some(c.to_string()),
         TokenKind::Newline | TokenKind::Eof => None,
     }
+}
+
+/// What an LTspice capacitor's `Q=` or inductor's `Flux=` expression defines.
+#[derive(Clone, Copy)]
+enum StateFunction {
+    /// Charge as a function of `x`, the voltage across the capacitor.
+    Charge,
+    /// Flux linkage as a function of `x`, the current through the inductor.
+    Flux,
+}
+
+/// Read a capacitor written `Q=<expression>` or an inductor written
+/// `Flux=<expression>`, LTspice's charge and flux forms, when the card is one.
+/// The expression runs to the end of the card and reads `x`, the element's
+/// own voltage or current.
+///
+/// A capacitor becomes a current source of `ddt(Q)`: open at DC, `jω·dQ/dv`
+/// in AC, and charge-conserving in transient. An inductor becomes a voltage
+/// source of `ddt(Flux)` reading its own branch current: a short at DC.
+fn take_state_function(
+    stream: &mut TokenStream,
+    line_num: usize,
+    elements: &mut Vec<Element>,
+    params: &ParamContext,
+    function: StateFunction,
+    (name, node_pos, node_neg): (&str, &str, &str),
+) -> Result<bool, ParseError> {
+    let key = match function {
+        StateFunction::Charge => "Q",
+        StateFunction::Flux => "FLUX",
+    };
+    if !matches!(&stream.peek().kind, TokenKind::Ident(word) if word.eq_ignore_ascii_case(key))
+        || !matches!(stream.peek_n(1).kind, TokenKind::Equals)
+    {
+        return Ok(false);
+    }
+    stream.advance();
+    stream.advance();
+    let own = match function {
+        StateFunction::Charge => format!("V({node_pos},{node_neg})"),
+        StateFunction::Flux => format!("I({name})"),
+    };
+    let mut expression = String::new();
+    // Paren depth, and the depth at which each open probe's arguments sit.
+    let mut depth = 0usize;
+    let mut probes: Vec<usize> = Vec::new();
+    while !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        let token = stream.peek().kind.clone();
+        match &token {
+            TokenKind::Ident(word)
+                if depth == 0 && matches!(stream.peek_n(1).kind, TokenKind::Equals) =>
+            {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!(
+                        "{name}: {word} is not read after a {key}= expression, which runs to the \
+                         end of the card"
+                    ),
+                });
+            }
+            TokenKind::Ident(word)
+                if (word.eq_ignore_ascii_case("V") || word.eq_ignore_ascii_case("I"))
+                    && matches!(stream.peek_n(1).kind, TokenKind::LParen) =>
+            {
+                probes.push(depth + 1);
+                append_behavioral_expr_token(&mut expression, &token);
+            }
+            TokenKind::Ident(word)
+                if word.eq_ignore_ascii_case("X")
+                    && probes.last() != Some(&depth)
+                    && !matches!(stream.peek_n(1).kind, TokenKind::LParen) =>
+            {
+                append_behavioral_expr_fragment(&mut expression, &own);
+            }
+            TokenKind::Expression(inner) => {
+                append_behavioral_expr_fragment(&mut expression, &format!("({inner})"));
+            }
+            TokenKind::LParen => {
+                depth += 1;
+                append_behavioral_expr_token(&mut expression, &token);
+            }
+            TokenKind::RParen => {
+                if probes.last() == Some(&depth) {
+                    probes.pop();
+                }
+                depth = depth.saturating_sub(1);
+                append_behavioral_expr_token(&mut expression, &token);
+            }
+            _ => append_behavioral_expr_token(&mut expression, &token),
+        }
+        stream.advance();
+    }
+    if expression.trim().is_empty() {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!("{name}: {key}= needs an expression"),
+        });
+    }
+    let expression = lower_dynamic_operators(
+        name,
+        format!("ddt({expression})"),
+        line_num,
+        params.random().seed(),
+        elements,
+    )?;
+    let kind = match function {
+        StateFunction::Charge => ElementKind::BehavioralCurrent {
+            expression,
+            tc1: 0.0,
+            tc2: 0.0,
+            multiplicity: SourceMultiplicity::default(),
+        },
+        StateFunction::Flux => ElementKind::BehavioralVoltage {
+            expression,
+            tc1: 0.0,
+            tc2: 0.0,
+            multiplicity: SourceMultiplicity::default(),
+        },
+    };
+    elements.push(Element {
+        name: name.to_string(),
+        kind,
+        nodes: vec![node_pos.to_string(), node_neg.to_string()],
+        provenance: crate::netlist::ElementProvenance::Authored,
+    });
+    Ok(true)
 }
 
 /// LTspice reads `R=` to the end of the card, or to the next `name=`
