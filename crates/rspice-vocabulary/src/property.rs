@@ -216,6 +216,11 @@ pub struct PropertyDefinition {
 
     /// Whether this property can be edited directly on the schematic
     pub editable_on_schematic: bool,
+
+    /// For an enum that is a preset: each setting with the values choosing it
+    /// writes into the sheet's other fields, which stay editable afterwards.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub presets: Vec<(String, Vec<(String, PropertyValue)>)>,
 }
 
 impl Default for PropertyDefinition {
@@ -244,6 +249,7 @@ impl Default for PropertyDefinition {
             visibility_condition: VisibilityCondition::default(),
             show_on_schematic: false,
             editable_on_schematic: false,
+            presets: Vec::new(),
         }
     }
 }
@@ -356,6 +362,25 @@ impl PropertyDefinition {
     pub fn with_category(mut self, category: impl Into<String>) -> Self {
         self.category = category.into();
         self
+    }
+
+    /// Make an enum a preset: choosing a setting writes its values into the
+    /// sheet's other fields.
+    pub fn with_presets(mut self, presets: Vec<(String, Vec<(String, PropertyValue)>)>) -> Self {
+        self.presets = presets;
+        self
+    }
+
+    /// The values choosing `setting` of this preset writes; empty for a
+    /// setting that fills nothing or a property that is no preset.
+    pub fn preset_values(&self, setting: &PropertyValue) -> &[(String, PropertyValue)] {
+        let PropertyValue::Enum { selected, .. } = setting else {
+            return &[];
+        };
+        self.presets
+            .iter()
+            .find(|(label, _)| label == selected)
+            .map_or(&[], |(_, values)| values.as_slice())
     }
 
     // =========================================================================

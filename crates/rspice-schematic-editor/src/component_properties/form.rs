@@ -798,7 +798,9 @@ fn render_property_field(
             draft.set_value("model_library", PropertyValue::String(String::new()));
             draft.set_value("model_corner", PropertyValue::String(String::new()));
         } else {
+            let filled = def.preset_values(&value).to_vec();
             draft.set_value(&def.name, value);
+            draft.fill_preset(&filled);
         }
     }
     if browse_clicked {

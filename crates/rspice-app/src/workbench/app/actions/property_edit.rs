@@ -233,7 +233,8 @@ fn builtin_xspice_property_sheet(
     Ok(sheet)
 }
 
-/// A functional part's sheet: one row per subcircuit parameter, labelled in
+/// A functional part's sheet: its preset first, where it has one, then one
+/// row per subcircuit parameter, labelled in
 /// words, with its unit and the subcircuit's own default. A selector offers
 /// its named settings.
 fn functional_property_sheet(
@@ -241,6 +242,35 @@ fn functional_property_sheet(
 ) -> Result<PropertySheet, String> {
     let descriptor = crate::state::validate_builtin_functional_binding(binding)?;
     let mut sheet = cell_instance_identity_sheet();
+    if let Some(preset) = descriptor.preset {
+        let labels = preset
+            .choices
+            .iter()
+            .map(|choice| choice.label.to_owned())
+            .collect::<Vec<_>>();
+        let presets = preset
+            .choices
+            .iter()
+            .map(|choice| {
+                let values = choice
+                    .values
+                    .iter()
+                    .map(|(name, value)| ((*name).to_owned(), PropertyValue::expression(*value)))
+                    .collect();
+                (choice.label.to_owned(), values)
+            })
+            .collect();
+        sheet.add(
+            PropertyDefinition::new(preset.name)
+                .with_display_name(preset.label)
+                .with_description(preset.description)
+                .with_type(PropertyType::Enum)
+                .with_default(PropertyValue::enumeration(labels[0].clone(), labels))
+                .with_presets(presets)
+                .with_order(-1)
+                .with_category("Parameters"),
+        );
+    }
     for (index, parameter) in descriptor.parameters.iter().enumerate() {
         let (property_type, default) = if parameter.choices.is_empty() {
             (

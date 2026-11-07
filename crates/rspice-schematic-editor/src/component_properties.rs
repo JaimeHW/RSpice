@@ -207,6 +207,20 @@ impl ComponentPropertyDraft {
         self.refresh_validation_summary();
     }
 
+    /// Write the values a preset's chosen setting fills in, replacing each
+    /// field's retained text as well, so the editor shows the filled value.
+    pub fn fill_preset(&mut self, values: &[(String, PropertyValue)]) {
+        for (name, value) in values {
+            let text = match value {
+                PropertyValue::Expression(expression) => expression.clone(),
+                other => other.display_string(),
+            };
+            self.numeric_draft_errors.remove(name);
+            self.numeric_text_drafts.insert(name.clone(), text);
+            self.set_value(name, value.clone());
+        }
+    }
+
     /// Return retained source text for a numeric or expression editor.
     pub fn numeric_text_draft(&self, name: &str) -> Option<&str> {
         self.numeric_text_drafts.get(name).map(String::as_str)
@@ -540,6 +554,61 @@ mod tests {
         state.set_value("gain", numeric(2.0));
         state.set_value("offset", numeric(3.0));
         state
+    }
+
+    #[test]
+    fn choosing_a_preset_fills_its_fields_and_leaves_them_editable() {
+        let process = |setting: &str| {
+            PropertyValue::enumeration(setting, vec!["Bipolar".to_owned(), "CMOS".to_owned()])
+        };
+        let expression = |text: &str| PropertyValue::expression(text);
+        let mut sheet = PropertySheet::new();
+        sheet.add(
+            PropertyDefinition::new("PROCESS")
+                .with_type(PropertyType::Enum)
+                .with_default(process("Bipolar"))
+                .with_presets(vec![
+                    (
+                        "Bipolar".to_owned(),
+                        vec![("ROUT".to_owned(), expression("5"))],
+                    ),
+                    (
+                        "CMOS".to_owned(),
+                        vec![("ROUT".to_owned(), expression("50"))],
+                    ),
+                ]),
+        );
+        sheet.add(
+            PropertyDefinition::new("ROUT")
+                .with_type(PropertyType::Expression)
+                .with_default(expression("5")),
+        );
+        let mut draft = ComponentPropertyDraft::default();
+        draft.reset(ComponentType::CellInstance, &sheet, HashMap::new());
+
+        let cmos = process("CMOS");
+        let filled = sheet
+            .get("PROCESS")
+            .expect("preset")
+            .preset_values(&cmos)
+            .to_vec();
+        draft.set_value("PROCESS", cmos);
+        draft.fill_preset(&filled);
+        assert_eq!(draft.get_value("ROUT"), Some(&expression("50")));
+        assert_eq!(draft.numeric_text_draft("ROUT"), Some("50"));
+        assert!(draft.is_modified("ROUT"));
+
+        draft.update_numeric_text_draft("ROUT", "47".to_owned(), None);
+        draft.set_value("ROUT", expression("47"));
+        assert_eq!(draft.get_value("ROUT"), Some(&expression("47")));
+        assert!(draft.validate_all(&sheet));
+        assert!(
+            sheet
+                .get("ROUT")
+                .expect("field")
+                .preset_values(&expression("50"))
+                .is_empty()
+        );
     }
 
     #[test]

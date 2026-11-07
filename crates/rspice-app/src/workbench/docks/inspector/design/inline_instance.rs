@@ -253,6 +253,26 @@ fn edited_component(
                     key,
                     candidate,
                 )?;
+                // Choosing a functional part's preset fills its parameters in.
+                if let Some(descriptor) = component
+                    .library_cell
+                    .as_ref()
+                    .filter(|binding| binding.is_builtin_functional())
+                    .and_then(|binding| {
+                        crate::state::validate_builtin_functional_binding(binding).ok()
+                    })
+                    .filter(|descriptor| {
+                        descriptor
+                            .preset
+                            .is_some_and(|preset| preset.name.eq_ignore_ascii_case(key))
+                    })
+                {
+                    component.params = crate::state::apply_functional_preset(
+                        descriptor,
+                        &component.params,
+                        candidate.trim(),
+                    )?;
+                }
             }
         },
     }

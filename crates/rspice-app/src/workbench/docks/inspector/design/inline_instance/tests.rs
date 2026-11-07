@@ -678,3 +678,39 @@ fn rendered_instance_name_is_a_draft_until_one_reference_transaction_commits() {
         "I(V9)"
     );
 }
+
+/// Choosing the 555's process in the inspector fills in that process's
+/// parameters, each of which stays its own editable field.
+#[test]
+fn choosing_a_functional_preset_inline_fills_its_parameters() {
+    let mut app = RSpiceApp::test_instance();
+    let timer = crate::state::functional_part("rspice.functional.timer555").expect("555");
+    let id = app.state.model.schematic.add_library_cell_component(
+        crate::state::Point::origin(),
+        crate::state::functional_library_binding(timer),
+    );
+    let component = app
+        .state
+        .model
+        .schematic
+        .document()
+        .components
+        .iter()
+        .find(|component| component.id == id)
+        .cloned()
+        .expect("placed");
+    let process = InlineEditField::Parameter("PROCESS".to_owned());
+    let cmos = prepare_field_edit(&app.state, &component, &process, "CMOS").expect("a valid edit");
+    assert!(
+        cmos.params.contains("PROCESS=CMOS") && cmos.params.contains("RDIV=100k"),
+        "{}",
+        cmos.params
+    );
+    let rout = InlineEditField::Parameter("ROUT".to_owned());
+    let tuned = prepare_field_edit(&app.state, &cmos, &rout, "75").expect("a valid edit");
+    assert!(
+        tuned.params.contains("ROUT=75") && tuned.params.contains("PROCESS=CMOS"),
+        "{}",
+        tuned.params
+    );
+}
