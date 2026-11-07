@@ -6669,15 +6669,40 @@ impl Engine {
             boundary_supply::BoundarySupplies::new(netlist, &flat_elements, reference);
 
         // LTspice and QSPICE quiet every device built from a model card
-        // flagged `noiseless`.
+        // flagged `noiseless`, and QSPICE a device whose own card is.
         for element in &flat_elements {
+            let flagged = |params: &[(String, Value)]| {
+                params
+                    .iter()
+                    .any(|(name, value)| name.eq_ignore_ascii_case("NOISELESS") && *value != 0.0)
+            };
             let noiseless = element_model_name(&element.kind)
                 .and_then(|model| find_model_def(netlist, model))
-                .is_some_and(|model| {
-                    model.params.iter().any(|(name, value)| {
-                        name.eq_ignore_ascii_case("NOISELESS") && *value != 0.0
-                    })
-                });
+                .is_some_and(|model| flagged(&model.params))
+                || match &element.kind {
+                    ElementKind::Resistor {
+                        instance_params, ..
+                    }
+                    | ElementKind::Capacitor {
+                        instance_params, ..
+                    }
+                    | ElementKind::Inductor {
+                        instance_params, ..
+                    }
+                    | ElementKind::Diode {
+                        instance_params, ..
+                    }
+                    | ElementKind::Bjt {
+                        instance_params, ..
+                    }
+                    | ElementKind::Jfet {
+                        instance_params, ..
+                    }
+                    | ElementKind::Mesfet {
+                        instance_params, ..
+                    } => flagged(instance_params),
+                    _ => false,
+                };
             if noiseless {
                 circuit
                     .noiseless_devices

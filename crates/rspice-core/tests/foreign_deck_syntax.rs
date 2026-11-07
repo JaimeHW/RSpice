@@ -876,3 +876,52 @@ fn a_switch_takes_its_model_parameters_on_its_own_card() {
     assert_close("V(f)", op_voltage(&netlist, "f"), 1.960_784_314e-2, 1e-11);
     assert_close("V(h)", op_voltage(&netlist, "h"), 0.999_000_999, 1e-9);
 }
+
+// QSPICE 2026 batch at 1 kHz: with R1 and J2 quiet V(o) carries J1 alone,
+// 1.022101e-15 V^2/Hz; all three noisy give 2.060779e-15. LTspice refuses
+// `noiseless` on a JFET card.
+#[test]
+fn a_noiseless_instance_flag_quiets_that_device() {
+    let deck = |flag: &str, bare: &str| {
+        parse(&format!(
+            "noiseless instances\n\
+             .param X={flag}\n\
+             V1 d 0 10\n\
+             R1 d o 1k noiseless=X\n\
+             J1 o g 0 JM\n\
+             J2 o h 0 JM {bare}\n\
+             V2 g 0 -1 AC 1\n\
+             V3 h 0 -1\n\
+             R3 d q 1k noiseless=0\n\
+             .model JM NJF Vto=-2 beta=1m KF=1e-15\n\
+             .end\n"
+        ))
+    };
+    let noise = |netlist: &Netlist| {
+        Engine::default()
+            .run_noise_named_with_input_source(netlist, "o", None, "V2", &[1e3], 300.15)
+            .expect("noise solves")
+            .remove(0)
+    };
+    let quiet = noise(&deck("1", "noiseless"));
+    assert_close(
+        "quiet V(o) noise",
+        quiet.output_noise_density,
+        1.022_101e-15,
+        1e-20,
+    );
+    for contribution in &quiet.contributions {
+        let device = contribution.identity.device.to_ascii_uppercase();
+        assert!(
+            !matches!(device.as_str(), "R1" | "J2") || contribution.output_contribution == 0.0,
+            "{contribution:?}"
+        );
+    }
+    let loud = noise(&deck("0", ""));
+    assert_close(
+        "loud V(o) noise",
+        loud.output_noise_density,
+        2.060_779e-15,
+        1e-20,
+    );
+}

@@ -5643,6 +5643,19 @@ fn parse_area_device_instance_params(
                 );
                 continue;
             }
+            // QSPICE's bare `noiseless` flag, the same as `noiseless=1`.
+            if name_upper == "NOISELESS" {
+                stream.advance();
+                upsert_instance_param(
+                    ElementParamSink {
+                        instance_params: &mut instance_params,
+                        deferred_params: &mut deferred_params,
+                    },
+                    "NOISELESS",
+                    DeferrableValue::Resolved(1.0),
+                );
+                continue;
+            }
             if (is_diode_assignment_name(&name_upper) || is_bjt_assignment_name(&name_upper))
                 && token_starts_unassigned_value(&stream.peek_n(1).kind, params)
             {
