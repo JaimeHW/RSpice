@@ -32,7 +32,7 @@ const MODELS_BASELINES: [ModelsBaseline; 8] = [
         name: "models-00-models-project",
         page: ModelsPage::Models,
         scope: ModelsCatalogScope::Project,
-        fingerprint: "ab6a84bd1339b669f85a079b4920215983a1e3519d63a94a3ec5413c53eb9693",
+        fingerprint: "9cb3eab81497bbee2afa202a980577e30f07a51dae35b2e83377fc65dc54d3fb",
     },
     ModelsBaseline {
         name: "models-01-symbols-cdf",
@@ -56,13 +56,13 @@ const MODELS_BASELINES: [ModelsBaseline; 8] = [
         name: "models-04-include-graph",
         page: ModelsPage::Include,
         scope: ModelsCatalogScope::Project,
-        fingerprint: "6dbc94ed5e3c5d88a9a64e13f83638717a487ee85de2021030fde68b67a7bda3",
+        fingerprint: "e9b793c5e1eb34617bf05ee21ac42507ee99a7575aef2e8fe2a56da429f77a8a",
     },
     ModelsBaseline {
         name: "models-05-qualification",
         page: ModelsPage::Qualification,
         scope: ModelsCatalogScope::Project,
-        fingerprint: "c9aa60a1b1f57b2d7371d31e180e648587951afbacee7baba9813833b2b36a9e",
+        fingerprint: "11e95810275dab02804ed88b27d88a6a97b974ed011b2a76e73544d32f73f717",
     },
     ModelsBaseline {
         name: "models-00b-rspice-library",
