@@ -1085,6 +1085,74 @@ fn a_qspice_value_hung_below_its_anchor_stays_off_the_edge_it_starts_on() {
     );
 }
 
+/// A part RSpice draws with its own artwork has a body of another size than
+/// the source symbol's. A name or value the drawing stood just beside the
+/// source body keeps its side and its line but moves out along the way it
+/// reads until it clears RSpice's body.
+#[test]
+fn a_name_or_value_beside_a_source_body_clears_the_body_rspice_draws() {
+    use crate::schematic::label_layout::{
+        INSTANCE_NAME_WORLD, INSTANCE_VALUE_WORLD, LayoutPoint, TextEdge, instance_label_layout,
+        text_box,
+    };
+
+    let drawing = parse_asc(
+        "Version 4\n\
+         SYMBOL npn 0 0 R0\nWINDOW 0 52 32 Left 2\nWINDOW 3 52 72 Left 2\n\
+         SYMATTR InstName Q1\nSYMATTR Value BC547\n\
+         SYMBOL npn 320 0 M0\nWINDOW 0 52 32 Left 2\nWINDOW 3 52 72 Left 2\n\
+         SYMATTR InstName Q2\nSYMATTR Value BC557\n\
+         SYMBOL cap 640 0 R0\nWINDOW 0 20 12 Left 2\nWINDOW 3 20 56 Left 2\n\
+         SYMATTR InstName C1\nSYMATTR Value 10n\n",
+    )
+    .expect("the drawing reads");
+    let imported = import_foreign_schematic(&drawing, "work", &library());
+    for (name, value, source_y) in [
+        ("Q1", "BC547", (40.0, 90.0)),
+        ("Q2", "BC557", (40.0, 90.0)),
+        ("C1", "10n", (15.0, 70.0)),
+    ] {
+        let part = imported
+            .document
+            .components
+            .iter()
+            .find(|component| component.name == name)
+            .unwrap_or_else(|| panic!("{name} is placed"));
+        let (width, height) = part.symbol_dimensions();
+        let (width, height) = if part.rotation.is_vertical() {
+            (height as f32, width as f32)
+        } else {
+            (width as f32, height as f32)
+        };
+        let (x, y) = (part.pos.x as f32, part.pos.y as f32);
+        let layout = instance_label_layout(LayoutPoint::new(x, y), 1.0, part);
+        let reads = if name == "Q2" {
+            TextEdge::End
+        } else {
+            TextEdge::Start
+        };
+        for (placed, text, size, line) in [
+            (layout.name, name, INSTANCE_NAME_WORLD, source_y.0),
+            (layout.value, value, INSTANCE_VALUE_WORLD, source_y.1),
+        ] {
+            assert_eq!(
+                (placed.horizontal, placed.vertical, placed.anchor.y),
+                (reads, TextEdge::Center, line),
+                "{name}: {text:?} keeps its side and its line"
+            );
+            let text_box = text_box(placed, text, size);
+            let clear = text_box.min.x >= x + width * 0.5
+                || text_box.max.x <= x - width * 0.5
+                || text_box.min.y >= y + height * 0.5
+                || text_box.max.y <= y - height * 0.5;
+            assert!(
+                clear,
+                "{name}: {text:?} at {text_box:?} stands on the {width}x{height} body at ({x}, {y})"
+            );
+        }
+    }
+}
+
 #[test]
 fn a_jumper_is_a_wire_and_a_named_subcircuit_reads_from_the_deck() {
     let drawing = parse_asc(

@@ -38,11 +38,14 @@ use crate::schematic::documentation_shape::{DocumentationShape, DocumentationSha
 use crate::schematic::functional_catalog::{
     conform_functional_inputs, functional_library_binding, functional_part, placement_value,
 };
-use crate::schematic::label_layout::TextEdge;
+use crate::schematic::label_layout::{
+    INSTANCE_NAME_WORLD, INSTANCE_VALUE_WORLD, LayoutPoint, LayoutRect, TextEdge, text_box,
+};
 use crate::schematic::label_position::LabelPosition;
 use crate::schematic::net_label::{Junction, NetLabel, NetLabelKind, NetLabelSide, SupplyGlyph};
 use crate::schematic::rotation::Rotation;
 use crate::schematic::terminal_connection::rebuild_connections_from_terminals;
+use crate::schematic::value_label::component_value_label;
 use crate::schematic::wire::Wire;
 use crate::symbol::{SymbolDocument, SymbolPin, SymbolShape};
 
@@ -50,6 +53,10 @@ use crate::symbol::{SymbolDocument, SymbolPin, SymbolShape};
 const GRID: i32 = 10;
 /// The places of an LTspice A-device's instance line.
 const DEVICE_PLACES: usize = 8;
+
+/// The air an instance's name or value keeps from a body RSpice draws for
+/// it, as the shared layout keeps it.
+const LABEL_CLEARANCE: f32 = 4.0;
 
 /// The device letters whose value names a `.model` card.
 const MODEL_PREFIXES: [&str; 7] = ["D", "Q", "M", "J", "Z", "S", "W"];
@@ -636,6 +643,11 @@ impl Builder<'_> {
     /// lettered them: at the instance's own `WINDOW`, else its symbol's,
     /// turned with the instance. The text stays upright and hangs off its
     /// anchor on the side the drawing's run grows toward.
+    ///
+    /// A part RSpice draws with its own artwork has a body of another size
+    /// than the source symbol's, so a text the drawing stood beside the
+    /// source body can land on RSpice's. Such a text keeps its side and its
+    /// line and moves out along the way it reads until it clears the body.
     fn letter_like_the_drawing(
         &mut self,
         symbol: &ForeignSymbol,
@@ -666,11 +678,20 @@ impl Builder<'_> {
         let Some(component) = self.document.components.last_mut() else {
             return;
         };
+        let body = (component.kind != ComponentType::CellInstance).then(|| native_body(component));
+        let clear = |position: LabelPosition, text: &str, size: f32| match body {
+            Some(body) => clear_of_body(position, origin, text, size, body),
+            None => position,
+        };
+        let (name_text, value_text) = (
+            component.name.clone(),
+            component_value_label(component).into_owned(),
+        );
         if let Some(position) = name_position {
-            component.name_label_pos = position;
+            component.name_label_pos = clear(position, &name_text, INSTANCE_NAME_WORLD);
         }
         if let Some(position) = value_position {
-            component.value_label_pos = position;
+            component.value_label_pos = clear(position, &value_text, INSTANCE_VALUE_WORLD);
         }
         component.display_mode = match hidden {
             (true, true) => ComponentDisplayMode::Hidden,
@@ -2062,6 +2083,87 @@ impl Builder<'_> {
 }
 
 /// The definition's default attributes under the placed symbol's own.
+/// The box a part RSpice draws natively stands in: its symbol's extent,
+/// turned with it, about its position.
+fn native_body(component: &Component) -> LayoutRect {
+    let (width, height) = component.symbol_dimensions();
+    let (width, height) = if component.rotation.is_vertical() {
+        (height, width)
+    } else {
+        (width, height)
+    };
+    let (x, y) = (component.pos.x as f32, component.pos.y as f32);
+    let (half_width, half_height) = (width as f32 * 0.5, height as f32 * 0.5);
+    LayoutRect {
+        min: LayoutPoint::new(x - half_width, y - half_height),
+        max: LayoutPoint::new(x + half_width, y + half_height),
+    }
+}
+
+/// A placed text moved, if it lands on `body`, along an axis its box
+/// reaches out on until it stands [`LABEL_CLEARANCE`] clear: the shortest
+/// such move, or the shortest of all four for a text centred on its anchor.
+fn clear_of_body(
+    position: LabelPosition,
+    origin: Point,
+    text: &str,
+    size: f32,
+    body: LayoutRect,
+) -> LabelPosition {
+    let LabelPosition::Placed {
+        offset,
+        horizontal,
+        vertical,
+    } = position
+    else {
+        return position;
+    };
+    let Some(placed) =
+        position.placed_text(LayoutPoint::new(origin.x as f32, origin.y as f32), 1.0)
+    else {
+        return position;
+    };
+    let text = text_box(placed, text, size);
+    let overlaps = text.min.x < body.max.x
+        && body.min.x < text.max.x
+        && text.min.y < body.max.y
+        && body.min.y < text.max.y;
+    if !overlaps {
+        return position;
+    }
+    let right = (body.max.x + LABEL_CLEARANCE - text.min.x).ceil();
+    let left = (body.min.x - LABEL_CLEARANCE - text.max.x).floor();
+    let down = (body.max.y + LABEL_CLEARANCE - text.min.y).ceil();
+    let up = (body.min.y - LABEL_CLEARANCE - text.max.y).floor();
+    let across = match horizontal {
+        TextEdge::Start => vec![right],
+        TextEdge::End => vec![left],
+        TextEdge::Center => Vec::new(),
+    };
+    let along = match vertical {
+        TextEdge::Start => vec![down],
+        TextEdge::End => vec![up],
+        TextEdge::Center => Vec::new(),
+    };
+    let (across, along) = if across.is_empty() && along.is_empty() {
+        (vec![right, left], vec![down, up])
+    } else {
+        (across, along)
+    };
+    let moves = across
+        .into_iter()
+        .map(|step| Point::new(step as i32, 0))
+        .chain(along.into_iter().map(|step| Point::new(0, step as i32)));
+    let Some(step) = moves.min_by_key(|step| step.x.abs() + step.y.abs()) else {
+        return position;
+    };
+    LabelPosition::Placed {
+        offset: offset + step,
+        horizontal,
+        vertical,
+    }
+}
+
 fn merged_attributes(
     definition: &ForeignSymbolDefinition,
     symbol: &ForeignSymbol,
