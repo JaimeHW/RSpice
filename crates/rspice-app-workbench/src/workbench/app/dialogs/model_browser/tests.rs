@@ -72,6 +72,11 @@ fn an_instance_is_offered_only_the_cards_it_can_run() {
         listed(&diode),
         [
             "RSpice Foundation/RSPICE_DIODE",
+            "RSpice Foundation/RSPICE_LED_BLUE",
+            "RSpice Foundation/RSPICE_LED_GREEN",
+            "RSpice Foundation/RSPICE_LED_RED",
+            "RSpice Foundation/RSPICE_LED_WHITE",
+            "RSpice Foundation/RSPICE_SCHOTTKY",
             "RSpice Foundation/RSPICE_ZENER"
         ]
     );
@@ -189,10 +194,12 @@ fn the_arrow_keys_skip_rows_that_cannot_be_bound() {
     let first = stepped(&groups, None, 1).expect("a first row");
     assert_eq!(first, key("RSpice Foundation", "RSPICE_DIODE"));
     let next = stepped(&groups, Some(&first), 1).expect("a second row");
-    assert_eq!(next, key("RSpice Foundation", "RSPICE_ZENER"));
+    assert_eq!(next, key("RSpice Foundation", "RSPICE_LED_BLUE"));
     // The vendor's shadowed copy is the last row; the walk stops short of it.
-    assert_eq!(stepped(&groups, Some(&next), 1), Some(next.clone()));
-    assert_eq!(stepped(&groups, Some(&next), -5), Some(first));
+    let last = stepped(&groups, Some(&first), 100).expect("a last row");
+    assert_eq!(last, key("RSpice Foundation", "RSPICE_ZENER"));
+    assert_eq!(stepped(&groups, Some(&last), 1), Some(last.clone()));
+    assert_eq!(stepped(&groups, Some(&last), -100), Some(first));
 }
 
 #[test]
@@ -494,18 +501,21 @@ fn the_pick_opens_on_the_model_in_use_and_select_binds_a_different_one() {
     assert_eq!(unchanged.hint, "D1 already uses RSPICE_DIODE");
 
     let _ = frame(&ctx, &mut state, &manager, vec![press(Key::ArrowDown)]);
-    assert_eq!(state.pick, Some(key("RSpice Foundation", "RSPICE_ZENER")));
+    assert_eq!(
+        state.pick,
+        Some(key("RSpice Foundation", "RSPICE_LED_BLUE"))
+    );
     let changed = footer(
         &manager,
         Some(&target),
-        Some((library, &card("RSPICE_ZENER"))),
+        Some((library, &card("RSPICE_LED_BLUE"))),
         &[],
         "",
     );
     assert!(changed.can_select);
     assert_eq!(
         changed.hint,
-        "Replaces RSPICE_DIODE on D1 with RSPICE_ZENER from RSpice Foundation"
+        "Replaces RSPICE_DIODE on D1 with RSPICE_LED_BLUE from RSpice Foundation"
     );
 
     let mut result = ModelBrowserResult::None;
@@ -519,7 +529,7 @@ fn the_pick_opens_on_the_model_in_use_and_select_binds_a_different_one() {
         result,
         ModelBrowserResult::Selected {
             library: "RSpice Foundation".to_owned(),
-            model: "RSPICE_ZENER".to_owned(),
+            model: "RSPICE_LED_BLUE".to_owned(),
         }
     );
     assert!(!state.open);
