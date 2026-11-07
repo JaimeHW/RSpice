@@ -44,6 +44,8 @@ const TIMESTEP_PRODUCER: &str = "rspice.engine.timestep";
 const MEASURE_PRODUCER: &str = "rspice.engine.measure";
 /// The converters the build inserts on mixed boundaries.
 const BOUNDARY_PRODUCER: &str = "rspice.engine.boundary";
+/// The engine's own build of the deck it solves.
+const ELABORATION_PRODUCER: &str = "rspice.engine.elaboration";
 
 pub const PARAMETER_CODE: &str = "MODEL-PARAMETER-CLAMPED";
 pub const AID_CODE: &str = "RUN-CONVERGENCE-AID";
@@ -53,10 +55,11 @@ pub const MEASURE_CODE: &str = "RUN-MEASURE-FAILED";
 const SUPPLY_INFERRED_CODE: &str = "RUN-BOUNDARY-SUPPLY-INFERRED";
 pub const SUPPLY_DEFAULTED_CODE: &str = "RUN-BOUNDARY-SUPPLY-DEFAULTED";
 const SUPPLY_TEMPLATE_CODE: &str = "RUN-BOUNDARY-SUPPLY-TEMPLATE-STATIC";
+const DC_INDUCTOR_LOOP_CODE: &str = "RUN-DC-INDUCTOR-LOOP";
 
 /// Every rule code a notice record carries, which is what tells a notice
 /// from a failure in the batch they share.
-const NOTICE_CODES: [&str; 8] = [
+const NOTICE_CODES: [&str; 9] = [
     PARAMETER_CODE,
     AID_CODE,
     TIMESTEP_CODE,
@@ -65,6 +68,7 @@ const NOTICE_CODES: [&str; 8] = [
     SUPPLY_INFERRED_CODE,
     SUPPLY_DEFAULTED_CODE,
     SUPPLY_TEMPLATE_CODE,
+    DC_INDUCTOR_LOOP_CODE,
 ];
 
 /// The analyses, or the sweep points, one record names. Past this many, it
@@ -424,6 +428,26 @@ impl Model {
                     boundary_supply_message(boundary, *kind, *level, from.as_deref()),
                     Some(plan()),
                 ),
+                EngineNotice::DcInductorLoop {
+                    inductors,
+                    resistance,
+                } => {
+                    let located = locate(inductors.first().map(String::as_str));
+                    let names = inductors.join(", ");
+                    let message = if inductors.len() == 1 {
+                        format!(
+                            "Inductor {names} closes a loop of fixed DC voltages, so the DC \
+                             operating point treats it as {resistance:e} ohm, as QSPICE does"
+                        )
+                    } else {
+                        format!(
+                            "Inductors {names} close a loop of fixed DC voltages, so the DC \
+                             operating point treats them as {resistance:e} ohm, as QSPICE does"
+                        )
+                    };
+                    let fallback = if manual_deck { Some(deck()) } else { None };
+                    (DiagnosticLevel::Warning, names, located, message, fallback)
+                }
             },
             RunNotice::TruncationExceeded { first_time, .. } => (
                 DiagnosticLevel::Warning,
@@ -615,6 +639,11 @@ fn notice_key(notice: &RunNotice, scope: &str) -> FindingKey {
                     BoundarySupplyKind::TemplateStatic => SUPPLY_TEMPLATE_CODE,
                 },
                 boundary.to_ascii_uppercase(),
+            ),
+            EngineNotice::DcInductorLoop { inductors, .. } => (
+                ELABORATION_PRODUCER,
+                DC_INDUCTOR_LOOP_CODE,
+                inductors.join("\u{1f}").to_ascii_uppercase(),
             ),
         },
         // One condition of the run's stepping, however many analyses and

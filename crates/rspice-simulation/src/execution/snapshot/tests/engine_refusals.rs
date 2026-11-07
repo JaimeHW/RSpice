@@ -107,11 +107,12 @@ fn a_node_shunt_stated_for_one_analysis_clears_that_analysis_alone() {
     );
 }
 
-/// A source across a winding is a loop of fixed branch voltages in the DC
-/// solve, which every operating point refuses. A transient steps the winding
-/// as an impedance; its startup is left to the engine and is not claimed.
+/// A source across a winding solves at DC, as it does in QSPICE, whose DC
+/// solve gives every inductor 1 pOhm: the engine gives that resistance to a
+/// winding that closes a loop of fixed branch voltages and warns naming it,
+/// so preparation refuses neither analysis.
 #[test]
-fn a_source_across_a_winding_is_refused_where_a_dc_point_is_solved() {
+fn a_source_across_a_winding_is_not_refused() {
     let refusals = refusals_of(
         "source across winding\nV1 a 0 1\nL1 a 0 1u\nR1 a 0 1k\n.op\n.end\n",
         vec![
@@ -120,14 +121,7 @@ fn a_source_across_a_winding_is_refused_where_a_dc_point_is_solved() {
         ],
     );
 
-    assert_eq!(refusals.len(), 1, "{refusals:?}");
-    let EngineRefusalKind::BranchVoltageLoop(branch_loop) = &refusals[0].kind else {
-        panic!("{refusals:?}");
-    };
-    assert!(branch_loop.through_inductor);
-    assert_eq!(branch_loop.members.len(), 2, "{branch_loop:?}");
-    assert_eq!(refusals[0].tasks.len(), 1);
-    assert_eq!(refusals[0].tasks[0].analysis, instance_id("op"));
+    assert!(refusals.is_empty(), "{refusals:?}");
 }
 
 /// Two sources across one node pair are the same singular DC solve, stated

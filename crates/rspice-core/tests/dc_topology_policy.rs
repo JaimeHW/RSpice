@@ -6,6 +6,8 @@ use rspice_core::engine::{
     SimulationErrorCategory, SpiceDialect,
 };
 use rspice_core::netlist::Netlist;
+use std::cell::RefCell;
+use std::sync::Once;
 
 fn engine() -> Engine {
     Engine::new(SimulationConfig::default())
@@ -13,6 +15,46 @@ fn engine() -> Engine {
 
 fn parse(deck: &str) -> Netlist {
     Netlist::parse(deck).expect("deck parses")
+}
+
+static LOG_INIT: Once = Once::new();
+
+thread_local! {
+    static CAPTURED: RefCell<Option<Vec<String>>> = const { RefCell::new(None) };
+}
+
+struct CapturingLogger;
+
+impl log::Log for CapturingLogger {
+    fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
+        metadata.level() <= log::Level::Warn
+    }
+
+    fn log(&self, record: &log::Record<'_>) {
+        if self.enabled(record.metadata()) {
+            CAPTURED.with(|captured| {
+                if let Some(lines) = captured.borrow_mut().as_mut() {
+                    lines.push(record.args().to_string());
+                }
+            });
+        }
+    }
+
+    fn flush(&self) {}
+}
+
+static LOGGER: CapturingLogger = CapturingLogger;
+
+/// Run `body` with the warnings it logs on this thread collected.
+fn warnings_of<T>(body: impl FnOnce() -> T) -> (T, Vec<String>) {
+    LOG_INIT.call_once(|| {
+        log::set_logger(&LOGGER).expect("the capture logger installs");
+        log::set_max_level(log::LevelFilter::Warn);
+    });
+    CAPTURED.with(|captured| *captured.borrow_mut() = Some(Vec::new()));
+    let value = body();
+    let lines = CAPTURED.with(|captured| captured.borrow_mut().take().unwrap_or_default());
+    (value, lines)
 }
 
 fn voltage(result: &rspice_core::solver::SimulationResult, node: &str) -> f64 {
@@ -765,10 +807,102 @@ fn xyce_winding_ic_participates_in_nonlinear_dc_bias() {
     assert!((voltage(&point, "out") - 0.577617386).abs() < 1e-6);
 }
 
-/// A loop of voltage sources and inductors is singular in every DC solve: the
-/// DC stamp shorts each winding, the loop's branch rows sum to a constant, and
-/// neither GMIN nor RSHUNT stamps a branch row. The circuit names each loop it
-/// refuses, and a winding the solve holds at its `IC=` is not part of one.
+/// QSPICE 2026 batch `.op`: its DC solve gives every inductor 1 pOhm, so a
+/// loop through a winding solves. 1 A into L1 || (L2 + L3) splits 2/3 and 1/3
+/// with V(a) = 6.666666666666666e-13 and V(b) = 3.333333333333333e-13; 1 V
+/// across 1 uH draws I(L1) = 1e12 and I(V1) = -1e12; 1 V and 2 V joined by
+/// 1 uH give I(L1) = -1e12, I(V2) = -1e12 and I(V1) = 9.99999999999999e11;
+/// `.dc V1 0 1 0.5` over 1 uH || 3 uH gives each V1 / 1e-12. Read the native
+/// way, RSpice gives that resistance to the windings that close a loop and to
+/// no other, and warns naming them: a winding outside every loop stays a
+/// short. LTspice differs by its default 1 mOhm series resistance, which it
+/// gives every inductor in every analysis.
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn a_loop_through_windings_solves_with_each_winding_a_picoohm_at_dc() {
+    let close = |label: &str, value: f64, expected: f64| {
+        assert!(
+            (value - expected).abs() <= 1e-12 * expected.abs(),
+            "{label} = {value:e}, QSPICE {expected:e}"
+        );
+    };
+    let current = |result: &rspice_core::solver::SimulationResult, name: &str| {
+        result
+            .branch_current_named(name)
+            .unwrap_or_else(|| panic!("I({name}) is solved"))
+    };
+
+    let (point, warnings) = warnings_of(|| {
+        engine().run_dc_op(&parse(
+            "inductor loop\nI1 0 a 1\nL1 a 0 16m\nL2 a b 97.5m\nL3 b 0 16m\nR1 a 0 10k\n\
+             I2 0 c 1\nL4 c 0 1u\nR2 c 0 1k\n.end\n",
+        ))
+    });
+    let point = point.expect("a loop through windings solves");
+    close("V(a)", voltage(&point, "a"), 6.666666666666666e-13);
+    close("V(b)", voltage(&point, "b"), 3.333333333333333e-13);
+    close("I(L1)", current(&point, "L1"), 2.0 / 3.0);
+    close("I(L2)", current(&point, "L2"), 1.0 / 3.0);
+    close("I(L3)", current(&point, "L3"), 1.0 / 3.0);
+    assert_eq!(voltage(&point, "c"), 0.0, "L4 closes no loop");
+    close("I(L4)", current(&point, "L4"), 1.0);
+    assert!(
+        warnings.iter().any(|line| {
+            let line = line.to_ascii_lowercase();
+            line.contains("inductor(s) l1, l2, l3 as 1e-12 ohm")
+                && line.contains("close the loop l1, l2, l3")
+        }),
+        "{warnings:?}"
+    );
+    assert!(
+        !warnings
+            .iter()
+            .any(|line| line.to_ascii_lowercase().contains("l4")),
+        "{warnings:?}"
+    );
+
+    let point = engine()
+        .run_dc_op(&parse("V across L\nV1 a 0 1\nL1 a 0 1u\n.end\n"))
+        .expect("a source across a winding solves");
+    close("I(L1)", current(&point, "L1"), 1e12);
+    close("I(V1)", current(&point, "V1"), -1e12);
+
+    let point = engine()
+        .run_dc_op(&parse(
+            "V L V\nV1 a 0 1\nL1 a b 1u\nV2 b 0 2\nR1 a 0 1k\n.end\n",
+        ))
+        .expect("a winding between two sources solves");
+    close("I(L1)", current(&point, "L1"), -1e12);
+    close("I(V2)", current(&point, "V2"), -1e12);
+    close("I(V1)", current(&point, "V1"), 9.99999999999999e11);
+
+    let sweep = engine()
+        .run_dc_sweep(
+            &parse("L loop under a sweep\nV1 a 0 1\nL1 a 0 1u\nL2 a 0 3u\n.end\n"),
+            "V1",
+            0.5,
+            1.0,
+            0.5,
+        )
+        .expect("every point of the sweep solves");
+    assert_eq!(sweep.len(), 2);
+    for (source, point) in &sweep {
+        close("I(L1)", current(point, "L1"), source / 1e-12);
+        close("I(L2)", current(point, "L2"), source / 1e-12);
+    }
+
+    let circuit = engine()
+        .build_circuit(&parse("V across L\nV1 a 0 1\nL1 a 0 1u\n.end\n"))
+        .unwrap();
+    assert!(circuit.dc_branch_voltage_loops().is_empty());
+}
+
+/// Read the ngspice way, a loop of voltage sources and inductors is singular
+/// in every DC solve: the DC stamp shorts each winding, the loop's branch rows
+/// sum to a constant, and neither GMIN nor RSHUNT stamps a branch row. A loop
+/// of voltage sources alone is singular read any way. The circuit names each
+/// loop it refuses, and a winding the solve holds at its `IC=` is not part of
+/// one.
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn a_loop_through_dc_shorted_windings_is_refused_by_every_dc_solve() {
@@ -796,7 +930,11 @@ fn a_loop_through_dc_shorted_windings_is_refused_by_every_dc_solve() {
     ];
     for (deck, members, through_inductor) in cases {
         let netlist = parse(deck);
-        let engine = engine();
+        let engine = if through_inductor {
+            Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Ngspice))
+        } else {
+            engine()
+        };
         engine
             .run_dc_op(&netlist)
             .expect_err("a loop of fixed branch voltages has no unique DC solution");
@@ -818,6 +956,8 @@ fn a_loop_through_dc_shorted_windings_is_refused_by_every_dc_solve() {
     }
 
     let xyce = Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
+    xyce.run_dc_op(&parse("V across L\nV1 a 0 1\nL1 a 0 1u\n.end\n"))
+        .expect_err("Xyce leaves a loop through a winding singular");
     let held = parse("Held winding\nV1 a 0 1\nL1 a 0 1u IC=1m\n.end\n");
     xyce.run_dc_op(&held)
         .expect("a winding held at its IC is a current in the DC solve");

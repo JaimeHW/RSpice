@@ -19,6 +19,11 @@ pub enum InductorIcMode {
     AllOperatingPoints,
 }
 
+/// The resistance QSPICE gives every inductor in a DC solve. RSpice gives it
+/// only to a winding that closes a loop of fixed DC branch voltages, whose DC
+/// system a short leaves singular.
+pub(crate) const DC_LOOP_RESISTANCE: Value = 1e-12;
+
 #[derive(Debug, Default, Clone)]
 pub struct Inductors {
     pub names: Vec<String>,
@@ -41,6 +46,11 @@ pub struct Inductors {
     pub ic: Vec<Option<Value>>,
     /// Bias policy; the authored `ic` values remain available to UIC in every mode.
     pub ic_mode: InductorIcMode,
+    /// The windings the DC solve gives [`DC_LOOP_RESISTANCE`] in place of a
+    /// short, because they close a loop of fixed DC branch voltages
+    /// ([`crate::circuit::CircuitData::resolve_dc_inductor_loops`]). Empty when
+    /// none does.
+    pub(crate) dc_loop: Vec<bool>,
 }
 
 impl Inductors {
@@ -117,6 +127,17 @@ impl Inductors {
         self.ic_mode == InductorIcMode::AllOperatingPoints && self.has_explicit_initial_conditions()
     }
 
+    /// The resistance the DC solve gives winding `index` in place of a
+    /// short, when it closes a loop of fixed DC branch voltages.
+    #[inline]
+    pub(crate) fn dc_loop_resistance(&self, index: usize) -> Option<Value> {
+        self.dc_loop
+            .get(index)
+            .copied()
+            .unwrap_or(false)
+            .then_some(DC_LOOP_RESISTANCE)
+    }
+
     /// Get equivalent resistance for trapezoidal integration
     #[inline]
     pub fn req(&self, idx: usize, dt: Value) -> Value {
@@ -126,8 +147,10 @@ impl Inductors {
     /// Stamp inductors for DC operating point.
     ///
     /// At DC, an ideal inductor is a short circuit:
-    /// V(np) - V(nn) = 0 with unconstrained branch current. Xyce's authored
-    /// IC replaces this short with a fixed-current equation during bias.
+    /// V(np) - V(nn) = 0 with unconstrained branch current, or
+    /// V(np) - V(nn) = R*I for a winding that closes a loop of fixed DC
+    /// branch voltages ([`Self::dc_loop_resistance`]). Xyce's authored IC
+    /// replaces this short with a fixed-current equation during bias.
     #[inline]
     pub fn stamp_dc_short_direct(
         &self,
@@ -152,6 +175,9 @@ impl Inductors {
             if nn > 0 {
                 matrix.add(br - 1, nn - 1, -1.0);
                 matrix.add(nn - 1, br - 1, -1.0);
+            }
+            if let Some(resistance) = self.dc_loop_resistance(i) {
+                matrix.add(br - 1, br - 1, -resistance);
             }
 
             rhs[br - 1] = 0.0;
@@ -229,6 +255,9 @@ impl Inductors {
                 matrix.add(br - 1, nn - 1, -1.0);
                 matrix.add(nn - 1, br - 1, -1.0);
             }
+            if let Some(resistance) = self.dc_loop_resistance(i) {
+                matrix.add(br - 1, br - 1, -resistance);
+            }
 
             rhs[br - 1] = 0.0;
         }
@@ -296,6 +325,9 @@ impl Inductors {
                 matrix.add(br - 1, nn - 1, -1.0);
                 matrix.add(nn - 1, br - 1, -1.0);
             }
+            if let Some(resistance) = self.dc_loop_resistance(i) {
+                matrix.add(br - 1, br - 1, -resistance);
+            }
             rhs[br - 1] = 0.0;
         }
     }
@@ -330,6 +362,9 @@ impl Inductors {
             if nn > 0 {
                 matrix.push(br - 1, nn - 1, -1.0);
                 matrix.push(nn - 1, br - 1, -1.0);
+            }
+            if let Some(resistance) = self.dc_loop_resistance(i) {
+                matrix.push(br - 1, br - 1, -resistance);
             }
 
             rhs[br - 1] = 0.0;

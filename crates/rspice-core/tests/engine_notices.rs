@@ -285,3 +285,52 @@ fn a_boundary_supply_the_deck_did_not_state_is_one_notice_naming_the_net() {
         "{from:?}"
     );
 }
+
+/// Two windings in parallel across one current source close a loop of fixed
+/// DC branch voltages, which QSPICE solves by giving every inductor 1 pOhm.
+/// The build gives them that resistance and raises one notice naming both; a
+/// winding outside every loop is not named.
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn windings_closing_a_dc_loop_are_one_notice_naming_them() {
+    let collector = NoticeCollector::new();
+    let _installed = collector.install();
+    let netlist = Netlist::parse(
+        "winding loop
+I1 0 a 1
+L1 a 0 1u
+L2 a 0 3u
+I2 0 c 1
+L3 c 0 1u
+R1 c 0 1k
+.op
+.end
+",
+    )
+    .expect("the deck parses");
+    Engine::default()
+        .run_dc_op_with_abort(&netlist, &NoAbort)
+        .expect("the loop solves");
+    let loops: Vec<_> = collector
+        .take()
+        .into_iter()
+        .filter_map(|recorded| match recorded.notice {
+            EngineNotice::DcInductorLoop {
+                inductors,
+                resistance,
+            } => Some((
+                inductors
+                    .iter()
+                    .map(|name| name.to_ascii_uppercase())
+                    .collect::<Vec<_>>(),
+                resistance,
+            )),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        loops,
+        vec![(vec!["L1".to_owned(), "L2".to_owned()], 1e-12)],
+        "{loops:#?}"
+    );
+}

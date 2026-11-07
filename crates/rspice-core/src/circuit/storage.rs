@@ -18,6 +18,7 @@ mod nonlinear;
 mod passive;
 mod sources;
 
+pub(crate) use inductors::DC_LOOP_RESISTANCE;
 pub use inductors::{InductorIcMode, Inductors};
 pub use nonlinear::Diodes;
 pub(crate) use nonlinear::{

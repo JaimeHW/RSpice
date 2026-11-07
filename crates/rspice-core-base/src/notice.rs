@@ -45,6 +45,15 @@ pub enum EngineNotice {
         /// card holds a static one.
         from: Option<String>,
     },
+    /// Windings that close a loop of fixed DC branch voltages, which shorted
+    /// windings leave without a unique DC solution, given a resistance in the
+    /// DC solve in place of the short, as QSPICE gives every inductor.
+    DcInductorLoop {
+        /// The windings, as the deck names them.
+        inductors: Vec<String>,
+        /// The resistance the DC solve gives each, in ohms.
+        resistance: f64,
+    },
 }
 
 /// Where a boundary's unstated supply came from.
@@ -167,6 +176,9 @@ enum NoticeKey {
         boundary: String,
         kind: BoundarySupplyKind,
     },
+    DcInductorLoop {
+        inductors: Vec<String>,
+    },
 }
 
 impl EngineNotice {
@@ -188,6 +200,12 @@ impl EngineNotice {
             Self::BoundarySupply { boundary, kind, .. } => NoticeKey::BoundarySupply {
                 boundary: boundary.to_ascii_uppercase(),
                 kind: *kind,
+            },
+            Self::DcInductorLoop { inductors, .. } => NoticeKey::DcInductorLoop {
+                inductors: inductors
+                    .iter()
+                    .map(|name| name.to_ascii_uppercase())
+                    .collect(),
             },
         }
     }

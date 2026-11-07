@@ -10993,6 +10993,13 @@ impl Engine {
             .set_dc_floating_components(dc_floating_components, dc_floating_component_is_certain);
         circuit.fatal_no_dc_path_nodes =
             circuit.independent_dc_drive_nodes(self.current_abstol(), self.residual_reltol());
+        // QSPICE's DC solve gives every inductor 1 pOhm, so a loop through a
+        // winding solves there. Read the native way, the windings that close
+        // such a loop get it and the build says so; ngspice and Xyce leave the
+        // loop singular.
+        if self.config.spice_dialect == SpiceDialect::BestAvailable {
+            circuit.resolve_dc_inductor_loops();
+        }
 
         // Resolve behavioral source expression references once every node
         // exists.
