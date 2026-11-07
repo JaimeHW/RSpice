@@ -2273,6 +2273,41 @@ fn a_qspice_pin_nothing_reaches_joins_its_own_net() {
     assert_eq!(note.pos, Point::new(260, -40));
 }
 
+/// An LTspice pin with no `PinName` letters nothing in LTspice. RSpice names
+/// its port for the pin's place on the instance line, but does not letter
+/// that made-up name on the drawing.
+#[test]
+fn an_ltspice_pin_with_no_name_letters_none() {
+    const UNNAMED_ASY: &str = "Version 4\nSymbolType BLOCK\nRECTANGLE Normal -32 -32 32 32\n\
+        SYMATTR Prefix X\nSYMATTR SpiceModel unnamed.sub\nSYMATTR Value unnamed\n\
+        PIN -32 0 LEFT 8\nPINATTR PinName IN\nPINATTR SpiceOrder 1\n\
+        PIN 32 0 RIGHT 8\nPINATTR SpiceOrder 2\n";
+    let mut library = library();
+    library.symbols.insert(
+        "unnamed".to_owned(),
+        ForeignSymbolSource {
+            definition: parse_asy(UNNAMED_ASY).expect("the test symbol reads"),
+            location: "unnamed.asy".to_owned(),
+            schematic: None,
+        },
+    );
+    let drawing = parse_asc("Version 4\nSYMBOL unnamed 64 64 R0\nSYMATTR InstName X1\n").unwrap();
+    let imported = import_foreign_schematic(&drawing, "work", &library);
+    let cell = imported
+        .cells
+        .iter()
+        .find(|cell| cell.source_symbol == "unnamed")
+        .expect("the unnamed cell");
+    let resolved = ResolvedCellSymbol::from_authored_document(cell.symbol.clone(), &cell.ports);
+    assert_eq!(
+        resolved
+            .connectable_pins()
+            .map(|pin| (pin.name.clone(), pin.name_hidden))
+            .collect::<BTreeMap<_, _>>(),
+        BTreeMap::from([("IN".to_owned(), false), ("P2".to_owned(), true)])
+    );
+}
+
 /// A pin its source drawing letters no name for draws none here: LTspice's
 /// `NONE`, a place the symbol draws no pin for, and a QSPICE pin with no
 /// justification or one centred on its own point. A lettered pin keeps its
