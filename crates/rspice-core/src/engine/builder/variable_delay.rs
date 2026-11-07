@@ -219,24 +219,25 @@ impl CodeModel for VariableDelay {
         for (index, value) in shifted {
             ctx.set_state(index, value);
         }
-        // A sample older than the longest delay from the last accepted time
-        // is never read again, even by a retried step.
-        let retention = maximum.map_or(Value::INFINITY, |maximum| maximum + (time - previous_time));
-        ctx.record_transient_history(
-            HISTORY,
-            time,
-            vec![time, input, previous_time, previous_input],
-            retention,
-        );
+        // Only accepted points enter the history: a trial's sample leaves with
+        // the trial, and writing one would copy the history the trial's
+        // rollback image shares. A trial reads its own present sample instead.
+        let present = [time, input, previous_time, previous_input];
+        if ctx.evaluation_phase() == EvaluationPhase::AcceptedStep {
+            // A sample older than the longest delay from the last accepted
+            // time is never read again, even by a retried step.
+            let retention =
+                maximum.map_or(Value::INFINITY, |maximum| maximum + (time - previous_time));
+            ctx.record_transient_history(HISTORY, time, present.to_vec(), retention);
+        }
         Self::request_corner_breakpoint(ctx, delay);
 
         let target = time - delay;
-        let Some(&[later_time, later, earlier_time, earlier]) = ctx
+        let recorded = ctx
             .transient_history_values_at_or_after(HISTORY, target)
             .and_then(|sample| <&[Value; 4]>::try_from(sample).ok())
-        else {
-            return Err(self.refuse(format!("has no history at time {target}")));
-        };
+            .filter(|sample| sample[0] <= time);
+        let &[later_time, later, earlier_time, earlier] = recorded.unwrap_or(&present);
         // The present sample enters the output, and its partial, only when
         // the delay is shorter than the step.
         let present = (later_time - time).abs() <= Value::EPSILON * time.abs().max(1.0);
