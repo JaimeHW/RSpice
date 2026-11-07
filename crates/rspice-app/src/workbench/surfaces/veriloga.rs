@@ -113,7 +113,8 @@ fn handle_veriloga_file_drop(ctx: &egui::Context, app: &mut RSpiceApp) {
         .collect::<Result<Vec<_>, _>>()
         .and_then(|sources| {
             crate::workbench::documents::code_workspace::import_dropped_veriloga_sources(
-                &mut app.state,
+                &app.state.model,
+                &mut app.state.code.code_workspace.veriloga,
                 sources,
             )
         });

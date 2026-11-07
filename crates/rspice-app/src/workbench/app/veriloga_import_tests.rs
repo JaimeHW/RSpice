@@ -191,8 +191,12 @@ fn a_multi_file_drop_imports_each_root_with_the_files_it_includes() {
     })
     .collect();
 
-    code_workspace::import_dropped_veriloga_sources(&mut app.state, dropped)
-        .expect("the drop is read");
+    code_workspace::import_dropped_veriloga_sources(
+        &app.state.model,
+        &mut app.state.code.code_workspace.veriloga,
+        dropped,
+    )
+    .expect("the drop is read");
 
     let first = form(&app);
     assert_eq!(first.file_name, "gainer.va");

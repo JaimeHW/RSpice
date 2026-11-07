@@ -393,7 +393,8 @@ fn show_rail(ui: &mut Ui, app: &mut RSpiceApp, rail: Rail) {
                     match code_workspace::source_file_mutation_block_reason(app, language) {
                         Some(reason) => Err(reason.to_owned()),
                         None => code_workspace::request_veriloga_add_files(
-                            &mut app.state,
+                            &app.state.model,
+                            &mut app.state.code.code_workspace.veriloga,
                             file_actions.bundle_id,
                             &path,
                         ),

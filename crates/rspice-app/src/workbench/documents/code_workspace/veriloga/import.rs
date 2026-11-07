@@ -14,14 +14,13 @@ use crate::state::{
     LibraryManager, MAX_PROJECT_CODE_SOURCE_BYTES, ProjectSourceBundle, ProjectSourceFile,
     ProjectSourceId, ProjectSourceLanguage,
 };
-use crate::workbench::RSpiceApp;
-use crate::workbench::app_state::AppState;
+use rspice_app_state::workbench::app_state::model::Model;
 
 use super::super::page::{VerilogAImportTarget, VerilogAWorkbenchState};
 use super::super::{
     VerilogAFileSelection, VerilogAImportFormState, VerilogAReplaceReview, VerilogAReplaceTarget,
 };
-use super::{invalidate_veriloga_evidence, selected_veriloga_source};
+use super::{RSpiceApp, invalidate_veriloga_evidence, selected_veriloga_source};
 
 #[cfg(target_arch = "wasm32")]
 #[derive(Debug)]
@@ -216,7 +215,7 @@ fn apply_import(app: &mut RSpiceApp, picked: Vec<PickedSource>) {
     veriloga.import_requested = false;
     if let Some(target) = veriloga.import_target.take() {
         veriloga.replace_target = None;
-        if !import_target_is_current(&app.state, &target) {
+        if !import_target_is_current(&app.state.model, &target) {
             app.state.record(
                 LogSeverity::Error,
                 LogSource::Studio,
@@ -291,15 +290,19 @@ fn apply_import(app: &mut RSpiceApp, picked: Vec<PickedSource>) {
     }
     // File > Import never touches an open view: the file becomes cell views
     // of its own, and the form says which, and where, before any is made.
-    if let Err(error) = open_veriloga_import_forms(&mut app.state, picked) {
+    if let Err(error) = open_veriloga_import_forms(
+        &app.state.model,
+        &mut app.state.code.code_workspace.veriloga,
+        picked,
+    ) {
         app.state.prompt(error);
     }
 }
 
 /// Whether the bundle Add files was asked for is still the revision the
 /// rail showed, and still holds the file that was in front.
-fn import_target_is_current(state: &AppState, target: &VerilogAImportTarget) -> bool {
-    let content = &state.model.workspace.content;
+fn import_target_is_current(model: &Model, target: &VerilogAImportTarget) -> bool {
+    let content = &model.workspace.content;
     content.project.id() == target.project_id
         && content
             .project_sources
@@ -315,14 +318,15 @@ fn import_target_is_current(state: &AppState, target: &VerilogAImportTarget) -> 
 /// front of the reader. The picker is bound to that exact revision. The
 /// caller has checked that the project's sources may change.
 pub(crate) fn request_veriloga_add_files(
-    state: &mut AppState,
+    model: &Model,
+    veriloga: &mut VerilogAWorkbenchState,
     bundle_id: ProjectSourceId,
     importer_path: &str,
 ) -> Result<(), String> {
-    if state.code.code_workspace.veriloga.import_requested {
+    if veriloga.import_requested {
         return Err("A Verilog-A/AMS file is already being chosen.".to_owned());
     }
-    let content = &state.model.workspace.content;
+    let content = &model.workspace.content;
     let bundle = content
         .project_sources
         .get_bundle(bundle_id)
@@ -334,7 +338,6 @@ pub(crate) fn request_veriloga_add_files(
         closure_digest: bundle.closure_digest(),
         importer_path: importer_path.to_owned(),
     };
-    let veriloga = &mut state.code.code_workspace.veriloga;
     veriloga.import_target = Some(target);
     veriloga.replace_target = None;
     veriloga.import_requested = true;
@@ -397,7 +400,8 @@ fn is_veriloga_root(name: &str) -> bool {
 /// and the rest in turn. A root is a `.va` or `.vams` file no other picked
 /// root includes; every picked file is a file each form can resolve.
 fn open_veriloga_import_forms(
-    state: &mut AppState,
+    model: &Model,
+    veriloga: &mut VerilogAWorkbenchState,
     picked: Vec<PickedSource>,
 ) -> Result<(), String> {
     let files = picked
@@ -424,7 +428,7 @@ fn open_veriloga_import_forms(
         .filter(|candidate| !included.contains(&candidate.name.to_lowercase()))
         .map(|root| {
             VerilogAImportFormState::read(
-                state,
+                model,
                 root.name.clone(),
                 files.clone(),
                 root.folder.clone(),
@@ -442,7 +446,6 @@ fn open_veriloga_import_forms(
         });
     }
     let first = forms.remove(0);
-    let veriloga = &mut state.code.code_workspace.veriloga;
     veriloga.import_form = Some(first);
     veriloga.import_queue = forms;
     Ok(())
@@ -592,15 +595,15 @@ impl VerilogAImportFormState {
     /// includes reach, the top modules it declares, and the library the
     /// active design lives in, when it may be written.
     fn read(
-        state: &AppState,
+        model: &Model,
         file_name: String,
         files: BTreeMap<String, String>,
         folder: Option<PathBuf>,
     ) -> Self {
-        let writable = writable_libraries(&state.model.library_manager);
+        let writable = writable_libraries(&model.library_manager);
         let library = [
-            &state.model.workspace.content.active_view.library,
-            &state.model.workspace.content.project.root_library,
+            &model.workspace.content.active_view.library,
+            &model.workspace.content.project.root_library,
         ]
         .into_iter()
         .find(|library| writable.contains(*library))
@@ -608,7 +611,7 @@ impl VerilogAImportFormState {
         .cloned()
         .unwrap_or_default();
         let mut form = Self {
-            project_id: state.model.workspace.content.project.id(),
+            project_id: model.workspace.content.project.id(),
             file_name,
             files,
             folder,
@@ -704,15 +707,14 @@ pub(crate) fn writable_libraries(libraries: &LibraryManager) -> Vec<String> {
 /// Files dropped on the workbench: each root among them opens the import
 /// form, with the other files and the root's folder to resolve its includes.
 pub(crate) fn import_dropped_veriloga_sources(
-    state: &mut AppState,
+    model: &Model,
+    veriloga: &mut VerilogAWorkbenchState,
     dropped: Vec<PickedSource>,
 ) -> Result<(), String> {
-    if state.model.safe_mode.project_read_only() {
+    if model.safe_mode.project_read_only() {
         return Err("The active project is read-only.".to_owned());
     }
-    if state.code.code_workspace.veriloga.import_requested
-        || state.code.code_workspace.veriloga.pending.is_some()
-    {
+    if veriloga.import_requested || veriloga.pending.is_some() {
         return Err("A Verilog-A/AMS import or compile transaction is already active.".to_owned());
     }
     if let Some(file) = dropped
@@ -726,7 +728,7 @@ pub(crate) fn import_dropped_veriloga_sources(
     }
     // A file dropped on an editor is a file to import, not a replacement for
     // the source under the pointer: it goes to the import form like any other.
-    open_veriloga_import_forms(state, dropped)
+    open_veriloga_import_forms(model, veriloga, dropped)
 }
 
 fn suggested_import_path(importer_path: &str, file_name: &str) -> String {

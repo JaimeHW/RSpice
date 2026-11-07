@@ -601,7 +601,8 @@ fn import_with_no_veriloga_tab_creates_the_cells_and_opens_the_first() {
         .library
         .clone();
     code_workspace::import_dropped_veriloga_sources(
-        &mut app.state,
+        &app.state.model,
+        &mut app.state.code.code_workspace.veriloga,
         vec![code_workspace::PickedSource {
             name: "pair.va".to_owned(),
             contents: TWO_TOP_MODULES.to_owned(),
@@ -718,7 +719,8 @@ fn import_of_an_unparseable_file_creates_nothing() {
         .map(|(_, library)| library.cell_count())
         .sum::<usize>();
     code_workspace::import_dropped_veriloga_sources(
-        &mut app.state,
+        &app.state.model,
+        &mut app.state.code.code_workspace.veriloga,
         vec![code_workspace::PickedSource {
             name: "broken.va".to_owned(),
             contents: "module broken(p, n;\nendmodule\n".to_owned(),

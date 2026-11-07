@@ -1309,7 +1309,8 @@ mod tests {
         let source = "module dropped(p, n); inout p, n; electrical p, n; endmodule\n";
 
         import_dropped_veriloga_sources(
-            &mut app.state,
+            &app.state.model,
+            &mut app.state.code.code_workspace.veriloga,
             vec![PickedSource {
                 name: "dropped.va".to_owned(),
                 contents: source.to_owned(),
