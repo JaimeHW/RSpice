@@ -913,6 +913,18 @@ impl Engine {
             }
         }
 
+        // A device the linear stamp leaves out -- a behavioral voltage
+        // source, whose branch equation is its expression -- leaves its
+        // branch row and column empty, and a system with an empty row has no
+        // solution to seed Newton with: it starts from zero without asking
+        // the solver to factor it.
+        if (0..size)
+            .any(|index| matrix.row_is_deficient(index) || matrix.column_is_deficient(index))
+        {
+            log::debug!("Linear presolve skipped: a device it leaves out owns an empty row");
+            return None;
+        }
+
         match matrix.solve(&rhs) {
             Ok(solution) => {
                 log::debug!("Linear presolve succeeded, using as initial guess");
