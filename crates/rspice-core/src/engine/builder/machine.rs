@@ -185,7 +185,7 @@ impl MachineModel {
             request(ctx, time + resolution);
             return;
         }
-        if !(step > 0.0) {
+        if step.is_nan() || step <= 0.0 {
             return;
         }
         let slopes: Vec<Value> = inputs
@@ -280,12 +280,15 @@ impl CodeModel for MachineModel {
             let current = AMPERES_PER_UNIT * ctx.state_prev(slot::OUTPUTS + index);
             ctx.set_output(port, -current);
         }
+        if ctx.evaluation_phase() == EvaluationPhase::RollbackableProbe {
+            // A trial only drives the outputs: the machine advances at
+            // accepted points.
+            return Ok(());
+        }
         let previous = ctx.state_prev(slot::STATE) as usize;
         let time = ctx.time;
         let state = self.advance(ctx, &mut evaluator, previous, &inputs, time, false);
-        if ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe {
-            self.schedule(ctx, &mut evaluator, (previous, state), &inputs);
-        }
+        self.schedule(ctx, &mut evaluator, (previous, state), &inputs);
         Ok(())
     }
 }

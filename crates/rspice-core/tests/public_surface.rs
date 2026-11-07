@@ -416,7 +416,10 @@ use rspice_core::analysis::harmonic_balance::{
 // `netlist::PartTolerance` and `netlist::PartToleranceDistribution`, the
 // `.TOLERANCE` statements the Monte Carlo driver reads from a parsed deck's
 // options, bring it to 5,257.
-const MAX_PUBLIC_ITEMS: usize = 5257;
+// `netlist::StateMachine` and `netlist::MachineRule`, the LTspice `.machine`
+// block an `ElementKind::StateMachine` carries to the engine's builder and
+// the CLI's element inspection, bring it to 5,259.
+const MAX_PUBLIC_ITEMS: usize = 5259;
 
 /// The `#[doc(hidden)] pub` items of the family, counted apart from
 /// `MAX_PUBLIC_ITEMS`. A hidden item is plumbing that one crate of the engine
