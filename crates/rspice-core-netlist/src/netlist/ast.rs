@@ -59,16 +59,6 @@ impl ParametricValue {
         ParametricValue::Resolved(v)
     }
 
-    /// Try to get the resolved value
-    pub fn as_value(&self) -> Option<Value> {
-        match self {
-            ParametricValue::Resolved(v) => Some(*v),
-            ParametricValue::Expression(_)
-            | ParametricValue::String(_)
-            | ParametricValue::StringExpression(_) => None,
-        }
-    }
-
     /// Check if this is a resolved value
     pub fn is_resolved(&self) -> bool {
         matches!(self, ParametricValue::Resolved(_))
@@ -223,6 +213,18 @@ pub enum ElementProvenance {
         /// behavioral source are the same elements.
         form: SynthesizedTransferForm,
     },
+    /// Behavioral voltage source driving the private input node of a source
+    /// known by a measured frequency response.
+    ///
+    /// The owner's other elements realize a rational fit of `response` for
+    /// the operating point and the transient. Small-signal analyses use the
+    /// response itself: there the owner's output is `response` times the
+    /// small-signal voltage of `node`.
+    GeneratedFrequencyResponseInput {
+        owner: String,
+        node: String,
+        response: FrequencyResponse,
+    },
 }
 
 /// How a dynamic controlled source realized from existing elements was
@@ -241,6 +243,9 @@ pub enum SynthesizedTransferForm {
     Integral,
     /// `delay(x,td[,tdmax])` or `absdelay(...)` inside a behavioral expression.
     Delay,
+    /// `FREQ {input} = (f, gain, phase)...` — a transfer fitted to a measured
+    /// frequency response.
+    Frequency,
 }
 
 impl SynthesizedTransferForm {
@@ -253,9 +258,76 @@ impl SynthesizedTransferForm {
             Self::Derivative => "ddt",
             Self::Integral => "idt",
             Self::Delay => "delay",
+            Self::Frequency => "FREQ",
         }
     }
 }
+
+/// A small-signal transfer known as gains measured at increasing
+/// frequencies, as an E/G `FREQ` table gives it.
+///
+/// The end gains hold below the first entry and above the last. Between two
+/// entries whose phases differ by at most a quarter turn, the magnitude in dB
+/// and the phase are linear in log frequency; from a 0 Hz entry, or across a
+/// wider turn, the real and imaginary parts are linear in frequency. That is
+/// how QSPICE reads the table.
+#[derive(Debug, Clone)]
+pub struct FrequencyResponse {
+    /// `(frequency in hertz, gain)`: at least one, frequencies non-negative
+    /// and strictly increasing.
+    entries: Vec<(Value, num_complex::Complex64)>,
+}
+
+impl FrequencyResponse {
+    pub(crate) fn new(entries: Vec<(Value, num_complex::Complex64)>) -> Self {
+        debug_assert!(!entries.is_empty());
+        debug_assert!(entries.windows(2).all(|pair| pair[0].0 < pair[1].0));
+        Self { entries }
+    }
+
+    /// The gain at `frequency` hertz.
+    #[must_use]
+    pub fn gain(&self, frequency: Value) -> num_complex::Complex64 {
+        let entries = &self.entries;
+        let upper = entries.partition_point(|&(at, _)| at <= frequency);
+        if upper == 0 {
+            return entries[0].1;
+        }
+        if upper == entries.len() {
+            return entries[upper - 1].1;
+        }
+        let ((low, below), (high, above)) = (entries[upper - 1], entries[upper]);
+        let turn = above.arg() - below.arg();
+        if low > 0.0
+            && turn.abs() <= std::f64::consts::FRAC_PI_2
+            && below.norm() > 0.0
+            && above.norm() > 0.0
+        {
+            let along = (frequency / low).ln() / (high / low).ln();
+            let magnitude = below.norm() * (above.norm() / below.norm()).powf(along);
+            num_complex::Complex64::from_polar(magnitude, below.arg() + turn * along)
+        } else {
+            below + (above - below) * ((frequency - low) / (high - low))
+        }
+    }
+}
+
+/// Bit for bit, so that provenance carrying a response keeps `Eq`.
+impl PartialEq for FrequencyResponse {
+    fn eq(&self, other: &Self) -> bool {
+        let bits = |&(frequency, gain): &(Value, num_complex::Complex64)| {
+            [frequency.to_bits(), gain.re.to_bits(), gain.im.to_bits()]
+        };
+        self.entries.len() == other.entries.len()
+            && self
+                .entries
+                .iter()
+                .zip(&other.entries)
+                .all(|(a, b)| bits(a) == bits(b))
+    }
+}
+
+impl Eq for FrequencyResponse {}
 
 /// Role of a parser-generated passive parasitic element.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

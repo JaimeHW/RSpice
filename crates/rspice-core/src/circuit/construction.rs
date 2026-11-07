@@ -96,6 +96,7 @@ impl CircuitData {
             xyce_core_transient_roundoff: Vec::new(),
             transient_max_step_hint: None,
             behavioral_sources: BehavioralSources::new(),
+            frequency_responses: Vec::new(),
             scheduler: super::scheduler::CircuitScheduler::new(),
             // XSPICE instances
             xspice_instances: Vec::new(),

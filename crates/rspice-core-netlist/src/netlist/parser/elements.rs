@@ -8333,7 +8333,59 @@ fn parse_voltage_controlled_source(
             return Ok(VoltageControlledSourceParseKind::PspiceChebyshev);
         }
         Some(ControlledSourceForm::Freq) => {
-            return Err(unsupported_form_error(line_num, element_label, "FREQ"));
+            let input_expr =
+                collect_expression_argument(stream, line_num, Some(&TokenKind::Equals))?;
+            let (mut decibels, mut degrees, mut rectangular) = (true, true, false);
+            while let TokenKind::Ident(word) = &stream.peek().kind {
+                match word.to_ascii_uppercase().as_str() {
+                    "DB" => decibels = true,
+                    "MAG" => decibels = false,
+                    "DEG" => degrees = true,
+                    "RAD" => degrees = false,
+                    "R_I" => rectangular = true,
+                    _ => break,
+                }
+                stream.advance();
+            }
+            stream.consume(&TokenKind::Equals);
+            let mut table = Vec::new();
+            let mut delay = 0.0;
+            while !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+                match &stream.peek().kind {
+                    TokenKind::Comma | TokenKind::LParen | TokenKind::RParen => {
+                        stream.advance();
+                    }
+                    TokenKind::Ident(word)
+                        if word.eq_ignore_ascii_case("DELAY")
+                            && matches!(stream.peek_n(1).kind, TokenKind::Equals) =>
+                    {
+                        stream.advance();
+                        stream.advance();
+                        delay = expect_value(stream, line_num, params)?;
+                    }
+                    TokenKind::Minus => {
+                        stream.advance();
+                        table.push(-expect_value(stream, line_num, params)?);
+                    }
+                    _ => table.push(expect_value(stream, line_num, params)?),
+                }
+            }
+            let units = if rectangular {
+                FreqTableUnits::Rectangular
+            } else {
+                FreqTableUnits::Polar { decibels, degrees }
+            };
+            elements.extend(synthesize_freq(
+                &name,
+                &node_pos,
+                &node_neg,
+                &input_expr,
+                &table,
+                units,
+                delay,
+                is_voltage_output,
+                line_num,
+            )?);
         }
         None => {
             if is_voltage_output

@@ -497,6 +497,25 @@ pub(crate) enum GroundCensus {
     Referenced(String),
 }
 
+/// A behavioral source whose small-signal transfer is a measured frequency
+/// response: small-signal analyses stamp the response's gain times the
+/// voltage of `input` in place of the linearization of the source's
+/// expression, which realizes a rational fit of the response for the
+/// operating point and the transient.
+#[derive(Debug, Clone)]
+pub(crate) struct FrequencyResponseSource {
+    pub(crate) output: BehavioralOutput,
+    pub(crate) input: NodeId,
+    pub(crate) response: crate::netlist::FrequencyResponse,
+}
+
+/// One behavioral source, by family and index in that family.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BehavioralOutput {
+    Voltage(usize),
+    Current(usize),
+}
+
 /// High-performance circuit representation using Struct-of-Arrays
 ///
 /// `Clone` exists so embarrassingly-parallel sweeps (AC frequency points)
@@ -690,6 +709,9 @@ pub struct CircuitData {
 
     // Behavioral sources (expression-based B-elements)
     pub(crate) behavioral_sources: BehavioralSources,
+    /// Behavioral sources that small-signal analyses answer with a measured
+    /// frequency response instead of their expression's linearization.
+    pub(crate) frequency_responses: Vec<FrequencyResponseSource>,
 
     /// Every discrete-event lane, and the questions the analog stepper asks
     /// them: what activation is next, and what interval it may not advance

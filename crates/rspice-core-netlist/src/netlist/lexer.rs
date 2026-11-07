@@ -939,7 +939,7 @@ impl TokenStream {
     }
 
     /// Collect tokens until end of line as a vec
-    pub fn collect_line(&mut self) -> Vec<Token> {
+    pub(crate) fn collect_line(&mut self) -> Vec<Token> {
         let mut tokens = Vec::new();
         while !matches!(self.peek().kind, TokenKind::Newline | TokenKind::Eof) {
             tokens.push(self.peek().clone());

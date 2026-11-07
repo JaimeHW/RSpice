@@ -54,7 +54,8 @@ pub(crate) fn filter_elements_with_abort(
             ElementProvenance::GeneratedPassiveHelper { owner, .. }
             | ElementProvenance::GeneratedDynamicStateDerivative { owner, .. }
             | ElementProvenance::GeneratedDynamicInternalNode { owner, .. }
-            | ElementProvenance::SynthesizedTransferState { owner, .. } => {
+            | ElementProvenance::SynthesizedTransferState { owner, .. }
+            | ElementProvenance::GeneratedFrequencyResponseInput { owner, .. } => {
                 rejected_owners.contains(&owner.to_ascii_uppercase())
             }
             ElementProvenance::GeneratedXyceAddResistor { .. } => false,

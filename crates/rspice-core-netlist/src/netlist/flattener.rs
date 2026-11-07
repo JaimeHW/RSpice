@@ -899,7 +899,10 @@ impl<'a> Flattener<'a> {
         for (index, element) in elements.iter().enumerate() {
             poll_parse_abort(abort, index)?;
             match &element.provenance {
-                super::ElementProvenance::GeneratedDynamicInternalNode { owner, node, .. } => {
+                super::ElementProvenance::GeneratedDynamicInternalNode { owner, node, .. }
+                | super::ElementProvenance::GeneratedFrequencyResponseInput {
+                    owner, node, ..
+                } => {
                     if !element
                         .nodes
                         .iter()
@@ -931,7 +934,8 @@ impl<'a> Flattener<'a> {
             poll_parse_abort(abort, elements.len().saturating_add(element_index))?;
             let generated_owner = match &element.provenance {
                 super::ElementProvenance::GeneratedDynamicInternalNode { owner, .. }
-                | super::ElementProvenance::GeneratedDynamicStateDerivative { owner, .. } => {
+                | super::ElementProvenance::GeneratedDynamicStateDerivative { owner, .. }
+                | super::ElementProvenance::GeneratedFrequencyResponseInput { owner, .. } => {
                     Some(owner.as_str())
                 }
                 _ => None,
@@ -1904,6 +1908,15 @@ impl<'a> Flattener<'a> {
                         form: *form,
                     }
                 }
+                super::ElementProvenance::GeneratedFrequencyResponseInput {
+                    owner,
+                    node,
+                    response,
+                } => super::ElementProvenance::GeneratedFrequencyResponseInput {
+                    owner: self.remap_local_element_reference(owner, prefix),
+                    node: self.qualify_hierarchy_name(prefix, node),
+                    response: response.clone(),
+                },
             },
         }
     }

@@ -83,6 +83,29 @@ fn try_stamp_behavioral_ac_coefficient(
     })
 }
 
+/// Adds `sign` times a measured response's gain at `frequency` to `row`, in
+/// the column of the response's input node.
+fn try_stamp_measured_response(
+    matrix: &mut ComplexMatrix,
+    row: usize,
+    measured: &crate::circuit::FrequencyResponseSource,
+    sign: Value,
+    source_name: &str,
+    frequency: Value,
+) -> Result<(), SimulationError> {
+    if measured.input == 0 {
+        return Ok(());
+    }
+    let gain = measured.response.gain(frequency) * sign;
+    matrix
+        .try_add(row, measured.input - 1, gain)
+        .map_err(|error| {
+            SimulationError::Circuit(format!(
+                "FREQ source '{source_name}' stamp failed at frequency {frequency:.17e} Hz while adding gain {gain}: {error}"
+            ))
+        })
+}
+
 #[derive(Debug, Clone, Copy)]
 struct AcVoltageConstraint {
     node_pos: NodeId,
@@ -2860,8 +2883,20 @@ impl Engine {
         // Behavioral sources: small-signal linearization at the DC
         // operating point and active frequency. The per-point caller
         // refreshes these partials so Xyce FREQ/HERTZ expressions remain
-        // live; sign conventions mirror the DC stamps exactly.
-        for source in &circuit.behavioral_sources.voltage_sources {
+        // live; sign conventions mirror the DC stamps exactly. A source with a
+        // measured frequency response stamps that response instead.
+        let measured_response = |output| {
+            circuit
+                .frequency_responses
+                .iter()
+                .find(|measured| measured.output == output)
+        };
+        for (index, source) in circuit
+            .behavioral_sources
+            .voltage_sources
+            .iter()
+            .enumerate()
+        {
             let np = source.node_pos;
             let nn = source.node_neg;
             let br = circuit.get_branch_matrix_index(source.branch_ordinal);
@@ -2907,6 +2942,19 @@ impl Engine {
                 )?;
             }
             // Branch row: V(np) - V(nn) - Σ (df/dx)·x = 0
+            if let Some(measured) =
+                measured_response(crate::circuit::BehavioralOutput::Voltage(index))
+            {
+                try_stamp_measured_response(
+                    ac_matrix,
+                    br - 1,
+                    measured,
+                    -1.0,
+                    &source.name,
+                    frequency_hz,
+                )?;
+                continue;
+            }
             for (global_idx, df) in source.linearized_partials() {
                 if df != 0.0 {
                     try_stamp_behavioral_ac_coefficient(
@@ -2921,9 +2969,31 @@ impl Engine {
                 }
             }
         }
-        for source in &circuit.behavioral_sources.current_sources {
+        for (index, source) in circuit
+            .behavioral_sources
+            .current_sources
+            .iter()
+            .enumerate()
+        {
             let np = source.node_pos;
             let nn = source.node_neg;
+            if let Some(measured) =
+                measured_response(crate::circuit::BehavioralOutput::Current(index))
+            {
+                for (node, sign) in [(np, 1.0), (nn, -1.0)] {
+                    if node > 0 {
+                        try_stamp_measured_response(
+                            ac_matrix,
+                            node - 1,
+                            measured,
+                            sign,
+                            &source.name,
+                            frequency_hz,
+                        )?;
+                    }
+                }
+                continue;
+            }
             // KCL rows: I flows np -> nn, linearized I ≈ Σ (df/dx)·x.
             for (global_idx, df) in source.linearized_partials() {
                 if df == 0.0 {

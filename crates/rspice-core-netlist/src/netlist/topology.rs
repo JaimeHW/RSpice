@@ -336,6 +336,7 @@ pub fn analyze_dc_ground_paths_with_ic_modes(
             element.provenance,
             crate::netlist::ElementProvenance::GeneratedDynamicInternalNode { .. }
                 | crate::netlist::ElementProvenance::SynthesizedTransferState { .. }
+                | crate::netlist::ElementProvenance::GeneratedFrequencyResponseInput { .. }
         );
         let terminal_nodes = connectivity_terminal_nodes(element).unwrap_or_else(|_| {
             analysis_complete = false;

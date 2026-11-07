@@ -230,6 +230,27 @@ impl Engine {
             }
         }
 
+        // A measured frequency response couples its source's output equations
+        // to the response's input node.
+        for source in &circuit.frequency_responses {
+            if source.input == 0 {
+                continue;
+            }
+            let rows = match source.output {
+                crate::circuit::BehavioralOutput::Voltage(index) => {
+                    let branch = circuit.behavioral_sources.voltage_sources[index].branch_ordinal;
+                    [circuit.get_branch_matrix_index(branch), 0]
+                }
+                crate::circuit::BehavioralOutput::Current(index) => {
+                    let current = &circuit.behavioral_sources.current_sources[index];
+                    [current.node_pos, current.node_neg]
+                }
+            };
+            for row in rows.into_iter().filter(|&row| row > 0) {
+                triplets.push((row - 1, source.input - 1, 0.0));
+            }
+        }
+
         // Diode stamps.
         for diode in &circuit.diodes.devices {
             let a = diode.node_anode;

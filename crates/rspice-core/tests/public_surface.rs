@@ -409,6 +409,10 @@ use rspice_core::analysis::harmonic_balance::{
 // skipped can neither fail the run nor stand in for the one it kept.
 // `library::MODEL_SOURCE_EXTENSIONS`, the model file extensions the model
 // picker and folder scan admit, brings it to 5,255.
+// `netlist::FrequencyResponse`, the measured response an E/G `FREQ` source
+// carries, and its `gain`, which the engine's small-signal stamp reads, add
+// two; deleting the unused `ParametricValue::as_value` and narrowing the
+// lexer's `collect_line` to the crate keep the census at 5,255.
 const MAX_PUBLIC_ITEMS: usize = 5255;
 
 /// The `#[doc(hidden)] pub` items of the family, counted apart from

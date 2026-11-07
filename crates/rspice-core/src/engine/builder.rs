@@ -4491,6 +4491,52 @@ fn holds_integral_initial_condition(element: &Element) -> bool {
     )
 }
 
+/// Hands each measured frequency response to the behavioral source that owns
+/// it, with the node its generated input source drives.
+fn attach_frequency_responses(
+    circuit: &mut CircuitData,
+    elements: &[Element],
+) -> Result<(), SimulationError> {
+    for element in elements {
+        let crate::netlist::ElementProvenance::GeneratedFrequencyResponseInput {
+            owner,
+            node,
+            response,
+        } = &element.provenance
+        else {
+            continue;
+        };
+        let named = |name: &str| name.eq_ignore_ascii_case(owner);
+        let sources = &circuit.behavioral_sources;
+        let output = sources
+            .voltage_sources
+            .iter()
+            .position(|source| named(&source.name))
+            .map(crate::circuit::BehavioralOutput::Voltage)
+            .or_else(|| {
+                sources
+                    .current_sources
+                    .iter()
+                    .position(|source| named(&source.name))
+                    .map(crate::circuit::BehavioralOutput::Current)
+            })
+            .ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    "FREQ source '{owner}' has no output source for its frequency response"
+                ))
+            })?;
+        let input = circuit.get_or_create_node(node);
+        circuit
+            .frequency_responses
+            .push(crate::circuit::FrequencyResponseSource {
+                output,
+                input,
+                response: response.clone(),
+            });
+    }
+    Ok(())
+}
+
 fn capacitor_ic_dc_mode(spice_dialect: SpiceDialect) -> crate::netlist::CapacitorIcDcMode {
     if spice_dialect == SpiceDialect::Xyce {
         crate::netlist::CapacitorIcDcMode::EnforcedConstraint
@@ -10521,6 +10567,8 @@ impl Engine {
                 }
             }
         }
+
+        attach_frequency_responses(&mut circuit, &flat_elements)?;
 
         #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
         veriloga_terminal_meters::resolve(&mut circuit, veriloga_terminal_meters)?;
