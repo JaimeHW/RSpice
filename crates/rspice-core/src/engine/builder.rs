@@ -48,6 +48,7 @@ mod ground_reference;
 mod machine;
 mod model_resolution;
 mod model_safety;
+mod resistor_currents;
 mod special_function;
 mod terminal_probes;
 mod variable_delay;
@@ -6684,6 +6685,12 @@ impl Engine {
             }
         }
 
+        let resistors_read_as_currents = if self.config.spice_dialect == SpiceDialect::Xyce {
+            HashSet::new()
+        } else {
+            resistor_currents::read_as_currents(&flat_elements)
+        };
+
         // State machines read nodes any element may create, so they are built
         // once every other element is.
         let mut machines = Vec::new();
@@ -6906,7 +6913,9 @@ impl Engine {
                         .max(0.0);
                     if thermal_state.is_none()
                         && resistance.is_finite()
-                        && resistance.abs() <= zero_resistance_tol
+                        && (resistance.abs() <= zero_resistance_tol
+                            || resistors_read_as_currents
+                                .contains(&element.name.to_ascii_uppercase()))
                     {
                         if !small_signal_resistance.is_finite() {
                             return Err(SimulationError::Circuit(format!(

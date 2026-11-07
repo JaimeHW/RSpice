@@ -10,7 +10,7 @@ use rspice_core::analysis::measure::MeasureResult;
 use rspice_core::analysis::measure_signals::{
     evaluate_ac_measurements, evaluate_tran_measurements,
 };
-use rspice_core::engine::Engine;
+use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect};
 use rspice_core::netlist::Netlist;
 
 fn parse(deck: &str) -> Netlist {
@@ -706,4 +706,68 @@ fn a_section_sign_belongs_to_element_and_node_names() {
     );
     assert_close("V(a)", op_voltage(&netlist, "a"), 4.0, 1e-9);
     assert_close("V(n§x)", op_voltage(&netlist, "n§x"), 3.0, 1e-9);
+}
+
+// LTspice 26.1.1 batch: V(o)=1 and V(p)=1 at the operating point; on the
+// ramp V(o)=V(a)/2 and, inside the subcircuit, V(s)=V(a)/4, and the machine
+// leaves LO when I(R2) passes 0.5 mA at 0.5 ms.
+#[test]
+fn a_resistor_current_is_readable_in_expressions() {
+    let netlist = parse(
+        "resistor currents\n\
+         V1 a 0 2\n\
+         R1 a b 1k\n\
+         R2 b 0 1k\n\
+         B1 o 0 V=I(R1)*1k\n\
+         R3 o 0 1\n\
+         B2 p 0 V=I(R2)*I(R1)*1e6\n\
+         R4 p 0 1\n\
+         .op\n\
+         .end\n",
+    );
+    assert_close("V(o)", op_voltage(&netlist, "o"), 1.0, 1e-9);
+    assert_close("V(p)", op_voltage(&netlist, "p"), 1.0, 1e-9);
+
+    let netlist = parse(
+        "resistor currents in time\n\
+         V1 a 0 PWL(0 0 1m 2)\n\
+         R1 a b 1k\n\
+         R2 b 0 1k\n\
+         B1 o 0 V=I(R1)*1k\n\
+         R3 o 0 1\n\
+         X1 a s cell\n\
+         .subckt cell in out\n\
+         RA in m 2k\n\
+         RB m 0 2k\n\
+         B1 out 0 V=I(RA)*1k\n\
+         RL out 0 1\n\
+         .ends\n\
+         .machine\n\
+         .state LO 0\n\
+         .state HI 1\n\
+         .rule LO HI I(R2) > 0.5m\n\
+         .output (q) state\n\
+         .endmachine\n\
+         R5 q 0 1k\n\
+         .tran 0 1m 0 1u\n\
+         .end\n",
+    );
+    let early = tran_voltages(&netlist, 1e-3, 0.4e-3, &["o", "s", "q"]);
+    assert_close("V(o) at 0.4 ms", early[0], 0.4, 1e-6);
+    assert_close("V(s) at 0.4 ms", early[1], 0.2, 1e-6);
+    assert_close("V(q) at 0.4 ms", early[2], 0.0, 1e-9);
+    let late = tran_voltages(&netlist, 1e-3, 0.51e-3, &["q"]);
+    assert_close("V(q) at 0.51 ms", late[0], 1.0, 1e-9);
+
+    let error = Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce))
+        .run_dc_op(&parse(
+            "xyce lead current\nV1 a 0 2\nR1 a 0 1k\nB1 o 0 V={I(R1)*1k}\nR3 o 0 1\n.op\n.end\n",
+        ))
+        .expect_err("Xyce reads no resistor current");
+    assert!(
+        error
+            .to_string()
+            .contains("lead_current_not_solution_variable"),
+        "{error}"
+    );
 }
