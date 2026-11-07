@@ -714,6 +714,16 @@ fn eval_function_with_derivative(
         | Function::Barycentric
         | Function::BarycentricFile => derivative_pair(0.0, 0.0),
         Function::Sdt => None,
+        Function::Rand | Function::Random | Function::White => {
+            let (x, dx) = eval_arg(0)?;
+            let seed = if args.len() == 2 {
+                eval_arg(1)?.0
+            } else {
+                super::vm::DEFAULT_RANDOM_SEED
+            };
+            let (value, slope) = super::vm::seeded_random(func, seed, x);
+            derivative_pair(value, slope * dx)
+        }
         Function::SpicePulse | Function::SpiceSin | Function::SpiceExp | Function::SpiceSffm => {
             if !matches!(context.target, DerivativeTarget::Time) {
                 return None;

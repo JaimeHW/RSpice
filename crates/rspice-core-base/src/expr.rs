@@ -48,7 +48,7 @@ pub use time_enclosure::{TimeEnclosure, TimeInterval};
 #[doc(hidden)]
 pub use vm::{
     AcceptedSdtState, EXPR_ZERO_TOLERANCE, LOGARITHM_MIN_ARGUMENT, LogarithmDomain,
-    XYCE_ATANH_EPSILON, XYCE_TANH_SATURATION_THRESHOLD, spice_exp_parameters,
+    XYCE_ATANH_EPSILON, XYCE_TANH_SATURATION_THRESHOLD, seeded_random, spice_exp_parameters,
     spice_waveform_is_periodic, spice_waveform_max_tone_cycles, spice_waveform_minimum_interval,
     spice_waveform_parameters,
 };

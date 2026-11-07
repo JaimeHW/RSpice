@@ -117,6 +117,8 @@ pub enum Instruction {
     SpiceSffm(usize),
     /// Rollback-safe trapezoidal time integral for one expression occurrence.
     Sdt(usize),
+    /// `rand`, `random` or `white` of the argument count's operands.
+    SeededRandom(super::Function, usize),
 
     /// Conditional: if cond != 0, keep second, else keep third
     IfElse,
@@ -746,6 +748,15 @@ impl Vm {
                         self.stack.push(result);
                     }
                 }
+                Instruction::SeededRandom(function, arg_count) => {
+                    let seed = if *arg_count == 2 {
+                        self.stack.pop().unwrap_or(DEFAULT_RANDOM_SEED)
+                    } else {
+                        DEFAULT_RANDOM_SEED
+                    };
+                    let x = self.stack.pop().unwrap_or(0.0);
+                    self.stack.push(seeded_random(*function, seed, x).0);
+                }
                 Instruction::Sdt(index) => {
                     let input = self.stack.pop().unwrap_or(0.0);
                     if self.sdt_states.len() <= *index {
@@ -1187,6 +1198,55 @@ fn interpolate_segment(x: Value, x1: Value, y1: Value, x2: Value, y2: Value, fla
     }
     let t = (x - x1) / dx;
     y1 + t * (y2 - y1)
+}
+
+/// Seed of `rand`, `random` and `white` when neither the call nor the deck
+/// names one: the deck's own default seed.
+pub(crate) const DEFAULT_RANDOM_SEED: Value = 1.0;
+
+/// `rand(x)`, `random(x)` or `white(x)` under `seed`, with its slope in `x`.
+///
+/// Each integer `k` owns one uniform sample `u(k)` in [0, 1), a hash of `k`
+/// and the seed, so a waveform is a pure function of its argument and replays
+/// identically under rollback, restarts and repeated runs. `rand` holds
+/// `u(floor(x))` across the unit interval; `random` joins consecutive samples
+/// linearly (QSPICE); `white` joins `u(k) - 0.5` with zero-slope smoothsteps
+/// (LTspice), band-limited noise in [-0.5, 0.5].
+#[doc(hidden)]
+pub fn seeded_random(function: super::Function, seed: Value, x: Value) -> (Value, Value) {
+    if !x.is_finite() {
+        return (Value::NAN, Value::NAN);
+    }
+    let floor = x.floor();
+    let fraction = x - floor;
+    // Saturating casts keep astronomically large arguments on a sample.
+    let index = floor as i64;
+    let seed = if seed == 0.0 { 0 } else { seed.to_bits() };
+    let sample = |k: i64| {
+        let mixed = splitmix64(seed ^ splitmix64(k as u64));
+        (mixed >> 11) as Value * (1.0 / (1u64 << 53) as Value)
+    };
+    match function {
+        super::Function::Rand => (sample(index), 0.0),
+        super::Function::Random => {
+            let (start, end) = (sample(index), sample(index.saturating_add(1)));
+            (start + (end - start) * fraction, end - start)
+        }
+        _ => {
+            let start = sample(index) - 0.5;
+            let span = sample(index.saturating_add(1)) - 0.5 - start;
+            let shape = fraction * fraction * (3.0 - 2.0 * fraction);
+            let slope = 6.0 * fraction * (1.0 - fraction);
+            (start + span * shape, span * slope)
+        }
+    }
+}
+
+fn splitmix64(value: u64) -> u64 {
+    let mut z = value.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
 }
 
 #[doc(hidden)]

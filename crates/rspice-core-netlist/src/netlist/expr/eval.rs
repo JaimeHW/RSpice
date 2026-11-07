@@ -823,10 +823,10 @@ impl PreparedExpression {
                         args,
                         user_program: None,
                     } => {
-                        statistical |= matches!(
-                            name.as_str(),
-                            "GAUSS" | "AGAUSS" | "UNIF" | "AUNIF" | "RAND" | "RANDOM"
-                        ) || (name == "LIMIT" && args.len() == 2);
+                        statistical |=
+                            matches!(name.as_str(), "GAUSS" | "AGAUSS" | "UNIF" | "AUNIF")
+                                || (matches!(name.as_str(), "RAND" | "RANDOM") && args.is_empty())
+                                || (name == "LIMIT" && args.len() == 2);
                     }
                     _ => {}
                 }
@@ -2249,7 +2249,34 @@ pub(super) fn eval_builtin_with_sample(
             let x = checked_real_arg(name, args, 0)?;
             Ok(bool_value(x <= 0.0))
         }
-        "RAND" | "RANDOM" => Ok(ComplexValue::from(0.5)),
+        // Xyce's argument-free form: one uniform draw from the deck's stream.
+        "RAND" | "RANDOM" if args.is_empty() => {
+            if ctx.statistical_mode() == StatisticalParamMode::Nominal {
+                return Ok(ComplexValue::from(0.5));
+            }
+            let draw = ctx.random().next_uniform();
+            sample(draw);
+            Ok(ComplexValue::from(draw))
+        }
+        "RAND" | "RANDOM" | "WHITE" => {
+            if !(1..=2).contains(&args.len()) {
+                return Err(ExprError::WrongArgCount(name.to_string()));
+            }
+            let function = match name {
+                "RAND" => crate::expr::Function::Rand,
+                "RANDOM" => crate::expr::Function::Random,
+                _ => crate::expr::Function::White,
+            };
+            let x = checked_real_arg(name, args, 0)?;
+            let seed = if args.len() == 2 {
+                checked_real_arg(name, args, 1)?
+            } else {
+                ctx.random().seed() as Value
+            };
+            Ok(ComplexValue::from(
+                crate::expr::seeded_random(function, seed, x).0,
+            ))
+        }
         _ => Err(ExprError::UnknownFunction(name.to_string())),
     }
 }

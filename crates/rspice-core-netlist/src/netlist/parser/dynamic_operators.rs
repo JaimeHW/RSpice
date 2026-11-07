@@ -16,8 +16,13 @@
 //!   `td`. Its far end is `x(t-td)` with the operating point as the history
 //!   before time zero, `x·e^(-jω·td)` in AC; the line keeps the waveform
 //!   history and schedules the delayed breakpoints.
+//!
+//! `rand(x)`, `random(x)` and `white(x)` are pure functions of `x` and a seed.
+//! A call without its own seed is given the deck's `.options seed` here, so
+//! every behavioral source draws the same samples the parameter evaluator does.
 
 use super::{Element, ElementKind, ParseError, SourceMultiplicity};
+use crate::netlist::expr::DEFAULT_RANDOM_SEED;
 use crate::netlist::lexer::parse_spice_value_complete;
 use crate::netlist::{ElementProvenance, SynthesizedTransferForm};
 
@@ -28,18 +33,29 @@ const DELAY_LINE_IMPEDANCE: f64 = 1e6;
 
 /// One operator call located in an expression.
 struct Call {
-    form: SynthesizedTransferForm,
+    operator: Operator,
     /// Byte range of the whole call, name through closing parenthesis.
     start: usize,
     end: usize,
     args: Vec<String>,
 }
 
-fn operator_form(name: &str) -> Option<SynthesizedTransferForm> {
+#[derive(Clone, Copy)]
+enum Operator {
+    /// A time-domain operator realized by elements.
+    Dynamic(SynthesizedTransferForm),
+    /// A random function, by its canonical name.
+    Random(&'static str),
+}
+
+fn operator(name: &str) -> Option<Operator> {
     match name.to_ascii_uppercase().as_str() {
-        "DDT" => Some(SynthesizedTransferForm::Derivative),
-        "IDT" => Some(SynthesizedTransferForm::Integral),
-        "DELAY" | "ABSDELAY" => Some(SynthesizedTransferForm::Delay),
+        "DDT" => Some(Operator::Dynamic(SynthesizedTransferForm::Derivative)),
+        "IDT" => Some(Operator::Dynamic(SynthesizedTransferForm::Integral)),
+        "DELAY" | "ABSDELAY" => Some(Operator::Dynamic(SynthesizedTransferForm::Delay)),
+        "RAND" => Some(Operator::Random("rand")),
+        "RANDOM" => Some(Operator::Random("random")),
+        "WHITE" => Some(Operator::Random("white")),
         _ => None,
     }
 }
@@ -123,10 +139,10 @@ fn call_arguments(text: &str, open: usize) -> Option<(Vec<String>, usize)> {
     None
 }
 
-/// The first operator call in `text`.
-fn first_call(text: &str, line: usize) -> Result<Option<Call>, ParseError> {
+/// The first operator call in `text` at or after byte `from`.
+fn first_call(text: &str, from: usize, line: usize) -> Result<Option<Call>, ParseError> {
     for (start, name, next) in identifiers(text) {
-        let Some(form) = operator_form(name) else {
+        let Some(operator) = operator(name).filter(|_| start >= from) else {
             continue;
         };
         if text.as_bytes().get(next) != Some(&b'(') {
@@ -137,7 +153,7 @@ fn first_call(text: &str, line: usize) -> Result<Option<Call>, ParseError> {
             message: format!("unbalanced parentheses in {name}() call"),
         })?;
         return Ok(Some(Call {
-            form,
+            operator,
             start,
             end,
             args,
@@ -171,47 +187,78 @@ fn varies_during_simulation(text: &str) -> bool {
 }
 
 /// Lower every `ddt`, `idt` and `delay` call in a behavioral expression owned
-/// by `owner`, appending the elements that realize them to `elements` and
-/// returning the rewritten expression.
+/// by `owner`, appending the elements that realize them to `elements`, and seed
+/// every random function that names no seed with the deck's `seed`. Returns
+/// the rewritten expression.
 pub(super) fn lower_dynamic_operators(
     owner: &str,
     expression: String,
     line: usize,
+    seed: u64,
     elements: &mut Vec<Element>,
 ) -> Result<String, ParseError> {
-    let mut ordinal = 0usize;
-    lower_calls(owner, &expression, line, &mut ordinal, elements)
+    let mut lowering = Lowering {
+        owner,
+        line,
+        seed,
+        ordinal: 0,
+        elements,
+    };
+    lowering.lower(&expression)
 }
 
-/// Replace every call in `text`, realizing the operators inside an argument
-/// before the call that reads them.
-fn lower_calls(
-    owner: &str,
-    text: &str,
+struct Lowering<'a> {
+    owner: &'a str,
     line: usize,
-    ordinal: &mut usize,
-    elements: &mut Vec<Element>,
-) -> Result<String, ParseError> {
-    let mut text = text.to_string();
-    while let Some(mut call) = first_call(&text, line)? {
-        for arg in &mut call.args {
-            *arg = lower_calls(owner, arg, line, ordinal, elements)?;
+    seed: u64,
+    ordinal: usize,
+    elements: &'a mut Vec<Element>,
+}
+
+impl Lowering<'_> {
+    /// Replace every call in `text`, realizing the operators inside an
+    /// argument before the call that reads them.
+    fn lower(&mut self, text: &str) -> Result<String, ParseError> {
+        let mut text = text.to_string();
+        let mut cursor = 0;
+        while let Some(mut call) = first_call(&text, cursor, self.line)? {
+            for arg in &mut call.args {
+                *arg = self.lower(arg)?;
+            }
+            let replacement = match call.operator {
+                Operator::Random(name) => {
+                    if call.args.len() == 1 && self.seed != DEFAULT_RANDOM_SEED {
+                        call.args.push(self.seed.to_string());
+                    }
+                    format!("{name}({})", call.args.join(","))
+                }
+                Operator::Dynamic(form) => {
+                    self.ordinal += 1;
+                    realize(
+                        self.owner,
+                        self.ordinal,
+                        form,
+                        &call.args,
+                        self.line,
+                        self.elements,
+                    )?
+                }
+            };
+            text.replace_range(call.start..call.end, &replacement);
+            cursor = call.start + replacement.len();
         }
-        *ordinal += 1;
-        let replacement = realize(owner, *ordinal, &call, line, elements)?;
-        text.replace_range(call.start..call.end, &replacement);
+        Ok(text)
     }
-    Ok(text)
 }
 
 fn realize(
     owner: &str,
     ordinal: usize,
-    call: &Call,
+    form: SynthesizedTransferForm,
+    args: &[String],
     line: usize,
     elements: &mut Vec<Element>,
 ) -> Result<String, ParseError> {
-    let form = call.form;
     let label = form.label();
     let fail = |message: String| ParseError::Syntax {
         line,
@@ -222,13 +269,13 @@ fn realize(
         SynthesizedTransferForm::Integral => (1, 3),
         _ => (2, 3),
     };
-    if !(min_args..=max_args).contains(&call.args.len()) || call.args.iter().any(String::is_empty) {
+    if !(min_args..=max_args).contains(&args.len()) || args.iter().any(String::is_empty) {
         return Err(fail(format!(
             "{label}() takes {min_args} to {max_args} arguments, got {}",
-            call.args.len()
+            args.len()
         )));
     }
-    let input = &call.args[0];
+    let input = &args[0];
     let node = |role: &str| format!("{owner}.__{role}{ordinal}");
     let internal = |node: &str| ElementProvenance::GeneratedDynamicInternalNode {
         owner: owner.to_string(),
@@ -287,7 +334,7 @@ fn realize(
                 nodes: vec![state.clone(), "0".to_string()],
                 provenance: internal(&state),
             });
-            if let Some(reset) = call.args.get(2) {
+            if let Some(reset) = args.get(2) {
                 // An ideal switch across the capacitor: while reset is asserted
                 // the branch pins the state to zero; otherwise its equation
                 // reduces to a zero branch current.
@@ -304,13 +351,13 @@ fn realize(
                     provenance: internal(&state),
                 });
             }
-            Ok(match call.args.get(1) {
+            Ok(match args.get(1) {
                 Some(initial) => format!("(({initial})+V({state}))"),
                 None => format!("V({state})"),
             })
         }
         _ => {
-            let delay = &call.args[1];
+            let delay = &args[1];
             if varies_during_simulation(delay) {
                 return Err(fail(format!(
                     "{label}() needs a delay fixed before the simulation starts; \
@@ -327,8 +374,7 @@ fn realize(
                 if value == 0.0 {
                     return Ok(format!("({input})"));
                 }
-                if let Some(maximum) = call
-                    .args
+                if let Some(maximum) = args
                     .get(2)
                     .and_then(|text| parse_spice_value_complete(text).ok())
                     && value > maximum

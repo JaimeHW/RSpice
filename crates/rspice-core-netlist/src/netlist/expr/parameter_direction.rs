@@ -340,6 +340,7 @@ where
                 value,
                 ctx.expression_dialect(),
                 draw,
+                ctx.random().seed() as Value,
             )
         };
         self.directions.truncate(start);
@@ -462,6 +463,7 @@ fn builtin_direction(
     value: ComplexValue,
     dialect: ExpressionDialect,
     draw: Option<Value>,
+    random_seed: Value,
 ) -> Result<ComplexDirection, ExprError> {
     let z = a.first().copied().unwrap_or_default();
     let dz = d.first().copied().unwrap_or_else(ComplexDirection::zero);
@@ -471,6 +473,7 @@ fn builtin_direction(
         "FLOOR" | "CEIL" => z.re.fract() == 0.0 && dz.re != 0.0,
         "INT" | "TRUNC" => z.re != 0.0 && z.re.fract() == 0.0 && dz.re != 0.0,
         "ROUND" | "NINT" => z.re.fract().abs() == 0.5 && dz.re != 0.0,
+        "RAND" | "RANDOM" => !a.is_empty() && z.re.fract() == 0.0 && dz.re != 0.0,
         "EQ0" | "NE0" => z.re.abs() == 1e-12 && dz.re != 0.0,
         "SGN" | "U" | "USTEP" | "URAMP" | "GT0" | "LT0" | "GE0" | "LE0" => {
             z.re == 0.0 && dz.re != 0.0
@@ -629,7 +632,16 @@ fn builtin_direction(
             }
         }
         "FLOOR" | "CEIL" | "ROUND" | "INT" | "TRUNC" | "NINT" | "SGN" | "SIGN" | "U" | "USTEP"
-        | "EQ0" | "NE0" | "GT0" | "LT0" | "GE0" | "LE0" | "RAND" | "RANDOM" => zero,
+        | "EQ0" | "NE0" | "GT0" | "LT0" | "GE0" | "LE0" | "RAND" => zero,
+        "RANDOM" | "WHITE" if !a.is_empty() => {
+            let function = if name == "RANDOM" {
+                crate::expr::Function::Random
+            } else {
+                crate::expr::Function::White
+            };
+            let seed = a.get(1).map_or(random_seed, |seed| seed.re);
+            dz * crate::expr::seeded_random(function, seed, z.re).1
+        }
         _ => return Err(ExprError::UnknownFunction(name.to_owned())),
     })
 }

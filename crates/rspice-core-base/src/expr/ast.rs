@@ -135,6 +135,9 @@ pub enum Function {
     Barycentric, // bli("path") = file-backed barycentric Lagrange interpolation
     BarycentricFile, // blifile("path") alias
     Sdt,       // sdt(x) = rollback-safe trapezoidal time integral
+    Rand,      // rand(x[, seed]) = one uniform sample per unit interval of x
+    Random,    // random(x[, seed]) = rand samples joined linearly
+    White,     // white(x[, seed]) = rand samples less 0.5 joined by smoothsteps
     Mod,       // mod(x, y) = x % y - modulo
     SpicePulse, // spice_pulse(v1, v2, td, tr, tf, pw[, per])
     SpiceSin,  // spice_sin(vo, va, freq, td, theta[, phase_degrees])
@@ -209,6 +212,9 @@ impl Function {
             "BLI" => Some(Self::Barycentric),
             "BLIFILE" => Some(Self::BarycentricFile),
             "SDT" => Some(Self::Sdt),
+            "RAND" => Some(Self::Rand),
+            "RANDOM" => Some(Self::Random),
+            "WHITE" => Some(Self::White),
             "PWL" => Some(Self::Pwl),
             "MOD" | "FMOD" => Some(Self::Mod),
             "SPICE_PULSE" => Some(Self::SpicePulse),
