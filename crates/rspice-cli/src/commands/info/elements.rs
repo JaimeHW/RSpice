@@ -333,6 +333,24 @@ impl<'a> ElementDetails<'a> {
                 let parameters = scalar_parameters(instance_params, deferred_params, &[]);
                 record!("special_function", function, parameters)
             }
+            ElementKind::StateMachine(machine) => {
+                let name = |index: usize| machine.states[index].0.as_str();
+                let tripdt = &machine.tripdt;
+                let states = &machine.states;
+                let rules: Vec<Value> = machine
+                    .rules
+                    .iter()
+                    .map(|rule| {
+                        json!({
+                            "from": rule.from.map_or("*", name),
+                            "to": name(rule.to),
+                            "condition": rule.condition,
+                        })
+                    })
+                    .collect();
+                let outputs = &machine.outputs;
+                record!("state_machine", tripdt, states, rules, outputs)
+            }
             Xspice {
                 model,
                 pspice_u_timing,

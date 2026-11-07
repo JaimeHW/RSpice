@@ -761,7 +761,8 @@ fn dc_conduction_groups(
         | ElementKind::CurrentSource(_)
         | ElementKind::Cccs { .. }
         | ElementKind::Vccs { .. }
-        | ElementKind::BehavioralCurrent { .. } => Vec::new(),
+        | ElementKind::BehavioralCurrent { .. }
+        | ElementKind::StateMachine(_) => Vec::new(),
         ElementKind::Coupling { .. } => Vec::new(),
         // A controlled source's sense terminals draw no current, so only its
         // output pair can tie nodes together.
@@ -892,6 +893,13 @@ fn xyce_dc_lead_groups(element: &Element) -> Result<Vec<Vec<&str>>, Connectivity
                 reason: "XSPICE lead groups are model-specific".to_string(),
             });
         }
+        // Each state-machine output is a current source between its two
+        // nodes.
+        ElementKind::StateMachine(_) => element
+            .nodes
+            .chunks(2)
+            .map(|pair| pair.iter().map(String::as_str).collect())
+            .collect(),
         // A special function's inputs only sense; its outputs drive against
         // the common terminal.
         ElementKind::SpecialFunction { .. } => {

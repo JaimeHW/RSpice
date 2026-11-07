@@ -234,6 +234,7 @@ fn element_kind_and_model(kind: &ElementKind) -> (&'static str, Option<&str>) {
         ElementKind::SpecialFunction { function, .. } => {
             ("special-function", Some(function.ltspice_name()))
         }
+        ElementKind::StateMachine(_) => ("state-machine", None),
     }
 }
 

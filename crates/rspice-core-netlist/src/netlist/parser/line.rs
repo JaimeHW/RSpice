@@ -224,6 +224,9 @@ pub(super) fn process_line_with_abort(
     state: &mut ParseState,
     abort: &dyn AbortSignal,
 ) -> Result<(), ParseWithAbortError> {
+    if super::machine::process_machine_line(line, line_num, origin, state)? {
+        return Ok(());
+    }
     let temperature_depth = state.subckt_stack.len();
     let authored_element_name = line
         .split_whitespace()

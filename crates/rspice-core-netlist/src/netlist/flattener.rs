@@ -29,8 +29,8 @@ use super::{
     DuplicateSubcircuitPortBindingError, Element, ElementKind, GlobalSubcircuitPortBindingError,
     InitialCondition, ModelDef, Netlist, NodeSet, ParamContext, ParameterRedefinitionPolicy,
     ParametricValue, ParseError, ParseWithAbortError, RandomState, SourceMultiplicity, SourceSpec,
-    StartupDirectiveDisposition, StartupDirectiveRecord, StartupDirectiveScope, SubcircuitDef,
-    UndefinedSubcircuitError, ensure_parse_not_aborted, finish_non_aborting_parse,
+    StartupDirectiveDisposition, StartupDirectiveRecord, StartupDirectiveScope, StateMachine,
+    SubcircuitDef, UndefinedSubcircuitError, ensure_parse_not_aborted, finish_non_aborting_parse,
     poll_parse_abort, validate_mutual_inductor_references,
 };
 use super::{ElementParameterDirection, NetlistSourceLocation, ParameterDirectionCapture};
@@ -1689,6 +1689,17 @@ impl<'a> Flattener<'a> {
                 instance_params: instance_params.clone(),
                 deferred_params: deferred_params.clone(),
             },
+            ElementKind::StateMachine(machine) => {
+                let mut machine = machine.clone();
+                for rule in &mut machine.rules {
+                    rule.condition =
+                        self.remap_behavioral_expression(&rule.condition, prefix, node_map);
+                }
+                for output in &mut machine.outputs {
+                    *output = self.remap_behavioral_expression(output, prefix, node_map);
+                }
+                ElementKind::StateMachine(machine)
+            }
             ElementKind::BehavioralVoltage {
                 expression,
                 tc1,
@@ -2412,6 +2423,9 @@ impl<'a> Flattener<'a> {
                 )?,
                 deferred_params: Vec::new(),
             },
+            ElementKind::StateMachine(machine) => ElementKind::StateMachine(Box::new(
+                self.prepare_state_machine(machine, scope, element_path, abort)?,
+            )),
 
             // The child resolver binds arguments sequentially in this caller
             // scope. Eager projection here loses complex values and makes later
@@ -3064,6 +3078,52 @@ impl<'a> Flattener<'a> {
             _ => {}
         }
         Ok(())
+    }
+
+    /// Resolve a state machine's parameters in its instance scope. Its state
+    /// names and `state` stay as written: the machine binds them.
+    fn prepare_state_machine(
+        &self,
+        machine: &StateMachine,
+        scope: &ParamContext,
+        element_path: &str,
+        abort: &dyn AbortSignal,
+    ) -> Result<StateMachine, ParseWithAbortError> {
+        let preserved: HashSet<String> = machine
+            .states
+            .iter()
+            .map(|(name, _)| name.to_ascii_uppercase())
+            .chain(std::iter::once("STATE".to_string()))
+            .collect();
+        let prepare = |expression: &str| {
+            prepare_behavioral_expression_preserving_parameters_with_abort(
+                expression,
+                scope,
+                &preserved,
+                abort,
+            )
+            .map_err(|error| {
+                map_preparation_error(error, |error| {
+                    ParseError::InvalidValue(format!(
+                        "state machine '{element_path}': '{expression}' could not be prepared:                          {error}"
+                    ))
+                })
+            })
+        };
+        let mut prepared = machine.clone();
+        if let Some(tripdt) = &mut prepared.tripdt {
+            *tripdt = prepare(tripdt)?;
+        }
+        for (_, value) in &mut prepared.states {
+            *value = prepare(value)?;
+        }
+        for rule in &mut prepared.rules {
+            rule.condition = prepare(&rule.condition)?;
+        }
+        for output in &mut prepared.outputs {
+            *output = prepare(output)?;
+        }
+        Ok(prepared)
     }
 
     fn prepare_spectre_statistical_expression(

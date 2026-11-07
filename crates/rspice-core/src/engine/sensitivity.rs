@@ -1327,9 +1327,9 @@ impl Engine {
             ElementKind::Mosfet { .. } => ElementType::Mosfet,
             ElementKind::Jfet { .. } => ElementType::Jfet,
             ElementKind::Mesfet { .. } => ElementType::Mesfet,
-            ElementKind::XyceMemristor { .. } | ElementKind::SpecialFunction { .. } => {
-                ElementType::Other
-            }
+            ElementKind::XyceMemristor { .. }
+            | ElementKind::SpecialFunction { .. }
+            | ElementKind::StateMachine(_) => ElementType::Other,
             ElementKind::Vccs { .. } => ElementType::Transconductance,
             ElementKind::Ccvs { .. } => ElementType::Transresistance,
             ElementKind::Vcvs { .. } | ElementKind::Cccs { .. } => ElementType::Other,

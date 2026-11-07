@@ -45,6 +45,7 @@ use std::time::{Duration, Instant};
 pub(in crate::engine) mod data_dependencies;
 mod frequency_output;
 mod ground_reference;
+mod machine;
 mod model_resolution;
 mod model_safety;
 mod special_function;
@@ -6666,6 +6667,9 @@ impl Engine {
         let boundary_supplies =
             boundary_supply::BoundarySupplies::new(netlist, &flat_elements, reference);
 
+        // State machines read nodes any element may create, so they are built
+        // once every other element is.
+        let mut machines = Vec::new();
         for (element_index, element) in flat_elements.iter().enumerate() {
             if element_index.is_multiple_of(64) {
                 check_build_abort(abort)?;
@@ -6717,6 +6721,9 @@ impl Engine {
                     instance_params,
                     self.config.temperature,
                 )?,
+                ElementKind::StateMachine(definition) => {
+                    machines.push((element, definition.as_ref()))
+                }
                 ElementKind::Resistor {
                     value,
                     value_expr,
@@ -10601,6 +10608,12 @@ impl Engine {
             }
         }
 
+        machine::build_all(
+            &mut circuit,
+            &machines,
+            &netlist.params,
+            self.config.temperature,
+        )?;
         attach_frequency_responses(&mut circuit, &flat_elements)?;
 
         #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]

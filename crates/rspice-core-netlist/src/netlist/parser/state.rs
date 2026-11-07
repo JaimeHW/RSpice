@@ -148,6 +148,10 @@ pub(super) struct ParseState {
     /// Unknown dot-commands and `.options` keys already warned about, so a
     /// deck repeating one card does not flood the log.
     pub(super) unknown_warned: HashSet<String>,
+    /// The `.machine` block being read, if any.
+    pub(super) open_machine: Option<super::machine::OpenMachine>,
+    /// How many `.machine` blocks have been read, which numbers their names.
+    pub(super) machine_count: usize,
 }
 
 impl ParseState {
@@ -199,6 +203,8 @@ impl ParseState {
             element_origins: HashMap::new(),
             mutual_inductor_records: Vec::new(),
             unknown_warned: HashSet::new(),
+            open_machine: None,
+            machine_count: 0,
         }
     }
 
@@ -213,6 +219,16 @@ impl ParseState {
         detected_at: NetlistSourceLocation,
         abort: &dyn AbortSignal,
     ) -> Result<Netlist, ParseWithAbortError> {
+        if let Some(machine) = &self.open_machine {
+            return Err(ParseError::Syntax {
+                line: machine.opened_at(),
+                message: format!(
+                    "the .machine block opened at line {} has no .endmachine",
+                    machine.opened_at()
+                ),
+            }
+            .into());
+        }
         if let Some(frame) = self.subckt_stack.last() {
             return Err(Self::missing_subcircuit_ends_error(
                 frame,

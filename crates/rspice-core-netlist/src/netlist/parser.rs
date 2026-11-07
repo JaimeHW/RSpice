@@ -183,6 +183,7 @@ mod freq_synthesis;
 mod hb_card;
 mod laplace_synthesis;
 mod line;
+mod machine;
 #[doc(hidden)]
 pub mod monte_carlo_identity;
 mod periodic_cards;

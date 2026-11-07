@@ -792,6 +792,42 @@ pub enum ElementKind {
         /// against the concrete instance scope during flattening.
         deferred_params: Vec<(String, String)>,
     },
+
+    /// LTspice `.machine` state machine.
+    ///
+    /// `nodes` holds each output's positive and negative terminal, in
+    /// `.output` order.
+    StateMachine(Box<StateMachine>),
+}
+
+/// An LTspice `.machine ... .endmachine` block.
+///
+/// Expressions keep their authored text: the state names and `state` in
+/// them are bound when the machine is built.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StateMachine {
+    /// The `.machine` card's time tolerance for locating a rule's trip.
+    pub tripdt: Option<String>,
+    /// Each state's name and value expression, in declaration order. The
+    /// first is the initial state.
+    pub states: Vec<(String, String)>,
+    /// The rules in declaration order.
+    pub rules: Vec<MachineRule>,
+    /// Each output's expression. Output `k` drives `nodes[2k]` from
+    /// `nodes[2k + 1]`.
+    pub outputs: Vec<String>,
+}
+
+/// One `.rule` of a [`StateMachine`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct MachineRule {
+    /// The state the rule leaves, as an index into the machine's states, or
+    /// `None` for `*`, which matches every state.
+    pub from: Option<usize>,
+    /// The state the rule enters.
+    pub to: usize,
+    /// The condition; the rule fires when it reaches 0.5.
+    pub condition: String,
 }
 
 /// The LTspice special-function devices, named by the model token of their
