@@ -257,3 +257,42 @@ RG fb 0 1k
         assert_close("output noise", density, expected, 3e-3 * expected);
     }
 }
+
+#[test]
+fn every_functional_subcircuit_parses_and_its_default_instance_solves() {
+    // Each part with its defaults, its positive supply pin at 5 V, its
+    // negative or ground pin at ground and every other pin loaded to ground.
+    let library = parse(rspice_core_base::builtin_lib::FUNCTIONAL_LIB);
+    assert!(!library.subcircuits.is_empty());
+    for subcircuit in &library.subcircuits {
+        let mut deck = format!("* {} defaults
+VSUP sup 0 5
+", subcircuit.name);
+        let mut probed = Vec::new();
+        let mut nodes = Vec::new();
+        for port in &subcircuit.ports {
+            match port.to_ascii_uppercase().as_str() {
+                "VP" | "VCC" => nodes.push("sup".to_owned()),
+                "VN" | "GND" => nodes.push("0".to_owned()),
+                _ => {
+                    let node = format!("n_{port}");
+                    deck.push_str(&format!("R_{port} {node} 0 100k
+"));
+                    nodes.push(node.clone());
+                    probed.push(node);
+                }
+            }
+        }
+        deck.push_str(&format!("X1 {} {}
+.end
+", nodes.join(" "), subcircuit.name));
+        let probes = probed.iter().map(String::as_str).collect::<Vec<_>>();
+        for (node, voltage) in probes.iter().zip(op_voltages(&deck, &probes)) {
+            assert!(
+                voltage.is_finite() && voltage.abs() <= 5.0 + 1e-6,
+                "{} {node}: {voltage}",
+                subcircuit.name
+            );
+        }
+    }
+}
