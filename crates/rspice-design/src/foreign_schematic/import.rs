@@ -2249,15 +2249,19 @@ fn unique_pin_names(slots: &[Option<&ForeignPin>]) -> Vec<PortSpec> {
         .collect()
 }
 
+/// How far a comment's text stands off the point its drawing stood it on by
+/// an edge, so a word standing on a wire keeps its descenders clear of it.
+const NOTE_STANDOFF_WORLD: f32 = 3.0;
+
 /// Where a note's anchor goes so its text's box stands on `point` the way
 /// the source drawing stood it: by its start, end or centre across, and by
 /// its top, bottom or middle down.
 fn note_anchor(note: &DesignNote, point: Point, justification: (TextEdge, TextEdge)) -> Point {
     let (width, height) = note.text_extent_world(&note.text);
     let reach = |edge: TextEdge, extent: f32| match edge {
-        TextEdge::Start => 0.0,
+        TextEdge::Start => -NOTE_STANDOFF_WORLD,
         TextEdge::Center => extent * 0.5,
-        TextEdge::End => extent,
+        TextEdge::End => extent + NOTE_STANDOFF_WORLD,
     };
     let (offset_x, offset_y) = DESIGN_NOTE_TEXT_OFFSET_WORLD;
     Point::new(

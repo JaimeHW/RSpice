@@ -676,9 +676,9 @@ fn directives_and_comments_keep_their_text_and_place() {
     assert_eq!(imported.directives[1].position, Point::new(40, 120));
     let note = &imported.document.design_notes[0];
     assert_eq!(note.text, "Bias network\nkeep R1 close");
-    // `Left` starts the text at (40, 200) and centres its two 15-unit lines
-    // on it; the anchor stands 6 left of and 3 over the text.
-    assert_eq!(note.pos, Point::new(34, 182));
+    // `Left` starts the text 3 past (40, 200) and centres its two 15-unit
+    // lines on it; the anchor stands 6 left of and 3 over the text.
+    assert_eq!(note.pos, Point::new(37, 182));
 }
 
 /// A QSPICE drawing: a source, a resistor, a DLL block and a comment, with
@@ -2197,6 +2197,9 @@ fn a_comment_keeps_its_size_and_stands_on_its_point_as_its_drawing_stood_it() {
         (label.pos.x as f32, label.pos.y as f32)
     };
     let near = |a: f32, b: f32| (a - b).abs() <= 0.5;
+    // A box that stands on its point by an edge stands this far off it, so
+    // its descenders clear the wire it labels.
+    let standoff = 3.0;
 
     let (size, [left, top, right, bottom]) = lettered(&qspice, "centred\nnote");
     let (x, y) = point(&qspice, "centre");
@@ -2206,17 +2209,17 @@ fn a_comment_keeps_its_size_and_stands_on_its_point_as_its_drawing_stood_it() {
     let (size, [left, _, right, bottom]) = lettered(&qspice, "standing");
     let (x, y) = point(&qspice, "base");
     assert_eq!(size, 100);
-    assert!(near((left + right) * 0.5, x) && near(bottom, y));
+    assert!(near((left + right) * 0.5, x) && near(bottom, y - standoff));
 
     let (size, [left, top, right, _]) = lettered(&ltspice, "hanging");
     let (x, y) = point(&ltspice, "top");
     assert_eq!(size, 67, "LTspice size 1 is 1.0x against the standard 1.5x");
-    assert!(near((left + right) * 0.5, x) && near(top, y));
+    assert!(near((left + right) * 0.5, x) && near(top, y + standoff));
 
     let (size, [left, top, _, bottom]) = lettered(&ltspice, "starting");
     let (x, y) = point(&ltspice, "left");
     assert_eq!(size, 100);
-    assert!(near(left, x) && near((top + bottom) * 0.5, y));
+    assert!(near(left, x + standoff) && near((top + bottom) * 0.5, y));
 
     let native = DesignNote::new(1, Point::new(0, 0), DesignNoteKind::PlainText, "n").unwrap();
     assert!(native.has_standard_text_size());
