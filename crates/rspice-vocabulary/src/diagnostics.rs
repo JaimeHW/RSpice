@@ -1,7 +1,6 @@
 //! Stable source-diagnostic identity and collection bounds shared by producers and views.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 
 mod metadata;
 mod source;
@@ -91,15 +90,6 @@ pub fn validate_diagnostic_count(count: usize) -> Result<(), String> {
     if count > MAX_DIAGNOSTICS {
         return Err(format!(
             "Diagnostic collection contains {count} records; the supported maximum is {MAX_DIAGNOSTICS}."
-        ));
-    }
-    Ok(())
-}
-
-pub fn insert_diagnostic_id(ids: &mut HashSet<uuid::Uuid>, id: uuid::Uuid) -> Result<(), String> {
-    if !ids.insert(id) {
-        return Err(format!(
-            "Diagnostic collection contains duplicate canonical ID {id}."
         ));
     }
     Ok(())

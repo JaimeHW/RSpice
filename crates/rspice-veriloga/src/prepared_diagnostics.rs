@@ -200,7 +200,9 @@ impl PreparedSourceMap {
             .map(|found| (found.path.display().to_string(), found.line, found.column))
     }
 
-    fn map_span(
+    /// The original document, byte range, line and column of a span of the
+    /// expanded text.
+    pub(crate) fn map_span(
         &self,
         source: &str,
         span: &CompileDiagnosticSpan,
@@ -258,9 +260,9 @@ impl PreparedSourceMap {
     }
 }
 
-struct SourceCoordinates<'a> {
-    path: &'a Path,
-    range: Range<usize>,
-    line: usize,
-    column: usize,
+pub(crate) struct SourceCoordinates<'a> {
+    pub(crate) path: &'a Path,
+    pub(crate) range: Range<usize>,
+    pub(crate) line: usize,
+    pub(crate) column: usize,
 }

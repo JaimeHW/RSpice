@@ -9,7 +9,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::ast::{Item, Module, SourceFile};
+use crate::ast::{BinaryOp, Expression, Item, Module, SourceFile, UnaryOp};
+use crate::prepared_diagnostics::PreparedSourceMap;
 use crate::runtime_report::{
     RuntimeQualificationOptions, RuntimeTarget, RuntimeTargetQualifications, RuntimeTargetReadiness,
 };
@@ -102,6 +103,10 @@ pub struct SpecialistFinding {
     pub summary: String,
     pub detail: String,
     pub span: SpecialistSpan,
+    /// Where `span` starts in the author's own files, when the compile kept
+    /// a map back to them. A finding about the module as a whole has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub location: Option<SpecialistLocation>,
     pub action: Option<SpecialistCodeAction>,
 }
 
@@ -120,6 +125,21 @@ impl From<Span> for SpecialistSpan {
             byte_end: span.end,
         }
     }
+}
+
+/// A finding's place in the document it was written in.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpecialistLocation {
+    /// The document's logical path; `None` for text compiled without a
+    /// document name.
+    pub path: Option<String>,
+    /// One-based line.
+    pub line: usize,
+    /// One-based column, counted in characters.
+    pub column: usize,
+    /// The finding's bytes in that document.
+    pub byte_start: usize,
+    pub byte_end: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -153,10 +173,13 @@ pub struct SpecialistModuleInstance {
     pub parent_module: String,
 }
 
+/// `source_map`, when the compile kept one, places each finding in the file
+/// and on the line and column it was written.
 pub(crate) fn analyze(
     analyzed: &AnalyzedFile,
     module_name: &str,
     source: &str,
+    source_map: Option<&PreparedSourceMap>,
     targets: &RuntimeTargetQualifications,
     requested: RuntimeQualificationOptions,
 ) -> SpecialistReport {
@@ -198,6 +221,11 @@ pub(crate) fn analyze(
             finding.detail.clone(),
         ))
     });
+    if let Some(source_map) = source_map {
+        for finding in &mut findings {
+            finding.location = locate(source_map, source, finding.span);
+        }
+    }
 
     let mut counts = BTreeMap::new();
     for finding in &findings {
@@ -341,38 +369,113 @@ fn analyze_regions(
         .map(|variable| variable.name.to_string())
         .collect::<BTreeSet<_>>();
     evidence.state_variables = state_variables.len();
+    let parameters = module
+        .parameters
+        .iter()
+        .map(|parameter| {
+            (
+                parameter.name.to_string(),
+                parameter
+                    .range
+                    .as_ref()
+                    .map_or(Signs::ANY, Signs::of_range),
+            )
+        })
+        .collect();
+    let context = RegionContext {
+        source,
+        state_variables: &state_variables,
+        parameters,
+    };
     walk_regions(
         &module.body,
-        source,
-        &state_variables,
+        &context,
         0,
+        &mut PathFacts::default(),
         evidence,
         findings,
     );
 }
 
+/// What the region walk reads but never changes.
+struct RegionContext<'a> {
+    source: &'a str,
+    state_variables: &'a BTreeSet<String>,
+    /// The signs each parameter's declared range allows. A parameter with no
+    /// range can be set to anything, zero included.
+    parameters: BTreeMap<String, Signs>,
+}
+
+/// What every evaluation path reaching a point has established: the
+/// variables assigned on all of them, each with the signs its value can
+/// have there. A variable missing here may still hold whatever the previous
+/// evaluation left in it.
+#[derive(Debug, Clone, Default)]
+struct PathFacts {
+    assigned: BTreeMap<String, Signs>,
+}
+
+impl PathFacts {
+    /// The facts that hold after either of two paths: a variable is assigned
+    /// only when both assigned it, to a value either could have left.
+    fn join(&self, other: &Self) -> Self {
+        Self {
+            assigned: self
+                .assigned
+                .iter()
+                .filter_map(|(name, signs)| {
+                    other
+                        .assigned
+                        .get(name)
+                        .map(|other| (name.clone(), signs.union(*other)))
+                })
+                .collect(),
+        }
+    }
+
+    /// Forget the values of `targets`, which a region that may or may not
+    /// run assigns, keeping whether each was already assigned.
+    fn widen(&mut self, targets: &BTreeSet<String>) {
+        for target in targets {
+            if let Some(signs) = self.assigned.get_mut(target) {
+                *signs = Signs::ANY;
+            }
+        }
+    }
+}
+
 fn walk_regions(
     regions: &[AnalyzedRegion],
-    source: &str,
-    state_variables: &BTreeSet<String>,
+    context: &RegionContext<'_>,
     conditional_depth: usize,
+    facts: &mut PathFacts,
     evidence: &mut SpecialistEvidence,
     findings: &mut Vec<SpecialistFinding>,
 ) {
     for region in regions {
         match region {
-            AnalyzedRegion::Assignment(_)
-            | AnalyzedRegion::Task(_)
-            | AnalyzedRegion::Initialization { .. } => {}
+            AnalyzedRegion::Task(_) => {}
+            // An initialization runs in its own phase only, so a variable it
+            // assigns may hold either value afterwards.
+            AnalyzedRegion::Initialization { body, .. } => {
+                facts.widen(&assigned_state_targets(body, context.state_variables));
+            }
+            AnalyzedRegion::Assignment(assignment) => {
+                if assignment.index.is_none() {
+                    let signs = context.signs(&assignment.expression, facts);
+                    facts.assigned.insert(assignment.target.to_string(), signs);
+                }
+            }
             AnalyzedRegion::Contribution(contribution) => {
                 evidence.contributions += 1;
-                let text = source_slice(source, contribution.span).to_ascii_lowercase();
+                let text = source_slice(context.source, contribution.span).to_ascii_lowercase();
                 let discontinuous = conditional_depth > 0 || uses_discontinuous_operator(&text);
                 let smoothed = text.contains("transition(") || text.contains("slew(");
                 if discontinuous && !smoothed {
                     findings.push(finding(
                         SpecialistCheckKind::Discontinuity,
                         "VA-DISCONTINUITY-UNSMOOTHED",
+                        SpecialistFindingSeverity::Warning,
                         "Potential unsmoothed discontinuity",
                         "A contribution is conditional or uses a discontinuous operator without transition() or slew() in the same source region.",
                         contribution.span,
@@ -386,20 +489,31 @@ fn walk_regions(
                     findings.push(finding(
                         SpecialistCheckKind::Convergence,
                         "VA-CONVERGENCE-RAW-EXP",
+                        SpecialistFindingSeverity::Warning,
                         "Unbounded exponential in contribution",
                         "The contribution calls exp() directly; limexp() generally provides a Newton-safe exponential for compact models.",
                         contribution.span,
                         Some(("Consider limexp()", "Replace exp() with limexp() only after confirming equivalent model intent.")),
                     ));
                 }
-                if text.contains('/') {
+                for denominator in context.unbounded_denominators(&contribution.expression, facts) {
+                    let text = source_slice(context.source, denominator)
+                        .split_whitespace()
+                        .collect::<Vec<_>>()
+                        .join(" ");
                     findings.push(finding(
                         SpecialistCheckKind::Convergence,
                         "VA-CONVERGENCE-DIVISION",
-                        "Review contribution denominator",
-                        "The contribution contains division. Verify that every reachable denominator is bounded away from zero across the qualified parameter domain.",
-                        contribution.span,
-                        None,
+                        SpecialistFindingSeverity::Information,
+                        "Denominator can reach zero",
+                        &format!(
+                            "Nothing keeps the denominator `{text}` away from zero: no declared parameter range, positive constant or positive function such as exp() or max(x, eps) excludes it."
+                        ),
+                        denominator,
+                        Some((
+                            "Bound the denominator",
+                            "Declare a parameter range that excludes zero, or divide by max(x, eps) where the model allows it.",
+                        )),
                     ));
                 }
             }
@@ -410,15 +524,22 @@ fn walk_regions(
                 ..
             } => {
                 evidence.conditional_regions += 1;
-                let then_assigned = assigned_state_targets(then_body, state_variables);
-                let else_assigned = assigned_state_targets(else_body, state_variables);
-                for target in then_assigned.symmetric_difference(&else_assigned) {
+                let then_assigned = assigned_state_targets(then_body, context.state_variables);
+                let else_assigned = assigned_state_targets(else_body, context.state_variables);
+                // A variable assigned on every path before the conditional
+                // holds this evaluation's value on the branch that leaves it
+                // alone: there is no state to hide.
+                for target in then_assigned
+                    .symmetric_difference(&else_assigned)
+                    .filter(|target| !facts.assigned.contains_key(*target))
+                {
                     findings.push(finding(
                         SpecialistCheckKind::HiddenState,
                         "VA-HIDDEN-STATE-PARTIAL-ASSIGNMENT",
-                        "State variable is not assigned on every branch",
+                        SpecialistFindingSeverity::Information,
+                        &format!("'{target}' is not assigned on every branch"),
                         &format!(
-                            "State variable '{target}' is assigned in only one branch of this conditional; its previous value may become hidden state."
+                            "State variable '{target}' is assigned in only one branch of this conditional and not before it; its previous value may become hidden state."
                         ),
                         *span,
                         Some((
@@ -427,29 +548,34 @@ fn walk_regions(
                         )),
                     ));
                 }
+                let mut then_facts = facts.clone();
                 walk_regions(
                     then_body,
-                    source,
-                    state_variables,
+                    context,
                     conditional_depth + 1,
+                    &mut then_facts,
                     evidence,
                     findings,
                 );
+                let mut else_facts = facts.clone();
                 walk_regions(
                     else_body,
-                    source,
-                    state_variables,
+                    context,
                     conditional_depth + 1,
+                    &mut else_facts,
                     evidence,
                     findings,
                 );
+                *facts = then_facts.join(&else_facts);
             }
             AnalyzedRegion::Loop { body, span, .. } => {
                 evidence.runtime_loops += 1;
-                if !assigned_state_targets(body, state_variables).is_empty() {
+                let body_assigned = assigned_state_targets(body, context.state_variables);
+                if !body_assigned.is_empty() {
                     findings.push(finding(
                         SpecialistCheckKind::HiddenState,
                         "VA-HIDDEN-STATE-RUNTIME-LOOP",
+                        SpecialistFindingSeverity::Warning,
                         "State assignment occurs in a runtime loop",
                         "A runtime loop may execute zero times, so state assignments inside it require an explicit value on the zero-iteration path.",
                         *span,
@@ -459,20 +585,273 @@ fn walk_regions(
                 findings.push(finding(
                     SpecialistCheckKind::Convergence,
                     "VA-CONVERGENCE-RUNTIME-LOOP",
+                    SpecialistFindingSeverity::Warning,
                     "Runtime loop requires a bounded termination review",
                     "The loop bound is evaluated at runtime. Verify monotonic progress and a finite iteration bound for every qualified parameter set.",
                     *span,
                     None,
                 ));
+                // A later iteration sees what an earlier one assigned, and the
+                // loop may run no iteration at all.
+                let mut body_facts = facts.clone();
+                body_facts.widen(&body_assigned);
                 walk_regions(
                     body,
-                    source,
-                    state_variables,
+                    context,
                     conditional_depth,
+                    &mut body_facts,
                     evidence,
                     findings,
                 );
+                *facts = facts.join(&body_facts);
             }
+        }
+    }
+}
+
+impl RegionContext<'_> {
+    /// The denominators in `expression` that nothing established on this
+    /// path keeps away from zero.
+    fn unbounded_denominators(&self, expression: &Expression, facts: &PathFacts) -> Vec<Span> {
+        let mut denominators = Vec::new();
+        crate::ast::visit_expression(expression, &mut |node| {
+            if let Expression::Binary(binary) = node
+                && matches!(binary.op, BinaryOp::Div | BinaryOp::IntDiv)
+                && self.signs(&binary.right, facts).may_be_zero()
+            {
+                denominators.push(binary.right.span());
+            }
+        });
+        denominators
+    }
+
+    /// The signs `expression` can take on this path.
+    fn signs(&self, expression: &Expression, facts: &PathFacts) -> Signs {
+        match expression {
+            Expression::Number(number) => Signs::of_value(number.value),
+            Expression::Identifier(identifier) => {
+                let name = identifier.name.as_str();
+                facts
+                    .assigned
+                    .get(name)
+                    .or_else(|| self.parameters.get(name))
+                    .copied()
+                    .unwrap_or(Signs::ANY)
+            }
+            Expression::SystemFunction(function) => {
+                match (function.name.as_str(), function.args.as_slice()) {
+                    ("$temperature" | "$vt", []) => Signs::POSITIVE,
+                    ("$vt", [temperature]) => self.signs(temperature, facts),
+                    ("$abstime", []) => Signs::NON_NEGATIVE,
+                    _ => Signs::ANY,
+                }
+            }
+            Expression::Unary(unary) => {
+                let operand = self.signs(&unary.operand, facts);
+                match unary.op {
+                    UnaryOp::Pos | UnaryOp::ToReal => operand,
+                    UnaryOp::Neg => operand.negated(),
+                    UnaryOp::ToInteger => operand.truncated(),
+                    _ => Signs::ANY,
+                }
+            }
+            Expression::Binary(binary) => {
+                let left = self.signs(&binary.left, facts);
+                let right = self.signs(&binary.right, facts);
+                match binary.op {
+                    BinaryOp::Add | BinaryOp::IntAdd => left.plus(right),
+                    BinaryOp::Sub | BinaryOp::IntSub => left.plus(right.negated()),
+                    BinaryOp::Mul | BinaryOp::IntMul => left.times(right),
+                    BinaryOp::Div => left.divided_by(right),
+                    BinaryOp::IntDiv => left.divided_by(right).truncated(),
+                    BinaryOp::Pow | BinaryOp::IntPow if left == Signs::POSITIVE => {
+                        Signs::POSITIVE
+                    }
+                    _ => Signs::ANY,
+                }
+            }
+            Expression::Conditional(conditional) => self
+                .signs(&conditional.then_expr, facts)
+                .union(self.signs(&conditional.else_expr, facts)),
+            Expression::Call(call) => match (call.name.as_str(), call.args.as_slice()) {
+                ("exp" | "limexp" | "cosh", [_]) => Signs::POSITIVE,
+                ("abs", [value]) => self.signs(value, facts).absolute(),
+                ("sqrt", [value]) => self.signs(value, facts).square_root(),
+                ("pow", [base, _]) if self.signs(base, facts) == Signs::POSITIVE => {
+                    Signs::POSITIVE
+                }
+                ("max", [left, right]) => self
+                    .signs(left, facts)
+                    .pairwise(self.signs(right, facts), Sign::larger),
+                ("min", [left, right]) => self
+                    .signs(left, facts)
+                    .pairwise(self.signs(right, facts), Sign::smaller),
+                _ => Signs::ANY,
+            },
+            _ => Signs::ANY,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Sign {
+    Negative,
+    Zero,
+    Positive,
+}
+
+impl Sign {
+    const ALL: [Self; 3] = [Self::Negative, Self::Zero, Self::Positive];
+
+    const fn signs(self) -> Signs {
+        match self {
+            Self::Negative => Signs::NEGATIVE,
+            Self::Zero => Signs::ZERO,
+            Self::Positive => Signs::POSITIVE,
+        }
+    }
+
+    fn larger(self, other: Self) -> Signs {
+        Ord::max(self, other).signs()
+    }
+
+    fn smaller(self, other: Self) -> Signs {
+        Ord::min(self, other).signs()
+    }
+}
+
+/// The signs a real value can have: a set of negative, zero and positive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Signs(u8);
+
+impl Signs {
+    const NEGATIVE: Self = Self(0b001);
+    const ZERO: Self = Self(0b010);
+    const POSITIVE: Self = Self(0b100);
+    const NON_NEGATIVE: Self = Self(0b110);
+    const ANY: Self = Self(0b111);
+
+    fn of_value(value: f64) -> Self {
+        if value > 0.0 {
+            Self::POSITIVE
+        } else if value < 0.0 {
+            Self::NEGATIVE
+        } else if value == 0.0 {
+            Self::ZERO
+        } else {
+            Self::ANY
+        }
+    }
+
+    /// The signs a declared range admits. Only its numeric bounds and
+    /// exclusions count; a bound another parameter supplies admits anything.
+    fn of_range(range: &crate::types::ParameterRange) -> Self {
+        let mut signs = Self::ANY;
+        if let Some(min) = range.min {
+            if min > 0.0 || (min == 0.0 && range.min_exclusive) {
+                signs = signs.without(Self::NEGATIVE.union(Self::ZERO));
+            } else if min == 0.0 {
+                signs = signs.without(Self::NEGATIVE);
+            }
+        }
+        if let Some(max) = range.max {
+            if max < 0.0 || (max == 0.0 && range.max_exclusive) {
+                signs = signs.without(Self::NON_NEGATIVE);
+            } else if max == 0.0 {
+                signs = signs.without(Self::POSITIVE);
+            }
+        }
+        if range.exclude.contains(&0.0) {
+            signs = signs.without(Self::ZERO);
+        }
+        signs.or_any()
+    }
+
+    const fn contains(self, sign: Sign) -> bool {
+        self.0 & sign.signs().0 != 0
+    }
+
+    const fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+
+    const fn without(self, other: Self) -> Self {
+        Self(self.0 & !other.0)
+    }
+
+    /// An empty set names no reachable value; read it as unknown.
+    const fn or_any(self) -> Self {
+        if self.0 == 0 { Self::ANY } else { self }
+    }
+
+    const fn may_be_zero(self) -> bool {
+        self.contains(Sign::Zero)
+    }
+
+    fn pairwise(self, other: Self, combine: impl Fn(Sign, Sign) -> Self) -> Self {
+        let mut signs = Self(0);
+        for left in Sign::ALL.into_iter().filter(|sign| self.contains(*sign)) {
+            for right in Sign::ALL.into_iter().filter(|sign| other.contains(*sign)) {
+                signs = signs.union(combine(left, right));
+            }
+        }
+        signs.or_any()
+    }
+
+    fn negated(self) -> Self {
+        self.pairwise(Self::ZERO, |sign, _| match sign {
+            Sign::Negative => Self::POSITIVE,
+            Sign::Zero => Self::ZERO,
+            Sign::Positive => Self::NEGATIVE,
+        })
+    }
+
+    fn plus(self, other: Self) -> Self {
+        self.pairwise(other, |left, right| match (left, right) {
+            (Sign::Zero, sign) | (sign, Sign::Zero) => sign.signs(),
+            (Sign::Positive, Sign::Positive) => Self::POSITIVE,
+            (Sign::Negative, Sign::Negative) => Self::NEGATIVE,
+            _ => Self::ANY,
+        })
+    }
+
+    fn times(self, other: Self) -> Self {
+        self.pairwise(other, |left, right| match (left, right) {
+            (Sign::Zero, _) | (_, Sign::Zero) => Self::ZERO,
+            (left, right) if left == right => Self::POSITIVE,
+            _ => Self::NEGATIVE,
+        })
+    }
+
+    /// The quotient's signs; a denominator that can only be zero gives no
+    /// finite value, and so any.
+    fn divided_by(self, other: Self) -> Self {
+        let nonzero = other.without(Self::ZERO);
+        if nonzero.0 == 0 {
+            return Self::ANY;
+        }
+        self.times(nonzero)
+    }
+
+    /// Truncation toward zero can turn any nonzero value into zero.
+    const fn truncated(self) -> Self {
+        self.union(Self::ZERO)
+    }
+
+    fn absolute(self) -> Self {
+        self.pairwise(Self::ZERO, |sign, _| match sign {
+            Sign::Zero => Self::ZERO,
+            _ => Self::POSITIVE,
+        })
+    }
+
+    fn square_root(self) -> Self {
+        if self == Self::POSITIVE {
+            Self::POSITIVE
+        } else if self.contains(Sign::Negative) {
+            Self::ANY
+        } else {
+            Self::NON_NEGATIVE
         }
     }
 }
@@ -605,6 +984,7 @@ fn analyze_portability(
                     byte_start: 0,
                     byte_end: 0,
                 },
+                location: None,
                 action: None,
             });
         }
@@ -614,6 +994,7 @@ fn analyze_portability(
 fn finding(
     check: SpecialistCheckKind,
     code: &str,
+    severity: SpecialistFindingSeverity,
     summary: &str,
     detail: &str,
     span: Span,
@@ -622,15 +1003,49 @@ fn finding(
     SpecialistFinding {
         check,
         code: code.to_owned(),
-        severity: SpecialistFindingSeverity::Warning,
+        severity,
         summary: summary.to_owned(),
         detail: detail.to_owned(),
         span: span.into(),
+        location: None,
         action: action.map(|(title, replacement_hint)| SpecialistCodeAction {
             title: title.to_owned(),
             replacement_hint: replacement_hint.to_owned(),
         }),
     }
+}
+
+/// Where a finding's span starts in its own document. A finding that covers
+/// no source text is about the module as a whole and has no place.
+fn locate(
+    source_map: &PreparedSourceMap,
+    source: &str,
+    span: SpecialistSpan,
+) -> Option<SpecialistLocation> {
+    if span.byte_start >= span.byte_end {
+        return None;
+    }
+    let found = source_map.map_span(
+        source,
+        &crate::CompileDiagnosticSpan {
+            source_id: span.source_id,
+            byte_start: span.byte_start,
+            byte_end: span.byte_end,
+            start: None,
+            end: None,
+        },
+    )?;
+    // Text compiled without a document is named "<input>" by the
+    // preprocessor; its findings belong to whichever document holds it.
+    let path = (found.path != std::path::Path::new("<input>"))
+        .then(|| crate::virtual_source::path_to_logical(found.path));
+    Some(SpecialistLocation {
+        path,
+        line: found.line,
+        column: found.column,
+        byte_start: found.range.start,
+        byte_end: found.range.end,
+    })
 }
 
 fn source_slice(source: &str, span: Span) -> &str {
@@ -742,6 +1157,181 @@ endmodule
                 .any(|finding| finding.code == "VA-CONVERGENCE-RAW-EXP")
         );
         report.validate_integrity().unwrap();
+    }
+
+    /// A behavioural op-amp as a reviewer writes one: both divisions are by
+    /// quantities the parameter ranges keep positive, and the clip reassigns a
+    /// variable assigned unconditionally just before it.
+    const OP_AMP: &str = r#"`include "constants.vams"
+`include "disciplines.vams"
+
+module opamp_bhv(inp, inn, out, vdd, vss);
+  input inp, inn;
+  output out;
+  inout vdd, vss;
+  electrical inp, inn, out, vdd, vss, mid;
+  parameter real a0 = 1e5 from (0:inf);
+  parameter real gbw = 10M from (0:inf);
+  parameter real sr = 5M from (0:inf);
+  parameter real rout = 50 from (0:inf);
+  parameter integer clip = 1 from [0:1];
+  real vin, vslew, vtarget, wp;
+  analog begin
+    wp = `M_TWO_PI * gbw / a0;
+    vin = V(inp, inn);
+    I(mid) <+ -a0 * vin;
+    I(mid) <+ V(mid) + ddt(V(mid)) / wp;
+    vslew = slew(V(mid), sr, -sr);
+    vtarget = vslew;
+    if (clip)
+      vtarget = min(max(vslew, V(vss)), V(vdd));
+    I(out) <+ (V(out) - vtarget) / rout;
+  end
+endmodule
+"#;
+
+    fn findings_with_code(source: &str, module: &str, code: &str) -> Vec<SpecialistFinding> {
+        let report = VerilogACompiler::default()
+            .compile_runtime(source, Some(module))
+            .expect("the model compiles");
+        report.validate_integrity().unwrap();
+        report
+            .specialist
+            .findings
+            .into_iter()
+            .filter(|finding| finding.code == code)
+            .collect()
+    }
+
+    /// A module dividing `denominator`, with `r` ranged (0:inf), `g` ranged
+    /// [1:10], `z` ranged [0:inf), `u` unranged, and `x` assigned `setup`
+    /// before the contribution.
+    fn division_findings(setup: &str, denominator: &str) -> Vec<SpecialistFinding> {
+        let source = format!(
+            "module divide(p, n, c);
+  inout p, n, c; electrical p, n, c;
+  parameter real r = 1 from (0:inf);
+  parameter real g = 2 from [1:10];
+  parameter real z = 1 from [0:inf);
+  parameter real u = 1;
+  real x;
+  analog begin
+    {setup}
+    I(p, n) <+ V(p, n) / ({denominator});
+  end
+endmodule
+"
+        );
+        findings_with_code(&source, "divide", "VA-CONVERGENCE-DIVISION")
+    }
+
+    #[test]
+    fn ranged_denominators_and_a_clip_after_an_assignment_raise_no_lint() {
+        for code in [
+            "VA-CONVERGENCE-DIVISION",
+            "VA-HIDDEN-STATE-PARTIAL-ASSIGNMENT",
+        ] {
+            assert_eq!(
+                findings_with_code(OP_AMP, "opamp_bhv", code),
+                [],
+                "{code} on a module whose denominators are positive"
+            );
+        }
+    }
+
+    #[test]
+    fn denominators_kept_from_zero_raise_nothing() {
+        for (setup, denominator) in [
+            ("", "r"),
+            ("", "g"),
+            ("", "2.5"),
+            ("", "-r"),
+            ("", "r * g"),
+            ("", "r / g"),
+            ("", "r + z"),
+            ("", "r - -g"),
+            ("", "max(V(c), 1e-12)"),
+            ("", "max(1f, V(c))"),
+            ("", "abs(V(c)) + 1"),
+            ("", "exp(V(c))"),
+            ("", "limexp(V(c))"),
+            ("", "pow(r, V(c))"),
+            ("", "sqrt(r)"),
+            ("", "$vt"),
+            ("", "$temperature"),
+            ("", "V(c) > 0 ? r : g"),
+            ("x = r * r;", "x"),
+            ("x = 1; if (V(c) > 0) x = g; else x = r;", "x"),
+            ("x = r; if (V(c) > 0) x = 2 * x;", "x"),
+        ] {
+            assert_eq!(
+                division_findings(setup, denominator),
+                [],
+                "`{setup}` then a division by `{denominator}`"
+            );
+        }
+    }
+
+    #[test]
+    fn denominators_that_can_reach_zero_are_reported() {
+        for (setup, denominator) in [
+            ("", "z"),
+            ("", "u"),
+            ("", "r - g"),
+            ("", "V(c)"),
+            ("", "sqrt(z)"),
+            ("", "abs(V(c))"),
+            ("", "max(V(c), z)"),
+            ("", "pow(V(c), 2)"),
+            ("x = r;", "x - 1"),
+            ("if (V(c) > 0) x = r;", "x"),
+            ("x = r; if (V(c) > 0) x = V(c);", "x"),
+        ] {
+            assert_eq!(
+                division_findings(setup, denominator).len(),
+                1,
+                "`{setup}` then a division by `{denominator}`"
+            );
+        }
+    }
+
+    #[test]
+    fn a_branch_denominator_is_one_information_finding_where_it_was_written() {
+        let source = "`include \"disciplines.vams\"\n\nmodule probe(p, n, c);\n  inout p, n, c;\n  electrical p, n, c;\n  analog I(p, n) <+ V(p, n) / V(c);\nendmodule\n";
+        let findings = findings_with_code(source, "probe", "VA-CONVERGENCE-DIVISION");
+        let [finding] = findings.as_slice() else {
+            panic!("one finding for one division: {findings:#?}");
+        };
+        assert_eq!(finding.severity, SpecialistFindingSeverity::Information);
+        let location = finding.location.as_ref().expect("the finding is placed");
+        assert_eq!(location.path, None, "the input was compiled without a name");
+        assert_eq!((location.line, location.column), (6, 31));
+        assert_eq!(&source[location.byte_start..location.byte_end], "V(c)");
+    }
+
+    #[test]
+    fn a_partial_assignment_reports_only_a_variable_left_unassigned_before_it() {
+        let source = r#"
+module latch(p, n);
+  inout p, n; electrical p, n;
+  real held, fresh;
+  analog begin
+    fresh = 0;
+    if (V(p, n) > 0) begin
+      held = V(p, n);
+      fresh = V(p, n);
+    end
+    I(p, n) <+ 1m * (held + fresh);
+  end
+endmodule
+"#;
+        let findings = findings_with_code(source, "latch", "VA-HIDDEN-STATE-PARTIAL-ASSIGNMENT");
+        let [finding] = findings.as_slice() else {
+            panic!("one variable is left unassigned: {findings:#?}");
+        };
+        assert!(finding.summary.contains("'held'"), "{}", finding.summary);
+        assert_eq!(finding.severity, SpecialistFindingSeverity::Information);
+        assert_eq!(finding.location.as_ref().map(|location| location.line), Some(7));
     }
 
     fn discontinuity_findings(source: &str, module: &str) -> Vec<String> {

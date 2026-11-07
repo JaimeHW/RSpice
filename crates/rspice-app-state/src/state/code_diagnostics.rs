@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use rspice_vocabulary::diagnostics::{
     DiagnosticSeverity as CodeEditorSeverity, MAX_DIAGNOSTICS,
-    SourceDiagnostic as CodeEditorDiagnostic, insert_diagnostic_id, validate_diagnostic_count,
+    SourceDiagnostic as CodeEditorDiagnostic, validate_diagnostic_count,
 };
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -111,8 +111,20 @@ impl CodeDiagnosticCollection {
         }
     }
 
+    /// Index `record`, or drop it when the collection already holds a record
+    /// with its identity: a finding reported twice is one finding, and the
+    /// repeat is bookkeeping, never a reason to refuse the rest.
     fn push_indexed(&mut self, mut record: CodeEditorDiagnostic) -> Result<(), String> {
-        insert_diagnostic_id(&mut self.diagnostic_ids, record.canonical.diagnostic_id)?;
+        if !self.diagnostic_ids.insert(record.canonical.diagnostic_id) {
+            if cfg!(debug_assertions) {
+                log::warn!(
+                    "Dropped a repeated source finding {}: {}",
+                    record.canonical.code,
+                    record.message
+                );
+            }
+            return Ok(());
+        }
         self.summary.record(record.severity);
         let line = diagnostic_line(&record);
         if record.line.is_none() {
@@ -335,7 +347,7 @@ mod tests {
     }
 
     #[test]
-    fn diagnostic_collection_rejects_duplicate_canonical_identity() {
+    fn diagnostic_collection_keeps_one_record_per_canonical_identity() {
         let diagnostic = CodeEditorDiagnostic::current(
             "rspice.test",
             "TEST-DUPLICATE",
@@ -348,8 +360,9 @@ mod tests {
             None,
             None,
         );
-        let error = CodeDiagnosticCollection::try_new(vec![diagnostic.clone(), diagnostic])
-            .expect_err("duplicate canonical IDs must fail closed");
-        assert!(error.contains("duplicate canonical ID"));
+        let collection = CodeDiagnosticCollection::try_new(vec![diagnostic.clone(), diagnostic])
+            .expect("a repeated finding is one finding, never a failure");
+        assert_eq!(collection.as_slice().len(), 1);
+        assert_eq!(collection.summary().errors, 1);
     }
 }

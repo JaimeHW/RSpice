@@ -1,7 +1,7 @@
 //! Project-bound compilation receipts used by preparation and application projections.
 
 use super::diagnostics::{
-    ProjectCompileDiagnostic, ProjectDiagnosticSeverity, compiler_diagnostics,
+    ProjectCompileDiagnostic, ProjectDiagnosticSeverity, compiler_diagnostics, merge_repeated,
     project_compile_outcome, specialist_diagnostics,
 };
 use super::{
@@ -12,9 +12,8 @@ use crate::veriloga::{PreparedRuntimeError, PreparedVerilogARuntime};
 use rspice_design::project_sources::ProjectSourceBundle;
 use rspice_veriloga::canonical_ir::digital::DigitalDelaySelect;
 use rspice_veriloga::{ExternalCell, RuntimeCompileReport};
-use rspice_vocabulary::diagnostics::{insert_diagnostic_id, validate_diagnostic_count};
+use rspice_vocabulary::diagnostics::validate_diagnostic_count;
 use rspice_vocabulary::product::ProjectId;
-use std::collections::HashSet;
 use std::sync::Arc;
 
 #[derive(Debug, Clone)]
@@ -43,15 +42,18 @@ impl ProjectCompileReceipt {
                 .and_then(|bundle| {
                     build_profile::resolve_veriloga_build_profile(bundle)
                         .ok()
-                        .map(|resolved| specialist_diagnostics(report, &resolved.profile))
+                        .map(|resolved| {
+                            specialist_diagnostics(
+                                report,
+                                &resolved.profile,
+                                bundle.root().logical_path(),
+                            )
+                        })
                 })
                 .unwrap_or_default(),
         );
+        let diagnostics = merge_repeated(diagnostics, token);
         validate_diagnostic_count(diagnostics.len())?;
-        let mut ids = HashSet::new();
-        for diagnostic in &diagnostics {
-            insert_diagnostic_id(&mut ids, diagnostic.identity(token))?;
-        }
         Ok((
             Self {
                 token,
@@ -156,6 +158,6 @@ pub fn compile_project_bundle_receipt_against(
                 detail,
             )]
         }),
-        Err(diagnostics) => Err(diagnostics),
+        Err(diagnostics) => Err(merge_repeated(diagnostics, token)),
     }
 }

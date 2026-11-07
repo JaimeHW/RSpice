@@ -224,9 +224,13 @@ const fn editor_severity(severity: CompileDiagnosticSeverity) -> ProjectDiagnost
     }
 }
 
+/// The specialist review's findings, each placed where it was written. A
+/// finding in text the compiler read without a document name is in the
+/// bundle's root document, `root_path`.
 pub(super) fn specialist_diagnostics(
     report: &RuntimeCompileReport,
     profile: &super::build_profile::VerilogABuildProfile,
+    root_path: &str,
 ) -> Vec<ProjectCompileDiagnostic> {
     report
         .specialist
@@ -252,13 +256,68 @@ pub(super) fn specialist_diagnostics(
                 detail.push_str(" — ");
                 detail.push_str(&action.replacement_hint);
             }
-            ProjectCompileDiagnostic::new(
+            let diagnostic = ProjectCompileDiagnostic::new(
                 "rspice.veriloga.specialist",
                 &finding.code,
                 severity,
                 finding.summary.as_str(),
                 detail,
-            )
+            );
+            match &finding.location {
+                Some(location) => diagnostic.with_source(
+                    Some(
+                        location
+                            .path
+                            .clone()
+                            .unwrap_or_else(|| root_path.to_owned()),
+                    ),
+                    None,
+                    Some(location.byte_start..location.byte_end),
+                    Some(location.line),
+                    Some(location.column),
+                ),
+                None => diagnostic,
+            }
+        })
+        .collect()
+}
+
+/// One row per distinct finding.
+///
+/// Findings with one identity — the same words about the same place — are
+/// one finding reported more than once, and the row says how many times. A
+/// repeat is bookkeeping, never a reason to refuse a compile.
+pub(super) fn merge_repeated(
+    diagnostics: Vec<ProjectCompileDiagnostic>,
+    token: VerilogASourceOperationToken,
+) -> Vec<ProjectCompileDiagnostic> {
+    let mut rows: Vec<(ProjectCompileDiagnostic, usize)> = Vec::with_capacity(diagnostics.len());
+    let mut rows_by_identity =
+        std::collections::HashMap::<_, usize>::with_capacity(diagnostics.len());
+    for diagnostic in diagnostics {
+        match rows_by_identity.entry(diagnostic.identity(token)) {
+            std::collections::hash_map::Entry::Occupied(row) => {
+                if cfg!(debug_assertions) {
+                    log::warn!(
+                        "Verilog-A finding {} reported more than once: {}",
+                        diagnostic.code,
+                        diagnostic.message
+                    );
+                }
+                rows[*row.get()].1 += 1;
+            }
+            std::collections::hash_map::Entry::Vacant(row) => {
+                row.insert(rows.len());
+                rows.push((diagnostic, 1));
+            }
+        }
+    }
+    rows.into_iter()
+        .map(|(mut diagnostic, count)| {
+            if count > 1 {
+                diagnostic.detail = format!("{} Reported {count} times.", diagnostic.detail).into();
+            }
+            diagnostic
         })
         .collect()
 }
@@ -345,5 +404,101 @@ mod tests {
         assert!(diagnostic.detail.contains("child.va:4"));
         let range = diagnostic.byte_range.clone().expect("included byte range");
         assert_eq!(&child[range], "@");
+    }
+
+    /// The probe divides by a branch voltage on line 6, column 31.
+    const PROBE: &str = "`include \"disciplines.vams\"\n\nmodule probe(p, n, c);\n  inout p, n, c;\n  electrical p, n, c;\n  analog I(p, n) <+ V(p, n) / V(c);\nendmodule\n";
+
+    fn bundle(path: &str, source: &str) -> ProjectSourceBundle {
+        use rspice_design::project_sources::{ProjectSourceLanguage, ProjectSourceOwner};
+        ProjectSourceBundle::try_new(
+            ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA),
+            ProjectSourceLanguage::VerilogA,
+            path,
+            source,
+            [],
+            [],
+        )
+        .expect("a valid bundle")
+    }
+
+    fn compiled(
+        bundle: &ProjectSourceBundle,
+        module: Option<&str>,
+    ) -> (
+        super::super::receipt::ProjectCompileReceipt,
+        Vec<ProjectCompileDiagnostic>,
+    ) {
+        super::super::receipt::compile_project_bundle_receipt(
+            rspice_vocabulary::product::ProjectId::new(),
+            bundle,
+            module,
+        )
+        .unwrap_or_else(|diagnostics| panic!("the module compiles: {diagnostics:#?}"))
+    }
+
+    #[test]
+    fn a_lint_finding_is_placed_where_it_was_written_on_either_compile_route() {
+        let bundle = bundle("probe.va", PROBE);
+        for module in [None, Some("probe")] {
+            let (_, diagnostics) = compiled(&bundle, module);
+            let divisions = diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.code == "VA-CONVERGENCE-DIVISION")
+                .collect::<Vec<_>>();
+            let [division] = divisions.as_slice() else {
+                panic!("one finding for one division: {diagnostics:#?}");
+            };
+            assert_eq!(division.severity, ProjectDiagnosticSeverity::Info);
+            assert_eq!(division.source_path.as_deref(), Some("probe.va"));
+            assert_eq!((division.line, division.column), (Some(6), Some(31)));
+            let range = division.byte_range.clone().expect("a byte range");
+            assert_eq!(&PROBE[range], "V(c)");
+        }
+    }
+
+    #[test]
+    fn repeated_findings_are_one_row_and_never_fail_the_compile() {
+        let bundle = bundle("probe.va", PROBE);
+        let (receipt, _) = compiled(&bundle, Some("probe"));
+        let mut report = (**receipt.report()).clone();
+        let mut unplaced = report
+            .specialist
+            .findings
+            .iter()
+            .find(|finding| finding.code == "VA-CONVERGENCE-DIVISION")
+            .expect("the division finding")
+            .clone();
+        unplaced.location = None;
+        report
+            .specialist
+            .findings
+            .extend([unplaced.clone(), unplaced.clone(), unplaced]);
+
+        let (_, diagnostics) = super::super::receipt::ProjectCompileReceipt::from_report_against(
+            receipt.token(),
+            &report,
+            Some(&bundle),
+            None,
+            rspice_veriloga::canonical_ir::digital::DigitalDelaySelect::Typ,
+        )
+        .expect("a repeated finding never fails a compile");
+        let divisions = diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "VA-CONVERGENCE-DIVISION")
+            .collect::<Vec<_>>();
+        assert_eq!(divisions.len(), 2, "the placed finding and one repeated row");
+        assert!(
+            divisions
+                .iter()
+                .any(|diagnostic| diagnostic.line.is_none()
+                    && diagnostic.detail.ends_with("Reported 3 times.")),
+            "{divisions:#?}"
+        );
+        assert!(
+            diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.code != "DIAGNOSTIC-CAPACITY")
+        );
     }
 }

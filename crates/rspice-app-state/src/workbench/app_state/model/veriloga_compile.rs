@@ -38,20 +38,26 @@ pub fn compile_project_bundle_receipt(
             .map_err(|error| vec![diagnostic_capacity_failure(token, error)]),
         Err(diagnostics) => Err(diagnostics
             .into_iter()
-            .map(|diagnostic| {
-                let diagnostic = CodeEditorDiagnostic::from(diagnostic);
-                let document_id = diagnostic
-                    .source_path
-                    .clone()
-                    .unwrap_or_else(|| token.bundle_id.to_string().into());
-                diagnostic.bind_validation(
-                    document_id,
-                    token.revision,
-                    token.closure_digest.to_string(),
-                )
-            })
+            .map(|diagnostic| bind_to_compile(CodeEditorDiagnostic::from(diagnostic), token))
             .collect()),
     }
+}
+
+/// `diagnostic` bound to the compile `token` names, in the document it was
+/// found in: two findings in different documents are two findings.
+fn bind_to_compile(
+    diagnostic: CodeEditorDiagnostic,
+    token: VerilogASourceOperationToken,
+) -> CodeEditorDiagnostic {
+    let document_id = diagnostic
+        .source_path
+        .clone()
+        .unwrap_or_else(|| token.bundle_id.to_string().into());
+    diagnostic.bind_validation(
+        document_id,
+        token.revision,
+        token.closure_digest.to_string(),
+    )
 }
 
 /// The receipt of the compile `token` names, from the report its worker
@@ -82,13 +88,7 @@ fn receipt_projection(
     let report = compilation.report();
     let diagnostics = diagnostics
         .into_iter()
-        .map(|diagnostic| {
-            CodeEditorDiagnostic::from(diagnostic).bind_validation(
-                token.bundle_id.to_string(),
-                token.revision,
-                token.closure_digest.to_string(),
-            )
-        })
+        .map(|diagnostic| bind_to_compile(CodeEditorDiagnostic::from(diagnostic), token))
         .collect();
     let diagnostics = Arc::new(CodeDiagnosticCollection::try_new(diagnostics)?);
     Ok(VerilogACompileReceipt {

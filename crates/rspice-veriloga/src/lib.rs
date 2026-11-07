@@ -171,8 +171,8 @@ pub use semantic::{ParameterScope, SemanticAnalyzer};
 pub use source::{SourceId, SourceMap, Span};
 pub use specialist::{
     SpecialistCheckDisposition, SpecialistCheckKind, SpecialistCheckSummary, SpecialistCodeAction,
-    SpecialistEvidence, SpecialistFinding, SpecialistFindingSeverity, SpecialistModuleInstance,
-    SpecialistReport, SpecialistSpan,
+    SpecialistEvidence, SpecialistFinding, SpecialistFindingSeverity, SpecialistLocation,
+    SpecialistModuleInstance, SpecialistReport, SpecialistSpan,
 };
 pub use types::{FunctionRegistry, ParameterRange, ValueType};
 pub use virtual_source::{
@@ -1015,6 +1015,7 @@ impl VerilogACompiler {
             &analyzed,
             report.abi.module_name.as_str(),
             preprocessed,
+            source_map,
             &report.targets,
             qualifications,
         );
