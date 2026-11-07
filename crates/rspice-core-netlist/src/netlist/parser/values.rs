@@ -287,11 +287,9 @@ pub(super) fn parse_model_params(
     let mut bare_ident_deferrals: Vec<(String, String, usize)> = Vec::new();
     let mut authored_names = Vec::new();
 
+    // The card ends a parenthesized list its line leaves open: QSPICE,
+    // LTspice and the XSPICE code models all read `.model Q NPN(BF=50` so.
     let opened_paren = stream.consume(&TokenKind::LParen);
-    let allow_missing_close = opened_paren
-        && model_type
-            .map(crate::codemodels::is_builtin_model_name)
-            .unwrap_or(false);
 
     loop {
         skip_commas(stream);
@@ -319,22 +317,6 @@ pub(super) fn parse_model_params(
                 return Err(ParseError::Syntax {
                     line: line_num,
                     message: "Unexpected ')' in .MODEL parameter list".to_string(),
-                });
-            }
-            TokenKind::Newline | TokenKind::Eof if opened_paren => {
-                let has_params = !numeric_params.is_empty()
-                    || !expr_params.is_empty()
-                    || !string_params.is_empty()
-                    || !string_vector_params.is_empty()
-                    || !real_vector_params.is_empty()
-                    || !real_vector_expr_params.is_empty()
-                    || !integer_vector_params.is_empty();
-                if allow_missing_close && has_params {
-                    break;
-                }
-                return Err(ParseError::Syntax {
-                    line: line_num,
-                    message: "Parenthesized .MODEL parameter list is missing ')'".to_string(),
                 });
             }
             TokenKind::Newline | TokenKind::Eof => break,

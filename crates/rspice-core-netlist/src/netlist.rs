@@ -11147,21 +11147,26 @@ mod tests {
     }
 
     #[test]
-    fn unterminated_model_parameter_list_is_rejected() {
-        let err = Netlist::parse(
+    fn a_model_card_ends_a_parameter_list_its_line_leaves_open() {
+        let netlist = Netlist::parse(
             "unterminated model params\n\
              D1 out 0 dmod\n\
              .model dmod D(IS=1e-14 RS=1\n\
              .op\n\
              .end\n",
         )
-        .expect_err("unterminated parenthesized .MODEL parameters must fail");
-
-        let message = err.to_string();
-        assert!(
-            message.contains(".MODEL") && message.contains(")"),
-            "unexpected error: {message}"
-        );
+        .expect("QSPICE and LTspice read the card to its end");
+        let model = &netlist.models[0];
+        for (name, value) in [("IS", 1e-14), ("RS", 1.0)] {
+            assert!(
+                model
+                    .params
+                    .iter()
+                    .any(|(key, read)| key.eq_ignore_ascii_case(name) && *read == value),
+                "{name} in {:?}",
+                model.params
+            );
+        }
     }
 
     #[test]

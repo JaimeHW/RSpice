@@ -457,3 +457,22 @@ R2 up 0 1k
     }
 }
 
+// QSPICE: V(cc)=4.432971, V(d)=3.858144. LTspice: 4.432987, 3.858142.
+#[test]
+fn a_model_card_ends_a_parameter_list_its_line_leaves_open() {
+    let netlist = parse(
+        "* unclosed model parameter list
+V1 c 0 5
+R1 c cc 1k
+VB b 0 0.7
+Q1 cc b 0 QX
+.model QX NPN(BF=50 IS=1e-15
+D1 c d DX
+R2 d 0 1k
+.model DX D(IS=1e-12 N=2
+.end
+",
+    );
+    assert_close("V(cc)", op_voltage(&netlist, "cc"), 4.432971, 2e-5);
+    assert_close("V(d)", op_voltage(&netlist, "d"), 3.858144, 2e-5);
+}
