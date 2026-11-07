@@ -78,12 +78,16 @@ pub(super) fn parse_resistor(
     let node_neg = expect_node(stream, line_num)?;
 
     // Skip optional parameter names (R=)
+    let assigned = matches!(&stream.peek().kind, TokenKind::Ident(key) if key == "R")
+        && matches!(stream.peek_n(1).kind, TokenKind::Equals);
     skip_optional_param_name(stream, "R");
 
     let capture_direction = parameter_direction.is_some();
     let mut direction = capture_direction.then(|| Ok(Derivative::from(0.0)));
     let mut value: Option<Value> = None;
-    let mut value_expr: Option<String> = None;
+    let mut value_expr: Option<String> = assigned
+        .then(|| take_unbraced_value_expression(stream))
+        .flatten();
     let mut model: Option<String> = None;
     let mut instance_params: Vec<(String, Value)> = Vec::new();
     let mut deferred_params: Vec<(String, String)> = Vec::new();
@@ -241,6 +245,13 @@ pub(super) fn parse_resistor(
                         continue;
                     }
 
+                    if (name_upper == "R" || name_upper == "VALUE")
+                        && let Some(expr) = take_unbraced_value_expression(stream)
+                    {
+                        value_expr = Some(expr);
+                        value = None;
+                        continue;
+                    }
                     if (name_upper == "R" || name_upper == "VALUE")
                         && let Some(expr) = take_value_expression_string(stream, params)
                     {
@@ -9719,6 +9730,56 @@ pub(super) fn behavioral_expr_token_fragment(token: &TokenKind) -> Option<String
         TokenKind::Other(c) => Some(c.to_string()),
         TokenKind::Newline | TokenKind::Eof => None,
     }
+}
+
+/// LTspice reads `R=` to the end of the card, or to the next `name=`
+/// assignment, as one expression whether or not it is braced:
+/// `R=V(rval)*2`, `R=if(mode>0.5,1.6k,100)`. A single value, or a run that
+/// holds a braced expression, is left to the value readers.
+fn take_unbraced_value_expression(stream: &mut TokenStream) -> Option<String> {
+    let mut depth = 0usize;
+    let mut count = 0usize;
+    let mut operated = false;
+    loop {
+        match &stream.peek_n(count).kind {
+            TokenKind::Newline | TokenKind::Eof | TokenKind::Expression(_) if depth > 0 => {
+                return None;
+            }
+            TokenKind::Newline | TokenKind::Eof => break,
+            TokenKind::Expression(_) => return None,
+            TokenKind::Ident(name)
+                if depth == 0
+                    && (matches!(stream.peek_n(count + 1).kind, TokenKind::Equals)
+                        || name.eq_ignore_ascii_case("NOISELESS")) =>
+            {
+                break;
+            }
+            TokenKind::LParen => {
+                depth += 1;
+                operated = true;
+            }
+            TokenKind::RParen => {
+                if depth == 0 {
+                    return None;
+                }
+                depth -= 1;
+            }
+            TokenKind::Plus | TokenKind::Minus | TokenKind::Star | TokenKind::Slash => {
+                operated = true;
+            }
+            _ => {}
+        }
+        count += 1;
+    }
+    if count < 2 || !operated {
+        return None;
+    }
+    let mut expression = String::new();
+    for _ in 0..count {
+        append_behavioral_expr_token(&mut expression, &stream.peek().kind);
+        stream.advance();
+    }
+    Some(expression)
 }
 
 fn append_behavioral_expr_token(expression: &mut String, token: &TokenKind) {

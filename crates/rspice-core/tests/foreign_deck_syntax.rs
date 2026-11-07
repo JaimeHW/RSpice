@@ -1492,3 +1492,33 @@ D1 b 0 CMDSH-4E
     );
     assert_close("V(b)", op_voltage(&netlist, "b"), 0.303_891_4, 1e-6);
 }
+
+// QSPICE: V(b)=8.205128, V(c)=9.786084, V(d)=2.806655, V(e)=3.333333;
+// LTspice agrees to 1e-8.
+#[test]
+fn a_resistance_written_without_braces_is_read_to_the_end_of_the_card() {
+    let netlist = parse(
+        "* behavioral resistors written without braces
+.param Mode=1
+V1 a 0 10
+V4 rval 0 350
+R1 a b R=V(rval)
+R2 b 0 R=if(Mode>0.5,1.6k,100)
+R3 a c R=9.1K*EXP(3490/(V(rval)+273) - 3490/300)
+R4 c 0 1k
+R5 a d R=(V(rval,b)/V(a,c))**2/1k+10
+R6 d 0 1k
+X1 a e sub
+.subckt sub p q
+R7 p q R=2*V(p)**2
+R8 q 0 100
+.ends sub
+.op
+.end
+",
+    );
+    assert_close("V(b)", op_voltage(&netlist, "b"), 8.205_128, 1e-6);
+    assert_close("V(c)", op_voltage(&netlist, "c"), 9.786_084, 1e-6);
+    assert_close("V(d)", op_voltage(&netlist, "d"), 2.806_655, 1e-6);
+    assert_close("V(e)", op_voltage(&netlist, "e"), 3.333_333, 1e-6);
+}
