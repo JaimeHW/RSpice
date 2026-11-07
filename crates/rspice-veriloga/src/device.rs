@@ -2540,13 +2540,12 @@ impl CanonicalNoiseRuntimePlan {
         // a model's own `ddx` gets the derivative the stamp uses there, and a
         // `$limit`ed value is its converged argument, which is what the
         // evaluator reads for one; neither needs any history.
-        let mut function = crate::canonical_ir::ad::resolve_ddx_readbacks(&function).map_err(
-            |error| {
+        let mut function =
+            crate::canonical_ir::ad::resolve_ddx_readbacks(&function).map_err(|error| {
                 NoisePlanFailure::Unlowerable(VmError::InvalidModel(format!(
                     "grouped-noise PSD/exponent metadata derivative failed: {error}"
                 )))
-            },
-        )?;
+            })?;
         crate::canonical_ir::frequency::freeze_noise_primal(&mut function);
         for value in &function.values {
             use crate::canonical_ir::CfgValueKind;
@@ -2978,11 +2977,7 @@ impl VerilogADevice {
     /// refused, naming the source.
     ///
     /// `label` names the source and runs only on the failure path.
-    fn noise_power(
-        value: f64,
-        scale: f64,
-        label: impl FnOnce() -> String,
-    ) -> Result<f64, VmError> {
+    fn noise_power(value: f64, scale: f64, label: impl FnOnce() -> String) -> Result<f64, VmError> {
         /// How many ulp of the instance's noise scale a residue may span.
         const RESIDUE_ULPS: f64 = 4.0;
         if !value.is_finite() {
@@ -9581,13 +9576,12 @@ impl VerilogADevice {
             if !any_active_injection {
                 continue;
             }
-            let psd = Self::noise_power(metadata.psd, power_scale, || {
-                source
-                    .name
-                    .as_ref()
-                    .map(ToString::to_string)
-                    .unwrap_or_else(|| format!("noise{expected}"))
-            })?;
+            let name = source
+                .name
+                .as_ref()
+                .map(ToString::to_string)
+                .unwrap_or_else(|| format!("noise{expected}"));
+            let psd = Self::noise_power(metadata.psd, power_scale, || name.clone())?;
             if psd == 0.0 {
                 continue;
             }
@@ -9602,11 +9596,7 @@ impl VerilogADevice {
                 psd,
                 exponent,
                 table: source.table.clone(),
-                name: source
-                    .name
-                    .as_ref()
-                    .map(ToString::to_string)
-                    .unwrap_or_else(|| format!("noise{expected}")),
+                name,
                 injections,
             });
         }
@@ -9988,13 +9978,14 @@ impl VerilogADevice {
             if injections.is_empty() {
                 continue;
             }
-            if Self::noise_power(metadata.psd, power_scale, || {
+            let label = || {
                 source
                     .name
                     .as_ref()
                     .map(ToString::to_string)
                     .unwrap_or_else(|| format!("noise{expected}"))
-            })? == 0.0 {
+            };
+            if Self::noise_power(metadata.psd, power_scale, label)? == 0.0 {
                 continue;
             }
             if let Some(exponent) = metadata.exponent {
