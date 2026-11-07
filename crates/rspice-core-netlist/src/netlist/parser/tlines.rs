@@ -198,7 +198,7 @@ pub(super) fn parse_vswitch(
         return Ok(());
     }
     let (control_pos, control_neg) = super::elements::expect_node_pair(stream, line_num)?;
-    let model = expect_ident(stream, line_num)?;
+    let model = expect_model_name(stream, line_num)?;
 
     // Optional initial state
     let initial_state = parse_switch_state(stream);
@@ -346,7 +346,7 @@ pub(super) fn parse_iswitch(
     let node_pos = expect_node(stream, line_num)?;
     let node_neg = expect_node(stream, line_num)?;
     let control_element = expect_ident(stream, line_num)?;
-    let model = expect_ident(stream, line_num)?;
+    let model = expect_model_name(stream, line_num)?;
 
     // Optional initial state
     let initial_state = parse_switch_state(stream);

@@ -1375,3 +1375,33 @@ c1 a 0 1n
     assert_eq!(roots.poles.len(), 1, "poles={:?}", roots.poles);
     assert_close("pz pole", roots.poles[0].re, -2.0e6, 1.0);
 }
+
+// QSPICE: V(a)=1, V(b)=4.545455, V(e)=V(f)=4.999995e-6; LTspice agrees to
+// 1e-8. LTspice's own libraries name switch models `800`, `4K` and `50µA`.
+#[test]
+fn switch_models_may_be_named_like_numbers() {
+    let netlist = parse(
+        "* switch models whose names read as numbers
+V1 in 0 5
+VC c 0 1
+S1 in a c 0 800
+R1 a 0 1k
+S2 in b c 0 50µA
+R2 b 0 1k
+S3 in e c 0 4K
+R3 e 0 1k
+W1 in f VC 2A
+R4 f 0 1k
+.model 800 SW(Ron=4k Roff=1G Vt=.5 Vh=-.4)
+.model 50µA SW(Ron=100 Roff=1T Vt=.5 Vh=-.1)
+.model 4K SW(Ron=2k Roff=1G Vt=1.5 Vh=-.4)
+.model 2A CSW(Ron=3k Roff=1G It=1 Ih=.1)
+.op
+.end
+",
+    );
+    assert_close("V(a)", op_voltage(&netlist, "a"), 1.0, 1e-6);
+    assert_close("V(b)", op_voltage(&netlist, "b"), 4.545455, 1e-6);
+    assert_close("V(e)", op_voltage(&netlist, "e"), 4.999995e-6, 1e-10);
+    assert_close("V(f)", op_voltage(&netlist, "f"), 4.999995e-6, 1e-10);
+}
