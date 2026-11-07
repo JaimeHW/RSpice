@@ -241,3 +241,14 @@ RF NF2 NF3 {ESR/OVERTONE^2}
 VF NF3 0 0
 FF A B VF {if(OVERTONE>1, 1, 0)}
 .ends RSPICE_FN_CRYSTAL
+
+* Varistor. Pins: A B.
+* A metal-oxide varistor on the native VARISTOR: it passes no current until
+* the voltage across it exceeds VBREAK either way, and then conducts the
+* excess through RCLAMP. CP is the disc's capacitance across it. The
+* defaults are a 275 VAC, 14 mm disc: 430 V at breakdown and 710 V at 50 A.
+.subckt RSPICE_FN_VARISTOR A B VBREAK=430 RCLAMP=5.6 CP=450p
+VBR NBR 0 {VBREAK}
+A1 NBR 0 0 0 0 0 A B VARISTOR RCLAMP={RCLAMP}
+CP A B {CP}
+.ends RSPICE_FN_VARISTOR

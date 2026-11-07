@@ -341,3 +341,16 @@ fn a_placed_crystal_passes_its_series_resonance_and_blocks_beside_it() {
     assert!((at(10e6) - 0.5).abs() < 1e-3, "{}", at(10e6));
     assert!(at(9.9e6) < 0.01, "{}", at(9.9e6));
 }
+
+#[test]
+fn a_placed_varistor_clamps_a_supply_through_its_source_resistance() {
+    // 800 V behind 10 Ohm into the default 430 V, 5.6 Ohm disc:
+    // V = 430 + (800 - V)/10 * 5.6.
+    let mut bench = Bench::default();
+    bench.primitive(ComponentType::VoltageSource, "V1", "800", &["in", "0"]);
+    bench.primitive(ComponentType::Resistor, "RS", "10", &["in", "out"]);
+    bench.part("rspice.functional.varistor", "RV1", "", &["out", "0"]);
+    let out = bench.operating_point("out");
+    let expected = (430.0 + 800.0 * 0.56) / 1.56;
+    assert!((out - expected).abs() < 1e-6, "{out} vs {expected}");
+}

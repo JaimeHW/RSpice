@@ -989,3 +989,30 @@ fn an_overtone_crystal_also_resonates_at_its_fundamental() {
     let (_, below) = crystal_extremum("FS=30Meg ESR=40 C0=4p C1=1.6f", 10e6, 1e-4, true);
     assert!(below > 1e3, "{below}");
 }
+
+#[test]
+fn varistor_clamps_at_its_breakdown_plus_its_current_through_rclamp_either_way() {
+    // V = VBREAK + I RCLAMP beyond breakdown, the same either way; below it
+    // no current flows. LTspice 26.1.1 batch, VARISTOR rclamp=5.6 on a
+    // 430 V control: 710.0 V at 50 A and -542.0 V at -20 A.
+    let deck = "* varistor
+I1 0 a 50
+RA a 0 1G
+X1 a 0 RSPICE_FN_VARISTOR
+I2 0 b -20
+RB b 0 1G
+X2 b 0 RSPICE_FN_VARISTOR
+V3 c 0 400
+X3 c 0 RSPICE_FN_VARISTOR
+I4 0 d 2
+RD d 0 1G
+X4 d 0 RSPICE_FN_VARISTOR VBREAK=33 RCLAMP=0.5
+.end
+";
+    let voltages = op_voltages(deck, &["a", "b", "d"]);
+    assert_close("50 A", voltages[0], 710.0, 1e-3);
+    assert_close("-20 A", voltages[1], -542.0, 1e-3);
+    assert_close("2 A, 33 V part", voltages[2], 34.0, 1e-4);
+    let below = op_currents(deck, &["V3"])[0];
+    assert!(below.abs() < 1e-9, "{below}");
+}

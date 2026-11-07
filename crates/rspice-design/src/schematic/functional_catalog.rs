@@ -1016,6 +1016,7 @@ static FUNCTIONAL_PARTS: &[FunctionalPartDescriptor] = &[
         SAMPLE_HOLD_PARAMETERS,
     ),
     discrete::CRYSTAL,
+    discrete::VARISTOR,
 ];
 
 /// Every functional part, in catalog order.

@@ -23,6 +23,7 @@ RSPICE_FN_PHASEDET	subckt	subckt	rspice-functional	lib/functional.lib	189	0	top
 RSPICE_FN_SAMPLEHOLD	subckt	subckt	rspice-functional	lib/functional.lib	209	0	top
 RSPICE_FN_SCHMITT_BUF	subckt	subckt	rspice-functional	lib/functional.lib	146	0	top
 RSPICE_FN_SCHMITT_INV	subckt	subckt	rspice-functional	lib/functional.lib	141	0	top
+RSPICE_FN_VARISTOR	subckt	subckt	rspice-functional	lib/functional.lib	250	0	top
 RSPICE_FN_XOR	subckt	subckt	rspice-functional	lib/functional.lib	135	0	top
 RSPICE_LED_BLUE	model	diode	rspice-foundation	lib/foundation.lib	26	0	top
 RSPICE_LED_GREEN	model	diode	rspice-foundation	lib/foundation.lib	25	0	top

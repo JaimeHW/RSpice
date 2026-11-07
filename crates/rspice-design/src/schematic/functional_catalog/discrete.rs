@@ -124,3 +124,50 @@ pub(super) const CRYSTAL: FunctionalPartDescriptor = FunctionalPartDescriptor {
     preset: Some(CRYSTAL_PRESET),
     inputs: None,
 };
+
+/// A 275 VAC, 14 mm metal-oxide disc.
+const VARISTOR_PARAMETERS: &[FunctionalParameter] = &[
+    number(
+        "VBREAK",
+        "Breakdown voltage",
+        "V",
+        "430",
+        "Voltage across the varistor, either way, beyond which it conducts.",
+    ),
+    number(
+        "RCLAMP",
+        "Clamp resistance",
+        "Ω",
+        "5.6",
+        "Resistance the voltage beyond breakdown drives current through: the clamp voltage at current I is VBREAK + I·RCLAMP.",
+    ),
+    number(
+        "CP",
+        "Capacitance",
+        "F",
+        "450p",
+        "Capacitance of the disc across the terminals.",
+    ),
+];
+
+pub(super) const VARISTOR: FunctionalPartDescriptor = FunctionalPartDescriptor {
+    stable_id: "rspice.functional.varistor",
+    display_name: "Varistor",
+    subcircuit: "RSPICE_FN_VARISTOR",
+    pins: TWO_TERMINAL_PINS,
+    symbol_asset: "functional_varistor.svg",
+    block: Some(TWO_TERMINAL_BLOCK),
+    keywords: &[
+        "varistor",
+        "mov",
+        "metal oxide varistor",
+        "surge",
+        "surge protection",
+        "transient suppressor",
+        "vdr",
+    ],
+    category: ComponentCategory::ProtectionElectromechanical,
+    parameters: VARISTOR_PARAMETERS,
+    preset: None,
+    inputs: None,
+};
