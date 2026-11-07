@@ -4,4 +4,4 @@
 # those private to a .SUBCKT body and are the user-facing part counts.
 # id	category	path	tier	spdx	redistributable	entry	models	subcircuits	models_top	subcircuits_top	files	bytes	devices	name
 rspice-foundation	builtin	foundation	own	LicenseRef-RSpice	1	lib/foundation.lib	21	1	21	1	1	4195	diode,bjt,jfet,mosfet,opamp	RSpice foundation models
-rspice-functional	builtin	functional	own	LicenseRef-RSpice	1	lib/functional.lib	0	1	0	1	1	2231	opamp,comparator,timer,logic	RSpice functional parts
+rspice-functional	builtin	functional	own	LicenseRef-RSpice	1	lib/functional.lib	0	2	0	2	1	3348	opamp,comparator,timer,logic	RSpice functional parts

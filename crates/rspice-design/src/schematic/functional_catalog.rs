@@ -82,6 +82,27 @@ const fn number(
     }
 }
 
+const fn selector(
+    name: &'static str,
+    label: &'static str,
+    default: &'static str,
+    description: &'static str,
+    choices: &'static [FunctionalChoice],
+) -> FunctionalParameter {
+    FunctionalParameter {
+        name,
+        label,
+        unit: "",
+        default,
+        description,
+        choices,
+    }
+}
+
+const fn choice(label: &'static str, value: &'static str) -> FunctionalChoice {
+    FunctionalChoice { label, value }
+}
+
 use PortDirection::{In, Out, Supply};
 
 const AMPLIFIER_PINS: &[FunctionalPin] = &[
@@ -215,22 +236,116 @@ const OP_AMP_PARAMETERS: &[FunctionalParameter] = &[
     ),
 ];
 
-static FUNCTIONAL_PARTS: &[FunctionalPartDescriptor] = &[FunctionalPartDescriptor {
-    stable_id: "rspice.functional.opamp",
-    display_name: "Op-Amp",
-    subcircuit: "RSPICE_FN_OPAMP",
-    pins: AMPLIFIER_PINS,
-    symbol_asset: "functional_opamp.svg",
-    keywords: &[
-        "op amp",
-        "opamp",
-        "operational amplifier",
-        "amplifier",
-        "voltage feedback",
-    ],
-    category: ComponentCategory::AmplifiersComparators,
-    parameters: OP_AMP_PARAMETERS,
-}];
+/// A fast general-purpose comparator with a push-pull output.
+const COMPARATOR_PARAMETERS: &[FunctionalParameter] = &[
+    number(
+        "VOS",
+        "Input offset voltage",
+        "V",
+        "0",
+        "Added to the non-inverting input; the thresholds centre on -VOS.",
+    ),
+    number(
+        "HYST",
+        "Hysteresis",
+        "V",
+        "1m",
+        "Distance between the rising and falling input thresholds.",
+    ),
+    number(
+        "TPD",
+        "Propagation delay",
+        "s",
+        "100n",
+        "Time from the input crossing a threshold to the output edge starting.",
+    ),
+    number(
+        "TRISE",
+        "Rise time",
+        "s",
+        "10n",
+        "Time the output takes to rise across its full swing.",
+    ),
+    number(
+        "TFALL",
+        "Fall time",
+        "s",
+        "10n",
+        "Time the output takes to fall across its full swing.",
+    ),
+    selector(
+        "OC",
+        "Output stage",
+        "Push-pull",
+        "Push-pull drives both ways between the supply pins; open collector only sinks toward V- and needs a pull-up.",
+        &[choice("Push-pull", "0"), choice("Open collector", "1")],
+    ),
+    number(
+        "ROUT",
+        "Output resistance",
+        "Ω",
+        "50",
+        "Resistance of the output stage.",
+    ),
+    number(
+        "ISRC",
+        "Source current limit",
+        "A",
+        "20m",
+        "Largest current the output sources, drawn from V+.",
+    ),
+    number(
+        "ISNK",
+        "Sink current limit",
+        "A",
+        "20m",
+        "Largest current the output sinks, returned to V-.",
+    ),
+    number(
+        "IQ",
+        "Quiescent current",
+        "A",
+        "500u",
+        "Supply current from V+ to V- with no load.",
+    ),
+];
+
+static FUNCTIONAL_PARTS: &[FunctionalPartDescriptor] = &[
+    FunctionalPartDescriptor {
+        stable_id: "rspice.functional.opamp",
+        display_name: "Op-Amp",
+        subcircuit: "RSPICE_FN_OPAMP",
+        pins: AMPLIFIER_PINS,
+        symbol_asset: "functional_opamp.svg",
+        keywords: &[
+            "op amp",
+            "opamp",
+            "operational amplifier",
+            "amplifier",
+            "voltage feedback",
+        ],
+        category: ComponentCategory::AmplifiersComparators,
+        parameters: OP_AMP_PARAMETERS,
+    },
+    FunctionalPartDescriptor {
+        stable_id: "rspice.functional.comparator",
+        display_name: "Comparator",
+        subcircuit: "RSPICE_FN_COMPARATOR",
+        pins: AMPLIFIER_PINS,
+        symbol_asset: "functional_comparator.svg",
+        keywords: &[
+            "comparator",
+            "lm393",
+            "lm339",
+            "lm311",
+            "voltage comparator",
+            "open collector",
+            "hysteresis",
+        ],
+        category: ComponentCategory::AmplifiersComparators,
+        parameters: COMPARATOR_PARAMETERS,
+    },
+];
 
 /// Every functional part, in catalog order.
 pub fn functional_parts() -> &'static [FunctionalPartDescriptor] {
@@ -341,10 +456,17 @@ pub fn functional_instance_parameters(
         let value = if parameter.choices.is_empty() {
             value
         } else {
+            // A setting whose label has a space is stored quoted.
+            let setting = ['"', '\'']
+                .into_iter()
+                .find_map(|quote| value.strip_prefix(quote)?.strip_suffix(quote))
+                .unwrap_or(value);
             parameter
                 .choices
                 .iter()
-                .find(|choice| choice.label.eq_ignore_ascii_case(value) || choice.value == value)
+                .find(|choice| {
+                    choice.label.eq_ignore_ascii_case(setting) || choice.value == setting
+                })
                 .map(|choice| choice.value)
                 .ok_or_else(|| {
                     format!(
@@ -476,5 +598,20 @@ mod tests {
                 .contains("no parameter 'GAIN'")
         );
         assert!(functional_instance_parameters(op_amp, "AVOL=1;2").is_err());
+
+        let comparator = functional_part("rspice.functional.comparator").expect("comparator");
+        assert_eq!(
+            functional_instance_parameters(comparator, "OC=\"Open collector\" HYST=10m"),
+            Ok(" HYST=10m OC=1".to_owned())
+        );
+        assert_eq!(
+            functional_instance_parameters(comparator, "oc=push-pull"),
+            Ok(" OC=0".to_owned())
+        );
+        assert!(
+            functional_instance_parameters(comparator, "OC=Totem")
+                .unwrap_err()
+                .contains("takes Push-pull or Open collector")
+        );
     }
 }

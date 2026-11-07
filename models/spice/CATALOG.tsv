@@ -7,6 +7,7 @@
 # can still be traced to its source, but not a part a user can select.
 # name	kind	device	pack	path	line	restricted	scope
 RSPICE_DIODE	model	diode	rspice-foundation	lib/foundation.lib	10	0	top
+RSPICE_FN_COMPARATOR	subckt	subckt	rspice-functional	lib/functional.lib	54	0	top
 RSPICE_FN_OPAMP	subckt	subckt	rspice-functional	lib/functional.lib	23	0	top
 RSPICE_LED_BLUE	model	diode	rspice-foundation	lib/foundation.lib	26	0	top
 RSPICE_LED_GREEN	model	diode	rspice-foundation	lib/foundation.lib	25	0	top

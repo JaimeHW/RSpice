@@ -106,3 +106,23 @@ fn a_placed_op_amp_amplifies_by_its_feedback_ratio() {
     let out = bench.operating_point("out");
     assert!((out - 0.5 * gain).abs() < 1e-6, "{out}");
 }
+
+#[test]
+fn a_placed_open_collector_comparator_releases_its_output_to_the_pull_up() {
+    // The selector's label reaches the subcircuit as its value: an open
+    // collector lets a 12 V pull-up take the output above the 5 V supply.
+    let mut bench = Bench::default();
+    supplies(&mut bench, "5", "0");
+    bench.primitive(ComponentType::VoltageSource, "VPU", "12", &["pu", "0"]);
+    bench.primitive(ComponentType::VoltageSource, "VIN", "1.1", &["in", "0"]);
+    bench.primitive(ComponentType::VoltageSource, "VR", "1", &["ref", "0"]);
+    bench.part(
+        "rspice.functional.comparator",
+        "X1",
+        "OC=\"Open collector\"",
+        &["in", "ref", "vp", "vn", "out"],
+    );
+    bench.primitive(ComponentType::Resistor, "RPU", "10k", &["pu", "out"]);
+    let out = bench.operating_point("out");
+    assert!((out - 12.0).abs() < 1e-6, "{out}");
+}

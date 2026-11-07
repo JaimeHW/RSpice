@@ -9,11 +9,11 @@
 [summary]
 packs = 2
 files = 2
-bytes = 6426
+bytes = 7543
 models = 21
-subcircuits = 2
+subcircuits = 3
 models_top_level = 21
-subcircuits_top_level = 2
+subcircuits_top_level = 3
 shipped_packs = 1
 tiers = { own = 2 }
 
@@ -55,10 +55,10 @@ devices = ["opamp", "comparator", "timer", "logic"]
 corners = []
 entry = "lib/functional.lib"
 files = 1
-bytes = 2231
+bytes = 3348
 models = 0
-subcircuits = 1
+subcircuits = 2
 models_top_level = 0
-subcircuits_top_level = 1
+subcircuits_top_level = 2
 lib_sections = 0
 digest = ""

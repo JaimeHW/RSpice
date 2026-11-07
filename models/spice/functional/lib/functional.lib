@@ -44,3 +44,26 @@ BSRC VP 0 I=0.5*(I(VSNS)+sqrt(I(VSNS)*I(VSNS)+1e-18))
 BSNK 0 VN I=0.5*(sqrt(I(VSNS)*I(VSNS)+1e-18)-I(VSNS))
 IQ VP VN {IQ}
 .ends RSPICE_FN_OPAMP
+
+* Comparator. Pins: IN+ IN- V+ V- OUT.
+* A differential Schmitt trigger decides; it trips HYST/2 either side of
+* -VOS and changes state TPD after its input crosses, and the output edge
+* then takes TRISE or TFALL to cross the full swing. The decision drives a
+* push-pull stage that swings between the supply pins behind ROUT, or, with
+* OC=1, an open-collector stage that only sinks toward V-.
+.subckt RSPICE_FN_COMPARATOR INP INN VP VN OUT
++ VOS=0 HYST=1m TPD=100n TRISE=10n TFALL=10n OC=0 ROUT=50 ISRC=20m ISNK=20m IQ=500u
+A1 INP INN 0 0 0 NLB NL 0 SCHMITT VT={-VOS} VH={HYST/2} VHIGH=1 VLOW=0 TD={TPD}
++ TRISE={TRISE} TFALL={TFALL}
+EVN NVN 0 VN 0 1
+A2 0 NL VP VN NVN NVN NT NVN OTA G=1 LINEAR VHIGH=1e9 VLOW=-1e9
+RT NT NVN 1 NOISY=0
+VPP NPP 0 {1-OC}
+A3 OUT NT NPP 0 0 0 NO 0 OTA G={1/ROUT} IOUT={ISRC} ISINK={-ISNK} ASYM VHIGH=1e9 VLOW=-1e9
+EOC NOC 0 NLB 0 {OC}
+A4 OUT VN NOC 0 0 0 NO 0 OTA G={1/ROUT} IOUT={ISNK} ISINK={-ISNK} VHIGH=1e9 VLOW=-1e9
+VSNS NO OUT 0
+BSRC VP 0 I=0.5*(I(VSNS)+sqrt(I(VSNS)*I(VSNS)+1e-18))
+BSNK 0 VN I=0.5*(sqrt(I(VSNS)*I(VSNS)+1e-18)-I(VSNS))
+IQ VP VN {IQ}
+.ends RSPICE_FN_COMPARATOR

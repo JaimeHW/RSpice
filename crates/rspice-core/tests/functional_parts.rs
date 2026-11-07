@@ -7,7 +7,7 @@
 //! LTspice 26.1.1 batch run of the same deck are pinned beside the analytic
 //! value; QSPICE has no netlist form of a generic op-amp to vote with.
 
-use rspice_core::engine::Engine;
+use rspice_core::engine::{Engine, TransientResult};
 use rspice_core::netlist::Netlist;
 
 fn parse(deck: &str) -> Netlist {
@@ -55,6 +55,33 @@ fn rising_crossing(time: &[f64], wave: &[f64], level: f64) -> f64 {
         .unwrap_or_else(|| panic!("never rises through {level}"));
     let fraction = (level - wave[index]) / (wave[index + 1] - wave[index]);
     time[index] + fraction * (time[index + 1] - time[index])
+}
+
+/// The time `node` first crosses `level` falling, interpolated.
+fn falling_crossing(time: &[f64], wave: &[f64], level: f64) -> f64 {
+    let inverted = wave.iter().map(|value| -value).collect::<Vec<_>>();
+    rising_crossing(time, &inverted, -level)
+}
+
+/// The value of `wave` at `at`, interpolated.
+fn value_at(time: &[f64], wave: &[f64], at: f64) -> f64 {
+    let index = time
+        .windows(2)
+        .position(|pair| pair[0] <= at && at <= pair[1])
+        .unwrap_or_else(|| panic!("{at} is outside the run"));
+    let fraction = (at - time[index]) / (time[index + 1] - time[index]);
+    wave[index] + fraction * (wave[index + 1] - wave[index])
+}
+
+fn transient(deck: &str, stop: f64, step: f64) -> TransientResult {
+    Engine::default()
+        .run_tran(&parse(deck), stop, step)
+        .unwrap_or_else(|error| panic!("transient solves: {error}\n{deck}"))
+}
+
+fn waveform<'a>(tran: &'a TransientResult, node: &str) -> &'a [f64] {
+    tran.try_voltage_waveform_named(node)
+        .unwrap_or_else(|| panic!("no waveform for {node}"))
 }
 
 const SUPPLIES: &str = "VP vp 0 5\nVN vn 0 -5\n";
@@ -265,9 +292,7 @@ fn every_functional_subcircuit_parses_and_its_default_instance_solves() {
     let library = parse(rspice_core_base::builtin_lib::FUNCTIONAL_LIB);
     assert!(!library.subcircuits.is_empty());
     for subcircuit in &library.subcircuits {
-        let mut deck = format!("* {} defaults
-VSUP sup 0 5
-", subcircuit.name);
+        let mut deck = format!("* {} defaults\nVSUP sup 0 5\n", subcircuit.name);
         let mut probed = Vec::new();
         let mut nodes = Vec::new();
         for port in &subcircuit.ports {
@@ -276,16 +301,17 @@ VSUP sup 0 5
                 "VN" | "GND" => nodes.push("0".to_owned()),
                 _ => {
                     let node = format!("n_{port}");
-                    deck.push_str(&format!("R_{port} {node} 0 100k
-"));
+                    deck.push_str(&format!("R_{port} {node} 0 100k\n"));
                     nodes.push(node.clone());
                     probed.push(node);
                 }
             }
         }
-        deck.push_str(&format!("X1 {} {}
-.end
-", nodes.join(" "), subcircuit.name));
+        deck.push_str(&format!(
+            "X1 {} {}\n.end\n",
+            nodes.join(" "),
+            subcircuit.name
+        ));
         let probes = probed.iter().map(String::as_str).collect::<Vec<_>>();
         for (node, voltage) in probes.iter().zip(op_voltages(&deck, &probes)) {
             assert!(
@@ -295,4 +321,92 @@ VSUP sup 0 5
             );
         }
     }
+}
+
+const LOGIC_SUPPLIES: &str = "VP vp 0 5\nVN vn 0 0\n";
+
+#[test]
+fn comparator_trips_half_its_hysteresis_either_side_of_its_offset() {
+    // A 20 mV/us ramp through a 1 V reference, up and back down. The output
+    // moves TPD plus half an edge, 1.5 ns, after the input crosses.
+    let deck = format!(
+        "* comparator thresholds
+{LOGIC_SUPPLIES}VIN in 0 PWL(0 0.9 10u 1.1 20u 0.9)
+VR ref 0 1
+X1 in ref vp vn out RSPICE_FN_COMPARATOR HYST=20m TPD=1n TRISE=1n TFALL=1n
+RL out 0 100k
+X2 in ref vp vn shifted RSPICE_FN_COMPARATOR HYST=20m VOS=5m TPD=1n TRISE=1n TFALL=1n
+RL2 shifted 0 100k
+.end
+"
+    );
+    let tran = transient(&deck, 20e-6, 10e-9);
+    let input = waveform(&tran, "in");
+    for (node, offset) in [("out", 0.0), ("shifted", 5e-3)] {
+        let output = waveform(&tran, node);
+        let rise = rising_crossing(&tran.time, &output, 2.5) - 1.5e-9;
+        let fall = falling_crossing(&tran.time, &output, 2.5) - 1.5e-9;
+        let rising = value_at(&tran.time, &input, rise);
+        let falling = value_at(&tran.time, &input, fall);
+        assert_close("rising threshold", rising, 1.01 - offset, 0.2e-3);
+        assert_close("falling threshold", falling, 0.99 - offset, 0.2e-3);
+    }
+}
+
+#[test]
+fn comparator_output_moves_its_propagation_delay_after_the_input_and_slews_its_edge_times() {
+    // The input steps through the 1.0005 V rising threshold 0.05 ns into its
+    // 0.1 ns edge at 1 us, and back down through 0.9995 V just after 6 us.
+    let deck = format!(
+        "* comparator delay
+{LOGIC_SUPPLIES}VIN in 0 PULSE(0.9 1.1 1u 0.1n 0.1n 5u 10u)
+VR ref 0 1
+X1 in ref vp vn out RSPICE_FN_COMPARATOR TPD=100n TRISE=10n TFALL=20n
+RL out 0 100k
+.end
+"
+    );
+    let tran = transient(&deck, 8e-6, 1e-9);
+    let out = waveform(&tran, "out");
+    let crossed_up = 1e-6 + 0.050_25e-9;
+    let crossed_down = 6.0001e-6 + 0.050_25e-9;
+    // The edge starts TPD after the crossing and is half done TRISE/2 later.
+    let at = |level| rising_crossing(&tran.time, &out, level);
+    assert_close("rising delay", at(2.5) - crossed_up, 100e-9 + 5e-9, 0.2e-9);
+    assert_close("10-90% rise", at(4.5) - at(0.5), 0.8 * 10e-9, 0.2e-9);
+    let at = |level| falling_crossing(&tran.time, &out, level);
+    assert_close("falling delay", at(2.5) - crossed_down, 100e-9 + 10e-9, 0.2e-9);
+    assert_close("90-10% fall", at(0.5) - at(4.5), 0.8 * 20e-9, 0.2e-9);
+    // High is V+ divided between ROUT and the load.
+    let high = out.iter().copied().fold(f64::MIN, f64::max);
+    assert_close("output high", high, 5.0 * 100e3 / (100e3 + 50.0), 1e-6);
+}
+
+#[test]
+fn comparator_open_collector_output_only_sinks() {
+    // A 10 kOhm pull-up to its own 12 V rail: high is the pull-up rail, not
+    // V+. Low, the stage sinks the pull-up current through ROUT up to its
+    // limit: I = ISNK*tanh(V/(ROUT*ISNK)).
+    let deck = |input: f64| {
+        format!(
+            "* open-collector comparator
+{LOGIC_SUPPLIES}VPU pu 0 12
+VIN in 0 {input}
+VR ref 0 1
+X1 in ref vp vn out RSPICE_FN_COMPARATOR OC=1
+RPU pu out 10k
+.end
+"
+        )
+    };
+    let high = op_voltages(&deck(1.1), &["out"])[0];
+    assert_close("released", high, 12.0, 1e-6);
+    let low = op_voltages(&deck(0.9), &["out"])[0];
+    let sunk = (12.0 - low) / 10e3;
+    assert_close("sink law", sunk, 20e-3 * (low / (50.0 * 20e-3)).tanh(), 1e-9);
+    assert!((0.05..0.07).contains(&low), "low {low}");
+    // V+ carries the quiescent current alone; the sunk current returns to V-.
+    let currents = op_currents(&deck(0.9), &["vp", "vn"]);
+    assert_close("I(V+)", -currents[0], 500e-6, 1e-9);
+    assert_close("I(V-)", currents[1], 500e-6 + sunk, 1e-9);
 }
