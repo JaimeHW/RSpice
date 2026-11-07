@@ -30,6 +30,9 @@ type HashSet<T> = rustc_hash::FxHashSet<T>;
 
 #[cfg(any(feature = "veriloga", test))]
 pub(crate) mod checkpoint;
+mod history;
+
+use history::TransientHistory;
 
 //=============================================================================
 // Analysis Type
@@ -302,11 +305,7 @@ fn same_transient_time(a: Value, b: Value) -> bool {
     (a - b).abs() <= f64::EPSILON * scale
 }
 
-fn prune_transient_history(
-    history: &mut Vec<TransientHistorySample>,
-    time: Value,
-    retention_window: Value,
-) {
+fn prune_transient_history(history: &mut TransientHistory, time: Value, retention_window: Value) {
     if !retention_window.is_finite() || retention_window < 0.0 {
         return;
     }
@@ -314,9 +313,7 @@ fn prune_transient_history(
     let prune_count = history.partition_point(|sample| {
         sample.time < oldest_kept && !same_transient_time(sample.time, oldest_kept)
     });
-    if prune_count > 0 {
-        history.drain(0..prune_count);
-    }
+    history.drop_oldest(prune_count);
 }
 
 /// Bit-for-bit equality, so a skipped write stores exactly what is already
@@ -652,7 +649,7 @@ pub struct CmContext {
     /// Integer state variables
     int_state: Vec<i64>,
     /// Per-instance transient sample histories keyed by model-defined names.
-    transient_histories: CopyOnWrite<HashMap<String, Vec<TransientHistorySample>>>,
+    transient_histories: CopyOnWrite<HashMap<String, TransientHistory>>,
     /// Logical transition metadata for analog input vectors.
     input_analog_vector_transitions: CopyOnWrite<HashMap<String, Vec<Option<AnalogTransition>>>>,
     /// Logical transition metadata emitted by analog outputs.
@@ -2886,16 +2883,17 @@ impl CmContext {
             }
         }
 
-        if let Some(last) = history.last_mut()
-            && same_transient_time(last.time, time)
+        if history
+            .last()
+            .is_some_and(|last| same_transient_time(last.time, time))
         {
-            last.time = time;
-            last.values = values;
-            prune_transient_history(history, time, retention_window);
-            return;
+            if let Some(last) = history.last_mut() {
+                last.time = time;
+                last.values = values;
+            }
+        } else {
+            history.push(TransientHistorySample { time, values });
         }
-
-        history.push(TransientHistorySample { time, values });
         prune_transient_history(history, time, retention_window);
     }
 

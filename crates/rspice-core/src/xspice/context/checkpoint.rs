@@ -374,7 +374,7 @@ impl CmContext {
         b.map(&self.setup.real_vector_param_revisions, |b, _| b.add(1))?;
         b.map(&self.transient_histories, |b, v| {
             b.add(v.len())?;
-            for sample in v {
+            for sample in v.iter() {
                 b.add(sample.values.len())?;
             }
             Ok(())
