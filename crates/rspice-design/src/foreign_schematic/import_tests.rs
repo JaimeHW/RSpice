@@ -1856,7 +1856,7 @@ fn a_qspice_pin_nothing_reaches_joins_its_own_net() {
     const DRAWING: &str = "«schematic
   «component (0,0) 0 0
     «symbol GmAmp
-      «type: Ã»
+      «type: \u{c3}»
       «text (0,300) 1 7 0 0x1000000 -1 -1 \"Ã1\"»
       «text (0,-200) 0.5 0 2 0x1000000 -1 -1 \"MultGmAmp\"»
       «text (0,-300) 1 7 0 0x1000000 -1 -1 \"Gm=1m\"»
