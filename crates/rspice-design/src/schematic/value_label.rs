@@ -21,13 +21,33 @@ pub fn component_value_label(component: &Component) -> Cow<'_, str> {
 }
 
 /// The texts an instance letters its value in, when a drawing lettered it in
-/// several that still spell the value the instance has now.
+/// texts of its own that still say what the instance has now: that spell
+/// its value, or that stand for its value and parameters as they are.
 pub fn value_pieces(component: &Component) -> Option<&[ValuePiece]> {
     let pieces = component.value_pieces.as_slice();
-    let spelled = pieces
-        .iter()
-        .flat_map(|piece| piece.text.split_whitespace());
-    (!pieces.is_empty() && spelled.eq(component.value.split_whitespace())).then_some(pieces)
+    let current = if pieces.iter().any(|piece| piece.stands_for.is_some()) {
+        let now = value_and_parameters(component);
+        pieces
+            .iter()
+            .all(|piece| piece.stands_for.as_deref() == Some(now.as_str()))
+    } else {
+        pieces
+            .iter()
+            .flat_map(|piece| piece.text.split_whitespace())
+            .eq(component.value.split_whitespace())
+    };
+    (!pieces.is_empty() && current).then_some(pieces)
+}
+
+/// An instance's value and parameters in one line, as a value piece that
+/// letters both records them.
+pub fn value_and_parameters(component: &Component) -> String {
+    component
+        .value
+        .split_whitespace()
+        .chain(component.params.split_whitespace())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// The value an instance of an authored cell symbol shows: its own, else

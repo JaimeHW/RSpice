@@ -1086,6 +1086,54 @@ fn a_qspice_value_hung_below_its_anchor_stays_off_the_edge_it_starts_on() {
     );
 }
 
+/// A source's drawing letters its waveform as written, a line at each of
+/// its value's windows, where RSpice letters a line for each parameter and
+/// runs down onto its neighbours. Each text stands where the drawing set it
+/// while the source keeps the waveform it came with; edited, the source
+/// letters RSpice's own label again.
+#[test]
+fn an_imported_source_letters_its_waveform_as_its_drawing_wrote_it() {
+    use crate::schematic::label_layout::TextEdge;
+    use crate::schematic::label_position::{LabelPosition, ValuePiece};
+    use crate::schematic::value_label::value_pieces;
+
+    let drawing = parse_asc(
+        "Version 4\nSYMBOL voltage 0 0 R0\nWINDOW 3 24 96 Left 2\nWINDOW 123 24 124 Left 2\n\
+         SYMATTR InstName V1\nSYMATTR Value PULSE(0 1 0 1n 1n 5u 10u)\nSYMATTR Value2 AC 1\n",
+    )
+    .expect("the drawing reads");
+    let imported = import_foreign_schematic(&drawing, "work", &library());
+    let mut source = imported
+        .document
+        .components
+        .iter()
+        .find(|part| part.name == "V1")
+        .cloned()
+        .expect("V1 is placed");
+    assert_eq!(source.kind, ComponentType::VoltageSourcePulse);
+    let pieces = value_pieces(&source).expect("the source letters its drawing's texts");
+    let texts = pieces
+        .iter()
+        .map(|piece| piece.text.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(texts, ["PULSE(0 1 0 1n 1n 5u 10u)", "AC 1"]);
+    // Each starts at its window, scaled from the symbol's origin.
+    let anchor = |piece: &ValuePiece| match piece.position {
+        LabelPosition::Placed {
+            offset, horizontal, ..
+        } => (source.pos + offset, horizontal),
+        LabelPosition::Auto => panic!("{piece:?} has no place"),
+    };
+    assert_eq!(anchor(&pieces[0]), (Point::new(30, 120), TextEdge::Start));
+    assert_eq!(anchor(&pieces[1]), (Point::new(30, 155), TextEdge::Start));
+
+    source.params.push_str(" td=1u");
+    assert!(
+        value_pieces(&source).is_none(),
+        "an edited source letters RSpice's own label"
+    );
+}
+
 /// QSPICE letters each of a part's attributes as a text of its own, where
 /// and as large as the drawing set it; the part's value is those texts
 /// joined. Lettering them as one line runs it across whatever stands beside

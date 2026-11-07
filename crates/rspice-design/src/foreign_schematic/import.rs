@@ -48,7 +48,7 @@ use crate::schematic::label_position::{LabelPosition, ValuePiece};
 use crate::schematic::net_label::{Junction, NetLabel, NetLabelKind, NetLabelSide, SupplyGlyph};
 use crate::schematic::rotation::Rotation;
 use crate::schematic::terminal_connection::rebuild_connections_from_terminals;
-use crate::schematic::value_label::{component_value_label, value_pieces};
+use crate::schematic::value_label::{component_value_label, value_and_parameters, value_pieces};
 use crate::schematic::wire::Wire;
 use crate::symbol::{PinNamePlacement, SymbolDocument, SymbolPin, SymbolShape};
 
@@ -56,6 +56,16 @@ use crate::symbol::{PinNamePlacement, SymbolDocument, SymbolPin, SymbolShape};
 const GRID: i32 = 10;
 /// The places of an LTspice A-device's instance line.
 const DEVICE_PLACES: usize = 8;
+
+/// The texts a source's drawing letters its waveform in, by LTspice's
+/// window number: its value, its second value (`AC 1`) and its settings
+/// (`Rser=1`).
+const SOURCE_TEXTS: [(u32, &str); 4] = [
+    (3, "Value"),
+    (123, "Value2"),
+    (39, "SpiceLine"),
+    (40, "SpiceLine2"),
+];
 
 /// The air an instance's name or value keeps from a body RSpice draws for
 /// it, as the shared layout keeps it.
@@ -698,7 +708,7 @@ impl Builder<'_> {
                 .map(|window| self.label_position(symbol, window, origin))
         };
         let (name_position, value_position) = (place(name), place(value));
-        let pieces = symbol
+        let mut pieces = symbol
             .value_pieces
             .iter()
             .map(|piece| {
@@ -709,6 +719,27 @@ impl Builder<'_> {
                 )
             })
             .collect::<Vec<_>>();
+        // A source's drawing letters its waveform as written, on a line,
+        // where RSpice letters a line for each parameter: each text the
+        // drawing shows keeps its words and its place.
+        let source = component.kind.is_source();
+        if source && pieces.is_empty() {
+            let attributes = merged_attributes(definition, symbol);
+            pieces = SOURCE_TEXTS
+                .into_iter()
+                .filter_map(|(number, key)| {
+                    let window = window(number).filter(|window| !window.hidden)?;
+                    let text =
+                        attribute(&attributes, key).filter(|text| !text.trim().is_empty())?;
+                    Some((
+                        text.trim().to_owned(),
+                        self.label_position(symbol, window, origin),
+                        100,
+                    ))
+                })
+                .collect();
+        }
+        let stands_for = source.then(|| value_and_parameters(component));
         let unshown =
             |window: Option<&ForeignWindow>| window.map_or(windowed, |window| window.hidden);
         let hidden = (unshown(name), unshown(value));
@@ -722,14 +753,16 @@ impl Builder<'_> {
         if let Some(position) = value_position {
             component.value_label_pos = position;
         }
-        // A value the drawing letters in several texts keeps each where the
-        // drawing put it, at its own size, while they spell the part's value.
+        // A value the drawing letters in texts of its own keeps each where
+        // the drawing put it, at its own size, while they say what the part
+        // has.
         component.value_pieces = pieces
             .into_iter()
             .map(|(text, position, size_percent)| ValuePiece {
                 text,
                 position,
                 size_percent,
+                stands_for: stands_for.clone(),
             })
             .collect();
         if value_pieces(component).is_none() {

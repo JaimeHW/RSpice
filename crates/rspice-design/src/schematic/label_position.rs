@@ -23,13 +23,20 @@ pub enum LabelPosition {
 
 /// One of the texts a drawing letters an instance's value in, when it
 /// letters it in several: QSPICE draws each of a part's attributes as a text
-/// of its own, at its own place and size.
+/// of its own, at its own place and size. A source's drawing letters its
+/// waveform as written, where RSpice keeps it as parameters.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ValuePiece {
     pub text: String,
     pub position: LabelPosition,
     /// The text's size in hundredths of an instance value's.
     pub size_percent: u16,
+    /// For a text that letters more than the value alone, the instance's
+    /// value and parameters as they stood when the drawing lettered it
+    /// ([`super::value_label::value_and_parameters`]): the text stands only
+    /// while the instance still has them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stands_for: Option<String>,
 }
 
 impl ValuePiece {
