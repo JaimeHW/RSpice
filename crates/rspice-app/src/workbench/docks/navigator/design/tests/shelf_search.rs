@@ -38,7 +38,10 @@ const TOP_HITS: &[(&str, &[&str])] = &[
     ("transfer function", &["S-Domain Transfer Function"]),
     ("schmitt", &["Schmitt Inverter", "Schmitt Buffer"]),
     ("74hc14", &["Schmitt Inverter"]),
-    ("hysteresis", &["Hysteresis"]),
+    (
+        "hysteresis",
+        &["Schmitt Inverter", "Schmitt Buffer", "Comparator"],
+    ),
     ("comparator", &["Comparator"]),
     ("lm393", &["Comparator"]),
     ("ota", &["OTA"]),

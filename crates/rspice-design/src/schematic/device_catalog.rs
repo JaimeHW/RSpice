@@ -336,7 +336,7 @@ const ENGINE_ONLY_XSPICE_DEVICES: &[CatalogXspiceDeviceDescriptor] = &[
         "Hysteresis",
         "xspice_hysteresis.svg",
         ["schmitt", "schmitt trigger", "comparator"],
-        Some(ComponentCategory::AmplifiersComparators),
+        None,
     ),
     xspice_device!(
         "rspice.xspice.ilimit",
@@ -497,7 +497,7 @@ const ENGINE_ONLY_XSPICE_DEVICES: &[CatalogXspiceDeviceDescriptor] = &[
         "Sample and Hold",
         "xspice_sample_hold.svg",
         ["sh", "sample hold", "track and hold"],
-        Some(ComponentCategory::LogicTiming),
+        None,
     ),
     xspice_device!(
         "rspice.xspice.s_xfer",
