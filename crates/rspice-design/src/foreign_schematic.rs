@@ -161,7 +161,12 @@ pub struct ForeignWindow {
     /// LTspice's attribute number: 0 the instance name, 3 the value.
     pub attribute: u32,
     pub offset: ForeignPoint,
-    pub alignment: String,
+    /// Which way the text's box reaches from `offset`, across and down, in
+    /// the symbol's frame: each step 1 or -1, or 0 where the box is centred
+    /// on that axis.
+    pub reach: ForeignPoint,
+    /// Set when the drawing hides the text (LTspice's `Invisible`).
+    pub hidden: bool,
 }
 
 /// One electrical pin of a symbol, relative to its origin.

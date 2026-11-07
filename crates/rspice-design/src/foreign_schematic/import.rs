@@ -655,13 +655,13 @@ impl Builder<'_> {
         let origin = component.pos;
         let place = |window: Option<&ForeignWindow>| {
             window
-                .filter(|window| !is_invisible(window))
+                .filter(|window| !window.hidden)
                 .map(|window| self.label_position(symbol, window, origin))
         };
         let (name_position, value_position) = (place(name), place(value));
         let hidden = (
-            name.is_some_and(is_invisible),
-            value.is_some_and(is_invisible),
+            name.is_some_and(|window| window.hidden),
+            value.is_some_and(|window| window.hidden),
         );
         let Some(component) = self.document.components.last_mut() else {
             return;
@@ -691,14 +691,13 @@ impl Builder<'_> {
                 .position
                 .offset(symbol.orientation.apply(window.offset)),
         );
-        let growth = symbol.orientation.apply(run_growth(&window.alignment));
-        let (horizontal, vertical) = match (growth.x.signum(), growth.y.signum()) {
-            (1, _) => (TextEdge::Start, TextEdge::Center),
-            (-1, _) => (TextEdge::End, TextEdge::Center),
-            (_, 1) => (TextEdge::Center, TextEdge::Start),
-            (_, -1) => (TextEdge::Center, TextEdge::End),
-            _ => (TextEdge::Center, TextEdge::Center),
+        let reach = symbol.orientation.apply(window.reach);
+        let edge = |step: i32| match step.signum() {
+            1 => TextEdge::Start,
+            -1 => TextEdge::End,
+            _ => TextEdge::Center,
         };
+        let (horizontal, vertical) = (edge(reach.x), edge(reach.y));
         LabelPosition::Placed {
             offset: anchor - origin,
             horizontal,
@@ -2063,24 +2062,6 @@ impl Builder<'_> {
 }
 
 /// The definition's default attributes under the placed symbol's own.
-fn is_invisible(window: &ForeignWindow) -> bool {
-    window.alignment.eq_ignore_ascii_case("Invisible")
-}
-
-/// The direction a window's run of text grows from its anchor, in the
-/// symbol's own frame: LTspice's `Left` text starts at the anchor, `Top`
-/// text hangs below it, and the `V` forms are the same runs turned a
-/// quarter counter-clockwise.
-fn run_growth(alignment: &str) -> ForeignPoint {
-    match alignment.to_ascii_lowercase().as_str() {
-        "left" | "vtop" => ForeignPoint::new(1, 0),
-        "right" | "vbottom" => ForeignPoint::new(-1, 0),
-        "top" | "vright" => ForeignPoint::new(0, 1),
-        "bottom" | "vleft" => ForeignPoint::new(0, -1),
-        _ => ForeignPoint::new(0, 0),
-    }
-}
-
 fn merged_attributes(
     definition: &ForeignSymbolDefinition,
     symbol: &ForeignSymbol,

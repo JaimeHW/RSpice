@@ -248,12 +248,12 @@ fn a_qsch_drawing_reads_its_components_nets_and_texts() {
     // the body, runs leftwards and the value, right of it, rightwards, so
     // once the source is turned the name stands above it and the value
     // hangs below.
-    let runs = source
+    let reaches = source
         .windows
         .iter()
-        .map(|window| window.alignment.as_str())
+        .map(|window| (window.reach.x, window.reach.y))
         .collect::<Vec<_>>();
-    assert_eq!(runs, ["Right", "Left"]);
+    assert_eq!(reaches, [(-1, 0), (1, 0)]);
     let definition = source.embedded.as_ref().expect("QSPICE embeds the symbol");
     assert_eq!(definition.symbol_type, "V");
     assert_eq!(

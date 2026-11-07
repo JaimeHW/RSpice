@@ -283,11 +283,27 @@ fn window(words: &[&str], line: usize) -> Result<ForeignWindow, ForeignParseErro
         .and_then(|word| word.parse().ok())
         .ok_or_else(|| ForeignParseError::new(line, "WINDOW needs an attribute number"))?;
     let offset = point(words, 2, line)?;
+    let alignment = words.get(4).copied().unwrap_or("Left").to_ascii_lowercase();
     Ok(ForeignWindow {
         attribute,
         offset,
-        alignment: words.get(4).copied().unwrap_or("Left").to_owned(),
+        reach: window_reach(&alignment),
+        hidden: alignment == "invisible",
     })
+}
+
+/// Which way a `WINDOW`'s text reaches from its anchor, in the symbol's own
+/// frame: `Left` text starts at the anchor, `Top` text hangs below it, and
+/// the `V` forms are the same runs turned a quarter counter-clockwise. Each
+/// word names one axis; the text centres on the other.
+fn window_reach(alignment: &str) -> ForeignPoint {
+    match alignment {
+        "left" | "vtop" => ForeignPoint::new(1, 0),
+        "right" | "vbottom" => ForeignPoint::new(-1, 0),
+        "top" | "vright" => ForeignPoint::new(0, 1),
+        "bottom" | "vleft" => ForeignPoint::new(0, -1),
+        _ => ForeignPoint::new(0, 0),
+    }
 }
 
 fn shape(keyword: &str, words: &[&str], line: usize) -> Result<ForeignShape, ForeignParseError> {

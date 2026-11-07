@@ -1025,6 +1025,66 @@ fn names_and_values_stand_where_the_drawing_lettered_them() {
     );
 }
 
+/// QSPICE justifies a symbol's text on both axes. A value that starts at a
+/// point on its body's lower edge and hangs below it stands outside the
+/// body; read on one axis only, it was centred on the edge and ran across
+/// the outline.
+#[test]
+fn a_qspice_value_hung_below_its_anchor_stays_off_the_edge_it_starts_on() {
+    use crate::schematic::label_layout::{
+        INSTANCE_VALUE_WORLD, LayoutPoint, TextEdge, instance_label_layout, text_box,
+    };
+
+    let drawing = parse_qsch(&qsch_bytes(
+        "«schematic
+  «component (0,0) 0 0
+    «symbol AMP
+      «type: X»
+      «line (-300,300) (300,0) 0 0 0x1000000 -1 -1»
+      «line (-300,-300) (300,0) 0 0 0x1000000 -1 -1»
+      «line (-300,300) (-300,-300) 0 0 0x1000000 -1 -1»
+      «text (-100,0) 1 15 0 0x1000000 -1 -1 \"X1\"»
+      «text (100,-100) 1 5 0 0x1000000 -1 -1 \"amp\"»
+      «pin (300,0) (0,0) 1 0 0 0x1000000 -1 \"OUT\"»
+      «pin (-300,100) (0,0) 1 0 0 0x1000000 -1 \"IN\"»
+    »
+  »
+»
+",
+    ))
+    .expect("the drawing reads");
+    let imported = import_foreign_schematic(&drawing, "work", &Library::default());
+    let amplifier = imported
+        .document
+        .components
+        .iter()
+        .find(|component| component.name == "X1")
+        .expect("the amplifier is placed");
+    let value = instance_label_layout(
+        LayoutPoint::new(amplifier.pos.x as f32, amplifier.pos.y as f32),
+        1.0,
+        amplifier,
+    )
+    .value;
+    assert_eq!(
+        (
+            value.anchor.x,
+            value.anchor.y,
+            value.horizontal,
+            value.vertical
+        ),
+        (10.0, 10.0, TextEdge::Start, TextEdge::Start)
+    );
+    // The lower edge runs from (-30, 30) up to (30, 0): over the box's whole
+    // width it stays at or above the box's top.
+    let edge_y = |x: f32| 30.0 - (x + 30.0) * 0.5;
+    let text = text_box(value, "amp", INSTANCE_VALUE_WORLD);
+    assert!(
+        edge_y(text.min.x) <= text.min.y && edge_y(text.max.x) <= text.min.y,
+        "the value's box {text:?} crosses the lower edge"
+    );
+}
+
 #[test]
 fn a_jumper_is_a_wire_and_a_named_subcircuit_reads_from_the_deck() {
     let drawing = parse_asc(
