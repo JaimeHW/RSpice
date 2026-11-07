@@ -517,8 +517,26 @@ impl Builder<'_> {
         pins: &[Point],
     ) {
         let label = self.symbol_label(symbol);
-        let value = attribute(attributes, "Value").unwrap_or_default();
+        let mut value = attribute(attributes, "Value")
+            .unwrap_or_default()
+            .to_owned();
         let mut words = Vec::new();
+        // QSPICE writes a passive's settings after its value in one text
+        // (`100µ Rser=.1`): the value is its first word.
+        if self.drawing.tool == ForeignTool::Qspice
+            && matches!(
+                mapping.kind,
+                NativeKind::Fixed(
+                    ComponentType::Resistor | ComponentType::Capacitor | ComponentType::Inductor
+                )
+            )
+        {
+            let tokens = spice_tokens(&spice_text(&value));
+            if let Some((first, rest)) = tokens.split_first() {
+                value.clone_from(first);
+                words.extend(rest.iter().cloned());
+            }
+        }
         for key in ["Value2", "SpiceLine", "SpiceLine2"] {
             if let Some(text) = attribute(attributes, key).filter(|text| !text.trim().is_empty()) {
                 words.extend(spice_tokens(&spice_text(text)));
@@ -545,7 +563,7 @@ impl Builder<'_> {
                         _ => extra.push(word),
                     }
                 }
-                let value = spice_text(value);
+                let value = spice_text(&value);
                 // QSPICE reads a passive's value as an expression, braces or
                 // not (`2.21/3`, `Rload`); RSpice reads one in braces.
                 let value = if self.drawing.tool == ForeignTool::Qspice
@@ -567,7 +585,7 @@ impl Builder<'_> {
             }
             NativeKind::VoltageSource | NativeKind::CurrentSource => {
                 let voltage = mapping.kind == NativeKind::VoltageSource;
-                let mut text = value.to_owned();
+                let mut text = value.clone();
                 for word in words {
                     text.push(' ');
                     text.push_str(&word);

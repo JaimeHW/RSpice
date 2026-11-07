@@ -654,7 +654,7 @@ const QSPICE: &str = "«schematic
     «symbol R
       «type: R»
       «text (100,150) 1 7 0 0x1000000 -1 -1 \"R1\"»
-      «text (100,-150) 1 7 0 0x1000000 -1 -1 \"1K\"»
+      «text (100,-150) 1 7 0 0x1000000 -1 -1 \"1K tc1=1m\"»
       «pin (0,200) (0,0) 1 0 0 0x1000000 -1 \"1\"»
       «pin (0,-200) (0,0) 1 0 0 0x1000000 -1 \"2\"»
     »
@@ -734,6 +734,17 @@ fn a_qspice_drawing_joins_what_its_wire_names_join_and_refuses_a_dll() {
     assert_eq!(nets[&("V1".to_owned(), 1)], nets[&("flag:0".to_owned(), 0)]);
     assert_eq!(nets[&("R1".to_owned(), 1)], nets[&("flag:0".to_owned(), 0)]);
     assert_eq!(nets[&("V1".to_owned(), 0)], nets[&("R1".to_owned(), 0)]);
+    // QSPICE writes a part's settings after its value in one text.
+    let resistor = imported
+        .document
+        .components
+        .iter()
+        .find(|component| component.name == "R1")
+        .expect("R1 was placed");
+    assert_eq!(
+        (resistor.value.as_str(), resistor.params.as_str()),
+        ("1K", "tc1=1m")
+    );
     assert_ne!(nets[&("V1".to_owned(), 0)], nets[&("V1".to_owned(), 1)]);
     assert_eq!(imported.directives[0].text, ".tran 3m");
 }
