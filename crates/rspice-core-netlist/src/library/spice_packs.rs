@@ -1279,8 +1279,11 @@ mod tests {
         assert_eq!(pack.id, "rspice-foundation");
         assert_eq!(pack.tier, LicenseTier::Own);
         assert!(pack.redistributable);
-        assert_eq!(index.model_count(), 16);
-        assert_eq!(index.part_count(), 17);
+        // Fifteen device-family defaults, the Zener, the Schottky and four
+        // LEDs, plus the one generic op-amp subcircuit.
+        assert_eq!(index.model_count(), 21);
+        assert_eq!(index.part_count(), 22);
+        assert_eq!(index.find_part("RSPICE_LED_RED").expect("lookup").len(), 1);
         assert!(index.find_part("1N4148").expect("lookup").is_empty());
         assert_eq!(index.find_part("RSPICE_DIODE").expect("lookup").len(), 1);
     }
