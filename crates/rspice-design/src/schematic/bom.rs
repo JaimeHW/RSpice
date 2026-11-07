@@ -112,7 +112,8 @@ impl BomFields {
 /// Whether a component is something bought and placed on a board. Sources,
 /// ports, probes, ground, ideal behavioral blocks and built-in code or
 /// Verilog-A models exist only for the simulator, unless the designer gave
-/// one a part number.
+/// one a part number. A functional part stands for a part the board is
+/// built with, so it is bought.
 pub fn is_purchased_part(component: &Component) -> bool {
     if !component.bom.mpn.trim().is_empty() {
         return true;
@@ -120,7 +121,7 @@ pub fn is_purchased_part(component: &Component) -> bool {
     if component
         .library_cell
         .as_ref()
-        .is_some_and(|binding| binding.is_executable_builtin())
+        .is_some_and(|binding| binding.is_builtin_xspice() || binding.is_generated_veriloga())
     {
         return false;
     }

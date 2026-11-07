@@ -19,7 +19,8 @@ impl<'a> HierarchySource<'a> {
     /// missing is listed as itself. Where `top` is the root of the plan this
     /// source carries, each occurrence descends into the master the plan
     /// resolved for it and into nothing where the plan stopped or rejected
-    /// it; otherwise into the master its placement names. An occurrence that
+    /// it, though a compiled built-in the plan stops at is listed as itself;
+    /// otherwise into the master its placement names. An occurrence that
     /// reaches a cellview it is already inside is not followed.
     pub fn bill_of_materials_parts(
         &self,
@@ -99,6 +100,11 @@ impl<'a> HierarchySource<'a> {
             let Some(materialized) = execution.materialized_binding() else {
                 return Descent::Nothing;
             };
+            // The plan stops at a compiled built-in because it is a leaf the
+            // engine owns, not because a configuration stopped the walk.
+            if materialized.is_executable_builtin() {
+                return Descent::Itself;
+            }
             if execution.stop_boundary() {
                 return Descent::Nothing;
             }

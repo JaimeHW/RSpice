@@ -578,3 +578,106 @@ fn the_built_in_default_reads_as_the_resolver_follows_it() {
         ]
     );
 }
+
+/// A functional part stands for a part a board is built with: placed with a
+/// purchasing field filled, it reaches the bill of materials and its CSV
+/// whether the walk follows a resolved plan or the placements alone. A code
+/// model is a simulator construct: the walk lists it, the bill leaves it out.
+#[test]
+fn placed_functional_parts_reach_the_bill_of_materials_with_their_purchasing_fields() {
+    use crate::schematic::bom::{bom_csv, bom_lines};
+    use crate::schematic::device_catalog::{
+        builtin_xspice_library_binding, engine_only_xspice_devices,
+    };
+    use crate::schematic::functional_catalog::{functional_library_binding, functional_part};
+
+    let root = CellViewRef::new("work", "top", "schematic");
+    let parts = [
+        "rspice.functional.comparator",
+        "rspice.functional.crystal",
+        "rspice.functional.varistor",
+        "rspice.functional.fuse",
+        "rspice.functional.relay",
+        "rspice.functional.optocoupler",
+        "rspice.functional.diac",
+        "rspice.functional.scr",
+        "rspice.functional.triac",
+        "rspice.functional.igbt",
+    ];
+    let mut top = SchematicDocument::default();
+    for (index, stable_id) in parts.iter().enumerate() {
+        let descriptor = functional_part(stable_id).expect("a catalog part");
+        let mut component = Component::new(
+            index as u64 + 1,
+            ComponentType::CellInstance,
+            Point::new(0, 0),
+        )
+        .with_library_cell(functional_library_binding(descriptor))
+        .with_name_value(&format!("U{}", index + 1), descriptor.display_name);
+        component.bom.manufacturer = format!("Maker {index}");
+        top.components.push(component);
+    }
+    let code_model = builtin_xspice_library_binding(&engine_only_xspice_devices()[0])
+        .expect("the catalog binding materializes");
+    let mut code_model = Component::new(
+        parts.len() as u64 + 1,
+        ComponentType::CellInstance,
+        Point::new(0, 0),
+    )
+    .with_library_cell(code_model)
+    .with_name_value("A1", "code model");
+    code_model.bom.manufacturer = "Maker".into();
+    top.components.push(code_model);
+    let mut library = Library::new("work");
+    let mut cell = Cell::new("top");
+    cell.add_view(View::new("schematic", ViewType::Schematic));
+    library.add_cell(cell);
+    let mut libraries = LibraryCatalog::default();
+    libraries.add_library(library);
+    let documents = Documents(HashMap::from([(root.key(), (top.clone(), false))]));
+    let sources = ProjectSourceRegistry::default();
+    let context = HierarchyContext {
+        documents: &documents,
+        libraries: &libraries,
+        project_id: ProjectId::new(),
+        project_sources: &sources,
+        source_files: &NoSourceFiles,
+    };
+    let (resolution, plan) = resolve_hierarchy(context, root.clone(), None);
+    assert!(resolution.is_valid());
+    let buffers = HashMap::from([(root.key(), top)]);
+    let walks = [
+        ("placed", HierarchySource::from_buffers(&buffers)),
+        (
+            "planned",
+            HierarchySource::from_buffers(&buffers).with_execution_plan(plan),
+        ),
+    ];
+    for (walk, hierarchy) in walks {
+        let found = hierarchy.bill_of_materials_parts(&buffers[&root.key()], &root);
+        assert_eq!(found.len(), parts.len() + 1, "{walk}");
+        let lines = bom_lines(
+            found
+                .iter()
+                .map(|(reference, component)| (reference.as_str(), *component)),
+        );
+        let csv = bom_csv(&lines);
+        assert_eq!(lines.len(), parts.len(), "{walk}: a code model is bought");
+        assert!(!csv.contains("\r\nA1,"), "{walk}: a code model is bought");
+        for (index, stable_id) in parts.iter().enumerate() {
+            let reference = format!("U{}", index + 1);
+            let line = lines
+                .iter()
+                .find(|line| line.references == [reference.clone()])
+                .unwrap_or_else(|| panic!("{walk}: {stable_id} is not on the bill of materials"));
+            assert_eq!(line.fields.manufacturer, format!("Maker {index}"));
+            let row = format!(
+                "{reference},1,{},Maker {index},",
+                functional_part(stable_id)
+                    .expect("a catalog part")
+                    .display_name
+            );
+            assert!(csv.contains(&row), "{walk}: no {row} in\n{csv}");
+        }
+    }
+}
