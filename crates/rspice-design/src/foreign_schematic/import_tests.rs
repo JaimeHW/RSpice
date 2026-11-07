@@ -220,6 +220,7 @@ fn imported_nets(
                 vec!["C".into(), "B".into(), "E".into()]
             }
             ComponentType::Nmos | ComponentType::Pmos => vec!["D".into(), "G".into(), "S".into()],
+            ComponentType::VSwitch => vec!["1".into(), "2".into(), "c+".into(), "c-".into()],
             ComponentType::Vcvs | ComponentType::Vccs => {
                 vec!["O+".into(), "O-".into(), "C+".into(), "C-".into()]
             }
@@ -1042,4 +1043,22 @@ fn a_subcircuit_named_by_its_spice_model_writes_that_model_and_its_values() {
         .expect("U1");
     assert_eq!(part.value, "level2");
     assert_eq!(part.params, "Avol=1Meg GBW=10Meg");
+}
+
+#[test]
+fn a_lead_to_one_pin_never_runs_through_another() {
+    // The switch's two control pins stand one above the other, where its
+    // RSpice symbol puts them side by side: a lead bent the wrong way from
+    // one terminal ran over the other pin and shorted the control input.
+    let source = "Version 4\nSHEET 1 880 680\n\
+        WIRE 144 192 -208 192\nWIRE 144 240 128 240\nWIRE -208 208 -208 192\n\
+        WIRE -208 320 -208 288\nWIRE 192 176 192 144\nWIRE 192 272 192 256\n\
+        FLAG 128 240 0\nFLAG -208 320 0\nFLAG -208 192 IN\nFLAG 192 144 OUT\nFLAG 192 272 0\n\
+        SYMBOL sw 192 272 M180\nSYMATTR InstName S1\nSYMATTR Value MYSW\n\
+        SYMBOL voltage -208 192 R0\nSYMATTR InstName V1\nSYMATTR Value 1\n";
+    let drawing = parse_asc(source).unwrap();
+    let library = Library::default();
+    let imported = import_foreign_schematic(&drawing, "work", &library);
+    assert_same_connectivity(&drawing, &imported, &library);
+    assert_on_grid(&imported);
 }
