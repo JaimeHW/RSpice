@@ -66,8 +66,8 @@ const TOP_HITS: &[(&str, &[&str])] = &[
     ("sine", &["Sinusoidal Voltage Source"]),
     ("transmission line", &["Transmission Line"]),
     ("pin", &["Port"]),
-    ("led", &["LED (red)"]),
-    ("light emitting diode", &["LED (red)"]),
+    ("led", &["LED"]),
+    ("light emitting diode", &["LED"]),
     ("zener", &["Zener Diode"]),
     ("schottky", &["Schottky Diode"]),
     ("battery", &["Battery"]),
@@ -76,7 +76,7 @@ const TOP_HITS: &[(&str, &[&str])] = &[
     ("electrolytic", &["Polarized Capacitor"]),
     ("polarized capacitor", &["Polarized Capacitor"]),
     ("rspice_zener", &["Zener Diode"]),
-    ("rspice_led_green", &["LED (green)"]),
+    ("rspice_led_green", &["LED"]),
     ("vdd", &["VDD"]),
     ("vcc", &["VCC"]),
     ("vss", &["VSS"]),
@@ -160,16 +160,17 @@ fn a_query_nothing_answers_lists_nothing() {
     assert!(hits(&app, "no-such-component-or-cell").is_empty());
 }
 
-/// A library card a variant row places is answered by that row alone.
+/// A library card a variant row places, or takes in its model field, is
+/// answered by that row alone.
 #[test]
 fn a_card_a_variant_row_places_is_listed_once() {
     let app = RSpiceApp::test_instance();
-    let labels = hits(&app, "led")
-        .into_iter()
-        .map(|hit| hit.label)
-        .collect::<Vec<_>>();
-    assert_eq!(
-        labels,
-        ["LED (red)", "LED (green)", "LED (blue)", "LED (white)"]
-    );
+    for query in ["led", "rspice_led_red", "rspice_led_blue", "white"] {
+        let labels = hits(&app, query)
+            .into_iter()
+            .filter(|hit| hit.label.starts_with("LED"))
+            .map(|hit| hit.label)
+            .collect::<Vec<_>>();
+        assert_eq!(labels, ["LED"], "{query}");
+    }
 }

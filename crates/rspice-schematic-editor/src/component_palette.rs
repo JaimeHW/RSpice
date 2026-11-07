@@ -28,6 +28,9 @@ pub struct ComponentPaletteEntry {
     pub variant: Option<&'static str>,
     /// The model card the row places in place of the type's own default.
     pub default_model: Option<&'static str>,
+    /// Other cards of the row's part, chosen in its model field once placed.
+    /// The shelf answers them with this row instead of listing each.
+    pub alternate_models: &'static [&'static str],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -90,6 +93,7 @@ const fn entry(
         keywords,
         variant: None,
         default_model: None,
+        alternate_models: &[],
     }
 }
 
@@ -108,6 +112,7 @@ const fn variant(
         keywords,
         variant: Some(variant),
         default_model,
+        alternate_models: &[],
     }
 }
 
@@ -339,34 +344,25 @@ const SEMICONDUCTORS: &[ComponentPaletteEntry] = &[
         Some("RSPICE_SCHOTTKY"),
         &["schottky", "barrier diode", "rectifier"],
     ),
-    variant(
-        T::Diode,
-        "LED (red)",
-        "led",
-        Some("RSPICE_LED_RED"),
-        &["led", "light emitting diode", "indicator", "red"],
-    ),
-    variant(
-        T::Diode,
-        "LED (green)",
-        "led",
-        Some("RSPICE_LED_GREEN"),
-        &["led", "light emitting diode", "indicator", "green"],
-    ),
-    variant(
-        T::Diode,
-        "LED (blue)",
-        "led",
-        Some("RSPICE_LED_BLUE"),
-        &["led", "light emitting diode", "indicator", "blue"],
-    ),
-    variant(
-        T::Diode,
-        "LED (white)",
-        "led",
-        Some("RSPICE_LED_WHITE"),
-        &["led", "light emitting diode", "indicator", "white"],
-    ),
+    // One LED: red when placed, and its model field takes the other colours.
+    ComponentPaletteEntry {
+        alternate_models: &["RSPICE_LED_GREEN", "RSPICE_LED_BLUE", "RSPICE_LED_WHITE"],
+        ..variant(
+            T::Diode,
+            "LED",
+            "led",
+            Some("RSPICE_LED_RED"),
+            &[
+                "led",
+                "light emitting diode",
+                "indicator",
+                "red",
+                "green",
+                "blue",
+                "white",
+            ],
+        )
+    },
     entry(
         T::Nmos,
         "NMOS",

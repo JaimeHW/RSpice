@@ -1535,7 +1535,7 @@ fn variant_entry(
 }
 
 /// Whether a palette variant row places this library part's card on its
-/// device.
+/// device, or takes it in its model field once placed.
 fn placed_by_variant_row(row: &LibraryPartRow) -> bool {
     let LibraryPartAction::Arm(placement) = &row.action else {
         return false;
@@ -1554,7 +1554,8 @@ fn placed_by_variant_row(row: &LibraryPartRow) -> bool {
         .any(|entry| {
             entry.kind == *component_type
                 && entry.variant.is_some()
-                && entry.default_model == Some(model.as_str())
+                && (entry.default_model == Some(model.as_str())
+                    || entry.alternate_models.contains(&model.as_str()))
         })
 }
 
@@ -2258,10 +2259,16 @@ pub(super) fn shelf_hits(
     for row in ComponentCategory::ALL.into_iter().flat_map(palette_rows) {
         match row {
             PaletteRow::Primitive(entry) if entry.variant.is_some() => {
+                let part_numbers = entry
+                    .default_model
+                    .iter()
+                    .chain(entry.alternate_models)
+                    .copied()
+                    .collect::<Vec<_>>();
                 let rank = query.rank(&ShelfTerms {
                     label: entry.label,
                     keywords: entry.keywords,
-                    part_numbers: entry.default_model.as_slice(),
+                    part_numbers: &part_numbers,
                 });
                 offer(&mut hits, rank, ShelfEntry::Variant(entry.label.to_owned()));
             }
