@@ -2506,6 +2506,53 @@ fn a_qspice_pin_name_stands_where_the_drawing_sets_it() {
     assert_eq!(placed("VN"), (Point::new(30, -1), Some(Point::new(-1, 0))));
 }
 
+/// An LTspice pin on a slanted edge names itself where LTspice letters it,
+/// beside the pin, though RSpice reads the pin onto the top of the box
+/// around the body and would letter the name below it, across the edge. A
+/// pin on an edge of that box keeps RSpice's own placement.
+#[test]
+fn an_ltspice_pin_on_a_slanted_edge_names_itself_where_ltspice_letters_it() {
+    const SLANTED_ASY: &str = "Version 4\nSymbolType CELL\n\
+        LINE Normal -32 -64 32 -64\nLINE Normal 32 -64 96 64\n\
+        LINE Normal 96 64 -32 64\nLINE Normal -32 64 -32 -64\n\
+        SYMATTR Prefix X\nSYMATTR SpiceModel slanted.sub\nSYMATTR Value slanted\n\
+        PIN 40 -48 RIGHT 8\nPINATTR PinName FB\nPINATTR SpiceOrder 1\n\
+        PIN -32 0 LEFT 8\nPINATTR PinName IN\nPINATTR SpiceOrder 2\n";
+    let mut library = Library::default();
+    library.symbols.insert(
+        "slanted".to_owned(),
+        ForeignSymbolSource {
+            definition: parse_asy(SLANTED_ASY).expect("the test symbol reads"),
+            location: "slanted.asy".to_owned(),
+            schematic: None,
+        },
+    );
+    let drawing = parse_asc("Version 4\nSYMBOL slanted 0 0 R0\nSYMATTR InstName X1\n")
+        .expect("the drawing reads");
+    let imported = import_foreign_schematic(&drawing, "work", &library);
+    let cell = imported
+        .cells
+        .iter()
+        .find(|cell| cell.source_symbol == "slanted")
+        .expect("the symbol's cell");
+    let resolved = ResolvedCellSymbol::from_authored_document(cell.symbol.clone(), &cell.ports);
+    let placed = |name: &str| {
+        let pin = resolved
+            .connectable_pins()
+            .find(|pin| pin.name == name)
+            .unwrap_or_else(|| panic!("no pin {name}"));
+        let terminal = resolved.effective_pin_offset(pin);
+        let anchor = resolved.pin_label_anchor(pin);
+        (
+            Point::new(anchor.x - terminal.x, anchor.y - terminal.y),
+            pin.name_at.map(|at| at.reach),
+        )
+    };
+    // Eight units in from the pin, reaching left, centred on its line.
+    assert_eq!(placed("FB"), (Point::new(-10, 0), Some(Point::new(-1, 0))));
+    assert_eq!(placed("IN").1, None);
+}
+
 /// LTspice letters a symbol's attributes only where a WINDOW shows them. A
 /// layout symbol that shows its name and no value, or neither, letters as
 /// much here and no more: the value RSpice would otherwise place itself

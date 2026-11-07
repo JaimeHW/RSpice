@@ -14,6 +14,7 @@ use std::path::PathBuf;
 
 use rspice_design_model::Point;
 use rspice_design_model::port::{PortDirection, PortSpec};
+use rspice_design_model::symbol_pin::SymbolPinSide;
 
 use super::behaviour::qspice_behaviour;
 use super::directives::{defined_model_names, foreign_directive_cards};
@@ -1608,6 +1609,32 @@ impl Builder<'_> {
                 .collect(),
             ..SymbolDocument::default()
         };
+        // An LTspice pin names itself as RSpice letters a pin on the edge
+        // its justification puts it on. A pin RSpice reads onto another
+        // edge, one inside the box around a slanted or stepped body, keeps
+        // the drawing's place for its name instead.
+        if self.drawing.tool == ForeignTool::Ltspice {
+            let agreed = document
+                .pins
+                .iter()
+                .map(|pin| {
+                    pin.name_at.is_some_and(|at| {
+                        let side = match (at.reach.x, at.reach.y) {
+                            (1, _) => SymbolPinSide::Left,
+                            (-1, _) => SymbolPinSide::Right,
+                            (_, 1) => SymbolPinSide::Top,
+                            _ => SymbolPinSide::Bottom,
+                        };
+                        document.pin_side(pin) == side
+                    })
+                })
+                .collect::<Vec<_>>();
+            for (pin, agreed) in document.pins.iter_mut().zip(agreed) {
+                if agreed {
+                    pin.name_at = None;
+                }
+            }
+        }
         let anchor = |attribute: u32| {
             definition
                 .windows

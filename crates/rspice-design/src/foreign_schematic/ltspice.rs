@@ -202,7 +202,7 @@ pub fn parse_asy(source: &str) -> Result<ForeignSymbolDefinition, ForeignParseEr
                         .is_some_and(|justification| justification.eq_ignore_ascii_case("NONE")),
                     // How far in from the pin the name starts.
                     name_offset: words.get(4).and_then(|offset| offset.parse().ok()),
-                    name_at: None,
+                    name_at: pin_name_at(words.get(3).copied(), words.get(4).copied()),
                 });
             }
             "PINATTR" => {
@@ -369,6 +369,27 @@ fn text_size_percent(code: Option<&str>) -> u16 {
 
 /// Which edge of a text, across and down, LTspice stands on its point. A
 /// `V` before the word turns the text upright; its box is placed the same.
+/// Where LTspice letters a pin's name: `offset` from the pin, away from the
+/// edge the justification puts the pin on, the name reaching on from there
+/// and centred across. A name lettered upright on its side (`VTOP`) has no
+/// place here.
+fn pin_name_at(
+    justification: Option<&str>,
+    offset: Option<&str>,
+) -> Option<(ForeignPoint, ForeignPoint)> {
+    let reach = match justification?.to_ascii_uppercase().as_str() {
+        "LEFT" => ForeignPoint::new(1, 0),
+        "RIGHT" => ForeignPoint::new(-1, 0),
+        "TOP" => ForeignPoint::new(0, 1),
+        "BOTTOM" => ForeignPoint::new(0, -1),
+        _ => return None,
+    };
+    let offset = offset
+        .and_then(|offset| offset.parse::<i32>().ok())
+        .unwrap_or(0);
+    Some((ForeignPoint::new(reach.x * offset, reach.y * offset), reach))
+}
+
 fn text_justification(word: Option<&str>) -> (TextEdge, TextEdge) {
     let word = word.unwrap_or("Left").to_ascii_lowercase();
     match word.strip_prefix('v').unwrap_or(&word) {
