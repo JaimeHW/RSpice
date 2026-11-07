@@ -233,6 +233,9 @@ fn component(node: &Node) -> Result<ForeignSymbol, ForeignParseError> {
                     name,
                     spice_order: definition.pins.len() + 1,
                     default_net,
+                    name_hidden: !pin_name_lettered(
+                        numbers_after_points(fields).get(1).map(String::as_str),
+                    ),
                     position: pin_points
                         .first()
                         .copied()
@@ -328,6 +331,15 @@ fn text_alignment(code: Option<&str>) -> String {
         _ => "Center",
     }
     .to_owned()
+}
+
+/// Whether QSPICE letters a pin's name, read from the name's text code. A
+/// code with no justification draws none, and neither does one centred on
+/// the pin's own point, where the name would sit on the terminal: QSPICE's
+/// amplifiers mark such inputs with their own + and - artwork instead.
+fn pin_name_lettered(code: Option<&str>) -> bool {
+    let code = code.and_then(|code| code.parse::<u32>().ok()).unwrap_or(0);
+    !matches!(code & 15, 0 | 15)
 }
 
 /// The way a text runs from its anchor, read from QSPICE's text code: a unit

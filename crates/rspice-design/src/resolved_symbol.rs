@@ -38,6 +38,8 @@ pub struct ResolvedSymbolPin {
     /// this, so neither can be inferred from the terminal coordinate alone.
     pub side: SymbolPinSide,
     pub offset: Point,
+    /// The symbol letters no name at this pin.
+    pub name_hidden: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -123,6 +125,7 @@ impl ResolvedCellSymbol {
                         direction: pin.direction,
                         side: document.pin_side(pin),
                         offset,
+                        name_hidden: pin.name_hidden,
                     }),
                     None => issues.push(ResolvedSymbolIssue {
                         kind: ResolvedSymbolIssueKind::UnplacedPin,
@@ -143,6 +146,7 @@ impl ResolvedCellSymbol {
                         direction: port.direction,
                         side: document.pin_side(pin),
                         offset,
+                        name_hidden: pin.name_hidden,
                     }),
                     None => issues.push(ResolvedSymbolIssue {
                         kind: ResolvedSymbolIssueKind::UnplacedPin,
@@ -215,6 +219,7 @@ impl ResolvedCellSymbol {
                         direction: port.direction,
                         side: document.pin_side(pin),
                         offset,
+                        name_hidden: pin.name_hidden,
                     })
                 })
             })

@@ -188,6 +188,10 @@ pub fn parse_asy(source: &str) -> Result<ForeignSymbolDefinition, ForeignParseEr
                     spice_order: 0,
                     position,
                     default_net: None,
+                    // The label's justification; `NONE` letters no name.
+                    name_hidden: words
+                        .get(3)
+                        .is_some_and(|justification| justification.eq_ignore_ascii_case("NONE")),
                 });
             }
             "PINATTR" => {

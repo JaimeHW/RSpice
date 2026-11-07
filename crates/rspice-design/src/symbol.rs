@@ -121,6 +121,11 @@ pub struct SymbolPin {
     /// Distance along the authored body side in symbol coordinates.
     #[serde(default)]
     pub offset: i32,
+    /// The drawing letters no name at this pin: its body's artwork marks it
+    /// instead, or the drawing it came from showed none. The name still
+    /// names the terminal everywhere else.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub name_hidden: bool,
 }
 
 impl SymbolPin {
@@ -132,7 +137,14 @@ impl SymbolPin {
             electrical_type: Some(default_electrical_type(direction)),
             side: Some(default_pin_side(direction, position)),
             offset: pin_offset(default_pin_side(direction, position), position),
+            name_hidden: false,
         }
+    }
+
+    /// The same pin with its name left off the drawing, or lettered.
+    pub fn with_name_hidden(mut self, hidden: bool) -> Self {
+        self.name_hidden = hidden;
+        self
     }
 
     pub fn with_contract(

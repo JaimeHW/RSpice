@@ -237,7 +237,7 @@ fn draw_symbol_pins(
         painter.line_segment([terminal, inner], stroke);
         draw_direction_mark(painter, terminal, inner, pin.direction, scale, color);
 
-        if let Some(font_size) = font_size {
+        if let Some(font_size) = font_size.filter(|_| !pin.name_hidden) {
             let anchor = to_screen(origin, scale, component, symbol.pin_label_anchor(pin));
             painter.text(
                 anchor,
@@ -465,6 +465,9 @@ fn write_symbol_pins_svg(
         )
         .unwrap();
         write_direction_mark_svg(svg, (x1, y1), (x2, y2), pin.direction, config);
+        if pin.name_hidden {
+            continue;
+        }
         write_text_svg(
             svg,
             "pin",
@@ -1216,6 +1219,69 @@ mod tests {
             }
         });
         assert_eq!(circles, 0, "the canvas pin has a dot");
+    }
+
+    /// A pin whose symbol letters no name keeps its lead and terminal, and
+    /// neither the canvas nor the SVG letters its name.
+    #[test]
+    fn a_pin_with_its_name_hidden_draws_its_lead_and_no_name() {
+        let named = |hidden: bool| {
+            ResolvedCellSymbol::from_authored_document(
+                SymbolDocument {
+                    pins: vec![
+                        SymbolPin::new("IN", PortDirection::In, Some(Point::new(-30, 0)))
+                            .with_name_hidden(hidden),
+                    ],
+                    body: vec![SymbolShape::Polyline {
+                        points: vec![Point::new(-20, -10), Point::new(-20, 10)],
+                        closed: false,
+                    }],
+                    ..SymbolDocument::default()
+                },
+                &[port("IN", PortDirection::In)],
+            )
+        };
+        let component = Component::new(1, ComponentType::CellInstance, Point::origin());
+        for hidden in [false, true] {
+            let symbol = named(hidden);
+            let mut svg = String::new();
+            write_resolved_symbol_svg(
+                &mut svg,
+                &component,
+                &symbol,
+                &SvgExportConfig {
+                    units_per_world: 1.0,
+                    ..SvgExportConfig::default()
+                },
+            );
+            assert_eq!(svg.contains(r#"class="pin""#), !hidden, "{svg}");
+            assert!(svg.contains("<line"), "the lead is drawn: {svg}");
+
+            let canvas = rspice_ui_kit::raster::render(egui::vec2(320.0, 320.0), |ui, _| {
+                draw_symbol_pins(
+                    &ui.painter().clone(),
+                    pos2(160.0, 160.0),
+                    4.0,
+                    &component,
+                    &symbol,
+                    Stroke::new(1.2, Color32::from_rgb(255, 64, 64)),
+                    true,
+                );
+            });
+            // The lead runs from x -30 to the body at -20: screen 40 to 80.
+            // The name reads into the body, right of it.
+            let (covered, lead) = painted_pixels(
+                &canvas,
+                egui::Rect::from_min_max(pos2(40.0, 150.0), pos2(78.0, 170.0)),
+            );
+            assert!(covered > 0 && lead > 0, "the lead is painted");
+            let (covered, name) = painted_pixels(
+                &canvas,
+                egui::Rect::from_min_max(pos2(84.0, 130.0), pos2(300.0, 190.0)),
+            );
+            assert!(covered > 0, "the asserted crop must be on the canvas");
+            assert_eq!(name > 0, !hidden, "hidden = {hidden}");
+        }
     }
 
     /// The reported defect: a generated block taller than it is wide sent

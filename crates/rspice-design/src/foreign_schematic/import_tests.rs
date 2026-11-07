@@ -1953,3 +1953,84 @@ fn a_qspice_pin_nothing_reaches_joins_its_own_net() {
     assert_eq!(note.text, "Not imported:\n¥2 (DFLOP)");
     assert_eq!(note.pos, Point::new(260, -40));
 }
+
+/// A pin its source drawing letters no name for draws none here: LTspice's
+/// `NONE`, a place the symbol draws no pin for, and a QSPICE pin with no
+/// justification or one centred on its own point. A lettered pin keeps its
+/// name.
+#[test]
+fn a_pin_its_drawing_letters_no_name_for_draws_none() {
+    const LABELLED_ASY: &str = "Version 4\nSymbolType BLOCK\nRECTANGLE Normal -32 -32 32 32\n\
+        SYMATTR Prefix X\nSYMATTR SpiceModel labelled.sub\nSYMATTR Value labelled\n\
+        PIN -32 0 LEFT 8\nPINATTR PinName IN\nPINATTR SpiceOrder 1\n\
+        PIN 32 0 NONE 0\nPINATTR PinName OUT\nPINATTR SpiceOrder 2\n";
+    let mut library = library();
+    library.symbols.insert(
+        "labelled".to_owned(),
+        ForeignSymbolSource {
+            definition: parse_asy(LABELLED_ASY).expect("the test symbol reads"),
+            location: "labelled.asy".to_owned(),
+            schematic: None,
+        },
+    );
+    let drawing = parse_asc(
+        "Version 4\nSHEET 1 800 600\nSYMBOL labelled 64 64 R0\nSYMATTR InstName X1\n\
+         SYMBOL Digital\\and 448 64 R0\nSYMATTR InstName A1\n",
+    )
+    .unwrap();
+    let ltspice = import_foreign_schematic(&drawing, "work", &library);
+
+    const DRAWING: &str = "«schematic
+  «component (0,0) 0 0
+    «symbol GmAmp
+      «type: \u{c3}»
+      «text (0,300) 1 7 0 0x1000000 -1 -1 \"Ã1\"»
+      «text (0,-200) 0.5 0 2 0x1000000 -1 -1 \"MultGmAmp\"»
+      «text (0,-300) 1 7 0 0x1000000 -1 -1 \"Gm=1m\"»
+      «pin (0,400) (0,0) 1 0 0 0x1000000 -1 \"Vdd\"»
+      «pin (0,-400) (0,0) 1 0 0 0x1000000 -1 \"Vss\"»
+      «pin (400,0) (-50,0) 1 11 0 0x1000000 -1 \"OUT\"»
+      «pin (-400,200) (50,0) 1 15 0 0x1000000 -1 \"IN-\"»
+      «pin (-400,-200) (50,0) 1 7 0 0x1000000 -1 \"IN+\"»
+    »
+  »
+»
+";
+    let qspice = import_foreign_schematic(
+        &parse_qsch(&qsch_bytes(DRAWING)).unwrap(),
+        "work",
+        &Library::default(),
+    );
+
+    let hidden = |imported: &ForeignImport, source: &str| {
+        let cell = imported
+            .cells
+            .iter()
+            .find(|cell| cell.source_symbol.eq_ignore_ascii_case(source))
+            .unwrap_or_else(|| panic!("no cell for {source}"));
+        let resolved = ResolvedCellSymbol::from_authored_document(cell.symbol.clone(), &cell.ports);
+        resolved
+            .connectable_pins()
+            .map(|pin| (pin.name.clone(), pin.name_hidden))
+            .collect::<BTreeMap<_, _>>()
+    };
+    assert_eq!(
+        hidden(&ltspice, "labelled"),
+        BTreeMap::from([("IN".to_owned(), false), ("OUT".to_owned(), true)])
+    );
+    // An A-device draws no pin names, and its places without a pin share one
+    // point: none of them letters a name over the others.
+    let gate = hidden(&ltspice, "Digital\\and");
+    assert_eq!(gate.len(), 8, "{gate:?}");
+    assert!(gate.values().all(|hidden| *hidden), "{gate:?}");
+    assert_eq!(
+        hidden(&qspice, "GmAmp"),
+        BTreeMap::from([
+            ("IN+".to_owned(), false),
+            ("IN-".to_owned(), true),
+            ("OUT".to_owned(), false),
+            ("Vdd".to_owned(), true),
+            ("Vss".to_owned(), true),
+        ])
+    );
+}

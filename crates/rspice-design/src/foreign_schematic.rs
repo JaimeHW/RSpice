@@ -172,6 +172,8 @@ pub struct ForeignPin {
     /// The net a QSPICE pin joins when nothing is wired to it (`Vdd`,
     /// `GND`).
     pub default_net: Option<String>,
+    /// The source tool letters no name at this pin.
+    pub name_hidden: bool,
 }
 
 /// Drawing primitives, in the units of the drawing that holds them.

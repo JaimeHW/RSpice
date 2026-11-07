@@ -1397,11 +1397,12 @@ impl Builder<'_> {
                     shared.or_else(|| spare.next()).unwrap_or_default()
                 }
             };
-            pins.push(SymbolPin::new(
-                port.name.clone(),
-                port.direction,
-                Some(position),
-            ));
+            // A place the symbol draws no pin for letters no name either:
+            // several share one point.
+            pins.push(
+                SymbolPin::new(port.name.clone(), port.direction, Some(position))
+                    .with_name_hidden(slot.is_none_or(|pin| pin.name_hidden)),
+            );
         }
         if !gaps.is_empty() && !device {
             self.notice(format!(

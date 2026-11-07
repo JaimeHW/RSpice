@@ -571,7 +571,10 @@ fn resolve_component_symbol(
     // schematic renderer exposes. Freeze exactly that connectable set.
     printable_document.pins = resolved
         .connectable_pins()
-        .map(|pin| SymbolPin::new(pin.name.clone(), pin.direction, Some(pin.offset)))
+        .map(|pin| {
+            SymbolPin::new(pin.name.clone(), pin.direction, Some(pin.offset))
+                .with_name_hidden(pin.name_hidden)
+        })
         .collect();
     Ok((Some(printable_document), Some(source)))
 }
