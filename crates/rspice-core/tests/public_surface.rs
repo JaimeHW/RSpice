@@ -413,7 +413,10 @@ use rspice_core::analysis::harmonic_balance::{
 // carries, and its `gain`, which the engine's small-signal stamp reads, add
 // two; deleting the unused `ParametricValue::as_value` and narrowing the
 // lexer's `collect_line` to the crate keep the census at 5,255.
-const MAX_PUBLIC_ITEMS: usize = 5255;
+// `netlist::PartTolerance` and `netlist::PartToleranceDistribution`, the
+// `.TOLERANCE` statements the Monte Carlo driver reads from a parsed deck's
+// options, bring it to 5,257.
+const MAX_PUBLIC_ITEMS: usize = 5257;
 
 /// The `#[doc(hidden)] pub` items of the family, counted apart from
 /// `MAX_PUBLIC_ITEMS`. A hidden item is plumbing that one crate of the engine
