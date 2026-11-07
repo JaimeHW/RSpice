@@ -105,16 +105,31 @@ fn handle_veriloga_file_drop(ctx: &egui::Context, app: &mut RSpiceApp) {
     if dropped.is_empty() {
         return;
     }
-    if dropped.len() != 1 {
-        let message = app
-            .state
-            .workbench
-            .messages()
-            .text(MessageId::VerilogADropOneSource);
-        app.state.prompt(message);
-        return;
+    // One root and its includes, or several roots: every dropped file is
+    // read, and the import sorts roots from the files they include.
+    let result = dropped
+        .iter()
+        .map(dropped_source)
+        .collect::<Result<Vec<_>, _>>()
+        .and_then(|sources| {
+            crate::workbench::documents::code_workspace::import_dropped_veriloga_sources(
+                &mut app.state,
+                sources,
+            )
+        });
+    if let Err(error) = result {
+        app.state.record(
+            LogSeverity::Error,
+            LogSource::Studio,
+            format!("Verilog-A/AMS drop import failed: {error}"),
+        );
     }
-    let file = &dropped[0];
+}
+
+/// One dropped file's name, text and folder.
+fn dropped_source(
+    file: &egui::DroppedFile,
+) -> Result<crate::workbench::documents::code_workspace::PickedSource, String> {
     let name = (!file.name.trim().is_empty())
         .then(|| file.name.clone())
         .or_else(|| {
@@ -124,7 +139,7 @@ fn handle_veriloga_file_drop(ctx: &egui::Context, app: &mut RSpiceApp) {
                 .and_then(std::ffi::OsStr::to_str)
                 .map(str::to_owned)
         })
-        .unwrap_or_else(|| "dropped.va".to_owned());
+        .ok_or_else(|| "A dropped file has no name.".to_owned())?;
     let bytes = if let Some(bytes) = file.bytes.as_ref() {
         Ok(bytes.to_vec())
     } else {
@@ -132,34 +147,33 @@ fn handle_veriloga_file_drop(ctx: &egui::Context, app: &mut RSpiceApp) {
         {
             file.path
                 .as_deref()
-                .ok_or_else(|| "Dropped file has neither bytes nor a native path.".to_owned())
-                .and_then(|path| std::fs::read(path).map_err(|error| error.to_string()))
+                .ok_or_else(|| format!("{name} has neither bytes nor a native path."))
+                .and_then(|path| std::fs::read(path).map_err(|error| format!("{name}: {error}")))
         }
         #[cfg(target_arch = "wasm32")]
         {
-            Err("The browser did not provide the dropped file's contents.".to_owned())
+            Err(format!(
+                "The browser did not provide the contents of {name}."
+            ))
         }
-    };
-    let result = bytes.and_then(|bytes| {
-        if bytes.len() > crate::state::MAX_PROJECT_CODE_SOURCE_BYTES {
-            return Err(format!(
-                "Dropped source exceeds the supported {}-byte limit.",
-                crate::state::MAX_PROJECT_CODE_SOURCE_BYTES
-            ));
-        }
-        let contents = String::from_utf8(bytes)
-            .map_err(|error| format!("Dropped source is not valid UTF-8: {error}"))?;
-        crate::workbench::documents::code_workspace::import_dropped_veriloga_source(
-            app, name, contents,
-        )
-    });
-    if let Err(error) = result {
-        app.state.record(
-            LogSeverity::Error,
-            LogSource::Studio,
-            format!("Verilog-A drop import failed: {error}"),
-        );
+    }?;
+    if bytes.len() > crate::state::MAX_PROJECT_CODE_SOURCE_BYTES {
+        return Err(format!(
+            "{name} exceeds the supported {}-byte limit.",
+            crate::state::MAX_PROJECT_CODE_SOURCE_BYTES
+        ));
     }
+    let contents =
+        String::from_utf8(bytes).map_err(|error| format!("{name} is not valid UTF-8: {error}"))?;
+    Ok(crate::workbench::documents::code_workspace::PickedSource {
+        folder: file
+            .path
+            .as_deref()
+            .and_then(std::path::Path::parent)
+            .map(std::path::Path::to_path_buf),
+        name,
+        contents,
+    })
 }
 
 fn source_editor(

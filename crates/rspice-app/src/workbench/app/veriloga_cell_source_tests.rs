@@ -599,10 +599,13 @@ fn import_with_no_veriloga_tab_creates_the_cells_and_opens_the_first() {
         .active_view
         .library
         .clone();
-    code_workspace::import_dropped_veriloga_source(
-        &mut app,
-        "pair.va".to_owned(),
-        TWO_TOP_MODULES.to_owned(),
+    code_workspace::import_dropped_veriloga_sources(
+        &mut app.state,
+        vec![code_workspace::PickedSource {
+            name: "pair.va".to_owned(),
+            contents: TWO_TOP_MODULES.to_owned(),
+            folder: None,
+        }],
     )
     .expect("the file is read");
     let form = app
@@ -615,7 +618,7 @@ fn import_with_no_veriloga_tab_creates_the_cells_and_opens_the_first() {
         .expect("the import form opened");
     assert_eq!(form.library, library, "the active design's library");
     assert_eq!(
-        form.modules.as_ref().map(|modules| modules
+        form.closure.modules.as_ref().map(|modules| modules
             .iter()
             .map(|module| module.name.as_str())
             .collect::<Vec<_>>()),
@@ -672,10 +675,13 @@ fn import_of_an_unparseable_file_creates_nothing() {
         .libraries_by_key()
         .map(|(_, library)| library.cell_count())
         .sum::<usize>();
-    code_workspace::import_dropped_veriloga_source(
-        &mut app,
-        "broken.va".to_owned(),
-        "module broken(p, n;\nendmodule\n".to_owned(),
+    code_workspace::import_dropped_veriloga_sources(
+        &mut app.state,
+        vec![code_workspace::PickedSource {
+            name: "broken.va".to_owned(),
+            contents: "module broken(p, n;\nendmodule\n".to_owned(),
+            folder: None,
+        }],
     )
     .expect("the file is read");
     let form = app
@@ -686,7 +692,7 @@ fn import_of_an_unparseable_file_creates_nothing() {
         .import_form
         .clone()
         .expect("the form opens to say why");
-    assert!(form.modules.is_err());
+    assert!(form.closure.modules.is_err());
 
     let ctx = themed_context();
     frame(&ctx, &mut app, DESKTOP);

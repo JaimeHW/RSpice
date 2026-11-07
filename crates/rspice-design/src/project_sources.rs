@@ -214,6 +214,23 @@ impl ProjectSourceLanguage {
         }
     }
 
+    /// Every extension a root file of this language may carry: Verilog-AMS
+    /// sources are `.vams` as often as `.va`.
+    const fn accepted_extensions(self) -> &'static [&'static str] {
+        match self {
+            Self::VerilogA => &[".va", ".vams"],
+            Self::RSpiceAutomation => &[".py"],
+        }
+    }
+
+    /// [`Self::accepted_extensions`] as the sentence that names them.
+    const fn accepted_extension_text(self) -> &'static str {
+        match self {
+            Self::VerilogA => "'.va' or '.vams'",
+            Self::RSpiceAutomation => "'.py'",
+        }
+    }
+
     const fn stable_name(self) -> &'static str {
         match self {
             Self::VerilogA => "verilog-a",
@@ -1889,10 +1906,10 @@ pub enum ProjectSourceError {
     InvalidFileNameCharacters { language: ProjectSourceLanguage },
     #[error("{language} source file name is reserved by a supported desktop platform")]
     ReservedFileName { language: ProjectSourceLanguage },
-    #[error("{language} source file name must end in '{required_extension}'")]
+    #[error("{language} source file name must end in {accepted}")]
     InvalidFileNameExtension {
         language: ProjectSourceLanguage,
-        required_extension: &'static str,
+        accepted: &'static str,
     },
     #[error("logical source path '{logical_path}' is absolute, traversing, or not normalized")]
     InvalidLogicalPath { logical_path: String },
@@ -2110,7 +2127,6 @@ fn validate_project_source_file_name(
         }
         other => other,
     })?;
-    let required_extension = language.required_extension();
     let leaf = file_name.rsplit('/').next().unwrap_or_default();
     let lowercase = leaf.to_ascii_lowercase();
     // Version-one projects used a single `.rspice` workflow document. Keep
@@ -2120,12 +2136,14 @@ fn validate_project_source_file_name(
     let legacy_automation = language == ProjectSourceLanguage::RSpiceAutomation
         && lowercase.ends_with(".rspice")
         && leaf.len() > ".rspice".len();
-    if (!lowercase.ends_with(required_extension) || leaf.len() == required_extension.len())
-        && !legacy_automation
-    {
+    let accepted = language
+        .accepted_extensions()
+        .iter()
+        .any(|extension| lowercase.ends_with(extension) && leaf.len() > extension.len());
+    if !accepted && !legacy_automation {
         return Err(ProjectSourceError::InvalidFileNameExtension {
             language,
-            required_extension,
+            accepted: language.accepted_extension_text(),
         });
     }
     Ok(())

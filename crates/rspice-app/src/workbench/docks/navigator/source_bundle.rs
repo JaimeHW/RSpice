@@ -136,14 +136,15 @@ const FILE_ACTIONS: [(MessageId, CodeSourceFileAction, WorkbenchIcon); 3] = [
 ];
 
 /// The file operations as icons at the right of a section header that spans
-/// `header`, acting on the file in front of the reader.
+/// `header`, acting on the file in front of the reader, and Add files, which
+/// adds files from disk beside it.
 fn header_file_actions(
     ui: &mut Ui,
     header: egui::Rect,
     actions: &FileActions,
     active: &str,
     messages: MessageCatalog,
-) -> Option<CodeSourceFileAction> {
+) -> Option<RailRequest> {
     let side = (header.height() - 4.0).max(1.0);
     let mut strip = ui.new_child(
         egui::UiBuilder::new()
@@ -171,8 +172,22 @@ fn header_file_actions(
             None => response,
         };
         if response.clicked() {
-            requested = Some(action);
+            requested = Some(RailRequest::FileAction(action, active.to_owned()));
         }
+    }
+    let add = strip
+        .add_enabled_ui(actions.writable, |ui| {
+            crate::workbench::design_system::icon_button(
+                ui,
+                WorkbenchIcon::Folder,
+                &messages.text(MessageId::CodeSourceAddFiles),
+                false,
+                Vec2::splat(side),
+            )
+        })
+        .inner;
+    if add.clicked() {
+        requested = Some(RailRequest::AddFiles(active.to_owned()));
     }
     requested
 }
@@ -304,6 +319,8 @@ fn select(state: &mut AppState, language: ProjectSourceLanguage, logical_path: &
 enum RailRequest {
     Select(String),
     FileAction(CodeSourceFileAction, String),
+    /// Add files from disk to the bundle, beside `path`.
+    AddFiles(String),
     /// Edit `path` with its caret on `line`.
     Reveal {
         path: String,
@@ -370,6 +387,22 @@ fn show_rail(ui: &mut Ui, app: &mut RSpiceApp, rail: Rail) {
                 open_file_action(app, language, file_actions.bundle_id, action, &path);
             }
         }
+        Some(RailRequest::AddFiles(path)) => {
+            if let Some(file_actions) = rail.actions.as_ref() {
+                let requested =
+                    match code_workspace::source_file_mutation_block_reason(app, language) {
+                        Some(reason) => Err(reason.to_owned()),
+                        None => code_workspace::request_veriloga_add_files(
+                            &mut app.state,
+                            file_actions.bundle_id,
+                            &path,
+                        ),
+                    };
+                if let Err(error) = requested {
+                    app.state.prompt(error);
+                }
+            }
+        }
         Some(RailRequest::Reveal { path, line }) => {
             select(&mut app.state, language, &path);
             if let Some(bundle_id) = bundle_id {
@@ -416,7 +449,7 @@ fn files_section(
     if let (Some(file_actions), Some(path)) = (rail.actions.as_ref(), rail.active.as_deref()) {
         let band = egui::Rect::from_x_y_ranges(ui.max_rect().x_range(), top..=ui.cursor().top());
         if let Some(action) = header_file_actions(ui, band, file_actions, path, messages) {
-            *request = Some(RailRequest::FileAction(action, path.to_owned()));
+            *request = Some(action);
         }
     }
     for row in &rail.files {

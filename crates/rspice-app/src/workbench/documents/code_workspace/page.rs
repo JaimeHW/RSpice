@@ -155,8 +155,8 @@ pub struct VerilogAWorkbenchState {
     /// on its next pass, where it has the egui context the worker wakes; a
     /// result for a closure that has moved on since is stale like any other.
     pub compile_request: Option<super::SelectedVerilogASource>,
-    /// A dependency import is bound to the exact bundle/importer that launched
-    /// the asynchronous picker.
+    /// Add files is bound to the exact bundle revision and the file in front
+    /// that launched the asynchronous picker.
     pub import_target: Option<VerilogAImportTarget>,
     /// "Replace source from file…" is bound to the exact bundle and file the
     /// editor showed when the picker opened. With neither target the picked
@@ -164,6 +164,9 @@ pub struct VerilogAWorkbenchState {
     pub replace_target: Option<VerilogAReplaceTarget>,
     /// File > Import's form: a read file that becomes cell views of its own.
     pub import_form: Option<VerilogAImportFormState>,
+    /// Further roots of the same pick or drop, each opening the form in turn
+    /// once the one before it is committed or cancelled.
+    pub import_queue: Vec<VerilogAImportFormState>,
     /// A picked file waiting for the confirmation that it replaces the file
     /// it was picked for. Nothing is replaced until it is confirmed.
     pub replace_review: Option<VerilogAReplaceReview>,
@@ -230,18 +233,29 @@ pub struct VerilogAReplaceReview {
     pub restorable: bool,
 }
 
-/// A Verilog-A file read for File > Import that becomes cell views: one per
-/// top module, in `library`, each owning a bundle of the file.
+/// A Verilog-A/AMS root file read for File > Import, with every file its
+/// includes reach, that becomes cell views: one per chosen top module, in
+/// `library`, all sharing one bundle of the files.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VerilogAImportFormState {
     pub project_id: ProjectId,
+    /// The root file, by the path it takes in the bundle.
     pub file_name: String,
-    pub contents: String,
+    /// Every file the import holds, root included, by the path it takes in
+    /// the bundle: what was picked or dropped, what was read from the root's
+    /// folder, and what Locate supplied.
+    pub files: std::collections::BTreeMap<String, String>,
+    /// The folder the root was read from, where its includes are looked for.
+    pub folder: Option<std::path::PathBuf>,
+    /// What the root's includes reach, and the top modules it declares.
+    pub closure: crate::state::workspace::ImportClosure,
     /// The library the cells go to. Only a writable library is offered.
     pub library: String,
-    /// The top modules the file declares, or the front end's refusal.
-    pub modules: Result<Vec<crate::state::workspace::DeclaredModule>, String>,
+    /// The top modules that get a cell, by name.
+    pub chosen: Vec<String>,
     pub error: Option<String>,
+    /// The missing file a Locate pick is for, while one is open.
+    pub locating: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

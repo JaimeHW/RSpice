@@ -1219,6 +1219,8 @@ mod veriloga_placement_tests;
 
 #[cfg(test)]
 mod veriloga_flow_tests;
+#[cfg(test)]
+mod veriloga_import_tests;
 
 #[cfg(test)]
 mod veriloga_panel_tests;

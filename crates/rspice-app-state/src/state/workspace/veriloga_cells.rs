@@ -49,9 +49,217 @@ pub fn survey_veriloga_bundle(bundle: &ProjectSourceBundle) -> Result<ModuleSurv
     })
 }
 
-/// Read the modules one file declares, as the root of a bundle of its own.
-pub fn survey_veriloga_file(path: &str, contents: &str) -> Result<ModuleSurvey, String> {
-    survey_veriloga_sources(path, &|candidate| (candidate == path).then_some(contents))
+/// Where one include of a source being imported resolved.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ImportedInclude {
+    /// A file of the import holds it.
+    Found,
+    /// The compiler supplies it as a standard header.
+    BuiltIn,
+    /// No file of the import holds it yet; `included_by` writes the directive.
+    Missing { included_by: String },
+}
+
+/// One file a root's includes reach.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportClosureFile {
+    /// Where the file sits among the import's files: beside the file that
+    /// includes it. A standard header is named as the directive names it.
+    pub path: String,
+    pub include: ImportedInclude,
+}
+
+/// A root file and every file its includes reach, read the way a compile
+/// reads them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportClosure {
+    /// Each file the includes reach, once, in the order the preprocessor
+    /// reaches them. The root is not among them.
+    pub files: Vec<ImportClosureFile>,
+    /// For each found file, the file whose include first reached it, as
+    /// `(importer, imported)`.
+    pub edges: Vec<(String, String)>,
+    /// The top modules the closure declares, or the front end's refusal.
+    pub modules: Result<Vec<DeclaredModule>, String>,
+}
+
+impl ImportClosure {
+    /// The files no file of the import holds yet.
+    pub fn missing(&self) -> impl Iterator<Item = &ImportClosureFile> {
+        self.files
+            .iter()
+            .filter(|file| matches!(file.include, ImportedInclude::Missing { .. }))
+    }
+}
+
+/// Resolve the include closure of `root` over `files`.
+///
+/// An include resolves beside the file that writes it, then from the root's
+/// folder, as a compile of the bundle resolves it. A file `files` does not
+/// hold is asked of `read`, the root's folder on disk say, and kept in
+/// `files` when it answers. A name neither holds and the compiler does not
+/// supply is missing, and stands in as an empty file so the walk goes on and
+/// every missing file is listed, not only the first.
+pub fn resolve_veriloga_import(
+    root: &str,
+    files: &mut std::collections::BTreeMap<String, String>,
+    read: &dyn Fn(&str) -> Option<String>,
+) -> ImportClosure {
+    let provider = ImportFiles {
+        files: std::cell::RefCell::new(files),
+        read,
+        reached: std::cell::RefCell::new(Vec::new()),
+    };
+    let preprocessed =
+        rspice_veriloga::Preprocessor::new().preprocess_provider_root(&provider, Path::new(root));
+    let reached = provider.reached.into_inner();
+    let files = provider.files.into_inner();
+    let mut closure = ImportClosure {
+        files: Vec::new(),
+        edges: Vec::new(),
+        modules: Err(String::new()),
+    };
+    for (including, file) in reached {
+        let same = |known: &ImportClosureFile| fold(&known.path) == fold(&file.path);
+        if fold(&file.path) == fold(root) || closure.files.iter().any(same) {
+            continue;
+        }
+        if file.include == ImportedInclude::Found {
+            closure.edges.push((including, file.path.clone()));
+        }
+        closure.files.push(file);
+    }
+    closure.modules = match (preprocessed, files.get(root)) {
+        (Ok(preprocessed), Some(root_source)) => {
+            declared_modules(root, root_source, &preprocessed).map(|survey| survey.tops)
+        }
+        (Err(error), _) => Err(error.to_string()),
+        (_, None) => Err(format!("{root} is not in the source")),
+    };
+    closure
+}
+
+/// The import's files as the preprocessor's include provider, recording
+/// where each include resolved.
+struct ImportFiles<'a, 'f> {
+    files: std::cell::RefCell<&'f mut std::collections::BTreeMap<String, String>>,
+    read: &'a dyn Fn(&str) -> Option<String>,
+    /// `(including file, include)` for each include, in the order reached.
+    reached: std::cell::RefCell<Vec<(String, ImportClosureFile)>>,
+}
+
+impl ImportFiles<'_, '_> {
+    /// The file at `path`, compared without case as the compile compares
+    /// it, under the name it is kept by.
+    fn file(&self, path: &str) -> Option<(String, String)> {
+        let folded = fold(path);
+        if let Some((name, source)) = self
+            .files
+            .borrow()
+            .iter()
+            .find(|(name, _)| fold(name) == folded)
+        {
+            return Some((name.clone(), source.clone()));
+        }
+        let source = (self.read)(path)?;
+        self.files
+            .borrow_mut()
+            .insert(path.to_owned(), source.clone());
+        Some((path.to_owned(), source))
+    }
+
+    fn reach(&self, including: &str, path: String, include: ImportedInclude) {
+        self.reached
+            .borrow_mut()
+            .push((including.to_owned(), ImportClosureFile { path, include }));
+    }
+}
+
+impl rspice_veriloga::SourceProvider for ImportFiles<'_, '_> {
+    fn load_root(
+        &self,
+        requested: &Path,
+    ) -> Result<rspice_veriloga::SourceDocument, rspice_veriloga::PreprocessorError> {
+        let logical = logical_path(requested);
+        self.file(&logical)
+            .map(|(name, source)| rspice_veriloga::SourceDocument::provided(name, source))
+            .ok_or_else(|| {
+                rspice_veriloga::PreprocessorError::new(
+                    format!("{logical} is not in the source"),
+                    Some(requested.to_path_buf()),
+                    0,
+                )
+            })
+    }
+
+    fn resolve_include(
+        &self,
+        including_file: Option<&Path>,
+        _include_paths: &[PathBuf],
+        requested: &str,
+    ) -> Result<Option<rspice_veriloga::SourceDocument>, rspice_veriloga::PreprocessorError> {
+        let including = including_file.map(logical_path).unwrap_or_default();
+        let parent = including.rsplit_once('/').map(|(parent, _)| parent);
+        let beside = joined_path(parent, requested);
+        let from_root = joined_path(None, requested);
+        for candidate in [&beside, &from_root].into_iter().flatten() {
+            if let Some((name, source)) = self.file(candidate) {
+                self.reach(&including, name.clone(), ImportedInclude::Found);
+                return Ok(Some(rspice_veriloga::SourceDocument::provided(
+                    name, source,
+                )));
+            }
+        }
+        // Declining hands the name to the standard headers.
+        if rspice_veriloga::stdlib::builtin_include_document(requested).is_some() {
+            self.reach(&including, requested.to_owned(), ImportedInclude::BuiltIn);
+            return Ok(None);
+        }
+        let path = beside.or(from_root).unwrap_or_else(|| requested.to_owned());
+        let stand_in = format!("\0missing/{}", self.reached.borrow().len());
+        self.reach(
+            &including,
+            path,
+            ImportedInclude::Missing {
+                included_by: including.clone(),
+            },
+        );
+        Ok(Some(rspice_veriloga::SourceDocument::provided(
+            stand_in,
+            String::new(),
+        )))
+    }
+}
+
+/// `requested` joined to the folder `parent`, `.` and `..` resolved, or
+/// `None` for a name a bundle cannot hold: absolute, or above its root.
+fn joined_path(parent: Option<&str>, requested: &str) -> Option<String> {
+    let requested = requested.replace('\\', "/");
+    if requested.is_empty()
+        || requested.contains('\0')
+        || requested.starts_with('/')
+        || requested.as_bytes().get(1) == Some(&b':')
+    {
+        return None;
+    }
+    let mut components = parent
+        .map(|parent| parent.split('/').collect::<Vec<_>>())
+        .unwrap_or_default();
+    for component in requested.split('/') {
+        match component {
+            "" => return None,
+            "." => {}
+            ".." => {
+                components.pop()?;
+            }
+            component => components.push(component),
+        }
+    }
+    (!components.is_empty()).then(|| components.join("/"))
+}
+
+fn fold(path: &str) -> String {
+    path.chars().flat_map(char::to_lowercase).collect()
 }
 
 /// Read the modules the source rooted at `root` declares, through the same
@@ -66,9 +274,19 @@ fn survey_veriloga_sources<'a>(
     let preprocessed = rspice_veriloga::Preprocessor::new()
         .preprocess_provider_root(&SourceFiles(file), Path::new(root))
         .map_err(|error| error.to_string())?;
+    declared_modules(root, root_source, &preprocessed)
+}
+
+/// The modules `preprocessed`, the expanded text of `root`, declares: its top
+/// modules, first-in-the-root-file first.
+fn declared_modules(
+    root: &str,
+    root_source: &str,
+    preprocessed: &str,
+) -> Result<ModuleSurvey, String> {
     let mut sources = rspice_veriloga::SourceMap::new();
-    let source_id = sources.add_source_mut(root, preprocessed.as_str());
-    let tokens = rspice_veriloga::Lexer::new(&preprocessed, source_id)
+    let source_id = sources.add_source_mut(root, preprocessed);
+    let tokens = rspice_veriloga::Lexer::new(preprocessed, source_id)
         .collect_tokens()
         .map_err(|error| error.to_string())?;
     let file = rspice_veriloga::Parser::new(&tokens)
@@ -458,4 +676,73 @@ pub(crate) fn retire_code_workspace_veriloga(
         (None, Ok(_)) => notice.push('.'),
     }
     Some(notice)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use super::*;
+
+    const ROOT: &str = "`include \"disciplines.vams\"\n`include \"macros.inc\"\n`include \"sub/body.inc\"\n`include \"absent.inc\"\nmodule dut(p, n);\n  inout p, n;\n  electrical p, n;\n  analog I(p, n) <+ `GAIN * V(p, n);\nendmodule\n";
+
+    /// Every include is listed once, where it resolved: a file the import
+    /// holds, one read from the root's folder beside the file that includes
+    /// it, a standard header, or missing; and the walk goes on past a missing
+    /// file, so the modules are still read.
+    #[test]
+    fn an_import_lists_every_include_where_it_resolved() {
+        let mut files = BTreeMap::from([
+            ("dut.va".to_owned(), ROOT.to_owned()),
+            ("macros.inc".to_owned(), "`define GAIN 2.0\n".to_owned()),
+        ]);
+        let folder = BTreeMap::from([
+            (
+                "sub/body.inc",
+                "`include \"leaf.inc\"\n`include \"macros.inc\"\n",
+            ),
+            ("sub/leaf.inc", "// leaf\n"),
+        ]);
+        let read = |path: &str| folder.get(path).map(|source| (*source).to_owned());
+
+        let closure = resolve_veriloga_import("dut.va", &mut files, &read);
+
+        let listed = closure
+            .files
+            .iter()
+            .map(|file| (file.path.as_str(), file.include.clone()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            listed,
+            [
+                ("disciplines.vams", ImportedInclude::BuiltIn),
+                ("macros.inc", ImportedInclude::Found),
+                ("sub/body.inc", ImportedInclude::Found),
+                ("sub/leaf.inc", ImportedInclude::Found),
+                (
+                    "absent.inc",
+                    ImportedInclude::Missing {
+                        included_by: "dut.va".to_owned()
+                    }
+                ),
+            ]
+        );
+        assert_eq!(
+            closure.edges,
+            [
+                ("dut.va".to_owned(), "macros.inc".to_owned()),
+                ("dut.va".to_owned(), "sub/body.inc".to_owned()),
+                ("sub/body.inc".to_owned(), "sub/leaf.inc".to_owned()),
+            ],
+            "one edge reaches each file; a second include of it adds none"
+        );
+        assert!(files.contains_key("sub/leaf.inc"), "a read file is kept");
+        assert_eq!(closure.missing().count(), 1);
+        assert_eq!(
+            closure
+                .modules
+                .map(|modules| modules.into_iter().map(|module| module.name).collect()),
+            Ok(vec!["dut".to_owned()])
+        );
+    }
 }

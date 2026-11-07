@@ -165,10 +165,17 @@ const OUTSIDE_THE_APPLICATION_GATE: &[GateRow] = &[
             crate::workbench::documents::code_workspace::VerilogAImportFormState {
                 project_id: state.model.workspace.content.project.id(),
                 file_name: "gain.va".to_owned(),
-                contents: String::new(),
+                files: std::collections::BTreeMap::new(),
+                folder: None,
+                closure: crate::state::workspace::ImportClosure {
+                    files: Vec::new(),
+                    edges: Vec::new(),
+                    modules: Ok(Vec::new()),
+                },
                 library: "behavioral".to_owned(),
-                modules: Ok(Vec::new()),
+                chosen: Vec::new(),
                 error: None,
+                locating: None,
             },
         );
     }),

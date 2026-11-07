@@ -71,15 +71,16 @@ pub(crate) use source_search::{
     open_active_source_search, open_source_search, open_source_search_in_bundle,
     source_search_query_id, source_search_results,
 };
-#[cfg(test)]
-pub(crate) use veriloga::complete_veriloga_file_pick;
 pub(crate) use veriloga::{
-    SelectedVerilogASource, active_veriloga_file_path, commit_veriloga_source_replacement,
-    compile_project_bundle_virtual_for_provenance, import_dropped_veriloga_source,
-    replace_selected_veriloga_file, request_veriloga_compile, request_veriloga_source_replacement,
+    PickedSource, SelectedVerilogASource, active_veriloga_file_path, close_veriloga_import_form,
+    commit_veriloga_source_replacement, compile_project_bundle_virtual_for_provenance,
+    import_dropped_veriloga_sources, replace_selected_veriloga_file, request_veriloga_add_files,
+    request_veriloga_compile, request_veriloga_import_locate, request_veriloga_source_replacement,
     selected_veriloga_editor_snapshot, selected_veriloga_source, viewed_veriloga_header,
     writable_libraries, write_veriloga_build_profile,
 };
+#[cfg(test)]
+pub(crate) use veriloga::{complete_veriloga_file_pick, complete_veriloga_files_pick};
 pub use veriloga::{consume_veriloga_compile_request, poll_veriloga_compile, poll_veriloga_import};
 pub(crate) use veriloga_inspector::{
     VerilogAInspectorAction, show_veriloga_inspector, symbol_drift_text, veriloga_compile_status,
