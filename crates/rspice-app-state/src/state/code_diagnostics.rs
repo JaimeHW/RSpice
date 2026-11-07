@@ -39,7 +39,9 @@ impl CodeDiagnosticSummary {
 
 #[derive(Debug, Clone, Default)]
 struct DocumentDiagnosticIndex {
-    severity_by_line: HashMap<usize, CodeEditorSeverity>,
+    /// The record with the highest severity on each one-based line, the
+    /// first reported among equals.
+    worst_by_line: HashMap<usize, usize>,
 }
 
 /// Bounded canonical collection with publication-time summaries and line
@@ -143,11 +145,16 @@ impl CodeDiagnosticCollection {
             None => &mut self.global,
         };
         if let Some(line) = line {
+            let index = self.records.len();
             target
-                .severity_by_line
+                .worst_by_line
                 .entry(line)
-                .and_modify(|severity| *severity = (*severity).max(record.severity))
-                .or_insert(record.severity);
+                .and_modify(|worst| {
+                    if self.records[*worst].severity < record.severity {
+                        *worst = index;
+                    }
+                })
+                .or_insert(index);
         }
         self.records.push(record);
         Ok(())
@@ -187,18 +194,50 @@ pub struct CodeDiagnosticView<'a> {
     document_key: Option<String>,
 }
 
-impl CodeDiagnosticView<'_> {
+impl<'a> CodeDiagnosticView<'a> {
     pub fn severity_for_line(&self, one_based_line: usize) -> Option<CodeEditorSeverity> {
+        self.worst_for_line(one_based_line)
+            .map(|diagnostic| diagnostic.severity)
+    }
+
+    /// The most severe finding on a one-based line of this document.
+    pub fn worst_for_line(&self, one_based_line: usize) -> Option<&'a CodeEditorDiagnostic> {
+        let records = &self.collection.records;
         let global = self
             .collection
             .global
-            .severity_by_line
+            .worst_by_line
             .get(&one_based_line)
-            .copied();
+            .map(|index| &records[*index]);
         let document = self
             .document_index()
-            .and_then(|index| index.severity_by_line.get(&one_based_line).copied());
-        global.max(document)
+            .and_then(|index| index.worst_by_line.get(&one_based_line))
+            .map(|index| &records[*index]);
+        match (global, document) {
+            (Some(global), Some(document)) if global.severity > document.severity => Some(global),
+            (_, Some(document)) => Some(document),
+            (global, None) => global,
+        }
+    }
+
+    /// This document's findings that name a line, in source order: by line,
+    /// then column, a finding with no column first on its line.
+    pub fn located(&self) -> Vec<&'a CodeEditorDiagnostic> {
+        let mut located = self
+            .collection
+            .records
+            .iter()
+            .filter(|diagnostic| diagnostic.line.is_some())
+            .filter(|diagnostic| match diagnostic.source_path.as_deref() {
+                None => true,
+                Some(path) => self
+                    .document_key
+                    .as_deref()
+                    .is_some_and(|key| normalize_diagnostic_path(path) == key),
+            })
+            .collect::<Vec<_>>();
+        located.sort_by_key(|diagnostic| (diagnostic.line, diagnostic.column));
+        located
     }
 
     fn document_index(&self) -> Option<&DocumentDiagnosticIndex> {
