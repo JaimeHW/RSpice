@@ -254,6 +254,7 @@ pub fn import_foreign_schematic(
         names: BTreeSet::new(),
         models: BTreeSet::new(),
         pin_points: HashMap::new(),
+        pin_leads: HashMap::new(),
         device_ties: Vec::new(),
         behaviours: Vec::new(),
     };
@@ -289,13 +290,26 @@ pub fn import_foreign_schematic(
     // Every pin is known before any lead is routed, so no lead runs through
     // a pin of a part placed after it.
     for (symbol, (definition, ..)) in drawing.symbols.iter().zip(&resolved) {
-        for pin in definition.iter().flat_map(|definition| &definition.pins) {
+        let Some(definition) = definition else {
+            continue;
+        };
+        let centre = body_centre(definition);
+        for pin in &definition.pins {
             let at = builder.scale(
                 symbol
                     .position
                     .offset(symbol.orientation.apply(pin.position)),
             );
             *builder.pin_points.entry(at).or_default() += 1;
+            let inward = symbol.orientation.apply(ForeignPoint::new(
+                centre.x - pin.position.x,
+                centre.y - pin.position.y,
+            ));
+            builder
+                .pin_leads
+                .entry(at)
+                .or_default()
+                .push(Point::new(inward.x, inward.y));
         }
     }
     for (symbol, resolved) in drawing.symbols.iter().zip(resolved) {
@@ -336,6 +350,8 @@ struct Builder<'a> {
     models: BTreeSet<String>,
     /// How many placed symbols have a pin at each point.
     pin_points: HashMap<Point, usize>,
+    /// The way each source pin's lead runs from its point into its body.
+    pin_leads: HashMap<Point, Vec<Point>>,
     /// Terminals of LTspice A-devices that LTspice grounds when nothing
     /// else reaches them.
     device_ties: Vec<DeviceTie>,
@@ -1817,7 +1833,8 @@ impl Builder<'_> {
                 self.document.components.push(port);
             } else {
                 let mut label = NetLabel::new(id, at, flag.name.clone());
-                label.side = match flag.facing.map(|run| (run.x.signum(), run.y.signum())) {
+                let run = flag.facing.or_else(|| self.away_from_attachment(at));
+                label.side = match run.map(|run| (run.x.signum(), run.y.signum())) {
                     Some((-1, _)) => NetLabelSide::Left,
                     Some((0, 1)) => NetLabelSide::Below,
                     Some((0, -1)) => NetLabelSide::Above,
@@ -1831,6 +1848,40 @@ impl Builder<'_> {
                 self.document.net_labels.push(label);
             }
         }
+    }
+
+    /// The way a flag's name reads when the drawing does not say: away from
+    /// the one side its wires and pin leads reach it from, as LTspice letters
+    /// a flag, so a flag at the foot of a supply pin names the rail below the
+    /// pin rather than across the part. A flag reached from more than one
+    /// side, or from the middle of a wire, says nothing.
+    fn away_from_attachment(&self, at: Point) -> Option<ForeignPoint> {
+        let mut reaches = Vec::new();
+        for (a, b) in &self.source_segments {
+            if *a == at {
+                reaches.push(*b - at);
+            } else if *b == at {
+                reaches.push(*a - at);
+            } else if strictly_inside(*a, *b, at) {
+                return None;
+            }
+        }
+        reaches.extend(self.pin_leads.get(&at).into_iter().flatten().copied());
+        let mut sides = reaches.into_iter().filter_map(|reach| {
+            match (
+                reach.x.abs() >= reach.y.abs(),
+                reach.x.signum(),
+                reach.y.signum(),
+            ) {
+                (true, 0, _) => None,
+                (true, x, _) => Some(ForeignPoint::new(x, 0)),
+                (false, _, y) => Some(ForeignPoint::new(0, y)),
+            }
+        });
+        let first = sides.next()?;
+        sides
+            .all(|side| side == first)
+            .then(|| ForeignPoint::new(-first.x, -first.y))
     }
 
     /// Places a mutual-inductance card (`K1 L1 L2 1`) whose windings are
@@ -2083,6 +2134,32 @@ impl Builder<'_> {
 }
 
 /// The definition's default attributes under the placed symbol's own.
+/// The middle of a symbol's drawn body in its own frame, or of its pins when
+/// it draws nothing.
+fn body_centre(definition: &ForeignSymbolDefinition) -> ForeignPoint {
+    let drawn = definition.shapes.iter().flat_map(|shape| match shape {
+        ForeignShape::Line(a, b) | ForeignShape::Rectangle(a, b) | ForeignShape::Ellipse(a, b) => {
+            vec![*a, *b]
+        }
+        ForeignShape::Arc([a, b, ..]) => vec![*a, *b],
+    });
+    let points = drawn.collect::<Vec<_>>();
+    let points = if points.is_empty() {
+        definition.pins.iter().map(|pin| pin.position).collect()
+    } else {
+        points
+    };
+    let (Some(min_x), Some(max_x), Some(min_y), Some(max_y)) = (
+        points.iter().map(|point| point.x).min(),
+        points.iter().map(|point| point.x).max(),
+        points.iter().map(|point| point.y).min(),
+        points.iter().map(|point| point.y).max(),
+    ) else {
+        return ForeignPoint::default();
+    };
+    ForeignPoint::new((min_x + max_x) / 2, (min_y + max_y) / 2)
+}
+
 /// The box a part RSpice draws natively stands in: its symbol's extent,
 /// turned with it, about its position.
 fn native_body(component: &Component) -> LayoutRect {

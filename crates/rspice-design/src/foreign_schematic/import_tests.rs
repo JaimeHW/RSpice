@@ -1153,6 +1153,41 @@ fn a_name_or_value_beside_a_source_body_clears_the_body_rspice_draws() {
     }
 }
 
+/// An LTspice flag names its net away from the one side its wire or pin
+/// lead reaches it from: below a pin whose lead comes down to it, above one
+/// whose lead runs up from it, beyond either end of a wire. A flag on the
+/// middle of a wire keeps the usual side.
+#[test]
+fn an_ltspice_flag_names_its_net_away_from_what_reaches_it() {
+    use crate::schematic::net_label::NetLabelSide;
+
+    let drawing = parse_asc(
+        "Version 4\n\
+         SYMBOL res 0 0 R0\nSYMATTR InstName R1\nSYMATTR Value 1k\n\
+         FLAG 16 16 TOP\nFLAG 16 96 FOOT\n\
+         WIRE 160 160 320 160\n\
+         FLAG 160 160 WEST\nFLAG 320 160 EAST\nFLAG 240 160 MIDDLE\n",
+    )
+    .expect("the drawing reads");
+    let imported = import_foreign_schematic(&drawing, "work", &library());
+    let sides = imported
+        .document
+        .net_labels
+        .iter()
+        .map(|label| (label.name.as_str(), label.side))
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(
+        sides,
+        BTreeMap::from([
+            ("EAST", NetLabelSide::Right),
+            ("FOOT", NetLabelSide::Below),
+            ("MIDDLE", NetLabelSide::Right),
+            ("TOP", NetLabelSide::Above),
+            ("WEST", NetLabelSide::Left),
+        ])
+    );
+}
+
 #[test]
 fn a_jumper_is_a_wire_and_a_named_subcircuit_reads_from_the_deck() {
     let drawing = parse_asc(
