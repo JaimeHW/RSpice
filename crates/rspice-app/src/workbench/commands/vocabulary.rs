@@ -47,6 +47,7 @@ pub enum Command {
     ImportNetlist,
     ImportVerilogA,
     ExportNetlist(crate::io::NetlistFormat),
+    ExportBillOfMaterials,
     Exit,
     Undo,
     Redo,
@@ -314,6 +315,11 @@ impl Command {
             Self::ExportNetlist(crate::io::NetlistFormat::Spice) => {
                 spec("export-netlist-spice", "Export SPICE netlist…", "File")
             }
+            Self::ExportBillOfMaterials => spec(
+                "export-bill-of-materials",
+                "Export bill of materials…",
+                "File",
+            ),
 
             Self::Exit => spec("exit-rspice", "Exit", "File"),
             Self::Undo => spec("undo", "Undo", "Edit"),
@@ -712,6 +718,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ImportVerilogA,
     Command::ExportNetlist(crate::io::NetlistFormat::Spectre),
     Command::ExportNetlist(crate::io::NetlistFormat::Spice),
+    Command::ExportBillOfMaterials,
     Command::Exit,
     Command::Undo,
     Command::Redo,
@@ -919,6 +926,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     CloudCommand::PublishToWeb.key(),
     Command::ExportNetlist(crate::io::NetlistFormat::Spectre).key(),
     Command::ExportNetlist(crate::io::NetlistFormat::Spice).key(),
+    Command::ExportBillOfMaterials.key(),
     SheetsCommand::SheetProperties.key(),
     SheetsCommand::SheetFormatManager.key(),
     SheetsCommand::SheetDefaults.key(),

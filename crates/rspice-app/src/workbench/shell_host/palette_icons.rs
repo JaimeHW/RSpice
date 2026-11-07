@@ -35,7 +35,10 @@ pub(super) fn palette_icon(command: Command) -> Option<Icon> {
         Command::ConfigurationSets => Icon::Grid,
         Command::RuleSetup => Icon::Check,
         Command::CheckCellview | Command::CheckDesign => Icon::Check,
-        Command::ImportNetlist | Command::ImportVerilogA | Command::ExportNetlist(_) => Icon::File,
+        Command::ImportNetlist
+        | Command::ImportVerilogA
+        | Command::ExportNetlist(_)
+        | Command::ExportBillOfMaterials => Icon::File,
         _ => return None,
     };
     Some(icon)

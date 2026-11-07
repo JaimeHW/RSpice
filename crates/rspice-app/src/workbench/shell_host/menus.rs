@@ -185,6 +185,11 @@ const EXPORT_MENU: &[MenuEntry] = &[
     )
     .access('N'),
     MenuEntry::command_as(ResultsCommand::ExportWaveformsCsv.key(), "Dataset\u{2026}").access('D'),
+    command_as(
+        Command::ExportBillOfMaterials,
+        "Bill of materials (CSV)\u{2026}",
+    )
+    .access('B'),
 ];
 
 /// Edit acts on what the page shows: with a source editor as the document,

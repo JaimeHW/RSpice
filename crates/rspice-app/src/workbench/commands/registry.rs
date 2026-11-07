@@ -351,6 +351,7 @@ impl Command {
                 | Self::ImportNetlist
                 | Self::ImportVerilogA
                 | Self::ExportNetlist(_)
+                | Self::ExportBillOfMaterials
                 | Self::FindInDesign
                 | Self::CheckDesign
                 | Self::ConnectivityManager

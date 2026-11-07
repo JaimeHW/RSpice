@@ -377,6 +377,7 @@ impl Command {
             | Self::ImportNetlist
             | Self::ImportVerilogA
             | Self::ExportNetlist(_)
+            | Self::ExportBillOfMaterials
             | Self::GenerateNetlist
             | Self::FindCodeDocument
             | Self::ValidateCodeDocument
@@ -440,6 +441,12 @@ impl Command {
                         app.export_workflow_io.as_ref(),
                     );
                 }
+            }
+            Self::ExportBillOfMaterials => {
+                crate::workbench::menu_bar::action_export_bill_of_materials_with_io(
+                    &mut app.state,
+                    app.export_workflow_io.as_ref(),
+                );
             }
             Self::Exit => file_action(app, FileMenuAction::Exit),
             Self::Undo => app.action_edit_undo(),
