@@ -383,6 +383,11 @@ const DESIGN_MENU: &[MenuEntry] = &[
         &[MenuEntry::submenu("Place", SYMBOL_PLACE_MENU).access('P')],
     ),
     MenuEntry::submenu("Arrange", ARRANGE_MENU).access('A'),
+    // No letter is left on this menu that its name holds.
+    MenuEntry::Only(
+        MenuContext::NotSymbolView,
+        &[MenuEntry::submenu("Standard values", STANDARD_VALUES_MENU)],
+    ),
     MenuEntry::submenu("Sheet", SHEET_MENU).access('S'),
     Separator,
     project(ProjectCommand::Variants).access('N'),
@@ -504,6 +509,43 @@ const ARRANGE_MENU: &[MenuEntry] = &[
     Separator,
     command(Command::SnapSelectionToGrid).access('S'),
     command(Command::JoinCollinearWires).access('J'),
+];
+
+/// Snap the selected values to the project's preferred-number series, and
+/// choose the series; the value fields' arrow keys step along the same one.
+const STANDARD_VALUES_MENU: &[MenuEntry] = &[
+    command(Command::SnapToStandardValue).access('S'),
+    Separator,
+    MenuEntry::radio(
+        Command::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E6).key(),
+        "E6",
+    )
+    .access('6'),
+    MenuEntry::radio(
+        Command::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E12).key(),
+        "E12",
+    )
+    .access('1'),
+    MenuEntry::radio(
+        Command::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E24).key(),
+        "E24",
+    )
+    .access('4'),
+    MenuEntry::radio(
+        Command::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E48).key(),
+        "E48",
+    )
+    .access('8'),
+    MenuEntry::radio(
+        Command::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E96).key(),
+        "E96",
+    )
+    .access('9'),
+    MenuEntry::radio(
+        Command::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E192).key(),
+        "E192",
+    )
+    .access('2'),
 ];
 
 /// Simulate: choose and fill the active plan, set it up, check and run it,

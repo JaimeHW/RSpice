@@ -11,7 +11,13 @@ use egui::os::OperatingSystem;
 /// Rows that go without an access key, each because its menu has no letter
 /// left to give it (see the menu's own note): a command's row by its id, a
 /// submenu's by its label.
-const KEYLESS_ROWS: [&str; 4] = ["save-all", "live-session", "deselect-all", "Select"];
+const KEYLESS_ROWS: [&str; 5] = [
+    "save-all",
+    "live-session",
+    "deselect-all",
+    "Select",
+    "Standard values",
+];
 
 fn key_press(key: Key, modifiers: Modifiers) -> egui::Event {
     egui::Event::Key {

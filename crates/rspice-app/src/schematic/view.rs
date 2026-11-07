@@ -43,6 +43,7 @@ pub(crate) mod selection_transform;
 pub(crate) mod sheet_visibility;
 mod shelf_drag;
 mod snap_resolution;
+pub(crate) mod standard_value_snap;
 mod stretch_interaction;
 pub(crate) mod violations;
 mod zoom_box;

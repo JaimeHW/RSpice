@@ -94,6 +94,9 @@ pub enum ContextAction {
     Arrange,
     /// A command on the Arrange page.
     ArrangeCommand(ArrangeAction),
+    /// Round the selected resistors, capacitors and inductors to the
+    /// project's preferred-number series.
+    SnapToStandardValue,
     /// Arm the zoom box: the next drag frames the view. A finger has no
     /// Z key.
     ZoomBox,
@@ -141,7 +144,8 @@ pub enum ContextIcon {
     /// The Arrange page's way back to the menu.
     Back,
     ZoomBox,
-    /// Snap Selection to Grid, as the Design menu's Arrange draws it.
+    /// Snap Selection to Grid, as the Design menu's Arrange draws it, and
+    /// Snap to standard value, which snaps a value to its series' grid.
     Grid,
 }
 

@@ -28,6 +28,8 @@ pub fn render_property_dialog(
     }
     let quantity_policy = state.model.preferences.quantity_presentation_policy();
     let number_locale = state.workbench.number_locale;
+    state.design.tabbed_property_dialog.draft.standard_series =
+        state.model.workspace.content.standard_value_series;
     let editor_context = component_editor_context(state);
     let result = render_tabbed_property_dialog(
         ctx,

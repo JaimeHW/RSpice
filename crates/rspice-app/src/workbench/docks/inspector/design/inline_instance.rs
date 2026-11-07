@@ -832,6 +832,16 @@ pub(super) fn edit_row_with_hint(
             }
         })
         .inner;
+    // A resistor, capacitor or inductor's value steps along the project's
+    // series from the keyboard and the wheel, as typing it would.
+    let stepped = matches!(field, InlineEditField::Value)
+        && crate::schematic::view::standard_value_snap::takes_standard_value(component.kind)
+        && rspice_schematic_editor::property_values::step_standard_value(
+            ui,
+            response.id,
+            app.state.model.workspace.content.standard_value_series,
+            &mut buffer,
+        );
     if cancel {
         app.state.workbench.inline_edit.end();
         ui.input_mut(|input| {
@@ -840,13 +850,13 @@ pub(super) fn edit_row_with_hint(
         response.surrender_focus();
         return None;
     }
-    if response.gained_focus() || response.changed() {
+    if response.gained_focus() || response.changed() || stepped {
         if !begin_edit(app, component.id, field.clone()) {
             restore_edit_focus(ui.ctx(), app);
             return None;
         }
         app.state.workbench.inline_edit.set_widget(response.id);
-        if response.changed() {
+        if response.changed() || stepped {
             update_edit(app, buffer);
         }
     }

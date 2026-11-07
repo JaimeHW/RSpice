@@ -89,6 +89,14 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
         label: "Arrange",
         shortcut_command: None,
     }),
+    // Only in the menu of a selection that holds a resistor, capacitor or
+    // inductor; see `menu_entries`.
+    ContextEntry::Command(ContextCommand {
+        action: ContextAction::SnapToStandardValue,
+        icon: ContextIcon::Grid,
+        label: "Snap to standard value",
+        shortcut_command: None,
+    }),
     // The stimulus-library group, which exists only in a placed source's menu
     // and states the verbs that source's standing with the library calls for;
     // see `stimulus`.
@@ -419,6 +427,22 @@ fn master_slot_shows(action: ContextAction, subject: MenuSubject) -> bool {
     }
 }
 
+/// Whether the selection holds a part whose value a series rounds: a menu
+/// opened on anything else has no use for the row.
+fn selection_holds_a_standard_value(state: &AppState) -> bool {
+    let selection = &state.model.schematic.session.editor.selection;
+    state
+        .model
+        .schematic
+        .document()
+        .components
+        .iter()
+        .any(|part| {
+            selection.components.contains(&part.id)
+                && super::standard_value_snap::takes_standard_value(part.kind)
+        })
+}
+
 /// The entries the menu is made of, for what it was opened on.
 ///
 /// The catalog is one list, and almost all of it is every target's: a verb that
@@ -441,6 +465,11 @@ fn menu_entries(state: &AppState, target: ContextTarget) -> Vec<ContextEntry> {
             }
             ContextEntry::Command(command) if stimulus::owns(command.action) => {
                 stimulus::shown(command.action, state)
+            }
+            ContextEntry::Command(command)
+                if command.action == ContextAction::SnapToStandardValue =>
+            {
+                selection_holds_a_standard_value(state)
             }
             ContextEntry::Command(command) => master_slot_shows(command.action, subject),
         };
@@ -1392,6 +1421,10 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
             writable,
             "The active schematic view is read-only; reopen it in an editable context to place a probe",
         ),
+        ContextAction::SnapToStandardValue => {
+            let blocked = super::standard_value_snap::snap_block_reason(state);
+            (blocked.is_none(), blocked.unwrap_or_default())
+        }
         ContextAction::OperatingPoint => (
             operating_point_available(state),
             "Run a DC operating-point analysis with device OP reporting first",
@@ -1504,6 +1537,9 @@ fn execute_context_action(
         ContextAction::ShowInNetlist => state.show_selected_instance_in_netlist(),
         ContextAction::Probe => state.model.schematic.arm_tool(Tool::Probe),
         ContextAction::OperatingPoint => open_operating_point(state),
+        ContextAction::SnapToStandardValue => {
+            super::standard_value_snap::run_snap_to_standard_value(state);
+        }
         ContextAction::Choose(_) => {}
     }
 }

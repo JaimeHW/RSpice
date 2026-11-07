@@ -73,6 +73,11 @@ pub struct ProjectWorkspace {
         skip_serializing_if = "rspice_design::drc::DesignRuleDeck::is_empty"
     )]
     pub design_rules: Stamped<rspice_design::drc::DesignRuleDeck>,
+    /// The preferred-number series a value field steps along and Snap to
+    /// standard value rounds to. Which parts a team buys is a project
+    /// decision, so it travels with the project.
+    #[serde(default)]
+    pub standard_value_series: rspice_vocabulary::quantity::ESeries,
     pub active_view: CellViewRef,
     pub open_views: Vec<OpenCellView>,
     /// Masters on the active document's occurrence, outermost first — a
@@ -240,6 +245,7 @@ impl Default for ProjectWorkspace {
             design_management: Stamped::default(),
             connectivity: Stamped::default(),
             design_rules: Stamped::default(),
+            standard_value_series: rspice_vocabulary::quantity::ESeries::default(),
             active_view: active_view.clone(),
             open_views: vec![OpenCellView::new(active_view.clone(), ViewType::Schematic)],
             hierarchy_stack: vec![active_view],

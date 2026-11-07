@@ -71,6 +71,10 @@ pub struct ComponentPropertyDraft {
 
     /// PWL editor state (for PWL sources)
     pub pwl_editor: PwlEditorState,
+
+    /// The project's preferred-number series, which a resistor, capacitor or
+    /// inductor's value field steps along. The host keeps it current.
+    pub standard_series: rspice_vocabulary::quantity::ESeries,
 }
 
 impl ComponentPropertyDraft {

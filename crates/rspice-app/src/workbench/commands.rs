@@ -121,6 +121,7 @@ pub(crate) const fn command_edits_schematic(command: Command) -> bool {
             | Command::DistributeSelectionHorizontal
             | Command::DistributeSelectionVertical
             | Command::SnapSelectionToGrid
+            | Command::SnapToStandardValue
             | Command::JoinCollinearWires
     )
 }
@@ -202,6 +203,7 @@ impl Command {
                 | Self::DistributeSelectionHorizontal
                 | Self::DistributeSelectionVertical
                 | Self::SnapSelectionToGrid
+                | Self::SnapToStandardValue
                 | Self::JoinCollinearWires
         )
     }
@@ -342,6 +344,8 @@ impl Command {
             | Self::DistributeSelectionHorizontal
             | Self::DistributeSelectionVertical
             | Self::SnapSelectionToGrid
+            | Self::SnapToStandardValue
+            | Self::SetStandardValueSeries(_)
             | Self::JoinCollinearWires
             | Self::Cancel
             | Self::AscendHierarchy
@@ -990,6 +994,18 @@ impl Command {
                     &mut app.state,
                     &symbol_context,
                 );
+            }
+            Self::SnapToStandardValue => {
+                crate::schematic::view::standard_value_snap::run_snap_to_standard_value(
+                    &mut app.state,
+                );
+            }
+            Self::SetStandardValueSeries(series) => {
+                let workspace = &mut app.state.model.workspace.content;
+                if workspace.standard_value_series != series {
+                    workspace.standard_value_series = series;
+                    workspace.project_metadata_dirty = true;
+                }
             }
             Self::AlignSelectionLeft
             | Self::AlignSelectionCenter

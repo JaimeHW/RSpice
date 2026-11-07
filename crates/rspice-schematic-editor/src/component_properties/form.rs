@@ -630,6 +630,17 @@ fn hint_layout_job(hint: &str, width: f32) -> egui::text::LayoutJob {
     job
 }
 
+/// Whether `def` is the value of a part drawn from a preferred-number series.
+fn takes_standard_value(draft: &ComponentPropertyDraft, def: &PropertyDefinition) -> bool {
+    use rspice_design::schematic::component_type::ComponentType;
+    draft.component_type.is_some_and(|kind| {
+        matches!(
+            kind,
+            ComponentType::Resistor | ComponentType::Capacitor | ComponentType::Inductor
+        ) && def.name == rspice_design::properties::component::get_primary_property_name(kind)
+    })
+}
+
 fn property_is_visible(definition: &PropertyDefinition, draft: &ComponentPropertyDraft) -> bool {
     use rspice_vocabulary::property::VisibilityCondition;
     match &definition.visibility_condition {
@@ -754,6 +765,25 @@ fn render_property_field(
             && let Some(response) = ui.ctx().read_response(control_id)
         {
             response.on_hover_text(def.description.clone());
+        }
+    }
+    // A resistor, capacitor or inductor's value steps along the project's
+    // series from the keyboard and the wheel, as a typed edit would.
+    if let (Some(control_id), Some(text)) = (editor_id, numeric_text.as_mut())
+        && takes_standard_value(draft, def)
+        && crate::property_values::step_standard_value(ui, control_id, draft.standard_series, text)
+    {
+        match rspice_design::properties::value::parse_expression_source(
+            def,
+            text,
+            quantity_policy,
+            number_locale,
+        ) {
+            Ok(value) => {
+                changed_value = Some(value);
+                numeric_parse_error = None;
+            }
+            Err(error) => numeric_parse_error = Some(error),
         }
     }
     if let Some(text) = numeric_text {
@@ -1162,7 +1192,16 @@ mod tests {
     #[test]
     fn the_form_is_padded_alike_above_its_first_caption_and_under_its_checks() {
         for target in [None, Some(44.0)] {
-            let (sheet, mut draft) = opened(ComponentType::Resistor);
+            let (full, mut draft) = opened(ComponentType::Resistor);
+            // The resistor's sheet as far as its Noise checks; the
+            // purchasing rows after them are text fields.
+            let mut sheet = PropertySheet::new();
+            for definition in full
+                .iter()
+                .filter(|definition| definition.category != "Bill of materials")
+            {
+                sheet.add(definition.clone());
+            }
             let ctx = egui::Context::default();
             rspice_ui_kit::Theme::default().apply(&ctx);
             rspice_ui_kit::Theme::default().apply_responsive_metrics_with_target(&ctx, target);
@@ -1213,6 +1252,64 @@ mod tests {
                 "touch target {target:?}: {above} above the first caption, {below} under the checks"
             );
         }
+    }
+
+    /// Up in a focused resistance field steps to the next value of the
+    /// project's series, and the wheel over it steps back down, as typed
+    /// edits of the draft.
+    #[test]
+    fn a_focused_value_field_steps_along_the_project_series() {
+        let (sheet, mut draft) = opened(ComponentType::Resistor);
+        draft.standard_series = rspice_vocabulary::quantity::ESeries::E12;
+        let ctx = egui::Context::default();
+        rspice_ui_kit::Theme::default().apply(&ctx);
+        let output = form_frame(&ctx, &sheet, &mut draft, true, Vec::new());
+        let well = texts(output)
+            .into_iter()
+            .find(|(text, _)| text == "1k")
+            .expect("the resistance well shows its default")
+            .1
+            .center();
+        let modifiers = egui::Modifiers::NONE;
+        let press = |pressed| egui::Event::PointerButton {
+            pos: well,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers,
+        };
+        form_frame(
+            &ctx,
+            &sheet,
+            &mut draft,
+            true,
+            vec![egui::Event::PointerMoved(well), press(true), press(false)],
+        );
+        // egui takes a focus lock from the second frame a widget holds the
+        // keyboard; a key in the very next frame would still navigate.
+        form_frame(&ctx, &sheet, &mut draft, true, Vec::new());
+        let resistance = |draft: &ComponentPropertyDraft| match draft.get_value("r") {
+            Some(PropertyValue::Number { value, .. }) => *value,
+            other => panic!("resistance is {other:?}"),
+        };
+
+        let up = egui::Event::Key {
+            key: egui::Key::ArrowUp,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        };
+        form_frame(&ctx, &sheet, &mut draft, true, vec![up]);
+        assert!((resistance(&draft) - 1200.0).abs() < 1e-9);
+
+        let wheel_down = egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Line,
+            delta: vec2(0.0, -1.0),
+            phase: egui::TouchPhase::Move,
+            modifiers,
+        };
+        form_frame(&ctx, &sheet, &mut draft, true, vec![wheel_down]);
+        assert!((resistance(&draft) - 1000.0).abs() < 1e-9);
     }
 
     fn texts(output: egui::FullOutput) -> Vec<(String, egui::Rect)> {

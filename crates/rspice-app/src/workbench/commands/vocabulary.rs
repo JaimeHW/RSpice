@@ -178,6 +178,11 @@ pub enum Command {
     DistributeSelectionVertical,
     /// Move every selected object's anchor to the nearest grid point.
     SnapSelectionToGrid,
+    /// Snap each selected resistor, capacitor and inductor to the nearest
+    /// value of the project's preferred-number series.
+    SnapToStandardValue,
+    /// Choose the preferred-number series the project's values step along.
+    SetStandardValueSeries(rspice_vocabulary::quantity::ESeries),
     /// Lay the active sheet's wires that run on one line, end to end or
     /// overlapping, as one wire each.
     JoinCollinearWires,
@@ -560,6 +565,20 @@ impl Command {
             Self::SnapSelectionToGrid => {
                 spec("snap-selection-to-grid", "Snap selection to grid", "Design")
             }
+            Self::SnapToStandardValue => {
+                spec("snap-to-standard-value", "Snap to standard value", "Design")
+            }
+            Self::SetStandardValueSeries(series) => {
+                use rspice_vocabulary::quantity::ESeries;
+                match series {
+                    ESeries::E6 => spec("standard-values-e6", "E6 standard values", "Design"),
+                    ESeries::E12 => spec("standard-values-e12", "E12 standard values", "Design"),
+                    ESeries::E24 => spec("standard-values-e24", "E24 standard values", "Design"),
+                    ESeries::E48 => spec("standard-values-e48", "E48 standard values", "Design"),
+                    ESeries::E96 => spec("standard-values-e96", "E96 standard values", "Design"),
+                    ESeries::E192 => spec("standard-values-e192", "E192 standard values", "Design"),
+                }
+            }
             Self::JoinCollinearWires => {
                 spec("join-collinear-wires", "Join collinear wires", "Design")
             }
@@ -846,6 +865,13 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::DistributeSelectionHorizontal,
     Command::DistributeSelectionVertical,
     Command::SnapSelectionToGrid,
+    Command::SnapToStandardValue,
+    Command::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E6),
+    Command::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E12),
+    Command::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E24),
+    Command::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E48),
+    Command::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E96),
+    Command::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E192),
     Command::JoinCollinearWires,
     Command::AscendHierarchy,
     Command::DescendHierarchy,
@@ -1097,6 +1123,13 @@ static COMMAND_ORDER: &[CommandKey] = &[
     Command::DistributeSelectionHorizontal.key(),
     Command::DistributeSelectionVertical.key(),
     Command::SnapSelectionToGrid.key(),
+    Command::SnapToStandardValue.key(),
+    Command::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E6).key(),
+    Command::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E12).key(),
+    Command::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E24).key(),
+    Command::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E48).key(),
+    Command::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E96).key(),
+    Command::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E192).key(),
     Command::JoinCollinearWires.key(),
     Command::AscendHierarchy.key(),
     Command::DescendHierarchy.key(),

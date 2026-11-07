@@ -186,6 +186,12 @@ impl Command {
                     && !state.schematic_edit_read_only()
                     && !state.model.schematic.session.editor.selection.is_empty()
             }
+            Self::SnapToStandardValue => {
+                active_schematic_editor(app)
+                    && crate::schematic::view::standard_value_snap::snap_block_reason(state)
+                        .is_none()
+            }
+            Self::SetStandardValueSeries(_) => true,
             Self::MoveSelection => {
                 active_schematic_editor(app)
                     && !state.schematic_edit_read_only()
@@ -545,6 +551,9 @@ impl Command {
             Self::ToggleFocusMode => Some(workbench.focus_mode),
             Self::ToggleFullScreen => Some(workbench.full_screen_presentation),
             Self::SetGridStyle(style) => Some(app.state.design.grid == style),
+            Self::SetStandardValueSeries(series) => {
+                Some(app.state.model.workspace.content.standard_value_series == series)
+            }
             Self::AnnotateOperatingPoint => Some(
                 app.state.design.schematic_visibility.annotations
                     == crate::state::SchematicAnnotationVisibility::OperatingPoint,

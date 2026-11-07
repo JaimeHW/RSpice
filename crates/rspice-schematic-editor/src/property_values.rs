@@ -15,8 +15,85 @@ use rspice_ui_kit::tokens::{self, Tokens};
 use rspice_ui_kit::widgets::{chip, mono_input, mono_input_with_unit, select_mono_with_response};
 use rspice_vocabulary::property::{DisplayMode, PropertyDefinition, PropertyType, PropertyValue};
 use rspice_vocabulary::quantity::{
-    QuantityInputKind, QuantityPresentationPolicy, UiNumberLocale, format_engineering_value,
+    ESeries, QuantityInputKind, QuantityPresentationPolicy, UiNumberLocale,
+    format_engineering_value,
 };
+
+/// Step a focused value field's text to the next standard value of `series`:
+/// Up and Down step up and down, and so does the wheel while the pointer is
+/// over the field. Returns whether the text moved.
+///
+/// The wheel over a focused field belongs to the field, so the panel behind
+/// it does not scroll as the value steps. A text with no neighbour in the
+/// series, such as an expression or a parameter, is left as it is.
+pub fn step_standard_value(
+    ui: &mut Ui,
+    field: egui::Id,
+    series: ESeries,
+    text: &mut String,
+) -> bool {
+    if !ui.memory(|memory| memory.has_focus(field)) {
+        return false;
+    }
+    // The vertical arrows are the field's from the frame it takes the
+    // keyboard, or egui's focus navigation would move to the next field.
+    ui.memory_mut(|memory| {
+        memory.set_focus_lock_filter(
+            field,
+            egui::EventFilter {
+                tab: false,
+                horizontal_arrows: true,
+                vertical_arrows: true,
+                escape: false,
+            },
+        );
+    });
+    let over_field = ui
+        .ctx()
+        .read_response(field)
+        .zip(ui.ctx().pointer_hover_pos())
+        .is_some_and(|(response, pointer)| response.rect.contains(pointer));
+    let (keys, notches) = ui.input_mut(|input| {
+        let keys = i32::from(input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp))
+            - i32::from(input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown));
+        let mut notches = 0.0;
+        if over_field {
+            // Line and page notches step; a trackpad's continuous points are
+            // too fine to count and are only kept from the panel.
+            for event in &input.events {
+                if let egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Line | egui::MouseWheelUnit::Page,
+                    delta,
+                    ..
+                } = event
+                {
+                    notches += delta.y;
+                }
+            }
+            input.smooth_scroll_delta = egui::Vec2::ZERO;
+        }
+        (keys, notches)
+    });
+    let up = match (keys, notches) {
+        (0, notches) if notches > 0.0 => true,
+        (0, notches) if notches < 0.0 => false,
+        (0, _) => return false,
+        (keys, _) => keys > 0,
+    };
+    let Some(next) = series.step_text(text.trim(), up) else {
+        return false;
+    };
+    *text = next;
+    // The caret follows the value's end, as it does after typing.
+    if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), field) {
+        let end = egui::text::CCursor::new(text.chars().count());
+        state
+            .cursor
+            .set_char_range(Some(egui::text::CCursorRange::one(end)));
+        state.store(ui.ctx(), field);
+    }
+    true
+}
 
 /// Whether the editor's own text carries this property's unit.
 ///

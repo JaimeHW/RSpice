@@ -352,6 +352,7 @@ impl Command {
                 | Self::ImportVerilogA
                 | Self::ExportNetlist(_)
                 | Self::ExportBillOfMaterials
+                | Self::SetStandardValueSeries(_)
                 | Self::FindInDesign
                 | Self::CheckDesign
                 | Self::ConnectivityManager
@@ -475,6 +476,7 @@ impl Command {
             | Self::MirrorSelectionHorizontal
             | Self::MirrorSelectionVertical
             | Self::SnapSelectionToGrid
+            | Self::SnapToStandardValue
             | Self::RepeatLastCommand
             | Self::ZoomToSelection
             | Self::ZoomBox => ShortcutContext::EngineeringCanvas,
@@ -485,6 +487,7 @@ impl Command {
             | Self::EditSymbolInPlace
             | Self::ShowInNetlist
             | Self::GridSnapRouting
+            | Self::SetStandardValueSeries(_)
             | Self::VisibilityOptions
             | Self::CheckCellview
             | Self::CheckDesign
@@ -787,6 +790,7 @@ impl Command {
             | Self::MirrorSelectionHorizontal
             | Self::MirrorSelectionVertical
             | Self::SnapSelectionToGrid
+            | Self::SnapToStandardValue
             | Self::JoinCollinearWires
                 if !super::active_schematic_editor(app) =>
             {
@@ -821,6 +825,10 @@ impl Command {
             | Self::MirrorSelectionHorizontal
             | Self::MirrorSelectionVertical
             | Self::SnapSelectionToGrid => "select an editable object",
+            Self::SnapToStandardValue => {
+                crate::schematic::view::standard_value_snap::snap_block_reason(&app.state)
+                    .unwrap_or("select a resistor, capacitor or inductor")
+            }
             Self::ConnectivityManager => "open a schematic or testbench",
             Self::HighlightNet if !super::active_schematic_editor(app) => {
                 "open a schematic or testbench"
