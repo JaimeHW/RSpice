@@ -131,6 +131,7 @@ pub fn draw_design_note(
 
     let marker_radius = (MARKER_RADIUS_WORLD * viewport.zoom).clamp(1.75, 3.5);
     match note.kind {
+        _ if note.anchor_mark_hidden => {}
         DesignNoteKind::PlainText => {
             painter.circle_filled(layout.anchor, marker_radius, color);
         }
@@ -187,8 +188,9 @@ pub fn design_note_at(
         screen_layout(ctx, viewport, note, &text, note_color(note.kind, &palette))
             .filter(|layout| {
                 layout.bounds.contains(pointer)
-                    || Rect::from_center_size(layout.anchor, egui::Vec2::splat(9.0))
-                        .contains(pointer)
+                    || (!note.anchor_mark_hidden
+                        && Rect::from_center_size(layout.anchor, egui::Vec2::splat(9.0))
+                            .contains(pointer))
             })
             .map(|_| note.id)
     })
@@ -285,6 +287,42 @@ mod tests {
             ),
             None
         );
+    }
+
+    /// A note whose anchor mark is hidden paints its text and no mark; a
+    /// note placed here paints both.
+    #[test]
+    fn a_note_with_its_anchor_mark_hidden_paints_its_text_and_no_mark() {
+        let ctx = initialized_context();
+        let viewport = Viewport {
+            offset: Pos2::ZERO,
+            zoom: 2.0,
+            bounds: Rect::from_min_size(Pos2::ZERO, egui::Vec2::splat(500.0)),
+        };
+        let context = DesignNoteRenderContext {
+            view_path: "work/top/schematic",
+            component_count: 0,
+            conductor_count: 0,
+        };
+        let palette = Tokens::get(&ctx).color;
+        for hidden in [false, true] {
+            let note = DesignNote::new(1, Point::new(50, 40), DesignNoteKind::PlainText, "Lockout")
+                .unwrap()
+                .with_anchor_mark_hidden(hidden);
+            // One layer per case: shapes painted on a layer stay there for
+            // the frame.
+            let layer = egui::LayerId::new(egui::Order::Background, egui::Id::new(hidden));
+            let painter = Painter::new(ctx.clone(), layer, viewport.bounds);
+            draw_design_note(&painter, &viewport, &note, &context, false, false, &palette);
+            let (mut marks, mut texts) = (0, 0);
+            painter.for_each_shape(|shape| match shape.shape {
+                egui::Shape::Circle(_) => marks += 1,
+                egui::Shape::Text(_) => texts += 1,
+                _ => {}
+            });
+            assert_eq!(marks, usize::from(!hidden), "hidden = {hidden}");
+            assert_eq!(texts, 1, "hidden = {hidden}");
+        }
     }
 
     #[test]

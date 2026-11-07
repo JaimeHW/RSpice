@@ -272,6 +272,9 @@ pub(super) fn include_design_note_bounds(
                 size,
             );
         }
+        if note.anchor_mark_hidden {
+            continue;
+        }
         let (anchor_x, anchor_y) = page(note.pos, config);
         let marker = world(design_notes::MARKER_RADIUS_WORLD, config);
         extent.include_box((
@@ -320,13 +323,15 @@ pub(super) fn write_design_note(
         note.id
     )
     .unwrap();
-    let (anchor_x, anchor_y) = page(note.pos, config);
-    writeln!(
-        svg,
-        "<circle class=\"design-note-anchor\" cx=\"{anchor_x}\" cy=\"{anchor_y}\" r=\"{}\"/>",
-        world(design_notes::MARKER_RADIUS_WORLD, config)
-    )
-    .unwrap();
+    if !note.anchor_mark_hidden {
+        let (anchor_x, anchor_y) = page(note.pos, config);
+        writeln!(
+            svg,
+            "<circle class=\"design-note-anchor\" cx=\"{anchor_x}\" cy=\"{anchor_y}\" r=\"{}\"/>",
+            world(design_notes::MARKER_RADIUS_WORLD, config)
+        )
+        .unwrap();
+    }
     let text = design_note_export_text(document, note, view_path);
     writeln!(svg, "<text class=\"note\" x=\"{x}\" y=\"{y}\"{resized}>").unwrap();
     for (index, line) in text.split('\n').enumerate() {

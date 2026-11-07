@@ -1870,7 +1870,9 @@ impl Builder<'_> {
                     match DesignNote::new(id, position, DesignNoteKind::PlainText, text.text.trim())
                     {
                         Ok(note) => {
-                            let note = note.with_text_size_percent(text.size_percent);
+                            let note = note
+                                .with_text_size_percent(text.size_percent)
+                                .with_anchor_mark_hidden(true);
                             let pos = note_anchor(&note, position, text.justification);
                             self.document.design_notes.push(DesignNote { pos, ..note });
                         }

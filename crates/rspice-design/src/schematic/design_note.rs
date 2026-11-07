@@ -360,6 +360,10 @@ pub struct DesignNote {
         skip_serializing_if = "is_standard_text_size"
     )]
     pub text_size_percent: u16,
+    /// The note draws no anchor mark: lettering brought in from a drawing
+    /// that marks none reads as it did there.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub anchor_mark_hidden: bool,
 }
 
 impl DesignNote {
@@ -381,7 +385,14 @@ impl DesignNote {
             layer: DesignNoteLayer::DrawingAnnotation,
             review,
             text_size_percent: STANDARD_TEXT_SIZE_PERCENT,
+            anchor_mark_hidden: false,
         })
+    }
+
+    /// The same note without its anchor mark, or with it.
+    pub fn with_anchor_mark_hidden(mut self, hidden: bool) -> Self {
+        self.anchor_mark_hidden = hidden;
+        self
     }
 
     /// The same note lettered at `percent` of the standard size, held to
