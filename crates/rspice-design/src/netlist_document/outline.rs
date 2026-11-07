@@ -408,6 +408,11 @@ pub fn parse_include_directives(source: &str) -> Vec<IncludeDirective> {
                 // `.lib section` opens an in-file library section. A source
                 // dependency requires both a locator and a section token.
                 ".lib" if tokens.len() >= 3 => IncludeKind::Library,
+                // LTspice's and PSpice's one-argument `.lib file` includes
+                // the whole file, as the engine's include reader does.
+                ".lib" if tokens.len() == 2 && names_model_file(&tokens[1].text) => {
+                    IncludeKind::Include
+                }
                 ".veriloga" => IncludeKind::VerilogA,
                 _ => return None,
             };
@@ -427,6 +432,20 @@ pub fn parse_include_directives(source: &str) -> Vec<IncludeDirective> {
             })
         })
         .collect()
+}
+
+/// Whether a one-argument `.lib` names a file rather than an in-file section:
+/// it carries a path or a model-source extension, which no section name does.
+fn names_model_file(argument: &str) -> bool {
+    argument.contains(['/', '\\'])
+        || std::path::Path::new(argument)
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| {
+                rspice_core_netlist::netlist::MODEL_SOURCE_EXTENSIONS
+                    .iter()
+                    .any(|known| extension.eq_ignore_ascii_case(known))
+            })
 }
 
 /// The tokens of one source card, in order, with quotes and trailing comments
@@ -570,6 +589,18 @@ mod tests {
                 OutlineSectionKind::Devices,
             ]
         );
+    }
+
+    #[test]
+    fn a_one_argument_lib_naming_a_file_is_an_include_and_a_bare_name_opens_a_section() {
+        let source = "deck\n.LIB \"../../forward_slash.lib\"\n.lib ADI.lib\n.lib TT\n.end\n";
+        let includes = parse_include_directives(source);
+
+        assert_eq!(includes.len(), 2);
+        assert_eq!(includes[0].kind(), IncludeKind::Include);
+        assert_eq!(includes[0].locator(), "../../forward_slash.lib");
+        assert_eq!(includes[1].kind(), IncludeKind::Include);
+        assert_eq!(includes[1].locator(), "ADI.lib");
     }
 
     #[test]
