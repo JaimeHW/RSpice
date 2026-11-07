@@ -26,6 +26,49 @@ pub(super) fn qualify_local_model_name(scope: &str, local_name: &str) -> String 
     format!("{scope}::{local_name}")
 }
 
+/// The device families model cards serve, each named by its first type.
+const MODEL_FAMILIES: &[&[&str]] = &[
+    &["D"],
+    &["NPN", "PNP", "LPNP"],
+    &["NMOS", "PMOS", "VDMOS"],
+    &["NJF", "PJF"],
+    &["NMF", "PMF", "NHFET", "PHFET"],
+    &["SW", "VSWITCH", "VSW"],
+    &["CSW", "ISWITCH", "ISW"],
+];
+
+/// The family a model type serves, by the family's first type.
+pub(super) fn model_family(model_type: &str) -> Option<&'static str> {
+    MODEL_FAMILIES
+        .iter()
+        .find(|family| {
+            family
+                .iter()
+                .any(|kind| kind.eq_ignore_ascii_case(model_type))
+        })
+        .map(|family| family[0])
+}
+
+/// The alias key of a local model name, upper case, for one family.
+pub(super) fn typed_model_key(local_key: &str, family: &str) -> String {
+    format!("{local_key}@{family}")
+}
+
+/// The model family an element names its model from, when cards of several
+/// families may share a name.
+fn element_model_family(kind: &ElementKind) -> Option<&'static str> {
+    match kind {
+        ElementKind::Diode { .. } => Some("D"),
+        ElementKind::Bjt { .. } => Some("NPN"),
+        ElementKind::Mosfet { .. } => Some("NMOS"),
+        ElementKind::Jfet { .. } => Some("NJF"),
+        ElementKind::Mesfet { .. } => Some("NMF"),
+        ElementKind::VSwitch { .. } => Some("SW"),
+        ElementKind::ISwitch { .. } => Some("CSW"),
+        _ => None,
+    }
+}
+
 /// One unresolved bare reference and the exact model card that owns it.
 #[derive(Debug)]
 pub(super) struct PendingModelParameterReference {
@@ -725,6 +768,7 @@ pub(super) fn rewrite_scoped_references(
             *subckt_name = qualified.clone();
         }
 
+        let family = element_model_family(&element.kind);
         let model_ref = match &mut element.kind {
             ElementKind::Resistor { model, .. }
             | ElementKind::Capacitor { model, .. }
@@ -746,10 +790,14 @@ pub(super) fn rewrite_scoped_references(
             _ => None,
         };
 
-        if let Some(model_name) = model_ref
-            && let Some(qualified) = visible_model_aliases.get(&model_name.to_ascii_uppercase())
-        {
-            *model_name = qualified.clone();
+        if let Some(model_name) = model_ref {
+            let key = model_name.to_ascii_uppercase();
+            if let Some(qualified) = family
+                .and_then(|family| visible_model_aliases.get(&typed_model_key(&key, family)))
+                .or_else(|| visible_model_aliases.get(&key))
+            {
+                *model_name = qualified.clone();
+            }
         }
 
         if let ElementKind::Xspice {

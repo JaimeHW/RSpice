@@ -934,6 +934,48 @@ fn a_branchless_device_current_is_readable_in_expressions() {
     );
 }
 
+// QSPICE 2026 batch: V(o1)=2.867132353, V(o2)=4.687499999 and
+// V(o3)=0.974575022; LTspice 26.1.1 agrees to 4 ppm. Each device takes the
+// card of its own family among the subcircuit's same-named ones.
+#[test]
+fn same_named_models_of_different_families_serve_their_own_devices() {
+    let netlist = parse(
+        "same-named models\n\
+         V1 a 0 5\n\
+         X1 a o1 o2 o3 cell\n\
+         .subckt cell vcc o1 o2 o3\n\
+         R1 vcc o1 10k\n\
+         Q1 o1 b 0 N\n\
+         RB vcc b 1Meg\n\
+         R2 vcc o2 100\n\
+         M1 o2 g 0 0 N\n\
+         VG g 0 3\n\
+         R3 vcc o3 1k\n\
+         D1 o3 m IQ\n\
+         S1 m 0 vcc 0 IQ\n\
+         .model N NPN(Bf=50)\n\
+         .model N VDMOS(Vto=0.5 Kp=0.001)\n\
+         .model IQ D(Is=1e-12)\n\
+         .model IQ SW(Ron=100 Roff=1Meg Vt=2)\n\
+         .ends\n\
+         .op\n\
+         .end\n",
+    );
+    let op = Engine::default()
+        .run_dc_op(&netlist)
+        .expect("operating point solves");
+    for (node, expected, tolerance) in [
+        ("o1", 2.867132353, 1e-5),
+        ("o2", 4.687499999, 1e-6),
+        ("o3", 0.974575022, 1e-5),
+    ] {
+        let actual = op
+            .try_voltage_named(node)
+            .unwrap_or_else(|| panic!("no voltage for {node}"));
+        assert_close(&format!("V({node})"), actual, expected, tolerance);
+    }
+}
+
 // QSPICE 2026 batch, which alone reads a switch model written on the switch
 // card (LTspice refuses it): V(a)=V(b)=V(g)=0.759746927, V(e)=9.900990e-3,
 // V(f)=1.960784e-2, V(h)=0.999000999.

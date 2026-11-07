@@ -435,10 +435,38 @@ pub(super) fn process_line_with_abort(
                 },
             )?;
             let local_name = model.name.clone();
-            let qualified_name = qualify_local_model_name(&frame.qualified_name, &local_name);
-            frame
+            let mut qualified_name = qualify_local_model_name(&frame.qualified_name, &local_name);
+            let local_key = local_name.to_ascii_uppercase();
+            let family = model_family(&model.model_type);
+            let earlier = frame
                 .local_model_aliases
-                .insert(local_name.to_ascii_uppercase(), qualified_name.clone());
+                .get(&local_key)
+                .and_then(|earlier| {
+                    let earlier_family = models
+                        .iter()
+                        .find(|card| card.name.eq_ignore_ascii_case(earlier))
+                        .and_then(|card| model_family(&card.model_type))?;
+                    Some((earlier.clone(), earlier_family))
+                });
+            match (earlier, family) {
+                // LTspice picks among one scope's same-named cards by the
+                // device that names them, so a card of another family takes
+                // a name of its own and both answer to their family's key.
+                (Some((earlier, earlier_family)), Some(family)) if earlier_family != family => {
+                    qualified_name = format!("{qualified_name}@{family}");
+                    frame
+                        .local_model_aliases
+                        .insert(typed_model_key(&local_key, earlier_family), earlier);
+                    frame
+                        .local_model_aliases
+                        .insert(typed_model_key(&local_key, family), qualified_name.clone());
+                }
+                _ => {
+                    frame
+                        .local_model_aliases
+                        .insert(local_key, qualified_name.clone());
+                }
+            }
             model.name = qualified_name;
             models.push(model);
             return Ok(());
