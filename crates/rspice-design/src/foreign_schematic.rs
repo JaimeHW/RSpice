@@ -7,15 +7,19 @@
 
 use std::fmt;
 
+mod directives;
 mod import;
+mod installed;
 mod ltspice;
 mod mapping;
 mod qspice;
 
+pub use directives::{ForeignCard, ForeignCardRole, defined_model_names, foreign_directive_cards};
 pub use import::{
     ForeignDirective, ForeignImport, ForeignImportNotice, ForeignLibrary, ForeignModelFile,
     ForeignNoticeSeverity, ForeignSymbolCell, ForeignSymbolSource, import_foreign_schematic,
 };
+pub use installed::{InstalledForeignLibrary, is_encrypted};
 pub use ltspice::{parse_asc, parse_asy};
 pub use qspice::parse_qsch;
 

@@ -17,6 +17,7 @@ use crate::schematic::component_type::ComponentType;
 struct Library {
     symbols: HashMap<String, ForeignSymbolSource>,
     models: HashMap<String, ForeignModelFile>,
+    cards: HashMap<String, String>,
 }
 
 impl ForeignLibrary for Library {
@@ -26,6 +27,10 @@ impl ForeignLibrary for Library {
 
     fn model_file(&self, name: &str) -> Option<ForeignModelFile> {
         self.models.get(&name.to_ascii_lowercase()).cloned()
+    }
+
+    fn model_card(&self, name: &str) -> Option<String> {
+        self.cards.get(&name.to_ascii_lowercase()).cloned()
     }
 }
 
@@ -705,4 +710,114 @@ fn a_qspice_drawing_joins_what_its_wire_names_join_and_refuses_a_dll() {
     assert_eq!(nets[&("V1".to_owned(), 0)], nets[&("R1".to_owned(), 0)]);
     assert_ne!(nets[&("V1".to_owned(), 0)], nets[&("V1".to_owned(), 1)]);
     assert_eq!(imported.directives[0].text, ".tran 3m");
+}
+
+#[test]
+fn directive_cards_sort_by_the_project_place_they_belong_in() {
+    let drawing = parse_asc(
+        "Version 4\n\
+         TEXT 0 0 Left 2 !.tran 0 1m\\n.param R=1k\\n+ C=1n\\n.model D1N D(Is=1n\\n+ Rs=1)\n\
+         TEXT 0 64 Left 2 !.subckt half a b\\nR1 a b {R}\\n.ends half\\n.lib my.lib\\n.backanno\\nK1 L1 L2 1\\n.step param R 1k 2k 1k\n",
+    )
+    .unwrap();
+    let imported = import_foreign_schematic(&drawing, "work", &Library::default());
+    let cards = foreign_directive_cards(&imported.directives);
+    let roles = cards
+        .iter()
+        .map(|card| (card.keyword(), card.role))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        roles,
+        [
+            (".tran".to_owned(), ForeignCardRole::Analysis),
+            (".param".to_owned(), ForeignCardRole::Parameter),
+            (".model".to_owned(), ForeignCardRole::ModelText),
+            (".subckt".to_owned(), ForeignCardRole::ModelText),
+            (".lib".to_owned(), ForeignCardRole::Include),
+            (".backanno".to_owned(), ForeignCardRole::SourceOnly),
+            ("k1".to_owned(), ForeignCardRole::Other),
+            (".step".to_owned(), ForeignCardRole::Step),
+        ]
+    );
+    assert_eq!(cards[1].tokens, [".param", "R=1k", "C=1n"]);
+    assert_eq!(cards[2].text, ".model D1N D(Is=1n\n+ Rs=1)");
+    assert_eq!(cards[3].text, ".subckt half a b\nR1 a b {R}\n.ends half");
+    assert_eq!(cards[3].position, Point::new(0, 80));
+    assert_eq!(defined_model_names(&cards), ["d1n", "half"]);
+}
+
+#[test]
+fn a_model_the_drawing_does_not_define_comes_from_the_source_library() {
+    let drawing = parse_asc(
+        "Version 4\n\
+         SYMBOL diode 0 0 R0\nSYMATTR InstName D1\nSYMATTR Value 1N4148\n\
+         SYMBOL diode 128 0 R0\nSYMATTR InstName D2\nSYMATTR Value MYD\n\
+         SYMBOL res 256 0 R0\nSYMATTR InstName R1\nSYMATTR Value 1k\n\
+         TEXT 0 200 Left 2 !.model MYD D(Is=1n)\n",
+    )
+    .unwrap();
+    let mut library = Library::default();
+    for name in ["1n4148", "myd"] {
+        library
+            .cards
+            .insert(name.to_owned(), format!(".model {name} D(Is=2n)"));
+    }
+    let imported = import_foreign_schematic(&drawing, "work", &library);
+    assert_eq!(imported.model_cards, [".model 1n4148 D(Is=2n)"]);
+}
+
+#[test]
+fn the_installed_library_reads_symbols_blocks_and_cards_in_place() {
+    let root = std::env::temp_dir().join(format!(
+        "rspice-foreign-library-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time after epoch")
+            .as_nanos()
+    ));
+    let beside = root.join("drawing");
+    let install = root.join("lib");
+    for folder in [
+        &beside,
+        &install.join("sym/OpAmps"),
+        &install.join("cmp"),
+        &install.join("sub"),
+    ] {
+        std::fs::create_dir_all(folder).expect("fixture folder");
+    }
+    std::fs::write(beside.join("block.asy"), AMPLIFIER_ASY).unwrap();
+    std::fs::write(beside.join("block.asc"), "Version 4\n").unwrap();
+    std::fs::write(install.join("sym/OpAmps/amp.asy"), AMPLIFIER_ASY).unwrap();
+    std::fs::write(
+        install.join("cmp/standard.dio"),
+        "* diodes\n.model 1N4148 D(Is=2.52n Rs=.568\n+ N=1.752)\n.model OTHER D\n",
+    )
+    .unwrap();
+    std::fs::write(
+        install.join("sub/locked.lib"),
+        "* LTspice Encrypted File\n0123456789\n",
+    )
+    .unwrap();
+    std::fs::write(install.join("sub/open.lib"), ".subckt amp 1 2 3\n.ends\n").unwrap();
+
+    let library = InstalledForeignLibrary::new(ForeignTool::Ltspice, &beside, Some(&install));
+    let block = library
+        .symbol("block")
+        .expect("the block symbol beside the drawing");
+    assert_eq!(block.schematic, Some(beside.join("block.asc")));
+    let amp = library.symbol("OpAmps\\amp").expect("an installed symbol");
+    assert_eq!(amp.schematic, None);
+    assert_eq!(amp.definition.pins.len(), 3);
+    assert!(library.symbol("missing").is_none());
+    assert_eq!(
+        library.model_card("1n4148").as_deref(),
+        Some(".model 1N4148 D(Is=2.52n Rs=.568\n+ N=1.752)")
+    );
+    assert!(library.model_card("absent").is_none());
+    assert!(library.model_file("locked.lib").expect("found").encrypted);
+    let open = library.model_file("open.lib").expect("found");
+    assert!(!open.encrypted);
+    assert_eq!(open.path, install.join("sub").join("open.lib"));
+    std::fs::remove_dir_all(&root).ok();
 }

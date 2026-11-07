@@ -15,6 +15,7 @@ use std::path::PathBuf;
 use rspice_design_model::Point;
 use rspice_design_model::port::{PortDirection, PortSpec};
 
+use super::directives::{defined_model_names, foreign_directive_cards};
 use super::mapping::{
     LTSPICE_AWAITING_NATIVE_PARTS, NativeKind, NativeMapping, ltspice_builtin_definition,
     native_mapping, qspice_refusal, source_value, spice_text, spice_tokens,
@@ -37,6 +38,9 @@ use crate::symbol::{SymbolDocument, SymbolPin, SymbolShape};
 /// RSpice's schematic grid step.
 const GRID: i32 = 10;
 
+/// The device letters whose value names a `.model` card.
+const MODEL_PREFIXES: [&str; 7] = ["D", "Q", "M", "J", "Z", "S", "W"];
+
 /// What the importer may read beside the drawing or from the source
 /// program's installed libraries. Files are read in place and never copied.
 pub trait ForeignLibrary {
@@ -45,6 +49,10 @@ pub trait ForeignLibrary {
     fn symbol(&self, name: &str) -> Option<ForeignSymbolSource>;
     /// Where a model file a symbol names (`SpiceModel`, `ModelFile`) lives.
     fn model_file(&self, name: &str) -> Option<ForeignModelFile>;
+    /// The `.model` card the source program finds for a model a part names
+    /// without the drawing defining it (LTspice's `standard.dio`, QSPICE's
+    /// `Diode.txt`).
+    fn model_card(&self, name: &str) -> Option<String>;
 }
 
 /// A symbol definition found for a placed symbol.
@@ -107,6 +115,9 @@ pub struct ForeignImport {
     pub document: SchematicDocument,
     pub cells: Vec<ForeignSymbolCell>,
     pub directives: Vec<ForeignDirective>,
+    /// The source program's own cards for models the parts name and the
+    /// drawing does not define.
+    pub model_cards: Vec<String>,
     pub notices: Vec<ForeignImportNotice>,
 }
 
@@ -131,6 +142,7 @@ pub fn import_foreign_schematic(
         anchors: HashSet::new(),
         terminals: Vec::new(),
         names: BTreeSet::new(),
+        models: BTreeSet::new(),
     };
     for symbol in &drawing.symbols {
         builder.place_symbol(symbol);
@@ -159,6 +171,8 @@ struct Builder<'a> {
     /// Every placed terminal, for the wire-connection cache.
     terminals: Vec<(u64, String, Point)>,
     names: BTreeSet<String>,
+    /// The models native parts name, for the source program's cards.
+    models: BTreeSet<String>,
 }
 
 impl Builder<'_> {
@@ -351,6 +365,11 @@ impl Builder<'_> {
             format!("{value} {}", extra.join(" ")).trim().to_owned()
         };
         let prefix = kind.spice_prefix();
+        if MODEL_PREFIXES.contains(&prefix)
+            && let Some(model) = value.split_whitespace().next()
+        {
+            self.models.insert(model.to_owned());
+        }
         let name = self.instance_name(attribute(attributes, "InstName"), prefix);
         let id = self.id();
         let mut component = Component::new(id, kind, Point::default()).with_name_value(name, value);
@@ -952,10 +971,18 @@ impl Builder<'_> {
 
     fn finish(mut self) -> ForeignImport {
         rebuild_connections_from_terminals(&mut self.document, &self.terminals);
+        let defined = defined_model_names(&foreign_directive_cards(&self.directives));
+        let model_cards = self
+            .models
+            .iter()
+            .filter(|model| !defined.contains(&model.to_ascii_lowercase()))
+            .filter_map(|model| self.access.model_card(model))
+            .collect();
         ForeignImport {
             document: self.document,
             cells: self.cells,
             directives: self.directives,
+            model_cards,
             notices: self.notices,
         }
     }
