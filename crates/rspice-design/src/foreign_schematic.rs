@@ -7,12 +7,20 @@
 
 use std::fmt;
 
+mod import;
 mod ltspice;
+mod mapping;
 mod qspice;
 
+pub use import::{
+    ForeignDirective, ForeignImport, ForeignImportNotice, ForeignLibrary, ForeignModelFile,
+    ForeignNoticeSeverity, ForeignSymbolCell, ForeignSymbolSource, import_foreign_schematic,
+};
 pub use ltspice::{parse_asc, parse_asy};
 pub use qspice::parse_qsch;
 
+#[cfg(test)]
+mod import_tests;
 #[cfg(test)]
 mod tests;
 
