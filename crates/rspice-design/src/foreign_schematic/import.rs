@@ -29,7 +29,9 @@ use super::{
     ForeignWindow,
 };
 use crate::schematic::component::{Component, LibraryCellInstance};
-use crate::schematic::component_display::ComponentDisplayMode;
+use crate::schematic::component_display::{
+    ComponentDisplayMode, SchematicParameterLabelVisibility,
+};
 use crate::schematic::component_type::ComponentType;
 use crate::schematic::design_note::{DESIGN_NOTE_TEXT_OFFSET_WORLD, DesignNote, DesignNoteKind};
 use crate::schematic::document::SchematicDocument;
@@ -39,7 +41,8 @@ use crate::schematic::functional_catalog::{
     conform_functional_inputs, functional_library_binding, functional_part, placement_value,
 };
 use crate::schematic::label_layout::{
-    INSTANCE_NAME_WORLD, INSTANCE_VALUE_WORLD, LayoutPoint, LayoutRect, TextEdge, text_box,
+    INSTANCE_NAME_WORLD, INSTANCE_VALUE_WORLD, LayoutPoint, LayoutRect, NET_LABEL_FONT_WORLD,
+    PlacedText, TextEdge, instance_label_layout, net_label_layout, supply_glyph_rect, text_box,
 };
 use crate::schematic::label_position::{LabelPosition, ValuePiece};
 use crate::schematic::net_label::{Junction, NetLabel, NetLabelKind, NetLabelSide, SupplyGlyph};
@@ -255,6 +258,7 @@ pub fn import_foreign_schematic(
         models: BTreeSet::new(),
         pin_points: HashMap::new(),
         pin_leads: HashMap::new(),
+        lettered: Vec::new(),
         device_ties: Vec::new(),
         behaviours: Vec::new(),
     };
@@ -317,6 +321,7 @@ pub fn import_foreign_schematic(
     }
     builder.tie_device_pins();
     builder.place_flags();
+    builder.clear_lettering();
     builder.place_texts();
     builder.place_shapes();
     builder.place_wires();
@@ -352,6 +357,9 @@ struct Builder<'a> {
     pin_points: HashMap<Point, usize>,
     /// The way each source pin's lead runs from its point into its body.
     pin_leads: HashMap<Point, Vec<Point>>,
+    /// The placed parts whose name and value stand where the drawing
+    /// lettered them, by index.
+    lettered: Vec<usize>,
     /// Terminals of LTspice A-devices that LTspice grounds when nothing
     /// else reaches them.
     device_ties: Vec<DeviceTie>,
@@ -659,11 +667,6 @@ impl Builder<'_> {
     /// lettered them: at the instance's own `WINDOW`, else its symbol's,
     /// turned with the instance. The text stays upright and hangs off its
     /// anchor on the side the drawing's run grows toward.
-    ///
-    /// A part RSpice draws with its own artwork has a body of another size
-    /// than the source symbol's, so a text the drawing stood beside the
-    /// source body can land on RSpice's. Such a text keeps its side and its
-    /// line and moves out along the way it reads until it clears the body.
     fn letter_like_the_drawing(
         &mut self,
         symbol: &ForeignSymbol,
@@ -702,36 +705,24 @@ impl Builder<'_> {
             name.is_some_and(|window| window.hidden),
             value.is_some_and(|window| window.hidden),
         );
+        self.lettered.push(self.document.components.len() - 1);
         let Some(component) = self.document.components.last_mut() else {
             return;
         };
-        let body = (component.kind != ComponentType::CellInstance).then(|| native_body(component));
-        let clear = |position: LabelPosition, text: &str, size: f32| match body {
-            Some(body) => clear_of_body(position, origin, text, size, body),
-            None => position,
-        };
-        let (name_text, value_text) = (
-            component.name.clone(),
-            component_value_label(component).into_owned(),
-        );
         if let Some(position) = name_position {
-            component.name_label_pos = clear(position, &name_text, INSTANCE_NAME_WORLD);
+            component.name_label_pos = position;
         }
         if let Some(position) = value_position {
-            component.value_label_pos = clear(position, &value_text, INSTANCE_VALUE_WORLD);
+            component.value_label_pos = position;
         }
         // A value the drawing letters in several texts keeps each where the
         // drawing put it, at its own size, while they spell the part's value.
         component.value_pieces = pieces
             .into_iter()
-            .map(|(text, position, size_percent)| {
-                let mut piece = ValuePiece {
-                    text,
-                    position,
-                    size_percent,
-                };
-                piece.position = clear(piece.position, &piece.text, piece.size_world());
-                piece
+            .map(|(text, position, size_percent)| ValuePiece {
+                text,
+                position,
+                size_percent,
             })
             .collect();
         if value_pieces(component).is_none() {
@@ -743,6 +734,73 @@ impl Builder<'_> {
             (false, true) => ComponentDisplayMode::NameOnly,
             (false, false) => component.display_mode,
         };
+    }
+
+    /// A part RSpice draws with its own artwork has a body of another size
+    /// than the source symbol's, so a name or value the drawing stood
+    /// beside the source body can land on RSpice's body or on a
+    /// neighbour's. Such a text keeps its side and its line and moves out
+    /// along the way it reads to the nearest place where it lands on no
+    /// body, no other part's text and no net label. A text the drawing
+    /// itself set on another text stays where it was set.
+    fn clear_lettering(&mut self) {
+        let bodies = self
+            .document
+            .components
+            .iter()
+            .filter(|component| component.kind != ComponentType::CellInstance)
+            .map(native_body)
+            .collect::<Vec<_>>();
+        let net_labels = self
+            .document
+            .net_labels
+            .iter()
+            .flat_map(net_label_boxes)
+            .collect::<Vec<_>>();
+        for &index in &self.lettered {
+            if self.document.components[index].kind == ComponentType::CellInstance {
+                continue;
+            }
+            for label in [Lettering::Name, Lettering::Value] {
+                let pieces = match label {
+                    Lettering::Name => 1,
+                    Lettering::Value => value_pieces(&self.document.components[index])
+                        .map_or(1, <[ValuePiece]>::len),
+                };
+                for piece in 0..pieces {
+                    let components = &self.document.components;
+                    let component = &components[index];
+                    let Some((position, text, size)) = label.text(component, piece) else {
+                        continue;
+                    };
+                    let origin = component.pos;
+                    let Some(placed) = position
+                        .placed_text(LayoutPoint::new(origin.x as f32, origin.y as f32), 1.0)
+                    else {
+                        continue;
+                    };
+                    let own = text_box(placed, &text, size);
+                    if !bodies.iter().any(|body| overlaps(own, *body)) {
+                        continue;
+                    }
+                    let obstacles = bodies
+                        .iter()
+                        .copied()
+                        .chain(net_labels.iter().copied())
+                        .chain(components.iter().enumerate().flat_map(|(other, part)| {
+                            lettering_boxes(part)
+                                .into_iter()
+                                .filter(move |(which, _)| {
+                                    other != index || *which != (label, piece)
+                                })
+                                .map(|(_, rect)| rect)
+                        }))
+                        .collect::<Vec<_>>();
+                    let cleared = clear_of(position, origin, &text, size, &obstacles);
+                    label.set(&mut self.document.components[index], piece, cleared);
+                }
+            }
+        }
     }
 
     fn label_position(
@@ -2205,15 +2263,134 @@ fn native_body(component: &Component) -> LayoutRect {
     }
 }
 
-/// A placed text moved, if it lands on `body`, along an axis its box
-/// reaches out on until it stands [`LABEL_CLEARANCE`] clear: the shortest
-/// such move, or the shortest of all four for a text centred on its anchor.
-fn clear_of_body(
+/// Which of a part's texts the importer is placing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Lettering {
+    Name,
+    Value,
+}
+
+impl Lettering {
+    /// The text's placement, its words and its size; for a value lettered
+    /// in pieces, the piece at `piece`. None for a text the part does not
+    /// show or a drawing did not place.
+    fn text(self, component: &Component, piece: usize) -> Option<(LabelPosition, String, f32)> {
+        let shown = SchematicParameterLabelVisibility::NamesAndValues;
+        let (position, text, size) = match self {
+            Self::Name if component.display_mode.show_name(shown) => (
+                component.name_label_pos,
+                component.name.clone(),
+                INSTANCE_NAME_WORLD,
+            ),
+            Self::Value if component.display_mode.show_value(shown) => {
+                match value_pieces(component) {
+                    Some(pieces) => {
+                        let piece = pieces.get(piece)?;
+                        (piece.position, piece.text.clone(), piece.size_world())
+                    }
+                    None => (
+                        component.value_label_pos,
+                        component_value_label(component).into_owned(),
+                        INSTANCE_VALUE_WORLD,
+                    ),
+                }
+            }
+            _ => return None,
+        };
+        (matches!(position, LabelPosition::Placed { .. }) && !text.trim().is_empty())
+            .then_some((position, text, size))
+    }
+
+    fn set(self, component: &mut Component, piece: usize, position: LabelPosition) {
+        match self {
+            Self::Name => component.name_label_pos = position,
+            Self::Value if value_pieces(component).is_some() => {
+                if let Some(piece) = component.value_pieces.get_mut(piece) {
+                    piece.position = position;
+                }
+            }
+            Self::Value => component.value_label_pos = position,
+        }
+    }
+}
+
+/// The boxes a part's shown name and value take where they are placed,
+/// each with which text it is.
+fn lettering_boxes(component: &Component) -> Vec<((Lettering, usize), LayoutRect)> {
+    let origin = LayoutPoint::new(component.pos.x as f32, component.pos.y as f32);
+    let layout = instance_label_layout(origin, 1.0, component);
+    let shown = SchematicParameterLabelVisibility::NamesAndValues;
+    let mut boxes = Vec::new();
+    if component.kind == ComponentType::Ground {
+        return boxes;
+    }
+    if component.display_mode.show_name(shown) && !component.name.trim().is_empty() {
+        boxes.push((
+            (Lettering::Name, 0),
+            text_box(layout.name, &component.name, INSTANCE_NAME_WORLD),
+        ));
+    }
+    if !component.display_mode.show_value(shown) {
+        return boxes;
+    }
+    match value_pieces(component) {
+        Some(pieces) => boxes.extend(pieces.iter().enumerate().filter_map(|(index, piece)| {
+            let placed = piece.position.placed_text(origin, 1.0)?;
+            Some((
+                (Lettering::Value, index),
+                text_box(placed, &piece.text, piece.size_world()),
+            ))
+        })),
+        None => {
+            let value = component_value_label(component);
+            if !value.trim().is_empty() {
+                boxes.push((
+                    (Lettering::Value, 0),
+                    text_box(layout.value, &value, INSTANCE_VALUE_WORLD),
+                ));
+            }
+        }
+    }
+    boxes
+}
+
+/// The boxes a net label's name, connector tab and supply symbol take.
+fn net_label_boxes(label: &NetLabel) -> Vec<LayoutRect> {
+    let layout = net_label_layout(label);
+    let name = text_box(
+        PlacedText {
+            anchor: layout.corner,
+            horizontal: TextEdge::Start,
+            vertical: TextEdge::End,
+        },
+        layout.name,
+        NET_LABEL_FONT_WORLD,
+    );
+    [
+        Some(name),
+        layout.tab.map(|(tab, _)| tab),
+        supply_glyph_rect(label),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
+}
+
+fn overlaps(a: LayoutRect, b: LayoutRect) -> bool {
+    a.min.x < b.max.x && b.min.x < a.max.x && a.min.y < b.max.y && b.min.y < a.max.y
+}
+
+/// A placed text moved along an axis its box reaches out on to the
+/// nearest place where it stands [`LABEL_CLEARANCE`] clear of every
+/// obstacle it would land on: the shortest such move, or the shortest of
+/// all four for a text centred on its anchor. A text with no such place
+/// within reach stays where it was.
+fn clear_of(
     position: LabelPosition,
     origin: Point,
     text: &str,
     size: f32,
-    body: LayoutRect,
+    obstacles: &[LayoutRect],
 ) -> LabelPosition {
     let LabelPosition::Placed {
         offset,
@@ -2229,41 +2406,67 @@ fn clear_of_body(
         return position;
     };
     let text = text_box(placed, text, size);
-    let overlaps = text.min.x < body.max.x
-        && body.min.x < text.max.x
-        && text.min.y < body.max.y
-        && body.min.y < text.max.y;
-    if !overlaps {
-        return position;
-    }
-    let right = (body.max.x + LABEL_CLEARANCE - text.min.x).ceil();
-    let left = (body.min.x - LABEL_CLEARANCE - text.max.x).floor();
-    let down = (body.max.y + LABEL_CLEARANCE - text.min.y).ceil();
-    let up = (body.min.y - LABEL_CLEARANCE - text.max.y).floor();
     let across = match horizontal {
-        TextEdge::Start => vec![right],
-        TextEdge::End => vec![left],
+        TextEdge::Start => vec![Point::new(1, 0)],
+        TextEdge::End => vec![Point::new(-1, 0)],
         TextEdge::Center => Vec::new(),
     };
     let along = match vertical {
-        TextEdge::Start => vec![down],
-        TextEdge::End => vec![up],
+        TextEdge::Start => vec![Point::new(0, 1)],
+        TextEdge::End => vec![Point::new(0, -1)],
         TextEdge::Center => Vec::new(),
     };
-    let (across, along) = if across.is_empty() && along.is_empty() {
-        (vec![right, left], vec![down, up])
+    let directions = if across.is_empty() && along.is_empty() {
+        vec![
+            Point::new(1, 0),
+            Point::new(-1, 0),
+            Point::new(0, 1),
+            Point::new(0, -1),
+        ]
     } else {
-        (across, along)
+        across.into_iter().chain(along).collect()
     };
-    let moves = across
+    // How far the text must move along `direction` to stand clear of
+    // `obstacle` beyond it.
+    let past = |direction: Point, obstacle: &LayoutRect| match (direction.x, direction.y) {
+        (1, _) => (obstacle.max.x + LABEL_CLEARANCE - text.min.x).ceil(),
+        (-1, _) => (text.max.x - obstacle.min.x + LABEL_CLEARANCE).ceil(),
+        (_, 1) => (obstacle.max.y + LABEL_CLEARANCE - text.min.y).ceil(),
+        _ => (text.max.y - obstacle.min.y + LABEL_CLEARANCE).ceil(),
+    };
+    let moved = |direction: Point, distance: f32| LayoutRect {
+        min: LayoutPoint::new(
+            text.min.x + direction.x as f32 * distance,
+            text.min.y + direction.y as f32 * distance,
+        ),
+        max: LayoutPoint::new(
+            text.max.x + direction.x as f32 * distance,
+            text.max.y + direction.y as f32 * distance,
+        ),
+    };
+    let reach = |direction: Point| {
+        let mut distance = 0.0_f32;
+        for _ in 0..=obstacles.len() {
+            let landed = moved(direction, distance);
+            match obstacles
+                .iter()
+                .find(|obstacle| overlaps(landed, **obstacle))
+            {
+                None => return Some(distance),
+                Some(obstacle) => distance = distance.max(past(direction, obstacle)),
+            }
+        }
+        None
+    };
+    let Some((direction, distance)) = directions
         .into_iter()
-        .map(|step| Point::new(step as i32, 0))
-        .chain(along.into_iter().map(|step| Point::new(0, step as i32)));
-    let Some(step) = moves.min_by_key(|step| step.x.abs() + step.y.abs()) else {
+        .filter_map(|direction| reach(direction).map(|distance| (direction, distance)))
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+    else {
         return position;
     };
     LabelPosition::Placed {
-        offset: offset + step,
+        offset: offset + Point::new(direction.x * distance as i32, direction.y * distance as i32),
         horizontal,
         vertical,
     }

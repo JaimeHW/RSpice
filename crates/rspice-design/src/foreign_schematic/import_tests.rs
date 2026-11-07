@@ -1253,6 +1253,60 @@ fn a_name_or_value_beside_a_source_body_clears_the_body_rspice_draws() {
     }
 }
 
+/// A name or value moved off the body RSpice draws goes to the nearest
+/// place where it lands on no body and no other text: a part's name and
+/// value both centred beside a turned body do not move onto each other.
+#[test]
+fn a_text_moved_off_a_body_lands_on_no_other_text() {
+    use crate::schematic::label_layout::{
+        INSTANCE_NAME_WORLD, INSTANCE_VALUE_WORLD, LayoutPoint, LayoutRect, instance_label_layout,
+        text_box,
+    };
+
+    let drawing = parse_asc(
+        "Version 4\n\
+         SYMBOL njf 0 0 R90\nWINDOW 0 32 60 VCenter 2\nWINDOW 3 60 48 VCenter 2\n\
+         SYMATTR InstName J1\nSYMATTR Value 2N4117\n",
+    )
+    .expect("the drawing reads");
+    let imported = import_foreign_schematic(&drawing, "work", &library());
+    let mut boxes = Vec::new();
+    for part in &imported.document.components {
+        let (width, height) = part.symbol_dimensions();
+        let (width, height) = if part.rotation.is_vertical() {
+            (height as f32, width as f32)
+        } else {
+            (width as f32, height as f32)
+        };
+        let (x, y) = (part.pos.x as f32, part.pos.y as f32);
+        boxes.push((
+            format!("{} body", part.name),
+            LayoutRect {
+                min: LayoutPoint::new(x - width * 0.5, y - height * 0.5),
+                max: LayoutPoint::new(x + width * 0.5, y + height * 0.5),
+            },
+        ));
+        let layout = instance_label_layout(LayoutPoint::new(x, y), 1.0, part);
+        boxes.push((
+            part.name.clone(),
+            text_box(layout.name, &part.name, INSTANCE_NAME_WORLD),
+        ));
+        boxes.push((
+            format!("{} value", part.name),
+            text_box(layout.value, &part.value, INSTANCE_VALUE_WORLD),
+        ));
+    }
+    for (index, (a, first)) in boxes.iter().enumerate() {
+        for (b, second) in &boxes[index + 1..] {
+            let apart = first.max.x <= second.min.x
+                || second.max.x <= first.min.x
+                || first.max.y <= second.min.y
+                || second.max.y <= first.min.y;
+            assert!(apart, "{a} at {first:?} lands on {b} at {second:?}");
+        }
+    }
+}
+
 /// An LTspice flag names its net away from the one side its wire or pin
 /// lead reaches it from: below a pin whose lead comes down to it, above one
 /// whose lead runs up from it, beyond either end of a wire. A flag on the
