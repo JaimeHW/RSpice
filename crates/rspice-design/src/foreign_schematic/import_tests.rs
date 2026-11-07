@@ -2149,6 +2149,71 @@ fn a_qspice_gate_letters_the_settings_its_drawing_shows() {
     );
 }
 
+/// QSPICE ties a gate's Vss pin to ground without drawing one; RSpice draws
+/// the ground. A setting the drawing letters across that pin gives way to
+/// the ground rather than run over it.
+#[test]
+fn a_qspice_setting_gives_way_to_the_ground_rspice_draws_on_a_pin() {
+    use crate::schematic::label_layout::{LayoutPoint, LayoutRect, text_box};
+    use crate::schematic::value_label::value_pieces;
+
+    const DRAWING: &str = "«schematic
+  «component (0,0) 0 0
+    «symbol AND2Q
+      «type: ¥»
+      «text (0,300) 1 7 0 0x1000000 -1 -1 \"¥1\"»
+      «text (0,-200) 0.5 0 2 0x1000000 -1 -1 \"AND\"»
+      «text (-60,-450) 1 7 0 0x1000000 -1 -1 \"Ref=2\"»
+      «pin (0,400) (0,0) 1 0 0 0x1000000 -1 \"Vdd\"»
+      «pin (0,-400) (0,0) 1 0 0 0x1000000 -1 \"Vss\" \"GND\"»
+      «pin (400,0) (0,0) 1 0 0 0x1000000 -1 \"Q\"»
+      «pin (-400,200) (0,0) 1 0 0 0x1000000 -1 \"b0\"»
+      «pin (-400,-200) (0,0) 1 0 0 0x1000000 -1 \"b1\"»
+    »
+  »
+  «net (0,400) 1 13 0 \"VDD\"»
+  «net (400,0) 1 13 0 \"y\"»
+  «net (-400,200) 1 13 0 \"a\"»
+  «net (-400,-200) 1 13 0 \"b\"»
+»
+";
+    let drawing = parse_qsch(&qsch_bytes(DRAWING)).unwrap();
+    let imported = import_foreign_schematic(&drawing, "work", &Library::default());
+    let components = &imported.document.components;
+    let gate = components
+        .iter()
+        .find(|component| component.kind == ComponentType::CellInstance)
+        .expect("the gate is placed");
+    let ground = components
+        .iter()
+        .find(|component| component.kind == ComponentType::Ground)
+        .expect("RSpice draws the pin's ground");
+    let (width, height) = ground.symbol_dimensions();
+    let (width, height) = if ground.rotation.is_vertical() {
+        (height, width)
+    } else {
+        (width, height)
+    };
+    let (x, y) = (ground.pos.x as f32, ground.pos.y as f32);
+    let body = LayoutRect {
+        min: LayoutPoint::new(x - width as f32 / 2.0, y - height as f32 / 2.0),
+        max: LayoutPoint::new(x + width as f32 / 2.0, y + height as f32 / 2.0),
+    };
+    let [piece] = value_pieces(gate).expect("the gate letters its setting") else {
+        panic!("one setting");
+    };
+    let origin = LayoutPoint::new(gate.pos.x as f32, gate.pos.y as f32);
+    let placed = piece.position.placed_text(origin, 1.0).expect("placed");
+    let text = text_box(placed, &piece.text, piece.size_world());
+    assert!(
+        text.max.x <= body.min.x
+            || body.max.x <= text.min.x
+            || text.max.y <= body.min.y
+            || body.max.y <= text.min.y,
+        "{text:?} runs over the ground at {body:?}"
+    );
+}
+
 /// QSPICE's ¥-device gate and Ã-device Gm amplifier: each comes across as a
 /// behavioural subcircuit written for it, its pins in the symbol's order,
 /// with the settings it states, and a notice naming it.

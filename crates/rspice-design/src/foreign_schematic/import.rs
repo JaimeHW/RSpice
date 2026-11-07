@@ -815,10 +815,18 @@ impl Builder<'_> {
             .flat_map(net_label_boxes)
             .collect::<Vec<_>>();
         for &index in &self.lettered {
-            if self.document.components[index].kind == ComponentType::CellInstance {
+            // A cell letters its name and value at its symbol's places. Only
+            // texts its drawing lettered for it give way, to a part RSpice
+            // draws where the drawing drew none: the ground on a pin QSPICE
+            // ties to ground itself.
+            let cell = self.document.components[index].kind == ComponentType::CellInstance;
+            if cell && value_pieces(&self.document.components[index]).is_none() {
                 continue;
             }
             for label in [Lettering::Name, Lettering::Value] {
+                if cell && label == Lettering::Name {
+                    continue;
+                }
                 let pieces = match label {
                     Lettering::Name => 1,
                     Lettering::Value => value_pieces(&self.document.components[index])
