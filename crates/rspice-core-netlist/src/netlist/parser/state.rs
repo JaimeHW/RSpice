@@ -152,6 +152,8 @@ pub(super) struct ParseState {
     pub(super) open_machine: Option<super::machine::OpenMachine>,
     /// How many `.machine` blocks have been read, which numbers their names.
     pub(super) machine_count: usize,
+    /// Root element cards that name a `.param` declared later in the deck.
+    pub(super) forward_parameters: super::forward_params::ForwardParameters,
 }
 
 impl ParseState {
@@ -205,6 +207,7 @@ impl ParseState {
             unknown_warned: HashSet::new(),
             open_machine: None,
             machine_count: 0,
+            forward_parameters: Default::default(),
         }
     }
 

@@ -24,6 +24,13 @@ pub(super) fn parse(
     // the line immediately before. A directive is consumed whole and leaves no
     // card open, so a `+` line here continues nothing.
     let mut veriloga_directive_line: Option<usize> = None;
+    state.forward_parameters = super::forward_params::ForwardParameters::scan(
+        lines,
+        body_start,
+        allow_non_semicolon_comments,
+        xyce_syntax,
+        abort,
+    )?;
 
     process_source_events_at(
         source_schedule.as_mut(),
@@ -297,6 +304,7 @@ pub(super) fn parse(
             return Err(error.into());
         }
     }
+    super::forward_params::read_postponed_elements(state, abort)?;
 
     Ok(root_eof)
 }

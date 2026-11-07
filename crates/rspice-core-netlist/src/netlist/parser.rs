@@ -57,6 +57,7 @@ mod card_binding;
 mod chebyshev_synthesis;
 mod command_parsers;
 mod commands;
+mod forward_params;
 mod root_redefinitions;
 mod scopes;
 mod startup_cards;
@@ -4774,7 +4775,15 @@ fn process_line_gated(
                 ParseWithAbortError::Parse(error) => map_current_error(error),
             });
     }
-    if state.conditionals_suppress() {
+    if state.conditionals_suppress()
+        || forward_params::postpone_forward_reference(
+            state,
+            line,
+            line_num,
+            origin,
+            source_is_included,
+        )
+    {
         return Ok(());
     }
     if line
