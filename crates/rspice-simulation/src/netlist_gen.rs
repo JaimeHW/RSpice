@@ -46,6 +46,7 @@ mod instances;
 mod magnetics;
 mod master_index;
 mod models;
+mod passives;
 mod sheet_geometry;
 mod source_tables;
 mod subcircuits;

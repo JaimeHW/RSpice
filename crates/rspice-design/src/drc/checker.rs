@@ -1320,6 +1320,7 @@ fn card_label(component: &ComponentInfo, card: &WrittenCard) -> String {
         CardRole::SeriesResistance => "series resistance",
         CardRole::ParallelResistance => "parallel resistance",
         CardRole::ParallelCapacitance => "parallel capacitance",
+        CardRole::SeriesInductance => "series inductance",
     };
     format!("{identity}'s {part}")
 }

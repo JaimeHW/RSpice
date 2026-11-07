@@ -274,13 +274,7 @@ pub fn validate_bulk_value(
             Ok(value.to_owned())
         }
         SelectionBulkProperty::Tolerance => {
-            let number = value.strip_suffix('%').unwrap_or(value).trim();
-            let parsed = number
-                .parse::<f64>()
-                .map_err(|_| "Tolerance must be a non-negative finite number.".to_owned())?;
-            if !parsed.is_finite() || parsed < 0.0 {
-                return Err("Tolerance must be a non-negative finite number.".to_owned());
-            }
+            crate::schematic::tolerance::parse_tolerance_percent(value)?;
             Ok(value.to_owned())
         }
         SelectionBulkProperty::Display => ComponentDisplayMode::parse(value)

@@ -105,11 +105,8 @@ impl<'a> NetlistGenerator<'a> {
         match component.kind {
             // Two-terminal passive components: X name node+ node- value [params]
             // Spectre format: R1 net1 net2 1k m=2 tc1=0.01
-            ComponentType::Resistor | ComponentType::Capacitor => {
-                let nodes = self.format_nodes(&node_names, 2);
-                let value_with_params =
-                    self.format_value_with_params(&component.value, &component.params);
-                Some(format!("{} {} {}", instance_name, nodes, value_with_params))
+            ComponentType::Resistor | ComponentType::Capacitor | ComponentType::Inductor => {
+                Some(self.passive_line(component, &node_names, &instance_name))
             }
 
             // Diode: D name A K model [params], falling back to the
@@ -121,15 +118,6 @@ impl<'a> NetlistGenerator<'a> {
                 let model = self.get_default_device_model(component, explicit_model.as_deref())?;
                 let params = self.format_params(&params_without_model);
                 Some(format!("{} {} {}{}", instance_name, nodes, model, params))
-            }
-
-            ComponentType::Inductor => {
-                let nodes = self.format_nodes(&node_names, 2);
-                let filtered_params = self
-                    .filter_component_params(&component.params, &["coupled_to", "coupling_factor"]);
-                let value_with_params =
-                    self.format_value_with_params(&component.value, &filtered_params);
-                Some(format!("{} {} {}", instance_name, nodes, value_with_params))
             }
 
             // Saturable inductor: L name node+ node- value model, where the

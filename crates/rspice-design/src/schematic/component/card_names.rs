@@ -28,6 +28,10 @@ const SENSE_SOURCE_PREFIX: &str = "VSENSE_";
 /// id to name a parasitic it writes beside that source.
 const SOURCE_PARASITIC_STEM: &str = "__RSPICE_SOURCE_";
 
+/// What the deck writes between an element letter and a resistor's id to
+/// name the series inductor its `lser` asks for.
+const PART_PARASITIC_STEM: &str = "__RSPICE_PART_";
+
 /// What a written card is to the component that makes the deck write it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum CardRole {
@@ -51,6 +55,9 @@ pub enum CardRole {
     /// The capacitor an independent source's `cpar` writes across its
     /// terminals.
     ParallelCapacitance,
+    /// The inductor a resistor's `lser` writes in series with its `+`
+    /// terminal.
+    SeriesInductance,
 }
 
 /// One card the deck writes.
@@ -181,6 +188,21 @@ impl Component {
         })
     }
 
+    /// The inductor a resistor's `lser` writes in series with its `+`
+    /// terminal, outside the resistor and its `cpar`; `None` when `lser` is
+    /// blank or zero.
+    pub fn resistor_series_inductance(&self) -> Option<SourceParasitic> {
+        if self.kind != ComponentType::Resistor {
+            return None;
+        }
+        let params = crate::parameters::parse_params_string(&self.params);
+        let value = params.get("lser")?.trim();
+        (!crate::parameters::source_value_is_zero_or_blank(value)).then(|| SourceParasitic {
+            name: format!("L{PART_PARASITIC_STEM}{}_LSER", self.id),
+            value: value.to_owned(),
+        })
+    }
+
     /// The cards this component makes the deck write on its own account: its
     /// own element where it has one, then the cards written beside or in
     /// place of it. A coupling is a question about the cellview, answered by
@@ -202,6 +224,9 @@ impl Component {
             self.sense_source_name()
                 .map(|name| card(name, CardRole::SenseSource)),
         );
+        if let Some(inductor) = self.resistor_series_inductance() {
+            cards.push(card(inductor.name, CardRole::SeriesInductance));
+        }
         if let Some(parasitics) = self.source_parasitics() {
             cards.extend(
                 [

@@ -32,18 +32,6 @@ impl<'a> NetlistGenerator<'a> {
         component.emitted_instance_name()
     }
 
-    pub(super) fn filter_component_params(&self, params: &str, excluded: &[&str]) -> String {
-        if params.trim().is_empty() {
-            return String::new();
-        }
-
-        let mut params_map = rspice_design::parameters::parse_params_string(params);
-        for key in excluded {
-            params_map.remove(&key.to_ascii_lowercase());
-        }
-        rspice_design::parameters::format_params_string(&params_map)
-    }
-
     pub(super) fn format_nodes(&self, nodes: &[String], expected: usize) -> String {
         if nodes.len() >= expected {
             nodes[..expected].join(" ")
@@ -100,16 +88,6 @@ impl<'a> NetlistGenerator<'a> {
             // Ensure single space separation from previous content
             format!(" {}", trimmed)
         }
-    }
-
-    /// Format component value with optional parameters appended
-    ///
-    /// Commercial-grade helper that combines value and params into
-    /// proper SPICE format: `value [params]`
-    pub(super) fn format_value_with_params(&self, value: &str, params: &str) -> String {
-        let formatted_value = self.format_value(value);
-        let formatted_params = self.format_params(params);
-        format!("{}{}", formatted_value, formatted_params)
     }
 
     /// Format source value specification
