@@ -476,3 +476,115 @@ R2 d 0 1k
     assert_close("V(cc)", op_voltage(&netlist, "cc"), 4.432971, 2e-5);
     assert_close("V(d)", op_voltage(&netlist, "d"), 3.858144, 2e-5);
 }
+
+/// A switch with a negative hysteresis turns on smoothly across the band.
+// QSPICE and LTspice agree: across Vt -/+ |Vh| the log conductance follows
+// 3u^2 - 2u^3. V(a) = 1 mA / g for the voltage switch at Vc = 0.15, 0.3,
+// 0.5, 0.7, 0.85; the same law for the current switch at Ic = 0.15, 0.45,
+// 0.75.
+#[test]
+fn a_negative_hysteresis_switch_turns_on_smoothly() {
+    let voltage = |control: f64| {
+        op_voltage(
+            &parse(&format!(
+                "* smooth voltage switch
+V1 c 0 {control}
+I2 0 a 1m
+S1 a 0 c 0 SX
+.model SX SW(Ron=1 Roff=1Meg Vt=.5 Vh=-.4)
+.end
+"
+            )),
+            "a",
+        )
+    };
+    for (control, expected) in [
+        (0.15, 856.282_7),
+        (0.3, 115.478_2),
+        (0.5, 1.0),
+        (0.7, 8.659_643e-3),
+        (0.85, 1.167_839e-3),
+    ] {
+        assert_close(
+            &format!("S1 at {control} V"),
+            voltage(control),
+            expected,
+            2e-6 * expected,
+        );
+    }
+    let current = |control: f64| {
+        op_voltage(
+            &parse(&format!(
+                "* smooth current switch
+I1 0 c {control}
+VC c 0 0
+I2 0 a 1m
+W1 a 0 VC WX
+.model WX CSW(Ron=1 Roff=1Meg It=.5 Ih=-.4)
+.end
+"
+            )),
+            "a",
+        )
+    };
+    for (control, expected) in [(0.15, 856.282_7), (0.45, 3.627_190), (0.75, 3.578_582e-3)] {
+        assert_close(
+            &format!("W1 at {control} A"),
+            current(control),
+            expected,
+            2e-6 * expected,
+        );
+    }
+}
+
+/// `noiseless` on a model card quiets every device built from it.
+// QSPICE and LTspice at 1 kHz: with the flag only R1 reaches V(b),
+// 2.906043e-28 V^2/Hz; without it Q1 adds 5.416252e-27 and S1 2.906043e-28.
+#[test]
+fn a_noiseless_model_card_quiets_its_devices() {
+    let deck = |flag: &str| {
+        parse(&format!(
+            "* noiseless model cards
+V1 a 0 1 AC 1
+R1 a b 1k
+D1 b 0 DX
+.model DX D(Ron=100 Vfwd=0.5 {flag})
+S1 b 0 a 0 SX
+.model SX SW(Ron=1k Roff=1Meg Vt=0.5 Vh=0.1 {flag})
+Q1 b a 0 QX
+.model QX NPN(BF=50 IS=1e-16 {flag})
+.end
+"
+        ))
+    };
+    let noise = |netlist: &Netlist| {
+        Engine::default()
+            .run_noise_named_with_input_source(netlist, "b", None, "V1", &[1e3], 300.15)
+            .expect("noise solves")
+            .remove(0)
+    };
+    let quiet = noise(&deck("noiseless"));
+    assert_close(
+        "quiet total",
+        quiet.output_noise_density,
+        2.906_043e-28,
+        1e-33,
+    );
+    for contribution in &quiet.contributions {
+        assert!(
+            contribution.identity.device.eq_ignore_ascii_case("R1")
+                || contribution.output_contribution == 0.0,
+            "{contribution:?}"
+        );
+    }
+    let loud = noise(&deck(""));
+    let device = |name: &str| -> f64 {
+        loud.contributions
+            .iter()
+            .filter(|contribution| contribution.identity.device.eq_ignore_ascii_case(name))
+            .map(|contribution| contribution.output_contribution)
+            .sum()
+    };
+    assert_close("Q1", device("Q1"), 5.416_252e-27, 1e-32);
+    assert_close("S1", device("S1"), 2.906_043e-28, 1e-33);
+}

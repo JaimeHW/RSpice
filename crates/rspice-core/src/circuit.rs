@@ -821,6 +821,9 @@ pub struct CircuitData {
     /// Every converter the build inserted on a mixed boundary; see
     /// [`CircuitData::converter_insertions`].
     pub(crate) converter_insertions: Vec<ConverterInsertion>,
+    /// Devices built from a model card flagged `noiseless`, upper-cased:
+    /// their noise sources stay out of every noise analysis.
+    pub(crate) noiseless_devices: std::collections::HashSet<String>,
     /// The `supplySensitivity` and `groundSensitivity` attributes on mixed
     /// modules' ports, for the converters the build inserts on those ports.
     #[cfg(feature = "veriloga")]

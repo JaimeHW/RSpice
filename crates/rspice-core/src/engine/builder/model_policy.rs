@@ -1429,10 +1429,36 @@ fn xyce_level2_native_diode_param(name: &str) -> bool {
 }
 
 pub(super) const VSWITCH_MODEL_PARAMS: &[&str] = &[
-    "VT", "VH", "VON", "VOFF", "VHON", "VHOFF", "ON", "OFF", "ONH", "OFFH", "RON", "ROFF", "SMOOTH",
+    "VT",
+    "VH",
+    "VON",
+    "VOFF",
+    "VHON",
+    "VHOFF",
+    "ON",
+    "OFF",
+    "ONH",
+    "OFFH",
+    "RON",
+    "ROFF",
+    "SMOOTH",
+    "NOISELESS",
 ];
 pub(super) const ISWITCH_MODEL_PARAMS: &[&str] = &[
-    "IT", "IH", "ION", "IOFF", "IHON", "IHOFF", "ON", "OFF", "ONH", "OFFH", "RON", "ROFF", "SMOOTH",
+    "IT",
+    "IH",
+    "ION",
+    "IOFF",
+    "IHON",
+    "IHOFF",
+    "ON",
+    "OFF",
+    "ONH",
+    "OFFH",
+    "RON",
+    "ROFF",
+    "SMOOTH",
+    "NOISELESS",
 ];
 
 /// Give a voltage- or current-controlled switch card that names no `ROFF`
@@ -1517,6 +1543,34 @@ pub(super) fn insert_xyce_current_switch_curve(
         params.insert("IOFF".to_owned(), 0.0);
     }
 }
+
+/// QSPICE and LTspice read a negative hysteresis on a threshold switch card
+/// as a smooth transition between `VT - |VH|` and `VT + |VH|` (`IT`/`IH` for
+/// a current switch), cubic in log conductance: the law of an `ON`/`OFF` card
+/// with those ends, which the card becomes. ngspice keeps its inverted band.
+pub(super) fn insert_smooth_switch_transition(
+    params: &mut HashMap<String, Value>,
+    dialect: SpiceDialect,
+    [threshold, hysteresis]: [&str; 2],
+) {
+    const CURVE_KEYS: [&str; 12] = [
+        "VON", "VOFF", "VHON", "VHOFF", "ION", "IOFF", "IHON", "IHOFF", "ON", "OFF", "ONH", "OFFH",
+    ];
+    let Some(&width) = params.get(hysteresis) else {
+        return;
+    };
+    if dialect == SpiceDialect::Ngspice
+        || width >= 0.0
+        || CURVE_KEYS.iter().any(|key| params.contains_key(*key))
+    {
+        return;
+    }
+    let center = params.get(threshold).copied().unwrap_or(0.0);
+    params.remove(hysteresis);
+    params.insert("ON".to_owned(), center - width);
+    params.insert("OFF".to_owned(), center + width);
+}
+
 pub(super) const XYCE_TEAM_MODEL_PARAMS: &[&str] = &[
     "LEVEL",
     "KON",

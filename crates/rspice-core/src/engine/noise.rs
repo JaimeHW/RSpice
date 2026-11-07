@@ -3084,6 +3084,16 @@ impl Engine {
             "a noise source names a mechanism no result can be written with"
         );
 
+        // A device built from a `noiseless` model card contributes nothing.
+        if !circuit.noiseless_devices.is_empty() {
+            let quiet = |device: &str| {
+                circuit
+                    .noiseless_devices
+                    .contains(&device.to_ascii_uppercase())
+            };
+            noise_sources.retain(|source| !quiet(&source.identity.device));
+            correlated_noise_sources.retain(|pair| !quiet(&pair.identity.device));
+        }
         let elementary_absolute_temperatures = noise_sources
             .iter()
             .map(|source| absolute_temperatures.get(&source.identity).copied())

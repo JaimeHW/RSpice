@@ -134,6 +134,7 @@ impl CircuitData {
             analog_task_output: None,
             analog_monitor_values: HashMap::new(),
             converter_insertions: Vec::new(),
+            noiseless_devices: std::collections::HashSet::new(),
             #[cfg(feature = "veriloga")]
             port_sensitivities: Vec::new(),
         }

@@ -6667,6 +6667,23 @@ impl Engine {
         let boundary_supplies =
             boundary_supply::BoundarySupplies::new(netlist, &flat_elements, reference);
 
+        // LTspice and QSPICE quiet every device built from a model card
+        // flagged `noiseless`.
+        for element in &flat_elements {
+            let noiseless = element_model_name(&element.kind)
+                .and_then(|model| find_model_def(netlist, model))
+                .is_some_and(|model| {
+                    model.params.iter().any(|(name, value)| {
+                        name.eq_ignore_ascii_case("NOISELESS") && *value != 0.0
+                    })
+                });
+            if noiseless {
+                circuit
+                    .noiseless_devices
+                    .insert(element.name.to_ascii_uppercase());
+            }
+        }
+
         // State machines read nodes any element may create, so they are built
         // once every other element is.
         let mut machines = Vec::new();
@@ -9856,6 +9873,12 @@ impl Engine {
                         model,
                     )?;
 
+                    insert_smooth_switch_transition(
+                        &mut params_map,
+                        self.config.spice_dialect,
+                        ["VT", "VH"],
+                    );
+
                     let mut sw = crate::device::VoltageSwitch::new(
                         element.name.clone(),
                         np,
@@ -9912,6 +9935,11 @@ impl Engine {
                         &mut params_map,
                         self.config.spice_dialect,
                         &model_def.model_type,
+                    );
+                    insert_smooth_switch_transition(
+                        &mut params_map,
+                        self.config.spice_dialect,
+                        ["IT", "IH"],
                     );
 
                     let mut sw = crate::device::CurrentSwitch::new(
