@@ -95,8 +95,8 @@ fn pnoise_card_output(card: &crate::netlist::PnoiseCard) -> String {
     }
 }
 
-/// Trapezoidal integral of a spectral density over the offsets it was
-/// sampled on.
+/// Integral of a spectral density over the offsets it was sampled on, step
+/// by step by the rule `.NOISE` integrates with.
 ///
 /// A single-point sweep spans no band, so there is nothing to integrate and
 /// the answer is `None` rather than zero — the same distinction the card's
@@ -1268,8 +1268,9 @@ mod integration_tests {
         assert!((result.phase_error_psd[0] / 200.0 - 1.0).abs() < 1e-13);
         assert!((result.phase_error_psd[1] / 50.0 - 1.0).abs() < 1e-13);
         result.integrate_band().unwrap();
-        // The retained two-point spectrum is integrated with trapezoidal quadrature.
-        assert!((result.integrated_phase_noise.unwrap() / 125.0_f64.sqrt() - 1.0).abs() < 1e-13);
+        // The retained two-point spectrum is integrated as the power law through
+        // its ends, which this 1/f^2 phase error is: 200/f^2 over 1..2 Hz is 100.
+        assert!((result.integrated_phase_noise.unwrap() / 100.0_f64.sqrt() - 1.0).abs() < 1e-13);
         let voltage_equivalent =
             integrate_phase_noise(&result.frequencies, &result.phase_noise_dbc)
                 .unwrap()

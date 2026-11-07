@@ -1663,9 +1663,108 @@ impl ScaledPositiveSum {
     }
 }
 
+/// Slope, in decades of density per decade of frequency, below which a step
+/// is flat (ngspice `N_INTFTHRESH`).
+const FLAT_NOISE_SLOPE: Value = 1e-10;
+
+/// Add one frequency step's band power to `total`.
+///
+/// Between two positive frequencies a density is taken to follow the power
+/// law through its two ends, `S(f) = S1 (f/f1)^e`, which integrates exactly
+/// to `(S2 f2 - S1 f1) / (e + 1)`, or to `S1 f1 ln(f2/f1)` for 1/f noise. That
+/// is the SPICE rule (ngspice's `Nintegrate`): it is exact for white noise,
+/// 1/f noise and any single-slope segment, where the trapezoid rule
+/// overstates a falling spectrum on a sparse logarithmic sweep. A flat step,
+/// a step from 0 Hz and a step with a zero density at either end have no
+/// slope to fit and take the trapezoid rule.
+fn add_noise_step(total: &mut ScaledPositiveSum, left: (Value, Value), right: (Value, Value)) {
+    let ((left_frequency, left_density), (right_frequency, right_density)) = (left, right);
+    let width = right_frequency - left_frequency;
+    if left_frequency > 0.0 && left_density > 0.0 && right_density > 0.0 {
+        let log_ratio = (width / left_frequency).ln_1p();
+        let log_rise = right_density.ln() - left_density.ln();
+        if log_ratio > 0.0 && (log_rise / log_ratio).abs() >= FLAT_NOISE_SLOPE {
+            // With x = ln(S2 f2 / (S1 f1)) the step's power is
+            // S1 f1 L (e^x - 1)/x = S2 f2 L (1 - e^-x)/x, L = ln(f2/f1). Taking
+            // it from the end with the larger S f keeps the factor beside the
+            // density in (0, L], and the form is smooth through 1/f (x = 0).
+            let x = log_rise + log_ratio;
+            let (density, frequency, shape) = if x >= 0.0 {
+                let shape = if x == 0.0 { 1.0 } else { -(-x).exp_m1() / x };
+                (right_density, right_frequency, shape)
+            } else {
+                (left_density, left_frequency, x.exp_m1() / x)
+            };
+            let multiplier = log_ratio * shape;
+            if multiplier > 0.0 && multiplier.is_finite() {
+                total.add_product(density, frequency, multiplier);
+                return;
+            }
+        }
+    }
+    total.add_product(left_density, width, 0.5);
+    total.add_product(right_density, width, 0.5);
+}
+
+/// Hand each elementary source's `density` at both ends of one frequency step
+/// to `step`: the k-th source of an identity at the left frequency meets the
+/// k-th of the same identity at the right, and a source present at one end
+/// only meets zero at the other.
+fn for_each_source_step<'a>(
+    left: &'a NoiseResult,
+    right: &'a NoiseResult,
+    density: impl Fn(&NoiseContribution) -> Value,
+    mut step: impl FnMut(&'a NoiseContribution, Value, Value),
+) {
+    use std::collections::HashMap;
+
+    let aligned = left.contributions.len() == right.contributions.len()
+        && left
+            .contributions
+            .iter()
+            .zip(&right.contributions)
+            .all(|(left, right)| left.identity == right.identity);
+    if aligned {
+        for (left, right) in left.contributions.iter().zip(&right.contributions) {
+            step(left, density(left), density(right));
+        }
+        return;
+    }
+    let mut right_by_identity: HashMap<&NoiseSourceIdentity, Vec<&NoiseContribution>> =
+        HashMap::new();
+    for contribution in &right.contributions {
+        right_by_identity
+            .entry(&contribution.identity)
+            .or_default()
+            .push(contribution);
+    }
+    let mut left_seen: HashMap<&NoiseSourceIdentity, usize> = HashMap::new();
+    for contribution in &left.contributions {
+        let seen = left_seen.entry(&contribution.identity).or_default();
+        let partner = right_by_identity
+            .get(&contribution.identity)
+            .and_then(|partners| partners.get(*seen));
+        *seen += 1;
+        step(
+            contribution,
+            density(contribution),
+            partner.map_or(0.0, |partner| density(partner)),
+        );
+    }
+    let mut right_seen: HashMap<&NoiseSourceIdentity, usize> = HashMap::new();
+    for contribution in &right.contributions {
+        let seen = right_seen.entry(&contribution.identity).or_default();
+        if *seen >= left_seen.get(&contribution.identity).copied().unwrap_or(0) {
+            step(contribution, 0.0, density(contribution));
+        }
+        *seen += 1;
+    }
+}
+
 /// Integrate a strictly increasing, nonnegative-frequency linear PSD without
-/// materializing endpoint sums or mean-square power. No band means `None`;
-/// malformed data is an error even for a single sample.
+/// materializing endpoint sums or mean-square power, one [`add_noise_step`]
+/// per step. No band means `None`; malformed data is an error even for a
+/// single sample.
 pub(crate) fn integrate_noise_density(
     points: impl IntoIterator<Item = (Value, Value)>,
 ) -> Result<Option<ScaledPositiveSum>, &'static str> {
@@ -1683,9 +1782,11 @@ pub(crate) fn integrate_noise_density(
             if frequency <= left_frequency {
                 return Err("noise frequencies must be strictly increasing");
             }
-            let width = frequency - left_frequency;
-            total.add_product(left_density, width, 0.5);
-            total.add_product(density, width, 0.5);
+            add_noise_step(
+                &mut total,
+                (left_frequency, left_density),
+                (frequency, density),
+            );
             has_band = true;
         }
         previous = Some((frequency, density));
@@ -1824,21 +1925,70 @@ impl IntegratedNoise {
     }
 
     /// Calculate total integrated output noise over the frequency band (V RMS)
-    /// Uses trapezoidal integration. Returns NaN when the supplied result
-    /// series contains non-finite/negative densities or frequencies,
-    /// or frequencies that are not strictly increasing.
+    ///
+    /// Each source's output density is integrated over every step on its own
+    /// (see [`add_noise_step`]) and the band powers are summed, as SPICE sums
+    /// them: a source's own spectrum follows one power law far better than a
+    /// sum of white and 1/f sources does. A series that does not name its
+    /// sources at every frequency integrates its total density instead.
+    /// Returns NaN when the supplied result series contains non-finite or
+    /// negative densities or frequencies, or frequencies that are not strictly
+    /// increasing.
     pub fn total_output_noise(&self) -> Value {
-        integrate_noise_density(
+        self.band_rms(
+            |result| result.output_noise_density,
+            |contribution| contribution.output_contribution,
+        )
+    }
+
+    /// The RMS of a band integral: each source's `source` density integrated
+    /// on its own and summed when every result names its sources, the
+    /// results' `total` density otherwise, and NaN for an invalid series.
+    fn band_rms(
+        &self,
+        total: impl Fn(&NoiseResult) -> Value,
+        source: impl Fn(&NoiseContribution) -> Value + Copy,
+    ) -> Value {
+        let total = integrate_noise_density(
             self.results
                 .iter()
-                .map(|r| (r.frequency, r.output_noise_density)),
-        )
-        .map(|total| total.unwrap_or_default().square_root())
-        .unwrap_or(Value::NAN)
+                .map(|result| (result.frequency, total(result))),
+        );
+        let Ok(total) = total else {
+            return Value::NAN;
+        };
+        if self
+            .results
+            .iter()
+            .any(|result| result.contributions.is_empty())
+        {
+            return total.unwrap_or_default().square_root();
+        }
+        let invalid = self
+            .results
+            .iter()
+            .flat_map(|result| &result.contributions)
+            .map(source)
+            .any(|density| !density.is_finite() || density < 0.0);
+        if invalid {
+            return Value::NAN;
+        }
+        let mut power = ScaledPositiveSum::default();
+        for window in self.results.windows(2) {
+            let (left, right) = (&window[0], &window[1]);
+            for_each_source_step(left, right, source, |_, left_density, right_density| {
+                add_noise_step(
+                    &mut power,
+                    (left.frequency, left_density),
+                    (right.frequency, right_density),
+                );
+            });
+        }
+        power.square_root()
     }
 
     /// Per-device, per-mechanism output-noise contributions integrated over
-    /// the analysis band (trapezoidal, matching `total_output_noise`),
+    /// the analysis band (source by source, matching `total_output_noise`),
     /// ranked descending by integrated power — the ranked noise-summary
     /// table analog designers read first.
     pub fn contribution_summary(&self) -> Vec<IntegratedContribution> {
@@ -1914,22 +2064,24 @@ impl IntegratedNoise {
 
         for window in self.results.windows(2) {
             let (a, b) = (&window[0], &window[1]);
-            let df = b.frequency - a.frequency;
-            // Integrating every endpoint term independently makes an absent
+            // Integrating every elementary source on its own makes an absent
             // sparse mechanism exactly zero at that edge, preserves right-only
             // onsets, and avoids materializing a duplicate-identity endpoint
             // sum that may overflow before multiplication by a narrow band.
-            for contribution in a.contributions.iter().chain(&b.contributions) {
+            let output = |contribution: &NoiseContribution| contribution.output_contribution;
+            for_each_source_step(a, b, output, |contribution, left_density, right_density| {
                 let entry = totals
                     .entry((
                         contribution.identity.device.clone(),
                         contribution_mechanism(contribution).to_string(),
                     ))
                     .or_insert((contribution.noise_type, ScaledPositiveSum::default()));
-                entry
-                    .1
-                    .add_product(contribution.output_contribution, df, 0.5);
-            }
+                add_noise_step(
+                    &mut entry.1,
+                    (a.frequency, left_density),
+                    (b.frequency, right_density),
+                );
+            });
         }
 
         // Rank before rounding powers to f64: distinct tiny or huge powers
@@ -1965,16 +2117,13 @@ impl IntegratedNoise {
 
     /// Calculate integrated input-referred noise (V RMS)
     ///
-    /// Returns NaN under the same invalid-series contract as
-    /// [`Self::total_output_noise`].
+    /// Integrated source by source like [`Self::total_output_noise`], and NaN
+    /// under the same invalid-series contract.
     pub fn total_input_referred_noise(&self) -> Value {
-        integrate_noise_density(
-            self.results
-                .iter()
-                .map(|r| (r.frequency, r.input_referred_density)),
+        self.band_rms(
+            |result| result.input_referred_density,
+            |contribution| contribution.input_contribution,
         )
-        .map(|total| total.unwrap_or_default().square_root())
-        .unwrap_or(Value::NAN)
     }
 
     /// Get all results
@@ -2535,6 +2684,79 @@ mod summary_tests {
             "mean-square power below the f64 range still has a representable RMS"
         );
         assert_eq!(narrow.total_input_referred_noise(), minimum);
+    }
+
+    /// A power-law spectrum integrates exactly however sparse the sweep:
+    /// white noise over the band, 1/f noise to K ln(f2/f1) and 1/f^2 noise to
+    /// K (1/f1 - 1/f2), on four points a decade apart. Sources integrate one
+    /// by one, so a white and a 1/f source together are exact too, which a
+    /// power law through their sum is not.
+    #[test]
+    fn power_law_spectra_integrate_exactly_on_a_sparse_logarithmic_sweep() {
+        let frequencies: [Value; 4] = [1e3, 1e4, 1e5, 1e6];
+        let source = |name: &str, density: Value| NoiseContribution {
+            identity: NoiseSourceIdentity::mechanism("X1", name),
+            noise_type: NoiseSourceType::White,
+            output_contribution: density,
+            input_contribution: density,
+            percentage: 0.0,
+        };
+        // Each source is (name, K, n) with density K / f^n.
+        let band = |spectra: &[(&str, Value, i32)]| {
+            IntegratedNoise::new(
+                frequencies
+                    .iter()
+                    .map(|&frequency| {
+                        let sources = spectra
+                            .iter()
+                            .map(|&(name, k, n)| source(name, k / frequency.powi(n)))
+                            .collect::<Vec<_>>();
+                        let total = sources.iter().map(|s| s.output_contribution).sum();
+                        custom_result(frequency, total, total, sources)
+                    })
+                    .collect(),
+            )
+        };
+        let (white, flicker, brown) = (4e-18, 2e-12, 3e-6);
+        let white_power = white * (1e6 - 1e3);
+        let flicker_power = flicker * 1000.0_f64.ln();
+        let brown_power = brown * (1.0 / 1e3 - 1.0 / 1e6);
+        for (spectra, expected) in [
+            (vec![("w", white, 0)], white_power),
+            (vec![("f", flicker, 1)], flicker_power),
+            (vec![("b", brown, 2)], brown_power),
+            (
+                vec![("w", white, 0), ("f", flicker, 1)],
+                white_power + flicker_power,
+            ),
+        ] {
+            let integrated = band(&spectra);
+            let total = integrated.total_output_noise();
+            assert!(
+                (total * total / expected - 1.0).abs() < 1e-12,
+                "{:?}: {:e} against {expected:e}",
+                spectra.iter().map(|(name, ..)| *name).collect::<Vec<_>>(),
+                total * total
+            );
+            let summary_power: Value = integrated
+                .contribution_summary()
+                .iter()
+                .map(|row| row.integrated_power)
+                .sum();
+            assert!((summary_power / expected - 1.0).abs() < 1e-12);
+            let input = integrated.total_input_referred_noise();
+            assert!((input * input / expected - 1.0).abs() < 1e-12);
+        }
+
+        // The total density alone is integrated with the same rule.
+        let alone = IntegratedNoise::new(
+            frequencies
+                .iter()
+                .map(|&f| custom_result(f, flicker / f, flicker / f, Vec::new()))
+                .collect(),
+        )
+        .total_output_noise();
+        assert!((alone * alone / flicker_power - 1.0).abs() < 1e-12);
     }
 
     #[test]

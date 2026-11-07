@@ -728,14 +728,14 @@ fn ekv26_noise_contribution_table_reads_the_same_on_either_route() {
         is_persistable_noise_mechanism,
     };
 
-    // The two ports settle 3.8e-8 apart on this deck - 1.349_080_490_8e-7
-    // against 1.349_080_440_3e-7 - so this window is five times that and four
-    // orders tighter than the 2e-3 relative window the Xyce ID(VD) oracle rows
-    // already run under.
+    // The two ports settle 3.8e-8 apart (relative) on this deck, so this
+    // window is five times that and four orders tighter than the 2e-3
+    // relative window the Xyce ID(VD) oracle rows already run under.
     const EKV26_NOISE_BAND_TOLERANCE: f64 = 2.0e-7;
     /// Output-referred noise power under M1 integrated over the band, in V^2,
-    /// as the native evaluator produces it.
-    const EXPECTED_M1_BAND_POWER: f64 = 1.349_080_490_769_807_4e-7;
+    /// as the native evaluator produces it, each source integrated step by
+    /// step as a power law the way SPICE integrates noise.
+    const EXPECTED_M1_BAND_POWER: f64 = 1.331_436_693_809_212_3e-7;
 
     let deck = "* EKV 2.6 noise contribution table\n\
          .options temp=27 gmin=0\n\
