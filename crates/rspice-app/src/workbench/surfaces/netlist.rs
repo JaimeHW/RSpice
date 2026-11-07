@@ -58,14 +58,14 @@ pub(super) fn publish_source_editor(
 
 /// Step the netlist editor's caret to the next or previous finding of the
 /// deck it shows, when F8 or Shift+F8 asked, and say which it reached.
-fn step_netlist_problem(ctx: &egui::Context, app: &mut RSpiceApp, editor_id: egui::Id) {
+fn step_netlist_problem(ctx: &egui::Context, state: &mut AppState, editor_id: egui::Id) {
     use crate::workbench::documents::code_workspace;
 
     let Some(step) = code_workspace::take_problem_step(ctx, editor_id) else {
         return;
     };
-    let buffer = &app.state.model.simulation.source.netlist_content;
-    let diagnostics = std::sync::Arc::clone(&app.state.code.netlist.diagnostics);
+    let buffer = &state.model.simulation.source.netlist_content;
+    let diagnostics = std::sync::Arc::clone(&state.code.netlist.diagnostics);
     // The buffer's own findings, in source order. A finding in an included
     // file names no line of this buffer, so it is not stepped to.
     let mut located = diagnostics
@@ -88,17 +88,16 @@ fn step_netlist_problem(ctx: &egui::Context, app: &mut RSpiceApp, editor_id: egu
         .iter()
         .map(|(line, column, _)| (*line, *column))
         .collect::<Vec<_>>();
-    let messages = app.state.workbench.messages();
+    let messages = state.workbench.messages();
     let Some(index) = code_workspace::problem_step_index(
         ctx,
         editor_id,
         buffer,
         &places,
-        app.state.code.netlist.cursor_char_index,
+        state.code.netlist.cursor_char_index,
         step,
     ) else {
-        app.state
-            .prompt(messages.text(MessageId::SourceDiagnosticNone));
+        state.prompt(messages.text(MessageId::SourceDiagnosticNone));
         return;
     };
     let (line, column, diagnostic) = located[index];
@@ -111,19 +110,19 @@ fn step_netlist_problem(ctx: &egui::Context, app: &mut RSpiceApp, editor_id: egu
         &diagnostic.message,
     );
     code_workspace::reveal_source_location(ctx, editor_id, line, column.unwrap_or(1));
-    app.state.prompt(announcement);
+    state.prompt(announcement);
 }
 
 /// Hand a line revealed in the netlist editor to it the way this page asks
 /// for a line.
-fn reveal_in_netlist(ui: &Ui, app: &mut RSpiceApp, editor_id: egui::Id) {
-    let buffer = &app.state.model.simulation.source.netlist_content;
+fn reveal_in_netlist(ui: &Ui, state: &mut AppState, editor_id: egui::Id) {
+    let buffer = &state.model.simulation.source.netlist_content;
     let Some(line) =
         crate::workbench::documents::text_editor_commands::take_reveal_line(ui, editor_id, buffer)
     else {
         return;
     };
-    app.state.code.netlist.requested_line = Some(line);
+    state.code.netlist.requested_line = Some(line);
 }
 
 pub(in crate::workbench) fn prepare_workspace(app: &mut RSpiceApp) {
@@ -268,8 +267,8 @@ pub(in crate::workbench) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
                     navigable: true,
                 },
             );
-            step_netlist_problem(ui.ctx(), app, editor_id);
-            reveal_in_netlist(ui, app, editor_id);
+            step_netlist_problem(ui.ctx(), &mut app.state, editor_id);
+            reveal_in_netlist(ui, &mut app.state, editor_id);
             let response =
                 crate::workbench::documents::netlist_document::show_editor(ui, &mut app.state);
             crate::workbench::chrome::title_bar::source_editor_context_menu(&response, app);
@@ -1218,8 +1217,8 @@ mod tests {
                         ui.ctx().memory_mut(|memory| memory.request_focus(editor));
                         queue_problem_step(ui.ctx(), editor, step);
                     }
-                    step_netlist_problem(ui.ctx(), app, editor);
-                    reveal_in_netlist(ui, app, editor);
+                    step_netlist_problem(ui.ctx(), &mut app.state, editor);
+                    reveal_in_netlist(ui, &mut app.state, editor);
                     netlist_document::show_editor(ui, &mut app.state);
                 });
             }
