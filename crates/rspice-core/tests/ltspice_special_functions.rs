@@ -747,3 +747,35 @@ A3 n 0 0 0 0 0 o3 0 VARISTOR rclamp=10
         assert_close(&format!("o3 at {v}"), node("o3"), o1, 1e-9);
     }
 }
+
+#[test]
+fn ota_source_limit_is_also_spelled_isrc_and_isource() {
+    let deck = "* ota source limit spellings
+V1 p 0 1
+A1 p 0 0 0 0 0 o1 0 OTA g=1m Isrc=43u Vlow=-1e308 Vhigh=1e308
+R1 o1 0 1k
+A2 p 0 0 0 0 0 o2 0 OTA g=1m Iout=43u Vlow=-1e308 Vhigh=1e308
+R2 o2 0 1k
+A3 p 0 0 0 0 0 o3 0 OTA g=1m Isource=43u Vlow=-1e308 Vhigh=1e308
+R3 o3 0 1k
+A4 0 p 0 0 0 0 o4 0 OTA g=1m Isrc=90u Isink=-20u Vlow=-1e308 Vhigh=1e308 asym
+R4 o4 0 1k
+A5 p 0 0 0 0 0 o5 0 OTA g=1m Isrc=90u Isink=-20u Vlow=-1e308 Vhigh=1e308 asym
+R5 o5 0 1k
+A6 p 0 0 0 0 0 o6 0 OTA g=10u Isrc=90u Isink=-20u Vlow=-1e308 Vhigh=1e308 asym
+R6 o6 0 1k
+.op
+.end
+";
+    let op = Engine::default()
+        .run_dc_op(&parse(deck))
+        .expect("OP solves");
+    let v = |node: &str| op.try_voltage_named(node).unwrap();
+    // LTspice 26.1.1 batch: -43 mV three times, 90 mV, -20 mV, -9.242343 mV.
+    for node in ["o1", "o2", "o3"] {
+        assert_close(node, v(node), -0.043, 1e-9);
+    }
+    assert_close("o4", v("o4"), 0.09, 1e-9);
+    assert_close("o5", v("o5"), -0.02, 1e-9);
+    assert_close("o6", v("o6"), -9.242_343e-3, 1e-9);
+}
