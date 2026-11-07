@@ -39,6 +39,7 @@ use sha2::Digest as _;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+mod bill_of_materials;
 mod materialize;
 mod source;
 use materialize::*;

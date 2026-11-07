@@ -110,11 +110,19 @@ impl BomFields {
 }
 
 /// Whether a component is something bought and placed on a board. Sources,
-/// ports, probes, ground and ideal behavioral blocks exist only for the
-/// simulator, unless the designer gave one a part number.
+/// ports, probes, ground, ideal behavioral blocks and built-in code or
+/// Verilog-A models exist only for the simulator, unless the designer gave
+/// one a part number.
 pub fn is_purchased_part(component: &Component) -> bool {
     if !component.bom.mpn.trim().is_empty() {
         return true;
+    }
+    if component
+        .library_cell
+        .as_ref()
+        .is_some_and(|binding| binding.is_executable_builtin())
+    {
+        return false;
     }
     let kind = component.kind;
     !(kind.is_source()
