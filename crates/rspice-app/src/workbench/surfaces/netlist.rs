@@ -114,8 +114,8 @@ fn step_netlist_problem(ctx: &egui::Context, app: &mut RSpiceApp, editor_id: egu
     app.state.prompt(announcement);
 }
 
-/// Hand a place revealed in the netlist editor to it the way this page asks
-/// for a line, with the caret then moved on to the place's column.
+/// Hand a line revealed in the netlist editor to it the way this page asks
+/// for a line.
 fn reveal_in_netlist(ui: &Ui, app: &mut RSpiceApp, editor_id: egui::Id) {
     let buffer = &app.state.model.simulation.source.netlist_content;
     let Some(line) =
@@ -123,12 +123,6 @@ fn reveal_in_netlist(ui: &Ui, app: &mut RSpiceApp, editor_id: egui::Id) {
     else {
         return;
     };
-    crate::workbench::documents::code_workspace::queue_revealed_column(
-        ui.ctx(),
-        editor_id,
-        buffer,
-        line,
-    );
     app.state.code.netlist.requested_line = Some(line);
 }
 

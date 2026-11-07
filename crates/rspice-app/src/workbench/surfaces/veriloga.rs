@@ -219,8 +219,8 @@ fn source_editor(
         );
         ui.painter()
             .galley(status_rect.min, galley, t.color.text_dim);
-        // A screen reader hears the strip change as it would a status bar:
-        // politely, once the reader is between words.
+        // A screen reader can read the strip as a status, but it is not a live
+        // region: the status bar already announces the compile result once.
         let status_response = ui.interact(
             status_rect,
             editor_id.with("compile-status"),
@@ -229,7 +229,6 @@ fn source_editor(
         ui.ctx().accesskit_node_builder(status_response.id, |node| {
             node.set_role(egui::accesskit::Role::Status);
             node.set_label(status);
-            node.set_live(egui::accesskit::Live::Polite);
         });
         if let Some(problem) = problem {
             left -= PROBLEM_MARK_GAP;

@@ -37,7 +37,7 @@ pub use editor::{
 };
 pub(crate) use editor::{
     ProblemStep, problem_step_announcement, problem_step_index, queue_problem_step,
-    queue_revealed_column, reveal_source_location, severity_title, take_problem_step,
+    reveal_source_location, severity_title, take_problem_step,
 };
 pub(crate) use language_services::{
     CodeLanguageToolsState, LanguageServiceIndex, commit_language_rename, extent_words,

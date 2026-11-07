@@ -14,8 +14,8 @@ use crate::ui::tokens::Tokens;
 use crate::ui::widgets::{Problem, paint_problem_mark};
 use crate::workbench::MessageId;
 use crate::workbench::documents::text_editor_commands::{
-    EditorSyntax, consume_standard_command, consume_structural_shortcut, queue_caret_char_index,
-    queue_reveal_line, show_go_to_line, take_reveal_line,
+    EditorSyntax, consume_standard_command, consume_structural_shortcut, queue_caret_position,
+    show_go_to_line, take_reveal_line,
 };
 
 const FONT_SIZE: f32 = 11.0;
@@ -135,32 +135,7 @@ pub(crate) fn reveal_source_location(
     line: usize,
     column: usize,
 ) {
-    queue_reveal_line(context, editor_id, line);
-    context.data_mut(|data| data.insert_temp(reveal_column_id(editor_id), column));
-}
-
-fn reveal_column_id(editor_id: egui::Id) -> egui::Id {
-    editor_id.with("reveal-column")
-}
-
-/// Ask the editor to move the caret from the start of the line a reveal just
-/// placed it on to the column queued with that reveal, kept within the line.
-pub(crate) fn queue_revealed_column(
-    context: &egui::Context,
-    editor_id: egui::Id,
-    source: &str,
-    line: usize,
-) {
-    let Some(column) =
-        context.data_mut(|data| data.remove_temp::<usize>(reveal_column_id(editor_id)))
-    else {
-        return;
-    };
-    let (start, width) = line_extent(source, line);
-    let offset = column.saturating_sub(1).min(width);
-    if offset > 0 {
-        queue_caret_char_index(context, editor_id, start + offset);
-    }
+    queue_caret_position(context, editor_id, line, column);
 }
 
 /// The character index a one-based line starts at in `source`, and its
@@ -377,9 +352,6 @@ fn show_code_document_impl(
         )
     });
     let revealed = take_reveal_line(ui, editor_id, source);
-    if let Some(line) = revealed {
-        queue_revealed_column(ui.ctx(), editor_id, source, line);
-    }
     let requested_line = revealed.or_else(|| show_go_to_line(ui, editor_id, source));
     let tokens = Tokens::get(ui.ctx());
     let colors = tokens.color;
