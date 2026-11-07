@@ -2271,6 +2271,9 @@ fn a_qspice_pin_nothing_reaches_joins_its_own_net() {
         .expect("the flip-flop leaves a note");
     assert_eq!(note.text, "Not imported:\n¥2 (DFLOP)");
     assert_eq!(note.pos, Point::new(260, -40));
+    // The note marks no point: no anchor mark sits at its corner, where a
+    // flag on the refused part's pin would touch it.
+    assert!(note.anchor_mark_hidden);
 }
 
 /// An LTspice pin with no `PinName` letters nothing in LTspice. RSpice names

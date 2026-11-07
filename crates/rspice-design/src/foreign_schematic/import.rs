@@ -1650,6 +1650,8 @@ impl Builder<'_> {
     /// A note where a refused component stood, so the gap reads as one: it
     /// hangs from the top left of the body, its label under the words, so it
     /// stays on the body's own ground rather than across its neighbours.
+    /// It marks no point, so it draws no anchor mark: a mark at the corner
+    /// would touch a flag standing on the refused part's pin.
     fn place_marker(
         &mut self,
         symbol: &ForeignSymbol,
@@ -1680,7 +1682,9 @@ impl Builder<'_> {
             DesignNoteKind::PlainText,
             text,
         ) {
-            self.document.design_notes.push(note);
+            self.document
+                .design_notes
+                .push(note.with_anchor_mark_hidden(true));
         }
     }
 
