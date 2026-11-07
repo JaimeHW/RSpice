@@ -441,3 +441,18 @@ fn a_placed_scr_conducts_with_its_gate_driven() {
     let anode = bench.operating_point("a");
     assert!(anode > 0.9 && anode < 1.1, "{anode}");
 }
+
+#[test]
+fn a_placed_triac_conducts_either_way_with_its_gate_driven_either_way() {
+    // 20 mA into or out of the gate; +-100 V through 100 Ohm.
+    for (supply, gate) in [("100", "15"), ("-100", "-15")] {
+        let mut bench = Bench::default();
+        bench.primitive(ComponentType::VoltageSource, "V1", supply, &["in", "0"]);
+        bench.primitive(ComponentType::VoltageSource, "VG", gate, &["gs", "0"]);
+        bench.primitive(ComponentType::Resistor, "RL", "100", &["in", "a"]);
+        bench.primitive(ComponentType::Resistor, "RG", "715", &["gs", "g"]);
+        bench.part("rspice.functional.triac", "Q1", "", &["a", "g", "0"]);
+        let across = bench.operating_point("a").abs();
+        assert!(across > 0.9 && across < 1.2, "{supply} V: {across}");
+    }
+}

@@ -1317,3 +1317,61 @@ X4 a4 g 0 RSPICE_FN_SCR
     let a4 = value_at(&tran.time, waveform(&tran, "a4"), 200e-6);
     assert!(a4 < 2.0, "did not latch above IL: {a4}");
 }
+
+#[test]
+fn triac_fires_in_quadrants_one_and_three_and_commutates_at_the_zero_crossing() {
+    // 100 V, 50 Hz into 100 Ohm. X1's gate takes 1.5 IGT in the sense of
+    // the supply (quadrants I and III) for 100 us from 2 ms into each half
+    // cycle; it conducts the rest of the half cycle and turns off as the
+    // current falls under IH near the zero crossing. X2's 0.8 IGT never
+    // fires it.
+    let deck = "* triac
+V1 s 0 SIN(0 100 50)
+VGATE gx 0 PULSE(0 1 2m 1u 1u 100u 10m)
+RL s a 100
+BG1 0 g I=V(gx)*if(V(s)>0, 15m, -15m)
+RG1 g 0 10k
+X1 a g 0 RSPICE_FN_TRIAC
+RL2 s a2 100
+BG2 0 g2 I=V(gx)*if(V(s)>0, 8m, -8m)
+RG2 g2 0 10k
+X2 a2 g2 0 RSPICE_FN_TRIAC
+.end
+";
+    let tran = transient(deck, 40e-3, 2e-6);
+    let (s, a) = (waveform(&tran, "s"), waveform(&tran, "a"));
+    let at = |time: f64| value_at(&tran.time, a, time);
+    assert_close(
+        "blocks before the gate, I",
+        at(1e-3),
+        value_at(&tran.time, s, 1e-3),
+        1e-3,
+    );
+    assert!(at(5e-3) > 0.9 && at(5e-3) < 1.1, "quadrant I: {}", at(5e-3));
+    assert_close(
+        "blocks before the gate, III",
+        at(11e-3),
+        value_at(&tran.time, s, 11e-3),
+        1e-3,
+    );
+    assert!(
+        at(15e-3) < -0.9 && at(15e-3) > -1.1,
+        "quadrant III: {}",
+        at(15e-3)
+    );
+    // Off once the half cycle's current falls under IH, and blocking again
+    // until the next gate pulse.
+    assert_close(
+        "off after the zero crossing",
+        at(21e-3),
+        value_at(&tran.time, s, 21e-3),
+        1e-3,
+    );
+    let a2 = waveform(&tran, "a2");
+    let missed = tran
+        .time
+        .iter()
+        .zip(a2.iter().zip(s))
+        .all(|(_, (a2, s))| (a2 - s).abs() < 1e-3);
+    assert!(missed, "X2 fired below IGT");
+}

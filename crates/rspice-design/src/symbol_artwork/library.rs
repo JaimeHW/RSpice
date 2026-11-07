@@ -665,7 +665,7 @@ mod parse_sanity {
     #[test]
     fn no_embedded_asset_letters_text() {
         let assets = self::embedded_symbols::EMBEDDED_SYMBOLS;
-        assert_eq!(assets.len(), 187);
+        assert_eq!(assets.len(), 188);
         for &(filename, svg_data) in assets {
             if let Err(error) = parse_asset(filename, svg_data) {
                 panic!("{error}");

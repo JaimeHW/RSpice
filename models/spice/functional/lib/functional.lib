@@ -352,3 +352,28 @@ A3 N1 K 0 0 0 0 NBO 0 SCHMITT VT={VDRM} VH=1m VHIGH=1 VLOW=0
 A4 NTG NLT NBO 0 0 0 NS 0 OR VHIGH=1 VLOW=0 TRISE={TON} TFALL={TON}
 RNS NS 0 1Meg NOISY=0
 .ends RSPICE_FN_SCR
+
+* TRIAC. Pins: MT2 G MT1.
+* An SCR either way round, in all four quadrants: the gate is a junction
+* each way, conducting IGT at VGT of either sign, and the triac turns on
+* while its gate current exceeds IGT either way or its voltage exceeds
+* VDRM either way, latching once its current reaches IL either way and
+* turning off once it falls under IH. Conducting, it drops VTM at ITM
+* either way along the slope resistance RT. The defaults are a
+* BT136-class 600 V, 4 A triac.
+.subckt RSPICE_FN_TRIAC MT2 G MT1 VDRM=600 IDRM=5u VGT=0.7 IGT=10m IH=15m
++ IL=20m VTM=1.4 ITM=5 RT=0.1 TON=2u
+.func sp(x) {uramp(x)+ln(1+exp(-abs(x)))}
+VS MT2 N1 0
+BA N1 MT1 I=V(NS)*26m/RT*(sp((V(N1,MT1)-VTM+RT*ITM)/26m)-sp((V(MT1,N1)-VTM+RT*ITM)/26m))+V(N1,MT1)*IDRM/VDRM
+BG G MT1 I=IGT/ln(2)*(sp((V(G,MT1)-VGT)/26m)-sp((V(MT1,G)-VGT)/26m))
+CG G MT1 {IGT*TON/VGT}
+BV NV 0 V=abs(V(N1,MT1))
+BGV NGV 0 V=abs(V(G,MT1))
+BI NI 0 V=abs(I(VS))
+A1 NGV 0 0 0 0 0 NTG 0 SCHMITT VT={VGT-0.5m} VH=0.5m VHIGH=1 VLOW=0
+A2 NI 0 0 0 0 0 NLT 0 SCHMITT VT={(IL+IH)/2} VH={(IL-IH)/2} VHIGH=1 VLOW=0
+A3 NV 0 0 0 0 0 NBO 0 SCHMITT VT={VDRM} VH=1m VHIGH=1 VLOW=0
+A4 NTG NLT NBO 0 0 0 NS 0 OR VHIGH=1 VLOW=0 TRISE={TON} TFALL={TON}
+RNS NS 0 1Meg NOISY=0
+.ends RSPICE_FN_TRIAC

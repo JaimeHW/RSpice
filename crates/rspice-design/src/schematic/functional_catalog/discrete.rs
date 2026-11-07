@@ -615,3 +615,100 @@ pub(super) const SCR: FunctionalPartDescriptor = FunctionalPartDescriptor {
     preset: None,
     inputs: None,
 };
+
+const TRIAC_PINS: &[FunctionalPin] = &[pin("MT2", InOut), pin("G", In), pin("MT1", InOut)];
+
+/// A BT136-class 600 V, 4 A triac.
+const TRIAC_PARAMETERS: &[FunctionalParameter] = &[
+    number(
+        "VDRM",
+        "Off-state voltage",
+        "V",
+        "600",
+        "Voltage the triac blocks either way; beyond it, it breaks over and turns on without gate current.",
+    ),
+    number(
+        "IDRM",
+        "Off-state current",
+        "A",
+        "5u",
+        "Leakage at VDRM, either way, while blocking.",
+    ),
+    number(
+        "VGT",
+        "Gate trigger voltage",
+        "V",
+        "0.7",
+        "Gate voltage, either sign against MT1, at the gate trigger current.",
+    ),
+    number(
+        "IGT",
+        "Gate trigger current",
+        "A",
+        "10m",
+        "Gate current, either way, above which the triac turns on in any quadrant.",
+    ),
+    number(
+        "IH",
+        "Holding current",
+        "A",
+        "15m",
+        "Current, either way, below which a latched triac turns off.",
+    ),
+    number(
+        "IL",
+        "Latching current",
+        "A",
+        "20m",
+        "Current the triac must reach while triggered to stay on once the gate is removed; at least IH.",
+    ),
+    number(
+        "VTM",
+        "On-state voltage",
+        "V",
+        "1.4",
+        "Voltage across the triac, either way, while conducting ITM.",
+    ),
+    number(
+        "ITM",
+        "On-state test current",
+        "A",
+        "5",
+        "Current at which the on-state voltage is VTM.",
+    ),
+    number(
+        "RT",
+        "On-state slope resistance",
+        "Ω",
+        "0.1",
+        "Slope of the on-state voltage with current about ITM.",
+    ),
+    number(
+        "TON",
+        "Turn-on time",
+        "s",
+        "2u",
+        "Time the triac takes to turn fully on, and off; the gate also stores IGT·TON of charge at VGT.",
+    ),
+];
+
+pub(super) const TRIAC: FunctionalPartDescriptor = FunctionalPartDescriptor {
+    stable_id: "rspice.functional.triac",
+    display_name: "TRIAC",
+    subcircuit: "RSPICE_FN_TRIAC",
+    pins: TRIAC_PINS,
+    symbol_asset: "functional_triac.svg",
+    block: Some(THYRISTOR_BLOCK),
+    keywords: &[
+        "triac",
+        "bidirectional thyristor",
+        "ac switch",
+        "bt136",
+        "phase control",
+        "dimmer",
+    ],
+    category: ComponentCategory::Semiconductors,
+    parameters: TRIAC_PARAMETERS,
+    preset: None,
+    inputs: None,
+};
