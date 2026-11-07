@@ -925,3 +925,45 @@ fn a_noiseless_instance_flag_quiets_that_device() {
         1e-20,
     );
 }
+
+// LTspice 26.1.1 and QSPICE 2026 batch agree: with QF=5 and w0=2*pi*1k the
+// band-pass gives V(b)=1 at 1 kHz and 0.01746725-0.1310044j at 2 kHz, the
+// low-pass V(c)=0.5-0.5j and 0.2-0.4j. PSpice's LAPLACE form is the same
+// low-pass.
+#[test]
+fn a_laplace_expression_reads_parameters_braced_or_bare() {
+    let netlist = parse(
+        "laplace parameters\n\
+         .param QF=5\n\
+         .param w0=2*pi*1K\n\
+         V1 a 0 AC 1\n\
+         E1 b 0 a 0 Laplace={w0/QF}*s/(s*s+{w0/QF}*s+{w0*w0})\n\
+         R1 b 0 1k\n\
+         E2 c 0 a 0 Laplace=w0/(s+w0)\n\
+         R2 c 0 1k\n\
+         E3 d 0 LAPLACE {V(a)} = {w0/(s+w0)}\n\
+         R3 d 0 1k\n\
+         .end\n",
+    );
+    let sweep = Engine::default()
+        .run_ac(&netlist, &[1e3, 2e3])
+        .expect("AC sweep solves");
+    for (point, node, re, im) in [
+        (0, "b", 1.0, 0.0),
+        (0, "c", 0.5, -0.5),
+        (0, "d", 0.5, -0.5),
+        (1, "b", 1.746_724_890_829_694e-2, -1.310_043_668_122_27e-1),
+        (1, "c", 0.2, -0.4),
+        (1, "d", 0.2, -0.4),
+    ] {
+        let result = &sweep[point];
+        let index = result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case(node))
+            .unwrap_or_else(|| panic!("V({node}) is solved"));
+        let voltage = result.voltages[index];
+        assert_close(&format!("Re V({node}) #{point}"), voltage.re, re, 1e-9);
+        assert_close(&format!("Im V({node}) #{point}"), voltage.im, im, 1e-9);
+    }
+}

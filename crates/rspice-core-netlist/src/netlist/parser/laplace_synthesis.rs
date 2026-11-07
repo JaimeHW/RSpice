@@ -227,7 +227,10 @@ fn suffix_multiplier(suffix: &str) -> Option<Value> {
     }
 }
 
-fn tokenize_rational(text: &str) -> Result<Vec<RatTok>, String> {
+fn tokenize_rational(
+    parameter: &dyn Fn(&str) -> Option<Value>,
+    text: &str,
+) -> Result<Vec<RatTok>, String> {
     let mut tokens = Vec::new();
     let chars: Vec<char> = text.chars().collect();
     let mut i = 0;
@@ -279,13 +282,18 @@ fn tokenize_rational(text: &str) -> Result<Vec<RatTok>, String> {
                     i += 1;
                 }
                 let name: String = chars[start..i].iter().collect();
-                if chars.get(i) != Some(&'(') {
+                if chars.get(i) == Some(&'(') {
+                    tokens.push(RatTok::Function(name));
+                } else if let Some(value) = parameter(&name) {
+                    // A parameter stands for its value, as LTspice and QSPICE
+                    // read one.
+                    tokens.push(RatTok::Num(value));
+                } else {
                     return Err(format!(
                         "unknown symbol '{name}' in LAPLACE expression \
-                         (allowed: numbers, s, + - * / ^, parentheses and exp(-s*T))"
+                         (allowed: numbers, parameters, s, + - * / ^, parentheses and exp(-s*T))"
                     ));
                 }
-                tokens.push(RatTok::Function(name));
             }
             c if c.is_ascii_digit() || c == '.' => {
                 // Number: digits, optional fraction, optional exponent,
@@ -466,8 +474,12 @@ impl RatParser {
 /// Parse a rational transfer function in `s` into ascending-coefficient
 /// numerator and denominator polynomials.
 /// Parse `N(s)/D(s)·e^(-s·T)`, returning the numerator, denominator and `T`.
-pub(super) fn parse_rational_in_s(text: &str) -> Result<(Vec<Value>, Vec<Value>, Value), String> {
-    let tokens = tokenize_rational(text)?;
+/// `parameter` gives the value of a name the expression uses, if it has one.
+pub(super) fn parse_rational_in_s(
+    parameter: &dyn Fn(&str) -> Option<Value>,
+    text: &str,
+) -> Result<(Vec<Value>, Vec<Value>, Value), String> {
+    let tokens = tokenize_rational(parameter, text)?;
     if tokens.is_empty() {
         return Err("empty LAPLACE transfer function".to_string());
     }
@@ -524,7 +536,9 @@ fn fmt_value(v: Value) -> String {
 /// state), `n` behavioral current sources implementing the controller-
 /// canonical state derivatives, and the behavioral output source (voltage
 /// for E forms, current for G forms) on the original output nodes.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn synthesize_laplace(
+    parameter: &dyn Fn(&str) -> Option<Value>,
     name: &str,
     node_pos: &str,
     node_neg: &str,
@@ -534,7 +548,7 @@ pub(super) fn synthesize_laplace(
     line_num: usize,
 ) -> Result<Vec<Element>, ParseError> {
     let (num, den, delay) =
-        parse_rational_in_s(rational_text).map_err(|message| ParseError::Syntax {
+        parse_rational_in_s(parameter, rational_text).map_err(|message| ParseError::Syntax {
             line: line_num,
             message: format!("LAPLACE source '{name}': {message}"),
         })?;
@@ -830,6 +844,19 @@ mod tests {
 
     /// Rational equality up to scaling: `got_n/got_d == want_n/want_d`
     /// iff `got_n·want_d == want_n·got_d` as polynomials.
+    fn no_parameter(_: &str) -> Option<Value> {
+        None
+    }
+
+    #[test]
+    fn a_parameter_stands_for_its_value() {
+        let parameter = |name: &str| name.eq_ignore_ascii_case("w0").then_some(2.0);
+        let (num, den, _) = parse_rational_in_s(&parameter, "w0/(s+W0)").unwrap();
+        assert_ratio_eq((&num, &den), (&[2.0], &[2.0, 1.0]));
+        let error = parse_rational_in_s(&parameter, "1/(s+w1)").unwrap_err();
+        assert!(error.contains("unknown symbol 'w1'"), "{error}");
+    }
+
     fn assert_ratio_eq(got: (&[Value], &[Value]), want: (&[Value], &[Value])) {
         let lhs = poly_mul(&got.0.to_vec(), &want.1.to_vec());
         let rhs = poly_mul(&want.0.to_vec(), &got.1.to_vec());
@@ -850,18 +877,20 @@ mod tests {
 
     #[test]
     fn parses_first_order_lowpass() {
-        let (num, den, _) = parse_rational_in_s("1/(1+s/1000)").unwrap();
+        let (num, den, _) = parse_rational_in_s(&no_parameter, "1/(1+s/1000)").unwrap();
         assert_ratio_eq((&num, &den), (&[1.0], &[1.0, 1e-3]));
     }
 
     #[test]
     fn double_star_is_a_power_and_a_negative_exponent_a_reciprocal() {
-        let (num, den, delay) = parse_rational_in_s("1./(1+.0005*s)**3").unwrap();
-        let (want_num, want_den, _) = parse_rational_in_s("1/((1+.0005*s)^3)").unwrap();
+        let (num, den, delay) = parse_rational_in_s(&no_parameter, "1./(1+.0005*s)**3").unwrap();
+        let (want_num, want_den, _) =
+            parse_rational_in_s(&no_parameter, "1/((1+.0005*s)^3)").unwrap();
         assert_ratio_eq((&num, &den), (&want_num, &want_den));
         assert_eq!(delay, 0.0);
-        let (num, den, delay) = parse_rational_in_s("exp(-.001*s)*(1+.001*s)**-2").unwrap();
-        let (want_num, want_den, _) = parse_rational_in_s("1/(1+.001*s)^2").unwrap();
+        let (num, den, delay) =
+            parse_rational_in_s(&no_parameter, "exp(-.001*s)*(1+.001*s)**-2").unwrap();
+        let (want_num, want_den, _) = parse_rational_in_s(&no_parameter, "1/(1+.001*s)^2").unwrap();
         assert_ratio_eq((&num, &den), (&want_num, &want_den));
         assert!((delay - 1e-3).abs() < 1e-18);
     }
@@ -869,22 +898,24 @@ mod tests {
     #[test]
     fn parses_polynomial_ratio_with_suffixes_and_powers() {
         // (1 + s/1k)^2 / (1 + s*1m) — suffixes k and m, integer power.
-        let (num, den, _) = parse_rational_in_s("(1+s/1k)^2/(1+s*1m)").unwrap();
+        let (num, den, _) = parse_rational_in_s(&no_parameter, "(1+s/1k)^2/(1+s*1m)").unwrap();
         assert_ratio_eq((&num, &den), (&[1.0, 2e-3, 1e-6], &[1.0, 1e-3]));
     }
 
     #[test]
     fn delay_factors_multiply_out_of_the_rational_part() {
-        let (num, den, delay) = parse_rational_in_s("2*exp(-s*1m)*exp(1-s/1k)/(1+s*0.2m)").unwrap();
+        let (num, den, delay) =
+            parse_rational_in_s(&no_parameter, "2*exp(-s*1m)*exp(1-s/1k)/(1+s*0.2m)").unwrap();
         assert!((delay - 2e-3).abs() < 1e-18, "{delay}");
         assert_ratio_eq((&num, &den), (&[2.0 * 1f64.exp()], &[1.0, 2e-4]));
-        let (_, _, delay) = parse_rational_in_s("exp(-s*1m)/(1+s)+exp(-s*1m)").unwrap();
+        let (_, _, delay) =
+            parse_rational_in_s(&no_parameter, "exp(-s*1m)/(1+s)+exp(-s*1m)").unwrap();
         assert_eq!(delay, 1e-3);
     }
 
     #[test]
     fn cancels_common_s_factors_exactly() {
-        let (num, den, _) = parse_rational_in_s("s/(s*(1+s))").unwrap();
+        let (num, den, _) = parse_rational_in_s(&no_parameter, "s/(s*(1+s))").unwrap();
         // After exact s-cancellation the DC value must be finite (1.0).
         assert!(
             num[0] != 0.0 || den[0] != 0.0,
@@ -895,10 +926,11 @@ mod tests {
 
     #[test]
     fn rejects_improper_and_malformed_input() {
-        let err = synthesize_laplace("e1", "out", "0", "v(in)", "s", true, 1).unwrap_err();
+        let err =
+            synthesize_laplace(&no_parameter, "e1", "out", "0", "v(in)", "s", true, 1).unwrap_err();
         assert!(format!("{err}").contains("improper"), "{err}");
 
-        assert!(parse_rational_in_s("1/(1+q)").is_err());
+        assert!(parse_rational_in_s(&no_parameter, "1/(1+q)").is_err());
         for (text, needle) in [
             ("sqrt(s)/(1+s)", "sqrt() is not realizable"),
             ("exp(-s*s)/(1+s)", "must be a delay"),
@@ -906,20 +938,28 @@ mod tests {
             ("1/exp(-s*1m)", "time advance"),
             ("exp(-s*1m)+exp(-s*2m)", "different exp(-s*T) delays"),
         ] {
-            let error = parse_rational_in_s(text).unwrap_err();
+            let error = parse_rational_in_s(&no_parameter, text).unwrap_err();
             assert!(error.contains(needle), "{text}: {error}");
         }
-        assert!(parse_rational_in_s("1/0").is_err());
-        assert!(parse_rational_in_s("").is_err());
+        assert!(parse_rational_in_s(&no_parameter, "1/0").is_err());
+        assert!(parse_rational_in_s(&no_parameter, "").is_err());
     }
 
     #[test]
     fn first_order_synthesis_has_expected_structure() {
         // H = 1/(1 + s/wc): one state, cap 1/wc, unit feedback, unit output.
         let wc = 6283.185307179586;
-        let elements =
-            synthesize_laplace("e1", "out", "0", "v(in)", &format!("1/(1+s/{wc})"), true, 1)
-                .unwrap();
+        let elements = synthesize_laplace(
+            &no_parameter,
+            "e1",
+            "out",
+            "0",
+            "v(in)",
+            &format!("1/(1+s/{wc})"),
+            true,
+            1,
+        )
+        .unwrap();
 
         // cap + state derivative + output
         assert_eq!(elements.len(), 3);

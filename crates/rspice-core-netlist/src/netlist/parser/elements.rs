@@ -7780,6 +7780,8 @@ fn take_ltspice_control_table(
 fn take_ltspice_laplace(
     stream: &mut TokenStream,
     line_num: usize,
+    params: &ParamContext,
+    defer_simple_param_refs: bool,
 ) -> Result<Option<String>, ParseError> {
     let is_option = |stream: &TokenStream| {
         matches!(&stream.peek().kind, TokenKind::Ident(word) if ["WINDOW", "NFFT", "MTOL"]
@@ -7797,7 +7799,15 @@ fn take_ltspice_laplace(
     let mut expression = String::new();
     while !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) && !is_option(stream) {
         match &stream.peek().kind {
-            TokenKind::Expression(inner) => expression.push_str(&format!("({inner})")),
+            // A braced constant is its value; one that names a value only an
+            // instance binds stays as written.
+            TokenKind::Expression(inner) => match (!defer_simple_param_refs)
+                .then(|| stream.evaluate_expression(inner, params).ok())
+                .flatten()
+            {
+                Some(value) => expression.push_str(&format!("({value:e})")),
+                None => expression.push_str(&format!("({inner})")),
+            },
             kind => append_behavioral_expr_token(&mut expression, kind),
         }
         stream.advance();
@@ -8705,7 +8715,13 @@ fn parse_voltage_controlled_source(
                 element_label,
                 !is_voltage_output,
             )?;
+            let parameter = |name: &str| {
+                (!defer_simple_param_refs)
+                    .then(|| stream.evaluate_expression(name, params).ok())
+                    .flatten()
+            };
             let mut synthesized = synthesize_laplace(
+                &parameter,
                 &name,
                 &node_pos,
                 &node_neg,
@@ -8855,8 +8871,16 @@ fn parse_voltage_controlled_source(
             }
 
             let (ctrl_pos, ctrl_neg) = expect_node_pair(stream, line_num)?;
-            if let Some(rational_text) = take_ltspice_laplace(stream, line_num)? {
+            if let Some(rational_text) =
+                take_ltspice_laplace(stream, line_num, params, defer_simple_param_refs)?
+            {
+                let parameter = |name: &str| {
+                    (!defer_simple_param_refs)
+                        .then(|| stream.evaluate_expression(name, params).ok())
+                        .flatten()
+                };
                 elements.extend(synthesize_laplace(
+                    &parameter,
                     &name,
                     &node_pos,
                     &node_neg,
