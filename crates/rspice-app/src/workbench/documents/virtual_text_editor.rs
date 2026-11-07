@@ -1282,13 +1282,13 @@ fn apply_key_action(
             session.preferred_column = None;
             outcome.caret_moved = true;
         }
-        KeyAction::Indent | KeyAction::Outdent if editable && !keys.tab_moves_focus => {
-            let command = if action == KeyAction::Indent {
-                StructuralCommand::Indent
-            } else {
-                StructuralCommand::Outdent
-            };
-            apply_model_structural(&mut session.model, keys.syntax, command);
+        KeyAction::Indent if editable && !keys.tab_moves_focus => {
+            indent_at_selections(&mut session.model, keys.syntax);
+            session.preferred_column = None;
+            outcome.caret_moved = true;
+        }
+        KeyAction::Outdent if editable && !keys.tab_moves_focus => {
+            apply_model_structural(&mut session.model, keys.syntax, StructuralCommand::Outdent);
             session.preferred_column = None;
             outcome.caret_moved = true;
         }
@@ -1493,19 +1493,110 @@ fn apply_model_structural(
         any_changed |= result.changed;
     }
     mapped_byte_selections.reverse();
-    let mapped = mapped_byte_selections
-        .into_iter()
-        .map(|selection| TextSelection {
-            anchor: byte_to_char_index(&source, selection.anchor),
-            cursor: byte_to_char_index(&source, selection.cursor),
-        })
-        .collect::<Vec<_>>();
+    let mapped = if matches!(
+        command,
+        StructuralCommand::Indent | StructuralCommand::Outdent
+    ) {
+        selections_after_reindent(model, &source)
+    } else {
+        mapped_byte_selections
+            .into_iter()
+            .map(|selection| TextSelection {
+                anchor: byte_to_char_index(&source, selection.anchor),
+                cursor: byte_to_char_index(&source, selection.cursor),
+            })
+            .collect::<Vec<_>>()
+    };
     if any_changed {
         model.replace_source_transaction(&source, mapped)
     } else {
         model.set_selections(mapped);
         false
     }
+}
+
+/// Tab in the source: while every selection lies on one line, indentation
+/// at each caret up to the next indent stop, replacing what is selected;
+/// once a selection spans lines, those whole lines indent.
+fn indent_at_selections(model: &mut TextDocumentModel, syntax: EditorSyntax) {
+    let spans_lines = model.selections().iter().any(|selection| {
+        let range = selection.range();
+        model.line_column_for_char(range.start).0 != model.line_column_for_char(range.end).0
+    });
+    if spans_lines {
+        apply_model_structural(model, syntax, StructuralCommand::Indent);
+        return;
+    }
+    let stop = syntax.indentation().chars().count().max(1);
+    let padding = model
+        .selections()
+        .iter()
+        .map(|selection| {
+            let column = model.line_column_for_char(selection.range().start).1;
+            " ".repeat(stop - column % stop)
+        })
+        .collect::<Vec<_>>();
+    model.replace_at_selections(&padding);
+}
+
+/// The model's selections carried across a change of leading indentation to
+/// `source`, which has the same lines. Each end keeps its line and the text
+/// it sits before: a caret moves with its text, and a selection that starts
+/// at a line's start keeps the indentation inside it.
+fn selections_after_reindent(model: &TextDocumentModel, source: &str) -> Vec<TextSelection> {
+    let mut starts = vec![0];
+    let mut lengths = Vec::new();
+    let mut length = 0;
+    for (index, character) in source.chars().enumerate() {
+        if character == '\n' {
+            lengths.push(length);
+            starts.push(index + 1);
+            length = 0;
+        } else if character != '\r' {
+            length += 1;
+        }
+    }
+    lengths.push(length);
+    let carry = |index: usize, keep_line_start: bool| {
+        let (line, column) = model.line_column_for_char(index);
+        let (Some(&start), Some(&new_length)) = (starts.get(line), lengths.get(line)) else {
+            return index;
+        };
+        let old_length = model
+            .line_content_char_range(line)
+            .map_or(new_length, |range| range.len());
+        let column = if new_length >= old_length {
+            if column == 0 && keep_line_start {
+                0
+            } else {
+                column + (new_length - old_length)
+            }
+        } else {
+            column.saturating_sub(old_length - new_length)
+        };
+        start + column.min(new_length)
+    };
+    model
+        .selections()
+        .iter()
+        .map(|selection| {
+            let range = selection.range();
+            let selected = !range.is_empty();
+            let start = carry(range.start, selected);
+            let end = carry(range.end, false);
+            if selection.anchor <= selection.cursor {
+                TextSelection {
+                    anchor: start,
+                    cursor: end,
+                }
+            } else {
+                TextSelection {
+                    anchor: end,
+                    cursor: start,
+                }
+            }
+        })
+        .collect()
 }
 
 fn apply_primary_structural(

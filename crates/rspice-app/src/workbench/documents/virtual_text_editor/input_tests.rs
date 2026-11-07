@@ -208,11 +208,16 @@ fn arrows_tab_and_escape_stay_in_the_editor_and_act_on_the_text() {
     assert!(bench.focused(), "ArrowUp keeps focus in the editor");
     assert_eq!(up.cursor_line, 2);
 
-    let _ = bench.key(Key::Tab, Modifiers::NONE);
+    let tabbed = bench.key(Key::Tab, Modifiers::NONE);
     assert!(bench.focused(), "Tab keeps focus in the editor");
     assert_eq!(
-        bench.source, "module m;\n  analog begin\n        x = 1;\n  end\nendmodule\n",
-        "Tab indents the caret's line"
+        bench.source, "module m;\n  analog begin\n     x = 1;\n  end\nendmodule\n",
+        "Tab at column 3 pads to the next indent stop"
+    );
+    assert_eq!(
+        (tabbed.cursor_char_index, tabbed.selected),
+        (29, None),
+        "the caret stays a caret, after the padding"
     );
 
     let selected = bench.key(Key::ArrowRight, Modifiers::SHIFT);
@@ -225,6 +230,42 @@ fn arrows_tab_and_escape_stay_in_the_editor_and_act_on_the_text() {
     assert!(
         !bench.focused(),
         "Escape with nothing to collapse hands the keyboard back"
+    );
+}
+
+#[test]
+fn tab_indents_at_the_caret_and_whole_lines_under_a_selection() {
+    let mut bench = Bench::new("a\n  bb\n    ccc\n", true);
+    bench.focus();
+    bench.move_caret_to(2, 4);
+    let _ = bench.key(Key::Tab, Modifiers::NONE);
+    assert_eq!(bench.source, "a\n  b b\n    ccc\n", "one space to the stop");
+    let _ = bench.key(Key::Tab, Modifiers::NONE);
+    assert_eq!(bench.source, "a\n  b     b\n    ccc\n", "a whole stop");
+
+    // A selection across lines indents those lines and stays selected.
+    bench.move_caret_to(1, 1);
+    let _ = bench.key(Key::ArrowDown, Modifiers::SHIFT);
+    let _ = bench.key(Key::ArrowRight, Modifiers::SHIFT);
+    let indented = bench.key(Key::Tab, Modifiers::NONE);
+    assert_eq!(bench.source, "    a\n      b     b\n    ccc\n");
+    assert_eq!(
+        indented.selected,
+        Some((0, 11)),
+        "the selection keeps the lines' text and their new indentation"
+    );
+    let outdented = bench.key(Key::Tab, Modifiers::SHIFT);
+    assert_eq!(bench.source, "a\n  b     b\n    ccc\n");
+    assert_eq!(outdented.selected, Some((0, 3)));
+
+    // Shift+Tab on a caret takes one stop off its line and keeps the caret
+    // on the text it was before.
+    bench.move_caret_to(3, 6);
+    let outdented = bench.key(Key::Tab, Modifiers::SHIFT);
+    assert_eq!(bench.source, "a\n  b     b\nccc\n");
+    assert_eq!(
+        (outdented.cursor_char_index, outdented.selected),
+        (13, None)
     );
 }
 
