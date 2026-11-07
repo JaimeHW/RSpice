@@ -12,8 +12,8 @@ use rspice_design::schematic::component_type::ComponentType;
 use rspice_design::schematic::device_catalog::{
     CatalogXspiceDeviceDescriptor, engine_only_xspice_devices,
 };
-use rspice_design::schematic::net_label::{NetLabelKind, SupplyGlyph};
 use rspice_design::schematic::functional_catalog::{FunctionalPartDescriptor, functional_parts};
+use rspice_design::schematic::net_label::{NetLabelKind, SupplyGlyph};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ComponentPaletteEntry {
@@ -28,9 +28,6 @@ pub struct ComponentPaletteEntry {
     pub variant: Option<&'static str>,
     /// The model card the row places in place of the type's own default.
     pub default_model: Option<&'static str>,
-    /// Other cards of the row's part, chosen in its model field once placed.
-    /// The shelf answers them with this row instead of listing each.
-    pub alternate_models: &'static [&'static str],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -93,7 +90,6 @@ const fn entry(
         keywords,
         variant: None,
         default_model: None,
-        alternate_models: &[],
     }
 }
 
@@ -112,7 +108,6 @@ const fn variant(
         keywords,
         variant: Some(variant),
         default_model,
-        alternate_models: &[],
     }
 }
 
@@ -344,25 +339,15 @@ const SEMICONDUCTORS: &[ComponentPaletteEntry] = &[
         Some("RSPICE_SCHOTTKY"),
         &["schottky", "barrier diode", "rectifier"],
     ),
-    // One LED: red when placed, and its model field takes the other colours.
-    ComponentPaletteEntry {
-        alternate_models: &["RSPICE_LED_GREEN", "RSPICE_LED_BLUE", "RSPICE_LED_WHITE"],
-        ..variant(
-            T::Diode,
-            "LED",
-            "led",
-            Some("RSPICE_LED_RED"),
-            &[
-                "led",
-                "light emitting diode",
-                "indicator",
-                "red",
-                "green",
-                "blue",
-                "white",
-            ],
-        )
-    },
+    // One LED, red when placed. The green, blue and white cards are library
+    // parts of their own, and its model field takes any of them.
+    variant(
+        T::Diode,
+        "LED",
+        "led",
+        Some("RSPICE_LED_RED"),
+        &["led", "light emitting diode", "indicator", "red"],
+    ),
     entry(
         T::Nmos,
         "NMOS",

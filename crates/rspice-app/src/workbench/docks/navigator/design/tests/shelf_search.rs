@@ -76,7 +76,8 @@ const TOP_HITS: &[(&str, &[&str])] = &[
     ("electrolytic", &["Polarized Capacitor"]),
     ("polarized capacitor", &["Polarized Capacitor"]),
     ("rspice_zener", &["Zener Diode"]),
-    ("rspice_led_green", &["LED"]),
+    ("rspice_led_green", &["RSPICE_LED_GREEN"]),
+    ("rspice_led_white", &["RSPICE_LED_WHITE"]),
     ("vdd", &["VDD"]),
     ("vcc", &["VCC"]),
     ("vss", &["VSS"]),
@@ -160,12 +161,11 @@ fn a_query_nothing_answers_lists_nothing() {
     assert!(hits(&app, "no-such-component-or-cell").is_empty());
 }
 
-/// A library card a variant row places, or takes in its model field, is
-/// answered by that row alone.
+/// A library card a variant row places is answered by that row alone.
 #[test]
 fn a_card_a_variant_row_places_is_listed_once() {
     let app = RSpiceApp::test_instance();
-    for query in ["led", "rspice_led_red", "rspice_led_blue", "white"] {
+    for query in ["led", "rspice_led_red"] {
         let labels = hits(&app, query)
             .into_iter()
             .filter(|hit| hit.label.starts_with("LED"))
