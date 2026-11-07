@@ -574,6 +574,7 @@ fn resolve_component_symbol(
         .map(|pin| {
             SymbolPin::new(pin.name.clone(), pin.direction, Some(pin.offset))
                 .with_name_hidden(pin.name_hidden)
+                .with_name_offset(pin.name_offset)
         })
         .collect();
     Ok((Some(printable_document), Some(source)))

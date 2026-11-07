@@ -1399,9 +1399,13 @@ impl Builder<'_> {
             };
             // A place the symbol draws no pin for letters no name either:
             // several share one point.
+            let name_offset = slot
+                .and_then(|pin| pin.name_offset)
+                .map(|offset| self.scale_fine(ForeignPoint::new(offset, 0)).x);
             pins.push(
                 SymbolPin::new(port.name.clone(), port.direction, Some(position))
-                    .with_name_hidden(slot.is_none_or(|pin| pin.name_hidden)),
+                    .with_name_hidden(slot.is_none_or(|pin| pin.name_hidden))
+                    .with_name_offset(name_offset),
             );
         }
         if !gaps.is_empty() && !device {

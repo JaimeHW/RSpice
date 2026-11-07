@@ -245,6 +245,7 @@ fn component(node: &Node) -> Result<ForeignSymbol, ForeignParseError> {
                     name_hidden: !pin_name_lettered(
                         numbers_after_points(fields).get(1).map(String::as_str),
                     ),
+                    name_offset: None,
                     position: pin_points
                         .first()
                         .copied()

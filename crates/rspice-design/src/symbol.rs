@@ -126,6 +126,10 @@ pub struct SymbolPin {
     /// names the terminal everywhere else.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub name_hidden: bool,
+    /// How far in from the terminal the drawing this pin came from starts
+    /// its name. The name never starts closer than the standard gutter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name_offset: Option<i32>,
 }
 
 impl SymbolPin {
@@ -138,12 +142,20 @@ impl SymbolPin {
             side: Some(default_pin_side(direction, position)),
             offset: pin_offset(default_pin_side(direction, position), position),
             name_hidden: false,
+            name_offset: None,
         }
     }
 
     /// The same pin with its name left off the drawing, or lettered.
     pub fn with_name_hidden(mut self, hidden: bool) -> Self {
         self.name_hidden = hidden;
+        self
+    }
+
+    /// The same pin with its name starting this far in from the terminal,
+    /// or at the standard gutter.
+    pub fn with_name_offset(mut self, offset: Option<i32>) -> Self {
+        self.name_offset = offset;
         self
     }
 

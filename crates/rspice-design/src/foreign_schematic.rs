@@ -176,6 +176,9 @@ pub struct ForeignPin {
     pub default_net: Option<String>,
     /// The source tool letters no name at this pin.
     pub name_hidden: bool,
+    /// How far in from the pin the source tool starts its name, in the
+    /// drawing's units.
+    pub name_offset: Option<i32>,
 }
 
 /// Drawing primitives, in the units of the drawing that holds them.

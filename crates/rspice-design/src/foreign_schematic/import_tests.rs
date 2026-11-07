@@ -1964,6 +1964,7 @@ fn a_qspice_pin_nothing_reaches_joins_its_own_net() {
 fn a_pin_its_drawing_letters_no_name_for_draws_none() {
     const LABELLED_ASY: &str = "Version 4\nSymbolType BLOCK\nRECTANGLE Normal -32 -32 32 32\n\
         SYMATTR Prefix X\nSYMATTR SpiceModel labelled.sub\nSYMATTR Value labelled\n\
+        LINE Normal -32 8 -24 0\nLINE Normal -32 -8 -24 0\n\
         PIN -32 0 LEFT 8\nPINATTR PinName IN\nPINATTR SpiceOrder 1\n\
         PIN 32 0 NONE 0\nPINATTR PinName OUT\nPINATTR SpiceOrder 2\n";
     let mut library = library();
@@ -2019,6 +2020,25 @@ fn a_pin_its_drawing_letters_no_name_for_draws_none() {
     assert_eq!(
         hidden(&ltspice, "labelled"),
         BTreeMap::from([("IN".to_owned(), false), ("OUT".to_owned(), true)])
+    );
+    // A lettered pin's name starts where the symbol starts it: eight drawing
+    // units in from the pin, past a clock wedge drawn there.
+    let labelled = ltspice
+        .cells
+        .iter()
+        .find(|cell| cell.source_symbol == "labelled")
+        .expect("the labelled cell");
+    let resolved =
+        ResolvedCellSymbol::from_authored_document(labelled.symbol.clone(), &labelled.ports);
+    let input = resolved
+        .connectable_pins()
+        .find(|pin| pin.name == "IN")
+        .expect("the IN pin");
+    assert_eq!(input.name_offset, Some(10));
+    let terminal = resolved.effective_pin_offset(input);
+    assert_eq!(
+        resolved.pin_label_anchor(input),
+        Point::new(terminal.x + 10, terminal.y)
     );
     // An A-device draws no pin names, and its places without a pin share one
     // point: none of them letters a name over the others.

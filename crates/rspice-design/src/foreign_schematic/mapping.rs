@@ -305,6 +305,7 @@ pub(super) fn ltspice_builtin_definition(base_name: &str) -> Option<ForeignSymbo
                 position: ForeignPoint::new(*x, *y),
                 default_net: None,
                 name_hidden: false,
+                name_offset: None,
             })
             .collect(),
         shapes: Vec::new(),

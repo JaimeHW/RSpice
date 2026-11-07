@@ -40,6 +40,8 @@ pub struct ResolvedSymbolPin {
     pub offset: Point,
     /// The symbol letters no name at this pin.
     pub name_hidden: bool,
+    /// How far in from the terminal the symbol starts this pin's name.
+    pub name_offset: Option<i32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -91,7 +93,9 @@ impl ResolvedCellSymbol {
     /// symbol) has a body that reaches out to every terminal, so the lead the
     /// renderer would draw has no length and the name would start on the
     /// artwork's lead. The name steps past the end of that lead instead, as a
-    /// generated symbol's steps past the end of the lead it draws.
+    /// generated symbol's steps past the end of the lead it draws. A pin that
+    /// sets its own distance for the name starts it there when that is
+    /// farther in.
     pub fn pin_label_anchor(&self, pin: &ResolvedSymbolPin) -> Point {
         let anchor = crate::symbol_generation::pin_label_anchor(
             pin.offset,
@@ -107,10 +111,18 @@ impl ResolvedCellSymbol {
                 end.y + step.y * crate::symbol_generation::GENERATED_LABEL_GUTTER,
             )
         });
-        self.effective_point(match past_lead {
-            Some(past) if inward(past) > inward(anchor) => past,
-            _ => anchor,
-        })
+        // The symbol's own distance for the name, past artwork at the pin
+        // that is not a lead, such as a clock wedge.
+        let drawn = pin
+            .name_offset
+            .map(|reach| Point::new(pin.offset.x + step.x * reach, pin.offset.y + step.y * reach));
+        let farthest = [past_lead, drawn]
+            .into_iter()
+            .flatten()
+            .filter(|point| inward(*point) > inward(anchor))
+            .max_by_key(|point| inward(*point))
+            .unwrap_or(anchor);
+        self.effective_point(farthest)
     }
 
     pub fn from_authored_document(document: SymbolDocument, ports: &[PortSpec]) -> Self {
@@ -126,6 +138,7 @@ impl ResolvedCellSymbol {
                         side: document.pin_side(pin),
                         offset,
                         name_hidden: pin.name_hidden,
+                        name_offset: pin.name_offset,
                     }),
                     None => issues.push(ResolvedSymbolIssue {
                         kind: ResolvedSymbolIssueKind::UnplacedPin,
@@ -147,6 +160,7 @@ impl ResolvedCellSymbol {
                         side: document.pin_side(pin),
                         offset,
                         name_hidden: pin.name_hidden,
+                        name_offset: pin.name_offset,
                     }),
                     None => issues.push(ResolvedSymbolIssue {
                         kind: ResolvedSymbolIssueKind::UnplacedPin,
@@ -220,6 +234,7 @@ impl ResolvedCellSymbol {
                         side: document.pin_side(pin),
                         offset,
                         name_hidden: pin.name_hidden,
+                        name_offset: pin.name_offset,
                     })
                 })
             })
@@ -357,6 +372,59 @@ mod tests {
                 ("IN", Point::new(-27, 0)),
                 ("OUT", Point::new(27, 0)),
                 ("BIAS", Point::new(0, 27)),
+            ]
+        );
+    }
+
+    /// A pin name starts as far in as its symbol sets it, past a clock wedge
+    /// drawn at the pin, and never closer than the standard gutter.
+    #[test]
+    fn a_pin_name_starts_as_far_in_as_its_symbol_sets_it() {
+        let line = |from: (i32, i32), to: (i32, i32)| SymbolShape::Polyline {
+            points: vec![Point::new(from.0, from.1), Point::new(to.0, to.1)],
+            closed: false,
+        };
+        let document = SymbolDocument {
+            pins: vec![
+                SymbolPin::new("CLK", PortDirection::In, Some(Point::new(-30, 0)))
+                    .with_name_offset(Some(10)),
+                SymbolPin::new("D", PortDirection::In, Some(Point::new(-30, 20)))
+                    .with_name_offset(Some(1)),
+                SymbolPin::new("Q", PortDirection::Out, Some(Point::new(30, 0))),
+            ],
+            body: vec![
+                SymbolShape::Polyline {
+                    points: vec![
+                        Point::new(-30, -30),
+                        Point::new(30, -30),
+                        Point::new(30, 30),
+                        Point::new(-30, 30),
+                    ],
+                    closed: true,
+                },
+                line((-30, -8), (-22, 0)),
+                line((-30, 8), (-22, 0)),
+            ],
+            ..SymbolDocument::default()
+        };
+        let symbol = ResolvedCellSymbol::from_authored_document(document.clone(), &[]);
+        let anchors = symbol
+            .connectable_pins()
+            .map(|pin| {
+                let standard = crate::symbol_generation::pin_label_anchor(
+                    pin.offset,
+                    pin.side,
+                    document.drawn_body_bounds(),
+                );
+                (pin.name.as_str(), symbol.pin_label_anchor(pin), standard)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            anchors,
+            [
+                ("CLK", Point::new(-20, 0), Point::new(-27, 0)),
+                ("D", Point::new(-27, 20), Point::new(-27, 20)),
+                ("Q", Point::new(27, 0), Point::new(27, 0)),
             ]
         );
     }
