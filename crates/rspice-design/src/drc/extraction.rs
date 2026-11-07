@@ -1446,7 +1446,10 @@ impl GroundTies {
             if label.is_ground() {
                 continue;
             }
-            let Some(global) = hierarchy.canonical_global_label(label.name.trim()) else {
+            let declaration = label.global_declaration();
+            let Some(global) = hierarchy.canonical_global_label(
+                declaration.as_deref().unwrap_or_else(|| label.name.trim()),
+            ) else {
                 continue;
             };
             let key = global.to_ascii_lowercase();

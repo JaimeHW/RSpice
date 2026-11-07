@@ -2180,6 +2180,91 @@ mod tests {
     }
 
     #[test]
+    fn a_supply_symbol_declares_its_rail_global_without_a_bang() {
+        use rspice_design::schematic::net_label::SupplyGlyph;
+        let libraries = LibraryCatalog::default();
+        let mut schematic = Schematic::default();
+        for (id, y) in [(1, 0), (2, 40), (3, 80)] {
+            schematic.document_mut_for_test().wires.push(Wire::segment(
+                id,
+                Point::new(0, y),
+                Point::new(40, y),
+            ));
+        }
+        let labels = &mut schematic.document_mut_for_test().net_labels;
+        labels.push(NetLabel::supply(
+            4,
+            Point::new(0, 0),
+            "VDD",
+            SupplyGlyph::Bar,
+        ));
+        labels.push(NetLabel::supply(
+            5,
+            Point::new(40, 40),
+            "VDD",
+            SupplyGlyph::Bar,
+        ));
+        labels.push(NetLabel::supply(
+            6,
+            Point::new(0, 80),
+            "VX",
+            SupplyGlyph::Down,
+        ));
+        let mut buffers = HashMap::new();
+        buffers.insert("user/top/schematic".to_owned(), schematic.clone());
+        let generate = |contract: &ConnectivityContract| {
+            let hierarchy =
+                HierarchySource::from_workspace(&libraries, &buffers).with_connectivity(contract);
+            generate_netlist_hierarchical(
+                &schematic,
+                &[],
+                &hierarchy,
+                &crate::netlist_gen::NetlistSourceData::new(
+                    &crate::netlist_gen::FixtureSourceFiles,
+                ),
+            )
+        };
+
+        // Declared by placement: both rails are global, and the two VDD
+        // symbols on separate wires are one net.
+        let result = generate(&ConnectivityContract::default());
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        assert!(
+            result.netlist.contains(".GLOBAL VDD! VX!"),
+            "{}",
+            result.netlist
+        );
+        assert_eq!(result.nets.len(), 2, "{:?}", result.nets);
+
+        // Under a technology-defined policy only the catalog's rails promote.
+        let contract = ConnectivityContract {
+            policy: ConnectivityPolicy {
+                global_promotion: GlobalNetPromotionPolicy::TechnologyDefinedOnly,
+                ..ConnectivityPolicy::default()
+            },
+            technology_global_nets: Some(TechnologyGlobalNetCatalog {
+                authority: "pdk".to_owned(),
+                nets: vec![ConnectivityAliasGroup {
+                    canonical_name: "VDD".to_owned(),
+                    aliases: Vec::new(),
+                }],
+            }),
+            ..ConnectivityContract::default()
+        };
+        contract.validate().unwrap();
+        let result = generate(&contract);
+        assert!(
+            result.netlist.contains(
+                ".GLOBAL VDD
+"
+            ),
+            "{}",
+            result.netlist
+        );
+        assert!(result.nets.contains_key("VX"), "{:?}", result.nets);
+    }
+
+    #[test]
     fn dialect_alias_catalog_merges_explicit_global_declarations() {
         let libraries = LibraryCatalog::default();
         let mut schematic = Schematic::default();

@@ -35,8 +35,7 @@ impl<S: AsRef<SchematicDocument>> SchematicBuffers for HashMap<String, S> {
         let mut declarations = self
             .values()
             .flat_map(|schematic| schematic.as_ref().net_labels.iter())
-            .filter(|label| label.name.ends_with('!'))
-            .map(|label| label.name.clone())
+            .filter_map(crate::schematic::net_label::NetLabel::global_declaration)
             .collect::<Vec<_>>();
         declarations.sort();
         declarations.dedup();

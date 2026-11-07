@@ -25,6 +25,48 @@ pub enum NetLabelKind {
 
     /// A name declared to continue on another sheet of the same cellview.
     OffSheet { direction: CrossSheetPortDirection },
+
+    /// A supply rail. Placing one declares its name global: it joins every
+    /// sheet and every cell of the design, and the deck writes `.GLOBAL`.
+    Supply { glyph: SupplyGlyph },
+}
+
+/// How a supply symbol is drawn. Ground keeps its own symbol.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "kebab-case")]
+pub enum SupplyGlyph {
+    /// A bar above the pin: a positive rail such as VDD.
+    #[default]
+    Bar,
+    /// An arrow above the pin: a positive rail such as VCC.
+    Arrow,
+    /// A bar below the pin: a negative or return rail such as VSS or VEE.
+    Down,
+}
+
+impl SupplyGlyph {
+    pub const ALL: [Self; 3] = [Self::Bar, Self::Arrow, Self::Down];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Bar => "Bar",
+            Self::Arrow => "Arrow",
+            Self::Down => "Negative bar",
+        }
+    }
+
+    /// The glyph a rail is drawn with by convention: VSS, VEE and a negative
+    /// name point down, VCC takes the arrow, anything else the bar.
+    pub fn for_name(name: &str) -> Self {
+        let name = name.trim().trim_end_matches('!').to_ascii_uppercase();
+        if name.starts_with("VSS") || name.starts_with("VEE") || name.starts_with("V-") {
+            Self::Down
+        } else if name.starts_with("VCC") {
+            Self::Arrow
+        } else {
+            Self::Bar
+        }
+    }
 }
 
 impl NetLabelKind {
@@ -53,7 +95,8 @@ impl NetLabelKind {
     /// claim.
     pub const fn off_sheet_direction(self) -> Option<CrossSheetPortDirection> {
         match self {
-            Self::Local => None,
+            // A supply joins by being global, not by a sheet-to-sheet claim.
+            Self::Local | Self::Supply { .. } => None,
             Self::OffSheet { direction } => Some(direction),
         }
     }
@@ -103,6 +146,29 @@ impl NetLabel {
             pos,
             name: name.into(),
             kind: NetLabelKind::OffSheet { direction },
+        }
+    }
+
+    /// Create a supply symbol: a rail declared global by placing it.
+    pub fn supply(id: u64, pos: Point, name: impl Into<String>, glyph: SupplyGlyph) -> Self {
+        Self {
+            id,
+            pos,
+            name: name.into(),
+            kind: NetLabelKind::Supply { glyph },
+        }
+    }
+
+    /// The global this label declares, `!`-suffixed: a supply symbol always
+    /// declares its rail; any other label only when its name ends in `!`.
+    pub fn global_declaration(&self) -> Option<String> {
+        let name = self.name.trim();
+        match self.kind {
+            NetLabelKind::Supply { .. } if !name.is_empty() => {
+                Some(format!("{}!", name.trim_end_matches('!')))
+            }
+            _ if name.ends_with('!') => Some(name.to_owned()),
+            _ => None,
         }
     }
 

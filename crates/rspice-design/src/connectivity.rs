@@ -971,7 +971,9 @@ where
                 );
                 continue;
             }
-            let promoted_name = (self.promote_label)(authored_name);
+            let declaration = label.global_declaration();
+            let promoted_name =
+                (self.promote_label)(declaration.as_deref().unwrap_or(authored_name));
             let name = promoted_name.as_deref().unwrap_or(authored_name);
             let bound = self.point_to_net.get(&label.pos).copied();
             let Some(net_id) = bound else {
