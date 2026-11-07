@@ -147,12 +147,13 @@ pub use {
         evaluate_noise_equation_measurements, evaluate_noise_measurements,
         evaluate_noise_measurements_with_abort,
         evaluate_noise_table_continuous_measurements_with_limits_and_abort,
-        evaluate_noise_table_measurements_with_abort, evaluate_tran_continuous_measurements,
+        evaluate_noise_table_measurements_with_abort, evaluate_op_measurements_with_abort,
+        evaluate_tran_continuous_measurements,
         evaluate_tran_continuous_measurements_with_limits_and_abort,
         evaluate_tran_equation_measurements, evaluate_tran_four_output_requests_with_abort,
         evaluate_tran_measurements, evaluate_tran_measurements_with_abort,
         evaluate_tran_output_requests_with_abort, evaluate_tran_remeasurements,
-        measurements_for_analysis, transient_signal_map, unevaluated_measurements,
+        transient_signal_map, unevaluated_measurements,
     },
 };
 

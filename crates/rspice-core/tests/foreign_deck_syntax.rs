@@ -4,6 +4,8 @@
 //! decks. Where the two disagree QSPICE decides; where QSPICE cannot read a
 //! construct, LTspice does.
 
+use rspice_core::abort_signal::NoAbort;
+use rspice_core::analysis::evaluate_op_measurements_with_abort;
 use rspice_core::analysis::measure::MeasureResult;
 use rspice_core::analysis::measure_signals::{
     evaluate_ac_measurements, evaluate_tran_measurements,
@@ -376,4 +378,35 @@ B1 o 0 V=V(a,p)*0.5+V(n,a)*0.25
     );
     assert_close("V(o1)", op_voltage(&netlist, "o1"), -10.75, 1e-9);
     assert_close("V(o2)", op_voltage(&netlist, "o2"), -1.47, 1e-9);
+}
+
+// QSPICE (QPOST) decides: vout=3.52533, iR1=1.47467 mA, pw=5.1987 mW,
+// vd=0.529717; LTspice: 3.525329, 1.474671 mA, 5.198700 mW, 0.529718.
+#[test]
+fn measurements_read_the_operating_point() {
+    let netlist = parse(
+        "* meas on the operating point
+V1 in 0 5
+R1 in out 1k
+R2 out 0 3k
+D1 out d dmod
+R3 d 0 10k
+.model dmod D(IS=2.52n RS=0.568 N=1.752)
+.op
+.meas op vout find V(out)
+.meas op iR1 find I(R1)
+.meas op pw param vout*iR1
+.meas op vd find V(out)-V(d)
+.end
+",
+    );
+    let operating_point = Engine::default()
+        .run_dc_op(&netlist)
+        .expect("operating point solves");
+    let results = evaluate_op_measurements_with_abort(&netlist, &operating_point, &NoAbort)
+        .expect("measurements evaluate");
+    assert_close("vout", measurement(&results, "vout"), 3.52533, 2e-5);
+    assert_close("iR1", measurement(&results, "iR1"), 1.47467e-3, 2e-8);
+    assert_close("pw", measurement(&results, "pw"), 5.1987e-3, 2e-7);
+    assert_close("vd", measurement(&results, "vd"), 0.529717, 2e-5);
 }

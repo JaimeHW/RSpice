@@ -435,7 +435,7 @@ impl<'a> RunContext<'a> {
 
         for analysis in analyses {
             let reason = match analysis.as_str() {
-                "TRAN" | "DC" | "AC" | "NOISE" => format!("{analysis} analysis did not run"),
+                "OP" | "TRAN" | "DC" | "AC" | "NOISE" => format!("{analysis} analysis did not run"),
                 "TRAN_CONT" | "FFT" => "TRAN analysis did not run".to_string(),
                 "DC_CONT" => "DC analysis did not run".to_string(),
                 "AC_CONT" => "AC analysis did not run".to_string(),

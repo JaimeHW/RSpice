@@ -6203,7 +6203,7 @@ fn evaluate_noise_measurements_with_parameters(
 
 /// The netlist's measurement statements for one analysis kind
 /// (`"TRAN"`, `"DC"`, `"AC"`, ...).
-pub fn measurements_for_analysis<'a>(
+pub(crate) fn measurements_for_analysis<'a>(
     netlist: &'a Netlist,
     analysis: &str,
 ) -> Vec<&'a MeasureStatement> {
@@ -7627,6 +7627,76 @@ fn evaluate_ac_measurements_with_parameters(
     }?;
     overlay_continuous_equation_results(&statements, &mut results, equation_traces, "AC");
     super::measure_units::annotate_native(netlist, "AC", &mut results, signals.keys(), None);
+    if abort.is_aborted() {
+        Err(SimulationError::Aborted)
+    } else {
+        Ok(results)
+    }
+}
+
+/// Evaluate `.MEAS OP` statements on the operating point. LTspice and
+/// QSPICE read the operating point as a one-point analysis: a FIND or DERIV
+/// with no AT or WHEN reads that point, and a PARAM reads the results before
+/// it.
+pub fn evaluate_op_measurements_with_abort(
+    netlist: &Netlist,
+    operating_point: &SimulationResult,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<MeasureResult>, SimulationError> {
+    if abort.is_aborted() {
+        return Err(SimulationError::Aborted);
+    }
+    let statements = measurements_for_analysis(netlist, "OP");
+    if statements.is_empty() {
+        return Ok(Vec::new());
+    }
+    let point = [(0.0, operating_point.clone())];
+    let Some(series) = DcSweepSeries::from_sweep_with_abort(&point, abort)? else {
+        return Ok(failed_measurements(
+            &statements,
+            "the operating point produced no solution",
+        ));
+    };
+    let at_the_point = statements
+        .iter()
+        .map(|statement| {
+            let mut statement = (*statement).clone();
+            if let MeasureType::Find { at, when, .. } | MeasureType::Derivative { at, when, .. } =
+                &mut statement.measure_type
+                && at.is_none()
+                && when.is_none()
+            {
+                *at = Some(0.0);
+            }
+            statement
+        })
+        .collect::<Vec<_>>();
+    let statements = at_the_point.iter().collect::<Vec<_>>();
+    let mut signals = series.signal_map();
+    let differential_signals =
+        match materialize_differential_voltage_signals(&statements, 1, &signals) {
+            Ok(signals) => signals,
+            Err(error) => return Ok(failed_measurements(&statements, &error)),
+        };
+    for (name, waveform) in &differential_signals {
+        insert_case_variants(&mut signals, name, waveform);
+    }
+    let policy = MeasureEvaluationPolicy {
+        global_default: netlist.options.measure_default_value,
+        equation_default: 0.0,
+        use_legacy_tran_trig_targ: false,
+        events: None,
+        interpolate_extrema_window_ends: measures_interpolate_extrema_window_ends(netlist),
+    };
+    let mut results = evaluate_statements(
+        &statements,
+        series.axis(),
+        &signals,
+        (&netlist.params).into(),
+        policy,
+        abort,
+    )?;
+    super::measure_units::annotate_native(netlist, "OP", &mut results, signals.keys(), None);
     if abort.is_aborted() {
         Err(SimulationError::Aborted)
     } else {

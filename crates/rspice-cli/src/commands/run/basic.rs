@@ -150,6 +150,16 @@ pub(super) fn finish_dc_op_result(
         result,
         op_report,
     ));
+    let measurements = rspice_core::analysis::evaluate_op_measurements_with_abort(
+        ctx.netlist,
+        result,
+        &crate::abort::ProcessAbort,
+    )
+    .map_err(|source| CliError::CoreSimulationError {
+        source,
+        analysis: Some("OP measurement projection".to_string()),
+    })?;
+    ctx.record_measurements("OP", measurements)?;
 
     if let Some(output) = ctx.resolve_output("op") {
         let analysis_id = output.analysis("op")?;
