@@ -64,7 +64,7 @@ impl SymbolImportFormat {
             SymbolImportFormat::LtspiceAsy
         } else {
             return Err(SymbolDefinitionError::Import(format!(
-                "{source_name}: unsupported symbol source; expected JSON, SVG, or EDIF 2 0 0"
+                "{source_name}: unsupported symbol source; expected JSON, SVG, EDIF 2 0 0, or LTspice ASY"
             )));
         };
         if let Some(extension) = extension {
@@ -746,7 +746,10 @@ pub fn validate_import_pin_anchors(
     pins.sort_by_key(|pin| pin.order);
     if pins.len() != imported.pin_anchors.len()
         || pins.iter().zip(&imported.pin_anchors).any(|(pin, anchor)| {
-            pin.order != anchor.spice_order || !pin.name.eq_ignore_ascii_case(&anchor.name)
+            pin.order != anchor.spice_order
+                || !pin
+                    .name
+                    .eq_ignore_ascii_case(&portable_terminal_name(&anchor.name))
         })
     {
         return Err(SymbolDefinitionError::Import(
@@ -754,6 +757,35 @@ pub fn validate_import_pin_anchors(
         ));
     }
     Ok(())
+}
+
+/// The portable spelling of a terminal an imported symbol names. A name a
+/// terminal can hold is itself; otherwise `+` reads `p` and `-` reads `n`
+/// as their own words (`In+` is `In_p`, `+IN` is `p_IN`, `V-` is `V_n`), any
+/// other character is a word break, and a leading digit gains a `p`.
+pub fn portable_terminal_name(name: &str) -> String {
+    let name = name.trim();
+    if validate_key(name).is_ok() {
+        return name.to_owned();
+    }
+    let mut spelled = String::with_capacity(name.len() + 4);
+    for character in name.chars() {
+        match character {
+            '+' => spelled.push_str("_p_"),
+            '-' => spelled.push_str("_n_"),
+            character if character.is_ascii_alphanumeric() => spelled.push(character),
+            _ => spelled.push('_'),
+        }
+    }
+    let mut portable = spelled
+        .split('_')
+        .filter(|word| !word.is_empty())
+        .collect::<Vec<_>>()
+        .join("_");
+    if portable.is_empty() || portable.starts_with(|character: char| character.is_ascii_digit()) {
+        portable.insert(0, 'p');
+    }
+    portable
 }
 
 impl SymbolImportReport {

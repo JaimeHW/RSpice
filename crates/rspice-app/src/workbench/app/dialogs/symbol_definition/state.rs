@@ -6,6 +6,8 @@ use crate::state::CellViewRef;
 pub(crate) enum SymbolImportBindingChoice {
     #[default]
     ExplicitModelContract,
+    /// The model an LTspice symbol names in its own attributes.
+    SymbolAttributes,
     UnboundForReview,
 }
 
@@ -41,12 +43,23 @@ impl SymbolImportDialogState {
     }
 
     pub(crate) fn accept_source(&mut self, name: String, text: String) {
+        // An LTspice symbol names the model it binds; it starts bound to it.
+        if is_ltspice_symbol(&name) {
+            self.binding_choice = SymbolImportBindingChoice::SymbolAttributes;
+        } else if self.binding_choice == SymbolImportBindingChoice::SymbolAttributes {
+            self.binding_choice = SymbolImportBindingChoice::ExplicitModelContract;
+        }
         self.source_name = name;
         self.source_text = text;
         self.source_error = None;
         self.validation_error = None;
         self.dirty = true;
     }
+}
+
+pub(crate) fn is_ltspice_symbol(name: &str) -> bool {
+    name.rsplit_once('.')
+        .is_some_and(|(_, extension)| extension.eq_ignore_ascii_case("asy"))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

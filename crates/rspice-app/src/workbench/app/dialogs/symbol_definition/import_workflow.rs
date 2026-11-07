@@ -3,7 +3,9 @@
 use egui::{Align, Context, Frame, Grid, Layout, Margin, Stroke, TextEdit, Ui, vec2};
 
 use crate::diagnostics::{LogSeverity, LogSource};
-use crate::state::{CellViewRef, ModelBoundSymbolDefinition, SymbolDefinitionImport};
+use crate::state::{
+    CellViewRef, ModelBoundSymbolDefinition, SymbolDefinitionImport, SymbolSourceContract,
+};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
@@ -259,14 +261,34 @@ fn import_body(
                     .as_ref()
                     .map(CellViewRef::display_path)
                     .unwrap_or_else(|| "Choose an explicit bound definition".to_owned()),
+                SymbolImportBindingChoice::SymbolAttributes => preview
+                    .and_then(|import| match &import.definition.source {
+                        SymbolSourceContract::Model { model, .. } => {
+                            Some(format!("{} / {} (named by the symbol)", model.library, model.model))
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| "Model the symbol names".to_owned()),
                 SymbolImportBindingChoice::UnboundForReview => {
                     "Create unbound symbol for review".to_owned()
                 }
             };
+            let names_its_model = super::state::is_ltspice_symbol(&state.source_name);
             crate::ui::widgets::Combo::from_id_salt("symbol-import-pin-contract")
                 .selected_text(selected)
                 .width(ui.available_width())
                 .show_ui(ui, |ui| {
+                    if names_its_model
+                        && ui
+                            .selectable_value(
+                                &mut state.binding_choice,
+                                SymbolImportBindingChoice::SymbolAttributes,
+                                "Model the symbol names",
+                            )
+                            .changed()
+                    {
+                        *changed = true;
+                    }
                     for reference in binding_options {
                         let response = ui.selectable_label(
                             state.binding_choice
@@ -399,6 +421,22 @@ fn import_candidate(
                     })?;
                 retarget_definition(&mut definition, &draft.target_library, target_name);
                 Some(definition)
+            }
+            SymbolImportBindingChoice::SymbolAttributes => {
+                let graphic = rspice_model_library::symbol::ImportedGraphicSource::from_bytes(
+                    rspice_model_library::symbol::ImportedGraphicFormat::LtspiceAsy,
+                    &draft.source_name,
+                    draft.source_text.as_bytes(),
+                )
+                .map_err(|error| error.to_string())?;
+                Some(
+                    super::super::create_model_bound_symbol::symbol_attribute_definition(
+                        state,
+                        &graphic,
+                        &draft.target_library,
+                        target_name,
+                    )?,
+                )
             }
             SymbolImportBindingChoice::UnboundForReview => Some(
                 ModelBoundSymbolDefinition::review_only(&draft.target_library, target_name),
@@ -590,6 +628,90 @@ mod tests {
             import_candidate(&app)
                 .expect_err("overwrite must fail closed")
                 .contains("already exists")
+        );
+    }
+
+    /// An LTspice symbol binds the subcircuit its `SpiceModel` names, through
+    /// its pins in `SpiceOrder`, once a library holding it is imported.
+    #[test]
+    fn an_ltspice_symbol_binds_the_subcircuit_it_names() {
+        let dir = std::env::temp_dir().join(format!(
+            "rspice-asy-binding-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time after epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("fixture directory");
+        let model_file = dir.join("testamp.lib");
+        std::fs::write(
+            &model_file,
+            "* RSpice test amplifier\n\
+             .subckt TESTAMP 1 2 99 50 45\n\
+             E1 45 0 1 2 1e5\n\
+             R1 99 50 1meg\n\
+             .ends TESTAMP\n",
+        )
+        .expect("model file");
+        let mut app = crate::workbench::app_state::AppState::default();
+        app.open_project_session();
+        app.model
+            .model_library_manager
+            .load_library_file(&model_file, None)
+            .expect("model library imports");
+        std::fs::remove_dir_all(&dir).ok();
+
+        let mut asy = "Version 4\nSymbolType CELL\n\
+                       LINE Normal -32 -32 32 0\nLINE Normal -32 32 32 0\n\
+                       LINE Normal -32 -32 -32 32\n\
+                       SYMATTR Prefix X\nSYMATTR SpiceModel TESTAMP\n\
+                       SYMATTR ModelFile lib/sub/testamp.lib\n"
+            .to_owned();
+        for (order, (name, x, y)) in [
+            ("In+", -48, 16),
+            ("In-", -48, -16),
+            ("V+", 0, -48),
+            ("V-", 0, 48),
+            ("OUT", 48, 0),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            asy.push_str(&format!(
+                "PIN {x} {y} NONE 0\nPINATTR PinName {name}\nPINATTR SpiceOrder {}\n",
+                order + 1
+            ));
+        }
+        app.design
+            .symbol_import
+            .accept_source("testamp.asy".to_owned(), asy.clone());
+        assert_eq!(
+            app.design.symbol_import.binding_choice,
+            SymbolImportBindingChoice::SymbolAttributes
+        );
+        app.design.symbol_import.target_library =
+            app.model.workspace.content.active_view.library.clone();
+        app.design.symbol_import.target_name = "testamp".to_owned();
+
+        let imported = import_candidate(&app).expect("the symbol binds the model it names");
+        let SymbolSourceContract::Model { model, ports } = &imported.definition.source else {
+            panic!("a model contract, not {:?}", imported.definition.source);
+        };
+        assert_eq!(model.model, "TESTAMP");
+        assert_eq!(
+            ports.iter().map(|port| port.name.as_str()).collect::<Vec<_>>(),
+            ["In_p", "In_n", "V_p", "V_n", "OUT"]
+        );
+        assert!(imported.report.pin_order_valid && imported.report.binding_valid);
+
+        app.design
+            .symbol_import
+            .accept_source("missing.asy".to_owned(), asy.replace("TESTAMP", "MISSING"));
+        let unresolved = import_candidate(&app).expect_err("an unimported model is named");
+        assert!(
+            unresolved.contains("MISSING") && unresolved.contains("testamp.lib"),
+            "{unresolved}"
         );
     }
 }

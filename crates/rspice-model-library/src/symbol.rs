@@ -35,7 +35,9 @@ pub use contracts::*;
 pub use definition::*;
 pub use form::*;
 use graphics::validate_imported_graphic;
-pub use graphics::{SymbolImportFormat, SymbolImportReport, validate_import_pin_anchors};
+pub use graphics::{
+    SymbolImportFormat, SymbolImportReport, portable_terminal_name, validate_import_pin_anchors,
+};
 pub use template::validate_library_netlist_template;
 pub use validation::SymbolDefinitionError;
 use validation::{

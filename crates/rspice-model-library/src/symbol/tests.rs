@@ -82,3 +82,28 @@ fn graphic_decoder_retains_the_byte_limit_and_active_content_refusal() {
         )),
     );
 }
+
+/// An imported symbol's terminal names keep their meaning in portable form,
+/// and a name that is already portable is left alone.
+#[test]
+fn imported_terminal_names_take_a_portable_spelling() {
+    for (name, portable) in [
+        ("In+", "In_p"),
+        ("In-", "In_n"),
+        ("+IN", "p_IN"),
+        ("V-", "V_n"),
+        ("EN/SD", "EN_SD"),
+        ("1", "p1"),
+        ("OUT", "OUT"),
+        ("a__b_", "a__b_"),
+    ] {
+        assert_eq!(portable_terminal_name(name), portable, "{name}");
+    }
+    assert_eq!(
+        SymbolImportFormat::detect(b"x", "notes.txt"),
+        Err(SymbolDefinitionError::Import(
+            "notes.txt: unsupported symbol source; expected JSON, SVG, EDIF 2 0 0, or LTspice ASY"
+                .to_owned()
+        )),
+    );
+}

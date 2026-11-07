@@ -476,10 +476,189 @@ fn default_cell_name(model: &str) -> String {
     name
 }
 
+/// The definition an LTspice symbol binds by its own attributes. `Prefix`
+/// says whether `SpiceModel` (or `Value`, which LTspice falls back to) names
+/// a subcircuit (`X`, the default) or a device model; `ModelFile` picks the
+/// model library imported from that file when several hold the name; and
+/// the symbol's pin names, in `SpiceOrder`, are the terminals it binds.
+pub(crate) fn symbol_attribute_definition(
+    state: &AppState,
+    graphic: &rspice_model_library::symbol::ImportedGraphicSource,
+    target_library: &str,
+    cell: &str,
+) -> Result<ModelBoundSymbolDefinition, String> {
+    let attribute = |key: &str| {
+        graphic
+            .attributes
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case(key))
+            .map(|(_, value)| value.trim().trim_matches('"'))
+            .filter(|value| !value.is_empty())
+    };
+    let source_name = &graphic.source_name;
+    let model_name = attribute("SpiceModel")
+        .or_else(|| attribute("Value"))
+        .ok_or_else(|| {
+            format!("{source_name} names no SpiceModel or Value to bind; choose a pin contract.")
+        })?;
+    let model_file = attribute("ModelFile")
+        .map(|file| file.rsplit(['/', '\\']).next().unwrap_or(file).to_owned());
+    let subcircuit = attribute("Prefix").is_none_or(|prefix| prefix.eq_ignore_ascii_case("X"));
+    // A definition read from the file `ModelFile` names is preferred; any
+    // other library holding the name binds when none was read from it.
+    let from_model_file = |path: Option<&std::path::Path>| {
+        model_file.as_deref().is_none_or(|file| {
+            path.and_then(std::path::Path::file_name)
+                .is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case(file))
+        })
+    };
+    let libraries = || state.model.model_library_manager.catalog().libraries();
+    let unresolved = || {
+        let kind = if subcircuit { "subcircuit" } else { "model" };
+        match &model_file {
+            Some(file) => format!(
+                "{source_name} binds {kind} {model_name} from {file}, which no imported model library holds; import {file} on the Models page or choose a pin contract."
+            ),
+            None => format!(
+                "{source_name} binds {kind} {model_name}, which no imported model library holds; import its model file on the Models page or choose a pin contract."
+            ),
+        }
+    };
+    let mut anchors = graphic.pin_anchors.iter().collect::<Vec<_>>();
+    anchors.sort_by_key(|anchor| anchor.spice_order);
+    let pin_names = anchors
+        .iter()
+        .map(|anchor| anchor.name.clone())
+        .collect::<Vec<_>>();
+    let (model_source, description) = if subcircuit {
+        let find = |preferred: bool| {
+            libraries().find_map(|library| {
+                library
+                    .subcircuits
+                    .values()
+                    .find(|interface| {
+                        interface.name.eq_ignore_ascii_case(model_name)
+                            && (!preferred
+                                || from_model_file(
+                                    interface
+                                        .file_path
+                                        .as_deref()
+                                        .or(library.root_path.as_deref()),
+                                ))
+                    })
+                    .map(|interface| (library, interface))
+            })
+        };
+        let (library, interface) = find(true).or_else(|| find(false)).ok_or_else(unresolved)?;
+        if interface.ports.len() != pin_names.len() {
+            return Err(format!(
+                "Subcircuit {} has {} terminals; {source_name} has {} pins.",
+                interface.name,
+                interface.ports.len(),
+                pin_names.len()
+            ));
+        }
+        let source_path = interface
+            .file_path
+            .clone()
+            .or_else(|| library.root_path.clone());
+        let source = CreateSymbolModelSource {
+            library: library.name.clone(),
+            model: interface.name.clone(),
+            model_type: ModelType::Other,
+            family: "subcircuit".to_owned(),
+            source_path,
+            section: interface.section.clone(),
+            instance_parameters: subcircuit_instance_parameters(
+                interface.parameter_defaults.clone(),
+            ),
+            requires_pin_review: false,
+            pins: Vec::new(),
+        };
+        (source, interface.description.clone())
+    } else {
+        let find = |preferred: bool| {
+            libraries().find_map(|library| {
+                library
+                    .models
+                    .values()
+                    .find(|model| {
+                        model.name.eq_ignore_ascii_case(model_name)
+                            && (!preferred
+                                || from_model_file(
+                                    model.file_path.as_deref().or(library.root_path.as_deref()),
+                                ))
+                    })
+                    .map(|model| (library, model))
+            })
+        };
+        let (library, model) = find(true).or_else(|| find(false)).ok_or_else(unresolved)?;
+        let terminals = inferred_model_pins(model.model_type).len();
+        if terminals != pin_names.len() {
+            return Err(format!(
+                "Model {} has {terminals} terminals; {source_name} has {} pins.",
+                model.name,
+                pin_names.len()
+            ));
+        }
+        let source = CreateSymbolModelSource {
+            library: library.name.clone(),
+            model: model.name.clone(),
+            model_type: model.model_type,
+            family: model_family_label(model.model_type).to_owned(),
+            source_path: model
+                .file_path
+                .clone()
+                .or_else(|| library.root_path.clone()),
+            section: None,
+            instance_parameters: model_instance_parameters(model),
+            requires_pin_review: false,
+            pins: Vec::new(),
+        };
+        (source, None)
+    };
+    // Roles read the symbol's own names (`In+`, `V-`); the terminals carry
+    // their portable spelling (`In_p`, `V_n`).
+    let roles = rspice_design::pin_roles::infer_pin_roles(&pin_names, description.as_deref());
+    let pins = pin_names
+        .iter()
+        .zip(roles)
+        .enumerate()
+        .map(|(index, (name, role))| {
+            let (electrical_type, side) = role_pin(role, index);
+            CreateSymbolPinDraft::new(
+                rspice_model_library::symbol::portable_terminal_name(name),
+                electrical_type,
+                side,
+            )
+        })
+        .collect::<Vec<_>>();
+    let draft = CreateModelBoundSymbolDialogState {
+        target: format!("{target_library} / {cell}"),
+        source_mode: CreateSymbolSourceMode::Model,
+        model_source: Some(CreateSymbolModelSource {
+            pins: pins.clone(),
+            ..model_source
+        }),
+        pins,
+        template: CreateSymbolTemplate::RectangularIc,
+        pin_contract_reviewed: true,
+        expected_library_revision: state.model.library_manager.revision(),
+        ..CreateModelBoundSymbolDialogState::default()
+    };
+    build_symbol_definition(state, &draft)
+}
+
 pub(super) fn build_create_symbol_definition(
     state: &AppState,
 ) -> Result<ModelBoundSymbolDefinition, String> {
-    let draft = &state.design.create_model_bound_symbol;
+    build_symbol_definition(state, &state.design.create_model_bound_symbol)
+}
+
+fn build_symbol_definition(
+    state: &AppState,
+    draft: &CreateModelBoundSymbolDialogState,
+) -> Result<ModelBoundSymbolDefinition, String> {
     let (library_name, cell_name) = parse_target(&draft.target)?;
     let library = state
         .model
