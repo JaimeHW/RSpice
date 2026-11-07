@@ -554,3 +554,198 @@ X2 r yi RSPICE_FN_SCHMITT_INV TD=1n TRISE=1n TFALL=1n VT=2 HYST=1
     assert_close("inverter up", input_at(falling_crossing(&tran.time, yi, 2.5)), 2.5, 1e-3);
     assert_close("inverter down", input_at(rising_crossing(&tran.time, yi, 2.5)), 1.5, 1e-3);
 }
+
+/// The times `wave` rises through `level`, interpolated.
+fn rising_crossings(time: &[f64], wave: &[f64], level: f64) -> Vec<f64> {
+    wave.windows(2)
+        .enumerate()
+        .filter(|(_, pair)| pair[0] < level && pair[1] >= level)
+        .map(|(index, pair)| {
+            let fraction = (level - pair[0]) / (pair[1] - pair[0]);
+            time[index] + fraction * (time[index + 1] - time[index])
+        })
+        .collect()
+}
+
+#[test]
+fn timer_555_astable_runs_at_its_textbook_frequency_and_duty_cycle_in_both_processes() {
+    // RA=1k, RB=10k, C=10n: f = 1.44/((RA+2RB)C) = 6857 Hz, high for
+    // (RA+RB)/(RA+2RB) = 52.4% of each period. The discharge transistor's
+    // saturation stretches the low time by about 2%.
+    for (tech, value) in [("Bipolar", 0), ("CMOS", 1)] {
+        let deck = format!(
+            "* 555 astable
+VCC vcc 0 5
+RA vcc dis 1k
+RB dis thr 10k
+C1 thr 0 10n
+X1 thr thr vcc out dis ctl vcc 0 RSPICE_FN_555 TECH={value}
+CC ctl 0 10n
+RL out 0 10k
+.end
+"
+        );
+        let tran = transient(&deck, 1.5e-3, 10e-9);
+        let out = waveform(&tran, "out");
+        let rises = rising_crossings(&tran.time, out, 1.5);
+        assert!(rises.len() >= 8, "{tech}: {} cycles", rises.len());
+        let first = rises[2];
+        let last = rises[rises.len() - 1];
+        let period = (last - first) / (rises.len() - 3) as f64;
+        let frequency = 1.0 / period;
+        let analytic = 1.44 / ((1e3 + 2.0 * 10e3) * 10e-9);
+        assert!(
+            (frequency / analytic - 1.0).abs() < 0.03,
+            "{tech}: {frequency} Hz vs {analytic} Hz"
+        );
+        let settled = tran.time.iter().position(|&t| t >= first).unwrap();
+        let fall = falling_crossing(&tran.time[settled..], &out[settled..], 1.5);
+        let duty = (fall - first) / period;
+        assert!((duty - 11.0 / 21.0).abs() < 0.015, "{tech}: duty {duty}");
+        // The capacitor swings between a third and two thirds of VCC.
+        let cap = &waveform(&tran, "thr")[settled..];
+        let top = cap.iter().copied().fold(f64::MIN, f64::max);
+        let bottom = cap.iter().copied().fold(f64::MAX, f64::min);
+        assert_close("upper threshold", top, 5.0 * 2.0 / 3.0, 5e-3);
+        assert_close("lower threshold", bottom, 5.0 / 3.0, 5e-3);
+    }
+}
+
+#[test]
+fn timer_555_monostable_pulse_is_one_point_one_rc_in_both_processes() {
+    // R=10k, C=10n: a 1 us trigger at 20 us starts a 110 us pulse.
+    for tech in [0, 1] {
+        let deck = format!(
+            "* 555 monostable
+VCC vcc 0 5
+VTR trig 0 PULSE(5 0 20u 10n 10n 1u 1)
+R1 vcc cap 10k
+C1 cap 0 10n
+X1 trig cap vcc out cap ctl vcc 0 RSPICE_FN_555 TECH={tech}
+CC ctl 0 10n
+RL out 0 10k
+.end
+"
+        );
+        let tran = transient(&deck, 200e-6, 10e-9);
+        let out = waveform(&tran, "out");
+        let start = tran.time.iter().position(|&t| t >= 10e-6).unwrap();
+        let rise = rising_crossing(&tran.time[start..], &out[start..], 1.5);
+        let fall = falling_crossing(&tran.time[start..], &out[start..], 1.5);
+        assert!((rise - 20e-6).abs() < 0.2e-6, "TECH={tech}: triggered at {rise}");
+        let width = fall - rise;
+        assert!(
+            (width / 110e-6 - 1.0).abs() < 0.01,
+            "TECH={tech}: pulse {width} s"
+        );
+    }
+}
+
+#[test]
+fn timer_555_reset_holds_the_output_low() {
+    let deck = "* 555 reset
+VCC vcc 0 5
+VRS rst 0 0.3
+RA vcc dis 1k
+RB dis thr 10k
+C1 thr 0 10n
+X1 thr thr rst out dis ctl vcc 0 RSPICE_FN_555
+RL out 0 10k
+.end
+";
+    // The latch keeps its power-on state through the operating point and
+    // takes the reset at the first step.
+    let tran = transient(deck, 200e-6, 10e-9);
+    let start = tran.time.iter().position(|&t| t >= 1e-6).unwrap();
+    let high = waveform(&tran, "out")[start..]
+        .iter()
+        .copied()
+        .fold(f64::MIN, f64::max);
+    assert!(high < 0.1, "output reached {high} under reset");
+}
+
+#[test]
+fn phase_detector_pumps_its_current_for_the_lead_between_the_edges() {
+    // A leads B by 0.2 us every 1 us: each cycle sources 100 uA for 0.2 us
+    // into 1 nF, 20 mV; within the first lead the ramp is 0.1 V/us.
+    let deck = "* phase detector
+VA a 0 PULSE(0 5 1u 1n 1n 0.5u 1u)
+VB b 0 PULSE(0 5 1.2u 1n 1n 0.5u 1u)
+X1 a b pd RSPICE_FN_PHASEDET
+CP pd 0 1n
+X2 b a pdn RSPICE_FN_PHASEDET VLOW=-5
+CN pdn 0 1n
+.end
+";
+    let tran = transient(deck, 4.9e-6, 1e-9);
+    let pd = waveform(&tran, "pd");
+    assert_close("first lead", value_at(&tran.time, pd, 1.15e-6), 0.1495e-1, 0.05e-3);
+    assert_close("four cycles", value_at(&tran.time, pd, 4.9e-6), 0.08, 0.2e-3);
+    // B leading pumps the other way.
+    let pdn = waveform(&tran, "pdn");
+    assert_close("lagging", value_at(&tran.time, pdn, 4.9e-6), -0.08, 0.2e-3);
+}
+
+#[test]
+fn counter_divides_its_clock_by_n_with_its_duty_cycle() {
+    // A 1 MHz clock; each output rises once per N edges and stays high for
+    // round(DUTY*N) of them.
+    let deck = "* counter
+VC clk 0 PULSE(0 5 1u 1n 1n 0.5u 1u)
+VR rst 0 0
+X2 clk rst q2 RSPICE_FN_COUNTER
+X3 clk rst q3 RSPICE_FN_COUNTER N=3
+X4 clk rst q4 RSPICE_FN_COUNTER N=4 DUTY=0.25
+.end
+";
+    let tran = transient(deck, 14e-6, 1e-9);
+    for (node, n, high_counts) in [("q2", 2.0, 1.0), ("q3", 3.0, 2.0), ("q4", 4.0, 1.0)] {
+        let out = waveform(&tran, node);
+        let rises = rising_crossings(&tran.time, out, 2.5);
+        let period = rises[2] - rises[1];
+        assert_close(node, period, n * 1e-6, 1e-9);
+        let start = tran.time.iter().position(|&t| t >= rises[1]).unwrap();
+        let fall = falling_crossing(&tran.time[start..], &out[start..], 2.5);
+        assert_close(node, fall - rises[1], high_counts * 1e-6, 1e-9);
+    }
+}
+
+#[test]
+fn counter_reset_holds_the_count_at_zero() {
+    // Held in reset the output stays at count zero, high, through the clock.
+    let deck = "* counter reset
+VC clk 0 PULSE(0 5 1u 1n 1n 0.5u 1u)
+VR rst 0 5
+X1 clk rst q RSPICE_FN_COUNTER N=2
+.end
+";
+    let tran = transient(deck, 6e-6, 1e-9);
+    let low = waveform(&tran, "q").iter().copied().fold(f64::MAX, f64::min);
+    assert!(low > 4.9, "reset output fell to {low}");
+}
+
+#[test]
+fn sample_and_hold_tracks_while_sampling_and_holds_the_last_value() {
+    // A 100 kHz, 1 V sine; SAMPLE is high from 2.5 us to 3.5 us.
+    let deck = "* sample and hold
+VS s 0 PULSE(0 5 2.5u 1n 1n 1u 4u)
+VI in 0 SIN(0 1 100k)
+X1 in s sh RSPICE_FN_SAMPLEHOLD
+.end
+";
+    let tran = transient(deck, 6e-6, 1e-9);
+    let sh = waveform(&tran, "sh");
+    let input = waveform(&tran, "in");
+    assert_close(
+        "tracking",
+        value_at(&tran.time, sh, 3e-6),
+        value_at(&tran.time, input, 3e-6),
+        5e-4,
+    );
+    // Held at the input's value at the falling edge, within the input's
+    // 0.37 V/us slope over a step either side.
+    let held = value_at(&tran.time, input, 3.5e-6);
+    for at in [4e-6, 5e-6, 6e-6] {
+        assert_close("holding", value_at(&tran.time, sh, at), held, 1e-3);
+    }
+}

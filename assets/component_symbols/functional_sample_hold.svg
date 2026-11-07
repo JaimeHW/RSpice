@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Sample and hold: block with a staircase of held levels.
+     Box 60x40, pins in(0,10), sample(0,30), out(60,20). -->
+<svg viewBox="0 0 60 40" xmlns="http://www.w3.org/2000/svg">
+  <path d="M 0,10 H 10" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 0,30 H 10" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 50,20 H 60" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 10,4 H 50 V 36 H 10 Z" fill="none" stroke="#000000" stroke-width="1" stroke-linejoin="round"/>
+  <path d="M 16.5,28 L 15.5,27 H 13.5 L 12.5,28 V 29 L 13.5,30 H 15.5 L 16.5,31 V 32 L 15.5,33 H 13.5 L 12.5,32" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 22,27 H 28 V 21 H 34 V 24 H 40 V 13 H 46" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 27,21 a 1,1 0 1 0 2,0 a 1,1 0 1 0 -2,0 Z" fill="#000000" stroke="none"/>
+  <path d="M 33,24 a 1,1 0 1 0 2,0 a 1,1 0 1 0 -2,0 Z" fill="#000000" stroke="none"/>
+  <path d="M 39,13 a 1,1 0 1 0 2,0 a 1,1 0 1 0 -2,0 Z" fill="#000000" stroke="none"/>
+</svg>

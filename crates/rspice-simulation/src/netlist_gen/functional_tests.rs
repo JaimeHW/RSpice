@@ -188,3 +188,90 @@ fn placed_logic_parts_settle_at_their_truth_table_levels() {
         assert!((voltage - expected).abs() < 1e-9, "{part} {node}: {voltage}");
     }
 }
+
+#[test]
+fn a_placed_cmos_555_astable_oscillates_at_its_textbook_frequency() {
+    // RA=1k, RB=10k, C=10n with the CMOS preset chosen by its label.
+    let mut bench = Bench::default();
+    bench.primitive(ComponentType::VoltageSource, "VCC", "5", &["vcc", "0"]);
+    bench.primitive(ComponentType::Resistor, "RA", "1k", &["vcc", "dis"]);
+    bench.primitive(ComponentType::Resistor, "RB", "10k", &["dis", "thr"]);
+    bench.primitive(ComponentType::Capacitor, "C1", "10n", &["thr", "0"]);
+    bench.part(
+        "rspice.functional.timer555",
+        "X1",
+        "TECH=CMOS",
+        &["thr", "thr", "vcc", "out", "dis", "ctl", "vcc", "0"],
+    );
+    bench.primitive(ComponentType::Capacitor, "CC", "10n", &["ctl", "0"]);
+    let tran = Engine::default()
+        .run_tran(&bench.deck(), 1e-3, 10e-9)
+        .expect("transient solves");
+    let out = tran.try_voltage_waveform_named("out").expect("out");
+    let rises = out
+        .windows(2)
+        .enumerate()
+        .filter(|(_, pair)| pair[0] < 2.5 && pair[1] >= 2.5)
+        .map(|(index, _)| tran.time[index])
+        .collect::<Vec<_>>();
+    // The CMOS output swings rail to rail; five settled periods.
+    assert!(rises.len() >= 7, "{} rising edges", rises.len());
+    let period = (rises[6] - rises[1]) / 5.0;
+    let analytic = 1.44 / ((1e3 + 2.0 * 10e3) * 10e-9);
+    assert!((1.0 / period / analytic - 1.0).abs() < 0.03, "{period}");
+    let high = out.iter().copied().fold(f64::MIN, f64::max);
+    assert!(high > 4.9, "CMOS output high {high}");
+}
+
+#[test]
+fn placed_sequential_parts_count_divide_and_hold() {
+    // A 1 MHz clock into a divide-by-4 counter and into a phase detector
+    // against itself delayed, and a sample-and-hold of a DC level.
+    let mut bench = Bench::default();
+    bench.primitive(
+        ComponentType::VoltageSourcePulse,
+        "VC",
+        "PULSE(0 5 1u 1n 1n 0.5u 1u)",
+        &["clk", "0"],
+    );
+    bench.primitive(
+        ComponentType::VoltageSourcePulse,
+        "VD",
+        "PULSE(0 5 1.2u 1n 1n 0.5u 1u)",
+        &["late", "0"],
+    );
+    bench.primitive(ComponentType::VoltageSource, "VR", "0", &["rst", "0"]);
+    bench.primitive(ComponentType::VoltageSource, "VI", "1.25", &["level", "0"]);
+    bench.part(
+        "rspice.functional.counter",
+        "X1",
+        "N=4",
+        &["clk", "rst", "div"],
+    );
+    bench.part(
+        "rspice.functional.phase_detector",
+        "X2",
+        "",
+        &["clk", "late", "pump"],
+    );
+    bench.primitive(ComponentType::Capacitor, "CP", "1n", &["pump", "0"]);
+    bench.part(
+        "rspice.functional.sample_hold",
+        "X3",
+        "",
+        &["level", "clk", "held"],
+    );
+    let tran = Engine::default()
+        .run_tran(&bench.deck(), 4.9e-6, 1e-9)
+        .expect("transient solves");
+    let at = |node: &str, time: f64| {
+        let wave = tran.try_voltage_waveform_named(node).expect(node);
+        let index = tran.time.iter().position(|&t| t >= time).expect("in run");
+        wave[index]
+    };
+    // Divide by 4, high for two counts: low from the second edge to the fourth.
+    assert!(at("div", 1.5e-6) > 4.9 && at("div", 3.5e-6) < 0.1);
+    // Four 0.2 us leads of 100 uA into 1 nF.
+    assert!((at("pump", 4.9e-6) - 0.08).abs() < 0.5e-3, "{}", at("pump", 4.9e-6));
+    assert!((at("held", 4.9e-6) - 1.25).abs() < 1e-3, "{}", at("held", 4.9e-6));
+}

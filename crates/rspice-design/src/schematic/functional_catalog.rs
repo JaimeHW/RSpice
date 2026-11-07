@@ -103,7 +103,7 @@ const fn choice(label: &'static str, value: &'static str) -> FunctionalChoice {
     FunctionalChoice { label, value }
 }
 
-use PortDirection::{In, Out, Supply};
+use PortDirection::{In, InOut, Out, Supply};
 
 const AMPLIFIER_PINS: &[FunctionalPin] = &[
     pin("IN+", In),
@@ -458,6 +458,115 @@ const SCHMITT_PARAMETERS: &[FunctionalParameter] = &[
     LOGIC_TIMING[3],
 ];
 
+const TIMER_PINS: &[FunctionalPin] = &[
+    pin("TRIG", In),
+    pin("THR", In),
+    pin("RESET", In),
+    pin("OUT", Out),
+    pin("DIS", InOut),
+    pin("CTRL", InOut),
+    pin("VCC", Supply),
+    pin("GND", Supply),
+];
+
+const TIMER_PARAMETERS: &[FunctionalParameter] = &[selector(
+    "TECH",
+    "Process",
+    "Bipolar",
+    "Bipolar: 5 kOhm divider, output high 1.4 V below VCC, 200 mA drive, 3 mA quiescent. CMOS: 100 kOhm divider, rail-to-rail output, 10 mA source and 100 mA sink, 100 uA quiescent.",
+    &[choice("Bipolar", "0"), choice("CMOS", "1")],
+)];
+
+const PHASE_DETECTOR_PINS: &[FunctionalPin] = &[pin("A", In), pin("B", In), pin("OUT", Out)];
+
+const PHASE_DETECTOR_PARAMETERS: &[FunctionalParameter] = &[
+    number(
+        "IOUT",
+        "Charge-pump current",
+        "A",
+        "100u",
+        "Current OUT sources while A leads and sinks while B leads.",
+    ),
+    number(
+        "VTH",
+        "Input threshold",
+        "V",
+        "2.5",
+        "An input edge counts when it rises through this level.",
+    ),
+    number(
+        "VHIGH",
+        "Output high clamp",
+        "V",
+        "5",
+        "Highest voltage the output is driven to.",
+    ),
+    number(
+        "VLOW",
+        "Output low clamp",
+        "V",
+        "0",
+        "Lowest voltage the output is driven to.",
+    ),
+    number(
+        "ROUT",
+        "Output resistance",
+        "Ω",
+        "1G",
+        "Resistance from the output to ground.",
+    ),
+];
+
+const COUNTER_PINS: &[FunctionalPin] = &[pin("CLK", In), pin("RST", In), pin("OUT", Out)];
+
+const COUNTER_PARAMETERS: &[FunctionalParameter] = &[
+    number(
+        "N",
+        "Divide ratio",
+        "",
+        "2",
+        "Rising CLK edges per output cycle.",
+    ),
+    number(
+        "DUTY",
+        "Duty cycle",
+        "",
+        "0.5",
+        "Fraction of each cycle's counts the output is high, rounded to whole counts.",
+    ),
+    LOGIC_LEVELS[0],
+    LOGIC_LEVELS[1],
+    LOGIC_TIMING[1],
+    LOGIC_TIMING[2],
+    LOGIC_TIMING[3],
+];
+
+const SAMPLE_HOLD_PINS: &[FunctionalPin] = &[pin("IN", In), pin("SAMPLE", In), pin("OUT", Out)];
+
+const SAMPLE_HOLD_PARAMETERS: &[FunctionalParameter] = &[
+    number(
+        "VTH",
+        "Sample threshold",
+        "V",
+        "2.5",
+        "OUT tracks IN while SAMPLE is above this level and holds when it falls through it.",
+    ),
+    number(
+        "ROUT",
+        "Output resistance",
+        "Ω",
+        "1",
+        "Resistance the held value drives the output through.",
+    ),
+    number(
+        "COUT",
+        "Output capacitance",
+        "F",
+        "10p",
+        "Capacitance from the output to ground.",
+    ),
+];
+
 /// A part of the Logic & timing group.
 const fn logic_part(
     stable_id: &'static str,
@@ -613,6 +722,64 @@ static FUNCTIONAL_PARTS: &[FunctionalPartDescriptor] = &[
         "functional_schmitt_buffer.svg",
         &["schmitt", "schmitt trigger", "buffer", "hysteresis"],
         SCHMITT_PARAMETERS,
+    ),
+    logic_part(
+        "rspice.functional.timer555",
+        "555 Timer",
+        "RSPICE_FN_555",
+        TIMER_PINS,
+        "functional_555.svg",
+        &[
+            "555",
+            "timer",
+            "ne555",
+            "lm555",
+            "tlc555",
+            "icm7555",
+            "astable",
+            "monostable",
+            "oscillator",
+        ],
+        TIMER_PARAMETERS,
+    ),
+    logic_part(
+        "rspice.functional.phase_detector",
+        "Phase Detector",
+        "RSPICE_FN_PHASEDET",
+        PHASE_DETECTOR_PINS,
+        "functional_phase_detector.svg",
+        &[
+            "phase detector",
+            "pfd",
+            "phase frequency detector",
+            "charge pump",
+            "pll",
+        ],
+        PHASE_DETECTOR_PARAMETERS,
+    ),
+    logic_part(
+        "rspice.functional.counter",
+        "Counter",
+        "RSPICE_FN_COUNTER",
+        COUNTER_PINS,
+        "functional_counter.svg",
+        &[
+            "divide by n",
+            "divider",
+            "frequency divider",
+            "prescaler",
+            "counter",
+        ],
+        COUNTER_PARAMETERS,
+    ),
+    logic_part(
+        "rspice.functional.sample_hold",
+        "Sample & Hold",
+        "RSPICE_FN_SAMPLEHOLD",
+        SAMPLE_HOLD_PINS,
+        "functional_sample_hold.svg",
+        &["sample and hold", "track and hold", "s/h", "sampler"],
+        SAMPLE_HOLD_PARAMETERS,
     ),
 ];
 
