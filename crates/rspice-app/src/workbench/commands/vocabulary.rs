@@ -318,7 +318,7 @@ impl Command {
             Self::NewVerilogADevice => spec("new-veriloga-device", "New Verilog-A device…", "File"),
             Self::OpenNetlist => spec("open-netlist", "Open netlist as project…", "File"),
             Self::ImportNetlist => spec("import-netlist", "Import SPICE deck…", "File"),
-            Self::ImportVerilogA => spec("import-veriloga", "Import Verilog-A…", "File"),
+            Self::ImportVerilogA => spec("import-veriloga", "Import Verilog-A/AMS…", "File"),
             Self::ImportLtspiceSchematic => spec(
                 "import-ltspice-schematic",
                 "Import LTspice schematic…",
@@ -689,7 +689,7 @@ impl Command {
                 "Show adopter on schematic",
                 "Stimulus",
             ),
-            Self::CompileVerilogA => spec("veriloga", "Compile Verilog-A", "Design"),
+            Self::CompileVerilogA => spec("veriloga", "Compile Verilog-A/AMS", "Design"),
             Self::VerilogABuildSettings => spec(
                 "veriloga-build-settings",
                 "Build settings\u{2026}",

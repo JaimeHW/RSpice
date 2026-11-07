@@ -1387,7 +1387,10 @@ fn design_follows_the_view_in_front() {
         .map(|(label, _)| label)
         .collect::<Vec<_>>();
     assert!(
-        veriloga.ends_with(&["Compile Verilog-A".to_owned(), "Build settings…".to_owned()]),
+        veriloga.ends_with(&[
+            "Compile Verilog-A/AMS".to_owned(),
+            "Build settings…".to_owned()
+        ]),
         "{veriloga:?}"
     );
     let schematic = shown_rows(ApplicationMenu::Design, &title_test_app())
@@ -1395,7 +1398,9 @@ fn design_follows_the_view_in_front() {
         .map(|(label, _)| label)
         .collect::<Vec<_>>();
     assert!(
-        !schematic.iter().any(|label| label == "Compile Verilog-A"),
+        !schematic
+            .iter()
+            .any(|label| label == "Compile Verilog-A/AMS"),
         "{schematic:?}"
     );
 

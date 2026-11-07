@@ -31,7 +31,7 @@ pub(in crate::workbench) fn veriloga_tools(
         app,
         Command::CompileVerilogA.key(),
         WorkbenchIcon::Run,
-        "Compile Verilog-A module",
+        "Compile Verilog-A/AMS module",
         layout,
     );
     generated_netlist_tool(ui, app, layout);

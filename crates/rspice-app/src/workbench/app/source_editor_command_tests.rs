@@ -97,7 +97,7 @@ fn no_source_page_carries_an_editor_menu_of_its_own() {
     frame(&ctx, &mut app, DESKTOP);
     let output = frame(&ctx, &mut app, DESKTOP);
     assert!(
-        has_label(&output, "Verilog-A source editor"),
+        has_label(&output, "Verilog-A/AMS source editor"),
         "the Verilog-A page was drawn"
     );
     assert!(!has_label(&output, "Editor"), "Verilog-A page");
@@ -384,8 +384,8 @@ fn editor_origin(output: &egui::FullOutput) -> egui::Pos2 {
         .as_ref()
         .and_then(|update| {
             update.nodes.iter().find(|(_, node)| {
-                node.value() == Some("Verilog-A source editor")
-                    || node.label() == Some("Verilog-A source editor")
+                node.value() == Some("Verilog-A/AMS source editor")
+                    || node.label() == Some("Verilog-A/AMS source editor")
             })
         })
         .and_then(|(_, node)| node.bounds())

@@ -45,7 +45,7 @@ impl BrowserTextImportKind {
             Self::ShortcutProfile => "shortcut profile",
             Self::EngineeringTableView => "engineering table view",
             Self::SymbolDefinition => "symbol definition",
-            Self::VerilogA => "Verilog-A source",
+            Self::VerilogA => "Verilog-A/AMS source",
             Self::Automation => "Automation source",
         }
     }

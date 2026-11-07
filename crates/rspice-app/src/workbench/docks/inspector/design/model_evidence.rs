@@ -71,7 +71,7 @@ fn project_module_evidence(
         None => ComponentModelEvidence::failed(
             model,
             Problem::Failure,
-            "No Verilog-A source for this view".to_owned(),
+            "No Verilog-A/AMS source for this view".to_owned(),
         ),
     })
 }

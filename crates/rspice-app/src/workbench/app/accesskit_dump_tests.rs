@@ -257,7 +257,7 @@ fn opened_scenes() -> Vec<Scene> {
         })
         .then(Gesture::secondary_click(
             Role::MultilineTextInput,
-            "Verilog-A source editor",
+            "Verilog-A/AMS source editor",
         ))
         .showing(|tree| find_node(tree, Role::Menu, "Source editor menu").is_some()),
     );
