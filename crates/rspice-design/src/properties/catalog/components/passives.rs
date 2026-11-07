@@ -243,3 +243,34 @@ impl PropertyCatalog {
             .insert(ComponentType::CoupledTransmissionLine, sheet);
     }
 }
+
+/// The tolerance pair R, C and L each carry: the band, and how a Monte Carlo
+/// spreads the value across it. Left blank the part is exact.
+fn tolerance_fields(order: i32) -> [PropertyDefinition; 2] {
+    use crate::schematic::tolerance::{DISTRIBUTION_KEY, TOLERANCE_KEY, ToleranceDistribution};
+    [
+        PropertyDefinition::new(TOLERANCE_KEY)
+            .with_display_name("Tolerance")
+            .with_description(
+                "Half-width of the value's band; Monte Carlo draws inside it and worst case                  takes its ends",
+            )
+            .with_type(PropertyType::Expression)
+            .with_default(PropertyValue::expression(""))
+            .with_unit("%")
+            .with_range(0.0, 100.0)
+            .with_order(order)
+            .with_category("Tolerance"),
+        PropertyDefinition::new(DISTRIBUTION_KEY)
+            .with_display_name("Distribution")
+            .with_description("gauss puts the tolerance at 3σ; uniform is flat across the band")
+            .with_type(PropertyType::Enum)
+            .with_default(PropertyValue::enumeration(
+                ToleranceDistribution::default().keyword(),
+                ToleranceDistribution::ALL
+                    .map(|distribution| distribution.keyword().to_owned())
+                    .to_vec(),
+            ))
+            .with_order(order + 1)
+            .with_category("Tolerance"),
+    ]
+}

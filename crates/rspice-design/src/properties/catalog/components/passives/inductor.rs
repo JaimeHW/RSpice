@@ -99,6 +99,9 @@ impl PropertyCatalog {
                 .with_order(16)
                 .with_category("Parasitics"),
         );
+        for field in tolerance_fields(17) {
+            sheet.add(field);
+        }
 
         // Temperature coefficients
         sheet.add(

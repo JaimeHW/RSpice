@@ -533,10 +533,12 @@ fn pack_rows(definitions: &[PropertyDefinition], columns: usize) -> Vec<Vec<Prop
 ///
 /// Composite values — a model binding with its Browse action, or a vector
 /// coefficient list — are unreadable in a half-width well, so they take the
-/// full grid width. The span is derived from the schema rather than the live
+/// full grid width, as does a part's free-text description. The span is derived from the schema rather than the live
 /// draft so typing can never reflow the grid under the cursor.
 fn property_span(definition: &PropertyDefinition) -> usize {
-    if definition.name == "model" {
+    if definition.name == "model"
+        || definition.name == rspice_design::schematic::bom::BomField::Description.key()
+    {
         return 2;
     }
     let composite_default = matches!(

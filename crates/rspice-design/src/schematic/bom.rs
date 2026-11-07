@@ -56,6 +56,27 @@ impl BomField {
             Self::PowerRating => "Power rating",
         }
     }
+
+    /// The name a property sheet and bulk edit address this field by. The
+    /// `bom_` prefix keeps it apart from every SPICE instance parameter, so
+    /// a sheet row can never be mistaken for one and written to the deck.
+    pub const fn key(self) -> &'static str {
+        match self {
+            Self::Manufacturer => "bom_manufacturer",
+            Self::Mpn => "bom_mpn",
+            Self::Description => "bom_description",
+            Self::Package => "bom_package",
+            Self::VoltageRating => "bom_voltage_rating",
+            Self::CurrentRating => "bom_current_rating",
+            Self::PowerRating => "bom_power_rating",
+        }
+    }
+
+    pub fn from_key(key: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|field| field.key().eq_ignore_ascii_case(key))
+    }
 }
 
 impl BomFields {

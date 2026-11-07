@@ -276,3 +276,71 @@ fn a_primitive_keeps_its_own_m_parameter_in_parameter_text() {
         "on a device card `m` is an ordinary device parameter"
     );
 }
+
+/// Purchasing data rides the typed BOM record both ways, and none of it ever
+/// becomes parameter text the netlist would write into the deck.
+#[test]
+fn bom_fields_round_trip_through_the_bom_record_not_the_parameters() {
+    use crate::schematic::bom::BomField;
+    let registry = PropertyCatalog::new();
+    let mut component = Component::new(1, ComponentType::Resistor, Point::origin());
+    component.bom.mpn = "RC0603FR-0710KL".to_owned();
+    let sheet = registry.get(component.kind);
+
+    let mut properties = collect_properties_with_sheet(&component, sheet);
+    assert_eq!(
+        properties.get(BomField::Mpn.key()),
+        Some(&PropertyValue::String("RC0603FR-0710KL".to_owned()))
+    );
+    properties.insert(
+        BomField::Manufacturer.key().to_owned(),
+        PropertyValue::String(" Yageo ".to_owned()),
+    );
+    properties.insert(
+        BomField::Mpn.key().to_owned(),
+        PropertyValue::String(String::new()),
+    );
+    apply_properties_with_sheet(&mut component, &properties, sheet).unwrap();
+
+    assert_eq!(component.bom.manufacturer, "Yageo");
+    assert!(component.bom.mpn.is_empty(), "a cleared field is cleared");
+    assert!(
+        !component.params.contains("bom_"),
+        "params: {}",
+        component.params
+    );
+}
+
+/// Every purchasable sheet carries the seven fields; net and probe
+/// constructs carry none. R, C and L carry the tolerance pair, and the
+/// resistor its two parasitics.
+#[test]
+fn sheets_carry_bom_tolerance_and_parasitic_rows_where_they_apply() {
+    use crate::schematic::bom::BomField;
+    let registry = PropertyCatalog::new();
+    for kind in [
+        ComponentType::Resistor,
+        ComponentType::Diode,
+        ComponentType::Nmos,
+        ComponentType::VoltageSource,
+    ] {
+        let sheet = registry.get(kind).expect("sheet");
+        for field in BomField::ALL {
+            assert!(sheet.get(field.key()).is_some(), "{kind:?} lacks {field:?}");
+        }
+    }
+    for kind in [ComponentType::Ground, ComponentType::Port] {
+        let sheet = registry.get(kind).expect("sheet");
+        assert!(sheet.get(BomField::Mpn.key()).is_none(), "{kind:?}");
+    }
+    for kind in [
+        ComponentType::Resistor,
+        ComponentType::Capacitor,
+        ComponentType::Inductor,
+    ] {
+        let sheet = registry.get(kind).expect("sheet");
+        assert!(sheet.get("tol").is_some() && sheet.get("tol_dist").is_some());
+    }
+    let resistor = registry.get(ComponentType::Resistor).expect("sheet");
+    assert!(resistor.get("cpar").is_some() && resistor.get("lser").is_some());
+}

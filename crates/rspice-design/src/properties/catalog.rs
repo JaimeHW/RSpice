@@ -34,5 +34,45 @@ impl PropertyCatalog {
         self.register_controlled_sources();
         self.register_interface_components();
         self.register_xspice_components();
+        self.register_bom_fields();
+    }
+
+    /// Every part that can be bought carries the purchasing fields, last on
+    /// its sheet. Ground, ports and probes are net and measurement constructs
+    /// with nothing to buy, so their sheets stay as they are.
+    fn register_bom_fields(&mut self) {
+        use crate::schematic::bom::BomField;
+        // Description first and full width: it is the one free-text line;
+        // the identifiers and ratings pair up beneath it.
+        const ROWS: [BomField; 7] = [
+            BomField::Description,
+            BomField::Manufacturer,
+            BomField::Mpn,
+            BomField::Package,
+            BomField::PowerRating,
+            BomField::VoltageRating,
+            BomField::CurrentRating,
+        ];
+        for (kind, sheet) in &mut self.sheets {
+            if matches!(
+                kind,
+                ComponentType::Ground
+                    | ComponentType::Port
+                    | ComponentType::LoopProbe
+                    | ComponentType::RfPort
+            ) {
+                continue;
+            }
+            for (order, field) in (800..).zip(ROWS) {
+                sheet.add(
+                    PropertyDefinition::new(field.key())
+                        .with_display_name(field.label())
+                        .with_type(PropertyType::String)
+                        .with_default(PropertyValue::string(""))
+                        .with_order(order)
+                        .with_category("Bill of materials"),
+                );
+            }
+        }
     }
 }

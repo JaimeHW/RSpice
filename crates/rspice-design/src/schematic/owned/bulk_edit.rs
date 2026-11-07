@@ -1,6 +1,10 @@
 //! Typed bulk component edits, validation and document-local commit.
 
+use super::super::tolerance::{
+    DISTRIBUTION_KEY, TOLERANCE_KEY, ToleranceDistribution, supports_tolerance,
+};
 use super::super::{
+    bom::BomField,
     component::{Component, ComponentDisplayMode},
     replacement::{
         format_replacement_parameters, parse_replacement_parameters_strict,
@@ -69,8 +73,10 @@ pub enum SelectionBulkProperty {
     ModelSection,
     Temperature,
     Tolerance,
+    ToleranceDistribution,
     Display,
     ParameterOverride,
+    Bom(BomField),
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -167,13 +173,34 @@ pub fn mutate_component(
             binding.model_section = next;
             Ok(true)
         }
-        SelectionBulkProperty::Temperature | SelectionBulkProperty::Tolerance => {
-            let key = if property == SelectionBulkProperty::Temperature {
-                "temp"
+        SelectionBulkProperty::Temperature => {
+            mutate_parameter(component, "temp", normalized, unset, restore)
+        }
+        SelectionBulkProperty::Tolerance | SelectionBulkProperty::ToleranceDistribution => {
+            if !supports_tolerance(component.kind) {
+                return Err(format!(
+                    "{} has no value a tolerance applies to.",
+                    component.name
+                ));
+            }
+            let key = if property == SelectionBulkProperty::Tolerance {
+                TOLERANCE_KEY
             } else {
-                "tol"
+                DISTRIBUTION_KEY
             };
             mutate_parameter(component, key, normalized, unset, restore)
+        }
+        SelectionBulkProperty::Bom(field) => {
+            let current = component.bom.get_mut(field);
+            if unset == SelectionBulkUnsetBehavior::LeaveUnchanged && current.is_empty() {
+                return Ok(false);
+            }
+            let next = if restore { "" } else { normalized };
+            if current == next {
+                return Ok(false);
+            }
+            next.clone_into(current);
+            Ok(true)
         }
         SelectionBulkProperty::Display => {
             if unset == SelectionBulkUnsetBehavior::LeaveUnchanged
@@ -277,6 +304,11 @@ pub fn validate_bulk_value(
             crate::schematic::tolerance::parse_tolerance_percent(value)?;
             Ok(value.to_owned())
         }
+        SelectionBulkProperty::ToleranceDistribution => ToleranceDistribution::parse(value)
+            .map(|distribution| distribution.keyword().to_owned())
+            .ok_or_else(|| "Distribution must be gauss or uniform.".to_owned()),
+        // Purchasing text is kept as the datasheet writes it.
+        SelectionBulkProperty::Bom(_) => Ok(value.to_owned()),
         SelectionBulkProperty::Display => ComponentDisplayMode::parse(value)
             .map(|mode| mode.label().to_owned())
             .ok_or_else(|| {

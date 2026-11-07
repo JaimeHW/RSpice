@@ -950,11 +950,13 @@ pub(super) fn inline_parameter_contract(
     // belongs on the panel whatever the card would do with it.
     let supported = level_supported_instance_parameters(state, component);
     let read_by_the_model = |name: &str| {
-        supported.is_none_or(|set| {
-            set.iter()
-                .any(|supported| supported.eq_ignore_ascii_case(name))
-                || declared.contains_key(&name.to_ascii_lowercase())
-        })
+        // Purchasing fields are the part's, whatever its model reads.
+        rspice_design::schematic::bom::BomField::from_key(name).is_some()
+            || supported.is_none_or(|set| {
+                set.iter()
+                    .any(|supported| supported.eq_ignore_ascii_case(name))
+                    || declared.contains_key(&name.to_ascii_lowercase())
+            })
     };
     let mut rows = Vec::new();
     let mut seen = HashSet::new();

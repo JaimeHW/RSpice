@@ -8,6 +8,7 @@
 
 use super::*;
 use crate::workbench::framework::command_registry::ids;
+use rspice_design::schematic::bom::BomField;
 
 #[cfg(test)]
 mod tests;
@@ -27,10 +28,14 @@ pub(super) fn field_value(component: &Component, field: &InlineEditField) -> Str
                 .unwrap_or_default()
         }
         // Parameter text is keyed case-insensitively, and stored lower-case.
-        InlineEditField::Parameter(key) => crate::state::parse_params_string(&component.params)
-            .get(&key.to_ascii_lowercase())
-            .cloned()
-            .unwrap_or_default(),
+        // A purchasing field is read from the typed BOM record instead.
+        InlineEditField::Parameter(key) => match BomField::from_key(key) {
+            Some(bom) => component.bom.get(bom).to_owned(),
+            None => crate::state::parse_params_string(&component.params)
+                .get(&key.to_ascii_lowercase())
+                .cloned()
+                .unwrap_or_default(),
+        },
     }
 }
 
@@ -240,13 +245,16 @@ fn edited_component(
                     .filter(|multiplicity| multiplicity.value() != 1.0)
             };
         }
-        InlineEditField::Parameter(key) => {
-            component.params = crate::state::params_string::set_parameter_value(
-                &component.params,
-                key,
-                candidate,
-            )?;
-        }
+        InlineEditField::Parameter(key) => match BomField::from_key(key) {
+            Some(bom) => candidate.trim().clone_into(component.bom.get_mut(bom)),
+            None => {
+                component.params = crate::state::params_string::set_parameter_value(
+                    &component.params,
+                    key,
+                    candidate,
+                )?;
+            }
+        },
     }
     Ok(component)
 }

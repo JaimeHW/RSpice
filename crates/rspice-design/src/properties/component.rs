@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use super::{PropertySheet, PropertyValue};
 use crate::parameters::{format_params_string, parse_params_string};
+use crate::schematic::bom::BomField;
 use crate::schematic::component::{Component, InstanceMultiplicity};
 use crate::schematic::component_type::ComponentType;
 
@@ -178,6 +179,17 @@ pub fn collect_properties_with_sheet(
         properties.insert(key, prop_value);
     }
 
+    // Purchasing fields live on the component's typed BOM record, never in
+    // parameter text the netlist would write.
+    for field in BomField::ALL {
+        if sheet.is_some_and(|sheet| sheet.get(field.key()).is_some()) {
+            properties.insert(
+                field.key().to_owned(),
+                PropertyValue::String(component.bom.get(field).to_owned()),
+            );
+        }
+    }
+
     // On a cell instance `m` is the flattener's physical multiplier, which
     // lives in a typed field rather than in parameter text. It is offered here
     // unconditionally, and an instance standing for itself reads as 1, because
@@ -300,7 +312,16 @@ pub fn apply_properties_with_sheet(
         HashMap::new()
     };
 
+    for field in BomField::ALL {
+        if let Some(value) = properties.get(field.key()) {
+            *component.bom.get_mut(field) = property_value_to_string(value).trim().to_owned();
+        }
+    }
+
     for (key, value) in properties {
+        if BomField::from_key(key).is_some() {
+            continue;
+        }
         // Skip name and primary property, and the reserved multiplicity that
         // the typed field above already took: on a cell instance `m` is never
         // free-text parameter text.

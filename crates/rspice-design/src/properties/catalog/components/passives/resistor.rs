@@ -137,7 +137,34 @@ impl PropertyCatalog {
                 .when_set("model"),
         );
 
-        // Temperature category (order 20-29)
+        // Parasitics (order 19-20). Explicit only, as on the capacitor: the
+        // capacitance is expanded across the resistor by the engine, the
+        // inductance written in series through an internal node.
+        sheet.add(
+            PropertyDefinition::new("cpar")
+                .with_display_name("Parallel capacitance")
+                .with_description("Capacitance placed across the resistor")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::expression(""))
+                .with_unit("F")
+                .with_order(19)
+                .with_category("Parasitics"),
+        );
+        sheet.add(
+            PropertyDefinition::new("lser")
+                .with_display_name("Series inductance")
+                .with_description("Inductance in series with the resistor through an internal node")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::expression(""))
+                .with_unit("H")
+                .with_order(20)
+                .with_category("Parasitics"),
+        );
+        for field in tolerance_fields(21) {
+            sheet.add(field);
+        }
+
+        // Temperature category (order 23-27)
         sheet.add(
             PropertyDefinition::new("temp")
                 .with_display_name("Temperature")
@@ -147,7 +174,7 @@ impl PropertyCatalog {
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::expression(""))
                 .with_unit("°C")
-                .with_order(19)
+                .with_order(23)
                 .with_category("Temperature"),
         );
         sheet.add(
@@ -157,7 +184,7 @@ impl PropertyCatalog {
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(0.0))
                 .with_unit("1/°C")
-                .with_order(20)
+                .with_order(24)
                 .with_category("Temperature"),
         );
         sheet.add(
@@ -167,7 +194,7 @@ impl PropertyCatalog {
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(0.0))
                 .with_unit("1/°C²")
-                .with_order(21)
+                .with_order(25)
                 .with_category("Temperature"),
         );
         sheet.add(
@@ -177,7 +204,7 @@ impl PropertyCatalog {
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(0.0))
                 .with_unit("%/°C")
-                .with_order(22)
+                .with_order(26)
                 .with_category("Temperature"),
         );
         sheet.add(
@@ -187,7 +214,7 @@ impl PropertyCatalog {
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(0.0))
                 .with_unit("°C")
-                .with_order(23)
+                .with_order(27)
                 .with_category("Temperature"),
         );
 

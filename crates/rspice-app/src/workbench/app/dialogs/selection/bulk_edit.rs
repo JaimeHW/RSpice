@@ -8,6 +8,8 @@
 use std::collections::{BTreeSet, HashSet};
 
 use egui::{Context, Grid, RichText, ScrollArea, TextEdit, Ui, Vec2};
+use rspice_design::schematic::bom::BomField;
+use rspice_design::schematic::tolerance::{ToleranceDistribution, supports_tolerance};
 
 use super::bulk_filter::{
     SelectionBulkFilter, SelectionBulkHierarchyScope, SelectionBulkObjectKind,
@@ -35,12 +37,20 @@ use crate::workbench::app_state::AppState;
 const TITLE: &str = "Bulk edit";
 const PRIMARY: &str = "Apply";
 
-const BULK_PROPERTIES: [SelectionBulkProperty; 5] = [
+const BULK_PROPERTIES: [SelectionBulkProperty; 13] = [
     SelectionBulkProperty::ModelSection,
     SelectionBulkProperty::Temperature,
     SelectionBulkProperty::Tolerance,
+    SelectionBulkProperty::ToleranceDistribution,
     SelectionBulkProperty::Display,
     SelectionBulkProperty::ParameterOverride,
+    SelectionBulkProperty::Bom(BomField::Manufacturer),
+    SelectionBulkProperty::Bom(BomField::Mpn),
+    SelectionBulkProperty::Bom(BomField::Description),
+    SelectionBulkProperty::Bom(BomField::Package),
+    SelectionBulkProperty::Bom(BomField::VoltageRating),
+    SelectionBulkProperty::Bom(BomField::CurrentRating),
+    SelectionBulkProperty::Bom(BomField::PowerRating),
 ];
 
 const fn bulk_property_label(value: SelectionBulkProperty) -> &'static str {
@@ -48,8 +58,10 @@ const fn bulk_property_label(value: SelectionBulkProperty) -> &'static str {
         SelectionBulkProperty::ModelSection => "Model section",
         SelectionBulkProperty::Temperature => "Temperature",
         SelectionBulkProperty::Tolerance => "Tolerance",
+        SelectionBulkProperty::ToleranceDistribution => "Tolerance distribution",
         SelectionBulkProperty::Display => "Display",
         SelectionBulkProperty::ParameterOverride => "Parameter override",
+        SelectionBulkProperty::Bom(field) => field.label(),
     }
 }
 
@@ -1222,9 +1234,33 @@ fn new_value_control(ui: &mut Ui, dialog: &mut SelectionBulkEditDialogState) -> 
             }
             before != dialog.new_value
         }
+        SelectionBulkProperty::ToleranceDistribution => {
+            let before = dialog.new_value.clone();
+            let labels =
+                ToleranceDistribution::ALL.map(|distribution| distribution.label().to_owned());
+            let shown = ToleranceDistribution::ALL
+                .into_iter()
+                .find(|distribution| distribution.keyword() == dialog.new_value)
+                .map_or("Choose a distribution", ToleranceDistribution::label);
+            let width = ui.available_width();
+            if let Some(index) = select(
+                ui,
+                "selection-bulk-tolerance-distribution",
+                "Distribution",
+                shown,
+                &labels,
+                width,
+            ) {
+                ToleranceDistribution::ALL[index]
+                    .keyword()
+                    .clone_into(&mut dialog.new_value);
+            }
+            before != dialog.new_value
+        }
         SelectionBulkProperty::Temperature
         | SelectionBulkProperty::Tolerance
-        | SelectionBulkProperty::ParameterOverride => {
+        | SelectionBulkProperty::ParameterOverride
+        | SelectionBulkProperty::Bom(_) => {
             field(ui, "New value", &mut dialog.new_value, "").changed()
         }
     }
@@ -1605,6 +1641,10 @@ fn component_row(
         Some("Other owner".to_owned())
     } else if (kind == SelectionBulkRowKind::Port && property != SelectionBulkProperty::Display)
         || (property == SelectionBulkProperty::ModelSection && component.library_cell.is_none())
+        || (matches!(
+            property,
+            SelectionBulkProperty::Tolerance | SelectionBulkProperty::ToleranceDistribution
+        ) && !supports_tolerance(component.kind))
     {
         Some("Not applicable".to_owned())
     } else if parse_replacement_parameters_strict(&component.params).is_err()
@@ -1612,6 +1652,7 @@ fn component_row(
             property,
             SelectionBulkProperty::Temperature
                 | SelectionBulkProperty::Tolerance
+                | SelectionBulkProperty::ToleranceDistribution
                 | SelectionBulkProperty::ParameterOverride
         )
     {
@@ -1654,12 +1695,15 @@ fn component_row(
         ),
         value: displayed_value,
         search_text: format!(
-            "{} {} {} {} {}",
+            "{} {} {} {} {} {} {} {}",
             component.kind.display_name(),
             component.name,
             component.value,
             component.params,
-            binding_search
+            binding_search,
+            component.bom.manufacturer,
+            component.bom.mpn,
+            component.bom.description
         ),
         lock,
     }
@@ -1746,9 +1790,15 @@ fn component_named_property(component: &Component, name: &str) -> Option<String>
             .map(|binding| binding.cell.clone())
             .or_else(|| Some(component.value.clone())),
         "value" => Some(component.value.clone()),
-        other => parse_replacement_parameters_strict(&component.params)
-            .ok()
-            .and_then(|parameters| parameters.get(other).cloned()),
+        other => match BomField::ALL
+            .into_iter()
+            .find(|field| field.label().eq_ignore_ascii_case(other))
+        {
+            Some(field) => Some(component.bom.get(field).to_owned()),
+            None => parse_replacement_parameters_strict(&component.params)
+                .ok()
+                .and_then(|parameters| parameters.get(other).cloned()),
+        },
     }
 }
 
@@ -2071,6 +2121,73 @@ mod tests {
             schematic.document().components[0].display_mode,
             ComponentDisplayMode::Hidden
         );
+    }
+
+    /// A part number set across a selection lands on each part's BOM record,
+    /// and clearing it restores the blank; a distribution is stored as its
+    /// keyword, and only on parts a tolerance applies to.
+    #[test]
+    fn bom_and_distribution_bulk_edits_reach_the_parts_they_apply_to() {
+        let mut schematic = SchematicState::default();
+        schematic.document_mut_for_test().components = vec![
+            Component::new(1, ComponentType::Resistor, Point::new(0, 0))
+                .with_name_value("R1", "1k"),
+            Component::new(2, ComponentType::Resistor, Point::new(1, 0))
+                .with_name_value("R2", "1k"),
+        ];
+        let ids = BTreeSet::from([1, 2]);
+        let edit = |schematic: &mut SchematicState, property, value: &str, unset| {
+            apply_bulk_edit(schematic, &ids, property, value, unset, None).expect("bulk edit")
+        };
+        edit(
+            &mut schematic,
+            SelectionBulkProperty::Bom(BomField::Mpn),
+            " RC0603FR-0710KL ",
+            SelectionBulkUnsetBehavior::SetExplicitValue,
+        );
+        assert!(
+            schematic
+                .document()
+                .components
+                .iter()
+                .all(|part| part.bom.mpn == "RC0603FR-0710KL" && part.params.is_empty())
+        );
+        edit(
+            &mut schematic,
+            SelectionBulkProperty::Bom(BomField::Mpn),
+            "",
+            SelectionBulkUnsetBehavior::RestoreInheritedValue,
+        );
+        assert!(
+            schematic
+                .document()
+                .components
+                .iter()
+                .all(|part| part.bom.mpn.is_empty())
+        );
+
+        edit(
+            &mut schematic,
+            SelectionBulkProperty::ToleranceDistribution,
+            "Uniform",
+            SelectionBulkUnsetBehavior::SetExplicitValue,
+        );
+        assert!(
+            schematic
+                .document()
+                .components
+                .iter()
+                .all(|part| part.params == "tol_dist=uniform")
+        );
+
+        let mut state = AppState::default();
+        state.model.schematic.document_mut_for_test().components = vec![component(1, "X1", None)];
+        let rows = build_rows(
+            &state,
+            &SelectionBulkFilter::default(),
+            SelectionBulkProperty::ToleranceDistribution,
+        );
+        assert_eq!(rows[0].lock.as_deref(), Some("Not applicable"));
     }
 
     #[test]

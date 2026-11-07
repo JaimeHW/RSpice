@@ -123,6 +123,10 @@ impl PropertyCatalog {
                 .with_category("Parasitics"),
         );
 
+        for field in tolerance_fields(25) {
+            sheet.add(field);
+        }
+
         // No voltage-coefficient fields: the engine models no
         // voltage-dependent capacitance, so `vc1`/`vc2` controls would write
         // a parameter that reaches the deck and is then silently discarded.
