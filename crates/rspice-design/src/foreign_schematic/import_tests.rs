@@ -101,8 +101,9 @@ fn library() -> Library {
 }
 
 /// The nets the source simulator reads from a drawing: wire ends, pins and
-/// flags join where they meet, a point on the middle of a wire joins it, and
-/// flags of one name are one net. Returns `(owner, pin index) -> net`.
+/// flags join where they meet, a point on the middle of a wire joins it,
+/// flags of one name are one net, and an LTspice A-device's pin that meets
+/// nothing is ground. Returns `(owner, pin index) -> net`.
 fn reference_nets(
     drawing: &ForeignSchematic,
     library: &Library,
@@ -141,6 +142,7 @@ fn reference_nets(
         parent: Vec::new(),
     };
     let mut owners = Vec::new();
+    let mut devices = BTreeSet::new();
     for symbol in &drawing.symbols {
         let definition = symbol
             .embedded
@@ -155,6 +157,13 @@ fn reference_nets(
             continue;
         };
         let name = symbol.attribute("InstName").unwrap_or_default().to_owned();
+        if drawing.tool == ForeignTool::Ltspice
+            && definition
+                .attribute("Prefix")
+                .is_some_and(|prefix| prefix.trim().eq_ignore_ascii_case("A"))
+        {
+            devices.insert(name.clone());
+        }
         for (order, pin) in definition.ordered_pins().into_iter().enumerate() {
             let at = symbol
                 .position
@@ -195,6 +204,34 @@ fn reference_nets(
                     by_name.insert(name.to_owned(), *item);
                 }
             }
+        }
+    }
+    let wired = drawing
+        .wires
+        .iter()
+        .flat_map(|(a, b)| [*a, *b])
+        .map(|point| nodes.node(point))
+        .collect::<Vec<_>>();
+    let wired = wired
+        .into_iter()
+        .map(|item| nodes.find(item))
+        .collect::<BTreeSet<_>>();
+    let mut sharing = HashMap::<usize, usize>::new();
+    for (_, item) in &owners {
+        *sharing.entry(nodes.find(*item)).or_default() += 1;
+    }
+    let alone = owners
+        .iter()
+        .filter(|((owner, _), item)| {
+            let root = nodes.find(*item);
+            devices.contains(owner) && sharing[&root] == 1 && !wired.contains(&root)
+        })
+        .map(|(_, item)| *item)
+        .collect::<Vec<_>>();
+    if let Some((first, rest)) = alone.split_first() {
+        let ground = *by_name.entry("0".to_owned()).or_insert(*first);
+        for item in std::iter::once(first).chain(rest) {
+            nodes.join(*item, ground);
         }
     }
     owners
@@ -1174,6 +1211,153 @@ SYMATTR InstName U2
         .filter(|notice| notice.message.contains("no pin for place 3"))
         .count();
     assert_eq!(notices, 1, "one notice per symbol: {:?}", imported.notices);
+}
+
+/// LTspice's varistor and D flip-flop: places without a pin, drawn pins a
+/// circuit may leave open, and the common every A-device draws.
+const LTSPICE_VARISTOR_ASY: &str = "Version 4
+SymbolType CELL
+RECTANGLE Normal -48 32 16 96
+    SYMATTR Prefix A
+SYMATTR SpiceModel VARISTOR
+    PIN -32 48 NONE 0
+PINATTR PinName invin
+PINATTR SpiceOrder 1
+    PIN -32 80 NONE 0
+PINATTR PinName noninvin
+PINATTR SpiceOrder 2
+    PIN -16 32 NONE 0
+PINATTR PinName out
+PINATTR SpiceOrder 7
+    PIN -16 96 NONE 0
+PINATTR PinName com
+PINATTR SpiceOrder 8
+";
+const LTSPICE_DFLOP_ASY: &str = "Version 4
+SymbolType CELL
+RECTANGLE Normal -80 0 80 144
+    SYMATTR Prefix A
+SYMATTR SpiceModel DFLOP
+    PIN -80 48 LEFT 8
+PINATTR PinName D
+PINATTR SpiceOrder 1
+    PIN -80 96 LEFT 8
+PINATTR PinName CLK
+PINATTR SpiceOrder 3
+    PIN 0 0 TOP 4
+PINATTR PinName PRE
+PINATTR SpiceOrder 4
+    PIN 0 144 BOTTOM 4
+PINATTR PinName CLR
+PINATTR SpiceOrder 5
+    PIN 96 96 RIGHT 20
+PINATTR PinName _Q
+PINATTR SpiceOrder 6
+    PIN 80 48 RIGHT 4
+PINATTR PinName Q
+PINATTR SpiceOrder 7
+    PIN -80 144 NONE 0
+PINATTR PinName com
+PINATTR SpiceOrder 8
+";
+
+#[test]
+fn an_ltspice_device_writes_eight_places_and_grounds_what_nothing_reaches() {
+    let mut library = Library::default();
+    for (name, source) in [
+        ("special\\varistor", LTSPICE_VARISTOR_ASY),
+        ("logic\\dflop", LTSPICE_DFLOP_ASY),
+    ] {
+        library.symbols.insert(
+            name.to_owned(),
+            ForeignSymbolSource {
+                definition: parse_asy(source).expect("the test symbol reads"),
+                location: format!("{name}.asy"),
+                schematic: None,
+            },
+        );
+    }
+    let drawing = parse_asc(
+        "Version 4
+SHEET 1 1200 400
+         FLAG -32 48 in
+FLAG -32 80 0
+FLAG -16 32 out
+         SYMBOL special\\varistor 0 0 R0
+SYMATTR InstName A1
+SYMATTR SpiceLine Rclamp=1
+         FLAG 320 48 d
+FLAG 320 96 clk
+FLAG 480 48 q
+         SYMBOL logic\\dflop 400 0 R0
+SYMATTR InstName A2
+",
+    )
+    .unwrap();
+    let imported = import_foreign_schematic(&drawing, "work", &library);
+    assert_on_grid(&imported);
+    assert_same_connectivity(&drawing, &imported, &library);
+    let cells = imported
+        .cells
+        .iter()
+        .map(|cell| (cell.cell.clone(), cell))
+        .collect::<HashMap<_, _>>();
+    let connectivity = extract(
+        &imported.document,
+        |binding| {
+            cells.get(&binding.cell).map(|cell| {
+                ResolvedCellSymbol::from_authored_document(cell.symbol.clone(), &cell.ports)
+            })
+        },
+        |_| None,
+    );
+    let nets = |name: &str| {
+        let component = imported
+            .document
+            .components
+            .iter()
+            .find(|component| component.name == name)
+            .unwrap_or_else(|| panic!("{name} was placed"));
+        let binding = component.library_cell.as_ref().expect("a cell instance");
+        binding
+            .terminal_order
+            .iter()
+            .map(|pin| {
+                let net = &connectivity
+                    .terminals
+                    .iter()
+                    .find(|terminal| terminal.component_id == component.id && &terminal.pin == pin)
+                    .unwrap_or_else(|| panic!("{name} has no terminal {pin}"))
+                    .net_name;
+                if crate::schematic::ground_names::is_ground_reference(net) {
+                    "0".to_owned()
+                } else {
+                    net.clone()
+                }
+            })
+            .collect::<Vec<_>>()
+    };
+    // Every place of the line is written; a place without a pin and a pin
+    // nothing reaches are node 0, as LTspice writes them.
+    assert_eq!(nets("A1"), ["in", "0", "0", "0", "0", "0", "out", "0"]);
+    assert_eq!(nets("A2"), ["d", "0", "clk", "0", "0", "0", "q", "0"]);
+    // One ground per open pin: the varistor's common, the flip-flop's
+    // preset, clear, inverted output and common; the flag's own.
+    let grounds = imported
+        .document
+        .components
+        .iter()
+        .filter(|component| component.kind == ComponentType::Ground)
+        .count();
+    assert_eq!(grounds, 6);
+    assert!(
+        !imported
+            .notices
+            .iter()
+            .any(|notice| notice.message.contains("no pin for place")),
+        "LTspice's own places need no notice: {:?}",
+        imported.notices
+    );
 }
 
 /// LTspice's AND gate: five inputs, the inverted and the true output, and

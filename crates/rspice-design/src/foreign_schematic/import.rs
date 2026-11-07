@@ -46,6 +46,8 @@ use crate::symbol::{SymbolDocument, SymbolPin, SymbolShape};
 
 /// RSpice's schematic grid step.
 const GRID: i32 = 10;
+/// The places of an LTspice A-device's instance line.
+const DEVICE_PLACES: usize = 8;
 
 /// The device letters whose value names a `.model` card.
 const MODEL_PREFIXES: [&str; 7] = ["D", "Q", "M", "J", "Z", "S", "W"];
@@ -126,7 +128,8 @@ pub struct ForeignSymbolCell {
     pub source: Option<ForeignModelSource>,
     /// Ports for instance-line places the source symbol gives no pin: each
     /// is a symbol pin that touches nothing, so it writes a node of its own,
-    /// as LTspice writes `MP_nn` there.
+    /// as LTspice writes `MP_nn` there. An A-device's share its common's pin,
+    /// or one grounded point when it draws none.
     pub unconnected: Vec<String>,
 }
 
@@ -241,11 +244,14 @@ pub fn import_foreign_schematic(
         terminals: Vec::new(),
         names: BTreeSet::new(),
         models: BTreeSet::new(),
+        pin_points: HashMap::new(),
+        device_ties: Vec::new(),
     };
     builder.collect_source_geometry();
     for symbol in &drawing.symbols {
         builder.place_symbol(symbol);
     }
+    builder.tie_device_pins();
     builder.place_flags();
     builder.place_texts();
     builder.place_shapes();
@@ -278,6 +284,20 @@ struct Builder<'a> {
     names: BTreeSet<String>,
     /// The models native parts name, for the source program's cards.
     models: BTreeSet<String>,
+    /// How many placed symbols have a pin at each point.
+    pin_points: HashMap<Point, usize>,
+    /// Terminals of LTspice A-devices that LTspice grounds when nothing
+    /// else reaches them.
+    device_ties: Vec<DeviceTie>,
+}
+
+/// A terminal of an LTspice A-device, tied to ground unless its source pin
+/// (`None`: it has none) meets a wire, a flag or another pin.
+struct DeviceTie {
+    source: Option<Point>,
+    terminal: Point,
+    /// The middle of the part's terminals, which the ground faces away from.
+    center: Point,
 }
 
 impl Builder<'_> {
@@ -389,6 +409,9 @@ impl Builder<'_> {
             })
             .collect::<Vec<_>>();
         self.anchors.extend(pins.iter().copied());
+        for point in &pins {
+            *self.pin_points.entry(*point).or_default() += 1;
+        }
         // LTspice's jumper joins its two nets and is no device: a wire.
         if tool == ForeignTool::Ltspice
             && symbol.base_name().eq_ignore_ascii_case("jumper")
@@ -841,12 +864,16 @@ impl Builder<'_> {
             .unwrap_or_default();
         words.splice(0..0, model_words);
         // One cell per model: a cell's `spice` view runs one model.
+        // LTspice's A-devices write all eight places of their line, and
+        // ground each place nothing reaches.
+        let device = prefix == "A" && !subcircuit && self.drawing.tool == ForeignTool::Ltspice;
         let cell_index = self.symbol_cell(
             symbol,
             definition,
             location,
             schematic.clone(),
             (!subcircuit).then_some(model.as_str()),
+            device,
         );
         let cell = self.cells[cell_index].clone();
         let model = if subcircuit { cell.cell.clone() } else { model };
@@ -953,6 +980,9 @@ impl Builder<'_> {
                 .collect()
         };
         let points = self.place_fitted(&mut component, pins, offsets);
+        if device {
+            self.tie_device(&cell, &component, pins, &points);
+        }
         for (port, point) in cell
             .ports
             .iter()
@@ -964,6 +994,92 @@ impl Builder<'_> {
         self.document.components.push(component);
     }
 
+    /// Records the terminals of an LTspice A-device that are ground when
+    /// nothing reaches them: each drawn pin, and the places its symbol gives
+    /// no pin when they do not share its common's.
+    fn tie_device(
+        &mut self,
+        cell: &ForeignSymbolCell,
+        component: &Component,
+        sources: &[Point],
+        terminals: &[Point],
+    ) {
+        let count = i32::try_from(terminals.len().max(1)).unwrap_or(1);
+        let sum = terminals
+            .iter()
+            .fold(Point::default(), |sum, point| sum + *point);
+        let center = Point::new(sum.x / count, sum.y / count);
+        for (source, terminal) in sources.iter().zip(terminals) {
+            self.device_ties.push(DeviceTie {
+                source: Some(*source),
+                terminal: *terminal,
+                center,
+            });
+        }
+        let placeholder = |pin: &&SymbolPin| cell.unconnected.contains(&pin.name);
+        let common = cell
+            .symbol
+            .pins
+            .get(7)
+            .filter(|pin| !placeholder(pin))
+            .and_then(|pin| pin.position);
+        let spare = cell
+            .symbol
+            .pins
+            .iter()
+            .filter(placeholder)
+            .filter_map(|pin| pin.position)
+            .find(|position| Some(*position) != common);
+        if let Some(position) = spare {
+            self.device_ties.push(DeviceTie {
+                source: None,
+                terminal: component.pos + component.transform_point(position),
+                center,
+            });
+        }
+    }
+
+    /// Grounds each recorded A-device terminal whose source pin nothing
+    /// reaches, as LTspice writes node `0` there: a ground symbol on the
+    /// terminal, facing away from the part.
+    fn tie_device_pins(&mut self) {
+        for tie in std::mem::take(&mut self.device_ties) {
+            let reached = tie.source.is_some_and(|source| {
+                self.source_nets.net(source).is_some()
+                    || self.pin_points.get(&source).copied().unwrap_or_default() > 1
+            });
+            if reached {
+                continue;
+            }
+            let away = tie.terminal - tie.center;
+            let rotation = if away.x.abs() > away.y.abs() {
+                if away.x > 0 { Rotation::R270 } else { Rotation::R90 }
+            } else if away.y < 0 {
+                Rotation::R180
+            } else {
+                Rotation::R0
+            };
+            let id = self.id();
+            let mut ground = Component::new(id, ComponentType::Ground, Point::default());
+            ground.rotation = rotation;
+            ground.name = format!("GND{id}");
+            let offset = ground
+                .terminal_positions()
+                .into_iter()
+                .next()
+                .map(|(_, point)| point)
+                .unwrap_or_default();
+            ground.pos = tie.terminal - offset;
+            self.terminals.extend(
+                ground
+                    .terminal_positions()
+                    .into_iter()
+                    .map(|(name, point)| (id, name.to_owned(), point)),
+            );
+            self.document.components.push(ground);
+        }
+    }
+
     /// The project cell for a symbol, made the first time the symbol is
     /// placed.
     fn symbol_cell(
@@ -973,6 +1089,7 @@ impl Builder<'_> {
         location: Option<String>,
         schematic: Option<PathBuf>,
         model: Option<&str>,
+        device: bool,
     ) -> usize {
         // QSPICE embeds a symbol per component, so two components under one
         // name may differ; their drawings decide.
@@ -997,11 +1114,22 @@ impl Builder<'_> {
         }
         // A hierarchical block's ports are its schematic's; only a symbol
         // over a model leaves places of its instance line without a pin.
-        let slots = if schematic.is_none() && self.drawing.tool == ForeignTool::Ltspice {
+        let mut slots = if schematic.is_none() && self.drawing.tool == ForeignTool::Ltspice {
             spice_order_slots(definition)
         } else {
             definition.ordered_pins().into_iter().map(Some).collect()
         };
+        // An A-device's places without a pin share its common's, which
+        // LTspice's own symbols all draw and its circuits ground.
+        let mut shared = None;
+        if device {
+            slots.resize(slots.len().max(DEVICE_PLACES), None);
+            shared = slots
+                .get(DEVICE_PLACES - 1)
+                .copied()
+                .flatten()
+                .map(|pin| self.scale(pin.position));
+        }
         let ports = unique_pin_names(&slots);
         let drawn = slots
             .iter()
@@ -1018,7 +1146,10 @@ impl Builder<'_> {
                 None => {
                     unconnected.push(port.name.clone());
                     gaps.push(order.to_string());
-                    spare.next().unwrap_or_default()
+                    if device && shared.is_none() {
+                        shared = spare.next();
+                    }
+                    shared.or_else(|| spare.next()).unwrap_or_default()
                 }
             };
             pins.push(SymbolPin::new(
@@ -1027,7 +1158,7 @@ impl Builder<'_> {
                 Some(position),
             ));
         }
-        if !gaps.is_empty() {
+        if !gaps.is_empty() && !device {
             self.notice(format!(
                 "{}: its symbol has no pin for place {} of the instance line; RSpice leaves an unconnected terminal there, as LTspice does, so the model's nodes keep their order.",
                 symbol.symbol,
