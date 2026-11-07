@@ -253,3 +253,26 @@ E3 c 0 in 0 Laplace=1./(1+.0005*s)**3
     assert_close("V(c)", values[1], 0.323323, 2e-4);
 }
 
+// QSPICE and LTspice: V(o1)=1000 and V(o2)=3.
+#[test]
+fn instance_parameters_the_subcircuit_does_not_declare_reach_its_body() {
+    let netlist = parse(
+        "* undeclared instance parameters
+V1 in 0 1
+X1 in 0 o1 amp Aol=1k
+R1 o1 0 1k
+X2 in 0 o2 amp2 G=3 Unused=7
+R2 o2 0 1k
+.subckt amp 1 2 3
+E1 3 0 1 2 {Aol}
+.ends amp
+.subckt amp2 1 2 3 G=1
+E1 3 0 1 2 {G}
+.ends amp2
+.op
+.end
+",
+    );
+    assert_close("V(o1)", op_voltage(&netlist, "o1"), 1000.0, 1e-9);
+    assert_close("V(o2)", op_voltage(&netlist, "o2"), 3.0, 1e-9);
+}

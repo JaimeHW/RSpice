@@ -332,6 +332,9 @@ pub struct Flattener<'a> {
     /// ngspice dialect: a `.global` port stays the global net whatever the X
     /// line connects there (the parser warns), rather than being refused.
     ngspice_global_ports: bool,
+    /// ngspice dialect: an X-line parameter the subcircuit does not declare
+    /// is refused rather than bound.
+    refuse_undeclared_instance_params: bool,
     /// Xyce's explicit ground-synonym preprocessing policy.
     ground_policy: super::GroundPolicy,
     /// Definitions currently being expanded, outermost first. A definition
@@ -412,6 +415,7 @@ impl<'a> Flattener<'a> {
             options_gmin: None,
             global_nodes: HashSet::new(),
             ngspice_global_ports: false,
+            refuse_undeclared_instance_params: false,
             ground_policy: super::GroundPolicy::OnlyZero,
             expansion_stack: Vec::new(),
             random: RandomState::default(),
@@ -563,6 +567,7 @@ impl<'a> Flattener<'a> {
             .map(|node| node.to_ascii_uppercase())
             .collect();
         self.ngspice_global_ports = netlist.parse_dialect == crate::config::SpiceDialect::Ngspice;
+        self.refuse_undeclared_instance_params = self.ngspice_global_ports;
         self.ground_policy = netlist.ground_policy();
         self.expansion_stack.clear();
         self.scoped_models.clear();
@@ -1346,11 +1351,11 @@ impl<'a> Flattener<'a> {
             .any(|(name, _)| name.eq_ignore_ascii_case("M"));
         let xyce_implicit_multiplier = caller_scope.expression_dialect() == ExpressionDialect::Xyce;
         let applies_as_physical_multiplier = xyce_implicit_multiplier || !formal_declares_m;
-        // Xyce binds an X-line parameter the subcircuit never declares
-        // ("Subcircuit instance parameters do not have to be prototyped on
-        // the .subckt line", N_IO_CircuitContext.C); its certification decks
-        // rely on it.
-        if caller_scope.expression_dialect() != ExpressionDialect::Xyce {
+        // QSPICE, LTspice and Xyce bind an X-line parameter the subcircuit
+        // never declares ("Subcircuit instance parameters do not have to be
+        // prototyped on the .subckt line", N_IO_CircuitContext.C). ngspice
+        // stops on one its subcircuit has no formal for.
+        if self.refuse_undeclared_instance_params {
             refuse_undeclared_subcircuit_instance_params(subckt, &instance.name, instance_params)?;
         }
         let mut multiplicity = 1.0;
@@ -4663,16 +4668,13 @@ pub(super) fn subcircuit_declared_parameters(
         .chain(texts(&subckt.body_string_params))
 }
 
-/// Refuse an X-line parameter that names nothing the subcircuit declares.
+/// Refuse an X-line parameter that names nothing the subcircuit declares, as
+/// the ngspice dialect does.
 ///
-/// `X1 a b rr r=5` on a `.subckt rr a b` with no parameters, or `q=5` on one
-/// that declares only `r`, used to bind a value no card reads and run as if
-/// it had not been written. ngspice refuses the first ("Mismatch: 0 formal
-/// but 1 actual params") and silently drops the second; Spectre refuses any
-/// instance parameter its subcircuit does not declare, and so does RSpice
-/// outside the ngspice dialect, whose parser has already dropped the second
-/// kind with a warning, and the Xyce dialect, which binds both as Xyce does.
-/// `M` is always the instance's parallel multiplier.
+/// ngspice refuses `X1 a b rr r=5` on a `.subckt rr a b` with no parameters
+/// ("Mismatch: 0 formal but 1 actual params") and drops `q=5` on one that
+/// declares only `r`, which the ngspice dialect's parser has already done
+/// with a warning. `M` is always the instance's parallel multiplier.
 fn refuse_undeclared_subcircuit_instance_params(
     subckt: &SubcircuitDef,
     instance_name: &str,
@@ -5807,48 +5809,41 @@ mod tests {
         }
     }
 
-    /// An X-line parameter that names nothing the subcircuit declares is
-    /// refused at the X card outside the Xyce dialect. ngspice 46 refuses
-    /// `X1 1 0 rr r=5` on a parameterless `rr` ("Mismatch: 0 formal but 1
-    /// actual params") and silently drops `q=5` on an `rr` that declares
-    /// only `r`; both used to run here as if the value had not been written.
+    /// QSPICE and LTspice pass an X-line parameter the subcircuit never
+    /// declares into its body as a subcircuit parameter, and accept one no
+    /// card reads: `X1 in 0 o1 amp Aol=1k` on `.subckt amp 1 2 3` with
+    /// `E1 3 0 1 2 {Aol}` gives V(o1)=1000, and `Unused=7` beside a declared
+    /// `G=3` gives V(o2)=3 in both.
     #[test]
-    fn instance_parameters_must_name_a_declared_subcircuit_parameter() {
-        let parse = |deck: &str| Netlist::parse(deck).expect("deck parses");
-        for (deck, detail) in [
-            (
-                "no params\n.subckt rr a b\nR1 a b 1k\n.ends\nV1 1 0 1\nX1 1 0 rr r=5\n.op\n.end\n",
-                "sets parameter 'r', which subcircuit 'rr' does not declare (it declares no parameters)",
-            ),
-            (
-                "unknown param\n.subckt rr a b r=1k\nR1 a b {r}\n.ends\nV1 1 0 1\nX1 1 0 rr q=5\n.op\n.end\n",
-                "sets parameter 'q', which subcircuit 'rr' does not declare (it declares r)",
-            ),
-            (
-                "params keyword\n.subckt rr a b params: r=1k\nR1 a b {r}\n.ends\nV1 1 0 1\nX1 1 0 rr params: r=2k q=5\n.op\n.end\n",
-                "sets parameter 'q'",
-            ),
-        ] {
-            let error = flatten_netlist(&parse(deck)).expect_err("undeclared parameter");
-            let ParseError::Syntax { line, message } = &error else {
-                panic!("{error:?}");
-            };
-            assert_eq!(*line, 6, "{message}");
-            assert!(
-                message
-                    .to_ascii_lowercase()
-                    .contains(&detail.to_ascii_lowercase()),
-                "{message}"
-            );
-        }
-        // M is the multiplier, and a body .param is a declared name.
-        for deck in [
-            "m\n.subckt rr a b\nR1 a b 1k\n.ends\nV1 1 0 1\nX1 1 0 rr m=2\n.op\n.end\n",
-            "body\n.subckt rr a b\n.param r=1k\nR1 a b {r}\n.ends\nV1 1 0 1\nX1 1 0 rr r=2k\n.op\n.end\n",
-            "declared\n.subckt rr a b r=1k\nR1 a b {r}\n.ends\nV1 1 0 1\nX1 1 0 rr R=2k M=2\n.op\n.end\n",
-        ] {
-            flatten_netlist(&parse(deck)).unwrap_or_else(|error| panic!("{deck}: {error}"));
-        }
+    fn instance_parameters_the_subcircuit_does_not_declare_are_bound() {
+        let netlist = Netlist::parse(
+            "undeclared
+V1 in 0 1
+X1 in 0 o1 amp Aol=1k
+R1 o1 0 1k
+X2 in 0 o2 amp2 G=3 Unused=7
+             R2 o2 0 1k
+.subckt amp 1 2 3
+E1 3 0 1 2 {Aol}
+.ends amp
+             .subckt amp2 1 2 3 G=1
+E1 3 0 1 2 {G}
+.ends amp2
+.op
+.end
+",
+        )
+        .expect("deck parses");
+        let flattened = flatten_netlist(&netlist).expect("expansion binds the parameters");
+        let mut gains = flattened
+            .iter()
+            .filter_map(|element| match element.kind {
+                ElementKind::Vcvs { gain, .. } => Some(gain),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        gains.sort_by(f64::total_cmp);
+        assert_eq!(gains, vec![3.0, 1000.0]);
     }
 
     /// Xyce binds an X-line parameter the subcircuit never declares: "Subcircuit
