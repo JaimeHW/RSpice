@@ -225,11 +225,14 @@ pub fn import_foreign_schematic(
         notices: Vec::new(),
         directives: Vec::new(),
         leads: Vec::new(),
+        source_points: HashSet::new(),
+        source_segments: Vec::new(),
         anchors: HashSet::new(),
         terminals: Vec::new(),
         names: BTreeSet::new(),
         models: BTreeSet::new(),
     };
+    builder.collect_source_geometry();
     for symbol in &drawing.symbols {
         builder.place_symbol(symbol);
     }
@@ -252,6 +255,10 @@ struct Builder<'a> {
     directives: Vec<ForeignDirective>,
     /// Leads from RSpice terminals to the source pins they stand for.
     leads: Vec<(Point, Point)>,
+    /// Every point the source drawing's wires, flags and junctions join at,
+    /// and its wire segments, on RSpice's grid: what a lead must not touch.
+    source_points: HashSet<Point>,
+    source_segments: Vec<(Point, Point)>,
     /// Every point the source drawing joins things at.
     anchors: HashSet<Point>,
     /// Every placed terminal, for the wire-connection cache.
@@ -504,7 +511,12 @@ impl Builder<'_> {
                 let mut extra = Vec::new();
                 for word in words {
                     match word.split_once('=') {
+                        // `Value2` and `SpiceLine` may both set a field; the
+                        // source program writes both and the later one holds.
                         Some((key, value)) if !key.is_empty() && !value.is_empty() => {
+                            params.retain(|(written, _): &(String, String)| {
+                                !written.eq_ignore_ascii_case(key)
+                            });
                             params.push((key.to_owned(), value.to_owned()));
                         }
                         // LTspice writes `x2` for two parts in parallel.
@@ -514,7 +526,25 @@ impl Builder<'_> {
                         _ => extra.push(word),
                     }
                 }
-                (kind, spice_text(value), params, extra)
+                let value = spice_text(value);
+                // QSPICE reads a passive's value as an expression, braces or
+                // not (`2.21/3`, `Rload`); RSpice reads one in braces.
+                let value = if self.drawing.tool == ForeignTool::Qspice
+                    && matches!(
+                        kind,
+                        ComponentType::Resistor
+                            | ComponentType::Capacitor
+                            | ComponentType::Inductor
+                    )
+                    && !value.is_empty()
+                    && !value.starts_with('{')
+                    && !is_spice_number(&value)
+                {
+                    format!("{{{value}}}")
+                } else {
+                    value
+                };
+                (kind, value, params, extra)
             }
             NativeKind::VoltageSource | NativeKind::CurrentSource => {
                 let voltage = mapping.kind == NativeKind::VoltageSource;
@@ -573,16 +603,8 @@ impl Builder<'_> {
                 })
                 .collect()
         };
-        let (position, rotation, mirrored) = fit(&component, pins, offsets);
-        component.pos = position;
-        component.rotation = rotation;
-        component.mirror_h = mirrored;
+        self.place_fitted(&mut component, pins, offsets);
         let placed = component.terminal_positions();
-        for (terminal, pin) in mapping.terminals.iter().zip(pins) {
-            if let Some((_, point)) = placed.iter().find(|(name, _)| name == terminal) {
-                self.lead(*point, *pin);
-            }
-        }
         if let Some((from, to)) = mapping.tie {
             let point = |terminal: &str| {
                 placed
@@ -629,12 +651,24 @@ impl Builder<'_> {
             "X".to_owned()
         };
         let subcircuit = schematic.is_some();
-        let written = (!subcircuit).then(|| {
-            attribute(attributes, "Value")
+        // A subcircuit's `SpiceModel`, when it names a model and not a file,
+        // is the model its line writes, ahead of `Value` and `Value2`.
+        let spice_model = attribute(attributes, "SpiceModel")
+            .map(str::trim)
+            .filter(|model| prefix == "X" && !model.is_empty() && !looks_like_file(model));
+        let written = (!subcircuit).then(|| match spice_model {
+            Some(model) => ["Value", "Value2"]
+                .into_iter()
+                .filter_map(|key| attribute(attributes, key))
+                .filter(|text| !text.trim().is_empty())
+                .fold(model.to_owned(), |line, text| {
+                    format!("{line} {}", spice_text(text))
+                }),
+            None => attribute(attributes, "Value")
                 .filter(|value| !value.trim().is_empty())
                 .or_else(|| attribute(attributes, "Value2"))
                 .map(spice_text)
-                .unwrap_or_else(|| symbol.base_name().to_owned())
+                .unwrap_or_else(|| symbol.base_name().to_owned()),
         });
         let mut words = Vec::new();
         for key in ["SpiceLine", "SpiceLine2"] {
@@ -762,13 +796,8 @@ impl Builder<'_> {
                 .map(|point| candidate.transform_point(*point))
                 .collect()
         };
-        let (position, rotation, mirrored) = fit(&component, pins, offsets);
-        component.pos = position;
-        component.rotation = rotation;
-        component.mirror_h = mirrored;
-        for ((port, offset), pin) in cell.ports.iter().zip(&local).zip(pins) {
-            let point = position + component.transform_point(*offset);
-            self.lead(point, *pin);
+        let points = self.place_fitted(&mut component, pins, offsets);
+        for (port, point) in cell.ports.iter().zip(points) {
             self.terminals.push((id, port.name.clone(), point));
         }
         self.document.components.push(component);
@@ -940,17 +969,147 @@ impl Builder<'_> {
     /// A straight or once-bent lead from a placed terminal to the source pin
     /// it stands for.
     fn lead(&mut self, from: Point, to: Point) {
-        if from == to {
-            return;
+        let route = lead_routes(from, to).into_iter().next().unwrap_or_default();
+        self.push_leads(&route);
+    }
+
+    fn push_leads(&mut self, leads: &[(Point, Point)]) {
+        for pair in leads.windows(2) {
+            // A bend joins its two legs.
+            if pair[0].1 == pair[1].0 {
+                self.anchors.insert(pair[0].1);
+            }
         }
-        if from.x == to.x || from.y == to.y {
-            self.leads.push((from, to));
-        } else {
-            let corner = Point::new(to.x, from.y);
-            self.leads.push((from, corner));
-            self.leads.push((corner, to));
-            self.anchors.insert(corner);
+        self.leads.extend_from_slice(leads);
+    }
+
+    fn collect_source_geometry(&mut self) {
+        let drawing = self.drawing;
+        for (a, b) in drawing.wires.iter().chain(&drawing.bus_taps) {
+            let (a, b) = (self.scale(*a), self.scale(*b));
+            self.source_points.extend([a, b]);
+            self.source_segments.push((a, b));
         }
+        for flag in &drawing.flags {
+            self.source_points.insert(self.scale(flag.position));
+        }
+        for point in &drawing.junctions {
+            self.source_points.insert(self.scale(*point));
+        }
+    }
+
+    /// Places `component` where its terminals best meet the source `pins`
+    /// and draws a lead from each terminal to its pin, returning the
+    /// terminal points in pin order. The cheapest placement whose leads all
+    /// run clear of every other pin, wire and lead wins, so a lead joins
+    /// nothing but its own pin; when none runs clear, the cheapest placement
+    /// keeps its plain leads.
+    fn place_fitted(
+        &mut self,
+        component: &mut Component,
+        pins: &[Point],
+        offsets: impl Fn(&Component) -> Vec<Point>,
+    ) -> Vec<Point> {
+        let candidates = placements(component, pins, &offsets);
+        let clear = candidates
+            .iter()
+            .find_map(|(position, rotation, mirrored, local)| {
+                let terminals = local
+                    .iter()
+                    .map(|offset| *position + *offset)
+                    .collect::<Vec<_>>();
+                self.clear_leads(&terminals, pins)
+                    .map(|leads| (*position, *rotation, *mirrored, terminals, leads))
+            });
+        let (position, rotation, mirrored, terminals, leads) = clear.unwrap_or_else(|| {
+            let (position, rotation, mirrored, local) =
+                candidates.into_iter().next().unwrap_or_else(|| {
+                    let mut upright = component.clone();
+                    upright.pos = Point::default();
+                    upright.rotation = Rotation::R0;
+                    upright.mirror_h = false;
+                    upright.mirror_v = false;
+                    let anchor = pins.first().copied().unwrap_or_default();
+                    (anchor, Rotation::R0, false, offsets(&upright))
+                });
+            let terminals = local
+                .iter()
+                .map(|offset| position + *offset)
+                .collect::<Vec<_>>();
+            let leads = terminals
+                .iter()
+                .zip(pins)
+                .flat_map(|(from, to)| {
+                    lead_routes(*from, *to)
+                        .into_iter()
+                        .next()
+                        .unwrap_or_default()
+                })
+                .collect();
+            (position, rotation, mirrored, terminals, leads)
+        });
+        component.pos = position;
+        component.rotation = rotation;
+        component.mirror_h = mirrored;
+        self.push_leads(&leads);
+        terminals
+    }
+
+    /// Leads from each terminal to its pin that touch no other pin,
+    /// terminal, joining point, wire or lead, or `None` when one cannot.
+    fn clear_leads(&self, terminals: &[Point], pins: &[Point]) -> Option<Vec<(Point, Point)>> {
+        let mut routed: Vec<(Point, Point)> = Vec::new();
+        for (from, to) in terminals.iter().zip(pins) {
+            let others = terminals
+                .iter()
+                .chain(pins)
+                .copied()
+                .filter(|point| point != from && point != to)
+                .collect::<Vec<_>>();
+            if from == to {
+                if others.contains(from) {
+                    return None;
+                }
+                continue;
+            }
+            let route = lead_routes(*from, *to)
+                .into_iter()
+                .find(|route| self.route_is_clear(route, *from, *to, &others, &routed))?;
+            routed.extend(route);
+        }
+        Some(routed)
+    }
+
+    fn route_is_clear(
+        &self,
+        route: &[(Point, Point)],
+        from: Point,
+        to: Point,
+        others: &[Point],
+        routed: &[(Point, Point)],
+    ) -> bool {
+        let touches_point = self
+            .anchors
+            .iter()
+            .chain(&self.source_points)
+            .chain(self.terminals.iter().map(|(_, _, point)| point))
+            .chain(others)
+            .filter(|point| **point != from && **point != to)
+            .any(|point| route.iter().any(|(a, b)| on_segment(*a, *b, *point)));
+        // A wire or lead that reaches the pin itself is already its net.
+        let touches_segment = self
+            .source_segments
+            .iter()
+            .chain(&self.leads)
+            .chain(routed)
+            .filter(|(c, d)| !on_segment(*c, *d, to))
+            .any(|(c, d)| {
+                on_segment(*c, *d, from)
+                    || route.iter().any(|(a, b)| {
+                        overlap(*a, *b, *c, *d) || (*b != to && on_segment(*c, *d, *b))
+                    })
+            });
+        !touches_point && !touches_segment
     }
 
     fn place_flags(&mut self) {
@@ -1300,6 +1459,35 @@ fn split_model(model: &str) -> (String, Vec<String>) {
     (name, tokens.collect())
 }
 
+/// Whether `text` is a SPICE number: digits, an optional fraction and
+/// exponent, then letters only (a scale or a unit, `10k`, `4.7uF`).
+pub(super) fn is_spice_number(text: &str) -> bool {
+    let unsigned = text.strip_prefix(['+', '-']).unwrap_or(text);
+    let digits = unsigned
+        .find(|character: char| !(character.is_ascii_digit() || character == '.'))
+        .unwrap_or(unsigned.len());
+    let (number, rest) = unsigned.split_at(digits);
+    if !number.chars().any(|character| character.is_ascii_digit())
+        || number.matches('.').count() > 1
+    {
+        return false;
+    }
+    let rest = match rest.strip_prefix(['e', 'E']) {
+        Some(exponent)
+            if exponent
+                .trim_start_matches(['+', '-'])
+                .starts_with(|c: char| c.is_ascii_digit()) =>
+        {
+            exponent
+                .trim_start_matches(['+', '-'])
+                .trim_start_matches(|c: char| c.is_ascii_digit())
+        }
+        _ => rest,
+    };
+    rest.chars()
+        .all(|character| character.is_ascii_alphabetic())
+}
+
 fn looks_like_file(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     [
@@ -1389,18 +1577,20 @@ fn strictly_inside(a: Point, b: Point, point: Point) -> bool {
     within(a.x, b.x, point.x) && within(a.y, b.y, point.y)
 }
 
-/// Turns and places a component so its terminals best meet the source pins.
+/// The placements of a component that put its terminals nearest the source
+/// pins, cheapest first: each with its position, turn, mirror and terminal
+/// offsets.
 ///
 /// Each of the eight orientations is tried at every position that puts one
 /// terminal in line with its pin. A terminal on its pin costs nothing; one
 /// in line costs its distance, and more when its lead would run back across
 /// the body; one out of line costs most, since its lead must bend.
-fn fit(
+fn placements(
     component: &Component,
     pins: &[Point],
     offsets: impl Fn(&Component) -> Vec<Point>,
-) -> (Point, Rotation, bool) {
-    let mut best: Option<(i64, Point, Rotation, bool)> = None;
+) -> Vec<(Point, Rotation, bool, Vec<Point>)> {
+    let mut found = Vec::new();
     for mirrored in [false, true] {
         for rotation in [Rotation::R0, Rotation::R90, Rotation::R180, Rotation::R270] {
             let mut candidate = component.clone();
@@ -1434,20 +1624,53 @@ fn fit(
                         .zip(pins)
                         .map(|(offset, pin)| lead_cost(position + *offset, *pin, position + center))
                         .sum::<i64>();
-                    if best.as_ref().is_none_or(|(least, ..)| cost < *least) {
-                        best = Some((cost, position, rotation, mirrored));
-                    }
+                    found.push((cost, position, rotation, mirrored, local.clone()));
                 }
             }
         }
     }
-    match best {
-        Some((_, position, rotation, mirrored)) => (position, rotation, mirrored),
-        None => {
-            let anchor = pins.first().copied().unwrap_or_default();
-            (anchor, Rotation::R0, false)
-        }
+    // A stable sort: of equal costs, the orientation tried first stays first.
+    found.sort_by_key(|(cost, ..)| *cost);
+    found
+        .into_iter()
+        .map(|(_, position, rotation, mirrored, local)| (position, rotation, mirrored, local))
+        .collect()
+}
+
+/// The ways a lead runs from a terminal to its pin: straight when they are in
+/// line, else bent once, across first or down first.
+fn lead_routes(from: Point, to: Point) -> Vec<Vec<(Point, Point)>> {
+    if from == to {
+        return vec![Vec::new()];
     }
+    if from.x == to.x || from.y == to.y {
+        return vec![vec![(from, to)]];
+    }
+    [Point::new(to.x, from.y), Point::new(from.x, to.y)]
+        .into_iter()
+        .map(|corner| vec![(from, corner), (corner, to)])
+        .collect()
+}
+
+/// Whether `point` lies on the segment from `a` to `b`, ends included.
+fn on_segment(a: Point, b: Point, point: Point) -> bool {
+    point == a || point == b || strictly_inside(a, b, point)
+}
+
+/// Whether two segments run along each other for some length.
+fn overlap(a: Point, b: Point, c: Point, d: Point) -> bool {
+    let cross = |p: Point| {
+        i64::from(b.x - a.x) * i64::from(p.y - a.y) - i64::from(b.y - a.y) * i64::from(p.x - a.x)
+    };
+    if a == b || cross(c) != 0 || cross(d) != 0 {
+        return false;
+    }
+    let (low, high, other_low, other_high) = if a.x == b.x {
+        (a.y.min(b.y), a.y.max(b.y), c.y.min(d.y), c.y.max(d.y))
+    } else {
+        (a.x.min(b.x), a.x.max(b.x), c.x.min(d.x), c.x.max(d.x))
+    };
+    high.min(other_high) > low.max(other_low)
 }
 
 fn lead_cost(terminal: Point, pin: Point, center: Point) -> i64 {

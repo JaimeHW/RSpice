@@ -17,7 +17,11 @@ const FILE_MARK: [u8; 4] = [0xFF, 0xD8, 0xFF, 0xDB];
 const OPEN: u8 = 0xAB;
 const CLOSE: u8 = 0xBB;
 
-/// A text QSPICE draws on a symbol without putting it on the instance line.
+/// A note QSPICE writes on a symbol (a vendor's name, a pin legend), never
+/// on the instance line.
+const COMMENT_TEXT_FLAG: &str = "1";
+/// A text QSPICE draws on a symbol without putting it on the instance line,
+/// unless it is the symbol's first text, its instance name.
 const GRAPHIC_TEXT_FLAG: &str = "2";
 
 /// Reads a `.qsch` schematic from its bytes.
@@ -223,8 +227,10 @@ fn component(node: &Node) -> Result<ForeignSymbol, ForeignParseError> {
             "text" => {
                 let text_points = points(fields, child.line)?;
                 let flags = numbers_after_points(fields);
-                if flags.get(2).map(String::as_str) == Some(GRAPHIC_TEXT_FLAG) {
-                    continue;
+                match flags.get(2).map(String::as_str) {
+                    Some(COMMENT_TEXT_FLAG) => continue,
+                    Some(GRAPHIC_TEXT_FLAG) if !texts.is_empty() => continue,
+                    _ => {}
                 }
                 texts.push((
                     text_points.first().copied().unwrap_or_default(),

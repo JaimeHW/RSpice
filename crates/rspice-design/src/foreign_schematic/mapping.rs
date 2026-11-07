@@ -396,8 +396,14 @@ pub(super) fn source_value(voltage: bool, text: &str) -> SourceValue {
         if let Some(waveform) = waveform.filter(|_| value.is_empty()) {
             kind = waveform;
             index += 1;
+            // LTspice's `SINE` is SPICE's `SIN`.
+            let name = if keyword == "SINE" {
+                "SIN"
+            } else {
+                &token[..keyword.len()]
+            };
             if token.contains('(') {
-                value = token.clone();
+                value = format!("{name}{}", &token[keyword.len()..]);
                 continue;
             }
             // QSPICE and LTspice also write a waveform's arguments as bare
@@ -411,7 +417,7 @@ pub(super) fn source_value(voltage: bool, text: &str) -> SourceValue {
                 .cloned()
                 .collect::<Vec<_>>();
             index += arguments.len();
-            value = format!("{token}({})", arguments.join(" "));
+            value = format!("{name}({})", arguments.join(" "));
             continue;
         }
         if let Some((key, parameter)) = token.split_once('=') {

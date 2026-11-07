@@ -380,6 +380,7 @@ SYMATTR Value PULSE(0 5µ 0 1n 1n 5u 10u) AC 1 Rser=0.1
 SYMBOL res 144 144 R0
 SYMATTR InstName R1
 SYMATTR Value 10k
+SYMATTR Value2 tol=5
 SYMATTR SpiceLine tol=1 pwr=0.1
 SYMBOL npn 96 256 R0
 SYMATTR InstName Q1
@@ -416,6 +417,7 @@ fn a_mixed_drawing_imports_with_its_connectivity_and_parameters() {
     assert_eq!(source.value, "PULSE(0 5u 0 1n 1n 5u 10u)");
     assert_eq!(source.params, "ac=1 rs=0.1");
     let resistor = component("R1");
+    // `Value2` and `SpiceLine` both set `tol`; the later one holds.
     assert_eq!(resistor.params, "tol=1 pwr=0.1");
     assert_eq!(component("Q1").kind, ComponentType::NpnBjt);
     assert_eq!(component("Q1").value, "2N3904");
@@ -991,4 +993,53 @@ fn a_jumper_is_a_wire_and_a_named_subcircuit_reads_from_the_deck() {
         block.netlist_template.as_deref(),
         Some("X{name} {nodes} {model} {params}")
     );
+}
+
+#[test]
+fn a_value_that_is_not_a_number_reads_as_an_expression() {
+    use super::import::is_spice_number;
+    for number in ["10k", "4.7uF", "1e-3", ".5", "-2.2Meg", "100"] {
+        assert!(is_spice_number(number), "{number}");
+    }
+    for expression in [
+        "2.21/3",
+        "Rload",
+        "(1T-Connection)+1",
+        "Lbus+Lcable",
+        "5K*(1-wiper)",
+    ] {
+        assert!(!is_spice_number(expression), "{expression}");
+    }
+}
+
+#[test]
+fn a_subcircuit_named_by_its_spice_model_writes_that_model_and_its_values() {
+    const MODELLED: &str = "Version 4\nSymbolType CELL\nRECTANGLE Normal -32 -32 32 32\n\
+        SYMATTR Prefix X\nSYMATTR SpiceModel level2\nSYMATTR Value2 Avol=1Meg GBW=10Meg\n\
+        SYMATTR ModelFile opamps.lib\n\
+        PIN -32 0 NONE 0\nPINATTR PinName IN\nPINATTR SpiceOrder 1\n\
+        PIN 32 0 NONE 0\nPINATTR PinName OUT\nPINATTR SpiceOrder 2\n";
+    let mut library = library();
+    library.symbols.insert(
+        "modelled".to_owned(),
+        ForeignSymbolSource {
+            definition: parse_asy(MODELLED).expect("the test symbol reads"),
+            location: "modelled.asy".to_owned(),
+            schematic: None,
+        },
+    );
+    let drawing = parse_asc(
+        "Version 4\nSHEET 1 880 680\nFLAG 64 96 in\nFLAG 128 96 out\n\
+         SYMBOL modelled 96 96 R0\nSYMATTR InstName U1\n",
+    )
+    .unwrap();
+    let imported = import_foreign_schematic(&drawing, "work", &library);
+    let part = imported
+        .document
+        .components
+        .iter()
+        .find(|component| component.name == "U1")
+        .expect("U1");
+    assert_eq!(part.value, "level2");
+    assert_eq!(part.params, "Avol=1Meg GBW=10Meg");
 }
