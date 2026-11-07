@@ -1303,3 +1303,28 @@ fn an_attribute_ltspice_emptied_is_no_value() {
     assert!(!source.value.contains('"'), "{:?}", source.value);
     assert!(source.params.contains("ac=1"), "{}", source.params);
 }
+
+#[test]
+fn a_part_with_no_value_writes_its_symbols_model() {
+    let mut library = Library::default();
+    library.symbols.insert(
+        "hold".to_owned(),
+        ForeignSymbolSource {
+            definition: parse_asy(
+                "Version 4\nSymbolType CELL\nSYMATTR Prefix A\nSYMATTR SpiceModel SAMPLEHOLD\n\
+                 PIN -32 0 NONE 0\nPINATTR SpiceOrder 1\nPIN 32 0 NONE 0\nPINATTR SpiceOrder 2\n",
+            )
+            .expect("the test symbol reads"),
+            location: "hold.asy".to_owned(),
+            schematic: None,
+        },
+    );
+    let drawing =
+        parse_asc("Version 4\nSHEET 1 400 400\nSYMBOL hold 0 0 R0\nSYMATTR InstName A1\n").unwrap();
+    let imported = import_foreign_schematic(&drawing, "work", &library);
+    let binding = imported.document.components[0]
+        .library_cell
+        .as_ref()
+        .expect("a cell instance");
+    assert_eq!(binding.module_name.as_deref(), Some("SAMPLEHOLD"));
+}

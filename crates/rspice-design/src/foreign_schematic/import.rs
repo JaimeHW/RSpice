@@ -770,6 +770,12 @@ impl Builder<'_> {
         let spice_model = attribute(attributes, "SpiceModel")
             .map(str::trim)
             .filter(|model| prefix == "X" && !model.is_empty() && !looks_like_file(model));
+        // With no value, or a value of settings alone, the symbol's own
+        // model is the one its line writes.
+        let fallback = attribute(attributes, "SpiceModel")
+            .map(str::trim)
+            .filter(|model| !model.is_empty() && !looks_like_file(model))
+            .unwrap_or(symbol.base_name());
         let written = (!subcircuit).then(|| match spice_model {
             Some(model) => ["Value", "Value2"]
                 .into_iter()
@@ -782,7 +788,7 @@ impl Builder<'_> {
                 .filter(|value| !value.trim().is_empty())
                 .or_else(|| attribute(attributes, "Value2"))
                 .map(spice_text)
-                .unwrap_or_else(|| symbol.base_name().to_owned()),
+                .unwrap_or_else(|| fallback.to_owned()),
         });
         let mut words = Vec::new();
         for key in ["SpiceLine", "SpiceLine2"] {
@@ -798,11 +804,6 @@ impl Builder<'_> {
         {
             words.extend(spice_tokens(&spice_text(value2)));
         }
-        // A value of settings alone leaves the symbol's own model in place.
-        let fallback = attribute(attributes, "SpiceModel")
-            .map(str::trim)
-            .filter(|model| !model.is_empty() && !looks_like_file(model))
-            .unwrap_or(symbol.base_name());
         let (model, model_words) = written
             .as_deref()
             .map(|text| split_model(text, fallback))
