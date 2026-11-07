@@ -9836,6 +9836,42 @@ mod tests {
         );
     }
 
+    /// LTspice's `noiseless` flag quiets a passive and the parasitic
+    /// resistors it brings; it never reads as a model name.
+    #[test]
+    fn ltspice_noiseless_quiets_a_passive_and_its_parasitic_resistors() {
+        let netlist = Netlist::parse(
+            "noiseless passives\n\
+             R1 a 0 1K noiseless\n\
+             C1 a 0 .8p Rpar=160Meg noiseless\n\
+             R2 a 0 1K\n\
+             .end\n",
+        )
+        .expect("noiseless passives parse");
+        let quiet = |name: &str| {
+            let element = netlist
+                .elements
+                .iter()
+                .find(|element| element.name.eq_ignore_ascii_case(name))
+                .unwrap_or_else(|| panic!("{name} is parsed"));
+            let ElementKind::Resistor {
+                model,
+                instance_params,
+                ..
+            } = &element.kind
+            else {
+                panic!("{name} is a resistor");
+            };
+            assert!(model.is_none(), "{name} names no model");
+            instance_params
+                .iter()
+                .any(|(key, value)| key.eq_ignore_ascii_case("NOISY") && *value == 0.0)
+        };
+        assert!(quiet("R1"));
+        assert!(quiet("RC1#PAR"));
+        assert!(!quiet("R2"));
+    }
+
     #[test]
     fn linear_controlled_sources_reject_unconsumed_trailing_tokens() {
         for line in [

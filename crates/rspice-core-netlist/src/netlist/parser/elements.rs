@@ -275,6 +275,8 @@ pub(super) fn parse_resistor(
                             }
                         }
                     }
+                } else if name_upper == "NOISELESS" {
+                    instance_params.push(noiseless_flag());
                 } else if model.is_none() {
                     // Bare identifier after the optional value is the resistor
                     // model name. This covers both model-only instances and
@@ -622,6 +624,12 @@ fn extract_instance_param(params: &mut Vec<(String, Value)>, key: &str) -> Optio
     Some(params.remove(idx).1)
 }
 
+/// LTspice's `noiseless` instance flag: the element, and any resistor its
+/// parasitics bring, adds no noise (`noisy=0`).
+fn noiseless_flag() -> (String, Value) {
+    ("NOISY".to_owned(), 0.0.into())
+}
+
 /// LTspice-style passive parasitics: peel explicit `Rser`/`Rpar`/`Cpar`
 /// instance parameters off an R/L/C and synthesize them as real elements
 /// (`Rser` inserts an internal series node `NAME#SER`). Only *explicit*
@@ -634,6 +642,16 @@ fn expand_passive_parasitics(
     instance_params: &mut Vec<(String, Value)>,
 ) {
     let tag = name.to_ascii_uppercase();
+    // A `noiseless` passive's parasitic resistors are as quiet as it is.
+    let helper_params = || {
+        instance_params
+            .iter()
+            .filter(|(key, _)| key.eq_ignore_ascii_case("NOISY"))
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    let rser_params = helper_params();
+    let rpar_params = helper_params();
 
     if let Some(rser) =
         extract_instance_param(instance_params, "RSER").filter(|v| v.is_finite() && *v > 0.0)
@@ -646,7 +664,7 @@ fn expand_passive_parasitics(
                 value: rser,
                 value_expr: None,
                 model: None,
-                instance_params: Vec::new(),
+                instance_params: rser_params,
                 deferred_params: Vec::new(),
             },
             nodes: vec![outer_pos, internal],
@@ -666,7 +684,7 @@ fn expand_passive_parasitics(
                 value: rpar,
                 value_expr: None,
                 model: None,
-                instance_params: Vec::new(),
+                instance_params: rpar_params,
                 deferred_params: Vec::new(),
             },
             nodes: vec![nodes[0].clone(), nodes[1].clone()],
@@ -986,6 +1004,8 @@ fn parse_passive_tail(
                     tail.value = Some(param_value);
                     tail.value_expr = None;
                     tail.direction = capture_direction.then(|| Ok(0.0.into()));
+                } else if name_upper == "NOISELESS" {
+                    tail.instance_params.push(noiseless_flag());
                 } else if tail.model.is_none() {
                     tail.model = Some(raw_name);
                 } else {
