@@ -1113,6 +1113,32 @@ pub(crate) fn native_compile_count(module: &str) -> usize {
         .count()
 }
 
+/// The instance and label of each noise source that has reported a negative
+/// power. Every copy of an instance shares the set, so a run warns once per
+/// source however many frequencies and copies evaluate it.
+#[derive(Debug, Clone, Default)]
+struct NegativeNoiseReports(
+    std::sync::Arc<std::sync::Mutex<std::collections::BTreeSet<(String, String)>>>,
+);
+
+impl NegativeNoiseReports {
+    /// The warning for `label`'s negative `power` the first time `instance`
+    /// reports that label, and `None` every later time.
+    fn first(&self, instance: &str, label: String, power: f64) -> Option<String> {
+        let mut reported = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let warning = format!(
+            "Verilog-A device '{instance}': noise source '{label}' has a negative power \
+             ({power:e}) at the operating point and contributes no noise"
+        );
+        reported
+            .insert((instance.to_owned(), label))
+            .then_some(warning)
+    }
+}
+
 /// A Verilog-A device instance in a circuit
 ///
 /// Holds the compiled model, runtime context, and circuit connectivity.
@@ -1180,6 +1206,8 @@ pub struct VerilogADevice {
     /// with exact source control flow and reaching definitions, or the reason
     /// one could not be built.
     canonical_noise_plan: CanonicalNoisePlan,
+    /// Noise sources this instance has reported a negative power for.
+    negative_noise_reports: NegativeNoiseReports,
     /// Required noise-gain variables, computed once on first noise observation.
     /// Clones share the mask; compiled assignment programs are never copied.
     noise_gain_live_variables: std::sync::OnceLock<std::sync::Arc<[bool]>>,
@@ -2969,55 +2997,31 @@ impl VerilogADevice {
 
     /// A noise source's power at the operating point.
     ///
-    /// Noise power cannot be negative. A negative value no larger than a few
-    /// ulp of `scale`, the largest power the same instance produced at the same
-    /// point, is beneath the resolution of the instance's own noise, whether it
-    /// is the residue of a cancellation or a model's signed term for a
-    /// vanishing current, and it reads as zero. Anything more negative is
-    /// refused, naming the source.
+    /// A power that is not finite is refused, naming the source. A negative
+    /// power is not an evaluation fault: a model may give a power the sign of
+    /// the current it models. It contributes no noise, and the instance warns
+    /// once per source.
     ///
-    /// `label` names the source and runs only on the failure path.
-    fn noise_power(value: f64, scale: f64, label: impl FnOnce() -> String) -> Result<f64, VmError> {
-        /// How many ulp of the instance's noise scale a residue may span.
-        const RESIDUE_ULPS: f64 = 4.0;
+    /// `label` names the source and runs only when it is reported.
+    fn noise_power(
+        value: f64,
+        instance: &str,
+        reports: &NegativeNoiseReports,
+        label: impl FnOnce() -> String,
+    ) -> Result<f64, VmError> {
         if !value.is_finite() {
             return Err(VmError::InvalidNumericResult(format!(
                 "noise source '{}' power evaluated to {value}",
                 label()
             )));
         }
-        if value >= 0.0 {
-            return Ok(value);
-        }
-        let ulp = f64::from_bits(scale.to_bits() + 1) - scale;
-        if -value <= RESIDUE_ULPS * ulp {
+        if value < 0.0 {
+            if let Some(warning) = reports.first(instance, label(), value) {
+                log::warn!("{warning}");
+            }
             return Ok(0.0);
         }
-        Err(VmError::InvalidNumericResult(format!(
-            "noise source '{}' power evaluated to negative value {value:e}",
-            label()
-        )))
-    }
-
-    /// The scale [`Self::noise_power`] judges a residue against: the largest
-    /// finite power magnitude among one instance's sources.
-    fn noise_power_scale(powers: impl IntoIterator<Item = f64>) -> f64 {
-        powers
-            .into_iter()
-            .filter(|power| power.is_finite())
-            .map(f64::abs)
-            .fold(0.0, f64::max)
-    }
-
-    /// Settle the sign of sources collected with their raw powers: residues
-    /// drop out with the zero powers, and a clearly negative power refuses.
-    fn settle_noise_powers(sources: &mut Vec<EvaluatedNoiseSource>) -> Result<(), VmError> {
-        let scale = Self::noise_power_scale(sources.iter().map(|source| source.psd));
-        for source in sources.iter_mut() {
-            source.psd = Self::noise_power(source.psd, scale, || source.name.clone())?;
-        }
-        sources.retain(|source| source.psd != 0.0);
-        Ok(())
+        Ok(value)
     }
 
     /// Create a new device instance
@@ -3366,6 +3370,7 @@ impl VerilogADevice {
             #[cfg(any(feature = "native", all(feature = "wasm-jit", target_arch = "wasm32")))]
             fused_stamp_jacobians: vec![0.0; fused_jacobian_count],
             canonical_noise_plan,
+            negative_noise_reports: NegativeNoiseReports::default(),
             one_step_dae_split_safe,
             noise_gain_live_variables: std::sync::OnceLock::new(),
             small_signal_replay_variables: std::sync::OnceLock::new(),
@@ -9054,9 +9059,13 @@ impl VerilogADevice {
                 #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
                 WasmJitExecutableEntry::NoisePsd(idx),
             )?;
-            // The sign is settled once every source is in: a residue is judged
-            // against the instance's largest power.
-            let psd = Self::finite_result(psd, || format!("noise source {idx} power"))?;
+            let psd = Self::noise_power(psd, &self.name, &self.negative_noise_reports, || {
+                source
+                    .name
+                    .as_ref()
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| format!("noise{idx}"))
+            })?;
             if psd == 0.0 {
                 continue;
             }
@@ -9130,7 +9139,6 @@ impl VerilogADevice {
                     .unwrap_or_else(|| format!("noise{idx}")),
             });
         }
-        Self::settle_noise_powers(&mut sources)?;
         Ok(sources)
     }
 
@@ -9447,12 +9455,6 @@ impl VerilogADevice {
                 "grouped-noise canonical runtime result shape changed after construction".into(),
             ));
         }
-        let power_scale = Self::noise_power_scale(
-            metadata
-                .iter()
-                .filter(|process| process.active)
-                .map(|process| process.psd),
-        );
         let mut vm = crate::vm::SmallSignalVm::with_variable_seed(
             &self.context,
             frequency_hz,
@@ -9581,7 +9583,12 @@ impl VerilogADevice {
                 .as_ref()
                 .map(ToString::to_string)
                 .unwrap_or_else(|| format!("noise{expected}"));
-            let psd = Self::noise_power(metadata.psd, power_scale, || name.clone())?;
+            let psd = Self::noise_power(
+                metadata.psd,
+                &self.name,
+                &self.negative_noise_reports,
+                || name.clone(),
+            )?;
             if psd == 0.0 {
                 continue;
             }
@@ -9911,12 +9918,6 @@ impl VerilogADevice {
                 "grouped-noise canonical runtime result shape changed after construction".into(),
             ));
         }
-        let power_scale = Self::noise_power_scale(
-            metadata
-                .iter()
-                .filter(|process| process.active)
-                .map(|process| process.psd),
-        );
         let mut processes = Vec::with_capacity(metadata.len());
         for (expected, metadata) in metadata.into_iter().enumerate() {
             if metadata.process_id != expected {
@@ -9985,7 +9986,13 @@ impl VerilogADevice {
                     .map(ToString::to_string)
                     .unwrap_or_else(|| format!("noise{expected}"))
             };
-            if Self::noise_power(metadata.psd, power_scale, label)? == 0.0 {
+            if Self::noise_power(
+                metadata.psd,
+                &self.name,
+                &self.negative_noise_reports,
+                label,
+            )? == 0.0
+            {
                 continue;
             }
             if let Some(exponent) = metadata.exponent {
@@ -10200,9 +10207,13 @@ impl VerilogADevice {
             }
             let psd_program = &source.psd_program;
             let psd = vm.execute(psd_program)?;
-            // The sign is settled once every source is in: a residue is judged
-            // against the instance's largest power.
-            let psd = Self::finite_result(psd, || format!("noise source {idx} power"))?;
+            let psd = Self::noise_power(psd, &self.name, &self.negative_noise_reports, || {
+                source
+                    .name
+                    .as_ref()
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| format!("noise{idx}"))
+            })?;
             if psd == 0.0 {
                 continue;
             }
@@ -10259,7 +10270,6 @@ impl VerilogADevice {
                     .unwrap_or_else(|| format!("noise{idx}")),
             });
         }
-        Self::settle_noise_powers(&mut sources)?;
         Ok(sources)
     }
 
@@ -11732,60 +11742,46 @@ mod tests {
         assert_send_sync::<VerilogADevice>();
     }
 
-    /// A negative noise power within a few ulp of the instance's largest power
-    /// reads as zero; one clearly below zero is refused by name. The first
-    /// residue is Mextram 505's `ib3_f` flicker power, which the model signs
-    /// with a reverse base current of about -1.2 fA, against its emitter
-    /// resistance's thermal noise.
+    /// A negative noise power contributes no noise and warns once per source,
+    /// whichever copy of the instance meets it; only a power that is not
+    /// finite refuses, naming the source. -2.8e-41 is Mextram 505's `ib3_f`
+    /// flicker power, which the model signs with its reverse base current.
     #[test]
-    fn negative_noise_power_residues_clamp_and_real_negatives_refuse_by_name() {
-        let scale = 3.3e-21;
+    fn negative_noise_powers_read_as_zero_and_warn_once_per_source() {
+        let reports = NegativeNoiseReports::default();
         let label = || "ib3_f".to_string();
         assert_eq!(
-            VerilogADevice::noise_power(1e-24, scale, label).unwrap(),
+            VerilogADevice::noise_power(1e-24, "X1", &reports, label).unwrap(),
             1e-24
         );
-        let ulp = f64::from_bits(scale.to_bits() + 1) - scale;
-        for residue in [-2.812432747666274e-41, -ulp, -4.0 * ulp] {
+        for negative in [-2.812432747666274e-41, -1e-20, -f64::MAX] {
             assert_eq!(
-                VerilogADevice::noise_power(residue, scale, label)
+                VerilogADevice::noise_power(negative, "X1", &reports, label)
                     .unwrap()
                     .to_bits(),
                 0.0_f64.to_bits(),
-                "{residue:e}"
+                "{negative:e}"
             );
         }
-        for negative in [-8.0 * ulp, -1e-30, -scale] {
-            let error = VerilogADevice::noise_power(negative, scale, label)
-                .expect_err("a clearly negative noise power is refused");
-            let message = error.to_string();
-            assert!(
-                message.contains("'ib3_f'") && message.contains("negative value"),
-                "{message}"
-            );
+        for invalid in [f64::NAN, f64::NEG_INFINITY] {
+            let error = VerilogADevice::noise_power(invalid, "X1", &reports, label)
+                .expect_err("a power that is not finite is refused")
+                .to_string();
+            assert!(error.contains("'ib3_f'"), "{error}");
         }
-        assert!(VerilogADevice::noise_power(f64::NAN, scale, label).is_err());
 
-        // A lone negative source is its own scale, so it always refuses.
-        let mut sources = vec![EvaluatedNoiseSource {
-            process_id: 0,
-            node_pos: 1,
-            node_neg: 0,
-            psd: -1.0,
-            exponent: None,
-            table: None,
-            name: "invalid".to_string(),
-        }];
-        assert!(VerilogADevice::settle_noise_powers(&mut sources).is_err());
-        sources[0].psd = 1e-20;
-        sources.push(EvaluatedNoiseSource {
-            psd: -1e-40,
-            name: "residue".to_string(),
-            ..sources[0].clone()
-        });
-        VerilogADevice::settle_noise_powers(&mut sources).unwrap();
-        assert_eq!(sources.len(), 1);
-        assert_eq!(sources[0].name, "invalid");
+        let reports = NegativeNoiseReports::default();
+        let copy = reports.clone();
+        let warning = reports
+            .first("X1", "ib3_f".into(), -1e-20)
+            .expect("the first negative power warns");
+        assert!(
+            warning.contains("'X1'") && warning.contains("'ib3_f'") && warning.contains("-1e-20"),
+            "{warning}"
+        );
+        assert_eq!(copy.first("X1", "ib3_f".into(), -2e-20), None);
+        assert!(copy.first("X1", "iex_f".into(), -1e-20).is_some());
+        assert!(copy.first("X2", "ib3_f".into(), -1e-20).is_some());
     }
 
     #[test]
@@ -12088,6 +12084,7 @@ endmodule
             fused_program_active: vec![1; num_stamp_programs],
             fused_stamp_jacobians: vec![0.0; native_jacobian_count],
             canonical_noise_plan,
+            negative_noise_reports: NegativeNoiseReports::default(),
             one_step_dae_split_safe: false,
             noise_gain_live_variables: std::sync::OnceLock::new(),
             small_signal_replay_variables: std::sync::OnceLock::new(),

@@ -474,7 +474,9 @@ fn collect_generated_device(
         .into_iter()
         .filter(|process| process.active && !process.injections.is_empty())
     {
-        processes.push(generated_process(circuit, device, process)?);
+        if let Some(process) = generated_process(circuit, device, process)? {
+            processes.push(process);
+        }
     }
     Ok(())
 }
@@ -483,12 +485,15 @@ fn collect_generated_device(
 ///
 /// The same validation and endpoint mapping `.NOISE` applies, so a process
 /// reaches the transient and the small-signal analyses on identical rows.
+///
+/// A negative power is the model's own sign, not a fault: the process
+/// contributes nothing (`None`), and the instance warns once for it.
 #[cfg(feature = "veriloga-builtins-base")]
 fn generated_process(
     circuit: &CircuitData,
     device: &crate::device::veriloga_builtins::BuiltinVerilogAInstance,
     process: crate::device::veriloga_builtins::BuiltinEvaluatedNoiseProcess,
-) -> Result<CollectedNoiseProcess, SimulationError> {
+) -> Result<Option<CollectedNoiseProcess>, SimulationError> {
     use crate::device::veriloga_builtins::{GeneratedNoiseInjection, GeneratedNoiseKind};
 
     let instance = device.instance_name.as_str();
@@ -500,11 +505,18 @@ fn generated_process(
              invalid: {detail}"
         ))
     };
-    if !process.psd.is_finite() || process.psd < 0.0 {
-        return Err(invalid(format!(
-            "PSD must be finite and nonnegative, got {}",
-            process.psd
-        )));
+    if !process.psd.is_finite() {
+        return Err(invalid(format!("PSD must be finite, got {}", process.psd)));
+    }
+    if process.psd < 0.0 {
+        if device.first_negative_noise_power(descriptor.mechanism) {
+            log::warn!(
+                "Verilog-A device '{instance}': noise source '{mechanism}' has a negative power \
+                 ({:e}) at the operating point and contributes no noise",
+                process.psd
+            );
+        }
+        return Ok(None);
     }
     let spectrum = match descriptor.kind {
         GeneratedNoiseKind::White => {
@@ -618,7 +630,7 @@ fn generated_process(
             gain,
         });
     }
-    Ok(CollectedNoiseProcess {
+    Ok(Some(CollectedNoiseProcess {
         instance: instance.to_string(),
         module: device.model_name.to_string(),
         route: NoiseProcessRoute::Generated,
@@ -627,7 +639,7 @@ fn generated_process(
         spectrum,
         psd: process.psd,
         injections,
-    })
+    }))
 }
 
 /// Canonical mechanism name for a Verilog-A noise label.

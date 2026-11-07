@@ -1092,23 +1092,31 @@ endmodule
 
     #[test]
     fn live_zero_gain_still_validates_raw_psd() {
-        let mut device = device(
-            r#"
+        let source = |power: &str| {
+            format!(
+                r#"
 module live_zero_gain(p, n);
     inout p, n; electrical p, n;
+    parameter real big = 1e308;
     real gain, process;
     analog begin
         gain = 0.0;
-        process = white_noise(-1.0, "invalid");
+        process = white_noise({power}, "invalid");
         I(p, n) <+ gain * process;
     end
 endmodule
-"#,
-        );
-        let error = device
+"#
+            )
+        };
+        let error = device(&source("big * 10.0"))
             .try_noise_processes_at_frequency(&[0.0], 1.0e3)
             .expect_err("live source with zero numeric gain must validate PSD");
-        assert!(error.to_string().contains("negative"), "{error}");
+        assert!(error.to_string().contains("inf"), "{error}");
+        // A negative power is not a fault: it contributes no noise.
+        let processes = device(&source("-1.0"))
+            .try_noise_processes_at_frequency(&[0.0], 1.0e3)
+            .expect("a negative power is not a fault");
+        assert!(processes.is_empty(), "{processes:?}");
     }
 
     #[test]

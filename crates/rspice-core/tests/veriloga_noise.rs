@@ -420,6 +420,96 @@ endmodule
     let _ = std::fs::remove_file(quiet);
 }
 
+static WARNINGS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+struct WarningCapture;
+
+impl log::Log for WarningCapture {
+    fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
+        metadata.level() <= log::Level::Warn
+    }
+
+    fn log(&self, record: &log::Record<'_>) {
+        if self.enabled(record.metadata()) {
+            WARNINGS
+                .lock()
+                .expect("warning capture")
+                .push(record.args().to_string());
+        }
+    }
+
+    fn flush(&self) {}
+}
+
+/// Start capturing this test binary's warnings.
+fn capture_warnings() {
+    static INSTALL: std::sync::Once = std::sync::Once::new();
+    INSTALL.call_once(|| {
+        log::set_logger(&WarningCapture).expect("the warning capture installs");
+        log::set_max_level(log::LevelFilter::Warn);
+    });
+}
+
+/// The warnings logged so far that mention `needle` (tests run in parallel,
+/// so each names something only it uses).
+fn warnings_mentioning(needle: &str) -> Vec<String> {
+    WARNINGS
+        .lock()
+        .expect("warning capture")
+        .iter()
+        .filter(|warning| warning.contains(needle))
+        .cloned()
+        .collect()
+}
+
+const SIGNED_NOISE: &str = r#"
+`include "disciplines.vams"
+module signed_noise(p, n);
+    inout p, n;
+    electrical p, n;
+    analog begin
+        I(p, n) <+ V(p, n) / 1000.0 + white_noise(1e-21, "thermal");
+        I(p, n) <+ white_noise(-1e-20, "reversed_power");
+    end
+endmodule
+"#;
+
+/// A negative noise power contributes no noise, and the run warns once for
+/// it, naming the instance, the source and the value, however many
+/// frequencies evaluate it.
+#[test]
+fn a_negative_noise_power_contributes_nothing_and_warns_once() {
+    capture_warnings();
+    let model = write_model("signed_noise.va", SIGNED_NOISE);
+    let frequencies = [1.0, 1.0e3, 1.0e6];
+    let density = output_noise(
+        &format!(
+            "* negative noise power\n\
+             i1 0 out dc 0\n\
+             XSIGNED out 0 signed_noise\n\
+             .va \"{model}\" signed_noise\n\
+             .end\n"
+        ),
+        "out",
+        &frequencies,
+    );
+
+    // Only the 1e-21 A^2/Hz source reaches the output, through 1 kOhm.
+    for (frequency, density) in frequencies.iter().zip(&density) {
+        assert!(
+            (density / 1e-15 - 1.0).abs() < 1e-12,
+            "{frequency} Hz: {density:e} V^2/Hz"
+        );
+    }
+    let warnings = warnings_mentioning("'reversed_power'");
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(
+        warnings[0].to_ascii_lowercase().contains("'xsigned'") && warnings[0].contains("-1e-20"),
+        "{}",
+        warnings[0]
+    );
+}
+
 #[test]
 fn va_white_noise_matches_native_resistor_thermal() {
     let model = write_model("nres.va", NOISY_RES);

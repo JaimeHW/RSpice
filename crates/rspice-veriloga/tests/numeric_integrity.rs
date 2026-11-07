@@ -764,6 +764,9 @@ endmodule
     assert_numeric_error(error, site);
 }
 
+/// A negative noise power is a model's own sign, not an evaluation fault: it
+/// contributes no noise. A power that is not finite is reported, naming the
+/// source.
 #[test]
 fn invalid_noise_power_is_reported_instead_of_suppressed() {
     let model = DeviceFixture::compile(
@@ -772,16 +775,21 @@ fn invalid_noise_power_is_reported_instead_of_suppressed() {
 module invalid_noise(p, n);
     inout p, n;
     electrical p, n;
-    analog I(p, n) <+ white_noise(V(p, n), "invalid");
+    analog I(p, n) <+ white_noise(V(p, n) * sqrt(V(p, n) + 2.0), "invalid");
 endmodule
 "#,
     );
     let mut device = model.device("A1", &[1, 0]);
 
-    let error = device
+    let sources = device
         .try_noise_sources(&[-1.0])
-        .expect_err("negative noise power must be a runtime diagnostic");
-    assert_numeric_error(error, "negative value");
+        .expect("a negative noise power is not a runtime diagnostic");
+    assert!(sources.is_empty(), "{sources:?}");
+
+    let error = device
+        .try_noise_sources(&[-3.0])
+        .expect_err("a NaN noise power must be a runtime diagnostic");
+    assert_numeric_error(error, "'invalid'");
 }
 
 #[test]

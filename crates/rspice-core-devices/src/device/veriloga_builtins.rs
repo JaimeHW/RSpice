@@ -188,6 +188,10 @@ pub struct BuiltinVerilogAInstance {
     /// Number of generated `idt` slots, retained so the packed rollback flag
     /// lanes can be decoded without allocating a persistent-state snapshot.
     dynamic_idt_state_count: usize,
+    /// Grouped noise processes this instance has reported a negative power
+    /// for. Every copy of the instance shares the set, so a run warns once per
+    /// process however many frequencies and copies evaluate it.
+    negative_noise_reports: Arc<std::sync::Mutex<std::collections::BTreeSet<&'static str>>>,
     kind: builtins::GeneratedBuiltinKind,
 }
 
@@ -1243,6 +1247,7 @@ impl BuiltinVerilogAInstance {
             initial_off_seed_anchor: None,
             dynamic_charge_third_back: vec![0.0; ddt_state_count],
             dynamic_idt_state_count: idt_state_count,
+            negative_noise_reports: Arc::default(),
             kind,
         })
     }
@@ -1629,6 +1634,16 @@ impl BuiltinVerilogAInstance {
         }
         debug_assert_eq!(evaluated.len(), descriptors.len());
         Ok(evaluated)
+    }
+
+    /// Whether this is the first negative power the run meets for the grouped
+    /// noise process `mechanism`; every copy of the instance shares the answer.
+    #[doc(hidden)]
+    pub fn first_negative_noise_power(&self, mechanism: &'static str) -> bool {
+        self.negative_noise_reports
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(mechanism)
     }
 
     #[doc(hidden)]
@@ -2587,6 +2602,7 @@ pub fn instantiate_builtin_scoped(
         initial_off_seed_anchor: None,
         dynamic_charge_third_back: vec![0.0; ddt_state_count],
         dynamic_idt_state_count: idt_state_count,
+        negative_noise_reports: Arc::default(),
         kind,
     }))
 }
