@@ -3276,3 +3276,42 @@ fn a_part_rspice_draws_is_judged_by_the_ink_its_artwork_draws() {
     let anchor = second.pos + offset;
     assert_eq!((anchor.x, anchor.y), (52, 30), "Q2's name moved");
 }
+
+/// A QSPICE source's drawing letters its waveform in one text, on one
+/// line, where RSpice, keeping the waveform as parameters, letters a line
+/// for each. The imported source letters it as its drawing wrote it.
+#[test]
+fn an_imported_qspice_source_letters_its_waveform_on_the_line_its_drawing_wrote() {
+    use crate::schematic::value_label::{component_value_label, value_pieces};
+
+    const DRAWING: &str = "«schematic
+  «component (0,0) 0 0
+    «symbol V
+      «type: V»
+      «text (130,0) 1 110 0 0x1000000 -1 -1 \"V1\"»
+      «text (-130,0) 1 109 0 0x1000000 -1 -1 \"PULSE(0 3 0 1n 1n 5µ 10µ)\"»
+      «pin (0,200) (0,0) 1 0 0 0x1000000 -1 \"+\"»
+      «pin (0,-200) (0,0) 1 0 0 0x1000000 -1 \"-\"»
+    »
+  »
+»
+";
+    let drawing = parse_qsch(&qsch_bytes(DRAWING)).unwrap();
+    let imported = import_foreign_schematic(&drawing, "work", &Library::default());
+    let source = imported
+        .document
+        .components
+        .iter()
+        .find(|component| component.kind.is_source())
+        .expect("the source is placed");
+    assert!(
+        component_value_label(source).lines().count() > 1,
+        "RSpice letters a pulse a line per parameter"
+    );
+    let pieces = value_pieces(source).expect("the source letters its waveform as written");
+    let texts = pieces
+        .iter()
+        .map(|piece| piece.text.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(texts, ["PULSE(0 3 0 1n 1n 5µ 10µ)"]);
+}
