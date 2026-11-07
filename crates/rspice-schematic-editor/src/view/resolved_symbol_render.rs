@@ -18,7 +18,10 @@ use crate::export::{SvgExportConfig, escape_xml};
 use rspice_design::{
     resolved_symbol::ResolvedCellSymbol,
     schematic::{
-        component::Component, component_display::SchematicParameterLabelVisibility, label_layout,
+        component::Component,
+        component_display::SchematicParameterLabelVisibility,
+        label_layout::{self, LayoutPoint},
+        label_position::LabelPosition,
         value_label::cell_instance_value as instance_value,
     },
     symbol::{SymbolShape, SymbolTextAlign, SymbolTextPlacement, symbol_text_bounds},
@@ -279,29 +282,49 @@ fn draw_symbol_labels(
     use super::drawing::{INSTANCE_NAME_WORLD, INSTANCE_VALUE_WORLD};
     use rspice_ui_kit::theme::{FontWeight, sans};
     let ppp = painter.pixels_per_point();
-    let name_anchor = symbol.document().name_anchor;
+    // A label a drawing placed stands where it was placed; any other at the
+    // symbol's own anchor.
+    let at = |placed: LabelPosition, anchor: Point| {
+        placed
+            .placed_text(LayoutPoint::new(origin.x, origin.y), scale)
+            .map_or_else(
+                || {
+                    (
+                        to_screen_symbol(origin, scale, component, symbol, anchor),
+                        instance_label_align(component, symbol, anchor),
+                    )
+                },
+                |text| {
+                    (
+                        super::drawing::layout_pos(text.anchor),
+                        super::drawing::text_align(text.horizontal, text.vertical),
+                    )
+                },
+            )
+    };
     if let Some(size) = lod::annotation_size(INSTANCE_NAME_WORLD, scale, ppp)
         && component.display_mode.show_name(visibility)
         && !component.name.is_empty()
     {
+        let (position, align) = at(component.name_label_pos, symbol.document().name_anchor);
         painter.text(
-            to_screen_symbol(origin, scale, component, symbol, name_anchor),
-            instance_label_align(component, symbol, name_anchor),
+            position,
+            align,
             &component.name,
             sans(size, FontWeight::Medium),
             palette.text,
         );
     }
     let value = instance_value(component);
-    let value_anchor = symbol.document().value_anchor;
     if let Some(size) = lod::annotation_size(INSTANCE_VALUE_WORLD, scale, ppp)
         && component.display_mode.show_value(visibility)
         && !value.is_empty()
     {
+        let (position, align) = at(component.value_label_pos, symbol.document().value_anchor);
         rspice_ui_kit::text::paint_text(
             painter,
-            to_screen_symbol(origin, scale, component, symbol, value_anchor),
-            instance_label_align(component, symbol, value_anchor),
+            position,
+            align,
             value,
             sans(size, FontWeight::Regular),
             palette.text_dim,
@@ -315,11 +338,7 @@ pub(crate) fn instance_name_anchor(
     component: &Component,
     symbol: &ResolvedCellSymbol,
 ) -> (Pos2, Align2) {
-    let placed = label_layout::symbol_label_placement(
-        component,
-        symbol.document(),
-        symbol.document().name_anchor,
-    );
+    let placed = label_layout::symbol_name_placement(component, symbol.document());
     (
         super::drawing::layout_pos(placed.anchor),
         super::drawing::text_align(placed.horizontal, placed.vertical),

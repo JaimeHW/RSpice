@@ -70,8 +70,8 @@ pub fn instance_texts(semantic: &SemanticComponent) -> Vec<SchematicText> {
     }
     let (name, value, value_text) = match &semantic.resolved_symbol {
         Some(document) => (
-            label_layout::symbol_label_placement(component, document, document.name_anchor),
-            label_layout::symbol_label_placement(component, document, document.value_anchor),
+            label_layout::symbol_name_placement(component, document),
+            label_layout::symbol_value_placement(component, document),
             cell_instance_value(component).to_owned(),
         ),
         None => {

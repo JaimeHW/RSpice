@@ -105,7 +105,7 @@ impl LayoutRect {
 }
 
 /// Which end of a run of text, on one axis, sits on its anchor.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum TextEdge {
     /// The left or top edge.
     Start,
@@ -234,7 +234,24 @@ fn infer_terminal_axis(component: &Component) -> TerminalAxis {
 /// Linear in `origin` and `scale`: `origin` is the instance's position and
 /// `scale` the size of one world unit in the caller's space, so the canvas
 /// evaluates it in screen points and an export in page units.
+///
+/// A name or value a drawing placed stands where it was placed.
 pub fn instance_label_layout(
+    origin: LayoutPoint,
+    scale: f32,
+    component: &Component,
+) -> InstanceLabelLayout {
+    let mut layout = automatic_instance_label_layout(origin, scale, component);
+    if let Some(name) = component.name_label_pos.placed_text(origin, scale) {
+        layout.name = name;
+    }
+    if let Some(value) = component.value_label_pos.placed_text(origin, scale) {
+        layout.value = value;
+    }
+    layout
+}
+
+fn automatic_instance_label_layout(
     origin: LayoutPoint,
     scale: f32,
     component: &Component,
@@ -323,6 +340,28 @@ pub fn instance_label_layout(
             value: PlacedText::new(LayoutPoint::new(x, y + half_h + margin), Center, Start),
         }
     }
+}
+
+/// Where an instance of an authored symbol letters its name, in world
+/// units: where a drawing placed it, else at the symbol's own name anchor.
+pub fn symbol_name_placement(component: &Component, document: &SymbolDocument) -> PlacedText {
+    component
+        .name_label_pos
+        .placed_text(instance_origin(component), 1.0)
+        .unwrap_or_else(|| symbol_label_placement(component, document, document.name_anchor))
+}
+
+/// Where an instance of an authored symbol letters its value, in world
+/// units: where a drawing placed it, else at the symbol's own value anchor.
+pub fn symbol_value_placement(component: &Component, document: &SymbolDocument) -> PlacedText {
+    component
+        .value_label_pos
+        .placed_text(instance_origin(component), 1.0)
+        .unwrap_or_else(|| symbol_label_placement(component, document, document.value_anchor))
+}
+
+fn instance_origin(component: &Component) -> LayoutPoint {
+    LayoutPoint::new(component.pos.x as f32, component.pos.y as f32)
 }
 
 /// Where an instance of an authored symbol letters its name or value: the

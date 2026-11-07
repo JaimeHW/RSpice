@@ -864,3 +864,131 @@ fn a_coupling_card_over_drawn_inductors_is_a_coupling_part() {
         .expect("the capacitor");
     assert_eq!(capacitor.params, "m=2");
 }
+
+#[test]
+fn names_and_values_stand_where_the_drawing_lettered_them() {
+    use crate::schematic::component_display::ComponentDisplayMode;
+    use crate::schematic::label_layout::{LayoutPoint, TextEdge, instance_label_layout};
+
+    // A resistor turned a quarter with LTspice's own windows for that turn,
+    // an amplifier mirrored with its value window moved, and a capacitor
+    // whose name window is hidden.
+    let drawing = parse_asc(
+        "Version 4\n\
+         SYMBOL res 192 80 R90\nWINDOW 0 0 56 VBottom 2\nWINDOW 3 32 56 VTop 2\n\
+         SYMATTR InstName R1\nSYMATTR Value 1k\n\
+         SYMBOL amp 480 160 M0\nWINDOW 3 -32 48 Left 2\nSYMATTR InstName U1\n\
+         SYMBOL cap 640 64 R0\nWINDOW 0 24 8 Invisible 2\nSYMATTR InstName C1\nSYMATTR Value 1u\n",
+    )
+    .expect("the drawing reads");
+    let imported = import_foreign_schematic(&drawing, "work", &library());
+    let component = |name: &str| {
+        imported
+            .document
+            .components
+            .iter()
+            .find(|component| component.name == name)
+            .unwrap_or_else(|| panic!("{name} is placed"))
+    };
+    let layout = |name: &str| {
+        let component = component(name);
+        instance_label_layout(
+            LayoutPoint::new(component.pos.x as f32, component.pos.y as f32),
+            1.0,
+            component,
+        )
+    };
+    let edges = |text: crate::schematic::label_layout::PlacedText| {
+        (text.anchor.x, text.anchor.y, text.horizontal, text.vertical)
+    };
+
+    // LTspice letters a turned resistor's name above it and its value below,
+    // each centred on the body: (136, 80) and (136, 112) on its grid.
+    let resistor = layout("R1");
+    assert_eq!(
+        edges(resistor.name),
+        (170.0, 100.0, TextEdge::Center, TextEdge::End)
+    );
+    assert_eq!(
+        edges(resistor.value),
+        (170.0, 140.0, TextEdge::Center, TextEdge::Start)
+    );
+    // Mirrored, a run that grew rightward grows leftward from (512, 208).
+    let amplifier = layout("U1");
+    assert_eq!(
+        edges(amplifier.value),
+        (640.0, 260.0, TextEdge::End, TextEdge::Center)
+    );
+    assert_eq!(
+        component("C1").display_mode,
+        ComponentDisplayMode::ValueOnly
+    );
+}
+
+#[test]
+fn a_jumper_is_a_wire_and_a_named_subcircuit_reads_from_the_deck() {
+    let drawing = parse_asc(
+        "Version 4\n\
+         FLAG 0 0 a\nFLAG 0 96 b\n\
+         SYMBOL Misc\\jumper -16 -16 R0\nSYMATTR InstName J1\n\
+         SYMBOL Misc\\TowTom2 320 0 R0\nSYMATTR InstName U1\n",
+    )
+    .expect("the drawing reads");
+    let mut source = library();
+    source.symbols.insert(
+        "misc\\jumper".to_owned(),
+        ForeignSymbolSource {
+            definition: parse_asy(
+                "Version 4\nSymbolType CELL\nSYMATTR Prefix J\n\
+                 PIN 16 16 NONE 0\nPINATTR SpiceOrder 1\nPIN 16 112 NONE 0\nPINATTR SpiceOrder 2\n",
+            )
+            .expect("the jumper reads"),
+            location: "jumper.asy".to_owned(),
+            schematic: None,
+        },
+    );
+    source.symbols.insert(
+        "misc\\towtom2".to_owned(),
+        ForeignSymbolSource {
+            definition: parse_asy(
+                "Version 4\nSymbolType CELL\nSYMATTR Value TowTom2\nSYMATTR Prefix X\n\
+                 PIN 0 0 NONE 0\nPINATTR SpiceOrder 1\nPIN 64 0 NONE 0\nPINATTR SpiceOrder 2\n",
+            )
+            .expect("the block reads"),
+            location: "TowTom2.asy".to_owned(),
+            schematic: None,
+        },
+    );
+    let imported = import_foreign_schematic(&drawing, "work", &source);
+    assert!(
+        imported
+            .document
+            .components
+            .iter()
+            .all(|component| component.name != "J1"),
+        "a jumper places no part"
+    );
+    // The flags `a` and `b` sit on the jumper's pins, (0, 0) and (0, 120) on
+    // RSpice's grid; wire runs the whole way between them.
+    let covered: i32 = imported
+        .document
+        .wires
+        .iter()
+        .flat_map(|wire| wire.points.windows(2).map(|ends| (ends[0], ends[1])))
+        .filter(|(start, end)| start.x == 0 && end.x == 0)
+        .map(|(start, end)| (end.y - start.y).abs())
+        .sum();
+    assert_eq!(covered, 120, "the jumper joins its two nets");
+    let block = imported
+        .document
+        .components
+        .iter()
+        .find(|component| component.name == "U1")
+        .and_then(|component| component.library_cell.as_ref())
+        .expect("the block is a cell instance");
+    assert_eq!(block.source_path, None);
+    assert_eq!(
+        block.netlist_template.as_deref(),
+        Some("X{name} {nodes} {model} {params}")
+    );
+}

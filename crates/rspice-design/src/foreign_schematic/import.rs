@@ -22,14 +22,17 @@ use super::mapping::{
 };
 use super::{
     ForeignAttribute, ForeignPoint, ForeignPortDirection, ForeignSchematic, ForeignShape,
-    ForeignSymbol, ForeignSymbolDefinition, ForeignTextKind, ForeignTool,
+    ForeignSymbol, ForeignSymbolDefinition, ForeignTextKind, ForeignTool, ForeignWindow,
 };
 use crate::schematic::component::{Component, LibraryCellInstance};
+use crate::schematic::component_display::ComponentDisplayMode;
 use crate::schematic::component_type::ComponentType;
 use crate::schematic::design_note::{DesignNote, DesignNoteKind};
 use crate::schematic::document::SchematicDocument;
 use crate::schematic::document_policy::{NetNamingPolicy, SchematicDocumentPolicy};
 use crate::schematic::documentation_shape::{DocumentationShape, DocumentationShapeGeometry};
+use crate::schematic::label_layout::TextEdge;
+use crate::schematic::label_position::LabelPosition;
 use crate::schematic::net_label::{Junction, NetLabel, NetLabelKind, SupplyGlyph};
 use crate::schematic::rotation::Rotation;
 use crate::schematic::terminal_connection::rebuild_connections_from_terminals;
@@ -280,6 +283,15 @@ impl Builder<'_> {
             })
             .collect::<Vec<_>>();
         self.anchors.extend(pins.iter().copied());
+        // LTspice's jumper joins its two nets and is no device: a wire.
+        if tool == ForeignTool::Ltspice
+            && symbol.base_name().eq_ignore_ascii_case("jumper")
+            && let [from, to] = pins.as_slice()
+        {
+            self.lead(*from, *to);
+            return;
+        }
+        let placed = self.document.components.len();
         match native_mapping(tool, symbol.base_name(), Some(&definition)) {
             Some(mapping) if schematic.is_none() => {
                 self.place_native(symbol, &attributes, mapping, &pins);
@@ -295,6 +307,83 @@ impl Builder<'_> {
                 }
                 self.place_cell(symbol, &definition, &attributes, location, schematic, &pins);
             }
+        }
+        if self.document.components.len() > placed {
+            self.letter_like_the_drawing(symbol, &definition);
+        }
+    }
+
+    /// Puts the last placed part's name and value where the drawing
+    /// lettered them: at the instance's own `WINDOW`, else its symbol's,
+    /// turned with the instance. The text stays upright and hangs off its
+    /// anchor on the side the drawing's run grows toward.
+    fn letter_like_the_drawing(
+        &mut self,
+        symbol: &ForeignSymbol,
+        definition: &ForeignSymbolDefinition,
+    ) {
+        let window = |attribute: u32| {
+            symbol
+                .windows
+                .iter()
+                .chain(&definition.windows)
+                .find(|window| window.attribute == attribute)
+        };
+        let (name, value) = (window(0), window(3));
+        let Some(component) = self.document.components.last() else {
+            return;
+        };
+        let origin = component.pos;
+        let place = |window: Option<&ForeignWindow>| {
+            window
+                .filter(|window| !is_invisible(window))
+                .map(|window| self.label_position(symbol, window, origin))
+        };
+        let (name_position, value_position) = (place(name), place(value));
+        let hidden = (
+            name.is_some_and(is_invisible),
+            value.is_some_and(is_invisible),
+        );
+        let Some(component) = self.document.components.last_mut() else {
+            return;
+        };
+        if let Some(position) = name_position {
+            component.name_label_pos = position;
+        }
+        if let Some(position) = value_position {
+            component.value_label_pos = position;
+        }
+        component.display_mode = match hidden {
+            (true, true) => ComponentDisplayMode::Hidden,
+            (true, false) => ComponentDisplayMode::ValueOnly,
+            (false, true) => ComponentDisplayMode::NameOnly,
+            (false, false) => component.display_mode,
+        };
+    }
+
+    fn label_position(
+        &self,
+        symbol: &ForeignSymbol,
+        window: &ForeignWindow,
+        origin: Point,
+    ) -> LabelPosition {
+        let anchor = self.scale_fine(
+            symbol
+                .position
+                .offset(symbol.orientation.apply(window.offset)),
+        );
+        let growth = symbol.orientation.apply(run_growth(&window.alignment));
+        let (horizontal, vertical) = match (growth.x.signum(), growth.y.signum()) {
+            (1, _) => (TextEdge::Start, TextEdge::Center),
+            (-1, _) => (TextEdge::End, TextEdge::Center),
+            (_, 1) => (TextEdge::Center, TextEdge::Start),
+            (_, -1) => (TextEdge::Center, TextEdge::End),
+            _ => (TextEdge::Center, TextEdge::Center),
+        };
+        LabelPosition::Placed {
+            offset: anchor - origin,
+            horizontal,
+            vertical,
         }
     }
 
@@ -536,6 +625,15 @@ impl Builder<'_> {
                     )),
                 }
                 break;
+            }
+            // A subcircuit the drawing's own model text or included files
+            // define is referenced by name.
+            if prefix == "X" && binding.source_path.is_none() {
+                binding.netlist_template = Some("X{name} {nodes} {model} {params}".to_owned());
+                binding.parameter_order = params
+                    .iter()
+                    .filter_map(|word| word.split_once('=').map(|(key, _)| key.to_owned()))
+                    .collect();
             }
         }
         if !loose.is_empty() {
@@ -1050,6 +1148,24 @@ impl Builder<'_> {
 }
 
 /// The definition's default attributes under the placed symbol's own.
+fn is_invisible(window: &ForeignWindow) -> bool {
+    window.alignment.eq_ignore_ascii_case("Invisible")
+}
+
+/// The direction a window's run of text grows from its anchor, in the
+/// symbol's own frame: LTspice's `Left` text starts at the anchor, `Top`
+/// text hangs below it, and the `V` forms are the same runs turned a
+/// quarter counter-clockwise.
+fn run_growth(alignment: &str) -> ForeignPoint {
+    match alignment.to_ascii_lowercase().as_str() {
+        "left" | "vtop" => ForeignPoint::new(1, 0),
+        "right" | "vbottom" => ForeignPoint::new(-1, 0),
+        "top" | "vright" => ForeignPoint::new(0, 1),
+        "bottom" | "vleft" => ForeignPoint::new(0, -1),
+        _ => ForeignPoint::new(0, 0),
+    }
+}
+
 fn merged_attributes(
     definition: &ForeignSymbolDefinition,
     symbol: &ForeignSymbol,
