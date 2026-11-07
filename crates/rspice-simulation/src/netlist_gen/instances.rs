@@ -934,8 +934,10 @@ impl<'a> NetlistGenerator<'a> {
         let descriptor = match validate_builtin_functional_binding(binding) {
             Ok(descriptor) => descriptor,
             Err(error) => {
-                self.errors
-                    .push(format!("Functional part '{}' is not executable: {error}", component.name));
+                self.errors.push(format!(
+                    "Functional part '{}' is not executable: {error}",
+                    component.name
+                ));
                 return None;
             }
         };

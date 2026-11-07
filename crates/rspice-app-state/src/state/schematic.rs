@@ -33,9 +33,9 @@ use rspice_design::schematic::deletion;
 mod design_note;
 mod design_projection;
 use rspice_design::schematic::device_catalog;
-use rspice_design::schematic::functional_catalog;
 use rspice_design::schematic::document;
 use rspice_design::schematic::document_policy;
+use rspice_design::schematic::functional_catalog;
 mod documentation_shape;
 use rspice_design::schematic::generated_veriloga_catalog;
 mod ground_names;
@@ -90,10 +90,6 @@ pub use device_catalog::{
     builtin_xspice_library_binding_with_vector_widths, builtin_xspice_vector_ports,
     engine_only_xspice_devices, validate_builtin_xspice_binding,
 };
-pub use functional_catalog::{
-    FunctionalPartDescriptor, functional_library_binding, functional_part, functional_parts,
-    validate_builtin_functional_binding,
-};
 pub use document_policy::{
     NetNamingPolicy, SchematicDocumentPolicy, SchematicGridPitch, SchematicPageOrientation,
     SchematicPageSize, SelectionCrossingPolicy, WireJunctionPolicy,
@@ -101,6 +97,10 @@ pub use document_policy::{
 pub use documentation_shape::{
     DocumentationShape, DocumentationShapeError, DocumentationShapeGeometry,
     DocumentationShapeKind, PendingDocumentationShapePlacement, geometry_from_points,
+};
+pub use functional_catalog::{
+    FunctionalPartDescriptor, functional_library_binding, functional_part, functional_parts,
+    validate_builtin_functional_binding,
 };
 pub use generated_veriloga_catalog::{
     generated_veriloga_devices, generated_veriloga_library_binding,

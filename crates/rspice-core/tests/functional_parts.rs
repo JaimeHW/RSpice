@@ -375,7 +375,12 @@ RL out 0 100k
     assert_close("rising delay", at(2.5) - crossed_up, 100e-9 + 5e-9, 0.2e-9);
     assert_close("10-90% rise", at(4.5) - at(0.5), 0.8 * 10e-9, 0.2e-9);
     let at = |level| falling_crossing(&tran.time, &out, level);
-    assert_close("falling delay", at(2.5) - crossed_down, 100e-9 + 10e-9, 0.2e-9);
+    assert_close(
+        "falling delay",
+        at(2.5) - crossed_down,
+        100e-9 + 10e-9,
+        0.2e-9,
+    );
     assert_close("90-10% fall", at(0.5) - at(4.5), 0.8 * 20e-9, 0.2e-9);
     // High is V+ divided between ROUT and the load.
     let high = out.iter().copied().fold(f64::MIN, f64::max);
@@ -403,7 +408,12 @@ RPU pu out 10k
     assert_close("released", high, 12.0, 1e-6);
     let low = op_voltages(&deck(0.9), &["out"])[0];
     let sunk = (12.0 - low) / 10e3;
-    assert_close("sink law", sunk, 20e-3 * (low / (50.0 * 20e-3)).tanh(), 1e-9);
+    assert_close(
+        "sink law",
+        sunk,
+        20e-3 * (low / (50.0 * 20e-3)).tanh(),
+        1e-9,
+    );
     assert!((0.05..0.07).contains(&low), "low {low}");
     // V+ carries the quiescent current alone; the sunk current returns to V-.
     let currents = op_currents(&deck(0.9), &["vp", "vn"]);
@@ -484,13 +494,12 @@ fn gates_follow_their_truth_tables_at_their_levels() {
             for (index, (gate, _)) in gates.iter().enumerate() {
                 deck.push_str(&format!("X{index} a b y{index} {gate} VHIGH=3.3\n"));
             }
-            deck.push_str("XI a yi RSPICE_FN_INV VHIGH=3.3\nXB a yb RSPICE_FN_BUF VHIGH=3.3\n.end\n");
+            deck.push_str(
+                "XI a yi RSPICE_FN_INV VHIGH=3.3\nXB a yb RSPICE_FN_BUF VHIGH=3.3\n.end\n",
+            );
             let nodes = ["y0", "y1", "y2", "y3", "y4", "yi", "yb"];
             let outputs = op_voltages(&deck, &nodes);
-            let expected = gates
-                .iter()
-                .map(|(_, truth)| truth(a, b))
-                .chain([!a, a]);
+            let expected = gates.iter().map(|(_, truth)| truth(a, b)).chain([!a, a]);
             for ((node, output), high) in nodes.iter().zip(outputs).zip(expected) {
                 assert_close(node, output, level(high), 1e-9);
             }
@@ -530,7 +539,10 @@ X3 g yg RSPICE_FN_BUF
     let at = |level| falling_crossing(&tran.time, yn, level);
     assert_close("inverter delay", at(2.5) - crossed, 10e-9 + 10e-9, 0.2e-9);
     assert_close("90-10% fall", at(0.5) - at(4.5), 0.8 * 20e-9, 0.2e-9);
-    let glitch = waveform(&tran, "yg").iter().copied().fold(f64::MIN, f64::max);
+    let glitch = waveform(&tran, "yg")
+        .iter()
+        .copied()
+        .fold(f64::MIN, f64::max);
     assert_close("suppressed pulse", glitch, 0.0, 1e-6);
 }
 
@@ -548,11 +560,31 @@ X2 r yi RSPICE_FN_SCHMITT_INV TD=1n TRISE=1n TFALL=1n VT=2 HYST=1
     let ramp = waveform(&tran, "r");
     let input_at = |time: f64| value_at(&tran.time, ramp, time - 1.5e-9);
     let ys = waveform(&tran, "ys");
-    assert_close("buffer up", input_at(rising_crossing(&tran.time, ys, 2.5)), 2.75, 1e-3);
-    assert_close("buffer down", input_at(falling_crossing(&tran.time, ys, 2.5)), 2.25, 1e-3);
+    assert_close(
+        "buffer up",
+        input_at(rising_crossing(&tran.time, ys, 2.5)),
+        2.75,
+        1e-3,
+    );
+    assert_close(
+        "buffer down",
+        input_at(falling_crossing(&tran.time, ys, 2.5)),
+        2.25,
+        1e-3,
+    );
     let yi = waveform(&tran, "yi");
-    assert_close("inverter up", input_at(falling_crossing(&tran.time, yi, 2.5)), 2.5, 1e-3);
-    assert_close("inverter down", input_at(rising_crossing(&tran.time, yi, 2.5)), 1.5, 1e-3);
+    assert_close(
+        "inverter up",
+        input_at(falling_crossing(&tran.time, yi, 2.5)),
+        2.5,
+        1e-3,
+    );
+    assert_close(
+        "inverter down",
+        input_at(rising_crossing(&tran.time, yi, 2.5)),
+        1.5,
+        1e-3,
+    );
 }
 
 /// The times `wave` rises through `level`, interpolated.
@@ -632,7 +664,10 @@ RL out 0 10k
         let start = tran.time.iter().position(|&t| t >= 10e-6).unwrap();
         let rise = rising_crossing(&tran.time[start..], &out[start..], 1.5);
         let fall = falling_crossing(&tran.time[start..], &out[start..], 1.5);
-        assert!((rise - 20e-6).abs() < 0.2e-6, "TECH={tech}: triggered at {rise}");
+        assert!(
+            (rise - 20e-6).abs() < 0.2e-6,
+            "TECH={tech}: triggered at {rise}"
+        );
         let width = fall - rise;
         assert!(
             (width / 110e-6 - 1.0).abs() < 0.01,
@@ -679,8 +714,18 @@ CN pdn 0 1n
 ";
     let tran = transient(deck, 4.9e-6, 1e-9);
     let pd = waveform(&tran, "pd");
-    assert_close("first lead", value_at(&tran.time, pd, 1.15e-6), 0.1495e-1, 0.05e-3);
-    assert_close("four cycles", value_at(&tran.time, pd, 4.9e-6), 0.08, 0.2e-3);
+    assert_close(
+        "first lead",
+        value_at(&tran.time, pd, 1.15e-6),
+        0.1495e-1,
+        0.05e-3,
+    );
+    assert_close(
+        "four cycles",
+        value_at(&tran.time, pd, 4.9e-6),
+        0.08,
+        0.2e-3,
+    );
     // B leading pumps the other way.
     let pdn = waveform(&tran, "pdn");
     assert_close("lagging", value_at(&tran.time, pdn, 4.9e-6), -0.08, 0.2e-3);
@@ -720,7 +765,10 @@ X1 clk rst q RSPICE_FN_COUNTER N=2
 .end
 ";
     let tran = transient(deck, 6e-6, 1e-9);
-    let low = waveform(&tran, "q").iter().copied().fold(f64::MAX, f64::min);
+    let low = waveform(&tran, "q")
+        .iter()
+        .copied()
+        .fold(f64::MAX, f64::min);
     assert!(low > 4.9, "reset output fell to {low}");
 }
 

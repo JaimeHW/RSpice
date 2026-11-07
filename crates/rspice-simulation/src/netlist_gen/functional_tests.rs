@@ -46,8 +46,9 @@ impl Bench {
     /// Place a functional part from its catalog binding.
     fn part(&mut self, stable_id: &str, name: &str, params: &str, nets: &[&str]) {
         let descriptor = functional_part(stable_id).expect("catalog part");
-        let mut component = Component::new(self.next_id, ComponentType::CellInstance, self.origin())
-            .with_library_cell(functional_library_binding(descriptor));
+        let mut component =
+            Component::new(self.next_id, ComponentType::CellInstance, self.origin())
+                .with_library_cell(functional_library_binding(descriptor));
         component.name = name.to_owned();
         component.params = params.to_owned();
         self.place(component, nets);
@@ -153,7 +154,10 @@ fn a_placed_ota_drives_its_bias_current_times_tanh_into_a_load() {
     let load = 1.0 / (1.0 / 10e3 + 1.0 / 10e6);
     let expected = 100e-6 * (10e-3_f64 / 51.7e-3).tanh() * load;
     let out = bench.operating_point("out");
-    assert!((out - expected).abs() < 1e-6 * expected, "{out} vs {expected}");
+    assert!(
+        (out - expected).abs() < 1e-6 * expected,
+        "{out} vs {expected}"
+    );
 }
 
 #[test]
@@ -170,7 +174,11 @@ fn placed_logic_parts_settle_at_their_truth_table_levels() {
         ("rspice.functional.xor2", &["a", "b", "xor"][..], 5.0),
         ("rspice.functional.inverter", &["a", "inv"][..], 0.0),
         ("rspice.functional.buffer", &["a", "buf"][..], 5.0),
-        ("rspice.functional.schmitt_inverter", &["b", "sinv"][..], 5.0),
+        (
+            "rspice.functional.schmitt_inverter",
+            &["b", "sinv"][..],
+            5.0,
+        ),
         ("rspice.functional.schmitt_buffer", &["a", "sbuf"][..], 5.0),
     ];
     for (index, (part, nets, _)) in parts.iter().enumerate() {
@@ -185,7 +193,10 @@ fn placed_logic_parts_settle_at_their_truth_table_levels() {
         .zip(bench.operating_points(&outputs))
         .zip(parts)
     {
-        assert!((voltage - expected).abs() < 1e-9, "{part} {node}: {voltage}");
+        assert!(
+            (voltage - expected).abs() < 1e-9,
+            "{part} {node}: {voltage}"
+        );
     }
 }
 
@@ -272,6 +283,14 @@ fn placed_sequential_parts_count_divide_and_hold() {
     // Divide by 4, high for two counts: low from the second edge to the fourth.
     assert!(at("div", 1.5e-6) > 4.9 && at("div", 3.5e-6) < 0.1);
     // Four 0.2 us leads of 100 uA into 1 nF.
-    assert!((at("pump", 4.9e-6) - 0.08).abs() < 0.5e-3, "{}", at("pump", 4.9e-6));
-    assert!((at("held", 4.9e-6) - 1.25).abs() < 1e-3, "{}", at("held", 4.9e-6));
+    assert!(
+        (at("pump", 4.9e-6) - 0.08).abs() < 0.5e-3,
+        "{}",
+        at("pump", 4.9e-6)
+    );
+    assert!(
+        (at("held", 4.9e-6) - 1.25).abs() < 1e-3,
+        "{}",
+        at("held", 4.9e-6)
+    );
 }

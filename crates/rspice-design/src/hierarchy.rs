@@ -29,8 +29,8 @@ use crate::project_sources::{ProjectSourceId, ProjectSourceOwner, ProjectSourceR
 use crate::schematic::component::LibraryCellInstance;
 use crate::schematic::component_type::ComponentType;
 use crate::schematic::device_catalog::validate_builtin_xspice_binding;
-use crate::schematic::functional_catalog::validate_builtin_functional_binding;
 use crate::schematic::document::SchematicDocument;
+use crate::schematic::functional_catalog::validate_builtin_functional_binding;
 use crate::schematic::generated_veriloga_catalog::validate_generated_veriloga_binding;
 use crate::schematic::port::PortSpec;
 use rspice_design_model::cell_view::{CellViewRef, DEFAULT_SCHEMATIC_VIEW};
