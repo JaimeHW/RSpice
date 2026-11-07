@@ -197,21 +197,43 @@ use crate::abort_signal::{AbortSignal, NoAbort};
 /// into the parser to interpret them. Parsed once and cached, because the
 /// flattener asks for it per netlist.
 pub(crate) fn builtin_subcircuits() -> &'static [SubcircuitDef] {
-    static SUBCIRCUITS: std::sync::OnceLock<Vec<SubcircuitDef>> = std::sync::OnceLock::new();
-    SUBCIRCUITS.get_or_init(|| {
-        [
+    &builtin_libraries().0
+}
+
+/// The model cards the embedded libraries' subcircuits hold, each named by
+/// its subcircuit's scope as a deck-local `.model` inside a `.subckt` is.
+/// The libraries' top-level cards resolve through the engine's foundation
+/// fallback instead.
+pub(crate) fn builtin_models() -> &'static [ModelDef] {
+    &builtin_libraries().1
+}
+
+type BuiltinLibraries = (Vec<SubcircuitDef>, Vec<ModelDef>);
+
+fn builtin_libraries() -> &'static BuiltinLibraries {
+    static LIBRARIES: std::sync::OnceLock<BuiltinLibraries> = std::sync::OnceLock::new();
+    LIBRARIES.get_or_init(|| {
+        let mut libraries = BuiltinLibraries::default();
+        for (library, source) in [
             ("foundation", crate::builtin_lib::FOUNDATION_LIB),
             ("functional", crate::builtin_lib::FUNCTIONAL_LIB),
-        ]
-        .into_iter()
-        .flat_map(|(library, source)| match parse_netlist(source) {
-            Ok(netlist) => netlist.subcircuits,
-            Err(error) => {
-                log::error!("embedded RSpice {library} library did not parse: {error}");
-                Vec::new()
+        ] {
+            match parse_netlist(source) {
+                Ok(netlist) => {
+                    libraries.0.extend(netlist.subcircuits);
+                    libraries.1.extend(
+                        netlist
+                            .models
+                            .into_iter()
+                            .filter(|model| model.name.contains("::")),
+                    );
+                }
+                Err(error) => {
+                    log::error!("embedded RSpice {library} library did not parse: {error}");
+                }
             }
-        })
-        .collect()
+        }
+        libraries
     })
 }
 

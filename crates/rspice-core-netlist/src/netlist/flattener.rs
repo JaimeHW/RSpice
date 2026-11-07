@@ -310,6 +310,9 @@ pub struct Flattener<'a> {
     /// Original model definitions, used to clone parameterized local models
     /// when subcircuits are expanded with instance-specific parameter scopes.
     models: &'a [ModelDef],
+    /// The model cards the embedded libraries' subcircuits hold, for a model
+    /// the deck does not define.
+    library_models: &'a [ModelDef],
     /// Configuration options
     config: FlattenerConfig,
     /// Parameter resolver for scoped parameter lookup
@@ -346,10 +349,11 @@ pub struct Flattener<'a> {
     random: RandomState,
     /// Model cards cloned while flattening parameterized subcircuit instances.
     scoped_models: Vec<ModelDef>,
-    /// Exact source-model index for each scoped clone, kept in lockstep with
-    /// `scoped_models` so diagnostics never infer provenance from a generated
-    /// hierarchy suffix or conflate duplicate names.
-    scoped_model_sources: Vec<usize>,
+    /// Exact source-model index for each scoped clone, none for a card from
+    /// an embedded library, kept in lockstep with `scoped_models` so
+    /// diagnostics never infer provenance from a generated hierarchy suffix
+    /// or conflate duplicate names.
+    scoped_model_sources: Vec<Option<usize>>,
     /// Diagnostic-only mode that isolates ordinary hierarchy failures between
     /// sibling instances while still propagating cancellation and resource
     /// limits. Normal circuit flattening always leaves this disabled.
@@ -396,7 +400,25 @@ impl<'a> Flattener<'a> {
         models: &'a [ModelDef],
         config: FlattenerConfig,
     ) -> Self {
-        let subcircuit_map: HashMap<String, &SubcircuitDef> = super::builtin_subcircuits()
+        Self::with_library(
+            subcircuits,
+            models,
+            super::builtin_subcircuits(),
+            super::builtin_models(),
+            config,
+        )
+    }
+
+    /// Create a flattener that resolves the subcircuits and model cards a
+    /// deck does not define from a library's.
+    pub(crate) fn with_library(
+        subcircuits: &'a [SubcircuitDef],
+        models: &'a [ModelDef],
+        library_subcircuits: &'a [SubcircuitDef],
+        library_models: &'a [ModelDef],
+        config: FlattenerConfig,
+    ) -> Self {
+        let subcircuit_map: HashMap<String, &SubcircuitDef> = library_subcircuits
             .iter()
             .chain(subcircuits)
             .map(|s| (s.name.to_ascii_uppercase(), s))
@@ -405,6 +427,7 @@ impl<'a> Flattener<'a> {
         Self {
             subcircuits: subcircuit_map,
             models,
+            library_models,
             config,
             param_resolver: ParamResolver::new(),
             instance_metadata: Vec::new(),
@@ -473,13 +496,14 @@ impl<'a> Flattener<'a> {
         &self.param_resolver
     }
 
-    /// Resolved instance-scoped models paired with their source definitions.
+    /// Resolved instance-scoped models paired with their source definitions
+    /// in the deck.
     pub(crate) fn scoped_models_with_sources(&self) -> impl Iterator<Item = (&ModelDef, usize)> {
         debug_assert_eq!(self.scoped_models.len(), self.scoped_model_sources.len());
         self.scoped_models
             .iter()
             .zip(&self.scoped_model_sources)
-            .map(|(model, source)| (model, *source))
+            .filter_map(|(model, source)| source.map(|source| (model, source)))
     }
 
     /// Collect instance-scoped model resolutions for parser diagnostics.
@@ -3339,6 +3363,7 @@ impl<'a> Flattener<'a> {
         self.scoped_models
             .iter()
             .chain(self.models)
+            .chain(self.library_models)
             .find(|model| model.name.eq_ignore_ascii_case(name))
     }
 
@@ -4229,16 +4254,33 @@ impl<'a> Flattener<'a> {
         preserve_unresolved: bool,
         abort: &dyn AbortSignal,
     ) -> Result<String, ParseWithAbortError> {
-        let Some((source_model_index, model_def)) = self
-            .models
+        let (models, library_models) = (self.models, self.library_models);
+        let Some((source_model_index, model_def)) = models
             .iter()
             .enumerate()
             .find(|(_, model)| model.name.eq_ignore_ascii_case(model_name))
+            .map(|(index, model)| (Some(index), model))
+            .or_else(|| {
+                library_models
+                    .iter()
+                    .find(|model| model.name.eq_ignore_ascii_case(model_name))
+                    .map(|model| (None, model))
+            })
         else {
             return Ok(model_name.to_string());
         };
 
         if model_def.expr_params.is_empty() && model_def.real_vector_expr_params.is_empty() {
+            // A library card a subcircuit reaches joins the deck as written.
+            if source_model_index.is_none()
+                && !self
+                    .scoped_models
+                    .iter()
+                    .any(|model| model.name.eq_ignore_ascii_case(model_name))
+            {
+                self.scoped_models.push(model_def.clone());
+                self.scoped_model_sources.push(None);
+            }
             return Ok(model_name.to_string());
         }
 
@@ -5819,6 +5861,57 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    /// A subcircuit from an embedded library holds its own `.model` cards as a
+    /// deck-local `.subckt` does: the card the library parse scopes under the
+    /// subcircuit joins the deck, as written or bound in the instance's scope.
+    #[test]
+    fn a_library_subcircuit_brings_the_model_cards_it_holds() {
+        let library = Netlist::parse(
+            "library\n\
+             .subckt LIBCELL a b\n\
+             D1 a b DLOCAL\n\
+             .model DLOCAL D(IS=1e-15 N=2)\n\
+             .ends\n\
+             .subckt LIBSCALED a b n=1\n\
+             D1 a b DSCALED\n\
+             .model DSCALED D(IS=1e-15 N={n})\n\
+             .ends\n\
+             .end\n",
+        )
+        .expect("library parses");
+        let deck = Netlist::parse("deck\nV1 1 0 1\nX1 1 0 LIBCELL\nX2 1 0 LIBSCALED n=3\n.end\n")
+            .expect("deck parses");
+        let mut flattener = Flattener::with_library(
+            &deck.subcircuits,
+            &deck.models,
+            &library.subcircuits,
+            &library.models,
+            FlattenerConfig::default(),
+        );
+        let elements = flattener.flatten(&deck).expect("deck flattens");
+        let emission = |name: &str| {
+            let diode = elements
+                .iter()
+                .find(|element| element.name.eq_ignore_ascii_case(name))
+                .unwrap_or_else(|| panic!("{name} is flattened"));
+            let ElementKind::Diode { model, .. } = &diode.kind else {
+                panic!("{name} is a diode");
+            };
+            let card = flattener
+                .scoped_models
+                .iter()
+                .find(|card| card.name.eq_ignore_ascii_case(model))
+                .unwrap_or_else(|| panic!("{name}'s card `{model}` joins the deck"));
+            card.params
+                .iter()
+                .find(|(param, _)| param.eq_ignore_ascii_case("N"))
+                .map(|(_, value)| *value)
+        };
+        assert_eq!(emission("X1.D1"), Some(2.0));
+        assert_eq!(emission("X2.D1"), Some(3.0));
+        assert_eq!(flattener.scoped_models_with_sources().count(), 0);
     }
 
     /// ngspice evaluates a K card's coefficient in each instance's parameter
