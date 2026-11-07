@@ -40,7 +40,7 @@ use crate::schematic::functional_catalog::{
 };
 use crate::schematic::label_layout::TextEdge;
 use crate::schematic::label_position::LabelPosition;
-use crate::schematic::net_label::{Junction, NetLabel, NetLabelKind, SupplyGlyph};
+use crate::schematic::net_label::{Junction, NetLabel, NetLabelKind, NetLabelSide, SupplyGlyph};
 use crate::schematic::rotation::Rotation;
 use crate::schematic::terminal_connection::rebuild_connections_from_terminals;
 use crate::schematic::wire::Wire;
@@ -1793,6 +1793,12 @@ impl Builder<'_> {
                 self.document.components.push(port);
             } else {
                 let mut label = NetLabel::new(id, at, flag.name.clone());
+                label.side = match flag.facing.map(|run| (run.x.signum(), run.y.signum())) {
+                    Some((-1, _)) => NetLabelSide::Left,
+                    Some((0, 1)) => NetLabelSide::Below,
+                    Some((0, -1)) => NetLabelSide::Above,
+                    _ => NetLabelSide::Right,
+                };
                 if is_supply_rail(&flag.name) {
                     label.kind = NetLabelKind::Supply {
                         glyph: SupplyGlyph::for_name(&flag.name),

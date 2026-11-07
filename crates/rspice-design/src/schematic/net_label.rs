@@ -69,6 +69,31 @@ impl SupplyGlyph {
     }
 }
 
+/// Which side of its point a net label's name stands on.
+///
+/// A label placed here reads to the right of its point. A label imported
+/// from a drawing that says which way its name runs keeps that side, so the
+/// name stays clear of what the source drawing kept it clear of.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "kebab-case")]
+pub enum NetLabelSide {
+    /// Above the line through the point, reading away to the right.
+    #[default]
+    Right,
+    /// Above the line through the point, ending short of it on the left.
+    Left,
+    /// Centred over the point.
+    Above,
+    /// Centred under the point.
+    Below,
+}
+
+impl NetLabelSide {
+    fn is_right(&self) -> bool {
+        *self == Self::Right
+    }
+}
+
 impl NetLabelKind {
     /// A supply symbol's glyph, or `None` for any other label.
     pub const fn supply_glyph(self) -> Option<SupplyGlyph> {
@@ -129,6 +154,11 @@ pub struct NetLabel {
     /// existed carry no such field and load as ordinary local labels.
     #[serde(default)]
     pub kind: NetLabelKind,
+
+    /// Which side of its point the name stands on. A supply symbol's name
+    /// follows its glyph instead.
+    #[serde(default, skip_serializing_if = "NetLabelSide::is_right")]
+    pub side: NetLabelSide,
 }
 
 impl NetLabel {
@@ -139,6 +169,7 @@ impl NetLabel {
             pos,
             name: name.into(),
             kind: NetLabelKind::Local,
+            side: NetLabelSide::Right,
         }
     }
 
@@ -154,6 +185,7 @@ impl NetLabel {
             pos,
             name: name.into(),
             kind: NetLabelKind::OffSheet { direction },
+            side: NetLabelSide::Right,
         }
     }
 
@@ -164,6 +196,7 @@ impl NetLabel {
             pos,
             name: name.into(),
             kind: NetLabelKind::Supply { glyph },
+            side: NetLabelSide::Right,
         }
     }
 

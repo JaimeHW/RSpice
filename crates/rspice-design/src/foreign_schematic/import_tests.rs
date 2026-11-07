@@ -2034,3 +2034,86 @@ fn a_pin_its_drawing_letters_no_name_for_draws_none() {
         ])
     );
 }
+
+/// A QSPICE net label's name stands on the side its drawing runs it to:
+/// under, left of, over or right of its point. A label placed here reads to
+/// the right, and a project written without a side loads that way.
+#[test]
+fn a_qspice_net_label_name_stands_on_the_side_its_drawing_runs_it_to() {
+    use crate::schematic::label_layout::{
+        LINE_BOX_EM, NET_LABEL_FONT_WORLD, NET_LABEL_GLYPH_WIDTH_WORLD, net_label_name_corner,
+    };
+    use crate::schematic::net_label::{NetLabel, NetLabelSide};
+
+    const DRAWING: &str = "«schematic
+  «net (0,0) 1 13 0 \"under\"»
+  «net (2000,0) 1 11 0 \"left\"»
+  «net (4000,0) 1 14 0 \"over\"»
+  «net (6000,0) 1 7 0 \"right\"»
+»
+";
+    let imported = import_foreign_schematic(
+        &parse_qsch(&qsch_bytes(DRAWING)).unwrap(),
+        "work",
+        &Library::default(),
+    );
+    let label = |name: &str| {
+        imported
+            .document
+            .net_labels
+            .iter()
+            .find(|label| label.name == name)
+            .unwrap_or_else(|| panic!("no label {name}"))
+    };
+    for (name, side) in [
+        ("under", NetLabelSide::Below),
+        ("left", NetLabelSide::Left),
+        ("over", NetLabelSide::Above),
+        ("right", NetLabelSide::Right),
+    ] {
+        let label = label(name);
+        assert_eq!(label.side, side, "{name}");
+        // The name's box, from its bottom-left corner.
+        let corner = net_label_name_corner(label);
+        let width = name.len() as f32 * NET_LABEL_GLYPH_WIDTH_WORLD;
+        let top = corner.y - NET_LABEL_FONT_WORLD * LINE_BOX_EM;
+        let (x, y) = (label.pos.x as f32, label.pos.y as f32);
+        match side {
+            NetLabelSide::Below => {
+                assert!(top > y, "{name} hangs under its point");
+                assert!(
+                    (corner.x + width * 0.5 - x).abs() < 0.01,
+                    "{name} is centred"
+                );
+            }
+            NetLabelSide::Above => {
+                assert!(corner.y < y, "{name} stands over its point");
+                assert!(
+                    (corner.x + width * 0.5 - x).abs() < 0.01,
+                    "{name} is centred"
+                );
+            }
+            NetLabelSide::Left => {
+                assert!(corner.x + width < x, "{name} ends short of its point");
+                assert!(
+                    corner.y < y,
+                    "{name} stands over the line through its point"
+                );
+            }
+            NetLabelSide::Right => {
+                assert!(corner.x > x, "{name} starts past its point");
+                assert!(
+                    corner.y < y,
+                    "{name} stands over the line through its point"
+                );
+            }
+        }
+    }
+
+    let native = NetLabel::new(1, Point::new(0, 0), "n");
+    assert_eq!(native.side, NetLabelSide::Right);
+    let written = serde_json::to_value(&native).unwrap();
+    assert!(written.get("side").is_none(), "{written}");
+    let restored: NetLabel = serde_json::from_value(written).unwrap();
+    assert_eq!(restored, native);
+}

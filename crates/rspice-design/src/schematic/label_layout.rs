@@ -13,7 +13,7 @@ use super::{
     bus::{Bus, BusTap},
     component::Component,
     component_type::ComponentType,
-    net_label::{NetLabel, NetLabelKind, SupplyGlyph},
+    net_label::{NetLabel, NetLabelKind, NetLabelSide, SupplyGlyph},
 };
 use crate::symbol::SymbolDocument;
 
@@ -498,14 +498,25 @@ pub fn net_label_display_name(label: &NetLabel) -> &str {
 /// The world corner a net label's name stands on: the bottom-left of its
 /// text box.
 ///
-/// A supply symbol's name is centred on its pin, over the bar or arrow of a
-/// positive rail and under the bar of a negative one.
+/// The name stands off its point on the label's side, the same distance
+/// whichever side that is. A supply symbol's name is centred on its pin,
+/// over the bar or arrow of a positive rail and under the bar of a negative
+/// one.
 pub fn net_label_name_corner(label: &NetLabel) -> LayoutPoint {
     let (x, y) = (label.pos.x as f32, label.pos.y as f32);
-    let NetLabelKind::Supply { glyph } = label.kind else {
-        return LayoutPoint::new(x + NET_LABEL_OFFSET.x, y + NET_LABEL_OFFSET.y);
-    };
     let width = net_label_display_name(label).chars().count() as f32 * NET_LABEL_GLYPH_WIDTH_WORLD;
+    let NetLabelKind::Supply { glyph } = label.kind else {
+        let (across, down) = (NET_LABEL_OFFSET.x, -NET_LABEL_OFFSET.y);
+        return match label.side {
+            NetLabelSide::Right => LayoutPoint::new(x + across, y - down),
+            NetLabelSide::Left => LayoutPoint::new(x - across - width, y - down),
+            NetLabelSide::Above => LayoutPoint::new(x - width * 0.5, y - down),
+            NetLabelSide::Below => LayoutPoint::new(
+                x - width * 0.5,
+                y + down + NET_LABEL_FONT_WORLD * LINE_BOX_EM,
+            ),
+        };
+    };
     let reach = SUPPLY_STEM_WORLD + SUPPLY_NAME_GAP_WORLD;
     let baseline = if glyph == SupplyGlyph::Down {
         y + reach + NET_LABEL_FONT_WORLD * LINE_BOX_EM
