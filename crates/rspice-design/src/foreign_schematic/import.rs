@@ -28,6 +28,7 @@ use crate::schematic::component::{Component, LibraryCellInstance};
 use crate::schematic::component_type::ComponentType;
 use crate::schematic::design_note::{DesignNote, DesignNoteKind};
 use crate::schematic::document::SchematicDocument;
+use crate::schematic::document_policy::{NetNamingPolicy, SchematicDocumentPolicy};
 use crate::schematic::documentation_shape::{DocumentationShape, DocumentationShapeGeometry};
 use crate::schematic::net_label::{Junction, NetLabel, NetLabelKind, SupplyGlyph};
 use crate::schematic::rotation::Rotation;
@@ -132,7 +133,15 @@ pub fn import_foreign_schematic(
         drawing,
         library,
         access,
-        document: SchematicDocument::default(),
+        // Both programs name nets as SPICE does: case-blind, with any
+        // printable character (`V+`, `+5V`).
+        document: SchematicDocument {
+            document_policy: SchematicDocumentPolicy {
+                net_naming: NetNamingPolicy::SpiceCompatibleRelaxed,
+                ..SchematicDocumentPolicy::default()
+            },
+            ..SchematicDocument::default()
+        },
         next_id: 1,
         cells: Vec::new(),
         cell_index: HashMap::new(),
@@ -334,6 +343,10 @@ impl Builder<'_> {
                     match word.split_once('=') {
                         Some((key, value)) if !key.is_empty() && !value.is_empty() => {
                             params.push((key.to_owned(), value.to_owned()));
+                        }
+                        // LTspice writes `x2` for two parts in parallel.
+                        _ if parallel_count(&word).is_some() => {
+                            params.push(("m".to_owned(), word[1..].to_owned()));
                         }
                         _ => extra.push(word),
                     }
@@ -795,14 +808,62 @@ impl Builder<'_> {
         }
     }
 
+    /// Places a mutual-inductance card (`K1 L1 L2 1`) whose windings are
+    /// inductors of the drawing as a coupling part at `position`. Returns
+    /// whether it did.
+    fn place_coupling(&mut self, position: Point, line: &str) -> bool {
+        let words = spice_tokens(line);
+        let [name, windings @ .., coupling] = words.as_slice() else {
+            return false;
+        };
+        if !name.to_ascii_uppercase().starts_with('K') || windings.len() < 2 {
+            return false;
+        }
+        let inductors = windings
+            .iter()
+            .map(|winding| {
+                self.document
+                    .components
+                    .iter()
+                    .find(|component| {
+                        component.kind == ComponentType::Inductor
+                            && component.name.eq_ignore_ascii_case(winding)
+                    })
+                    .map(|component| component.name.clone())
+            })
+            .collect::<Option<Vec<_>>>();
+        let Some(inductors) = inductors else {
+            return false;
+        };
+        let name = self.instance_name(Some(name), "K");
+        let id = self.id();
+        let mut component = Component::new(id, ComponentType::CoupledInductor, position)
+            .with_name_value(name, coupling.clone());
+        component.params = format!("inductors=\"{}\"", inductors.join(" "));
+        self.document.components.push(component);
+        true
+    }
+
     fn place_texts(&mut self) {
         for text in &self.drawing.texts {
             let position = self.scale(text.position);
             match text.kind {
-                ForeignTextKind::Directive => self.directives.push(ForeignDirective {
-                    position,
-                    text: spice_text_lines(&text.text),
-                }),
+                ForeignTextKind::Directive => {
+                    let mut couplings = 0;
+                    let text = spice_text_lines(&text.text)
+                        .lines()
+                        .filter(|line| {
+                            let at = position + Point::new(0, 20 * couplings);
+                            let placed = self.place_coupling(at, line);
+                            couplings += i32::from(placed);
+                            !placed
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    if !text.trim().is_empty() {
+                        self.directives.push(ForeignDirective { position, text });
+                    }
+                }
                 ForeignTextKind::Comment => {
                     let id = self.id();
                     match DesignNote::new(id, position, DesignNoteKind::PlainText, text.text.trim())
@@ -1004,6 +1065,13 @@ fn merged_attributes(
         }
     }
     attributes
+}
+
+/// The count of an LTspice parallel-count word (`x2`).
+fn parallel_count(word: &str) -> Option<u32> {
+    word.strip_prefix(['x', 'X'])
+        .and_then(|count| count.parse::<u32>().ok())
+        .filter(|count| *count > 0)
 }
 
 fn attribute<'a>(attributes: &'a [ForeignAttribute], name: &str) -> Option<&'a str> {

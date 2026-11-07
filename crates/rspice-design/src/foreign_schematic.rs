@@ -14,7 +14,9 @@ mod ltspice;
 mod mapping;
 mod qspice;
 
-pub use directives::{ForeignCard, ForeignCardRole, defined_model_names, foreign_directive_cards};
+pub use directives::{
+    ForeignCard, ForeignCardRole, defined_model_names, foreign_directive_cards, keep_directive_text,
+};
 pub use import::{
     ForeignDirective, ForeignImport, ForeignImportNotice, ForeignLibrary, ForeignModelFile,
     ForeignNoticeSeverity, ForeignSymbolCell, ForeignSymbolSource, import_foreign_schematic,

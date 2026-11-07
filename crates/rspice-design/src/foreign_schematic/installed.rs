@@ -5,6 +5,7 @@
 //! are; nothing is copied.
 
 use std::cell::OnceCell;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use super::import::{ForeignLibrary, ForeignModelFile, ForeignSymbolSource};
@@ -14,6 +15,9 @@ use super::{ForeignTool, decode_foreign_text, parse_asy};
 pub struct InstalledForeignLibrary {
     beside: PathBuf,
     symbol_roots: Vec<PathBuf>,
+    /// Every installed symbol by its lower-case file stem, for a drawing
+    /// that names a symbol without its folder, as LTspice allows.
+    symbol_index: OnceCell<HashMap<String, PathBuf>>,
     model_roots: Vec<PathBuf>,
     card_files: Vec<PathBuf>,
     cards: OnceCell<Vec<String>>,
@@ -41,6 +45,7 @@ impl InstalledForeignLibrary {
         let mut library = Self {
             beside: beside.to_path_buf(),
             symbol_roots: Vec::new(),
+            symbol_index: OnceCell::new(),
             model_roots: vec![beside.to_path_buf()],
             card_files: Vec::new(),
             cards: OnceCell::new(),
@@ -66,6 +71,18 @@ impl InstalledForeignLibrary {
         library
     }
 
+    fn indexed_symbol(&self, name: &str) -> Option<&PathBuf> {
+        let index = self.symbol_index.get_or_init(|| {
+            let mut index = HashMap::new();
+            for root in &self.symbol_roots {
+                index_symbols(root, &mut index);
+            }
+            index
+        });
+        let stem = name.rsplit(['/', '\\']).next().unwrap_or(name);
+        index.get(&stem.to_ascii_lowercase())
+    }
+
     fn card_texts(&self) -> &[String] {
         self.cards.get_or_init(|| {
             self.card_files
@@ -79,10 +96,17 @@ impl InstalledForeignLibrary {
 
 impl ForeignLibrary for InstalledForeignLibrary {
     fn symbol(&self, name: &str) -> Option<ForeignSymbolSource> {
-        let relative = format!("{}.asy", name.replace('\\', "/"));
-        let roots = std::iter::once(&self.beside).chain(&self.symbol_roots);
-        for root in roots {
-            let path = root.join(&relative);
+        let relative = name
+            .split(['/', '\\'])
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join("/");
+        let relative = format!("{relative}.asy");
+        let candidates = std::iter::once(&self.beside)
+            .chain(&self.symbol_roots)
+            .map(|root| root.join(&relative))
+            .chain(self.indexed_symbol(name).cloned());
+        for path in candidates {
             let Ok(bytes) = std::fs::read(&path) else {
                 continue;
             };
@@ -91,8 +115,9 @@ impl ForeignLibrary for InstalledForeignLibrary {
             };
             // A symbol drawn beside a schematic of the same name is a block
             // whose insides that schematic draws.
-            let schematic = Some(path.with_extension("asc"))
-                .filter(|schematic| *root == self.beside && schematic.is_file());
+            let schematic = Some(path.with_extension("asc")).filter(|schematic| {
+                path.parent() == Some(self.beside.as_path()) && schematic.is_file()
+            });
             return Some(ForeignSymbolSource {
                 definition,
                 location: path.display().to_string(),
@@ -159,6 +184,28 @@ fn model_card_in(text: &str, name: &str) -> Option<String> {
         return Some(card);
     }
     None
+}
+
+fn index_symbols(folder: &Path, index: &mut HashMap<String, PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(folder) else {
+        return;
+    };
+    let mut paths = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .collect::<Vec<_>>();
+    paths.sort();
+    for path in paths {
+        if path.is_dir() {
+            index_symbols(&path, index);
+        } else if path
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("asy"))
+            && let Some(stem) = path.file_stem().and_then(|stem| stem.to_str())
+        {
+            index.entry(stem.to_ascii_lowercase()).or_insert(path);
+        }
+    }
 }
 
 fn files_in(folder: &Path, wanted: impl Fn(&str) -> bool) -> Vec<PathBuf> {

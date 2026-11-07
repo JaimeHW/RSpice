@@ -11,6 +11,9 @@ use rspice_design_model::Point;
 
 use super::ForeignDirective;
 use crate::netlist_document::card_tokens;
+use crate::schematic::design_note::{DesignNote, DesignNoteKind};
+use crate::schematic::document::SchematicDocument;
+use crate::schematic::identity::SchematicIdentity;
 
 /// The project place a directive card belongs in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -157,4 +160,18 @@ pub fn defined_model_names(cards: &[ForeignCard]) -> Vec<String> {
             _ => None,
         })
         .collect()
+}
+
+/// Writes directive text RSpice keeps on the sheet as a note where its block
+/// was drawn.
+pub fn keep_directive_text(
+    document: &mut SchematicDocument,
+    position: Point,
+    text: &str,
+) -> Result<(), String> {
+    let id = SchematicIdentity::with_cursor(1).allocate(document);
+    let note = DesignNote::new(id, position, DesignNoteKind::PlainText, text)
+        .map_err(|error| error.to_string())?;
+    document.design_notes.push(note);
+    Ok(())
 }

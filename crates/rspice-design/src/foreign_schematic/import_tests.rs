@@ -821,3 +821,46 @@ fn the_installed_library_reads_symbols_blocks_and_cards_in_place() {
     assert_eq!(open.path, install.join("sub").join("open.lib"));
     std::fs::remove_dir_all(&root).ok();
 }
+
+#[test]
+fn a_coupling_card_over_drawn_inductors_is_a_coupling_part() {
+    let drawing = parse_asc(
+        "Version 4\n\
+         SYMBOL ind 0 0 R0\nSYMATTR InstName L1\nSYMATTR Value 10u\n\
+         SYMBOL ind 128 0 R0\nSYMATTR InstName L2\nSYMATTR Value 40u\n\
+         SYMBOL cap 256 0 R0\nSYMATTR InstName C1\nSYMATTR Value 1u\nSYMATTR Value2 x2\n\
+         TEXT 0 200 Left 2 !K1 L1 L2 0.98\n\
+         TEXT 0 260 Left 2 !K2 L1 L9 1\n",
+    )
+    .unwrap();
+    let imported = import_foreign_schematic(&drawing, "work", &Library::default());
+    let coupling = imported
+        .document
+        .components
+        .iter()
+        .find(|component| component.kind == ComponentType::CoupledInductor)
+        .expect("a coupling part");
+    assert_eq!(
+        (
+            coupling.name.as_str(),
+            coupling.value.as_str(),
+            coupling.params.as_str()
+        ),
+        ("K1", "0.98", "inductors=\"L1 L2\"")
+    );
+    assert_eq!(coupling.pos, Point::new(0, 250));
+    // A card naming a winding the drawing lacks stays directive text.
+    let texts = imported
+        .directives
+        .iter()
+        .map(|directive| directive.text.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(texts, ["K2 L1 L9 1"]);
+    let capacitor = imported
+        .document
+        .components
+        .iter()
+        .find(|component| component.name == "C1")
+        .expect("the capacitor");
+    assert_eq!(capacitor.params, "m=2");
+}
