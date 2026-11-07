@@ -349,6 +349,8 @@ struct DeviceTie {
     terminal: Point,
     /// The middle of the part's terminals, which the ground faces away from.
     center: Point,
+    /// The net the terminal joins, ground when there is none.
+    net: Option<String>,
 }
 
 impl Builder<'_> {
@@ -428,10 +430,9 @@ impl Builder<'_> {
             return;
         }
         if tool == ForeignTool::Qspice
-            && let Some(reason) = symbol
-                .embedded
-                .as_ref()
-                .and_then(|definition| qspice_refusal(definition.symbol_type.trim()))
+            && let Some(reason) = symbol.embedded.as_ref().and_then(|definition| {
+                qspice_refusal(definition.symbol_type.trim(), &qspice_kind(symbol))
+            })
         {
             self.refuse(format!("{label} {reason}; it was left out."));
             self.place_marker(symbol, &label);
@@ -525,23 +526,16 @@ impl Builder<'_> {
             symbol.attribute(DEVICE_TYPE).unwrap_or_default(),
             symbol.attribute("Value").unwrap_or_default()
         );
-        let pins = definition
-            .ordered_pins()
-            .into_iter()
-            .map(|pin| {
-                self.scale(
-                    symbol
-                        .position
-                        .offset(symbol.orientation.apply(pin.position)),
-                )
-            })
-            .collect::<Vec<_>>();
-        let reached = pins
+        let ordered = definition.ordered_pins();
+        let pins = ordered
             .iter()
-            .map(|point| {
-                self.source_nets.net(*point).is_some()
-                    || self.pin_points.get(point).copied().unwrap_or_default() > 1
-            })
+            .map(|pin| self.pin_source(symbol, pin))
+            .collect::<Vec<_>>();
+        // A pin with a net of its own joins it when nothing is wired to it.
+        let reached = ordered
+            .iter()
+            .zip(&pins)
+            .map(|(pin, point)| pin.default_net.is_some() || self.reached(*point))
             .collect::<Vec<_>>();
         let model = format!(
             "{}_{}",
@@ -1132,6 +1126,9 @@ impl Builder<'_> {
         if device {
             self.tie_device(&cell, &component, pins, &points);
         }
+        if self.drawing.tool == ForeignTool::Qspice {
+            self.tie_default_nets(symbol, definition, pins, &points);
+        }
         for (port, point) in cell
             .ports
             .iter()
@@ -1153,16 +1150,13 @@ impl Builder<'_> {
         sources: &[Point],
         terminals: &[Point],
     ) {
-        let count = i32::try_from(terminals.len().max(1)).unwrap_or(1);
-        let sum = terminals
-            .iter()
-            .fold(Point::default(), |sum, point| sum + *point);
-        let center = Point::new(sum.x / count, sum.y / count);
+        let center = centre(terminals);
         for (source, terminal) in sources.iter().zip(terminals) {
             self.device_ties.push(DeviceTie {
                 source: Some(*source),
                 terminal: *terminal,
                 center,
+                net: None,
             });
         }
         let placeholder = |pin: &&SymbolPin| cell.unconnected.contains(&pin.name);
@@ -1184,8 +1178,56 @@ impl Builder<'_> {
                 source: None,
                 terminal: component.pos + component.transform_point(position),
                 center,
+                net: None,
             });
         }
+    }
+
+    /// Records the pins of a QSPICE part that join a net of their own
+    /// (`Vdd`, `GND`) when nothing is wired to them, as QSPICE connects them.
+    fn tie_default_nets(
+        &mut self,
+        symbol: &ForeignSymbol,
+        definition: &ForeignSymbolDefinition,
+        sources: &[Point],
+        terminals: &[Point],
+    ) {
+        let center = centre(terminals);
+        for pin in definition.ordered_pins() {
+            let Some(net) = &pin.default_net else {
+                continue;
+            };
+            let source = self.pin_source(symbol, pin);
+            let Some(terminal) = sources
+                .iter()
+                .position(|point| *point == source)
+                .and_then(|index| terminals.get(index))
+            else {
+                continue;
+            };
+            let ground = net == "0" || net.eq_ignore_ascii_case("GND");
+            self.device_ties.push(DeviceTie {
+                source: Some(source),
+                terminal: *terminal,
+                center,
+                net: (!ground).then(|| net.clone()),
+            });
+        }
+    }
+
+    /// Where a symbol's pin lies on the drawing, scaled to the sheet.
+    fn pin_source(&self, symbol: &ForeignSymbol, pin: &ForeignPin) -> Point {
+        self.scale(
+            symbol
+                .position
+                .offset(symbol.orientation.apply(pin.position)),
+        )
+    }
+
+    /// Whether a wire, a label or another pin reaches the drawing's point.
+    fn reached(&self, point: Point) -> bool {
+        self.source_nets.net(point).is_some()
+            || self.pin_points.get(&point).copied().unwrap_or_default() > 1
     }
 
     /// Grounds each recorded A-device terminal whose source pin nothing
@@ -1193,11 +1235,18 @@ impl Builder<'_> {
     /// terminal, facing away from the part.
     fn tie_device_pins(&mut self) {
         for tie in std::mem::take(&mut self.device_ties) {
-            let reached = tie.source.is_some_and(|source| {
-                self.source_nets.net(source).is_some()
-                    || self.pin_points.get(&source).copied().unwrap_or_default() > 1
-            });
-            if reached {
+            if tie.source.is_some_and(|source| self.reached(source)) {
+                continue;
+            }
+            if let Some(net) = tie.net {
+                let id = self.id();
+                let mut label = NetLabel::new(id, tie.terminal, net.clone());
+                if is_supply_rail(&net) {
+                    label.kind = NetLabelKind::Supply {
+                        glyph: SupplyGlyph::for_name(&net),
+                    };
+                }
+                self.document.net_labels.push(label);
                 continue;
             }
             let away = tie.terminal - tie.center;
@@ -2105,6 +2154,29 @@ fn unique_pin_names(slots: &[Option<&ForeignPin>]) -> Vec<PortSpec> {
 }
 
 /// VDD, VCC, VSS and VEE, alone or numbered, are supply rails.
+/// The middle of a part's terminals.
+fn centre(terminals: &[Point]) -> Point {
+    let count = i32::try_from(terminals.len().max(1)).unwrap_or(1);
+    let sum = terminals
+        .iter()
+        .fold(Point::default(), |sum, point| sum + *point);
+    Point::new(sum.x / count, sum.y / count)
+}
+
+/// The type a QSPICE behavioural device states (`D-FLOP`, `RROPAMP`): the
+/// first word of the type its symbol draws, else of its value.
+fn qspice_kind(symbol: &ForeignSymbol) -> String {
+    [symbol.attribute(DEVICE_TYPE), symbol.attribute("Value")]
+        .into_iter()
+        .flatten()
+        .find_map(|text| {
+            spice_tokens(&spice_text(text))
+                .into_iter()
+                .find(|word| !word.contains('='))
+        })
+        .unwrap_or_default()
+}
+
 fn is_supply_rail(name: &str) -> bool {
     let upper = name.trim().to_ascii_uppercase();
     ["VDD", "VCC", "VSS", "VEE"].iter().any(|rail| {

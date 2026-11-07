@@ -139,20 +139,46 @@ pub(super) fn qspice_native(device_type: &str, pin_count: usize) -> Option<Nativ
     })
 }
 
-/// Why a QSPICE device cannot come across at all.
-pub(super) fn qspice_refusal(device_type: &str) -> Option<&'static str> {
-    match device_type.chars().next()? {
-        'Ø' => Some(
-            "is a QSPICE C++/Verilog DLL block; RSpice runs behavioral blocks written in Verilog-A, so rewrite it as a Verilog-A module and place that instead",
-        ),
-        'Ã' => Some("is a QSPICE behavioral Gm amplifier, which has no RSpice equivalent"),
-        '¥' => Some("is a QSPICE behavioral logic gate, which has no RSpice equivalent"),
-        '€' => Some("is a QSPICE behavioral digital block, which has no RSpice equivalent"),
-        'Ö' | '£' | '×' | '¢' | 'Æ' => {
-            Some("is a QSPICE-only behavioral device, which has no RSpice equivalent")
+/// Why a QSPICE device whose symbol type is `device_type` (`¥`, `Ã`, `Ø`, …)
+/// and whose stated type is `kind` (`D-FLOP`, `RROPAMP`, empty when it
+/// states none) is left out, or `None` when RSpice imports its kind.
+pub(super) fn qspice_refusal(device_type: &str, kind: &str) -> Option<String> {
+    let letter = device_type.chars().next()?;
+    let kind = kind.trim().to_uppercase();
+    let what = match letter {
+        'Ø' => {
+            return Some(
+                "is a QSPICE C++/Verilog DLL block; RSpice runs behavioral blocks written in Verilog-A, so rewrite it as a Verilog-A module and place that instead"
+                    .to_owned(),
+            );
         }
-        _ => None,
-    }
+        'Ã' if kind == "RROPAMP" => "rail-to-rail op-amp",
+        'Ã' => "Gm amplifier",
+        '¥' => match kind.as_str() {
+            "D-FLOP" => "D flip-flop",
+            "JK-FLOP" => "JK flip-flop",
+            "SR-FLOP" => "SR flip-flop",
+            "T-FLOP" => "toggle flip-flop",
+            "PS-FLOP" => "switching-regulator flip-flop",
+            "CLOCKSYNC" => "clock synchronizer",
+            "MONOSTABLE" => "monostable",
+            "ULATOR" => "AM/FM modulator",
+            "Φ-DET" => "phase/frequency detector",
+            oscillator if oscillator.contains("OSC") || oscillator == "VCO" => "oscillator",
+            _ => "digital device",
+        },
+        '€' => "digital block",
+        'Ö' | '£' | '×' | '¢' | 'Æ' => "device",
+        _ => return None,
+    };
+    let device = if kind.is_empty() {
+        format!("{letter}-device")
+    } else {
+        format!("{letter}-device {kind}")
+    };
+    Some(format!(
+        "is a QSPICE behavioral {what} ({device}), which has no RSpice equivalent"
+    ))
 }
 
 /// The parts LTspice's power and discrete library draws that RSpice will
@@ -276,6 +302,7 @@ pub(super) fn ltspice_builtin_definition(base_name: &str) -> Option<ForeignSymbo
                 name: (*pin).to_owned(),
                 spice_order: index + 1,
                 position: ForeignPoint::new(*x, *y),
+                default_net: None,
             })
             .collect(),
         shapes: Vec::new(),

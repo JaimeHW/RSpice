@@ -1829,3 +1829,99 @@ fn an_ltspice_universal_opamp_at_level2_is_the_functional_op_amp() {
         );
     }
 }
+
+/// A QSPICE pin that names a net of its own joins it when nothing is wired
+/// to it: the Gm amplifier's Vdd pin the `Vdd` rail, its Vss pin ground. A
+/// behavioural device RSpice has no part for is refused by what it is.
+#[test]
+fn a_qspice_pin_nothing_reaches_joins_its_own_net() {
+    const DRAWING: &str = "«schematic
+  «component (0,0) 0 0
+    «symbol GmAmp
+      «type: Ã»
+      «text (0,300) 1 7 0 0x1000000 -1 -1 \"Ã1\"»
+      «text (0,-200) 0.5 0 2 0x1000000 -1 -1 \"MultGmAmp\"»
+      «text (0,-300) 1 7 0 0x1000000 -1 -1 \"Gm=1m\"»
+      «pin (0,400) (0,0) 1 0 0 0x1000000 -1 \"Vdd\" \"Vdd\"»
+      «pin (0,-400) (0,0) 1 0 0 0x1000000 -1 \"Vss\" \"GND\"»
+      «pin (400,0) (0,0) 1 0 0 0x1000000 -1 \"OUT\"»
+      «pin (-400,200) (0,0) 1 0 0 0x1000000 -1 \"IN-\"»
+      «pin (-400,-200) (0,0) 1 0 0 0x1000000 -1 \"IN+\"»
+    »
+  »
+  «component (3000,0) 0 0
+    «symbol DFLOP
+      «type: ¥»
+      «text (0,300) 1 7 0 0x1000000 -1 -1 \"¥2\"»
+      «text (0,-200) 0.5 0 2 0x1000000 -1 -1 \"D-FLOP\"»
+      «pin (0,400) (0,0) 1 0 0 0x1000000 -1 \"Vdd\" \"Vdd\"»
+      «pin (0,-400) (0,0) 1 0 0 0x1000000 -1 \"Vss\" \"GND\"»
+      «pin (400,0) (0,0) 1 0 0 0x1000000 -1 \"Q\"»
+      «pin (-400,0) (0,0) 1 0 0 0x1000000 -1 \"D\"»
+    »
+  »
+  «net (400,0) 1 13 0 \"out\"»
+  «net (-400,200) 1 13 0 \"out\"»
+  «net (-400,-200) 1 13 0 \"in\"»
+»
+";
+    let drawing = parse_qsch(&qsch_bytes(DRAWING)).unwrap();
+    let pins = &drawing.symbols[0]
+        .embedded
+        .as_ref()
+        .expect("QSPICE embeds the symbol")
+        .pins;
+    assert_eq!(pins[0].default_net.as_deref(), Some("Vdd"));
+    assert_eq!(pins[2].default_net, None);
+    let imported = import_foreign_schematic(&drawing, "work", &Library::default());
+    let refusal = imported
+        .notices
+        .iter()
+        .find(|notice| notice.severity == ForeignNoticeSeverity::Refusal)
+        .expect("the flip-flop is refused");
+    assert!(
+        refusal.message.contains("D flip-flop (¥-device D-FLOP)"),
+        "{}",
+        refusal.message
+    );
+    let cells = imported
+        .cells
+        .iter()
+        .map(|cell| (cell.cell.clone(), cell))
+        .collect::<HashMap<_, _>>();
+    let connectivity = extract(
+        &imported.document,
+        |binding| {
+            cells.get(&binding.cell).map(|cell| {
+                ResolvedCellSymbol::from_authored_document(cell.symbol.clone(), &cell.ports)
+            })
+        },
+        |_| None,
+    );
+    let amplifier = imported
+        .document
+        .components
+        .iter()
+        .find(|component| component.kind == ComponentType::CellInstance)
+        .expect("the amplifier is placed");
+    let binding = amplifier.library_cell.as_ref().expect("a cell instance");
+    let nets = binding
+        .terminal_order
+        .iter()
+        .map(|pin| {
+            let net = &connectivity
+                .terminals
+                .iter()
+                .find(|terminal| terminal.component_id == amplifier.id && &terminal.pin == pin)
+                .unwrap_or_else(|| panic!("no terminal {pin}"))
+                .net_name;
+            if crate::schematic::ground_names::is_ground_reference(net) {
+                "0".to_owned()
+            } else {
+                net.to_ascii_lowercase()
+            }
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(nets, ["vdd", "0", "out", "out", "in"]);
+    assert_on_grid(&imported);
+}

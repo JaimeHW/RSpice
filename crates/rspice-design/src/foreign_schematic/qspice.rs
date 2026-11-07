@@ -218,10 +218,18 @@ fn component(node: &Node) -> Result<ForeignSymbol, ForeignParseError> {
             }
             "pin" => {
                 let pin_points = points(fields, child.line)?;
-                let name = quoted(fields).into_iter().next().unwrap_or_default();
+                // A second string names the net the pin joins when nothing
+                // is wired to it; `¥` marks a pin that may stay open.
+                let mut strings = quoted(fields).into_iter();
+                let name = strings.next().unwrap_or_default();
+                let default_net = strings
+                    .next()
+                    .map(|net| net.trim().to_owned())
+                    .filter(|net| !net.is_empty() && net != "¥");
                 definition.pins.push(ForeignPin {
                     name,
                     spice_order: definition.pins.len() + 1,
+                    default_net,
                     position: pin_points
                         .first()
                         .copied()

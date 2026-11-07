@@ -169,6 +169,9 @@ pub struct ForeignPin {
     /// Position of the pin on the instance line, from 1.
     pub spice_order: usize,
     pub position: ForeignPoint,
+    /// The net a QSPICE pin joins when nothing is wired to it (`Vdd`,
+    /// `GND`).
+    pub default_net: Option<String>,
 }
 
 /// Drawing primitives, in the units of the drawing that holds them.

@@ -186,6 +186,7 @@ pub fn parse_asy(source: &str) -> Result<ForeignSymbolDefinition, ForeignParseEr
                     name: String::new(),
                     spice_order: 0,
                     position,
+                    default_net: None,
                 });
             }
             "PINATTR" => {
