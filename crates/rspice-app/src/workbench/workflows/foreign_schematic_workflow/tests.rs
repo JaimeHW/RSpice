@@ -248,7 +248,8 @@ fn stepped_runs_are_run_set_axes_and_measurements_are_plan_measurements() {
         statements,
         [
             ".MEAS TRAN peak MAX V(out)",
-            ".MEAS TRAN fall FIND time WHEN V(out)=0.5 FALL=1"
+            ".MEAS TRAN fall FIND time WHEN V(out)=0.5 FALL=1",
+            ".MEAS TRAN late FIND V(out) AT fall"
         ]
     );
     let kept = plan
@@ -261,12 +262,11 @@ fn stepped_runs_are_run_set_axes_and_measurements_are_plan_measurements() {
             )
         })
         .collect::<Vec<_>>();
-    assert_eq!(kept.len(), 5, "{kept:?}");
+    assert_eq!(kept.len(), 4, "{kept:?}");
     assert!(kept[0].1.contains("model parameter"), "{kept:?}");
     assert!(kept[1].1.contains("already steps"), "{kept:?}");
     assert!(kept[2].1.contains("`V9`"), "{kept:?}");
     assert!(kept[3].1.contains("no AC analysis"), "{kept:?}");
-    assert!(kept[4].1.contains("does not read"), "{kept:?}");
 }
 
 #[test]
