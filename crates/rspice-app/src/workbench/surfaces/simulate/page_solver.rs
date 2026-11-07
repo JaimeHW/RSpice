@@ -1221,7 +1221,12 @@ fn topology_contract(ui: &mut Ui) {
             rule_row(
                 ui,
                 "Voltage-source loops",
-                "refused · sources alone by design rules · via inductors at every DC point",
+                "sources alone refused by design rules at every DC point",
+            );
+            rule_row(
+                ui,
+                "Loops through inductors",
+                "1 pOhm per winding and a warning · refused under ngspice and Xyce",
             );
             rule_row(
                 ui,
