@@ -538,7 +538,12 @@ use super::*;
 // `wreal_resolution` never refuses or folds one.
 // Version 179 follows the schema to 186, which ties to ground an internal node
 // that no contribution reaches.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 179;
+//
+// Version 180 opens a potential branch only for a guard on the contribution
+// statement, never for a conditional inside its value. The serialized form is
+// unchanged, but an earlier record carries activation conditions that opened
+// `V(o) <+ c ? x : 0` whenever `c` was false.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 180;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

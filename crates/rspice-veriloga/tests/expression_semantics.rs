@@ -684,3 +684,92 @@ endmodule
 
     assert_eq!(evaluate(&mut device).to_bits(), (-1.0_f64).to_bits());
 }
+
+/// Stamp `vx(o, s)` with node `o` at row 0, `s` at row 1 and the branch
+/// current, when there is one, at row 2.
+fn stamp_source_rows(
+    fixture: &DeviceFixture,
+    parameters: &[(&str, f64)],
+) -> ([[f64; 3]; 3], [f64; 3]) {
+    let mut device = fixture.device("X1", &[1, 2]);
+    device.set_branch_current_indices(&[3][..device.num_branch_unknowns()]);
+    for (name, value) in parameters {
+        assert!(device.set_parameter(name, *value), "{name}");
+    }
+    device.try_resolve_parameter_defaults().unwrap();
+    let mut matrix = [[0.0; 3]; 3];
+    let mut rhs = [0.0; 3];
+    device
+        .try_stamp(
+            &[5.0, 5.0, 0.0],
+            |row, column, value| matrix[row][column] += value,
+            |row, value| rhs[row] += value,
+        )
+        .unwrap();
+    (matrix, rhs)
+}
+
+/// A conditional the source writes inside a potential contribution is part of
+/// its value: the statement still executes, so the branch is a source whichever
+/// arm is taken, and an arm of zero is an ideal zero-volt source. Only a guard
+/// on the statement itself can leave the branch open.
+#[test]
+fn a_conditional_value_never_opens_its_potential_branch() {
+    let source = |body: &str| {
+        format!(
+            "module vx(o, s); inout o, s; electrical o, s;
+            parameter real k = 0; parameter integer en = 1;
+            analog begin {body} end endmodule"
+        )
+    };
+    let closed = |value: f64| ([[0.0, 0.0, 1.0], [0.0; 3], [1.0, 0.0, 0.0]], [0.0, 0.0, value]);
+    let open = ([[0.0; 3], [0.0; 3], [0.0, 0.0, 1.0]], [0.0; 3]);
+    for (body, guarded) in [
+        ("V(o) <+ (k > 1) ? 2.0 : 0.0;", false),
+        ("V(o) <+ (k > 1) ? 0.0 : 2.0;", false),
+        ("if (k > 1) V(o) <+ 2.0; else V(o) <+ 0.0;", true),
+        ("if (en) V(o) <+ (k > 1) ? 2.0 : 0.0;", true),
+    ] {
+        let fixture = DeviceFixture::compile(&source(body));
+        assert_eq!(fixture.branch_sources.len(), 1, "{body}");
+        assert_eq!(
+            fixture.stamp_programs[0].static_condition.is_some(),
+            guarded,
+            "{body}"
+        );
+        for (k, en) in [(0.5, 1.0), (2.0, 1.0), (0.5, 0.0), (2.0, 0.0)] {
+            let high = if body.contains("? 0.0 : 2.0") { 0.0 } else { 2.0 };
+            let low = 2.0 - high;
+            let value = if k > 1.0 { high } else { low };
+            let expected = if body.starts_with("if (en)") && en == 0.0 {
+                open
+            } else {
+                closed(value)
+            };
+            assert_eq!(
+                stamp_source_rows(&fixture, &[("k", k), ("en", en)]),
+                expected,
+                "{body}; k={k}, en={en}"
+            );
+        }
+    }
+
+    // The contrast: a guard on the statement does open the branch.
+    let fixture = DeviceFixture::compile(&source("if (k > 1) V(o) <+ 2.0;"));
+    assert_eq!(stamp_source_rows(&fixture, &[("k", 0.5)]), open);
+    assert_eq!(stamp_source_rows(&fixture, &[("k", 2.0)]), closed(2.0));
+
+    // A conditional flow contribution stays a flow source with no branch.
+    let fixture = DeviceFixture::compile(&source("I(o, s) <+ (k > 1) ? V(o, s) : 0.0;"));
+    assert!(fixture.branch_sources.is_empty());
+    assert!(fixture.stamp_programs[0].static_condition.is_none());
+    for k in [0.5, 2.0] {
+        let g = if k > 1.0 { 1.0 } else { 0.0 };
+        let (matrix, _) = stamp_source_rows(&fixture, &[("k", k)]);
+        assert_eq!(
+            matrix,
+            [[g, -g, 0.0], [-g, g, 0.0], [0.0; 3]],
+            "k={k}"
+        );
+    }
+}

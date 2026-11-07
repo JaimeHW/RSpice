@@ -4613,6 +4613,58 @@ endmodule
         }
     }
 
+    /// A conditional inside a potential contribution's value is the value: the
+    /// source stays active whichever arm runs. Only a statement guard exports
+    /// an activation condition, and it is that guard alone.
+    #[test]
+    fn wasm_a_conditional_value_keeps_its_potential_source_in_both_plans() {
+        use super::abi::FRAME_RESULT_OFFSET;
+
+        for (body, guarded) in [
+            ("V(o) <+ (k > 1) ? 2.0 : 0.0;", false),
+            ("if (en) V(o) <+ (k > 1) ? 2.0 : 0.0;", true),
+        ] {
+            let source = format!(
+                "module vx(o, s); inout o, s; electrical o, s;
+                parameter real k = 0; parameter integer en = 1;
+                analog begin {body} end endmodule"
+            );
+            for postfix in [false, true] {
+                let mut harness = FusedKernelHarness::for_source_with_plan(&source, "vx", postfix);
+                harness.reset();
+                let condition = harness
+                    .executable
+                    .export(WasmJitExecutableEntry::StaticCondition(0))
+                    .map(str::to_owned);
+                assert_eq!(condition.is_some(), guarded, "{body}; postfix={postfix}");
+                for (k, en) in [(0.5, 1.0), (2.0, 1.0), (0.5, 0.0)] {
+                    harness.write_f64(FusedKernelHarness::PARAMETERS as usize, k);
+                    harness.write_f64(FusedKernelHarness::PARAMETERS as usize + 8, en);
+                    harness.call_assignments();
+                    harness.call_prelude();
+                    if let Some(condition) = &condition {
+                        assert_eq!(harness.call(condition), 0);
+                        assert_eq!(
+                            harness.read_f64(FRAME_RESULT_OFFSET as usize),
+                            en,
+                            "{body}; postfix={postfix}, k={k}, en={en}"
+                        );
+                    }
+                    if guarded && en == 0.0 {
+                        continue;
+                    }
+                    let residual = harness.stamp_value_export(0);
+                    assert_eq!(harness.call(&residual), 0);
+                    assert_eq!(
+                        harness.read_f64(FRAME_RESULT_OFFSET as usize),
+                        if k > 1.0 { 2.0 } else { 0.0 },
+                        "{body}; postfix={postfix}, k={k}, en={en}"
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn wasm_potential_sources_preserve_branch_identity_in_both_plans() {
         use super::abi::{

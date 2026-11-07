@@ -1207,7 +1207,8 @@ impl DeviceIR {
             // variables derived purely from parameters): a potential
             // contribution that is mode-disabled must leave the branch
             // open, not short it to zero volts.
-            let (static_condition, expr) = Self::peel_static_condition(exprs, expr, &static_vars);
+            let (static_condition, expr) =
+                Self::peel_static_condition(exprs, expr, contrib.expression_guard, &static_vars);
 
             let (branch_ref, expr, branch_ordinal) = if contrib.indirect {
                 // Constraint equations are orientation-free (f == g holds
@@ -1708,29 +1709,34 @@ impl DeviceIR {
         }
     }
 
-    /// Peel leading instance-static guards (`cond ? inner : 0` where cond
-    /// is fixed per instance) into a separate activation condition
+    /// Split an instance-static statement guard off a contribution as its
+    /// activation condition.
+    ///
+    /// Only the guard the analyzer folded around the statement
+    /// (`guard ? value : 0`, recorded as [`AnalogSiteGuard::Select`]) can
+    /// disable a branch. A conditional the source wrote inside the
+    /// contribution's value is part of that value: `V(o) <+ c ? x : 0` is a
+    /// potential source whichever arm runs, so it is never peeled, however
+    /// static `c` is.
+    ///
+    /// [`AnalogSiteGuard::Select`]: crate::semantic::AnalogSiteGuard::Select
     fn peel_static_condition(
-        arena: &mut ExprArena,
+        arena: &ExprArena,
         expr: NodeId,
+        guard: crate::semantic::AnalogSiteGuard,
         static_vars: &HashSet<SmolStr>,
     ) -> (Option<NodeId>, NodeId) {
-        let mut condition: Option<NodeId> = None;
-        let mut current = expr;
-        loop {
-            match *arena.node(current) {
-                Node::Conditional(cond, then_expr, else_expr)
-                    if Self::is_instance_static_expr(arena, cond, static_vars)
-                        && matches!(*arena.node(else_expr), Node::Const(v) if v == 0.0) =>
-                {
-                    condition = Some(match condition {
-                        Some(prev) => arena.push(Node::Binary(BinaryOp::And, prev, cond)),
-                        None => cond,
-                    });
-                    current = then_expr;
-                }
-                _ => return (condition, current),
+        if guard != crate::semantic::AnalogSiteGuard::Select {
+            return (None, expr);
+        }
+        match *arena.node(expr) {
+            Node::Conditional(cond, then_expr, else_expr)
+                if Self::is_instance_static_expr(arena, cond, static_vars)
+                    && matches!(*arena.node(else_expr), Node::Const(v) if v == 0.0) =>
+            {
+                (Some(cond), then_expr)
             }
+            _ => (None, expr),
         }
     }
 

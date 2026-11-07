@@ -2020,11 +2020,11 @@ pub(crate) fn lower_static_condition_program(
     limits: NativeLoweringLimits<'_>,
 ) -> JitResult<NativeProgram> {
     if let Some(mir) = canonical_mir {
-        let (mir, expr) = canonical_static_condition_expr(model, mir, stamp_index)?;
+        let expr = canonical_static_condition_expr(model, mir, stamp_index)?;
         return NativeProgram::from_mir_expression(
             model.name.clone(),
             EntryKind::StaticCondition,
-            &mir,
+            mir,
             expr,
             limits,
         );
@@ -2042,7 +2042,7 @@ fn canonical_static_condition_expr(
     model: &CompiledModel,
     canonical_mir: &MirModel,
     stamp_index: usize,
-) -> JitResult<(MirModel, ExprId)> {
+) -> JitResult<ExprId> {
     let equation =
         canonical_mir
             .equations
@@ -2052,52 +2052,32 @@ fn canonical_static_condition_expr(
                 detail: format!("canonical equation {stamp_index} is outside equation table")
                     .into(),
             })?;
-    let mut synthetic = canonical_mir.clone();
-
-    let expr = extract_leading_static_condition(
-        model,
-        &mut synthetic,
-        stamp_index,
-        equation.expression.id,
-    )?;
-    Ok((synthetic, expr))
+    extract_leading_static_condition(model, canonical_mir, stamp_index, equation.expression.id)
 }
 
+/// The statement guard the compiled model peeled into this equation's static
+/// condition: the one `guard ? value : 0` wrapper the analyzer folds around a
+/// guarded contribution. A conditional inside the value is the source's own
+/// expression and stays in the residual, exactly as the compiled model keeps it.
 fn extract_leading_static_condition(
     model: &CompiledModel,
-    mir: &mut MirModel,
+    mir: &MirModel,
     stamp_index: usize,
     root: ExprId,
 ) -> JitResult<ExprId> {
-    let mut condition = None;
-    let mut current = root;
-
-    loop {
-        let expression = canonical_expression(model, mir, current)?.clone();
-        match expression.kind {
-            HirExprKind::Conditional {
-                condition: guard,
-                then_expr,
-                else_expr,
-            } if is_canonical_zero(model, mir, else_expr)? => {
-                condition = Some(match condition {
-                    Some(previous) => {
-                        append_canonical_binary(mir, "And", previous, guard, expression.span)
-                    }
-                    None => guard,
-                });
-                current = then_expr;
-            }
-            _ => {
-                return condition.ok_or_else(|| JitError::InvalidCanonicalIr {
-                    model: model.name.clone(),
-                    detail: format!(
-                        "canonical equation {stamp_index} is missing leading static-condition guard"
-                    )
-                    .into(),
-                });
-            }
-        }
+    match canonical_expression(model, mir, root)?.kind {
+        HirExprKind::Conditional {
+            condition: guard,
+            else_expr,
+            ..
+        } if is_canonical_zero(model, mir, else_expr)? => Ok(guard),
+        _ => Err(JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: format!(
+                "canonical equation {stamp_index} is missing leading static-condition guard"
+            )
+            .into(),
+        }),
     }
 }
 
