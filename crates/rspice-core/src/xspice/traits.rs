@@ -667,15 +667,18 @@ pub struct InputDataFileParameter {
 
 /// A device-noise current a code model drives between the terminals of one
 /// of its ports, white with a flicker corner: `white · (1 + corner / f)`.
-#[derive(Debug, Clone, PartialEq)]
+/// With a `spectrum` the density is `white · s(f)² · (1 + corner / f)`, `s`
+/// that expression of the frequency and the operating-point node voltages.
+#[derive(Debug, Clone)]
 pub struct PortNoiseCurrent {
     /// The mechanism's name in noise contributions.
     pub mechanism: &'static str,
     pub port: &'static str,
-    /// White current density (A²/Hz).
+    /// White current density (A²/Hz), or the scale of `spectrum`.
     pub white: Value,
     /// Flicker corner (Hz).
     pub corner: Value,
+    pub(crate) spectrum: Option<crate::expr::CompiledExpr>,
 }
 
 /// The main trait for XSPICE code models

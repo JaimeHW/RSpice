@@ -142,6 +142,8 @@ fn ota_refuses_what_ltspice_does_not_define() {
     );
     let window = build_error("* bad\nA1 0 in 0 0 0 0 out 0 OTA Vhigh=0 Vlow=1\n.end\n");
     assert!(window.contains("Vhigh above Vlow"), "{window}");
+    let varying = build_error("* bad\nA1 0 in 0 0 0 0 out 0 OTA g=1m*(1+freq)\n.end\n");
+    assert!(varying.contains("parameter 'G'"), "{varying}");
 }
 
 fn tran_at(deck: &str, stop: f64, step: f64, probes: &[(&str, f64)]) -> Vec<f64> {
@@ -291,12 +293,22 @@ A3 b in 0 0 0 0 q3 0 SCHMITT Vt=0.6 Vh=0.3
 }
 
 fn ota_noise_density(deck: &str, mechanism: &str, frequencies: &[f64]) -> Vec<f64> {
+    device_noise_density(deck, "A1", mechanism, frequencies)
+}
+
+fn device_noise_density(
+    deck: &str,
+    device: &str,
+    mechanism: &str,
+    frequencies: &[f64],
+) -> Vec<f64> {
     Engine::default()
         .run_noise_named_with_input_source(&parse(deck), "out", None, "V1", frequencies, 300.15)
         .expect("noise solves")
         .iter()
         .map(|point| {
-            let probe = NoiseContributionProbe::parse(&format!("DNO(A1,{mechanism})")).unwrap();
+            let probe =
+                NoiseContributionProbe::parse(&format!("DNO({device},{mechanism})")).unwrap();
             point
                 .contribution(&probe)
                 .expect("OTA mechanism reported")
@@ -335,6 +347,79 @@ A1 a b 0 0 0 0 out 0 OTA G=1m Iout=20u Vhigh=10 Vlow=-10 Rout=10k in=1p ink=10
     let densities = ota_noise_density(current, "in", &[1.0, 1e4]);
     for (actual, expected) in densities.into_iter().zip([1.326_650e-7, 4.001_999e-8]) {
         assert_close("in", actual, expected, 1e-6 * expected);
+    }
+}
+
+#[test]
+fn ota_noise_densities_written_as_expressions_of_frequency_match_ltspice() {
+    // LTspice 26.1.1 batch, V(A1.en) and V(x1:A1.in), each density through
+    // G*Rout = 10. LTspice reads a value across blanks inside parentheses or
+    // beside an operator, evaluates it at every frequency point, keeps the
+    // flicker corner on top, and reads node voltages at the operating point.
+    let cases: [(&str, &str, &str, [f64; 3], [f64; 3]); 4] = [
+        (
+            "* en of freq, written with blanks
+V1 in 0 0 AC 1
+A1 0 in 0 0 0 0 out 0 OTA G=1m Iout=20u Vhigh=10 Vlow=-10 Rout=10k en=10n+ 20n*min(freq,1k)/ (1k+ freq) Vlow=-10
+.end
+",
+            "A1",
+            "en",
+            [1.0, 1e3, 1e4],
+            [1.001_998e-7, 2.0e-7, 1.181_818e-7],
+        ),
+        (
+            "* en of freq under a flicker corner
+V1 in 0 0 AC 1
+A1 0 in 0 0 0 0 out 0 OTA G=1m Iout=20u Vhigh=10 Vlow=-10 Rout=10k en=10n*(1+freq/1k) enk=100
+.end
+",
+            "A1",
+            "en",
+            [1.0, 10.0, 1e5],
+            [1.005_993e-6, 3.349_791e-7, 1.010_505e-5],
+        ),
+        (
+            "* in as a table of freq, inside a subcircuit
+V1 s 0 0 AC 1
+Ra a 0 1k
+Rb b s 3k
+X1 a b out amp ia=1p
+.subckt amp a b out ia=2p
+.param ib=3
+A1 a b 0 0 0 0 out 0 OTA G=1m Iout=20u Vhigh=10 Vlow=-10 Rout=10k in=table(freq, 10, {ia}, 10k, {ia*ib})
+.ends
+.end
+",
+            "X1.A1",
+            "in",
+            [1.0, 100.0, 1e4],
+            [4.0e-8, 4.072_072e-8, 1.2e-7],
+        ),
+        (
+            "* en reading a node voltage
+V1 in 0 0 AC 1
+V2 b 0 2
+A1 0 in 0 0 0 0 out 0 OTA G=1m Iout=20u Vhigh=10 Vlow=-10 Rout=10k en=V(b)*5n/(freq**0.5)
+.end
+",
+            "A1",
+            "en",
+            [1.0, 100.0, 1e5],
+            [1.0e-7, 1.0e-8, 3.162_278e-10],
+        ),
+    ];
+    for (deck, device, mechanism, frequencies, expected) in cases {
+        let densities = device_noise_density(deck, device, mechanism, &frequencies);
+        for ((actual, expected), frequency) in densities.into_iter().zip(expected).zip(frequencies)
+        {
+            assert_close(
+                &format!("{device} {mechanism} at {frequency} Hz"),
+                actual,
+                expected,
+                2e-6 * expected,
+            );
+        }
     }
 }
 

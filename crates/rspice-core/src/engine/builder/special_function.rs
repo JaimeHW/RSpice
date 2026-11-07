@@ -12,6 +12,9 @@ use crate::device::special_function::{
     Gate, GateFunction, Ota, OutputStage, Schmitt, Sequential, SequentialFunction,
     SpecialFunctionError,
 };
+use crate::expr::{
+    CompiledExpr, Expr, compile, function_uses_implicit_time, parse_expression_strict,
+};
 use crate::netlist::SpecialFunction;
 use crate::xspice::{
     CmContext, CmResult, CodeModel, EvaluationPhase, ParamSpec, PortNoiseCurrent, PortSpec,
@@ -82,15 +85,25 @@ struct Hosted {
     capacitances: Vec<(usize, Value)>,
 }
 
-/// Build one special-function instance into `circuit`.
+/// Build one special-function instance into `circuit`. `params` are its
+/// numeric parameters and the noise densities the flattener kept as
+/// expressions of frequency and the operating point.
 pub(super) fn build(
     circuit: &mut CircuitData,
     element: &Element,
     function: SpecialFunction,
-    params: &[(String, Value)],
+    (params, densities): (&[(String, Value)], &[(String, String)]),
     temperature: Value,
 ) -> Result<(), SimulationError> {
     let terminals = Terminals::new(element)?;
+    if function != SpecialFunction::Ota
+        && let Some((name, _)) = densities.first()
+    {
+        return Err(SimulationError::Circuit(format!(
+            "{}: parameter {name} must be a constant",
+            element.name
+        )));
+    }
     let Hosted {
         model,
         ports,
@@ -98,6 +111,21 @@ pub(super) fn build(
     } = match function {
         SpecialFunction::Ota => {
             let ota = Ota::from_params(params).map_err(|error| device_error(element, error))?;
+            let mut en = None;
+            let mut in_ = None;
+            for (name, expression) in densities {
+                let slot = match name.to_ascii_uppercase().as_str() {
+                    "EN" => &mut en,
+                    "IN" => &mut in_,
+                    _ => {
+                        return Err(SimulationError::Circuit(format!(
+                            "{}: OTA common-mode input current noise (incm) is not supported",
+                            element.name
+                        )));
+                    }
+                };
+                *slot = Some(noise_density(element, name, expression)?);
+            }
             if ota.noise.incm > 0.0 {
                 return Err(SimulationError::Circuit(format!(
                     "{}: OTA common-mode input current noise (incm) is not supported",
@@ -137,7 +165,12 @@ pub(super) fn build(
             ];
             Hosted {
                 capacitances: vec![(7, ota.cout)],
-                model: Arc::new(OtaModel { ota, multiplier }),
+                model: Arc::new(OtaModel {
+                    ota,
+                    multiplier,
+                    en,
+                    in_,
+                }),
                 ports,
             }
         }
@@ -191,6 +224,44 @@ pub(super) fn build(
     Ok(())
 }
 
+/// A noise density written as an expression: compiled, and held to
+/// frequency, temperature and node voltages, which the noise analysis reads
+/// at the operating point.
+fn noise_density(
+    element: &Element,
+    name: &str,
+    expression: &str,
+) -> Result<CompiledExpr, SimulationError> {
+    let fail = |message: String| {
+        SimulationError::Circuit(format!(
+            "{}: noise density {name} '{expression}' {message}",
+            element.name
+        ))
+    };
+    let parsed = parse_expression_strict(expression).map_err(|error| fail(error.to_string()))?;
+    if reads_time(&parsed) {
+        return Err(fail("reads the time".to_string()));
+    }
+    let compiled = compile(&parsed);
+    if !compiled.branch_map.is_empty() {
+        return Err(fail("reads a branch current".to_string()));
+    }
+    Ok(compiled)
+}
+
+fn reads_time(expression: &Expr) -> bool {
+    match expression {
+        Expr::Time => true,
+        Expr::Unary { operand, .. } => reads_time(operand),
+        Expr::Binary { left, right, .. } => reads_time(left) || reads_time(right),
+        Expr::Function { func, args } => {
+            function_uses_implicit_time(*func) || args.iter().any(reads_time)
+        }
+        Expr::LookupTable { input, .. } => reads_time(input),
+        _ => false,
+    }
+}
+
 fn node_id(circuit: &mut CircuitData, name: &str) -> crate::NodeId {
     if name == "0" {
         0
@@ -206,6 +277,10 @@ fn node_id(circuit: &mut CircuitData, name: &str) -> crate::NodeId {
 struct OtaModel {
     ota: Ota,
     multiplier: bool,
+    /// Input voltage and normal-mode current noise written as expressions,
+    /// which replace the constant densities.
+    en: Option<CompiledExpr>,
+    in_: Option<CompiledExpr>,
 }
 
 impl OtaModel {
@@ -292,14 +367,22 @@ impl CodeModel for OtaModel {
             PortNoiseCurrent {
                 mechanism: "en",
                 port: "out",
-                white: (drive.d_input * noise.en).powi(2),
+                white: match self.en {
+                    Some(_) => drive.d_input.powi(2),
+                    None => (drive.d_input * noise.en).powi(2),
+                },
                 corner: noise.enk,
+                spectrum: self.en.clone(),
             },
             PortNoiseCurrent {
                 mechanism: "in",
                 port: "in",
-                white: noise.in_.powi(2),
+                white: match self.in_ {
+                    Some(_) => 1.0,
+                    None => noise.in_.powi(2),
+                },
                 corner: noise.ink,
+                spectrum: self.in_.clone(),
             },
         ]
     }

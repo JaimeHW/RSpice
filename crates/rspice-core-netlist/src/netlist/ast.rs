@@ -788,8 +788,11 @@ pub enum ElementKind {
         /// Instance parameters resolved while parsing, upper-cased. A bare
         /// flag such as `LINEAR` is stored with the value 1.
         instance_params: Vec<(String, Value)>,
-        /// Instance parameters captured inside subcircuit bodies and resolved
-        /// against the concrete instance scope during flattening.
+        /// Instance parameters whose value needs a scope the parser did not
+        /// have, resolved against the concrete instance scope during
+        /// flattening. A flattened element keeps here only the noise
+        /// densities that read `freq` or the operating point, as prepared
+        /// expressions in its own node names.
         deferred_params: Vec<(String, String)>,
     },
 
@@ -892,6 +895,16 @@ impl SpecialFunction {
         Self::ALL
             .into_iter()
             .find(|function| token.eq_ignore_ascii_case(function.ltspice_name()))
+    }
+
+    /// Whether instance parameter `name` is a noise density, which the noise
+    /// analysis reads at each frequency point and so may be written as an
+    /// expression of `freq` and the operating point.
+    pub(crate) fn reads_noise_density(self, name: &str) -> bool {
+        matches!(self, Self::Ota)
+            && ["EN", "IN", "INCM"]
+                .iter()
+                .any(|density| name.eq_ignore_ascii_case(density))
     }
 }
 

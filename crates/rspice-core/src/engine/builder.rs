@@ -6713,12 +6713,12 @@ impl Engine {
                 ElementKind::SpecialFunction {
                     function,
                     instance_params,
-                    ..
+                    deferred_params,
                 } => special_function::build(
                     &mut circuit,
                     element,
                     *function,
-                    instance_params,
+                    (instance_params, deferred_params),
                     self.config.temperature,
                 )?,
                 ElementKind::StateMachine(definition) => {

@@ -1229,6 +1229,7 @@ fn pss_noise_is_colored(noise_type: NoiseSourceType) -> bool {
         NoiseSourceType::Flicker
             | NoiseSourceType::Burst
             | NoiseSourceType::Table
+            | NoiseSourceType::Spectral
             | NoiseSourceType::Bsim4Flicker
             | NoiseSourceType::Bsim3Flicker
     )

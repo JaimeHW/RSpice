@@ -1360,6 +1360,7 @@ pub enum NoiseMechanismTag {
     Bsim4Flicker,
     Bsim3Flicker,
     Bsim4CorrelatedThermal,
+    Spectral,
 }
 
 impl From<NoiseSourceType> for NoiseMechanismTag {
@@ -1374,6 +1375,7 @@ impl From<NoiseSourceType> for NoiseMechanismTag {
             NoiseSourceType::Bsim4Flicker => Self::Bsim4Flicker,
             NoiseSourceType::Bsim3Flicker => Self::Bsim3Flicker,
             NoiseSourceType::Bsim4CorrelatedThermal => Self::Bsim4CorrelatedThermal,
+            NoiseSourceType::Spectral => Self::Spectral,
         }
     }
 }
@@ -1390,6 +1392,7 @@ impl From<NoiseMechanismTag> for NoiseSourceType {
             NoiseMechanismTag::Bsim4Flicker => Self::Bsim4Flicker,
             NoiseMechanismTag::Bsim3Flicker => Self::Bsim3Flicker,
             NoiseMechanismTag::Bsim4CorrelatedThermal => Self::Bsim4CorrelatedThermal,
+            NoiseMechanismTag::Spectral => Self::Spectral,
         }
     }
 }

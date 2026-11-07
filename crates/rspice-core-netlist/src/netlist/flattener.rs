@@ -1874,6 +1874,23 @@ impl<'a> Flattener<'a> {
                     real_vector_expr_params: real_vector_expr_params.clone(),
                 }
             }
+            ElementKind::SpecialFunction {
+                function,
+                instance_params,
+                deferred_params,
+            } => ElementKind::SpecialFunction {
+                function: *function,
+                instance_params: instance_params.clone(),
+                deferred_params: deferred_params
+                    .iter()
+                    .map(|(name, expression)| {
+                        (
+                            name.clone(),
+                            self.remap_behavioral_expression(expression, prefix, node_map),
+                        )
+                    })
+                    .collect(),
+            },
             // All other kinds - clone as-is
             other => other.clone(),
         };
@@ -2417,16 +2434,20 @@ impl<'a> Flattener<'a> {
                 function,
                 instance_params,
                 deferred_params,
-            } => ElementKind::SpecialFunction {
-                function: *function,
-                instance_params: self.merge_deferred_params(
+            } => {
+                let (instance_params, deferred_params) = self.resolve_special_function_params(
+                    *function,
                     instance_params,
                     deferred_params,
                     scope,
                     abort,
-                )?,
-                deferred_params: Vec::new(),
-            },
+                )?;
+                ElementKind::SpecialFunction {
+                    function: *function,
+                    instance_params,
+                    deferred_params,
+                }
+            }
             ElementKind::StateMachine(machine) => ElementKind::StateMachine(Box::new(
                 self.prepare_state_machine(machine, scope, element_path, abort)?,
             )),
@@ -3472,6 +3493,30 @@ impl<'a> Flattener<'a> {
         let statistical = |(_, expression): &(String, String)| {
             scope.expression_references_spectre_statistics(expression)
         };
+        if let ElementKind::SpecialFunction {
+            function,
+            instance_params,
+            deferred_params,
+        } = &element.kind
+        {
+            if deferred_params.is_empty() {
+                return Ok(None);
+            }
+            let (instance_params, deferred_params) = self.resolve_special_function_params(
+                *function,
+                instance_params,
+                deferred_params,
+                scope,
+                abort,
+            )?;
+            let mut bound = element.clone();
+            bound.kind = ElementKind::SpecialFunction {
+                function: *function,
+                instance_params,
+                deferred_params,
+            };
+            return Ok(Some(bound));
+        }
         let pending = match &element.kind {
             ElementKind::Resistor {
                 deferred_params, ..
@@ -3560,6 +3605,47 @@ impl<'a> Flattener<'a> {
             *deferred_params = kept;
         }
         Ok(Some(bound))
+    }
+
+    /// Resolve a special function's deferred assignments against `scope`. A
+    /// noise density that reads `freq` or the operating point stays a
+    /// prepared expression, returned second, for the noise analysis to
+    /// evaluate at each frequency point; every other assignment resolves to a
+    /// number, returned first with the parse-time ones.
+    fn resolve_special_function_params(
+        &self,
+        function: crate::netlist::SpecialFunction,
+        instance_params: &[(String, Value)],
+        deferred_params: &[(String, String)],
+        scope: &ParamContext,
+        abort: &dyn AbortSignal,
+    ) -> Result<(Vec<(String, Value)>, Vec<(String, String)>), ParseWithAbortError> {
+        let mut constant = Vec::new();
+        let mut varying: Vec<(String, String)> = Vec::new();
+        for (name, expression) in deferred_params {
+            if function.reads_noise_density(name) {
+                let prepared = prepare_behavioral_expression_with_abort(expression, scope, abort)
+                    .map_err(|error| {
+                    map_preparation_error(error, |error| {
+                        ParseError::InvalidValue(format!(
+                            "instance parameter '{name}' could not be prepared: {error}"
+                        ))
+                    })
+                })?;
+                if behavioral_expression_references_runtime_quantity(&prepared) {
+                    varying.push((name.clone(), prepared));
+                    continue;
+                }
+            }
+            constant.push((name.clone(), expression.clone()));
+        }
+        let mut resolved = self.merge_deferred_params(instance_params, &constant, scope, abort)?;
+        resolved.retain(|(name, _)| {
+            !varying
+                .iter()
+                .any(|(kept, _)| kept.eq_ignore_ascii_case(name))
+        });
+        Ok((resolved, varying))
     }
 
     /// Merge deferred (expression-valued) instance parameters over the

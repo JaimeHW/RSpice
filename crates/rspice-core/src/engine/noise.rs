@@ -624,6 +624,7 @@ impl Engine {
                 frequency > 0.0 && source.current != 0.0
             }
             crate::analysis::noise::NoiseSourceType::Table
+            | crate::analysis::noise::NoiseSourceType::Spectral
             | crate::analysis::noise::NoiseSourceType::Bsim4CorrelatedThermal => false,
         };
         if density == 0.0 && should_be_positive {
@@ -1867,8 +1868,13 @@ impl Engine {
     }
 
     /// The device noise code models drive between their port terminals: a
-    /// white source, and a 1/f source for a flicker corner.
-    fn code_model_port_noise_sources(circuit: &CircuitData) -> Vec<NoiseSource> {
+    /// white source, and a 1/f source for a flicker corner, or one source
+    /// whose density is an expression of frequency read at the operating
+    /// point `dc_solution`.
+    fn code_model_port_noise_sources(
+        circuit: &CircuitData,
+        dc_solution: &[Value],
+    ) -> Result<Vec<NoiseSource>, SimulationError> {
         use crate::xspice::PortConnection;
         let mut sources = Vec::new();
         for instance in &circuit.xspice_instances {
@@ -1888,6 +1894,38 @@ impl Engine {
                     instance.name.clone(),
                     noise.mechanism,
                 );
+                if let Some(expression) = noise.spectrum {
+                    let mut voltages = vec![0.0; expression.node_map.len()];
+                    for (name, &index) in &expression.node_map {
+                        let node = name.to_ascii_uppercase();
+                        if crate::naming::is_spice_ground_name(&node) {
+                            continue;
+                        }
+                        let Some(id) = circuit.get_node_by_name(&node) else {
+                            return Err(SimulationError::Circuit(format!(
+                                "{}: noise density {} reads node {node}, which no element \
+                                 connects",
+                                instance.name, noise.mechanism
+                            )));
+                        };
+                        voltages[index] = id
+                            .checked_sub(1)
+                            .and_then(|row| dc_solution.get(row))
+                            .copied()
+                            .unwrap_or(0.0);
+                    }
+                    let spectrum = crate::analysis::noise::SpectralDensity {
+                        expression,
+                        voltages,
+                        scale: noise.white,
+                        corner: noise.corner.max(0.0),
+                    };
+                    sources.push(
+                        NoiseSource::spectral(instance.name.clone(), pos, neg, spectrum)
+                            .with_identity(identity),
+                    );
+                    continue;
+                }
                 sources.push(
                     NoiseSource::white(instance.name.clone(), pos, neg, noise.white)
                         .with_identity(identity.clone()),
@@ -1906,7 +1944,7 @@ impl Engine {
                 }
             }
         }
-        sources
+        Ok(sources)
     }
 
     /// The thermal noise of every switch's present conductance: `4kT·G`
@@ -2329,7 +2367,7 @@ impl Engine {
         }
 
         noise_sources.extend(Self::converter_thermal_noise_sources(circuit)?);
-        noise_sources.extend(Self::code_model_port_noise_sources(circuit));
+        noise_sources.extend(Self::code_model_port_noise_sources(circuit, dc_solution)?);
 
         for bsim3 in &circuit.bsim3v3.devices {
             noise_sources.extend(Self::collect_bsim3v3_noise_sources(bsim3)?);

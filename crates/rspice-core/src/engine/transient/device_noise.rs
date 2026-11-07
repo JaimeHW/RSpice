@@ -204,6 +204,10 @@ fn rendering_law(source: &NoiseSource) -> Result<Option<AmplitudeLaw>, String> {
              make. Use .NOISE for this device."
         )),
         NoiseSourceType::Bsim4CorrelatedThermal => Ok(None),
+        NoiseSourceType::Spectral => Err(format!(
+            "transient noise cannot render '{named}': its density is an expression of \
+             frequency. Use .NOISE for this device."
+        )),
     }
 }
 

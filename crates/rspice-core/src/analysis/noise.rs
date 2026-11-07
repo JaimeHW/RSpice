@@ -511,6 +511,10 @@ pub enum NoiseSourceType {
     Bsim3Flicker,
     /// BSIM4 correlated channel/gate thermal noise (`tnoiMod=2`).
     Bsim4CorrelatedThermal,
+    /// A density written as an expression of frequency and the operating
+    /// point (an LTspice OTA's `en=` that reads `freq`), evaluated at each
+    /// analysis frequency.
+    Spectral,
 }
 
 /// Shared tabulated noise PSD: sorted `(frequency, power)` points plus a log-log
@@ -621,6 +625,36 @@ pub struct NoiseSource {
     pub bsim4_flicker: Option<std::sync::Arc<Bsim4FlickerNoise>>,
     /// BSIM3 `noiMod=2/3/6` physical flicker-noise state.
     pub bsim3_flicker: Option<std::sync::Arc<Bsim3FlickerNoise>>,
+    /// The density of a [`NoiseSourceType::Spectral`] source.
+    pub(crate) spectrum: Option<std::sync::Arc<SpectralDensity>>,
+}
+
+/// A noise density `scale · s(f)² · (1 + corner / f)`, with `s` an expression
+/// of the frequency `f` and of node voltages held at the operating point.
+#[derive(Debug)]
+pub(crate) struct SpectralDensity {
+    pub(crate) expression: crate::expr::CompiledExpr,
+    /// The operating-point voltage of each node the expression reads, by the
+    /// expression's own node index.
+    pub(crate) voltages: Vec<Value>,
+    pub(crate) scale: Value,
+    /// Flicker corner (Hz); zero for none.
+    pub(crate) corner: Value,
+}
+
+impl SpectralDensity {
+    fn at(&self, frequency: Value, temperature: Value) -> Value {
+        let context = crate::expr::Context::dc(&self.voltages, &[])
+            .with_frequency(frequency)
+            .with_temperature(crate::constants::kelvin_to_celsius(temperature));
+        let amplitude = crate::expr::Vm::new().execute(&self.expression, &context);
+        let flicker = if self.corner > 0.0 && frequency > 0.0 {
+            self.corner / frequency
+        } else {
+            0.0
+        };
+        self.scale * amplitude * amplitude * (1.0 + flicker)
+    }
 }
 
 /// KF * |I|^AF / f^EF evaluation, including a retained coefficient scale.
@@ -714,6 +748,7 @@ impl NoiseSource {
             table: None,
             bsim4_flicker: None,
             bsim3_flicker: None,
+            spectrum: None,
         }
     }
 
@@ -735,6 +770,7 @@ impl NoiseSource {
             table: None,
             bsim4_flicker: None,
             bsim3_flicker: None,
+            spectrum: None,
         }
     }
 
@@ -776,6 +812,7 @@ impl NoiseSource {
             table: None,
             bsim4_flicker: None,
             bsim3_flicker: None,
+            spectrum: None,
         }
     }
 
@@ -798,6 +835,21 @@ impl NoiseSource {
             table: None,
             bsim4_flicker: None,
             bsim3_flicker: None,
+            spectrum: None,
+        }
+    }
+
+    /// Create a source whose density is an expression of frequency.
+    pub(crate) fn spectral(
+        device_name: String,
+        node_pos: usize,
+        node_neg: usize,
+        spectrum: SpectralDensity,
+    ) -> Self {
+        Self {
+            noise_type: NoiseSourceType::Spectral,
+            spectrum: Some(std::sync::Arc::new(spectrum)),
+            ..Self::white(device_name, node_pos, node_neg, 1.0)
         }
     }
 
@@ -839,6 +891,7 @@ impl NoiseSource {
             table: Some(std::sync::Arc::new((points, log_interp))),
             bsim4_flicker: None,
             bsim3_flicker: None,
+            spectrum: None,
         }
     }
 
@@ -865,6 +918,7 @@ impl NoiseSource {
             table: None,
             bsim4_flicker: Some(std::sync::Arc::new(model)),
             bsim3_flicker: None,
+            spectrum: None,
         }
     }
 
@@ -891,6 +945,7 @@ impl NoiseSource {
             table: None,
             bsim4_flicker: None,
             bsim3_flicker: Some(std::sync::Arc::new(model)),
+            spectrum: None,
         }
     }
 
@@ -924,6 +979,7 @@ impl NoiseSource {
             table: None,
             bsim4_flicker: None,
             bsim3_flicker: None,
+            spectrum: None,
         }
     }
 
@@ -995,6 +1051,11 @@ impl NoiseSource {
                 .map(|model| model.spectral_density(frequency, temperature))
                 .unwrap_or(Value::NAN),
             NoiseSourceType::Bsim4CorrelatedThermal => 0.0,
+            NoiseSourceType::Spectral => self
+                .spectrum
+                .as_ref()
+                .map(|spectrum| spectrum.at(frequency, temperature))
+                .unwrap_or(Value::NAN),
         }
     }
 
@@ -1279,6 +1340,7 @@ impl NoiseSourceType {
             NoiseSourceType::Bsim4Flicker => "bsim4-flicker",
             NoiseSourceType::Bsim3Flicker => "bsim3-flicker",
             NoiseSourceType::Bsim4CorrelatedThermal => "bsim4-correlated-thermal",
+            NoiseSourceType::Spectral => "spectral",
         }
     }
 }
@@ -2175,6 +2237,7 @@ mod mechanism_tests {
             NoiseSourceType::Bsim4Flicker,
             NoiseSourceType::Bsim3Flicker,
             NoiseSourceType::Bsim4CorrelatedThermal,
+            NoiseSourceType::Spectral,
         ] {
             // Listing the variants is only sound while the list is complete,
             // and this match is what makes adding one a compile error here.
@@ -2187,7 +2250,8 @@ mod mechanism_tests {
                 | NoiseSourceType::Table
                 | NoiseSourceType::Bsim4Flicker
                 | NoiseSourceType::Bsim3Flicker
-                | NoiseSourceType::Bsim4CorrelatedThermal => {}
+                | NoiseSourceType::Bsim4CorrelatedThermal
+                | NoiseSourceType::Spectral => {}
             }
             let label = noise_type.label();
             assert!(

@@ -1029,7 +1029,7 @@ pub(crate) fn collect_delimited_expression(
     Some(pieces.join(""))
 }
 
-fn contiguous_expression_piece(token: &Token) -> String {
+pub(crate) fn contiguous_expression_piece(token: &Token) -> String {
     match &token.kind {
         TokenKind::Expression(expr) => format!("({expr})"),
         TokenKind::Number(value) if token.lexeme.is_empty() => value.to_string(),

@@ -79,7 +79,7 @@ pub(super) fn parse_special_function(
             assign(param_name, None);
             continue;
         }
-        match take_deferrable_value(stream, params, defer_simple_param_refs) {
+        match take_value(stream, params, defer_simple_param_refs) {
             Some(value) => assign(param_name, Some(value)),
             None => {
                 return Err(ParseError::Syntax {
@@ -106,6 +106,71 @@ pub(super) fn parse_special_function(
         provenance: crate::netlist::ElementProvenance::Authored,
     });
     Ok(())
+}
+
+/// One parameter value. LTspice reads a value up to the blank that separates
+/// it from the next assignment or flag; a blank inside parentheses or beside
+/// an operator continues it, so `en=1n+ 2n/ (1+freq) Vlow=0` assigns one
+/// expression to `en`.
+fn take_value(
+    stream: &mut TokenStream,
+    params: &ParamContext,
+    defer: bool,
+) -> Option<DeferrableValue> {
+    let operator = |kind: &TokenKind| {
+        matches!(
+            kind,
+            TokenKind::Plus | TokenKind::Minus | TokenKind::Star | TokenKind::Slash
+        ) || matches!(kind, TokenKind::Other(c) if "^<>!&|".contains(*c))
+    };
+    let mut text = String::new();
+    let mut previous_end = None;
+    let mut after_operator = false;
+    let mut depth = 0usize;
+    loop {
+        let token = stream.peek();
+        if let Some(end) = previous_end
+            && token.span.start != end
+        {
+            if depth == 0 && !after_operator && !operator(&token.kind) {
+                break;
+            }
+            text.push(' ');
+        }
+        match &token.kind {
+            TokenKind::LParen => depth += 1,
+            TokenKind::RParen if depth > 0 => depth -= 1,
+            TokenKind::Comma | TokenKind::Equals if depth > 0 => {}
+            TokenKind::Ident(_)
+            | TokenKind::Number(_)
+            | TokenKind::Expression(_)
+            | TokenKind::Plus
+            | TokenKind::Minus
+            | TokenKind::Star
+            | TokenKind::Slash
+            | TokenKind::Other(_) => {}
+            _ => break,
+        }
+        after_operator = operator(&token.kind);
+        previous_end = Some(token.span.end);
+        text.push_str(&crate::netlist::lexer::contiguous_expression_piece(token));
+        stream.advance();
+    }
+    if text.is_empty() || depth != 0 {
+        return None;
+    }
+    if let Ok(value) = crate::netlist::lexer::parse_spice_value_complete(&text) {
+        return Some(DeferrableValue::Resolved(value));
+    }
+    if defer {
+        return Some(DeferrableValue::Deferred(text));
+    }
+    Some(
+        match stream.evaluate_value_capturing_direction(&text, params, None) {
+            Ok(value) => DeferrableValue::Resolved(value),
+            Err(_) => DeferrableValue::Deferred(text),
+        },
+    )
 }
 
 /// Give back its XSPICE reading to every special-function element whose
@@ -185,6 +250,36 @@ mod tests {
             special_function_of_line("a2 in 0 0 0 0 qb q 0 Schmitt vt=1 vh=0.1", &[]),
             Some(SpecialFunction::Schmitt)
         );
+    }
+
+    #[test]
+    fn a_value_runs_across_blanks_inside_parentheses_and_beside_operators() {
+        let netlist = crate::netlist::Netlist::parse(
+            "* ota\nA1 0 in 0 0 0 0 out 0 OTA g=2m en=1n+ 2n*min(freq, 1k)/ (1k+ freq) \
+             linear Vlow=-1\n.end\n",
+        )
+        .unwrap();
+        let ElementKind::SpecialFunction {
+            instance_params,
+            deferred_params,
+            ..
+        } = &netlist.elements[0].kind
+        else {
+            panic!("not a special function: {:?}", netlist.elements[0].kind);
+        };
+        assert_eq!(
+            deferred_params,
+            &[(
+                "EN".to_string(),
+                "1n+ 2n*min(freq, 1k)/ (1k+ freq)".to_string()
+            )]
+        );
+        for expected in [("G", 2e-3), ("LINEAR", 1.0), ("VLOW", -1.0)] {
+            assert!(
+                instance_params.contains(&(expected.0.to_string(), expected.1)),
+                "{expected:?} in {instance_params:?}"
+            );
+        }
     }
 
     #[test]
