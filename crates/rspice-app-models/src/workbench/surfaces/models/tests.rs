@@ -68,7 +68,7 @@ const MODELS_BASELINES: [ModelsBaseline; 8] = [
         name: "models-00b-rspice-library",
         page: ModelsPage::Models,
         scope: ModelsCatalogScope::RSpiceLibrary,
-        fingerprint: "dee91ecf99812ee2ecd2613a3ba8aec9b3d5070c0e4c2e6407c571dd75d9f6b4",
+        fingerprint: "fc421baa820a2c414c03b1d627da02e852d80d52e861890334363e43e09bd6c8",
     },
     ModelsBaseline {
         name: "models-00c-installed-packs",
