@@ -676,9 +676,10 @@ fn directives_and_comments_keep_their_text_and_place() {
     assert_eq!(imported.directives[1].position, Point::new(40, 120));
     let note = &imported.document.design_notes[0];
     assert_eq!(note.text, "Bias network\nkeep R1 close");
-    // `Left` starts the text 3 past (40, 200) and centres its two 15-unit
-    // lines on it; the anchor stands 6 left of and 3 over the text.
-    assert_eq!(note.pos, Point::new(37, 182));
+    // `Left` starts the text 3 past (40, 200) and centres its first 15-unit
+    // line on it, the second running below; the anchor stands 6 left of and
+    // 3 over the text.
+    assert_eq!(note.pos, Point::new(37, 189));
 }
 
 /// A QSPICE drawing: a source, a resistor, a DLL block and a comment, with
@@ -2692,7 +2693,13 @@ fn a_comment_draws_no_anchor_mark_where_its_drawing_drew_none() {
     let drawing =
         parse_asc("Version 4\nTEXT 32 160 Left 2 ;Bias network\nDATAFLAG 96 80 \"$\"\n").unwrap();
     let mut imported = import_foreign_schematic(&drawing, "work", &Library::default());
-    keep_directive_text(&mut imported.document, Point::new(0, 0), ".options gmin=1p").unwrap();
+    keep_directive_text(
+        &mut imported.document,
+        Point::new(0, 0),
+        ".options gmin=1p",
+        ForeignLettering::default(),
+    )
+    .unwrap();
     let note = |start: &str| {
         imported
             .document
@@ -2704,4 +2711,107 @@ fn a_comment_draws_no_anchor_mark_where_its_drawing_drew_none() {
     assert!(note("Bias network").anchor_mark_hidden);
     assert!(note(".options").anchor_mark_hidden);
     assert!(!note("LTspice readout").anchor_mark_hidden);
+}
+
+/// Where a net label of `imported` named `name` stands, in world units.
+fn label_point(imported: &ForeignImport, name: &str) -> (f32, f32) {
+    let label = imported
+        .document
+        .net_labels
+        .iter()
+        .find(|label| label.name == name)
+        .unwrap_or_else(|| panic!("no label {name}"));
+    (label.pos.x as f32, label.pos.y as f32)
+}
+
+/// A note's text box: left, top, right, bottom, and the height of one line.
+fn note_box(note: &crate::schematic::design_note::DesignNote) -> ([f32; 4], f32) {
+    use crate::schematic::design_note::DESIGN_NOTE_TEXT_OFFSET_WORLD;
+
+    let (width, height) = note.text_extent_world(&note.text);
+    let left = note.pos.x as f32 + DESIGN_NOTE_TEXT_OFFSET_WORLD.0;
+    let top = note.pos.y as f32 + DESIGN_NOTE_TEXT_OFFSET_WORLD.1;
+    (
+        [left, top, left + width, top + height],
+        note.text_extent_world("").1,
+    )
+}
+
+/// LTspice letters a comment of several lines that it centres down by its
+/// first line, centred on its point, and runs the rest below: its drawings
+/// lay their notes out by that, a table's rows starting under the note
+/// above them. A comment standing on its point by its bottom edge stands
+/// there whole.
+#[test]
+fn an_ltspice_comment_of_several_lines_stands_on_its_point_by_its_first_line() {
+    let imported = import_foreign_schematic(
+        &parse_asc(
+            "Version 4\nSHEET 1 800 600\nFLAG 0 0 left\nFLAG 640 0 base\n\
+             TEXT 0 0 Left 2 ;first\\nsecond\\nthird\n\
+             TEXT 640 0 Bottom 2 ;upper\\nlower\n",
+        )
+        .unwrap(),
+        "work",
+        &Library::default(),
+    );
+    let note = |start: &str| {
+        imported
+            .document
+            .design_notes
+            .iter()
+            .find(|note| note.text.starts_with(start))
+            .unwrap_or_else(|| panic!("no note {start:?}"))
+    };
+    let near = |a: f32, b: f32| (a - b).abs() <= 0.5;
+    let standoff = 3.0;
+
+    let ([left, top, _, _], line) = note_box(note("first"));
+    let (x, y) = label_point(&imported, "left");
+    assert!(
+        near(left, x + standoff) && near(top + line * 0.5, y),
+        "the first line stands centred on the point: {left},{top} against {x},{y}"
+    );
+
+    let ([_, _, _, bottom], _) = note_box(note("upper"));
+    let (_, y) = label_point(&imported, "base");
+    assert!(near(bottom, y - standoff), "{bottom} against {y}");
+}
+
+/// Directive text kept on the sheet is lettered as its block was: at the
+/// block's size, its first line centred on the point the drawing stood the
+/// block on.
+#[test]
+fn directive_text_kept_on_the_sheet_is_lettered_as_its_block_was() {
+    let drawing =
+        parse_asc("Version 4\nFLAG 640 0 base\nTEXT 640 0 Left 3 !.backanno\\n.options gmin=1p\n")
+            .unwrap();
+    let mut imported = import_foreign_schematic(&drawing, "work", &Library::default());
+    let card = foreign_directive_cards(&imported.directives)
+        .into_iter()
+        .find(|card| card.keyword() == ".options")
+        .expect("the block holds an .options card");
+    keep_directive_text(
+        &mut imported.document,
+        card.position,
+        &card.text,
+        card.lettering,
+    )
+    .unwrap();
+    let note = imported
+        .document
+        .design_notes
+        .iter()
+        .find(|note| note.text == ".options gmin=1p")
+        .expect("the card is kept as a note");
+    assert_eq!(
+        note.text_size_percent, 133,
+        "LTspice size 3 is 2.0x against 1.5x"
+    );
+    let near = |a: f32, b: f32| (a - b).abs() <= 0.5;
+    let ([left, top, _, _], line) = note_box(note);
+    let (x, y) = label_point(&imported, "base");
+    assert!(
+        near(left, x + 3.0) && near(top + line * 0.5, y),
+        "{left},{top} against {x},{y}"
+    );
 }

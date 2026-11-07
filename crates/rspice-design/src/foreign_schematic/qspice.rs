@@ -7,9 +7,10 @@
 //! so it reads like every other drawing here.
 
 use super::{
-    ForeignAttribute, ForeignOrientation, ForeignParseError, ForeignPin, ForeignPoint,
-    ForeignSchematic, ForeignShape, ForeignSymbol, ForeignSymbolDefinition, ForeignText,
-    ForeignTextKind, ForeignTool, ForeignValuePiece, ForeignWindow, decode_foreign_text,
+    ForeignAttribute, ForeignLettering, ForeignOrientation, ForeignParseError, ForeignPin,
+    ForeignPoint, ForeignSchematic, ForeignShape, ForeignSymbol, ForeignSymbolDefinition,
+    ForeignText, ForeignTextKind, ForeignTool, ForeignValuePiece, ForeignWindow,
+    decode_foreign_text,
 };
 use crate::schematic::label_layout::TextEdge;
 
@@ -87,8 +88,13 @@ pub fn parse_qsch(bytes: &[u8]) -> Result<ForeignSchematic, ForeignParseError> {
                     kind,
                     text: quoted(fields).join("\n"),
                     line: node.line,
-                    size_percent: size_percent(numbers.first().map(String::as_str)),
-                    justification: text_justification(numbers.get(1).map(String::as_str)),
+                    // QSPICE's own drawings hold no text of several lines to
+                    // show where it stands one; it is centred whole.
+                    lettering: ForeignLettering {
+                        size_percent: size_percent(numbers.first().map(String::as_str)),
+                        justification: text_justification(numbers.get(1).map(String::as_str)),
+                        by_first_line: false,
+                    },
                 });
             }
             "line" | "rect" | "ellipse" | "arc" | "arc3p" | "zigzag" | "triangle" => {

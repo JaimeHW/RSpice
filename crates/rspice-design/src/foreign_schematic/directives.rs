@@ -9,7 +9,8 @@
 
 use rspice_design_model::Point;
 
-use super::ForeignDirective;
+use super::import::lettered_note;
+use super::{ForeignDirective, ForeignLettering};
 use crate::netlist_document::card_tokens;
 use crate::schematic::design_note::{DesignNote, DesignNoteKind};
 use crate::schematic::document::SchematicDocument;
@@ -46,6 +47,8 @@ pub enum ForeignCardRole {
 pub struct ForeignCard {
     /// Where the block holding the card was drawn.
     pub position: Point,
+    /// How the block holding the card was lettered.
+    pub lettering: ForeignLettering,
     pub role: ForeignCardRole,
     /// The card as written; a subcircuit is every line through its `.ends`.
     pub text: String,
@@ -104,6 +107,7 @@ pub fn foreign_directive_cards(directives: &[ForeignDirective]) -> Vec<ForeignCa
                 {
                     cards.push(ForeignCard {
                         position: directive.position,
+                        lettering: directive.lettering,
                         role: ForeignCardRole::ModelText,
                         text: body,
                         tokens,
@@ -117,6 +121,7 @@ pub fn foreign_directive_cards(directives: &[ForeignDirective]) -> Vec<ForeignCa
             }
             cards.push(ForeignCard {
                 position: directive.position,
+                lettering: directive.lettering,
                 role: role(&keyword),
                 text,
                 tokens,
@@ -126,6 +131,7 @@ pub fn foreign_directive_cards(directives: &[ForeignDirective]) -> Vec<ForeignCa
         if let Some((body, tokens, _)) = subcircuit {
             cards.push(ForeignCard {
                 position: directive.position,
+                lettering: directive.lettering,
                 role: ForeignCardRole::Other,
                 text: body,
                 tokens,
@@ -163,16 +169,19 @@ pub fn defined_model_names(cards: &[ForeignCard]) -> Vec<String> {
 }
 
 /// Writes directive text RSpice keeps on the sheet as a note where its block
-/// was drawn. Like a comment, it is lettering alone, with no anchor mark.
+/// was drawn, lettered as the block was. Like a comment, it is lettering
+/// alone, with no anchor mark.
 pub fn keep_directive_text(
     document: &mut SchematicDocument,
     position: Point,
     text: &str,
+    lettering: ForeignLettering,
 ) -> Result<(), String> {
     let id = SchematicIdentity::with_cursor(1).allocate(document);
     let note = DesignNote::new(id, position, DesignNoteKind::PlainText, text)
-        .map_err(|error| error.to_string())?
-        .with_anchor_mark_hidden(true);
-    document.design_notes.push(note);
+        .map_err(|error| error.to_string())?;
+    document
+        .design_notes
+        .push(lettered_note(note, position, &lettering));
     Ok(())
 }

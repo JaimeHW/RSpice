@@ -3,7 +3,9 @@
 //! model text and included files as model libraries, and what has no place
 //! as text on its sheet.
 
-use rspice_design::foreign_schematic::{ForeignCard, ForeignCardRole, ForeignTool};
+use rspice_design::foreign_schematic::{
+    ForeignCard, ForeignCardRole, ForeignLettering, ForeignTool,
+};
 use rspice_design_model::Point;
 use rspice_simulation_contract::analysis_draft::AnalysisDraft;
 use rspice_simulation_contract::config::NoiseSweepType;
@@ -16,6 +18,7 @@ use rspice_simulation_contract::run_set::RunSetDimensionKind;
 fn card(role: ForeignCardRole, text: &str) -> ForeignCard {
     ForeignCard {
         position: Point::new(10, 20),
+        lettering: ForeignLettering::default(),
         role,
         text: text.to_owned(),
         tokens: rspice_design::netlist_document::card_tokens(text),

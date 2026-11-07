@@ -20,9 +20,10 @@ use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use rspice_design::foreign_schematic::{
-    ForeignCard, ForeignCardRole, ForeignLibrary, ForeignNoticeSeverity, ForeignSymbolCell,
-    ForeignTool, InstalledForeignLibrary, bind_instances_to_sources, decode_foreign_text,
-    foreign_directive_cards, import_foreign_schematic, keep_directive_text, parse_asc, parse_qsch,
+    ForeignCard, ForeignCardRole, ForeignLettering, ForeignLibrary, ForeignNoticeSeverity,
+    ForeignSymbolCell, ForeignTool, InstalledForeignLibrary, bind_instances_to_sources,
+    decode_foreign_text, foreign_directive_cards, import_foreign_schematic, keep_directive_text,
+    parse_asc, parse_qsch,
 };
 use rspice_design::schematic::document::SchematicDocument;
 use rspice_simulation_contract::design_variable::{
@@ -404,7 +405,7 @@ fn keep_on_sheet(
     plan: &ForeignPlan,
     notices: &mut Vec<(ForeignNoticeSeverity, String)>,
 ) {
-    let mut blocks = BTreeMap::<(i32, i32), Vec<&str>>::new();
+    let mut blocks = BTreeMap::<(i32, i32), (ForeignLettering, Vec<&str>)>::new();
     for (card, reason) in &plan.kept {
         notices.push((
             ForeignNoticeSeverity::Notice,
@@ -415,14 +416,16 @@ fn keep_on_sheet(
         ));
         blocks
             .entry((card.position.x, card.position.y))
-            .or_default()
+            .or_insert_with(|| (card.lettering, Vec::new()))
+            .1
             .push(card.text.as_str());
     }
-    for ((x, y), texts) in blocks {
+    for ((x, y), (lettering, texts)) in blocks {
         if let Err(error) = keep_directive_text(
             document,
             rspice_design_model::Point::new(x, y),
             &texts.join("\n"),
+            lettering,
         ) {
             notices.push((
                 ForeignNoticeSeverity::Refusal,

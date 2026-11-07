@@ -5,9 +5,10 @@
 //! as the two characters `\n`.
 
 use super::{
-    ForeignAttribute, ForeignDataFlag, ForeignFlag, ForeignOrientation, ForeignParseError,
-    ForeignPin, ForeignPoint, ForeignPortDirection, ForeignSchematic, ForeignShape, ForeignSymbol,
-    ForeignSymbolDefinition, ForeignText, ForeignTextKind, ForeignTool, ForeignWindow,
+    ForeignAttribute, ForeignDataFlag, ForeignFlag, ForeignLettering, ForeignOrientation,
+    ForeignParseError, ForeignPin, ForeignPoint, ForeignPortDirection, ForeignSchematic,
+    ForeignShape, ForeignSymbol, ForeignSymbolDefinition, ForeignText, ForeignTextKind,
+    ForeignTool, ForeignWindow,
 };
 use crate::schematic::label_layout::TextEdge;
 
@@ -125,8 +126,11 @@ pub fn parse_asc(source: &str) -> Result<ForeignSchematic, ForeignParseError> {
                     kind,
                     text: unescape_text(text),
                     line,
-                    size_percent: text_size_percent(words.get(4).copied()),
-                    justification: text_justification(words.get(3).copied()),
+                    lettering: ForeignLettering {
+                        size_percent: text_size_percent(words.get(4).copied()),
+                        justification: text_justification(words.get(3).copied()),
+                        by_first_line: true,
+                    },
                 });
             }
             "LINE" | "RECTANGLE" | "CIRCLE" | "ARC" => {

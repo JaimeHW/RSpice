@@ -320,11 +320,33 @@ pub struct ForeignText {
     /// The text with its line breaks restored.
     pub text: String,
     pub line: usize,
+    pub lettering: ForeignLettering,
+}
+
+/// How a drawing letters a text: its size, and how its box stands on its
+/// point.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ForeignLettering {
     /// The lettering in percent of the source tool's standard size.
     pub size_percent: u16,
-    /// Which edge of the text's box, across and then down, stands on
-    /// `position`.
+    /// Which edge of the text's box, across and then down, stands on its
+    /// point.
     pub justification: (TextEdge, TextEdge),
+    /// Whether a text of several lines centred down stands on its point by
+    /// its first line, the rest running below, as LTspice letters one; else
+    /// by the middle of all its lines.
+    pub by_first_line: bool,
+}
+
+impl Default for ForeignLettering {
+    /// LTspice's lettering for a text that states none: `Left 2`.
+    fn default() -> Self {
+        Self {
+            size_percent: 100,
+            justification: (TextEdge::Start, TextEdge::Center),
+            by_first_line: true,
+        }
+    }
 }
 
 /// A waveform readout placed on a net (`DATAFLAG`).

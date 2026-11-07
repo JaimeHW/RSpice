@@ -24,9 +24,9 @@ use super::mapping::{
 };
 use super::qspice::DEVICE_TYPE;
 use super::{
-    ForeignAttribute, ForeignPin, ForeignPoint, ForeignPortDirection, ForeignSchematic,
-    ForeignShape, ForeignSymbol, ForeignSymbolDefinition, ForeignTextKind, ForeignTool,
-    ForeignWindow,
+    ForeignAttribute, ForeignLettering, ForeignPin, ForeignPoint, ForeignPortDirection,
+    ForeignSchematic, ForeignShape, ForeignSymbol, ForeignSymbolDefinition, ForeignTextKind,
+    ForeignTool, ForeignWindow,
 };
 use crate::schematic::component::{Component, LibraryCellInstance};
 use crate::schematic::component_display::{
@@ -110,11 +110,12 @@ pub struct ForeignImportNotice {
     pub message: String,
 }
 
-/// A directive block of the drawing, where it was drawn.
+/// A directive block of the drawing, where and how it was lettered.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ForeignDirective {
     pub position: Point,
     pub text: String,
+    pub lettering: ForeignLettering,
 }
 
 /// A symbol RSpice has no component for, as a cell for the project library:
@@ -2030,6 +2031,7 @@ impl Builder<'_> {
             let position = self.scale(text.position);
             match text.kind {
                 ForeignTextKind::Directive => {
+                    let lettering = text.lettering;
                     let mut couplings = 0;
                     let text = spice_text_lines(&text.text)
                         .lines()
@@ -2042,7 +2044,11 @@ impl Builder<'_> {
                         .collect::<Vec<_>>()
                         .join("\n");
                     if !text.trim().is_empty() {
-                        self.directives.push(ForeignDirective { position, text });
+                        self.directives.push(ForeignDirective {
+                            position,
+                            text,
+                            lettering,
+                        });
                     }
                 }
                 ForeignTextKind::Comment => {
@@ -2050,11 +2056,8 @@ impl Builder<'_> {
                     match DesignNote::new(id, position, DesignNoteKind::PlainText, text.text.trim())
                     {
                         Ok(note) => {
-                            let note = note
-                                .with_text_size_percent(text.size_percent)
-                                .with_anchor_mark_hidden(true);
-                            let pos = note_anchor(&note, position, text.justification);
-                            self.document.design_notes.push(DesignNote { pos, ..note });
+                            let note = lettered_note(note, position, &text.lettering);
+                            self.document.design_notes.push(note);
                         }
                         Err(error) => self.notice(format!(
                             "The comment on line {} was not placed: {error}.",
@@ -2663,20 +2666,42 @@ fn unique_pin_names(slots: &[Option<&ForeignPin>]) -> Vec<PortSpec> {
 /// an edge, so a word standing on a wire keeps its descenders clear of it.
 const NOTE_STANDOFF_WORLD: f32 = 3.0;
 
+/// `note` lettered the way its drawing lettered it, standing on `point`,
+/// with no anchor mark: the drawing marks none.
+pub(super) fn lettered_note(
+    note: DesignNote,
+    point: Point,
+    lettering: &ForeignLettering,
+) -> DesignNote {
+    let note = note
+        .with_text_size_percent(lettering.size_percent)
+        .with_anchor_mark_hidden(true);
+    let pos = note_anchor(&note, point, lettering);
+    DesignNote { pos, ..note }
+}
+
 /// Where a note's anchor goes so its text's box stands on `point` the way
 /// the source drawing stood it: by its start, end or centre across, and by
-/// its top, bottom or middle down.
-fn note_anchor(note: &DesignNote, point: Point, justification: (TextEdge, TextEdge)) -> Point {
+/// its top, bottom or middle down. A text of several lines LTspice centres
+/// down stands on its point by its first line, the rest running below; its
+/// drawings lay their notes out by that.
+fn note_anchor(note: &DesignNote, point: Point, lettering: &ForeignLettering) -> Point {
     let (width, height) = note.text_extent_world(&note.text);
-    let reach = |edge: TextEdge, extent: f32| match edge {
+    let middle = if lettering.by_first_line {
+        note.text_extent_world("").1
+    } else {
+        height
+    };
+    let reach = |edge: TextEdge, extent: f32, middle: f32| match edge {
         TextEdge::Start => -NOTE_STANDOFF_WORLD,
-        TextEdge::Center => extent * 0.5,
+        TextEdge::Center => middle * 0.5,
         TextEdge::End => extent + NOTE_STANDOFF_WORLD,
     };
+    let (across, down) = lettering.justification;
     let (offset_x, offset_y) = DESIGN_NOTE_TEXT_OFFSET_WORLD;
     Point::new(
-        point.x - (reach(justification.0, width) + offset_x).round() as i32,
-        point.y - (reach(justification.1, height) + offset_y).round() as i32,
+        point.x - (reach(across, width, width) + offset_x).round() as i32,
+        point.y - (reach(down, height, middle) + offset_y).round() as i32,
     )
 }
 
