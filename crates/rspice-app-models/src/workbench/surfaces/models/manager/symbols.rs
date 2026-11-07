@@ -46,9 +46,7 @@ pub(super) fn symbols_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
         },
         // Outermost-right first: the band lays its actions out right to left.
         |ui| {
-            if Button::new("Create symbol").accent().show(ui).clicked() {
-                app.wb.outbox.push(OpenSymbolAuthoring::ModelBound);
-            }
+            create_symbol_button(ui, app);
             if Button::new("Form designer").show(ui).clicked() {
                 app.wb.outbox.push(OpenSymbolAuthoring::ParameterForm);
             }
@@ -236,6 +234,54 @@ impl RegistryLayout {
 /// The registry table, virtualized over its heterogeneous entries.
 ///
 /// Returns the row a click landed on, if any.
+/// Create symbol starts from a device model or from any subcircuit the
+/// model libraries hold: with subcircuits loaded it opens a menu of them.
+fn create_symbol_button(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
+    let mut subcircuits = app
+        .model
+        .model_library_manager
+        .catalog()
+        .libraries()
+        .flat_map(|library| {
+            library
+                .subcircuits
+                .values()
+                .map(|interface| (interface.name.clone(), library.name.clone()))
+        })
+        .collect::<Vec<_>>();
+    subcircuits.sort_by_key(|(name, _)| name.to_ascii_lowercase());
+    subcircuits.dedup_by(|a, b| a.0.eq_ignore_ascii_case(&b.0));
+    if subcircuits.is_empty() {
+        if Button::new("Create symbol").accent().show(ui).clicked() {
+            app.wb.outbox.push(OpenSymbolAuthoring::ModelBound);
+        }
+        return;
+    }
+    let create = Button::new("Create symbol").accent().menu().show(ui);
+    egui::Popup::menu(&create).show(|ui| {
+        ui.set_min_width(200.0);
+        if ui.button("From a device model\u{2026}").clicked() {
+            app.wb.outbox.push(OpenSymbolAuthoring::ModelBound);
+            ui.close();
+        }
+        ui.separator();
+        egui::ScrollArea::vertical()
+            .max_height(320.0)
+            .show(ui, |ui| {
+                for (subcircuit, library) in &subcircuits {
+                    if ui
+                        .button(subcircuit)
+                        .on_hover_text(format!("Subcircuit in {library}"))
+                        .clicked()
+                    {
+                        app.queue_subcircuit_symbol(library, subcircuit);
+                        ui.close();
+                    }
+                }
+            });
+    });
+}
+
 fn symbol_registry(
     ui: &mut Ui,
     height: f32,
