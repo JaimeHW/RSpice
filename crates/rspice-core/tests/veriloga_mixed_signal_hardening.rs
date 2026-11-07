@@ -619,6 +619,12 @@ fn mixed_fixture_hashes_are_identical_across_processes() {
 /// landing. It now steps to 666.46 ps and lands. Every rise, and every `ca`,
 /// `qa` and `qb` event, is bit-identical; the fall, which this test does not
 /// pin, moved 1.3e-21 s toward 2/3 ns (8.6e-21 s late, was 9.9e-21 s).
+///
+/// `clk` moved from `sin(0 1 1g 0 0 -90)` to a behavioral `-cos` when the
+/// native stepper began resolving sine sources whatever TSTEP says (56 -> 74
+/// on the SIN deck, every step held to 24.7 ps). The behavioral clock steps as
+/// the SIN one did before: the same 56 points, the approach step
+/// `[0.3274, 0.4024]` ns the test describes.
 const TWO_CROSSINGS_PIN: (&str, &str, usize) = (
     "two_unfed_crossings_keep_their_own_instants_when_a_trial_lands_on_the_later_one",
     "hardening_two_crossings",
@@ -4768,6 +4774,11 @@ fn a_carried_crossing_wakes_its_process_after_the_write_that_caused_it() {
 /// A crossing is carried when the discrete half moved something the analog
 /// equations read before it was found, and by nothing else. This deck moves
 /// nothing, so both edges keep their own instants.
+///
+/// `clk` comes from a behavioral source. Read the native way, a SIN source is
+/// resolved every 24.7 ps whatever TSTEP says: the trial from 0.3215 ns then
+/// ends at 0.3461 ns, its chord dates `clk` at 0.33361 ns, before `ca`, and no
+/// trial lands on the later crossing.
 #[test]
 fn two_unfed_crossings_keep_their_own_instants_when_a_trial_lands_on_the_later_one() {
     /// `clk` rises through half the supply here: `-cos(2π·10⁹·t) = 0.5`.
@@ -4791,7 +4802,7 @@ endmodule
     let deck = format!(
         "* a curved clock and a straight ramp crossing 0.67 ps apart\n\
          .param vcc=1\n\
-         Vclk clk 0 sin(0 1 1g 0 0 -90)\n\
+         Bclk clk 0 V=-cos(2*pi*1e9*time)\n\
          Vramp ca 0 pwl(0 0 0.668n 1)\n\
          X1 clk ca qa qb two_input_sampler\n\
          Rqa qa 0 1k\n\
