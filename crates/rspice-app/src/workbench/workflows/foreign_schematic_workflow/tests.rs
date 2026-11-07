@@ -9,8 +9,9 @@ use rspice_simulation_contract::analysis_draft::AnalysisDraft;
 use rspice_simulation_contract::config::NoiseSweepType;
 use rspice_simulation_contract::options::IntegrationMethod;
 
-use super::plan::plan_from_cards;
+use super::plan::{ForeignPlan, plan_from_cards};
 use super::*;
+use rspice_simulation_contract::run_set::RunSetDimensionKind;
 
 fn card(role: ForeignCardRole, text: &str) -> ForeignCard {
     ForeignCard {
@@ -24,7 +25,7 @@ fn card(role: ForeignCardRole, text: &str) -> ForeignCard {
 #[test]
 fn analysis_cards_become_the_drafts_of_their_analyses() {
     use ForeignCardRole::Analysis;
-    let plan = plan_from_cards(vec![
+    let plan = plan_cards(vec![
         card(Analysis, ".tran 0 10m 1m 1u uic startup"),
         card(Analysis, ".ac oct 20 10 1meg"),
         card(Analysis, ".dc V1 0 5 0.1 V2 0 1 0.5"),
@@ -111,8 +112,14 @@ fn analysis_cards_become_the_drafts_of_their_analyses() {
 
 #[test]
 fn parameters_options_and_temperature_find_their_plan_places() {
-    let plan = plan_from_cards(vec![
+    let plan = plan_cards(vec![
+        card(ForeignCardRole::Analysis, ".tran 1m"),
         card(ForeignCardRole::Parameter, ".param R=1k Gain={R/100}"),
+        // LTspice also reads spaced and bare assignments.
+        card(
+            ForeignCardRole::Parameter,
+            ".param Vdd = 15 sel 3 RG = {RF / 2} ; the supply",
+        ),
         card(
             ForeignCardRole::Options,
             ".options reltol=1e-4 method=gear plotwinsize=0 cshunt=1p",
@@ -124,10 +131,19 @@ fn parameters_options_and_temperature_find_their_plan_places() {
         card(ForeignCardRole::SourceOnly, ".backanno"),
         card(ForeignCardRole::Other, "K1 L1 L2 1"),
     ]);
-    assert_eq!(plan.variables, [("R".to_owned(), "1k".to_owned())]);
+    let variables = plan
+        .variables
+        .iter()
+        .map(|(name, value)| (name.as_str(), value.as_str()))
+        .collect::<Vec<_>>();
+    assert_eq!(variables, [("R", "1k"), ("Vdd", "15"), ("sel", "3")]);
     assert_eq!(
         plan.model_text,
-        [".param Gain={R/100}", ".model D1N D(Is=1n)"]
+        [
+            ".param Gain={R/100}",
+            ".param RG={RF / 2}",
+            ".model D1N D(Is=1n)"
+        ]
     );
     assert_eq!(plan.options.reltol, 1e-4);
     assert_eq!(plan.options.method, IntegrationMethod::Gear2);
@@ -137,16 +153,141 @@ fn parameters_options_and_temperature_find_their_plan_places() {
         .iter()
         .map(|(card, _)| card.text.as_str())
         .collect::<Vec<_>>();
+    assert_eq!(kept, [".options cshunt=1p", "K1 L1 L2 1"]);
+    assert!(plan.notices[0].contains("plotwinsize=0"));
+    // A temperature list and a stepped parameter are axes of the run set.
     assert_eq!(
-        kept,
+        axes(&plan),
         [
-            ".options cshunt=1p",
-            ".temp 0 25 50",
-            ".step param R 1k 2k 1k",
-            "K1 L1 L2 1"
+            (RunSetDimensionKind::Temperature, vec![0.0, 25.0, 50.0]),
+            (RunSetDimensionKind::Parameter, vec![1e3, 2e3]),
         ]
     );
-    assert!(plan.notices[0].contains("plotwinsize=0"));
+}
+
+fn plan_cards(cards: Vec<ForeignCard>) -> ForeignPlan {
+    plan_from_cards(cards, &SchematicDocument::default(), |_| None)
+}
+
+fn axes(plan: &ForeignPlan) -> Vec<(RunSetDimensionKind, Vec<f64>)> {
+    plan.sweeps
+        .iter()
+        .map(|(_, dimension)| (dimension.kind, dimension.canonical_values()))
+        .collect()
+}
+
+#[test]
+fn stepped_runs_are_run_set_axes_and_measurements_are_plan_measurements() {
+    use ForeignCardRole::{Analysis, Measurement, Step};
+    let mut document = SchematicDocument::default();
+    document.components.push(
+        rspice_design::schematic::component::Component::new(
+            1,
+            rspice_design::schematic::component_type::ComponentType::VoltageSource,
+            Point::new(0, 0),
+        )
+        .with_name_value("V1".to_owned(), "DC 5".to_owned()),
+    );
+    let plan = plan_from_cards(
+        vec![
+            card(Measurement, ".meas peak MAX V(out) ; the highest output"),
+            card(Analysis, ".tran 0 1m"),
+            card(Step, ".step dec param C 1n 100n 1"),
+            card(Step, ".step param X .1 .3 .1"),
+            card(Step, ".step V1 list 1 2"),
+            card(Step, ".step NPN 2N2222(Vaf) 50 100 25"),
+            card(Step, ".step param C list 1 2"),
+            card(Step, ".step V9 1 2 1"),
+            card(Measurement, ".meas AC gain FIND V(out) AT 1k"),
+            card(
+                Measurement,
+                ".measure tran fall FIND time WHEN V(out)=0.5 FALL=1",
+            ),
+            card(Measurement, ".meas TRAN late FIND V(out) AT fall"),
+        ],
+        &document,
+        |_| None,
+    );
+    assert_eq!(
+        axes(&plan),
+        [
+            (RunSetDimensionKind::Parameter, vec![1e-9, 1e-8, 1e-7]),
+            (RunSetDimensionKind::Parameter, vec![0.1, 0.2, 0.3]),
+            (RunSetDimensionKind::Source, vec![1.0, 2.0]),
+        ]
+    );
+    let (_, stepped) = &plan.sweeps[1];
+    assert_eq!(
+        stepped
+            .values
+            .iter()
+            .map(|value| value.lexical.as_str())
+            .collect::<Vec<_>>(),
+        ["100m", "200m", "300m"],
+        "a sum's binary residue is not a value of its own"
+    );
+    assert_eq!(plan.sweeps[2].1.source, "netlist-source:V1");
+    // A parameter the drawing only steps is a design variable at its first
+    // value, so the reference point runs too.
+    assert!(
+        plan.variables
+            .iter()
+            .any(|(name, value)| name == "C" && value == "1n"),
+        "{:?}",
+        plan.variables
+    );
+    let statements = plan
+        .measurements
+        .iter()
+        .map(|(_, definition)| {
+            assert!(definition.define_measurement);
+            definition.expression.as_str()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        statements,
+        [
+            ".MEAS TRAN peak MAX V(out)",
+            ".MEAS TRAN fall FIND time WHEN V(out)=0.5 FALL=1"
+        ]
+    );
+    let kept = plan
+        .kept
+        .iter()
+        .map(|(card, reason)| {
+            (
+                card.text.split_whitespace().nth(1).unwrap_or_default(),
+                reason.as_str(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(kept.len(), 5, "{kept:?}");
+    assert!(kept[0].1.contains("model parameter"), "{kept:?}");
+    assert!(kept[1].1.contains("already steps"), "{kept:?}");
+    assert!(kept[2].1.contains("`V9`"), "{kept:?}");
+    assert!(kept[3].1.contains("no AC analysis"), "{kept:?}");
+    assert!(kept[4].1.contains("does not read"), "{kept:?}");
+}
+
+#[test]
+fn sweeps_and_measurements_without_an_analysis_stay_on_the_sheet() {
+    let plan = plan_cards(vec![
+        card(ForeignCardRole::Step, ".step param R list 1 2"),
+        card(ForeignCardRole::Measurement, ".meas TRAN peak MAX V(out)"),
+    ]);
+    assert!(plan.sweeps.is_empty() && plan.measurements.is_empty());
+    assert_eq!(plan.kept.len(), 2);
+}
+
+#[test]
+fn an_analysis_the_plan_refuses_stays_on_the_sheet() {
+    let plan = plan_from_cards(
+        vec![card(ForeignCardRole::Analysis, ".tran 1m")],
+        &SchematicDocument::default(),
+        |_| Some("refused".to_owned()),
+    );
+    assert!(plan.analyses.is_empty());
+    assert_eq!(plan.kept[0].1, "refused");
 }
 
 /// A drawing folder with an LTspice schematic, a symbol RSpice has no part
@@ -183,6 +324,7 @@ fn drawing_folder() -> PathBuf {
          SYMBOL cap 192 96 R0\nSYMATTR InstName C1\nSYMATTR Value 1u\n\
          SYMBOL buffer 352 96 R0\nSYMATTR InstName U1\n\
          TEXT 32 240 Left 2 !.tran 0 20m 0 10u\\n.param R=1k\\n.include buffers.lib\n\
+         TEXT 32 270 Left 2 !.step param R list 1k 2k\\n.meas TRAN vmax MAX V(out)\n\
          TEXT 32 300 Left 2 !.model D1N D(Is=1n)\\nK1 L1 L2 1\n",
     )
     .expect("schematic");
@@ -271,5 +413,35 @@ fn an_imported_schematic_is_project_content_a_run_reads() {
         .map(|note| note.text.as_str())
         .collect::<Vec<_>>();
     assert_eq!(notes, ["K1 L1 L2 1"]);
+
+    // The stepped parameter is an axis of the plan's run set and the
+    // measurement a plan measurement; both reach a prepared run as they are.
+    let axes = model
+        .sim_setup
+        .run_set
+        .enabled_dimensions()
+        .map(|dimension| (dimension.source.clone(), dimension.canonical_values()))
+        .collect::<Vec<_>>();
+    assert_eq!(axes, [("design-variable:R".to_owned(), vec![1e3, 2e3])]);
+    let measurements = model
+        .workspace
+        .content
+        .plan_data(plan.id())
+        .expect("the imported plan's payload")
+        .specification_definitions
+        .iter()
+        .map(|definition| definition.expression.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(measurements, [".MEAS TRAN vmax MAX V(out)"]);
+
+    let mut checked = rspice_design::drc::DrcResult::new();
+    checked.completed = true;
+    app.state.model.design_checks.drc_results = Some(checked);
+    app.state.model.design_checks.drc_checked_version =
+        app.state.model.schematic.topology_version();
+    let prepared = crate::simulation::controller::SimulationController::new()
+        .prepare_run_set_for_preflight(&app.state)
+        .expect("the imported schematic prepares a run with no further step");
+    assert_eq!((prepared.pvt_point_count, prepared.task_count), (2, 2));
     std::fs::remove_dir_all(&folder).ok();
 }

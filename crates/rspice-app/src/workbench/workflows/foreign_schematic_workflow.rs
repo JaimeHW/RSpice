@@ -29,6 +29,7 @@ use rspice_simulation_contract::design_variable::{
     DesignVariableSweepEligibility,
 };
 use rspice_simulation_contract::design_variable_quantity::DesignVariableQuantity;
+use rspice_simulation_contract::run_set::{RunSetDimensionKind, RunSetState, value_id};
 
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::{Cell, CellViewRef, SchematicState, View, ViewType};
@@ -110,10 +111,16 @@ pub(crate) fn import_foreign_schematic_file(
         .active_view
         .library
         .clone();
+    let access = InstalledForeignLibrary::for_drawing(tool, path);
     let mut seen = HashSet::from([path.to_path_buf()]);
-    let mut tree = import_tree(tool, path, &library, &mut seen, true)?;
+    let mut tree = import_tree(tool, path, &access, &library, &mut seen, true)?;
     rename_taken_cells(&app.state, &library, &mut tree);
-    let mut plan = plan_from_cards(std::mem::take(&mut tree.cards));
+    let mut plan = plan_from_cards(std::mem::take(&mut tree.cards), &tree.document, |draft| {
+        app.state
+            .model
+            .sim_setup
+            .analysis_draft_validation_error(draft)
+    });
     let mut notices = std::mem::take(&mut tree.notices);
     notices.extend(
         plan.notices
@@ -121,7 +128,6 @@ pub(crate) fn import_foreign_schematic_file(
             .map(|notice| (ForeignNoticeSeverity::Notice, notice)),
     );
 
-    let access = InstalledForeignLibrary::for_drawing(tool, path);
     let includes = resolve_includes(&access, &mut plan, &mut notices);
     keep_on_sheet(&mut tree.document, &plan, &mut notices);
 
@@ -191,13 +197,13 @@ fn read_drawing(
 fn import_tree(
     tool: ForeignTool,
     path: &Path,
+    access: &InstalledForeignLibrary,
     library: &str,
     seen: &mut HashSet<PathBuf>,
     top: bool,
 ) -> Result<ImportedTree, String> {
     let drawing = read_drawing(tool, path)?;
-    let access = InstalledForeignLibrary::for_drawing(tool, path);
-    let imported = import_foreign_schematic(&drawing, library, &access);
+    let imported = import_foreign_schematic(&drawing, library, access);
     let mut cards = foreign_directive_cards(&imported.directives);
     if !top {
         cards.retain(|card| {
@@ -221,7 +227,14 @@ fn import_tree(
     for cell in imported.cells {
         let schematic = match &cell.schematic {
             Some(block) if seen.insert(block.clone()) => {
-                let child = import_tree(tool, block, library, seen, false)?;
+                let child = import_tree(
+                    tool,
+                    block,
+                    &access.for_another_drawing(block),
+                    library,
+                    seen,
+                    false,
+                )?;
                 tree.cards.extend(child.cards);
                 tree.model_cards.extend(child.model_cards);
                 tree.notices.extend(child.notices);
@@ -395,7 +408,6 @@ fn add_symbol_cells(
         }
         edit.add_cell(entry);
     }
-    drop(edit);
     let mutation = state.model.preflight_project_library_mutation(
         crate::state::ProjectLibraryMutation::CreateCell {
             library: library.to_owned(),
@@ -531,8 +543,8 @@ fn add_model_libraries(
 }
 
 /// Activates a simulation plan named after the cell holding the drawing's
-/// analyses, options, temperature and design variables. A drawing with no
-/// analysis leaves the active plan as it is.
+/// analyses, options, temperature, design variables, run-set axes and
+/// measurements. A drawing with no analysis leaves the active plan as it is.
 fn commit_plan(
     app: &mut RSpiceApp,
     cell: &str,
@@ -541,18 +553,6 @@ fn commit_plan(
 ) {
     let mut analyses = rspice_simulation_contract::plan_model::SimulationPlan::empty();
     for (card, draft) in &plan.analyses {
-        if let Some(error) = app
-            .state
-            .model
-            .sim_setup
-            .analysis_draft_validation_error(draft)
-        {
-            notices.push((
-                ForeignNoticeSeverity::Refusal,
-                format!("`{}` is not a valid plan analysis: {error}", card.text),
-            ));
-            continue;
-        }
         let id = rspice_vocabulary::product::AnalysisInstanceId::new();
         let position = analyses.instances().len();
         if let Err(error) = analyses.insert_draft_with_id(id, draft.clone(), true, position) {
@@ -595,10 +595,31 @@ fn commit_plan(
         reference_pvt.temperature_celsius = temperature;
         options.temp = temperature;
     }
-    match commit_plan_document(app, cell, analyses, reference_pvt, options, variables) {
+    let payload = crate::state::SimulationPlanPayload {
+        design_variables: variables,
+        specification_definitions: plan
+            .measurements
+            .iter()
+            .map(|(_, definition)| definition.clone())
+            .collect(),
+        ..crate::state::SimulationPlanPayload::default()
+    };
+    match commit_plan_document(
+        app,
+        cell,
+        analyses,
+        reference_pvt,
+        options,
+        run_set(plan),
+        &payload,
+    ) {
         Ok(name) => notices.push((
             ForeignNoticeSeverity::Notice,
-            format!("The schematic's analyses are the active simulation plan `{name}`."),
+            format!(
+                "The schematic's analyses are the active simulation plan `{name}`, with {} stepped axis(es) in its run set and {} measurement(s).",
+                plan.sweeps.len(),
+                plan.measurements.len()
+            ),
         )),
         Err(error) => notices.push((
             ForeignNoticeSeverity::Refusal,
@@ -607,13 +628,45 @@ fn commit_plan(
     }
 }
 
+/// The plan's run set: its reference point alone, crossed with every axis
+/// the drawing steps. A stepped temperature takes the run set's own
+/// temperature axis.
+fn run_set(plan: &ForeignPlan) -> RunSetState {
+    let mut run_set = RunSetState::reference_only();
+    for (_, sweep) in &plan.sweeps {
+        let template = run_set
+            .dimensions
+            .iter_mut()
+            .find(|dimension| dimension.kind == sweep.kind)
+            .filter(|_| sweep.kind == RunSetDimensionKind::Temperature);
+        match template {
+            Some(temperature) => {
+                temperature.values = sweep
+                    .values
+                    .iter()
+                    .enumerate()
+                    .map(|(index, value)| {
+                        let mut value = value.clone();
+                        value.id = value_id(&temperature.id, index);
+                        value
+                    })
+                    .collect();
+                temperature.enabled = true;
+            }
+            None => run_set.dimensions.push(sweep.clone()),
+        }
+    }
+    run_set
+}
+
 fn commit_plan_document(
     app: &mut RSpiceApp,
     cell: &str,
     analysis_plan: rspice_simulation_contract::plan_model::SimulationPlan,
     reference_pvt: crate::workbench::app_state::ReferencePvtPoint,
     options: rspice_simulation_contract::options::SimulationOptions,
-    design_variables: Vec<DesignVariable>,
+    run_set: RunSetState,
+    payload: &crate::state::SimulationPlanPayload,
 ) -> Result<String, String> {
     use crate::workbench::app_state::{SimulationPlanImportDocument, SimulationPlanName};
 
@@ -635,14 +688,10 @@ fn commit_plan_document(
         name: SimulationPlanName::new(name).map_err(|error| error.to_string())?,
         analysis_plan,
         reference_pvt,
-        run_set: rspice_simulation_contract::run_set::RunSetState::reference_only(),
+        run_set,
         model_bindings: Vec::new(),
         save_policy: crate::workbench::app_state::SimulationSavePolicy::default(),
         options,
-    };
-    let payload = crate::state::SimulationPlanPayload {
-        design_variables,
-        ..crate::state::SimulationPlanPayload::default()
     };
     let mut setup = app.state.model.sim_setup.clone();
     let mut workspace = app.state.model.workspace.clone();
@@ -655,7 +704,7 @@ fn commit_plan_document(
         .content
         .import_plan_data(
             outcome.cloned_plan_id,
-            &payload,
+            payload,
             &outcome.analysis_identity_map,
         )
         .map_err(|error| error.to_string())?;
