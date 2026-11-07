@@ -727,13 +727,16 @@ const fn context_view_mask(context: ShortcutContext) -> u8 {
         // Source documents: never a schematic or symbol canvas, so Ctrl+D can
         // be Duplicate line here and Duplicate on a drawing.
         ShortcutContext::SourceEditor => 0b1000,
+        // Violation markers are on drawings. A source document's own findings
+        // are stepped by its editor, so F8 can be Next problem there and Next
+        // violation on a drawing.
+        ShortcutContext::ViolationNavigation => 0b0111,
         ShortcutContext::Global
         | ShortcutContext::ApplicationChrome
         | ShortcutContext::DesignWorkspace
         | ShortcutContext::SimulationWorkspace
         | ShortcutContext::ResultsWorkspace
         | ShortcutContext::VerificationWorkspace
-        | ShortcutContext::ViolationNavigation
         | ShortcutContext::RunnableProject => 0b1111,
     }
 }
