@@ -244,6 +244,11 @@ fn tokenize_rational(text: &str) -> Result<Vec<RatTok>, String> {
                 tokens.push(RatTok::Minus);
                 i += 1;
             }
+            // `**` is the power operator, as `^` is.
+            '*' if chars.get(i + 1) == Some(&'*') => {
+                tokens.push(RatTok::Caret);
+                i += 2;
+            }
             '*' => {
                 tokens.push(RatTok::Star);
                 i += 1;
@@ -390,12 +395,19 @@ impl RatParser {
         let base = self.parse_unary()?;
         if self.peek() == Some(&RatTok::Caret) {
             self.next();
+            let negative = self.peek() == Some(&RatTok::Minus);
+            if negative {
+                self.next();
+            }
             match self.next() {
-                Some(RatTok::Num(v)) if v >= 0.0 && v.fract() == 0.0 && v <= 16.0 => {
+                Some(RatTok::Num(v)) if v.fract() == 0.0 && v <= 16.0 && !negative => {
                     Ok(base.powi(v as u32))
                 }
-                _ => Err("'^' in LAPLACE expressions requires a small non-negative \
-                          integer exponent"
+                Some(RatTok::Num(v)) if v.fract() == 0.0 && v <= 16.0 => {
+                    Rational::constant(1.0).div(&base.powi(v as u32))
+                }
+                _ => Err("a power in a LAPLACE expression requires a small integer \
+                          exponent"
                     .to_string()),
             }
         } else {
@@ -840,6 +852,18 @@ mod tests {
     fn parses_first_order_lowpass() {
         let (num, den, _) = parse_rational_in_s("1/(1+s/1000)").unwrap();
         assert_ratio_eq((&num, &den), (&[1.0], &[1.0, 1e-3]));
+    }
+
+    #[test]
+    fn double_star_is_a_power_and_a_negative_exponent_a_reciprocal() {
+        let (num, den, delay) = parse_rational_in_s("1./(1+.0005*s)**3").unwrap();
+        let (want_num, want_den, _) = parse_rational_in_s("1/((1+.0005*s)^3)").unwrap();
+        assert_ratio_eq((&num, &den), (&want_num, &want_den));
+        assert_eq!(delay, 0.0);
+        let (num, den, delay) = parse_rational_in_s("exp(-.001*s)*(1+.001*s)**-2").unwrap();
+        let (want_num, want_den, _) = parse_rational_in_s("1/(1+.001*s)^2").unwrap();
+        assert_ratio_eq((&num, &den), (&want_num, &want_den));
+        assert!((delay - 1e-3).abs() < 1e-18);
     }
 
     #[test]

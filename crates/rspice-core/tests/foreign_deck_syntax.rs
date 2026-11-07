@@ -233,3 +233,23 @@ G1 0 o c 0 1m vto=-.75 dir=1
         assert_close(&format!("V({node})"), value, expected, 1e-9);
     }
 }
+
+// QSPICE: V(b)=0.264241 and V(c)=0.323323 at 1 ms, the exact step responses
+// 1-(1+t/T)e^(-t/T) and 1-(1+u+u²/2)e^(-u). LTspice's 0.264592 and 0.322882
+// differ by its frequency-domain realization; QSPICE decides.
+#[test]
+fn a_laplace_power_written_with_a_double_star_is_a_power() {
+    let netlist = parse(
+        "* laplace double star
+V1 in 0 PULSE(0 1 0 1n 1n 1 2)
+E2 b 0 in 0 Laplace=1/(1+.001*s)**2
+E3 c 0 in 0 Laplace=1./(1+.0005*s)**3
+.tran 0 5m 0 1u
+.end
+",
+    );
+    let values = tran_voltages(&netlist, 5e-3, 1e-3, &["b", "c"]);
+    assert_close("V(b)", values[0], 0.264241, 2e-4);
+    assert_close("V(c)", values[1], 0.323323, 2e-4);
+}
+
