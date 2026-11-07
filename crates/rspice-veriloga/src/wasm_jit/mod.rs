@@ -4613,16 +4613,21 @@ endmodule
         }
     }
 
-    /// A conditional inside a potential contribution's value is the value: the
-    /// source stays active whichever arm runs. Only a statement guard exports
-    /// an activation condition, and it is that guard alone.
+    /// A conditional inside a contribution's value is the value: a potential
+    /// source stays active whichever arm runs, and a flow source stays a flow
+    /// source. Only a statement guard exports an activation condition, and it
+    /// is that guard alone.
     #[test]
     fn wasm_a_conditional_value_keeps_its_potential_source_in_both_plans() {
         use super::abi::FRAME_RESULT_OFFSET;
 
-        for (body, guarded) in [
-            ("V(o) <+ (k > 1) ? 2.0 : 0.0;", false),
-            ("if (en) V(o) <+ (k > 1) ? 2.0 : 0.0;", true),
+        // Each value is (k <= 1, k > 1) with both nodes held at 0 V.
+        for (body, guarded, value) in [
+            ("V(o) <+ (k > 1) ? 2.0 : 0.0;", false, (0.0, 2.0)),
+            ("V(o) <+ (k > 1) ? 0.0 : 2.0;", false, (2.0, 0.0)),
+            ("if (en) V(o) <+ (k > 1) ? 2.0 : 0.0;", true, (0.0, 2.0)),
+            ("V(o) <+ (V(s) > 10) ? 2.0 : 0.0*V(s);", false, (0.0, 0.0)),
+            ("I(o, s) <+ (k > 1) ? V(o, s) : 0.0;", false, (0.0, 0.0)),
         ] {
             let source = format!(
                 "module vx(o, s); inout o, s; electrical o, s;
@@ -4632,6 +4637,8 @@ endmodule
             for postfix in [false, true] {
                 let mut harness = FusedKernelHarness::for_source_with_plan(&source, "vx", postfix);
                 harness.reset();
+                harness.write_f64(FusedKernelHarness::VOLTAGES as usize, 0.0);
+                harness.write_f64(FusedKernelHarness::VOLTAGES as usize + 8, 0.0);
                 let condition = harness
                     .executable
                     .export(WasmJitExecutableEntry::StaticCondition(0))
@@ -4657,8 +4664,51 @@ endmodule
                     assert_eq!(harness.call(&residual), 0);
                     assert_eq!(
                         harness.read_f64(FRAME_RESULT_OFFSET as usize),
-                        if k > 1.0 { 2.0 } else { 0.0 },
+                        if k > 1.0 { value.1 } else { value.0 },
                         "{body}; postfix={postfix}, k={k}, en={en}"
+                    );
+                }
+            }
+        }
+
+        // Both arms of an `if`/`else` are guarded statements on one branch:
+        // exactly one is active, and it holds its own value.
+        let source = "module vx(o, s); inout o, s; electrical o, s;
+            parameter real k = 0;
+            analog begin if (k > 1) V(o) <+ 2.0; else V(o) <+ 0.0; end endmodule";
+        for postfix in [false, true] {
+            let mut harness = FusedKernelHarness::for_source_with_plan(source, "vx", postfix);
+            harness.reset();
+            let conditions: Vec<String> = (0..2)
+                .map(|stamp| {
+                    harness
+                        .executable
+                        .export(WasmJitExecutableEntry::StaticCondition(stamp))
+                        .expect("each arm exports its guard")
+                        .to_owned()
+                })
+                .collect();
+            for k in [0.5, 2.0] {
+                harness.write_f64(FusedKernelHarness::PARAMETERS as usize, k);
+                harness.call_assignments();
+                harness.call_prelude();
+                for (stamp, (condition, value)) in conditions.iter().zip([2.0, 0.0]).enumerate() {
+                    assert_eq!(harness.call(condition), 0);
+                    let active = (k > 1.0) == (stamp == 0);
+                    assert_eq!(
+                        harness.read_f64(FRAME_RESULT_OFFSET as usize),
+                        if active { 1.0 } else { 0.0 },
+                        "postfix={postfix}, k={k}, stamp {stamp}"
+                    );
+                    if !active {
+                        continue;
+                    }
+                    let residual = harness.stamp_value_export(stamp);
+                    assert_eq!(harness.call(&residual), 0);
+                    assert_eq!(
+                        harness.read_f64(FRAME_RESULT_OFFSET as usize),
+                        value,
+                        "postfix={postfix}, k={k}, stamp {stamp}"
                     );
                 }
             }

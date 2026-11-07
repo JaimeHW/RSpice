@@ -120,7 +120,10 @@ endmodule
             let processes = device
                 .try_noise_processes_at_frequency(&[bias], 1.0e3)
                 .unwrap_or_else(|error| panic!("{limit} at {bias} V: {error}"));
-            let names: Vec<_> = processes.iter().map(|process| process.name.as_str()).collect();
+            let names: Vec<_> = processes
+                .iter()
+                .map(|process| process.name.as_str())
+                .collect();
             assert_eq!(names, ["shot", "flicker", "conductance"], "{limit}");
             for (process, expected, exponent) in [
                 (&processes[0], 2.0 * P_Q * id.abs(), None),

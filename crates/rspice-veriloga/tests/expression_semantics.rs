@@ -722,7 +722,12 @@ fn a_conditional_value_never_opens_its_potential_branch() {
             analog begin {body} end endmodule"
         )
     };
-    let closed = |value: f64| ([[0.0, 0.0, 1.0], [0.0; 3], [1.0, 0.0, 0.0]], [0.0, 0.0, value]);
+    let closed = |value: f64| {
+        (
+            [[0.0, 0.0, 1.0], [0.0; 3], [1.0, 0.0, 0.0]],
+            [0.0, 0.0, value],
+        )
+    };
     let open = ([[0.0; 3], [0.0; 3], [0.0, 0.0, 1.0]], [0.0; 3]);
     for (body, guarded) in [
         ("V(o) <+ (k > 1) ? 2.0 : 0.0;", false),
@@ -738,7 +743,11 @@ fn a_conditional_value_never_opens_its_potential_branch() {
             "{body}"
         );
         for (k, en) in [(0.5, 1.0), (2.0, 1.0), (0.5, 0.0), (2.0, 0.0)] {
-            let high = if body.contains("? 0.0 : 2.0") { 0.0 } else { 2.0 };
+            let high = if body.contains("? 0.0 : 2.0") {
+                0.0
+            } else {
+                2.0
+            };
             let low = 2.0 - high;
             let value = if k > 1.0 { high } else { low };
             let expected = if body.starts_with("if (en)") && en == 0.0 {
@@ -759,6 +768,11 @@ fn a_conditional_value_never_opens_its_potential_branch() {
     assert_eq!(stamp_source_rows(&fixture, &[("k", 0.5)]), open);
     assert_eq!(stamp_source_rows(&fixture, &[("k", 2.0)]), closed(2.0));
 
+    // Nor is a condition read at run time: at V(s) = 5 V this is a 0 V source.
+    let fixture = DeviceFixture::compile(&source("V(o) <+ (V(s) > 10) ? 2.0 : 0.0*V(s);"));
+    assert!(fixture.stamp_programs[0].static_condition.is_none());
+    assert_eq!(stamp_source_rows(&fixture, &[]), closed(0.0));
+
     // A conditional flow contribution stays a flow source with no branch.
     let fixture = DeviceFixture::compile(&source("I(o, s) <+ (k > 1) ? V(o, s) : 0.0;"));
     assert!(fixture.branch_sources.is_empty());
@@ -766,10 +780,6 @@ fn a_conditional_value_never_opens_its_potential_branch() {
     for k in [0.5, 2.0] {
         let g = if k > 1.0 { 1.0 } else { 0.0 };
         let (matrix, _) = stamp_source_rows(&fixture, &[("k", k)]);
-        assert_eq!(
-            matrix,
-            [[g, -g, 0.0], [-g, g, 0.0], [0.0; 3]],
-            "k={k}"
-        );
+        assert_eq!(matrix, [[g, -g, 0.0], [-g, g, 0.0], [0.0; 3]], "k={k}");
     }
 }
