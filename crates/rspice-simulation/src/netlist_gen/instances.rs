@@ -752,7 +752,11 @@ impl<'a> NetlistGenerator<'a> {
                     {
                         return None;
                     }
-                    if master_ports.is_none() {
+                    // A template-bound binding that states its own terminal
+                    // order writes its whole card itself and needs no master.
+                    let self_described =
+                        binding.netlist_template.is_some() && !binding.terminal_order.is_empty();
+                    if master_ports.is_none() && !self_described {
                         let defect = NetlistDefect::MissingMaster {
                             occurrence,
                             master: reference,
