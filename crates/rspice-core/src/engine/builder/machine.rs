@@ -1,7 +1,7 @@
 //! Elaboration of LTspice `.machine` state machines.
 //!
-//! A machine runs as a code model whose inputs are the node voltages its
-//! expressions read. It advances at accepted time points: at each one the
+//! A machine runs as a code model whose inputs are the node voltages and
+//! branch currents its expressions read. It advances at accepted time points: at each one the
 //! `*` rules and then the current state's rules are tried in order, and the
 //! first whose condition reaches 0.5 moves the machine, one rule per point.
 //! The outputs are then evaluated at that point and drive their nodes as
@@ -54,10 +54,19 @@ enum Operand {
     Ground,
 }
 
-/// A compiled expression and what each of its voltage slots reads.
+/// A compiled expression, what each of its voltage slots reads, and the
+/// input each of its branch-current slots reads.
 struct Program {
     code: CompiledExpr,
     operands: Vec<Operand>,
+    currents: Vec<usize>,
+}
+
+/// What one input of a machine reads.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Input {
+    Node(String),
+    Branch(String),
 }
 
 struct Rule {
@@ -83,6 +92,7 @@ struct Evaluator<'a> {
     model: &'a MachineModel,
     vm: Vm,
     voltages: Vec<Value>,
+    currents: Vec<Value>,
 }
 
 impl Evaluator<'_> {
@@ -95,7 +105,10 @@ impl Evaluator<'_> {
                 Operand::State => state,
                 Operand::Ground => 0.0,
             }));
-        let context = Context::transient(&self.voltages, &[], time)
+        self.currents.clear();
+        self.currents
+            .extend(program.currents.iter().map(|index| inputs[*index]));
+        let context = Context::transient(&self.voltages, &self.currents, time)
             .with_temperature(self.model.temperature)
             .with_expression_dialect(self.model.dialect);
         self.vm.execute(&program.code, &context)
@@ -125,6 +138,7 @@ impl MachineModel {
             model: self,
             vm: Vm::new(),
             voltages: Vec::new(),
+            currents: Vec::new(),
         }
     }
 
@@ -432,18 +446,11 @@ fn build(
             .map_err(|error| fail(format!("{what} '{text}': {error}")))?;
         let parsed = parse_expression_strict(&prepared)
             .map_err(|error| fail(format!("{what} '{text}': {error}")))?;
-        let code = compile(&parsed);
-        if !code.branch_map.is_empty() {
-            return Err(fail(format!(
-                "{what} '{text}' reads a branch current; a .machine reads node voltages and \
-                 time only"
-            )));
-        }
-        Ok(code)
+        Ok(compile(&parsed))
     };
     let constant = |what: &str, text: &str| -> Result<Value, SimulationError> {
         let code = compile_text(what, text)?;
-        if !code.node_map.is_empty() {
+        if !code.node_map.is_empty() || !code.branch_map.is_empty() {
             return Err(fail(format!("{what} '{text}' must be a constant")));
         }
         let value = Vm::new().execute(&code, &Context::dc(&[], &[]));
@@ -487,7 +494,14 @@ fn build(
         state_node.push('#');
     }
 
-    let mut input_nodes: Vec<String> = Vec::new();
+    let mut inputs: Vec<Input> = Vec::new();
+    let mut input_index = |input: Input| match inputs.iter().position(|known| *known == input) {
+        Some(index) => index,
+        None => {
+            inputs.push(input);
+            inputs.len() - 1
+        }
+    };
     let mut program = |what: &str, text: &str| -> Result<Program, SimulationError> {
         let bound = bind_states(text, &states, &state_node, &mut Vec::new());
         let code = compile_text(what, &bound)?;
@@ -504,17 +518,18 @@ fn build(
                     "{what} '{text}' reads node {node}, which no element connects"
                 )));
             } else {
-                let index = match input_nodes.iter().position(|input| *input == node) {
-                    Some(index) => index,
-                    None => {
-                        input_nodes.push(node);
-                        input_nodes.len() - 1
-                    }
-                };
-                Operand::Input(index)
+                Operand::Input(input_index(Input::Node(node)))
             };
         }
-        Ok(Program { code, operands })
+        let mut currents = vec![0; code.branch_map.len()];
+        for (branch, local) in &code.branch_map {
+            currents[*local] = input_index(Input::Branch(branch.to_ascii_uppercase()));
+        }
+        Ok(Program {
+            code,
+            operands,
+            currents,
+        })
     };
     let mut rules = Vec::with_capacity(machine.rules.len());
     for rule in &machine.rules {
@@ -537,7 +552,7 @@ fn build(
             element.nodes.len()
         )));
     }
-    let input_ports: Vec<String> = (0..input_nodes.len())
+    let input_ports: Vec<String> = (0..inputs.len())
         .map(|index| format!("in{index}"))
         .collect();
     let output_ports: Vec<String> = (0..outputs.len())
@@ -545,18 +560,28 @@ fn build(
         .collect();
     let ports = input_ports
         .iter()
-        .map(|port| PortSpec::input(port.as_str(), PortType::DifferentialVoltage))
+        .zip(&inputs)
+        .map(|(port, input)| {
+            let port_type = match input {
+                Input::Node(_) => PortType::DifferentialVoltage,
+                Input::Branch(_) => PortType::VoltageName,
+            };
+            PortSpec::input(port.as_str(), port_type)
+        })
         .chain(
             output_ports
                 .iter()
                 .map(|port| PortSpec::output(port.as_str(), PortType::DifferentialCurrent)),
         )
         .collect();
-    let connections: Vec<XspicePort> = input_nodes
+    let connections: Vec<XspicePort> = inputs
         .iter()
-        .map(|node| XspicePort::DifferentialVoltage {
-            pos: node.clone(),
-            neg: "0".to_string(),
+        .map(|input| match input {
+            Input::Node(node) => XspicePort::DifferentialVoltage {
+                pos: node.clone(),
+                neg: "0".to_string(),
+            },
+            Input::Branch(branch) => XspicePort::VoltageName(branch.clone()),
         })
         .chain(
             element

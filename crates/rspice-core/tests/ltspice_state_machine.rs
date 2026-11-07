@@ -540,3 +540,34 @@ R2 qb 0 1K
     assert_crossings("o1", &run.crossings("o1", 0.5), &us(501.5), 1e-9);
     assert_crossings("p1", &run.crossings("p1", 0.5), &us(501.2), 1e-9);
 }
+
+#[test]
+fn rules_read_branch_currents() {
+    let deck = "* overcurrent latches
+Vs in 0 PWL(0 0 1m 2)
+Rl in 0 1k
+L1 in a 1m
+Ra a 0 2k
+R1 2 0 1K
+R2 3 0 1K
+.machine
+.state ok 0
+.state trip 1
+.rule ok trip -I(Vs) > 1.5m
+.output (2) state
+.endmachine
+.machine
+.state ok 0
+.state trip 1
+.rule ok trip I(L1) > 0.4m
+.output (3) state
+.endmachine
+.end
+";
+    let run = Run::new(deck, 1e-3, &["2", "3"]);
+    // LTspice 26.1.1 batch: the source current reaches 1.5 mA at 500.167 us
+    // and the inductor's 0.4 mA at 400.5 us, half a microsecond behind the
+    // ramp.
+    assert_crossings("I(Vs)", &run.crossings("2", 0.5), &[500.166667e-6], 5e-9);
+    assert_crossings("I(L1)", &run.crossings("3", 0.5), &[400.500002e-6], 5e-9);
+}
