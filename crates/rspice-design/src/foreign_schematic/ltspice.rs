@@ -40,6 +40,7 @@ pub fn parse_asc(source: &str) -> Result<ForeignSchematic, ForeignParseError> {
                     position,
                     name,
                     port: None,
+                    facing: None,
                 });
             }
             "IOPIN" => {

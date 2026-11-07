@@ -65,6 +65,9 @@ pub fn parse_qsch(bytes: &[u8]) -> Result<ForeignSchematic, ForeignParseError> {
                         name
                     },
                     port: None,
+                    facing: Some(text_run(
+                        numbers_after_points(fields).get(1).map(String::as_str),
+                    )),
                 });
             }
             "junction" => {
@@ -316,6 +319,21 @@ fn component(node: &Node) -> Result<ForeignSymbol, ForeignParseError> {
 /// text counter-clockwise in quarters, which keeps it upright on a turned
 /// symbol.
 fn text_alignment(code: Option<&str>) -> String {
+    let run = text_run(code);
+    match (run.x, run.y) {
+        (1, _) => "Left",
+        (-1, _) => "Right",
+        (_, 1) => "Top",
+        (_, -1) => "Bottom",
+        _ => "Center",
+    }
+    .to_owned()
+}
+
+/// The way a text runs from its anchor, read from QSPICE's text code: a unit
+/// step, or none for a text centred on its anchor. A net label's code says
+/// the same of its name, and of a ground's glyph.
+fn text_run(code: Option<&str>) -> ForeignPoint {
     let code = code.and_then(|code| code.parse::<u8>().ok()).unwrap_or(7);
     let across = match (code >> 2) & 3 {
         1 => 1,
@@ -335,14 +353,7 @@ fn text_alignment(code: Option<&str>) -> String {
     for _ in 0..(code >> 5) & 3 {
         run = ForeignPoint::new(run.y, -run.x);
     }
-    match (run.x, run.y) {
-        (1, _) => "Left",
-        (-1, _) => "Right",
-        (_, 1) => "Top",
-        (_, -1) => "Bottom",
-        _ => "Center",
-    }
-    .to_owned()
+    run
 }
 
 /// QSPICE's orientation code: the low three bits turn the symbol

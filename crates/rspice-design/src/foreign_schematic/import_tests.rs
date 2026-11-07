@@ -10,6 +10,7 @@ use super::*;
 use crate::connectivity::extract;
 use crate::resolved_symbol::ResolvedCellSymbol;
 use crate::schematic::component_type::ComponentType;
+use crate::schematic::rotation::Rotation;
 
 /// A library that knows a few symbols and model files, as a user's LTspice
 /// installation would.
@@ -707,7 +708,7 @@ const QSPICE: &str = "«schematic
     »
   »
   «net (0,-400) 1 13 0 \"GND\"»
-  «net (1000,400) 1 13 0 \"GND\"»
+  «net (1000,400) 1 7 0 \"GND\"»
   «wire (0,-200) (0,-400) \"GND\"»
   «wire (0,200) (0,400) \"in\"»
   «wire (0,400) (400,400) \"in\"»
@@ -762,6 +763,22 @@ fn a_qspice_drawing_joins_what_its_wire_names_join_and_refuses_a_dll() {
             .filter(|kind| **kind == ComponentType::Ground)
             .count(),
         2
+    );
+    // A ground QSPICE draws running right faces right, its terminal on the
+    // net label's point.
+    let grounds = imported
+        .document
+        .components
+        .iter()
+        .filter(|component| component.kind == ComponentType::Ground)
+        .map(|ground| (ground.rotation, ground.terminal_positions()[0].1))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        grounds,
+        [
+            (Rotation::R0, Point::new(0, 40)),
+            (Rotation::R270, Point::new(100, -40))
+        ]
     );
     assert!(
         imported

@@ -300,6 +300,10 @@ fn a_qsch_drawing_reads_its_components_nets_and_texts() {
 
     assert_eq!(drawing.flags[0].name, "0");
     assert_eq!(drawing.flags[1].name, "OUT");
+    // A net label's code says which way it runs: the ground left, the name
+    // up.
+    assert_eq!(drawing.flags[0].facing, Some(ForeignPoint::new(-1, 0)));
+    assert_eq!(drawing.flags[1].facing, Some(ForeignPoint::new(0, -1)));
     // The drawing is turned over: QSPICE's y points up.
     assert_eq!(drawing.flags[1].position, ForeignPoint::new(900, 0));
     assert_eq!(drawing.junctions, vec![ForeignPoint::new(200, 0)]);

@@ -265,6 +265,9 @@ pub struct ForeignFlag {
     pub name: String,
     /// Set when an `IOPIN` makes the flag a pin of the drawing.
     pub port: Option<ForeignPortDirection>,
+    /// The way the flag runs from its point, where the drawing says so
+    /// (QSPICE); a ground with none hangs below its point.
+    pub facing: Option<ForeignPoint>,
 }
 
 impl ForeignFlag {

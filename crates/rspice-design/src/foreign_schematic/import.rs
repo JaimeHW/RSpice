@@ -1721,7 +1721,20 @@ impl Builder<'_> {
             self.anchors.insert(at);
             let id = self.id();
             if flag.is_ground() {
-                let mut ground = Component::new(id, ComponentType::Ground, at + Point::new(0, 10));
+                let mut ground = Component::new(id, ComponentType::Ground, Point::default());
+                ground.rotation = match flag.facing.map(|run| (run.x.signum(), run.y.signum())) {
+                    Some((1, _)) => Rotation::R270,
+                    Some((-1, _)) => Rotation::R90,
+                    Some((0, -1)) => Rotation::R180,
+                    _ => Rotation::R0,
+                };
+                let terminal = ground
+                    .terminal_positions()
+                    .into_iter()
+                    .next()
+                    .map(|(_, point)| point)
+                    .unwrap_or_default();
+                ground.pos = at - terminal;
                 ground.name = format!("GND{id}");
                 self.terminals.extend(
                     ground
