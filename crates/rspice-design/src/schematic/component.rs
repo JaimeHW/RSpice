@@ -549,6 +549,9 @@ pub struct Component {
     /// definition has moved on — both by comparison, so neither can go stale.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stimulus_provenance: Option<super::stimulus_provenance::StimulusProvenance>,
+    /// Purchasing data for the bill of materials.
+    #[serde(default, skip_serializing_if = "super::bom::BomFields::is_empty")]
+    pub bom: super::bom::BomFields,
 }
 
 /// Component fields exactly as a project file on disk spells them.
@@ -584,6 +587,8 @@ struct PersistedComponent {
     multiplicity: Option<InstanceMultiplicity>,
     #[serde(default)]
     stimulus_provenance: Option<super::stimulus_provenance::StimulusProvenance>,
+    #[serde(default)]
+    bom: super::bom::BomFields,
 }
 
 impl From<PersistedComponent> for Component {
@@ -606,6 +611,7 @@ impl From<PersistedComponent> for Component {
             execution_terminal_layout: None,
             multiplicity: persisted.multiplicity,
             stimulus_provenance: persisted.stimulus_provenance,
+            bom: persisted.bom,
         };
         component.adopt_params_multiplicity();
         component.adopt_engine_source_parameter_spellings();
@@ -639,6 +645,7 @@ impl Component {
             multiplicity: None,
             stimulus_provenance: None,
             execution_terminal_layout: None,
+            bom: super::bom::BomFields::default(),
         }
     }
 

@@ -2,6 +2,7 @@
 
 pub mod array;
 pub mod array_edit;
+pub mod bom;
 pub mod bus;
 pub mod bus_edit;
 pub mod bus_route;
