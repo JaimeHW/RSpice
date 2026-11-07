@@ -46,6 +46,7 @@ use std::time::Duration;
 pub(in crate::engine) mod data_dependencies;
 mod frequency_output;
 mod ground_reference;
+mod lead_current_meters;
 mod machine;
 mod model_resolution;
 mod model_safety;
@@ -6446,6 +6447,15 @@ impl Engine {
                 .iter()
                 .map(|probe| probe.source_name.to_ascii_uppercase()),
         );
+        let lead_meters = if self.config.spice_dialect == SpiceDialect::Xyce {
+            Vec::new()
+        } else {
+            lead_current_meters::materialize(
+                &mut flat_elements,
+                &mut known_device_names,
+                self.config.resource_limits.max_flattened_elements,
+            )?
+        };
         validate_xyce_memristor_generated_namespaces(
             netlist,
             &flat_elements,
@@ -11138,6 +11148,10 @@ impl Engine {
             circuit.resolve_dc_inductor_loops();
         }
 
+        // A device read through its meter answers to its own name.
+        for (device, meter) in &lead_meters {
+            circuit.name_branch_after(meter, device);
+        }
         // Resolve behavioral source expression references once every node
         // exists.
         let no_device_names = HashSet::new();

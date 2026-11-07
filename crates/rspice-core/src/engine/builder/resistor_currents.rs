@@ -7,6 +7,21 @@ use super::*;
 
 /// The resistors, by upper-case name, whose current an expression reads.
 pub(super) fn read_as_currents(elements: &[Element]) -> HashSet<String> {
+    let operands = current_reads(elements);
+    if operands.is_empty() {
+        return operands;
+    }
+    elements
+        .iter()
+        .filter(|element| matches!(element.kind, ElementKind::Resistor { .. }))
+        .map(|element| element.name.to_ascii_uppercase())
+        .filter(|name| operands.contains(name))
+        .collect()
+}
+
+/// Every name, upper case, whose current a behavioral, switch-control or
+/// state-machine expression reads as `I(name)`.
+pub(super) fn current_reads(elements: &[Element]) -> HashSet<String> {
     let mut operands = HashSet::new();
     for element in elements {
         match &element.kind {
@@ -29,15 +44,7 @@ pub(super) fn read_as_currents(elements: &[Element]) -> HashSet<String> {
             _ => {}
         }
     }
-    if operands.is_empty() {
-        return operands;
-    }
-    elements
-        .iter()
-        .filter(|element| matches!(element.kind, ElementKind::Resistor { .. }))
-        .map(|element| element.name.to_ascii_uppercase())
-        .filter(|name| operands.contains(name))
-        .collect()
+    operands
 }
 
 /// Adds the upper-case name of every single-operand `I(name)` in `text`.

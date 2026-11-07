@@ -413,6 +413,20 @@ impl CircuitData {
         branch
     }
 
+    /// Name the branch `owner` carries after `name` too, and report it by
+    /// `name`: a meter in series with a device that has no branch of its own
+    /// carries that device's current.
+    pub(crate) fn name_branch_after(&mut self, owner: &str, name: &str) {
+        let Some(branch) = self.get_branch_by_name(owner) else {
+            return;
+        };
+        if let Some(slot) = self.branch_name_by_ordinal.get_mut(branch - 1) {
+            *slot = Some(name.to_string());
+        }
+        self.branch_names.insert(name.to_string(), branch);
+        self.branch_names.insert(name.to_uppercase(), branch);
+    }
+
     /// Look up a branch ordinal by element name (for CCCS/CCVS control element)
     /// Returns None if the element is not found
     pub fn get_branch_by_name(&self, name: &str) -> Option<NodeId> {

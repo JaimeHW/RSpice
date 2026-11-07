@@ -840,6 +840,100 @@ fn a_resistor_current_is_readable_in_expressions() {
     );
 }
 
+// LTspice 26.1.1 batch; QSPICE refuses every one of these reads. A diode,
+// a B, I or G current source and a W switch report their current from the
+// first terminal to the second, and an S switch the other way round. B9
+// reads its own current: LTspice stops its iteration at V(q) = -1.99951,
+// short of the fixed point -2 a Newton solve reaches.
+#[test]
+fn a_branchless_device_current_is_readable_in_expressions() {
+    let netlist = parse(
+        "lead currents of branchless devices\n\
+         V1 a 0 1\n\
+         R1 a b 100\n\
+         D1 b 0 DX\n\
+         .model DX D(Is=1e-14)\n\
+         B1 c 0 I=2m*V(a)\n\
+         R2 c 0 1k\n\
+         I1 d 0 3m\n\
+         R5 d 0 1k\n\
+         G1 e 0 a 0 4m\n\
+         R6 e 0 1k\n\
+         S1 a f a 0 SWX\n\
+         S2 0 h a 0 SWX\n\
+         R7 f 0 50\n\
+         R9 a h 50\n\
+         .model SWX SW(Ron=50 Roff=1Meg Vt=0.5)\n\
+         W1 a k V1 WX\n\
+         R10 k 0 50\n\
+         .model WX CSW(Ron=50 Roff=1Meg It=-1)\n\
+         B9 q 0 I=1m+0.5*I(B9)\n\
+         R11 q 0 1k\n\
+         B2 o1 0 V=1k*I(D1)\n\
+         B3 o2 0 V=1k*I(B1)\n\
+         B4 o3 0 V=1k*I(I1)\n\
+         B5 o4 0 V=1k*I(G1)\n\
+         B6 o5 0 V=1k*I(S1)\n\
+         B7 o6 0 V=1k*I(S2)\n\
+         B8 o7 0 V=1k*I(W1)\n\
+         X1 a s cell\n\
+         .subckt cell in out\n\
+         RA in m 100\n\
+         DA m 0 DX\n\
+         BA out 0 V=1k*I(DA)\n\
+         .ends\n\
+         .op\n\
+         .end\n",
+    );
+    let op = Engine::default()
+        .run_dc_op(&netlist)
+        .expect("operating point solves");
+    let voltage = |node: &str| {
+        op.try_voltage_named(node)
+            .unwrap_or_else(|| panic!("no voltage for {node}"))
+    };
+    // The diode's own operating point sits 3 ppm from LTspice's; its read
+    // current is the one through R1.
+    let diode_current = (voltage("a") - voltage("b")) / 100.0;
+    for node in ["o1", "s"] {
+        assert_close(
+            &format!("V({node})"),
+            voltage(node),
+            3.151882330117470,
+            2e-5,
+        );
+        assert_close(
+            &format!("V({node})"),
+            voltage(node),
+            1e3 * diode_current,
+            1e-9,
+        );
+    }
+    for (node, expected) in [
+        ("o2", 2.0),
+        ("o3", 3.0),
+        ("o4", 4.0),
+        ("o5", -10.00000000025),
+        ("o6", 10.00000000025),
+        ("o7", 10.0),
+        ("q", -2.0),
+    ] {
+        assert_close(&format!("V({node})"), voltage(node), expected, 1e-6);
+    }
+
+    let error = Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce))
+        .run_dc_op(&parse(
+            "xyce lead current\nV1 a 0 1\nD1 a 0 DX\n.model DX D\nB1 o 0 V={I(D1)*1k}\nR3 o 0 1\n.op\n.end\n",
+        ))
+        .expect_err("Xyce reads no diode current");
+    assert!(
+        error
+            .to_string()
+            .contains("lead_current_not_solution_variable"),
+        "{error}"
+    );
+}
+
 // QSPICE 2026 batch, which alone reads a switch model written on the switch
 // card (LTspice refuses it): V(a)=V(b)=V(g)=0.759746927, V(e)=9.900990e-3,
 // V(f)=1.960784e-2, V(h)=0.999000999.
