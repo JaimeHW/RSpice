@@ -454,3 +454,89 @@ fn an_imported_schematic_is_project_content_a_run_reads() {
     assert_eq!((prepared.pvt_point_count, prepared.task_count), (2, 2));
     std::fs::remove_dir_all(&folder).ok();
 }
+
+/// Imports `drawing` as `name`.asc and answers the sheet it lies on, and
+/// whether everything drawn lies inside that sheet's drawing area and clear
+/// of its title block.
+fn import_onto_sheet(name: &str, drawing: &str) -> (String, bool, bool) {
+    let folder = drawing_folder();
+    let file = folder.join(format!("{name}.asc"));
+    std::fs::write(&file, drawing).expect("schematic");
+    let mut app = RSpiceApp::test_instance();
+    app.state.open_project_session();
+    import_foreign_schematic_file(&mut app, &file, ForeignTool::Ltspice).expect("imports");
+    std::fs::remove_dir_all(&folder).ok();
+    let model = &mut app.state.model;
+    let sheet = model.active_drawing_sheet();
+    let own = model.active_sheet_catalog().is_some();
+    let (min_x, min_y, max_x, max_y) = model
+        .frame_symbol_context()
+        .content_bounds(model.schematic.document())
+        .expect("something drawn");
+    let area = sheet.geometry.drawing_area;
+    let inside = f64::from(min_x) >= area.min_x
+        && f64::from(min_y) >= area.min_y
+        && f64::from(max_x) <= area.max_x
+        && f64::from(max_y) <= area.max_y;
+    let clear = sheet
+        .geometry
+        .title_block
+        .is_none_or(|block| f64::from(max_x) < block.min_x || f64::from(max_y) < block.min_y);
+    let pins_on_grid = model
+        .schematic
+        .document()
+        .components
+        .iter()
+        .all(|part| part.pos.x % 10 == 0 && part.pos.y % 10 == 0);
+    assert!(pins_on_grid);
+    (
+        format!(
+            "{} {}",
+            sheet.format.authored_size.label(),
+            sheet.format.orientation.label()
+        ) + if own { " (own)" } else { "" },
+        inside,
+        clear,
+    )
+}
+
+#[test]
+fn an_imported_drawing_lies_inside_the_smallest_sheet_that_holds_it() {
+    // Far from the origin, and small: the project's A4 sheet holds it.
+    let small = "Version 4
+SHEET 1 880 680
+         WIRE -3984 -3000 -4096 -3000
+FLAG -4096 -2920 0
+FLAG -3984 -2920 0
+         SYMBOL voltage -4096 -3016 R0
+SYMATTR InstName V1
+SYMATTR Value 1
+         SYMBOL res -4000 -3016 R0
+SYMATTR InstName R1
+SYMATTR Value 1k
+";
+    assert_eq!(
+        import_onto_sheet("small", small),
+        ("ISO A4 landscape".to_owned(), true, true)
+    );
+    // Two parts 2400 units apart need more than A4 and A3 hold.
+    let wide = "Version 4
+SHEET 1 880 680
+         WIRE 2416 0 0 0
+FLAG 0 80 0
+FLAG 2416 80 0
+         SYMBOL voltage 0 -16 R0
+SYMATTR InstName V1
+SYMATTR Value 1
+         SYMBOL res 2400 -16 R0
+SYMATTR InstName R1
+SYMATTR Value 1k
+";
+    let (sheet, inside, clear) = import_onto_sheet("wide", wide);
+    assert!(sheet.ends_with("landscape (own)"), "{sheet}");
+    assert!(
+        !sheet.starts_with("ISO A4") && !sheet.starts_with("ISO A3"),
+        "{sheet}"
+    );
+    assert!(inside && clear, "{sheet}");
+}

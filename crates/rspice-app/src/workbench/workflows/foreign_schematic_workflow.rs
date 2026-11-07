@@ -12,6 +12,7 @@
 //! sheet as text. Every notice is written to the log.
 
 mod plan;
+mod sheet;
 #[cfg(test)]
 mod tests;
 
@@ -40,6 +41,7 @@ use crate::workbench::workflows::file_workflow::{
 };
 
 use plan::{ForeignPlan, plan_from_cards};
+use sheet::{OwnSheet, place_on_sheet};
 
 /// The file-picker filter and the gesture's name, per source program.
 const fn picker(tool: ForeignTool) -> (&'static str, &'static str, &'static str) {
@@ -132,12 +134,15 @@ pub(crate) fn import_foreign_schematic_file(
     bind_model_files(&mut tree, &library, &mut includes);
     keep_on_sheet(&mut tree.document, &plan, &mut notices);
 
-    add_symbol_cells(&mut app.state, &library, &mut tree.cells)?;
+    let mut own_sheets = add_symbol_cells(&mut app.state, &library, &mut tree.cells)?;
+    let top_sheet = place_on_sheet(&app.state.model, &mut tree.document);
     let reference = import_loaded_schematic_as_cell_view(
         &mut app.state,
         SchematicState::from_document(std::mem::take(&mut tree.document)),
         SchematicLoadOrigin::PersistentPath(path),
     )?;
+    own_sheets.extend(top_sheet.map(|sheet| (reference.clone(), sheet)));
+    give_own_sheets(&mut app.state, own_sheets, &mut notices);
     adopt_as_top_cell(&mut app.state, &reference, &mut notices);
     add_model_libraries(
         &mut app.state,
@@ -427,14 +432,16 @@ fn keep_on_sheet(
     }
 }
 
-/// Adds the symbol cells, and each block's schematic, to the library.
+/// Adds the symbol cells, and each block's schematic, to the library, each
+/// schematic placed on its sheet. Returns the sheets the schematics need
+/// in place of the project's.
 fn add_symbol_cells(
     state: &mut AppState,
     library: &str,
     cells: &mut Vec<(ForeignSymbolCell, Option<SchematicDocument>)>,
-) -> Result<(), String> {
+) -> Result<Vec<(CellViewRef, OwnSheet)>, String> {
     let Some((first, _)) = cells.first() else {
-        return Ok(());
+        return Ok(Vec::new());
     };
     let first = first.cell.clone();
     let mut candidate = state.model.library_manager.clone();
@@ -463,7 +470,11 @@ fn add_symbol_cells(
         },
     )?;
     state.model.library_manager = candidate;
-    for (reference, document) in blocks {
+    let mut own_sheets = Vec::new();
+    for (reference, mut document) in blocks {
+        if let Some(sheet) = place_on_sheet(&state.model, &mut document) {
+            own_sheets.push((reference.clone(), sheet));
+        }
         let mut schematic = SchematicState::from_document(document);
         schematic.session.is_dirty = true;
         schematic.session.editor.snap_engine = state.design.schematic_snap.clone();
@@ -474,7 +485,77 @@ fn add_symbol_cells(
             .insert_schematic_editor(reference.key(), schematic);
     }
     state.model.publish_project_library_mutation(mutation);
-    Ok(())
+    Ok(own_sheets)
+}
+
+/// Gives each schematic too large for the project's sheet its own, as one
+/// project transaction.
+fn give_own_sheets(
+    state: &mut AppState,
+    sheets: Vec<(CellViewRef, OwnSheet)>,
+    notices: &mut Vec<(ForeignNoticeSeverity, String)>,
+) {
+    if sheets.is_empty() {
+        return;
+    }
+    let before = (*state.model.workspace.content.design_management).clone();
+    let mut candidate = before.clone();
+    let mut given = Vec::new();
+    for (reference, OwnSheet { format, objects }) in sheets {
+        let key = reference.key();
+        let label = format!(
+            "{} {}",
+            format.authored_size.label(),
+            format.orientation.label()
+        );
+        let outcome = candidate
+            .bootstrap_for_cell_view(&key, "Sheet 1", objects)
+            .and_then(|sheet| {
+                let catalog = candidate.sheet_catalog_mut(&key).ok_or_else(|| {
+                    rspice_design_model::design_management::DesignManagementError::MissingReference {
+                        domain: "sheet catalog",
+                        identity: key.clone(),
+                    }
+                })?;
+                // The new size keeps the sheet's own title fields.
+                let (revision, format) = catalog.find(sheet).map_or((0, format.clone()), |held| {
+                    (
+                        held.revision(),
+                        format.with_target_sheet_title_fields(held.page_format()),
+                    )
+                });
+                catalog.update_sheet_page_format(sheet, revision, format)
+            });
+        match outcome {
+            Ok(_) => given.push(format!(
+                "{} is drawn on {label}: the project's sheet does not hold it.",
+                reference.display_path()
+            )),
+            Err(error) => notices.push((
+                ForeignNoticeSeverity::Notice,
+                format!(
+                    "{} keeps the project's sheet, which does not hold it: {error}.",
+                    reference.display_path()
+                ),
+            )),
+        }
+    }
+    match state
+        .model
+        .commit_sheet_catalog("import drawing sheets", before, candidate)
+    {
+        Ok(()) => notices.extend(
+            given
+                .into_iter()
+                .map(|message| (ForeignNoticeSeverity::Notice, message)),
+        ),
+        Err(error) => notices.push((
+            ForeignNoticeSeverity::Notice,
+            format!(
+                "The imported drawings keep the project's sheet, which does not hold them: {error}."
+            ),
+        )),
+    }
 }
 
 /// The executable view of a cell whose model a file defines: the file, the
