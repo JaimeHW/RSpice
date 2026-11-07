@@ -182,3 +182,54 @@ R3 a 0 1k mfg=Vishay pn=CRCW08051K00
     assert_close("V(b)", values[0], 0.632120, 2e-4);
     assert_close("V(c)", values[1], 9.999e-5, 1e-8);
 }
+
+// LTspice 26.1.1 decides: QSPICE ignores VTO and DIR on a G source ("Ignoring
+// unknown instance parameter"). LTspice: 0.01089, -0.71289, 0, 0.025, 0.07,
+// 0.06889 and 0.0050625.
+#[test]
+fn a_g_source_with_vto_and_dir_is_a_one_sided_square_law() {
+    let netlist = parse(
+        "* G square law
+V1 c1 0 1
+G1 0 o1 c1 0 100m vto=670m dir=1
+R1 o1 0 1
+V2 c2 0 -2
+G2 0 o2 c2 0 100m vto=670m dir=-1
+R2 o2 0 1
+V3 c3 0 0.5
+G3 0 o3 c3 0 100m vto=670m dir=1
+R3 o3 0 1
+V4 c4 0 0.5
+G4 0 o4 c4 0 100m dir=1
+R4 o4 0 1
+V5 c5 0 0.7
+G5 0 o5 c5 0 100m vto=670m dir=0.5
+R5 o5 0 1
+V6 c6 0 1.5
+G6 0 o6 c6 0 100m dir=2 vto=670m
+R6 o6 0 1
+X1 c6 o7 sq
+R7 o7 0 1
+.subckt sq c o
+G1 0 o c 0 1m vto=-.75 dir=1
+.ends
+.op
+.end
+",
+    );
+    let op = Engine::default()
+        .run_dc_op(&netlist)
+        .expect("operating point solves");
+    for (node, expected) in [
+        ("o1", 0.01089),
+        ("o2", -0.71289),
+        ("o3", 0.0),
+        ("o4", 0.025),
+        ("o5", 0.07),
+        ("o6", 0.06889),
+        ("o7", 0.0050625),
+    ] {
+        let value = op.try_voltage_named(node).expect("node voltage");
+        assert_close(&format!("V({node})"), value, expected, 1e-9);
+    }
+}

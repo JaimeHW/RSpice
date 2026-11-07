@@ -8082,6 +8082,91 @@ fn validate_resolved_source_multiplicity(
     Ok(())
 }
 
+/// LTspice's `VTO=` and `DIR=` on a linear G source. A nonzero `DIR` makes
+/// the source a one-sided square law: `gain·(V-VTO)²` while the control
+/// voltage is above `VTO` for a positive `DIR`, `-gain·(V-VTO)²` while it is
+/// below for a negative one, and no current otherwise. Only the sign of the
+/// integer part of `DIR` counts; with `DIR` zero or absent the source stays
+/// linear and `VTO` has no effect (LTspice 26.1.1 batch runs).
+#[derive(Debug, Clone, Copy)]
+struct SquareLawThreshold {
+    vto: Value,
+    conducts_above: bool,
+}
+
+impl SquareLawThreshold {
+    fn current(self, gain: &str, ctrl_pos: &str, ctrl_neg: &str) -> String {
+        let vto = if self.vto < 0.0 {
+            format!("({})", self.vto)
+        } else {
+            self.vto.to_string()
+        };
+        let control = format!("V({ctrl_pos},{ctrl_neg})");
+        let (sign, overdrive) = if self.conducts_above {
+            ("", format!("max({control}-{vto},0)"))
+        } else {
+            ("-", format!("max({vto}-{control},0)"))
+        };
+        format!("{sign}{gain}*{overdrive}*{overdrive}")
+    }
+}
+
+/// Takes `VTO=` and `DIR=` off a linear G line, wherever they stand after the
+/// control nodes. Both need values known where the source is read.
+fn take_square_law_threshold(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    name: &str,
+) -> Result<Option<SquareLawThreshold>, ParseError> {
+    let mut vto = 0.0;
+    let mut dir = 0.0;
+    loop {
+        let base = stream.checkpoint();
+        let tokens = stream.remaining_line_tokens();
+        let found = tokens
+            .iter()
+            .enumerate()
+            .find_map(|(index, token)| match &token.kind {
+                TokenKind::Ident(word)
+                    if (word.eq_ignore_ascii_case("VTO") || word.eq_ignore_ascii_case("DIR"))
+                        && matches!(
+                            tokens.get(index + 1).map(|token| &token.kind),
+                            Some(TokenKind::Equals)
+                        ) =>
+                {
+                    Some((index, word.to_ascii_uppercase()))
+                }
+                _ => None,
+            });
+        let Some((index, key)) = found else {
+            break;
+        };
+        let mut probe = stream.clone();
+        probe.restore_checkpoint(base + index + 2);
+        let value = expect_value(&mut probe, line_num, params)
+            .ok()
+            .filter(|value| value.is_finite())
+            .ok_or_else(|| ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    "G source '{name}' {key}= needs a finite value known where the source is read"
+                ),
+            })?;
+        let end = probe.checkpoint();
+        stream.remove_tokens(base + index..end);
+        if key == "VTO" {
+            vto = value;
+        } else {
+            dir = value.trunc();
+        }
+    }
+    Ok((dir != 0.0).then_some(SquareLawThreshold {
+        vto,
+        conducts_above: dir > 0.0,
+    }))
+}
+
 /// Shared implementation for E (VCVS) and G (VCCS) parsing, covering the
 /// linear, POLY, VALUE, and TABLE forms. Extended forms lower onto the
 /// behavioral-source engine, which provides Newton linearization, AC
@@ -8435,6 +8520,11 @@ fn parse_voltage_controlled_source(
                 )?);
                 return Ok(VoltageControlledSourceParseKind::Ordinary);
             }
+            let threshold = if is_voltage_output {
+                None
+            } else {
+                take_square_law_threshold(stream, line_num, params, &name)?
+            };
             let mut gain_direction = 0.0.into();
             let (gain, gain_expr) = expect_deferrable_controlled_source_value(
                 stream,
@@ -8457,6 +8547,7 @@ fn parse_voltage_controlled_source(
                     .map(|_| &mut multiplicity_direction),
             )?;
             if !defer_simple_param_refs
+                && threshold.is_none()
                 && gain_expr.is_none()
                 && multiplicity.value_expr.is_none()
                 && let Some(capture) = parameter_direction
@@ -8471,7 +8562,11 @@ fn parse_voltage_controlled_source(
                     ),
                 );
             }
-            let kind = if is_voltage_output {
+            let kind = if let Some(threshold) = threshold {
+                let gain =
+                    gain_expr.map_or_else(|| format!("({gain})"), |expr| format!("({expr})"));
+                lower_behavioral(threshold.current(&gain, &ctrl_pos, &ctrl_neg), multiplicity)
+            } else if is_voltage_output {
                 ElementKind::Vcvs {
                     gain,
                     gain_expr,
