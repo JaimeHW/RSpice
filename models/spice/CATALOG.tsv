@@ -7,22 +7,22 @@
 # can still be traced to its source, but not a part a user can select.
 # name	kind	device	pack	path	line	restricted	scope
 RSPICE_DIODE	model	diode	rspice-foundation	lib/foundation.lib	10	0	top
-RSPICE_FN_555	subckt	subckt	rspice-functional	lib/functional.lib	153	0	top
-RSPICE_FN_AND	subckt	subckt	rspice-functional	lib/functional.lib	114	0	top
-RSPICE_FN_BUF	subckt	subckt	rspice-functional	lib/functional.lib	111	0	top
+RSPICE_FN_555	subckt	subckt	rspice-functional	lib/functional.lib	162	0	top
+RSPICE_FN_AND	subckt	subckt	rspice-functional	lib/functional.lib	123	0	top
+RSPICE_FN_BUF	subckt	subckt	rspice-functional	lib/functional.lib	120	0	top
 RSPICE_FN_COMPARATOR	subckt	subckt	rspice-functional	lib/functional.lib	54	0	top
-RSPICE_FN_COUNTER	subckt	subckt	rspice-functional	lib/functional.lib	187	0	top
-RSPICE_FN_INV	subckt	subckt	rspice-functional	lib/functional.lib	108	0	top
-RSPICE_FN_NAND	subckt	subckt	rspice-functional	lib/functional.lib	117	0	top
-RSPICE_FN_NOR	subckt	subckt	rspice-functional	lib/functional.lib	123	0	top
+RSPICE_FN_COUNTER	subckt	subckt	rspice-functional	lib/functional.lib	196	0	top
+RSPICE_FN_INV	subckt	subckt	rspice-functional	lib/functional.lib	117	0	top
+RSPICE_FN_NAND	subckt	subckt	rspice-functional	lib/functional.lib	126	0	top
+RSPICE_FN_NOR	subckt	subckt	rspice-functional	lib/functional.lib	132	0	top
 RSPICE_FN_OPAMP	subckt	subckt	rspice-functional	lib/functional.lib	23	0	top
-RSPICE_FN_OR	subckt	subckt	rspice-functional	lib/functional.lib	120	0	top
-RSPICE_FN_OTA	subckt	subckt	rspice-functional	lib/functional.lib	77	0	top
-RSPICE_FN_PHASEDET	subckt	subckt	rspice-functional	lib/functional.lib	180	0	top
-RSPICE_FN_SAMPLEHOLD	subckt	subckt	rspice-functional	lib/functional.lib	196	0	top
-RSPICE_FN_SCHMITT_BUF	subckt	subckt	rspice-functional	lib/functional.lib	137	0	top
-RSPICE_FN_SCHMITT_INV	subckt	subckt	rspice-functional	lib/functional.lib	132	0	top
-RSPICE_FN_XOR	subckt	subckt	rspice-functional	lib/functional.lib	126	0	top
+RSPICE_FN_OR	subckt	subckt	rspice-functional	lib/functional.lib	129	0	top
+RSPICE_FN_OTA	subckt	subckt	rspice-functional	lib/functional.lib	80	0	top
+RSPICE_FN_PHASEDET	subckt	subckt	rspice-functional	lib/functional.lib	189	0	top
+RSPICE_FN_SAMPLEHOLD	subckt	subckt	rspice-functional	lib/functional.lib	205	0	top
+RSPICE_FN_SCHMITT_BUF	subckt	subckt	rspice-functional	lib/functional.lib	146	0	top
+RSPICE_FN_SCHMITT_INV	subckt	subckt	rspice-functional	lib/functional.lib	141	0	top
+RSPICE_FN_XOR	subckt	subckt	rspice-functional	lib/functional.lib	135	0	top
 RSPICE_LED_BLUE	model	diode	rspice-foundation	lib/foundation.lib	26	0	top
 RSPICE_LED_GREEN	model	diode	rspice-foundation	lib/foundation.lib	25	0	top
 RSPICE_LED_RED	model	diode	rspice-foundation	lib/foundation.lib	24	0	top

@@ -477,6 +477,68 @@ fn ota_bias_input_sits_above_v_minus_and_its_current_returns_there() {
 }
 
 #[test]
+fn ota_input_bias_currents_and_noise_are_its_parameters() {
+    // Each input returns to ground through 10 kOhm: IN+ draws IB + IOS/2,
+    // IN- draws IB - IOS/2, and RIN joins them.
+    let deck = format!(
+        "* ota input stage
+{SUPPLIES}IB vp iabc 100u
+RP inp 0 10k
+RN inn 0 10k
+X1 inp inn iabc vp vn out RSPICE_FN_OTA IB=1u IOS=0.2u RIN=1Meg
+VO out 0 0
+.end
+"
+    );
+    let [inp, inn] = op_voltages(&deck, &["inp", "inn"])[..] else {
+        unreachable!()
+    };
+    assert_close("V(IN+)", inp, -10.980_392e-3, 1e-8);
+    assert_close("V(IN-)", inn, -9.019_608e-3, 1e-8);
+
+    let noise = |deck: &str, frequencies: &[f64]| -> Vec<f64> {
+        Engine::default()
+            .run_noise_named_with_input_source(
+                &parse(deck),
+                "out",
+                None,
+                "VIN",
+                frequencies,
+                300.15,
+            )
+            .expect("noise solves")
+            .iter()
+            .map(|point| point.output_noise_density.sqrt())
+            .collect()
+    };
+    // 100 uA of bias into a noiseless 1 kOhm load beside ROUT: the noise at
+    // the output is the input's times IABC/VLIN times the load.
+    let gain = 100e-6 / 51.7e-3 * (1e3 * 10e6 / (1e3 + 10e6));
+    let ota = |source: &str, parameters: &str| {
+        format!(
+            "* ota noise
+{SUPPLIES}IB vp iabc 100u
+{source}
+X1 inp 0 iabc vp vn out RSPICE_FN_OTA {parameters}
+RL out 0 1k NOISY=0
+.end
+"
+        )
+    };
+    // Driven from a stiff source, the input carries EN alone, with its corner.
+    let stiff = ota("VIN inp 0 0 AC 1", "ENK=100");
+    for (density, frequency) in noise(&stiff, &[10.0, 1e4]).into_iter().zip([10.0_f64, 1e4]) {
+        let expected = 7e-9 * (1.0 + 100.0 / frequency).sqrt() * gain;
+        assert_close("en", density, expected, 2e-3 * expected);
+    }
+    // IN flows through a noiseless 10 kOhm source resistance.
+    let resistive = ota("VIN src 0 0 AC 1\nRS src inp 10k NOISY=0", "EN=0 IN=1p");
+    let density = noise(&resistive, &[1e4])[0];
+    let expected = 1e-12 * 10e3 * gain;
+    assert_close("in", density, expected, 2e-3 * expected);
+}
+
+#[test]
 fn gates_follow_their_truth_tables_at_their_levels_for_two_to_five_inputs() {
     // Every input combination on every gate drawn with two to five inputs,
     // the inputs it leaves off tied to ground; both levels on the inverter

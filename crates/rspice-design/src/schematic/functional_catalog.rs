@@ -384,7 +384,8 @@ const OTA_BLOCK: FunctionalBlock = FunctionalBlock {
 };
 
 /// A bipolar operational transconductance amplifier biased by the current
-/// into its IABC pin.
+/// into its IABC pin, with an LM13700's input voltage noise. Its input stage
+/// is the Op-Amp's.
 const OTA_PARAMETERS: &[FunctionalParameter] = &[
     number(
         "VLIN",
@@ -393,13 +394,33 @@ const OTA_PARAMETERS: &[FunctionalParameter] = &[
         "51.7m",
         "The output current is IABC·tanh(vd/VLIN), so the transconductance is IABC/VLIN; 51.7 mV is a bipolar pair's 2kT/q.",
     ),
+    OP_AMP_PARAMETERS[3],
+    OP_AMP_PARAMETERS[4],
+    OP_AMP_PARAMETERS[5],
+    OP_AMP_PARAMETERS[6],
+    OP_AMP_PARAMETERS[7],
     number(
-        "VOS",
-        "Input offset voltage",
-        "V",
-        "0",
-        "Added to the non-inverting input.",
+        "EN",
+        "Voltage noise",
+        "V/√Hz",
+        "7n",
+        "White input-referred voltage noise density.",
     ),
+    number(
+        "ENK",
+        "Voltage noise corner",
+        "Hz",
+        "0",
+        "1/f corner of the voltage noise; 0 leaves it white.",
+    ),
+    number(
+        "IN",
+        "Current noise",
+        "A/√Hz",
+        "0",
+        "White current noise density between the inputs.",
+    ),
+    OP_AMP_PARAMETERS[11],
     number(
         "ROUT",
         "Output resistance",
