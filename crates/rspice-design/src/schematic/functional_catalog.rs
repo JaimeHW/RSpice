@@ -1020,6 +1020,7 @@ static FUNCTIONAL_PARTS: &[FunctionalPartDescriptor] = &[
     discrete::FUSE,
     discrete::RELAY,
     discrete::OPTOCOUPLER,
+    discrete::DIAC,
 ];
 
 /// Every functional part, in catalog order.

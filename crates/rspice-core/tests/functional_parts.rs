@@ -1201,3 +1201,39 @@ IL3 c3 0 -1m
     let saturated = op_voltages(deck, &["c3"])[0];
     assert_close("VCESAT at half the photocurrent", saturated, 0.4, 1e-3);
 }
+
+#[test]
+fn diac_breaks_over_at_plus_and_minus_vbo_and_folds_back_by_dv() {
+    // A source ramping to +40 V and then -40 V through 1 kOhm and a 100 Ohm
+    // sense resistor: the diac blocks to +-VBO, leaking IBO there, then
+    // conducts at VBO - DV + I RON either way.
+    let deck = "* diac
+V1 s 0 PWL(0 0 1m 40 2m 40 2.001m -40 3m -40)
+R1 s a 1k
+X1 a b RSPICE_FN_DIAC
+RL b 0 100
+.end
+";
+    let tran = transient(deck, 3e-3, 0.2e-6);
+    let a = waveform(&tran, "a");
+    let b = waveform(&tran, "b");
+    let across = a.iter().zip(b).map(|(a, b)| a - b).collect::<Vec<_>>();
+    let peak = across.iter().copied().fold(f64::MIN, f64::max);
+    let trough = across.iter().copied().fold(f64::MAX, f64::min);
+    assert_close("+VBO", peak, 32.0, 0.01);
+    assert_close("-VBO", trough, -32.0, 0.01);
+    let leak = value_at(&tran.time, b, 0.5e-3) / 100.0;
+    let blocking = value_at(&tran.time, &across, 0.5e-3);
+    assert_close("leakage", leak, blocking * 50e-6 / 32.0, 1e-9);
+    for at in [1.5e-3, 2.5e-3] {
+        let current = value_at(&tran.time, b, at) / 100.0;
+        let on = value_at(&tran.time, &across, at);
+        assert_close(
+            "on state",
+            on,
+            (32.0 - 5.0 + 10.0 * current.abs()).copysign(current),
+            1e-6,
+        );
+        assert!(current.abs() > 10e-3, "{current}");
+    }
+}

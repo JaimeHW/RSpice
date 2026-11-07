@@ -460,3 +460,58 @@ pub(super) const OPTOCOUPLER: FunctionalPartDescriptor = FunctionalPartDescripto
     preset: None,
     inputs: None,
 };
+
+const DIAC_PINS: &[FunctionalPin] = &[pin("A1", InOut), pin("A2", InOut)];
+
+/// A 32 V trigger diode.
+const DIAC_PARAMETERS: &[FunctionalParameter] = &[
+    number(
+        "VBO",
+        "Breakover voltage",
+        "V",
+        "32",
+        "Voltage, either way, at which the diac breaks over and conducts.",
+    ),
+    number(
+        "IBO",
+        "Breakover current",
+        "A",
+        "50u",
+        "Current at the breakover voltage; the diac blocks again once its current falls under half of it.",
+    ),
+    number(
+        "DV",
+        "Fold-back voltage",
+        "V",
+        "5",
+        "How far the voltage falls from VBO once the diac conducts.",
+    ),
+    number(
+        "RON",
+        "On resistance",
+        "Ω",
+        "10",
+        "Slope of the conducting voltage with current.",
+    ),
+    number(
+        "TON",
+        "Switching time",
+        "s",
+        "100n",
+        "Time the diac takes to break over, and to block again.",
+    ),
+];
+
+pub(super) const DIAC: FunctionalPartDescriptor = FunctionalPartDescriptor {
+    stable_id: "rspice.functional.diac",
+    display_name: "DIAC",
+    subcircuit: "RSPICE_FN_DIAC",
+    pins: DIAC_PINS,
+    symbol_asset: "functional_diac.svg",
+    block: Some(TWO_TERMINAL_BLOCK),
+    keywords: &["diac", "trigger diode", "db3", "breakover diode"],
+    category: ComponentCategory::Semiconductors,
+    parameters: DIAC_PARAMETERS,
+    preset: None,
+    inputs: None,
+};

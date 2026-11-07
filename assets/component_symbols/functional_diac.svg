@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- DIAC: two opposed junctions between two bars. Box 60x20, pins A1(0,10),
+     A2(60,10). -->
+<svg viewBox="0 0 60 20" xmlns="http://www.w3.org/2000/svg">
+  <path d="M 0,10 H 25" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 25,2 V 18" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 25,3 V 9.5 L 35,6.25 Z" fill="#000000" stroke="none"/>
+  <path d="M 35,10.5 V 17 L 25,13.75 Z" fill="#000000" stroke="none"/>
+  <path d="M 35,2 V 18" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 35,10 H 60" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+</svg>

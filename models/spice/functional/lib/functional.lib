@@ -313,3 +313,18 @@ CP NP 0 {TAU}
 BC C E I=V(NP)*tanh(0.549306*uramp(V(C,E))/VCESAT)
 CI K E {CISO}
 .ends RSPICE_FN_OPTO
+
+* DIAC. Pins: A1 A2.
+* Symmetric: below VBO either way it leaks VBO/IBO's worth, so IBO flows
+* at VBO. Past IBO it breaks over, over TON, to its on state, which sits
+* DV below VBO and rises through RON with its current; it returns to
+* blocking once its current falls under IBO/2. The defaults are a 32 V
+* trigger diode.
+.subckt RSPICE_FN_DIAC A1 A2 VBO=32 IBO=50u DV=5 RON=10 TON=100n
+VS A1 N1 0
+BM N1 A2 I=(1-V(NS))*V(N1,A2)*IBO/VBO+V(NS)*(uramp(V(N1,A2)-VBO+DV)-uramp(V(A2,N1)-VBO+DV))/RON
+BI NI 0 V=abs(I(VS))
+A1 NI 0 0 0 0 0 NS 0 SCHMITT VT={0.75*IBO} VH={0.25*IBO} VHIGH=1 VLOW=0 TRISE={TON}
++ TFALL={TON}
+RNS NS 0 1Meg NOISY=0
+.ends RSPICE_FN_DIAC

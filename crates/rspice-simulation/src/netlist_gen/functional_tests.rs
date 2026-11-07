@@ -416,3 +416,15 @@ fn a_placed_optocoupler_sinks_ctr_times_its_led_current() {
         "{probes:?}"
     );
 }
+
+#[test]
+fn a_placed_diac_blocks_below_its_breakover_voltage() {
+    // 30 V across the 32 V diac through 1 kOhm: only its leakage flows.
+    let mut bench = Bench::default();
+    bench.primitive(ComponentType::VoltageSource, "V1", "30", &["in", "0"]);
+    bench.primitive(ComponentType::Resistor, "R1", "1k", &["in", "a"]);
+    bench.part("rspice.functional.diac", "D1", "", &["a", "0"]);
+    let across = bench.operating_point("a");
+    let expected = 30.0 / (1.0 + 1e3 * 50e-6 / 32.0);
+    assert!((across - expected).abs() < 1e-6, "{across} vs {expected}");
+}
