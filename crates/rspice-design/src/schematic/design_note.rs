@@ -17,6 +17,28 @@ pub const MAX_DESIGN_REVIEW_MESSAGE_LEN: usize = 4096;
 pub const MAX_DESIGN_REVIEW_EVIDENCE_LABEL_LEN: usize = 256;
 pub const MAX_DESIGN_REVIEW_EVIDENCE_IDENTITY_LEN: usize = 1024;
 
+/// A note's type size at the standard size, in world units. Every surface
+/// letters a note at these measures times the note's scale.
+pub const DESIGN_NOTE_FONT_WORLD: f32 = 12.0;
+/// The distance from one line of a note to the next at the standard size.
+pub const DESIGN_NOTE_LINE_ADVANCE_WORLD: f32 = 15.0;
+/// One glyph's advance at the standard size: Plex Mono's 0.6 em.
+pub const DESIGN_NOTE_GLYPH_WIDTH_WORLD: f32 = 7.2;
+/// The top-left corner of a note's first line, from its anchor. It does not
+/// scale, so the anchor mark keeps one distance from any note's text.
+pub const DESIGN_NOTE_TEXT_OFFSET_WORLD: (f32, f32) = (6.0, 3.0);
+/// The sizes a note may be lettered at, in percent of the standard size.
+pub const DESIGN_NOTE_TEXT_SIZE_PERCENT: std::ops::RangeInclusive<u16> = 25..=800;
+const STANDARD_TEXT_SIZE_PERCENT: u16 = 100;
+
+fn standard_text_size() -> u16 {
+    STANDARD_TEXT_SIZE_PERCENT
+}
+
+fn is_standard_text_size(percent: &u16) -> bool {
+    *percent == STANDARD_TEXT_SIZE_PERCENT
+}
+
 /// The four documentation semantics exposed by the mockup-owned placement
 /// transaction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -331,6 +353,13 @@ pub struct DesignNote {
     pub layer: DesignNoteLayer,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub review: Option<DesignReviewRecord>,
+    /// The note's lettering in percent of the standard size. A comment
+    /// imported from another tool keeps the size its drawing gave it.
+    #[serde(
+        default = "standard_text_size",
+        skip_serializing_if = "is_standard_text_size"
+    )]
+    pub text_size_percent: u16,
 }
 
 impl DesignNote {
@@ -351,7 +380,46 @@ impl DesignNote {
             text,
             layer: DesignNoteLayer::DrawingAnnotation,
             review,
+            text_size_percent: STANDARD_TEXT_SIZE_PERCENT,
         })
+    }
+
+    /// The same note lettered at `percent` of the standard size, held to
+    /// the sizes a note may take.
+    pub fn with_text_size_percent(mut self, percent: u16) -> Self {
+        self.text_size_percent = percent.clamp(
+            *DESIGN_NOTE_TEXT_SIZE_PERCENT.start(),
+            *DESIGN_NOTE_TEXT_SIZE_PERCENT.end(),
+        );
+        self
+    }
+
+    /// Whether the note is lettered at the standard size.
+    pub fn has_standard_text_size(&self) -> bool {
+        is_standard_text_size(&self.text_size_percent)
+    }
+
+    /// What a surface multiplies the standard lettering by.
+    pub fn text_scale(&self) -> f32 {
+        f32::from(self.text_size_percent.clamp(
+            *DESIGN_NOTE_TEXT_SIZE_PERCENT.start(),
+            *DESIGN_NOTE_TEXT_SIZE_PERCENT.end(),
+        )) / f32::from(STANDARD_TEXT_SIZE_PERCENT)
+    }
+
+    /// The width and height of the box `rendered_text` stands in, in world
+    /// units, from the top-left corner of its first line.
+    pub fn text_extent_world(&self, rendered_text: &str) -> (f32, f32) {
+        let (lines, longest) = rendered_text
+            .split('\n')
+            .fold((0_usize, 0_usize), |(lines, longest), line| {
+                (lines + 1, longest.max(line.chars().count()))
+            });
+        let scale = self.text_scale();
+        (
+            longest.max(1) as f32 * DESIGN_NOTE_GLYPH_WIDTH_WORLD * scale,
+            lines.max(1) as f32 * DESIGN_NOTE_LINE_ADVANCE_WORLD * scale,
+        )
     }
 
     pub fn validate(&self) -> Result<(), DesignNoteError> {

@@ -11,6 +11,7 @@ use super::{
     ForeignSchematic, ForeignShape, ForeignSymbol, ForeignSymbolDefinition, ForeignText,
     ForeignTextKind, ForeignTool, ForeignWindow, decode_foreign_text,
 };
+use crate::schematic::label_layout::TextEdge;
 
 /// The bytes QSPICE writes before the schematic tree.
 const FILE_MARK: [u8; 4] = [0xFF, 0xD8, 0xFF, 0xDB];
@@ -86,6 +87,14 @@ pub fn parse_qsch(bytes: &[u8]) -> Result<ForeignSchematic, ForeignParseError> {
                     kind,
                     text: quoted(fields).join("\n"),
                     line: node.line,
+                    size_percent: numbers
+                        .first()
+                        .and_then(|size| size.parse::<f64>().ok())
+                        .filter(|size| size.is_finite() && *size > 0.0)
+                        .map_or(100, |size| {
+                            (size * 100.0).round().min(f64::from(u16::MAX)) as u16
+                        }),
+                    justification: text_justification(numbers.get(1).map(String::as_str)),
                 });
             }
             "line" | "rect" | "ellipse" | "arc" | "arc3p" | "zigzag" | "triangle" => {
@@ -340,6 +349,19 @@ fn text_alignment(code: Option<&str>) -> String {
 fn pin_name_lettered(code: Option<&str>) -> bool {
     let code = code.and_then(|code| code.parse::<u32>().ok()).unwrap_or(0);
     !matches!(code & 15, 0 | 15)
+}
+
+/// Which edge of a text's box, across and down, stands on its anchor, read
+/// from QSPICE's text code as [`text_run`] reads it. A text with no
+/// justification is centred.
+fn text_justification(code: Option<&str>) -> (TextEdge, TextEdge) {
+    let code = code.and_then(|code| code.parse::<u32>().ok()).unwrap_or(7);
+    let edge = |bits: u32| match bits & 3 {
+        1 => TextEdge::Start,
+        2 => TextEdge::End,
+        _ => TextEdge::Center,
+    };
+    (edge(code >> 2), edge(code))
 }
 
 /// The way a text runs from its anchor, read from QSPICE's text code: a unit

@@ -207,14 +207,18 @@ pub fn schematic_bounds(
         bounds.include(note.pos);
         let lines = note.text.lines().collect::<Vec<_>>();
         let width = lines.iter().map(|line| line.len()).max().unwrap_or(1);
+        // At the note's own size, rounded up.
+        let percent = (f64::from(note.text_scale()) * 100.0).round() as i64;
+        let scaled = |extent: i64| extent.saturating_mul(percent).saturating_add(99) / 100;
         bounds.include_i64(
-            i64::from(note.pos.x)
-                .saturating_add(i64::try_from(width).unwrap_or(i64::MAX).saturating_mul(2)),
-            i64::from(note.pos.y).saturating_add(
+            i64::from(note.pos.x).saturating_add(scaled(
+                i64::try_from(width).unwrap_or(i64::MAX).saturating_mul(2),
+            )),
+            i64::from(note.pos.y).saturating_add(scaled(
                 i64::try_from(lines.len())
                     .unwrap_or(i64::MAX)
                     .saturating_mul(4),
-            ),
+            )),
         );
     }
     for shape in &schematic.documentation_shapes {

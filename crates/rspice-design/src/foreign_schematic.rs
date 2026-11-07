@@ -7,6 +7,8 @@
 
 use std::fmt;
 
+use crate::schematic::label_layout::TextEdge;
+
 mod behaviour;
 mod directives;
 mod functional;
@@ -292,6 +294,11 @@ pub struct ForeignText {
     /// The text with its line breaks restored.
     pub text: String,
     pub line: usize,
+    /// The lettering in percent of the source tool's standard size.
+    pub size_percent: u16,
+    /// Which edge of the text's box, across and then down, stands on
+    /// `position`.
+    pub justification: (TextEdge, TextEdge),
 }
 
 /// A waveform readout placed on a net (`DATAFLAG`).

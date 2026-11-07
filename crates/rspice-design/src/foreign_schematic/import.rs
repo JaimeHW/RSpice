@@ -31,7 +31,7 @@ use super::{
 use crate::schematic::component::{Component, LibraryCellInstance};
 use crate::schematic::component_display::ComponentDisplayMode;
 use crate::schematic::component_type::ComponentType;
-use crate::schematic::design_note::{DesignNote, DesignNoteKind};
+use crate::schematic::design_note::{DESIGN_NOTE_TEXT_OFFSET_WORLD, DesignNote, DesignNoteKind};
 use crate::schematic::document::SchematicDocument;
 use crate::schematic::document_policy::{NetNamingPolicy, SchematicDocumentPolicy};
 use crate::schematic::documentation_shape::{DocumentationShape, DocumentationShapeGeometry};
@@ -1869,7 +1869,11 @@ impl Builder<'_> {
                     let id = self.id();
                     match DesignNote::new(id, position, DesignNoteKind::PlainText, text.text.trim())
                     {
-                        Ok(note) => self.document.design_notes.push(note),
+                        Ok(note) => {
+                            let note = note.with_text_size_percent(text.size_percent);
+                            let pos = note_anchor(&note, position, text.justification);
+                            self.document.design_notes.push(DesignNote { pos, ..note });
+                        }
                         Err(error) => self.notice(format!(
                             "The comment on line {} was not placed: {error}.",
                             text.line
@@ -2237,6 +2241,23 @@ fn unique_pin_names(slots: &[Option<&ForeignPin>]) -> Vec<PortSpec> {
             }
         })
         .collect()
+}
+
+/// Where a note's anchor goes so its text's box stands on `point` the way
+/// the source drawing stood it: by its start, end or centre across, and by
+/// its top, bottom or middle down.
+fn note_anchor(note: &DesignNote, point: Point, justification: (TextEdge, TextEdge)) -> Point {
+    let (width, height) = note.text_extent_world(&note.text);
+    let reach = |edge: TextEdge, extent: f32| match edge {
+        TextEdge::Start => 0.0,
+        TextEdge::Center => extent * 0.5,
+        TextEdge::End => extent,
+    };
+    let (offset_x, offset_y) = DESIGN_NOTE_TEXT_OFFSET_WORLD;
+    Point::new(
+        point.x - (reach(justification.0, width) + offset_x).round() as i32,
+        point.y - (reach(justification.1, height) + offset_y).round() as i32,
+    )
 }
 
 /// VDD, VCC, VSS and VEE, alone or numbered, are supply rails.

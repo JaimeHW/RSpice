@@ -465,16 +465,17 @@ impl<'a> SemanticSceneCompiler<'a> {
             )?,
         );
         for note in &schematic.design_notes {
+            let scale = f64::from(note.text_scale());
             let mut origin = self.schematic_point(note.pos)?;
             for line in note.text.lines() {
                 self.add_text(
                     origin,
                     line,
                     SceneFont::Sans,
-                    2_800,
+                    (2_800.0 * scale).round() as u64,
                     annotation_stroke.color,
                 )?;
-                origin = self.offset_scene_point(origin, 0, 3_400)?;
+                origin = self.offset_scene_point(origin, 0, (3_400.0 * scale).round() as i64)?;
             }
         }
         let documentation_stroke = self.mapped_stroke(

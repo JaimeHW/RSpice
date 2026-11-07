@@ -257,9 +257,9 @@ pub(super) fn include_design_note_bounds(
     view_path: &str,
     extent: &mut Extent,
 ) {
-    let size = world(design_notes::FONT_WORLD_SIZE, config);
-    let advance = world(design_notes::LINE_ADVANCE_WORLD, config);
     for note in notes {
+        let size = world(design_notes::FONT_WORLD_SIZE * note.text_scale(), config);
+        let advance = world(design_notes::LINE_ADVANCE_WORLD * note.text_scale(), config);
         let (x, top) = design_note_origin(note, config);
         for (index, line) in design_note_export_text(context, note, view_path)
             .split('\n')
@@ -290,10 +290,17 @@ pub(super) fn write_design_note(
     config: &SvgExportConfig,
     view_path: &str,
 ) {
-    let size = world(design_notes::FONT_WORLD_SIZE, config);
-    let advance = world(design_notes::LINE_ADVANCE_WORLD, config);
+    let size = world(design_notes::FONT_WORLD_SIZE * note.text_scale(), config);
+    let advance = world(design_notes::LINE_ADVANCE_WORLD * note.text_scale(), config);
     let (x, top) = design_note_origin(note, config);
     let y = svg_text_baseline(top, Align::Min, size);
+    // The stylesheet letters a note at the standard size; one drawn at
+    // another says so itself.
+    let resized = if note.has_standard_text_size() {
+        String::new()
+    } else {
+        format!(" style=\"font-size: {size}px\"")
+    };
     let kind = match note.kind {
         DesignNoteKind::PlainText => "plain-text",
         DesignNoteKind::PropertyDisplay => "property-display",
@@ -321,7 +328,7 @@ pub(super) fn write_design_note(
     )
     .unwrap();
     let text = design_note_export_text(document, note, view_path);
-    writeln!(svg, "<text class=\"note\" x=\"{x}\" y=\"{y}\">").unwrap();
+    writeln!(svg, "<text class=\"note\" x=\"{x}\" y=\"{y}\"{resized}>").unwrap();
     for (index, line) in text.split('\n').enumerate() {
         let dy = if index == 0 { 0.0 } else { advance };
         writeln!(

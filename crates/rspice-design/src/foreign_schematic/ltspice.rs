@@ -9,6 +9,7 @@ use super::{
     ForeignPin, ForeignPoint, ForeignPortDirection, ForeignSchematic, ForeignShape, ForeignSymbol,
     ForeignSymbolDefinition, ForeignText, ForeignTextKind, ForeignTool, ForeignWindow,
 };
+use crate::schematic::label_layout::TextEdge;
 
 /// Reads an `.asc` schematic.
 pub fn parse_asc(source: &str) -> Result<ForeignSchematic, ForeignParseError> {
@@ -123,6 +124,8 @@ pub fn parse_asc(source: &str) -> Result<ForeignSchematic, ForeignParseError> {
                     kind,
                     text: unescape_text(text),
                     line,
+                    size_percent: text_size_percent(words.get(4).copied()),
+                    justification: text_justification(words.get(3).copied()),
                 });
             }
             "LINE" | "RECTANGLE" | "CIRCLE" | "ARC" => {
@@ -331,6 +334,28 @@ fn two_points(
 
 /// What follows the first `fields` space-separated fields of a record, with
 /// its own spacing kept.
+/// LTspice's text size code: an index into the sizes its text dialog
+/// offers, 0.625x to 7x, of which 1.5x (code 2) is the standard.
+fn text_size_percent(code: Option<&str>) -> u16 {
+    const PERCENT: [u16; 8] = [42, 67, 100, 133, 167, 233, 333, 467];
+    code.and_then(|code| code.parse::<usize>().ok())
+        .and_then(|index| PERCENT.get(index).copied())
+        .unwrap_or(100)
+}
+
+/// Which edge of a text, across and down, LTspice stands on its point. A
+/// `V` before the word turns the text upright; its box is placed the same.
+fn text_justification(word: Option<&str>) -> (TextEdge, TextEdge) {
+    let word = word.unwrap_or("Left").to_ascii_lowercase();
+    match word.strip_prefix('v').unwrap_or(&word) {
+        "right" => (TextEdge::End, TextEdge::Center),
+        "center" => (TextEdge::Center, TextEdge::Center),
+        "top" => (TextEdge::Center, TextEdge::Start),
+        "bottom" => (TextEdge::Center, TextEdge::End),
+        _ => (TextEdge::Start, TextEdge::Center),
+    }
+}
+
 fn rest_after(record: &str, fields: usize) -> &str {
     let mut rest = record.trim_start();
     for _ in 0..fields {

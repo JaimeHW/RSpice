@@ -4,7 +4,10 @@ use std::sync::Arc;
 
 use egui::{Color32, Context, Galley, Painter, Pos2, Rect, Stroke, vec2};
 
-use rspice_design::schematic::design_note::{DesignNote, DesignNoteKind, DesignNoteRenderContext};
+use rspice_design::schematic::design_note::{
+    DESIGN_NOTE_FONT_WORLD, DESIGN_NOTE_LINE_ADVANCE_WORLD, DESIGN_NOTE_TEXT_OFFSET_WORLD,
+    DesignNote, DesignNoteKind, DesignNoteRenderContext,
+};
 use rspice_design_model::Point;
 use rspice_ui_kit::palette::Palette;
 use rspice_ui_kit::theme::{self, FontWeight};
@@ -12,14 +15,13 @@ use rspice_ui_kit::tokens::Tokens;
 
 use super::viewport::Viewport;
 
-pub(crate) const FONT_WORLD_SIZE: f32 = 12.0;
-pub(crate) const LINE_ADVANCE_WORLD: f32 = 15.0;
+pub(crate) const FONT_WORLD_SIZE: f32 = DESIGN_NOTE_FONT_WORLD;
+pub(crate) const LINE_ADVANCE_WORLD: f32 = DESIGN_NOTE_LINE_ADVANCE_WORLD;
 /// The top-left corner of a note's first line, from its anchor.
-pub(crate) const OFFSET_X_WORLD: f32 = 6.0;
-pub(crate) const OFFSET_Y_WORLD: f32 = 3.0;
+pub(crate) const OFFSET_X_WORLD: f32 = DESIGN_NOTE_TEXT_OFFSET_WORLD.0;
+pub(crate) const OFFSET_Y_WORLD: f32 = DESIGN_NOTE_TEXT_OFFSET_WORLD.1;
 /// The anchor marker's radius, in world units.
 pub(crate) const MARKER_RADIUS_WORLD: f32 = 2.0;
-const GLYPH_WIDTH_WORLD: f32 = 7.2;
 const POINTER_SLOP: f32 = 3.0;
 /// The fill behind a selected note's text, over the canvas, as a selected
 /// net label has.
@@ -41,8 +43,12 @@ fn screen_layout(
 ) -> Option<DesignNoteScreenLayout> {
     // A note is annotation: below the one legibility floor it hides, with
     // its marker, rather than painting a smudge.
-    let font_size =
-        super::lod::annotation_size(FONT_WORLD_SIZE, viewport.zoom, ctx.pixels_per_point())?;
+    let scale = note.text_scale();
+    let font_size = super::lod::annotation_size(
+        FONT_WORLD_SIZE * scale,
+        viewport.zoom,
+        ctx.pixels_per_point(),
+    )?;
     let anchor = viewport.schematic_to_screen(note.pos);
     let text_origin = anchor
         + vec2(
@@ -61,7 +67,11 @@ fn screen_layout(
                 color,
             )
         });
-        let position = text_origin + vec2(0.0, index as f32 * LINE_ADVANCE_WORLD * viewport.zoom);
+        let position = text_origin
+            + vec2(
+                0.0,
+                index as f32 * LINE_ADVANCE_WORLD * scale * viewport.zoom,
+            );
         let rect = Rect::from_min_size(position, galley.size());
         bounds = if lines.is_empty() {
             rect
@@ -186,14 +196,8 @@ pub fn design_note_at(
 
 /// Intrinsic world bounds for culling, zoom-to-fit, and marquee selection.
 pub fn world_bounds(note: &DesignNote, rendered_text: &str) -> (Point, Point) {
-    let lines: Vec<&str> = rendered_text.split('\n').collect();
-    let longest = lines
-        .iter()
-        .map(|line| line.chars().count())
-        .max()
-        .unwrap_or(1) as f32;
-    let width = (longest.max(1.0) * GLYPH_WIDTH_WORLD).ceil() as i32;
-    let height = ((lines.len().max(1) as f32) * LINE_ADVANCE_WORLD).ceil() as i32;
+    let (width, height) = note.text_extent_world(rendered_text);
+    let (width, height) = (width.ceil() as i32, height.ceil() as i32);
     (
         note.pos,
         Point::new(

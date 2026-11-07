@@ -676,7 +676,9 @@ fn directives_and_comments_keep_their_text_and_place() {
     assert_eq!(imported.directives[1].position, Point::new(40, 120));
     let note = &imported.document.design_notes[0];
     assert_eq!(note.text, "Bias network\nkeep R1 close");
-    assert_eq!(note.pos, Point::new(40, 200));
+    // `Left` starts the text at (40, 200) and centres its two 15-unit lines
+    // on it; the anchor stands 6 left of and 3 over the text.
+    assert_eq!(note.pos, Point::new(34, 182));
 }
 
 /// A QSPICE drawing: a source, a resistor, a DLL block and a comment, with
@@ -2115,5 +2117,91 @@ fn a_qspice_net_label_name_stands_on_the_side_its_drawing_runs_it_to() {
     let written = serde_json::to_value(&native).unwrap();
     assert!(written.get("side").is_none(), "{written}");
     let restored: NetLabel = serde_json::from_value(written).unwrap();
+    assert_eq!(restored, native);
+}
+
+/// A comment keeps the size its drawing letters it at, and its text's box
+/// stands on its point the way the drawing stood it there: centred on it,
+/// standing on it, hanging from it or starting at it. A note placed here
+/// keeps the standard size, and a project written without one loads at it.
+#[test]
+fn a_comment_keeps_its_size_and_stands_on_its_point_as_its_drawing_stood_it() {
+    use crate::schematic::design_note::{
+        DESIGN_NOTE_TEXT_OFFSET_WORLD, DesignNote, DesignNoteKind,
+    };
+
+    const DRAWING: &str = "«schematic
+  «net (0,0) 1 7 0 \"centre\"»
+  «net (4000,0) 1 7 0 \"base\"»
+  «text (0,0) 0.8 15 1 0x1000000 -1 -1 \"centred\\nnote\"»
+  «text (4000,0) 1 14 1 0x1000000 -1 -1 \"standing\"»
+»
+";
+    let qspice = import_foreign_schematic(
+        &parse_qsch(&qsch_bytes(DRAWING)).unwrap(),
+        "work",
+        &Library::default(),
+    );
+    let ltspice = import_foreign_schematic(
+        &parse_asc(
+            "Version 4\nSHEET 1 800 600\nFLAG 0 0 top\nFLAG 640 0 left\n\
+             TEXT 0 0 Top 1 ;hanging\nTEXT 640 0 Left 2 ;starting\n",
+        )
+        .unwrap(),
+        "work",
+        &Library::default(),
+    );
+    // The note's size, and its text's box: left, top, right, bottom.
+    let lettered = |imported: &ForeignImport, text: &str| {
+        let note = imported
+            .document
+            .design_notes
+            .iter()
+            .find(|note| note.text == text)
+            .unwrap_or_else(|| panic!("no note {text:?}"));
+        let (width, height) = note.text_extent_world(&note.text);
+        let left = note.pos.x as f32 + DESIGN_NOTE_TEXT_OFFSET_WORLD.0;
+        let top = note.pos.y as f32 + DESIGN_NOTE_TEXT_OFFSET_WORLD.1;
+        (
+            note.text_size_percent,
+            [left, top, left + width, top + height],
+        )
+    };
+    let point = |imported: &ForeignImport, name: &str| {
+        let label = imported
+            .document
+            .net_labels
+            .iter()
+            .find(|label| label.name == name)
+            .unwrap_or_else(|| panic!("no label {name}"));
+        (label.pos.x as f32, label.pos.y as f32)
+    };
+    let near = |a: f32, b: f32| (a - b).abs() <= 0.5;
+
+    let (size, [left, top, right, bottom]) = lettered(&qspice, "centred\nnote");
+    let (x, y) = point(&qspice, "centre");
+    assert_eq!(size, 80);
+    assert!(near((left + right) * 0.5, x) && near((top + bottom) * 0.5, y));
+
+    let (size, [left, _, right, bottom]) = lettered(&qspice, "standing");
+    let (x, y) = point(&qspice, "base");
+    assert_eq!(size, 100);
+    assert!(near((left + right) * 0.5, x) && near(bottom, y));
+
+    let (size, [left, top, right, _]) = lettered(&ltspice, "hanging");
+    let (x, y) = point(&ltspice, "top");
+    assert_eq!(size, 67, "LTspice size 1 is 1.0x against the standard 1.5x");
+    assert!(near((left + right) * 0.5, x) && near(top, y));
+
+    let (size, [left, top, _, bottom]) = lettered(&ltspice, "starting");
+    let (x, y) = point(&ltspice, "left");
+    assert_eq!(size, 100);
+    assert!(near(left, x) && near((top + bottom) * 0.5, y));
+
+    let native = DesignNote::new(1, Point::new(0, 0), DesignNoteKind::PlainText, "n").unwrap();
+    assert!(native.has_standard_text_size());
+    let written = serde_json::to_value(&native).unwrap();
+    assert!(written.get("text_size_percent").is_none(), "{written}");
+    let restored: DesignNote = serde_json::from_value(written).unwrap();
     assert_eq!(restored, native);
 }
