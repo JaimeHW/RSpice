@@ -3,13 +3,16 @@
 //! Every native primitive is filed here under its functional group, with the
 //! words a reader searches it by. Code models carry their own group on their
 //! catalog descriptor; [`palette_rows`] merges the two, so the shelf, the
-//! instance catalog and the symbol audit all read one list.
+//! instance catalog and the symbol audit all read one list. The supply rails
+//! are filed with the connectivity objects: each places a global net label
+//! drawn with its rail symbol.
 
 pub use rspice_design::schematic::component_category::ComponentCategory;
 use rspice_design::schematic::component_type::ComponentType;
 use rspice_design::schematic::device_catalog::{
     CatalogXspiceDeviceDescriptor, engine_only_xspice_devices,
 };
+use rspice_design::schematic::net_label::{NetLabelKind, SupplyGlyph};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ComponentPaletteEntry {
@@ -32,11 +35,35 @@ pub struct ComponentPaletteSection {
     pub entries: &'static [ComponentPaletteEntry],
 }
 
+/// A supply rail the shelf places: a global net label named for the rail.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SupplyPaletteEntry {
+    /// The rail's net name, which is also the row's label.
+    pub name: &'static str,
+    /// What a reader may type for this row besides its name.
+    pub keywords: &'static [&'static str],
+}
+
+impl SupplyPaletteEntry {
+    /// The rail's conventional symbol.
+    pub fn glyph(&self) -> SupplyGlyph {
+        SupplyGlyph::for_name(self.name)
+    }
+
+    /// The label kind the row places.
+    pub fn kind(&self) -> NetLabelKind {
+        NetLabelKind::Supply {
+            glyph: self.glyph(),
+        }
+    }
+}
+
 /// One row of a functional group.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PaletteRow {
     Primitive(&'static ComponentPaletteEntry),
     Xspice(&'static CatalogXspiceDeviceDescriptor),
+    Supply(&'static SupplyPaletteEntry),
 }
 
 impl PaletteRow {
@@ -44,6 +71,7 @@ impl PaletteRow {
         match self {
             Self::Primitive(entry) => entry.label,
             Self::Xspice(descriptor) => descriptor.display_name,
+            Self::Supply(entry) => entry.name,
         }
     }
 }
@@ -107,6 +135,27 @@ const HIERARCHY: &[ComponentPaletteEntry] = &[
         None,
         &["chassis", "frame", "enclosure"],
     ),
+];
+
+/// The rails every analog and mixed-signal design draws: two positive, two
+/// negative or return.
+const SUPPLIES: &[SupplyPaletteEntry] = &[
+    SupplyPaletteEntry {
+        name: "VDD",
+        keywords: &["vdd", "supply", "rail", "power", "global", "positive"],
+    },
+    SupplyPaletteEntry {
+        name: "VCC",
+        keywords: &["vcc", "supply", "rail", "power", "global", "positive"],
+    },
+    SupplyPaletteEntry {
+        name: "VSS",
+        keywords: &["vss", "supply", "rail", "power", "global", "negative", "return"],
+    },
+    SupplyPaletteEntry {
+        name: "VEE",
+        keywords: &["vee", "supply", "rail", "power", "global", "negative"],
+    },
 ];
 
 const PASSIVES: &[ComponentPaletteEntry] = &[
@@ -739,9 +788,15 @@ pub fn component_palette() -> &'static [ComponentPaletteSection] {
     PALETTE
 }
 
+/// The supply rails, in shelf order.
+pub fn supply_palette() -> &'static [SupplyPaletteEntry] {
+    SUPPLIES
+}
+
 /// Every row filed under `category`: its native primitives in palette order,
-/// then its code models by name. A code model that duplicates a native part
-/// carries no group and is never listed; it stays valid in netlists.
+/// then its code models by name, then (for the connectivity group) the supply
+/// rails. A code model that duplicates a native part carries no group and is
+/// never listed; it stays valid in netlists.
 pub fn palette_rows(category: ComponentCategory) -> Vec<PaletteRow> {
     let mut rows = PALETTE
         .iter()
@@ -754,6 +809,9 @@ pub fn palette_rows(category: ComponentCategory) -> Vec<PaletteRow> {
         .collect::<Vec<_>>();
     models.sort_by_key(|descriptor| descriptor.display_name);
     rows.extend(models.into_iter().map(PaletteRow::Xspice));
+    if category == ComponentCategory::HierarchyConnectivity {
+        rows.extend(SUPPLIES.iter().map(PaletteRow::Supply));
+    }
     rows
 }
 

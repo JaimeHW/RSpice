@@ -11,7 +11,9 @@
 use super::super::shelf::*;
 use super::*;
 use crate::schematic::view::SchematicShelfDragPayload;
-use crate::schematic::{ComponentCategory, PaletteRow, component_palette, palette_rows};
+use crate::schematic::{
+    ComponentCategory, PaletteRow, component_palette, palette_rows, supply_palette,
+};
 use crate::state::model_hub::{ModelHubPartRow, PartPlacement, PartProvenance, PartState};
 use crate::state::model_library::{ModelLibrary, ModelSourceAuthority};
 use crate::state::{
@@ -441,6 +443,74 @@ fn a_variant_row_places_its_type_with_its_card_and_skin() {
     assert_eq!(placed.symbol_variant.as_deref(), Some("zener"));
 }
 
+/// The four rails are filed with the connectivity objects. A rail's row arms
+/// the Label tool with its name and symbol, every click places that rail as
+/// a global label, and the row reads as armed until the tool changes.
+#[test]
+fn a_supply_row_places_its_global_rail_on_every_click() {
+    use crate::state::{NetLabelKind, Point};
+    use rspice_design::schematic::net_label::SupplyGlyph;
+
+    let filed = palette_rows(ComponentCategory::HierarchyConnectivity)
+        .into_iter()
+        .filter_map(|row| match row {
+            PaletteRow::Supply(entry) => Some(entry.name),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(filed, ["VDD", "VCC", "VSS", "VEE"]);
+
+    let mut app = RSpiceApp::test_instance();
+    for (name, glyph) in [
+        ("VDD", SupplyGlyph::Bar),
+        ("VCC", SupplyGlyph::Arrow),
+        ("VSS", SupplyGlyph::Down),
+        ("VEE", SupplyGlyph::Down),
+    ] {
+        let entry = supply_palette()
+            .iter()
+            .find(|entry| entry.name == name)
+            .expect("a filed rail");
+        arm_supply(&mut app.state, entry, &egui::Context::default());
+        assert_eq!(app.state.model.schematic.session.editor.tool, Tool::Label);
+        let before = app.state.model.schematic.document().net_labels.len();
+        for y in [0, 20] {
+            assert!(crate::workbench::app::place_sequenced_net_label(
+                &mut app.state,
+                Point::new(10 * before as i32, y),
+            ));
+        }
+        let labels = &app.state.model.schematic.document().net_labels[before..];
+        assert_eq!(labels.len(), 2, "{name}: one label per click");
+        for label in labels {
+            assert_eq!(label.name, name);
+            assert_eq!(label.kind, NetLabelKind::Supply { glyph });
+            assert_eq!(label.global_declaration(), Some(format!("{name}!")));
+        }
+        let armed = ShelfEntry::Supply(name.to_owned());
+        assert!(
+            shelf_hits(
+                &app.state,
+                &super::super::shelf::search::ShelfQuery::new(name),
+                &[],
+                &[],
+            )
+            .iter()
+            .any(|hit| hit.label == name && hit.selected),
+            "{name}: the armed rail's row reads as armed"
+        );
+        assert_eq!(
+            ShelfEntry::from_storage_key(&armed.storage_key()),
+            Some(armed)
+        );
+    }
+    app.state.model.schematic.arm_tool(Tool::Select);
+    assert!(
+        !crate::workbench::app::place_sequenced_net_label(&mut app.state, Point::new(0, 80)),
+        "a changed tool retires the rail"
+    );
+}
+
 // ------------------------------------------------------------ shelf identity
 
 /// Every glyph the Component shelf can paint, deduplicated: each placeable
@@ -457,6 +527,11 @@ fn every_shelf_glyph() -> Vec<ShelfGlyph> {
         ShelfGlyph::Icon(WorkbenchIcon::Models),
     ];
     glyphs.extend(ComponentCategory::ALL.map(category_glyph));
+    glyphs.extend(
+        supply_palette()
+            .iter()
+            .map(|entry| ShelfGlyph::Supply(entry.glyph())),
+    );
     for section in component_palette() {
         for entry in section.entries {
             glyphs.push(primitive_shelf_glyph(entry.kind));
@@ -1001,6 +1076,7 @@ fn every_shelf_entry_kind_round_trips_through_its_stored_key() {
         ShelfEntry::LibraryPart("1N4148".to_owned()),
         ShelfEntry::BuiltinXspice("gain".to_owned()),
         ShelfEntry::GeneratedVerilogA("bsimcmg".to_owned()),
+        ShelfEntry::Supply("VDD".to_owned()),
         ShelfEntry::Cell {
             library: "work".to_owned(),
             cell: "opamp".to_owned(),

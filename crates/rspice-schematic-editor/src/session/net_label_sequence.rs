@@ -4,7 +4,8 @@
 //! The entry is typed into once. A name ending in a number counts on from
 //! it (`D0`, then `D1`, `D2`, ...), a list (`a b c`) or a bus range
 //! (`D<0:7>`) is placed one name per click, and the canvas ghost shows the
-//! name the next click will place. Runtime only: what reaches the document is
+//! name the next click will place. A supply symbol armed from the shelf
+//! places its one rail name on every click until the tool is cancelled. Runtime only: what reaches the document is
 //! one ordinary label per click.
 
 use rspice_design::schematic::bus::BusDeclaration;
@@ -34,6 +35,8 @@ enum SequenceOrder {
         next: u64,
         width: usize,
     },
+    /// One name placed on every click: a supply rail armed from the shelf.
+    Repeating { name: String },
 }
 
 /// The names an entry asks for, in the order the clicks place them.
@@ -77,11 +80,29 @@ impl NetLabelSequence {
         Some(Self { kind, order })
     }
 
+    /// `name` on every click, as the shelf arms a supply symbol.
+    pub fn repeating(name: impl Into<String>, kind: NetLabelKind) -> Self {
+        Self {
+            kind,
+            order: SequenceOrder::Repeating { name: name.into() },
+        }
+    }
+
+    /// The one name a repeating sequence places, or `None` for a list or a
+    /// count.
+    pub fn repeated_name(&self) -> Option<&str> {
+        match &self.order {
+            SequenceOrder::Repeating { name } => Some(name),
+            SequenceOrder::Listed { .. } | SequenceOrder::Counting { .. } => None,
+        }
+    }
+
     /// The name the next click places.
     pub fn next_name(&self) -> Option<String> {
         match &self.order {
             SequenceOrder::Listed { names, .. } => names.front().cloned(),
             SequenceOrder::Counting { stem, next, width } => Some(format!("{stem}{next:0width$}")),
+            SequenceOrder::Repeating { name } => Some(name.clone()),
         }
     }
 
@@ -89,7 +110,7 @@ impl NetLabelSequence {
     pub fn position(&self) -> Option<(usize, usize)> {
         match &self.order {
             SequenceOrder::Listed { names, total } => Some((total - names.len() + 1, *total)),
-            SequenceOrder::Counting { .. } => None,
+            SequenceOrder::Counting { .. } | SequenceOrder::Repeating { .. } => None,
         }
     }
 
@@ -107,6 +128,7 @@ impl NetLabelSequence {
                 }
                 None => false,
             },
+            SequenceOrder::Repeating { .. } => true,
         }
     }
 }

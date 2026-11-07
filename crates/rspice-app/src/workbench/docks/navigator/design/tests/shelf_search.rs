@@ -61,6 +61,11 @@ const TOP_HITS: &[(&str, &[&str])] = &[
     ("polarized capacitor", &["Polarized Capacitor"]),
     ("rspice_zener", &["Zener Diode"]),
     ("rspice_led_green", &["LED (green)"]),
+    ("vdd", &["VDD"]),
+    ("vcc", &["VCC"]),
+    ("vss", &["VSS"]),
+    ("vee", &["VEE"]),
+    ("rail", &["VDD", "VCC", "VSS", "VEE"]),
 ];
 
 #[test]

@@ -24,7 +24,7 @@ pub mod xspice_placement;
 
 pub use component_palette::{
     ComponentCategory, ComponentPaletteEntry, ComponentPaletteSection, PaletteRow,
-    component_palette, device_class_keywords, palette_rows,
+    SupplyPaletteEntry, component_palette, device_class_keywords, palette_rows, supply_palette,
 };
 pub use symbols::SymbolLibrary;
 

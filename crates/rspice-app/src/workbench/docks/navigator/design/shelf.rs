@@ -24,8 +24,8 @@ use rspice_design::schematic::device_catalog::CatalogXspiceDeviceDescriptor;
 
 use crate::schematic::view::SchematicShelfDragPayload;
 use crate::schematic::{
-    ComponentCategory, ComponentPaletteEntry, PaletteRow, component_palette, device_class_keywords,
-    palette_rows,
+    ComponentCategory, ComponentPaletteEntry, PaletteRow, SupplyPaletteEntry, component_palette,
+    device_class_keywords, palette_rows, supply_palette,
 };
 use crate::state::model_hub::{
     ModelHubPartRow, PartPlacement, PartProvenance, PartState, plan_library_placement,
@@ -115,6 +115,8 @@ pub(super) enum ShelfGlyph {
     Amp,
     /// The event-driven / mixed-signal squared plus — the mockup's ⊞.
     Event,
+    /// A supply rail's symbol, drawn from the strokes the canvas paints.
+    Supply(rspice_design::schematic::net_label::SupplyGlyph),
 }
 
 impl ShelfGlyph {
@@ -173,6 +175,32 @@ impl ShelfGlyph {
                     ],
                     stroke,
                 );
+            }
+            Self::Supply(glyph) => {
+                let label = crate::state::NetLabel::supply(
+                    0,
+                    crate::state::Point::new(0, 0),
+                    "",
+                    glyph,
+                );
+                let Some(bounds) =
+                    rspice_design::schematic::label_layout::supply_glyph_rect(&label)
+                else {
+                    return;
+                };
+                // The world strokes fill most of the slot's width, centred.
+                let fit = 16.0 * scale / (bounds.max.x - bounds.min.x).max(1.0);
+                let middle = egui::pos2(
+                    (bounds.min.x + bounds.max.x) * 0.5,
+                    (bounds.min.y + bounds.max.y) * 0.5,
+                );
+                let at = |point: rspice_design::schematic::label_layout::LayoutPoint| {
+                    rect.center() + (egui::pos2(point.x, point.y) - middle) * fit
+                };
+                for [from, to] in rspice_design::schematic::label_layout::supply_glyph_marks(&label)
+                {
+                    painter.line_segment([at(from), at(to)], stroke);
+                }
             }
         }
     }
@@ -701,6 +729,8 @@ pub(super) enum ShelfEntry {
         cell: String,
         view: String,
     },
+    /// A supply rail, by its net name.
+    Supply(String),
 }
 
 impl ShelfEntry {
@@ -741,6 +771,7 @@ impl ShelfEntry {
             Self::LibraryPart(part) => format!("part{SHELF_ENTRY_FIELD}{part}"),
             Self::BuiltinXspice(id) => format!("xspice{SHELF_ENTRY_FIELD}{id}"),
             Self::GeneratedVerilogA(model) => format!("veriloga{SHELF_ENTRY_FIELD}{model}"),
+            Self::Supply(name) => format!("supply{SHELF_ENTRY_FIELD}{name}"),
             Self::Cell {
                 library,
                 cell,
@@ -764,6 +795,7 @@ impl ShelfEntry {
             "part" => Self::LibraryPart(fields.next()?.to_owned()),
             "xspice" => Self::BuiltinXspice(fields.next()?.to_owned()),
             "veriloga" => Self::GeneratedVerilogA(fields.next()?.to_owned()),
+            "supply" => Self::Supply(fields.next()?.to_owned()),
             "cell" => Self::Cell {
                 library: fields.next()?.to_owned(),
                 cell: fields.next()?.to_owned(),
@@ -848,6 +880,9 @@ struct ShelfPlacementWatch {
 
 /// The identity the schematic currently has armed, as a shelf row names it.
 fn armed_shelf_entry(state: &AppState) -> Option<ShelfEntry> {
+    if let Some(entry) = armed_supply(state) {
+        return Some(ShelfEntry::Supply(entry.name.to_owned()));
+    }
     let Tool::Place(kind) = state.model.schematic.session.editor.tool else {
         return None;
     };
@@ -932,7 +967,10 @@ fn observe_placements(ui: &Ui, state: &mut AppState) {
         state.model.active_schematic_epoch,
         state.model.workspace.content.active_view.display_path(),
     );
-    let components = state.model.schematic.document().components.len();
+    // A supply rail is a net label, so labels count as placements beside
+    // components.
+    let document = state.model.schematic.document();
+    let components = document.components.len() + document.net_labels.len();
     let live = armed_shelf_entry(state).or_else(|| dragged_shelf_entry(ui.ctx()));
     // A watch belonging to another design is no watch at all: its objects were
     // placed before this shelf ever looked at them.
@@ -990,6 +1028,7 @@ pub(super) enum ShelfArm {
     Part(Box<LibraryPartRow>),
     /// A project stimulus definition, by name.
     Stimulus(String),
+    Supply(&'static SupplyPaletteEntry),
 }
 
 /// Resolve one stored entry into the row the band would paint.
@@ -1112,6 +1151,19 @@ fn resolve_shelf_entry(
                 arm: ShelfArm::Cell(Box::new(candidate.binding.clone())),
             })
         }
+        ShelfEntry::Supply(name) => {
+            let supply = supply_palette()
+                .iter()
+                .find(|supply| supply.name == name)?;
+            Some(ShelfEntryRow {
+                entry: entry.clone(),
+                glyph: supply_shelf_glyph(supply),
+                label: supply.name.to_owned(),
+                meta: None,
+                selected: armed_supply(state) == Some(supply),
+                arm: ShelfArm::Supply(supply),
+            })
+        }
     }
 }
 
@@ -1218,7 +1270,10 @@ fn shelf_drag_payload(arm: &ShelfArm) -> Option<SchematicShelfDragPayload> {
             .map(SchematicShelfDragPayload::library_cell),
         // A variant arms its card and skin on the place tool, which a drop
         // does not carry.
-        ShelfArm::Variant(_) | ShelfArm::Part(_) | ShelfArm::Stimulus(_) => None,
+        // A supply is a net label, which a drop does not place.
+        ShelfArm::Variant(_) | ShelfArm::Part(_) | ShelfArm::Stimulus(_) | ShelfArm::Supply(_) => {
+            None
+        }
     }
 }
 
@@ -1256,6 +1311,7 @@ fn apply_shelf_arm(app: &mut RSpiceApp, arm: ShelfArm, ctx: &egui::Context) {
         ShelfArm::Cell(binding) => arm_cell(&mut app.state, *binding, ctx),
         ShelfArm::Part(row) => apply_library_part_row(app, *row, ctx),
         ShelfArm::Stimulus(name) => arm_stimulus_definition(&mut app.state, &name, ctx),
+        ShelfArm::Supply(entry) => arm_supply(&mut app.state, entry, ctx),
     }
 }
 
@@ -1281,6 +1337,7 @@ pub(super) fn component_catalog(ui: &mut Ui, state: &mut AppState) -> Option<She
                 let clicked = match row {
                     PaletteRow::Primitive(entry) => primitive_row(ui, state, entry, 2),
                     PaletteRow::Xspice(descriptor) => xspice_row(ui, state, descriptor, 2),
+                    PaletteRow::Supply(entry) => supply_row(ui, state, entry, 2),
                 };
                 armed = clicked.or(armed);
             }
@@ -1489,6 +1546,54 @@ fn placed_by_variant_row(row: &LibraryPartRow) -> bool {
 }
 
 /// Whether the place tool holds this primitive bare, with no card or skin.
+/// The supply rail the Label tool holds from the shelf, if any.
+fn armed_supply(state: &AppState) -> Option<&'static SupplyPaletteEntry> {
+    let editor = &state.model.schematic.session.editor;
+    if editor.tool != Tool::Label {
+        return None;
+    }
+    let sequence = editor.pending_net_label_sequence.as_ref()?;
+    let name = sequence.repeated_name()?;
+    supply_palette()
+        .iter()
+        .find(|supply| supply.name == name && supply.kind() == sequence.kind)
+}
+
+fn supply_shelf_glyph(entry: &SupplyPaletteEntry) -> ShelfGlyph {
+    ShelfGlyph::Supply(entry.glyph())
+}
+
+/// Arm the Label tool to place one supply rail on every click.
+pub(super) fn arm_supply(state: &mut AppState, entry: &SupplyPaletteEntry, ctx: &egui::Context) {
+    state.model.schematic.session.editor.pending_library_cell = None;
+    state.model.schematic.arm_tool(Tool::Label);
+    state.model.schematic.session.editor.pending_net_label_sequence = Some(
+        rspice_schematic_editor::session::net_label_sequence::NetLabelSequence::repeating(
+            entry.name,
+            entry.kind(),
+        ),
+    );
+    finish_shelf_placement(state, ctx);
+}
+
+fn supply_row(
+    ui: &mut Ui,
+    state: &mut AppState,
+    entry: &'static SupplyPaletteEntry,
+    level: usize,
+) -> Option<ShelfArm> {
+    let response = shelf_part_row(
+        ui,
+        supply_shelf_glyph(entry),
+        entry.name,
+        armed_supply(state) == Some(entry),
+        None,
+        level,
+    );
+    shelf_pin_context_menu(&response, state, &ShelfEntry::Supply(entry.name.to_owned()));
+    response.clicked().then_some(ShelfArm::Supply(entry))
+}
+
 fn primitive_armed(state: &AppState, kind: ComponentType) -> bool {
     let editor = &state.model.schematic.session.editor;
     editor.tool == Tool::Place(kind)
@@ -2038,7 +2143,7 @@ pub(super) struct ShelfHit {
     glyph: ShelfGlyph,
     pub(super) label: String,
     meta: Option<String>,
-    selected: bool,
+    pub(super) selected: bool,
     arm: ShelfArm,
     /// The pinnable identity; a stimulus definition is project state and has
     /// none.
@@ -2106,6 +2211,14 @@ pub(super) fn shelf_hits(
                     part_numbers: &[],
                 });
                 offer(&mut hits, rank, ShelfEntry::Primitive(entry.kind));
+            }
+            PaletteRow::Supply(entry) => {
+                let rank = query.rank(&ShelfTerms {
+                    label: entry.name,
+                    keywords: entry.keywords,
+                    part_numbers: &[],
+                });
+                offer(&mut hits, rank, ShelfEntry::Supply(entry.name.to_owned()));
             }
             PaletteRow::Xspice(descriptor) => {
                 let mut part_numbers = vec![descriptor.model_type];
