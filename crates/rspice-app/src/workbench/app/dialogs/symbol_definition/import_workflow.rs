@@ -263,9 +263,10 @@ fn import_body(
                     .unwrap_or_else(|| "Choose an explicit bound definition".to_owned()),
                 SymbolImportBindingChoice::SymbolAttributes => preview
                     .and_then(|import| match &import.definition.source {
-                        SymbolSourceContract::Model { model, .. } => {
-                            Some(format!("{} / {} (named by the symbol)", model.library, model.model))
-                        }
+                        SymbolSourceContract::Model { model, .. } => Some(format!(
+                            "{} / {} (named by the symbol)",
+                            model.library, model.model
+                        )),
                         _ => None,
                     })
                     .unwrap_or_else(|| "Model the symbol names".to_owned()),
@@ -700,7 +701,10 @@ mod tests {
         };
         assert_eq!(model.model, "TESTAMP");
         assert_eq!(
-            ports.iter().map(|port| port.name.as_str()).collect::<Vec<_>>(),
+            ports
+                .iter()
+                .map(|port| port.name.as_str())
+                .collect::<Vec<_>>(),
             ["In_p", "In_n", "V_p", "V_n", "OUT"]
         );
         assert!(imported.report.pin_order_valid && imported.report.binding_valid);

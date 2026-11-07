@@ -89,7 +89,6 @@ pub use include::{
     MODEL_SOURCE_EXTENSIONS, ResolvedIncludeDependency, SealedSourceBundle, SealedSourceEdge,
     normalize_source_path_literal, parse_include_directive, parse_lib_directive,
 };
-pub(crate) use parser::strip_semicolon_comment;
 pub use initcond::{
     DeviceInitialConditionSourceProvider, DeviceInitialConditionSourceText,
     MAX_DEVICE_INITIAL_CONDITION_SOURCE_BYTES,
@@ -118,6 +117,7 @@ pub(crate) use output_symbols::{
     OutputOperand, collect_output_node_namespace_from_elements_with_abort,
 };
 pub use param_scope::ParamResolver;
+pub(crate) use parser::strip_semicolon_comment;
 pub use parser::*;
 pub use source_map::*;
 pub use spectre_statistics::*;
@@ -9804,8 +9804,9 @@ mod tests {
                 .unwrap_or_else(|| panic!("{name} is parsed"))
                 .kind
         };
-        let is_input_pair =
-            |pos: &str, neg: &str| pos.eq_ignore_ascii_case("inp") && neg.eq_ignore_ascii_case("inn");
+        let is_input_pair = |pos: &str, neg: &str| {
+            pos.eq_ignore_ascii_case("inp") && neg.eq_ignore_ascii_case("inn")
+        };
         assert!(matches!(
             kind("E1"),
             ElementKind::Vcvs { gain, control_nodes: (pos, neg), .. }
