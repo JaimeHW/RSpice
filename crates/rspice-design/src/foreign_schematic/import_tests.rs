@@ -2848,7 +2848,9 @@ fn an_imported_rail_turns_its_glyph_away_from_what_reaches_it() {
          WIRE 0 0 0 64\nFLAG 0 0 Vss\n\
          WIRE 160 0 160 64\nFLAG 160 64 Vcc\n\
          WIRE 320 0 320 64\nFLAG 320 0 VDD\n\
-         WIRE 480 0 480 64\nFLAG 480 64 VEE\n",
+         WIRE 480 0 480 64\nFLAG 480 64 VEE\n\
+         WIRE 640 0 704 0\nWIRE 640 0 640 64\nFLAG 640 0 VSS2\n\
+         WIRE 800 0 800 64\nWIRE 800 64 800 128\nFLAG 800 64 VEE2\n",
     )
     .unwrap();
     let imported = import_foreign_schematic(&drawing, "work", &Library::default());
@@ -2868,6 +2870,12 @@ fn an_imported_rail_turns_its_glyph_away_from_what_reaches_it() {
     assert_eq!(glyph("Vcc"), SupplyGlyph::Down, "reached from above");
     assert_eq!(glyph("VDD"), SupplyGlyph::Bar);
     assert_eq!(glyph("VEE"), SupplyGlyph::Down);
+    assert_eq!(
+        glyph("VSS2"),
+        SupplyGlyph::Bar,
+        "on a corner, reached from below"
+    );
+    assert_eq!(glyph("VEE2"), SupplyGlyph::Down, "on the middle of a run");
 }
 
 /// Where a net label of `imported` named `name` stands, in world units.

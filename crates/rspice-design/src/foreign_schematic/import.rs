@@ -1993,8 +1993,12 @@ impl Builder<'_> {
                     _ => NetLabelSide::Right,
                 };
                 if is_supply_rail(&flag.name) {
+                    let reaches = match flag.facing {
+                        Some(facing) => vec![ForeignPoint::new(-facing.x, -facing.y)],
+                        None => self.reaches(at),
+                    };
                     label.kind = NetLabelKind::Supply {
-                        glyph: rail_glyph(&flag.name, run),
+                        glyph: rail_glyph(&flag.name, &reaches),
                     };
                 }
                 // A side RSpice chose, or a name QSPICE centres over its
@@ -2074,6 +2078,17 @@ impl Builder<'_> {
     /// pin rather than across the part. A flag reached from more than one
     /// side, or from the middle of a wire, says nothing.
     fn away_from_attachment(&self, at: Point) -> Option<ForeignPoint> {
+        let mut sides = self.reaches(at).into_iter();
+        let first = sides.next()?;
+        sides
+            .all(|side| side == first)
+            .then(|| ForeignPoint::new(-first.x, -first.y))
+    }
+
+    /// The sides wires and pin leads reach `at` from, each a unit step
+    /// along the axis it mostly runs on: both ways along a wire `at` stands
+    /// on the middle of.
+    fn reaches(&self, at: Point) -> Vec<ForeignPoint> {
         let mut reaches = Vec::new();
         for (a, b) in &self.source_segments {
             if *a == at {
@@ -2081,25 +2096,24 @@ impl Builder<'_> {
             } else if *b == at {
                 reaches.push(*a - at);
             } else if strictly_inside(*a, *b, at) {
-                return None;
+                reaches.extend([*a - at, *b - at]);
             }
         }
         reaches.extend(self.pin_leads.get(&at).into_iter().flatten().copied());
-        let mut sides = reaches.into_iter().filter_map(|reach| {
-            match (
-                reach.x.abs() >= reach.y.abs(),
-                reach.x.signum(),
-                reach.y.signum(),
-            ) {
-                (true, 0, _) => None,
-                (true, x, _) => Some(ForeignPoint::new(x, 0)),
-                (false, _, y) => Some(ForeignPoint::new(0, y)),
-            }
-        });
-        let first = sides.next()?;
-        sides
-            .all(|side| side == first)
-            .then(|| ForeignPoint::new(-first.x, -first.y))
+        reaches
+            .into_iter()
+            .filter_map(|reach| {
+                match (
+                    reach.x.abs() >= reach.y.abs(),
+                    reach.x.signum(),
+                    reach.y.signum(),
+                ) {
+                    (true, 0, _) => None,
+                    (true, x, _) => Some(ForeignPoint::new(x, 0)),
+                    (false, _, y) => Some(ForeignPoint::new(0, y)),
+                }
+            })
+            .collect()
     }
 
     /// Places a mutual-inductance card (`K1 L1 L2 1`) whose windings are
@@ -2823,20 +2837,21 @@ fn note_anchor(note: &DesignNote, point: Point, lettering: &ForeignLettering) ->
 }
 
 /// The glyph a rail flag draws: its name's by convention, unless that would
-/// stand on what reaches the flag. A rail reached from above hangs its bar
-/// below its point, and one reached from below stands its bar or arrow over
-/// it, as a drafter turns a rail symbol away from its wire; `run` is the way
-/// the flag's name reads, away from what reaches it.
-fn rail_glyph(name: &str, run: Option<ForeignPoint>) -> SupplyGlyph {
+/// stand on what reaches the flag. A rail reached from above and not from
+/// below hangs its bar below its point, and one reached from below and not
+/// from above stands its bar or arrow over it, as a drafter turns a rail
+/// symbol away from its wire; `reaches` are the sides wires and leads reach
+/// the flag from.
+fn rail_glyph(name: &str, reaches: &[ForeignPoint]) -> SupplyGlyph {
     let glyph = SupplyGlyph::for_name(name);
-    match run.map(|run| (run.x.signum(), run.y.signum())) {
-        Some((0, 1)) => SupplyGlyph::Down,
-        Some((0, -1)) if glyph == SupplyGlyph::Down => SupplyGlyph::Bar,
+    let from = |y: i32| reaches.iter().any(|reach| reach.x == 0 && reach.y == y);
+    match glyph {
+        SupplyGlyph::Down if from(1) && !from(-1) => SupplyGlyph::Bar,
+        SupplyGlyph::Bar | SupplyGlyph::Arrow if from(-1) && !from(1) => SupplyGlyph::Down,
         _ => glyph,
     }
 }
 
-/// VDD, VCC, VSS and VEE, alone or numbered, are supply rails.
 /// The middle of a part's terminals.
 fn centre(terminals: &[Point]) -> Point {
     let count = i32::try_from(terminals.len().max(1)).unwrap_or(1);
@@ -2861,6 +2876,7 @@ fn qspice_kind(symbol: &ForeignSymbol) -> String {
         .unwrap_or_default()
 }
 
+/// VDD, VCC, VSS and VEE, alone or numbered, are supply rails.
 fn is_supply_rail(name: &str) -> bool {
     let upper = name.trim().to_ascii_uppercase();
     ["VDD", "VCC", "VSS", "VEE"].iter().any(|rail| {
