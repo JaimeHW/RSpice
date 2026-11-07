@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- XOR gate. Box 60x40, pins a(0,10), b(0,30), y(60,20). -->
+<svg viewBox="0 0 60 40" xmlns="http://www.w3.org/2000/svg">
+  <path d="M 0,10 H 16.4" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 0,30 H 16.4" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 10,4 C 15,13 15,27 10,36" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 14,4 C 28,5 38,11 46,20 C 38,29 28,35 14,36 C 19,27 19,13 14,4 Z" fill="none" stroke="#000000" stroke-width="1" stroke-linejoin="round"/>
+  <path d="M 46,20 H 60" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+</svg>

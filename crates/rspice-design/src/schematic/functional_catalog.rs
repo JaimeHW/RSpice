@@ -366,6 +366,120 @@ const OTA_PARAMETERS: &[FunctionalParameter] = &[
     ),
 ];
 
+const ONE_INPUT_PINS: &[FunctionalPin] = &[pin("A", In), pin("Y", Out)];
+
+const TWO_INPUT_PINS: &[FunctionalPin] = &[pin("A", In), pin("B", In), pin("Y", Out)];
+
+const LOGIC_LEVELS: [FunctionalParameter; 2] = [
+    number(
+        "VHIGH",
+        "High level",
+        "V",
+        "5",
+        "Output high voltage; an input is high at or above the midpoint of the two levels.",
+    ),
+    number(
+        "VLOW",
+        "Low level",
+        "V",
+        "0",
+        "Output low voltage; an input is low below the midpoint of the two levels.",
+    ),
+];
+
+const LOGIC_TIMING: [FunctionalParameter; 4] = [
+    number(
+        "TD",
+        "Delay",
+        "s",
+        "10n",
+        "Time from an input change to the output edge starting; a pulse shorter than this never reaches the output.",
+    ),
+    number(
+        "TRISE",
+        "Rise time",
+        "s",
+        "5n",
+        "Time the output takes to rise from low to high.",
+    ),
+    number(
+        "TFALL",
+        "Fall time",
+        "s",
+        "5n",
+        "Time the output takes to fall from high to low.",
+    ),
+    number(
+        "ROUT",
+        "Output resistance",
+        "Ω",
+        "50",
+        "Resistance the output drives through.",
+    ),
+];
+
+/// Analog-threshold logic: levels, then timing and drive.
+const LOGIC_PARAMETERS: &[FunctionalParameter] = &[
+    LOGIC_LEVELS[0],
+    LOGIC_LEVELS[1],
+    LOGIC_TIMING[0],
+    LOGIC_TIMING[1],
+    LOGIC_TIMING[2],
+    LOGIC_TIMING[3],
+];
+
+/// A Schmitt trigger: its two thresholds, then the logic levels and timing.
+const SCHMITT_PARAMETERS: &[FunctionalParameter] = &[
+    number(
+        "VT",
+        "Threshold centre",
+        "V",
+        "2.5",
+        "Midpoint of the rising and falling input thresholds.",
+    ),
+    number(
+        "HYST",
+        "Hysteresis",
+        "V",
+        "0.5",
+        "The input rises through VT+HYST/2 to switch and falls through VT-HYST/2 to switch back.",
+    ),
+    number(
+        "VHIGH",
+        "High level",
+        "V",
+        "5",
+        "Output high voltage.",
+    ),
+    number("VLOW", "Low level", "V", "0", "Output low voltage."),
+    LOGIC_TIMING[0],
+    LOGIC_TIMING[1],
+    LOGIC_TIMING[2],
+    LOGIC_TIMING[3],
+];
+
+/// A part of the Logic & timing group.
+const fn logic_part(
+    stable_id: &'static str,
+    display_name: &'static str,
+    subcircuit: &'static str,
+    pins: &'static [FunctionalPin],
+    symbol_asset: &'static str,
+    keywords: &'static [&'static str],
+    parameters: &'static [FunctionalParameter],
+) -> FunctionalPartDescriptor {
+    FunctionalPartDescriptor {
+        stable_id,
+        display_name,
+        subcircuit,
+        pins,
+        symbol_asset,
+        keywords,
+        category: ComponentCategory::LogicTiming,
+        parameters,
+    }
+}
+
 static FUNCTIONAL_PARTS: &[FunctionalPartDescriptor] = &[
     FunctionalPartDescriptor {
         stable_id: "rspice.functional.opamp",
@@ -419,6 +533,87 @@ static FUNCTIONAL_PARTS: &[FunctionalPartDescriptor] = &[
         category: ComponentCategory::AmplifiersComparators,
         parameters: OTA_PARAMETERS,
     },
+    logic_part(
+        "rspice.functional.and2",
+        "AND Gate",
+        "RSPICE_FN_AND2",
+        TWO_INPUT_PINS,
+        "functional_and.svg",
+        &["and", "logic gate", "74hc08"],
+        LOGIC_PARAMETERS,
+    ),
+    logic_part(
+        "rspice.functional.nand2",
+        "NAND Gate",
+        "RSPICE_FN_NAND2",
+        TWO_INPUT_PINS,
+        "functional_nand.svg",
+        &["nand", "logic gate", "74hc00"],
+        LOGIC_PARAMETERS,
+    ),
+    logic_part(
+        "rspice.functional.or2",
+        "OR Gate",
+        "RSPICE_FN_OR2",
+        TWO_INPUT_PINS,
+        "functional_or.svg",
+        &["or", "logic gate", "74hc32"],
+        LOGIC_PARAMETERS,
+    ),
+    logic_part(
+        "rspice.functional.nor2",
+        "NOR Gate",
+        "RSPICE_FN_NOR2",
+        TWO_INPUT_PINS,
+        "functional_nor.svg",
+        &["nor", "logic gate", "74hc02"],
+        LOGIC_PARAMETERS,
+    ),
+    logic_part(
+        "rspice.functional.xor2",
+        "XOR Gate",
+        "RSPICE_FN_XOR2",
+        TWO_INPUT_PINS,
+        "functional_xor.svg",
+        &["xor", "exclusive or", "logic gate", "74hc86"],
+        LOGIC_PARAMETERS,
+    ),
+    logic_part(
+        "rspice.functional.inverter",
+        "Inverter",
+        "RSPICE_FN_INV",
+        ONE_INPUT_PINS,
+        "functional_inverter.svg",
+        &["inverter", "not", "not gate", "logic gate", "74hc04"],
+        LOGIC_PARAMETERS,
+    ),
+    logic_part(
+        "rspice.functional.buffer",
+        "Buffer",
+        "RSPICE_FN_BUF",
+        ONE_INPUT_PINS,
+        "functional_buffer.svg",
+        &["buffer", "logic buffer", "driver", "logic gate"],
+        LOGIC_PARAMETERS,
+    ),
+    logic_part(
+        "rspice.functional.schmitt_inverter",
+        "Schmitt Inverter",
+        "RSPICE_FN_SCHMITT_INV",
+        ONE_INPUT_PINS,
+        "functional_schmitt_inverter.svg",
+        &["schmitt", "schmitt trigger", "inverter", "hysteresis", "74hc14"],
+        SCHMITT_PARAMETERS,
+    ),
+    logic_part(
+        "rspice.functional.schmitt_buffer",
+        "Schmitt Buffer",
+        "RSPICE_FN_SCHMITT_BUF",
+        ONE_INPUT_PINS,
+        "functional_schmitt_buffer.svg",
+        &["schmitt", "schmitt trigger", "buffer", "hysteresis"],
+        SCHMITT_PARAMETERS,
+    ),
 ];
 
 /// Every functional part, in catalog order.

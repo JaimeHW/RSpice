@@ -155,3 +155,36 @@ fn a_placed_ota_drives_its_bias_current_times_tanh_into_a_load() {
     let out = bench.operating_point("out");
     assert!((out - expected).abs() < 1e-6 * expected, "{out} vs {expected}");
 }
+
+#[test]
+fn placed_logic_parts_settle_at_their_truth_table_levels() {
+    // A high and B low into every gate; the Schmitt parts read B and A.
+    let mut bench = Bench::default();
+    bench.primitive(ComponentType::VoltageSource, "VA", "5", &["a", "0"]);
+    bench.primitive(ComponentType::VoltageSource, "VB", "0", &["b", "0"]);
+    let parts = [
+        ("rspice.functional.and2", &["a", "b", "and"][..], 0.0),
+        ("rspice.functional.nand2", &["a", "b", "nand"][..], 5.0),
+        ("rspice.functional.or2", &["a", "b", "or"][..], 5.0),
+        ("rspice.functional.nor2", &["a", "b", "nor"][..], 0.0),
+        ("rspice.functional.xor2", &["a", "b", "xor"][..], 5.0),
+        ("rspice.functional.inverter", &["a", "inv"][..], 0.0),
+        ("rspice.functional.buffer", &["a", "buf"][..], 5.0),
+        ("rspice.functional.schmitt_inverter", &["b", "sinv"][..], 5.0),
+        ("rspice.functional.schmitt_buffer", &["a", "sbuf"][..], 5.0),
+    ];
+    for (index, (part, nets, _)) in parts.iter().enumerate() {
+        bench.part(part, &format!("X{index}"), "", nets);
+    }
+    let outputs = parts
+        .iter()
+        .map(|(_, nets, _)| nets[nets.len() - 1])
+        .collect::<Vec<_>>();
+    for ((node, voltage), (part, _, expected)) in outputs
+        .iter()
+        .zip(bench.operating_points(&outputs))
+        .zip(parts)
+    {
+        assert!((voltage - expected).abs() < 1e-9, "{part} {node}: {voltage}");
+    }
+}

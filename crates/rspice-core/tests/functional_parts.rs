@@ -465,3 +465,92 @@ fn ota_bias_input_sits_above_v_minus_and_its_current_returns_there() {
     assert_close("I(V+)", -currents[0], 1e-3 + 100e-6 + sourced, 1e-9);
     assert_close("I(V-)", currents[1], 1e-3 + 100e-6, 1e-9);
 }
+
+#[test]
+fn gates_follow_their_truth_tables_at_their_levels() {
+    // Every input pair on every two-input gate, and both levels on the
+    // inverter and the buffer, unloaded: the output sits at its level.
+    let gates: [(&str, fn(bool, bool) -> bool); 5] = [
+        ("RSPICE_FN_AND2", |a, b| a && b),
+        ("RSPICE_FN_NAND2", |a, b| !(a && b)),
+        ("RSPICE_FN_OR2", |a, b| a || b),
+        ("RSPICE_FN_NOR2", |a, b| !(a || b)),
+        ("RSPICE_FN_XOR2", |a, b| a != b),
+    ];
+    let level = |high: bool| if high { 3.3 } else { 0.0 };
+    for a in [false, true] {
+        for b in [false, true] {
+            let mut deck = format!("* gates\nVA a 0 {}\nVB b 0 {}\n", level(a), level(b));
+            for (index, (gate, _)) in gates.iter().enumerate() {
+                deck.push_str(&format!("X{index} a b y{index} {gate} VHIGH=3.3\n"));
+            }
+            deck.push_str("XI a yi RSPICE_FN_INV VHIGH=3.3\nXB a yb RSPICE_FN_BUF VHIGH=3.3\n.end\n");
+            let nodes = ["y0", "y1", "y2", "y3", "y4", "yi", "yb"];
+            let outputs = op_voltages(&deck, &nodes);
+            let expected = gates
+                .iter()
+                .map(|(_, truth)| truth(a, b))
+                .chain([!a, a]);
+            for ((node, output), high) in nodes.iter().zip(outputs).zip(expected) {
+                assert_close(node, output, level(high), 1e-9);
+            }
+        }
+    }
+}
+
+#[test]
+fn an_input_is_high_from_the_midpoint_of_the_levels() {
+    // VHIGH=3.3, VLOW=0.3: the threshold is 1.8 V.
+    let deck = |input: f64| {
+        format!("* threshold\nVA a 0 {input}\nX1 a y RSPICE_FN_BUF VHIGH=3.3 VLOW=0.3\n.end\n")
+    };
+    assert_close("below", op_voltages(&deck(1.79), &["y"])[0], 0.3, 1e-9);
+    assert_close("at", op_voltages(&deck(1.8), &["y"])[0], 3.3, 1e-9);
+}
+
+#[test]
+fn a_gate_output_moves_its_delay_after_the_input_and_slews_its_edge_times() {
+    // A 0.1 ns input edge at 1 us crosses 2.5 V 0.05 ns in. A 5 ns pulse is
+    // shorter than the 10 ns delay and never reaches the output.
+    let deck = "* gate timing
+VA a 0 PULSE(0 5 1u 0.1n 0.1n 1u 4u)
+VG g 0 PULSE(0 5 1u 0.1n 0.1n 5n 4u)
+X1 a y RSPICE_FN_BUF
+X2 a yn RSPICE_FN_INV TFALL=20n
+X3 g yg RSPICE_FN_BUF
+.end
+";
+    let tran = transient(deck, 3e-6, 1e-9);
+    let crossed = 1e-6 + 0.05e-9;
+    let y = waveform(&tran, "y");
+    let at = |level| rising_crossing(&tran.time, y, level);
+    assert_close("buffer delay", at(2.5) - crossed, 10e-9 + 2.5e-9, 0.2e-9);
+    assert_close("10-90% rise", at(4.5) - at(0.5), 0.8 * 5e-9, 0.2e-9);
+    let yn = waveform(&tran, "yn");
+    let at = |level| falling_crossing(&tran.time, yn, level);
+    assert_close("inverter delay", at(2.5) - crossed, 10e-9 + 10e-9, 0.2e-9);
+    assert_close("90-10% fall", at(0.5) - at(4.5), 0.8 * 20e-9, 0.2e-9);
+    let glitch = waveform(&tran, "yg").iter().copied().fold(f64::MIN, f64::max);
+    assert_close("suppressed pulse", glitch, 0.0, 1e-6);
+}
+
+#[test]
+fn schmitt_triggers_switch_half_their_hysteresis_either_side_of_their_threshold() {
+    // A 0.5 V/us ramp up and back down; the output moves TD plus half an
+    // edge, 1.5 ns, after the input crosses.
+    let deck = "* schmitt
+VR r 0 PWL(0 0 10u 5 20u 0)
+X1 r ys RSPICE_FN_SCHMITT_BUF TD=1n TRISE=1n TFALL=1n
+X2 r yi RSPICE_FN_SCHMITT_INV TD=1n TRISE=1n TFALL=1n VT=2 HYST=1
+.end
+";
+    let tran = transient(deck, 20e-6, 10e-9);
+    let ramp = waveform(&tran, "r");
+    let input_at = |time: f64| value_at(&tran.time, ramp, time - 1.5e-9);
+    let ys = waveform(&tran, "ys");
+    assert_close("buffer up", input_at(rising_crossing(&tran.time, ys, 2.5)), 2.75, 1e-3);
+    assert_close("buffer down", input_at(falling_crossing(&tran.time, ys, 2.5)), 2.25, 1e-3);
+    let yi = waveform(&tran, "yi");
+    assert_close("inverter up", input_at(falling_crossing(&tran.time, yi, 2.5)), 2.5, 1e-3);
+    assert_close("inverter down", input_at(rising_crossing(&tran.time, yi, 2.5)), 1.5, 1e-3);
+}

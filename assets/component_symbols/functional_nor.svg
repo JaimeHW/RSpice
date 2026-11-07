@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- NOR gate. Box 60x40, pins a(0,10), b(0,30), y(60,20). -->
+<svg viewBox="0 0 60 40" xmlns="http://www.w3.org/2000/svg">
+  <path d="M 0,10 H 13.4" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 0,30 H 13.4" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 11,4 C 25,5 34,11 43,20 C 34,29 25,35 11,36 C 16,27 16,13 11,4 Z" fill="none" stroke="#000000" stroke-width="1" stroke-linejoin="round"/>
+  <path d="M 43,20 A 2.5,2.5 0 0 1 48,20 A 2.5,2.5 0 0 1 43,20" fill="none" stroke="#000000" stroke-width="1"/>
+  <path d="M 48,20 H 60" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+</svg>

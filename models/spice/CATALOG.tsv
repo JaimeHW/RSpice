@@ -7,9 +7,18 @@
 # can still be traced to its source, but not a part a user can select.
 # name	kind	device	pack	path	line	restricted	scope
 RSPICE_DIODE	model	diode	rspice-foundation	lib/foundation.lib	10	0	top
+RSPICE_FN_AND2	subckt	subckt	rspice-functional	lib/functional.lib	111	0	top
+RSPICE_FN_BUF	subckt	subckt	rspice-functional	lib/functional.lib	108	0	top
 RSPICE_FN_COMPARATOR	subckt	subckt	rspice-functional	lib/functional.lib	54	0	top
+RSPICE_FN_INV	subckt	subckt	rspice-functional	lib/functional.lib	105	0	top
+RSPICE_FN_NAND2	subckt	subckt	rspice-functional	lib/functional.lib	114	0	top
+RSPICE_FN_NOR2	subckt	subckt	rspice-functional	lib/functional.lib	120	0	top
 RSPICE_FN_OPAMP	subckt	subckt	rspice-functional	lib/functional.lib	23	0	top
+RSPICE_FN_OR2	subckt	subckt	rspice-functional	lib/functional.lib	117	0	top
 RSPICE_FN_OTA	subckt	subckt	rspice-functional	lib/functional.lib	77	0	top
+RSPICE_FN_SCHMITT_BUF	subckt	subckt	rspice-functional	lib/functional.lib	134	0	top
+RSPICE_FN_SCHMITT_INV	subckt	subckt	rspice-functional	lib/functional.lib	129	0	top
+RSPICE_FN_XOR2	subckt	subckt	rspice-functional	lib/functional.lib	123	0	top
 RSPICE_LED_BLUE	model	diode	rspice-foundation	lib/foundation.lib	26	0	top
 RSPICE_LED_GREEN	model	diode	rspice-foundation	lib/foundation.lib	25	0	top
 RSPICE_LED_RED	model	diode	rspice-foundation	lib/foundation.lib	24	0	top

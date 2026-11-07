@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- AND gate. Box 60x40, pins a(0,10), b(0,30), y(60,20). -->
+<svg viewBox="0 0 60 40" xmlns="http://www.w3.org/2000/svg">
+  <path d="M 0,10 H 14" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 0,30 H 14" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 14,4 H 30 A 16,16 0 0 1 30,36 H 14 Z" fill="none" stroke="#000000" stroke-width="1" stroke-linejoin="round"/>
+  <path d="M 46,20 H 60" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+</svg>
