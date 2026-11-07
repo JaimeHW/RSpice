@@ -16,6 +16,7 @@ use rspice_design_model::Point;
 use rspice_design_model::port::{PortDirection, PortSpec};
 
 use super::directives::{defined_model_names, foreign_directive_cards};
+use super::functional::{Functional, FunctionalPlan, SourceNets, ltspice_gate};
 use super::mapping::{
     LTSPICE_AWAITING_NATIVE_PARTS, NativeKind, NativeMapping, ltspice_builtin_definition,
     native_mapping, qspice_refusal, source_value, spice_text, spice_tokens,
@@ -32,6 +33,9 @@ use crate::schematic::design_note::{DesignNote, DesignNoteKind};
 use crate::schematic::document::SchematicDocument;
 use crate::schematic::document_policy::{NetNamingPolicy, SchematicDocumentPolicy};
 use crate::schematic::documentation_shape::{DocumentationShape, DocumentationShapeGeometry};
+use crate::schematic::functional_catalog::{
+    conform_functional_inputs, functional_library_binding, functional_part, placement_value,
+};
 use crate::schematic::label_layout::TextEdge;
 use crate::schematic::label_position::LabelPosition;
 use crate::schematic::net_label::{Junction, NetLabel, NetLabelKind, SupplyGlyph};
@@ -232,6 +236,7 @@ pub fn import_foreign_schematic(
         leads: Vec::new(),
         source_points: HashSet::new(),
         source_segments: Vec::new(),
+        source_nets: SourceNets::default(),
         anchors: HashSet::new(),
         terminals: Vec::new(),
         names: BTreeSet::new(),
@@ -264,6 +269,8 @@ struct Builder<'a> {
     /// and its wire segments, on RSpice's grid: what a lead must not touch.
     source_points: HashSet<Point>,
     source_segments: Vec<(Point, Point)>,
+    /// The nets the source drawing's wires and flags make.
+    source_nets: SourceNets,
     /// Every point the source drawing joins things at.
     anchors: HashSet<Point>,
     /// Every placed terminal, for the wire-connection cache.
@@ -383,15 +390,22 @@ impl Builder<'_> {
                 self.place_native(symbol, &attributes, mapping, &pins);
             }
             _ => {
-                if tool == ForeignTool::Ltspice
-                    && LTSPICE_AWAITING_NATIVE_PARTS
-                        .contains(&symbol.base_name().to_ascii_lowercase().as_str())
+                if schematic.is_none()
+                    && let Some(plan) =
+                        self.functional_plan(symbol, &definition, &attributes, &pins)
                 {
-                    self.notice(format!(
-                        "{label} keeps LTspice's own symbol and model until RSpice carries this part natively."
-                    ));
+                    self.place_functional(symbol, &attributes, plan, &pins);
+                } else {
+                    if tool == ForeignTool::Ltspice
+                        && LTSPICE_AWAITING_NATIVE_PARTS
+                            .contains(&symbol.base_name().to_ascii_lowercase().as_str())
+                    {
+                        self.notice(format!(
+                            "{label} keeps LTspice's own symbol and model until RSpice carries this part natively."
+                        ));
+                    }
+                    self.place_cell(symbol, &definition, &attributes, location, schematic, &pins);
                 }
-                self.place_cell(symbol, &definition, &attributes, location, schematic, &pins);
             }
         }
         if self.document.components.len() > placed {
@@ -626,6 +640,102 @@ impl Builder<'_> {
                 .into_iter()
                 .map(|(name, point)| (id, name.to_owned(), point)),
         );
+        self.document.components.push(component);
+    }
+
+    /// The functional part an LTspice part becomes, when RSpice carries it
+    /// as one; a part that stays LTspice's own device says why.
+    fn functional_plan(
+        &mut self,
+        symbol: &ForeignSymbol,
+        definition: &ForeignSymbolDefinition,
+        attributes: &[ForeignAttribute],
+        pins: &[Point],
+    ) -> Option<FunctionalPlan> {
+        if self.drawing.tool != ForeignTool::Ltspice
+            || !attribute(attributes, "Prefix")
+                .is_some_and(|prefix| prefix.trim().eq_ignore_ascii_case("A"))
+        {
+            return None;
+        }
+        let mut words = Vec::new();
+        let model = match attribute(attributes, "Value").filter(|value| !value.trim().is_empty()) {
+            Some(value) => {
+                let mut tokens = spice_tokens(&spice_text(value)).into_iter();
+                let model = tokens.next().unwrap_or_default();
+                words.extend(tokens);
+                model
+            }
+            None => attribute(attributes, "SpiceModel")
+                .unwrap_or_default()
+                .trim()
+                .to_owned(),
+        };
+        for key in ["Value2", "SpiceLine", "SpiceLine2"] {
+            if let Some(text) = attribute(attributes, key).filter(|text| !text.trim().is_empty()) {
+                words.extend(spice_tokens(&spice_text(text)));
+            }
+        }
+        let nets = &self.source_nets;
+        let net = |index: usize| pins.get(index).and_then(|point| nets.net(*point));
+        let is_ground = |net: usize| nets.is_ground(net);
+        match ltspice_gate(&model, &definition.ordered_pins(), &net, &is_ground, &words)? {
+            Functional::Part(plan) => Some(plan),
+            Functional::Kept(reason) => {
+                let label = self.symbol_label(symbol);
+                self.notice(format!("{label} {reason}."));
+                None
+            }
+        }
+    }
+
+    /// Places RSpice's functional part for a source part, its pins drawn to
+    /// the source pins the plan names.
+    fn place_functional(
+        &mut self,
+        symbol: &ForeignSymbol,
+        attributes: &[ForeignAttribute],
+        plan: FunctionalPlan,
+        pins: &[Point],
+    ) {
+        let Some(descriptor) = functional_part(plan.stable_id) else {
+            return;
+        };
+        let id = self.id();
+        let mut component = Component::new(id, ComponentType::CellInstance, Point::default())
+            .with_library_cell(functional_library_binding(descriptor));
+        component.params = plan
+            .params
+            .iter()
+            .map(|(key, value)| format!("{key}={value}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        if let Err(error) = conform_functional_inputs(&mut component) {
+            let label = self.symbol_label(symbol);
+            self.notice(format!("{label}: {error}."));
+        }
+        let Some(binding) = component.library_cell.clone() else {
+            return;
+        };
+        let name = self.instance_name(attribute(attributes, "InstName"), "X");
+        component.name = name;
+        component.value = placement_value(&binding);
+        let targets = plan
+            .pins
+            .iter()
+            .map(|index| pins[*index])
+            .collect::<Vec<_>>();
+        let offsets = |candidate: &Component| -> Vec<Point> {
+            candidate
+                .terminal_positions()
+                .into_iter()
+                .map(|(_, point)| point)
+                .collect()
+        };
+        let points = self.place_fitted(&mut component, &targets, offsets);
+        for (terminal, point) in binding.terminal_order.iter().zip(points) {
+            self.terminals.push((id, terminal.clone(), point));
+        }
         self.document.components.push(component);
     }
 
@@ -1036,6 +1146,19 @@ impl Builder<'_> {
         for point in &drawing.junctions {
             self.source_points.insert(self.scale(*point));
         }
+        let flags = drawing
+            .flags
+            .iter()
+            .map(|flag| {
+                let name = if flag.is_ground() {
+                    "0"
+                } else {
+                    flag.name.as_str()
+                };
+                (self.scale(flag.position), name)
+            })
+            .collect::<Vec<_>>();
+        self.source_nets = SourceNets::new(&self.source_segments, &flags);
     }
 
     /// Places `component` where its terminals best meet the source `pins`
@@ -1638,7 +1761,7 @@ fn spice_text_lines(text: &str) -> String {
         .join("\n")
 }
 
-fn strictly_inside(a: Point, b: Point, point: Point) -> bool {
+pub(super) fn strictly_inside(a: Point, b: Point, point: Point) -> bool {
     if point == a || point == b {
         return false;
     }

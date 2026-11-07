@@ -1164,3 +1164,115 @@ SYMATTR InstName U2
         .count();
     assert_eq!(notices, 1, "one notice per symbol: {:?}", imported.notices);
 }
+
+/// LTspice's AND gate: five inputs, the inverted and the true output, and
+/// its common, at the places its library draws them.
+const LTSPICE_AND_ASY: &str = "Version 4\nSymbolType CELL\nLINE Normal -32 16 32 16\n\
+    SYMATTR Prefix A\nSYMATTR SpiceModel AND\n\
+    PIN -32 32 NONE 0\nPINATTR PinName a\nPINATTR SpiceOrder 1\n\
+    PIN -32 48 NONE 0\nPINATTR PinName b\nPINATTR SpiceOrder 2\n\
+    PIN -32 64 NONE 0\nPINATTR PinName c\nPINATTR SpiceOrder 3\n\
+    PIN -32 80 NONE 0\nPINATTR PinName d\nPINATTR SpiceOrder 4\n\
+    PIN -32 96 NONE 0\nPINATTR PinName e\nPINATTR SpiceOrder 5\n\
+    PIN 32 80 NONE 0\nPINATTR PinName _Q\nPINATTR SpiceOrder 6\n\
+    PIN 32 48 NONE 0\nPINATTR PinName Q\nPINATTR SpiceOrder 7\n\
+    PIN -16 96 NONE 0\nPINATTR PinName com\nPINATTR SpiceOrder 8\n";
+
+#[test]
+fn an_ltspice_gate_with_a_ground_common_and_one_output_is_a_functional_gate() {
+    let mut library = Library::default();
+    library.symbols.insert(
+        "logic\\and".to_owned(),
+        ForeignSymbolSource {
+            definition: parse_asy(LTSPICE_AND_ASY).expect("the test symbol reads"),
+            location: "logic/and.asy".to_owned(),
+            schematic: None,
+        },
+    );
+    let drawing = parse_asc(
+        "Version 4\nSHEET 1 1600 400\n\
+         FLAG -32 32 in1\nFLAG -32 48 in2\nFLAG 32 48 y1\n\
+         SYMBOL logic\\and 0 0 R0\nSYMATTR InstName A1\nSYMATTR SpiceLine Vhigh=5 Td=10n\n\
+         FLAG 288 32 in1\nFLAG 288 48 in2\nFLAG 288 64 in3\nFLAG 352 80 y2\n\
+         SYMBOL logic\\and 320 0 R0\nSYMATTR InstName A2\n\
+         FLAG 608 32 in1\nFLAG 672 48 y3\nFLAG 672 80 y4\n\
+         SYMBOL logic\\and 640 0 R0\nSYMATTR InstName A3\n\
+         FLAG 928 32 in1\nFLAG 928 48 in2\nFLAG 992 48 y5\nFLAG 944 96 vref\n\
+         SYMBOL logic\\and 960 0 R0\nSYMATTR InstName A4\n\
+         FLAG 1248 32 in1\nFLAG 1248 48 in2\nFLAG 1312 48 y6\n\
+         WIRE 1264 96 1264 160\nFLAG 1264 160 0\n\
+         SYMBOL logic\\and 1280 0 R0\nSYMATTR InstName A5\nSYMATTR SpiceLine Tau=1n\n",
+    )
+    .unwrap();
+    let imported = import_foreign_schematic(&drawing, "work", &library);
+    assert_on_grid(&imported);
+    let part = |name: &str| {
+        imported
+            .document
+            .components
+            .iter()
+            .find(|component| component.name == name)
+            .unwrap_or_else(|| panic!("{name} was placed"))
+    };
+    let functional = |name: &str| {
+        part(name)
+            .library_cell
+            .as_ref()
+            .and_then(|binding| binding.builtin_functional.as_ref())
+            .map(|contract| contract.stable_id.as_str())
+    };
+    assert_eq!(functional("A1"), Some("rspice.functional.and"));
+    assert_eq!(
+        part("A1").params,
+        "INPUTS=2 VHIGH=5 VLOW=0 TD=10n TRISE=0 ROUT=1 TFALL=0"
+    );
+    assert_eq!(
+        part("A1").library_cell.as_ref().unwrap().terminal_order,
+        ["A", "B", "Y"]
+    );
+    assert_eq!(functional("A2"), Some("rspice.functional.nand"));
+    assert_eq!(
+        part("A2").library_cell.as_ref().unwrap().terminal_order,
+        ["A", "B", "C", "Y"]
+    );
+    // Both outputs, a common off ground, or a setting the part lacks keep
+    // LTspice's own device, and the import says why.
+    for name in ["A3", "A4", "A5"] {
+        assert_eq!(functional(name), None, "{name} keeps LTspice's device");
+    }
+    for (name, why) in [
+        ("A3", "both its true and its inverted output"),
+        ("A4", "common on a net other than ground"),
+        ("A5", "`Tau=1n`"),
+    ] {
+        assert!(
+            imported
+                .notices
+                .iter()
+                .any(|notice| notice.message.starts_with(name) && notice.message.contains(why)),
+            "{name}: {:?}",
+            imported.notices
+        );
+    }
+    // Each drawn pin of a functional gate lands on its source pin's net.
+    let connectivity = extract(&imported.document, |_| None, |_| None);
+    let nets = |name: &str| {
+        let component = part(name);
+        component
+            .terminal_positions()
+            .into_iter()
+            .map(|(_, point)| {
+                connectivity
+                    .terminals
+                    .iter()
+                    .find(|terminal| {
+                        terminal.component_id == component.id && terminal.point == point
+                    })
+                    .map(|terminal| terminal.net_name.clone())
+                    .unwrap_or_else(|| panic!("{name} has no terminal at {point:?}"))
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(nets("A1"), ["in1", "in2", "y1"]);
+    assert_eq!(nets("A2"), ["in1", "in2", "in3", "y2"]);
+}

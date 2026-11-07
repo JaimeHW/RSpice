@@ -8,6 +8,7 @@
 use std::fmt;
 
 mod directives;
+mod functional;
 mod import;
 mod installed;
 mod ltspice;
