@@ -63,7 +63,8 @@ impl PropertyCatalog {
             ) {
                 continue;
             }
-            for (order, field) in (800..).zip(ROWS) {
+            // After every other group, the symbol skin (900) included.
+            for (order, field) in (950..).zip(ROWS) {
                 sheet.add(
                     PropertyDefinition::new(field.key())
                         .with_display_name(field.label())

@@ -252,7 +252,7 @@ fn tolerance_fields(order: i32) -> [PropertyDefinition; 2] {
         PropertyDefinition::new(TOLERANCE_KEY)
             .with_display_name("Tolerance")
             .with_description(
-                "Half-width of the value's band; Monte Carlo draws inside it and worst case                  takes its ends",
+                "Half-width of the value's band; Monte Carlo draws inside it and worst case takes its ends",
             )
             .with_type(PropertyType::Expression)
             .with_default(PropertyValue::expression(""))
