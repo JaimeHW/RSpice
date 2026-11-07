@@ -135,8 +135,8 @@ pub fn net_label_text(label: &NetLabel) -> SchematicText {
 }
 
 /// Everything a net label draws, in world units: its attachment diamond,
-/// its name and an off-sheet connector's tab.
-pub fn net_label_bounds(label: &NetLabel) -> [Option<LayoutRect>; 3] {
+/// its name, an off-sheet connector's tab and a supply symbol's strokes.
+pub fn net_label_bounds(label: &NetLabel) -> [Option<LayoutRect>; 4] {
     let layout = label_layout::net_label_layout(label);
     let (x, y) = (label.pos.x as f32, label.pos.y as f32);
     let half = layout.diamond_half;
@@ -147,6 +147,7 @@ pub fn net_label_bounds(label: &NetLabel) -> [Option<LayoutRect>; 3] {
         }),
         Some(net_label_text(label).bounds()),
         layout.tab.map(|(tab, _)| tab),
+        label_layout::supply_glyph_rect(label),
     ]
 }
 

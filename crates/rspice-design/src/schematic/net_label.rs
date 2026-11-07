@@ -70,6 +70,14 @@ impl SupplyGlyph {
 }
 
 impl NetLabelKind {
+    /// A supply symbol's glyph, or `None` for any other label.
+    pub const fn supply_glyph(self) -> Option<SupplyGlyph> {
+        match self {
+            Self::Supply { glyph } => Some(glyph),
+            Self::Local | Self::OffSheet { .. } => None,
+        }
+    }
+
     /// The declarable off-sheet directions, in the order every surface offers
     /// them. The enum itself belongs to the design-management model, so the
     /// product's ordering and wording for it live beside the label kind.

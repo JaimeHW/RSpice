@@ -57,6 +57,9 @@ struct NetLabelScreenLayout {
     /// Present only for an off-sheet connector, and always inside
     /// `decoration_rect`.
     connector_tab: Option<(Rect, CrossSheetPortDirection)>,
+    /// A supply symbol's stem and bar or arrow, in screen points; empty for
+    /// any other label, and always inside `decoration_rect`.
+    supply_glyph: Vec<[Pos2; 2]>,
     decoration_rect: Rect,
     attachment_hit_rect: Rect,
 }
@@ -159,6 +162,22 @@ fn screen_layout(
                 (LabelText::Greeked(bar), rect)
             }
         };
+    // A supply's name is centred on its pin by the shaped width, which the
+    // shared layout can only estimate.
+    let (text, text_rect) = if label.kind.supply_glyph().is_some() {
+        let shift = vec2(anchor.x - text_rect.center().x, 0.0);
+        let text = match text {
+            LabelText::Greeked(bar) => LabelText::Greeked(bar.translate(shift)),
+            shaped @ LabelText::Shaped(_) => shaped,
+        };
+        (text, text_rect.translate(shift))
+    } else {
+        (text, text_rect)
+    };
+    let supply_glyph = label_layout::supply_glyph_marks(label)
+        .into_iter()
+        .map(|marks| marks.map(|mark| anchor + (layout_pos(mark) - label_pos(label)) * zoom))
+        .collect::<Vec<_>>();
     let attachment_radius = lod::diamond_half_pt(zoom);
     let attachment_rect =
         Rect::from_center_size(anchor, egui::Vec2::splat(attachment_radius * 2.0));
@@ -181,12 +200,17 @@ fn screen_layout(
         (LabelText::Shaped(_), Some((tab, _))) => text_rect.union(tab),
         (LabelText::Shaped(_), None) => text_rect,
     };
+    let painted = supply_glyph
+        .iter()
+        .flatten()
+        .fold(painted, |rect, point| rect.union(Rect::from_pos(*point)));
     NetLabelScreenLayout {
         text,
         attachment: anchor,
         attachment_radius,
         text_rect,
         connector_tab,
+        supply_glyph,
         decoration_rect: painted.expand(POINTER_SLOP),
         attachment_hit_rect: attachment_rect.expand(POINTER_SLOP),
     }
@@ -337,6 +361,22 @@ pub fn draw_net_label_attached(
         diamond,
         Stroke::NONE,
     ));
+    if !layout.supply_glyph.is_empty() {
+        // The rail's symbol, at the weight the level of detail gives a part's
+        // body at this zoom.
+        let stroke = Stroke::new(
+            lod::stroke_pt(
+                lod::StrokeRole::Symbol,
+                viewport.zoom,
+                painter.pixels_per_point(),
+                lod::Emphasis::Plain,
+            ),
+            text_color,
+        );
+        for segment in &layout.supply_glyph {
+            painter.line_segment(*segment, stroke);
+        }
+    }
     match layout.text {
         LabelText::Shaped(galley) => {
             painter.galley(layout.text_rect.min, galley, text_color);
@@ -387,20 +427,25 @@ pub fn hit_bounds(ctx: &Context, viewport: &Viewport, label: &NetLabel) -> Optio
 pub fn world_bounds(label: &NetLabel) -> (Point, Point) {
     let glyphs = display_name(label).chars().count() as f32;
     let corner = name_corner_world(label);
-    let text_min_x = corner.x;
-    let min_x = label.pos.x as f32;
     let tab_width = if label.kind.off_sheet_direction().is_some() {
         CONNECTOR_TAB_GAP_WORLD + CONNECTOR_TAB_WIDTH_WORLD
     } else {
         0.0
     };
-    let max_x = text_min_x + glyphs * LABEL_GLYPH_WIDTH_WORLD + tab_width;
-    let text_max_y = corner.y;
-    let max_y = label.pos.y as f32;
-    let min_y = text_max_y - LABEL_LINE_HEIGHT_WORLD;
+    let text = Rect::from_min_max(
+        Pos2::new(corner.x, corner.y - LABEL_LINE_HEIGHT_WORLD),
+        Pos2::new(
+            corner.x + glyphs * LABEL_GLYPH_WIDTH_WORLD + tab_width,
+            corner.y,
+        ),
+    );
+    let mut bounds = text.union(Rect::from_pos(label_pos(label)));
+    if let Some(glyph) = label_layout::supply_glyph_rect(label) {
+        bounds = bounds.union(layout_rect(glyph));
+    }
     (
-        Point::new(min_x.floor() as i32, min_y.floor() as i32),
-        Point::new(max_x.ceil() as i32, max_y.ceil() as i32),
+        Point::new(bounds.min.x.floor() as i32, bounds.min.y.floor() as i32),
+        Point::new(bounds.max.x.ceil() as i32, bounds.max.y.ceil() as i32),
     )
 }
 
@@ -608,6 +653,41 @@ mod tests {
         assert!(plain.connector_tab.is_none());
         assert!(plain.decoration_rect.width() < layout.decoration_rect.width());
         assert_eq!(plain.text_rect, layout.text_rect);
+    }
+
+    /// A supply symbol's stem and bar or arrow stand inside the one rect hit
+    /// testing reads, its name is centred on the pin, and the marquee and fit
+    /// bounds reach the glyph's far end.
+    #[test]
+    fn a_supply_glyph_is_inside_the_decoration_rect_and_the_world_bounds() {
+        use rspice_design::schematic::net_label::SupplyGlyph;
+        let ctx = initialized_context();
+        let viewport = viewport();
+        let color = Tokens::get(&ctx).color.net_label;
+        for glyph in [SupplyGlyph::Bar, SupplyGlyph::Arrow, SupplyGlyph::Down] {
+            let label = NetLabel::supply(9, Point::new(50, 40), "VDD", glyph);
+            let layout = screen_layout(&ctx, &viewport, &label, color);
+            assert!(layout.supply_glyph.len() >= 2, "{glyph:?}: a stem and a bar or arrow");
+            for point in layout.supply_glyph.iter().flatten() {
+                assert!(layout.decoration_rect.contains(*point), "{glyph:?}: {point:?}");
+            }
+            assert!(
+                (layout.text_rect.center().x - layout.attachment.x).abs() < 0.5,
+                "{glyph:?}: the name is centred on the pin"
+            );
+            let stem_end = layout.supply_glyph[0][1];
+            if glyph == SupplyGlyph::Down {
+                assert!(layout.text_rect.top() > stem_end.y, "a negative rail's name is below its bar");
+            } else {
+                assert!(layout.text_rect.bottom() < stem_end.y, "{glyph:?}: the name is above the symbol");
+            }
+            let (min, max) = world_bounds(&label);
+            let glyph_rect = label_layout::supply_glyph_rect(&label).expect("a supply has a glyph");
+            assert!(min.x as f32 <= glyph_rect.min.x && max.x as f32 >= glyph_rect.max.x);
+            assert!(min.y as f32 <= glyph_rect.min.y && max.y as f32 >= glyph_rect.max.y);
+        }
+        let plain = NetLabel::new(9, Point::new(50, 40), "VDD");
+        assert!(screen_layout(&ctx, &viewport, &plain, color).supply_glyph.is_empty());
     }
 
     #[test]

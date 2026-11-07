@@ -13,7 +13,7 @@ use super::{
     bus::{Bus, BusTap},
     component::Component,
     component_type::ComponentType,
-    net_label::NetLabel,
+    net_label::{NetLabel, NetLabelKind, SupplyGlyph},
 };
 use crate::symbol::SymbolDocument;
 
@@ -44,6 +44,15 @@ pub const UNNAMED_NET_LABEL: &str = "<unnamed>";
 pub const CONNECTOR_TAB_STROKE_PER_HEIGHT: f32 = 0.085;
 
 const NET_LABEL_OFFSET: LayoutPoint = LayoutPoint::new(7.0, -5.0);
+/// How far a supply symbol's stem runs from its pin: one grid pitch.
+pub const SUPPLY_STEM_WORLD: f32 = 10.0;
+/// Half the width of a supply symbol's bar.
+pub const SUPPLY_BAR_HALF_WORLD: f32 = 7.0;
+/// Half the width, and the depth, of a supply arrow's head.
+const SUPPLY_ARROW_HALF_WORLD: f32 = 4.0;
+const SUPPLY_ARROW_DEPTH_WORLD: f32 = 5.0;
+/// Air between the bar or arrow tip and the rail's name.
+const SUPPLY_NAME_GAP_WORLD: f32 = 2.0;
 /// Gap between a connector's name and its tab.
 pub const CONNECTOR_TAB_GAP_WORLD: f32 = 3.0;
 /// Width of a connector tab. Its height follows the name, so the pair reads
@@ -449,11 +458,68 @@ pub fn net_label_display_name(label: &NetLabel) -> &str {
 
 /// The world corner a net label's name stands on: the bottom-left of its
 /// text box.
+///
+/// A supply symbol's name is centred on its pin, over the bar or arrow of a
+/// positive rail and under the bar of a negative one.
 pub fn net_label_name_corner(label: &NetLabel) -> LayoutPoint {
-    LayoutPoint::new(
-        label.pos.x as f32 + NET_LABEL_OFFSET.x,
-        label.pos.y as f32 + NET_LABEL_OFFSET.y,
-    )
+    let (x, y) = (label.pos.x as f32, label.pos.y as f32);
+    let NetLabelKind::Supply { glyph } = label.kind else {
+        return LayoutPoint::new(x + NET_LABEL_OFFSET.x, y + NET_LABEL_OFFSET.y);
+    };
+    let width = net_label_display_name(label).chars().count() as f32 * NET_LABEL_GLYPH_WIDTH_WORLD;
+    let reach = SUPPLY_STEM_WORLD + SUPPLY_NAME_GAP_WORLD;
+    let baseline = if glyph == SupplyGlyph::Down {
+        y + reach + NET_LABEL_FONT_WORLD * LINE_BOX_EM
+    } else {
+        y - reach
+    };
+    LayoutPoint::new(x - width * 0.5, baseline)
+}
+
+/// A supply symbol's strokes, in world units: the stem from its pin, then
+/// the bar across its end, the arrowhead whose tip it is, or the bar below
+/// the pin of a negative rail. Any other label draws none.
+pub fn supply_glyph_marks(label: &NetLabel) -> Vec<[LayoutPoint; 2]> {
+    let NetLabelKind::Supply { glyph } = label.kind else {
+        return Vec::new();
+    };
+    let (x, y) = (label.pos.x as f32, label.pos.y as f32);
+    let end = if glyph == SupplyGlyph::Down {
+        y + SUPPLY_STEM_WORLD
+    } else {
+        y - SUPPLY_STEM_WORLD
+    };
+    let point = LayoutPoint::new;
+    let mut marks = vec![[point(x, y), point(x, end)]];
+    match glyph {
+        SupplyGlyph::Bar | SupplyGlyph::Down => marks.push([
+            point(x - SUPPLY_BAR_HALF_WORLD, end),
+            point(x + SUPPLY_BAR_HALF_WORLD, end),
+        ]),
+        SupplyGlyph::Arrow => {
+            let base = end + SUPPLY_ARROW_DEPTH_WORLD;
+            marks.push([point(x - SUPPLY_ARROW_HALF_WORLD, base), point(x, end)]);
+            marks.push([point(x, end), point(x + SUPPLY_ARROW_HALF_WORLD, base)]);
+        }
+    }
+    marks
+}
+
+/// The box a supply symbol's strokes stand in, or `None` for any other label.
+pub fn supply_glyph_rect(label: &NetLabel) -> Option<LayoutRect> {
+    let marks = supply_glyph_marks(label);
+    let mut points = marks.iter().flatten();
+    let first = *points.next()?;
+    Some(points.fold(
+        LayoutRect {
+            min: first,
+            max: first,
+        },
+        |rect, point| LayoutRect {
+            min: LayoutPoint::new(rect.min.x.min(point.x), rect.min.y.min(point.y)),
+            max: LayoutPoint::new(rect.max.x.max(point.x), rect.max.y.max(point.y)),
+        },
+    ))
 }
 
 /// A net label in world units, as a zoomless drawing places it.

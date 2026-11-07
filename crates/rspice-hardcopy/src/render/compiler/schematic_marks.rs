@@ -123,6 +123,27 @@ impl SemanticSceneCompiler<'_> {
             fill: Some(SceneFill::solid(ink)),
         });
         self.schematic_text(&net_label_text(label))?;
+        let supply = label_layout::supply_glyph_marks(label);
+        if !supply.is_empty() {
+            // A supply's stem and bar at the weight of a connector's tab.
+            let stroke = StrokeStyle::try_new(
+                ink,
+                width_um(
+                    label_layout::NET_LABEL_FONT_WORLD
+                        * label_layout::LINE_BOX_EM
+                        * label_layout::CONNECTOR_TAB_STROKE_PER_HEIGHT,
+                ),
+                StrokePattern::Solid,
+                None,
+            )?;
+            for [start, end] in supply {
+                self.primitives.push(ScenePrimitive::Line {
+                    from: self.layout_point(start)?,
+                    to: self.layout_point(end)?,
+                    stroke,
+                });
+            }
+        }
         if let Some((tab, direction)) = layout.tab {
             let stroke = StrokeStyle::try_new(
                 ink,

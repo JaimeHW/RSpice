@@ -509,6 +509,16 @@ pub(super) fn write_net_label(svg: &mut String, label: &NetLabel, config: &SvgEx
         Align2::LEFT_BOTTOM,
         world(layout.font_size, config),
     );
+    let supply = rspice_design::schematic::label_layout::supply_glyph_marks(label);
+    if !supply.is_empty() {
+        let mut data = String::new();
+        for [start, end] in supply {
+            let (x1, y1) = at(drawing::layout_pos(start));
+            let (x2, y2) = at(drawing::layout_pos(end));
+            write!(data, "M {x1} {y1} L {x2} {y2} ").unwrap();
+        }
+        writeln!(svg, "<path class=\"net-supply\" d=\"{}\"/>", data.trim_end()).unwrap();
+    }
     if let Some((tab, direction)) = layout.tab {
         let (left, top) = at(tab.min);
         writeln!(
@@ -556,12 +566,17 @@ pub(super) fn include_net_label_bounds(
             layout.name,
             world(layout.font_size, config),
         );
-        if let Some((tab, _)) = layout.tab {
+        let supply = rspice_design::schematic::label_layout::supply_glyph_rect(label)
+            .map(|glyph| (glyph.min.x, glyph.min.y, glyph.max.x, glyph.max.y));
+        let tab = layout
+            .tab
+            .map(|(tab, _)| (tab.min.x, tab.min.y, tab.max.x, tab.max.y));
+        for (left, top, right, bottom) in tab.into_iter().chain(supply) {
             extent.include_box((
-                world(tab.min.x, config),
-                world(tab.min.y, config),
-                world(tab.max.x, config),
-                world(tab.max.y, config),
+                world(left, config),
+                world(top, config),
+                world(right, config),
+                world(bottom, config),
             ));
         }
     }
