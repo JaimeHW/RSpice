@@ -126,9 +126,10 @@ pub fn show_code_document_with_debug_versioned(
 }
 
 /// Put the caret of the source editor `editor_id` on a one-based line and
-/// column the next time it is drawn, and scroll it into view. Every way to a
-/// place in a source document goes through here: a finding opened from
-/// Problems or the inspector, and F8 and Shift+F8.
+/// column the next time it is drawn, scroll it into view and give it the
+/// keyboard, so F8 steps on from there. Every way to a place in a source
+/// document goes through here: a finding opened from Problems or the
+/// inspector, and F8 and Shift+F8.
 pub(crate) fn reveal_source_location(
     context: &egui::Context,
     editor_id: egui::Id,
@@ -136,6 +137,7 @@ pub(crate) fn reveal_source_location(
     column: usize,
 ) {
     queue_caret_position(context, editor_id, line, column);
+    context.memory_mut(|memory| memory.request_focus(editor_id));
 }
 
 /// The character index a one-based line starts at in `source`, and its
