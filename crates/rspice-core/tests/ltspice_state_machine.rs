@@ -516,6 +516,31 @@ fn trips_are_located_to_within_tripdt() {
     }
 }
 
+/// LTspice 26.1.1 batch: a rule on a comparator of a 1 kHz sine, whose
+/// output turns from flat to steep inside one step, trips at 500.017485 us,
+/// where 0.5+0.5*tanh(1e4*V(a)) reaches 0.9; its state output rises at
+/// 500.0174873 us.
+#[test]
+fn a_rule_trips_where_inputs_that_turned_inside_a_step_cross() {
+    let deck = "* trip inside a step
+V1 a 0 sin(0 1 1k 0 0 180)
+R1 a 0 1k
+B1 b 0 V=0.5+0.5*tanh(1e4*V(a))
+R2 b 0 1k
+.machine
+.state lo 0
+.state hi 1
+.rule lo hi V(b) > 0.9
+.output (q) state
+.endmachine
+R5 q 0 1k
+.end
+";
+    let crossing = 0.5e-3 + (0.8f64.atanh() / 1e4).asin() / (std::f64::consts::TAU * 1e3);
+    let run = Run::new(deck, 1e-3, &["q"]);
+    assert_crossings("V(q)", &run.crossings("q", 0.5), &[crossing], 1e-9);
+}
+
 #[test]
 fn machines_in_subcircuits_read_their_instance_nodes_and_parameters() {
     let deck = "* toggles in subcircuits

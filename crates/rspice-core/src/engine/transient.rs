@@ -8664,14 +8664,24 @@ impl Engine {
             macro_rules! reject_for_veriloga_event_refinement {
                 ($candidate_solution:expr, $candidate_time:expr, $phase_start:expr) => {{
                     let mut discontinuity = false;
-                    if circuit.has_any_veriloga_devices() {
+                    let code_model_event = circuit.xspice_candidate_event_time(t, $candidate_time);
+                    if circuit.has_any_veriloga_devices() || code_model_event.is_some() {
                         Self::evaluate_analog_candidate(&mut circuit, &mut matrix, $candidate_solution)?;
-                        let model_candidate = Self::inspect_transient_model_candidate(
+                        let mut model_candidate = Self::inspect_transient_model_candidate(
                             abort,
                             &mut circuit, $candidate_time, dt, $candidate_solution,
                             XspiceCompanionPolicy { coefficients: &coeff, xyce_one_step_order2 },
                             timestep.hard_min_dt(), analysis_initial_step, analysis_final_step,
                         )?;
+                        // A code model's own event this candidate stepped
+                        // past is landed on as a mixed module's A/D crossing
+                        // is, whichever comes first.
+                        if let Some(event) = code_model_event
+                            && model_candidate.refinement_time.is_none_or(|root| event < root)
+                        {
+                            model_candidate.refinement_time = Some(event);
+                            model_candidate.analog_event_root = false;
+                        }
                         // A root the solver cannot separate from the accepted
                         // point is landed on the earliest interior time it can
                         // reach; one whose landing is not interior at all is

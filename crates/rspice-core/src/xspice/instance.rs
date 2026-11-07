@@ -2367,6 +2367,14 @@ impl XspiceInstance {
         self.probe_writes_only_outputs
     }
 
+    /// [`super::CodeModel::candidate_event_time`] for the transient candidate
+    /// at `candidate`, when this instance's last probe was of it.
+    pub(crate) fn candidate_event_time(&self, candidate: Value) -> Option<Value> {
+        (self.probe_writes_only_outputs && self.context.time == candidate)
+            .then(|| self.model.candidate_event_time(&self.context))
+            .flatten()
+    }
+
     /// The model call of [`Self::evaluate`] for a probe that writes only its
     /// outputs. A failing call puts back the outputs alone, which by the
     /// model's declaration is the whole of what it could have written; the

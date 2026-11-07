@@ -4842,6 +4842,21 @@ impl CircuitData {
         }
     }
 
+    /// Earliest instant strictly between `accepted` and `candidate` where some
+    /// code model's next accepted evaluation would first act
+    /// ([`crate::xspice::CodeModel::candidate_event_time`]).
+    pub(crate) fn xspice_candidate_event_time(
+        &self,
+        accepted: Value,
+        candidate: Value,
+    ) -> Option<Value> {
+        self.xspice_instances
+            .iter()
+            .filter_map(|instance| instance.candidate_event_time(candidate))
+            .filter(|&time| time > accepted && time < candidate)
+            .reduce(Value::min)
+    }
+
     /// Earliest exact absolute event requested by accepted Verilog-A state.
     /// Runtime timer, sampled-filter, and slew corners participate alongside
     /// generated-model timers so locked grids and checkpoint resume preserve

@@ -738,6 +738,19 @@ pub trait CodeModel: Send + Sync {
         false
     }
 
+    /// The instant strictly inside the step from the last accepted point to
+    /// the candidate this model was last probed at where its next accepted
+    /// evaluation would first act, when that lies far enough before the
+    /// candidate for the model to care: the stepper rejects the candidate and
+    /// lands there. Only a model whose probe writes only its outputs
+    /// ([`Self::probe_writes_only_outputs`]) is asked, because only its probe
+    /// leaves the candidate's inputs in the context.
+    ///
+    /// The default is none.
+    fn candidate_event_time(&self, _ctx: &super::CmContext) -> Option<Value> {
+        None
+    }
+
     /// Whether this code model needs global conservative Newton damping.
     ///
     /// Most XSPICE models are behavioral sources with explicit operating-point

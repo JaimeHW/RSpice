@@ -13,6 +13,9 @@
 //! (by default a part in 10⁹ of the stop time): at each accepted point the
 //! machine extrapolates its inputs along their last step and asks the
 //! stepper to land just past the first instant the next rule would fire.
+//! A candidate point a rule would fire at, reached on inputs that turned
+//! inside the step, is rejected, and the stepper lands just past the first
+//! instant the inputs, read as straight lines across the step, fire it.
 //! After every change of state it asks for a step of that length, so the
 //! outputs switch promptly and a rule the new state enables fires next.
 
@@ -176,6 +179,13 @@ impl MachineModel {
         state
     }
 
+    /// How closely a trip is located.
+    fn resolution(&self, ctx: &CmContext) -> Value {
+        self.tripdt.unwrap_or_else(|| {
+            DEFAULT_RESOLUTION * ctx.transient_stop_time().unwrap_or(ctx.time).max(ctx.time)
+        })
+    }
+
     /// Ask the stepper for the next point the machine needs: a short step
     /// after a change of state or before a rule that fires next, else just
     /// past the first trip its extrapolated inputs reach.
@@ -187,9 +197,7 @@ impl MachineModel {
         inputs: &[Value],
     ) {
         let (time, step) = (ctx.time, ctx.time - ctx.time_prev);
-        let resolution = self.tripdt.unwrap_or_else(|| {
-            DEFAULT_RESOLUTION * ctx.transient_stop_time().unwrap_or(time).max(time)
-        });
+        let resolution = self.resolution(ctx);
         let request = |ctx: &mut CmContext, at: Value| {
             if ctx.is_ahead(at) {
                 ctx.request_breakpoint(at);
@@ -242,6 +250,56 @@ impl MachineModel {
     }
 }
 
+impl MachineModel {
+    /// Just past the first instant a rule fires from the accepted state on
+    /// the inputs read as straight lines from the last accepted point to this
+    /// candidate, when the candidate fires one and that instant falls more
+    /// than the trip resolution before it.
+    fn candidate_trip(&self, ctx: &CmContext) -> Option<Value> {
+        let (time, before) = (ctx.time, ctx.time_prev);
+        let resolution = self.resolution(ctx);
+        if time - before <= resolution {
+            return None;
+        }
+        let state = ctx.state_prev(slot::STATE) as usize;
+        let candidate: Vec<Value> = self
+            .input_ports
+            .iter()
+            .map(|port| ctx.input(port))
+            .collect();
+        let accepted: Vec<Value> = (0..candidate.len())
+            .map(|index| ctx.state_prev(self.input_slot(index)))
+            .collect();
+        let mut evaluator = self.evaluator();
+        let mut between = vec![0.0; candidate.len()];
+        let mut trips = |at: Value| {
+            let weight = (at - before) / (time - before);
+            for ((value, start), end) in between.iter_mut().zip(&accepted).zip(&candidate) {
+                *value = start + (end - start) * weight;
+            }
+            evaluator.next(state, &between, at) != state
+        };
+        // A rule that fires on the accepted inputs already has its short step.
+        if !trips(time) || trips(before) {
+            return None;
+        }
+        let (mut early, mut late) = (before, time);
+        while late - early > 0.5 * resolution {
+            let middle = 0.5 * (early + late);
+            if middle <= early || middle >= late {
+                break;
+            }
+            if trips(middle) {
+                late = middle;
+            } else {
+                early = middle;
+            }
+        }
+        let landing = late + 0.5 * resolution;
+        (landing < time - 0.5 * resolution).then_some(landing)
+    }
+}
+
 impl CodeModel for MachineModel {
     fn name(&self) -> &str {
         "ltspice_machine"
@@ -267,6 +325,16 @@ impl CodeModel for MachineModel {
 
     fn checkpoint_support(&self, _ctx: &CmContext) -> XspiceCheckpointSupport {
         XspiceCheckpointSupport::Serializable
+    }
+
+    fn probe_writes_only_outputs(&self) -> bool {
+        // A probe drives the outputs the last accepted point decided and
+        // nothing else.
+        true
+    }
+
+    fn candidate_event_time(&self, ctx: &CmContext) -> Option<Value> {
+        self.candidate_trip(ctx)
     }
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
