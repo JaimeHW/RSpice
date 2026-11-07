@@ -114,6 +114,9 @@ pub enum DrcViolationType {
     /// A net label, pin or bus-tap end sits exactly where two wires cross
     /// with no junction, so it does not say which wire it joins.
     AmbiguousCrossing,
+    /// A supply symbol names a rail the technology's global-net catalog does
+    /// not hold, while that catalog alone promotes globals.
+    UnknownSupplyRail,
 
     //-------------------------------------------------------------------------
     // Electrical Issues
@@ -197,7 +200,7 @@ impl DrcViolationType {
     /// The array's fixed length does not make it exhaustive — a variant added
     /// to the enum and not here still compiles — so a test in `rules` holds it
     /// to the variants serde's derive declares.
-    pub const ALL: [Self; 35] = [
+    pub const ALL: [Self; 36] = [
         Self::FloatingNode,
         Self::UnconnectedPin,
         Self::UndrivenInput,
@@ -213,6 +216,7 @@ impl DrcViolationType {
         Self::VectorWidthMismatch,
         Self::OffSheetConnectorWithoutPartner,
         Self::AmbiguousCrossing,
+        Self::UnknownSupplyRail,
         Self::ShortedOutputs,
         Self::MissingGround,
         Self::SourceToSource,
@@ -252,7 +256,8 @@ impl DrcViolationType {
             | Self::DuplicateBusMemberDriver
             | Self::VectorWidthMismatch
             | Self::OffSheetConnectorWithoutPartner
-            | Self::AmbiguousCrossing => DrcRuleCategory::Connectivity,
+            | Self::AmbiguousCrossing
+            | Self::UnknownSupplyRail => DrcRuleCategory::Connectivity,
             Self::ShortedOutputs
             | Self::MissingGround
             | Self::SourceToSource
@@ -338,6 +343,7 @@ impl DrcViolationType {
                 "Off-sheet connector has no partner on another sheet"
             }
             Self::AmbiguousCrossing => "Label, pin or bus tap on an unmarked wire crossing",
+            Self::UnknownSupplyRail => "Supply rail is not a global net of the technology",
             Self::ShortedOutputs => "Multiple declared outputs connected to the same net",
             Self::UndrivenNet => "Net joins declared inputs and nothing drives it",
             Self::GroundNotNodeZero => "Ground label's net is written under another name",
@@ -386,6 +392,10 @@ impl DrcViolationType {
             }
             Self::AmbiguousCrossing => {
                 "Place a junction to join the crossing wires, or move it onto one wire"
+            }
+            Self::UnknownSupplyRail => {
+                "Rename the rail to a global net the technology defines, or add it to the \
+                 technology's global-net catalog"
             }
             Self::ShortedOutputs => "Leave only one declared output driver on the net",
             Self::UndrivenNet => {

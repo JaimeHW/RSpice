@@ -6,8 +6,8 @@
 
 use super::checker::{
     DrcChecker, DrcConfig, append_case_collision_violations, append_ground_not_node_zero,
-    append_off_sheet_connector_violations, append_vector_width_violations, component_identity,
-    diagnostic_location,
+    append_off_sheet_connector_violations, append_unknown_supply_rails,
+    append_vector_width_violations, component_identity, diagnostic_location,
 };
 use super::input::{BrokenReference, ComponentInfo, ParameterRangeIssue, PinInfo};
 use super::source_loops::{self, GROUND_KEY};
@@ -518,6 +518,12 @@ fn check_subject(
             append_ground_not_node_zero(
                 view.document,
                 &connectivity,
+                &mut report,
+                &config.severity_overrides,
+            );
+            append_unknown_supply_rails(
+                view.document,
+                hierarchy,
                 &mut report,
                 &config.severity_overrides,
             );

@@ -161,6 +161,19 @@ impl<'a> HierarchySource<'a> {
         }
     }
 
+    /// The technology whose global-net catalog alone promotes labels to
+    /// globals, when the project's contract says so.
+    pub(crate) fn technology_global_authority(&self) -> Option<&'a str> {
+        let contract = self.connectivity?;
+        if contract.policy.global_promotion != GlobalNetPromotionPolicy::TechnologyDefinedOnly {
+            return None;
+        }
+        contract
+            .technology_global_nets
+            .as_ref()
+            .map(|catalog| catalog.authority.as_str())
+    }
+
     /// Canonical `.GLOBAL` node names in deterministic source order.
     pub fn global_net_names(&self) -> Vec<String> {
         let Some(contract) = self.connectivity else {

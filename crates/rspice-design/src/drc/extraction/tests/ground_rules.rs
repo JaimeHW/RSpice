@@ -551,3 +551,70 @@ fn a_global_tied_to_ground_is_a_finding_only_where_the_design_parts_it() {
     returned.components.push(instance(9, "X1", "tie"));
     assert_eq!(tied(&returned, &views), (0, 0));
 }
+
+/// `parts` with every label whose name starts with `V` drawn as a supply
+/// symbol.
+fn supplied(parts: Vec<(Component, Vec<(&str, &str)>)>) -> SchematicDocument {
+    use crate::schematic::net_label::{NetLabelKind, SupplyGlyph};
+    let mut document = labelled(parts);
+    for label in &mut document.net_labels {
+        if label.name.starts_with('V') {
+            label.kind = NetLabelKind::Supply {
+                glyph: SupplyGlyph::for_name(&label.name),
+            };
+        }
+    }
+    document
+}
+
+/// Under a technology catalog, a supply symbol naming a rail the catalog
+/// does not hold is an error where it is drawn, once per rail and inside the
+/// occurrence of a cell; a rail the catalog defines, or an alias of one, is
+/// not. Under the default contract every supply declares its own global.
+#[test]
+fn a_supply_rail_outside_the_technology_catalog_is_an_error() {
+    let views = buffers([(
+        "rail",
+        supplied(vec![two(1, ComponentType::Resistor, "RN", "VEE", "0")]),
+    )]);
+    let mut top = supplied(vec![
+        two(1, ComponentType::VoltageSource, "V1", "VCC", "0"),
+        two(2, ComponentType::Resistor, "RL", "VCC", "VDDX"),
+        two(3, ComponentType::Resistor, "RM", "VDDX", "0"),
+    ]);
+    top.components.push(instance(9, "X1", "rail"));
+    let contract = catalog(&[("GND", &[]), ("VDD", &["VCC"])]);
+
+    let result = checked_under(&contract, &top, &views);
+    let unknown = of_type(&result, DrcViolationType::UnknownSupplyRail);
+    assert_eq!(unknown.len(), 2, "{:?}", result.violations());
+    assert_eq!(unknown[0].severity, DrcSeverity::Error);
+    assert_eq!(
+        unknown[0].message,
+        "Supply 'VDDX' is not a global net of technology 'demo-pdk@1.0': the deck writes it \
+         as a node of this cellview alone"
+    );
+    assert_eq!(
+        unknown[0].location,
+        DrcLocation::NetLabel {
+            name: "VDDX".to_owned()
+        }
+    );
+    let DrcLocation::InsideInstance { path, inner, .. } = &unknown[1].location else {
+        panic!("stated inside the occurrence: {:?}", unknown[1].location);
+    };
+    assert_eq!(path.to_string(), "/X1");
+    assert_eq!(
+        inner.as_ref(),
+        &DrcLocation::NetLabel {
+            name: "VEE".to_owned()
+        }
+    );
+
+    let result = checked_under(&unaliased(), &top, &views);
+    assert!(
+        of_type(&result, DrcViolationType::UnknownSupplyRail).is_empty(),
+        "{:?}",
+        result.violations()
+    );
+}

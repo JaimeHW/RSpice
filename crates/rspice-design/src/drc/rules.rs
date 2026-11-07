@@ -283,6 +283,20 @@ impl DrcViolationType {
                 max_severity: DrcSeverity::Critical,
                 waivable: false,
             },
+            Self::UnknownSupplyRail => &DrcRule {
+                code: "DRC-UNKNOWN-SUPPLY-RAIL",
+                title: "Supply rail outside the technology",
+                explanation: "The project promotes only the global nets its technology defines, \
+                    and this supply symbol names a rail the technology's global-net catalog does \
+                    not hold. The deck writes the label as a node of the cellview it is drawn in, \
+                    not as the design-wide rail the symbol shows, so it reaches nothing outside \
+                    that cellview. Rename the rail to one the technology defines, or add it to \
+                    the catalog.",
+                default_severity: DrcSeverity::Error,
+                floor: ANY,
+                max_severity: DrcSeverity::Critical,
+                waivable: true,
+            },
             Self::ShortedOutputs => &DrcRule {
                 code: "DRC-SHORTED-OUTPUTS",
                 title: "Shorted outputs",
@@ -576,6 +590,7 @@ mod tests {
                 "DRC-OFF-SHEET-CONNECTOR-WITHOUT-PARTNER"
             }
             DrcViolationType::AmbiguousCrossing => "DRC-AMBIGUOUS-CROSSING",
+            DrcViolationType::UnknownSupplyRail => "DRC-UNKNOWN-SUPPLY-RAIL",
             DrcViolationType::ShortedOutputs => "DRC-SHORTED-OUTPUTS",
             DrcViolationType::MissingGround => "DRC-MISSING-GROUND",
             DrcViolationType::SourceToSource => "DRC-SOURCE-TO-SOURCE",

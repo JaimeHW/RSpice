@@ -1297,6 +1297,59 @@ pub(super) fn append_ground_not_node_zero(
     }
 }
 
+/// Report each supply rail the technology's global-net catalog does not hold,
+/// at the first label that names it, when that catalog alone promotes
+/// globals.
+///
+/// The deck writes such a label as a node of the cellview it is drawn in, so
+/// the design-wide rail its symbol shows reaches nothing outside it. A ground
+/// name is the ground rules' to judge.
+pub(super) fn append_unknown_supply_rails(
+    schematic: &crate::schematic::document::SchematicDocument,
+    hierarchy: &crate::hierarchy::HierarchySource<'_>,
+    result: &mut DrcResult,
+    severity_overrides: &BTreeMap<DrcViolationType, DrcSeverity>,
+) {
+    let Some(authority) = hierarchy.technology_global_authority() else {
+        return;
+    };
+    let mut labels = schematic
+        .net_labels
+        .iter()
+        .filter(|label| label.kind.supply_glyph().is_some() && !label.is_ground())
+        .collect::<Vec<_>>();
+    labels.sort_by_key(|label| label.id);
+    let mut stated = std::collections::HashSet::new();
+    let mut next_id = result.total_count();
+    for label in labels {
+        let Some(declaration) = label.global_declaration() else {
+            continue;
+        };
+        let name = label.name.trim();
+        if hierarchy.canonical_global_label(&declaration).is_some()
+            || !stated.insert(name.to_ascii_lowercase())
+        {
+            continue;
+        }
+        let mut violation = DrcViolation::new(
+            next_id,
+            DrcViolationType::UnknownSupplyRail,
+            format!(
+                "Supply '{name}' is not a global net of technology '{authority}': the deck \
+                 writes it as a node of this cellview alone"
+            ),
+            DrcLocation::NetLabel {
+                name: label.name.clone(),
+            },
+        );
+        if let Some(severity) = severity_overrides.get(&DrcViolationType::UnknownSupplyRail) {
+            violation.severity = *severity;
+        }
+        result.add_violation(violation);
+        next_id += 1;
+    }
+}
+
 /// What a finding calls this component: the authored reference where there is
 /// one, and its identity otherwise, so a message never names an empty string.
 pub(super) fn component_identity(component: &ComponentInfo) -> String {
