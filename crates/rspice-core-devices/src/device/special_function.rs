@@ -71,7 +71,10 @@ impl<'a> InstanceParams<'a> {
     fn get_any(&mut self, names: &[&str]) -> Result<Option<Value>, SpecialFunctionError> {
         let mut found = None;
         for (index, (candidate, value)) in self.params.iter().enumerate() {
-            if names.iter().any(|name| candidate.eq_ignore_ascii_case(name)) {
+            if names
+                .iter()
+                .any(|name| candidate.eq_ignore_ascii_case(name))
+            {
                 self.read[index] = true;
                 found = Some((candidate, *value));
             }

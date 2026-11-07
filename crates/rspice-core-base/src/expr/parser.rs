@@ -698,11 +698,11 @@ impl<'a> Parser<'a> {
         let mut name = match &self.current {
             Token::Ident(arg) => arg.clone(),
             Token::Number { lexeme, .. } => lexeme.clone(),
-            Token::Plus | Token::Minus => String::new(),
+            Token::Plus => "+".to_string(),
+            Token::Minus => "-".to_string(),
             _ => return None,
         };
-        if name.is_empty() {
-            name.push(if self.current == Token::Plus { '+' } else { '-' });
+        if matches!(self.current, Token::Plus | Token::Minus) {
             if !self.name_continues() {
                 return None;
             }
