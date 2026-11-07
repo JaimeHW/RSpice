@@ -36,14 +36,16 @@ pub fn collect_properties_from_component(
     collect_properties_with_sheet(component, registry.get(component.kind))
 }
 
-/// Apply the current transaction's schema to its component field map.
+/// Apply the current transaction's schema to its component field map, then
+/// redraw a gate with the input count the transaction sets.
 pub fn apply_properties_to_component(
     component: &mut Component,
     properties: &HashMap<String, PropertyValue>,
     registry: &PropertyEditorSchema,
 ) -> Result<(), String> {
     let sheet = registry.get(component.kind);
-    apply_properties_with_sheet(component, properties, sheet)
+    apply_properties_with_sheet(component, properties, sheet)?;
+    crate::state::conform_functional_inputs(component)
 }
 
 /// Run the same complete schema, expression, numeric-draft, and PWL checks

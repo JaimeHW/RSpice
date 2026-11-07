@@ -929,7 +929,8 @@ impl<'a> NetlistGenerator<'a> {
         instance_name: &str,
     ) -> Option<String> {
         use rspice_design::schematic::functional_catalog::{
-            functional_instance_parameters, validate_builtin_functional_binding,
+            functional_card_nodes, functional_instance_parameters,
+            validate_builtin_functional_binding,
         };
         let descriptor = match validate_builtin_functional_binding(binding) {
             Ok(descriptor) => descriptor,
@@ -941,16 +942,16 @@ impl<'a> NetlistGenerator<'a> {
                 return None;
             }
         };
-        if node_names.len() != descriptor.pins.len() {
-            self.errors.push(format!(
-                "Functional part '{}' expects {} nodes for {}, found {}",
-                component.name,
-                descriptor.pins.len(),
-                descriptor.display_name,
-                node_names.len()
-            ));
-            return None;
-        }
+        let nodes = match functional_card_nodes(descriptor, binding, node_names) {
+            Ok(nodes) => nodes,
+            Err(error) => {
+                self.errors.push(format!(
+                    "Functional part '{}' is not executable: {error}",
+                    component.name
+                ));
+                return None;
+            }
+        };
         let params = match functional_instance_parameters(descriptor, &component.params) {
             Ok(params) => params,
             Err(error) => {
@@ -963,7 +964,7 @@ impl<'a> NetlistGenerator<'a> {
         };
         Some(format!(
             "{instance_name} {} {}{params}",
-            node_names.join(" "),
+            nodes.join(" "),
             descriptor.subcircuit
         ))
     }

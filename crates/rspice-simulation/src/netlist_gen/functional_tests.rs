@@ -11,7 +11,7 @@ use rspice_design::library::LibraryCatalog;
 use rspice_design::schematic::component::Component;
 use rspice_design::schematic::component_type::ComponentType;
 use rspice_design::schematic::functional_catalog::{
-    apply_functional_preset, functional_library_binding, functional_part,
+    apply_functional_preset, conform_functional_inputs, functional_library_binding, functional_part,
 };
 use rspice_design::schematic::net_label::NetLabel;
 use rspice_design::schematic::owned::Schematic;
@@ -53,6 +53,7 @@ impl Bench {
                 .with_library_cell(functional_library_binding(descriptor));
         component.name = name.to_owned();
         component.params = params.to_owned();
+        conform_functional_inputs(&mut component).expect("a drawable input count");
         self.place(component, nets);
     }
 
@@ -169,11 +170,27 @@ fn placed_logic_parts_settle_at_their_truth_table_levels() {
     bench.primitive(ComponentType::VoltageSource, "VA", "5", &["a", "0"]);
     bench.primitive(ComponentType::VoltageSource, "VB", "0", &["b", "0"]);
     let parts = [
-        ("rspice.functional.and2", &["a", "b", "and"][..], 0.0),
-        ("rspice.functional.nand2", &["a", "b", "nand"][..], 5.0),
-        ("rspice.functional.or2", &["a", "b", "or"][..], 5.0),
-        ("rspice.functional.nor2", &["a", "b", "nor"][..], 0.0),
-        ("rspice.functional.xor2", &["a", "b", "xor"][..], 5.0),
+        ("rspice.functional.and", &["a", "b", "and"][..], 0.0),
+        ("rspice.functional.nand", &["a", "b", "nand"][..], 5.0),
+        ("rspice.functional.or", &["a", "b", "or"][..], 5.0),
+        ("rspice.functional.nor", &["a", "b", "nor"][..], 0.0),
+        ("rspice.functional.xor", &["a", "b", "xor"][..], 5.0),
+        // Drawn with four inputs, three of them high.
+        (
+            "rspice.functional.and",
+            &["a", "a", "a", "b", "and4"][..],
+            0.0,
+        ),
+        (
+            "rspice.functional.or",
+            &["a", "a", "a", "b", "or4"][..],
+            5.0,
+        ),
+        (
+            "rspice.functional.xor",
+            &["b", "b", "a", "b", "xor4"][..],
+            5.0,
+        ),
         ("rspice.functional.inverter", &["a", "inv"][..], 0.0),
         ("rspice.functional.buffer", &["a", "buf"][..], 5.0),
         (
@@ -184,7 +201,8 @@ fn placed_logic_parts_settle_at_their_truth_table_levels() {
         ("rspice.functional.schmitt_buffer", &["a", "sbuf"][..], 5.0),
     ];
     for (index, (part, nets, _)) in parts.iter().enumerate() {
-        bench.part(part, &format!("X{index}"), "", nets);
+        let inputs = if nets.len() == 5 { "INPUTS=4" } else { "" };
+        bench.part(part, &format!("X{index}"), inputs, nets);
     }
     let outputs = parts
         .iter()

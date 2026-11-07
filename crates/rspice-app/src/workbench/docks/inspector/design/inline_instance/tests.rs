@@ -714,3 +714,30 @@ fn choosing_a_functional_preset_inline_fills_its_parameters() {
         tuned.params
     );
 }
+
+/// Choosing how many inputs a gate draws in the inspector redraws it with
+/// that many input pins.
+#[test]
+fn choosing_a_gates_input_count_inline_redraws_its_pins() {
+    let mut app = RSpiceApp::test_instance();
+    let gate = crate::state::functional_part("rspice.functional.nand").expect("NAND");
+    let id = app.state.model.schematic.add_library_cell_component(
+        crate::state::Point::origin(),
+        crate::state::functional_library_binding(gate),
+    );
+    let component = app
+        .state
+        .model
+        .schematic
+        .document()
+        .components
+        .iter()
+        .find(|component| component.id == id)
+        .cloned()
+        .expect("placed");
+    assert_eq!(component.terminal_positions().len(), 3);
+    let inputs = InlineEditField::Parameter("INPUTS".to_owned());
+    let four = prepare_field_edit(&app.state, &component, &inputs, "4").expect("a valid edit");
+    assert_eq!(four.terminal_positions().len(), 5, "{}", four.params);
+    assert!(prepare_field_edit(&app.state, &component, &inputs, "6").is_err());
+}

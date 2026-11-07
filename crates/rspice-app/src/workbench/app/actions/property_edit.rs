@@ -233,8 +233,8 @@ fn builtin_xspice_property_sheet(
     Ok(sheet)
 }
 
-/// A functional part's sheet: its preset first, where it has one, then one
-/// row per subcircuit parameter, labelled in
+/// A functional part's sheet: how many inputs it draws and its preset first,
+/// where it has them, then one row per subcircuit parameter, labelled in
 /// words, with its unit and the subcircuit's own default. A selector offers
 /// its named settings.
 fn functional_property_sheet(
@@ -242,6 +242,22 @@ fn functional_property_sheet(
 ) -> Result<PropertySheet, String> {
     let descriptor = crate::state::validate_builtin_functional_binding(binding)?;
     let mut sheet = cell_instance_identity_sheet();
+    if let Some(inputs) = descriptor.inputs {
+        let counts = (inputs.fewest..=inputs.most)
+            .map(|count| count.to_string())
+            .collect::<Vec<_>>();
+        sheet.add(
+            PropertyDefinition::new(crate::state::FUNCTIONAL_INPUTS_SETTING)
+                .with_display_name("Inputs")
+                .with_description(
+                    "How many inputs the gate draws. Inputs it leaves off are tied to ground, which the gate ignores.",
+                )
+                .with_type(PropertyType::Enum)
+                .with_default(PropertyValue::enumeration(counts[0].clone(), counts))
+                .with_order(-2)
+                .with_category("Parameters"),
+        );
+    }
     if let Some(preset) = descriptor.preset {
         let labels = preset
             .choices

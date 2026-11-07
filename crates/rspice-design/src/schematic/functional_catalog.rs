@@ -12,7 +12,7 @@
 use rspice_design_model::{Point, symbol_pin::SymbolPinSide};
 
 use super::{
-    component::{BuiltinFunctionalInstance, LibraryCellInstance},
+    component::{BuiltinFunctionalInstance, Component, LibraryCellInstance},
     component_category::ComponentCategory,
     port::{PortDirection, PortSpec},
 };
@@ -67,6 +67,19 @@ pub struct FunctionalPreset {
     pub choices: &'static [FunctionalPresetChoice],
 }
 
+/// How many of a part's leading input pins a placement draws, when that
+/// varies. The native gates take five inputs and ignore any tied to their
+/// common, so one subcircuit serves every count: the card ties the inputs a
+/// placement leaves off to ground.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FunctionalInputs {
+    pub fewest: usize,
+    pub most: usize,
+}
+
+/// The sheet setting that holds a variable-input placement's input count.
+pub const FUNCTIONAL_INPUTS_SETTING: &str = "INPUTS";
+
 /// Pin geometry a part draws instead of the generated block's: the block
 /// height and, in pin order, the edge each pin meets and its terminal
 /// relative to the block's centre. The block is the generated width.
@@ -93,6 +106,9 @@ pub struct FunctionalPartDescriptor {
     pub parameters: &'static [FunctionalParameter],
     /// A setting that fills parameters in, shown above them.
     pub preset: Option<FunctionalPreset>,
+    /// How many of the leading input pins a placement may draw, when that
+    /// varies; the pins list them all.
+    pub inputs: Option<FunctionalInputs>,
 }
 
 const fn pin(name: &'static str, direction: PortDirection) -> FunctionalPin {
@@ -416,7 +432,18 @@ const OTA_PARAMETERS: &[FunctionalParameter] = &[
 
 const ONE_INPUT_PINS: &[FunctionalPin] = &[pin("A", In), pin("Y", Out)];
 
-const TWO_INPUT_PINS: &[FunctionalPin] = &[pin("A", In), pin("B", In), pin("Y", Out)];
+/// A gate's five inputs, of which a placement draws two to five, and its
+/// output.
+const GATE_PINS: &[FunctionalPin] = &[
+    pin("A", In),
+    pin("B", In),
+    pin("C", In),
+    pin("D", In),
+    pin("E", In),
+    pin("Y", Out),
+];
+
+const GATE_INPUTS: FunctionalInputs = FunctionalInputs { fewest: 2, most: 5 };
 
 const LOGIC_LEVELS: [FunctionalParameter; 2] = [
     number(
@@ -725,6 +752,29 @@ const fn logic_part(
         category: ComponentCategory::LogicTiming,
         parameters,
         preset: None,
+        inputs: None,
+    }
+}
+
+/// A gate of two to five inputs.
+const fn gate_part(
+    stable_id: &'static str,
+    display_name: &'static str,
+    subcircuit: &'static str,
+    symbol_asset: &'static str,
+    keywords: &'static [&'static str],
+) -> FunctionalPartDescriptor {
+    FunctionalPartDescriptor {
+        inputs: Some(GATE_INPUTS),
+        ..logic_part(
+            stable_id,
+            display_name,
+            subcircuit,
+            GATE_PINS,
+            symbol_asset,
+            keywords,
+            LOGIC_PARAMETERS,
+        )
     }
 }
 
@@ -746,6 +796,7 @@ static FUNCTIONAL_PARTS: &[FunctionalPartDescriptor] = &[
         category: ComponentCategory::AmplifiersComparators,
         parameters: OP_AMP_PARAMETERS,
         preset: None,
+        inputs: None,
     },
     FunctionalPartDescriptor {
         stable_id: "rspice.functional.comparator",
@@ -766,6 +817,7 @@ static FUNCTIONAL_PARTS: &[FunctionalPartDescriptor] = &[
         category: ComponentCategory::AmplifiersComparators,
         parameters: COMPARATOR_PARAMETERS,
         preset: None,
+        inputs: None,
     },
     FunctionalPartDescriptor {
         stable_id: "rspice.functional.ota",
@@ -786,51 +838,42 @@ static FUNCTIONAL_PARTS: &[FunctionalPartDescriptor] = &[
         category: ComponentCategory::AmplifiersComparators,
         parameters: OTA_PARAMETERS,
         preset: None,
+        inputs: None,
     },
-    logic_part(
-        "rspice.functional.and2",
+    gate_part(
+        "rspice.functional.and",
         "AND Gate",
-        "RSPICE_FN_AND2",
-        TWO_INPUT_PINS,
+        "RSPICE_FN_AND",
         "functional_and.svg",
         &["and", "logic gate", "74hc08"],
-        LOGIC_PARAMETERS,
     ),
-    logic_part(
-        "rspice.functional.nand2",
+    gate_part(
+        "rspice.functional.nand",
         "NAND Gate",
-        "RSPICE_FN_NAND2",
-        TWO_INPUT_PINS,
+        "RSPICE_FN_NAND",
         "functional_nand.svg",
         &["nand", "logic gate", "74hc00"],
-        LOGIC_PARAMETERS,
     ),
-    logic_part(
-        "rspice.functional.or2",
+    gate_part(
+        "rspice.functional.or",
         "OR Gate",
-        "RSPICE_FN_OR2",
-        TWO_INPUT_PINS,
+        "RSPICE_FN_OR",
         "functional_or.svg",
         &["or", "logic gate", "74hc32"],
-        LOGIC_PARAMETERS,
     ),
-    logic_part(
-        "rspice.functional.nor2",
+    gate_part(
+        "rspice.functional.nor",
         "NOR Gate",
-        "RSPICE_FN_NOR2",
-        TWO_INPUT_PINS,
+        "RSPICE_FN_NOR",
         "functional_nor.svg",
         &["nor", "logic gate", "74hc02"],
-        LOGIC_PARAMETERS,
     ),
-    logic_part(
-        "rspice.functional.xor2",
+    gate_part(
+        "rspice.functional.xor",
         "XOR Gate",
-        "RSPICE_FN_XOR2",
-        TWO_INPUT_PINS,
+        "RSPICE_FN_XOR",
         "functional_xor.svg",
         &["xor", "exclusive or", "logic gate", "74hc86"],
-        LOGIC_PARAMETERS,
     ),
     logic_part(
         "rspice.functional.inverter",
@@ -951,8 +994,45 @@ pub fn functional_part(stable_id: &str) -> Option<&'static FunctionalPartDescrip
 
 /// The library-cell binding a new placement of `descriptor` carries.
 pub fn functional_library_binding(descriptor: &FunctionalPartDescriptor) -> LibraryCellInstance {
-    let ports = descriptor
-        .pins
+    functional_library_binding_with_inputs(
+        descriptor,
+        descriptor.inputs.map_or(0, |inputs| inputs.fewest),
+    )
+}
+
+/// The pins a placement drawing `inputs` of the part's variable inputs has,
+/// in subcircuit order; every pin for a part without them.
+fn placed_pins(descriptor: &FunctionalPartDescriptor, inputs: usize) -> Vec<FunctionalPin> {
+    match descriptor.inputs {
+        None => descriptor.pins.to_vec(),
+        Some(range) => descriptor.pins[..inputs.min(range.most)]
+            .iter()
+            .chain(&descriptor.pins[range.most..])
+            .copied()
+            .collect(),
+    }
+}
+
+/// How many of its part's variable inputs `binding` draws; None for a part
+/// without them.
+pub fn functional_input_count(
+    descriptor: &FunctionalPartDescriptor,
+    binding: &LibraryCellInstance,
+) -> Option<usize> {
+    let range = descriptor.inputs?;
+    binding
+        .terminal_order
+        .len()
+        .checked_sub(descriptor.pins.len() - range.most)
+}
+
+/// The binding of a placement that draws `inputs` of the part's variable
+/// inputs, with the artwork drawn for that many.
+fn functional_library_binding_with_inputs(
+    descriptor: &FunctionalPartDescriptor,
+    inputs: usize,
+) -> LibraryCellInstance {
+    let ports = placed_pins(descriptor, inputs)
         .iter()
         .map(|pin| PortSpec {
             name: pin.name.to_owned(),
@@ -968,33 +1048,66 @@ pub fn functional_library_binding(descriptor: &FunctionalPartDescriptor) -> Libr
         .map(|parameter| parameter.name.to_owned())
         .collect();
     binding.bind_interface(&ports);
+    let symbol_asset = match descriptor.inputs {
+        Some(range) if inputs != range.fewest => {
+            descriptor.symbol_asset.strip_suffix(".svg").map_or_else(
+                || descriptor.symbol_asset.to_owned(),
+                |stem| format!("{stem}_{inputs}.svg"),
+            )
+        }
+        _ => descriptor.symbol_asset.to_owned(),
+    };
     binding.builtin_functional = Some(BuiltinFunctionalInstance {
         stable_id: descriptor.stable_id.to_owned(),
         subcircuit: descriptor.subcircuit.to_owned(),
-        symbol_asset: descriptor.symbol_asset.to_owned(),
+        symbol_asset,
     });
     binding
 }
 
+/// A gate's inputs down its left edge, on the grid: three fit the 40-tall
+/// body, four and five take a 60-tall block. The output is at the middle of
+/// the right edge.
+fn gate_input_rows(inputs: usize) -> (i32, &'static [i32]) {
+    match inputs {
+        0..=2 => (40, &[-10, 10]),
+        3 => (40, &[-10, 0, 10]),
+        4 => (60, &[-20, -10, 10, 20]),
+        _ => (60, &[-20, -10, 0, 10, 20]),
+    }
+}
+
 /// The block a functional placement draws when its part sets its own pin
-/// geometry and the placement still has the part's pins; None otherwise, and
-/// the generated block applies.
+/// geometry or draws a chosen number of inputs, and the placement still has
+/// the part's pins; None otherwise, and the generated block applies.
 pub fn functional_block_symbol(binding: &LibraryCellInstance) -> Option<GeneratedSymbol> {
     let descriptor = functional_part(&binding.builtin_functional.as_ref()?.stable_id)?;
-    let block = descriptor.block?;
-    let same_pins = binding.terminal_order.len() == descriptor.pins.len()
-        && block.pins.len() == descriptor.pins.len()
+    let inputs = functional_input_count(descriptor, binding).unwrap_or(0);
+    let pins = placed_pins(descriptor, inputs);
+    let (height, geometry) = if descriptor.inputs.is_some() {
+        let (height, rows) = gate_input_rows(inputs);
+        let geometry = rows
+            .iter()
+            .map(|&y| (SymbolPinSide::Left, -GENERATED_WIDTH / 2, y))
+            .chain([(SymbolPinSide::Right, GENERATED_WIDTH / 2, 0)])
+            .collect::<Vec<_>>();
+        (height, geometry)
+    } else {
+        let block = descriptor.block?;
+        (block.height, block.pins.to_vec())
+    };
+    let same_pins = binding.terminal_order.len() == pins.len()
+        && geometry.len() == pins.len()
         && binding
             .terminal_order
             .iter()
-            .zip(descriptor.pins)
+            .zip(&pins)
             .all(|(placed, pin)| placed == pin.name);
     same_pins.then(|| GeneratedSymbol {
-        pins: descriptor
-            .pins
+        pins: pins
             .iter()
-            .zip(block.pins)
-            .map(|(pin, &(side, x, y))| GeneratedPin {
+            .zip(geometry)
+            .map(|(pin, (side, x, y))| GeneratedPin {
                 name: pin.name.to_owned(),
                 direction: pin.direction,
                 side,
@@ -1002,7 +1115,7 @@ pub fn functional_block_symbol(binding: &LibraryCellInstance) -> Option<Generate
             })
             .collect(),
         width: GENERATED_WIDTH,
-        height: block.height,
+        height,
         body: GeneratedBody::Block,
     })
 }
@@ -1031,7 +1144,24 @@ pub fn validate_builtin_functional_binding(
             contract.stable_id
         )
     })?;
-    let expected = functional_library_binding(descriptor);
+    let expected = match (
+        descriptor.inputs,
+        functional_input_count(descriptor, binding),
+    ) {
+        (None, _) => functional_library_binding(descriptor),
+        (Some(range), Some(inputs)) if (range.fewest..=range.most).contains(&inputs) => {
+            functional_library_binding_with_inputs(descriptor, inputs)
+        }
+        (Some(range), _) => {
+            return Err(format!(
+                "this {} draws {} pins; it takes {} to {} inputs",
+                descriptor.display_name,
+                binding.terminal_order.len(),
+                range.fewest,
+                range.most
+            ));
+        }
+    };
     let same_parameters = binding.parameter_order.len() == expected.parameter_order.len()
         && binding
             .parameter_order
@@ -1132,6 +1262,13 @@ pub fn functional_instance_parameters(
                 .join(" or ")
         ));
     }
+    if let Some(range) = descriptor.inputs
+        && let Some((_, value)) = parsed
+            .iter()
+            .find(|(key, _)| key.eq_ignore_ascii_case(FUNCTIONAL_INPUTS_SETTING))
+    {
+        input_count(descriptor, range, value)?;
+    }
     if let Some((key, _)) = parsed.iter().find(|(key, _)| {
         !descriptor
             .parameters
@@ -1140,6 +1277,7 @@ pub fn functional_instance_parameters(
             && descriptor
                 .preset
                 .is_none_or(|preset| !preset.name.eq_ignore_ascii_case(key))
+            && (descriptor.inputs.is_none() || !key.eq_ignore_ascii_case(FUNCTIONAL_INPUTS_SETTING))
     }) {
         return Err(format!(
             "{} has no parameter '{}'",
@@ -1151,6 +1289,96 @@ pub fn functional_instance_parameters(
         .into_iter()
         .map(|parameter| format!(" {parameter}"))
         .collect())
+}
+
+/// The input count an Inputs setting names, inside the part's range.
+fn input_count(
+    descriptor: &FunctionalPartDescriptor,
+    range: FunctionalInputs,
+    value: &str,
+) -> Result<usize, String> {
+    value
+        .trim()
+        .trim_matches(['"', '\''])
+        .parse::<usize>()
+        .ok()
+        .filter(|count| (range.fewest..=range.most).contains(count))
+        .ok_or_else(|| {
+            format!(
+                "{} takes {} to {} inputs, not '{}'",
+                descriptor.display_name,
+                range.fewest,
+                range.most,
+                value.trim()
+            )
+        })
+}
+
+/// Redraw a variable-input placement with as many inputs as its Inputs
+/// setting asks for (the part's fewest when it names none). Wires stay where
+/// they are: the gate functions are symmetric in their inputs, so a wire that
+/// lands on another input pin still means the same circuit.
+pub fn conform_functional_inputs(component: &mut Component) -> Result<(), String> {
+    let Some(binding) = component
+        .library_cell
+        .as_ref()
+        .filter(|binding| binding.builtin_functional.is_some())
+    else {
+        return Ok(());
+    };
+    let descriptor = validate_builtin_functional_binding(binding)?;
+    let Some(range) = descriptor.inputs else {
+        return Ok(());
+    };
+    let wanted = match crate::parameters::parse_params_string(&component.params)
+        .get(&FUNCTIONAL_INPUTS_SETTING.to_ascii_lowercase())
+    {
+        Some(value) => input_count(descriptor, range, value)?,
+        None => range.fewest,
+    };
+    if functional_input_count(descriptor, binding) != Some(wanted) {
+        component.library_cell = Some(functional_library_binding_with_inputs(descriptor, wanted));
+    }
+    Ok(())
+}
+
+/// The nodes of a placement's card, in subcircuit port order, from the nodes
+/// its drawn pins land on: an input the placement leaves off is tied to
+/// ground, which the gate ignores.
+pub fn functional_card_nodes(
+    descriptor: &FunctionalPartDescriptor,
+    binding: &LibraryCellInstance,
+    nodes: &[String],
+) -> Result<Vec<String>, String> {
+    if nodes.len() != binding.terminal_order.len() {
+        return Err(format!(
+            "{} draws {} pins but {} nodes reached it",
+            descriptor.display_name,
+            binding.terminal_order.len(),
+            nodes.len()
+        ));
+    }
+    descriptor
+        .pins
+        .iter()
+        .enumerate()
+        .map(|(index, pin)| {
+            match binding
+                .terminal_order
+                .iter()
+                .position(|placed| placed == pin.name)
+            {
+                Some(placed) => Ok(nodes[placed].clone()),
+                None if descriptor.inputs.is_some_and(|range| index < range.most) => {
+                    Ok("0".to_owned())
+                }
+                None => Err(format!(
+                    "{} has no {} pin",
+                    descriptor.display_name, pin.name
+                )),
+            }
+        })
+        .collect()
 }
 
 /// The setting of `preset` that `value` names, quoted or not.
@@ -1177,8 +1405,12 @@ pub fn apply_functional_preset(
     let preset = descriptor
         .preset
         .ok_or_else(|| format!("{} has no preset", descriptor.display_name))?;
-    let choice = preset_choice(&preset, setting)
-        .ok_or_else(|| format!("{} has no {} '{setting}'", descriptor.display_name, preset.label))?;
+    let choice = preset_choice(&preset, setting).ok_or_else(|| {
+        format!(
+            "{} has no {} '{setting}'",
+            descriptor.display_name, preset.label
+        )
+    })?;
     let mut params = crate::parameters::set_parameter_value(params, preset.name, choice.label)?;
     for (name, value) in choice.values {
         params = crate::parameters::set_parameter_value(&params, name, value)?;
@@ -1290,7 +1522,11 @@ mod tests {
         for descriptor in functional_parts() {
             let binding = functional_library_binding(descriptor);
             let Some(block) = functional_block_symbol(&binding) else {
-                assert!(descriptor.block.is_none(), "{}", descriptor.display_name);
+                assert!(
+                    descriptor.block.is_none() && descriptor.inputs.is_none(),
+                    "{}",
+                    descriptor.display_name
+                );
                 continue;
             };
             let (half_width, half_height) = (block.width / 2, block.height / 2);
@@ -1414,7 +1650,11 @@ mod tests {
             }
             for choice in preset.choices {
                 let names = |choice: &FunctionalPresetChoice| {
-                    choice.values.iter().map(|(name, _)| *name).collect::<Vec<_>>()
+                    choice
+                        .values
+                        .iter()
+                        .map(|(name, _)| *name)
+                        .collect::<Vec<_>>()
                 };
                 assert_eq!(names(choice), names(&preset.choices[0]), "{}", choice.label);
             }
@@ -1428,12 +1668,89 @@ mod tests {
         );
         // The setting is kept on the instance and left off its card.
         let card = functional_instance_parameters(timer, &cmos).expect("a valid card");
-        assert!(!card.contains("PROCESS") && card.contains(" DROP=0 ROUT=50"), "{card}");
+        assert!(
+            !card.contains("PROCESS") && card.contains(" DROP=0 ROUT=50"),
+            "{card}"
+        );
         assert!(
             functional_instance_parameters(timer, "PROCESS=GaAs")
                 .unwrap_err()
                 .contains("takes Bipolar or CMOS")
         );
         assert!(apply_functional_preset(timer, "", "GaAs").is_err());
+    }
+
+    #[test]
+    fn a_gate_draws_two_to_five_inputs_on_the_grid_and_ties_the_rest_to_ground() {
+        for descriptor in functional_parts() {
+            let Some(range) = descriptor.inputs else {
+                continue;
+            };
+            for inputs in range.fewest..=range.most {
+                let mut component = Component::new(
+                    1,
+                    super::super::component_type::ComponentType::CellInstance,
+                    Point::origin(),
+                )
+                .with_library_cell(functional_library_binding(descriptor));
+                component.params = format!("INPUTS={inputs} VHIGH=3.3");
+                conform_functional_inputs(&mut component).expect("a count in range");
+                let binding = component.library_cell.clone().expect("bound");
+                assert_eq!(functional_input_count(descriptor, &binding), Some(inputs));
+                assert_eq!(
+                    validate_builtin_functional_binding(&binding),
+                    Ok(descriptor)
+                );
+                let symbol = functional_block_symbol(&binding).expect("a gate block");
+                let rows = symbol
+                    .pins
+                    .iter()
+                    .filter(|pin| pin.side == SymbolPinSide::Left)
+                    .map(|pin| pin.offset.y)
+                    .collect::<Vec<_>>();
+                assert_eq!(rows.len(), inputs, "{}", descriptor.display_name);
+                assert!(rows.windows(2).all(|pair| pair[1] - pair[0] >= 10));
+                assert!(
+                    rows.iter()
+                        .all(|y| y % 10 == 0 && 2 * y.abs() < symbol.height)
+                );
+                let asset = &binding
+                    .builtin_functional
+                    .as_ref()
+                    .expect("functional")
+                    .symbol_asset;
+                assert_eq!(
+                    asset == descriptor.symbol_asset,
+                    inputs == range.fewest,
+                    "{asset}"
+                );
+                let nodes = binding
+                    .terminal_order
+                    .iter()
+                    .map(|pin| pin.to_ascii_lowercase())
+                    .collect::<Vec<_>>();
+                let card = functional_card_nodes(descriptor, &binding, &nodes).expect("nodes");
+                let expected = ["a", "b", "c", "d", "e"]
+                    .iter()
+                    .enumerate()
+                    .map(|(index, name)| if index < inputs { *name } else { "0" })
+                    .chain(["y"])
+                    .collect::<Vec<_>>();
+                assert_eq!(card, expected);
+                assert_eq!(
+                    functional_instance_parameters(descriptor, &component.params),
+                    Ok(" VHIGH=3.3".to_owned())
+                );
+            }
+            let mut component = Component::new(
+                1,
+                super::super::component_type::ComponentType::CellInstance,
+                Point::origin(),
+            )
+            .with_library_cell(functional_library_binding(descriptor));
+            component.params = "INPUTS=6".to_owned();
+            assert!(conform_functional_inputs(&mut component).is_err());
+            assert!(functional_instance_parameters(descriptor, "INPUTS=1").is_err());
+        }
     }
 }

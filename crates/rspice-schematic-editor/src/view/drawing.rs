@@ -1653,29 +1653,37 @@ mod tests {
         );
     }
 
-    /// Every functional part is drawn from its own artwork, undistorted, with
-    /// each lead ending on a terminal.
+    /// Every functional part, drawn with each input count it takes, is drawn
+    /// from its own artwork, undistorted, with each lead ending on a terminal.
     #[test]
     fn every_functional_part_draws_its_artwork_on_its_terminals() {
         use rspice_design::schematic::functional_catalog::{
-            functional_library_binding, functional_parts,
+            conform_functional_inputs, functional_library_binding, functional_parts,
         };
         let library = SymbolLibrary::load_embedded().expect("symbol library");
         for descriptor in functional_parts() {
-            let component = Component::new(1, ComponentType::CellInstance, Point::origin())
-                .with_library_cell(functional_library_binding(descriptor));
-            assert!(
-                compatible_builtin_xspice_asset(&component, &library).is_some(),
-                "{} artwork must end its leads on the part's terminals",
-                descriptor.display_name
-            );
-            let (_, height) = component.symbol_dimensions();
-            assert_eq!(
-                component.artwork_dimensions(),
-                (rspice_design::symbol_generation::GENERATED_WIDTH, height),
-                "{} artwork must be drawn in the box it was authored for",
-                descriptor.display_name
-            );
+            let counts = descriptor
+                .inputs
+                .map_or(0..=0, |inputs| inputs.fewest..=inputs.most);
+            for inputs in counts {
+                let mut component = Component::new(1, ComponentType::CellInstance, Point::origin())
+                    .with_library_cell(functional_library_binding(descriptor));
+                if inputs > 0 {
+                    component.params = format!("INPUTS={inputs}");
+                    conform_functional_inputs(&mut component).expect("a count it takes");
+                }
+                let name = format!("{} with {inputs} inputs", descriptor.display_name);
+                assert!(
+                    compatible_builtin_xspice_asset(&component, &library).is_some(),
+                    "{name}: its artwork must end its leads on the part's terminals"
+                );
+                let (_, height) = component.symbol_dimensions();
+                assert_eq!(
+                    component.artwork_dimensions(),
+                    (rspice_design::symbol_generation::GENERATED_WIDTH, height),
+                    "{name}: its artwork must be drawn in the box it was authored for"
+                );
+            }
         }
     }
 

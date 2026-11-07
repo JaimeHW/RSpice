@@ -477,32 +477,50 @@ fn ota_bias_input_sits_above_v_minus_and_its_current_returns_there() {
 }
 
 #[test]
-fn gates_follow_their_truth_tables_at_their_levels() {
-    // Every input pair on every two-input gate, and both levels on the
-    // inverter and the buffer, unloaded: the output sits at its level.
-    type Truth = fn(bool, bool) -> bool;
+fn gates_follow_their_truth_tables_at_their_levels_for_two_to_five_inputs() {
+    // Every input combination on every gate drawn with two to five inputs,
+    // the inputs it leaves off tied to ground; both levels on the inverter
+    // and the buffer. Unloaded, the output sits at its level. XOR is high
+    // when exactly one input is.
+    type Truth = fn(&[bool]) -> bool;
     let gates: [(&str, Truth); 5] = [
-        ("RSPICE_FN_AND2", |a, b| a && b),
-        ("RSPICE_FN_NAND2", |a, b| !(a && b)),
-        ("RSPICE_FN_OR2", |a, b| a || b),
-        ("RSPICE_FN_NOR2", |a, b| !(a || b)),
-        ("RSPICE_FN_XOR2", |a, b| a != b),
+        ("RSPICE_FN_AND", |inputs| inputs.iter().all(|&high| high)),
+        ("RSPICE_FN_NAND", |inputs| !inputs.iter().all(|&high| high)),
+        ("RSPICE_FN_OR", |inputs| inputs.iter().any(|&high| high)),
+        ("RSPICE_FN_NOR", |inputs| !inputs.iter().any(|&high| high)),
+        ("RSPICE_FN_XOR", |inputs| {
+            inputs.iter().filter(|&&high| high).count() == 1
+        }),
     ];
     let level = |high: bool| if high { 3.3 } else { 0.0 };
-    for a in [false, true] {
-        for b in [false, true] {
-            let mut deck = format!("* gates\nVA a 0 {}\nVB b 0 {}\n", level(a), level(b));
+    let names = ["a", "b", "c", "d", "e"];
+    for count in 2..=5 {
+        for pattern in 0..1_u32 << count {
+            let inputs = (0..count)
+                .map(|bit| pattern & (1 << bit) != 0)
+                .collect::<Vec<_>>();
+            let mut deck = String::from("* gates\n");
+            for (name, &high) in names.iter().zip(&inputs) {
+                deck.push_str(&format!("V{name} {name} 0 {}\n", level(high)));
+            }
+            let pins = (0..5)
+                .map(|pin| if pin < count { names[pin] } else { "0" })
+                .collect::<Vec<_>>()
+                .join(" ");
             for (index, (gate, _)) in gates.iter().enumerate() {
-                deck.push_str(&format!("X{index} a b y{index} {gate} VHIGH=3.3\n"));
+                deck.push_str(&format!("X{index} {pins} y{index} {gate} VHIGH=3.3\n"));
             }
             deck.push_str(
                 "XI a yi RSPICE_FN_INV VHIGH=3.3\nXB a yb RSPICE_FN_BUF VHIGH=3.3\n.end\n",
             );
             let nodes = ["y0", "y1", "y2", "y3", "y4", "yi", "yb"];
             let outputs = op_voltages(&deck, &nodes);
-            let expected = gates.iter().map(|(_, truth)| truth(a, b)).chain([!a, a]);
+            let expected = gates
+                .iter()
+                .map(|(_, truth)| truth(&inputs))
+                .chain([!inputs[0], inputs[0]]);
             for ((node, output), high) in nodes.iter().zip(outputs).zip(expected) {
-                assert_close(node, output, level(high), 1e-9);
+                assert_close(&format!("{node} for {inputs:?}"), output, level(high), 1e-9);
             }
         }
     }
@@ -669,10 +687,7 @@ RL out 0 10k
         let start = tran.time.iter().position(|&t| t >= 10e-6).unwrap();
         let rise = rising_crossing(&tran.time[start..], &out[start..], 1.5);
         let fall = falling_crossing(&tran.time[start..], &out[start..], 1.5);
-        assert!(
-            (rise - 20e-6).abs() < 0.2e-6,
-            "{tech}: triggered at {rise}"
-        );
+        assert!((rise - 20e-6).abs() < 0.2e-6, "{tech}: triggered at {rise}");
         let width = fall - rise;
         assert!(
             (width / 110e-6 - 1.0).abs() < 0.01,

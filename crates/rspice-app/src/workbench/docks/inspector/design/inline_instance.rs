@@ -276,6 +276,8 @@ fn edited_component(
             }
         },
     }
+    // A gate is redrawn with the input count its parameters now set.
+    crate::state::conform_functional_inputs(&mut component)?;
     Ok(component)
 }
 /// Finish the previous field before opening a draft against the live component.

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- NAND gate, 4 inputs. Box 60x60, pins a(0,10), b(0,20), c(0,40), d(0,50), y(60,30). -->
+<svg viewBox="0 0 60 60" xmlns="http://www.w3.org/2000/svg">
+  <path d="M 0,10 H 12" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 0,20 H 12" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 0,40 H 12" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 0,50 H 12" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 12,14 H 27 A 16,16 0 0 1 27,46 H 12 Z" fill="none" stroke="#000000" stroke-width="1" stroke-linejoin="round"/>
+  <path d="M 12,8 V 14" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 12,46 V 52" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 43,30 A 2.5,2.5 0 0 1 48,30 A 2.5,2.5 0 0 1 43,30" fill="none" stroke="#000000" stroke-width="1"/>
+  <path d="M 48,30 H 60" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+</svg>

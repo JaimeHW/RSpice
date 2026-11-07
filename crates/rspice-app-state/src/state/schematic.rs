@@ -99,8 +99,9 @@ pub use documentation_shape::{
     DocumentationShapeKind, PendingDocumentationShapePlacement, geometry_from_points,
 };
 pub use functional_catalog::{
-    FunctionalPartDescriptor, apply_functional_preset, functional_library_binding, functional_part,
-    functional_parts, validate_builtin_functional_binding,
+    FUNCTIONAL_INPUTS_SETTING, FunctionalPartDescriptor, apply_functional_preset,
+    conform_functional_inputs, functional_library_binding, functional_part, functional_parts,
+    validate_builtin_functional_binding,
 };
 pub use generated_veriloga_catalog::{
     generated_veriloga_devices, generated_veriloga_library_binding,
