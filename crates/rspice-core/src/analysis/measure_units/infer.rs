@@ -158,7 +158,9 @@ impl Inference<'_> {
         {
             return match quantity.to_ascii_lowercase().as_str() {
                 "i" | "id" | "ig" | "is" | "ib" | "ic" | "ie" | "isub" => known("A"),
-                "gm" | "gds" | "gmb" | "gmbs" | "go" => known("S"),
+                "gm" | "gds" | "gmb" | "gmbs" | "go" | "gd" | "gpi" | "gmu" => known("S"),
+                "cd" | "cpi" | "cmu" => known("F"),
+                "qd" | "qbe" | "qbc" => known("C"),
                 "vgs" | "vds" | "vbs" | "vbe" | "vce" | "vbc" => known("V"),
                 "power" | "p" => known("W"),
                 _ => MeasurementUnit::Unknown,

@@ -2695,15 +2695,40 @@ impl Bjt {
     }
 
     /// Cached operating-point values from the last accepted Newton solution:
-    /// `(vbe, vbc, ic, ib, gm)` where `gm = dIc/dVbe` at the bias point.
+    /// `(vbe, vbc, ic, ib, gm)`, with `gm` the transconductance of SPICE's
+    /// hybrid-pi split (see [`Self::op_conductances`]).
     pub fn op_values(&self) -> (Value, Value, Value, Value, Value) {
-        (
-            self.vbe,
-            self.vbc,
-            self.ic,
-            self.ib,
-            self.intrinsic_linearization.dic_dvbe,
-        )
+        let (_, _, gm, _) = self.op_conductances();
+        (self.vbe, self.vbc, self.ic, self.ib, gm)
+    }
+
+    /// The small-signal conductances of the last accepted Newton solution as
+    /// SPICE reports them, `(gpi, gmu, gm, go)`: the base current's slopes
+    /// against VBE and VBC, and the collector current split so its slope is
+    /// `gm + go` against VBE and `-(go + gmu)` against VBC.
+    pub fn op_conductances(&self) -> (Value, Value, Value, Value) {
+        let linearized = &self.intrinsic_linearization;
+        let (gpi, gmu) = (linearized.dib_dvbe, linearized.dib_dvbc);
+        let go = -linearized.dic_dvbc - gmu;
+        (gpi, gmu, linearized.dic_dvbe - go, go)
+    }
+
+    /// The stored charge at the last accepted Newton solution as SPICE reports
+    /// it, `(qbe, qbc, cpi, cmu)`: the two internal junctions' charges in the
+    /// device's own polarity and the capacitances they present. `None` for a
+    /// VBIC device, whose charges are not the Gummel-Poon pair.
+    pub fn op_charges(&self) -> Option<(Value, Value, Value, Value)> {
+        if self.uses_vbic_dynamic_charges() {
+            return None;
+        }
+        let charges = self.legacy_transient_charge_state_with_vbx(self.vbe, self.vbc, 0.0, 0.0);
+        let p = self.polarity();
+        Some((
+            p * charges.qbe,
+            p * charges.qbc,
+            charges.capbe,
+            charges.capbc,
+        ))
     }
 
     /// Cached static terminal currents in the canonical C/B/E/S order.

@@ -805,7 +805,15 @@ impl SignalProjection {
                 abort,
             ) {
                 Err(SimulationError::RequestedSignalUnavailable(_))
-                    if self.ignores_unknown_saves => {}
+                    if self.ignores_unknown_saves =>
+                {
+                    // ngspice keeps an empty vector for a device quantity no
+                    // device answers to (frontend/outitf.c, addSpecialDesc);
+                    // the name is passed over for any other kind of signal.
+                    if matches!(signal, SaveSignal::DeviceParam { .. }) {
+                        columns.push(unanswered_device_quantity(&authored, source)?);
+                    }
+                }
                 resolved => columns.push(resolved?),
             }
         }
@@ -877,6 +885,29 @@ impl SignalProjection {
             Err(OutputOperandEvaluationError::Detail { .. }) => Err(source.unavailable(authored)),
         }
     }
+}
+
+/// The column of a saved `@device[quantity]` that nothing computes: every
+/// sample of the axis reads zero, which is what ngspice writes for it.
+fn unanswered_device_quantity(
+    authored: &str,
+    source: &ProjectionSource<'_>,
+) -> Result<ProjectedSignal, SimulationError> {
+    let length = source.axis.as_ref().len();
+    let descriptor = signal_descriptor(
+        authored,
+        registry_name(authored),
+        SignalKind::DeviceObservable,
+        SignalValueType::Real,
+    )
+    .map_err(|error| {
+        SimulationError::Netlist(format!("save '{authored}' cannot be described: {error}"))
+    })?;
+    ProjectedSignal::new(
+        descriptor,
+        ProjectionValues::Real(Cow::Owned(vec![0.0; length])),
+        vec![true; length],
+    )
 }
 
 /// Convert the core resolver's frontend column tuples into typed columns.

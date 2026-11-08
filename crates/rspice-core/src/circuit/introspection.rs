@@ -681,28 +681,41 @@ impl CircuitData {
 
         for bjt in &self.bjts.devices {
             let (vbe, vbc, ic, ib, gm) = bjt.op_values();
+            let (gpi, gmu, _, go) = bjt.op_conductances();
             let [_, _, ie, is] = bjt.operating_point_terminal_currents();
             // Multiplicity scales both currents; it must not erase a finite
             // current gain. Retain the zero-current convention only at zero IB.
             let beta = if ib != 0.0 { ic / ib } else { 0.0 };
+            let mut params = vec![
+                (OpLabel::IC, ic),
+                (OpLabel::IB, ib),
+                (OpLabel::IE, ie),
+                (OpLabel::IS, is),
+                (OpLabel::VBE, vbe),
+                (OpLabel::VCE, vbe - vbc),
+                (OpLabel::BETA, beta),
+                (OpLabel::GM, gm),
+                (OpLabel::GPI, gpi),
+                (OpLabel::GMU, gmu),
+                (OpLabel::GO, go),
+                (
+                    OpLabel::TEMP,
+                    crate::constants::kelvin_to_celsius(bjt.operating_temperature_kelvin()),
+                ),
+            ];
+            if let Some((qbe, qbc, cpi, cmu)) = bjt.op_charges() {
+                params.extend([
+                    (OpLabel::QBE, qbe),
+                    (OpLabel::QBC, qbc),
+                    (OpLabel::CPI, cpi),
+                    (OpLabel::CMU, cmu),
+                ]);
+            }
             entries.push(DeviceOpEntry::new(
                 bjt.name.clone(),
                 OpLabel::BJT,
                 None,
-                vec![
-                    (OpLabel::IC, ic),
-                    (OpLabel::IB, ib),
-                    (OpLabel::IE, ie),
-                    (OpLabel::IS, is),
-                    (OpLabel::VBE, vbe),
-                    (OpLabel::VCE, vbe - vbc),
-                    (OpLabel::BETA, beta),
-                    (OpLabel::GM, gm),
-                    (
-                        OpLabel::TEMP,
-                        crate::constants::kelvin_to_celsius(bjt.operating_temperature_kelvin()),
-                    ),
-                ],
+                params,
             ));
         }
 
@@ -715,6 +728,7 @@ impl CircuitData {
                 continue;
             }
             let (vd, id, gd, cd) = diode.op_values();
+            let sidewall_charge = sidewall.map(|index| self.diodes.devices[index].op_charge());
             let sidewall = sidewall.map(|index| self.diodes.devices[index].op_values());
             let mut params = vec![
                 (OpLabel::VD, vd),
@@ -724,6 +738,7 @@ impl CircuitData {
                 ),
                 (OpLabel::GD, gd),
                 (OpLabel::CD, cd),
+                (OpLabel::QD, diode.op_charge() + sidewall_charge.unwrap_or(0.0)),
                 (
                     OpLabel::TEMP,
                     crate::constants::kelvin_to_celsius(diode.operating_temperature_kelvin()),

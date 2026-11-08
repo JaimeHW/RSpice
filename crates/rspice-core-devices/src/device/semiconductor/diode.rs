@@ -1733,6 +1733,11 @@ impl Diode {
         (self.prev_vd, id, gd, cd)
     }
 
+    /// Stored charge at the last accepted Newton solution.
+    pub fn op_charge(&self) -> Value {
+        self.junction_charge_and_capacitance(self.prev_vd).0
+    }
+
     /// Apply instance area and multiplicity under the selected dialect.
     /// Select the dialect before calling this method.
     ///

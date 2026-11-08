@@ -262,6 +262,120 @@ fn a_print_card_chooses_table_columns_but_a_rawfile_keeps_every_vector() {
     cleanup(&run.dir);
 }
 
+/// The `.dc-001`/`.tran-001` raw file a control-block analysis writes.
+fn control_raw(run: &Run, analysis: &str) -> rspice_core::io::RawWaveformData {
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args(["--quiet", "run"])
+        .arg(run.dir.join("input.cir"))
+        .arg("-o")
+        .arg(run.dir.join("control.raw"))
+        .args(["-f", "raw"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    rspice_core::io::parse_raw_file(&run.dir.join(format!("control.{analysis}.raw"))).unwrap()
+}
+
+/// The named column's sample at sweep index `point`, within 1e-4
+/// of the value ngspice-46 writes for the same deck.
+fn assert_column_at(
+    raw: &rspice_core::io::RawWaveformData,
+    column: &str,
+    point: usize,
+    expected: f64,
+) {
+    let value = raw_column(raw, column).unwrap_or_else(|| panic!("{column} is kept"))[point];
+    assert!(
+        (value - expected).abs() <= 1e-4 * expected.abs(),
+        "{column}: {value:e} against {expected:e}"
+    );
+}
+
+/// A control `save` keeps the operating-point quantities ngspice keeps, and
+/// keeps an empty vector for a name no device quantity answers to.
+#[test]
+fn a_control_save_keeps_a_bjts_conductances_charges_and_capacitances() {
+    let deck = "bjt saved quantities
+VB b 0 0.7
+VC c 0 5
+Q1 c b 0 qmod
+.model qmod NPN(IS=1e-14 BF=100 VAF=50 TF=1n CJE=1p CJC=0.5p TR=10n)
+.control
+save @q1[gm] @q1[gpi] @q1[go] @q1[gmu]
+save @q1[qbe] @q1[qbc] @q1[cmu] @q1[cpi]
+save @q1[pi]
+dc vb 0.6 0.8 0.1
+.endc
+.end
+";
+    let run = run_deck("control_save_bjt", deck, &[]);
+    let raw = control_raw(&run, "dc-001");
+    assert_eq!(raw.variables.len(), 10, "{:?}", raw.variables);
+    // ngspice-46 at VB = 0.7.
+    for (column, expected) in [
+        ("@q1[gm]", 2.379695759743e-1),
+        ("@q1[gpi]", 2.192292661310e-3),
+        ("@q1[go]", 1.134069354286e-4),
+        ("@q1[gmu]", 1.000000002041e-12),
+        ("@q1[qbe]", 7.040796360280e-12),
+        ("@q1[qbc]", -1.448792984825e-12),
+        ("@q1[cmu]", 2.664735247060e-13),
+        ("@q1[cpi]", 2.396995021093e-10),
+    ] {
+        assert_column_at(&raw, column, 1, expected);
+    }
+    let unanswered = raw_column(&raw, "@q1[pi]").expect("ngspice keeps the empty vector");
+    assert_eq!(unanswered, [0.0; 3]);
+    cleanup(&run.dir);
+}
+
+/// ngspice-46 reads the stored charge of a diode from a control `save` too.
+#[test]
+fn a_control_save_keeps_a_diodes_charge() {
+    let deck = "diode saved quantities
+V1 1 0 0.5
+D1 1 0 dmod
+.model dmod D(IS=1e-14 N=1.1 TT=5n CJO=1p VJ=0.7 M=0.4 RS=2)
+.control
+save @d1[gd] @d1[cd] @d1[qd]
+dc v1 -1 0.6 0.4
+.endc
+.end
+";
+    let run = run_deck("control_save_diode", deck, &[]);
+    let raw = control_raw(&run, "dc-001");
+    assert_eq!(raw.variables.len(), 4, "{:?}", raw.variables);
+    assert_column_at(&raw, "@d1[qd]", 0, -8.201478273262e-13);
+    assert_column_at(&raw, "@d1[qd]", 4, 8.458830854119e-13);
+    assert_column_at(&raw, "@d1[cd]", 4, 4.226251727145e-12);
+    cleanup(&run.dir);
+}
+
+/// ngspice spells a source inside a subcircuit `v.x1.vs#branch`, and a
+/// transient that saves it keeps that branch alone.
+#[test]
+fn a_control_save_keeps_a_subcircuit_branch_by_its_ngspice_flat_name() {
+    let deck = "subcircuit branch save
+X1 1 0 sub
+R1 1 0 1k
+.subckt sub a b
+Vs a b 2
+.ends
+.control
+save v.x1.vs#branch
+tran 1n 5n
+.endc
+.end
+";
+    let run = run_deck("control_save_flat_branch", deck, &[]);
+    let raw = control_raw(&run, "tran-001");
+    assert_eq!(raw.variables.len(), 2, "{:?}", raw.variables);
+    let branch = raw.waveforms.iter().next_back().expect("the branch vector");
+    assert!(branch.name.eq_ignore_ascii_case("I(x1.vs)"), "{}", branch.name);
+    assert!((branch.y[0] + 2e-3).abs() < 1e-12);
+    cleanup(&run.dir);
+}
+
 #[test]
 fn a_save_card_narrows_a_rawfile_that_a_print_card_does_not() {
     let deck = PRINTED_DC_DECK.replace(

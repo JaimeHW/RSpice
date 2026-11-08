@@ -46,7 +46,11 @@ pub fn device_param_unit(family: &str, name: &str) -> &'static str {
     match (family, name) {
         ("MOSFET", "id") | ("BJT", "ic" | "ib") | ("DIODE", "id") => "A",
         ("MOSFET", "vgs" | "vds" | "vbs" | "vth") | ("BJT", "vbe" | "vce") | ("DIODE", "vd") => "V",
-        ("MOSFET", "gm" | "gds" | "gmb") | ("BJT", "gm") | ("DIODE", "gd") => "S",
+        ("MOSFET", "gm" | "gds" | "gmb")
+        | ("BJT", "gm" | "gpi" | "gmu" | "go")
+        | ("DIODE", "gd") => "S",
+        ("BJT", "cpi" | "cmu") | ("DIODE", "cd") => "F",
+        ("BJT", "qbe" | "qbc") | ("DIODE", "qd") => "C",
         _ => "",
     }
 }
