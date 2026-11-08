@@ -5185,7 +5185,12 @@ impl Engine {
                 #[cfg(feature = "veriloga")]
                 let initial = initial
                     .map_err(|error| circuit.annotate_mixed_convergence_failure(error, 0.0, false));
-                initial?
+                let (mut solution, mode, contract) = initial?;
+                let held_rows = Self::initial_condition_rows(
+                    &self.collect_initial_condition_hints(netlist, &circuit),
+                );
+                circuit.settle_capacitive_islands(&matrix, &mut solution, &held_rows);
+                (solution, mode, contract)
             };
         let mut origin_model_finish = None;
         if resume.is_none() && !uic_requested && circuit.has_any_veriloga_devices() {
@@ -13023,6 +13028,17 @@ impl Engine {
                 // Native fixed Gear2 resumes order two after that interval;
                 // a new physical event is identified by its reset history.
                 trap_order = 2;
+            } else if current_method == IntegrationMethod::Gear2 {
+                // Gear leaves a breakpoint at order one, as ngspice cuts the
+                // order there for every method, and resumes order two after
+                // that interval. An order-two charge estimate on the first
+                // interval reaches back across the corner, which dilutes it
+                // into a step far wider than the edge allows.
+                trap_order = Self::next_trapezoidal_order_after_accepted_step(
+                    step_trap_order,
+                    hit_breakpoint,
+                    true,
+                );
             }
 
             lte_estimator.set_method_order(effective_method_order(current_method, trap_order));

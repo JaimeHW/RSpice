@@ -96,3 +96,60 @@ fn bsim3_chain_delay_is_step_independent_at_second_order() {
         "third-stage delay {fine:.4e} is not within 3 ps of ngspice's 3.7482 ns"
     );
 }
+
+/// Gear leaves a breakpoint at first order. A 1 ns RC behind a 1 ns ramp sits
+/// beside a 1 ms RC that keeps the steps long up to the edge; at second order
+/// the charge estimate reached back across the corner and accepted a 70 ps
+/// first step, which put v(fast) 2 mV above the closed form through the ramp.
+/// ngspice-46 steps 0.12 ps off the edge and QSPICE 3.4 ps.
+#[test]
+fn gear_leaves_a_breakpoint_at_first_order() {
+    let netlist = Netlist::parse(
+        "\
+* separated nanosecond and millisecond dynamics
+vin in 0 pulse(0 1 1u 1n 1n 1 2)
+r1 in fast 1k
+c1 fast 0 1p
+r2 in slow 1k
+c2 slow 0 1u
+.tran 10n 1.2u 0 10n
+.options reltol=1e-6 abstol=1e-12 vntol=1e-8 method=gear
+.end
+",
+    )
+    .expect("deck parses");
+    let result = Engine::new(SimulationConfig::default())
+        .run_tran(&netlist, 1.2e-6, 10.0e-9)
+        .expect("transient solves");
+    let fast = result
+        .try_voltage_waveform_named("fast")
+        .expect("v(fast) is recorded");
+
+    let (edge, rise, tau) = (1.0e-6, 1.0e-9, 1.0e-9);
+    let after = result
+        .time
+        .iter()
+        .position(|&time| time > edge)
+        .expect("the run passes the edge");
+    let first_step = result.time[after] - result.time[after - 1];
+    assert!(
+        first_step <= 5.0e-12,
+        "first step off the edge is {:.3} ps",
+        first_step * 1e12
+    );
+    // The ramp's closed form through a 1 ns RC: x - (1 - exp(-x)), x in units
+    // of the time constant, over the first half of the ramp, where ngspice-46
+    // stays within 35 uV of it.
+    for (time, actual) in result.time.iter().zip(fast).skip(after) {
+        if *time > edge + 0.5 * rise {
+            break;
+        }
+        let x = (time - edge) / tau;
+        let expected = x + (-x).exp_m1();
+        assert!(
+            (actual - expected).abs() <= 1.0e-4,
+            "v(fast) at {:.4} ps into the ramp is {actual:.6e}, closed form {expected:.6e}",
+            (time - edge) * 1e12
+        );
+    }
+}
