@@ -1212,6 +1212,9 @@ mod source_editor_command_tests;
 mod veriloga_interface_tests;
 
 #[cfg(test)]
+mod veriloga_symbol_tests;
+
+#[cfg(test)]
 mod veriloga_parameter_tests;
 
 #[cfg(test)]

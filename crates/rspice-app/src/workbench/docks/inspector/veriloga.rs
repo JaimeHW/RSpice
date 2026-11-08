@@ -27,7 +27,6 @@ pub(in crate::workbench) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         }
     };
     match action {
-        Some(VerilogAInspectorAction::UpdateSymbol) => app.state.update_active_veriloga_symbol(),
         // The same road a finding in Problems takes, so the two agree on
         // where the caret lands.
         Some(VerilogAInspectorAction::RevealFinding {

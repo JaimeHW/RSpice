@@ -380,6 +380,7 @@ impl Command {
                 | Self::StimulusShowAdopter
                 | Self::CompileVerilogA
                 | Self::VerilogABuildSettings
+                | Self::VerilogAOpenSymbol
                 | Self::AutomationConsole
                 | Self::DescendHierarchyDirect
                 | Self::ShowInNetlist

@@ -14,8 +14,9 @@ use super::{
 
 /// Toolbar of an open Verilog-A cell view.
 ///
-/// Compile and the cross-link to the generated deck, then the build settings
-/// Compile reads, then the source tools, Format first. The toolbar is the only
+/// Compile and the cross-links to the generated deck and the cell's symbol,
+/// then the build settings Compile reads, then the source tools, Format first.
+/// The toolbar is the only
 /// place the first two actions live, so they come first: on a phone, Compile
 /// is the one tool the row keeps, and the deck heads More tools. Build settings, Format
 /// and every source tool are in the command palette as well, and Format in the
@@ -35,6 +36,14 @@ pub(in crate::workbench) fn veriloga_tools(
         layout,
     );
     generated_netlist_tool(ui, app, layout);
+    toolbar_text_command(
+        ui,
+        app,
+        Command::VerilogAOpenSymbol.key(),
+        WorkbenchIcon::Instance,
+        "Open symbol",
+        layout,
+    );
     toolbar_icon_command(
         ui,
         app,

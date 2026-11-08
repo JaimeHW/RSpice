@@ -722,7 +722,7 @@ fn a_hand_edited_symbol_reports_its_drift_and_updates_as_one_undo_step() {
     assert_eq!(drift.extra, ["n"]);
     assert_eq!(
         code_workspace::symbol_drift_text(&drift, app.state.workbench.messages()),
-        "1 pin missing, 1 extra"
+        "Symbol out of date: ctl missing; n no longer in the module"
     );
     assert!(!app.state.model.can_undo_project_design());
 

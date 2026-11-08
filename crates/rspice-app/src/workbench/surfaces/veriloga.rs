@@ -413,7 +413,8 @@ fn source_editor(
 /// The line under the toolbar that states a finding about the module's
 /// interface: its ports differ from the cell's schematic, they could not be
 /// written, or a hand-edited symbol has drifted from them, with Update symbol
-/// beside the drift. With nothing to say it takes no room at all.
+/// and Open symbol beside the drift. With nothing to say it takes no room at
+/// all.
 fn interface_strip(
     ui: &mut Ui,
     state: &mut crate::workbench::app_state::AppState,
@@ -450,13 +451,14 @@ fn interface_strip(
             StripAction::None,
         ),
         Some(VerilogAInterfaceFinding::SymbolDrift(drift)) => (
-            messages.format(
-                MessageId::VerilogASymbolStrip,
-                &[("drift", &symbol_drift_text(drift, messages))],
-            ),
+            symbol_drift_text(drift, messages),
             t.color.warn,
             None,
-            StripAction::UpdateSymbol,
+            if drift.updatable() {
+                StripAction::UpdateSymbol
+            } else {
+                StripAction::None
+            },
         ),
         // With nothing to fix, the compile result of a device New Verilog-A
         // device… created hands it back to the schematic it came from.
@@ -561,11 +563,11 @@ fn interface_strip(
     }
 }
 
-/// What the interface strip's one button does.
+/// What the interface strip offers.
 enum StripAction {
     /// The strip states a finding with nothing to press.
     None,
-    /// Reconcile a hand-edited symbol with the module's ports.
+    /// Bring a hand-edited symbol up to date and take its author to it.
     UpdateSymbol,
     /// Place the new device in the schematic named by the label.
     Place(String),

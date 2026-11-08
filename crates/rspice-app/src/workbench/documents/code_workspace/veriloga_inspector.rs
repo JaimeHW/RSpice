@@ -14,10 +14,10 @@ use egui::{Align, Color32, Layout, Sense, Stroke, Ui, Vec2};
 use crate::product::ProjectId;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Button, StatusMark, paint_status_mark};
+use crate::ui::widgets::{StatusMark, paint_status_mark};
 use crate::workbench::design_system::{
     Problem, code_inspector_section, paint_problem_mark, panel_bleed, panel_inset, problem_line,
-    property_row, property_row_control_columns, property_row_height, property_row_problem,
+    property_row, property_row_height, property_row_problem,
 };
 use crate::workbench::{MessageCatalog, MessageId};
 
@@ -25,7 +25,7 @@ use rspice_app_state::workbench::app_state::model::compiled_parameters;
 use rspice_design::library::metadata::{CellParameter, ParameterValueType};
 
 use super::page::VerilogAWorkbenchState;
-use super::veriloga_interface::{VerilogACellSymbol, VerilogASymbolDrift};
+use super::veriloga_interface::VerilogACellSymbol;
 use super::{CodeEditorDiagnostic, CodeEditorSeverity, SelectedVerilogASource};
 use crate::state::code_diagnostics::CodeDiagnosticCollection;
 use crate::state::{VerilogACompileReceipt, VerilogAInterfaceOutcome};
@@ -143,8 +143,6 @@ pub(crate) fn veriloga_compile_status(
 /// What the reader asked the inspector to do.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum VerilogAInspectorAction {
-    /// Reconcile the cell's hand-edited symbol with the module's ports.
-    UpdateSymbol,
     /// Put the editor's caret where a finding is: the document of the
     /// bundle that holds it, and its one-based line and column.
     RevealFinding {
@@ -168,7 +166,8 @@ pub(crate) fn show_veriloga_inspector(
     let t = Tokens::get(ui.ctx());
     ui.set_width(ui.available_width());
     let receipt = veriloga_receipt(state, project_id, selected);
-    let mut action = module_section(ui, state, selected, receipt, messages);
+    module_section(ui, state, selected, receipt, messages);
+    let mut action = None;
     // Diagnostics exist only for a source the compiler has read. With neither
     // a receipt nor a refusal for this exact revision there is nothing to
     // list, and the strip already says the source needs a compile.
@@ -456,8 +455,7 @@ fn module_section(
     selected: &SelectedVerilogASource,
     receipt: Option<&VerilogACompileReceipt>,
     messages: MessageCatalog,
-) -> Option<VerilogAInspectorAction> {
-    let mut action = None;
+) {
     // The module a compile actually elaborated outranks the one the bundle
     // asks for: with no explicit entry the compiler chooses, and the receipt
     // is the record of what it chose.
@@ -481,94 +479,39 @@ fn module_section(
                     &messages.text(MessageId::VerilogANoBytecode),
                 );
             }
-            if interface_rows(ui, state, receipt, selected.view(), messages) {
-                action = Some(VerilogAInspectorAction::UpdateSymbol);
-            }
+            interface_rows(ui, state, receipt, selected.view(), messages);
         },
     );
-    action
 }
 
-/// Where the module's ports stand against the cell's: a row only when they
-/// disagree with the schematic that defines them, or when a hand-edited
-/// symbol has fallen behind them. Returns whether Update symbol was pressed.
+/// A row when the module's ports disagree with the schematic that defines
+/// them. What the symbol needs is the editor strip's to say, beside the action
+/// that answers it.
 fn interface_rows(
     ui: &mut Ui,
     state: &VerilogAWorkbenchState,
     receipt: Option<&VerilogACompileReceipt>,
     reference: &crate::state::CellViewRef,
     messages: MessageCatalog,
-) -> bool {
-    match state.symbol_standing.of(reference) {
-        Some(VerilogACellSymbol::SchematicDefined) => {
-            let differs = receipt.is_some_and(|receipt| {
-                matches!(
-                    receipt.interface,
-                    Some(VerilogAInterfaceOutcome::SchematicMismatch { .. })
-                )
-            });
-            if differs {
-                property_row_problem(
-                    ui,
-                    &messages.text(MessageId::VerilogAPortsRow),
-                    &messages.text(MessageId::VerilogAPortsDifferFromSchematic),
-                    Some(Problem::Failure),
-                );
-            }
-            false
-        }
-        Some(VerilogACellSymbol::Drifted(drift)) => {
-            property_row(
-                ui,
-                &messages.text(MessageId::VerilogASymbolRow),
-                &symbol_drift_text(drift, messages),
-            );
-            value_column_button(ui, &messages.text(MessageId::VerilogAUpdateSymbol))
-        }
-        None
-        | Some(
-            VerilogACellSymbol::None | VerilogACellSymbol::Generated | VerilogACellSymbol::InStep,
-        ) => false,
-    }
-}
-
-/// "2 pins missing, 1 extra", and how many pins turned round when any did.
-pub(crate) fn symbol_drift_text(drift: &VerilogASymbolDrift, messages: MessageCatalog) -> String {
-    let count = |items: &[String]| items.len().to_string();
-    let missing = count(&drift.missing);
-    let mut text = messages.format(
-        if drift.missing.len() == 1 {
-            MessageId::VerilogASymbolPinMissing
-        } else {
-            MessageId::VerilogASymbolPinsMissing
-        },
-        &[("missing", &missing), ("extra", &count(&drift.extra))],
+) {
+    let schematic_defined = matches!(
+        state.symbol_standing.of(reference),
+        Some(VerilogACellSymbol::SchematicDefined)
     );
-    if !drift.turned.is_empty() {
-        text.push_str(&messages.format(
-            MessageId::VerilogASymbolPinsTurned,
-            &[("count", &count(&drift.turned))],
-        ));
+    let differs = receipt.is_some_and(|receipt| {
+        matches!(
+            receipt.interface,
+            Some(VerilogAInterfaceOutcome::SchematicMismatch { .. })
+        )
+    });
+    if schematic_defined && differs {
+        property_row_problem(
+            ui,
+            &messages.text(MessageId::VerilogAPortsRow),
+            &messages.text(MessageId::VerilogAPortsDifferFromSchematic),
+            Some(Problem::Failure),
+        );
     }
-    text
-}
-
-/// A button in the value column, under the fact it acts on, so the action
-/// stays on the inspector's label/value grid.
-fn value_column_button(ui: &mut Ui, label: &str) -> bool {
-    let width = ui.available_width();
-    let (_, value_left) = property_row_control_columns(ui, width);
-    let height = property_row_height(ui) + 6.0;
-    ui.allocate_ui_with_layout(
-        Vec2::new(width, height),
-        Layout::left_to_right(Align::Center),
-        |ui| {
-            ui.set_min_size(Vec2::new(width, height));
-            ui.add_space(value_left);
-            Button::new(label).show(ui).clicked()
-        },
-    )
-    .inner
 }
 
 /// What the last compile of this source found. A clean compile has nothing to

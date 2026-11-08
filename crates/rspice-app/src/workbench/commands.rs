@@ -411,6 +411,7 @@ impl Command {
             | Self::CompareGeneratedRevisions
             | Self::CompileVerilogA
             | Self::VerilogABuildSettings
+            | Self::VerilogAOpenSymbol
             | Self::AutomationConsole => CommandOwner::Code,
         }
     }
@@ -1235,6 +1236,12 @@ impl Command {
                 if let Err(error) = crate::workbench::app::open_veriloga_build_settings(app) {
                     app.state.prompt(error);
                 }
+            }
+            Self::VerilogAOpenSymbol => {
+                activate_workspace(app, Workspace::Design);
+                crate::workbench::app::actions::veriloga_symbol::open_veriloga_symbol(
+                    &mut app.state,
+                );
             }
             Self::AutomationConsole => {
                 activate_workspace(app, Workspace::Netlist);

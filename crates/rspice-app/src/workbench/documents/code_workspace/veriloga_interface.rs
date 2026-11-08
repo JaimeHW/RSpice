@@ -17,12 +17,13 @@ use rspice_design::library::metadata::{
 use rspice_design::symbol::generated::{GENERATED_SYMBOL_VIEW, is_generated_symbol};
 
 use crate::state::{
-    CellViewRef, LibraryManager, PortDirection, PortSpec, ProjectSourceBundle,
-    ProjectSourceRegistry, SymbolDocument, ViewType,
+    CellViewRef, LibraryManager, PortSpec, ProjectSourceBundle, ProjectSourceRegistry,
+    SymbolDocument, ViewType,
 };
 
 use super::page::VerilogAWorkbenchState;
 use crate::state::{VerilogACompileReceipt, VerilogAInterfaceOutcome};
+use crate::workbench::{MessageCatalog, MessageId};
 
 /// The view whose ports define a cell when it has one.
 const SCHEMATIC_VIEW: &str = "schematic";
@@ -63,6 +64,44 @@ pub struct VerilogASymbolDrift {
     pub extra: Vec<String>,
     /// Pins that point a way their port no longer does.
     pub turned: Vec<String>,
+}
+
+impl VerilogASymbolDrift {
+    /// Whether Update symbol has anything to do. Pins no port declares are
+    /// their author's to remove, in the symbol editor.
+    pub fn updatable(&self) -> bool {
+        !self.missing.is_empty() || !self.turned.is_empty()
+    }
+}
+
+/// "Symbol out of date: en missing": which ports the symbol is behind on.
+pub(crate) fn symbol_drift_text(drift: &VerilogASymbolDrift, messages: MessageCatalog) -> String {
+    let details = [
+        (&drift.missing, MessageId::VerilogASymbolStripMissing),
+        (&drift.turned, MessageId::VerilogASymbolStripTurned),
+        (&drift.extra, MessageId::VerilogASymbolStripExtra),
+    ]
+    .into_iter()
+    .filter(|(names, _)| !names.is_empty())
+    .map(|(names, clause)| messages.format(clause, &[("names", &listed_names(names))]))
+    .collect::<Vec<_>>()
+    .join("; ");
+    messages.format(MessageId::VerilogASymbolStrip, &[("details", &details)])
+}
+
+/// Up to three names, then how many more.
+fn listed_names(names: &[String]) -> String {
+    const SHOWN: usize = 3;
+    let mut text = names
+        .iter()
+        .take(SHOWN)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(", ");
+    if names.len() > SHOWN {
+        text.push_str(&format!(" +{}", names.len() - SHOWN));
+    }
+    text
 }
 
 /// Where the open cell view's symbol stands against its interface.
@@ -172,11 +211,7 @@ fn symbol_drift(document: &SymbolDocument, ports: &[PortSpec]) -> VerilogASymbol
     for port in ports {
         match document.pin(&port.name) {
             Some(pin) if pin.position.is_some() => {
-                let pointed = |direction| match direction {
-                    PortDirection::Supply => PortDirection::InOut,
-                    direction => direction,
-                };
-                if pointed(pin.direction) != pointed(port.direction) {
+                if !pin.states_direction(port.direction) {
                     drift.turned.push(port.name.clone());
                 }
             }

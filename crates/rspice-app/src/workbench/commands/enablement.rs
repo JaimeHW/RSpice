@@ -498,6 +498,7 @@ impl Command {
             Self::VerilogABuildSettings => {
                 crate::workbench::app::veriloga_build_settings_available(app)
             }
+            Self::VerilogAOpenSymbol => crate::workbench::app::actions::veriloga_symbol::can_open_veriloga_symbol(&state.model),
             Self::CompareGeneratedRevisions => {
                 netlist_page_is_visible(state)
                     && !state.code.netlist.generated_history.is_empty()

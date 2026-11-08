@@ -86,12 +86,14 @@ pub use veriloga::{consume_veriloga_compile_request, poll_veriloga_compile, poll
 #[cfg(test)]
 pub(crate) use veriloga_inspector::veriloga_diagnostics;
 pub(crate) use veriloga_inspector::{
-    VerilogAInspectorAction, show_veriloga_inspector, symbol_drift_text, veriloga_compile_status,
+    VerilogAInspectorAction, show_veriloga_inspector, veriloga_compile_status,
     veriloga_current_diagnostics, veriloga_receipt,
 };
+#[cfg(test)]
+pub(crate) use veriloga_interface::VerilogASymbolDrift;
 pub(crate) use veriloga_interface::{
     VerilogACellSymbol, VerilogAInterfaceFinding, interface_check_finding, interface_finding,
-    reconciled_symbol, refresh_symbol_standing, symbol_standing,
+    reconciled_symbol, refresh_symbol_standing, symbol_drift_text, symbol_standing,
 };
 pub(crate) use veriloga_live_check::drive_veriloga_live_check;
 
