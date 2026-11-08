@@ -1625,9 +1625,12 @@ R2 out 0 1k
     assert_eq!(elaborations, 1);
     let document = common::read_json(&dir.join("out.json"));
     let netlist = rspice_core::Netlist::parse(deck).expect("deck parses");
-    let elaborated =
-        rspice_core::execution::topology_fingerprint(&rspice_core::Engine::default(), &netlist)
-            .expect("deck elaborates");
+    let elaborated = rspice_core::execution::topology_fingerprint_with_abort(
+        &rspice_core::Engine::default(),
+        &netlist,
+        &rspice_core::NoAbort,
+    )
+    .expect("deck elaborates");
     assert_eq!(
         document["topologyFingerprint"].as_str(),
         Some(elaborated.to_string().as_str())
