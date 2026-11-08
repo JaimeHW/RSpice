@@ -10,7 +10,7 @@ use rspice_ui_kit::{
     panels::WorkbenchIcon,
     theme::{self, FontWeight},
     tokens::{self, Tokens},
-    widgets::{chip, docbar_at_height, select},
+    widgets::{FILTER_CLEAR_INSET, docbar_at_height, filter_field_clear, select},
 };
 
 /// Document selection and application navigation requested by the bar.
@@ -300,6 +300,30 @@ fn inline_result_actions(ui: &mut Ui, host: &mut impl SheetBarHost) {
     result_viewer_actions(ui, host);
 }
 
+fn operating_point_filter_id() -> egui::Id {
+    egui::Id::new("rspice.results.operating-point-filter")
+}
+
+/// The sheet's filter. Nothing beside it comes or goes as the reader types,
+/// and the inset is kept whether or not the mark is showing, so neither the
+/// field nor its text moves on the first keystroke.
+fn operating_point_filter(ui: &mut Ui, filter: &mut String) {
+    let field = ui.add(
+        egui::TextEdit::singleline(filter)
+            .id(operating_point_filter_id())
+            .desired_width(150.0)
+            .font(theme::field_mono())
+            .margin(egui::Margin {
+                left: 4,
+                right: FILTER_CLEAR_INSET,
+                top: 2,
+                bottom: 2,
+            })
+            .hint_text("Filter…"),
+    );
+    filter_field_clear(ui, &field, filter);
+}
+
 fn result_viewer_actions(ui: &mut Ui, host: &mut impl SheetBarHost) {
     match host.viewer() {
         ResultViewer::Fft => {
@@ -313,18 +337,7 @@ fn result_viewer_actions(ui: &mut Ui, host: &mut impl SheetBarHost) {
             }
         }
         ResultViewer::Eye => host.eye_actions(ui),
-        ResultViewer::Op => {
-            let filter = host.operating_point_filter();
-            if !filter.is_empty() && chip(ui, "clear", true).clicked() {
-                filter.clear();
-            }
-            ui.add(
-                egui::TextEdit::singleline(filter)
-                    .desired_width(150.0)
-                    .font(theme::field_mono())
-                    .hint_text("Filter…"),
-            );
-        }
+        ResultViewer::Op => operating_point_filter(ui, host.operating_point_filter()),
         ResultViewer::Specs => {
             if host.specification_editing() {
                 if ui.button("Discard").clicked() {
@@ -341,3 +354,6 @@ fn result_viewer_actions(ui: &mut Ui, host: &mut impl SheetBarHost) {
         _ => {}
     }
 }
+
+#[cfg(test)]
+mod tests;
