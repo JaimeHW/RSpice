@@ -1492,17 +1492,20 @@ impl Engine {
         };
 
         // Log diagnostic information when falling back to convergence aids.
+        // A direct solve the aids then rescue is progress, not a warning: the
+        // operating point is reported converged, and when every aid fails
+        // the error returned carries the failure.
         if let Some(detail) = direct_solver_error
             .as_ref()
             .and_then(SimulationError::nonfinite_trial_detail)
         {
-            log::warn!(
+            log::info!(
                 "DC Newton-Raphson rejected a non-finite device trial iterate after {} iteration(s): {}. Trying configured convergence aids...",
                 direct_iterations.max(1),
                 detail
             );
         } else if let Some(err) = direct_solver_error.as_ref() {
-            log::warn!(
+            log::info!(
                 "DC Newton-Raphson linear solve failed after {} iteration(s): {}. Trying configured convergence aids...",
                 direct_iterations.max(1),
                 err
@@ -1737,7 +1740,7 @@ impl Engine {
                     if !allow_source && !allow_pseudo && !allow_arc && !gate_generation_aid {
                         return Err(prefer_nonfinite_trial_failure(e, &nonfinite_direct_failure));
                     }
-                    log::warn!(
+                    log::info!(
                         "GMIN stepping failed with {}. Escalating to next configured aid.",
                         e
                     );
@@ -1806,7 +1809,7 @@ impl Engine {
                     if abort.is_aborted() {
                         return Err(SimulationError::Aborted);
                     }
-                    log::warn!(
+                    log::info!(
                         "B3SOI electrothermal startup failed with {}. Continuing with configured aids.",
                         e
                     );
@@ -1861,7 +1864,7 @@ impl Engine {
                     if !allow_pseudo && !allow_arc && !gate_generation_aid {
                         return Err(prefer_nonfinite_trial_failure(e, &nonfinite_direct_failure));
                     }
-                    log::warn!(
+                    log::info!(
                         "Source stepping failed with {}. Escalating to next configured aid.",
                         e
                     );
@@ -1914,7 +1917,7 @@ impl Engine {
                     if !allow_arc && !gate_generation_aid {
                         return Err(prefer_nonfinite_trial_failure(e, &nonfinite_direct_failure));
                     }
-                    log::warn!(
+                    log::info!(
                         "Pseudo-transient continuation failed with {}. Escalating to next configured aid.",
                         e
                     );
@@ -1965,7 +1968,7 @@ impl Engine {
                     if !allow_arc {
                         return Err(prefer_nonfinite_trial_failure(e, &nonfinite_direct_failure));
                     }
-                    log::warn!(
+                    log::info!(
                         "Gate generation continuation failed with {}. Escalating to arc-length continuation.",
                         e
                     );

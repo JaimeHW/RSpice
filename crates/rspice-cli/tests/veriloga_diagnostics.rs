@@ -649,3 +649,124 @@ fn module_selection_and_misspelled_masters_say_what_to_write() {
         "{stderr}"
     );
 }
+
+/// Run one deck at the default log level against a private model cache.
+fn run_deck(root: &common::TestDirectory, deck: &str) -> (String, String) {
+    let path = root.join("deck.cir");
+    std::fs::write(&path, deck).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .arg("run")
+        .arg(&path)
+        .env("RSPICE_VERILOGA_CACHE_DIR", root.join("cache"))
+        .env_remove("RUST_LOG")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(output.status.success(), "{stdout}{stderr}");
+    (stdout, stderr)
+}
+
+/// The value a `.op` listing prints for one signal.
+fn listed(stdout: &str, signal: &str) -> Option<f64> {
+    stdout.lines().find_map(|line| {
+        let (name, value) = line.trim().split_once(" = ")?;
+        (name == signal).then(|| value.split_whitespace().next()?.parse().ok())?
+    })
+}
+
+/// A junction driven by 1 mA through `limexp`, with and without `pnjlim`,
+/// settles where its current balances the source: Vt ln(1 + 1 mA / Is).
+/// The linear presolve parks the node at a megavolt, far past the knee, and
+/// the operating point has to come back from there. Coming back takes the
+/// convergence aids, which is progress the listing does not warn about.
+#[test]
+fn a_limexp_junction_driven_far_past_its_knee_balances_its_current() {
+    let root = common::test_dir("limexp_junction");
+    let vt = 1.380649e-23 * 300.15 / 1.602176634e-19;
+    let expected = vt * (1.0e-3 / 1.0e-14 + 1.0_f64).ln();
+    for limited in [false, true] {
+        let voltage = if limited {
+            "vd = $limit(V(a, c), \"pnjlim\", $vt, vcrit);"
+        } else {
+            "vd = V(a, c);"
+        };
+        std::fs::write(
+            root.join("junction.va"),
+            format!(
+                "`include \"constants.vams\"\n`include \"disciplines.vams\"\n\
+module junction(a, c); inout a, c; electrical a, c; real vd, vcrit;\n\
+analog begin\n\
+  vcrit = $vt * ln($vt / (`M_SQRT2 * 1.0e-14));\n\
+  {voltage}\n\
+  I(a, c) <+ 1.0e-14 * (limexp(vd / $vt) - 1.0);\n\
+end\nendmodule\n"
+            ),
+        )
+        .unwrap();
+        let (stdout, stderr) = run_deck(
+            &root,
+            ".title limexp junction\n.hdl \"junction.va\"\nI1 0 a DC 1m\nX1 a 0 junction\n.op\n.end\n",
+        );
+        let voltage = listed(&stdout, "V(A)").unwrap_or_else(|| panic!("V(A) listed: {stdout}"));
+        assert!(
+            (voltage - expected).abs() <= 1.0e-6 * expected,
+            "limited={limited}: V(A) = {voltage} V, expected {expected} V\n{stdout}{stderr}"
+        );
+        assert!(!stderr.contains("WARN"), "limited={limited}: {stderr}");
+    }
+}
+
+/// A branch the module names lists its current, in amperes; an unknown the
+/// module never named is not listed.
+#[test]
+fn an_operating_point_lists_named_branch_currents_and_hides_the_rest() {
+    let root = common::test_dir("instance_unknowns");
+    std::fs::write(
+        root.join("unknowns.va"),
+        "`include \"disciplines.vams\"\n\
+module unknowns(p, n, s); inout p, n, s; electrical p, n, s; electrical mid;\n\
+branch (p, mid) b1; branch (mid, n) b2;\n\
+analog begin\n\
+  I(b1) <+ V(b1) / 1k;\n\
+  V(b2) <+ 2.0 * I(b2);\n\
+  V(s) <+ 1.0 * I(<p>);\n\
+end\nendmodule\n",
+    )
+    .unwrap();
+    let (stdout, stderr) = run_deck(
+        &root,
+        ".title unknowns\n.hdl \"unknowns.va\"\nV1 a 0 DC 1\nX1 a 0 s unknowns\n.op\n.end\n",
+    );
+    let current = 1.0 / 1002.0;
+    let line = stdout
+        .lines()
+        .find(|line| line.trim().starts_with("I(X1:b2) = "))
+        .unwrap_or_else(|| panic!("I(X1:b2) listed: {stdout}"));
+    assert!(line.trim_end().ends_with(" A"), "{line}");
+    let value = listed(&stdout, "I(X1:b2)").unwrap();
+    assert!((value - current).abs() <= 1.0e-9 * current, "{line}");
+    assert!(!stdout.contains("V(X1:b2)"), "{stdout}");
+    assert!(!stdout.contains("__"), "{stdout}");
+    assert!(!stderr.contains("WARN"), "{stderr}");
+}
+
+/// Mextram's self-heating node swings by a hundred kilovolts within two Newton
+/// steps of the linear presolve, where a linear solve fails its accuracy check
+/// and GMIN stepping takes over and converges. The rescue is not a warning.
+#[test]
+fn a_mextram_operating_point_rescued_by_gmin_stepping_prints_no_warning() {
+    let root = common::test_dir("mextram_rescue");
+    let model = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../models/veriloga/cmc/505p5p0_va/bjt505t.va");
+    let model = model.display().to_string().replace('\\', "/");
+    let (stdout, stderr) = run_deck(
+        &root,
+        &format!(
+            ".title mextram self-heating\n.hdl \"{model}\"\nVCC vcc 0 DC 2\nRL vcc c 1k\n\
+VB b 0 DC 0.75\nX1 c b 0 0 dt bjt505t_va\nRT dt 0 1G\n.op\n.end\n"
+        ),
+    );
+    assert!(listed(&stdout, "V(C)").is_some(), "{stdout}");
+    assert!(!stderr.contains("WARN"), "{stderr}");
+}
