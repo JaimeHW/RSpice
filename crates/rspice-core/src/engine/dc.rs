@@ -248,6 +248,15 @@ impl DcSweepLifecycle {
     }
 }
 
+/// `prefix` + `name` + `suffix`, for the names a result publishes per device.
+fn joined_name(prefix: &str, name: &str, suffix: &str) -> String {
+    let mut joined = String::with_capacity(prefix.len() + name.len() + suffix.len());
+    joined.push_str(prefix);
+    joined.push_str(name);
+    joined.push_str(suffix);
+    joined
+}
+
 fn dc_result_value_count(
     result: &SimulationResult,
     device_op_report: &crate::circuit::DeviceOpReport,
@@ -653,6 +662,9 @@ impl Engine {
         // A nodal resistor has no MNA branch unknown, so evaluate its lead
         // current directly from the converged terminal voltages and the
         // conductance actually installed in this circuit instance.
+        result
+            .dc_observables
+            .reserve(circuit.resistors.names.len().saturating_mul(4));
         for (index, ((name, stamp), conductance)) in circuit
             .resistors
             .names
@@ -677,10 +689,10 @@ impl Engine {
                 .and_then(Option::as_ref)
                 .map(|state| state.output_resistance)
                 .unwrap_or(circuit.resistors.reported_resistances[index]);
-            result.push_dc_observable(format!("{name}:R"), reported_resistance);
-            result.push_dc_observable(format!("I({name})"), current);
-            result.push_dc_observable(format!("P({name})"), power);
-            result.push_dc_observable(format!("W({name})"), power);
+            result.push_dc_observable(joined_name(name, ":R", ""), reported_resistance);
+            result.push_dc_observable(joined_name("I(", name, ")"), current);
+            result.push_dc_observable(joined_name("P(", name, ")"), power);
+            result.push_dc_observable(joined_name("W(", name, ")"), power);
         }
 
         // Zero and near-zero resistors use an explicit MNA branch. Preserve
