@@ -52,7 +52,7 @@ use crate::schematic::net_label::{
 use crate::schematic::rotation::Rotation;
 use crate::schematic::terminal_connection::rebuild_connections_from_terminals;
 use crate::schematic::value_label::{value_and_parameters, value_pieces};
-use crate::schematic::wire::Wire;
+use crate::schematic::wire::{Wire, WireBridge};
 use crate::symbol::{PinNamePlacement, SymbolCurve, SymbolDocument, SymbolPin, SymbolShape};
 
 mod clearance;
@@ -261,6 +261,7 @@ pub fn import_foreign_schematic(
         notices: Vec::new(),
         directives: Vec::new(),
         leads: Vec::new(),
+        bridges: BTreeMap::new(),
         source_points: HashSet::new(),
         source_segments: Vec::new(),
         source_nets: SourceNets::default(),
@@ -352,6 +353,8 @@ struct Builder<'a> {
     directives: Vec<ForeignDirective>,
     /// Leads from RSpice terminals to the source pins they stand for.
     leads: Vec<(Point, Point)>,
+    /// What each jumper draws, by the ends of the wire it is.
+    bridges: BTreeMap<WireEnds, WireBridge>,
     /// Every point the source drawing's wires, flags and junctions join at,
     /// and its wire segments, on RSpice's grid: what a lead must not touch.
     source_points: HashSet<Point>,
@@ -515,12 +518,14 @@ impl Builder<'_> {
             })
             .collect::<Vec<_>>();
         self.anchors.extend(pins.iter().copied());
-        // LTspice's jumper joins its two nets and is no device: a wire.
+        // LTspice's jumper joins its two nets and is no device: a wire, which
+        // draws what the jumper's symbol draws.
         if tool == ForeignTool::Ltspice
             && symbol.base_name().eq_ignore_ascii_case("jumper")
             && let [from, to] = pins.as_slice()
         {
             self.lead(*from, *to);
+            self.bridge_jumper(symbol, &definition, *from, *to);
             return;
         }
         let placed = self.document.components.len();
@@ -1637,6 +1642,80 @@ impl Builder<'_> {
         index
     }
 
+    /// Keeps what a jumper between `from` and `to` draws, for the wire that
+    /// joins them to draw instead of a line.
+    fn bridge_jumper(
+        &mut self,
+        symbol: &ForeignSymbol,
+        definition: &ForeignSymbolDefinition,
+        from: Point,
+        to: Point,
+    ) {
+        if from == to || (from.x != to.x && from.y != to.y) {
+            return;
+        }
+        let key = ends_key(from, to);
+        let first = Point::new(key.0.0, key.0.1);
+        let run = Point::new(key.1.0, key.1.1) - first;
+        let origin = self.scale(symbol.position) - first;
+        let unit = |x, y| {
+            let step = symbol.orientation.apply(ForeignPoint::new(x, y));
+            Point::new(step.x, step.y)
+        };
+        let (across, down) = (unit(1, 0), unit(0, 1));
+        let place = |point: Point| {
+            origin
+                + Point::new(
+                    point.x * across.x + point.y * down.x,
+                    point.x * across.y + point.y * down.y,
+                )
+        };
+        let (mut lines, mut curves) = (Vec::new(), Vec::new());
+        for shape in definition
+            .shapes
+            .iter()
+            .filter_map(|s| self.symbol_shape(s))
+        {
+            match shape {
+                SymbolShape::Polyline { points, closed } => {
+                    lines.extend(
+                        points
+                            .windows(2)
+                            .map(|ends| [place(ends[0]), place(ends[1])]),
+                    );
+                    if closed && let [start, .., end] = points.as_slice() {
+                        lines.push([place(*end), place(*start)]);
+                    }
+                }
+                SymbolShape::Curve(curve) => curves.push(curve.placed(origin, across, down)),
+                _ => {}
+            }
+        }
+        let window = symbol
+            .windows
+            .iter()
+            .chain(&definition.windows)
+            .find(|window| window.attribute == 0)
+            .filter(|window| !window.hidden);
+        let name_position = window.map_or(LabelPosition::Auto, |window| {
+            self.label_position(symbol, window, first, INSTANCE_NAME_WORLD)
+        });
+        let name = window
+            .and_then(|_| symbol.attribute("InstName"))
+            .unwrap_or_default()
+            .to_owned();
+        self.bridges.insert(
+            key,
+            WireBridge {
+                run,
+                lines,
+                curves,
+                name,
+                name_position,
+            },
+        );
+    }
+
     fn symbol_shape(&self, shape: &ForeignShape) -> Option<SymbolShape> {
         Some(match shape {
             ForeignShape::Line(a, b) => SymbolShape::Polyline {
@@ -2224,11 +2303,13 @@ impl Builder<'_> {
             if a == b {
                 continue;
             }
+            // A jumper joins its two pins and nothing between them.
+            let bridged = self.bridges.contains_key(&ends_key(a, b));
             let mut cuts = self
                 .anchors
                 .iter()
                 .copied()
-                .filter(|point| strictly_inside(a, b, *point))
+                .filter(|point| !bridged && strictly_inside(a, b, *point))
                 .collect::<Vec<_>>();
             cuts.sort_by_key(|point| {
                 (i64::from(point.x - a.x)).abs() + (i64::from(point.y - a.y)).abs()
@@ -2256,11 +2337,9 @@ impl Builder<'_> {
         }
         for (a, b) in pieces {
             let id = self.id();
-            self.document.wires.push(Wire::segment(
-                id,
-                Point::new(a.0, a.1),
-                Point::new(b.0, b.1),
-            ));
+            let mut wire = Wire::segment(id, Point::new(a.0, a.1), Point::new(b.0, b.1));
+            wire.bridge = self.bridges.remove(&(a, b)).map(Box::new);
+            self.document.wires.push(wire);
         }
         for ((x, y), count) in ends {
             if count >= 3 {
@@ -2884,6 +2963,14 @@ fn lead_cost(terminal: Point, pin: Point, center: Point) -> i64 {
     } else {
         length
     }
+}
+
+/// A wire's ends as the sheet keeps them: the lesser first.
+type WireEnds = ((i32, i32), (i32, i32));
+
+fn ends_key(a: Point, b: Point) -> WireEnds {
+    let (a, b) = ((a.x, a.y), (b.x, b.y));
+    if a <= b { (a, b) } else { (b, a) }
 }
 
 /// The arc a drawing makes in the box `a`–`b`: counter-clockwise on screen

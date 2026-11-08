@@ -1453,6 +1453,100 @@ fn an_ltspice_flag_names_its_net_away_from_what_reaches_it() {
 }
 
 #[test]
+fn a_jumper_draws_its_bridge_and_name_on_the_wire_it_is() {
+    use crate::schematic::label_layout::{LayoutPoint, TextEdge};
+    use crate::schematic::wire::Wire;
+
+    let drawing = parse_asc(
+        "Version 4\n\
+         WIRE 80 80 80 240\n\
+         SYMBOL Misc\\jumper 80 80 R0\nSYMATTR InstName J3\n\
+         SYMBOL Misc\\jumper 320 80 R90\nSYMATTR InstName J4\n",
+    )
+    .expect("the drawing reads");
+    let mut source = library();
+    source.symbols.insert(
+        "misc\\jumper".to_owned(),
+        ForeignSymbolSource {
+            definition: parse_asy(
+                "Version 4\nSymbolType CELL\n\
+                 LINE Normal -48 0 -32 0\nLINE Normal 32 0 48 0\n\
+                 CIRCLE Normal -36 -4 -28 4\nCIRCLE Normal 28 -4 36 4\n\
+                 ARC Normal -32 -32 32 32 32 0 -32 0\n\
+                 WINDOW 0 0 -40 Bottom 2\nSYMATTR Prefix J\n\
+                 PIN -48 0 NONE 0\nPINATTR SpiceOrder 1\n\
+                 PIN 48 0 NONE 0\nPINATTR SpiceOrder 2\n",
+            )
+            .expect("the jumper reads"),
+            location: "jumper.asy".to_owned(),
+            schematic: None,
+        },
+    );
+    let imported = import_foreign_schematic(&drawing, "work", &source);
+    assert!(imported.document.components.is_empty(), "no part");
+    let bridged = |name: &str| -> &Wire {
+        imported
+            .document
+            .wires
+            .iter()
+            .find(|wire| {
+                wire.drawn_bridge()
+                    .is_some_and(|bridge| bridge.name == name)
+            })
+            .expect("the jumper's wire draws its bridge")
+    };
+
+    let flat = bridged("J3");
+    // The wire another wire ends on the middle of is still one run.
+    assert_eq!(flat.points, [Point::new(20, 50), Point::new(80, 50)]);
+    let bridge = flat.drawn_bridge().expect("drawn");
+    assert_eq!(
+        bridge.lines,
+        [
+            [Point::new(0, 0), Point::new(10, 0)],
+            [Point::new(50, 0), Point::new(60, 0)],
+        ]
+    );
+    assert_eq!(bridge.curves.len(), 3);
+    let placed = bridge
+        .name_position
+        .placed_text(LayoutPoint::new(20.0, 50.0), 1.0)
+        .expect("placed");
+    assert_eq!(
+        (
+            placed.anchor,
+            placed.horizontal,
+            placed.vertical,
+            placed.upward
+        ),
+        (
+            LayoutPoint::new(50.0, 25.0),
+            TextEdge::Center,
+            TextEdge::End,
+            false
+        )
+    );
+    let ((low_x, low_y), (high_x, high_y)) = {
+        let (low, high) = bridge.stroke_bounds();
+        ((low[0], low[1]), (high[0], high[1]))
+    };
+    assert_eq!((low_x, high_x), (0.0, 60.0));
+    assert!(low_y <= -19.0 && high_y >= 0.0, "{low_y} {high_y}");
+
+    let upright = bridged("J4");
+    assert_eq!(upright.points, [Point::new(200, 20), Point::new(200, 80)]);
+    assert_eq!(
+        upright.drawn_bridge().expect("drawn").run,
+        Point::new(0, 60)
+    );
+
+    assert!(flat.translated(10, 40).drawn_bridge().is_some(), "it moves");
+    let mut stretched = flat.clone();
+    stretched.points[1].x += 10;
+    assert!(stretched.drawn_bridge().is_none(), "another run is a line");
+}
+
+#[test]
 fn a_jumper_is_a_wire_and_a_named_subcircuit_reads_from_the_deck() {
     let drawing = parse_asc(
         "Version 4\n\

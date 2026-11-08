@@ -7,7 +7,8 @@ use super::{
     drawing::{
         ConductorInk, JunctionPaint, ProbeVisualStatus, bus_band_width_pt, bus_tap_width_pt,
         chain_conductors, draw_bus, draw_bus_tap, draw_component, draw_conductor, draw_hover_halo,
-        draw_hover_outline, draw_junction, draw_open_pin_marks, draw_probe, probe_world_bounds,
+        draw_hover_outline, draw_junction, draw_open_pin_marks, draw_probe, draw_wire_bridge,
+        probe_world_bounds,
     },
     net_labels::{NetLabelPaint, draw_net_label_attached, world_bounds as net_label_world_bounds},
     pointer_target::PointerTarget,
@@ -189,6 +190,10 @@ pub fn draw_content(
         };
         if ink != ConductorInk::Plain {
             inked_wires.insert(index, ink);
+        }
+        if let Some(bridge) = wire.drawn_bridge() {
+            draw_wire_bridge(painter, viewport, wire.points[0], bridge, ink, palette);
+            continue;
         }
         let colour_key = match ink {
             ConductorInk::Class(colour) => colour.to_array(),

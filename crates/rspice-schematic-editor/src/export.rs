@@ -12,11 +12,12 @@ use rspice_design::{
     resolved_symbol::{ResolvedCellSymbol, ResolvedSymbolSource},
     schematic::{
         component::Component, component_display::SchematicParameterLabelVisibility,
-        component_type::ComponentType, document::SchematicDocument,
+        component_type::ComponentType, document::SchematicDocument, label_layout::LayoutPoint,
+        wire::WireBridge,
     },
     symbol_resolver::SymbolResolver,
 };
-use rspice_design_model::design_management::SheetCatalog;
+use rspice_design_model::{Point, design_management::SheetCatalog};
 
 mod block_symbols;
 mod config;
@@ -38,11 +39,11 @@ use self::geometry::{
     write_documentation_shape, write_junction, write_net_label, write_probe,
 };
 use super::view::design_view::object_is_on_active_sheet;
-use super::view::drawing::{chain_conductors, compute_label_layout};
+use super::view::drawing::{chain_conductors, compute_label_layout, text_align};
 use super::view::lod::{StrokeRole, nominal_wu};
 use super::view::resolved_symbol_render::{
-    InstanceLabel, resolved_symbol_world_bounds, write_resolved_symbol_svg, write_sized_text_svg,
-    write_text_svg, write_upward_svg,
+    InstanceLabel, resolved_symbol_world_bounds, write_placed_curve_svg, write_resolved_symbol_svg,
+    write_sized_text_svg, write_text_svg, write_upward_svg,
 };
 
 #[derive(Clone)]
@@ -262,8 +263,17 @@ fn export_to_svg_with_resolved_symbol_entries(
 
     // Wires as the canvas joins them: one path a chain, so a corner is a
     // mitered join rather than two butt ends.
-    for chain in chain_conductors(sheet.wires.iter().map(|wire| wire.points.as_slice())) {
+    let lined = sheet
+        .wires
+        .iter()
+        .filter(|wire| wire.drawn_bridge().is_none());
+    for chain in chain_conductors(lined.map(|wire| wire.points.as_slice())) {
         write_conductor(&mut svg, &chain, config);
+    }
+    for wire in &sheet.wires {
+        if let Some(bridge) = wire.drawn_bridge() {
+            write_wire_bridge(&mut svg, wire.points[0], bridge, config);
+        }
     }
 
     for bus in &sheet.buses {
@@ -399,6 +409,9 @@ fn calculate_bounds_with_resolved_symbols(
         for point in &wire.points {
             let (x, y) = geometry::page(*point, config);
             extent.include(x, y);
+        }
+        if let Some(bridge) = wire.drawn_bridge() {
+            include_wire_bridge_bounds(wire.points[0], bridge, config, &mut extent);
         }
     }
 
@@ -646,6 +659,71 @@ fn vector_port_stroke_width(component: &Component, config: &SvgExportConfig) -> 
         port.vector()
             .map(|_| geometry::world(nominal_wu(StrokeRole::VectorPort), config))
     })
+}
+
+/// What an imported wire draws in place of a line: strokes in a part's
+/// class, and its name.
+fn write_wire_bridge(
+    svg: &mut String,
+    first: Point,
+    bridge: &WireBridge,
+    config: &SvgExportConfig,
+) {
+    for [from, to] in &bridge.lines {
+        let (x0, y0) = geometry::page(first + *from, config);
+        let (x1, y1) = geometry::page(first + *to, config);
+        writeln!(svg, r#"<path class="symbol" d="M {x0} {y0} L {x1} {y1}"/>"#).unwrap();
+    }
+    for curve in &bridge.curves {
+        write_placed_curve_svg(svg, first, curve, config);
+    }
+    if let Some(label) = wire_bridge_label(first, bridge, config) {
+        label.write(svg, config);
+    }
+}
+
+fn wire_bridge_label(
+    first: Point,
+    bridge: &WireBridge,
+    config: &SvgExportConfig,
+) -> Option<PrimitiveLabel> {
+    let (x, y) = geometry::page(first, config);
+    let placed = bridge.name_position.placed_text(
+        LayoutPoint::new(x as f32, y as f32),
+        config.units_per_world as f32,
+    )?;
+    (!bridge.name.trim().is_empty()).then(|| PrimitiveLabel {
+        kind: InstanceLabel::Name,
+        at: (f64::from(placed.anchor.x), f64::from(placed.anchor.y)),
+        align: text_align(placed.horizontal, placed.vertical),
+        upward: placed.upward,
+        text: bridge.name.clone(),
+        size_percent: bridge.name_position.size_percent(),
+    })
+}
+
+fn include_wire_bridge_bounds(
+    first: Point,
+    bridge: &WireBridge,
+    config: &SvgExportConfig,
+    extent: &mut Extent,
+) {
+    let ([low_x, low_y], [high_x, high_y]) = bridge.stroke_bounds();
+    let (x, y) = geometry::page(first, config);
+    let unit = config.units_per_world;
+    extent.include_box((
+        x + low_x * unit,
+        y + low_y * unit,
+        x + high_x * unit,
+        y + high_y * unit,
+    ));
+    if let Some(label) = wire_bridge_label(first, bridge, config) {
+        if label.upward {
+            extent.include_upward_text(label.at, label.align, &label.text, label.size(config));
+        } else {
+            extent.include_text(label.at, label.align, &label.text, label.size(config));
+        }
+    }
 }
 
 /// One instance label as the page sets it.
@@ -919,6 +997,40 @@ pub(crate) fn escape_xml(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_bridged_wire_exports_its_bridge_and_name_and_no_line() {
+        use rspice_design::schematic::{
+            label_layout::TextEdge, label_position::LabelPosition, wire::Wire,
+        };
+        let mut schematic = Schematic::default();
+        let mut wire = Wire::segment(1, Point::new(40, 60), Point::new(100, 60));
+        wire.bridge = Some(Box::new(WireBridge {
+            run: Point::new(60, 0),
+            lines: vec![[Point::new(0, 0), Point::new(10, 0)]],
+            curves: vec![rspice_design::symbol::SymbolCurve {
+                center: [30.0, 0.0],
+                radii: [20.0, 20.0],
+                start_degrees: 180.0,
+                sweep_degrees: 180.0,
+            }],
+            name: "J9".to_owned(),
+            name_position: LabelPosition::Placed {
+                offset: Point::new(30, -30),
+                horizontal: TextEdge::Center,
+                vertical: TextEdge::End,
+                upward: false,
+                size_percent: 100,
+            },
+        }));
+        schematic.document_mut_for_test().wires.push(wire);
+
+        let svg = export_to_svg(schematic.document(), &SvgExportConfig::default());
+        assert!(!svg.contains(r#"class="wire""#), "{svg}");
+        assert!(svg.contains(r#"<path class="symbol" d="M "#), "{svg}");
+        assert!(svg.contains(" A 20"), "a true arc: {svg}");
+        assert!(svg.contains(">J9<"), "{svg}");
+    }
 
     #[test]
     fn note_only_svg_is_bounded_escaped_multiline_and_semantic() {

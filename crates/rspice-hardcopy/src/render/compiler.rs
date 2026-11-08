@@ -404,7 +404,9 @@ impl<'a> SemanticSceneCompiler<'a> {
             )?,
         );
         for wire in &schematic.wires {
-            if wire.points.len() >= 2 {
+            if let Some(bridge) = wire.drawn_bridge() {
+                self.wire_bridge(wire.points[0], bridge)?;
+            } else if wire.points.len() >= 2 {
                 self.primitives.push(ScenePrimitive::Polyline {
                     points: self.schematic_polyline(&wire.points)?,
                     closed: false,

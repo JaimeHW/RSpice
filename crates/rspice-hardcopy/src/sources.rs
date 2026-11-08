@@ -20,7 +20,7 @@ mod visualization;
 
 pub(crate) use schematic_text::{
     SchematicText, SchematicTextClass, bus_declaration_text, instance_texts, net_label_bounds,
-    net_label_text, tap_slice_text,
+    net_label_text, tap_slice_text, wire_bridge_text,
 };
 
 pub use aggregation::resolve_hardcopy_source_set_with;

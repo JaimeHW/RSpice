@@ -9,10 +9,12 @@ use rspice_design::schematic::{
     bus::{Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation},
     bus_route,
     component_type::ComponentType,
+    label_layout::TextEdge,
+    label_position::LabelPosition,
     net_label::{Junction, NetLabel},
     port_overlay,
     rotation::Rotation,
-    wire::Wire,
+    wire::{Wire, WireBridge},
 };
 use rspice_design::symbol::{PinNamePlacement, SymbolCurve, SymbolPin};
 use rspice_design_model::{design_management::CrossSheetPortDirection, port::PortDirection};
@@ -454,6 +456,54 @@ fn a_printed_source_symbol_keeps_the_native_pen_and_prints_true_curves() {
     assert_eq!(
         ellipses,
         [(carried.at(42.5, 32.5), 2_500, 1_563, 30_000, 200_000)]
+    );
+}
+
+#[test]
+fn a_printed_bridged_wire_draws_its_bridge_and_name_and_no_line() {
+    let mut printed = sheet(Vec::new());
+    let mut wire = Wire::segment(1, SchematicPoint::new(40, 60), SchematicPoint::new(100, 60));
+    wire.bridge = Some(Box::new(WireBridge {
+        run: SchematicPoint::new(60, 0),
+        lines: vec![[SchematicPoint::new(0, 0), SchematicPoint::new(10, 0)]],
+        curves: vec![SymbolCurve {
+            center: [30.0, 0.0],
+            radii: [20.0, 20.0],
+            start_degrees: 180.0,
+            sweep_degrees: 180.0,
+        }],
+        name: "J9".to_owned(),
+        name_position: LabelPosition::Placed {
+            offset: SchematicPoint::new(30, -30),
+            horizontal: TextEdge::Center,
+            vertical: TextEdge::End,
+            upward: false,
+            size_percent: 100,
+        },
+    }));
+    printed.wires.push(wire);
+    let compiled = compile(&printed);
+    let (x, _) = compiled.at(70.0, 30.0);
+    assert_eq!(compiled.text("J9").0, x);
+    let ellipses = compiled
+        .primitives
+        .iter()
+        .filter(|primitive| matches!(primitive, ScenePrimitive::Ellipse { .. }))
+        .count();
+    assert_eq!(ellipses, 1);
+    let native = compile(&sheet(vec![part(
+        2,
+        ComponentType::Resistor,
+        (40, 40),
+        "R1",
+        "1k",
+    )]));
+    assert_eq!(line_widths(&compiled), line_widths(&native));
+    let symbol = *line_widths(&compiled).iter().next().expect("a pen");
+    assert_eq!(
+        polylines_at(&compiled, symbol),
+        [vec![compiled.at(40.0, 60.0), compiled.at(50.0, 60.0)]],
+        "only the drawn strokes, in the symbol's pen, and no line along the run"
     );
 }
 

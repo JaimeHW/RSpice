@@ -4,6 +4,8 @@
 //! Each wire is a polyline (sequence of connected points).
 
 use super::segment::{WireHitResult, WireSegment};
+use crate::schematic::label_position::LabelPosition;
+use crate::symbol::SymbolCurve;
 use rspice_design_model::Point;
 use serde::{Deserialize, Serialize};
 
@@ -25,12 +27,63 @@ pub struct Wire {
     /// Points are in grid coordinates. The wire connects
     /// point[0] → point[1] → ... → point[n-1].
     pub points: Vec<Point>,
+
+    /// What an imported drawing draws across this connection in place of a
+    /// line.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bridge: Option<Box<WireBridge>>,
+}
+
+/// LTspice's wire jumper as its drawing shows it: a bridge and a name, where
+/// the connection itself is only a wire.
+///
+/// Everything stands relative to the wire's first point, so it moves with the
+/// wire. A wire edited to any other run draws as a line.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WireBridge {
+    /// The wire's run when the bridge was drawn: its last point less its
+    /// first.
+    pub run: Point,
+    pub lines: Vec<[Point; 2]>,
+    pub curves: Vec<SymbolCurve>,
+    pub name: String,
+    /// Where the drawing lettered the name, from the wire's first point.
+    pub name_position: LabelPosition,
+}
+
+impl WireBridge {
+    /// The corners of the strokes, from the wire's first point.
+    #[must_use]
+    pub fn stroke_bounds(&self) -> ([f64; 2], [f64; 2]) {
+        let mut min = [0.0_f64; 2];
+        let mut max = [0.0_f64; 2];
+        let run = [f64::from(self.run.x), f64::from(self.run.y)];
+        let lines = self
+            .lines
+            .iter()
+            .flatten()
+            .map(|point| [f64::from(point.x), f64::from(point.y)]);
+        let curves = self.curves.iter().flat_map(|curve| {
+            let (low, high) = curve.bounds();
+            [low, high]
+        });
+        for [x, y] in lines.chain(curves).chain([run]) {
+            min = [min[0].min(x), min[1].min(y)];
+            max = [max[0].max(x), max[1].max(y)];
+        }
+        (min, max)
+    }
 }
 
 impl Wire {
     /// Create a new wire with the given points
     pub fn new(id: u64, points: Vec<Point>) -> Self {
-        Self { id, points }
+        Self {
+            id,
+            points,
+            bridge: None,
+        }
     }
 
     /// Create a two-point wire (single segment)
@@ -38,7 +91,19 @@ impl Wire {
         Self {
             id,
             points: vec![start, end],
+            bridge: None,
         }
+    }
+
+    /// What the wire draws in place of a line, while it still has the run
+    /// that drawing was made for.
+    #[must_use]
+    pub fn drawn_bridge(&self) -> Option<&WireBridge> {
+        let bridge = self.bridge.as_deref()?;
+        let [first, last] = self.points.as_slice() else {
+            return None;
+        };
+        (*last - *first == bridge.run).then_some(bridge)
     }
 
     /// Check if wire contains a point (on any segment)
@@ -286,6 +351,7 @@ impl Wire {
                 .iter()
                 .map(|p| Point::new(p.x + dx, p.y + dy))
                 .collect(),
+            bridge: self.bridge.clone(),
         }
     }
 

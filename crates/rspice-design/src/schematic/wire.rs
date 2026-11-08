@@ -6,6 +6,6 @@ mod segment;
 mod through;
 
 pub use connection::WireConnection;
-pub use polyline::Wire;
+pub use polyline::{Wire, WireBridge};
 pub use segment::{WireHitResult, WireSegment};
 pub(crate) use through::WiresThrough;

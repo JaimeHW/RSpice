@@ -172,6 +172,15 @@ pub fn schematic_bounds(
             .iter()
             .copied()
             .for_each(|point| bounds.include(point));
+        if let Some(bridge) = wire.drawn_bridge() {
+            let first = wire.points[0];
+            let ([low_x, low_y], [high_x, high_y]) = bridge.stroke_bounds();
+            bounds.include(first + Point::new(low_x.floor() as i32, low_y.floor() as i32));
+            bounds.include(first + Point::new(high_x.ceil() as i32, high_y.ceil() as i32));
+            if let Some(text) = super::wire_bridge_text(first, bridge) {
+                bounds.include_layout_rect(text.bounds());
+            }
+        }
     }
     // A bus's outer strands stand off its centreline, and its declaration
     // and every tap's slice stand beside it.

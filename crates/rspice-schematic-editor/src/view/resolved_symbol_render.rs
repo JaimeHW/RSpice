@@ -975,7 +975,23 @@ fn paint_curve(
     curve: &SymbolCurve,
     stroke: Stroke,
 ) {
-    let placed = placed_curve(component, symbol, curve);
+    paint_placed_curve(
+        painter,
+        origin,
+        scale,
+        &placed_curve(component, symbol, curve),
+        stroke,
+    );
+}
+
+/// Strokes `placed`, whose numbers are units from `origin`.
+pub(super) fn paint_placed_curve(
+    painter: &Painter,
+    origin: Pos2,
+    scale: f32,
+    placed: &SymbolCurve,
+    stroke: Stroke,
+) {
     let pixels_per_unit = f64::from(scale * painter.pixels_per_point());
     let mut points = placed
         .tessellated(pixels_per_unit)
@@ -999,11 +1015,22 @@ fn write_curve_svg(
     config: &SvgExportConfig,
 ) {
     let placed = placed_curve(component, symbol, curve);
+    write_placed_curve_svg(svg, component.pos, &placed, config);
+}
+
+/// Writes `placed`, whose numbers are world units from `origin`, as a true
+/// ellipse or elliptical arc.
+pub(crate) fn write_placed_curve_svg(
+    svg: &mut String,
+    origin: Point,
+    placed: &SymbolCurve,
+    config: &SvgExportConfig,
+) {
     let unit = config.units_per_world;
     let page = |[x, y]: [f64; 2]| {
         (
-            (f64::from(component.pos.x) + x) * unit,
-            (f64::from(component.pos.y) + y) * unit,
+            (f64::from(origin.x) + x) * unit,
+            (f64::from(origin.y) + y) * unit,
         )
     };
     let (rx, ry) = (placed.radii[0] * unit, placed.radii[1] * unit);

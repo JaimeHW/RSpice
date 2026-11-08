@@ -995,8 +995,17 @@ fn active_object_bounds<'a>(
         }
     }
     for wire in &view.document.wires {
+        let bridged = wire.drawn_bridge().map(|bridge| {
+            let ([low_x, low_y], [high_x, high_y]) = bridge.stroke_bounds();
+            let first = wire.points[0];
+            [
+                first + Point::new(low_x.floor() as i32, low_y.floor() as i32),
+                first + Point::new(high_x.ceil() as i32, high_y.ceil() as i32),
+            ]
+        });
+        let rect = points_bounds(bridged.as_ref().map_or(&wire.points[..], |ends| &ends[..]));
         if visible(wire.id)
-            && let Some(rect) = points_bounds(&wire.points)
+            && let Some(rect) = rect
         {
             bounds.push(PrintableObjectBounds {
                 target: DrawingSheetOverflowTarget::Wire(wire.id),

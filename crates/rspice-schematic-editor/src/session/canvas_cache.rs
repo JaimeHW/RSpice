@@ -150,6 +150,14 @@ impl CanvasCache {
                 max.y = max.y.max(point.y);
                 self.wire_vertices.entry(*point).or_insert((wire.id, index));
             }
+            if let Some(bridge) = wire.drawn_bridge() {
+                let ([low_x, low_y], [high_x, high_y]) = bridge.stroke_bounds();
+                let first = wire.points[0];
+                min.x = min.x.min(first.x + low_x.floor() as i32);
+                min.y = min.y.min(first.y + low_y.floor() as i32);
+                max.x = max.x.max(first.x + high_x.ceil() as i32);
+                max.y = max.y.max(first.y + high_y.ceil() as i32);
+            }
             self.wire_bounds.push((min, max));
             let wire_index = self.wire_bounds.len() - 1;
             let min_cell_x = min.x.div_euclid(SPATIAL_CELL);

@@ -16,7 +16,7 @@ use rspice_design::schematic::{
     component_type::ComponentType,
     label_layout::{self, LayoutPoint, TextEdge},
     probe::SchematicProbe,
-    wire::Wire,
+    wire::{Wire, WireBridge},
 };
 use rspice_design_model::{
     Point,
@@ -61,7 +61,61 @@ pub fn draw_wire(
     ink: ConductorInk,
     palette: &Palette,
 ) {
-    draw_conductor(painter, viewport, &wire.points, ink, palette);
+    if let Some(bridge) = wire.drawn_bridge() {
+        draw_wire_bridge(painter, viewport, wire.points[0], bridge, ink, palette);
+    } else {
+        draw_conductor(painter, viewport, &wire.points, ink, palette);
+    }
+}
+
+/// What an imported wire draws in place of a line: strokes at a part's
+/// weight and in a part's ink, while nothing lights its net, and its name.
+pub fn draw_wire_bridge(
+    painter: &Painter,
+    viewport: &Viewport,
+    first: Point,
+    bridge: &WireBridge,
+    ink: ConductorInk,
+    palette: &Palette,
+) {
+    let origin = viewport.schematic_to_screen(first);
+    let scale = viewport.zoom;
+    let ppp = painter.pixels_per_point();
+    let colour = match ink {
+        ConductorInk::Plain => palette.symbol,
+        other => other.colour(palette),
+    };
+    let stroke = Stroke::new(
+        lod::stroke_pt(StrokeRole::Symbol, scale, ppp, ink.emphasis()),
+        colour,
+    );
+    for [from, to] in &bridge.lines {
+        let at = |point: &Point| origin + Vec2::new(point.x as f32 * scale, point.y as f32 * scale);
+        painter.line_segment([at(from), at(to)], stroke);
+    }
+    for curve in &bridge.curves {
+        super::resolved_symbol_render::paint_placed_curve(painter, origin, scale, curve, stroke);
+    }
+    let placed = bridge
+        .name_position
+        .placed_text(LayoutPoint::new(origin.x, origin.y), scale);
+    let size = lod::annotation_size(
+        bridge.name_position.size_world(INSTANCE_NAME_WORLD),
+        scale,
+        ppp,
+    );
+    if let (Some(placed), Some(size)) = (placed, size) {
+        let (at, align) = (
+            layout_pos(placed.anchor),
+            text_align(placed.horizontal, placed.vertical),
+        );
+        let font = rspice_ui_kit::theme::sans(size, rspice_ui_kit::theme::FontWeight::Medium);
+        if placed.upward {
+            paint_upward_text(painter, at, align, &bridge.name, font, palette.text);
+        } else {
+            painter.text(at, align, &bridge.name, font, palette.text);
+        }
+    }
 }
 
 /// The state a conductor is drawn in. Variants are in precedence order: when

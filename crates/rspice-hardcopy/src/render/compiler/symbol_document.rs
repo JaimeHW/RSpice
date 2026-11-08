@@ -11,6 +11,44 @@
 use super::*;
 
 impl SemanticSceneCompiler<'_> {
+    /// What an imported wire draws in place of a line: strokes in the
+    /// sheet's symbol ink, and its name.
+    pub(super) fn wire_bridge(
+        &mut self,
+        first: SchematicPoint,
+        bridge: &rspice_design::schematic::wire::WireBridge,
+    ) -> Result<(), HardcopyRenderError> {
+        let stroke = self.mapped_stroke(
+            PrintObjectKind::Layer,
+            "layer:schematic-components",
+            StrokeStyle {
+                color: SemanticColor::Exact(super::schematic_marks::SYMBOL_INK),
+                width: super::schematic_marks::width_um(drawing_metrics::SYMBOL_WIDTH_WORLD),
+                ..StrokeStyle::default()
+            },
+        );
+        for [from, to] in &bridge.lines {
+            let points = vec![
+                self.schematic_point(first + *from)?,
+                self.schematic_point(first + *to)?,
+            ];
+            self.primitives.push(ScenePrimitive::Polyline {
+                points,
+                closed: false,
+                stroke,
+                fill: None,
+            });
+        }
+        for curve in &bridge.curves {
+            let placed = curve.placed(first, SchematicPoint::new(1, 0), SchematicPoint::new(0, 1));
+            self.symbol_curve(&placed, None, stroke)?;
+        }
+        if let Some(text) = crate::sources::wire_bridge_text(first, bridge) {
+            self.schematic_text(&text)?;
+        }
+        Ok(())
+    }
+
     pub(in crate::render) fn symbol_document(
         &mut self,
         symbol: &SymbolDocument,

@@ -13,7 +13,9 @@ use rspice_design::schematic::{
     label_layout::{self, LayoutPoint, LayoutRect, PlacedText, TextEdge, ValueClass},
     net_label::NetLabel,
     value_label::{cell_instance_value, component_value_label, value_pieces},
+    wire::WireBridge,
 };
+use rspice_design_model::Point;
 
 use super::SemanticComponent;
 
@@ -144,6 +146,19 @@ pub fn bus_declaration_text(bus: &Bus) -> Option<SchematicText> {
         placed: label_layout::bus_declaration_placement(bus)?,
         text: bus.declaration.as_ref()?.to_string(),
         size_percent: 100,
+    })
+}
+
+/// The name of an imported wire that draws a bridge, where the drawing
+/// lettered it.
+pub fn wire_bridge_text(first: Point, bridge: &WireBridge) -> Option<SchematicText> {
+    let origin = LayoutPoint::new(first.x as f32, first.y as f32);
+    (!bridge.name.trim().is_empty()).then_some(())?;
+    Some(SchematicText {
+        class: SchematicTextClass::Name,
+        placed: bridge.name_position.placed_text(origin, 1.0)?,
+        text: bridge.name.clone(),
+        size_percent: bridge.name_position.size_percent(),
     })
 }
 
