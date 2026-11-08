@@ -56,7 +56,7 @@ const CHEVRON_SIDE: f32 = 11.0;
 const TITLE_COUNT_GAP: f32 = 7.0;
 const PROBLEM_ROW_H: f32 = 24.0;
 /// A retained value on the sheet reads to this many significant digits; the
-/// inspector and the hover carry the rest.
+/// inspector carries the rest.
 const TABLE_SIGNIFICANT_DIGITS: usize = 6;
 const READOUT_SIGNIFICANT_DIGITS: usize = 9;
 const CELSIUS: &str = "\u{b0}C";
@@ -903,7 +903,7 @@ fn value_parts(value: f64, unit: &str) -> (String, String) {
 }
 
 /// A retained value to nine digits, the last one a double's noise cannot
-/// reach: the inspector's and the hover's form.
+/// reach: the inspector's form.
 fn quantity_readout(value: f64, unit: &str) -> String {
     if !value.is_finite() {
         return NON_FINITE.to_owned();
@@ -1034,11 +1034,6 @@ impl Grid {
 
     fn max_name_chars(&self) -> usize {
         ((self.name_w - NAME_INSET - NAME_END_PAD) / self.advance).floor() as usize
-    }
-
-    /// The slot under a horizontal screen position, if it is a value's.
-    fn slot_at(&self, left: f32, x: f32) -> Option<usize> {
-        (x >= self.visible.left() + self.name_w).then(|| ((x - left) / VALUE_W).floor() as usize)
     }
 }
 
@@ -1307,30 +1302,31 @@ impl<M: SchematicMapping> SheetPainter<'_, M> {
         );
     }
 
+    /// Paints the row's name, and returns it whole if the cell had to cut it.
     fn paint_name(
         &self,
         painter: &egui::Painter,
         cell: egui::Rect,
         row: RowSource<'_>,
         kind: OpRowKind,
-    ) {
+    ) -> Option<String> {
         let (parent, leaf) = name_parts(row.name());
         let leaf = if kind == OpRowKind::Node {
             self.source.mapping.display_node(&leaf)
         } else {
             Cow::Borrowed(leaf.as_str())
         };
-        let (parent, leaf) = elide_name(&parent, &leaf, self.grid.max_name_chars());
+        let (shown_parent, shown_leaf) = elide_name(&parent, &leaf, self.grid.max_name_chars());
         let font = theme::mono(tokens::FS_1, FontWeight::Regular);
         let mut job = LayoutJob::default();
-        if !parent.is_empty() {
+        if !shown_parent.is_empty() {
             job.append(
-                &parent,
+                &shown_parent,
                 0.0,
                 TextFormat::simple(font.clone(), self.colors.text_dim),
             );
         }
-        job.append(&leaf, 0.0, TextFormat::simple(font, self.colors.text));
+        job.append(&shown_leaf, 0.0, TextFormat::simple(font, self.colors.text));
         let galley = painter.layout_job(job);
         painter.galley(
             egui::pos2(
@@ -1340,6 +1336,7 @@ impl<M: SchematicMapping> SheetPainter<'_, M> {
             galley,
             self.colors.text,
         );
+        (shown_parent != parent || shown_leaf != *leaf).then(|| format!("{parent}{leaf}"))
     }
 
     fn paint_value(&self, painter: &egui::Painter, cell: egui::Rect, value: CellValue) {
@@ -1423,7 +1420,7 @@ impl<M: SchematicMapping> SheetPainter<'_, M> {
             painter.rect_filled(rect, 0.0, self.colors.bg_hover);
         }
         let name_cell = self.grid.name_cell(y, ROW_H);
-        self.paint_name(
+        let cut_name = self.paint_name(
             &painter.with_clip_rect(name_cell.intersect(rect)),
             name_cell,
             row,
@@ -1470,36 +1467,16 @@ impl<M: SchematicMapping> SheetPainter<'_, M> {
         if response.double_clicked() {
             out.action = Some(locate_action(section.kind, row.name(), self.source.mapping));
         }
-        let pointer_x = response.hover_pos().map(|pos| pos.x);
-        response.on_hover_ui_at_pointer(|ui| self.row_hover(ui, section, row, pointer_x));
-    }
-
-    /// The whole name, the deck's identity where it reads differently, and the
-    /// value under the pointer to the inspector's digits.
-    fn row_hover(&self, ui: &mut Ui, section: &PlanSection, row: RowSource<'_>, x: Option<f32>) {
-        let (parent, leaf) = name_parts(row.name());
-        let mono = |text: String, color| {
-            egui::RichText::new(text)
-                .font(theme::mono(tokens::FS_1, FontWeight::Regular))
-                .color(color)
-        };
-        let shown = format!("{parent}{leaf}");
-        let spelled_differently = shown != row.name();
-        ui.label(mono(shown, self.colors.text));
-        if spelled_differently {
-            ui.label(mono(row.name().to_owned(), self.colors.text_dim));
-        }
-        let column = x
-            .and_then(|x| self.grid.slot_at(self.grid.values_left(section.slots()), x))
-            .and_then(|slot| slot.checked_sub(usize::from(section.region)))
-            .and_then(|slot| section.columns.get(slot));
-        if let Some((column, (value, unit))) =
-            column.and_then(|column| Some((column, row.quantity(column)?)))
-        {
-            ui.label(mono(
-                format!("{}  {}", column.label, quantity_readout(value, &unit)),
-                self.colors.text,
-            ));
+        // Over the cut name only: anything else on the row is already legible,
+        // and a tooltip would restate it on top of the row below.
+        if let Some(whole) = cut_name.filter(|_| {
+            response
+                .hover_pos()
+                .is_some_and(|pos| name_cell.contains(pos))
+        }) {
+            response.on_hover_text_at_pointer(
+                egui::RichText::new(whole).font(theme::mono(tokens::FS_1, FontWeight::Regular)),
+            );
         }
     }
 }

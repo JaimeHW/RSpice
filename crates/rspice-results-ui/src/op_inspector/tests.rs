@@ -1039,6 +1039,61 @@ fn first_row() -> egui::Pos2 {
     egui::pos2(60.0, TITLE_H + COLUMN_HEADER_H + ROW_H * 0.5)
 }
 
+/// Whether a tooltip is up once the pointer has rested at `at`.
+fn tooltip_up(plan: &OpPlan, view: &OpView<'_, Mapped>, at: egui::Pos2) -> bool {
+    let ctx = egui::Context::default();
+    rspice_ui_kit::Theme::default().apply(&ctx);
+    frame(&ctx, plan, view, Vec::new());
+    frame(&ctx, plan, view, vec![egui::Event::PointerMoved(at)]);
+    for _ in 0..90 {
+        frame(&ctx, plan, view, Vec::new());
+    }
+    ctx.memory(|memory| {
+        memory
+            .areas()
+            .visible_layer_ids()
+            .iter()
+            .any(|layer| layer.order == egui::Order::Tooltip)
+    })
+}
+
+#[test]
+fn a_row_has_a_tooltip_only_over_a_name_the_cell_had_to_cut() {
+    let long = format!("V({})", "a".repeat(120));
+    let dc = DcOpResult {
+        node_voltages: vec![node(&long, 1.0), node("V(short)", 1.0)],
+        branch_currents: vec![node("I(V1)", 1.0e-3)],
+        ..DcOpResult::default()
+    };
+    let plan = plan_of(Some(&dc), None);
+    let mapping = Mapped {
+        node: true,
+        device: None,
+    };
+    let view = OpView {
+        evidence: &evidence(),
+        dc: Some(&dc),
+        devices: None,
+        selection: None,
+        mapping: &mapping,
+        failure_site: None,
+    };
+    let cut_row = first_row();
+    let whole_row = cut_row + egui::vec2(0.0, ROW_H);
+    let over_value = egui::vec2(500.0, 0.0);
+
+    assert!(tooltip_up(&plan, &view, cut_row), "the cut name");
+    assert!(
+        !tooltip_up(&plan, &view, cut_row + over_value),
+        "a value on the cut row"
+    );
+    assert!(!tooltip_up(&plan, &view, whole_row), "a name shown whole");
+    assert!(
+        !tooltip_up(&plan, &view, whole_row + over_value),
+        "a value on a row shown whole"
+    );
+}
+
 #[test]
 fn a_click_picks_the_row_and_a_double_click_cross_probes_it() {
     let (dc, report) = evidence_fixture(4, 4);
