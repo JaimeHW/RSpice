@@ -14,7 +14,7 @@ use super::super::{
 use super::PreviewView;
 use crate::{
     session::{EditorSession, tool::Tool},
-    symbols::{SymbolLibrary, draw_symbol, draw_symbol_with_dimensions},
+    symbols::{PinLeads, SymbolLibrary, draw_symbol, draw_symbol_with_dimensions},
 };
 use egui::{Painter, Response, Stroke};
 use rspice_design::{
@@ -120,6 +120,7 @@ pub fn draw_component_preview(
                     viewport.zoom,
                     &preview_component,
                     preview_stroke,
+                    &PinLeads::NONE,
                 );
             } else if let Some(symbol) = symbol_context.pending_library_symbol()
                 && symbol.source() == ResolvedSymbolSource::Authored
@@ -269,6 +270,7 @@ pub fn draw_shelf_drag_preview(
                 viewport.zoom,
                 &component,
                 preview_stroke,
+                &PinLeads::NONE,
             );
         } else if let Some(symbol) = resolve_symbol(binding)
             && symbol.source() == ResolvedSymbolSource::Authored

@@ -15,6 +15,7 @@ use egui::{Align, Align2, Color32, Painter, Pos2, Shape, Stroke, vec2};
 
 use super::lod;
 use crate::export::{SvgExportConfig, escape_xml};
+use crate::symbols::PinLeads;
 use rspice_design::{
     resolved_symbol::{ResolvedCellSymbol, ResolvedSymbolPin},
     schematic::{
@@ -49,6 +50,7 @@ pub fn draw_resolved_symbol(
         stroke,
         SchematicParameterLabelVisibility::NamesAndValues,
         &Tokens::get(painter.ctx()).color,
+        &PinLeads::NONE,
     );
 }
 
@@ -65,9 +67,12 @@ pub fn draw_resolved_symbol_with_visibility(
     stroke: Stroke,
     parameter_labels: SchematicParameterLabelVisibility,
     palette: &Palette,
+    leads: &PinLeads<'_>,
 ) {
-    draw_symbol_body(painter, origin, scale, component, symbol, stroke);
-    draw_symbol_pins(painter, origin, scale, component, symbol, stroke, true);
+    draw_symbol_body(painter, origin, scale, component, symbol, stroke, leads);
+    draw_symbol_pins(
+        painter, origin, scale, component, symbol, stroke, true, leads,
+    );
     draw_symbol_labels(
         painter,
         origin,
@@ -90,8 +95,25 @@ pub fn draw_resolved_symbol_artwork(
     symbol: &ResolvedCellSymbol,
     stroke: Stroke,
 ) {
-    draw_symbol_body(painter, origin, scale, component, symbol, stroke);
-    draw_symbol_pins(painter, origin, scale, component, symbol, stroke, false);
+    draw_symbol_body(
+        painter,
+        origin,
+        scale,
+        component,
+        symbol,
+        stroke,
+        &PinLeads::NONE,
+    );
+    draw_symbol_pins(
+        painter,
+        origin,
+        scale,
+        component,
+        symbol,
+        stroke,
+        false,
+        &PinLeads::NONE,
+    );
 }
 
 pub(crate) fn write_resolved_symbol_svg(
@@ -124,6 +146,7 @@ fn draw_symbol_body(
     component: &Component,
     symbol: &ResolvedCellSymbol,
     stroke: Stroke,
+    leads: &PinLeads<'_>,
 ) {
     for shape in &symbol.document().body {
         match shape {
@@ -137,8 +160,11 @@ fn draw_symbol_body(
                 // rather than two butt ends with a notch between them.
                 if *closed && screen_points.len() > 2 {
                     painter.add(egui::Shape::closed_line(screen_points, stroke));
-                } else if screen_points.len() >= 2 {
-                    painter.add(egui::Shape::line(screen_points, stroke));
+                } else {
+                    let rest = leads.paint_leads(painter, &screen_points, stroke);
+                    if rest.len() >= 2 {
+                        painter.add(egui::Shape::line(rest.to_vec(), stroke));
+                    }
                 }
             }
             SymbolShape::Circle { center, radius } => {
@@ -216,6 +242,10 @@ fn symbol_text_align(component: &Component, align: SymbolTextAlign) -> Align2 {
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Independent canvas transform, symbol, and paint inputs."
+)]
 fn draw_symbol_pins(
     painter: &Painter,
     origin: Pos2,
@@ -224,6 +254,7 @@ fn draw_symbol_pins(
     symbol: &ResolvedCellSymbol,
     stroke: Stroke,
     named: bool,
+    leads: &PinLeads<'_>,
 ) {
     // Leads are drawn in the body's stroke: one symbol weight.
     let color = stroke.color;
@@ -244,7 +275,9 @@ fn draw_symbol_pins(
         let inner = to_screen(origin, scale, component, symbol.pin_lead_inner(pin));
         // No dot on the terminal: a filled dot means a junction of three or
         // more, and an open pin takes the scene's open-pin mark instead.
-        painter.line_segment([terminal, inner], stroke);
+        if leads.paint_leads(painter, &[terminal, inner], stroke).len() == 2 {
+            painter.line_segment([terminal, inner], stroke);
+        }
         draw_direction_mark(painter, terminal, inner, pin.direction, scale, color);
 
         if let Some(font_size) = font_size.filter(|_| !pin.name_hidden) {
@@ -1122,6 +1155,7 @@ mod tests {
                 component,
                 symbol,
                 Stroke::new(1.2, Color32::from_rgb(255, 64, 64)),
+                &PinLeads::NONE,
             );
         })
     }
@@ -1375,6 +1409,7 @@ mod tests {
             &symbol,
             Stroke::new(1.0, egui::Color32::WHITE),
             false,
+            &PinLeads::NONE,
         );
         let mut circles = 0;
         painter.for_each_shape(|shape| {
@@ -1430,6 +1465,7 @@ mod tests {
                     &symbol,
                     Stroke::new(1.2, Color32::from_rgb(255, 64, 64)),
                     true,
+                    &PinLeads::NONE,
                 );
             });
             // The lead runs from x -30 to the body at -20: screen 40 to 80.

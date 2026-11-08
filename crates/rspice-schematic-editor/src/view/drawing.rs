@@ -24,7 +24,7 @@ use rspice_design_model::{
 };
 use rspice_ui_kit::{palette::Palette, tokens::Tokens};
 
-use super::super::symbols::{SymbolLibrary, draw_baked};
+use super::super::symbols::{PinLeads, SymbolLibrary, draw_baked};
 use super::lod::{self, Emphasis, StrokeRole, TextClass, TextLod};
 use super::resolved_symbol_render::{
     draw_resolved_symbol_with_visibility, resolved_symbol_world_bounds,
@@ -837,6 +837,12 @@ pub fn draw_component(
             .then(|| symbol_context.resolved_symbol(component))
             .flatten()
     });
+    let terminals = component
+        .terminal_positions_resolved(resolved_cell_symbol)
+        .into_iter()
+        .map(|(_, terminal)| viewport.schematic_to_screen(terminal))
+        .collect::<Vec<_>>();
+    let leads = PinLeads::new(&terminals, conductor_width_pt(scale, ppp, selected), scale);
 
     // Authored symbols are the sole component-body source. Missing library or
     // instance resolution is rendered as an explicit error marker; it must
@@ -855,8 +861,8 @@ pub fn draw_component(
                 )
             })
             .is_some_and(|baked| {
-                draw_baked(painter, &baked, pos, scale, stroke);
-                draw_artwork_lead_extensions(painter, pos, scale, component, stroke);
+                draw_baked(painter, &baked, pos, scale, stroke, &leads);
+                draw_artwork_lead_extensions(painter, pos, scale, component, stroke, &leads);
                 true
             })
         {
@@ -874,6 +880,7 @@ pub fn draw_component(
                 stroke,
                 parameter_labels,
                 palette,
+                &leads,
             );
             true
         } else {
@@ -896,7 +903,7 @@ pub fn draw_component(
             component.mirror_h,
             component.mirror_v,
         );
-        draw_baked(painter, &baked, pos, scale, symbol_stroke);
+        draw_baked(painter, &baked, pos, scale, symbol_stroke, &leads);
         if component.kind == ComponentType::Port {
             draw_port_direction_overlay(
                 painter,
@@ -1037,6 +1044,7 @@ pub fn draw_artwork_lead_extensions(
     scale: f32,
     component: &Component,
     stroke: Stroke,
+    leads: &PinLeads<'_>,
 ) {
     let to_screen = |point: Point| {
         let transformed = component.transform_point(point);
@@ -1046,7 +1054,10 @@ pub fn draw_artwork_lead_extensions(
         )
     };
     for (edge, terminal) in component.artwork_lead_extensions() {
-        painter.line_segment([to_screen(edge), to_screen(terminal)], stroke);
+        let points = [to_screen(edge), to_screen(terminal)];
+        if leads.paint_leads(painter, &points, stroke).len() == 2 {
+            painter.line_segment(points, stroke);
+        }
     }
     let Some(size) = lod::annotation_size(
         rspice_design::symbol_generation::GENERATED_PIN_LABEL_SIZE,
@@ -1526,6 +1537,9 @@ pub fn bus_band_width_pt(zoom: f32, pixels_per_point: f32) -> f32 {
 pub fn bus_tap_width_pt(zoom: f32, pixels_per_point: f32) -> f32 {
     lod::stroke_pt(StrokeRole::BusTap, zoom, pixels_per_point, Emphasis::Plain)
 }
+
+#[cfg(test)]
+mod lead_raster_tests;
 
 #[cfg(test)]
 mod tests {

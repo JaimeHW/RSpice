@@ -75,24 +75,114 @@ fn collect_corner_dots(points: &[Vec2], dots: &mut Vec<Vec2>) {
     }
 }
 
-/// Paint a baked symbol: one multiply-add per vertex, one shape per polyline.
+/// The terminals a symbol's leads end on, for painting those leads as the
+/// ends of the wires that reach them.
+///
+/// A wire is snapped to the pixel grid by its own stroke, and a symbol's
+/// stroke can be a different width with a different parity, so a lead painted
+/// as artwork lands half a pixel off the wire it meets and smears. A lead here
+/// is an axis-aligned stroke end on a terminal; it takes the wire's width and
+/// the terminal's own column or row, so egui snaps it exactly as it snaps the
+/// wire. Curves, diagonals and everything else stay artwork.
+#[derive(Debug, Clone, Copy)]
+pub struct PinLeads<'a> {
+    terminals: &'a [Pos2],
+    wire_width: f32,
+    reach: f32,
+}
+
+impl PinLeads<'_> {
+    /// No terminals: every stroke paints as artwork, for a symbol no wire
+    /// reaches, a preview or a thumbnail.
+    pub const NONE: PinLeads<'static> = PinLeads {
+        terminals: &[],
+        wire_width: 0.0,
+        reach: 0.0,
+    };
+}
+
+impl<'a> PinLeads<'a> {
+    /// `terminals` in screen points, for wires `wire_width` points wide at
+    /// `zoom` points per world unit.
+    pub fn new(terminals: &'a [Pos2], wire_width: f32, zoom: f32) -> Self {
+        Self {
+            terminals,
+            wire_width,
+            // Half a world unit: art lies on the grid, or close by rounding.
+            reach: 0.5 * zoom,
+        }
+    }
+
+    /// The lead `end`-`inner` is, from its terminal to `inner` on the
+    /// terminal's own column or row, if it is one.
+    fn lead(&self, end: Pos2, inner: Pos2) -> Option<[Pos2; 2]> {
+        const STRAIGHT: f32 = 0.01;
+        let terminal = *self
+            .terminals
+            .iter()
+            .find(|terminal| (**terminal - end).length() <= self.reach)?;
+        let (across, along) = ((end.x - inner.x).abs(), (end.y - inner.y).abs());
+        if across <= STRAIGHT && along > STRAIGHT {
+            Some([terminal, Pos2::new(terminal.x, inner.y)])
+        } else if along <= STRAIGHT && across > STRAIGHT {
+            Some([terminal, Pos2::new(inner.x, terminal.y)])
+        } else {
+            None
+        }
+    }
+
+    /// Paints whichever ends of the open stroke `points` are leads, and
+    /// answers the part of it that is still to paint as artwork.
+    pub fn paint_leads<'p>(
+        &self,
+        painter: &Painter,
+        points: &'p [Pos2],
+        stroke: Stroke,
+    ) -> &'p [Pos2] {
+        let wire = Stroke::new(self.wire_width, stroke.color);
+        let mut rest = points;
+        if let [end, inner, ..] = rest
+            && let Some(lead) = self.lead(*end, *inner)
+        {
+            painter.line_segment(lead, wire);
+            rest = &rest[1..];
+        }
+        if let [.., inner, end] = rest
+            && let Some(lead) = self.lead(*end, *inner)
+        {
+            painter.line_segment(lead, wire);
+            rest = &rest[..rest.len() - 1];
+        }
+        rest
+    }
+}
+
+/// Paint a baked symbol: one multiply-add per vertex, one shape per polyline,
+/// its leads as the ends of the wires that reach them.
 pub fn draw_baked(
     painter: &Painter,
     baked: &BakedSymbol,
     center: Pos2,
     scale: f32,
     stroke: Stroke,
+    leads: &PinLeads<'_>,
 ) {
     let radius = stroke.width / 2.0;
     for dot in &baked.corner_dots {
         painter.circle_filled(center + *dot * scale, radius, stroke.color);
     }
     for line in &baked.polylines {
-        if line.len() == 2 {
-            painter.line_segment([center + line[0] * scale, center + line[1] * scale], stroke);
+        if let [a, b] = line[..] {
+            let points = [center + a * scale, center + b * scale];
+            if leads.paint_leads(painter, &points, stroke).len() == 2 {
+                painter.line_segment(points, stroke);
+            }
         } else {
             let points: Vec<Pos2> = line.iter().map(|p| center + *p * scale).collect();
-            painter.add(Shape::line(points, stroke));
+            let rest = leads.paint_leads(painter, &points, stroke);
+            if rest.len() >= 2 {
+                painter.add(Shape::line(rest.to_vec(), stroke));
+            }
         }
     }
     for polygon in &baked.filled {
