@@ -1513,7 +1513,12 @@ endmodule\n",
     let listed = |name: &str| {
         signals
             .iter()
-            .find(|signal| signal.descriptor().display_name().eq_ignore_ascii_case(name))
+            .find(|signal| {
+                signal
+                    .descriptor()
+                    .display_name()
+                    .eq_ignore_ascii_case(name)
+            })
             .map(|signal| {
                 let ProjectionValues::Real(values) = signal.values() else {
                     panic!("{name} is a real column");
@@ -1536,7 +1541,10 @@ endmodule\n",
     assert_static("V(X1.mid)", value, 2.0 * current);
     let (_, value) = listed("V(S)").unwrap_or_else(|| panic!("V(S) in {names:?}"));
     assert_static("V(S)", value, current);
-    assert!(listed("V(X1:b2)").is_none(), "a branch current listed as a voltage: {names:?}");
+    assert!(
+        listed("V(X1:b2)").is_none(),
+        "a branch current listed as a voltage: {names:?}"
+    );
     assert!(
         names.iter().all(|name| !name.contains("__")),
         "an unknown the module never named is listed: {names:?}"

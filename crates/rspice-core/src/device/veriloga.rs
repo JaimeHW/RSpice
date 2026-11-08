@@ -163,7 +163,11 @@ impl TerminalCurrentModel {
 
     /// Whether moving to `solution` changes every terminal current by no more
     /// than the device tolerance allows.
-    fn settled(&self, solution: &[Value], criteria: crate::device::NonlinearConvergenceCriteria) -> bool {
+    fn settled(
+        &self,
+        solution: &[Value],
+        criteria: crate::device::NonlinearConvergenceCriteria,
+    ) -> bool {
         let mut change = vec![0.0; self.rows.len()];
         for &(slot, column, value, column_value) in &self.conductances {
             let Some(&next) = solution.get(column) else {
@@ -171,11 +175,14 @@ impl TerminalCurrentModel {
             };
             change[slot] += value * (next - column_value);
         }
-        self.rows.iter().zip(&change).all(|(&(_, current), &change)| {
-            let tolerance = criteria.current_tolerance()
-                + criteria.relative_tolerance() * current.abs().max((current + change).abs());
-            change.abs() <= tolerance
-        })
+        self.rows
+            .iter()
+            .zip(&change)
+            .all(|(&(_, current), &change)| {
+                let tolerance = criteria.current_tolerance()
+                    + criteria.relative_tolerance() * current.abs().max((current + change).abs());
+                change.abs() <= tolerance
+            })
     }
 }
 

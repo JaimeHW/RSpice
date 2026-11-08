@@ -198,7 +198,8 @@ impl SimulationResult {
     /// normalizes its mask, so ground is never one.
     pub fn set_instance_unknowns(&mut self, unknowns: Vec<Option<InstanceUnknown>>) {
         self.instance_unknowns = unknowns;
-        self.instance_unknowns.resize(self.node_voltages.len(), None);
+        self.instance_unknowns
+            .resize(self.node_voltages.len(), None);
         if let Some(ground) = self.instance_unknowns.first_mut() {
             *ground = None;
         }
