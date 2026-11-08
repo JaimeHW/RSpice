@@ -1480,6 +1480,60 @@ fn capability_refusals_exit_sixty_nine_with_their_token() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// An instance parameter the device does not read is named once and ignored,
+/// and the deck runs, as QSPICE runs it ("Ignoring unknown instance parameter
+/// "WW" of device M1."). The parameters each device reads stay quiet.
+#[test]
+fn an_unknown_instance_parameter_is_named_and_the_deck_runs() {
+    let dir = test_dir("unknown_instance_parameter");
+    let path = dir.join("unknown.sp");
+    std::fs::write(
+        &path,
+        "* unknown instance parameters\n\
+         VD d 0 5\n\
+         VG g 0 2\n\
+         M1 d g 0 0 nm ww=10u l=1u w=2u nf=1 ad=1p icvds=1\n\
+         .model nm nmos level=1 vto=1 kp=20u\n\
+         D1 d a dm foo=3 area=2 pj=1u\n\
+         R1 a 0 1k\n\
+         .model dm d is=1e-14\n\
+         Q1 d g e qm bar=1 area=1 dtemp=1\n\
+         R2 e 0 1k\n\
+         .model qm npn bf=100\n\
+         J1 d g s jm baz=1 area=1 temp=30\n\
+         R3 s 0 1k\n\
+         .model jm njf vto=-2\n\
+         Z1 d g z zm qux=1 area=1 m=1\n\
+         R4 z 0 1k\n\
+         .model zm nmf vto=-2\n\
+         .op\n\
+         .end\n",
+    )
+    .unwrap();
+    let output = run_rspice(&["run", path.to_str().unwrap()]);
+    assert!(output.status.success(), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    for (param, device) in [
+        ("WW", "M1"),
+        ("FOO", "D1"),
+        ("BAR", "Q1"),
+        ("BAZ", "J1"),
+        ("QUX", "Z1"),
+    ] {
+        let line = format!("Ignoring unknown instance parameter \"{param}\" of device {device}.");
+        assert_eq!(stderr.matches(&line).count(), 1, "{line}: {stderr}");
+    }
+    assert_eq!(
+        stderr
+            .matches("Ignoring unknown instance parameter")
+            .count(),
+        5,
+        "{stderr}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A deck whose only analysis is one RSpice does not run is refused, as
 /// LTspice, Xyce and ngspice refuse it, rather than answered with a default
 /// operating point. Beside an analysis RSpice runs the card only warns, and a

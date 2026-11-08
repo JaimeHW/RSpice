@@ -7454,6 +7454,11 @@ impl Engine {
                         continue;
                     }
 
+                    warn_unknown_instance_params(
+                        &element.name,
+                        instance_params,
+                        DIODE_INSTANCE_PARAMS,
+                    );
                     let resolved_model = resolve_native_model_card(
                         netlist,
                         selected_diode_model,
@@ -7967,6 +7972,11 @@ impl Engine {
                         self.config.spice_dialect,
                         instance_params,
                     )?;
+                    warn_unknown_instance_params(
+                        &element.name,
+                        instance_params,
+                        BJT_INSTANCE_PARAMS,
+                    );
                     bjt = rebuilt(bjt, |bjt| bjt.with_instance_params(instance_params));
                     bjt.set_xyce_compatibility(self.config.spice_dialect == SpiceDialect::Xyce);
                     bjt.set_ngspice_compatibility(
@@ -8706,6 +8716,11 @@ impl Engine {
                         mosfet = mosfet.with_params_at_tnom(params_map, tnom_k);
                     }
 
+                    warn_unknown_instance_params(
+                        &element.name,
+                        instance_params,
+                        CLASSIC_MOS_INSTANCE_PARAMS,
+                    );
                     for (name, value) in instance_params {
                         if ["M", "MULT", "NF"]
                             .iter()
@@ -8981,6 +8996,11 @@ impl Engine {
                             element.name
                         )));
                     }
+                    warn_unknown_instance_params(
+                        &element.name,
+                        instance_params,
+                        FET_INSTANCE_PARAMS,
+                    );
                     jfet = jfet.with_instance_params(instance_params);
                     jfet.set_noise_absolute_temperature(explicit_temp_k);
                     jfet.set_analysis_temperature(self.config.temperature);
@@ -9309,6 +9329,11 @@ impl Engine {
                             element.name
                         )));
                     }
+                    warn_unknown_instance_params(
+                        &element.name,
+                        instance_params,
+                        FET_INSTANCE_PARAMS,
+                    );
                     jfet = jfet.with_instance_params(instance_params);
                     jfet.set_noise_absolute_temperature(explicit_temp_k);
                     jfet.set_analysis_temperature(self.config.temperature);

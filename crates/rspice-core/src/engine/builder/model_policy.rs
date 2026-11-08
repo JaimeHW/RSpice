@@ -985,6 +985,89 @@ pub(super) fn validate_bjt_model_level(
     Ok(())
 }
 
+/// The instance parameters the native Berkeley bulk MOSFET reads: geometry,
+/// junction areas and squares, `OFF`, the `IC=` components, multiplicity, the
+/// instance temperature, and the size keys model binning selects on.
+pub(super) const CLASSIC_MOS_INSTANCE_PARAMS: &[&str] = &[
+    "W", "WIDTH", "L", "LENGTH", "NFIN", "AD", "AS", "PD", "PS", "NRD", "NRS", "OFF", "IC_VDS",
+    "IC_VGS", "IC_VBS", "IC_VES", "IC_VPS", "M", "MULT", "NF", "TEMP", "DTEMP",
+];
+/// The instance parameters the native diode reads.
+pub(super) const DIODE_INSTANCE_PARAMS: &[&str] = &[
+    "AREA",
+    "PJ",
+    "PERIM",
+    "W",
+    "L",
+    "WM",
+    "LM",
+    "WP",
+    "LP",
+    "M",
+    "MULT",
+    "OFF",
+    "IC",
+    "TEMP",
+    "DTEMP",
+    "NOISELESS",
+];
+/// The instance parameters the native Gummel-Poon and VBIC BJT read.
+pub(super) const BJT_INSTANCE_PARAMS: &[&str] = &[
+    "AREA",
+    "AREAB",
+    "AREAC",
+    "M",
+    "MULT",
+    "OFF",
+    "IC_VBE",
+    "IC_VCE",
+    "TEMP",
+    "DTEMP",
+    "TRISE",
+    "DTA",
+    "SW_ET",
+    "SW_NOISE",
+    "NOISELESS",
+];
+/// The instance parameters the native JFET, MESFET, MESA and HFET read.
+pub(super) const FET_INSTANCE_PARAMS: &[&str] = &[
+    "AREA",
+    "W",
+    "L",
+    "NF",
+    "M",
+    "MULT",
+    "OFF",
+    "IC_VDS",
+    "IC_VGS",
+    "TEMP",
+    "DTEMP",
+    "TS",
+    "TD",
+    "NOISELESS",
+];
+
+/// Report each instance parameter the native device does not read, once per
+/// run, and go on without it, as QSPICE does.
+pub(super) fn warn_unknown_instance_params(
+    element_name: &str,
+    instance_params: &[(String, f64)],
+    known: &[&str],
+) {
+    for (name, _) in instance_params {
+        if known.iter().any(|known| name.eq_ignore_ascii_case(known)) {
+            continue;
+        }
+        let line = format!(
+            "Ignoring unknown instance parameter \"{}\" of device {element_name}.",
+            name.to_ascii_uppercase()
+        );
+        if crate::log_scope::first_saying(&line) {
+            log::warn!("{line}");
+        }
+    }
+}
+
 pub(super) fn validate_bjt_instance_controls(
     element_name: &str,
     vbic: bool,
