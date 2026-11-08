@@ -2040,7 +2040,9 @@ fn step_op_voltages(netlist: &Netlist, node: &str) -> Vec<f64> {
     let plan = step_plan(&engine, netlist);
     (0..plan.total_runs())
         .map(|run| {
-            let materialized = engine.materialize_step_run(&plan, run).expect("run materializes");
+            let materialized = engine
+                .materialize_step_run(&plan, run)
+                .expect("run materializes");
             op_voltage(materialized.netlist(), node)
         })
         .collect()
@@ -2090,9 +2092,18 @@ fn a_random_function_draws_again_at_every_step_point() {
         let netlist = parse(deck);
         let first = step_op_voltages(&netlist, "a");
         let again = step_op_voltages(&netlist, "a");
-        assert_eq!(first, again, "a deck reproduces its draws run to run:\n{deck}");
-        assert!(first.iter().all(|v| (0.5..=1.5).contains(v)), "{first:?}\n{deck}");
-        assert!(distinct(&first), "every point draws again: {first:?}\n{deck}");
+        assert_eq!(
+            first, again,
+            "a deck reproduces its draws run to run:\n{deck}"
+        );
+        assert!(
+            first.iter().all(|v| (0.5..=1.5).contains(v)),
+            "{first:?}\n{deck}"
+        );
+        assert!(
+            distinct(&first),
+            "every point draws again: {first:?}\n{deck}"
+        );
     }
 }
 
@@ -2100,7 +2111,8 @@ fn a_random_function_draws_again_at_every_step_point() {
 // with the deck run alone.
 #[test]
 fn the_first_step_point_is_the_decks_own_draw() {
-    let body = ".param r=mc(1k,0.5)\nI1 0 a 1m\nR1 a 0 {r}\nI2 0 b 1m\nR2 b 0 {mc(1k,0.5)}\n.op\n.end\n";
+    let body =
+        ".param r=mc(1k,0.5)\nI1 0 a 1m\nR1 a 0 {r}\nI2 0 b 1m\nR2 b 0 {mc(1k,0.5)}\n.op\n.end\n";
     let alone = parse(&format!("* alone\n{body}"));
     let swept = parse(&format!("* one point\n.step param run list 7\n{body}"));
     let runs = step_op_voltages(&swept, "a");
@@ -2117,7 +2129,11 @@ fn an_element_draw_is_not_the_parameter_draw_before_it() {
         "* draws\n.param r=mc(1k,0.5)\nI1 0 a 1m\nR1 a 0 {r}\nI2 0 b 1m\nR2 b 0 {mc(1k,0.5)}\n\
          I3 0 c 1m\nR3 c 0 {mc(1k,0.5)}\n.op\n.end\n",
     );
-    let (a, b, c) = (op_voltage(&netlist, "a"), op_voltage(&netlist, "b"), op_voltage(&netlist, "c"));
+    let (a, b, c) = (
+        op_voltage(&netlist, "a"),
+        op_voltage(&netlist, "b"),
+        op_voltage(&netlist, "c"),
+    );
     assert!((a - b).abs() > 1e-9, "R1 and R2 share a draw: {a} {b}");
     assert!((b - c).abs() > 1e-9, "R2 and R3 share a draw: {b} {c}");
     // Rebuilding draws the same values again.
@@ -2141,13 +2157,24 @@ fn a_parameter_replay_of_a_step_run_keeps_that_runs_draws() {
         .collect();
     let mut seen = Vec::new();
     for run in &nominal {
-        let (a, b) = (op_voltage(run.netlist(), "a"), op_voltage(run.netlist(), "b"));
+        let (a, b) = (
+            op_voltage(run.netlist(), "a"),
+            op_voltage(run.netlist(), "b"),
+        );
         seen.push((a, b));
         let (replayed, _) =
             Engine::create_perturbed_netlist_multi(run.netlist(), &[("P".to_owned(), 2000.0)])
                 .expect("replay");
-        assert_eq!(op_voltage(&replayed, "a"), a, "the .param draw changed on replay");
-        assert_eq!(op_voltage(&replayed, "b"), b, "the element draw changed on replay");
+        assert_eq!(
+            op_voltage(&replayed, "a"),
+            a,
+            "the .param draw changed on replay"
+        );
+        assert_eq!(
+            op_voltage(&replayed, "b"),
+            b,
+            "the element draw changed on replay"
+        );
         assert_close("perturbed parameter", op_voltage(&replayed, "c"), 2.0, 1e-9);
     }
     assert!(

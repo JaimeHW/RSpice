@@ -271,8 +271,7 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<(Netlist, usize), SimulationError> {
         let seed = step_run_seed(netlist.params.random().seed(), run_index);
-        if overrides.is_empty()
-            && (run_index == 0 || netlist.params.parse_statistical_draws() == 0)
+        if overrides.is_empty() && (run_index == 0 || netlist.params.parse_statistical_draws() == 0)
         {
             let mut stepped = netlist.clone();
             if run_index != 0 {
