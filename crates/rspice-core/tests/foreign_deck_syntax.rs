@@ -896,12 +896,7 @@ fn a_branchless_device_current_is_readable_in_expressions() {
     // current is the one through R1.
     let diode_current = (voltage("a") - voltage("b")) / 100.0;
     for node in ["o1", "s"] {
-        assert_close(
-            &format!("V({node})"),
-            voltage(node),
-            3.151882330117470,
-            2e-5,
-        );
+        assert_close(&format!("V({node})"), voltage(node), 3.15188233011747, 2e-5);
         assert_close(
             &format!("V({node})"),
             voltage(node),
