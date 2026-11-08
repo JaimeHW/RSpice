@@ -347,9 +347,6 @@ impl DesignReviewMutation {
     }
 }
 
-/// How far a lettered note's edge stands off the point it stands on, so its
-/// descenders clear the wire beside it.
-const LETTERED_NOTE_STANDOFF_WORLD: f32 = 3.0;
 /// The distance from one line of a lettered note to the next at the standard
 /// size, as LTspice spaces its lines.
 const LETTERED_NOTE_LINE_ADVANCE_WORLD: f32 = 17.5;
@@ -449,7 +446,7 @@ impl DesignNote {
     ) -> Vec<(PlacedText, &'a str)> {
         let lines = rendered_text.split('\n').collect::<Vec<_>>();
         let advance = lettered_note_line_advance(self.text_size_percent);
-        let reach = self.lettered_size_world() * LINE_BOX_EM * 0.5 + LETTERED_NOTE_STANDOFF_WORLD;
+        let reach = self.lettered_size_world() * LINE_BOX_EM * 0.5;
         let beyond_first = (lines.len() - 1) as f32 * advance;
         // The middle of the first line, from the point, across the lines.
         let first = match lettering.across {
@@ -458,11 +455,6 @@ impl DesignNote {
             TextEdge::Center => -beyond_first * 0.5,
             TextEdge::End => -reach - beyond_first,
         };
-        let along = match lettering.along {
-            TextEdge::Start => LETTERED_NOTE_STANDOFF_WORLD,
-            TextEdge::Center => 0.0,
-            TextEdge::End => -LETTERED_NOTE_STANDOFF_WORLD,
-        };
         let (x, y) = (self.pos.x as f32, self.pos.y as f32);
         lines
             .into_iter()
@@ -470,9 +462,9 @@ impl DesignNote {
             .map(|(index, line)| {
                 let across = first + index as f32 * advance;
                 let anchor = if lettering.upward {
-                    LayoutPoint::new(x + across, y - along)
+                    LayoutPoint::new(x + across, y)
                 } else {
-                    LayoutPoint::new(x + along, y + across)
+                    LayoutPoint::new(x, y + across)
                 };
                 let placed = PlacedText {
                     anchor,

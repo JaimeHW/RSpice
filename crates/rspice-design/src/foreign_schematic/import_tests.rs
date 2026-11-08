@@ -1435,7 +1435,8 @@ fn an_ltspice_flag_reached_only_along_a_vertical_line_reads_up_it() {
          WIRE 0 0 0 160\nFLAG 0 0 ONTOP\nFLAG 0 160 ATFOOT\n\
          WIRE 160 0 160 160\nFLAG 160 80 PAST\n\
          WIRE 320 0 320 160\nWIRE 320 0 480 0\nFLAG 320 0 CORNER\n\
-         WIRE 480 160 640 160\nFLAG 640 160 LEVEL\n",
+         WIRE 480 160 640 160\nFLAG 640 160 LEVEL\n\
+         WIRE 800 0 800 160\nWIRE 800 160 960 160\nFLAG 800 160 UNDER\n",
     )
     .expect("the drawing reads");
     let imported = import_foreign_schematic(&drawing, "work", &library());
@@ -1451,6 +1452,7 @@ fn an_ltspice_flag_reached_only_along_a_vertical_line_reads_up_it() {
         ("ATFOOT", NetLabelSide::RisingBelow, true),
         ("PAST", NetLabelSide::RisingBeside, true),
         ("CORNER", NetLabelSide::Above, false),
+        ("UNDER", NetLabelSide::Below, false),
         ("LEVEL", NetLabelSide::Right, false),
     ] {
         assert_eq!(label(name).side, side, "{name}");
@@ -3267,9 +3269,6 @@ fn a_comment_keeps_its_size_and_stands_on_its_point_as_its_drawing_stood_it() {
         (label.pos.x as f32, label.pos.y as f32)
     };
     let near = |a: f32, b: f32| (a - b).abs() <= 0.5;
-    // A box that stands on its point by an edge stands this far off it, so
-    // its descenders clear the wire it labels.
-    let standoff = 3.0;
 
     let (size, [left, top, right, bottom]) = lettered(&qspice, "centred\nnote");
     let (x, y) = point(&qspice, "centre");
@@ -3279,17 +3278,17 @@ fn a_comment_keeps_its_size_and_stands_on_its_point_as_its_drawing_stood_it() {
     let (size, [left, _, right, bottom]) = lettered(&qspice, "standing");
     let (x, y) = point(&qspice, "base");
     assert_eq!(size, 100);
-    assert!(near((left + right) * 0.5, x) && near(bottom, y - standoff));
+    assert!(near((left + right) * 0.5, x) && near(bottom, y));
 
     let (size, [left, top, right, _]) = lettered(&ltspice, "hanging");
     let (x, y) = point(&ltspice, "top");
     assert_eq!(size, 67, "LTspice size 1 is 1.0x against the standard 1.5x");
-    assert!(near((left + right) * 0.5, x) && near(top, y + standoff));
+    assert!(near((left + right) * 0.5, x) && near(top, y));
 
     let (size, [left, top, _, bottom]) = lettered(&ltspice, "starting");
     let (x, y) = point(&ltspice, "left");
     assert_eq!(size, 100);
-    assert!(near(left, x + standoff) && near((top + bottom) * 0.5, y));
+    assert!(near(left, x) && near((top + bottom) * 0.5, y));
 
     let native = DesignNote::new(1, Point::new(0, 0), DesignNoteKind::PlainText, "n").unwrap();
     assert!(native.has_standard_text_size());
@@ -3347,10 +3346,7 @@ fn every_line_of_an_imported_text_keeps_its_justification() {
     let right = lines("ends");
     assert_eq!(right[0].0.horizontal, TextEdge::End);
     assert_eq!(right[0].0.anchor.x, right[1].0.anchor.x);
-    assert!(
-        right[0].0.anchor.x < 500.0,
-        "each line ends short of the point"
-    );
+    assert_eq!(right[0].0.anchor.x, 500.0, "each line ends on the point");
     assert!(
         right[0].0.anchor.y == 100.0,
         "standing on the point by its first line"
@@ -3359,9 +3355,9 @@ fn every_line_of_an_imported_text_keeps_its_justification() {
     let upward = lines("reads");
     assert!(upward[0].0.upward);
     assert_eq!(upward[0].0.horizontal, TextEdge::Start);
-    assert!(
-        upward[0].0.anchor.y < 100.0,
-        "it starts past the point, rising"
+    assert_eq!(
+        upward[0].0.anchor.y, 100.0,
+        "it starts on the point, rising"
     );
 }
 
@@ -3478,18 +3474,17 @@ fn an_ltspice_comment_of_several_lines_stands_on_its_point_by_its_first_line() {
             .unwrap_or_else(|| panic!("no note {start:?}"))
     };
     let near = |a: f32, b: f32| (a - b).abs() <= 0.5;
-    let standoff = 3.0;
 
     let ([left, top, _, _], line) = note_box(note("first"));
     let (x, y) = label_point(&imported, "left");
     assert!(
-        near(left, x + standoff) && near(top + line * 0.5, y),
+        near(left, x) && near(top + line * 0.5, y),
         "the first line stands centred on the point: {left},{top} against {x},{y}"
     );
 
     let ([_, _, _, bottom], _) = note_box(note("upper"));
     let (_, y) = label_point(&imported, "base");
-    assert!(near(bottom, y - standoff), "{bottom} against {y}");
+    assert!(near(bottom, y), "{bottom} against {y}");
 }
 
 /// A directive block is lettered as the drawing lettered it: whole, at the
@@ -3514,7 +3509,7 @@ fn a_directive_block_is_lettered_where_and_as_the_drawing_lettered_it() {
     let ([left, top, _, _], line) = note_box(note);
     let (x, y) = label_point(&imported, "base");
     assert!(
-        near(left, x + 3.0) && near(top + line * 0.5, y),
+        near(left, x) && near(top + line * 0.5, y),
         "{left},{top} against {x},{y}"
     );
 }
