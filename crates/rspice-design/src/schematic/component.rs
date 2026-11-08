@@ -342,6 +342,23 @@ impl LibraryCellInstance {
         }
     }
 
+    /// The block an instance of this binding draws for `ports`, its bound
+    /// interface: a functional part's own pin geometry; for catalog artwork,
+    /// the block the artwork's terminals were drawn against; otherwise the
+    /// symbol the generation rules give the interface and its roles.
+    pub fn generated_block(
+        &self,
+        ports: &[super::port::PortSpec],
+    ) -> crate::symbol_generation::GeneratedSymbol {
+        super::functional_catalog::functional_block_symbol(self).unwrap_or_else(|| {
+            if self.builtin_symbol_asset().is_some() {
+                crate::symbol_generation::generate_artwork_block(ports)
+            } else {
+                crate::symbol_generation::generate_symbol_with_roles(ports, self.interface_roles())
+            }
+        })
+    }
+
     /// The bound pin roles, when they describe the bound interface.
     pub fn interface_roles(&self) -> &[super::port::PinRole] {
         if self.terminal_roles.len() == self.terminal_order.len() {
@@ -952,13 +969,7 @@ impl Component {
         };
 
         if let Some(ports) = cell.interface() {
-            let generated = super::functional_catalog::functional_block_symbol(cell)
-                .unwrap_or_else(|| {
-                    crate::symbol_generation::generate_symbol_with_roles(
-                        &ports,
-                        cell.interface_roles(),
-                    )
-                });
+            let generated = cell.generated_block(&ports);
             return InstanceBlock {
                 body: generated.body_bounds(),
                 outline: generated.body_outline(),
@@ -1113,14 +1124,7 @@ impl Component {
     pub fn symbol_dimensions(&self) -> (i32, i32) {
         if let Some(cell) = &self.library_cell {
             if let Some(ports) = cell.interface() {
-                return super::functional_catalog::functional_block_symbol(cell)
-                    .unwrap_or_else(|| {
-                        crate::symbol_generation::generate_symbol_with_roles(
-                            &ports,
-                            cell.interface_roles(),
-                        )
-                    })
-                    .dimensions();
+                return cell.generated_block(&ports).dimensions();
             }
             let pin_count = if cell.terminal_order.is_empty() {
                 2

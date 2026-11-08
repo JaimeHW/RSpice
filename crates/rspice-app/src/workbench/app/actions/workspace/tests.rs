@@ -497,9 +497,10 @@ fn generating_active_symbol_document_writes_symbol_view_metadata() {
         .expect("symbol view exists");
     let doc =
         crate::state::SymbolDocument::load_from_view(view).expect("stored symbol document parses");
+    // A port named IN reads as an input, so it takes the left edge.
     assert_eq!(
         doc.pin("IN").expect("IN pin exists").position,
-        Some(Point::new(30, 0))
+        Some(Point::new(-40, 0))
     );
     assert!(
         !view.metadata.contains_key("generated"),

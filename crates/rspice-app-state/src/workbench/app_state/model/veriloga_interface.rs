@@ -31,8 +31,9 @@ use rspice_design::library::metadata::{
 };
 use rspice_design::schematic::owned::Schematic;
 use rspice_design::symbol::generated::{
-    GENERATED_SYMBOL_VIEW, is_generated_symbol, store_generated_symbol,
+    GENERATED_SYMBOL_VIEW, is_generated_symbol, store_generated_interface_symbol,
 };
+use rspice_design::symbol_generation::InterfacePin;
 use rspice_design_model::bus::{BusDeclaration, BusNotation};
 use rspice_veriloga::ast::PortDirection as ModulePortDirection;
 use rspice_veriloga::canonical_ir::CanonicalValueType;
@@ -197,6 +198,21 @@ pub fn port_electrical_type(
     }
 }
 
+/// What the generated symbol knows about each compiled port: its role from
+/// its name and declared direction, and a thermal node from its discipline.
+pub fn interface_pins(ports: &[SourceViewPort]) -> Vec<InterfacePin> {
+    ports
+        .iter()
+        .map(|port| {
+            rspice_design::pin_roles::interface_pin(
+                &port.name,
+                port.direction,
+                port.discipline.eq_ignore_ascii_case("thermal"),
+            )
+        })
+        .collect()
+}
+
 /// Give the cell of the Verilog-A view at `reference` the interface its
 /// clean compile declares, under the rule in this module's header.
 pub fn apply_compiled_interface(
@@ -282,9 +298,12 @@ pub fn apply_compiled_interface(
             let mut symbol = existing
                 .cloned()
                 .unwrap_or_else(|| View::new(GENERATED_SYMBOL_VIEW, ViewType::Symbol));
-            if let Err(reason) =
-                store_generated_symbol(&mut symbol, &module, port_electrical_type(&ports))
-            {
+            if let Err(reason) = store_generated_interface_symbol(
+                &mut symbol,
+                &module,
+                &interface_pins(&ports),
+                port_electrical_type(&ports),
+            ) {
                 return refused(format!(
                     "the generated symbol could not be written: {reason}"
                 ));

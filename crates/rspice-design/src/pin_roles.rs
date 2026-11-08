@@ -7,7 +7,9 @@
 //! from the name when the name says one, and from the comment otherwise. A
 //! pin neither names is bidirectional, which places it as before.
 
-use rspice_design_model::port::PinRole;
+use rspice_design_model::port::{PinRole, PortDirection};
+
+use crate::symbol_generation::{InterfacePin, PinMark};
 
 /// Comment headings that introduce a vendor pin-order list.
 const PIN_ORDER_HEADINGS: &[&str] = &[
@@ -76,28 +78,108 @@ fn entry_text(entry: &str) -> &str {
     entry
 }
 
-/// The role a pin name or a description phrase states, if any.
-pub fn role_from_name(name: &str) -> Option<PinRole> {
-    let compact = name
-        .chars()
+/// Positive supply names; the ones marked as prefixes also name `vdd2` or
+/// `vdd_core`.
+const POSITIVE_SUPPLIES: &[&str] = &[
+    "V+", "VCC", "VDD", "VS+", "+VS", "VPOS", "+V", "VPLUS", "AVDD", "VDDA", "DVDD", "VDDD",
+    "VDDIO", "VPWR", "VBAT",
+];
+const POSITIVE_SUPPLY_PREFIXES: &[&str] = &["VDD", "VCC", "AVDD", "DVDD"];
+const NEGATIVE_SUPPLIES: &[&str] = &[
+    "V-", "VEE", "VSS", "VS-", "-VS", "VNEG", "-V", "VMINUS", "AVSS", "VSSA", "DVSS", "VSSD",
+];
+const NEGATIVE_SUPPLY_PREFIXES: &[&str] = &["VSS", "VEE", "AVSS", "DVSS"];
+/// `COM` is exact: `COMP` is a comparator's output.
+const GROUNDS: &[&str] = &[
+    "GND", "AGND", "DGND", "PGND", "GROUND", "COM", "0", "VGND", "GNDA", "GNDD",
+];
+const GROUND_PREFIXES: &[&str] = &["GND"];
+const CLOCKS: &[&str] = &[
+    "CLK", "CLOCK", "CK", "CLKIN", "PHI", "PHI1", "PHI2", "CLKB", "CLKN",
+];
+
+/// A name as the tables spell it: upper case, without spaces or `_`.
+fn compact_name(name: &str) -> String {
+    name.chars()
         .filter(|c| !c.is_whitespace() && *c != '_')
         .collect::<String>()
-        .to_ascii_uppercase();
+        .to_ascii_uppercase()
+}
+
+/// Whether `compact` is one of `names`, or one of `prefixes` followed by
+/// more of a name.
+fn named(compact: &str, names: &[&str], prefixes: &[&str]) -> bool {
+    names.contains(&compact)
+        || prefixes.iter().any(|prefix| {
+            compact.strip_prefix(prefix).is_some_and(|rest| {
+                rest.chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_alphanumeric())
+            })
+        })
+}
+
+/// The role and mark a generated symbol gives one port, by the first rule
+/// that matches: a thermal discipline; a supply or ground name, whatever the
+/// declared direction (a Verilog-A rail can only be `inout`); a declared
+/// input, inverting or not as its name says; a declared output; a
+/// bidirectional port whose name states a signal role; anything else is
+/// bidirectional. A clock name marks an input.
+pub fn interface_pin(name: &str, direction: PortDirection, thermal: bool) -> InterfacePin {
+    if thermal {
+        return InterfacePin {
+            role: PinRole::Bidirectional,
+            mark: PinMark::Thermal,
+        };
+    }
+    let named_role = role_from_name(name);
+    let role = match (named_role, direction) {
+        (Some(role @ (PinRole::PositiveSupply | PinRole::NegativeSupply | PinRole::Ground)), _) => {
+            role
+        }
+        (
+            Some(role @ (PinRole::NonInvertingInput | PinRole::InvertingInput)),
+            PortDirection::In,
+        ) => role,
+        (_, PortDirection::In) => PinRole::Input,
+        (_, PortDirection::Out) => PinRole::Output,
+        (_, PortDirection::Supply) => PinRole::PositiveSupply,
+        (Some(role), PortDirection::InOut) => role,
+        (None, PortDirection::InOut) => PinRole::Bidirectional,
+    };
+    let clock = matches!(role, PinRole::Input) && CLOCKS.contains(&compact_name(name).as_str());
+    InterfacePin {
+        role,
+        mark: if clock {
+            PinMark::Clock
+        } else {
+            PinMark::Plain
+        },
+    }
+}
+
+/// The role a pin name or a description phrase states, if any.
+pub fn role_from_name(name: &str) -> Option<PinRole> {
+    let compact = compact_name(name);
+    if named(&compact, POSITIVE_SUPPLIES, POSITIVE_SUPPLY_PREFIXES) {
+        return Some(PinRole::PositiveSupply);
+    }
+    if named(&compact, NEGATIVE_SUPPLIES, NEGATIVE_SUPPLY_PREFIXES) {
+        return Some(PinRole::NegativeSupply);
+    }
+    if named(&compact, GROUNDS, GROUND_PREFIXES) {
+        return Some(PinRole::Ground);
+    }
+    if CLOCKS.contains(&compact.as_str()) {
+        return Some(PinRole::Input);
+    }
     let role = match compact.as_str() {
         "IN+" | "+IN" | "INP" | "VIN+" | "+VIN" | "VINP" | "NONINV" | "NINV" | "NI" | "PLUS"
         | "+" | "INPLUS" => PinRole::NonInvertingInput,
         "IN-" | "-IN" | "INN" | "INM" | "VIN-" | "-VIN" | "VINN" | "VINM" | "INV" | "MINUS"
         | "-" | "INMINUS" => PinRole::InvertingInput,
-        "OUT" | "VOUT" | "VO" | "OUTPUT" | "O" | "OUT+" | "OUT-" | "OUTP" | "OUTN" => {
-            PinRole::Output
-        }
-        "V+" | "VCC" | "VDD" | "VS+" | "+VS" | "VPOS" | "+V" | "VPLUS" | "AVDD" | "VDDA" => {
-            PinRole::PositiveSupply
-        }
-        "V-" | "VEE" | "VSS" | "VS-" | "-VS" | "VNEG" | "-V" | "VMINUS" | "AVSS" | "VSSA" => {
-            PinRole::NegativeSupply
-        }
-        "GND" | "AGND" | "DGND" | "PGND" | "GROUND" | "COM" | "0" => PinRole::Ground,
+        "OUT" | "VOUT" | "VO" | "OUTPUT" | "O" | "OUT+" | "OUT-" | "OUTP" | "OUTN" | "Q" | "QB"
+        | "QN" | "Y" | "Z" => PinRole::Output,
         "EN" | "ENABLE" | "SHDN" | "SD" | "SHUTDOWN" | "IN" | "VIN" | "REF" | "VREF" => {
             PinRole::Input
         }

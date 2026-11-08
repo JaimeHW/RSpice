@@ -41,7 +41,7 @@ pub use rspice_design_model::symbol_geometry::{
 };
 
 use crate::library::View;
-use crate::symbol_generation::{GeneratedSymbol, generate_symbol_with_roles};
+use crate::symbol_generation::{GeneratedSymbol, PinLabel, generate_symbol_with_roles};
 use rspice_design_model::{
     Point,
     bus::{BusDeclaration, declared_vector, declared_width},
@@ -817,46 +817,51 @@ impl SymbolDocument {
         Self::from_generated(generate_symbol_with_roles(ports, roles))
     }
 
-    /// The document of a generated block, pins on the edges it assigns.
+    /// The document of a generated symbol, pins on the edges it assigns and
+    /// lettered as it says.
     pub fn from_generated(generated: GeneratedSymbol) -> Self {
         let body = generated
             .body_outline()
             .into_iter()
             .map(|(points, closed)| SymbolShape::Polyline { points, closed })
             .collect();
-        let body_half_width = generated.body_half_width();
-        let body_half_height = generated.body_half_height();
+        let name_anchor = generated.name_anchor();
+        let value_anchor = generated.value_anchor();
         // The generator already knows which edge every pin belongs to; record
         // it, so nothing downstream has to re-derive the edge from a terminal
         // coordinate that cannot express it.
         let pins = generated
             .pins
             .into_iter()
-            .map(|pin| {
+            .zip(generated.labels)
+            .map(|(pin, label)| {
                 let offset = pin.offset;
                 let side = pin.side;
-                SymbolPin::new(pin.name, pin.direction, Some(offset)).with_contract(
+                let pin = SymbolPin::new(pin.name, pin.direction, Some(offset)).with_contract(
                     default_electrical_type(pin.direction),
                     side,
                     match side {
                         SymbolPinSide::Left | SymbolPinSide::Right => offset.y,
                         SymbolPinSide::Top | SymbolPinSide::Bottom => offset.x,
                     },
-                )
+                );
+                match label {
+                    PinLabel::Inside => pin,
+                    PinLabel::InsideFrom(reach) => pin.with_name_offset(Some(reach)),
+                    PinLabel::Hidden => pin.with_name_hidden(true),
+                    PinLabel::Beside { offset, reach } => SymbolPin {
+                        name_at: Some(PinNamePlacement { offset, reach }),
+                        ..pin
+                    },
+                }
             })
             .collect();
         Self {
             pins,
             body,
             origin: Point::origin(),
-            name_anchor: Point::new(
-                -body_half_width,
-                -body_half_height - SYMBOL_TERMINAL_GRID * 2,
-            ),
-            value_anchor: Point::new(
-                -body_half_width,
-                body_half_height + SYMBOL_TERMINAL_GRID * 2,
-            ),
+            name_anchor,
+            value_anchor,
             waivers: crate::drc::DrcWaivers::default(),
         }
     }

@@ -15,6 +15,7 @@ use rspice_design_model::symbol_pin::SymbolElectricalType;
 
 use super::SymbolDocument;
 use crate::library::View;
+use crate::symbol_generation::{InterfacePin, generate_interface_symbol};
 
 /// The one symbol view a cell keeps generated.
 ///
@@ -128,7 +129,18 @@ pub fn generated_symbol_document(
     ports: &[PortSpec],
     electrical: impl Fn(&PortSpec) -> Option<SymbolElectricalType>,
 ) -> SymbolDocument {
-    let mut document = SymbolDocument::generated_from_ports(ports);
+    generated_interface_document(ports, &[], electrical)
+}
+
+/// The symbol generated for `ports` described by `pins` (read from the
+/// ports' names when they do not cover the interface), each pin typed by
+/// `electrical` where it names a type.
+pub fn generated_interface_document(
+    ports: &[PortSpec],
+    pins: &[InterfacePin],
+    electrical: impl Fn(&PortSpec) -> Option<SymbolElectricalType>,
+) -> SymbolDocument {
+    let mut document = SymbolDocument::from_generated(generate_interface_symbol(ports, pins));
     for port in ports {
         if let Some(electrical) = electrical(port)
             && let Some(pin) = document.pin_mut(&port.name)
@@ -146,7 +158,18 @@ pub fn store_generated_symbol(
     ports: &[PortSpec],
     electrical: impl Fn(&PortSpec) -> Option<SymbolElectricalType>,
 ) -> Result<(), String> {
-    generated_symbol_document(ports, electrical).store_in_view(view)?;
+    store_generated_interface_symbol(view, ports, &[], electrical)
+}
+
+/// [`store_generated_symbol`] for an interface whose pins are described,
+/// parallel to `ports`.
+pub fn store_generated_interface_symbol(
+    view: &mut View,
+    ports: &[PortSpec],
+    pins: &[InterfacePin],
+    electrical: impl Fn(&PortSpec) -> Option<SymbolElectricalType>,
+) -> Result<(), String> {
+    generated_interface_document(ports, pins, electrical).store_in_view(view)?;
     view.metadata
         .insert(GENERATED_MARKER_KEY.to_owned(), "ports".to_owned());
     view.metadata

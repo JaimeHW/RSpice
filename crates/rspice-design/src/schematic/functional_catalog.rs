@@ -16,7 +16,7 @@ use super::{
     component_category::ComponentCategory,
     port::{PortDirection, PortSpec},
 };
-use crate::symbol_generation::{GENERATED_WIDTH, GeneratedBody, GeneratedPin, GeneratedSymbol};
+use crate::symbol_generation::{GENERATED_WIDTH, GeneratedPin, GeneratedSymbol};
 
 mod discrete;
 
@@ -1149,20 +1149,20 @@ pub fn functional_block_symbol(binding: &LibraryCellInstance) -> Option<Generate
             .iter()
             .zip(&pins)
             .all(|(placed, pin)| placed == pin.name);
-    same_pins.then(|| GeneratedSymbol {
-        pins: pins
-            .iter()
-            .zip(geometry)
-            .map(|(pin, (side, x, y))| GeneratedPin {
-                name: pin.name.to_owned(),
-                direction: pin.direction,
-                side,
-                offset: Point::new(x, y),
-            })
-            .collect(),
-        width: GENERATED_WIDTH,
-        height,
-        body: GeneratedBody::Block,
+    same_pins.then(|| {
+        GeneratedSymbol::fixed_block(
+            pins.iter()
+                .zip(geometry)
+                .map(|(pin, (side, x, y))| GeneratedPin {
+                    name: pin.name.to_owned(),
+                    direction: pin.direction,
+                    side,
+                    offset: Point::new(x, y),
+                })
+                .collect(),
+            GENERATED_WIDTH,
+            height,
+        )
     })
 }
 

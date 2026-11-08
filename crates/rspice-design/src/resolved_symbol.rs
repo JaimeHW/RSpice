@@ -382,9 +382,9 @@ mod tests {
         assert_eq!(
             anchors,
             [
-                ("IN", Point::new(-27, 0)),
-                ("OUT", Point::new(27, 0)),
-                ("BIAS", Point::new(0, 27)),
+                ("IN", Point::new(-26, 0)),
+                ("OUT", Point::new(26, 0)),
+                ("BIAS", Point::new(0, 26)),
             ]
         );
     }
@@ -435,9 +435,9 @@ mod tests {
         assert_eq!(
             anchors,
             [
-                ("CLK", Point::new(-20, 0), Point::new(-27, 0)),
-                ("D", Point::new(-27, 20), Point::new(-27, 20)),
-                ("Q", Point::new(27, 0), Point::new(27, 0)),
+                ("CLK", Point::new(-20, 0), Point::new(-26, 0)),
+                ("D", Point::new(-26, 20), Point::new(-26, 20)),
+                ("Q", Point::new(26, 0), Point::new(26, 0)),
             ]
         );
     }
