@@ -976,6 +976,53 @@ fn same_named_models_of_different_families_serve_their_own_devices() {
     }
 }
 
+// QSPICE 2026 and LTspice 26.1.1 batches agree: inv() is 1 below 0.5 and 0
+// from 0.5 up.
+#[test]
+fn inv_is_the_logical_inverse_from_one_half() {
+    let netlist = parse(
+        "inv\n\
+         V1 a 0 0.4\n\
+         V2 b 0 0.6\n\
+         V3 c 0 0.5\n\
+         V4 d 0 -3\n\
+         B1 o1 0 V=inv(V(a))\n\
+         B2 o2 0 V=inv(V(b))\n\
+         B3 o3 0 V=inv(V(c))\n\
+         B4 o4 0 V=inv(V(d))\n\
+         B5 o5 0 V=inv(V(a))*inv(V(d))+2*INV(V(b))\n\
+         .op\n\
+         .end\n",
+    );
+    let op = Engine::default()
+        .run_dc_op(&netlist)
+        .expect("operating point solves");
+    for (node, expected) in [
+        ("o1", 1.0),
+        ("o2", 0.0),
+        ("o3", 0.0),
+        ("o4", 1.0),
+        ("o5", 1.0),
+    ] {
+        let actual = op
+            .try_voltage_named(node)
+            .unwrap_or_else(|| panic!("no voltage for {node}"));
+        assert_close(&format!("V({node})"), actual, expected, 1e-12);
+    }
+    let error = Netlist::parse("inv arity\nB1 o 0 V=inv(1,2)\nR1 o 0 1\n.op\n.end\n")
+        .map(|netlist| Engine::default().run_dc_op(&netlist).map(|_| ()))
+        .map_or_else(
+            |error| error.to_string(),
+            |run| run.err().map(|e| e.to_string()).unwrap_or_default(),
+        );
+    assert!(
+        error
+            .to_ascii_lowercase()
+            .contains("inv expects 1 argument"),
+        "{error}"
+    );
+}
+
 // QSPICE 2026 batch, which alone reads a switch model written on the switch
 // card (LTspice refuses it): V(a)=V(b)=V(g)=0.759746927, V(e)=9.900990e-3,
 // V(f)=1.960784e-2, V(h)=0.999000999.

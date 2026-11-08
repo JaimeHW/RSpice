@@ -831,6 +831,9 @@ impl<'a> Parser<'a> {
             if upper == "UPLIM" || upper == "DNLIM" {
                 return self.soft_limit(name, upper == "UPLIM", args);
             }
+            if upper == "INV" {
+                return self.logical_inverse(name, args);
+            }
 
             self.errors
                 .push(format!("Unknown function '{}' in expression", name));
@@ -879,6 +882,27 @@ impl<'a> Parser<'a> {
                 },
                 x,
                 limited,
+            ],
+        }
+    }
+
+    /// `inv(x)` is 0 where `x` is at least 0.5 and 1 elsewhere, as LTspice
+    /// and QSPICE read it, whatever LTspice's help says of `x = 0.5`.
+    fn logical_inverse(&mut self, name: &str, args: Vec<Expr>) -> Expr {
+        let Ok([x]) = <[Expr; 1]>::try_from(args) else {
+            self.errors.push(format!("{name} expects 1 argument"));
+            return Expr::Const(0.0);
+        };
+        Expr::Function {
+            func: Function::If,
+            args: vec![
+                Expr::Binary {
+                    op: BinaryOp::Ge,
+                    left: Box::new(x),
+                    right: Box::new(Expr::Const(0.5)),
+                },
+                Expr::Const(0.0),
+                Expr::Const(1.0),
             ],
         }
     }
