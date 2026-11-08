@@ -13,13 +13,14 @@ use super::*;
 /// the current of, and returns each `(device, meter)` name pair.
 pub(super) fn materialize(
     elements: &mut Vec<Element>,
-    known_device_names: &mut HashSet<String>,
+    known_device_names: &mut terminal_probes::KnownDeviceNames,
     max_elements: usize,
 ) -> Result<Vec<(String, String)>, SimulationError> {
     let operands = resistor_currents::current_reads(elements);
     if operands.is_empty() {
         return Ok(Vec::new());
     }
+    let known_device_names = known_device_names.of(elements);
     let mut nodes = elements
         .iter()
         .flat_map(|element| element.nodes.iter())
