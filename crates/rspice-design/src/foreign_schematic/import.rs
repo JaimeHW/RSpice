@@ -1497,7 +1497,8 @@ impl Builder<'_> {
             .flatten()
             .map(|pin| self.scale(pin.position))
             .collect::<Vec<_>>();
-        let mut spare = unconnected_pin_points(&drawn);
+        let lettering = self.symbol_lettering(symbol, definition);
+        let mut spare = clearance::unconnected_pin_points(&drawn, &lettering);
         let mut unconnected = Vec::new();
         let mut gaps = Vec::new();
         let mut pins = Vec::new();
@@ -2430,25 +2431,6 @@ fn spice_order_slots(definition: &ForeignSymbolDefinition) -> Vec<Option<&Foreig
         next = next.max(pin.spice_order + 1);
     }
     slots
-}
-
-/// Places for pins that must touch nothing, near the middle of the drawn
-/// pins: each an odd number of grid steps on both axes, where no wire of a
-/// drawing on LTspice's grid (two RSpice steps) can run, and off every
-/// drawn pin.
-fn unconnected_pin_points(drawn: &[Point]) -> impl Iterator<Item = Point> + '_ {
-    let middle = |values: Vec<i32>| {
-        let (low, high) = (
-            values.iter().copied().min().unwrap_or_default(),
-            values.iter().copied().max().unwrap_or_default(),
-        );
-        ((low + high) / 2).div_euclid(2 * GRID) * 2 * GRID + GRID
-    };
-    let x = middle(drawn.iter().map(|point| point.x).collect());
-    let y = middle(drawn.iter().map(|point| point.y).collect());
-    (0..)
-        .map(move |step| Point::new(x + 2 * GRID * step, y))
-        .filter(|point| !drawn.contains(point))
 }
 
 /// Ports in instance-line order, each with a name of its own; a place no

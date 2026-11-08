@@ -1790,6 +1790,60 @@ SYMATTR InstName U2
     assert_eq!(notices, 1, "one notice per symbol: {:?}", imported.notices);
 }
 
+/// RSpice marks the terminal it leaves for an instance-line place the
+/// symbol draws no pin for, and LTspice draws nothing there. The mark keeps
+/// off the name and value the symbol letters across its middle: it stands
+/// at the nearest place clear of them, still touching nothing.
+#[test]
+fn an_unconnected_terminal_keeps_its_mark_off_the_symbols_lettering() {
+    use crate::schematic::label_layout::{
+        INSTANCE_VALUE_WORLD, LayoutPoint, instance_label_layout, text_box,
+    };
+
+    let drawing = parse_asc(
+        "Version 4
+SHEET 1 800 600
+         WIRE 32 64 -64 64
+WIRE 192 64 96 64
+WIRE 64 192 64 96
+         FLAG -64 64 in
+FLAG 192 64 out
+FLAG 64 192 0
+         SYMBOL gapped 64 64 R0
+WINDOW 3 0 24 Top 2
+SYMATTR InstName U1
+SYMATTR Value LDO_33
+",
+    )
+    .unwrap();
+    let library = library();
+    let imported = import_foreign_schematic(&drawing, "work", &library);
+    assert_same_connectivity(&drawing, &imported, &library);
+    let cell = &imported.cells[0];
+    let mark = cell
+        .symbol
+        .pins
+        .iter()
+        .find(|pin| pin.name == "NC3")
+        .and_then(|pin| pin.position)
+        .expect("place 3 has a terminal");
+    // The middle of the drawn pins, (10, 30), lies under the value.
+    assert_eq!((mark.x, mark.y), (30, 30));
+    let part = &imported.document.components[0];
+    let layout = instance_label_layout(
+        LayoutPoint::new(part.pos.x as f32, part.pos.y as f32),
+        1.0,
+        part,
+    );
+    let value = text_box(layout.value, &part.value, INSTANCE_VALUE_WORLD);
+    let at = part.pos + part.transform_point(mark - cell.symbol.origin);
+    let (x, y) = (at.x as f32, at.y as f32);
+    assert!(
+        x >= value.max.x || x <= value.min.x || y >= value.max.y || y <= value.min.y,
+        "the mark at ({x}, {y}) stands on the value at {value:?}"
+    );
+}
+
 /// LTspice's varistor and D flip-flop: places without a pin, drawn pins a
 /// circuit may leave open, and the common every A-device draws.
 const LTSPICE_VARISTOR_ASY: &str = "Version 4

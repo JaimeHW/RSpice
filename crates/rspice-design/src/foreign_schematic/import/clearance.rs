@@ -2,7 +2,8 @@
 
 use rspice_design_model::Point;
 
-use super::Builder;
+use super::{Builder, GRID};
+use crate::foreign_schematic::{ForeignSymbol, ForeignSymbolDefinition};
 use crate::schematic::component::Component;
 use crate::schematic::component_display::SchematicParameterLabelVisibility;
 use crate::schematic::component_type::ComponentType;
@@ -26,6 +27,54 @@ const LABEL_CLEARANCE: f32 = 4.0;
 const STROKE_HALF_WIDTH: f32 = SYMBOL_WIDTH_WORLD / 2.0;
 
 impl Builder<'_> {
+    /// The boxes a cell's name and value take where `symbol`'s windows, else
+    /// its definition's, letter them, in the symbol's own frame: what an
+    /// unconnected terminal's mark keeps off.
+    pub(super) fn symbol_lettering(
+        &self,
+        symbol: &ForeignSymbol,
+        definition: &ForeignSymbolDefinition,
+    ) -> Vec<LayoutRect> {
+        let window = |attribute: u32| {
+            symbol
+                .windows
+                .iter()
+                .chain(&definition.windows)
+                .find(|window| window.attribute == attribute)
+                .filter(|window| !window.hidden)
+        };
+        let value = symbol
+            .attribute("Value")
+            .or_else(|| definition.attribute("Value"));
+        let edge = |step: i32| match step.signum() {
+            1 => TextEdge::Start,
+            -1 => TextEdge::End,
+            _ => TextEdge::Center,
+        };
+        [
+            (window(0), symbol.attribute("InstName"), INSTANCE_NAME_WORLD),
+            (window(3), value, INSTANCE_VALUE_WORLD),
+        ]
+        .into_iter()
+        .filter_map(|(window, text, size)| {
+            let (window, text) = (window?, text?);
+            let anchor = self.scale_fine(window.offset);
+            let (horizontal, vertical) = if window.vertical {
+                (edge(-window.reach.y), edge(window.reach.x))
+            } else {
+                (edge(window.reach.x), edge(window.reach.y))
+            };
+            let placed = PlacedText {
+                anchor: LayoutPoint::new(anchor.x as f32, anchor.y as f32),
+                horizontal,
+                vertical,
+                upward: window.vertical,
+            };
+            Some(text_box(placed, text, size))
+        })
+        .collect()
+    }
+
     /// A part RSpice draws with its own artwork has a body of another size
     /// than the source symbol's, so a name or value the drawing stood
     /// beside the source body can land on RSpice's body or on a
@@ -502,6 +551,38 @@ fn stroke_meets(start: LayoutPoint, end: LayoutPoint, text: LayoutRect) -> bool 
         }
     }
     true
+}
+
+/// Places for pins that must touch nothing, near the middle of the drawn
+/// pins: each an odd number of grid steps on both axes, where no wire of a
+/// drawing on LTspice's grid (two RSpice steps) can run, off every drawn
+/// pin, and [`LABEL_CLEARANCE`] clear of the symbol's own `lettering`, where
+/// the terminal's mark would stand on the text.
+pub(super) fn unconnected_pin_points<'a>(
+    drawn: &'a [Point],
+    lettering: &'a [LayoutRect],
+) -> impl Iterator<Item = Point> + 'a {
+    let middle = |values: Vec<i32>| {
+        let (low, high) = (
+            values.iter().copied().min().unwrap_or_default(),
+            values.iter().copied().max().unwrap_or_default(),
+        );
+        ((low + high) / 2).div_euclid(2 * GRID) * 2 * GRID + GRID
+    };
+    let x = middle(drawn.iter().map(|point| point.x).collect());
+    let y = middle(drawn.iter().map(|point| point.y).collect());
+    let lettered = |point: &Point| {
+        let (x, y) = (point.x as f32, point.y as f32);
+        lettering.iter().any(|text| {
+            x > text.min.x - LABEL_CLEARANCE
+                && x < text.max.x + LABEL_CLEARANCE
+                && y > text.min.y - LABEL_CLEARANCE
+                && y < text.max.y + LABEL_CLEARANCE
+        })
+    };
+    (0..)
+        .map(move |step| Point::new(x + 2 * GRID * step, y))
+        .filter(move |point| !drawn.contains(point) && !lettered(point))
 }
 
 /// A placed text moved along an axis its box reaches out on to the
