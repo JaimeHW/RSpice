@@ -37,7 +37,8 @@ use sha2::{Digest as ShaDigest, Sha256};
 use rspice_vocabulary::product::ContentDigest;
 
 pub use rspice_design_model::symbol_geometry::{
-    SymbolShape, SymbolTextAlign, SymbolTextPlacement, SymbolTextSize, symbol_text_bounds,
+    SymbolCurve, SymbolShape, SymbolTextAlign, SymbolTextPlacement, SymbolTextSize,
+    symbol_text_bounds,
 };
 
 use crate::library::View;
@@ -1067,6 +1068,7 @@ impl SymbolDocument {
                         )?;
                     }
                 }
+                SymbolShape::Curve(curve) => validate_symbol_curve(curve, ordinal)?,
                 SymbolShape::Circle { center, radius } | SymbolShape::Dot { center, radius } => {
                     validate_symbol_point(*center, &format!("round shape {ordinal} center"))?;
                     validate_symbol_radius(*center, *radius, ordinal)?;
@@ -1370,6 +1372,11 @@ impl SymbolDocument {
                         center.y.saturating_add(*radius),
                     ]);
                 }
+                SymbolShape::Curve(curve) => {
+                    let (least, greatest) = curve.whole_unit_bounds();
+                    xs.extend([least.x, greatest.x]);
+                    ys.extend([least.y, greatest.y]);
+                }
                 SymbolShape::Arrow { tip, .. } => {
                     xs.extend([
                         tip.x.saturating_sub(SYMBOL_TERMINAL_GRID),
@@ -1455,6 +1462,39 @@ fn validate_symbol_point(point: Point, label: &str) -> Result<(), String> {
         return Err(format!(
             "Invalid symbol metadata: {label} ({}, {}) exceeds the supported coordinate range",
             point.x, point.y
+        ));
+    }
+    Ok(())
+}
+
+fn validate_symbol_curve(curve: &SymbolCurve, ordinal: usize) -> Result<(), String> {
+    let numbers = [
+        curve.center[0],
+        curve.center[1],
+        curve.radii[0],
+        curve.radii[1],
+        curve.start_degrees,
+        curve.sweep_degrees,
+    ];
+    if !numbers.iter().all(|number| number.is_finite())
+        || curve.radii[0] <= 0.0
+        || curve.radii[1] <= 0.0
+        || curve.sweep_degrees <= 0.0
+        || curve.sweep_degrees > 360.0
+    {
+        return Err(format!(
+            "Invalid symbol metadata: curve {ordinal} needs finite positive radii and a sweep between 0 and 360 degrees"
+        ));
+    }
+    let limit = f64::from(MAX_SYMBOL_COORDINATE_ABS);
+    let (least, greatest) = curve.bounds();
+    if least
+        .into_iter()
+        .chain(greatest)
+        .any(|coordinate| coordinate.abs() > limit)
+    {
+        return Err(format!(
+            "Invalid symbol metadata: curve {ordinal} bounds exceed the coordinate representation"
         ));
     }
     Ok(())

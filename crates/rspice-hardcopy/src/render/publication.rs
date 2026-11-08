@@ -1950,6 +1950,35 @@ pub(super) fn validate_primitive(
             }
             validate_fill(*fill)
         }
+        ScenePrimitive::Ellipse {
+            center,
+            radius_x,
+            radius_y,
+            start_millidegrees,
+            sweep_millidegrees,
+            stroke,
+        } => {
+            let (least, greatest) = scene_ellipse(
+                (center.x.micrometres() as f64, center.y.micrometres() as f64),
+                (radius_x.micrometres() as f64, radius_y.micrometres() as f64),
+                *start_millidegrees,
+                *sweep_millidegrees,
+            )
+            .bounds();
+            // A micrometre of grace for the arithmetic of the bounds.
+            if *radius_x == Length::ZERO
+                || *radius_y == Length::ZERO
+                || *sweep_millidegrees <= 0
+                || *sweep_millidegrees > 360_000
+                || least[0] < -1.0
+                || least[1] < -1.0
+                || greatest[0] > extent.width().micrometres() as f64 + 1.0
+                || greatest[1] > extent.height().micrometres() as f64 + 1.0
+            {
+                return Err(HardcopyRenderError::PrimitiveOutsideExtent);
+            }
+            validate_stroke(*stroke)
+        }
         ScenePrimitive::RasterImage {
             rect,
             png,
@@ -2062,12 +2091,27 @@ pub(super) fn validate_fill(fill: Option<SceneFill>) -> Result<(), HardcopyRende
     Ok(())
 }
 
+/// A scene's ellipse as a curve, in whatever length unit its numbers are.
+pub fn scene_ellipse(
+    center: (f64, f64),
+    radii: (f64, f64),
+    start_millidegrees: i32,
+    sweep_millidegrees: i32,
+) -> SymbolCurve {
+    SymbolCurve {
+        center: [center.0, center.1],
+        radii: [radii.0, radii.1],
+        start_degrees: f64::from(start_millidegrees) / 1000.0,
+        sweep_degrees: f64::from(sweep_millidegrees) / 1000.0,
+    }
+}
+
 pub(super) fn primitive_vertex_count(primitive: &ScenePrimitive) -> usize {
     match primitive {
         ScenePrimitive::Line { .. } => 2,
         ScenePrimitive::Polyline { points, .. } => points.len(),
         ScenePrimitive::Rect { .. } => 4,
-        ScenePrimitive::Circle { .. } => 4,
+        ScenePrimitive::Circle { .. } | ScenePrimitive::Ellipse { .. } => 4,
         ScenePrimitive::RasterImage { .. } => 4,
         ScenePrimitive::Text { .. } => 1,
         ScenePrimitive::ClippedGroup { primitives, .. } => {
@@ -2099,6 +2143,7 @@ pub(super) fn primitive_hatch_line_count(primitive: &ScenePrimitive) -> u64 {
         ScenePrimitive::Rect { rect, .. } => rect.width.micrometres() + rect.height.micrometres(),
         ScenePrimitive::Circle { radius, .. } => radius.micrometres().saturating_mul(4),
         ScenePrimitive::Line { .. }
+        | ScenePrimitive::Ellipse { .. }
         | ScenePrimitive::RasterImage { .. }
         | ScenePrimitive::Text { .. } => 0,
         ScenePrimitive::ClippedGroup { .. } => unreachable!("handled before fill resolution"),

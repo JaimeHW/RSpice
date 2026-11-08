@@ -735,6 +735,38 @@ fn unix_timestamp_conversion_stops_at_the_last_second_of_9999() {
 }
 
 #[test]
+fn a_curve_is_a_true_arc_on_every_page_format() {
+    let content = extent(100_000, 60_000);
+    let metadata = HardcopySceneMetadata::try_new("curve test", "RSpice").unwrap();
+    let ellipse = |start: i32, sweep: i32| ScenePrimitive::Ellipse {
+        center: ScenePoint::new(
+            Length::from_micrometres(30_000),
+            Length::from_micrometres(20_000),
+        ),
+        radius_x: Length::from_micrometres(5_000),
+        radius_y: Length::from_micrometres(2_500),
+        start_millidegrees: start,
+        sweep_millidegrees: sweep,
+        stroke: StrokeStyle::default(),
+    };
+    let scene = HardcopyScene::try_new(
+        content,
+        metadata,
+        vec![ellipse(30_000, 200_000), ellipse(0, 360_000)],
+        Vec::new(),
+    )
+    .unwrap();
+    let svg_plan = plan(OutputFormat::SvgVector, content, false);
+    let publication = HardcopyRenderer::render(&svg_plan, &scene).unwrap();
+    let svg = std::str::from_utf8(publication.single_part().unwrap().bytes()).unwrap();
+    assert!(svg.contains(" 0 1 1 "), "a large clockwise arc: {svg}");
+    assert!(svg.contains("<ellipse "));
+    let pdf_plan = plan(OutputFormat::PdfVector, content, false);
+    let pdf = HardcopyRenderer::render(&pdf_plan, &scene).unwrap();
+    ParsedPdf::load_mem(pdf.single_part().unwrap().bytes()).unwrap();
+}
+
+#[test]
 fn svg_is_deterministic_searchable_embedded_and_xml_escaped() {
     let content = extent(100_000, 60_000);
     let plan = plan(OutputFormat::SvgVector, content, false);

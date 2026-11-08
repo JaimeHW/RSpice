@@ -26,7 +26,8 @@ use rspice_design::{
         value_label::{cell_instance_value as instance_value, value_pieces},
     },
     symbol::{
-        SymbolDocument, SymbolShape, SymbolTextAlign, SymbolTextPlacement, symbol_text_bounds,
+        SymbolCurve, SymbolDocument, SymbolShape, SymbolTextAlign, SymbolTextPlacement,
+        symbol_text_bounds,
     },
     symbol_generation::{fit_pin_name, inward_step},
 };
@@ -180,12 +181,11 @@ fn draw_symbol_body(
                 start_degrees,
                 sweep_degrees,
             } => {
-                let points: Vec<Pos2> =
-                    arc_points(*center, *radius, *start_degrees, *sweep_degrees)
-                        .into_iter()
-                        .map(|point| to_screen_symbol(origin, scale, component, symbol, point))
-                        .collect();
-                painter.add(Shape::line(points, stroke));
+                let arc = SymbolCurve::of_arc(*center, *radius, *start_degrees, *sweep_degrees);
+                paint_curve(painter, origin, scale, component, symbol, &arc, stroke);
+            }
+            SymbolShape::Curve(curve) => {
+                paint_curve(painter, origin, scale, component, symbol, curve, stroke);
             }
             SymbolShape::Arrow {
                 tip,
@@ -498,21 +498,10 @@ fn write_symbol_body_svg(
                 start_degrees,
                 sweep_degrees,
             } => {
-                let points = arc_points(*center, *radius, *start_degrees, *sweep_degrees);
-                if points.is_empty() {
-                    continue;
-                }
-                svg.push_str(r#"<path class="symbol" d=""#);
-                for (index, point) in points.into_iter().enumerate() {
-                    let (x, y) = to_svg_symbol(component, symbol, point, config);
-                    if index == 0 {
-                        write!(svg, "M {x} {y}").unwrap();
-                    } else {
-                        write!(svg, " L {x} {y}").unwrap();
-                    }
-                }
-                svg.push_str("\"/>\n");
+                let arc = SymbolCurve::of_arc(*center, *radius, *start_degrees, *sweep_degrees);
+                write_curve_svg(svg, component, symbol, &arc, config);
             }
+            SymbolShape::Curve(curve) => write_curve_svg(svg, component, symbol, curve, config),
             SymbolShape::Arrow {
                 tip,
                 rotation_quarters,
@@ -974,19 +963,83 @@ fn draw_direction_mark(
 const MARK_LENGTH: f32 = 5.0;
 const MARK_HALF_WIDTH: f32 = 2.0;
 
-fn arc_points(center: Point, radius: i32, start_degrees: i32, sweep_degrees: i32) -> Vec<Point> {
-    let steps = 24.max(sweep_degrees.abs() / 8) as usize;
-    (0..=steps)
-        .map(|step| {
-            let t = step as f32 / steps as f32;
-            let degrees = start_degrees as f32 + sweep_degrees as f32 * t;
-            let radians = degrees.to_radians();
-            Point::new(
-                center.x + (radius as f32 * radians.cos()).round() as i32,
-                center.y + (radius as f32 * radians.sin()).round() as i32,
-            )
-        })
-        .collect()
+/// `curve` as it stands on the sheet relative to `component`: the instance's
+/// own transform applied to unrounded points, so a curve never meets the
+/// rounding every whole-unit point does.
+fn placed_curve(
+    component: &Component,
+    symbol: &ResolvedCellSymbol,
+    curve: &SymbolCurve,
+) -> SymbolCurve {
+    let place = |point: Point| component.transform_point(symbol.effective_point(point));
+    let origin = place(Point::origin());
+    curve.placed(
+        origin,
+        place(Point::new(1, 0)) - origin,
+        place(Point::new(0, 1)) - origin,
+    )
+}
+
+/// Strokes `curve` in as many straight pieces as its size on screen needs.
+fn paint_curve(
+    painter: &Painter,
+    origin: Pos2,
+    scale: f32,
+    component: &Component,
+    symbol: &ResolvedCellSymbol,
+    curve: &SymbolCurve,
+    stroke: Stroke,
+) {
+    let placed = placed_curve(component, symbol, curve);
+    let pixels_per_unit = f64::from(scale * painter.pixels_per_point());
+    let mut points = placed
+        .tessellated(pixels_per_unit)
+        .into_iter()
+        .map(|[x, y]| origin + vec2(x as f32 * scale, y as f32 * scale))
+        .collect::<Vec<_>>();
+    if placed.is_whole() {
+        points.pop();
+        painter.add(Shape::closed_line(points, stroke));
+    } else {
+        painter.add(Shape::line(points, stroke));
+    }
+}
+
+/// Writes `curve` as a true ellipse or elliptical arc.
+fn write_curve_svg(
+    svg: &mut String,
+    component: &Component,
+    symbol: &ResolvedCellSymbol,
+    curve: &SymbolCurve,
+    config: &SvgExportConfig,
+) {
+    let placed = placed_curve(component, symbol, curve);
+    let unit = config.units_per_world;
+    let page = |[x, y]: [f64; 2]| {
+        (
+            (f64::from(component.pos.x) + x) * unit,
+            (f64::from(component.pos.y) + y) * unit,
+        )
+    };
+    let (rx, ry) = (placed.radii[0] * unit, placed.radii[1] * unit);
+    if placed.is_whole() {
+        let (cx, cy) = page(placed.center);
+        writeln!(
+            svg,
+            r#"<ellipse class="symbol" cx="{cx}" cy="{cy}" rx="{rx}" ry="{ry}"/>"#
+        )
+        .unwrap();
+        return;
+    }
+    let (x0, y0) = page(placed.start_point());
+    let (x1, y1) = page(placed.end_point());
+    let large = i32::from(placed.sweep_degrees > 180.0);
+    // A curve runs clockwise on a y-down page, which is SVG's sweep flag 1.
+    writeln!(
+        svg,
+        r#"<path class="symbol" d="M {x0} {y0} A {rx} {ry} 0 {large} 1 {x1} {y1}"/>"#
+    )
+    .unwrap();
 }
 
 fn arrow_points(tip: Point, rotation_quarters: i32) -> [Point; 3] {
@@ -1038,6 +1091,11 @@ fn fold_symbol_artwork_points(symbol: &ResolvedCellSymbol, mut include: impl FnM
                 for point in cardinal_bounds(symbol.effective_point(*center), *radius) {
                     include(point);
                 }
+            }
+            SymbolShape::Curve(curve) => {
+                let (least, greatest) = curve.whole_unit_bounds();
+                include(symbol.effective_point(least));
+                include(symbol.effective_point(greatest));
             }
             SymbolShape::Arrow {
                 tip,

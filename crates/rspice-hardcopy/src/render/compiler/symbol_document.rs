@@ -31,6 +31,7 @@ impl SemanticSceneCompiler<'_> {
         let body_fallback = if component.is_some() {
             StrokeStyle {
                 color: SemanticColor::Exact(super::schematic_marks::SYMBOL_INK),
+                width: super::schematic_marks::width_um(drawing_metrics::SYMBOL_WIDTH_WORLD),
                 ..StrokeStyle::default()
             }
         } else {
@@ -105,33 +106,10 @@ impl SemanticSceneCompiler<'_> {
                     start_degrees,
                     sweep_degrees,
                 } => {
-                    let count = (sweep_degrees.unsigned_abs() / 5).clamp(8, 144) as usize;
-                    let mut points = Vec::with_capacity(count + 1);
-                    for index in 0..=count {
-                        let angle = f64::from(*start_degrees)
-                            + f64::from(*sweep_degrees) * index as f64 / count as f64;
-                        let radians = angle.to_radians();
-                        points.push(
-                            SchematicPoint::new(
-                                center.x.saturating_add(
-                                    (f64::from(*radius) * radians.cos()).round() as i32,
-                                ),
-                                center.y.saturating_add(
-                                    (f64::from(*radius) * radians.sin()).round() as i32,
-                                ),
-                            ),
-                        );
-                    }
-                    self.primitives.push(ScenePrimitive::Polyline {
-                        points: points
-                            .into_iter()
-                            .map(|point| convert(self, point))
-                            .collect::<Result<_, _>>()?,
-                        closed: false,
-                        stroke: body_stroke,
-                        fill: None,
-                    });
+                    let arc = SymbolCurve::of_arc(*center, *radius, *start_degrees, *sweep_degrees);
+                    self.symbol_curve(&arc, component, body_stroke)?;
                 }
+                SymbolShape::Curve(curve) => self.symbol_curve(curve, component, body_stroke)?,
                 SymbolShape::Arrow {
                     tip,
                     rotation_quarters,
@@ -213,6 +191,38 @@ impl SemanticSceneCompiler<'_> {
         if pin_stable_id != body_stable_id {
             self.add_mapping_legend(PrintObjectKind::Layer, pin_stable_id, pin_stroke)?;
         }
+        Ok(())
+    }
+
+    /// One curve of a symbol, placed unrounded and printed as a true curve.
+    fn symbol_curve(
+        &mut self,
+        curve: &SymbolCurve,
+        component: Option<&Component>,
+        stroke: StrokeStyle,
+    ) -> Result<(), HardcopyRenderError> {
+        let placed = component.map_or(*curve, |component| {
+            let origin = component.transform_point(SchematicPoint::origin());
+            curve.placed(
+                component.pos + origin,
+                component.transform_point(SchematicPoint::new(1, 0)) - origin,
+                component.transform_point(SchematicPoint::new(0, 1)) - origin,
+            )
+        });
+        let micrometres = |value: f64| value * SCHEMATIC_UNIT_UM as f64;
+        let center = self.signed_micrometre_point(
+            micrometres(placed.center[0]).round() as i64,
+            micrometres(placed.center[1]).round() as i64,
+        )?;
+        let length = |value: f64| Length::from_micrometres(micrometres(value).round() as u64);
+        self.primitives.push(ScenePrimitive::Ellipse {
+            center,
+            radius_x: length(placed.radii[0]),
+            radius_y: length(placed.radii[1]),
+            start_millidegrees: (placed.start_degrees * 1000.0).round() as i32,
+            sweep_millidegrees: (placed.sweep_degrees * 1000.0).round() as i32,
+            stroke,
+        });
         Ok(())
     }
 }

@@ -295,6 +295,42 @@ pub(super) fn write_svg_primitive(
             write_svg_fill(output, plan, *fill);
             output.push_str("/>");
         }
+        ScenePrimitive::Ellipse {
+            center,
+            radius_x,
+            radius_y,
+            start_millidegrees,
+            sweep_millidegrees,
+            stroke,
+        } => {
+            let curve = scene_ellipse(
+                transform.point(*center),
+                (transform.length(*radius_x), transform.length(*radius_y)),
+                *start_millidegrees,
+                *sweep_millidegrees,
+            );
+            let [rx, ry] = curve.radii;
+            if curve.is_whole() {
+                let [cx, cy] = curve.center;
+                write!(
+                    output,
+                    "<ellipse cx=\"{cx:.3}\" cy=\"{cy:.3}\" rx=\"{rx:.3}\" ry=\"{ry:.3}\""
+                )
+                .expect("write to string");
+            } else {
+                let [x0, y0] = curve.start_point();
+                let [x1, y1] = curve.end_point();
+                let large = i32::from(curve.sweep_degrees > 180.0);
+                write!(
+                    output,
+                    "<path d=\"M {x0:.3} {y0:.3} A {rx:.3} {ry:.3} 0 {large} 1 {x1:.3} {y1:.3}\""
+                )
+                .expect("write to string");
+            }
+            write_svg_stroke(output, resolve_stroke(plan, transform, *stroke));
+            write_svg_fill(output, plan, None);
+            output.push_str("/>");
+        }
         ScenePrimitive::RasterImage {
             rect,
             png,
@@ -457,6 +493,7 @@ pub(super) fn primitive_fill(primitive: &ScenePrimitive) -> Option<SceneFill> {
         | ScenePrimitive::Rect { fill, .. }
         | ScenePrimitive::Circle { fill, .. } => *fill,
         ScenePrimitive::Line { .. }
+        | ScenePrimitive::Ellipse { .. }
         | ScenePrimitive::RasterImage { .. }
         | ScenePrimitive::Text { .. }
         | ScenePrimitive::ClippedGroup { .. } => None,

@@ -1539,6 +1539,8 @@ pub fn bus_tap_width_pt(zoom: f32, pixels_per_point: f32) -> f32 {
 }
 
 #[cfg(test)]
+mod curve_stroke_tests;
+#[cfg(test)]
 mod lead_raster_tests;
 
 #[cfg(test)]

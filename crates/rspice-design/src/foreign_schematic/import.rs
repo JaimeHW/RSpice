@@ -51,7 +51,7 @@ use crate::schematic::rotation::Rotation;
 use crate::schematic::terminal_connection::rebuild_connections_from_terminals;
 use crate::schematic::value_label::{value_and_parameters, value_pieces};
 use crate::schematic::wire::Wire;
-use crate::symbol::{PinNamePlacement, SymbolDocument, SymbolPin, SymbolShape};
+use crate::symbol::{PinNamePlacement, SymbolCurve, SymbolDocument, SymbolPin, SymbolShape};
 
 mod clearance;
 
@@ -416,11 +416,23 @@ impl Builder<'_> {
     /// A drawing point on the sheet. A pure function of the coordinate, so
     /// points the source joins stay joined and points it keeps apart stay
     /// apart, whatever grid they sit on.
-    fn scale(&self, point: ForeignPoint) -> Point {
-        let (numerator, denominator) = match self.drawing.tool {
+    fn scale_ratio(&self) -> (i64, i64) {
+        match self.drawing.tool {
             ForeignTool::Ltspice => (5, 8),
             ForeignTool::Qspice => (1, 10),
-        };
+        }
+    }
+
+    /// Where `point` lies in world units before [`Self::scale`] rounds it: a
+    /// curve is drawn through these.
+    fn exact(&self, point: ForeignPoint) -> [f64; 2] {
+        let (numerator, denominator) = self.scale_ratio();
+        let ratio = numerator as f64 / denominator as f64;
+        [f64::from(point.x) * ratio, f64::from(point.y) * ratio]
+    }
+
+    fn scale(&self, point: ForeignPoint) -> Point {
+        let (numerator, denominator) = self.scale_ratio();
         let scaled = |value: i32| {
             let scaled = i64::from(value) * numerator;
             i32::try_from((scaled + scaled.signum() * denominator / 2) / denominator).unwrap_or(0)
@@ -1635,32 +1647,14 @@ impl Builder<'_> {
                 }
             }
             ForeignShape::Ellipse(a, b) => {
-                let (a, b) = (self.scale(*a), self.scale(*b));
-                let (width, height) = ((b.x - a.x).abs(), (b.y - a.y).abs());
-                if width == height {
-                    SymbolShape::Circle {
-                        center: Point::new((a.x + b.x) / 2, (a.y + b.y) / 2),
-                        radius: (width / 2).max(1),
-                    }
-                } else {
-                    SymbolShape::Polyline {
-                        points: ellipse_points(a, b, 0.0, std::f64::consts::TAU, 24),
-                        closed: true,
-                    }
-                }
+                SymbolShape::Curve(ellipse_in_box(self.exact(*a), self.exact(*b)))
             }
-            ForeignShape::Arc([a, b, start, end]) => {
-                let (from, sweep) = arc_angles(
-                    self.scale(*a),
-                    self.scale(*b),
-                    self.scale(*start),
-                    self.scale(*end),
-                )?;
-                SymbolShape::Polyline {
-                    points: ellipse_points(self.scale(*a), self.scale(*b), from, sweep, 16),
-                    closed: false,
-                }
-            }
+            ForeignShape::Arc([a, b, start, end]) => SymbolShape::Curve(arc_in_box(
+                self.exact(*a),
+                self.exact(*b),
+                self.exact(*start),
+                self.exact(*end),
+            )?),
         })
     }
 
@@ -2154,23 +2148,23 @@ impl Builder<'_> {
                     opposite: self.scale(*b),
                 },
                 ForeignShape::Ellipse(a, b) => DocumentationShapeGeometry::Polygon {
-                    points: ellipse_points(
-                        self.scale(*a),
-                        self.scale(*b),
-                        0.0,
-                        std::f64::consts::TAU,
-                        32,
-                    ),
+                    points: ellipse_outline(ellipse_in_box(self.exact(*a), self.exact(*b))),
                 },
                 ForeignShape::Arc([a, b, start, end]) => {
-                    let (a, b) = (self.scale(*a), self.scale(*b));
-                    match arc_angles(a, b, self.scale(*start), self.scale(*end)) {
-                        Some((from, sweep)) => {
-                            let points = ellipse_points(a, b, from, sweep, 2);
+                    let arc = arc_in_box(
+                        self.exact(*a),
+                        self.exact(*b),
+                        self.exact(*start),
+                        self.exact(*end),
+                    );
+                    match arc {
+                        Some(arc) => {
+                            let at = |degrees: f64| whole_point(arc.point_at(degrees));
+                            let from = arc.start_degrees;
                             DocumentationShapeGeometry::Arc {
-                                start: points[0],
-                                through: points[1],
-                                end: points[2],
+                                start: at(from + arc.sweep_degrees),
+                                through: at(from + arc.sweep_degrees / 2.0),
+                                end: at(from),
                             }
                         }
                         None => {
@@ -2847,42 +2841,55 @@ fn lead_cost(terminal: Point, pin: Point, center: Point) -> i64 {
     }
 }
 
-/// Start angle and counter-clockwise sweep, in radians on screen, of the
-/// arc LTspice draws in the box `a`–`b` from the ray through `start` to the
-/// ray through `end`.
-fn arc_angles(a: Point, b: Point, start: Point, end: Point) -> Option<(f64, f64)> {
-    let center = (f64::from(a.x + b.x) / 2.0, f64::from(a.y + b.y) / 2.0);
-    if a.x == b.x || a.y == b.y {
+/// The arc a drawing makes in the box `a`–`b`: counter-clockwise on screen
+/// from where the ray through `start` leaves the ellipse to where the ray
+/// through `end` does, the rule both tools draw by. `None` for a box with no
+/// area.
+fn arc_in_box(a: [f64; 2], b: [f64; 2], start: [f64; 2], end: [f64; 2]) -> Option<SymbolCurve> {
+    if a[0] == b[0] || a[1] == b[1] {
         return None;
     }
-    // Screen y points down, so counter-clockwise on screen is a falling
-    // mathematical angle once y is turned over.
-    let angle = |point: Point| (center.1 - f64::from(point.y)).atan2(f64::from(point.x) - center.0);
-    let from = angle(start);
-    let mut sweep = angle(end) - from;
-    if sweep <= 0.0 {
-        sweep += std::f64::consts::TAU;
-    }
-    Some((from, sweep))
+    let mut arc = ellipse_in_box(a, b);
+    let [x, y] = arc.center;
+    let [rx, ry] = arc.radii;
+    let angle = |point: [f64; 2]| {
+        ((point[1] - y) / ry)
+            .atan2((point[0] - x) / rx)
+            .to_degrees()
+    };
+    // A curve runs clockwise, so this one starts from the far end.
+    let sweep = (angle(start) - angle(end)).rem_euclid(360.0);
+    arc.start_degrees = angle(end).rem_euclid(360.0);
+    arc.sweep_degrees = if sweep == 0.0 { 360.0 } else { sweep };
+    Some(arc)
 }
 
-/// `segments + 1` points along the ellipse in the box `a`–`b`, from `from`
-/// counter-clockwise through `sweep` (radians, y up).
-fn ellipse_points(a: Point, b: Point, from: f64, sweep: f64, segments: usize) -> Vec<Point> {
-    let center = (f64::from(a.x + b.x) / 2.0, f64::from(a.y + b.y) / 2.0);
-    let radius = (
-        f64::from((b.x - a.x).abs()) / 2.0,
-        f64::from((b.y - a.y).abs()) / 2.0,
-    );
-    let closed = (sweep - std::f64::consts::TAU).abs() < 1e-9;
-    let count = if closed { segments } else { segments + 1 };
-    (0..count)
-        .map(|index| {
-            let angle = from + sweep * index as f64 / segments as f64;
-            Point::new(
-                (center.0 + radius.0 * angle.cos()).round() as i32,
-                (center.1 - radius.1 * angle.sin()).round() as i32,
-            )
-        })
-        .collect()
+/// The whole ellipse in the box `a`–`b`. A box with no height or width still
+/// draws, as the sliver its source does.
+fn ellipse_in_box(a: [f64; 2], b: [f64; 2]) -> SymbolCurve {
+    SymbolCurve {
+        center: [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0],
+        radii: [
+            ((b[0] - a[0]).abs() / 2.0).max(0.5),
+            ((b[1] - a[1]).abs() / 2.0).max(0.5),
+        ],
+        start_degrees: 0.0,
+        sweep_degrees: 360.0,
+    }
+}
+
+/// A closed ring of whole-unit points around a sheet's drawn ellipse.
+fn ellipse_outline(ellipse: SymbolCurve) -> Vec<Point> {
+    let mut ring = ellipse
+        .tessellated(1.0)
+        .into_iter()
+        .map(whole_point)
+        .collect::<Vec<_>>();
+    ring.pop();
+    ring.dedup();
+    ring
+}
+
+fn whole_point([x, y]: [f64; 2]) -> Point {
+    Point::new(x.round() as i32, y.round() as i32)
 }

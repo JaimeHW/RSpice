@@ -398,6 +398,21 @@ fn body_ink(symbol: &SymbolDocument, component: &Component) -> Vec<Ink> {
                     max: LayoutPoint::new(center.x + radius, center.y + radius),
                 }));
             }
+            SymbolShape::Curve(curve) => {
+                let ends = curve
+                    .placed(
+                        component.pos + component.transform_point(Point::origin()),
+                        component.transform_point(Point::new(1, 0))
+                            - component.transform_point(Point::origin()),
+                        component.transform_point(Point::new(0, 1))
+                            - component.transform_point(Point::origin()),
+                    )
+                    .tessellated(1.0)
+                    .into_iter()
+                    .map(|[x, y]| LayoutPoint::new(x as f32, y as f32))
+                    .collect::<Vec<_>>();
+                ink.extend(ends.windows(2).map(|run| Ink::Stroke(run[0], run[1])));
+            }
             SymbolShape::Arrow { .. } | SymbolShape::Text { .. } => {}
         }
     }

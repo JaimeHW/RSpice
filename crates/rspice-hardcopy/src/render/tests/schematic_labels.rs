@@ -14,7 +14,9 @@ use rspice_design::schematic::{
     rotation::Rotation,
     wire::Wire,
 };
+use rspice_design::symbol::SymbolCurve;
 use rspice_design_model::{design_management::CrossSheetPortDirection, port::PortDirection};
+use std::collections::BTreeSet;
 
 const UM: i64 = SCHEMATIC_UNIT_UM;
 
@@ -330,6 +332,72 @@ fn a_printed_label_hangs_off_the_canvas_anchor_in_the_canvas_type() {
 
 /// Every polyline drawn at `width`, as world-unit points relative to the
 /// scene.
+fn line_widths(compiled: &Compiled) -> BTreeSet<u64> {
+    compiled
+        .primitives
+        .iter()
+        .filter_map(|primitive| match primitive {
+            ScenePrimitive::Line { stroke, .. }
+            | ScenePrimitive::Polyline { stroke, .. }
+            | ScenePrimitive::Ellipse { stroke, .. } => Some(stroke.width.micrometres()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A part that carries its source's symbol prints with the pen a native part
+/// does, and its curve prints as a curve, unrounded.
+#[test]
+fn a_printed_source_symbol_keeps_the_native_pen_and_prints_true_curves() {
+    let native = compile(&sheet(vec![part(
+        1,
+        ComponentType::Resistor,
+        (40, 40),
+        "R1",
+        "1k",
+    )]));
+    let mut symbol = cell_symbol();
+    symbol.body.push(SymbolShape::Curve(SymbolCurve {
+        center: [2.5, -7.5],
+        radii: [10.0, 6.25],
+        start_degrees: 30.0,
+        sweep_degrees: 200.0,
+    }));
+    let mut carried = sheet(Vec::new());
+    carried.components.push(SemanticComponent {
+        symbol_source: Some(SemanticSymbolSource::Authored),
+        component: part(2, ComponentType::Resistor, (40, 40), "R1", "1k"),
+        resolved_symbol: Some(symbol),
+    });
+    let carried = compile(&carried);
+    assert_eq!(line_widths(&carried), line_widths(&native));
+    let ellipses = carried
+        .primitives
+        .iter()
+        .filter_map(|primitive| match primitive {
+            ScenePrimitive::Ellipse {
+                center,
+                radius_x,
+                radius_y,
+                start_millidegrees,
+                sweep_millidegrees,
+                ..
+            } => Some((
+                (center.x.micrometres() as i64, center.y.micrometres() as i64),
+                radius_x.micrometres(),
+                radius_y.micrometres(),
+                *start_millidegrees,
+                *sweep_millidegrees,
+            )),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        ellipses,
+        [(carried.at(42.5, 32.5), 2_500, 1_563, 30_000, 200_000)]
+    );
+}
+
 fn polylines_at(compiled: &Compiled, width: u64) -> Vec<Vec<(i64, i64)>> {
     compiled
         .primitives

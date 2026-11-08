@@ -557,7 +557,7 @@ fn shape_kind(shape: &SymbolShape) -> &'static str {
         SymbolShape::Polyline { closed: true, .. } => "polygon",
         SymbolShape::Polyline { .. } => "polyline",
         SymbolShape::Circle { .. } => "circle",
-        SymbolShape::Arc { .. } => "arc",
+        SymbolShape::Arc { .. } | SymbolShape::Curve(_) => "arc",
         SymbolShape::Arrow { .. } => "arrow",
         SymbolShape::Dot { .. } => "dot",
         SymbolShape::Text { .. } => "text",
@@ -617,6 +617,19 @@ fn shape_section(
             changed |= coordinate_row(ui, edit, &before, "Radius", radius);
             changed |= coordinate_row(ui, edit, &before, "Start °", start_degrees);
             changed |= coordinate_row(ui, edit, &before, "Sweep °", sweep_degrees);
+        }
+        // A drawing's curve is not a whole-unit shape to retype; it can move.
+        SymbolShape::Curve(curve) => {
+            let round = |value: f64| value.round() as i32;
+            let (x, y) = (round(curve.center[0]), round(curve.center[1]));
+            let (mut new_x, mut new_y) = (x, y);
+            let moved = coordinate_row(ui, edit, &before, "Center X", &mut new_x)
+                | coordinate_row(ui, edit, &before, "Center Y", &mut new_y);
+            if moved {
+                curve.center[0] += f64::from(new_x - x);
+                curve.center[1] += f64::from(new_y - y);
+                changed = true;
+            }
         }
         SymbolShape::Arrow {
             tip,

@@ -236,7 +236,7 @@ fn shape_label(shape: &SymbolShape) -> String {
             if *closed { "polygon" } else { "polyline" }.to_owned()
         }
         SymbolShape::Circle { .. } => "circle".to_owned(),
-        SymbolShape::Arc { .. } => "arc".to_owned(),
+        SymbolShape::Arc { .. } | SymbolShape::Curve(_) => "arc".to_owned(),
         SymbolShape::Arrow { .. } => "arrow".to_owned(),
         SymbolShape::Dot { .. } => "dot".to_owned(),
         SymbolShape::Text { text, .. } => {

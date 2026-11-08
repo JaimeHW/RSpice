@@ -345,6 +345,11 @@ pub(super) fn include_symbol_document_bounds(
                     center.y.saturating_add(radius),
                 ));
             }
+            SymbolShape::Curve(curve) => {
+                let (least, greatest) = curve.whole_unit_bounds();
+                bounds.include(map(least));
+                bounds.include(map(greatest));
+            }
             SymbolShape::Arrow { tip, .. } => bounds.include(map(*tip)),
             SymbolShape::Text {
                 anchor,

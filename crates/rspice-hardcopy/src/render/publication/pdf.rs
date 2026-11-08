@@ -173,6 +173,36 @@ pub(super) fn coordinate_to_points(value: f64) -> f32 {
     (value * POINTS_PER_INCH / MICROMETRES_PER_INCH as f64) as f32
 }
 
+/// `curve` as cubic Beziers, one for every quarter turn or part of one.
+fn append_pdf_curve(builder: &mut PathBuilder, curve: &SymbolCurve) {
+    let pieces = (curve.sweep_degrees / 90.0).ceil().max(1.0) as usize;
+    let step = (curve.sweep_degrees / pieces as f64).to_radians();
+    let handle = 4.0 / 3.0 * (step / 4.0).tan();
+    let [cx, cy] = curve.center;
+    let [rx, ry] = curve.radii;
+    let at = |x: f64, y: f64| (x as f32, y as f32);
+    let (x, y) = at(curve.start_point()[0], curve.start_point()[1]);
+    builder.move_to(x, y);
+    for piece in 0..pieces {
+        let from = curve.start_degrees.to_radians() + step * piece as f64;
+        let (sin0, cos0) = from.sin_cos();
+        let (sin1, cos1) = (from + step).sin_cos();
+        let (x1, y1) = at(
+            cx + rx * (cos0 - handle * sin0),
+            cy + ry * (sin0 + handle * cos0),
+        );
+        let (x2, y2) = at(
+            cx + rx * (cos1 + handle * sin1),
+            cy + ry * (sin1 - handle * cos1),
+        );
+        let (x, y) = at(cx + rx * cos1, cy + ry * sin1);
+        builder.cubic_to(x1, y1, x2, y2, x, y);
+    }
+    if curve.is_whole() {
+        builder.close();
+    }
+}
+
 pub(super) fn draw_pdf_trim_marks(
     surface: &mut krilla::surface::Surface<'_>,
     plan: &HardcopyPlan,
@@ -506,6 +536,35 @@ pub(super) fn draw_pdf_primitive(
                     (cx - radius, cy - radius, radius * 2.0, radius * 2.0),
                     *fill,
                 );
+            }
+        }
+        ScenePrimitive::Ellipse {
+            center,
+            radius_x,
+            radius_y,
+            start_millidegrees,
+            sweep_millidegrees,
+            stroke,
+        } => {
+            let (cx, cy) = transform.point(*center);
+            let curve = scene_ellipse(
+                (
+                    f64::from(coordinate_to_points(cx)),
+                    f64::from(coordinate_to_points(cy)),
+                ),
+                (
+                    f64::from(coordinate_to_points(transform.length(*radius_x))),
+                    f64::from(coordinate_to_points(transform.length(*radius_y))),
+                ),
+                *start_millidegrees,
+                *sweep_millidegrees,
+            );
+            let mut builder = PathBuilder::new();
+            append_pdf_curve(&mut builder, &curve);
+            set_pdf_scene_fill(surface, plan, None);
+            set_pdf_stroke(surface, resolve_stroke(plan, transform, *stroke));
+            if let Some(path) = builder.finish() {
+                surface.draw_path(&path);
             }
         }
         ScenePrimitive::RasterImage { rect, png, .. } => {

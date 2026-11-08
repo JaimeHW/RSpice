@@ -46,7 +46,7 @@ use super::sources::{
 use rspice_design::schematic::{
     component::Component, documentation_shape::DocumentationShapeGeometry,
 };
-use rspice_design::symbol::{SymbolDocument, SymbolShape, SymbolTextPlacement};
+use rspice_design::symbol::{SymbolCurve, SymbolDocument, SymbolShape, SymbolTextPlacement};
 use rspice_design::symbol_artwork::{PathCommand, SymbolLibrary};
 use rspice_design_model::Point as SchematicPoint;
 use rspice_design_model::design_management::{
@@ -464,6 +464,16 @@ pub enum ScenePrimitive {
         radius: Length,
         stroke: Option<StrokeStyle>,
         fill: Option<SceneFill>,
+    },
+    /// An ellipse, or the part of one running clockwise on the page from
+    /// `start_millidegrees`, drawn as a true curve.
+    Ellipse {
+        center: ScenePoint,
+        radius_x: Length,
+        radius_y: Length,
+        start_millidegrees: i32,
+        sweep_millidegrees: i32,
+        stroke: StrokeStyle,
     },
     RasterImage {
         rect: SceneRect,
@@ -926,6 +936,21 @@ fn translate_primitives(
                     radius,
                     stroke,
                     fill,
+                },
+                ScenePrimitive::Ellipse {
+                    center,
+                    radius_x,
+                    radius_y,
+                    start_millidegrees,
+                    sweep_millidegrees,
+                    stroke,
+                } => ScenePrimitive::Ellipse {
+                    center: point(center)?,
+                    radius_x,
+                    radius_y,
+                    start_millidegrees,
+                    sweep_millidegrees,
+                    stroke,
                 },
                 ScenePrimitive::RasterImage {
                     rect,

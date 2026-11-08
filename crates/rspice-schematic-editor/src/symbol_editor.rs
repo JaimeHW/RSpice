@@ -18,8 +18,8 @@ use rspice_design::{
         component_type::ComponentType,
     },
     symbol::{
-        SYMBOL_TERMINAL_GRID, SymbolAttributeKind, SymbolDocument, SymbolEditorMetadata, SymbolPin,
-        SymbolShape, SymbolTextAlign,
+        SYMBOL_TERMINAL_GRID, SymbolAttributeKind, SymbolCurve, SymbolDocument,
+        SymbolEditorMetadata, SymbolPin, SymbolShape, SymbolTextAlign,
     },
 };
 use rspice_design_model::{
@@ -337,8 +337,11 @@ fn draw_body(
                 start_degrees,
                 sweep_degrees,
             } => {
-                let points = arc_points(viewport, *center, *radius, *start_degrees, *sweep_degrees);
-                painter.add(Shape::line(points, stroke));
+                let arc = SymbolCurve::of_arc(*center, *radius, *start_degrees, *sweep_degrees);
+                painter.add(Shape::line(curve_points(viewport, &arc), stroke));
+            }
+            SymbolShape::Curve(curve) => {
+                painter.add(Shape::line(curve_points(viewport, curve), stroke));
             }
             SymbolShape::Arrow {
                 tip,
@@ -752,9 +755,13 @@ fn shape_hit(shape: &SymbolShape, viewport: SymbolViewport, pos: Pos2) -> bool {
             radius,
             start_degrees,
             sweep_degrees,
-        } => arc_points(viewport, *center, *radius, *start_degrees, *sweep_degrees)
-            .windows(2)
-            .any(|pair| distance_to_screen_segment(pos, pair[0], pair[1]) <= HIT_PX),
+        } => curve_hit(
+            &SymbolCurve::of_arc(*center, *radius, *start_degrees, *sweep_degrees),
+            viewport,
+            pos,
+            HIT_PX,
+        ),
+        SymbolShape::Curve(curve) => curve_hit(curve, viewport, pos, HIT_PX),
         SymbolShape::Arrow { tip, .. } => viewport.world_to_screen(*tip).distance(pos) <= 18.0,
         SymbolShape::Dot { center, radius } => {
             viewport.world_to_screen(*center).distance(pos)
@@ -903,26 +910,22 @@ fn draw_arrow(
     ));
 }
 
-fn arc_points(
-    viewport: SymbolViewport,
-    center: Point,
-    radius: i32,
-    start_degrees: i32,
-    sweep_degrees: i32,
-) -> Vec<Pos2> {
-    let steps = 24.max(sweep_degrees.abs() / 8) as usize;
-    (0..=steps)
-        .map(|step| {
-            let t = step as f32 / steps as f32;
-            let degrees = start_degrees as f32 + sweep_degrees as f32 * t;
-            let radians = degrees.to_radians();
-            let point = Point::new(
-                center.x + (radius as f32 * radians.cos()).round() as i32,
-                center.y + (radius as f32 * radians.sin()).round() as i32,
-            );
-            viewport.world_to_screen(point)
-        })
+/// Points along `curve` on screen, as many as the view's size needs.
+fn curve_points(viewport: SymbolViewport, curve: &SymbolCurve) -> Vec<Pos2> {
+    let origin = viewport.world_to_screen(Point::origin());
+    let across = viewport.world_to_screen(Point::new(1, 0)) - origin;
+    let down = viewport.world_to_screen(Point::new(0, 1)) - origin;
+    curve
+        .tessellated(f64::from(viewport.zoom))
+        .into_iter()
+        .map(|[x, y]| origin + across * x as f32 + down * y as f32)
         .collect()
+}
+
+fn curve_hit(curve: &SymbolCurve, viewport: SymbolViewport, pos: Pos2, reach: f32) -> bool {
+    curve_points(viewport, curve)
+        .windows(2)
+        .any(|pair| distance_to_screen_segment(pos, pair[0], pair[1]) <= reach)
 }
 
 fn document_bounds(document: &SymbolDocument) -> (Point, Point) {
@@ -957,6 +960,11 @@ fn document_bounds(document: &SymbolDocument) -> (Point, Point) {
             SymbolShape::Arc { center, radius, .. } => {
                 xs.extend([center.x - radius, center.x + radius]);
                 ys.extend([center.y - radius, center.y + radius]);
+            }
+            SymbolShape::Curve(curve) => {
+                let (least, greatest) = curve.whole_unit_bounds();
+                xs.extend([least.x, greatest.x]);
+                ys.extend([least.y, greatest.y]);
             }
             SymbolShape::Arrow { tip, .. } => {
                 xs.extend([tip.x - 10, tip.x + 10]);

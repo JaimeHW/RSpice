@@ -3429,6 +3429,50 @@ fn a_native_part_draws_its_sources_own_symbol_in_every_orientation() {
     }
 }
 
+/// An arc reaches its ends exactly where the source's rays leave the circle,
+/// with nothing rounded to whole units on the way.
+#[test]
+fn an_imported_arc_is_the_sources_own_curve_and_ends_on_its_rays() {
+    use crate::symbol::SymbolShape;
+
+    const LOOP_ASY: &str = "Version 4\nSymbolType CELL\n\
+        ARC Normal 0 16 32 48 4 44 20 16\n\
+        CIRCLE Normal 6 60 26 76\n\
+        SYMATTR Value L\nSYMATTR Prefix L\n\
+        PIN 16 0 NONE 0\nPINATTR PinName A\nPINATTR SpiceOrder 1\n\
+        PIN 16 96 NONE 0\nPINATTR PinName B\nPINATTR SpiceOrder 2\n";
+    let library = library_of("ind", LOOP_ASY);
+    let drawing =
+        parse_asc("Version 4\nSYMBOL ind 0 0 R0\nSYMATTR InstName L1\nSYMATTR Value 1u\n").unwrap();
+    let imported = import_foreign_schematic(&drawing, "work", &library);
+    let inductor = &imported.document.components[0];
+    assert_eq!(inductor.kind, ComponentType::Inductor);
+    let body = &inductor
+        .source_symbol()
+        .expect("the source's symbol")
+        .document()
+        .body;
+    let [SymbolShape::Curve(arc), SymbolShape::Curve(circle)] = &body[..] else {
+        panic!("two curves: {body:?}");
+    };
+    assert_eq!(arc.center, [10.0, 20.0]);
+    assert_eq!(arc.radii, [10.0, 10.0]);
+    let on_ray = |point: [f64; 2], (x, y): (f64, f64)| {
+        let (dx, dy) = (point[0] - arc.center[0], point[1] - arc.center[1]);
+        let (rx, ry) = (x - arc.center[0], y - arc.center[1]);
+        (dx * ry - dy * rx).abs() < 1e-6 && dx * rx + dy * ry > 0.0
+    };
+    // LTspice runs counter-clockwise from the first ray to the second, and a
+    // curve runs clockwise, so the first ray is where the curve ends.
+    assert!(on_ray(arc.end_point(), (2.5, 27.5)));
+    assert!(on_ray(arc.start_point(), (12.5, 10.0)));
+    assert!((arc.sweep_degrees - 210.963_756_532).abs() < 1e-6);
+    // A source circle whose box is not on whole units stays exactly there.
+    assert_eq!(circle.center, [10.0, 42.5]);
+    assert_eq!(circle.radii, [6.25, 5.0]);
+    assert!(circle.is_whole());
+}
+
 /// With no symbol to read, a native part draws RSpice's glyph, scaled so its
 /// terminals land on the pins the drawing puts them on.
 #[cfg(feature = "symbol-artwork")]

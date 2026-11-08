@@ -803,6 +803,9 @@ fn publication_schematic_setup() -> rspice_hardcopy_contract::SchematicHardcopyS
     )
 }
 
+/// Device pixels per micrometre fine enough for a published page's ellipses.
+const MICROMETRES_TO_FINE_PIXELS: f64 = 0.02;
+
 fn point(value: ScenePoint, source: &str) -> Result<Point, PublicationBuildError> {
     let range = |_| PublicationBuildError::CoordinateRange {
         source: source.to_string(),
@@ -952,6 +955,55 @@ fn convert_primitive(
             stroke: style.as_ref().map(stroke),
             fill: fill_style.as_ref().map(fill),
         })),
+        ScenePrimitive::Ellipse {
+            center,
+            radius_x,
+            radius_y,
+            start_millidegrees,
+            sweep_millidegrees,
+            stroke: style,
+        } => {
+            let segments = if radius_x == radius_y {
+                // The format turns its arcs the other way on the page.
+                vec![PathSegment::Arc {
+                    center: point(*center, source)?,
+                    radius_um: radius_x.micrometres(),
+                    start_millideg: -start_millidegrees,
+                    sweep_millideg: -sweep_millidegrees,
+                }]
+            } else {
+                // The format has circular arcs only, so an ellipse goes as a
+                // run of chords too short to see.
+                let at = point(*center, source)?;
+                let ellipse = rspice_hardcopy::render::scene_ellipse(
+                    (at.x_um as f64, at.y_um as f64),
+                    (radius_x.micrometres() as f64, radius_y.micrometres() as f64),
+                    *start_millidegrees,
+                    *sweep_millidegrees,
+                );
+                ellipse
+                    .tessellated(MICROMETRES_TO_FINE_PIXELS)
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, [x, y])| {
+                        let to = Point {
+                            x_um: x.round() as i64,
+                            y_um: y.round() as i64,
+                        };
+                        if index == 0 {
+                            PathSegment::MoveTo { to }
+                        } else {
+                            PathSegment::LineTo { to }
+                        }
+                    })
+                    .collect()
+            };
+            out.push(Primitive::Path(PathPrimitive {
+                segments,
+                stroke: Some(stroke(style)),
+                fill: None,
+            }));
+        }
         ScenePrimitive::Text {
             origin,
             text,

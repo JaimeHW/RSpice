@@ -449,6 +449,7 @@ pub fn symbol_shape_bounds(
             rspice_design_model::Point::new(center.x - radius, center.y - radius),
             rspice_design_model::Point::new(center.x + radius, center.y + radius),
         ),
+        SymbolShape::Curve(curve) => curve.whole_unit_bounds(),
         SymbolShape::Arrow { tip, .. } => (
             rspice_design_model::Point::new(tip.x - 10, tip.y - 10),
             rspice_design_model::Point::new(tip.x + 10, tip.y + 10),

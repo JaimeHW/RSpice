@@ -110,7 +110,7 @@ fn assert_lead_lies_on_its_wire(name: &str, component: &Component, outward: (i32
         .terminal_positions()
         .into_iter()
         .map(|(_, point)| point)
-        .min_by_key(|point| (point.x * outward.0 + point.y * outward.1) * -1)
+        .min_by_key(|point| -(point.x * outward.0 + point.y * outward.1))
         .expect("a terminal");
     let upright = outward.0 == 0;
     for ppp in DENSITIES {
