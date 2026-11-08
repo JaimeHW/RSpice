@@ -257,3 +257,44 @@ fn multiple_raw_plots_cannot_be_imported_as_a_successful_partial_dataset() {
     let decoded = decode_spice_raw(&std::fs::read(selected).unwrap(), Default::default()).unwrap();
     assert_eq!(decoded.signals[0].real, [1.0, 3.0]);
 }
+
+/// A noise rawfile is its spectrum followed by ngspice's one-point
+/// "Integrated Noise" totals; the application imports the spectrum.
+#[test]
+fn a_noise_rawfile_imports_its_spectrum_beside_its_totals() {
+    let dir = test_dir("raw_application_noise");
+    let deck = dir.join("noise.cir");
+    std::fs::write(
+        &deck,
+        "* resistor noise
+v1 in 0 dc 0 ac 1
+r1 in out 1k
+r2 out 0 1k
+.noise v(out) v1 lin 3 100 1k
+.end
+",
+    )
+    .unwrap();
+    for format in ["raw", "ascii"] {
+        let output = dir.join(format!("noise.{format}"));
+        let result = Command::new(env!("CARGO_BIN_EXE_rspice"))
+            .args(["--quiet", "run"])
+            .arg(&deck)
+            .arg("-o")
+            .arg(&output)
+            .args(["-f", format])
+            .output()
+            .unwrap();
+        assert!(result.status.success(), "{result:?}");
+        let decoded =
+            decode_spice_raw(&std::fs::read(output).unwrap(), Default::default()).unwrap();
+        assert_eq!(decoded.domain, WaveformDomain::Ac);
+        assert_eq!(decoded.coordinate, [100.0, 550.0, 1000.0]);
+        let names = decoded
+            .signals
+            .iter()
+            .map(|signal| signal.name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(names, ["onoise_spectrum", "inoise_spectrum"]);
+    }
+}

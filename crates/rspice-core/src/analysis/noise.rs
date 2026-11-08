@@ -2143,9 +2143,82 @@ impl IntegratedNoise {
         )
     }
 
+    /// The totals SPICE's "Integrated Noise" plot reports, in RMS: each
+    /// source's output density is integrated over every frequency step as a
+    /// power law between its ends, and the input-referred part divides each
+    /// step's output by the gain at the step's upper frequency (ngspice
+    /// noisean.c, each device's INT_NOIZ pass; cktnoise.c:121 takes the root
+    /// unless `sqrnoise` is set). Returns `(output, input)`.
+    pub fn spice_band_totals(&self) -> (Value, Value) {
+        // noisedef.h:105 N_MINLOG and :106 N_MINGAIN.
+        let ln = |density: Value| density.max(1e-38).ln();
+        let (mut output, mut input) = (0.0, 0.0);
+        for pair in self.results.windows(2) {
+            let [last, point] = pair else { continue };
+            let step = SpiceNoiseStep {
+                del_freq: point.frequency - last.frequency,
+                ln_freq: point.frequency.max(1e-38).ln(),
+                ln_last_freq: last.frequency.max(1e-38).ln(),
+            };
+            let gain_inverse = 1.0 / point.input_gain_squared.max(1e-20);
+            for (index, source) in point.contributions.iter().enumerate() {
+                let previous = last
+                    .contributions
+                    .get(index)
+                    .filter(|previous| previous.identity == source.identity)
+                    .or_else(|| {
+                        last.contributions
+                            .iter()
+                            .find(|previous| previous.identity == source.identity)
+                    });
+                let Some(previous) = previous else { continue };
+                let density = source.output_contribution;
+                let step_output =
+                    step.integral(density, ln(density), ln(previous.output_contribution));
+                output += step_output;
+                input += gain_inverse * step_output;
+            }
+        }
+        (output.sqrt(), input.sqrt())
+    }
+
     /// Get all results
     pub fn results(&self) -> &[NoiseResult] {
         &self.results
+    }
+}
+
+/// One frequency step of the noise integration (ngspice `Ndata`).
+struct SpiceNoiseStep {
+    del_freq: Value,
+    ln_freq: Value,
+    ln_last_freq: Value,
+}
+
+impl SpiceNoiseStep {
+    /// ngspice Nintegrate (spicelib/analysis/ninteg.c:27).
+    fn integral(&self, density: Value, ln_density: Value, ln_last: Value) -> Value {
+        // ninteg.c:24
+        let limexp = |x: Value| {
+            if x > 700.0 {
+                700.0_f64.exp() * (1.0 + x - 700.0)
+            } else {
+                x.exp()
+            }
+        };
+        let exponent = (ln_density - ln_last) / (self.ln_freq - self.ln_last_freq);
+        // noisedef.h:109 N_INTFTHRESH and :113 N_INTUSELOG.
+        if exponent.abs() < 1e-10 {
+            return density * self.del_freq;
+        }
+        let a = limexp(ln_density - exponent * self.ln_freq);
+        let exponent = exponent + 1.0;
+        if exponent.abs() < 1e-10 {
+            a * (self.ln_freq - self.ln_last_freq)
+        } else {
+            a * ((limexp(exponent * self.ln_freq) - limexp(exponent * self.ln_last_freq))
+                / exponent)
+        }
     }
 }
 

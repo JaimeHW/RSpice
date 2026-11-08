@@ -424,7 +424,10 @@ use rspice_core::analysis::harmonic_balance::{
 // unknowns hold so that the application's operating-point table lists a
 // branch current as a current and leaves an unnamed unknown out, bring it
 // to 5,262.
-const MAX_PUBLIC_ITEMS: usize = 5262;
+// `IntegratedNoise::spice_band_totals`, ngspice's integrated-noise totals that
+// the control interpreter's noise plot and the CLI noise rawfile both write,
+// brings it to 5,263.
+const MAX_PUBLIC_ITEMS: usize = 5263;
 
 /// The `#[doc(hidden)] pub` items of the family, counted apart from
 /// `MAX_PUBLIC_ITEMS`. A hidden item is plumbing that one crate of the engine

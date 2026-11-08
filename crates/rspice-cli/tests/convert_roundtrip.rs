@@ -383,6 +383,109 @@ fn typed_table_coordinates_and_quantities_survive_json_hdf5_and_raw() {
     assert_eq!(result["plot_name"], source["plot_name"]);
 }
 
+/// One 1k resistor driven by a current source: its output noise density is
+/// flat, so the band total is the density times the root of the bandwidth
+/// and the input-referred total is that over the 1k transimpedance.
+const NOISE_DECK: &str = "* resistor noise with a current-source input
+iin 0 out dc 0 ac 1
+r1 out 0 1k
+.noise v(out) iin dec 1 10 1k
+.end
+";
+
+/// ngspice writes a noise spectrum followed by a one-point "Integrated Noise"
+/// plot of its band totals. Without `--section` a conversion reads the
+/// spectrum; the totals are their own section.
+#[test]
+fn noise_rawfiles_carry_their_totals_and_convert_their_spectrum() {
+    let dir = test_dir("noise_totals");
+    for format in ["raw", "ascii"] {
+        let raw = simulate(&dir, NOISE_DECK, format, &format!("noise.{format}.raw"));
+        let file = rspice_core::io::ltspice_raw::parse_raw_plots_bytes_with_limits(
+            &std::fs::read(&raw).unwrap(),
+            Default::default(),
+        )
+        .unwrap();
+        let plots = file
+            .plots
+            .iter()
+            .map(|plot| plot.header.plotname.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            plots,
+            ["Noise Spectral Density Curves", "Integrated Noise"],
+            "{format}"
+        );
+        let totals = &file.plots[1];
+        let variables = totals
+            .variables
+            .iter()
+            .map(|variable| (variable.name.as_str(), variable.var_type.as_str()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            variables,
+            [
+                ("v(onoise_total)", "voltage"),
+                ("i(inoise_total)", "current")
+            ]
+        );
+        let density = file.plots[0].waveforms[1].y[0];
+        let output_total = totals.waveforms[0].y[0];
+        let input_total = totals.waveforms[1].y[0];
+        assert_eq!(totals.waveforms[0].y.len(), 1);
+        assert!((output_total / (density * 990f64.sqrt()) - 1.0).abs() < 1e-9);
+        assert!((input_total * 1e3 / output_total - 1.0).abs() < 1e-9);
+        // ngspice-46 batch rawfile of this deck.
+        assert!((output_total / 1.281_027_145_294_307e-7 - 1.0).abs() < 1e-6);
+
+        let spectrum = dir.join(format!("spectrum.{format}.csv"));
+        convert(&raw, &spectrum, "csv", &[]);
+        let (header, rows) = read_csv(&spectrum);
+        assert_eq!(header, ["frequency", "onoise_spectrum", "inoise_spectrum"]);
+        assert_eq!(rows.len(), 3);
+
+        let summary = dir.join(format!("totals.{format}.csv"));
+        convert(&raw, &summary, "csv", &["--section", "Integrated Noise"]);
+        let (header, rows) = read_csv(&summary);
+        assert_eq!(header[1..], ["v(onoise_total)", "i(inoise_total)"]);
+        assert_eq!(rows, [vec![0.0, output_total, input_total]]);
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Where the gain varies the input-referred total divides each step's output
+/// by the gain at the step's upper frequency, as ngspice does. ngspice-46
+/// gives these totals for an RC low-pass from 1 Hz to 100 kHz.
+#[test]
+fn noise_rawfile_totals_follow_spice_where_the_gain_varies() {
+    let dir = test_dir("noise_totals_rc");
+    let deck = "* rc noise
+v1 in 0 dc 0 ac 1
+r1 in out 1k
+c1 out 0 1u
+r2 out 0 10k
+\r
+                .noise v(out) v1 dec 5 1 100k
+.end
+";
+    let raw = simulate(&dir, deck, "raw", "rc.raw");
+    let file = rspice_core::io::ltspice_raw::parse_raw_plots_bytes_with_limits(
+        &std::fs::read(&raw).unwrap(),
+        Default::default(),
+    )
+    .unwrap();
+    let totals = &file.plots[1];
+    assert_eq!(totals.variables[1].name, "v(inoise_total)");
+    for (waveform, expected) in totals.waveforms.iter().zip([6.393845e-08, 1.698928e-06]) {
+        assert!(
+            (waveform.y[0] / expected - 1.0).abs() < 2e-6,
+            "{}",
+            waveform.y[0]
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Parse a CSV file into (header, rows).
 fn read_csv(path: &Path) -> (Vec<String>, Vec<Vec<f64>>) {
     let (headers, rows) = common::read_numeric_csv(path);

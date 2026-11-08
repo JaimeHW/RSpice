@@ -168,6 +168,7 @@ impl RawWaveformData {
                 | "distortion operating point"
                 | "pole-zero analysis"
                 | "transfer function"
+                | "integrated noise"
                 | "integrated noise - v^2 or a^2" => true,
                 // ngspice uses the same title for DC scalars and complex spectra.
                 "sensitivity analysis" => !self.header.is_complex,

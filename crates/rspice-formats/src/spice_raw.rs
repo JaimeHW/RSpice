@@ -45,6 +45,20 @@ pub fn decode_spice_raw(
     // further plots (including corrupt ones) cannot disappear behind success.
     let mut file = rspice_core::io::ltspice_raw::parse_raw_plots_bytes_with_limits(bytes, limits)
         .map_err(RawReadError::Parse)?;
+    // ngspice follows a noise spectrum with a one-point "Integrated Noise"
+    // plot of its band totals: a summary of the dataset, not another one.
+    if let [spectrum, totals] = file.plots.as_slice()
+        && spectrum
+            .header
+            .plotname
+            .eq_ignore_ascii_case("Noise Spectral Density Curves")
+        && totals
+            .header
+            .plotname
+            .eq_ignore_ascii_case("Integrated Noise")
+    {
+        file.plots.truncate(1);
+    }
     if file.plots.len() > 1 {
         return Err(RawReadError::MultiplePlots(file.plots.len()));
     }

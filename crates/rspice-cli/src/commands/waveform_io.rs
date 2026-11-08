@@ -385,6 +385,22 @@ pub(super) fn select_section(
     ))
 }
 
+/// The spectrum of an ngspice noise rawfile: the spectral-density plot
+/// followed by its one-point "Integrated Noise" totals. The totals summarize
+/// that spectrum, so a reader that is not told which section to take reads
+/// the spectrum; `--section` still selects either plot.
+fn spectrum_with_its_totals(names: &[&str]) -> Option<usize> {
+    match names {
+        [spectrum, totals]
+            if spectrum.eq_ignore_ascii_case("Noise Spectral Density Curves")
+                && totals.eq_ignore_ascii_case("Integrated Noise") =>
+        {
+            Some(0)
+        }
+        _ => None,
+    }
+}
+
 fn load_rawfile(
     path: &Path,
     resource_limits: rspice_core::ResourceLimits,
@@ -442,7 +458,10 @@ pub(super) fn raw_result(
         .iter()
         .map(|plot| plot.header.plotname.as_str())
         .collect();
-    let index = select_section(path, &names, section)?;
+    let index = match (section, spectrum_with_its_totals(&names)) {
+        (None, Some(spectrum)) => spectrum,
+        _ => select_section(path, &names, section)?,
+    };
     let data = file
         .plots
         .into_iter()
