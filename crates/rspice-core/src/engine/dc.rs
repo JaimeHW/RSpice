@@ -851,7 +851,17 @@ impl Engine {
             .map_err(SimulationError::Circuit)?
             .entries
         {
-            for (parameter, value) in entry.params {
+            let module_quantities = entry
+                .module
+                .into_iter()
+                .flat_map(|module| module.quantities)
+                .map(|quantity| (quantity.name, quantity.value));
+            for (parameter, value) in entry
+                .params
+                .into_iter()
+                .map(|(parameter, value)| (parameter.to_owned(), value))
+                .chain(module_quantities)
+            {
                 let name = format!("{}:{parameter}", entry.name);
                 if result.try_dc_observable_named(&name).is_none() {
                     result.push_dc_observable(name, value);

@@ -57,6 +57,7 @@ fn worker_device_op_entry_unknown_static_labels_are_bounded() {
             name: "vendor-param".to_string(),
             value: 1.25,
         }],
+        module: None,
     }
     .into();
 
@@ -83,18 +84,21 @@ fn worker_device_op_report_preserves_core_static_labels() {
                     ("gds", 7.0),
                     ("gmb", 8.0),
                 ],
+                module: None,
             },
             rspice_core::circuit::DeviceOpEntry {
                 name: "B3".to_string(),
                 device_kind: "BSIM3",
                 region: Some("linear"),
                 params: vec![("vdsat", 9.0), ("gmbs", 10.0)],
+                module: None,
             },
             rspice_core::circuit::DeviceOpEntry {
                 name: "B4".to_string(),
                 device_kind: "BSIM4",
                 region: Some("subthreshold"),
                 params: vec![("id", 11.0)],
+                module: None,
             },
             rspice_core::circuit::DeviceOpEntry {
                 name: "Q1".to_string(),
@@ -107,24 +111,28 @@ fn worker_device_op_report_preserves_core_static_labels() {
                     ("vce", 15.0),
                     ("beta", 16.0),
                 ],
+                module: None,
             },
             rspice_core::circuit::DeviceOpEntry {
                 name: "D1".to_string(),
                 device_kind: "DIODE",
                 region: None,
                 params: vec![("vd", 17.0), ("gd", 18.0)],
+                module: None,
             },
             rspice_core::circuit::DeviceOpEntry {
                 name: "J1".to_string(),
                 device_kind: "JFET",
                 region: None,
                 params: vec![("igs", 19.0), ("igd", 20.0)],
+                module: None,
             },
             rspice_core::circuit::DeviceOpEntry {
                 name: "Z1".to_string(),
                 device_kind: "MESFET",
                 region: None,
                 params: vec![("id", 21.0)],
+                module: None,
             },
         ],
     };

@@ -677,6 +677,8 @@ use rspice_core::circuit::InductorProbeInfo as _;
 use rspice_core::circuit::Inductors as _;
 use rspice_core::circuit::JilesAthertonBinding as _;
 use rspice_core::circuit::ModelSafetyValue as _;
+use rspice_core::circuit::ModuleOpQuantity as _;
+use rspice_core::circuit::ModuleOpReport as _;
 use rspice_core::circuit::MosModelSafety as _;
 use rspice_core::circuit::MosModelSafetyFamily as _;
 use rspice_core::circuit::MosTerminalLayout as _;

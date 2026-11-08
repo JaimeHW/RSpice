@@ -305,6 +305,7 @@ fn device_states(shape: &Shape) -> Vec<DeviceStateSeries> {
                 name: "gm".to_owned(),
                 unit: Some(SignalUnit::Siemens),
                 values: shape.reals(),
+                description: None,
             }],
         )
         .expect("a device state history is valid"),

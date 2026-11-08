@@ -123,6 +123,8 @@ impl CircuitData {
             #[cfg(feature = "veriloga")]
             veriloga_devices: crate::device::veriloga::VerilogADevices::new(),
             #[cfg(feature = "veriloga")]
+            veriloga_instance_modules: std::collections::HashMap::new(),
+            #[cfg(feature = "veriloga")]
             mixed_signal_hosts: Vec::new(),
             #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
             ground_census: Default::default(),

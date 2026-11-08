@@ -1168,6 +1168,7 @@ fn state_with_reported_device_op(device: &str) -> AppState {
             device_kind: "MOSFET",
             region: Some("saturation"),
             params: vec![("id", 1.0e-4)],
+            module: None,
         }],
     });
     let mut run = SimulationRun::new(1);

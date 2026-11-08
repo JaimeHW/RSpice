@@ -366,6 +366,67 @@ pub struct HirVariable {
     pub is_state: bool,
     /// Reads may consume the immutable entry input before the current write.
     pub retains_input: bool,
+    /// Present when the module reports this variable at an operating point.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output: Option<HirOutputVariable>,
+}
+
+/// A module-scope variable the source describes with `desc` and `units`
+/// attributes: an operating-point output of every instance, read by name
+/// (`@x1[gm]`) and listed beside the instance's terminal currents.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HirOutputVariable {
+    /// The `units` attribute, empty when the source gives none.
+    pub units: SmolStr,
+    /// The `desc` attribute, empty when the source gives none.
+    pub description: SmolStr,
+    /// How an instance's multiplicity scales the reported value.
+    pub scaling: HirOutputScaling,
+}
+
+/// The `multiplicity` attribute of an operating-point output: whether an
+/// instance with multiplicity `m` reports `m` times the module's value, a
+/// `1/m` share of it, or the value itself.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum HirOutputScaling {
+    #[default]
+    Unscaled,
+    Multiply,
+    Divide,
+}
+
+impl HirOutputVariable {
+    /// The output a declaration's attributes describe, if any: a variable is
+    /// an output when it carries `desc` (or `info`) or `units`.
+    pub(crate) fn from_attributes(attributes: &[crate::ast::Attribute]) -> Option<Self> {
+        let text = |names: &[&str]| {
+            attributes.iter().rev().find_map(|attribute| {
+                names
+                    .iter()
+                    .any(|name| attribute.name.as_str() == *name)
+                    .then(|| match &attribute.value {
+                        Some(crate::ast::Expression::StringLit(text)) => Some(text.value.clone()),
+                        _ => None,
+                    })
+                    .flatten()
+            })
+        };
+        let description = text(&["desc", "info"]);
+        let units = text(&["units", "unit"]);
+        if description.is_none() && units.is_none() {
+            return None;
+        }
+        let scaling = match text(&["multiplicity"]).as_deref() {
+            Some(text) if text.eq_ignore_ascii_case("multiply") => HirOutputScaling::Multiply,
+            Some(text) if text.eq_ignore_ascii_case("divide") => HirOutputScaling::Divide,
+            _ => HirOutputScaling::Unscaled,
+        };
+        Some(Self {
+            units: units.unwrap_or_default(),
+            description: description.unwrap_or_default(),
+            scaling,
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1323,6 +1384,7 @@ impl HirModel {
                     value_type: CanonicalValueType::from(variable.value_type),
                     is_state: variable.is_state,
                     retains_input: variable.retains_input,
+                    output: variable.output.clone(),
                 })
                 .collect(),
             arrays,

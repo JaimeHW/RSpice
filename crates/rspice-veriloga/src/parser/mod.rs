@@ -1071,7 +1071,8 @@ impl<'a> Parser<'a> {
                 module.aliasparams.push(alias);
             }
             TokenKind::Real | TokenKind::Integer | TokenKind::String => {
-                let var = self.parse_variable_decl()?;
+                let mut var = self.parse_variable_decl()?;
+                var.attributes = attributes.clone();
                 module.variables.push(var);
             }
             TokenKind::Electrical | TokenKind::Voltage | TokenKind::Current => {
@@ -1925,6 +1926,7 @@ impl<'a> Parser<'a> {
                         span: item.span,
                     })
                     .collect(),
+                attributes: Vec::new(),
                 span: declaration.span,
             }),
             // `time` is the unsigned 64-bit reg a module-level `time` declares;
@@ -2290,6 +2292,7 @@ impl<'a> Parser<'a> {
         Ok(VariableDecl {
             var_type,
             items,
+            attributes: Vec::new(),
             span: start.extend(self.previous_span()),
         })
     }

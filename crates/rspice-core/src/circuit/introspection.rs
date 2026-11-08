@@ -25,6 +25,42 @@ pub struct DeviceOpEntry {
     pub region: Option<&'static str>,
     /// Named operating-point quantities in display order.
     pub params: Vec<(&'static str, Value)>,
+    /// What a runtime-compiled Verilog-A instance reports under its module's
+    /// own names; `None` for every other device.
+    pub module: Option<ModuleOpReport>,
+}
+
+/// A runtime-compiled Verilog-A instance's operating point, named by its
+/// module: the current entering each terminal, then each module variable the
+/// source describes as an output, in declaration order.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModuleOpReport {
+    /// The module's name.
+    pub module: String,
+    pub quantities: Vec<ModuleOpQuantity>,
+}
+
+/// One quantity a module reports, with the units and description its source
+/// gives it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModuleOpQuantity {
+    /// `i` and the port name for a terminal current (`iout`), the variable's
+    /// own name for an output (`gm`). `@x1[name]` reads it.
+    pub name: String,
+    pub value: Value,
+    /// Empty when the source gives none.
+    pub units: String,
+    /// Empty when the source gives none.
+    pub description: String,
+}
+
+impl ModuleOpReport {
+    /// The quantity `name` names, compared as a deck compares names.
+    pub fn quantity(&self, name: &str) -> Option<&ModuleOpQuantity> {
+        self.quantities
+            .iter()
+            .find(|quantity| quantity.name.eq_ignore_ascii_case(name))
+    }
 }
 
 impl DeviceOpEntry {
@@ -50,7 +86,46 @@ impl DeviceOpEntry {
                 .into_iter()
                 .map(|(label, value)| (label.as_str(), value))
                 .collect(),
+            module: None,
         }
+    }
+
+    /// The entry of a runtime-compiled Verilog-A instance, which names its
+    /// quantities itself.
+    pub fn module(name: String, module: ModuleOpReport) -> Self {
+        Self {
+            name,
+            device_kind: OpLabel::VERILOGA.as_str(),
+            region: None,
+            params: Vec::new(),
+            module: Some(module),
+        }
+    }
+
+    /// What a table lists the device as: a Verilog-A instance's module, any
+    /// other device's family.
+    pub fn family(&self) -> &str {
+        self.module
+            .as_ref()
+            .map_or(self.device_kind, |module| module.module.as_str())
+    }
+
+    /// Every reported quantity in display order: the family's, each without
+    /// units of its own, then a module's, each with the units its source
+    /// gives it.
+    pub fn quantities(&self) -> impl Iterator<Item = (&str, Value, Option<&str>)> + '_ {
+        self.params
+            .iter()
+            .map(|(name, value)| (*name, *value, None))
+            .chain(self.module.iter().flat_map(|module| {
+                module.quantities.iter().map(|quantity| {
+                    (
+                        quantity.name.as_str(),
+                        quantity.value,
+                        Some(quantity.units.as_str()),
+                    )
+                })
+            }))
     }
 
     /// True when every label this entry carries can be read back.
@@ -1010,6 +1085,8 @@ impl CircuitData {
         self.apply_veriloga_terminal_meters(&mut report, solution)?;
         self.add_conductive_power_observations(&mut report, solution)?;
         self.add_intrinsic_voltage_observations(&mut report, solution)?;
+        #[cfg(feature = "veriloga")]
+        self.add_runtime_veriloga_operating_points(&mut report, solution)?;
         Ok(report)
     }
 

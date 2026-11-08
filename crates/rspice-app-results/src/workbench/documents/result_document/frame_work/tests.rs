@@ -316,6 +316,7 @@ fn operating_point_analysis() -> AnalysisResult {
                     ("vds", 1.8),
                     ("gm", 1.0e-3),
                 ],
+                module: None,
             })
             .collect(),
     };

@@ -145,14 +145,13 @@ fn device_matches(entry: &DeviceOpEntry, filter: &str, root: &str) -> bool {
     entry.name.to_ascii_lowercase().contains(&filter)
         || scope.to_ascii_lowercase().contains(&filter)
         || leaf.to_ascii_lowercase().contains(&filter)
-        || entry.device_kind.to_ascii_lowercase().contains(&filter)
+        || entry.family().to_ascii_lowercase().contains(&filter)
         || entry
             .region
             .is_some_and(|region| region.to_ascii_lowercase().contains(&filter))
         || entry
-            .params
-            .iter()
-            .any(|(name, _)| name.to_ascii_lowercase().contains(&filter))
+            .quantities()
+            .any(|(name, _, _)| name.to_ascii_lowercase().contains(&filter))
 }
 fn sort_groups_by_leaf(groups: &mut BTreeMap<String, Vec<(String, usize)>>) {
     for rows in groups.values_mut() {
@@ -229,7 +228,8 @@ fn grouped_devices(
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct OpScope {
     scope: String,
-    columns: Vec<(&'static str, &'static str)>,
+    /// Each quantity column's name and units.
+    columns: Vec<(String, String)>,
     count: usize,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -391,10 +391,9 @@ impl OpPlan {
 const DEVICE_FAMILY_ORDER: [&str; 3] = ["MOSFET", "BJT", "DIODE"];
 fn device_sort_value(entry: &DeviceOpEntry, key: &str) -> Option<f64> {
     entry
-        .params
-        .iter()
-        .find(|(candidate, _)| candidate.eq_ignore_ascii_case(key))
-        .map(|(_, value)| *value)
+        .quantities()
+        .find(|(candidate, _, _)| candidate.eq_ignore_ascii_case(key))
+        .map(|(_, value, _)| value)
         .filter(|value| value.is_finite())
 }
 fn device_family_rank(family: &str) -> usize {
@@ -403,19 +402,19 @@ fn device_family_rank(family: &str) -> usize {
         .position(|known| known.eq_ignore_ascii_case(family))
         .unwrap_or(DEVICE_FAMILY_ORDER.len())
 }
-fn device_columns(
-    report: &DeviceOpReport,
-    rows: &[(String, usize)],
-) -> Vec<(&'static str, &'static str)> {
+fn device_columns(report: &DeviceOpReport, rows: &[(String, usize)]) -> Vec<(String, String)> {
     let mut shown: Vec<usize> = rows.iter().map(|(_, index)| *index).collect();
     shown.sort_unstable();
-    let mut columns: Vec<(usize, &'static str, &'static str)> = Vec::new();
+    let mut columns: Vec<(usize, String, String)> = Vec::new();
     for index in shown {
         let entry = &report.entries[index];
         let rank = device_family_rank(entry.device_kind);
-        for (name, _) in &entry.params {
+        // A module states its quantities' units; a family's come from the
+        // family's own table.
+        for (name, _, units) in entry.quantities() {
             if !columns.iter().any(|(_, candidate, _)| candidate == name) {
-                columns.push((rank, *name, device_param_unit(entry.device_kind, name)));
+                let units = units.unwrap_or_else(|| device_param_unit(entry.device_kind, name));
+                columns.push((rank, name.to_owned(), units.to_owned()));
             }
         }
     }
@@ -520,7 +519,7 @@ fn column_header(ui: &mut Ui, width: f32, columns: &[(f32, &str, bool)]) -> egui
 fn device_column_header(
     ui: &mut Ui,
     width: f32,
-    columns: &[(&'static str, &'static str)],
+    columns: &[(String, String)],
     scope: &str,
     sort: Option<&(String, bool)>,
 ) -> Option<String> {
@@ -529,7 +528,11 @@ fn device_column_header(
         (KIND_W, "Family", false),
         (REGION_W, "Region", false),
     ];
-    headers.extend(columns.iter().map(|(name, _)| (VALUE_MIN_W, *name, true)));
+    headers.extend(
+        columns
+            .iter()
+            .map(|(name, _)| (VALUE_MIN_W, name.as_str(), true)),
+    );
     headers.push((ACTION_W, "", false));
     let rect = column_header(ui, width, &headers);
     let t = Tokens::get(ui.ctx());
@@ -544,7 +547,7 @@ fn device_column_header(
         let ascending = selected && sort.is_some_and(|(_, ascending)| *ascending);
         let response = ui.interact(
             cell,
-            ui.id().with(("op-sort", scope, *key)),
+            ui.id().with(("op-sort", scope, key.as_str())),
             egui::Sense::click(),
         );
         response.widget_info(|| {
@@ -1050,9 +1053,8 @@ fn show_device_card(
                         .allocate_exact_size(egui::vec2(table_width, ROW_H), egui::Sense::hover());
                     response.widget_info(|| {
                         let values = entry
-                            .params
-                            .iter()
-                            .map(|(name, value)| format!("{name} {value}"))
+                            .quantities()
+                            .map(|(name, value, _)| format!("{name} {value}"))
                             .collect::<Vec<_>>()
                             .join(", ");
                         egui::WidgetInfo::labeled(
@@ -1060,7 +1062,7 @@ fn show_device_card(
                             true,
                             format!(
                                 "{} device {}, region {}, {}",
-                                entry.device_kind,
+                                entry.family(),
                                 entry.name,
                                 entry.region.unwrap_or("not reported"),
                                 values,
@@ -1069,16 +1071,15 @@ fn show_device_card(
                     });
                     ui.ctx().accesskit_node_builder(response.id, |node| {
                         let values = entry
-                            .params
-                            .iter()
-                            .map(|(name, value)| format!("{name} {value}"))
+                            .quantities()
+                            .map(|(name, value, _)| format!("{name} {value}"))
                             .collect::<Vec<_>>()
                             .join(", ");
                         node.set_role(egui::accesskit::Role::Row);
                         node.set_label(format!(
                             "Instance {}; family {}; region {}; {}",
                             entry.name,
-                            entry.device_kind,
+                            entry.family(),
                             entry.region.unwrap_or("not reported"),
                             values,
                         ));
@@ -1104,7 +1105,7 @@ fn show_device_card(
                     paint_cell(
                         ui,
                         op_column_rect(rect, NAME_W, KIND_W),
-                        entry.device_kind,
+                        entry.family(),
                         egui::Align2::LEFT_CENTER,
                         theme::mono(tokens::FS_0, FontWeight::Regular),
                         colors.text_dim,
@@ -1121,14 +1122,13 @@ fn show_device_card(
                     }
                     for (index, (name, unit)) in columns.iter().enumerate() {
                         let text = entry
-                            .params
-                            .iter()
-                            .find(|(candidate, _)| candidate == name)
-                            .map(|(_, value)| {
+                            .quantities()
+                            .find(|(candidate, _, _)| candidate == name)
+                            .map(|(_, value, _)| {
                                 if unit.is_empty() {
-                                    rspice_vocabulary::property::format_engineering(*value)
+                                    rspice_vocabulary::property::format_engineering(value)
                                 } else {
-                                    fmt_si(*value, unit, 4)
+                                    fmt_si(value, unit, 4)
                                 }
                             })
                             .unwrap_or_else(|| "—".to_owned());
@@ -1285,6 +1285,7 @@ pub fn evidence_fixture(nodes: usize, devices: usize) -> (DcOpResult, DeviceOpRe
                 device_kind: "MOSFET",
                 region: Some("saturation"),
                 params: vec![("gm", index as f64 * 1.0e-3), ("id", 1.0e-6)],
+                module: None,
             })
             .collect(),
     };
@@ -1355,6 +1356,7 @@ mod tests {
             device_kind: "MOSFET",
             region: Some("saturation"),
             params: vec![("gm", 1.2e-3)],
+            module: None,
         };
         assert!(device_matches(&entry, "xafe", "amplifier"));
         assert!(device_matches(&entry, "mosfet", "amplifier"));
@@ -1388,24 +1390,28 @@ mod tests {
                     device_kind: "MOSFET",
                     region: Some("cutoff"),
                     params: vec![],
+                    module: None,
                 },
                 DeviceOpEntry {
                     name: "M_low".to_owned(),
                     device_kind: "MOSFET",
                     region: Some("saturation"),
                     params: vec![("gm", 1.0e-3)],
+                    module: None,
                 },
                 DeviceOpEntry {
                     name: "M_high".to_owned(),
                     device_kind: "MOSFET",
                     region: Some("saturation"),
                     params: vec![("gm", 3.0e-3)],
+                    module: None,
                 },
                 DeviceOpEntry {
                     name: "M_negative".to_owned(),
                     device_kind: "MOSFET",
                     region: Some("saturation"),
                     params: vec![("gm", -4.0e-3)],
+                    module: None,
                 },
             ],
         };
@@ -1440,12 +1446,14 @@ mod tests {
                     device_kind: "BJT",
                     region: Some("forward"),
                     params: vec![("ic", 1.0e-3), ("vbe", 0.7)],
+                    module: None,
                 },
                 DeviceOpEntry {
                     name: "m_second".to_owned(),
                     device_kind: "MOSFET",
                     region: Some("saturation"),
                     params: vec![("gm", 2.0e-3), ("vgs", 1.1)],
+                    module: None,
                 },
             ],
         };

@@ -882,7 +882,13 @@ fn an_unnamed_terminal_adds_nothing_to_the_circuit() {
     let metered = operating_point(&deck(".save v(a) @x1[ip]"));
     assert_eq!(plain.node_names.len() + 1, metered.node_names.len());
     assert_eq!(plain.branch_names.len() + 1, metered.branch_names.len());
-    assert!(plain.try_dc_observable_named("x1:ip").is_none());
+    // The instance's operating point reports the current without a meter,
+    // and the two agree.
+    assert_static(
+        "unmetered @x1[ip]",
+        observable(&plain, "x1:ip"),
+        observable(&metered, "x1:ip"),
+    );
     assert_static(
         "metered @x1[ip]",
         observable(&metered, "x1:ip"),

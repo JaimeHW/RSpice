@@ -480,6 +480,7 @@ impl SemanticAnalyzer {
                         is_state: true,
                         retains_input: false,
                         is_event_controlled: true,
+                        output: None,
                     });
                     module.event_state_variables.push(base + offset);
                 }

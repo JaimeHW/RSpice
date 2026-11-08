@@ -5742,6 +5742,20 @@ impl VerilogADevice {
         Ok(())
     }
 
+    /// A copy of the instance whose terminals sit on `nodes`, one distinct
+    /// solver node each, in terminal order.
+    ///
+    /// For a host that evaluates the instance apart from its circuit: with a
+    /// row of its own, each terminal's stamp row sums to the current entering
+    /// that terminal, even where two terminals share a net or one is grounded.
+    pub fn try_with_terminal_nodes(&self, nodes: &[usize]) -> Result<Self, VmError> {
+        Self::validate_solver_indices("terminal", nodes, self.node_mapping.len())?;
+        let mut copy = self.clone();
+        copy.node_mapping.copy_from_slice(nodes);
+        copy.rebuild_matrix_indices();
+        Ok(copy)
+    }
+
     /// Read terminals the device was given a node for as unconnected:
     /// `$port_connected` returns 0 for each, and each keeps its node.
     ///

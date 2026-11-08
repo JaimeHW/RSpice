@@ -482,6 +482,9 @@ pub struct AnalyzedVariable {
     /// Written by an analog event body or the discrete-domain scheduler.
     /// Distinct from declaration/analog initialization and ordinary retention.
     pub is_event_controlled: bool,
+    /// What the module reports this variable as at an operating point, when
+    /// its declaration describes it as an output.
+    pub output: Option<crate::canonical_ir::HirOutputVariable>,
 }
 
 /// Analyzed internal node (not connected to external ports)

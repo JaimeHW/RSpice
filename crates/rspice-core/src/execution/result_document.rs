@@ -1924,6 +1924,10 @@ pub struct DeviceParameterSeries {
     pub name: String,
     #[serde(with = "wire::optional_signal_unit")]
     pub unit: Option<SignalUnit>,
+    /// What the quantity is, where its source says: a Verilog-A module's
+    /// `desc` for each output it reports.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     pub values: Vec<Option<f64>>,
 }
 

@@ -397,6 +397,78 @@ pub struct ProjectDeviceOpEntry {
     pub region: Option<String>,
     #[serde(default)]
     pub params: Vec<ProjectNamedValue>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub module: Option<ProjectModuleOp>,
+}
+
+/// A runtime Verilog-A instance's operating point under its module's names.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProjectModuleOp {
+    pub module: String,
+    #[serde(default)]
+    pub quantities: Vec<ProjectModuleQuantity>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProjectModuleQuantity {
+    pub name: String,
+    pub value: f64,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub units: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
+}
+
+impl ProjectModuleOp {
+    fn validate(&self, prefix: &str) -> Result<(), String> {
+        if self.module.trim().is_empty() {
+            return Err(format!("{prefix}.module is empty"));
+        }
+        for (idx, quantity) in self.quantities.iter().enumerate() {
+            let prefix = format!("{prefix}.quantities[{idx}]");
+            if quantity.name.trim().is_empty() {
+                return Err(format!("{prefix}.name is empty"));
+            }
+            require_finite(quantity.value, &format!("{prefix}.value"))?;
+        }
+        Ok(())
+    }
+}
+
+impl From<ProjectModuleOp> for rspice_core::circuit::ModuleOpReport {
+    fn from(module: ProjectModuleOp) -> Self {
+        Self {
+            module: module.module,
+            quantities: module
+                .quantities
+                .into_iter()
+                .map(|quantity| rspice_core::circuit::ModuleOpQuantity {
+                    name: quantity.name,
+                    value: quantity.value,
+                    units: quantity.units,
+                    description: quantity.description,
+                })
+                .collect(),
+        }
+    }
+}
+
+impl From<&rspice_core::circuit::ModuleOpReport> for ProjectModuleOp {
+    fn from(module: &rspice_core::circuit::ModuleOpReport) -> Self {
+        Self {
+            module: module.module.clone(),
+            quantities: module
+                .quantities
+                .iter()
+                .map(|quantity| ProjectModuleQuantity {
+                    name: quantity.name.clone(),
+                    value: quantity.value,
+                    units: quantity.units.clone(),
+                    description: quantity.description.clone(),
+                })
+                .collect(),
+        }
+    }
 }
 
 impl ProjectDeviceOpEntry {
@@ -410,6 +482,7 @@ impl ProjectDeviceOpEntry {
                 .into_iter()
                 .map(|param| (intern_static_label(param.name), param.value))
                 .collect(),
+            module: self.module.map(Into::into),
         }
     }
 
@@ -420,6 +493,9 @@ impl ProjectDeviceOpEntry {
         }
         for (idx, param) in self.params.iter().enumerate() {
             param.validate(&format!("{prefix}.params[{idx}]"))?;
+        }
+        if let Some(module) = &self.module {
+            module.validate(&format!("{prefix}.module"))?;
         }
         Ok(())
     }
@@ -439,6 +515,7 @@ impl From<&rspice_core::circuit::DeviceOpEntry> for ProjectDeviceOpEntry {
                     value: *value,
                 })
                 .collect(),
+            module: entry.module.as_ref().map(ProjectModuleOp::from),
         }
     }
 }

@@ -9884,6 +9884,12 @@ impl Engine {
                                 prepared.canonical_ir.as_deref(),
                                 &device,
                             );
+                            if let Some(artifact) = &prepared.canonical_ir {
+                                circuit.veriloga_instance_modules.insert(
+                                    element.name.to_ascii_lowercase(),
+                                    std::sync::Arc::clone(artifact),
+                                );
+                            }
                             circuit.add_veriloga_device(device);
                             continue;
                         }

@@ -257,15 +257,31 @@ fn print_device_op_report(
             .region
             .map(|region| format!(" [{}]", region))
             .unwrap_or_default();
+        // A Verilog-A instance is listed under its module, its quantities
+        // under the module's names and units.
+        let kind = entry
+            .module
+            .as_ref()
+            .map_or(entry.device_kind, |module| module.module.as_str());
         let params = entry
             .params
             .iter()
             .map(|(name, value)| format!("{}={}", name, format_engineering(*value)))
+            .chain(entry.module.iter().flat_map(|module| {
+                module.quantities.iter().map(|quantity| {
+                    format!(
+                        "{}={}{}",
+                        quantity.name,
+                        format_engineering(quantity.value),
+                        quantity.units
+                    )
+                })
+            }))
             .collect::<Vec<_>>()
             .join("  ");
         crate::console::line(format_args!(
             "  {:<16} {:<7}{} {}",
-            entry.name, entry.device_kind, region, params
+            entry.name, kind, region, params
         ))?;
     }
     if report.entries.len() > cap {

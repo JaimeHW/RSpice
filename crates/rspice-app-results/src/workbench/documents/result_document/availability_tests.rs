@@ -499,6 +499,7 @@ fn op_viewer_requires_the_selected_analysis_device_report() {
             device_kind: "MOSFET",
             region: Some("saturation"),
             params: Vec::new(),
+            module: None,
         }],
     };
     let mut run = SimulationRun::new(1);

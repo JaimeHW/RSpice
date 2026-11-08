@@ -256,7 +256,8 @@ use smol_str::SmolStr;
 /// of clamping them. Earlier artifacts must be rebuilt from source. Version 18
 /// fixed constant integer comparisons; version 17 fixed digital range arithmetic.
 /// Version 186 ties to ground an internal node that no contribution reaches.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 186;
+/// Version 187 records which module variables are operating-point outputs.
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 187;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {

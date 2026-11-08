@@ -119,6 +119,7 @@ fn an_operating_point_label_outside_the_vocabulary_is_still_refused() {
             device_kind: "DIODE",
             region: None,
             params: vec![("vd", 0.7), ("vendor-quantity", 1.0)],
+            module: None,
         }],
     };
     let mut simulation = SimulationState::default();

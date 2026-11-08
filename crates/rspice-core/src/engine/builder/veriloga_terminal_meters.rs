@@ -58,6 +58,10 @@ pub(super) struct InstancePorts {
     /// no device parameter other than these terminal currents.
     pub(super) runtime: bool,
     pub(super) ports: Vec<InstancePort>,
+    /// The module variables a runtime instance reports beside its terminal
+    /// currents, lower case. One that shares a terminal current's label is
+    /// what the label reads, so that terminal gets no meter for it.
+    pub(super) outputs: Vec<String>,
 }
 
 /// What an X-card instance is called in a diagnostic.
@@ -325,11 +329,25 @@ pub(super) fn runtime_instance_ports(
             }
         })
         .collect();
+    let outputs = entry
+        .canonical_ir
+        .as_deref()
+        .map(|artifact| {
+            artifact
+                .hir
+                .variables
+                .iter()
+                .filter(|variable| variable.output.is_some())
+                .map(|variable| variable.name.to_ascii_lowercase())
+                .collect()
+        })
+        .unwrap_or_default();
     InstancePorts {
         module: entry.model.name.to_string(),
         subject: INSTANCE,
         runtime: true,
         ports,
+        outputs,
     }
 }
 
@@ -370,6 +388,7 @@ fn catalog_ports(
         subject,
         runtime: false,
         ports,
+        outputs: Vec::new(),
     })
 }
 
@@ -419,6 +438,8 @@ fn terminal_forms(instance: &str, ports: &InstancePorts) -> String {
         .ports
         .iter()
         .flat_map(|port| std::iter::once(&port.label).chain(&port.aliases))
+        .filter(|label| !ports.outputs.contains(label))
+        .chain(&ports.outputs)
         .map(|label| format!("@{instance}[{label}]"))
         .collect::<Vec<_>>()
         .join(", ")
@@ -485,13 +506,15 @@ pub(super) fn materialize(
         }
         if ports.runtime {
             for param in requests.parameters_of(instance) {
-                if !ports.ports.iter().any(|port| port.label == param) {
+                if !ports.ports.iter().any(|port| port.label == param)
+                    && !ports.outputs.iter().any(|output| output == param)
+                {
                     return Err(refusal(
                         instance,
                         module,
                         format!(
-                            "`@{instance}[{param}]` names no terminal of the {subject} \
-                             '{instance}' of '{module}'; its terminal currents are {}",
+                            "`@{instance}[{param}]` names nothing the {subject} '{instance}' \
+                             of '{module}' reports; it reports {}",
                             terminal_forms(instance, &ports)
                         ),
                     ));
@@ -505,6 +528,7 @@ pub(super) fn materialize(
             if !primary
                 && !std::iter::once(&port.label)
                     .chain(&port.aliases)
+                    .filter(|label| !ports.outputs.contains(label))
                     .any(|label| requests.selects_terminal(instance, label))
             {
                 continue;

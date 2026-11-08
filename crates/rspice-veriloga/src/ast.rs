@@ -1018,6 +1018,10 @@ pub struct VariableDecl {
     pub var_type: VarType,
     /// Variable names and optional array dimensions
     pub items: Vec<VariableItem>,
+    /// Attribute instances written before the declaration. A module-scope
+    /// variable whose attributes give it `desc` or `units` is an
+    /// operating-point output of the module.
+    pub attributes: Vec<Attribute>,
     /// Source span
     pub span: Span,
 }

@@ -174,6 +174,7 @@ fn operating_point_app(devices: usize) -> RSpiceApp {
                     device_kind: "MOSFET",
                     region: Some("saturation"),
                     params: Vec::new(),
+                    module: None,
                 })
                 .collect(),
         },
@@ -747,6 +748,7 @@ pub(super) fn app_showing(viewer: ResultViewer) -> RSpiceApp {
                     device_kind: "MOSFET",
                     region: Some("saturation"),
                     params: Vec::new(),
+                    module: None,
                 }],
             },
         ),

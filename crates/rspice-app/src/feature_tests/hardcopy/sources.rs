@@ -798,6 +798,7 @@ fn device_only_operating_point_hardcopy_preserves_the_device_table() {
                 device_kind: "MOSFET",
                 region: Some("saturation"),
                 params: vec![("gm", 1.25e-3), ("vds", 0.8)],
+                module: None,
             }],
         },
     );

@@ -433,7 +433,12 @@ use rspice_core::analysis::harmonic_balance::{
 // again.
 // One projection query lets the CLI's operating-point export skip an
 // unauthored deck's projection.
-const MAX_PUBLIC_ITEMS: usize = 5265;
+// `circuit::ModuleOpReport` and `circuit::ModuleOpQuantity`, the terminal
+// currents and described variables a runtime Verilog-A instance reports at
+// an operating point, with `DeviceOpEntry::module`, `family`, `quantities`
+// and `ModuleOpReport::quantity`, which the CLI, the result document and the
+// operating-point table read them through, bring it to 5,268.
+const MAX_PUBLIC_ITEMS: usize = 5271;
 
 /// The `#[doc(hidden)] pub` items of the family, counted apart from
 /// `MAX_PUBLIC_ITEMS`. A hidden item is plumbing that one crate of the engine

@@ -52,6 +52,8 @@ pub use model_safety::{
 };
 mod terminals;
 pub use terminals::{BjtTerminalLayout, MosTerminalLayout};
+#[cfg(feature = "veriloga")]
+mod module_operating_points;
 mod terminal_meters;
 pub(crate) use terminal_meters::VerilogATerminalMeter;
 mod boundary_edges;
@@ -64,7 +66,9 @@ pub(crate) use external_models::{
 mod capacitive_islands;
 mod force_accept;
 mod introspection;
-pub use introspection::{DcBranchVoltageLoop, DeviceOpEntry, DeviceOpReport};
+pub use introspection::{
+    DcBranchVoltageLoop, DeviceOpEntry, DeviceOpReport, ModuleOpQuantity, ModuleOpReport,
+};
 mod linear_stamping;
 mod magnetic;
 #[cfg(feature = "veriloga")]
@@ -795,6 +799,14 @@ pub struct CircuitData {
     // Verilog-A devices (feature-gated)
     #[cfg(feature = "veriloga")]
     pub(crate) veriloga_devices: crate::device::veriloga::VerilogADevices,
+    /// The compiled module behind each runtime Verilog-A instance, by the
+    /// instance's lower-case name: its operating point reads the module's
+    /// outputs through it.
+    #[cfg(feature = "veriloga")]
+    pub(crate) veriloga_instance_modules: std::collections::HashMap<
+        String,
+        std::sync::Arc<rspice_veriloga::canonical_ir::CanonicalIrArtifact>,
+    >,
     /// Running hosts for instantiated mixed Verilog-AMS modules.
     ///
     /// Beside the analog instances rather than beside `xspice_instances`,

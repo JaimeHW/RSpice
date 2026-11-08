@@ -151,6 +151,8 @@ op_labels! {
     HFET1 = "HFET1",
     HFET2 = "HFET2",
     NONLINEAR_CORE = "NONLINEAR_CORE",
+    /// A runtime-compiled Verilog-A module, whose own names label its report.
+    VERILOGA = "VERILOGA",
 
     // Operating regions.
     CUTOFF = "cutoff",

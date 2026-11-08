@@ -1339,6 +1339,7 @@ mod tests {
                 device_kind: "SOURCE",
                 region: None,
                 params: vec![("id", 2.0e-3)],
+                module: None,
             }],
         });
 

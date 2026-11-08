@@ -90,6 +90,58 @@ pub(crate) struct WorkerDeviceOpEntry {
     pub device_kind: String,
     pub region: Option<String>,
     pub params: Vec<WorkerNamedValue>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub module: Option<WorkerModuleOp>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct WorkerModuleOp {
+    pub module: String,
+    pub quantities: Vec<WorkerModuleQuantity>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct WorkerModuleQuantity {
+    pub name: String,
+    pub value: f64,
+    pub units: String,
+    pub description: String,
+}
+
+impl From<rspice_core::circuit::ModuleOpReport> for WorkerModuleOp {
+    fn from(module: rspice_core::circuit::ModuleOpReport) -> Self {
+        Self {
+            module: module.module,
+            quantities: module
+                .quantities
+                .into_iter()
+                .map(|quantity| WorkerModuleQuantity {
+                    name: quantity.name,
+                    value: quantity.value,
+                    units: quantity.units,
+                    description: quantity.description,
+                })
+                .collect(),
+        }
+    }
+}
+
+impl From<WorkerModuleOp> for rspice_core::circuit::ModuleOpReport {
+    fn from(module: WorkerModuleOp) -> Self {
+        Self {
+            module: module.module,
+            quantities: module
+                .quantities
+                .into_iter()
+                .map(|quantity| rspice_core::circuit::ModuleOpQuantity {
+                    name: quantity.name,
+                    value: quantity.value,
+                    units: quantity.units,
+                    description: quantity.description,
+                })
+                .collect(),
+        }
+    }
 }
 
 impl From<rspice_core::circuit::DeviceOpEntry> for WorkerDeviceOpEntry {
@@ -106,6 +158,7 @@ impl From<rspice_core::circuit::DeviceOpEntry> for WorkerDeviceOpEntry {
                     value,
                 })
                 .collect(),
+            module: value.module.map(WorkerModuleOp::from),
         }
     }
 }
@@ -121,6 +174,7 @@ impl From<WorkerDeviceOpEntry> for rspice_core::circuit::DeviceOpEntry {
                 .into_iter()
                 .map(|param| (intern_static_label(param.name), param.value))
                 .collect(),
+            module: value.module.map(Into::into),
         }
     }
 }

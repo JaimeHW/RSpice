@@ -513,6 +513,7 @@ impl<'a> HierarchyElaborator<'a> {
                     is_state: false,
                     retains_input: false,
                     is_event_controlled: false,
+                    output: None,
                 });
                 index
             });

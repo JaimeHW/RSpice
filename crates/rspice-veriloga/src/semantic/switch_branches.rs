@@ -41,6 +41,7 @@ impl SwitchState {
                 is_state: false,
                 retains_input: false,
                 is_event_controlled: false,
+                output: None,
             });
             (name, index)
         });

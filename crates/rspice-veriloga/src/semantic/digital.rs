@@ -1148,6 +1148,7 @@ impl SemanticAnalyzer {
                             is_state: true,
                             retains_input: false,
                             is_event_controlled: true,
+                            output: None,
                         });
                     }
                     analyzed.arrays.insert(signal.name.clone(), layout.clone());
@@ -1182,6 +1183,7 @@ impl SemanticAnalyzer {
                     is_state: true,
                     retains_input: false,
                     is_event_controlled: false,
+                    output: None,
                 });
                 self.bind_discrete_read_symbol(signal, value_type);
                 slot
@@ -1335,6 +1337,7 @@ impl SemanticAnalyzer {
                     is_state: true,
                     retains_input: false,
                     is_event_controlled: true,
+                    output: None,
                 });
                 analyzed.event_state_variables.push(validity_slot);
                 analyzed.discrete_inputs.push((value_slot, validity_slot));

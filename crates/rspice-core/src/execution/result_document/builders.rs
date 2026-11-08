@@ -332,6 +332,23 @@ fn require_named_columns(
     Ok(())
 }
 
+/// The unit a module's `units` text states, in the vocabulary a result
+/// document carries; text it has no name for is kept as written.
+fn stated_unit(units: &str) -> Option<SignalUnit> {
+    let units = units.trim();
+    Some(match units {
+        "" => return None,
+        "V" => SignalUnit::Volt,
+        "A" => SignalUnit::Ampere,
+        "S" | "A/V" | "mho" => SignalUnit::Siemens,
+        "Ohm" | "ohm" | "Ohms" | "ohms" => SignalUnit::Ohm,
+        "W" => SignalUnit::Watt,
+        "Hz" => SignalUnit::Hertz,
+        "s" => SignalUnit::Second,
+        _ => SignalUnit::Custom(units.to_owned()),
+    })
+}
+
 /// The branch names a result solved, lower case, for [`device_parameter_unit`].
 fn solved_branch_names<'a>(names: impl IntoIterator<Item = &'a str>) -> HashSet<String> {
     names
@@ -373,6 +390,9 @@ fn device_states_from_reports(
     let mut order: Vec<String> = Vec::new();
     let mut kinds: BTreeMap<String, Option<String>> = BTreeMap::new();
     let mut parameter_order: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    // The units and description a module states for a quantity it reports.
+    let mut stated: BTreeMap<(String, String), (Option<SignalUnit>, Option<String>)> =
+        BTreeMap::new();
     for report in reports {
         for entry in &report.entries {
             if entry.name.trim().is_empty() {
@@ -384,16 +404,27 @@ fn device_states_from_reports(
             let key = entry.name.to_ascii_lowercase();
             if !kinds.contains_key(&key) {
                 order.push(key.clone());
-                kinds.insert(key.clone(), Some(entry.device_kind.to_owned()));
+                kinds.insert(key.clone(), Some(entry.family().to_owned()));
                 parameter_order.insert(key.clone(), Vec::new());
             }
             let parameters = parameter_order
                 .get_mut(&key)
                 .ok_or_else(|| source_error(location, "device parameter order lost its device"))?;
-            for (parameter, _) in &entry.params {
-                if !parameters.iter().any(|known| known.as_str() == *parameter) {
-                    parameters.push((*parameter).to_owned());
+            for (parameter, _, _) in entry.quantities() {
+                if !parameters.iter().any(|known| known.as_str() == parameter) {
+                    parameters.push(parameter.to_owned());
                 }
+            }
+            for quantity in entry.module.iter().flat_map(|module| &module.quantities) {
+                stated
+                    .entry((key.clone(), quantity.name.clone()))
+                    .or_insert_with(|| {
+                        (
+                            stated_unit(&quantity.units),
+                            (!quantity.description.is_empty())
+                                .then(|| quantity.description.clone()),
+                        )
+                    });
             }
         }
     }
@@ -420,10 +451,9 @@ fn device_states_from_reports(
                     regions.push(entry.region.map(str::to_owned));
                     for (index, parameter) in parameters.iter().enumerate() {
                         let value = entry
-                            .params
-                            .iter()
-                            .find(|(name, _)| *name == parameter.as_str())
-                            .map(|(_, value)| *value);
+                            .quantities()
+                            .find(|(name, _, _)| *name == parameter.as_str())
+                            .map(|(_, value, _)| value);
                         let value = match value {
                             Some(value) if !value.is_finite() => {
                                 return Err(source_error(
@@ -453,10 +483,20 @@ fn device_states_from_reports(
         let parameters = parameters
             .iter()
             .zip(columns)
-            .map(|(name, values)| DeviceParameterSeries {
-                unit: device_parameter_unit(&display_name, name, solved_branches),
-                name: name.clone(),
-                values,
+            .map(|(name, values)| {
+                let (unit, description) = match stated.get(&(key.clone(), name.clone())) {
+                    Some((unit, description)) => (unit.clone(), description.clone()),
+                    None => (
+                        device_parameter_unit(&display_name, name, solved_branches),
+                        None,
+                    ),
+                };
+                DeviceParameterSeries {
+                    unit,
+                    description,
+                    name: name.clone(),
+                    values,
+                }
             })
             .collect();
         states.push(DeviceStateSeries::new(
@@ -945,6 +985,7 @@ impl AnalysisResultDocument {
             entry.push(DeviceParameterSeries {
                 name: trace.parameter.clone(),
                 unit: device_parameter_unit(&trace.device_name, &trace.parameter, &solved_branches),
+                description: None,
                 values: finite_samples(LOCATION, &trace.parameter, &trace.values)?,
             });
         }

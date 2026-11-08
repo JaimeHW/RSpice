@@ -160,6 +160,7 @@ pub(super) fn lower(source: &Module) -> CompileResult<LoweredAnalogEvents> {
                     init: None,
                     span: binding.span,
                 }],
+                attributes: Vec::new(),
                 span: binding.span,
             });
         }
@@ -176,6 +177,7 @@ pub(super) fn lower(source: &Module) -> CompileResult<LoweredAnalogEvents> {
         if binding.observation.is_none() {
             module.variables.push(VariableDecl {
                 var_type: VarType::Integer,
+                attributes: Vec::new(),
                 span,
                 items: vec![VariableItem {
                     name: binding.variable.clone(),

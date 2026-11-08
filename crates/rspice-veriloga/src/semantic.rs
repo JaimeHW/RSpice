@@ -2187,6 +2187,15 @@ impl SemanticAnalyzer {
                     is_state: false,
                     retains_input: false,
                     is_event_controlled: false,
+                    // A numeric module variable the source describes is an
+                    // operating-point output.
+                    output: (var_decl.var_type != VarType::String)
+                        .then(|| {
+                            crate::canonical_ir::HirOutputVariable::from_attributes(
+                                &var_decl.attributes,
+                            )
+                        })
+                        .flatten(),
                 });
 
                 if completes_integer_port {
@@ -2295,6 +2304,7 @@ impl SemanticAnalyzer {
                 is_state: false,
                 retains_input: false,
                 is_event_controlled: false,
+                output: None,
             });
 
             // A localparam is a constant expression wherever it is declared,
@@ -2855,6 +2865,7 @@ impl SemanticAnalyzer {
                 is_state: false,
                 retains_input: false,
                 is_event_controlled: false,
+                output: None,
             });
         }
         Some(AnalyzedArray {
@@ -3020,6 +3031,7 @@ impl SemanticAnalyzer {
             is_state: false,
             retains_input: false,
             is_event_controlled: false,
+            output: None,
         });
         self.define_symbol(Symbol {
             name,
@@ -3515,6 +3527,7 @@ impl SemanticAnalyzer {
                             is_state: false,
                             retains_input: false,
                             is_event_controlled: false,
+                            output: None,
                         });
                         self.define_symbol(Symbol {
                             name: hoisted.clone(),
@@ -4422,6 +4435,7 @@ impl SemanticAnalyzer {
             is_state: false,
             retains_input: false,
             is_event_controlled: false,
+            output: None,
         });
         self.define_symbol(Symbol {
             name: name.clone(),
@@ -4665,6 +4679,7 @@ impl SemanticAnalyzer {
                 is_state: false,
                 retains_input: false,
                 is_event_controlled: false,
+                output: None,
             });
             this.define_symbol(Symbol {
                 name: name.clone(),
@@ -5083,6 +5098,7 @@ impl SemanticAnalyzer {
                     is_state: true,
                     retains_input: false,
                     is_event_controlled: true,
+                    output: None,
                 });
             }
             module.event_state_variables.extend([value, value + 1]);
@@ -5784,6 +5800,7 @@ impl SemanticAnalyzer {
             is_state: false,
             retains_input: false,
             is_event_controlled: false,
+            output: None,
         });
         self.task_vars.insert(name.into(), var_index);
         // The reset runs unconditionally: every evaluation starts neutral
