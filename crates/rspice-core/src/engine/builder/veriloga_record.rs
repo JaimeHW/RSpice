@@ -17,6 +17,10 @@
 //! bytes that remain, nesting is bounded, and a malformed record is an error,
 //! never a panic. The record's checksum is verified before decoding starts,
 //! so a damaged file is refused without being interpreted at all.
+//!
+//! [`encode_detached`] writes a value with some of its largest sequences set
+//! apart in chunks of whole elements, each encoded on its own, so that a
+//! reader can decode them side by side and join them.
 
 use serde::de::{self, DeserializeSeed, IntoDeserializer, Visitor};
 use serde::ser::{self, Serialize};
@@ -80,23 +84,52 @@ impl de::Error for RecordCodecError {
 type Result<T> = std::result::Result<T, RecordCodecError>;
 
 /// Encode `value`.
+#[cfg(any(test, feature = "veriloga-native"))]
 pub(super) fn encode<T: Serialize + ?Sized>(value: &T) -> Result<Vec<u8>> {
-    let mut encoder = Encoder {
-        out: Vec::new(),
-        names: HashMap::new(),
-    };
+    let mut encoder = Encoder::new(Vec::new());
     value.serialize(&mut encoder)?;
     Ok(encoder.out)
 }
 
 /// The length [`encode`] would return, without building the encoding.
 pub(super) fn encoded_len<T: Serialize + ?Sized>(value: &T) -> Result<usize> {
-    let mut encoder = Encoder {
-        out: Count(0),
-        names: HashMap::new(),
-    };
+    let mut encoder = Encoder::new(Count(0));
     value.serialize(&mut encoder)?;
     Ok(encoder.out.0)
+}
+
+/// A value encoded with some sequences set apart, by [`encode_detached`].
+pub(super) struct DetachedEncoding {
+    /// The value, with each detached sequence written as an empty one.
+    pub(super) main: Vec<u8>,
+    /// For each detached field, in the order named, its chunks. Each chunk
+    /// decodes on its own as a sequence of that field's elements, and the
+    /// chunks in order are the whole sequence.
+    pub(super) chunks: Vec<Vec<Vec<u8>>>,
+}
+
+/// Encode `value`, setting apart the sequences in the fields named `fields`
+/// of the struct in its field `parent`, in chunks of about `chunk_bytes`.
+pub(super) fn encode_detached<T: Serialize + ?Sized>(
+    value: &T,
+    parent: &'static str,
+    fields: &[&'static str],
+    chunk_bytes: usize,
+) -> Result<DetachedEncoding> {
+    let mut encoder = Encoder::new(Vec::new());
+    encoder.detach = Some(Box::new(Detach {
+        parent,
+        fields: fields.to_vec(),
+        chunk_bytes,
+        path: Vec::new(),
+        chunks: vec![Vec::new(); fields.len()],
+    }));
+    value.serialize(&mut encoder)?;
+    let chunks = encoder.detach.map_or_else(Vec::new, |detach| detach.chunks);
+    Ok(DetachedEncoding {
+        main: encoder.out,
+        chunks,
+    })
 }
 
 /// Decode a value [`encode`] wrote. Every byte of `bytes` must belong to it.
@@ -149,9 +182,50 @@ struct Encoder<S> {
     out: S,
     /// Each field name written so far, by its table index.
     names: HashMap<&'static str, u64>,
+    detach: Option<Box<Detach>>,
+}
+
+/// Which sequences [`encode_detached`] sets apart, and those it has.
+struct Detach {
+    parent: &'static str,
+    fields: Vec<&'static str>,
+    chunk_bytes: usize,
+    /// The struct fields the encoder is inside of, outermost first.
+    path: Vec<&'static str>,
+    chunks: Vec<Vec<Vec<u8>>>,
 }
 
 impl<S: Sink> Encoder<S> {
+    fn new(out: S) -> Self {
+        Self {
+            out,
+            names: HashMap::new(),
+            detach: None,
+        }
+    }
+
+    /// Encode one struct field's value, setting it apart when it is one of
+    /// the detached sequences.
+    fn field<T: Serialize + ?Sized>(&mut self, key: &'static str, value: &T) -> Result<()> {
+        let Some(detach) = self.detach.as_mut() else {
+            return value.serialize(self);
+        };
+        let detached = (detach.path.len() == 1 && detach.path[0] == detach.parent)
+            .then(|| detach.fields.iter().position(|field| *field == key))
+            .flatten();
+        if let Some(index) = detached {
+            let chunk_bytes = detach.chunk_bytes;
+            detach.chunks[index] = value.serialize(SequenceChunker { chunk_bytes })?;
+            self.tagged_len(SEQ, 0);
+            return Ok(());
+        }
+        detach.path.push(key);
+        let encoded = value.serialize(&mut *self);
+        if let Some(detach) = self.detach.as_mut() {
+            detach.path.pop();
+        }
+        encoded
+    }
     fn varint(&mut self, mut value: u64) {
         while value >= 0x80 {
             self.out.push((value as u8) | 0x80);
@@ -531,7 +605,7 @@ impl<S: Sink> ser::SerializeStruct for Compound<'_, S> {
         value: &T,
     ) -> Result<()> {
         self.encoder.name(key);
-        value.serialize(&mut *self.encoder)
+        self.encoder.field(key, value)
     }
 
     fn end(self) -> Result<()> {
@@ -550,12 +624,186 @@ impl<S: Sink> ser::SerializeStructVariant for Compound<'_, S> {
         value: &T,
     ) -> Result<()> {
         self.encoder.name(key);
-        value.serialize(&mut *self.encoder)
+        self.encoder.field(key, value)
     }
 
     fn end(self) -> Result<()> {
         self.finish();
         Ok(())
+    }
+}
+
+/// Encodes one sequence as chunks of whole elements, each a sequence that
+/// decodes on its own; anything but a sequence is refused.
+struct SequenceChunker {
+    chunk_bytes: usize,
+}
+
+type Chunks = Vec<Vec<u8>>;
+type NoCompound = ser::Impossible<Chunks, RecordCodecError>;
+
+fn not_a_sequence() -> RecordCodecError {
+    RecordCodecError("only a sequence can be detached from a record".into())
+}
+
+macro_rules! refuse_scalars {
+    ($($method:ident($type:ty)),* $(,)?) => {
+        $(fn $method(self, _value: $type) -> Result<Chunks> {
+            Err(not_a_sequence())
+        })*
+    };
+}
+
+impl ser::Serializer for SequenceChunker {
+    type Ok = Chunks;
+    type Error = RecordCodecError;
+    type SerializeSeq = ChunkedSequence;
+    type SerializeTuple = NoCompound;
+    type SerializeTupleStruct = NoCompound;
+    type SerializeTupleVariant = NoCompound;
+    type SerializeMap = NoCompound;
+    type SerializeStruct = NoCompound;
+    type SerializeStructVariant = NoCompound;
+
+    refuse_scalars!(
+        serialize_bool(bool),
+        serialize_i8(i8),
+        serialize_i16(i16),
+        serialize_i32(i32),
+        serialize_i64(i64),
+        serialize_u8(u8),
+        serialize_u16(u16),
+        serialize_u32(u32),
+        serialize_u64(u64),
+        serialize_f32(f32),
+        serialize_f64(f64),
+        serialize_char(char),
+        serialize_str(&str),
+        serialize_bytes(&[u8]),
+        serialize_unit_struct(&'static str),
+    );
+
+    fn serialize_none(self) -> Result<Chunks> {
+        Err(not_a_sequence())
+    }
+
+    fn serialize_some<T: Serialize + ?Sized>(self, _value: &T) -> Result<Chunks> {
+        Err(not_a_sequence())
+    }
+
+    fn serialize_unit(self) -> Result<Chunks> {
+        Err(not_a_sequence())
+    }
+
+    fn serialize_unit_variant(self, _: &'static str, _: u32, _: &'static str) -> Result<Chunks> {
+        Err(not_a_sequence())
+    }
+
+    fn serialize_newtype_struct<T: Serialize + ?Sized>(
+        self,
+        _name: &'static str,
+        _value: &T,
+    ) -> Result<Chunks> {
+        Err(not_a_sequence())
+    }
+
+    fn serialize_newtype_variant<T: Serialize + ?Sized>(
+        self,
+        _: &'static str,
+        _: u32,
+        _: &'static str,
+        _: &T,
+    ) -> Result<Chunks> {
+        Err(not_a_sequence())
+    }
+
+    fn serialize_seq(self, _len: Option<usize>) -> Result<ChunkedSequence> {
+        Ok(ChunkedSequence {
+            chunk_bytes: self.chunk_bytes,
+            elements: Encoder::new(Vec::new()),
+            count: 0,
+            chunks: Vec::new(),
+        })
+    }
+
+    fn serialize_tuple(self, _len: usize) -> Result<NoCompound> {
+        Err(not_a_sequence())
+    }
+
+    fn serialize_tuple_struct(self, _: &'static str, _: usize) -> Result<NoCompound> {
+        Err(not_a_sequence())
+    }
+
+    fn serialize_tuple_variant(
+        self,
+        _: &'static str,
+        _: u32,
+        _: &'static str,
+        _: usize,
+    ) -> Result<NoCompound> {
+        Err(not_a_sequence())
+    }
+
+    fn serialize_map(self, _len: Option<usize>) -> Result<NoCompound> {
+        Err(not_a_sequence())
+    }
+
+    fn serialize_struct(self, _: &'static str, _: usize) -> Result<NoCompound> {
+        Err(not_a_sequence())
+    }
+
+    fn serialize_struct_variant(
+        self,
+        _: &'static str,
+        _: u32,
+        _: &'static str,
+        _: usize,
+    ) -> Result<NoCompound> {
+        Err(not_a_sequence())
+    }
+
+    fn is_human_readable(&self) -> bool {
+        false
+    }
+}
+
+struct ChunkedSequence {
+    chunk_bytes: usize,
+    /// The elements of the chunk being filled, with a name table of its own.
+    elements: Encoder<Vec<u8>>,
+    count: usize,
+    chunks: Chunks,
+}
+
+impl ChunkedSequence {
+    fn close_chunk(&mut self) {
+        let elements = std::mem::replace(&mut self.elements, Encoder::new(Vec::new()));
+        let mut chunk = Encoder::new(Vec::with_capacity(elements.out.len() + 11));
+        chunk.tagged_len(SEQ, self.count);
+        chunk.out.extend_from_slice(&elements.out);
+        self.chunks.push(chunk.out);
+        self.count = 0;
+    }
+}
+
+impl ser::SerializeSeq for ChunkedSequence {
+    type Ok = Chunks;
+    type Error = RecordCodecError;
+
+    fn serialize_element<T: Serialize + ?Sized>(&mut self, value: &T) -> Result<()> {
+        value.serialize(&mut self.elements)?;
+        self.count += 1;
+        if self.elements.out.len() >= self.chunk_bytes {
+            self.close_chunk();
+        }
+        Ok(())
+    }
+
+    fn end(mut self) -> Result<Chunks> {
+        if self.count > 0 {
+            self.close_chunk();
+        }
+        Ok(self.chunks)
     }
 }
 
@@ -987,7 +1235,7 @@ impl<'de> de::VariantAccess<'de> for VariantContent<'_, 'de> {
 
 #[cfg(test)]
 mod tests {
-    use super::{decode, encode};
+    use super::{decode, encode, encode_detached};
     use serde::{Deserialize, Serialize};
     use std::collections::BTreeMap;
 
@@ -1086,6 +1334,63 @@ mod tests {
                 label: serde_json::json!("inf"),
             }
         );
+    }
+
+    /// The sequences set apart come back, chunk by chunk, as the whole
+    /// sequence; the rest of the value decodes on its own with them empty.
+    /// The same field name anywhere else stays inline.
+    #[test]
+    fn detached_sequences_split_into_chunks_that_decode_on_their_own() {
+        #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+        struct Model {
+            instructions: Vec<Instruction>,
+            programs: Vec<Program>,
+            name: String,
+        }
+        #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+        struct Record {
+            version: u32,
+            model: Model,
+            others: Vec<Program>,
+        }
+        let instructions: Vec<Instruction> = (0..500)
+            .flat_map(|index| program(Some(index as f64), Vec::new()).instructions)
+            .collect();
+        let record = Record {
+            version: 3,
+            model: Model {
+                instructions: instructions.clone(),
+                programs: vec![program(None, vec!["kept".into()]); 40],
+                name: "model".into(),
+            },
+            others: vec![program(None, Vec::new()); 3],
+        };
+
+        let encoded =
+            encode_detached(&record, "model", &["programs", "instructions"], 512).expect("encode");
+        assert_eq!(encoded.chunks.len(), 2);
+        assert!(encoded.chunks.iter().all(|chunks| chunks.len() > 1));
+        let mut main = decode::<Record>(&encoded.main).expect("decode the main section");
+        assert!(main.model.instructions.is_empty() && main.model.programs.is_empty());
+        assert_eq!(
+            main.others, record.others,
+            "only the model's fields are set apart"
+        );
+        for chunk in &encoded.chunks[0] {
+            main.model
+                .programs
+                .extend(decode::<Vec<Program>>(chunk).expect("decode a chunk"));
+        }
+        for chunk in &encoded.chunks[1] {
+            main.model
+                .instructions
+                .extend(decode::<Vec<Instruction>>(chunk).expect("decode a chunk"));
+        }
+        assert_eq!(main, record);
+
+        let nothing_detached = encode_detached(&record, "model", &[], 512).expect("encode");
+        assert_eq!(nothing_detached.main, encode(&record).expect("encode"));
+        assert!(encode_detached(&record, "model", &["name"], 512).is_err());
     }
 
     #[test]

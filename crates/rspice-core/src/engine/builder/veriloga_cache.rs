@@ -552,9 +552,11 @@ use super::*;
 //
 // Version 182 writes the record in the compact binary encoding of
 // `veriloga_record`, sealed by a header that names the record version and the
-// compiler build and carries a checksum of every byte. The compiler build is
-// part of the file name too, so from here on a compiler change no longer
-// needs a bump of this constant to keep its records apart.
+// compiler build, with a checksum of every byte. The model's assignment
+// passes, most of a large record, are set apart in chunks that a reader
+// decodes in parallel. The compiler build is part of the file name too, so
+// from here on a compiler change no longer needs a bump of this constant to
+// keep its records apart.
 pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 182;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_RECORD_EXTENSION: &str = "record";
@@ -565,6 +567,16 @@ pub(super) const VERILOGA_CACHE_TEMPORARY_EXTENSION: &str = "tmp";
 /// A temporary file this old is a crashed writer's, never a write in progress.
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_ABANDONED_TEMPORARY: Duration = Duration::from_secs(3600);
+/// The fields of a compiled model its record sets apart in chunks: the
+/// assignment passes, which are nearly all of a large model's record.
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
+const DETACHED_MODEL_FIELDS: [&str; 2] = ["assignment_steps", "noise_assignment_steps"];
+/// Small enough that a large model's passes spread over every core.
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
+const RECORD_CHUNK_BYTES: usize = 8 * 1024 * 1024;
+/// Decoding threads beyond this many stop paying for their memory traffic.
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
+const RECORD_DECODE_THREADS: usize = 16;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_RENAME_RETRIES: u32 = 20;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
@@ -1473,32 +1485,35 @@ const RECORD_MAGIC: [u8; 8] = *b"RSPVAREC";
 #[cfg(all(feature = "veriloga-native", not(target_arch = "wasm32")))]
 const NATIVE_IMAGE_MAGIC: [u8; 8] = *b"RSPVANAT";
 
-/// Magic, record version, compiler identity, payload length, payload digest.
+/// Magic, record version, compiler identity, payload length, digest.
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 const RECORD_HEADER_BYTES: usize = 8 + 4 + 32 + 8 + 32;
 
-/// The header that seals `payload`: whoever reads it back checks that this
-/// kind of file, record version and compiler wrote it and that every byte is
-/// the one written.
+/// The header that seals a payload of `payload_len` bytes vouched for by
+/// `digest`: whoever reads it back checks that this kind of file, record
+/// version and compiler wrote it, and that the bytes are the ones written.
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
-fn sealing_header(magic: [u8; 8], payload: &[u8]) -> [u8; RECORD_HEADER_BYTES] {
+fn sealing_header(
+    magic: [u8; 8],
+    payload_len: usize,
+    digest: &blake3::Hash,
+) -> [u8; RECORD_HEADER_BYTES] {
     let mut header = [0_u8; RECORD_HEADER_BYTES];
     header[..8].copy_from_slice(&magic);
     header[8..12].copy_from_slice(&VERILOGA_CACHE_RECORD_VERSION.to_le_bytes());
     header[12..44].copy_from_slice(veriloga_compiler_identity());
-    header[44..52].copy_from_slice(&(payload.len() as u64).to_le_bytes());
-    header[52..].copy_from_slice(blake3::hash(payload).as_bytes());
+    header[44..52].copy_from_slice(&(payload_len as u64).to_le_bytes());
+    header[52..].copy_from_slice(digest.as_bytes());
     header
 }
 
+/// A sealed file's payload and the digest its header declares for it, once
+/// the header names this kind of file, record version and compiler build.
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
-fn record_header(payload: &[u8]) -> [u8; RECORD_HEADER_BYTES] {
-    sealing_header(RECORD_MAGIC, payload)
-}
-
-/// The payload of a sealed cache file, once its header vouches for every byte.
-#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
-fn sealed_payload(magic: [u8; 8], bytes: &[u8]) -> Result<&[u8], &'static str> {
+fn sealed_payload_and_digest(
+    magic: [u8; 8],
+    bytes: &[u8],
+) -> Result<(&[u8], [u8; 32]), &'static str> {
     if bytes.len() < RECORD_HEADER_BYTES || bytes[..8] != magic {
         return Err("it is not that kind of Verilog-A cache file");
     }
@@ -1512,15 +1527,204 @@ fn sealed_payload(magic: [u8; 8], bytes: &[u8]) -> Result<&[u8], &'static str> {
     if bytes[44..52] != (payload.len() as u64).to_le_bytes() {
         return Err("it is truncated");
     }
-    if bytes[52..RECORD_HEADER_BYTES] != *blake3::hash(payload).as_bytes() {
+    let mut digest = [0_u8; 32];
+    digest.copy_from_slice(&bytes[52..RECORD_HEADER_BYTES]);
+    Ok((payload, digest))
+}
+
+/// The payload of a sealed file whose digest covers the whole payload.
+#[cfg(all(feature = "veriloga-native", not(target_arch = "wasm32")))]
+fn sealed_payload(magic: [u8; 8], bytes: &[u8]) -> Result<&[u8], &'static str> {
+    let (payload, digest) = sealed_payload_and_digest(magic, bytes)?;
+    if *blake3::hash(payload).as_bytes() != digest {
         return Err("its contents do not match their checksum");
     }
     Ok(payload)
 }
 
+/// A record payload: a table, then the sections it lists.
+///
+/// The first section is the record with its detached fields empty; each
+/// detached field follows as its chunks, in [`DETACHED_MODEL_FIELDS`] order.
+/// The header's digest covers the table, and the table carries a digest for
+/// every section, so the sections are verified where they are decoded, side
+/// by side, and nothing is decoded before its bytes are vouched for.
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
-fn sealed_record_payload(bytes: &[u8]) -> Result<&[u8], &'static str> {
-    sealed_payload(RECORD_MAGIC, bytes)
+struct RecordSections<'a> {
+    chunk_counts: [usize; DETACHED_MODEL_FIELDS.len()],
+    sections: Vec<(&'a [u8], [u8; 32])>,
+}
+
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
+const SECTION_ENTRY_BYTES: usize = 8 + 32;
+
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
+fn record_section_table(encoded: &veriloga_record::DetachedEncoding) -> Vec<u8> {
+    let sections: Vec<&[u8]> = std::iter::once(&encoded.main)
+        .chain(encoded.chunks.iter().flatten())
+        .map(Vec::as_slice)
+        .collect();
+    let mut table = Vec::with_capacity(8 + 4 * encoded.chunks.len() + 40 * sections.len());
+    for chunks in &encoded.chunks {
+        table.extend_from_slice(&(chunks.len() as u32).to_le_bytes());
+    }
+    table.extend_from_slice(&(sections.len() as u32).to_le_bytes());
+    for section in sections {
+        table.extend_from_slice(&(section.len() as u64).to_le_bytes());
+        table.extend_from_slice(blake3::hash(section).as_bytes());
+    }
+    table
+}
+
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
+impl<'a> RecordSections<'a> {
+    fn parse(payload: &'a [u8], digest: &[u8; 32]) -> Result<Self, String> {
+        fn take<'p>(payload: &'p [u8], at: &mut usize, len: usize) -> Result<&'p [u8], String> {
+            let bytes = at
+                .checked_add(len)
+                .and_then(|end| payload.get(*at..end))
+                .ok_or_else(|| "its section table is truncated".to_string())?;
+            *at += len;
+            Ok(bytes)
+        }
+        fn count(bytes: &[u8]) -> usize {
+            u32::from_le_bytes(bytes.try_into().expect("four bytes")) as usize
+        }
+
+        let mut at = 0;
+        let mut chunk_counts = [0; DETACHED_MODEL_FIELDS.len()];
+        for chunks in &mut chunk_counts {
+            *chunks = count(take(payload, &mut at, 4)?);
+        }
+        let section_count = count(take(payload, &mut at, 4)?);
+        let detached = chunk_counts
+            .iter()
+            .try_fold(1_usize, |sum, chunks| sum.checked_add(*chunks));
+        if detached != Some(section_count) {
+            return Err(format!(
+                "its table lists {section_count} sections for {chunk_counts:?} chunks"
+            ));
+        }
+        let entries = take(
+            payload,
+            &mut at,
+            section_count
+                .checked_mul(SECTION_ENTRY_BYTES)
+                .ok_or_else(|| "its section table is truncated".to_string())?,
+        )?;
+        if *blake3::hash(&payload[..at]).as_bytes() != *digest {
+            return Err("its contents do not match their checksum".into());
+        }
+        let mut sections = Vec::with_capacity(section_count);
+        for entry in entries.chunks_exact(SECTION_ENTRY_BYTES) {
+            let len = usize::try_from(u64::from_le_bytes(
+                entry[..8].try_into().expect("eight bytes"),
+            ))
+            .map_err(|_| "a section is longer than memory".to_string())?;
+            let mut section_digest = [0_u8; 32];
+            section_digest.copy_from_slice(&entry[8..]);
+            sections.push((take(payload, &mut at, len)?, section_digest));
+        }
+        if at != payload.len() {
+            return Err(format!(
+                "{} bytes follow its last section",
+                payload.len() - at
+            ));
+        }
+        Ok(Self {
+            chunk_counts,
+            sections,
+        })
+    }
+
+    /// Verify and decode every section on several threads, then join the
+    /// detached chunks back into the record.
+    fn decode(self) -> Result<VerilogADiskCacheRecord, String> {
+        use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
+
+        enum Decoded {
+            Record(Box<VerilogADiskCacheRecord>),
+            Steps(Vec<rspice_veriloga::codegen::AssignmentStep>),
+        }
+
+        let sections = &self.sections;
+        let next = AtomicUsize::new(0);
+        let decode_section = |index: usize| -> Result<Decoded, String> {
+            let (bytes, digest) = sections[index];
+            if *blake3::hash(bytes).as_bytes() != digest {
+                return Err("its contents do not match their checksum".into());
+            }
+            let decoded = if index == 0 {
+                veriloga_record::decode(bytes).map(|record| Decoded::Record(Box::new(record)))
+            } else {
+                veriloga_record::decode(bytes).map(Decoded::Steps)
+            };
+            decoded.map_err(|error| error.to_string())
+        };
+        let threads = std::thread::available_parallelism()
+            .map_or(1, |threads| threads.get())
+            .min(RECORD_DECODE_THREADS)
+            .min(sections.len());
+        let mut decoded: Vec<Option<Decoded>> = (0..sections.len()).map(|_| None).collect();
+        let finished = std::thread::scope(|scope| {
+            let workers: Vec<_> = (0..threads)
+                .map(|_| {
+                    scope.spawn(|| {
+                        let mut finished = Vec::new();
+                        loop {
+                            let index = next.fetch_add(1, Relaxed);
+                            if index >= sections.len() {
+                                return finished;
+                            }
+                            finished.push((index, decode_section(index)));
+                        }
+                    })
+                })
+                .collect();
+            workers
+                .into_iter()
+                .flat_map(|worker| {
+                    worker
+                        .join()
+                        .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+                })
+                .collect::<Vec<_>>()
+        });
+        for (index, section) in finished {
+            decoded[index] = Some(section?);
+        }
+
+        let mut decoded = decoded
+            .into_iter()
+            .map(|section| section.expect("every section"));
+        let Some(Decoded::Record(mut record)) = decoded.next() else {
+            return Err("its first section is not a record".into());
+        };
+        let model = &mut record.model;
+        let fields = [
+            &mut model.assignment_steps,
+            &mut model.noise_assignment_steps,
+        ];
+        for ((field, chunks), steps) in DETACHED_MODEL_FIELDS
+            .iter()
+            .zip(self.chunk_counts)
+            .zip(fields)
+        {
+            if chunks == 0 {
+                continue;
+            }
+            if !steps.is_empty() {
+                return Err(format!("its {field} are both inline and detached"));
+            }
+            for _ in 0..chunks {
+                match decoded.next() {
+                    Some(Decoded::Steps(chunk)) => steps.extend(chunk),
+                    _ => return Err(format!("a chunk of its {field} is not a pass")),
+                }
+            }
+        }
+        Ok(*record)
+    }
 }
 
 /// Read and decode one record, returning it with its encoded size.
@@ -1531,20 +1735,71 @@ fn read_cache_record_with_limits_and_abort(
     abort: &dyn AbortSignal,
 ) -> Result<(VerilogADiskCacheRecord, usize), VerilogACacheRecordReadError> {
     let bytes = read_cache_file_with_limits_and_abort(path, limits, abort)?;
-    let payload = sealed_record_payload(&bytes).map_err(|reason| {
+    unseal_record(&bytes).map_err(|reason| {
         VerilogACacheRecordReadError::Invalid(format!(
             "discarding Verilog-A cache record '{}': {reason}",
             path.display()
         ))
-    })?;
-    let record = veriloga_record::decode::<VerilogADiskCacheRecord>(payload).map_err(|error| {
-        VerilogACacheRecordReadError::Invalid(format!(
-            "failed to decode cache record '{}': {}",
-            path.display(),
-            error
-        ))
-    })?;
+    })
+}
+
+/// Decode a sealed record file, returning the record with its payload size.
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
+fn unseal_record(bytes: &[u8]) -> Result<(VerilogADiskCacheRecord, usize), String> {
+    let (payload, digest) = sealed_payload_and_digest(RECORD_MAGIC, bytes)?;
+    let record = RecordSections::parse(payload, &digest)?.decode()?;
     Ok((record, payload.len()))
+}
+
+/// A record encoded and sealed for the disk: its header, section table and
+/// sections, written one after another.
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
+struct SealedRecord {
+    header: [u8; RECORD_HEADER_BYTES],
+    table: Vec<u8>,
+    sections: veriloga_record::DetachedEncoding,
+}
+
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
+impl SealedRecord {
+    fn new<T: serde::Serialize + ?Sized>(record: &T) -> Result<Self, String> {
+        let sections = veriloga_record::encode_detached(
+            record,
+            "model",
+            &DETACHED_MODEL_FIELDS,
+            RECORD_CHUNK_BYTES,
+        )
+        .map_err(|error| format!("failed to encode Verilog-A cache record: {error}"))?;
+        let table = record_section_table(&sections);
+        let mut sealed = Self {
+            header: [0; RECORD_HEADER_BYTES],
+            table,
+            sections,
+        };
+        sealed.header = sealing_header(
+            RECORD_MAGIC,
+            sealed.payload_len(),
+            &blake3::hash(&sealed.table),
+        );
+        Ok(sealed)
+    }
+
+    fn parts(&self) -> impl Iterator<Item = &[u8]> {
+        [&self.table, &self.sections.main]
+            .into_iter()
+            .chain(self.sections.chunks.iter().flatten())
+            .map(Vec::as_slice)
+    }
+
+    fn payload_len(&self) -> usize {
+        self.parts().map(<[u8]>::len).sum()
+    }
+
+    fn file_parts(&self) -> Vec<&[u8]> {
+        std::iter::once(&self.header[..])
+            .chain(self.parts())
+            .collect()
+    }
 }
 
 /// Read one whole cache file within the shared cache budget.
@@ -1678,12 +1933,11 @@ fn persist_model_to_disk_at_with_limits(
     cache_root: &Path,
     limits: ResourceLimits,
 ) -> Result<(), String> {
-    let payload = veriloga_record::encode(&BorrowedVerilogACacheRecord::new(source_path, entry))
-        .map_err(|error| format!("failed to encode Verilog-A cache record: {error}"))?;
-    ensure_cache_write_limit("record", payload.len(), limits)?;
+    let sealed = SealedRecord::new(&BorrowedVerilogACacheRecord::new(source_path, entry))?;
+    ensure_cache_write_limit("record", sealed.payload_len(), limits)?;
     write_cache_file_atomically(
         &cache_record_path_with_root(source_path, cache_root),
-        &[&record_header(&payload), &payload],
+        &sealed.file_parts(),
     )
 }
 
@@ -1731,7 +1985,10 @@ fn persist_native_image_at(
     ensure_cache_write_limit("native image", payload.len(), limits)?;
     write_cache_file_atomically(
         &native_image_path_with_root(key, cache_root),
-        &[&sealing_header(NATIVE_IMAGE_MAGIC, &payload), &payload],
+        &[
+            &sealing_header(NATIVE_IMAGE_MAGIC, payload.len(), &blake3::hash(&payload)),
+            &payload,
+        ],
     )
 }
 
@@ -3534,7 +3791,7 @@ mod tests {
     }
 
     fn compiled_entry(source_path: &Path) -> CachedVerilogAModel {
-        std::fs::write(
+        compiled_entry_from(
             source_path,
             r#"
 `include "disciplines.vams"
@@ -3546,7 +3803,30 @@ module cached_resistor(p, n);
 endmodule
 "#,
         )
-        .expect("write temporary Verilog-A source");
+    }
+
+    /// A model with assignment passes, which a record sets apart.
+    fn compiled_assigning_entry(source_path: &Path) -> CachedVerilogAModel {
+        compiled_entry_from(
+            source_path,
+            r#"
+`include "disciplines.vams"
+module cached_conductance(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real r = 1000.0 from (0:inf);
+    real current;
+    analog begin
+        current = V(p, n) / r;
+        I(p, n) <+ current;
+    end
+endmodule
+"#,
+        )
+    }
+
+    fn compiled_entry_from(source_path: &Path, source: &str) -> CachedVerilogAModel {
+        std::fs::write(source_path, source).expect("write temporary Verilog-A source");
 
         let runtime = rspice_veriloga::VerilogACompiler::default()
             .compile_file_runtime_with_metadata(source_path, None)
@@ -3564,14 +3844,11 @@ endmodule
     /// have sealed it.
     fn reseal_record(path: &Path, version: u32, edit: impl FnOnce(&mut VerilogADiskCacheRecord)) {
         let bytes = std::fs::read(path).expect("read cache record");
-        let payload = sealed_record_payload(&bytes).expect("a valid record");
-        let mut record =
-            veriloga_record::decode::<VerilogADiskCacheRecord>(payload).expect("decode record");
+        let (mut record, _) = unseal_record(&bytes).expect("a valid record");
         edit(&mut record);
-        let payload = veriloga_record::encode(&record).expect("encode record");
-        let mut header = record_header(&payload);
-        header[8..12].copy_from_slice(&version.to_le_bytes());
-        std::fs::write(path, [&header[..], &payload].concat()).expect("write record");
+        let mut sealed = SealedRecord::new(&record).expect("encode record");
+        sealed.header[8..12].copy_from_slice(&version.to_le_bytes());
+        std::fs::write(path, sealed.file_parts().concat()).expect("write record");
     }
 
     #[test]
@@ -3853,8 +4130,11 @@ endmodule
         assert!(load_native_image_at(&key, &root, ResourceLimits::default()).is_none());
 
         let payload = veriloga_record::encode(&42_u64).expect("encode payload");
-        let sealed_as_image =
-            [&sealing_header(NATIVE_IMAGE_MAGIC, &payload)[..], &payload].concat();
+        let sealed_as_image = [
+            &sealing_header(NATIVE_IMAGE_MAGIC, payload.len(), &blake3::hash(&payload))[..],
+            &payload,
+        ]
+        .concat();
         std::fs::write(&path, &sealed_as_image).expect("write native image file");
         let listed = list_cache_files(&root).expect("list cache files");
         assert_eq!(listed.len(), 1);
@@ -3868,7 +4148,11 @@ endmodule
         );
         assert!(!path.exists(), "an undecodable image is removed");
 
-        let sealed_as_record = [&record_header(&payload)[..], &payload].concat();
+        let sealed_as_record = [
+            &sealing_header(RECORD_MAGIC, payload.len(), &blake3::hash(&payload))[..],
+            &payload,
+        ]
+        .concat();
         std::fs::write(&path, &sealed_as_record).expect("write record under an image name");
         assert!(load_native_image_at(&key, &root, ResourceLimits::default()).is_none());
         assert!(!path.exists(), "a record is never read as an image");
@@ -3876,19 +4160,58 @@ endmodule
         std::fs::remove_dir_all(root).expect("remove temporary cache root");
     }
 
+    /// A record's assignment passes are written apart from the rest, in
+    /// sections the reader verifies and decodes side by side, and they read
+    /// back as the record that was written.
+    #[test]
+    fn disk_cache_record_sets_its_passes_apart_and_reads_them_back() {
+        let root = unique_test_root("record-sections");
+        let source_path = root.join("model.va");
+        std::fs::create_dir_all(&root).expect("create temporary cache root");
+        let entry = compiled_assigning_entry(&source_path);
+        assert!(!entry.model.assignment_steps.is_empty());
+        let key = VerilogASourceKey::new(&source_path, None);
+        let sealed =
+            SealedRecord::new(&BorrowedVerilogACacheRecord::new(&key, &entry)).expect("seal");
+        assert_eq!(
+            sealed.sections.chunks.len(),
+            DETACHED_MODEL_FIELDS.len(),
+            "every detached field has its chunks"
+        );
+        assert!(!sealed.sections.chunks[0].is_empty());
+
+        let (record, payload_len) =
+            unseal_record(&sealed.file_parts().concat()).expect("unseal record");
+        assert_eq!(payload_len, sealed.payload_len());
+        assert_eq!(
+            serde_json::to_value(&record.model).expect("serialize read model"),
+            serde_json::to_value(&*entry.model).expect("serialize written model"),
+        );
+        std::fs::remove_dir_all(root).expect("remove temporary cache root");
+    }
+
     /// Any byte of a record changed on disk, by a crash, a full disk or bad
-    /// memory, is caught by its checksum before a single value is decoded.
+    /// memory, is caught by a checksum before any value it vouches for is
+    /// decoded: the table's in the header, each section's in the table.
     #[test]
     fn disk_cache_discards_a_damaged_record() {
         let root = unique_test_root("damaged-record");
         let source_path = root.join("model.va");
         std::fs::create_dir_all(&root).expect("create temporary cache root");
-        let entry = compiled_entry(&source_path);
+        let entry = compiled_assigning_entry(&source_path);
         let cache_root = root.join("cache");
         let cache_path =
             cache_record_path_with_root(&VerilogASourceKey::new(&source_path, None), &cache_root);
+        persist_model_to_disk_at(&source_path, &entry, &cache_root).expect("persist cache record");
+        let record_len = std::fs::read(&cache_path).expect("read cache record").len();
 
-        for damage in [RECORD_HEADER_BYTES + 7, RECORD_HEADER_BYTES - 1, 3] {
+        for damage in [
+            3,
+            RECORD_HEADER_BYTES - 1,
+            RECORD_HEADER_BYTES + 7,
+            record_len / 2,
+            record_len - 1,
+        ] {
             persist_model_to_disk_at(&source_path, &entry, &cache_root)
                 .expect("persist cache record");
             let mut bytes = std::fs::read(&cache_path).expect("read cache record");
