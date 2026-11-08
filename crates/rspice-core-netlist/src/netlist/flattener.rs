@@ -612,7 +612,7 @@ impl<'a> Flattener<'a> {
         if let Err(error) = validate_mutual_inductor_references(netlist) {
             self.handle_branch_error(error.into(), "mutual-inductor validation")?;
         }
-        let mut flat_elements = Vec::new();
+        let mut flat_elements = Vec::with_capacity(netlist.elements.len());
         self.parameter_direction = netlist.parameter_direction.clone();
         self.external_subckts = Self::collect_external_subckts(netlist);
         self.defer_external_module_binding = netlist.needs_veriloga_module_discovery();
@@ -636,6 +636,7 @@ impl<'a> Flattener<'a> {
         self.scoped_startup_directives.clear();
         self.xspice_auto_bridge_node_hints.clear();
         self.flattened_element_names.clear();
+        self.flattened_element_names.reserve(netlist.elements.len());
         self.expanded_instance_paths.clear();
         self.xspice_auto_bridge_digital_param_name = netlist
             .options
@@ -899,7 +900,7 @@ impl<'a> Flattener<'a> {
         .map_err(ParseError::from)?;
         materialize_passive_initial_condition(&mut element)?;
         let canonical_name = element.name.to_ascii_uppercase();
-        if !self.flattened_element_names.insert(canonical_name.clone()) {
+        if !self.flattened_element_names.insert(canonical_name) {
             return Err(ParseError::Syntax {
                 line: 0,
                 message: format!(
@@ -2097,7 +2098,7 @@ impl<'a> Flattener<'a> {
         // retain their original names across hierarchy levels. Xyce applies
         // the $G prefix rule during subcircuit expansion, so recognizing it
         // here is essential before connectivity and device construction.
-        if self.global_nodes.contains(&node.to_ascii_uppercase())
+        if (!self.global_nodes.is_empty() && self.global_nodes.contains(&node.to_ascii_uppercase()))
             || node
                 .get(..2)
                 .is_some_and(|prefix| prefix.eq_ignore_ascii_case("$G"))
