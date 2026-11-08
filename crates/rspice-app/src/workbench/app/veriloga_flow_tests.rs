@@ -959,6 +959,82 @@ fn a_reviewed_op_amp_compiles_clean_and_each_of_its_errors_is_reached_where_it_w
     assert_eq!(user.caret(), (21, 29));
 }
 
+/// A failed compile's errors stay on the text they are about while it is
+/// edited: outdated, moved down with it when a line is added above, and gone
+/// with the statement they named when it is deleted. "Show problem at caret"
+/// says what the caret is on, and that it was found before the latest edits.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_failed_compiles_errors_follow_their_text_through_edits_until_it_is_deleted() {
+    let (mut user, _, _) = new_device("opamp_bhv", "inp:in inn:in out:out vdd vss");
+    let broken = OPAMP
+        .replace("vslew = slew(", "vslw = slew(")
+        .replace("* gbw)", "* gbww)");
+    super::veriloga_interface_tests::edit_source(&mut user.app, &broken);
+    user.settle();
+    compile(&mut user);
+    let path = crate::workbench::documents::code_workspace::selected_veriloga_source(&user.app)
+        .expect("a Verilog-A view is open")
+        .document()
+        .logical_path()
+        .to_owned();
+    let failure = std::sync::Arc::clone(&user.app.state.code.code_workspace.veriloga.last_failure);
+    let located = failure.view(Some(&path)).located();
+    let count = located.len();
+    let (code, gbww) = located
+        .iter()
+        .find(|diagnostic| diagnostic.line == Some(21))
+        .map(|diagnostic| (diagnostic.code().to_owned(), diagnostic.message.to_string()))
+        .expect("the misspelt gain-bandwidth product is an error");
+    let vslw = located
+        .iter()
+        .find(|diagnostic| diagnostic.line == Some(26))
+        .map(|diagnostic| diagnostic.message.to_string())
+        .expect("the misspelt slew variable is an error");
+    let step = |user: &mut User, command: Command| {
+        command.execute(&mut user.app);
+        user.settle();
+        user.prompt()
+    };
+    assert_eq!(
+        step(&mut user, Command::NextProblem),
+        format!("Error 1 of {count}, line 21: {gbww}")
+    );
+    assert_eq!(user.caret(), (21, 29));
+    assert_eq!(
+        step(&mut user, Command::ShowProblemAtCaret),
+        format!("Error {code} at line 21, column 29: {gbww}")
+    );
+
+    // A line added above: the errors are where their text went.
+    let commented = format!("// Reviewed.\n{broken}");
+    super::veriloga_interface_tests::edit_source(&mut user.app, &commented);
+    user.settle();
+    assert_eq!(
+        step(&mut user, Command::NextProblem),
+        format!("Error 1 of {count}, line 22: {gbww}")
+    );
+    assert_eq!(user.caret(), (22, 29));
+    assert_eq!(
+        step(&mut user, Command::ShowProblemAtCaret),
+        format!("Error {code} at line 22, column 29, found before your latest edits: {gbww}")
+    );
+
+    // The statement with the misspelt variable deleted: its error goes too.
+    let statement = commented
+        .lines()
+        .find(|line| line.contains("vslw = slew("))
+        .expect("the statement is in the source");
+    let deleted = commented.replace(&format!("{statement}\n"), "");
+    super::veriloga_interface_tests::edit_source(&mut user.app, &deleted);
+    user.settle();
+    for _ in 0..count {
+        let said = step(&mut user, Command::NextProblem);
+        assert!(said.contains(&format!(" of {}, ", count - 1)), "{said:?}");
+        assert!(!said.contains(&vslw), "{said:?}");
+    }
+}
+
 /// Four compact models as their authors ship them, each a root with its
 /// includes beside it: the folder under `models/veriloga/cmc`, the root, and
 /// the module it declares.
@@ -1066,3 +1142,4 @@ fn compact_models_import_from_their_source_folders_compile_and_place() {
         assert_eq!(placed, 1, "{module} is placed once");
     }
 }
+

@@ -18,8 +18,10 @@ use crate::workbench::documents::text_editor_commands::{
     show_go_to_line, take_reveal_line,
 };
 
+mod findings;
 mod veriloga_syntax;
 
+use findings::{HeldFinding, HeldFindings};
 use veriloga_syntax::{LineState, SyntaxClass, SyntaxSpan, VerilogAHighlighter, tokenize_line};
 
 const FONT_SIZE: f32 = 11.0;
@@ -71,13 +73,23 @@ pub struct CodeDocumentInteraction {
     pub announcement: Option<String>,
 }
 
+/// Where the text an editor shows stands with the last check of it.
+#[derive(Debug, Clone, Copy)]
+pub enum EditorFindings<'a> {
+    /// A check of the very text the editor shows reported these.
+    Current(&'a CodeDiagnosticCollection),
+    /// The text changed after the last check. What that check found stays
+    /// shown, dimmed as outdated, each finding moved through the edits.
+    Outdated,
+}
+
 pub fn show_code_document_interaction_versioned(
     ui: &mut Ui,
     id: impl std::hash::Hash + std::fmt::Debug,
     source: &mut String,
     source_revision: u64,
     language: CodeEditorLanguage,
-    diagnostics: &CodeDiagnosticCollection,
+    findings: EditorFindings<'_>,
     diagnostic_path: Option<&str>,
     editable: bool,
     messages: crate::workbench::MessageCatalog,
@@ -88,7 +100,7 @@ pub fn show_code_document_interaction_versioned(
         source,
         source_revision,
         language,
-        diagnostics,
+        findings,
         diagnostic_path,
         editable,
         messages,
@@ -106,7 +118,7 @@ pub fn show_code_document_with_debug_versioned(
     source: &mut String,
     source_revision: u64,
     language: CodeEditorLanguage,
-    diagnostics: &CodeDiagnosticCollection,
+    findings: EditorFindings<'_>,
     diagnostic_path: Option<&str>,
     editable: bool,
     messages: crate::workbench::MessageCatalog,
@@ -119,7 +131,7 @@ pub fn show_code_document_with_debug_versioned(
         source,
         source_revision,
         language,
-        diagnostics,
+        findings,
         diagnostic_path,
         editable,
         messages,
@@ -174,11 +186,13 @@ fn caret_place(source: &str, char_index: usize) -> (usize, usize) {
 }
 
 /// A step to the next or the previous finding in the focused source
-/// document, from wherever its caret is. Both wrap at the document's ends.
+/// document, from wherever its caret is, both wrapping at the document's
+/// ends; or a question about the finding at the caret, which stays put.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ProblemStep {
     Next,
     Previous,
+    AtCaret,
 }
 
 /// The shortcuts and the palette raise a step; the page that draws the
@@ -227,7 +241,8 @@ struct LastProblemStep {
 /// Which of `places` (one-based line and optional column, in source order)
 /// a step from the caret at `caret_index` lands on in the editor
 /// `editor_id`: the first finding after the caret, or the last before it,
-/// each wrapping to the other end. The caller moves the caret there.
+/// each wrapping to the other end. The caller moves the caret there. A
+/// question about the caret moves nowhere and lands on none.
 pub(crate) fn problem_step_index(
     context: &egui::Context,
     editor_id: egui::Id,
@@ -237,7 +252,7 @@ pub(crate) fn problem_step_index(
     step: ProblemStep,
 ) -> Option<usize> {
     let count = places.len();
-    if count == 0 {
+    if count == 0 || step == ProblemStep::AtCaret {
         return None;
     }
     // Where the caret lands on a place: on its column, kept within the line,
@@ -263,6 +278,7 @@ pub(crate) fn problem_step_index(
             .iter()
             .rposition(|place| landing(*place) < caret)
             .unwrap_or(count - 1),
+        (_, ProblemStep::AtCaret) => return None,
     };
     context.data_mut(|data| {
         data.insert_temp(
@@ -297,37 +313,82 @@ pub(crate) fn problem_step_announcement(
     )
 }
 
+/// What "Show problem at caret" says of a finding: its severity, code,
+/// place and message, and whether it was found before the latest edits.
+pub(crate) fn problem_at_caret_announcement(
+    messages: crate::workbench::MessageCatalog,
+    severity: CodeEditorSeverity,
+    code: &str,
+    (line, column): (usize, usize),
+    message: &str,
+    outdated: bool,
+) -> String {
+    messages.format(
+        if outdated {
+            MessageId::SourceDiagnosticAtCaretOutdated
+        } else {
+            MessageId::SourceDiagnosticAtCaret
+        },
+        &[
+            ("severity", &severity_title(severity, messages)),
+            ("code", code),
+            ("line", &line.to_string()),
+            ("column", &column.to_string()),
+            ("message", message),
+        ],
+    )
+}
+
 /// Move the caret of `editor_id` to the finding `step` reaches in this
-/// document, and say which it is.
+/// document and say which it is, or say what the finding at the caret is.
 fn step_to_problem(
     context: &egui::Context,
     editor_id: egui::Id,
     source: &str,
-    diagnostics: &crate::state::code_diagnostics::CodeDiagnosticView<'_>,
+    findings: &HeldFindings,
     step: ProblemStep,
     messages: crate::workbench::MessageCatalog,
 ) -> String {
-    let located = diagnostics.located();
-    let places = located
-        .iter()
-        .map(|diagnostic| (diagnostic.line.unwrap_or(1), diagnostic.column))
-        .collect::<Vec<_>>();
     let caret = context
         .data(|data| data.get_temp::<usize>(reported_caret_id(editor_id)))
         .unwrap_or(0);
+    if step == ProblemStep::AtCaret {
+        return findings.at_caret(caret).map_or_else(
+            || messages.text(MessageId::SourceDiagnosticNoneAtCaret),
+            |finding| {
+                let (line, column) = findings.line_column(finding.range.start);
+                problem_at_caret_announcement(
+                    messages,
+                    finding.severity,
+                    &finding.code,
+                    (line + 1, column + 1),
+                    &finding.message,
+                    findings.is_outdated(),
+                )
+            },
+        );
+    }
+    let located = findings.iter().collect::<Vec<_>>();
+    let places = located
+        .iter()
+        .map(|finding| {
+            let (line, column) = findings.line_column(finding.range.start);
+            (line + 1, Some(column + 1))
+        })
+        .collect::<Vec<_>>();
     let Some(index) = problem_step_index(context, editor_id, source, &places, caret, step) else {
         return messages.text(MessageId::SourceDiagnosticNone);
     };
     let (line, column) = places[index];
     reveal_source_location(context, editor_id, line, column.unwrap_or(1));
-    let diagnostic = located[index];
+    let finding = located[index];
     problem_step_announcement(
         messages,
-        diagnostic.severity,
+        finding.severity,
         index,
         located.len(),
         line,
-        &diagnostic.message,
+        &finding.message,
     )
 }
 
@@ -337,7 +398,7 @@ fn show_code_document_impl(
     source: &mut String,
     source_revision: u64,
     language: CodeEditorLanguage,
-    diagnostics: &CodeDiagnosticCollection,
+    findings: EditorFindings<'_>,
     diagnostic_path: Option<&str>,
     editable: bool,
     messages: crate::workbench::MessageCatalog,
@@ -345,18 +406,25 @@ fn show_code_document_impl(
     current_line: Option<usize>,
     breakpoints_enabled: bool,
 ) -> CodeDocumentInteraction {
-    let diagnostic_view = diagnostics.view(diagnostic_path);
-    // Before the reveal is taken, so the step lands in this frame.
-    let announcement = take_problem_step(ui.ctx(), editor_id).map(|step| {
-        step_to_problem(
-            ui.ctx(),
-            editor_id,
+    // The findings shown are the last check's, kept through the edits made
+    // since it ran.
+    let held_id = editor_id.with("held-findings");
+    let mut held = ui
+        .ctx()
+        .data_mut(|data| data.remove_temp::<HeldFindings>(held_id))
+        .unwrap_or_default();
+    match findings {
+        EditorFindings::Current(diagnostics) => held.take_current(
             source,
-            &diagnostic_view,
-            step,
-            messages,
-        )
-    });
+            source_revision,
+            std::ptr::from_ref(diagnostics).addr(),
+            &diagnostics.view(diagnostic_path),
+        ),
+        EditorFindings::Outdated => held.keep_through_edits(source, source_revision),
+    }
+    // Before the reveal is taken, so the step lands in this frame.
+    let announcement = take_problem_step(ui.ctx(), editor_id)
+        .map(|step| step_to_problem(ui.ctx(), editor_id, source, &held, step, messages));
     let revealed = take_reveal_line(ui, editor_id, source);
     let requested_line = revealed.or_else(|| show_go_to_line(ui, editor_id, source));
     let tokens = Tokens::get(ui.ctx());
@@ -406,6 +474,8 @@ fn show_code_document_impl(
             breakpoints_enabled,
             current_line,
             cross_probe_line: None,
+            marks: held.marks(),
+            marks_outdated: held.is_outdated(),
         };
         // The reading of each line is kept between frames, so a frame reads
         // only the lines it shows.
@@ -435,18 +505,30 @@ fn show_code_document_impl(
                 ui.fonts_mut(|fonts| fonts.layout_job(job))
             },
             |logical_line| {
-                diagnostic_view
-                    .severity_for_line(logical_line.saturating_add(1))
-                    .and_then(diagnostic_problem)
+                held.worst_on_line(logical_line)
+                    .and_then(|finding| diagnostic_problem(finding.severity))
             },
             |logical_line| {
-                diagnostic_view
-                    .worst_for_line(logical_line.saturating_add(1))
-                    .map(|diagnostic| line_diagnostic_description(diagnostic, messages))
+                held.worst_on_line(logical_line)
+                    .map(|finding| line_diagnostic_description(finding, messages))
             },
         );
+        // The findings under the pointer, while the text they were placed in
+        // is the text on screen.
+        if let Some(char_index) = output.hover_char_index
+            && !output.changed
+            && !held.is_empty()
+        {
+            let covering = held.covering(char_index);
+            if !covering.is_empty() {
+                output.response.clone().on_hover_ui_at_pointer(|ui| {
+                    findings_tooltip(ui, &held, &covering, messages, &colors);
+                });
+            }
+        }
         ui.ctx().data_mut(|data| {
             data.insert_temp(reported_caret_id(editor_id), output.cursor_char_index);
+            data.insert_temp(held_id, held);
             if let Some(highlighter) = highlighter {
                 data.insert_temp(highlighter_id, highlighter);
             }
@@ -586,9 +668,9 @@ fn show_code_document_impl(
                         gutter_font.clone(),
                         colors.text_faint,
                     );
-                    if let Some(problem) = diagnostic_view
-                        .severity_for_line(line_number)
-                        .and_then(diagnostic_problem)
+                    if let Some(problem) = held
+                        .worst_on_line(line_index)
+                        .and_then(|finding| diagnostic_problem(finding.severity))
                     {
                         paint_problem_mark(
                             painter,
@@ -609,6 +691,7 @@ fn show_code_document_impl(
         let range = range.as_sorted_char_range();
         (range.start != range.end).then_some((range.start.0, range.end.0))
     });
+    ui.ctx().data_mut(|data| data.insert_temp(held_id, held));
     CodeDocumentInteraction {
         changed,
         cursor_char_index,
@@ -911,16 +994,52 @@ pub(crate) fn severity_title(
 /// What a screen reader hears for a source line that has a finding: its
 /// severity and its message, so the line says what is wrong with it.
 fn line_diagnostic_description(
-    diagnostic: &CodeEditorDiagnostic,
+    finding: &HeldFinding,
     messages: crate::workbench::MessageCatalog,
 ) -> String {
     messages.format(
         MessageId::EditorAccessibleLineDiagnostic,
         &[
-            ("severity", &severity_title(diagnostic.severity, messages)),
-            ("message", &diagnostic.message),
+            ("severity", &severity_title(finding.severity, messages)),
+            ("message", &finding.message),
         ],
     )
+}
+
+/// The findings under the pointer: for each, its severity, code and place
+/// over its message, and a word when they were found before the latest edits.
+fn findings_tooltip(
+    ui: &mut Ui,
+    held: &HeldFindings,
+    covering: &[&HeldFinding],
+    messages: crate::workbench::MessageCatalog,
+    colors: &crate::ui::palette::Palette,
+) {
+    ui.set_max_width(420.0);
+    for finding in covering {
+        let (line, column) = held.line_column(finding.range.start);
+        let place = messages.format(
+            MessageId::SourceDiagnosticHoverPlace,
+            &[
+                ("severity", &severity_title(finding.severity, messages)),
+                ("code", &finding.code),
+                ("line", &(line + 1).to_string()),
+                ("column", &(column + 1).to_string()),
+            ],
+        );
+        ui.label(
+            egui::RichText::new(place)
+                .font(theme::mono(FONT_SIZE, FontWeight::Medium))
+                .color(colors.text_dim),
+        );
+        ui.label(egui::RichText::new(finding.message.as_ref()).color(colors.text));
+    }
+    if held.is_outdated() {
+        ui.label(
+            egui::RichText::new(messages.text(MessageId::SourceDiagnosticOutdated))
+                .color(colors.text_dim),
+        );
+    }
 }
 
 /// The gutter mark a diagnostic earns: only a warning or an error is marked.

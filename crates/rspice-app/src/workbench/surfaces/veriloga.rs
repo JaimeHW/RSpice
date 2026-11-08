@@ -19,7 +19,7 @@ use super::super::design_system::{PROBLEM_MARK_GAP, PROBLEM_MARK_SIDE, paint_pro
 use crate::state::code_diagnostics::CodeDiagnosticCollection;
 use crate::workbench::app::actions::veriloga_placement::veriloga_placement_target;
 use crate::workbench::documents::code_workspace::{
-    CodeEditorLanguage, show_code_document_interaction_versioned,
+    CodeEditorLanguage, EditorFindings, show_code_document_interaction_versioned,
 };
 
 const EDITOR_TOOLBAR_HEIGHT: f32 = 33.0;
@@ -89,7 +89,7 @@ pub fn show_in_design(ui: &mut Ui, app: &mut RSpiceApp) {
             &selected,
             &shown_path,
             &mut source,
-            &diagnostics,
+            diagnostics.as_deref(),
             editor_language,
             header.is_none(),
         );
@@ -183,7 +183,8 @@ fn source_editor(
     selected: &crate::workbench::documents::code_workspace::SelectedVerilogASource,
     active_path: &str,
     source: &mut String,
-    diagnostics: &CodeDiagnosticCollection,
+    // `None` when the source changed after its last check.
+    diagnostics: Option<&CodeDiagnosticCollection>,
     editor_language: CodeEditorLanguage,
     // False for a built-in header: it is read here, and nothing that writes
     // a file, searches the bundle, or records a place in it applies.
@@ -315,7 +316,7 @@ fn source_editor(
                 source,
                 selected.bundle().revision().get(),
                 editor_language,
-                diagnostics,
+                diagnostics.map_or(EditorFindings::Outdated, EditorFindings::Current),
                 Some(active_path),
                 editable,
                 messages,
@@ -564,8 +565,8 @@ enum StripAction {
 fn current_diagnostics(
     app: &RSpiceApp,
     selected: &crate::workbench::documents::code_workspace::SelectedVerilogASource,
-) -> std::sync::Arc<CodeDiagnosticCollection> {
-    crate::workbench::documents::code_workspace::veriloga_diagnostics(
+) -> Option<std::sync::Arc<CodeDiagnosticCollection>> {
+    crate::workbench::documents::code_workspace::veriloga_current_diagnostics(
         &app.state.code.code_workspace.veriloga,
         app.state.model.workspace.content.project.id(),
         selected,

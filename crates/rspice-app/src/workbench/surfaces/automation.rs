@@ -18,7 +18,7 @@ use super::super::design_system::{
 };
 use crate::state::code_diagnostics::CodeDiagnosticCollection;
 use crate::workbench::documents::code_workspace::{
-    AutomationExecutionState, CodeEditorLanguage, CodeWorkspacePage,
+    AutomationExecutionState, CodeEditorLanguage, CodeWorkspacePage, EditorFindings,
     show_code_document_with_debug_versioned,
 };
 
@@ -769,7 +769,7 @@ fn code_pane(
                 source,
                 bundle.revision().get(),
                 language,
-                diagnostics,
+                EditorFindings::Current(diagnostics),
                 Some(selected_path),
                 editable,
                 messages,
@@ -783,7 +783,7 @@ fn code_pane(
                 source,
                 bundle.revision().get(),
                 language,
-                diagnostics,
+                EditorFindings::Current(diagnostics),
                 Some(selected_path),
                 editable,
                 messages,

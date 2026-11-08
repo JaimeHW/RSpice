@@ -32,6 +32,8 @@ pub(super) fn test_style<'a>(
         breakpoints_enabled: false,
         current_line: None,
         cross_probe_line: None,
+        marks: &[],
+        marks_outdated: false,
     }
 }
 

@@ -89,6 +89,40 @@ fn step_netlist_problem(ctx: &egui::Context, state: &mut AppState, editor_id: eg
         .map(|(line, column, _)| (*line, *column))
         .collect::<Vec<_>>();
     let messages = state.workbench.messages();
+    if step == code_workspace::ProblemStep::AtCaret {
+        // The finding the caret is at or after on its line, or else the
+        // line's first.
+        let before = buffer
+            .char_indices()
+            .nth(state.code.netlist.cursor_char_index)
+            .map_or(buffer.as_str(), |(byte, _)| &buffer[..byte]);
+        let line = before.matches('\n').count() + 1;
+        let column = before
+            .rsplit('\n')
+            .next()
+            .map_or(0, |text| text.chars().count())
+            + 1;
+        let mut on_line = located.iter().filter(|(at, ..)| *at == line);
+        let found = on_line
+            .clone()
+            .rfind(|(_, at, _)| at.unwrap_or(1) <= column)
+            .or_else(|| on_line.next());
+        let announcement = found.map_or_else(
+            || messages.text(MessageId::SourceDiagnosticNoneAtCaret),
+            |(line, column, diagnostic)| {
+                code_workspace::problem_at_caret_announcement(
+                    messages,
+                    diagnostic.severity,
+                    &diagnostic.canonical.code,
+                    (*line, column.unwrap_or(1)),
+                    &diagnostic.message,
+                    false,
+                )
+            },
+        );
+        state.prompt(announcement);
+        return;
+    }
     let Some(index) = code_workspace::problem_step_index(
         ctx,
         editor_id,

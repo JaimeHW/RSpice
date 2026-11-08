@@ -159,7 +159,27 @@ pub(crate) struct VirtualEditorStyle<'a> {
     pub breakpoints_enabled: bool,
     pub current_line: Option<usize>,
     pub cross_probe_line: Option<usize>,
+    /// The stretches of text findings cover, by line, each underlined in
+    /// the shape of its severity.
+    pub marks: &'a [SourceMark],
+    /// The findings were made before the latest edits: their marks are
+    /// drawn dimmed.
+    pub marks_outdated: bool,
 }
+
+/// The stretch of one line a finding covers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SourceMark {
+    /// Zero-based logical line.
+    pub line: usize,
+    /// Character columns on the line. An empty stretch, a finding at the
+    /// end of a line, is marked one character wide.
+    pub columns: std::ops::Range<usize>,
+    pub severity: rspice_vocabulary::diagnostics::DiagnosticSeverity,
+}
+
+/// How much of its ink an outdated finding's mark keeps.
+const OUTDATED_MARK_OPACITY: f32 = 0.45;
 
 /// A row the viewport is about to paint, for the language service that lays
 /// it out.
@@ -577,6 +597,13 @@ pub(crate) fn show_virtual_text_editor(
                 ui.clip_rect().right_bottom(),
             ));
             let code_painter = ui.painter().with_clip_rect(code_clip);
+            // Marks of findings made before the latest edits are dimmed.
+            let mut mark_painter = code_painter.clone();
+            let mut gutter_mark_painter = ui.painter().clone();
+            if style.marks_outdated {
+                mark_painter.multiply_opacity(OUTDATED_MARK_OPACITY);
+                gutter_mark_painter.multiply_opacity(OUTDATED_MARK_OPACITY);
+            }
             let gutter_rect = egui::Rect::from_min_max(
                 egui::pos2(sticky_gutter_left, ui.clip_rect().top()),
                 egui::pos2(sticky_separator, ui.clip_rect().bottom()),
@@ -649,6 +676,22 @@ pub(crate) fn show_virtual_text_editor(
                     galley,
                     style.text,
                 );
+                let first_mark = style
+                    .marks
+                    .partition_point(|mark| mark.line < line.logical_line);
+                let line_marks = style.marks[first_mark..]
+                    .iter()
+                    .take_while(|mark| mark.line == line.logical_line);
+                for mark in line_marks {
+                    paint_source_mark(
+                        &mark_painter,
+                        mark,
+                        code_origin_x,
+                        row_top + style.line_height - 2.5,
+                        char_width,
+                        style,
+                    );
+                }
 
                 // The line number is neutral. A warning or an error on
                 // the line is a mark between the number and the code; an
@@ -669,7 +712,7 @@ pub(crate) fn show_virtual_text_editor(
                 );
                 if let Some(problem) = problem {
                     paint_problem_mark(
-                        ui.painter(),
+                        &gutter_mark_painter,
                         egui::Rect::from_center_size(
                             egui::pos2(sticky_separator - 4.5, row_rect.center().y),
                             Vec2::splat(GUTTER_MARK_SIDE),
@@ -2101,6 +2144,63 @@ fn handle_ime(session: &mut VirtualEditorSession, event: egui::ImeEvent) {
         }
         #[allow(deprecated)]
         egui::ImeEvent::Enabled | egui::ImeEvent::Disabled => {}
+    }
+}
+
+/// Underline the stretch `mark` covers, along `underline`: an error with a
+/// zigzag, a warning with a solid rule, and a note or a hint with a dotted
+/// one, so the shape says the severity as well as the ink does.
+fn paint_source_mark(
+    painter: &egui::Painter,
+    mark: &SourceMark,
+    code_origin_x: f32,
+    underline: f32,
+    char_width: f32,
+    style: &VirtualEditorStyle<'_>,
+) {
+    use rspice_vocabulary::diagnostics::DiagnosticSeverity;
+
+    /// Half a zigzag's period and a dotted rule's pitch.
+    const STEP: f32 = 2.0;
+    let start = mark.columns.start;
+    let end = mark.columns.end.max(start + 1);
+    let clip = painter.clip_rect();
+    let left = (code_origin_x + start as f32 * char_width).max(clip.left() - STEP);
+    let right = (code_origin_x + end as f32 * char_width).min(clip.right() + STEP);
+    if left >= right {
+        return;
+    }
+    match mark.severity {
+        DiagnosticSeverity::Error => {
+            // The zigzag keeps its phase to the text, so it does not crawl
+            // as the row scrolls sideways.
+            let mut step = ((left - code_origin_x) / STEP).floor();
+            let mut points = Vec::new();
+            loop {
+                let x = code_origin_x + step * STEP;
+                let y = if step.rem_euclid(2.0) < 1.0 {
+                    underline + 1.0
+                } else {
+                    underline - 1.0
+                };
+                points.push(egui::pos2(x.clamp(left, right), y));
+                if x >= right {
+                    break;
+                }
+                step += 1.0;
+            }
+            painter.add(egui::Shape::line(points, Stroke::new(1.0, style.error)));
+        }
+        DiagnosticSeverity::Warning => {
+            painter.hline(left..=right, underline, Stroke::new(1.5, style.warning));
+        }
+        DiagnosticSeverity::Info | DiagnosticSeverity::Hint => {
+            let mut x = code_origin_x + ((left - code_origin_x) / STEP).ceil() * STEP;
+            while x <= right {
+                painter.circle_filled(egui::pos2(x, underline), 0.7, style.text_dim);
+                x += STEP * 1.5;
+            }
+        }
     }
 }
 

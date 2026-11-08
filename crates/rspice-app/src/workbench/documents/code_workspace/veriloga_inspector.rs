@@ -49,16 +49,25 @@ pub(crate) fn veriloga_diagnostics(
     project_id: ProjectId,
     selected: &SelectedVerilogASource,
 ) -> Arc<CodeDiagnosticCollection> {
+    veriloga_current_diagnostics(state, project_id, selected)
+        .unwrap_or_else(|| Arc::new(CodeDiagnosticCollection::default()))
+}
+
+/// The findings of the last compile of exactly this source, or `None` when
+/// the source changed after it: the editor then keeps the last compile's
+/// findings, outdated, rather than show the text as clean.
+pub(crate) fn veriloga_current_diagnostics(
+    state: &VerilogAWorkbenchState,
+    project_id: ProjectId,
+    selected: &SelectedVerilogASource,
+) -> Option<Arc<CodeDiagnosticCollection>> {
     veriloga_receipt(state, project_id, selected)
         .map(|receipt| Arc::clone(&receipt.diagnostics))
-        .unwrap_or_else(|| {
+        .or_else(|| {
             state
                 .last_failure_token
                 .filter(|token| selected.matches_token(project_id, *token))
-                .map_or_else(
-                    || Arc::new(CodeDiagnosticCollection::default()),
-                    |_| Arc::clone(&state.last_failure),
-                )
+                .map(|_| Arc::clone(&state.last_failure))
         })
 }
 

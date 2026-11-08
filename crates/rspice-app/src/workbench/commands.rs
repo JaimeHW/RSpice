@@ -399,6 +399,7 @@ impl Command {
             | Self::GoToLine
             | Self::NextProblem
             | Self::PreviousProblem
+            | Self::ShowProblemAtCaret
             | Self::FormatDocument
             | Self::FoldSelection
             | Self::UnfoldAtCaret
@@ -1166,6 +1167,11 @@ impl Command {
                 .workbench
                 .outbox
                 .push(crate::workbench::documents::code_workspace::ProblemStep::Previous),
+            Self::ShowProblemAtCaret => app
+                .state
+                .workbench
+                .outbox
+                .push(crate::workbench::documents::code_workspace::ProblemStep::AtCaret),
             Self::GoToDefinition | Self::FindReferences | Self::RenameSymbol => {
                 if let Err(error) = crate::workbench::app::navigate_active_source(app, self) {
                     app.state.prompt(error);

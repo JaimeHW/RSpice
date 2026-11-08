@@ -32,12 +32,12 @@ pub use automation::{
     sync_automation_debugger, toggle_automation_breakpoint, validate_automation_workspace,
 };
 pub use editor::{
-    CodeEditorDiagnostic, CodeEditorLanguage, CodeEditorSeverity,
+    CodeEditorDiagnostic, CodeEditorLanguage, CodeEditorSeverity, EditorFindings,
     show_code_document_interaction_versioned, show_code_document_with_debug_versioned,
 };
 pub(crate) use editor::{
-    ProblemStep, problem_step_announcement, problem_step_index, queue_problem_step,
-    reveal_source_location, severity_title, take_problem_step,
+    ProblemStep, problem_at_caret_announcement, problem_step_announcement, problem_step_index,
+    queue_problem_step, reveal_source_location, severity_title, take_problem_step,
 };
 pub(crate) use language_services::{
     CodeLanguageToolsState, LanguageServiceIndex, commit_language_rename, extent_words,
@@ -82,9 +82,11 @@ pub(crate) use veriloga::{
 #[cfg(test)]
 pub(crate) use veriloga::{complete_veriloga_file_pick, complete_veriloga_files_pick};
 pub use veriloga::{consume_veriloga_compile_request, poll_veriloga_compile, poll_veriloga_import};
+#[cfg(test)]
+pub(crate) use veriloga_inspector::veriloga_diagnostics;
 pub(crate) use veriloga_inspector::{
     VerilogAInspectorAction, show_veriloga_inspector, symbol_drift_text, veriloga_compile_status,
-    veriloga_diagnostics, veriloga_receipt,
+    veriloga_current_diagnostics, veriloga_receipt,
 };
 pub(crate) use veriloga_interface::{
     VerilogACellSymbol, VerilogAInterfaceFinding, interface_check_finding, interface_finding,

@@ -530,6 +530,7 @@ impl Command {
             | Self::GoToLine
             | Self::NextProblem
             | Self::PreviousProblem
+            | Self::ShowProblemAtCaret
             | Self::FormatDocument
             | Self::FoldSelection
             | Self::UnfoldAtCaret
@@ -684,6 +685,7 @@ impl Command {
             Self::GoToLine => GO_TO_LINE,
             Self::NextProblem => NEXT_PROBLEM,
             Self::PreviousProblem => PREVIOUS_PROBLEM,
+            Self::ShowProblemAtCaret => NONE,
             Self::FoldSelection => FOLD_SELECTION,
             Self::UnfoldAtCaret => UNFOLD_AT_CARET,
             Self::GoToDefinition => GO_TO_DEFINITION,

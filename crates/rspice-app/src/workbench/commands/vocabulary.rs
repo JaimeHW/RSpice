@@ -227,6 +227,8 @@ pub enum Command {
     /// The next or previous finding in the focused source document.
     NextProblem,
     PreviousProblem,
+    /// Say what the finding at the caret of the focused source document is.
+    ShowProblemAtCaret,
     FormatDocument,
     FoldSelection,
     UnfoldAtCaret,
@@ -650,6 +652,9 @@ impl Command {
             Self::GoToLine => spec("go-to-line", "Go to line\u{2026}", "Edit"),
             Self::NextProblem => spec("next-problem", "Next problem", "Edit"),
             Self::PreviousProblem => spec("previous-problem", "Previous problem", "Edit"),
+            Self::ShowProblemAtCaret => {
+                spec("show-problem-at-caret", "Show problem at caret", "Edit")
+            }
             Self::FormatDocument => spec("format-document", "Format document", "Edit"),
             Self::FoldSelection => spec("fold-selection", "Fold selection", "View"),
             Self::UnfoldAtCaret => spec("unfold-at-caret", "Unfold at caret", "View"),
@@ -916,6 +921,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::GoToLine,
     Command::NextProblem,
     Command::PreviousProblem,
+    Command::ShowProblemAtCaret,
     Command::FormatDocument,
     Command::FoldSelection,
     Command::UnfoldAtCaret,
@@ -1186,6 +1192,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     Command::GoToLine.key(),
     Command::NextProblem.key(),
     Command::PreviousProblem.key(),
+    Command::ShowProblemAtCaret.key(),
     Command::FormatDocument.key(),
     Command::FoldSelection.key(),
     Command::UnfoldAtCaret.key(),

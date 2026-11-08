@@ -213,6 +213,9 @@ pub fn show(ui: &mut Ui, state: &mut AppState) -> egui::Response {
             breakpoints_enabled: false,
             current_line: None,
             cross_probe_line,
+            // The deck's findings are underlined in its own layout.
+            marks: &[],
+            marks_outdated: false,
         };
         let revision = state.code.netlist.revision;
         let output = crate::workbench::documents::virtual_text_editor::show_virtual_text_editor(
