@@ -42,36 +42,31 @@ fn selected_op_evidence(state: ResultsReads<'_>) -> Option<OpEvidence> {
         return None;
     }
 
-    let (detail_policy, facts) = match analysis.result_payload.as_ref() {
+    let facts = match analysis.result_payload.as_ref() {
         Some(AnalysisResultPayload::OperatingPoint {
             temperature_celsius,
             annotation,
-            device_detail,
             mna_node_names,
             mna_branch_names,
             run_point_index,
             run_point_count,
             run_point_process,
             ..
-        }) => (
-            Some(*device_detail),
-            Some(OperatingPointReportFacts {
-                temperature_celsius: *temperature_celsius,
-                process: *run_point_process,
-                point_index: *run_point_index,
-                point_count: *run_point_count,
-                mna_nodes: mna_node_names.len(),
-                mna_branches: mna_branch_names.len(),
-                annotation: *annotation,
-            }),
-        ),
-        _ => (None, None),
+        }) => Some(OperatingPointReportFacts {
+            temperature_celsius: *temperature_celsius,
+            process: *run_point_process,
+            point_index: *run_point_index,
+            point_count: *run_point_count,
+            mna_nodes: mna_node_names.len(),
+            mna_branches: mna_branch_names.len(),
+            annotation: *annotation,
+        }),
+        _ => None,
     };
 
     Some(OpEvidence {
         success: analysis.success,
         error: analysis.error_message.clone(),
-        detail_policy,
         facts,
     })
 }
@@ -283,6 +278,17 @@ fn op_plan(state: &mut ResultsParts<'_>, analysis: AnalysisPresentationKey) -> O
     state.results.plans.op = Some(Arc::clone(&built));
     Some(built)
 }
+/// The plan of the analysis on display, built once however many surfaces ask.
+fn active_plan(state: &mut ResultsParts<'_>) -> Option<Arc<OpPlan>> {
+    let key = state.model.simulation.active_run().and_then(|run| {
+        state
+            .model
+            .simulation
+            .active_analysis()
+            .map(|analysis| AnalysisPresentationKey::new(run.dataset_id, analysis))
+    });
+    key.and_then(|key| op_plan(state, key))
+}
 struct OpMapping<'a> {
     state: ResultsReads<'a>,
     notations: Option<BusNotations>,
@@ -333,14 +339,7 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         return;
     }
 
-    let analysis_key = state.model.simulation.active_run().and_then(|run| {
-        state
-            .model
-            .simulation
-            .active_analysis()
-            .map(|analysis| AnalysisPresentationKey::new(run.dataset_id, analysis))
-    });
-    let plan = analysis_key.and_then(|key| op_plan(state, key));
+    let plan = active_plan(state);
     let selection = reconciled_selection(state);
     let analysis = state.model.simulation.active_analysis();
     let dc = analysis.and_then(|analysis| analysis.dc_op.as_ref());
@@ -411,6 +410,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let Some(evidence) = selected_op_evidence(state.results_reads()) else {
         return;
     };
+    let plan = active_plan(state);
     let detail = reconciled_selection(state).and_then(|selection| {
         let reads = state.results_reads();
         let analysis = reads.model.simulation.active_analysis();
@@ -431,6 +431,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         ui,
         &evidence,
         result_mapping_is_current(state.results_reads()),
+        plan.as_ref().and_then(|plan| plan.display.scope_note()),
         detail.as_ref(),
     );
     if let Some(action) = action {

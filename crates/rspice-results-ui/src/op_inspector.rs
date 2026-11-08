@@ -74,7 +74,6 @@ const SCHEMATIC_CHANGED: &str = "Schematic changed since this run; cross-probing
 pub struct OpEvidence {
     pub success: bool,
     pub error: Option<String>,
-    pub detail_policy: Option<OperatingPointDeviceDetailEvidence>,
     pub facts: Option<OperatingPointReportFacts>,
 }
 
@@ -197,19 +196,28 @@ pub fn show_absent(ui: &mut Ui, absence: OpAbsence) {
 ///
 /// A full save is the normal state and says nothing. A reduced one explains
 /// rows the reader expected and cannot find, which is the only case worth a
-/// line of the panel.
-fn reduced_scope_warning(
-    policy: Option<OperatingPointDeviceDetailEvidence>,
+/// line of the panel: a save policy that happened to keep every device is not
+/// that case, whatever it is called.
+fn reduced_scope_note(
+    devices: Option<&DeviceOpReport>,
+    detail: Option<&RetainedDetail>,
 ) -> Option<&'static str> {
-    match policy {
-        None | Some(OperatingPointDeviceDetailEvidence::AllDevices) => None,
-        Some(OperatingPointDeviceDetailEvidence::SelectedAndViolations) => {
-            Some("Only selected and violating devices were saved.")
+    let detail = detail?;
+    let left_out = devices.is_some_and(|report| {
+        report
+            .entries
+            .iter()
+            .any(|entry| !retained_detail_allows(&entry.name, Some(detail)))
+    });
+    match detail.policy {
+        OperatingPointDeviceDetailEvidence::AllDevices => None,
+        OperatingPointDeviceDetailEvidence::SelectedAndViolations => {
+            left_out.then_some("Only selected and violating devices were saved.")
         }
-        Some(OperatingPointDeviceDetailEvidence::ViolationsOnly) => {
-            Some("Only violating devices were saved.")
+        OperatingPointDeviceDetailEvidence::ViolationsOnly => {
+            left_out.then_some("Only violating devices were saved.")
         }
-        Some(OperatingPointDeviceDetailEvidence::None) => {
+        OperatingPointDeviceDetailEvidence::None => {
             Some("No per-device detail was saved for this run.")
         }
     }
@@ -708,6 +716,7 @@ pub struct OpPlan {
     device_shown: usize,
     /// The one line a filter that matched nothing leaves on the sheet.
     no_match: Option<String>,
+    scope_note: Option<&'static str>,
 }
 
 impl OpPlan {
@@ -748,11 +757,18 @@ impl OpPlan {
             node_shown,
             device_shown,
             no_match,
+            scope_note: reduced_scope_note(devices, detail),
         }
     }
 
     pub fn node_shown(&self) -> usize {
         self.node_shown
+    }
+
+    /// What the inspector says about devices the save left out, if it left
+    /// any out.
+    pub fn scope_note(&self) -> Option<&'static str> {
+        self.scope_note
     }
 
     /// The section whose title and column header stay on the sheet's top edge
@@ -1762,6 +1778,7 @@ pub fn right_panel(
     ui: &mut Ui,
     evidence: &OpEvidence,
     current: bool,
+    scope_note: Option<&str>,
     detail: Option<&OpDetail>,
 ) -> Option<OpAction> {
     let mut action = None;
@@ -1826,8 +1843,8 @@ pub fn right_panel(
 
     // A full save and a current mapping are the normal states; only the
     // reduced save and the stale mapping change what the sheet can show.
-    if let Some(reduced) = reduced_scope_warning(evidence.detail_policy) {
-        crate::presentation::panel_note(ui, reduced);
+    if let Some(note) = scope_note {
+        crate::presentation::panel_note(ui, note);
     }
     if !current && detail.is_none() {
         crate::presentation::panel_note(ui, SCHEMATIC_CHANGED);

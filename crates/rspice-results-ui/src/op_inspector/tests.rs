@@ -802,7 +802,6 @@ fn a_failed_solve_offers_to_mark_what_it_named_at_the_end_of_its_row() {
     let failed = OpEvidence {
         success: false,
         error: Some("did not converge".to_owned()),
-        detail_policy: None,
         facts: None,
     };
     let view = |failure_site| OpView {
@@ -824,6 +823,61 @@ fn a_failed_solve_offers_to_mark_what_it_named_at_the_end_of_its_row() {
     assert!(responses[1].highlight_failure_sites);
     let responses = play(&plan, &view(None), press_release(at));
     assert!(!responses[1].highlight_failure_sites);
+}
+
+#[test]
+fn the_save_policy_is_mentioned_only_when_it_kept_a_device_off_the_sheet() {
+    use OperatingPointDeviceDetailEvidence as Policy;
+
+    let report = DeviceOpReport {
+        entries: vec![
+            device("M1", "MOSFET", None, vec![]),
+            device("M2", "MOSFET", None, vec![]),
+        ],
+    };
+    let note = |policy, selected: &[&str], violations: &[&str]| {
+        let detail = RetainedDetail {
+            policy,
+            selected: selected.iter().map(|name| (*name).to_owned()).collect(),
+            violations: violations.iter().map(|name| (*name).to_owned()).collect(),
+        };
+        let (sort, collapsed) = (OpSort::new(), BTreeSet::new());
+        OpPlan::new(
+            OpControls {
+                filter: "",
+                sort: &sort,
+                collapsed: &collapsed,
+            },
+            None,
+            Some(&report),
+            Some(&detail),
+        )
+        .scope_note()
+    };
+
+    assert_eq!(note(Policy::AllDevices, &[], &[]), None);
+    assert_eq!(
+        note(Policy::SelectedAndViolations, &[], &[]),
+        None,
+        "with nothing picked and nothing violating, every device is kept"
+    );
+    assert_eq!(
+        note(Policy::SelectedAndViolations, &["M1"], &["M2"]),
+        None,
+        "the two lists together name every device"
+    );
+    assert_eq!(
+        note(Policy::SelectedAndViolations, &["M1"], &[]),
+        Some("Only selected and violating devices were saved.")
+    );
+    assert_eq!(
+        note(Policy::ViolationsOnly, &[], &[]),
+        Some("Only violating devices were saved.")
+    );
+    assert_eq!(
+        note(Policy::None, &[], &[]),
+        Some("No per-device detail was saved for this run.")
+    );
 }
 
 #[test]
@@ -854,7 +908,10 @@ fn a_stale_schematic_greys_the_one_cross_probe_button_and_says_why_once() {
     for _ in 0..2 {
         let input = rspice_ui_kit::raster::display_input(SIZE, 1.0);
         let output = ctx.run_ui(input, |ui| {
-            assert_eq!(right_panel(ui, &evidence(), false, Some(&detail)), None);
+            assert_eq!(
+                right_panel(ui, &evidence(), false, None, Some(&detail)),
+                None
+            );
         });
         nodes = output
             .platform_output
@@ -923,7 +980,6 @@ fn evidence() -> OpEvidence {
     OpEvidence {
         success: true,
         error: None,
-        detail_policy: None,
         facts: None,
     }
 }
