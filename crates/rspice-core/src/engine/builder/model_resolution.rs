@@ -246,20 +246,11 @@ fn resolve_passive_eval_context<'a>(
     instance_params: &[(String, f64)],
     temperature_kelvin: f64,
 ) -> Result<(ModelEvaluationContext<'a>, f64, f64), SimulationError> {
-    let mut current_temp_c = crate::constants::kelvin_to_celsius(temperature_kelvin);
-    if let Some(temp) = instance_param(instance_params, &["TEMP"]) {
-        current_temp_c = normalize_temperature_param_to_celsius(temp);
-    } else if let Some(dtemp) = instance_param(instance_params, &["DTEMP"]) {
-        current_temp_c += dtemp;
-    }
-
+    let current_temp_c = passive_instance_temperature_celsius(instance_params, temperature_kelvin);
     let base_tnom_c = netlist.options.tnom.unwrap_or(27.0);
     let Some(model_def) = model_def else {
-        let mut ctx = base_eval_context(netlist);
-        set_model_temperature_scalars(&mut ctx, current_temp_c, base_tnom_c);
-        materialize_model_parameters(&mut ctx, netlist.abort)?;
         return Ok((
-            ModelEvaluationContext::new(ctx, netlist.abort),
+            modelless_passive_eval_context(netlist, current_temp_c, base_tnom_c)?,
             current_temp_c,
             base_tnom_c,
         ));
@@ -271,6 +262,36 @@ fn resolve_passive_eval_context<'a>(
         .unwrap_or(base_tnom_c);
 
     Ok((ctx, current_temp_c, model_tnom_c))
+}
+
+/// A passive instance's own temperature in Celsius: its `TEMP`, else the
+/// circuit's plus its `DTEMP`.
+fn passive_instance_temperature_celsius(
+    instance_params: &[(String, f64)],
+    temperature_kelvin: f64,
+) -> f64 {
+    if let Some(temp) = instance_param(instance_params, &["TEMP"]) {
+        normalize_temperature_param_to_celsius(temp)
+    } else {
+        let circuit_c = crate::constants::kelvin_to_celsius(temperature_kelvin);
+        match instance_param(instance_params, &["DTEMP"]) {
+            Some(dtemp) => circuit_c + dtemp,
+            None => circuit_c,
+        }
+    }
+}
+
+/// The evaluation context of a passive instance that names no model: the
+/// deck's parameters with the instance's temperature scalars.
+fn modelless_passive_eval_context<'a>(
+    netlist: &ModelResolution<'a>,
+    current_temp_c: f64,
+    tnom_c: f64,
+) -> Result<ModelEvaluationContext<'a>, SimulationError> {
+    let mut ctx = base_eval_context(netlist);
+    set_model_temperature_scalars(&mut ctx, current_temp_c, tnom_c);
+    materialize_model_parameters(&mut ctx, netlist.abort)?;
+    Ok(ModelEvaluationContext::new(ctx, netlist.abort))
 }
 
 fn build_model_eval_context<'a>(

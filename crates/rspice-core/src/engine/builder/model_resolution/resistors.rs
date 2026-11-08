@@ -14,7 +14,7 @@ fn resolve_resistor_flicker_noise(
     };
     let model_name = &model_def.name;
     let instance_params = evaluation.context.instance_params;
-    let eval_ctx = &evaluation.eval_ctx;
+    let eval_ctx = evaluation.eval_ctx()?;
     let parameter = |names: &[&str], default: f64| -> Result<f64, SimulationError> {
         if let Some((name, value)) = model_def.string_params.iter().find(|(name, _)| {
             names
@@ -334,7 +334,7 @@ fn resolve_resistor_thermal_state(
         evaluation.netlist,
         model_def,
         evaluation.context.instance_params,
-        &evaluation.eval_ctx,
+        evaluation.eval_ctx()?,
         evaluation.temperature_celsius,
     )
 }
@@ -614,7 +614,9 @@ pub(in crate::engine::builder) struct ResistorEvaluation<'a> {
     element_name: &'a str,
     context: ResistorResolutionContext<'a>,
     model_def: Option<&'a crate::netlist::ModelDef>,
-    eval_ctx: ModelEvaluationContext<'a>,
+    /// Filled by [`Self::new`] when building it has an effect, and otherwise
+    /// by the first expression that reads it.
+    eval_ctx: std::cell::OnceCell<ModelEvaluationContext<'a>>,
     temperature_celsius: f64,
     tnom_celsius: f64,
     model_level: Option<i32>,
@@ -651,14 +653,40 @@ impl<'a> ResistorEvaluation<'a> {
             None
         };
 
-        let (eval_ctx, current_temp_c, tnom_c) =
-            resolve_passive_eval_context(netlist, model_def, instance_params, temperature_kelvin)?;
-        let resistor_level = if let (Some(model_def), Some(model_name)) = (model_def, model_name) {
-            let level =
-                resolve_resistor_model_level(element_name, model_name, model_def, &eval_ctx)?;
-            Some(level)
+        // A card with no model reads a context only to evaluate a value
+        // expression, and with no retained parameter expression to materialize
+        // building one draws no statistical sample: most cards need none.
+        let (eval_ctx, current_temp_c, tnom_c, resistor_level) = if model_def.is_none()
+            && !netlist.params.has_retained_parameter_expressions()
+        {
+            (
+                std::cell::OnceCell::new(),
+                passive_instance_temperature_celsius(instance_params, temperature_kelvin),
+                netlist.options.tnom.unwrap_or(27.0),
+                None,
+            )
         } else {
-            None
+            let (eval_ctx, current_temp_c, tnom_c) = resolve_passive_eval_context(
+                netlist,
+                model_def,
+                instance_params,
+                temperature_kelvin,
+            )?;
+            let resistor_level = match (model_def, model_name) {
+                (Some(model_def), Some(model_name)) => Some(resolve_resistor_model_level(
+                    element_name,
+                    model_name,
+                    model_def,
+                    &eval_ctx,
+                )?),
+                _ => None,
+            };
+            (
+                std::cell::OnceCell::from(eval_ctx),
+                current_temp_c,
+                tnom_c,
+                resistor_level,
+            )
         };
 
         Ok(Self {
@@ -671,6 +699,18 @@ impl<'a> ResistorEvaluation<'a> {
             tnom_celsius: tnom_c,
             model_level: resistor_level,
         })
+    }
+
+    fn eval_ctx(&self) -> Result<&ModelEvaluationContext<'a>, SimulationError> {
+        if let Some(context) = self.eval_ctx.get() {
+            return Ok(context);
+        }
+        let context = modelless_passive_eval_context(
+            self.netlist,
+            self.temperature_celsius,
+            self.tnom_celsius,
+        )?;
+        Ok(self.eval_ctx.get_or_init(|| context))
     }
 
     pub(in crate::engine::builder) fn effective_parameters(
@@ -744,7 +784,7 @@ fn resolve_resistor_parameters(
         spice_dialect,
     } = evaluation.context;
     let model_def = evaluation.model_def;
-    let eval_ctx = &evaluation.eval_ctx;
+    let eval_ctx = || evaluation.eval_ctx();
     let current_temp_c = evaluation.temperature_celsius;
     let tnom_c = evaluation.tnom_celsius;
     let resistor_level = evaluation.model_level;
@@ -760,7 +800,7 @@ fn resolve_resistor_parameters(
                     model_name,
                     model_def,
                     instance_params,
-                    eval_ctx,
+                    eval_ctx()?,
                 )?;
                 (Some(resistance), Some(resistance))
             } else {
@@ -771,7 +811,7 @@ fn resolve_resistor_parameters(
                     value_expr,
                     model_def,
                     instance_params,
-                    eval_ctx,
+                    eval_ctx()?,
                 )?;
                 (
                     Some(resolved.electrical_resistance),
@@ -792,7 +832,7 @@ fn resolve_resistor_parameters(
             if resistance.is_none()
                 && let Some(expr) = value_expr
             {
-                resistance = Some(eval_ctx.evaluate(expr).map_err(|error| {
+                resistance = Some(eval_ctx()?.evaluate(expr).map_err(|error| {
                     map_model_expression_error(error, |e| {
                         format!(
                             "Resistor '{}' value expression could not be resolved: {}",
@@ -813,7 +853,7 @@ fn resolve_resistor_parameters(
         } else {
             &["R", "RES", "R0", "VALUE", "RESISTANCE"]
         };
-        let model_resistance = resolve_model_param(model_def, model_resistance_names, eval_ctx)?;
+        let model_resistance = resolve_model_param(model_def, model_resistance_names, eval_ctx()?)?;
 
         if resistor_level != Some(2) {
             let geometry_resistance = if resistance.is_none() {
@@ -821,7 +861,7 @@ fn resolve_resistor_parameters(
                     element_name,
                     model_def,
                     instance_params,
-                    eval_ctx,
+                    eval_ctx()?,
                     netlist.params.expression_dialect(),
                     spice_dialect,
                 )?
@@ -901,21 +941,21 @@ fn resolve_resistor_parameters(
     let width = if let Some(width) = instance_param(instance_params, &["W", "WIDTH"]) {
         width
     } else if let Some(model_def) = model_def {
-        resolve_model_param(model_def, &["DEFW"], eval_ctx)?.unwrap_or(10.0e-6)
+        resolve_model_param(model_def, &["DEFW"], eval_ctx()?)?.unwrap_or(10.0e-6)
     } else {
         10.0e-6
     };
     let tc1 = if let Some(tc1) = instance_param(instance_params, &["TC1"]) {
         tc1
     } else if let Some(model_def) = model_def {
-        resolve_model_param(model_def, &["TC1"], eval_ctx)?.unwrap_or(0.0)
+        resolve_model_param(model_def, &["TC1"], eval_ctx()?)?.unwrap_or(0.0)
     } else {
         0.0
     };
     let tc2 = if let Some(tc2) = instance_param(instance_params, &["TC2"]) {
         tc2
     } else if let Some(model_def) = model_def {
-        resolve_model_param(model_def, &["TC2"], eval_ctx)?.unwrap_or(0.0)
+        resolve_model_param(model_def, &["TC2"], eval_ctx()?)?.unwrap_or(0.0)
     } else {
         0.0
     };
@@ -938,7 +978,7 @@ fn resolve_resistor_parameters(
     let tce = if let Some(tce) = instance_param(instance_params, &["TCE"]) {
         Some(tce)
     } else if let Some(model_def) = model_def {
-        resolve_model_param(model_def, &["TCE"], eval_ctx)?
+        resolve_model_param(model_def, &["TCE"], eval_ctx()?)?
     } else {
         None
     };
@@ -954,12 +994,16 @@ fn resolve_resistor_parameters(
         resolved *= scale;
     } else {
         // LTspice's `tc` polynomial continues past TC2 with TC3·dT³, ...
-        let higher_orders = (3..)
-            .map_while(|order| {
-                let name = format!("TC{order}");
-                instance_param(instance_params, &[name.as_str()])
-            })
-            .collect::<Vec<_>>();
+        let higher_orders = if instance_params.is_empty() {
+            Vec::new()
+        } else {
+            (3..)
+                .map_while(|order| {
+                    let name = format!("TC{order}");
+                    instance_param(instance_params, &[name.as_str()])
+                })
+                .collect::<Vec<_>>()
+        };
         if let Some(value) = higher_orders.iter().find(|value| !value.is_finite()) {
             return Err(SimulationError::Circuit(format!(
                 "Resistor '{element_name}' resolved a temperature coefficient to non-finite value {value}"
