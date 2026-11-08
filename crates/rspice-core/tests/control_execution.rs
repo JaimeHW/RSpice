@@ -3378,7 +3378,7 @@ fn write_names_an_operating_points_vectors_as_ngspice_does() {
     assert_eq!(names_of(&one[0]), ["v(a) voltage", "v(b) voltage"]);
     assert_eq!(one[0].plot, "Operating Point");
     assert_eq!(one[0].points, 1);
-    assert!((one[0].values[0][1] - 9.803921568627451e-3).abs() < 1e-12);
+    assert!((one[0].values[0][1] - 9.803921568627e-3).abs() < 1e-12);
     assert_eq!(
         names_of(&sections(2)[0]),
         [
