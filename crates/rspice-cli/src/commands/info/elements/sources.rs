@@ -42,6 +42,19 @@ pub(super) fn describe(source: &SourceSpec) -> Value {
             record!("rf_port", inner, port)
         }
         Dc(value) => numeric_record!("dc", [value]),
+        ExpTrain(train) => {
+            let rspice_core::netlist::ExpTrain {
+                v1,
+                v2,
+                td1,
+                tau1,
+                td2,
+                tau2,
+                period,
+                ..
+            } = train;
+            numeric_record!("exp_train", [v1, v2, td1, tau1, td2, tau2, period])
+        }
         Ac { magnitude, phase } => numeric_record!("ac", [magnitude, phase]),
         DcAc {
             dc_value,
