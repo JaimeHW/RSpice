@@ -289,6 +289,9 @@ struct FlattenScope<'a> {
     node_map: &'a HashMap<String, String>,
     scope: &'a ParamContext,
     depth: usize,
+    /// The flattened netlist's card origins, which locate an expansion
+    /// error at the card that raised it.
+    origins: &'a HashMap<String, NetlistSourceLocation>,
 }
 
 #[derive(Clone, Copy)]
@@ -408,9 +411,6 @@ pub struct Flattener<'a> {
     /// node names. See [`Self::canonicalize_node_spellings`].
     expanded_instance_paths: HashSet<String>,
     parameter_direction: Option<Box<ParameterDirectionCapture>>,
-    /// The flattened netlist's card origins, which locate an expansion
-    /// error at the card that raised it.
-    element_origins: HashMap<String, NetlistSourceLocation>,
 }
 
 impl<'a> Flattener<'a> {
@@ -493,7 +493,6 @@ impl<'a> Flattener<'a> {
             flattened_element_names: HashSet::new(),
             expanded_instance_paths: HashSet::new(),
             parameter_direction: None,
-            element_origins: HashMap::new(),
         }
     }
 
@@ -501,7 +500,7 @@ impl<'a> Flattener<'a> {
     /// came from: `subcircuit` holds the card, or none for the root deck.
     /// An error already located deeper in the hierarchy keeps its card.
     fn locate_expansion_error(
-        &self,
+        origins: &HashMap<String, NetlistSourceLocation>,
         error: ParseWithAbortError,
         subcircuit: Option<&str>,
         name: &str,
@@ -509,10 +508,7 @@ impl<'a> Flattener<'a> {
         let ParseWithAbortError::Parse(ParseError::Syntax { line: 0, message }) = error else {
             return error;
         };
-        match self
-            .element_origins
-            .get(&super::element_origin_key(subcircuit, name))
-        {
+        match origins.get(&super::element_origin_key(subcircuit, name)) {
             Some(origin) => ParseError::Syntax {
                 line: origin.line,
                 message: format!("{origin}: {message}"),
@@ -641,7 +637,6 @@ impl<'a> Flattener<'a> {
         self.xspice_auto_bridge_node_hints.clear();
         self.flattened_element_names.clear();
         self.expanded_instance_paths.clear();
-        self.element_origins = netlist.element_origins.clone();
         self.xspice_auto_bridge_digital_param_name = netlist
             .options
             .auto_bridge_param_name("d")
@@ -690,12 +685,18 @@ impl<'a> Flattener<'a> {
                     node_map: &HashMap::new(),
                     scope: &global_scope,
                     depth: 0,
+                    origins: &netlist.element_origins,
                 },
                 &mut flat_elements,
                 abort,
             ) {
                 self.expansion_stack.truncate(stack_len);
-                let error = self.locate_expansion_error(error, None, &element.name);
+                let error = Self::locate_expansion_error(
+                    &netlist.element_origins,
+                    error,
+                    None,
+                    &element.name,
+                );
                 self.handle_branch_error(error, &format!("top-level element {}", element.name))?;
             }
         }
@@ -733,6 +734,7 @@ impl<'a> Flattener<'a> {
             node_map,
             scope,
             depth,
+            origins,
         } = scope;
         ensure_parse_not_aborted(abort)?;
         ResourceLimitError::ensure(ResourceKind::HierarchyDepth, depth, self.config.max_depth)
@@ -842,6 +844,7 @@ impl<'a> Flattener<'a> {
                             node_map,
                             scope,
                             depth,
+                            origins,
                         },
                         output,
                         abort,
@@ -1330,6 +1333,7 @@ impl<'a> Flattener<'a> {
             node_map: parent_node_map,
             scope: caller_scope,
             depth,
+            origins,
         } = scope;
         ensure_parse_not_aborted(abort)?;
         // Look up subcircuit definition
@@ -1541,6 +1545,7 @@ impl<'a> Flattener<'a> {
                         node_map: &node_map,
                         scope: &param_scope,
                         depth: depth + 1,
+                        origins,
                     },
                     output,
                     abort,
@@ -1548,8 +1553,12 @@ impl<'a> Flattener<'a> {
             })();
             if let Err(error) = branch_result {
                 self.expansion_stack.truncate(stack_len);
-                let error =
-                    self.locate_expansion_error(error, Some(&subckt.name), &sub_element.name);
+                let error = Self::locate_expansion_error(
+                    origins,
+                    error,
+                    Some(&subckt.name),
+                    &sub_element.name,
+                );
                 self.handle_branch_error(
                     error,
                     &format!(
