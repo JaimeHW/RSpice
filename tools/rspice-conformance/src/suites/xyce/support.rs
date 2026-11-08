@@ -2478,6 +2478,7 @@ impl XyceTestRunner {
             residual_reltol,
             gmin,
             rshunt,
+            gshunt,
             cshunt,
             method,
             xmu,
@@ -2614,6 +2615,7 @@ impl XyceTestRunner {
             && residual_reltol.is_none()
             && gmin.is_none()
             && rshunt.is_none()
+            && gshunt.is_none()
             && cshunt.is_none()
             && method.as_deref() == method_selector
             && xmu.is_none()
