@@ -2662,6 +2662,27 @@ fn an_ltspice_pin_on_a_slanted_edge_names_itself_where_ltspice_letters_it() {
     assert_eq!(placed("IN").1, None);
 }
 
+/// A drawn ellipse as large as a sheet stays on the sheet, as fine a ring as
+/// a polygon may be.
+#[test]
+fn a_sheet_sized_drawn_ellipse_is_kept() {
+    use crate::schematic::documentation_shape::{
+        DocumentationShapeGeometry, MAX_DOCUMENTATION_POLYGON_POINTS,
+    };
+
+    let drawing = parse_asc("Version 4\nCIRCLE Normal 0 0 1600 1200\n").unwrap();
+    let imported = import_foreign_schematic(&drawing, "work", &Library::default());
+    let notices = format!("{:?}", imported.notices);
+    assert!(!notices.contains("zero size"), "{notices}");
+    let [shape] = imported.document.documentation_shapes.as_slice() else {
+        panic!("one shape: {:?}", imported.document.documentation_shapes);
+    };
+    let DocumentationShapeGeometry::Polygon { points } = &shape.geometry else {
+        panic!("a ring: {shape:?}");
+    };
+    assert!(points.len() > 256 && points.len() <= MAX_DOCUMENTATION_POLYGON_POINTS);
+}
+
 /// LTspice letters a name on its side where the pin's justification starts
 /// with `V`: the name reads upward and runs from the pin into the body.
 #[test]

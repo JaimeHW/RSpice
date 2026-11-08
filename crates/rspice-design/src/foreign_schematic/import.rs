@@ -35,7 +35,9 @@ use crate::schematic::component_type::ComponentType;
 use crate::schematic::design_note::{DESIGN_NOTE_TEXT_OFFSET_WORLD, DesignNote, DesignNoteKind};
 use crate::schematic::document::SchematicDocument;
 use crate::schematic::document_policy::{NetNamingPolicy, SchematicDocumentPolicy};
-use crate::schematic::documentation_shape::{DocumentationShape, DocumentationShapeGeometry};
+use crate::schematic::documentation_shape::{
+    DocumentationShape, DocumentationShapeGeometry, MAX_DOCUMENTATION_POLYGON_POINTS,
+};
 use crate::schematic::functional_catalog::{
     conform_functional_inputs, functional_library_binding, functional_part, placement_value,
 };
@@ -2921,16 +2923,23 @@ fn ellipse_in_box(a: [f64; 2], b: [f64; 2]) -> SymbolCurve {
     }
 }
 
-/// A closed ring of whole-unit points around a sheet's drawn ellipse.
+/// A closed ring of whole-unit points around a sheet's drawn ellipse, as fine
+/// as a sheet's polygon may be.
 fn ellipse_outline(ellipse: SymbolCurve) -> Vec<Point> {
-    let mut ring = ellipse
-        .tessellated(1.0)
-        .into_iter()
-        .map(whole_point)
-        .collect::<Vec<_>>();
-    ring.pop();
-    ring.dedup();
-    ring
+    let mut pixels_per_unit = 1.0;
+    loop {
+        let mut ring = ellipse
+            .tessellated(pixels_per_unit)
+            .into_iter()
+            .map(whole_point)
+            .collect::<Vec<_>>();
+        ring.pop();
+        ring.dedup();
+        if ring.len() <= MAX_DOCUMENTATION_POLYGON_POINTS {
+            return ring;
+        }
+        pixels_per_unit /= 2.0;
+    }
 }
 
 fn whole_point([x, y]: [f64; 2]) -> Point {
