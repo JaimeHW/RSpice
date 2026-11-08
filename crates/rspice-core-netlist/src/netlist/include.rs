@@ -353,9 +353,8 @@ impl PreparedSource {
         content: Arc<str>,
         abort: &dyn AbortSignal,
     ) -> Result<Self, ParseWithAbortError> {
-        let (adapted, spectre_names) =
-            super::spectre_adapter::adapt_spectre_source(path, &content)
-                .map_err(|error| spectre_adaptation_error(path, error))?;
+        let (adapted, spectre_names) = super::spectre_adapter::adapt_spectre_source(path, &content)
+            .map_err(|error| spectre_adaptation_error(path, error))?;
         let text = match adapted {
             std::borrow::Cow::Borrowed(_) => Arc::clone(&content),
             std::borrow::Cow::Owned(text) => Arc::from(text),
@@ -365,9 +364,9 @@ impl PreparedSource {
         let mut start = 0;
         for (line_index, piece) in text.split_inclusive('\n').enumerate() {
             poll_parse_abort(abort, line_index)?;
-            let line = piece.strip_suffix('\n').map_or(piece, |line| {
-                line.strip_suffix('\r').unwrap_or(line)
-            });
+            let line = piece
+                .strip_suffix('\n')
+                .map_or(piece, |line| line.strip_suffix('\r').unwrap_or(line));
             let trimmed = line.trim();
             if trimmed.starts_with('.')
                 && split_directive(trimmed).is_some_and(|(directive, _)| {
