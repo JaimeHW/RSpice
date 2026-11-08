@@ -242,7 +242,10 @@ impl Destinations {
         let key = key(path).map_err(|error| CliError::output_error(path, error))?;
         let mut state = self.lock()?;
         if let Some(previous) = state.declared.get(&key) {
-            let message = format!("control file collides with {previous} at '{}'", path.display());
+            let message = format!(
+                "control file collides with {previous} at '{}'",
+                path.display()
+            );
             state.collision = Some(message.clone());
             return Err(conflict(message));
         }
