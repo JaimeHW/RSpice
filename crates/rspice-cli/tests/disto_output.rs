@@ -306,34 +306,34 @@ fn ratio_at_or_above_one_fails_with_the_core_contract() {
     );
 }
 
+/// A supply rail or quiet branch has no fundamental, so its products have no
+/// ratio to it. The analysis still succeeds: the signal keeps its product
+/// phasors and gets no ratio column, never a zero or an infinity.
 #[test]
-fn zero_f1_denominator_fails_instead_of_exporting_zero_or_infinity() {
+fn a_signal_without_a_fundamental_exports_its_products_without_a_ratio() {
     let dir = test_dir("zero_f1_ratio");
-    let output_path = dir.join("undefined_ratio.json");
-    let output = run(
-        &fixture("disto_zero_fundamental_ratio.cir"),
-        Some((&output_path, "json")),
-    );
-    assert!(
-        !output.status.success(),
-        "undefined 0/0 normalization unexpectedly succeeded"
-    );
-    let diagnostic = format!(
-        "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let diagnostic_lower = diagnostic.to_ascii_lowercase();
-    assert!(
-        diagnostic_lower.contains("cannot normalize 2f1 signal 'i(vquiet)' at f1 point 0")
-            && diagnostic_lower.contains("f1 magnitude is zero")
-            && diagnostic_lower.contains("no finite magnitude ratio exists"),
-        "undefined normalization did not fail precisely:\n{diagnostic}"
-    );
-    assert!(
-        !output_path.exists(),
-        "a failed normalization must not publish an output artifact"
-    );
+    for format in ["ascii", "json"] {
+        let output_path = dir.join(format!("quiet.{format}"));
+        let output = run(
+            &fixture("disto_zero_fundamental_ratio.cir"),
+            Some((&output_path, format)),
+        );
+        assert!(
+            output.status.success(),
+            "{format} DISTO export of a quiet branch failed:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let text = std::fs::read_to_string(&output_path)
+            .expect("read DISTO output")
+            .to_ascii_lowercase();
+        if format == "ascii" {
+            assert!(text.contains("peak(2f1:i(vquiet))"), "{text}");
+            assert!(
+                !text.contains("magnitude_ratio_to_f1(2f1:i(vquiet))"),
+                "{text}"
+            );
+        }
+    }
 }
 
 #[test]

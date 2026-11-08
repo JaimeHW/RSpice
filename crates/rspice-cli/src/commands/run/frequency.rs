@@ -448,12 +448,7 @@ fn distortion_export_table(
             let ratios = if series.label == "f1" {
                 None
             } else {
-                Some(distortion_magnitude_ratio(
-                    &f1_signals,
-                    &series.label,
-                    &signal,
-                    &magnitudes,
-                )?)
+                distortion_magnitude_ratio(&f1_signals, &series.label, &signal, &magnitudes)?
             };
             let var_type = signal.raw_variable_type().to_string();
             columns.push(ExportColumn {
@@ -531,12 +526,7 @@ fn distortion_hdf5_section(
             let magnitude_ratio_to_f1 = if series.label == "f1" {
                 None
             } else {
-                Some(distortion_magnitude_ratio(
-                    f1_signals,
-                    &series.label,
-                    signal,
-                    &magnitude,
-                )?)
+                distortion_magnitude_ratio(f1_signals, &series.label, signal, &magnitude)?
             };
             signals.push(Hdf5DistortionSignal {
                 name: signal.display_name.clone(),
@@ -570,12 +560,17 @@ fn distortion_hdf5_section(
     })
 }
 
+/// Each response magnitude over the same signal's F1 magnitude.
+///
+/// A signal with no fundamental at some point (a supply rail, a quiet branch)
+/// has no ratio to it, so it gets no ratio column rather than a zero or an
+/// infinity; its product phasors are still exported.
 fn distortion_magnitude_ratio(
     f1_signals: &[ComplexSignal],
     series_label: &str,
     signal: &ComplexSignal,
     numerator_magnitudes: &[f64],
-) -> Result<Vec<f64>, CliError> {
+) -> Result<Option<Vec<f64>>, CliError> {
     let fundamental = f1_signals
         .iter()
         .find(|fundamental| {
@@ -597,22 +592,14 @@ fn distortion_magnitude_ratio(
         )));
     }
 
-    numerator_magnitudes
+    Ok(numerator_magnitudes
         .iter()
         .zip(fundamental.real.iter().zip(&fundamental.imag))
-        .enumerate()
-        .map(|(index, (&numerator, (&real, &imag)))| {
+        .map(|(&numerator, (&real, &imag))| {
             let denominator = real.hypot(imag);
-            if denominator == 0.0 {
-                Err(distortion_schema_error(format!(
-                    "cannot normalize {series_label} signal '{}' at F1 point {index}: the F1 magnitude is zero (response magnitude {numerator:.17e}); no finite magnitude ratio exists",
-                    signal.display_name
-                )))
-            } else {
-                Ok(numerator / denominator)
-            }
+            (denominator > 0.0).then(|| numerator / denominator)
         })
-        .collect()
+        .collect())
 }
 
 pub(super) fn run_ac_data(ctx: &RunContext<'_>, table_name: &str) -> Result<(), CliError> {
