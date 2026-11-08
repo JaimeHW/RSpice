@@ -249,11 +249,15 @@ fn suffix_multiplier(suffix: &str) -> Option<Value> {
     }
 }
 
+/// The characters a token was read from: its first, and the one after its
+/// last.
+type CharSpan = (usize, usize);
+
 /// The tokens of `text`, and the characters each was read from.
 fn tokenize_rational(
     parameter: &dyn Fn(&str) -> Option<Value>,
     text: &str,
-) -> Result<(Vec<RatTok>, Vec<(usize, usize)>), String> {
+) -> Result<(Vec<RatTok>, Vec<CharSpan>), String> {
     let mut tokens = Vec::new();
     let mut spans = Vec::new();
     let chars: Vec<char> = text.chars().collect();
@@ -618,7 +622,7 @@ struct TermParser {
     text: Vec<char>,
     tokens: Vec<RatTok>,
     /// The characters of `text` each token was read from.
-    spans: Vec<(usize, usize)>,
+    spans: Vec<CharSpan>,
     pos: usize,
 }
 
