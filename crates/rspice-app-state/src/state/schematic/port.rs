@@ -1067,10 +1067,11 @@ mod tests {
 
         let terminals = component.terminal_positions();
         assert_eq!(terminals.len(), 5);
-        assert_eq!(terminals[0].1, Point::new(70, 90)); // inp — left, first
-        assert_eq!(terminals[1].1, Point::new(70, 110)); // inn — left, second
-        assert_eq!(terminals[2].1, Point::new(130, 100)); // out — right
-        assert_eq!(terminals[3].1, Point::new(100, 80)); // vdd — top rail
-        assert_eq!(terminals[4].1, Point::new(100, 120)); // vss — bottom rail
+        // An amplifier's pin set draws the triangle.
+        assert_eq!(terminals[0].1, Point::new(60, 80)); // inp — left, upper
+        assert_eq!(terminals[1].1, Point::new(60, 120)); // inn — left, lower
+        assert_eq!(terminals[2].1, Point::new(140, 100)); // out — the apex
+        assert_eq!(terminals[3].1, Point::new(100, 60)); // vdd — top rail
+        assert_eq!(terminals[4].1, Point::new(100, 140)); // vss — bottom rail
     }
 }
