@@ -198,6 +198,7 @@ mod source_specs;
 mod special_function;
 mod state;
 mod tlines;
+mod urc;
 mod values;
 
 pub(in crate::netlist) use chebyshev_synthesis::{ChebyshevSpec, synthesize_chebyshev};

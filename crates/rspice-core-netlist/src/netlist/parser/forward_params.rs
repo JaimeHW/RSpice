@@ -10,6 +10,9 @@ use super::*;
 #[derive(Debug, Default)]
 pub(super) struct ForwardParameters {
     declared: HashSet<String>,
+    /// Root URC model cards, which make a `U` card a distributed RC line
+    /// wherever they sit.
+    urc_models: HashSet<String>,
     postponed: Vec<PostponedElement>,
     replaying: bool,
 }
@@ -34,6 +37,7 @@ impl ForwardParameters {
         abort: &dyn AbortSignal,
     ) -> Result<Self, ParseWithAbortError> {
         let mut declared = HashSet::new();
+        let mut urc_models = HashSet::new();
         let mut depth = 0usize;
         let mut card = String::new();
         let mut finish = |card: &mut String, depth: &mut usize| {
@@ -50,6 +54,10 @@ impl ForwardParameters {
                 // `.global_param` values are runtime values an element
                 // already keeps as an expression, so they need no deferral.
                 declared.extend(declared_parameter_names(&card[head.len()..]));
+            } else if *depth == 0
+                && let Some(name) = urc::is_urc_model_card(card)
+            {
+                urc_models.insert(name);
             }
             card.clear();
         };
@@ -77,6 +85,7 @@ impl ForwardParameters {
         finish(&mut card, &mut depth);
         Ok(Self {
             declared,
+            urc_models,
             postponed: Vec::new(),
             replaying: false,
         })
@@ -99,8 +108,13 @@ pub(super) fn postpone_forward_reference(
 ) -> bool {
     let plan = &state.forward_parameters;
     let designator = line.trim_start().chars().next();
+    // A `U` card whose URC model card comes later is read once that card is.
+    let urc_model_ahead = designator.is_some_and(|c| c.eq_ignore_ascii_case(&'U'))
+        && urc::model_field(line)
+            .is_some_and(|model| plan.urc_models.contains(&model.to_ascii_uppercase()))
+        && !urc::names_urc_model(line, &state.models);
     if plan.replaying
-        || plan.declared.is_empty()
+        || (plan.declared.is_empty() && !urc_model_ahead)
         || !state.subckt_stack.is_empty()
         || state.open_machine.is_some()
         || !designator.is_some_and(char::is_alphabetic)
@@ -110,14 +124,15 @@ pub(super) fn postpone_forward_reference(
     }
     let mut words = line.split_whitespace();
     words.next();
-    let names_unbound = words.any(|word| {
-        word.split(|c: char| !(c.is_alphanumeric() || c == '_'))
-            .filter(|name| name.starts_with(|c: char| c.is_alphabetic() || c == '_'))
-            .any(|name| {
-                plan.declared.contains(&name.to_ascii_uppercase())
-                    && !state.params.has_any_parameter_binding(name)
-            })
-    });
+    let names_unbound = urc_model_ahead
+        || words.any(|word| {
+            word.split(|c: char| !(c.is_alphanumeric() || c == '_'))
+                .filter(|name| name.starts_with(|c: char| c.is_alphabetic() || c == '_'))
+                .any(|name| {
+                    plan.declared.contains(&name.to_ascii_uppercase())
+                        && !state.params.has_any_parameter_binding(name)
+                })
+        });
     if names_unbound {
         let position = state.elements.len();
         state.forward_parameters.postponed.push(PostponedElement {

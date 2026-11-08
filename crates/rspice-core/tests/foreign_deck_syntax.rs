@@ -1165,3 +1165,37 @@ r4 m 0 25.4
     );
     assert_close("V(m)", op_voltage(&netlist, "m"), 1.0, 1e-9);
 }
+
+// ngspice-46: V(out) = 0.5, V(o3) = 0.396004 (LTspice and QSPICE 0.396005);
+// the AC response and a 10 ns transient match ngspice to six digits too.
+// A root line binds a URC card written after it; a line inside a subcircuit
+// binds one written before the subcircuit.
+#[test]
+fn a_u_card_with_a_urc_model_is_ngspices_distributed_rc_line() {
+    let netlist = parse(
+        "* urc
+V1 in 0 1
+U1 in out 0 umod L=1m N=6
+RL out 0 1k
+.model dmod URC(RPERL=1meg CPERL=1n ISPERL=1e-12 RSPERL=10)
+.subckt line a b
+U3 a b 0 dmod L=1m N=4
+.ends
+X1 in o3 line
+R3 o3 0 1k
+.model umod URC(K=1.5 FMAX=1G RPERL=1meg CPERL=1n)
+.op
+.end
+",
+    );
+    let count = |prefix: &str| {
+        netlist
+            .elements
+            .iter()
+            .filter(|element| element.name.starts_with(prefix))
+            .count()
+    };
+    assert_eq!((count("RU1#"), count("CU1#")), (12, 11));
+    assert_close("V(out)", op_voltage(&netlist, "out"), 0.5, 1e-9);
+    assert_close("V(o3)", op_voltage(&netlist, "o3"), 0.396004, 2e-6);
+}

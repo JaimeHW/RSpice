@@ -2188,13 +2188,13 @@ pub(super) fn parse_pspice_u_device(
                  .VEC card (.vec '<file>'), or inline it as a STIM U-device"
             ),
         }),
-        _ => Err(ParseError::Syntax {
+        _ => Err(urc::unbound_line(&fields, line_num).unwrap_or_else(|| ParseError::Syntax {
             line: line_num,
             message: format!(
                 "Unsupported PSpice U-device type '{}'; supported frontend lowerings are simple gates, CONSTRAINT, DFF, DLTCH, DLYLINE, JKFF, TFF, LOGICEXP, PINDLY, PULLUP, PULLDN, SRFF, STIM, BUFA, INVA, ANDA, NANDA, ORA, NORA, XORA, NXORA, BUF3, INV3, AND3, NAND3, OR3, NOR3, XOR3, NXOR3, BUF3A, INV3A, AND3A, NAND3A, OR3A, NOR3A, XOR3A, NXOR3A, AO, AOI, OA, and OAI",
                 fields[1]
             ),
-        }),
+        })),
     }
 }
 

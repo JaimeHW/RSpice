@@ -947,6 +947,11 @@ pub(super) fn parse_line(
                 )
             }
         },
+        // ngspice's distributed RC line when its model card is a URC card,
+        // otherwise a PSpice digital primitive.
+        'U' if urc::names_urc_model(line, models) => {
+            urc::parse_urc(&mut stream, line_num, elements, models, params)
+        }
         'U' => parse_pspice_u_device(line, line_num, elements, params, defer_simple_param_refs),
         _ => Err(ParseError::Syntax {
             line: line_num,
