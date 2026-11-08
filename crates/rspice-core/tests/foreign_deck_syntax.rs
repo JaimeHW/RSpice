@@ -1200,6 +1200,32 @@ R3 o3 0 1k
     assert_close("V(o3)", op_voltage(&netlist, "o3"), 0.396004, 2e-6);
 }
 
+// A URC card that gives ISPERL, even as zero, shunts each section with a
+// diode, as ngspice's does; ngspice-46, LTspice and QSPICE all run such a
+// line, and V(out) = 0.5 in ngspice-46.
+#[test]
+fn a_urc_card_with_a_zero_isperl_shunts_the_line_with_diodes() {
+    let netlist = parse(
+        "* urc isperl=0
+V1 in 0 1
+U1 in out 0 umod L=1m N=6
+RL out 0 1k
+.model umod URC(RPERL=1meg CPERL=1n ISPERL=0)
+.op
+.end
+",
+    );
+    let count = |prefix: &str| {
+        netlist
+            .elements
+            .iter()
+            .filter(|element| element.name.starts_with(prefix))
+            .count()
+    };
+    assert_eq!((count("DU1#"), count("CU1#")), (11, 0));
+    assert_close("V(out)", op_voltage(&netlist, "out"), 0.5, 1e-8);
+}
+
 // HSPICE's `.DCVOLT` is its `.IC`; Xyce reads both spellings the same way
 // (QSPICE ignores the card and LTspice rejects it).
 #[test]

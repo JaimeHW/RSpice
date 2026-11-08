@@ -148,13 +148,13 @@ pub(super) fn parse_urc(
         ("FMAX", positive(fmax)),
         ("RPERL", positive(rperl)),
         ("CPERL", nonnegative(cperl)),
-        ("ISPERL", isperl.is_none_or(positive)),
+        ("ISPERL", isperl.is_none_or(nonnegative)),
         ("RSPERL", nonnegative(rsperl)),
     ] {
         if !valid {
             return Err(invalid(format!(
-                "URC model '{model_name}' has an invalid {key}; K must exceed 1, FMAX, RPERL \
-                 and ISPERL must be positive, CPERL and RSPERL nonnegative"
+                "URC model '{model_name}' has an invalid {key}; K must exceed 1, FMAX and \
+                 RPERL must be positive, CPERL, ISPERL and RSPERL nonnegative"
             )));
         }
     }
