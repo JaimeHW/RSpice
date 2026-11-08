@@ -1364,7 +1364,7 @@ impl<M: SchematicMapping> SheetPainter<'_, M> {
             job.append(
                 &parent,
                 0.0,
-                TextFormat::simple(font.clone(), self.colors.text_faint),
+                TextFormat::simple(font.clone(), self.colors.text_dim),
             );
         }
         job.append(&leaf, 0.0, TextFormat::simple(font, self.colors.text));
@@ -1389,7 +1389,7 @@ impl<M: SchematicMapping> SheetPainter<'_, M> {
                     egui::pos2(edge, cell.center().y),
                     egui::Align2::RIGHT_CENTER,
                     mantissa,
-                    font,
+                    font.clone(),
                     self.colors.text,
                 );
                 if !unit.is_empty() {
@@ -1397,7 +1397,7 @@ impl<M: SchematicMapping> SheetPainter<'_, M> {
                         egui::pos2(edge + MANTISSA_GAP, cell.center().y),
                         egui::Align2::LEFT_CENTER,
                         unit,
-                        theme::mono(tokens::FS_0, FontWeight::Regular),
+                        font,
                         self.colors.text_dim,
                     );
                 }
