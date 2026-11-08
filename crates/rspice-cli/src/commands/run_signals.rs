@@ -201,6 +201,45 @@ pub(crate) fn project_scalar(
             .map_err(|error| schema_error(instance, error))
         })
         .collect::<Result<Vec<_>, _>>()?;
+    project_scalar_sources(
+        netlist,
+        projection,
+        ScalarProjectionSources {
+            kind,
+            instance,
+            axis,
+            source_signals,
+            lookup,
+            ordered,
+        },
+        abort,
+    )
+}
+
+/// One real-valued inventory, already in the form the projection reads.
+struct ScalarProjectionSources<'a> {
+    kind: AnalysisResultKind,
+    instance: &'a str,
+    axis: &'a [Value],
+    source_signals: Vec<ProjectionSourceSignal<'a>>,
+    lookup: HashMap<String, &'a [Value]>,
+    ordered: Option<Vec<ProjectedSignal>>,
+}
+
+fn project_scalar_sources(
+    netlist: &rspice_core::Netlist,
+    projection: &SignalProjection,
+    request: ScalarProjectionSources<'_>,
+    abort: &dyn rspice_core::AbortSignal,
+) -> Result<Vec<ScalarSignal>, rspice_core::SimulationError> {
+    let ScalarProjectionSources {
+        kind,
+        instance,
+        axis,
+        source_signals,
+        lookup,
+        ordered,
+    } = request;
     let source = ProjectionSource::new(kind, instance)
         .with_axis(axis)
         .with_signals(source_signals)
@@ -381,14 +420,6 @@ fn inventory_rows(
             }
             other => other,
         })
-}
-
-pub(crate) fn transient_signals(
-    result: &TransientResult,
-) -> Result<Vec<ScalarSignal>, rspice_core::SimulationError> {
-    let signals = rspice_core::execution::transient_projection_signals(result)
-        .map_err(|error| schema_error("TRAN", error))?;
-    inventory_rows("TRAN", signals)
 }
 
 pub(crate) fn dc_operating_point_signals(
@@ -807,16 +838,37 @@ pub(crate) fn transient_export_signals(
 ) -> Result<Vec<ScalarSignal>, rspice_core::SimulationError> {
     let projection = projection(netlist)?;
     let ordered = projection.ordered_transient_columns(netlist, result, limits, abort)?;
-    let signals = transient_signals(result)?;
+    // A gate-level run holds tens of millions of values: the projection reads
+    // the waveforms in place instead of an inventory copy of them.
+    let inventory = rspice_core::execution::transient_projection_signals(result)
+        .map_err(|error| schema_error("TRAN", error))?;
+    let source_signals = inventory
+        .iter()
+        .map(|signal| {
+            let display_name = signal.descriptor().display_name();
+            let ProjectionValues::Real(values) = signal.values() else {
+                return Err(rspice_core::SimulationError::Circuit(format!(
+                    "TRAN: result signal '{display_name}' is complex in a real inventory"
+                )));
+            };
+            ProjectionSourceSignal::new(
+                display_name,
+                probe_registry_name(display_name),
+                signal.descriptor().kind(),
+                ProjectionValues::Real(std::borrow::Cow::Borrowed(values.as_ref())),
+            )
+            .map_err(|error| schema_error("TRAN", error))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     let lookup = rspice_core::analysis::measure_signals::transient_signal_map(result);
-    project_scalar(
+    project_scalar_sources(
         netlist,
         &projection,
-        ScalarProjectionRequest {
+        ScalarProjectionSources {
             kind: AnalysisResultKind::Transient,
             instance: "TRAN",
             axis: &result.time,
-            signals: &signals,
+            source_signals,
             lookup,
             ordered,
         },

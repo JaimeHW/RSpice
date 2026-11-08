@@ -1247,13 +1247,13 @@ pub(super) fn finish_transient_result(
             }
             OutputFormat::Raw | OutputFormat::RawAscii | OutputFormat::Csv | OutputFormat::Tsv => {
                 TransientOutputDocument::Table {
-                    table: Box::new(super::export::scalar_table(
+                    table: Box::new(super::export::scalar_table_taking_samples(
                         "transient",
                         "Transient Analysis",
                         "time",
                         "time",
                         output_time,
-                        &signals,
+                        &mut signals,
                     )),
                     events: rspice_core::execution::transient_event_plots(
                         &result.digital_traces,

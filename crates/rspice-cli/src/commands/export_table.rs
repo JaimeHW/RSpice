@@ -180,13 +180,45 @@ pub(crate) fn scalar_table(
         scale,
         columns: signals
             .iter()
-            .map(|signal| ExportColumn {
-                unit: signal.unit_symbol(),
-                name: signal.display_name.clone(),
-                var_type: signal.raw_variable_type().to_string(),
-                data: ColumnData::Real(signal.values.clone()),
+            .map(|signal| scalar_column(signal, signal.values.clone()))
+            .collect(),
+    }
+}
+
+/// [`scalar_table`] for a caller done with the samples: they move into the
+/// table, where a gate-level transient would otherwise hold another copy of
+/// tens of millions of values. The signals keep their names and kinds.
+pub(crate) fn scalar_table_taking_samples(
+    analysis: impl Into<String>,
+    plot_name: impl Into<String>,
+    scale_name: impl Into<String>,
+    scale_type: impl Into<String>,
+    scale: Vec<f64>,
+    signals: &mut [ScalarSignal],
+) -> ExportTable {
+    ExportTable {
+        scale_unit: None,
+        analysis: analysis.into(),
+        plot_name: plot_name.into(),
+        scale_name: scale_name.into(),
+        scale_type: scale_type.into(),
+        scale,
+        columns: signals
+            .iter_mut()
+            .map(|signal| {
+                let values = std::mem::take(&mut signal.values);
+                scalar_column(signal, values)
             })
             .collect(),
+    }
+}
+
+fn scalar_column(signal: &ScalarSignal, values: Vec<f64>) -> ExportColumn {
+    ExportColumn {
+        unit: signal.unit_symbol(),
+        name: signal.display_name.clone(),
+        var_type: signal.raw_variable_type().to_string(),
+        data: ColumnData::Real(values),
     }
 }
 
@@ -919,6 +951,33 @@ mod tests {
                 data: ColumnData::Real(vec![1.25]),
             }],
         }
+    }
+
+    #[test]
+    fn a_table_taking_samples_moves_each_column_instead_of_copying_it() {
+        let values = vec![1.0, 2.0, 3.0];
+        let samples = values.as_ptr();
+        let mut signals = [ScalarSignal {
+            display_name: "V(out)".to_string(),
+            raw_name: "out".to_string(),
+            kind: crate::commands::run_signals::SignalKind::Voltage,
+            values,
+        }];
+        let table = scalar_table_taking_samples(
+            "transient",
+            "Transient Analysis",
+            "time",
+            "time",
+            vec![0.0, 1.0, 2.0],
+            &mut signals,
+        );
+        let ColumnData::Real(column) = &table.columns[0].data else {
+            panic!("a scalar signal makes a real column");
+        };
+        assert_eq!(column.as_ptr(), samples);
+        assert_eq!(column.as_slice(), [1.0, 2.0, 3.0]);
+        assert_eq!(table.columns[0].name, "V(out)");
+        assert!(signals[0].values.is_empty());
     }
 
     #[test]
