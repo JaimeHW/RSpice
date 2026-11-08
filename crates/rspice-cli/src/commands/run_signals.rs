@@ -740,6 +740,15 @@ fn complex_point_index(
     Ok(indexed)
 }
 
+/// Whether a later sweep point has the first point's name tables and one value
+/// per name, so the schema checked at the first point covers it too.
+fn ac_point_matches_first(result: &AcResult, first: &AcResult) -> bool {
+    result.node_names == first.node_names
+        && result.branch_names == first.branch_names
+        && result.voltages.len() == result.node_names.len()
+        && result.currents.len() == result.branch_names.len()
+}
+
 pub(crate) fn ac_signals(
     results: &[AcResult],
 ) -> Result<Vec<ComplexSignal>, rspice_core::SimulationError> {
@@ -771,6 +780,14 @@ pub(crate) fn ac_signals(
         .collect::<Vec<_>>();
 
     for (point_index, result) in results.iter().enumerate() {
+        if point_index > 0 && ac_point_matches_first(result, first_result) {
+            let values = result.voltages.iter().chain(&result.currents);
+            for (signal, value) in aggregated.iter_mut().zip(values) {
+                signal.real.push(value.re);
+                signal.imag.push(value.im);
+            }
+            continue;
+        }
         let point = format!(
             "frequency point {} ({:.16e} Hz)",
             point_index + 1,
@@ -1045,6 +1062,35 @@ mod tests {
             .collect();
         result.branch_currents = branches.iter().map(|(_, value)| *value).collect();
         result
+    }
+
+    #[test]
+    fn an_ac_point_shares_the_first_point_schema_only_when_its_names_and_lengths_match() {
+        let first = ac_result(
+            1.0,
+            &[("a", Complex64::new(1.0, 0.0))],
+            &[("v1", Complex64::new(0.0, 1.0))],
+        );
+        let same = ac_result(
+            2.0,
+            &[("a", Complex64::new(2.0, 0.0))],
+            &[("v1", Complex64::new(0.0, 2.0))],
+        );
+        assert!(ac_point_matches_first(&same, &first));
+
+        let renamed = ac_result(
+            2.0,
+            &[("b", Complex64::new(2.0, 0.0))],
+            &[("v1", Complex64::new(0.0, 2.0))],
+        );
+        assert!(!ac_point_matches_first(&renamed, &first));
+
+        let mut short = same.clone();
+        short.voltages.clear();
+        assert!(!ac_point_matches_first(&short, &first));
+        short = same.clone();
+        short.currents.push(Complex64::new(0.0, 0.0));
+        assert!(!ac_point_matches_first(&short, &first));
     }
 
     fn ac_result(
