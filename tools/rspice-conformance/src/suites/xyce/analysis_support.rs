@@ -1538,7 +1538,8 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             | rspice_core::netlist::SourceSpec::Pwl { .. }
             | rspice_core::netlist::SourceSpec::PwlFile { .. }
             | rspice_core::netlist::SourceSpec::TrNoise { .. }
-            | rspice_core::netlist::SourceSpec::TrRandom { .. } => None,
+            | rspice_core::netlist::SourceSpec::TrRandom { .. }
+            | rspice_core::netlist::SourceSpec::ExpTrain(_) => None,
             rspice_core::netlist::SourceSpec::DcTransient { transient, .. }
             | rspice_core::netlist::SourceSpec::AcTransient { transient, .. }
             | rspice_core::netlist::SourceSpec::DcAcTransient { transient, .. } => {
