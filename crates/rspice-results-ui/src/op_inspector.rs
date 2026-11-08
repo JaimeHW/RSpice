@@ -1471,11 +1471,11 @@ impl<M: SchematicMapping> SheetPainter<'_, M> {
             out.action = Some(locate_action(section.kind, row.name(), self.source.mapping));
         }
         let pointer_x = response.hover_pos().map(|pos| pos.x);
-        response.on_hover_ui(|ui| self.row_hover(ui, section, row, pointer_x));
+        response.on_hover_ui_at_pointer(|ui| self.row_hover(ui, section, row, pointer_x));
     }
 
-    /// The whole name, the deck's identity, and the value under the pointer
-    /// to the inspector's digits.
+    /// The whole name, the deck's identity where it reads differently, and the
+    /// value under the pointer to the inspector's digits.
     fn row_hover(&self, ui: &mut Ui, section: &PlanSection, row: RowSource<'_>, x: Option<f32>) {
         let (parent, leaf) = name_parts(row.name());
         let mono = |text: String, color| {
@@ -1483,8 +1483,12 @@ impl<M: SchematicMapping> SheetPainter<'_, M> {
                 .font(theme::mono(tokens::FS_1, FontWeight::Regular))
                 .color(color)
         };
-        ui.label(mono(format!("{parent}{leaf}"), self.colors.text));
-        ui.label(mono(row.name().to_owned(), self.colors.text_faint));
+        let shown = format!("{parent}{leaf}");
+        let spelled_differently = shown != row.name();
+        ui.label(mono(shown, self.colors.text));
+        if spelled_differently {
+            ui.label(mono(row.name().to_owned(), self.colors.text_dim));
+        }
         let column = x
             .and_then(|x| self.grid.slot_at(self.grid.values_left(section.slots()), x))
             .and_then(|slot| slot.checked_sub(usize::from(section.region)))
