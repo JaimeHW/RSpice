@@ -998,7 +998,7 @@ fn output_only_function_arity(name: &str, xyce_dialect: bool) -> Option<(usize, 
         "R" | "RE" | "REAL" | "IMG" | "IMAG" | "PH" | "PHASE" | "DB" => Some((1, 1)),
         "DDX" if xyce_dialect => Some((2, 2)),
         "RAND" | "RANDOM" => Some((0, 0)),
-        "UNIF" | "AUNIF" => Some((2, 2)),
+        "UNIF" | "AUNIF" | "MC" => Some((2, 2)),
         "GAUSS" | "AGAUSS" => Some((2, 3)),
         _ => None,
     }

@@ -1766,7 +1766,7 @@ fn is_vector_expression_function(name: &str) -> bool {
         || matches!(
             name.to_ascii_uppercase().as_str(),
             "R" | "RE" | "REAL" | "IMG" | "IMAG" | "PH" | "PHASE" | "DB"
-                | "GAUSS" | "AGAUSS" | "UNIF" | "AUNIF" | "RAND" | "RANDOM"
+                | "GAUSS" | "AGAUSS" | "UNIF" | "AUNIF" | "MC" | "RAND" | "RANDOM"
         )
 }
 

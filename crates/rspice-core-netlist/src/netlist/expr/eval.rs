@@ -824,7 +824,7 @@ impl PreparedExpression {
                         user_program: None,
                     } => {
                         statistical |=
-                            matches!(name.as_str(), "GAUSS" | "AGAUSS" | "UNIF" | "AUNIF")
+                            matches!(name.as_str(), "GAUSS" | "AGAUSS" | "UNIF" | "AUNIF" | "MC")
                                 || (matches!(name.as_str(), "RAND" | "RANDOM") && args.is_empty())
                                 || (name == "LIMIT" && args.len() == 2);
                     }
@@ -2115,11 +2115,11 @@ pub(super) fn eval_builtin_with_sample(
             sample(draw);
             Ok(ComplexValue::from(nom + deviation / sigma * draw))
         }
-        "UNIF" | "AUNIF" => {
+        "UNIF" | "AUNIF" | "MC" => {
             require_arg_count(name, args, 2)?;
             let nom = checked_real_arg(name, args, 0)?;
             let var = checked_real_arg(name, args, 1)?;
-            let deviation = if name == "UNIF" { nom * var } else { var };
+            let deviation = if name == "AUNIF" { var } else { nom * var };
             if ctx.statistical_mode() == StatisticalParamMode::Nominal {
                 return Ok(ComplexValue::from(nom));
             }

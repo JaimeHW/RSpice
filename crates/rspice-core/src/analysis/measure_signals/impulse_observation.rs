@@ -412,7 +412,7 @@ impl<'a> Resolver<'a, '_> {
                 // their explicit arguments are constants.
                 let mut all_constant = !matches!(
                     name.to_ascii_uppercase().as_str(),
-                    "RAND" | "RANDOM" | "GAUSS" | "AGAUSS" | "UNIF" | "AUNIF"
+                    "RAND" | "RANDOM" | "GAUSS" | "AGAUSS" | "UNIF" | "AUNIF" | "MC"
                 );
                 for arg in args {
                     let child = self.expression(arg)?;

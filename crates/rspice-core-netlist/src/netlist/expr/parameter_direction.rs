@@ -596,9 +596,9 @@ fn builtin_direction(
             }
         }
         "LIMIT" => d[0] + d[1] * draw.unwrap_or(0.0),
-        "UNIF" | "AUNIF" | "GAUSS" | "AGAUSS" => {
+        "UNIF" | "AUNIF" | "GAUSS" | "AGAUSS" | "MC" => {
             if let Some(draw) = draw {
-                let relative = matches!(name, "UNIF" | "GAUSS");
+                let relative = matches!(name, "UNIF" | "GAUSS" | "MC");
                 let deviation = if relative { a[0].re * a[1].re } else { a[1].re };
                 let dd = if relative {
                     d[0] * a[1] + d[1] * a[0]

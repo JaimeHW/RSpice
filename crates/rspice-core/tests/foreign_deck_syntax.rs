@@ -2011,3 +2011,24 @@ R2 out 0 1k
         1e-9,
     );
 }
+
+// LTspice 26.1.1 and QSPICE: `mc(x,y)` is a uniform draw between x*(1-y) and
+// x*(1+y) (twelve steps of this deck gave R1 between 635 and 1496 ohm).
+#[test]
+fn mc_is_a_uniform_draw_about_its_first_argument() {
+    let netlist = parse(
+        "* mc
+V1 a 0 1
+R1 a b {mc(1k, 0.5)}
+R2 b 0 1k
+.op
+.end
+",
+    );
+    let r1 = 1e3 * (1.0 / op_voltage(&netlist, "b") - 1.0);
+    assert!((500.0..=1500.0).contains(&r1), "R1 = {r1}");
+    assert!(
+        (r1 - 1e3).abs() > 1e-6,
+        "R1 = {r1} is the nominal, not a draw"
+    );
+}
