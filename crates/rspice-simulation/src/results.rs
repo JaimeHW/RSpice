@@ -409,6 +409,10 @@ pub struct DcOpResult {
     /// Node voltages
     pub node_voltages: HashMap<String, f64>,
 
+    /// The units of each node value that is not in volts (`K` on a thermal
+    /// net), by node name.
+    pub node_units: HashMap<String, String>,
+
     /// Branch currents
     pub branch_currents: HashMap<String, f64>,
 

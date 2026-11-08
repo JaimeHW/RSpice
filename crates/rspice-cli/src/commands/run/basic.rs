@@ -122,9 +122,12 @@ pub(super) fn finish_dc_op_result(
             .collect::<Vec<_>>();
         crate::console::line(format_args!("DC Operating Point:"))?;
         for signal in voltage_signals.iter().take(10) {
+            // A thermal net's value is a temperature, in kelvin.
             crate::console::line(format_args!(
-                "  {} = {:.9e} V",
-                signal.display_name, signal.values[0]
+                "  {} = {:.9e} {}",
+                signal.display_name,
+                signal.values[0],
+                signal.unit_symbol().unwrap_or_default()
             ))?;
         }
         if voltage_signals.len() > 10 {

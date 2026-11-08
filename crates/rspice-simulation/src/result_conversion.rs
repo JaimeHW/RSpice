@@ -136,13 +136,18 @@ impl<Clock: Fn() -> f64> ResultConversion<Clock> {
                     dc_result.mna_branch_names.clone(),
                     dc_result.mna_solution.clone(),
                 );
+                // A thermal net's value is a temperature, in kelvin.
+                let node_units = &dc_result.node_units;
                 let node_voltages = dc_result
                     .node_voltages
-                    .into_iter()
-                    .map(|(name, value)| OperatingPointValue {
+                    .iter()
+                    .map(|(name, &value)| OperatingPointValue {
                         name: format!("V({})", name),
                         value,
-                        unit: "V".to_string(),
+                        unit: node_units
+                            .get(name)
+                            .cloned()
+                            .unwrap_or_else(|| "V".to_string()),
                     })
                     .collect();
                 let branch_currents = dc_result

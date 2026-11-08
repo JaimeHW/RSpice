@@ -8,6 +8,8 @@ use rspice_core::{CurrentImpulseDerivative, CurrentImpulseOwner, CurrentImpulseT
 
 fn fixture(time: f64, order: u32, coefficient: f64) -> TransientResult {
     TransientResult {
+        instance_unknowns: Vec::new(),
+        potential_units: Vec::new(),
         time: (0..=8).map(|j| j as f64 / 8.0).collect(),
         step_sizes: vec![0.125; 9],
         voltages: vec![vec![3.0; 9]],

@@ -447,6 +447,35 @@ impl CircuitData {
         kinds
     }
 
+    /// Record that `node`'s potential is in `units` rather than volts, under
+    /// the node's name; ground and an unnamed node are left out.
+    pub(crate) fn record_potential_units(&mut self, node: NodeId, units: &str) {
+        let name = self
+            .node_map
+            .iter()
+            .find(|&(_, &id)| id == node && node > 0)
+            .map(|(name, _)| name.clone());
+        if let Some(name) = name {
+            self.veriloga_potential_units.push((name, units.to_owned()));
+        }
+    }
+
+    /// The units of each node's potential where a Verilog-A discipline makes
+    /// it something other than a voltage (`K` on a thermal net), indexed by
+    /// node ID with ground at 0; `None` is volts.
+    pub(crate) fn potential_units(&self) -> Vec<Option<String>> {
+        let mut units = vec![None; self.num_nodes() + 1];
+        for (name, unit) in &self.veriloga_potential_units {
+            if let Some(&node) = self.node_map.get(name)
+                && node > 0
+                && let Some(slot) = units.get_mut(node)
+            {
+                *slot = Some(unit.clone());
+            }
+        }
+        units
+    }
+
     pub(crate) fn non_electrical_state_mask(&self) -> Vec<bool> {
         let mut mask = vec![false; self.num_nodes()];
         for node in &self.non_electrical_state_nodes {

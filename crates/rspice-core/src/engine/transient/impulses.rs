@@ -416,6 +416,8 @@ mod tests {
 
     fn result() -> TransientResult {
         TransientResult {
+            instance_unknowns: Vec::new(),
+            potential_units: Vec::new(),
             time: vec![0.0],
             step_sizes: vec![0.0],
             num_nodes: 1,

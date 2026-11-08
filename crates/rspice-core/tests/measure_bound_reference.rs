@@ -96,6 +96,8 @@ fn sealed_measurement_reference_reaches_live_equation_reads_without_file_access(
     bind_error_measurement_reference(&mut netlist.measurements[0], "TIME,V(out)\n0,2\n").unwrap();
     assert_ne!(unbound_identity, identity(&netlist));
     let waveform = rspice_core::engine::TransientResult {
+        instance_unknowns: Vec::new(),
+        potential_units: Vec::new(),
         voltage_impulses: None,
         current_impulses: None,
         time: vec![0.0, 1.0, 2.0],

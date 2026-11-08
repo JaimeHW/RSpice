@@ -543,6 +543,8 @@ pub(crate) enum WorkerSimulationResult {
         #[serde(default)]
         mna_solution: Vec<f64>,
         node_voltages: HashMap<String, f64>,
+        #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+        node_units: HashMap<String, String>,
         branch_currents: HashMap<String, f64>,
         device_report: Option<WorkerDeviceOpReport>,
         #[serde(default, skip_serializing_if = "WorkerChecks::is_empty")]
@@ -1074,6 +1076,7 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                 mna_branch_names: result.mna_branch_names,
                 mna_solution: result.mna_solution,
                 node_voltages: result.node_voltages,
+                node_units: result.node_units,
                 branch_currents: result.branch_currents,
                 device_report: result.device_report.map(WorkerDeviceOpReport::from),
                 checks: result.checks.into(),
@@ -1474,6 +1477,7 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 mna_branch_names,
                 mna_solution,
                 node_voltages,
+                node_units,
                 branch_currents,
                 device_report,
                 checks,
@@ -1484,6 +1488,7 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 mna_branch_names,
                 mna_solution,
                 node_voltages,
+                node_units,
                 branch_currents,
                 device_report: device_report.map(rspice_core::circuit::DeviceOpReport::from),
                 checks: checks.into(),

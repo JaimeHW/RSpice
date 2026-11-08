@@ -175,8 +175,10 @@ fn validate_descriptor(
     owner: &SignalOwner,
 ) -> Result<(), SignalSchemaError> {
     let valid = match kind {
+        // A node's potential is in its discipline's units: volts on an
+        // electrical net, kelvin on a thermal one.
         SignalKind::Voltage => {
-            *unit == SignalUnit::Volt
+            matches!(unit, SignalUnit::Volt | SignalUnit::Custom(_))
                 && matches!(value_type, SignalValueType::Real | SignalValueType::Complex)
                 && matches!(shape, SignalShape::Scalar | SignalShape::Vector)
                 && matches!(owner, SignalOwner::Node(_))

@@ -994,6 +994,7 @@ fn dc_op_worker_result_round_trip_preserves_exact_mna_state_and_contract() {
         mna_branch_names: vec!["V1".to_owned()],
         mna_solution: vec![1.25, -1.0e-3],
         node_voltages: HashMap::from([("out".to_owned(), 1.25)]),
+        node_units: HashMap::from([("out".to_owned(), "K".to_owned())]),
         branch_currents: HashMap::from([("V1".to_owned(), -1.0e-3)]),
         device_report: None,
         checks: Default::default(),
@@ -1008,6 +1009,7 @@ fn dc_op_worker_result_round_trip_preserves_exact_mna_state_and_contract() {
     assert_eq!(restored.mna_node_names, ["out"]);
     assert_eq!(restored.mna_branch_names, ["V1"]);
     assert_eq!(restored.mna_solution, [1.25, -1.0e-3]);
+    assert_eq!(restored.node_units.get("out").map(String::as_str), Some("K"));
 }
 
 #[test]

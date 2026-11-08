@@ -3235,6 +3235,8 @@ impl Engine {
             let initial_state = self.pss_extract_reactive_state(circuit);
 
             let waveform = TransientResult {
+                instance_unknowns: Vec::new(),
+                potential_units: Vec::new(),
                 voltage_impulses: None,
                 current_impulses: None,
                 time: vec![0.0],
@@ -4909,6 +4911,8 @@ impl Engine {
         let mut trapgear = TrapGearController::new();
 
         let mut result = retain_waveform.then(|| TransientResult {
+            instance_unknowns: Vec::new(),
+            potential_units: Vec::new(),
             voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0],

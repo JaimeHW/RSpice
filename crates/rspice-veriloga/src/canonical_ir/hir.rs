@@ -295,6 +295,14 @@ pub struct HirPort {
     /// circuit node converts no such port.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub coerced_from_input: bool,
+    /// The units of the port's potential where its discipline's potential
+    /// nature is not a voltage (`K` on a thermal port); `None` is volts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub potential_units: Option<SmolStr>,
+    /// The units of the port's flow where its discipline's flow nature is not
+    /// a current (`W` on a thermal port); `None` is amperes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flow_units: Option<SmolStr>,
 }
 
 /// One port of the module header as declared, before vector expansion.
@@ -480,6 +488,10 @@ pub struct HirInternalNode {
     pub name: SmolStr,
     pub discipline: SmolStr,
     pub index: u32,
+    /// The units of the node's potential where its discipline's potential
+    /// nature is not a voltage (`K` on a thermal node); `None` is volts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub potential_units: Option<SmolStr>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1355,6 +1367,8 @@ impl HirModel {
                     supply_sensitivity: port.supply_sensitivity.clone(),
                     ground_sensitivity: port.ground_sensitivity.clone(),
                     coerced_from_input: port.coerced_from_input,
+                    potential_units: None,
+                    flow_units: None,
                 })
                 .collect(),
             formal_ports: module
@@ -1419,6 +1433,7 @@ impl HirModel {
                     name: node.name.clone(),
                     discipline: node.discipline.clone(),
                     index: u32::try_from(node.index).expect("internal node index exceeds u32::MAX"),
+                    potential_units: None,
                 })
                 .collect(),
             ground_nodes: module.ground_nodes.clone(),
@@ -1494,6 +1509,30 @@ impl HirModel {
             .filter_map(|parameter| parameter.range.as_mut())
         {
             range.record_source_text(source);
+        }
+    }
+
+    /// Record the units of every port and internal node whose discipline's
+    /// natures are not voltage and current, from the natures `disciplines`
+    /// declares, so a host can list a thermal node in kelvin.
+    pub fn record_nature_units(&mut self, disciplines: &crate::disciplines::DisciplineDb) {
+        // A nature's units, where they are not the electrical ones.
+        let units = |discipline: &str, flow: bool| -> Option<SmolStr> {
+            let discipline = disciplines.get_discipline(discipline)?;
+            let (nature, electrical) = if flow {
+                (discipline.flow.as_ref()?, "A")
+            } else {
+                (discipline.potential.as_ref()?, "V")
+            };
+            let units = disciplines.get_nature(nature)?.units.trim();
+            (!units.is_empty() && units != electrical).then(|| SmolStr::from(units))
+        };
+        for port in &mut self.ports {
+            port.potential_units = units(&port.discipline, false);
+            port.flow_units = units(&port.discipline, true);
+        }
+        for node in &mut self.internal_nodes {
+            node.potential_units = units(&node.discipline, false);
         }
     }
 

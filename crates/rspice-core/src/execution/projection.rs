@@ -154,6 +154,24 @@ impl<'a> ProjectionSourceSignal<'a> {
         })
     }
 
+    /// The same column with a node potential in its discipline's units
+    /// (`K` on a thermal net) where they are not volts.
+    fn in_potential_units(mut self, units: Option<&str>) -> Result<Self, SignalSchemaError> {
+        if let Some(units) = units {
+            let descriptor = &self.descriptor;
+            self.descriptor = SignalDescriptor::new(
+                descriptor.canonical_name(),
+                descriptor.display_name(),
+                descriptor.kind(),
+                SignalUnit::Custom(units.to_owned()),
+                descriptor.value_type(),
+                descriptor.shape(),
+                descriptor.owner().clone(),
+            )?;
+        }
+        Ok(self)
+    }
+
     /// Attach the result's own per-sample validity mask.
     ///
     /// Absent samples stay absent through projection; they are never filled
@@ -1025,17 +1043,35 @@ pub fn transient_projection_signals(
     result: &crate::engine::TransientResult,
 ) -> Result<Vec<ProjectionSourceSignal<'_>>, SignalSchemaError> {
     let mut signals = Vec::new();
+    let mut instance_currents = Vec::new();
     for (index, waveform) in result.voltages.iter().enumerate() {
         if !result.time.is_empty() && waveform.is_empty() {
             continue;
         }
         let registry = result_registry_name(result.node_names.get(index), index + 1);
-        signals.push(ProjectionSourceSignal::new(
-            format!("V({registry})"),
-            &registry,
-            SignalKind::Voltage,
-            ProjectionValues::Real(Cow::Borrowed(waveform.as_slice())),
-        )?);
+        let values = ProjectionValues::Real(Cow::Borrowed(waveform.as_slice()));
+        // A Verilog-A instance's own unknowns, listed as the operating-point
+        // inventory below lists them.
+        match result.instance_unknowns.get(index).copied().flatten() {
+            None => signals.push(
+                ProjectionSourceSignal::new(
+                    format!("V({registry})"),
+                    &registry,
+                    SignalKind::Voltage,
+                    values,
+                )?
+                .in_potential_units(result.potential_units.get(index).and_then(Option::as_deref))?,
+            ),
+            Some(crate::solver::InstanceUnknown::BranchCurrent) => {
+                instance_currents.push(ProjectionSourceSignal::new(
+                    format!("I({registry})"),
+                    &registry,
+                    SignalKind::Current,
+                    values,
+                )?);
+            }
+            Some(crate::solver::InstanceUnknown::Private) => {}
+        }
     }
     for (index, waveform) in result.branch_currents.iter().enumerate() {
         if !result.time.is_empty() && waveform.is_empty() {
@@ -1049,6 +1085,7 @@ pub fn transient_projection_signals(
             ProjectionValues::Real(Cow::Borrowed(waveform.as_slice())),
         )?);
     }
+    signals.append(&mut instance_currents);
     for trace in &result.digital_traces {
         let sampled = sampled_digital_trace(
             &result.time,
@@ -1161,12 +1198,15 @@ pub fn operating_point_projection_signals(
         // current is listed with the currents, in amperes, and an unknown the
         // module never named is not listed at all.
         match result.instance_unknown(node_id) {
-            None => signals.push(ProjectionSourceSignal::new(
-                format!("V({registry})"),
-                &registry,
-                SignalKind::Voltage,
-                values,
-            )?),
+            None => signals.push(
+                ProjectionSourceSignal::new(
+                    format!("V({registry})"),
+                    &registry,
+                    SignalKind::Voltage,
+                    values,
+                )?
+                .in_potential_units(result.potential_units(node_id))?,
+            ),
             Some(crate::solver::InstanceUnknown::BranchCurrent) => {
                 instance_currents.push(ProjectionSourceSignal::new(
                     format!("I({registry})"),

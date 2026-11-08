@@ -14,6 +14,8 @@ fn fixture() -> TransientResult {
     let mut step_sizes = vec![1.0 / 128.0; 129];
     step_sizes[0] = 0.0;
     TransientResult {
+        instance_unknowns: Vec::new(),
+        potential_units: Vec::new(),
         time: (0..=128).map(|i| i as f64 / 128.0).collect(),
         step_sizes,
         voltages: vec![vec![3.0; 129], vec![1.0; 129]],

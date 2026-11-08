@@ -1260,6 +1260,8 @@ mod tests {
             iterations: 0,
             jacobian: None,
             waveform: TransientResult {
+                instance_unknowns: Vec::new(),
+                potential_units: Vec::new(),
                 time,
                 step_sizes: vec![],
                 voltages: vec![values],

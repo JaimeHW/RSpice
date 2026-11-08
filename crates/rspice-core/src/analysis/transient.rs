@@ -1304,6 +1304,14 @@ pub struct TransientResult {
     pub node_names: Vec<String>,
     /// Branch names aligned with `branch_currents`
     pub branch_names: Vec<String>,
+    /// What each of `node_names` holds when a Verilog-A instance owns it as a
+    /// solver unknown rather than a net, aligned with `node_names`; a node
+    /// past the end is a net.
+    pub instance_unknowns: Vec<Option<crate::solver::InstanceUnknown>>,
+    /// The units of each of `node_names` whose discipline's potential is not
+    /// a voltage (`K` on a thermal net), aligned with `node_names`; a node
+    /// past the end, or `None`, is in volts.
+    pub potential_units: Vec<Option<String>>,
     /// Newly accepted current impulses, in coulombs. `None` means unavailable
     /// or unrecorded. Coverage belongs to each trace: only an empty complete
     /// trace proves no impulses for that owner in this run segment.
@@ -2001,6 +2009,8 @@ impl TransientResultCompressed {
         }
 
         Ok(TransientResult {
+            instance_unknowns: Vec::new(),
+            potential_units: Vec::new(),
             voltage_impulses: self.voltage_impulses,
             current_impulses: self.current_impulses,
             time: self.time,
@@ -2036,6 +2046,8 @@ mod tests {
     fn result_on_grid(time: Vec<Value>) -> TransientResult {
         let values = time.iter().map(|time| 2.0 * time).collect::<Vec<_>>();
         TransientResult {
+            instance_unknowns: Vec::new(),
+            potential_units: Vec::new(),
             voltage_impulses: None,
             current_impulses: None,
             step_sizes: vec![0.0; time.len()],
@@ -2518,6 +2530,8 @@ mod bus_tests {
         // producer does not. A test that asserts it here fails the day a
         // boundary starts declaring buses without the rest of the chain.
         let result = TransientResult {
+            instance_unknowns: Vec::new(),
+            potential_units: Vec::new(),
             voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0],

@@ -67,6 +67,8 @@ fn fixture(
     coefficient: f64,
 ) -> TransientResult {
     TransientResult {
+        instance_unknowns: Vec::new(),
+        potential_units: Vec::new(),
         time: (0..=8).map(|j| start + duration * j as f64 / 8.0).collect(),
         step_sizes: vec![duration / 8.0; 9],
         voltages: vec![vec![0.0; 9]],

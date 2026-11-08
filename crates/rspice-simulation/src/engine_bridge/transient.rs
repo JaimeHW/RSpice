@@ -4,6 +4,7 @@ use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
 use rspice_core::abort_signal::AbortSignal;
+use rspice_core::solver::InstanceUnknown;
 
 use super::{EngineBridge, ensure_not_aborted};
 use crate::error::SimulationError;
@@ -333,11 +334,31 @@ fn convert_transient_result(
         if voltages.is_empty() {
             continue;
         }
-        let name = tran_result.node_names[node_idx].clone();
+        let node = &tran_result.node_names[node_idx];
+        // A Verilog-A instance's own unknowns: a branch the module names is a
+        // current, and an unknown it never named is no signal. A net whose
+        // discipline's potential is not a voltage keeps its own units.
+        let (name, unit) = match tran_result
+            .instance_unknowns
+            .get(node_idx)
+            .copied()
+            .flatten()
+        {
+            None => (
+                node.clone(),
+                tran_result
+                    .potential_units
+                    .get(node_idx)
+                    .and_then(Option::as_deref)
+                    .unwrap_or("V"),
+            ),
+            Some(InstanceUnknown::BranchCurrent) => (format!("I({node})"), "A"),
+            Some(InstanceUnknown::Private) => continue,
+        };
 
         waveforms.insert(
             name.clone(),
-            SampledWaveform::new_time_domain(
+            SampledWaveform::new_time_domain_in_unit(
                 &name,
                 filtered_time.clone(),
                 filtered_transient_values(
@@ -348,6 +369,7 @@ fn convert_transient_result(
                     start_time,
                     interpolate_start,
                 )?,
+                unit,
             ),
         );
     }
@@ -619,6 +641,8 @@ fn evaluate_transient_measurements(
         .chain(filtered_time.windows(2).map(|pair| pair[1] - pair[0]))
         .collect();
     let visible_result = rspice_core::engine::TransientResult {
+        instance_unknowns: result.instance_unknowns.clone(),
+        potential_units: result.potential_units.clone(),
         current_impulses: result.current_impulses.as_ref().map(|traces| {
             let start = filtered_time.first().copied().unwrap_or(start_time);
             traces
@@ -1016,6 +1040,8 @@ mod tests {
     fn current_impulse_history_conversion_preserves_exact_charge_and_window_coverage() {
         use rspice_core::{CurrentImpulseOwner, CurrentImpulsePoint, CurrentImpulseTrace};
         let mut result = rspice_core::engine::TransientResult {
+            instance_unknowns: Vec::new(),
+            potential_units: Vec::new(),
             time: vec![0.0, 0.5, 1.0],
             step_sizes: vec![0.0, 0.5, 0.5],
             voltages: vec![],
@@ -1365,6 +1391,8 @@ mod tests {
     fn transient_conversion_preserves_branch_current_waveforms() {
         let netlist = parse_netlist("branch current\nV1 out 0 1\nR1 out 0 1k\n.tran 1n 2n\n.end\n");
         let result = rspice_core::engine::TransientResult {
+            instance_unknowns: Vec::new(),
+            potential_units: Vec::new(),
             voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0, 1.0e-9, 2.0e-9],
@@ -1406,6 +1434,8 @@ mod tests {
              .end\n",
         );
         let result = rspice_core::engine::TransientResult {
+            instance_unknowns: Vec::new(),
+            potential_units: Vec::new(),
             voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0, 1.0e-9, 2.0e-9],
@@ -1442,6 +1472,8 @@ mod tests {
     #[test]
     fn transient_shape_mismatch_is_a_terminal_error() {
         let result = rspice_core::engine::TransientResult {
+            instance_unknowns: Vec::new(),
+            potential_units: Vec::new(),
             voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0, 1.0e-9],
@@ -1486,6 +1518,8 @@ mod tests {
             .chain(time.windows(2).map(|pair| pair[1] - pair[0]))
             .collect::<Vec<_>>();
         let result = rspice_core::engine::TransientResult {
+            instance_unknowns: Vec::new(),
+            potential_units: Vec::new(),
             voltage_impulses: None,
             current_impulses: None,
             time: time.clone(),
@@ -1569,6 +1603,8 @@ mod tests {
             .chain(std::iter::repeat_n(1.0e-9, time.len() - 1))
             .collect();
         let tran_result = rspice_core::engine::TransientResult {
+            instance_unknowns: Vec::new(),
+            potential_units: Vec::new(),
             voltage_impulses: None,
             current_impulses: None,
             time: time.clone(),

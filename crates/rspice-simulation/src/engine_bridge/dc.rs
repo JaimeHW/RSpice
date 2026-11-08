@@ -326,22 +326,23 @@ impl EngineBridge {
                 retain_dc_quantity_basis(&mut evidence, first_result)?;
                 for (node_idx, node_name) in first_result.node_names.iter().enumerate() {
                     ensure_not_aborted(abort)?;
-                    if node_idx == 0 || first_result.event_only_node_kind(node_idx).is_some() {
+                    let Some((quantity, unit)) = dc_node_quantity(first_result, node_idx, node_name)
+                    else {
                         continue;
-                    }
+                    };
                     let mut voltages = Vec::with_capacity(sweep_results.len());
                     for (_, result) in &sweep_results {
                         ensure_not_aborted(abort)?;
                         voltages.push(result.node_voltages[node_idx]);
                     }
-                    let trace_name = evidence
-                        .trace_name(&DcSweepQuantity::NodeVoltage(node_name.clone()), member);
+                    let trace_name = evidence.trace_name(&quantity, member);
                     waveforms.insert(
                         trace_name.clone(),
-                        SampledWaveform::new_time_domain(
+                        SampledWaveform::new_time_domain_in_unit(
                             trace_name,
                             sweep_values.clone(),
                             voltages,
+                            unit,
                         ),
                     );
                 }
@@ -451,18 +452,19 @@ impl EngineBridge {
                 let member = usize::from(branch == HYSTERESIS_REVERSE);
                 for (index, node_name) in first_result.node_names.iter().enumerate() {
                     ensure_not_aborted(abort)?;
-                    if index == 0 || first_result.event_only_node_kind(index).is_some() {
+                    let Some((quantity, unit)) = dc_node_quantity(first_result, index, node_name)
+                    else {
                         continue;
-                    }
-                    let trace_name = evidence
-                        .trace_name(&DcSweepQuantity::NodeVoltage(node_name.clone()), member);
+                    };
+                    let trace_name = evidence.trace_name(&quantity, member);
                     let voltages = ordered(&|result| result.node_voltages[index]);
                     waveforms.insert(
                         trace_name.clone(),
-                        SampledWaveform::new_time_domain(
+                        SampledWaveform::new_time_domain_in_unit(
                             trace_name,
                             sweep_values.clone(),
                             voltages,
+                            unit,
                         ),
                     );
                 }
@@ -514,20 +516,24 @@ impl EngineBridge {
                 ensure_not_aborted(abort)?;
                 // Ground is a constant zero column; a net only the event
                 // domain resolves has no voltage column at all.
-                if i == 0 || first_result.event_only_node_kind(i).is_some() {
+                let Some((quantity, unit)) = dc_node_quantity(first_result, i, name) else {
                     continue;
-                }
+                };
                 let mut voltages = Vec::with_capacity(sweep_results.len());
                 for (_, result) in &sweep_results {
                     ensure_not_aborted(abort)?;
                     voltages.push(result.node_voltages[i]);
                 }
 
-                let trace_name =
-                    evidence.trace_name(&DcSweepQuantity::NodeVoltage(name.clone()), 0);
+                let trace_name = evidence.trace_name(&quantity, 0);
                 waveforms.insert(
                     trace_name.clone(),
-                    SampledWaveform::new_time_domain(trace_name, sweep_values.clone(), voltages),
+                    SampledWaveform::new_time_domain_in_unit(
+                        trace_name,
+                        sweep_values.clone(),
+                        voltages,
+                        unit,
+                    ),
                 );
             }
             for (branch_idx, branch_name) in first_result.branch_names.iter().enumerate() {
@@ -585,10 +591,34 @@ impl EngineBridge {
     }
 }
 
+/// What a node slot of a DC solution is published as, with its unit: a net's
+/// value, in volts or in its discipline's own units (`K` on a thermal net),
+/// or the current of a branch a Verilog-A module names. Ground, a net only the
+/// event domain resolves and an unknown a module never named are published as
+/// nothing.
+fn dc_node_quantity<'a>(
+    result: &'a rspice_core::SimulationResult,
+    index: usize,
+    name: &str,
+) -> Option<(DcSweepQuantity, &'a str)> {
+    if index == 0 || result.event_only_node_kind(index).is_some() {
+        return None;
+    }
+    match result.instance_unknown(index) {
+        None => Some((
+            DcSweepQuantity::NodeVoltage(name.to_owned()),
+            result.potential_units(index).unwrap_or("V"),
+        )),
+        Some(InstanceUnknown::BranchCurrent) => {
+            Some((DcSweepQuantity::BranchCurrent(name.to_owned()), "A"))
+        }
+        Some(InstanceUnknown::Private) => None,
+    }
+}
+
 /// The quantities a DC sweep publishes: every node voltage and branch current
-/// the sweep emits a trace for. A net only the event domain resolves has no
-/// voltage, so it is left out here exactly as the trace loops leave it out;
-/// declaring it would leave the basis one curve the result can never cover.
+/// the sweep emits a trace for, each as [`dc_node_quantity`] names it, so the
+/// basis covers exactly the curves the trace loops emit.
 fn retain_dc_quantity_basis(
     evidence: &mut DcSweepEvidence,
     result: &rspice_core::SimulationResult,
@@ -597,10 +627,8 @@ fn retain_dc_quantity_basis(
         .node_names
         .iter()
         .enumerate()
-        .skip(1)
-        .filter(|(index, _)| result.event_only_node_kind(*index).is_none())
-        .map(|(_, name)| name.clone())
-        .map(DcSweepQuantity::NodeVoltage)
+        .filter_map(|(index, name)| dc_node_quantity(result, index, name))
+        .map(|(quantity, _)| quantity)
         .chain(
             result
                 .branch_names
@@ -819,6 +847,9 @@ fn convert_dc_result(
             let name = core_result.node_names[i].clone();
             match core_result.instance_unknown(i) {
                 None => {
+                    if let Some(units) = core_result.potential_units(i) {
+                        result.node_units.insert(name.clone(), units.to_owned());
+                    }
                     result.node_voltages.insert(name, voltage);
                 }
                 Some(InstanceUnknown::BranchCurrent) => {
@@ -933,6 +964,22 @@ mod operating_point_contract_tests {
         );
     }
 
+    /// A thermal net's value is a temperature: the table keeps its kelvin,
+    /// and an electrical net keeps volts, the units every table assumes.
+    #[test]
+    fn the_operating_point_table_keeps_a_thermal_nets_kelvin() {
+        let mut core = rspice_core::SimulationResult::new(2, 0);
+        core.node_names = vec!["0".to_owned(), "out".to_owned(), "t".to_owned()];
+        core.node_voltages = vec![0.0, 1.25, 0.4];
+        core.set_potential_units(vec![None, None, Some("K".to_owned())]);
+
+        let converted = convert_dc_result(&core, &rspice_core::abort_signal::NoAbort)
+            .expect("the conversion succeeds");
+        assert_eq!(converted.node_units.get("t").map(String::as_str), Some("K"));
+        assert!(!converted.node_units.contains_key("out"));
+        assert_eq!(dc_node_quantity(&core, 2, "t").map(|(_, unit)| unit), Some("K"));
+    }
+
     /// A DC sweep declares only the quantities it emits a curve for: a net
     /// only the event domain resolves has neither, so a mixed deck's sweep
     /// covers its own basis.
@@ -960,6 +1007,47 @@ mod operating_point_contract_tests {
                 DcSweepQuantity::NodeVoltage("out".to_owned()),
                 DcSweepQuantity::BranchCurrent("V1".to_owned()),
             ]
+        );
+    }
+
+    /// A Verilog-A instance's own unknowns are no nets: a branch the module
+    /// names sweeps as a current, and one it never named not at all.
+    #[test]
+    fn the_dc_sweep_basis_lists_a_module_branch_as_a_current_and_leaves_out_a_private_unknown()
+    {
+        let mut core = rspice_core::SimulationResult::new(3, 1);
+        core.node_names = vec![
+            "0".to_owned(),
+            "out".to_owned(),
+            "X1:b".to_owned(),
+            "X1:__br1".to_owned(),
+        ];
+        core.branch_names = vec!["V1".to_owned()];
+        core.set_instance_unknowns(vec![
+            None,
+            None,
+            Some(InstanceUnknown::BranchCurrent),
+            Some(InstanceUnknown::Private),
+        ]);
+        let mut evidence = DcSweepEvidence {
+            source: "V1".to_owned(),
+            direction: DcSweepDirection::Ascending,
+            quantities: Vec::new(),
+            family: DcSweepFamily::Single,
+            selection: rspice_results::dc_sweep::DcCurveSelection::All,
+        };
+        retain_dc_quantity_basis(&mut evidence, &core).expect("the basis is retained");
+        assert_eq!(
+            evidence.quantities,
+            [
+                DcSweepQuantity::NodeVoltage("out".to_owned()),
+                DcSweepQuantity::BranchCurrent("X1:b".to_owned()),
+                DcSweepQuantity::BranchCurrent("V1".to_owned()),
+            ]
+        );
+        assert_eq!(
+            dc_node_quantity(&core, 2, "X1:b").map(|(_, unit)| unit),
+            Some("A")
         );
     }
 

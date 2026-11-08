@@ -315,7 +315,7 @@ impl VerilogADevices {
 
     /// Start an operating point's initial-junction load: every named limiter
     /// that has never run starts from its algorithm's starting value.
-    pub fn begin_initial_junction_limiting(&mut self) {
+    pub(crate) fn begin_initial_junction_limiting(&mut self) {
         for device in &mut self.devices {
             device.begin_initial_junction_limiting();
         }

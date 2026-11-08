@@ -4926,6 +4926,8 @@ impl Engine {
             && !circuit.has_any_veriloga_devices()
         {
             let mut result = TransientResult {
+                instance_unknowns: Vec::new(),
+                potential_units: Vec::new(),
                 voltage_impulses: None,
                 current_impulses: None,
                 time: vec![0.0],
@@ -6166,6 +6168,9 @@ impl Engine {
             }
         }
         let mut result = TransientResult {
+            // Ground is not among `node_names`.
+            instance_unknowns: circuit.instance_unknown_kinds().split_off(1),
+            potential_units: circuit.potential_units().split_off(1),
             voltage_impulses: None,
             current_impulses: None,
             time,
@@ -17127,6 +17132,8 @@ D1 D 0 DMOD
             })
             .collect::<Vec<_>>();
         let result = TransientResult {
+            instance_unknowns: Vec::new(),
+            potential_units: Vec::new(),
             voltage_impulses: None,
             current_impulses: Some(vec![crate::CurrentImpulseTrace {
                 derivatives: vec![crate::CurrentImpulseDerivative {
@@ -17311,6 +17318,8 @@ D1 D 0 DMOD
             .map(|&time| 100.0 + 20.0 * time * time)
             .collect::<Vec<_>>();
         let result = TransientResult {
+            instance_unknowns: Vec::new(),
+            potential_units: Vec::new(),
             voltage_impulses: None,
             current_impulses: None,
             step_sizes: std::iter::once(0.0)
@@ -17455,6 +17464,8 @@ D1 D 0 DMOD
     fn compressed_report_marks_disabled_storage_as_exact() {
         let time = vec![0.0, 0.1, 0.4, 1.0];
         let result = TransientResult {
+            instance_unknowns: Vec::new(),
+            potential_units: Vec::new(),
             voltage_impulses: None,
             current_impulses: None,
             time: time.clone(),
@@ -17491,6 +17502,8 @@ D1 D 0 DMOD
         // 3 / 10 differs from 3 * (1 / 10) in binary64. Subtracting
         // a nearby actual sample magnifies that difference in the error.
         let result = TransientResult {
+            instance_unknowns: Vec::new(),
+            potential_units: Vec::new(),
             voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0, 3.0, 10.0],
@@ -17531,6 +17544,8 @@ D1 D 0 DMOD
     #[test]
     fn compression_report_verification_observes_abort() {
         let result = TransientResult {
+            instance_unknowns: Vec::new(),
+            potential_units: Vec::new(),
             voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0, 0.5, 1.0],
@@ -17565,6 +17580,8 @@ D1 D 0 DMOD
     fn compressed_transient_retains_mandatory_output_points_exactly() {
         let time = vec![0.0, 0.5, 1.0, 1.5, 2.0];
         let result = TransientResult {
+            instance_unknowns: Vec::new(),
+            potential_units: Vec::new(),
             voltage_impulses: None,
             current_impulses: None,
             time: time.clone(),
@@ -17615,6 +17632,8 @@ D1 D 0 DMOD
     fn transient_compression_polls_abort_during_large_waveform_scans() {
         let time = (0..10_000).map(|index| index as Value).collect::<Vec<_>>();
         let result = TransientResult {
+            instance_unknowns: Vec::new(),
+            potential_units: Vec::new(),
             voltage_impulses: None,
             current_impulses: None,
             step_sizes: std::iter::once(0.0)
@@ -17760,6 +17779,8 @@ D1 D 0 DMOD
     fn compressed_maximum_interval_splits_at_or_before_boundary() {
         let time = vec![0.0, 0.6, 1.01, 1.6];
         let result = TransientResult {
+            instance_unknowns: Vec::new(),
+            potential_units: Vec::new(),
             voltage_impulses: None,
             current_impulses: None,
             time: time.clone(),
@@ -17811,6 +17832,8 @@ D1 D 0 DMOD
     #[test]
     fn compression_rejects_an_unattainable_maximum_interval() {
         let result = TransientResult {
+            instance_unknowns: Vec::new(),
+            potential_units: Vec::new(),
             voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0, 1.5, 3.0],

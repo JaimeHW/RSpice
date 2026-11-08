@@ -37,7 +37,8 @@ impl CircuitData {
     }
 }
 
-/// The units and description a terminal current is reported with.
+/// The units a terminal current is reported with, unless the port's
+/// discipline gives its flow other units (`W` on a thermal port).
 const TERMINAL_CURRENT_UNITS: &str = "A";
 
 /// Evaluate `device` once at `solution` and read its terminal currents and
@@ -125,16 +126,31 @@ fn module_operating_point(
     let declared = terminals.saturating_sub(
         artifact.map_or(0, |artifact| artifact.hir.node_aliases.len()),
     );
+    let flow_units = |terminal: usize| {
+        artifact
+            .and_then(|artifact| artifact.hir.ports.get(terminal))
+            .and_then(|port| port.flow_units.as_deref())
+    };
     let mut quantities: Vec<ModuleOpQuantity> = device
         .terminal_names()
         .iter()
         .take(declared)
         .zip(currents)
-        .map(|(port, value)| ModuleOpQuantity {
-            name: terminal_current_label(port),
-            value,
-            units: TERMINAL_CURRENT_UNITS.to_owned(),
-            description: format!("Current into terminal {port}"),
+        .enumerate()
+        .map(|(terminal, (port, value))| {
+            let (units, description) = match flow_units(terminal) {
+                Some(units) => (units.to_owned(), format!("Flow into terminal {port}")),
+                None => (
+                    TERMINAL_CURRENT_UNITS.to_owned(),
+                    format!("Current into terminal {port}"),
+                ),
+            };
+            ModuleOpQuantity {
+                name: terminal_current_label(port),
+                value,
+                units,
+                description,
+            }
         })
         .filter(|current| {
             !outputs

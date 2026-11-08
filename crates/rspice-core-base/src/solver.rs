@@ -79,6 +79,10 @@ pub struct SimulationResult {
     /// in amperes, and an unknown the module never named is no quantity a
     /// reader asked for. Private for the same reason `event_only_nodes` is.
     instance_unknowns: Vec<Option<InstanceUnknown>>,
+    /// The units a node's value is in where its discipline's potential is
+    /// not a voltage (`K` for a thermal net), aligned with `node_voltages`;
+    /// `None` is volts. Private for the same reason `event_only_nodes` is.
+    potential_units: Vec<Option<String>>,
 }
 
 /// What a node-indexed slot holds when a Verilog-A instance owns it as a
@@ -107,6 +111,7 @@ impl SimulationResult {
             voltage_waveforms: Vec::new(),
             event_only_nodes: vec![None; num_nodes + 1],
             instance_unknowns: vec![None; num_nodes + 1],
+            potential_units: vec![None; num_nodes + 1],
         }
     }
 
@@ -206,6 +211,23 @@ impl SimulationResult {
         self.instance_unknowns
             .resize(self.node_voltages.len(), None);
         if let Some(ground) = self.instance_unknowns.first_mut() {
+            *ground = None;
+        }
+    }
+
+    /// The units a node's value is in when its discipline's potential is not
+    /// a voltage (`K` for a thermal net), or `None` for volts.
+    pub fn potential_units(&self, node: usize) -> Option<&str> {
+        self.potential_units.get(node).and_then(Option::as_deref)
+    }
+
+    /// Record the units of each node whose discipline's potential is not a
+    /// voltage, aligned with `node_voltages`; normalized the way
+    /// [`Self::set_event_only_nodes`] normalizes its mask.
+    pub fn set_potential_units(&mut self, units: Vec<Option<String>>) {
+        self.potential_units = units;
+        self.potential_units.resize(self.node_voltages.len(), None);
+        if let Some(ground) = self.potential_units.first_mut() {
             *ground = None;
         }
     }

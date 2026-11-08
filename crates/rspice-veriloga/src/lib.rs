@@ -1582,6 +1582,7 @@ impl VerilogACompiler {
         let phase_started = web_time::Instant::now();
         let mut hir = canonical_ir::HirModel::from_analyzed_module(&metadata, module);
         hir.record_parameter_source_text(source);
+        hir.record_nature_units(&analyzed.disciplines);
         hir.digital_observations = digital
             .analog_probes
             .iter()

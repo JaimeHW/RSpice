@@ -645,6 +645,10 @@ pub struct CircuitData {
     /// rather than for nets, by the name each was created under: names, not
     /// IDs, because a ground remap renumbers nodes after the builder is done.
     pub(crate) veriloga_instance_unknowns: Vec<(String, crate::solver::InstanceUnknown)>,
+    /// The nodes a Verilog-A port or internal node gives a potential that is
+    /// not a voltage, with its units (`K` on a thermal net), by name for the
+    /// reason [`Self::veriloga_instance_unknowns`] gives.
+    pub(crate) veriloga_potential_units: Vec<(String, String)>,
     /// Node IDs a Verilog-A or generated compact model's instance owns: its
     /// internal nodes, and the nets of its own that the terminals a card left
     /// out sit on. None of them takes the final nodal GMIN floor

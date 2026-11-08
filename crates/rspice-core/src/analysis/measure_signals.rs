@@ -7972,6 +7972,8 @@ mod tests {
 
     fn tran_result() -> TransientResult {
         TransientResult {
+            instance_unknowns: Vec::new(),
+            potential_units: Vec::new(),
             voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0, 1.0, 2.0, 3.0],
@@ -7994,6 +7996,8 @@ mod tests {
     fn tran_waveform(time: Vec<Value>, voltage: Vec<Value>) -> TransientResult {
         assert_eq!(time.len(), voltage.len());
         TransientResult {
+            instance_unknowns: Vec::new(),
+            potential_units: Vec::new(),
             voltage_impulses: None,
             current_impulses: None,
             step_sizes: vec![0.0; time.len()],
@@ -8177,6 +8181,8 @@ mod tests {
         ));
 
         let empty_result = TransientResult {
+            instance_unknowns: Vec::new(),
+            potential_units: Vec::new(),
             voltage_impulses: None,
             current_impulses: None,
             time: result.time.clone(),
@@ -8747,6 +8753,8 @@ mod tests {
         )
         .expect("sparse numeric measurements parse");
         let result = TransientResult {
+            instance_unknowns: Vec::new(),
+            potential_units: Vec::new(),
             voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0, 1.0, 2.0, 3.0],
@@ -8807,6 +8815,8 @@ mod tests {
         )
         .expect("hierarchical measurement deck parses");
         let result = TransientResult {
+            instance_unknowns: Vec::new(),
+            potential_units: Vec::new(),
             voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0, 1.0],
@@ -8854,6 +8864,8 @@ mod tests {
         )
         .expect("FRAC_MAX deck parses");
         let frac_result = TransientResult {
+            instance_unknowns: Vec::new(),
+            potential_units: Vec::new(),
             voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0, 1.0, 2.0, 3.0, 4.0],
@@ -8887,6 +8899,8 @@ mod tests {
         )
         .expect("legacy global window deck parses");
         let window_result = TransientResult {
+            instance_unknowns: Vec::new(),
+            potential_units: Vec::new(),
             voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0],
@@ -8932,6 +8946,8 @@ mod tests {
         )
         .expect("live ERR IEEE deck parses");
         let result = TransientResult {
+            instance_unknowns: Vec::new(),
+            potential_units: Vec::new(),
             voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0, 1.0],
@@ -9132,6 +9148,8 @@ mod tests {
         )
         .expect("syntactic parser retains recursive hierarchy");
         let result = TransientResult {
+            instance_unknowns: Vec::new(),
+            potential_units: Vec::new(),
             voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0, 1.0],
@@ -9236,6 +9254,8 @@ mod tests {
         )
         .expect("ordered live-measure deck parses");
         let result = TransientResult {
+            instance_unknowns: Vec::new(),
+            potential_units: Vec::new(),
             voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0, 0.5, 1.0],
@@ -9597,6 +9617,8 @@ mod tests {
         )
         .expect("FIND LAST recovery deck parses");
         let result = TransientResult {
+            instance_unknowns: Vec::new(),
+            potential_units: Vec::new(),
             voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0, 1.0, 2.0, 3.0],
@@ -9696,6 +9718,8 @@ mod tests {
         )
         .expect("raw-vs-braced consumer deck parses");
         let result = TransientResult {
+            instance_unknowns: Vec::new(),
+            potential_units: Vec::new(),
             voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0, 1.0, 2.0, 3.0],
@@ -9805,6 +9829,8 @@ mod tests {
         )
         .expect("raw NaN WHEN deck parses");
         let result = TransientResult {
+            instance_unknowns: Vec::new(),
+            potential_units: Vec::new(),
             voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0],
@@ -9902,6 +9928,8 @@ mod tests {
         )
         .expect("raw delay history deck parses");
         let result = TransientResult {
+            instance_unknowns: Vec::new(),
+            potential_units: Vec::new(),
             voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0],
@@ -9970,6 +9998,8 @@ mod tests {
         )
         .expect("terminal undefined LAST deck parses");
         let result = TransientResult {
+            instance_unknowns: Vec::new(),
+            potential_units: Vec::new(),
             voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0, 1.0, 2.0, 3.0],
@@ -10039,6 +10069,8 @@ mod tests {
         )
         .expect("DERIV -2 recovery deck parses");
         let result = TransientResult {
+            instance_unknowns: Vec::new(),
+            potential_units: Vec::new(),
             voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0],
@@ -10458,6 +10490,8 @@ mod tests {
         ))
         .expect("raw-NaN ERROR dependency deck parses");
         let result = TransientResult {
+            instance_unknowns: Vec::new(),
+            potential_units: Vec::new(),
             voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0, 1.0, 2.0],
@@ -10548,6 +10582,8 @@ mod tests {
         )
         .expect("issue 277 deck parses");
         let result = TransientResult {
+            instance_unknowns: Vec::new(),
+            potential_units: Vec::new(),
             voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0, 0.5, 1.0],
@@ -11145,6 +11181,8 @@ mod tests {
         )
         .expect("typed raw-current deck parses");
         let result = TransientResult {
+            instance_unknowns: Vec::new(),
+            potential_units: Vec::new(),
             voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0, 1.0, 2.0],

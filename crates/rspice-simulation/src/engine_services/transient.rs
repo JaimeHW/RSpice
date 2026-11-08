@@ -133,6 +133,8 @@ mod tests {
 
     fn conversion_result() -> TransientResult {
         TransientResult {
+            instance_unknowns: Vec::new(),
+            potential_units: Vec::new(),
             voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0, 1.0],

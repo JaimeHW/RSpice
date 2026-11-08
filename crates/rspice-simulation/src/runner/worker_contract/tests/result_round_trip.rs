@@ -383,6 +383,7 @@ fn worker_result_round_trip() {
         mna_branch_names: vec!["V1".to_owned()],
         mna_solution: vec![1.2, -0.01],
         node_voltages: HashMap::from([("out".to_string(), 1.2)]),
+        node_units: HashMap::new(),
         branch_currents: HashMap::from([("V1".to_string(), -0.01)]),
         device_report: None,
         checks: Default::default(),

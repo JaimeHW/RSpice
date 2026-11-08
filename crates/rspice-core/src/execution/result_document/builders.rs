@@ -146,6 +146,28 @@ fn voltage_descriptor(
     )
 }
 
+/// A real node value in its discipline's units: volts, or `units` where the
+/// node's potential is not a voltage (`K` on a thermal net).
+fn potential_descriptor(
+    location: &'static str,
+    node: &str,
+    units: Option<&str>,
+    point_count: usize,
+) -> Result<SignalDescriptor, ResultDocumentError> {
+    descriptor(
+        location,
+        format!("v({node})"),
+        format!("V({node})"),
+        SignalClassification {
+            kind: SignalKind::Voltage,
+            unit: units.map_or(SignalUnit::Volt, |units| SignalUnit::Custom(units.to_owned())),
+            value_type: SignalValueType::Real,
+            shape: series_shape(point_count),
+            owner: SignalOwner::Node(node.to_owned()),
+        },
+    )
+}
+
 fn current_descriptor(
     location: &'static str,
     branch: &str,
@@ -558,7 +580,7 @@ impl AnalysisResultDocument {
             // operating-point projection lists them.
             let (descriptor, listed) = match result.instance_unknown(index) {
                 None => (
-                    voltage_descriptor(LOCATION, name, SignalValueType::Real, 1)?,
+                    potential_descriptor(LOCATION, name, result.potential_units(index), 1)?,
                     &mut signals,
                 ),
                 Some(InstanceUnknown::BranchCurrent) => (
@@ -737,7 +759,12 @@ impl AnalysisResultDocument {
                 )
             } else {
                 (
-                    voltage_descriptor(LOCATION, name, SignalValueType::Real, point_count)?,
+                    potential_descriptor(
+                        LOCATION,
+                        name,
+                        first.result.potential_units(index),
+                        point_count,
+                    )?,
                     &mut signals,
                 )
             };
@@ -919,14 +946,32 @@ impl AnalysisResultDocument {
         // the voltage of an event net does not exist. The net reaches the
         // document through its event trace, which is its carrier.
         let event_only = result.event_only_node_mask();
+        let mut instance_currents = Vec::new();
         for (index, (name, waveform)) in result.node_names.iter().zip(&result.voltages).enumerate()
         {
             if event_only.get(index).copied().unwrap_or(false) {
                 continue;
             }
-            signals.push(projected_real_series(
+            // A Verilog-A instance's own unknowns are listed as the
+            // operating-point builder lists them.
+            let (descriptor, listed) = match result.instance_unknowns.get(index).copied().flatten()
+            {
+                None => {
+                    let units = result.potential_units.get(index).and_then(Option::as_deref);
+                    (
+                        potential_descriptor(LOCATION, name, units, point_count)?,
+                        &mut signals,
+                    )
+                }
+                Some(InstanceUnknown::BranchCurrent) => (
+                    current_descriptor(LOCATION, name, SignalValueType::Real, point_count)?,
+                    &mut instance_currents,
+                ),
+                Some(InstanceUnknown::Private) => continue,
+            };
+            listed.push(projected_real_series(
                 LOCATION,
-                voltage_descriptor(LOCATION, name, SignalValueType::Real, point_count)?,
+                descriptor,
                 name,
                 waveform,
                 point_count,
@@ -941,6 +986,7 @@ impl AnalysisResultDocument {
                 point_count,
             )?);
         }
+        signals.append(&mut instance_currents);
 
         let mut store_traces = Vec::with_capacity(result.store_traces.len());
         for trace in &result.store_traces {

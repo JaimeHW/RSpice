@@ -4,6 +4,8 @@ use crate::{CurrentImpulseOwner, CurrentImpulsePoint, CurrentImpulseTrace};
 
 fn fixture() -> TransientResult {
     TransientResult {
+        instance_unknowns: Vec::new(),
+        potential_units: Vec::new(),
         time: (0..=8).map(|n| n as Value / 8.0).collect(),
         step_sizes: vec![0.125; 9],
         voltages: vec![vec![3.0; 9]],

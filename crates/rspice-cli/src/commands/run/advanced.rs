@@ -454,6 +454,7 @@ pub(super) fn export_pss(
                 raw_name,
                 kind: crate::commands::run_signals::SignalKind::Voltage,
                 values: waveform.values.clone(),
+                units: None,
             }
         })
         .collect();

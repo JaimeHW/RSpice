@@ -8,6 +8,8 @@ use rspice_core::{
 fn fixture() -> TransientResult {
     let time = (0..=256).map(|n| n as Value / 128.0).collect::<Vec<_>>();
     TransientResult {
+        instance_unknowns: Vec::new(),
+        potential_units: Vec::new(),
         step_sizes: vec![1.0 / 128.0; time.len()],
         voltages: vec![vec![3.0; time.len()]],
         branch_currents: vec![vec![0.0; time.len()]],

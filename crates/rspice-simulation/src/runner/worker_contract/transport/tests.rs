@@ -298,6 +298,7 @@ fn worker_transport_extracts_and_authenticates_dc_op_mna_solution() {
             mna_branch_names: vec!["V1".to_owned()],
             mna_solution: vec![1.25, -0.001],
             node_voltages: HashMap::from([("out".to_owned(), 1.25)]),
+            node_units: HashMap::new(),
             branch_currents: HashMap::from([("V1".to_owned(), -0.001)]),
             device_report: None,
             checks: Default::default(),

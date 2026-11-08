@@ -35,12 +35,28 @@ pub(crate) fn unit_symbol(kind: SignalKind) -> Option<String> {
     }
 }
 
+/// The units of a node value whose discipline's potential is not a voltage
+/// (`K` on a thermal net), as its descriptor states them.
+fn node_units(descriptor: &rspice_core::execution::SignalDescriptor) -> Option<String> {
+    match descriptor.unit() {
+        rspice_core::execution::SignalUnit::Custom(units)
+            if descriptor.kind() == SignalKind::Voltage =>
+        {
+            Some(units.clone())
+        }
+        _ => None,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ScalarSignal {
     pub(crate) display_name: String,
     pub(crate) raw_name: String,
     pub(crate) kind: SignalKind,
     pub(crate) values: Vec<Value>,
+    /// The units of a node value whose discipline's potential is not a
+    /// voltage (`K` on a thermal net); `None` is the kind's own.
+    pub(crate) units: Option<String>,
 }
 
 impl ScalarSignal {
@@ -49,7 +65,7 @@ impl ScalarSignal {
     }
 
     pub(crate) fn unit_symbol(&self) -> Option<String> {
-        unit_symbol(self.kind)
+        self.units.clone().or_else(|| unit_symbol(self.kind))
     }
 }
 
@@ -391,6 +407,7 @@ fn scalar_signals(
                 display_name,
                 kind,
                 values,
+                units: node_units(signal.descriptor()),
             })
         })
         .collect()
@@ -460,6 +477,7 @@ fn inventory_row(
         display_name,
         kind: signal.descriptor().kind(),
         values: values.as_ref().to_vec(),
+        units: node_units(signal.descriptor()),
     })
 }
 
@@ -1216,6 +1234,7 @@ mod tests {
             raw_name: "out".to_string(),
             kind: SignalKind::Voltage,
             values: vec![1.0],
+            units: None,
         }];
         let wildcard = netlist_with_saves(".SAVE V(o*)\n");
         let projected = scalar_export_signals(

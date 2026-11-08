@@ -648,6 +648,9 @@ fn bind_veriloga_solver_unknowns(
             .try_set_branch_current_indices(&branch_nodes)
             .map_err(|error| error.to_string())?;
     }
+    if let Some(artifact) = artifact {
+        record_veriloga_potential_units(circuit, device, artifact, &internal_nodes);
+    }
     circuit
         .non_electrical_state_nodes
         .extend(device.non_electrical_node_indices());
@@ -689,6 +692,33 @@ fn bind_veriloga_solver_unknowns(
     );
     circuit.compact_model_private_nodes.extend(private);
     Ok(())
+}
+
+/// Record the nets the instance's ports and the nodes of its own whose
+/// discipline gives a potential other than a voltage, with its units, so a
+/// thermal net is listed in kelvin.
+#[cfg(feature = "veriloga")]
+fn record_veriloga_potential_units(
+    circuit: &mut CircuitData,
+    device: &rspice_veriloga::device::VerilogADevice,
+    artifact: &rspice_veriloga::canonical_ir::CanonicalIrArtifact,
+    internal_nodes: &[crate::NodeId],
+) {
+    let ports = artifact
+        .hir
+        .ports
+        .iter()
+        .enumerate()
+        .map(|(terminal, port)| (device.node_for_terminal(terminal), &port.potential_units));
+    let internal = internal_nodes
+        .iter()
+        .zip(&artifact.hir.internal_nodes)
+        .map(|(&node, declared)| (node, &declared.potential_units));
+    for (node, units) in ports.chain(internal) {
+        if let Some(units) = units {
+            circuit.record_potential_units(node, units);
+        }
+    }
 }
 
 /// The internal-node names a cached compilation carries, or an empty list when

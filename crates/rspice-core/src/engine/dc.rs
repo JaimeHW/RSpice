@@ -337,6 +337,8 @@ fn populate_public_dc_solution(
     // A Verilog-A instance's own unknowns hold node slots for the same reason
     // and are not nets either; the circuit says which ones by name.
     result.set_instance_unknowns(circuit.instance_unknown_kinds());
+    // And a thermal net's value is a temperature, in kelvin.
+    result.set_potential_units(circuit.potential_units());
     // Some devices own solver-only unknowns after the public branch range.
     // Those internal states remain available to device observation through
     // `solution`, but they are intentionally not exposed as branch currents.

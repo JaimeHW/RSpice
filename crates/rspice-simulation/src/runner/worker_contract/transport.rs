@@ -1152,6 +1152,8 @@ pub(crate) enum WorkerSimulationResultTransport {
         mna_solution: WorkerF64Series,
         mna_solution_digest: rspice_vocabulary::product::ContentDigest,
         node_voltages: HashMap<String, f64>,
+        #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+        node_units: HashMap<String, String>,
         branch_currents: HashMap<String, f64>,
         device_report: Option<WorkerDeviceOpReport>,
         #[serde(default, skip_serializing_if = "WorkerChecks::is_empty")]

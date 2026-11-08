@@ -263,6 +263,8 @@ mod tests {
             values: vec![current; 3],
         };
         let result = TransientResult {
+            instance_unknowns: Vec::new(),
+            potential_units: Vec::new(),
             time: vec![0.0, 0.5, 1.0],
             step_sizes: vec![0.0, 0.5, 0.5],
             voltages: vec![vec![1.0; 3]],
