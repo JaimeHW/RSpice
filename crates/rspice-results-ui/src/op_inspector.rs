@@ -370,6 +370,34 @@ fn order_rows(
 }
 
 /// A family's own quantities, in the order the report introduced them.
+/// The quantities a designer opens this page for, in the order they are
+/// read. A family not listed, a Verilog-A module among them, stays as it
+/// reports.
+fn leading_quantities(family: &str) -> &'static [&'static str] {
+    const MOSFET: &[&str] = &[
+        "id", "vgs", "vds", "vbs", "vth", "vdsat", "gm", "gds", "gmb", "gmbs", "ig", "is", "ib",
+    ];
+    const BJT: &[&str] = &[
+        "ic", "ib", "vbe", "vce", "gm", "gpi", "gmu", "go", "ie", "is",
+    ];
+    match family {
+        "MOSFET" | "MOS9" | "BSIM3" | "BSIM4" | "B3SOIFD" | "B3SOIDD" | "B3SOIPD" | "EKV26"
+        | "EKV3" | "VDMOS" => MOSFET,
+        "BJT" => BJT,
+        _ => &[],
+    }
+}
+
+/// A quantity's place in its family: the listed ones first and in that order,
+/// the rest level with each other so a stable sort leaves them in report order.
+fn quantity_rank(family: &str, name: &str) -> usize {
+    let leading = leading_quantities(family);
+    leading
+        .iter()
+        .position(|known| *known == name)
+        .unwrap_or(leading.len())
+}
+
 fn family_columns(report: &DeviceOpReport, rows: &[ShownRow]) -> Vec<PlanColumn> {
     let mut in_report_order: Vec<usize> = rows.iter().map(|row| row.index).collect();
     in_report_order.sort_unstable();
@@ -384,6 +412,10 @@ fn family_columns(report: &DeviceOpReport, rows: &[ShownRow]) -> Vec<PlanColumn>
                 });
             }
         }
+    }
+    if let Some(row) = rows.first() {
+        let (family, _) = device_reading(&report.entries[row.index]);
+        columns.sort_by_key(|column| quantity_rank(family, &column.label));
     }
     columns
 }
@@ -1696,8 +1728,11 @@ pub fn selection_detail(
             if let Some(region) = entry.region {
                 rows.push((REGION_HEADER.to_owned(), region.to_owned()));
             }
+            let mut quantities: Vec<_> = quantities.collect();
+            quantities.sort_by_key(|(name, _, _)| quantity_rank(family, name));
             rows.extend(
                 quantities
+                    .into_iter()
                     .map(|(name, value, unit)| (name.to_owned(), quantity_readout(value, unit))),
             );
         }

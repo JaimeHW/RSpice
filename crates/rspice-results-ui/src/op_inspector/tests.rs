@@ -168,7 +168,7 @@ fn the_sheet_lists_nodes_then_branches_then_families_in_their_order() {
 }
 
 #[test]
-fn a_family_shows_only_its_own_quantities_in_report_order() {
+fn a_family_shows_only_its_own_quantities() {
     let report = DeviceOpReport {
         entries: vec![
             device(
@@ -194,7 +194,7 @@ fn a_family_shows_only_its_own_quantities_in_report_order() {
     let plan = plan_of(None, Some(&report));
     assert_eq!(labels(&plan, "Diode"), ["vd", "id", "temp"]);
     assert_eq!(labels(&plan, "vamp"), ["iinp", "iinn", "ignd", "iout"]);
-    assert_eq!(labels(&plan, "MOSFET"), ["gm", "vgs"]);
+    assert_eq!(labels(&plan, "MOSFET"), ["vgs", "gm"]);
 }
 
 #[test]
@@ -246,7 +246,7 @@ fn sorting_one_family_leaves_the_others_and_the_columns_alone() {
     );
     assert_eq!(
         labels(&plan, "MOSFET"),
-        ["gm", "vgs"],
+        ["vgs", "gm"],
         "the sort rewrote the columns"
     );
 }
@@ -477,6 +477,73 @@ fn a_non_finite_value_stays_a_row_and_is_refused_in_its_cell() {
         RowSource::Scalar(&failed).cell(&plan.sections[0].columns[0]),
         CellValue::Refused
     ));
+}
+
+#[test]
+fn a_family_leads_with_the_quantities_a_designer_reads() {
+    let reported = |family: &'static str, names: &[&'static str]| {
+        let entry = device(
+            "U1",
+            family,
+            None,
+            names.iter().map(|name| (*name, 1.0)).collect(),
+        );
+        let report = DeviceOpReport {
+            entries: vec![entry],
+        };
+        let plan = plan_of(None, Some(&report));
+        let columns = labels(&plan, &family_title(family));
+        let selection = OpSelection {
+            kind: OpRowKind::Device,
+            index: 0,
+            name: "U1".to_owned(),
+        };
+        let mapped = Mapped {
+            node: false,
+            device: None,
+        };
+        let detail =
+            selection_detail(&selection, None, Some(&report), &mapped).expect("the row exists");
+        let inspector: Vec<String> = detail
+            .rows
+            .iter()
+            .map(|(label, _)| label.clone())
+            .filter(|label| label != "Family" && label != "Identity")
+            .collect();
+        assert_eq!(columns, inspector, "the inspector reads like the sheet");
+        columns
+    };
+
+    assert_eq!(
+        reported(
+            "MOSFET",
+            &[
+                "id", "ig", "is", "ib", "vgs", "vds", "vbs", "vth", "vdsat", "gm", "gds", "gmb",
+                "temp", "power",
+            ],
+        ),
+        [
+            "id", "vgs", "vds", "vbs", "vth", "vdsat", "gm", "gds", "gmb", "ig", "is", "ib",
+            "temp", "power",
+        ],
+    );
+    assert_eq!(
+        reported("BSIM4", &["id", "ig", "vgs", "output_vdsat", "gm"]),
+        ["id", "vgs", "gm", "ig", "output_vdsat"],
+        "every MOSFET model reads alike"
+    );
+    assert_eq!(
+        reported("BJT", &["ic", "ib", "ie", "is", "vbe", "vce", "gm", "beta"]),
+        ["ic", "ib", "vbe", "vce", "gm", "ie", "is", "beta"],
+    );
+    let as_reported = ["vd", "id", "gd", "cd"];
+    assert_eq!(reported("DIODE", &as_reported), as_reported);
+    let module = ["iout", "id", "ig"];
+    assert_eq!(
+        reported("vamp", &module),
+        module,
+        "a module keeps its stated order"
+    );
 }
 
 #[test]
