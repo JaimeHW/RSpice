@@ -431,7 +431,9 @@ use rspice_core::analysis::harmonic_balance::{
 // deck keeps the topology of the circuit its analyses build, so the
 // fingerprint its typed and HDF5 artifacts carry does not elaborate the deck
 // again.
-const MAX_PUBLIC_ITEMS: usize = 5264;
+// One projection query lets the CLI's operating-point export skip an
+// unauthored deck's projection.
+const MAX_PUBLIC_ITEMS: usize = 5265;
 
 /// The `#[doc(hidden)] pub` items of the family, counted apart from
 /// `MAX_PUBLIC_ITEMS`. A hidden item is plumbing that one crate of the engine
