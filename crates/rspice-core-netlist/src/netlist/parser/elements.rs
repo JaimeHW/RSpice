@@ -10743,6 +10743,26 @@ mod literal_resistor_tests {
             assert!(parse_literal_resistor(card, &params).is_none(), "{card}");
         }
     }
+
+    #[test]
+    fn arithmetic_flags_and_extra_values_are_left_to_the_token_parser() {
+        let params = ParamContext::default();
+        for card in [
+            "R1 a b 1k shorted",
+            "R1 a b shorted",
+            "R1 a b 1k*2",
+            "R1 a b 1k * 2",
+            "R1 a b 2+3",
+            "R1 a b 1k +2",
+            "R1 a b 1k -2",
+            "R1 a b -1k",
+            "R1 a b 1k Ohm",
+            "R1 a b 1k,2k",
+            "R1 a b (1k)",
+        ] {
+            assert!(parse_literal_resistor(card, &params).is_none(), "{card}");
+        }
+    }
 }
 
 #[cfg(test)]
