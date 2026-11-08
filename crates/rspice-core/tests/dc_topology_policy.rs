@@ -1018,6 +1018,39 @@ fn a_capacitive_island_takes_its_charge_neutral_voltage() {
     }
 }
 
+/// A floating pair joined by 1 mOhm: 1000 S rounds the 1e-15 S nodal floor
+/// away, so its rows cancel exactly. It is still a capacitive divider, and
+/// used to be refused as a singular matrix.
+#[test]
+fn an_island_joined_by_a_tiny_resistor_still_settles() {
+    let netlist = parse(
+        "island behind a series short
+         v1 in 0 1
+         c1 in near 1n
+         rs near far 1m
+         c2 far 0 1n
+         .end
+",
+    );
+    let op = engine()
+        .run_dc_op(&netlist)
+        .expect("the island's operating point solves");
+    let transient = engine()
+        .run_tran(&netlist, 1.0e-8, 1.0e-9)
+        .expect("the transient runs");
+    for node in ["near", "far"] {
+        let settled = voltage(&op, node);
+        assert!((settled - 0.5).abs() <= 1.0e-12, "v({node}) = {settled}");
+        let start = transient
+            .try_voltage_at_named(node, 0)
+            .unwrap_or_else(|| panic!("v({node}) is recorded"));
+        assert!(
+            (start - 0.5).abs() <= 1.0e-12,
+            "v({node}) at t = 0: {start}"
+        );
+    }
+}
+
 /// An initial condition on an island holds it where the condition puts it
 /// for the transient's operating point; the charge-neutral voltage is for an
 /// island nothing pins.

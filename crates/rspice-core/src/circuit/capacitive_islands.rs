@@ -23,6 +23,43 @@ struct IslandCoupling {
 }
 
 impl CircuitData {
+    /// Raise the nodal floor `gmin` on a floating group its own resistors
+    /// would round it away on.
+    ///
+    /// Against a 1 mOhm resistor's 1000 S, 1e-15 S is lost in a double: the
+    /// group's rows cancel exactly and a linear circuit is refused as
+    /// singular. Only this floor sets the common mode of such a group and no
+    /// current leaves it through anything else, so the larger floor moves no
+    /// other node, and its charge is settled afterwards as for any island.
+    pub(crate) fn stamp_resistive_island_floor(&self, matrix: &mut StaticMatrix, gmin: Value) {
+        const ROUNDING_MARGIN: Value = 16.0 * Value::EPSILON;
+        if self.dc_floating_component_nodes.is_empty() {
+            return;
+        }
+        let mut largest = vec![0.0_f64; self.dc_floating_component_nodes.len()];
+        let by_node = &self.dc_floating_component_by_node;
+        let resistors = &self.resistors;
+        for (stamp, conductance) in resistors.stamps.iter().zip(&resistors.conductances) {
+            if let Some(&Some(component)) = by_node.get(stamp.pp.row) {
+                largest[component] = largest[component].max(conductance.abs());
+            }
+        }
+        for (node, component) in by_node.iter().enumerate().skip(1) {
+            let Some(component) = *component else {
+                continue;
+            };
+            let raised = ROUNDING_MARGIN * largest[component] - gmin;
+            let qualifies = |flags: &[bool]| flags.get(component).copied().unwrap_or(false);
+            if raised > 0.0
+                && qualifies(&self.dc_floating_component_is_certain)
+                && qualifies(&self.dc_floating_component_is_passive)
+                && self.receives_nodal_gmin(node - 1)
+            {
+                matrix.add(node - 1, node - 1, raised);
+            }
+        }
+    }
+
     /// Shift the common mode of every capacitive island so its net charge is
     /// zero, leaving every other node as solved.
     ///

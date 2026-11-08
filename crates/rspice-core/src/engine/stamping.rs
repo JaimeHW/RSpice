@@ -53,6 +53,7 @@ impl Engine {
                 matrix.add(index, index, gmin);
             }
         }
+        circuit.stamp_resistive_island_floor(matrix, gmin);
     }
 
     /// Add a homotopy GMIN stage `gmin` whose final floor is `floor`: the
