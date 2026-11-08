@@ -18,3 +18,22 @@ fn a_device_that_cannot_be_located_is_answered_on_the_status_bar() {
     );
     assert!(state.workbench.toasts.activity().is_empty());
 }
+
+/// A double-click the schematic cannot answer gets its reason on the same
+/// line, and leaves the workspace where it was.
+#[test]
+fn a_refused_cross_probe_is_answered_on_the_status_bar() {
+    let mut state = AppState::default();
+    let workspace = state.workbench.workspace;
+    apply_action(
+        &mut state.results_parts(),
+        OpAction::Refused("This retained node has no schematic mapping."),
+    );
+    state.drain_notices(&egui::Context::default());
+    assert_eq!(
+        state.prompt_text(),
+        Some("This retained node has no schematic mapping.")
+    );
+    assert_eq!(state.workbench.workspace, workspace);
+    assert!(state.workbench.toasts.activity().is_empty());
+}
