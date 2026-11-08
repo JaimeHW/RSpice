@@ -469,6 +469,8 @@ struct PlanSection {
     count: usize,
     sort: Option<(String, bool)>,
     collapsed: bool,
+    /// The most characters a value's prefix and unit can take in this section.
+    longest_unit: usize,
     /// Why the section holds no rows; it stands in for them.
     note: Option<String>,
     /// Sheet offset of the title row.
@@ -481,6 +483,15 @@ impl PlanSection {
     /// Value columns on the sheet's grid, counting the region's.
     fn slots(&self) -> usize {
         self.columns.len() + usize::from(self.region)
+    }
+    /// The room for this section's prefixes and units, at the mono `advance`.
+    fn unit_slot(&self, advance: f32) -> f32 {
+        UNIT_SLOT_W.max((self.longest_unit as f32 * advance).ceil())
+    }
+    /// One of this section's value columns: the sheet's own width, grown by
+    /// whatever its units need so the mantissas keep their room.
+    fn value_w(&self, advance: f32) -> f32 {
+        VALUE_W + self.unit_slot(advance) - UNIT_SLOT_W
     }
     fn has_rows(&self) -> bool {
         !self.collapsed && self.note.is_none()
@@ -558,6 +569,12 @@ impl PlanBuilder<'_> {
         name_header: &str,
         columns: Vec<PlanColumn>,
     ) -> PlanSection {
+        // A value's prefix goes in front of its unit.
+        let longest_unit = columns
+            .iter()
+            .map(|column| column.unit.chars().count() + 1)
+            .max()
+            .unwrap_or(0);
         PlanSection {
             kind,
             key: key.to_owned(),
@@ -568,6 +585,7 @@ impl PlanBuilder<'_> {
             count: 0,
             sort: self.controls.sort.get(key).cloned(),
             collapsed: self.controls.collapsed.contains(key),
+            longest_unit,
             note: None,
             top: 0.0,
             bottom: 0.0,
@@ -733,7 +751,6 @@ pub struct OpPlan {
     rows: Vec<PlanRow>,
     offsets: RowOffsets,
     longest_name: usize,
-    widest_slots: usize,
     node_shown: usize,
     device_shown: usize,
     /// The one line a filter that matched nothing leaves on the sheet.
@@ -767,12 +784,6 @@ impl OpPlan {
         });
         OpPlan {
             offsets: RowOffsets::from_heights(builder.rows.iter().map(|row| row.height())),
-            widest_slots: builder
-                .sections
-                .iter()
-                .map(PlanSection::slots)
-                .max()
-                .unwrap_or(0),
             longest_name: builder.longest_name,
             sections: builder.sections,
             rows: builder.rows,
@@ -781,6 +792,14 @@ impl OpPlan {
             no_match,
             scope_note: reduced_scope_note(devices, detail),
         }
+    }
+
+    /// The width of the widest section's whole value grid.
+    fn widest_values(&self, advance: f32) -> f32 {
+        self.sections
+            .iter()
+            .map(|section| section.slots() as f32 * section.value_w(advance))
+            .fold(0.0, f32::max)
     }
 
     pub fn node_shown(&self) -> usize {
@@ -1043,22 +1062,23 @@ impl Grid {
         )
     }
 
-    /// Where a section of `slots` value columns starts on screen. It scrolls
-    /// no further than it overflows, so a section that fits stays whole and
-    /// one narrower than the widest stops at its own last column; and a whole
-    /// column at a time, so the frozen name column never cuts a value in two.
-    fn values_left(&self, slots: usize) -> f32 {
+    /// Where a section of `slots` value columns, each `width` wide, starts on
+    /// screen. It scrolls no further than it overflows, so a section that fits
+    /// stays whole and one narrower than the widest stops at its own last
+    /// column; and a whole column at a time, so the frozen name column never
+    /// cuts a value in two.
+    fn values_left(&self, slots: usize, width: f32) -> f32 {
         let scrolled = self.visible.left() - self.origin.x;
-        let overflow = self.name_w + slots as f32 * VALUE_W - self.visible.width();
-        let columns = (scrolled.min(overflow.max(0.0)) / VALUE_W).ceil();
-        self.visible.left() + self.name_w - columns * VALUE_W
+        let overflow = self.name_w + slots as f32 * width - self.visible.width();
+        let columns = (scrolled.min(overflow.max(0.0)) / width).ceil();
+        self.visible.left() + self.name_w - columns * width
     }
 
-    /// One slot of the shared value grid, in a section starting at `left`.
-    fn value_cell(&self, left: f32, y: f32, height: f32, slot: usize) -> egui::Rect {
+    /// One slot of a section's value grid, the section starting at `left`.
+    fn value_cell(&self, left: f32, y: f32, height: f32, slot: usize, width: f32) -> egui::Rect {
         egui::Rect::from_min_size(
-            egui::pos2(left + slot as f32 * VALUE_W, self.screen_y(y)),
-            egui::vec2(VALUE_W, height),
+            egui::pos2(left + slot as f32 * width, self.screen_y(y)),
+            egui::vec2(width, height),
         )
     }
 
@@ -1081,8 +1101,8 @@ impl Grid {
     }
 }
 
-fn mantissa_edge(cell: egui::Rect) -> f32 {
-    cell.right() - UNIT_SLOT_W - MANTISSA_GAP
+fn mantissa_edge(cell: egui::Rect, unit_slot: f32) -> f32 {
+    cell.right() - unit_slot - MANTISSA_GAP
 }
 
 fn describe(ui: &Ui, response: &egui::Response, role: egui::accesskit::Role, label: &str) {
@@ -1198,17 +1218,18 @@ impl<M: SchematicMapping> SheetPainter<'_, M> {
             out,
         );
         let values = self.grid.values_clip().intersect(rect);
-        let left = self.grid.values_left(section.slots());
+        let width = section.value_w(self.grid.advance);
+        let left = self.grid.values_left(section.slots(), width);
         let mut slot = 0;
         if section.region {
-            let cell = self.grid.value_cell(left, y, COLUMN_HEADER_H, slot);
+            let cell = self.grid.value_cell(left, y, COLUMN_HEADER_H, slot, width);
             if self.grid.shows_whole(cell) {
                 self.header_cell(section, cell, values, REGION_HEADER, HeaderAlign::Text, out);
             }
             slot += 1;
         }
         for column in &section.columns {
-            let cell = self.grid.value_cell(left, y, COLUMN_HEADER_H, slot);
+            let cell = self.grid.value_cell(left, y, COLUMN_HEADER_H, slot, width);
             slot += 1;
             if self.grid.shows_whole(cell) {
                 self.header_cell(
@@ -1274,14 +1295,13 @@ impl<M: SchematicMapping> SheetPainter<'_, M> {
             measured
         };
         let width = galley.size().x;
+        let edge = mantissa_edge(cell, section.unit_slot(self.grid.advance));
         let left = match align {
             HeaderAlign::Name => cell.left() + NAME_INSET,
             HeaderAlign::Text => cell.left() + CELL_INSET,
             // A short label ends over its mantissas; a long one uses the
             // unit slot as well rather than clip.
-            HeaderAlign::Number if width <= mantissa_edge(cell) - cell.left() - MANTISSA_GAP => {
-                mantissa_edge(cell) - width
-            }
+            HeaderAlign::Number if width <= edge - cell.left() - MANTISSA_GAP => edge - width,
             HeaderAlign::Number => cell.right() - MANTISSA_GAP - width,
         };
         let top = cell.center().y - galley.size().y * 0.5;
@@ -1383,12 +1403,18 @@ impl<M: SchematicMapping> SheetPainter<'_, M> {
         (shown_parent != parent || shown_leaf != *leaf).then(|| format!("{parent}{leaf}"))
     }
 
-    fn paint_value(&self, painter: &egui::Painter, cell: egui::Rect, value: CellValue) {
+    fn paint_value(
+        &self,
+        painter: &egui::Painter,
+        cell: egui::Rect,
+        unit_slot: f32,
+        value: CellValue,
+    ) {
         let painter = painter.with_clip_rect(cell.intersect(painter.clip_rect()));
         let font = theme::mono(tokens::FS_1, FontWeight::Regular);
         match value {
             CellValue::Number { mantissa, unit } => {
-                let edge = mantissa_edge(cell);
+                let edge = mantissa_edge(cell, unit_slot);
                 painter.text(
                     egui::pos2(edge, cell.center().y),
                     egui::Align2::RIGHT_CENTER,
@@ -1428,7 +1454,7 @@ impl<M: SchematicMapping> SheetPainter<'_, M> {
             }
             CellValue::Missing => {
                 painter.text(
-                    egui::pos2(mantissa_edge(cell), cell.center().y),
+                    egui::pos2(mantissa_edge(cell, unit_slot), cell.center().y),
                     egui::Align2::RIGHT_CENTER,
                     "\u{2014}",
                     font,
@@ -1472,10 +1498,12 @@ impl<M: SchematicMapping> SheetPainter<'_, M> {
         );
         let values_clip = self.grid.values_clip().intersect(rect);
         let values = self.ui.painter_at(values_clip);
-        let left = self.grid.values_left(section.slots());
+        let width = section.value_w(self.grid.advance);
+        let unit_slot = section.unit_slot(self.grid.advance);
+        let left = self.grid.values_left(section.slots(), width);
         let mut slot = 0;
         if section.region {
-            let cell = self.grid.value_cell(left, y, ROW_H, slot);
+            let cell = self.grid.value_cell(left, y, ROW_H, slot, width);
             if let Some(region) = row.region().filter(|_| self.grid.shows_whole(cell)) {
                 values.with_clip_rect(cell.intersect(values_clip)).text(
                     egui::pos2(cell.left() + CELL_INSET, cell.center().y),
@@ -1488,10 +1516,10 @@ impl<M: SchematicMapping> SheetPainter<'_, M> {
             slot += 1;
         }
         for column in &section.columns {
-            let cell = self.grid.value_cell(left, y, ROW_H, slot);
+            let cell = self.grid.value_cell(left, y, ROW_H, slot, width);
             slot += 1;
             if self.grid.shows_whole(cell) {
-                self.paint_value(&values, cell, row.cell(column));
+                self.paint_value(&values, cell, unit_slot, row.cell(column));
             }
         }
         describe(
@@ -1561,7 +1589,7 @@ fn show_sheet<M: SchematicMapping>(
         .size()
         .x;
     let name_w = name_column_width(advance, plan.longest_name);
-    let content_w = name_w + plan.widest_slots as f32 * VALUE_W;
+    let content_w = name_w + plan.widest_values(advance);
     let content_h = plan.offsets.total_height() + SHEET_END_PAD;
     let table = egui::ScrollArea::both()
         .id_salt("rspice.results.op.sheet")

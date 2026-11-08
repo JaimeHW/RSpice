@@ -776,17 +776,92 @@ fn a_section_scrolls_in_whole_columns_only_as_far_as_it_overflows() {
         name_w,
         advance: 7.0,
     };
-    assert_eq!(grid.values_left(3), name_w, "it fits: nothing moves");
     assert_eq!(
-        grid.values_left(5),
+        grid.values_left(3, VALUE_W),
+        name_w,
+        "it fits: nothing moves"
+    );
+    assert_eq!(
+        grid.values_left(5, VALUE_W),
         name_w - 2.0 * VALUE_W,
         "it stops once its last column is whole"
     );
     assert_eq!(
-        grid.values_left(20),
+        grid.values_left(20, VALUE_W),
         name_w - 3.0 * VALUE_W,
         "it follows the bar a column at a time"
     );
+}
+
+#[test]
+fn a_long_unit_widens_its_own_section_and_no_built_in_one() {
+    const ADVANCE: f32 = 7.2;
+    let report = DeviceOpReport {
+        entries: vec![
+            device(
+                "M1",
+                "MOSFET",
+                Some("saturation"),
+                vec![("id", 1.0), ("temp", 27.0)],
+            ),
+            device("D1", "DIODE", None, vec![("cd", 1.0), ("power", 1.0)]),
+            module_device(
+                "X1",
+                "sqlaw",
+                vec![("kp", 2.0e-4, "A/V^2"), ("id", 1.0e-3, "A")],
+            ),
+            module_device("X2", "rmod", vec![("ia", 1.0, "A"), ("g", 1.0, "S")]),
+        ],
+    };
+    let plan = plan_of(None, Some(&report));
+    let section = |title: &str| {
+        plan.sections
+            .iter()
+            .find(|section| section.title == title)
+            .expect("the section")
+    };
+    for title in ["MOSFET", "Diode", "rmod"] {
+        assert_eq!(section(title).unit_slot(ADVANCE), UNIT_SLOT_W, "{title}");
+        assert_eq!(section(title).value_w(ADVANCE), VALUE_W, "{title}");
+    }
+    let wide = section("sqlaw");
+    assert_eq!(wide.unit_slot(ADVANCE), 44.0, "six characters: mA/V^2");
+    assert_eq!(wide.value_w(ADVANCE), VALUE_W + 10.0);
+    assert!(
+        wide.unit_slot(ADVANCE) >= "mA/V^2".chars().count() as f32 * ADVANCE,
+        "the slot holds what it was sized for"
+    );
+    assert_eq!(
+        wide.value_w(ADVANCE) - wide.unit_slot(ADVANCE),
+        VALUE_W - UNIT_SLOT_W,
+        "the mantissas keep their room"
+    );
+
+    // The widest grid is the content width, and a section steps by its own
+    // column.
+    let scrolled = Grid {
+        origin: egui::pos2(-300.0, 0.0),
+        visible: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 400.0)),
+        name_w: 200.0,
+        advance: ADVANCE,
+    };
+    let width = wide.value_w(ADVANCE);
+    assert_eq!(
+        plan.widest_values(ADVANCE),
+        [
+            section("MOSFET").slots() as f32 * VALUE_W,
+            wide.slots() as f32 * width,
+        ]
+        .into_iter()
+        .fold(0.0, f32::max)
+    );
+    assert_eq!(
+        scrolled.values_left(20, width),
+        200.0 - 3.0 * width,
+        "300 pt of scroll is three of these columns"
+    );
+    let cell = scrolled.value_cell(0.0, 0.0, ROW_H, 1, width);
+    assert_eq!((cell.left(), cell.width()), (width, width));
 }
 
 #[test]
@@ -798,7 +873,9 @@ fn only_a_whole_column_is_painted_and_the_last_one_can_always_be_reached() {
         name_w: 200.0,
         advance: 7.0,
     };
-    let cell = |grid: &Grid, slot: usize| grid.value_cell(grid.values_left(8), 0.0, ROW_H, slot);
+    let cell = |grid: &Grid, slot: usize| {
+        grid.value_cell(grid.values_left(8, VALUE_W), 0.0, ROW_H, slot, VALUE_W)
+    };
 
     let start = at(0.0);
     assert!(start.shows_whole(cell(&start, 2)), "400 pt holds three");
