@@ -1233,6 +1233,8 @@ mod tests {
 
     fn waveform(time: &[f64], voltage: &[f64]) -> TransientResult {
         TransientResult {
+            instance_unknowns: Vec::new(),
+            potential_units: Vec::new(),
             current_impulses: None,
             voltage_impulses: None,
             time: time.to_vec(),

@@ -928,6 +928,8 @@ mod tests {
             "counterfactual must prove the historical relation alone admits identical wrong tables"
         );
         let shared_wrong_result = TransientResult {
+            instance_unknowns: Vec::new(),
+            potential_units: Vec::new(),
             current_impulses: None,
             voltage_impulses: None,
             time: vec![0.0, 1.0e-9],
