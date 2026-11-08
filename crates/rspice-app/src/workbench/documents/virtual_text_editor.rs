@@ -24,7 +24,9 @@ use super::text_editor_commands::{
     ByteSelection, EditorSyntax, apply_structural_command, publish_caret_line,
     take_queued_caret_char_index, take_queued_caret_position, take_queued_standard_command,
     take_queued_structural_command, take_queued_view_command,
-    veriloga_blocks::{dedent_closing_word, leaves_block_open, veriloga_fold_regions},
+    veriloga_blocks::{
+        dedent_after_typing, dedent_closing_word_at_caret, leaves_block_open, veriloga_fold_regions,
+    },
 };
 use crate::workbench::framework::requests::{
     EditorViewCommand, StandardCommand, StructuralCommand,
@@ -1228,7 +1230,7 @@ fn handle_event(
             grow_maximum_columns_for_insertion(session, &text);
             session.model.insert_at_selections(&text);
             if keys.syntax == EditorSyntax::VerilogA {
-                dedent_closing_word(&mut session.model);
+                dedent_after_typing(&mut session.model, &text);
             }
             session.preferred_column = None;
             outcome.caret_moved = true;
@@ -1346,6 +1348,9 @@ fn apply_key_action(
             outcome.caret_moved = true;
         }
         KeyAction::Newline if editable => {
+            if keys.syntax == EditorSyntax::VerilogA {
+                dedent_closing_word_at_caret(&mut session.model);
+            }
             insert_smart_newline(&mut session.model, keys.syntax);
             session.preferred_column = None;
             outcome.caret_moved = true;

@@ -280,10 +280,43 @@ fn typing_a_verilog_a_block_indents_its_body_and_brings_its_end_back() {
     for letter in ["e", "n", "d"] {
         let _ = bench.frame(vec![egui::Event::Text(letter.to_owned())]);
     }
+    let _ = bench.key(Key::Enter, Modifiers::NONE);
     assert_eq!(
         bench.source,
-        "module m;\n  analog begin\n      x = 1;\n  end"
+        "module m;\n  analog begin\n      x = 1;\n  end\n  "
     );
+}
+
+/// A closing word comes back to its block's indentation once it is
+/// complete: when what is typed next cannot continue it, or the line ends.
+/// A longer word that starts with one stays at the body's indentation.
+#[test]
+fn a_closing_word_comes_back_only_once_it_is_complete() {
+    let typed = |letters: &str, then_enter: bool| {
+        let mut bench = Bench::new("  analog begin\n      x = 1;\n      ", true);
+        bench.focus();
+        bench.move_caret_to(3, 7);
+        for letter in letters.chars() {
+            let _ = bench.frame(vec![egui::Event::Text(letter.to_string())]);
+        }
+        if then_enter {
+            let _ = bench.key(Key::Enter, Modifiers::NONE);
+        }
+        bench.source
+    };
+    let body = "  analog begin\n      x = 1;\n";
+    assert_eq!(
+        typed("endpoint", false),
+        format!("{body}      endpoint"),
+        "endpoint keeps the body's indentation"
+    );
+    assert_eq!(typed("end_x", false), format!("{body}      end_x"));
+    assert_eq!(
+        typed("endcase_sel", false),
+        format!("{body}      endcase_sel")
+    );
+    assert_eq!(typed("end", true), format!("{body}  end\n  "));
+    assert_eq!(typed("end ", false), format!("{body}  end "));
 }
 
 #[test]

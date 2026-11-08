@@ -93,9 +93,9 @@ fn a_closing_word_typed_alone_takes_its_line_back_to_its_block() {
     let typed = |source: &str| {
         let mut model = TextDocumentModel::from_source(source);
         model.set_selections(vec![TextSelection::caret(model.len_chars())]);
-        dedent_closing_word(&mut model);
+        dedent_closing_word_at_caret(&mut model);
         let once = model.to_source();
-        dedent_closing_word(&mut model);
+        dedent_closing_word_at_caret(&mut model);
         assert_eq!(model.to_source(), once, "a second reading changes nothing");
         assert_eq!(
             model.selections(),
@@ -130,5 +130,40 @@ fn a_closing_word_typed_alone_takes_its_line_back_to_its_block() {
         "    end",
     ] {
         assert_eq!(typed(unchanged), unchanged);
+    }
+}
+
+/// A closing word comes back once what is typed after it ends it, and only
+/// then: a letter, a digit, `_` or `$` makes it a longer word.
+#[test]
+fn a_closing_word_comes_back_once_the_next_character_ends_it() {
+    let after = |source: &str, typed: &str| {
+        let mut model = TextDocumentModel::from_source(source);
+        model.set_selections(vec![TextSelection::caret(model.len_chars())]);
+        dedent_after_typing(&mut model, typed);
+        assert_eq!(
+            model.selections(),
+            &[TextSelection::caret(model.len_chars())],
+            "the caret stays after what was typed"
+        );
+        model.to_source()
+    };
+    let block = "  analog begin\n    x = 1;\n";
+    assert_eq!(
+        after(&format!("{block}    end "), " "),
+        format!("{block}  end ")
+    );
+    assert_eq!(
+        after(&format!("{block}    end;"), ";"),
+        format!("{block}  end;")
+    );
+    assert_eq!(
+        after(&format!("{block}    end // done"), " // done"),
+        format!("{block}  end // done")
+    );
+    for longer in ["endp", "end_", "end$", "end2", "endpoint ", "endcase_sel "] {
+        let source = format!("{block}    {longer}");
+        let typed = &longer[longer.len() - 1..];
+        assert_eq!(after(&source, typed), source, "{longer:?}");
     }
 }

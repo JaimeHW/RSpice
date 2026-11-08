@@ -30,8 +30,9 @@ enum BlockWord {
     Branch,
 }
 
-/// The words that close a block when typed alone on a line, and so take the
-/// line back to the indentation of the block they close.
+/// The words that close a block when they stand complete and alone on a
+/// line, and so take the line back to the indentation of the block they
+/// close.
 const CLOSING_WORDS: [&str; 10] = [
     "end",
     "endcase",
@@ -182,29 +183,65 @@ fn leading_indentation(text: &str) -> &str {
     &text[..text.len() - text.trim_start_matches([' ', '\t']).len()]
 }
 
-/// A word that closes a block, typed alone on its line at a single caret,
-/// takes the line back to the indentation of the block it closes.
-pub(crate) fn dedent_closing_word(model: &mut TextDocumentModel) {
+/// Whether `character`, typed after a word, makes it a longer word.
+fn continues_word(character: char) -> bool {
+    character.is_alphanumeric() || matches!(character, '_' | '$')
+}
+
+/// After `typed` was put in at the caret: a closing word it completes, by
+/// following it with a character no word goes on with, takes its line back
+/// to the indentation of the block it closes. `end ` and `end;` come back;
+/// `endpoint` stays where it is written.
+pub(crate) fn dedent_after_typing(model: &mut TextDocumentModel, typed: &str) {
+    if typed.chars().next().is_none_or(continues_word) {
+        return;
+    }
+    let [selection] = model.selections() else {
+        return;
+    };
+    if let Some(word_end) = selection.cursor.checked_sub(typed.chars().count()) {
+        dedent_closing_word(model, word_end);
+    }
+}
+
+/// Before the line is ended at the caret: a closing word right before the
+/// caret is complete, so its line takes the indentation of the block it
+/// closes.
+pub(crate) fn dedent_closing_word_at_caret(model: &mut TextDocumentModel) {
+    if let [selection] = model.selections() {
+        let caret = selection.cursor;
+        dedent_closing_word(model, caret);
+    }
+}
+
+/// A closing word that is all its line holds up to `word_end`, before a
+/// single caret on the same line, takes the line back to the indentation of
+/// the block it closes. The caret keeps its place in the text.
+fn dedent_closing_word(model: &mut TextDocumentModel, word_end: usize) {
     let [selection] = model.selections() else {
         return;
     };
     let caret = selection.cursor;
-    if !selection.range().is_empty() {
+    if !selection.range().is_empty() || caret < word_end {
         return;
     }
-    let line = model.line_column_for_char(caret).0;
+    let line = model.line_column_for_char(word_end).0;
     let Some(content) = model.line_content_char_range(line) else {
         return;
     };
-    let text = model.text_range(content.clone());
-    if content.end != caret || !CLOSING_WORDS.contains(&text.trim_start()) {
+    if word_end < content.start || caret > content.end {
         return;
     }
-    let width = leading_indentation(&text).chars().count();
+    let word = model.text_range(content.start..word_end);
+    if !CLOSING_WORDS.contains(&word.trim_start()) {
+        return;
+    }
+    let width = leading_indentation(&word).chars().count();
     let Some(target) = open_block_indentation(model, line) else {
         return;
     };
-    if target.chars().count() >= width {
+    let target_width = target.chars().count();
+    if target_width >= width {
         return;
     }
     model.set_selections(vec![TextSelection {
@@ -212,9 +249,7 @@ pub(crate) fn dedent_closing_word(model: &mut TextDocumentModel) {
         cursor: content.start + width,
     }]);
     model.replace_at_selections(&[target]);
-    if let Some(content) = model.line_content_char_range(line) {
-        model.set_selections(vec![TextSelection::caret(content.end)]);
-    }
+    model.set_selections(vec![TextSelection::caret(caret - width + target_width)]);
 }
 
 #[cfg(test)]
