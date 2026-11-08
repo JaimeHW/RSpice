@@ -149,6 +149,7 @@ impl CompiledExpr {
 
     /// From here on `smallsig()` reads 1: the program runs in a `.ac` or
     /// `.noise` analysis, operating point included.
+    #[doc(hidden)]
     pub fn enter_small_signal_analysis(&mut self) {
         for &index in &self.small_signal_constants {
             self.instructions[index] = Instruction::PushConst(1.0);

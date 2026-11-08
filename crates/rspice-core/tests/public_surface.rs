@@ -631,7 +631,14 @@ const MAX_PUBLIC_ITEMS: usize = 5265;
 // `SpecialFunction::table_entry` adds one: the varistor (`rspice-core-devices`
 // device/special_function/mixed.rs) reads the table entries the netlist parser
 // stores under it. The census is 1,666, with no slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 1666;
+// `CompiledExpr::enter_small_signal_analysis` adds one, read by the behavioral
+// sources (`rspice-core-devices` device/behavioral.rs), and
+// `BehavioralSources::enter_small_signal_analysis` adds one, read by the
+// small-signal bias (`rspice-core` engine/small_signal_bias.rs): `smallsig()`
+// reads 1 through an AC or noise analysis. `OutputStage::output_current` adds
+// one: the builder (engine/builder/special_function.rs) drives a logic output
+// with it. The census is 1,669, with no slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 1669;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
