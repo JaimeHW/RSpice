@@ -1512,17 +1512,7 @@ impl Engine {
                 return Err(SimulationError::Aborted);
             }
             let swept = if outer_is_temp {
-                let mut swept = netlist.clone();
-                swept.options.temp = Some(outer_value);
-                swept.params.set("TEMP", outer_value);
-                swept.params.set("TEMPER", outer_value);
-                swept.params.set(
-                    "VT",
-                    crate::constants::thermal_voltage(crate::constants::celsius_to_kelvin(
-                        outer_value,
-                    )),
-                );
-                swept
+                Self::temperature_point_netlist(netlist, outer_value)
             } else if outer_is_parameter {
                 let (swept, bindings) = Self::create_perturbed_netlist_with_limits_and_abort(
                     netlist,
@@ -1548,13 +1538,21 @@ impl Engine {
                 Self::override_independent_source_dc(&mut swept, &sweep2.source, outer_value)?;
                 swept
             };
-            let inner = self.run_dc_sweep_points_with_lifecycle_and_abort(
-                &swept,
-                source_name,
-                &inner_points,
-                &mut lifecycle,
-                abort,
-            )?;
+            let outer_temperature_engine = if outer_is_temp {
+                Some(self.temperature_point_engine(&swept, outer_value)?)
+            } else {
+                None
+            };
+            let inner = outer_temperature_engine
+                .as_ref()
+                .unwrap_or(self)
+                .run_dc_sweep_points_with_lifecycle_and_abort(
+                    &swept,
+                    source_name,
+                    &inner_points,
+                    &mut lifecycle,
+                    abort,
+                )?;
             retained_values = inner.iter().fold(retained_values, |total, point| {
                 total.saturating_add(dc_sweep_point_value_count(point))
             });
@@ -1575,6 +1573,33 @@ impl Engine {
         }
         lifecycle.ensure_complete()?;
         Ok(results)
+    }
+
+    /// The deck one temperature-sweep point solves, whether TEMP is the swept
+    /// source, the outer source of a nested sweep, or a `RESTART=YES` point.
+    fn temperature_point_netlist(netlist: &Netlist, celsius: Value) -> Netlist {
+        let mut swept = netlist.clone();
+        swept.options.temp = Some(celsius);
+        swept.params.set("TEMP", celsius);
+        swept.params.set("TEMPER", celsius);
+        swept.params.set(
+            "VT",
+            crate::constants::thermal_voltage(crate::constants::celsius_to_kelvin(celsius)),
+        );
+        swept
+    }
+
+    /// The engine that solves a temperature-sweep point. The swept value is the
+    /// analysis variable, so it sets the circuit temperature even for a caller
+    /// that resolved its configuration up front (the command line folds `.temp`
+    /// and `--temp` in once); every other resolved policy is kept.
+    fn temperature_point_engine(
+        &self,
+        point: &Netlist,
+        celsius: Value,
+    ) -> Result<Self, SimulationError> {
+        let config = self.frequency_row_config(point, Some(celsius), None);
+        Ok(self.try_resolved_with_config(config)?)
     }
 
     /// Set the DC operating value of a named top-level independent source.
@@ -1697,18 +1722,10 @@ impl Engine {
                 if abort.is_aborted() {
                     return Err(SimulationError::Aborted);
                 }
-                let mut swept = netlist.clone();
-                swept.options.temp = Some(sweep_value);
-                swept.params.set("TEMP", sweep_value);
-                swept.params.set("TEMPER", sweep_value);
-                swept.params.set(
-                    "VT",
-                    crate::constants::thermal_voltage(crate::constants::celsius_to_kelvin(
-                        sweep_value,
-                    )),
-                );
+                let swept = Self::temperature_point_netlist(netlist, sweep_value);
+                let point_engine = self.temperature_point_engine(&swept, sweep_value)?;
                 lifecycle.sweep_value = sweep_value;
-                let (result, device_op_report) = self
+                let (result, device_op_report) = point_engine
                     .run_dc_op_with_startup_and_lifecycle_report_and_abort(
                         &swept,
                         DcOpStartup::Automatic {
@@ -2064,17 +2081,7 @@ impl Engine {
                 return Err(SimulationError::Aborted);
             }
             let swept = if is_temp {
-                let mut swept = netlist.clone();
-                swept.options.temp = Some(sweep_value);
-                swept.params.set("TEMP", sweep_value);
-                swept.params.set("TEMPER", sweep_value);
-                swept.params.set(
-                    "VT",
-                    crate::constants::thermal_voltage(crate::constants::celsius_to_kelvin(
-                        sweep_value,
-                    )),
-                );
-                swept
+                Self::temperature_point_netlist(netlist, sweep_value)
             } else if let Some(parameter) = &parameter {
                 Self::create_perturbed_netlist_with_limits_and_abort(
                     netlist,
@@ -2089,8 +2096,15 @@ impl Engine {
                 Self::override_independent_source_dc(&mut swept, source_name, sweep_value)?;
                 swept
             };
+            let temperature_engine = if is_temp {
+                Some(self.temperature_point_engine(&swept, sweep_value)?)
+            } else {
+                None
+            };
             lifecycle.sweep_value = sweep_value;
-            let (result, device_op_report) = self
+            let (result, device_op_report) = temperature_engine
+                .as_ref()
+                .unwrap_or(self)
                 .run_dc_op_with_startup_and_lifecycle_report_and_abort(
                     &swept,
                     DcOpStartup::Automatic { use_hints: true },
@@ -2826,6 +2840,54 @@ mod tests {
             .run_dc_op_with_report_and_abort(&netlist, &NoAbort)
             .expect("overridden deck solves");
         assert_voltage(&result, "out", 0.5);
+    }
+
+    #[test]
+    fn a_temperature_sweep_sets_the_circuit_temperature_of_a_resolved_engine() {
+        // The command line resolves its configuration once; the swept TEMP is
+        // still the temperature every point is solved at (ngspice, Xyce,
+        // LTspice and QSPICE agree), primary or nested.
+        let netlist = Netlist::parse(
+            "resistor tc under a temperature sweep\n\
+             v1 in 0 dc 1\n\
+             r1 in out 1k tc1=0.002\n\
+             r2 out 0 1k\n\
+             .end\n",
+        )
+        .expect("deck parses");
+        let config = crate::engine::SimulationConfig {
+            temperature: crate::constants::celsius_to_kelvin(27.0),
+            ..Default::default()
+        };
+        let engine =
+            Engine::try_new_with_resolved_config(config).expect("resolved config is valid");
+        let divider = |celsius: Value| 1.0 / (1.0 + (1.0 + 0.002 * (celsius - 27.0)));
+
+        let points = engine
+            .run_dc_sweep_with_abort(&netlist, "TEMP", -40.0, 125.0, 55.0, &NoAbort)
+            .expect("temperature sweep solves");
+        assert_eq!(points.len(), 4);
+        for (celsius, result) in &points {
+            assert_voltage(result, "out", divider(*celsius));
+        }
+
+        let outer = crate::netlist::DcSecondSweep::linear("TEMP".to_owned(), -40.0, 125.0, 165.0);
+        let nested = engine
+            .run_dc_sweep2_with_abort(
+                &netlist,
+                "v1",
+                DcSweepRange {
+                    start: 1.0,
+                    stop: 1.0,
+                    step: 1.0,
+                },
+                Some(&outer),
+                &NoAbort,
+            )
+            .expect("nested temperature sweep solves");
+        assert_eq!(nested.len(), 2);
+        assert_voltage(&nested[0].1, "out", divider(-40.0));
+        assert_voltage(&nested[1].1, "out", divider(125.0));
     }
 
     #[test]
