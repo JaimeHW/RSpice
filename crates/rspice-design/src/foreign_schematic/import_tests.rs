@@ -3473,3 +3473,136 @@ fn an_imported_qspice_source_letters_its_waveform_on_the_line_its_drawing_wrote(
         .collect::<Vec<_>>();
     assert_eq!(texts, ["PULSE(0 3 0 1n 1n 5µ 10µ)"]);
 }
+
+/// A ground QSPICE draws is its stemless triangle hung from the net point, and
+/// the imported ground draws the same: a note the drawing sets a grid step
+/// below the ground clears it, where RSpice's own ground, reaching further
+/// down, would run over the note's words.
+#[cfg(feature = "symbol-artwork")]
+#[test]
+fn a_qspice_ground_draws_its_triangle_clear_of_a_note_set_below_it() {
+    use crate::schematic::design_note::DESIGN_NOTE_TEXT_OFFSET_WORLD;
+    use crate::schematic::ground_glyph::GroundGlyph;
+    use crate::schematic::label_layout::{LayoutPoint, LayoutRect};
+
+    const DRAWING: &str = "«schematic
+  «net (0,0) 1 13 0 \"GND\"»
+  «wire (0,200) (0,0) \"GND\"»
+  «text (0,-100) 1 13 1 0x1000000 -1 -1 \"a note below the ground\"»
+»
+";
+    let drawing = parse_qsch(&qsch_bytes(DRAWING)).unwrap();
+    let imported = import_foreign_schematic(&drawing, "work", &Library::default());
+    let ground = imported
+        .document
+        .components
+        .iter()
+        .find(|component| component.kind == ComponentType::Ground)
+        .expect("the ground is placed");
+    assert_eq!(ground.ground_glyph, GroundGlyph::Qspice);
+    let artwork = crate::symbol_artwork::SymbolLibrary::load_embedded().expect("the artwork loads");
+    let corners = artwork
+        .placed_artwork(ground)
+        .expect("the ground draws")
+        .iter()
+        .flat_map(|run| run.points.clone())
+        .map(|(x, y)| (ground.pos.x as f32 + x, ground.pos.y as f32 + y))
+        .collect::<Vec<_>>();
+    // No stem: the top edge runs through the net point, 16.5 across, and the
+    // sides fall at 45 degrees to an apex 8.25 below it.
+    let net_point = ground.terminal_positions()[0].1;
+    let (net_x, net_y) = (net_point.x as f32, net_point.y as f32);
+    let near = |a: f32, b: f32| (a - b).abs() < 1e-3;
+    for (x, y) in [
+        (net_x - 8.25, net_y),
+        (net_x + 8.25, net_y),
+        (net_x, net_y + 8.25),
+    ] {
+        assert!(
+            corners.iter().any(|&(cx, cy)| near(cx, x) && near(cy, y)),
+            "no corner at {x},{y} in {corners:?}"
+        );
+    }
+    assert!(
+        corners
+            .iter()
+            .all(|&(_, y)| y >= net_y - 1e-3 && y <= net_y + 8.25 + 1e-3)
+    );
+
+    let note = imported
+        .document
+        .design_notes
+        .iter()
+        .find(|note| note.text == "a note below the ground")
+        .expect("the note is placed");
+    let (width, height) = note.text_extent_world(&note.text);
+    let (x, y) = (
+        note.pos.x as f32 + DESIGN_NOTE_TEXT_OFFSET_WORLD.0,
+        note.pos.y as f32 + DESIGN_NOTE_TEXT_OFFSET_WORLD.1,
+    );
+    let words = LayoutRect {
+        min: LayoutPoint::new(x, y),
+        max: LayoutPoint::new(x + width, y + height),
+    };
+    assert!(
+        !meets_drawn_body(ground, words),
+        "the ground runs over {words:?}"
+    );
+    let mut native = ground.clone();
+    native.ground_glyph = GroundGlyph::Native;
+    assert!(
+        meets_drawn_body(&native, words),
+        "RSpice's own ground would clear the note too: the case proves nothing"
+    );
+}
+
+/// LTspice draws its ground flag as an open triangle with no stem, turned
+/// away from the one side a wire reaches it from. The imported ground draws
+/// LTspice's triangle and turns the same way; with a wire on both sides, or
+/// none, it hangs below its point.
+#[test]
+fn an_ltspice_ground_turns_away_from_its_wire_and_draws_ltspices_triangle() {
+    use crate::schematic::ground_glyph::GroundGlyph;
+
+    let drawing = parse_asc(
+        "Version 4
+         WIRE 0 0 64 0
+FLAG 0 0 0
+         WIRE 160 -64 160 0
+FLAG 160 0 0
+         WIRE 256 64 256 0
+FLAG 256 0 0
+         WIRE 320 0 448 0
+FLAG 384 0 0
+",
+    )
+    .expect("the drawing reads");
+    let imported = import_foreign_schematic(&drawing, "work", &library());
+    let grounds = imported
+        .document
+        .components
+        .iter()
+        .filter(|component| component.kind == ComponentType::Ground)
+        .map(|ground| {
+            assert_eq!(ground.ground_glyph, GroundGlyph::Ltspice);
+            let terminal = ground.terminal_positions()[0].1;
+            ((terminal.x, terminal.y), ground.rotation)
+        })
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(
+        grounds,
+        BTreeMap::from([
+            ((0, 0), Rotation::R90),
+            ((200, 0), Rotation::R0),
+            ((320, 0), Rotation::R180),
+            ((480, 0), Rotation::R0),
+        ])
+    );
+    // LTspice's triangle is 36 of its units across and 18 deep, drawn at
+    // five quarters: its top edge on the terminal, its sides at 45 degrees.
+    let [left, right, apex] = GroundGlyph::Ltspice.outline().expect("an imported glyph");
+    let (_, terminal) = ComponentType::Ground.terminal_offsets()[0];
+    assert_eq!((left.1, right.1), (terminal.y as f32, terminal.y as f32));
+    assert_eq!((right.0 - left.0, apex.1 - left.1), (45.0, 22.5));
+    assert_eq!(apex.0, terminal.x as f32);
+}

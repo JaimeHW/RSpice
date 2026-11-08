@@ -7,6 +7,7 @@ use crate::parameters::{format_params_string, parse_params_string};
 use crate::schematic::bom::BomField;
 use crate::schematic::component::{Component, InstanceMultiplicity};
 use crate::schematic::component_type::ComponentType;
+use crate::schematic::ground_glyph::GroundGlyph;
 
 /// Returns the primary property name for a given component type.
 ///
@@ -283,11 +284,13 @@ pub fn apply_properties_with_sheet(
     }
 
     if let Some(PropertyValue::Enum { selected, .. }) = properties.get("symbol") {
-        component.symbol_variant = if selected.is_empty() || selected == "default" {
-            None
-        } else {
-            Some(selected.clone())
-        };
+        let variant = (!selected.is_empty() && selected != "default").then(|| selected.clone());
+        // A chosen skin replaces the glyph a ground was imported with, so
+        // choosing the default afterwards draws RSpice's own.
+        if variant != component.symbol_variant {
+            component.ground_glyph = GroundGlyph::Native;
+        }
+        component.symbol_variant = variant;
     }
 
     // `m` returns to the typed field it was read from. A value the field

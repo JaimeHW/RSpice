@@ -499,6 +499,41 @@ fn a_printed_port_shows_which_way_its_signal_goes() {
     assert_eq!(marks.len(), 6, "three strokes for each port");
 }
 
+/// A ground imported from another tool prints that tool's triangle, where and
+/// as the canvas draws it, each corner on the printed unit grid: LTspice's
+/// open triangle, its top edge on the terminal, 45 wide and 22.5 deep.
+#[test]
+fn a_printed_imported_ground_is_its_tools_triangle() {
+    use rspice_design::schematic::ground_glyph::GroundGlyph;
+
+    let mut ground = part(1, ComponentType::Ground, (40, 30), "GND1", "");
+    ground.ground_glyph = GroundGlyph::Ltspice;
+    let compiled = compile(&sheet(vec![ground]));
+    let outlines = compiled
+        .primitives
+        .iter()
+        .filter_map(|primitive| match primitive {
+            ScenePrimitive::Polyline {
+                points,
+                closed: true,
+                fill: None,
+                ..
+            } => Some(
+                points
+                    .iter()
+                    .map(|point| (point.x.micrometres() as i64, point.y.micrometres() as i64))
+                    .collect::<Vec<_>>(),
+            ),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let [left, right, apex] = GroundGlyph::Ltspice.outline().expect("an imported glyph");
+    let triangle = [left, right, apex]
+        .map(|(x, y)| compiled.at(40.0 + f64::from(x).round(), 30.0 + f64::from(y).round()))
+        .to_vec();
+    assert_eq!(outlines, [triangle]);
+}
+
 /// A port's name is an electrical name, printed in the type a connector's
 /// name is: Plex Mono Medium, 11 wu, in the net ink (D1 section 1). It was
 /// set as an instance value, in 9-wu Plex Sans and the value ink.

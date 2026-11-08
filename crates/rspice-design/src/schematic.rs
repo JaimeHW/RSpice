@@ -25,6 +25,7 @@ pub mod drawing_metrics;
 pub mod find_replace;
 pub mod functional_catalog;
 pub mod generated_veriloga_catalog;
+pub mod ground_glyph;
 pub mod ground_names;
 pub mod hierarchy;
 pub mod history;

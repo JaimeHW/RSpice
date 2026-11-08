@@ -7,11 +7,12 @@ use std::collections::HashMap;
 
 use crate::schematic::component::Component;
 use crate::schematic::component_type::ComponentType;
+use crate::schematic::ground_glyph::GroundGlyph;
 
 use super::error::SymbolError;
 use super::parser::parse_svg;
 use super::placement::PlacedRun;
-use super::types::Symbol;
+use super::types::{PathCommand, Symbol, SymbolPath};
 
 mod embedded_symbols {
     include!(concat!(env!("OUT_DIR"), "/embedded_symbols.rs"));
@@ -32,6 +33,8 @@ pub struct SymbolLibrary {
     horizontal_variant_symbols: HashMap<ComponentType, HashMap<String, Symbol>>,
     /// All embedded asset files parsed successfully and keyed by filename
     embedded_assets: HashMap<String, Symbol>,
+    /// The flag a ground imported from another tool draws, by that tool
+    ground_flags: HashMap<GroundGlyph, Symbol>,
 }
 
 impl Default for SymbolLibrary {
@@ -49,6 +52,7 @@ impl SymbolLibrary {
             variant_symbols: HashMap::new(),
             horizontal_variant_symbols: HashMap::new(),
             embedded_assets: HashMap::new(),
+            ground_flags: HashMap::new(),
         }
     }
 
@@ -229,6 +233,11 @@ impl SymbolLibrary {
             }
             library.horizontal_symbols.insert(*component_type, symbol);
         }
+
+        library.ground_flags = GroundGlyph::IMPORTED
+            .into_iter()
+            .filter_map(|glyph| Some((glyph, ground_flag(glyph)?)))
+            .collect();
 
         Ok(library)
     }
@@ -425,19 +434,34 @@ impl SymbolLibrary {
         self.get_with_rotation(component_type, rotation_degrees)
     }
 
+    /// The artwork `component` draws with and the turn it draws it at: the
+    /// skin it names, else the flag of the tool a ground was imported from,
+    /// else its kind's symbol. The canvas, the SVG export and the hardcopy
+    /// all draw a part from this.
+    pub fn component_symbol(&self, component: &Component) -> Option<(&Symbol, i32)> {
+        if component.kind == ComponentType::Ground
+            && component.symbol_variant.is_none()
+            && let Some(flag) = self.ground_flags.get(&component.ground_glyph)
+        {
+            return Some((flag, component.rotation.degrees()));
+        }
+        self.get_with_rotation_variant(
+            component.kind,
+            component.rotation.degrees(),
+            component.symbol_variant.as_deref(),
+        )
+    }
+
     /// The artwork of a part RSpice draws with its own symbol, placed as the
-    /// canvas places it for `component`: its kind's symbol or the skin it
-    /// names, turned and mirrored with it, in schematic units about its
-    /// position. None for a library cell, whose drawing is its cell's.
+    /// canvas places it for `component`: the artwork
+    /// [`component_symbol`](Self::component_symbol) gives it, turned and
+    /// mirrored with it, in schematic units about its position. None for a
+    /// library cell, whose drawing is its cell's.
     pub fn placed_artwork(&self, component: &Component) -> Option<Vec<PlacedRun>> {
         if component.kind == ComponentType::CellInstance {
             return None;
         }
-        let (symbol, rotation) = self.get_with_rotation_variant(
-            component.kind,
-            component.rotation.degrees(),
-            component.symbol_variant.as_deref(),
-        )?;
+        let (symbol, rotation) = self.component_symbol(component)?;
         Some(symbol.placed_runs(
             symbol.target_width,
             symbol.target_height,
@@ -463,6 +487,27 @@ impl SymbolLibrary {
     pub fn asset_count(&self) -> usize {
         self.embedded_assets.len()
     }
+}
+
+/// The symbol of an imported ground's flag: its triangle, closed, in a box
+/// centred on the ground's position and drawn at its own size, so placing
+/// it puts every corner exactly where [`GroundGlyph::outline`] says.
+fn ground_flag(glyph: GroundGlyph) -> Option<Symbol> {
+    let [first, rest @ ..] = glyph.outline()?;
+    let (half_width, half_height) = glyph.half_extent()?;
+    let mut commands = vec![PathCommand::MoveTo(first.0, first.1)];
+    commands.extend(rest.iter().map(|&(x, y)| PathCommand::LineTo(x, y)));
+    commands.push(PathCommand::Close);
+    Some(Symbol {
+        name: "Ground".to_owned(),
+        paths: vec![SymbolPath {
+            commands,
+            filled: false,
+        }],
+        bounds: (-half_width, -half_height, half_width, half_height),
+        target_width: 2.0 * half_width,
+        target_height: 2.0 * half_height,
+    })
 }
 
 fn symbol_reaches_terminal_offsets(

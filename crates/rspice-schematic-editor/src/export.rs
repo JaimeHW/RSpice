@@ -468,13 +468,9 @@ fn component_export_world_bounds(
             });
     }
 
-    let Some((symbol, adjusted_rotation)) = symbol_library.and_then(|library| {
-        library.get_with_rotation_variant(
-            component.kind,
-            component.rotation.degrees(),
-            component.symbol_variant.as_deref(),
-        )
-    }) else {
+    let Some((symbol, adjusted_rotation)) =
+        symbol_library.and_then(|library| library.component_symbol(component))
+    else {
         return symbol_resolution_error_world_bounds(component, config, "missing canonical SVG");
     };
     let mut bounds = catalog_asset_world_bounds(
@@ -597,13 +593,9 @@ fn write_component(
         } else {
             write_symbol_resolution_error(svg, component, config, "unresolved cell");
         }
-    } else if let Some((symbol, adjusted_rotation)) = symbol_library.and_then(|library| {
-        library.get_with_rotation_variant(
-            component.kind,
-            component.rotation.degrees(),
-            component.symbol_variant.as_deref(),
-        )
-    }) {
+    } else if let Some((symbol, adjusted_rotation)) =
+        symbol_library.and_then(|library| library.component_symbol(component))
+    {
         let port_stroke_width = if component.kind == ComponentType::Port {
             vector_port_stroke_width(component, config)
         } else {
@@ -1031,6 +1023,44 @@ mod tests {
             svg.matches(r#"<path class="symbol""#).count(),
             expected_paths
         );
+    }
+
+    /// A ground imported from another tool exports the triangle that tool
+    /// draws, corner for corner where the canvas draws it, and the page holds
+    /// it: QSPICE's stemless one, LTspice's wider and deeper one.
+    #[test]
+    fn an_imported_ground_exports_its_tools_triangle() {
+        use rspice_design::schematic::ground_glyph::GroundGlyph;
+
+        let library = crate::SymbolLibrary::load_embedded().expect("canonical symbols");
+        let config = SvgExportConfig {
+            units_per_world: 1.0,
+            margin: 0.0,
+            ..SvgExportConfig::default()
+        };
+        for (glyph, path) in [
+            (GroundGlyph::Qspice, "M 41.75 0 L 58.25 0 L 50 8.25 Z"),
+            (GroundGlyph::Ltspice, "M 27.5 0 L 72.5 0 L 50 22.5 Z"),
+        ] {
+            let mut ground = Component::new(1, ComponentType::Ground, Point::new(50, 10));
+            ground.ground_glyph = glyph;
+            let mut svg = String::new();
+            write_component(&mut svg, &ground, &config, None, Some(&library));
+            assert!(
+                svg.contains(&format!(r#"<path class="symbol" d="{path}" fill="none"/>"#)),
+                "{glyph:?}: {svg}"
+            );
+            assert_eq!(svg.matches(r#"<path class="symbol""#).count(), 1, "{svg}");
+            let [left, right, apex] = glyph.outline().expect("an imported glyph");
+            let bounds = component_export_world_bounds(&ground, None, Some(&library), &config);
+            for (x, y) in [left, right, apex] {
+                let (x, y) = (50.0 + f64::from(x), 10.0 + f64::from(y));
+                assert!(
+                    bounds.0 <= x && x <= bounds.2 && bounds.1 <= y && y <= bounds.3,
+                    "{glyph:?}: {x},{y} outside {bounds:?}"
+                );
+            }
+        }
     }
 
     #[test]

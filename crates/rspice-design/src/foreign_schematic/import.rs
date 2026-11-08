@@ -39,6 +39,7 @@ use crate::schematic::documentation_shape::{DocumentationShape, DocumentationSha
 use crate::schematic::functional_catalog::{
     conform_functional_inputs, functional_library_binding, functional_part, placement_value,
 };
+use crate::schematic::ground_glyph::GroundGlyph;
 use crate::schematic::label_layout::TextEdge;
 use crate::schematic::label_position::{LabelPosition, ValuePiece};
 use crate::schematic::net_label::{Junction, NetLabel, NetLabelKind, NetLabelSide, SupplyGlyph};
@@ -1875,7 +1876,15 @@ impl Builder<'_> {
             let id = self.id();
             if flag.is_ground() {
                 let mut ground = Component::new(id, ComponentType::Ground, Point::default());
-                ground.rotation = match flag.facing.map(|run| (run.x.signum(), run.y.signum())) {
+                // The source's own glyph, turned as the source turns it: the
+                // way the drawing says, else away from the one side a wire
+                // or lead reaches the flag from, else hanging below.
+                ground.ground_glyph = match self.drawing.tool {
+                    ForeignTool::Ltspice => GroundGlyph::Ltspice,
+                    ForeignTool::Qspice => GroundGlyph::Qspice,
+                };
+                let run = flag.facing.or_else(|| self.away_from_attachment(at));
+                ground.rotation = match run.map(|run| (run.x.signum(), run.y.signum())) {
                     Some((1, _)) => Rotation::R270,
                     Some((-1, _)) => Rotation::R90,
                     Some((0, -1)) => Rotation::R180,

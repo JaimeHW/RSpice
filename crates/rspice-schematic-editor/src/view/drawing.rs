@@ -882,11 +882,7 @@ pub fn draw_component(
         }
     } else if let Some((library, symbol, adjusted_rotation)) = symbol_library.and_then(|library| {
         library
-            .get_with_rotation_variant(
-                component.kind,
-                rotation_degrees,
-                component.symbol_variant.as_deref(),
-            )
+            .component_symbol(component)
             .map(|(symbol, rotation)| (library, symbol, rotation))
     }) {
         let symbol_stroke = if component.kind == ComponentType::Port {

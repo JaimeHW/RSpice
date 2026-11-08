@@ -13,6 +13,7 @@ pub use variant::PreparedVariantReplacement;
 pub use written_name::{BehavioralLowering, component_for_engine_device};
 
 use super::component_type::ComponentType;
+use super::ground_glyph::GroundGlyph;
 use super::label_position::{LabelPosition, ValuePiece};
 use super::rotation::Rotation;
 use rspice_design_model::Point;
@@ -556,6 +557,11 @@ pub struct Component {
     #[serde(default)]
     pub symbol_variant: Option<String>,
 
+    /// The glyph a ground draws: RSpice's own, or the flag of the tool it was
+    /// imported from. Display only; a chosen skin replaces it.
+    #[serde(default, skip_serializing_if = "GroundGlyph::is_native")]
+    pub ground_glyph: GroundGlyph,
+
     /// Name label position (Auto for smart placement, Custom for user-defined)
     #[serde(default)]
     pub name_label_pos: LabelPosition,
@@ -644,6 +650,8 @@ struct PersistedComponent {
     #[serde(default)]
     symbol_variant: Option<String>,
     #[serde(default)]
+    ground_glyph: GroundGlyph,
+    #[serde(default)]
     name_label_pos: LabelPosition,
     #[serde(default)]
     value_label_pos: LabelPosition,
@@ -676,6 +684,7 @@ impl From<PersistedComponent> for Component {
             value: persisted.value,
             params: persisted.params,
             symbol_variant: persisted.symbol_variant,
+            ground_glyph: persisted.ground_glyph,
             name_label_pos: persisted.name_label_pos,
             value_label_pos: persisted.value_label_pos,
             value_pieces: persisted.value_pieces,
@@ -711,6 +720,7 @@ impl Component {
             value: String::new(),
             params: String::new(),
             symbol_variant: None,
+            ground_glyph: GroundGlyph::Native,
             name_label_pos: LabelPosition::Auto,
             value_label_pos: LabelPosition::Auto,
             value_pieces: Vec::new(),
@@ -1176,7 +1186,8 @@ impl Component {
             .collect()
     }
 
-    /// Effective symbol dimensions, allowing generic block scaling for bound library cells.
+    /// Effective symbol dimensions, allowing generic block scaling for bound
+    /// library cells and the glyph of an imported ground.
     pub fn symbol_dimensions(&self) -> (i32, i32) {
         if let Some(cell) = &self.library_cell {
             if let Some(ports) = cell.interface() {
@@ -1190,6 +1201,12 @@ impl Component {
             let rows = pin_count.div_ceil(2).max(2) as i32;
             let height = (rows * 20).max(40);
             return (60, height);
+        }
+        if self.kind == ComponentType::Ground
+            && self.symbol_variant.is_none()
+            && let Some((half_width, half_height)) = self.ground_glyph.half_extent()
+        {
+            return (2 * half_width.ceil() as i32, 2 * half_height.ceil() as i32);
         }
         self.kind.symbol_dimensions()
     }

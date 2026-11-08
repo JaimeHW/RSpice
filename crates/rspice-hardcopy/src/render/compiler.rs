@@ -863,18 +863,12 @@ impl<'a> SemanticSceneCompiler<'a> {
         {
             return self.generated_cell_instance(component, stroke);
         } else {
-            let (symbol, rotation) = library
-                .get_with_rotation_variant(
-                    component.kind,
-                    component.rotation.degrees(),
-                    component.symbol_variant.as_deref(),
-                )
-                .ok_or_else(|| {
-                    conversion_error(format!(
-                        "no production symbol is registered for {:?}",
-                        component.kind
-                    ))
-                })?;
+            let (symbol, rotation) = library.component_symbol(component).ok_or_else(|| {
+                conversion_error(format!(
+                    "no production symbol is registered for {:?}",
+                    component.kind
+                ))
+            })?;
             (symbol, rotation, symbol.target_width, symbol.target_height)
         };
         let (cx, cy) = symbol.center();

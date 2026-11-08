@@ -60,6 +60,51 @@ fn component_bridge_persists_the_normalized_reference_identity() {
     assert_eq!(component.name, "R42");
 }
 
+/// An imported ground keeps the glyph of the tool it came from through any
+/// edit that leaves its skin alone. Choosing a skin replaces that glyph, so
+/// choosing the default afterwards draws RSpice's own ground.
+#[test]
+fn a_chosen_skin_replaces_an_imported_grounds_glyph() {
+    use crate::schematic::ground_glyph::GroundGlyph;
+
+    let registry = PropertyCatalog::new();
+    let mut ground = Component::new(1, ComponentType::Ground, Point::origin());
+    ground.ground_glyph = GroundGlyph::Qspice;
+    let sheet = registry.get(ground.kind);
+    let choose = |ground: &mut Component, skin: &str| {
+        let mut properties = collect_properties_with_sheet(ground, sheet);
+        properties.insert(
+            "symbol".to_owned(),
+            PropertyValue::Enum {
+                selected: skin.to_owned(),
+                options: vec![
+                    "default".to_owned(),
+                    "earth".to_owned(),
+                    "chassis".to_owned(),
+                ],
+            },
+        );
+        apply_properties_with_sheet(ground, &properties, sheet).unwrap();
+    };
+
+    let unchanged = collect_properties_with_sheet(&ground, sheet);
+    apply_properties_with_sheet(&mut ground, &unchanged, sheet).unwrap();
+    assert_eq!(ground.ground_glyph, GroundGlyph::Qspice);
+    choose(&mut ground, "default");
+    assert_eq!(ground.ground_glyph, GroundGlyph::Qspice);
+
+    choose(&mut ground, "earth");
+    assert_eq!(
+        (ground.symbol_variant.as_deref(), ground.ground_glyph),
+        (Some("earth"), GroundGlyph::Native)
+    );
+    choose(&mut ground, "default");
+    assert_eq!(
+        (ground.symbol_variant.as_deref(), ground.ground_glyph),
+        (None, GroundGlyph::Native)
+    );
+}
+
 #[test]
 fn component_bridge_does_not_drop_a_small_nonzero_default_delta() {
     let registry = PropertyCatalog::new();

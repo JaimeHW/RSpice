@@ -298,7 +298,8 @@ pub struct ForeignFlag {
     /// Set when an `IOPIN` makes the flag a pin of the drawing.
     pub port: Option<ForeignPortDirection>,
     /// The way the flag runs from its point, where the drawing says so
-    /// (QSPICE); a ground with none hangs below its point.
+    /// (QSPICE); a ground with none turns away from the one side a wire
+    /// reaches it from, as LTspice turns it, else hangs below its point.
     pub facing: Option<ForeignPoint>,
 }
 
