@@ -466,6 +466,16 @@ impl Engine {
             .clamp(1, work_items.max(1))
     }
 
+    /// Worker count for a frequency sweep whose workers each copy the circuit
+    /// and hold their own factorization. A copy costs memory for the whole
+    /// sweep but shortens only its share of the points, so a large circuit
+    /// stops adding workers where the copies would outweigh the simulation.
+    #[cfg(feature = "parallel")]
+    pub(crate) fn frequency_worker_count(&self, devices: usize, points: usize) -> usize {
+        self.parallel_worker_count(points)
+            .min(frequency_workers_within_budget(devices))
+    }
+
     /// Execute Rayon work without initializing its unbounded global pool.
     ///
     /// A frontend-owned Rayon worker (for example a CLI multi-run plan) is
@@ -1147,9 +1157,37 @@ mod convergence_quality_tests {
     }
 }
 
+/// Memory one frequency-sweep worker holds per circuit device: its copy of the
+/// device and the device's share of the factorization.
+#[cfg(feature = "parallel")]
+const FREQUENCY_WORKER_BYTES_PER_DEVICE: usize = 4096;
+
+/// Memory all frequency-sweep workers together may claim before a sweep stops
+/// adding them.
+#[cfg(feature = "parallel")]
+const FREQUENCY_WORKER_BUDGET_BYTES: usize = 512 << 20;
+
+/// How many frequency-sweep workers fit the worker memory budget.
+#[cfg(feature = "parallel")]
+fn frequency_workers_within_budget(devices: usize) -> usize {
+    let worker_bytes = devices
+        .max(1)
+        .saturating_mul(FREQUENCY_WORKER_BYTES_PER_DEVICE);
+    (FREQUENCY_WORKER_BUDGET_BYTES / worker_bytes).max(1)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "parallel")]
+    #[test]
+    fn frequency_workers_are_limited_only_for_large_circuits() {
+        assert_eq!(super::frequency_workers_within_budget(30_000), 4);
+        assert_eq!(super::frequency_workers_within_budget(200_000), 1);
+        assert!(super::frequency_workers_within_budget(5_000) >= 26);
+        assert!(super::frequency_workers_within_budget(0) >= 64);
+    }
 
     #[test]
     fn hierarchical_node_lookup_resolves_nested_subcircuit_port() {

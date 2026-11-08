@@ -3300,14 +3300,17 @@ impl Engine {
         if frequencies.len() >= 10 {
             use rayon::prelude::*;
 
-            let workers = self.parallel_worker_count(frequencies.len());
+            let workers = self.frequency_worker_count(circuit.device_count(), frequencies.len());
             if workers > 1 {
                 let chunk_len = frequencies.len().div_ceil(workers);
-                let work: Vec<(CircuitData, usize, &[Value])> = frequencies
+                let mut work: Vec<(CircuitData, usize, &[Value])> = frequencies
                     .chunks(chunk_len)
                     .enumerate()
+                    .skip(1)
                     .map(|(chunk_index, chunk)| (circuit.clone(), chunk_index * chunk_len, chunk))
                     .collect();
+                // The first chunk owns the circuit itself instead of one more copy.
+                work.insert(0, (circuit, 0, &frequencies[..chunk_len]));
                 // A chunk's lines belong to the run, on whichever pool thread.
                 let log_scope = crate::log_scope::capture();
                 let chunk_results: Result<Vec<Vec<AcResult>>, SimulationError> = self
