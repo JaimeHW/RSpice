@@ -808,8 +808,11 @@ fn transient_print_preserves_authored_projection_order_and_duplicates() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The authored `.PRINT` spelling titles a printed table. A rawfile is the
+/// waveform database, as in ngspice `-r`: it keeps every vector under its own
+/// name and converts back unchanged.
 #[test]
-fn spaced_print_operands_round_trip_through_raw_formats() {
+fn a_spaced_print_card_leaves_a_rawfile_every_vector_under_its_own_name() {
     let dir = test_dir("spaced_print_raw_round_trip");
     for format in ["raw", "ascii"] {
         let path = run_export(&dir, format, TRAN_ORDERED_PRINT_DECK, format);
@@ -829,10 +832,15 @@ fn spaced_print_operands_round_trip_through_raw_formats() {
             String::from_utf8_lossy(&output.stderr)
         );
         let csv = std::fs::read_to_string(&converted).expect("read converted CSV");
-        assert_eq!(
-            csv.lines().next(),
-            Some("time,I ( V1 ),V ( out ),{V(out)+1},V(out)"),
-            "RAW metadata must preserve authored probe spelling"
+        let header = csv.lines().next().expect("CSV header");
+        let columns = header.split(',').collect::<Vec<_>>();
+        assert_eq!(columns[0], "time");
+        for vector in ["V(IN)", "V(OUT)", "I(V1)"] {
+            assert!(columns.contains(&vector), "{vector} missing: {header}");
+        }
+        assert!(
+            !header.contains("{V(out)+1}") && !header.contains("I ( V1 )"),
+            "a print column reached the rawfile: {header}"
         );
     }
     let _ = std::fs::remove_dir_all(&dir);

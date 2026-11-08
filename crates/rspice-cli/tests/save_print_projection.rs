@@ -203,3 +203,83 @@ fn hb_refuses_an_unknown_saved_signal() {
     assert_typed_unavailable(&run, "@R1[NotAParameter]", "HB");
     cleanup(&run.dir);
 }
+
+const PRINTED_DC_DECK: &str = "* a printed DC sweep
+     V1 in 0 5
+     R1 in out 1k
+     R2 out 0 1k
+     .dc V1 0 4 1
+     .print dc I(V1)
+     .end
+";
+
+fn run_raw(run: &Run, format: &str) -> rspice_core::io::RawWaveformData {
+    let path = run.dir.join(format!("result.{format}.raw"));
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args(["--quiet", "run"])
+        .arg(run.dir.join("input.cir"))
+        .arg("-o")
+        .arg(&path)
+        .args(["-f", format])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    rspice_core::io::parse_raw_file(&path).unwrap()
+}
+
+fn raw_column<'a>(raw: &'a rspice_core::io::RawWaveformData, name: &str) -> Option<&'a [f64]> {
+    raw.waveforms
+        .iter()
+        .find(|waveform| waveform.name.eq_ignore_ascii_case(name))
+        .map(|waveform| waveform.y.as_slice())
+}
+
+// A rawfile is a waveform database: ngspice -r, Xyce -r, LTspice and QSPICE
+// all keep every vector whatever a .PRINT card prints.
+#[test]
+fn a_print_card_chooses_table_columns_but_a_rawfile_keeps_every_vector() {
+    let run = run_deck("print_dc_raw", PRINTED_DC_DECK, &[]);
+    assert!(run.output.status.success(), "{:?}", run.output);
+    let csv = std::fs::read_to_string(&run.output_path).unwrap();
+    assert_eq!(header_columns(&csv).len(), 2, "{csv}");
+    assert_eq!(csv_column(&csv, "I(V1)").len(), 5);
+
+    for format in ["raw", "ascii"] {
+        let raw = run_raw(&run, format);
+        let current = raw_column(&raw, "I(V1)").expect("the printed current");
+        let output = raw_column(&raw, "V(out)").expect("an unprinted node voltage");
+        let input = raw_column(&raw, "V(in)").expect("an unprinted node voltage");
+        for ((volts, current), (output, input)) in [0.0, 1.0, 2.0, 3.0, 4.0]
+            .iter()
+            .zip(current)
+            .zip(output.iter().zip(input))
+        {
+            assert!((output - volts / 2.0).abs() < 1e-12);
+            assert!((input - volts).abs() < 1e-12);
+            assert!((current + volts / 2000.0).abs() < 1e-15);
+        }
+    }
+    cleanup(&run.dir);
+}
+
+#[test]
+fn a_save_card_narrows_a_rawfile_that_a_print_card_does_not() {
+    let deck = PRINTED_DC_DECK.replace(
+        ".print dc I(V1)",
+        ".save V(out)
+.print dc V(out) I(V1)",
+    );
+    let run = run_deck("save_print_dc_raw", &deck, &[]);
+    assert!(run.output.status.success(), "{:?}", run.output);
+    for format in ["raw", "ascii"] {
+        let raw = run_raw(&run, format);
+        let names = raw
+            .variables
+            .iter()
+            .map(|variable| variable.name.to_ascii_lowercase())
+            .collect::<Vec<_>>();
+        assert_eq!(names.len(), 2, "{names:?}");
+        assert_eq!(names[1], "v(out)");
+    }
+    cleanup(&run.dir);
+}

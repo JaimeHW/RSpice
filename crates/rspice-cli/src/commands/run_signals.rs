@@ -151,6 +151,63 @@ pub(crate) fn voltage_display_name(name: &str, fallback_index: usize) -> String 
 // Projection entry points
 //=============================================================================
 
+/// Drop the `.PRINT`/`.PLOT` cards from a deck's output selection, keeping
+/// what `.SAVE`/`.PROBE` select.
+///
+/// A rawfile or HDF5 file is a waveform database: as in ngspice `-r`,
+/// LTspice, QSPICE and Xyce `-r`, it holds every vector unless a save card
+/// narrows it. A print card chooses the columns of a printed table only.
+/// The parser folds each print operand into the deck's save set, so exactly
+/// one matching entry per operand comes back out.
+pub(crate) fn release_print_selection(netlist: &mut rspice_core::Netlist) {
+    use rspice_core::netlist::{OutputDirectiveKind, OutputOperandKind, SaveSet, SaveSignal};
+    let is_print = |directive| {
+        matches!(
+            directive,
+            OutputDirectiveKind::Print | OutputDirectiveKind::Plot
+        )
+    };
+    if !netlist
+        .output_requests
+        .iter()
+        .any(|request| is_print(request.directive))
+    {
+        return;
+    }
+    let mut printed = SaveSet::default();
+    for request in netlist
+        .output_requests
+        .iter()
+        .filter(|request| is_print(request.directive))
+    {
+        printed
+            .signals
+            .extend(request.operand_kinds().iter().map(|kind| match kind {
+                OutputOperandKind::Probe(signal) => signal.clone(),
+                OutputOperandKind::Expression { body } => SaveSignal::Raw(body.clone()),
+            }));
+    }
+    printed.apply_ground_policy(netlist.ground_policy());
+    let mut saves = netlist.saves.clone();
+    for signal in &printed.signals {
+        if let Some(index) = saves.signals.iter().position(|saved| saved == signal) {
+            saves.signals.remove(index);
+        }
+    }
+    let requests = netlist
+        .output_requests
+        .iter()
+        .filter(|request| {
+            matches!(
+                request.directive,
+                OutputDirectiveKind::Save | OutputDirectiveKind::Probe
+            )
+        })
+        .cloned()
+        .collect();
+    netlist.override_output_selection(saves, requests);
+}
+
 /// Build the deck's authored output contract once per export.
 pub(crate) fn projection(
     netlist: &rspice_core::Netlist,

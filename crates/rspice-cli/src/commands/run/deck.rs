@@ -512,6 +512,21 @@ pub(super) fn load_netlist_from_source(
     rspice_core::netlist::validate_output_symbols_with_abort(&netlist, &crate::abort::ProcessAbort)
         .map_err(|error| map_cancellable_parse_error(error, args.timeout))?;
 
+    // A waveform database keeps every vector unless `.SAVE`/`.PROBE` narrow
+    // it; the `.PRINT`/`.PLOT` columns choose what a table prints.
+    if args.saves.is_empty() && args.output.is_some() {
+        let format = match args.format {
+            Some(format) => format,
+            None => parse_format_name(&config.output.format)?,
+        };
+        if matches!(
+            format,
+            OutputFormat::Raw | OutputFormat::RawAscii | OutputFormat::Hdf5
+        ) {
+            crate::commands::run_signals::release_print_selection(&mut netlist);
+        }
+    }
+
     if emit_diagnostics {
         crate::commands::emit_netlist_diagnostics(&netlist, false);
     }
