@@ -2102,7 +2102,7 @@ fn source_numeric_args_end(stream: &TokenStream, has_paren: bool) -> bool {
     }
 }
 
-/// Parse EXP(V1 V2 TD1 TAU1 TD2 TAU2); omitted timing parameters stay NaN
+/// Parse EXP(V1 V2 TD1 TAU1 TD2 TAU2 [PERIOD ...]); omitted timing parameters stay NaN
 /// so the transient runtime can resolve ngspice's tstep-based defaults
 /// (TD1/TAU1/TAU2 default to TSTEP, TD2 to TD1+TSTEP).
 fn parse_exp_spec(
@@ -2129,16 +2129,28 @@ fn parse_exp_spec(
         .unwrap_or(Value::NAN);
     let tau2 = source_optional_value(stream, line_num, params, "EXP", "TAU2", has_paren)?
         .unwrap_or(Value::NAN);
-    // LTspice repeats an EXP every seventh value, adding each pulse to the
-    // tails of the ones before it; QSPICE repeats it another way and counts
-    // TD2 from TD1. With no agreed meaning the value is refused by name.
-    skip_commas(stream);
-    if has_paren && !source_numeric_args_end(stream, has_paren) {
-        return Err(ParseError::Syntax {
+    if let Some(period) =
+        source_optional_value(stream, line_num, params, "EXP", "PERIOD", has_paren)?
+    {
+        let pulses = source_optional_value(stream, line_num, params, "EXP", "N", has_paren)?
+            .map(|count| count.max(0.0) as u64);
+        let burst = source_optional_value(stream, line_num, params, "EXP", "BURST", has_paren)?;
+        // Both simulators read past these and do nothing with what they find.
+        while source_optional_value(stream, line_num, params, "EXP", "extra", has_paren)?.is_some()
+        {
+        }
+        close_source_args(stream, line_num, "EXP", has_paren)?;
+        return crate::netlist::ExpTrain::new(
+            params.exp_train_dialect(),
+            [v1, v2],
+            [td1, tau1, td2, tau2, period],
+            pulses,
+            burst,
+        )
+        .map(SourceSpec::ExpTrain)
+        .map_err(|message| ParseError::Syntax {
             line: line_num,
-            message: "EXP takes six values; a seventh, LTspice's repeat period, is not \
-                      supported"
-                .to_string(),
+            message,
         });
     }
 
@@ -2407,13 +2419,30 @@ mod tests {
     }
 
     #[test]
-    fn an_exp_with_a_repeat_period_is_refused_by_name() {
+    fn a_seventh_exp_value_repeats_it() {
         let params = ParamContext::new();
-        assert!(parse_source_spec_text("EXP(0 1 1m 1m 2m 1m)", 4, &params).is_ok());
-        match parse_source_spec_text("EXP(0 1 1m 1m 2m 1m 10m)", 4, &params) {
+        assert!(matches!(
+            parse_source_spec_text("EXP(0 1 1m 1m 2m 1m)", 4, &params),
+            Ok(SourceSpec::Exp { .. })
+        ));
+        assert!(matches!(
+            parse_source_spec_text("EXP(0 1 1m 1m 2m 1m 10m)", 4, &params),
+            Ok(SourceSpec::ExpTrain(_))
+        ));
+        let no_parentheses = parse_source_spec_text("EXP 0 1 1m 1m 2m 1m 10m 2 50m", 4, &params);
+        assert!(
+            matches!(no_parentheses, Ok(SourceSpec::ExpTrain(_))),
+            "{no_parentheses:?}"
+        );
+    }
+
+    #[test]
+    fn a_repeat_qspice_cannot_run_names_the_reason_and_the_line() {
+        let params = ParamContext::new();
+        match parse_source_spec_text("EXP(0 1 1m 1m 20m 1m 10m)", 4, &params) {
             Err(ParseError::Syntax { line, message }) => {
                 assert_eq!(line, 4);
-                assert!(message.contains("LTspice's repeat period"), "{message}");
+                assert!(message.contains("at least TD2"), "{message}");
             }
             other => panic!("{other:?}"),
         }

@@ -822,6 +822,15 @@ impl Engine {
                     }
                 }
             }
+            SourceSpec::ExpTrain(train) => {
+                for (visited, time) in train.edges_until(tstop).enumerate() {
+                    Self::add_source_clock_if_in_range(breakpoints, time, tstop);
+                    if visited % 1024 == 0 {
+                        Self::check_source_breakpoint_collection(breakpoints, abort, max_points)?;
+                    }
+                }
+                return Self::check_source_breakpoint_collection(breakpoints, abort, max_points);
+            }
             SourceSpec::Exp { td1, td2, .. } => {
                 if exact {
                     let (td1, _, td2, _) =

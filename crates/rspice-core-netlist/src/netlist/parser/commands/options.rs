@@ -132,6 +132,18 @@ pub(in crate::netlist::parser) fn parse_options_command(
         let value_start = stream.checkpoint();
         let result = (|| -> Result<(), ParseError> {
             match (option_package.as_deref(), key_upper.as_str()) {
+                (None, "RSPICE_EXP_REPEAT") => {
+                    let known = matches!(&stream.peek().kind, TokenKind::Ident(name)
+                        if name.eq_ignore_ascii_case("QSPICE")
+                            || name.eq_ignore_ascii_case("LTSPICE"));
+                    if !known {
+                        return Err(ParseError::Syntax {
+                            line: line_num,
+                            message: "RSPICE_EXP_REPEAT expects QSPICE or LTSPICE".to_owned(),
+                        });
+                    }
+                    stream.advance();
+                }
                 (None, "RSPICE_DIALECT") => {
                     let dialect = match &stream.peek().kind {
                         TokenKind::Ident(name) => match name.to_ascii_uppercase().as_str() {

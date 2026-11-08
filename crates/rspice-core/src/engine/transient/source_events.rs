@@ -130,6 +130,7 @@ fn activation(spec: &SourceSpec, basis: SourceTimeBasis, dialect: SpiceDialect) 
         )
         .0
         .max(0.0),
+        SourceSpec::ExpTrain(train) => train.first_edge().max(0.0),
         _ => 0.0,
     }
 }
@@ -237,6 +238,7 @@ fn continuous(
         // File transformations, pattern/repeat seams and switched carriers
         // retain order zero until their own structural continuity is certified.
         SourceSpec::PwlFile { .. }
+        | SourceSpec::ExpTrain(_)
         | SourceSpec::Pat { .. }
         | SourceSpec::Sffm { .. }
         | SourceSpec::Am { .. }

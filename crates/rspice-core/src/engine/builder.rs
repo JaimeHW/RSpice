@@ -7401,6 +7401,7 @@ impl Engine {
                         | crate::netlist::SourceSpec::AcTransient { .. }
                         | crate::netlist::SourceSpec::DcAcTransient { .. }
                         | crate::netlist::SourceSpec::Exp { .. }
+                        | crate::netlist::SourceSpec::ExpTrain(_)
                         | crate::netlist::SourceSpec::Sffm { .. }
                         | crate::netlist::SourceSpec::Am { .. }
                         | crate::netlist::SourceSpec::TrNoise { .. }
@@ -7457,6 +7458,7 @@ impl Engine {
                         | crate::netlist::SourceSpec::AcTransient { .. }
                         | crate::netlist::SourceSpec::DcAcTransient { .. }
                         | crate::netlist::SourceSpec::Exp { .. }
+                        | crate::netlist::SourceSpec::ExpTrain(_)
                         | crate::netlist::SourceSpec::Sffm { .. }
                         | crate::netlist::SourceSpec::Am { .. }
                         | crate::netlist::SourceSpec::TrNoise { .. }

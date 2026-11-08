@@ -21,6 +21,7 @@ mod ast;
 mod control_source;
 pub use control_source::ControlScriptSource;
 mod data_table;
+mod exp_train;
 pub mod expr;
 mod flattener;
 pub mod hierarchy_path;
@@ -69,6 +70,8 @@ pub use ast::*;
 pub use data_table::{
     FrequencyDataPoint, FrequencyDataTableError, data_table_parameter_name_is_valid,
 };
+pub use exp_train::ExpTrain;
+pub(crate) use exp_train::ExpTrainDialect;
 pub use expr::{
     ParamContext, ParameterRedefinitionDiagnosticPolicy, ParameterRedefinitionPolicy, RandomState,
     StatisticalParamMode,

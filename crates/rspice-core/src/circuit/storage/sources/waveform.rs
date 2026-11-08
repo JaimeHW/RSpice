@@ -257,6 +257,7 @@ impl VoltageSources {
                     .map(|context| Self::resolve_exp_timing(*td1, *tau1, *td2, *tau2, context));
                 resolved[0] != resolved[1]
             }
+            SourceSpec::ExpTrain(_) => false,
             SourceSpec::Sffm {
                 carrier_freq,
                 modulation_index,
@@ -813,6 +814,10 @@ impl VoltageSources {
                     v1 + (v2 - v1) * (1.0 - (-(time - td1) / tau1).exp())
                         - (v2 - v1) * (1.0 - (-(time - td2) / tau2).exp())
                 }
+            }
+            SourceSpec::ExpTrain(train) => {
+                let (value, slope) = train.value_and_slope(time, side == SourceTimeSide::LeftLimit);
+                if DERIVATIVE { slope } else { value }
             }
             SourceSpec::Sffm {
                 offset,

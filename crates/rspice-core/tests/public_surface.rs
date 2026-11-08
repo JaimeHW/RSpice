@@ -444,7 +444,10 @@ use rspice_core::analysis::harmonic_balance::{
 // `BuiltinVerilogAInstance::non_voltage_terminals`, which the circuit reads
 // across the crate boundary so a built-in self-heating model's thermal net is
 // in kelvin too, brings it to 5,271.
-const MAX_PUBLIC_ITEMS: usize = 5274;
+// `netlist::ExpTrain`, the repeating EXP a `SourceSpec` carries, its re-export
+// and `ExpTrain::edges_until`, the corners the application's stimulus preview
+// marks (`rspice-app-state` stimulus_realize/derived.rs), bring it to 5,277.
+const MAX_PUBLIC_ITEMS: usize = 5277;
 
 /// The `#[doc(hidden)] pub` items of the family, counted apart from
 /// `MAX_PUBLIC_ITEMS`. A hidden item is plumbing that one crate of the engine
@@ -653,7 +656,12 @@ const MAX_PUBLIC_ITEMS: usize = 5274;
 // `Diode::op_charge` add four: a control `save` reads the quantities and the
 // flat branch name that `rspice-core` resolves from the netlist and device
 // crates.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 1673;
+// `ParamContext::parse_statistical_draws` adds one, read by the `.step` runner
+// (`rspice-core` engine/step.rs) to tell a deck that drew while it was read.
+// `ExpTrain::first_edge` and `value_and_slope` add two, read by the source
+// waveform and event code (`rspice-core` circuit/storage/sources and
+// engine/transient/source_events.rs). The census is 1,676, with no slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 1676;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

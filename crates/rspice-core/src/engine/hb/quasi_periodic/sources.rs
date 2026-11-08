@@ -152,7 +152,10 @@ impl Projector<'_> {
                     "QPSS periodic FILE/PAT source projection is not connected",
                 ));
             }
-            SourceSpec::Exp { .. } | SourceSpec::TrNoise { .. } | SourceSpec::TrRandom { .. } => {
+            SourceSpec::Exp { .. }
+            | SourceSpec::ExpTrain(_)
+            | SourceSpec::TrNoise { .. }
+            | SourceSpec::TrRandom { .. } => {
                 return Err(invalid(
                     "QPSS requires stationary deterministic source waveforms",
                 ));

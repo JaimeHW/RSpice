@@ -5699,6 +5699,7 @@ pub(super) fn scale_source_amplitudes(spec: &mut SourceSpec, m: Value) {
             *v1 *= m;
             *v2 *= m;
         }
+        SourceSpec::ExpTrain(train) => train.scale_levels(m),
         SourceSpec::Sffm {
             offset, amplitude, ..
         } => {

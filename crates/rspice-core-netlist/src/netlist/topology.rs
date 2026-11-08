@@ -526,6 +526,7 @@ fn independent_current_is_zero_at_dc(spec: &super::SourceSpec) -> bool {
             dc_value: value, ..
         } => *value == 0.0,
         super::SourceSpec::Pulse { v1, .. } | super::SourceSpec::Exp { v1, .. } => *v1 == 0.0,
+        super::SourceSpec::ExpTrain(train) => train.v1 == 0.0,
         super::SourceSpec::Sin {
             offset,
             amplitude,

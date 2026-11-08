@@ -2205,6 +2205,9 @@ pub enum SourceSpec {
         tau2: Value,
     },
 
+    /// `EXP` with a seventh value, which repeats it.
+    ExpTrain(super::ExpTrain),
+
     /// Single-frequency FM source: SFFM(VO VA FC MDI FM TD PHASEM PHASEC)
     ///
     /// `v(t) = VO + VA*sin(2*pi*FC*t + MDI*sin(2*pi*FM*t))` from `t = 0`, as

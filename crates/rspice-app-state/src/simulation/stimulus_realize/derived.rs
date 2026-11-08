@@ -406,6 +406,9 @@ fn fit_span(spec: &SourceSpec, timing: PreviewTiming) -> f64 {
             let (td1, tau1, td2, tau2) = exp_timing(*td1, *tau1, *td2, *tau2, timing);
             (td2 + 6.0 * tau2).max(td1 + 6.0 * tau1)
         }
+        SourceSpec::ExpTrain(train) => (train.td1 + 3.0 * train.period)
+            .max(train.td2 + 6.0 * train.tau2)
+            .max(train.td1 + 6.0 * train.tau1),
         SourceSpec::Pwl {
             points,
             delay,
@@ -517,6 +520,16 @@ fn guides(spec: &SourceSpec, timing: PreviewTiming) -> Vec<Guide> {
             guides.push(Guide {
                 time: td2,
                 label: "TD2",
+            });
+        }
+        SourceSpec::ExpTrain(train) => {
+            guides.push(Guide {
+                time: train.td1,
+                label: "TD1",
+            });
+            guides.push(Guide {
+                time: train.td1 + train.period,
+                label: "TD1+PER",
             });
         }
         SourceSpec::Sin { delay, .. }
@@ -636,6 +649,14 @@ pub(super) fn breakpoints_between(
             let (td1, _, td2, _) = exp_timing(*td1, *tau1, *td2, *tau2, timing);
             collector.corner(td1);
             collector.corner(td2);
+        }
+        SourceSpec::ExpTrain(train) => {
+            for time in train.edges_until(to) {
+                collector.corner(time);
+                if collector.full() {
+                    break;
+                }
+            }
         }
         SourceSpec::Sin { delay, .. } | SourceSpec::Am { delay, .. } => collector.step(*delay),
         SourceSpec::Pwl { points, delay, .. } => {
@@ -892,6 +913,12 @@ fn readouts_of(
             rows.push(row("τ rise", seconds_free(tau1, "s")));
             rows.push(row("τ fall", seconds_free(tau2, "s")));
             rows.push(row("Δ", seconds_free(v2 - v1, unit)));
+        }
+        SourceSpec::ExpTrain(train) => {
+            rows.push(row("τ rise", seconds_free(train.tau1, "s")));
+            rows.push(row("τ fall", seconds_free(train.tau2, "s")));
+            rows.push(row("Period", seconds_free(train.period, "s")));
+            rows.push(row("Δ", seconds_free(train.v2 - train.v1, unit)));
         }
         SourceSpec::Sffm {
             carrier_freq,

@@ -380,6 +380,8 @@ pub struct ParamContext {
     spectre_statistical_parameters: BTreeSet<String>,
     /// Dialect-specific expression-function behavior.
     expression_dialect: ExpressionDialect,
+    /// Whose meaning an `EXP` with a repeat takes in this deck.
+    exp_train_dialect: crate::netlist::ExpTrainDialect,
     /// Repeated-definition behavior selected for this parse/elaboration.
     parameter_redefinition_policy: ParameterRedefinitionPolicy,
     /// Diagnostic behavior for a repeated definition in this parse scope.
@@ -1186,6 +1188,14 @@ impl ParamContext {
     /// Current dialect-specific expression-function semantics.
     pub fn expression_dialect(&self) -> ExpressionDialect {
         self.expression_dialect
+    }
+
+    pub(crate) fn set_exp_train_dialect(&mut self, dialect: crate::netlist::ExpTrainDialect) {
+        self.exp_train_dialect = dialect;
+    }
+
+    pub(crate) fn exp_train_dialect(&self) -> crate::netlist::ExpTrainDialect {
+        self.exp_train_dialect
     }
 
     /// Select repeated parameter-definition behavior for subsequent parsing.

@@ -53,6 +53,7 @@ impl Engine {
             | SourceSpec::PwlFile { .. }
             | SourceSpec::Pat { .. }
             | SourceSpec::Exp { .. }
+            | SourceSpec::ExpTrain(_)
             | SourceSpec::Sffm { .. }
             | SourceSpec::Am { .. }
             | SourceSpec::TrNoise { .. }
@@ -398,7 +399,7 @@ impl Engine {
                 "HB does not yet implement exact periodic PAT source coefficients".to_string(),
             )
             .into()),
-            SourceSpec::Exp { .. } => Err(HbError::InvalidConfig(
+            SourceSpec::Exp { .. } | SourceSpec::ExpTrain(_) => Err(HbError::InvalidConfig(
                 "HB requires periodic sources; EXP is not periodic".to_string(),
             )
             .into()),

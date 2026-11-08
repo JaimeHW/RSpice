@@ -93,6 +93,7 @@ pub(crate) fn extract_dc_value_with_limits(
         })
         .unwrap_or(*value_offset),
         SourceSpec::Exp { v1, .. } => *v1,
+        SourceSpec::ExpTrain(train) => train.v1,
         SourceSpec::Ac { .. } => 0.0, // AC sources have no DC component
         // QSPICE and LTspice hold SFFM at VO in the operating point. ngspice
         // evaluates SFFM and AM to exactly 0 at t <= TD (vsrcload.c), and

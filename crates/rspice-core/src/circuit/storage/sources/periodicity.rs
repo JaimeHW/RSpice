@@ -216,6 +216,7 @@ impl VoltageSources {
             | SourceSpec::DcAc { .. }
             | SourceSpec::Pulse { .. }
             | SourceSpec::Exp { .. }
+            | SourceSpec::ExpTrain(_)
             | SourceSpec::Pwl { .. }
             | SourceSpec::PwlFile { .. }
             | SourceSpec::Pat { .. }
@@ -280,6 +281,7 @@ impl VoltageSources {
                 let (td1, _, td2, _) = Self::resolve_exp_timing(*td1, *tau1, *td2, *tau2, context);
                 v1 == v2 || (td1 > period && td2 > period)
             }
+            SourceSpec::ExpTrain(train) => train.v1 == train.v2 || train.first_edge() > period,
             SourceSpec::Pwl {
                 points,
                 delay,
@@ -472,6 +474,7 @@ impl VoltageSources {
                     )
             }
             SourceSpec::Exp { v1, v2, .. } => v1 == v2,
+            SourceSpec::ExpTrain(train) => train.v1 == train.v2,
             SourceSpec::Sffm {
                 amplitude,
                 carrier_freq,

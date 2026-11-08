@@ -2264,3 +2264,124 @@ R2 b 0 1k
     );
     assert_close("V(b)", op_voltage(&netlist, "b"), 0.5, 1e-12);
 }
+
+fn assert_exp_samples(card: &str, options: &str, stop: f64, samples: &[(f64, f64)]) {
+    let netlist = parse(&format!(
+        "exp train\nV1 a 0 {card}\nR1 a 0 1k\n.tran 0 {stop}\n{options}\n.end\n"
+    ));
+    for &(time, expected) in samples {
+        let value = tran_voltages(&netlist, stop, time, &["a"])[0];
+        assert_close(&format!("{card} at {time}"), value, expected, 4e-4);
+    }
+}
+
+// QSPICE64 build Oct 27 2026: each repeat picks up on the first pulse's curve.
+#[test]
+fn a_seventh_exp_value_repeats_it_the_way_qspice_does() {
+    assert_exp_samples(
+        "EXP(0 1 1u 1u 5u 2u 7u)",
+        "",
+        30e-6,
+        &[
+            (2e-6, 0.632118),
+            (7e-6, 0.604053),
+            (10e-6, 0.914328),
+            (12e-6, 0.988406),
+            (13e-6, 0.791368),
+            (14e-6, 0.481007),
+            (16e-6, 0.767120),
+            (26e-6, 0.988406),
+        ],
+    );
+    assert_exp_samples(
+        "EXP(0 1 1u 1u 5u 2u 20u)",
+        "",
+        30e-6,
+        &[
+            (22e-6, 0.632324),
+            (25e-6, 0.981694),
+            (26e-6, 0.992989),
+            (28e-6, 0.366866),
+        ],
+    );
+}
+
+// QSPICE64 build Oct 27 2026: three pulses to a train, one train every 50 us.
+#[test]
+fn a_counted_exp_train_repeats_the_way_qspice_does() {
+    assert_exp_samples(
+        "EXP(0 1 1u 2u 3u 40u 10u 3 50u)",
+        "",
+        90e-6,
+        &[
+            (12e-6, 0.859901),
+            (15e-6, 0.869259),
+            (20e-6, 0.785238),
+            (52e-6, 0.675877),
+            (55e-6, 0.872904),
+            (63e-6, 0.875818),
+            (65e-6, 0.852288),
+            (80e-6, 0.761825),
+        ],
+    );
+}
+
+// LTspice 26.1.1: every pulse adds to the tails of the earlier ones, with the
+// option standing anywhere in the deck.
+#[test]
+fn the_ltspice_exp_repeat_adds_each_pulse_to_the_earlier_tails() {
+    let ltspice = ".options rspice_exp_repeat=ltspice";
+    assert_exp_samples(
+        "EXP(0 1 1u 1u 5u 2u 7u)",
+        ltspice,
+        30e-6,
+        &[
+            (2e-6, 0.632116),
+            (6e-6, 0.599795),
+            (8e-6, 0.222218),
+            (9e-6, 0.767116),
+            (10e-6, 0.946625),
+            (12e-6, 1.011865),
+            (13e-6, 0.618104),
+            (14e-6, 0.376509),
+            (16e-6, 0.771203),
+            (19e-6, 1.012777),
+        ],
+    );
+    assert_exp_samples(
+        "EXP(0 1 1u 1u 5u 2u 20u)",
+        ltspice,
+        30e-6,
+        &[
+            (22e-6, 0.632319),
+            (25e-6, 0.98173),
+            (26e-6, 0.599822),
+            (28e-6, 0.222229),
+        ],
+    );
+    assert_exp_samples(
+        "EXP(0 1 1u 2u 3u 40u 10u 3 50u)",
+        ltspice,
+        35e-6,
+        &[
+            (5e-6, 0.8159),
+            (10e-6, 0.8283),
+            (15e-6, 1.5558),
+            (20e-6, 1.4820),
+            (25e-6, 2.1327),
+            (30e-6, 1.9912),
+        ],
+    );
+}
+
+#[test]
+fn the_exp_repeat_option_names_what_it_accepts() {
+    let refusal = Netlist::parse(
+        "exp train\nV1 a 0 1\nR1 a 0 1k\n.options rspice_exp_repeat=spectre\n.op\n.end\n",
+    )
+    .expect_err("an unknown reading is refused");
+    assert!(
+        refusal.to_string().contains("RSPICE_EXP_REPEAT"),
+        "{refusal}"
+    );
+}
