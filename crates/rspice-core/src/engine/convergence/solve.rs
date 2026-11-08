@@ -2604,6 +2604,16 @@ impl Engine {
         let mut damping_state = NewtonDampingState::default();
         let junction_owns_steps = Self::junction_limiting_owns_newton_steps(circuit)
             || self.b3soi_limiter_owns_global_damping(circuit);
+        // ngspice finds the DC and the transient operating point with the one
+        // CKTop, so this Newton projects its iterates onto the same no-gain
+        // box the DC one does, spanning the sources at `time`. An initial
+        // condition is a source the box does not span: a constrained start
+        // keeps the unprojected step, as the DC constrained startup does.
+        let voltage_box = if node_constraints.is_empty() {
+            damping::NoGainVoltageBox::of_transient_operating_point(circuit, time)
+        } else {
+            None
+        };
         // ngspice floors every NIiter call to 100 iterations (ITL1); the
         // per-iterate junction walk of pnjlim devices legitimately needs
         // tens of iterations on deep TTL chains before the residual settles.
@@ -2764,6 +2774,9 @@ impl Engine {
             };
             circuit.enforce_ideal_voltage_constraints(new_solution, time)?;
             Self::reset_nonfinite_values(new_solution);
+            if let Some(voltage_box) = &voltage_box {
+                voltage_box.project(new_solution);
+            }
             Self::enforce_node_voltage_hints(circuit, matrix, new_solution, node_constraints);
 
             let voltage_converged = self.dc_newton_update_convergence_met(

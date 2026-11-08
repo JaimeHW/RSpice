@@ -21,17 +21,44 @@ pub(in crate::engine::convergence) struct NoGainVoltageBox {
 }
 
 impl NoGainVoltageBox {
-    /// The box for `circuit`, or `None` when an element can supply gain or a
-    /// row holds a state the no-gain argument does not cover (temperature,
-    /// a memristor's state, a code model's private unknown).
+    /// The box for `circuit`'s DC operating point, or `None` when an element
+    /// can supply gain or a row holds a state the no-gain argument does not
+    /// cover (temperature, a memristor's state, a code model's private
+    /// unknown).
     pub(in crate::engine::convergence) fn of(circuit: &CircuitData) -> Option<Self> {
+        Self::spanning(
+            circuit,
+            |index| circuit.voltage_sources.dc_values[index],
+            |index| circuit.current_sources.dc_values[index],
+        )
+    }
+
+    /// The box for a transient operating point at `time`: the same DC
+    /// problem, with each independent source at its waveform value there.
+    pub(in crate::engine::convergence) fn of_transient_operating_point(
+        circuit: &CircuitData,
+        time: Value,
+    ) -> Option<Self> {
+        Self::spanning(
+            circuit,
+            |index| circuit.voltage_sources.transient_value_at(index, time),
+            |index| circuit.current_sources.value_at_time(index, time),
+        )
+    }
+
+    fn spanning(
+        circuit: &CircuitData,
+        voltage_source_value: impl Fn(usize) -> Value,
+        current_source_value: impl Fn(usize) -> Value,
+    ) -> Option<Self> {
         if !circuit.vcvs.is_empty()
             || !circuit.vccs.is_empty()
             || !circuit.cccs.is_empty()
             || !circuit.ccvs.is_empty()
             || !circuit.behavioral_sources.is_empty()
             // A current source can drive a node to any potential.
-            || circuit.current_sources.dc_values.iter().any(|&i| i != 0.0)
+            || (0..circuit.current_sources.dc_values.len())
+                .any(|index| current_source_value(index) != 0.0)
             || circuit.resistors.conductances.iter().any(|&g| g < 0.0)
             || !circuit.multi_winding_transformers.is_empty()
             || !circuit.jiles_atherton_inductors.is_empty()
@@ -83,12 +110,8 @@ impl NoGainVoltageBox {
         }
         let sources = &circuit.voltage_sources;
         let (mut low, mut high, mut stacked) = (0.0_f64, 0.0_f64, 0.0_f64);
-        for ((&value, &pos), &neg) in sources
-            .dc_values
-            .iter()
-            .zip(&sources.node_pos)
-            .zip(&sources.node_neg)
-        {
+        for (index, (&pos, &neg)) in sources.node_pos.iter().zip(&sources.node_neg).enumerate() {
+            let value = voltage_source_value(index);
             if !value.is_finite() {
                 return None;
             }
@@ -1142,6 +1165,93 @@ mod tests {
             assert!(
                 iterations <= 20,
                 "{dialect:?}: {iterations} Newton iterations"
+            );
+        }
+    }
+
+    #[test]
+    fn a_transient_operating_point_box_spans_the_sources_at_its_time() {
+        let circuit = built(concat!(
+            "waveform box
+",
+            "V1 a 0 dc 0 pulse(5 -1 1n 1n 1n 1n 4n)
+",
+            "R1 a b 1k
+",
+            "D1 b 0 dm
+",
+            ".model dm d
+",
+            ".tran 1n 10n
+",
+            ".end
+",
+        ));
+        let dc = NoGainVoltageBox::of(&circuit).unwrap();
+        assert_eq!((dc.low, dc.high), (0.0, 0.0));
+        let start = NoGainVoltageBox::of_transient_operating_point(&circuit, 0.0).unwrap();
+        assert_eq!((start.low, start.high), (0.0, 5.0));
+        let low = NoGainVoltageBox::of_transient_operating_point(&circuit, 2.5e-9).unwrap();
+        assert_eq!((low.low, low.high), (-1.0, 0.0));
+    }
+
+    /// ngspice's DCFL inverter pair (tests/ngspice/hfet/inverter.cir). Its
+    /// transient operating point used to take an unprojected first step that
+    /// put the first output at 4.4 V under the 2 V supply; Newton then settled
+    /// where HFETA's load loop carries one instance's inverse flag into every
+    /// later one (hfetload.c declares it at function scope), at v(3) =
+    /// 1.92987, v(4) = -0.00244. ngspice-46 reaches v(3) = 1.955693,
+    /// v(4) = 0.2063419 from `.nodeset v(3)=1.9 v(4)=0.1`.
+    #[test]
+    fn the_hfet_inverter_pair_starts_its_transient_from_its_dc_operating_point() {
+        let deck = concat!(
+            "DCFL inverter pair
+",
+            ".subckt inv 1 2 3
+",
+            "z1 1 3 3 aload l=1u w=10u
+",
+            "z2 3 2 0 adrv l=1u w=10u
+",
+            ".ends
+",
+            "vdd 1 0 dc 2
+",
+            "vin 2 0 dc 0 pwl(0 0 1n 0 1.005n 1 2n 1)
+",
+            "x1 1 2 3 inv
+",
+            "x2 1 3 4 inv
+",
+            ".model adrv nhfet level=5 rd=60 rs=60 m=2.57 lambda=0.17 vs=1.5e5 mu=0.385
+",
+            "+ vt0=0.3 eta=1.32 sigma0=0.04 vsigma=0.1 vsigmat=0.3 js1s=1e-12 js1d=1e-12
+",
+            "+ nmax=6e15
+",
+            ".model aload nhfet level=5 rd=60 rs=60 m=2.57 lambda=0.17 vs=1.5e5 mu=0.385
+",
+            "+ vt0=-0.3 eta=1.32 sigma0=0.04 vsigma=0.1 vsigmat=0.3 js1s=1e-12 js1d=1e-12
+",
+            "+ nmax=6e15
+",
+            ".tran 0.01n 0.02n
+",
+            ".end
+",
+        );
+        let netlist = crate::netlist::Netlist::parse(deck).unwrap();
+        let engine = Engine::default();
+        let op = engine.run_dc_op(&netlist).unwrap();
+        let tran = engine.run_tran(&netlist, 0.02e-9, 0.01e-9).unwrap();
+        for (node, ngspice) in [("3", 1.955693), ("4", 0.2063419)] {
+            let named = |names: &[String]| names.iter().position(|n| n.eq_ignore_ascii_case(node));
+            let dc = op.node_voltages[named(&op.node_names).unwrap()];
+            let start = tran.voltages[named(&tran.node_names).unwrap()][0];
+            assert!((dc - ngspice).abs() < 1e-6, "DC v({node}) = {dc}");
+            assert!(
+                (start - dc).abs() < 1e-6,
+                "transient v({node}) starts at {start}, the DC operating point is {dc}"
             );
         }
     }
