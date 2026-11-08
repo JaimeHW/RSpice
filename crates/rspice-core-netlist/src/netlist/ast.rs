@@ -332,6 +332,7 @@ impl FrequencyResponse {
     }
 
     /// How the source was written: `FREQ` or `LAPLACE`.
+    #[doc(hidden)]
     #[must_use]
     pub fn form(&self) -> SynthesizedTransferForm {
         match self.kind {
@@ -342,6 +343,7 @@ impl FrequencyResponse {
 
     /// For a LAPLACE expression, its first factor that is not rational in
     /// `s`, as written: the source has no response in time.
+    #[doc(hidden)]
     #[must_use]
     pub fn non_rational_factor(&self) -> Option<&str> {
         match &self.kind {
@@ -945,6 +947,7 @@ impl SpecialFunction {
 
     /// The instance parameter that holds entry `index`, from 1, of the
     /// `table(x1 y1 x2 y2 ...)` a VARISTOR may be given.
+    #[doc(hidden)]
     #[must_use]
     pub fn table_entry(index: usize) -> String {
         format!("TABLE[{index}]")

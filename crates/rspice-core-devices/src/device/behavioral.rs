@@ -717,6 +717,7 @@ impl BehavioralVoltageSource {
     /// small-signal stamp, as LTspice's `NoJacob` does: the source still
     /// follows its inputs from one Newton iterate to the next, as a fixed
     /// point, and small-signal analyses see no response through it.
+    #[doc(hidden)]
     pub fn set_jacobian(&mut self, jacobian: bool) {
         self.invalidate_cached_exact_constraint();
         self.jacobian = jacobian;
@@ -1958,6 +1959,7 @@ impl BehavioralCurrentSource {
 
     /// Leave the expression's partials out of every Jacobian and
     /// small-signal stamp; see [`BehavioralVoltageSource::set_jacobian`].
+    #[doc(hidden)]
     pub fn set_jacobian(&mut self, jacobian: bool) {
         self.jacobian = jacobian;
     }

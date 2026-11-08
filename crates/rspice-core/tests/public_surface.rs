@@ -621,7 +621,17 @@ const MAX_PUBLIC_ITEMS: usize = 5265;
 // unknown instance parameter from what each MOS model's build read, and the
 // VDMOS reader in `rspice-core-devices` notes its reads below it. The census
 // is 1,661, with no slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 1661;
+// `BehavioralVoltageSource::set_jacobian` and its current-source twin add two:
+// the builder (`rspice-core` engine/builder.rs) leaves the partials of a
+// source flagged `NoJacob` out of the Jacobian. `FrequencyResponse::form` and
+// `non_rational_factor` add two: the builder and the small-signal stamp
+// (engine/ac.rs) name the source's form in their errors, and the capability
+// check (engine/analysis_capability.rs) refuses a time-domain analysis of a
+// LAPLACE source with a factor that is not rational in `s`.
+// `SpecialFunction::table_entry` adds one: the varistor (`rspice-core-devices`
+// device/special_function/mixed.rs) reads the table entries the netlist parser
+// stores under it. The census is 1,666, with no slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 1666;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
