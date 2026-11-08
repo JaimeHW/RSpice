@@ -77,9 +77,9 @@ impl Bench {
                         EditorSyntax::VerilogA,
                         None,
                         &style,
-                        |ui, text, _line, font| {
+                        |ui, row, font| {
                             ui.fonts_mut(|fonts| {
-                                fonts.layout_no_wrap(text.to_owned(), font, Color32::WHITE)
+                                fonts.layout_no_wrap(row.text.to_owned(), font, Color32::WHITE)
                             })
                         },
                         |_| None,

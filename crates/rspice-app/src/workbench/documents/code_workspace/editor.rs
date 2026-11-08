@@ -18,6 +18,10 @@ use crate::workbench::documents::text_editor_commands::{
     show_go_to_line, take_reveal_line,
 };
 
+mod veriloga_syntax;
+
+use veriloga_syntax::{LineState, SyntaxClass, SyntaxSpan, VerilogAHighlighter, tokenize_line};
+
 const FONT_SIZE: f32 = 11.0;
 const LINE_HEIGHT: f32 = 17.05;
 const GUTTER_WIDTH: f32 = 47.0;
@@ -388,8 +392,8 @@ fn show_code_document_impl(
             top_padding: 8.0,
             background: colors.bg_inset,
             hover_background: colors.bg_hover,
-            active_background: colors.accent.linear_multiply(0.075),
-            selection_background: colors.accent.linear_multiply(0.28),
+            active_background: colors.syntax.current_line,
+            selection_background: colors.syntax.selection,
             text: colors.text,
             text_dim: colors.text_dim,
             text_faint: colors.text_faint,
@@ -403,6 +407,14 @@ fn show_code_document_impl(
             current_line,
             cross_probe_line: None,
         };
+        // The reading of each line is kept between frames, so a frame reads
+        // only the lines it shows.
+        let highlighter_id = editor_id.with("veriloga-syntax");
+        let mut highlighter = (language == CodeEditorLanguage::VerilogA).then(|| {
+            ui.ctx()
+                .data_mut(|data| data.remove_temp::<VerilogAHighlighter>(highlighter_id))
+                .unwrap_or_default()
+        });
         let output = crate::workbench::documents::virtual_text_editor::show_virtual_text_editor(
             ui,
             editor_id,
@@ -412,8 +424,14 @@ fn show_code_document_impl(
             syntax,
             requested_line,
             &style,
-            |ui, text, _line, font| {
-                let job = layout_job(text, language, font, &[], &colors);
+            |ui, row, font| {
+                let job = match highlighter.as_mut() {
+                    Some(highlighter) => {
+                        let (spans, line) = highlighter.line(row.document, row.logical_line);
+                        veriloga_row_job(&spans, &line, row.text, row.first_column, font, &colors)
+                    }
+                    None => layout_job(row.text, language, font, &[], &colors),
+                };
                 ui.fonts_mut(|fonts| fonts.layout_job(job))
             },
             |logical_line| {
@@ -429,6 +447,9 @@ fn show_code_document_impl(
         );
         ui.ctx().data_mut(|data| {
             data.insert_temp(reported_caret_id(editor_id), output.cursor_char_index);
+            if let Some(highlighter) = highlighter {
+                data.insert_temp(highlighter_id, highlighter);
+            }
         });
         return CodeDocumentInteraction {
             changed: output.changed,
@@ -611,19 +632,26 @@ fn layout_job(
     };
     job.wrap.max_width = f32::INFINITY;
     let mut byte_offset = 0;
+    let mut state = LineState::default();
     for segment in source.split_inclusive('\n') {
         let (line, newline) = segment
             .strip_suffix('\n')
             .map_or((segment, ""), |line| (line, "\n"));
-        highlight_line(
-            &mut job,
-            line,
-            language,
-            byte_offset,
-            &font,
-            diagnostics,
-            colors,
-        );
+        if language == CodeEditorLanguage::VerilogA {
+            let (spans, exit) = tokenize_line(line, state);
+            state = exit;
+            append_classified(&mut job, &spans, line, 0..line.len(), &font, colors);
+        } else {
+            highlight_line(
+                &mut job,
+                line,
+                language,
+                byte_offset,
+                &font,
+                diagnostics,
+                colors,
+            );
+        }
         if !newline.is_empty() {
             append(&mut job, newline, font.clone(), colors.text, Stroke::NONE);
         }
@@ -633,6 +661,104 @@ fn layout_job(
         append(&mut job, "", font, colors.text, Stroke::NONE);
     }
     job
+}
+
+/// Lay out the part of a Verilog-A line a row shows: `line` is the whole
+/// line, classified as `spans`, and `shown` the part of it from character
+/// `first_column`. The classes come from the whole line, so a row scrolled
+/// sideways colours a string or a comment it starts inside of.
+fn veriloga_row_job(
+    spans: &[SyntaxSpan],
+    line: &str,
+    shown: &str,
+    first_column: usize,
+    font: FontId,
+    colors: &crate::ui::palette::Palette,
+) -> LayoutJob {
+    let mut job = LayoutJob::default();
+    job.wrap.max_width = f32::INFINITY;
+    let start = line
+        .char_indices()
+        .nth(first_column)
+        .map_or(line.len(), |(index, _)| index);
+    let end = start + shown.len();
+    if line.get(start..end) == Some(shown) {
+        append_classified(&mut job, spans, line, start..end, &font, colors);
+    } else {
+        // The row is not the line this frame read: lay it out plainly
+        // rather than colour the wrong text.
+        append(&mut job, shown, font, colors.text, Stroke::NONE);
+    }
+    job
+}
+
+/// Append `line[shown]` to `job`, each stretch in the ink of its class.
+fn append_classified(
+    job: &mut LayoutJob,
+    spans: &[SyntaxSpan],
+    line: &str,
+    shown: std::ops::Range<usize>,
+    font: &FontId,
+    colors: &crate::ui::palette::Palette,
+) {
+    let mut cursor = shown.start;
+    for span in spans {
+        let from = span.range.start.max(cursor);
+        let to = span.range.end.min(shown.end);
+        if from >= to {
+            continue;
+        }
+        if cursor < from {
+            append(
+                job,
+                &line[cursor..from],
+                font.clone(),
+                colors.text,
+                Stroke::NONE,
+            );
+        }
+        append(
+            job,
+            &line[from..to],
+            font.clone(),
+            syntax_color(span.class, colors),
+            Stroke::NONE,
+        );
+        cursor = to;
+    }
+    if cursor < shown.end {
+        append(
+            job,
+            &line[cursor..shown.end],
+            font.clone(),
+            colors.text,
+            Stroke::NONE,
+        );
+    }
+    if shown.is_empty() {
+        append(job, "", font.clone(), colors.text, Stroke::NONE);
+    }
+}
+
+/// The ink a Verilog-A syntax class is painted in.
+const fn syntax_color(class: SyntaxClass, colors: &crate::ui::palette::Palette) -> Color32 {
+    let syntax = &colors.syntax;
+    match class {
+        SyntaxClass::Text => colors.text,
+        SyntaxClass::Keyword => syntax.keyword,
+        SyntaxClass::Discipline => syntax.discipline,
+        SyntaxClass::SystemTask => syntax.system,
+        SyntaxClass::AnalogOperator => syntax.analog_operator,
+        SyntaxClass::Contribution => syntax.contribution,
+        SyntaxClass::Number => syntax.number,
+        SyntaxClass::String => syntax.string,
+        SyntaxClass::Comment => syntax.comment,
+        SyntaxClass::Directive => syntax.directive,
+        SyntaxClass::Attribute => syntax.attribute,
+        SyntaxClass::ModuleName => syntax.module_name,
+        SyntaxClass::PortName => syntax.port_name,
+        SyntaxClass::ParameterName => syntax.parameter_name,
+    }
 }
 
 fn highlight_line(
@@ -647,7 +773,7 @@ fn highlight_line(
     let mut cursor = 0;
     while cursor < line.len() {
         let rest = &line[cursor..];
-        let (length, color) = next_token(rest, &line[..cursor], language, colors);
+        let (length, color) = next_token(rest, language, colors);
         let length = length.max(rest.chars().next().map_or(0, char::len_utf8));
         let end = (cursor + length).min(line.len());
         let range = (line_start + cursor)..(line_start + end);
@@ -672,7 +798,6 @@ fn highlight_line(
 
 fn next_token(
     text: &str,
-    prefix: &str,
     language: CodeEditorLanguage,
     colors: &crate::ui::palette::Palette,
 ) -> (usize, Color32) {
@@ -696,12 +821,6 @@ fn next_token(
         }
         return (text.len(), colors.warn);
     }
-    if language == CodeEditorLanguage::VerilogA && text.starts_with("parameter ") {
-        let length = text
-            .find('=')
-            .map_or(text.len(), |index| text[..index].trim_end().len());
-        return (length.max("parameter".len()), colors.net_label);
-    }
     let first = text.chars().next().unwrap_or_default();
     if first.is_ascii_digit() {
         let length = text
@@ -721,14 +840,6 @@ fn next_token(
             .map_or(first.len_utf8(), |(index, ch)| index + ch.len_utf8());
         let word = &text[..length];
         let color = match language {
-            CodeEditorLanguage::VerilogA
-                if matches!(word, "module" | "endmodule" | "`include" | "`define") =>
-            {
-                colors.traces[1]
-            }
-            CodeEditorLanguage::VerilogA if prefix.trim_end().ends_with("module") => {
-                colors.traces[0]
-            }
             CodeEditorLanguage::Automation if word == "plan" => colors.traces[1],
             CodeEditorLanguage::Automation if matches!(word, "True" | "False") => colors.net_label,
             CodeEditorLanguage::Python
@@ -894,43 +1005,61 @@ mod tests {
     fn canonical_source_tokens_use_mockup_palette_roles() {
         let colors = crate::ui::palette::INSTRUMENT_DARK;
         assert_eq!(
-            next_token("module", "", CodeEditorLanguage::VerilogA, &colors).1,
-            colors.traces[1]
-        );
-        assert_eq!(
-            next_token(
-                "sensor_bridge",
-                "module ",
-                CodeEditorLanguage::VerilogA,
-                &colors,
-            )
-            .1,
-            colors.traces[0]
-        );
-        assert_eq!(
-            next_token("100.0", "", CodeEditorLanguage::VerilogA, &colors).1,
-            colors.traces[3]
-        );
-        assert_eq!(
-            next_token("\"all\"", "", CodeEditorLanguage::Automation, &colors).1,
+            next_token("\"all\"", CodeEditorLanguage::Automation, &colors).1,
             colors.warn
         );
         assert_eq!(
-            next_token("plan", "", CodeEditorLanguage::Automation, &colors).1,
+            next_token("plan", CodeEditorLanguage::Automation, &colors).1,
             colors.traces[1]
         );
         assert_eq!(
-            next_token("True", "", CodeEditorLanguage::Automation, &colors).1,
+            next_token("True", CodeEditorLanguage::Automation, &colors).1,
             colors.net_label
         );
         assert_eq!(
-            next_token("from", "", CodeEditorLanguage::Python, &colors).1,
+            next_token("from", CodeEditorLanguage::Python, &colors).1,
             colors.traces[1]
         );
         assert_eq!(
-            next_token("schema: value", "", CodeEditorLanguage::Yaml, &colors).1,
+            next_token("schema: value", CodeEditorLanguage::Yaml, &colors).1,
             colors.net_label
         );
+    }
+
+    /// A Verilog-A row wears the syntax inks of the theme it is drawn in, and
+    /// a row scrolled sideways keeps the class of the text it starts inside.
+    #[test]
+    fn veriloga_rows_wear_the_syntax_inks_of_their_theme() {
+        let line = "  parameter real gain = 10k; // open loop";
+        let (spans, _) = tokenize_line(line, LineState::default());
+        let font = FontId::monospace(FONT_SIZE);
+        for colors in [
+            crate::ui::palette::INSTRUMENT_DARK,
+            crate::ui::palette::INSTRUMENT_LIGHT,
+        ] {
+            let job = veriloga_row_job(&spans, line, line, 0, font.clone(), &colors);
+            let ink = |text: &str| {
+                let start = line.find(text).expect("the text is on the line");
+                job.format_at_byte(egui::epaint::text::ByteIndex(start))
+                    .color
+            };
+            let syntax = colors.syntax;
+            assert_eq!(ink("parameter"), syntax.keyword);
+            assert_eq!(ink("gain"), syntax.parameter_name);
+            assert_eq!(ink("10k"), syntax.number);
+            assert_eq!(ink("// open"), syntax.comment);
+            assert_eq!(ink("="), colors.text);
+            // Scrolled to start inside the comment, the row is still comment.
+            let shown = &line[line.find("open").expect("the comment")..];
+            let first_column = line[..line.len() - shown.len()].chars().count();
+            let job = veriloga_row_job(&spans, line, shown, first_column, font.clone(), &colors);
+            assert_eq!(job.text, shown);
+            assert!(
+                job.sections
+                    .iter()
+                    .all(|section| section.format.color == syntax.comment)
+            );
+        }
     }
 
     #[test]

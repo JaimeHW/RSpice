@@ -75,6 +75,45 @@ pub struct Palette {
     pub shadow_color: Color32,
     /// Popover shadow geometry: (y-offset, blur) in points.
     pub shadow_geom: (i8, u8),
+    /// Source-code inks and the editor's own fills.
+    pub syntax: SyntaxPalette,
+}
+
+/// What a source editor paints code with: one ink per syntax class, the fill
+/// behind selected text and the fill of the caret's line. Every ink stands
+/// 4.5:1 off the code well (`bg_inset`), the caret's line and the selection,
+/// so a selected or current line reads as plainly as any other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SyntaxPalette {
+    /// Reserved words: `module`, `analog`, `begin`, `parameter`.
+    pub keyword: Color32,
+    /// Disciplines and natures, and a nature's access function: `electrical`,
+    /// `thermal`, the `V` of `V(out)`.
+    pub discipline: Color32,
+    /// System functions and tasks: `$temperature`, `$strobe`.
+    pub system: Color32,
+    /// Analog operators and filters: `ddt`, `transition`, `laplace_nd`.
+    pub analog_operator: Color32,
+    /// The contribution operator `<+`.
+    pub contribution: Color32,
+    /// Numbers, with their scale factor or size: `10k`, `1e-3`, `4'hF`.
+    pub number: Color32,
+    pub string: Color32,
+    pub comment: Color32,
+    /// Compiler directives and macro uses: `` `include ``, `` `M_PI ``.
+    pub directive: Color32,
+    /// Attribute instances: `(* desc="gain" *)`.
+    pub attribute: Color32,
+    /// The name a module declares.
+    pub module_name: Color32,
+    /// The names of a module's ports where they are declared.
+    pub port_name: Color32,
+    /// The names of parameters where they are declared.
+    pub parameter_name: Color32,
+    /// The fill behind selected text.
+    pub selection: Color32,
+    /// The fill of the line the caret is on.
+    pub current_line: Color32,
 }
 
 /// Instrument · dark
@@ -127,6 +166,23 @@ pub const INSTRUMENT_DARK: Palette = Palette {
     ],
     shadow_color: Color32::from_rgba_premultiplied(0, 0, 0, 107),
     shadow_geom: (14, 42),
+    syntax: SyntaxPalette {
+        keyword: Color32::from_rgb(122, 178, 240),
+        discipline: Color32::from_rgb(86, 196, 182),
+        system: Color32::from_rgb(196, 160, 240),
+        analog_operator: Color32::from_rgb(236, 142, 200),
+        contribution: Color32::from_rgb(242, 184, 36),
+        number: Color32::from_rgb(140, 206, 120),
+        string: Color32::from_rgb(232, 160, 100),
+        comment: Color32::from_rgb(150, 162, 156),
+        directive: Color32::from_rgb(222, 138, 168),
+        attribute: Color32::from_rgb(160, 168, 184),
+        module_name: Color32::from_rgb(236, 204, 104),
+        port_name: Color32::from_rgb(128, 210, 230),
+        parameter_name: Color32::from_rgb(220, 177, 85),
+        selection: Color32::from_rgb(56, 48, 24),
+        current_line: Color32::from_rgb(22, 29, 34),
+    },
 };
 
 /// Instrument · light
@@ -173,6 +229,23 @@ pub const INSTRUMENT_LIGHT: Palette = Palette {
     ],
     shadow_color: Color32::from_rgba_premultiplied(7, 8, 9, 46),
     shadow_geom: (14, 42),
+    syntax: SyntaxPalette {
+        keyword: Color32::from_rgb(28, 78, 158),
+        discipline: Color32::from_rgb(0, 96, 87),
+        system: Color32::from_rgb(106, 58, 168),
+        analog_operator: Color32::from_rgb(153, 37, 105),
+        contribution: Color32::from_rgb(123, 73, 0),
+        number: Color32::from_rgb(27, 98, 22),
+        string: Color32::from_rgb(144, 59, 0),
+        comment: Color32::from_rgb(77, 87, 83),
+        directive: Color32::from_rgb(146, 46, 78),
+        attribute: Color32::from_rgb(78, 84, 100),
+        module_name: Color32::from_rgb(115, 77, 0),
+        port_name: Color32::from_rgb(0, 90, 130),
+        parameter_name: Color32::from_rgb(96, 82, 20),
+        selection: Color32::from_rgb(222, 206, 156),
+        current_line: Color32::from_rgb(214, 220, 224),
+    },
 };
 
 const _: [(); 1] = [(); color_is_rgb(INSTRUMENT_DARK.wire, 0x44, 0x8c, 0x60) as usize];
@@ -278,6 +351,52 @@ mod tests {
                     "{mode} text_faint is unreadable on {surface} at {faint:.2}:1"
                 );
             }
+        }
+    }
+
+    /// Every syntax ink reads 4.5:1 off the code well, the caret's line and
+    /// the selection fill, and plain text does on the selection too, in both
+    /// palettes: a selected or current line never loses its code. The
+    /// selection and the caret's line still stand off the well.
+    #[test]
+    fn syntax_inks_read_on_every_editor_fill() {
+        for (mode, palette) in [("dark", INSTRUMENT_DARK), ("light", INSTRUMENT_LIGHT)] {
+            let syntax = palette.syntax;
+            let inks = [
+                ("keyword", syntax.keyword),
+                ("discipline", syntax.discipline),
+                ("system", syntax.system),
+                ("analog operator", syntax.analog_operator),
+                ("contribution", syntax.contribution),
+                ("number", syntax.number),
+                ("string", syntax.string),
+                ("comment", syntax.comment),
+                ("directive", syntax.directive),
+                ("attribute", syntax.attribute),
+                ("module name", syntax.module_name),
+                ("port name", syntax.port_name),
+                ("parameter name", syntax.parameter_name),
+                ("text", palette.text),
+            ];
+            for (fill, ground) in [
+                ("code well", palette.bg_inset),
+                ("caret line", syntax.current_line),
+                ("selection", syntax.selection),
+            ] {
+                for (ink, color) in inks {
+                    let ratio = contrast(color, ground);
+                    assert!(
+                        ratio >= 4.5,
+                        "{mode} {ink} is only {ratio:.2}:1 on the {fill}"
+                    );
+                }
+            }
+            let selection = contrast(syntax.selection, palette.bg_inset);
+            assert!(
+                selection >= 1.2,
+                "{mode} selection stands only {selection:.2}:1 off the code well"
+            );
+            assert_ne!(syntax.current_line, palette.bg_inset, "{mode}");
         }
     }
 }

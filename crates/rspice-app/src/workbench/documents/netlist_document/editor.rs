@@ -224,11 +224,11 @@ pub fn show(ui: &mut Ui, state: &mut AppState) -> egui::Response {
             EditorSyntax::Spice,
             requested_line,
             &style,
-            |ui, text, _line, font| {
+            |ui, row, font| {
                 let job = if diff_document {
-                    highlight::diff_layout_job(text, font, &c)
+                    highlight::diff_layout_job(row.text, font, &c)
                 } else {
-                    highlight::layout_job(text, font, &c, &[])
+                    highlight::layout_job(row.text, font, &c, &[])
                 };
                 ui.fonts_mut(|fonts| fonts.layout_job(job))
             },

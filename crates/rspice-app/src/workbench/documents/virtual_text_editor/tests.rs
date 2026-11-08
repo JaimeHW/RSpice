@@ -267,8 +267,10 @@ fn requested_line_unfolds_and_reveals_a_collapsed_target() {
             EditorSyntax::Spice,
             Some(2),
             &style,
-            |ui, text, _line, font| {
-                ui.fonts_mut(|fonts| fonts.layout_no_wrap(text.to_owned(), font, Color32::WHITE))
+            |ui, row, font| {
+                ui.fonts_mut(|fonts| {
+                    fonts.layout_no_wrap(row.text.to_owned(), font, Color32::WHITE)
+                })
             },
             |_| None,
             |_| None,
@@ -341,9 +343,11 @@ fn widget_lays_out_only_a_bounded_large_document_viewport() {
             EditorSyntax::Spice,
             None,
             &style,
-            |ui, text, _line, font| {
+            |ui, row, font| {
                 laid_out += 1;
-                ui.fonts_mut(|fonts| fonts.layout_no_wrap(text.to_owned(), font, Color32::WHITE))
+                ui.fonts_mut(|fonts| {
+                    fonts.layout_no_wrap(row.text.to_owned(), font, Color32::WHITE)
+                })
             },
             |_| None,
             |_| None,
@@ -420,8 +424,10 @@ fn focused_debug_editor_exposes_f9_breakpoint_toggle() {
             EditorSyntax::Python,
             None,
             &style,
-            |ui, text, _line, font| {
-                ui.fonts_mut(|fonts| fonts.layout_no_wrap(text.to_owned(), font, Color32::WHITE))
+            |ui, row, font| {
+                ui.fonts_mut(|fonts| {
+                    fonts.layout_no_wrap(row.text.to_owned(), font, Color32::WHITE)
+                })
             },
             |_| None,
             |_| None,
@@ -448,8 +454,10 @@ fn focused_debug_editor_exposes_f9_breakpoint_toggle() {
             EditorSyntax::Python,
             None,
             &style,
-            |ui, text, _line, font| {
-                ui.fonts_mut(|fonts| fonts.layout_no_wrap(text.to_owned(), font, Color32::WHITE))
+            |ui, row, font| {
+                ui.fonts_mut(|fonts| {
+                    fonts.layout_no_wrap(row.text.to_owned(), font, Color32::WHITE)
+                })
             },
             |_| None,
             |_| None,
@@ -490,9 +498,9 @@ fn a_focused_editor_draws_no_focus_ring() {
                 EditorSyntax::Python,
                 None,
                 &style,
-                |ui, text, _line, font| {
+                |ui, row, font| {
                     ui.fonts_mut(|fonts| {
-                        fonts.layout_no_wrap(text.to_owned(), font, Color32::WHITE)
+                        fonts.layout_no_wrap(row.text.to_owned(), font, Color32::WHITE)
                     })
                 },
                 |_| None,
@@ -546,9 +554,9 @@ fn widget_exposes_active_line_read_only_and_diagnostic_context_to_accesskit() {
                 EditorSyntax::Spice,
                 Some(2),
                 &style,
-                |ui, text, _line, font| {
+                |ui, row, font| {
                     ui.fonts_mut(|fonts| {
-                        fonts.layout_no_wrap(text.to_owned(), font, Color32::WHITE)
+                        fonts.layout_no_wrap(row.text.to_owned(), font, Color32::WHITE)
                     })
                 },
                 |_| None,
@@ -624,9 +632,9 @@ fn accesskit_active_line_payload_is_bounded_for_extreme_source_lines() {
                     EditorSyntax::Spice,
                     None,
                     &style,
-                    |ui, text, _line, font| {
+                    |ui, row, font| {
                         ui.fonts_mut(|fonts| {
-                            fonts.layout_no_wrap(text.to_owned(), font, Color32::WHITE)
+                            fonts.layout_no_wrap(row.text.to_owned(), font, Color32::WHITE)
                         })
                     },
                     |_| None,
@@ -691,9 +699,9 @@ fn accesskit_excerpt_geometry_tracks_the_real_horizontal_source_column() {
                     EditorSyntax::Spice,
                     None,
                     &style,
-                    |ui, text, _line, font| {
+                    |ui, row, font| {
                         ui.fonts_mut(|fonts| {
-                            fonts.layout_no_wrap(text.to_owned(), font, Color32::WHITE)
+                            fonts.layout_no_wrap(row.text.to_owned(), font, Color32::WHITE)
                         })
                     },
                     |_| None,

@@ -161,6 +161,18 @@ pub(crate) struct VirtualEditorStyle<'a> {
     pub cross_probe_line: Option<usize>,
 }
 
+/// A row the viewport is about to paint, for the language service that lays
+/// it out.
+pub(crate) struct LayoutRow<'a> {
+    /// The row's text from `first_column`, as wide as the viewport needs.
+    pub text: &'a str,
+    pub logical_line: usize,
+    /// The character column `text` starts at.
+    pub first_column: usize,
+    /// The whole document, for a reading that carries from line to line.
+    pub document: &'a TextDocumentModel,
+}
+
 pub(crate) struct VirtualEditorOutput {
     pub changed: bool,
     pub cursor_line: usize,
@@ -187,9 +199,9 @@ pub(crate) struct VirtualEditorOutput {
 /// Show a virtualized source document.
 ///
 /// `source_revision` is the application document revision, not a frame counter.
-/// `layout_line` receives a bounded horizontal slice and its logical line so a
-/// language service can lay it out without constructing a whole-document
-/// galley. `line_problem` returns the mark the strongest current diagnostic on
+/// `layout_line` receives a bounded horizontal slice of a row, where it starts
+/// and the document it belongs to, so a language service can lay it out
+/// without constructing a whole-document galley. `line_problem` returns the mark the strongest current diagnostic on
 /// a zero-based logical line earns: a warning or an error, or none for a note
 /// or a hint. `line_diagnostic_context` is called at most once
 /// per frame, for the active line only, and should return a concise summary
@@ -203,7 +215,7 @@ pub(crate) fn show_virtual_text_editor(
     syntax: EditorSyntax,
     requested_line: Option<usize>,
     style: &VirtualEditorStyle<'_>,
-    mut layout_line: impl FnMut(&Ui, &str, usize, FontId) -> Arc<egui::Galley>,
+    mut layout_line: impl FnMut(&Ui, &LayoutRow<'_>, FontId) -> Arc<egui::Galley>,
     mut line_problem: impl FnMut(usize) -> Option<Problem>,
     mut line_diagnostic_context: impl FnMut(usize) -> Option<String>,
 ) -> VirtualEditorOutput {
@@ -619,7 +631,16 @@ pub(crate) fn show_virtual_text_editor(
                     char_width,
                     style.selection_background,
                 );
-                let galley = layout_line(ui, &line.text, line.logical_line, style.font.clone());
+                let galley = layout_line(
+                    ui,
+                    &LayoutRow {
+                        text: &line.text,
+                        logical_line: line.logical_line,
+                        first_column: line.first_column,
+                        document: &session.model,
+                    },
+                    style.font.clone(),
+                );
                 code_painter.galley(
                     egui::pos2(
                         code_origin_x + line.first_column as f32 * char_width,
