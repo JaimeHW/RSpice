@@ -524,7 +524,7 @@ fn ota_noise_densities_written_as_expressions_of_frequency_match_ltspice() {
     // G*Rout = 10. LTspice reads a value across blanks inside parentheses or
     // beside an operator, evaluates it at every frequency point, keeps the
     // flicker corner on top, and reads node voltages at the operating point.
-    let cases: [NoiseDensityCase; 4] = [
+    let cases: [NoiseDensityCase; 6] = [
         (
             "* en of freq, written with blanks
 V1 in 0 0 AC 1
@@ -575,6 +575,37 @@ A1 0 in 0 0 0 0 out 0 OTA G=1m Iout=20u Vhigh=10 Vlow=-10 Rout=10k en=V(b)*5n/(f
             "en",
             [1.0, 100.0, 1e5],
             [1.0e-7, 1.0e-8, 3.162_278e-10],
+        ),
+        (
+            "* en reading a resistor and a source current
+V1 in 0 0 AC 1
+V2 c 0 2
+R8 c m 2Meg
+R9 m 0 2Meg
+A1 in 0 0 0 0 0 out 0 OTA G=1m Rout=1k en=1n+4m*I(R8)+1m*I(V2)*(-1) enk=0 Linear Vhigh=100 Vlow=-100
+.end
+",
+            "A1",
+            "en",
+            [1e3, 2e3, 1e4],
+            [3.5e-9, 3.5e-9, 3.5e-9],
+        ),
+        (
+            "* en reading a resistor current inside a subcircuit
+V1 in 0 0 AC 1
+X1 in out amp
+.subckt amp i o
+V2 c 0 2
+R8 c m 2Meg
+R9 m 0 2Meg
+A1 i 0 0 0 0 0 o 0 OTA G=1m Rout=1k en=1n+4m*I(R8) enk=0 Linear Vhigh=100 Vlow=-100
+.ends
+.end
+",
+            "X1.A1",
+            "en",
+            [1e3, 2e3, 1e4],
+            [3e-9, 3e-9, 3e-9],
         ),
     ];
     for (deck, device, mechanism, frequencies, expected) in cases {

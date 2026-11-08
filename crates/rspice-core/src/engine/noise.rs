@@ -1826,7 +1826,7 @@ impl Engine {
     /// The device noise code models drive between their port terminals: a
     /// white source, and a 1/f source for a flicker corner, or one source
     /// whose density is an expression of frequency read at the operating
-    /// point `dc_solution`.
+    /// point `dc_solution`, node voltages and branch currents alike.
     fn code_model_port_noise_sources(
         circuit: &CircuitData,
         dc_solution: &[Value],
@@ -1870,9 +1870,26 @@ impl Engine {
                             .copied()
                             .unwrap_or(0.0);
                     }
+                    let mut currents = vec![0.0; expression.branch_map.len()];
+                    for (name, &index) in &expression.branch_map {
+                        let Some(branch) = circuit.get_branch_by_name(name) else {
+                            return Err(SimulationError::Circuit(format!(
+                                "{}: noise density {} reads the current of {name}, \
+                                 which no branch carries",
+                                instance.name, noise.mechanism
+                            )));
+                        };
+                        currents[index] = circuit
+                            .get_branch_matrix_index(branch)
+                            .checked_sub(1)
+                            .and_then(|row| dc_solution.get(row))
+                            .copied()
+                            .unwrap_or(0.0);
+                    }
                     let spectrum = crate::analysis::noise::SpectralDensity {
                         expression,
                         voltages,
+                        currents,
                         scale: noise.white,
                         corner: noise.corner.max(0.0),
                     };

@@ -20,7 +20,7 @@ pub(super) fn read_as_currents(elements: &[Element]) -> HashSet<String> {
 }
 
 /// Every name, upper case, whose current a behavioral, switch-control or
-/// state-machine expression reads as `I(name)`.
+/// state-machine expression or a noise density reads as `I(name)`.
 pub(super) fn current_reads(elements: &[Element]) -> HashSet<String> {
     let mut operands = HashSet::new();
     for element in elements {
@@ -31,6 +31,14 @@ pub(super) fn current_reads(elements: &[Element]) -> HashSet<String> {
                 control_expression: expression,
                 ..
             } => current_operands(expression, &mut operands),
+            // A flattened special function keeps only its noise densities here.
+            ElementKind::SpecialFunction {
+                deferred_params, ..
+            } => {
+                for (_, expression) in deferred_params {
+                    current_operands(expression, &mut operands);
+                }
+            }
             ElementKind::StateMachine(machine) => {
                 for text in machine
                     .rules

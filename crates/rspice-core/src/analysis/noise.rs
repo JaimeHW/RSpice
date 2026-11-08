@@ -637,6 +637,8 @@ pub(crate) struct SpectralDensity {
     /// The operating-point voltage of each node the expression reads, by the
     /// expression's own node index.
     pub(crate) voltages: Vec<Value>,
+    /// The operating-point current of each branch it reads, likewise.
+    pub(crate) currents: Vec<Value>,
     pub(crate) scale: Value,
     /// Flicker corner (Hz); zero for none.
     pub(crate) corner: Value,
@@ -644,7 +646,7 @@ pub(crate) struct SpectralDensity {
 
 impl SpectralDensity {
     fn at(&self, frequency: Value, temperature: Value) -> Value {
-        let context = crate::expr::Context::dc(&self.voltages, &[])
+        let context = crate::expr::Context::dc(&self.voltages, &self.currents)
             .with_frequency(frequency)
             .with_temperature(crate::constants::kelvin_to_celsius(temperature));
         let amplitude = crate::expr::Vm::new().execute(&self.expression, &context);

@@ -263,8 +263,8 @@ pub(super) fn build(
 }
 
 /// A noise density written as an expression: compiled, and held to
-/// frequency, temperature and node voltages, which the noise analysis reads
-/// at the operating point.
+/// frequency, temperature, node voltages and branch currents, which the
+/// noise analysis reads at the operating point.
 fn noise_density(
     element: &Element,
     name: &str,
@@ -280,11 +280,7 @@ fn noise_density(
     if reads_time(&parsed) {
         return Err(fail("reads the time".to_string()));
     }
-    let compiled = compile(&parsed);
-    if !compiled.branch_map.is_empty() {
-        return Err(fail("reads a branch current".to_string()));
-    }
-    Ok(compiled)
+    Ok(compile(&parsed))
 }
 
 fn reads_time(expression: &Expr) -> bool {
