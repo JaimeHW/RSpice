@@ -660,7 +660,7 @@ fn a_cross_probe_names_its_target_or_says_why_not() {
 }
 
 #[test]
-fn the_inspector_states_every_quantity_at_full_precision_with_the_deck_name() {
+fn the_inspector_states_every_quantity_to_nine_digits_with_the_deck_name() {
     let report = DeviceOpReport {
         entries: vec![device(
             "X1.M1",
@@ -686,7 +686,7 @@ fn the_inspector_states_every_quantity_at_full_precision_with_the_deck_name() {
         [
             ("Family", "MOSFET"),
             ("Region", "saturation"),
-            ("id", "1.234567891 mA"),
+            ("id", "1.23456789 mA"),
             ("temp", "27 \u{b0}C"),
             ("Identity", "X1.M1"),
         ]
@@ -824,6 +824,11 @@ fn a_failed_solve_offers_to_mark_what_it_named_at_the_end_of_its_row() {
     assert!(responses[1].highlight_failure_sites);
     let responses = play(&plan, &view(None), press_release(at));
     assert!(!responses[1].highlight_failure_sites);
+}
+
+#[test]
+fn the_readout_stops_short_of_floating_point_noise() {
+    assert_eq!(quantity_readout(768.000000000001e-9, "S"), "768 nS");
 }
 
 #[test]

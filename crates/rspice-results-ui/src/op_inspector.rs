@@ -58,7 +58,7 @@ const PROBLEM_ROW_H: f32 = 24.0;
 /// A retained value on the sheet reads to this many significant digits; the
 /// inspector and the hover carry the rest.
 const TABLE_SIGNIFICANT_DIGITS: usize = 6;
-const READOUT_SIGNIFICANT_DIGITS: usize = 15;
+const READOUT_SIGNIFICANT_DIGITS: usize = 9;
 const CELSIUS: &str = "\u{b0}C";
 const REGION_HEADER: &str = "Region";
 const DEVICES_TITLE: &str = "Device operating points";
@@ -908,7 +908,8 @@ fn value_parts(value: f64, unit: &str) -> (String, String) {
     }
 }
 
-/// A retained value at full precision: the inspector's and the hover's form.
+/// A retained value to nine digits, the last one a double's noise cannot
+/// reach: the inspector's and the hover's form.
 fn quantity_readout(value: f64, unit: &str) -> String {
     if !value.is_finite() {
         return NON_FINITE.to_owned();
@@ -1474,7 +1475,7 @@ impl<M: SchematicMapping> SheetPainter<'_, M> {
     }
 
     /// The whole name, the deck's identity, and the value under the pointer
-    /// at full precision.
+    /// to the inspector's digits.
     fn row_hover(&self, ui: &mut Ui, section: &PlanSection, row: RowSource<'_>, x: Option<f32>) {
         let (parent, leaf) = name_parts(row.name());
         let mono = |text: String, color| {
