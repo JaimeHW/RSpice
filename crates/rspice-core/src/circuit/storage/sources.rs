@@ -1489,11 +1489,11 @@ impl VoltageSources {
     /// `SFFM`'s carrier, modulating frequency and modulation index as this
     /// transient resolves them, in that order.
     ///
-    /// MDI is clamped against the resolved `FC/FM` ratio rather than against
-    /// the authored one, which is why the three come back together: reporting
-    /// a modulation index that was computed from a different pair of
-    /// frequencies than the ones beside it would be arithmetic nobody can
-    /// check.
+    /// The ngspice dialect clamps MDI against the resolved `FC/FM` ratio
+    /// rather than against the authored one, which is why the three come back
+    /// together: reporting a modulation index that was computed from a
+    /// different pair of frequencies than the ones beside it would be
+    /// arithmetic nobody can check.
     pub fn resolve_sffm_parameters_with_dialect(
         carrier_freq: Value,
         modulation_index: Value,
@@ -1570,8 +1570,8 @@ impl VoltageSources {
         }
     }
 
-    /// ngspice's analysis-scaled frequency defaults for SFFM/AM: an omitted
-    /// frequency becomes `cycles / tstop` (vsrcload.c uses 5 and 500).
+    /// An omitted SFFM/AM frequency scaled to the analysis, `cycles / tstop`:
+    /// ngspice's vsrcload.c uses 5 and 500 cycles, QSPICE one.
     #[inline]
     fn modulated_frequency_default(
         cycles: Value,

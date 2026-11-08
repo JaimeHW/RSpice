@@ -1226,8 +1226,8 @@ mod tests {
         sin_frequency(*frequency, timing)
     }
 
-    /// An SFFM carrier authored as zero is read as omitted and becomes
-    /// `5 / TSTOP`; the modulating frequency's own default is `500 / TSTOP`.
+    /// An SFFM carrier or modulating frequency authored as zero is read as
+    /// omitted and becomes `1 / TSTOP`, as QSPICE reads it.
     #[test]
     fn an_sffm_carrier_of_zero_reads_the_engine_substitution() {
         let record = definition(
@@ -1237,8 +1237,8 @@ mod tests {
         );
         let realization = StimulusRealization::of(&record, SpanChoice::Fit, timing(1e-3));
 
-        assert_eq!(readout(&realization, "FC"), "5 kHz");
-        assert_eq!(readout(&realization, "FM"), "500 kHz");
+        assert_eq!(readout(&realization, "FC"), "1 kHz");
+        assert_eq!(readout(&realization, "FM"), "1 kHz");
     }
 
     #[test]

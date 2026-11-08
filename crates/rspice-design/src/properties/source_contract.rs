@@ -592,39 +592,20 @@ fn pat_findings(fields: &SourceFields<'_>, findings: &mut Vec<SourceContractFind
 
 /// `SFFM(VO VA FC MDI FM TD PHASEM PHASEC)`.
 ///
-/// No refusals: the evaluator limits MDI with ngspice's if/else-if chain, so a
-/// negative FM turns `FC/FM` negative and MDI lands on that ratio (or on 0 when
-/// below it) — the card runs, it just never uses the authored index.
+/// No refusals: the engine reads the card as QSPICE does, so an FC or FM of 0
+/// is read as omitted and every other value, a negative frequency or an MDI
+/// above FC/FM included, stands as written.
 fn sffm_findings(fields: &SourceFields<'_>, findings: &mut Vec<SourceContractFinding>) {
-    if fields.number("fm").is_some_and(|signal| signal < 0.0) {
-        findings.push(SourceContractFinding::advisory(
-            "fm",
-            "A negative FM inverts the MDI limiter: MDI lands on FC/FM (negative, mirroring the modulation) or on 0, never on the authored value",
-        ));
-    }
-    if fields.number("fc").is_some_and(|carrier| carrier <= 0.0) {
+    if fields.number("fc").is_some_and(|carrier| carrier == 0.0) {
         findings.push(SourceContractFinding::advisory(
             "fc",
-            "An FC of 0 is read as omitted: the engine substitutes 5 / TSTOP",
+            "An FC of 0 is read as omitted: the engine substitutes 1 / TSTOP",
         ));
     }
     if fields.number("fm").is_some_and(|signal| signal == 0.0) {
         findings.push(SourceContractFinding::advisory(
             "fm",
-            "An FM of 0 is read as omitted: the engine substitutes 500 / TSTOP",
-        ));
-    }
-    if let (Some(index), Some(carrier), Some(signal)) = (
-        fields.number("mdi"),
-        fields.number("fc"),
-        fields.number("fm"),
-    ) && carrier > 0.0
-        && signal > 0.0
-        && (index < 0.0 || index > carrier / signal)
-    {
-        findings.push(SourceContractFinding::advisory(
-            "mdi",
-            "MDI is clamped to 0 … FC/FM at evaluation — the authored index is outside that range",
+            "An FM of 0 is read as omitted: the engine substitutes 1 / TSTOP",
         ));
     }
     if fields.number("td").is_some_and(|delay| delay > 0.0) {
@@ -978,37 +959,34 @@ mod tests {
         );
     }
 
-    /// Verified against the evaluator: the MDI limiter is ngspice's if/else-if
-    /// chain, so a negative FM lands MDI on the negative `FC/FM` ratio (or on
-    /// 0 when below it) and the run keeps going — advise, never refuse.
+    /// The engine takes a negative FM and an MDI above FC/FM as written, as
+    /// QSPICE does, so neither has anything to advise.
     #[test]
-    fn a_negative_sffm_signal_frequency_is_advised_not_refused() {
-        let findings = findings_for(
-            ComponentType::VoltageSourceSffm,
-            &[("fc", "1Meg"), ("fm", "-1k"), ("mdi", "1")],
-        );
-        assert!(refusals(&findings).is_empty(), "{findings:?}");
-        assert!(
-            advisories(&findings)
-                .iter()
-                .any(|finding| finding.field == "fm" && finding.message.contains("FC/FM")),
-            "{findings:?}"
-        );
+    fn a_negative_sffm_signal_frequency_and_a_large_index_stand_as_written() {
+        for fields in [
+            [("fc", "1Meg"), ("fm", "-1k"), ("mdi", "1")],
+            [("fc", "1k"), ("fm", "1k"), ("mdi", "50")],
+        ] {
+            let findings = findings_for(ComponentType::VoltageSourceSffm, &fields);
+            assert!(findings.is_empty(), "{fields:?}: {findings:?}");
+        }
     }
 
     #[test]
-    fn an_out_of_range_sffm_index_is_advised_as_clamped() {
+    fn a_zero_sffm_frequency_is_advised_as_one_cycle_over_tstop() {
         let findings = findings_for(
             ComponentType::VoltageSourceSffm,
-            &[("fc", "1k"), ("fm", "1k"), ("mdi", "50")],
+            &[("fc", "0"), ("fm", "0"), ("mdi", "1")],
         );
         assert!(refusals(&findings).is_empty(), "{findings:?}");
-        assert!(
-            advisories(&findings)
-                .iter()
-                .any(|finding| finding.field == "mdi" && finding.message.contains("clamped")),
-            "{findings:?}"
-        );
+        for field in ["fc", "fm"] {
+            assert!(
+                advisories(&findings)
+                    .iter()
+                    .any(|finding| finding.field == field && finding.message.contains("1 / TSTOP")),
+                "{field}: {findings:?}"
+            );
+        }
     }
 
     #[test]

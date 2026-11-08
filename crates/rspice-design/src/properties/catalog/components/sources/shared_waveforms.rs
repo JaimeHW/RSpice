@@ -109,7 +109,7 @@ impl PropertyCatalog {
         sheet.add(
             PropertyDefinition::new("mdi")
                 .with_display_name("Mod index (MDI)")
-                .with_description("Modulation index; limited to FC/FM during simulation")
+                .with_description("Modulation index")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(1.0))
                 .with_order(13)

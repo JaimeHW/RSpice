@@ -225,7 +225,7 @@ fn an_authored_pulse_width_still_previews_as_a_train() {
 }
 
 /// The SFFM pin. An authored `FC=0` is read as omitted and the engine puts
-/// `5 / TSTOP` in its place, so the same card previews differently under two
+/// `1 / TSTOP` in its place, so the same card previews differently under two
 /// stop times — which is exactly why the card names the transient it used.
 #[test]
 fn an_sffm_carrier_of_zero_previews_with_the_engine_tstop_substitution() {
@@ -251,7 +251,7 @@ fn an_sffm_carrier_of_zero_previews_with_the_engine_tstop_substitution() {
     let slow_span = slow.readouts().expect("readouts").span();
     assert!(
         fast_span > slow_span,
-        "5 / TSTOP is a faster carrier at the shorter stop time: {fast_span} vs {slow_span}"
+        "1 / TSTOP is a faster carrier at the shorter stop time: {fast_span} vs {slow_span}"
     );
 }
 

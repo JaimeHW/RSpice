@@ -259,7 +259,7 @@ pub(crate) const PREVIEW_DIALECT: SpiceDialect = SpiceDialect::BestAvailable;
 /// makes for an omitted field, so an edges-only `PULSE(0 5 0 1n 1n)` shows the
 /// single zero-width pulse the ngspice-46/47 rule produces rather than the
 /// square wave its labels suggest, and an `SFFM` authored with `FC=0` shows the
-/// engine's `5 / TSTOP` carrier.
+/// engine's `1 / TSTOP` carrier.
 ///
 /// The transient the substitutions resolve against is the plan's, never the
 /// window's: a preview looking at one period of a pulse train is still looking

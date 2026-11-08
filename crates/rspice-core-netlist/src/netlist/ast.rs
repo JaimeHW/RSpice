@@ -2114,13 +2114,15 @@ pub enum SourceSpec {
         offset: Value,
         /// VA: carrier amplitude
         amplitude: Value,
-        /// FC: carrier frequency in Hz (NaN = ngspice default 5/tstop)
+        /// FC: carrier frequency in Hz (NaN/0 = 1/tstop; 5/tstop in the
+        /// ngspice dialect)
         carrier_freq: Value,
-        /// MDI: modulation index (limited like ngspice: values above `FC/FM`
-        /// land on `FC/FM` — even when FM < 0 makes it negative — else
-        /// negative values land on 0)
+        /// MDI: modulation index (NaN = none). The ngspice dialect defaults it
+        /// to 90 and limits it: values above `FC/FM` land on `FC/FM` — even
+        /// when FM < 0 makes it negative — else negative values land on 0
         modulation_index: Value,
-        /// FM: signal (modulating) frequency in Hz (NaN/0 = 500/tstop)
+        /// FM: signal (modulating) frequency in Hz (NaN/0 = 1/tstop; 500/tstop
+        /// in the ngspice dialect)
         signal_freq: Value,
         /// TD: delay before the waveform starts
         delay: Value,

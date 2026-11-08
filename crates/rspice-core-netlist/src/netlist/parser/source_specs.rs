@@ -1049,8 +1049,8 @@ fn parse_trrandom_spec(
     })
 }
 
-/// Parse SFFM(VO VA FC MDI FM TD PHASEM PHASEC); omitted frequencies stay
-/// NaN so the transient runtime can resolve ngspice's tstop-based defaults.
+/// Parse SFFM(VO VA FC MDI FM TD PHASEM PHASEC); omitted values stay NaN so
+/// the transient runtime can resolve its dialect's tstop-based defaults.
 fn parse_sffm_spec(
     stream: &mut TokenStream,
     line_num: usize,
@@ -1092,7 +1092,7 @@ fn parse_sffm_spec(
     {
         log::warn!(
             "line {line_num}: SFFM modulation index {modulation_index} exceeds FC/FM = {}; \
-             it will be limited during simulation (ngspice behavior)",
+             the ngspice dialect limits it to that ratio",
             carrier_freq / signal_freq
         );
     }

@@ -278,49 +278,74 @@ impl VoltageSources {
         signal_freq: Value,
         context: Option<TransientSourceContext>,
     ) -> (Value, Value, Value) {
-        if Self::pulse_dialect(context) == crate::config::SpiceDialect::Xyce {
-            return (
-                if carrier_freq.is_finite() {
+        let authored_or_none = |modulation_index: Value| {
+            if modulation_index.is_finite() {
+                modulation_index
+            } else {
+                0.0
+            }
+        };
+        match Self::pulse_dialect(context) {
+            crate::config::SpiceDialect::Xyce => {
+                let default = Self::xyce_modulated_frequency_default(context);
+                let frequency = |authored: Value| {
+                    if authored.is_finite() {
+                        authored
+                    } else {
+                        default
+                    }
+                };
+                (
+                    frequency(carrier_freq),
+                    frequency(signal_freq),
+                    authored_or_none(modulation_index),
+                )
+            }
+            crate::config::SpiceDialect::BestAvailable => {
+                // QSPICE's rule: an omitted or zero FC or FS is one cycle
+                // over the stop time, an omitted MDI is no modulation, and
+                // an authored MDI stands as written.
+                let one_cycle = Self::modulated_frequency_default(1.0, context);
+                let frequency = |authored: Value| {
+                    if authored.is_finite() && authored != 0.0 {
+                        authored
+                    } else {
+                        one_cycle
+                    }
+                };
+                (
+                    frequency(carrier_freq),
+                    frequency(signal_freq),
+                    authored_or_none(modulation_index),
+                )
+            }
+            crate::config::SpiceDialect::Ngspice => {
+                let fc = if carrier_freq.is_finite() && carrier_freq > 0.0 {
                     carrier_freq
                 } else {
-                    Self::xyce_modulated_frequency_default(context)
-                },
-                if signal_freq.is_finite() {
+                    Self::modulated_frequency_default(5.0, context)
+                };
+                let fm = if signal_freq.is_finite() && signal_freq != 0.0 {
                     signal_freq
                 } else {
-                    Self::xyce_modulated_frequency_default(context)
-                },
-                if modulation_index.is_finite() {
-                    modulation_index
-                } else {
+                    Self::modulated_frequency_default(500.0, context)
+                };
+                // ngspice limits MDI with an if/else-if chain, not a symmetric
+                // clamp: a negative FM makes FC/FM negative, and any MDI above
+                // that ratio lands on the ratio itself. clamp(0.0, ratio) panics.
+                let ratio = fc / fm;
+                let mdi = if !modulation_index.is_finite() {
+                    90.0_f64.min(ratio)
+                } else if modulation_index > ratio {
+                    ratio
+                } else if modulation_index < 0.0 {
                     0.0
-                },
-            );
+                } else {
+                    modulation_index
+                };
+                (fc, fm, mdi)
+            }
         }
-        let fc = if carrier_freq.is_finite() && carrier_freq > 0.0 {
-            carrier_freq
-        } else {
-            Self::modulated_frequency_default(5.0, context)
-        };
-        let fm = if signal_freq.is_finite() && signal_freq != 0.0 {
-            signal_freq
-        } else {
-            Self::modulated_frequency_default(500.0, context)
-        };
-        // ngspice limits MDI with an if/else-if chain, not a symmetric
-        // clamp: a negative FM makes FC/FM negative, and any MDI above
-        // that ratio lands on the ratio itself. clamp(0.0, ratio) panics.
-        let ratio = fc / fm;
-        let mdi = if !modulation_index.is_finite() {
-            90.0_f64.min(ratio)
-        } else if modulation_index > ratio {
-            ratio
-        } else if modulation_index < 0.0 {
-            0.0
-        } else {
-            modulation_index
-        };
-        (fc, fm, mdi)
     }
 
     pub(super) fn am_frequencies(

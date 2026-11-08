@@ -262,7 +262,7 @@ r1 1 0 1k
 
 #[test]
 fn sffm_clamps_modulation_index_like_ngspice() {
-    // MDI=25 exceeds FC/FM=10, so ngspice clamps it to 10.
+    // MDI=25 exceeds FC/FM=10, so the ngspice dialect clamps it to 10.
     let deck = "\
 * sffm clamp
 v1 1 0 sffm(0 1 1meg 25 100k)
@@ -270,7 +270,13 @@ r1 1 0 1k
 .tran 10n 2u
 .end
 ";
-    let (times, values) = transient_node_values(deck, "1", 2.0e-6, 10.0e-9);
+    let (times, values) = transient_node_values_with_config(
+        deck,
+        "1",
+        2.0e-6,
+        10.0e-9,
+        SimulationConfig::default().with_spice_dialect(SpiceDialect::Ngspice),
+    );
     for (t, v) in times.iter().zip(values.iter()) {
         let expected = sffm_reference(*t, 0.0, 1.0, 1.0e6, 10.0, 1.0e5, 0.0);
         assert!(
@@ -293,7 +299,13 @@ r1 1 0 1k
 .tran 10n 2u
 .end
 ";
-    let (times, values) = transient_node_values(deck, "1", 2.0e-6, 10.0e-9);
+    let (times, values) = transient_node_values_with_config(
+        deck,
+        "1",
+        2.0e-6,
+        10.0e-9,
+        SimulationConfig::default().with_spice_dialect(SpiceDialect::Ngspice),
+    );
     assert!(times.len() > 100, "expected a dense transient");
     for (t, v) in times.iter().zip(values.iter()) {
         let expected = sffm_reference(*t, 0.0, 1.0, 1.0e6, -10.0, -1.0e5, 0.0);
@@ -335,6 +347,63 @@ r1 1 0 1k
         times.iter().any(|t| (t - 1.0e-6).abs() < 1e-12),
         "TD must be a breakpoint timepoint"
     );
+}
+
+/// The default dialect reads SFFM as QSPICE does: an omitted MDI is no
+/// modulation, an omitted or zero FC or FS is one cycle over the stop time,
+/// and an authored MDI or a negative frequency stands as written, with no
+/// limit at FC/FS. QSPICE at 100 ns, in node order: 0 (a zero crossing of
+/// the bare 10 MHz carrier), 0.153894, 0.309017, -0.412915, 0.153894,
+/// 0.57127, 0.309214 and -0.28968.
+#[test]
+fn sffm_defaults_follow_qspice() {
+    let deck = "\
+* sffm defaults
+v1 n1 0 sffm(0 1 10meg)
+r1 n1 0 1k
+v2 n2 0 sffm(0 1 10meg 0.5)
+r2 n2 0 1k
+v3 n3 0 sffm(0 1)
+r3 n3 0 1k
+v4 n4 0 sffm(0 1 1meg 5 1meg)
+r4 n4 0 1k
+v5 n5 0 sffm(0 1 10meg 0.5 0)
+r5 n5 0 1k
+v6 n6 0 sffm(0 1 0 0.5 1meg)
+r6 n6 0 1k
+v7 n7 0 sffm(0 1 1meg 5 -100k)
+r7 n7 0 1k
+v8 n8 0 sffm(0 1 10meg -0.5 1meg)
+r8 n8 0 1k
+.end
+";
+    let one_cycle = 1.0 / 2.0e-6;
+    let expected = [
+        ("n1", 10.0e6, 0.0, 0.0),
+        ("n2", 10.0e6, 0.5, one_cycle),
+        ("n3", one_cycle, 0.0, one_cycle),
+        ("n4", 1.0e6, 5.0, 1.0e6),
+        ("n5", 10.0e6, 0.5, one_cycle),
+        ("n6", one_cycle, 0.5, 1.0e6),
+        ("n7", 1.0e6, 5.0, -1.0e5),
+        ("n8", 10.0e6, -0.5, 1.0e6),
+    ];
+    let netlist = Netlist::parse(deck).expect("parse");
+    let result = Engine::new(SimulationConfig::default())
+        .run_tran(&netlist, 2.0e-6, 1.0e-9)
+        .expect("transient");
+    for (node, fc, mdi, fs) in expected {
+        let values = result
+            .try_voltage_waveform_named(node)
+            .unwrap_or_else(|| panic!("node {node} missing"));
+        for (t, v) in result.time.iter().zip(values) {
+            let expected = sffm_reference(*t, 0.0, 1.0, fc, mdi, fs, 0.0);
+            assert!(
+                (v - expected).abs() < TOL,
+                "{node} at t={t}: got {v}, formula {expected}"
+            );
+        }
+    }
 }
 
 #[test]
