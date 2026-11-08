@@ -548,7 +548,7 @@ impl LogicModel {
                     }
                 }
                 let state = if operating_point {
-                    0
+                    u32::from(self.stage.initial == Some(true))
                 } else {
                     device.next(state as u32, before, now)
                 };
@@ -658,18 +658,26 @@ impl CodeModel for LogicModel {
                 ctx.state_prev(slot::STATE),
                 true,
             );
-            let (high, high_b) = bits(desired);
+            // A gate or Schmitt trigger given `IC` drives it here, and its
+            // function takes over `Td` after time zero.
+            let held = match (&self.decision, stage.initial) {
+                (Decision::Sequential { .. }, _) | (_, None) => None,
+                (_, Some(high)) => Some(word(high, !high)),
+            };
+            let level = held.unwrap_or(desired);
+            let (high, high_b) = bits(level);
             let (q, qb) = (stage.level(high), stage.level(high_b));
             ctx.set_initial_state(slot::DESIRED, desired);
-            ctx.set_initial_state(slot::LEVEL, desired);
+            ctx.set_initial_state(slot::LEVEL, level);
             ctx.set_initial_state(slot::Q, q);
             ctx.set_initial_state(slot::QB, qb);
             ctx.set_initial_state(slot::STATE, state);
-            ctx.set_initial_state(slot::SINCE, Value::MIN);
+            let since = if held.is_some() { 0.0 } else { Value::MIN };
+            ctx.set_initial_state(slot::SINCE, since);
             for (index, input) in self.operating_point_inputs(inputs).into_iter().enumerate() {
                 ctx.set_initial_state(slot::INPUTS + index, input);
             }
-            (desired, q, qb)
+            (level, q, qb)
         } else {
             let (start, now) = (ctx.time_prev, ctx.time);
             let was_desired = ctx.state_prev(slot::DESIRED);

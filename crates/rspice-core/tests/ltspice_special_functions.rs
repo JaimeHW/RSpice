@@ -373,6 +373,60 @@ A5 in 0 0 0 0 0 o5 0 OR Ref=0.5 Vh=0.2
     }
 }
 
+#[test]
+fn an_initial_condition_holds_a_gate_through_the_operating_point_and_starts_a_flip_flop() {
+    let deck = "* logic IC
+V1 in1 0 1
+V0 lo 0 0
+A1 in1 0 0 0 0 0 o1 0 SCHMITT Vt=1 Vh=0.5 IC=1
+A3 lo 0 0 0 0 0 o3 0 OR IC=1
+A5 in1 0 0 0 0 0 o5 0 SCHMITT Vt=1 Vh=0.5
+A6 lo 0 0 0 0 0 o6 0 OR IC=1 Td=10u
+A7 lo 0 lo 0 0 0 q7 0 DFLOP ic=1
+A8 lo lo 0 0 0 qb8 q8 0 SRFLOP ic=0.7
+A9 lo 0 0 0 0 qb9 q9 0 OR ic=0.5
+A10 in1 0 0 0 0 qb10 q10 0 SCHMITT Vt=0.5 Vh=0.1 IC=0 Td=5u
+.end
+";
+    // LTspice 26.1.1: a gate or Schmitt trigger drives its IC in the
+    // operating point and its function from time zero, Td later; a
+    // flip-flop starts in its IC state and keeps it. IC reads high above 0.5.
+    let probes = [
+        ("o1", 0.0, 1.0),
+        ("o3", 0.0, 1.0),
+        ("o5", 0.0, 0.0),
+        ("o6", 0.0, 1.0),
+        ("q7", 0.0, 1.0),
+        ("q8", 0.0, 1.0),
+        ("qb8", 0.0, 0.0),
+        ("q9", 0.0, 0.0),
+        ("qb9", 0.0, 1.0),
+        ("q10", 0.0, 0.0),
+        ("qb10", 0.0, 1.0),
+        ("o1", 3e-6, 0.0),
+        ("o3", 3e-6, 0.0),
+        ("o6", 3e-6, 1.0),
+        ("q10", 3e-6, 0.0),
+        ("o6", 7e-6, 1.0),
+        ("q10", 7e-6, 1.0),
+        ("qb10", 7e-6, 0.0),
+        ("o6", 15e-6, 0.0),
+        ("q7", 15e-6, 1.0),
+        ("q8", 15e-6, 1.0),
+        ("qb8", 15e-6, 0.0),
+    ];
+    let points: Vec<(&str, f64)> = probes.iter().map(|(n, t, _)| (*n, *t)).collect();
+    let values = tran_at(deck, 20e-6, 0.1e-6, &points);
+    for ((node, time, expected), actual) in probes.iter().zip(values) {
+        assert_close(&format!("{node} at {time:e}"), actual, *expected, 1e-6);
+    }
+    let counter = build_error("* bad\nV1 c 0 0\nA1 c 0 0 0 0 0 q 0 COUNTER cycles=4 ic=1\n.end\n");
+    assert!(
+        counter.contains("COUNTER does not define parameter IC"),
+        "{counter}"
+    );
+}
+
 fn ota_noise_density(deck: &str, mechanism: &str, frequencies: &[f64]) -> Vec<f64> {
     device_noise_density(deck, "A1", mechanism, frequencies)
 }

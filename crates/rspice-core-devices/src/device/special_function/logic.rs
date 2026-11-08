@@ -14,6 +14,11 @@
 //! slews: `dx/dt = clamp((L − x)/τ, −Sfall, Srise)` with
 //! `S = (Vhigh − Vlow)/T` and `τ = 0.1·Trise·Tfall/(Trise + Tfall)`, a
 //! linear ramp that settles exponentially over its last `S·τ`.
+//!
+//! `IC` above 0.5 starts `Q` high and below it low. A gate or Schmitt
+//! trigger holds that level through the operating point only: from the first
+//! time step its function decides, and a change reaches the outputs `Td`
+//! after time zero.
 
 use super::{InstanceParams, SpecialFunctionError, require};
 use crate::Value;
@@ -63,6 +68,8 @@ pub struct OutputStage {
     pub tfall: Value,
     /// Largest step the simulator takes after a state change.
     pub tripdt: Option<Value>,
+    /// Whether `Q` starts high, from `IC`.
+    pub initial: Option<bool>,
 }
 
 impl OutputStage {
@@ -79,6 +86,7 @@ impl OutputStage {
         let trise = p.or("TRISE", 0.0)?;
         let tfall = p.or("TFALL", trise)?;
         let tripdt = p.get("TRIPDT")?;
+        let initial = p.get("IC")?.map(|ic| ic > 0.5);
         require(vhigh > vlow, || {
             format!("{device} needs Vhigh above Vlow (Vhigh={vhigh}, Vlow={vlow})")
         })?;
@@ -127,6 +135,7 @@ impl OutputStage {
             trise,
             tfall,
             tripdt,
+            initial,
         })
     }
 

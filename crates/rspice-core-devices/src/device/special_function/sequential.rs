@@ -10,9 +10,10 @@
 //! period and `Phi2` (terminal 6) for as many counts half a period later.
 //! Terminals without a function are ignored.
 //!
-//! A flip-flop starts low and a counter at zero, and neither changes state
-//! in the operating point: the first time step applies the inputs. The
-//! counter switches its phases on the clock edge whatever `Td` says.
+//! A flip-flop starts low, or high given `IC` above 0.5, and a counter at
+//! zero, and neither changes state in the operating point: the first time
+//! step applies the inputs. The counter switches its phases on the clock edge
+//! whatever `Td` says, and takes no `IC`.
 
 use super::logic::OutputStage;
 use super::{InstanceParams, SpecialFunctionError, require};
@@ -71,6 +72,9 @@ impl Sequential {
                         .clamp(0.0, cycles.into()) as u32,
                     None => cycles / 2,
                 };
+                require(stage.initial.is_none(), || {
+                    "COUNTER does not define parameter IC".to_string()
+                })?;
                 stage.delay = 0.0;
                 SequentialFunction::Counter { cycles, high }
             }
