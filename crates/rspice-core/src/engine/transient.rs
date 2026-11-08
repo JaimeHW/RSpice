@@ -7107,6 +7107,7 @@ impl Engine {
         // every DiagnosticTimer below avoids the underlying clock query.
         let diagnostic_timing_enabled = log::log_enabled!(log::Level::Debug);
         let transient_wall_start = DiagnosticTimer::start(diagnostic_timing_enabled);
+        let newton_iterations_at_start = self.convergence_quality().total_iterations;
         let mut total_stamp_nanos: u128 = 0;
         let mut total_solve_nanos: u128 = 0;
         let mut total_trunc_nanos: u128 = 0;
@@ -13229,8 +13230,11 @@ impl Engine {
         }
         let transient_wall = transient_wall_start.elapsed();
         log::debug!(
-            "Transient Newton phases: {} step attempts, {} merit trials, {} merit retries, {} failed attempts (v={} d={} r={}), top {:.3}s, setup {:.3}s, stamp {:.3}s, solve {:.3}s, merit {:.3}s, postsolve {:.3}s, postloop {:.3}s, trunc {:.3}s, trap-trial {:.3}s, acceptance {:.3}s, tail {:.3}s, middle {:.3}s, other {:.3}s (wall {:.3}s)",
+            "Transient Newton phases: {} step attempts, {} Newton iterations, {} merit trials, {} merit retries, {} failed attempts (v={} d={} r={}), top {:.3}s, setup {:.3}s, stamp {:.3}s, solve {:.3}s, merit {:.3}s, postsolve {:.3}s, postloop {:.3}s, trunc {:.3}s, trap-trial {:.3}s, acceptance {:.3}s, tail {:.3}s, middle {:.3}s, other {:.3}s (wall {:.3}s)",
             total_step_attempts,
+            self.convergence_quality()
+                .total_iterations
+                .saturating_sub(newton_iterations_at_start),
             total_merit_trials,
             total_merit_retries,
             total_failed_attempts,
