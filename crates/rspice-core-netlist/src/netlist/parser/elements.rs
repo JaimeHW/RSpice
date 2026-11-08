@@ -10263,6 +10263,72 @@ fn parse_string_field_value(raw_value: &str, params_ctx: &ParamContext) -> Optio
 }
 
 #[cfg(test)]
+mod literal_resistor_tests {
+    use super::*;
+
+    fn through_the_token_parser(card: &str, params: &ParamContext) -> Element {
+        let mut stream = TokenStream::new(tokenize(card).expect("card tokenizes"));
+        let mut elements = Vec::new();
+        let mut diagnostics = Vec::new();
+        parse_resistor(
+            &mut stream,
+            1,
+            &mut elements,
+            params,
+            &mut diagnostics,
+            false,
+            None,
+        )
+        .expect("card parses");
+        elements.pop().expect("one resistor")
+    }
+
+    fn resistance(element: &Element) -> Value {
+        let ElementKind::Resistor { value, .. } = element.kind else {
+            panic!("{} is not a resistor", element.name);
+        };
+        value
+    }
+
+    #[test]
+    fn a_plain_card_reads_as_the_token_parser_reads_it() {
+        let params = ParamContext::default();
+        for card in [
+            "R1 a b 1k",
+            "r_2 0 12 4700",
+            "RX N1 007 1e3",
+            "R3\ta  b 5MEG",
+            "R4 2b c 10",
+        ] {
+            let read = parse_literal_resistor(card, &params).expect("plain card");
+            let parsed = through_the_token_parser(card, &params);
+            assert_eq!(read.name, parsed.name, "{card}");
+            assert_eq!(read.nodes, parsed.nodes, "{card}");
+            assert_eq!(resistance(&read), resistance(&parsed), "{card}");
+        }
+    }
+
+    #[test]
+    fn any_other_card_is_left_to_the_token_parser() {
+        let mut params = ParamContext::default();
+        params.set("RVAL", 2.0);
+        for card in [
+            "R1 a b",
+            "R1 a b 1k tc1=0.01",
+            "R1 a b {2}",
+            "R1 a b rmod",
+            "R1 a b RVAL",
+            "R1 a b 1.5",
+            "R1 a b 1k;note",
+            "C1 a b 1k",
+            " R1 a b 1k",
+        ] {
+            assert!(parse_literal_resistor(card, &params).is_none(), "{card}");
+        }
+    }
+}
+
+#[cfg(test)]
 mod xyce_ydevice_table_tests {
     use super::{XyceYDeviceFamily, XyceYDeviceOwnership, xyce_legacy_y_gate_spec};
 
