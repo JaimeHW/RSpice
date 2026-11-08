@@ -518,3 +518,71 @@ fn the_highlighter_rereads_the_lines_after_an_edit() {
     assert_eq!(text, "module m(a);");
     assert_eq!(spans[1].class, SyntaxClass::ModuleName);
 }
+
+#[test]
+fn an_edit_is_placed_in_the_lines_it_changed() {
+    let changed = |before: &str, after: &str| {
+        changed_lines(&Rope::from_str(before), &Rope::from_str(after))
+            .map(|lines| (lines.first, lines.old_end, lines.new_end))
+    };
+    assert_eq!(changed("a\nb\nc\n", "a\nb\nc\n"), None);
+    assert_eq!(changed("a\nb\nc\n", "a\nB\nc\n"), Some((0, 2, 2)));
+    assert_eq!(
+        changed("a\nb\n", "a\nx\nb\n"),
+        Some((0, 1, 2)),
+        "a line put in"
+    );
+    assert_eq!(
+        changed("a\nx\ny\nb\n", "a\nb\n"),
+        Some((0, 3, 1)),
+        "two lines taken out"
+    );
+    assert_eq!(
+        changed("a\nb\nc\n", "a\r\nb\nc\n"),
+        Some((0, 1, 1)),
+        "a carriage return put before a line feed"
+    );
+    assert_eq!(changed("abc", "abd"), Some((0, 1, 1)));
+}
+
+/// Edits anywhere, read back from a view at the end of the source, read as
+/// the edited source does from its start: the lines after an edit are kept
+/// only when the state they start in is the state they were read in.
+#[test]
+fn an_edit_reads_back_as_the_edited_source_reads_afresh() {
+    let mut text: String = (0..300)
+        .map(|n| format!("  x{n} = {n}; // line {n}\n"))
+        .collect();
+    let edits = [
+        ("x10 = 10;", "x10 = 11;"),
+        ("x20 = 20;", "x20 = 20; /*"),
+        ("x40 = 40;", "x40 = 40; */"),
+        (
+            "x60 = 60; // line 60\n",
+            "x60 = 60; // line 60\n  y = 1;\n  z = 2;\n",
+        ),
+        ("  x80 = 80; // line 80\n  x81 = 81; // line 81\n", ""),
+        ("x100 = 100;", "s = \"a\\"),
+        ("x101 = 101;", "x101 = 101; \""),
+        ("\n  x150", "\r\n  x150"),
+        ("x20 = 20; /*", "x20 = 20;"),
+        ("x290 = 290;", "(* x = 1 "),
+    ];
+    let mut document = TextDocumentModel::from_source(&text);
+    let mut highlighter = VerilogAHighlighter::default();
+    let last = |document: &TextDocumentModel| document.line_count() - 1;
+    let _ = highlighter.line(&document, last(&document));
+    for (from, to) in edits {
+        assert!(text.contains(from), "{from:?}");
+        text = text.replacen(from, to, 1);
+        assert!(document.synchronize_source(&text));
+        let mut fresh = VerilogAHighlighter::default();
+        for line in (0..=last(&document)).rev().step_by(7) {
+            assert_eq!(
+                highlighter.line(&document, line),
+                fresh.line(&document, line),
+                "line {line} after {from:?} became {to:?}"
+            );
+        }
+    }
+}

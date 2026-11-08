@@ -12,6 +12,7 @@ use std::hash::{Hash, Hasher};
 use std::ops::Range;
 use std::sync::{Arc, OnceLock};
 
+use ropey::Rope;
 use rspice_veriloga::error::LexerErrorKind;
 use rspice_veriloga::{Lexer, SourceId, Token, TokenKind};
 
@@ -496,14 +497,19 @@ type LineReading = (Arc<[SyntaxSpan]>, LineState);
 
 /// Each line's entry state and its classified spans, kept between frames so a
 /// frame reads only the lines it shows and an edit rereads only from where it
-/// was made.
+/// was made, through the lines it changed, to where the state reading them
+/// leaves agrees with the state the unchanged lines after them were read in.
 #[derive(Clone, Default)]
 pub(crate) struct VerilogAHighlighter {
     lines: Vec<LineRecord>,
-    /// The document revision `verified` counts lines of.
-    revision: Option<(u64, usize)>,
+    /// The text the records describe and the document revision it was.
+    text: Option<(Rope, (u64, usize))>,
     /// Leading lines checked against the document this revision.
     verified: usize,
+    /// After an edit, the first line past the lines it changed, and the
+    /// count of leading lines checked once that line is reached in the
+    /// state it was read in before the edit.
+    resume: Option<(usize, usize)>,
     /// Each reading of a line: its spans and the state it leaves.
     readings: HashMap<(u64, LineState), LineReading>,
 }
@@ -525,9 +531,9 @@ impl VerilogAHighlighter {
         logical_line: usize,
     ) -> (Arc<[SyntaxSpan]>, String) {
         let key = (document.revision(), document.len_chars());
-        if self.revision != Some(key) {
-            self.revision = Some(key);
-            self.verified = 0;
+        if self.text.as_ref().map(|(_, read)| *read) != Some(key) {
+            self.realign(document.rope());
+            self.text = Some((document.rope().clone(), key));
             self.lines.truncate(document.line_count().max(1));
         }
         let entry = self.entry_state(document, logical_line);
@@ -550,6 +556,49 @@ impl VerilogAHighlighter {
         (spans, exit)
     }
 
+    /// Fit the records to `text`: keep those of the lines before the
+    /// stretch an edit changed and, shifted, those of the lines after it.
+    fn realign(&mut self, text: &Rope) {
+        let Some((before, _)) = self.text.as_ref() else {
+            *self = Self {
+                readings: std::mem::take(&mut self.readings),
+                ..Self::default()
+            };
+            return;
+        };
+        let Some(ChangedLines {
+            first,
+            old_end,
+            new_end,
+        }) = changed_lines(before, text)
+        else {
+            return;
+        };
+        let checked = self.verified;
+        self.verified = checked.min(first);
+        self.resume = None;
+        if old_end >= self.lines.len() {
+            self.lines.truncate(first + 1);
+        } else {
+            self.lines.splice(
+                first + 1..old_end,
+                std::iter::repeat_n(
+                    LineRecord {
+                        entry: LineState::default(),
+                        read: None,
+                    },
+                    new_end - first - 1,
+                ),
+            );
+            if checked >= old_end {
+                self.resume = Some((new_end, checked - old_end + new_end));
+            }
+        }
+        if let Some(record) = self.lines.get_mut(first) {
+            record.read = None;
+        }
+    }
+
     /// The state `logical_line` starts in, read forward from the last line
     /// this revision has already checked.
     fn entry_state(&mut self, document: &TextDocumentModel, logical_line: usize) -> LineState {
@@ -562,6 +611,20 @@ impl VerilogAHighlighter {
         let target = logical_line.min(document.line_count().saturating_sub(1));
         while self.verified < target {
             let line = self.verified;
+            if let Some((first_unchanged, checked)) = self.resume
+                && line == first_unchanged
+            {
+                // The first line after the edit starts in the state it was
+                // read in before: every line after it reads as it did.
+                self.resume = None;
+                if self.lines[line]
+                    .read
+                    .is_some_and(|(_, entry)| entry == self.lines[line].entry)
+                {
+                    self.verified = checked.min(self.lines.len() - 1).max(line);
+                    continue;
+                }
+            }
             let text = line_text(document, line);
             let reading = (text_hash(&text), self.lines[line].entry);
             if self.lines[line].read != Some(reading) || self.lines.len() <= line + 1 {
@@ -578,6 +641,111 @@ impl VerilogAHighlighter {
             self.verified += 1;
         }
         self.lines[target.min(self.lines.len() - 1)].entry
+    }
+}
+
+/// The lines an edit changed, from the text before it to the text after.
+#[derive(Debug, PartialEq, Eq)]
+struct ChangedLines {
+    /// The first line that may read differently.
+    first: usize,
+    /// The first line after the change, before it and after it: the lines
+    /// from these on are the same text.
+    old_end: usize,
+    new_end: usize,
+}
+
+/// Where `after` differs from `before`, in lines, or `None` when it does not.
+/// The unchanged lines after the change start after a line feed in both
+/// texts, so a carriage return the edit added or removed before it cannot
+/// make the two texts break their lines differently.
+fn changed_lines(before: &Rope, after: &Rope) -> Option<ChangedLines> {
+    let prefix = common_prefix(before, after);
+    if prefix == before.len_bytes() && prefix == after.len_bytes() {
+        return None;
+    }
+    let most = before.len_bytes().min(after.len_bytes()) - prefix;
+    let suffix = common_suffix(before, after).min(most);
+    let first = before.byte_to_line(prefix).saturating_sub(1);
+    let start = before.len_bytes() - suffix;
+    let starts_line = |text: &Rope, at: usize| at > 0 && text.byte(at - 1) == b'\n';
+    let shared = if starts_line(before, start) && starts_line(after, after.len_bytes() - suffix) {
+        suffix
+    } else if let Some(feed) = before.bytes_at(start).position(|byte| byte == b'\n') {
+        suffix - feed - 1
+    } else {
+        return Some(ChangedLines {
+            first,
+            old_end: before.len_lines(),
+            new_end: after.len_lines(),
+        });
+    };
+    Some(ChangedLines {
+        first,
+        old_end: before.byte_to_line(before.len_bytes() - shared),
+        new_end: after.byte_to_line(after.len_bytes() - shared),
+    })
+}
+
+fn common_prefix(before: &Rope, after: &Rope) -> usize {
+    common_run(before.chunks(), after.chunks(), false)
+}
+
+fn common_suffix(before: &Rope, after: &Rope) -> usize {
+    fn backwards(text: &Rope) -> ropey::iter::Chunks<'_> {
+        text.chunks_at_byte(text.len_bytes()).0.reversed()
+    }
+    common_run(backwards(before), backwards(after), true)
+}
+
+/// The bytes two chunk sequences agree on from their start, or from their
+/// end when `backwards`, where the chunks come last first.
+fn common_run<'a>(
+    mut left: impl Iterator<Item = &'a str>,
+    mut right: impl Iterator<Item = &'a str>,
+    backwards: bool,
+) -> usize {
+    let (mut a, mut b): (&[u8], &[u8]) = (&[], &[]);
+    let mut same = 0;
+    loop {
+        if a.is_empty() {
+            let Some(chunk) = left.next() else {
+                return same;
+            };
+            a = chunk.as_bytes();
+        }
+        if b.is_empty() {
+            let Some(chunk) = right.next() else {
+                return same;
+            };
+            b = chunk.as_bytes();
+        }
+        let length = a.len().min(b.len());
+        let (x, y) = if backwards {
+            (&a[a.len() - length..], &b[b.len() - length..])
+        } else {
+            (&a[..length], &b[..length])
+        };
+        if x != y {
+            let agreeing = if backwards {
+                x.iter()
+                    .rev()
+                    .zip(y.iter().rev())
+                    .take_while(|(p, q)| p == q)
+                    .count()
+            } else {
+                x.iter().zip(y).take_while(|(p, q)| p == q).count()
+            };
+            return same + agreeing;
+        }
+        same += length;
+        if backwards {
+            a = &a[..a.len() - length];
+            b = &b[..b.len() - length];
+        } else {
+            a = &a[length..];
+            b = &b[length..];
+        }
     }
 }
 

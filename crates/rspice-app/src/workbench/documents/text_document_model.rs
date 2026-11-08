@@ -637,6 +637,12 @@ impl TextDocumentModel {
         self.text.lines()
     }
 
+    /// The text, for a reader that compares it with a copy it kept: a clone
+    /// shares the text's storage, so keeping one costs little.
+    pub const fn rope(&self) -> &Rope {
+        &self.text
+    }
+
     fn commit_history(&mut self, before: Rope, before_selections: Vec<TextSelection>) {
         self.undo.push(HistoryEntry {
             before,
