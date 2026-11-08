@@ -745,6 +745,16 @@ impl LexError {
 //=============================================================================
 
 /// Tokenize a SPICE netlist string
+/// The one token `field` spells, read as [`tokenize`] would read it, or
+/// `None` when the field is empty or more than one token.
+pub(crate) fn single_token(field: &str) -> Option<TokenKind> {
+    if field.is_empty() {
+        return None;
+    }
+    let (kind, consumed) = Lexer::new(field).next_token(field).ok()?;
+    (consumed == field.len()).then_some(kind)
+}
+
 pub fn tokenize(input: &str) -> Result<Vec<Token>, LexError> {
     let mut lexer = Lexer::new(input);
     lexer.tokenize()

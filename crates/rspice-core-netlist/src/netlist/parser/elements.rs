@@ -4,6 +4,66 @@ use super::*;
 use crate::netlist::lexer::Token;
 use crate::netlist::{ElementProvenance, GeneratedPassiveHelperRole, XspicePort};
 
+/// Reads `Rname node node value` straight from its fields when the value is
+/// a literal and nothing follows it, the form every resistor of a generated
+/// or extracted deck takes. Any other spelling returns `None` for
+/// [`parse_resistor`] to read through the token stream.
+pub(super) fn parse_literal_resistor(line: &str, params: &ParamContext) -> Option<Element> {
+    use crate::netlist::lexer::{is_xyce_device_name, single_token};
+
+    if !line.starts_with(['R', 'r']) {
+        return None;
+    }
+    let mut fields = line.split([' ', '\t']).filter(|field| !field.is_empty());
+    let (name, node_pos, node_neg, value) = (
+        fields.next()?,
+        fields.next()?,
+        fields.next()?,
+        fields.next()?,
+    );
+    let is_plain = |field: &str| {
+        field
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+    };
+    if fields.next().is_some() || ![name, node_pos, node_neg, value].into_iter().all(is_plain) {
+        return None;
+    }
+    let TokenKind::Ident(name) = single_token(name)? else {
+        return None;
+    };
+    if !is_xyce_device_name(&name) {
+        return None;
+    }
+    let node = |field: &str| match single_token(field)? {
+        TokenKind::Ident(node) => Some(node),
+        TokenKind::Number(_) if field.bytes().all(|byte| byte.is_ascii_digit()) => {
+            Some(field.to_string())
+        }
+        _ => None,
+    };
+    let nodes = vec![node(node_pos)?, node(node_neg)?];
+    let value = match single_token(value)? {
+        TokenKind::Number(value) => value,
+        TokenKind::Ident(value) if params.get(&value).is_none() => {
+            parse_spice_value(&value).ok()?
+        }
+        _ => return None,
+    };
+    Some(Element {
+        name,
+        kind: ElementKind::Resistor {
+            value,
+            value_expr: None,
+            model: None,
+            instance_params: Vec::new(),
+            deferred_params: Vec::new(),
+        },
+        nodes,
+        provenance: crate::netlist::ElementProvenance::Authored,
+    })
+}
+
 pub(super) fn parse_resistor(
     stream: &mut TokenStream,
     line_num: usize,

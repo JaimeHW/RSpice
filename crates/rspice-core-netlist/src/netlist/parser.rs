@@ -1351,6 +1351,9 @@ fn apply_root_preprocessing(
         .split_whitespace()
         .next()
         .unwrap_or_default();
+        if !head.starts_with('.') {
+            return LogicalLinePolicy::Rewrite;
+        }
         if !is_root && head.eq_ignore_ascii_case(".PREPROCESS") {
             return LogicalLinePolicy::InertIncludedPreprocess;
         }
@@ -2448,7 +2451,7 @@ fn scan_root_preprocess_logical_line(
     first_remove_unused_line: &mut usize,
     abort: &dyn AbortSignal,
 ) -> Result<(), ParseWithAbortError> {
-    if logical_line.is_empty() {
+    if !logical_line.trim_start().starts_with('.') {
         return Ok(());
     }
     let fields = xyce_logical_fields_with_abort(logical_line, abort)?;

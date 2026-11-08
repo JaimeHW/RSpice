@@ -15,6 +15,15 @@ pub(super) fn strip_inline_semicolon_comment_with_non_semicolon_comments(
     line: &str,
     allow_non_semicolon_comments: bool,
 ) -> &str {
+    // Every comment marker below is one of these bytes, so a card with none
+    // of them has nothing to strip.
+    if !line
+        .bytes()
+        .any(|byte| matches!(byte, b';' | b'$' | b'/' | b'#'))
+    {
+        return line;
+    }
+
     // ngspice rewrites a leading `#` to `*` (inp_stripcomments_line in
     // inpcom.c), and reads an indented one the same way.
     if allow_non_semicolon_comments && line.trim_start().starts_with('#') {
@@ -642,6 +651,12 @@ pub(super) fn parse_line(
     measurements: &mut Vec<MeasureStatement>,
     context: ParseLineContext<'_>,
 ) -> Result<(), ParseWithAbortError> {
+    if context.parameter_direction.is_none()
+        && let Some(resistor) = parse_literal_resistor(line, params)
+    {
+        elements.push(resistor);
+        return Ok(());
+    }
     let cancellation = NumericParseAbort::new(context.abort);
     let abort: &dyn AbortSignal = &cancellation;
     let defer_simple_param_refs =
