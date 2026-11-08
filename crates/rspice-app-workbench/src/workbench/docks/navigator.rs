@@ -2,7 +2,7 @@
 
 pub mod rail;
 
-use egui::{Align, Key, Modifiers, Response, ScrollArea, Sense, Ui};
+use egui::{Align, Key, Modifiers, Response, ScrollArea, Ui};
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -12,17 +12,9 @@ use crate::workbench::framework::workbench_host::WorkbenchHost;
 
 use super::super::state::Workspace;
 use crate::ui::panels::{PANEL_HEADER_H, WorkbenchIcon};
+use crate::ui::widgets::{FILTER_CLEAR_INSET, filter_field_clear};
 
 pub const PANEL_SEARCH_MARGIN_X: f32 = 8.0;
-/// The right inset a filter field keeps while it holds a query, so its text
-/// column ends before the control that empties it.
-const PANEL_SEARCH_CLEAR_INSET: i8 = 26;
-/// The clear control's hit target — the field's own height less its border, so
-/// the whole right inset answers the pointer.
-const PANEL_SEARCH_CLEAR_TARGET: f32 = 22.0;
-/// The crossing strokes inside that target, at the size the search mark
-/// opposite it is drawn.
-const PANEL_SEARCH_CLEAR_MARK: f32 = 13.0;
 pub const SCHEMATIC_NAV_ROW_HEIGHT: f32 = 24.0;
 pub const SCHEMATIC_NAV_LABEL_SIZE: f32 = tokens::FS_1;
 pub const SCHEMATIC_NAV_META_SIZE: f32 = 10.0;
@@ -224,11 +216,7 @@ pub fn panel_search_keys(
                 .font(theme::field_sans())
                 .margin(egui::Margin {
                     left: 29,
-                    right: if clearable {
-                        PANEL_SEARCH_CLEAR_INSET
-                    } else {
-                        8
-                    },
+                    right: if clearable { FILTER_CLEAR_INSET } else { 8 },
                     top: 5,
                     bottom: 5,
                 }),
@@ -245,21 +233,7 @@ pub fn panel_search_keys(
             ),
             t.color.text_faint,
         );
-        let cleared = clearable && panel_search_clear(ui, id, &response);
-        // `lost_focus` as well as `has_focus`: egui takes the focus off a text
-        // field the moment it reads the Escape, so by the time the field is
-        // painted the press has already cost it the focus it is being asked
-        // about.
-        let escaped = clearable
-            && (response.has_focus() || response.lost_focus())
-            && ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Escape));
-        if cleared || escaped {
-            query.clear();
-        }
-        if cleared {
-            // The pointer emptied the field; the reader is still in it.
-            response.request_focus();
-        }
+        filter_field_clear(ui, &response, query);
         keys.rows = response.has_focus()
             && ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::ArrowDown));
         // A single-line field gives up the focus on the Enter it reads.
@@ -269,41 +243,6 @@ pub fn panel_search_keys(
     });
     ui.add_space(8.0);
     keys
-}
-
-/// The control that empties the filter, drawn in the field's right inset.
-///
-/// The mark is [`WorkbenchIcon::Close`] — the same crossing strokes every
-/// other dismissal in the workbench paints — rather than a `✕` set in text,
-/// so it matches them stroke for stroke whichever face holds the character.
-fn panel_search_clear(ui: &mut Ui, id: &'static str, field: &Response) -> bool {
-    let t = Tokens::get(ui.ctx());
-    let rect = egui::Rect::from_center_size(
-        egui::pos2(
-            field.rect.right() - PANEL_SEARCH_CLEAR_INSET as f32 * 0.5 - 2.0,
-            field.rect.center().y,
-        ),
-        egui::Vec2::splat(PANEL_SEARCH_CLEAR_TARGET),
-    );
-    let response = ui.interact(rect, egui::Id::new((id, "clear")), Sense::click());
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(
-            egui::WidgetType::Button,
-            ui.is_enabled(),
-            "Clear the filter",
-        )
-    });
-    WorkbenchIcon::Close.paint(
-        ui.painter(),
-        egui::Rect::from_center_size(rect.center(), egui::Vec2::splat(PANEL_SEARCH_CLEAR_MARK)),
-        if response.hovered() || response.has_focus() {
-            t.color.text
-        } else {
-            t.color.text_faint
-        },
-    );
-    theme::paint_focus_ring(ui, &response, rect);
-    response.clicked()
 }
 
 /// Whether one line of the simulation rail survives the navigator's filter.

@@ -27,6 +27,7 @@ mod command_form;
 mod dialog;
 mod dialog_tabs;
 mod docbar;
+mod filter_clear;
 mod form;
 pub mod notice;
 mod ordered_chips;
@@ -54,6 +55,7 @@ pub use dialog::{
 };
 pub use dialog_tabs::dialog_tabs;
 pub use docbar::docbar_at_height;
+pub use filter_clear::{FILTER_CLEAR_INSET, filter_field_clear};
 pub use form::name_control;
 pub use form::{
     choice_row, field_label, input_row, kv_row, mono_input, mono_input_with_unit, switch_row,
