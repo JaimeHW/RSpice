@@ -146,8 +146,7 @@ fn parse_source_spec_impl(
                     && !is_source_level_keyword(s)
                     && crate::netlist::lexer::parse_spice_value(s).is_ok() =>
             {
-                let v = expect_finite_source_value(stream, line_num, params, "DC", "value")?;
-                dc_value = Some(v);
+                dc_value = Some(expect_dc_level(stream, line_num, params)?);
                 continue;
             }
             TokenKind::Ident(s)
@@ -178,8 +177,7 @@ fn parse_source_spec_impl(
                     && !is_source_level_keyword(s)
                     && params.get(s).is_some() =>
             {
-                let v = expect_finite_source_value(stream, line_num, params, "DC", "value")?;
-                dc_value = Some(v);
+                dc_value = Some(expect_dc_level(stream, line_num, params)?);
                 continue;
             }
             TokenKind::Ident(s)
@@ -215,14 +213,16 @@ fn parse_source_spec_impl(
                             | TokenKind::Minus
                     )
                 {
-                    let context = if dc_value.is_none() {
-                        "DC"
-                    } else {
-                        "source tail"
-                    };
-                    let v = expect_finite_source_value(stream, line_num, params, context, "value")?;
                     if dc_value.is_none() {
-                        dc_value = Some(v);
+                        dc_value = Some(expect_dc_level(stream, line_num, params)?);
+                    } else {
+                        expect_finite_source_value(
+                            stream,
+                            line_num,
+                            params,
+                            "source tail",
+                            "value",
+                        )?;
                     }
                     continue;
                 }
@@ -261,10 +261,15 @@ fn parse_source_spec_impl(
                 if !had_equals && dc_term_is_omitted(stream) {
                     dc_value = Some(0.0);
                 } else {
-                    dc_value = Some(expect_finite_source_value(
-                        stream, line_num, params, "DC", "value",
-                    )?);
+                    dc_value = Some(expect_dc_level(stream, line_num, params)?);
                 }
+            }
+            // QSPICE lets a later `DC=` replace the level: `DC 0 DC=Vout`.
+            "DC" if matches!(stream.peek_n(1).kind, TokenKind::Equals) => {
+                stream.advance();
+                stream.advance();
+                skip_commas(stream);
+                dc_value = Some(expect_dc_level(stream, line_num, params)?);
             }
             "AC" if ac_terms.is_none() => {
                 stream.advance();
@@ -1826,6 +1831,50 @@ fn expect_source_field_value(
     } else {
         expect_value(stream, line_num, params)
     }
+}
+
+/// Read a DC level. QSPICE and LTspice take one written as unbraced
+/// arithmetic, `DC 1+2` or `DC U(-prb)`, as one expression; a source keyword
+/// after it, such as `AC`, ends it.
+fn expect_dc_level(
+    stream: &mut TokenStream,
+    line_num: usize,
+    context: &SourceParseContext<'_>,
+) -> Result<Value, ParseError> {
+    let Some(count) = unbraced_arithmetic_extent(stream, context.params, is_source_level_keyword)
+    else {
+        return expect_finite_source_value(stream, line_num, context, "DC", "value");
+    };
+    let span = stream.peek().span.start..stream.peek_n(count - 1).span.end;
+    let expression = take_tokens_as_expression(stream, count);
+    let mut direction = Ok(Derivative::from(0.0));
+    let value = stream
+        .evaluate_value_capturing_direction(
+            &expression,
+            context.params,
+            context.direction.map(|_| &mut direction),
+        )
+        .map_err(|error| ParseError::InvalidValue(format!("DC level '{expression}': {error}")))?;
+    if let Some(directions) = context.direction {
+        directions.borrow_mut()[0] =
+            direction.map_err(|error| ParseError::InvalidValue(error.to_string()))?;
+    }
+    if !value.is_finite() {
+        return Err(non_finite_source_value_error(
+            line_num, "DC", "value", value,
+        ));
+    }
+    if let Some(mapping) = &context.mapping {
+        let mapped = (mapping.map)(&expression, value, mapping.abort).map_err(|error| {
+            *mapping.error.borrow_mut() = Some(error);
+            ParseError::InvalidValue("source value mapping failed".into())
+        })?;
+        mapping
+            .replacements
+            .borrow_mut()
+            .push((span, format!("{{{mapped}}}")));
+    }
+    Ok(value)
 }
 
 fn expect_finite_source_value(

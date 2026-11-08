@@ -1797,3 +1797,71 @@ fn a_behavioral_source_flagged_nojacob_leaves_its_partials_out() {
         );
     }
 }
+
+// QSPICE 2026 batch at 1 ms; LTspice 26.1.1 agrees on `DC 1+2` and
+// `DC U(-prb)` and refuses the rest. `V(q)` and `V(u)` are an RC and an RL
+// driven by a 1 V/ms ramp: 1 - 2(1 - e^-0.5) and 0.5(1 - e^-2).
+#[test]
+fn a_value_written_as_unbraced_arithmetic_reads_as_one_expression() {
+    let netlist = parse(
+        "unbraced arithmetic\n\
+         .param prb=-1\n\
+         .param Vx=5\n\
+         V2 c 0 DC U(-prb)\n\
+         R2 c 0 1k\n\
+         V3 d 0 DC 0 DC=2\n\
+         R3 d 0 1k\n\
+         V4 e 0 DC DC=3\n\
+         R4 e 0 1k\n\
+         V5 f 0 DC 0 DC=Vx\n\
+         R5 f 0 1k\n\
+         V6 g 0 DC U(prb) AC 1\n\
+         R6 g 0 1k\n\
+         V7 h 0 DC 1+2\n\
+         R7 h 0 1k\n\
+         V8 k 0 1+2\n\
+         R8 k 0 1k\n\
+         V9 m 0 2 +1\n\
+         R9 m 0 1k\n\
+         I1 0 ra 1m\n\
+         Ra ra 0 1k +1k\n\
+         I2 0 rb 1m\n\
+         Rb rb 0 1k -100\n\
+         I3 0 rc 1m\n\
+         Rc rc 0 1k*2\n\
+         I4 0 rd 1m\n\
+         Rd rd 0 {1k} * 3\n\
+         I5 0 ia DC U(-prb)*1m\n\
+         R10 ia 0 1k\n\
+         V10 p 0 PWL(0 0 1m 1)\n\
+         R11 p q 1k\n\
+         C1 q 0 1u +1u\n\
+         V11 s 0 PWL(0 0 1m 1)\n\
+         R12 s u 1k\n\
+         L1 u 0 1 -0.5\n\
+         .tran 1m\n\
+         .end\n",
+    );
+    let probes = [
+        ("c", 1.0, 1e-9),
+        ("d", 2.0, 1e-9),
+        ("e", 3.0, 1e-9),
+        ("f", 5.0, 1e-9),
+        ("g", 0.0, 1e-9),
+        ("h", 3.0, 1e-9),
+        ("k", 3.0, 1e-9),
+        ("m", 3.0, 1e-9),
+        ("ra", 2.0, 1e-9),
+        ("rb", 0.9, 1e-9),
+        ("rc", 2.0, 1e-9),
+        ("rd", 3.0, 1e-9),
+        ("ia", 1.0, 1e-9),
+        ("q", 0.2130615684, 1e-5),
+        ("u", 0.4323321680, 1e-5),
+    ];
+    let nodes: Vec<&str> = probes.iter().map(|(node, _, _)| *node).collect();
+    let values = tran_voltages(&netlist, 1e-3, 1e-3, &nodes);
+    for ((node, expected, tolerance), actual) in probes.iter().zip(values) {
+        assert_close(&format!("V({node})"), actual, *expected, *tolerance);
+    }
+}

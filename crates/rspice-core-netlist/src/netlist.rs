@@ -11991,10 +11991,11 @@ mod tests {
         ] {
             for source in ["V1", "I1"] {
                 for dc_keyword in ["", "DC "] {
-                    // Unlabelled tail values are accepted like their unsigned
-                    // counterparts; the authored first value remains the DC level.
+                    // QSPICE adds the signed values that follow the level to
+                    // it, as it reads `-.3 -.1 +.2` as `-.3-.1+.2`; an
+                    // unsigned value after them is ignored.
                     let deck = format!(
-                        "signed source values\n.param gain=.3\n{source} a 0 {dc_keyword}{spelling} -.1 +.2 AC 1\n.end\n"
+                        "signed source values\n.param gain=.3\n{source} a 0 {dc_keyword}{spelling} -.1 +.2 4 AC 1\n.end\n"
                     );
                     let netlist = Netlist::parse(&deck).unwrap();
                     let spec = match &netlist.elements[0].kind {
@@ -12003,7 +12004,7 @@ mod tests {
                     };
                     assert!(
                         matches!(spec, SourceSpec::DcAc { dc_value, ac_magnitude, .. }
-                        if (*dc_value - expected).abs() < 1e-16 && *ac_magnitude == 1.0),
+                        if (*dc_value - (expected + 0.1)).abs() < 1e-15 && *ac_magnitude == 1.0),
                         "{deck}: {spec:?}"
                     );
                 }

@@ -99,7 +99,11 @@ pub(super) fn parse_resistor(
     // 1) Explicit value (numeric/expression/param ref)
     // 2) Model name
     // 3) First named parameter (e.g. R=, VALUE=, MODEL=, L=, W=...)
-    if !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+    if value_expr.is_none()
+        && let Some(expr) = take_unbraced_arithmetic(stream, params, |_| false)
+    {
+        value_expr = Some(expr);
+    } else if !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         match &stream.peek().kind {
             TokenKind::Number(_) => {
                 value = Some(expect_value_capturing_direction(
@@ -893,6 +897,40 @@ struct PassiveFamily<'a> {
     unit_words: &'a [&'a str],
 }
 
+/// Give a capacitor or inductor the value of `expr`: evaluated now where it
+/// can be, kept for the parameter pass when references are deferred, and
+/// kept for the runtime evaluator when it reads more than parameters.
+fn resolve_passive_value_expression(
+    stream: &TokenStream,
+    params: &ParamContext,
+    tail: &mut PassiveTail,
+    expr: String,
+    defer_simple_param_refs: bool,
+) -> Result<(), ParseError> {
+    if defer_simple_param_refs {
+        tail.value_expr = Some(expr);
+        return Ok(());
+    }
+    match stream.evaluate_value_capturing_direction(&expr, params, tail.direction.as_mut()) {
+        Ok(value) => tail.value = Some(value),
+        Err(error) => {
+            tail.direction = None;
+            match stream.prepare_behavioral_expression(&expr, params) {
+                Ok(prepared) => match stream.evaluate_expression(&prepared, params) {
+                    Ok(value) => tail.value = Some(value),
+                    // Parameter and user-function expansion has already
+                    // succeeded.  Preserve that prepared expression for the
+                    // runtime evaluator rather than reintroducing identifiers
+                    // which only existed in the parser's parameter scope.
+                    Err(_) => tail.value_expr = Some(prepared),
+                },
+                Err(_) => return Err(ParseError::InvalidValue(error.to_string())),
+            }
+        }
+    }
+    Ok(())
+}
+
 fn parse_passive_tail(
     stream: &mut TokenStream,
     line_num: usize,
@@ -920,7 +958,9 @@ fn parse_passive_tail(
     skip_commas(stream);
 
     // Optional leading positional value or model name.
-    if !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+    if let Some(expr) = take_unbraced_arithmetic(stream, params, |_| false) {
+        resolve_passive_value_expression(stream, params, &mut tail, expr, defer_simple_param_refs)?;
+    } else if !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         match &stream.peek().kind {
             TokenKind::Number(_) => {
                 tail.value = Some(expect_value(stream, line_num, params)?);
@@ -933,35 +973,13 @@ fn parse_passive_tail(
                         message: format!("Expected value for {element_label}"),
                     }
                 })?;
-                if defer_simple_param_refs {
-                    tail.value_expr = Some(expr);
-                } else {
-                    match stream.evaluate_value_capturing_direction(
-                        &expr,
-                        params,
-                        tail.direction.as_mut(),
-                    ) {
-                        Ok(value) => tail.value = Some(value),
-                        Err(error) => {
-                            tail.direction = None;
-                            match stream.prepare_behavioral_expression(&expr, params) {
-                                Ok(prepared) => match stream.evaluate_expression(&prepared, params)
-                                {
-                                    Ok(value) => tail.value = Some(value),
-                                    // Parameter and user-function expansion has
-                                    // already succeeded.  Preserve that prepared
-                                    // expression for the runtime evaluator rather
-                                    // than reintroducing identifiers which only
-                                    // existed in the parser's parameter scope.
-                                    Err(_) => tail.value_expr = Some(prepared),
-                                },
-                                Err(_) => {
-                                    return Err(ParseError::InvalidValue(error.to_string()));
-                                }
-                            }
-                        }
-                    }
-                }
+                resolve_passive_value_expression(
+                    stream,
+                    params,
+                    &mut tail,
+                    expr,
+                    defer_simple_param_refs,
+                )?;
             }
             TokenKind::Ident(s) => {
                 let ident = s.clone();
@@ -9952,6 +9970,112 @@ fn take_unbraced_value_expression(stream: &mut TokenStream) -> Option<String> {
         stream.advance();
     }
     Some(expression)
+}
+
+/// QSPICE reads a value written as unbraced arithmetic, `1000u +100n`,
+/// `1k -100`, `1k * 3` or `U(-prb)`, as one expression, spaces and all; the
+/// run ends at the first operand no operator joins to the one before it,
+/// which QSPICE warns about and ignores. Returns how many tokens the run
+/// spans when it joins operands or calls a function; a lone value is left to
+/// the value readers. A word `stop` accepts ends the run, as does a `name=`.
+/// Xyce reads one value and ignores the rest, so its dialect never takes a
+/// run.
+pub(super) fn unbraced_arithmetic_extent(
+    stream: &TokenStream,
+    params: &ParamContext,
+    stop: fn(&str) -> bool,
+) -> Option<usize> {
+    if params.expression_dialect() == crate::config::ExpressionDialect::Xyce {
+        return None;
+    }
+    let group_end = |open: usize| {
+        let mut depth = 0usize;
+        let mut index = open;
+        loop {
+            match stream.peek_n(index).kind {
+                TokenKind::LParen => depth += 1,
+                TokenKind::RParen => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(index + 1);
+                    }
+                }
+                TokenKind::Newline | TokenKind::Eof => return None,
+                _ => {}
+            }
+            index += 1;
+        }
+    };
+    let mut index = 0;
+    let mut end = 0;
+    let mut joined = false;
+    let mut after_operator = false;
+    loop {
+        let mut at = index;
+        while matches!(stream.peek_n(at).kind, TokenKind::Plus | TokenKind::Minus) {
+            at += 1;
+        }
+        let called = match &stream.peek_n(at).kind {
+            TokenKind::Number(_) | TokenKind::Expression(_) => {
+                at += 1;
+                false
+            }
+            TokenKind::Ident(name)
+                if !stop(name) && !matches!(stream.peek_n(at + 1).kind, TokenKind::Equals) =>
+            {
+                at += 1;
+                let called = matches!(stream.peek_n(at).kind, TokenKind::LParen);
+                if called {
+                    at = group_end(at)?;
+                }
+                called
+            }
+            TokenKind::LParen => {
+                at = group_end(at)?;
+                true
+            }
+            _ => break,
+        };
+        joined |= after_operator || called;
+        index = at;
+        end = at;
+        let next = stream.peek_n(index);
+        match next.kind {
+            TokenKind::Plus | TokenKind::Minus | TokenKind::Star | TokenKind::Slash => index += 1,
+            // The lexer reads `-100` after a space as one negative number;
+            // after an operand it subtracts: `1k -100` is 900.
+            TokenKind::Number(_) if next.lexeme.starts_with('-') => {}
+            _ => break,
+        }
+        after_operator = true;
+    }
+    joined.then_some(end)
+}
+
+/// Take the run [`unbraced_arithmetic_extent`] finds as one expression.
+pub(super) fn take_unbraced_arithmetic(
+    stream: &mut TokenStream,
+    params: &ParamContext,
+    stop: fn(&str) -> bool,
+) -> Option<String> {
+    let count = unbraced_arithmetic_extent(stream, params, stop)?;
+    Some(take_tokens_as_expression(stream, count))
+}
+
+/// Join the next `count` tokens into one expression. A braced operand keeps
+/// its own grouping: `{a+b} *2` is `(a+b)*2`.
+pub(super) fn take_tokens_as_expression(stream: &mut TokenStream, count: usize) -> String {
+    let mut expression = String::new();
+    for _ in 0..count {
+        match &stream.peek().kind {
+            TokenKind::Expression(inner) => {
+                append_behavioral_expr_fragment(&mut expression, &format!("({inner})"));
+            }
+            token => append_behavioral_expr_token(&mut expression, token),
+        }
+        stream.advance();
+    }
+    expression
 }
 
 fn append_behavioral_expr_token(expression: &mut String, token: &TokenKind) {
