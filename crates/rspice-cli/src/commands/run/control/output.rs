@@ -500,10 +500,10 @@ fn publish_bytes(path: &Path, bytes: &[u8]) -> Result<(), CliError> {
 /// `{re,im}` pair for each of the trace's two coordinates, or an SVG point.
 const PRESENTATION_BYTES_PER_VALUE: u64 = 128;
 
-/// What one presentation file may grow to. It holds no more samples than the
-/// run may store, so it is bounded by the result-value cap rather than by the
-/// budget for the data files a simulation reads; a pathological plot fails
-/// before it fills the disk, and a batch run with every vector saved fits.
+/// What one presentation file may grow to, scaled from the result-value cap
+/// rather than the budget for the data files a simulation reads: a batch run
+/// that plots every vector it saved fits, and a plot that repeats its samples
+/// past that scale fails before it fills the disk.
 fn presentation_byte_limit(config: &Config) -> u64 {
     u64::try_from(config.resources.limits().max_result_values)
         .unwrap_or(u64::MAX)
