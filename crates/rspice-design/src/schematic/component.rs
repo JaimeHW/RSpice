@@ -343,20 +343,29 @@ impl LibraryCellInstance {
     }
 
     /// The block an instance of this binding draws for `ports`, its bound
-    /// interface: a functional part's own pin geometry; for catalog artwork,
-    /// the block the artwork's terminals were drawn against; otherwise the
-    /// symbol the generation rules give the interface and its roles.
+    /// interface: a functional part's own pin geometry; a shipped compact
+    /// model's device glyph; for catalog artwork, the block the artwork's
+    /// terminals were drawn against; otherwise the symbol the generation
+    /// rules give the interface and its roles.
     pub fn generated_block(
         &self,
         ports: &[super::port::PortSpec],
     ) -> crate::symbol_generation::GeneratedSymbol {
-        super::functional_catalog::functional_block_symbol(self).unwrap_or_else(|| {
-            if self.builtin_symbol_asset().is_some() {
-                crate::symbol_generation::generate_artwork_block(ports)
-            } else {
-                crate::symbol_generation::generate_symbol_with_roles(ports, self.interface_roles())
-            }
-        })
+        super::functional_catalog::functional_block_symbol(self)
+            .or_else(|| {
+                super::generated_veriloga_catalog::compact_model_glyph(self)
+                    .map(|glyph| glyph.block(ports))
+            })
+            .unwrap_or_else(|| {
+                if self.builtin_symbol_asset().is_some() {
+                    crate::symbol_generation::generate_artwork_block(ports)
+                } else {
+                    crate::symbol_generation::generate_symbol_with_roles(
+                        ports,
+                        self.interface_roles(),
+                    )
+                }
+            })
     }
 
     /// The bound pin roles, when they describe the bound interface.
@@ -1087,12 +1096,49 @@ impl Component {
     /// never the drawing — otherwise every extra character of a port name
     /// would distort the glyph a little further.
     pub fn artwork_dimensions(&self) -> (i32, i32) {
+        if let Some(glyph) = self.device_glyph() {
+            return glyph.artwork_size();
+        }
         let (width, height) = self.symbol_dimensions();
         (width.min(crate::symbol_generation::GENERATED_WIDTH), height)
     }
 
-    /// Terminal offsets as authored artwork draws them, in interface order.
+    /// The device glyph this instance draws, when it places a shipped
+    /// compact model.
+    pub fn device_glyph(&self) -> Option<super::generated_veriloga_catalog::DeviceGlyph> {
+        super::generated_veriloga_catalog::compact_model_glyph(self.library_cell.as_ref()?)
+    }
+
+    /// The authored artwork this instance of a compiled built-in draws: its
+    /// catalog artwork, or a compact model's device glyph in the polarity
+    /// its parameters give it.
+    pub fn builtin_artwork(&self) -> Option<&str> {
+        let binding = self.library_cell.as_ref()?;
+        binding.builtin_symbol_asset().or_else(|| {
+            self.device_glyph()
+                .map(|glyph| glyph.asset(binding, &self.params))
+        })
+    }
+
+    /// The terminal names the artwork letters beside its terminals: a
+    /// device glyph's back gates, thermal nodes and extras.
+    pub fn artwork_terminal_names(&self) -> Vec<super::generated_veriloga_catalog::GlyphName> {
+        self.device_glyph()
+            .zip(
+                self.library_cell
+                    .as_ref()
+                    .and_then(LibraryCellInstance::interface),
+            )
+            .map(|(glyph, ports)| glyph.names(&ports))
+            .unwrap_or_default()
+    }
+
+    /// Terminal offsets as authored artwork draws them, in interface order;
+    /// for a device glyph, the terminals its core artwork reaches.
     pub fn artwork_pin_offsets(&self) -> Vec<Point> {
+        if let Some(glyph) = self.device_glyph() {
+            return glyph.core_offsets();
+        }
         let (artwork_width, _) = self.artwork_dimensions();
         self.instance_block_pins()
             .into_iter()
@@ -1110,8 +1156,12 @@ impl Component {
     }
 
     /// Leads that carry authored artwork out to terminals it does not reach,
-    /// as `(artwork edge, terminal)` pairs in unrotated symbol coordinates.
+    /// as `(artwork edge, terminal)` pairs in unrotated symbol coordinates;
+    /// for a device glyph, the extras drawn beside its core artwork.
     pub fn artwork_lead_extensions(&self) -> Vec<(Point, Point)> {
+        if let Some(glyph) = self.device_glyph() {
+            return glyph.extra_segments();
+        }
         self.artwork_pin_offsets()
             .into_iter()
             .zip(self.instance_block_pins())

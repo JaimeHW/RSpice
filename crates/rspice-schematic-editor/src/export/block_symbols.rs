@@ -71,7 +71,9 @@ fn catalog_asset_local_point(
     (x * cosine - y * sine, x * sine + y * cosine)
 }
 
-/// Carry artwork leads out to terminals the drawing itself does not reach.
+/// Carry artwork leads out to terminals the drawing itself does not reach,
+/// draw a device glyph's extras, and letter the terminals the artwork
+/// names, as the canvas does.
 pub(super) fn write_artwork_lead_extensions(
     svg: &mut String,
     component: &Component,
@@ -87,6 +89,17 @@ pub(super) fn write_artwork_lead_extensions(
             edge.0, edge.1, terminal.0, terminal.1
         )
         .unwrap();
+    }
+    for name in component.artwork_terminal_names() {
+        crate::view::resolved_symbol_render::write_text_svg(
+            svg,
+            "pin",
+            local(name.at),
+            &name.text,
+            crate::view::drawing::artwork_name_align(component, name.reach),
+            f64::from(rspice_design::symbol_generation::GENERATED_PIN_LABEL_SIZE)
+                * config.units_per_world,
+        );
     }
 }
 

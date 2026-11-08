@@ -826,19 +826,23 @@ impl<'a> SemanticSceneCompiler<'a> {
         let builtin_asset = component
             .library_cell
             .as_ref()
-            .and_then(|binding| binding.builtin_xspice.as_ref())
-            .and_then(|contract| {
+            .and_then(|binding| {
+                binding
+                    .builtin_xspice
+                    .as_ref()
+                    .map(|contract| contract.symbol_asset.as_str())
+                    .or_else(|| {
+                        component
+                            .device_glyph()
+                            .map(|glyph| glyph.asset(binding, &component.params))
+                    })
+            })
+            .and_then(|asset| {
                 let (width, height) = component.artwork_dimensions();
-                let offsets = component.artwork_pin_offsets();
                 library
-                    .asset_matches_terminal_offsets(
-                        &contract.symbol_asset,
-                        width as f32,
-                        height as f32,
-                        &offsets,
-                    )
+                    .artwork_fits(component, asset, width as f32, height as f32)
                     .then(|| {
-                        library.get_asset(&contract.symbol_asset).map(|symbol| {
+                        library.get_asset(asset).map(|symbol| {
                             (
                                 symbol,
                                 component.rotation.degrees(),
@@ -1021,7 +1025,9 @@ impl<'a> SemanticSceneCompiler<'a> {
         Ok(())
     }
 
-    /// Carry artwork leads out to terminals the drawing itself does not reach.
+    /// Carry artwork leads out to terminals the drawing itself does not
+    /// reach, draw a device glyph's extras, and letter the terminals the
+    /// artwork names.
     fn artwork_lead_extensions(
         &mut self,
         component: &Component,
@@ -1040,6 +1046,21 @@ impl<'a> SemanticSceneCompiler<'a> {
                 to: self.schematic_point(world(terminal))?,
                 stroke,
             });
+        }
+        for name in component.artwork_terminal_names() {
+            let anchor = if component.transform_point(name.reach).x < 0 {
+                TextAnchor::End
+            } else {
+                TextAnchor::Start
+            };
+            self.add_text_placed(
+                self.schematic_point(world(name.at))?,
+                &name.text,
+                SceneFont::Sans,
+                1_900,
+                stroke.color,
+                (anchor, SceneTextRotation::Upright),
+            )?;
         }
         Ok(())
     }

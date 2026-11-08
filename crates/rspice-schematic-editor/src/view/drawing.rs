@@ -1021,17 +1021,17 @@ pub fn compatible_builtin_xspice_asset<'a>(
     component: &'a Component,
     library: &'a SymbolLibrary,
 ) -> Option<(&'a SymbolLibrary, &'a str, f32, f32)> {
-    let asset = component.library_cell.as_ref()?.builtin_symbol_asset()?;
+    let asset = component.builtin_artwork()?;
     let (width, height) = component.artwork_dimensions();
-    let offsets = component.artwork_pin_offsets();
     library
-        .asset_matches_terminal_offsets(asset, width as f32, height as f32, &offsets)
+        .artwork_fits(component, asset, width as f32, height as f32)
         .then_some((library, asset, width as f32, height as f32))
 }
 
 /// Carry artwork leads out to terminals the drawing itself does not reach,
 /// which happens when a long interface widens the block past the size the
-/// artwork was authored for.
+/// artwork was authored for, draw a device glyph's extras, and letter the
+/// terminals the artwork names.
 pub fn draw_artwork_lead_extensions(
     painter: &Painter,
     pos: Pos2,
@@ -1039,16 +1039,44 @@ pub fn draw_artwork_lead_extensions(
     component: &Component,
     stroke: Stroke,
 ) {
+    let to_screen = |point: Point| {
+        let transformed = component.transform_point(point);
+        Pos2::new(
+            pos.x + transformed.x as f32 * scale,
+            pos.y + transformed.y as f32 * scale,
+        )
+    };
     for (edge, terminal) in component.artwork_lead_extensions() {
-        let to_screen = |point: Point| {
-            let transformed = component.transform_point(point);
-            Pos2::new(
-                pos.x + transformed.x as f32 * scale,
-                pos.y + transformed.y as f32 * scale,
-            )
-        };
         painter.line_segment([to_screen(edge), to_screen(terminal)], stroke);
     }
+    let Some(size) = lod::annotation_size(
+        rspice_design::symbol_generation::GENERATED_PIN_LABEL_SIZE,
+        scale,
+        painter.pixels_per_point(),
+    ) else {
+        return;
+    };
+    for name in component.artwork_terminal_names() {
+        painter.text(
+            to_screen(name.at),
+            artwork_name_align(component, name.reach),
+            &name.text,
+            rspice_ui_kit::theme::mono(size, rspice_ui_kit::theme::FontWeight::Regular),
+            stroke.color.gamma_multiply(0.75),
+        );
+    }
+}
+
+/// How a name an artwork letters hangs off its anchor once the instance is
+/// turned: its box reaches the way the artwork set it, kept upright.
+pub(crate) fn artwork_name_align(component: &Component, reach: Point) -> egui::Align2 {
+    let reach = component.transform_point(reach);
+    let edge = |step: i32| match step.signum() {
+        1 => egui::Align::Min,
+        -1 => egui::Align::Max,
+        _ => egui::Align::Center,
+    };
+    egui::Align2([edge(reach.x), edge(reach.y)])
 }
 
 /// Where a primitive's name and value sit and how they hang off their

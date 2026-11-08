@@ -323,6 +323,32 @@ impl SymbolLibrary {
             })
     }
 
+    /// Whether `asset` drawn at `width` x `height` reaches the terminals of
+    /// `component` as its artwork must: exactly the instance's terminals for
+    /// catalog artwork; every terminal of the core for a device glyph, whose
+    /// house leads turn corners on the glyph's edge.
+    pub fn artwork_fits(
+        &self,
+        component: &Component,
+        asset: &str,
+        width: f32,
+        height: f32,
+    ) -> bool {
+        let offsets = component.artwork_pin_offsets();
+        if component.device_glyph().is_none() {
+            return self.asset_matches_terminal_offsets(asset, width, height, &offsets);
+        }
+        let Some(symbol) = self.get_asset(asset) else {
+            return false;
+        };
+        let anchors = symbol.boundary_anchors(width, height);
+        offsets.iter().all(|terminal| {
+            anchors.iter().any(|(x, y)| {
+                (*x - terminal.x as f32).abs() <= 0.25 && (*y - terminal.y as f32).abs() <= 0.25
+            })
+        })
+    }
+
     /// Return all parsed embedded asset filenames.
     #[cfg(test)]
     pub fn asset_names(&self) -> Vec<String> {
@@ -689,7 +715,7 @@ mod parse_sanity {
     #[test]
     fn no_embedded_asset_letters_text() {
         let assets = self::embedded_symbols::EMBEDDED_SYMBOLS;
-        assert_eq!(assets.len(), 189);
+        assert_eq!(assets.len(), 197);
         for &(filename, svg_data) in assets {
             if let Err(error) = parse_asset(filename, svg_data) {
                 panic!("{error}");

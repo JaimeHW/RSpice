@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- MOS varactor. Box 40x40, pins G(0,20), B(40,20). Unpolarized-capacitor
+     plates with the gate plate curved toward the bulk; the variable arrow
+     crosses both. -->
+<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+  <path d="M 0,20 H 17.25" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 15,11 C 18,15 18,25 15,29" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 21.6,11 V 29" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 21.6,20 H 40" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 10,32 L 27.6,9.1" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 29.4,6.7 L 24.6,9.4 L 28.0,12.0 Z" fill="#000000" stroke="none"/>
+</svg>

@@ -18,6 +18,10 @@ use super::{
     port::{PortDirection, PortSpec},
 };
 
+mod device_glyph;
+
+pub use device_glyph::{DeviceGlyph, GlyphName, compact_model_glyph};
+
 pub const GENERATED_VERILOGA_BINDING_SCHEMA_REVISION: u32 = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -550,10 +550,9 @@ fn compatible_builtin_xspice_symbol<'a>(
     component: &Component,
     library: &'a crate::SymbolLibrary,
 ) -> Option<(&'a crate::symbols::Symbol, f32, f32)> {
-    let asset = component.library_cell.as_ref()?.builtin_symbol_asset()?;
+    let asset = component.builtin_artwork()?;
     let (width, height) = component.artwork_dimensions();
-    let offsets = component.artwork_pin_offsets();
-    if !library.asset_matches_terminal_offsets(asset, width as f32, height as f32, &offsets) {
+    if !library.artwork_fits(component, asset, width as f32, height as f32) {
         return None;
     }
     library
