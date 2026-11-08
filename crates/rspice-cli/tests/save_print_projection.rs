@@ -371,7 +371,11 @@ tran 1n 5n
     let raw = control_raw(&run, "tran-001");
     assert_eq!(raw.variables.len(), 2, "{:?}", raw.variables);
     let branch = raw.waveforms.iter().next_back().expect("the branch vector");
-    assert!(branch.name.eq_ignore_ascii_case("I(x1.vs)"), "{}", branch.name);
+    assert!(
+        branch.name.eq_ignore_ascii_case("I(x1.vs)"),
+        "{}",
+        branch.name
+    );
     assert!((branch.y[0] + 2e-3).abs() < 1e-12);
     cleanup(&run.dir);
 }

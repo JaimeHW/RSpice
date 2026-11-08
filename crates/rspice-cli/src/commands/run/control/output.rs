@@ -570,8 +570,8 @@ fn writer_error(
     match failure {
         Some(BoundedWriteFailure::Aborted) => cancellation_cli_error(args.timeout),
         Some(BoundedWriteFailure::ByteLimitExceeded { limit_bytes }) => {
-            let values = usize::try_from(limit_bytes / PRESENTATION_BYTES_PER_VALUE)
-                .unwrap_or(usize::MAX);
+            let values =
+                usize::try_from(limit_bytes / PRESENTATION_BYTES_PER_VALUE).unwrap_or(usize::MAX);
             CliError::ResourceLimit {
                 path: path.to_path_buf(),
                 source: rspice_core::ResourceLimitError {

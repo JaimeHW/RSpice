@@ -738,7 +738,10 @@ impl CircuitData {
                 ),
                 (OpLabel::GD, gd),
                 (OpLabel::CD, cd),
-                (OpLabel::QD, diode.op_charge() + sidewall_charge.unwrap_or(0.0)),
+                (
+                    OpLabel::QD,
+                    diode.op_charge() + sidewall_charge.unwrap_or(0.0),
+                ),
                 (
                     OpLabel::TEMP,
                     crate::constants::kelvin_to_celsius(diode.operating_temperature_kelvin()),
