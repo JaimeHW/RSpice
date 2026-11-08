@@ -1132,3 +1132,68 @@ fn legacy_private_resistor_noise_matches_full_port_covariance() {
         }
     }
 }
+
+/// VBIC's substrate resistance and parasitic transport current are noise
+/// sources wherever the substrate network exists. LTspice and Xyce count both
+/// in the spectrum and in its total; ngspice-46 integrates them too, though
+/// its printed density leaves them out. Over 1 kHz to 100 MHz on this deck
+/// ngspice-46 integrates 2.486000e-4 V of output noise. The input-referred
+/// total is the integral of the input-referred spectrum, 1.252399e-4 V in
+/// LTspice 26.1; ngspice-46 prints 1.292646e-4 V because it refers the lower
+/// end of each interval through the upper end's gain.
+#[test]
+fn vbic_substrate_noise_reaches_the_integrated_totals() {
+    let netlist = Netlist::parse(
+        "VBIC noise scale
+V1 R3_P 0 5
+V2 V2_P 0 5 AC 1
+C1 R3_N V2_P 1n
+R4 R3_N 0 100k
+Q1 VOUT R3_N Q1_E N1 M=2
+R1 R3_P VOUT 100k
+R2 Q1_E 0 10k
+R3 R3_P R3_N 500k
+.MODEL N1 NPN LEVEL=4
++ IS=1e-16 IBEI=1e-18 IBEN=5e-15 IBCI=2e-17 IBCN=5e-15 ISP=1e-15 RCX=10
++ RCI=60 RBX=10 RBI=40 RE=2 RS=20 RBP=40 VEF=10 VER=4 IKF=2e-3 ITF=8e-2
++ XTF=20 IKR=2e-4 IKP=2e-4 CJE=1e-13 CJC=2e-14 CJEP=1e-13 CJCP=4e-13 VO=2
++ GAMM=2e-11 HRCF=2 QCO=1e-12 AVC1=2 AVC2=15 TF=10e-12 TR=100e-12 TD=2e-11
++ RTH=300 KFN=10e-15 AFN=1 BFN=1
+.end
+",
+    )
+    .expect("deck parses");
+    let frequencies: Vec<f64> = (0..=125)
+        .map(|point| 1.0e3 * 10.0_f64.powf(f64::from(point) / 25.0))
+        .collect();
+    let results = Engine::new(SimulationConfig::default())
+        .run_noise_named_with_input_source(&netlist, "vout", None, "v2", &frequencies, 300.15)
+        .expect("noise analysis runs");
+    let integrated = IntegratedNoise::new(results);
+    for (label, actual, reference, tolerance) in [
+        ("output", integrated.total_output_noise(), 2.486000e-4, 1.0e-5),
+        (
+            "input",
+            integrated.total_input_referred_noise(),
+            1.252399e-4,
+            5.0e-4,
+        ),
+    ] {
+        assert!(
+            ((actual - reference) / reference).abs() <= tolerance,
+            "{label} noise {actual:.7e}, reference {reference:.7e}"
+        );
+    }
+    let mechanisms: Vec<String> = integrated
+        .contribution_summary()
+        .into_iter()
+        .filter(|contribution| contribution.device_name.eq_ignore_ascii_case("q1"))
+        .map(|contribution| contribution.mechanism)
+        .collect();
+    // The parasitic transport current is exactly zero at this bias, so only
+    // the substrate resistance shows up as a mechanism of its own.
+    assert!(
+        mechanisms.iter().any(|name| name == "RS"),
+        "RS in {mechanisms:?}"
+    );
+}

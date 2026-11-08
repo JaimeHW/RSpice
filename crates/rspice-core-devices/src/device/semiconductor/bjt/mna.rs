@@ -630,7 +630,9 @@ impl Bjt {
 
     /// Noise sources at the accepted bias. VBIC 1.3 follows vbic_1p3.va;
     /// older VBIC retains ngspice's emitter injection for RBP and its
-    /// omission of RS/Iccp and extrinsic B-E flicker from the total spectrum.
+    /// omission of extrinsic B-E flicker. RS and Iccp count wherever the
+    /// substrate network exists, as LTspice and Xyce count them and ngspice
+    /// integrates them.
     #[doc(hidden)]
     pub fn vbic_noise_operating_model(&self) -> Option<VbicNoiseOperatingModel> {
         if !self.uses_vbic_dynamic_charges() || !self.mna_promoted() {
@@ -660,7 +662,7 @@ impl Bjt {
             )
         };
         let shot_scale = if self.vbic_13 { self.m } else { 1.0 };
-        let four_terminal_noise = self.vbic_13 && !self.vbic_three_terminal;
+        let substrate_noise = !self.vbic_three_terminal;
         Some(VbicNoiseOperatingModel {
             physical_constants: self
                 .vbic_13
@@ -719,7 +721,7 @@ impl Bjt {
                     "RS",
                     self.node_si,
                     self.node_substrate,
-                    if four_terminal_noise {
+                    if substrate_noise {
                         eval.irs.d_external[EXT_S]
                     } else {
                         0.0
@@ -750,7 +752,7 @@ impl Bjt {
                     "ICCP",
                     self.node_bx,
                     self.node_si,
-                    if four_terminal_noise {
+                    if substrate_noise {
                         shot_scale * eval.iccp.current
                     } else {
                         0.0
