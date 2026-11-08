@@ -1075,6 +1075,8 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<Option<Vec<Value>>, SimulationError> {
         let entry_state = circuit.nonlinear_state_snapshot();
+        let entry_private_nodes = circuit.compact_model_private_nodes.clone();
+        let entry_settled_nodes = circuit.settled_compact_model_private_nodes.clone();
         circuit.zero_dc_nodal_floor = true;
         let attempt =
             self.solve_nonlinear_with_guess_unchecked(circuit, matrix, initial_guess, abort);
@@ -1086,6 +1088,10 @@ impl Engine {
             Err(error) => error,
         };
         circuit.restore_nonlinear_state(entry_state);
+        // The floor's own first assembly decides again which private nodes
+        // settle and which it refuses by name.
+        circuit.compact_model_private_nodes = entry_private_nodes;
+        circuit.settled_compact_model_private_nodes = entry_settled_nodes;
         self.retain_dc_nodal_floor(circuit, matrix, &error);
         Ok(None)
     }
