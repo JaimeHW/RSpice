@@ -2129,6 +2129,18 @@ fn parse_exp_spec(
         .unwrap_or(Value::NAN);
     let tau2 = source_optional_value(stream, line_num, params, "EXP", "TAU2", has_paren)?
         .unwrap_or(Value::NAN);
+    // LTspice repeats an EXP every seventh value, adding each pulse to the
+    // tails of the ones before it; QSPICE repeats it another way and counts
+    // TD2 from TD1. With no agreed meaning the value is refused by name.
+    skip_commas(stream);
+    if has_paren && !source_numeric_args_end(stream, has_paren) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "EXP takes six values; a seventh, LTspice's repeat period, is not \
+                      supported"
+                .to_string(),
+        });
+    }
 
     close_source_args(stream, line_num, "EXP", has_paren)?;
 
@@ -2391,6 +2403,19 @@ mod tests {
                 independent_source_file_dependency(&resolved).unwrap(),
                 "{raw}"
             );
+        }
+    }
+
+    #[test]
+    fn an_exp_with_a_repeat_period_is_refused_by_name() {
+        let params = ParamContext::new();
+        assert!(parse_source_spec_text("EXP(0 1 1m 1m 2m 1m)", 4, &params).is_ok());
+        match parse_source_spec_text("EXP(0 1 1m 1m 2m 1m 10m)", 4, &params) {
+            Err(ParseError::Syntax { line, message }) => {
+                assert_eq!(line, 4);
+                assert!(message.contains("LTspice's repeat period"), "{message}");
+            }
+            other => panic!("{other:?}"),
         }
     }
 
