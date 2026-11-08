@@ -6341,12 +6341,11 @@ impl Engine {
         }
         xyce_lte_excluded_indices.sort_unstable();
         xyce_lte_excluded_indices.dedup();
-        let nonlinear_terminal_solution_indices =
-            Self::nonlinear_terminal_solution_indices(
-                &circuit,
-                &solution_lte_excluded,
-                self.config.spice_dialect,
-            );
+        let nonlinear_terminal_solution_indices = Self::nonlinear_terminal_solution_indices(
+            &circuit,
+            &solution_lte_excluded,
+            self.config.spice_dialect,
+        );
 
         // Grid-locked stepping: the configured grid (filtered to points after
         // the start) is the mandatory target-sample sequence, and the run

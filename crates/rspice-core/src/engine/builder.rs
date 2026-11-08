@@ -11,8 +11,8 @@ use crate::device::DistributedRlgc;
 use crate::device::controlled::VoltageControlledNodes;
 use crate::device::passive::CoupledWinding;
 use crate::xspice::{AUTO_BRIDGE_PREFIX, CodeModelVectorParams};
-use rspice_core_base::instance_param_reads::{InstanceParamReads, note_instance_param_read};
 use behavioral::{BehavioralResistorModel, BehavioralResistorPolicy};
+use rspice_core_base::instance_param_reads::{InstanceParamReads, note_instance_param_read};
 
 /// A model parameter the deck left as text: its name and the unresolved
 /// expression or string literal that follows it.
