@@ -3186,6 +3186,9 @@ fn plan_xspice_auto_bridges(
     bridge_metadata: &BTreeMap<usize, XspiceAutoBridgeNodeMetadata>,
     supplies: &boundary_supply::BoundarySupplies,
 ) -> Vec<PlannedXspiceAutoBridge> {
+    if circuit.xspice_instances.is_empty() {
+        return Vec::new();
+    }
     let mut analog_nodes = BTreeSet::new();
     let mut digital_nodes = BTreeMap::new();
     let mut digital_node_families = BTreeMap::new();

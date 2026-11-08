@@ -29,7 +29,7 @@
 //! What counts as a rail and what counts as reaching are stated by
 //! [`crate::netlist::analyze_supply_reachability`], which owns both rules.
 
-use std::cell::RefCell;
+use std::cell::{OnceCell, RefCell};
 use std::collections::BTreeSet;
 
 use crate::SimulationError;
@@ -97,22 +97,26 @@ pub(super) struct ResolvedSupply {
 
 /// The per-design answer to "what supply does this boundary net convert
 /// against", shared by both boundary routes.
-pub(super) struct BoundarySupplies {
+pub(super) struct BoundarySupplies<'a> {
     declared: Option<crate::Value>,
     parameter: String,
-    reachability: crate::netlist::SupplyReachability,
+    elements: &'a [Element],
+    reference: Option<&'a str>,
+    /// Worked out when the first boundary net asks, so a design with no
+    /// boundary never walks its sources for rails.
+    reachability: OnceCell<crate::netlist::SupplyReachability>,
     /// Nets already spoken about, so a design with one boundary net and two
     /// bridges on it says its sentence once.
     reported: RefCell<BTreeSet<String>>,
 }
 
-impl BoundarySupplies {
+impl<'a> BoundarySupplies<'a> {
     /// `reference` is the net a deck that names no node 0 has aliased to it,
     /// which is ground to a rail as `0` is.
     pub(super) fn new(
         netlist: &Netlist,
-        flat_elements: &[Element],
-        reference: Option<&str>,
+        flat_elements: &'a [Element],
+        reference: Option<&'a str>,
     ) -> Self {
         let parameter = netlist
             .options
@@ -126,9 +130,16 @@ impl BoundarySupplies {
         Self {
             declared,
             parameter,
-            reachability: analyze_supply_reachability(flat_elements, reference),
+            elements: flat_elements,
+            reference,
+            reachability: OnceCell::new(),
             reported: RefCell::new(BTreeSet::new()),
         }
+    }
+
+    fn reachability(&self) -> &crate::netlist::SupplyReachability {
+        self.reachability
+            .get_or_init(|| analyze_supply_reachability(self.elements, self.reference))
     }
 
     /// One boundary net's supply.
@@ -174,7 +185,7 @@ impl BoundarySupplies {
     /// The rails that reach `node_label`, one per distinct level.
     fn distinct_rails(&self, node_label: &str) -> Vec<&crate::netlist::SupplyRail> {
         let mut distinct: Vec<&crate::netlist::SupplyRail> = Vec::new();
-        for rail in self.reachability.rails_reaching(node_label) {
+        for rail in self.reachability().rails_reaching(node_label) {
             if !distinct
                 .iter()
                 .any(|kept| same_level(kept.level, rail.level))
@@ -206,7 +217,7 @@ impl BoundarySupplies {
     /// does: the nominal level of a supply bound live to it.
     #[cfg(feature = "veriloga")]
     pub(super) fn rail_level(&self, net: &str) -> Option<crate::Value> {
-        self.reachability
+        self.reachability()
             .rails_reaching(net)
             .iter()
             .find(|rail| rail.node.eq_ignore_ascii_case(net))

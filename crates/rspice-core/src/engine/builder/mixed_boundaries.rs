@@ -12,6 +12,9 @@ pub(super) fn plan_conversions(
     supplies: &boundary_supply::BoundarySupplies,
     rules: &connect_modules::DesignConnectRules,
 ) -> Result<Vec<PlannedXspiceAutoBridge>, SimulationError> {
+    if circuit.mixed_signal_hosts.is_empty() {
+        return Ok(Vec::new());
+    }
     let mut physical = BTreeSet::new();
     collect_flat_analog_nodes(&mut physical, circuit, flat_elements);
     let mut endpoints = BTreeMap::new();
