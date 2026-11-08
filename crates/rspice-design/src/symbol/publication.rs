@@ -93,14 +93,23 @@ pub fn symbol_save_checks(
         .iter()
         .map(|pin| pin.name.clone())
         .collect::<Vec<_>>();
-    let electrical_match = expected_directions.len() == document.pins.len()
-        && expected_directions.iter().zip(&document.pins).all(
-            |((electrical, direction, _, name), pin)| {
-                pin.name.eq_ignore_ascii_case(name)
-                    && pin.electrical_type() == *electrical
-                    && pin.direction == *direction
-            },
-        );
+    // A model definition states each pin's type and direction outright. A
+    // bare interface states a direction, and the type is the pin's author's.
+    let bound = definition.is_some();
+    let disagreeing = expected_directions
+        .iter()
+        .zip(&document.pins)
+        .find(|((electrical, direction, _, name), pin)| {
+            let answers = if bound {
+                pin.electrical_type() == *electrical && pin.direction == *direction
+            } else {
+                pin.states_direction(*direction)
+            };
+            !(pin.name.eq_ignore_ascii_case(name) && answers)
+        })
+        .map(|(_, pin)| pin.name.as_str());
+    let electrical_match =
+        expected_directions.len() == document.pins.len() && disagreeing.is_none();
     let placement_valid = document
         .pins
         .iter()
@@ -112,10 +121,7 @@ pub fn symbol_save_checks(
         .into_iter()
         .filter(|finding| finding.kind == PinFindingKind::PinOffGrid)
         .count();
-    let family = definition
-        .map(|definition| definition.identity.cell.as_str())
-        .unwrap_or("standalone symbol");
-    vec![
+    let mut checks = vec![
         SymbolSaveCheck {
             label: "Pin count",
             expected: expected_names.len().to_string(),
@@ -133,12 +139,21 @@ pub fn symbol_save_checks(
                     .all(|(expected, observed)| expected.eq_ignore_ascii_case(observed)),
         },
         SymbolSaveCheck {
-            label: "Electrical types",
-            expected: "bound contract".to_owned(),
-            observed: if electrical_match {
-                "matched".to_owned()
+            label: if bound {
+                "Electrical types"
             } else {
-                "mismatch".to_owned()
+                "Pin directions"
+            },
+            expected: if bound {
+                "bound contract"
+            } else {
+                "the interface"
+            }
+            .to_owned(),
+            observed: match disagreeing {
+                _ if electrical_match => "matched".to_owned(),
+                Some(pin) => format!("mismatch at {pin}"),
+                None => "mismatch".to_owned(),
             },
             passed: electrical_match,
         },
@@ -158,13 +173,16 @@ pub fn symbol_save_checks(
             observed: off_grid.to_string(),
             passed: off_grid == 0,
         },
-        SymbolSaveCheck {
+    ];
+    if let Some(definition) = definition {
+        checks.push(SymbolSaveCheck {
             label: "Model family",
-            expected: family.to_owned(),
+            expected: definition.identity.cell.clone(),
             observed: cell.to_owned(),
-            passed: definition.is_none_or(|definition| definition.identity.cell == cell),
-        },
-    ]
+            passed: definition.identity.cell == cell,
+        });
+    }
+    checks
 }
 
 /// Validated encodings of a symbol document and its editor metadata.

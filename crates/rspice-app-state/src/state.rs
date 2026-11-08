@@ -318,6 +318,21 @@ mod symbol_document_tests {
     }
 
     #[test]
+    fn reconcile_ports_stands_a_new_pin_in_line_with_its_side() {
+        let mut doc = SymbolDocument::generated_from_ports(&ota_ports());
+        doc.pin_mut("INP").expect("INP exists").position = Some(Point::new(-70, -10));
+        let mut ports = ota_ports();
+        ports.push(port("IBIAS", PortDirection::In));
+
+        doc.reconcile_ports(&ports);
+
+        assert_eq!(
+            doc.pin("IBIAS").and_then(|pin| pin.position).map(|at| at.x),
+            Some(-70)
+        );
+    }
+
+    #[test]
     fn reconcile_ports_places_new_pins_without_overwriting_existing_art() {
         let mut doc = SymbolDocument::generated_from_ports(&ota_ports());
         let original_inp = doc.pin("INP").expect("INP exists").position;

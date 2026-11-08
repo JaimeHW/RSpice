@@ -71,6 +71,54 @@ fn save_checks_pass_a_symbol_that_matches_its_interface() {
     );
 }
 
+/// A module declares its rails `inout`, and the generated symbol draws them
+/// as the rails they are. That has to publish.
+#[test]
+fn save_checks_pass_a_rail_drawn_on_a_bidirectional_port() {
+    let ports = [PortSpec {
+        name: "vdd".to_owned(),
+        direction: PortDirection::InOut,
+    }];
+    let document = SymbolDocument {
+        pins: vec![SymbolPin::new(
+            "vdd",
+            PortDirection::Supply,
+            Some(Point::new(0, -40)),
+        )],
+        ..SymbolDocument::default()
+    };
+
+    let checks = symbol_save_checks(None, "amp", &document, &ports);
+
+    assert!(checks.iter().all(|check| check.passed), "{checks:?}");
+}
+
+/// A refusal says which pin to look at.
+#[test]
+fn save_checks_name_the_pin_turned_against_its_port() {
+    let ports = [PortSpec {
+        name: "IN".to_owned(),
+        direction: PortDirection::In,
+    }];
+    let document = SymbolDocument {
+        pins: vec![SymbolPin::new(
+            "IN",
+            PortDirection::Out,
+            Some(Point::new(-40, 0)),
+        )],
+        ..SymbolDocument::default()
+    };
+
+    let checks = symbol_save_checks(None, "amp", &document, &ports);
+
+    let row = checks
+        .iter()
+        .find(|check| check.label == "Pin directions")
+        .expect("the row");
+    assert!(!row.passed);
+    assert_eq!(row.observed, "mismatch at IN");
+}
+
 /// A symbol-pin waiver is stored inside its symbol, so it names the pin
 /// alone: a copy of the cell carries the symbol, waiver and all, and the
 /// waiver still covers the copy's pin. One written by an earlier build names

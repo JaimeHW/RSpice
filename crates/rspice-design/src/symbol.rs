@@ -162,6 +162,25 @@ impl SymbolPin {
         }
     }
 
+    /// Stand this pin's terminal on `column`, the line of the terminals on
+    /// its side, when there is one.
+    fn stand_in_column(&mut self, column: Option<i32>) {
+        let (Some(column), Some(position)) = (column, self.position) else {
+            return;
+        };
+        self.position = Some(match self.side() {
+            SymbolPinSide::Left | SymbolPinSide::Right => Point::new(column, position.y),
+            SymbolPinSide::Top | SymbolPinSide::Bottom => Point::new(position.x, column),
+        });
+    }
+
+    /// Whether this pin states the direction of a port declaring `declared`.
+    /// A bidirectional terminal may be drawn as the rail it is.
+    pub fn states_direction(&self, declared: PortDirection) -> bool {
+        self.direction == declared
+            || (declared == PortDirection::InOut && self.direction == PortDirection::Supply)
+    }
+
     /// The same pin with its name left off the drawing, or lettered.
     pub fn with_name_hidden(mut self, hidden: bool) -> Self {
         self.name_hidden = hidden;
@@ -1122,14 +1141,18 @@ impl SymbolDocument {
             let stated = electrical(port);
             let known = match self.pin_mut(&port.name) {
                 Some(pin) => {
-                    let kept = pin
-                        .electrical_type
-                        .filter(|_| pin.direction == port.direction);
+                    let agrees = pin.states_direction(port.direction);
+                    let kept = pin.electrical_type.filter(|_| agrees);
                     let electrical = stated
                         .or(kept)
                         .unwrap_or_else(|| default_electrical_type(port.direction));
+                    let direction = if agrees && stated.is_none() {
+                        pin.direction
+                    } else {
+                        port.direction
+                    };
                     pin.name = port.name.clone();
-                    pin.set_electrical_contract(electrical, port.direction);
+                    pin.set_electrical_contract(electrical, direction);
                     if pin.position.is_some() {
                         continue;
                     }
@@ -1139,9 +1162,11 @@ impl SymbolDocument {
             };
             let side = default_pin_side(port.direction, None);
             let offset = self.next_free_offset(side);
+            let column = self.terminal_column(side);
             if known {
                 if let Some(pin) = self.pin_mut(&port.name) {
                     pin.set_side_and_offset(side, offset, bounds);
+                    pin.stand_in_column(column);
                 }
                 continue;
             }
@@ -1149,6 +1174,7 @@ impl SymbolDocument {
             let mut pin = SymbolPin::new(&port.name, port.direction, None)
                 .with_contract(electrical, side, offset);
             pin.set_side_and_offset(side, offset, bounds);
+            pin.stand_in_column(column);
             self.pins.push(pin);
         }
 
@@ -1167,6 +1193,23 @@ impl SymbolDocument {
                 .position(|port| port.name.eq_ignore_ascii_case(&pin.name))
                 .unwrap_or(ports.len())
         });
+    }
+
+    /// The line the outermost terminals on `side` stand on, when any do.
+    fn terminal_column(&self, side: SymbolPinSide) -> Option<i32> {
+        let reach = self
+            .pins
+            .iter()
+            .filter(|pin| pin.side() == side)
+            .filter_map(|pin| pin.position)
+            .map(|position| match side {
+                SymbolPinSide::Left | SymbolPinSide::Right => position.x,
+                SymbolPinSide::Top | SymbolPinSide::Bottom => position.y,
+            });
+        match side {
+            SymbolPinSide::Left | SymbolPinSide::Top => reach.min(),
+            SymbolPinSide::Right | SymbolPinSide::Bottom => reach.max(),
+        }
     }
 
     /// The next terminal-grid offset on `side` that no placed pin occupies.
