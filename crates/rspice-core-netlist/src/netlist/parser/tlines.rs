@@ -224,6 +224,13 @@ pub(super) fn parse_vswitch(
 /// the `.model` card that form stands for, named after the switch, and the
 /// switch card that uses it.
 pub(super) fn inline_switch_model(line: &str) -> Option<(String, String)> {
+    // The card's first field is its name; only a switch card is split.
+    if !line
+        .trim_start_matches([',', ' ', '\t'])
+        .starts_with(['S', 's'])
+    {
+        return None;
+    }
     let fields = split_spice_fields(line);
     let name = fields.first()?;
     if !name.starts_with(['S', 's']) || fields.len() < 6 {

@@ -281,11 +281,13 @@ pub(crate) use crate::source_location::display_source_path;
 /// subcircuit that holds it (none for the root deck) and its name, both
 /// case-folded.
 pub(crate) fn element_origin_key(subcircuit: Option<&str>, name: &str) -> String {
-    format!(
-        "{}/{}",
-        subcircuit.unwrap_or_default().to_ascii_uppercase(),
-        name.to_ascii_uppercase()
-    )
+    let subcircuit = subcircuit.unwrap_or_default();
+    let mut key = String::with_capacity(subcircuit.len() + 1 + name.len());
+    key.push_str(subcircuit);
+    key.push('/');
+    key.push_str(name);
+    key.make_ascii_uppercase();
+    key
 }
 
 /// Whether two optional names are both absent or equal ignoring ASCII case.

@@ -250,7 +250,6 @@ pub(super) fn process_line_with_abort(
     }
 
     let head = line.split_whitespace().next().unwrap_or("");
-    let upper = line.to_uppercase();
 
     // Check for .SUBCKT start
     if head.eq_ignore_ascii_case(".subckt") {
@@ -390,7 +389,11 @@ pub(super) fn process_line_with_abort(
 
     // If inside subcircuit, add elements to subcircuit
     if state.subckt_stack.last().is_some() {
-        if upper.starts_with(".MODEL") {
+        if line
+            .as_bytes()
+            .get(..6)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(b".MODEL"))
+        {
             let enclosing_scopes: Vec<String> = state
                 .subckt_stack
                 .iter()
@@ -962,6 +965,13 @@ pub(super) fn parse_line(
 }
 
 fn capture_subckt_body_scope(line: &str, def: &mut SubcircuitDef, params: &ParamContext) {
+    // Only a parameter card, whose first field is a dot command, is read.
+    if !line
+        .trim_start_matches([',', ' ', '\t'])
+        .starts_with('.')
+    {
+        return;
+    }
     let fields = split_spice_fields(line);
     let Some(command) = fields.first() else {
         return;

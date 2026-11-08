@@ -47,6 +47,18 @@ impl MutualInductorSemanticRecord {
         origin: &NetlistSourceLocation,
         source_line: &str,
     ) {
+        // Only an inductor or a coupling keeps its card's spelling, so a card
+        // that parsed to neither is not read a second time.
+        if !elements.iter().any(|element| {
+            matches!(
+                element.kind,
+                ElementKind::Inductor { .. }
+                    | ElementKind::JilesAthertonInductor { .. }
+                    | ElementKind::Coupling { .. }
+            )
+        }) {
+            return;
+        }
         let authored_tokens = authored_tokens(source_line);
         for element in elements {
             match &element.kind {

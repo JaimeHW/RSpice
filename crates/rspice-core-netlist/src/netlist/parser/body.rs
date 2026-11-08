@@ -261,8 +261,9 @@ pub(super) fn parse(
             continue; // Skip normal processing
         }
 
-        // Start new continuation or process line
-        continuation = trimmed.to_string();
+        // Start new continuation or process line, reusing the buffer.
+        continuation.clear();
+        continuation.push_str(trimmed);
         continuation_line = Some(line_num);
         continuation_origin = Some(origin);
     }
