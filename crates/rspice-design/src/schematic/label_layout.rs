@@ -50,8 +50,9 @@ pub const UNNAMED_NET_LABEL: &str = "<unnamed>";
 pub const CONNECTOR_TAB_STROKE_PER_HEIGHT: f32 = 0.085;
 
 const NET_LABEL_OFFSET: LayoutPoint = LayoutPoint::new(7.0, -5.0);
-/// Air between a wire's end and a name lettered beyond it.
-const LETTERED_NAME_ACROSS_WORLD: f32 = 6.0;
+/// Air between a wire's end and a name lettered beyond it: the name all but
+/// meets the wire, as LTspice sets it.
+const LETTERED_NAME_ACROSS_WORLD: f32 = 1.0;
 /// Air between a wire's end and a name lettered over or under it.
 const LETTERED_NAME_ABOVE_WORLD: f32 = 3.0;
 /// Plex's cap height and descent, in em.
