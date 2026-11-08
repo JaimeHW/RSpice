@@ -42,8 +42,8 @@ pub use editor::{
 };
 pub(crate) use editor::{
     ProblemStep, problem_at_caret_announcement, problem_step_announcement, problem_step_index,
-    queue_problem_step, reveal_source_location, severity_title,
-    show_veriloga_document_versioned, take_problem_step,
+    queue_problem_step, reveal_source_location, severity_title, show_veriloga_document_versioned,
+    take_problem_step,
 };
 pub(crate) use language_services::{
     CodeLanguageToolsState, LanguageServiceIndex, commit_language_rename, extent_words,

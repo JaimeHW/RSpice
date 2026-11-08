@@ -609,7 +609,10 @@ impl LanguageServiceIndex {
         match self.veriloga_target(logical_path, char_index, name) {
             Some(target) => {
                 let sites = self.veriloga_sites(&target, name);
-                (sites.iter().map(|(_, ranges)| ranges.len()).sum(), sites.len())
+                (
+                    sites.iter().map(|(_, ranges)| ranges.len()).sum(),
+                    sites.len(),
+                )
             }
             None => self.rename_extent(name),
         }
@@ -641,8 +644,14 @@ impl LanguageServiceIndex {
                 "'{replacement}' already means something in Verilog-A, so it cannot be a name."
             ));
         }
-        if catalog.reserves(name) && self.veriloga_target(logical_path, char_index, name).is_none() {
-            return Err(format!("'{name}' is part of Verilog-A and cannot be renamed."));
+        if catalog.reserves(name)
+            && self
+                .veriloga_target(logical_path, char_index, name)
+                .is_none()
+        {
+            return Err(format!(
+                "'{name}' is part of Verilog-A and cannot be renamed."
+            ));
         }
         let symbols = self.veriloga_symbols(logical_path).ok_or_else(|| {
             format!("The indexed source document '{logical_path}' is no longer available.")
@@ -775,9 +784,9 @@ impl LanguageServiceIndex {
                 .entry(crate::state::project_source_path_key(&token.logical_path))
                 .or_insert(token.logical_path.as_str());
         }
-        paths.into_iter().filter_map(|(key, path)| {
-            self.veriloga.get(&key).map(|symbols| (path, symbols))
-        })
+        paths
+            .into_iter()
+            .filter_map(|(key, path)| self.veriloga.get(&key).map(|symbols| (path, symbols)))
     }
 
     /// Why renaming `target` to `replacement` would change what the source
@@ -794,7 +803,10 @@ impl LanguageServiceIndex {
         let Some(declaration) = symbols.declaration(target.declaration) else {
             return Ok(());
         };
-        if symbols.declared_in(declaration.scope, replacement).is_some() {
+        if symbols
+            .declared_in(declaration.scope, replacement)
+            .is_some()
+        {
             return Err(format!(
                 "'{replacement}' is already declared beside '{name}'."
             ));
@@ -814,7 +826,11 @@ impl LanguageServiceIndex {
             }
         }
         // A use of the new name that the renamed declaration would take over.
-        for written in symbols.names().iter().filter(|written| written.name == replacement) {
+        for written in symbols
+            .names()
+            .iter()
+            .filter(|written| written.name == replacement)
+        {
             let captured = symbols
                 .enclosing_scopes(written.range.start)
                 .take_while(|scope| symbols.declared_in(*scope, replacement).is_none())
@@ -1768,22 +1784,14 @@ mod tests {
             refusal("ddt"),
             "'ddt' already means something in Verilog-A, so it cannot be a name."
         );
-        assert_eq!(
-            refusal("$strobe"),
-            "'$strobe' is not a valid name."
-        );
+        assert_eq!(refusal("$strobe"), "'$strobe' is not a valid name.");
         assert_eq!(refusal("2b"), "'2b' is not a valid name.");
     }
 
     #[test]
     fn a_verilog_a_rename_that_would_change_the_meaning_is_refused() {
         let source = "module m(p);\n  inout p;\n  electrical p;\n  real a, b;\n  analog function real f;\n    input c;\n    real d;\n    f = a + c + b;\n  endfunction\n  analog begin : body\n    integer k;\n    k = 1;\n    V(p) <+ a * k;\n  end\nendmodule\n";
-        let bundle = bundle(
-            ProjectSourceLanguage::VerilogA,
-            "m.va",
-            source,
-            Vec::new(),
-        );
+        let bundle = bundle(ProjectSourceLanguage::VerilogA, "m.va", source, Vec::new());
         let index = LanguageServiceIndex::build(ProjectId::new(), &bundle).unwrap();
         let rename = |written: &str, name: &str, replacement: &str| {
             index.rename_preview_at("m.va", char_of(source, written), name, replacement)
@@ -1802,7 +1810,13 @@ mod tests {
         );
         // Fine: nothing inside `body` is called `q`, and `k` is local to it.
         let renamed = rename("k;\n", "k", "q").unwrap();
-        assert_eq!(renamed[0].1, source.replace("integer k;", "integer q;").replace("k = 1;", "q = 1;").replace("a * k;", "a * q;"));
+        assert_eq!(
+            renamed[0].1,
+            source
+                .replace("integer k;", "integer q;")
+                .replace("k = 1;", "q = 1;")
+                .replace("a * k;", "a * q;")
+        );
     }
 
     /// A file that does not read has no scopes to rename within.
@@ -1814,7 +1828,10 @@ mod tests {
         let refusal = index
             .rename_preview_at("m.va", char_of(source, "g = ;"), "g", "gain")
             .unwrap_err();
-        assert!(refusal.starts_with("Rename needs to read the whole file, and line 4"), "{refusal}");
+        assert!(
+            refusal.starts_with("Rename needs to read the whole file, and line 4"),
+            "{refusal}"
+        );
     }
 
     /// A parameter connected by name from an instance cannot be followed.
@@ -1826,7 +1843,10 @@ mod tests {
         let refusal = index
             .rename_preview_at("m.va", char_of(source, "g = 1"), "g", "gain")
             .unwrap_err();
-        assert_eq!(refusal, "'g' is connected by name at m.va:10, which Rename cannot follow.");
+        assert_eq!(
+            refusal,
+            "'g' is connected by name at m.va:10, which Rename cannot follow."
+        );
     }
 
     /// References list the uses of the one declaration, with their columns.
@@ -1838,7 +1858,11 @@ mod tests {
         assert_eq!(
             references
                 .iter()
-                .map(|reference| (reference.line, reference.column, reference.line_preview.as_str()))
+                .map(|reference| (
+                    reference.line,
+                    reference.column,
+                    reference.line_preview.as_str()
+                ))
                 .collect::<Vec<_>>(),
             [
                 (10, 8, "real x;"),

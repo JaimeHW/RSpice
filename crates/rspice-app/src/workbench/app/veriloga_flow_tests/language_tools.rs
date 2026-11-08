@@ -185,7 +185,11 @@ fn arrows_move_the_choice_in_a_list_that_is_open_and_the_caret_otherwise() {
     user.key(Key::Escape, NONE);
     user.key(Key::ArrowDown, NONE);
     user.settle();
-    assert_eq!(user.caret().0, line + 1, "the list closed, the arrow is the caret's");
+    assert_eq!(
+        user.caret().0,
+        line + 1,
+        "the list closed, the arrow is the caret's"
+    );
 }
 
 #[test]
@@ -276,7 +280,10 @@ fn find_references_is_a_list_the_keyboard_walks_and_enter_opens_at_the_column() 
         .expect("the caret is on a name");
     user.settle();
 
-    assert_eq!(user.app.state.workbench.console_page, ConsolePage::References);
+    assert_eq!(
+        user.app.state.workbench.console_page,
+        ConsolePage::References
+    );
     assert_eq!(user.prompt(), "2 references to gbw in 1 file.");
     assert_eq!(user.app.state.model.log_buffer.entries().count(), logged);
     let list = user

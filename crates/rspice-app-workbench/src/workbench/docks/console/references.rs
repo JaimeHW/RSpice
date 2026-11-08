@@ -32,14 +32,18 @@ fn row_id(index: usize) -> egui::Id {
 /// Drop a list whose bundle has left the project, and leave the page when
 /// there is no list to show: a session restored on it holds none.
 pub(super) fn settle(app: &mut impl WorkbenchHost) {
-    let has_list = app.workbench().source_references.as_ref().is_some_and(|list| {
-        app.model()
-            .workspace
-            .content
-            .project_sources
-            .get_bundle(list.bundle)
-            .is_some()
-    });
+    let has_list = app
+        .workbench()
+        .source_references
+        .as_ref()
+        .is_some_and(|list| {
+            app.model()
+                .workspace
+                .content
+                .project_sources
+                .get_bundle(list.bundle)
+                .is_some()
+        });
     if !has_list {
         let workbench = app.workbench_mut();
         workbench.source_references = None;
@@ -177,7 +181,9 @@ fn table(ui: &mut Ui, list: &mut SourceReferences) -> Option<DiagnosticRoute> {
         .max_height(body_height)
         .min_scrolled_height(0.0);
     if moved {
-        let shown = ui.data(|data| data.get_temp::<f32>(offset_id)).unwrap_or(0.0);
+        let shown = ui
+            .data(|data| data.get_temp::<f32>(offset_id))
+            .unwrap_or(0.0);
         let top = list.selected as f32 * pitch;
         let bottom = top + CONSOLE_ROW_MIN_HEIGHT;
         area = area.vertical_scroll_offset(if top < shown {
@@ -259,11 +265,7 @@ fn table(ui: &mut Ui, list: &mut SourceReferences) -> Option<DiagnosticRoute> {
 }
 
 /// The table's one keyboard stop, laid over the rows it moves through.
-fn body(
-    ui: &mut Ui,
-    rect: egui::Rect,
-    current: Option<(egui::Id, egui::Rect)>,
-) -> egui::Response {
+fn body(ui: &mut Ui, rect: egui::Rect, current: Option<(egui::Id, egui::Rect)>) -> egui::Response {
     let id = body_id();
     let response = ui.interact(rect, id, Sense::FOCUSABLE);
     if response.has_focus() {

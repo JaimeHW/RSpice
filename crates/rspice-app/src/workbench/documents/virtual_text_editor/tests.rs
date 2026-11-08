@@ -747,8 +747,12 @@ fn accessible_text_is_the_caret_line_and_three_lines_either_side() {
         .collect::<Vec<_>>();
     rows.sort_by(|left, right| left.0.total_cmp(&right.0));
     assert_eq!(
-        rows.iter().map(|(_, text)| text.as_str()).collect::<Vec<_>>(),
-        ["line 7", "line 8", "line 9", "line 10", "line 11", "line 12", "line 13"]
+        rows.iter()
+            .map(|(_, text)| text.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "line 7", "line 8", "line 9", "line 10", "line 11", "line 12", "line 13"
+        ]
     );
     let pitch = rows[1].0 - rows[0].0;
     assert!(

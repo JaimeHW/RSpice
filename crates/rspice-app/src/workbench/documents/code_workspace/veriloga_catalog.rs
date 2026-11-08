@@ -310,7 +310,10 @@ fn header_declarations(source: &str) -> Vec<CatalogEntry> {
                         .potential
                         .as_deref()
                         .map(|nature| format!("potential {nature}")),
-                    discipline.flow.as_deref().map(|nature| format!("flow {nature}")),
+                    discipline
+                        .flow
+                        .as_deref()
+                        .map(|nature| format!("flow {nature}")),
                 ]
                 .into_iter()
                 .flatten()
@@ -396,19 +399,37 @@ const DIRECTIVE_DOCUMENTATION: &[(&str, &str)] = &[
     ("include", "Reads another source file in at this place."),
     ("define", "Defines a text macro."),
     ("undef", "Removes the definition of a text macro."),
-    ("ifdef", "Keeps the text that follows when a macro is defined."),
-    ("ifndef", "Keeps the text that follows when a macro is not defined."),
+    (
+        "ifdef",
+        "Keeps the text that follows when a macro is defined.",
+    ),
+    (
+        "ifndef",
+        "Keeps the text that follows when a macro is not defined.",
+    ),
     ("else", "The alternative of an `ifdef or `ifndef."),
-    ("elsif", "A further alternative of an `ifdef or `ifndef, on another macro."),
+    (
+        "elsif",
+        "A further alternative of an `ifdef or `ifndef, on another macro.",
+    ),
     ("endif", "Closes an `ifdef or `ifndef."),
-    ("timescale", "Sets the time unit and precision of the modules that follow."),
+    (
+        "timescale",
+        "Sets the time unit and precision of the modules that follow.",
+    ),
     ("resetall", "Sets every directive back to its default."),
-    ("default_nettype", "Sets the type of nets declared implicitly."),
+    (
+        "default_nettype",
+        "Sets the type of nets declared implicitly.",
+    ),
     (
         "default_transition",
         "Sets the transition time digital events take by default.",
     ),
-    ("default_discipline", "Sets the discipline of nets that declare none."),
+    (
+        "default_discipline",
+        "Sets the discipline of nets that declare none.",
+    ),
     (
         "begin_keywords",
         "Reads the text that follows with the reserved words of a named standard.",
@@ -437,7 +458,11 @@ const DOCUMENTATION: &[(&str, Option<&str>, &str)] = &[
     ("asinh", Some("x"), "Inverse hyperbolic sine."),
     ("acosh", Some("x"), "Inverse hyperbolic cosine."),
     ("atanh", Some("x"), "Inverse hyperbolic tangent."),
-    ("atan2", Some("y, x"), "Arc tangent of y/x in the quadrant of (x, y)."),
+    (
+        "atan2",
+        Some("y, x"),
+        "Arc tangent of y/x in the quadrant of (x, y).",
+    ),
     ("hypot", Some("x, y"), "Square root of x² + y²."),
     ("floor", Some("x"), "Largest integer not above x."),
     ("ceil", Some("x"), "Smallest integer not below x."),
@@ -588,7 +613,11 @@ const DOCUMENTATION: &[(&str, Option<&str>, &str)] = &[
         Some("parameter"),
         "Whether the instance or its model sets the parameter.",
     ),
-    ("$port_connected", Some("port"), "Whether the port is connected."),
+    (
+        "$port_connected",
+        Some("port"),
+        "Whether the port is connected.",
+    ),
     (
         "$limit",
         Some("access, [function], [arg…]"),
@@ -749,8 +778,12 @@ mod tests {
         assert_eq!(kind("P_K"), Some(CatalogKind::Macro));
         assert_eq!(kind("disciplines.vams"), Some(CatalogKind::Header));
         // `electrical` is both: the lexer reserves it, the header declares it.
-        assert!(catalog.entries().iter().any(|entry| entry.name == "electrical"
-            && entry.kind == CatalogKind::Discipline));
+        assert!(
+            catalog
+                .entries()
+                .iter()
+                .any(|entry| entry.name == "electrical" && entry.kind == CatalogKind::Discipline)
+        );
         assert_eq!(kind("begin"), Some(CatalogKind::Keyword));
         assert_eq!(kind("cross"), Some(CatalogKind::AnalogOperator));
     }
@@ -762,7 +795,11 @@ mod tests {
         assert_eq!(ddt.signature(), "ddt(expr [, abstol])");
         assert_eq!(
             ddt.signature_parts(1),
-            Some(("ddt(expr [, ".to_owned(), "abstol".to_owned(), "])".to_owned()))
+            Some((
+                "ddt(expr [, ".to_owned(),
+                "abstol".to_owned(),
+                "])".to_owned()
+            ))
         );
         assert_eq!(ddt.signature_parts(2), None);
         let strobe = catalog.entry("$strobe").expect("$strobe");

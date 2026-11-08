@@ -180,7 +180,9 @@ impl VerilogASymbols {
 
     /// Whether `scope` is the file or a module.
     pub(crate) fn is_module_level(&self, scope: usize) -> bool {
-        self.scopes.get(scope).is_some_and(|scope| scope.module_level)
+        self.scopes
+            .get(scope)
+            .is_some_and(|scope| scope.module_level)
     }
 
     /// The first place `name` is written after a `.`.
@@ -276,7 +278,9 @@ fn parse(text: &str) -> Result<rspice_veriloga::SourceFile, (usize, String)> {
 fn blank_line(text: &str, line: usize) -> Option<String> {
     let starts = line_starts(text);
     let start = *starts.get(line.checked_sub(1)?)?;
-    let end = text[start..].find('\n').map_or(text.len(), |end| start + end);
+    let end = text[start..]
+        .find('\n')
+        .map_or(text.len(), |end| start + end);
     let mut blanked = text.to_owned();
     blanked.replace_range(
         start..end,
@@ -406,7 +410,10 @@ impl Reader<'_> {
     }
 
     fn scope(&mut self, range: Range<usize>, module_level: bool) -> usize {
-        self.symbols.scopes.push(Scope { range, module_level });
+        self.symbols.scopes.push(Scope {
+            range,
+            module_level,
+        });
         self.symbols.scopes.len() - 1
     }
 
@@ -848,10 +855,16 @@ mod tests {
             [(18, 12), (19, 9), (20, 14), (21, 12)]
         );
         // The block's local.
-        assert_eq!(uses(&symbols, TWO_SCOPES, "k;\n"), [(12, 13), (13, 5), (14, 20)]);
+        assert_eq!(
+            uses(&symbols, TWO_SCOPES, "k;\n"),
+            [(12, 13), (13, 5), (14, 20)]
+        );
         // `V` is an access function and `twice(y)` calls the function.
         let access = TWO_SCOPES.find("V(a, b)").expect("the contribution");
-        assert_eq!(symbols.name_at(access).and_then(|name| name.declaration), None);
+        assert_eq!(
+            symbols.name_at(access).and_then(|name| name.declaration),
+            None
+        );
         assert_eq!(uses(&symbols, TWO_SCOPES, "twice;").len(), 3);
     }
 

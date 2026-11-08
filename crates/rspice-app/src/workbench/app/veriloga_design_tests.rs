@@ -365,7 +365,10 @@ fn find_references_lists_each_occurrence_on_the_references_page() {
         app.state.workbench.console_page,
         crate::workbench::state::ConsolePage::References
     );
-    assert_eq!(app.state.prompt_text(), Some("2 references to g in 1 file."));
+    assert_eq!(
+        app.state.prompt_text(),
+        Some("2 references to g in 1 file.")
+    );
 }
 
 /// Format is the editor's request, and it formats the document that view's

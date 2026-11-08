@@ -585,8 +585,8 @@ fn show_code_document_impl(
                 });
             }
         }
-        let announcement = announcement
-            .or_else(|| assist_answer.and_then(|answer| answer.announcement));
+        let announcement =
+            announcement.or_else(|| assist_answer.and_then(|answer| answer.announcement));
         ui.ctx().data_mut(|data| {
             data.insert_temp(reported_caret_id(editor_id), output.cursor_char_index);
             data.insert_temp(held_id, held);

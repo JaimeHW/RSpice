@@ -254,8 +254,7 @@ pub(super) fn show(
     state.card = state
         .card
         .filter(|place| *place == (state.serial, caret_char) && focused);
-    let typed_into_call =
-        grew && matches!(source[..caret].chars().next_back(), Some('(' | ','));
+    let typed_into_call = grew && matches!(source[..caret].chars().next_back(), Some('(' | ','));
     let wants_call = typed_into_call || state.signature_open || state.card.is_some();
     let symbols = if wants_call || keys.ask_information {
         state.symbols(source, caret_line)
@@ -299,8 +298,7 @@ pub(super) fn show(
             .map(|(_, _, information)| information.clone());
         let information = cached.unwrap_or_else(|| {
             let symbols = state.symbols(source, caret_line);
-            let information =
-                information_at(source, byte_at(source, index), symbols.as_deref());
+            let information = information_at(source, byte_at(source, index), symbols.as_deref());
             state.hover = Some((state.serial, index, information.clone()));
             information
         });
@@ -394,8 +392,7 @@ fn run_completion(
     if keys.step != 0 {
         popup.moved = true;
     }
-    popup.selected =
-        (popup.selected as i32 + keys.step).rem_euclid(offered.len() as i32) as usize;
+    popup.selected = (popup.selected as i32 + keys.step).rem_euclid(offered.len() as i32) as usize;
     popup.first_shown = popup
         .first_shown
         .min(popup.selected)
@@ -537,9 +534,12 @@ fn draw_popup(
             messages.text(MessageId::VerilogACompletionHint)
         )
     };
-    let footer = ui
-        .painter()
-        .layout(footer, footer_font, colors.text_dim, (width - 20.0).max(0.0));
+    let footer = ui.painter().layout(
+        footer,
+        footer_font,
+        colors.text_dim,
+        (width - 20.0).max(0.0),
+    );
     let height = rows as f32 * ROW_HEIGHT + footer.size().y + 14.0 + 2.0;
     // Under the caret, or above its line where the bottom of the window
     // would cut it.

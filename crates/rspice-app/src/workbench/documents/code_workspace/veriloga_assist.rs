@@ -186,10 +186,9 @@ fn include_query(
     column: usize,
     spans: &[SyntaxSpan],
 ) -> Option<CompletionQuery> {
-    let (index, string) = spans
-        .iter()
-        .enumerate()
-        .find(|(_, span)| span.class == SyntaxClass::String && span.range.contains(&(column - 1)))?;
+    let (index, string) = spans.iter().enumerate().find(|(_, span)| {
+        span.class == SyntaxClass::String && span.range.contains(&(column - 1))
+    })?;
     let directive = index.checked_sub(1).map(|before| &spans[before])?;
     if directive.class != SyntaxClass::Directive || &line[directive.range.clone()] != "`include" {
         return None;
@@ -215,10 +214,7 @@ fn matches_prefix(name: &str, prefix: &str) -> bool {
 
 /// The text after a callable's name in the list: `(expr [, abstol])`.
 fn argument_list(signature: &str, name: &str) -> String {
-    signature
-        .strip_prefix(name)
-        .unwrap_or(signature)
-        .to_owned()
+    signature.strip_prefix(name).unwrap_or(signature).to_owned()
 }
 
 /// The completions of `query`, the file's own names first where a plain name
@@ -238,7 +234,9 @@ pub(crate) fn candidates(
     let catalog = VerilogACatalog::get();
     let caret = query.range.end;
     // A `(` already written after the caret is the call's own.
-    let paren_follows = source[caret..].trim_start_matches([' ', '\t']).starts_with('(');
+    let paren_follows = source[caret..]
+        .trim_start_matches([' ', '\t'])
+        .starts_with('(');
     let opening = |insert: String, callable: bool| {
         if callable && !paren_follows {
             format!("{insert}(")
@@ -247,7 +245,8 @@ pub(crate) fn candidates(
         }
     };
     let keep = |name: &str| {
-        matches_prefix(name, &query.prefix) && (asked_for || !name.eq_ignore_ascii_case(&query.prefix))
+        matches_prefix(name, &query.prefix)
+            && (asked_for || !name.eq_ignore_ascii_case(&query.prefix))
     };
     let from_catalog = |kinds: &[CatalogKind], out: &mut Vec<Candidate>| {
         let mut listed = catalog
@@ -394,9 +393,15 @@ fn defined_macros(source: &str) -> Vec<(String, String)> {
             continue;
         };
         let rest = rest.trim_start();
-        let end = rest.find(|c: char| !is_word_character(c)).unwrap_or(rest.len());
+        let end = rest
+            .find(|c: char| !is_word_character(c))
+            .unwrap_or(rest.len());
         let name = &rest[..end];
-        if !name.is_empty() && !macros.iter().any(|(known, _): &(String, String)| known == name) {
+        if !name.is_empty()
+            && !macros
+                .iter()
+                .any(|(known, _): &(String, String)| known == name)
+        {
             macros.push((name.to_owned(), rest[end..].trim().to_owned()));
         }
     }
@@ -569,12 +574,9 @@ pub(crate) fn is_callable(name: &str, symbols: Option<&VerilogASymbols>) -> bool
         .written(name)
         .is_some_and(|entry| entry.parameters.is_some())
         || symbols.is_some_and(|symbols| {
-            symbols
-                .declarations()
-                .iter()
-                .any(|declaration| {
-                    declaration.kind == VerilogASymbolKind::Function && declaration.name == name
-                })
+            symbols.declarations().iter().any(|declaration| {
+                declaration.kind == VerilogASymbolKind::Function && declaration.name == name
+            })
         })
 }
 
@@ -676,7 +678,11 @@ mod tests {
             .expect("$temperature is offered");
         assert_eq!(temperature.kind, "function");
         assert_eq!(temperature.insert, "$temperature");
-        assert!(offered.iter().all(|candidate| candidate.label.starts_with('$')));
+        assert!(
+            offered
+                .iter()
+                .all(|candidate| candidate.label.starts_with('$'))
+        );
         let (source, caret) = with_text_at_blank_line("$str");
         assert_eq!(labels(&list(&source, caret, false)), ["$strobe"]);
     }
@@ -810,7 +816,11 @@ mod tests {
             gain.sentence(),
             "gain: parameter. parameter real = 1e5 from (0:inf). Open-loop gain (V/V)."
         );
-        assert_eq!(at("analog").map(|_| ()), None, "a plain keyword says nothing");
+        assert_eq!(
+            at("analog").map(|_| ()),
+            None,
+            "a plain keyword says nothing"
+        );
         let source = "// ddt\n$strobe(\"ddt\");\n$temperature;\n`M_PI;\n";
         let symbols = VerilogASymbols::read(source);
         let at = |written: &str, nth: usize| {
