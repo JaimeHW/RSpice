@@ -2535,7 +2535,7 @@ fn draw_rspice_glyph_at_the_source_pin_span(
             .collect()
     };
     let Some((_, rotation, mirrored, local)) =
-        placements(component, &pins, &offsets).into_iter().next()
+        placements(component, &pins, offsets).into_iter().next()
     else {
         return false;
     };
