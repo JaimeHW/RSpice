@@ -2751,7 +2751,7 @@ fn generated_parameter_descriptors_are_the_public_scope_authority() {
 module parameter_metadata(p, n);
     inout p, n;
     electrical p, n;
-    parameter real limit = 10.0;
+    (* units = "V", desc = "Largest \"safe\" voltage" *) parameter real limit = 10.0;
     (* type = "instance", xyceAlsoModel = "yes" *)
         parameter integer gain = 2 from [0.0:limit];
     aliasparam GAIN_ALIAS = gain;
@@ -2764,6 +2764,12 @@ endmodule
     assert!(state.contains(
         "P::dual(\"gain\", Some(2.0)).integer().aliases(&[\"GAIN_ALIAS\"]).minimum(B::inclusive(0.0)).dynamic_constraints()"
     ));
+    // The source's units and description, escaped as the Rust literal they
+    // are emitted as.
+    assert!(
+        state.contains(".described(\"V\", \"Largest \\\"safe\\\" voltage\")"),
+        "{state}"
+    );
     assert!(!state.contains("GeneratedVerilogAParameterDescriptor {"));
     assert!(!state.contains("pub fn parameter_scope"));
 }

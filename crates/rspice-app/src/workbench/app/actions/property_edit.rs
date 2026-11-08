@@ -339,10 +339,15 @@ fn generated_veriloga_property_sheet(
                 }
             })
             .unwrap_or_else(|| PropertyValue::expression(""));
-        let mut description = format!(
-            "Generated Verilog-A {scope} parameter for {}.",
-            descriptor.model_name
-        );
+        // The source's own `desc` where it gives one.
+        let mut description = if parameter.description.is_empty() {
+            format!(
+                "Generated Verilog-A {scope} parameter for {}.",
+                descriptor.model_name
+            )
+        } else {
+            parameter.description.to_owned()
+        };
         if parameter.has_dynamic_constraints {
             description.push_str(
                 " Its final range depends on other parameters; the compiled model validates the complete set.",
@@ -364,6 +369,9 @@ fn generated_veriloga_property_sheet(
             } else {
                 "Instance parameters"
             });
+        if !parameter.units.is_empty() {
+            definition.unit = Some(parameter.units.to_owned());
+        }
         if !parameter.has_dynamic_constraints {
             definition.min_value = parameter
                 .minimum
@@ -965,6 +973,33 @@ mod tests {
         let fallback = stimulus_preview_timing(&state);
         assert_eq!(fallback, PreviewTiming::default());
         assert!(!fallback.from_analysis);
+    }
+
+    /// A built-in Verilog-A parameter's row carries the units and description
+    /// its source declares.
+    #[test]
+    fn a_generated_veriloga_parameter_row_reads_its_source_units_and_description() {
+        let (descriptor, parameter) = crate::state::generated_veriloga_devices()
+            .iter()
+            .find_map(|descriptor| {
+                descriptor
+                    .parameters
+                    .iter()
+                    .find(|parameter| !parameter.units.is_empty() && !parameter.description.is_empty())
+                    .map(|parameter| (descriptor, parameter))
+            })
+            .expect("some built-in model describes a parameter");
+        let binding = crate::state::generated_veriloga_library_binding(descriptor)
+            .expect("a catalog binding");
+        let sheet = generated_veriloga_property_sheet(&binding).expect("a property sheet");
+        let row = sheet.get(parameter.name).expect("the parameter has a row");
+        assert!(
+            row.description.starts_with(parameter.description),
+            "{}: {}",
+            parameter.name,
+            row.description
+        );
+        assert_eq!(row.unit.as_deref(), Some(parameter.units), "{}", parameter.name);
     }
 
     #[test]

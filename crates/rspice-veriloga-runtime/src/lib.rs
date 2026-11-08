@@ -3463,7 +3463,8 @@ mod fixed_lane_tests {
                 .minimum(GeneratedVerilogAParameterBound::inclusive(0.0))
                 .maximum(GeneratedVerilogAParameterBound::exclusive(100.0))
                 .excluded_values(&[50.0])
-                .dynamic_constraints();
+                .dynamic_constraints()
+                .described("K/W", "Thermal resistance");
         const EXPECTED_PARAMETER: GeneratedVerilogAParameterDescriptor =
             GeneratedVerilogAParameterDescriptor {
                 name: "rth0",
@@ -3482,13 +3483,15 @@ mod fixed_lane_tests {
                 }),
                 excluded_values: &[50.0],
                 has_dynamic_constraints: true,
+                units: "K/W",
+                description: "Thermal resistance",
             };
         const MODEL_PARAMETER: GeneratedVerilogAParameterDescriptor =
             GeneratedVerilogAParameterDescriptor::model("model_only", None);
         const INSTANCE_PARAMETER: GeneratedVerilogAParameterDescriptor =
             GeneratedVerilogAParameterDescriptor::instance("instance_only", Some(1.0));
 
-        assert_eq!(GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION, 5);
+        assert_eq!(GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION, 6);
         const ARRAY: GeneratedVerilogAParameterDescriptor =
             GeneratedVerilogAParameterDescriptor::instance("coefficients", Some(0.0)).array();
         const {

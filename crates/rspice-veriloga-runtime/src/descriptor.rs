@@ -8,7 +8,9 @@ use super::Value;
 /// This is intentionally independent of checkpoint and stamp-workspace
 /// versions: consumers use it to decide whether a persisted schematic binding
 /// can be reconstructed from the compiled model catalog.
-pub const GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION: u32 = 5;
+///
+/// Version 6 carries each parameter's units and description from its source.
+pub const GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION: u32 = 6;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GeneratedVerilogAParameterScope {
@@ -78,6 +80,10 @@ pub struct GeneratedVerilogAParameterDescriptor {
     pub maximum: Option<GeneratedVerilogAParameterBound>,
     pub excluded_values: &'static [Value],
     pub has_dynamic_constraints: bool,
+    /// The declaration's `units` attribute, empty when it has none.
+    pub units: &'static str,
+    /// The declaration's `desc` attribute, empty when it has none.
+    pub description: &'static str,
 }
 
 impl GeneratedVerilogAParameterDescriptor {
@@ -97,6 +103,8 @@ impl GeneratedVerilogAParameterDescriptor {
             maximum: None,
             excluded_values: &[],
             has_dynamic_constraints: false,
+            units: "",
+            description: "",
         }
     }
 
@@ -156,6 +164,14 @@ impl GeneratedVerilogAParameterDescriptor {
     #[inline]
     pub const fn dynamic_constraints(mut self) -> Self {
         self.has_dynamic_constraints = true;
+        self
+    }
+
+    /// The units and description the source's attributes give.
+    #[inline]
+    pub const fn described(mut self, units: &'static str, description: &'static str) -> Self {
+        self.units = units;
+        self.description = description;
         self
     }
 }

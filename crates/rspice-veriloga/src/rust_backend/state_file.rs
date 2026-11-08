@@ -1527,6 +1527,23 @@ fn emit_public_parameter_descriptors(artifact: &CanonicalIrArtifact, out: &mut S
         if has_dynamic_constraints {
             descriptor.push_str(".dynamic_constraints()");
         }
+        // The units and description the declaration's attributes give.
+        let declared = artifact
+            .hir
+            .parameters
+            .iter()
+            .find(|declared| declared.id == parameter.id);
+        let units = declared
+            .and_then(|declared| declared.units.as_deref())
+            .unwrap_or("")
+            .trim();
+        let description = declared
+            .and_then(|declared| declared.description.as_deref())
+            .unwrap_or("")
+            .trim();
+        if !units.is_empty() || !description.is_empty() {
+            descriptor.push_str(&format!(".described({units:?}, {description:?})"));
+        }
         out.push_str(&format!("        {descriptor},\n"));
     }
     out.push_str("    ];\n");
