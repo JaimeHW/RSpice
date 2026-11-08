@@ -732,8 +732,13 @@ pub(crate) fn dc_operating_point_export_signals(
 ) -> Result<Vec<ScalarSignal>, rspice_core::SimulationError> {
     let projection = projection(netlist)?;
     let signals = checked_dc_operating_point_signals(result)?;
-    let observables = rspice_core::execution::operating_point_observable_series(result);
-    let lookup = rspice_core::execution::observable_lookup(&observables);
+    // An operating point holds one value per observable, so each series is
+    // that value where the result keeps it.
+    let lookup = result
+        .dc_observables
+        .iter()
+        .map(|(name, value)| (name.clone(), std::slice::from_ref(value)))
+        .collect();
     project_scalar(
         netlist,
         &projection,
