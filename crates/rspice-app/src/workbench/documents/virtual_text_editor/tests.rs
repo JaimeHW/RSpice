@@ -677,14 +677,83 @@ fn widget_exposes_active_line_read_only_and_diagnostic_context_to_accesskit() {
     let active_text = nodes
         .iter()
         .find_map(|(_, node)| {
-            (node.role() == egui::accesskit::Role::TextRun && node.value() == Some("V1 input 0 1"))
-                .then_some(node)
+            (node.role() == egui::accesskit::Role::TextRun
+                && node.value().map(str::trim_end) == Some("V1 input 0 1"))
+            .then_some(node)
         })
         .expect("active-line TextRun");
     let bounds = active_text.bounds().expect("active-line bounds");
     assert!(
         bounds.y0 >= f64::from(style.top_padding + style.line_height),
         "line-two accessibility geometry must not overlap line one: {bounds:?}"
+    );
+}
+
+/// A screen reader is given the caret's line and three lines either side,
+/// each row of them where it is drawn; the lines beyond are left out.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn accessible_text_is_the_caret_line_and_three_lines_either_side() {
+    let context = egui::Context::default();
+    context.enable_accesskit();
+    crate::ui::Theme::default().apply(&context);
+    let mut source = (1..=20)
+        .map(|line| format!("line {line}\n"))
+        .collect::<String>();
+    let edited = std::collections::HashSet::new();
+    let style = test_style(&edited);
+    let nodes = context
+        .run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(900.0, 600.0),
+                )),
+                ..Default::default()
+            },
+            |ui| {
+                let _ = show_virtual_text_editor(
+                    ui,
+                    egui::Id::new("window-accessible-editor-test"),
+                    &mut source,
+                    1,
+                    true,
+                    EditorSyntax::Spice,
+                    Some(10),
+                    &style,
+                    |ui, row, font| {
+                        ui.fonts_mut(|fonts| {
+                            fonts.layout_no_wrap(row.text.to_owned(), font, Color32::WHITE)
+                        })
+                    },
+                    |_| None,
+                    |_| None,
+                );
+            },
+        )
+        .platform_output
+        .accesskit_update
+        .expect("AccessKit editor tree")
+        .nodes;
+    let mut rows = nodes
+        .iter()
+        .filter(|(_, node)| node.role() == egui::accesskit::Role::TextRun)
+        .map(|(_, node)| {
+            (
+                node.bounds().expect("a row's bounds").y0,
+                node.value().unwrap_or_default().trim_end().to_owned(),
+            )
+        })
+        .collect::<Vec<_>>();
+    rows.sort_by(|left, right| left.0.total_cmp(&right.0));
+    assert_eq!(
+        rows.iter().map(|(_, text)| text.as_str()).collect::<Vec<_>>(),
+        ["line 7", "line 8", "line 9", "line 10", "line 11", "line 12", "line 13"]
+    );
+    let pitch = rows[1].0 - rows[0].0;
+    assert!(
+        (pitch - f64::from(style.line_height)).abs() < 0.5,
+        "each line's bounds are where it is drawn: {pitch}"
     );
 }
 

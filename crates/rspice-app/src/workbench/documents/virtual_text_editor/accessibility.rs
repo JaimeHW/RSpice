@@ -1,16 +1,31 @@
 //! The virtual editor's AccessKit projection.
 //!
 //! A rope-backed editor cannot hand a screen reader the whole document, so it
-//! publishes a bounded window around the caret and keeps that window's
-//! selection in sync with the model's. Every string that reaches the
-//! accessibility tree is length-capped: an assistive technology reading a
-//! 100k-character line is a hang, not a feature.
+//! publishes a bounded window around the caret, the caret's line and three
+//! lines either side, and keeps that window's selection in sync with the
+//! model's. Every string that reaches the accessibility tree is length-capped:
+//! an assistive technology reading a 100k-character line is a hang, not a
+//! feature.
 
 use super::*;
+
+/// The lines either side of the caret's that a screen reader is given.
+const ACCESSIBLE_CONTEXT_LINES: usize = 3;
+
+/// One document line's part of the window's text.
+#[derive(Debug, Clone, Copy)]
+struct AccessibleWindowLine {
+    line: usize,
+    first_column: usize,
+    chars: usize,
+    /// Where it starts in the window's text.
+    offset: usize,
+}
 
 #[derive(Debug)]
 struct AccessibleLineWindow {
     text: String,
+    lines: Vec<AccessibleWindowLine>,
     line: usize,
     column: usize,
     total_lines: usize,
@@ -21,6 +36,25 @@ struct AccessibleLineWindow {
     selected_chars: usize,
     selection_is_complete: bool,
     cursor_count: usize,
+}
+
+impl AccessibleLineWindow {
+    /// Where the document's `line` and `column` stand in the window's text,
+    /// when the window shows them.
+    fn offset_of(&self, line: usize, column: usize) -> Option<usize> {
+        let entry = self.lines.iter().find(|entry| entry.line == line)?;
+        (entry.first_column..=entry.first_column + entry.chars)
+            .contains(&column)
+            .then(|| entry.offset + column - entry.first_column)
+    }
+
+    /// The document line and column at `offset` in the window's text.
+    fn place_of(&self, offset: usize) -> Option<(usize, usize)> {
+        self.lines
+            .iter()
+            .find(|entry| (entry.offset..=entry.offset + entry.chars).contains(&offset))
+            .map(|entry| (entry.line, entry.first_column + offset - entry.offset))
+    }
 }
 
 fn accessible_line_window(model: &TextDocumentModel) -> AccessibleLineWindow {
@@ -51,33 +85,58 @@ fn accessible_line_window(model: &TextDocumentModel) -> AccessibleLineWindow {
     };
     first_column = first_column.min(total_columns.saturating_sub(MAX_ACCESSIBLE_LINE_CHARS));
     let last_column = (first_column + MAX_ACCESSIBLE_LINE_CHARS).min(total_columns);
-    let selection_is_complete = anchor_line == line
-        && (first_column..=last_column).contains(&column)
-        && (first_column..=last_column).contains(&anchor_column);
-    let primary = column
-        .saturating_sub(first_column)
-        .min(last_column - first_column);
-    let secondary = if selection_is_complete {
-        anchor_column
-            .saturating_sub(first_column)
-            .min(last_column - first_column)
-    } else {
-        primary
-    };
 
-    AccessibleLineWindow {
-        text: model.text_range((line_range.start + first_column)..(line_range.start + last_column)),
+    let total_lines = model.line_count();
+    let mut text = String::new();
+    let mut lines = Vec::new();
+    let mut offset = 0;
+    let window_end = (line + ACCESSIBLE_CONTEXT_LINES).min(total_lines.saturating_sub(1));
+    for index in line.saturating_sub(ACCESSIBLE_CONTEXT_LINES)..=window_end {
+        let range = if index == line {
+            line_range.clone()
+        } else {
+            model
+                .line_content_char_range(index)
+                .unwrap_or_else(|| model.len_chars()..model.len_chars())
+        };
+        let (first, last) = if index == line {
+            (first_column, last_column)
+        } else {
+            (0, range.len().min(MAX_ACCESSIBLE_LINE_CHARS))
+        };
+        if !lines.is_empty() {
+            text.push('\n');
+            offset += 1;
+        }
+        text.push_str(&model.text_range((range.start + first)..(range.start + last)));
+        lines.push(AccessibleWindowLine {
+            line: index,
+            first_column: first,
+            chars: last - first,
+            offset,
+        });
+        offset += last - first;
+    }
+
+    let mut window = AccessibleLineWindow {
+        text,
+        lines,
         line,
         column,
-        total_lines: model.line_count(),
+        total_lines,
         total_columns,
         first_column,
-        primary,
-        secondary,
+        primary: 0,
+        secondary: 0,
         selected_chars,
-        selection_is_complete,
+        selection_is_complete: false,
         cursor_count: model.selections().len(),
-    }
+    };
+    window.primary = window.offset_of(line, column).unwrap_or(0);
+    let anchor = window.offset_of(anchor_line, anchor_column);
+    window.selection_is_complete = anchor.is_some();
+    window.secondary = anchor.unwrap_or(window.primary);
+    window
 }
 
 fn accessible_cursor_range(window: &AccessibleLineWindow) -> egui::text::CCursorRange {
@@ -93,7 +152,18 @@ fn accessible_line_galley(
     window: &AccessibleLineWindow,
     style: &VirtualEditorStyle<'_>,
 ) -> Arc<egui::Galley> {
-    ui.fonts_mut(|fonts| fonts.layout_no_wrap(window.text.clone(), style.font.clone(), style.text))
+    // At the editor's own line pitch, so each line's bounds are where it is
+    // drawn.
+    let mut job = egui::text::LayoutJob::simple(
+        window.text.clone(),
+        style.font.clone(),
+        style.text,
+        f32::INFINITY,
+    );
+    if let Some(section) = job.sections.first_mut() {
+        section.format.line_height = Some(style.line_height);
+    }
+    ui.fonts_mut(|fonts| fonts.layout_job(job))
 }
 
 pub(super) fn consume_accesskit_text_selection(
@@ -115,14 +185,19 @@ pub(super) fn consume_accesskit_text_selection(
         .iter()
         .any(|event| range.on_event(ui.os(), event, &galley, editor_id));
     if changed {
-        let line_start = model
-            .line_content_char_range(window.line)
-            .map_or(model.len_chars(), |range| range.start);
         let accessible_chars = window.text.chars().count();
-        let primary =
-            line_start + window.first_column + range.primary.index.0.min(accessible_chars);
-        let secondary =
-            line_start + window.first_column + range.secondary.index.0.min(accessible_chars);
+        let document_char = |index: usize| {
+            window
+                .place_of(index.min(accessible_chars))
+                .and_then(|(line, column)| {
+                    model
+                        .line_content_char_range(line)
+                        .map(|range| range.start + column)
+                })
+                .unwrap_or_else(|| model.len_chars())
+        };
+        let primary = document_char(range.primary.index.0);
+        let secondary = document_char(range.secondary.index.0);
         model.set_selections(vec![TextSelection {
             anchor: secondary,
             cursor: primary,
@@ -149,8 +224,14 @@ pub(super) fn update_accesskit_text_state(
 
     let window = accessible_line_window(model);
     let galley = accessible_line_galley(ui, &window, style);
+    let first_line = window.lines.first().map_or(window.line, |entry| entry.line);
     let visible_row = model
-        .projected_visible_row_for_logical_line(window.line)
+        .projected_visible_row_for_logical_line(first_line)
+        .or_else(|| {
+            model
+                .projected_visible_row_for_logical_line(window.line)
+                .map(|row| row.saturating_sub(window.line - first_line))
+        })
         .unwrap_or(0);
     let char_width = monospace_advance(ui, &style.font).max(1.0);
     egui::text_selection::accesskit_text::update_accesskit_for_text_widget(
@@ -292,7 +373,7 @@ fn append_accessible_sentence(description: &mut String, sentence: &str) {
     description.push_str(sentence);
 }
 
-pub(super) fn bounded_accessible_text(source: &str, maximum_chars: usize) -> String {
+pub(crate) fn bounded_accessible_text(source: &str, maximum_chars: usize) -> String {
     let mut output = String::with_capacity(source.len().min(maximum_chars));
     let mut output_chars = 0usize;
     let mut pending_space = false;
