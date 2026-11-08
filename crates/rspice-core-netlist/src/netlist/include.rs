@@ -1514,17 +1514,22 @@ impl IncludeProcessor {
             poll_parse_text(abort, line)?;
             let line_number = line_index + 1;
             let trimmed = line.trim();
+            // Every card this expansion acts on is a dot card, so a model
+            // library's parameter and continuation lines skip those checks.
+            let dot_card = trimmed.starts_with('.');
 
             // QSPICE and LTspice include the file a one-argument `.lib`
             // names whole. Xyce reads every one-argument `.lib` as the start
             // of a library section, so its BUG 387 certification deck fails
             // on the missing `.ENDL`; a deck read under Xyce's rules keeps
             // that meaning.
-            let whole_file_lib = self.expression_dialect != ExpressionDialect::Xyce
+            let whole_file_lib = dot_card
+                && self.expression_dialect != ExpressionDialect::Xyce
                 && library_file_include(trimmed).is_some();
 
-            if split_directive(trimmed)
-                .is_some_and(|(directive, _)| directive.eq_ignore_ascii_case(".lib"))
+            if dot_card
+                && split_directive(trimmed)
+                    .is_some_and(|(directive, _)| directive.eq_ignore_ascii_case(".lib"))
                 && !whole_file_lib
             {
                 let Some((filename, section)) = lib_directive_parts(trimmed) else {
@@ -1564,7 +1569,7 @@ impl IncludeProcessor {
                 continue;
             }
 
-            if let Some(end_name) = parse_endl_directive(trimmed, line_number)? {
+            if dot_card && let Some(end_name) = parse_endl_directive(trimmed, line_number)? {
                 inline_sections.close(
                     end_name.as_deref(),
                     line_number,

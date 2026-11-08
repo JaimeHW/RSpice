@@ -140,12 +140,34 @@ pub(crate) fn is_native_spectre_source(path: &Path, source: &str) -> bool {
     // A language boundary inside a line or block comment is inert. Keep this
     // lightweight recognition in lockstep with the adapter without requiring
     // a successful full Spectre comment pass merely to select the dialect.
+    // The probe reads each line through the adapter's own comment rules but
+    // keeps none of it, since every included source passes through here.
+    const BOUNDARY: &[u8] = b"simulator lang=";
     let mut in_block_comment = false;
     source.lines().enumerate().any(|(line_index, line)| {
-        strip_spectre_comments_from_line(line, &mut in_block_comment, line_index + 1, None)
-            .trim()
-            .to_ascii_lowercase()
-            .starts_with("simulator lang=")
+        // Characters of the boundary matched so far, after the line's leading
+        // whitespace; `None` once the kept text can no longer begin with it.
+        let mut matched = Some(0usize);
+        let mut started = false;
+        scan_spectre_comments_in_line(
+            line,
+            &mut in_block_comment,
+            line_index + 1,
+            None,
+            |character| {
+                let Some(count) = matched.filter(|count| *count < BOUNDARY.len()) else {
+                    return;
+                };
+                if !started && character.is_whitespace() {
+                    return;
+                }
+                started = true;
+                matched = (character.is_ascii()
+                    && (character as u8).to_ascii_lowercase() == BOUNDARY[count])
+                    .then_some(count + 1);
+            },
+        );
+        matched == Some(BOUNDARY.len())
     })
 }
 
@@ -796,9 +818,34 @@ fn strip_spectre_comments_from_line(
     line: &str,
     in_block_comment: &mut bool,
     line_number: usize,
-    mut block_start_line: Option<&mut usize>,
+    block_start_line: Option<&mut usize>,
 ) -> String {
     let mut output = String::with_capacity(line.len());
+    scan_spectre_comments_in_line(
+        line,
+        in_block_comment,
+        line_number,
+        block_start_line,
+        |character| output.push(character),
+    );
+    output
+}
+
+/// Read one physical line under Spectre's comment rules, handing every
+/// character outside a comment to `keep` in order. A block comment that opens
+/// after kept text other than whitespace keeps one separating space.
+fn scan_spectre_comments_in_line(
+    line: &str,
+    in_block_comment: &mut bool,
+    line_number: usize,
+    mut block_start_line: Option<&mut usize>,
+    mut keep: impl FnMut(char),
+) {
+    let mut last_kept = None;
+    let mut push = |character: char, last_kept: &mut Option<char>| {
+        keep(character);
+        *last_kept = Some(character);
+    };
     let mut characters = line.char_indices().peekable();
     let mut quote = None;
     let mut escaped = false;
@@ -812,7 +859,7 @@ fn strip_spectre_comments_from_line(
             continue;
         }
         if let Some(active_quote) = quote {
-            output.push(character);
+            push(character, &mut last_kept);
             if escaped {
                 escaped = false;
             } else if character == '\\' {
@@ -824,7 +871,7 @@ fn strip_spectre_comments_from_line(
         }
         if matches!(character, '\'' | '"') {
             quote = Some(character);
-            output.push(character);
+            push(character, &mut last_kept);
         } else if character == '/' && next == Some('/') {
             break;
         } else if character == '/' && next == Some('*') {
@@ -833,18 +880,13 @@ fn strip_spectre_comments_from_line(
             if let Some(start) = block_start_line.as_deref_mut() {
                 *start = line_number;
             }
-            if output
-                .chars()
-                .last()
-                .is_some_and(|last| !last.is_whitespace())
-            {
-                output.push(' ');
+            if last_kept.is_some_and(|last: char| !last.is_whitespace()) {
+                push(' ', &mut last_kept);
             }
         } else {
-            output.push(character);
+            push(character, &mut last_kept);
         }
     }
-    output
 }
 
 fn lower_statistics(
