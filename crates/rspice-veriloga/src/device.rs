@@ -2426,6 +2426,37 @@ enum CanonicalNoisePlan {
 }
 
 impl CanonicalNoisePlan {
+    /// Plan `model`'s grouped noise from `artifact`, whose identity has been
+    /// validated against it.
+    ///
+    /// Planned eagerly, because the outcome depends only on the model and
+    /// the artifact, but a lowering failure is *reported* lazily. A model
+    /// whose noise metadata the canonical CFG cannot represent is still a
+    /// valid device for every analysis that never reads that metadata, so
+    /// that failure is carried on the instance and raised when noise is
+    /// actually requested. An artifact that does not describe this model
+    /// still refuses construction, because it invalidates the whole instance.
+    /// What does not change either way is the landing contract: a schema-1
+    /// instance never falls back to the eager scalar PSD path.
+    fn for_model(
+        model: &CompiledModel,
+        artifact: Option<&CanonicalIrArtifact>,
+    ) -> Result<Self, VmError> {
+        if !Self::required_for(model) {
+            return Ok(Self::NotRequired);
+        }
+        Ok(match artifact {
+            Some(artifact) => match CanonicalNoiseRuntimePlan::build(artifact, model) {
+                Ok(plan) => Self::Ready(std::sync::Arc::new(plan)),
+                Err(NoisePlanFailure::Artifact(error)) => return Err(error),
+                Err(NoisePlanFailure::Unlowerable(error)) => {
+                    Self::Unavailable(std::sync::Arc::new(error))
+                }
+            },
+            None => Self::Unavailable(std::sync::Arc::new(Self::missing_artifact())),
+        })
+    }
+
     /// Whether this model's noise must be evaluated through a canonical plan.
     /// Decided from the model alone so that construction and the per-frequency
     /// noise entry point cannot disagree about which path applies.
@@ -2443,6 +2474,49 @@ impl CanonicalNoisePlan {
             "grouped Verilog-A noise requires canonical IR metadata; no legacy fallback is permitted"
                 .into(),
         )
+    }
+}
+
+/// Grouped-noise planning for a device under construction, on a thread of
+/// its own where the platform has threads: lowering a large model's noise
+/// metadata takes about as long as the rest of construction together.
+enum NoisePlanning<'scope> {
+    #[cfg(not(target_arch = "wasm32"))]
+    Beside(std::thread::ScopedJoinHandle<'scope, Result<CanonicalNoisePlan, VmError>>),
+    Planned(
+        Result<CanonicalNoisePlan, VmError>,
+        std::marker::PhantomData<&'scope ()>,
+    ),
+}
+
+impl<'scope> NoisePlanning<'scope> {
+    fn start<'env>(
+        scope: &'scope std::thread::Scope<'scope, 'env>,
+        model: &std::sync::Arc<CompiledModel>,
+        artifact: Option<&'env CanonicalIrArtifact>,
+    ) -> Self {
+        #[cfg(not(target_arch = "wasm32"))]
+        if CanonicalNoisePlan::required_for(model) && artifact.is_some() {
+            let model = std::sync::Arc::clone(model);
+            return Self::Beside(
+                scope.spawn(move || CanonicalNoisePlan::for_model(&model, artifact)),
+            );
+        }
+        let _ = scope;
+        Self::Planned(
+            CanonicalNoisePlan::for_model(model, artifact),
+            std::marker::PhantomData,
+        )
+    }
+
+    fn finish(self) -> Result<CanonicalNoisePlan, VmError> {
+        match self {
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::Beside(planning) => planning
+                .join()
+                .unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
+            Self::Planned(plan, _) => plan,
+        }
     }
 }
 
@@ -2472,16 +2546,13 @@ struct EvaluatedCanonicalNoiseProcess {
 }
 
 impl CanonicalNoiseRuntimePlan {
+    /// Plan `model`'s grouped noise from `artifact`, whose identity the
+    /// caller has already validated against the model: device construction
+    /// refuses a mismatched artifact before it plans noise.
     fn build(
         artifact: &CanonicalIrArtifact,
         model: &CompiledModel,
     ) -> Result<Self, NoisePlanFailure> {
-        crate::canonical_compat::validate_canonical_artifact_identity_for_model(model, artifact)
-            .map_err(|detail| {
-                NoisePlanFailure::Artifact(VmError::InvalidModel(format!(
-                    "canonical grouped-noise artifact/model mismatch: {detail}"
-                )))
-            })?;
         Self::validate_compiled_injections(artifact, model).map_err(NoisePlanFailure::Artifact)?;
         if artifact.hir.module_name != model.name
             || artifact.hir.ports.len() != model.num_terminals
@@ -3154,6 +3225,33 @@ impl VerilogADevice {
         simulation_parameters: rspice_veriloga_runtime::GeneratedSimulationParameters,
         control: &dyn crate::PipelineControl,
     ) -> Result<Self, VmError> {
+        std::thread::scope(|scope| {
+            Self::try_new_in_scope(
+                scope,
+                name,
+                model,
+                nodes,
+                canonical_artifact,
+                parameters,
+                simulation_parameters,
+                control,
+            )
+        })
+    }
+
+    /// [`Self::try_new_inner`], planning grouped noise on a thread of `scope`
+    /// while the rest of the device is built.
+    #[allow(clippy::too_many_arguments)]
+    fn try_new_in_scope<'scope, 'env>(
+        scope: &'scope std::thread::Scope<'scope, 'env>,
+        name: impl Into<SmolStr>,
+        model: std::sync::Arc<CompiledModel>,
+        nodes: &[usize],
+        canonical_artifact: Option<&'env CanonicalIrArtifact>,
+        parameters: &[(&str, f64)],
+        simulation_parameters: rspice_veriloga_runtime::GeneratedSimulationParameters,
+        control: &dyn crate::PipelineControl,
+    ) -> Result<Self, VmError> {
         if control.is_cancelled() {
             return Err(VmError::CompilationCancelled);
         }
@@ -3212,6 +3310,10 @@ impl VerilogADevice {
         if model.noise_process_schema >= 1 {
             Self::validate_portable_noise_assignment_split(&model)?;
         }
+        // The artifact is now known to describe the model, which is all
+        // planning needs; its outcome is taken after the native image, so an
+        // error it reports still comes before one compiling reports.
+        let canonical_noise_plan = NoisePlanning::start(scope, &model, canonical_artifact);
 
         let num_terminals = model.num_terminals;
         let supplied_terminals = nodes.len().min(num_terminals);
@@ -3277,44 +3379,17 @@ impl VerilogADevice {
         context.zi_filters = model.zi_filters.clone();
         Self::preallocate_vm_runtime_state(&mut context, &model)?;
 
-        // Planned eagerly, because the outcome depends only on the model and
-        // the artifact, but a lowering failure is *reported* lazily. A model
-        // whose noise metadata the canonical CFG cannot represent is still a
-        // valid device for every analysis that never reads that metadata, so
-        // that failure is carried on the instance and raised when noise is
-        // actually requested. An artifact that does not describe this model
-        // still refuses here, because it invalidates the whole instance. What
-        // does not change either way is the landing contract: a schema-1
-        // instance never falls back to the eager scalar PSD path.
-        let canonical_noise_plan = if CanonicalNoisePlan::required_for(&model) {
-            match canonical_artifact {
-                Some(artifact) => match CanonicalNoiseRuntimePlan::build(artifact, &model) {
-                    Ok(plan) => CanonicalNoisePlan::Ready(std::sync::Arc::new(plan)),
-                    Err(NoisePlanFailure::Artifact(error)) => return Err(error),
-                    Err(NoisePlanFailure::Unlowerable(error)) => {
-                        CanonicalNoisePlan::Unavailable(std::sync::Arc::new(error))
-                    }
-                },
-                None => CanonicalNoisePlan::Unavailable(std::sync::Arc::new(
-                    CanonicalNoisePlan::missing_artifact(),
-                )),
-            }
-        } else {
-            CanonicalNoisePlan::NotRequired
-        };
-
         #[cfg(feature = "native")]
         let native_model = match canonical_artifact {
-            Some(artifact) => {
-                Self::try_native_compile_with_canonical_ir(&model, artifact, control)?
-            }
+            Some(artifact) => Self::try_native_compile_with_canonical_ir(&model, artifact, control),
             #[cfg(feature = "native-bytecode-contract-tests")]
-            None => Self::try_native_compile(&model, control)?,
+            None => Self::try_native_compile(&model, control),
             #[cfg(not(feature = "native-bytecode-contract-tests"))]
-            None => {
-                return Err(Self::missing_canonical_ir_native_error());
-            }
+            None => Err(Self::missing_canonical_ir_native_error()),
         };
+        let canonical_noise_plan = canonical_noise_plan.finish()?;
+        #[cfg(feature = "native")]
+        let native_model = native_model?;
 
         #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
         let wasm_jit_model = match canonical_artifact {
