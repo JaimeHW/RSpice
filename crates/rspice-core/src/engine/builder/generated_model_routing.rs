@@ -359,9 +359,56 @@ pub(super) fn try_route_generated_mos_model(
         compact_syntax,
         context.spice_dialect,
     )? {
-        Some(route) => route.build(circuit, netlist, element, context),
+        Some(route) => {
+            let known = |name: &str| {
+                let known = generated_mos_instance_key_is_known(route.target, name);
+                if !known {
+                    warn_ignored_instance_param(&element.name, name);
+                }
+                known
+            };
+            let instance_params = context
+                .instance_params
+                .iter()
+                .filter(|(name, _)| known(name))
+                .cloned()
+                .collect::<Vec<_>>();
+            let deferred_params = context
+                .deferred_params
+                .iter()
+                .filter(|(name, _)| known(name))
+                .cloned()
+                .collect::<Vec<_>>();
+            route.build(
+                circuit,
+                netlist,
+                element,
+                GeneratedRoutingContext {
+                    instance_params: &instance_params,
+                    deferred_params: &deferred_params,
+                    ..context
+                },
+            )
+        }
         None => Ok(false),
     }
+}
+
+/// Whether a MOS card's instance key means anything to `target`: a parameter
+/// the module declares for instances, or a keyword the route owns. A
+/// multiplier stays too, so that a module without one refuses it by name
+/// rather than simulate a single device.
+fn generated_mos_instance_key_is_known(target: GeneratedTarget, name: &str) -> bool {
+    is_internal_routing_param(name)
+        || matches_model_type(name, &["M", "MULT"])
+        || !matches!(
+            generated_instance_key_role(target, name),
+            GeneratedInstanceKeyRole::Parameter
+        )
+        || matches!(
+            builtins::parameter_scope(target.model_name, name),
+            Some(GeneratedVerilogAParameterScope::Instance | GeneratedVerilogAParameterScope::Dual)
+        )
 }
 
 fn generated_mos_route<'a>(
@@ -1995,6 +2042,16 @@ mod card_keyword_tests {
             .expect_err("nothing runs below absolute zero")
             .to_string();
         assert!(message.contains("M1"), "unexpected refusal: {message}");
+    }
+
+    #[test]
+    fn a_mos_card_keeps_the_keys_the_module_declares_and_the_route_owns() {
+        for key in ["W", "l", "OFF", "dtemp", "M"] {
+            assert!(generated_mos_instance_key_is_known(EKV, key), "{key}");
+        }
+        for key in ["WW", "nrd"] {
+            assert!(!generated_mos_instance_key_is_known(EKV, key), "{key}");
+        }
     }
 
     #[test]

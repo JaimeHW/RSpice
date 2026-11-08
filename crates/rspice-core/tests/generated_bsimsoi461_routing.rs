@@ -18,6 +18,21 @@ fn xyce_engine() -> Engine {
     })
 }
 
+/// QSPICE names an unknown instance parameter and runs on; so does the
+/// generated route, where a B4SOI card lands.
+#[test]
+fn a_b4soi_card_with_an_unknown_instance_parameter_still_builds() {
+    let netlist = Netlist::parse(
+        "* b4soi\nVDD d 0 1.5\nVG g 0 0\nM1 d g s e NSOI W=10u L=.18u WW=2\n\
+         .MODEL NSOI NMOS LEVEL=70 VERSION=4.6 TYPE=1 SOIMOD=0 SHMOD=0\n.OP\n.END\n",
+    )
+    .expect("the deck parses");
+    let circuit = Engine::new(SimulationConfig::default())
+        .build_circuit(&netlist)
+        .expect("WW is reported and dropped");
+    assert!(circuit.has_generated_veriloga_devices());
+}
+
 #[test]
 fn xyce_level70_routes_exclusively_to_generated_bsimsoi461() {
     assert!(
