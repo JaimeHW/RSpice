@@ -180,8 +180,7 @@ pub fn topology_fingerprint_with_abort(
         .map(|name| format!("v({name})"))
         .collect::<Vec<_>>();
     unknown_layout.extend(built.branch_names.iter().map(|name| format!("i({name})")));
-    unknown_layout
-        .extend((0..built.hidden_states).map(|index| format!("state-unknown-{index}")));
+    unknown_layout.extend((0..built.hidden_states).map(|index| format!("state-unknown-{index}")));
     let state_layout = (0..built.hidden_states)
         .map(|index| format!("state-{index}"))
         .collect::<Vec<_>>();

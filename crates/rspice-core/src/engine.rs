@@ -134,10 +134,10 @@ pub use builder::{
     register_precompiled_veriloga_model_with_dependencies,
     register_precompiled_veriloga_runtime_with_dependencies, veriloga_cache_telemetry,
 };
+pub(crate) use built_topology::BuiltTopology;
 pub use config_resolver::{
     ConvergencePreset, SimulationConfigOverrides, resolve_simulation_config,
 };
-pub(crate) use built_topology::BuiltTopology;
 pub use core::Engine;
 pub use dc::{
     DcSweepAxis, DcSweepPointResult, DcSweepRange, DcSweepResult, bounded_dc_sweep_points,
