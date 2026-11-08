@@ -322,6 +322,25 @@ pub(crate) fn take_queued_caret_char_index(
     context.data_mut(|data| data.remove_temp::<usize>(editor_id.with("caret-char-index")))
 }
 
+/// Ask the source editor `editor_id` to replace a stretch of its text, in
+/// characters, as one undoable edit the next time it is drawn, leaving the
+/// caret after the new text.
+pub(crate) fn queue_text_replacement(
+    context: &egui::Context,
+    editor_id: Id,
+    range: std::ops::Range<usize>,
+    text: String,
+) {
+    context.data_mut(|data| data.insert_temp(editor_id.with("text-replacement"), (range, text)));
+}
+
+pub(crate) fn take_queued_text_replacement(
+    context: &egui::Context,
+    editor_id: Id,
+) -> Option<(std::ops::Range<usize>, String)> {
+    context.data_mut(|data| data.remove_temp(editor_id.with("text-replacement")))
+}
+
 /// Ask the source editor `editor_id` to put its caret at a one-based line
 /// and column next frame and bring it into view: left where it is when
 /// already on screen, centred when it is not. Out-of-range positions clamp

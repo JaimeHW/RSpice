@@ -9,6 +9,7 @@ mod accessibility;
 mod keymap;
 mod touch;
 
+pub(crate) use accessibility::bounded_accessible_text;
 use accessibility::{consume_accesskit_text_selection, update_accesskit_text_state};
 use keymap::{KeyAction, Motion, Reach};
 
@@ -23,7 +24,7 @@ use super::text_document_model::{TextDocumentModel, TextSelection};
 use super::text_editor_commands::{
     ByteSelection, EditorSyntax, apply_structural_command, publish_caret_line,
     take_queued_caret_char_index, take_queued_caret_position, take_queued_standard_command,
-    take_queued_structural_command, take_queued_view_command,
+    take_queued_structural_command, take_queued_text_replacement, take_queued_view_command,
     veriloga_blocks::{
         dedent_after_typing, dedent_closing_word_at_caret, leaves_block_open, veriloga_fold_regions,
     },
@@ -299,6 +300,12 @@ pub(crate) fn show_virtual_text_editor(
         && (!command.mutates_source() || editable)
     {
         apply_model_structural(&mut session.model, syntax, command);
+        reveal = reveal.or(Some(Reveal::Nearest));
+    }
+    if let Some((range, text)) = take_queued_text_replacement(ui.ctx(), editor_id)
+        && editable
+    {
+        replace_text_range(&mut session, range, &text, syntax);
         reveal = reveal.or(Some(Reveal::Nearest));
     }
     if let Some(command) = take_queued_view_command(ui.ctx(), editor_id) {
@@ -907,6 +914,28 @@ fn primary_caret_anchor(
         code_origin_x + column as f32 * char_width,
         origin.y + style.top_padding + (visible_row + 1) as f32 * style.line_height + 4.0,
     ))
+}
+
+/// Replace characters `range` with `text` as one undoable edit, the caret
+/// after it. A closing word put in this way takes its line back as a typed
+/// one does.
+fn replace_text_range(
+    session: &mut VirtualEditorSession,
+    range: Range<usize>,
+    text: &str,
+    syntax: EditorSyntax,
+) {
+    let length = session.model.len_chars();
+    session.model.set_selections(vec![TextSelection {
+        anchor: range.start.min(length),
+        cursor: range.end.min(length),
+    }]);
+    grow_maximum_columns_for_insertion(session, text);
+    session.model.insert_at_selections(text);
+    if syntax == EditorSyntax::VerilogA {
+        dedent_closing_word_at_caret(&mut session.model);
+    }
+    session.preferred_column = None;
 }
 
 /// Put a single caret at `char_index`, unfolding its line.

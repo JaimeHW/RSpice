@@ -19,6 +19,7 @@ use crate::workbench::documents::text_editor_commands::{
     veriloga_syntax::{LineState, SyntaxClass, SyntaxSpan, VerilogAHighlighter, tokenize_line},
 };
 
+mod assist;
 mod findings;
 
 use findings::{HeldFinding, HeldFindings};
@@ -106,6 +107,38 @@ pub fn show_code_document_interaction_versioned(
         &[],
         None,
         false,
+        &[],
+    )
+}
+
+/// The Verilog-A source editor, with `include_files` the project files its
+/// `` `include `` completion offers.
+pub(crate) fn show_veriloga_document_versioned(
+    ui: &mut Ui,
+    id: impl std::hash::Hash + std::fmt::Debug,
+    source: &mut String,
+    source_revision: u64,
+    language: CodeEditorLanguage,
+    findings: EditorFindings<'_>,
+    diagnostic_path: Option<&str>,
+    editable: bool,
+    messages: crate::workbench::MessageCatalog,
+    include_files: &[String],
+) -> CodeDocumentInteraction {
+    show_code_document_impl(
+        ui,
+        egui::Id::new(id),
+        source,
+        source_revision,
+        language,
+        findings,
+        diagnostic_path,
+        editable,
+        messages,
+        &[],
+        None,
+        false,
+        include_files,
     )
 }
 
@@ -137,6 +170,7 @@ pub fn show_code_document_with_debug_versioned(
         breakpoints,
         current_line,
         true,
+        &[],
     )
 }
 
@@ -404,6 +438,7 @@ fn show_code_document_impl(
     breakpoints: &[usize],
     current_line: Option<usize>,
     breakpoints_enabled: bool,
+    include_files: &[String],
 ) -> CodeDocumentInteraction {
     // The findings shown are the last check's, kept through the edits made
     // since it ran.
@@ -484,6 +519,8 @@ fn show_code_document_impl(
                 .data_mut(|data| data.remove_temp::<VerilogAHighlighter>(highlighter_id))
                 .unwrap_or_default()
         });
+        let assist_keys = (language == CodeEditorLanguage::VerilogA)
+            .then(|| assist::consume_keys(ui, editor_id, editable));
         let output = crate::workbench::documents::virtual_text_editor::show_virtual_text_editor(
             ui,
             editor_id,
@@ -512,19 +549,44 @@ fn show_code_document_impl(
                     .map(|finding| line_diagnostic_description(finding, messages))
             },
         );
+        let assist_answer = assist_keys.map(|keys| {
+            assist::show(
+                ui,
+                editor_id,
+                &assist::AssistFrame {
+                    source,
+                    source_revision,
+                    editable,
+                    include_files,
+                    messages,
+                },
+                &output,
+                keys,
+            )
+        });
         // The findings under the pointer, while the text they were placed in
-        // is the text on screen.
+        // is the text on screen, and what the name under it is.
         if let Some(char_index) = output.hover_char_index
             && !output.changed
-            && !held.is_empty()
         {
             let covering = held.covering(char_index);
-            if !covering.is_empty() {
+            let information = assist_answer
+                .as_ref()
+                .and_then(|answer| answer.hover.as_ref());
+            if !covering.is_empty() || information.is_some() {
                 output.response.clone().on_hover_ui_at_pointer(|ui| {
-                    findings_tooltip(ui, &held, &covering, messages, &colors);
+                    if !covering.is_empty() {
+                        findings_tooltip(ui, &held, &covering, messages, &colors);
+                    }
+                    if let Some(information) = information {
+                        ui.set_max_width(420.0);
+                        assist::information_body(ui, information, &colors);
+                    }
                 });
             }
         }
+        let announcement = announcement
+            .or_else(|| assist_answer.and_then(|answer| answer.announcement));
         ui.ctx().data_mut(|data| {
             data.insert_temp(reported_caret_id(editor_id), output.cursor_char_index);
             data.insert_temp(held_id, held);

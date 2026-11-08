@@ -19,7 +19,7 @@ use super::super::design_system::{PROBLEM_MARK_GAP, PROBLEM_MARK_SIDE, paint_pro
 use crate::state::code_diagnostics::CodeDiagnosticCollection;
 use crate::workbench::app::actions::veriloga_placement::veriloga_placement_target;
 use crate::workbench::documents::code_workspace::{
-    CodeEditorLanguage, EditorFindings, show_code_document_interaction_versioned,
+    CodeEditorLanguage, EditorFindings, show_veriloga_document_versioned,
 };
 
 const EDITOR_TOOLBAR_HEIGHT: f32 = 33.0;
@@ -303,10 +303,23 @@ fn source_editor(
             navigable: editable && editor_language == CodeEditorLanguage::VerilogA,
         },
     );
+    // What an include in this file may name: the bundle's other sources.
+    let include_files = selected
+        .bundle()
+        .files()
+        .iter()
+        .map(crate::state::ProjectSourceFile::logical_path)
+        .chain([selected.bundle().root().logical_path()])
+        .filter(|path| {
+            !crate::state::project_source_paths_equal(path, active_path)
+                && selected.bundle().role_for_path(path).is_none()
+        })
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
     let interaction = egui::Frame::new()
         .fill(t.color.bg_inset)
         .show(ui, |ui| {
-            let interaction = show_code_document_interaction_versioned(
+            let interaction = show_veriloga_document_versioned(
                 ui,
                 (
                     "workbench.veriloga.source",
@@ -320,6 +333,7 @@ fn source_editor(
                 Some(active_path),
                 editable,
                 messages,
+                &include_files,
             );
             if editable && interaction.changed {
                 match crate::workbench::documents::code_workspace::replace_selected_veriloga_file(

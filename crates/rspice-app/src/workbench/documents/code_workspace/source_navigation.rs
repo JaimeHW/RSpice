@@ -432,7 +432,7 @@ fn module_outline(module: &Module, text: &SourceText<'_>, rows: &mut Vec<SourceO
 /// blank. A macro use becomes an identifier of the same length — `` `P_Q ``
 /// reads as `_P_Q`, and `` `MAX(a, b) `` as a call — which is all a
 /// declaration's outline needs from an expression: where it starts and ends.
-fn without_preprocessor_syntax(source: &str) -> String {
+pub(super) fn without_preprocessor_syntax(source: &str) -> String {
     const DIRECTIVES: [&str; 13] = [
         "include",
         "define",

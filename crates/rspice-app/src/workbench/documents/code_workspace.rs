@@ -14,9 +14,12 @@ mod source_files;
 mod source_navigation;
 mod source_search;
 mod veriloga;
+mod veriloga_assist;
+mod veriloga_catalog;
 mod veriloga_inspector;
 mod veriloga_interface;
 mod veriloga_live_check;
+mod veriloga_symbols;
 use rspice_simulation::project_veriloga::build_profile as veriloga_profile;
 
 pub use super::{CodeSourceFileAction, CodeWorkspacePage};
@@ -38,7 +41,8 @@ pub use editor::{
 };
 pub(crate) use editor::{
     ProblemStep, problem_at_caret_announcement, problem_step_announcement, problem_step_index,
-    queue_problem_step, reveal_source_location, severity_title, take_problem_step,
+    queue_problem_step, reveal_source_location, severity_title,
+    show_veriloga_document_versioned, take_problem_step,
 };
 pub(crate) use language_services::{
     CodeLanguageToolsState, LanguageServiceIndex, commit_language_rename, extent_words,
