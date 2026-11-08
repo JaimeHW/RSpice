@@ -390,7 +390,7 @@ struct SpectreSourceName {
 
 /// The top-level names of one Spectre source: what a deck that reads it,
 /// directly or through an include, shares with it.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct SpectreSourceNames {
     path: PathBuf,
     names: Vec<SpectreSourceName>,

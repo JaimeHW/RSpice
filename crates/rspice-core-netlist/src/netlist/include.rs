@@ -328,6 +328,88 @@ pub struct IncludeProcessor {
     /// How each source's text is read before it is expanded; `None` reads it
     /// as written.
     source_text_filter: Option<SourceTextFilter>,
+    /// Each dependency source as this expansion reads it, prepared on its
+    /// first read. A model library selected through many sections is
+    /// filtered, adapted and indexed once.
+    prepared_sources: HashMap<PathBuf, Arc<PreparedSource>>,
+}
+
+/// A source's text as an expansion reads it (after the reading filter and
+/// Spectre adaptation), with where its lines and section cards are.
+#[derive(Debug)]
+struct PreparedSource {
+    text: Arc<str>,
+    spectre_names: Option<super::spectre_adapter::SpectreSourceNames>,
+    /// Byte range of each line, split as [`str::lines`] splits the text.
+    lines: Vec<std::ops::Range<usize>>,
+    /// The lines holding a `.lib` or `.ENDL` card, ascending. Inside a
+    /// section left out no other line is read, so expansion skips to these.
+    section_cards: Vec<usize>,
+}
+
+impl PreparedSource {
+    fn new(
+        path: &Path,
+        content: Arc<str>,
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, ParseWithAbortError> {
+        let (adapted, spectre_names) =
+            super::spectre_adapter::adapt_spectre_source(path, &content)
+                .map_err(|error| spectre_adaptation_error(path, error))?;
+        let text = match adapted {
+            std::borrow::Cow::Borrowed(_) => Arc::clone(&content),
+            std::borrow::Cow::Owned(text) => Arc::from(text),
+        };
+        let mut lines = Vec::new();
+        let mut section_cards = Vec::new();
+        let mut start = 0;
+        for (line_index, piece) in text.split_inclusive('\n').enumerate() {
+            poll_parse_abort(abort, line_index)?;
+            let line = piece.strip_suffix('\n').map_or(piece, |line| {
+                line.strip_suffix('\r').unwrap_or(line)
+            });
+            let trimmed = line.trim();
+            if trimmed.starts_with('.')
+                && split_directive(trimmed).is_some_and(|(directive, _)| {
+                    matches_ignore_ascii_case(directive, &[".lib", ".endl"])
+                })
+            {
+                section_cards.push(line_index);
+            }
+            lines.push(start..start + line.len());
+            start += piece.len();
+        }
+        Ok(Self {
+            text,
+            spectre_names,
+            lines,
+            section_cards,
+        })
+    }
+
+    /// The first line at or after `line_index` that a section left out reads.
+    fn next_section_card(&self, line_index: usize) -> Option<usize> {
+        let position = self
+            .section_cards
+            .partition_point(|&card| card < line_index);
+        self.section_cards.get(position).copied()
+    }
+}
+
+fn spectre_adaptation_error(
+    path: &Path,
+    error: super::spectre_adapter::SpectreModelAdapterError,
+) -> ParseWithAbortError {
+    ParseError::Syntax {
+        line: error.line,
+        message: format!(
+            "{}:{}: Spectre model-library adaptation failed: {}",
+            display_source_path(path),
+            error.line,
+            error.message
+        ),
+    }
+    .into()
 }
 
 /// A reading of one source's text, given its path.
@@ -753,6 +835,7 @@ impl IncludeProcessor {
             expression_dialect: ExpressionDialect::default(),
             spectre_names: super::spectre_adapter::SpectreDeckNames::default(),
             source_text_filter: None,
+            prepared_sources: HashMap::new(),
         }
     }
 
@@ -786,6 +869,24 @@ impl IncludeProcessor {
         filtered.map_or(content, Arc::from)
     }
 
+    /// The dependency source at `path`, whose text is `content`, as this
+    /// expansion reads it.
+    fn prepared_source(
+        &mut self,
+        path: &Path,
+        content: Arc<str>,
+        abort: &dyn AbortSignal,
+    ) -> Result<Arc<PreparedSource>, ParseWithAbortError> {
+        if let Some(source) = self.prepared_sources.get(path) {
+            return Ok(Arc::clone(source));
+        }
+        let text = self.expansion_text(path, content);
+        let source = Arc::new(PreparedSource::new(path, text, abort)?);
+        self.prepared_sources
+            .insert(path.to_path_buf(), Arc::clone(&source));
+        Ok(source)
+    }
+
     /// Read included sources under `dialect`'s rules.
     pub(crate) fn with_expression_dialect(mut self, dialect: ExpressionDialect) -> Self {
         self.expression_dialect = dialect;
@@ -795,6 +896,7 @@ impl IncludeProcessor {
     fn begin_source_operation(&mut self) {
         self.active_includes.clear();
         self.spectre_names.clear();
+        self.prepared_sources.clear();
         self.current_depth = 0;
         self.resolved_dependencies.clear();
         let cache = self
@@ -968,9 +1070,9 @@ impl IncludeProcessor {
         let result = (|| {
             let content =
                 self.read_source_with_abort(&canonical, &canonical.display().to_string(), abort)?;
-            let content = self.expansion_text(&canonical, content);
+            let source = self.prepared_source(&canonical, content, abort)?;
             let expanded = self.expand_content_from_mapped_with_abort(
-                &content,
+                &source,
                 &canonical,
                 section,
                 section.is_some(),
@@ -1034,8 +1136,9 @@ impl IncludeProcessor {
         self.begin_source_operation();
         let native_spectre =
             super::spectre_adapter::is_native_spectre_source(current_path, content);
+        let source = PreparedSource::new(current_path, Arc::from(content), abort)?;
         let mut expanded = self.expand_content_from_mapped_with_abort(
-            content,
+            &source,
             current_path,
             None,
             false,
@@ -1393,9 +1496,9 @@ impl IncludeProcessor {
                 source: Arc::clone(&content),
                 resolution: resolution.clone(),
             });
-            let content = self.expansion_text(&canonical, content);
+            let source = self.prepared_source(&canonical, content, abort)?;
             self.expand_content_from_mapped_with_abort(
-                &content,
+                &source,
                 &canonical,
                 selected_section,
                 false,
@@ -1450,9 +1553,9 @@ impl IncludeProcessor {
                 source: Arc::clone(&content),
                 resolution: resolution.clone(),
             });
-            let content = self.expansion_text(&canonical, content);
+            let source = self.prepared_source(&canonical, content, abort)?;
             self.expand_content_from_mapped_with_abort(
-                &content,
+                &source,
                 &canonical,
                 section,
                 section.is_some(),
@@ -1467,7 +1570,7 @@ impl IncludeProcessor {
 
     fn expand_content_from_mapped_with_abort(
         &mut self,
-        content: &str,
+        source: &PreparedSource,
         current_path: &Path,
         selected_section: Option<&str>,
         require_selected_section: bool,
@@ -1475,26 +1578,12 @@ impl IncludeProcessor {
         abort: &dyn AbortSignal,
     ) -> Result<ExpandedSource, ParseWithAbortError> {
         ensure_parse_not_aborted(abort)?;
-        let adaptation_failed = |error: super::spectre_adapter::SpectreModelAdapterError| {
-            ParseWithAbortError::from(ParseError::Syntax {
-                line: error.line,
-                message: format!(
-                    "{}:{}: Spectre model-library adaptation failed: {}",
-                    display_source_path(current_path),
-                    error.line,
-                    error.message
-                ),
-            })
-        };
-        let (adapted, spectre_names) =
-            super::spectre_adapter::adapt_spectre_source(current_path, content)
-                .map_err(adaptation_failed)?;
-        if let Some(names) = spectre_names {
+        if let Some(names) = &source.spectre_names {
             self.spectre_names
-                .merge(names, selected_section)
-                .map_err(adaptation_failed)?;
+                .merge(names.clone(), selected_section)
+                .map_err(|error| spectre_adaptation_error(current_path, error))?;
         }
-        let content = adapted.as_ref();
+        let content = source.text.as_ref();
         ResourceLimitError::ensure(
             ResourceKind::ExpandedSourceBytes,
             content.len(),
@@ -1507,9 +1596,20 @@ impl IncludeProcessor {
         });
         let mut inline_sections = InlineLibrarySections::default();
         let mut selected_section_found = selected_section.is_none();
-        let source_line_count = content.lines().count();
+        let source_line_count = source.lines.len();
 
-        for (line_index, line) in content.lines().enumerate() {
+        let mut next_line = 0;
+        while next_line < source_line_count {
+            let line_index = if inline_sections.reading() {
+                next_line
+            } else {
+                match source.next_section_card(next_line) {
+                    Some(card) => card,
+                    None => break,
+                }
+            };
+            next_line = line_index + 1;
+            let line = &content[source.lines[line_index].clone()];
             poll_parse_abort(abort, line_index)?;
             poll_parse_text(abort, line)?;
             let line_number = line_index + 1;
