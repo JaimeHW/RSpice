@@ -957,7 +957,7 @@ max_flattened_elements = 250000
 max_circuit_nodes = 250000
 max_matrix_unknowns = 250000
 max_analysis_points = 2000000
-max_result_values = 25000000
+max_result_values = 100000000
 max_parallel_workers = 64               # cap batch/analysis worker fan-out
 max_batch_runs = 10000
 ```

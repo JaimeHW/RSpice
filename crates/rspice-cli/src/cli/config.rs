@@ -125,6 +125,15 @@ pub struct ResourceConfig {
     pub max_batch_runs: usize,
 }
 
+/// The values one batch result may hold. A run here writes its results and
+/// exits, so it holds one result set rather than the workbench's many. A
+/// waveform is held as 8-byte samples and copied once more on its way to the
+/// output file: an annotated ISCAS-85 c880 transient with every vector saved
+/// (32.7M values) peaks at 940 MB, 24 bytes a value, so 100M values bound a
+/// run near 2.4 GB. That admits the gate-level transients ngspice writes with
+/// `-r`, which the engine's 25M default refused from c880 up.
+const BATCH_MAX_RESULT_VALUES: usize = 100_000_000;
+
 impl Default for ResourceConfig {
     fn default() -> Self {
         let limits = rspice_core::ResourceLimits::default();
@@ -142,7 +151,7 @@ impl Default for ResourceConfig {
             max_circuit_nodes: limits.max_circuit_nodes,
             max_matrix_unknowns: limits.max_matrix_unknowns,
             max_analysis_points: limits.max_analysis_points,
-            max_result_values: limits.max_result_values,
+            max_result_values: BATCH_MAX_RESULT_VALUES.max(limits.max_result_values),
             max_parallel_workers: limits.max_parallel_workers,
             max_batch_runs: limits.max_batch_runs,
         }
@@ -611,6 +620,15 @@ mod tests {
     use super::*;
     use crate::cli::OutputFormat;
     use clap::ValueEnum;
+
+    #[test]
+    fn a_batch_run_holds_a_gate_level_transient_with_every_vector_saved() {
+        // ISCAS-85 c880 with wire parasitics: 14913 node voltages, 61 source
+        // currents and 17404 resistor and capacitor currents at the 1011
+        // points of `.tran 1ps 1ns`, plus the time axis. ngspice writes it.
+        let values = (14_913 + 61 + 17_404 + 1) * 1_011;
+        assert!(Config::default().resources.limits().max_result_values >= values);
+    }
 
     #[test]
     fn convergence_policy_reaches_the_shared_engine_base_without_losing_tolerances() {
