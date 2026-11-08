@@ -91,6 +91,7 @@ mod integer_runtime;
 pub mod ir;
 pub mod json_float;
 mod keyword_sets;
+pub mod language_catalog;
 pub mod lexer;
 pub mod metrics;
 mod numeric_literal;

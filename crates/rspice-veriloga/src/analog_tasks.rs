@@ -22,7 +22,7 @@ pub struct AnalogTaskOrigin {
 /// An analog position that does not accept one of these refuses it as
 /// unsupported; any other `$name` is reported as unknown, which is what a
 /// misspelling looks like.
-const STANDARD_SYSTEM_NAMES: &[&str] = &[
+pub(crate) const STANDARD_SYSTEM_NAMES: &[&str] = &[
     // Display and file I/O
     "$display",
     "$strobe",
