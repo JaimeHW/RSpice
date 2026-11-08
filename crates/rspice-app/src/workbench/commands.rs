@@ -754,7 +754,10 @@ impl Command {
                     app.state.clear_primary_log()
                 }
                 ConsolePage::Console => {}
-                ConsolePage::Problems | ConsolePage::Measurements | ConsolePage::TaskLog => {}
+                ConsolePage::Problems
+                | ConsolePage::Measurements
+                | ConsolePage::TaskLog
+                | ConsolePage::References => {}
             },
             Self::ToggleFocusMode => {
                 app.state.workbench.focus_mode = !app.state.workbench.focus_mode;

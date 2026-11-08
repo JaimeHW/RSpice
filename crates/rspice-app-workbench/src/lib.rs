@@ -97,8 +97,8 @@ pub mod workbench {
         };
         pub use rspice_app_state::workbench::workspace::Workspace;
         pub use workbench_session::{
-            ConsolePage, Drawer, StatusPrompt, WidthClass, WorkbenchSession, WorkspaceDocumentId,
-            WorkspaceLayoutState, default_console_height,
+            ConsolePage, Drawer, SourceReference, SourceReferences, StatusPrompt, WidthClass,
+            WorkbenchSession, WorkspaceDocumentId, WorkspaceLayoutState, default_console_height,
         };
     }
     pub mod surfaces;

@@ -538,7 +538,10 @@ impl Command {
                     state.workbench.console_view.channel == ConsoleChannel::Session
                         && !state.model.log_buffer.is_empty()
                 }
-                ConsolePage::Problems | ConsolePage::Measurements | ConsolePage::TaskLog => false,
+                ConsolePage::Problems
+                | ConsolePage::Measurements
+                | ConsolePage::TaskLog
+                | ConsolePage::References => false,
             },
             _ => true,
         }

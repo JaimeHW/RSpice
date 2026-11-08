@@ -260,9 +260,13 @@ pub enum ConsolePage {
     Problems,
     Measurements,
     TaskLog,
+    /// What Find references found. Its tab shows only while there is a list.
+    References,
 }
 
 impl ConsolePage {
+    /// The pages the dock always has. References joins them while there is
+    /// a list.
     pub const ALL: [Self; 4] = [
         Self::Console,
         Self::Problems,
@@ -276,6 +280,53 @@ impl ConsolePage {
             Self::Problems => "Problems",
             Self::Measurements => "Measurements",
             Self::TaskLog => "Task log",
+            Self::References => "References",
+        }
+    }
+}
+
+/// One place Find references found a name.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SourceReference {
+    pub logical_path: String,
+    /// One-based.
+    pub line: usize,
+    /// One-based, in characters.
+    pub column: usize,
+    /// The line, as it read.
+    pub text: String,
+    pub route: crate::workbench::app_state::diagnostic_store::DiagnosticRoute,
+}
+
+/// What Find references last found, for the References page. A reading
+/// position over the source, never persisted.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SourceReferences {
+    pub name: String,
+    pub bundle: crate::state::ProjectSourceId,
+    /// The bundle's revision the rows were read from.
+    pub revision: u64,
+    pub rows: Vec<SourceReference>,
+    /// The row the keyboard stands on.
+    pub selected: usize,
+    /// The table takes the keyboard the next frame it is drawn.
+    pub take_focus: bool,
+}
+
+impl SourceReferences {
+    pub fn new(
+        name: String,
+        bundle: crate::state::ProjectSourceId,
+        revision: u64,
+        rows: Vec<SourceReference>,
+    ) -> Self {
+        Self {
+            name,
+            bundle,
+            revision,
+            rows,
+            selected: 0,
+            take_focus: true,
         }
     }
 }
@@ -382,6 +433,8 @@ pub struct WorkbenchSession {
     /// to be active when it was chosen.
     pub workspace_preset: WorkspacePreset,
     pub console_page: ConsolePage,
+    /// What Find references last found.
+    pub source_references: Option<SourceReferences>,
     /// The reader's place on the Console page. Transient: a reading position
     /// over logs, not a layout preference.
     pub console_view: ConsoleView,
@@ -497,6 +550,7 @@ impl Default for WorkbenchSession {
             workspace_layouts: HashMap::new(),
             workspace_preset: WorkspacePreset::default(),
             console_page: ConsolePage::Console,
+            source_references: None,
             console_view: ConsoleView::default(),
             problems_view: ProblemsView::default(),
             documents: WorkspaceDocumentRegistry::default(),
@@ -572,6 +626,14 @@ impl WorkbenchSession {
     pub fn shows_design_surface(&self) -> bool {
         self.workspace == Workspace::Design
             && self.current_route().surface_id() == SurfaceId::Design
+    }
+
+    /// Bring the reader to what Find references found: the References page,
+    /// with the keyboard on its table.
+    pub fn show_references(&mut self, references: SourceReferences) {
+        self.source_references = Some(references);
+        self.open_console();
+        self.console_page = ConsolePage::References;
     }
 
     /// Show the bottom dock, at its own height and out of focus mode, on

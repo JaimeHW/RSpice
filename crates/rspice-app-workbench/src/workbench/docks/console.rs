@@ -2,6 +2,7 @@
 
 pub mod log_anchor;
 pub mod problems;
+mod references;
 pub mod transcript;
 
 use problems::{ProblemCount, active_problem_count, problems};
@@ -55,6 +56,7 @@ const CONSOLE_FONT_SIZE: f32 = tokens::FS_1;
 
 pub fn show(ui: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
     transcript::collect_save(ui.ctx(), app.session_mut());
+    references::settle(app);
     ui.spacing_mut().item_spacing.y = 0.0;
     header(ui, app, layout);
     if !layout.show_console_body {
@@ -106,6 +108,7 @@ pub fn show(ui: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
             }
             ConsolePage::Measurements => measurements(ui, app),
             ConsolePage::TaskLog => task_log(ui, app),
+            ConsolePage::References => references::references(ui, app),
         },
     );
     ui.ctx().accesskit_node_builder(body.response.id, |node| {
@@ -267,19 +270,34 @@ pub fn console_tabs(
     let mut requested = None;
     let mut expand = false;
     let mut focus = None;
-    let mut ids = Vec::with_capacity(ConsolePage::ALL.len());
+    // The References tab stands for a list, and goes when the list does.
+    let pages = ConsolePage::ALL
+        .into_iter()
+        .chain(
+            app.workbench()
+                .source_references
+                .is_some()
+                .then_some(ConsolePage::References),
+        )
+        .collect::<Vec<_>>();
+    let mut ids = Vec::with_capacity(pages.len());
     // A row of the tabs' own height. `horizontal` starts a row at the control
     // height and centres in that, which set a tab taller than a control below
     // the strip's foot, over the page under it.
     ui.spacing_mut().interact_size.y = height;
     let tabs = ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing = Vec2::ZERO;
-        for (index, page) in ConsolePage::ALL.into_iter().enumerate() {
+        for (index, page) in pages.iter().copied().enumerate() {
             let count = match page {
                 ConsolePage::Problems => problems.total(),
                 ConsolePage::Measurements => active_measurement_count(&app.model().simulation),
                 ConsolePage::TaskLog => app.model().simulation.retained.runs.len(),
                 ConsolePage::Console => 0,
+                ConsolePage::References => app
+                    .workbench()
+                    .source_references
+                    .as_ref()
+                    .map_or(0, |list| list.rows.len()),
             };
             // The badge has room for one number. Which severities that number
             // is made of is said in the tab's name and under the pointer, so
@@ -324,10 +342,9 @@ pub fn console_tabs(
                     if direction == i32::MIN {
                         0
                     } else if direction == i32::MAX {
-                        ConsolePage::ALL.len() - 1
+                        pages.len() - 1
                     } else {
-                        (index as i32 + direction).rem_euclid(ConsolePage::ALL.len() as i32)
-                            as usize
+                        (index as i32 + direction).rem_euclid(pages.len() as i32) as usize
                     }
                 });
             }
@@ -338,7 +355,7 @@ pub fn console_tabs(
         node.set_label("Console pages");
     });
     if let Some(index) = focus {
-        requested = Some(ConsolePage::ALL[index]);
+        requested = Some(pages[index]);
         ui.memory_mut(|memory| memory.request_focus(ids[index]));
     }
     if let Some(page) = requested {

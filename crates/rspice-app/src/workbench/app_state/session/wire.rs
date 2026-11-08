@@ -539,6 +539,7 @@ impl<'a> WorkbenchWireRef<'a> {
             text_locale: _,
             toasts: _,
             active_source_editor: _,
+            source_references: _,
             outbox: _,
         } = workbench;
         Self {
@@ -769,6 +770,7 @@ impl WorkbenchWire {
             text_locale: _,
             toasts: _,
             active_source_editor: _,
+            source_references: _,
             outbox: _,
         } = &mut *state.workbench;
         *workspace = self.workspace;
