@@ -6,6 +6,7 @@
 pub mod canonical;
 pub mod diagnostics;
 pub mod hierarchy_path;
+pub mod natural_order;
 pub mod product;
 pub mod property;
 pub mod quantity;

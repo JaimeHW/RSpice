@@ -26,7 +26,7 @@ use rspice_ui_kit::{
     tokens::{self, Tokens},
     widgets::{Button, PROBLEM_MARK_SIDE, Problem, measurement_table, paint_problem_mark},
 };
-use rspice_vocabulary::hierarchy_path::ProbeTarget;
+use rspice_vocabulary::{hierarchy_path::ProbeTarget, natural_order::natural_cmp};
 use std::{
     borrow::Cow,
     cmp::Ordering,
@@ -249,43 +249,6 @@ fn name_parts(name: &str) -> (String, String) {
         }
         Ok(target) => (String::new(), target.leaf),
         Err(_) => (String::new(), signal.to_owned()),
-    }
-}
-
-/// Name order that reads part numbers the way a designer counts: `M2` before
-/// `M10`.
-fn natural_cmp(left: &str, right: &str) -> Ordering {
-    let mut a = left.chars().peekable();
-    let mut b = right.chars().peekable();
-    loop {
-        match (a.peek().copied(), b.peek().copied()) {
-            (None, None) => return left.cmp(right),
-            (None, Some(_)) => return Ordering::Less,
-            (Some(_), None) => return Ordering::Greater,
-            (Some(x), Some(y)) if x.is_ascii_digit() && y.is_ascii_digit() => {
-                let run = |chars: &mut std::iter::Peekable<std::str::Chars<'_>>| {
-                    let mut digits = String::new();
-                    while let Some(digit) = chars.next_if(char::is_ascii_digit) {
-                        digits.push(digit);
-                    }
-                    digits
-                };
-                let (x, y) = (run(&mut a), run(&mut b));
-                let (x, y) = (x.trim_start_matches('0'), y.trim_start_matches('0'));
-                let order = x.len().cmp(&y.len()).then_with(|| x.cmp(y));
-                if order != Ordering::Equal {
-                    return order;
-                }
-            }
-            (Some(x), Some(y)) => {
-                let order = x.to_ascii_lowercase().cmp(&y.to_ascii_lowercase());
-                if order != Ordering::Equal {
-                    return order;
-                }
-                a.next();
-                b.next();
-            }
-        }
     }
 }
 
