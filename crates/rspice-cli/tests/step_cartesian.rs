@@ -1637,6 +1637,58 @@ R2 out 0 1k
     );
 }
 
+/// A sweep and a transient name the topology of the circuit their own solve
+/// built. Only a BJT's transient-only internal nodes make a transient's circuit
+/// a different shape from the one a typed result names.
+#[test]
+fn a_typed_sweep_or_transient_elaborates_only_when_its_shape_differs() {
+    let sweep = "* Divider sweep
+V1 in 0 1
+R1 in out 1k
+R2 out 0 1k
+.dc V1 0 1 0.5
+.end
+";
+    let transient = "* RC step
+V1 in 0 PULSE(0 1 0 1n 1n 5n 10n)
+R1 in out 1k
+C1 out 0 1p
+.tran 0.1n 20n
+.end
+";
+    let bjt_transient = "* Switch
+V1 c 0 5
+V2 b 0 PULSE(0 1 0 1n 1n 5n 10n)
+R1 c o 1k
+RB b g 10k
+Q1 o g 0 NPN1
+.model NPN1 NPN
+.tran 1n 20n
+.end
+";
+    for (deck, tag, expected) in [
+        (sweep, "elaborations_sweep_typed", 1),
+        (transient, "elaborations_transient_typed", 1),
+        (bjt_transient, "elaborations_bjt_transient_typed", 2),
+    ] {
+        let (elaborations, dir) = elaborated_circuits_as(deck, tag, "json");
+        assert_eq!(elaborations, expected, "{tag}");
+        let document = common::read_json(&dir.join("out.json"));
+        let netlist = rspice_core::Netlist::parse(deck).expect("deck parses");
+        let elaborated = rspice_core::execution::topology_fingerprint_with_abort(
+            &rspice_core::Engine::default(),
+            &netlist,
+            &rspice_core::NoAbort,
+        )
+        .expect("deck elaborates");
+        assert_eq!(
+            document["topologyFingerprint"].as_str(),
+            Some(elaborated.to_string().as_str()),
+            "{tag}"
+        );
+    }
+}
+
 /// The preflight elaborates every coordinate before anything solves, and
 /// execution runs against what it established instead of preflighting again.
 /// A plan of one coordinate solves the circuit its preflight elaborated, so it

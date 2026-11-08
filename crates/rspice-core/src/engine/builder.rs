@@ -6153,7 +6153,11 @@ impl Engine {
         }
         let mut built = built;
         built.circuit.analog_task_output = self.config.hdl.output.clone();
-        if default_ports.is_empty() && transient_stop_time.is_none() {
+        // Of everything a transient stop time changes, only a BJT's internal
+        // nodes change the circuit's shape.
+        if default_ports.is_empty()
+            && (transient_stop_time.is_none() || built.circuit.bjts.devices.is_empty())
+        {
             self.record_built_topology(netlist, &built.circuit);
         }
         Ok(*built)

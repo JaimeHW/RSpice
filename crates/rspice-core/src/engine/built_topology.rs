@@ -85,8 +85,9 @@ impl Engine {
     /// A frontend that publishes a structural fingerprint for a deck it runs
     /// once holds the guard across the run, so the fingerprint names the
     /// circuit the analyses built instead of elaborating the deck again. A
-    /// build with RF ports, a transient stop time or another netlist records
-    /// nothing, and the fingerprint then elaborates the deck itself.
+    /// build with RF ports, a transient build of a deck with a BJT, or a build
+    /// of another netlist records nothing, and the fingerprint then elaborates
+    /// the deck itself.
     #[must_use = "the topology is kept only while the returned guard lives"]
     pub fn retain_built_topology<'a>(&'a self, netlist: &'a Netlist) -> impl Sized + 'a {
         let record = Arc::new(BuiltTopologyRecord {

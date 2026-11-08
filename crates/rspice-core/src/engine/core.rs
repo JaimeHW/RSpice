@@ -670,6 +670,12 @@ impl Engine {
                 std::sync::Arc::clone(&self.compiler_diagnostics);
             resolved_engine.compiler_diagnostic_handler = self.compiler_diagnostic_handler.clone();
         }
+        resolved_engine.retained_topology = std::sync::Mutex::new(
+            self.retained_topology
+                .lock()
+                .ok()
+                .and_then(|record| record.clone()),
+        );
         Ok(resolved_engine)
     }
 
