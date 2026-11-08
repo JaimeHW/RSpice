@@ -374,6 +374,22 @@ pub(super) fn write_dc_op_output(
                         source: e,
                     })?;
                 }
+                if matches!(format, OutputFormat::Raw) {
+                    // `raw` is the binary rawfile: one little-endian double per
+                    // variable for the single point.
+                    writeln!(file, "Binary:").map_err(|e| CliError::OutputError {
+                        path: path.to_path_buf(),
+                        source: e,
+                    })?;
+                    for signal in signals {
+                        file.write_all(&signal.values[0].to_le_bytes())
+                            .map_err(|e| CliError::OutputError {
+                                path: path.to_path_buf(),
+                                source: e,
+                            })?;
+                    }
+                    return Ok(());
+                }
                 writeln!(file, "Values:").map_err(|e| CliError::OutputError {
                     path: path.to_path_buf(),
                     source: e,

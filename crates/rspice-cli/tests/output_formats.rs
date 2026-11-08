@@ -309,6 +309,34 @@ fn op_exports_every_format() {
     check_all_formats("op", OP_DECK);
 }
 
+/// `-f raw` is the binary rawfile for the operating point too; `-f ascii`
+/// is the text one. Both carry the same values.
+#[test]
+fn op_raw_is_binary_and_ascii_is_text() {
+    let dir = test_dir("op_raw_encoding");
+    let binary = std::fs::read(run_export(&dir, "op_binary", OP_DECK, "raw")).unwrap();
+    let marker = b"Binary:\n";
+    let start = binary
+        .windows(marker.len())
+        .position(|window| window == marker)
+        .expect("binary rawfile has a Binary: section")
+        + marker.len();
+    let values: Vec<f64> = binary[start..]
+        .chunks_exact(8)
+        .map(|bytes| f64::from_le_bytes(bytes.try_into().unwrap()))
+        .collect();
+    assert_eq!(values.len(), 3, "V(in), V(out), I(v1): {values:?}");
+    assert_eq!(&values[..2], &[5.0, 2.5]);
+    assert!((values[2] + 2.5e-3).abs() < 1e-15, "{values:?}");
+
+    let ascii = std::fs::read_to_string(run_export(&dir, "op_ascii", OP_DECK, "ascii")).unwrap();
+    assert!(
+        ascii.contains("Values:\n") && !ascii.contains("Binary:"),
+        "{ascii}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn dc_sweep_exports_every_format() {
     check_all_formats("dc", DC_DECK);
