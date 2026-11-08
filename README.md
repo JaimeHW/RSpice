@@ -67,7 +67,7 @@ C1 out 0 100n
 Run it:
 
 ```console
-$ target/release/rspice run rc_lowpass.sp --meas
+$ target/release/rspice run rc_lowpass.sp
 ✓ Transient complete: 1020 time points computed
   Measurement Results (TRAN, 2):
     VPEAK = 4.999773e+00

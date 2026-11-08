@@ -526,7 +526,6 @@ fn fft_measures_read_the_last_spectrum_of_their_output() {
         .args([
             "run",
             deck.to_str().expect("UTF-8 deck path"),
-            "--meas",
             "--output",
             requested.to_str().expect("UTF-8 output path"),
             "--format",

@@ -1,4 +1,4 @@
-//! Integration tests for `.MEAS` result display: the `--meas` stdout summary
+//! Integration tests for `.MEAS` result display: the stdout summary
 //! must keep SPICE-scale magnitudes visible (a ~220ns risetime used to render
 //! as `0.000000`), and the `--meas-file` writers must keep full precision.
 
@@ -24,7 +24,7 @@ fn meas_summary_displays_sub_microsecond_values() {
     let deck = dir.join("rc.sp");
     std::fs::write(&deck, SUB_MICROSECOND_DECK).expect("write deck");
 
-    let output = run_rspice(&["run", deck.to_str().unwrap(), "--meas"]);
+    let output = run_rspice(&["run", deck.to_str().unwrap()]);
     assert!(
         output.status.success(),
         "run failed: {}",
@@ -76,7 +76,7 @@ fn time_current_and_dc_measurements_evaluate() {
     )
     .expect("write deck");
 
-    let output = run_rspice(&["run", deck.to_str().unwrap(), "--meas"]);
+    let output = run_rspice(&["run", deck.to_str().unwrap()]);
     assert!(
         output.status.success(),
         "run failed: {}",
@@ -138,7 +138,7 @@ fn time_current_and_dc_measurements_evaluate() {
          .END\n",
     )
     .expect("write dc deck");
-    let output = run_rspice(&["run", dc_deck.to_str().unwrap(), "--meas"]);
+    let output = run_rspice(&["run", dc_deck.to_str().unwrap()]);
     assert!(
         output.status.success(),
         "dc run failed: {}",
@@ -185,7 +185,7 @@ fn ac_measurements_evaluate() {
     )
     .expect("write deck");
 
-    let output = run_rspice(&["run", deck.to_str().unwrap(), "--meas"]);
+    let output = run_rspice(&["run", deck.to_str().unwrap()]);
     assert!(
         output.status.success(),
         "run failed: {}",
@@ -496,13 +496,7 @@ fn two_signal_conditions_count_edges_by_their_difference_in_every_dialect() {
         ("D1", 1.0),
     ];
     for dialect in ["best", "ngspice", "xyce"] {
-        let output = run_rspice(&[
-            "run",
-            deck.to_str().unwrap(),
-            "--spice-dialect",
-            dialect,
-            "--meas",
-        ]);
+        let output = run_rspice(&["run", deck.to_str().unwrap(), "--spice-dialect", dialect]);
         assert!(
             output.status.success(),
             "{dialect} run failed: {}",

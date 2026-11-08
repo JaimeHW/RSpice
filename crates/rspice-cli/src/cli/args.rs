@@ -381,10 +381,6 @@ pub struct RunArgs {
     #[command(flatten)]
     pub netlist_options: NetlistOptions,
 
-    /// Print .MEAS measurement results
-    #[arg(long)]
-    pub meas: bool,
-
     /// Exit 0 even when .MEAS measurements fail (default: failed
     /// measurements exit with code 3)
     #[arg(long)]

@@ -258,7 +258,7 @@ pub(super) fn record_continuous_measurements(
         .borrow_mut()
         .insert(analysis.to_ascii_uppercase());
 
-    if ctx.args.meas && !ctx.quiet {
+    if !ctx.quiet {
         let row_count = results
             .iter()
             .map(|result| result.records.len())

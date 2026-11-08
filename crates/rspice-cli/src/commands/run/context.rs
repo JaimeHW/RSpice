@@ -340,8 +340,8 @@ impl<'a> RunContext<'a> {
         })
     }
 
-    /// Record evaluated .MEAS results: print them under `--meas` and keep
-    /// them for report files and the exit status.
+    /// Record evaluated .MEAS results: print them, as every SPICE batch run
+    /// reports them, and keep them for report files and the exit status.
     pub(super) fn record_measurements(
         &self,
         analysis: &str,
@@ -354,7 +354,7 @@ impl<'a> RunContext<'a> {
             .borrow_mut()
             .insert(analysis.to_ascii_uppercase());
 
-        if self.args.meas && !self.quiet {
+        if !self.quiet {
             crate::console::line(format_args!(
                 "  Measurement Results ({}, {}):",
                 analysis,

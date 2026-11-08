@@ -279,7 +279,6 @@ Output and reports:
 | `--save SIGNAL` | Export only these signals, replacing the deck's `.SAVE`, `.PROBE`, `.PRINT` and `.PLOT` selection (repeatable; `V(out)`, `V(a,b)`, `I(v1)`, `@m1[id]`, `all`) |
 | `--expand-buses` | With `-f vcd`, write each digital-bus member as its own one-bit `$var` |
 | `--compress`, `--compress-tol TOL` | Decimate the published transient waveform within TOL (default `1e-4`) |
-| `--meas` | Print `.MEAS` results |
 | `--meas-file FILE`, `--meas-format FORMAT` | Write `.MEAS` results as `json` (default) or `csv` |
 | `--report-file FILE`, `--report-format FORMAT` | Write a `junit` or `tap` CI report; each flag requires the other |
 | `--summary FILE` | Write a JSON run summary, or print it to stdout with `-` |

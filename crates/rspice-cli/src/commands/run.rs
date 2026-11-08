@@ -889,9 +889,6 @@ fn run_concrete_deck(
         }
     }
 
-    if args.meas && !quiet && netlist.measurements.is_empty() {
-        crate::console::line(format_args!("  No .MEAS statements found in netlist"))?;
-    }
     ctx.record_unevaluated_measurements()?;
     if simulation_error.is_none() {
         if requested_mode {
