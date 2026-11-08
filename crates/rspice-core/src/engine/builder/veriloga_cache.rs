@@ -583,6 +583,10 @@ pub(super) const VERILOGA_CACHE_RENAME_RETRIES: u32 = 20;
 pub(super) const VERILOGA_CACHE_RENAME_BACKOFF: Duration = Duration::from_millis(25);
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_DEFAULT_MAX_ENTRIES: usize = 512;
+/// The records and native images of all the shipped CMC models together take
+/// about 2 GB, the three HiSIM-HV variants most of it, so this holds every
+/// one of them with room for a second compiler build's: the entries an older
+/// build wrote are never read again and are the first to be evicted.
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_DEFAULT_MAX_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
