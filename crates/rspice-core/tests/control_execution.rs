@@ -3127,3 +3127,43 @@ fn save_keeps_the_vectors_it_names_readable() {
     assert_eq!(error, None);
     assert!((printed(&presented[0])[0].y.samples[0].re - 1.5).abs() < 1e-9);
 }
+
+#[test]
+fn a_save_command_narrows_the_vectors_a_later_analysis_keeps() {
+    // ngspice `save` (frontend/breakp2.c:34) narrows what the next run keeps,
+    // so `allv` after it names the saved voltage alone.
+    let source = "* control save\n\
+                  V1 in 0 PULSE(0 1 0 1n 1n 5n 10n)\n\
+                  R1 in mid 1k\n\
+                  R2 mid out 1k\n\
+                  C1 out 0 1p\n\
+                  .control\n\
+                  save v(out)\n\
+                  tran 0.1n 10n\n\
+                  plot allv\n\
+                  .endc\n\
+                  .end\n";
+    let engine = Engine::new(SimulationConfig::default());
+    let (circuit, presentation) = drive(source, &engine, |_| {});
+    let ControlAnalysisResult::Transient(result) = &circuit.datasets()[0].result else {
+        panic!("expected transient data");
+    };
+    let kept = result
+        .voltages
+        .iter()
+        .filter(|waveform| !waveform.is_empty())
+        .count();
+    assert_eq!(kept, 1);
+    let [plot] = presentation.as_slice() else {
+        panic!("expected one plot, got {}", presentation.len());
+    };
+    let ControlPresentationKind::Plot { traces, .. } = &plot.kind else {
+        panic!("expected a plot");
+    };
+    let names: Vec<_> = traces
+        .iter()
+        .map(|trace| trace.y.expression.to_ascii_lowercase())
+        .collect();
+    assert_eq!(names.len(), 1, "{names:?}");
+    assert!(names[0].contains("out"), "{names:?}");
+}

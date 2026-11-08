@@ -115,6 +115,23 @@ impl ControlNamedDataset {
         .then(|| self.scale_name().to_ascii_lowercase())
     }
 
+    /// Whether the analysis kept the node voltage (or branch current) at
+    /// `index`. A transient keeps no samples for a vector its `save` list
+    /// left out; the other analyses keep every vector they name.
+    fn retains(&self, index: usize, voltage: bool) -> bool {
+        let ControlAnalysisResult::Transient(result) = &self.result else {
+            return true;
+        };
+        let waveforms = if voltage {
+            &result.voltages
+        } else {
+            &result.branch_currents
+        };
+        waveforms
+            .get(index)
+            .is_some_and(|waveform| !waveform.is_empty())
+    }
+
     /// `(name, type)` for every retained raw vector; ground is no vector.
     pub(super) fn vectors(&self, is_ground: impl Fn(&str) -> bool) -> Vec<(String, &'static str)> {
         let mut vectors: Vec<_> = self
@@ -125,14 +142,18 @@ impl ControlNamedDataset {
         vectors.extend(
             self.node_names()
                 .iter()
-                .map(|name| name.to_ascii_lowercase())
+                .enumerate()
+                .filter(|&(index, _)| self.retains(index, true))
+                .map(|(_, name)| name.to_ascii_lowercase())
                 .filter(|name| !is_ground(name))
                 .map(|name| (name, "voltage")),
         );
         vectors.extend(
             self.branch_names()
                 .iter()
-                .map(|name| (format!("{}#branch", name.to_ascii_lowercase()), "current")),
+                .enumerate()
+                .filter(|&(index, _)| self.retains(index, false))
+                .map(|(_, name)| (format!("{}#branch", name.to_ascii_lowercase()), "current")),
         );
         if let ControlAnalysisResult::SParameters(run) = &self.result {
             vectors.extend(super::sparam::names(run));

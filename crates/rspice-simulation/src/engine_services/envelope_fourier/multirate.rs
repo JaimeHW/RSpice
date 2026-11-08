@@ -240,6 +240,7 @@ fn project(
         ) {
             let selection = rspice_core::netlist::SaveSet {
                 signals: vec![selected.clone()],
+                ..Default::default()
             };
             if !state
                 .branch_names()

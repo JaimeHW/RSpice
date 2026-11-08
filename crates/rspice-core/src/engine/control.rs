@@ -448,12 +448,12 @@ impl ControlCircuit {
                     ControlCommandEffect::CircuitChanged,
                 ))
             }
-            // ngspice `save` (frontend/breakp2.c:34 com_save) narrows the
-            // vectors a later analysis keeps. Every analysis here keeps all
-            // of its vectors, so each one the list names stays readable.
-            CommandKind::Save => Ok(PreparedCommand::Complete(
-                ControlCommandEffect::CircuitChanged,
-            )),
+            CommandKind::Save => {
+                self.apply_save(command);
+                Ok(PreparedCommand::Complete(
+                    ControlCommandEffect::CircuitChanged,
+                ))
+            }
             // ngspice `remzerovec` (frontend/postcoms.c:78 com_remzerovec)
             // drops the current plot's vectors of no elements, which
             // `.option savecurrents` leaves for the devices it cannot read.
@@ -775,6 +775,27 @@ impl ControlCircuit {
                 .to_string_lossy()
                 .into_owned(),
             None => path,
+        }
+    }
+
+    /// ngspice `save` (frontend/breakp2.c:34 com_save): the vectors join the
+    /// list a later analysis keeps, and the analysis keeps only those; `save
+    /// all` keeps every vector again. A name no vector answers to is ignored,
+    /// as ngspice ignores it (frontend/outitf.c:396), rather than refused as
+    /// a `.save` card's would be.
+    fn apply_save(&mut self, command: &ControlCommand) {
+        let policy = self.netlist.ground_policy();
+        for word in shell::words(&command.arguments) {
+            let Some(signal) = crate::netlist::parse_save_probe(word.text.trim()) else {
+                continue;
+            };
+            let mut saved = crate::netlist::SaveSet {
+                signals: vec![signal],
+                ..Default::default()
+            };
+            saved.apply_ground_policy(policy);
+            self.netlist.saves.signals.extend(saved.signals);
+            self.netlist.saves.ignores_unknown_names = true;
         }
     }
 

@@ -1676,6 +1676,7 @@ impl TransientCapturePlan {
         // name-shape filtering alone is not an output-visibility boundary.
         let complete_save_wildcard = save_owns_complete_wildcard.then(|| SaveSet {
             signals: vec![SaveSignal::Voltage("*".to_string())],
+            ..SaveSet::default()
         });
         let voltages = node_names
             .iter()

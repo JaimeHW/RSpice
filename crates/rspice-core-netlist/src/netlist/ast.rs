@@ -967,6 +967,9 @@ pub enum SaveSignal {
 pub struct SaveSet {
     /// Selected signals in netlist order (duplicates are harmless).
     pub signals: Vec<SaveSignal>,
+    /// Whether a selected name no vector answers to is passed over instead of
+    /// refused, as a control-block `save` is in ngspice.
+    pub ignores_unknown_names: bool,
 }
 
 impl SaveSet {
@@ -1199,6 +1202,7 @@ mod save_set_tests {
     fn hierarchical_colon_and_dot_names_select_each_other() {
         let saves = SaveSet {
             signals: vec![SaveSignal::Voltage("xtest:2".to_string())],
+            ..SaveSet::default()
         };
         assert!(saves.selects("V(XTEST.2)"));
         assert!(saves.selects("V(XTEST:2)"));
@@ -1218,6 +1222,7 @@ mod save_set_tests {
                 SaveSignal::VoltageDiff("out".into(), "GROUND".into()),
                 SaveSignal::Raw("V(GND)+V(GROUND)".into()),
             ],
+            ..SaveSet::default()
         };
 
         saves.apply_ground_policy(super::super::GroundPolicy::XyceReplace);

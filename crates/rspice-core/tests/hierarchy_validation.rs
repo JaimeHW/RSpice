@@ -241,7 +241,10 @@ fn diamond_reuse_is_not_a_cycle() {
 //=============================================================================
 
 fn saves(signals: Vec<SaveSignal>) -> SaveSet {
-    SaveSet { signals }
+    SaveSet {
+        signals,
+        ..SaveSet::default()
+    }
 }
 
 #[test]

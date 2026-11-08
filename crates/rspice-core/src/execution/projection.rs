@@ -451,6 +451,8 @@ pub struct SignalProjection {
     /// Symbols contributed by `.SAVE`/`.PROBE` alone. `.PRINT`/`.PLOT`
     /// operands are owned by their card and are ordered by it instead.
     save_only: Vec<SaveSignal>,
+    /// Whether a `save_only` symbol no vector answers to is passed over.
+    ignores_unknown_saves: bool,
     keeps_everything: bool,
     authored: bool,
     /// The unit a rendered phase (`VP(x)`, `ph(v(x))`) is printed in.
@@ -533,6 +535,7 @@ impl SignalProjection {
         Ok(Self {
             cards,
             save_only,
+            ignores_unknown_saves: netlist.saves.ignores_unknown_names,
             keeps_everything: netlist
                 .saves
                 .signals
@@ -793,14 +796,18 @@ impl SignalProjection {
                 origin: NetlistSourceLocation::in_file("<.SAVE selection>", 0),
                 operands: Vec::new(),
             };
-            columns.push(self.resolve_operand(
+            match self.resolve_operand(
                 params,
                 source,
                 &card,
                 &authored,
                 &OutputOperandKind::Probe(signal.clone()),
                 abort,
-            )?);
+            ) {
+                Err(SimulationError::RequestedSignalUnavailable(_))
+                    if self.ignores_unknown_saves => {}
+                resolved => columns.push(resolved?),
+            }
         }
 
         Ok(ProjectedSignals { signals: columns })
@@ -1293,6 +1300,7 @@ fn save_signals_match(first: &SaveSignal, second: &SaveSignal) -> bool {
 fn select_inventory(source: &ProjectionSource<'_>, signal: &SaveSignal) -> Vec<usize> {
     let selection = SaveSet {
         signals: vec![signal.clone()],
+        ..SaveSet::default()
     };
     source
         .signals
@@ -1917,6 +1925,27 @@ mod tests {
         };
         assert_eq!(detail.signal, "@D1[Id]");
         assert_eq!(detail.analysis_label, "TRAN");
+    }
+
+    #[test]
+    fn a_control_save_passes_over_a_name_no_vector_answers_to() {
+        let mut netlist = parse(
+            "missing save\nV1 out 0 1\nR1 out 0 1k\n.TRAN 1u 10u\n.SAVE V(out) @D1[Id]\n.END\n",
+        );
+        netlist.saves.ignores_unknown_names = true;
+        let projection = SignalProjection::from_netlist(&netlist).expect("projection builds");
+        let source = ProjectionSource::new(AnalysisResultKind::Transient, "TRAN")
+            .with_axis(vec![0.0, 1.0])
+            .with_signals(vec![real_signal(
+                "V(out)",
+                "out",
+                SignalKind::Voltage,
+                vec![1.0, 1.0],
+            )]);
+        let projected = projection
+            .project(&netlist.params, &source, &crate::abort_signal::NoAbort)
+            .expect("ngspice ignores a saved name no vector answers to");
+        assert_eq!(names(&projected), ["V(out)"]);
     }
 
     #[test]
