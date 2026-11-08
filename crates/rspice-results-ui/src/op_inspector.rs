@@ -1546,12 +1546,14 @@ fn show_sheet<M: SchematicMapping>(
             if background.clicked() {
                 out.selected = Some(None);
             }
-            background.id
+            background
         });
-    ui.ctx().accesskit_node_builder(table.inner, |node| {
-        node.set_role(egui::accesskit::Role::Table);
-        node.set_label("Operating point");
-    });
+    describe(
+        ui,
+        &table.inner,
+        egui::accesskit::Role::Table,
+        "Operating point",
+    );
 }
 
 fn faint_line(ui: &mut Ui, message: &str) {
