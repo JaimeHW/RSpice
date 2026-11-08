@@ -3128,6 +3128,18 @@ fn save_keeps_the_vectors_it_names_readable() {
     assert!((printed(&presented[0])[0].y.samples[0].re - 1.5).abs() < 1e-9);
 }
 
+/// ngspice names a source inside a subcircuit `v.x1.vs`; `print
+/// v.x1.vs#branch` reads the -2 mA ngspice-46 prints for the same script.
+#[test]
+fn a_subcircuit_branch_reads_by_its_ngspice_flat_name() {
+    let (presented, error) = run_until_error(
+        "flat branch\nX1 1 0 sub\nR1 1 0 1k\n.subckt sub a b\nVs a b 2\n.ends\n\
+         .control\nsave v.x1.vs#branch\nop\nprint v.x1.vs#branch\n.endc\n.end\n",
+    );
+    assert_eq!(error, None);
+    assert!((printed(&presented[0])[0].y.samples[0].re + 2e-3).abs() < 1e-12);
+}
+
 #[test]
 fn a_save_command_narrows_the_vectors_a_later_analysis_keeps() {
     // ngspice `save` (frontend/breakp2.c:34) narrows what the next run keeps,

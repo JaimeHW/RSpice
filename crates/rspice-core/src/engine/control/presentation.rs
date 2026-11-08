@@ -546,10 +546,14 @@ impl ControlCircuit {
             } else {
                 &lower
             };
+            let path = crate::netlist::flat_instance_path(name);
             let index = dataset
                 .branch_names()
                 .iter()
-                .position(|item| item.eq_ignore_ascii_case(name))
+                .position(|item| {
+                    item.eq_ignore_ascii_case(name)
+                        || path.is_some_and(|path| item.eq_ignore_ascii_case(path))
+                })
                 .ok_or_else(|| unavailable(line, dataset, name))?;
             (
                 Column::Branch(index),

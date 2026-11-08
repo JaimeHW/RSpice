@@ -1147,10 +1147,11 @@ impl SaveSet {
                 }
                 SaveSignal::Current(elem) => {
                     let elem = elem.to_ascii_lowercase();
-                    if inner_i
-                        .or(branch)
-                        .is_some_and(|t| pattern_selects(&elem, t))
-                    {
+                    if inner_i.or(branch).is_some_and(|t| {
+                        pattern_selects(&elem, t)
+                            || flat_instance_path(&elem)
+                                .is_some_and(|path| pattern_selects(path, t))
+                    }) {
                         return true;
                     }
                 }
@@ -1199,6 +1200,19 @@ impl SaveSet {
             _ => false,
         })
     }
+}
+
+/// The hierarchical path behind ngspice's flat spelling of a subcircuit
+/// device: `v.xlf.vdd` names the source `vdd` inside `xlf`, whose flattened
+/// name here is `xlf.vdd`. `None` for any other spelling.
+pub fn flat_instance_path(name: &str) -> Option<&str> {
+    let (letter, path) = name.split_once('.')?;
+    let (_, device) = path.rsplit_once('.')?;
+    (letter.len() == 1
+        && device
+            .get(..1)
+            .is_some_and(|initial| initial.eq_ignore_ascii_case(letter)))
+    .then_some(path)
 }
 
 /// Match a save selection against a vector name, honoring `*` wildcards.
@@ -1269,6 +1283,21 @@ mod save_set_tests {
         };
         assert!(saves.selects("V(XTEST.2)"));
         assert!(saves.selects("V(XTEST:2)"));
+    }
+
+    #[test]
+    fn ngspices_flat_device_name_selects_the_flattened_branch() {
+        assert_eq!(flat_instance_path("v.xlf.vdd"), Some("xlf.vdd"));
+        assert_eq!(flat_instance_path("v.x1.x2.v3"), Some("x1.x2.v3"));
+        for other in ["vdd", "xlf.vdd", "r.xlf.vdd", "vd.xlf.vdd"] {
+            assert_eq!(flat_instance_path(other), None, "{other}");
+        }
+        let saves = SaveSet {
+            signals: vec![SaveSignal::Current("v.xlf.vdd".to_string())],
+            ..SaveSet::default()
+        };
+        assert!(saves.selects("I(Xlf.VDD)"));
+        assert!(saves.selects("xlf.vdd#branch"));
     }
 
     #[test]
