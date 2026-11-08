@@ -22,6 +22,9 @@ const NAME_W: f32 = 146.0;
 const KIND_W: f32 = 82.0;
 const REGION_W: f32 = 92.0;
 const VALUE_MIN_W: f32 = 78.0;
+/// A device quantity's column: holds `-999.9999 mV` at the table's mono size,
+/// because clipped against its left edge a number loses its leading digits.
+const DEVICE_VALUE_W: f32 = 100.0;
 /// Wide enough that the "Schematic" button keeps its label on one line.
 const ACTION_W: f32 = 100.0;
 /// The button's inset inside its column.
@@ -531,7 +534,7 @@ fn device_column_header(
     headers.extend(
         columns
             .iter()
-            .map(|(name, _)| (VALUE_MIN_W, name.as_str(), true)),
+            .map(|(name, _)| (DEVICE_VALUE_W, name.as_str(), true)),
     );
     headers.push((ACTION_W, "", false));
     let rect = column_header(ui, width, &headers);
@@ -540,8 +543,8 @@ fn device_column_header(
     for (index, (key, _)) in columns.iter().enumerate() {
         let cell = op_column_rect(
             rect,
-            NAME_W + KIND_W + REGION_W + index as f32 * VALUE_MIN_W,
-            VALUE_MIN_W,
+            NAME_W + KIND_W + REGION_W + index as f32 * DEVICE_VALUE_W,
+            DEVICE_VALUE_W,
         );
         let selected = sort.is_some_and(|(current, _)| current.eq_ignore_ascii_case(key));
         let ascending = selected && sort.is_some_and(|(_, ascending)| *ascending);
@@ -725,6 +728,16 @@ fn empty_table_message(ui: &mut Ui, message: impl Into<String>) {
         node.set_role(egui::accesskit::Role::Status);
         node.set_label(message);
     });
+}
+/// A device quantity as its column prints it. Units a module states can be
+/// longer than a family's: they take the place of decimals, never of the
+/// number's leading digits.
+fn device_value_text(value: f64, unit: &str) -> String {
+    if unit.is_empty() {
+        rspice_vocabulary::property::format_engineering(value)
+    } else {
+        fmt_si(value, unit, 5usize.saturating_sub(unit.chars().count()).min(4))
+    }
 }
 fn node_value_text(row: &OperatingPointValue) -> (String, bool) {
     if row.value.is_finite() {
@@ -1014,7 +1027,11 @@ fn show_device_card(
         ui.scope(|ui| {
             let available = ui.available_width();
             let width_of = |layout: &OpScope| {
-                (NAME_W + KIND_W + REGION_W + layout.columns.len() as f32 * VALUE_MIN_W + ACTION_W)
+                (NAME_W
+                    + KIND_W
+                    + REGION_W
+                    + layout.columns.len() as f32 * DEVICE_VALUE_W
+                    + ACTION_W)
                     .max(available)
             };
             let widest = layouts.iter().map(width_of).fold(available, f32::max);
@@ -1124,20 +1141,14 @@ fn show_device_card(
                         let text = entry
                             .quantities()
                             .find(|(candidate, _, _)| candidate == name)
-                            .map(|(_, value, _)| {
-                                if unit.is_empty() {
-                                    rspice_vocabulary::property::format_engineering(value)
-                                } else {
-                                    fmt_si(value, unit, 4)
-                                }
-                            })
+                            .map(|(_, value, _)| device_value_text(value, unit))
                             .unwrap_or_else(|| "—".to_owned());
                         paint_cell(
                             ui,
                             op_column_rect(
                                 rect,
-                                NAME_W + KIND_W + REGION_W + index as f32 * VALUE_MIN_W,
-                                VALUE_MIN_W,
+                                NAME_W + KIND_W + REGION_W + index as f32 * DEVICE_VALUE_W,
+                                DEVICE_VALUE_W,
                             ),
                             text,
                             egui::Align2::RIGHT_CENTER,
@@ -1341,6 +1352,18 @@ mod tests {
             "an engine name and a canonical path name one occurrence"
         );
     }
+    /// A device column holds `-999.9999 mV`: longer units give up decimals,
+    /// and the number keeps its leading digits.
+    #[test]
+    fn a_device_value_fits_its_column_whatever_units_it_states() {
+        for unit in ["V", "Wb", "A/V", "coul", "A/V^2"] {
+            let text = device_value_text(-751.626_9e-3, unit);
+            assert!(text.starts_with("-75"), "{text}");
+            assert!(text.chars().count() <= "-999.9999 mV".len(), "{text}");
+        }
+        assert_eq!(device_value_text(-751.626_9e-3, "V"), "-751.6269 mV");
+    }
+
     #[test]
     fn stacked_cards_reserve_room_for_both_headers_and_bodies() {
         let available = 480.0;
