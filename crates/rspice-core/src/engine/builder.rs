@@ -6387,7 +6387,7 @@ impl Engine {
         let authored_net_names: std::cell::OnceCell<std::collections::HashSet<String>> =
             std::cell::OnceCell::new();
         if !self.config.device_voltage_limiting {
-        for element in &flat_elements {
+            for element in &flat_elements {
                 let family = match &element.kind {
                     ElementKind::Diode { .. } => Some("diode"),
                     ElementKind::Mosfet { .. } => Some("MOSFET/VDMOS"),

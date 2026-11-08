@@ -652,7 +652,10 @@ mod tests {
         if cfg!(windows) {
             let dir = windows_profile_dir("SystemRoot").expect("windows defines SystemRoot");
             assert!(dir.is_absolute());
-            assert_eq!(windows_profile_dir("APPDATA").is_some(), user_config_dir().is_some());
+            assert_eq!(
+                windows_profile_dir("APPDATA").is_some(),
+                user_config_dir().is_some()
+            );
         } else {
             assert_eq!(windows_profile_dir("HOME"), None);
         }
