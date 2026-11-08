@@ -18,7 +18,7 @@ use rspice_results::operating_point::report::{
     signal_leaf,
 };
 use rspice_results_ui::op_inspector::{self as viewer, OpAbsence, OpAction, OpEvidence};
-use std::{borrow::Cow, sync::Arc};
+use std::{borrow::Cow, collections::BTreeSet, sync::Arc};
 fn retained_detail(analysis: &crate::state::AnalysisResult) -> Option<RetainedDetail> {
     match analysis.result_payload.as_ref() {
         Some(AnalysisResultPayload::OperatingPoint {
@@ -35,7 +35,7 @@ fn retained_detail(analysis: &crate::state::AnalysisResult) -> Option<RetainedDe
     }
 }
 fn selected_op_evidence(state: ResultsReads<'_>) -> Option<OpEvidence> {
-    let run = state.model.simulation.active_run()?;
+    state.model.simulation.active_run()?;
     let analysis = state.model.simulation.active_analysis()?;
     if analysis.analysis_type != AnalysisType::DcOp {
         return None;
@@ -68,19 +68,9 @@ fn selected_op_evidence(state: ResultsReads<'_>) -> Option<OpEvidence> {
     };
 
     Some(OpEvidence {
-        run_id: run.id,
-        label: analysis.label.clone(),
         success: analysis.success,
         error: analysis.error_message.clone(),
         detail_policy,
-        node_count: analysis
-            .dc_op
-            .as_ref()
-            .map_or(0, |dc| dc.node_voltages.len()),
-        branch_count: analysis
-            .dc_op
-            .as_ref()
-            .map_or(0, |dc| dc.branch_currents.len()),
         facts,
     })
 }
@@ -210,6 +200,7 @@ pub fn apply_action(state: &mut ResultsParts<'_>, action: OpAction) {
                 Err(error) => state.prompt(error.message(&signal)),
             }
         }
+        OpAction::Refused(reason) => state.prompt(reason),
         OpAction::LocateDevice(component_id) => {
             let Some(component) = state
                 .model
@@ -245,15 +236,15 @@ struct OpPlanKey {
     source: (RunHistoryRevision, u64),
     analysis: AnalysisPresentationKey,
     filter: String,
-    sort: Option<(String, bool)>,
-    root: String,
+    sort: viewer::OpSort,
+    collapsed: BTreeSet<String>,
 }
 impl OpPlanKey {
     fn controls(&self) -> viewer::OpControls<'_> {
         viewer::OpControls {
             filter: &self.filter,
-            sort: self.sort.as_ref(),
-            root: &self.root,
+            sort: &self.sort,
+            collapsed: &self.collapsed,
         }
     }
 }
@@ -271,12 +262,7 @@ fn op_plan(state: &mut ResultsParts<'_>, analysis: AnalysisPresentationKey) -> O
         analysis,
         filter: state.results.session.op_filter.clone(),
         sort: state.results.session.op_sort.clone(),
-        root: state
-            .model
-            .workspace
-            .content
-            .simulation_root_reference()
-            .cell,
+        collapsed: state.results.session.op_collapsed.clone(),
     };
     if let Some(plan) = state.results.plans.op.as_ref()
         && plan.key == key
@@ -313,6 +299,20 @@ impl viewer::SchematicMapping for OpMapping<'_> {
         device_target(self.state, name)
     }
 }
+/// The row the reader picked, kept true to the data under the sheet: moved
+/// if a new solve renumbered it, dropped if the row is gone.
+fn reconciled_selection(state: &mut ResultsParts<'_>) -> Option<viewer::OpSelection> {
+    let selected = state.results.session.op_selected.as_ref()?;
+    let analysis = state.model.simulation.active_analysis();
+    let resolved = selected.resolved(
+        analysis.and_then(|analysis| analysis.dc_op.as_ref()),
+        analysis.and_then(|analysis| analysis.device_op.as_ref()),
+    );
+    if resolved.as_ref() != Some(selected) {
+        state.results.session.op_selected = resolved.clone();
+    }
+    resolved
+}
 pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let Some(evidence) = selected_op_evidence(state.results_reads()) else {
         let absence = match state.model.simulation.active_analysis() {
@@ -340,6 +340,7 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
             .map(|analysis| AnalysisPresentationKey::new(run.dataset_id, analysis))
     });
     let plan = analysis_key.and_then(|key| op_plan(state, key));
+    let selection = reconciled_selection(state);
     let analysis = state.model.simulation.active_analysis();
     let dc = analysis.and_then(|analysis| analysis.dc_op.as_ref());
     let devices = analysis.and_then(|analysis| analysis.device_op.as_ref());
@@ -354,14 +355,6 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         state: state.results_reads(),
         notations,
     };
-    let controls = plan
-        .as_ref()
-        .map(|plan| plan.key.controls())
-        .unwrap_or(viewer::OpControls {
-            filter: "",
-            sort: None,
-            root: "",
-        });
     let response = viewer::show(
         ui,
         plan.as_ref().map(|plan| &plan.display),
@@ -369,38 +362,71 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
             evidence: &evidence,
             dc,
             devices,
-            controls,
+            selection: selection.as_ref(),
             mapping: &mapping,
         },
     );
     let viewer::OpResponse {
         action,
         clicked_sort,
+        selected,
+        toggled_section,
     } = response;
     if let Some(action) = action {
         apply_action(state, action);
     }
-    if let Some(key) = clicked_sort {
-        state.results.session.op_sort = match state.results.session.op_sort.as_ref() {
-            Some((current, ascending)) if current.eq_ignore_ascii_case(&key) => {
-                Some((key, !*ascending))
-            }
+    if let Some(selected) = selected {
+        state.results.session.op_selected = selected;
+    }
+    if let Some(section) = toggled_section
+        && !state.results.session.op_collapsed.remove(&section)
+    {
+        state.results.session.op_collapsed.insert(section);
+    }
+    if let Some((section, column)) = clicked_sort {
+        let ascending = match state.results.session.op_sort.get(&section) {
+            Some((current, ascending)) if current.eq_ignore_ascii_case(&column) => !*ascending,
             // Analog operating-point work generally starts with the largest
             // retained magnitude, so a new quantity sorts descending by
             // absolute value while preserving the retained sign in the table.
-            _ => Some((key, false)),
+            _ => false,
         };
+        state
+            .results
+            .session
+            .op_sort
+            .insert(section, (column, ascending));
     }
 }
 pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let Some(evidence) = selected_op_evidence(state.results_reads()) else {
         return;
     };
-    viewer::right_panel(
+    let detail = reconciled_selection(state).and_then(|selection| {
+        let reads = state.results_reads();
+        let analysis = reads.model.simulation.active_analysis();
+        viewer::selection_detail(
+            &selection,
+            analysis.and_then(|analysis| analysis.dc_op.as_ref()),
+            analysis.and_then(|analysis| analysis.device_op.as_ref()),
+            &OpMapping {
+                state: reads,
+                notations: Some(bus_notations(
+                    &reads.model.workspace,
+                    &reads.model.schematic,
+                )),
+            },
+        )
+    });
+    let action = viewer::right_panel(
         ui,
         &evidence,
         result_mapping_is_current(state.results_reads()),
+        detail.as_ref(),
     );
+    if let Some(action) = action {
+        apply_action(state, action);
+    }
 }
 #[cfg(test)]
 mod tests {
@@ -448,10 +474,7 @@ mod tests {
         state.model.simulation.view.active_analysis_idx = Some(1);
         assert!(selected_op_evidence(state.results_reads()).is_none());
         state.model.simulation.view.active_analysis_idx = Some(0);
-        let evidence = selected_op_evidence(state.results_reads()).expect("selected OP evidence");
-        assert_eq!(evidence.run_id, 9);
-        assert_eq!(evidence.label, "OP 1");
-        assert_eq!(evidence.node_count, 1);
+        assert!(selected_op_evidence(state.results_reads()).is_some());
     }
     #[test]
     fn node_evidence_does_not_depend_on_a_device_report() {
@@ -473,8 +496,7 @@ mod tests {
         state.model.simulation.view.active_run_idx = Some(0);
         state.model.simulation.view.active_analysis_idx = Some(0);
 
-        let evidence = selected_op_evidence(state.results_reads()).expect("retained OP evidence");
-        assert_eq!(evidence.node_count, 1);
+        assert!(selected_op_evidence(state.results_reads()).is_some());
         let dc = state.model.simulation.retained.runs[0].analyses[0]
             .dc_op
             .as_ref()
@@ -488,8 +510,8 @@ mod tests {
             viewer::OpPlan::new(
                 viewer::OpControls {
                     filter: "out",
-                    sort: None,
-                    root: "amplifier"
+                    sort: &viewer::OpSort::new(),
+                    collapsed: &BTreeSet::new(),
                 },
                 Some(dc),
                 None,
@@ -510,7 +532,6 @@ mod tests {
         let changed = op_plan(&mut state.results_parts(), key).unwrap();
         assert_eq!(changed.display.node_shown(), 3);
         assert_eq!(changed.display.device_shown(), 2);
-        assert_eq!(changed.display.device_in_scope(), 2);
         assert_eq!(original.display.node_shown(), 40);
         assert_eq!(original.display.device_shown(), 40);
         assert!(changed.display.node_indices().all(|index| index < 3));
@@ -524,6 +545,44 @@ mod tests {
             });
         });
         assert_eq!(state.model.simulation.view.data_version, version);
+    }
+    #[test]
+    fn a_rerun_keeps_the_picked_row_and_a_vanished_row_clears_it() {
+        let mut state = op_state(12, 12);
+        let picked = state.model.simulation.retained.runs[0].analyses[0]
+            .device_op
+            .as_ref()
+            .expect("a device report")
+            .entries[7]
+            .name
+            .clone();
+        state.results.results.session.op_selected = Some(viewer::OpSelection {
+            kind: viewer::OpRowKind::Device,
+            index: 7,
+            name: picked.clone(),
+        });
+
+        state.model.simulation.retained.runs[0].analyses[0]
+            .device_op
+            .as_mut()
+            .expect("a device report")
+            .entries
+            .swap(0, 7);
+        let moved = reconciled_selection(&mut state.results_parts()).expect("the row still exists");
+        assert_eq!((moved.index, moved.name.as_str()), (0, picked.as_str()));
+        assert_eq!(state.results.results.session.op_selected, Some(moved));
+
+        state.model.simulation.retained.runs[0].analyses[0]
+            .device_op
+            .as_mut()
+            .expect("a device report")
+            .entries
+            .remove(0);
+        assert_eq!(reconciled_selection(&mut state.results_parts()), None);
+        assert_eq!(
+            state.results.results.session.op_selected, None,
+            "a row no longer in the data kept the inspector showing it"
+        );
     }
     #[test]
     fn the_readers_controls_are_part_of_the_row_plan_key() {
@@ -544,12 +603,30 @@ mod tests {
         );
 
         state.results.results.session.op_filter.clear();
-        state.results.results.session.op_sort = Some(("gm".to_owned(), true));
+        state
+            .results
+            .results
+            .session
+            .op_sort
+            .insert("MOSFET".to_owned(), ("gm".to_owned(), true));
         let sorted = op_plan(&mut state.results_parts(), key).expect("a row plan");
         assert_ne!(
             sorted.display.device_indices().collect::<Vec<_>>(),
             unfiltered.display.device_indices().collect::<Vec<_>>(),
             "a new sort key served the previous ordering"
+        );
+
+        state
+            .results
+            .results
+            .session
+            .op_collapsed
+            .insert("MOSFET".to_owned());
+        let folded = op_plan(&mut state.results_parts(), key).expect("a row plan");
+        assert_eq!(
+            folded.display.device_indices().count(),
+            0,
+            "folding a section served the previous rows"
         );
     }
     #[test]
@@ -574,9 +651,7 @@ mod tests {
             3,
             "the sheet would have indexed rows the new dataset no longer retains"
         );
-        assert_eq!(
-            after.display.node_offset_count(),
-            after.display.node_row_count()
-        );
+        let (rows, offsets) = after.display.row_counts();
+        assert_eq!(offsets, rows);
     }
 }

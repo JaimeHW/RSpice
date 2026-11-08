@@ -31,7 +31,7 @@ closure.
 | `smith_chart`, `polar`, `network_matrix` | Smith chart and polar views of retained S-parameter and complex responses; network-matrix cells |
 | `eye_diagram`, `events` | Eye diagrams over `rspice-core` waveform folding and `rspice-results` mask compliance; digital and real event tables and bus controls |
 | `histogram`, `scatter`, `box_violin`, `sensitivity`, `optimization` | Monte Carlo histograms, scatter correlation with trial brushing, and box and violin plots against requirements; sensitivity and mismatch contribution sheets; optimization convergence |
-| `op_inspector`, `specs`, `soa` | Operating-point cards and tables; the specification result table and inspector; SOA rule projections and stress history |
+| `op_inspector`, `specs`, `soa` | The operating-point sheet; the specification result table and inspector; SOA rule projections and stress history |
 
 ## Boundaries
 

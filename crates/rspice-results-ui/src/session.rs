@@ -485,10 +485,14 @@ pub struct ResultViewerState {
     /// workspace leaves it.
     pub document_presentation:
         Option<rspice_results::visualization_document::VisualizationPresentationPolicy>,
-    /// OP inspector device-name filter (docbar input). Transient.
+    /// OP sheet name filter (docbar input). Transient.
     pub op_filter: String,
-    /// OP inspector sort: (column key, descending). Transient.
-    pub op_sort: Option<(String, bool)>,
+    /// OP sheet sort, per section. Transient.
+    pub op_sort: crate::op_inspector::OpSort,
+    /// OP sheet sections the reader has folded, by title. Transient.
+    pub op_collapsed: std::collections::BTreeSet<String>,
+    /// OP sheet row the reader picked. Transient.
+    pub op_selected: Option<crate::op_inspector::OpSelection>,
     /// The axis-limit field being typed, if any.
     ///
     /// Editing is transactional like the marker dialog: the pinned interval

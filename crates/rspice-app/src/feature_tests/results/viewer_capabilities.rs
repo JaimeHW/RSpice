@@ -187,7 +187,16 @@ fn clearing_design_execution_context_clears_project_scoped_results_state() {
     );
     results.session.rf_pin.insert(ResultViewer::Smith, (0, 1));
     results.session.op_filter = "M1".to_string();
-    results.session.op_sort = Some(("gm".to_string(), true));
+    results
+        .session
+        .op_sort
+        .insert("MOSFET".to_string(), ("gm".to_string(), true));
+    results.session.op_collapsed.insert("BJT".to_string());
+    results.session.op_selected = Some(rspice_results_ui::op_inspector::OpSelection {
+        kind: rspice_results_ui::op_inspector::OpRowKind::Device,
+        index: 0,
+        name: "M1".to_string(),
+    });
     results.session.spec_drafts = Some(Vec::new());
     state.results.specification_editor_route_pending = true;
 
@@ -207,7 +216,9 @@ fn clearing_design_execution_context_clears_project_scoped_results_state() {
     assert!(results.analysis_expr_cache.is_empty());
     assert!(results.session.rf_pin.is_empty());
     assert!(results.session.op_filter.is_empty());
-    assert_eq!(results.session.op_sort, None);
+    assert!(results.session.op_sort.is_empty());
+    assert!(results.session.op_collapsed.is_empty());
+    assert_eq!(results.session.op_selected, None);
     assert!(results.session.spec_drafts.is_none());
     assert!(!state.results.specification_editor_route_pending);
 }
