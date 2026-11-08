@@ -2696,7 +2696,7 @@ impl Bjt {
 
     /// Cached operating-point values from the last accepted Newton solution:
     /// `(vbe, vbc, ic, ib, gm)`, with `gm` the transconductance of SPICE's
-    /// hybrid-pi split (see [`Self::op_conductances`]).
+    /// hybrid-pi split.
     pub fn op_values(&self) -> (Value, Value, Value, Value, Value) {
         let (_, _, gm, _) = self.op_conductances();
         (self.vbe, self.vbc, self.ic, self.ib, gm)
@@ -2706,6 +2706,7 @@ impl Bjt {
     /// SPICE reports them, `(gpi, gmu, gm, go)`: the base current's slopes
     /// against VBE and VBC, and the collector current split so its slope is
     /// `gm + go` against VBE and `-(go + gmu)` against VBC.
+    #[doc(hidden)]
     pub fn op_conductances(&self) -> (Value, Value, Value, Value) {
         let linearized = &self.intrinsic_linearization;
         let (gpi, gmu) = (linearized.dib_dvbe, linearized.dib_dvbc);
@@ -2717,6 +2718,7 @@ impl Bjt {
     /// it, `(qbe, qbc, cpi, cmu)`: the two internal junctions' charges in the
     /// device's own polarity and the capacitances they present. `None` for a
     /// VBIC device, whose charges are not the Gummel-Poon pair.
+    #[doc(hidden)]
     pub fn op_charges(&self) -> Option<(Value, Value, Value, Value)> {
         if self.uses_vbic_dynamic_charges() {
             return None;

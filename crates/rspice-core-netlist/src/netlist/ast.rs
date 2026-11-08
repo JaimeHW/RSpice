@@ -1205,6 +1205,7 @@ impl SaveSet {
 /// The hierarchical path behind ngspice's flat spelling of a subcircuit
 /// device: `v.xlf.vdd` names the source `vdd` inside `xlf`, whose flattened
 /// name here is `xlf.vdd`. `None` for any other spelling.
+#[doc(hidden)]
 pub fn flat_instance_path(name: &str) -> Option<&str> {
     let (letter, path) = name.split_once('.')?;
     let (_, device) = path.rsplit_once('.')?;

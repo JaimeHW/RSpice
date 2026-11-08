@@ -1734,6 +1734,7 @@ impl Diode {
     }
 
     /// Stored charge at the last accepted Newton solution.
+    #[doc(hidden)]
     pub fn op_charge(&self) -> Value {
         self.junction_charge_and_capacitance(self.prev_vd).0
     }

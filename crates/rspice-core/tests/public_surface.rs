@@ -638,7 +638,11 @@ const MAX_PUBLIC_ITEMS: usize = 5265;
 // reads 1 through an AC or noise analysis. `OutputStage::output_current` adds
 // one: the builder (engine/builder/special_function.rs) drives a logic output
 // with it. The census is 1,669, with no slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 1669;
+// `flat_instance_path`, `Bjt::op_conductances`, `Bjt::op_charges` and
+// `Diode::op_charge` add four: a control `save` reads the quantities and the
+// flat branch name that `rspice-core` resolves from the netlist and device
+// crates.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 1673;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
