@@ -41,6 +41,10 @@ use crate::resource::{ResourceKind, ResourceLimitError};
 use crate::{CircuitData, Netlist, Value};
 use std::collections::{HashMap, HashSet};
 
+/// Where a transient leaves its devices' last state for its caller.
+pub(super) type FinalDeviceState =
+    std::sync::Arc<std::sync::Mutex<Option<crate::circuit::DeviceOpReport>>>;
+
 /// Main simulation engine
 pub struct Engine {
     #[cfg(feature = "veriloga")]
@@ -91,6 +95,13 @@ pub struct Engine {
     /// on a copy without it.
     pub(super) small_signal_state:
         Option<std::sync::Arc<super::small_signal_state::TransientStateBias>>,
+    /// Where a transient on this engine leaves its devices' last state, for
+    /// the control language to read afterwards.
+    ///
+    /// Configuration of a per-run engine only, as `small_signal_state` is: it
+    /// is set on the private engine copy that runs one control `tran`, so no
+    /// other run pays for the report.
+    pub(super) final_device_state: Option<FinalDeviceState>,
     /// Where the first plain build of one netlist records its topology while
     /// [`Self::retain_built_topology`]'s guard lives.
     pub(super) retained_topology:
@@ -257,6 +268,7 @@ impl Engine {
             compiler_diagnostic_handler: None,
             startup_directives: std::sync::Mutex::new(None),
             small_signal_state: None,
+            final_device_state: None,
             retained_topology: std::sync::Mutex::new(None),
         }
     }
@@ -284,6 +296,7 @@ impl Engine {
             compiler_diagnostic_handler: None,
             startup_directives: std::sync::Mutex::new(None),
             small_signal_state: None,
+            final_device_state: None,
             retained_topology: std::sync::Mutex::new(None),
         })
     }
@@ -311,6 +324,7 @@ impl Engine {
             compiler_diagnostic_handler: None,
             startup_directives: std::sync::Mutex::new(None),
             small_signal_state: None,
+            final_device_state: None,
             retained_topology: std::sync::Mutex::new(None),
         }
     }
@@ -340,6 +354,7 @@ impl Engine {
             compiler_diagnostic_handler: None,
             startup_directives: std::sync::Mutex::new(None),
             small_signal_state: None,
+            final_device_state: None,
             retained_topology: std::sync::Mutex::new(None),
         })
     }
@@ -604,6 +619,7 @@ impl Engine {
             resolved_engine.compiler_diagnostic_handler = self.compiler_diagnostic_handler.clone();
         }
         resolved_engine.small_signal_state = self.small_signal_state.clone();
+        resolved_engine.final_device_state = self.final_device_state.clone();
         resolved_engine.retained_topology =
             std::sync::Mutex::new(self.built_topology_record(netlist));
         resolved_engine

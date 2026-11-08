@@ -7,7 +7,9 @@ use rspice_core::engine::{
 };
 use rspice_core::execution::SignalUnit;
 use rspice_core::execution::control::{ControlCommand, ControlLimits, ControlProgram};
-use rspice_core::{ComplexValue, ConvergenceConfig, Engine, Netlist, NoAbort, SimulationConfig};
+use rspice_core::{
+    ComplexValue, ConvergenceConfig, Engine, Netlist, NoAbort, SimulationConfig, SpiceDialect,
+};
 
 fn drive(
     source: &str,
@@ -3138,6 +3140,136 @@ fn a_subcircuit_branch_reads_by_its_ngspice_flat_name() {
     );
     assert_eq!(error, None);
     assert!((printed(&presented[0])[0].y.samples[0].re + 2e-3).abs() < 1e-12);
+}
+
+/// What each `print` of a script prints for the bipolar deck the numbers
+/// below were read from, under ngspice's physical constants.
+fn device_quantities(script: &str) -> Vec<Vec<Vec<ComplexValue>>> {
+    let engine = Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Ngspice));
+    let source = format!(
+        "device quantities\nVCC c 0 5\nVB b 0 dc 0.7 ac 1\nR1 c 0 1k\nQ1 c b 0 npn1\n\
+         .model npn1 NPN(IS=1e-15 BF=100 VAF=20 VAR=30 IKF=10m RB=10 RC=1 RE=1 CJE=1p \
+         CJC=1p TF=1n)\n.control\n{script}.endc\n.end\n"
+    );
+    let (_, presented) = drive(&source, &engine, |_| {});
+    presented
+        .iter()
+        .map(|request| {
+            printed(request)
+                .iter()
+                .map(|trace| trace.y.samples.clone())
+                .collect()
+        })
+        .collect()
+}
+
+fn assert_quantity(column: &[ComplexValue], expected: &[f64], tolerance: f64) {
+    assert_eq!(column.len(), expected.len(), "{column:?}");
+    for (value, expected) in column.iter().zip(expected) {
+        assert!(
+            (value.re - expected).abs() <= tolerance * expected.abs(),
+            "{} against {expected}",
+            value.re
+        );
+    }
+}
+
+/// `@device[quantity]` after `op` is the device's value whether or not a
+/// `save` named it. ngspice-46 prints gm = 2.298115e-02, go = 2.623332e-05,
+/// gpi = 2.134915e-04, gmu = 1.000000e-12, ic = 6.252246e-04 and
+/// ib = 5.521936e-06, and an instance parameter answers too.
+#[test]
+fn print_and_let_read_a_device_quantity_after_an_operating_point() {
+    let quantities = [
+        ("gm", 2.298115e-2),
+        ("go", 2.623332e-5),
+        ("gpi", 2.134915e-4),
+        ("gmu", 1.0e-12),
+        ("ic", 6.252246e-4),
+        ("ib", 5.521936e-6),
+    ];
+    let names = quantities
+        .iter()
+        .map(|(name, _)| format!("@q1[{name}]"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    for script in [
+        format!("op\nprint {names}\n"),
+        format!("save {names}\nop\nprint {names}\n"),
+    ] {
+        let printed = device_quantities(&script);
+        for (column, (_, expected)) in printed[0].iter().zip(quantities) {
+            assert_quantity(column, &[expected], 1.0e-6);
+        }
+    }
+    let printed = device_quantities(
+        "op\nlet x = @q1[gm]*2\nprint x\nprint @q1[gm]+@q1[go]\nprint @r1[resistance]\n\
+         print @vcc[dc]\n",
+    );
+    assert_quantity(&printed[0][0], &[4.596230e-2], 1.0e-6);
+    assert_quantity(&printed[1][0], &[2.300738e-2], 1.0e-6);
+    assert_quantity(&printed[2][0], &[1000.0], 1.0e-12);
+    assert_quantity(&printed[3][0], &[5.0], 1.0e-12);
+}
+
+/// A saved quantity is a vector of the plot; anything else is what the device
+/// was left holding, one value long. For `dc vb 0.6 0.8 0.1` ngspice-46 prints
+/// a saved gm of 5.481787e-04, 2.298066e-02, 2.757943e-01 and, unsaved,
+/// gm = 2.757943e-01 and go = 4.444552e-04; ngspice stops its sweep points
+/// less tightly than the operating point, hence the wider tolerance.
+#[test]
+fn a_saved_quantity_is_a_vector_and_an_unsaved_one_the_last_state() {
+    let printed = device_quantities("dc vb 0.6 0.8 0.1\nprint @q1[gm]\n");
+    assert_quantity(&printed[0][0], &[2.757943e-1], 5.0e-5);
+
+    let printed = device_quantities(
+        "save @q1[gm]\ndc vb 0.6 0.8 0.1\nprint @q1[gm]\nprint @q1[go]\nprint v(c)+@q1[go]\n",
+    );
+    assert_quantity(
+        &printed[0][0],
+        &[5.481787e-4, 2.298066e-2, 2.757943e-1],
+        5.0e-5,
+    );
+    assert_quantity(&printed[1][0], &[4.444552e-4], 5.0e-5);
+    assert_eq!(printed[2][0].len(), 3);
+
+    // ngspice-46: unsaved after `tran` or `ac`, 2.298115e-02, one value long;
+    // saved through a transient, a value per time point; saved through `ac`,
+    // the one bias value, as complex data.
+    for analysis in ["tran 0.1n 0.5n", "ac lin 2 1k 2k"] {
+        let printed = device_quantities(&format!("{analysis}\nprint @q1[gm]\n"));
+        assert_quantity(&printed[0][0], &[2.298115e-2], 1.0e-6);
+    }
+    let printed =
+        device_quantities("save @q1[gm] v(c)\ntran 0.1n 0.5n\nprint @q1[gm]\nprint v(c)\n");
+    assert!(printed[0][0].len() > 1);
+    assert_eq!(printed[0][0].len(), printed[1][0].len());
+    assert_quantity(
+        &printed[0][0][printed[0][0].len() - 1..],
+        &[2.298115e-2],
+        1.0e-6,
+    );
+    let printed = device_quantities("save @q1[gm] v(c)\nac lin 2 1k 2k\nprint @q1[gm]\n");
+    assert_quantity(&printed[0][0], &[2.298115e-2], 1.0e-6);
+}
+
+/// The state is the last analysis's whichever plot is current. After `op`
+/// then the sweep, ngspice-46 prints 2.757943e-01 for `@q1[gm]` from op1 too.
+#[test]
+fn a_device_quantity_follows_the_last_analysis_not_the_current_plot() {
+    let printed =
+        device_quantities("op\ndc vb 0.6 0.8 0.1\nsetplot op1\nprint @q1[gm]\nprint op1.@q1[gm]\n");
+    assert_quantity(&printed[0][0], &[2.757943e-1], 5.0e-5);
+    assert_quantity(&printed[1][0], &[2.757943e-1], 5.0e-5);
+}
+
+#[test]
+fn a_device_quantity_no_device_answers_is_refused_by_name() {
+    let (_, error) = run_until_error(
+        "unknown\nV1 1 0 1\nR1 1 0 1k\n.control\nop\nprint @r1[nope]\n.endc\n.end\n",
+    );
+    let error = error.expect("an unknown quantity refuses");
+    assert!(error.contains("@R1[NOPE]"), "{error}");
 }
 
 #[test]

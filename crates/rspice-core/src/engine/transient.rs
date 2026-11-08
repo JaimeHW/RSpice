@@ -13309,6 +13309,27 @@ impl Engine {
             );
         }
 
+        if let Some(final_state) = &self.final_device_state
+            && let Ok(mut final_state) = final_state.lock()
+        {
+            *final_state = Some(
+                circuit
+                    .transient_device_op_report(
+                        &solution,
+                        &diode_history.cqd_prev,
+                        &bjt_history.accepted_terminal_currents,
+                        Some(&bjt_history.accepted_external_bc_current),
+                        Some([
+                            &jfet_history.accepted_cqgs,
+                            &jfet_history.accepted_cqgd,
+                            &jfet_history.accepted_cqds,
+                        ]),
+                        Some(&mosfet_history.accepted_displacement_currents),
+                    )
+                    .map_err(SimulationError::Circuit)?,
+            );
+        }
+
         // The devices keep the tally; the circuit is local to this body, so the
         // count has to be lifted into the run's diagnostics before it is
         // dropped. Transient is the only phase in which bypass can fire.

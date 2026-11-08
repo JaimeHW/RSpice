@@ -85,7 +85,7 @@ impl CircuitData {
                 .flatten();
         }
         if let Some(index) = position(&self.voltage_sources.names) {
-            return is(&["DCV0"])
+            return is(&["DCV0", "DC"])
                 .then(|| {
                     named(
                         &self.voltage_sources.names,
@@ -96,7 +96,7 @@ impl CircuitData {
                 .flatten();
         }
         if let Some(index) = position(&self.current_sources.names) {
-            return is(&["DCV0"])
+            return is(&["DCV0", "DC"])
                 .then(|| {
                     named(
                         &self.current_sources.names,

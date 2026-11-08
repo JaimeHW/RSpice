@@ -4,6 +4,7 @@ use super::*;
 mod batch;
 mod compose;
 mod dcmatch;
+mod device_state;
 mod distortion;
 mod events;
 mod functions;
@@ -25,6 +26,7 @@ use crate::netlist::expr::{
     parse_control_expression_prefix_with_abort,
 };
 use crate::signal_unit::SignalUnit;
+pub(super) use device_state::DeviceState;
 pub(super) use pole_zero::resolve_function as resolve_root_function;
 pub(super) use vectors::{VectorStore, VectorValue};
 
@@ -168,6 +170,18 @@ enum Column {
     Stability(stability::StabilityColumn),
     SParameter(sparam::SParameterColumn),
     DcMatch(dcmatch::DcMatchColumn),
+    /// One value a device holds.
+    DeviceState {
+        value: Value,
+        complex: bool,
+    },
+    /// A saved quantity across a DC sweep, by its place in each point's report.
+    DeviceSweep {
+        entry: usize,
+        parameter: usize,
+    },
+    /// A saved quantity's transient trace.
+    DeviceTrace(usize),
 }
 
 struct Selected<'a> {
@@ -325,7 +339,11 @@ impl ControlNamedDataset {
 
 impl Selected<'_> {
     fn is_scalar(&self) -> bool {
-        matches!(self.column, Column::DcMatch(column) if column.is_scalar())
+        match self.column {
+            Column::DcMatch(column) => column.is_scalar(),
+            Column::DeviceState { .. } => true,
+            _ => false,
+        }
     }
 
     fn sample(&self, row: usize) -> Option<ComplexValue> {
@@ -334,10 +352,27 @@ impl Selected<'_> {
         {
             return column.sample(result, row);
         }
+        if let Column::DeviceState { value, .. } = self.column {
+            return Some(value.into());
+        }
         if row >= self.dataset.length() {
             return None;
         }
         match (self.column, &self.dataset.result) {
+            (Column::DeviceState { .. }, _) => None,
+            (Column::DeviceSweep { entry, parameter }, ControlAnalysisResult::DcSweep(result)) => {
+                let report = &result.points.get(row)?.device_op_report;
+                let (_, value) = report.entries.get(entry)?.params.get(parameter)?;
+                Some((*value).into())
+            }
+            (Column::DeviceTrace(index), ControlAnalysisResult::Transient(result)) => result
+                .device_op_traces
+                .get(index)?
+                .values
+                .get(row)
+                .copied()
+                .map(Into::into),
+            (Column::DeviceSweep { .. } | Column::DeviceTrace(_), _) => None,
             (Column::DcMatch(_), _)
             | (Column::Node(_) | Column::Branch(_), ControlAnalysisResult::DcMatch(_)) => None,
             (Column::Stability(column), ControlAnalysisResult::Stability(result)) => {
@@ -524,6 +559,9 @@ impl ControlCircuit {
         probe: Option<&str>,
         line: usize,
     ) -> Result<Selected<'a>, ControlError> {
+        if probe.is_none() && name.starts_with('@') {
+            return self.device_quantity(dataset, name, line);
+        }
         if probe.is_none()
             && let Some(mut selected) = transfer::select(dataset, name)
                 .or(pole_zero::select_gain(dataset, name))

@@ -73,6 +73,8 @@ pub struct ControlNamedDataset {
     pub name: String,
     pub analysis_id: crate::identity::AnalysisInstanceId,
     pub device_op_report: Option<Box<crate::circuit::DeviceOpReport>>,
+    /// The `(device, quantity)` pairs a `save` kept when this plot ran.
+    saved_device_quantities: Vec<(String, String)>,
     pub command: AnalysisCommand,
     pub result: ControlAnalysisResult,
 }
@@ -230,6 +232,10 @@ pub struct ControlCircuit {
     /// The deck as the script found it, which `reset` reloads.
     authored: Netlist,
     datasets: Vec<ControlNamedDataset>,
+    /// What the devices hold after the last analysis.
+    device_state: Option<presentation::DeviceState>,
+    /// The instance parameters the command being run names.
+    instance_quantities: Vec<(String, String, Value)>,
     /// The dataset unqualified vector names resolve against: the newest,
     /// unless `setplot` selected another (ngspice `plot_cur`).
     current: Option<usize>,
@@ -271,6 +277,8 @@ impl ControlCircuit {
             authored: netlist.clone(),
             netlist,
             datasets: Vec::new(),
+            device_state: None,
+            instance_quantities: Vec::new(),
             current: None,
             destroyed: BTreeSet::new(),
             ordinals: BTreeMap::new(),
@@ -380,6 +388,14 @@ impl ControlCircuit {
             .into());
         }
         let kind = CommandKind::parse(command)?;
+        if command.arguments.contains('@')
+            && !matches!(
+                kind,
+                CommandKind::Save | CommandKind::Alter | CommandKind::AlterModel
+            )
+        {
+            self.prepare_device_state(engine, &command.arguments, line, abort)?;
+        }
         // ngspice cp_redirect (frontend/streams.c:47) sends the output of
         // any command to the file a `>` names.
         if kind.prints_text()
@@ -505,6 +521,7 @@ impl ControlCircuit {
                 // go, the plots and the script's variables stay
                 // (frontend/inp.c:549 names the deck it reloads).
                 self.netlist = self.authored.clone();
+                self.device_state = None;
                 self.runtime_options = crate::netlist::SimulationOptions::default();
                 Ok(Self::batch_output(
                     command,
@@ -807,6 +824,28 @@ impl ControlCircuit {
         }))
     }
 
+    /// The configuration an analysis of this script solves under.
+    fn analysis_config(&self, engine: &Engine) -> crate::SimulationConfig {
+        // Resolve authored options before marking this bounded engine resolved.
+        // Then apply only settings changed by executed commands: a caller's
+        // resolved policy must not be overwritten by unrelated authored options.
+        let resolved = engine.resolved_for_netlist(&self.netlist);
+        let mut configured = crate::resolve_simulation_config(
+            resolved.config(),
+            Some(&self.runtime_options),
+            &crate::SimulationConfigOverrides::default(),
+        );
+        if let Some(workers) = self.settings.maximum_parallel_workers {
+            configured.resource_limits.max_parallel_workers =
+                configured.resource_limits.max_parallel_workers.min(workers);
+        }
+        configured.resource_limits.max_result_values = configured
+            .resource_limits
+            .max_result_values
+            .saturating_sub(self.retained_values);
+        configured
+    }
+
     fn run_analysis<E, F>(
         &mut self,
         engine: &Engine,
@@ -829,24 +868,8 @@ impl ControlCircuit {
         engine
             .ensure_batch_runs(self.datasets.len().saturating_add(1))
             .map_err(|error| simulation_error(line, error))?;
-        // Resolve authored options before marking this bounded engine resolved.
-        // Then apply only settings changed by executed commands: a caller's
-        // resolved policy must not be overwritten by unrelated authored options.
-        let resolved = engine.resolved_for_netlist(&self.netlist);
-        let mut configured = crate::resolve_simulation_config(
-            resolved.config(),
-            Some(&self.runtime_options),
-            &crate::SimulationConfigOverrides::default(),
-        );
-        if let Some(workers) = self.settings.maximum_parallel_workers {
-            configured.resource_limits.max_parallel_workers =
-                configured.resource_limits.max_parallel_workers.min(workers);
-        }
-        configured.resource_limits.max_result_values = configured
-            .resource_limits
-            .max_result_values
-            .saturating_sub(self.retained_values);
-        let bounded = if matches!(
+        let configured = self.analysis_config(engine);
+        let mut bounded = if matches!(
             analysis,
             AnalysisCommand::AcData { .. } | AnalysisCommand::NoiseData { .. }
         ) {
@@ -855,6 +878,10 @@ impl ControlCircuit {
             engine.try_resolved_with_config(configured)
         }
         .map_err(|source| ControlExecutionError::Configuration { line, source })?;
+        let final_state = super::core::FinalDeviceState::default();
+        if matches!(analysis, AnalysisCommand::Tran { .. }) {
+            bounded.final_device_state = Some(std::sync::Arc::clone(&final_state));
+        }
         let (kind, identity_kind) = analysis::identity(&analysis, line)?;
         let ordinal = self
             .ordinals
@@ -1037,6 +1064,34 @@ impl ControlCircuit {
         engine
             .ensure_result_values(retained_values)
             .map_err(|error| simulation_error(line, error))?;
+        let saved_device_quantities = netlist
+            .saves
+            .signals
+            .iter()
+            .filter_map(|signal| match signal {
+                crate::netlist::SaveSignal::DeviceParam { device, param } => {
+                    Some((device.clone(), param.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+        self.device_state = match &result {
+            ControlAnalysisResult::OperatingPoint(_) => device_op_report
+                .clone()
+                .map(presentation::DeviceState::Solved),
+            ControlAnalysisResult::DcSweep(result) => result
+                .points
+                .last()
+                .map(|point| Box::new(point.device_op_report.clone()))
+                .map(presentation::DeviceState::Solved),
+            ControlAnalysisResult::Transient(_) => final_state
+                .lock()
+                .ok()
+                .and_then(|mut report| report.take())
+                .map(Box::new)
+                .map(presentation::DeviceState::Solved),
+            _ => Some(presentation::DeviceState::Bias(Box::new(netlist))),
+        };
         // A destroyed plot's name may return; its `settype` units do not.
         self.vector_units
             .retain(|id, _| !id.dataset.eq_ignore_ascii_case(&name));
@@ -1044,6 +1099,7 @@ impl ControlCircuit {
             name: name.clone(),
             analysis_id,
             device_op_report,
+            saved_device_quantities,
             command: analysis,
             result,
         });

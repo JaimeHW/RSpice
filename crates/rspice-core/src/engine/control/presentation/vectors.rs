@@ -314,6 +314,7 @@ impl ControlCircuit {
     ) -> bool {
         self.vectors.current_plot().is_some()
             || self.names_user_vector(expression)
+            || names_device_quantity(expression)
             || self.names_constant(expression, variables)
             || needs_vector_functions(expression, variables)
     }
@@ -910,6 +911,18 @@ impl ControlCircuit {
                     charge(budget, value.samples.len(), line)?;
                     return Ok(leaf(expression, value, leaves));
                 }
+                // `plot.@device[quantity]`: the expression parser keeps the
+                // brackets of a leading `@` only.
+                if let ("[]", [Expr::Param(vector), Expr::Param(quantity)]) =
+                    (name.as_str(), args.as_slice())
+                    && vector.contains('@')
+                {
+                    let name = format!("{vector}[{quantity}]");
+                    let (dataset, raw) = self.qualified(&name, line)?;
+                    let selected = self.select(dataset, raw, None, line)?;
+                    let value = sampled(&selected, budget, line, abort)?;
+                    return Ok(leaf(expression, value, leaves));
+                }
                 if name == "[]" {
                     let value = self.index_vector(args, budget, variables, line, abort)?;
                     charge(budget, value.samples.len(), line)?;
@@ -1383,6 +1396,20 @@ fn leaf(expression: &mut Expr, value: VectorValue, leaves: &mut Vec<VectorValue>
     shape
 }
 
+/// Whether the expression reads a `@device[quantity]`, whose value is as long
+/// as what the device holds rather than as the plot.
+fn names_device_quantity(expression: &Expr) -> bool {
+    match expression {
+        Expr::Param(name) => name.contains('@'),
+        Expr::FnCall { args, .. } => args.iter().any(names_device_quantity),
+        Expr::BinOp { left, right, .. } => {
+            names_device_quantity(left) || names_device_quantity(right)
+        }
+        Expr::UnaryOp { operand, .. } => names_device_quantity(operand),
+        Expr::Number(_) | Expr::ComplexNumber(_) | Expr::StringLiteral(_) => false,
+    }
+}
+
 /// Every retained sample of a dataset vector, on that dataset's scale.
 fn sampled(
     selected: &Selected<'_>,
@@ -1401,7 +1428,8 @@ fn sampled(
         charge(budget, 1, line)?;
         return Ok(VectorValue {
             samples: vec![value],
-            complex: value.im != 0.0,
+            complex: value.im != 0.0
+                || matches!(selected.column, Column::DeviceState { complex: true, .. }),
             scale: None,
             unit: selected.unit.clone(),
         });
