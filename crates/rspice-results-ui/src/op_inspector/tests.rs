@@ -718,6 +718,80 @@ fn a_section_scrolls_in_whole_columns_only_as_far_as_it_overflows() {
 }
 
 #[test]
+fn only_a_whole_column_is_painted_and_the_last_one_can_always_be_reached() {
+    let visible = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600.0, 400.0));
+    let at = |scrolled: f32| Grid {
+        origin: egui::pos2(-scrolled, 0.0),
+        visible,
+        name_w: 200.0,
+        advance: 7.0,
+    };
+    let cell = |grid: &Grid, slot: usize| grid.value_cell(grid.values_left(8), 0.0, ROW_H, slot);
+
+    let start = at(0.0);
+    assert!(start.shows_whole(cell(&start, 2)), "400 pt holds three");
+    assert!(
+        !start.shows_whole(cell(&start, 3)),
+        "the fourth would be cut"
+    );
+
+    let end = at(200.0 + 8.0 * VALUE_W - 600.0);
+    assert!(end.shows_whole(cell(&end, 7)));
+    assert!(!end.shows_whole(egui::Rect::from_min_size(
+        egui::pos2(visible.right() - 10.0, 0.0),
+        egui::vec2(VALUE_W, ROW_H),
+    )));
+}
+
+#[test]
+fn a_header_is_on_the_sheet_only_for_a_column_that_fits() {
+    let params = [
+        "id", "vgs", "vds", "vbs", "vth", "vdsat", "gm", "gds", "gmb",
+    ]
+    .map(|name| (name, 1.0))
+    .to_vec();
+    let report = DeviceOpReport {
+        entries: vec![device("M1", "MOSFET", None, params)],
+    };
+    let plan = plan_of(None, Some(&report));
+    let mapping = Mapped {
+        node: false,
+        device: None,
+    };
+    let view = OpView {
+        evidence: &evidence(),
+        dc: None,
+        devices: Some(&report),
+        selection: None,
+        mapping: &mapping,
+        failure_site: None,
+    };
+    let ctx = egui::Context::default();
+    rspice_ui_kit::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let mut nodes = Vec::new();
+    for _ in 0..3 {
+        let input = rspice_ui_kit::raster::display_input(SIZE, 1.0);
+        let output = ctx.run_ui(input, |ui| {
+            let _ = show(ui, Some(&plan), &view);
+        });
+        nodes = output
+            .platform_output
+            .accesskit_update
+            .map(|update| update.nodes)
+            .unwrap_or_default();
+    }
+    let painted = nodes
+        .iter()
+        .filter_map(|(_, node)| node.label())
+        .filter(|label| label.starts_with("MOSFET: ") && !label.starts_with("MOSFET: Instance"))
+        .count();
+    // 900 pt less the 160 pt name column holds seven 104 pt columns, whatever
+    // the scroll bar's gutter takes.
+    assert_eq!(painted, 7);
+}
+
+#[test]
 fn a_failed_solve_offers_to_mark_what_it_named_at_the_end_of_its_row() {
     let (dc, report) = evidence_fixture(4, 4);
     let plan = plan_of(Some(&dc), Some(&report));

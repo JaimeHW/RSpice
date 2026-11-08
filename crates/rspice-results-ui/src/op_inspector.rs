@@ -45,6 +45,8 @@ const NAME_MAX_W: f32 = 320.0;
 const NAME_INSET: f32 = 22.0;
 const NAME_END_PAD: f32 = 8.0;
 const VALUE_W: f32 = 104.0;
+/// Rounding room when a column's edge meets the sheet's.
+const WHOLE_COLUMN_TOLERANCE: f32 = 0.5;
 const CELL_INSET: f32 = 8.0;
 /// The slot the prefix and unit start in; every mantissa ends just before it.
 const UNIT_SLOT_W: f32 = 34.0;
@@ -1015,6 +1017,12 @@ impl Grid {
         )
     }
 
+    /// Whether a value column is on screen whole. One that is not stays
+    /// blank: half a number reads as a different number.
+    fn shows_whole(&self, cell: egui::Rect) -> bool {
+        cell.right() <= self.visible.right() + WHOLE_COLUMN_TOLERANCE
+    }
+
     /// Everything right of the name column.
     fn values_clip(&self) -> egui::Rect {
         egui::Rect::from_min_max(
@@ -1154,20 +1162,24 @@ impl<M: SchematicMapping> SheetPainter<'_, M> {
         let mut slot = 0;
         if section.region {
             let cell = self.grid.value_cell(left, y, COLUMN_HEADER_H, slot);
-            self.header_cell(section, cell, values, REGION_HEADER, HeaderAlign::Text, out);
+            if self.grid.shows_whole(cell) {
+                self.header_cell(section, cell, values, REGION_HEADER, HeaderAlign::Text, out);
+            }
             slot += 1;
         }
         for column in &section.columns {
             let cell = self.grid.value_cell(left, y, COLUMN_HEADER_H, slot);
-            self.header_cell(
-                section,
-                cell,
-                values,
-                &column.label,
-                HeaderAlign::Number,
-                out,
-            );
             slot += 1;
+            if self.grid.shows_whole(cell) {
+                self.header_cell(
+                    section,
+                    cell,
+                    values,
+                    &column.label,
+                    HeaderAlign::Number,
+                    out,
+                );
+            }
         }
     }
 
@@ -1421,8 +1433,8 @@ impl<M: SchematicMapping> SheetPainter<'_, M> {
         let left = self.grid.values_left(section.slots());
         let mut slot = 0;
         if section.region {
-            if let Some(region) = row.region() {
-                let cell = self.grid.value_cell(left, y, ROW_H, slot);
+            let cell = self.grid.value_cell(left, y, ROW_H, slot);
+            if let Some(region) = row.region().filter(|_| self.grid.shows_whole(cell)) {
                 values.with_clip_rect(cell.intersect(values_clip)).text(
                     egui::pos2(cell.left() + CELL_INSET, cell.center().y),
                     egui::Align2::LEFT_CENTER,
@@ -1436,7 +1448,7 @@ impl<M: SchematicMapping> SheetPainter<'_, M> {
         for column in &section.columns {
             let cell = self.grid.value_cell(left, y, ROW_H, slot);
             slot += 1;
-            if cell.intersects(values_clip) {
+            if self.grid.shows_whole(cell) {
                 self.paint_value(&values, cell, row.cell(column));
             }
         }
