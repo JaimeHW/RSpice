@@ -3473,6 +3473,48 @@ fn an_imported_arc_is_the_sources_own_curve_and_ends_on_its_rays() {
     assert!(circle.is_whole());
 }
 
+/// The swap to RSpice's symbol changes what is drawn and nothing else, in
+/// every orientation the drawing turned the part.
+#[cfg(feature = "symbol-artwork")]
+#[test]
+fn a_part_swapped_to_rspices_symbol_keeps_its_pins_lettering_and_identity() {
+    let library = library_of("res", BOXED_RESISTOR_ASY);
+    for orientation in ORIENTATIONS {
+        let drawing = parse_asc(&format!(
+            "Version 4\nSYMBOL res 160 160 {orientation}\nSYMATTR InstName R1\nSYMATTR Value 1k\n"
+        ))
+        .unwrap();
+        let imported = import_foreign_schematic(&drawing, "work", &library);
+        let carried = &imported.document.components[0];
+        let swapped = with_rspice_symbol(carried).expect("a glyph to swap to");
+        assert_ne!(
+            swapped.source_symbol().map(|symbol| symbol.document()),
+            carried.source_symbol().map(|symbol| symbol.document()),
+            "{orientation}: the artwork is dropped"
+        );
+        assert_eq!(swapped.terminal_positions(), carried.terminal_positions());
+        assert_eq!(swapped.pos, carried.pos, "{orientation}");
+        assert_eq!(swapped.kind, carried.kind, "{orientation}");
+        assert_eq!(
+            (swapped.name.as_str(), swapped.value.as_str()),
+            (carried.name.as_str(), carried.value.as_str()),
+            "{orientation}"
+        );
+        assert_eq!(
+            swapped.name_label_pos, carried.name_label_pos,
+            "{orientation}"
+        );
+        assert_eq!(
+            swapped.value_label_pos, carried.value_label_pos,
+            "{orientation}"
+        );
+        assert!(
+            with_rspice_symbol(&swapped).is_none(),
+            "{orientation}: already swapped"
+        );
+    }
+}
+
 /// With no symbol to read, a native part draws RSpice's glyph, scaled so its
 /// terminals land on the pins the drawing puts them on.
 #[cfg(feature = "symbol-artwork")]

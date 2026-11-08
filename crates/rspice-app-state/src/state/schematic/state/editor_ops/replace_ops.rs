@@ -72,6 +72,38 @@ impl SchematicState {
         )
     }
 
+    /// The parts a swap to RSpice's symbols reaches: the selected ones, or
+    /// with nothing selected every part on the sheet.
+    fn in_symbol_swap_scope(&self, component: u64) -> bool {
+        let selection = &self.session.editor.selection;
+        selection.is_empty() || selection.has_component(component)
+    }
+
+    /// Whether any part in scope still draws artwork its drawing brought.
+    pub fn can_swap_to_rspice_symbols(&self) -> bool {
+        !self.session.read_only
+            && self.design.document().components.iter().any(|component| {
+                self.in_symbol_swap_scope(component.id) && component.can_swap_to_rspice_symbol()
+            })
+    }
+
+    /// Draws the parts in scope with RSpice's own symbols at the pins they
+    /// stand on, as one undo step, and counts them.
+    pub fn swap_to_rspice_symbols(&mut self) -> usize {
+        if self.session.read_only {
+            return 0;
+        }
+        let selection = self.session.editor.selection.clone();
+        let edit = self.design.swap_part_symbols(
+            |component| selection.is_empty() || selection.has_component(component),
+            rspice_design::foreign_schematic::with_rspice_symbol,
+        );
+        if edit.value > 0 {
+            self.finish_document_edit(edit.committed);
+        }
+        edit.value
+    }
+
     /// Validate before opening history, then commit to the same borrowed document.
     pub fn replace_selected_instance(
         &mut self,
@@ -105,6 +137,68 @@ mod tests {
     use crate::state::{
         LibraryCellInstance, PortSpec, SchematicReplacementParameter, SchematicSnapshot, Wire,
     };
+
+    /// Two resistors, each carrying its drawing's artwork.
+    fn sheet_with_carried_artwork() -> (SchematicState, u64, u64) {
+        use rspice_design::schematic::component_type::ComponentType;
+        use rspice_design::symbol::{SymbolDocument, SymbolPin, SymbolShape};
+
+        let pin = |name: &str, y: i32| {
+            SymbolPin::new(name, PortDirection::InOut, Some(Point::new(0, y)))
+                .with_name_hidden(true)
+        };
+        let mut state = SchematicState::default();
+        let carried = state.add_component(ComponentType::Resistor, Point::new(100, 100));
+        let other = state.add_component(ComponentType::Resistor, Point::new(300, 100));
+        for id in [carried, other] {
+            state
+                .document_mut_for_test()
+                .components
+                .iter_mut()
+                .find(|component| component.id == id)
+                .expect("the part")
+                .set_source_symbol(SymbolDocument {
+                    pins: vec![pin("+", 0), pin("-", 60)],
+                    body: vec![SymbolShape::Polyline {
+                        points: vec![Point::new(0, 0), Point::new(9, 30), Point::new(0, 60)],
+                        closed: false,
+                    }],
+                    ..SymbolDocument::default()
+                });
+        }
+        (state, carried, other)
+    }
+
+    #[test]
+    fn swapping_to_rspice_symbols_reaches_the_selection_or_the_sheet_and_undoes_in_one_step() {
+        let artwork = |state: &SchematicState, id: u64| {
+            state
+                .design
+                .document()
+                .components
+                .iter()
+                .find(|component| component.id == id)
+                .and_then(|component| component.source_symbol())
+                .map(|symbol| symbol.document().clone())
+        };
+        let (mut state, first, second) = sheet_with_carried_artwork();
+        let (before_first, before_second) = (artwork(&state, first), artwork(&state, second));
+        state.session.editor.selection.select_only_component(first);
+        assert!(state.can_swap_to_rspice_symbols());
+        assert_eq!(state.swap_to_rspice_symbols(), 1, "the selection alone");
+        assert_ne!(artwork(&state, first), before_first);
+        assert_eq!(artwork(&state, second), before_second);
+        assert!(state.undo());
+        assert_eq!(artwork(&state, first), before_first, "one undo step");
+
+        state.session.editor.selection.clear();
+        assert_eq!(state.swap_to_rspice_symbols(), 2, "the whole sheet");
+        assert_ne!(artwork(&state, first), before_first);
+        assert_ne!(artwork(&state, second), before_second);
+        assert!(state.undo());
+        assert_eq!(artwork(&state, first), before_first, "one undo step");
+        assert_eq!(artwork(&state, second), before_second, "one undo step");
+    }
 
     fn five_pin_binding(cell: &str) -> LibraryCellInstance {
         let mut binding = LibraryCellInstance::new("analog", cell, "symbol");

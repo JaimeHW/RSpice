@@ -2618,8 +2618,49 @@ fn draw_rspice_glyph_at_the_source_pin_span(
             (*name, pin)
         })
         .collect::<Vec<_>>();
-    component.set_source_symbol(terminal_symbol(&symbol_pins, tie, body));
+    component.set_glyph_at_source_pins(terminal_symbol(&symbol_pins, tie, body));
     true
+}
+
+/// `component` drawn with RSpice's own glyph at the pins its carried symbol
+/// stands on: the same terminals, lettering and electrical part, with the
+/// drawing's artwork dropped. `None` when it carries no artwork to drop or
+/// RSpice has no glyph for it.
+pub fn with_rspice_symbol(component: &Component) -> Option<Component> {
+    if !component.can_swap_to_rspice_symbol() {
+        return None;
+    }
+    let placed = component.terminal_positions();
+    // A pin that stands on another is a tie the glyph does not draw.
+    let mut terminals: Vec<(&str, Point)> = Vec::new();
+    let mut tie = None;
+    for (name, point) in &placed {
+        match terminals.iter().find(|(_, at)| at == point) {
+            Some((to, _)) => tie = Some((*name, *to)),
+            None => terminals.push((*name, *point)),
+        }
+    }
+    let mut swapped = component.clone();
+    swapped.clear_source_symbol();
+    swapped.rotation = Rotation::R0;
+    swapped.mirror_h = false;
+    swapped.mirror_v = false;
+    if !draw_rspice_glyph_at_the_source_pin_span(&mut swapped, &terminals, tie) {
+        return None;
+    }
+    // The glyph took its own anchor; the part keeps the one its lettering is
+    // measured from.
+    let shift = swapped.pos - component.pos;
+    let mut document = swapped.source_symbol()?.document().clone();
+    for shape in &mut document.body {
+        shape.translate(shift);
+    }
+    for pin in &mut document.pins {
+        pin.position = pin.position.map(|position| position + shift);
+    }
+    swapped.pos = component.pos;
+    swapped.set_glyph_at_source_pins(document);
+    (swapped.terminal_positions() == placed).then_some(swapped)
 }
 
 /// Without RSpice's artwork there is no glyph to scale.

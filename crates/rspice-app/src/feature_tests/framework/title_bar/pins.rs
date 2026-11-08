@@ -279,6 +279,7 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 10] = [
             "Stretch | stretch-selection | S | off: select an editable object",
             "Create array… | array-selection |  | off: select an editable object",
             "Replace instance… | replace-instance |  | off: select an editable object",
+            "Swap to RSpice symbols | swap-to-rspice-symbols |  | off: no part here draws an imported symbol",
             "Bulk edit… | design-bulk-tools |  | on",
             "---",
             "Rename… | rename-selection | F2 | off: select one editable component, net label, or declared bus",

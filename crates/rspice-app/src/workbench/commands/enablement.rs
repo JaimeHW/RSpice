@@ -214,6 +214,11 @@ impl Command {
                 active_schematic_editor(app)
                     && crate::workbench::app::replace_instance_available(state)
             }
+            Self::SwapToRSpiceSymbols => {
+                active_schematic_editor(app)
+                    && !state.schematic_edit_read_only()
+                    && state.model.schematic.can_swap_to_rspice_symbols()
+            }
             // The repair is offered exactly where the deck refuses: the
             // schematic itself answers whether the selected instance still
             // presents its master's interface, so a live row and a netlist

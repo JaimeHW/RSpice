@@ -478,6 +478,7 @@ impl Command {
             | Self::StretchSelection
             | Self::ArraySelection
             | Self::ReplaceInstance
+            | Self::SwapToRSpiceSymbols
             | Self::UpdateInstanceInterface
             | Self::CreateHierarchy
             | Self::Place(_)
@@ -634,6 +635,7 @@ impl Command {
             Self::StretchSelection => STRETCH_SELECTION,
             Self::ArraySelection => NONE,
             Self::ReplaceInstance => NONE,
+            Self::SwapToRSpiceSymbols => NONE,
             Self::UpdateInstanceInterface => NONE,
             Self::CreateHierarchy => NONE,
             Self::ConnectivityManager => NONE,
@@ -800,6 +802,7 @@ impl Command {
             | Self::StretchSelection
             | Self::ArraySelection
             | Self::ReplaceInstance
+            | Self::SwapToRSpiceSymbols
             | Self::CreateHierarchy
             | Self::RotateSelection
             | Self::RotateSelectionCounterClockwise
@@ -816,6 +819,7 @@ impl Command {
             | Self::StretchSelection
             | Self::ArraySelection
             | Self::ReplaceInstance
+            | Self::SwapToRSpiceSymbols
             | Self::CreateHierarchy
             | Self::RotateSelection
             | Self::RotateSelectionCounterClockwise
@@ -841,6 +845,7 @@ impl Command {
             | Self::MirrorSelectionHorizontal
             | Self::MirrorSelectionVertical
             | Self::SnapSelectionToGrid => "select an editable object",
+            Self::SwapToRSpiceSymbols => "no part here draws an imported symbol",
             Self::SnapToStandardValue => {
                 crate::schematic::view::standard_value_snap::snap_block_reason(&app.state)
                     .unwrap_or("select a resistor, capacitor or inductor")

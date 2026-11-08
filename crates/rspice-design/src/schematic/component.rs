@@ -576,6 +576,11 @@ pub struct Component {
     )]
     source_symbol: Option<Arc<ResolvedCellSymbol>>,
 
+    /// That `source_symbol` is RSpice's own glyph at the drawing's pins, and
+    /// not artwork the drawing brought.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    source_symbol_is_glyph: bool,
+
     /// Name label position (Auto for smart placement, Custom for user-defined)
     #[serde(default)]
     pub name_label_pos: LabelPosition,
@@ -668,6 +673,8 @@ struct PersistedComponent {
     #[serde(default)]
     source_symbol: Option<SymbolDocument>,
     #[serde(default)]
+    source_symbol_is_glyph: bool,
+    #[serde(default)]
     name_label_pos: LabelPosition,
     #[serde(default)]
     value_label_pos: LabelPosition,
@@ -716,6 +723,7 @@ impl From<PersistedComponent> for Component {
             symbol_variant: persisted.symbol_variant,
             ground_glyph: persisted.ground_glyph,
             source_symbol: persisted.source_symbol.map(source_symbol),
+            source_symbol_is_glyph: persisted.source_symbol_is_glyph,
             name_label_pos: persisted.name_label_pos,
             value_label_pos: persisted.value_label_pos,
             value_pieces: persisted.value_pieces,
@@ -753,6 +761,7 @@ impl Component {
             symbol_variant: None,
             ground_glyph: GroundGlyph::Native,
             source_symbol: None,
+            source_symbol_is_glyph: false,
             name_label_pos: LabelPosition::Auto,
             value_label_pos: LabelPosition::Auto,
             value_pieces: Vec::new(),
@@ -1324,6 +1333,30 @@ impl Component {
     /// Gives this part the artwork of the drawing it came from.
     pub fn set_source_symbol(&mut self, document: SymbolDocument) {
         self.source_symbol = Some(source_symbol(document));
+        self.source_symbol_is_glyph = false;
+    }
+
+    /// Draws this part with RSpice's own glyph, shaped to the pins of the
+    /// drawing it came from.
+    pub fn set_glyph_at_source_pins(&mut self, document: SymbolDocument) {
+        self.set_source_symbol(document);
+        self.source_symbol_is_glyph = true;
+    }
+
+    /// Takes back whatever the drawing this part came from gave it to draw.
+    pub fn clear_source_symbol(&mut self) {
+        self.source_symbol = None;
+        self.source_symbol_is_glyph = false;
+    }
+
+    /// Whether this part draws artwork its drawing brought with it, where
+    /// RSpice has a symbol of its own for the kind of part it is.
+    pub fn can_swap_to_rspice_symbol(&self) -> bool {
+        self.kind != ComponentType::CellInstance
+            && !self.source_symbol_is_glyph
+            && self
+                .source_symbol()
+                .is_some_and(|symbol| !symbol.document().body.is_empty())
     }
 
     /// Whether a symbol document, not RSpice's symbol for the part's kind,

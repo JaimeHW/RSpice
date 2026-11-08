@@ -29,7 +29,7 @@ pub(super) fn palette_icon(command: Command) -> Option<Icon> {
         Command::PlaceShape => Icon::Grid,
         Command::MoveSelection | Command::StretchSelection => Icon::Select,
         Command::ArraySelection => Icon::Grid,
-        Command::ReplaceInstance => Icon::Refresh,
+        Command::ReplaceInstance | Command::SwapToRSpiceSymbols => Icon::Refresh,
         Command::CreateHierarchy => Icon::Folder,
         Command::ConnectivityManager => Icon::Bus,
         Command::ConfigurationSets => Icon::Grid,

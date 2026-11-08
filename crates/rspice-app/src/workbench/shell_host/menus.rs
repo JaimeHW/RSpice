@@ -269,6 +269,7 @@ const EDIT_MENU: &[MenuEntry] = &[
             command(Command::StretchSelection).access('H'),
             command(Command::ArraySelection).access('Y'),
             command(Command::ReplaceInstance).access('S'),
+            command(Command::SwapToRSpiceSymbols).access('W'),
             command(Command::SelectionBulkEdit).access('B'),
             Separator,
             command(Command::RenameSelection).access('M'),

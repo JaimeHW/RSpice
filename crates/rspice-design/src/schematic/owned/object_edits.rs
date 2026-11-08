@@ -117,6 +117,38 @@ impl Schematic {
         })
     }
 
+    /// Re-draws the parts `in_scope` accepts with what `swap` answers for
+    /// them, as one undo step, and counts them.
+    pub fn swap_part_symbols(
+        &mut self,
+        in_scope: impl Fn(u64) -> bool,
+        swap: impl Fn(&Component) -> Option<Component>,
+    ) -> DocumentEdit<usize> {
+        let swapped = self
+            .document
+            .components
+            .iter()
+            .enumerate()
+            .filter(|(_, component)| in_scope(component.id))
+            .filter_map(|(index, component)| Some((index, swap(component)?)))
+            .collect::<Vec<_>>();
+        if swapped.is_empty() {
+            return DocumentEdit {
+                value: 0,
+                committed: false,
+            };
+        }
+        let count = swapped.len();
+        self.history.begin(&self.document, "swap to RSpice symbols");
+        for (index, component) in swapped {
+            self.document.components[index] = component;
+        }
+        DocumentEdit {
+            value: count,
+            committed: self.end_operation(),
+        }
+    }
+
     pub fn replace_instance(
         &mut self,
         selected_component: Option<u64>,

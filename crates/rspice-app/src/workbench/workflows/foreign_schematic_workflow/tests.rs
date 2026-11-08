@@ -498,6 +498,105 @@ fn a_directive_block_stays_on_the_sheet_while_the_plan_takes_its_analysis() {
     );
 }
 
+/// What a sheet paints, as text: every stroke and every run of lettering.
+fn painted_sheet(state: &mut AppState) -> Vec<String> {
+    let symbols = crate::schematic::symbols::SymbolLibrary::load_embedded().ok();
+    let ctx = egui::Context::default();
+    ctx.set_os(egui::os::OperatingSystem::Nix);
+    crate::ui::Theme::default().apply(&ctx);
+    let mut output = None;
+    for _ in 0..3 {
+        let editor = &mut state.model.schematic.session.editor;
+        editor.needs_fit = false;
+        editor.needs_drawing_sheet_fit = false;
+        editor.zoom = 2.0;
+        editor.pan = (40.0, 40.0);
+        let input = crate::ui::raster::display_input(egui::vec2(1200.0, 900.0), 1.0);
+        output = Some(ctx.run_ui(input, |ui| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(ui, |ui| {
+                    crate::schematic::view::render_schematic_view(ui, state, symbols.as_ref());
+                });
+        }));
+    }
+    fn walk(shape: &egui::Shape, out: &mut Vec<String>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, out)),
+            egui::Shape::Text(text) => out.push(format!("{:?} {}", text.pos, text.galley.text())),
+            egui::Shape::LineSegment { .. } | egui::Shape::Path(_) | egui::Shape::Circle(_) => {
+                out.push(format!("{shape:?}"));
+            }
+            _ => {}
+        }
+    }
+    let mut painted = Vec::new();
+    for shape in output.expect("three frames").shapes {
+        walk(&shape.shape, &mut painted);
+    }
+    painted
+}
+
+/// A saved project holds everything its imported sheet draws: with the drawing
+/// and every symbol it read gone, the sheet paints the same.
+#[test]
+fn an_imported_sheet_draws_the_same_with_its_source_gone() {
+    use crate::state::ComponentType;
+    use crate::workbench::workflows::project_workflow::{
+        ProjectLoadOrigin, apply_loaded_project, save_project_to_path,
+    };
+
+    let folder = drawing_folder();
+    std::fs::write(
+        folder.join("res.asy"),
+        "Version 4\nSymbolType CELL\n\
+         LINE Normal 16 16 16 32\nLINE Normal 16 80 16 96\nRECTANGLE Normal 4 32 28 80\n\
+         ARC Normal 0 30 32 62 4 56 28 36\n\
+         WINDOW 0 40 40 Left 2\nWINDOW 3 40 72 Left 2\n\
+         SYMATTR Value R\nSYMATTR Prefix R\n\
+         PIN 16 16 NONE 0\nPINATTR PinName A\nPINATTR SpiceOrder 1\n\
+         PIN 16 96 NONE 0\nPINATTR PinName B\nPINATTR SpiceOrder 2\n",
+    )
+    .expect("symbol");
+    let mut app = RSpiceApp::test_instance();
+    app.state.open_project_session();
+    import_foreign_schematic_file(&mut app, &folder.join("filter.asc"), ForeignTool::Ltspice)
+        .expect("the schematic imports");
+    let resistor = app
+        .state
+        .model
+        .schematic
+        .document()
+        .components
+        .iter()
+        .find(|part| part.kind == ComponentType::Resistor)
+        .expect("the resistor");
+    assert!(resistor.can_swap_to_rspice_symbol(), "it draws its source");
+    let before = painted_sheet(&mut app.state);
+    assert!(before.len() > 4, "the sheet paints its part: {before:?}");
+
+    let project = std::env::temp_dir().join(format!(
+        "rspice-imported-sheet-{}-{}.rspiceproj",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time after epoch")
+            .as_nanos()
+    ));
+    assert!(save_project_to_path(&mut app.state, &project), "it saves");
+    std::fs::remove_dir_all(&folder).expect("the drawing is gone");
+    let loaded = crate::io::load_project_file(&project).expect("it reloads");
+
+    let mut reopened = RSpiceApp::test_instance();
+    assert!(apply_loaded_project(
+        &mut reopened.state,
+        loaded,
+        ProjectLoadOrigin::BrowserImport("reopened.rspiceproj"),
+    ));
+    std::fs::remove_file(&project).ok();
+    assert_eq!(painted_sheet(&mut reopened.state), before);
+}
+
 /// Imports `drawing` as `name`.asc and answers the sheet it lies on, and
 /// whether everything drawn lies inside that sheet's drawing area and clear
 /// of its title block.

@@ -744,11 +744,12 @@ const DESIGN_PLACEMENT_COMMANDS: [Command; 10] = [
     Command::PlaceText,
     Command::PlaceShape,
 ];
-const SELECTION_EDIT_COMMANDS: [Command; 5] = [
+const SELECTION_EDIT_COMMANDS: [Command; 6] = [
     Command::MoveSelection,
     Command::StretchSelection,
     Command::ArraySelection,
     Command::ReplaceInstance,
+    Command::SwapToRSpiceSymbols,
     Command::SelectionBulkEdit,
 ];
 const DESIGN_MANAGEMENT_COMMANDS: [CommandKey; 6] = [

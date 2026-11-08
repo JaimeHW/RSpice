@@ -134,6 +134,9 @@ pub enum Command {
     StretchSelection,
     ArraySelection,
     ReplaceInstance,
+    /// Draw the selected parts, or the whole sheet, with RSpice's own symbols
+    /// instead of the artwork their drawing brought.
+    SwapToRSpiceSymbols,
     /// Re-place a stale instance on its own master: same cell, the interface
     /// the master presents now. It is a degenerate replacement, which is why
     /// it sits beside [`Self::ReplaceInstance`] rather than in a repair
@@ -470,6 +473,9 @@ impl Command {
             Self::StretchSelection => spec("stretch-selection", "Stretch", "Edit"),
             Self::ArraySelection => spec("array-selection", "Create array\u{2026}", "Edit"),
             Self::ReplaceInstance => spec("replace-instance", "Replace instance\u{2026}", "Edit"),
+            Self::SwapToRSpiceSymbols => {
+                spec("swap-to-rspice-symbols", "Swap to RSpice symbols", "Edit")
+            }
             Self::UpdateInstanceInterface => spec(
                 "update-instance-interface",
                 "Update instance interface",
@@ -850,6 +856,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::StretchSelection,
     Command::ArraySelection,
     Command::ReplaceInstance,
+    Command::SwapToRSpiceSymbols,
     Command::UpdateInstanceInterface,
     Command::CreateHierarchy,
     Command::SelectionBulkEdit,
@@ -1105,6 +1112,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     Command::StretchSelection.key(),
     Command::ArraySelection.key(),
     Command::ReplaceInstance.key(),
+    Command::SwapToRSpiceSymbols.key(),
     Command::UpdateInstanceInterface.key(),
     Command::CreateHierarchy.key(),
     ProjectCommand::CreateSymbol.key(),

@@ -105,6 +105,7 @@ pub(crate) const fn command_edits_schematic(command: Command) -> bool {
             | Command::StretchSelection
             | Command::ArraySelection
             | Command::ReplaceInstance
+            | Command::SwapToRSpiceSymbols
             | Command::UpdateInstanceInterface
             | Command::CreateHierarchy
             | Command::Place(_)
@@ -311,6 +312,7 @@ impl Command {
             | Self::StretchSelection
             | Self::ArraySelection
             | Self::ReplaceInstance
+            | Self::SwapToRSpiceSymbols
             | Self::UpdateInstanceInterface
             | Self::CreateHierarchy
             | Self::ConnectivityManager
@@ -884,6 +886,9 @@ impl Command {
             }
             Self::ReplaceInstance => {
                 crate::workbench::app::open_replace_instance_dialog(&mut app.state);
+            }
+            Self::SwapToRSpiceSymbols => {
+                app.state.model.schematic.swap_to_rspice_symbols();
             }
             // The operation reports its own outcome, including the name of any
             // terminal the master dropped, so no route composes a second
