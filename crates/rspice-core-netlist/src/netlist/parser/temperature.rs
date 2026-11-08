@@ -187,6 +187,10 @@ fn install_temperature(params: &mut ParamContext, temperature: Value) {
 
 /// A lexical scan supplies hints only. It must not evaluate an expression,
 /// consume a random draw, report a suppressed card's error, or author options.
+///
+/// The last `.TEMP` card sets the run temperature over any option when it
+/// names a single value, so a single literal there is the hint. A sweep leaves
+/// the option's temperature in place.
 pub(super) fn prescan_temperature_options_with_abort(
     lines: &[&str],
     body_start: usize,
@@ -195,18 +199,54 @@ pub(super) fn prescan_temperature_options_with_abort(
     abort: &dyn AbortSignal,
 ) -> Result<ParserTemperatures, ParseWithAbortError> {
     let mut hints = ParserTemperatures::default();
-    for_each_options_line_with_abort(
+    let mut last_temp_card = None;
+    for_each_card_line_with_abort(
         lines,
         body_start,
         allow_non_semicolon_comments,
         xyce_syntax,
+        |head| is_options_head(head) || is_temp_head(head),
         abort,
         |line, line_num| {
-            scan_temperature_option_line(line, line_num, &mut hints);
+            if is_temp_head(line.split_whitespace().next().unwrap_or("")) {
+                last_temp_card = Some(single_literal_temp_card(line, line_num));
+            } else {
+                scan_temperature_option_line(line, line_num, &mut hints);
+            }
             Ok(())
         },
     )?;
+    if let Some(Some(temp)) = last_temp_card {
+        hints.temp = Some(temp);
+    }
     Ok(hints)
+}
+
+/// `.TEMP`, including the `.TEMP=t` spelling.
+fn is_temp_head(head: &str) -> bool {
+    head.split('=')
+        .next()
+        .is_some_and(|word| word.eq_ignore_ascii_case(".temp"))
+}
+
+/// The temperature of a `.TEMP` card that names one signed numeric literal.
+fn single_literal_temp_card(line: &str, line_num: usize) -> Option<Value> {
+    let mut stream = TokenStream::new(tokenize(line).ok()?);
+    stream.advance();
+    stream.consume(&TokenKind::Equals);
+    let (value, width) = match (&stream.peek().kind, &stream.peek_n(1).kind) {
+        (TokenKind::Number(value), _) => (*value, 1),
+        (TokenKind::Plus, TokenKind::Number(value)) => (*value, 2),
+        (TokenKind::Minus, TokenKind::Number(value)) => (-value, 2),
+        _ => return None,
+    };
+    for _ in 0..width {
+        stream.advance();
+    }
+    if !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        return None;
+    }
+    parse_celsius_option("TEMP", value, line_num).ok()
 }
 
 fn scan_temperature_option_line(line: &str, line_num: usize, hints: &mut ParserTemperatures) {
@@ -520,6 +560,10 @@ mod tests {
     fn literal_fast_path_and_parameter_dependency_pass_counts_are_bounded() {
         for (body, expected) in [
             (".options temp=85 tnom=35\n", 1),
+            (".options temp=85\n.temp -40\n", 1),
+            (".temp=-40\n.options tnom=35\n", 1),
+            (".options temp=85\n.temp -40\n.temp 25 125\n", 1),
+            (".temp 25\n+ 125\n.options temp=85\n", 1),
             (".param ambient=85\n.options temp={ambient}\n", 2),
             (
                 ".param nominal=55\n.options temp={TNOM+10} tnom={nominal}\n",

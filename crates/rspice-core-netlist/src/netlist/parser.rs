@@ -4683,6 +4683,13 @@ fn validate_coupling_model_references_in_elements_with_abort(
     Ok(())
 }
 
+fn is_options_head(head: &str) -> bool {
+    head.eq_ignore_ascii_case(".options")
+        || head.eq_ignore_ascii_case(".option")
+        || head.eq_ignore_ascii_case(".opt")
+        || head.eq_ignore_ascii_case(".opts")
+}
+
 fn is_dot_command_head(head: &str) -> bool {
     head.strip_prefix('.')
         .and_then(|rest| rest.chars().next())
@@ -4690,18 +4697,20 @@ fn is_dot_command_head(head: &str) -> bool {
 }
 
 /// Seed and temperature discovery consume the same complete logical cards as
-/// each other, including values split over continuation lines.
-fn for_each_options_line_with_abort(
+/// each other, including values split over continuation lines. `is_card`
+/// selects the cards by their first word.
+fn for_each_card_line_with_abort(
     lines: &[&str],
     body_start: usize,
     allow_non_semicolon_comments: bool,
     xyce_syntax: bool,
+    is_card: impl Fn(&str) -> bool,
     abort: &dyn AbortSignal,
     mut inspect: impl FnMut(&str, usize) -> Result<(), ParseError>,
 ) -> Result<(), ParseWithAbortError> {
     let mut continuation = String::new();
     let mut continuation_line = None;
-    let mut in_options = false;
+    let mut in_card = false;
     for (index, line) in lines.iter().enumerate().skip(body_start) {
         poll_parse_abort(abort, index)?;
         poll_parse_text(abort, line)?;
@@ -4719,7 +4728,7 @@ fn for_each_options_line_with_abort(
         }
 
         if let Some(rest) = trimmed.strip_prefix('+') {
-            if in_options {
+            if in_card {
                 continuation.push(' ');
                 continuation.push_str(rest.trim());
             }
@@ -4735,16 +4744,10 @@ fn for_each_options_line_with_abort(
         }
 
         let head = trimmed.split_whitespace().next().unwrap_or("");
-        if head.eq_ignore_ascii_case(".options")
-            || head.eq_ignore_ascii_case(".option")
-            || head.eq_ignore_ascii_case(".opt")
-            || head.eq_ignore_ascii_case(".opts")
-        {
-            in_options = true;
+        in_card = is_card(head);
+        if in_card {
             continuation.push_str(trimmed);
             continuation_line = Some(line_num);
-        } else {
-            in_options = false;
         }
     }
 
@@ -4830,11 +4833,12 @@ fn prescan_random_seed_with_abort(
     abort: &dyn AbortSignal,
 ) -> Result<Option<u64>, ParseWithAbortError> {
     let mut seed = None;
-    for_each_options_line_with_abort(
+    for_each_card_line_with_abort(
         lines,
         body_start,
         allow_non_semicolon_comments,
         xyce_syntax,
+        is_options_head,
         abort,
         |line, line_num| scan_options_tokens_for_seed(line, line_num, &mut seed),
     )?;
@@ -4852,11 +4856,12 @@ fn prescan_spice_dialect_with_abort(
     abort: &dyn AbortSignal,
 ) -> Result<Option<crate::config::SpiceDialect>, ParseWithAbortError> {
     let mut dialect = None;
-    for_each_options_line_with_abort(
+    for_each_card_line_with_abort(
         lines,
         body_start,
         allow_non_semicolon_comments,
         xyce_syntax,
+        is_options_head,
         abort,
         |line, line_num| {
             let tokens = tokenize(line).map_err(|error| lex_to_parse_error(error, line_num))?;
