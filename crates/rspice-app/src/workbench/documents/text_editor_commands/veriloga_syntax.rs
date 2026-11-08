@@ -85,6 +85,13 @@ pub(crate) struct LineState {
     depth: u8,
 }
 
+impl LineState {
+    /// Whether the next line starts inside a block comment or a string.
+    pub(crate) fn inside_literal(self) -> bool {
+        self.block_comment || self.string
+    }
+}
+
 /// The analog operators, filters and event functions of Verilog-AMS LRM 2.4
 /// sections 4.5 and 5.10, as a call names them.
 const ANALOG_OPERATORS: &[&str] = &[

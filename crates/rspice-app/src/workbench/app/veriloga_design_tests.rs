@@ -402,7 +402,10 @@ fn format_in_a_veriloga_cell_view_formats_that_views_document() {
         .and_then(|bundle| bundle.file_content("model.va"))
         .expect("the formatted source")
         .to_owned();
-    assert_eq!(formatted, module_source("gain", "  real x;\n"));
+    assert_eq!(
+        formatted,
+        "// Behavioral conductance.\nmodule gain(p, n);\n    inout p, n;\n    electrical p, n;\n    parameter real g = 1m;\n    real x;\n    analog I(p, n) <+ g * V(p, n);\nendmodule\n"
+    );
     assert!(
         app.state.code.code_workspace.language_tools.is_none(),
         "Format opens no dialog"

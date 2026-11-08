@@ -8,7 +8,7 @@ use crate::workbench::documents::text_document_model::{TextDocumentModel, TextSe
 
 /// The blocks the source is built of, for folding and indentation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum BlockKind {
+pub(crate) enum BlockKind {
     BeginEnd,
     Case,
     Function,
@@ -22,7 +22,7 @@ enum BlockKind {
 
 /// What a word does to the block structure around it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum BlockWord {
+pub(crate) enum BlockWord {
     Open(BlockKind),
     Close(BlockKind),
     /// `` `else `` or `` `elsif ``: the end of one branch of a conditional
@@ -49,7 +49,7 @@ const CLOSING_WORDS: [&str; 10] = [
 /// The block words of `line`, in order, read from `entry`, and the state it
 /// leaves the next line in. Words in comments, strings and attributes are
 /// not words of the source.
-fn block_words(line: &str, entry: LineState) -> (Vec<BlockWord>, LineState) {
+pub(crate) fn block_words(line: &str, entry: LineState) -> (Vec<BlockWord>, LineState) {
     let (spans, exit) = tokenize_line(line, entry);
     let words = spans
         .iter()

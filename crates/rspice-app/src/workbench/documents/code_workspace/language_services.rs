@@ -288,8 +288,9 @@ pub(crate) fn format_language_document(
     Ok(message)
 }
 
-/// The formatter's whole-document edit: trailing blanks removed outside
-/// string literals and one final line break, or why the source is refused.
+/// The formatter's whole-document edit, or why the source is refused. For
+/// every language: trailing blanks removed outside string literals and one
+/// final line break. Verilog-A is also laid out by its block structure.
 fn formatted_source(
     language: ProjectSourceLanguage,
     logical_path: &str,
@@ -298,7 +299,16 @@ fn formatted_source(
     let syntax = document_syntax(language, logical_path);
     validate_source_for_formatting(syntax, logical_path, source)?;
     let protected = protected_string_lines(source, syntax);
-    Ok(normalize_source_whitespace(source, &protected).0)
+    let normalized = normalize_source_whitespace(source, &protected).0;
+    Ok(match syntax {
+        DocumentSyntax::VerilogA => super::veriloga_format::format_source(&normalized),
+        DocumentSyntax::Python | DocumentSyntax::Yaml | DocumentSyntax::Toml => normalized,
+    })
+}
+
+#[cfg(test)]
+pub(super) fn formatted_verilog_a(logical_path: &str, source: &str) -> Result<String, String> {
+    formatted_source(ProjectSourceLanguage::VerilogA, logical_path, source)
 }
 
 fn write_language_document(
@@ -928,13 +938,13 @@ fn validate_source_for_formatting(
         DocumentSyntax::VerilogA => {
             let mut source_map = rspice_veriloga::SourceMap::new();
             let source_id = source_map.add_source_mut(logical_path, source);
-            let tokens = rspice_veriloga::Lexer::new(source, source_id)
+            // Layout is read from the tokens and keeps them all, so it needs
+            // no more than that they read: a header of macros is no module,
+            // and a module's directives are not yet expanded here.
+            rspice_veriloga::Lexer::new(source, source_id)
                 .collect_tokens()
-                .map_err(|error| format!("Formatting is blocked by Verilog-A lexing: {error}"))?;
-            rspice_veriloga::Parser::new(&tokens)
-                .parse()
                 .map(|_| ())
-                .map_err(|error| format!("Formatting is blocked by Verilog-A parsing: {error}"))
+                .map_err(|error| format!("Formatting is blocked by Verilog-A lexing: {error}"))
         }
         DocumentSyntax::Toml => toml::from_str::<toml::Value>(source)
             .map(|_| ())

@@ -16,6 +16,7 @@ mod source_search;
 mod veriloga;
 mod veriloga_assist;
 mod veriloga_catalog;
+mod veriloga_format;
 mod veriloga_inspector;
 mod veriloga_interface;
 mod veriloga_live_check;
