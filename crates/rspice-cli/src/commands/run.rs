@@ -50,10 +50,10 @@ use context::{
     ArtifactCoordinate, PlannedAnalysisIdentities, RunContext, RunIdentity, run_requested_mode,
 };
 use deck::{
-    analyses_in_execution_order, build_observed_engine, load_netlist_from_source,
-    materialize_addresistors_artifact, parse_format_name, parse_options_for_run,
-    preflight_deck_run_count, step_analysis_signature, validate_pss_flag_conflict,
-    validate_run_numeric_args, validate_step_frontend_compatibility,
+    DeckPreflight, analyses_in_execution_order, build_observed_engine, load_netlist_from_source,
+    materialize_addresistors_artifact, parse_format_name, parse_options_for_run, preflight_deck,
+    step_analysis_signature, validate_pss_flag_conflict, validate_run_numeric_args,
+    validate_step_frontend_compatibility,
 };
 use naming::{
     axis_set_manifest_path, compose_run_label, conditional_step_schema_path, resolve_output_path,
@@ -71,8 +71,8 @@ use crate::cli::{
 use crate::commands::publish;
 use rspice_core::execution::{
     AnalysisInstanceId, AxisAssignment, AxisKind, DeckPlan, DeckPlanError, DeckPlanMaterializer,
-    MaterializedAnalysis, MaterializedRunError, PlannedPostProcess, PostProcessSource,
-    RunAxisValue, RunCoordinate, StepAxisTarget,
+    MaterializedAnalysis, MaterializedRun, MaterializedRunError, PlannedPostProcess,
+    PostProcessSource, RunAxisValue, RunCoordinate, StepAxisTarget,
 };
 use rspice_core::netlist::AnalysisCommand;
 use rspice_core::{
@@ -268,13 +268,14 @@ fn execute_with_destinations(
     let mut prepared = Vec::with_capacity(plan.len());
     let mut concrete_runs = 0usize;
     for deck in &plan {
-        let prepared_deck = planning::PreparedDeck::prepare(&deck.source, &args, config)?;
-        concrete_runs = concrete_runs.saturating_add(prepared_deck.preflight(
-            &args,
-            config,
-            multi_run || args.corners.is_some(),
-            deck.label.as_deref(),
-        )?);
+        let prepared_deck = planning::PreparedDeck::prepare(&deck.source, &args, config)?
+            .preflight(
+                &args,
+                config,
+                multi_run || args.corners.is_some(),
+                deck.label.as_deref(),
+            )?;
+        concrete_runs = concrete_runs.saturating_add(prepared_deck.runs());
         prepared.push(prepared_deck);
         if concrete_runs > resource_limits.max_batch_runs {
             return Err(CliError::ResourceLimit {

@@ -120,9 +120,32 @@ fn canonical_assignment_target(assignment: &AxisAssignment) -> String {
 /// execution pass re-materializes to run, and checks what it gets against this
 /// rather than re-deriving it, so a coordinate whose topology moved between the
 /// two passes fails instead of publishing under a contract it no longer meets.
+///
+/// A plan of one coordinate keeps the run its preflight materialized, and the
+/// execution runs that instead of elaborating the same coordinate again. A
+/// larger plan re-materializes each coordinate as it runs, so no more than
+/// one elaborated coordinate is held at a time.
 pub(super) struct StepCoordinateContract {
     signature: Vec<&'static str>,
     pub(super) topology: rspice_core::execution::TopologyFingerprint,
+    materialized: Option<MaterializedRun>,
+}
+
+impl StepCoordinateContract {
+    /// The coordinate's run: the one the preflight kept, or a fresh
+    /// materialization checked against this contract.
+    fn run<'a>(
+        &'a self,
+        materializer: &DeckPlanMaterializer<'_>,
+        run_index: usize,
+    ) -> Result<std::borrow::Cow<'a, MaterializedRun>, MaterializedRunError> {
+        match &self.materialized {
+            Some(materialized) => Ok(std::borrow::Cow::Borrowed(materialized)),
+            None => materializer
+                .materialize_run_with_abort(run_index, &crate::abort::ProcessAbort)
+                .map(std::borrow::Cow::Owned),
+        }
+    }
 }
 
 pub(super) fn preflight_step_coordinates(
@@ -200,6 +223,7 @@ pub(super) fn preflight_step_coordinates(
         contracts.push(StepCoordinateContract {
             signature,
             topology: materialized.topology_fingerprint(),
+            materialized: (materializer.len() == 1).then_some(materialized),
         });
 
         // A duration is known before execution. Measurement payloads depend
@@ -282,6 +306,7 @@ fn run_implicit_step_op_table(
     engine: &Engine,
     plan: &DeckPlan,
     materializer: &DeckPlanMaterializer<'_>,
+    contracts: &[StepCoordinateContract],
     run_label: Option<&str>,
 ) -> Result<DeckOutcome, CliError> {
     let first_coordinate =
@@ -322,20 +347,19 @@ fn run_implicit_step_op_table(
     let mut retained_values = 0usize;
     let mut preflight = Vec::with_capacity(materializer.len());
 
-    for run_index in 0..materializer.len() {
+    for (run_index, contract) in contracts.iter().enumerate() {
         if crate::abort::reason().is_some() {
             break;
         }
-        let materialized =
-            match materializer.materialize_run_with_abort(run_index, &crate::abort::ProcessAbort) {
-                Ok(materialized) => materialized,
-                Err(MaterializedRunError::Aborted) if crate::abort::reason().is_some() => {
-                    break;
-                }
-                Err(error) => {
-                    return Err(map_materialized_run_error(error, args, "Step"));
-                }
-            };
+        let materialized = match contract.run(materializer, run_index) {
+            Ok(materialized) => materialized,
+            Err(MaterializedRunError::Aborted) if crate::abort::reason().is_some() => {
+                break;
+            }
+            Err(error) => {
+                return Err(map_materialized_run_error(error, args, "Step"));
+            }
+        };
         let canonical_coordinate = materialized.coordinate();
         let value = one_dimensional
             .then(|| implicit_axis_assignment(canonical_coordinate))
@@ -935,6 +959,7 @@ fn execution_signal_owner_json(owner: &rspice_core::execution::SignalOwner) -> s
 
 pub(super) fn run_deck(
     netlist: &Netlist,
+    preflight: &DeckPreflight,
     args: &RunArgs,
     config: &Config,
     verbose: bool,
@@ -981,16 +1006,18 @@ pub(super) fn run_deck(
             &crate::abort::ProcessAbort,
         )
         .map_err(|error| map_materialized_run_error(error, args, "Step planning"))?;
-    let aggregate_report_values =
-        (base_signature.is_empty() && netlist.control_script.is_none()).then_some(1);
-    let coordinate_contracts = preflight_step_coordinates(
-        &engine,
-        &materializer,
-        &base_signature,
-        aggregate_report_values,
-        args,
-        run_label,
-    )?;
+    // The variant's preflight already checked every coordinate of this plan
+    // before any deck solved; execution runs against those contracts.
+    let coordinate_contracts = preflight.coordinates();
+    if coordinate_contracts.len() != materializer.len() {
+        return Err(CliError::InternalError {
+            message: format!(
+                ".STEP plan has {} coordinate(s) but its preflight checked {}",
+                materializer.len(),
+                coordinate_contracts.len()
+            ),
+        });
+    }
 
     if base_signature.is_empty() && netlist.control_script.is_none() {
         return run_implicit_step_op_table(
@@ -1002,6 +1029,7 @@ pub(super) fn run_deck(
             &engine,
             &canonical_plan,
             &materializer,
+            coordinate_contracts,
             run_label,
         );
     }
@@ -1027,20 +1055,19 @@ pub(super) fn run_deck(
         if crate::abort::reason().is_some() {
             break;
         }
-        let materialized =
-            match materializer.materialize_run_with_abort(run_index, &crate::abort::ProcessAbort) {
-                Ok(materialized) => materialized,
-                Err(MaterializedRunError::Aborted) if crate::abort::reason().is_some() => {
-                    break;
-                }
-                Err(error) => {
-                    return Err(map_materialized_run_error(
-                        error,
-                        args,
-                        format!("Step coordinate {}", run_index + 1),
-                    ));
-                }
-            };
+        let materialized = match expected.run(&materializer, run_index) {
+            Ok(materialized) => materialized,
+            Err(MaterializedRunError::Aborted) if crate::abort::reason().is_some() => {
+                break;
+            }
+            Err(error) => {
+                return Err(map_materialized_run_error(
+                    error,
+                    args,
+                    format!("Step coordinate {}", run_index + 1),
+                ));
+            }
+        };
         let canonical_coordinate = materialized.coordinate();
         let materialized_signature = step_analysis_signature(materialized.netlist());
         if materialized_signature != expected.signature {

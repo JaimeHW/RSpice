@@ -358,15 +358,34 @@ pub(super) fn validate_step_frontend_compatibility(
     Ok(())
 }
 
+/// What the preflight of one outer variant established before any solve: how
+/// many concrete runs it executes and the contract of each axis coordinate.
+pub(super) struct DeckPreflight {
+    runs: usize,
+    coordinates: Vec<super::axis::StepCoordinateContract>,
+}
+
+impl DeckPreflight {
+    /// The number of concrete Cartesian coordinates this variant executes.
+    pub(super) const fn runs(&self) -> usize {
+        self.runs
+    }
+
+    /// Each axis coordinate's contract, in canonical order; empty for a deck
+    /// without axes.
+    pub(super) fn coordinates(&self) -> &[super::axis::StepCoordinateContract] {
+        &self.coordinates
+    }
+}
+
 /// Preflight one already-expanded `.ALTER`/textual-`.DATA` variant without
-/// solving it or publishing output. The returned count is the number of
-/// concrete Cartesian coordinates this outer variant will execute.
-pub(super) fn preflight_deck_run_count(
+/// solving it or publishing output.
+pub(super) fn preflight_deck(
     netlist: &Netlist,
     args: &RunArgs,
     config: &Config,
     run_label: Option<&str>,
-) -> Result<usize, CliError> {
+) -> Result<DeckPreflight, CliError> {
     validate_step_frontend_compatibility(netlist, args)?;
 
     let resource_limits = config.resources.limits();
@@ -394,7 +413,10 @@ pub(super) fn preflight_deck_run_count(
                 args.tran_stop,
             )?;
         }
-        return Ok(1);
+        return Ok(DeckPreflight {
+            runs: 1,
+            coordinates: Vec::new(),
+        });
     }
 
     let base_signature = step_analysis_signature(netlist);
@@ -408,7 +430,7 @@ pub(super) fn preflight_deck_run_count(
         .map_err(|error| map_materialized_run_error(error, args, "Step planning preflight"))?;
     let aggregate_report_values =
         (base_signature.is_empty() && netlist.control_script.is_none()).then_some(1);
-    preflight_step_coordinates(
+    let coordinates = preflight_step_coordinates(
         &engine,
         &materializer,
         &base_signature,
@@ -416,7 +438,10 @@ pub(super) fn preflight_deck_run_count(
         args,
         run_label,
     )?;
-    Ok(materializer.len())
+    Ok(DeckPreflight {
+        runs: materializer.len(),
+        coordinates,
+    })
 }
 
 pub(super) fn load_netlist_from_source(

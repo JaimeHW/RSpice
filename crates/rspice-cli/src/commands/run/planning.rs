@@ -6,6 +6,13 @@ pub(super) enum PreparedDeck {
     Corners(Vec<corners::PreparedCorner>),
 }
 
+/// A prepared deck whose every concrete run passed the preflight, carrying
+/// what that preflight established so execution does not establish it again.
+pub(super) enum PreflightedDeck {
+    Single(Box<Netlist>, DeckPreflight),
+    Corners(Vec<corners::PreflightedCorner>),
+}
+
 impl PreparedDeck {
     pub fn prepare(source: &str, args: &RunArgs, config: &Config) -> Result<Self, CliError> {
         if args.corners.is_some() {
@@ -18,12 +25,12 @@ impl PreparedDeck {
     }
 
     pub fn preflight(
-        &self,
+        self,
         args: &RunArgs,
         config: &Config,
         multi_run: bool,
         run_label: Option<&str>,
-    ) -> Result<usize, CliError> {
+    ) -> Result<PreflightedDeck, CliError> {
         let check = |netlist: &Netlist, args: &RunArgs, label: Option<&str>| {
             if multi_run
                 && netlist
@@ -37,17 +44,33 @@ impl PreparedDeck {
                     suggestion: Some("run each expanded deck separately".into()),
                 });
             }
-            preflight_deck_run_count(netlist, args, config, label)
+            preflight_deck(netlist, args, config, label)
         };
         match self {
-            Self::Single(netlist) => check(netlist, args, run_label),
-            Self::Corners(corners) => {
-                let mut count = 0usize;
-                for corner in corners {
-                    count = count.saturating_add(check(&corner.netlist, &corner.args, run_label)?);
-                }
-                Ok(count)
+            Self::Single(netlist) => {
+                let preflight = check(&netlist, args, run_label)?;
+                Ok(PreflightedDeck::Single(netlist, preflight))
             }
+            Self::Corners(corners) => corners
+                .into_iter()
+                .map(|corner| {
+                    let preflight = check(&corner.netlist, &corner.args, run_label)?;
+                    Ok(corners::PreflightedCorner { corner, preflight })
+                })
+                .collect::<Result<_, _>>()
+                .map(PreflightedDeck::Corners),
+        }
+    }
+}
+
+impl PreflightedDeck {
+    /// The number of concrete runs this deck executes.
+    pub fn runs(&self) -> usize {
+        match self {
+            Self::Single(_, preflight) => preflight.runs(),
+            Self::Corners(corners) => corners.iter().fold(0usize, |count, corner| {
+                count.saturating_add(corner.preflight.runs())
+            }),
         }
     }
 
@@ -61,7 +84,7 @@ impl PreparedDeck {
     ) -> Result<DeckOutcome, CliError> {
         match self {
             Self::Corners(corners) => corners::run(corners, args, config, quiet, label),
-            Self::Single(netlist) => {
+            Self::Single(netlist, preflight) => {
                 if !quiet {
                     crate::commands::emit_netlist_diagnostics(netlist, false);
                 }
@@ -73,7 +96,8 @@ impl PreparedDeck {
                     crate::commands::is_stdin(&args.input),
                     args.timeout,
                 )?;
-                let mut outcome = run_deck(netlist, args, config, verbose, quiet, label)?;
+                let mut outcome =
+                    run_deck(netlist, preflight, args, config, verbose, quiet, label)?;
                 if let Some(path) = derived {
                     outcome.outputs.push(path);
                 }

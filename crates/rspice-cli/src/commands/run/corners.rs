@@ -50,6 +50,12 @@ pub(super) struct PreparedCorner {
     pub args: RunArgs,
 }
 
+/// A corner together with what its preflight established.
+pub(super) struct PreflightedCorner {
+    pub corner: PreparedCorner,
+    pub preflight: DeckPreflight,
+}
+
 /// Read the selected library section as each corner's deck is parsed.
 pub(super) fn prepare(
     source: &str,
@@ -124,7 +130,7 @@ fn with_corner_library(source: &str, library: &std::path::Path, corner: &str) ->
 }
 
 pub(super) fn run(
-    prepared: &[PreparedCorner],
+    prepared: &[PreflightedCorner],
     args: &RunArgs,
     config: &Config,
     quiet: bool,
@@ -149,7 +155,11 @@ pub(super) fn run(
     let transaction = publish::current();
     let destinations = publish::destinations::current();
     let report_budget = ReportValueBudget::new(config.resources.limits().max_result_values);
-    let job = |prepared: &PreparedCorner| -> Result<DeckOutcome, CliError> {
+    let job = |prepared: &PreflightedCorner| -> Result<DeckOutcome, CliError> {
+        let PreflightedCorner {
+            corner: prepared,
+            preflight,
+        } = prepared;
         let corner = &prepared.name;
         let started = Instant::now();
         let _joined = transaction.clone().map(publish::enter);
@@ -160,6 +170,7 @@ pub(super) fn run(
             }
             run_deck(
                 &prepared.netlist,
+                preflight,
                 &prepared.args,
                 config,
                 false,
@@ -214,9 +225,9 @@ pub(super) fn run(
     let results: Vec<_> = prepared
         .iter()
         .zip(&outcomes)
-        .map(|(name, outcome)| {
+        .map(|(prepared, outcome)| {
             (
-                name.name.clone(),
+                prepared.corner.name.clone(),
                 outcome.reports.iter().all(|report| report.error.is_none()),
                 outcome.reports.iter().all(|report| {
                     report

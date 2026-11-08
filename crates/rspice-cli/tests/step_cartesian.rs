@@ -1572,3 +1572,65 @@ fn stepped_physical_analyses_are_order_independent_and_never_fabricate_data() {
         );
     }
 }
+
+/// How many circuits one run elaborates, read from the builder's debug record.
+fn elaborated_circuits(deck_text: &str, tag: &str) -> usize {
+    let dir = test_dir(tag);
+    let deck = dir.join("deck.sp");
+    std::fs::write(&deck, deck_text).expect("write deck");
+    let output = dir.join("out.csv");
+    let run = run_rspice(&[
+        "--log-level",
+        "debug",
+        "run",
+        deck.to_str().unwrap(),
+        "-o",
+        output.to_str().unwrap(),
+        "-f",
+        "csv",
+    ]);
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(
+        run.status.success(),
+        "stdout: {}; stderr: {stderr}",
+        String::from_utf8_lossy(&run.stdout)
+    );
+    stderr.matches("Building circuit with").count()
+}
+
+/// The preflight elaborates every coordinate before anything solves, and
+/// execution runs against what it established instead of preflighting again.
+/// A plan of one coordinate solves the circuit its preflight elaborated, so it
+/// is elaborated once to check and once to solve. A larger plan elaborates each
+/// coordinate again as it runs, keeping one coordinate in memory at a time.
+#[test]
+fn axis_coordinates_are_elaborated_once_by_their_preflight() {
+    let one = elaborated_circuits(
+        "* One temperature
+V1 in 0 1
+R1 in out 1k
+R2 out 0 1k
+.temp 50
+.dc V1 0 1 0.5
+.end
+",
+        "elaborations_one",
+    );
+    assert_eq!(one, 2, "preflight, then the solve");
+    let three = elaborated_circuits(
+        "* Three steps
+V1 in 0 1
+R1 in out {r}
+R2 out 0 1k
+.param r=1k
+.step param r 1k 3k 1k
+.dc V1 0 1 0.5
+.end
+",
+        "elaborations_three",
+    );
+    assert_eq!(
+        three, 9,
+        "per coordinate: preflight, materialization for execution, then the solve"
+    );
+}
