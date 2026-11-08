@@ -342,30 +342,36 @@ impl LibraryCellInstance {
         }
     }
 
-    /// The block an instance of this binding draws for `ports`, its bound
+    /// The block the catalog sets for this binding, for `ports`, its bound
     /// interface: a functional part's own pin geometry; a shipped compact
     /// model's device glyph; for catalog artwork, the block the artwork's
-    /// terminals were drawn against; otherwise the symbol the generation
-    /// rules give the interface and its roles.
-    pub fn generated_block(
+    /// terminals were drawn against. None for a binding the catalog does not
+    /// draw.
+    pub fn catalog_block(
         &self,
         ports: &[super::port::PortSpec],
-    ) -> crate::symbol_generation::GeneratedSymbol {
+    ) -> Option<crate::symbol_generation::GeneratedSymbol> {
         super::functional_catalog::functional_block_symbol(self)
             .or_else(|| {
                 super::generated_veriloga_catalog::compact_model_glyph(self)
                     .map(|glyph| glyph.block(ports))
             })
-            .unwrap_or_else(|| {
-                if self.builtin_symbol_asset().is_some() {
-                    crate::symbol_generation::generate_artwork_block(ports)
-                } else {
-                    crate::symbol_generation::generate_symbol_with_roles(
-                        ports,
-                        self.interface_roles(),
-                    )
-                }
+            .or_else(|| {
+                self.builtin_symbol_asset()
+                    .map(|_| crate::symbol_generation::generate_artwork_block(ports))
             })
+    }
+
+    /// The block an instance of this binding draws for `ports`: the one the
+    /// catalog sets, otherwise the symbol the generation rules give the
+    /// interface and its roles.
+    pub fn generated_block(
+        &self,
+        ports: &[super::port::PortSpec],
+    ) -> crate::symbol_generation::GeneratedSymbol {
+        self.catalog_block(ports).unwrap_or_else(|| {
+            crate::symbol_generation::generate_symbol_with_roles(ports, self.interface_roles())
+        })
     }
 
     /// The bound pin roles, when they describe the bound interface.

@@ -387,3 +387,55 @@ fn an_instance_that_states_pin_roles_draws_the_symbol_they_describe() {
     assert_eq!(resolved.connectable_pins().count(), 5);
     assert!(resolved.issues().is_empty());
 }
+
+/// A wire on a catalog part's visible pin is on that pin: where the part is
+/// drawn and where extraction looks for its terminals are one layout. Compact
+/// models join the walk when the catalog is compiled in.
+#[test]
+fn every_catalog_part_connects_where_it_is_drawn() {
+    use crate::schematic::device_catalog::{
+        builtin_xspice_library_binding, engine_only_xspice_devices,
+    };
+    use crate::schematic::functional_catalog::{functional_library_binding, functional_parts};
+    use crate::schematic::generated_veriloga_catalog::{
+        generated_veriloga_devices, generated_veriloga_library_binding,
+    };
+
+    let libraries = LibraryCatalog::default();
+    let buffers = HashMap::<String, SchematicDocument>::new();
+    let resolver = SymbolResolver::new(&libraries, &buffers);
+    let bindings =
+        functional_parts()
+            .iter()
+            .map(functional_library_binding)
+            .chain(
+                engine_only_xspice_devices()
+                    .iter()
+                    .map(|device| builtin_xspice_library_binding(device).expect("xspice binding")),
+            )
+            .chain(generated_veriloga_devices().iter().map(|device| {
+                generated_veriloga_library_binding(device).expect("generated binding")
+            }));
+
+    for binding in bindings {
+        let cell = binding.cell.clone();
+        let resolved = resolver.resolve_binding(&binding).expect("resolves");
+        let component = crate::schematic::component::Component::new(
+            1,
+            ComponentType::CellInstance,
+            Point::new(100, 100),
+        )
+        .with_library_cell(binding);
+        let drawn: Vec<Point> = component
+            .terminal_positions()
+            .into_iter()
+            .map(|(_, point)| point)
+            .collect();
+        let extracted: Vec<Point> = component
+            .terminal_positions_resolved(Some(&resolved))
+            .into_iter()
+            .map(|(_, point)| point)
+            .collect();
+        assert_eq!(drawn, extracted, "{cell}");
+    }
+}
