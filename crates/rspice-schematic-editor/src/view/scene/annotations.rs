@@ -4,8 +4,11 @@
 //! its own subject and the kept set does not change as the view pans.
 
 use super::super::{
-    design_view::DesignView, drawing::compute_label_layout, net_labels,
-    resolved_symbol_render::instance_name_anchor, symbol_context::SchematicSymbolContext,
+    design_view::DesignView,
+    drawing::{compute_label_layout, upward_rect},
+    net_labels,
+    resolved_symbol_render::instance_name_anchor,
+    symbol_context::SchematicSymbolContext,
     viewport::Viewport,
 };
 use egui::{Painter, Pos2, Rect, Vec2};
@@ -239,19 +242,24 @@ fn instance_name_rect(component: &Component, symbols: &SchematicSymbolContext) -
     if component.name.is_empty() || component.kind == ComponentType::Ground {
         return None;
     }
-    let (anchor, align) = match symbols.resolved_symbol(component) {
+    let (anchor, align, upward) = match symbols.resolved_symbol(component) {
         Some(symbol) => instance_name_anchor(component, symbol),
         None => {
             let origin = Pos2::new(component.pos.x as f32, component.pos.y as f32);
             let layout = compute_label_layout(origin, 1.0, component);
-            (layout.name_pos, layout.name_align)
+            (layout.name_pos, layout.name_align, layout.name_upward)
         }
     };
     let size = Vec2::new(
         component.name.chars().count() as f32 * NAME_ADVANCE_WU,
         NAME_LINE_WU,
     );
-    Some(align.anchor_size(anchor, size))
+    let upright = align.anchor_size(anchor, size);
+    Some(if upward {
+        upward_rect(anchor, upright)
+    } else {
+        upright
+    })
 }
 
 fn world_rect((min, max): (Point, Point)) -> Rect {

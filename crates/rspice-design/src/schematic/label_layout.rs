@@ -120,6 +120,10 @@ pub struct PlacedText {
     pub anchor: LayoutPoint,
     pub horizontal: TextEdge,
     pub vertical: TextEdge,
+    /// The run reads upward, turned a quarter counter-clockwise about its
+    /// anchor, as LTspice letters a vertical window: `horizontal` is then
+    /// the edge along its reading and `vertical` the edge across it.
+    pub upward: bool,
 }
 
 impl PlacedText {
@@ -128,6 +132,7 @@ impl PlacedText {
             anchor,
             horizontal,
             vertical,
+            upward: false,
         }
     }
 }
@@ -442,6 +447,23 @@ pub fn text_box(placed: PlacedText, text: &str, size: f32) -> LayoutRect {
         .unwrap_or(0);
     let width = glyphs as f32 * size * GLYPH_ADVANCE_EM;
     let height = lines as f32 * size * LINE_BOX_EM;
+    if placed.upward {
+        // Read upward, a run starts at its bottom and its top faces left.
+        let bottom = match placed.horizontal {
+            TextEdge::Start => placed.anchor.y,
+            TextEdge::Center => placed.anchor.y + width * 0.5,
+            TextEdge::End => placed.anchor.y + width,
+        };
+        let left = match placed.vertical {
+            TextEdge::Start => placed.anchor.x,
+            TextEdge::Center => placed.anchor.x - height * 0.5,
+            TextEdge::End => placed.anchor.x - height,
+        };
+        return LayoutRect {
+            min: LayoutPoint::new(left, bottom - width),
+            max: LayoutPoint::new(left + height, bottom),
+        };
+    }
     let left = match placed.horizontal {
         TextEdge::Start => placed.anchor.x,
         TextEdge::Center => placed.anchor.x - width * 0.5,

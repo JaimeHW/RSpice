@@ -337,6 +337,7 @@ fn net_label_boxes(label: &NetLabel) -> Vec<LayoutRect> {
             anchor: layout.corner,
             horizontal: TextEdge::Start,
             vertical: TextEdge::End,
+            upward: false,
         },
         layout.name,
         NET_LABEL_FONT_WORLD,
@@ -520,11 +521,24 @@ fn clear_of(
 ) -> LabelPosition {
     let LabelPosition::Placed {
         offset,
-        horizontal,
-        vertical,
+        horizontal: run_horizontal,
+        vertical: run_vertical,
+        upward,
     } = position
     else {
         return position;
+    };
+    // The edges the box reaches out on across the page and down it: a run
+    // read upward reaches up from its start and right from its top.
+    let (horizontal, vertical) = if upward {
+        let up = match run_horizontal {
+            TextEdge::Start => TextEdge::End,
+            TextEdge::Center => TextEdge::Center,
+            TextEdge::End => TextEdge::Start,
+        };
+        (run_vertical, up)
+    } else {
+        (run_horizontal, run_vertical)
     };
     let Some(placed) =
         position.placed_text(LayoutPoint::new(origin.x as f32, origin.y as f32), 1.0)
@@ -609,7 +623,8 @@ fn clear_of(
     };
     LabelPosition::Placed {
         offset: offset + Point::new(direction.x * distance as i32, direction.y * distance as i32),
-        horizontal,
-        vertical,
+        horizontal: run_horizontal,
+        vertical: run_vertical,
+        upward,
     }
 }

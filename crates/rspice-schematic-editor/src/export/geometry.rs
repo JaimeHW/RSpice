@@ -70,19 +70,23 @@ impl Extent {
         text: &str,
         size: f64,
     ) {
-        let width = estimated_text_width(text, size);
-        let left = match align.x() {
-            Align::Min => x,
-            Align::Center => x - width * 0.5,
-            Align::Max => x - width,
-        };
-        let top = match align.y() {
-            Align::Min => y,
-            Align::Center => y - LINE_BOX_EM * size * 0.5,
-            Align::Max => y - LINE_BOX_EM * size,
-        };
+        let (left, top, width, height) = upright_text_box((x, y), align, text, size);
         self.include(left, top);
-        self.include(left + width, top + LINE_BOX_EM * size);
+        self.include(left + width, top + height);
+    }
+
+    /// The box a run read upward takes: hung off `(x, y)` by `align` as
+    /// upright, then turned a quarter counter-clockwise about `(x, y)`.
+    pub(super) fn include_upward_text(
+        &mut self,
+        (x, y): (f64, f64),
+        align: Align2,
+        text: &str,
+        size: f64,
+    ) {
+        let (left, top, width, height) = upright_text_box((x, y), align, text, size);
+        self.include(x + (top - y), y - (left + width - x));
+        self.include(x + (top + height - y), y - (left - x));
     }
 }
 
@@ -95,6 +99,29 @@ pub(super) fn page(point: Point, config: &SvgExportConfig) -> (f64, f64) {
         f64::from(point.x) * config.units_per_world,
         f64::from(point.y) * config.units_per_world,
     )
+}
+
+/// The upright box, left, top, width and height, a run of text takes when
+/// hung off `(x, y)` by `align`.
+fn upright_text_box(
+    (x, y): (f64, f64),
+    align: Align2,
+    text: &str,
+    size: f64,
+) -> (f64, f64, f64, f64) {
+    let width = estimated_text_width(text, size);
+    let height = LINE_BOX_EM * size;
+    let left = match align.x() {
+        Align::Min => x,
+        Align::Center => x - width * 0.5,
+        Align::Max => x - width,
+    };
+    let top = match align.y() {
+        Align::Min => y,
+        Align::Center => y - height * 0.5,
+        Align::Max => y - height,
+    };
+    (left, top, width, height)
 }
 
 /// A world offset from a world point, in SVG units.

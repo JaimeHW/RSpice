@@ -12,12 +12,15 @@ pub enum LabelPosition {
     #[default]
     Auto,
     /// Where a drawing put the text: its anchor's offset from the
-    /// instance's position in world units, and which ends of the upright run
-    /// sit on that anchor.
+    /// instance's position in world units, which ends of the run sit on
+    /// that anchor, and whether the run reads upward rather than upright
+    /// ([`PlacedText::upward`]).
     Placed {
         offset: Point,
         horizontal: TextEdge,
         vertical: TextEdge,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        upward: bool,
     },
 }
 
@@ -59,6 +62,7 @@ impl LabelPosition {
                 offset,
                 horizontal,
                 vertical,
+                upward,
             } => Some(PlacedText {
                 anchor: LayoutPoint::new(
                     origin.x + offset.x as f32 * scale,
@@ -66,6 +70,7 @@ impl LabelPosition {
                 ),
                 horizontal,
                 vertical,
+                upward,
             }),
         }
     }

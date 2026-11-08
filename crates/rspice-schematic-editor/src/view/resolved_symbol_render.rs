@@ -303,12 +303,14 @@ fn draw_symbol_labels(
                     (
                         to_screen_symbol(origin, scale, component, symbol, anchor),
                         instance_label_align(component, symbol, anchor),
+                        false,
                     )
                 },
                 |text| {
                     (
                         super::drawing::layout_pos(text.anchor),
                         super::drawing::text_align(text.horizontal, text.vertical),
+                        text.upward,
                     )
                 },
             )
@@ -317,14 +319,20 @@ fn draw_symbol_labels(
         && component.display_mode.show_name(visibility)
         && !component.name.is_empty()
     {
-        let (position, align) = at(component.name_label_pos, symbol.document().name_anchor);
-        painter.text(
-            position,
-            align,
-            &component.name,
-            sans(size, FontWeight::Medium),
-            palette.text,
-        );
+        let (position, align, upward) = at(component.name_label_pos, symbol.document().name_anchor);
+        let font = sans(size, FontWeight::Medium);
+        if upward {
+            super::drawing::paint_upward_text(
+                painter,
+                position,
+                align,
+                &component.name,
+                font,
+                palette.text,
+            );
+        } else {
+            painter.text(position, align, &component.name, font, palette.text);
+        }
     }
     // A value the drawing lettered in texts of its own stands as they were
     // set.
@@ -339,15 +347,28 @@ fn draw_symbol_labels(
         && component.display_mode.show_value(visibility)
         && !value.is_empty()
     {
-        let (position, align) = at(component.value_label_pos, symbol.document().value_anchor);
-        rspice_ui_kit::text::paint_text(
-            painter,
-            position,
-            align,
-            value,
-            sans(size, FontWeight::Regular),
-            palette.text_dim,
-        );
+        let (position, align, upward) =
+            at(component.value_label_pos, symbol.document().value_anchor);
+        let font = sans(size, FontWeight::Regular);
+        if upward {
+            super::drawing::paint_upward_text(
+                painter,
+                position,
+                align,
+                value,
+                font,
+                palette.text_dim,
+            );
+        } else {
+            rspice_ui_kit::text::paint_text(
+                painter,
+                position,
+                align,
+                value,
+                font,
+                palette.text_dim,
+            );
+        }
     }
 }
 
@@ -356,11 +377,12 @@ fn draw_symbol_labels(
 pub(crate) fn instance_name_anchor(
     component: &Component,
     symbol: &ResolvedCellSymbol,
-) -> (Pos2, Align2) {
+) -> (Pos2, Align2, bool) {
     let placed = label_layout::symbol_name_placement(component, symbol.document());
     (
         super::drawing::layout_pos(placed.anchor),
         super::drawing::text_align(placed.horizontal, placed.vertical),
+        placed.upward,
     )
 }
 
@@ -553,26 +575,41 @@ fn write_symbol_labels_svg(
     config: &SvgExportConfig,
 ) {
     let name_anchor = symbol.document().name_anchor;
+    let (x, y) = to_svg(component, Point::default(), config);
+    let origin = LayoutPoint::new(x as f32, y as f32);
+    let placed = |position: LabelPosition| {
+        position
+            .placed_text(origin, config.units_per_world as f32)
+            .map(|placed| {
+                let at = super::drawing::layout_pos(placed.anchor);
+                (
+                    (f64::from(at.x), f64::from(at.y)),
+                    super::drawing::text_align(placed.horizontal, placed.vertical),
+                    placed.upward,
+                )
+            })
+    };
     if component
         .display_mode
         .show_name(SchematicParameterLabelVisibility::NamesAndValues)
         && !component.name.is_empty()
     {
-        InstanceLabel::Name.write(
-            svg,
-            to_svg_symbol(component, symbol, name_anchor, config),
-            &component.name,
-            instance_label_align(component, symbol, name_anchor),
-            config,
-        );
+        let (at, align, upward) = placed(component.name_label_pos).unwrap_or_else(|| {
+            (
+                to_svg_symbol(component, symbol, name_anchor, config),
+                instance_label_align(component, symbol, name_anchor),
+                false,
+            )
+        });
+        write_upward_svg(svg, at, upward, |svg| {
+            InstanceLabel::Name.write(svg, at, &component.name, align, config);
+        });
     }
     let shown = component
         .display_mode
         .show_value(SchematicParameterLabelVisibility::NamesAndValues);
     if let Some(pieces) = value_pieces(component) {
         if shown {
-            let (x, y) = to_svg(component, Point::default(), config);
-            let origin = LayoutPoint::new(x as f32, y as f32);
             for piece in pieces {
                 let Some(placed) = piece
                     .position
@@ -584,14 +621,17 @@ fn write_symbol_labels_svg(
                     continue;
                 }
                 let at = super::drawing::layout_pos(placed.anchor);
-                write_sized_text_svg(
-                    svg,
-                    InstanceLabel::Value.class(),
-                    (f64::from(at.x), f64::from(at.y)),
-                    &piece.text,
-                    super::drawing::text_align(placed.horizontal, placed.vertical),
-                    InstanceLabel::Value.size(config) * f64::from(piece.size_percent) / 100.0,
-                );
+                let at = (f64::from(at.x), f64::from(at.y));
+                write_upward_svg(svg, at, placed.upward, |svg| {
+                    write_sized_text_svg(
+                        svg,
+                        InstanceLabel::Value.class(),
+                        at,
+                        &piece.text,
+                        super::drawing::text_align(placed.horizontal, placed.vertical),
+                        InstanceLabel::Value.size(config) * f64::from(piece.size_percent) / 100.0,
+                    );
+                });
             }
         }
         return;
@@ -603,13 +643,33 @@ fn write_symbol_labels_svg(
         .show_value(SchematicParameterLabelVisibility::NamesAndValues)
         && !value.is_empty()
     {
-        InstanceLabel::Value.write(
-            svg,
-            to_svg_symbol(component, symbol, value_anchor, config),
-            value,
-            instance_label_align(component, symbol, value_anchor),
-            config,
-        );
+        let (at, align, upward) = placed(component.value_label_pos).unwrap_or_else(|| {
+            (
+                to_svg_symbol(component, symbol, value_anchor, config),
+                instance_label_align(component, symbol, value_anchor),
+                false,
+            )
+        });
+        write_upward_svg(svg, at, upward, |svg| {
+            InstanceLabel::Value.write(svg, at, value, align, config);
+        });
+    }
+}
+
+/// The runs `write` writes, turned a quarter counter-clockwise about `at`
+/// when they read upward, as LTspice letters a vertical window.
+pub(crate) fn write_upward_svg(
+    svg: &mut String,
+    (x, y): (f64, f64),
+    upward: bool,
+    write: impl FnOnce(&mut String),
+) {
+    if upward {
+        writeln!(svg, r#"<g transform="rotate(-90 {x} {y})">"#).unwrap();
+        write(svg);
+        svg.push_str("</g>\n");
+    } else {
+        write(svg);
     }
 }
 

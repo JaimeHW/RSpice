@@ -1026,6 +1026,85 @@ fn names_and_values_stand_where_the_drawing_lettered_them() {
     );
 }
 
+/// LTspice turns a window's text with its symbol and never letters it
+/// upside down: a vertical window on a symbol turned a half reads upward, as
+/// does an upright window on a symbol turned a quarter, while a vertical
+/// window on a symbol turned a quarter reads across. Two vertical windows
+/// side by side, lettered upright, ran over each other; read upward, each
+/// starts where the drawing anchored it and they stand apart.
+#[test]
+fn an_ltspice_vertical_window_reads_upward_as_its_symbol_turns_it() {
+    use crate::schematic::label_layout::{
+        INSTANCE_NAME_WORLD, INSTANCE_VALUE_WORLD, LayoutPoint, TextEdge, instance_label_layout,
+        text_box,
+    };
+
+    let drawing = parse_asc(
+        "Version 4
+         SYMBOL diode 0 0 R180
+WINDOW 0 72 -48 VRight 2
+WINDOW 3 48 -48 VRight 2
+         SYMATTR InstName D7
+SYMATTR Value SCHOTTKY_40V
+         SYMBOL res 320 0 R90
+WINDOW 0 0 56 VBottom 2
+WINDOW 3 32 56 Left 2
+         SYMATTR InstName R4
+SYMATTR Value 4k7
+",
+    )
+    .expect("the drawing reads");
+    let imported = import_foreign_schematic(&drawing, "work", &library());
+    let part = |name: &str| {
+        imported
+            .document
+            .components
+            .iter()
+            .find(|component| component.name == name)
+            .unwrap_or_else(|| panic!("{name} is placed"))
+    };
+    let layout = |name: &str| {
+        let part = part(name);
+        instance_label_layout(
+            LayoutPoint::new(part.pos.x as f32, part.pos.y as f32),
+            1.0,
+            part,
+        )
+    };
+
+    // The diode's name and value read upward from where the drawing anchored
+    // them, (-72, 48) and (-48, 48), centred across their line.
+    let diode = layout("D7");
+    for (placed, x) in [(diode.name, -90.0), (diode.value, -60.0)] {
+        assert!(placed.upward, "{placed:?} reads upward");
+        assert_eq!(
+            (
+                placed.anchor.x,
+                placed.anchor.y,
+                placed.horizontal,
+                placed.vertical
+            ),
+            (x, 60.0, TextEdge::Start, TextEdge::Center)
+        );
+    }
+    let name = text_box(diode.name, "D7", INSTANCE_NAME_WORLD);
+    let value = text_box(diode.value, "SCHOTTKY_40V", INSTANCE_VALUE_WORLD);
+    assert!(
+        value.max.y - value.min.y > value.max.x - value.min.x,
+        "the value stands taller than it is wide: {value:?}"
+    );
+    assert!(
+        name.max.x <= value.min.x,
+        "the name at {name:?} stands clear of the value at {value:?}"
+    );
+
+    // The turned resistor's vertical name window reads across; its upright
+    // value window reads upward.
+    let resistor = layout("R4");
+    assert!(!resistor.name.upward, "{:?} reads across", resistor.name);
+    assert!(resistor.value.upward, "{:?} reads upward", resistor.value);
+}
+
 /// QSPICE justifies a symbol's text on both axes. A value that starts at a
 /// point on its body's lower edge and hangs below it stands outside the
 /// body; read on one axis only, it was centred on the edge and ran across

@@ -42,7 +42,7 @@ use super::view::drawing::{chain_conductors, compute_label_layout};
 use super::view::lod::{StrokeRole, nominal_wu};
 use super::view::resolved_symbol_render::{
     InstanceLabel, resolved_symbol_world_bounds, write_resolved_symbol_svg, write_sized_text_svg,
-    write_text_svg,
+    write_text_svg, write_upward_svg,
 };
 
 #[derive(Clone)]
@@ -658,6 +658,8 @@ struct PrimitiveLabel {
     kind: InstanceLabel,
     at: (f64, f64),
     align: egui::Align2,
+    /// The label reads upward, turned a quarter counter-clockwise about `at`.
+    upward: bool,
     text: String,
     /// The label's size in hundredths of its kind's: a value a drawing
     /// lettered in pieces sets each piece as large as the drawing did.
@@ -670,19 +672,21 @@ impl PrimitiveLabel {
     }
 
     fn write(&self, svg: &mut String, config: &SvgExportConfig) {
-        if self.size_percent == 100 {
-            self.kind
-                .write(svg, self.at, &self.text, self.align, config);
-        } else {
-            write_sized_text_svg(
-                svg,
-                self.kind.class(),
-                self.at,
-                &self.text,
-                self.align,
-                self.size(config),
-            );
-        }
+        write_upward_svg(svg, self.at, self.upward, |svg| {
+            if self.size_percent == 100 {
+                self.kind
+                    .write(svg, self.at, &self.text, self.align, config);
+            } else {
+                write_sized_text_svg(
+                    svg,
+                    self.kind.class(),
+                    self.at,
+                    &self.text,
+                    self.align,
+                    self.size(config),
+                );
+            }
+        });
     }
 }
 
@@ -711,6 +715,7 @@ fn primitive_labels(component: &Component, config: &SvgExportConfig) -> Vec<Prim
             kind: InstanceLabel::Name,
             at: at(layout.name_pos),
             align: layout.name_align,
+            upward: layout.name_upward,
             text: component.name.clone(),
             size_percent: 100,
         });
@@ -740,6 +745,7 @@ fn primitive_labels(component: &Component, config: &SvgExportConfig) -> Vec<Prim
                     kind: InstanceLabel::Value,
                     at: at(crate::view::drawing::layout_pos(placed.anchor)),
                     align: crate::view::drawing::text_align(placed.horizontal, placed.vertical),
+                    upward: placed.upward,
                     text: piece.text.clone(),
                     size_percent: piece.size_percent,
                 });
@@ -759,6 +765,7 @@ fn primitive_labels(component: &Component, config: &SvgExportConfig) -> Vec<Prim
             ),
             at: at(layout.value_pos),
             align: layout.value_align,
+            upward: layout.value_upward,
             text: value.to_string(),
             size_percent: 100,
         });
@@ -791,7 +798,11 @@ fn include_primitive_label_bounds(
     extent: &mut Extent,
 ) {
     for label in primitive_labels(component, config) {
-        extent.include_text(label.at, label.align, &label.text, label.size(config));
+        if label.upward {
+            extent.include_upward_text(label.at, label.align, &label.text, label.size(config));
+        } else {
+            extent.include_text(label.at, label.align, &label.text, label.size(config));
+        }
     }
 }
 
@@ -1511,6 +1522,47 @@ mod tests {
                 .abs()
                 < 1e-9
         );
+    }
+
+    /// A value a drawing letters upward exports as the canvas paints it:
+    /// hung off its anchor as upright text, then turned a quarter
+    /// counter-clockwise about that anchor. The name beside it stays upright.
+    #[test]
+    fn a_value_read_upward_exports_turned_about_its_anchor() {
+        use rspice_design::schematic::label_layout::TextEdge;
+        use rspice_design::schematic::label_position::LabelPosition;
+
+        let config = SvgExportConfig::default();
+        let mut resistor = Component::new(1, ComponentType::Resistor, Point::new(100, 100));
+        resistor.name = "R1".to_owned();
+        resistor.value = "4k7".to_owned();
+        resistor.value_label_pos = LabelPosition::Placed {
+            offset: Point::new(-30, 20),
+            horizontal: TextEdge::Start,
+            vertical: TextEdge::Center,
+            upward: true,
+        };
+        let mut svg = String::new();
+        write_component(&mut svg, &resistor, &config, None, None);
+        let (x, y) = (
+            70.0 * config.units_per_world,
+            120.0 * config.units_per_world,
+        );
+        let turn = format!(r#"<g transform="rotate(-90 {x} {y})">"#);
+        let lines = svg.lines().collect::<Vec<_>>();
+        let at = lines
+            .iter()
+            .position(|line| *line == turn)
+            .unwrap_or_else(|| panic!("no {turn} in {svg}"));
+        assert!(
+            lines[at + 1].ends_with(">4k7</text>")
+                && lines[at + 1].contains(&format!(r#"x="{x}""#))
+                && lines[at + 1].contains(r#"text-anchor="start""#),
+            "the value hangs off the anchor it turns about: {}",
+            lines[at + 1]
+        );
+        assert_eq!(lines[at + 2], "</g>");
+        assert_eq!(svg.matches("<g transform=\"rotate(-90").count(), 1, "{svg}");
     }
 
     #[test]

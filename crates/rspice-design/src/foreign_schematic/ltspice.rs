@@ -295,6 +295,7 @@ fn window(words: &[&str], line: usize) -> Result<ForeignWindow, ForeignParseErro
         offset,
         reach: window_reach(&alignment),
         hidden: alignment == "invisible",
+        vertical: alignment.starts_with('v'),
     })
 }
 

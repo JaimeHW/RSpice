@@ -305,6 +305,7 @@ fn component(node: &Node) -> Result<ForeignSymbol, ForeignParseError> {
             offset,
             reach,
             hidden: false,
+            vertical: false,
         });
     }
     let rest = texts.collect::<Vec<_>>();
@@ -314,6 +315,7 @@ fn component(node: &Node) -> Result<ForeignSymbol, ForeignParseError> {
             offset: *offset,
             reach: *reach,
             hidden: false,
+            vertical: false,
         });
         attributes.push(ForeignAttribute {
             name: "Value".to_owned(),
@@ -335,6 +337,7 @@ fn component(node: &Node) -> Result<ForeignSymbol, ForeignParseError> {
                     offset,
                     reach,
                     hidden: false,
+                    vertical: false,
                 },
                 size_percent,
             })

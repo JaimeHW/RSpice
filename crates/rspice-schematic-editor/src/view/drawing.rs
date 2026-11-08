@@ -1052,14 +1052,47 @@ pub fn draw_artwork_lead_extensions(
 }
 
 /// Where a primitive's name and value sit and how they hang off their
-/// anchors. Linear in `pos` and `scale`, so the SVG evaluates it in its own
-/// units.
+/// anchors, and whether each reads upward, turned a quarter counter-clockwise
+/// about its anchor. Linear in `pos` and `scale`, so the SVG evaluates it in
+/// its own units.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct LabelLayout {
     pub(crate) name_pos: Pos2,
     pub(crate) name_align: egui::Align2,
+    pub(crate) name_upward: bool,
     pub(crate) value_pos: Pos2,
     pub(crate) value_align: egui::Align2,
+    pub(crate) value_upward: bool,
+}
+
+/// A run of text read upward: hung off `at` as `align` hangs it upright,
+/// then turned a quarter counter-clockwise about `at`, as LTspice letters a
+/// vertical window. Returns the box it takes.
+pub(crate) fn paint_upward_text(
+    painter: &Painter,
+    at: Pos2,
+    align: egui::Align2,
+    text: &str,
+    font: egui::FontId,
+    color: egui::Color32,
+) -> Rect {
+    let galley =
+        painter.fonts_mut(|fonts| rspice_ui_kit::text::layout_no_wrap(fonts, text, font, color));
+    let upright = align.anchor_size(at, galley.size());
+    let shape = egui::epaint::TextShape::new(upright.min, galley, color)
+        .with_angle_and_anchor(-std::f32::consts::FRAC_PI_2, align);
+    let bounds = shape.visual_bounding_rect();
+    painter.add(shape);
+    bounds
+}
+
+/// The box `upright`, hung off `at`, takes once turned a quarter
+/// counter-clockwise about `at`: what a run read upward covers.
+pub(crate) fn upward_rect(at: Pos2, upright: Rect) -> Rect {
+    Rect::from_min_max(
+        Pos2::new(at.x + (upright.min.y - at.y), at.y - (upright.max.x - at.x)),
+        Pos2::new(at.x + (upright.max.y - at.y), at.y - (upright.min.x - at.x)),
+    )
 }
 
 /// How a run of the shared layout's text hangs off its anchor, as egui
@@ -1083,8 +1116,10 @@ pub(crate) fn compute_label_layout(pos: Pos2, scale: f32, component: &Component)
     LabelLayout {
         name_pos: layout_pos(layout.name.anchor),
         name_align: text_align(layout.name.horizontal, layout.name.vertical),
+        name_upward: layout.name.upward,
         value_pos: layout_pos(layout.value.anchor),
         value_align: text_align(layout.value.horizontal, layout.value.vertical),
+        value_upward: layout.value.upward,
     }
 }
 
@@ -1111,13 +1146,25 @@ fn draw_component_labels(
         && component.display_mode.show_name(visibility)
         && !component.name.is_empty()
     {
-        painter.text(
-            layout.name_pos,
-            layout.name_align,
-            &component.name,
-            rspice_ui_kit::theme::sans(size, rspice_ui_kit::theme::FontWeight::Medium),
-            palette.text,
-        );
+        let font = rspice_ui_kit::theme::sans(size, rspice_ui_kit::theme::FontWeight::Medium);
+        if layout.name_upward {
+            paint_upward_text(
+                painter,
+                layout.name_pos,
+                layout.name_align,
+                &component.name,
+                font,
+                palette.text,
+            );
+        } else {
+            painter.text(
+                layout.name_pos,
+                layout.name_align,
+                &component.name,
+                font,
+                palette.text,
+            );
+        }
     }
 
     // Draw component value, or a port's name, which is an electrical name.
@@ -1132,14 +1179,27 @@ fn draw_component_labels(
                 let value_text =
                     super::super::source_labels::component_value_label_cached(component);
                 if !value_text.is_empty() {
-                    rspice_ui_kit::text::paint_text(
-                        painter,
-                        layout.value_pos,
-                        layout.value_align,
-                        value_text.as_ref(),
-                        rspice_ui_kit::theme::sans(size, rspice_ui_kit::theme::FontWeight::Regular),
-                        palette.text_dim,
-                    );
+                    let font =
+                        rspice_ui_kit::theme::sans(size, rspice_ui_kit::theme::FontWeight::Regular);
+                    if layout.value_upward {
+                        paint_upward_text(
+                            painter,
+                            layout.value_pos,
+                            layout.value_align,
+                            value_text.as_ref(),
+                            font,
+                            palette.text_dim,
+                        );
+                    } else {
+                        rspice_ui_kit::text::paint_text(
+                            painter,
+                            layout.value_pos,
+                            layout.value_align,
+                            value_text.as_ref(),
+                            font,
+                            palette.text_dim,
+                        );
+                    }
                 }
             }
         }
@@ -1179,14 +1239,23 @@ pub(super) fn draw_value_pieces(
         if let Some(size) = lod::annotation_size(piece.size_world(), scale, ppp)
             && !piece.text.trim().is_empty()
         {
-            rspice_ui_kit::text::paint_text(
-                painter,
+            let (at, align) = (
                 layout_pos(placed.anchor),
                 text_align(placed.horizontal, placed.vertical),
-                &piece.text,
-                rspice_ui_kit::theme::sans(size, rspice_ui_kit::theme::FontWeight::Regular),
-                palette.text_dim,
             );
+            let font = rspice_ui_kit::theme::sans(size, rspice_ui_kit::theme::FontWeight::Regular);
+            if placed.upward {
+                paint_upward_text(painter, at, align, &piece.text, font, palette.text_dim);
+            } else {
+                rspice_ui_kit::text::paint_text(
+                    painter,
+                    at,
+                    align,
+                    &piece.text,
+                    font,
+                    palette.text_dim,
+                );
+            }
         }
     }
 }

@@ -53,8 +53,9 @@ impl SemanticSceneCompiler<'_> {
     }
 
     /// One run of schematic text, a line per line, hung off its world anchor
-    /// the way the canvas hangs a galley: upright, justified by its anchor
-    /// edge, each baseline Plex's ascent below its line's top.
+    /// the way the canvas hangs a galley: justified by its anchor edge, each
+    /// baseline Plex's ascent below its line's top, and a run read upward
+    /// turned a quarter counter-clockwise about its anchor.
     pub(super) fn schematic_text(
         &mut self,
         text: &SchematicText,
@@ -67,20 +68,31 @@ impl SemanticSceneCompiler<'_> {
         };
         let lines = text.text.lines().collect::<Vec<_>>();
         let LayoutPoint { x, y } = text.placed.anchor;
+        let rotation = if text.placed.upward {
+            SceneTextRotation::CounterClockwise90
+        } else {
+            SceneTextRotation::Upright
+        };
         for (line, baseline) in lines.iter().zip(label_layout::text_baselines(
             y,
             text.placed.vertical,
             size,
             lines.len(),
         )) {
-            let origin = self.signed_micrometre_point(world_um(x), world_um(baseline))?;
+            // Turned about the anchor, a line's baseline lies right of it.
+            let (x, y) = if text.placed.upward {
+                (x + (baseline - y), y)
+            } else {
+                (x, baseline)
+            };
+            let origin = self.signed_micrometre_point(world_um(x), world_um(y))?;
             self.add_text_placed(
                 origin,
                 line,
                 text.class.font(),
                 world_um(size).unsigned_abs(),
                 SemanticColor::Exact(text.class.ink()),
-                (anchor, SceneTextRotation::Upright),
+                (anchor, rotation),
             )?;
         }
         Ok(())

@@ -803,11 +803,22 @@ impl Builder<'_> {
             -1 => TextEdge::End,
             _ => TextEdge::Center,
         };
-        let (horizontal, vertical) = (edge(reach.x), edge(reach.y));
+        // LTspice turns a window's text with its symbol and letters a
+        // quarter-turned one along its turned line: a vertical window on an
+        // upright symbol, or an upright one on a turned symbol, reads upward.
+        // Read upward, a run starts at its bottom and its top faces left.
+        let upward = self.drawing.tool == ForeignTool::Ltspice
+            && window.vertical != (symbol.orientation.quarter_turns % 2 == 1);
+        let (horizontal, vertical) = if upward {
+            (edge(-reach.y), edge(reach.x))
+        } else {
+            (edge(reach.x), edge(reach.y))
+        };
         LabelPosition::Placed {
             offset: anchor - origin,
             horizontal,
             vertical,
+            upward,
         }
     }
 

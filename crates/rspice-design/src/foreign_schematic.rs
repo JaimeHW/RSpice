@@ -167,6 +167,8 @@ pub struct ForeignWindow {
     pub reach: ForeignPoint,
     /// Set when the drawing hides the text (LTspice's `Invisible`).
     pub hidden: bool,
+    /// The text reads upward in the symbol's frame (LTspice's `V` forms).
+    pub vertical: bool,
 }
 
 /// One of the texts a drawing letters an instance's value in, when it
