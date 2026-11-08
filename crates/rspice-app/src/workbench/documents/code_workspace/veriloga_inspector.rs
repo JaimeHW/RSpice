@@ -53,9 +53,10 @@ pub(crate) fn veriloga_diagnostics(
         .unwrap_or_else(|| Arc::new(CodeDiagnosticCollection::default()))
 }
 
-/// The findings of the last compile of exactly this source, or `None` when
-/// the source changed after it: the editor then keeps the last compile's
-/// findings, outdated, rather than show the text as clean.
+/// The findings of the last check of exactly this source, a compile's or
+/// the one made while it is written, or `None` when the source changed after
+/// it: the editor then keeps the last check's findings, outdated, rather
+/// than show the text as clean.
 pub(crate) fn veriloga_current_diagnostics(
     state: &VerilogAWorkbenchState,
     project_id: ProjectId,
@@ -68,6 +69,14 @@ pub(crate) fn veriloga_current_diagnostics(
                 .last_failure_token
                 .filter(|token| selected.matches_token(project_id, *token))
                 .map(|_| Arc::clone(&state.last_failure))
+        })
+        .or_else(|| {
+            state
+                .live_check
+                .findings
+                .as_ref()
+                .filter(|(token, _)| selected.matches_token(project_id, *token))
+                .map(|(_, findings)| Arc::clone(findings))
         })
 }
 

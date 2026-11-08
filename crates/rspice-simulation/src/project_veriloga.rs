@@ -10,6 +10,7 @@ use crate::veriloga::{PreparedRuntimeError, PreparedVerilogARuntime, PreparedVer
 pub mod build_profile;
 pub mod compile_service;
 pub mod diagnostics;
+pub mod live_check;
 pub mod preparation;
 pub mod receipt;
 pub mod worker;

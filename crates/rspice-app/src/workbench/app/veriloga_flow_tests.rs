@@ -1035,6 +1035,104 @@ fn a_failed_compiles_errors_follow_their_text_through_edits_until_it_is_deleted(
     }
 }
 
+/// A module about two thousand lines long: a chain of variables, each one
+/// more than the one before, driving one branch.
+fn long_module(links: usize) -> String {
+    let mut source = String::from(
+        "`include \"disciplines.vams\"\n\nmodule chain(p, n);\n  inout p, n;\n  electrical p, n;\n",
+    );
+    for index in 0..links {
+        source.push_str(&format!("  real x{index};\n"));
+    }
+    source.push_str("  analog begin\n    x0 = 1;\n");
+    for index in 1..links {
+        source.push_str(&format!("    x{index} = x{} + 1;\n", index - 1));
+    }
+    source.push_str(&format!(
+        "    I(p, n) <+ x{} * V(p, n) * 1e-9;\n  end\nendmodule\n",
+        links - 1
+    ));
+    source
+}
+
+/// A pause in writing checks the module, with no compile: an error typed
+/// into a two-thousand-line module is found half a second after the typing
+/// stops, on the line it was typed on, and correcting it clears it the same
+/// way.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_pause_in_writing_checks_a_long_module_and_finds_the_error_typed_into_it() {
+    let (mut user, _, _) = new_device("chain", "p n");
+    let module = long_module(1000);
+    assert!(module.lines().count() >= 2000);
+    super::veriloga_interface_tests::edit_source(&mut user.app, &module);
+    user.settle();
+    compile(&mut user);
+    assert!(
+        user.app
+            .state
+            .code
+            .code_workspace
+            .veriloga
+            .last_failure
+            .is_empty()
+    );
+    let checking = |app: &RSpiceApp| {
+        app.state
+            .code
+            .code_workspace
+            .veriloga
+            .live_check
+            .running
+            .is_some()
+    };
+    // The pause is timed the way the frame loop sees it.
+    let pause_then_check = |user: &mut User, source: &str| {
+        user.wait_for("no check on its way", |app| !checking(app));
+        super::veriloga_interface_tests::edit_source(&mut user.app, source);
+        let edited = user.ctx.input(|input| input.time);
+        while !checking(&user.app) {
+            user.frame(Vec::new());
+            assert!(
+                user.ctx.input(|input| input.time) - edited < 1.0,
+                "no check started"
+            );
+        }
+        let paused = user.ctx.input(|input| input.time) - edited;
+        assert!((0.5..0.55).contains(&paused), "{paused}");
+        user.wait_for("the check", |app| !checking(app));
+        assert!(
+            user.app
+                .state
+                .code
+                .code_workspace
+                .veriloga
+                .pending
+                .is_none(),
+            "nothing was compiled"
+        );
+        Command::NextProblem.execute(&mut user.app);
+        user.settle();
+        user.prompt()
+    };
+
+    let broken = module.replace("    x700 = x699 + 1;\n", "    x700 = x699 + y;\n");
+    let line = broken
+        .lines()
+        .position(|text| text.contains("+ y;"))
+        .expect("the typed error")
+        + 1;
+    let said = pause_then_check(&mut user, &broken);
+    assert!(
+        said.starts_with(&format!("Error 1 of 1, line {line}: ")) && said.contains("'y'"),
+        "{said:?}"
+    );
+    assert_eq!(
+        pause_then_check(&mut user, &module),
+        "No problems in this document."
+    );
+}
+
 /// Four compact models as their authors ship them, each a root with its
 /// includes beside it: the folder under `models/veriloga/cmc`, the root, and
 /// the module it declares.

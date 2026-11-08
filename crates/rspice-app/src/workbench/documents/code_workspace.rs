@@ -16,6 +16,7 @@ mod source_search;
 mod veriloga;
 mod veriloga_inspector;
 mod veriloga_interface;
+mod veriloga_live_check;
 use rspice_simulation::project_veriloga::build_profile as veriloga_profile;
 
 pub use super::{CodeSourceFileAction, CodeWorkspacePage};
@@ -92,6 +93,7 @@ pub(crate) use veriloga_interface::{
     VerilogACellSymbol, VerilogAInterfaceFinding, interface_check_finding, interface_finding,
     reconciled_symbol, refresh_symbol_standing, symbol_standing,
 };
+pub(crate) use veriloga_live_check::drive_veriloga_live_check;
 
 /// The cell view whose Verilog-A source a deck's `.veriloga` locator names.
 ///

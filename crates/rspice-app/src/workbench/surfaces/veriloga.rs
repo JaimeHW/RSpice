@@ -357,6 +357,15 @@ fn source_editor(
         (bundle_id, active_path.to_owned()),
         interaction.cursor_char_index,
     );
+    if editor_language == CodeEditorLanguage::VerilogA {
+        let project_id = app.state.model.workspace.content.project.id();
+        crate::workbench::documents::code_workspace::drive_veriloga_live_check(
+            ui.ctx(),
+            &mut app.state.code.code_workspace.veriloga,
+            project_id,
+            selected,
+        );
+    }
     let selection_key = (bundle_id, active_path.to_owned());
     if let Some(range) = interaction.selected_char_range {
         app.state

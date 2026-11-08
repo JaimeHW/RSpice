@@ -184,6 +184,30 @@ pub struct VerilogAWorkbenchState {
     /// Devices New Verilog-A device… created whose module the reader has not
     /// yet compiled into something placeable.
     pub placement_handoffs: Vec<VerilogAPlacementHandoff>,
+    /// The check of the source while it is written, between compiles.
+    pub live_check: VerilogALiveCheck,
+}
+
+/// The source is checked, short of generating code, once its writer pauses:
+/// what the check finds is shown as the source's findings until it changes
+/// again or is compiled.
+#[derive(Debug, Clone, Default)]
+pub struct VerilogALiveCheck {
+    /// The source as it was last seen changed, and the frame time then.
+    pub edited: Option<(VerilogASourceOperationToken, f64)>,
+    /// A check on its way, of the source its token names.
+    pub running: Option<RunningVerilogACheck>,
+    /// What the last check of the source its token names found.
+    pub findings: Option<(
+        VerilogASourceOperationToken,
+        Arc<crate::state::code_diagnostics::CodeDiagnosticCollection>,
+    )>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RunningVerilogACheck {
+    pub token: VerilogASourceOperationToken,
+    pub receiver: Arc<Mutex<mpsc::Receiver<Vec<super::CodeEditorDiagnostic>>>>,
 }
 
 impl VerilogAWorkbenchState {
@@ -197,6 +221,7 @@ impl VerilogAWorkbenchState {
         self.receipt = None;
         Arc::make_mut(&mut self.last_failure).clear();
         self.last_failure_token = None;
+        self.live_check = VerilogALiveCheck::default();
     }
 }
 
