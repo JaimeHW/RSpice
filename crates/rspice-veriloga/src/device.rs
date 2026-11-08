@@ -5756,6 +5756,51 @@ impl VerilogADevice {
         Ok(copy)
     }
 
+    /// Start an operating point's initial-junction load (SPICE's
+    /// MODEINITJCT): each named limiter that has never run reads an unknown
+    /// previous value, which a built-in limiter answers with its starting
+    /// value (`pnjlim` the junction's critical voltage) and a source-defined
+    /// one with the proposal. A limiter with history keeps it.
+    pub fn begin_initial_junction_limiting(&mut self) {
+        let mut slots = Vec::new();
+        let mut scan = |program: &crate::codegen::BytecodeProgram| {
+            slots.extend(program.instructions.iter().filter_map(|instruction| {
+                match instruction {
+                    Instruction::NamedLimiterPrevious(slot) => Some(*slot),
+                    _ => None,
+                }
+            }));
+        };
+        fn scan_steps(
+            steps: &[AssignmentStep],
+            scan: &mut impl FnMut(&crate::codegen::BytecodeProgram),
+        ) {
+            for step in steps {
+                match step {
+                    AssignmentStep::Initialization { body, .. } => scan_steps(body, scan),
+                    AssignmentStep::Task(task) => task.expressions().for_each(&mut *scan),
+                    AssignmentStep::Assign(assignment) => scan(&assignment.program),
+                    AssignmentStep::AssignIndexed { index, value, .. } => {
+                        scan(index);
+                        scan(value);
+                    }
+                    AssignmentStep::Loop { condition, body } => {
+                        scan(condition);
+                        scan_steps(body, scan);
+                    }
+                }
+            }
+        }
+        scan_steps(&self.model.assignment_steps, &mut scan);
+        for stamp in &self.model.stamp_programs {
+            scan(&stamp.value_program);
+            if let Some(program) = &stamp.limiter_correction {
+                scan(program);
+            }
+        }
+        self.context.begin_initial_junction_limiting(&slots);
+    }
+
     /// Read terminals the device was given a node for as unconnected:
     /// `$port_connected` returns 0 for each, and each keeps its node.
     ///

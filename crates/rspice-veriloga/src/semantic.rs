@@ -8614,10 +8614,20 @@ impl SemanticAnalyzer {
             argument: LimiterArgument::Proposed,
             span: function.span,
         });
-        let implicit_previous = Expression::AnalogOperator(AnalogOperator::LimiterArgument {
+        let previous = Expression::AnalogOperator(AnalogOperator::LimiterArgument {
             argument: LimiterArgument::Previous,
             span: function.span,
         });
+        // The initial-junction load's unknown history reaches the function as
+        // the proposal, as a limiter's first iterate always has.
+        let start = builtin_limiters::Body {
+            span: function.span,
+        };
+        let implicit_previous = start.cond(
+            start.unknown(previous.clone()),
+            implicit_proposed.clone(),
+            previous,
+        );
         let forwarded_start = if typed { 4 } else { 2 };
         let mut limiter_args = Vec::with_capacity(2 + function.args.len() - forwarded_start);
         limiter_args.extend([implicit_proposed, implicit_previous]);

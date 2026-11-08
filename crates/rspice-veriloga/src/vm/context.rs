@@ -2113,6 +2113,23 @@ impl VmContext {
         self.state_initialized[index] = true;
     }
 
+    /// Give each never-published limiter in `slots` the initial-junction
+    /// load's unknown history, NaN, which its body reads as "start here".
+    pub(crate) fn begin_initial_junction_limiting(&mut self, slots: &[usize]) {
+        for &slot in slots {
+            let (Some(initialized), Some(value)) = (
+                self.state_initialized.get_mut(slot),
+                self.state_values.get_mut(slot),
+            ) else {
+                continue;
+            };
+            if !*initialized {
+                *value = f64::NAN;
+                *initialized = true;
+            }
+        }
+    }
+
     /// Allocate state variables.
     pub fn allocate_states(&mut self, count: usize) {
         self.state_values.resize(count, 0.0);

@@ -282,6 +282,10 @@ impl Engine {
         let junction_gmin =
             self.effective_device_junction_gmin(self.config.convergence_config.gmin_target);
         circuit.begin_switch_initial_junction_load();
+        #[cfg(feature = "veriloga")]
+        circuit
+            .veriloga_devices_mut()
+            .begin_initial_junction_limiting();
         circuit.set_b3soi_operating_point_mode(true);
         circuit.set_xyce_memristor_operating_point_mode(true);
         circuit.set_semiconductor_junction_gmin(junction_gmin);

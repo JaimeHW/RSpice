@@ -1140,6 +1140,9 @@ impl CircuitData {
     #[cfg(feature = "veriloga")]
     pub fn add_veriloga_device(&mut self, mut device: crate::device::veriloga::VerilogADevice) {
         device.set_simulation_parameters(self.generated_simulation_parameters);
+        // The first load of each named limiter is the initial-junction load,
+        // whichever solve makes it.
+        device.begin_initial_junction_limiting();
         self.non_electrical_state_nodes
             .extend(device.non_electrical_node_indices());
         self.veriloga_devices.add(device);

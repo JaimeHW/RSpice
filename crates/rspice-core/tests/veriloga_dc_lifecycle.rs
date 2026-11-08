@@ -3,6 +3,7 @@
 
 use rspice_core::abort_signal::CountingAbort;
 use rspice_core::engine::DcSweepRange;
+use rspice_core::notice::{EngineNotice, NoticeCollector};
 use rspice_core::{Engine, Netlist, NoAbort};
 use std::io::Write;
 use std::path::PathBuf;
@@ -2278,4 +2279,68 @@ end\nendmodule\n"
             "limited={limited}: V(a) = {actual} V, expected {expected} V"
         );
     }
+}
+
+/// A `pnjlim` junction behind 1 k from 5 V, and one fed 1 mA, both found by
+/// the direct Newton alone. The linear presolve parks each junction near a
+/// rail; the initial-junction load starts the limiter from the junction's
+/// critical voltage instead, as ngspice-46's OSDI `init_lim` does, so no
+/// convergence aid is needed.
+#[test]
+fn a_pnjlim_junction_starts_from_its_critical_voltage_without_an_aid() {
+    let vt = 1.380649e-23 * 300.15 / 1.602176634e-19;
+    let is = 1.0e-14_f64;
+    // 5 = 1 k * is * (exp(v / vt) - 1) + v, by Newton on the diode equation.
+    let mut behind_resistor = 0.7_f64;
+    for _ in 0..100 {
+        let current = is * ((behind_resistor / vt).exp() - 1.0);
+        let residual = 1.0e3 * current + behind_resistor - 5.0;
+        let slope = 1.0e3 * is * (behind_resistor / vt).exp() / vt + 1.0;
+        behind_resistor -= residual / slope;
+    }
+    let fed_current = vt * (1.0e-3 / is + 1.0).ln();
+    let model = write_model(
+        "pnjlim_start",
+        "`include \"constants.vams\"\n`include \"disciplines.vams\"\n\
+module junction(a, c); inout a, c; electrical a, c; real vd, vcrit;\n\
+analog begin\n\
+  vcrit = $vt * ln($vt / (`M_SQRT2 * 1.0e-14));\n\
+  vd = $limit(V(a, c), \"pnjlim\", $vt, vcrit);\n\
+  I(a, c) <+ 1.0e-14 * (exp(vd / $vt) - 1.0);\n\
+end\nendmodule\n",
+    );
+    for (drive, expected) in [
+        ("V1 in 0 DC 5
+R1 in a 1k", behind_resistor),
+        ("I1 0 a DC 1m", fed_current),
+    ] {
+        let deck = format!(
+            "* pnjlim start
+.hdl \"{}\"
+{drive}
+X1 a 0 junction
+.op
+.end
+",
+            deck_path(&model)
+        );
+        let netlist = Netlist::parse(&deck).expect("deck parses");
+        let collector = NoticeCollector::new();
+        let _installed = collector.install();
+        let result = Engine::default()
+            .run_dc_op_with_abort(&netlist, &NoAbort)
+            .unwrap_or_else(|error| panic!("{drive}: {error}"));
+        let aids: Vec<_> = collector
+            .take()
+            .into_iter()
+            .filter(|recorded| matches!(recorded.notice, EngineNotice::ConvergenceAid(_)))
+            .collect();
+        assert!(aids.is_empty(), "{drive}: the direct Newton answers: {aids:?}");
+        let actual = node_voltage(&result, "a");
+        assert!(
+            (actual - expected).abs() <= 1.0e-6 * expected,
+            "{drive}: V(a) = {actual} V, expected {expected} V"
+        );
+    }
+    let _ = std::fs::remove_file(model);
 }

@@ -16,6 +16,12 @@
 //! the limiter's implicit proposed and previous values, and lowered exactly as
 //! a source-defined limiter function's inlined body is. Every route therefore
 //! runs it through the one named-limiter operator they already share.
+//!
+//! An operating point's initial-junction load hands a limiter that has never
+//! run an unknown (NaN) previous value. A built-in limiter then returns its
+//! starting value, as ngspice-46's OSDI limiting callbacks do under
+//! `init_lim`: `pnjlim` the junction's critical voltage, `fetlim` the
+//! threshold plus 0.1, `limvds` 0.1 and `limitlog` 0.
 
 use super::*;
 
@@ -24,6 +30,9 @@ use super::*;
 /// reach of any source identifier.
 const VNEW: &str = "$limit.vnew";
 const VOLD: &str = "$limit.vold";
+/// The previous iterate as the history holds it, NaN on the initial-junction
+/// load; `VOLD` is the proposal there, so no body reads a NaN.
+const HISTORY: &str = "$limit.history";
 const ARGUMENTS: [&str; 2] = ["$limit.a0", "$limit.a1"];
 
 #[derive(Clone, Copy)]
@@ -100,8 +109,17 @@ impl SemanticAnalyzer {
             SmolStr::new(VNEW),
             self.lower_expression(&implicit(LimiterArgument::Proposed))?,
         );
+        let body = Body { span };
         frame.insert(
             SmolStr::new(VOLD),
+            self.lower_expression(&body.cond(
+                body.unknown(implicit(LimiterArgument::Previous)),
+                implicit(LimiterArgument::Proposed),
+                implicit(LimiterArgument::Previous),
+            ))?,
+        );
+        frame.insert(
+            SmolStr::new(HISTORY),
             self.lower_expression(&implicit(LimiterArgument::Previous))?,
         );
         for (name, argument) in ARGUMENTS
@@ -112,7 +130,11 @@ impl SemanticAnalyzer {
             let value = self.coerce_assignment_expression(value, ValueType::Real)?.0;
             frame.insert(SmolStr::new(name), value);
         }
-        let body = Body { span }.algorithm(limiter.algorithm);
+        let body = body.cond(
+            body.unknown(body.name(HISTORY)),
+            body.start(limiter.algorithm),
+            body.algorithm(limiter.algorithm),
+        );
         self.subst_stack.push(frame);
         let candidate = self.lower_expression(&body);
         self.subst_stack.pop();
@@ -127,8 +149,8 @@ impl SemanticAnalyzer {
 }
 
 /// Builds a limiter body as source-level expressions at one span.
-struct Body {
-    span: Span,
+pub(super) struct Body {
+    pub(super) span: Span,
 }
 
 impl Body {
@@ -140,6 +162,24 @@ impl Body {
             Algorithm::Logarithmic => self.limitlog(),
             Algorithm::Identity => self.name(VNEW),
         }
+    }
+
+    /// What the limiter returns on the initial-junction load, from ngspice-46
+    /// `src/osdi/osdicallbacks.c`.
+    fn start(&self, algorithm: Algorithm) -> Expression {
+        match algorithm {
+            Algorithm::PnJunction => self.name(ARGUMENTS[1]),
+            Algorithm::Fet => self.add(self.name(ARGUMENTS[0]), self.num(0.1)),
+            Algorithm::DrainSource => self.num(0.1),
+            Algorithm::Logarithmic => self.num(0.0),
+            Algorithm::Identity => self.name(VNEW),
+        }
+    }
+
+    /// Whether `history` is the initial-junction load's unknown: NaN, the one
+    /// value unequal to itself.
+    pub(super) fn unknown(&self, history: Expression) -> Expression {
+        self.binary(BinaryOp::Ne, history.clone(), history)
     }
 
     /// `DEVpnjlim(vnew, vold, vt, vcrit)`.
@@ -358,7 +398,12 @@ impl Body {
         self.binary(BinaryOp::Le, left, right)
     }
 
-    fn cond(&self, condition: Expression, then: Expression, otherwise: Expression) -> Expression {
+    pub(super) fn cond(
+        &self,
+        condition: Expression,
+        then: Expression,
+        otherwise: Expression,
+    ) -> Expression {
         Expression::Conditional(ConditionalExpr {
             condition: Box::new(condition),
             then_expr: Box::new(then),
