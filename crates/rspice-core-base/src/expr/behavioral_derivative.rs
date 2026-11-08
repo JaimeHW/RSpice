@@ -708,6 +708,7 @@ fn eval_function_with_derivative(
         | Function::Barycentric
         | Function::BarycentricFile => derivative_pair(0.0, 0.0),
         Function::Sdt => None,
+        Function::SmallSig => derivative_pair(context.program.small_signal_value(), 0.0),
         Function::Rand | Function::Random | Function::White => {
             let (x, dx) = eval_arg(0)?;
             let seed = if args.len() == 2 {

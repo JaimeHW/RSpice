@@ -648,6 +648,13 @@ impl BehavioralVoltageSource {
         self.transient_voltage_lte_excluded
     }
 
+    /// `smallsig()` in this source's expression reads 1 from here on.
+    pub(crate) fn enter_small_signal_analysis(&mut self) {
+        if !self.program.small_signal_constants.is_empty() {
+            Arc::make_mut(&mut self.program).enter_small_signal_analysis();
+        }
+    }
+
     pub(crate) fn is_solution_dependent(&self) -> bool {
         !self.program.node_map.is_empty() || !self.program.branch_map.is_empty()
     }
@@ -1913,6 +1920,13 @@ impl BehavioralCurrentSource {
             .filter_map(|binding| *binding)
     }
 
+    /// `smallsig()` in this source's expression reads 1 from here on.
+    pub(crate) fn enter_small_signal_analysis(&mut self) {
+        if !self.program.small_signal_constants.is_empty() {
+            Arc::make_mut(&mut self.program).enter_small_signal_analysis();
+        }
+    }
+
     pub(crate) fn is_solution_dependent(&self) -> bool {
         !self.program.node_map.is_empty() || !self.program.branch_map.is_empty()
     }
@@ -2380,6 +2394,20 @@ impl BehavioralCurrentSource {
 pub struct BehavioralSources {
     pub voltage_sources: Vec<BehavioralVoltageSource>,
     pub current_sources: Vec<BehavioralCurrentSource>,
+}
+
+impl BehavioralSources {
+    /// Every source's `smallsig()` reads 1 from here on: the circuit is about
+    /// to solve the operating point of a `.ac` or `.noise` analysis.
+    #[doc(hidden)]
+    pub fn enter_small_signal_analysis(&mut self) {
+        self.voltage_sources
+            .iter_mut()
+            .for_each(BehavioralVoltageSource::enter_small_signal_analysis);
+        self.current_sources
+            .iter_mut()
+            .for_each(BehavioralCurrentSource::enter_small_signal_analysis);
+    }
 }
 
 /// Written out so that `clone_from` reaches each source's own `clone_from`:

@@ -939,6 +939,7 @@ impl<'a> Parser<'a> {
             | Function::BarycentricFile => Some((1, 3)),
             Function::Sdt => Some((1, 1)),
             Function::Rand | Function::Random | Function::White => Some((1, 2)),
+            Function::SmallSig => Some((0, 0)),
             _ => None,
         };
 

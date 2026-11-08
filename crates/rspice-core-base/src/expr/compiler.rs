@@ -243,6 +243,12 @@ fn compile_expr(expr: &Expr, program: &mut CompiledExpr, context: Option<&Contex
                 Function::Rand | Function::Random | Function::White => {
                     Instruction::SeededRandom(*func, args.len())
                 }
+                Function::SmallSig => {
+                    program
+                        .small_signal_constants
+                        .push(program.instructions.len());
+                    Instruction::PushConst(0.0)
+                }
                 Function::Mod => Instruction::Mod,
                 Function::SpicePulse => Instruction::SpicePulse(args.len()),
                 Function::SpiceSin => Instruction::SpiceSin(args.len()),

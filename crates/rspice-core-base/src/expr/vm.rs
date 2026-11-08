@@ -137,12 +137,34 @@ pub struct CompiledExpr {
     pub lookup_tables: Vec<LookupTable>,
     /// Number of independently stateful SDT occurrences in this program.
     pub sdt_count: usize,
+    /// The constants `smallsig()` compiled to.
+    pub small_signal_constants: Vec<usize>,
 }
 
 impl CompiledExpr {
     /// Create empty program
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// From here on `smallsig()` reads 1: the program runs in a `.ac` or
+    /// `.noise` analysis, operating point included.
+    pub fn enter_small_signal_analysis(&mut self) {
+        for &index in &self.small_signal_constants {
+            self.instructions[index] = Instruction::PushConst(1.0);
+        }
+    }
+
+    /// What `smallsig()` reads in this program.
+    pub(crate) fn small_signal_value(&self) -> Value {
+        match self
+            .small_signal_constants
+            .first()
+            .map(|&index| &self.instructions[index])
+        {
+            Some(Instruction::PushConst(value)) => *value,
+            _ => 0.0,
+        }
     }
 
     /// Get or assign a node index

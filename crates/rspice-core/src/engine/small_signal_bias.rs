@@ -110,6 +110,9 @@ impl Engine {
             None => self.build_circuit_with_abort(netlist, abort)?,
         };
         Self::ensure_analysis_capability(&circuit, analysis)?;
+        if matches!(analysis, CapabilityAnalysis::Ac | CapabilityAnalysis::Noise) {
+            circuit.behavioral_sources.enter_small_signal_analysis();
+        }
         circuit
             .begin_veriloga_equilibrium_analysis(physical)
             .map_err(SimulationError::Circuit)?;

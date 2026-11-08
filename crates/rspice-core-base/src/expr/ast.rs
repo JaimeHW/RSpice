@@ -138,6 +138,7 @@ pub enum Function {
     Rand,      // rand(x[, seed]) = one uniform sample per unit interval of x
     Random,    // random(x[, seed]) = rand samples joined linearly
     White,     // white(x[, seed]) = rand samples less 0.5 joined by smoothsteps
+    SmallSig,  // smallsig() = 1 in a .ac or .noise analysis, otherwise 0
     Mod,       // mod(x, y) = x % y - modulo
     SpicePulse, // spice_pulse(v1, v2, td, tr, tf, pw[, per])
     SpiceSin,  // spice_sin(vo, va, freq, td, theta[, phase_degrees])
@@ -215,6 +216,7 @@ impl Function {
             "RAND" => Some(Self::Rand),
             "RANDOM" => Some(Self::Random),
             "WHITE" => Some(Self::White),
+            "SMALLSIG" => Some(Self::SmallSig),
             "PWL" => Some(Self::Pwl),
             "MOD" | "FMOD" => Some(Self::Mod),
             "SPICE_PULSE" => Some(Self::SpicePulse),

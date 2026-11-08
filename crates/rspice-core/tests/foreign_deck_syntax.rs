@@ -1964,3 +1964,50 @@ fn a_sin_stops_after_its_cycle_count() {
         assert_close(&format!("V({node}) at {time:e}"), actual, expected, 1e-4);
     }
 }
+
+// LTspice 26.1.1 (QSPICE has no such function): `smallsig()` is 0 in `.op` and
+// `.tran` and 1 through `.ac` and `.noise`, their operating points included.
+#[test]
+fn smallsig_is_one_through_ac_and_noise_only() {
+    let netlist = parse(
+        "* smallsig
+B1 a 0 V=smallsig()+2
+R1 a 0 1k
+V1 in 0 0 AC 1
+B2 out 0 V=V(a)*V(in)
+R2 out 0 1k
+.op
+.end
+",
+    );
+    assert_close("V(a) op", op_voltage(&netlist, "a"), 2.0, 1e-12);
+    assert_close(
+        "V(a) tran",
+        tran_voltages(&netlist, 1e-3, 1e-3, &["a"])[0],
+        2.0,
+        1e-9,
+    );
+    let out = |names: &[String]| {
+        names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("out"))
+            .expect("node out")
+    };
+    let ac = Engine::default()
+        .run_ac(&netlist, &[1e3])
+        .expect("AC solves")
+        .pop()
+        .expect("one AC point");
+    assert_close("V(out) ac", ac.voltages[out(&ac.node_names)].re, 3.0, 1e-9);
+    let noise = Engine::default()
+        .run_noise_named_with_input_source(&netlist, "out", None, "V1", &[1e3], 300.15)
+        .expect("noise solves")
+        .pop()
+        .expect("one noise point");
+    assert_close(
+        "V(out) noise",
+        noise.voltages[out(&noise.node_names)].re,
+        3.0,
+        1e-9,
+    );
+}
