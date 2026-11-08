@@ -419,7 +419,12 @@ use rspice_core::analysis::harmonic_balance::{
 // `netlist::StateMachine` and `netlist::MachineRule`, the LTspice `.machine`
 // block an `ElementKind::StateMachine` carries to the engine's builder and
 // the CLI's element inspection, bring it to 5,259.
-const MAX_PUBLIC_ITEMS: usize = 5259;
+// `solver::InstanceUnknown` with `SimulationResult::instance_unknown` and
+// `set_instance_unknowns`, which say what a Verilog-A instance's own
+// unknowns hold so that the application's operating-point table lists a
+// branch current as a current and leaves an unnamed unknown out, bring it
+// to 5,262.
+const MAX_PUBLIC_ITEMS: usize = 5262;
 
 /// The `#[doc(hidden)] pub` items of the family, counted apart from
 /// `MAX_PUBLIC_ITEMS`. A hidden item is plumbing that one crate of the engine

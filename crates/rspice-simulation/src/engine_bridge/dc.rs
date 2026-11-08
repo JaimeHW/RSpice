@@ -3,6 +3,7 @@
 use std::collections::{HashMap, HashSet};
 
 use rspice_core::abort_signal::AbortSignal;
+use rspice_core::solver::InstanceUnknown;
 
 use super::{EngineBridge, ensure_not_aborted};
 use crate::error::SimulationError;
@@ -810,11 +811,21 @@ fn convert_dc_result(
     // only the event domain resolves has none — publishing the placeholder
     // row here is what put 0 V beside a logic net on the schematic, in the
     // operating-point sheet and in every saved project.
+    // A Verilog-A instance's own unknowns are no nets either: a branch the
+    // module names reads as its current, and one it never named not at all.
     for (i, &voltage) in core_result.node_voltages.iter().enumerate() {
         ensure_not_aborted(abort)?;
         if i > 0 && core_result.event_only_node_kind(i).is_none() {
             let name = core_result.node_names[i].clone();
-            result.node_voltages.insert(name, voltage);
+            match core_result.instance_unknown(i) {
+                None => {
+                    result.node_voltages.insert(name, voltage);
+                }
+                Some(InstanceUnknown::BranchCurrent) => {
+                    result.branch_currents.insert(name, voltage);
+                }
+                Some(InstanceUnknown::Private) => {}
+            }
         }
     }
 
