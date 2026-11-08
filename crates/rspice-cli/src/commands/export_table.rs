@@ -962,6 +962,7 @@ mod tests {
             raw_name: "out".to_string(),
             kind: crate::commands::run_signals::SignalKind::Voltage,
             values,
+            units: None,
         }];
         let table = scalar_table_taking_samples(
             "transient",

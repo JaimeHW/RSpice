@@ -315,6 +315,8 @@ impl XyceTestRunner {
             )
         };
         Ok(TransientResult {
+            instance_unknowns: Vec::new(),
+            potential_units: Vec::new(),
             current_impulses: None,
             voltage_impulses: None,
             time,
@@ -4569,6 +4571,8 @@ impl XyceTestRunner {
             })
             .collect::<Vec<_>>();
         TransientResult {
+            instance_unknowns: Vec::new(),
+            potential_units: Vec::new(),
             current_impulses: None,
             voltage_impulses: None,
             time,
