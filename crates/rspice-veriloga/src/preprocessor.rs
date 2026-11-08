@@ -2305,7 +2305,7 @@ fn strip_utf8_bom(source: &str) -> &str {
 const PREDEFINED_MACROS: [&str; 2] = ["__FILE__", "__LINE__"];
 
 /// The directives the preprocessor processes itself.
-const KNOWN_DIRECTIVES: [&str; 15] = [
+pub(crate) const KNOWN_DIRECTIVES: [&str; 15] = [
     "begin_keywords",
     "end_keywords",
     "include",

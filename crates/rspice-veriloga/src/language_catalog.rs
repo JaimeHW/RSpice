@@ -194,6 +194,11 @@ pub fn is_reserved_word(word: &str) -> bool {
     TokenKind::keyword(word).is_some()
 }
 
+/// The directives the preprocessor acts on, each without its backtick.
+pub fn directives() -> impl Iterator<Item = &'static str> {
+    crate::preprocessor::KNOWN_DIRECTIVES.iter().copied()
+}
+
 /// The standard headers built into the compiler: the name an include writes
 /// for each, and its text.
 pub fn builtin_headers() -> impl Iterator<Item = (&'static str, &'static str)> {
