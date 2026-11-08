@@ -190,13 +190,13 @@ fn coupled_groups(
     }
     let mut groups: Vec<Vec<usize>> = Vec::new();
     let mut group_index: Vec<Option<usize>> = vec![None; unknowns.len()];
-    for member in 0..unknowns.len() {
+    for (member, &island) in unknowns.iter().enumerate() {
         let leader = root(&mut group_of, member);
         let index = *group_index[leader].get_or_insert_with(|| {
             groups.push(Vec::new());
             groups.len() - 1
         });
-        groups[index].push(unknowns[member]);
+        groups[index].push(island);
     }
     groups
 }
