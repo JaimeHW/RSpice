@@ -43,7 +43,7 @@ pub use veriloga_compile::{
 };
 pub use veriloga_interface::{
     AppliedInterface, apply_compiled_interface, compiled_parameters, interface_mismatch_detail,
-    port_electrical_type, seed_veriloga_view, with_interface_outcome,
+    interface_pins, port_electrical_type, seed_veriloga_view, with_interface_outcome,
 };
 pub use veriloga_parameters::{
     cell_instance_identity_sheet, compiled_parameter_sheet, instance_multiplicity_definition,

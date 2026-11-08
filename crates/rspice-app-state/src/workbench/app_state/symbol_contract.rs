@@ -5,10 +5,15 @@
 //! The pin checks, the waivers and the diagnostic digests read these, as do
 //! the symbol editor's own workflows, so they are the model's operations.
 
-use rspice_design::library::metadata::{metadata_ports, module_interface_view};
-use rspice_design::symbol::generated::{GENERATED_PORTS_KEY, decode_ports};
+use rspice_design::library::metadata::{
+    SourceViewPort, VERILOGA_PORTS_KEY, decode_source_view_ports, metadata_ports,
+    module_interface_view,
+};
+use rspice_design::symbol::generated::{
+    GENERATED_PORTS_KEY, decode_ports, generated_interface_document,
+};
 
-use super::model::Model;
+use super::model::{Model, interface_pins, port_electrical_type};
 use crate::state::{
     CellViewRef, PortSpec, SYMBOL_DOCUMENT_METADATA_KEY, SymbolDocument, SymbolEditorMetadata,
 };
@@ -74,6 +79,67 @@ impl Model {
             .and_then(|view| view.metadata.get(GENERATED_PORTS_KEY))
             .map(|encoded| decode_ports(encoded))
             .unwrap_or_default()
+    }
+
+    /// What the interface of one cell's symbol is read from, in the words
+    /// the symbol editor's actions use for it.
+    pub fn symbol_contract_source(&self, reference: &CellViewRef) -> &'static str {
+        let module_defined = self
+            .library_manager
+            .get_library(&reference.library)
+            .and_then(|library| library.get_cell(&reference.cell))
+            .and_then(module_interface_view)
+            .is_some();
+        if module_defined {
+            "module"
+        } else {
+            "schematic"
+        }
+    }
+
+    /// The ports of one cell's module, with their disciplines and domains,
+    /// when that module's last clean compile is the cell's interface.
+    fn symbol_contract_module_ports(&self, reference: &CellViewRef) -> Option<Vec<SourceViewPort>> {
+        let cell = self
+            .library_manager
+            .get_library(&reference.library)?
+            .get_cell(&reference.cell)?;
+        decode_source_view_ports(
+            module_interface_view(cell)?
+                .metadata
+                .get(VERILOGA_PORTS_KEY)?,
+        )
+    }
+
+    /// The symbol generated for `ports`: for a cell a compiled module
+    /// defines, the one that module's compile draws.
+    pub fn generated_symbol_document(
+        &self,
+        reference: &CellViewRef,
+        ports: &[PortSpec],
+    ) -> SymbolDocument {
+        match self.symbol_contract_module_ports(reference) {
+            Some(typed) => generated_interface_document(
+                ports,
+                &interface_pins(&typed),
+                port_electrical_type(&typed),
+            ),
+            None => SymbolDocument::generated_from_ports(ports),
+        }
+    }
+
+    /// `document` brought into agreement with `ports`, a compiled module's
+    /// discrete ports typed as the module declares them.
+    pub fn reconcile_symbol_with_contract(
+        &self,
+        reference: &CellViewRef,
+        document: &mut SymbolDocument,
+        ports: &[PortSpec],
+    ) {
+        let typed = self
+            .symbol_contract_module_ports(reference)
+            .unwrap_or_default();
+        document.reconcile_typed_ports(ports, port_electrical_type(&typed));
     }
 
     pub fn load_active_symbol_document(&self) -> Result<SymbolDocument, String> {

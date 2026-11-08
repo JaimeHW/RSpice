@@ -111,13 +111,17 @@ fn pins_section(
     let contract_command =
         crate::workbench::commands::vocabulary::Command::SymbolUpdatePinsFromContract;
     if contract_command.availability(app).is_available() {
+        let source = app
+            .state
+            .model
+            .symbol_contract_source(&app.state.model.workspace.content.active_view);
         ui.horizontal(|ui| {
             ui.add_space(8.0);
             let width = (ui.available_width() - 8.0).max(1.0);
             if super::super::super::design_system::labeled_icon_button(
                 ui,
                 WorkbenchIcon::Refresh,
-                "Update pins from schematic",
+                &format!("Update pins from {source}"),
                 false,
                 width,
             )

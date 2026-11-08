@@ -158,24 +158,11 @@ fn symbol_save_dialog_body(
     revision_note: &mut String,
 ) -> Option<egui::Id> {
     let t = Tokens::get(ui.ctx());
-    egui::Frame::new()
-        .fill(t.color.accent.gamma_multiply(0.08))
-        .stroke(Stroke::new(1.0, t.color.accent.gamma_multiply(0.42)))
-        .inner_margin(egui::Margin::symmetric(12, 9))
-        .show(ui, |ui| {
-            ui.label(
-                egui::RichText::new(
-                    "Pin count, netlist order, electrical type and model binding are checked atomically.",
-                )
-                .font(theme::sans(tokens::FS_1, FontWeight::Regular))
-                .color(t.color.text),
-            );
-        });
-    ui.add_space(8.0);
+    let column_width = (ui.available_width() - ui.spacing().item_spacing.x * 3.0) / 4.0;
     egui::Grid::new("symbol-editor.save-checks")
         .num_columns(4)
         .striped(true)
-        .min_col_width(112.0)
+        .min_col_width(column_width)
         .show(ui, |ui| {
             for heading in ["Check", "Expected", "Observed", "Status"] {
                 ui.label(
@@ -222,7 +209,7 @@ fn symbol_save_dialog_body(
         ui.label(
             egui::RichText::new("A revision note is required.")
                 .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                .color(t.color.err),
+                .color(t.color.text_faint),
         );
     }
     Some(response.id)
@@ -300,38 +287,47 @@ pub fn read_only_banner(
 /// A published revision and a revision counter are not states a reader acts
 /// on, and the strip stood permanently to report them. With the symbol saved
 /// there is no strip at all.
-pub fn unpublished_changes_strip(ui: &mut Ui, dirty: bool) {
+/// The notice a symbol with unsaved edits carries, along the foot of its
+/// `canvas`.
+///
+/// Over the drawing rather than above it, and claiming no layout: a row that
+/// arrives with the first edit would move the canvas under the pointer and
+/// end the drag that made the edit.
+pub fn unsaved_changes_notice(ui: &mut Ui, canvas: Rect, dirty: bool) {
+    const NOTICE: &str = "Unsaved changes: Save symbol records them as a new revision.";
     if !dirty {
         return;
     }
     let t = Tokens::get(ui.ctx());
     let c = t.color;
-    ui.allocate_ui_with_layout(
-        vec2(ui.available_width(), 22.0),
-        egui::Layout::left_to_right(egui::Align::Center),
-        |ui| {
-            let rect = ui.max_rect();
-            ui.painter().hline(
-                rect.x_range(),
-                rect.bottom() - 0.5,
-                Stroke::new(1.0, c.border),
-            );
-            ui.add_space(12.0);
-            let (mark, _) = ui.allocate_exact_size(
-                vec2(PROBLEM_MARK_SIDE, PROBLEM_MARK_SIDE),
-                egui::Sense::hover(),
-            );
-            paint_problem_mark(ui.painter(), mark, Problem::Warning);
-            ui.add_space(4.0);
-            ui.label(
-                egui::RichText::new(
-                    "Unpublished changes: placed instances still use the last saved symbol.",
-                )
-                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                .color(c.text_dim),
-            );
-        },
+    let band = Rect::from_min_max(
+        egui::pos2(canvas.left(), canvas.bottom() - 22.0),
+        canvas.right_bottom(),
     );
+    let painter = ui.painter_at(canvas);
+    painter.rect_filled(band, 0.0, c.bg_inset);
+    painter.hline(band.x_range(), band.top() + 0.5, Stroke::new(1.0, c.border));
+    let mark = Rect::from_center_size(
+        egui::pos2(
+            band.left() + 12.0 + PROBLEM_MARK_SIDE * 0.5,
+            band.center().y,
+        ),
+        egui::Vec2::splat(PROBLEM_MARK_SIDE),
+    );
+    paint_problem_mark(&painter, mark, Problem::Warning);
+    painter.text(
+        egui::pos2(mark.right() + 4.0, band.center().y),
+        egui::Align2::LEFT_CENTER,
+        NOTICE,
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        c.text_dim,
+    );
+    let response = ui.interact(
+        band,
+        egui::Id::new("symbol-editor.unsaved-changes"),
+        egui::Sense::hover(),
+    );
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, NOTICE));
 }
 
 pub fn empty_generate_state(
@@ -339,6 +335,7 @@ pub fn empty_generate_state(
     source: &SymbolRequestSource,
     ports: &[PortSpec],
     can_generate: bool,
+    contract_source: &str,
 ) -> Option<SymbolSurfaceRequest> {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
@@ -355,14 +352,14 @@ pub fn empty_generate_state(
             );
             ui.label(
                 egui::RichText::new(format!(
-                    "Generate from schematic builds a box body with all {} ports placed.",
+                    "Generate from {contract_source} draws a body with all {} ports placed.",
                     ports.len()
                 ))
                 .font(theme::sans(tokens::FS_1, FontWeight::Regular))
                 .color(c.text_faint),
             );
             ui.add_space(8.0);
-            if Button::new("Generate from schematic")
+            if Button::new(&format!("Generate from {contract_source}"))
                 .enabled(can_generate)
                 .show(ui)
                 .clicked()

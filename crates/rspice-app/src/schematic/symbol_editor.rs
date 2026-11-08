@@ -90,16 +90,17 @@ pub fn show(ui: &mut Ui, state: &mut AppState, symbol_library: Option<&SymbolLib
         .symbol
         .history
         .is_dirty(&state.model.workspace.content.active_key());
-    // Edited in place, the canvas is the parent sheet: a strip arriving with
-    // the first edit would shift the whole sheet under the pointer mid-drag.
-    // Leaving with unsaved edits asks instead.
-    if state.symbol_in_place().is_none() {
-        surface::unpublished_changes_strip(ui, dirty);
-    }
     if document.body.is_empty()
         && !ports.is_empty()
-        && let Some(request) =
-            surface::empty_generate_state(ui, &source, &ports, !state.active_view_read_only())
+        && let Some(request) = surface::empty_generate_state(
+            ui,
+            &source,
+            &ports,
+            !state.active_view_read_only(),
+            state
+                .model
+                .symbol_contract_source(&state.model.workspace.content.active_view),
+        )
     {
         if !apply_surface_request(state, request) {
             return;
@@ -149,6 +150,11 @@ pub fn show(ui: &mut Ui, state: &mut AppState, symbol_library: Option<&SymbolLib
                 &state.design.symbol.editor,
                 &state.model.workspace.content.active_view,
             ),
+        }
+        // Edited in place, the canvas is the parent sheet, and leaving with
+        // unsaved edits asks instead.
+        if in_place.is_none() {
+            surface::unsaved_changes_notice(ui, rect, dirty);
         }
         // The canvas takes keyboard focus on every press for its shortcuts, so
         // only focus that Tab moved here shows the ring: a press never frames

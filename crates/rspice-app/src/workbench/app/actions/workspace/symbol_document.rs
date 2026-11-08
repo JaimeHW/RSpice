@@ -541,7 +541,11 @@ impl AppState {
         let before = self.model.load_active_symbol_document()?;
         let metadata = self.load_active_symbol_editor_metadata(&before)?;
         let mut document = before.clone();
-        document.reconcile_ports(&ports);
+        self.model.reconcile_symbol_with_contract(
+            &self.model.workspace.content.active_view,
+            &mut document,
+            &ports,
+        );
         if document == before {
             return Ok("Symbol pins already match the interface contract".to_owned());
         }

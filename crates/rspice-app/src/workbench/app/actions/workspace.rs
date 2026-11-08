@@ -15,8 +15,7 @@ use super::hierarchy_net_highlight::NetCarry;
 use crate::diagnostics::LogAnchor;
 use crate::schematic::view::schematic_symbol_context;
 use crate::state::{
-    CellViewRef, ComponentType, Point, RetainedSimulationState, SchematicState, SymbolDocument,
-    ViewType,
+    CellViewRef, ComponentType, Point, RetainedSimulationState, SchematicState, ViewType,
 };
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::{AppState, Model};
@@ -420,7 +419,9 @@ impl AppState {
         }
         let before = self.model.load_active_symbol_document()?;
         let ports = self.active_symbol_ports();
-        let document = SymbolDocument::generated_from_ports(&ports);
+        let document = self
+            .model
+            .generated_symbol_document(&self.model.workspace.content.active_view, &ports);
         if document != before {
             self.record_symbol_metadata_edit(&before);
         }

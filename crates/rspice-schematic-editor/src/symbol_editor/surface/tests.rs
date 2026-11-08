@@ -69,7 +69,9 @@ fn generation_button_returns_its_source_only_when_enabled() {
         let mut request = None;
         click_label("Generate from schematic", |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                if let Some(emitted) = empty_generate_state(ui, &source, &ports, enabled) {
+                if let Some(emitted) =
+                    empty_generate_state(ui, &source, &ports, enabled, "schematic")
+                {
                     request = Some(emitted);
                 }
             });
