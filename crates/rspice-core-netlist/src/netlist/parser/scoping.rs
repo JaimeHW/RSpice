@@ -32,7 +32,7 @@ const MODEL_FAMILIES: &[&[&str]] = &[
     &["NPN", "PNP", "LPNP"],
     &["NMOS", "PMOS", "VDMOS"],
     &["NJF", "PJF"],
-    &["NMF", "PMF", "NHFET", "PHFET"],
+    &["NMF", "PMF", "NHFET", "PHFET", "NIGBT", "PIGBT"],
     &["SW", "VSWITCH", "VSW"],
     &["CSW", "ISWITCH", "ISW"],
 ];

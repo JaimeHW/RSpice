@@ -2385,3 +2385,155 @@ fn the_exp_repeat_option_names_what_it_accepts() {
         "{refusal}"
     );
 }
+
+/// The collector current of `Z1 c g 0 {instance}` from an operating point.
+fn igbt_collector_current(model: &str, instance: &str, extra: &str, vc: f64, vg: f64) -> f64 {
+    let deck = format!(
+        "transistor\nVc c 0 {vc}\nVg g 0 {vg}\nZ1 c g 0 {instance}\n.model N1 {model}\n\
+         B1 i 0 V=-I(Vc)\nR1 i 0 1\n{extra}\n.op\n.end\n"
+    );
+    op_voltage(&parse(&deck), "i")
+}
+
+fn assert_igbt_current(label: &str, actual: f64, expected: f64, relative: f64) {
+    assert_close(label, actual, expected, relative * expected.abs());
+}
+
+// LTspice 26.1.1 batch runs of the same operating points.
+#[test]
+fn an_igbt_follows_ltspice_across_its_regions() {
+    for (vc, vg, ic) in [
+        (0.5, 10.0, 0.00707467),
+        (1.0, 10.0, 1.51923),
+        (2.5, 10.0, 6.52478),
+        (5.0, 10.0, 10.673),
+        (10.0, 10.0, 11.3134),
+        (25.0, 10.0, 11.6605),
+        (2.5, 15.0, 10.8611),
+        (10.0, 15.0, 31.1723),
+        (5.0, 20.0, 29.1056),
+        (25.0, 20.0, 59.6124),
+        (10.0, 4.66, 7.805096e-6),
+        (10.0, 4.70, 2.278354e-4),
+        (10.0, 5.0, 1.012380e-1),
+        (40.0, 0.0, 3.907555e-7),
+        (200.0, 0.0, 1.541254e-6),
+        (100.0, 8.0, 6.481147),
+        (700.0, 8.0, 55.87534),
+    ] {
+        assert_igbt_current(
+            &format!("Vc {vc}, Vg {vg}"),
+            igbt_collector_current("NIGBT", "N1", "", vc, vg),
+            ic,
+            4e-3,
+        );
+    }
+}
+
+// LTspice 26.1.1: a positional area replaces the card's AREA, and m multiplies.
+#[test]
+fn an_igbt_area_and_multiplier_follow_ltspice() {
+    for (vc, ic) in [(0.5, 1.888948), (1.5, 10.61203), (2.5, 17.97035)] {
+        assert_igbt_current(
+            &format!("area 2, Vc {vc}"),
+            igbt_collector_current("NIGBT", "N1 2", "", vc, 10.0),
+            ic,
+            4e-3,
+        );
+    }
+    assert_igbt_current(
+        "m=2",
+        igbt_collector_current("NIGBT", "N1 m=2", "", 1.5, 10.0),
+        6.993762,
+        4e-3,
+    );
+}
+
+// LTspice 26.1.1: a P device is the mirror of its N twin.
+#[test]
+fn a_pigbt_mirrors_ltspice() {
+    assert_igbt_current(
+        "PIGBT",
+        igbt_collector_current("PIGBT", "N1", "", -1.5, -10.0),
+        -3.496881,
+        4e-3,
+    );
+}
+
+// LTspice 26.1.1 at .temp 125 and .temp -40.
+#[test]
+fn an_igbt_follows_ltspice_over_temperature() {
+    for (celsius, vc, vg, ic) in [
+        (125.0, 1.0, 10.0, 0.53938),
+        (125.0, 2.5, 10.0, 5.0777),
+        (125.0, 25.0, 10.0, 9.9978),
+        (-40.0, 1.0, 10.0, 2.5044),
+        (-40.0, 2.5, 10.0, 8.3195),
+        (-40.0, 25.0, 10.0, 14.05),
+    ] {
+        assert_igbt_current(
+            &format!("{celsius} C, Vc {vc}"),
+            igbt_collector_current("NIGBT", "N1", &format!(".temp {celsius}"), vc, vg),
+            ic,
+            8e-3,
+        );
+    }
+}
+
+// LTspice 26.1.1: a 10 ohm gate drive, 1 ohm collector load, gate driven by AC.
+#[test]
+fn an_igbt_small_signal_gain_and_input_follow_ltspice() {
+    let netlist = parse(
+        "gain\nVc vc 0 10\nRc vc c 1\nVg gp 0 10 AC 1\nRg gp g 10\nZ1 c g 0 N1\n.model N1 NIGBT\n\
+         .ac list 1k 1Meg\n.end\n",
+    );
+    let sweep = Engine::default()
+        .run_ac(&netlist, &[1e3, 1e6])
+        .expect("AC sweep solves");
+    for (point, node, re, im, tolerance) in [
+        (0, "c", -0.353416, 3.98149e-4, 1e-5),
+        (0, "g", 1.0, -1.8883e-4, 1e-5),
+        (1, "c", -0.281022, 0.0848514, 1e-3),
+        (1, "g", 0.964253, -0.175703, 1e-3),
+    ] {
+        let result = &sweep[point];
+        let index = result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case(node))
+            .unwrap_or_else(|| panic!("V({node}) is solved"));
+        let voltage = result.voltages[index];
+        assert_close(&format!("Im V({node}) #{point}"), voltage.im, im, tolerance);
+        assert_close(&format!("Re V({node}) #{point}"), voltage.re, re, 1e-3);
+    }
+}
+
+// LTspice 26.1.1: a clamped inductive load switched by a 10 ohm gate drive.
+#[test]
+fn an_igbt_switches_an_inductor_as_ltspice_does() {
+    let netlist = parse(
+        "switching\nZ1 c g 0 N1\nRg gp g 10\nVg gp 0 PULSE(0 15 1u 20n 20n 5u 20u)\nVcc vcc 0 300\n\
+         L1 vcc c 100u\nD1 c vcc Dx\n.model Dx D Ron=1m Roff=1Meg Vfwd=.8\n.model N1 NIGBT\n\
+         B1 i 0 V=I(L1)\nR1 i 0 1\n.end\n",
+    );
+    let times = [1.5e-6, 4e-6, 6e-6, 6.2e-6, 6.3e-6, 8e-6];
+    let voltages = tran_samples(&netlist, 12e-6, 2e-9, &times, "c");
+    let currents = tran_samples(&netlist, 12e-6, 2e-9, &times, "i");
+    for ((time, voltage), (expected, tolerance)) in times.iter().zip(&voltages).zip([
+        (1.27579, 0.01),
+        (2.39182, 0.01),
+        (3.51922, 0.02),
+        (132.568, 3.0),
+        (225.178, 3.0),
+        (300.812, 0.2),
+    ]) {
+        assert_close(&format!("V(c) at {time}"), *voltage, expected, tolerance);
+    }
+    for ((time, current), expected) in times
+        .iter()
+        .zip(&currents)
+        .zip([1.43373, 8.88762, 14.8289, 15.3344, 15.4541, 15.4772])
+    {
+        assert_close(&format!("I(L1) at {time}"), *current, expected, 0.02);
+    }
+}

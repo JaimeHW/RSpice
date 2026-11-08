@@ -46,6 +46,7 @@ use std::time::Duration;
 pub(in crate::engine) mod data_dependencies;
 mod frequency_output;
 mod ground_reference;
+mod igbt;
 mod lead_current_meters;
 mod machine;
 mod model_resolution;
@@ -9277,11 +9278,26 @@ impl Engine {
                     instance_params,
                     ..
                 } => {
+                    // Resolve NMF/PMF from model card when available.
+                    let model_def = find_model_def(netlist, model);
+                    let igbt_card = resolve_native_model_card(
+                        netlist,
+                        model_def,
+                        instance_params,
+                        self.config.temperature,
+                    )?;
+                    if igbt::build_if_igbt(
+                        &mut circuit,
+                        element,
+                        igbt_card.as_deref(),
+                        instance_params,
+                        self.config.temperature,
+                    )? {
+                        continue;
+                    }
                     let drain = circuit.get_or_create_node(&element.nodes[0]);
                     let gate = circuit.get_or_create_node(&element.nodes[1]);
                     let source = circuit.get_or_create_node(&element.nodes[2]);
-                    // Resolve NMF/PMF from model card when available.
-                    let model_def = find_model_def(netlist, model);
                     let foundation_model = model_def
                         .is_none()
                         .then(|| {

@@ -291,7 +291,7 @@ const MOS_CARD_TYPES: &[&str] = &[
 ];
 
 /// Card types a `Z` instance binds, mirroring `resolve_mesfet_type_from_model`.
-const MESFET_CARD_TYPES: &[&str] = &["NMF", "PMF", "NHFET", "PHFET"];
+const MESFET_CARD_TYPES: &[&str] = &["NMF", "PMF", "NHFET", "PHFET", "NIGBT", "PIGBT"];
 
 fn builtin_mos_model_names() -> &'static HashSet<String> {
     static NAMES: OnceLock<HashSet<String>> = OnceLock::new();
