@@ -223,16 +223,17 @@ fn reduced_scope_note(
     }
 }
 
-/// One device's family and quantities, with each quantity's unit. The only
-/// place this page reads them from a report entry.
+/// One device's family and quantities, with each quantity's unit: the one a
+/// module states, which may be none, or the family table's. The only place this
+/// page reads them from a report entry.
 fn device_reading(entry: &DeviceOpEntry) -> (&str, impl Iterator<Item = (&str, f64, &str)> + '_) {
-    let family = entry.device_kind;
+    let kind = entry.device_kind;
     (
-        family,
-        entry
-            .params
-            .iter()
-            .map(move |(name, value)| (*name, *value, device_param_unit(family, name))),
+        entry.family(),
+        entry.quantities().map(move |(name, value, units)| {
+            let unit = units.unwrap_or_else(|| device_param_unit(kind, name));
+            (name, value, unit)
+        }),
     )
 }
 

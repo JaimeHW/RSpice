@@ -1,4 +1,5 @@
 use super::*;
+use rspice_results::engine_evidence::{ModuleOpQuantity, ModuleOpReport};
 
 fn node(name: &str, value: f64) -> OperatingPointValue {
     OperatingPointValue {
@@ -19,6 +20,28 @@ fn device(
         device_kind: family,
         region,
         params,
+        module: None,
+    }
+}
+
+fn module_device(name: &str, module: &str, quantities: Vec<(&str, f64, &str)>) -> DeviceOpEntry {
+    DeviceOpEntry {
+        name: name.to_owned(),
+        device_kind: "VERILOGA",
+        region: None,
+        params: Vec::new(),
+        module: Some(ModuleOpReport {
+            module: module.to_owned(),
+            quantities: quantities
+                .into_iter()
+                .map(|(name, value, units)| ModuleOpQuantity {
+                    name: name.to_owned(),
+                    value,
+                    units: units.to_owned(),
+                    description: String::new(),
+                })
+                .collect(),
+        }),
     }
 }
 
@@ -872,6 +895,36 @@ fn a_failed_solve_offers_to_mark_what_it_named_at_the_end_of_its_row() {
     assert!(responses[1].highlight_failure_sites);
     let responses = play(&plan, &view(None), press_release(at));
     assert!(!responses[1].highlight_failure_sites);
+}
+
+#[test]
+fn a_unit_the_module_states_wins_and_one_it_does_not_state_stays_blank() {
+    let report = DeviceOpReport {
+        entries: vec![module_device(
+            "X1",
+            "sqlaw",
+            vec![
+                ("id", 1.0e-3, "A"),
+                ("kp", 2.0e-4, "A/V^2"),
+                ("gm", 3.0, ""),
+            ],
+        )],
+    };
+    let plan = plan_of(None, Some(&report));
+    let columns = &plan
+        .sections
+        .iter()
+        .find(|section| section.title == "sqlaw")
+        .expect("the module's section")
+        .columns;
+    assert_eq!(
+        columns
+            .iter()
+            .map(|column| (column.label.as_str(), column.unit.as_str()))
+            .collect::<Vec<_>>(),
+        [("id", "A"), ("kp", "A/V^2"), ("gm", "")],
+        "gm is a siemens on the family table, but this module's source gives it no unit"
+    );
 }
 
 #[test]
