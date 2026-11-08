@@ -441,7 +441,10 @@ use rspice_core::analysis::harmonic_balance::{
 // `SimulationResult::potential_units` with `set_potential_units`, which say
 // that a thermal net's value is in kelvin to the CLI, the result document and
 // the operating-point table, bring it to 5,270.
-const MAX_PUBLIC_ITEMS: usize = 5273;
+// `BuiltinVerilogAInstance::non_voltage_terminals`, which the circuit reads
+// across the crate boundary so a built-in self-heating model's thermal net is
+// in kelvin too, brings it to 5,271.
+const MAX_PUBLIC_ITEMS: usize = 5274;
 
 /// The `#[doc(hidden)] pub` items of the family, counted apart from
 /// `MAX_PUBLIC_ITEMS`. A hidden item is plumbing that one crate of the engine

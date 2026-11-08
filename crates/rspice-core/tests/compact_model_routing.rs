@@ -178,6 +178,40 @@ Q1 cx bx 0 0 qmod
     );
 }
 
+/// A built-in self-heating model's thermal terminal sits on a net whose value
+/// is a temperature, listed in kelvin as a runtime module's is.
+#[cfg(feature = "veriloga-model-bjt505t-va")]
+#[test]
+fn a_built_in_thermal_net_is_listed_in_kelvin() {
+    let deck = "\
+* MEXTRAM 505 self-heating, thermal net on the card
+VCC c 0 DC 1
+VB b 0 DC 0
+RB b bx 10k
+RC c cx 1k
+Q1 cx bx 0 0 dt qmod
+RT dt 0 1G
+.model qmod MEXTRAM505T ()
+.op
+.end
+";
+    let netlist = Netlist::parse(deck).expect("self-heating MEXTRAM deck parses");
+    let result = engine().run_dc_op(&netlist).expect("operating point solves");
+    let signals = rspice_core::execution::operating_point_projection_signals(&result)
+        .expect("the operating point lists its values");
+    let unit = |name: &str| {
+        signals
+            .iter()
+            .find(|signal| signal.descriptor().display_name().eq_ignore_ascii_case(name))
+            .unwrap_or_else(|| panic!("{name} is not listed"))
+            .descriptor()
+            .unit()
+            .symbol()
+    };
+    assert_eq!(unit("V(dt)"), "K");
+    assert_eq!(unit("V(cx)"), "V");
+}
+
 #[cfg(feature = "veriloga-model-bjt505-va")]
 mod compiled_mextram {
     use super::*;

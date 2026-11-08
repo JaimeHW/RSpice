@@ -1279,6 +1279,9 @@ impl CircuitData {
     ) {
         self.non_electrical_state_nodes
             .extend(device.non_electrical_node_indices());
+        for (node, units) in device.non_voltage_terminals() {
+            self.record_potential_units(node, units);
+        }
         self.generated_veriloga_devices.add(device);
     }
 

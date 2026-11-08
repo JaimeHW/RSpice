@@ -1476,6 +1476,18 @@ impl BuiltinVerilogAInstance {
             .filter(|&node| node > 0)
     }
 
+    /// Each terminal whose potential is not a voltage, with the circuit node
+    /// it sits on and that potential's units. The shipped models declare only
+    /// `electrical` and `thermal` terminals.
+    pub fn non_voltage_terminals(&self) -> impl Iterator<Item = (usize, &'static str)> + '_ {
+        builtins::descriptor(self.model_name)
+            .map_or(&[][..], |descriptor| descriptor.terminals)
+            .iter()
+            .zip(&self.nodes)
+            .filter(|(terminal, _)| terminal.discipline.eq_ignore_ascii_case("thermal"))
+            .map(|(_, &node)| (node, "K"))
+    }
+
     /// Canonical internal-node names paired with their circuit node IDs.
     /// External terminals occupy the prefix of `nodes`.
     #[doc(hidden)]
