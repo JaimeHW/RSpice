@@ -4,7 +4,7 @@ use super::*;
 use rspice_core::engine::{
     ControlPresentation, ControlPresentationKind, ControlTrace, ControlVector,
 };
-use rspice_core::execution::{BoundedAbortWriter, BoundedWriteFailure};
+use rspice_core::execution::BoundedWriteFailure;
 use serde::Serialize;
 use std::io::Write;
 use std::path::Path;
@@ -124,10 +124,7 @@ pub(super) fn present(
     let tagged = tag_output_path(&base, &format!("control-{ordinal:03}"));
     let data_path = tagged.with_extension("json");
     let svg_path = tagged.with_extension("svg");
-    let mut writer = BoundedAbortWriter::new(
-        &crate::abort::ProcessAbort,
-        config.resources.limits().max_external_data_bytes as u64,
-    );
+    let byte_limit = presentation_byte_limit(config);
     let document = PresentationDocument {
         schema: "rspice.control-presentation",
         version: 3,
@@ -155,19 +152,14 @@ pub(super) fn present(
             })
             .collect(),
     };
-    if let Err(error) = serde_json::to_writer(&mut writer, &document) {
-        return Err(writer_error(&writer, &data_path, args, error.to_string()));
-    }
-    publish_bytes(&data_path, &writer.into_bytes())?;
+    publish_presentation(&data_path, byte_limit, args, |writer| {
+        serde_json::to_writer(writer, &document).map_err(|error| error.to_string())
+    })?;
     let mut paths = vec![data_path];
     if let Some(options) = options {
-        let mut writer = BoundedAbortWriter::new(
-            &crate::abort::ProcessAbort,
-            config.resources.limits().max_external_data_bytes as u64,
-        );
-        render_svg(&mut writer, traces, options)
-            .map_err(|error| writer_error(&writer, &svg_path, args, error.to_string()))?;
-        publish_bytes(&svg_path, &writer.into_bytes())?;
+        publish_presentation(&svg_path, byte_limit, args, |writer| {
+            render_svg(writer, traces, options).map_err(|error| error.to_string())
+        })?;
         paths.push(svg_path);
     }
     if !quiet {
@@ -504,24 +496,91 @@ fn publish_bytes(path: &Path, bytes: &[u8]) -> Result<(), CliError> {
     .map_err(|error| map_atomic_output_error(path, error))
 }
 
+/// Upper bound on the bytes one sample takes in a presentation file: a JSON
+/// `{re,im}` pair for each of the trace's two coordinates, or an SVG point.
+const PRESENTATION_BYTES_PER_VALUE: u64 = 128;
+
+/// What one presentation file may grow to. It holds no more samples than the
+/// run may store, so it is bounded by the result-value cap rather than by the
+/// budget for the data files a simulation reads; a pathological plot fails
+/// before it fills the disk, and a batch run with every vector saved fits.
+fn presentation_byte_limit(config: &Config) -> u64 {
+    u64::try_from(config.resources.limits().max_result_values)
+        .unwrap_or(u64::MAX)
+        .saturating_mul(PRESENTATION_BYTES_PER_VALUE)
+}
+
+/// Streams one presentation file to its staged destination, refusing it at
+/// its byte limit and polling for cancellation between writes, so a plot's
+/// text is never held in memory beside the samples it came from.
+struct PresentationWriter<'a> {
+    destination: &'a mut dyn Write,
+    written: u64,
+    byte_limit: u64,
+    failure: Option<BoundedWriteFailure>,
+}
+
+impl Write for PresentationWriter<'_> {
+    fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+        if rspice_core::AbortSignal::is_aborted(&crate::abort::ProcessAbort) {
+            self.failure = Some(BoundedWriteFailure::Aborted);
+            return Err(std::io::Error::other("presentation cancelled"));
+        }
+        let written = self.written.saturating_add(buffer.len() as u64);
+        if written > self.byte_limit {
+            self.failure = Some(BoundedWriteFailure::ByteLimitExceeded {
+                limit_bytes: self.byte_limit,
+            });
+            return Err(std::io::Error::other("presentation file too large"));
+        }
+        self.destination.write_all(buffer)?;
+        self.written = written;
+        Ok(buffer.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.destination.flush()
+    }
+}
+
+fn publish_presentation(
+    path: &Path,
+    byte_limit: u64,
+    args: &RunArgs,
+    write: impl FnOnce(&mut PresentationWriter<'_>) -> Result<(), String>,
+) -> Result<(), CliError> {
+    publish::artifact(path, |destination| {
+        let mut writer = PresentationWriter {
+            destination,
+            written: 0,
+            byte_limit,
+            failure: None,
+        };
+        write(&mut writer).map_err(|message| writer_error(writer.failure, path, args, message))
+    })
+    .map_err(|error| map_atomic_output_error(path, error))
+}
+
 fn writer_error(
-    writer: &BoundedAbortWriter<'_>,
+    failure: Option<BoundedWriteFailure>,
     path: &Path,
     args: &RunArgs,
     message: String,
 ) -> CliError {
-    match writer.failure() {
+    match failure {
         Some(BoundedWriteFailure::Aborted) => cancellation_cli_error(args.timeout),
-        Some(BoundedWriteFailure::ByteLimitExceeded { limit_bytes }) => CliError::ResourceLimit {
-            path: path.to_path_buf(),
-            source: rspice_core::ResourceLimitError {
-                resource: rspice_core::ResourceKind::ExternalDataBytes,
-                requested: usize::try_from(limit_bytes)
-                    .unwrap_or(usize::MAX)
-                    .saturating_add(1),
-                limit: usize::try_from(limit_bytes).unwrap_or(usize::MAX),
-            },
-        },
+        Some(BoundedWriteFailure::ByteLimitExceeded { limit_bytes }) => {
+            let values = usize::try_from(limit_bytes / PRESENTATION_BYTES_PER_VALUE)
+                .unwrap_or(usize::MAX);
+            CliError::ResourceLimit {
+                path: path.to_path_buf(),
+                source: rspice_core::ResourceLimitError {
+                    resource: rspice_core::ResourceKind::ResultValues,
+                    requested: values.saturating_add(1),
+                    limit: values,
+                },
+            }
+        }
         _ => CliError::output_error(path, std::io::Error::other(message)),
     }
 }
@@ -595,7 +654,7 @@ fn fraction(value: f64, bounds: [f64; 2]) -> f64 {
 }
 
 fn render_svg(
-    writer: &mut BoundedAbortWriter<'_>,
+    writer: &mut PresentationWriter<'_>,
     traces: &[ControlTrace],
     options: &rspice_core::engine::ControlPlotOptions,
 ) -> std::io::Result<()> {

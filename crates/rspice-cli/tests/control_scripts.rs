@@ -124,6 +124,49 @@ fn control_plot_draws_a_complex_vector_as_its_real_part() {
     }
 }
 
+/// A plot's files are bounded by the values the run may store, not by the
+/// budget for the data files a deck reads: a plot far past that budget is
+/// published whole, and one past what the value cap allows is refused whole.
+#[test]
+fn a_plot_is_bounded_by_the_result_value_cap() {
+    let dir = test_dir("control-plot-budget");
+    let deck = dir.join("plot.cir");
+    let traces = "v(out) ".repeat(60);
+    std::fs::write(
+        &deck,
+        format!(
+            "plot budget\nV1 in 0 dc 0 ac 1\nR1 in out 1k\nC1 out 0 1u\n.control\n\
+             ac lin 3 100 300\nplot {traces}\n.endc\n.end\n"
+        ),
+    )
+    .unwrap();
+    let run_with = |stem: &str, setting: &str| {
+        let config = dir.join(format!("{stem}.toml"));
+        std::fs::write(&config, format!("[resources]\n{setting}\n")).unwrap();
+        Command::new(env!("CARGO_BIN_EXE_rspice"))
+            .arg("--config")
+            .arg(config)
+            .args(["--quiet", "--error-format", "json", "run"])
+            .arg(&deck)
+            .arg("-o")
+            .arg(dir.join(format!("{stem}.csv")))
+            .args(["-f", "csv"])
+            .output()
+            .expect("execute public CLI")
+    };
+
+    passed(&run_with("kept", "max_external_data_bytes=64"));
+    let kept = document(&dir.join("kept.control-001.json"));
+    assert_eq!(kept["traces"].as_array().unwrap().len(), 60);
+    assert!(dir.join("kept.control-001.svg").is_file());
+
+    let refused = run_with("refused", "max_result_values=32");
+    assert_eq!(refused.status.code(), Some(75), "{refused:?}");
+    let stderr = String::from_utf8_lossy(&refused.stderr);
+    assert!(stderr.contains("result_values"), "{stderr}");
+    assert!(!dir.join("refused.control-001.json").exists());
+}
+
 #[test]
 fn control_cd_to_inputdir_writes_beside_the_deck() {
     let dir = test_dir("control-inputdir");
