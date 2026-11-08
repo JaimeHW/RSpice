@@ -692,6 +692,12 @@ impl SignalProjection {
             .collect()
     }
 
+    /// Whether the deck's own output cards shape this projection. When they
+    /// do not, [`Self::project`] exports the inventory it is given unchanged.
+    pub fn is_authored(&self) -> bool {
+        self.authored
+    }
+
     /// Project one analysis result onto its authored output contract.
     pub fn project(
         &self,

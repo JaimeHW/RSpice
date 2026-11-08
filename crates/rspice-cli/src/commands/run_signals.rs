@@ -730,8 +730,25 @@ pub(crate) fn dc_operating_point_export_signals(
     result: &SimulationResult,
     abort: &dyn rspice_core::AbortSignal,
 ) -> Result<Vec<ScalarSignal>, rspice_core::SimulationError> {
-    let projection = projection(netlist)?;
     let signals = checked_dc_operating_point_signals(result)?;
+    Ok(project_dc_operating_point(netlist, result, &signals, abort)?.into_owned())
+}
+
+/// The operating point's export columns from the inventory already read from
+/// `result`. A deck with no output card of its own exports that inventory.
+pub(crate) fn project_dc_operating_point<'a>(
+    netlist: &rspice_core::Netlist,
+    result: &SimulationResult,
+    signals: &'a [ScalarSignal],
+    abort: &dyn rspice_core::AbortSignal,
+) -> Result<std::borrow::Cow<'a, [ScalarSignal]>, rspice_core::SimulationError> {
+    let projection = projection(netlist)?;
+    if abort.is_aborted() {
+        return Err(rspice_core::SimulationError::Aborted);
+    }
+    if !projection.is_authored() {
+        return Ok(std::borrow::Cow::Borrowed(signals));
+    }
     // An operating point holds one value per observable, so each series is
     // that value where the result keeps it.
     let lookup = result
@@ -746,12 +763,13 @@ pub(crate) fn dc_operating_point_export_signals(
             kind: AnalysisResultKind::OperatingPoint,
             instance: "DC OP",
             axis: &[0.0],
-            signals: &signals,
+            signals,
             lookup,
             ordered: None,
         },
         abort,
     )
+    .map(std::borrow::Cow::Owned)
 }
 
 pub(crate) fn dc_export_signals(

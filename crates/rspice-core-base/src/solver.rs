@@ -23,6 +23,7 @@ pub use newton::*;
 use crate::Value;
 use crate::event_net::{EventOnlyNetKind, EventTraceSurface, event_only_voltage_refusal};
 use std::collections::HashMap;
+use std::sync::OnceLock;
 
 /// Simulation result containing node voltages and branch currents
 #[derive(Debug, Clone)]
@@ -47,7 +48,7 @@ pub struct SimulationResult {
     /// Case-insensitive lookup index for observables populated by the engine.
     /// The ordered public vector remains the export view; this index prevents
     /// large .PRINT DC requests from degrading to an O(columns^2) scan.
-    dc_observable_index: HashMap<String, Value>,
+    dc_observable_index: OnceLock<HashMap<String, Value>>,
     /// Time points (for transient analysis)
     pub time_points: Vec<Value>,
     /// Voltage waveforms, indexed `[node_id][time_index]`.
@@ -101,7 +102,7 @@ impl SimulationResult {
             branch_currents: vec![0.0; num_branches],
             branch_names: vec![String::new(); num_branches],
             dc_observables: Vec::new(),
-            dc_observable_index: HashMap::new(),
+            dc_observable_index: OnceLock::new(),
             time_points: Vec::new(),
             voltage_waveforms: Vec::new(),
             event_only_nodes: vec![None; num_nodes + 1],
@@ -130,20 +131,24 @@ impl SimulationResult {
     /// Append an engine-owned DC observable and update its lookup index.
     #[doc(hidden)]
     pub fn push_dc_observable(&mut self, name: String, value: Value) {
-        self.dc_observable_index
-            .insert(name.to_ascii_lowercase(), value);
+        if let Some(index) = self.dc_observable_index.get_mut() {
+            index.insert(name.to_ascii_lowercase(), value);
+        }
         self.dc_observables.push((name, value));
     }
 
     /// Look up a converged DC observable by its SPICE probe name.
     pub fn try_dc_observable_named(&self, name: &str) -> Option<Value> {
-        if self.dc_observable_index.len() == self.dc_observables.len()
-            && !self.dc_observable_index.is_empty()
-        {
-            return self
-                .dc_observable_index
-                .get(&name.to_ascii_lowercase())
-                .copied();
+        // Most results are never asked, and a large one publishes several
+        // names per device, so the index is built at the first lookup.
+        let index = self.dc_observable_index.get_or_init(|| {
+            self.dc_observables
+                .iter()
+                .map(|(name, value)| (name.to_ascii_lowercase(), *value))
+                .collect()
+        });
+        if index.len() == self.dc_observables.len() && !index.is_empty() {
+            return index.get(&name.to_ascii_lowercase()).copied();
         }
         self.dc_observables
             .iter()

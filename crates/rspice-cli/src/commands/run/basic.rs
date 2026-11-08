@@ -16,7 +16,7 @@ use crate::cli::{CliError, OutputFormat, map_atomic_output_error};
 use crate::commands::publish;
 use crate::commands::run_signals::{
     SignalKind, checked_dc_operating_point_signals, dc_export_signals,
-    dc_operating_point_export_signals, transient_export_signals,
+    project_dc_operating_point, transient_export_signals,
 };
 use crate::hdf5::{Hdf5SimulationData, Hdf5WaveformSection, write_hdf5, write_hdf5_to_writer};
 use std::path::Path;
@@ -69,9 +69,13 @@ pub(super) fn finish_dc_op_result(
 ) -> Result<(), CliError> {
     let operating_point_signals = checked_dc_operating_point_signals(result)
         .map_err(|error| map_output_projection_error(ctx, error, "DC OP"))?;
-    let exported_operating_point_signals =
-        dc_operating_point_export_signals(ctx.netlist, result, &crate::abort::ProcessAbort)
-            .map_err(|error| map_output_projection_error(ctx, error, "DC OP"))?;
+    let exported_operating_point_signals = project_dc_operating_point(
+        ctx.netlist,
+        result,
+        &operating_point_signals,
+        &crate::abort::ProcessAbort,
+    )
+    .map_err(|error| map_output_projection_error(ctx, error, "DC OP"))?;
     super::shared::ensure_finite_series(
         ctx.args.allow_nonfinite,
         "DC OP",
