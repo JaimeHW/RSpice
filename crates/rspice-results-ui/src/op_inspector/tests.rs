@@ -507,6 +507,9 @@ fn the_readout_keeps_the_precision_the_table_drops() {
     assert_eq!(quantity_readout(0.751_626_903, "V"), "751.626903 mV");
     assert_eq!(quantity_readout(5.0, "V"), "5 V");
     assert_eq!(quantity_readout(26.85, CELSIUS), "26.85 \u{b0}C");
+    assert_eq!(quantity_readout(27.000000000001, CELSIUS), "27 \u{b0}C");
+    assert_eq!(quantity_readout(100.0, CELSIUS), "100 \u{b0}C");
+    assert_eq!(quantity_readout(0.0, CELSIUS), "0 \u{b0}C");
     assert_eq!(quantity_readout(f64::NAN, "V"), NON_FINITE);
 }
 

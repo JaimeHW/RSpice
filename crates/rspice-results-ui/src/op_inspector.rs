@@ -946,7 +946,13 @@ fn quantity_readout(value: f64, unit: &str) -> String {
         return NON_FINITE.to_owned();
     }
     if unit == CELSIUS {
-        let text = format!("{value:.12}");
+        let whole_digits = if value == 0.0 {
+            1
+        } else {
+            value.abs().log10().floor() as i32 + 1
+        };
+        let decimals = (READOUT_SIGNIFICANT_DIGITS as i32 - whole_digits).max(1) as usize;
+        let text = format!("{value:.decimals$}");
         let text = text.trim_end_matches('0').trim_end_matches('.');
         return format!("{text} {CELSIUS}");
     }
