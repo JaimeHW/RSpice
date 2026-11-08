@@ -20,7 +20,17 @@ pub(crate) fn validate_canonical_artifact_identity_for_model(
             .map(|diagnostic| diagnostic.message.to_string())
             .unwrap_or_else(|| "canonical artifact validation failed".into())
     })?;
+    validate_canonical_artifact_layout_for_model(model, artifact)
+}
 
+/// The part of [`validate_canonical_artifact_identity_for_model`] that
+/// compares the artifact with the model: names, layouts, counts, parameters
+/// and equations, without validating the artifact's own structure, which is
+/// most of the cost for a large model.
+pub(crate) fn validate_canonical_artifact_layout_for_model(
+    model: &CompiledModel,
+    artifact: &CanonicalIrArtifact,
+) -> Result<(), String> {
     if artifact.mir.module_name != model.name {
         return Err(format!(
             "canonical module '{}' does not match compiled model '{}'",

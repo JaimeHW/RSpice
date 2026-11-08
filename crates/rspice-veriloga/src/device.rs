@@ -2426,8 +2426,7 @@ enum CanonicalNoisePlan {
 }
 
 impl CanonicalNoisePlan {
-    /// Plan `model`'s grouped noise from `artifact`, whose identity has been
-    /// validated against it.
+    /// Plan `model`'s grouped noise from `artifact`.
     ///
     /// Planned eagerly, because the outcome depends only on the model and
     /// the artifact, but a lowering failure is *reported* lazily. A model
@@ -2480,33 +2479,32 @@ impl CanonicalNoisePlan {
 /// Grouped-noise planning for a device under construction, on a thread of
 /// its own where the platform has threads: lowering a large model's noise
 /// metadata takes about as long as the rest of construction together.
-enum NoisePlanning<'scope> {
+enum NoisePlanning<'scope, 'env> {
     #[cfg(not(target_arch = "wasm32"))]
     Beside(std::thread::ScopedJoinHandle<'scope, Result<CanonicalNoisePlan, VmError>>),
-    Planned(
-        Result<CanonicalNoisePlan, VmError>,
+    /// Planned in line when its outcome is taken.
+    InLine(
+        std::sync::Arc<CompiledModel>,
+        Option<&'env CanonicalIrArtifact>,
         std::marker::PhantomData<&'scope ()>,
     ),
 }
 
-impl<'scope> NoisePlanning<'scope> {
-    fn start<'env>(
+impl<'scope, 'env> NoisePlanning<'scope, 'env> {
+    fn start(
         scope: &'scope std::thread::Scope<'scope, 'env>,
         model: &std::sync::Arc<CompiledModel>,
         artifact: Option<&'env CanonicalIrArtifact>,
     ) -> Self {
+        let model = std::sync::Arc::clone(model);
         #[cfg(not(target_arch = "wasm32"))]
-        if CanonicalNoisePlan::required_for(model) && artifact.is_some() {
-            let model = std::sync::Arc::clone(model);
+        if CanonicalNoisePlan::required_for(&model) && artifact.is_some() {
             return Self::Beside(
                 scope.spawn(move || CanonicalNoisePlan::for_model(&model, artifact)),
             );
         }
         let _ = scope;
-        Self::Planned(
-            CanonicalNoisePlan::for_model(model, artifact),
-            std::marker::PhantomData,
-        )
+        Self::InLine(model, artifact, std::marker::PhantomData)
     }
 
     fn finish(self) -> Result<CanonicalNoisePlan, VmError> {
@@ -2515,7 +2513,16 @@ impl<'scope> NoisePlanning<'scope> {
             Self::Beside(planning) => planning
                 .join()
                 .unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
-            Self::Planned(plan, _) => plan,
+            Self::InLine(model, artifact, _) => CanonicalNoisePlan::for_model(&model, artifact),
+        }
+    }
+
+    /// Wait out planning for a device that is refused anyway, whatever became
+    /// of it: it may have read an artifact that failed validation.
+    fn abandon(self) {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Self::Beside(planning) = self {
+            let _ = planning.join();
         }
     }
 }
@@ -2546,13 +2553,21 @@ struct EvaluatedCanonicalNoiseProcess {
 }
 
 impl CanonicalNoiseRuntimePlan {
-    /// Plan `model`'s grouped noise from `artifact`, whose identity the
-    /// caller has already validated against the model: device construction
-    /// refuses a mismatched artifact before it plans noise.
+    /// Plan `model`'s grouped noise from `artifact`.
+    ///
+    /// Planning checks that the artifact is laid out like the model before it
+    /// lowers anything, but leaves validating the artifact's own structure to
+    /// device construction, which does that beside it.
     fn build(
         artifact: &CanonicalIrArtifact,
         model: &CompiledModel,
     ) -> Result<Self, NoisePlanFailure> {
+        crate::canonical_compat::validate_canonical_artifact_layout_for_model(model, artifact)
+            .map_err(|detail| {
+                NoisePlanFailure::Artifact(VmError::InvalidModel(format!(
+                    "canonical grouped-noise artifact/model mismatch: {detail}"
+                )))
+            })?;
         Self::validate_compiled_injections(artifact, model).map_err(NoisePlanFailure::Artifact)?;
         if artifact.hir.module_name != model.name
             || artifact.hir.ports.len() != model.num_terminals
@@ -3293,15 +3308,22 @@ impl VerilogADevice {
                 "initialization prologue must name unique top-level assignments".into(),
             ));
         }
+        // Planning starts beside the artifact's validation and is waited out
+        // if that fails; its outcome is taken after the native image, so an
+        // error it reports still comes before one compiling reports.
+        let canonical_noise_plan = NoisePlanning::start(scope, &model, canonical_artifact);
         // Validate before looking up a compiled image: a cache hit skips the
         // backend compiler, including its artifact checks.
-        if let Some(artifact) = canonical_artifact {
-            crate::canonical_compat::validate_canonical_artifact_identity_for_model(
-                &model, artifact,
-            )
-            .map_err(|detail| {
-                VmError::InvalidModel(format!("canonical artifact/model mismatch: {detail}"))
-            })?;
+        if let Some(artifact) = canonical_artifact
+            && let Err(detail) =
+                crate::canonical_compat::validate_canonical_artifact_identity_for_model(
+                    &model, artifact,
+                )
+        {
+            canonical_noise_plan.abandon();
+            return Err(VmError::InvalidModel(format!(
+                "canonical artifact/model mismatch: {detail}"
+            )));
         }
         #[cfg(all(
             not(feature = "native"),
@@ -3310,10 +3332,6 @@ impl VerilogADevice {
         if model.noise_process_schema >= 1 {
             Self::validate_portable_noise_assignment_split(&model)?;
         }
-        // The artifact is now known to describe the model, which is all
-        // planning needs; its outcome is taken after the native image, so an
-        // error it reports still comes before one compiling reports.
-        let canonical_noise_plan = NoisePlanning::start(scope, &model, canonical_artifact);
 
         let num_terminals = model.num_terminals;
         let supplied_terminals = nodes.len().min(num_terminals);
