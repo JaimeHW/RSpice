@@ -1057,14 +1057,19 @@ fn validate_runtime_artifact_pair(
     let Some(artifact) = required_canonical_artifact(canonical_ir)? else {
         return Ok(());
     };
-    artifact.validate().map_err(|diagnostics| {
-        let detail = diagnostics
-            .first()
-            .map(|diagnostic| diagnostic.message.as_str())
-            .unwrap_or("canonical artifact validation failed");
-        format!("canonical Verilog-A artifact failed integrity validation: {detail}")
-    })?;
+    artifact.validate().map_err(artifact_integrity_failure)?;
     artifact_pair_agrees(model, artifact)
+}
+
+#[cfg(feature = "veriloga")]
+fn artifact_integrity_failure(
+    diagnostics: Vec<rspice_veriloga::canonical_ir::IrDiagnostic>,
+) -> String {
+    let detail = diagnostics
+        .first()
+        .map(|diagnostic| diagnostic.message.as_str())
+        .unwrap_or("canonical artifact validation failed");
+    format!("canonical Verilog-A artifact failed integrity validation: {detail}")
 }
 
 /// Verify a pair read back from this build's own disk cache.
@@ -1072,14 +1077,23 @@ fn validate_runtime_artifact_pair(
 /// The record header proves the bytes are the ones this compiler build wrote
 /// after [`validate_runtime_artifact_pair`] passed them, so the canonical
 /// artifact's full self-validation, a third of a second for the largest
-/// compact models, would only repeat itself. The pairing is still checked.
+/// compact models, would only repeat itself. The pairing is still checked,
+/// and so is the digital plan: its stored identity is what a device build
+/// compares, so a plan the record did not carry whole has to be a cache miss
+/// here and not a source the device refuses.
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 fn validate_cached_artifact_pair(
     model: &rspice_veriloga::CompiledModel,
     canonical_ir: Option<&rspice_veriloga::canonical_ir::CanonicalIrArtifact>,
 ) -> Result<(), String> {
     match required_canonical_artifact(canonical_ir)? {
-        Some(artifact) => artifact_pair_agrees(model, artifact),
+        Some(artifact) => {
+            artifact
+                .digital
+                .validate()
+                .map_err(artifact_integrity_failure)?;
+            artifact_pair_agrees(model, artifact)
+        }
         None => Ok(()),
     }
 }
@@ -3910,6 +3924,61 @@ endmodule
         .unwrap_err();
         assert!(matches!(error, SimulationError::Aborted));
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_design_with_only_timing_checks_survives_the_disk_record() {
+        let root = unique_test_root("digital-checks");
+        std::fs::create_dir_all(&root).unwrap();
+        let source = root.join("stamp.va");
+        std::fs::write(
+            &source,
+            "`timescale 1ns/1ns
+             module chk(input d, input c);
+             reg ntf;
+             specify $setup(d, posedge c, 3, ntf); endspecify
+             endmodule
+             module stamp(p, n);
+             inout p, n;
+             electrical p, n;
+             reg d, c;
+             chk u(d, c);
+             analog I(p, n) <+ V(p, n) / 1000.0;
+             endmodule
+",
+        )
+        .unwrap();
+        let report = rspice_veriloga::VerilogACompiler::new(rspice_veriloga::CompilerOptions {
+            enable_ams: true,
+            ..Default::default()
+        })
+        .compile_file_runtime_with_metadata(&source, Some("stamp"))
+        .unwrap();
+        let plan = report.canonical_ir.digital.clone();
+        assert!(plan.delays.is_empty() && !plan.delays.checks.is_empty());
+        let key = VerilogASourceKey::new(&source, Some("stamp"));
+        let entry = CachedVerilogAModel {
+            dependencies: fingerprint_paths(&report.dependencies).unwrap(),
+            model: std::sync::Arc::new(report.model),
+            canonical_ir: Some(std::sync::Arc::new(report.canonical_ir)),
+            diagnostics: report.diagnostics.into(),
+        };
+        persist_model_to_disk_at_with_limits(&key, &entry, &root, ResourceLimits::default())
+            .unwrap();
+        let load = || {
+            load_model_from_disk_at_with_limits(&key, &root, ResourceLimits::default(), &NoAbort)
+                .unwrap()
+        };
+        let hit = load().expect("a whole record is a hit").entry;
+        assert_eq!(hit.canonical_ir.unwrap().digital, plan);
+
+        let cache_path = cache_record_path_with_root(&key, &root);
+        reseal_record(&cache_path, VERILOGA_CACHE_RECORD_VERSION, |record| {
+            let artifact = record.canonical_ir.as_mut().unwrap();
+            artifact.digital.delays.checks.clear();
+        });
+        assert!(load().is_none(), "a plan that lost content is a miss");
+        assert!(!cache_path.exists(), "and its record is discarded");
     }
 
     #[test]
