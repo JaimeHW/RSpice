@@ -1171,7 +1171,12 @@ R3 R3_P R3_N 500k
         .expect("noise analysis runs");
     let integrated = IntegratedNoise::new(results);
     for (label, actual, reference, tolerance) in [
-        ("output", integrated.total_output_noise(), 2.486000e-4, 1.0e-5),
+        (
+            "output",
+            integrated.total_output_noise(),
+            2.486000e-4,
+            1.0e-5,
+        ),
         (
             "input",
             integrated.total_input_referred_noise(),
