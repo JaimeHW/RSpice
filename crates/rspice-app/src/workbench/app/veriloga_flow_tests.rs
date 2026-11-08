@@ -33,6 +33,8 @@ struct User {
     ctx: egui::Context,
     app: RSpiceApp,
     named: Vec<(String, egui::Rect)>,
+    /// What the last frame's named nodes also said of themselves.
+    described: Vec<(String, String)>,
     live: Vec<String>,
 }
 
@@ -45,6 +47,7 @@ impl User {
             ctx,
             app,
             named: Vec::new(),
+            described: Vec::new(),
             live: Vec::new(),
         };
         user.app.symbol_library = crate::schematic::symbols::SymbolLibrary::load_embedded().ok();
@@ -62,6 +65,7 @@ impl User {
             ctx,
             app,
             named,
+            described,
             live,
         } = self;
         let output = ctx.run_ui(
@@ -82,6 +86,7 @@ impl User {
             },
         );
         named.clear();
+        described.clear();
         live.clear();
         for (_, node) in output
             .platform_output
@@ -94,6 +99,9 @@ impl User {
                 && let Some(label) = node.label()
             {
                 live.push(label.to_owned());
+            }
+            if let (Some(name), Some(description)) = (node.label(), node.description()) {
+                described.push((name.to_owned(), description.to_owned()));
             }
             let (Some(name), Some(bounds)) = (node.label().or_else(|| node.value()), node.bounds())
             else {
@@ -1240,3 +1248,5 @@ fn compact_models_import_from_their_source_folders_compile_and_place() {
         assert_eq!(placed, 1, "{module} is placed once");
     }
 }
+
+mod language_tools;

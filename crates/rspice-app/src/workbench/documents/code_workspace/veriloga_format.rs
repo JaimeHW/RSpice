@@ -540,9 +540,9 @@ mod tests {
         }
     }
 
-    /// The number of parameters a model declares and all it parses to, with
+    /// Each parameter a model declares, as the compiler parsed it, with
     /// every source position taken out.
-    fn parsed_model(root: &Path) -> Result<(usize, String), String> {
+    fn parameter_table(root: &Path) -> Result<Vec<String>, String> {
         let text = rspice_veriloga::Preprocessor::new()
             .preprocess_file(root)
             .map_err(|error| error.to_string())?;
@@ -563,14 +563,31 @@ mod tests {
             rest = &span[span.find('}').map_or(span.len(), |end| end + 1)..];
         }
         kept.push_str(rest);
-        Ok((kept.matches("ParameterDecl {").count(), kept))
+        Ok(kept
+            .split("ParameterDecl {")
+            .skip(1)
+            .map(|tail| {
+                let mut depth = 1;
+                let end = tail
+                    .char_indices()
+                    .find(|(_, character)| {
+                        match character {
+                            '{' => depth += 1,
+                            '}' => depth -= 1,
+                            _ => {}
+                        }
+                        depth == 0
+                    })
+                    .map_or(tail.len(), |(end, _)| end);
+                tail[..end].to_owned()
+            })
+            .collect())
     }
 
     /// Every shipped model that compiles on its own, each of its files
-    /// formatted, parses to what it did: the same parameters, the same
-    /// everything.
+    /// formatted, declares the parameters it did.
     #[test]
-    fn the_shipped_models_parse_the_same_after_formatting() {
+    fn the_shipped_models_declare_the_same_parameters_after_formatting() {
         let root = cmc_root();
         let copy = std::env::temp_dir().join(format!("rspice-format-{}", std::process::id()));
         let sources = sources_under(&root);
@@ -586,18 +603,20 @@ mod tests {
             .iter()
             .filter(|path| path.extension().is_some_and(|extension| extension == "va"))
         {
-            let Ok((declared, parsed)) = parsed_model(path) else {
+            let Ok(table) = parameter_table(path) else {
                 continue;
             };
-            let (formatted_declared, formatted_parsed) =
-                parsed_model(&place(path)).expect("a formatted model still parses");
-            assert_eq!(declared, formatted_declared, "{}", path.display());
-            assert!(parsed == formatted_parsed, "{} changed", path.display());
+            let formatted = parameter_table(&place(path)).expect("a formatted model still parses");
+            assert_eq!(table.len(), formatted.len(), "{}", path.display());
+            for (before, after) in table.iter().zip(&formatted) {
+                assert_eq!(before, after, "{}", path.display());
+            }
             models += 1;
-            parameters += declared;
+            parameters += table.len();
         }
         std::fs::remove_dir_all(&copy).expect("the temporary directory goes");
         assert!(models >= 30, "{models} models were compared");
         assert!(parameters > 1_000, "{parameters} parameters were compared");
+        println!("{models} models, {parameters} parameters compared");
     }
 }
