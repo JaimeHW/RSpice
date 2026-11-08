@@ -1099,13 +1099,18 @@ mod convergence_quality_tests {
     /// A step rejected on truncation error is an LTE rejection as well as a
     /// timestep reduction, on the ngspice charge-truncation arm and on the
     /// Xyce voltage-estimate arm alike.
+    ///
+    /// The sine comes from a behavioral source. A SIN source is resolved
+    /// finely enough whatever TSTEP says, so truncation never rejects a step
+    /// on it; the behavioral source carries the same waveform uncapped.
     #[test]
     fn truncation_rejects_are_counted_as_lte_rejections() {
         use crate::numerics::integration::TransientLteReference;
 
-        let netlist =
-            Netlist::parse("rc sine\nV1 in 0 SIN(0 1 100meg)\nR1 in out 1k\nC1 out 0 1p\n.end\n")
-                .expect("deck parses");
+        let netlist = Netlist::parse(
+            "rc sine\nB1 in 0 V=sin(2*pi*100meg*time)\nR1 in out 1k\nC1 out 0 1p\n.end\n",
+        )
+        .expect("deck parses");
         for reference in [None, Some(TransientLteReference::PointGlobal)] {
             let config = SimulationConfig {
                 transient_lte_reference: reference,
