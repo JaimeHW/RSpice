@@ -136,6 +136,10 @@ const LAYERS: &[(&str, u32)] = &[
     // does `notice`, whose collector rides in the scope as an opaque value
     // that `notice` alone sets and downcasts.
     ("log_scope", 0),
+    // Which instance parameters a model read while it was built. It names
+    // nothing in the crate but `Value`: a parameter reader notes a name here,
+    // and the builder watching the map warns about the names left unread.
+    ("instance_param_reads", 0),
     // Where a line of deck text was written. It names nothing in the crate:
     // the parser records one and every refusal and diagnostic that cites a
     // deck line reads down into it, so none of them reaches up into `netlist`.
