@@ -449,6 +449,7 @@ impl CircuitData {
 
     /// Record that `node`'s potential is in `units` rather than volts, under
     /// the node's name; ground and an unnamed node are left out.
+    #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
     pub(crate) fn record_potential_units(&mut self, node: NodeId, units: &str) {
         let name = self
             .node_map
