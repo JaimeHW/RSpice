@@ -345,6 +345,8 @@ pub(super) fn parse_resistor(
                     }
                 } else if name_upper == "NOISELESS" {
                     instance_params.push(noiseless_flag());
+                } else if name_upper == "SHORTED" {
+                    // QSPICE reads this schematic flag and solves the resistor as written.
                 } else if model.is_none() {
                     // Bare identifier after the optional value is the resistor
                     // model name. This covers both model-only instances and

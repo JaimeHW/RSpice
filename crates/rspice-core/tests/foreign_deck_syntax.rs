@@ -2098,3 +2098,19 @@ C1 out 0 1u
         );
     }
 }
+
+// QSPICE: a trailing `shorted` flag changes nothing, V(b) = 0.5 (LTspice refuses
+// the card, and QSPICE decides).
+#[test]
+fn a_resistor_flagged_shorted_is_solved_as_written() {
+    let netlist = parse(
+        "* shorted flag
+V1 a 0 1
+R1 a b 1k shorted
+R2 b 0 1k
+.op
+.end
+",
+    );
+    assert_close("V(b)", op_voltage(&netlist, "b"), 0.5, 1e-12);
+}
