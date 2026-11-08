@@ -2009,8 +2009,8 @@ impl TransientResultCompressed {
         }
 
         Ok(TransientResult {
-            instance_unknowns: Vec::new(),
-            potential_units: Vec::new(),
+            instance_unknowns: self.instance_unknowns,
+            potential_units: self.potential_units,
             voltage_impulses: self.voltage_impulses,
             current_impulses: self.current_impulses,
             time: self.time,

@@ -821,6 +821,16 @@ pub struct TransientResultCompressed {
     /// then device-store order.
     pub channels: Vec<TransientCompressedChannel>,
 
+    /// What each node channel holds when a Verilog-A instance owns it as a
+    /// solver unknown rather than a net, in node-channel order; a node past
+    /// the end is a net.
+    pub instance_unknowns: Vec<Option<crate::solver::InstanceUnknown>>,
+
+    /// The units of each node channel whose discipline's potential is not a
+    /// voltage (`K` on a thermal net), in node-channel order; a node past the
+    /// end, or `None`, is in volts.
+    pub potential_units: Vec<Option<String>>,
+
     /// XSPICE digital event traces, carried exactly. Event traces keep every
     /// sample: interpolation is undefined for them, so they are never
     /// decimated.
@@ -1557,6 +1567,8 @@ mod tests {
             time: vec![0.0, 1.0, 2.0],
             step_sizes: vec![0.0, 1.0, 1.0],
             channels,
+            instance_unknowns: Vec::new(),
+            potential_units: Vec::new(),
             digital_traces: Vec::new(),
             digital_buses: Vec::new(),
             real_traces: Vec::new(),

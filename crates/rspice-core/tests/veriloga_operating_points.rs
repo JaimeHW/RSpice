@@ -189,7 +189,8 @@ const TWO_BRANCHES: &str = "module two_branches(p, n); inout p, n; electrical p,
     end endmodule";
 
 /// A transient lists a named branch's unknown as the current it is, and an
-/// unknown the module never named not at all, as the operating point does.
+/// unknown the module never named not at all, as the operating point does;
+/// a compressed run says the same of the waveform it expands to.
 #[test]
 fn a_transient_lists_a_module_branch_as_a_current_and_no_unnamed_unknown() {
     let model = write_model("two_branches", TWO_BRANCHES);
@@ -198,23 +199,32 @@ fn a_transient_lists_a_module_branch_as_a_current_and_no_unnamed_unknown() {
          .tran 1n 2n\n.end\n"
     );
     let netlist = Netlist::parse_validated(&deck).expect("deck parses");
-    let result = Engine::default()
+    let direct = Engine::default()
         .run_tran(&netlist, 2e-9, 0.2e-9)
         .expect("transient runs");
-    let signals = rspice_core::execution::transient_projection_signals(&result)
-        .expect("the transient lists its signals");
-    let names: Vec<_> = signals
-        .iter()
-        .map(|signal| (signal.descriptor().display_name().to_owned(), signal.descriptor().kind()))
-        .collect();
-    assert!(
-        names.iter().any(|(name, kind)| name.eq_ignore_ascii_case("I(X1:bwire)")
-            && *kind == rspice_core::execution::SignalKind::Current),
-        "the named branch is not listed as a current: {names:?}"
-    );
-    assert!(
-        !names.iter().any(|(name, _)| name.contains("__")
-            || name.eq_ignore_ascii_case("V(X1:bwire)")),
-        "an unknown is listed as a net: {names:?}"
-    );
+    let expanded = Engine::default()
+        .run_tran_compressed(&netlist, 2e-9, 0.2e-9, rspice_core::engine::CompressionConfig::default())
+        .expect("compressed transient runs")
+        .try_into_transient()
+        .expect("the compressed transient expands");
+    for result in [&direct, &expanded] {
+        let signals = rspice_core::execution::transient_projection_signals(result)
+            .expect("the transient lists its signals");
+        let names: Vec<_> = signals
+            .iter()
+            .map(|signal| {
+                (signal.descriptor().display_name().to_owned(), signal.descriptor().kind())
+            })
+            .collect();
+        assert!(
+            names.iter().any(|(name, kind)| name.eq_ignore_ascii_case("I(X1:bwire)")
+                && *kind == rspice_core::execution::SignalKind::Current),
+            "the named branch is not listed as a current: {names:?}"
+        );
+        assert!(
+            !names.iter().any(|(name, _)| name.contains("__")
+                || name.eq_ignore_ascii_case("V(X1:bwire)")),
+            "an unknown is listed as a net: {names:?}"
+        );
+    }
 }

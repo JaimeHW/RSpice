@@ -13938,6 +13938,8 @@ fn compress_transient_result(
      -> TransientResultCompressed {
         let stored_points = indices.len();
         TransientResultCompressed {
+            instance_unknowns: result.instance_unknowns.clone(),
+            potential_units: result.potential_units.clone(),
             voltage_impulses: result.voltage_impulses.clone(),
             current_impulses: result.current_impulses.clone(),
             time: indices.iter().map(|&index| result.time[index]).collect(),
