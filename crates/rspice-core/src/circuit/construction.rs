@@ -283,8 +283,8 @@ impl CircuitData {
         &mut self,
         known_device_names: &HashSet<String>,
     ) -> Result<(), CircuitError> {
-        let node_lookup = self.node_map.clone();
-        let branch_lookup = self.branch_names.clone();
+        let node_lookup = &self.node_map;
+        let branch_lookup = &self.branch_names;
         let num_nodes = self.num_nodes;
         self.behavioral_sources
             .bind_references(
@@ -339,8 +339,8 @@ impl CircuitData {
             )
             .map_err(CircuitError::InvalidComponent)?;
 
-        let node_lookup = self.node_map.clone();
-        let branch_lookup = self.branch_names.clone();
+        let node_lookup = &self.node_map;
+        let branch_lookup = &self.branch_names;
         let num_nodes = self.num_nodes;
         for switch in &mut self.generic_switches {
             switch

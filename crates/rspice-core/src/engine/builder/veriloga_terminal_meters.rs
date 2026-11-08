@@ -438,7 +438,7 @@ fn refusal(instance: &str, module: &str, detail: String) -> SimulationError {
 pub(super) fn materialize(
     netlist: &Netlist,
     elements: &mut Vec<Element>,
-    known_device_names: &mut HashSet<String>,
+    known_device_names: &mut super::terminal_probes::KnownDeviceNames,
     max_elements: usize,
     ports_of: impl Fn(&Element) -> Option<InstancePorts>,
     abort: &dyn AbortSignal,
@@ -447,6 +447,7 @@ pub(super) fn materialize(
     if requests.is_empty() {
         return Ok(Vec::new());
     }
+    let known_device_names = known_device_names.of(elements);
     struct Planned {
         element: usize,
         node: usize,

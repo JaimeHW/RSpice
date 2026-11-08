@@ -6393,11 +6393,10 @@ impl Engine {
                 }
             }
         }
-        let mut known_device_names = flat_elements
-            .iter()
-            .map(|element| element.name.to_ascii_uppercase())
-            .collect::<HashSet<_>>();
+        let mut known_device_names = terminal_probes::KnownDeviceNames::default();
         if netlist.options.topology_supernode.unwrap_or(false) {
+            // The reduction removes devices a behavioral source may still name.
+            known_device_names.of(&flat_elements);
             if let Some(capture) = &mut circuit.parameter_direction {
                 capture.has_uncaptured_dependencies = true;
             }
@@ -11127,8 +11126,14 @@ impl Engine {
 
         // Resolve behavioral source expression references once every node
         // exists.
+        let no_device_names = HashSet::new();
+        let behavioral_sources_empty = circuit.behavioral_sources.is_empty();
         circuit
-            .bind_behavioral_references(&known_device_names)
+            .bind_behavioral_references(if behavioral_sources_empty {
+                &no_device_names
+            } else {
+                &*known_device_names.of(&flat_elements)
+            })
             .map_err(SimulationError::from)?;
         // HDL reads of deck objects by path, now that a branch's solution
         // index is final.

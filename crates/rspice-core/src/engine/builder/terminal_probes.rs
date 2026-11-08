@@ -2,10 +2,26 @@
 
 use super::*;
 
+/// The upper-cased names of a build's devices, gathered when something first
+/// asks. Most decks never do.
+#[derive(Default)]
+pub(super) struct KnownDeviceNames(Option<HashSet<String>>);
+
+impl KnownDeviceNames {
+    pub(super) fn of(&mut self, elements: &[Element]) -> &mut HashSet<String> {
+        self.0.get_or_insert_with(|| {
+            elements
+                .iter()
+                .map(|element| element.name.to_ascii_uppercase())
+                .collect()
+        })
+    }
+}
+
 pub(super) fn materialize(
     netlist: &Netlist,
     elements: &mut Vec<Element>,
-    known_device_names: &mut HashSet<String>,
+    known_device_names: &mut KnownDeviceNames,
     max_elements: usize,
     abort: &dyn AbortSignal,
 ) -> Result<Vec<(String, String)>, SimulationError> {
@@ -13,6 +29,7 @@ pub(super) fn materialize(
     if probes.is_empty() {
         return Ok(Vec::new());
     }
+    let known_device_names = known_device_names.of(elements);
     ResourceLimitError::ensure(
         ResourceKind::FlattenedElements,
         elements.len().saturating_add(probes.len()),
