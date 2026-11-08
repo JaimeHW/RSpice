@@ -62,14 +62,16 @@ const GRID: i32 = 10;
 /// The places of an LTspice A-device's instance line.
 const DEVICE_PLACES: usize = 8;
 
-/// The texts a source's drawing letters its waveform in, by LTspice's
-/// window number: its value, its second value (`AC 1`) and its settings
-/// (`Rser=1`).
-const SOURCE_TEXTS: [(u32, &str); 4] = [
+/// The attributes a drawing can letter beside a part's name, by LTspice's
+/// window number: its value, its second value (`AC 1`), its settings
+/// (`Rser=1`), the model it names, and its description.
+const LETTERED_ATTRIBUTES: [(u32, &str); 6] = [
     (3, "Value"),
     (123, "Value2"),
     (39, "SpiceLine"),
     (40, "SpiceLine2"),
+    (38, "SpiceModel"),
+    (1, "Description"),
 ];
 
 /// The device letters whose value names a `.model` card.
@@ -680,20 +682,30 @@ impl Builder<'_> {
         // drawing shows keeps its words and its place.
         let attributes = merged_attributes(definition, symbol);
         let source = component.kind.is_source();
-        if source && pieces.is_empty() {
-            pieces = SOURCE_TEXTS
+        if pieces.is_empty() {
+            let (lettered, others): (Vec<_>, Vec<_>) = LETTERED_ATTRIBUTES
                 .into_iter()
                 .filter_map(|(number, key)| {
                     let window = window(number).filter(|window| !window.hidden)?;
                     let text =
                         attribute(&attributes, key).filter(|text| !text.trim().is_empty())?;
                     Some((
+                        number,
                         text.trim().to_owned(),
                         self.label_position(symbol, window, origin, INSTANCE_VALUE_WORLD),
                         lettered_percent(window.size_percent, INSTANCE_VALUE_WORLD),
                     ))
                 })
-                .collect();
+                .partition(|(number, ..)| *number == 3);
+            // A lone value letters as the part's value; a source's waveform,
+            // or any other text the drawing shows, keeps its own place.
+            if source || !others.is_empty() {
+                pieces = lettered
+                    .into_iter()
+                    .chain(others)
+                    .map(|(_, text, position, size)| (text, position, size))
+                    .collect();
+            }
         }
         let spelled = pieces
             .iter()
@@ -714,7 +726,10 @@ impl Builder<'_> {
         let valueless = windowed
             && pieces.is_empty()
             && attribute(&attributes, "Value").is_none_or(|text| text.trim().is_empty());
-        let hidden = (unshown(name), unshown(value) || valueless);
+        let hidden = (
+            unshown(name),
+            pieces.is_empty() && (unshown(value) || valueless),
+        );
         let Some(component) = self.document.components.last_mut() else {
             return;
         };

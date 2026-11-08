@@ -297,7 +297,9 @@ fn window(words: &[&str], line: usize) -> Result<ForeignWindow, ForeignParseErro
         attribute,
         offset,
         reach: window_reach(&alignment),
-        hidden: alignment == "invisible",
+        // A window of size 0 is LTspice's way of keeping a place for a text it
+        // does not show.
+        hidden: alignment == "invisible" || words.get(5).is_some_and(|size| *size == "0"),
         vertical: alignment.starts_with('v'),
         size_percent: text_size_percent(words.get(5).copied()),
     })

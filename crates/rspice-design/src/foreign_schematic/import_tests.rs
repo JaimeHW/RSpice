@@ -2199,6 +2199,87 @@ fn a_gate_input_a_jumper_grounds_is_not_read() {
 }
 
 #[test]
+fn every_attribute_a_drawing_shows_is_lettered_where_it_shows_it() {
+    use crate::schematic::label_position::LabelPosition;
+    use crate::schematic::value_label::value_pieces;
+
+    let drawing = parse_asc(
+        "Version 4\n\
+         SYMBOL ind 0 0 R0\nWINDOW 3 40 40 Left 2\nWINDOW 123 40 80 Left 2\nWINDOW 39 0 0 Left 0\n\
+         SYMATTR InstName L7\nSYMATTR Value 3m\nSYMATTR Value2 Rser={Rs/2}\nSYMATTR SpiceLine Ipk=2\n\
+         SYMBOL ind 320 0 R0\nWINDOW 3 40 40 Left 2\nWINDOW 39 40 80 Left 2\nWINDOW 40 40 120 Left 2\n\
+         SYMATTR InstName L8\nSYMATTR Value 5m\nSYMATTR SpiceLine Rser=9\nSYMATTR SpiceLine2 Cpar=3p\n\
+         SYMBOL ind 640 0 R0\nWINDOW 3 40 40 Left 0\nWINDOW 123 40 80 Left 2\n\
+         SYMATTR InstName L9\nSYMATTR Value 9m\nSYMATTR Value2 Rser=4\n\
+         SYMBOL ind 960 0 R0\nWINDOW 3 40 40 Left 2\nWINDOW 123 40 80 Left 0\n\
+         SYMATTR InstName L10\nSYMATTR Value 2m\nSYMATTR Value2 Rser=4\n\
+         SYMBOL shown 1280 0 R0\nSYMATTR InstName U1\n",
+    )
+    .expect("the drawing reads");
+    let mut source = library();
+    source.symbols.insert(
+        "shown".to_owned(),
+        ForeignSymbolSource {
+            definition: parse_asy(
+                "Version 4\nSymbolType CELL\nRECTANGLE Normal 0 0 64 64\n\
+                 WINDOW 0 0 -16 Left 2\nWINDOW 3 0 80 Left 2\nWINDOW 38 0 112 Left 2\n\
+                 SYMATTR Prefix X\nSYMATTR Value core\nSYMATTR SpiceModel plan.sub\n\
+                 PIN 0 32 NONE 0\nPINATTR SpiceOrder 1\n",
+            )
+            .expect("the symbol reads"),
+            location: "shown.asy".to_owned(),
+            schematic: None,
+        },
+    );
+    let imported = import_foreign_schematic(&drawing, "work", &source);
+    let texts = |name: &str| {
+        let part = imported
+            .document
+            .components
+            .iter()
+            .find(|part| part.name == name)
+            .unwrap_or_else(|| panic!("{name} is placed"));
+        value_pieces(part).map(|pieces| {
+            pieces
+                .iter()
+                .map(|piece| piece.text.clone())
+                .collect::<Vec<_>>()
+        })
+    };
+    assert_eq!(texts("L7").unwrap(), ["3m", "Rser={Rs/2}"]);
+    assert_eq!(texts("L8").unwrap(), ["5m", "Rser=9", "Cpar=3p"]);
+    assert_eq!(
+        texts("L9").unwrap(),
+        ["Rser=4"],
+        "its value's window is size 0"
+    );
+    assert_eq!(
+        texts("L10"),
+        None,
+        "a size 0 window shows nothing, so the value letters alone"
+    );
+    assert_eq!(
+        texts("U1").unwrap(),
+        ["core", "plan.sub"],
+        "the symbol's own window"
+    );
+
+    // The reading stays what the attributes say.
+    let l7 = imported
+        .document
+        .components
+        .iter()
+        .find(|part| part.name == "L7")
+        .expect("L7 is placed");
+    assert_eq!(l7.value, "3m");
+    let spots = value_pieces(l7).expect("pieces");
+    let LabelPosition::Placed { offset, .. } = spots[1].position else {
+        panic!("{:?} has no place", spots[1]);
+    };
+    assert_eq!(l7.pos + offset, Point::new(25, 50));
+}
+
+#[test]
 fn an_attribute_ltspice_emptied_is_no_value() {
     // LTspice writes `""` for a value the user cleared.
     let drawing = parse_asc(
