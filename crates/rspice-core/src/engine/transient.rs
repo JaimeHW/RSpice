@@ -3977,11 +3977,12 @@ impl Engine {
     #[inline]
     fn requires_conservative_ngspice_breakpoint_restart(
         circuit: &crate::circuit::CircuitData,
+        dialect: SpiceDialect,
     ) -> bool {
         circuit.has_b3soi_devices()
-            || !circuit.tlines.is_empty()
             || !circuit.coupled_tlines.is_empty()
-            || Self::has_hfet_devices(circuit)
+            || (dialect != SpiceDialect::Ngspice
+                && (!circuit.tlines.is_empty() || Self::has_hfet_devices(circuit)))
     }
 
     #[inline]
@@ -3998,8 +3999,13 @@ impl Engine {
     fn source_ramp_tracking_delta(
         circuit: &crate::circuit::CircuitData,
         configured: Value,
+        dialect: SpiceDialect,
     ) -> Value {
-        if Self::has_hfet_devices(circuit) && configured.is_finite() && configured > 0.0 {
+        if dialect != SpiceDialect::Ngspice
+            && Self::has_hfet_devices(circuit)
+            && configured.is_finite()
+            && configured > 0.0
+        {
             configured.min(HFET_SOURCE_RAMP_TRACKING_DELTA)
         } else {
             configured
@@ -5532,12 +5538,16 @@ impl Engine {
             ))
         };
         if self.config.spice_dialect != SpiceDialect::Xyce
-            && Self::requires_conservative_ngspice_breakpoint_restart(&circuit)
+            && Self::requires_conservative_ngspice_breakpoint_restart(
+                &circuit,
+                self.config.spice_dialect,
+            )
         {
-            // Native B3SOI, HFET, and delay-line histories still need the
-            // established smaller warmup step to preserve transient accuracy.
-            // Keep this capability guard independent of deck identity and let
-            // ordinary ngspice-style circuits use the source-compatible scale.
+            // Native B3SOI and coupled-line histories, and HFET and delay-line
+            // ones outside the ngspice dialect, still need the established
+            // smaller warmup step to preserve transient accuracy. Keep this
+            // capability guard independent of deck identity and let ordinary
+            // ngspice-style circuits use the source-compatible scale.
             breakpoints.use_conservative_restart_step();
         }
         Self::collect_transient_source_breakpoints(
@@ -6332,7 +6342,11 @@ impl Engine {
         xyce_lte_excluded_indices.sort_unstable();
         xyce_lte_excluded_indices.dedup();
         let nonlinear_terminal_solution_indices =
-            Self::nonlinear_terminal_solution_indices(&circuit, &solution_lte_excluded);
+            Self::nonlinear_terminal_solution_indices(
+                &circuit,
+                &solution_lte_excluded,
+                self.config.spice_dialect,
+            );
 
         // Grid-locked stepping: the configured grid (filtered to points after
         // the start) is the mandatory target-sample sequence, and the run
@@ -8200,6 +8214,7 @@ impl Engine {
                         source_ramp_tracking_delta: Self::source_ramp_tracking_delta(
                             &circuit,
                             self.config.transient_node_activity_bound,
+                            self.config.spice_dialect,
                         ),
                     },
                     StepBiasFloors {
@@ -10250,9 +10265,11 @@ impl Engine {
                 }
             }
 
+            // ngspice cuts the step where Newton fails, and that cut is part
+            // of the grid its dialect reproduces.
             if !converged
                 && !merit_globalization_retry
-                && self.config.spice_dialect != SpiceDialect::Xyce
+                && self.config.spice_dialect == SpiceDialect::BestAvailable
                 && !is_strictly_linear_transient
                 && circuit.has_nonlinear_devices()
             {
@@ -10861,13 +10878,12 @@ impl Engine {
             } else {
                 None
             };
-            let candidate_truncation_limit = Self::min_truncation_limit(
-                Self::min_truncation_limit(
-                    Self::min_truncation_limit(device_truncation_limit, ltra_truncation_limit),
-                    cpl_interpolation_limit,
-                ),
+            let non_charge_truncation_limit = Self::min_truncation_limit(
+                Self::min_truncation_limit(ltra_truncation_limit, cpl_interpolation_limit),
                 activity_limit,
             );
+            let candidate_truncation_limit =
+                Self::min_truncation_limit(device_truncation_limit, non_charge_truncation_limit);
             total_trunc_nanos += truncation_phase_start.elapsed().as_nanos();
             let middle_phase_start = DiagnosticTimer::start(diagnostic_timing_enabled);
 
@@ -12952,9 +12968,23 @@ impl Engine {
                     && !physical_event
                     && limit >= 2.0 * dt
             };
+            // In the ngspice dialect an accepted order-one step takes its next
+            // width from the order-two truncation, whether or not that promotes
+            // the order (dctran.c:820-833): the second CKTtrunc replaces the
+            // first one's answer, so the order-one charge limit that accepted
+            // this step caps nothing after it. The limits outside the charge
+            // truncation still hold.
+            let next_step_truncation_limit = if self.config.spice_dialect == SpiceDialect::Ngspice
+                && step_trap_order == 1
+                && let Some(trial) = trapezoidal_order_trial
+            {
+                Self::min_truncation_limit(Some(trial.limit), non_charge_truncation_limit)
+            } else {
+                candidate_truncation_limit
+            };
             if !xyce_iteration_error_control
                 && !first_accepted_transient_step
-                && let Some(limit) = candidate_truncation_limit
+                && let Some(limit) = next_step_truncation_limit
                 && limit.is_finite()
                 && limit > 0.0
                 && limit + 1e-18 < timestep.dt()
@@ -18045,6 +18075,31 @@ D1 D 0 DMOD
     }
 
     #[test]
+    fn the_ngspice_dialect_bounds_step_activity_on_bipolar_terminals_only() {
+        let netlist = Netlist::parse(
+            "activity terminals\nQ1 c b 0 QM\n.model QM NPN\nM1 d g 0 0 NM\n.model NM NMOS\n.end",
+        )
+        .expect("deck parses");
+        let circuit = Engine::default()
+            .build_circuit(&netlist)
+            .expect("deck builds");
+        let index = |name| circuit.get_node_by_name(name).expect("node exists") - 1;
+        let excluded = vec![false; circuit.matrix_size()];
+        let terminals = |dialect| {
+            let mut terminals =
+                Engine::nonlinear_terminal_solution_indices(&circuit, &excluded, dialect);
+            terminals.sort_unstable();
+            terminals
+        };
+        let mut bipolar = vec![index("c"), index("b")];
+        bipolar.sort_unstable();
+        assert_eq!(terminals(SpiceDialect::Ngspice), bipolar);
+        let mut every = vec![index("c"), index("b"), index("d"), index("g")];
+        every.sort_unstable();
+        assert_eq!(terminals(SpiceDialect::BestAvailable), every);
+    }
+
+    #[test]
     fn nonlinear_terminal_activity_limit_respects_voltage_lte_exclusions() {
         let mut circuit = crate::circuit::CircuitData::new();
         circuit.mosfets.add(crate::device::Mosfet::new_nmos(
@@ -18057,7 +18112,11 @@ D1 D 0 DMOD
 
         let accepted = [0.0, 0.0, 0.0];
         let gate_only_step = [0.0, 1.0, 0.0];
-        let included = Engine::nonlinear_terminal_solution_indices(&circuit, &[false; 3]);
+        let included = Engine::nonlinear_terminal_solution_indices(
+            &circuit,
+            &[false; 3],
+            SpiceDialect::BestAvailable,
+        );
         assert_eq!(included, [0, 1, 2]);
         let limited = Engine::nonlinear_terminal_activity_limit(
             &included,
@@ -18070,7 +18129,11 @@ D1 D 0 DMOD
         assert!((limited - 4.0e-10).abs() < 1.0e-18);
 
         let excluded_gate = [false, true, false];
-        let included = Engine::nonlinear_terminal_solution_indices(&circuit, &excluded_gate);
+        let included = Engine::nonlinear_terminal_solution_indices(
+            &circuit,
+            &excluded_gate,
+            SpiceDialect::BestAvailable,
+        );
         assert_eq!(included, [0, 2]);
         assert!(
             Engine::nonlinear_terminal_activity_limit(
@@ -18202,15 +18265,22 @@ D1 D 0 DMOD
 
     #[test]
     fn conservative_ngspice_breakpoint_restart_is_capability_scoped() {
+        let best = SpiceDialect::BestAvailable;
         let empty = crate::circuit::CircuitData::new();
         assert!(!Engine::requires_conservative_ngspice_breakpoint_restart(
-            &empty
+            &empty, best
         ));
 
         let mut delay_line = crate::circuit::CircuitData::new();
         delay_line.tlines.push(scalar_line("T1"));
         assert!(Engine::requires_conservative_ngspice_breakpoint_restart(
-            &delay_line
+            &delay_line,
+            best
+        ));
+        // The ngspice dialect restarts these as dctran.c does.
+        assert!(!Engine::requires_conservative_ngspice_breakpoint_restart(
+            &delay_line,
+            SpiceDialect::Ngspice
         ));
 
         let hfet = Netlist::parse(
@@ -18221,11 +18291,20 @@ D1 D 0 DMOD
             .build_circuit(&hfet)
             .expect("HFET fixture builds");
         assert!(Engine::requires_conservative_ngspice_breakpoint_restart(
-            &hfet_circuit
+            &hfet_circuit,
+            best
+        ));
+        assert!(!Engine::requires_conservative_ngspice_breakpoint_restart(
+            &hfet_circuit,
+            SpiceDialect::Ngspice
         ));
         assert_eq!(
-            Engine::source_ramp_tracking_delta(&hfet_circuit, 0.35),
+            Engine::source_ramp_tracking_delta(&hfet_circuit, 0.35, best),
             HFET_SOURCE_RAMP_TRACKING_DELTA
+        );
+        assert_eq!(
+            Engine::source_ramp_tracking_delta(&hfet_circuit, 0.35, SpiceDialect::Ngspice),
+            0.35
         );
 
         let jfet = Netlist::parse("JFET restart policy\nJ1 1 2 0 JM\n.model JM NJF\n.end")
@@ -18234,10 +18313,11 @@ D1 D 0 DMOD
             .build_circuit(&jfet)
             .expect("JFET fixture builds");
         assert!(!Engine::requires_conservative_ngspice_breakpoint_restart(
-            &jfet_circuit
+            &jfet_circuit,
+            best
         ));
         assert_eq!(
-            Engine::source_ramp_tracking_delta(&jfet_circuit, 0.35),
+            Engine::source_ramp_tracking_delta(&jfet_circuit, 0.35, best),
             0.35
         );
     }

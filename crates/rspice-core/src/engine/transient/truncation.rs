@@ -2766,6 +2766,7 @@ impl Engine {
     pub(super) fn nonlinear_terminal_solution_indices(
         circuit: &crate::circuit::CircuitData,
         excluded_solution_indices: &[bool],
+        dialect: SpiceDialect,
     ) -> Vec<usize> {
         let mut included = vec![false; excluded_solution_indices.len()];
         let mut include = |node: usize| {
@@ -2782,22 +2783,29 @@ impl Engine {
             }
         };
 
-        for mos in &circuit.mosfets.devices {
-            include(mos.node_drain);
-            include(mos.node_gate);
-            include(mos.node_source);
-            include(mos.node_bulk);
-        }
         for bjt in &circuit.bjts.devices {
             include(bjt.node_collector);
             include(bjt.node_base);
             include(bjt.node_emitter);
             include(bjt.node_substrate);
         }
-        for jfet in &circuit.jfets {
-            include(jfet.drain);
-            include(jfet.gate);
-            include(jfet.source);
+        // The ngspice dialect leaves unipolar devices to its own truncation
+        // and Newton-failure cuts, the limits its references were made with.
+        // A bipolar latch keeps the bound: its regeneration turns a truncation
+        // estimate a fraction of a percent from ngspice's acceptance threshold
+        // into a whole step of difference on the edge.
+        if dialect != SpiceDialect::Ngspice {
+            for mos in &circuit.mosfets.devices {
+                include(mos.node_drain);
+                include(mos.node_gate);
+                include(mos.node_source);
+                include(mos.node_bulk);
+            }
+            for jfet in &circuit.jfets {
+                include(jfet.drain);
+                include(jfet.gate);
+                include(jfet.source);
+            }
         }
 
         included
