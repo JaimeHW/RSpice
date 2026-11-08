@@ -1341,7 +1341,13 @@ pub fn validate_output_symbols_with_abort(
     netlist: &Netlist,
     abort: &dyn AbortSignal,
 ) -> Result<(), ParseWithAbortError> {
-    if netlist.output_requests.is_empty() {
+    // A request that names no symbol, such as `save all`, has nothing to
+    // resolve; only a deck with one that does is elaborated here.
+    if netlist
+        .output_requests
+        .iter()
+        .all(|request| request.expressions.is_empty() && request.dependencies.is_empty())
+    {
         return Ok(());
     }
     ensure_parse_not_aborted(abort)?;
