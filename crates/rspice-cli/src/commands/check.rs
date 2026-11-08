@@ -306,7 +306,16 @@ fn validate_netlist(
 
     // Always-on topology checks: these decks produce singular systems, so
     // catching them statically beats a NaN at runtime.
-    check_topology(netlist, &flattened.elements, &mut result);
+    // The native dialect solves a loop through a winding as QSPICE does,
+    // with every inductor 1 pOhm at DC; the others leave it singular.
+    let windings_close_loops =
+        engine.config().spice_dialect != rspice_core::engine::SpiceDialect::BestAvailable;
+    check_topology(
+        netlist,
+        &flattened.elements,
+        windings_close_loops,
+        &mut result,
+    );
     let built = check_circuit_build(netlist, &mut result, &engine)?;
 
     if args.connectivity {
@@ -543,11 +552,13 @@ impl rspice_core::xspice::DigitalCosimRuntime for CheckDigitalCosimRuntime {
 }
 
 /// Detect circuit topologies that make the MNA matrix singular:
-/// loops of ideal voltage sources (and DC-shorted inductors), and nodes
-/// whose only connections are current sources.
+/// loops of ideal voltage sources (and, where `windings_close_loops`,
+/// DC-shorted inductors), and nodes whose only connections are current
+/// sources.
 fn check_topology(
     netlist: &Netlist,
     elements: &[rspice_core::netlist::Element],
+    windings_close_loops: bool,
     result: &mut ValidationResult,
 ) {
     use rspice_core::netlist::ElementKind;
@@ -576,10 +587,11 @@ fn check_topology(
     }
 
     for elem in elements {
-        let is_vsrc_edge = matches!(
-            elem.kind,
-            ElementKind::VoltageSource(_) | ElementKind::Inductor { .. }
-        );
+        let is_vsrc_edge = match elem.kind {
+            ElementKind::VoltageSource(_) => true,
+            ElementKind::Inductor { .. } => windings_close_loops,
+            _ => false,
+        };
         if !is_vsrc_edge || elem.nodes.len() < 2 {
             continue;
         }
@@ -1065,7 +1077,7 @@ mod tests {
         )
         .expect("Xyce false-mode deck parses");
         let mut false_result = ValidationResult::default();
-        check_topology(&false_mode, &false_mode.elements, &mut false_result);
+        check_topology(&false_mode, &false_mode.elements, true, &mut false_result);
         assert!(false_result.errors.is_empty());
 
         let replace_mode = Netlist::parse(
@@ -1078,8 +1090,35 @@ mod tests {
         )
         .expect("Xyce replacement deck parses");
         let mut replace_result = ValidationResult::default();
-        check_topology(&replace_mode, &replace_mode.elements, &mut replace_result);
+        check_topology(
+            &replace_mode,
+            &replace_mode.elements,
+            true,
+            &mut replace_result,
+        );
         assert_eq!(replace_result.errors.len(), 1);
+    }
+
+    #[test]
+    fn a_winding_loop_is_singular_only_where_the_dialect_leaves_it_so() {
+        let deck = Netlist::parse(
+            "winding loop\n\
+             V1 a 0 1\n\
+             L1 a b 1m\n\
+             L2 b 0 1m\n\
+             L3 a 0 1m\n\
+             V2 c 0 1\n\
+             V3 c 0 2\n\
+             .END\n",
+        )
+        .expect("loop deck parses");
+        let mut native = ValidationResult::default();
+        check_topology(&deck, &deck.elements, false, &mut native);
+        assert_eq!(native.errors.len(), 1, "{:?}", native.errors);
+        assert!(native.errors[0].message.contains("'V3'"));
+        let mut singular = ValidationResult::default();
+        check_topology(&deck, &deck.elements, true, &mut singular);
+        assert_eq!(singular.errors.len(), 3, "{:?}", singular.errors);
     }
 
     #[test]
