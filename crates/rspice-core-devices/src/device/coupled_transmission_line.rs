@@ -535,17 +535,15 @@ impl CoupledTransmissionLine {
         // changes propagation and drops accepted history when a tolerance
         // refinement makes the solver's step shorter than one picosecond.
         let t2_ps = t2_seconds * 1e12;
-        // The history pruning inside the plan needs a mutable view; clone the
-        // history for this evaluation so the accepted history is untouched until
-        // commit (ngspice prunes only via the accepted `cp->vi_head`).
-        let mut history = native.history.clone();
+        // The plan reads the accepted history without pruning it; only an
+        // accepted step prunes (ngspice moves `cp->vi_head` only on accept).
         match native.runtime.step_stamp_plan(
             t1_ps,
             t2_ps,
             dt_seconds,
             &native.near_v,
             &native.far_v,
-            &mut history,
+            &native.history,
         ) {
             Ok(plan) => Some(plan),
             Err(err) => {
@@ -907,7 +905,7 @@ mod tests {
         }
         let accepted = line.native.clone();
         let expected_retry = line.native_step_plan(0.625e-12, 0.125e-12).unwrap();
-        // A larger trial may prune its private history but is then rejected.
+        // A larger trial reads further into the history but is then rejected.
         assert!(line.native_step_plan(0.75e-12, 0.25e-12).is_some());
         assert_eq!(line.native, accepted);
         assert_eq!(
@@ -915,5 +913,66 @@ mod tests {
             expected_retry
         );
         assert_eq!(line.native, accepted);
+    }
+
+    #[test]
+    fn a_trial_step_reads_the_accepted_history_in_place() {
+        // A long delay at a fine step holds thousands of accepted samples.
+        // Every Newton iteration plans a trial step against them, so a trial
+        // that copied the history cost time in proportion to its length.
+        fn line_with_history(samples: u32) -> CoupledTransmissionLine {
+            let mut line = CoupledTransmissionLine::new(
+                "P1".into(),
+                vec![1, 2],
+                0,
+                vec![3, 4],
+                0,
+                &[vec![2.25, 0.0], vec![0.0, 2.25]],
+                &[vec![0.6e-6, 0.05e-6], vec![0.05e-6, 0.6e-6]],
+                &[vec![1.2e-9, -0.11e-9], vec![-0.11e-9, 1.2e-9]],
+                &[vec![0.0; 2], vec![0.0; 2]],
+                0.03,
+            )
+            .unwrap();
+            line.set_native_branch_matrix_indices(vec![5, 6], vec![7, 8])
+                .unwrap();
+            line.native_seed_dc(&[0.0; 2], &[0.0; 2]).unwrap();
+            let native = line.native.as_mut().unwrap();
+            // 0.01 ps apart: all of them lie within the line's ~800 ps delay.
+            for index in 1..=samples {
+                let time_ps = f64::from(index) * 0.01;
+                native
+                    .history
+                    .push_sample(NativeCplViSample::new(
+                        time_ps,
+                        vec![0.1, 0.0],
+                        vec![0.0; 2],
+                        vec![0.0; 2],
+                        vec![0.0; 2],
+                    ))
+                    .unwrap();
+                native.last_committed_ps = time_ps;
+                native.last_real_seconds = time_ps * 1e-12;
+            }
+            line
+        }
+        fn trial_seconds(line: &CoupledTransmissionLine) -> f64 {
+            let start = line.native.as_ref().unwrap().last_real_seconds;
+            (0..5)
+                .map(|_| {
+                    let clock = std::time::Instant::now();
+                    for _ in 0..20 {
+                        assert!(line.native_step_plan(start + 0.01e-12, 0.01e-12).is_some());
+                    }
+                    clock.elapsed().as_secs_f64()
+                })
+                .fold(f64::INFINITY, f64::min)
+        }
+        let short = trial_seconds(&line_with_history(100));
+        let long = trial_seconds(&line_with_history(20_000));
+        assert!(
+            long < 20.0 * short,
+            "trials against 20000 samples took {long:.2e} s, against 100 samples {short:.2e} s"
+        );
     }
 }

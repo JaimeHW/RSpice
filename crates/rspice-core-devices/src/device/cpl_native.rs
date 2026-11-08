@@ -721,11 +721,11 @@ impl NativeCplRuntime {
         dt_seconds: f64,
         input_voltage: &[f64],
         output_voltage: &[f64],
-        history: &mut NativeCplViHistory,
+        history: &NativeCplViHistory,
     ) -> Result<NativeCplStampPlan, NativeCplError> {
         let h = dt_seconds;
         let h1 = 0.5 * dt_seconds;
-        let delayed = history.delayed_vi_samples_ps(t1_ps, t2_ps, &self.taul_ps)?;
+        let (delayed, _) = history.delayed_vi_lookup_ps(t1_ps, t2_ps, &self.taul_ps)?;
 
         // ngspice runs right_consts on the throwaway working copy `cp2`; clone
         // so the accepted convolution state is preserved for the next commit.
@@ -1200,12 +1200,33 @@ impl NativeCplViHistory {
         (worst_error > 0.0).then(|| h * (0.9 / worst_error.sqrt()).min(2.0))
     }
 
+    /// The delayed samples for the step `[previous, current]`, then the
+    /// history before the earliest delayed time is dropped: no later step
+    /// reads behind it.
     pub(crate) fn delayed_vi_samples_ps(
         &mut self,
         previous_time_ps: f64,
         current_time_ps: f64,
         taul_ps: &[f64],
     ) -> Result<NativeCplDelayedVi, NativeCplError> {
+        let (result, prune_to) =
+            self.delayed_vi_lookup_ps(previous_time_ps, current_time_ps, taul_ps)?;
+        if let Some(prune_to) = prune_to {
+            self.samples.drain(..prune_to);
+        }
+        Ok(result)
+    }
+
+    /// The delayed samples for the step `[previous, current]` and the index
+    /// of the first sample a later step can still read, leaving the history
+    /// untouched. A trial step evaluates against the accepted history this
+    /// way; only an accepted step prunes it.
+    fn delayed_vi_lookup_ps(
+        &self,
+        previous_time_ps: f64,
+        current_time_ps: f64,
+        taul_ps: &[f64],
+    ) -> Result<(NativeCplDelayedVi, Option<usize>), NativeCplError> {
         if !previous_time_ps.is_finite()
             || previous_time_ps < 0.0
             || !current_time_ps.is_finite()
@@ -1303,24 +1324,29 @@ impl NativeCplViHistory {
             }
         }
 
-        if let Some(prune_to) = prune_to {
-            for _ in 0..prune_to {
-                self.samples.pop_front();
-            }
-        }
-
-        Ok(result)
+        Ok((result, prune_to))
     }
 
+    /// The first index `i` with `t[i] <= target <= t[i + 1]`. Sample times
+    /// increase strictly, so a binary search finds it: a long delay at a
+    /// fine step keeps thousands of samples between the oldest and the
+    /// newest.
     fn bracket_lower_index(&self, target_ps: f64) -> Result<usize, NativeCplError> {
-        for index in 0..self.samples.len().saturating_sub(1) {
-            let lower = &self.samples[index];
-            let upper = &self.samples[index + 1];
-            if lower.time_ps <= target_ps && target_ps <= upper.time_ps {
-                return Ok(index);
-            }
-        }
-        Err(NativeCplError::InsufficientHistory { target_ps })
+        let above = self
+            .samples
+            .partition_point(|sample| sample.time_ps < target_ps);
+        let lower = match above {
+            0 => self
+                .samples
+                .front()
+                .is_some_and(|first| first.time_ps <= target_ps)
+                .then_some(0),
+            above if above < self.samples.len() => Some(above - 1),
+            _ => None,
+        };
+        lower
+            .filter(|&lower| lower + 1 < self.samples.len())
+            .ok_or(NativeCplError::InsufficientHistory { target_ps })
     }
 
     fn interpolate_sample(
@@ -3019,6 +3045,33 @@ mod tests {
     }
 
     #[test]
+    fn cpl_native_history_brackets_a_time_by_the_first_interval_holding_it() {
+        let history = history_with_samples();
+        for (target, lower) in [
+            (0.0, Some(0)),
+            (5.0, Some(0)),
+            (10.0, Some(0)),
+            (10.5, Some(1)),
+            (20.0, Some(1)),
+            (39.9, Some(3)),
+            (40.0, Some(3)),
+            (-0.5, None),
+            (40.5, None),
+            (f64::NAN, None),
+        ] {
+            assert_eq!(
+                history.bracket_lower_index(target).ok(),
+                lower,
+                "target {target} ps"
+            );
+        }
+        let mut single =
+            NativeCplViHistory::new(2, vec![0.5, 1.5], vec![10.5, 11.5]).expect("history");
+        single.push_sample(sample(0, 0.0)).expect("initial sample");
+        assert!(single.bracket_lower_index(0.0).is_err());
+    }
+
+    #[test]
     fn cpl_native_delayed_vi_samples_use_dc_before_delay() {
         let mut history =
             NativeCplViHistory::new(2, vec![0.5, 1.5], vec![10.5, 11.5]).expect("history");
@@ -3365,7 +3418,7 @@ mod tests {
             .unwrap();
         let before = runtime.clone();
         let stamp = runtime
-            .step_stamp_plan(0.0, 1e12, 1.0, &near, &far, &mut history)
+            .step_stamp_plan(0.0, 1e12, 1.0, &near, &far, &history)
             .unwrap();
         assert_eq!(
             runtime, before,
@@ -4014,7 +4067,6 @@ mod oracle_replay {
                 continue;
             };
             {
-                let mut trial_history = history.clone();
                 let plan = rt
                     .step_stamp_plan(
                         t1_ps as f64,
@@ -4022,7 +4074,7 @@ mod oracle_replay {
                         *dt_oracle,
                         &prev_v_i,
                         &prev_v_o,
-                        &mut trial_history,
+                        &history,
                     )
                     .unwrap();
                 let mut scale = 1.0e-9f64;
