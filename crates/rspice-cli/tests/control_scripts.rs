@@ -92,6 +92,13 @@ fn control_write_publishes_a_raw_file_under_the_run_ownership_rules() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("collides with"), "{stderr}");
 
+    let tagged = dir.join("tagged.cir");
+    std::fs::write(&tagged, script("write tagged.op-001.csv")).unwrap();
+    let out = run(&tagged, &dir.join("tagged.csv"), &[]);
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("collides with"), "{stderr}");
+
     let source = dir.join("source.cir");
     std::fs::write(&source, script("write source.cir")).unwrap();
     let authored = std::fs::read(&source).unwrap();

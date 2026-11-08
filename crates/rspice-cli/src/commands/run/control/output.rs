@@ -414,6 +414,7 @@ impl ControlFiles {
                 ));
             }
         };
+        publish::destinations::refuse_declared(&destination)?;
         match self
             .files
             .iter_mut()

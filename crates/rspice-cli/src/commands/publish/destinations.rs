@@ -236,6 +236,19 @@ impl Destinations {
         Ok(())
     }
 
+    /// A control script's file may not take a path the invocation declared,
+    /// even when the run publishes its results under names tagged from it.
+    fn refuse_declared(&self, path: &Path) -> Result<(), CliError> {
+        let key = key(path).map_err(|error| CliError::output_error(path, error))?;
+        let mut state = self.lock()?;
+        if let Some(previous) = state.declared.get(&key) {
+            let message = format!("control file collides with {previous} at '{}'", path.display());
+            state.collision = Some(message.clone());
+            return Err(conflict(message));
+        }
+        Ok(())
+    }
+
     pub(crate) fn finish(&self) -> Result<(), CliError> {
         match self.lock()?.collision.clone() {
             Some(message) => Err(conflict(message)),
@@ -246,6 +259,10 @@ impl Destinations {
 
 pub(crate) fn protect(source: &Path) -> Result<(), CliError> {
     current().map_or(Ok(()), |registry| registry.protect(source))
+}
+
+pub(crate) fn refuse_declared(path: &Path) -> Result<(), CliError> {
+    current().map_or(Ok(()), |registry| registry.refuse_declared(path))
 }
 
 pub(crate) fn claim(path: &Path) -> Result<(), CliError> {
