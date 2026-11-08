@@ -102,7 +102,7 @@ pub fn instance_texts(semantic: &SemanticComponent) -> Vec<SchematicText> {
             class: SchematicTextClass::Name,
             placed: name,
             text: component.name.clone(),
-            size_percent: 100,
+            size_percent: component.name_label_pos.size_percent(),
         });
     }
     let pieces = value_pieces(component)
@@ -130,7 +130,7 @@ pub fn instance_texts(semantic: &SemanticComponent) -> Vec<SchematicText> {
             },
             placed: value,
             text: value_text,
-            size_percent: 100,
+            size_percent: component.value_label_pos.size_percent(),
         });
     }
     texts
@@ -160,7 +160,8 @@ pub fn net_label_text(label: &NetLabel) -> SchematicText {
             upward: false,
         },
         text: layout.name.to_owned(),
-        size_percent: 100,
+        size_percent: (layout.font_size / label_layout::NET_LABEL_FONT_WORLD * 100.0).round()
+            as u16,
     }
 }
 

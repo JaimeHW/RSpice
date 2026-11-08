@@ -832,16 +832,16 @@ pub fn draw_component(
     );
 
     let rotation_degrees = component.rotation.degrees();
-    let resolved_cell_symbol = if component.kind == ComponentType::CellInstance {
-        symbol_context.resolved_symbol(component)
-    } else {
-        None
-    };
+    let resolved_cell_symbol = component.source_symbol().or_else(|| {
+        (component.kind == ComponentType::CellInstance)
+            .then(|| symbol_context.resolved_symbol(component))
+            .flatten()
+    });
 
     // Authored symbols are the sole component-body source. Missing library or
     // instance resolution is rendered as an explicit error marker; it must
     // never silently change the circuit's visual semantics.
-    let symbol_drew_its_own_labels = if component.kind == ComponentType::CellInstance {
+    let symbol_drew_its_own_labels = if component.is_drawn_from_a_symbol_document() {
         if symbol_library
             .and_then(|library| compatible_builtin_xspice_asset(component, library))
             .and_then(|(library, filename, width, height)| {
@@ -1017,6 +1017,9 @@ pub fn compatible_builtin_xspice_asset<'a>(
     component: &'a Component,
     library: &'a SymbolLibrary,
 ) -> Option<(&'a SymbolLibrary, &'a str, f32, f32)> {
+    if component.source_symbol().is_some() {
+        return None;
+    }
     let asset = component.builtin_artwork()?;
     let (width, height) = component.artwork_dimensions();
     library
@@ -1166,8 +1169,11 @@ fn draw_component_labels(
     let layout = compute_label_layout(pos, scale, component);
 
     // Draw component name (reference designator)
-    if let Some(size) = lod::annotation_size(INSTANCE_NAME_WORLD, scale, ppp)
-        && component.display_mode.show_name(visibility)
+    if let Some(size) = lod::annotation_size(
+        component.name_label_pos.size_world(INSTANCE_NAME_WORLD),
+        scale,
+        ppp,
+    ) && component.display_mode.show_name(visibility)
         && !component.name.is_empty()
     {
         let font = rspice_ui_kit::theme::sans(size, rspice_ui_kit::theme::FontWeight::Medium);
@@ -1199,7 +1205,11 @@ fn draw_component_labels(
         label_layout::ValueClass::Value => {
             if let Some(pieces) = rspice_design::schematic::value_label::value_pieces(component) {
                 draw_value_pieces(painter, pos, scale, pieces, palette);
-            } else if let Some(size) = lod::annotation_size(INSTANCE_VALUE_WORLD, scale, ppp) {
+            } else if let Some(size) = lod::annotation_size(
+                component.value_label_pos.size_world(INSTANCE_VALUE_WORLD),
+                scale,
+                ppp,
+            ) {
                 let value_text =
                     super::super::source_labels::component_value_label_cached(component);
                 if !value_text.is_empty() {

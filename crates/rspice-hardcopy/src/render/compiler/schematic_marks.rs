@@ -105,24 +105,48 @@ impl SemanticSceneCompiler<'_> {
         let ink = SemanticColor::Exact(super::schematic_text::NET_INK);
         let layout = label_layout::net_label_layout(label);
         let (x, y) = (label.pos.x as f32, label.pos.y as f32);
-        let half = layout.diamond_half;
-        let points = [(x, y - half), (x + half, y), (x, y + half), (x - half, y)]
-            .into_iter()
-            .map(|(x, y)| self.layout_point(LayoutPoint::new(x, y)))
-            .collect::<Result<_, _>>()?;
-        self.primitives.push(ScenePrimitive::Polyline {
-            points,
-            closed: true,
-            // A hairline in the fill's ink, so the mark is its own size.
-            stroke: StrokeStyle::try_new(
-                ink,
-                Length::from_micrometres(25),
-                StrokePattern::Solid,
-                None,
-            )?,
-            fill: Some(SceneFill::solid(ink)),
-        });
-        self.schematic_text(&net_label_text(label))?;
+        // The diamond an RSpice label attaches by, or the open-pin square of
+        // a pin a drawing left open; a flag from a drawing draws neither.
+        let (half, open_pin) = (layout.diamond_half, layout.open_pin_half);
+        let mark = if half > 0.0 {
+            Some((
+                [(x, y - half), (x + half, y), (x, y + half), (x - half, y)],
+                true,
+            ))
+        } else if open_pin > 0.0 {
+            Some((
+                [
+                    (x - open_pin, y - open_pin),
+                    (x + open_pin, y - open_pin),
+                    (x + open_pin, y + open_pin),
+                    (x - open_pin, y + open_pin),
+                ],
+                false,
+            ))
+        } else {
+            None
+        };
+        if let Some((corners, filled)) = mark {
+            let points = corners
+                .into_iter()
+                .map(|(x, y)| self.layout_point(LayoutPoint::new(x, y)))
+                .collect::<Result<_, _>>()?;
+            self.primitives.push(ScenePrimitive::Polyline {
+                points,
+                closed: true,
+                // A hairline in the fill's ink, so the mark is its own size.
+                stroke: StrokeStyle::try_new(
+                    ink,
+                    Length::from_micrometres(25),
+                    StrokePattern::Solid,
+                    None,
+                )?,
+                fill: filled.then(|| SceneFill::solid(ink)),
+            });
+        }
+        if !layout.name.is_empty() {
+            self.schematic_text(&net_label_text(label))?;
+        }
         let supply = label_layout::supply_glyph_marks(label);
         if !supply.is_empty() {
             // A supply's stem and bar at the weight of a connector's tab.

@@ -16,10 +16,13 @@ use super::component_type::ComponentType;
 use super::ground_glyph::GroundGlyph;
 use super::label_position::{LabelPosition, ValuePiece};
 use super::rotation::Rotation;
+use crate::resolved_symbol::ResolvedCellSymbol;
+use crate::symbol::SymbolDocument;
 use rspice_design_model::Point;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 // =============================================================================
 // Component
@@ -562,6 +565,17 @@ pub struct Component {
     #[serde(default, skip_serializing_if = "GroundGlyph::is_native")]
     pub ground_glyph: GroundGlyph,
 
+    /// The artwork of the drawing this part was imported from, when that
+    /// drawing's own symbol could be read. A part keeps its native electrical
+    /// identity and draws this in place of RSpice's symbol; the drawing's
+    /// pins, under the native terminal names, are its terminals.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "serialize_source_symbol"
+    )]
+    source_symbol: Option<Arc<ResolvedCellSymbol>>,
+
     /// Name label position (Auto for smart placement, Custom for user-defined)
     #[serde(default)]
     pub name_label_pos: LabelPosition,
@@ -652,6 +666,8 @@ struct PersistedComponent {
     #[serde(default)]
     ground_glyph: GroundGlyph,
     #[serde(default)]
+    source_symbol: Option<SymbolDocument>,
+    #[serde(default)]
     name_label_pos: LabelPosition,
     #[serde(default)]
     value_label_pos: LabelPosition,
@@ -673,6 +689,20 @@ struct PersistedComponent {
     bom: super::bom::BomFields,
 }
 
+fn source_symbol(document: SymbolDocument) -> Arc<ResolvedCellSymbol> {
+    Arc::new(ResolvedCellSymbol::from_authored_document(document, &[]))
+}
+
+fn serialize_source_symbol<S: Serializer>(
+    symbol: &Option<Arc<ResolvedCellSymbol>>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    symbol
+        .as_ref()
+        .map(|symbol| symbol.document())
+        .serialize(serializer)
+}
+
 impl From<PersistedComponent> for Component {
     fn from(persisted: PersistedComponent) -> Self {
         let mut component = Self {
@@ -685,6 +715,7 @@ impl From<PersistedComponent> for Component {
             params: persisted.params,
             symbol_variant: persisted.symbol_variant,
             ground_glyph: persisted.ground_glyph,
+            source_symbol: persisted.source_symbol.map(source_symbol),
             name_label_pos: persisted.name_label_pos,
             value_label_pos: persisted.value_label_pos,
             value_pieces: persisted.value_pieces,
@@ -721,6 +752,7 @@ impl Component {
             params: String::new(),
             symbol_variant: None,
             ground_glyph: GroundGlyph::Native,
+            source_symbol: None,
             name_label_pos: LabelPosition::Auto,
             value_label_pos: LabelPosition::Auto,
             value_pieces: Vec::new(),
@@ -872,6 +904,24 @@ impl Component {
     /// - Netlist generation
     /// - Rubber-banding during component moves
     pub fn terminal_positions(&self) -> Vec<(&'static str, Point)> {
+        if self.library_cell.is_some()
+            && let Some(symbol) = &self.source_symbol
+        {
+            return symbol
+                .connectable_pins()
+                .enumerate()
+                .map(|(idx, pin)| {
+                    let transformed = self.transform_point(symbol.effective_pin_offset(pin));
+                    (
+                        Self::terminal_label(idx),
+                        Point::new(
+                            self.pos.x.saturating_add(transformed.x),
+                            self.pos.y.saturating_add(transformed.y),
+                        ),
+                    )
+                })
+                .collect();
+        }
         if self.library_cell.is_some() {
             return self
                 .instance_pin_layout()
@@ -895,7 +945,8 @@ impl Component {
             .terminal_offsets()
             .iter()
             .map(|&(name, offset)| {
-                let transformed = self.transform_point(offset);
+                let transformed =
+                    self.transform_point(self.source_pin_offset(name).unwrap_or(offset));
                 (
                     name,
                     Point::new(
@@ -929,7 +980,7 @@ impl Component {
                 .collect();
         }
         if self.kind == ComponentType::CellInstance
-            && let Some(resolved_symbol) = resolved_symbol
+            && let Some(resolved_symbol) = self.source_symbol().or(resolved_symbol)
         {
             return resolved_symbol
                 .connectable_pins()
@@ -1241,11 +1292,71 @@ impl Component {
         }
     }
 
+    /// Undoes [`transform_point`](Self::transform_point): where a point
+    /// about the component lies in the component's own frame.
+    pub fn untransform_point(&self, p: Point) -> Point {
+        let turned = match self.rotation {
+            Rotation::R0 => p,
+            Rotation::R90 => Point::new(p.y, p.x.saturating_neg()),
+            Rotation::R180 => Point::new(p.x.saturating_neg(), p.y.saturating_neg()),
+            Rotation::R270 => Point::new(p.y.saturating_neg(), p.x),
+        };
+        Point::new(
+            if self.mirror_h {
+                turned.x.saturating_neg()
+            } else {
+                turned.x
+            },
+            if self.mirror_v {
+                turned.y.saturating_neg()
+            } else {
+                turned.y
+            },
+        )
+    }
+
+    /// The artwork of the drawing this part was imported from, which it
+    /// draws in place of RSpice's own symbol.
+    pub fn source_symbol(&self) -> Option<&ResolvedCellSymbol> {
+        self.source_symbol.as_deref()
+    }
+
+    /// Gives this part the artwork of the drawing it came from.
+    pub fn set_source_symbol(&mut self, document: SymbolDocument) {
+        self.source_symbol = Some(source_symbol(document));
+    }
+
+    /// Whether a symbol document, not RSpice's symbol for the part's kind,
+    /// draws this part: a library cell, or a part that keeps the artwork of
+    /// the drawing it came from.
+    pub fn is_drawn_from_a_symbol_document(&self) -> bool {
+        self.kind == ComponentType::CellInstance || self.source_symbol.is_some()
+    }
+
+    fn source_pin_offset(&self, name: &str) -> Option<Point> {
+        let symbol = self.source_symbol.as_ref()?;
+        symbol
+            .connectable_pins()
+            .find(|pin| pin.name == name)
+            .map(|pin| symbol.effective_pin_offset(pin))
+    }
+
     /// Get the bounding box of this component in grid coordinates
     ///
     /// Returns (min_x, min_y, max_x, max_y) representing the
     /// footprint of the component symbol, matching the actual rendered size.
     pub fn bounding_box(&self) -> (i32, i32, i32, i32) {
+        if let Some(symbol) = &self.source_symbol
+            && let Some((low, high)) = symbol.document().drawn_body_bounds()
+        {
+            let (a, b) = (self.transform_point(low), self.transform_point(high));
+            return (
+                self.pos.x + a.x.min(b.x),
+                self.pos.y + a.y.min(b.y),
+                self.pos.x + a.x.max(b.x),
+                self.pos.y + a.y.max(b.y),
+            );
+        }
         // Use actual symbol dimensions for accurate hit detection
         let (width, height) = self.symbol_dimensions();
         let half_w = width / 2;

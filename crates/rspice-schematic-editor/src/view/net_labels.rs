@@ -20,7 +20,7 @@ use rspice_design::schematic::{
         self, CONNECTOR_TAB_GAP_WORLD, CONNECTOR_TAB_WIDTH_WORLD, LayoutPoint, LayoutRect,
         NET_LABEL_GLYPH_WIDTH_WORLD as LABEL_GLYPH_WIDTH_WORLD,
     },
-    net_label::NetLabel,
+    net_label::{NetLabel, NetLabelDrawing},
 };
 use rspice_design_model::{Point, design_management::CrossSheetPortDirection};
 use rspice_ui_kit::palette::Palette;
@@ -79,8 +79,10 @@ pub(crate) struct NetLabelWorldLayout<'a> {
     pub(crate) font_size: f32,
     /// The bottom-left corner of the name's text box.
     pub(crate) corner: Pos2,
-    /// Half the diagonal of the attachment diamond.
+    /// Half the diagonal of the attachment diamond, 0 when it draws none.
     pub(crate) diamond_half: f32,
+    /// Half the side of the open-pin square, 0 when it draws none.
+    pub(crate) open_pin_half: f32,
     /// An off-sheet connector's tab after a name of the estimated width.
     pub(crate) tab: Option<(Rect, CrossSheetPortDirection)>,
 }
@@ -104,6 +106,7 @@ pub(crate) fn world_layout(label: &NetLabel) -> NetLabelWorldLayout<'_> {
         font_size: layout.font_size,
         corner: layout_pos(layout.corner),
         diamond_half: layout.diamond_half,
+        open_pin_half: layout.open_pin_half,
         tab: layout
             .tab
             .map(|(rect, direction)| (layout_rect(rect), direction)),
@@ -124,47 +127,47 @@ fn screen_layout(
     let anchor = viewport.schematic_to_screen(label.pos);
     let corner = anchor + (name_corner_world(label) - label_pos(label)) * zoom;
     let name = display_name(label);
-    let (text, text_rect) =
-        match lod::text_lod(LABEL_FONT_WORLD_SIZE, zoom, ppp, TextClass::Electrical) {
-            TextLod::Draw(font_size) => {
-                let galley = ctx.fonts_mut(|fonts| {
-                    rspice_ui_kit::text::layout_no_wrap(
-                        fonts,
-                        name,
-                        theme::mono(font_size, FontWeight::Medium),
-                        color,
-                    )
-                });
-                let text_min = corner - vec2(0.0, galley.size().y);
-                let rect = Rect::from_min_size(text_min, galley.size());
-                (LabelText::Shaped(galley), rect)
-            }
-            greek @ (TextLod::Greek(_) | TextLod::Hide) => {
-                // An electrical name greeks rather than hides; `Hide` cannot
-                // come back for it, and would take the thinnest bar if it did.
-                let bar_height = match greek {
-                    TextLod::Greek(bar) => bar.height_pt,
-                    TextLod::Draw(_) | TextLod::Hide => 1.0 / ppp.max(f32::EPSILON),
-                };
-                let box_height = LABEL_LINE_HEIGHT_WORLD * zoom;
-                let text_min = corner - vec2(0.0, box_height);
-                let width = lod::greek_bar_width_pt(
-                    name.chars().count(),
-                    LABEL_GLYPH_WIDTH_WORLD,
-                    zoom,
-                    ppp,
-                );
-                let rect = Rect::from_min_size(text_min, vec2(width, box_height));
-                let bar = Rect::from_min_size(
-                    Pos2::new(rect.left(), rect.center().y - bar_height * 0.5),
-                    vec2(width, bar_height),
-                );
-                (LabelText::Greeked(bar), rect)
-            }
-        };
+    let font_world = label_layout::net_label_font_world(label);
+    let (text, text_rect) = match lod::text_lod(font_world, zoom, ppp, TextClass::Electrical) {
+        TextLod::Draw(font_size) => {
+            let galley = ctx.fonts_mut(|fonts| {
+                rspice_ui_kit::text::layout_no_wrap(
+                    fonts,
+                    name,
+                    theme::mono(font_size, FontWeight::Medium),
+                    color,
+                )
+            });
+            let text_min = corner - vec2(0.0, galley.size().y);
+            let rect = Rect::from_min_size(text_min, galley.size());
+            (LabelText::Shaped(galley), rect)
+        }
+        greek @ (TextLod::Greek(_) | TextLod::Hide) => {
+            // An electrical name greeks rather than hides; `Hide` cannot
+            // come back for it, and would take the thinnest bar if it did.
+            let bar_height = match greek {
+                TextLod::Greek(bar) => bar.height_pt,
+                TextLod::Draw(_) | TextLod::Hide => 1.0 / ppp.max(f32::EPSILON),
+            };
+            let box_height = LABEL_LINE_HEIGHT_WORLD * font_world / LABEL_FONT_WORLD_SIZE * zoom;
+            let text_min = corner - vec2(0.0, box_height);
+            let width = lod::greek_bar_width_pt(
+                name.chars().count(),
+                LABEL_GLYPH_WIDTH_WORLD * font_world / LABEL_FONT_WORLD_SIZE,
+                zoom,
+                ppp,
+            );
+            let rect = Rect::from_min_size(text_min, vec2(width, box_height));
+            let bar = Rect::from_min_size(
+                Pos2::new(rect.left(), rect.center().y - bar_height * 0.5),
+                vec2(width, bar_height),
+            );
+            (LabelText::Greeked(bar), rect)
+        }
+    };
     // A supply's name is centred on its pin by the shaped width, which the
     // shared layout can only estimate.
-    let (text, text_rect) = if label.kind.supply_glyph().is_some() {
+    let (text, text_rect) = if label.kind.supply_glyph().is_some() && label.drawing.is_native() {
         let shift = vec2(anchor.x - text_rect.center().x, 0.0);
         let text = match text {
             LabelText::Greeked(bar) => LabelText::Greeked(bar.translate(shift)),
@@ -351,16 +354,38 @@ pub fn draw_net_label_attached(
         Some(ink) if !preview => ink.colour(palette),
         Some(_) | None => text_color,
     };
-    painter.add(egui::Shape::convex_polygon(
-        vec![
-            layout.attachment + vec2(0.0, -attachment_radius),
-            layout.attachment + vec2(attachment_radius, 0.0),
-            layout.attachment + vec2(0.0, attachment_radius),
-            layout.attachment + vec2(-attachment_radius, 0.0),
-        ],
-        diamond,
-        Stroke::NONE,
-    ));
+    match label.drawing {
+        NetLabelDrawing::Native => {
+            painter.add(egui::Shape::convex_polygon(
+                vec![
+                    layout.attachment + vec2(0.0, -attachment_radius),
+                    layout.attachment + vec2(attachment_radius, 0.0),
+                    layout.attachment + vec2(0.0, attachment_radius),
+                    layout.attachment + vec2(-attachment_radius, 0.0),
+                ],
+                diamond,
+                Stroke::NONE,
+            ));
+        }
+        NetLabelDrawing::Lettered => {}
+        NetLabelDrawing::OpenPin => {
+            let side = lod::open_pin_side_pt(viewport.zoom);
+            painter.rect_stroke(
+                Rect::from_center_size(layout.attachment, egui::Vec2::splat(side)),
+                0.0,
+                Stroke::new(
+                    lod::stroke_pt(
+                        lod::StrokeRole::Symbol,
+                        viewport.zoom,
+                        painter.pixels_per_point(),
+                        lod::Emphasis::Plain,
+                    ),
+                    text_color,
+                ),
+                egui::StrokeKind::Middle,
+            );
+        }
+    }
     if !layout.supply_glyph.is_empty() {
         // The rail's symbol, at the weight the level of detail gives a part's
         // body at this zoom.
@@ -427,15 +452,16 @@ pub fn hit_bounds(ctx: &Context, viewport: &Viewport, label: &NetLabel) -> Optio
 pub fn world_bounds(label: &NetLabel) -> (Point, Point) {
     let glyphs = display_name(label).chars().count() as f32;
     let corner = name_corner_world(label);
+    let font_ratio = label_layout::net_label_font_world(label) / LABEL_FONT_WORLD_SIZE;
     let tab_width = if label.kind.off_sheet_direction().is_some() {
         CONNECTOR_TAB_GAP_WORLD + CONNECTOR_TAB_WIDTH_WORLD
     } else {
         0.0
     };
     let text = Rect::from_min_max(
-        Pos2::new(corner.x, corner.y - LABEL_LINE_HEIGHT_WORLD),
+        Pos2::new(corner.x, corner.y - LABEL_LINE_HEIGHT_WORLD * font_ratio),
         Pos2::new(
-            corner.x + glyphs * LABEL_GLYPH_WIDTH_WORLD + tab_width,
+            corner.x + glyphs * LABEL_GLYPH_WIDTH_WORLD * font_ratio + tab_width,
             corner.y,
         ),
     );

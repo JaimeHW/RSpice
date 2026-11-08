@@ -13,7 +13,8 @@ use super::{
     bus::{Bus, BusTap},
     component::Component,
     component_type::ComponentType,
-    net_label::{NetLabel, NetLabelKind, NetLabelSide, SupplyGlyph},
+    ground_glyph::OPEN_PIN_HALF_WORLD,
+    net_label::{NetLabel, NetLabelDrawing, NetLabelKind, NetLabelSide, SupplyGlyph},
 };
 use crate::symbol::SymbolDocument;
 
@@ -32,6 +33,11 @@ pub const TAP_SLICE_OFFSET: LayoutPoint = LayoutPoint::new(5.0, -7.0);
 /// A probe reference's bottom-left corner, from the probe's position.
 pub const PROBE_LABEL_OFFSET: LayoutPoint = LayoutPoint::new(13.0, -9.0);
 
+/// The type size, in world units, of text another tool's drawing letters at
+/// that tool's standard size: what stands in the same proportion to the
+/// drawing's scaled geometry as it does in that tool.
+pub const IMPORTED_TEXT_WORLD: u16 = 15;
+
 /// A net label's type size, in world units.
 pub const NET_LABEL_FONT_WORLD: f32 = 11.0;
 /// The estimated advance of one glyph of a net label's name, in world units.
@@ -44,6 +50,13 @@ pub const UNNAMED_NET_LABEL: &str = "<unnamed>";
 pub const CONNECTOR_TAB_STROKE_PER_HEIGHT: f32 = 0.085;
 
 const NET_LABEL_OFFSET: LayoutPoint = LayoutPoint::new(7.0, -5.0);
+/// Air between a wire's end and a name lettered beyond it.
+const LETTERED_NAME_ACROSS_WORLD: f32 = 6.0;
+/// Air between a wire's end and a name lettered over or under it.
+const LETTERED_NAME_ABOVE_WORLD: f32 = 3.0;
+/// Plex's cap height and descent, in em.
+const CAP_HEIGHT_EM: f32 = 0.698;
+const DESCENT_EM: f32 = 0.275;
 /// How far a supply symbol's stem runs from its pin: one grid pitch.
 pub const SUPPLY_STEM_WORLD: f32 = 10.0;
 /// Half the width of a supply symbol's bar.
@@ -510,7 +523,9 @@ pub fn tap_slice_placement(tap: &BusTap) -> PlacedText {
 
 /// What a net label reads: its name, or a placeholder for a blank one.
 pub fn net_label_display_name(label: &NetLabel) -> &str {
-    if label.name.trim().is_empty() {
+    if label.drawing == NetLabelDrawing::OpenPin {
+        ""
+    } else if label.name.trim().is_empty() {
         UNNAMED_NET_LABEL
     } else {
         &label.name
@@ -526,6 +541,9 @@ pub fn net_label_display_name(label: &NetLabel) -> &str {
 /// one.
 pub fn net_label_name_corner(label: &NetLabel) -> LayoutPoint {
     let (x, y) = (label.pos.x as f32, label.pos.y as f32);
+    if label.drawing != NetLabelDrawing::Native {
+        return lettered_name_corner(label);
+    }
     let width = net_label_display_name(label).chars().count() as f32 * NET_LABEL_GLYPH_WIDTH_WORLD;
     let NetLabelKind::Supply { glyph } = label.kind else {
         let (across, down) = (NET_LABEL_OFFSET.x, -NET_LABEL_OFFSET.y);
@@ -548,6 +566,41 @@ pub fn net_label_name_corner(label: &NetLabel) -> LayoutPoint {
     LayoutPoint::new(x - width * 0.5, baseline)
 }
 
+/// The corner of a name lettered as another tool's drawing letters it: at the
+/// wire end, centred on the wire when it runs on past the end, and standing
+/// clear of the wire end by the air that tool leaves.
+fn lettered_name_corner(label: &NetLabel) -> LayoutPoint {
+    let (x, y) = (label.pos.x as f32, label.pos.y as f32);
+    let size = net_label_font_world(label);
+    let width = net_label_display_name(label).chars().count() as f32 * NET_LABEL_GLYPH_WIDTH_WORLD
+        / NET_LABEL_FONT_WORLD
+        * size;
+    let height = size * LINE_BOX_EM;
+    match label.side {
+        NetLabelSide::Right => LayoutPoint::new(x + LETTERED_NAME_ACROSS_WORLD, y + height * 0.5),
+        NetLabelSide::Left => {
+            LayoutPoint::new(x - LETTERED_NAME_ACROSS_WORLD - width, y + height * 0.5)
+        }
+        NetLabelSide::Above => LayoutPoint::new(
+            x - width * 0.5,
+            y - LETTERED_NAME_ABOVE_WORLD + size * DESCENT_EM,
+        ),
+        NetLabelSide::Below => LayoutPoint::new(
+            x - width * 0.5,
+            y + LETTERED_NAME_ABOVE_WORLD + size * (CAP_HEIGHT_EM + DESCENT_EM),
+        ),
+    }
+}
+
+/// A net label's type size, in world units.
+pub fn net_label_font_world(label: &NetLabel) -> f32 {
+    if label.drawing == NetLabelDrawing::Native {
+        NET_LABEL_FONT_WORLD
+    } else {
+        f32::from(IMPORTED_TEXT_WORLD)
+    }
+}
+
 /// A supply symbol's strokes, in world units: the stem from its pin, then
 /// the bar across its end, the arrowhead whose tip it is, or the bar below
 /// the pin of a negative rail. Any other label draws none.
@@ -555,6 +608,9 @@ pub fn supply_glyph_marks(label: &NetLabel) -> Vec<[LayoutPoint; 2]> {
     let NetLabelKind::Supply { glyph } = label.kind else {
         return Vec::new();
     };
+    if label.drawing != NetLabelDrawing::Native {
+        return Vec::new();
+    }
     let (x, y) = (label.pos.x as f32, label.pos.y as f32);
     let end = if glyph == SupplyGlyph::Down {
         y + SUPPLY_STEM_WORLD
@@ -601,8 +657,10 @@ pub struct NetLabelLayout<'a> {
     pub font_size: f32,
     /// The bottom-left corner of the name's text box.
     pub corner: LayoutPoint,
-    /// Half the diagonal of the attachment diamond.
+    /// Half the diagonal of the attachment diamond, 0 when it draws none.
     pub diamond_half: f32,
+    /// Half the side of the open-pin square, 0 when it draws none.
+    pub open_pin_half: f32,
     /// An off-sheet connector's tab after a name of the estimated width.
     pub tab: Option<(LayoutRect, CrossSheetPortDirection)>,
 }
@@ -628,9 +686,16 @@ pub fn net_label_layout(label: &NetLabel) -> NetLabelLayout<'_> {
     });
     NetLabelLayout {
         name,
-        font_size: NET_LABEL_FONT_WORLD,
+        font_size: net_label_font_world(label),
         corner,
-        diamond_half: NET_LABEL_DIAMOND_HALF_WORLD,
+        diamond_half: match label.drawing {
+            NetLabelDrawing::Native => NET_LABEL_DIAMOND_HALF_WORLD,
+            NetLabelDrawing::Lettered | NetLabelDrawing::OpenPin => 0.0,
+        },
+        open_pin_half: match label.drawing {
+            NetLabelDrawing::OpenPin => OPEN_PIN_HALF_WORLD,
+            NetLabelDrawing::Native | NetLabelDrawing::Lettered => 0.0,
+        },
         tab,
     }
 }

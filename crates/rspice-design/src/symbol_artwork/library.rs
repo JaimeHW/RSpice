@@ -489,11 +489,12 @@ impl SymbolLibrary {
     }
 }
 
-/// The symbol of an imported ground's flag: its triangle, closed, in a box
+/// The symbol of an imported ground's glyph: its outline, closed, in a box
 /// centred on the ground's position and drawn at its own size, so placing
 /// it puts every corner exactly where [`GroundGlyph::outline`] says.
 fn ground_flag(glyph: GroundGlyph) -> Option<Symbol> {
-    let [first, rest @ ..] = glyph.outline()?;
+    let outline = glyph.outline()?;
+    let (first, rest) = outline.split_first()?;
     let (half_width, half_height) = glyph.half_extent()?;
     let mut commands = vec![PathCommand::MoveTo(first.0, first.1)];
     commands.extend(rest.iter().map(|&(x, y)| PathCommand::LineTo(x, y)));

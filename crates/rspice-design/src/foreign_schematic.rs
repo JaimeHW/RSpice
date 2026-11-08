@@ -18,9 +18,7 @@ mod ltspice;
 mod mapping;
 mod qspice;
 
-pub use directives::{
-    ForeignCard, ForeignCardRole, defined_model_names, foreign_directive_cards, keep_directive_text,
-};
+pub use directives::{ForeignCard, ForeignCardRole, defined_model_names, foreign_directive_cards};
 pub use import::{
     ForeignDirective, ForeignImport, ForeignImportNotice, ForeignLibrary, ForeignModelFile,
     ForeignModelSource, ForeignNoticeSeverity, ForeignSymbolCell, ForeignSymbolSource,
@@ -169,6 +167,8 @@ pub struct ForeignWindow {
     pub hidden: bool,
     /// The text reads upward in the symbol's frame (LTspice's `V` forms).
     pub vertical: bool,
+    /// The lettering in percent of the source tool's standard size.
+    pub size_percent: u16,
 }
 
 /// One of the texts a drawing letters an instance's value in, when it

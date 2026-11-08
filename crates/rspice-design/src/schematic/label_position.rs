@@ -21,7 +21,26 @@ pub enum LabelPosition {
         vertical: TextEdge,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         upward: bool,
+        /// The text's size in hundredths of an instance's ordinary lettering
+        /// of the same kind: a drawing's text keeps the drawing's size.
+        #[serde(
+            default = "ordinary_size_percent",
+            skip_serializing_if = "is_ordinary_size_percent"
+        )]
+        size_percent: u16,
     },
+}
+
+const fn ordinary_size_percent() -> u16 {
+    100
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde's skip_serializing_if hands the field by reference."
+)]
+const fn is_ordinary_size_percent(percent: &u16) -> bool {
+    *percent == ordinary_size_percent()
 }
 
 /// One of the texts a drawing letters an instance's value in, when it
@@ -51,6 +70,22 @@ impl ValuePiece {
 }
 
 impl LabelPosition {
+    /// The text's size in hundredths of an instance's ordinary lettering.
+    #[must_use]
+    pub const fn size_percent(self) -> u16 {
+        match self {
+            Self::Auto => ordinary_size_percent(),
+            Self::Placed { size_percent, .. } => size_percent,
+        }
+    }
+
+    /// The text's type size in world units, where `ordinary` is the size an
+    /// instance letters this kind of text at.
+    #[must_use]
+    pub fn size_world(self, ordinary: f32) -> f32 {
+        ordinary * f32::from(self.size_percent()) / 100.0
+    }
+
     /// The run's anchor and hang for an instance at `origin`, with `scale`
     /// the size of one world unit in the caller's space, when a drawing
     /// placed the text.
@@ -63,6 +98,7 @@ impl LabelPosition {
                 horizontal,
                 vertical,
                 upward,
+                ..
             } => Some(PlacedText {
                 anchor: LayoutPoint::new(
                     origin.x + offset.x as f32 * scale,

@@ -316,6 +316,58 @@ fn a_qsch_drawing_reads_its_components_nets_and_texts() {
     assert_eq!(drawing.texts[1].text, "150°C \"lockout\" \nnote");
 }
 
+/// QSPICE names a resistor's zigzag and an inductor's coil only by their
+/// box: each runs end to end along the box's longer side, leaving and reaching
+/// its centre line, where the pins' leads end.
+#[test]
+fn a_qsch_zigzag_and_coil_are_drawn_from_their_boxes() {
+    let drawing = parse_qsch(&qsch(
+        "«schematic
+  «component (0,0) 0 0
+    «symbol L
+      «type: L»
+      «zigzag (-80,180) (80,-180) 0 0 0 0x1000000 -1 -1»
+      «coil (-80,180) (80,-180) 0 0 0 0x1000000 -1 -1»
+      «pin (0,200) (0,0) 1 0 0 0x1000000 -1 \"1\"»
+      «pin (0,-200) (0,0) 1 0 0 0x1000000 -1 \"2\"»
+    »
+  »
+»
+",
+    ))
+    .expect("the drawing reads");
+    let shapes = &drawing.symbols[0]
+        .embedded
+        .as_ref()
+        .expect("embedded")
+        .shapes;
+    let point = ForeignPoint::new;
+    let lines = shapes
+        .iter()
+        .filter_map(|shape| match shape {
+            ForeignShape::Line(a, b) => Some((*a, *b)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(lines.len(), 7, "{shapes:?}");
+    assert!(lines.windows(2).all(|pair| pair[0].1 == pair[1].0));
+    assert_eq!((lines[0].0, lines[6].1), (point(0, -180), point(0, 180)));
+    assert!(lines.iter().any(|(a, _)| a.x == 80));
+    assert!(lines.iter().any(|(a, _)| a.x == -80));
+    let arcs = shapes
+        .iter()
+        .filter_map(|shape| match shape {
+            ForeignShape::Arc([_, _, start, end]) => Some((*start, *end)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(arcs.len(), 3, "{shapes:?}");
+    assert_eq!(arcs[0].1, point(0, -180), "the coil leaves its top end");
+    assert_eq!(arcs[2].0, point(0, 180), "and reaches its bottom end");
+    assert_eq!(arcs[1].1, arcs[0].0, "one loop runs into the next");
+    assert_eq!(arcs[2].1, arcs[1].0, "one loop runs into the next");
+}
+
 #[test]
 fn a_qsch_component_turned_by_an_eighth_is_refused() {
     let turned = QSPICE_DRAWING.replacen("«component (0,0) 6 0", "«component (0,0) 3 0", 1);

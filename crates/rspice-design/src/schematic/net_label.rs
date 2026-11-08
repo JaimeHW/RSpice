@@ -159,6 +159,31 @@ pub struct NetLabel {
     /// follows its glyph instead.
     #[serde(default, skip_serializing_if = "NetLabelSide::is_right")]
     pub side: NetLabelSide,
+
+    /// What the label draws at its point.
+    #[serde(default, skip_serializing_if = "NetLabelDrawing::is_native")]
+    pub drawing: NetLabelDrawing,
+}
+
+/// What a net label draws, which never touches the net it names.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "kebab-case")]
+pub enum NetLabelDrawing {
+    /// RSpice's own label: its attachment mark and name, and a rail's symbol.
+    #[default]
+    Native,
+    /// A flag from another tool's drawing: the name at the wire end and
+    /// nothing else, at the size that drawing letters it.
+    Lettered,
+    /// A pin another tool's drawing leaves open and its simulator ties to
+    /// this net: the open-pin square and nothing else.
+    OpenPin,
+}
+
+impl NetLabelDrawing {
+    pub fn is_native(&self) -> bool {
+        *self == Self::Native
+    }
 }
 
 impl NetLabel {
@@ -170,6 +195,7 @@ impl NetLabel {
             name: name.into(),
             kind: NetLabelKind::Local,
             side: NetLabelSide::Right,
+            drawing: NetLabelDrawing::Native,
         }
     }
 
@@ -186,6 +212,7 @@ impl NetLabel {
             name: name.into(),
             kind: NetLabelKind::OffSheet { direction },
             side: NetLabelSide::Right,
+            drawing: NetLabelDrawing::Native,
         }
     }
 
@@ -197,6 +224,7 @@ impl NetLabel {
             name: name.into(),
             kind: NetLabelKind::Supply { glyph },
             side: NetLabelSide::Right,
+            drawing: NetLabelDrawing::Native,
         }
     }
 

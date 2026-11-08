@@ -781,6 +781,11 @@ pub struct SymbolDocument {
     pub origin: Point,
     pub name_anchor: Point,
     pub value_anchor: Point,
+    /// The type size, in world units, of the pin names of a symbol that came
+    /// from another tool's drawing, which letters them in the ordinary label
+    /// face at the drawing's size. None for RSpice's own symbols.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pin_name_size: Option<u16>,
     /// The pin-contract findings this symbol's team has accepted as they
     /// stand, stored with the symbol so they travel with its library.
     ///
@@ -820,12 +825,22 @@ impl Default for SymbolDocument {
             origin: Point::origin(),
             name_anchor: Point::new(-20, -40),
             value_anchor: Point::new(-20, 40),
+            pin_name_size: None,
             waivers: crate::drc::DrcWaivers::default(),
         }
     }
 }
 
 impl SymbolDocument {
+    /// The type size of this symbol's pin names, in world units.
+    #[must_use]
+    pub fn pin_name_world(&self) -> f32 {
+        self.pin_name_size.map_or(
+            crate::symbol_generation::GENERATED_PIN_LABEL_SIZE,
+            f32::from,
+        )
+    }
+
     pub fn generated_from_ports(ports: &[PortSpec]) -> Self {
         Self::generated_from_interface(ports, &[])
     }
@@ -881,6 +896,7 @@ impl SymbolDocument {
             origin: Point::origin(),
             name_anchor,
             value_anchor,
+            pin_name_size: None,
             waivers: crate::drc::DrcWaivers::default(),
         }
     }

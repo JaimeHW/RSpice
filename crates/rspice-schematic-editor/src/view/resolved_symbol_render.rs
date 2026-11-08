@@ -24,8 +24,10 @@ use rspice_design::{
         label_position::LabelPosition,
         value_label::{cell_instance_value as instance_value, value_pieces},
     },
-    symbol::{SymbolShape, SymbolTextAlign, SymbolTextPlacement, symbol_text_bounds},
-    symbol_generation::{GENERATED_PIN_LABEL_SIZE, fit_pin_name, inward_step},
+    symbol::{
+        SymbolDocument, SymbolShape, SymbolTextAlign, SymbolTextPlacement, symbol_text_bounds,
+    },
+    symbol_generation::{fit_pin_name, inward_step},
 };
 use rspice_design_model::{Point, port::PortDirection};
 use rspice_ui_kit::{palette::Palette, tokens::Tokens};
@@ -225,9 +227,17 @@ fn draw_symbol_pins(
 ) {
     // Leads are drawn in the body's stroke: one symbol weight.
     let color = stroke.color;
+    let document = symbol.document();
     let font_size =
-        lod::annotation_size(GENERATED_PIN_LABEL_SIZE, scale, painter.pixels_per_point())
+        lod::annotation_size(document.pin_name_world(), scale, painter.pixels_per_point())
             .filter(|_| named);
+    let font = |size: f32| {
+        if document.pin_name_size.is_some() {
+            rspice_ui_kit::theme::sans(size, rspice_ui_kit::theme::FontWeight::Regular)
+        } else {
+            rspice_ui_kit::theme::mono(size, rspice_ui_kit::theme::FontWeight::Regular)
+        }
+    };
     for pin in symbol.connectable_pins() {
         let offset = symbol.effective_pin_offset(pin);
         let terminal = to_screen(origin, scale, component, offset);
@@ -242,11 +252,21 @@ fn draw_symbol_pins(
             painter.text(
                 anchor,
                 pin_label_align(component, pin),
-                fit_pin_name(&pin.name),
-                rspice_ui_kit::theme::mono(font_size, rspice_ui_kit::theme::FontWeight::Regular),
+                displayed_pin_name(document, &pin.name),
+                font(font_size),
                 color.gamma_multiply(0.75),
             );
         }
+    }
+}
+
+/// The pin name a symbol letters: a drawing's symbol letters it whole, a
+/// generated block fits it to the width it reserved.
+fn displayed_pin_name(document: &SymbolDocument, name: &str) -> String {
+    if document.pin_name_size.is_some() {
+        name.to_owned()
+    } else {
+        fit_pin_name(name)
     }
 }
 
@@ -315,8 +335,11 @@ fn draw_symbol_labels(
                 },
             )
     };
-    if let Some(size) = lod::annotation_size(INSTANCE_NAME_WORLD, scale, ppp)
-        && component.display_mode.show_name(visibility)
+    if let Some(size) = lod::annotation_size(
+        component.name_label_pos.size_world(INSTANCE_NAME_WORLD),
+        scale,
+        ppp,
+    ) && component.display_mode.show_name(visibility)
         && !component.name.is_empty()
     {
         let (position, align, upward) = at(component.name_label_pos, symbol.document().name_anchor);
@@ -343,8 +366,11 @@ fn draw_symbol_labels(
         return;
     }
     let value = instance_value(component);
-    if let Some(size) = lod::annotation_size(INSTANCE_VALUE_WORLD, scale, ppp)
-        && component.display_mode.show_value(visibility)
+    if let Some(size) = lod::annotation_size(
+        component.value_label_pos.size_world(INSTANCE_VALUE_WORLD),
+        scale,
+        ppp,
+    ) && component.display_mode.show_value(visibility)
         && !value.is_empty()
     {
         let (position, align, upward) =
@@ -513,9 +539,9 @@ fn write_symbol_pins_svg(
             svg,
             "pin",
             to_svg(component, symbol.pin_label_anchor(pin), config),
-            &fit_pin_name(&pin.name),
+            &displayed_pin_name(symbol.document(), &pin.name),
             pin_label_align(component, pin),
-            f64::from(GENERATED_PIN_LABEL_SIZE) * config.units_per_world,
+            f64::from(symbol.document().pin_name_world()) * config.units_per_world,
         );
     }
 }
@@ -602,7 +628,16 @@ fn write_symbol_labels_svg(
             )
         });
         write_upward_svg(svg, at, upward, |svg| {
-            InstanceLabel::Name.write(svg, at, &component.name, align, config);
+            write_sized_text_svg(
+                svg,
+                InstanceLabel::Name.class(),
+                at,
+                &component.name,
+                align,
+                InstanceLabel::Name.size(config)
+                    * f64::from(component.name_label_pos.size_percent())
+                    / 100.0,
+            );
         });
     }
     let shown = component

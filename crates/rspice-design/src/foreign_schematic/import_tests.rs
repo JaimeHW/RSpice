@@ -309,7 +309,7 @@ fn imported_nets(
         }
     }
     let scale = |value: i32| match drawing.tool {
-        ForeignTool::Ltspice => value * 5 / 4,
+        ForeignTool::Ltspice => value * 5 / 8,
         ForeignTool::Qspice => value / 10,
     };
     for flag in &drawing.flags {
@@ -352,11 +352,8 @@ fn assert_same_connectivity(
     assert_eq!(ours, reference);
 }
 
-fn assert_on_grid(imported: &ForeignImport) {
+fn assert_wires_on_grid(imported: &ForeignImport) {
     let on_grid = |point: Point| point.x % 10 == 0 && point.y % 10 == 0;
-    for component in &imported.document.components {
-        assert!(on_grid(component.pos), "{} is off the grid", component.name);
-    }
     for wire in &imported.document.wires {
         for point in &wire.points {
             assert!(on_grid(*point), "a wire point {point:?} is off the grid");
@@ -398,17 +395,15 @@ fn every_orientation_of_a_part_lands_its_pins_on_their_own_wires() {
     let imported = import_foreign_schematic(&drawing, "work", &library);
     assert!(imported.notices.is_empty(), "{:?}", imported.notices);
     assert_same_connectivity(&drawing, &imported, &library);
-    assert_on_grid(&imported);
+    assert_wires_on_grid(&imported);
     // Each resistor lies along its pins: vertical for R0/R180/M0/M180.
     for component in &imported.document.components {
         let index = component.name[1..].parse::<usize>().unwrap();
         let along_y = matches!(ORIENTATIONS[index], "R0" | "M0" | "R180" | "M180");
-        assert_eq!(
-            component.rotation.is_vertical(),
-            along_y,
-            "{}",
-            component.name
-        );
+        let [(_, first), (_, second)] = component.terminal_positions()[..] else {
+            panic!("{} has two terminals", component.name);
+        };
+        assert_eq!(first.x == second.x, along_y, "{}", component.name);
         assert_eq!(component.value, format!("{}k", index + 1));
     }
 }
@@ -464,7 +459,7 @@ fn a_mixed_drawing_imports_with_its_connectivity_and_parameters() {
     let library = Library::default();
     let imported = import_foreign_schematic(&drawing, "work", &library);
     assert_same_connectivity(&drawing, &imported, &library);
-    assert_on_grid(&imported);
+    assert_wires_on_grid(&imported);
 
     let component = |name: &str| {
         imported
@@ -551,7 +546,7 @@ fn a_symbol_from_the_library_keeps_its_pins_and_model_file() {
     let library = library();
     let imported = import_foreign_schematic(&drawing, "work", &library);
     assert_same_connectivity(&drawing, &imported, &library);
-    assert_on_grid(&imported);
+    assert_wires_on_grid(&imported);
     assert_eq!(imported.cells.len(), 2, "one cell per symbol");
     let amplifier = &imported.cells[0];
     assert_eq!(amplifier.cell, "amp");
@@ -673,13 +668,17 @@ fn directives_and_comments_keep_their_text_and_place() {
             ".param R=1k\n.include models.lib\n.machine\n.endmachine",
         ]
     );
-    assert_eq!(imported.directives[1].position, Point::new(40, 120));
-    let note = &imported.document.design_notes[0];
-    assert_eq!(note.text, "Bias network\nkeep R1 close");
-    // `Left` starts the text 3 past (40, 200) and centres its first 15-unit
+    assert_eq!(imported.directives[1].position, Point::new(20, 60));
+    let note = imported
+        .document
+        .design_notes
+        .iter()
+        .find(|note| note.text == "Bias network\nkeep R1 close")
+        .expect("the comment is lettered");
+    // `Left` starts the text 3 past (20, 100) and centres its first 15-unit
     // line on it, the second running below; the anchor stands 6 left of and
     // 3 over the text.
-    assert_eq!(note.pos, Point::new(37, 189));
+    assert_eq!(note.pos, Point::new(17, 89));
 }
 
 /// A QSPICE drawing: a source, a resistor, a DLL block and a comment, with
@@ -791,7 +790,7 @@ fn a_qspice_drawing_joins_what_its_wire_names_join_and_refuses_a_dll() {
             .iter()
             .any(|note| note.text == "Not imported:\nØ1")
     );
-    assert_on_grid(&imported);
+    assert_wires_on_grid(&imported);
 
     // QSPICE wrote each wire's net: the import joins the same wires.
     let nets = imported_nets(&drawing, &imported);
@@ -843,7 +842,7 @@ fn directive_cards_sort_by_the_project_place_they_belong_in() {
     assert_eq!(cards[1].tokens, [".param", "R=1k", "C=1n"]);
     assert_eq!(cards[2].text, ".model D1N D(Is=1n\n+ Rs=1)");
     assert_eq!(cards[3].text, ".subckt half a b\nR1 a b {R}\n.ends half");
-    assert_eq!(cards[3].position, Point::new(0, 80));
+    assert_eq!(cards[3].position, Point::new(0, 40));
     assert_eq!(defined_model_names(&cards), ["d1n", "half"]);
 }
 
@@ -949,7 +948,7 @@ fn a_coupling_card_over_drawn_inductors_is_a_coupling_part() {
         ),
         ("K1", "0.98", "inductors=\"L1 L2\"")
     );
-    assert_eq!(coupling.pos, Point::new(0, 250));
+    assert_eq!(coupling.pos, Point::new(0, 125));
     // A card naming a winding the drawing lacks stays directive text.
     let texts = imported
         .directives
@@ -1008,17 +1007,17 @@ fn names_and_values_stand_where_the_drawing_lettered_them() {
     let resistor = layout("R1");
     assert_eq!(
         edges(resistor.name),
-        (170.0, 100.0, TextEdge::Center, TextEdge::End)
+        (85.0, 50.0, TextEdge::Center, TextEdge::End)
     );
     assert_eq!(
         edges(resistor.value),
-        (170.0, 140.0, TextEdge::Center, TextEdge::Start)
+        (85.0, 70.0, TextEdge::Center, TextEdge::Start)
     );
     // Mirrored, a run that grew rightward grows leftward from (512, 208).
     let amplifier = layout("U1");
     assert_eq!(
         edges(amplifier.value),
-        (640.0, 260.0, TextEdge::End, TextEdge::Center)
+        (320.0, 130.0, TextEdge::End, TextEdge::Center)
     );
     assert_eq!(
         component("C1").display_mode,
@@ -1075,7 +1074,7 @@ SYMATTR Value 4k7
     // The diode's name and value read upward from where the drawing anchored
     // them, (-72, 48) and (-48, 48), centred across their line.
     let diode = layout("D7");
-    for (placed, x) in [(diode.name, -90.0), (diode.value, -60.0)] {
+    for (placed, x) in [(diode.name, -45.0), (diode.value, -30.0)] {
         assert!(placed.upward, "{placed:?} reads upward");
         assert_eq!(
             (
@@ -1084,7 +1083,7 @@ SYMATTR Value 4k7
                 placed.horizontal,
                 placed.vertical
             ),
-            (x, 60.0, TextEdge::Start, TextEdge::Center)
+            (x, 30.0, TextEdge::Start, TextEdge::Center)
         );
     }
     let name = text_box(diode.name, "D7", INSTANCE_NAME_WORLD);
@@ -1203,8 +1202,8 @@ fn an_imported_source_letters_its_waveform_as_its_drawing_wrote_it() {
         } => (source.pos + offset, horizontal),
         LabelPosition::Auto => panic!("{piece:?} has no place"),
     };
-    assert_eq!(anchor(&pieces[0]), (Point::new(30, 120), TextEdge::Start));
-    assert_eq!(anchor(&pieces[1]), (Point::new(30, 155), TextEdge::Start));
+    assert_eq!(anchor(&pieces[0]), (Point::new(15, 60), TextEdge::Start));
+    assert_eq!(anchor(&pieces[1]), (Point::new(15, 78), TextEdge::Start));
 
     source.params.push_str(" td=1u");
     assert!(
@@ -1285,10 +1284,10 @@ fn a_qspice_value_lettered_in_several_texts_keeps_each_where_the_drawing_set_it(
             .map(|(text, line, size, _)| (*text, *line, *size))
             .collect::<Vec<_>>(),
         [
-            ("Ron=1", -6.0, 4.5),
-            ("Roff=1Meg", 3.0, 4.5),
-            ("Vt=1", 12.0, 4.5),
-            ("Vh=-0.5", 21.0, 4.5),
+            ("Ron=1", -6.0, 7.47),
+            ("Roff=1Meg", 3.0, 7.47),
+            ("Vt=1", 12.0, 7.47),
+            ("Vh=-0.5", 21.0, 7.47),
         ]
     );
     let name = text_box(
@@ -1299,11 +1298,13 @@ fn a_qspice_value_lettered_in_several_texts_keeps_each_where_the_drawing_set_it(
     let apart = |a: &LayoutRect, b: &LayoutRect| {
         a.max.x <= b.min.x || b.max.x <= a.min.x || a.max.y <= b.min.y || b.max.y <= a.min.y
     };
-    for (index, (text, _, _, a)) in boxes.iter().enumerate() {
+    for (text, _, _, a) in &boxes {
         assert!(apart(a, &name), "{text} runs into the name");
-        for (other, _, _, b) in &boxes[index + 1..] {
-            assert!(apart(a, b), "{text} runs into {other}");
-        }
+    }
+    // The drawing's lines stand closer than a line box and clear of each
+    // other's capitals.
+    for pair in boxes.windows(2) {
+        assert!(pair[1].1 - pair[0].1 > 7.47 * 0.7, "{}", pair[0].0);
     }
 
     switch.value = "Ron=2 Roff=1Meg Vt=1 Vh=-0.5".to_owned();
@@ -1311,115 +1312,6 @@ fn a_qspice_value_lettered_in_several_texts_keeps_each_where_the_drawing_set_it(
         value_pieces(&switch).is_none(),
         "an edited value letters as one text"
     );
-}
-
-/// A part RSpice draws with its own artwork has a body of another size than
-/// the source symbol's. A name or value the drawing stood just beside the
-/// source body keeps its side and its line but moves out along the way it
-/// reads until it clears the ink of RSpice's body.
-#[test]
-fn a_name_or_value_beside_a_source_body_clears_the_body_rspice_draws() {
-    use crate::schematic::label_layout::{
-        INSTANCE_NAME_WORLD, INSTANCE_VALUE_WORLD, LayoutPoint, TextEdge, instance_label_layout,
-        text_box,
-    };
-
-    let drawing = parse_asc(
-        "Version 4\n\
-         SYMBOL npn 0 0 R0\nWINDOW 0 52 32 Left 2\nWINDOW 3 52 72 Left 2\n\
-         SYMATTR InstName Q1\nSYMATTR Value BC547\n\
-         SYMBOL npn 320 0 M0\nWINDOW 0 52 32 Left 2\nWINDOW 3 52 72 Left 2\n\
-         SYMATTR InstName Q2\nSYMATTR Value BC557\n\
-         SYMBOL cap 640 0 R0\nWINDOW 0 20 12 Left 2\nWINDOW 3 20 56 Left 2\n\
-         SYMATTR InstName C1\nSYMATTR Value 10n\n",
-    )
-    .expect("the drawing reads");
-    let imported = import_foreign_schematic(&drawing, "work", &library());
-    for (name, value, source_y) in [
-        ("Q1", "BC547", (40.0, 90.0)),
-        ("Q2", "BC557", (40.0, 90.0)),
-        ("C1", "10n", (15.0, 70.0)),
-    ] {
-        let part = imported
-            .document
-            .components
-            .iter()
-            .find(|component| component.name == name)
-            .unwrap_or_else(|| panic!("{name} is placed"));
-        let (x, y) = (part.pos.x as f32, part.pos.y as f32);
-        let layout = instance_label_layout(LayoutPoint::new(x, y), 1.0, part);
-        let reads = if name == "Q2" {
-            TextEdge::End
-        } else {
-            TextEdge::Start
-        };
-        for (placed, text, size, line) in [
-            (layout.name, name, INSTANCE_NAME_WORLD, source_y.0),
-            (layout.value, value, INSTANCE_VALUE_WORLD, source_y.1),
-        ] {
-            assert_eq!(
-                (placed.horizontal, placed.vertical, placed.anchor.y),
-                (reads, TextEdge::Center, line),
-                "{name}: {text:?} keeps its side and its line"
-            );
-            let text_box = text_box(placed, text, size);
-            assert!(
-                !meets_drawn_body(part, text_box),
-                "{name}: {text:?} at {text_box:?} stands on the body drawn at ({x}, {y})"
-            );
-        }
-    }
-}
-
-/// A name or value moved off the body RSpice draws goes to the nearest
-/// place where it lands on no drawn body and no other text: a part's name
-/// and value both centred beside a turned body do not move onto each other.
-#[test]
-fn a_text_moved_off_a_body_lands_on_no_other_text() {
-    use crate::schematic::label_layout::{
-        INSTANCE_NAME_WORLD, INSTANCE_VALUE_WORLD, LayoutPoint, LayoutRect, instance_label_layout,
-        text_box,
-    };
-
-    let drawing = parse_asc(
-        "Version 4\n\
-         SYMBOL njf 0 0 R90\nWINDOW 0 32 60 VCenter 2\nWINDOW 3 60 48 VCenter 2\n\
-         SYMATTR InstName J1\nSYMATTR Value 2N4117\n",
-    )
-    .expect("the drawing reads");
-    let imported = import_foreign_schematic(&drawing, "work", &library());
-    let parts = &imported.document.components;
-    let mut boxes: Vec<(String, LayoutRect)> = Vec::new();
-    for part in parts {
-        let (x, y) = (part.pos.x as f32, part.pos.y as f32);
-        let layout = instance_label_layout(LayoutPoint::new(x, y), 1.0, part);
-        boxes.push((
-            part.name.clone(),
-            text_box(layout.name, &part.name, INSTANCE_NAME_WORLD),
-        ));
-        boxes.push((
-            format!("{} value", part.name),
-            text_box(layout.value, &part.value, INSTANCE_VALUE_WORLD),
-        ));
-    }
-    for (text, text_box) in &boxes {
-        for part in parts {
-            assert!(
-                !meets_drawn_body(part, *text_box),
-                "{text} at {text_box:?} lands on {}'s body",
-                part.name
-            );
-        }
-    }
-    for (index, (a, first)) in boxes.iter().enumerate() {
-        for (b, second) in &boxes[index + 1..] {
-            let apart = first.max.x <= second.min.x
-                || second.max.x <= first.min.x
-                || first.max.y <= second.min.y
-                || second.max.y <= first.min.y;
-            assert!(apart, "{a} at {first:?} lands on {b} at {second:?}");
-        }
-    }
 }
 
 /// A text that could stand clear only past other parts stays by its own
@@ -1500,58 +1392,11 @@ fn an_ltspice_flag_names_its_net_away_from_what_reaches_it() {
         BTreeMap::from([
             ("EAST", NetLabelSide::Right),
             ("FOOT", NetLabelSide::Below),
-            ("MIDDLE", NetLabelSide::Right),
+            ("MIDDLE", NetLabelSide::Above),
             ("TOP", NetLabelSide::Above),
             ("WEST", NetLabelSide::Left),
         ])
     );
-}
-
-/// A flag whose side RSpice chooses, on the middle of a wire, names its net
-/// on the first side where the name lands on no part's body: reading away
-/// from the amplifier whose input it labels, not across its body.
-#[test]
-fn a_flag_whose_side_rspice_chooses_names_its_net_clear_of_bodies() {
-    use crate::schematic::net_label::NetLabelSide;
-
-    let drawing = parse_asc(
-        "Version 4\n\
-         SYMBOL amp 128 0 R0\nSYMATTR InstName X1\n\
-         WIRE 16 -16 96 -16\nFLAG 80 -16 SIGNAL\n",
-    )
-    .expect("the drawing reads");
-    let imported = import_foreign_schematic(&drawing, "work", &library());
-    let label = imported
-        .document
-        .net_labels
-        .iter()
-        .find(|label| label.name == "SIGNAL")
-        .expect("the flag is placed");
-    assert_eq!(label.side, NetLabelSide::Left);
-}
-
-/// A flag on the middle of a wire beside a part's slanted edge, inside the
-/// box around the part but clear of what it draws, names its net on the
-/// side away from the edge: the part's strokes, not its box, are what the
-/// name keeps off.
-#[test]
-fn a_flag_beside_a_slanted_edge_names_its_net_away_from_it() {
-    use crate::schematic::net_label::NetLabelSide;
-
-    let drawing = parse_asc(
-        "Version 4\n\
-         SYMBOL amp 128 0 M0\nSYMATTR InstName X1\n\
-         WIRE 80 -16 120 -16\nFLAG 112 -16 EDGE\n",
-    )
-    .expect("the drawing reads");
-    let imported = import_foreign_schematic(&drawing, "work", &library());
-    let label = imported
-        .document
-        .net_labels
-        .iter()
-        .find(|label| label.name == "EDGE")
-        .expect("the flag is placed");
-    assert_eq!(label.side, NetLabelSide::Left);
 }
 
 #[test]
@@ -1597,7 +1442,7 @@ fn a_jumper_is_a_wire_and_a_named_subcircuit_reads_from_the_deck() {
             .all(|component| component.name != "J1"),
         "a jumper places no part"
     );
-    // The flags `a` and `b` sit on the jumper's pins, (0, 0) and (0, 120) on
+    // The flags `a` and `b` sit on the jumper's pins, (0, 0) and (0, 60) on
     // RSpice's grid; wire runs the whole way between them.
     let covered: i32 = imported
         .document
@@ -1607,7 +1452,7 @@ fn a_jumper_is_a_wire_and_a_named_subcircuit_reads_from_the_deck() {
         .filter(|(start, end)| start.x == 0 && end.x == 0)
         .map(|(start, end)| (end.y - start.y).abs())
         .sum();
-    assert_eq!(covered, 120, "the jumper joins its two nets");
+    assert_eq!(covered, 60, "the jumper joins its two nets");
     let block = imported
         .document
         .components
@@ -1686,7 +1531,7 @@ fn a_lead_to_one_pin_never_runs_through_another() {
     let library = Library::default();
     let imported = import_foreign_schematic(&drawing, "work", &library);
     assert_same_connectivity(&drawing, &imported, &library);
-    assert_on_grid(&imported);
+    assert_wires_on_grid(&imported);
 }
 
 #[test]
@@ -1708,7 +1553,7 @@ fn leads_that_must_cross_jog_around_each_other() {
     let library = Library::default();
     let imported = import_foreign_schematic(&drawing, "work", &library);
     assert_same_connectivity(&drawing, &imported, &library);
-    assert_on_grid(&imported);
+    assert_wires_on_grid(&imported);
 }
 
 #[test]
@@ -1740,7 +1585,7 @@ SYMATTR InstName U2
     let library = library();
     let imported = import_foreign_schematic(&drawing, "work", &library);
     assert_same_connectivity(&drawing, &imported, &library);
-    assert_on_grid(&imported);
+    assert_wires_on_grid(&imported);
     let cell = &imported.cells[0];
     let ports = cell
         .ports
@@ -1827,8 +1672,8 @@ SYMATTR Value LDO_33
         .find(|pin| pin.name == "NC3")
         .and_then(|pin| pin.position)
         .expect("place 3 has a terminal");
-    // The middle of the drawn pins, (10, 30), lies under the value.
-    assert_eq!((mark.x, mark.y), (30, 30));
+    // Half a grid step off the grid, where no wire can reach it.
+    assert_eq!((mark.x, mark.y), (25, 15));
     let part = &imported.document.components[0];
     let layout = instance_label_layout(
         LayoutPoint::new(part.pos.x as f32, part.pos.y as f32),
@@ -1926,7 +1771,7 @@ SYMATTR InstName A2
     )
     .unwrap();
     let imported = import_foreign_schematic(&drawing, "work", &library);
-    assert_on_grid(&imported);
+    assert_wires_on_grid(&imported);
     assert_same_connectivity(&drawing, &imported, &library);
     let cells = imported
         .cells
@@ -2033,7 +1878,7 @@ fn an_ltspice_gate_with_a_ground_common_and_one_output_is_a_functional_gate() {
     )
     .unwrap();
     let imported = import_foreign_schematic(&drawing, "work", &library);
-    assert_on_grid(&imported);
+    assert_wires_on_grid(&imported);
     let part = |name: &str| {
         imported
             .document
@@ -2259,78 +2104,13 @@ fn a_qspice_gate_letters_the_settings_its_drawing_shows() {
     let [piece] = pieces else {
         panic!("{pieces:?}");
     };
-    assert_eq!((piece.text.as_str(), piece.size_percent), ("Ref=2", 60));
+    assert_eq!((piece.text.as_str(), piece.size_percent), ("Ref=2", 100));
     assert!(matches!(piece.position, LabelPosition::Placed { .. }));
 
     gate.params.push_str(" Ref=3");
     assert!(
         value_pieces(&gate).is_none(),
         "an edited gate letters RSpice's own value"
-    );
-}
-
-/// QSPICE ties a gate's Vss pin to ground without drawing one; RSpice draws
-/// the ground. A setting the drawing letters across that pin gives way to
-/// the ground rather than run over it.
-#[test]
-fn a_qspice_setting_gives_way_to_the_ground_rspice_draws_on_a_pin() {
-    use crate::schematic::label_layout::{LayoutPoint, LayoutRect, text_box};
-    use crate::schematic::value_label::value_pieces;
-
-    const DRAWING: &str = "«schematic
-  «component (0,0) 0 0
-    «symbol AND2Q
-      «type: ¥»
-      «text (0,300) 1 7 0 0x1000000 -1 -1 \"¥1\"»
-      «text (0,-200) 0.5 0 2 0x1000000 -1 -1 \"AND\"»
-      «text (-60,-450) 1 7 0 0x1000000 -1 -1 \"Ref=2\"»
-      «pin (0,400) (0,0) 1 0 0 0x1000000 -1 \"Vdd\"»
-      «pin (0,-400) (0,0) 1 0 0 0x1000000 -1 \"Vss\" \"GND\"»
-      «pin (400,0) (0,0) 1 0 0 0x1000000 -1 \"Q\"»
-      «pin (-400,200) (0,0) 1 0 0 0x1000000 -1 \"b0\"»
-      «pin (-400,-200) (0,0) 1 0 0 0x1000000 -1 \"b1\"»
-    »
-  »
-  «net (0,400) 1 13 0 \"VDD\"»
-  «net (400,0) 1 13 0 \"y\"»
-  «net (-400,200) 1 13 0 \"a\"»
-  «net (-400,-200) 1 13 0 \"b\"»
-»
-";
-    let drawing = parse_qsch(&qsch_bytes(DRAWING)).unwrap();
-    let imported = import_foreign_schematic(&drawing, "work", &Library::default());
-    let components = &imported.document.components;
-    let gate = components
-        .iter()
-        .find(|component| component.kind == ComponentType::CellInstance)
-        .expect("the gate is placed");
-    let ground = components
-        .iter()
-        .find(|component| component.kind == ComponentType::Ground)
-        .expect("RSpice draws the pin's ground");
-    let (width, height) = ground.symbol_dimensions();
-    let (width, height) = if ground.rotation.is_vertical() {
-        (height, width)
-    } else {
-        (width, height)
-    };
-    let (x, y) = (ground.pos.x as f32, ground.pos.y as f32);
-    let body = LayoutRect {
-        min: LayoutPoint::new(x - width as f32 / 2.0, y - height as f32 / 2.0),
-        max: LayoutPoint::new(x + width as f32 / 2.0, y + height as f32 / 2.0),
-    };
-    let [piece] = value_pieces(gate).expect("the gate letters its setting") else {
-        panic!("one setting");
-    };
-    let origin = LayoutPoint::new(gate.pos.x as f32, gate.pos.y as f32);
-    let placed = piece.position.placed_text(origin, 1.0).expect("placed");
-    let text = text_box(placed, &piece.text, piece.size_world());
-    assert!(
-        text.max.x <= body.min.x
-            || body.max.x <= text.min.x
-            || text.max.y <= body.min.y
-            || body.max.y <= text.min.y,
-        "{text:?} runs over the ground at {body:?}"
     );
 }
 
@@ -2468,7 +2248,7 @@ fn qspice_gates_and_gm_amplifiers_come_across_as_behavioural_subcircuits() {
         .map(|component| (component.name.as_str(), component.value.as_str()))
         .collect::<Vec<_>>();
     assert_eq!(parts, [("X1", "AND2Q_1"), ("X2", "Gm_2")]);
-    assert_on_grid(&imported);
+    assert_wires_on_grid(&imported);
 }
 
 /// LTspice's UniversalOpAmp2 at level2 is RSpice's Op-Amp with its settings
@@ -2507,7 +2287,7 @@ fn an_ltspice_universal_opamp_at_level2_is_the_functional_op_amp() {
     )
     .unwrap();
     let imported = import_foreign_schematic(&drawing, "work", &library);
-    assert_on_grid(&imported);
+    assert_wires_on_grid(&imported);
     let part = |name: &str| {
         imported
             .document
@@ -2643,7 +2423,7 @@ fn a_qspice_pin_nothing_reaches_joins_its_own_net() {
         })
         .collect::<Vec<_>>();
     assert_eq!(nets, ["vdd", "0", "out", "out", "in"]);
-    assert_on_grid(&imported);
+    assert_wires_on_grid(&imported);
     // The refused flip-flop's note hangs from its body's top left corner,
     // its label under the words, not across the parts beside it.
     let note = imported
@@ -2662,26 +2442,40 @@ fn a_qspice_pin_nothing_reaches_joins_its_own_net() {
 /// The note RSpice leaves where it refused a part hangs from the top left
 /// of the part's gap. Where its words would run onto a part beside the gap,
 /// it moves to the first other place along the gap's top or bottom where
-/// they land on nothing: here standing on the left of its bottom, under the
-/// resistor's lower lead, which every place along the top crosses.
+/// they land on nothing: here along the top, past the resistor whose body
+/// stands in the corner.
 #[test]
 fn a_refused_parts_note_hangs_where_it_lands_on_nothing() {
+    let mut library = library();
+    library.symbols.insert(
+        "wide".to_owned(),
+        ForeignSymbolSource {
+            definition: parse_asy(
+                "Version 4\nSymbolType CELL\nRECTANGLE Normal -320 -160 320 160\n\
+                 PIN -320 0 NONE 0\nPINATTR PinName IN\nPINATTR SpiceOrder 1\n",
+            )
+            .expect("the test symbol reads"),
+            location: "wide.asy".to_owned(),
+            schematic: None,
+        },
+    );
     let drawing = parse_asc(
         "Version 4\n\
-         SYMBOL amp 160 64 R0\nSYMATTR InstName @1\n\
-         SYMBOL res 176 -48 R0\nSYMATTR InstName R1\nSYMATTR Value 1k\n",
+         SYMBOL wide 0 0 R0\nSYMATTR InstName @1\n\
+         SYMBOL res -256 -176 R0\nSYMATTR InstName R1\nSYMATTR Value 1k\n",
     )
     .expect("the drawing reads");
-    let imported = import_foreign_schematic(&drawing, "work", &library());
+    let imported = import_foreign_schematic(&drawing, "work", &library);
     let note = imported
         .document
         .design_notes
         .iter()
         .find(|note| note.text.starts_with("Not imported"))
         .expect("the probe leaves a note");
-    // From the top left, (160, 40), the words would run over the
-    // resistor's lead at x = 240 down to y = 60.
-    assert_eq!(note.pos, Point::new(160, 87));
+    // From the top left, (-200, -100), the words would run over the
+    // resistor at x = -150.
+    assert_eq!(note.pos.y, -100);
+    assert!(note.pos.x > -150, "{:?}", note.pos);
 }
 
 /// An LTspice pin with no `PinName` letters nothing in LTspice. RSpice names
@@ -2811,7 +2605,7 @@ fn an_ltspice_pin_on_a_slanted_edge_names_itself_where_ltspice_letters_it() {
         )
     };
     // Eight units in from the pin, reaching left, centred on its line.
-    assert_eq!(placed("FB"), (Point::new(-10, 0), Some(Point::new(-1, 0))));
+    assert_eq!(placed("FB"), (Point::new(-5, 0), Some(Point::new(-1, 0))));
     assert_eq!(placed("IN").1, None);
 }
 
@@ -2943,11 +2737,11 @@ fn a_pin_its_drawing_letters_no_name_for_draws_none() {
         .connectable_pins()
         .find(|pin| pin.name == "IN")
         .expect("the IN pin");
-    assert_eq!(input.name_offset, Some(10));
+    assert_eq!(input.name_offset, Some(5));
     let terminal = resolved.effective_pin_offset(input);
     assert_eq!(
         resolved.pin_label_anchor(input),
-        Point::new(terminal.x + 10, terminal.y)
+        Point::new(terminal.x + 5, terminal.y)
     );
     // An A-device draws no pin names, and its places without a pin share one
     // point: none of them letters a name over the others.
@@ -2972,7 +2766,8 @@ fn a_pin_its_drawing_letters_no_name_for_draws_none() {
 #[test]
 fn a_qspice_net_label_name_stands_on_the_side_its_drawing_runs_it_to() {
     use crate::schematic::label_layout::{
-        LINE_BOX_EM, NET_LABEL_FONT_WORLD, NET_LABEL_GLYPH_WIDTH_WORLD, net_label_name_corner,
+        LINE_BOX_EM, NET_LABEL_FONT_WORLD, NET_LABEL_GLYPH_WIDTH_WORLD, net_label_font_world,
+        net_label_name_corner,
     };
     use crate::schematic::net_label::{NetLabel, NetLabelSide};
 
@@ -3006,19 +2801,20 @@ fn a_qspice_net_label_name_stands_on_the_side_its_drawing_runs_it_to() {
         assert_eq!(label.side, side, "{name}");
         // The name's box, from its bottom-left corner.
         let corner = net_label_name_corner(label);
-        let width = name.len() as f32 * NET_LABEL_GLYPH_WIDTH_WORLD;
-        let top = corner.y - NET_LABEL_FONT_WORLD * LINE_BOX_EM;
+        let font = net_label_font_world(label);
+        let width = name.len() as f32 * NET_LABEL_GLYPH_WIDTH_WORLD * font / NET_LABEL_FONT_WORLD;
         let (x, y) = (label.pos.x as f32, label.pos.y as f32);
+        let centred_on_its_line = (corner.y - font * LINE_BOX_EM * 0.5 - y).abs() < 0.01;
         match side {
             NetLabelSide::Below => {
-                assert!(top > y, "{name} hangs under its point");
+                assert!(corner.y > y, "{name} hangs under its point");
                 assert!(
                     (corner.x + width * 0.5 - x).abs() < 0.01,
                     "{name} is centred"
                 );
             }
             NetLabelSide::Above => {
-                assert!(corner.y < y, "{name} stands over its point");
+                assert!(corner.y - font * 0.275 < y, "{name} stands over its point");
                 assert!(
                     (corner.x + width * 0.5 - x).abs() < 0.01,
                     "{name} is centred"
@@ -3026,17 +2822,11 @@ fn a_qspice_net_label_name_stands_on_the_side_its_drawing_runs_it_to() {
             }
             NetLabelSide::Left => {
                 assert!(corner.x + width < x, "{name} ends short of its point");
-                assert!(
-                    corner.y < y,
-                    "{name} stands over the line through its point"
-                );
+                assert!(centred_on_its_line, "{name} is centred on its line");
             }
             NetLabelSide::Right => {
                 assert!(corner.x > x, "{name} starts past its point");
-                assert!(
-                    corner.y < y,
-                    "{name} stands over the line through its point"
-                );
+                assert!(centred_on_its_line, "{name} is centred on its line");
             }
         }
     }
@@ -3144,17 +2934,12 @@ fn a_comment_keeps_its_size_and_stands_on_its_point_as_its_drawing_stood_it() {
 /// to a wire, keeps its mark.
 #[test]
 fn a_comment_draws_no_anchor_mark_where_its_drawing_drew_none() {
-    let drawing =
-        parse_asc("Version 4\nTEXT 32 160 Left 2 ;Bias network\nDATAFLAG 96 80 \"$\"\n").unwrap();
-    let mut imported = import_foreign_schematic(&drawing, "work", &Library::default());
-    keep_directive_text(
-        &mut imported.document,
-        Point::new(0, 0),
-        1,
-        &[(0, ".options gmin=1p")],
-        ForeignLettering::default(),
+    let drawing = parse_asc(
+        "Version 4\nTEXT 32 160 Left 2 ;Bias network\nTEXT 32 320 Left 2 !.options gmin=1p\n\
+         DATAFLAG 96 80 \"$\"\n",
     )
     .unwrap();
+    let imported = import_foreign_schematic(&drawing, "work", &Library::default());
     let note = |start: &str| {
         imported
             .document
@@ -3276,34 +3061,20 @@ fn an_ltspice_comment_of_several_lines_stands_on_its_point_by_its_first_line() {
     assert!(near(bottom, y - standoff), "{bottom} against {y}");
 }
 
-/// Directive text kept on the sheet is lettered as its block was: at the
-/// block's size, on its own line of the block, whose first line the drawing
-/// centred on its point. The `.backanno` line above it is read by LTspice
-/// alone, and its line stays empty.
+/// A directive block is lettered as the drawing lettered it: whole, at the
+/// block's size, its first line centred on the drawing's point.
 #[test]
-fn directive_text_kept_on_the_sheet_is_lettered_as_its_block_was() {
+fn a_directive_block_is_lettered_where_and_as_the_drawing_lettered_it() {
     let drawing =
         parse_asc("Version 4\nFLAG 640 0 base\nTEXT 640 0 Left 3 !.backanno\\n.options gmin=1p\n")
             .unwrap();
-    let mut imported = import_foreign_schematic(&drawing, "work", &Library::default());
-    let card = foreign_directive_cards(&imported.directives)
-        .into_iter()
-        .find(|card| card.keyword() == ".options")
-        .expect("the block holds an .options card");
-    keep_directive_text(
-        &mut imported.document,
-        card.position,
-        card.block_lines,
-        &[(card.line, card.text.as_str())],
-        card.lettering,
-    )
-    .unwrap();
+    let imported = import_foreign_schematic(&drawing, "work", &Library::default());
     let note = imported
         .document
         .design_notes
         .iter()
-        .find(|note| note.text == ".options gmin=1p")
-        .expect("the card is kept as a note");
+        .find(|note| note.text == ".backanno\n.options gmin=1p")
+        .expect("the block is lettered whole");
     assert_eq!(
         note.text_size_percent, 133,
         "LTspice size 3 is 2.0x against 1.5x"
@@ -3312,7 +3083,7 @@ fn directive_text_kept_on_the_sheet_is_lettered_as_its_block_was() {
     let ([left, top, _, _], line) = note_box(note);
     let (x, y) = label_point(&imported, "base");
     assert!(
-        near(left, x + 3.0) && near(top - line * 0.5, y),
+        near(left, x + 3.0) && near(top + line * 0.5, y),
         "{left},{top} against {x},{y}"
     );
 }
@@ -3351,91 +3122,6 @@ fn meets_drawn_body(
             })
         })
     })
-}
-
-/// Whether `text` meets the body RSpice draws for `part`: its symbol's box,
-/// where the artwork is not built in.
-#[cfg(not(feature = "symbol-artwork"))]
-fn meets_drawn_body(
-    part: &crate::schematic::component::Component,
-    text: crate::schematic::label_layout::LayoutRect,
-) -> bool {
-    let (width, height) = part.symbol_dimensions();
-    let (width, height) = if part.rotation.is_vertical() {
-        (height as f32, width as f32)
-    } else {
-        (width as f32, height as f32)
-    };
-    let (x, y) = (part.pos.x as f32, part.pos.y as f32);
-    text.min.x < x + width * 0.5
-        && text.max.x > x - width * 0.5
-        && text.min.y < y + height * 0.5
-        && text.max.y > y - height * 0.5
-}
-
-/// A part RSpice draws with its own artwork is judged by the ink that
-/// artwork draws, not by the box it stands in. The drawing letters each
-/// transistor beside the small body it drew; RSpice's transistors reach
-/// further. The first one's value lands on its own emitter lead, and along
-/// its line the second transistor and its name leave it no room: it steps
-/// off its line, clear of every lead. The second one's name stands inside
-/// its box between its leads, clear of their ink, where the drawing set it.
-#[cfg(feature = "symbol-artwork")]
-#[test]
-fn a_part_rspice_draws_is_judged_by_the_ink_its_artwork_draws() {
-    use crate::schematic::label_layout::{
-        INSTANCE_NAME_WORLD, INSTANCE_VALUE_WORLD, LayoutPoint, instance_label_layout, text_box,
-    };
-    use crate::schematic::label_position::LabelPosition;
-
-    const DRAWING: &str = "«schematic
-  «component (0,0) 0 0
-    «symbol
-      «type: QN»
-      «text (150,150) 1 7 0 0x1000000 -1 -1 \"Q1\"»
-      «text (50,-350) 1 7 0 0x1000000 -1 -1 \"NPN1\"»
-      «pin (100,200) (0,0) 1 0 0 0x0 -1 \"C\"»
-      «pin (-100,0) (0,0) 1 0 0 0x0 -1 \"B\"»
-      «pin (100,-200) (0,0) 1 0 0 0x0 -1 \"E\"»
-    »
-  »
-  «component (600,-300) 0 0
-    «symbol
-      «type: QP»
-      «text (-80,0) 1 7 0 0x1000000 -1 -1 \"Q2\"»
-      «text (150,-150) 1 7 0 0x1000000 -1 -1 \"PNP1\"»
-      «pin (100,-200) (0,0) 1 0 0 0x0 -1 \"C\"»
-      «pin (-100,0) (0,0) 1 0 0 0x0 -1 \"B\"»
-      «pin (100,200) (0,0) 1 0 0 0x0 -1 \"E\"»
-    »
-  »
-»
-";
-    let drawing = parse_qsch(&qsch_bytes(DRAWING)).unwrap();
-    let imported = import_foreign_schematic(&drawing, "work", &Library::default());
-    let parts = &imported.document.components;
-    for part in parts {
-        let origin = LayoutPoint::new(part.pos.x as f32, part.pos.y as f32);
-        let layout = instance_label_layout(origin, 1.0, part);
-        for (placed, text, size) in [
-            (layout.name, &part.name, INSTANCE_NAME_WORLD),
-            (layout.value, &part.value, INSTANCE_VALUE_WORLD),
-        ] {
-            let text_box = text_box(placed, text, size);
-            assert!(
-                !parts.iter().any(|body| meets_drawn_body(body, text_box)),
-                "{text} at {text_box:?} runs over a transistor's ink"
-            );
-        }
-    }
-    // Q2's name stands where the drawing set it: the drawing's anchor, a
-    // tenth of the source's units, upward.
-    let second = parts.iter().find(|part| part.name == "Q2").expect("Q2");
-    let LabelPosition::Placed { offset, .. } = second.name_label_pos else {
-        panic!("Q2's name is placed");
-    };
-    let anchor = second.pos + offset;
-    assert_eq!((anchor.x, anchor.y), (52, 30), "Q2's name moved");
 }
 
 /// A QSPICE source's drawing letters its waveform in one text, on one
@@ -3596,16 +3282,282 @@ FLAG 384 0 0
         grounds,
         BTreeMap::from([
             ((0, 0), Rotation::R90),
-            ((200, 0), Rotation::R0),
-            ((320, 0), Rotation::R180),
-            ((480, 0), Rotation::R0),
+            ((100, 0), Rotation::R0),
+            ((160, 0), Rotation::R180),
+            ((240, 0), Rotation::R0),
         ])
     );
     // LTspice's triangle is 36 of its units across and 18 deep, drawn at
-    // five quarters: its top edge on the terminal, its sides at 45 degrees.
-    let [left, right, apex] = GroundGlyph::Ltspice.outline().expect("an imported glyph");
+    // five eighths: its top edge on the terminal, its sides at 45 degrees.
+    let [left, right, apex]: [(f32, f32); 3] = GroundGlyph::Ltspice
+        .outline()
+        .expect("an imported glyph")
+        .try_into()
+        .expect("a triangle");
     let (_, terminal) = ComponentType::Ground.terminal_offsets()[0];
     assert_eq!((left.1, right.1), (terminal.y as f32, terminal.y as f32));
-    assert_eq!((right.0 - left.0, apex.1 - left.1), (45.0, 22.5));
+    assert_eq!((right.0 - left.0, apex.1 - left.1), (22.5, 11.25));
     assert_eq!(apex.0, terminal.x as f32);
+}
+
+/// A resistor's symbol as a user's installation might draw it: pins at 16, 16
+/// and 16, 96, a box between two leads, its name and value windowed.
+const BOXED_RESISTOR_ASY: &str = "Version 4\nSymbolType CELL\n\
+    LINE Normal 16 16 16 32\nLINE Normal 16 80 16 96\nRECTANGLE Normal 4 32 28 80\n\
+    WINDOW 0 40 40 Left 2\nWINDOW 3 40 72 Left 1\n\
+    SYMATTR Value R\nSYMATTR Prefix R\n\
+    PIN 16 16 NONE 0\nPINATTR PinName A\nPINATTR SpiceOrder 1\n\
+    PIN 16 96 NONE 0\nPINATTR PinName B\nPINATTR SpiceOrder 2\n";
+
+fn library_of(name: &str, source: &str) -> Library {
+    let mut library = Library::default();
+    library.symbols.insert(
+        name.to_owned(),
+        ForeignSymbolSource {
+            definition: parse_asy(source).expect("the test symbol reads"),
+            location: format!("{name}.asy"),
+            schematic: None,
+        },
+    );
+    library
+}
+
+fn wire_points(imported: &ForeignImport) -> BTreeSet<(i32, i32)> {
+    imported
+        .document
+        .wires
+        .iter()
+        .flat_map(|wire| wire.points.iter().map(|point| (point.x, point.y)))
+        .collect()
+}
+
+/// Sixteen LTspice units are one of RSpice's ten-unit steps, and a point that
+/// falls between steps stays between them: scaling is a function of the
+/// coordinate alone, so nothing merges or splits.
+#[test]
+fn an_ltspice_coordinate_scales_by_five_eighths_and_nothing_snaps() {
+    let drawing =
+        parse_asc("Version 4\nWIRE 0 0 16 0\nWIRE 16 0 16 8\nWIRE 16 8 -20 8\nFLAG -20 8 out\n")
+            .unwrap();
+    let imported = import_foreign_schematic(&drawing, "work", &Library::default());
+    assert_eq!(
+        wire_points(&imported),
+        BTreeSet::from([(0, 0), (10, 0), (10, 5), (-13, 5)])
+    );
+    assert_eq!(imported.document.net_labels[0].pos, Point::new(-13, 5));
+}
+
+/// A native part stays that part and draws the symbol its source tool draws,
+/// its pins on the source's pins whichever way the drawing turns it.
+#[test]
+fn a_native_part_draws_its_sources_own_symbol_in_every_orientation() {
+    let library = library_of("res", BOXED_RESISTOR_ASY);
+    for orientation in ORIENTATIONS {
+        let drawing = parse_asc(&format!(
+            "Version 4\nSYMBOL res 160 160 {orientation}\nSYMATTR InstName R1\nSYMATTR Value 1k\n"
+        ))
+        .unwrap();
+        let imported = import_foreign_schematic(&drawing, "work", &library);
+        let resistor = &imported.document.components[0];
+        assert_eq!(resistor.kind, ComponentType::Resistor, "{orientation}");
+        let symbol = resistor.source_symbol().expect("the source's symbol");
+        assert_eq!(symbol.document().body.len(), 3, "{orientation}");
+        let placed = &drawing.symbols[0];
+        let expected = [ForeignPoint::new(16, 16), ForeignPoint::new(16, 96)].map(|pin| {
+            let point = placed.position.offset(placed.orientation.apply(pin));
+            (point.x * 5 / 8, point.y * 5 / 8)
+        });
+        let terminals = resistor
+            .terminal_positions()
+            .into_iter()
+            .map(|(_, point)| (point.x, point.y))
+            .collect::<Vec<_>>();
+        assert_eq!(terminals, expected, "{orientation}");
+    }
+}
+
+/// With no symbol to read, a native part draws RSpice's glyph, scaled so its
+/// terminals land on the pins the drawing puts them on.
+#[cfg(feature = "symbol-artwork")]
+#[test]
+fn a_native_part_with_no_readable_symbol_draws_rspices_glyph_at_the_pin_span() {
+    let drawing =
+        parse_asc("Version 4\nSYMBOL res 0 0 R0\nSYMATTR InstName R1\nSYMATTR Value 1k\n").unwrap();
+    let imported = import_foreign_schematic(&drawing, "work", &Library::default());
+    let resistor = &imported.document.components[0];
+    assert!(resistor.source_symbol().is_some(), "a scaled glyph");
+    let terminals = resistor
+        .terminal_positions()
+        .into_iter()
+        .map(|(_, point)| (point.x, point.y))
+        .collect::<Vec<_>>();
+    assert_eq!(terminals, [(10, 10), (10, 60)]);
+}
+
+/// A switch keeps its own behaviour and draws the source's symbol too.
+#[test]
+fn a_functional_part_draws_its_sources_own_symbol() {
+    const SWITCH_ASY: &str = "Version 4\nSymbolType CELL\nCIRCLE Normal -32 -32 32 32\n\
+        PIN 0 -48 NONE 0\nPINATTR PinName 1\nPINATTR SpiceOrder 1\n\
+        PIN 0 48 NONE 0\nPINATTR PinName 2\nPINATTR SpiceOrder 2\n\
+        PIN -48 -16 NONE 0\nPINATTR PinName 3\nPINATTR SpiceOrder 3\n\
+        PIN -48 16 NONE 0\nPINATTR PinName 4\nPINATTR SpiceOrder 4\n";
+    let library = library_of("sw", SWITCH_ASY);
+    let drawing =
+        parse_asc("Version 4\nSYMBOL sw 160 160 R0\nSYMATTR InstName S1\nSYMATTR Value MYSW\n")
+            .unwrap();
+    let imported = import_foreign_schematic(&drawing, "work", &library);
+    let switch = &imported.document.components[0];
+    assert_eq!(switch.kind, ComponentType::VSwitch);
+    assert!(switch.source_symbol().is_some(), "the source's symbol");
+    let terminals = switch
+        .terminal_positions()
+        .into_iter()
+        .map(|(_, point)| (point.x, point.y))
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        terminals,
+        BTreeSet::from([(100, 70), (100, 130), (70, 90), (70, 110)])
+    );
+}
+
+/// A pin the source leaves open but ties to ground itself keeps the tie and
+/// draws the small open square, not a ground symbol the drawing does not have.
+#[test]
+fn a_pin_the_source_ties_by_itself_draws_an_open_square_and_keeps_its_net() {
+    use crate::schematic::ground_glyph::GroundGlyph;
+
+    let drawing =
+        parse_asc("Version 4\nSYMBOL Digital\\and 64 64 R0\nSYMATTR InstName A7\n").unwrap();
+    let library = library();
+    let imported = import_foreign_schematic(&drawing, "work", &library);
+    assert_same_connectivity(&drawing, &imported, &library);
+    let grounds = imported
+        .document
+        .components
+        .iter()
+        .filter(|component| component.kind == ComponentType::Ground)
+        .collect::<Vec<_>>();
+    assert!(!grounds.is_empty(), "the pins are tied");
+    for ground in grounds {
+        assert_eq!(ground.ground_glyph, GroundGlyph::OpenPin, "{}", ground.name);
+    }
+}
+
+/// QSPICE's default net on a pin nothing reaches is the same: the net is kept
+/// and the pin draws open, lettering no name.
+#[test]
+fn a_qspice_default_net_draws_an_open_pin_and_keeps_its_net() {
+    use crate::schematic::label_layout::net_label_display_name;
+    use crate::schematic::net_label::NetLabelDrawing;
+
+    const DRAWING: &str = "«schematic
+  «component (0,0) 0 0
+    «symbol AND2Q
+      «type: ¥»
+      «text (0,300) 1 7 0 0x1000000 -1 -1 \"¥1\"»
+      «text (0,-200) 0.5 0 2 0x1000000 -1 -1 \"AND\"»
+      «pin (0,400) (0,0) 1 0 0 0x1000000 -1 \"Vdd\" \"Vdd\"»
+      «pin (0,-400) (0,0) 1 0 0 0x1000000 -1 \"Vss\" \"GND\"»
+      «pin (400,0) (0,0) 1 0 0 0x1000000 -1 \"Q\"»
+      «pin (-400,200) (0,0) 1 0 0 0x1000000 -1 \"b0\"»
+      «pin (-400,-200) (0,0) 1 0 0 0x1000000 -1 \"b1\"»
+    »
+  »
+  «net (400,0) 1 13 0 \"y\"»
+  «net (-400,200) 1 13 0 \"a\"»
+  «net (-400,-200) 1 13 0 \"b\"»
+»
+";
+    let imported = import_foreign_schematic(
+        &parse_qsch(&qsch_bytes(DRAWING)).unwrap(),
+        "work",
+        &Library::default(),
+    );
+    let label = imported
+        .document
+        .net_labels
+        .iter()
+        .find(|label| label.name == "Vdd")
+        .expect("the net is kept");
+    assert_eq!(label.drawing, NetLabelDrawing::OpenPin);
+    assert_eq!(net_label_display_name(label), "");
+}
+
+/// A value window letters the `Value` attribute: with none, the drawing shows
+/// nothing there, while the model stays on the part for the run.
+#[test]
+fn a_value_window_with_no_value_letters_nothing_and_keeps_the_model() {
+    use crate::schematic::component_display::ComponentDisplayMode;
+
+    const MODELLED_ASY: &str = "Version 4\nSymbolType CELL\nRECTANGLE Normal -16 -16 16 16\n\
+        WINDOW 0 0 -32 Center 2\nWINDOW 3 0 32 Center 2\n\
+        SYMATTR Prefix X\nSYMATTR SpiceModel amp.sub\n\
+        PIN -16 0 NONE 0\nPINATTR PinName A\nPINATTR SpiceOrder 1\n";
+    let mut library = library();
+    library.symbols.insert(
+        "modelled".to_owned(),
+        ForeignSymbolSource {
+            definition: parse_asy(MODELLED_ASY).expect("the test symbol reads"),
+            location: "modelled.asy".to_owned(),
+            schematic: None,
+        },
+    );
+    let drawing = parse_asc("Version 4\nSYMBOL modelled 64 64 R0\nSYMATTR InstName X1\n").unwrap();
+    let imported = import_foreign_schematic(&drawing, "work", &library);
+    let part = &imported.document.components[0];
+    assert_eq!(part.display_mode, ComponentDisplayMode::NameOnly);
+    let binding = part.library_cell.as_ref().expect("a cell");
+    assert_eq!(binding.source_path, Some(PathBuf::from("lib/amp.sub")));
+}
+
+/// An imported net flag letters its name at the wire's end and nothing else:
+/// no attachment diamond, no rail glyph.
+#[test]
+fn an_imported_net_flag_letters_its_name_at_the_wire_end_with_no_diamond() {
+    use crate::schematic::label_layout::{
+        IMPORTED_TEXT_WORLD, net_label_font_world, net_label_layout, supply_glyph_marks,
+    };
+    use crate::schematic::net_label::NetLabelDrawing;
+
+    let drawing = parse_asc("Version 4\nWIRE 0 0 160 0\nFLAG 160 0 OUT\nFLAG 0 0 VCC\n").unwrap();
+    let imported = import_foreign_schematic(&drawing, "work", &Library::default());
+    for label in &imported.document.net_labels {
+        assert_eq!(label.drawing, NetLabelDrawing::Lettered, "{}", label.name);
+        assert_eq!(net_label_layout(label).diamond_half, 0.0, "{}", label.name);
+        assert!(supply_glyph_marks(label).is_empty(), "{}", label.name);
+        assert_eq!(net_label_font_world(label), f32::from(IMPORTED_TEXT_WORLD));
+    }
+}
+
+/// Names, values and pin names are lettered at the size their source gives
+/// them, scaled like the geometry: size 2 is the ordinary fifteen units here,
+/// and size 1 two thirds of it.
+#[test]
+fn imported_text_keeps_the_proportions_of_its_source() {
+    use crate::schematic::label_layout::{
+        IMPORTED_TEXT_WORLD, INSTANCE_NAME_WORLD, INSTANCE_VALUE_WORLD,
+    };
+
+    let library = library_of("res", BOXED_RESISTOR_ASY);
+    let drawing =
+        parse_asc("Version 4\nSYMBOL res 0 0 R0\nSYMATTR InstName R1\nSYMATTR Value 1k\n").unwrap();
+    let imported = import_foreign_schematic(&drawing, "work", &library);
+    let resistor = &imported.document.components[0];
+    let ordinary = f32::from(IMPORTED_TEXT_WORLD);
+    let name = resistor.name_label_pos.size_world(INSTANCE_NAME_WORLD);
+    let value = resistor.value_label_pos.size_world(INSTANCE_VALUE_WORLD);
+    assert!((name - ordinary).abs() < 0.1, "name at {name}");
+    assert!(
+        (value - ordinary * 2.0 / 3.0).abs() < 0.2,
+        "value at {value}"
+    );
+
+    let library = self::library();
+    let drawing = parse_asc("Version 4\nSYMBOL amp 64 64 R0\nSYMATTR InstName U1\n").unwrap();
+    let imported = import_foreign_schematic(&drawing, "work", &library);
+    assert_eq!(
+        imported.cells[0].symbol.pin_name_size,
+        Some(IMPORTED_TEXT_WORLD)
+    );
 }

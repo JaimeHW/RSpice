@@ -427,7 +427,7 @@ fn component_export_world_bounds(
     symbol_library: Option<&crate::SymbolLibrary>,
     config: &SvgExportConfig,
 ) -> (f64, f64, f64, f64) {
-    if component.kind == ComponentType::CellInstance {
+    if component.is_drawn_from_a_symbol_document() {
         if let Some((symbol, width, height)) =
             symbol_library.and_then(|library| compatible_builtin_xspice_symbol(component, library))
         {
@@ -546,6 +546,9 @@ fn compatible_builtin_xspice_symbol<'a>(
     component: &Component,
     library: &'a crate::SymbolLibrary,
 ) -> Option<(&'a crate::symbols::Symbol, f32, f32)> {
+    if component.source_symbol().is_some() {
+        return None;
+    }
     let asset = component.builtin_artwork()?;
     let (width, height) = component.artwork_dimensions();
     if !library.artwork_fits(component, asset, width as f32, height as f32) {
@@ -567,7 +570,7 @@ fn write_component(
 
     svg.push_str("<g>\n");
 
-    if component.kind == ComponentType::CellInstance {
+    if component.is_drawn_from_a_symbol_document() {
         // Artwork first, exactly as the canvas resolves it: an exported sheet
         // must show the same authored symbol the schematic was drawn with.
         if let Some((symbol, width, height)) =
@@ -708,7 +711,7 @@ fn primitive_labels(component: &Component, config: &SvgExportConfig) -> Vec<Prim
             align: layout.name_align,
             upward: layout.name_upward,
             text: component.name.clone(),
-            size_percent: 100,
+            size_percent: component.name_label_pos.size_percent(),
         });
     }
     let pieces = rspice_design::schematic::value_label::value_pieces(component).filter(|_| {
@@ -758,7 +761,7 @@ fn primitive_labels(component: &Component, config: &SvgExportConfig) -> Vec<Prim
             align: layout.value_align,
             upward: layout.value_upward,
             text: value.to_string(),
-            size_percent: 100,
+            size_percent: component.value_label_pos.size_percent(),
         });
     }
     labels
@@ -771,7 +774,7 @@ fn symbol_writes_labels(
     resolved_symbol: Option<&ResolvedCellSymbol>,
     symbol_library: Option<&crate::SymbolLibrary>,
 ) -> bool {
-    component.kind == ComponentType::CellInstance
+    component.is_drawn_from_a_symbol_document()
         && symbol_library
             .and_then(|library| compatible_builtin_xspice_symbol(component, library))
             .is_none()
@@ -894,13 +897,15 @@ fn write_symbol_resolution_error(
 }
 
 fn find_resolved_symbol<'a>(
-    component: &Component,
+    component: &'a Component,
     resolved_symbols: &'a [ResolvedSymbolExportEntry],
 ) -> Option<&'a ResolvedCellSymbol> {
-    resolved_symbols
-        .iter()
-        .find(|entry| entry.component_id == component.id)
-        .map(|entry| &entry.symbol)
+    component.source_symbol().or_else(|| {
+        resolved_symbols
+            .iter()
+            .find(|entry| entry.component_id == component.id)
+            .map(|entry| &entry.symbol)
+    })
 }
 
 pub(crate) fn escape_xml(text: &str) -> String {
@@ -1040,7 +1045,7 @@ mod tests {
         };
         for (glyph, path) in [
             (GroundGlyph::Qspice, "M 41.75 0 L 58.25 0 L 50 8.25 Z"),
-            (GroundGlyph::Ltspice, "M 27.5 0 L 72.5 0 L 50 22.5 Z"),
+            (GroundGlyph::Ltspice, "M 38.75 0 L 61.25 0 L 50 11.25 Z"),
         ] {
             let mut ground = Component::new(1, ComponentType::Ground, Point::new(50, 10));
             ground.ground_glyph = glyph;
@@ -1051,7 +1056,11 @@ mod tests {
                 "{glyph:?}: {svg}"
             );
             assert_eq!(svg.matches(r#"<path class="symbol""#).count(), 1, "{svg}");
-            let [left, right, apex] = glyph.outline().expect("an imported glyph");
+            let [left, right, apex]: [(f32, f32); 3] = glyph
+                .outline()
+                .expect("an imported glyph")
+                .try_into()
+                .expect("a triangle");
             let bounds = component_export_world_bounds(&ground, None, Some(&library), &config);
             for (x, y) in [left, right, apex] {
                 let (x, y) = (50.0 + f64::from(x), 10.0 + f64::from(y));
@@ -1570,6 +1579,7 @@ mod tests {
             horizontal: TextEdge::Start,
             vertical: TextEdge::Center,
             upward: true,
+            size_percent: 100,
         };
         let mut svg = String::new();
         write_component(&mut svg, &resistor, &config, None, None);

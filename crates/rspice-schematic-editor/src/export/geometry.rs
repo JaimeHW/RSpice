@@ -21,7 +21,7 @@ use rspice_design_model::Point;
 use super::SvgExportConfig;
 use crate::view::{
     design_notes, drawing, lod, net_labels,
-    resolved_symbol_render::{svg_text_baseline, write_text_svg},
+    resolved_symbol_render::{svg_text_baseline, write_sized_text_svg, write_text_svg},
 };
 
 /// The page rectangle grown to hold everything drawn, in SVG units.
@@ -531,23 +531,48 @@ pub(super) fn write_net_label(svg: &mut String, label: &NetLabel, config: &SvgEx
     writeln!(svg, "<g class=\"net\" data-object-id=\"{}\">", label.id).unwrap();
     let (x, y) = page(label.pos, config);
     let half = world(layout.diamond_half, config);
-    writeln!(
-        svg,
-        "<polygon class=\"net-mark\" points=\"{x},{} {},{y} {x},{} {},{y}\"/>",
-        y - half,
-        x + half,
-        y + half,
-        x - half
-    )
-    .unwrap();
-    write_text_svg(
-        svg,
-        "net-name",
-        at(layout.corner),
-        layout.name,
-        Align2::LEFT_BOTTOM,
-        world(layout.font_size, config),
-    );
+    if half > 0.0 {
+        writeln!(
+            svg,
+            "<polygon class=\"net-mark\" points=\"{x},{} {},{y} {x},{} {},{y}\"/>",
+            y - half,
+            x + half,
+            y + half,
+            x - half
+        )
+        .unwrap();
+    }
+    let open_pin = world(layout.open_pin_half, config);
+    if open_pin > 0.0 {
+        writeln!(
+            svg,
+            "<rect class=\"symbol\" x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\"/>",
+            x - open_pin,
+            y - open_pin,
+            2.0 * open_pin,
+            2.0 * open_pin
+        )
+        .unwrap();
+    }
+    if label.drawing.is_native() {
+        write_text_svg(
+            svg,
+            "net-name",
+            at(layout.corner),
+            layout.name,
+            Align2::LEFT_BOTTOM,
+            world(layout.font_size, config),
+        );
+    } else if !layout.name.is_empty() {
+        write_sized_text_svg(
+            svg,
+            "net-name",
+            at(layout.corner),
+            layout.name,
+            Align2::LEFT_BOTTOM,
+            world(layout.font_size, config),
+        );
+    }
     let supply = rspice_design::schematic::label_layout::supply_glyph_marks(label);
     if !supply.is_empty() {
         let mut data = String::new();

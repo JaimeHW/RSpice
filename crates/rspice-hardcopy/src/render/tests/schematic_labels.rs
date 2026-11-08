@@ -527,7 +527,11 @@ fn a_printed_imported_ground_is_its_tools_triangle() {
             _ => None,
         })
         .collect::<Vec<_>>();
-    let [left, right, apex] = GroundGlyph::Ltspice.outline().expect("an imported glyph");
+    let [left, right, apex]: [(f32, f32); 3] = GroundGlyph::Ltspice
+        .outline()
+        .expect("an imported glyph")
+        .try_into()
+        .expect("a triangle");
     let triangle = [left, right, apex]
         .map(|(x, y)| compiled.at(40.0 + f64::from(x).round(), 30.0 + f64::from(y).round()))
         .to_vec();

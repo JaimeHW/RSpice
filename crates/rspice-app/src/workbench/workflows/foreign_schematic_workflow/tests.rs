@@ -3,9 +3,7 @@
 //! model text and included files as model libraries, and what has no place
 //! as text on its sheet.
 
-use rspice_design::foreign_schematic::{
-    ForeignCard, ForeignCardRole, ForeignLettering, ForeignTool,
-};
+use rspice_design::foreign_schematic::{ForeignCard, ForeignCardRole, ForeignTool};
 use rspice_design_model::Point;
 use rspice_simulation_contract::analysis_draft::AnalysisDraft;
 use rspice_simulation_contract::config::NoiseSweepType;
@@ -18,9 +16,6 @@ use rspice_simulation_contract::run_set::RunSetDimensionKind;
 fn card(role: ForeignCardRole, text: &str) -> ForeignCard {
     ForeignCard {
         position: Point::new(10, 20),
-        lettering: ForeignLettering::default(),
-        line: 0,
-        block_lines: 1,
         role,
         text: text.to_owned(),
         tokens: rspice_design::netlist_document::card_tokens(text),
@@ -426,7 +421,14 @@ fn an_imported_schematic_is_project_content_a_run_reads() {
         .iter()
         .map(|note| note.text.as_str())
         .collect::<Vec<_>>();
-    assert_eq!(notes, ["K1 L1 L2 1"]);
+    assert_eq!(
+        notes,
+        [
+            ".tran 0 20m 0 10u\n.param R=1k\n.include buffers.lib",
+            ".step param R list 1k 2k\n.meas TRAN vmax MAX V(out)",
+            ".model D1N D(Is=1n)\nK1 L1 L2 1",
+        ]
+    );
 
     // The stepped parameter is an axis of the plan's run set and the
     // measurement a plan measurement; both reach a prepared run as they are.
@@ -460,40 +462,39 @@ fn an_imported_schematic_is_project_content_a_run_reads() {
     std::fs::remove_dir_all(&folder).ok();
 }
 
-/// A directive block's cards stay on the sheet each on its own line of the
-/// block: the analysis the plan took leaves its line empty, so the coupling
-/// under it stays one line below the point the block stands on, where LTspice
-/// draws it, not lifted into the analysis's place.
+/// A directive block stays on the sheet as the drawing lettered it, whole,
+/// while the plan takes the analysis it holds: what a run reads and what the
+/// sheet shows are separate.
 #[test]
-fn a_kept_card_stays_on_its_own_line_of_its_block() {
+fn a_directive_block_stays_on_the_sheet_while_the_plan_takes_its_analysis() {
     let folder = drawing_folder();
     let file = folder.join("lines.asc");
     std::fs::write(
         &file,
         "Version 4\nSHEET 1 880 680\n\
          SYMBOL res 32 64 R0\nSYMATTR InstName R1\nSYMATTR Value 1k\n\
-         TEXT 32 240 Left 2 !.tran 1m\\nK1 L1 L2 1\n\
-         TEXT 400 240 Left 2 !K2 L3 L4 1\n",
+         TEXT 32 240 Left 2 !.tran 1m\\nK1 L1 L2 1\n",
     )
     .expect("schematic");
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
     import_foreign_schematic_file(&mut app, &file, ForeignTool::Ltspice).expect("imports");
     std::fs::remove_dir_all(&folder).ok();
-    let notes = &app.state.model.schematic.document().design_notes;
-    let note = |text: &str| {
-        notes
+    let model = &app.state.model;
+    let notes = &model.schematic.document().design_notes;
+    assert!(
+        notes.iter().any(|note| note.text == ".tran 1m\nK1 L1 L2 1"),
+        "{notes:?}"
+    );
+    let plan = model
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("the imported plan");
+    assert!(
+        plan.instances()
             .iter()
-            .find(|note| note.text == text)
-            .unwrap_or_else(|| panic!("no note {text:?} in {notes:?}"))
-    };
-    let (second, alone) = (note("K1 L1 L2 1"), note("K2 L3 L4 1"));
-    // The blocks stand on one row, 368 LTspice units apart; the coupling of
-    // the first is its second line.
-    assert_eq!(alone.pos.x - second.pos.x, 460);
-    assert_eq!(
-        second.pos.y - alone.pos.y,
-        second.text_extent_world("").1.round() as i32
+            .any(|instance| matches!(instance.draft(), AnalysisDraft::Transient(_))),
+        "the plan still holds the analysis"
     );
 }
 
@@ -529,7 +530,8 @@ fn import_onto_sheet(name: &str, drawing: &str) -> (String, bool, bool) {
         .document()
         .components
         .iter()
-        .all(|part| part.pos.x % 10 == 0 && part.pos.y % 10 == 0);
+        .flat_map(|part| part.terminal_positions())
+        .all(|(_, point)| point.x % 10 == 0 && point.y % 10 == 0);
     assert!(pins_on_grid);
     (
         format!(
@@ -547,13 +549,13 @@ fn an_imported_drawing_lies_inside_the_smallest_sheet_that_holds_it() {
     // Far from the origin, and small: the project's A4 sheet holds it.
     let small = "Version 4
 SHEET 1 880 680
-         WIRE -3984 -3000 -4096 -3000
-FLAG -4096 -2920 0
-FLAG -3984 -2920 0
-         SYMBOL voltage -4096 -3016 R0
+         WIRE -3984 -3008 -4096 -3008
+FLAG -4096 -2928 0
+FLAG -3984 -2928 0
+         SYMBOL voltage -4096 -3024 R0
 SYMATTR InstName V1
 SYMATTR Value 1
-         SYMBOL res -4000 -3016 R0
+         SYMBOL res -4000 -3024 R0
 SYMATTR InstName R1
 SYMATTR Value 1k
 ";

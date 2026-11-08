@@ -296,6 +296,7 @@ fn window(words: &[&str], line: usize) -> Result<ForeignWindow, ForeignParseErro
         reach: window_reach(&alignment),
         hidden: alignment == "invisible",
         vertical: alignment.starts_with('v'),
+        size_percent: text_size_percent(words.get(5).copied()),
     })
 }
 

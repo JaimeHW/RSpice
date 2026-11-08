@@ -97,7 +97,7 @@ pub fn parse_qsch(bytes: &[u8]) -> Result<ForeignSchematic, ForeignParseError> {
                     },
                 });
             }
-            "line" | "rect" | "ellipse" | "arc" | "arc3p" | "zigzag" | "triangle" => {
+            "line" | "rect" | "ellipse" | "arc" | "arc3p" | "zigzag" | "coil" | "triangle" => {
                 schematic.shapes.extend(shape(keyword, fields, node.line)?);
             }
             // Page furniture, bitmaps and plot settings carry no circuit.
@@ -295,7 +295,7 @@ fn component(node: &Node) -> Result<ForeignSymbol, ForeignParseError> {
     }
     let mut windows = Vec::new();
     let mut texts = texts.into_iter();
-    if let Some((offset, name, reach, _)) = texts.next() {
+    if let Some((offset, name, reach, size_percent)) = texts.next() {
         attributes.push(ForeignAttribute {
             name: "InstName".to_owned(),
             value: name,
@@ -306,16 +306,18 @@ fn component(node: &Node) -> Result<ForeignSymbol, ForeignParseError> {
             reach,
             hidden: false,
             vertical: false,
+            size_percent,
         });
     }
     let rest = texts.collect::<Vec<_>>();
-    if let Some((offset, _, reach, _)) = rest.first() {
+    if let Some((offset, _, reach, size_percent)) = rest.first() {
         windows.push(ForeignWindow {
             attribute: 3,
             offset: *offset,
             reach: *reach,
             hidden: false,
             vertical: false,
+            size_percent: *size_percent,
         });
         attributes.push(ForeignAttribute {
             name: "Value".to_owned(),
@@ -338,6 +340,7 @@ fn component(node: &Node) -> Result<ForeignSymbol, ForeignParseError> {
                     reach,
                     hidden: false,
                     vertical: false,
+                    size_percent,
                 },
                 size_percent,
             })
@@ -459,7 +462,9 @@ fn shape(keyword: &str, fields: &str, line: usize) -> Result<Vec<ForeignShape>, 
     let points = points(fields, line)?;
     Ok(match (keyword, points.as_slice()) {
         ("line", [a, b, ..]) => vec![ForeignShape::Line(*a, *b)],
-        ("rect" | "zigzag", [a, b, ..]) => vec![ForeignShape::Rectangle(*a, *b)],
+        ("rect", [a, b, ..]) => vec![ForeignShape::Rectangle(*a, *b)],
+        ("zigzag", [a, b, ..]) => zigzag(*a, *b),
+        ("coil", [a, b, ..]) => coil(*a, *b),
         ("ellipse", [a, b, ..]) => vec![ForeignShape::Ellipse(*a, *b)],
         ("triangle", [a, b, c, ..]) => vec![
             ForeignShape::Line(*a, *b),
@@ -473,6 +478,69 @@ fn shape(keyword: &str, fields: &str, line: usize) -> Result<Vec<ForeignShape>, 
         }
         _ => Vec::new(),
     })
+}
+
+/// The point `along` the longer side of the box `a`-`b`, from its top or left
+/// end, and `across` its centre line: to the right of a standing box, above a
+/// lying one, so that turning one into the other is a rotation.
+fn along_box(a: ForeignPoint, b: ForeignPoint, along: i32, across: i32) -> ForeignPoint {
+    let (left, top) = (a.x.min(b.x), a.y.min(b.y));
+    let (width, height) = ((a.x - b.x).abs(), (a.y - b.y).abs());
+    if height >= width {
+        ForeignPoint::new(left + width / 2 + across, top + along)
+    } else {
+        ForeignPoint::new(left + along, top + height / 2 - across)
+    }
+}
+
+/// A box's longer side and half its shorter one.
+fn length_and_reach(a: ForeignPoint, b: ForeignPoint) -> (i32, i32) {
+    let (width, height) = ((a.x - b.x).abs(), (a.y - b.y).abs());
+    (width.max(height), width.min(height) / 2)
+}
+
+/// A resistor's zigzag, which QSPICE names only by its box: three full swings
+/// from end to end, leaving and reaching the centre line.
+fn zigzag(a: ForeignPoint, b: ForeignPoint) -> Vec<ForeignShape> {
+    let (length, reach) = length_and_reach(a, b);
+    let corners = [
+        (0, 0),
+        (1, reach),
+        (3, -reach),
+        (5, reach),
+        (7, -reach),
+        (9, reach),
+        (11, -reach),
+        (12, 0),
+    ]
+    .map(|(twelfths, across)| along_box(a, b, length * twelfths / 12, across));
+    corners
+        .windows(2)
+        .map(|ends| ForeignShape::Line(ends[0], ends[1]))
+        .collect()
+}
+
+/// An inductor's coil, which QSPICE names only by its box: three overlapping
+/// loops from end to end, each left open where it crosses its neighbour.
+fn coil(a: ForeignPoint, b: ForeignPoint) -> Vec<ForeignShape> {
+    let (length, reach) = length_and_reach(a, b);
+    let radius = length / 5;
+    let waist = -(reach * 2 / 3);
+    let first = along_box(a, b, radius * 7 / 4, waist);
+    let second = along_box(a, b, length - radius * 7 / 4, waist);
+    let loop_around = |centre: i32, start: ForeignPoint, end: ForeignPoint| {
+        ForeignShape::Arc([
+            along_box(a, b, centre - radius, -reach),
+            along_box(a, b, centre + radius, reach),
+            start,
+            end,
+        ])
+    };
+    vec![
+        loop_around(radius, first, along_box(a, b, 0, 0)),
+        loop_around(length / 2, second, first),
+        loop_around(length - radius, along_box(a, b, length, 0), second),
+    ]
 }
 
 /// The box and rays of QSPICE's three-point arc: counter-clockwise on screen

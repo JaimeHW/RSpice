@@ -1,13 +1,13 @@
 //! Turning a foreign drawing into an RSpice schematic.
 //!
-//! The drawing is scaled onto RSpice's grid: one LTspice grid step (16
-//! units) becomes two RSpice steps, and one QSPICE step (100 units) one.
-//! Every place a source pin, wire end or flag sits keeps its scaled position,
-//! so the source's wiring stands as it was drawn. A part RSpice draws natively
-//! is turned and placed where its terminals best meet the source pins, and a
-//! straight lead joins any terminal that does not land on its pin. A part
-//! RSpice has no component for keeps the source symbol's own drawing as a
-//! cell of the project, so its pins land exactly.
+//! The drawing is scaled onto RSpice's grid: one source grid step (16 LTspice
+//! units, 100 QSPICE units) becomes one RSpice step. Every place a source pin,
+//! wire end or flag sits keeps its scaled position, so the source's wiring
+//! stands as it was drawn. A part draws its source symbol's own artwork,
+//! whether it keeps a native electrical identity or comes across as a cell of
+//! the project, so its pins land exactly. A native part whose symbol cannot be
+//! read is turned and placed where its terminals best meet the source pins, and
+//! a straight lead joins any terminal that does not land on its pin.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
@@ -40,9 +40,13 @@ use crate::schematic::functional_catalog::{
     conform_functional_inputs, functional_library_binding, functional_part, placement_value,
 };
 use crate::schematic::ground_glyph::GroundGlyph;
-use crate::schematic::label_layout::TextEdge;
+use crate::schematic::label_layout::{
+    IMPORTED_TEXT_WORLD, INSTANCE_NAME_WORLD, INSTANCE_VALUE_WORLD, TextEdge,
+};
 use crate::schematic::label_position::{LabelPosition, ValuePiece};
-use crate::schematic::net_label::{Junction, NetLabel, NetLabelKind, NetLabelSide, SupplyGlyph};
+use crate::schematic::net_label::{
+    Junction, NetLabel, NetLabelDrawing, NetLabelKind, NetLabelSide, SupplyGlyph,
+};
 use crate::schematic::rotation::Rotation;
 use crate::schematic::terminal_connection::rebuild_connections_from_terminals;
 use crate::schematic::value_label::{value_and_parameters, value_pieces};
@@ -264,9 +268,7 @@ pub fn import_foreign_schematic(
         models: BTreeSet::new(),
         pin_points: HashMap::new(),
         pin_leads: HashMap::new(),
-        lettered: Vec::new(),
         markers: Vec::new(),
-        free_names: Vec::new(),
         device_ties: Vec::new(),
         behaviours: Vec::new(),
     };
@@ -329,8 +331,6 @@ pub fn import_foreign_schematic(
     }
     builder.tie_device_pins();
     builder.place_flags();
-    builder.clear_net_names();
-    builder.clear_lettering();
     builder.place_texts();
     builder.place_shapes();
     builder.place_wires();
@@ -367,15 +367,9 @@ struct Builder<'a> {
     pin_points: HashMap<Point, usize>,
     /// The way each source pin's lead runs from its point into its body.
     pin_leads: HashMap<Point, Vec<Point>>,
-    /// The placed parts whose name and value stand where the drawing
-    /// lettered them, by index.
-    lettered: Vec<usize>,
     /// The notes marking refused parts, by index, each with the bottom
     /// right of the gap its part left.
     markers: Vec<(usize, Point)>,
-    /// Net labels, by index, whose name may stand on another side where it
-    /// lands on a body, with those sides in the order to try them.
-    free_names: Vec<(usize, Vec<NetLabelSide>)>,
     /// Terminals of LTspice A-devices that LTspice grounds when nothing
     /// else reaches them.
     device_ties: Vec<DeviceTie>,
@@ -394,58 +388,8 @@ type Resolved = (
 struct DeviceTie {
     source: Option<Point>,
     terminal: Point,
-    /// The part's body, which the ground faces away from.
-    body: Body,
     /// The net the terminal joins, ground when there is none.
     net: Option<String>,
-}
-
-/// The middle of a placed part's body and half its width and height.
-#[derive(Debug, Clone, Copy)]
-struct Body {
-    center: Point,
-    half: Point,
-}
-
-impl Body {
-    fn of(symbol: &SymbolDocument, component: &Component, terminals: &[Point]) -> Self {
-        let (low, high) = symbol.body_bounds();
-        if low == high {
-            return Self {
-                center: centre(terminals),
-                half: Point::new(1, 1),
-            };
-        }
-        let [low, high] =
-            [low, high].map(|corner| component.pos + component.transform_point(corner));
-        Self {
-            center: Point::new((low.x + high.x) / 2, (low.y + high.y) / 2),
-            half: Point::new(
-                ((high.x - low.x) / 2).abs().max(1),
-                ((high.y - low.y) / 2).abs().max(1),
-            ),
-        }
-    }
-
-    /// The way a ground on `terminal` faces: out of the body edge the
-    /// terminal stands on.
-    fn outward(self, terminal: Point) -> Rotation {
-        let away = terminal - self.center;
-        // Measured in half-widths, so a pin on a long side reads as on it.
-        if i64::from(away.x.abs()) * i64::from(self.half.y)
-            > i64::from(away.y.abs()) * i64::from(self.half.x)
-        {
-            if away.x > 0 {
-                Rotation::R270
-            } else {
-                Rotation::R90
-            }
-        } else if away.y < 0 {
-            Rotation::R180
-        } else {
-            Rotation::R0
-        }
-    }
 }
 
 impl Builder<'_> {
@@ -469,34 +413,19 @@ impl Builder<'_> {
         });
     }
 
-    /// A drawing point on RSpice's grid.
+    /// A drawing point on the sheet. A pure function of the coordinate, so
+    /// points the source joins stay joined and points it keeps apart stay
+    /// apart, whatever grid they sit on.
     fn scale(&self, point: ForeignPoint) -> Point {
-        Point::new(self.scale_length(point.x), self.scale_length(point.y))
-    }
-
-    fn scale_length(&self, length: i32) -> i32 {
         let (numerator, denominator) = match self.drawing.tool {
-            ForeignTool::Ltspice => (5_i64, 4_i64),
+            ForeignTool::Ltspice => (5, 8),
             ForeignTool::Qspice => (1, 10),
         };
-        let scaled = i64::from(length) * numerator;
-        let step = denominator * i64::from(GRID);
-        let snapped = (scaled + scaled.signum() * step / 2) / step * i64::from(GRID);
-        i32::try_from(snapped).unwrap_or(if snapped < 0 { i32::MIN } else { i32::MAX })
-    }
-
-    /// A drawing point at full precision, for artwork that need not sit on
-    /// the grid.
-    fn scale_fine(&self, point: ForeignPoint) -> Point {
-        let (numerator, denominator) = match self.drawing.tool {
-            ForeignTool::Ltspice => (5, 4),
-            ForeignTool::Qspice => (1, 10),
-        };
-        let fine = |value: i32| {
+        let scaled = |value: i32| {
             let scaled = i64::from(value) * numerator;
             i32::try_from((scaled + scaled.signum() * denominator / 2) / denominator).unwrap_or(0)
         };
-        Point::new(fine(point.x), fine(point.y))
+        Point::new(scaled(point.x), scaled(point.y))
     }
 
     /// A placed symbol's definition, where it was read, and the schematic
@@ -583,14 +512,14 @@ impl Builder<'_> {
         let placed = self.document.components.len();
         match native_mapping(tool, symbol.base_name(), Some(&definition)) {
             Some(mapping) if schematic.is_none() => {
-                self.place_native(symbol, &attributes, mapping, &pins);
+                self.place_native(symbol, &definition, &attributes, mapping, &pins);
             }
             _ => {
                 if schematic.is_none()
                     && let Some(plan) =
                         self.functional_plan(symbol, &definition, &attributes, &pins)
                 {
-                    self.place_functional(symbol, &attributes, plan, &pins);
+                    self.place_functional(symbol, &definition, &attributes, plan, &pins);
                 } else {
                     if tool == ForeignTool::Ltspice
                         && LTSPICE_AWAITING_NATIVE_PARTS
@@ -707,29 +636,32 @@ impl Builder<'_> {
             return;
         };
         let origin = component.pos;
-        let place = |window: Option<&ForeignWindow>| {
+        let place = |window: Option<&ForeignWindow>, ordinary: f32| {
             window
                 .filter(|window| !window.hidden)
-                .map(|window| self.label_position(symbol, window, origin))
+                .map(|window| self.label_position(symbol, window, origin, ordinary))
         };
-        let (name_position, value_position) = (place(name), place(value));
+        let (name_position, value_position) = (
+            place(name, INSTANCE_NAME_WORLD),
+            place(value, INSTANCE_VALUE_WORLD),
+        );
         let mut pieces = symbol
             .value_pieces
             .iter()
             .map(|piece| {
                 (
                     piece.text.clone(),
-                    self.label_position(symbol, &piece.window, origin),
-                    piece.size_percent,
+                    self.label_position(symbol, &piece.window, origin, INSTANCE_VALUE_WORLD),
+                    lettered_percent(piece.size_percent, INSTANCE_VALUE_WORLD),
                 )
             })
             .collect::<Vec<_>>();
         // A source's drawing letters its waveform as written, on a line,
         // where RSpice letters a line for each parameter: each text the
         // drawing shows keeps its words and its place.
+        let attributes = merged_attributes(definition, symbol);
         let source = component.kind.is_source();
         if source && pieces.is_empty() {
-            let attributes = merged_attributes(definition, symbol);
             pieces = SOURCE_TEXTS
                 .into_iter()
                 .filter_map(|(number, key)| {
@@ -738,8 +670,8 @@ impl Builder<'_> {
                         attribute(&attributes, key).filter(|text| !text.trim().is_empty())?;
                     Some((
                         text.trim().to_owned(),
-                        self.label_position(symbol, window, origin),
-                        100,
+                        self.label_position(symbol, window, origin, INSTANCE_VALUE_WORLD),
+                        lettered_percent(window.size_percent, INSTANCE_VALUE_WORLD),
                     ))
                 })
                 .collect();
@@ -758,8 +690,12 @@ impl Builder<'_> {
         let stands_for = (source || !spelled).then(|| value_and_parameters(component));
         let unshown =
             |window: Option<&ForeignWindow>| window.map_or(windowed, |window| window.hidden);
-        let hidden = (unshown(name), unshown(value));
-        self.lettered.push(self.document.components.len() - 1);
+        // A value window letters the `Value` attribute and nothing else: the
+        // model a symbol's `SpiceModel` names stays on the part, unlettered.
+        let valueless = windowed
+            && pieces.is_empty()
+            && attribute(&attributes, "Value").is_none_or(|text| text.trim().is_empty());
+        let hidden = (unshown(name), unshown(value) || valueless);
         let Some(component) = self.document.components.last_mut() else {
             return;
         };
@@ -797,8 +733,9 @@ impl Builder<'_> {
         symbol: &ForeignSymbol,
         window: &ForeignWindow,
         origin: Point,
+        ordinary: f32,
     ) -> LabelPosition {
-        let anchor = self.scale_fine(
+        let anchor = self.scale(
             symbol
                 .position
                 .offset(symbol.orientation.apply(window.offset)),
@@ -825,6 +762,7 @@ impl Builder<'_> {
             horizontal,
             vertical,
             upward,
+            size_percent: lettered_percent(window.size_percent, ordinary),
         }
     }
 
@@ -858,6 +796,7 @@ impl Builder<'_> {
     fn place_native(
         &mut self,
         symbol: &ForeignSymbol,
+        definition: &ForeignSymbolDefinition,
         attributes: &[ForeignAttribute],
         mapping: NativeMapping,
         pins: &[Point],
@@ -986,7 +925,22 @@ impl Builder<'_> {
                 })
                 .collect()
         };
-        self.place_fitted(&mut component, pins, offsets);
+        let terminals = mapping
+            .terminals
+            .iter()
+            .copied()
+            .zip(pins.iter().copied())
+            .collect::<Vec<_>>();
+        if !self.draw_as_the_source_draws(
+            &mut component,
+            symbol,
+            definition,
+            &terminals,
+            mapping.tie,
+        ) && !draw_rspice_glyph_at_the_source_pin_span(&mut component, &terminals, mapping.tie)
+        {
+            self.place_fitted(&mut component, pins, offsets);
+        }
         let placed = component.terminal_positions();
         if let Some((from, to)) = mapping.tie {
             let point = |terminal: &str| {
@@ -995,7 +949,9 @@ impl Builder<'_> {
                     .find(|(name, _)| *name == terminal)
                     .map(|(_, point)| *point)
             };
-            if let (Some(from), Some(to)) = (point(from), point(to)) {
+            if let (Some(from), Some(to)) = (point(from), point(to))
+                && from != to
+            {
                 self.lead(from, to);
             }
         }
@@ -1065,6 +1021,7 @@ impl Builder<'_> {
     fn place_functional(
         &mut self,
         symbol: &ForeignSymbol,
+        definition: &ForeignSymbolDefinition,
         attributes: &[ForeignAttribute],
         plan: FunctionalPlan,
         pins: &[Point],
@@ -1103,7 +1060,23 @@ impl Builder<'_> {
                 .map(|(_, point)| point)
                 .collect()
         };
-        let points = self.place_fitted(&mut component, &targets, offsets);
+        let terminals = binding
+            .terminal_order
+            .iter()
+            .map(String::as_str)
+            .zip(targets.iter().copied())
+            .collect::<Vec<_>>();
+        let points = if self.draw_as_the_source_draws(
+            &mut component,
+            symbol,
+            definition,
+            &terminals,
+            None,
+        ) {
+            targets.clone()
+        } else {
+            self.place_fitted(&mut component, &targets, offsets)
+        };
         for (terminal, point) in binding.terminal_order.iter().zip(points) {
             self.terminals.push((id, terminal.clone(), point));
         }
@@ -1302,8 +1275,7 @@ impl Builder<'_> {
             self.tie_device(&cell, &component, pins, &points);
         }
         if self.drawing.tool == ForeignTool::Qspice {
-            let body = Body::of(&cell.symbol, &component, &points);
-            self.tie_default_nets(symbol, definition, body, pins, &points);
+            self.tie_default_nets(symbol, definition, pins, &points);
         }
         for (port, point) in cell
             .ports
@@ -1316,6 +1288,47 @@ impl Builder<'_> {
         self.document.components.push(component);
     }
 
+    /// Gives a native part the artwork its own symbol draws, standing where
+    /// and as the drawing stands it, with each terminal on its source pin.
+    /// False when the definition carries no artwork, as a stand-in for a
+    /// missing symbol file does.
+    fn draw_as_the_source_draws(
+        &self,
+        component: &mut Component,
+        symbol: &ForeignSymbol,
+        definition: &ForeignSymbolDefinition,
+        terminals: &[(&str, Point)],
+        tie: Option<(&str, &str)>,
+    ) -> bool {
+        let body = definition
+            .shapes
+            .iter()
+            .filter_map(|shape| self.symbol_shape(shape))
+            .collect::<Vec<_>>();
+        if body.is_empty() {
+            return false;
+        }
+        component.pos = self.scale(symbol.position);
+        // A drawing turns and then mirrors; a component mirrors and then
+        // turns, so a mirrored part turns the other way.
+        component.mirror_h = symbol.orientation.mirrored;
+        component.rotation = match (
+            symbol.orientation.quarter_turns,
+            symbol.orientation.mirrored,
+        ) {
+            (0, _) => Rotation::R0,
+            (2, _) => Rotation::R180,
+            (1, false) | (3, true) => Rotation::R90,
+            _ => Rotation::R270,
+        };
+        let pins = terminals
+            .iter()
+            .map(|(name, pin)| (*name, component.untransform_point(*pin - component.pos)))
+            .collect::<Vec<_>>();
+        component.set_source_symbol(terminal_symbol(&pins, tie, body));
+        true
+    }
+
     /// Records the terminals of an LTspice A-device that are ground when
     /// nothing reaches them: each drawn pin, and the places its symbol gives
     /// no pin when they do not share its common's.
@@ -1326,12 +1339,10 @@ impl Builder<'_> {
         sources: &[Point],
         terminals: &[Point],
     ) {
-        let body = Body::of(&cell.symbol, component, terminals);
         for (source, terminal) in sources.iter().zip(terminals) {
             self.device_ties.push(DeviceTie {
                 source: Some(*source),
                 terminal: *terminal,
-                body,
                 net: None,
             });
         }
@@ -1353,7 +1364,6 @@ impl Builder<'_> {
             self.device_ties.push(DeviceTie {
                 source: None,
                 terminal: component.pos + component.transform_point(position),
-                body,
                 net: None,
             });
         }
@@ -1365,7 +1375,6 @@ impl Builder<'_> {
         &mut self,
         symbol: &ForeignSymbol,
         definition: &ForeignSymbolDefinition,
-        body: Body,
         sources: &[Point],
         terminals: &[Point],
     ) {
@@ -1385,7 +1394,6 @@ impl Builder<'_> {
             self.device_ties.push(DeviceTie {
                 source: Some(source),
                 terminal: *terminal,
-                body,
                 net: (!ground).then(|| net.clone()),
             });
         }
@@ -1406,9 +1414,9 @@ impl Builder<'_> {
             || self.pin_points.get(&point).copied().unwrap_or_default() > 1
     }
 
-    /// Grounds each recorded A-device terminal whose source pin nothing
-    /// reaches, as LTspice writes node `0` there: a ground symbol on the
-    /// terminal, facing away from the part.
+    /// Ties each recorded terminal whose source pin nothing reaches to the
+    /// net its source simulator writes there. The source draws such a pin as
+    /// open, so the tie draws only the open-pin square.
     fn tie_device_pins(&mut self) {
         for tie in std::mem::take(&mut self.device_ties) {
             if tie.source.is_some_and(|source| self.reached(source)) {
@@ -1417,6 +1425,7 @@ impl Builder<'_> {
             if let Some(net) = tie.net {
                 let id = self.id();
                 let mut label = NetLabel::new(id, tie.terminal, net.clone());
+                label.drawing = NetLabelDrawing::OpenPin;
                 if is_supply_rail(&net) {
                     label.kind = NetLabelKind::Supply {
                         glyph: SupplyGlyph::for_name(&net),
@@ -1425,10 +1434,9 @@ impl Builder<'_> {
                 self.document.net_labels.push(label);
                 continue;
             }
-            let rotation = tie.body.outward(tie.terminal);
             let id = self.id();
             let mut ground = Component::new(id, ComponentType::Ground, Point::default());
-            ground.rotation = rotation;
+            ground.ground_glyph = GroundGlyph::OpenPin;
             ground.name = format!("GND{id}");
             let offset = ground
                 .terminal_positions()
@@ -1525,7 +1533,7 @@ impl Builder<'_> {
             // nothing: the port's name is made up for its place.
             let name_offset = slot
                 .and_then(|pin| pin.name_offset)
-                .map(|offset| self.scale_fine(ForeignPoint::new(offset, 0)).x);
+                .map(|offset| self.scale(ForeignPoint::new(offset, 0)).x);
             pins.push(
                 SymbolPin::new(port.name.clone(), port.direction, Some(position))
                     .with_name_hidden(
@@ -1534,7 +1542,7 @@ impl Builder<'_> {
                     .with_name_offset(name_offset)
                     .with_name_at(slot.and_then(|pin| pin.name_at).map(|(offset, reach)| {
                         PinNamePlacement {
-                            offset: self.scale_fine(offset),
+                            offset: self.scale(offset),
                             reach: Point::new(reach.x, reach.y),
                         }
                     })),
@@ -1549,6 +1557,7 @@ impl Builder<'_> {
         }
         let mut document = SymbolDocument {
             pins,
+            pin_name_size: Some(IMPORTED_TEXT_WORLD),
             body: definition
                 .shapes
                 .iter()
@@ -1587,7 +1596,7 @@ impl Builder<'_> {
                 .windows
                 .iter()
                 .find(|window| window.attribute == attribute)
-                .map(|window| self.scale_fine(window.offset))
+                .map(|window| self.scale(window.offset))
         };
         if let Some(point) = anchor(0) {
             document.name_anchor = point;
@@ -1615,18 +1624,18 @@ impl Builder<'_> {
     fn symbol_shape(&self, shape: &ForeignShape) -> Option<SymbolShape> {
         Some(match shape {
             ForeignShape::Line(a, b) => SymbolShape::Polyline {
-                points: vec![self.scale_fine(*a), self.scale_fine(*b)],
+                points: vec![self.scale(*a), self.scale(*b)],
                 closed: false,
             },
             ForeignShape::Rectangle(a, b) => {
-                let (a, b) = (self.scale_fine(*a), self.scale_fine(*b));
+                let (a, b) = (self.scale(*a), self.scale(*b));
                 SymbolShape::Polyline {
                     points: vec![a, Point::new(b.x, a.y), b, Point::new(a.x, b.y)],
                     closed: true,
                 }
             }
             ForeignShape::Ellipse(a, b) => {
-                let (a, b) = (self.scale_fine(*a), self.scale_fine(*b));
+                let (a, b) = (self.scale(*a), self.scale(*b));
                 let (width, height) = ((b.x - a.x).abs(), (b.y - a.y).abs());
                 if width == height {
                     SymbolShape::Circle {
@@ -1642,19 +1651,13 @@ impl Builder<'_> {
             }
             ForeignShape::Arc([a, b, start, end]) => {
                 let (from, sweep) = arc_angles(
-                    self.scale_fine(*a),
-                    self.scale_fine(*b),
-                    self.scale_fine(*start),
-                    self.scale_fine(*end),
+                    self.scale(*a),
+                    self.scale(*b),
+                    self.scale(*start),
+                    self.scale(*end),
                 )?;
                 SymbolShape::Polyline {
-                    points: ellipse_points(
-                        self.scale_fine(*a),
-                        self.scale_fine(*b),
-                        from,
-                        sweep,
-                        16,
-                    ),
+                    points: ellipse_points(self.scale(*a), self.scale(*b), from, sweep, 16),
                     closed: false,
                 }
             }
@@ -1926,12 +1929,15 @@ impl Builder<'_> {
                 self.document.components.push(port);
             } else {
                 let mut label = NetLabel::new(id, at, flag.name.clone());
+                label.drawing = NetLabelDrawing::Lettered;
                 let run = flag.facing.or_else(|| self.away_from_attachment(at));
+                // A flag the wires reach from more than one side letters its
+                // name over its point.
                 label.side = match run.map(|run| (run.x.signum(), run.y.signum())) {
+                    Some((1, _)) => NetLabelSide::Right,
                     Some((-1, _)) => NetLabelSide::Left,
                     Some((0, 1)) => NetLabelSide::Below,
-                    Some((0, -1)) => NetLabelSide::Above,
-                    _ => NetLabelSide::Right,
+                    _ => NetLabelSide::Above,
                 };
                 if is_supply_rail(&flag.name) {
                     let reaches = match flag.facing {
@@ -1941,20 +1947,6 @@ impl Builder<'_> {
                     label.kind = NetLabelKind::Supply {
                         glyph: rail_glyph(&flag.name, &reaches),
                     };
-                }
-                // A side RSpice chose, or a name QSPICE centres over its
-                // point, gives way to another where it lands on a body.
-                let others = match (run, label.side) {
-                    _ if matches!(label.kind, NetLabelKind::Supply { .. }) => Vec::new(),
-                    (None, _) => vec![NetLabelSide::Left, NetLabelSide::Above, NetLabelSide::Below],
-                    (Some(_), NetLabelSide::Above) if flag.facing.is_some() => {
-                        vec![NetLabelSide::Right, NetLabelSide::Left]
-                    }
-                    _ => Vec::new(),
-                };
-                if !others.is_empty() {
-                    self.free_names
-                        .push((self.document.net_labels.len(), others));
                 }
                 self.document.net_labels.push(label);
             }
@@ -2046,7 +2038,7 @@ impl Builder<'_> {
             let position = self.scale(text.position);
             match text.kind {
                 ForeignTextKind::Directive => {
-                    let lettering = text.lettering;
+                    let (lettering, line) = (text.lettering, text.line);
                     let mut couplings = 0;
                     let text = spice_text_lines(&text.text)
                         .lines()
@@ -2059,6 +2051,19 @@ impl Builder<'_> {
                         .collect::<Vec<_>>()
                         .join("\n");
                     if !text.trim().is_empty() {
+                        // The block stays on the sheet where the source drew
+                        // it, whatever a project place takes from it.
+                        let id = self.id();
+                        match DesignNote::new(id, position, DesignNoteKind::PlainText, text.trim())
+                        {
+                            Ok(note) => {
+                                let note = lettered_note(note, position, &lettering);
+                                self.document.design_notes.push(note);
+                            }
+                            Err(error) => self.notice(format!(
+                                "The directive block at line {line} was not drawn: {error}."
+                            )),
+                        }
                         self.directives.push(ForeignDirective {
                             position,
                             text,
@@ -2107,25 +2112,25 @@ impl Builder<'_> {
         for shape in &self.drawing.shapes {
             let geometry = match shape {
                 ForeignShape::Line(a, b) => DocumentationShapeGeometry::Line {
-                    start: self.scale_fine(*a),
-                    end: self.scale_fine(*b),
+                    start: self.scale(*a),
+                    end: self.scale(*b),
                 },
                 ForeignShape::Rectangle(a, b) => DocumentationShapeGeometry::Rectangle {
-                    first: self.scale_fine(*a),
-                    opposite: self.scale_fine(*b),
+                    first: self.scale(*a),
+                    opposite: self.scale(*b),
                 },
                 ForeignShape::Ellipse(a, b) => DocumentationShapeGeometry::Polygon {
                     points: ellipse_points(
-                        self.scale_fine(*a),
-                        self.scale_fine(*b),
+                        self.scale(*a),
+                        self.scale(*b),
                         0.0,
                         std::f64::consts::TAU,
                         32,
                     ),
                 },
                 ForeignShape::Arc([a, b, start, end]) => {
-                    let (a, b) = (self.scale_fine(*a), self.scale_fine(*b));
-                    match arc_angles(a, b, self.scale_fine(*start), self.scale_fine(*end)) {
+                    let (a, b) = (self.scale(*a), self.scale(*b));
+                    match arc_angles(a, b, self.scale(*start), self.scale(*end)) {
                         Some((from, sweep)) => {
                             let points = ellipse_points(a, b, from, sweep, 2);
                             DocumentationShapeGeometry::Arc {
@@ -2443,44 +2448,21 @@ pub(super) fn lettered_note(
     point: Point,
     lettering: &ForeignLettering,
 ) -> DesignNote {
-    let lines = note.text.split('\n').count();
-    lettered_block_note(note, point, lettering, 0, lines)
-}
-
-/// `note` lettered as lines `first_line` on of a block of `block_lines`
-/// lines its drawing stood on `point`: each line where the block drew it.
-pub(super) fn lettered_block_note(
-    note: DesignNote,
-    point: Point,
-    lettering: &ForeignLettering,
-    first_line: usize,
-    block_lines: usize,
-) -> DesignNote {
     let note = note
         .with_text_size_percent(lettering.size_percent)
         .with_anchor_mark_hidden(true);
-    let pos = note_anchor(&note, point, lettering, first_line, block_lines);
+    let pos = note_anchor(&note, point, lettering);
     DesignNote { pos, ..note }
 }
 
-/// Where a note's anchor goes so the block of `block_lines` lines it is
-/// part of, from line `first_line` on, stands on `point` the way the source
-/// drawing stood it: by its start, end or centre across, and by its top,
-/// bottom or middle down. A text of several lines LTspice centres down
+/// Where a note's anchor goes so its text stands on `point` the way the
+/// source drawing stood it: by its start, end or centre across, and by its
+/// top, bottom or middle down. A text of several lines LTspice centres down
 /// stands on its point by its first line, the rest running below; its
 /// drawings lay their notes out by that.
-fn note_anchor(
-    note: &DesignNote,
-    point: Point,
-    lettering: &ForeignLettering,
-    first_line: usize,
-    block_lines: usize,
-) -> Point {
-    let (width, own_height) = note.text_extent_world(&note.text);
+fn note_anchor(note: &DesignNote, point: Point, lettering: &ForeignLettering) -> Point {
+    let (width, height) = note.text_extent_world(&note.text);
     let line_height = note.text_extent_world("").1;
-    let lines = note.text.split('\n').count();
-    let others = block_lines.max(first_line + lines) - lines;
-    let height = own_height + others as f32 * line_height;
     let middle = if lettering.by_first_line {
         line_height
     } else {
@@ -2495,9 +2477,137 @@ fn note_anchor(
     let (offset_x, offset_y) = DESIGN_NOTE_TEXT_OFFSET_WORLD;
     Point::new(
         point.x - (reach(across, width, width) + offset_x).round() as i32,
-        point.y - (reach(down, height, middle) + offset_y).round() as i32
-            + (first_line as f32 * line_height).round() as i32,
+        point.y - (reach(down, height, middle) + offset_y).round() as i32,
     )
+}
+
+/// The symbol document of a part that draws `body`, with a terminal at each
+/// of `pins` under its native name. A terminal the symbol has no pin for
+/// stands on the pin the source simulator ties it to.
+fn terminal_symbol(
+    pins: &[(&str, Point)],
+    tie: Option<(&str, &str)>,
+    body: Vec<SymbolShape>,
+) -> SymbolDocument {
+    let terminal = |name: &str, position: Point| {
+        SymbolPin::new(name, PortDirection::InOut, Some(position)).with_name_hidden(true)
+    };
+    let mut terminals = pins
+        .iter()
+        .map(|(name, position)| terminal(name, *position))
+        .collect::<Vec<_>>();
+    if let Some((tied, to)) = tie
+        && let Some((_, position)) = pins.iter().find(|(name, _)| *name == to)
+    {
+        terminals.push(terminal(tied, *position));
+    }
+    SymbolDocument {
+        pins: terminals,
+        body,
+        ..SymbolDocument::default()
+    }
+}
+
+/// Draws a native part whose source symbol could not be read: RSpice's glyph
+/// turned to meet the source pins and scaled so its terminals span what the
+/// pins span, each terminal on its pin. False when RSpice's artwork is not
+/// built in, or its glyph has no terminals to scale by.
+#[cfg(feature = "symbol-artwork")]
+fn draw_rspice_glyph_at_the_source_pin_span(
+    component: &mut Component,
+    terminals: &[(&str, Point)],
+    tie: Option<(&str, &str)>,
+) -> bool {
+    use crate::symbol_artwork::SymbolLibrary;
+    static ARTWORK: std::sync::LazyLock<Option<SymbolLibrary>> =
+        std::sync::LazyLock::new(|| SymbolLibrary::load_embedded().ok());
+    let pins = terminals.iter().map(|(_, pin)| *pin).collect::<Vec<_>>();
+    let offsets = |candidate: &Component| -> Vec<Point> {
+        let placed = candidate.terminal_positions();
+        terminals
+            .iter()
+            .map(|(name, _)| {
+                placed
+                    .iter()
+                    .find(|(terminal, _)| terminal == name)
+                    .map_or(Point::default(), |(_, point)| *point)
+            })
+            .collect()
+    };
+    let Some((_, rotation, mirrored, local)) =
+        placements(component, &pins, &offsets).into_iter().next()
+    else {
+        return false;
+    };
+    let span = |points: &[Point]| {
+        let reach = |axis: fn(&Point) -> i32| {
+            let values = points.iter().map(axis);
+            values.clone().max().unwrap_or_default() - values.min().unwrap_or_default()
+        };
+        reach(|point| point.x).max(reach(|point| point.y))
+    };
+    let (glyph_span, pin_span) = (span(&local), span(&pins));
+    let Some(first) = pins.first().copied().filter(|_| glyph_span > 0) else {
+        return false;
+    };
+    let scale = pin_span as f32 / glyph_span as f32;
+    let scaled =
+        |x: f32, y: f32| Point::new((x * scale).round() as i32, (y * scale).round() as i32);
+    let mut turned = component.clone();
+    turned.pos = Point::default();
+    turned.rotation = rotation;
+    turned.mirror_h = mirrored;
+    let Some(runs) = ARTWORK
+        .as_ref()
+        .and_then(|library| library.placed_artwork(&turned))
+    else {
+        return false;
+    };
+    let mut body = runs
+        .iter()
+        .map(|run| SymbolShape::Polyline {
+            points: run.points.iter().map(|&(x, y)| scaled(x, y)).collect(),
+            closed: false,
+        })
+        .collect::<Vec<_>>();
+    component.pos = first - scaled(local[0].x as f32, local[0].y as f32);
+    // Where the glyph's own terminal falls short of its pin, a lead draws the
+    // rest.
+    let symbol_pins = terminals
+        .iter()
+        .zip(&local)
+        .map(|((name, pin), terminal)| {
+            let (drawn, pin) = (
+                scaled(terminal.x as f32, terminal.y as f32),
+                *pin - component.pos,
+            );
+            if drawn != pin {
+                body.push(SymbolShape::Polyline {
+                    points: vec![drawn, pin],
+                    closed: false,
+                });
+            }
+            (*name, pin)
+        })
+        .collect::<Vec<_>>();
+    component.set_source_symbol(terminal_symbol(&symbol_pins, tie, body));
+    true
+}
+
+/// Without RSpice's artwork there is no glyph to scale.
+#[cfg(not(feature = "symbol-artwork"))]
+fn draw_rspice_glyph_at_the_source_pin_span(
+    _: &mut Component,
+    _: &[(&str, Point)],
+    _: Option<(&str, &str)>,
+) -> bool {
+    false
+}
+
+/// A text's size in hundredths of the ordinary lettering of its kind, when
+/// its drawing letters it at `source_percent` of that tool's standard size.
+fn lettered_percent(source_percent: u16, ordinary: f32) -> u16 {
+    (f32::from(IMPORTED_TEXT_WORLD) * f32::from(source_percent) / ordinary).round() as u16
 }
 
 /// The glyph a rail flag draws: its name's by convention, unless that would
@@ -2514,15 +2624,6 @@ fn rail_glyph(name: &str, reaches: &[ForeignPoint]) -> SupplyGlyph {
         SupplyGlyph::Bar | SupplyGlyph::Arrow if from(-1) && !from(1) => SupplyGlyph::Down,
         _ => glyph,
     }
-}
-
-/// The middle of a part's terminals.
-fn centre(terminals: &[Point]) -> Point {
-    let count = i32::try_from(terminals.len().max(1)).unwrap_or(1);
-    let sum = terminals
-        .iter()
-        .fold(Point::default(), |sum, point| sum + *point);
-    Point::new(sum.x / count, sum.y / count)
 }
 
 /// The type a QSPICE behavioural device states (`D-FLOP`, `RROPAMP`): the

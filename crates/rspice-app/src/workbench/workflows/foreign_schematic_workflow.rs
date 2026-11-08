@@ -20,10 +20,9 @@ use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use rspice_design::foreign_schematic::{
-    ForeignCard, ForeignCardRole, ForeignLettering, ForeignLibrary, ForeignNoticeSeverity,
-    ForeignSymbolCell, ForeignTool, InstalledForeignLibrary, bind_instances_to_sources,
-    decode_foreign_text, foreign_directive_cards, import_foreign_schematic, keep_directive_text,
-    parse_asc, parse_qsch,
+    ForeignCard, ForeignCardRole, ForeignLibrary, ForeignNoticeSeverity, ForeignSymbolCell,
+    ForeignTool, InstalledForeignLibrary, bind_instances_to_sources, decode_foreign_text,
+    foreign_directive_cards, import_foreign_schematic, parse_asc, parse_qsch,
 };
 use rspice_design::schematic::document::SchematicDocument;
 use rspice_simulation_contract::design_variable::{
@@ -133,7 +132,7 @@ pub(crate) fn import_foreign_schematic_file(
 
     let mut includes = resolve_includes(&access, &mut plan, &mut notices);
     bind_model_files(&mut tree, &library, &mut includes);
-    keep_on_sheet(&mut tree.document, &plan, &mut notices);
+    note_cards_with_no_place(&plan, &mut notices);
 
     let mut own_sheets = add_symbol_cells(&mut app.state, &library, &mut tree.cells)?;
     let top_sheet = place_on_sheet(&app.state.model, &mut tree.document);
@@ -398,14 +397,12 @@ fn resolve_includes(
     found
 }
 
-/// Writes every card with no project place onto the sheet where its block
-/// was drawn, one note per block.
-fn keep_on_sheet(
-    document: &mut SchematicDocument,
+/// Says which cards found no project place: the sheet shows them, as it
+/// shows every directive block the drawing drew, but nothing runs them.
+fn note_cards_with_no_place(
     plan: &ForeignPlan,
     notices: &mut Vec<(ForeignNoticeSeverity, String)>,
 ) {
-    let mut blocks = BTreeMap::<(i32, i32), (ForeignLettering, usize, Vec<(usize, &str)>)>::new();
     for (card, reason) in &plan.kept {
         notices.push((
             ForeignNoticeSeverity::Notice,
@@ -414,26 +411,6 @@ fn keep_on_sheet(
                 card.text.lines().next().unwrap_or_default()
             ),
         ));
-        blocks
-            .entry((card.position.x, card.position.y))
-            .or_insert_with(|| (card.lettering, card.block_lines, Vec::new()))
-            .2
-            .push((card.line, card.text.as_str()));
-    }
-    for ((x, y), (lettering, block_lines, mut kept)) in blocks {
-        kept.sort_by_key(|(line, _)| *line);
-        if let Err(error) = keep_directive_text(
-            document,
-            rspice_design_model::Point::new(x, y),
-            block_lines,
-            &kept,
-            lettering,
-        ) {
-            notices.push((
-                ForeignNoticeSeverity::Refusal,
-                format!("Directive text could not be placed on the sheet: {error}."),
-            ));
-        }
     }
 }
 

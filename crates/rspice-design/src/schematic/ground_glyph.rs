@@ -6,8 +6,12 @@ use super::component_type::ComponentType;
 
 /// Half the top edge of LTspice's ground flag, which is also how far its apex
 /// hangs below the net point: LTspice draws an open triangle 36 units across
-/// and 18 deep, which the importer draws at five quarters.
-const LTSPICE_REACH: f32 = 22.5;
+/// and 18 deep, which the importer draws at five eighths.
+const LTSPICE_REACH: f32 = 11.25;
+
+/// Half the side of the open-pin square LTspice draws, about six of its
+/// units across, at the importer's five eighths.
+pub const OPEN_PIN_HALF_WORLD: f32 = 1.875;
 
 /// Half the top edge of QSPICE's ground, and its depth: QSPICE draws a
 /// stemless triangle 165 units across and 82.5 deep, which the importer draws
@@ -25,30 +29,41 @@ pub enum GroundGlyph {
     Native,
     Ltspice,
     Qspice,
+    /// The small open square a source tool draws on a pin nothing reaches,
+    /// where its simulator ties that pin to ground: the tie stands, the
+    /// drawing shows no ground symbol.
+    OpenPin,
 }
 
 impl GroundGlyph {
     /// Every glyph a ground imported from another tool draws.
-    pub const IMPORTED: [Self; 2] = [Self::Ltspice, Self::Qspice];
+    pub const IMPORTED: [Self; 3] = [Self::Ltspice, Self::Qspice, Self::OpenPin];
 
     pub fn is_native(&self) -> bool {
         *self == Self::Native
     }
 
-    /// The triangle an imported glyph draws, in schematic units about the
-    /// ground symbol's position before it is turned: its top edge centred on
-    /// the terminal, its apex below. None for RSpice's own glyph.
-    pub fn outline(self) -> Option<[(f32, f32); 3]> {
-        let reach = match self {
-            Self::Native => return None,
-            Self::Ltspice => LTSPICE_REACH,
-            Self::Qspice => QSPICE_REACH,
-        };
+    /// The closed outline an imported glyph draws, in schematic units about
+    /// the ground symbol's position before it is turned: a flag's triangle
+    /// with its top edge centred on the terminal and its apex below, or the
+    /// open-pin square centred on the terminal. None for RSpice's own glyph.
+    pub fn outline(self) -> Option<Vec<(f32, f32)>> {
         let top = ComponentType::Ground
             .terminal_offsets()
             .first()
             .map_or(0.0, |(_, terminal)| terminal.y as f32);
-        Some([(-reach, top), (reach, top), (0.0, top + reach)])
+        let triangle = |reach: f32| vec![(-reach, top), (reach, top), (0.0, top + reach)];
+        match self {
+            Self::Native => None,
+            Self::Ltspice => Some(triangle(LTSPICE_REACH)),
+            Self::Qspice => Some(triangle(QSPICE_REACH)),
+            Self::OpenPin => Some(vec![
+                (-OPEN_PIN_HALF_WORLD, top - OPEN_PIN_HALF_WORLD),
+                (OPEN_PIN_HALF_WORLD, top - OPEN_PIN_HALF_WORLD),
+                (OPEN_PIN_HALF_WORLD, top + OPEN_PIN_HALF_WORLD),
+                (-OPEN_PIN_HALF_WORLD, top + OPEN_PIN_HALF_WORLD),
+            ]),
+        }
     }
 
     /// Half the width and half the height of the box about the position

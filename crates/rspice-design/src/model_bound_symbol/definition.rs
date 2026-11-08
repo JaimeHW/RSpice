@@ -64,6 +64,7 @@ pub fn materialize_symbol_document(definition: &ModelBoundSymbolDefinition) -> S
             origin: Point::origin(),
             name_anchor: Point::new(-half_width, -half_height - 30),
             value_anchor: Point::new(-half_width, half_height + 30),
+            pin_name_size: None,
             waivers: crate::drc::DrcWaivers::default(),
         };
     }
@@ -100,6 +101,7 @@ pub fn materialize_symbol_document(definition: &ModelBoundSymbolDefinition) -> S
         origin: Point::origin(),
         name_anchor: Point::new(-half_width, -half_height - 30),
         value_anchor: Point::new(-half_width, half_height + 30),
+        pin_name_size: None,
         waivers: crate::drc::DrcWaivers::default(),
     }
 }

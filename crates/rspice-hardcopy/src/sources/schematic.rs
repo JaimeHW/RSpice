@@ -1,7 +1,9 @@
 //! Schematic hardcopy resolution over borrowed design content and captured selection.
 
 use super::*;
-use rspice_design::resolved_symbol::{ResolvedSymbolIssueKind, ResolvedSymbolSource};
+use rspice_design::resolved_symbol::{
+    ResolvedCellSymbol, ResolvedSymbolIssueKind, ResolvedSymbolSource,
+};
 use rspice_design::schematic::{component_type::ComponentType, owned::Schematic};
 use rspice_design::symbol::SymbolPin;
 use rspice_design::symbol_resolver::SymbolResolver;
@@ -528,6 +530,12 @@ fn resolve_component_symbol(
     component: &Component,
     resolver: Option<&SymbolResolver<'_, Schematic>>,
 ) -> Result<(Option<SymbolDocument>, Option<SemanticSymbolSource>), HardcopySourceError> {
+    if let Some(symbol) = component.source_symbol() {
+        return Ok((
+            Some(printable_symbol(symbol)),
+            Some(SemanticSymbolSource::Authored),
+        ));
+    }
     if component.kind != ComponentType::CellInstance {
         return Ok((None, None));
     }
@@ -566,9 +574,13 @@ fn resolve_component_symbol(
         ResolvedSymbolSource::Authored => SemanticSymbolSource::Authored,
         ResolvedSymbolSource::Generated => SemanticSymbolSource::Generated,
     };
+    Ok((Some(printable_symbol(&resolved)), Some(source)))
+}
+
+/// The reconciled pin contract, not orphan metadata, is what the schematic
+/// renderer exposes. Freeze exactly that connectable set.
+fn printable_symbol(resolved: &ResolvedCellSymbol) -> SymbolDocument {
     let mut printable_document = resolved.document().clone();
-    // The reconciled pin contract, not orphan metadata, is what the
-    // schematic renderer exposes. Freeze exactly that connectable set.
     printable_document.pins = resolved
         .connectable_pins()
         .map(|pin| {
@@ -577,7 +589,7 @@ fn resolve_component_symbol(
                 .with_name_offset(pin.name_offset)
         })
         .collect();
-    Ok((Some(printable_document), Some(source)))
+    printable_document
 }
 
 #[cfg(test)]
