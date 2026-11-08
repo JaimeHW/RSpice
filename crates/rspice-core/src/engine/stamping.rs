@@ -38,6 +38,14 @@ impl Engine {
         gmin: Value,
     ) {
         if gmin == 0.0 {
+            // The floor is what closes a pure event net's placeholder row at
+            // DC. Without it the row is empty, and the system would be
+            // singular for a net no analog equation can reach.
+            for row in circuit.xspice_event_node_matrix_rows() {
+                if circuit.event_only_net_kind(row + 1).is_some() {
+                    matrix.add(row, row, 1.0);
+                }
+            }
             return;
         }
         for index in 0..circuit.num_nodes() {
@@ -486,6 +494,23 @@ mod tests {
         engine.config.spice_dialect = crate::engine::SpiceDialect::Xyce;
         assert_eq!(engine.transient_nodal_gmin_floor(&circuit, false), 0.0);
         assert_eq!(engine.transient_nodal_gmin_floor(&circuit, true), 0.0);
+    }
+
+    #[test]
+    fn a_zero_nodal_floor_closes_a_pure_event_row_and_no_analog_one() {
+        let mut circuit = CircuitData::new();
+        circuit.get_or_create_node("digital");
+        circuit.get_or_create_node("analog");
+        circuit.xspice_has_event_driven_devices = true;
+        circuit
+            .net_kinds
+            .register(1, crate::circuit::NetKind::Digital);
+        circuit.set_analog_touched_nodes(&std::collections::BTreeSet::from([2]));
+        let mut matrix = StaticMatrix::from_triplets(2, 2, &[(0, 0, 0.0), (1, 1, 0.0)]).unwrap();
+
+        Engine::stamp_nodal_gmin(&circuit, &mut matrix, 0.0);
+
+        assert_eq!(matrix.deficient_rows(), vec![1]);
     }
 
     #[test]
