@@ -1904,3 +1904,34 @@ fn a_parameter_value_may_follow_its_name_without_an_equals_sign() {
         "{error}"
     );
 }
+
+// QSPICE 2026: "Didn't find a model for "D" -- defaults assumed", and the
+// same for "X"; both diodes sit at 0.684811103 V. LTspice refuses both.
+#[test]
+fn a_diode_whose_model_is_missing_takes_the_default_parameters() {
+    let netlist = parse(
+        "default diode\n\
+         V1 a 0 1\n\
+         R1 a b 100\n\
+         D1 b 0 D\n\
+         R2 a c 100\n\
+         D2 c 0 X\n\
+         .op\n\
+         .end\n",
+    );
+    for node in ["b", "c"] {
+        assert_close(
+            &format!("V({node})"),
+            op_voltage(&netlist, node),
+            0.6848111031,
+            1e-6,
+        );
+    }
+    let error = Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Ngspice))
+        .run_dc_op(&netlist)
+        .expect_err("ngspice refuses a diode without its model");
+    assert!(
+        error.to_string().contains("references unknown model 'D'"),
+        "{error}"
+    );
+}

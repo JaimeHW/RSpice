@@ -7586,6 +7586,21 @@ impl Engine {
                         if crate::log_scope::first_saying(&line) {
                             log::warn!("{line}");
                         }
+                    } else if self.config.spice_dialect == SpiceDialect::BestAvailable {
+                        // QSPICE gives a diode whose model it cannot find the
+                        // default parameters and warns; LTspice, ngspice and
+                        // Xyce refuse it.
+                        rs_given = false;
+                        cj0_given = false;
+                        sidewall_cj0_given = false;
+                        model_params = HashMap::new();
+                        let line = format!(
+                            "{} uses default diode parameters: the deck defines no .MODEL '{}'",
+                            element.name, model
+                        );
+                        if crate::log_scope::first_saying(&line) {
+                            log::warn!("{line}");
+                        }
                     } else {
                         return Err(SimulationError::Circuit(format!(
                             "Diode '{}' references unknown model '{}'",
