@@ -86,11 +86,29 @@ pub enum NetLabelSide {
     Above,
     /// Centred under the point.
     Below,
+    /// Read upward, on the line through the point, starting past it: a
+    /// drawing's flag on the top end of a vertical wire.
+    RisingAbove,
+    /// Read upward, on the line through the point, ending short of it: a
+    /// drawing's flag on the bottom end of a vertical wire.
+    RisingBelow,
+    /// Read upward, centred to the left of the point: a drawing's flag on
+    /// the middle of a vertical wire.
+    RisingBeside,
 }
 
 impl NetLabelSide {
     fn is_right(&self) -> bool {
         *self == Self::Right
+    }
+
+    /// Whether a name on this side reads upward rather than level.
+    #[must_use]
+    pub const fn reads_upward(self) -> bool {
+        matches!(
+            self,
+            Self::RisingAbove | Self::RisingBelow | Self::RisingBeside
+        )
     }
 }
 

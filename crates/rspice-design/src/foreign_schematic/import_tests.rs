@@ -1422,6 +1422,59 @@ fn a_text_with_no_clear_place_beside_its_part_stays_by_it() {
 /// whose lead runs up from it, beyond either end of a wire. A flag on the
 /// middle of a wire keeps the usual side.
 #[test]
+fn an_ltspice_flag_reached_only_along_a_vertical_line_reads_up_it() {
+    use crate::schematic::label_layout::{
+        NET_LABEL_FONT_WORLD, NET_LABEL_GLYPH_WIDTH_WORLD, net_label_layout, net_label_name_corner,
+    };
+    use crate::schematic::net_label::NetLabelSide;
+
+    let drawing = parse_asc(
+        "Version 4\n\
+         WIRE 0 0 0 160\nFLAG 0 0 ONTOP\nFLAG 0 160 ATFOOT\n\
+         WIRE 160 0 160 160\nFLAG 160 80 PAST\n\
+         WIRE 320 0 320 160\nWIRE 320 0 480 0\nFLAG 320 0 CORNER\n\
+         WIRE 480 160 640 160\nFLAG 640 160 LEVEL\n",
+    )
+    .expect("the drawing reads");
+    let imported = import_foreign_schematic(&drawing, "work", &library());
+    let label = |name: &str| {
+        imported
+            .document
+            .net_labels
+            .iter()
+            .find(|label| label.name == name)
+            .unwrap_or_else(|| panic!("no label {name}"))
+    };
+    for (name, side, upward) in [
+        ("ATFOOT", NetLabelSide::RisingBelow, true),
+        ("PAST", NetLabelSide::RisingBeside, true),
+        ("CORNER", NetLabelSide::Above, false),
+        ("LEVEL", NetLabelSide::Right, false),
+    ] {
+        assert_eq!(label(name).side, side, "{name}");
+        assert_eq!(net_label_layout(label(name)).upward, upward, "{name}");
+    }
+    assert_eq!(label("ONTOP").side, NetLabelSide::RisingAbove);
+
+    // On the top end the name starts past the wire end, centred on the wire;
+    // on the bottom end it ends short of it.
+    let (top, foot) = (label("ONTOP"), label("ATFOOT"));
+    let level = label("LEVEL");
+    let gap = net_label_name_corner(level).x - level.pos.x as f32;
+    let corner = net_label_name_corner(top);
+    assert_eq!(corner.y, top.pos.y as f32 - gap);
+    assert!(corner.x > top.pos.x as f32, "{corner:?}");
+    let layout = net_label_layout(foot);
+    let width = foot.name.len() as f32 * NET_LABEL_GLYPH_WIDTH_WORLD * layout.font_size
+        / NET_LABEL_FONT_WORLD;
+    assert!(
+        (layout.corner.y - width - foot.pos.y as f32 - gap).abs() < 0.5,
+        "{:?}",
+        layout.corner
+    );
+}
+
+#[test]
 fn an_ltspice_flag_names_its_net_away_from_what_reaches_it() {
     use crate::schematic::net_label::NetLabelSide;
 
@@ -1444,9 +1497,9 @@ fn an_ltspice_flag_names_its_net_away_from_what_reaches_it() {
         sides,
         BTreeMap::from([
             ("EAST", NetLabelSide::Right),
-            ("FOOT", NetLabelSide::Below),
+            ("FOOT", NetLabelSide::RisingBelow),
             ("MIDDLE", NetLabelSide::Above),
-            ("TOP", NetLabelSide::Above),
+            ("TOP", NetLabelSide::RisingAbove),
             ("WEST", NetLabelSide::Left),
         ])
     );
@@ -3042,6 +3095,9 @@ fn a_qspice_net_label_name_stands_on_the_side_its_drawing_runs_it_to() {
         let (x, y) = (label.pos.x as f32, label.pos.y as f32);
         let centred_on_its_line = (corner.y - font * LINE_BOX_EM * 0.5 - y).abs() < 0.01;
         match side {
+            NetLabelSide::RisingAbove | NetLabelSide::RisingBelow | NetLabelSide::RisingBeside => {
+                unreachable!("{name} reads level")
+            }
             NetLabelSide::Below => {
                 assert!(corner.y > y, "{name} hangs under its point");
                 assert!(

@@ -27,7 +27,7 @@ use rspice_ui_kit::palette::Palette;
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::Tokens;
 
-use super::drawing::{ConductorInk, draw_hover_outline, layout_pos};
+use super::drawing::{ConductorInk, draw_hover_outline, layout_pos, upward_rect};
 use super::lod::{self, TextClass, TextLod};
 use super::viewport::Viewport;
 
@@ -54,6 +54,8 @@ struct NetLabelScreenLayout {
     attachment_radius: f32,
     /// The text box: the shaped galley's rect, or where it would be.
     text_rect: Rect,
+    /// The corner a name read upward turns about.
+    upward_about: Option<Pos2>,
     /// Present only for an off-sheet connector, and always inside
     /// `decoration_rect`.
     connector_tab: Option<(Rect, CrossSheetPortDirection)>,
@@ -79,6 +81,9 @@ pub(crate) struct NetLabelWorldLayout<'a> {
     pub(crate) font_size: f32,
     /// The bottom-left corner of the name's text box.
     pub(crate) corner: Pos2,
+    /// The name reads upward, turned a quarter counter-clockwise about
+    /// `corner`.
+    pub(crate) upward: bool,
     /// Half the diagonal of the attachment diamond, 0 when it draws none.
     pub(crate) diamond_half: f32,
     /// Half the side of the open-pin square, 0 when it draws none.
@@ -105,6 +110,7 @@ pub(crate) fn world_layout(label: &NetLabel) -> NetLabelWorldLayout<'_> {
         name: layout.name,
         font_size: layout.font_size,
         corner: layout_pos(layout.corner),
+        upward: layout.upward,
         diamond_half: layout.diamond_half,
         open_pin_half: layout.open_pin_half,
         tab: layout
@@ -177,6 +183,19 @@ fn screen_layout(
     } else {
         (text, text_rect)
     };
+    let upward_about = label_layout::net_label_layout(label)
+        .upward
+        .then_some(corner);
+    let (text, text_rect) = match upward_about {
+        Some(corner) => (
+            match text {
+                LabelText::Greeked(bar) => LabelText::Greeked(upward_rect(corner, bar)),
+                shaped @ LabelText::Shaped(_) => shaped,
+            },
+            upward_rect(corner, text_rect),
+        ),
+        None => (text, text_rect),
+    };
     let supply_glyph = label_layout::supply_glyph_marks(label)
         .into_iter()
         .map(|marks| marks.map(|mark| anchor + (layout_pos(mark) - label_pos(label)) * zoom))
@@ -212,6 +231,7 @@ fn screen_layout(
         attachment: anchor,
         attachment_radius,
         text_rect,
+        upward_about,
         connector_tab,
         supply_glyph,
         decoration_rect: painted.expand(POINTER_SLOP),
@@ -404,7 +424,18 @@ pub fn draw_net_label_attached(
     }
     match layout.text {
         LabelText::Shaped(galley) => {
-            painter.galley(layout.text_rect.min, galley, text_color);
+            if let Some(corner) = layout.upward_about {
+                let upright = corner - vec2(0.0, galley.size().y);
+                painter.add(
+                    egui::epaint::TextShape::new(upright, galley, text_color)
+                        .with_angle_and_anchor(
+                            -std::f32::consts::FRAC_PI_2,
+                            egui::Align2::LEFT_BOTTOM,
+                        ),
+                );
+            } else {
+                painter.galley(layout.text_rect.min, galley, text_color);
+            }
             if let Some((tab, direction)) = layout.connector_tab {
                 paint_connector_tab(painter, viewport.zoom, tab, direction, text_color);
             }

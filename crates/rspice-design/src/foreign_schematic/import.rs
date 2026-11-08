@@ -2009,11 +2009,19 @@ impl Builder<'_> {
                 label.drawing = NetLabelDrawing::Lettered;
                 let run = flag.facing.or_else(|| self.away_from_attachment(at));
                 // A flag the wires reach from more than one side letters its
-                // name over its point.
-                label.side = match run.map(|run| (run.x.signum(), run.y.signum())) {
-                    Some((1, _)) => NetLabelSide::Right,
-                    Some((-1, _)) => NetLabelSide::Left,
-                    Some((0, 1)) => NetLabelSide::Below,
+                // name over its point; one reached only along a vertical line
+                // reads up that line, as LTspice letters it.
+                let reaches = self.reaches(at);
+                let rising = self.drawing.tool == ForeignTool::Ltspice
+                    && !reaches.is_empty()
+                    && reaches.iter().all(|reach| reach.x == 0);
+                label.side = match (run.map(|run| (run.x.signum(), run.y.signum())), rising) {
+                    (Some((1, _)), _) => NetLabelSide::Right,
+                    (Some((-1, _)), _) => NetLabelSide::Left,
+                    (Some((0, 1)), false) => NetLabelSide::Below,
+                    (Some((0, 1)), true) => NetLabelSide::RisingBelow,
+                    (Some((0, -1)), true) => NetLabelSide::RisingAbove,
+                    (None | Some((0, 0)), true) => NetLabelSide::RisingBeside,
                     _ => NetLabelSide::Above,
                 };
                 if is_supply_rail(&flag.name) {

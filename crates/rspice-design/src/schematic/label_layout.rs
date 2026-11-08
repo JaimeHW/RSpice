@@ -550,7 +550,10 @@ pub fn net_label_name_corner(label: &NetLabel) -> LayoutPoint {
         return match label.side {
             NetLabelSide::Right => LayoutPoint::new(x + across, y - down),
             NetLabelSide::Left => LayoutPoint::new(x - across - width, y - down),
-            NetLabelSide::Above => LayoutPoint::new(x - width * 0.5, y - down),
+            NetLabelSide::Above
+            | NetLabelSide::RisingAbove
+            | NetLabelSide::RisingBelow
+            | NetLabelSide::RisingBeside => LayoutPoint::new(x - width * 0.5, y - down),
             NetLabelSide::Below => LayoutPoint::new(
                 x - width * 0.5,
                 y + down + NET_LABEL_FONT_WORLD * LINE_BOX_EM,
@@ -588,6 +591,18 @@ fn lettered_name_corner(label: &NetLabel) -> LayoutPoint {
         NetLabelSide::Below => LayoutPoint::new(
             x - width * 0.5,
             y + LETTERED_NAME_ABOVE_WORLD + size * (CAP_HEIGHT_EM + DESCENT_EM),
+        ),
+        // Read upward, the box's left edge is the run's foot and its bottom
+        // edge faces right: the same air on the same sides, a quarter turned.
+        NetLabelSide::RisingAbove => {
+            LayoutPoint::new(x + height * 0.5, y - LETTERED_NAME_ACROSS_WORLD)
+        }
+        NetLabelSide::RisingBelow => {
+            LayoutPoint::new(x + height * 0.5, y + LETTERED_NAME_ACROSS_WORLD + width)
+        }
+        NetLabelSide::RisingBeside => LayoutPoint::new(
+            x - LETTERED_NAME_ABOVE_WORLD + size * DESCENT_EM,
+            y + width * 0.5,
         ),
     }
 }
@@ -657,6 +672,9 @@ pub struct NetLabelLayout<'a> {
     pub font_size: f32,
     /// The bottom-left corner of the name's text box.
     pub corner: LayoutPoint,
+    /// The name reads upward, turned a quarter counter-clockwise about
+    /// `corner`.
+    pub upward: bool,
     /// Half the diagonal of the attachment diamond, 0 when it draws none.
     pub diamond_half: f32,
     /// Half the side of the open-pin square, 0 when it draws none.
@@ -688,6 +706,7 @@ pub fn net_label_layout(label: &NetLabel) -> NetLabelLayout<'_> {
         name,
         font_size: net_label_font_world(label),
         corner,
+        upward: label.drawing != NetLabelDrawing::Native && label.side.reads_upward(),
         diamond_half: match label.drawing {
             NetLabelDrawing::Native => NET_LABEL_DIAMOND_HALF_WORLD,
             NetLabelDrawing::Lettered | NetLabelDrawing::OpenPin => 0.0,

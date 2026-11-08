@@ -172,7 +172,7 @@ pub fn net_label_text(label: &NetLabel) -> SchematicText {
             anchor: layout.corner,
             horizontal: TextEdge::Start,
             vertical: TextEdge::End,
-            upward: false,
+            upward: layout.upward,
         },
         text: layout.name.to_owned(),
         size_percent: (layout.font_size / label_layout::NET_LABEL_FONT_WORLD * 100.0).round()

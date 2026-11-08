@@ -21,7 +21,9 @@ use rspice_design_model::Point;
 use super::SvgExportConfig;
 use crate::view::{
     design_notes, drawing, lod, net_labels,
-    resolved_symbol_render::{svg_text_baseline, write_sized_text_svg, write_text_svg},
+    resolved_symbol_render::{
+        svg_text_baseline, write_sized_text_svg, write_text_svg, write_upward_svg,
+    },
 };
 
 /// The page rectangle grown to hold everything drawn, in SVG units.
@@ -564,14 +566,16 @@ pub(super) fn write_net_label(svg: &mut String, label: &NetLabel, config: &SvgEx
             world(layout.font_size, config),
         );
     } else if !layout.name.is_empty() {
-        write_sized_text_svg(
-            svg,
-            "net-name",
-            at(layout.corner),
-            layout.name,
-            Align2::LEFT_BOTTOM,
-            world(layout.font_size, config),
-        );
+        write_upward_svg(svg, at(layout.corner), layout.upward, |svg| {
+            write_sized_text_svg(
+                svg,
+                "net-name",
+                at(layout.corner),
+                layout.name,
+                Align2::LEFT_BOTTOM,
+                world(layout.font_size, config),
+            );
+        });
     }
     let supply = rspice_design::schematic::label_layout::supply_glyph_marks(label);
     if !supply.is_empty() {
@@ -629,12 +633,21 @@ pub(super) fn include_net_label_bounds(
         let (x, y) = page(label.pos, config);
         let half = world(layout.diamond_half, config);
         extent.include_box((x - half, y - half, x + half, y + half));
-        extent.include_text(
-            world_point(layout.corner, config),
-            Align2::LEFT_BOTTOM,
-            layout.name,
-            world(layout.font_size, config),
-        );
+        if layout.upward {
+            extent.include_upward_text(
+                world_point(layout.corner, config),
+                Align2::LEFT_BOTTOM,
+                layout.name,
+                world(layout.font_size, config),
+            );
+        } else {
+            extent.include_text(
+                world_point(layout.corner, config),
+                Align2::LEFT_BOTTOM,
+                layout.name,
+                world(layout.font_size, config),
+            );
+        }
         let supply = rspice_design::schematic::label_layout::supply_glyph_rect(label)
             .map(|glyph| (glyph.min.x, glyph.min.y, glyph.max.x, glyph.max.y));
         let tab = layout
