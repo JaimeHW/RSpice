@@ -65,6 +65,9 @@ pub fn execution_resource_policy_blocker(
     limits.max_include_depth = defaults.max_include_depth;
     limits.max_hierarchy_depth = defaults.max_hierarchy_depth;
     limits.max_flattened_elements = defaults.max_flattened_elements;
+    // A result budget above the default narrows nothing, and the command line
+    // starts from one so a large batch run is not refused for its size.
+    limits.max_result_values = limits.max_result_values.min(defaults.max_result_values);
     (limits != defaults).then_some(
         "this analysis does not yet enforce custom execution resource limits; use default execution limits",
     )
@@ -88,6 +91,25 @@ mod tests {
             execution_resource_policy_blocker(&NON_ENFORCING, limits),
             None
         );
+    }
+
+    /// The command line's default result budget sits above the engine's, and
+    /// a run on default settings must not read as one that set a limit.
+    #[test]
+    fn a_wider_result_budget_alone_does_not_refuse_an_analysis() {
+        let mut limits = ResourceLimits::default();
+        limits.max_result_values *= 4;
+        assert_eq!(
+            execution_resource_policy_blocker(&NON_ENFORCING, limits),
+            None
+        );
+    }
+
+    #[test]
+    fn a_narrower_result_budget_still_refuses_an_analysis_that_ignores_it() {
+        let mut limits = ResourceLimits::default();
+        limits.max_result_values /= 2;
+        assert!(execution_resource_policy_blocker(&NON_ENFORCING, limits).is_some());
     }
 
     /// A spec the list above does not name.
