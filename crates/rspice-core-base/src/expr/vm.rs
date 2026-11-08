@@ -505,14 +505,7 @@ impl Vm {
                 Instruction::Sub => self.binary_op(|a, b| a - b),
                 Instruction::Mul => self.binary_op(|a, b| a * b),
                 Instruction::Div => self.binary_op(|a, b| if b != 0.0 { a / b } else { 0.0 }),
-                Instruction::Pow => {
-                    let dialect = ctx.expression_dialect;
-                    self.binary_op(|a, b| super::real_pow(a, b, dialect));
-                }
-                Instruction::FunctionPow => {
-                    let dialect = ctx.expression_dialect;
-                    self.binary_op(|a, b| super::real_function_pow(a, b, dialect));
-                }
+                Instruction::Pow | Instruction::FunctionPow => self.binary_op(super::real_pow),
 
                 // Comparisons
                 Instruction::Lt => self.binary_op(|a, b| if a < b { 1.0 } else { 0.0 }),
@@ -1543,24 +1536,30 @@ mod tests {
         )
     }
 
+    /// The power operator and `pow()` follow QSPICE in every dialect: the
+    /// signed power at an integer exponent, the real odd root at the
+    /// reciprocal of an odd integer, and zero at any other fractional one.
     #[test]
-    fn xyce_vm_matches_abm_power_gold_expressions() {
-        assert_eq!(eval("-v(n)**2", -2.5, ExpressionDialect::Xyce), -6.25);
-        assert_eq!(eval("v(n)**-2", -2.5, ExpressionDialect::Xyce), 0.16);
-        assert_eq!(eval("v(n)**-3", -2.5, ExpressionDialect::Xyce), -0.064);
-
-        let power_2_1 = 2.5_f64.powf(2.1) * (2.1 * std::f64::consts::PI).cos();
-        let power_3_1 = 2.5_f64.powf(3.1) * (3.1 * std::f64::consts::PI).cos();
-        assert_eq!(eval("v(n)**2.1", -2.5, ExpressionDialect::Xyce), power_2_1);
-        assert_eq!(
-            eval("pow(-v(n),3.1)", 2.5, ExpressionDialect::Xyce),
-            power_3_1
-        );
-    }
-
-    #[test]
-    fn negative_fractional_power_remains_nan_outside_xyce() {
-        assert!(eval("v(n)**2.1", -2.5, ExpressionDialect::Ngspice).is_nan());
+    fn negative_base_power_follows_qspice_in_every_dialect() {
+        for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+            for (expression, base, expected) in [
+                ("-v(n)**2", -2.5, -6.25),
+                ("v(n)**-2", -2.5, 0.16),
+                ("v(n)**-3", -2.5, -0.064),
+                ("pow(v(n),3)", -2.0, -8.0),
+                ("v(n)^(1/3)", -8.0, -2.0),
+                ("pow(v(n),1/3)", -8.0, -2.0),
+                ("v(n)**(2/3)", -8.0, 0.0),
+                ("v(n)**2.1", -2.5, 0.0),
+                ("pow(-v(n),3.1)", 2.5, 0.0),
+            ] {
+                assert_eq!(
+                    eval(expression, base, dialect),
+                    expected,
+                    "{expression} at v(n) = {base} ({dialect:?})"
+                );
+            }
+        }
     }
 
     #[test]

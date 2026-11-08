@@ -704,10 +704,7 @@ impl Dual {
         context: &Context<'_>,
     ) -> Option<Self> {
         let evaluate = |base, exponent| match instruction {
-            Instruction::Pow => super::real_pow(base, exponent, context.expression_dialect),
-            Instruction::FunctionPow => {
-                super::real_function_pow(base, exponent, context.expression_dialect)
-            }
+            Instruction::Pow | Instruction::FunctionPow => super::real_pow(base, exponent),
             Instruction::Pwr => {
                 super::real_function_pwr(base, exponent, context.expression_dialect)
             }
@@ -721,8 +718,7 @@ impl Dual {
             )));
         }
         // Finite exponents have defined magnitude powers at infinite bases.
-        // Negative-base projection below still rejects invalid real domains
-        // and indeterminate products such as infinity times a zero phase.
+        // The negative-base branch below still rejects invalid real domains.
         if !exponent.value.is_finite() {
             return None;
         }
@@ -755,30 +751,31 @@ impl Dual {
                 ..self
             };
             let coefficient = if exponent.constant {
-                // The existing power helpers own sign, magnitude and Xyce's
-                // complex projection. Do not duplicate those dialect rules.
+                // The power helpers own the sign of each real branch at a
+                // negative base, and its absence. Do not duplicate them.
                 let coefficient = evaluate(-1.0, exponent.value.lower);
                 if !coefficient.is_finite() {
                     return None;
                 }
-                Self::constant(coefficient)
+                coefficient
             } else if matches!(instruction, Instruction::Pwrs)
                 || (matches!(instruction, Instruction::Pwr)
                     && context.expression_dialect != crate::config::ExpressionDialect::Xyce)
             {
-                Self::constant(-1.0)
-            } else if context.expression_dialect == crate::config::ExpressionDialect::Xyce {
-                exponent
-                    .mul(Self::constant(std::f64::consts::PI))?
-                    .trigonometric(true)?
-            } else if matches!(instruction, Instruction::FunctionPow) {
-                Self::constant(1.0)
+                -1.0
             } else {
-                // A varying real exponent on a negative base has no open
-                // real domain under the ordinary power-operator contract.
+                // A varying exponent steps the power at a negative base
+                // between its real roots and zero, which no bound encloses.
                 return None;
             };
-            let powered = negative.neg().positive_power(exponent).mul(coefficient)?;
+            let powered = if coefficient == 0.0 {
+                Self::constant(0.0)
+            } else {
+                negative
+                    .neg()
+                    .positive_power(exponent)
+                    .mul(Self::constant(coefficient))?
+            };
             result = Some(match result {
                 None => powered,
                 Some(positive) => Self {
@@ -2065,58 +2062,33 @@ mod tests {
     fn power_bounds_cover_dialect_values_and_independent_chain_rule_derivatives() {
         use crate::config::ExpressionDialect;
         type Derivative = fn(Value, ExpressionDialect) -> Value;
-        let cases: [(&str, bool, Derivative); 14] = [
-            ("(time-1)^3", false, |t, _| 3.0 * (t - 1.0).powi(2)),
-            ("(time-1)^(0*time+3)", false, |t, _| 3.0 * (t - 1.0).powi(2)),
-            ("(time+1)^(-3)", false, |t, _| -3.0 / (t + 1.0).powi(4)),
-            ("(time+1)^0.5", false, |t, _| 0.5 / (t + 1.0).sqrt()),
-            ("(1e-310*(time+1))^0.5", false, |t, _| {
+        let cases: [(&str, Derivative); 13] = [
+            ("(time-1)^3", |t, _| 3.0 * (t - 1.0).powi(2)),
+            ("(time-1)^(0*time+3)", |t, _| 3.0 * (t - 1.0).powi(2)),
+            ("(time+1)^(-3)", |t, _| -3.0 / (t + 1.0).powi(4)),
+            ("(time+1)^0.5", |t, _| 0.5 / (t + 1.0).sqrt()),
+            ("(1e-310*(time+1))^0.5", |t, _| {
                 0.5 * 1e-310_f64.sqrt() / (t + 1.0).sqrt()
             }),
-            ("pow(time-1,3)", false, |t, dialect| {
-                if dialect == ExpressionDialect::Xyce {
-                    3.0 * (t - 1.0).powi(2)
-                } else {
-                    3.0 * (t - 1.0) * (t - 1.0).abs()
-                }
-            }),
-            ("pwr(time-1,2)", false, |t, dialect| {
+            ("pow(time-1,3)", |t, _| 3.0 * (t - 1.0).powi(2)),
+            ("pwr(time-1,2)", |t, dialect| {
                 if dialect == ExpressionDialect::Xyce {
                     2.0 * (t - 1.0)
                 } else {
                     2.0 * (t - 1.0).abs()
                 }
             }),
-            ("pwrs(time-1,2)", false, |t, _| 2.0 * (t - 1.0).abs()),
-            ("(-time-1)^(-0.5)", true, |t, _| {
-                -0.5 * std::f64::consts::FRAC_PI_2.cos() / (t + 1.0).powf(1.5)
-            }),
-            ("2^(sin(time)+2)", false, |t, _| {
+            ("pwrs(time-1,2)", |t, _| 2.0 * (t - 1.0).abs()),
+            ("(-time-1)^(-0.5)", |_, _| 0.0),
+            ("(-time-1)^(1/3)", |t, _| -(t + 1.0).powf(-2.0 / 3.0) / 3.0),
+            ("2^(sin(time)+2)", |t, _| {
                 2.0_f64.powf(t.sin() + 2.0) * 2.0_f64.ln() * t.cos()
             }),
-            ("(time+1)^(sin(time)+2)", false, |t, _| {
+            ("(time+1)^(sin(time)+2)", |t, _| {
                 (t + 1.0).powf(t.sin() + 2.0)
                     * (t.cos() * (t + 1.0).ln() + (t.sin() + 2.0) / (t + 1.0))
             }),
-            ("(-time-1)^(sin(time)+2)", true, |t, _| {
-                let p = t.sin() + 2.0;
-                let (s, c) = (std::f64::consts::PI * p).sin_cos();
-                (t + 1.0).powf(p)
-                    * (c * (t.cos() * (t + 1.0).ln() + p / (t + 1.0))
-                        - std::f64::consts::PI * s * t.cos())
-            }),
-            ("pow(-time-1,sin(time)+2)", false, |t, dialect| {
-                let p = t.sin() + 2.0;
-                let derivative = t.cos() * (t + 1.0).ln() + p / (t + 1.0);
-                (t + 1.0).powf(p)
-                    * if dialect == ExpressionDialect::Xyce {
-                        let (s, c) = (std::f64::consts::PI * p).sin_cos();
-                        c * derivative - std::f64::consts::PI * s * t.cos()
-                    } else {
-                        derivative
-                    }
-            }),
-            ("pwrs(-time-1,sin(time)+2)", false, |t, _| {
+            ("pwrs(-time-1,sin(time)+2)", |t, _| {
                 -(t + 1.0).powf(t.sin() + 2.0)
                     * (t.cos() * (t + 1.0).ln() + (t.sin() + 2.0) / (t + 1.0))
             }),
@@ -2124,10 +2096,7 @@ mod tests {
         for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
             let context = Context::transient(&[], &[], 0.0).with_expression_dialect(dialect);
             let stop = 3.0;
-            for (expression, xyce_only, derivative) in cases {
-                if xyce_only && dialect != ExpressionDialect::Xyce {
-                    continue;
-                }
+            for (expression, derivative) in cases {
                 let program = compile(&parse_expression_strict(expression).unwrap());
                 let mut bounds = TimeEnclosure::new(&program, stop).unwrap();
                 let mut vm = Vm::new();
@@ -2153,10 +2122,25 @@ mod tests {
                     }
                 }
             }
-            for expression in ["pow(-2,3)+pwr(-2,2)+pwrs(-2,2)", "(-2)^0.5", "(-2)^0"] {
-                if dialect == ExpressionDialect::Ngspice && expression == "(-2)^0.5" {
-                    continue;
-                }
+            // A varying exponent on a negative base steps between the real
+            // roots and zero, so it has no bound.
+            for expression in ["(-time-1)^(sin(time)+2)", "pow(-time-1,sin(time)+2)"] {
+                let program = compile(&parse_expression_strict(expression).unwrap());
+                let bounds = TimeEnclosure::new(&program, stop).unwrap().evaluate(
+                    TimeInterval {
+                        lower: 0.0,
+                        upper: stop,
+                    },
+                    &context,
+                );
+                assert!(bounds.is_none(), "{expression} ({dialect:?}) has bounds");
+            }
+            for expression in [
+                "pow(-2,3)+pwr(-2,2)+pwrs(-2,2)",
+                "(-2)^0.5",
+                "(-2)^0",
+                "(-8)^(1/3)",
+            ] {
                 let program = compile(&parse_expression_strict(expression).unwrap());
                 let TimeBounds { value, slope, .. } = TimeEnclosure::new(&program, stop)
                     .unwrap()
@@ -2688,7 +2672,7 @@ mod tests {
                     "abs(T-0.5)",
                     "log(1e-38*(4*T-2))",
                     "exp(pwrs(T-0.5,0))",
-                    "pow(-1-T,0.2+T)",
+                    "pwrs(-1-T,0.2+T)",
                     "pwr(T-0.5,1.5)",
                     "pwrs(T-0.5,2)",
                     "sqr(T-0.5)",

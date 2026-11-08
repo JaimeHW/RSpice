@@ -10,8 +10,8 @@ use super::{
     BinaryOp, CompiledExpr, Derivative, EXPR_ZERO_TOLERANCE, Expr, Function, LogarithmDomain,
     UnaryOp, XYCE_ATANH_EPSILON, XYCE_TANH_SATURATION_THRESHOLD, derivative_pair,
     lookup_table_interpolate_with_derivative, normalize_expression_boundary, ordered_limit,
-    ordered_sign, real_function_pow_with_derivative, real_function_pwr_with_derivative,
-    real_function_pwrs_with_derivative, real_pow_with_derivative,
+    ordered_sign, real_function_pwr_with_derivative, real_function_pwrs_with_derivative,
+    real_pow_with_derivative,
 };
 use crate::Value;
 use crate::config::ExpressionDialect;
@@ -682,13 +682,7 @@ fn eval_function_with_derivative(
         Function::Pow => {
             let (left, d_left) = eval_arg(0)?;
             let (right, d_right) = eval_arg(1)?;
-            real_function_pow_with_derivative(
-                left,
-                d_left,
-                right,
-                d_right,
-                context.expression_dialect,
-            )
+            real_pow_with_derivative(left, d_left, right, d_right, context.expression_dialect)
         }
         Function::Mod => {
             let (left, d_left) = eval_arg(0)?;

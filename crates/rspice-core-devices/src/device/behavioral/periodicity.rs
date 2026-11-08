@@ -372,13 +372,7 @@ pub(crate) fn finite_fourier_degree(
             (Function::Sin | Function::Cos, [phase]) => {
                 Some(affine_time_increment(phase, period, context)?.abs() / std::f64::consts::TAU)
             }
-            (Function::Pow, [base, exponent])
-                if context.expression_dialect == crate::config::ExpressionDialect::Xyce
-                    || constant_value(exponent, context)
-                        .is_some_and(|value| value.rem_euclid(2.0) == 0.0) =>
-            {
-                power(base, exponent)
-            }
+            (Function::Pow, [base, exponent]) => power(base, exponent),
             (Function::Pwr, [base, exponent])
                 if context.expression_dialect == crate::config::ExpressionDialect::Xyce
                     || constant_value(exponent, context)
@@ -644,7 +638,7 @@ mod tests {
                 Some(67.0),
                 Some(67.0),
             ),
-            ("pow(sin(2*pi*64meg*time),3)", None, Some(192.0)),
+            ("pow(sin(2*pi*64meg*time),3)", Some(192.0), Some(192.0)),
             ("pow(sin(2*pi*64meg*time),4)", Some(256.0), Some(256.0)),
             ("pwr(sin(2*pi*64meg*time),3)", Some(192.0), Some(192.0)),
             ("pwr(sin(2*pi*64meg*time),4)", None, Some(256.0)),

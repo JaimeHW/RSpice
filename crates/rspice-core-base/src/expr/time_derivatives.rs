@@ -370,25 +370,24 @@ impl Operations<'_> {
             } else {
                 value
             }
-        } else if !xyce && matches!(instruction, Instruction::FunctionPow) {
-            self.power(&absolute, b)?
-        } else if xyce && negative && !(b.constant && b.point().fract() == 0.0) {
-            let magnitude = self.power(&absolute, b)?;
-            let phase = self.scale(b.clone(), std::f64::consts::PI)?;
-            let point = super::power::sin_cos_pi(b.point());
-            self.multiply(&magnitude, &self.sine_cosine_at(&phase, false, point)?.1)?
+        } else if negative && !(b.constant && b.point().fract() == 0.0) {
+            // A negative base is on the branch `sign * |x|^y` its exponent
+            // selects, the real odd root say, or zero off every root.
+            let sign = super::power::negative_base_sign(b.point());
+            if sign == 0.0 {
+                self.constant(0.0)
+            } else {
+                self.scale(self.power(&absolute, b)?, sign)?
+            }
         } else {
             self.power(a, b)?
         };
         result.use_point(match instruction {
-            Instruction::FunctionPow => {
-                super::real_function_pow(a.point(), b.point(), context.expression_dialect)
-            }
             Instruction::Pwr => {
                 super::real_function_pwr(a.point(), b.point(), context.expression_dialect)
             }
             Instruction::Pwrs => super::real_function_pwrs(a.point(), b.point()),
-            _ => super::real_pow(a.point(), b.point(), context.expression_dialect),
+            _ => super::real_pow(a.point(), b.point()),
         });
         Ok(result)
     }
@@ -966,13 +965,8 @@ mod tests {
     #[test]
     fn time_taylor_preserves_dialect_power_and_clamp_semantics() {
         use crate::config::ExpressionDialect::{Ngspice, Xyce};
-        let cosine = std::f64::consts::FRAC_PI_2.cos();
         for (expression, dialect, expected) in [
-            (
-                "pow(-2+time,0.5)",
-                Ngspice,
-                vec![2.0_f64.sqrt(), -0.5 / 2.0_f64.sqrt()],
-            ),
+            ("pow(-2+time,0.5)", Ngspice, vec![0.0, 0.0]),
             (
                 "pwr(-2+time,0.5)",
                 Ngspice,
@@ -983,24 +977,17 @@ mod tests {
                 Xyce,
                 vec![-2.0_f64.sqrt(), 0.5 / 2.0_f64.sqrt()],
             ),
+            ("(-2+time)^0.5", Xyce, vec![0.0, 0.0, 0.0]),
+            ("(-1)^(0.5+time)", Ngspice, vec![0.0, 0.0, 0.0, 0.0]),
             (
-                "(-2+time)^0.5",
-                Xyce,
-                vec![
-                    2.0_f64.sqrt() * cosine,
-                    -0.5 / 2.0_f64.sqrt() * cosine,
-                    -0.125 / 2.0_f64.sqrt() * cosine,
-                ],
+                "(-8+time)^(1/3)",
+                Ngspice,
+                vec![-2.0, 1.0 / 12.0, 1.0 / 144.0],
             ),
             (
-                "(-1)^(0.5+time)",
+                "pow(-8,1/3+time)",
                 Xyce,
-                vec![
-                    cosine,
-                    -std::f64::consts::PI,
-                    -std::f64::consts::PI.powi(2) * cosine,
-                    std::f64::consts::PI.powi(3),
-                ],
+                vec![-2.0, -2.0 * 8.0_f64.ln(), -2.0 * 8.0_f64.ln().powi(2)],
             ),
             ("tanh(400+1e300*time)", Xyce, vec![1.0, 0.0]),
             (

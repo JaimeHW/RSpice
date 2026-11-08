@@ -2880,11 +2880,12 @@ mod tests {
     }
 
     #[test]
-    fn xyce_power_analytic_derivative_matches_bytecode_and_finite_difference() {
+    fn power_analytic_derivative_matches_bytecode_and_finite_difference() {
         for (expression, point) in [
+            ("v(n)**(1/3)", -8.0),
+            ("pow(v(n),1/5)", -2.0),
+            ("(-v(n))**(-1/3)", 8.0),
             ("v(n)**2.1", -2.5),
-            ("pow(v(n),2.1)", -2.5),
-            ("(-v(n))**3.1", 2.5),
             ("v(n)**-3", -2.0),
         ] {
             let (analytic_value, analytic_derivative) = eval_node_derivative(expression, point);
@@ -2911,8 +2912,8 @@ mod tests {
     }
 
     #[test]
-    fn xyce_power_exponent_derivative_matches_finite_difference() {
-        let expression = "(-2.5)**v(n)";
+    fn power_exponent_derivative_matches_finite_difference() {
+        let expression = "2.5**v(n)";
         let point = 3.1;
         let (analytic_value, analytic_derivative) = eval_node_derivative(expression, point);
         assert_eq!(

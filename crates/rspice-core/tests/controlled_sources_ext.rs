@@ -477,3 +477,43 @@ rl out 0 1k
         "G VALUE must match linear VCCS: {vv} vs {vl}"
     );
 }
+
+/// A power of a negative base is the signed power at an integer exponent,
+/// the real odd root at the reciprocal of an odd integer and zero at any other
+/// fractional exponent, through `^`, `**` and `pow()` alike, and a
+/// node-valued exponent solves. QSPICE `.op` values.
+#[test]
+fn bsource_power_of_a_negative_base_solves() {
+    let deck = "* negative-base powers
+vin in 0 dc -2
+vm8 m8 0 dc -8
+vexp exponent 0 3
+vthird third 0 {1/3}
+bvariable variable 0 v=v(in)^v(exponent)
+bfraction fraction 0 v=v(in)^2.5
+bstar star 0 v=v(in)**3
+bpow pow 0 v=pow(v(in),3)
+broot root 0 v=v(m8)**(1/3)
+bvroot vroot 0 v=v(m8)**v(third)
+bproot proot 0 v=pow(v(m8),1/3)
+bsquare square 0 v=v(m8)^(2/3)
+.op
+.end
+";
+    for (node, expected) in [
+        ("variable", -8.0),
+        ("fraction", 0.0),
+        ("star", -8.0),
+        ("pow", -8.0),
+        ("root", -2.0),
+        ("vroot", -2.0),
+        ("proot", -2.0),
+        ("square", 0.0),
+    ] {
+        let v = op_voltage(deck, node);
+        assert!(
+            (v - expected).abs() < 1e-9,
+            "v({node}) = {v}, QSPICE {expected}"
+        );
+    }
+}

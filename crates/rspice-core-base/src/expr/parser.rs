@@ -1333,14 +1333,14 @@ mod tests {
 
     #[test]
     fn named_power_functions_follow_the_selected_spice_dialect() {
-        // ngspice behavioral POW uses the magnitude of its base, while PWR
-        // and PWRS preserve the base sign. Xyce aliases POW and PWR to the
-        // same complex-projected power operation.
+        // POW is the power operator in every dialect, as QSPICE has it. The
+        // ngspice PWR and PWRS preserve the base sign, and Xyce aliases PWR
+        // to POW.
         assert_eq!(eval_const("pow(-2,2)"), 4.0);
-        assert_eq!(eval_const("pow(-2,3)"), 8.0);
+        assert_eq!(eval_const("pow(-2,3)"), -8.0);
         assert_eq!(eval_const("pwr(-2,3)"), -8.0);
         assert_eq!(eval_const("pwrs(-2,3)"), -8.0);
-        assert_eq!(eval_const("pow(-4,0.5)"), 2.0);
+        assert_eq!(eval_const("pow(-4,0.5)"), 0.0);
         assert_eq!(eval_const("pwr(-4,0.5)"), -2.0);
         assert_eq!(eval_const("pwr(0,0)"), 1.0);
         assert!(eval_const("pwr(0,-1)").is_infinite());

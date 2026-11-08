@@ -37,9 +37,8 @@ pub use parser::{ParseExpressionWithAbortError, parse_expression_strict_with_abo
 #[doc(hidden)]
 pub use power::{normalize_expression_boundary, ordered_limit, ordered_sign};
 pub(crate) use power::{
-    real_function_pow, real_function_pow_with_derivative, real_function_pwr,
-    real_function_pwr_with_derivative, real_function_pwrs, real_function_pwrs_with_derivative,
-    real_pow, real_pow_with_derivative,
+    real_function_pwr, real_function_pwr_with_derivative, real_function_pwrs,
+    real_function_pwrs_with_derivative, real_pow, real_pow_with_derivative,
 };
 #[doc(hidden)]
 pub use time_derivatives::{TimeDerivativeError, TimeDerivatives};
