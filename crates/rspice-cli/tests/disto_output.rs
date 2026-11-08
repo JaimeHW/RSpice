@@ -416,9 +416,9 @@ fn dedicated_hdf5_section_round_trips_product_identity_and_provenance() {
 }
 
 #[test]
-fn every_flat_output_format_retains_typed_product_payload() {
+fn every_flat_table_format_retains_typed_product_payload() {
     let dir = test_dir("flat_formats");
-    for format in ["csv", "tsv", "ascii", "raw"] {
+    for format in ["csv", "tsv"] {
         let output_path = dir.join(format!("one_tone.{format}"));
         let output = run(&fixture("disto_one_tone.cir"), Some((&output_path, format)));
         assert!(
@@ -439,6 +439,86 @@ fn every_flat_output_format_retains_typed_product_payload() {
                 visible.contains(required),
                 "{format} DISTO output lost '{required}'"
             );
+        }
+    }
+}
+
+/// A distortion rawfile is ngspice's: one plot per product it reports, over
+/// the F1 sweep named `frequency`, with each signal's peak phasor under the
+/// signal's own name.
+#[test]
+fn rawfiles_carry_ngspice_product_plots() {
+    let dir = test_dir("raw_products");
+    for (deck, plots) in [
+        (
+            "disto_one_tone.cir",
+            vec![
+                ("DISTORTION - 2nd harmonic", "second-harmonic"),
+                ("DISTORTION - 3rd harmonic", "third-harmonic"),
+            ],
+        ),
+        (
+            "disto_two_tone.cir",
+            vec![
+                ("DISTORTION - IM: f1+f2", "sum"),
+                ("DISTORTION - IM: f1-f2", "difference"),
+                ("DISTORTION - IM: 2f1-f2", "third-order-difference"),
+            ],
+        ),
+    ] {
+        let json = dir.join(format!("{deck}.json"));
+        assert!(run(&fixture(deck), Some((&json, "json"))).status.success());
+        let document = read_json(&json);
+        for format in ["raw", "ascii"] {
+            let path = dir.join(format!("{deck}.{format}"));
+            let output = run(&fixture(deck), Some((&path, format)));
+            assert!(output.status.success(), "{output:?}");
+            let file = rspice_core::io::ltspice_raw::parse_raw_plots_bytes_with_limits(
+                &std::fs::read(&path).unwrap(),
+                Default::default(),
+            )
+            .unwrap();
+            let names = file
+                .plots
+                .iter()
+                .map(|plot| plot.header.plotname.as_str())
+                .collect::<Vec<_>>();
+            assert_eq!(
+                names,
+                plots.iter().map(|(name, _)| *name).collect::<Vec<_>>()
+            );
+            for (plot, (_, product_name)) in file.plots.iter().zip(&plots) {
+                let variables = plot
+                    .variables
+                    .iter()
+                    .map(|variable| {
+                        (
+                            variable.name.to_ascii_lowercase(),
+                            variable.var_type.as_str(),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    variables,
+                    [
+                        ("frequency".to_string(), "frequency"),
+                        ("i(v1)".to_string(), "current")
+                    ]
+                );
+                assert_eq!(plot.waveforms[0].y, axis_values(&document, "frequency"));
+                let current = &plot.waveforms[1];
+                let imag = current.y_imag.as_deref().expect("complex phasor");
+                let expected = product(&document, "I(V1)", product_name);
+                assert_eq!(
+                    current
+                        .y
+                        .iter()
+                        .copied()
+                        .zip(imag.iter().copied())
+                        .collect::<Vec<_>>(),
+                    expected
+                );
+            }
         }
     }
 }
