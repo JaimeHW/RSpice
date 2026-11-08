@@ -143,6 +143,7 @@ impl NetlistExecutionProfile {
             code,
             "unknown-option"
                 | "unsupported-dot-command"
+                | "unsupported-analysis"
                 | "control-command-dropped"
                 | "invalid-option-defaulted"
         )

@@ -125,6 +125,31 @@ fn map_multi_run_error(
     }
 }
 
+/// A deck whose analyses are all ones RSpice does not run is refused: the
+/// default operating point answers a deck that asked for no analysis, not one
+/// that asked for an analysis this build cannot perform.
+fn refuse_unrun_analyses(netlist: &Netlist) -> Result<(), CliError> {
+    let Some(card) = netlist
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "unsupported-analysis")
+    else {
+        return Ok(());
+    };
+    let refusal = rspice_core::UnsupportedCapabilityError::new(
+        "analysis.unrun_card",
+        format!("{}; the deck names no analysis RSpice runs", card.message),
+    );
+    let refusal = match card.origin.clone() {
+        Some(origin) => refusal.at(origin),
+        None => refusal,
+    };
+    Err(CliError::CoreSimulationError {
+        source: refusal.into(),
+        analysis: None,
+    })
+}
+
 struct DeckOutcome {
     reports: Vec<SimulationReport>,
     outputs: Vec<PathBuf>,
@@ -848,6 +873,7 @@ fn run_concrete_deck(
         }
 
         if !ran_analysis && simulation_error.is_none() {
+            refuse_unrun_analyses(netlist)?;
             if !quiet {
                 crate::console::line(format_args!(
                     "No analysis commands - running default DC OP..."

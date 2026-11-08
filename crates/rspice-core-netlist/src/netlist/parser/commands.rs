@@ -391,17 +391,28 @@ pub(super) fn parse_command(
             // An unrecognized dot-command means whatever it requests will not
             // happen; that must be visible, not a debug-level whisper.
             let key = cmd.to_ascii_uppercase();
+            let analysis = UNRUN_ANALYSIS_CARDS.contains(&key.as_str());
             if unknown_warned.insert(key) {
-                let message = format!(
-                    "unsupported dot-command '{cmd}' ignored; whatever it requests \
-                     (analysis, option, output) will not run"
-                );
-                log::warn!("line {line_num}: {message}");
-                diagnostics.push(ParseDiagnostic::warning(
-                    line_num,
-                    "unsupported-dot-command",
-                    message,
-                ));
+                if analysis {
+                    let message = format!("unsupported analysis '{cmd}': RSpice does not run it");
+                    log::warn!("line {line_num}: {message}");
+                    diagnostics.push(ParseDiagnostic::warning_at(
+                        origin.clone(),
+                        "unsupported-analysis",
+                        message,
+                    ));
+                } else {
+                    let message = format!(
+                        "unsupported dot-command '{cmd}' ignored; whatever it requests \
+                         (analysis, option, output) will not run"
+                    );
+                    log::warn!("line {line_num}: {message}");
+                    diagnostics.push(ParseDiagnostic::warning(
+                        line_num,
+                        "unsupported-dot-command",
+                        message,
+                    ));
+                }
             }
             require_line_consumed = false;
         }
@@ -413,6 +424,34 @@ pub(super) fn parse_command(
 
     Ok(())
 }
+
+/// Analysis cards of other simulators that RSpice does not run: HSPICE's
+/// harmonic-balance, shooting-Newton, phase-noise, loop-stability and
+/// statistical-eye analyses, Xyce's sampling, PCE and MPDE analyses, and
+/// matrix-exponential and transient-noise cards.
+const UNRUN_ANALYSIS_CARDS: &[&str] = &[
+    ".EMBEDDEDSAMPLING",
+    ".HBAC",
+    ".HBLSP",
+    ".HBNOISE",
+    ".HBOSC",
+    ".HBXF",
+    ".LSTB",
+    ".MATEX",
+    ".MPDE",
+    ".PCE",
+    ".PHASENOISE",
+    ".PTDNOISE",
+    ".SAMPLING",
+    ".SN",
+    ".SNAC",
+    ".SNFT",
+    ".SNNOISE",
+    ".SNOSC",
+    ".SNXF",
+    ".STATEYE",
+    ".TRANNOISE",
+];
 
 /// Parse `.STB DEC|LIN|OCT np fstart fstop PROBE=<v>|<v> [NYQUIST=yes|no]`.
 ///

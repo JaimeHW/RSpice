@@ -1480,6 +1480,47 @@ fn capability_refusals_exit_sixty_nine_with_their_token() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A deck whose only analysis is one RSpice does not run is refused, as
+/// LTspice, Xyce and ngspice refuse it, rather than answered with a default
+/// operating point. Beside an analysis RSpice runs the card only warns, and a
+/// deck that names no analysis at all still gets its operating point.
+#[test]
+fn a_deck_naming_only_unrun_analyses_is_a_capability_refusal() {
+    let dir = test_dir("category_unrun_analysis");
+    let body = "* divider\nVin in 0 1\nR1 in out 1k\nR2 out 0 1k\n";
+    for card in [".matex -1u 1m", ".trannoise 0 1m"] {
+        let output = dir.join("unrun.raw");
+        let refused = run_json(
+            &dir,
+            "unrun.sp",
+            &format!("{body}{card}\n.end\n"),
+            &["-o", output.to_str().unwrap()],
+        );
+        assert_eq!(refused["observed_exit_code"], 69, "{refused}");
+        assert_eq!(refused["error"]["capability"], "analysis.unrun_card");
+        assert_eq!(refused["error"]["line"], 5, "{refused}");
+        assert!(!output.exists(), "a refused deck publishes nothing");
+    }
+
+    for (deck, warned) in [
+        (format!("{body}.ac dec 2 1k 10k\n.stateye\n.end\n"), true),
+        (format!("{body}.end\n"), false),
+    ] {
+        let path = dir.join("runs.sp");
+        std::fs::write(&path, deck).unwrap();
+        let output = run_rspice(&["run", path.to_str().unwrap()]);
+        assert!(output.status.success(), "{output:?}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(
+            stderr.contains("unsupported analysis '.STATEYE'"),
+            warned,
+            "{stderr}"
+        );
+    }
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A Newton failure the engine names a digital edge for is still a
 /// convergence failure: it exits 82 with its iteration count, and its message
 /// carries the edge and the converter. `bn` has no solution once `n` is
