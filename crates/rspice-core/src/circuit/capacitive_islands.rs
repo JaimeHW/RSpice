@@ -178,7 +178,9 @@ fn coupled_groups(
         member
     }
     for coupling in couplings {
-        let near = unknowns.iter().position(|&island| island == coupling.island);
+        let near = unknowns
+            .iter()
+            .position(|&island| island == coupling.island);
         let far = island_at(coupling.far)
             .and_then(|island| unknowns.iter().position(|&candidate| candidate == island));
         if let (Some(near), Some(far)) = (near, far) {
@@ -203,7 +205,9 @@ fn coupled_groups(
 /// pivoting; `None` when it is singular, as a group of islands with no
 /// capacitive path to a solved node is.
 fn solve_dense(size: usize, mut system: Vec<Value>, mut rhs: Vec<Value>) -> Option<Vec<Value>> {
-    let scale = system.iter().fold(0.0_f64, |largest, value| largest.max(value.abs()));
+    let scale = system
+        .iter()
+        .fold(0.0_f64, |largest, value| largest.max(value.abs()));
     if !(scale.is_finite() && scale > 0.0) {
         return None;
     }
@@ -240,5 +244,8 @@ fn solve_dense(size: usize, mut system: Vec<Value>, mut rhs: Vec<Value>) -> Opti
             .sum();
         solution[row] = (rhs[row] - tail) / system[row * size + row];
     }
-    solution.iter().all(|value| value.is_finite()).then_some(solution)
+    solution
+        .iter()
+        .all(|value| value.is_finite())
+        .then_some(solution)
 }
