@@ -24,6 +24,7 @@ pub(super) fn parse(
     // the line immediately before. A directive is consumed whole and leaves no
     // card open, so a `+` line here continues nothing.
     let mut veriloga_directive_line: Option<usize> = None;
+    let mut shell_continuation = false;
     state.forward_parameters = super::forward_params::ForwardParameters::scan(
         lines,
         body_start,
@@ -77,9 +78,26 @@ pub(super) fn parse(
             allow_non_semicolon_comments,
         );
         let trimmed = no_inline_comment.trim();
+        // ngspice's shell-style `\\` at the end of a card makes the next line
+        // its continuation.
+        let shell_continued = std::mem::take(&mut shell_continuation);
+        let trimmed = match trimmed.strip_suffix("\\\\") {
+            Some(head) if !xyce_syntax && !trimmed.starts_with('*') => {
+                shell_continuation = true;
+                head.trim_end()
+            }
+            _ => trimmed,
+        };
         if trimmed.is_empty() || trimmed.starts_with('*') {
             continue;
         }
+        let shell_joined;
+        let trimmed = if shell_continued && !trimmed.starts_with('+') {
+            shell_joined = format!("+{trimmed}");
+            shell_joined.as_str()
+        } else {
+            trimmed
+        };
 
         let ordinary_continuation = data_table.is_none() && trimmed.starts_with('+');
         if !ordinary_continuation {
@@ -141,6 +159,16 @@ pub(super) fn parse(
                     ),
                 }
                 .into());
+            }
+            // Before any card, ngspice drops a continuation line with a
+            // message rather than read its text as a card of its own.
+            if continuation.is_empty() && !xyce_syntax {
+                state.diagnostics.push(ParseDiagnostic::warning_at(
+                    origin,
+                    "orphan-continuation",
+                    format!("continuation line {line_num} follows no card and is ignored"),
+                ));
+                continue;
             }
             continuation_line.get_or_insert(line_num);
             continuation_origin.get_or_insert_with(|| origin.clone());

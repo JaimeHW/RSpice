@@ -7835,10 +7835,24 @@ fn collect_source_expression_argument(
     terminator: Option<&TokenKind>,
     stop_at_multiplicity: bool,
 ) -> Result<String, ParseError> {
+    // A lone braced field is the expression. One that only starts it is read
+    // with the rest of the line, as a behavioral source reads it.
     if let TokenKind::Expression(inner) = &stream.peek().kind {
-        let inner = inner.clone();
-        stream.advance();
-        return Ok(inner);
+        let lone = match &stream.peek_n(1).kind {
+            TokenKind::Newline | TokenKind::Eof => true,
+            TokenKind::Ident(name) => {
+                stop_at_multiplicity
+                    && name.eq_ignore_ascii_case("M")
+                    && matches!(stream.peek_n(2).kind, TokenKind::Equals)
+            }
+            next => terminator
+                .is_some_and(|term| std::mem::discriminant(next) == std::mem::discriminant(term)),
+        };
+        if lone {
+            let inner = inner.clone();
+            stream.advance();
+            return Ok(inner);
+        }
     }
 
     let mut expression = String::new();

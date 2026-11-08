@@ -154,9 +154,9 @@ pub(super) fn parse_command(
         ".CODEMODEL" | ".RSPICE_UNSUPPORTED_CODEMODEL" => {
             parse_xspice_codemodel_command(stream, line_num, &cmd)?;
         }
-        // `.PARAMS` is the plural spelling ngspice accepts for `.PARAM`; IHP's
-        // SG13G2 device subcircuits are written with it.
-        ".PARAM" | ".PARAMS" | ".CSPARAM" => {
+        // ngspice reads every card that starts `.param` as one: IHP's SG13G2
+        // device subcircuits are written with `.PARAMS`.
+        ".PARAM" | ".PARAMS" | ".PARAMETERS" | ".CSPARAM" => {
             parse_param_statement(
                 stream,
                 line_num,
@@ -233,7 +233,7 @@ pub(super) fn parse_command(
             parse_func_statement(stream, line_num, params, root_redefinitions)?;
         }
         ".PREPROCESS" => parse_preprocess_command(stream, line_num, diagnostics)?,
-        ".OPTIONS" | ".OPTION" | ".OPT" => {
+        ".OPTIONS" | ".OPTION" | ".OPT" | ".OPTS" => {
             let parameter_direction = if defer_scoped_values {
                 // Scoped option bindings have not retained instance directions.
                 if let Some(capture) = parameter_direction {

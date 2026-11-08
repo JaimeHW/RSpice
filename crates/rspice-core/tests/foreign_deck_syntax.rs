@@ -1086,3 +1086,82 @@ fn an_sffm_source_is_resolved_whatever_tstep_says() {
         "V(a) strays {worst:e} from the SFFM between points"
     );
 }
+
+// ngspice-46 and LTspice: 16, 3, 3 and 2 (g = 2, v(a) = v(b) = 1).
+#[test]
+fn a_braced_parameter_that_starts_a_value_expression_keeps_the_rest_of_the_line() {
+    let netlist = parse(
+        "* braced head
+.param g=2
+va a 0 1
+vb b 0 1
+b1 o1 0 v={g}*(v(a)+v(b))^3
+r1 o1 0 1k
+e2 o2 0 value={g}*v(a)+1
+r2 o2 0 1k
+g3 0 o3 value={g}*v(a)+1
+r3 o3 0 1
+b4 o4 0 v={g*v(a)}
+r4 o4 0 1k
+.op
+.end
+",
+    );
+    for (node, expected) in [("o1", 16.0), ("o2", 3.0), ("o3", 3.0), ("o4", 2.0)] {
+        assert_close(node, op_voltage(&netlist, node), expected, 1e-9);
+    }
+}
+
+// ngspice-46 reads any card that starts `.param` as one, and then takes the
+// `.elseif` branch: V(m) = 5k / (2k + 5k).
+#[test]
+fn ngspice_reads_a_parameters_card_as_a_param_card() {
+    let netlist = parse(
+        "* parameters spelling
+.parameters a=2 b=3
+v1 n1 0 1
+r1 n1 m {1k*a}
+.if (a==1)
+r5 m 0 7k
+.elseif (a==2)
+r5 m 0 5k
+.else
+r5 m 0 9k
+.endif
+.op
+.end
+",
+    );
+    assert_close("V(m)", op_voltage(&netlist, "m"), 5.0 / 7.0, 1e-12);
+}
+
+// ngspice-46: a `+` line before any card is dropped ("Illegal continuation
+// line: ignored."), `\\` ends a line that the next one continues, and `.opts`
+// is `.options`. V(m) = 1: the 1e6 mil resistor is 25.4 ohm.
+#[test]
+fn ngspice_line_continuations_and_the_opts_spelling() {
+    let netlist = parse(
+        "* ngspice lines
+//  a comment-only line
++ so this continuation continues nothing
+.opts reltol=1e-4
+v1 in 0 2
+r3 in m \\\\
+1e6mil
+r4 m 0 25.4
+.op
+.end
+",
+    );
+    assert_eq!(netlist.options.reltol, Some(1e-4));
+    assert_eq!(netlist.elements.len(), 3, "{:?}", netlist.elements);
+    assert!(
+        netlist
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "orphan-continuation"),
+        "{:?}",
+        netlist.diagnostics
+    );
+    assert_close("V(m)", op_voltage(&netlist, "m"), 1.0, 1e-9);
+}

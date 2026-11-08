@@ -43,7 +43,7 @@ impl ForwardParameters {
             } else if head.eq_ignore_ascii_case(".ends") || head.eq_ignore_ascii_case(".eom") {
                 *depth = depth.saturating_sub(1);
             } else if *depth == 0
-                && [".param", ".params"]
+                && [".param", ".params", ".parameters"]
                     .iter()
                     .any(|command| head.eq_ignore_ascii_case(command))
             {

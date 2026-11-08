@@ -681,7 +681,7 @@ fn rewrite_top_level_param_assignments_with_abort(
         let continues = in_param_statement && line.trim_start().starts_with('+');
         if matches!(
             token.as_str(),
-            ".param" | ".params" | ".csparam" | ".global_param"
+            ".param" | ".params" | ".parameters" | ".csparam" | ".global_param"
         ) || continues
         {
             in_param_statement = true;

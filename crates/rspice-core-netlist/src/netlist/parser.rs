@@ -4737,6 +4737,7 @@ fn for_each_options_line_with_abort(
         if head.eq_ignore_ascii_case(".options")
             || head.eq_ignore_ascii_case(".option")
             || head.eq_ignore_ascii_case(".opt")
+            || head.eq_ignore_ascii_case(".opts")
         {
             in_options = true;
             continuation.push_str(trimmed);
