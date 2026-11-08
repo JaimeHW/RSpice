@@ -10,7 +10,7 @@ use rspice_results_ui::operational::{self, ResultOperationalState, ResultOperati
 
 use super::{AnalysisPresentationKey, ResultViewer, ResultsParts, ResultsReads, ResultsState};
 use crate::state::{
-    AnalysisResult, AnalysisResultSourceDomain, SimulationRun, SimulationRunLifecycle,
+    AnalysisResult, AnalysisResultSourceDomain, AnalysisType, SimulationRun, SimulationRunLifecycle,
 };
 #[cfg(test)]
 use crate::workbench::documents::result_document::test_host::ResultsTestHost;
@@ -643,38 +643,82 @@ pub(super) fn show_result_operational_status(
     state: &mut ResultsParts<'_>,
     status: &ResultOperationalStatus,
 ) -> bool {
-    let mut offer = None;
-    let mut marked = false;
+    if status.state == ResultOperationalState::Failed
+        && !status.blocks_visuals
+        && op_sheet_states_the_failure(state.results_reads(), state.results.session.viewer)
+    {
+        return false;
+    }
+    let mut offered = None;
     let operational::OperationalResponse {
         blocks_visuals,
         dismiss,
         highlight,
     } = operational::show(ui, status, || {
-        offer = failure_site_offer(state.results_reads());
-        marked = offer
-            .as_ref()
-            .is_some_and(|offer| state.results.marked_failure_run == Some(offer.run_sequence));
-        offer.as_ref().map(|offer| operational::FailureSiteControl {
-            named: offer.named,
-            elided: offer.elided,
-            headline: offer.headline,
-            marked,
-        })
+        offered = offered_failure_sites(state);
+        offered.as_ref().map(OfferedFailureSites::control)
     });
     if dismiss {
         state.results.dismiss_runtime_condition();
     }
     if highlight {
-        if marked {
-            clear_failure_site_marking(state.model);
-            state.results.marked_failure_run = None;
-        } else {
-            state.workbench.outbox.push(MarkFailureSites(
-                offer.as_ref().map(|offer| offer.run_sequence),
-            ));
-        }
+        toggle_failure_site_marking(state, offered.as_ref());
     }
     blocks_visuals
+}
+
+/// Whether `viewer` is the operating-point sheet of the solve that failed.
+/// The sheet says so on its own first row, so a banner above it would be the
+/// same sentence twice.
+fn op_sheet_states_the_failure(state: ResultsReads<'_>, viewer: ResultViewer) -> bool {
+    viewer == ResultViewer::Op
+        && state
+            .model
+            .simulation
+            .active_analysis()
+            .is_some_and(|analysis| {
+                analysis.analysis_type == AnalysisType::DcOp
+                    && !analysis.success
+                    && !analysis.is_live_partial()
+            })
+}
+
+/// The failure on display's offer to mark what it named, and whether that
+/// marking is on the drawing now.
+pub(super) struct OfferedFailureSites {
+    offer: FailureSiteOffer,
+    marked: bool,
+}
+
+impl OfferedFailureSites {
+    pub(super) fn control(&self) -> operational::FailureSiteControl<'static> {
+        operational::FailureSiteControl {
+            named: self.offer.named,
+            elided: self.offer.elided,
+            headline: self.offer.headline,
+            marked: self.marked,
+        }
+    }
+}
+
+pub(super) fn offered_failure_sites(state: &ResultsParts<'_>) -> Option<OfferedFailureSites> {
+    let offer = failure_site_offer(state.results_reads())?;
+    let marked = state.results.marked_failure_run == Some(offer.run_sequence);
+    Some(OfferedFailureSites { offer, marked })
+}
+
+pub(super) fn toggle_failure_site_marking(
+    state: &mut ResultsParts<'_>,
+    offered: Option<&OfferedFailureSites>,
+) {
+    if offered.is_some_and(|offered| offered.marked) {
+        clear_failure_site_marking(state.model);
+        state.results.marked_failure_run = None;
+    } else {
+        state.workbench.outbox.push(MarkFailureSites(
+            offered.map(|offered| offered.offer.run_sequence),
+        ));
+    }
 }
 
 /// Whether the analysis on display named objects worth marking.
@@ -745,7 +789,7 @@ fn failure_site_offer(state: ResultsReads<'_>) -> Option<FailureSiteOffer> {
 #[cfg(test)]
 mod failure_site_control_tests {
     use super::*;
-    use crate::state::{AnalysisResult, AnalysisType, ConvergenceAttribution};
+    use crate::state::ConvergenceAttribution;
 
     const FAILURE: &str = "Newton did not converge after 100 iterations";
 
@@ -780,6 +824,33 @@ mod failure_site_control_tests {
         state.model.simulation.start_run().add_analysis(analysis);
         state.model.simulation.select_run(0);
         state
+    }
+
+    /// Only the failed solve's own sheet goes without the banner: the sheet
+    /// of a solve that finished, and every other page, still need it.
+    #[test]
+    fn the_operating_point_sheet_states_its_own_failed_solve() {
+        let mut failed = ResultsTestHost::default();
+        failed
+            .model
+            .simulation
+            .start_run()
+            .add_analysis(AnalysisResult::failed(1, AnalysisType::DcOp, "op", FAILURE));
+        failed.model.simulation.select_run(0);
+        assert!(op_sheet_states_the_failure(
+            failed.results_reads(),
+            ResultViewer::Op
+        ));
+        assert!(!op_sheet_states_the_failure(
+            failed.results_reads(),
+            ResultViewer::Waves
+        ));
+
+        let elsewhere = state_showing_failure(None, FAILURE);
+        assert!(!op_sheet_states_the_failure(
+            elsewhere.results_reads(),
+            ResultViewer::Op
+        ));
     }
 
     /// The control is offered for the failure it was recorded against.

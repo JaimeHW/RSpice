@@ -3,6 +3,7 @@
 use super::{
     AnalysisPresentationKey,
     frame_work::{self, DatasetWalk},
+    operational_state,
 };
 use crate::state::{
     AnalysisResultPayload, AnalysisType, BusNotations, RunHistoryRevision,
@@ -351,6 +352,7 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
                 .is_some_and(|plan| plan.display.node_shown() > 0)
         })
         .map(|_| bus_notations(&state.model.workspace, &state.model.schematic));
+    let failure_sites = operational_state::offered_failure_sites(state);
     let mapping = OpMapping {
         state: state.results_reads(),
         notations,
@@ -364,6 +366,9 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
             devices,
             selection: selection.as_ref(),
             mapping: &mapping,
+            failure_site: failure_sites
+                .as_ref()
+                .map(operational_state::OfferedFailureSites::control),
         },
     );
     let viewer::OpResponse {
@@ -371,7 +376,11 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         clicked_sort,
         selected,
         toggled_section,
+        highlight_failure_sites,
     } = response;
+    if highlight_failure_sites {
+        operational_state::toggle_failure_site_marking(state, failure_sites.as_ref());
+    }
     if let Some(action) = action {
         apply_action(state, action);
     }

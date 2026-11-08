@@ -2,7 +2,11 @@
 //! family's own quantities on one scrolling grid, and the exact readout of the
 //! row the reader picked.
 
-use crate::{presentation::well_hint, virtual_rows::RowOffsets};
+use crate::{
+    operational::{FailureSiteControl, failure_site_hint, failure_site_label},
+    presentation::well_hint,
+    virtual_rows::RowOffsets,
+};
 use egui::{
     Ui,
     text::{LayoutJob, TextFormat},
@@ -153,6 +157,8 @@ pub struct OpView<'a, M> {
     pub devices: Option<&'a DeviceOpReport>,
     pub selection: Option<&'a OpSelection>,
     pub mapping: &'a M,
+    /// The failed solve's offer to mark what it named on the drawing.
+    pub failure_site: Option<FailureSiteControl<'a>>,
 }
 
 #[derive(Default)]
@@ -163,6 +169,7 @@ pub struct OpResponse {
     /// A row was picked, or the sheet's empty space was clicked (`Some(None)`).
     pub selected: Option<Option<OpSelection>>,
     pub toggled_section: Option<String>,
+    pub highlight_failure_sites: bool,
 }
 
 pub enum OpAbsence {
@@ -1539,13 +1546,33 @@ fn faint_line(ui: &mut Ui, message: &str) {
     describe(ui, &response, egui::accesskit::Role::Status, message);
 }
 
-/// A solve that did not finish: its mark, its words and its error on one line.
-fn problem_row(ui: &mut Ui, error: Option<&str>) {
+/// A solve that did not finish: its mark, its words and its error on one
+/// line, ending in the run's offer to mark what it named. Whether the offer
+/// was taken.
+fn problem_row(
+    ui: &mut Ui,
+    error: Option<&str>,
+    failure_site: Option<&FailureSiteControl<'_>>,
+) -> bool {
     let t = Tokens::get(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), PROBLEM_ROW_H),
         egui::Sense::hover(),
     );
+    let mut text_right = rect.right() - NAME_END_PAD;
+    let mut highlight = false;
+    if let Some(offer) = failure_site {
+        let mut end = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(rect.shrink2(egui::vec2(NAME_END_PAD, 0.0)))
+                .layout(egui::Layout::right_to_left(egui::Align::Center)),
+        );
+        let button = Button::new(&failure_site_label(offer))
+            .compact()
+            .show(&mut end);
+        text_right = button.rect.left() - NAME_END_PAD;
+        highlight = button.on_hover_text(failure_site_hint(offer)).clicked();
+    }
     let painter = ui.painter_at(rect);
     paint_problem_mark(
         &painter,
@@ -1566,8 +1593,7 @@ fn problem_row(ui: &mut Ui, error: Option<&str>) {
     );
     if let Some(error) = error {
         let mut job = LayoutJob::simple_singleline(error.to_owned(), font, t.color.text_dim);
-        job.wrap =
-            egui::text::TextWrapping::truncate_at_width(rect.right() - error_x - NAME_END_PAD);
+        job.wrap = egui::text::TextWrapping::truncate_at_width(text_right - error_x);
         painter.galley(
             egui::pos2(error_x, text_y),
             painter.layout_job(job),
@@ -1581,6 +1607,7 @@ fn problem_row(ui: &mut Ui, error: Option<&str>) {
         egui::accesskit::Role::Status,
         &format!("Partial solution. {}", error.unwrap_or_default()),
     );
+    highlight
 }
 
 pub fn show(
@@ -1590,7 +1617,11 @@ pub fn show(
 ) -> OpResponse {
     let mut response = OpResponse::default();
     if !source.evidence.success {
-        problem_row(ui, source.evidence.error.as_deref());
+        response.highlight_failure_sites = problem_row(
+            ui,
+            source.evidence.error.as_deref(),
+            source.failure_site.as_ref(),
+        );
     }
     let Some(plan) = plan else {
         return response;
@@ -2399,6 +2430,41 @@ mod tests {
     }
 
     #[test]
+    fn a_failed_solve_offers_to_mark_what_it_named_at_the_end_of_its_row() {
+        let (dc, report) = evidence_fixture(4, 4);
+        let plan = plan_of(Some(&dc), Some(&report));
+        let mapping = Mapped {
+            node: true,
+            device: None,
+        };
+        let failed = OpEvidence {
+            success: false,
+            error: Some("did not converge".to_owned()),
+            detail_policy: None,
+            facts: None,
+        };
+        let view = |failure_site| OpView {
+            evidence: &failed,
+            dc: Some(&dc),
+            devices: Some(&report),
+            selection: None,
+            mapping: &mapping,
+            failure_site,
+        };
+        let at = egui::pos2(SIZE.x - NAME_END_PAD - 20.0, PROBLEM_ROW_H * 0.5);
+        let offer = FailureSiteControl {
+            named: 2,
+            elided: 0,
+            headline: "Did not converge",
+            marked: false,
+        };
+        let responses = play(&plan, &view(Some(offer)), press_release(at));
+        assert!(responses[1].highlight_failure_sites);
+        let responses = play(&plan, &view(None), press_release(at));
+        assert!(!responses[1].highlight_failure_sites);
+    }
+
+    #[test]
     fn a_stale_schematic_greys_the_one_cross_probe_button_and_says_why_once() {
         let report = DeviceOpReport {
             entries: vec![device("M1", "MOSFET", None, vec![("id", 1e-3)])],
@@ -2516,6 +2582,7 @@ mod tests {
             devices: Some(&report),
             selection: None,
             mapping: &mapping,
+            failure_site: None,
         };
         let responses = play(&plan, &view, press_release(first_row()));
         let picked = responses[1]
@@ -2553,6 +2620,7 @@ mod tests {
             devices: Some(&report),
             selection: None,
             mapping: &mapping,
+            failure_site: None,
         };
         let header = egui::pos2(60.0, TITLE_H + COLUMN_HEADER_H * 0.5);
         let responses = play(&plan, &view, press_release(header));
@@ -2586,6 +2654,7 @@ mod tests {
             devices: Some(&report),
             selection: None,
             mapping: &mapping,
+            failure_site: None,
         };
         let responses = play(&plan, &view, press_release(egui::pos2(60.0, 380.0)));
         assert_eq!(responses[1].selected, Some(None));
@@ -2610,6 +2679,7 @@ mod tests {
             devices: Some(&report),
             selection: None,
             mapping: &mapping,
+            failure_site: None,
         };
         let row = egui::pos2(
             60.0,

@@ -237,6 +237,36 @@ pub struct FailureSiteControl<'a> {
     pub marked: bool,
 }
 
+/// What the control marking a failure's named objects says.
+pub(crate) fn failure_site_label(offer: &FailureSiteControl<'_>) -> String {
+    // "Objects", not "nodes": a site is a node *or* a branch current, which the
+    // schematic draws as a device (`ConvergenceSiteKind`). The console's anchor
+    // hint has always said "objects", and this control marks the same set.
+    if offer.marked {
+        "Clear highlighted sites".to_owned()
+    } else if offer.named == 1 {
+        "Highlight the 1 object this run named".to_owned()
+    } else {
+        format!("Highlight the {} objects this run named", offer.named)
+    }
+}
+
+pub(crate) fn failure_site_hint(offer: &FailureSiteControl<'_>) -> String {
+    if offer.marked {
+        "Remove the marking from the drawing".to_owned()
+    } else if offer.elided > 0 {
+        format!(
+            "{} — {} named, {} more measured but not named",
+            offer.headline, offer.named, offer.elided
+        )
+    } else {
+        format!(
+            "{} — marks all {} on the drawing",
+            offer.headline, offer.named
+        )
+    }
+}
+
 /// Presentation outcome; the host applies dismiss and highlight requests.
 #[derive(Default)]
 pub struct OperationalResponse {
@@ -584,32 +614,9 @@ impl OperationalCard<'_> {
 /// paints its own focus ring, so nothing is given up by drawing it in the
 /// chrome every other control on this surface uses.
 fn show_failure_site_control(ui: &mut Ui, offer: &FailureSiteControl<'_>) -> bool {
-    // "Objects", not "nodes": a site is a node *or* a branch current, which the
-    // schematic draws as a device (`ConvergenceSiteKind`). The console's anchor
-    // hint has always said "objects", and this control marks the same set.
-    let label = if offer.marked {
-        "Clear highlighted sites".to_owned()
-    } else if offer.named == 1 {
-        "Highlight the 1 object this run named".to_owned()
-    } else {
-        format!("Highlight the {} objects this run named", offer.named)
-    };
-    let hint = if offer.marked {
-        "Remove the marking from the drawing".to_owned()
-    } else if offer.elided > 0 {
-        format!(
-            "{} — {} named, {} more measured but not named",
-            offer.headline, offer.named, offer.elided
-        )
-    } else {
-        format!(
-            "{} — marks all {} on the drawing",
-            offer.headline, offer.named
-        )
-    };
-    let clicked = rspice_ui_kit::widgets::Button::new(&label)
+    let clicked = rspice_ui_kit::widgets::Button::new(&failure_site_label(offer))
         .show(ui)
-        .on_hover_text(&hint)
+        .on_hover_text(failure_site_hint(offer))
         .clicked();
     if !offer.marked && offer.elided > 0 {
         let t = Tokens::get(ui.ctx());
