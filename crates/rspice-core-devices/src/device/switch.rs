@@ -341,16 +341,24 @@ fn ideal_conductance(state: SwitchState, ron: Value, roff: Value) -> Value {
     1.0 / ideal_resistance(state, ron, roff)
 }
 
-/// The step ngspice's switch truncation allows an ideal switch whose control
-/// is closing on the threshold that would change its state (`sw/swtrunc.c`,
-/// `csw/cswtrunc.c`).
+/// The step an ideal switch allows while its control closes on the threshold
+/// that would change its state: the law of ngspice's switch truncation
+/// (`sw/swtrunc.c`, `csw/cswtrunc.c`) with a finer margin.
 ///
 /// An off switch whose control rose by `last_change` over the step `dt` to
 /// `control`, still below `VT + VH`, may move it by at most three quarters of
-/// the remaining distance plus `margin` in the next step; an on switch
+/// the remaining distance plus the margin in the next step; an on switch
 /// falling toward `VT - VH` likewise. The step is scaled from the last one
-/// by that ratio, so the control closes on the threshold geometrically and
-/// the step that crosses it overshoots by about `margin` at most. `None`
+/// by that ratio, so the control closes on the threshold geometrically: the
+/// last point before the crossing is within about four margins of it, and
+/// the step that crosses overshoots by about one margin at most.
+///
+/// Between those two points the output is a chord from one resistance's
+/// level to the other's, so the margin is what places the change of state
+/// in time. ngspice's fixed 50 mV (50 µA) leaves it up to a whole print step
+/// late on a slow ramp. Here the margin is a thousandth, the relative
+/// accuracy the solver holds the control itself to, of the band's scale
+/// `|VT| + |VH|`, or of `unit` when the band is narrower than that. `None`
 /// when the control is not approaching the threshold it would cross.
 fn ideal_threshold_approach_limit(
     state: SwitchState,
@@ -358,9 +366,10 @@ fn ideal_threshold_approach_limit(
     hysteresis: Value,
     control: Value,
     last_change: Value,
-    margin: Value,
+    unit: Value,
     dt: Value,
 ) -> Option<Value> {
+    let margin = 1.0e-3 * (threshold.abs() + hysteresis.abs()).max(unit);
     let max_change = if state == SwitchState::On {
         let reference = threshold - hysteresis;
         if !(control > reference && last_change < 0.0) {
@@ -993,12 +1002,14 @@ impl VoltageSwitch {
             .0
     }
 
-    /// The next step `SWtrunc` (`sw/swtrunc.c`) allows this switch after the
-    /// step `dt` from `accepted` to `candidate`, with the switch in the state
-    /// the candidate left it: the control may close on the threshold it would
-    /// cross by three quarters of the remaining distance plus 50 mV. Only the
-    /// ideal switch has an instant to resolve; a smooth or curve switch's
-    /// transition is resolved by the truncation error of what it drives.
+    /// The next step this switch allows after the step `dt` from `accepted`
+    /// to `candidate`, with the switch in the state the candidate left it:
+    /// the control may close on the threshold it would cross by three
+    /// quarters of the remaining distance plus a thousandth of the band's
+    /// scale, never less than 1 mV (`SWtrunc`'s law, `sw/swtrunc.c`, with a
+    /// finer margin than its 50 mV). Only the ideal switch has an instant to
+    /// resolve; a smooth or curve switch's transition is resolved by the
+    /// truncation error of what it drives.
     #[doc(hidden)]
     pub fn threshold_approach_step_limit(
         &self,
@@ -1026,7 +1037,7 @@ impl VoltageSwitch {
             self.vh,
             now,
             now - control(accepted),
-            0.05,
+            1.0,
             dt,
         )
     }
@@ -1679,17 +1690,18 @@ impl CurrentSwitch {
         }
     }
 
-    /// The next step `CSWtrunc` (`csw/cswtrunc.c`) means to allow this switch
-    /// after the step `dt` from `accepted` to `candidate`: the control
-    /// current may close on the threshold it would cross by three quarters
-    /// of the remaining distance plus 50 µA.
+    /// The next step this switch allows after the step `dt` from `accepted`
+    /// to `candidate`: the control current may close on the threshold it
+    /// would cross by three quarters of the remaining distance plus a
+    /// thousandth of the band's scale, never less than 1 µA (`CSWtrunc`'s
+    /// law, `csw/cswtrunc.c`, with a finer margin than its 50 µA).
     ///
     /// ngspice-46 never stores the control current that routine reads (the
     /// store is commented out in `cswload.c`, marked FIXME), so its limit is
     /// always inert and a current switch's change of state lands wherever
     /// the step happens to fall. That is a reference defect; the limit is
-    /// applied here as written, so the instant a current switch changes
-    /// state is resolved as a voltage switch's is.
+    /// applied here, so the instant a current switch changes state is
+    /// resolved as a voltage switch's is.
     #[doc(hidden)]
     pub fn threshold_approach_step_limit(
         &self,
@@ -1707,7 +1719,7 @@ impl CurrentSwitch {
             self.ih,
             now,
             now - self.control_current(accepted),
-            5.0e-5,
+            1.0e-3,
             dt,
         )
     }
@@ -3191,9 +3203,11 @@ mod tests {
         );
     }
 
-    /// `SWtrunc` (`sw/swtrunc.c`): a control closing on the threshold that
-    /// would change the state may cover three quarters of the remaining
-    /// distance plus 50 mV in the next step; receding or past it, no limit.
+    /// `SWtrunc`'s law (`sw/swtrunc.c`) with a finer margin: a control
+    /// closing on the threshold that would change the state may cover three
+    /// quarters of the remaining distance plus a thousandth of `|VT| + |VH|`
+    /// (of 1 V for a narrower band) in the next step; receding or past it,
+    /// no limit.
     #[test]
     fn ideal_voltage_switch_limits_the_step_that_closes_on_its_threshold() {
         let switch = VoltageSwitch::new("s1".to_string(), 1, 0, 2, 0)
@@ -3205,7 +3219,10 @@ mod tests {
         let limit = switch
             .threshold_approach_step_limit(&[0.0, 1.5], &[0.0, 2.0], dt)
             .expect("an off switch closing on VT + VH is limited");
-        assert_eq!(limit.to_bits(), ((0.5 * 0.75 + 0.05) / 0.5 * dt).to_bits());
+        assert_eq!(
+            limit.to_bits(),
+            ((0.5 * 0.75 + 1.0e-3 * 2.5) / 0.5 * dt).to_bits()
+        );
         // Off and falling: nothing to resolve.
         assert_eq!(
             switch.threshold_approach_step_limit(&[0.0, 2.0], &[0.0, 1.5], dt),
@@ -3222,8 +3239,34 @@ mod tests {
             .expect("an on switch closing on VT - VH is limited");
         assert_eq!(
             limit.to_bits(),
-            ((-0.5 * 0.75 - 0.05) / -0.5 * dt).to_bits()
+            ((-0.5 * 0.75 - 1.0e-3 * 2.5) / -0.5 * dt).to_bits()
         );
+
+        // A band narrower than 1 V keeps a 1 mV margin.
+        let narrow = VoltageSwitch::new("s4".to_string(), 1, 0, 2, 0)
+            .with_thresholds(0.25, 0.25)
+            .with_resistances(1.0, 1.0e6)
+            .with_initial_state(SwitchState::Off);
+        let limit = narrow
+            .threshold_approach_step_limit(&[0.0, 0.0], &[0.0, 0.25], dt)
+            .expect("an off switch closing on VT + VH is limited");
+        assert_eq!(
+            limit.to_bits(),
+            ((0.25 * 0.75 + 1.0e-3) / 0.25 * dt).to_bits()
+        );
+
+        // A current switch's band is in amperes: on, falling from 4.5 mA to
+        // 4.25 mA toward IT - IH = 4 mA, with a margin of 6 µA.
+        let mut current = CurrentSwitch::new("w1".to_string(), 1, 0, "v1".to_string())
+            .with_thresholds(5.0e-3, 1.0e-3)
+            .with_resistances(1.0, 1.0e6)
+            .with_initial_state(SwitchState::On);
+        current.set_ctrl_branch(2);
+        let limit = current
+            .threshold_approach_step_limit(&[0.0, 4.5e-3], &[0.0, 4.25e-3], dt)
+            .expect("an on switch closing on IT - IH is limited");
+        let expected = (0.25e-3 * 0.75 + 6.0e-6) / 0.25e-3 * dt;
+        assert!((limit - expected).abs() <= 1.0e-12 * expected);
 
         // A SMOOTH switch has no instant to resolve.
         let params = std::collections::HashMap::from([("SMOOTH".to_string(), 0.1)]);

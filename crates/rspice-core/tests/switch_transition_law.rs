@@ -260,6 +260,76 @@ w1 40 0 vm3 wswitch1 off
     }
 }
 
+/// A `W` switch (`IT = 5m`, `IH = 1m`) and an `S` switch (`VT = 5`,
+/// `VH = 1`) on one control that ramps to 10 over 10 ms and back: each turns
+/// on as the control passes 6, at 6 ms, and off as it falls below 4, at
+/// 16 ms. Between the points either side of a change of state the output is
+/// a chord from one level to the other, so at a 0.1 ms print step those two
+/// points must close on the crossing. QSPICE brackets each change within
+/// nanoseconds and LTspice within its 20 µs step; both read the exact on and
+/// off levels at 5.95, 6.05, 15.95 and 16.05 ms. ngspice-46's `S` step
+/// overshoots by its fixed 50 mV margin, 34 µs here, and reads 8.70 V at
+/// 15.95 ms.
+#[test]
+fn hysteresis_change_of_state_lands_at_the_crossing() {
+    let deck = "\
+switch edges at a coarse print step
+vin in 0 dc 10
+vctl ctrl 0 pwl(0 0 10m 10 20m 0)
+rctl ctrl sense 1k
+vam sense 0 dc 0
+w1 in outw vam csw1
+rlw outw 0 1k
+s1 in outs ctrl 0 sw1
+rls outs 0 1k
+.model csw1 csw it=5m ih=1m ron=1 roff=1meg
+.model sw1 sw vt=5 vh=1 ron=1 roff=1meg
+.end
+";
+    let on = 10.0 * 1.0e3 / (1.0e3 + 1.0);
+    let off = 10.0 * 1.0e3 / (1.0e3 + 1.0e6);
+    let level = |got: f64, want: f64| (got - want).abs() <= 1.0e-9 * want;
+    for dialect in [SpiceDialect::BestAvailable, SpiceDialect::Ngspice] {
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        let tran = engine(dialect)
+            .run_tran(&netlist, 20.0e-3, 0.1e-3)
+            .expect("transient runs");
+        for node in ["outw", "outs"] {
+            let wave = tran
+                .try_voltage_waveform_named(node)
+                .unwrap_or_else(|| panic!("node {node} missing"));
+            for (time, want) in [
+                (5.95e-3, off),
+                (6.05e-3, on),
+                (15.95e-3, on),
+                (16.05e-3, off),
+            ] {
+                let index = tran.time.partition_point(|&t| t < time);
+                let (t0, t1) = (tran.time[index - 1], tran.time[index]);
+                let got =
+                    wave[index - 1] + (wave[index] - wave[index - 1]) * (time - t0) / (t1 - t0);
+                assert!(
+                    level(got, want),
+                    "{dialect:?} v({node}) at {time:e} s: {got:.12e}, want {want:.12e}"
+                );
+            }
+            for (crossing, before, after) in [(6.0e-3, off, on), (16.0e-3, on, off)] {
+                let index = tran.time.partition_point(|&t| t <= crossing);
+                let (t0, t1) = (tran.time[index - 1], tran.time[index]);
+                assert!(
+                    level(wave[index - 1], before) && level(wave[index], after),
+                    "{dialect:?} v({node}) changes state between {t0:e} s and {t1:e} s, \
+                     not across the crossing at {crossing:e} s"
+                );
+                assert!(
+                    t1 - t0 <= 40.0e-6,
+                    "{dialect:?} v({node}) changes state over {t0:e}..{t1:e} s"
+                );
+            }
+        }
+    }
+}
+
 /// A default `VT = 0` switch whose control starts exactly at 0 V: ngspice-46
 /// turns both on at the operating point, and after each pulse a switch whose
 /// control returns to exactly 0 V takes the state opposite to the one it left

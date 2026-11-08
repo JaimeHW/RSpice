@@ -947,7 +947,7 @@ endmodule
 /// refused the run as pinned at the floor). The crossing belongs to the endpoint, where the step put the
 /// change. The control crosses at 10 ns + ln(1.8/0.85) ns = 10.750 ns, and
 /// the switch's step limit lets the step that changes it overshoot by up to
-/// 50 mV of control, about 60 ps here, as ngspice's does.
+/// 1 mV of control, about a picosecond here.
 #[test]
 fn a_crossing_across_a_switch_change_of_state_is_dated_at_the_step() {
     let model = ModelFile::new(
