@@ -4347,10 +4347,7 @@ struct RealEquivalentFactors {
 }
 
 impl RealEquivalentFactors {
-    fn new(
-        csc: &SymbolicSparseColMat<usize>,
-        options: SolverOptions,
-    ) -> Result<Self, SolverError> {
+    fn new(csc: &SymbolicSparseColMat<usize>, options: SolverOptions) -> Result<Self, SolverError> {
         let n = csc.nrows();
         let nnz = csc.row_idx().len();
         let order = n.checked_mul(2).ok_or(SolverError::OutOfMemory)?;
@@ -6309,8 +6306,7 @@ impl ComplexMatrix {
         let scaled_denominator_floor =
             denominator_floor.map(|_| ws.scaled_denominator_floor.as_slice());
 
-        ws.rhs
-            .resize_with(n, 1, |_, _| Complex64::new(0.0, 0.0));
+        ws.rhs.resize_with(n, 1, |_, _| Complex64::new(0.0, 0.0));
         ws.rhs.col_as_slice_mut(0).copy_from_slice(&ws.scaled_rhs);
         ws.factors.solve_in_place(&mut ws.rhs, operation)?;
 
