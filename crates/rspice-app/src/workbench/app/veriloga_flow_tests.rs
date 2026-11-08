@@ -1240,4 +1240,3 @@ fn compact_models_import_from_their_source_folders_compile_and_place() {
         assert_eq!(placed, 1, "{module} is placed once");
     }
 }
-
