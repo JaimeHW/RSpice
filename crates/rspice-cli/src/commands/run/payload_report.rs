@@ -9,6 +9,7 @@ use rspice_core::execution::{
     AnalysisInstanceId, AnalysisResultDocumentBuilder, ResultDocumentError, SignalDescriptor,
     SignalKind, SignalOwner, SignalShape, SignalUnit, SignalValueType,
 };
+use rspice_core::io::raw_export::RawFormat;
 use std::path::Path;
 
 pub(super) fn publish(
@@ -18,6 +19,22 @@ pub(super) fn publish(
     analysis: &str,
     title: &str,
     build: impl Fn() -> Result<AnalysisResultDocumentBuilder, ResultDocumentError>,
+) -> Result<(), CliError> {
+    publish_with_rawfile(ctx, path, analysis_id, analysis, title, build, None)
+}
+
+/// A rawfile's own rendering of one result, where it is not the flat table.
+pub(super) type Rawfile<'a> = &'a dyn Fn(&mut dyn std::io::Write, RawFormat) -> std::io::Result<()>;
+
+/// [`publish`], with the binary and ASCII rawfiles written by `rawfile`.
+pub(super) fn publish_with_rawfile(
+    ctx: &RunContext<'_>,
+    path: &Path,
+    analysis_id: AnalysisInstanceId,
+    analysis: &str,
+    title: &str,
+    build: impl Fn() -> Result<AnalysisResultDocumentBuilder, ResultDocumentError>,
+    rawfile: Option<Rawfile<'_>>,
 ) -> Result<(), CliError> {
     let mut table = if ctx.format == OutputFormat::Json {
         // Typed publication invokes the builder below and never serializes this
@@ -68,5 +85,20 @@ pub(super) fn publish(
             SignalOwner::Analysis,
         )
     }))?;
-    document::publish_table_result(ctx, path, analysis_id, schema, &table, build)
+    let raw_format = match ctx.format {
+        OutputFormat::Raw => Some(RawFormat::Binary),
+        OutputFormat::RawAscii => Some(RawFormat::Ascii),
+        _ => None,
+    };
+    match rawfile.zip(raw_format) {
+        Some((rawfile, format)) => {
+            document::publish_analysis_result(ctx, path, analysis_id, schema, build, |path, _| {
+                crate::commands::publish::artifact(path, |writer| {
+                    rawfile(writer, format).map_err(|error| CliError::output_error(path, error))
+                })
+                .map_err(|error| crate::cli::map_atomic_output_error(path, error))
+            })
+        }
+        None => document::publish_table_result(ctx, path, analysis_id, schema, &table, build),
+    }
 }

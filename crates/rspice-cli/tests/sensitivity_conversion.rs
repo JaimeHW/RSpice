@@ -75,7 +75,11 @@ fn native_sensitivity_exports_retain_derivatives_context_and_missing_reasons() {
                 )
             };
             let typed = run(&directory, "typed", &circuit);
-            for (format, extension) in FORMATS {
+            // A `.SENS` rawfile is ngspice's layout; its own test pins it.
+            for (format, extension) in FORMATS
+                .into_iter()
+                .filter(|(format, _)| !matches!(*format, "raw" | "ascii"))
+            {
                 let native = run_format(&directory, "native", &circuit, format, extension, &[]);
                 let equal = compare(&native, &typed, &[]);
                 assert!(equal.status.success(), "{ac}/{zero}/{format}: {equal:?}");
@@ -87,6 +91,66 @@ fn native_sensitivity_exports_retain_derivatives_context_and_missing_reasons() {
                         Some(3),
                         "{ac}/{format}: {different:?}"
                     );
+                }
+            }
+        }
+    }
+}
+
+/// A `.SENS` rawfile is ngspice's: one "Sensitivity Analysis" plot whose
+/// vectors are the derivatives, named `v(<parameter>)` for a voltage output
+/// and `i(<parameter>)` for a current, real at one point for DC and complex
+/// over frequency for AC.
+#[test]
+fn sensitivity_rawfiles_use_the_ngspice_layout() {
+    use rspice_core::Complex64;
+    let directory = common::test_dir("sensitivity_raw_layout");
+    let frequencies = [100.0, 550.0, 1000.0];
+    // dV(out)/dR1 of the divider is -Z2/(R1+Z2)^2, Z2 = R2 parallel C1.
+    let derivative = |frequency: f64| {
+        let z2 = 1.0 / Complex64::new(1e-3, 2.0 * std::f64::consts::PI * frequency * 1e-6);
+        -z2 / ((1e3 + z2) * (1e3 + z2))
+    };
+    for (probe, name, var_type) in [
+        ("V(out)", "v(R1)", "voltage"),
+        ("I(V1)", "i(R1)", "current"),
+    ] {
+        for ac in [false, true] {
+            let sweep = if ac { " AC LIN 3 100 1000" } else { "" };
+            let circuit = format!(
+                "Divider\nV1 in 0 DC 1 AC 1\nR1 in out 1k\nR2 out 0 1k\nC1 out 0 1u\n.sens {probe} R1{sweep}\n.end\n"
+            );
+            for (format, extension) in [("raw", "raw"), ("ascii", "ascii.raw")] {
+                let path = run_format(&directory, "native", &circuit, format, extension, &[]);
+                let file = rspice_core::io::ltspice_raw::parse_raw_plots_bytes_with_limits(
+                    &std::fs::read(&path).unwrap(),
+                    Default::default(),
+                )
+                .unwrap();
+                assert_eq!(file.plots.len(), 1);
+                let plot = &file.plots[0];
+                assert_eq!(plot.header.plotname, "Sensitivity Analysis");
+                let variables = plot
+                    .variables
+                    .iter()
+                    .map(|variable| (variable.name.as_str(), variable.var_type.as_str()))
+                    .collect::<Vec<_>>();
+                let column = if ac {
+                    assert_eq!(variables, [("frequency", "frequency"), (name, var_type)]);
+                    assert_eq!(plot.waveforms[0].y, frequencies);
+                    &plot.waveforms[1]
+                } else {
+                    assert_eq!(variables, [(name, var_type)]);
+                    &plot.waveforms[0]
+                };
+                if probe == "V(out)" {
+                    let points: &[f64] = if ac { &frequencies } else { &[0.0] };
+                    for (row, frequency) in points.iter().enumerate() {
+                        let expected = derivative(*frequency);
+                        let imag = column.y_imag.as_ref().map_or(0.0, |imag| imag[row]);
+                        let error = (Complex64::new(column.y[row], imag) - expected).norm();
+                        assert!(error < 1e-6 * expected.norm(), "{format}/{ac}: {error}");
+                    }
                 }
             }
         }
