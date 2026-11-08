@@ -16,6 +16,9 @@ use crate::workbench::framework::requests::{
     EditorViewCommand, SourceEditorRequest, StandardCommand, StructuralCommand,
 };
 
+pub(crate) mod veriloga_blocks;
+pub(crate) mod veriloga_syntax;
+
 #[derive(Debug, Clone, Default)]
 struct GoToLineState {
     open: bool,

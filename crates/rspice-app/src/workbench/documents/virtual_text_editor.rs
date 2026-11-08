@@ -24,6 +24,7 @@ use super::text_editor_commands::{
     ByteSelection, EditorSyntax, apply_structural_command, publish_caret_line,
     take_queued_caret_char_index, take_queued_caret_position, take_queued_standard_command,
     take_queued_structural_command, take_queued_view_command,
+    veriloga_blocks::{dedent_closing_word, leaves_block_open, veriloga_fold_regions},
 };
 use crate::workbench::framework::requests::{
     EditorViewCommand, StandardCommand, StructuralCommand,
@@ -1226,6 +1227,9 @@ fn handle_event(
         {
             grow_maximum_columns_for_insertion(session, &text);
             session.model.insert_at_selections(&text);
+            if keys.syntax == EditorSyntax::VerilogA {
+                dedent_closing_word(&mut session.model);
+            }
             session.preferred_column = None;
             outcome.caret_moved = true;
         }
@@ -1784,7 +1788,7 @@ fn insert_smart_newline(model: &mut TextDocumentModel, syntax: EditorSyntax) -> 
             let trimmed = prefix.trim_end();
             let opens_block = match syntax {
                 EditorSyntax::Python | EditorSyntax::Yaml => trimmed.ends_with(':'),
-                EditorSyntax::VerilogA => trimmed.ends_with('{'),
+                EditorSyntax::VerilogA => leaves_block_open(trimmed),
                 EditorSyntax::Spice => {
                     trimmed.split_ascii_whitespace().next().is_some_and(|head| {
                         matches!(
@@ -1929,7 +1933,9 @@ fn move_line_edge(model: &mut TextDocumentModel, end: bool, extend: bool, docume
     model.set_selections(selections);
 }
 
-fn fold_selection(session: &mut VirtualEditorSession) {
+/// Fold the selected lines. A caret, or a selection within one line, folds
+/// the innermost block around its line that is not folded already.
+fn fold_selection(session: &mut VirtualEditorSession, syntax: EditorSyntax) {
     let Some(selection) = session.model.selections().last().copied() else {
         return;
     };
@@ -1942,7 +1948,20 @@ fn fold_selection(session: &mut VirtualEditorSession) {
         .line_column_for_char(selection.range().end)
         .0
         .saturating_add(1);
-    session.model.fold_lines(start, end);
+    if end > start + 1 {
+        session.model.fold_lines(start, end);
+        return;
+    }
+    let mut around = discover_fold_regions(&session.model, syntax)
+        .into_iter()
+        .filter(|(first, last)| *first <= start && start < *last)
+        .collect::<Vec<_>>();
+    around.sort_unstable_by_key(|&(first, last)| (std::cmp::Reverse(first), last));
+    for (first, last) in around {
+        if session.model.fold_lines(first, last) {
+            return;
+        }
+    }
 }
 
 fn handle_view_command(
@@ -1951,7 +1970,7 @@ fn handle_view_command(
     command: EditorViewCommand,
 ) {
     match command {
-        EditorViewCommand::FoldSelection => fold_selection(session),
+        EditorViewCommand::FoldSelection => fold_selection(session, syntax),
         EditorViewCommand::UnfoldAtCaret => {
             let cursor = session
                 .model
@@ -1985,15 +2004,7 @@ fn discover_fold_regions(model: &TextDocumentModel, syntax: EditorSyntax) -> Vec
                 (".if", ".endif"),
             ],
         ),
-        EditorSyntax::VerilogA => delimited_fold_regions(
-            model,
-            &[
-                ("module", "endmodule"),
-                ("function", "endfunction"),
-                ("discipline", "enddiscipline"),
-                ("nature", "endnature"),
-            ],
-        ),
+        EditorSyntax::VerilogA => veriloga_fold_regions(model),
     }
 }
 

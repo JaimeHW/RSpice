@@ -270,6 +270,23 @@ fn tab_indents_at_the_caret_and_whole_lines_under_a_selection() {
 }
 
 #[test]
+fn typing_a_verilog_a_block_indents_its_body_and_brings_its_end_back() {
+    let mut bench = Bench::new("module m;\n  analog begin", true);
+    bench.focus();
+    bench.move_caret_to(2, 15);
+    let _ = bench.key(Key::Enter, Modifiers::NONE);
+    let _ = bench.frame(vec![egui::Event::Text("x = 1;".to_owned())]);
+    let _ = bench.key(Key::Enter, Modifiers::NONE);
+    for letter in ["e", "n", "d"] {
+        let _ = bench.frame(vec![egui::Event::Text(letter.to_owned())]);
+    }
+    assert_eq!(
+        bench.source,
+        "module m;\n  analog begin\n      x = 1;\n  end"
+    );
+}
+
+#[test]
 fn a_key_in_the_first_focused_frame_stays_in_the_editor() {
     for key in [Key::ArrowLeft, Key::ArrowDown, Key::Tab] {
         let mut bench = Bench::new("alpha\nbeta\ngamma\n", true);

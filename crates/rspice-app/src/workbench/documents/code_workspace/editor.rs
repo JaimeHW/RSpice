@@ -16,13 +16,12 @@ use crate::workbench::MessageId;
 use crate::workbench::documents::text_editor_commands::{
     EditorSyntax, consume_standard_command, consume_structural_shortcut, queue_caret_position,
     show_go_to_line, take_reveal_line,
+    veriloga_syntax::{LineState, SyntaxClass, SyntaxSpan, VerilogAHighlighter, tokenize_line},
 };
 
 mod findings;
-mod veriloga_syntax;
 
 use findings::{HeldFinding, HeldFindings};
-use veriloga_syntax::{LineState, SyntaxClass, SyntaxSpan, VerilogAHighlighter, tokenize_line};
 
 const FONT_SIZE: f32 = 11.0;
 const LINE_HEIGHT: f32 = 17.05;

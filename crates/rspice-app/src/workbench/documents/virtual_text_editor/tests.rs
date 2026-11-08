@@ -309,6 +309,88 @@ fn indentation_and_toml_fold_discovery_are_deterministic() {
     );
 }
 
+/// Two branches of an `if` inside the analog block of a module.
+const NESTED_BRANCHES: &str = "module amp(inp, out);
+  analog begin
+    if (g > 1) begin
+      V(out) <+ g * V(inp);
+    end else begin
+      V(out) <+ V(inp);
+    end
+  end
+endmodule
+";
+
+#[test]
+fn fold_selection_at_a_caret_folds_the_innermost_block_around_it_then_the_next() {
+    let mut session = VirtualEditorSession {
+        model: TextDocumentModel::from_source(NESTED_BRANCHES),
+        ..VirtualEditorSession::default()
+    };
+    let caret = session.model.char_at_line_column(2, 8);
+    session
+        .model
+        .set_selections(vec![TextSelection::caret(caret)]);
+    let folds = |session: &VirtualEditorSession| {
+        session
+            .model
+            .folds()
+            .iter()
+            .map(|fold| (fold.start_line, fold.end_line))
+            .collect::<Vec<_>>()
+    };
+    handle_view_command(
+        &mut session,
+        EditorSyntax::VerilogA,
+        EditorViewCommand::FoldSelection,
+    );
+    assert_eq!(folds(&session), [(2, 4)], "the `if` branch alone");
+    handle_view_command(
+        &mut session,
+        EditorSyntax::VerilogA,
+        EditorViewCommand::FoldSelection,
+    );
+    assert_eq!(folds(&session), [(1, 8)], "then the analog block around it");
+
+    // A caret outside every block folds nothing.
+    let mut outside = VirtualEditorSession {
+        model: TextDocumentModel::from_source(NESTED_BRANCHES),
+        ..VirtualEditorSession::default()
+    };
+    let end = outside.model.len_chars();
+    outside
+        .model
+        .set_selections(vec![TextSelection::caret(end)]);
+    handle_view_command(
+        &mut outside,
+        EditorSyntax::VerilogA,
+        EditorViewCommand::FoldSelection,
+    );
+    assert!(outside.model.folds().is_empty());
+}
+
+#[test]
+fn verilog_a_indents_after_a_line_that_opens_a_block_and_only_then() {
+    let newline_after = |line: &str| {
+        let mut model = TextDocumentModel::from_source(line);
+        model.set_selections(vec![TextSelection::caret(model.len_chars())]);
+        assert!(insert_smart_newline(&mut model, EditorSyntax::VerilogA));
+        model.to_source()
+    };
+    assert_eq!(newline_after("  analog begin"), "  analog begin\n      ");
+    assert_eq!(newline_after("  case (x)"), "  case (x)\n      ");
+    assert_eq!(newline_after("`ifdef FAST"), "`ifdef FAST\n    ");
+    assert_eq!(newline_after("  `else"), "  `else\n      ");
+    assert_eq!(
+        newline_after("  end else begin"),
+        "  end else begin\n      "
+    );
+    assert_eq!(newline_after("module m(a);"), "module m(a);\n    ");
+    assert_eq!(newline_after("  end"), "  end\n  ");
+    assert_eq!(newline_after("  x = 1; // begin"), "  x = 1; // begin\n  ");
+    assert_eq!(newline_after("  y = {a, b, {"), "  y = {a, b, {\n  ");
+}
+
 #[test]
 fn five_million_line_fold_discovery_streams_without_a_line_vector() {
     let source = "x\n".repeat(5_000_000);
