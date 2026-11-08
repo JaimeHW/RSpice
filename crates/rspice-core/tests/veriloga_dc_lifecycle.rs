@@ -2235,3 +2235,47 @@ fn an_internal_node_no_contribution_reaches_is_tied_to_ground() {
     }
     let _ = std::fs::remove_file(model);
 }
+
+/// A junction driven by 1 mA through `limexp`, with and without `pnjlim`,
+/// settles where its current balances the source, Vt ln(1 + 1 mA / Is), even
+/// though the linear presolve parks its node at a megavolt, far past the
+/// knee. Beyond its threshold `limexp` is a straight line, and a Jacobian that
+/// kept growing there walked Newton down one thermal voltage per step from
+/// that megavolt and called the result converged.
+#[test]
+fn a_limexp_junction_driven_far_past_its_knee_settles_on_its_current() {
+    let vt = 1.380649e-23 * 300.15 / 1.602176634e-19;
+    let expected = vt * (1.0e-3_f64 / 1.0e-14 + 1.0).ln();
+    for limited in [false, true] {
+        let voltage = if limited {
+            "vd = $limit(V(a, c), \"pnjlim\", $vt, vcrit);"
+        } else {
+            "vd = V(a, c);"
+        };
+        let model = write_model(
+            "limexp_junction",
+            &format!(
+                "`include \"constants.vams\"\n`include \"disciplines.vams\"\n\
+module junction(a, c); inout a, c; electrical a, c; real vd, vcrit;\n\
+analog begin\n\
+  vcrit = $vt * ln($vt / (`M_SQRT2 * 1.0e-14));\n\
+  {voltage}\n\
+  I(a, c) <+ 1.0e-14 * (limexp(vd / $vt) - 1.0);\n\
+end\nendmodule\n"
+            ),
+        );
+        let deck = format!(
+            "* limexp junction\n.hdl \"{}\"\nI1 0 a DC 1m\nX1 a 0 junction\n.op\n.end\n",
+            deck_path(&model)
+        );
+        let netlist = Netlist::parse(&deck).expect("deck parses");
+        let result = Engine::default().run_dc_op(&netlist);
+        let _ = std::fs::remove_file(&model);
+        let result = result.unwrap_or_else(|error| panic!("limited={limited}: {error}"));
+        let actual = node_voltage(&result, "a");
+        assert!(
+            (actual - expected).abs() <= 1.0e-6 * expected,
+            "limited={limited}: V(a) = {actual} V, expected {expected} V"
+        );
+    }
+}
