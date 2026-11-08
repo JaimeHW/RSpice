@@ -6785,6 +6785,12 @@ impl Engine {
         // State machines read nodes any element may create, so they are built
         // once every other element is.
         let mut machines = Vec::new();
+        circuit.resistors.reserve(
+            flat_elements
+                .iter()
+                .filter(|element| matches!(element.kind, ElementKind::Resistor { .. }))
+                .count(),
+        );
         for (element_index, element) in flat_elements.iter().enumerate() {
             if element_index.is_multiple_of(64) {
                 check_build_abort(abort)?;
@@ -10899,16 +10905,25 @@ impl Engine {
         // the `veriloga` feature asks the second question too, so the set is
         // computed unconditionally and lives on the circuit rather than inside
         // the mixed-module block that first needed it.
+        // Only an event net asks which nodes analog devices touch, and only an
+        // XSPICE instance or a mixed-signal host makes one.
+        #[cfg(feature = "veriloga")]
+        let has_event_domain =
+            !circuit.xspice_instances.is_empty() || !circuit.mixed_signal_hosts.is_empty();
+        #[cfg(not(feature = "veriloga"))]
+        let has_event_domain = !circuit.xspice_instances.is_empty();
         let mut physical_nodes = BTreeSet::new();
-        collect_flat_analog_nodes(&mut physical_nodes, &circuit, &flat_elements);
-        for instance in &circuit.xspice_instances {
-            for index in 0..instance.ports().len() {
-                if let Some(connection) = instance.connection_at(index) {
-                    collect_analog_connection_nodes(&mut physical_nodes, connection);
+        if has_event_domain {
+            collect_flat_analog_nodes(&mut physical_nodes, &circuit, &flat_elements);
+            for instance in &circuit.xspice_instances {
+                for index in 0..instance.ports().len() {
+                    if let Some(connection) = instance.connection_at(index) {
+                        collect_analog_connection_nodes(&mut physical_nodes, connection);
+                    }
                 }
             }
+            circuit.set_analog_touched_nodes(&physical_nodes);
         }
-        circuit.set_analog_touched_nodes(&physical_nodes);
 
         // Validate mixed bindings only after source and generated XSPICE
         // connections have completed the event-domain table.

@@ -399,6 +399,20 @@ impl Resistors {
         );
     }
 
+    /// Make room for `additional` more resistors in every column at once.
+    pub(crate) fn reserve(&mut self, additional: usize) {
+        self.device_owners.reserve(additional);
+        self.names.reserve(additional);
+        self.stamps.reserve(additional);
+        self.conductances.reserve(additional);
+        self.reported_resistances.reserve(additional);
+        self.small_signal_conductances.reserve(additional);
+        self.noise_temperature_offsets.reserve(additional);
+        self.noisy.reserve(additional);
+        self.flicker.reserve(additional);
+        self.thermal.reserve(additional);
+    }
+
     /// Add a resistor whose electrical and reportable resistance values are
     /// intentionally distinct. Native resistor construction uses this path
     /// so parameter observation never has to reconstruct `R` from `1/G`.
