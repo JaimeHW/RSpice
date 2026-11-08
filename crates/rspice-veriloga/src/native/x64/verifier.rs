@@ -14,6 +14,11 @@ pub(super) struct VerifiedX64Code {
     pub(super) code_len: usize,
     pub(super) direct_call_targets: Vec<i64>,
     pub(super) rip_relative_references: Vec<VerifiedRipRelativeReference>,
+    /// Offsets of the 64-bit immediates that a `movabs reg, imm64` loads for
+    /// the `call reg` right after it: every absolute address the code calls.
+    pub(super) absolute_call_immediates: Vec<usize>,
+    /// Indirect calls whose target is anything else.
+    pub(super) other_indirect_calls: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,11 +35,29 @@ enum ControlFlow {
     Call { displacement_offset: usize },
 }
 
+/// What an instruction does with a register that may hold a call target.
+#[derive(Debug, Clone, Copy)]
+enum CallTargetUse {
+    None,
+    /// `movabs reg, imm64`.
+    LoadImmediate64 {
+        register: u8,
+        immediate_offset: usize,
+    },
+    /// `call reg`.
+    CallRegister {
+        register: u8,
+    },
+    /// `call [memory]`.
+    CallMemory,
+}
+
 #[derive(Debug)]
 struct DecodedInstruction {
     end: usize,
     control_flow: ControlFlow,
     rip_displacement_offset: Option<usize>,
+    call_target_use: CallTargetUse,
 }
 
 pub(super) fn verify_exact_function(bytes: &[u8], entry_kind: &str) -> JitResult<VerifiedX64Code> {
@@ -208,6 +231,9 @@ fn decode_through_return(bytes: &[u8], entry_kind: &str) -> JitResult<VerifiedX6
     let mut local_branch_targets = Vec::new();
     let mut direct_call_targets = Vec::new();
     let mut rip_relative_references = Vec::new();
+    let mut absolute_call_immediates = Vec::new();
+    let mut other_indirect_calls = 0;
+    let mut loaded_immediate = None;
     let mut offset = 0;
     let code_len = loop {
         instruction_starts.push(offset);
@@ -225,6 +251,27 @@ fn decode_through_return(bytes: &[u8], entry_kind: &str) -> JitResult<VerifiedX6
                 target_offset: relative_target(next, displacement),
             });
         }
+
+        loaded_immediate = match instruction.call_target_use {
+            CallTargetUse::LoadImmediate64 {
+                register,
+                immediate_offset,
+            } => Some((register, immediate_offset)),
+            CallTargetUse::CallRegister { register } => {
+                match loaded_immediate {
+                    Some((loaded, immediate_offset)) if loaded == register => {
+                        absolute_call_immediates.push(immediate_offset);
+                    }
+                    _ => other_indirect_calls += 1,
+                }
+                None
+            }
+            CallTargetUse::CallMemory => {
+                other_indirect_calls += 1;
+                None
+            }
+            CallTargetUse::None => None,
+        };
 
         match instruction.control_flow {
             ControlFlow::None => {}
@@ -275,6 +322,8 @@ fn decode_through_return(bytes: &[u8], entry_kind: &str) -> JitResult<VerifiedX6
         code_len,
         direct_call_targets,
         rip_relative_references,
+        absolute_call_immediates,
+        other_indirect_calls,
     })
 }
 
@@ -290,17 +339,20 @@ fn decode_instruction(bytes: &[u8], start: usize) -> Result<DecodedInstruction, 
     }
 
     let mut rex_w = false;
+    let mut rex_b = 0;
     if bytes
         .get(cursor)
         .is_some_and(|byte| matches!(*byte, 0x40..=0x4F))
     {
         rex_w = bytes[cursor] & 0x08 != 0;
+        rex_b = (bytes[cursor] & 0x01) << 3;
         cursor += 1;
     }
 
     let opcode = take_u8(bytes, &mut cursor, "opcode")?;
     let mut control_flow = ControlFlow::None;
     let mut rip_displacement_offset = None;
+    let mut call_target_use = CallTargetUse::None;
     match opcode {
         0x01 | 0x08 | 0x09 | 0x20 | 0x21 | 0x29 | 0x31 | 0x39 | 0x84 | 0x85 | 0x89 | 0x8B
         | 0x8D => {
@@ -381,20 +433,34 @@ fn decode_instruction(bytes: &[u8], start: usize) -> Result<DecodedInstruction, 
         }
         0xFF => {
             reject_legacy_prefix(legacy_prefix, opcode)?;
+            let modrm = bytes.get(cursor).copied();
             let extension =
                 decode_modrm_extension(bytes, &mut cursor, &mut rip_displacement_offset)?;
             if extension != 2 {
                 return Err(format!("unsupported FF /{extension} instruction"));
             }
+            call_target_use = match modrm {
+                Some(modrm) if modrm >> 6 == 0b11 => CallTargetUse::CallRegister {
+                    register: rex_b | (modrm & 0b111),
+                },
+                _ => CallTargetUse::CallMemory,
+            };
         }
         0xB8..=0xBF => {
             reject_legacy_prefix(legacy_prefix, opcode)?;
+            let immediate_offset = cursor;
             take(
                 bytes,
                 &mut cursor,
                 if rex_w { 8 } else { 4 },
                 if rex_w { "imm64" } else { "imm32" },
             )?;
+            if rex_w {
+                call_target_use = CallTargetUse::LoadImmediate64 {
+                    register: rex_b | (opcode & 0b111),
+                    immediate_offset,
+                };
+            }
         }
         0x0F => {
             let secondary = take_u8(bytes, &mut cursor, "two-byte opcode")?;
@@ -449,6 +515,7 @@ fn decode_instruction(bytes: &[u8], start: usize) -> Result<DecodedInstruction, 
         end: cursor,
         control_flow,
         rip_displacement_offset,
+        call_target_use,
     })
 }
 
@@ -585,5 +652,39 @@ mod tests {
     fn rejects_unknown_or_truncated_encodings() {
         assert!(verify_exact_function(&[0x0F, 0x0B, 0xC3], "unknown").is_err());
         assert!(verify_exact_function(&[0xE9, 0, 0, 0], "truncated").is_err());
+    }
+
+    /// A process that installs a stored image has to find every absolute
+    /// address the code calls, and nothing that only looks like one.
+    #[test]
+    fn finds_the_absolute_address_each_indirect_call_loads() {
+        let address = [0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11];
+        let mut code = vec![0x48, 0xB8];
+        code.extend(address); // movabs rax, address
+        code.extend([0xFF, 0xD0]); // call rax
+        code.extend([0x49, 0xBB]);
+        code.extend(address); // movabs r11, address
+        code.extend([0x41, 0xFF, 0xD3]); // call r11
+        code.extend([0x49, 0xBB]);
+        code.extend(address); // movabs r11, a constant
+        code.extend([0x4D, 0x21, 0xDA]); // and r10, r11
+        code.push(0xC3);
+        let verified = verify_exact_function(&code, "helper calls").expect("valid helper calls");
+        assert_eq!(verified.absolute_call_immediates, [2, 14]);
+        assert_eq!(verified.other_indirect_calls, 0);
+
+        // A call through a register the preceding load did not write, or one
+        // separated from its load, has no address this decoder can vouch for.
+        let mut code = vec![0x49, 0xBB];
+        code.extend(address); // movabs r11, address
+        code.extend([0xFF, 0xD0]); // call rax
+        code.extend([0x48, 0xB8]);
+        code.extend(address); // movabs rax, address
+        code.extend([0x4D, 0x21, 0xDA]); // and r10, r11
+        code.extend([0xFF, 0xD0]); // call rax
+        code.push(0xC3);
+        let verified = verify_exact_function(&code, "opaque calls").expect("valid opaque calls");
+        assert!(verified.absolute_call_immediates.is_empty());
+        assert_eq!(verified.other_indirect_calls, 2);
     }
 }

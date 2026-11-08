@@ -65,7 +65,7 @@ pub(crate) struct NativeModelPlan {
 /// on its entries' reads, so its evaluation leaves every declared name
 /// published. Running an observation for one of those would not add a value —
 /// it would re-execute operators the evaluation owns.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) enum NativeAssignmentCoverage {
     /// Rooted on the observable set. An evaluation publishes every named
     /// variable and a readback needs nothing further.

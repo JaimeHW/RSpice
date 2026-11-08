@@ -14,20 +14,21 @@ mod calling_convention;
 pub(crate) mod codegen;
 mod driver;
 pub mod encoder;
+mod image;
 mod verifier;
+
+pub use image::StoredNativeImage;
+pub(crate) use image::X64Image;
+use image::{X64ImageCalls, X64ImageLayout, X64RuntimeFunction};
 
 pub(super) use super::ssa as ir;
 
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 use super::assignment::MAX_ASSIGNMENT_CHUNK_OPERATIONS;
 use super::assignment::{NativeAssignment, chunk_ranges as assignment_chunk_ranges};
-use super::model::{
-    CodeOffset, NativeCurrentDependencies, NativeEntryOffsets, NativeEntryStarts, NativeModel,
-    NativeRequiredStorage,
-};
+use super::model::{CodeOffset, NativeCurrentDependencies, NativeEntryOffsets, NativeModel};
 use super::model_plan::{NativeAssignmentCoverage, NativeModelPlan, NativeObservationPlan};
 use super::plan_program::PlanProgramRef;
-use super::runtime::ExecutableMemory;
 #[cfg(all(windows, target_arch = "x86_64"))]
 use super::runtime::WindowsX64RuntimeFunction;
 use super::value_cache::ValueEntryCache;
@@ -178,10 +179,22 @@ pub(crate) fn compile_model_with_canonical_ir(
     compile_model_plan(model, &plan)
 }
 
+pub(crate) fn emit_model_with_canonical_ir(
+    model: &CompiledModel,
+    artifact: &CanonicalIrArtifact,
+) -> JitResult<X64Image> {
+    let plan = crate::jit::cfg_plan_builder::build_default_model_plan(model, artifact)?;
+    emit_model_plan(model, &plan)
+}
+
 pub(crate) fn compile_model_plan(
     model: &CompiledModel,
     plan: &NativeModelPlan,
 ) -> JitResult<NativeModel> {
+    emit_model_plan(model, plan)?.install(model)
+}
+
+fn emit_model_plan(model: &CompiledModel, plan: &NativeModelPlan) -> JitResult<X64Image> {
     plan.validate_shape(model)?;
 
     let mut image = Vec::new();
@@ -418,32 +431,19 @@ pub(crate) fn compile_model_plan(
         noise_exponents,
     };
     validate_compiled_entry_shape(model, &entries, &plan.current_dependencies)?;
-    verify_x64_image_layout(model, &image, &entry_starts)?;
-
-    #[cfg(all(windows, target_arch = "x86_64"))]
-    let executable = {
-        let runtime_functions =
-            append_windows_x64_unwind_metadata(&mut image, &windows_unwind_functions)?;
-        ExecutableMemory::allocate_with_windows_unwind(&image, &runtime_functions)?
-    };
-    #[cfg(not(all(windows, target_arch = "x86_64")))]
-    let executable = ExecutableMemory::allocate(&image)?;
-
-    NativeModel::from_executable_image_with_dependencies(
-        model.num_terminals,
-        model.internal_nodes,
-        model.num_variables,
-        model.parameters.len(),
-        model.branch_sources.len(),
-        model.stamp_programs.len(),
-        executable,
-        entries,
-        NativeEntryStarts::new(entry_starts),
-        plan.current_dependencies.clone(),
-        NativeRequiredStorage::for_model(model).with_prelude_slots(plan.prelude_slot_count()),
-        plan.assignment_coverage,
+    finish_image(
+        model,
+        image,
+        &windows_unwind_functions,
+        X64ImageLayout {
+            entries,
+            entry_starts,
+            current_dependencies: plan.current_dependencies.clone(),
+            prelude_slots: plan.prelude_slot_count(),
+            assignment_coverage: plan.assignment_coverage,
+            one_step_dae_split_safe: plan.one_step_dae_split_safe,
+        },
     )
-    .map(|model| model.with_one_step_dae_split_safe(plan.one_step_dae_split_safe))
 }
 
 /// Emit the observation pass on its own: two functions, no entries, no kernels.
@@ -457,6 +457,13 @@ pub(crate) fn compile_observation_image(
     model: &CompiledModel,
     plan: &NativeObservationPlan,
 ) -> JitResult<NativeModel> {
+    emit_observation_image(model, plan)?.install(model)
+}
+
+pub(crate) fn emit_observation_image(
+    model: &CompiledModel,
+    plan: &NativeObservationPlan,
+) -> JitResult<X64Image> {
     let mut image = Vec::new();
     let mut entry_starts = Vec::new();
     let mut windows_unwind_functions = Vec::new();
@@ -484,31 +491,54 @@ pub(crate) fn compile_observation_image(
         noise_psd: Vec::new(),
         noise_exponents: Vec::new(),
     };
-    verify_x64_image_layout(model, &image, &entry_starts)?;
+    finish_image(
+        model,
+        image,
+        &windows_unwind_functions,
+        X64ImageLayout {
+            entries,
+            entry_starts,
+            current_dependencies: plan.current_dependencies.clone(),
+            prelude_slots: 0,
+            assignment_coverage: NativeAssignmentCoverage::ObservableVariables,
+            one_step_dae_split_safe: false,
+        },
+    )
+}
+
+/// Verify an emitted image and, on Windows, append its unwind data.
+fn finish_image(
+    model: &CompiledModel,
+    #[cfg_attr(not(all(windows, target_arch = "x86_64")), allow(unused_mut))] mut image: Vec<u8>,
+    windows_unwind_functions: &[PendingWindowsX64UnwindFunction],
+    layout: X64ImageLayout,
+) -> JitResult<X64Image> {
+    let calls = verify_x64_image_layout(model, &image, &layout.entry_starts)?;
+    let code_len = image.len();
 
     #[cfg(all(windows, target_arch = "x86_64"))]
-    let executable = {
-        let runtime_functions =
-            append_windows_x64_unwind_metadata(&mut image, &windows_unwind_functions)?;
-        ExecutableMemory::allocate_with_windows_unwind(&image, &runtime_functions)?
-    };
+    let runtime_functions =
+        append_windows_x64_unwind_metadata(&mut image, windows_unwind_functions)?
+            .into_iter()
+            .map(|function| X64RuntimeFunction {
+                begin_address: function.begin_address,
+                end_address: function.end_address,
+                unwind_info_address: function.unwind_info_address,
+            })
+            .collect();
     #[cfg(not(all(windows, target_arch = "x86_64")))]
-    let executable = ExecutableMemory::allocate(&image)?;
+    let runtime_functions = {
+        let _ = windows_unwind_functions;
+        Vec::new()
+    };
 
-    NativeModel::from_executable_image_with_dependencies(
-        model.num_terminals,
-        model.internal_nodes,
-        model.num_variables,
-        model.parameters.len(),
-        model.branch_sources.len(),
-        model.stamp_programs.len(),
-        executable,
-        entries,
-        NativeEntryStarts::new(entry_starts),
-        plan.current_dependencies.clone(),
-        NativeRequiredStorage::for_model(model),
-        NativeAssignmentCoverage::ObservableVariables,
-    )
+    Ok(X64Image::new(
+        image,
+        code_len,
+        runtime_functions,
+        layout,
+        calls,
+    ))
 }
 
 fn verify_x64_function_code(bytes: &[u8], entry_kind: &str) -> JitResult<()> {
@@ -649,11 +679,16 @@ fn verify_x64_function_artifact(artifact: &CompiledX64Function, entry_kind: &str
     Ok(())
 }
 
+/// Verify every entry of an image and report the indirect calls it makes.
 fn verify_x64_image_layout(
     model: &CompiledModel,
     image: &[u8],
     entry_starts: &[CodeOffset],
-) -> JitResult<()> {
+) -> JitResult<X64ImageCalls> {
+    let mut calls = X64ImageCalls {
+        absolute: Vec::new(),
+        other: 0,
+    };
     if entry_starts.is_empty() {
         return Err(JitError::Verifier {
             model: model.name.clone(),
@@ -696,6 +731,13 @@ fn verify_x64_image_layout(
         }
         let verified =
             verifier::verify_function_prefix(&image[start..end], &format!("image entry {index}"))?;
+        calls.absolute.extend(
+            verified
+                .absolute_call_immediates
+                .iter()
+                .map(|immediate| start + immediate),
+        );
+        calls.other += verified.other_indirect_calls;
         for relative_target in verified.direct_call_targets {
             let absolute_target = i64::try_from(start)
                 .ok()
@@ -716,7 +758,7 @@ fn verify_x64_image_layout(
             }
         }
     }
-    Ok(())
+    Ok(calls)
 }
 
 #[cfg(all(windows, target_arch = "x86_64"))]

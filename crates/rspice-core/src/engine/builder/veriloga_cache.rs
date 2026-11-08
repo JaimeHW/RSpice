@@ -559,6 +559,8 @@ pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 182;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_RECORD_EXTENSION: &str = "record";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
+pub(super) const VERILOGA_CACHE_NATIVE_EXTENSION: &str = "native";
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_TEMPORARY_EXTENSION: &str = "tmp";
 /// A temporary file this old is a crashed writer's, never a write in progress.
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
@@ -1410,8 +1412,9 @@ pub(super) struct VerilogACacheFileInfo {
     temporary: bool,
 }
 
-/// Cache files this build manages: records, and the temporaries they are
-/// written through. Anything else in the directory is left alone.
+/// Cache files this build manages: records, native images, and the
+/// temporaries they are written through. Anything else in the directory is
+/// left alone.
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) fn list_cache_files(cache_root: &Path) -> Result<Vec<VerilogACacheFileInfo>, String> {
     let dir_iter = match std::fs::read_dir(cache_root) {
@@ -1429,7 +1432,7 @@ pub(super) fn list_cache_files(cache_root: &Path) -> Result<Vec<VerilogACacheFil
         let entry = entry.map_err(|e| format!("failed to read cache directory entry: {}", e))?;
         let path = entry.path();
         let temporary = match path.extension().and_then(|e| e.to_str()) {
-            Some(VERILOGA_CACHE_RECORD_EXTENSION) => false,
+            Some(VERILOGA_CACHE_RECORD_EXTENSION | VERILOGA_CACHE_NATIVE_EXTENSION) => false,
             Some(VERILOGA_CACHE_TEMPORARY_EXTENSION) => true,
             _ => continue,
         };
@@ -1466,16 +1469,21 @@ const CACHE_RECORD_READ: &str = "Verilog-A cache record";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 const RECORD_MAGIC: [u8; 8] = *b"RSPVAREC";
 
+/// What every native image file starts with.
+#[cfg(all(feature = "veriloga-native", not(target_arch = "wasm32")))]
+const NATIVE_IMAGE_MAGIC: [u8; 8] = *b"RSPVANAT";
+
 /// Magic, record version, compiler identity, payload length, payload digest.
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 const RECORD_HEADER_BYTES: usize = 8 + 4 + 32 + 8 + 32;
 
 /// The header that seals `payload`: whoever reads it back checks that this
-/// record version and compiler wrote it and that every byte is the one written.
+/// kind of file, record version and compiler wrote it and that every byte is
+/// the one written.
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
-fn record_header(payload: &[u8]) -> [u8; RECORD_HEADER_BYTES] {
+fn sealing_header(magic: [u8; 8], payload: &[u8]) -> [u8; RECORD_HEADER_BYTES] {
     let mut header = [0_u8; RECORD_HEADER_BYTES];
-    header[..8].copy_from_slice(&RECORD_MAGIC);
+    header[..8].copy_from_slice(&magic);
     header[8..12].copy_from_slice(&VERILOGA_CACHE_RECORD_VERSION.to_le_bytes());
     header[12..44].copy_from_slice(veriloga_compiler_identity());
     header[44..52].copy_from_slice(&(payload.len() as u64).to_le_bytes());
@@ -1483,11 +1491,16 @@ fn record_header(payload: &[u8]) -> [u8; RECORD_HEADER_BYTES] {
     header
 }
 
-/// The payload of a record file, once its header vouches for every byte.
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
-fn sealed_record_payload(bytes: &[u8]) -> Result<&[u8], &'static str> {
-    if bytes.len() < RECORD_HEADER_BYTES || bytes[..8] != RECORD_MAGIC {
-        return Err("it is not a Verilog-A cache record");
+fn record_header(payload: &[u8]) -> [u8; RECORD_HEADER_BYTES] {
+    sealing_header(RECORD_MAGIC, payload)
+}
+
+/// The payload of a sealed cache file, once its header vouches for every byte.
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
+fn sealed_payload(magic: [u8; 8], bytes: &[u8]) -> Result<&[u8], &'static str> {
+    if bytes.len() < RECORD_HEADER_BYTES || bytes[..8] != magic {
+        return Err("it is not that kind of Verilog-A cache file");
     }
     if bytes[8..12] != VERILOGA_CACHE_RECORD_VERSION.to_le_bytes() {
         return Err("it was written in another record version");
@@ -1505,6 +1518,11 @@ fn sealed_record_payload(bytes: &[u8]) -> Result<&[u8], &'static str> {
     Ok(payload)
 }
 
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
+fn sealed_record_payload(bytes: &[u8]) -> Result<&[u8], &'static str> {
+    sealed_payload(RECORD_MAGIC, bytes)
+}
+
 /// Read and decode one record, returning it with its encoded size.
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 fn read_cache_record_with_limits_and_abort(
@@ -1512,6 +1530,30 @@ fn read_cache_record_with_limits_and_abort(
     limits: ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> Result<(VerilogADiskCacheRecord, usize), VerilogACacheRecordReadError> {
+    let bytes = read_cache_file_with_limits_and_abort(path, limits, abort)?;
+    let payload = sealed_record_payload(&bytes).map_err(|reason| {
+        VerilogACacheRecordReadError::Invalid(format!(
+            "discarding Verilog-A cache record '{}': {reason}",
+            path.display()
+        ))
+    })?;
+    let record = veriloga_record::decode::<VerilogADiskCacheRecord>(payload).map_err(|error| {
+        VerilogACacheRecordReadError::Invalid(format!(
+            "failed to decode cache record '{}': {}",
+            path.display(),
+            error
+        ))
+    })?;
+    Ok((record, payload.len()))
+}
+
+/// Read one whole cache file within the shared cache budget.
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
+fn read_cache_file_with_limits_and_abort(
+    path: &Path,
+    limits: ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<u8>, VerilogACacheRecordReadError> {
     let file = match std::fs::File::open(path) {
         Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -1519,7 +1561,7 @@ fn read_cache_record_with_limits_and_abort(
         }
         Err(error) => {
             return Err(VerilogACacheRecordReadError::Invalid(format!(
-                "failed to read cache record '{}': {}",
+                "failed to read Verilog-A cache file '{}': {}",
                 path.display(),
                 error
             )));
@@ -1530,7 +1572,7 @@ fn read_cache_record_with_limits_and_abort(
         .map(|metadata| usize::try_from(metadata.len()).unwrap_or(usize::MAX))
         .map_err(|error| {
             VerilogACacheRecordReadError::Invalid(format!(
-                "failed to inspect cache record '{}': {}",
+                "failed to inspect Verilog-A cache file '{}': {}",
                 path.display(),
                 error
             ))
@@ -1563,25 +1605,12 @@ fn read_cache_record_with_limits_and_abort(
             ));
         }
         return Err(VerilogACacheRecordReadError::Invalid(format!(
-            "failed to read cache record '{}': {}",
+            "failed to read Verilog-A cache file '{}': {}",
             path.display(),
             error
         )));
     }
-    let payload = sealed_record_payload(&bytes).map_err(|reason| {
-        VerilogACacheRecordReadError::Invalid(format!(
-            "discarding Verilog-A cache record '{}': {reason}",
-            path.display()
-        ))
-    })?;
-    let record = veriloga_record::decode::<VerilogADiskCacheRecord>(payload).map_err(|error| {
-        VerilogACacheRecordReadError::Invalid(format!(
-            "failed to decode cache record '{}': {}",
-            path.display(),
-            error
-        ))
-    })?;
-    Ok((record, payload.len()))
+    Ok(bytes)
 }
 
 /// Publish a cache file whole or not at all.
@@ -1651,19 +1680,154 @@ fn persist_model_to_disk_at_with_limits(
 ) -> Result<(), String> {
     let payload = veriloga_record::encode(&BorrowedVerilogACacheRecord::new(source_path, entry))
         .map_err(|error| format!("failed to encode Verilog-A cache record: {error}"))?;
-    let (_, disk_max_bytes) = veriloga_cache_limits();
-    let resource_max_bytes = u64::try_from(limits.max_shared_cache_bytes).unwrap_or(u64::MAX);
-    let write_limit = disk_max_bytes.min(resource_max_bytes);
-    let record_bytes = (RECORD_HEADER_BYTES + payload.len()) as u64;
-    if record_bytes > write_limit {
-        return Err(format!(
-            "Verilog-A cache record of {record_bytes} bytes exceeds the {write_limit} byte write limit"
-        ));
-    }
+    ensure_cache_write_limit("record", payload.len(), limits)?;
     write_cache_file_atomically(
         &cache_record_path_with_root(source_path, cache_root),
         &[&record_header(&payload), &payload],
     )
+}
+
+/// Refuse a cache file larger than the disk cache or the shared budget.
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
+fn ensure_cache_write_limit(
+    kind: &str,
+    payload_bytes: usize,
+    limits: ResourceLimits,
+) -> Result<(), String> {
+    let (_, disk_max_bytes) = veriloga_cache_limits();
+    let resource_max_bytes = u64::try_from(limits.max_shared_cache_bytes).unwrap_or(u64::MAX);
+    let write_limit = disk_max_bytes.min(resource_max_bytes);
+    let file_bytes = (RECORD_HEADER_BYTES + payload_bytes) as u64;
+    if file_bytes > write_limit {
+        return Err(format!(
+            "Verilog-A cache {kind} of {file_bytes} bytes exceeds the {write_limit} byte write limit"
+        ));
+    }
+    Ok(())
+}
+
+/// Where the native image filed under `key` lives. Like a record's, the name
+/// carries the compiler build, which is what keeps one build's machine code
+/// from another's.
+#[cfg(all(feature = "veriloga-native", not(target_arch = "wasm32")))]
+fn native_image_path_with_root(key: &[u8; 32], cache_root: &Path) -> PathBuf {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(veriloga_compiler_identity());
+    hasher.update(b"\0native\0");
+    hasher.update(key);
+    let name = hasher.finalize().to_hex();
+    cache_root.join(format!("{name}.{VERILOGA_CACHE_NATIVE_EXTENSION}"))
+}
+
+#[cfg(all(feature = "veriloga-native", not(target_arch = "wasm32")))]
+fn persist_native_image_at(
+    key: &[u8; 32],
+    image: &rspice_veriloga::native::StoredNativeImage,
+    cache_root: &Path,
+    limits: ResourceLimits,
+) -> Result<(), String> {
+    let payload = veriloga_record::encode(image)
+        .map_err(|error| format!("failed to encode native Verilog-A image: {error}"))?;
+    ensure_cache_write_limit("native image", payload.len(), limits)?;
+    write_cache_file_atomically(
+        &native_image_path_with_root(key, cache_root),
+        &[&sealing_header(NATIVE_IMAGE_MAGIC, &payload), &payload],
+    )
+}
+
+/// The native image filed under `key`, or `None`. A file that fails its seal
+/// or does not decode is removed so the next compile can replace it.
+#[cfg(all(feature = "veriloga-native", not(target_arch = "wasm32")))]
+fn load_native_image_at(
+    key: &[u8; 32],
+    cache_root: &Path,
+    limits: ResourceLimits,
+) -> Option<rspice_veriloga::native::StoredNativeImage> {
+    let path = native_image_path_with_root(key, cache_root);
+    let bytes = match read_cache_file_with_limits_and_abort(&path, limits, &NoAbort) {
+        Ok(bytes) => bytes,
+        Err(VerilogACacheRecordReadError::Missing | VerilogACacheRecordReadError::Cancelled) => {
+            return None;
+        }
+        Err(VerilogACacheRecordReadError::ResourceLimit(error)) => {
+            log::debug!(
+                "not reading native Verilog-A image '{}': {error}",
+                path.display()
+            );
+            return None;
+        }
+        Err(VerilogACacheRecordReadError::Invalid(error)) => {
+            log::warn!("{error}");
+            return None;
+        }
+    };
+    let decoded = sealed_payload(NATIVE_IMAGE_MAGIC, &bytes)
+        .map_err(str::to_string)
+        .and_then(|payload| {
+            veriloga_record::decode::<rspice_veriloga::native::StoredNativeImage>(payload)
+                .map_err(|error| error.to_string())
+        });
+    match decoded {
+        Ok(image) => {
+            touch_cache_file(&path);
+            Some(image)
+        }
+        Err(reason) => {
+            log::warn!(
+                "discarding native Verilog-A image '{}': {reason}",
+                path.display()
+            );
+            remove_cache_file(&path);
+            None
+        }
+    }
+}
+
+/// The disk cache's store for native images. Records and images share one
+/// directory, one budget and one least-recently-used eviction.
+#[cfg(all(feature = "veriloga-native", not(target_arch = "wasm32")))]
+struct DiskNativeImageStore;
+
+#[cfg(all(feature = "veriloga-native", not(target_arch = "wasm32")))]
+impl rspice_veriloga::native::NativeImageStore for DiskNativeImageStore {
+    fn load(
+        &self,
+        key: &rspice_veriloga::native::NativeImageKey,
+    ) -> Option<rspice_veriloga::native::StoredNativeImage> {
+        load_native_image_at(
+            key.as_bytes(),
+            &veriloga_cache_root(),
+            ResourceLimits::default(),
+        )
+    }
+
+    fn store(
+        &self,
+        key: &rspice_veriloga::native::NativeImageKey,
+        image: &rspice_veriloga::native::StoredNativeImage,
+    ) {
+        let cache_root = veriloga_cache_root();
+        match persist_native_image_at(
+            key.as_bytes(),
+            image,
+            &cache_root,
+            ResourceLimits::default(),
+        ) {
+            Ok(()) => {
+                if let Err(error) = prune_veriloga_cache(&cache_root) {
+                    log::warn!("failed to prune Verilog-A cache after write: {error}");
+                }
+            }
+            Err(error) => log::warn!("{error}"),
+        }
+    }
+}
+
+/// Let every native image this process compiles outlive it.
+#[cfg(all(feature = "veriloga-native", not(target_arch = "wasm32")))]
+fn install_disk_native_image_store() {
+    static STORE: DiskNativeImageStore = DiskNativeImageStore;
+    rspice_veriloga::native::install_native_image_store(&STORE);
 }
 
 #[cfg(all(test, feature = "veriloga", not(target_arch = "wasm32")))]
@@ -2097,6 +2261,8 @@ fn lookup_veriloga_key_with_limits_and_abort(
     let path = canonical.source_path.as_path();
     let selected_module = canonical.selected_module.as_deref();
     VERILOGA_CACHE_TELEMETRY.lookups.fetch_add(1, Relaxed);
+    #[cfg(all(feature = "veriloga-native", not(target_arch = "wasm32")))]
+    install_disk_native_image_store();
     check_build_abort(abort)?;
     if selected_module.is_some() && is_sealed_veriloga_virtual_path(path) {
         return Err(cache_refusal(
@@ -3672,6 +3838,41 @@ endmodule
                 .expect("read the retained record")
                 .is_some()
         );
+        std::fs::remove_dir_all(root).expect("remove temporary cache root");
+    }
+
+    /// A native image is a cache file like a record: listed, so it is evicted
+    /// with them, and refused and removed when its seal or its contents fail.
+    #[cfg(feature = "veriloga-native")]
+    #[test]
+    fn disk_cache_refuses_and_removes_a_damaged_native_image() {
+        let root = unique_test_root("native-image");
+        std::fs::create_dir_all(&root).expect("create temporary cache root");
+        let key = [7_u8; 32];
+        let path = native_image_path_with_root(&key, &root);
+        assert!(load_native_image_at(&key, &root, ResourceLimits::default()).is_none());
+
+        let payload = veriloga_record::encode(&42_u64).expect("encode payload");
+        let sealed_as_image =
+            [&sealing_header(NATIVE_IMAGE_MAGIC, &payload)[..], &payload].concat();
+        std::fs::write(&path, &sealed_as_image).expect("write native image file");
+        let listed = list_cache_files(&root).expect("list cache files");
+        assert_eq!(listed.len(), 1);
+        assert!(
+            !listed[0].temporary,
+            "a native image is evicted like a record"
+        );
+        assert!(
+            load_native_image_at(&key, &root, ResourceLimits::default()).is_none(),
+            "a payload that is not an image must not load"
+        );
+        assert!(!path.exists(), "an undecodable image is removed");
+
+        let sealed_as_record = [&record_header(&payload)[..], &payload].concat();
+        std::fs::write(&path, &sealed_as_record).expect("write record under an image name");
+        assert!(load_native_image_at(&key, &root, ResourceLimits::default()).is_none());
+        assert!(!path.exists(), "a record is never read as an image");
+
         std::fs::remove_dir_all(root).expect("remove temporary cache root");
     }
 

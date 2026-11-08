@@ -1,6 +1,6 @@
 //! Dependency metadata shared by every executable JIT backend.
 
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct JitCurrentDependencies {
     /// Branch unknowns the CFG route's prelude reads.
     ///

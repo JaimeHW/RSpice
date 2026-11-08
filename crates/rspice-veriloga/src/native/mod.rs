@@ -110,6 +110,9 @@ mod runtime;
     target_arch = "x86_64"
 ))]
 mod state_pairing_census;
+/// Stored images are x64 images; on another host nothing reaches the store.
+#[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))]
+mod stored;
 mod target;
 /// A machine backend for another instruction set is dead code on this host:
 /// its dispatch is compiled out, and so is every test that reaches into it.
@@ -134,7 +137,9 @@ pub(crate) use abi::{NativeRuntimeError, NativeRuntimeErrorKind};
 pub(crate) use model::NativeRequiredStorage;
 pub(crate) use model::NativeStampKernelIo;
 pub use model::{NativeModel, PlanStats};
+pub use stored::{NativeImageKey, NativeImageStore, install_native_image_store};
 pub use target::{Architecture, TargetSpec};
+pub use x64::StoredNativeImage;
 
 /// Release-qualification ceiling for any single shipped Verilog-A model's
 /// complete native executable image. This is intentionally much lower than
@@ -275,6 +280,42 @@ pub fn compile_observation_image_with_canonical_ir(
                 })
             }
         }
+    }
+}
+
+/// The evaluation image for `model`: the one the process's image store holds
+/// when there is one, compiled otherwise.
+pub(crate) fn evaluation_image(
+    model: &CompiledModel,
+    artifact: &CanonicalIrArtifact,
+    key: &cache::NativeCompileCacheKey,
+) -> JitResult<NativeModel> {
+    match qualified_host_target()?.arch {
+        Architecture::X64 => {
+            stored::install_through_store(stored::installed_store(), key, model, || {
+                validate_native_coverage(model)?;
+                x64::emit_model_with_canonical_ir(model, artifact)
+            })
+        }
+        Architecture::AArch64 => compile_native_with_canonical_ir(model, artifact),
+    }
+}
+
+/// The observation image for `model`, from the process's image store like
+/// [`evaluation_image`].
+pub(crate) fn observation_image(
+    model: &CompiledModel,
+    artifact: &CanonicalIrArtifact,
+    key: &cache::NativeCompileCacheKey,
+) -> JitResult<NativeModel> {
+    match qualified_host_target()?.arch {
+        Architecture::X64 => {
+            stored::install_through_store(stored::installed_store(), key, model, || {
+                let plan = crate::jit::plan_builder::build_observation_plan(model, artifact)?;
+                x64::emit_observation_image(model, &plan)
+            })
+        }
+        Architecture::AArch64 => compile_observation_image_with_canonical_ir(model, artifact),
     }
 }
 

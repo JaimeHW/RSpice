@@ -3678,7 +3678,7 @@ impl VerilogADevice {
             module: model.name.clone(),
             owner: std::sync::Arc::downgrade(model),
         };
-        Self::try_native_compile_cached(model, cache_key, control, |model| {
+        Self::try_native_compile_cached(model, cache_key, control, |model, _| {
             crate::native::compile_native(model)
         })
     }
@@ -3696,8 +3696,8 @@ impl VerilogADevice {
             module: model.name.clone(),
             layout: compiled_model_layout_identity(model).0,
         };
-        Self::try_native_compile_cached(model, cache_key, control, |model| {
-            crate::native::compile_native_with_canonical_ir(model, artifact)
+        Self::try_native_compile_cached(model, cache_key, control, |model, key| {
+            crate::native::evaluation_image(model, artifact, key)
         })
     }
 
@@ -3720,9 +3720,12 @@ impl VerilogADevice {
             module: model.name.clone(),
             layout: compiled_model_layout_identity(model).0,
         };
-        Self::try_native_compile_cached(model, cache_key, &crate::NoPipelineControl, |model| {
-            crate::native::compile_observation_image_with_canonical_ir(model, artifact)
-        })
+        Self::try_native_compile_cached(
+            model,
+            cache_key,
+            &crate::NoPipelineControl,
+            |model, key| crate::native::observation_image(model, artifact, key),
+        )
     }
 
     #[cfg(feature = "native")]
@@ -3730,9 +3733,13 @@ impl VerilogADevice {
         model: &std::sync::Arc<CompiledModel>,
         cache_key: NativeCompileCacheKey,
         control: &dyn crate::PipelineControl,
-        compile: impl FnOnce(&CompiledModel) -> crate::native::JitResult<NativeModel>,
+        compile: impl FnOnce(
+            &CompiledModel,
+            &NativeCompileCacheKey,
+        ) -> crate::native::JitResult<NativeModel>,
     ) -> Result<std::sync::Arc<NativeModel>, VmError> {
         static NATIVE_CACHE: std::sync::OnceLock<NativeCompileCache> = std::sync::OnceLock::new();
+        let compiled_key = cache_key.clone();
         NATIVE_CACHE
             .get_or_init(NativeCompileCache::default)
             .get_or_compile(cache_key, control, || {
@@ -3742,7 +3749,7 @@ impl VerilogADevice {
                     .expect("native compile log")
                     .push(model.name.to_string());
 
-                match compile(model.as_ref()) {
+                match compile(model.as_ref(), &compiled_key) {
                     Ok(native) => {
                         log::info!("[JIT] Model '{}' compiled to native code", model.name);
                         Ok(std::sync::Arc::new(native))

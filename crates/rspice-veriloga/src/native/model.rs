@@ -34,7 +34,10 @@ pub(crate) struct NativeStampKernelIo {
     pub jacobians: *mut f64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+#[serde(transparent)]
 pub(crate) struct CodeOffset(usize);
 
 impl CodeOffset {
@@ -87,7 +90,7 @@ impl NativeEntryStarts {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct NativeEntryOffsets {
     /// The module's assignment pass, when it has one.
     ///
