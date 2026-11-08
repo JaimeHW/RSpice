@@ -5585,8 +5585,9 @@ pub(super) fn parse_param_statement(
             continue;
         }
 
-        // Expect = sign
-        if !stream.consume(&TokenKind::Equals) {
+        // Expect = sign. LTspice and QSPICE also take the value straight
+        // after the name: `.param X table(phimargin, 29.4, 3.5, ...)`.
+        if !stream.consume(&TokenKind::Equals) && !param_value_follows_name(stream, params) {
             return Err(ParseError::Syntax {
                 line: line_num,
                 message: format!("Expected '=' after parameter name '{}'", name),
@@ -5669,6 +5670,17 @@ pub(super) fn parse_param_statement(
     }
 
     Ok(())
+}
+
+/// Whether a `.param` name is followed by its value with no `=` between,
+/// which LTspice and QSPICE accept and Xyce does not.
+fn param_value_follows_name(stream: &TokenStream, params: &ParamContext) -> bool {
+    params.expression_dialect() != crate::config::ExpressionDialect::Xyce
+        && match stream.peek().kind {
+            TokenKind::Newline | TokenKind::Eof | TokenKind::Comma | TokenKind::Equals => false,
+            TokenKind::Ident(_) => !matches!(stream.peek_n(1).kind, TokenKind::Equals),
+            _ => true,
+        }
 }
 
 fn handle_parameter_redefinition(

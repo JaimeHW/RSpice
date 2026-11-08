@@ -1865,3 +1865,42 @@ fn a_value_written_as_unbraced_arithmetic_reads_as_one_expression() {
         assert_close(&format!("V({node})"), actual, *expected, *tolerance);
     }
 }
+
+// LTspice 26.1.1 and QSPICE 2026 batches agree: 5, 0.5, 10, 6 and 3.
+#[test]
+fn a_parameter_value_may_follow_its_name_without_an_equals_sign() {
+    let netlist = parse(
+        "param without equals\n\
+         .param A 5\n\
+         .param B table(A,0,0,10,1)\n\
+         .param C {A*2}\n\
+         .param D A+1 F=3\n\
+         V1 a 0 {A}\n\
+         R1 a 0 1k\n\
+         V2 b 0 {B}\n\
+         R2 b 0 1k\n\
+         V3 c 0 {C}\n\
+         R3 c 0 1k\n\
+         V4 d 0 {D}\n\
+         R4 d 0 1k\n\
+         V5 e 0 {F}\n\
+         R5 e 0 1k\n\
+         .op\n\
+         .end\n",
+    );
+    for (node, expected) in [("a", 5.0), ("b", 0.5), ("c", 10.0), ("d", 6.0), ("e", 3.0)] {
+        assert_close(
+            &format!("V({node})"),
+            op_voltage(&netlist, node),
+            expected,
+            1e-12,
+        );
+    }
+    let error = Netlist::parse("no value\n.param A\n.end\n").expect_err("a name alone");
+    assert!(
+        error
+            .to_string()
+            .contains("Expected '=' after parameter name 'A'"),
+        "{error}"
+    );
+}
