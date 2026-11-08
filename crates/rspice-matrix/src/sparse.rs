@@ -6233,11 +6233,64 @@ impl ComplexMatrix {
             Some(workspace) => workspace.factors.repivot_reused()?,
             None => false,
         };
-        if repivoted {
+        let circuit_lu = if repivoted {
             self.solve_certified_into(rhs, solution, operation, denominator_floor)
         } else {
             first
+        };
+        if !matches!(circuit_lu, Err(SolverError::InaccurateSolution(_)))
+            || self.uses_faer_factors()
+        {
+            return circuit_lu;
         }
+        // The real equivalent picks a pivot from one real number where the
+        // complex factors weigh both parts, so a badly scaled system can
+        // certify on one and not the other. Only an answer that certifies
+        // replaces the candidate a caller may still refine.
+        let candidate = solution.clone();
+        if self
+            .solve_once_through_faer(rhs, solution, operation, denominator_floor)
+            .is_ok()
+        {
+            return Ok(());
+        }
+        *solution = candidate;
+        circuit_lu
+    }
+
+    /// One certified solve on faer's complex factors.
+    ///
+    /// The Circuit LU factors stay for the next point: one hard frequency
+    /// must not leave the rest of a sweep on faer's larger workspace, nor make
+    /// a later point's digits depend on which worker met the hard one.
+    fn solve_once_through_faer(
+        &mut self,
+        rhs: &[Complex64],
+        solution: &mut Vec<Complex64>,
+        operation: ComplexSolveOp,
+        denominator_floor: Option<&[Value]>,
+    ) -> Result<(), SolverError> {
+        let symbolic = match &self.real_symbolic {
+            Some(symbolic) => Arc::clone(symbolic),
+            None => Arc::new(
+                sparse_lu::factorize_symbolic_lu(self.csc.as_ref().as_ref(), Default::default())
+                    .map_err(map_faer_error)?,
+            ),
+        };
+        self.real_symbolic = Some(Arc::clone(&symbolic));
+        let faer = ComplexFactors::Faer(Box::new(FaerComplexFactors::new(symbolic)?));
+        let Some(workspace) = self.lu.as_mut() else {
+            return Err(SolverError::SingularMatrix);
+        };
+        let circuit_lu = std::mem::replace(&mut workspace.factors, faer);
+        self.factorization_valid = false;
+        let result = self.solve_certified_into(rhs, solution, operation, denominator_floor);
+        if let Some(workspace) = self.lu.as_mut() {
+            workspace.factors = circuit_lu;
+        }
+        // The restored factors are still those of this matrix.
+        self.factorization_valid = true;
+        result
     }
 
     fn solve_certified_into(
