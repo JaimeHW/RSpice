@@ -26,7 +26,6 @@ const SILICON_PERMITTIVITY: Value = 1.05e-12;
 const INTRINSIC_DENSITY: Value = 1.45e10;
 const BOLTZMANN_OVER_CHARGE: Value = 8.617333262e-5;
 const JUNCTION_BUILT_IN: Value = 0.6;
-const CELSIUS_OFFSET: Value = 273.15;
 /// The channel's floor, so a drain with no current path still has a voltage.
 const CHANNEL_LEAK: Value = 1e-12;
 /// The ratio of drain voltage to breakdown that avalanche gain stops at.
@@ -308,17 +307,6 @@ impl IgbtLaw {
         instance_params: &[(String, Value)],
         ambient_kelvin: Value,
     ) -> Result<Self, SimulationError> {
-        const READ: [&str; 21] = [
-            "AGD", "AREA", "BVF", "BVN", "CGS", "COXD", "JSNE", "KF", "KP", "MUN", "MUP", "NB",
-            "TAU", "THETA", "VT", "VTD", "WB", "SUBTHRES", "KFN", "AFN", "TNOM",
-        ];
-        for (name, _) in &card.params {
-            if !READ.iter().any(|known| name.eq_ignore_ascii_case(known)) {
-                return Err(SimulationError::Circuit(format!(
-                    "{owner}: an IGBT model does not read {name}"
-                )));
-            }
-        }
         const INSTANCE: [&str; 5] = ["AREA", "M", "MULT", "TEMP", "OFF"];
         for (name, _) in instance_params {
             if !INSTANCE
@@ -363,8 +351,8 @@ impl IgbtLaw {
         let subthreshold = positive("subthres", read("SUBTHRES", 0.02))?;
         let breakdown_factor = positive("BVF", read("BVF", 1.0))?;
         let kelvin = instance_param(instance_params, &["TEMP"])
-            .map_or(ambient_kelvin, |celsius| celsius + CELSIUS_OFFSET);
-        let nominal = read("TNOM", 27.0) + CELSIUS_OFFSET;
+            .map_or(ambient_kelvin, crate::constants::celsius_to_kelvin);
+        let nominal = crate::constants::celsius_to_kelvin(read("TNOM", 27.0));
         let thermal_voltage = BOLTZMANN_OVER_CHARGE * kelvin;
         let ambipolar_diffusivity = 2.0 * thermal_voltage * electron_mobility * hole_mobility
             / (electron_mobility + hole_mobility);
@@ -892,15 +880,6 @@ impl CodeModel for Igbt {
         Ok(())
     }
 
-    fn output_input_partials(&self, ctx: &CmContext, output_port: &str) -> Vec<(String, Value)> {
-        let Some(terminal) = terminal_index(output_port) else {
-            return Vec::new();
-        };
-        Self::node_slopes(Self::stored_slopes(ctx, slot::CONDUCTANCE, terminal))
-            .map(|(port, slope)| (port.to_string(), slope))
-            .to_vec()
-    }
-
     fn output_input_ac_partials(
         &self,
         ctx: &CmContext,
@@ -1020,9 +999,9 @@ mod tests {
 
     #[test]
     fn a_card_is_refused_for_what_it_cannot_mean() {
-        let refusal = IgbtLaw::from_card("Z1", &card(&[("BOGUS", 1.0)]), &[], 300.15)
-            .expect_err("an unread parameter");
-        assert!(refusal.to_string().contains("BOGUS"), "{refusal}");
+        let refusal = IgbtLaw::from_card("Z1", &card(&[]), &[("foo".to_owned(), 2.0)], 300.15)
+            .expect_err("an instance parameter it does not read");
+        assert!(refusal.to_string().contains("foo"), "{refusal}");
         let refusal = IgbtLaw::from_card("Z1", &card(&[("AGD", 1.0)]), &[], 300.15)
             .expect_err("an overlap larger than the die");
         assert!(refusal.to_string().contains("Agd"), "{refusal}");

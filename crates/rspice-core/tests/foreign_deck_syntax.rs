@@ -2447,6 +2447,12 @@ fn an_igbt_area_and_multiplier_follow_ltspice() {
         6.993762,
         4e-3,
     );
+    assert_igbt_current(
+        "a card parameter LTspice ignores",
+        igbt_collector_current("NIGBT Vces=600", "N1", "", 1.5, 10.0),
+        3.496881,
+        4e-3,
+    );
 }
 
 // LTspice 26.1.1: a P device is the mirror of its N twin.
