@@ -191,39 +191,25 @@ fn install_temperature(params: &mut ParamContext, temperature: Value) {
 /// The last `.TEMP` card sets the run temperature over any option when it
 /// names a single value, so a single literal there is the hint. A sweep leaves
 /// the option's temperature in place.
-pub(super) fn prescan_temperature_options_with_abort(
-    lines: &[&str],
-    body_start: usize,
-    allow_non_semicolon_comments: bool,
-    xyce_syntax: bool,
-    abort: &dyn AbortSignal,
-) -> Result<ParserTemperatures, ParseWithAbortError> {
+pub(super) fn prescan_temperature_options(cards: &[ScannedCard]) -> ParserTemperatures {
     let mut hints = ParserTemperatures::default();
     let mut last_temp_card = None;
-    for_each_card_line_with_abort(
-        lines,
-        body_start,
-        allow_non_semicolon_comments,
-        xyce_syntax,
-        |head| is_options_head(head) || is_temp_head(head),
-        abort,
-        |line, line_num| {
-            if is_temp_head(line.split_whitespace().next().unwrap_or("")) {
-                last_temp_card = Some(single_literal_temp_card(line, line_num));
-            } else {
-                scan_temperature_option_line(line, line_num, &mut hints);
-            }
-            Ok(())
-        },
-    )?;
+    for card in cards {
+        let (text, line) = card.parts();
+        if is_temp_head(card.head()) {
+            last_temp_card = Some(single_literal_temp_card(text, line));
+        } else {
+            scan_temperature_option_line(text, line, &mut hints);
+        }
+    }
     if let Some(Some(temp)) = last_temp_card {
         hints.temp = Some(temp);
     }
-    Ok(hints)
+    hints
 }
 
 /// `.TEMP`, including the `.TEMP=t` spelling.
-fn is_temp_head(head: &str) -> bool {
+pub(super) fn is_temp_head(head: &str) -> bool {
     head.split('=')
         .next()
         .is_some_and(|word| word.eq_ignore_ascii_case(".temp"))

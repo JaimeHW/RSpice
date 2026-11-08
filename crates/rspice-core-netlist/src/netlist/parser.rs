@@ -71,7 +71,7 @@ use stream::TokenStream;
 
 use temperature::{
     ParserTemperatures, TemperatureDirective, TemperaturePassError, apply_replayed_temperature,
-    parse_with_consistent_temperatures, prescan_temperature_options_with_abort,
+    is_temp_head, parse_with_consistent_temperatures, prescan_temperature_options,
     replayed_temperature,
 };
 
@@ -886,15 +886,23 @@ fn parse_netlist_impl(
     // Seed the statistical expression functions before any parameter
     // evaluation so the deck behaves identically regardless of where the
     // `.options seed=` line appears.
-    let seed = match options.statistical_seed.or(replay.seed) {
-        Some(seed) => Some(seed),
-        None => prescan_random_seed_with_abort(
+    let scanned_options = if options.statistical_seed.or(replay.seed).is_none()
+        || options.spice_dialect.is_none()
+        || replay.temperatures.is_none()
+    {
+        scan_option_and_temperature_cards(
             &lines,
             body_start,
             allow_non_semicolon_comments,
             xyce_syntax,
             abort,
-        )?,
+        )?
+    } else {
+        Vec::new()
+    };
+    let seed = match options.statistical_seed.or(replay.seed) {
+        Some(seed) => Some(seed),
+        None => prescan_random_seed(&scanned_options)?,
     };
     if let Some(seed) = seed {
         state.params.set_random_seed(seed);
@@ -905,14 +913,7 @@ fn parse_netlist_impl(
     // option (`--spice-dialect`) wins, as it does for the simulation.
     state.spice_dialect = match options.spice_dialect {
         Some(dialect) => dialect,
-        None => prescan_spice_dialect_with_abort(
-            &lines,
-            body_start,
-            allow_non_semicolon_comments,
-            xyce_syntax,
-            abort,
-        )?
-        .unwrap_or_default(),
+        None => prescan_spice_dialect(&scanned_options)?.unwrap_or_default(),
     };
     // Xyce draws `agauss`, `gauss`, `aunif` and `unif` only inside a sampling
     // analysis and reads their nominal value everywhere else (`agaussOp::val`
@@ -930,13 +931,7 @@ fn parse_netlist_impl(
     );
     let mut temperatures = match replay.temperatures {
         Some(temperatures) => temperatures,
-        None => prescan_temperature_options_with_abort(
-            &lines,
-            body_start,
-            allow_non_semicolon_comments,
-            xyce_syntax,
-            abort,
-        )?,
+        None => prescan_temperature_options(&scanned_options),
     };
     temperatures.apply_override(overrides)?;
     temperatures.install(&mut state.params);
@@ -4824,6 +4819,52 @@ fn process_line_gated(
     })
 }
 
+/// One logical `.OPTIONS` or `.TEMP` card, with its first physical line.
+struct ScannedCard {
+    text: String,
+    line: usize,
+}
+
+impl ScannedCard {
+    /// The card's text and physical line.
+    fn parts(&self) -> (&str, usize) {
+        (&self.text, self.line)
+    }
+
+    /// The card's first word.
+    fn head(&self) -> &str {
+        self.text.split_whitespace().next().unwrap_or("")
+    }
+}
+
+/// The deck's `.OPTIONS` and `.TEMP` cards, gathered in one pass for the
+/// prescans that read them: the random seed, the dialect, the temperature.
+fn scan_option_and_temperature_cards(
+    lines: &[&str],
+    body_start: usize,
+    allow_non_semicolon_comments: bool,
+    xyce_syntax: bool,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<ScannedCard>, ParseWithAbortError> {
+    let mut cards = Vec::new();
+    for_each_card_line_with_abort(
+        lines,
+        body_start,
+        allow_non_semicolon_comments,
+        xyce_syntax,
+        |head| is_options_head(head) || is_temp_head(head),
+        abort,
+        |card, line| {
+            cards.push(ScannedCard {
+                text: card.to_owned(),
+                line,
+            });
+            Ok(())
+        },
+    )?;
+    Ok(cards)
+}
+
 /// Pre-scan for `.options seed=<n>` (alias `rndseed=<n>`) so the statistical
 /// expression functions can be seeded before any parameter evaluation,
 /// regardless of where the option appears in the deck.
@@ -4831,65 +4872,42 @@ fn process_line_gated(
 /// Scans `.options` logical lines (including `+` continuations); the last
 /// occurrence wins, matching SPICE option-override behavior. `seed=random`
 /// is ignored here — `parse_options_command` emits the warning for it.
-fn prescan_random_seed_with_abort(
-    lines: &[&str],
-    body_start: usize,
-    allow_non_semicolon_comments: bool,
-    xyce_syntax: bool,
-    abort: &dyn AbortSignal,
-) -> Result<Option<u64>, ParseWithAbortError> {
+fn prescan_random_seed(cards: &[ScannedCard]) -> Result<Option<u64>, ParseError> {
     let mut seed = None;
-    for_each_card_line_with_abort(
-        lines,
-        body_start,
-        allow_non_semicolon_comments,
-        xyce_syntax,
-        is_options_head,
-        abort,
-        |line, line_num| scan_options_tokens_for_seed(line, line_num, &mut seed),
-    )?;
+    for card in cards.iter().filter(|card| is_options_head(card.head())) {
+        let (text, line) = card.parts();
+        scan_options_tokens_for_seed(text, line, &mut seed)?;
+    }
     Ok(seed)
 }
 
 /// Pre-scan for the deck's `.options rspice_dialect=`, whose dialect governs
 /// how cards before it are read too. The last valid occurrence wins; an
 /// invalid value is left for `parse_options_command` to refuse.
-fn prescan_spice_dialect_with_abort(
-    lines: &[&str],
-    body_start: usize,
-    allow_non_semicolon_comments: bool,
-    xyce_syntax: bool,
-    abort: &dyn AbortSignal,
-) -> Result<Option<crate::config::SpiceDialect>, ParseWithAbortError> {
+fn prescan_spice_dialect(
+    cards: &[ScannedCard],
+) -> Result<Option<crate::config::SpiceDialect>, ParseError> {
     let mut dialect = None;
-    for_each_card_line_with_abort(
-        lines,
-        body_start,
-        allow_non_semicolon_comments,
-        xyce_syntax,
-        is_options_head,
-        abort,
-        |line, line_num| {
-            let tokens = tokenize(line).map_err(|error| lex_to_parse_error(error, line_num))?;
-            for window in tokens.windows(3) {
-                let [key, equals, value] = window else {
-                    continue;
+    for card in cards.iter().filter(|card| is_options_head(card.head())) {
+        let (text, line) = card.parts();
+        let tokens = tokenize(text).map_err(|error| lex_to_parse_error(error, line))?;
+        for window in tokens.windows(3) {
+            let [key, equals, value] = window else {
+                continue;
+            };
+            if let (TokenKind::Ident(key), TokenKind::Equals, TokenKind::Ident(value)) =
+                (&key.kind, &equals.kind, &value.kind)
+                && key.eq_ignore_ascii_case("RSPICE_DIALECT")
+            {
+                dialect = match value.to_ascii_uppercase().as_str() {
+                    "BEST_AVAILABLE" => Some(crate::config::SpiceDialect::BestAvailable),
+                    "NGSPICE" => Some(crate::config::SpiceDialect::Ngspice),
+                    "XYCE" => Some(crate::config::SpiceDialect::Xyce),
+                    _ => dialect,
                 };
-                if let (TokenKind::Ident(key), TokenKind::Equals, TokenKind::Ident(value)) =
-                    (&key.kind, &equals.kind, &value.kind)
-                    && key.eq_ignore_ascii_case("RSPICE_DIALECT")
-                {
-                    dialect = match value.to_ascii_uppercase().as_str() {
-                        "BEST_AVAILABLE" => Some(crate::config::SpiceDialect::BestAvailable),
-                        "NGSPICE" => Some(crate::config::SpiceDialect::Ngspice),
-                        "XYCE" => Some(crate::config::SpiceDialect::Xyce),
-                        _ => dialect,
-                    };
-                }
             }
-            Ok(())
-        },
-    )?;
+        }
+    }
     Ok(dialect)
 }
 
