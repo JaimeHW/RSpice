@@ -11,6 +11,7 @@ use crate::device::DistributedRlgc;
 use crate::device::controlled::VoltageControlledNodes;
 use crate::device::passive::CoupledWinding;
 use crate::xspice::{AUTO_BRIDGE_PREFIX, CodeModelVectorParams};
+use rspice_core_base::instance_param_reads::{InstanceParamReads, note_instance_param_read};
 use behavioral::{BehavioralResistorModel, BehavioralResistorPolicy};
 
 /// A model parameter the deck left as text: its name and the unresolved
@@ -8152,6 +8153,7 @@ impl Engine {
                     instance_params,
                     deferred_params,
                 } => {
+                    let instance_param_reads = InstanceParamReads::watch(instance_params);
                     // Resolve NMOS/PMOS from model card when available.
                     let model_def = find_binned_model_def(
                         netlist,
@@ -8382,6 +8384,7 @@ impl Engine {
                                         temperature_kelvin: self.config.temperature,
                                     },
                                 )?;
+                                warn_unread_instance_params(&element.name, instance_param_reads);
                                 continue;
                             }
                             56 => {
@@ -8397,6 +8400,7 @@ impl Engine {
                                         temperature_kelvin: self.config.temperature,
                                     },
                                 )?;
+                                warn_unread_instance_params(&element.name, instance_param_reads);
                                 continue;
                             }
                             57 => {
@@ -8413,6 +8417,7 @@ impl Engine {
                                     },
                                     level == 10,
                                 )?;
+                                warn_unread_instance_params(&element.name, instance_param_reads);
                                 continue;
                             }
                             _ => {}
@@ -8521,6 +8526,7 @@ impl Engine {
                             crate::circuit::MosModelSafetyFamily::Bsim3,
                             resolved_mos_type,
                         );
+                        warn_unread_instance_params(&element.name, instance_param_reads);
                         continue;
                     }
 
@@ -8560,6 +8566,7 @@ impl Engine {
                             crate::circuit::MosModelSafetyFamily::Bsim4,
                             resolved_mos_type,
                         );
+                        warn_unread_instance_params(&element.name, instance_param_reads);
                         continue;
                     }
 
@@ -8649,6 +8656,7 @@ impl Engine {
                             crate::circuit::MosModelSafetyFamily::Vdmos,
                             resolved_mos_type,
                         );
+                        warn_unread_instance_params(&element.name, instance_param_reads);
                         continue;
                     }
 

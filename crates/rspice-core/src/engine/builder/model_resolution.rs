@@ -85,6 +85,7 @@ pub(super) fn model_param(params: &[(String, f64)], names: &[&str]) -> Option<f6
 }
 
 pub(super) fn instance_param(params: &[(String, f64)], names: &[&str]) -> Option<f64> {
+    names.iter().copied().for_each(note_instance_param_read);
     params.iter().find_map(|(name, value)| {
         if names
             .iter()

@@ -1216,6 +1216,11 @@ impl Engine {
         let gate = circuit.get_or_create_node(&element.nodes[1]);
         let source = circuit.get_or_create_node(&element.nodes[2]);
         let bulk = circuit.get_or_create_node(&element.nodes[3]);
+        let instance_params = accepted_instance_params(
+            &element.name,
+            instance_params,
+            crate::device::EkvMosfet::INSTANCE_PARAMS,
+        );
         let device = crate::device::EkvMosfet::from_params(
             element.name.clone(),
             MosTerminals {
@@ -1226,7 +1231,7 @@ impl Engine {
             },
             device_mos_type,
             params_map,
-            instance_params,
+            &instance_params,
             circuit_temperature_kelvin,
         )
         .map_err(|error| {
@@ -1263,6 +1268,11 @@ impl Engine {
         let gate = circuit.get_or_create_node(&element.nodes[1]);
         let source = circuit.get_or_create_node(&element.nodes[2]);
         let bulk = circuit.get_or_create_node(&element.nodes[3]);
+        let instance_params = accepted_instance_params(
+            &element.name,
+            instance_params,
+            crate::device::Ekv3Device::INSTANCE_PARAMS,
+        );
         let device = crate::device::Ekv3Device::from_params(
             element.name.clone(),
             MosTerminals {
@@ -1273,7 +1283,7 @@ impl Engine {
             },
             device_mos_type,
             params_map,
-            instance_params,
+            &instance_params,
             temperature_kelvin,
         )
         .map_err(|error| {

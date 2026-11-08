@@ -1138,6 +1138,10 @@ pub struct EkvMosfet {
 }
 
 impl EkvMosfet {
+    /// The instance parameters this device reads and checks a card against.
+    #[doc(hidden)]
+    pub const INSTANCE_PARAMS: &'static [&'static str] = EKV26_INSTANCE_PARAMS;
+
     pub fn new_nmos(name: String, terminals: MosTerminals) -> Self {
         Self::new(name, MosType::Nmos, terminals)
     }

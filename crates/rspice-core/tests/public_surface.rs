@@ -616,7 +616,12 @@ const MAX_PUBLIC_ITEMS: usize = 5265;
 // engine/transient/device_noise/processes.rs) warns once per instance and
 // process for a negative power, across every frequency and copy that
 // evaluates it. The census is 1,655, with no slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 1655;
+// `instance_param_reads` adds four and `EkvMosfet::INSTANCE_PARAMS` and
+// `Ekv3Device::INSTANCE_PARAMS` two: the builder in `rspice-core` warns about an
+// unknown instance parameter from what each MOS model's build read, and the
+// VDMOS reader in `rspice-core-devices` notes its reads below it. The census
+// is 1,661, with no slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 1661;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

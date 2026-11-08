@@ -2174,3 +2174,57 @@ fn mos1_transient_weak_inversion_charge_uses_the_continued_body_threshold() {
         }
     }
 }
+
+const EKV3_CARD: &str = ".MODEL m NMOS LEVEL=301 SIGN=1 TG=-1 SCALE=1 XL=0 XW=0 COX=8.58E-3 \
+GAMMAG=18.4 AQMA=0 AQMI=0 ETAQM=0.75 VTO=400E-3 PHIF=450E-3 GAMMA=300E-3 XJ=30E-9 N0=1.025 \
+KP=390E-6 E0=438E+6 E1=159E+6 ETA=0.57 ZC=1E-6 THC=0 PDITS=2.58E-6 PDITSD=0.91 PDITSL=0 \
+FPROUT=1.85E+6 DDITS=0.1 AVTO=0 AKP=0 AGAMMA=0 UCRIT=5E+6 DELTA=1.5 LAMBDA=0.5 ACLM=0.85 \
+DL=-16.7E-9 DLC=-23E-9 WDL=0 LL=0 LLN=1 DW=-45.3E-9 DWC=0 LDW=0 LETA0=1E+6 LETA=1.3 LETA2=0 \
+WETA=1 NCS=0.5 ETAD=0.75 SIGMAD=1 LR=100E-9 QLR=580E-6 NLR=100E-3 FLR=2 WR=80E-9 QWR=500E-6 \
+NWR=12E-3 RLX=170E-6 LOV=25E-9 GAMMAOV=5 VFBOV=0 KJF=150E-12 CJF=300E-3 KG=50E-6 XB=5.5 \
+EB=21E+9 LOVIG=40E-12 TNOM=30 TCV=600E-6 BEX=-1.6 TE0EX=-4.15 TE1EX=0 TETA=2E-3 UCEX=1.2 \
+TLAMBDA=0.15 TCVL=0 TCVW=0 TCVWL=0";
+
+/// QSPICE runs a BSIM4 card with `WW=2` and says `Ignoring unknown instance
+/// parameter "WW" of device M1.` Every native MOS family reports a name its
+/// build does not read and builds on without it, and says nothing of a name
+/// it does read.
+#[test]
+fn every_native_mos_family_names_an_unknown_instance_parameter_and_builds() {
+    init_log_capture();
+    let families = [
+        ("BSIM3", ".model m nmos level=49 version=3.3", "nrd=2"),
+        ("BSIM4", ".model m nmos level=54", "nrs=2"),
+        ("B3SOI", ".model m nmos level=55", "nrb=2"),
+        ("EKV26", ".model m nmos level=260 tnom=27", "ns=1"),
+        ("EKV3", EKV3_CARD, "nf=1"),
+        ("VDMOS", ".model m vdmos vto=2 kp=1", "as=1p"),
+    ];
+    for (family, card, known) in families {
+        let geometry = if family == "EKV3" {
+            "w=150n l=150n"
+        } else {
+            "w=1u l=1u"
+        };
+        let device = format!("{family}x");
+        let deck = format!(
+            "* {family}\nvd d 0 1\nvg g 0 1\nm{device} d g 0 0 m {geometry} {known} wwq=2\n{card}\n.end\n"
+        );
+        let netlist = Netlist::parse(&deck).unwrap_or_else(|error| panic!("{family}: {error}"));
+        Engine::new(SimulationConfig::default())
+            .build_circuit(&netlist)
+            .unwrap_or_else(|error| panic!("{family}: {error}"));
+        let known_name = known.split('=').next().unwrap().to_ascii_uppercase();
+        let warnings = CAPTURED_WARNINGS.lock().expect("warning log capture lock");
+        let about_device = |param: &str| {
+            let line =
+                format!("Ignoring unknown instance parameter \"{param}\" of device m{device}.");
+            warnings
+                .iter()
+                .filter(|message| message.eq_ignore_ascii_case(&line))
+                .count()
+        };
+        assert_eq!(about_device("WWQ"), 1, "{family}: {warnings:?}");
+        assert_eq!(about_device(&known_name), 0, "{family}: {warnings:?}");
+    }
+}

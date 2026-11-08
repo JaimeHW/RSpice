@@ -506,6 +506,10 @@ pub struct Ekv3Device {
 }
 
 impl Ekv3Device {
+    /// The instance parameters this device reads and checks a card against.
+    #[doc(hidden)]
+    pub const INSTANCE_PARAMS: &'static [&'static str] = EKV3_INSTANCE_PARAMS;
+
     pub fn from_params(
         name: String,
         terminals: MosTerminals,

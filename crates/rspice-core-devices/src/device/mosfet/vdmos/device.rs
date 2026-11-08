@@ -973,6 +973,7 @@ impl Vdmos {
         instance_params: &[(String, Value)],
     ) -> Self {
         fn instance_value(params: &[(String, Value)], name: &str) -> Option<Value> {
+            rspice_core_base::instance_param_reads::note_instance_param_read(name);
             params.iter().find_map(|(candidate, value)| {
                 candidate.eq_ignore_ascii_case(name).then_some(*value)
             })

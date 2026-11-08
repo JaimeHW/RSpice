@@ -41,6 +41,9 @@ pub mod family_features;
 /// error taxonomy and the deck planner. A leaf, so neither has to reach for
 /// the other to say which analysis or sweep point a value belongs to.
 pub mod identity;
+/// The names a device's build read from its instance parameters.
+#[doc(hidden)]
+pub mod instance_param_reads;
 pub mod io;
 /// Which run a log record belongs to, carried onto the engine's worker threads.
 /// A leaf: the analyses that hand work to another thread read down into it.

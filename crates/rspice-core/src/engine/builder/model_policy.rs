@@ -1055,16 +1055,42 @@ pub(super) fn warn_unknown_instance_params(
     known: &[&str],
 ) {
     for (name, _) in instance_params {
-        if known.iter().any(|known| name.eq_ignore_ascii_case(known)) {
-            continue;
+        if !known.iter().any(|known| name.eq_ignore_ascii_case(known)) {
+            warn_ignored_instance_param(element_name, name);
         }
-        let line = format!(
-            "Ignoring unknown instance parameter \"{}\" of device {element_name}.",
-            name.to_ascii_uppercase()
-        );
-        if crate::log_scope::first_saying(&line) {
-            log::warn!("{line}");
-        }
+    }
+}
+
+/// Report each instance parameter the device's build never asked for.
+pub(super) fn warn_unread_instance_params(element_name: &str, reads: InstanceParamReads) {
+    for name in reads.unread() {
+        warn_ignored_instance_param(element_name, &name);
+    }
+}
+
+/// The instance parameters a device that refuses unknown names can be built
+/// from: `known` is the list the device checks against, and the rest are
+/// reported and dropped.
+pub(super) fn accepted_instance_params(
+    element_name: &str,
+    instance_params: &[(String, f64)],
+    known: &[&str],
+) -> Vec<(String, f64)> {
+    warn_unknown_instance_params(element_name, instance_params, known);
+    instance_params
+        .iter()
+        .filter(|(name, _)| known.iter().any(|known| name.eq_ignore_ascii_case(known)))
+        .cloned()
+        .collect()
+}
+
+pub(super) fn warn_ignored_instance_param(element_name: &str, name: &str) {
+    let line = format!(
+        "Ignoring unknown instance parameter \"{}\" of device {element_name}.",
+        name.to_ascii_uppercase()
+    );
+    if crate::log_scope::first_saying(&line) {
+        log::warn!("{line}");
     }
 }
 
@@ -1696,6 +1722,8 @@ pub(super) fn native_mos_instance_multiplier(
     family: &str,
     instance_params: &[(String, f64)],
 ) -> Result<f64, SimulationError> {
+    note_instance_param_read("M");
+    note_instance_param_read("MULT");
     let mut multiplier = None;
     for (alias, value) in instance_params
         .iter()
@@ -1723,6 +1751,7 @@ pub(super) fn native_bsim4v8_instance_selector(
     default: i32,
     allowed: &[i32],
 ) -> Result<(i32, bool), SimulationError> {
+    note_instance_param_read(param);
     let Some((_, raw)) = instance_params
         .iter()
         .find(|(name, _)| name.eq_ignore_ascii_case(param))
@@ -1767,6 +1796,7 @@ pub(super) fn native_mos_instance_integer_selector_reset_to_default(
     default: i32,
     allowed: &[i32],
 ) -> Result<(i32, bool), SimulationError> {
+    note_instance_param_read(param);
     if let Some((_, expr)) = deferred_params
         .iter()
         .find(|(name, _)| name.eq_ignore_ascii_case(param))
@@ -1821,6 +1851,7 @@ pub(super) fn native_b3soi_debug_mod(
     instance_params: &[(String, f64)],
     deferred_params: &[(String, String)],
 ) -> Result<Option<i32>, SimulationError> {
+    note_instance_param_read("DEBUG");
     for (name, expr) in deferred_params {
         if name.eq_ignore_ascii_case("DEBUG") {
             return Err(SimulationError::Circuit(format!(
