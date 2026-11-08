@@ -1199,3 +1199,29 @@ R3 o3 0 1k
     assert_close("V(out)", op_voltage(&netlist, "out"), 0.5, 1e-9);
     assert_close("V(o3)", op_voltage(&netlist, "o3"), 0.396004, 2e-6);
 }
+
+// HSPICE's `.DCVOLT` is its `.IC`; Xyce reads both spellings the same way
+// (QSPICE ignores the card and LTspice rejects it).
+#[test]
+fn a_dcvolt_card_sets_initial_conditions_like_ic() {
+    let netlist = parse(
+        "* dcvolt
+c1 a 0 1n
+r1 a 0 1k
+c2 b 0 1n
+r2 b 0 1k
+.dcvolt v(a)=1
+.dcvolt b 2
+.tran 10n 5u uic
+.end
+",
+    );
+    let initial = |node: &str| {
+        netlist
+            .initial_conditions
+            .iter()
+            .find(|condition| condition.node.eq_ignore_ascii_case(node))
+            .map(|condition| condition.voltage)
+    };
+    assert_eq!((initial("a"), initial("b")), (Some(1.0), Some(2.0)));
+}

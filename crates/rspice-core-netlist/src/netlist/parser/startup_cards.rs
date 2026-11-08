@@ -69,7 +69,8 @@ impl StartupCardPlan {
         sink: StartupCardSink<'_>,
     ) -> Result<bool, ParseError> {
         let head = match command {
-            ".IC" => Head::Voltage(StartupDirectiveKind::Ic),
+            // HSPICE's `.DCVOLT` is its `.IC`, in both spellings.
+            ".IC" | ".DCVOLT" => Head::Voltage(StartupDirectiveKind::Ic),
             ".NODESET" => Head::Voltage(StartupDirectiveKind::NodeSet),
             ".INITCOND" => Head::Device,
             _ => return Ok(false),
