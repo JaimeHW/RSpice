@@ -51,6 +51,66 @@ fn generated_noise_is_independently_selectable() {
     );
 }
 
+/// A module that declares no `m` of its own takes the card's `m` as the
+/// instance's multiplicity: the same circuit as that many devices in parallel,
+/// at bias, in the small signal and through a transient.
+#[cfg(feature = "veriloga-model-diode-cmc")]
+#[test]
+fn a_generated_instance_multiplier_is_that_many_parallel_instances() {
+    use rspice_core::engine::Engine;
+    use rspice_core::netlist::Netlist;
+
+    let response = |devices: &str| -> [f64; 4] {
+        let deck = format!(
+            "* DIODE_CMC multiplier
+             vdd g 0 dc 5 ac 1 pulse(5 6 0 1n 1n 5n 20n)
+             rl g d 10k
+             {devices}
+             .model dmod D level=2002
+             .end
+"
+        );
+        let netlist = Netlist::parse_validated(&deck).expect("DIODE_CMC deck parses");
+        let engine = Engine::default();
+        let position = |names: &[String]| {
+            names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("d"))
+                .expect("node d")
+        };
+        let op = engine.run_dc_op(&netlist).expect("operating point");
+        let ac = engine.run_ac(&netlist, &[1.0e6]).expect("AC");
+        let tran = engine
+            .run_tran(&netlist, 4.0e-9, 0.1e-9)
+            .expect("transient");
+        let small_signal = ac[0].voltages[position(&ac[0].node_names)];
+        [
+            op.node_voltages[position(&op.node_names)],
+            small_signal.re,
+            small_signal.im,
+            *tran.voltages[position(&tran.node_names)]
+                .last()
+                .expect("transient samples"),
+        ]
+    };
+
+    let multiplied = response("d1 d 0 dmod m=2");
+    let parallel = response("d1 d 0 dmod\nd2 d 0 dmod");
+    let single = response("d1 d 0 dmod");
+    for (index, (multiplied, parallel)) in multiplied.iter().zip(parallel).enumerate() {
+        assert!(
+            (multiplied - parallel).abs() <= 1.0e-9 * parallel.abs(),
+            "response {index}: m=2 gave {multiplied}, two instances {parallel}"
+        );
+    }
+    assert!(
+        (multiplied[0] - single[0]).abs() > 1.0e-3,
+        "m=2 must not be one device: {} against {}",
+        multiplied[0],
+        single[0]
+    );
+}
+
 /// A build that carries the generated catalog without its noise schedules
 /// contributes no noise from a generated card at all, where the native port
 /// for the same level contributes several. Nothing used to say so: the

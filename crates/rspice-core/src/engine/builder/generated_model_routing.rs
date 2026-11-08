@@ -396,8 +396,8 @@ pub(super) fn try_route_generated_mos_model(
 
 /// Whether a MOS card's instance key means anything to `target`: a parameter
 /// the module declares for instances, or a keyword the route owns. A
-/// multiplier stays too, so that a module without one refuses it by name
-/// rather than simulate a single device.
+/// multiplier stays too: the generated registry takes `m` as the instance's
+/// multiplicity when the module declares no `m` of its own.
 fn generated_mos_instance_key_is_known(target: GeneratedTarget, name: &str) -> bool {
     is_internal_routing_param(name)
         || matches_model_type(name, &["M", "MULT"])
