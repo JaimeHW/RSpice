@@ -263,6 +263,7 @@ impl XyceTestRunner {
                     && Self::nodes_match(&vcos.nodes, &["1", "1a"])
                     && matches!(&vcos.kind, ElementKind::VoltageSource(SourceSpec::Sin {
                         offset, amplitude, frequency, delay, damping, phase,
+                        ..
                     }) if offset.to_bits() == 0.0f64.to_bits()
                         && amplitude.to_bits() == 5.0f64.to_bits()
                         && frequency.to_bits() == RESISTOR_SOURCE_FREQUENCY.to_bits()

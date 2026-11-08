@@ -2834,6 +2834,7 @@ mod tests {
                         delay: 0.0,
                         damping: 0.0,
                         phase: 0.0,
+                        cycles: None,
                     }),
                 }),
             },
@@ -2947,6 +2948,7 @@ mod tests {
                     delay: 0.0,
                     damping: 0.0,
                     phase: 0.0,
+                    cycles: None,
                 }),
             },
         );
@@ -3163,6 +3165,7 @@ mod tests {
                     delay: 0.0,
                     damping: 0.0,
                     phase: 0.0,
+                    cycles: None,
                 }),
             },
         );
@@ -3181,6 +3184,7 @@ mod tests {
             delay: 0.0,
             damping: 0.0,
             phase: 0.0,
+            cycles: None,
         });
         assert_close(
             sources
@@ -3196,6 +3200,7 @@ mod tests {
             delay: 0.0,
             damping: 0.0,
             phase: 0.0,
+            cycles: None,
         });
         // Xyce SinData::getMaxTimeStepSize returns 0.1 / FREQ. An
         // authored zero is a constant waveform with no finite device cap.
@@ -3211,6 +3216,7 @@ mod tests {
             delay: 0.0,
             damping: 0.0,
             phase: 0.0,
+            cycles: None,
         };
 
         let value = source_at(&spec, 2.5e-9, transient_context(1.0e-9, 10.0e-9));
@@ -3227,6 +3233,7 @@ mod tests {
             delay: 0.0,
             damping: 0.0,
             phase: 0.0,
+            cycles: None,
         };
 
         let value = source_at(&spec, 2.5e-9, transient_context(1.0e-9, 10.0e-9));
@@ -3301,6 +3308,7 @@ mod tests {
             delay: 5.0e-9,
             damping: 0.0,
             phase: std::f64::consts::FRAC_PI_2,
+            cycles: None,
         };
         let value = source_at(&spec, 1.0e-9, transient_context(1.0e-9, 10.0e-9));
         assert_close(value, 3.0);

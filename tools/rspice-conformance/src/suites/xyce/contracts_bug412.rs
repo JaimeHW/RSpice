@@ -265,6 +265,7 @@ impl XyceTestRunner {
                 delay,
                 damping,
                 phase,
+                ..
             }) if offset.to_bits() == SOURCE_OFFSET.to_bits()
                 && amplitude.to_bits() == SOURCE_AMPLITUDE.to_bits()
                 && frequency.to_bits() == SOURCE_FREQUENCY.to_bits()

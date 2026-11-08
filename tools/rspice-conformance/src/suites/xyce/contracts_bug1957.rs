@@ -269,6 +269,7 @@ impl XyceTestRunner {
             || !Self::nodes_match(&source.nodes, &["1", "0"])
             || !matches!(&source.kind, ElementKind::VoltageSource(SourceSpec::Sin {
                 offset, amplitude, frequency, delay, damping, phase,
+                ..
             }) if offset.to_bits() == 0.0f64.to_bits()
                 && amplitude.to_bits() == 169.7f64.to_bits()
                 && frequency.to_bits() == 60.0f64.to_bits()

@@ -98,7 +98,12 @@ pub(super) fn describe(source: &SourceSpec) -> Value {
             delay,
             damping,
             phase,
-        } => numeric_record!("sin", [offset, amplitude, frequency, delay, damping, phase]),
+            cycles,
+        } => numeric_record!(
+            "sin",
+            [offset, amplitude, frequency, delay, damping, phase],
+            cycles
+        ),
         Pwl {
             points,
             delay,

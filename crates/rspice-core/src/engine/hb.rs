@@ -2325,6 +2325,7 @@ mod tests {
                 delay: 0.0,
                 damping: 0.0,
                 phase: 0.0,
+                cycles: None,
             };
             let mut circuit = engine.build_circuit(&deck).unwrap();
             circuit.current_sources.source_specs[0] = Some(source);
@@ -3187,6 +3188,7 @@ mod tests {
             delay: 0.0,
             damping: 0.0,
             phase: 0.0,
+            cycles: None,
         };
         let spectrum = Engine::hb_source_spectrum(
             2.0,
@@ -3219,6 +3221,7 @@ mod tests {
                 delay: 0.0,
                 damping: 0.0,
                 phase: 0.0,
+                cycles: None,
             }),
         };
         for source in [source.clone(), source.with_dc_value(0.0)] {
@@ -3250,6 +3253,7 @@ mod tests {
             delay: 0.0,
             damping: 0.0,
             phase: 0.0,
+            cycles: None,
         };
         let spectrum = Engine::hb_source_spectrum(
             2.0,
@@ -3276,6 +3280,7 @@ mod tests {
             delay: 0.0,
             damping: 0.0,
             phase: 0.0,
+            cycles: None,
         };
         let err = Engine::hb_source_spectrum(
             0.0,

@@ -2153,6 +2153,7 @@ impl Engine {
                 delay,
                 damping,
                 phase,
+                ..
             } => {
                 match param_name {
                     "V0" | "VO" | "OFFSET" => *offset = value,
@@ -3105,6 +3106,7 @@ I1 out 0 DC 0 SIN(0 1 1k 0 0 0)
             delay: 0.0,
             damping: 0.0,
             phase: 0.0,
+            cycles: None,
         }
         .with_ac(2.0, 0.25);
         Engine::set_sin_source_parameter(&mut spec, "PHASE", 90.0).unwrap();

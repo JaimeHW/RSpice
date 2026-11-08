@@ -635,6 +635,7 @@ impl XyceTestRunner {
             delay,
             damping,
             phase,
+            ..
         }) = &voltage_source.kind
         else {
             return Err(format!(

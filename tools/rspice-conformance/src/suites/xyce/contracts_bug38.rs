@@ -305,6 +305,7 @@ impl XyceTestRunner {
                     delay,
                     damping,
                     phase,
+                    ..
                 }) if nodes == ["1", "0"]
                     && offset.to_bits() == 0.0f64.to_bits()
                     && amplitude.to_bits() == 10.0f64.to_bits()

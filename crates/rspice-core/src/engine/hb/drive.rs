@@ -297,6 +297,7 @@ impl Engine {
                 delay,
                 damping,
                 phase,
+                cycles,
             } => {
                 for (name, value) in [
                     ("offset", *offset),
@@ -321,6 +322,14 @@ impl Engine {
                 if *damping != 0.0 {
                     return Err(HbError::InvalidConfig(
                         "HB requires periodic sources; a damped SIN waveform is not periodic"
+                            .to_string(),
+                    )
+                    .into());
+                }
+                if cycles.is_some() {
+                    return Err(HbError::InvalidConfig(
+                        "HB requires periodic sources; a SIN that stops after NCYCLES is not \
+                         periodic"
                             .to_string(),
                     )
                     .into());

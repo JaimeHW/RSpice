@@ -581,6 +581,7 @@ impl XyceTestRunner {
                     delay,
                     damping,
                     phase,
+                    ..
                 }) if nodes.len() == 2
                     && [*offset, *amplitude, *frequency, *delay, *damping, *phase]
                         .into_iter()
@@ -864,6 +865,7 @@ impl XyceTestRunner {
                     delay,
                     damping,
                     phase,
+                    ..
                 }) if nodes.len() == 2
                     && [*offset, *amplitude, *frequency, *delay, *damping, *phase]
                         .into_iter()
@@ -1529,6 +1531,7 @@ impl XyceTestRunner {
             delay,
             damping,
             phase,
+            ..
         } = transient.as_ref()
         else {
             return Err("ABM_FREQ current source transient waveform must be SIN".to_string());
@@ -5882,6 +5885,7 @@ impl XyceTestRunner {
                     delay,
                     damping,
                     phase,
+                    ..
                 }) => {
                     if source.is_some() {
                         return Err("exact SIN/SPICE_SIN parity requires exactly one excitation"

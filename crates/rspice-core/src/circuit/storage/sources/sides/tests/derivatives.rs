@@ -41,6 +41,7 @@ fn causal_event_orders_affine_source_curvature_does_not_erase_value_or_slope_jum
                 delay: 1.0,
                 damping: 0.0,
                 phase: 0.7,
+                cycles: None,
             },
             dialect,
         );
@@ -246,6 +247,7 @@ fn physical_source_slopes_select_delayed_analytic_carriers_and_wrappers() {
         delay: 1.0,
         damping: 0.1,
         phase: 0.3,
+        cycles: None,
     };
     let expected = 2.0 * (std::f64::consts::FRAC_PI_2 * 0.3_f64.cos() - 0.1 * 0.3_f64.sin());
     let pair = sources(

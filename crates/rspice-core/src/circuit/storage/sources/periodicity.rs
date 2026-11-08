@@ -363,11 +363,13 @@ impl VoltageSources {
                 frequency,
                 delay,
                 damping,
+                cycles,
                 ..
             } => {
                 let frequency = Self::resolve_sin_frequency(*frequency, context);
                 *amplitude == 0.0
                     || (*damping == 0.0
+                        && cycles.is_none()
                         && (frequency == 0.0
                             || (*delay <= 0.0 && integral_cycles(frequency.abs() * period))))
             }

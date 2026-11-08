@@ -183,6 +183,7 @@ impl XyceTestRunner {
             }) if dc_value.to_bits() == 0.0f64.to_bits()
                 && matches!(transient.as_ref(), SourceSpec::Sin {
                     offset, amplitude, frequency, delay, damping, phase,
+                    ..
                 } if offset.to_bits() == 0.0f64.to_bits()
                     && amplitude.to_bits() == 1.0f64.to_bits()
                     && frequency.to_bits() == 1_000.0f64.to_bits()

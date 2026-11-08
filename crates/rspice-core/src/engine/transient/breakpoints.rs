@@ -604,12 +604,33 @@ impl Engine {
                     }
                 }
             }
-            SourceSpec::Sin { delay, .. } => {
+            SourceSpec::Sin {
+                delay,
+                frequency,
+                cycles,
+                ..
+            } => {
                 // Xyce 7.10 SinData inherits SourceData's no-op breakpoint
                 // implementation.  Its delay remains part of the waveform,
                 // but it is not registered with StepErrorControl.
                 if exact || dialect != crate::engine::SpiceDialect::Xyce {
                     Self::add_source_clock_if_in_range(breakpoints, *delay, tstop);
+                }
+                // A SIN limited to NCYCLES bends where its last cycle ends.
+                let frequency = if frequency.is_nan() && tstop > 0.0 {
+                    1.0 / tstop
+                } else {
+                    *frequency
+                };
+                if let Some(cycles) = cycles.filter(|cycles| *cycles > 0.0)
+                    && frequency.is_finite()
+                    && frequency > 0.0
+                {
+                    Self::add_source_clock_if_in_range(
+                        breakpoints,
+                        *delay + cycles / frequency,
+                        tstop,
+                    );
                 }
             }
             SourceSpec::Pwl {
@@ -1916,6 +1937,7 @@ mod tests {
                 delay: 10.0e-9,
                 damping: 0.0,
                 phase: 0.0,
+                cycles: None,
             },
             crate::netlist::SourceSpec::Sffm {
                 offset: 0.0,

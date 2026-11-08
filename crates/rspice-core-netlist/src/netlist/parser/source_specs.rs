@@ -1252,6 +1252,14 @@ fn parse_sin_spec(
     // SPICE SIN phase is specified in degrees; store radians internally.
     let phase = source_value_or_default(stream, line_num, params, "SIN", "PHASE", has_paren, 0.0)?
         .to_radians();
+    // LTspice and QSPICE stop after NCYCLES cycles; a count that is not
+    // positive runs on, as in both. Xyce reads six values.
+    let cycles = if xyce_source_dialect(params) {
+        None
+    } else {
+        source_optional_value(stream, line_num, params, "SIN", "NCYCLES", has_paren)?
+            .filter(|cycles| *cycles > 0.0)
+    };
 
     close_source_args(stream, line_num, "SIN", has_paren)?;
 
@@ -1262,6 +1270,7 @@ fn parse_sin_spec(
         delay,
         damping,
         phase,
+        cycles,
     })
 }
 

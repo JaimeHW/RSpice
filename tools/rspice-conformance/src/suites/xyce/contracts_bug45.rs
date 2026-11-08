@@ -226,6 +226,7 @@ impl XyceTestRunner {
                 delay,
                 damping,
                 phase,
+                ..
             }) if offset.to_bits() == 0.0f64.to_bits()
                 && amplitude.to_bits() == 10.0f64.to_bits()
                 && frequency.to_bits() == 1_000.0f64.to_bits()

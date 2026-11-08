@@ -179,6 +179,7 @@ impl XyceTestRunner {
             delay,
             damping,
             phase,
+            ..
         }) = &source.kind
         else {
             return Err(format!("{LABEL} voltage source must be direct SIN"));

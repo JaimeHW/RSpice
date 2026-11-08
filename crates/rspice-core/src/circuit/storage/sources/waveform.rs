@@ -133,14 +133,30 @@ impl VoltageSources {
                 delay,
                 damping,
                 phase,
+                cycles,
                 ..
             } => {
                 if time == *delay && side == SourceTimeSide::LeftLimit {
                     return Some(0.0);
                 }
+                let frequency = Self::resolve_sin_frequency(*frequency, context);
+                if let Some(end) = sin_burst_end(*cycles, frequency)
+                    && (time - delay > end
+                        || (time - delay == end && side != SourceTimeSide::LeftLimit))
+                {
+                    // The phase stops; a damped envelope decays on.
+                    return tone(
+                        *amplitude,
+                        0.0,
+                        std::f64::consts::TAU * frequency * end + phase,
+                        *damping,
+                        time - delay,
+                        1,
+                    );
+                }
                 tone(
                     *amplitude,
-                    std::f64::consts::TAU * Self::resolve_sin_frequency(*frequency, context),
+                    std::f64::consts::TAU * frequency,
                     *phase,
                     *damping,
                     time - delay,
@@ -591,9 +607,28 @@ impl VoltageSources {
                 delay,
                 damping,
                 phase,
+                cycles,
             } => {
                 let frequency = Self::resolve_sin_frequency(*frequency, context);
-                if time < *delay
+                let end = sin_burst_end(*cycles, frequency);
+                if let Some(end) = end
+                    && (time - delay > end
+                        || (time - delay == end
+                            && !(DERIVATIVE && side == SourceTimeSide::LeftLimit)))
+                {
+                    // QSPICE stops the phase where the last cycle ends and
+                    // lets a damped envelope decay on; LTspice also stops the
+                    // envelope, which is the same for an undamped SIN.
+                    let t = time - delay;
+                    let held = amplitude
+                        * (-damping * t).exp()
+                        * (2.0 * PI * frequency * end + phase).sin();
+                    if DERIVATIVE {
+                        -damping * held
+                    } else {
+                        offset + held
+                    }
+                } else if time < *delay
                     || (DERIVATIVE && time == *delay && side == SourceTimeSide::LeftLimit)
                 {
                     // ngspice holds VO + VA*sin(PHASE) before the delay,
@@ -878,6 +913,14 @@ impl VoltageSources {
     }
 }
 
+/// How long after its delay a SIN of `cycles` cycles at `frequency` runs.
+fn sin_burst_end(cycles: Option<Value>, frequency: Value) -> Option<Value> {
+    cycles
+        .filter(|cycles| *cycles > 0.0)
+        .filter(|_| frequency.is_finite() && frequency > 0.0)
+        .map(|cycles| cycles / frequency)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -975,6 +1018,7 @@ mod tests {
             delay: 0.1,
             damping: 0.0,
             phase,
+            cycles: None,
         };
         let omega = std::f64::consts::TAU * frequency;
         for (order, expected) in [
@@ -1034,6 +1078,7 @@ mod tests {
             delay: 0.1,
             damping: 0.7,
             phase: 37.0_f64.to_radians(),
+            cycles: None,
         };
         assert_eq!(
             VoltageSources::source_time_component::<true>(&sinusoid, 0.05, None, None),

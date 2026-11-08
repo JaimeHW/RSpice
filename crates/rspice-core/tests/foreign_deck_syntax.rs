@@ -1935,3 +1935,37 @@ fn a_diode_whose_model_is_missing_takes_the_default_parameters() {
         "{error}"
     );
 }
+
+// QSPICE 2026 and LTspice 26.1.1 batches: a SIN stops after NCYCLES and
+// holds the phase its last cycle ends on; a count that is not positive runs
+// on. Past the end QSPICE lets a damped envelope decay on (V(c) is
+// 1 + 2e^(-200 t)) where LTspice freezes it at 2.5576; QSPICE decides.
+#[test]
+fn a_sin_stops_after_its_cycle_count() {
+    let netlist = parse(
+        "sin ncycles\n\
+         V1 a 0 SIN(0.5 1 1k 0.2m 0 30 2)\n\
+         R1 a 0 1k\n\
+         V2 b 0 SIN(0 1 1k 0 100 0 1.5)\n\
+         R2 b 0 1k\n\
+         V3 c 0 SIN(1 2 1k 0 200 0 1.25)\n\
+         R3 c 0 1k\n\
+         V4 d 0 SIN(0 1 1k 0 0 0 0)\n\
+         R4 d 0 1k\n\
+         .tran 0 4m 0 1u\n\
+         .end\n",
+    );
+    for (time, node, expected) in [
+        (0.1e-3, "a", 1.0),
+        (0.6e-3, "a", 0.604528463),
+        (2.5e-3, "a", 1.0),
+        (0.6e-3, "b", -0.553552667),
+        (2.5e-3, "b", 0.0),
+        (1.6e-3, "c", 2.452298081),
+        (3.7e-3, "c", 1.954227833),
+        (3.7e-3, "d", -0.951056516),
+    ] {
+        let actual = tran_voltages(&netlist, 4e-3, time, &[node])[0];
+        assert_close(&format!("V({node}) at {time:e}"), actual, expected, 1e-4);
+    }
+}

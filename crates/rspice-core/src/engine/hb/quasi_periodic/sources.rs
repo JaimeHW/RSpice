@@ -118,12 +118,18 @@ impl Projector<'_> {
                 delay,
                 damping,
                 phase,
+                cycles,
             } => {
                 let mut spectrum = self.constant(*offset)?;
                 if *amplitude != 0.0 {
                     if *damping != 0.0 {
                         return Err(invalid(
                             "a damped SIN has no stationary quasiperiodic drive",
+                        ));
+                    }
+                    if cycles.is_some() {
+                        return Err(invalid(
+                            "a SIN that stops after NCYCLES has no stationary quasiperiodic drive",
                         ));
                     }
                     let phase = phase

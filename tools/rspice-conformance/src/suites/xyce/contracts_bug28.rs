@@ -232,6 +232,7 @@ impl XyceTestRunner {
                 delay,
                 damping,
                 phase,
+                ..
             }) if netlist.elements[3].name.eq_ignore_ascii_case("VSRC")
                 && Self::nodes_match(&netlist.elements[3].nodes, &["node1", "0"])
                 && offset.to_bits() == 0.0f64.to_bits()

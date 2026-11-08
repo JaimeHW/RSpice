@@ -155,6 +155,7 @@ mod tests {
             delay: 0.0,
             damping: 0.0,
             phase: 0.0,
+            cycles: None,
         };
         assert_eq!(extract_ac_value(&spec), (0.0, 0.0));
 
@@ -185,6 +186,7 @@ mod tests {
             delay: 0.0,
             damping: 0.0,
             phase: std::f64::consts::FRAC_PI_2,
+            cycles: None,
         };
         assert_eq!(extract_dc_value(&spec), 3.0);
     }

@@ -851,6 +851,7 @@ impl XyceTestRunner {
                 delay,
                 damping,
                 phase,
+                ..
             } if [*offset, *amplitude, *frequency, *delay, *damping, *phase]
                 .into_iter()
                 .all(Value::is_finite)

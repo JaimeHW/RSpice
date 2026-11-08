@@ -2098,7 +2098,7 @@ pub enum SourceSpec {
         width_defaults_to_zero: bool,
     },
 
-    /// Sinusoidal source: SIN(vo va freq td theta phase)
+    /// Sinusoidal source: SIN(vo va freq td theta phase [ncycles])
     Sin {
         offset: Value,
         amplitude: Value,
@@ -2106,6 +2106,10 @@ pub enum SourceSpec {
         delay: Value,
         damping: Value,
         phase: Value,
+        /// LTspice's and QSPICE's NCYCLES: after this many cycles the source
+        /// holds the value it reached. `None`, or a count that is not
+        /// positive, runs on for ever.
+        cycles: Option<Value>,
     },
 
     /// Piecewise linear source: PWL(t1 v1 t2 v2 ...) [TD=delay] [R=repeat_time]
