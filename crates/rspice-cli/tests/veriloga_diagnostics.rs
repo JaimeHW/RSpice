@@ -66,7 +66,7 @@ fn runtime_warnings_survive_disk_cache_hits_and_are_not_repeated_per_analysis() 
             .unwrap()
             .path()
             .extension()
-            .is_some_and(|extension| extension == "json")
+            .is_some_and(|extension| extension == "record")
     }));
     let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
         .args(["--quiet", "--error-format", "json", "run"])
@@ -217,7 +217,7 @@ fn check_preserves_source_resource_failures_with_cold_and_warm_caches() {
                         .unwrap()
                         .path()
                         .extension()
-                        .is_some_and(|extension| extension == "json")
+                        .is_some_and(|extension| extension == "record")
                 }));
             }
             let config = root.join("config.toml");
