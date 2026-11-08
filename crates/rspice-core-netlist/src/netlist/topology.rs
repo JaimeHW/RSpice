@@ -59,15 +59,19 @@ impl std::error::Error for ConnectivityAnalysisError {}
 pub fn analyze_xyce_connectivity(
     elements: &[Element],
 ) -> Result<ConnectivityDiagnostics, ConnectivityAnalysisError> {
-    let mut union = NodeUnion::default();
+    let mut union = TerminalNodes::default();
     // Per node, by union index: the first device attached to it, and whether
     // a device of another name is attached too.
     let mut attachments: Vec<Option<(&str, bool)>> = Vec::new();
+    let mut terminals = Vec::new();
+    let mut seen_on_device = Vec::new();
 
     for element in elements {
-        union.collect_element_nodes(element);
-        let mut seen_on_device = Vec::new();
-        for node in connectivity_terminal_nodes(element)? {
+        refuse_model_specific_leads(element)?;
+        terminals.clear();
+        extend_element_terminal_nodes(element, &mut terminals);
+        seen_on_device.clear();
+        for &node in &terminals {
             let index = union.ensure_node(node);
             if seen_on_device.contains(&index) {
                 continue;
@@ -83,13 +87,7 @@ pub fn analyze_xyce_connectivity(
                 }
             }
         }
-        for group in xyce_dc_lead_groups(element)? {
-            if let Some((first, rest)) = group.split_first() {
-                for node in rest {
-                    union.union_nodes(first, node);
-                }
-            }
-        }
+        union.join_groups(element, xyce_dc_lead_groups(element)?);
     }
 
     // A node's normalized name is its key, so sorting the names orders the
@@ -98,23 +96,16 @@ pub fn analyze_xyce_connectivity(
         .iter()
         .enumerate()
         .filter(|(_, attachment)| attachment.is_some_and(|(_, shared)| !shared))
-        .map(|(index, _)| &union.entries[index].original)
-        .filter(|node| !is_ground_name(node))
-        .cloned()
+        .filter(|(index, _)| !is_ground_name(union.name_at(*index)))
+        .map(|(index, _)| union.normalized_name(index))
         .collect::<Vec<_>>();
     one_device_terminal_nodes.sort_unstable();
 
-    let ground_root = union
-        .index_by_key
-        .get(&node_key("0"))
-        .map(|index| union.root_of(*index));
-    let mut no_dc_path_nodes = union
-        .entries
-        .iter()
-        .enumerate()
-        .filter(|(_, entry)| !is_ground_name(&entry.original))
-        .filter(|(index, _)| ground_root.is_none_or(|ground| union.root_of(*index) != ground))
-        .map(|(_, entry)| entry.original.clone())
+    let ground_root = union.index_of("0").map(|index| union.root_of(index));
+    let mut no_dc_path_nodes = (0..union.names.len())
+        .filter(|index| !is_ground_name(union.name_at(*index)))
+        .filter(|index| ground_root.is_none_or(|ground| union.root_of(*index) != ground))
+        .map(|index| union.normalized_name(index))
         .collect::<Vec<_>>();
     no_dc_path_nodes.sort_unstable();
 
@@ -124,18 +115,26 @@ pub fn analyze_xyce_connectivity(
     })
 }
 
-fn connectivity_terminal_nodes(element: &Element) -> Result<Vec<&str>, ConnectivityAnalysisError> {
+/// Refuse a device whose lead groups only its code model knows.
+fn refuse_model_specific_leads(element: &Element) -> Result<(), ConnectivityAnalysisError> {
     if matches!(element.kind, ElementKind::Xspice { .. }) {
         return Err(ConnectivityAnalysisError {
             element: element.name.clone(),
             reason: "XSPICE lead groups are model-specific".to_string(),
         });
     }
-    Ok(all_element_terminal_nodes(element))
+    Ok(())
 }
 
 fn all_element_terminal_nodes(element: &Element) -> Vec<&str> {
-    let mut nodes = element.nodes.iter().map(String::as_str).collect::<Vec<_>>();
+    let mut nodes = Vec::new();
+    extend_element_terminal_nodes(element, &mut nodes);
+    nodes
+}
+
+/// Append every node `element` terminates on, in terminal order.
+fn extend_element_terminal_nodes<'a>(element: &'a Element, nodes: &mut Vec<&'a str>) {
+    nodes.extend(element.nodes.iter().map(String::as_str));
     match &element.kind {
         ElementKind::Vcvs { control_nodes, .. } | ElementKind::Vccs { control_nodes, .. } => {
             nodes.push(&control_nodes.0);
@@ -180,7 +179,6 @@ fn all_element_terminal_nodes(element: &Element) -> Vec<&str> {
         }
         _ => {}
     }
-    nodes
 }
 
 /// Severity assigned to a node with no DC-conducting path to ground.
@@ -320,33 +318,36 @@ pub fn analyze_dc_ground_paths(
 /// contract, against the build's reference: `0` and its aliases, and
 /// `reference`, the net a deck that names no node 0 has aliased to it.
 #[doc(hidden)]
-pub fn analyze_dc_ground_paths_with_ic_modes(
-    elements: &[Element],
+pub fn analyze_dc_ground_paths_with_ic_modes<'a>(
+    elements: &'a [Element],
     capacitor_ic_mode: CapacitorIcDcMode,
     inductor_ic_enforced: bool,
-    reference: Option<&str>,
+    reference: Option<&'a str>,
 ) -> Result<DcGroundPathDiagnostics, ConnectivityAnalysisError> {
-    let mut union = NodeUnion::default();
-    // Every terminal node by union index, in the order the elements first
-    // reach it.
-    let mut order: Vec<usize> = Vec::new();
-    let mut seen: HashSet<usize> = HashSet::new();
-    // Nodes some authored element touches. A rational-transfer realization's
-    // state nodes reach only its own generated elements, and their operating
-    // point is set by that realization's equations -- the state currents read
-    // each other's voltages -- rather than by conduction to ground. Whether
-    // those equations have full rank is not a question a connectivity walk can
-    // answer, so the synthesizer's guarantee stands in for one.
-    let mut authored_nodes: HashSet<usize> = HashSet::new();
-    let mut uncertain_node_keys: BTreeSet<String> = BTreeSet::new();
-    let mut module_terminal_keys: BTreeSet<String> = BTreeSet::new();
+    let mut union = TerminalNodes::default();
+    // By union index, which is the order the elements first reach each node:
+    // whether some authored element touches it. A rational-transfer
+    // realization's state nodes reach only its own generated elements, and
+    // their operating point is set by that realization's equations -- the
+    // state currents read each other's voltages -- rather than by conduction
+    // to ground. Whether those equations have full rank is not a question a
+    // connectivity walk can answer, so the synthesizer's guarantee stands in
+    // for one.
+    let mut authored: Vec<bool> = Vec::new();
+    let mut uncertain_nodes: Vec<usize> = Vec::new();
+    let mut module_terminal_nodes: Vec<usize> = Vec::new();
     let mut analysis_complete = true;
+    let mut terminals = Vec::new();
 
     for element in elements {
-        union.collect_element_nodes(element);
+        terminals.clear();
+        extend_element_terminal_nodes(element, &mut terminals);
         if matches!(element.kind, ElementKind::Subcircuit { .. }) {
             // An X card still standing after flattening is a compiled module.
-            module_terminal_keys.extend(element.nodes.iter().map(|node| node_key(node)));
+            for node in &element.nodes {
+                let index = union.ensure_node(node);
+                module_terminal_nodes.push(index);
+            }
         }
         let synthesized = matches!(
             element.provenance,
@@ -356,48 +357,37 @@ pub fn analyze_dc_ground_paths_with_ic_modes(
                 | crate::netlist::ElementProvenance::GeneratedFrequencyResponseOutput { .. }
                 | crate::netlist::ElementProvenance::GeneratedVariableDelay { .. }
         );
-        let terminal_nodes = connectivity_terminal_nodes(element).unwrap_or_else(|_| {
+        let model_specific_leads = refuse_model_specific_leads(element).is_err();
+        if model_specific_leads {
             analysis_complete = false;
-            let terminals = all_element_terminal_nodes(element);
-            uncertain_node_keys.extend(terminals.iter().map(|node| node_key(node)));
-            terminals
-        });
-        for node in terminal_nodes {
+        }
+        for &node in &terminals {
             let index = union.ensure_node(node);
-            if !synthesized {
-                authored_nodes.insert(index);
+            if authored.len() <= index {
+                authored.resize(index + 1, false);
             }
-            if seen.insert(index) {
-                order.push(index);
+            authored[index] |= !synthesized;
+            if model_specific_leads {
+                uncertain_nodes.push(index);
             }
         }
-        let conduction_groups =
-            dc_conduction_groups(element, capacitor_ic_mode, inductor_ic_enforced).unwrap_or_else(
-                |_| {
-                    analysis_complete = false;
-                    uncertain_node_keys.extend(
-                        all_element_terminal_nodes(element)
-                            .into_iter()
-                            .map(node_key),
-                    );
-                    Vec::new()
-                },
-            );
-        for group in conduction_groups {
-            if let Some((first, rest)) = group.split_first() {
-                for node in rest {
-                    union.union_nodes(first, node);
+        match dc_conduction_groups(element, capacitor_ic_mode, inductor_ic_enforced) {
+            Ok(groups) => union.join_groups(element, groups),
+            Err(_) => {
+                analysis_complete = false;
+                for &node in &terminals {
+                    uncertain_nodes.push(union.ensure_node(node));
                 }
             }
         }
     }
     // The aliased net is node 0, so a terminal a card ties to node 0 by its
     // syntax alone is on it too.
-    if let Some(reference) = reference {
-        let (zero, aliased) = (node_key("0"), node_key(reference));
-        if union.index_by_key.contains_key(&zero) && union.index_by_key.contains_key(&aliased) {
-            union.union_nodes("0", reference);
-        }
+    if let Some(reference) = reference
+        && union.index_of("0").is_some()
+        && union.index_of(reference).is_some()
+    {
+        union.union_nodes("0", reference);
     }
 
     // Classify whole DC-conductive components, not merely source terminals.
@@ -412,8 +402,8 @@ pub fn analyze_dc_ground_paths_with_ic_modes(
     for element in elements {
         let roots: BTreeSet<usize> = dc_current_constraint_nodes(element)
             .iter()
-            .filter_map(|node| union.index_by_key.get(&node_key(node)))
-            .map(|index| union.root_of(*index))
+            .filter_map(|node| union.index_of(node))
+            .map(|index| union.root_of(index))
             .collect();
         if roots.len() > 1 {
             if matches!(element.kind, ElementKind::CurrentSource(_)) {
@@ -424,70 +414,59 @@ pub fn analyze_dc_ground_paths_with_ic_modes(
         }
     }
 
-    let uncertain_roots: BTreeSet<usize> = uncertain_node_keys
+    let uncertain_roots: BTreeSet<usize> = uncertain_nodes
         .iter()
-        .filter_map(|key| union.index_by_key.get(key))
         .map(|index| union.root_of(*index))
         .collect();
 
     let Some(ground) = union
-        .index_by_key
-        .get(&node_key("0"))
-        .or_else(|| reference.and_then(|reference| union.index_by_key.get(&node_key(reference))))
-        .map(|index| union.root_of(*index))
+        .index_of("0")
+        .or_else(|| reference.and_then(|reference| union.index_of(reference)))
+        .map(|index| union.root_of(index))
     else {
         // No ground reference at all. Circuit validation owns that report;
         // every node would otherwise be listed here.
         return Ok(DcGroundPathDiagnostics::default());
     };
 
-    let no_dc_path_nodes: Vec<String> = order
-        .into_iter()
-        .filter(|index| authored_nodes.contains(index) && union.root_of(*index) != ground)
-        .map(|index| &union.entries[index].original)
-        .filter(|node| !is_reference(node, reference))
-        .cloned()
+    let floating: Vec<usize> = (0..union.names.len())
+        .filter(|index| authored[*index] && union.root_of(*index) != ground)
+        .filter(|index| !is_reference(union.name_at(*index), reference))
+        .collect();
+    let no_dc_path_nodes: Vec<String> = floating
+        .iter()
+        .map(|index| union.normalized_name(*index))
         .collect();
 
-    let node_diagnostics = no_dc_path_nodes
+    let node_diagnostics = floating
         .iter()
-        .map(|node| {
-            let severity = union
-                .index_by_key
-                .get(&node_key(node))
-                .map(|index| union.root_of(*index))
-                .filter(|root| {
-                    current_driven_roots.contains(root)
-                        && !controlled_current_roots.contains(root)
-                        && !uncertain_roots.contains(root)
-                })
-                .map_or(DcGroundPathSeverity::WarningOnly, |_| {
-                    DcGroundPathSeverity::FatalCurrentDriven
-                });
+        .zip(&no_dc_path_nodes)
+        .map(|(index, node)| {
+            let root = union.root_of(*index);
+            let fatal = current_driven_roots.contains(&root)
+                && !controlled_current_roots.contains(&root)
+                && !uncertain_roots.contains(&root);
             DcGroundPathNodeDiagnostic {
                 node: node.clone(),
-                severity,
+                severity: if fatal {
+                    DcGroundPathSeverity::FatalCurrentDriven
+                } else {
+                    DcGroundPathSeverity::WarningOnly
+                },
             }
         })
         .collect();
 
     let mut component_index_by_root = BTreeMap::new();
     let mut floating_components: Vec<Vec<String>> = Vec::new();
-    let module_roots: BTreeSet<usize> = module_terminal_keys
+    let module_roots: BTreeSet<usize> = module_terminal_nodes
         .iter()
-        .filter_map(|key| union.index_by_key.get(key))
         .map(|index| union.root_of(*index))
         .collect();
     let mut floating_component_is_certain = Vec::new();
     let mut floating_component_has_module_terminal = Vec::new();
-    for node in &no_dc_path_nodes {
-        let Some(root) = union
-            .index_by_key
-            .get(&node_key(node))
-            .map(|index| union.root_of(*index))
-        else {
-            continue;
-        };
+    for (index, node) in floating.iter().zip(&no_dc_path_nodes) {
+        let root = union.root_of(*index);
         let component_index = *component_index_by_root.entry(root).or_insert_with(|| {
             floating_components.push(Vec::new());
             floating_component_is_certain.push(!uncertain_roots.contains(&root));
@@ -736,8 +715,7 @@ fn dc_conduction_groups(
     element: &Element,
     capacitor_ic_mode: CapacitorIcDcMode,
     inductor_ic_enforced: bool,
-) -> Result<Vec<Vec<&str>>, ConnectivityAnalysisError> {
-    let all = || vec![element.nodes.iter().map(String::as_str).collect::<Vec<_>>()];
+) -> Result<LeadGroups<'_>, ConnectivityAnalysisError> {
     if matches!(
         element.provenance,
         super::ElementProvenance::GeneratedDynamicStateDerivative {
@@ -750,7 +728,7 @@ fn dc_conduction_groups(
         // nonsingular algebraic system at DC, so their state voltages are
         // determined without a physical shunt. Preserve that semantic fact
         // across the deliberately conservative conduction-only heuristic.
-        return Ok(all());
+        return Ok(LeadGroups::AllTerminals);
     }
     let groups = match &element.kind {
         // A capacitor carrying an initial condition states a voltage across
@@ -762,7 +740,9 @@ fn dc_conduction_groups(
         ElementKind::Capacitor {
             initial_voltage: Some(_),
             ..
-        } if capacitor_ic_mode == CapacitorIcDcMode::EnforcedConstraint => all(),
+        } if capacitor_ic_mode == CapacitorIcDcMode::EnforcedConstraint => {
+            return Ok(LeadGroups::AllTerminals);
+        }
         // Open at DC: a capacitor blocks it, and a source that prescribes a
         // current leaves the voltage across itself free.
         ElementKind::Inductor {
@@ -778,7 +758,9 @@ fn dc_conduction_groups(
         ElementKind::Coupling { .. } => Vec::new(),
         // A controlled source's sense terminals draw no current, so only its
         // output pair can tie nodes together.
-        ElementKind::Vcvs { .. } | ElementKind::VSwitch { .. } => all(),
+        ElementKind::Vcvs { .. } | ElementKind::VSwitch { .. } => {
+            return Ok(LeadGroups::AllTerminals);
+        }
         ElementKind::Subcircuit { .. }
         | ElementKind::PspiceChebyshev { .. }
         | ElementKind::VoltageSourceDeferred(_)
@@ -825,7 +807,7 @@ fn dc_conduction_groups(
         | ElementKind::Bjt { .. }
         | ElementKind::Jfet { .. }
         | ElementKind::Mesfet { .. }
-        | ElementKind::TransmissionLine { .. } => all(),
+        | ElementKind::TransmissionLine { .. } => return Ok(LeadGroups::AllTerminals),
         ElementKind::Mosfet { .. } => {
             return Err(ConnectivityAnalysisError {
                 element: element.name.clone(),
@@ -836,20 +818,14 @@ fn dc_conduction_groups(
             });
         }
     };
-    Ok(groups)
+    Ok(LeadGroups::Listed(groups))
 }
 
-fn xyce_dc_lead_groups(element: &Element) -> Result<Vec<Vec<&str>>, ConnectivityAnalysisError> {
+fn xyce_dc_lead_groups(element: &Element) -> Result<LeadGroups<'_>, ConnectivityAnalysisError> {
     let all = || vec![element.nodes.iter().map(String::as_str).collect::<Vec<_>>()];
-    let separate = || {
-        element
-            .nodes
-            .iter()
-            .map(|node| vec![node.as_str()])
-            .collect::<Vec<_>>()
-    };
     let groups = match &element.kind {
-        ElementKind::Capacitor { .. } => separate(),
+        // Each lead is a group of its own, which joins nothing.
+        ElementKind::Capacitor { .. } => Vec::new(),
         ElementKind::Bjt { .. } if element.nodes.len() >= 3 => {
             let mut groups = vec![vec![
                 element.nodes[0].as_str(),
@@ -933,7 +909,7 @@ fn xyce_dc_lead_groups(element: &Element) -> Result<Vec<Vec<&str>>, Connectivity
         | ElementKind::BehavioralVoltage { .. }
         | ElementKind::BehavioralCurrent { .. }
         | ElementKind::ISwitch { .. }
-        | ElementKind::GenericSwitch { .. } => all(),
+        | ElementKind::GenericSwitch { .. } => return Ok(LeadGroups::AllTerminals),
         ElementKind::Bjt { .. }
         | ElementKind::Mosfet { .. }
         | ElementKind::Jfet { .. }
@@ -948,7 +924,135 @@ fn xyce_dc_lead_groups(element: &Element) -> Result<Vec<Vec<&str>>, Connectivity
             });
         }
     };
-    Ok(groups)
+    Ok(LeadGroups::Listed(groups))
+}
+
+/// The terminals an element ties together.
+enum LeadGroups<'a> {
+    /// Every node on the element's card, as one group.
+    AllTerminals,
+    /// Only these sets.
+    Listed(Vec<Vec<&'a str>>),
+}
+
+/// A node name that hashes and compares as its [`node_key`] does, without
+/// owning one.
+#[derive(Clone, Copy)]
+struct NodeName<'a>(&'a str);
+
+impl<'a> NodeName<'a> {
+    fn new(name: &'a str) -> Self {
+        Self(if is_ground_name(name) { "0" } else { name })
+    }
+}
+
+impl PartialEq for NodeName<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.eq_ignore_ascii_case(other.0)
+    }
+}
+
+impl Eq for NodeName<'_> {}
+
+impl std::hash::Hash for NodeName<'_> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        with_node_key(self.0, |key| key.hash(state));
+    }
+}
+
+/// The nets of a walk over a deck's elements: the deck's own spellings, keyed
+/// and joined by index.
+#[derive(Default)]
+struct TerminalNodes<'a> {
+    index_by_name: HashMap<NodeName<'a>, usize>,
+    names: Vec<NodeName<'a>>,
+    parents: Vec<usize>,
+    ranks: Vec<u8>,
+}
+
+impl<'a> TerminalNodes<'a> {
+    fn index_of(&self, name: &'a str) -> Option<usize> {
+        self.index_by_name.get(&NodeName::new(name)).copied()
+    }
+
+    fn ensure_node(&mut self, name: &'a str) -> usize {
+        let name = NodeName::new(name);
+        let next = self.names.len();
+        match self.index_by_name.entry(name) {
+            std::collections::hash_map::Entry::Occupied(entry) => *entry.get(),
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                entry.insert(next);
+                self.names.push(name);
+                self.parents.push(next);
+                self.ranks.push(0);
+                next
+            }
+        }
+    }
+
+    /// The first spelling of a net, `0` for ground.
+    fn name_at(&self, index: usize) -> &'a str {
+        self.names[index].0
+    }
+
+    fn normalized_name(&self, index: usize) -> String {
+        self.name_at(index).to_ascii_uppercase()
+    }
+
+    fn find(&mut self, index: usize) -> usize {
+        let parent = self.parents[index];
+        if parent == index {
+            return index;
+        }
+        let root = self.find(parent);
+        self.parents[index] = root;
+        root
+    }
+
+    fn root_of(&self, mut index: usize) -> usize {
+        while self.parents[index] != index {
+            index = self.parents[index];
+        }
+        index
+    }
+
+    fn union_nodes(&mut self, left: &'a str, right: &'a str) {
+        let left = self.ensure_node(left);
+        let right = self.ensure_node(right);
+        let mut left_root = self.find(left);
+        let mut right_root = self.find(right);
+        if left_root == right_root {
+            return;
+        }
+        if self.ranks[left_root] < self.ranks[right_root] {
+            std::mem::swap(&mut left_root, &mut right_root);
+        }
+        self.parents[right_root] = left_root;
+        if self.ranks[left_root] == self.ranks[right_root] {
+            self.ranks[left_root] += 1;
+        }
+    }
+
+    fn join_groups(&mut self, element: &'a Element, groups: LeadGroups<'a>) {
+        match groups {
+            LeadGroups::AllTerminals => {
+                if let Some((first, rest)) = element.nodes.split_first() {
+                    for node in rest {
+                        self.union_nodes(first, node);
+                    }
+                }
+            }
+            LeadGroups::Listed(groups) => {
+                for group in groups {
+                    if let Some((first, rest)) = group.split_first() {
+                        for node in rest {
+                            self.union_nodes(first, node);
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
