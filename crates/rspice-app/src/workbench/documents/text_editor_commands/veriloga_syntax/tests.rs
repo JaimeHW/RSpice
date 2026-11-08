@@ -1,3 +1,7 @@
+//! Verilog-A syntax classes line by line, checked against the compiler's
+//! own reading of the shipped compact models, and the highlighter's
+//! rereading after edits.
+
 use super::*;
 
 /// The class of each word of `line`, read from the start of a file, in order:

@@ -1,3 +1,6 @@
+//! The Verilog-A block words, the folds they make and the indentation a
+//! closing word takes.
+
 use super::*;
 
 /// Only a word of the source opens or closes a block: the same word in a

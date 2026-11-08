@@ -1,3 +1,6 @@
+//! How a compile's findings are held through edits: placed on their text,
+//! shifted with it, and dropped with it when it is deleted.
+
 use super::*;
 use crate::state::code_diagnostics::CodeDiagnosticCollection;
 use rspice_vocabulary::diagnostics::SourceDiagnostic;
