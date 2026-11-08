@@ -38,7 +38,7 @@ const DECLARATION_WORDS: [&str; 9] = [
 /// it, or, when it ended its line, one step in from the statement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Align {
-    Column(usize),
+    Under(usize),
     Hang(usize),
 }
 
@@ -221,7 +221,7 @@ fn place_lines(lines: &mut [Line<'_>]) {
         let level = depth.saturating_add_signed(lowest) * INDENT_WIDTH;
         line.indent = match (brackets.last(), continuing) {
             _ if is_blank => 0,
-            (Some(Align::Column(column)), _) => *column,
+            (Some(Align::Under(column)), _) => *column,
             (Some(Align::Hang(hang)), _) if closes_bracket => hang.saturating_sub(INDENT_WIDTH),
             (Some(Align::Hang(hang)), _) => *hang,
             (None, Some(statement)) if !comment_only && !STANDS_LEVEL.contains(&first_word) => {
@@ -260,7 +260,7 @@ fn follow_brackets(line: &Line<'_>, brackets: &mut Vec<Align>, statement_indent:
                 brackets.push(match next {
                     Some(next) => {
                         let column = line.text[lead..next.range.start].chars().count();
-                        Align::Column(line.indent + column)
+                        Align::Under(line.indent + column)
                     }
                     None => Align::Hang(statement_indent + INDENT_WIDTH),
                 });

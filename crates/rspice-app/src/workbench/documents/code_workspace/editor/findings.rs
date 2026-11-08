@@ -114,10 +114,6 @@ impl HeldFindings {
         self.outdated
     }
 
-    pub(crate) fn is_empty(&self) -> bool {
-        self.findings.is_empty()
-    }
-
     /// The stretch of each line every finding covers, by line.
     pub(crate) fn marks(&self) -> &[SourceMark] {
         &self.marks

@@ -143,10 +143,10 @@ fn a_deleted_line_takes_its_finding_even_when_its_neighbour_starts_alike() {
     // deletion could be read as starting inside the finding.
     let deleted = source.replace("  vslw = 2;\n", "");
     held.keep_through_edits(&deleted, 2);
-    assert!(held.is_empty());
+    assert!(held.iter().next().is_none());
     // A line typed back in the same place is new text, not the finding.
     held.keep_through_edits(source, 3);
-    assert!(held.is_empty());
+    assert!(held.iter().next().is_none());
 }
 
 #[test]
@@ -175,7 +175,7 @@ fn a_fresh_check_replaces_the_held_findings() {
         &CodeDiagnosticCollection::default().view(None),
     );
     assert!(!held.is_outdated());
-    assert!(held.is_empty());
+    assert!(held.iter().next().is_none());
     assert!(held.marks().is_empty());
 }
 
