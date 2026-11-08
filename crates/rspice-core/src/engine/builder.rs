@@ -11074,8 +11074,13 @@ impl Engine {
         check_build_abort(abort)?;
         check_circuit_resource_limits(self, &circuit)?;
 
-        circuit
-            .set_dc_floating_components(dc_floating_components, dc_floating_component_is_certain);
+        let dc_floating_component_is_passive =
+            passive_floating_components(&circuit, &flat_elements, &dc_floating_components);
+        circuit.set_dc_floating_components(
+            dc_floating_components,
+            dc_floating_component_is_certain,
+            dc_floating_component_is_passive,
+        );
         circuit.fatal_no_dc_path_nodes =
             circuit.independent_dc_drive_nodes(self.current_abstol(), self.residual_reltol());
         // QSPICE's DC solve gives every inductor 1 pOhm, so a loop through a

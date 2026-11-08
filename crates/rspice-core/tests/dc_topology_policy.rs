@@ -968,3 +968,122 @@ fn a_loop_through_dc_shorted_windings_is_refused_by_every_dc_solve() {
             .is_empty()
     );
 }
+
+/// A node only capacitors reach takes the voltage its capacitors share
+/// charging up from rest, its net charge zero: 1 V over 1 pF and 3 pF in
+/// series puts 0.25 V between them, at the operating point and where a
+/// transient starts. QSPICE and Xyce give 0.25, ngspice-46 0.249999. Islands
+/// that capacitors chain together settle together, and an island a resistor
+/// joins moves as one.
+#[test]
+fn a_capacitive_island_takes_its_charge_neutral_voltage() {
+    let netlist = parse(
+        "capacitive islands
+         v1 in 0 dc 1 pulse(1 2 1n 10p 10p 2n 4n)
+         r1 in 0 1k
+         c1 in island 1p
+         c2 island 0 3p
+         c3 in upper 1p
+         c4 upper lower 1p
+         c5 lower 0 1p
+         c6 in near 1p
+         r6 near far 1k
+         c7 far 0 1p
+         .end
+",
+    );
+    let expected = [
+        ("island", 0.25),
+        ("upper", 2.0 / 3.0),
+        ("lower", 1.0 / 3.0),
+        ("near", 0.5),
+        ("far", 0.5),
+    ];
+    let op = engine()
+        .run_dc_op(&netlist)
+        .expect("the islands' operating point solves");
+    let transient = engine()
+        .run_tran(&netlist, 2.0e-9, 1.0e-12)
+        .expect("the transient runs");
+    for (node, value) in expected {
+        let settled = voltage(&op, node);
+        assert!((settled - value).abs() <= 1.0e-12, "v({node}) = {settled}");
+        let start = transient
+            .try_voltage_at_named(node, 0)
+            .unwrap_or_else(|| panic!("v({node}) is recorded"));
+        assert!(
+            (start - value).abs() <= 1.0e-12,
+            "v({node}) at t = 0: {start}"
+        );
+    }
+}
+
+/// An initial condition on an island holds it where the condition puts it
+/// for the transient's operating point; the charge-neutral voltage is for an
+/// island nothing pins.
+#[test]
+fn an_initial_condition_holds_a_capacitive_island_at_its_value() {
+    let netlist = parse(
+        "capacitive island under .ic
+         v1 in 0 dc 1 pulse(1 2 1n 10p 10p 2n 4n)
+         r1 in 0 1k
+         c1 in island 1p
+         c2 island 0 3p
+         .ic v(island)=0.7
+         .end
+",
+    );
+    let transient = engine()
+        .run_tran(&netlist, 2.0e-9, 1.0e-12)
+        .expect("the transient runs");
+    let start = transient
+        .try_voltage_at_named("island", 0)
+        .expect("v(island) is recorded");
+    assert!((start - 0.7).abs() <= 1.0e-9, "v(island) at t = 0: {start}");
+}
+
+/// The charge-neutral shift is for an island nothing else reads. A node a
+/// resistor grounds keeps its DC voltage, and an island a controlled source's
+/// control port or a behavioral expression reads keeps the voltage the solve
+/// gave it, so what that element drives stays consistent with it.
+#[test]
+fn a_node_with_a_dc_path_or_a_reader_keeps_its_solved_voltage() {
+    let netlist = parse(
+        "capacitive nodes that are not islands
+         v1 in 0 dc 1 pulse(1 2 1n 10p 10p 2n 4n)
+         r1 in 0 1k
+         c1 in held 1p
+         r2 held 0 1meg
+         c3 in sensed 1p
+         c4 sensed 0 1p
+         e1 copy 0 sensed 0 1
+         r3 copy 0 1k
+         c5 in read 1p
+         c6 read 0 1p
+         b1 echo 0 v=v(read)
+         r4 echo 0 1k
+         .end
+",
+    );
+    let op = engine()
+        .run_dc_op(&netlist)
+        .expect("the operating point solves");
+    let transient = engine()
+        .run_tran(&netlist, 2.0e-9, 1.0e-12)
+        .expect("the transient runs");
+    let start = |node: &str| {
+        transient
+            .try_voltage_at_named(node, 0)
+            .unwrap_or_else(|| panic!("v({node}) is recorded"))
+    };
+    for node in ["held", "sensed", "read"] {
+        let solved = voltage(&op, node);
+        assert!(solved.abs() <= 1.0e-12, "v({node}) = {solved}");
+        let initial = start(node);
+        assert!(initial.abs() <= 1.0e-12, "v({node}) at t = 0: {initial}");
+    }
+    assert_eq!(voltage(&op, "copy"), voltage(&op, "sensed"));
+    assert_eq!(voltage(&op, "echo"), voltage(&op, "read"));
+    assert_eq!(start("copy"), start("sensed"));
+    assert_eq!(start("echo"), start("read"));
+}

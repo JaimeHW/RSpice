@@ -1718,7 +1718,7 @@ impl Engine {
         if !force_initial_conditions {
             self.ensure_dc_paths_to_ground(circuit)?;
         }
-        let solution = match startup {
+        let mut solution = match startup {
             DcOpStartup::ForceInitialConditions => {
                 let hints = self.collect_initial_condition_hints(netlist, circuit);
                 if hints.is_empty() {
@@ -1782,9 +1782,21 @@ impl Engine {
         // physical unconstrained DC equilibrium, so reconstructing ordinary
         // DC KCL here would apply the wrong equation contract.
         if !force_initial_conditions {
+            circuit.settle_capacitive_islands(matrix, &mut solution, &[]);
             self.ensure_solved_dc_paths_to_ground(circuit, matrix, &solution)?;
         }
         Ok(solution)
+    }
+
+    /// The matrix rows the initial conditions `constraints` hold.
+    pub(in crate::engine) fn initial_condition_rows(
+        constraints: &[StartupVoltageConstraint],
+    ) -> Vec<usize> {
+        constraints
+            .iter()
+            .flat_map(|constraint| [constraint.positive, constraint.negative])
+            .filter_map(|node| node.checked_sub(1))
+            .collect()
     }
 
     /// Refuse a current-driven floating component whose operating point the

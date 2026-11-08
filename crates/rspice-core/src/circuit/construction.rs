@@ -57,6 +57,7 @@ impl CircuitData {
             dc_floating_component_by_node: Vec::new(),
             dc_floating_component_nodes: Vec::new(),
             dc_floating_component_is_certain: Vec::new(),
+            dc_floating_component_is_passive: Vec::new(),
             bsim3v3: Bsim3v3s::new(),
             bsim4v8: Bsim4v8s::new(),
             bsim4_stamp_replay: Default::default(),
@@ -256,8 +257,10 @@ impl CircuitData {
         &mut self,
         components: Vec<Vec<String>>,
         component_is_certain: Vec<bool>,
+        component_is_passive: Vec<bool>,
     ) {
         debug_assert_eq!(components.len(), component_is_certain.len());
+        debug_assert_eq!(components.len(), component_is_passive.len());
         let mut component_by_node = vec![None; self.num_nodes.saturating_add(1)];
         for (component_index, nodes) in components.iter().enumerate() {
             for node in nodes {
@@ -272,6 +275,7 @@ impl CircuitData {
         self.dc_floating_component_by_node = component_by_node;
         self.dc_floating_component_nodes = components;
         self.dc_floating_component_is_certain = component_is_certain;
+        self.dc_floating_component_is_passive = component_is_passive;
     }
 
     /// Resolve behavioral expression references against current node/branch maps.

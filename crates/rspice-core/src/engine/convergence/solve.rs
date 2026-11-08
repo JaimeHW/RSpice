@@ -2960,17 +2960,20 @@ mod correction_constraint_tests {
 
     /// A node only the floor defines, here one between two capacitors,
     /// leaves the system singular without it; ngspice warns "singular matrix:
-    /// check node" there, and the solve goes on at the floor.
+    /// check node" there, and the solve goes on at the floor. The node then
+    /// takes the voltage its capacitors share charging up from rest, half of
+    /// V(b): QSPICE gives 0.25 and 0.31472, Xyce and ngspice-46 the same.
     #[test]
-    fn a_node_only_the_nodal_floor_defines_keeps_the_floor() {
+    fn a_node_only_the_nodal_floor_defines_takes_its_charge_neutral_voltage() {
         for deck in [
             "floating linear\nV1 a 0 1\nR1 a b 1k\nR2 b 0 1k\nC1 b c 1p\nC2 c 0 1p\n.op\n.end\n",
             "floating nonlinear\nV1 a 0 1\nR1 a b 1k\nD1 b 0 dm\nC1 b c 1p\nC2 c 0 1p\n\
              .model dm d is=1e-14\n.op\n.end\n",
         ] {
             let point = operating_point(deck);
-            assert!(voltage(&point, "b") > 0.4, "{deck}: {point:?}");
-            assert!(voltage(&point, "c").abs() < 1e-6, "{deck}: {point:?}");
+            let (b, c) = (voltage(&point, "b"), voltage(&point, "c"));
+            assert!(b > 0.4, "{deck}: {point:?}");
+            assert!((c - 0.5 * b).abs() <= 1e-12, "{deck}: {point:?}");
         }
     }
 

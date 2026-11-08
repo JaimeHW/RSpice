@@ -61,6 +61,7 @@ mod external_models;
 pub(crate) use external_models::{
     VerilogADcAcceptedStateCarrier, XspiceCompanionPolicy, XspiceOutputIterates,
 };
+mod capacitive_islands;
 mod force_accept;
 mod introspection;
 pub use introspection::{DcBranchVoltageLoop, DeviceOpEntry, DeviceOpReport};
@@ -618,6 +619,9 @@ pub struct CircuitData {
     /// Whether each floating component is untouched by a model-specific DC
     /// terminal grouping and can therefore support a fatal topology proof.
     pub(crate) dc_floating_component_is_certain: Vec<bool>,
+    /// Whether only resistors and capacitors have a terminal on each floating
+    /// component, so that its charge alone sets its common mode.
+    pub(crate) dc_floating_component_is_passive: Vec<bool>,
     pub(crate) bsim3v3: Bsim3v3s,
     pub(crate) bsim4v8: Bsim4v8s,
     /// Recorded matrix offsets of the BSIM4 conductance stamps.

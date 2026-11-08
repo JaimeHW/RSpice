@@ -2131,6 +2131,45 @@ pub(super) fn collect_floating_nodes(
     diagnostics
 }
 
+/// Whether only resistors and capacitors have a terminal on each of the
+/// floating `components`.
+pub(super) fn passive_floating_components(
+    circuit: &CircuitData,
+    flat_elements: &[crate::netlist::Element],
+    components: &[Vec<String>],
+) -> Vec<bool> {
+    if components.is_empty() {
+        return Vec::new();
+    }
+    let mut touched_by_other = vec![false; circuit.num_nodes() + 1];
+    for element in flat_elements {
+        if matches!(
+            element.kind,
+            ElementKind::Resistor { .. } | ElementKind::Capacitor { .. }
+        ) {
+            continue;
+        }
+        for node in &element.nodes {
+            if let Some(slot) = circuit
+                .get_node_by_name(node)
+                .and_then(|id| touched_by_other.get_mut(id))
+            {
+                *slot = true;
+            }
+        }
+    }
+    components
+        .iter()
+        .map(|nodes| {
+            nodes.iter().all(|node| {
+                circuit
+                    .get_node_by_name(node)
+                    .is_some_and(|id| !touched_by_other.get(id).copied().unwrap_or(true))
+            })
+        })
+        .collect()
+}
+
 thread_local! {
     /// Set while a circuit is rebuilt from a deck whose build has already
     /// reported its topology, so the rebuild does not report it again.
