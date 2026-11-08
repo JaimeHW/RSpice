@@ -309,8 +309,21 @@ impl Mosfet {
             p3 + p4 - a / 3.0
         };
 
-        let a3 = (a1 * a1 / 4.0 - b1 + y3).sqrt();
-        let b3 = (y3 * y3 / 4.0 - d1).sqrt();
+        // Ferrari's factors `x^2 + (a1/2 ± a3) x + (y3/2 ± b3)` need
+        // `a3^2 = a1^2/4 - b1 + y3`, `b3^2 = y3^2/4 - d1` and
+        // `2 a3 b3 = a1 y3/2 - c1`. mos2load.c takes `b3` as the root of the
+        // second, a difference of near-equal terms: without a body effect
+        // (`gammad = 0`) it is exactly zero, and rounding leaves it a few
+        // ulps either side, so the square root is either NaN or a 1e-7
+        // perturbation that fails the 1e-6 residual below, and VMAX silently
+        // drops out. The third is free of that cancellation. The four sign
+        // pairs and the residual test pick the root as before.
+        let a3 = (a1 * a1 / 4.0 - b1 + y3).max(0.0).sqrt();
+        let b3 = if a3 > 0.0 {
+            (a1 * y3 / 2.0 - c1).abs() / (2.0 * a3)
+        } else {
+            (y3 * y3 / 4.0 - d1).max(0.0).sqrt()
+        };
         let mut xvalid: Option<Value> = None;
         for i in 0..4 {
             let a4 = a1 / 2.0 + SIG1[i] * a3;
@@ -1595,6 +1608,48 @@ mod tests {
         assert_relative(gm, 8.231405e-4, 1.0e-6);
         assert_relative(gds, 1.639541e-5, 1.0e-6);
         assert_relative(gmb, 7.948465e-5, 1.0e-6);
+    }
+
+    /// Without a body effect the velocity-saturation quartic is the
+    /// biquadratic `x^4 + b1 x^2 + d1 = 0`, whose smallest positive root is
+    /// closed-form. One of its Ferrari radicands is exactly zero, and across
+    /// these biases rounding leaves it on both sides of zero.
+    #[test]
+    fn level2_vmax_biquadratic_root_is_found_whatever_the_rounding() {
+        let (vbin, xv) = (0.7, 2.0);
+        for step in 0_i32..=40 {
+            let vgsx = 0.9 + 0.05 * Value::from(step);
+            for phi in [0.45, 0.5, 0.55, 0.6, 0.65, 0.7] {
+                let v1 = vgsx - vbin + phi;
+                let b1 = -2.0 * (v1 + xv);
+                let d1 = 2.0 * v1 * (phi + xv) - phi * phi;
+                let x2 = (-b1 - (b1 * b1 - 4.0 * d1).sqrt()) / 2.0;
+                let vdsat = Mosfet::level2_vmax_vdsat(vgsx, vbin, 1.0, 0.0, phi, phi.powf(1.5), xv)
+                    .unwrap_or_else(|| panic!("no root at vgs={vgsx} phi={phi}"));
+                assert_relative(vdsat, x2 - phi, 1.0e-12);
+            }
+        }
+    }
+
+    /// VMAX with no body effect at 80 C, where the quartic's zero radicand
+    /// rounds negative. ngspice-46 and LTspice 26.1.1 agree: 1.1787968e-4 A
+    /// (1.2301532e-4 A without VMAX).
+    #[test]
+    fn level2_vmax_holds_at_a_raised_temperature() {
+        let mut params = HashMap::new();
+        params.insert("LEVEL".to_string(), 2.0);
+        params.insert("VTO".to_string(), 0.7);
+        params.insert("TOX".to_string(), 20.0e-9);
+        params.insert("UO".to_string(), 500.0);
+        params.insert("VMAX".to_string(), 5.0e4);
+        params.insert("NEFF".to_string(), 1.0);
+        let mut mos = Mosfet::new_nmos("m1".to_string(), 1, 2, 3, 4)
+            .with_params(&params)
+            .with_geometry(10.0e-6, 2.0e-6);
+        mos.set_temperature(353.15, 300.15);
+        assert_relative(mos.level2_evaluate(1.5, 2.0, 0.0).id, 1.1787968e-4, 1.0e-6);
+        let (id, ..) = mos.level2_operating_point(1.5, 2.0, 0.0);
+        assert_relative(id, 1.1787968e-4, 1.0e-6);
     }
 
     #[test]
