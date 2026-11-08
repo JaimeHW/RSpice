@@ -1163,6 +1163,12 @@ impl DigitalDelayPlan {
     pub fn is_empty(&self) -> bool {
         self.drivers.is_empty() && self.nets.is_empty() && self.paths.is_empty()
     }
+
+    /// Whether a written plan may leave this table out. A table of timing
+    /// checks alone delays nothing, but it still has its checks to keep.
+    fn holds_nothing(&self) -> bool {
+        self.is_empty() && self.checks.is_empty()
+    }
 }
 
 /// A timing check (IEEE 1364-2005 section 15) on discrete signals, its
@@ -1395,7 +1401,7 @@ pub struct CanonicalDigitalPlan {
     #[serde(default, skip_serializing_if = "DigitalStrengthPlan::is_empty")]
     pub strength: DigitalStrengthPlan,
     /// Delays on drivers and nets (IEEE 1364-2005 sections 6.1.3 and 7.14).
-    #[serde(default, skip_serializing_if = "DigitalDelayPlan::is_empty")]
+    #[serde(default, skip_serializing_if = "DigitalDelayPlan::holds_nothing")]
     pub delays: DigitalDelayPlan,
 }
 
