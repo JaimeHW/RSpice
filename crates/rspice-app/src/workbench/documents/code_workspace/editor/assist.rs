@@ -79,6 +79,8 @@ struct AssistState {
     popup: Option<Popup>,
     dismissed_at: Option<u64>,
     signature_open: bool,
+    /// A row was taken this frame; the text arrives the next.
+    took_a_row: bool,
     /// The card Ctrl+Shift+Space opened, standing while the text and caret
     /// it was opened on do.
     card: Option<(u64, usize)>,
@@ -337,6 +339,8 @@ fn run_completion(
 ) {
     let source = frame.source;
     let query = completion_query(source, caret);
+    // The text just taken from the list is not more typing for it to answer.
+    let took_a_row = std::mem::take(&mut state.took_a_row);
     if keys.ask_completion {
         state.popup = query.as_ref().map(|query| Popup {
             start: query.range.start,
@@ -346,6 +350,7 @@ fn run_completion(
         });
         state.dismissed_at = None;
     } else if grew
+        && !took_a_row
         && state.popup.is_none()
         && state.dismissed_at != Some(state.serial)
         && let Some(query) = query.as_ref()
@@ -413,6 +418,7 @@ fn run_completion(
             );
             context.memory_mut(|memory| memory.request_focus(editor_id));
             context.request_repaint();
+            state.took_a_row = true;
         }
         None => state.popup = Some(popup),
     }
