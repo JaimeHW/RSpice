@@ -2310,8 +2310,11 @@ analog begin\n\
 end\nendmodule\n",
     );
     for (drive, expected) in [
-        ("V1 in 0 DC 5
-R1 in a 1k", behind_resistor),
+        (
+            "V1 in 0 DC 5
+R1 in a 1k",
+            behind_resistor,
+        ),
         ("I1 0 a DC 1m", fed_current),
     ] {
         let deck = format!(
@@ -2335,7 +2338,10 @@ X1 a 0 junction
             .into_iter()
             .filter(|recorded| matches!(recorded.notice, EngineNotice::ConvergenceAid(_)))
             .collect();
-        assert!(aids.is_empty(), "{drive}: the direct Newton answers: {aids:?}");
+        assert!(
+            aids.is_empty(),
+            "{drive}: the direct Newton answers: {aids:?}"
+        );
         let actual = node_voltage(&result, "a");
         assert!(
             (actual - expected).abs() <= 1.0e-6 * expected,

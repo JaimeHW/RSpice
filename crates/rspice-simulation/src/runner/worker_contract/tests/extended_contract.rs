@@ -1009,7 +1009,10 @@ fn dc_op_worker_result_round_trip_preserves_exact_mna_state_and_contract() {
     assert_eq!(restored.mna_node_names, ["out"]);
     assert_eq!(restored.mna_branch_names, ["V1"]);
     assert_eq!(restored.mna_solution, [1.25, -1.0e-3]);
-    assert_eq!(restored.node_units.get("out").map(String::as_str), Some("K"));
+    assert_eq!(
+        restored.node_units.get("out").map(String::as_str),
+        Some("K")
+    );
 }
 
 #[test]

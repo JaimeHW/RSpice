@@ -196,13 +196,20 @@ RT dt 0 1G
 .end
 ";
     let netlist = Netlist::parse(deck).expect("self-heating MEXTRAM deck parses");
-    let result = engine().run_dc_op(&netlist).expect("operating point solves");
+    let result = engine()
+        .run_dc_op(&netlist)
+        .expect("operating point solves");
     let signals = rspice_core::execution::operating_point_projection_signals(&result)
         .expect("the operating point lists its values");
     let unit = |name: &str| {
         signals
             .iter()
-            .find(|signal| signal.descriptor().display_name().eq_ignore_ascii_case(name))
+            .find(|signal| {
+                signal
+                    .descriptor()
+                    .display_name()
+                    .eq_ignore_ascii_case(name)
+            })
             .unwrap_or_else(|| panic!("{name} is not listed"))
             .descriptor()
             .unit()

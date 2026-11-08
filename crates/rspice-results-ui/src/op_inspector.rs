@@ -736,7 +736,11 @@ fn device_value_text(value: f64, unit: &str) -> String {
     if unit.is_empty() {
         rspice_vocabulary::property::format_engineering(value)
     } else {
-        fmt_si(value, unit, 5usize.saturating_sub(unit.chars().count()).min(4))
+        fmt_si(
+            value,
+            unit,
+            5usize.saturating_sub(unit.chars().count()).min(4),
+        )
     }
 }
 fn node_value_text(row: &OperatingPointValue) -> (String, bool) {

@@ -75,7 +75,10 @@ fn an_instance_reports_each_terminal_current_and_each_described_variable() {
     assert_eq!(value("g"), 1.0e-3);
     assert!((value("itot") - 10.0e-3).abs() < 1e-12, "{}", value("itot"));
     let g = report.quantity("g").unwrap();
-    assert_eq!((g.units.as_str(), g.description.as_str()), ("S", "Conductance"));
+    assert_eq!(
+        (g.units.as_str(), g.description.as_str()),
+        ("S", "Conductance")
+    );
     assert_eq!(report.quantity("ia").unwrap().units, "A");
     assert!(
         report.quantity("hidden").is_none(),
@@ -95,8 +98,8 @@ fn a_described_variable_is_read_by_name_and_an_unknown_name_is_refused() {
              .op\n.end\n"
         )
     };
-    let netlist = Netlist::parse_validated(&deck(".save @x1[g] @x1[itot] @x1[ia]"))
-        .expect("deck parses");
+    let netlist =
+        Netlist::parse_validated(&deck(".save @x1[g] @x1[itot] @x1[ia]")).expect("deck parses");
     let result = Engine::default()
         .run_dc_op(&netlist)
         .expect("a described variable is a quantity the instance reports");
@@ -155,7 +158,12 @@ fn a_thermal_node_is_listed_in_kelvin_and_a_thermal_port_flow_in_watts() {
     let listed = |name: &str| {
         signals
             .iter()
-            .find(|signal| signal.descriptor().display_name().eq_ignore_ascii_case(name))
+            .find(|signal| {
+                signal
+                    .descriptor()
+                    .display_name()
+                    .eq_ignore_ascii_case(name)
+            })
             .unwrap_or_else(|| panic!("{name} is not listed"))
     };
     assert_eq!(listed("V(t)").descriptor().unit().symbol(), "K");
@@ -175,8 +183,15 @@ fn a_thermal_node_is_listed_in_kelvin_and_a_thermal_port_flow_in_watts() {
         .expect("X1 is reported under its module's names");
     let flow = module.quantity("idt").expect("the thermal port's flow");
     assert_eq!(flow.units, "W");
-    assert!((flow.value + 4.0e-3).abs() < 1e-9, "idt reads {}", flow.value);
-    assert_eq!(module.quantity("ip").expect("a terminal current").units, "A");
+    assert!(
+        (flow.value + 4.0e-3).abs() < 1e-9,
+        "idt reads {}",
+        flow.value
+    );
+    assert_eq!(
+        module.quantity("ip").expect("a terminal current").units,
+        "A"
+    );
 }
 
 /// A named branch and one the module never named, in series.
@@ -203,7 +218,12 @@ fn a_transient_lists_a_module_branch_as_a_current_and_no_unnamed_unknown() {
         .run_tran(&netlist, 2e-9, 0.2e-9)
         .expect("transient runs");
     let expanded = Engine::default()
-        .run_tran_compressed(&netlist, 2e-9, 0.2e-9, rspice_core::engine::CompressionConfig::default())
+        .run_tran_compressed(
+            &netlist,
+            2e-9,
+            0.2e-9,
+            rspice_core::engine::CompressionConfig::default(),
+        )
         .expect("compressed transient runs")
         .try_into_transient()
         .expect("the compressed transient expands");
@@ -213,17 +233,23 @@ fn a_transient_lists_a_module_branch_as_a_current_and_no_unnamed_unknown() {
         let names: Vec<_> = signals
             .iter()
             .map(|signal| {
-                (signal.descriptor().display_name().to_owned(), signal.descriptor().kind())
+                (
+                    signal.descriptor().display_name().to_owned(),
+                    signal.descriptor().kind(),
+                )
             })
             .collect();
         assert!(
-            names.iter().any(|(name, kind)| name.eq_ignore_ascii_case("I(X1:bwire)")
-                && *kind == rspice_core::execution::SignalKind::Current),
+            names
+                .iter()
+                .any(|(name, kind)| name.eq_ignore_ascii_case("I(X1:bwire)")
+                    && *kind == rspice_core::execution::SignalKind::Current),
             "the named branch is not listed as a current: {names:?}"
         );
         assert!(
-            !names.iter().any(|(name, _)| name.contains("__")
-                || name.eq_ignore_ascii_case("V(X1:bwire)")),
+            !names
+                .iter()
+                .any(|(name, _)| name.contains("__") || name.eq_ignore_ascii_case("V(X1:bwire)")),
             "an unknown is listed as a net: {names:?}"
         );
     }

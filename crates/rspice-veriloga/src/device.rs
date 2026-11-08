@@ -5763,14 +5763,15 @@ impl VerilogADevice {
     /// one with the proposal. A limiter with history keeps it.
     pub fn begin_initial_junction_limiting(&mut self) {
         let mut slots = Vec::new();
-        let mut scan = |program: &crate::codegen::BytecodeProgram| {
-            slots.extend(program.instructions.iter().filter_map(|instruction| {
-                match instruction {
-                    Instruction::NamedLimiterPrevious(slot) => Some(*slot),
-                    _ => None,
-                }
-            }));
-        };
+        let mut scan =
+            |program: &crate::codegen::BytecodeProgram| {
+                slots.extend(program.instructions.iter().filter_map(
+                    |instruction| match instruction {
+                        Instruction::NamedLimiterPrevious(slot) => Some(*slot),
+                        _ => None,
+                    },
+                ));
+            };
         fn scan_steps(
             steps: &[AssignmentStep],
             scan: &mut impl FnMut(&crate::codegen::BytecodeProgram),

@@ -123,9 +123,8 @@ fn module_operating_point(
     // Ports the card connects, not the hidden terminals that bind a module's
     // own nets to deck nodes. A module output of the same name as a port's
     // current label is the module's, and keeps the name.
-    let declared = terminals.saturating_sub(
-        artifact.map_or(0, |artifact| artifact.hir.node_aliases.len()),
-    );
+    let declared =
+        terminals.saturating_sub(artifact.map_or(0, |artifact| artifact.hir.node_aliases.len()));
     let flow_units = |terminal: usize| {
         artifact
             .and_then(|artifact| artifact.hir.ports.get(terminal))

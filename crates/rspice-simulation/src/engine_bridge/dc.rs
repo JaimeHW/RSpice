@@ -326,7 +326,8 @@ impl EngineBridge {
                 retain_dc_quantity_basis(&mut evidence, first_result)?;
                 for (node_idx, node_name) in first_result.node_names.iter().enumerate() {
                     ensure_not_aborted(abort)?;
-                    let Some((quantity, unit)) = dc_node_quantity(first_result, node_idx, node_name)
+                    let Some((quantity, unit)) =
+                        dc_node_quantity(first_result, node_idx, node_name)
                     else {
                         continue;
                     };
@@ -977,7 +978,10 @@ mod operating_point_contract_tests {
             .expect("the conversion succeeds");
         assert_eq!(converted.node_units.get("t").map(String::as_str), Some("K"));
         assert!(!converted.node_units.contains_key("out"));
-        assert_eq!(dc_node_quantity(&core, 2, "t").map(|(_, unit)| unit), Some("K"));
+        assert_eq!(
+            dc_node_quantity(&core, 2, "t").map(|(_, unit)| unit),
+            Some("K")
+        );
     }
 
     /// A DC sweep declares only the quantities it emits a curve for: a net
@@ -1013,8 +1017,7 @@ mod operating_point_contract_tests {
     /// A Verilog-A instance's own unknowns are no nets: a branch the module
     /// names sweeps as a current, and one it never named not at all.
     #[test]
-    fn the_dc_sweep_basis_lists_a_module_branch_as_a_current_and_leaves_out_a_private_unknown()
-    {
+    fn the_dc_sweep_basis_lists_a_module_branch_as_a_current_and_leaves_out_a_private_unknown() {
         let mut core = rspice_core::SimulationResult::new(3, 1);
         core.node_names = vec![
             "0".to_owned(),

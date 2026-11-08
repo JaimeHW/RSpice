@@ -160,7 +160,9 @@ fn potential_descriptor(
         format!("V({node})"),
         SignalClassification {
             kind: SignalKind::Voltage,
-            unit: units.map_or(SignalUnit::Volt, |units| SignalUnit::Custom(units.to_owned())),
+            unit: units.map_or(SignalUnit::Volt, |units| {
+                SignalUnit::Custom(units.to_owned())
+            }),
             value_type: SignalValueType::Real,
             shape: series_shape(point_count),
             owner: SignalOwner::Node(node.to_owned()),
