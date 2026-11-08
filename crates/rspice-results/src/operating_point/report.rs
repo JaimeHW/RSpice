@@ -38,19 +38,31 @@ pub fn annotation_label(annotation: OperatingPointAnnotationEvidence) -> &'stati
     }
 }
 
-/// Unit of an existing operating-point report quantity; unknown labels stay unspecified.
+/// Unit of a reported operating-point quantity, or `""` for one without.
+///
+/// A label means one physical quantity whichever family reports it, so only
+/// the family's standing is read: a family outside the fixed vocabulary is a
+/// compiled Verilog-A model, and all such a model reports are the currents at
+/// its terminals, under names its ports decide.
 pub fn device_param_unit(family: &str, name: &str) -> &'static str {
-    if rspice_core::op_label::OpLabel::is_intrinsic_voltage_name(name) {
+    use rspice_core::op_label::{OP_LABELS, OpLabel};
+
+    if OpLabel::is_intrinsic_voltage_name(name) {
         return "V";
     }
-    match (family, name) {
-        ("MOSFET", "id") | ("BJT", "ic" | "ib") | ("DIODE", "id") => "A",
-        ("MOSFET", "vgs" | "vds" | "vbs" | "vth") | ("BJT", "vbe" | "vce") | ("DIODE", "vd") => "V",
-        ("MOSFET", "gm" | "gds" | "gmb")
-        | ("BJT", "gm" | "gpi" | "gmu" | "go")
-        | ("DIODE", "gd") => "S",
-        ("BJT", "cpi" | "cmu") | ("DIODE", "cd") => "F",
-        ("BJT", "qbe" | "qbc") | ("DIODE", "qd") => "C",
+    if !OP_LABELS.iter().any(|label| *label == family) {
+        return "A";
+    }
+    match name {
+        "id" | "ig" | "is" | "ic" | "ib" | "ie" | "igs" | "igd" | "idiode" | "idsw" => "A",
+        "vd" | "vgs" | "vds" | "vbs" | "vbe" | "vce" | "vth" | "vdsat" | "output_vdsat"
+        | "vdsw" => "V",
+        "gm" | "gds" | "gd" | "gdsw" | "gmb" | "gmbs" | "gpi" | "gmu" | "go" => "S",
+        "cd" | "cdsw" | "c" | "cpi" | "cmu" => "F",
+        "qbe" | "qbc" | "qd" => "C",
+        "r" => "\u{3a9}",
+        "power" => "W",
+        "temp" => "\u{b0}C",
         _ => "",
     }
 }
@@ -109,6 +121,92 @@ pub fn signal_leaf(name: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// The vocabulary's device families and operating regions, which name no
+    /// quantity.
+    const NOT_QUANTITIES: &[&str] = &[
+        "MOSFET",
+        "MOS9",
+        "BSIM3",
+        "BSIM4",
+        "B3SOIFD",
+        "B3SOIDD",
+        "B3SOIPD",
+        "EKV26",
+        "EKV3",
+        "VDMOS",
+        "BJT",
+        "DIODE",
+        "RESISTOR",
+        "CAPACITOR",
+        "JFET",
+        "JFET2",
+        "JFET2_XYCE",
+        "MESFET",
+        "HFET1",
+        "HFET2",
+        "NONLINEAR_CORE",
+        "VERILOGA",
+        "cutoff",
+        "linear",
+        "triode",
+        "saturation",
+        "quasi-saturation",
+        "subthreshold",
+        "body-diode",
+        "active",
+        "reverse",
+        "forward",
+    ];
+    /// A current gain is a ratio.
+    const UNITLESS: &[&str] = &["beta"];
+    /// A nonlinear core's state, reported in Xyce's convention: its unit
+    /// follows the core's LEVEL and BHSIUNITS, which the label does not carry.
+    const UNIT_SET_BY_THE_MODEL: &[&str] = &["m", "h", "b"];
+
+    #[test]
+    fn every_reported_quantity_is_classified() {
+        use rspice_core::op_label::OP_LABELS;
+        for label in OP_LABELS {
+            let label = label.as_str();
+            if NOT_QUANTITIES.contains(&label) {
+                continue;
+            }
+            let unit = device_param_unit("MOSFET", label);
+            if UNITLESS.contains(&label) || UNIT_SET_BY_THE_MODEL.contains(&label) {
+                assert_eq!(unit, "", "{label} was listed as having no fixed unit");
+            } else {
+                assert_ne!(
+                    unit, "",
+                    "{label} has no unit: name one in device_param_unit, or list \
+                     it as unitless with the reason"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_quantity_states_the_physics_of_its_label() {
+        for (family, name, unit) in [
+            ("DIODE", "cd", "F"),
+            ("DIODE", "cdsw", "F"),
+            ("DIODE", "temp", "\u{b0}C"),
+            ("BSIM4", "output_vdsat", "V"),
+            ("VDMOS", "power", "W"),
+            ("RESISTOR", "r", "\u{3a9}"),
+            ("CAPACITOR", "c", "F"),
+            ("MOSFET", "vgs_intrinsic", "V"),
+            ("BJT", "beta", ""),
+        ] {
+            assert_eq!(device_param_unit(family, name), unit, "{family} {name}");
+        }
+    }
+
+    #[test]
+    fn a_compiled_model_reports_terminal_currents_under_its_ports_names() {
+        assert_eq!(device_param_unit("vamp", "iout"), "A");
+        assert_eq!(device_param_unit("psp104", "id"), "A");
+    }
+
     #[test]
     fn detail_policy_never_expands_beyond_retained_rows() {
         let selected = RetainedDeviceDetail {
