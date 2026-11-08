@@ -322,7 +322,7 @@ fn result_viewer_actions(ui: &mut Ui, host: &mut impl SheetBarHost) {
                 egui::TextEdit::singleline(filter)
                     .desired_width(150.0)
                     .font(theme::field_mono())
-                    .hint_text("filter devices…"),
+                    .hint_text("Filter names…"),
             );
         }
         ResultViewer::Specs => {
