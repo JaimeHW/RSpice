@@ -901,7 +901,7 @@ fn elide_middle(text: &str, max_chars: usize) -> String {
 }
 
 /// A name cut to `max_chars`: the leaf whole while it fits, the path giving
-/// up its middle first.
+/// up its middle first, then the middle of the whole name.
 fn elide_name(parent: &str, leaf: &str, max_chars: usize) -> (String, String) {
     let parent_chars = parent.chars().count();
     let leaf_chars = leaf.chars().count();
@@ -914,7 +914,18 @@ fn elide_name(parent: &str, leaf: &str, max_chars: usize) -> (String, String) {
             leaf.to_owned(),
         );
     }
-    (String::new(), elide_middle(leaf, max_chars))
+    let elided = elide_middle(&format!("{parent}{leaf}"), max_chars);
+    // The head `elide_middle` kept, with its ellipsis.
+    let head = max_chars - max_chars.saturating_sub(1) / 2;
+    let split = if head > parent_chars {
+        parent_chars
+    } else {
+        head
+    };
+    (
+        elided.chars().take(split).collect(),
+        elided.chars().skip(split).collect(),
+    )
 }
 
 fn name_column_width(advance: f32, longest_name: usize) -> f32 {
@@ -953,13 +964,21 @@ impl Grid {
         )
     }
 
-    /// One slot of the shared value grid.
-    fn value_cell(&self, y: f32, height: f32, slot: usize) -> egui::Rect {
+    /// Where a section of `slots` value columns starts on screen. It scrolls
+    /// no further than it overflows, so a section that fits stays whole and
+    /// one narrower than the widest stops at its own last column; and a whole
+    /// column at a time, so the frozen name column never cuts a value in two.
+    fn values_left(&self, slots: usize) -> f32 {
+        let scrolled = self.visible.left() - self.origin.x;
+        let overflow = self.name_w + slots as f32 * VALUE_W - self.visible.width();
+        let columns = (scrolled.min(overflow.max(0.0)) / VALUE_W).ceil();
+        self.visible.left() + self.name_w - columns * VALUE_W
+    }
+
+    /// One slot of the shared value grid, in a section starting at `left`.
+    fn value_cell(&self, left: f32, y: f32, height: f32, slot: usize) -> egui::Rect {
         egui::Rect::from_min_size(
-            egui::pos2(
-                self.origin.x + self.name_w + slot as f32 * VALUE_W,
-                self.screen_y(y),
-            ),
+            egui::pos2(left + slot as f32 * VALUE_W, self.screen_y(y)),
             egui::vec2(VALUE_W, height),
         )
     }
@@ -977,9 +996,8 @@ impl Grid {
     }
 
     /// The slot under a horizontal screen position, if it is a value's.
-    fn slot_at(&self, x: f32) -> Option<usize> {
-        (x >= self.visible.left() + self.name_w)
-            .then(|| ((x - self.origin.x - self.name_w) / VALUE_W).floor() as usize)
+    fn slot_at(&self, left: f32, x: f32) -> Option<usize> {
+        (x >= self.visible.left() + self.name_w).then(|| ((x - left) / VALUE_W).floor() as usize)
     }
 }
 
@@ -1100,14 +1118,15 @@ impl<M: SchematicMapping> SheetPainter<'_, M> {
             out,
         );
         let values = self.grid.values_clip().intersect(rect);
+        let left = self.grid.values_left(section.slots());
         let mut slot = 0;
         if section.region {
-            let cell = self.grid.value_cell(y, COLUMN_HEADER_H, slot);
+            let cell = self.grid.value_cell(left, y, COLUMN_HEADER_H, slot);
             self.header_cell(section, cell, values, REGION_HEADER, HeaderAlign::Text, out);
             slot += 1;
         }
         for column in &section.columns {
-            let cell = self.grid.value_cell(y, COLUMN_HEADER_H, slot);
+            let cell = self.grid.value_cell(left, y, COLUMN_HEADER_H, slot);
             self.header_cell(
                 section,
                 cell,
@@ -1155,11 +1174,12 @@ impl<M: SchematicMapping> SheetPainter<'_, M> {
         let measured =
             painter.layout_no_wrap(label.to_owned(), font.clone(), self.colors.text_faint);
         let room = match align {
-            HeaderAlign::Number => cell.width() - 2.0 * MANTISSA_GAP,
+            HeaderAlign::Number => cell.width() - MANTISSA_GAP,
             HeaderAlign::Name => cell.width() - NAME_INSET - NAME_END_PAD,
             HeaderAlign::Text => cell.width() - 2.0 * CELL_INSET,
         };
-        let galley = if measured.size().x > room {
+        let elided = measured.size().x > room;
+        let galley = if elided {
             let advance = measured.size().x / label.chars().count().max(1) as f32;
             painter.layout_no_wrap(
                 elide_middle(label, (room / advance).floor() as usize),
@@ -1221,6 +1241,9 @@ impl<M: SchematicMapping> SheetPainter<'_, M> {
         theme::paint_focus_ring(self.ui, &response, shown.shrink(1.0));
         if response.clicked() {
             out.clicked_sort = Some((section.title.clone(), label.to_owned()));
+        }
+        if elided {
+            response.on_hover_text(label);
         }
     }
 
@@ -1363,10 +1386,11 @@ impl<M: SchematicMapping> SheetPainter<'_, M> {
         );
         let values_clip = self.grid.values_clip().intersect(rect);
         let values = self.ui.painter_at(values_clip);
+        let left = self.grid.values_left(section.slots());
         let mut slot = 0;
         if section.region {
             if let Some(region) = row.region() {
-                let cell = self.grid.value_cell(y, ROW_H, slot);
+                let cell = self.grid.value_cell(left, y, ROW_H, slot);
                 values.with_clip_rect(cell.intersect(values_clip)).text(
                     egui::pos2(cell.left() + CELL_INSET, cell.center().y),
                     egui::Align2::LEFT_CENTER,
@@ -1378,7 +1402,7 @@ impl<M: SchematicMapping> SheetPainter<'_, M> {
             slot += 1;
         }
         for column in &section.columns {
-            let cell = self.grid.value_cell(y, ROW_H, slot);
+            let cell = self.grid.value_cell(left, y, ROW_H, slot);
             slot += 1;
             if cell.intersects(values_clip) {
                 self.paint_value(&values, cell, row.cell(column));
@@ -1417,7 +1441,7 @@ impl<M: SchematicMapping> SheetPainter<'_, M> {
         ui.label(mono(format!("{parent}{leaf}"), self.colors.text));
         ui.label(mono(row.name().to_owned(), self.colors.text_faint));
         let column = x
-            .and_then(|x| self.grid.slot_at(x))
+            .and_then(|x| self.grid.slot_at(self.grid.values_left(section.slots()), x))
             .and_then(|slot| slot.checked_sub(usize::from(section.region)))
             .and_then(|slot| section.columns.get(slot));
         if let Some((column, (value, unit))) =
@@ -2293,7 +2317,11 @@ mod tests {
         );
         assert_eq!(
             elide_name("X1.", "averyveryverylongleaf", 9),
-            (String::new(), "aver\u{2026}leaf".to_owned()),
+            ("X1.".to_owned(), "a\u{2026}leaf".to_owned()),
+        );
+        assert_eq!(
+            elide_name("Xouter.Xinner.", "averyveryverylongleaf", 9),
+            ("Xout\u{2026}".to_owned(), "leaf".to_owned()),
         );
         assert_eq!(
             elide_name("X1.", "mid", 10),
@@ -2427,6 +2455,28 @@ mod tests {
             .map(|(label, value)| (label.to_owned(), value.to_owned()))
         );
         assert_eq!(detail.action, OpAction::Refused(DEVICE_NOT_ON_SCHEMATIC));
+    }
+
+    #[test]
+    fn a_section_scrolls_in_whole_columns_only_as_far_as_it_overflows() {
+        let name_w = 200.0;
+        let grid = Grid {
+            origin: egui::pos2(-300.0, 0.0),
+            visible: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600.0, 400.0)),
+            name_w,
+            advance: 7.0,
+        };
+        assert_eq!(grid.values_left(3), name_w, "it fits: nothing moves");
+        assert_eq!(
+            grid.values_left(5),
+            name_w - 2.0 * VALUE_W,
+            "it stops once its last column is whole"
+        );
+        assert_eq!(
+            grid.values_left(20),
+            name_w - 3.0 * VALUE_W,
+            "it follows the bar a column at a time"
+        );
     }
 
     #[test]
