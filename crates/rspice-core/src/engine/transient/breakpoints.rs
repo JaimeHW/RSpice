@@ -843,12 +843,11 @@ impl Engine {
                 Self::add_source_clock_if_in_range(breakpoints, td1, tstop);
                 Self::add_source_clock_if_in_range(breakpoints, td2, tstop);
             }
-            // SFFM is exactly 0 until TD and generally discontinuous there
-            // (ngspice vsrcload.c), so native/ngspice operation schedules the
-            // switch-on instant. Xyce 7.10 SFFMData inherits SourceData's
-            // no-op breakpoint implementation.
+            // ngspice's SFFM is exactly 0 until TD and generally
+            // discontinuous there (vsrcload.c), so that dialect schedules the
+            // switch-on instant. The other dialects do not read TD.
             SourceSpec::Sffm { delay, .. } => {
-                if exact || dialect != crate::engine::SpiceDialect::Xyce {
+                if dialect == crate::engine::SpiceDialect::Ngspice {
                     Self::add_source_clock_if_in_range(breakpoints, *delay, tstop);
                 }
             }
@@ -1945,7 +1944,14 @@ mod tests {
                         dialect,
                     },
                 );
-                assert_delays_close(breakpoints.times(), &[10.0e-9]);
+                // Only the ngspice dialect's SFFM reads TD.
+                if dialect == crate::engine::SpiceDialect::BestAvailable
+                    && matches!(spec, crate::netlist::SourceSpec::Sffm { .. })
+                {
+                    assert!(breakpoints.times().is_empty());
+                } else {
+                    assert_delays_close(breakpoints.times(), &[10.0e-9]);
+                }
             }
 
             let mut xyce_breakpoints = BreakpointManager::new();

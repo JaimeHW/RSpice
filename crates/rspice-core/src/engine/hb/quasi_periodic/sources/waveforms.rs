@@ -158,9 +158,11 @@ impl Projector<'_> {
                     phase_carrier,
                     modulation_index,
                 } => {
-                    let xyce = self.dialect == SpiceDialect::Xyce;
+                    // Only the ngspice dialect reads TD and the phases, and
+                    // defaults and limits MDI.
+                    let five_values = self.dialect != SpiceDialect::Ngspice;
                     let ratio = carrier_freq / signal_freq;
-                    let mdi = if xyce {
+                    let mdi = if five_values {
                         if modulation_index.is_nan() {
                             0.0
                         } else {
@@ -179,13 +181,13 @@ impl Projector<'_> {
                         0.0,
                         *carrier_freq,
                         *signal_freq,
-                        if xyce {
+                        if five_values {
                             0.0
                         } else {
                             phase_carrier.to_radians()
                                 - std::f64::consts::TAU * carrier_freq * delay
                         },
-                        if xyce {
+                        if five_values {
                             0.0
                         } else {
                             phase_modulation.to_radians()

@@ -1096,6 +1096,11 @@ fn parse_sffm_spec(
             carrier_freq / signal_freq
         );
     }
+    if delay != 0.0 || phase_modulation != 0.0 || phase_carrier != 0.0 {
+        log::warn!(
+            "line {line_num}: SFFM TD, PHASEM and PHASEC are read only by the ngspice dialect"
+        );
+    }
 
     Ok(SourceSpec::Sffm {
         offset,

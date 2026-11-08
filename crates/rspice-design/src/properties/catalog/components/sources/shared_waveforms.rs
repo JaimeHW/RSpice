@@ -128,7 +128,7 @@ impl PropertyCatalog {
         sheet.add(
             PropertyDefinition::new("td")
                 .with_display_name("Delay time (TD)")
-                .with_description("Output is exactly zero before this time")
+                .with_description("ngspice dialect only: output is exactly zero before this time")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
                 .with_unit("s")
@@ -138,7 +138,7 @@ impl PropertyCatalog {
         sheet.add(
             PropertyDefinition::new("phasem")
                 .with_display_name("Mod phase (PHASEM)")
-                .with_description("Modulation phase in degrees")
+                .with_description("ngspice dialect only: modulation phase in degrees")
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(0.0))
                 .with_unit("°")
@@ -149,7 +149,7 @@ impl PropertyCatalog {
         sheet.add(
             PropertyDefinition::new("phasec")
                 .with_display_name("Carrier phase (PHASEC)")
-                .with_description("Carrier phase in degrees")
+                .with_description("ngspice dialect only: carrier phase in degrees")
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(0.0))
                 .with_unit("°")

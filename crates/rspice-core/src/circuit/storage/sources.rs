@@ -1547,6 +1547,13 @@ impl VoltageSources {
             .unwrap_or(crate::config::SpiceDialect::BestAvailable)
     }
 
+    /// QSPICE, LTspice and Xyce read SFFM's first five values only. TD, both
+    /// phases and the zero output through TD belong to the ngspice dialect.
+    #[inline]
+    fn sffm_reads_delay(context: Option<TransientSourceContext>) -> bool {
+        Self::pulse_dialect(context) == crate::config::SpiceDialect::Ngspice
+    }
+
     #[inline]
     fn sin_frequency_default(context: Option<TransientSourceContext>) -> Value {
         context

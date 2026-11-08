@@ -194,7 +194,8 @@ fn qpss_engine_pulse_and_repeating_pwl_use_continuous_fourier_coefficients() {
 fn qpss_engine_modulated_sources_keep_independent_carrier_and_modulation_phases() {
     let deck = "modulation\nV1 am 0 AM(.3 .7 .2 1414.213562373095 1k 20u 50 30)\nR1 am 0 1k\nV2 fm 0 SFFM(.1 .4 1k .1 1414.213562373095 20u 50 30)\nR2 fm 0 1k\n.end\n";
     let netlist = Netlist::parse(deck).unwrap();
-    let engine = Engine::new(SimulationConfig::default());
+    // SFFM's delay and phases exist in the ngspice dialect only.
+    let engine = Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Ngspice));
     let point = engine.run_qpss(&netlist, config(2)).unwrap();
     let pc = 30.0_f64.to_radians() - std::f64::consts::TAU * 1e3 * 20e-6;
     let pm = 50.0_f64.to_radians() - std::f64::consts::TAU * std::f64::consts::SQRT_2 * 1e3 * 20e-6;

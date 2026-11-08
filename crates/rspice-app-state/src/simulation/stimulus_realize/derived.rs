@@ -436,12 +436,11 @@ fn fit_span(spec: &SourceSpec, timing: PreviewTiming) -> f64 {
             carrier_freq,
             modulation_index,
             signal_freq,
-            delay,
             ..
         } => {
             let (_, fm, _) =
                 sffm_parameters(*carrier_freq, *modulation_index, *signal_freq, timing);
-            delay.max(0.0) + 2.0 / fm
+            2.0 / fm
         }
         SourceSpec::Am {
             modulating_freq,
@@ -521,7 +520,6 @@ fn guides(spec: &SourceSpec, timing: PreviewTiming) -> Vec<Guide> {
             });
         }
         SourceSpec::Sin { delay, .. }
-        | SourceSpec::Sffm { delay, .. }
         | SourceSpec::Am { delay, .. }
         | SourceSpec::TrRandom { delay, .. } => guides.push(Guide {
             time: *delay,
@@ -639,9 +637,7 @@ pub(super) fn breakpoints_between(
             collector.corner(td1);
             collector.corner(td2);
         }
-        SourceSpec::Sin { delay, .. }
-        | SourceSpec::Sffm { delay, .. }
-        | SourceSpec::Am { delay, .. } => collector.step(*delay),
+        SourceSpec::Sin { delay, .. } | SourceSpec::Am { delay, .. } => collector.step(*delay),
         SourceSpec::Pwl { points, delay, .. } => {
             // The source is exactly zero until TD, so a table whose first
             // level is not zero opens with a jump rather than a corner.

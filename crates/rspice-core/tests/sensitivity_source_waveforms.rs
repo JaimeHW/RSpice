@@ -186,14 +186,14 @@ fn file_backed_pwl_source_rows_differentiate_the_file_value_at_zero() {
 }
 
 #[test]
-fn sffm_source_rows_differentiate_the_zero_initial_value() {
-    // ngspice's SFFM is exactly zero at t <= TD, offset included.
+fn sffm_source_rows_differentiate_the_offset() {
+    // QSPICE's operating point holds SFFM at VO.
     check_kind(
         "sffm",
         "sffm(0.2 1 1meg 5 100k)",
-        0.0,
+        0.2,
         "sffm(0.1m 1m 1meg 5 100k)",
-        0.0,
+        0.1e-3,
     );
 }
 

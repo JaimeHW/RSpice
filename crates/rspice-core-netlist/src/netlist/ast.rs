@@ -2105,8 +2105,10 @@ pub enum SourceSpec {
 
     /// Single-frequency FM source: SFFM(VO VA FC MDI FM TD PHASEM PHASEC)
     ///
-    /// `v(t) = VO + VA*sin(2*pi*FC*(t-TD) + PHASEC + MDI*sin(2*pi*FM*(t-TD) + PHASEM))`
-    /// for `t > TD`, and exactly 0 before (ngspice vsrcload.c semantics).
+    /// `v(t) = VO + VA*sin(2*pi*FC*t + MDI*sin(2*pi*FM*t))` from `t = 0`, as
+    /// QSPICE, LTspice and Xyce read it. The ngspice dialect alone reads TD and
+    /// the phases: `VO + VA*sin(2*pi*FC*(t-TD) + PHASEC + MDI*sin(2*pi*FM*(t-TD)
+    /// + PHASEM))` for `t > TD`, and exactly 0 before (vsrcload.c).
     /// Omitted `carrier_freq`/`signal_freq` are stored as NaN and resolved
     /// against the active transient's stop time at evaluation.
     Sffm {
@@ -2124,11 +2126,11 @@ pub enum SourceSpec {
         /// FM: signal (modulating) frequency in Hz (NaN/0 = 1/tstop; 500/tstop
         /// in the ngspice dialect)
         signal_freq: Value,
-        /// TD: delay before the waveform starts
+        /// TD: delay before the waveform starts (ngspice dialect only)
         delay: Value,
-        /// PHASEM: modulation phase in degrees
+        /// PHASEM: modulation phase in degrees (ngspice dialect only)
         phase_modulation: Value,
-        /// PHASEC: carrier phase in degrees
+        /// PHASEC: carrier phase in degrees (ngspice dialect only)
         phase_carrier: Value,
     },
 

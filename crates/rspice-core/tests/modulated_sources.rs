@@ -249,7 +249,13 @@ r1 1 0 1k
 .tran 10n 5u
 .end
 ";
-    let (times, values) = transient_node_values(deck, "1", 5.0e-6, 10.0e-9);
+    let (times, values) = transient_node_values_with_config(
+        deck,
+        "1",
+        5.0e-6,
+        10.0e-9,
+        SimulationConfig::default().with_spice_dialect(SpiceDialect::Ngspice),
+    );
     assert!(times.len() > 100, "expected a dense transient");
     for (t, v) in times.iter().zip(values.iter()) {
         let expected = sffm_reference(*t, 0.2, 1.0, 1.0e6, 5.0, 1.0e5, 0.0);
@@ -325,7 +331,13 @@ r1 1 0 1k
 .tran 5n 3u
 .end
 ";
-    let (times, values) = transient_node_values(deck, "1", 3.0e-6, 5.0e-9);
+    let (times, values) = transient_node_values_with_config(
+        deck,
+        "1",
+        3.0e-6,
+        5.0e-9,
+        SimulationConfig::default().with_spice_dialect(SpiceDialect::Ngspice),
+    );
     let mut saw_pre_delay = false;
     let mut saw_post_delay = false;
     for (t, v) in times.iter().zip(values.iter()) {
@@ -398,6 +410,52 @@ r8 n8 0 1k
             .unwrap_or_else(|| panic!("node {node} missing"));
         for (t, v) in result.time.iter().zip(values) {
             let expected = sffm_reference(*t, 0.0, 1.0, fc, mdi, fs, 0.0);
+            assert!(
+                (v - expected).abs() < TOL,
+                "{node} at t={t}: got {v}, formula {expected}"
+            );
+        }
+    }
+}
+
+/// QSPICE, LTspice and Xyce read five SFFM values: the output is VO at t = 0
+/// and in the operating point, and a sixth to eighth value (ngspice's TD,
+/// PHASEM and PHASEC) moves nothing. QSPICE gives every node below 1 at
+/// t = 0, 1.47571 at 250 ns and 0.710291 at 500 ns; ngspice gives 0 at t = 0
+/// and holds 0 through TD.
+#[test]
+fn sffm_default_dialect_reads_five_values_from_vo() {
+    let deck = "\
+* sffm extra values
+v1 n1 0 sffm(1 0.5 1meg 2 100k)
+r1 n1 0 1k
+v2 n2 0 sffm(1 0.5 1meg 2 100k 1u)
+r2 n2 0 1k
+v3 n3 0 sffm(1 0.5 1meg 2 100k 1u 30)
+r3 n3 0 1k
+v4 n4 0 sffm(1 0.5 1meg 2 100k 0 30 60)
+r4 n4 0 1k
+.end
+";
+    let netlist = Netlist::parse(deck).expect("parse");
+    let engine = Engine::new(SimulationConfig::default());
+    let op = engine.run_dc_op(&netlist).expect("operating point");
+    let result = engine
+        .run_tran(&netlist, 3.0e-6, 2.0e-9)
+        .expect("transient");
+    for node in ["n1", "n2", "n3", "n4"] {
+        assert_eq!(
+            op.try_voltage_named(node),
+            Some(1.0),
+            "{node} at the operating point"
+        );
+        let values = result
+            .try_voltage_waveform_named(node)
+            .unwrap_or_else(|| panic!("node {node} missing"));
+        assert_eq!(values.first().copied(), Some(1.0), "{node} at t = 0");
+        for (t, v) in result.time.iter().zip(values) {
+            let expected =
+                1.0 + 0.5 * (2.0 * PI * 1.0e6 * t + 2.0 * (2.0 * PI * 1.0e5 * t).sin()).sin();
             assert!(
                 (v - expected).abs() < TOL,
                 "{node} at t={t}: got {v}, formula {expected}"
@@ -482,7 +540,7 @@ r1 1 0 1k
 }
 
 #[test]
-fn modulated_sources_contribute_zero_to_the_operating_point() {
+fn ngspice_modulated_sources_contribute_zero_to_the_operating_point() {
     // ngspice's vsrcload.c yields exactly 0 at t<=TD, which is what the DC
     // operating point evaluates.
     let deck = "\
@@ -496,7 +554,7 @@ r3 3 0 1k
 .end
 ";
     let netlist = Netlist::parse(deck).expect("parse");
-    let engine = Engine::new(SimulationConfig::default());
+    let engine = Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Ngspice));
     let op = engine.run_dc_op(&netlist).expect("op");
     for node in ["1", "2", "3"] {
         let idx = op

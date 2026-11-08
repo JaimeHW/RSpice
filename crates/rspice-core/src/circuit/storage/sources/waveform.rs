@@ -791,10 +791,7 @@ impl VoltageSources {
             } => {
                 let (fc, fm, mdi) =
                     Self::sffm_parameters(*carrier_freq, *modulation_index, *signal_freq, context);
-                if matches!(
-                    Self::pulse_dialect(context),
-                    crate::config::SpiceDialect::Xyce
-                ) {
+                if !Self::sffm_reads_delay(context) {
                     if DERIVATIVE {
                         let carrier = 2.0 * PI * fc;
                         let modulation = 2.0 * PI * fm;

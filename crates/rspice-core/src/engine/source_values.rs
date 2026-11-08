@@ -4,25 +4,31 @@ use crate::Value;
 use crate::netlist::SourceSpec;
 /// Extract DC value from a SourceSpec enum
 pub fn extract_dc_value(spec: &SourceSpec) -> Value {
-    extract_dc_value_with_limits(spec, crate::resource::ResourceLimits::default())
+    extract_dc_value_with_limits(
+        spec,
+        crate::config::SpiceDialect::BestAvailable,
+        crate::resource::ResourceLimits::default(),
+    )
 }
 
 pub(crate) fn extract_dc_value_with_limits(
     spec: &SourceSpec,
+    dialect: crate::config::SpiceDialect,
     resource_limits: crate::resource::ResourceLimits,
 ) -> Value {
     match spec {
         SourceSpec::Distortion { inner, .. }
         | SourceSpec::AcTransient {
             transient: inner, ..
-        } => extract_dc_value_with_limits(inner, resource_limits),
+        } => extract_dc_value_with_limits(inner, dialect, resource_limits),
         // Same rule as SIN below: ngspice's TRANOP takes the `time = 0`
         // waveform value rather than the bare DC (MODEDC covers MODETRANOP, so
         // vsrcload.c reaches `case PORT`). Without it the transient would open
         // at the DC bias and step to the full port amplitude on its first
         // accepted point.
         SourceSpec::RfPort { inner, port } => {
-            extract_dc_value_with_limits(inner, resource_limits) + port.drive_at(0.0).unwrap_or(0.0)
+            extract_dc_value_with_limits(inner, dialect, resource_limits)
+                + port.drive_at(0.0).unwrap_or(0.0)
         }
         SourceSpec::Dc(v) => *v,
         SourceSpec::DcAc { dc_value, .. } => *dc_value,
@@ -88,9 +94,15 @@ pub(crate) fn extract_dc_value_with_limits(
         .unwrap_or(*value_offset),
         SourceSpec::Exp { v1, .. } => *v1,
         SourceSpec::Ac { .. } => 0.0, // AC sources have no DC component
-        // ngspice's SFFM/AM evaluate to exactly 0 at t <= TD (vsrcload.c),
-        // which is what the operating point sees at time zero. TRNOISE is
-        // zero-mean, so the operating point sees 0 as well.
+        // QSPICE and LTspice hold SFFM at VO in the operating point. ngspice
+        // evaluates SFFM and AM to exactly 0 at t <= TD (vsrcload.c), and
+        // Xyce's operating point reads SFFM as 0 too. TRNOISE is zero-mean,
+        // so the operating point sees 0 as well.
+        SourceSpec::Sffm { offset, .. }
+            if dialect == crate::config::SpiceDialect::BestAvailable =>
+        {
+            *offset
+        }
         SourceSpec::Sffm { .. } | SourceSpec::Am { .. } | SourceSpec::TrNoise { .. } => 0.0,
         SourceSpec::TrRandom { parameter2, .. } => *parameter2,
     }

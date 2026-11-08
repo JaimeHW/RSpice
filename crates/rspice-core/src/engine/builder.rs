@@ -7309,7 +7309,11 @@ impl Engine {
                     let np = circuit.get_or_create_node(&element.nodes[0]);
                     let nn = circuit.get_or_create_node(&element.nodes[1]);
                     let branch = circuit.allocate_branch_named(&element.name);
-                    let dc_value = extract_dc_value_with_limits(spec, self.config.resource_limits);
+                    let dc_value = extract_dc_value_with_limits(
+                        spec,
+                        self.config.spice_dialect,
+                        self.config.resource_limits,
+                    );
                     let (ac_mag, ac_phase) = super::extract_ac_value(spec);
                     log::debug!(
                         "VoltageSource {}: DC={}, AC_mag={}, AC_phase={}, spec={:?}",
@@ -7370,7 +7374,11 @@ impl Engine {
                     )?;
                     let np = circuit.get_or_create_node(&element.nodes[0]);
                     let nn = circuit.get_or_create_node(&element.nodes[1]);
-                    let dc_value = extract_dc_value_with_limits(spec, self.config.resource_limits);
+                    let dc_value = extract_dc_value_with_limits(
+                        spec,
+                        self.config.spice_dialect,
+                        self.config.resource_limits,
+                    );
                     let (ac_mag, ac_phase) = super::extract_ac_value(spec);
                     let transient_spec = match spec {
                         crate::netlist::SourceSpec::Distortion { .. }

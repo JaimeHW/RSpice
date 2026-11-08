@@ -307,9 +307,9 @@ impl VoltageSources {
                 delay,
                 ..
             } => {
-                let xyce = Self::pulse_dialect(context) == crate::config::SpiceDialect::Xyce;
-                (!xyce && *delay > period)
-                    || (*amplitude == 0.0 && (xyce || *delay < 0.0 || *offset == 0.0))
+                let delayed = Self::sffm_reads_delay(context);
+                (delayed && *delay > period)
+                    || (*amplitude == 0.0 && (!delayed || *delay < 0.0 || *offset == 0.0))
             }
             SourceSpec::Am {
                 offset,
@@ -478,10 +478,9 @@ impl VoltageSources {
                 delay,
                 ..
             } => {
-                let xyce = Self::pulse_dialect(context) == crate::config::SpiceDialect::Xyce;
                 let (fc, fm, mdi) =
                     Self::sffm_parameters(*carrier_freq, *modulation_index, *signal_freq, context);
-                (xyce || *delay <= 0.0)
+                (!Self::sffm_reads_delay(context) || *delay <= 0.0)
                     && Self::source_time_component::<true>(spec, 0.0, context, pwl).is_finite()
                     && (*amplitude == 0.0
                         || ((fc == 0.0 || integral_cycles(fc.abs() * period))
@@ -646,7 +645,8 @@ mod tests {
             ),
             ("PAT(1m 0.2m 0 0.1u 0.1u 0.5u b10) R=-1", false),
             ("SFFM(0 1m 2meg 0.3 1meg)", true),
-            ("SFFM(0.2m 1m 2meg 0.3 1meg)", false),
+            ("SFFM(0.2m 1m 2meg 0.3 1meg 0.3u 30 60)", true),
+            ("SFFM(0.2m 1m 2meg 0.3 1.25meg)", false),
             ("AM(0 1m 1m 1meg 2meg)", true),
             ("AM(0 1m 1m 1.25meg 2meg)", false),
         ] {

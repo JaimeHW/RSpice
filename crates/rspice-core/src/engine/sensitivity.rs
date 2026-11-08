@@ -1552,6 +1552,7 @@ impl Engine {
 
     fn collect_ac_sensitivity_targets(
         netlist: &Netlist,
+        dialect: crate::config::SpiceDialect,
         resource_limits: crate::resource::ResourceLimits,
     ) -> Result<Vec<AcSensitivityTarget>, SimulationError> {
         let mut targets = Vec::new();
@@ -1639,6 +1640,7 @@ impl Engine {
                             parameter: "DC".to_string(),
                             nominal_value: crate::engine::extract_dc_value_with_limits(
                                 spec,
+                                dialect,
                                 resource_limits,
                             ),
                             location: AcSensitivityLocation::SourceDc { element_index },
@@ -3268,11 +3270,15 @@ impl Engine {
         self.ensure_sensitivity_capability(&flat, abort)?;
         Self::validate_complete_dc_sensitivity_coverage(&flat)?;
         Self::validate_design_parameter_filters(&flat, filters, "DC")?;
-        let candidates = Self::collect_ac_sensitivity_targets(&flat, self.config.resource_limits)?
-            .into_iter()
-            .filter(Self::dc_sensitivity_target_active)
-            .chain(Self::collect_design_parameter_targets(netlist))
-            .collect::<Vec<_>>();
+        let candidates = Self::collect_ac_sensitivity_targets(
+            &flat,
+            self.config.spice_dialect,
+            self.config.resource_limits,
+        )?
+        .into_iter()
+        .filter(Self::dc_sensitivity_target_active)
+        .chain(Self::collect_design_parameter_targets(netlist))
+        .collect::<Vec<_>>();
         Self::refuse_dead_sensitivity_filters(&candidates, filters, "DC", "DC parameter")?;
         let targets = Self::select_sensitivity_targets(candidates, filters);
         if targets.is_empty() {
@@ -3493,10 +3499,14 @@ impl Engine {
         let flat = self.flattened_sensitivity_netlist(netlist, abort)?;
         self.ensure_sensitivity_capability(&flat, abort)?;
         Self::validate_design_parameter_filters(&flat, filters, "AC")?;
-        let candidates = Self::collect_ac_sensitivity_targets(&flat, self.config.resource_limits)?
-            .into_iter()
-            .chain(Self::collect_design_parameter_targets(netlist))
-            .collect::<Vec<_>>();
+        let candidates = Self::collect_ac_sensitivity_targets(
+            &flat,
+            self.config.spice_dialect,
+            self.config.resource_limits,
+        )?
+        .into_iter()
+        .chain(Self::collect_design_parameter_targets(netlist))
+        .collect::<Vec<_>>();
         Self::refuse_dead_sensitivity_filters(&candidates, filters, "AC", "parameter")?;
         let targets = Self::select_sensitivity_targets(candidates, filters);
         if targets.is_empty() {
@@ -3756,6 +3766,7 @@ mod tests {
             )).unwrap();
             let targets = Engine::collect_ac_sensitivity_targets(
                 &netlist,
+                crate::config::SpiceDialect::BestAvailable,
                 crate::resource::ResourceLimits::default(),
             )
             .unwrap();
@@ -3871,6 +3882,7 @@ mod tests {
         let netlist = Netlist::parse("Postprocessing\nR1 out 0 1\n.end\n").unwrap();
         let target = Engine::collect_ac_sensitivity_targets(
             &netlist,
+            crate::config::SpiceDialect::BestAvailable,
             crate::resource::ResourceLimits::default(),
         )
         .unwrap()
@@ -3957,6 +3969,7 @@ mod tests {
 
         let mut target = Engine::collect_ac_sensitivity_targets(
             &netlist,
+            crate::config::SpiceDialect::BestAvailable,
             crate::resource::ResourceLimits::default(),
         )
         .unwrap()
