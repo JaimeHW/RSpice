@@ -2913,6 +2913,16 @@ impl Engine {
     }
 }
 
+/// Newton stamps a preceding proof or status load supplied. A transient
+/// runs on the analysis worker, so a test reads this as a process-wide total.
+#[cfg(test)]
+pub(super) static NEWTON_STAMPS_REUSED: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+/// Rebuilds the stamp after a failed proof, for comparing the two paths.
+#[cfg(test)]
+pub(super) static RESTAMP_AFTER_FAILED_PROOF: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
 #[cfg(test)]
 mod core_state_tests;
 
@@ -2965,6 +2975,49 @@ mod tests {
             false,
             None
         ));
+    }
+
+    #[test]
+    fn a_failed_residual_proof_lends_its_stamp_to_the_next_newton_iteration() {
+        let mut deck = String::from(
+            "MESFET ring with behavioral loads\n\
+             .subckt mesinv 10 20 3\n\
+             rdl 10 1 20\n\
+             bl1 1 2 i=0.00025*tanh(v(1,2)/0.00025/2240)*(1+v(1,2)*0.027)\n\
+             rsl 2 3 20\n\
+             zd 3 20 0 driver l=0.7u w=20u\n\
+             ci 3 0 20f\n\
+             .ends mesinv\n\
+             .options reltol=1e-7 chgtol=1e-20 trtol=1\n\
+             .model driver nmf level=2 n=1.44 rd=20 rs=20 vs=1.9e5\n\
+             + mu=0.25 d=1e-7 vto=0.15 m=2 lambda=0.15 sigma0=0.02 vsigmat=0.5\n\
+             vdd 1 0 dc 1.6\n",
+        );
+        for stage in 0..10 {
+            deck.push_str(&format!(
+                "xinv{stage} 1 {} {} mesinv\n",
+                stage + 2,
+                stage + 3
+            ));
+        }
+        deck.push_str("xinv10 1 12 2000 mesinv\n");
+        deck.push_str("vkick 2000 2 dc 0 pwl(0 0 0.2n 0 0.3n 0.1 0.4n 0)\n.end\n");
+        let netlist = Netlist::parse(&deck).expect("ring deck parses");
+        use std::sync::atomic::Ordering::Relaxed;
+        let run = |restamp: bool| {
+            RESTAMP_AFTER_FAILED_PROOF.store(restamp, Relaxed);
+            NEWTON_STAMPS_REUSED.store(0, Relaxed);
+            let result = Engine::default()
+                .run_tran(&netlist, 300e-12, 20e-12)
+                .expect("ring runs");
+            (result, NEWTON_STAMPS_REUSED.load(Relaxed))
+        };
+        let (rebuilt, _) = run(true);
+        let (lent, reused) = run(false);
+        RESTAMP_AFTER_FAILED_PROOF.store(false, Relaxed);
+        assert!(reused > 0, "no failed proof lent its stamp");
+        assert_eq!(lent.time, rebuilt.time);
+        assert_eq!(lent.voltages, rebuilt.voltages);
     }
 
     fn xyce_core_residual_fixture() -> (Engine, crate::circuit::CircuitData, usize) {

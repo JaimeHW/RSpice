@@ -7104,6 +7104,16 @@ impl Engine {
         let mut linear_solution = Vec::with_capacity(size);
         let mut correction_rhs = Vec::with_capacity(size);
         let uses_direct_device_correction = Self::requires_transient_correction_form(&circuit);
+        // A candidate the residual proof turns away takes one more Newton
+        // iteration at that same point. Where the proof's stamp is the one
+        // that iteration would build, it is kept instead of built twice.
+        let failed_proof_stamp_serves_newton = self.config.spice_dialect != SpiceDialect::Xyce
+            && classic_mos_stamp_cache.is_none()
+            && diode_stamp_cache.is_none()
+            && circuit.transient_proof_stamp_is_newton_stamp();
+        #[cfg(test)]
+        let failed_proof_stamp_serves_newton = failed_proof_stamp_serves_newton
+            && !residual::RESTAMP_AFTER_FAILED_PROOF.load(std::sync::atomic::Ordering::Relaxed);
         // Newton phase accounting is debug-only. In normal production runs
         // every DiagnosticTimer below avoids the underlying clock query.
         let diagnostic_timing_enabled = log::log_enabled!(log::Level::Debug);
@@ -9123,8 +9133,11 @@ impl Engine {
                     analysis_final_step,
                 };
                 if std::mem::take(&mut system_matches_new_solution) {
-                    // The status assembly of the previous pass already holds
-                    // this candidate's Jacobian and RHS.
+                    // The status assembly or residual proof of the previous
+                    // pass already holds this candidate's Jacobian and RHS.
+                    #[cfg(test)]
+                    residual::NEWTON_STAMPS_REUSED
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 } else if let Some(cache) = classic_mos_stamp_cache.as_ref() {
                     let refresh_classic_mos_nonlinear = !nonlinear_state_matches_new_solution;
                     let reuse_classic_mos_terms = reuse_sequential_classic_mos_newton_terms
@@ -10057,6 +10070,8 @@ impl Engine {
                                 residual_converged_for_acceptance;
                             total_postsolve_residual_nanos +=
                                 postsolve_residual_start.elapsed().as_nanos();
+                            system_matches_new_solution = failed_proof_stamp_serves_newton
+                                && !residual_converged_for_acceptance;
                             // The proof restamp refreshes nonlinear, generated,
                             // behavioral, and XSPICE trial state at the exact
                             // candidate. Re-evaluate convergence afterward so

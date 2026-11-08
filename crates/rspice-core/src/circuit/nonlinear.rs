@@ -418,6 +418,45 @@ impl CircuitData {
             && !has_dynamic_veriloga
     }
 
+    /// Whether the transient residual proof's stamp at a candidate is the
+    /// stamp the next Newton iteration builds there. The families the proof
+    /// and Newton stamp alike are the JFET-family devices and behavioral
+    /// sources; every other nonlinear family stamps a physical, unlimited
+    /// linearization into the proof or carries state its own stamp advances.
+    pub(crate) fn transient_proof_stamp_is_newton_stamp(&self) -> bool {
+        #[cfg(feature = "veriloga-builtins-base")]
+        let has_generated_veriloga = self.has_generated_veriloga_devices();
+        #[cfg(not(feature = "veriloga-builtins-base"))]
+        let has_generated_veriloga = false;
+        #[cfg(feature = "veriloga")]
+        let has_dynamic_veriloga = self.has_veriloga_devices() || self.has_mixed_signal_hosts();
+        #[cfg(not(feature = "veriloga"))]
+        let has_dynamic_veriloga = false;
+
+        (!self.jfets.is_empty() || !self.behavioral_sources.is_empty())
+            && !self.capacitors.has_solution_dependent_values()
+            && self.mosfets.is_empty()
+            && self.diodes.is_empty()
+            && self.bjts.is_empty()
+            && self.b3soi.is_empty()
+            && self.b3soi_fd.is_empty()
+            && self.b3soi_pd.is_empty()
+            && self.bsim3v3.is_empty()
+            && self.bsim4v8.is_empty()
+            && self.ekv26s.is_empty()
+            && self.ekv3s.is_empty()
+            && self.vdmoses.is_empty()
+            && self.xyce_memristors.is_empty()
+            && self.vswitches.is_empty()
+            && self.iswitches.is_empty()
+            && self.generic_switches.is_empty()
+            && self.jiles_atherton_inductors.is_empty()
+            && self.xyce_core_groups.is_empty()
+            && !self.has_xspice_devices()
+            && !has_generated_veriloga
+            && !has_dynamic_veriloga
+    }
+
     /// Whether a transient attempt can reuse one solution-independent base
     /// matrix for every classic-MOS Newton and residual assembly.
     ///
