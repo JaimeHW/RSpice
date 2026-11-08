@@ -69,6 +69,29 @@ impl<'a> InstanceParams<'a> {
 
     /// The last assignment of any of `names`, the spellings of one parameter.
     fn get_any(&mut self, names: &[&str]) -> Result<Option<Value>, SpecialFunctionError> {
+        match self.last(names) {
+            Some((name, value)) if !value.is_finite() => Err(SpecialFunctionError::new(format!(
+                "{} parameter {name} is not finite ({value})",
+                self.device
+            ))),
+            found => Ok(found.map(|(_, value)| value)),
+        }
+    }
+
+    /// A compliance rail: `name`, or `default` when it is not given. It may
+    /// be infinite, as LTspice reads `1e309`, and then limits nothing.
+    fn rail(&mut self, name: &str, default: Value) -> Result<Value, SpecialFunctionError> {
+        match self.last(&[name]) {
+            Some((name, value)) if value.is_nan() => Err(SpecialFunctionError::new(format!(
+                "{} parameter {name} is not a number",
+                self.device
+            ))),
+            found => Ok(found.map_or(default, |(_, value)| value)),
+        }
+    }
+
+    /// The last assignment of any of `names`, marked read.
+    fn last(&mut self, names: &[&str]) -> Option<(&'a str, Value)> {
         let mut found = None;
         for (index, (candidate, value)) in self.params.iter().enumerate() {
             if names
@@ -76,16 +99,10 @@ impl<'a> InstanceParams<'a> {
                 .any(|name| candidate.eq_ignore_ascii_case(name))
             {
                 self.read[index] = true;
-                found = Some((candidate, *value));
+                found = Some((candidate.as_str(), *value));
             }
         }
-        match found {
-            Some((name, value)) if !value.is_finite() => Err(SpecialFunctionError::new(format!(
-                "{} parameter {name} is not finite ({value})",
-                self.device
-            ))),
-            found => Ok(found.map(|(_, value)| value)),
-        }
+        found
     }
 
     fn or(&mut self, name: &str, default: Value) -> Result<Value, SpecialFunctionError> {

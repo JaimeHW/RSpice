@@ -104,6 +104,49 @@ A7 0 in 0 0 0 0 o7 0 OTA G=1m Iout=10u Vhigh=5 Vlow=-5 Rout=100k
 }
 
 #[test]
+fn an_asym_ota_may_drive_one_way_only_and_rails_may_be_infinite() {
+    // LTspice 26.1.1 at V(in) = 10 V and -10 V: an asym OTA with no sink
+    // (A1) or no source (A2) current drives nothing that way, and 1e309
+    // rails (A3) limit nothing. LTspice reads its 1 TOhm gmin across each 1 MOhm
+    // load, 1 ppm.
+    for (input, expected) in [
+        (
+            10.0,
+            [
+                0.6640361062317428,
+                -0.09999867116640841,
+                -0.2999990279434994,
+            ],
+        ),
+        (-10.0, [0.0, 0.0, 0.2999990279434994]),
+    ] {
+        let deck = format!(
+            "* one-sided asym and infinite rails
+V1 in 0 {input}
+A1 0 in 0 0 0 0 o1 0 OTA g=80n asym isource=1u isink=0 Vlow=-1e308 Vhigh=1e308
+R1 o1 0 1Meg
+A2 in 0 0 0 0 0 o2 0 OTA g=60n asym isource=0 isink=-100n Vlow=-1e308 Vhigh=1e308
+R2 o2 0 1Meg
+A3 in 0 0 0 0 0 o3 0 OTA g=200u iout=300u vlow=-1e309 vhigh=1e309
+R3 o3 0 1k
+.end
+"
+        );
+        let op = Engine::default()
+            .run_dc_op(&parse(&deck))
+            .expect("operating point solves");
+        for (node, expected) in ["o1", "o2", "o3"].into_iter().zip(expected) {
+            let actual = op
+                .try_voltage_named(node)
+                .unwrap_or_else(|| panic!("no voltage for {node}"));
+            assert_close(&format!("{node} at {input} V"), actual, expected, 1e-6);
+        }
+    }
+    let both = build_error("* bad\nA1 0 in 0 0 0 0 out 0 OTA asym Iout=-1u Isink=-2u\n.end\n");
+    assert!(both.contains("Iout not negative"), "{both}");
+}
+
+#[test]
 fn ota_small_signal_gain_rolls_off_on_rout_and_cout() {
     let deck = "* ota ac
 V1 in 0 0 AC 1

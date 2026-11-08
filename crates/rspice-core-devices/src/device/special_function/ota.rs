@@ -68,8 +68,8 @@ impl Ota {
         let asym = p.flag("ASYM")?;
         let linear = p.flag("LINEAR")?;
         let offset = p.or("REF", 0.0)?;
-        let vhigh = p.or("VHIGH", 2.0)?;
-        let vlow = p.or("VLOW", 0.0)?;
+        let vhigh = p.rail("VHIGH", 2.0)?;
+        let vlow = p.rail("VLOW", 0.0)?;
         let rclamp = p.or("RCLAMP", 1.0)?;
         let epsilon = p.or("EPSILON", 0.0)?;
         let rout = p.get("ROUT")?;
@@ -88,9 +88,9 @@ impl Ota {
                 format!("OTA needs Iout above Isink (Iout={iout}, Isink={isink})")
             })?;
             if asym {
-                require(iout > 0.0 && isink < 0.0, || {
+                require(iout >= 0.0 && isink <= 0.0, || {
                     format!(
-                        "OTA asym needs a positive Iout and a negative Isink \
+                        "OTA asym needs an Iout not negative and an Isink not positive \
                          (Iout={iout}, Isink={isink})"
                     )
                 })?;
@@ -187,8 +187,12 @@ impl Ota {
     }
 }
 
-/// `limit · tanh(x / limit)` and its slope.
+/// `limit · tanh(x / limit)` and its slope; nothing at a zero limit, as an
+/// asym OTA with no sink or no source current drives none that way.
 fn bounded_tanh(x: Value, limit: Value) -> (Value, Value) {
+    if limit == 0.0 {
+        return (0.0, 0.0);
+    }
     let t = (x / limit).tanh();
     (limit * t, 1.0 - t * t)
 }
