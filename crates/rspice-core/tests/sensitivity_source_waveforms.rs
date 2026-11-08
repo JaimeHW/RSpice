@@ -392,9 +392,41 @@ fn ldo_unfiltered_rows_hold_the_trim_registers_discrete_state() {
          vsclk sclk 0 pwl(0 0 401u 0 401.01u 1.8 401.5u 1.8 401.51u 0)\n\
          xtrim sclk sdi csn tr3 tr2 tr1 tr0 spi_trim\n",
     ));
+    let (compared, outside) = rows_outside_the_solves_resolution(&held, &mixed);
+    assert!(outside.is_empty(), "{outside:?}");
+    assert!(compared > 400, "{compared} rows compared");
+}
+
+/// The rows of `other` further from their `held` twins than two separate
+/// solves can resolve, and how many rows were compared. Each is read as the
+/// change in the output a change of the parameter by its own size would make.
+///
+/// The two decks are solved apart, so the two operating points stop apart:
+/// V(vout) differs by about 1e-11 V between the held and the Verilog trim
+/// register, where a different trim code moves it by 8.6 mV. A row is a slope
+/// at its own operating point, so an exact row (a source or a passive) can
+/// only be held to that gap. A device or model row is a residual difference
+/// over a step of 1e-3 of the parameter, whose output change the high-gain
+/// loop resolves to about 1e-10 of the output. A parameter at zero has no
+/// size to read its row at, and is not compared. Whether a row is one-sided is
+/// decided from the difference of its two sides, so a row at that resolution
+/// can go either way; a row above it must not.
+#[cfg(feature = "veriloga")]
+fn rows_outside_the_solves_resolution(
+    held: &SensitivityResult,
+    other: &SensitivityResult,
+) -> (usize, Vec<String>) {
+    use rspice_core::analysis::ElementType as Kind;
+    let gap = (held.output_value - other.output_value).abs();
+    let resolved = 1e-10 * held.output_value.abs() / 1e-3;
     let mut compared = 0;
-    for twin in &held.sensitivities {
-        let Some(row) = mixed
+    let mut outside = Vec::new();
+    for twin in held
+        .sensitivities
+        .iter()
+        .filter(|row| row.nominal_value != 0.0)
+    {
+        let Some(row) = other
             .sensitivities
             .iter()
             .find(|row| row.vector_name.eq_ignore_ascii_case(&twin.vector_name))
@@ -402,14 +434,31 @@ fn ldo_unfiltered_rows_hold_the_trim_registers_discrete_state() {
             continue;
         };
         compared += 1;
-        assert!(
-            (row.absolute - twin.absolute).abs() <= 1e-12 * twin.absolute.abs().max(1e-300),
-            "{}: {:e} held {:e}",
-            twin.vector_name,
-            row.absolute,
-            twin.absolute
+        let size = twin.nominal_value.abs();
+        let exact = matches!(
+            twin.element_type,
+            Kind::CurrentSource | Kind::VoltageSource | Kind::Resistor | Kind::Capacitor
         );
+        let tolerance = if exact {
+            4.0 * gap + 1e-12 * (twin.absolute * size).abs()
+        } else {
+            resolved
+        };
+        if (row.absolute - twin.absolute).abs() * size > tolerance {
+            outside.push(format!(
+                "{}: {:e} held {:e}",
+                twin.vector_name, row.absolute, twin.absolute
+            ));
+        }
+        let one_sided = |result: &SensitivityResult| {
+            result
+                .one_sided
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case(&twin.vector_name))
+        };
+        if (twin.absolute * size).abs() > resolved && one_sided(held) != one_sided(other) {
+            outside.push(format!("{}: one-sided in only one", twin.vector_name));
+        }
     }
-    assert!(compared > 500, "{compared} rows compared");
-    assert_eq!(mixed.one_sided, held.one_sided);
+    (compared, outside)
 }
