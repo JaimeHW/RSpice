@@ -11465,7 +11465,19 @@ mod tests {
                         assert_eq!(actual, expected, "{dialect:?} nested={nested}: {tail}");
                     }
                 }
-                for fields in ["3 VALUE=-.2", "3 R=-.2", "3 -.2", "R=-.2"] {
+                // QSPICE adds a signed value that follows the first one;
+                // Xyce lets it replace the first.
+                let signed_tail = if matches!(dialect, ExpressionDialect::Xyce) {
+                    -5.0
+                } else {
+                    (3.0_f64 - 0.2).recip()
+                };
+                for (fields, conductance) in [
+                    ("3 VALUE=-.2", -5.0),
+                    ("3 R=-.2", -5.0),
+                    ("3 -.2", signed_tail),
+                    ("R=-.2", -5.0),
+                ] {
                     let body = format!("R1 r 0 {fields}");
                     let source = if nested {
                         format!("Signed replacements\nX1 cell\n.subckt cell\n{body}\n.ends\n.end")
@@ -11482,7 +11494,7 @@ mod tests {
                     .unwrap();
                     let circuit = engine.build_circuit(&netlist).unwrap();
                     assert_eq!(
-                        circuit.resistors.conductances[0], -5.0,
+                        circuit.resistors.conductances[0], conductance,
                         "{dialect:?} nested={nested}: {fields}"
                     );
                 }

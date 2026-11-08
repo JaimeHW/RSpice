@@ -797,6 +797,13 @@ mod tests {
     fn passive_sensitivity_tracks_the_accepted_primary_assignment() {
         let engine = Engine::default();
         for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+            // QSPICE adds a signed value that follows the first one, so
+            // `3 +{q}` is 4 and moves by q's 1e-8; Xyce lets it replace the 3.
+            let signed_tail = if matches!(dialect, ExpressionDialect::Xyce) {
+                1e-8
+            } else {
+                0.25e-8
+            };
             for device in ["R", "C", "L"] {
                 for nested in [false, true] {
                     for (fields, relative_direction) in [
@@ -805,7 +812,7 @@ mod tests {
                         (format!("3 {device}=q"), 1e-8),
                         ("q VALUE=2".into(), 0.0),
                         ("{q} 2".into(), 0.0),
-                        ("3 +{q}".into(), 1e-8),
+                        ("3 +{q}".into(), signed_tail),
                         ("3 {q}".into(), 1e-8),
                         ("{1+abs(p)} VALUE=2".into(), 0.0),
                         ("n VALUE=2".into(), 0.0),
