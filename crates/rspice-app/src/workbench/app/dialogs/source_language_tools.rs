@@ -173,12 +173,6 @@ fn list_references(
             line: reference.line,
             column: reference.column,
             text: reference.line_preview.clone(),
-            route: crate::workbench::app_state::diagnostic_store::DiagnosticRoute::CodeDocument {
-                bundle: index.bundle_id,
-                logical_path: reference.logical_path.as_str().into(),
-                line: Some(reference.line),
-                column: Some(reference.column),
-            },
         })
         .collect::<Vec<_>>();
     let revision = app

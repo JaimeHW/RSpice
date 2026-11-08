@@ -256,7 +256,7 @@ fn table(ui: &mut Ui, list: &mut SourceReferences) -> Option<DiagnosticRoute> {
     report_escape_owner(&response);
     if let Some(index) = pressed {
         list.selected = index;
-        follow = list.rows.get(index).map(|row| row.route.clone());
+        follow = route_to(list, index);
     }
     if follow.is_some() {
         response.surrender_focus();
@@ -298,6 +298,17 @@ fn body(ui: &mut Ui, rect: egui::Rect, current: Option<(egui::Id, egui::Rect)>) 
         theme::paint_focus_ring(ui, &response, framed);
     }
     response
+}
+
+/// Where a row opens: its document at its line and column.
+fn route_to(list: &SourceReferences, index: usize) -> Option<DiagnosticRoute> {
+    let row = list.rows.get(index)?;
+    Some(DiagnosticRoute::CodeDocument {
+        bundle: list.bundle,
+        logical_path: row.logical_path.as_str().into(),
+        line: Some(row.line),
+        column: Some(row.column),
+    })
 }
 
 /// Move over the rows, open one, or let go. The keys are taken only while
@@ -353,8 +364,6 @@ fn keyboard(
         at
     };
     list.selected = next;
-    let opened = enter
-        .then(|| list.rows.get(next).map(|row| row.route.clone()))
-        .flatten();
+    let opened = enter.then(|| route_to(list, next)).flatten();
     (next != at, opened)
 }

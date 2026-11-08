@@ -295,7 +295,6 @@ pub struct SourceReference {
     pub column: usize,
     /// The line, as it read.
     pub text: String,
-    pub route: crate::workbench::app_state::diagnostic_store::DiagnosticRoute,
 }
 
 /// What Find references last found, for the References page. A reading

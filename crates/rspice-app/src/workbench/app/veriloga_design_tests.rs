@@ -351,15 +351,7 @@ fn find_references_lists_each_occurrence_on_the_references_page() {
             ("model.va", 6, 21, "analog I(p, n) <+ g * V(p, n);"),
         ]
     );
-    assert_eq!(
-        list.rows[1].route,
-        crate::workbench::app_state::diagnostic_store::DiagnosticRoute::CodeDocument {
-            bundle: bundle_id,
-            logical_path: "model.va".into(),
-            line: Some(6),
-            column: Some(21),
-        }
-    );
+    assert_eq!(list.bundle, bundle_id);
     assert!(app.state.workbench.console_visible);
     assert_eq!(
         app.state.workbench.console_page,
