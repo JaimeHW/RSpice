@@ -6,6 +6,10 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::label_layout::{
+    IMPORTED_TEXT_WORLD, LINE_BOX_EM, LayoutPoint, LayoutRect, PlacedText, TextEdge, text_box,
+};
+
 use rspice_design_model::Point;
 
 /// Maximum authored note source retained in a schematic document.
@@ -343,6 +347,37 @@ impl DesignReviewMutation {
     }
 }
 
+/// How far a lettered note's edge stands off the point it stands on, so its
+/// descenders clear the wire beside it.
+const LETTERED_NOTE_STANDOFF_WORLD: f32 = 3.0;
+/// The distance from one line of a lettered note to the next at the standard
+/// size, as LTspice spaces its lines.
+const LETTERED_NOTE_LINE_ADVANCE_WORLD: f32 = 17.5;
+
+/// The distance from one line of a note lettered at `size_percent` to the
+/// next, in world units.
+#[must_use]
+pub fn lettered_note_line_advance(size_percent: u16) -> f32 {
+    LETTERED_NOTE_LINE_ADVANCE_WORLD * f32::from(size_percent) / 100.0
+}
+
+/// How a note brought from another tool's drawing is lettered: in RSpice's
+/// proportional face at the source's size, every line justified about the
+/// note's point as the source justified it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NoteLettering {
+    /// Which edge of each line stands on the point, along the line.
+    pub along: TextEdge,
+    /// Which edge of the lines together stands on the point, across them.
+    pub across: TextEdge,
+    /// Lines centred across stand on the point by the first, the rest
+    /// running on past it, rather than by the middle of them all.
+    pub by_first_line: bool,
+    /// The lines read upward, each to the right of the one before.
+    pub upward: bool,
+}
+
 /// A durable authored documentation object.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DesignNote {
@@ -364,6 +399,10 @@ pub struct DesignNote {
     /// that marks none reads as it did there.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub anchor_mark_hidden: bool,
+    /// Set when the note came from another tool's drawing and letters as it
+    /// did there; `pos` is then the point the drawing stood it on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lettering: Option<NoteLettering>,
 }
 
 impl DesignNote {
@@ -386,7 +425,80 @@ impl DesignNote {
             review,
             text_size_percent: STANDARD_TEXT_SIZE_PERCENT,
             anchor_mark_hidden: false,
+            lettering: None,
         })
+    }
+
+    /// The same note lettered as a drawing lettered it.
+    pub fn with_lettering(mut self, lettering: NoteLettering) -> Self {
+        self.lettering = Some(lettering);
+        self
+    }
+
+    /// A lettered note's type size, in world units.
+    pub fn lettered_size_world(&self) -> f32 {
+        f32::from(IMPORTED_TEXT_WORLD) * self.text_scale()
+    }
+
+    /// Each line of a lettered note reading `rendered_text`, where it stands
+    /// in world units.
+    pub fn lettered_lines<'a>(
+        &self,
+        lettering: NoteLettering,
+        rendered_text: &'a str,
+    ) -> Vec<(PlacedText, &'a str)> {
+        let lines = rendered_text.split('\n').collect::<Vec<_>>();
+        let advance = lettered_note_line_advance(self.text_size_percent);
+        let reach = self.lettered_size_world() * LINE_BOX_EM * 0.5 + LETTERED_NOTE_STANDOFF_WORLD;
+        let beyond_first = (lines.len() - 1) as f32 * advance;
+        // The middle of the first line, from the point, across the lines.
+        let first = match lettering.across {
+            TextEdge::Start => reach,
+            TextEdge::Center if lettering.by_first_line => 0.0,
+            TextEdge::Center => -beyond_first * 0.5,
+            TextEdge::End => -reach - beyond_first,
+        };
+        let along = match lettering.along {
+            TextEdge::Start => LETTERED_NOTE_STANDOFF_WORLD,
+            TextEdge::Center => 0.0,
+            TextEdge::End => -LETTERED_NOTE_STANDOFF_WORLD,
+        };
+        let (x, y) = (self.pos.x as f32, self.pos.y as f32);
+        lines
+            .into_iter()
+            .enumerate()
+            .map(|(index, line)| {
+                let across = first + index as f32 * advance;
+                let anchor = if lettering.upward {
+                    LayoutPoint::new(x + across, y - along)
+                } else {
+                    LayoutPoint::new(x + along, y + across)
+                };
+                let placed = PlacedText {
+                    anchor,
+                    horizontal: lettering.along,
+                    vertical: TextEdge::Center,
+                    upward: lettering.upward,
+                };
+                (placed, line)
+            })
+            .collect()
+    }
+
+    /// The box the lines of a lettered note take, in world units.
+    pub fn lettered_box(&self, lettering: NoteLettering, rendered_text: &str) -> LayoutRect {
+        let size = self.lettered_size_world();
+        self.lettered_lines(lettering, rendered_text)
+            .into_iter()
+            .map(|(placed, line)| text_box(placed, line, size))
+            .reduce(|all, line| LayoutRect {
+                min: LayoutPoint::new(all.min.x.min(line.min.x), all.min.y.min(line.min.y)),
+                max: LayoutPoint::new(all.max.x.max(line.max.x), all.max.y.max(line.max.y)),
+            })
+            .unwrap_or(LayoutRect {
+                min: LayoutPoint::new(self.pos.x as f32, self.pos.y as f32),
+                max: LayoutPoint::new(self.pos.x as f32, self.pos.y as f32),
+            })
     }
 
     /// The same note without its anchor mark, or with it.

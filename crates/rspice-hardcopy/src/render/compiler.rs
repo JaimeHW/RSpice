@@ -467,6 +467,10 @@ impl<'a> SemanticSceneCompiler<'a> {
             )?,
         );
         for note in &schematic.design_notes {
+            if let Some(lettering) = note.lettering {
+                self.lettered_note(note, lettering)?;
+                continue;
+            }
             let scale = f64::from(note.text_scale());
             let mut origin = self.schematic_point(note.pos)?;
             for line in note.text.lines() {

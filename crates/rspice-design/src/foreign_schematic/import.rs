@@ -32,7 +32,9 @@ use super::{
 use crate::schematic::component::{Component, LibraryCellInstance};
 use crate::schematic::component_display::ComponentDisplayMode;
 use crate::schematic::component_type::ComponentType;
-use crate::schematic::design_note::{DESIGN_NOTE_TEXT_OFFSET_WORLD, DesignNote, DesignNoteKind};
+use crate::schematic::design_note::{
+    DesignNote, DesignNoteKind, NoteLettering, lettered_note_line_advance,
+};
 use crate::schematic::document::SchematicDocument;
 use crate::schematic::document_policy::{NetNamingPolicy, SchematicDocumentPolicy};
 use crate::schematic::documentation_shape::{
@@ -2163,13 +2165,13 @@ impl Builder<'_> {
             match text.kind {
                 ForeignTextKind::Directive => {
                     let (lettering, line) = (text.lettering, text.line);
-                    let advance = i32::from(lettering.size_percent) * 15 / 100;
+                    let advance = lettered_note_line_advance(lettering.size_percent);
                     // A coupling letters its own line of the block, so the
                     // block keeps that line empty.
                     let (mut drawn, mut read) = (Vec::new(), Vec::new());
                     let lines = spice_text_lines(&text.text);
                     for (index, line) in lines.lines().enumerate() {
-                        let at = position + Point::new(0, advance * index as i32);
+                        let at = position + Point::new(0, (advance * index as f32).round() as i32);
                         if self.place_coupling(at, line, &lettering) {
                             drawn.push("");
                         } else {
@@ -2183,7 +2185,8 @@ impl Builder<'_> {
                         // it, whatever a project place takes from it.
                         let id = self.id();
                         let empty = drawn.iter().take_while(|line| line.trim().is_empty());
-                        let first = position + Point::new(0, advance * empty.count() as i32);
+                        let first = position
+                            + Point::new(0, (advance * empty.count() as f32).round() as i32);
                         match DesignNote::new(
                             id,
                             first,
@@ -2571,10 +2574,6 @@ fn unique_pin_names(slots: &[Option<&ForeignPin>]) -> Vec<PortSpec> {
         .collect()
 }
 
-/// How far a comment's text stands off the point its drawing stood it on by
-/// an edge, so a word standing on a wire keeps its descenders clear of it.
-const NOTE_STANDOFF_WORLD: f32 = 3.0;
-
 /// `note` lettered the way its drawing lettered it, standing on `point`,
 /// with no anchor mark: the drawing marks none.
 pub(super) fn lettered_note(
@@ -2582,37 +2581,19 @@ pub(super) fn lettered_note(
     point: Point,
     lettering: &ForeignLettering,
 ) -> DesignNote {
-    let note = note
-        .with_text_size_percent(lettering.size_percent)
-        .with_anchor_mark_hidden(true);
-    let pos = note_anchor(&note, point, lettering);
-    DesignNote { pos, ..note }
-}
-
-/// Where a note's anchor goes so its text stands on `point` the way the
-/// source drawing stood it: by its start, end or centre across, and by its
-/// top, bottom or middle down. A text of several lines LTspice centres down
-/// stands on its point by its first line, the rest running below; its
-/// drawings lay their notes out by that.
-fn note_anchor(note: &DesignNote, point: Point, lettering: &ForeignLettering) -> Point {
-    let (width, height) = note.text_extent_world(&note.text);
-    let line_height = note.text_extent_world("").1;
-    let middle = if lettering.by_first_line {
-        line_height
-    } else {
-        height
-    };
-    let reach = |edge: TextEdge, extent: f32, middle: f32| match edge {
-        TextEdge::Start => -NOTE_STANDOFF_WORLD,
-        TextEdge::Center => middle * 0.5,
-        TextEdge::End => extent + NOTE_STANDOFF_WORLD,
-    };
-    let (across, down) = lettering.justification;
-    let (offset_x, offset_y) = DESIGN_NOTE_TEXT_OFFSET_WORLD;
-    Point::new(
-        point.x - (reach(across, width, width) + offset_x).round() as i32,
-        point.y - (reach(down, height, middle) + offset_y).round() as i32,
-    )
+    let (along, across) = lettering.justification;
+    DesignNote {
+        pos: point,
+        ..note
+            .with_text_size_percent(lettering.size_percent)
+            .with_anchor_mark_hidden(true)
+            .with_lettering(NoteLettering {
+                along,
+                across,
+                by_first_line: lettering.by_first_line,
+                upward: lettering.upward,
+            })
+    }
 }
 
 /// The symbol document of a part that draws `body`, with a terminal at each

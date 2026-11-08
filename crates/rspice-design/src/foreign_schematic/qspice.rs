@@ -94,6 +94,7 @@ pub fn parse_qsch(bytes: &[u8]) -> Result<ForeignSchematic, ForeignParseError> {
                         size_percent: size_percent(numbers.first().map(String::as_str)),
                         justification: text_justification(numbers.get(1).map(String::as_str)),
                         by_first_line: false,
+                        upward: false,
                     },
                 });
             }

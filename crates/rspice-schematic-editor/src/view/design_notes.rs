@@ -6,13 +6,14 @@ use egui::{Color32, Context, Galley, Painter, Pos2, Rect, Stroke, vec2};
 
 use rspice_design::schematic::design_note::{
     DESIGN_NOTE_FONT_WORLD, DESIGN_NOTE_LINE_ADVANCE_WORLD, DESIGN_NOTE_TEXT_OFFSET_WORLD,
-    DesignNote, DesignNoteKind, DesignNoteRenderContext,
+    DesignNote, DesignNoteKind, DesignNoteRenderContext, NoteLettering,
 };
 use rspice_design_model::Point;
 use rspice_ui_kit::palette::Palette;
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::Tokens;
 
+use super::drawing::{layout_pos, text_align, upward_rect};
 use super::viewport::Viewport;
 
 pub(crate) const FONT_WORLD_SIZE: f32 = DESIGN_NOTE_FONT_WORLD;
@@ -29,7 +30,9 @@ const SELECTION_FILL_ALPHA: f32 = 0.12;
 
 #[derive(Clone)]
 struct DesignNoteScreenLayout {
-    lines: Vec<(Arc<Galley>, Pos2)>,
+    /// Each line, its upright box's corner, and how it hangs when it turns
+    /// to read upward.
+    lines: Vec<(Arc<Galley>, Pos2, Option<egui::Align2>)>,
     bounds: Rect,
     anchor: Pos2,
 }
@@ -41,6 +44,9 @@ fn screen_layout(
     text: &str,
     color: Color32,
 ) -> Option<DesignNoteScreenLayout> {
+    if let Some(lettering) = note.lettering {
+        return lettered_screen_layout(ctx, viewport, note, lettering, text, color);
+    }
     // A note is annotation: below the one legibility floor it hides, with
     // its marker, rather than painting a smudge.
     let scale = note.text_scale();
@@ -78,11 +84,62 @@ fn screen_layout(
         } else {
             bounds.union(rect)
         };
-        lines.push((galley, position));
+        lines.push((galley, position, None));
     }
     Some(DesignNoteScreenLayout {
         lines,
         bounds: bounds.expand(POINTER_SLOP),
+        anchor,
+    })
+}
+
+/// A note from another tool's drawing: its lines in the proportional face,
+/// each hung off its own anchor by its own shaped width.
+fn lettered_screen_layout(
+    ctx: &Context,
+    viewport: &Viewport,
+    note: &DesignNote,
+    lettering: NoteLettering,
+    text: &str,
+    color: Color32,
+) -> Option<DesignNoteScreenLayout> {
+    let font_size = super::lod::annotation_size(
+        note.lettered_size_world(),
+        viewport.zoom,
+        ctx.pixels_per_point(),
+    )?;
+    let anchor = viewport.schematic_to_screen(note.pos);
+    let point = Pos2::new(note.pos.x as f32, note.pos.y as f32);
+    let mut lines = Vec::new();
+    let mut bounds: Option<Rect> = None;
+    for (placed, source) in note.lettered_lines(lettering, text) {
+        if source.trim().is_empty() {
+            continue;
+        }
+        let at = anchor + (layout_pos(placed.anchor) - point) * viewport.zoom;
+        let align = text_align(placed.horizontal, placed.vertical);
+        let galley = ctx.fonts_mut(|fonts| {
+            rspice_ui_kit::text::layout_no_wrap(
+                fonts,
+                source,
+                theme::sans(font_size, FontWeight::Regular),
+                color,
+            )
+        });
+        let upright = align.anchor_size(at, galley.size());
+        let drawn = if placed.upward {
+            upward_rect(at, upright)
+        } else {
+            upright
+        };
+        bounds = Some(bounds.map_or(drawn, |all| all.union(drawn)));
+        lines.push((galley, upright.min, placed.upward.then_some(align)));
+    }
+    Some(DesignNoteScreenLayout {
+        lines,
+        bounds: bounds
+            .unwrap_or(Rect::from_pos(anchor))
+            .expand(POINTER_SLOP),
         anchor,
     })
 }
@@ -164,8 +221,15 @@ pub fn draw_design_note(
             );
         }
     }
-    for (galley, position) in layout.lines {
-        painter.galley(position, galley, color);
+    for (galley, position, upward) in layout.lines {
+        if let Some(align) = upward {
+            painter.add(
+                egui::epaint::TextShape::new(position, galley, color)
+                    .with_angle_and_anchor(-std::f32::consts::FRAC_PI_2, align),
+            );
+        } else {
+            painter.galley(position, galley, color);
+        }
     }
     if note.kind == DesignNoteKind::RequirementLink {
         painter.line_segment(
@@ -198,6 +262,13 @@ pub fn design_note_at(
 
 /// Intrinsic world bounds for culling, zoom-to-fit, and marquee selection.
 pub fn world_bounds(note: &DesignNote, rendered_text: &str) -> (Point, Point) {
+    if let Some(lettering) = note.lettering {
+        let drawn = note.lettered_box(lettering, rendered_text);
+        return (
+            Point::new(drawn.min.x.floor() as i32, drawn.min.y.floor() as i32),
+            Point::new(drawn.max.x.ceil() as i32, drawn.max.y.ceil() as i32),
+        );
+    }
     let (width, height) = note.text_extent_world(rendered_text);
     let (width, height) = (width.ceil() as i32, height.ceil() as i32);
     (

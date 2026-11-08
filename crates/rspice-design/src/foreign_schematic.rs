@@ -342,6 +342,9 @@ pub struct ForeignLettering {
     /// its first line, the rest running below, as LTspice letters one; else
     /// by the middle of all its lines.
     pub by_first_line: bool,
+    /// The text reads upward; `justification` then says which edge along
+    /// its run, and which across it, stands on the point.
+    pub upward: bool,
 }
 
 impl Default for ForeignLettering {
@@ -351,6 +354,7 @@ impl Default for ForeignLettering {
             size_percent: 100,
             justification: (TextEdge::Start, TextEdge::Center),
             by_first_line: true,
+            upward: false,
         }
     }
 }

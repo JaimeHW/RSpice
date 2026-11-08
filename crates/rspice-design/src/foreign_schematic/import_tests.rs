@@ -675,10 +675,9 @@ fn directives_and_comments_keep_their_text_and_place() {
         .iter()
         .find(|note| note.text == "Bias network\nkeep R1 close")
         .expect("the comment is lettered");
-    // `Left` starts the text 3 past (20, 100) and centres its first 15-unit
-    // line on it, the second running below; the anchor stands 6 left of and
-    // 3 over the text.
-    assert_eq!(note.pos, Point::new(17, 89));
+    // The note stands on its drawing's point, and how it hangs from there
+    // is its lettering's to say.
+    assert_eq!(note.pos, Point::new(20, 100));
 }
 
 /// A QSPICE drawing: a source, a resistor, a DLL block and a comment, with
@@ -939,17 +938,20 @@ fn a_coupling_line_of_a_block_keeps_its_place_among_the_blocks_lines() {
         .filter(|component| component.kind == ComponentType::CoupledInductor)
         .map(|component| component.pos)
         .collect::<Vec<_>>();
-    let advance = 15;
+    let advance = 17.5;
     assert_eq!(
         couplings,
-        [Point::new(0, 120), Point::new(0, 120 + 2 * advance)]
+        [
+            Point::new(0, 120),
+            Point::new(0, 120 + (2.0 * advance) as i32)
+        ]
     );
     let [note] = &imported.document.design_notes[..] else {
         panic!("one note");
     };
     assert_eq!(note.text, ".tran 1\n\n.op");
     // The note begins on its first drawn line, as if the source had put it there.
-    let plain = parse_asc("Version 4\nTEXT 0 216 Left 2 !.tran 1\\n\\n.op\n").unwrap();
+    let plain = parse_asc("Version 4\nTEXT 0 220 Left 2 !.tran 1\\n\\n.op\n").unwrap();
     let plain = import_foreign_schematic(&plain, "work", &Library::default());
     assert_eq!(note.pos, plain.document.design_notes[0].pos);
     let [directive] = &imported.directives[..] else {
@@ -3218,9 +3220,7 @@ fn a_qspice_net_label_name_stands_on_the_side_its_drawing_runs_it_to() {
 /// keeps the standard size, and a project written without one loads at it.
 #[test]
 fn a_comment_keeps_its_size_and_stands_on_its_point_as_its_drawing_stood_it() {
-    use crate::schematic::design_note::{
-        DESIGN_NOTE_TEXT_OFFSET_WORLD, DesignNote, DesignNoteKind,
-    };
+    use crate::schematic::design_note::{DesignNote, DesignNoteKind};
 
     const DRAWING: &str = "«schematic
   «net (0,0) 1 7 0 \"centre\"»
@@ -3251,12 +3251,10 @@ fn a_comment_keeps_its_size_and_stands_on_its_point_as_its_drawing_stood_it() {
             .iter()
             .find(|note| note.text == text)
             .unwrap_or_else(|| panic!("no note {text:?}"));
-        let (width, height) = note.text_extent_world(&note.text);
-        let left = note.pos.x as f32 + DESIGN_NOTE_TEXT_OFFSET_WORLD.0;
-        let top = note.pos.y as f32 + DESIGN_NOTE_TEXT_OFFSET_WORLD.1;
+        let drawn = note.lettered_box(note.lettering.expect("lettered"), &note.text);
         (
             note.text_size_percent,
-            [left, top, left + width, top + height],
+            [drawn.min.x, drawn.min.y, drawn.max.x, drawn.max.y],
         )
     };
     let point = |imported: &ForeignImport, name: &str| {
@@ -3305,6 +3303,68 @@ fn a_comment_keeps_its_size_and_stands_on_its_point_as_its_drawing_stood_it() {
 /// so the note draws none either, and nor does directive text kept on the
 /// sheet. A note RSpice writes itself, here for a readout the drawing pinned
 /// to a wire, keeps its mark.
+#[test]
+fn every_line_of_an_imported_text_keeps_its_justification() {
+    use crate::schematic::label_layout::{PlacedText, TextEdge};
+
+    let drawing = parse_asc(
+        "Version 4\n\
+         TEXT 160 160 Bottom 2 ;wide first line\\nnext\\nlast\n\
+         TEXT 800 160 Right 2 ;ends here\\nand here\n\
+         TEXT 1600 160 VLeft 2 ;reads up\n",
+    )
+    .expect("the drawing reads");
+    let imported = import_foreign_schematic(&drawing, "work", &Library::default());
+    let lines = |start: &str| -> Vec<(PlacedText, String)> {
+        let note = imported
+            .document
+            .design_notes
+            .iter()
+            .find(|note| note.text.starts_with(start))
+            .unwrap_or_else(|| panic!("no note {start}"));
+        assert!(note.anchor_mark_hidden, "{start}");
+        note.lettered_lines(note.lettering.expect("lettered"), &note.text)
+            .into_iter()
+            .map(|(placed, line)| (placed, line.to_owned()))
+            .collect()
+    };
+
+    let centred = lines("wide");
+    assert_eq!(centred.len(), 3);
+    for (placed, _) in &centred {
+        assert_eq!(placed.anchor.x, 100.0, "every line is centred on the point");
+        assert_eq!(placed.horizontal, TextEdge::Center);
+    }
+    assert!(
+        centred[2].0.anchor.y < 100.0,
+        "the last line ends over the point"
+    );
+    assert_eq!(
+        centred[1].0.anchor.y - centred[0].0.anchor.y,
+        centred[2].0.anchor.y - centred[1].0.anchor.y
+    );
+
+    let right = lines("ends");
+    assert_eq!(right[0].0.horizontal, TextEdge::End);
+    assert_eq!(right[0].0.anchor.x, right[1].0.anchor.x);
+    assert!(
+        right[0].0.anchor.x < 500.0,
+        "each line ends short of the point"
+    );
+    assert!(
+        right[0].0.anchor.y == 100.0,
+        "standing on the point by its first line"
+    );
+
+    let upward = lines("reads");
+    assert!(upward[0].0.upward);
+    assert_eq!(upward[0].0.horizontal, TextEdge::Start);
+    assert!(
+        upward[0].0.anchor.y < 100.0,
+        "it starts past the point, rising"
+    );
+}
+
 #[test]
 fn a_comment_draws_no_anchor_mark_where_its_drawing_drew_none() {
     let drawing = parse_asc(
@@ -3383,14 +3443,12 @@ fn label_point(imported: &ForeignImport, name: &str) -> (f32, f32) {
 
 /// A note's text box: left, top, right, bottom, and the height of one line.
 fn note_box(note: &crate::schematic::design_note::DesignNote) -> ([f32; 4], f32) {
-    use crate::schematic::design_note::DESIGN_NOTE_TEXT_OFFSET_WORLD;
+    use crate::schematic::label_layout::LINE_BOX_EM;
 
-    let (width, height) = note.text_extent_world(&note.text);
-    let left = note.pos.x as f32 + DESIGN_NOTE_TEXT_OFFSET_WORLD.0;
-    let top = note.pos.y as f32 + DESIGN_NOTE_TEXT_OFFSET_WORLD.1;
+    let drawn = note.lettered_box(note.lettering.expect("lettered"), &note.text);
     (
-        [left, top, left + width, top + height],
-        note.text_extent_world("").1,
+        [drawn.min.x, drawn.min.y, drawn.max.x, drawn.max.y],
+        note.lettered_size_world() * LINE_BOX_EM,
     )
 }
 
@@ -3543,9 +3601,7 @@ fn an_imported_qspice_source_letters_its_waveform_on_the_line_its_drawing_wrote(
 #[cfg(feature = "symbol-artwork")]
 #[test]
 fn a_qspice_ground_draws_its_triangle_clear_of_a_note_set_below_it() {
-    use crate::schematic::design_note::DESIGN_NOTE_TEXT_OFFSET_WORLD;
     use crate::schematic::ground_glyph::GroundGlyph;
-    use crate::schematic::label_layout::{LayoutPoint, LayoutRect};
 
     const DRAWING: &str = "«schematic
   «net (0,0) 1 13 0 \"GND\"»
@@ -3597,15 +3653,7 @@ fn a_qspice_ground_draws_its_triangle_clear_of_a_note_set_below_it() {
         .iter()
         .find(|note| note.text == "a note below the ground")
         .expect("the note is placed");
-    let (width, height) = note.text_extent_world(&note.text);
-    let (x, y) = (
-        note.pos.x as f32 + DESIGN_NOTE_TEXT_OFFSET_WORLD.0,
-        note.pos.y as f32 + DESIGN_NOTE_TEXT_OFFSET_WORLD.1,
-    );
-    let words = LayoutRect {
-        min: LayoutPoint::new(x, y),
-        max: LayoutPoint::new(x + width, y + height),
-    };
+    let words = note.lettered_box(note.lettering.expect("lettered"), &note.text);
     assert!(
         !meets_drawn_body(ground, words),
         "the ground runs over {words:?}"

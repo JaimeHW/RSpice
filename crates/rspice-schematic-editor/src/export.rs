@@ -363,6 +363,7 @@ fn write_style(svg: &mut String, config: &SvgExportConfig) {
   .probe circle {{ fill: {paper}; }}\n\
   .probe-label {{ font-family: {MONO}; font-size: {slice_size}px; font-weight: 500; fill: {text}; stroke: none; }}\n\
   .note {{ font-family: {MONO}; font-size: {note_size}px; font-weight: 400; fill: {text}; }}\n\
+  .lettered-note {{ font-family: {SANS}; font-weight: 400; fill: {text}; }}\n\
   .design-note-anchor {{ fill: {text}; stroke: none; }}\n\
   .design-note-requirement-link .note {{ text-decoration: underline; }}\n\
   .documentation-shape {{ stroke: {text}; stroke-width: {shape_width}; fill: none; stroke-linecap: round; stroke-linejoin: round; }}\n\
@@ -1030,6 +1031,47 @@ mod tests {
         assert!(svg.contains(r#"<path class="symbol" d="M "#), "{svg}");
         assert!(svg.contains(" A 20"), "a true arc: {svg}");
         assert!(svg.contains(">J9<"), "{svg}");
+    }
+
+    #[test]
+    fn an_imported_note_letters_each_line_in_the_label_face_and_a_native_note_does_not() {
+        use rspice_design::schematic::design_note::{DesignNote, DesignNoteKind, NoteLettering};
+        use rspice_design::schematic::label_layout::TextEdge;
+
+        let mut schematic = Schematic::default();
+        let imported = DesignNote::new(
+            19,
+            Point::new(30, 40),
+            DesignNoteKind::PlainText,
+            "one\ntwo",
+        )
+        .unwrap()
+        .with_anchor_mark_hidden(true)
+        .with_lettering(NoteLettering {
+            along: TextEdge::Center,
+            across: TextEdge::End,
+            by_first_line: false,
+            upward: false,
+        });
+        let native =
+            DesignNote::new(20, Point::new(30, 140), DesignNoteKind::PlainText, "own").unwrap();
+        schematic
+            .document_mut_for_test()
+            .design_notes
+            .extend([imported, native]);
+
+        let svg = export_to_svg(schematic.document(), &SvgExportConfig::default());
+        assert_eq!(
+            svg.matches(r#"<text class="lettered-note""#).count(),
+            2,
+            "{svg}"
+        );
+        assert_eq!(svg.matches(r#"text-anchor="middle""#).count(), 2, "{svg}");
+        assert_eq!(svg.matches(r#"<text class="note""#).count(), 1, "{svg}");
+        assert!(
+            svg.contains(".lettered-note { font-family: 'IBM Plex Sans'"),
+            "{svg}"
+        );
     }
 
     #[test]

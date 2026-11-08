@@ -213,6 +213,10 @@ pub fn schematic_bounds(
         }
     }
     for note in &schematic.design_notes {
+        if let Some(lettering) = note.lettering {
+            bounds.include_layout_rect(note.lettered_box(lettering, &note.text));
+            continue;
+        }
         bounds.include(note.pos);
         let lines = note.text.lines().collect::<Vec<_>>();
         let width = lines.iter().map(|line| line.len()).max().unwrap_or(1);

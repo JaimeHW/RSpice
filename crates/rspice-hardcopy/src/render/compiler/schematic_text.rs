@@ -8,6 +8,7 @@
 use super::*;
 use crate::sources::{SchematicText, SchematicTextClass, SemanticComponent, instance_texts};
 use rspice_design::resolved_symbol::ResolvedCellSymbol;
+use rspice_design::schematic::design_note::{DesignNote, NoteLettering};
 use rspice_design::schematic::label_layout::{self, LayoutPoint, PlacedText, TextEdge};
 use rspice_design::symbol_generation::fit_pin_name;
 
@@ -69,6 +70,28 @@ impl SemanticSceneCompiler<'_> {
             text.size_world(),
             text.class.ink(),
         )
+    }
+
+    /// A note from another tool's drawing, in the proportional face, every
+    /// line justified about its point as the drawing set it.
+    pub(super) fn lettered_note(
+        &mut self,
+        note: &DesignNote,
+        lettering: NoteLettering,
+    ) -> Result<(), HardcopyRenderError> {
+        let class = SchematicTextClass::Value;
+        for (placed, line) in note.lettered_lines(lettering, &note.text) {
+            if !line.trim().is_empty() {
+                self.placed_lines(
+                    placed,
+                    line,
+                    class.font(),
+                    note.lettered_size_world(),
+                    class.ink(),
+                )?;
+            }
+        }
+        Ok(())
     }
 
     /// `text` hung off its anchor, each line on the baseline the canvas sets

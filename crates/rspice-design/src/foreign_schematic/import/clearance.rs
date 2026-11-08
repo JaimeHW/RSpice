@@ -466,6 +466,14 @@ fn stroke_meets(start: LayoutPoint, end: LayoutPoint, text: LayoutRect) -> bool 
 
 /// The box a note's words take with its anchor at `pos`.
 fn note_box(note: &DesignNote, pos: Point) -> LayoutRect {
+    if let Some(lettering) = note.lettering {
+        let drawn = note.lettered_box(lettering, &note.text);
+        let (x, y) = ((pos.x - note.pos.x) as f32, (pos.y - note.pos.y) as f32);
+        return LayoutRect {
+            min: LayoutPoint::new(drawn.min.x + x, drawn.min.y + y),
+            max: LayoutPoint::new(drawn.max.x + x, drawn.max.y + y),
+        };
+    }
     let (width, height) = note.text_extent_world(&note.text);
     let (offset_x, offset_y) = DESIGN_NOTE_TEXT_OFFSET_WORLD;
     let (x, y) = (pos.x as f32 + offset_x, pos.y as f32 + offset_y);

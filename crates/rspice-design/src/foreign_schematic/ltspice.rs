@@ -130,6 +130,9 @@ pub fn parse_asc(source: &str) -> Result<ForeignSchematic, ForeignParseError> {
                         size_percent: text_size_percent(words.get(4).copied()),
                         justification: text_justification(words.get(3).copied()),
                         by_first_line: true,
+                        upward: words
+                            .get(3)
+                            .is_some_and(|word| word.to_ascii_lowercase().starts_with('v')),
                     },
                 });
             }

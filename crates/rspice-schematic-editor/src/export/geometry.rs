@@ -287,6 +287,20 @@ pub(super) fn include_design_note_bounds(
     extent: &mut Extent,
 ) {
     for note in notes {
+        if let Some(lettering) = note.lettering {
+            let size = world(note.lettered_size_world(), config);
+            let text = design_note_export_text(context, note, view_path);
+            for (placed, line) in note.lettered_lines(lettering, &text) {
+                let at = world_point(drawing::layout_pos(placed.anchor), config);
+                let align = drawing::text_align(placed.horizontal, placed.vertical);
+                if placed.upward {
+                    extent.include_upward_text(at, align, line, size);
+                } else {
+                    extent.include_text(at, align, line, size);
+                }
+            }
+            continue;
+        }
         let size = world(design_notes::FONT_WORLD_SIZE * note.text_scale(), config);
         let advance = world(design_notes::LINE_ADVANCE_WORLD * note.text_scale(), config);
         let (x, top) = design_note_origin(note, config);
@@ -362,6 +376,21 @@ pub(super) fn write_design_note(
         .unwrap();
     }
     let text = design_note_export_text(document, note, view_path);
+    if let Some(lettering) = note.lettering {
+        let size = world(note.lettered_size_world(), config);
+        for (placed, line) in note.lettered_lines(lettering, &text) {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let at = world_point(drawing::layout_pos(placed.anchor), config);
+            let align = drawing::text_align(placed.horizontal, placed.vertical);
+            write_upward_svg(svg, at, placed.upward, |svg| {
+                write_sized_text_svg(svg, "lettered-note", at, line, align, size);
+            });
+        }
+        svg.push_str("</g>\n");
+        return;
+    }
     writeln!(svg, "<text class=\"note\" x=\"{x}\" y=\"{y}\"{resized}>").unwrap();
     for (index, line) in text.split('\n').enumerate() {
         let dy = if index == 0 { 0.0 } else { advance };
