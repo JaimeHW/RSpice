@@ -7,15 +7,14 @@
 //! its own and has no checker beside it, so there the source is checked by
 //! Compile alone.
 
-use std::time::Duration;
-
 use crate::product::ProjectId;
 
 use super::SelectedVerilogASource;
 use super::page::VerilogAWorkbenchState;
 
 /// How long the source has to stay as it is before it is checked.
-pub(crate) const LIVE_CHECK_PAUSE: Duration = Duration::from_millis(500);
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) const LIVE_CHECK_PAUSE: std::time::Duration = std::time::Duration::from_millis(500);
 
 /// Drive the check of `selected`, the source the editor shows, on by one
 /// frame: take a finished check's findings, note a change, and start a check
@@ -69,7 +68,7 @@ pub(crate) fn drive_veriloga_live_check(
     };
     let pause = LIVE_CHECK_PAUSE.as_secs_f64();
     if now - since < pause {
-        ctx.request_repaint_after(Duration::from_secs_f64(pause - (now - since)));
+        ctx.request_repaint_after(std::time::Duration::from_secs_f64(pause - (now - since)));
         return;
     }
     // One check at a time: a check of an earlier text answers first, and

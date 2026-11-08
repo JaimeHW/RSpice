@@ -190,12 +190,14 @@ pub struct VerilogAWorkbenchState {
 
 /// The source is checked, short of generating code, once its writer pauses:
 /// what the check finds is shown as the source's findings until it changes
-/// again or is compiled.
+/// again or is compiled. The browser build has no thread to check on.
 #[derive(Debug, Clone, Default)]
 pub struct VerilogALiveCheck {
     /// The source as it was last seen changed, and the frame time then.
+    #[cfg(not(target_arch = "wasm32"))]
     pub edited: Option<(VerilogASourceOperationToken, f64)>,
     /// A check on its way, of the source its token names.
+    #[cfg(not(target_arch = "wasm32"))]
     pub running: Option<RunningVerilogACheck>,
     /// What the last check of the source its token names found.
     pub findings: Option<(
@@ -204,6 +206,7 @@ pub struct VerilogALiveCheck {
     )>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, Clone)]
 pub struct RunningVerilogACheck {
     pub token: VerilogASourceOperationToken,
