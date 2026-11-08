@@ -17,7 +17,7 @@ use super::lod;
 use crate::export::{SvgExportConfig, escape_xml};
 use crate::symbols::PinLeads;
 use rspice_design::{
-    resolved_symbol::{ResolvedCellSymbol, ResolvedSymbolPin},
+    resolved_symbol::ResolvedCellSymbol,
     schematic::{
         component::Component,
         component_display::SchematicParameterLabelVisibility,
@@ -29,7 +29,7 @@ use rspice_design::{
         SymbolCurve, SymbolDocument, SymbolShape, SymbolTextAlign, SymbolTextPlacement,
         symbol_text_bounds,
     },
-    symbol_generation::{fit_pin_name, inward_step},
+    symbol_generation::fit_pin_name,
 };
 use rspice_design_model::{Point, port::PortDirection};
 use rspice_ui_kit::{palette::Palette, tokens::Tokens};
@@ -282,13 +282,22 @@ fn draw_symbol_pins(
 
         if let Some(font_size) = font_size.filter(|_| !pin.name_hidden) {
             let anchor = to_screen(origin, scale, component, symbol.pin_label_anchor(pin));
-            painter.text(
-                anchor,
-                pin_label_align(component, pin),
-                displayed_pin_name(document, &pin.name),
-                font(font_size),
-                color.gamma_multiply(0.75),
-            );
+            let hang = component.pin_name_hang(pin);
+            let align = super::drawing::text_align(hang.horizontal, hang.vertical);
+            let name = displayed_pin_name(document, &pin.name);
+            let ink = color.gamma_multiply(0.75);
+            if hang.upward {
+                super::drawing::paint_upward_text(
+                    painter,
+                    anchor,
+                    align,
+                    &name,
+                    font(font_size),
+                    ink,
+                );
+            } else {
+                painter.text(anchor, align, name, font(font_size), ink);
+            }
         }
     }
 }
@@ -300,34 +309,6 @@ fn displayed_pin_name(document: &SymbolDocument, name: &str) -> String {
         name.to_owned()
     } else {
         fit_pin_name(name)
-    }
-}
-
-/// Align a pin name so it reads from its own edge into the body, whatever
-/// orientation the instance is placed in. A name the drawing placed itself
-/// reaches from its anchor the way the drawing set it, turned with the
-/// instance and kept upright.
-fn pin_label_align(component: &Component, pin: &ResolvedSymbolPin) -> Align2 {
-    if let Some(at) = pin.name_at {
-        let reach = component.transform_point(at.reach);
-        let edge = |step: i32| match step.signum() {
-            1 => Align::Min,
-            -1 => Align::Max,
-            _ => Align::Center,
-        };
-        return Align2([edge(reach.x), edge(reach.y)]);
-    }
-    let inward = component.transform_point(inward_step(pin.side));
-    if inward.x.abs() >= inward.y.abs() {
-        if inward.x >= 0 {
-            Align2::LEFT_CENTER
-        } else {
-            Align2::RIGHT_CENTER
-        }
-    } else if inward.y >= 0 {
-        Align2::CENTER_TOP
-    } else {
-        Align2::CENTER_BOTTOM
     }
 }
 
@@ -557,14 +538,18 @@ fn write_symbol_pins_svg(
         if pin.name_hidden {
             continue;
         }
-        write_text_svg(
-            svg,
-            "pin",
-            to_svg(component, symbol.pin_label_anchor(pin), config),
-            &displayed_pin_name(symbol.document(), &pin.name),
-            pin_label_align(component, pin),
-            f64::from(symbol.document().pin_name_world()) * config.units_per_world,
-        );
+        let at = to_svg(component, symbol.pin_label_anchor(pin), config);
+        let hang = component.pin_name_hang(pin);
+        let align = super::drawing::text_align(hang.horizontal, hang.vertical);
+        let name = displayed_pin_name(symbol.document(), &pin.name);
+        let size = f64::from(symbol.document().pin_name_world()) * config.units_per_world;
+        write_upward_svg(svg, at, hang.upward, |svg| {
+            if symbol.document().pin_name_size.is_some() {
+                write_sized_text_svg(svg, "lettered-pin", at, &name, align, size);
+            } else {
+                write_text_svg(svg, "pin", at, &name, align, size);
+            }
+        });
     }
 }
 
@@ -1476,6 +1461,74 @@ mod tests {
             }
         });
         assert_eq!(circles, 0, "the canvas pin has a dot");
+    }
+
+    /// A name its drawing lettered on its side reads upward on the canvas and
+    /// in the SVG, about the same anchor.
+    #[test]
+    fn a_pin_name_on_its_side_reads_upward_on_canvas_and_in_svg() {
+        let mut pin = SymbolPin::new("REF", PortDirection::In, Some(Point::new(0, -30)));
+        pin.name_at = Some(rspice_design::symbol::PinNamePlacement {
+            offset: Point::new(0, 5),
+            reach: Point::new(0, 1),
+            upward: true,
+        });
+        let symbol = ResolvedCellSymbol::from_authored_document(
+            SymbolDocument {
+                pins: vec![pin],
+                pin_name_size: Some(15),
+                body: vec![SymbolShape::Polyline {
+                    points: vec![Point::new(-40, -30), Point::new(40, -30)],
+                    closed: false,
+                }],
+                ..SymbolDocument::default()
+            },
+            &[port("REF", PortDirection::In)],
+        );
+        let component = Component::new(1, ComponentType::CellInstance, Point::new(100, 100));
+        let mut svg = String::new();
+        write_resolved_symbol_svg(
+            &mut svg,
+            &component,
+            &symbol,
+            &SvgExportConfig {
+                units_per_world: 1.0,
+                ..SvgExportConfig::default()
+            },
+        );
+        assert!(
+            svg.contains(r#"transform="rotate(-90 100 75)""#),
+            "turned about its anchor: {svg}"
+        );
+        assert!(svg.contains(r#"text-anchor="end""#), "{svg}");
+        assert!(svg.contains("font-size:15px"), "{svg}");
+
+        let ctx = egui::Context::default();
+        rspice_ui_kit::Theme::default().apply(&ctx);
+        let mut angles = Vec::new();
+        let _ = ctx.run_ui(
+            rspice_ui_kit::raster::display_input(egui::vec2(400.0, 400.0), 1.0),
+            |ui| {
+                let painter = ui.painter().clone();
+                draw_symbol_pins(
+                    &painter,
+                    pos2(200.0, 200.0),
+                    2.0,
+                    &component,
+                    &symbol,
+                    Stroke::new(1.0, Color32::WHITE),
+                    true,
+                    &PinLeads::NONE,
+                );
+                angles.clear();
+                painter.for_each_shape(|shape| {
+                    if let Shape::Text(text) = &shape.shape {
+                        angles.push(text.angle);
+                    }
+                });
+            },
+        );
+        assert_eq!(angles, [-std::f32::consts::FRAC_PI_2]);
     }
 
     /// A pin whose symbol letters no name keeps its lead and terminal, and

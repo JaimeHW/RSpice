@@ -203,6 +203,9 @@ pub fn parse_asy(source: &str) -> Result<ForeignSymbolDefinition, ForeignParseEr
                     // How far in from the pin the name starts.
                     name_offset: words.get(4).and_then(|offset| offset.parse().ok()),
                     name_at: pin_name_at(words.get(3).copied(), words.get(4).copied()),
+                    name_upward: words
+                        .get(3)
+                        .is_some_and(|word| word.to_ascii_uppercase().starts_with('V')),
                 });
             }
             "PINATTR" => {
@@ -373,17 +376,20 @@ fn text_size_percent(code: Option<&str>) -> u16 {
 /// `V` before the word turns the text upright; its box is placed the same.
 /// Where LTspice letters a pin's name: `offset` from the pin, away from the
 /// edge the justification puts the pin on, the name reaching on from there
-/// and centred across. A name lettered upright on its side (`VTOP`) has no
-/// place here.
+/// and centred across. A `V` before the word letters the name on its side,
+/// reading upward, and the word then says which end of that run the pin
+/// stands at: `VRIGHT` its last letter, on a top edge, so the name runs down
+/// into the body; `VLEFT` its first, on a bottom edge; `VTOP` and `VBOTTOM`
+/// the tops and feet of its letters.
 fn pin_name_at(
     justification: Option<&str>,
     offset: Option<&str>,
 ) -> Option<(ForeignPoint, ForeignPoint)> {
     let reach = match justification?.to_ascii_uppercase().as_str() {
-        "LEFT" => ForeignPoint::new(1, 0),
-        "RIGHT" => ForeignPoint::new(-1, 0),
-        "TOP" => ForeignPoint::new(0, 1),
-        "BOTTOM" => ForeignPoint::new(0, -1),
+        "LEFT" | "VTOP" => ForeignPoint::new(1, 0),
+        "RIGHT" | "VBOTTOM" => ForeignPoint::new(-1, 0),
+        "TOP" | "VRIGHT" => ForeignPoint::new(0, 1),
+        "BOTTOM" | "VLEFT" => ForeignPoint::new(0, -1),
         _ => return None,
     };
     let offset = offset

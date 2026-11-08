@@ -2662,6 +2662,74 @@ fn an_ltspice_pin_on_a_slanted_edge_names_itself_where_ltspice_letters_it() {
     assert_eq!(placed("IN").1, None);
 }
 
+/// LTspice letters a name on its side where the pin's justification starts
+/// with `V`: the name reads upward and runs from the pin into the body.
+#[test]
+fn a_pin_name_lettered_on_its_side_reads_upward_into_the_body() {
+    use crate::schematic::label_layout::TextEdge;
+
+    const CHIP_ASY: &str = "Version 4\nSymbolType CELL\n\
+        RECTANGLE Normal -160 -160 160 160\n\
+        SYMATTR Prefix X\nSYMATTR SpiceModel chip.sub\nSYMATTR Value chip\n\
+        PIN -80 -160 VRIGHT 8\nPINATTR PinName REF\nPINATTR SpiceOrder 1\n\
+        PIN 80 160 VLEFT 8\nPINATTR PinName AGND\nPINATTR SpiceOrder 2\n\
+        PIN -160 0 LEFT 8\nPINATTR PinName IN\nPINATTR SpiceOrder 3\n";
+    let mut library = Library::default();
+    library.symbols.insert(
+        "chip".to_owned(),
+        ForeignSymbolSource {
+            definition: parse_asy(CHIP_ASY).expect("the test symbol reads"),
+            location: "chip.asy".to_owned(),
+            schematic: None,
+        },
+    );
+    let drawing = parse_asc("Version 4\nSYMBOL chip 0 0 R0\nSYMATTR InstName X1\n")
+        .expect("the drawing reads");
+    let imported = import_foreign_schematic(&drawing, "work", &library);
+    let cell = imported
+        .cells
+        .iter()
+        .find(|cell| cell.source_symbol == "chip")
+        .expect("the symbol's cell");
+    let resolved = ResolvedCellSymbol::from_authored_document(cell.symbol.clone(), &cell.ports);
+    let upright = imported.document.components[0].clone();
+    let mut turned = upright.clone();
+    turned.rotation = crate::schematic::rotation::Rotation::R90;
+    let placed = |name: &str| {
+        let pin = resolved
+            .connectable_pins()
+            .find(|pin| pin.name == name)
+            .unwrap_or_else(|| panic!("no pin {name}"));
+        let terminal = resolved.effective_pin_offset(pin);
+        let anchor = resolved.pin_label_anchor(pin);
+        (
+            Point::new(anchor.x - terminal.x, anchor.y - terminal.y),
+            upright.pin_name_hang(pin),
+            turned.pin_name_hang(pin),
+        )
+    };
+    let (edge_in, hang, on_its_side) = placed("REF");
+    assert_eq!(edge_in, Point::new(0, 5), "five units below the top edge");
+    assert_eq!(
+        (hang.horizontal, hang.vertical, hang.upward),
+        (TextEdge::End, TextEdge::Center, true),
+        "its last letter nearest the pin"
+    );
+    assert!(!on_its_side.upward, "a quarter turn stands it upright");
+    let (edge_in, hang, _) = placed("AGND");
+    assert_eq!(
+        edge_in,
+        Point::new(0, -5),
+        "five units above the bottom edge"
+    );
+    assert_eq!(
+        (hang.horizontal, hang.vertical, hang.upward),
+        (TextEdge::Start, TextEdge::Center, true),
+        "its first letter nearest the pin"
+    );
+    assert!(!placed("IN").1.upward, "a left pin's name stays upright");
+}
+
 /// LTspice letters a symbol's attributes only where a WINDOW shows them. A
 /// layout symbol that shows its name and no value, or neither, letters as
 /// much here and no more: the value RSpice would otherwise place itself

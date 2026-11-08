@@ -187,6 +187,9 @@ impl SemanticSceneCompiler<'_> {
                 self.add_text(label, &pin.name, SceneFont::Sans, 2_300, pin_stroke.color)?;
             }
         }
+        if let Some(component) = component {
+            self.symbol_pin_names(symbol, component)?;
+        }
         self.add_mapping_legend(PrintObjectKind::Layer, body_stable_id, body_stroke)?;
         if pin_stable_id != body_stable_id {
             self.add_mapping_legend(PrintObjectKind::Layer, pin_stable_id, pin_stroke)?;

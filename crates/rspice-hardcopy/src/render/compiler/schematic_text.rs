@@ -7,7 +7,9 @@
 
 use super::*;
 use crate::sources::{SchematicText, SchematicTextClass, SemanticComponent, instance_texts};
-use rspice_design::schematic::label_layout::{self, LayoutPoint, TextEdge};
+use rspice_design::resolved_symbol::ResolvedCellSymbol;
+use rspice_design::schematic::label_layout::{self, LayoutPoint, PlacedText, TextEdge};
+use rspice_design::symbol_generation::fit_pin_name;
 
 /// The print palette's text inks: the light screen tokens the SVG export
 /// letters a sheet in, whatever the theme.
@@ -60,27 +62,45 @@ impl SemanticSceneCompiler<'_> {
         &mut self,
         text: &SchematicText,
     ) -> Result<(), HardcopyRenderError> {
-        let size = text.size_world();
-        let anchor = match text.placed.horizontal {
+        self.placed_lines(
+            text.placed,
+            &text.text,
+            text.class.font(),
+            text.size_world(),
+            text.class.ink(),
+        )
+    }
+
+    /// `text` hung off its anchor, each line on the baseline the canvas sets
+    /// it on.
+    fn placed_lines(
+        &mut self,
+        placed: PlacedText,
+        text: &str,
+        font: SceneFont,
+        size: f32,
+        ink: Rgb8,
+    ) -> Result<(), HardcopyRenderError> {
+        let anchor = match placed.horizontal {
             TextEdge::Start => TextAnchor::Start,
             TextEdge::Center => TextAnchor::Middle,
             TextEdge::End => TextAnchor::End,
         };
-        let lines = text.text.lines().collect::<Vec<_>>();
-        let LayoutPoint { x, y } = text.placed.anchor;
-        let rotation = if text.placed.upward {
+        let lines = text.lines().collect::<Vec<_>>();
+        let LayoutPoint { x, y } = placed.anchor;
+        let rotation = if placed.upward {
             SceneTextRotation::CounterClockwise90
         } else {
             SceneTextRotation::Upright
         };
         for (line, baseline) in lines.iter().zip(label_layout::text_baselines(
             y,
-            text.placed.vertical,
+            placed.vertical,
             size,
             lines.len(),
         )) {
             // Turned about the anchor, a line's baseline lies right of it.
-            let (x, y) = if text.placed.upward {
+            let (x, y) = if placed.upward {
                 (x + (baseline - y), y)
             } else {
                 (x, baseline)
@@ -89,11 +109,42 @@ impl SemanticSceneCompiler<'_> {
             self.add_text_placed(
                 origin,
                 line,
-                text.class.font(),
+                font,
                 world_um(size).unsigned_abs(),
-                SemanticColor::Exact(text.class.ink()),
+                SemanticColor::Exact(ink),
                 (anchor, rotation),
             )?;
+        }
+        Ok(())
+    }
+
+    /// The names a placed part's symbol letters at its pins, where the canvas
+    /// letters them.
+    pub(super) fn symbol_pin_names(
+        &mut self,
+        document: &SymbolDocument,
+        component: &Component,
+    ) -> Result<(), HardcopyRenderError> {
+        let symbol = ResolvedCellSymbol::from_authored_document(document.clone(), &[]);
+        let lettered = document.pin_name_size.is_some();
+        for pin in symbol.connectable_pins().filter(|pin| !pin.name_hidden) {
+            let turned = component.transform_point(symbol.pin_label_anchor(pin));
+            let hang = component.pin_name_hang(pin);
+            let placed = PlacedText {
+                anchor: LayoutPoint::new(
+                    (component.pos.x + turned.x) as f32,
+                    (component.pos.y + turned.y) as f32,
+                ),
+                horizontal: hang.horizontal,
+                vertical: hang.vertical,
+                upward: hang.upward,
+            };
+            let (name, font) = if lettered {
+                (pin.name.clone(), SceneFont::Sans)
+            } else {
+                (fit_pin_name(&pin.name), SceneFont::Monospace)
+            };
+            self.placed_lines(placed, &name, font, document.pin_name_world(), VALUE_INK)?;
         }
         Ok(())
     }

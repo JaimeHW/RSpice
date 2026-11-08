@@ -1552,11 +1552,12 @@ impl Builder<'_> {
                         slot.is_none_or(|pin| pin.name_hidden || pin.name.trim().is_empty()),
                     )
                     .with_name_offset(name_offset)
-                    .with_name_at(slot.and_then(|pin| pin.name_at).map(|(offset, reach)| {
-                        PinNamePlacement {
+                    .with_name_at(slot.and_then(|pin| {
+                        pin.name_at.map(|(offset, reach)| PinNamePlacement {
                             offset: self.scale(offset),
                             reach: Point::new(reach.x, reach.y),
-                        }
+                            upward: pin.name_upward,
+                        })
                     })),
             );
         }
@@ -1580,13 +1581,14 @@ impl Builder<'_> {
         // An LTspice pin names itself as RSpice letters a pin on the edge
         // its justification puts it on. A pin RSpice reads onto another
         // edge, one inside the box around a slanted or stepped body, keeps
-        // the drawing's place for its name instead.
+        // the drawing's place for its name instead, and so does a pin it
+        // letters on its side.
         if self.drawing.tool == ForeignTool::Ltspice {
             let agreed = document
                 .pins
                 .iter()
                 .map(|pin| {
-                    pin.name_at.is_some_and(|at| {
+                    pin.name_at.filter(|at| !at.upward).is_some_and(|at| {
                         let side = match (at.reach.x, at.reach.y) {
                             (1, _) => SymbolPinSide::Left,
                             (-1, _) => SymbolPinSide::Right,

@@ -6,6 +6,7 @@ use rspice_design_model::Point;
 use rspice_design_model::port::{PortDirection, PortSpec};
 use rspice_design_model::symbol_pin::SymbolPinSide;
 
+use crate::schematic::label_layout::TextEdge;
 use crate::symbol::{PinNamePlacement, SymbolDocument, SymbolShape};
 use crate::symbol_generation::GeneratedSymbol;
 
@@ -45,6 +46,16 @@ pub struct ResolvedSymbolPin {
     /// Where the symbol letters this pin's name, when the drawing it came
     /// from sets the place itself.
     pub name_at: Option<PinNamePlacement>,
+}
+
+/// How a pin's name hangs off its anchor on a placed part.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PinNameHang {
+    pub horizontal: TextEdge,
+    pub vertical: TextEdge,
+    /// The name reads upward: `horizontal` is then the edge along its
+    /// reading and `vertical` the edge across it.
+    pub upward: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

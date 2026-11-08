@@ -14,7 +14,7 @@ use rspice_design::schematic::{
     rotation::Rotation,
     wire::Wire,
 };
-use rspice_design::symbol::SymbolCurve;
+use rspice_design::symbol::{PinNamePlacement, SymbolCurve, SymbolPin};
 use rspice_design_model::{design_management::CrossSheetPortDirection, port::PortDirection};
 use std::collections::BTreeSet;
 
@@ -332,6 +332,65 @@ fn a_printed_label_hangs_off_the_canvas_anchor_in_the_canvas_type() {
 
 /// Every polyline drawn at `width`, as world-unit points relative to the
 /// scene.
+/// A placed part's pins print their names where the canvas letters them: one
+/// its drawing lettered on its side turned, about its own anchor.
+#[test]
+fn a_placed_symbol_prints_its_pin_names_as_the_canvas_letters_them() {
+    let mut symbol = cell_symbol();
+    let mut on_its_side =
+        SymbolPin::new("REF", PortDirection::In, Some(SchematicPoint::new(0, -20)));
+    on_its_side.name_at = Some(PinNamePlacement {
+        offset: SchematicPoint::new(0, 5),
+        reach: SchematicPoint::new(0, 1),
+        upward: true,
+    });
+    symbol.pin_name_size = Some(15);
+    symbol.pins = vec![
+        on_its_side,
+        SymbolPin::new(
+            "HIDDEN",
+            PortDirection::In,
+            Some(SchematicPoint::new(30, 0)),
+        )
+        .with_name_hidden(true),
+    ];
+    let mut carried = sheet(Vec::new());
+    carried.components.push(SemanticComponent {
+        symbol_source: Some(SemanticSymbolSource::Authored),
+        component: part(2, ComponentType::CellInstance, (40, 40), "", ""),
+        resolved_symbol: Some(symbol),
+    });
+    let compiled = compile(&carried);
+    let names = compiled
+        .primitives
+        .iter()
+        .filter_map(|primitive| match primitive {
+            ScenePrimitive::Text {
+                origin,
+                text,
+                anchor,
+                rotation,
+                ..
+            } if text == "REF" || text == "HIDDEN" => Some((
+                text.as_str(),
+                origin.y.micrometres() as i64,
+                *anchor,
+                *rotation,
+            )),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        names,
+        [(
+            "REF",
+            compiled.at(40.0, 25.0).1,
+            TextAnchor::End,
+            SceneTextRotation::CounterClockwise90,
+        )]
+    );
+}
+
 fn line_widths(compiled: &Compiled) -> BTreeSet<u64> {
     compiled
         .primitives

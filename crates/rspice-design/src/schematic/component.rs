@@ -14,9 +14,10 @@ pub use written_name::{BehavioralLowering, component_for_engine_device};
 
 use super::component_type::ComponentType;
 use super::ground_glyph::GroundGlyph;
+use super::label_layout::TextEdge;
 use super::label_position::{LabelPosition, ValuePiece};
 use super::rotation::Rotation;
-use crate::resolved_symbol::ResolvedCellSymbol;
+use crate::resolved_symbol::{PinNameHang, ResolvedCellSymbol, ResolvedSymbolPin};
 use crate::symbol::SymbolDocument;
 use rspice_design_model::Point;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -1357,6 +1358,45 @@ impl Component {
             && self
                 .source_symbol()
                 .is_some_and(|symbol| !symbol.document().body.is_empty())
+    }
+
+    /// How `pin`'s name hangs off its anchor on this part: reading from its
+    /// own edge into the body, however the part is placed. A name the drawing
+    /// placed itself reaches the way the drawing set it, turned with the
+    /// part; one the drawing lettered on its side reads upward, unless a
+    /// quarter turn of the part stands it upright.
+    pub fn pin_name_hang(&self, pin: &ResolvedSymbolPin) -> PinNameHang {
+        let edge = |step: i32| match step.signum() {
+            1 => TextEdge::Start,
+            -1 => TextEdge::End,
+            _ => TextEdge::Center,
+        };
+        if let Some(at) = pin.name_at {
+            let reach = self.transform_point(at.reach);
+            let upward = at.upward && matches!(self.rotation, Rotation::R0 | Rotation::R180);
+            // A run read upward goes up the page, and its feet are on the right.
+            let (along, across) = if upward {
+                (-reach.y, reach.x)
+            } else {
+                (reach.x, reach.y)
+            };
+            return PinNameHang {
+                horizontal: edge(along),
+                vertical: edge(across),
+                upward,
+            };
+        }
+        let inward = self.transform_point(crate::symbol_generation::inward_step(pin.side));
+        let (horizontal, vertical) = if inward.x.abs() >= inward.y.abs() {
+            (edge(if inward.x >= 0 { 1 } else { -1 }), TextEdge::Center)
+        } else {
+            (TextEdge::Center, edge(if inward.y >= 0 { 1 } else { -1 }))
+        };
+        PinNameHang {
+            horizontal,
+            vertical,
+            upward: false,
+        }
     }
 
     /// Whether a symbol document, not RSpice's symbol for the part's kind,

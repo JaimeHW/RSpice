@@ -254,6 +254,7 @@ fn component(node: &Node) -> Result<ForeignSymbol, ForeignParseError> {
                             text_reach(numbers_after_points(fields).get(1).map(String::as_str)),
                         )
                     }),
+                    name_upward: false,
                     position: pin_points
                         .first()
                         .copied()

@@ -202,6 +202,8 @@ pub struct ForeignPin {
     /// itself (QSPICE): the anchor's offset from the pin, and which way the
     /// name's box reaches from it across and down, in the symbol's frame.
     pub name_at: Option<(ForeignPoint, ForeignPoint)>,
+    /// The source tool letters the name on its side, reading upward.
+    pub name_upward: bool,
 }
 
 /// Drawing primitives, in the units of the drawing that holds them.

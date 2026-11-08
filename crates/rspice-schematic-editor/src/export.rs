@@ -344,6 +344,7 @@ fn write_style(svg: &mut String, config: &SvgExportConfig) {
   .name {{ font-family: {SANS}; font-size: {name_size}px; font-weight: 500; fill: {name}; }}\n\
   .value {{ font-family: {SANS}; font-size: {value_size}px; font-weight: 400; fill: {text}; }}\n\
   .pin {{ font-family: {MONO}; font-size: {pin_size}px; font-weight: 400; fill: {text}; }}\n\
+  .lettered-pin {{ font-family: {SANS}; font-weight: 400; fill: {text}; }}\n\
   .net-mark {{ fill: {net}; stroke: none; }}\n\
   .net-name {{ font-family: {MONO}; font-size: {net_size}px; font-weight: 500; fill: {net}; }}\n\
   .net-tab {{ stroke: {net}; fill: none; stroke-linecap: round; stroke-linejoin: round; }}\n\

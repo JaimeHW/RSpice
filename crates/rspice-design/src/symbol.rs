@@ -146,6 +146,10 @@ pub struct PinNamePlacement {
     /// Which way the name's box reaches from its anchor, across and down:
     /// each step 1 or -1, or 0 where the box is centred on that axis.
     pub reach: Point,
+    /// The name reads upward, turned a quarter counter-clockwise about its
+    /// anchor, rather than upright.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub upward: bool,
 }
 
 impl SymbolPin {
