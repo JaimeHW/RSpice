@@ -70,10 +70,16 @@ pub fn canvas_request(
     viewport: SymbolViewport,
     response: &egui::Response,
 ) -> Option<SymbolCanvasRequest> {
+    let drag_started = response.drag_started_by(egui::PointerButton::Primary);
+    // A drag reports as started only once the pointer has left the press by
+    // egui's threshold, and what it picks up is what was under the press.
+    let pressed_at = drag_started
+        .then(|| response.ctx.input(|input| input.pointer.press_origin()))
+        .flatten();
     let input = SymbolCanvasInput {
-        pointer: response.interact_pointer_pos()?,
+        pointer: pressed_at.or_else(|| response.interact_pointer_pos())?,
         secondary_clicked: response.secondary_clicked(),
-        drag_started: response.drag_started_by(egui::PointerButton::Primary),
+        drag_started,
         dragged: response.dragged_by(egui::PointerButton::Primary),
         drag_stopped: response.drag_stopped_by(egui::PointerButton::Primary),
         clicked: response.clicked_by(egui::PointerButton::Primary),
@@ -590,6 +596,10 @@ fn pin_placed_at(document: &SymbolDocument, name: &str, point: Point) -> Option<
         SymbolPinSide::Top | SymbolPinSide::Bottom => point.x,
     };
     pin.set_side_and_offset(side, offset, bounds);
+    // Its side says which way the lead runs. The terminal itself stands where
+    // it was dropped: a body is not always a box, and a point on a triangle's
+    // shoulder is not one the box around it has.
+    pin.position = Some(point);
     Some(pin)
 }
 
