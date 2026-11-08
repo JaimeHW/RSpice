@@ -264,6 +264,7 @@ pub fn import_foreign_schematic(
         pin_points: HashMap::new(),
         pin_leads: HashMap::new(),
         lettered: Vec::new(),
+        markers: Vec::new(),
         free_names: Vec::new(),
         device_ties: Vec::new(),
         behaviours: Vec::new(),
@@ -332,6 +333,7 @@ pub fn import_foreign_schematic(
     builder.place_texts();
     builder.place_shapes();
     builder.place_wires();
+    builder.clear_markers();
     builder.finish()
 }
 
@@ -367,6 +369,9 @@ struct Builder<'a> {
     /// The placed parts whose name and value stand where the drawing
     /// lettered them, by index.
     lettered: Vec<usize>,
+    /// The notes marking refused parts, by index, each with the bottom
+    /// right of the gap its part left.
+    markers: Vec<(usize, Point)>,
     /// Net labels, by index, whose name may stand on another side where it
     /// lands on a body, with those sides in the order to try them.
     free_names: Vec<(usize, Vec<NetLabelSide>)>,
@@ -1672,47 +1677,6 @@ impl Builder<'_> {
         };
         let attributes = merged_attributes(&definition, symbol);
         self.place_cell(symbol, &definition, &attributes, None, None, &[]);
-    }
-
-    /// A note where a refused component stood, so the gap reads as one: it
-    /// hangs from the top left of the body, its label under the words, so it
-    /// stays on the body's own ground rather than across its neighbours.
-    /// It marks no point, so it draws no anchor mark: a mark at the corner
-    /// would touch a flag standing on the refused part's pin.
-    fn place_marker(
-        &mut self,
-        symbol: &ForeignSymbol,
-        definition: Option<&ForeignSymbolDefinition>,
-        label: &str,
-    ) {
-        let id = self.id();
-        let corner = definition
-            .into_iter()
-            .flat_map(|definition| {
-                let shapes = definition.shapes.iter().flat_map(|shape| match shape {
-                    ForeignShape::Line(a, b)
-                    | ForeignShape::Rectangle(a, b)
-                    | ForeignShape::Ellipse(a, b) => vec![*a, *b],
-                    // An arc's box is its whole ellipse's, often wider than
-                    // the body.
-                    ForeignShape::Arc(_) => Vec::new(),
-                });
-                shapes.chain(definition.pins.iter().map(|pin| pin.position))
-            })
-            .map(|point| symbol.orientation.apply(point))
-            .reduce(|a, b| ForeignPoint::new(a.x.min(b.x), a.y.min(b.y)))
-            .unwrap_or_default();
-        let text = format!("Not imported:\n{label}");
-        if let Ok(note) = DesignNote::new(
-            id,
-            self.scale(symbol.position.offset(corner)),
-            DesignNoteKind::PlainText,
-            text,
-        ) {
-            self.document
-                .design_notes
-                .push(note.with_anchor_mark_hidden(true));
-        }
     }
 
     /// A straight or once-bent lead from a placed terminal to the source pin

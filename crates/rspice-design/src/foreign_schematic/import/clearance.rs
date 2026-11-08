@@ -3,10 +3,13 @@
 use rspice_design_model::Point;
 
 use super::{Builder, GRID};
-use crate::foreign_schematic::{ForeignSymbol, ForeignSymbolDefinition};
+use crate::foreign_schematic::{
+    ForeignPoint, ForeignShape, ForeignSymbol, ForeignSymbolDefinition,
+};
 use crate::schematic::component::Component;
 use crate::schematic::component_display::SchematicParameterLabelVisibility;
 use crate::schematic::component_type::ComponentType;
+use crate::schematic::design_note::{DESIGN_NOTE_TEXT_OFFSET_WORLD, DesignNote, DesignNoteKind};
 use crate::schematic::drawing_metrics::SYMBOL_WIDTH_WORLD;
 use crate::schematic::label_layout::{
     INSTANCE_NAME_WORLD, INSTANCE_VALUE_WORLD, LayoutPoint, LayoutRect, NET_LABEL_FONT_WORLD,
@@ -73,6 +76,126 @@ impl Builder<'_> {
             Some(text_box(placed, text, size))
         })
         .collect()
+    }
+
+    /// A note where a refused component stood, so the gap reads as one: it
+    /// hangs from the top left of the body, its label under the words, so it
+    /// stays on the body's own ground rather than across its neighbours.
+    /// It marks no point, so it draws no anchor mark: a mark at the corner
+    /// would touch a flag standing on the refused part's pin.
+    pub(super) fn place_marker(
+        &mut self,
+        symbol: &ForeignSymbol,
+        definition: Option<&ForeignSymbolDefinition>,
+        label: &str,
+    ) {
+        let id = self.id();
+        let (low, high) = definition
+            .into_iter()
+            .flat_map(|definition| {
+                let shapes = definition.shapes.iter().flat_map(|shape| match shape {
+                    ForeignShape::Line(a, b)
+                    | ForeignShape::Rectangle(a, b)
+                    | ForeignShape::Ellipse(a, b) => vec![*a, *b],
+                    // An arc's box is its whole ellipse's, often wider than
+                    // the body.
+                    ForeignShape::Arc(_) => Vec::new(),
+                });
+                shapes.chain(definition.pins.iter().map(|pin| pin.position))
+            })
+            .map(|point| symbol.orientation.apply(point))
+            .map(|point| (point, point))
+            .reduce(|(low, high), (point, _)| {
+                (
+                    ForeignPoint::new(low.x.min(point.x), low.y.min(point.y)),
+                    ForeignPoint::new(high.x.max(point.x), high.y.max(point.y)),
+                )
+            })
+            .unwrap_or_default();
+        let text = format!("Not imported:\n{label}");
+        if let Ok(note) = DesignNote::new(
+            id,
+            self.scale(symbol.position.offset(low)),
+            DesignNoteKind::PlainText,
+            text,
+        ) {
+            self.markers.push((
+                self.document.design_notes.len(),
+                self.scale_fine(symbol.position.offset(high)),
+            ));
+            self.document
+                .design_notes
+                .push(note.with_anchor_mark_hidden(true));
+        }
+    }
+
+    /// A refused part's marker that would land on a body, a name or value,
+    /// a net label, a wire or another note hangs instead from the first
+    /// other place along its part's gap where it lands on none: from the
+    /// middle or the right of the gap's top, else standing on the left,
+    /// middle or right of its bottom. With no such place it stays where it
+    /// was.
+    pub(super) fn clear_markers(&mut self) {
+        if self.markers.is_empty() {
+            return;
+        }
+        let at = |point: Point| LayoutPoint::new(point.x as f32, point.y as f32);
+        let obstacles = self
+            .drawn_bodies()
+            .into_iter()
+            .flatten()
+            .chain(
+                self.document
+                    .net_labels
+                    .iter()
+                    .flat_map(net_label_boxes)
+                    .map(Ink::Area),
+            )
+            .chain(self.document.components.iter().flat_map(|part| {
+                lettering_boxes(part)
+                    .into_iter()
+                    .map(|(_, rect)| Ink::Area(rect))
+            }))
+            .chain(self.document.wires.iter().flat_map(|wire| {
+                wire.points
+                    .windows(2)
+                    .map(|piece| Ink::Stroke(at(piece[0]), at(piece[1])))
+                    .collect::<Vec<_>>()
+            }))
+            .collect::<Vec<_>>();
+        let mut notes = self
+            .document
+            .design_notes
+            .iter()
+            .map(|note| note_box(note, note.pos))
+            .collect::<Vec<_>>();
+        for &(index, high) in &self.markers {
+            let note = &self.document.design_notes[index];
+            let lands = |rect: LayoutRect| {
+                obstacles.iter().any(|ink| ink.meets(rect))
+                    || notes
+                        .iter()
+                        .enumerate()
+                        .any(|(other, note)| other != index && overlaps(rect, *note))
+            };
+            if !lands(notes[index]) {
+                continue;
+            }
+            let (width, height) = note.text_extent_world(&note.text);
+            let (offset_x, offset_y) = DESIGN_NOTE_TEXT_OFFSET_WORLD;
+            let right = high.x - (width + offset_x).ceil() as i32;
+            let centre = (note.pos.x + right) / 2;
+            let bottom = high.y - (height + offset_y).ceil() as i32;
+            let place = [note.pos.y, bottom]
+                .into_iter()
+                .flat_map(|y| [note.pos.x, centre, right].map(|x| Point::new(x, y)))
+                .skip(1)
+                .find(|pos| !lands(note_box(note, *pos)));
+            if let Some(pos) = place {
+                notes[index] = note_box(note, pos);
+                self.document.design_notes[index].pos = pos;
+            }
+        }
     }
 
     /// A part RSpice draws with its own artwork has a body of another size
@@ -551,6 +674,17 @@ fn stroke_meets(start: LayoutPoint, end: LayoutPoint, text: LayoutRect) -> bool 
         }
     }
     true
+}
+
+/// The box a note's words take with its anchor at `pos`.
+fn note_box(note: &DesignNote, pos: Point) -> LayoutRect {
+    let (width, height) = note.text_extent_world(&note.text);
+    let (offset_x, offset_y) = DESIGN_NOTE_TEXT_OFFSET_WORLD;
+    let (x, y) = (pos.x as f32 + offset_x, pos.y as f32 + offset_y);
+    LayoutRect {
+        min: LayoutPoint::new(x, y),
+        max: LayoutPoint::new(x + width, y + height),
+    }
 }
 
 /// Places for pins that must touch nothing, near the middle of the drawn

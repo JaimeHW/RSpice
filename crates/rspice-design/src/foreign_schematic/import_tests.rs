@@ -2659,6 +2659,31 @@ fn a_qspice_pin_nothing_reaches_joins_its_own_net() {
     assert!(note.anchor_mark_hidden);
 }
 
+/// The note RSpice leaves where it refused a part hangs from the top left
+/// of the part's gap. Where its words would run onto a part beside the gap,
+/// it moves to the first other place along the gap's top or bottom where
+/// they land on nothing: here standing on the left of its bottom, under the
+/// resistor's lower lead, which every place along the top crosses.
+#[test]
+fn a_refused_parts_note_hangs_where_it_lands_on_nothing() {
+    let drawing = parse_asc(
+        "Version 4\n\
+         SYMBOL amp 160 64 R0\nSYMATTR InstName @1\n\
+         SYMBOL res 176 -48 R0\nSYMATTR InstName R1\nSYMATTR Value 1k\n",
+    )
+    .expect("the drawing reads");
+    let imported = import_foreign_schematic(&drawing, "work", &library());
+    let note = imported
+        .document
+        .design_notes
+        .iter()
+        .find(|note| note.text.starts_with("Not imported"))
+        .expect("the probe leaves a note");
+    // From the top left, (160, 40), the words would run over the
+    // resistor's lead at x = 240 down to y = 60.
+    assert_eq!(note.pos, Point::new(160, 87));
+}
+
 /// An LTspice pin with no `PinName` letters nothing in LTspice. RSpice names
 /// its port for the pin's place on the instance line, but does not letter
 /// that made-up name on the drawing.
