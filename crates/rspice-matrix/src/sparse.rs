@@ -4236,8 +4236,8 @@ impl StaticMatrix {
 
 use num_complex::Complex64;
 
-/// Reusable complex sparse-LU workspace (see [`LuWorkspace`]).
-struct ComplexLuWorkspace {
+/// Faer's complex LU with the scratch its factor and solves need.
+struct FaerComplexFactors {
     symbolic: Arc<sparse_lu::SymbolicLu<usize>>,
     numeric: sparse_lu::NumericLu<usize, Complex64>,
     factor_mem: MemBuffer,
@@ -4245,6 +4245,288 @@ struct ComplexLuWorkspace {
     transpose_solve_mem: MemBuffer,
     solve_rhs_capacity: usize,
     transpose_rhs_capacity: usize,
+}
+
+impl FaerComplexFactors {
+    fn new(symbolic: Arc<sparse_lu::SymbolicLu<usize>>) -> Result<Self, SolverError> {
+        let par = get_global_parallelism();
+        let factor_mem = MemBuffer::try_new(
+            symbolic.factorize_numeric_lu_scratch::<Complex64>(par, Default::default()),
+        )
+        .map_err(|_| SolverError::OutOfMemory)?;
+        let solve_mem = MemBuffer::try_new(symbolic.solve_in_place_scratch::<Complex64>(1, par))
+            .map_err(|_| SolverError::OutOfMemory)?;
+        let transpose_solve_mem =
+            MemBuffer::try_new(symbolic.solve_transpose_in_place_scratch::<Complex64>(1, par))
+                .map_err(|_| SolverError::OutOfMemory)?;
+        Ok(Self {
+            symbolic,
+            numeric: sparse_lu::NumericLu::new(),
+            factor_mem,
+            solve_mem,
+            transpose_solve_mem,
+            solve_rhs_capacity: 1,
+            transpose_rhs_capacity: 1,
+        })
+    }
+
+    fn factor(
+        &mut self,
+        csc: &SymbolicSparseColMat<usize>,
+        scaled_values: &[Complex64],
+    ) -> Result<(), SolverError> {
+        let matrix = SparseColMatRef::new(csc.as_ref(), scaled_values);
+        self.symbolic
+            .factorize_numeric_lu(
+                &mut self.numeric,
+                matrix,
+                get_global_parallelism(),
+                MemStack::new(&mut self.factor_mem),
+                Default::default(),
+            )
+            .map_err(map_faer_lu_error)?;
+        Ok(())
+    }
+
+    fn solve_in_place(
+        &mut self,
+        rhs: &mut Mat<Complex64>,
+        operation: ComplexSolveOp,
+    ) -> Result<(), SolverError> {
+        let par = get_global_parallelism();
+        let rhs_count = rhs.ncols();
+        match operation {
+            ComplexSolveOp::Normal if rhs_count > self.solve_rhs_capacity => {
+                self.solve_mem = MemBuffer::try_new(
+                    self.symbolic
+                        .solve_in_place_scratch::<Complex64>(rhs_count, par),
+                )
+                .map_err(|_| SolverError::OutOfMemory)?;
+                self.solve_rhs_capacity = rhs_count;
+            }
+            ComplexSolveOp::Transpose if rhs_count > self.transpose_rhs_capacity => {
+                self.transpose_solve_mem = MemBuffer::try_new(
+                    self.symbolic
+                        .solve_transpose_in_place_scratch::<Complex64>(rhs_count, par),
+                )
+                .map_err(|_| SolverError::OutOfMemory)?;
+                self.transpose_rhs_capacity = rhs_count;
+            }
+            _ => {}
+        }
+        // INVARIANT: `numeric` came from `symbolic.factorize_numeric_lu` on
+        // this pattern; the caller solves only while `factorization_valid`.
+        let lu = sparse_lu::LuRef::new_unchecked(&self.symbolic, &self.numeric);
+        match operation {
+            ComplexSolveOp::Normal => lu.solve_in_place_with_conj(
+                Conj::No,
+                rhs.as_mut(),
+                par,
+                MemStack::new(&mut self.solve_mem),
+            ),
+            ComplexSolveOp::Transpose => lu.solve_transpose_in_place_with_conj(
+                Conj::No,
+                rhs.as_mut(),
+                par,
+                MemStack::new(&mut self.transpose_solve_mem),
+            ),
+        }
+        Ok(())
+    }
+}
+
+/// Circuit LU on the real equivalent of a complex system,
+/// `[A_r -A_i; A_i A_r] [x_r; x_i] = [b_r; b_i]`.
+struct RealEquivalentFactors {
+    klu: crate::KluSolver,
+    values: Vec<Value>,
+    rhs: Vec<Value>,
+    solution: Vec<Value>,
+    /// Whether the current factors replay pivots chosen at an earlier point.
+    pivots_reused: bool,
+}
+
+impl RealEquivalentFactors {
+    fn new(
+        csc: &SymbolicSparseColMat<usize>,
+        options: SolverOptions,
+    ) -> Result<Self, SolverError> {
+        let n = csc.nrows();
+        let nnz = csc.row_idx().len();
+        let order = n.checked_mul(2).ok_or(SolverError::OutOfMemory)?;
+        let entries = nnz.checked_mul(4).ok_or(SolverError::OutOfMemory)?;
+        let mut col_ptr = Vec::new();
+        col_ptr
+            .try_reserve_exact(order + 1)
+            .map_err(|_| SolverError::OutOfMemory)?;
+        let mut row_idx = Vec::new();
+        row_idx
+            .try_reserve_exact(entries)
+            .map_err(|_| SolverError::OutOfMemory)?;
+        // Both halves of the equivalent carry a complex column's rows twice,
+        // once on the real equations and once on the imaginary ones.
+        col_ptr.push(0);
+        for _ in 0..2 {
+            for col in 0..n {
+                let rows = &csc.row_idx()[csc.col_ptr()[col]..csc.col_ptr()[col + 1]];
+                row_idx.extend_from_slice(rows);
+                row_idx.extend(rows.iter().map(|&row| row + n));
+                col_ptr.push(row_idx.len());
+            }
+        }
+        let mut klu = crate::KluSolver::new();
+        klu.set_pivot_tolerance(options.pivot_tolerance)?;
+        klu.analyze(order, &col_ptr, &row_idx)?;
+        let mut values = Vec::new();
+        values
+            .try_reserve_exact(entries)
+            .map_err(|_| SolverError::OutOfMemory)?;
+        values.resize(entries, 0.0);
+        Ok(Self {
+            klu,
+            values,
+            rhs: Vec::new(),
+            solution: Vec::new(),
+            pivots_reused: false,
+        })
+    }
+
+    fn factor(
+        &mut self,
+        csc: &SymbolicSparseColMat<usize>,
+        scaled_values: &[Complex64],
+    ) -> Result<(), SolverError> {
+        let col_ptr = csc.col_ptr();
+        let (left, right) = self.values.split_at_mut(2 * scaled_values.len());
+        let mut at = 0;
+        for col in 0..csc.ncols() {
+            let column = &scaled_values[col_ptr[col]..col_ptr[col + 1]];
+            let next = at + 2 * column.len();
+            let (left_re, left_im) = left[at..next].split_at_mut(column.len());
+            let (right_im, right_re) = right[at..next].split_at_mut(column.len());
+            for (entry, value) in column.iter().enumerate() {
+                left_re[entry] = value.re;
+                left_im[entry] = value.im;
+                right_im[entry] = -value.im;
+                right_re[entry] = value.re;
+            }
+            at = next;
+        }
+        // A frequency point differs from the last by its reactive terms, so
+        // the pivots usually carry over. Values they do not suit re-pivot.
+        let replays_pivots = self.klu.is_factored();
+        match self.klu.refactor(&self.values) {
+            Ok(()) if !self.klu.reused_pivots_show_damaging_growth(&self.values) => {
+                self.pivots_reused = replays_pivots;
+                Ok(())
+            }
+            Ok(()) | Err(SolverError::PivotGrowth) => self.repivot(),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Factor the current values with a fresh pivot search.
+    fn repivot(&mut self) -> Result<(), SolverError> {
+        self.pivots_reused = false;
+        self.klu.factor(&self.values)
+    }
+
+    fn solve_in_place(
+        &mut self,
+        rhs: &mut Mat<Complex64>,
+        operation: ComplexSolveOp,
+    ) -> Result<(), SolverError> {
+        let n = rhs.nrows();
+        let rhs_count = rhs.ncols();
+        let block = n.checked_mul(2).ok_or(SolverError::OutOfMemory)?;
+        let required = block
+            .checked_mul(rhs_count)
+            .ok_or(SolverError::OutOfMemory)?;
+        if self.rhs.len() != required {
+            self.rhs
+                .try_reserve_exact(required.saturating_sub(self.rhs.len()))
+                .map_err(|_| SolverError::OutOfMemory)?;
+            self.rhs.resize(required, 0.0);
+        }
+        // `A^T x = b` is the transpose of the equivalent acting on `[x_r; -x_i]`
+        // with the right-hand side `[b_r; -b_i]`.
+        let imag_sign = match operation {
+            ComplexSolveOp::Normal => 1.0,
+            ComplexSolveOp::Transpose => -1.0,
+        };
+        for (index, block_rhs) in self.rhs.chunks_exact_mut(block).enumerate() {
+            let (re, im) = block_rhs.split_at_mut(n);
+            for ((re, im), value) in re.iter_mut().zip(im).zip(rhs.col_as_slice(index)) {
+                *re = value.re;
+                *im = imag_sign * value.im;
+            }
+        }
+        match operation {
+            ComplexSolveOp::Normal => {
+                self.klu
+                    .solve_many(&self.rhs, rhs_count, &mut self.solution)?;
+            }
+            ComplexSolveOp::Transpose => {
+                self.klu
+                    .solve_many_transpose(&self.rhs, rhs_count, &mut self.solution)?;
+            }
+        }
+        for (index, block_solution) in self.solution.chunks_exact(block).enumerate() {
+            let (re, im) = block_solution.split_at(n);
+            for ((value, &re), &im) in rhs.col_as_slice_mut(index).iter_mut().zip(re).zip(im) {
+                *value = Complex64::new(re, imag_sign * im);
+            }
+        }
+        Ok(())
+    }
+}
+
+/// The LU a complex solve runs through.
+enum ComplexFactors {
+    Faer(Box<FaerComplexFactors>),
+    RealEquivalent(Box<RealEquivalentFactors>),
+}
+
+impl ComplexFactors {
+    fn factor(
+        &mut self,
+        csc: &SymbolicSparseColMat<usize>,
+        scaled_values: &[Complex64],
+    ) -> Result<(), SolverError> {
+        match self {
+            Self::Faer(factors) => factors.factor(csc, scaled_values),
+            Self::RealEquivalent(factors) => factors.factor(csc, scaled_values),
+        }
+    }
+
+    fn solve_in_place(
+        &mut self,
+        rhs: &mut Mat<Complex64>,
+        operation: ComplexSolveOp,
+    ) -> Result<(), SolverError> {
+        match self {
+            Self::Faer(factors) => factors.solve_in_place(rhs, operation),
+            Self::RealEquivalent(factors) => factors.solve_in_place(rhs, operation),
+        }
+    }
+
+    /// Re-pivot factors that replay pivots from an earlier point. Returns
+    /// whether a solve against the new factors can differ from the last.
+    fn repivot_reused(&mut self) -> Result<bool, SolverError> {
+        match self {
+            Self::Faer(_) => Ok(false),
+            Self::RealEquivalent(factors) if factors.pivots_reused => {
+                factors.repivot()?;
+                Ok(true)
+            }
+            Self::RealEquivalent(_) => Ok(false),
+        }
+    }
+}
+
+/// Reusable complex sparse-LU workspace (see [`LuWorkspace`]).
+struct ComplexLuWorkspace {
+    factors: ComplexFactors,
     rhs: Mat<Complex64>,
     scaled_values: Vec<Complex64>,
     scaled_rhs: Vec<Complex64>,
@@ -4976,9 +5258,13 @@ pub struct ComplexMatrix {
     values: Vec<Complex64>,
     /// Identity of the real sparsity pattern from which this matrix was made.
     pattern_id: u64,
-    /// Reusable LU workspace; the symbolic part is shared with the real
-    /// matrix when available (symbolic LU is scalar-type independent).
+    /// Reusable LU workspace.
     lu: Option<ComplexLuWorkspace>,
+    /// Faer symbolic analysis already paid for by the real matrix, when its
+    /// solves went through faer; a faer complex solve reuses it.
+    real_symbolic: Option<Arc<sparse_lu::SymbolicLu<usize>>>,
+    /// Backend and pivot policy inherited from the real matrix.
+    solver_options: SolverOptions,
     /// True while `lu.numeric` holds the factorization of the current
     /// `values`. Consecutive solves against unchanged values (noise analysis
     /// solves one matrix against many excitation vectors) skip refactorizing.
@@ -4991,7 +5277,7 @@ impl ComplexMatrix {
     /// Create a ComplexMatrix with the same structure as a StaticMatrix
     pub fn from_real_structure(real_matrix: &StaticMatrix) -> Self {
         let nnz = real_matrix.values.len();
-        let mut this = Self {
+        Self {
             nrows: real_matrix.nrows,
             ncols: real_matrix.ncols,
             csc: real_matrix.csc.clone(),
@@ -4999,41 +5285,49 @@ impl ComplexMatrix {
             values: vec![Complex64::new(0.0, 0.0); nnz],
             pattern_id: real_matrix.pattern_id,
             lu: None,
+            // A successful default KLU-only DC solve deliberately does not
+            // pay for an independent faer symbolic analysis.
+            real_symbolic: real_matrix.lu.as_ref().map(|ws| ws.symbolic.clone()),
+            solver_options: real_matrix.solver_options,
             factorization_valid: false,
             stamping_error: None,
-        };
-        // Reuse the real matrix's symbolic analysis when faer has already been
-        // selected or used as a fallback. A successful default KLU-only DC
-        // solve deliberately does not pay this independent symbolic cost.
-        if let Some(symbolic) = real_matrix.lu.as_ref().map(|ws| ws.symbolic.clone()) {
-            this.lu = Self::workspace_from_symbolic(this.nrows, symbolic).ok();
         }
-        this
     }
 
-    fn workspace_from_symbolic(
-        nrows: usize,
-        symbolic: Arc<sparse_lu::SymbolicLu<usize>>,
-    ) -> Result<ComplexLuWorkspace, SolverError> {
-        let par = get_global_parallelism();
-        let factor_mem = MemBuffer::try_new(
-            symbolic.factorize_numeric_lu_scratch::<Complex64>(par, Default::default()),
-        )
-        .map_err(|_| SolverError::OutOfMemory)?;
-        let solve_mem = MemBuffer::try_new(symbolic.solve_in_place_scratch::<Complex64>(1, par))
-            .map_err(|_| SolverError::OutOfMemory)?;
-        let transpose_solve_mem =
-            MemBuffer::try_new(symbolic.solve_transpose_in_place_scratch::<Complex64>(1, par))
-                .map_err(|_| SolverError::OutOfMemory)?;
-        Ok(ComplexLuWorkspace {
-            symbolic,
-            numeric: sparse_lu::NumericLu::new(),
-            factor_mem,
-            solve_mem,
-            transpose_solve_mem,
-            solve_rhs_capacity: 1,
-            transpose_rhs_capacity: 1,
-            rhs: Mat::zeros(nrows, 1),
+    /// Whether this matrix solves through faer's complex LU rather than
+    /// Circuit LU on the real equivalent.
+    ///
+    /// Circuit LU is the default: over the AC, noise and pole-zero corpora it
+    /// matched faer to round-off at no greater cost, and on arrays of stages
+    /// sharing a few global nets faer's workspace ran away (3.1 GB against
+    /// 0.2 GB for 200 OTA stages; 5000 stages could not allocate it at all).
+    /// Faer remains the explicit opt-out.
+    fn uses_faer_factors(&self) -> bool {
+        self.solver_options.real_backend == RealSolverBackend::Faer
+    }
+
+    fn create_workspace(&mut self) -> Result<(), SolverError> {
+        let factors = if self.uses_faer_factors() {
+            let symbolic = match self.real_symbolic.take() {
+                Some(symbolic) => symbolic,
+                None => Arc::new(
+                    sparse_lu::factorize_symbolic_lu(
+                        self.csc.as_ref().as_ref(),
+                        Default::default(),
+                    )
+                    .map_err(map_faer_error)?,
+                ),
+            };
+            ComplexFactors::Faer(Box::new(FaerComplexFactors::new(symbolic)?))
+        } else {
+            ComplexFactors::RealEquivalent(Box::new(RealEquivalentFactors::new(
+                &self.csc,
+                self.solver_options,
+            )?))
+        };
+        self.lu = Some(ComplexLuWorkspace {
+            factors,
+            rhs: Mat::zeros(self.nrows, 1),
             scaled_values: Vec::new(),
             scaled_rhs: Vec::new(),
             scaled_denominator_floor: Vec::new(),
@@ -5043,7 +5337,21 @@ impl ComplexMatrix {
             denominator: Vec::new(),
             compensation: Vec::new(),
             row_nnz: Vec::new(),
-        })
+        });
+        self.factorization_valid = false;
+        Ok(())
+    }
+
+    /// Stored entries of the real-equivalent factors, once a solve built them.
+    #[cfg(test)]
+    fn real_equivalent_factor_nnz(&self) -> Option<usize> {
+        match &self.lu.as_ref()?.factors {
+            ComplexFactors::RealEquivalent(factors) => {
+                let (lower, upper) = factors.klu.factor_nnz();
+                Some(lower + upper)
+            }
+            ComplexFactors::Faer(_) => None,
+        }
     }
 
     /// Zero all values
@@ -5808,15 +6116,10 @@ impl ComplexMatrix {
             return Ok(());
         }
         if self.lu.is_none() {
-            let symbolic =
-                sparse_lu::factorize_symbolic_lu(self.csc.as_ref().as_ref(), Default::default())
-                    .map_err(map_faer_error)?;
-            self.lu = Some(Self::workspace_from_symbolic(n, Arc::new(symbolic))?);
-            self.factorization_valid = false;
+            self.create_workspace()?;
         }
 
         let accepted = {
-            let par = get_global_parallelism();
             let Self {
                 csc,
                 values,
@@ -5835,36 +6138,8 @@ impl ComplexMatrix {
                     &mut ws.row_scale,
                     &mut ws.col_scale,
                 )?;
-                let mat = SparseColMatRef::new(csc.as_ref().as_ref(), ws.scaled_values.as_slice());
-                ws.symbolic
-                    .factorize_numeric_lu(
-                        &mut ws.numeric,
-                        mat,
-                        par,
-                        MemStack::new(&mut ws.factor_mem),
-                        Default::default(),
-                    )
-                    .map_err(map_faer_lu_error)?;
+                ws.factors.factor(csc, &ws.scaled_values)?;
                 *factorization_valid = true;
-            }
-            match operation {
-                ComplexSolveOp::Normal if rhs_count > ws.solve_rhs_capacity => {
-                    ws.solve_mem = MemBuffer::try_new(
-                        ws.symbolic
-                            .solve_in_place_scratch::<Complex64>(rhs_count, par),
-                    )
-                    .map_err(|_| SolverError::OutOfMemory)?;
-                    ws.solve_rhs_capacity = rhs_count;
-                }
-                ComplexSolveOp::Transpose if rhs_count > ws.transpose_rhs_capacity => {
-                    ws.transpose_solve_mem = MemBuffer::try_new(
-                        ws.symbolic
-                            .solve_transpose_in_place_scratch::<Complex64>(rhs_count, par),
-                    )
-                    .map_err(|_| SolverError::OutOfMemory)?;
-                    ws.transpose_rhs_capacity = rhs_count;
-                }
-                _ => {}
             }
             let rhs_scale = match operation {
                 ComplexSolveOp::Normal => &ws.row_scale,
@@ -5881,21 +6156,7 @@ impl ComplexMatrix {
                     ws.rhs[(row, rhs_index)] = value;
                 }
             }
-            let lu_ref = sparse_lu::LuRef::new_unchecked(&ws.symbolic, &ws.numeric);
-            match operation {
-                ComplexSolveOp::Normal => lu_ref.solve_in_place_with_conj(
-                    Conj::No,
-                    ws.rhs.as_mut(),
-                    par,
-                    MemStack::new(&mut ws.solve_mem),
-                ),
-                ComplexSolveOp::Transpose => lu_ref.solve_transpose_in_place_with_conj(
-                    Conj::No,
-                    ws.rhs.as_mut(),
-                    par,
-                    MemStack::new(&mut ws.transpose_solve_mem),
-                ),
-            }
+            ws.factors.solve_in_place(&mut ws.rhs, operation)?;
 
             solution.resize(required, Complex64::new(0.0, 0.0));
             let solution_scale = match operation {
@@ -5965,6 +6226,30 @@ impl ComplexMatrix {
         operation: ComplexSolveOp,
         denominator_floor: Option<&[Value]>,
     ) -> Result<(), SolverError> {
+        let first = self.solve_certified_into(rhs, solution, operation, denominator_floor);
+        if !matches!(first, Err(SolverError::InaccurateSolution(_))) {
+            return first;
+        }
+        // Pivots replayed from another frequency may not suit this one; only
+        // a search for this matrix's own pivots can tell.
+        let repivoted = match self.lu.as_mut() {
+            Some(workspace) => workspace.factors.repivot_reused()?,
+            None => false,
+        };
+        if repivoted {
+            self.solve_certified_into(rhs, solution, operation, denominator_floor)
+        } else {
+            first
+        }
+    }
+
+    fn solve_certified_into(
+        &mut self,
+        rhs: &[Complex64],
+        solution: &mut Vec<Complex64>,
+        operation: ComplexSolveOp,
+        denominator_floor: Option<&[Value]>,
+    ) -> Result<(), SolverError> {
         let n = self.nrows;
         self.check_stamping_error()?;
 
@@ -5983,14 +6268,9 @@ impl ComplexMatrix {
         }
 
         if self.lu.is_none() {
-            let symbolic =
-                sparse_lu::factorize_symbolic_lu(self.csc.as_ref().as_ref(), Default::default())
-                    .map_err(map_faer_error)?;
-            self.lu = Some(Self::workspace_from_symbolic(n, Arc::new(symbolic))?);
-            self.factorization_valid = false;
+            self.create_workspace()?;
         }
 
-        let par = get_global_parallelism();
         let Self {
             csc,
             values,
@@ -6010,16 +6290,7 @@ impl ComplexMatrix {
                 &mut ws.row_scale,
                 &mut ws.col_scale,
             )?;
-            let mat = SparseColMatRef::new(csc.as_ref().as_ref(), ws.scaled_values.as_slice());
-            ws.symbolic
-                .factorize_numeric_lu(
-                    &mut ws.numeric,
-                    mat,
-                    par,
-                    MemStack::new(&mut ws.factor_mem),
-                    Default::default(),
-                )
-                .map_err(map_faer_lu_error)?;
+            ws.factors.factor(csc, &ws.scaled_values)?;
             *factorization_valid = true;
         }
 
@@ -6038,26 +6309,10 @@ impl ComplexMatrix {
         let scaled_denominator_floor =
             denominator_floor.map(|_| ws.scaled_denominator_floor.as_slice());
 
-        // INVARIANT: `ws.numeric` was produced by `ws.symbolic.factorize_numeric_lu`
-        // on this matrix's pattern, and `factorization_valid` guarantees the
-        // values have not been mutated since (every mutator clears the flag).
-        let lu_ref = sparse_lu::LuRef::new_unchecked(&ws.symbolic, &ws.numeric);
-
+        ws.rhs
+            .resize_with(n, 1, |_, _| Complex64::new(0.0, 0.0));
         ws.rhs.col_as_slice_mut(0).copy_from_slice(&ws.scaled_rhs);
-        match operation {
-            ComplexSolveOp::Normal => lu_ref.solve_in_place_with_conj(
-                Conj::No,
-                ws.rhs.as_mut(),
-                par,
-                MemStack::new(&mut ws.solve_mem),
-            ),
-            ComplexSolveOp::Transpose => lu_ref.solve_transpose_in_place_with_conj(
-                Conj::No,
-                ws.rhs.as_mut(),
-                par,
-                MemStack::new(&mut ws.transpose_solve_mem),
-            ),
-        }
+        ws.factors.solve_in_place(&mut ws.rhs, operation)?;
 
         solution.clear();
         solution.extend_from_slice(ws.rhs.col_as_slice(0));
@@ -6100,20 +6355,7 @@ impl ComplexMatrix {
             }
 
             ws.rhs.col_as_slice_mut(0).copy_from_slice(&ws.residual);
-            match operation {
-                ComplexSolveOp::Normal => lu_ref.solve_in_place_with_conj(
-                    Conj::No,
-                    ws.rhs.as_mut(),
-                    par,
-                    MemStack::new(&mut ws.solve_mem),
-                ),
-                ComplexSolveOp::Transpose => lu_ref.solve_transpose_in_place_with_conj(
-                    Conj::No,
-                    ws.rhs.as_mut(),
-                    par,
-                    MemStack::new(&mut ws.transpose_solve_mem),
-                ),
-            }
+            ws.factors.solve_in_place(&mut ws.rhs, operation)?;
             for (value, &correction) in solution.iter_mut().zip(ws.rhs.col_as_slice(0)) {
                 let refined = *value + correction;
                 if !complex_is_finite(correction) || !complex_is_finite(refined) {
@@ -9153,6 +9395,188 @@ mod tests {
     ///
     /// The block is a cycle: neither of its equations has one unknown, so the
     /// singleton projection cannot reach it.
+    /// The small-signal matrix of `blocks` identical stages on four global
+    /// nets whose rows and columns reach every stage, the shape of an OTA
+    /// array: transconductance feeds each global column into the stage rows,
+    /// and gate capacitance feeds the stage columns back into the global rows.
+    fn bordered_stage_entries(
+        blocks: usize,
+        omega: Value,
+    ) -> (usize, Vec<(usize, usize, Complex64)>) {
+        let n = blocks * 3 + 4;
+        let global = |index: usize| blocks * 3 + index;
+        let admittance = |g: Value, c: Value| Complex64::new(g, omega * c);
+        let mut entries = Vec::new();
+        for block in 0..blocks {
+            let [a, b, c] = [block * 3, block * 3 + 1, block * 3 + 2];
+            let spread = 1.0 + block as Value / blocks as Value;
+            for (row, col, g, cap) in [
+                (a, a, 3.0e-3, 2.0e-13),
+                (a, b, -1.0e-3, -5.0e-14),
+                (b, a, -1.0e-3, -5.0e-14),
+                (b, b, 4.0e-3, 3.0e-13),
+                (b, c, -2.0e-3, -1.0e-13),
+                (c, b, -2.0e-3, -1.0e-13),
+                (c, c, 5.0e-3, 4.0e-13),
+            ] {
+                entries.push((row, col, admittance(g * spread, cap)));
+            }
+            for index in 0..4 {
+                let g_net = global(index);
+                let (gm, cgs) = (2.0e-4 * (1.0 + index as Value), 1.0e-14 * spread);
+                entries.push((a, g_net, admittance(gm, cgs)));
+                entries.push((c, g_net, admittance(-gm, 0.0)));
+                entries.push((g_net, b, admittance(0.0, cgs)));
+                entries.push((g_net, c, admittance(0.0, cgs)));
+            }
+        }
+        for index in 0..4 {
+            let g_net = global(index);
+            entries.push((g_net, g_net, admittance(1.0e-3, 1.0e-12)));
+        }
+        (n, entries)
+    }
+
+    fn bordered_stage_matrix(
+        blocks: usize,
+        omega: Value,
+        options: SolverOptions,
+    ) -> (ComplexMatrix, Vec<(usize, usize, Complex64)>) {
+        let (n, entries) = bordered_stage_entries(blocks, omega);
+        let triplets: Vec<_> = entries.iter().map(|&(r, c, _)| (r, c, 0.0)).collect();
+        let real = StaticMatrix::from_triplets_with_options(n, n, &triplets, options).unwrap();
+        let mut matrix = ComplexMatrix::from_real_structure(&real);
+        for &(row, col, value) in &entries {
+            matrix.add(row, col, value);
+        }
+        (matrix, entries)
+    }
+
+    fn assert_residual_small(
+        entries: &[(usize, usize, Complex64)],
+        solution: &[Complex64],
+        rhs: &[Complex64],
+        transpose: bool,
+    ) {
+        let mut product = vec![Complex64::new(0.0, 0.0); rhs.len()];
+        for &(row, col, value) in entries {
+            let (row, col) = if transpose { (col, row) } else { (row, col) };
+            product[row] += value * solution[col];
+        }
+        let scale = rhs
+            .iter()
+            .fold(1.0e-30, |max: Value, value| max.max(value.norm()));
+        for (row, (&lhs, &right)) in product.iter().zip(rhs).enumerate() {
+            assert!(
+                (lhs - right).norm() <= 1.0e-10 * scale,
+                "row {row} residual {:.3e}",
+                (lhs - right).norm()
+            );
+        }
+    }
+
+    #[test]
+    fn a_bordered_complex_system_solves_within_its_block_fill() {
+        let blocks = 800;
+        let omega = 2.0 * std::f64::consts::PI * 1.0e6;
+        let (mut matrix, entries) = bordered_stage_matrix(blocks, omega, SolverOptions::default());
+        let n = matrix.nrows;
+        let mut rhs = vec![Complex64::new(0.0, 0.0); n];
+        rhs[n - 3] = Complex64::new(1.0, 0.0);
+        let solution = matrix.solve(&rhs).unwrap();
+        assert_residual_small(&entries, &solution, &rhs, false);
+
+        let factor_nnz = matrix
+            .real_equivalent_factor_nnz()
+            .expect("the bordered system solves through Circuit LU");
+        let input_nnz = 4 * entries.len();
+        assert!(
+            factor_nnz <= 3 * input_nnz,
+            "factor fill {factor_nnz} against {input_nnz} input entries"
+        );
+    }
+
+    #[test]
+    fn a_real_equivalent_solve_matches_faer_across_operations_and_frequencies() {
+        let faer_options = SolverOptions {
+            real_backend: RealSolverBackend::Faer,
+            ..SolverOptions::default()
+        };
+        let mut rhs = vec![Complex64::new(0.0, 0.0); 3 * 40 + 4];
+        rhs[1] = Complex64::new(0.25, -0.5);
+        rhs[3 * 40 + 1] = Complex64::new(1.0, 0.0);
+        let mut second = vec![Complex64::new(0.0, 0.0); rhs.len()];
+        second[7] = Complex64::new(0.0, 1.0);
+        let batched_rhs: Vec<_> = rhs.iter().chain(&second).copied().collect();
+
+        let close = |a: &[Complex64], b: &[Complex64]| {
+            let scale = a
+                .iter()
+                .fold(1.0e-30, |max: Value, value| max.max(value.norm()));
+            for (index, (x, y)) in a.iter().zip(b).enumerate() {
+                assert!(
+                    (x - y).norm() <= 1.0e-9 * scale,
+                    "unknown {index}: {x} against {y}"
+                );
+            }
+        };
+        let (mut circuit, _) = bordered_stage_matrix(40, 1.0e6, SolverOptions::default());
+        let (mut faer, _) = bordered_stage_matrix(40, 1.0e6, faer_options);
+        for omega in [1.0e6, 1.0e7, 3.0e9, 2.0e3] {
+            let (_, updated) = bordered_stage_entries(40, omega);
+            circuit.clear_values();
+            faer.clear_values();
+            for &(row, col, value) in &updated {
+                circuit.add(row, col, value);
+                faer.add(row, col, value);
+            }
+            let solution = circuit.solve(&rhs).unwrap();
+            assert_residual_small(&updated, &solution, &rhs, false);
+            close(&solution, &faer.solve(&rhs).unwrap());
+
+            let mut transposed = Vec::new();
+            circuit.solve_transpose_into(&rhs, &mut transposed).unwrap();
+            assert_residual_small(&updated, &transposed, &rhs, true);
+            let mut faer_transposed = Vec::new();
+            faer.solve_transpose_into(&rhs, &mut faer_transposed)
+                .unwrap();
+            close(&transposed, &faer_transposed);
+
+            let mut batch = Vec::new();
+            circuit
+                .solve_many_into(&batched_rhs, 2, &mut batch)
+                .unwrap();
+            let (first_solution, second_solution) = batch.split_at(rhs.len());
+            close(first_solution, &solution);
+            close(second_solution, &faer.solve(&second).unwrap());
+        }
+    }
+
+    #[test]
+    fn a_reused_pivot_that_stops_suiting_a_frequency_searches_again() {
+        // The first frequency makes the resistive (0, 0) entry the pivot of
+        // its column; the second leaves it vanishing beside the reactive one.
+        let triplets = [(0, 0, 0.0), (1, 0, 0.0), (0, 1, 0.0), (1, 1, 0.0)];
+        let real = StaticMatrix::from_triplets(2, 2, &triplets).unwrap();
+        let mut matrix = ComplexMatrix::from_real_structure(&real);
+        let stamp = |matrix: &mut ComplexMatrix, g: Value, b: Value| {
+            matrix.clear_values();
+            matrix.add(0, 0, Complex64::new(g, 0.0));
+            matrix.add(1, 0, Complex64::new(0.0, b));
+            matrix.add(0, 1, Complex64::new(0.0, b));
+            matrix.add(1, 1, Complex64::new(1.0, 0.0));
+        };
+        let rhs = [Complex64::new(1.0, 0.0), Complex64::new(0.0, 0.0)];
+        stamp(&mut matrix, 1.0, 1.0e-12);
+        matrix.solve(&rhs).unwrap();
+        stamp(&mut matrix, 1.0e-13, 1.0);
+        let solution = matrix.solve(&rhs).unwrap();
+        // Eliminating x1 = -j b x0 leaves (g + b^2) x0 = rhs0.
+        let denominator = 1.0e-13 + 1.0;
+        assert!((solution[0] - Complex64::new(1.0 / denominator, 0.0)).norm() <= 1.0e-12);
+        assert!((solution[1] - Complex64::new(0.0, -1.0 / denominator)).norm() <= 1.0e-12);
+    }
+
     fn complex_matrix_with_unexcited_block(k: Value) -> ComplexMatrix {
         let structure: [(usize, usize); 9] = [
             (0, 0),
