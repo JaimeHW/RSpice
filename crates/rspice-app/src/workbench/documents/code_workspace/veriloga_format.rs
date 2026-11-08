@@ -617,6 +617,5 @@ mod tests {
         std::fs::remove_dir_all(&copy).expect("the temporary directory goes");
         assert!(models >= 30, "{models} models were compared");
         assert!(parameters > 1_000, "{parameters} parameters were compared");
-        println!("{models} models, {parameters} parameters compared");
     }
 }
