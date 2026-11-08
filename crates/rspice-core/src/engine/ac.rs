@@ -2462,10 +2462,12 @@ impl Engine {
                 ac_matrix.add_real(stamp.nn.row - 1, stamp.nn.col - 1, g);
             }
         }
-        if circuit.global_shunt_conductance != 0.0 {
+        let small_signal_shunt =
+            circuit.global_shunt_conductance - circuit.large_signal_shunt_conductance;
+        if small_signal_shunt != 0.0 {
             for index in 0..circuit.num_nodes() {
                 if circuit.has_global_shunt_at(index) {
-                    ac_matrix.add_real(index, index, circuit.global_shunt_conductance);
+                    ac_matrix.add_real(index, index, small_signal_shunt);
                 }
             }
         }

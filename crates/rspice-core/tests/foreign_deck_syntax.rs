@@ -1225,3 +1225,38 @@ r2 b 0 1k
     };
     assert_eq!((initial("a"), initial("b")), (Some(1.0), Some(2.0)));
 }
+
+// QSPICE: 1 mA into 1k with GSHUNT=1m gives V(a) = 0.5 at the operating
+// point and in the transient, while the AC analysis leaves the shunt out
+// (Re V(a) = 0.999961 at 1 kHz).
+#[test]
+fn gshunt_loads_every_node_in_the_operating_point_and_transient_only() {
+    let netlist = parse(
+        "* gshunt
+.option gshunt=1m
+i1 0 a dc 1m ac 1m
+r1 a 0 1k
+c1 a 0 1n
+.op
+.end
+",
+    );
+    assert_close("V(a) op", op_voltage(&netlist, "a"), 0.5, 1e-9);
+    assert_close(
+        "V(a) tran",
+        tran_voltages(&netlist, 1e-4, 1e-4, &["a"])[0],
+        0.5,
+        1e-6,
+    );
+    let point = Engine::default()
+        .run_ac(&netlist, &[1e3])
+        .expect("AC solves")
+        .pop()
+        .expect("one AC point");
+    let index = point
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("a"))
+        .expect("node a");
+    assert_close("Re V(a) ac", point.voltages[index].re, 0.999961, 1e-6);
+}

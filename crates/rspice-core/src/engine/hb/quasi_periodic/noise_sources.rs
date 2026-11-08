@@ -173,7 +173,7 @@ impl Engine {
         let nodes = circuit.num_nodes();
         let ambient = self.config.temperature;
         let kb = pnoise_physical_constants(self.config.spice_dialect).boltzmann;
-        let shunt = circuit.global_shunt_conductance();
+        let shunt = circuit.global_shunt_conductance() - circuit.large_signal_shunt_conductance;
         if !shunt.is_finite() || shunt < 0.0 {
             return Err(error("RSHUNT conductance must be finite and nonnegative"));
         }

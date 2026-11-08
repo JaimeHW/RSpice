@@ -2289,7 +2289,8 @@ impl Engine {
         // consumes this shared catalog.  Private DAE state rows are excluded
         // exactly as they are by the global-shunt matrix stamp; GMIN remains
         // absent because it is a solver aid rather than physical circuitry.
-        let shunt_conductance = circuit.global_shunt_conductance();
+        let shunt_conductance =
+            circuit.global_shunt_conductance() - circuit.large_signal_shunt_conductance;
         if shunt_conductance != 0.0 {
             if !shunt_conductance.is_finite() || shunt_conductance < 0.0 {
                 return Err(SimulationError::Circuit(format!(

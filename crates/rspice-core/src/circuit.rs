@@ -595,6 +595,10 @@ pub struct CircuitData {
     /// electrical node to ground. This is part of the physical circuit and is
     /// kept separate from solver-controlled GMIN/conditioning diagonals.
     pub(crate) global_shunt_conductance: Value,
+    /// The part of [`Self::global_shunt_conductance`] that `.OPTIONS GSHUNT`
+    /// adds: present in the operating point and the transient, absent from
+    /// the small-signal analyses, and noiseless.
+    pub(crate) large_signal_shunt_conductance: Value,
     /// Private meter nodes map to their authored external terminal. They add no
     /// physical shunts and must not become the implicit ground reference.
     pub(crate) terminal_probe_nodes: HashMap<NodeId, NodeId>,

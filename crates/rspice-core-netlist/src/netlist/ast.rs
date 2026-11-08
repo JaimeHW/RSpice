@@ -5058,6 +5058,10 @@ pub struct SimulationOptions {
     /// operating point's topology check, which otherwise refuses such a deck
     /// rather than reporting a bias the conditioning shunt invented.
     pub rshunt: Option<Value>,
+    /// HSPICE `.OPTIONS GSHUNT`: a conductance from every circuit node to
+    /// ground in the operating point and the transient. QSPICE leaves it out
+    /// of the small-signal analyses, and so does RSpice.
+    pub gshunt: Option<Value>,
     /// Ngspice `.OPTIONS CSHUNT`: capacitance of a capacitor placed from every
     /// circuit node to ground.
     ///
@@ -5403,6 +5407,9 @@ impl SimulationOptions {
         }
         if other.rshunt.is_some() {
             self.rshunt = other.rshunt;
+        }
+        if other.gshunt.is_some() {
+            self.gshunt = other.gshunt;
         }
         if other.method.is_some() {
             self.method = other.method.clone();

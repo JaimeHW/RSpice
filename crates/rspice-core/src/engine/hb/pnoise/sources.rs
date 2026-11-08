@@ -90,7 +90,8 @@ impl Engine {
         // node to ground. It is distinct from numerical GMIN and therefore
         // contributes one independent stationary 4kT*G source per stamped
         // electrical row. Private DAE state rows are deliberately excluded.
-        let shunt_conductance = circuit.global_shunt_conductance();
+        let shunt_conductance =
+            circuit.global_shunt_conductance() - circuit.large_signal_shunt_conductance;
         if !shunt_conductance.is_finite() || shunt_conductance < 0.0 {
             return Err(SimulationError::Circuit(format!(
                 "pnoise .OPTIONS RSHUNT conductance is invalid ({shunt_conductance})"

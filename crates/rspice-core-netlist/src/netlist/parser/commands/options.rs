@@ -992,6 +992,11 @@ pub(in crate::netlist::parser) fn parse_options_command(
                     )?;
                     options.rshunt = Some(parse_positive_real_option("RSHUNT", value, line_num)?);
                 }
+                (_, "GSHUNT") => {
+                    let value = expect_value(stream, line_num, params)?;
+                    options.gshunt =
+                        Some(parse_non_negative_real_option("GSHUNT", value, line_num)?);
+                }
                 (_, "CSHUNT") => {
                     let value = expect_value_with_direction(
                         stream,

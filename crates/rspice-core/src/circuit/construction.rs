@@ -47,6 +47,7 @@ impl CircuitData {
             no_dc_path_nodes: Vec::new(),
             fatal_no_dc_path_nodes: Vec::new(),
             global_shunt_conductance: 0.0,
+            large_signal_shunt_conductance: 0.0,
             terminal_probe_nodes: HashMap::new(),
             terminal_probe_source_names: HashSet::new(),
             veriloga_terminal_meters: Vec::new(),
