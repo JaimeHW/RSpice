@@ -63,6 +63,8 @@ const CELSIUS: &str = "\u{b0}C";
 const REGION_HEADER: &str = "Region";
 const DEVICES_TITLE: &str = "Device operating points";
 const DEVICE_FAMILY_ORDER: [&str; 3] = ["MOSFET", "BJT", "DIODE"];
+/// After the known families and every other built-in one.
+const MODULE_SECTION_RANK: usize = DEVICE_FAMILY_ORDER.len() + 1;
 const NON_FINITE: &str = "non-finite";
 const NODE_NOT_ON_SCHEMATIC: &str =
     "This retained node has no current, unambiguous schematic mapping.";
@@ -357,10 +359,8 @@ fn order_rows(
     }
 }
 
-/// A family's own quantities, in the order the report introduced them.
 /// The quantities a designer opens this page for, in the order they are
-/// read. A family not listed, a Verilog-A module among them, stays as it
-/// reports.
+/// read. A family not listed stays as it reports.
 fn leading_quantities(family: &str) -> &'static [&'static str] {
     const MOSFET: &[&str] = &[
         "id", "vgs", "vds", "vbs", "vth", "vdsat", "gm", "gds", "gmb", "gmbs", "ig", "is", "ib",
@@ -376,16 +376,25 @@ fn leading_quantities(family: &str) -> &'static [&'static str] {
     }
 }
 
+/// The family whose standing order a device's quantities follow. A Verilog-A
+/// module has none, whatever its author called it: it keeps the order it
+/// reports.
+fn ranking_family(entry: &DeviceOpEntry) -> Option<&str> {
+    entry.module.is_none().then_some(entry.device_kind)
+}
+
 /// A quantity's place in its family: the listed ones first and in that order,
 /// the rest level with each other so a stable sort leaves them in report order.
-fn quantity_rank(family: &str, name: &str) -> usize {
-    let leading = leading_quantities(family);
+fn quantity_rank(family: Option<&str>, name: &str) -> usize {
+    let leading = family.map_or(&[] as &[&str], leading_quantities);
     leading
         .iter()
         .position(|known| *known == name)
         .unwrap_or(leading.len())
 }
 
+/// A family's own quantities, in the order the report introduced them, the
+/// family's leading ones first.
 fn family_columns(report: &DeviceOpReport, rows: &[ShownRow]) -> Vec<PlanColumn> {
     let mut in_report_order: Vec<usize> = rows.iter().map(|row| row.index).collect();
     in_report_order.sort_unstable();
@@ -402,14 +411,14 @@ fn family_columns(report: &DeviceOpReport, rows: &[ShownRow]) -> Vec<PlanColumn>
         }
     }
     if let Some(row) = rows.first() {
-        let (family, _) = device_reading(&report.entries[row.index]);
+        let family = ranking_family(&report.entries[row.index]);
         columns.sort_by_key(|column| quantity_rank(family, &column.label));
     }
     columns
 }
 
-/// The section title of a family: the engine's capitals where they are only
-/// shouting, a Verilog-A module's name exactly as its author wrote it.
+/// The section title of a built-in family: the engine's capitals where they
+/// are only shouting.
 fn family_title(family: &str) -> String {
     match family {
         "DIODE" => "Diode",
@@ -428,6 +437,19 @@ fn family_rank(family: &str) -> usize {
         .unwrap_or(DEVICE_FAMILY_ORDER.len())
 }
 
+/// Where a device's section sits among the others, and its title. A Verilog-A
+/// module follows every built-in family, under exactly the name its author
+/// wrote, even one that spells a family's.
+fn device_section(entry: &DeviceOpEntry) -> (usize, String) {
+    match &entry.module {
+        Some(module) => (MODULE_SECTION_RANK, module.module.clone()),
+        None => (
+            family_rank(entry.device_kind),
+            family_title(entry.device_kind),
+        ),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PlanColumn {
     label: String,
@@ -437,6 +459,9 @@ struct PlanColumn {
 #[derive(Debug, Clone)]
 struct PlanSection {
     kind: OpRowKind,
+    /// What the reader's sort and fold are held under: the title, but a
+    /// module's title can repeat a family's.
+    key: String,
     title: String,
     name_header: String,
     columns: Vec<PlanColumn>,
@@ -528,19 +553,21 @@ impl PlanBuilder<'_> {
     fn section(
         &self,
         kind: OpRowKind,
+        key: &str,
         title: &str,
         name_header: &str,
         columns: Vec<PlanColumn>,
     ) -> PlanSection {
         PlanSection {
             kind,
+            key: key.to_owned(),
             title: title.to_owned(),
             name_header: name_header.to_owned(),
             columns,
             region: false,
             count: 0,
-            sort: self.controls.sort.get(title).cloned(),
-            collapsed: self.controls.collapsed.contains(title),
+            sort: self.controls.sort.get(key).cloned(),
+            collapsed: self.controls.collapsed.contains(key),
             note: None,
             top: 0.0,
             bottom: 0.0,
@@ -580,7 +607,7 @@ impl PlanBuilder<'_> {
     /// what matched, so it leaves such sections out.
     fn add_note(&mut self, kind: OpRowKind, title: &str, note: &str) {
         if self.filter.is_empty() {
-            let mut section = self.section(kind, title, "", Vec::new());
+            let mut section = self.section(kind, title, title, "", Vec::new());
             section.note = Some(note.to_owned());
             self.add(section, &[]);
         }
@@ -607,7 +634,13 @@ impl PlanBuilder<'_> {
             label: spec.value_header.to_owned(),
             unit: String::new(),
         };
-        let section = self.section(spec.kind, spec.title, spec.name_header, vec![column]);
+        let section = self.section(
+            spec.kind,
+            spec.title,
+            spec.title,
+            spec.name_header,
+            vec![column],
+        );
         order_rows(
             &mut shown,
             section.sort.as_ref(),
@@ -624,7 +657,7 @@ impl PlanBuilder<'_> {
         devices: Option<&DeviceOpReport>,
         detail: Option<&RetainedDetail>,
     ) -> usize {
-        let mut families = BTreeMap::<(usize, String, String), Vec<ShownRow>>::new();
+        let mut families = BTreeMap::<(usize, String), Vec<ShownRow>>::new();
         if let Some(report) = devices {
             for (index, entry) in report
                 .entries
@@ -633,11 +666,10 @@ impl PlanBuilder<'_> {
                 .filter(|(_, entry)| retained_detail_allows(&entry.name, detail))
             {
                 let (family, _) = device_reading(entry);
-                let title = family_title(family);
+                let (rank, title) = device_section(entry);
                 let also = [family, title.as_str(), entry.region.unwrap_or_default()];
                 if let Some(row) = ShownRow::matching(index, &entry.name, &also, &self.filter) {
-                    let key = (family_rank(family), title.to_lowercase(), title);
-                    families.entry(key).or_default().push(row);
+                    families.entry((rank, title)).or_default().push(row);
                 }
             }
         }
@@ -656,10 +688,21 @@ impl PlanBuilder<'_> {
             self.add_note(OpRowKind::Device, DEVICES_TITLE, note);
             return 0;
         };
+        let mut families: Vec<_> = families.into_iter().collect();
+        families.sort_by(|((left_rank, left), _), ((right_rank, right), _)| {
+            left_rank
+                .cmp(right_rank)
+                .then_with(|| natural_cmp(left, right))
+        });
         let mut device_shown = 0;
-        for ((_, _, title), mut shown) in families {
+        for ((rank, title), mut shown) in families {
             let columns = family_columns(report, &shown);
-            let mut section = self.section(OpRowKind::Device, &title, "Instance", columns);
+            let key = if rank == MODULE_SECTION_RANK {
+                format!("module {title}")
+            } else {
+                title.clone()
+            };
+            let mut section = self.section(OpRowKind::Device, &key, &title, "Instance", columns);
             section.region = shown
                 .iter()
                 .any(|row| report.entries[row.index].region.is_some());
@@ -1076,7 +1119,7 @@ impl<M: SchematicMapping> SheetPainter<'_, M> {
         let rect = self.grid.row(y, TITLE_H);
         let response = self.ui.interact(
             rect,
-            self.ui.id().with(("op-section", &section.title)),
+            self.ui.id().with(("op-section", &section.key)),
             egui::Sense::click(),
         );
         let painter = self.ui.painter_at(rect);
@@ -1133,7 +1176,7 @@ impl<M: SchematicMapping> SheetPainter<'_, M> {
         );
         theme::paint_focus_ring(self.ui, &response, rect);
         if response.clicked() {
-            out.toggled_section = Some(section.title.clone());
+            out.toggled_section = Some(section.key.clone());
         }
     }
 
@@ -1195,7 +1238,7 @@ impl<M: SchematicMapping> SheetPainter<'_, M> {
         }
         let response = self.ui.interact(
             shown,
-            self.ui.id().with(("op-sort", &section.title, label)),
+            self.ui.id().with(("op-sort", &section.key, label)),
             egui::Sense::click(),
         );
         let sorted = section
@@ -1281,7 +1324,7 @@ impl<M: SchematicMapping> SheetPainter<'_, M> {
         );
         theme::paint_focus_ring(self.ui, &response, shown.shrink(1.0));
         if response.clicked() {
-            out.clicked_sort = Some((section.title.clone(), label.to_owned()));
+            out.clicked_sort = Some((section.key.clone(), label.to_owned()));
         }
         if elided {
             response.on_hover_text(label);
@@ -1718,8 +1761,9 @@ pub fn selection_detail(
             rows.push((label.to_owned(), quantity_readout(value.value, &value.unit)));
         }
         RowSource::Device(entry) => {
-            let (family, quantities) = device_reading(entry);
-            rows.push(("Family".to_owned(), family_title(family)));
+            let (_, quantities) = device_reading(entry);
+            let family = ranking_family(entry);
+            rows.push(("Family".to_owned(), device_section(entry).1));
             if let Some(region) = entry.region {
                 rows.push((REGION_HEADER.to_owned(), region.to_owned()));
             }

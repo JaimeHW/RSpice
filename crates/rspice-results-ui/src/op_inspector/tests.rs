@@ -898,6 +898,116 @@ fn a_failed_solve_offers_to_mark_what_it_named_at_the_end_of_its_row() {
 }
 
 #[test]
+fn each_module_has_a_section_after_the_built_in_families_in_counting_order() {
+    let report = DeviceOpReport {
+        entries: vec![
+            module_device("X3", "stage10", vec![("ia", 1.0, "A")]),
+            module_device("X2", "Stage2", vec![("ia", 1.0, "A")]),
+            device("R1", "RESISTOR", None, vec![("r", 1.0)]),
+            module_device("X1", "alpha", vec![("ia", 1.0, "A")]),
+            device("D1", "DIODE", None, vec![("id", 1.0)]),
+            module_device("X4", "Stage2", vec![("ia", 1.0, "A")]),
+            device("M1", "MOSFET", None, vec![("id", 1.0)]),
+        ],
+    };
+    let plan = plan_of(None, Some(&report));
+    assert_eq!(
+        titles(&plan)[2..],
+        ["MOSFET", "Diode", "Resistor", "alpha", "Stage2", "stage10"],
+    );
+    let stage = |title: &str| {
+        plan.sections
+            .iter()
+            .find(|section| section.title == title)
+            .expect("the section")
+            .count
+    };
+    assert_eq!(stage("Stage2"), 2, "one section however many instances");
+
+    let found = plan_with(
+        "stage1",
+        &OpSort::new(),
+        &BTreeSet::new(),
+        None,
+        Some(&report),
+    );
+    assert_eq!(
+        titles(&found),
+        ["stage10"],
+        "the filter finds a module by name"
+    );
+}
+
+#[test]
+fn a_module_named_like_a_family_keeps_its_own_section_and_order() {
+    let report = DeviceOpReport {
+        entries: vec![
+            device("Q1", "BJT", None, vec![("ie", 1.0), ("ic", 2.0)]),
+            module_device("X1", "BJT", vec![("ie", 1.0, "A"), ("ic", 2.0, "A")]),
+            module_device("X2", "DIODE", vec![("id", 1.0, "A")]),
+        ],
+    };
+    let plan = plan_of(None, Some(&report));
+    assert_eq!(titles(&plan)[2..], ["BJT", "BJT", "DIODE"]);
+    let order = |section: usize| {
+        plan.sections[section + 2]
+            .columns
+            .iter()
+            .map(|column| column.label.as_str())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        order(0),
+        ["ic", "ie"],
+        "the family leads with its collector"
+    );
+    assert_eq!(order(1), ["ie", "ic"], "the module keeps its own order");
+
+    let mut sort = OpSort::new();
+    sort.insert("BJT".to_owned(), ("ic".to_owned(), true));
+    let collapsed = BTreeSet::from(["BJT".to_owned()]);
+    let plan = plan_with("", &sort, &collapsed, None, Some(&report));
+    assert!(plan.sections[2].collapsed && plan.sections[2].sort.is_some());
+    assert!(
+        !plan.sections[3].collapsed && plan.sections[3].sort.is_none(),
+        "the reader's fold and sort of the family are not the module's"
+    );
+}
+
+#[test]
+fn the_inspector_gives_a_module_by_name_in_its_own_order_and_units() {
+    let report = DeviceOpReport {
+        entries: vec![module_device(
+            "X1",
+            "BJT",
+            vec![("ie", 1.0e-3, "A"), ("ic", 2.0e-3, "A/V^2"), ("n", 1.5, "")],
+        )],
+    };
+    let selection = OpSelection {
+        kind: OpRowKind::Device,
+        index: 0,
+        name: "X1".to_owned(),
+    };
+    let mapping = Mapped {
+        node: false,
+        device: None,
+    };
+    let detail =
+        selection_detail(&selection, None, Some(&report), &mapping).expect("the row exists");
+    assert_eq!(
+        detail.rows,
+        [
+            ("Family", "BJT"),
+            ("ie", "1 mA"),
+            ("ic", "2 mA/V^2"),
+            ("n", "1.5"),
+            ("Identity", "X1"),
+        ]
+        .map(|(label, value)| (label.to_owned(), value.to_owned()))
+    );
+}
+
+#[test]
 fn a_unit_the_module_states_wins_and_one_it_does_not_state_stays_blank() {
     let report = DeviceOpReport {
         entries: vec![module_device(
