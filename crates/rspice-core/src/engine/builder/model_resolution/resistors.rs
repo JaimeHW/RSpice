@@ -490,10 +490,12 @@ fn apply_resistor_instance_scaling(
         resistance *= scale;
     }
 
+    // A negative M is a negative conductance `M/R`, as in ngspice and
+    // LTspice, the same element a negative R is.
     if let Some(mult) = instance_param(instance_params, &["M", "MULT"]) {
-        if !mult.is_finite() || mult <= 0.0 {
+        if !mult.is_finite() || mult == 0.0 {
             return Err(SimulationError::Circuit(format!(
-                "Resistor '{}' has invalid multiplicity M={} (must be finite and > 0)",
+                "Resistor '{}' has invalid multiplicity M={} (must be finite and nonzero)",
                 element_name, mult
             )));
         }

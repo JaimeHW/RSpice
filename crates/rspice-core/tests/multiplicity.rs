@@ -106,6 +106,36 @@ r2 out 0 1k
     );
 }
 
+/// A negative `m` on a resistor is a negative conductance `m/R`, the same
+/// element as a negative `R`. ngspice-46 and LTspice 26.1.1 agree:
+/// `i(v1)` = 0.5 mA and `i(v3)` = 2 mA.
+#[test]
+fn resistor_negative_m_is_a_negative_conductance() {
+    let deck = "\
+* negative resistance and negative multiplicity
+v1 a 0 1
+r1 a 0 -2k
+v3 c 0 1
+r3 c 0 1k m=-2
+.op
+.end
+";
+    assert_eq!(resistor_conductance(deck, "r3"), -2.0e-3);
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let op = Engine::default()
+        .run_dc_op(&netlist)
+        .expect("operating point solves");
+    for (source, expected) in [("v1", 0.5e-3), ("v3", 2.0e-3)] {
+        let current = op
+            .branch_current_named(source)
+            .unwrap_or_else(|| panic!("i({source}) missing"));
+        assert!(
+            (current - expected).abs() <= 1.0e-12,
+            "i({source}) = {current:e}, want {expected:e}"
+        );
+    }
+}
+
 #[test]
 fn diode_m_matches_explicit_parallel_copies() {
     let with_m = "\
