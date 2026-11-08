@@ -11,6 +11,8 @@ pub(in crate::netlist::parser) struct AnalysisCardPlan {
     /// Published cards' `ACTIMES=`/`CHECKPOINT=` requests, checked against
     /// the deck's `.TRAN` card once the whole deck is read.
     small_signal_states: Vec<super::StagedSmallSignalState>,
+    /// The tables published `.AC` and `.NOISE` cards' `LIST`s read.
+    frequency_tables: Vec<DataTable>,
     /// Each published `.STEP` card's index in the deck's analysis list, with
     /// the line that authored it.
     step_card_lines: Vec<(usize, usize)>,
@@ -77,9 +79,11 @@ impl AnalysisCardPlan {
             ..context
         };
         let card = match ParsedAnalysisCard::parse(command, &mut probe, parsing) {
-            Ok(Some(card)) if !queued => {
+            Ok(Some(mut card)) if !queued => {
                 *stream = probe;
                 self.record_step_card_line(&card, sink.analyses.len(), context.line_num);
+                self.frequency_tables
+                    .extend(card.take_frequency_table(self.frequency_tables.len()));
                 self.small_signal_states.extend(card.publish(sink));
                 return Ok(true);
             }
@@ -248,7 +252,7 @@ impl AnalysisCardPlan {
         let mut diagnostics = std::mem::take(sink.diagnostics).into_iter();
         let mut output_cursor = 0;
         let mut diagnostic_cursor = 0;
-        for (output_position, diagnostic_position, line, card) in ready {
+        for (output_position, diagnostic_position, line, mut card) in ready {
             ensure_parse_not_aborted(abort)?;
             sink.output_requests
                 .extend(outputs.by_ref().take(output_position - output_cursor));
@@ -260,6 +264,8 @@ impl AnalysisCardPlan {
             output_cursor = output_position;
             diagnostic_cursor = diagnostic_position;
             self.record_step_card_line(&card, sink.analyses.len(), line);
+            self.frequency_tables
+                .extend(card.take_frequency_table(self.frequency_tables.len()));
             let staged = card.publish(AnalysisCardSink {
                 analyses: sink.analyses,
                 monte_carlo_source_cards: sink.monte_carlo_source_cards,
@@ -283,6 +289,10 @@ impl AnalysisCardPlan {
     }
 
     /// Each published `.STEP` card's index in the analysis list, with its line.
+    pub(in crate::netlist::parser) fn frequency_tables(&self) -> &[DataTable] {
+        &self.frequency_tables
+    }
+
     pub(in crate::netlist::parser) fn step_card_lines(&self) -> &[(usize, usize)] {
         &self.step_card_lines
     }

@@ -248,6 +248,8 @@ impl ParseState {
 
         let mut analyses = self.analyses;
         resolve_implicit_step_targets(&mut analyses, &params);
+        let mut data_tables = self.data_tables;
+        data_tables.extend_from_slice(self.analysis_cards.frequency_tables());
         let step_card_lines = self.analysis_cards.step_card_lines().to_vec();
         let small_signal_states = self.analysis_cards.into_small_signal_states(&analyses)?;
 
@@ -271,7 +273,7 @@ impl ParseState {
             lin_analysis: self.lin_analysis,
             fft_analyses: self.fft_analyses,
             small_signal_states,
-            data_tables: self.data_tables,
+            data_tables,
             models: self.models,
             subcircuits,
             params,

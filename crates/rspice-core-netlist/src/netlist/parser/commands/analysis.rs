@@ -43,6 +43,8 @@ pub(super) struct ParsedAnalysisCard {
     transient_noise: Option<TransientNoiseConfig>,
     /// Whether a `.TRAN` card carries LTspice's `STARTUP`.
     transient_startup: bool,
+    /// The points of a `.AC` or `.NOISE` card's `LIST`.
+    frequency_list: Option<Vec<Value>>,
     /// The card's `ACTIMES=`/`CHECKPOINT=` state, with its line.
     small_signal_state: Option<(usize, SmallSignalStateSource)>,
     diagnostics: Vec<ParseDiagnostic>,
@@ -234,6 +236,7 @@ impl ParsedAnalysisCard {
         let mut output_request = None;
         let mut transient_noise = None;
         let mut transient_startup = false;
+        let mut frequency_list = None;
         let mut collected_diagnostics = Vec::new();
         let diagnostics = &mut collected_diagnostics;
         match head {
@@ -298,6 +301,11 @@ impl ParsedAnalysisCard {
                     }
                     let table_name = expect_ident(stream, line_num)?;
                     analysis = Some(AnalysisCommand::AcData { table_name });
+                } else if var_str.eq_ignore_ascii_case("LIST") {
+                    frequency_list = Some(parse_frequency_list(stream, line_num, params, ".AC")?);
+                    analysis = Some(AnalysisCommand::AcData {
+                        table_name: String::new(),
+                    });
                 } else {
                     let variation = match var_str.as_str() {
                         "LIN" => FreqVariation::Lin,
@@ -481,7 +489,7 @@ impl ParsedAnalysisCard {
                 fft_analysis = Some(analysis);
             }
             AnalysisHead::Noise => {
-                let noise = parse_noise_command(stream, line_num, params)?;
+                let noise = parse_noise_command(stream, line_num, params, &mut frequency_list)?;
                 analysis = Some(noise);
             }
             AnalysisHead::Sensitivity => {
@@ -512,8 +520,8 @@ impl ParsedAnalysisCard {
                 return Err(ParseError::Syntax {
                     line: line_num,
                     message: format!(
-                        "{command} DATA= solves one table row per point and takes no ACTIMES= \
-                         or CHECKPOINT="
+                        "{command} DATA= and LIST solve one table row per point and take no \
+                         ACTIMES= or CHECKPOINT="
                     ),
                 });
             }
@@ -531,11 +539,33 @@ impl ParsedAnalysisCard {
             output_request,
             transient_noise,
             transient_startup,
+            frequency_list,
             small_signal_state,
             diagnostics: collected_diagnostics,
         };
         card.validate_constraints(line_num, lin_exists, current_noise)?;
         Ok(card)
+    }
+
+    /// The table a `.AC` or `.NOISE` card's `LIST` reads, named by `ordinal`
+    /// among the deck's lists.
+    pub(super) fn take_frequency_table(&mut self, ordinal: usize) -> Option<DataTable> {
+        let frequencies = self.frequency_list.take()?;
+        let name = format!("LIST@{}", ordinal + 1);
+        if let Some(
+            AnalysisCommand::AcData { table_name } | AnalysisCommand::NoiseData { table_name, .. },
+        ) = &mut self.analysis
+        {
+            table_name.clone_from(&name);
+        }
+        Some(DataTable {
+            name,
+            params: vec!["FREQ".to_string()],
+            rows: frequencies
+                .into_iter()
+                .map(|frequency| vec![frequency])
+                .collect(),
+        })
     }
 
     fn validate_constraints(

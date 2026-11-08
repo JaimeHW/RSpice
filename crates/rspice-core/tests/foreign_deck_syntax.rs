@@ -2032,3 +2032,69 @@ R2 b 0 1k
         "R1 = {r1} is the nominal, not a draw"
     );
 }
+
+// QSPICE and LTspice 26.1.1 sweep a `.ac list` or `.noise ... list` in ascending
+// order; QSPICE keeps a repeated point (LTspice drops it). Values are QSPICE's.
+#[test]
+fn ac_and_noise_take_a_list_of_frequencies() {
+    let netlist = parse(
+        "* ac list
+V1 in 0 0 AC 1
+R1 in out 1k
+C1 out 0 1u
+.ac list 1k 1 {2*5} 1k
+.end
+",
+    );
+    let (_, points) = Engine::default()
+        .run_ac_data(&netlist, &netlist.data_tables[0].name)
+        .expect("AC solves");
+    let frequencies = points
+        .iter()
+        .map(|point| point.frequency)
+        .collect::<Vec<_>>();
+    assert_eq!(frequencies, [1.0, 10.0, 1e3, 1e3]);
+    let index = points[0]
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("out"))
+        .expect("node out");
+    let at_1k = points[2].voltages[index];
+    assert_close("Re V(out)", at_1k.re, 2.470452303185767e-2, 1e-12);
+    assert_close("Im V(out)", at_1k.im, -1.552230961346476e-1, 1e-12);
+
+    let netlist = parse(
+        "* noise list
+V1 in 0 0 AC 1
+R1 in out 1k
+R2 out 0 2k
+C1 out 0 1u
+.noise V(out) V1 list 1 10 1k 100k
+.end
+",
+    );
+    let (_, points) = Engine::default()
+        .run_noise_data_named_with_input_source(
+            &netlist,
+            "out",
+            None,
+            "V1",
+            &netlist.data_tables[0].name,
+            300.15,
+        )
+        .expect("noise solves");
+    assert_eq!(points.len(), 4);
+    for (point, expected) in points.iter().zip([
+        1.105052070396838e-17,
+        1.103135901387140e-17,
+        5.958555168984793e-19,
+        6.298116196694071e-23,
+    ]) {
+        assert_close(
+            &format!("onoise at {} Hz", point.frequency),
+            point.output_noise_density,
+            expected,
+            1e-3 * expected,
+        );
+    }
+}

@@ -1375,10 +1375,37 @@ pub(super) fn parse_disto_command(
 }
 
 /// Parse .NOISE command: .NOISE V(out`[,ref]`) Vsource DEC|LIN|OCT np fstart fstop `[pts_per_summary]`
+/// The points of a `.AC` or `.NOISE` card's `LIST`, ascending as LTspice and
+/// QSPICE sweep them. A repeated point stays, as in QSPICE.
+pub(super) fn parse_frequency_list(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    card: &str,
+) -> Result<Vec<Value>, ParseError> {
+    let mut frequencies = Vec::new();
+    loop {
+        skip_commas(stream);
+        if at_small_signal_fields_end(stream) {
+            break;
+        }
+        frequencies.push(expect_value(stream, line_num, params)?);
+    }
+    if frequencies.is_empty() {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!("{card} LIST requires at least one frequency"),
+        });
+    }
+    frequencies.sort_by(Value::total_cmp);
+    Ok(frequencies)
+}
+
 pub(super) fn parse_noise_command(
     stream: &mut TokenStream,
     line_num: usize,
     params: &ParamContext,
+    frequency_list: &mut Option<Vec<Value>>,
 ) -> Result<AnalysisCommand, ParseError> {
     let (output_node, reference_node) = parse_voltage_output_reference(stream, line_num)?;
 
@@ -1403,6 +1430,15 @@ pub(super) fn parse_noise_command(
             reference_node,
             input_source,
             table_name,
+        });
+    }
+    if var_str.eq_ignore_ascii_case("LIST") {
+        *frequency_list = Some(parse_frequency_list(stream, line_num, params, ".NOISE")?);
+        return Ok(AnalysisCommand::NoiseData {
+            output_node,
+            reference_node,
+            input_source,
+            table_name: String::new(),
         });
     }
     let variation = match var_str.to_uppercase().as_str() {
