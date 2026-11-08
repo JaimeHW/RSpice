@@ -6998,8 +6998,9 @@ impl Engine {
                     if thermal_state.is_none()
                         && resistance.is_finite()
                         && (resistance.abs() <= zero_resistance_tol
-                            || resistors_read_as_currents
-                                .contains(&element.name.to_ascii_uppercase()))
+                            || (!resistors_read_as_currents.is_empty()
+                                && resistors_read_as_currents
+                                    .contains(&element.name.to_ascii_uppercase())))
                     {
                         if !small_signal_resistance.is_finite() {
                             return Err(SimulationError::Circuit(format!(
