@@ -7,7 +7,7 @@
 use super::flattener::{extract_parenthesized, is_ident_continue, is_ident_start};
 use super::{Element, ElementKind, XspiceDigitalNode, XspicePort};
 use crate::Value;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 /// Xyce 7.10 `DeviceOptions::zeroResistanceTol` default.
 pub const XYCE_DEFAULT_ZERO_RESISTANCE_TOL: Value = 1.0e-100;
@@ -60,19 +60,27 @@ pub fn analyze_xyce_connectivity(
     elements: &[Element],
 ) -> Result<ConnectivityDiagnostics, ConnectivityAnalysisError> {
     let mut union = NodeUnion::default();
-    let mut attachments: BTreeMap<String, (String, BTreeSet<String>)> = BTreeMap::new();
+    // Per node, by union index: the first device attached to it, and whether
+    // a device of another name is attached too.
+    let mut attachments: Vec<Option<(&str, bool)>> = Vec::new();
 
     for element in elements {
         union.collect_element_nodes(element);
-        let mut seen_on_device = BTreeSet::new();
+        let mut seen_on_device = Vec::new();
         for node in connectivity_terminal_nodes(element)? {
-            let key = node_key(node);
-            if seen_on_device.insert(key.clone()) {
-                attachments
-                    .entry(key)
-                    .or_insert_with(|| (normalize_node_name(node), BTreeSet::new()))
-                    .1
-                    .insert(element.name.to_ascii_uppercase());
+            let index = union.ensure_node(node);
+            if seen_on_device.contains(&index) {
+                continue;
+            }
+            seen_on_device.push(index);
+            if attachments.len() <= index {
+                attachments.resize(index + 1, None);
+            }
+            match &mut attachments[index] {
+                slot @ None => *slot = Some((element.name.as_str(), false)),
+                Some((first, shared)) => {
+                    *shared |= !first.eq_ignore_ascii_case(&element.name);
+                }
             }
         }
         for group in xyce_dc_lead_groups(element)? {
@@ -84,11 +92,17 @@ pub fn analyze_xyce_connectivity(
         }
     }
 
-    let one_device_terminal_nodes = attachments
-        .values()
-        .filter(|(node, devices)| !is_ground_name(node) && devices.len() <= 1)
-        .map(|(node, _)| node.clone())
-        .collect();
+    // A node's normalized name is its key, so sorting the names orders the
+    // nodes by key.
+    let mut one_device_terminal_nodes = attachments
+        .iter()
+        .enumerate()
+        .filter(|(_, attachment)| attachment.is_some_and(|(_, shared)| !shared))
+        .map(|(index, _)| &union.entries[index].original)
+        .filter(|node| !is_ground_name(node))
+        .cloned()
+        .collect::<Vec<_>>();
+    one_device_terminal_nodes.sort_unstable();
 
     let ground_root = union
         .index_by_key
@@ -102,7 +116,7 @@ pub fn analyze_xyce_connectivity(
         .filter(|(index, _)| ground_root.is_none_or(|ground| union.root_of(*index) != ground))
         .map(|(_, entry)| entry.original.clone())
         .collect::<Vec<_>>();
-    no_dc_path_nodes.sort_by_key(|node| node_key(node));
+    no_dc_path_nodes.sort_unstable();
 
     Ok(ConnectivityDiagnostics {
         one_device_terminal_nodes,
@@ -313,15 +327,17 @@ pub fn analyze_dc_ground_paths_with_ic_modes(
     reference: Option<&str>,
 ) -> Result<DcGroundPathDiagnostics, ConnectivityAnalysisError> {
     let mut union = NodeUnion::default();
-    let mut order: Vec<String> = Vec::new();
-    let mut seen: BTreeSet<String> = BTreeSet::new();
+    // Every terminal node by union index, in the order the elements first
+    // reach it.
+    let mut order: Vec<usize> = Vec::new();
+    let mut seen: HashSet<usize> = HashSet::new();
     // Nodes some authored element touches. A rational-transfer realization's
     // state nodes reach only its own generated elements, and their operating
     // point is set by that realization's equations -- the state currents read
     // each other's voltages -- rather than by conduction to ground. Whether
     // those equations have full rank is not a question a connectivity walk can
     // answer, so the synthesizer's guarantee stands in for one.
-    let mut authored_nodes: BTreeSet<String> = BTreeSet::new();
+    let mut authored_nodes: HashSet<usize> = HashSet::new();
     let mut uncertain_node_keys: BTreeSet<String> = BTreeSet::new();
     let mut module_terminal_keys: BTreeSet<String> = BTreeSet::new();
     let mut analysis_complete = true;
@@ -347,11 +363,12 @@ pub fn analyze_dc_ground_paths_with_ic_modes(
             terminals
         });
         for node in terminal_nodes {
+            let index = union.ensure_node(node);
             if !synthesized {
-                authored_nodes.insert(node_key(node));
+                authored_nodes.insert(index);
             }
-            if seen.insert(node_key(node)) {
-                order.push(normalize_node_name(node));
+            if seen.insert(index) {
+                order.push(index);
             }
         }
         let conduction_groups =
@@ -426,14 +443,10 @@ pub fn analyze_dc_ground_paths_with_ic_modes(
 
     let no_dc_path_nodes: Vec<String> = order
         .into_iter()
+        .filter(|index| authored_nodes.contains(index) && union.root_of(*index) != ground)
+        .map(|index| &union.entries[index].original)
         .filter(|node| !is_reference(node, reference))
-        .filter(|node| authored_nodes.contains(&node_key(node)))
-        .filter(|node| {
-            union
-                .index_by_key
-                .get(&node_key(node))
-                .is_some_and(|index| union.root_of(*index) != ground)
-        })
+        .cloned()
         .collect();
 
     let node_diagnostics = no_dc_path_nodes
@@ -1003,12 +1016,17 @@ impl NodeUnion {
         }
     }
 
+    /// The index of the node `name` keys, if it has one.
+    fn index_of(&self, name: &str) -> Option<usize> {
+        with_node_key(name, |key| self.index_by_key.get(key).copied())
+    }
+
     fn ensure_node(&mut self, name: &str) -> usize {
-        let key = node_key(name);
-        if let Some(index) = self.index_by_key.get(&key) {
-            return *index;
+        if let Some(index) = self.index_of(name) {
+            return index;
         }
 
+        let key = node_key(name);
         let index = self.entries.len();
         self.entries.push(NodeEntry {
             parent: index,
@@ -1313,6 +1331,25 @@ fn node_key(name: &str) -> String {
         "0".to_string()
     } else {
         name.to_ascii_uppercase()
+    }
+}
+
+/// Read `name`'s [`node_key`] without allocating it, for a name short
+/// enough to case-fold in place.
+fn with_node_key<R>(name: &str, read: impl FnOnce(&str) -> R) -> R {
+    if is_ground_name(name) {
+        return read("0");
+    }
+    let mut buffer = [0_u8; 64];
+    let Some(key) = buffer.get_mut(..name.len()) else {
+        return read(&name.to_ascii_uppercase());
+    };
+    key.copy_from_slice(name.as_bytes());
+    key.make_ascii_uppercase();
+    // ASCII case folding leaves every other byte as it was.
+    match std::str::from_utf8(key) {
+        Ok(key) => read(key),
+        Err(_) => read(&name.to_ascii_uppercase()),
     }
 }
 
