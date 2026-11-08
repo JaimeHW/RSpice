@@ -328,63 +328,74 @@ fn generated_veriloga_property_sheet(
     let descriptor = crate::state::validate_generated_veriloga_binding(binding)?;
     let mut sheet = cell_instance_identity_sheet();
     for (index, parameter) in descriptor.parameters.iter().enumerate() {
-        let scope = generated_veriloga_parameter_scope_label(parameter.scope);
-        let default = parameter
-            .default
-            .map(|value| {
-                if parameter.is_integer {
-                    PropertyValue::expression((value as i64).to_string())
-                } else {
-                    PropertyValue::expression(value.to_string())
-                }
-            })
-            .unwrap_or_else(|| PropertyValue::expression(""));
-        // The source's own `desc` where it gives one.
-        let mut description = if parameter.description.is_empty() {
-            format!(
-                "Generated Verilog-A {scope} parameter for {}.",
-                descriptor.model_name
-            )
-        } else {
-            parameter.description.to_owned()
-        };
-        if parameter.has_dynamic_constraints {
-            description.push_str(
-                " Its final range depends on other parameters; the compiled model validates the complete set.",
-            );
-        }
-        if !parameter.aliases.is_empty() {
-            description.push_str(&format!(" Aliases: {}.", parameter.aliases.join(", ")));
-        }
-        // As with code models, the compiled Verilog-A parameter key is the
-        // name the deck and the compiled module both use.
-        let mut definition = PropertyDefinition::new(parameter.name)
-            .with_description(description)
-            .with_type(PropertyType::Expression)
-            .with_default(default)
-            .with_max_length(512)
-            .with_order(index as i32)
-            .with_category(if scope == "model" {
-                "Model parameters"
-            } else {
-                "Instance parameters"
-            });
-        if !parameter.units.is_empty() {
-            definition.unit = Some(parameter.units.to_owned());
-        }
-        if !parameter.has_dynamic_constraints {
-            definition.min_value = parameter
-                .minimum
-                .filter(|bound| !bound.exclusive)
-                .map(|bound| bound.value);
-            definition.max_value = parameter
-                .maximum
-                .filter(|bound| !bound.exclusive)
-                .map(|bound| bound.value);
-        }
-        sheet.add(definition);
+        sheet.add(generated_veriloga_parameter_definition(
+            parameter,
+            index,
+            descriptor.model_name,
+        ));
     }
     Ok(sheet)
+}
+
+/// One built-in Verilog-A parameter's row, with the units and description its
+/// source declares.
+fn generated_veriloga_parameter_definition(
+    parameter: &rspice_core::device::veriloga_builtins::GeneratedVerilogAParameterDescriptor,
+    index: usize,
+    model_name: &str,
+) -> PropertyDefinition {
+    let scope = generated_veriloga_parameter_scope_label(parameter.scope);
+    let default = parameter
+        .default
+        .map(|value| {
+            if parameter.is_integer {
+                PropertyValue::expression((value as i64).to_string())
+            } else {
+                PropertyValue::expression(value.to_string())
+            }
+        })
+        .unwrap_or_else(|| PropertyValue::expression(""));
+    // The source's own `desc` where it gives one.
+    let mut description = if parameter.description.is_empty() {
+        format!("Generated Verilog-A {scope} parameter for {model_name}.")
+    } else {
+        parameter.description.to_owned()
+    };
+    if parameter.has_dynamic_constraints {
+        description.push_str(
+            " Its final range depends on other parameters; the compiled model validates the complete set.",
+        );
+    }
+    if !parameter.aliases.is_empty() {
+        description.push_str(&format!(" Aliases: {}.", parameter.aliases.join(", ")));
+    }
+    // As with code models, the compiled Verilog-A parameter key is the
+    // name the deck and the compiled module both use.
+    let mut definition = PropertyDefinition::new(parameter.name)
+        .with_description(description)
+        .with_type(PropertyType::Expression)
+        .with_default(default)
+        .with_max_length(512)
+        .with_order(index as i32)
+        .with_category(if scope == "model" {
+            "Model parameters"
+        } else {
+            "Instance parameters"
+        });
+    if !parameter.units.is_empty() {
+        definition.unit = Some(parameter.units.to_owned());
+    }
+    if !parameter.has_dynamic_constraints {
+        definition.min_value = parameter
+            .minimum
+            .filter(|bound| !bound.exclusive)
+            .map(|bound| bound.value);
+        definition.max_value = parameter
+            .maximum
+            .filter(|bound| !bound.exclusive)
+            .map(|bound| bound.value);
+    }
+    definition
 }
 
 const fn generated_veriloga_parameter_scope_label(
@@ -979,27 +990,21 @@ mod tests {
     /// its source declares.
     #[test]
     fn a_generated_veriloga_parameter_row_reads_its_source_units_and_description() {
-        let (descriptor, parameter) = crate::state::generated_veriloga_devices()
-            .iter()
-            .find_map(|descriptor| {
-                descriptor
-                    .parameters
-                    .iter()
-                    .find(|parameter| !parameter.units.is_empty() && !parameter.description.is_empty())
-                    .map(|parameter| (descriptor, parameter))
-            })
-            .expect("some built-in model describes a parameter");
-        let binding = crate::state::generated_veriloga_library_binding(descriptor)
-            .expect("a catalog binding");
-        let sheet = generated_veriloga_property_sheet(&binding).expect("a property sheet");
-        let row = sheet.get(parameter.name).expect("the parameter has a row");
-        assert!(
-            row.description.starts_with(parameter.description),
-            "{}: {}",
-            parameter.name,
-            row.description
+        use rspice_core::device::veriloga_builtins::GeneratedVerilogAParameterDescriptor;
+
+        let described = GeneratedVerilogAParameterDescriptor::model("rth", None)
+            .described("K/W", "Thermal resistance");
+        let row = generated_veriloga_parameter_definition(&described, 0, "bjt505t_va");
+        assert_eq!(row.description, "Thermal resistance");
+        assert_eq!(row.unit.as_deref(), Some("K/W"));
+
+        let bare = GeneratedVerilogAParameterDescriptor::instance("w", None);
+        let row = generated_veriloga_parameter_definition(&bare, 1, "bjt505t_va");
+        assert_eq!(
+            row.description,
+            "Generated Verilog-A instance parameter for bjt505t_va."
         );
-        assert_eq!(row.unit.as_deref(), Some(parameter.units), "{}", parameter.name);
+        assert_eq!(row.unit, None);
     }
 
     #[test]
