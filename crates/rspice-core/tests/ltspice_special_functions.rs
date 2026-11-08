@@ -1080,3 +1080,44 @@ A1 a out 0 0 0 0 0 0 OTA g=0 incm=1p incmk=10
         assert_close("icm", actual, expected, 1e-6 * expected);
     }
 }
+
+// LTspice 26.1.1: `Isrc` and `Isink` drive a logic output with a current beside
+// `Rout` to the common, clamped through 1 ohm past the state's own level.
+#[test]
+fn a_logic_output_may_drive_a_current() {
+    for (set, reset, bias, expected) in [
+        (1, 0, 0.0, 2.999700029997005e-1),
+        (1, 0, 1.0, 1.299870012998701),
+        (1, 0, 3.0, 2.500007997420018),
+        (0, 1, 0.0, -9.999899991000187e-5),
+        (0, 1, 1.0, -8.999909991900169e-5),
+        (0, 1, 3.0, -6.999929993700131e-5),
+    ] {
+        let deck = format!(
+            "* flip-flop driving a current
+VS s 0 PULSE(0 {set} 1u 1n 1n 5u)
+VR r 0 PULSE(0 {reset} 1u 1n 1n 5u)
+A1 s r 0 0 0 0 o 0 SRFLOP Vhigh=2.5 Vlow=0 Rout=1G Ref=.5 Isrc=3u Isink=-100u
+Rb o b 100k
+Vb b 0 {bias}
+.end
+"
+        );
+        let held = tran_at(&deck, 20e-6, 100e-9, &[("o", 20e-6)])[0];
+        assert_close(
+            &format!("V(o) S={set} R={reset} Vb={bias}"),
+            held,
+            expected,
+            1e-9,
+        );
+    }
+    let refusal = build_error(
+        "* a slewing current drive
+V1 d 0 1
+A1 d 0 0 0 0 0 o 0 BUF Vhigh=2.5 Isrc=3u Trise=1u
+R1 o 0 1k
+.end
+",
+    );
+    assert!(refusal.contains("not both"), "{refusal}");
+}

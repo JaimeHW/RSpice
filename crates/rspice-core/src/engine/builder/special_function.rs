@@ -725,7 +725,7 @@ impl CodeModel for LogicModel {
         let (high, high_b) = bits(level);
         for (sense, drive, true_output) in self.output_ports() {
             let (high, source) = if true_output { (high, q) } else { (high_b, qb) };
-            let current = (ctx.input(sense) - source) / stage.resistance(high);
+            let (current, _) = stage.output_current(high, source, ctx.input(sense));
             ctx.set_output(drive, current);
         }
         Ok(())
@@ -737,7 +737,8 @@ impl CodeModel for LogicModel {
             .find(|(_, drive, _)| output_port.eq_ignore_ascii_case(drive))
             .map(|(sense, _, true_output)| {
                 let high = if true_output { high } else { high_b };
-                vec![(sense.to_string(), 1.0 / self.stage.resistance(high))]
+                let (_, slope) = self.stage.output_current(high, 0.0, ctx.input(sense));
+                vec![(sense.to_string(), slope)]
             })
             .unwrap_or_default()
     }

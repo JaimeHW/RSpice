@@ -73,6 +73,10 @@ pub struct OutputStage {
     pub tripdt: Option<Value>,
     /// Whether `Q` starts high, from `IC`.
     pub initial: Option<bool>,
+    /// The current driven into the output while high, in place of `Vhigh`.
+    pub isrc: Option<Value>,
+    /// The current driven into the output while low, in place of `Vlow`.
+    pub isink: Option<Value>,
 }
 
 impl OutputStage {
@@ -90,6 +94,12 @@ impl OutputStage {
         let tfall = p.or("TFALL", trise)?;
         let tripdt = p.get("TRIPDT")?;
         let initial = p.get("IC")?.map(|ic| ic > 0.5);
+        let isrc = p.get("ISRC")?;
+        let isink = p.get("ISINK")?;
+        require(
+            (isrc.is_none() && isink.is_none()) || (trise == 0.0 && tfall == 0.0),
+            || format!("{device} takes a current Isrc or Isink or a slewing Trise/Tfall, not both"),
+        )?;
         require(vhigh != vlow, || {
             format!("{device} needs Vhigh apart from Vlow (Vhigh={vhigh}, Vlow={vlow})")
         })?;
@@ -145,7 +155,34 @@ impl OutputStage {
             tfall,
             tripdt,
             initial,
+            isrc,
+            isink,
         })
+    }
+
+    /// The current an output `voltage` above the common draws from its node
+    /// while driven `high` from `source`, and that current's slope.
+    ///
+    /// `Isrc` and `Isink` drive the state's current into the node beside its
+    /// resistance to the common, and either one clamps the output through
+    /// 1 ohm once it is past the state's own level (LTspice 26.1.1).
+    #[doc(hidden)]
+    pub fn output_current(&self, high: bool, source: Value, voltage: Value) -> (Value, Value) {
+        let conductance = 1.0 / self.resistance(high);
+        let (drive, level, past) = if high {
+            (self.isrc, self.vhigh, voltage > self.vhigh)
+        } else {
+            (self.isink, self.vlow, voltage < self.vlow)
+        };
+        let current = match drive {
+            Some(drive) => voltage * conductance - drive,
+            None => (voltage - source) * conductance,
+        };
+        if past && (self.isrc.is_some() || self.isink.is_some()) {
+            (current + voltage - level, conductance + 1.0)
+        } else {
+            (current, conductance)
+        }
     }
 
     #[doc(hidden)]
