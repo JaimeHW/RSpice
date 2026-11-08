@@ -923,7 +923,46 @@ fn the_installed_library_reads_symbols_blocks_and_cards_in_place() {
 }
 
 #[test]
+fn a_coupling_line_of_a_block_keeps_its_place_among_the_blocks_lines() {
+    let drawing = parse_asc(
+        "Version 4\n\
+         SYMBOL ind 0 0 R0\nSYMATTR InstName L1\nSYMATTR Value 10u\n\
+         SYMBOL ind 128 0 R0\nSYMATTR InstName L2\nSYMATTR Value 40u\n\
+         TEXT 0 192 Left 2 !K1 L1 L2 1\\n.tran 1\\nK2 L1 L2 1\\n.op\n",
+    )
+    .unwrap();
+    let imported = import_foreign_schematic(&drawing, "work", &Library::default());
+    let couplings = imported
+        .document
+        .components
+        .iter()
+        .filter(|component| component.kind == ComponentType::CoupledInductor)
+        .map(|component| component.pos)
+        .collect::<Vec<_>>();
+    let advance = 15;
+    assert_eq!(
+        couplings,
+        [Point::new(0, 120), Point::new(0, 120 + 2 * advance)]
+    );
+    let [note] = &imported.document.design_notes[..] else {
+        panic!("one note");
+    };
+    assert_eq!(note.text, ".tran 1\n\n.op");
+    // The note begins on its first drawn line, as if the source had put it there.
+    let plain = parse_asc("Version 4\nTEXT 0 216 Left 2 !.tran 1\\n\\n.op\n").unwrap();
+    let plain = import_foreign_schematic(&plain, "work", &Library::default());
+    assert_eq!(note.pos, plain.document.design_notes[0].pos);
+    let [directive] = &imported.directives[..] else {
+        panic!("one directive");
+    };
+    assert_eq!(directive.text, ".tran 1\n.op");
+}
+
+#[test]
 fn a_coupling_card_over_drawn_inductors_is_a_coupling_part() {
+    use crate::schematic::component_display::ComponentDisplayMode;
+    use crate::schematic::value_label::value_pieces;
+
     let drawing = parse_asc(
         "Version 4\n\
          SYMBOL ind 0 0 R0\nSYMATTR InstName L1\nSYMATTR Value 10u\n\
@@ -949,6 +988,13 @@ fn a_coupling_card_over_drawn_inductors_is_a_coupling_part() {
         ("K1", "0.98", "inductors=\"L1 L2\"")
     );
     assert_eq!(coupling.pos, Point::new(0, 125));
+    // The drawing shows the statement and no part, and so does the import.
+    assert!(coupling.source_symbol().is_some_and(|symbol| {
+        symbol.document().body.is_empty() && symbol.document().pins.is_empty()
+    }));
+    assert_eq!(coupling.display_mode, ComponentDisplayMode::ValueOnly);
+    let pieces = value_pieces(coupling).expect("the part letters its statement");
+    assert_eq!(pieces[0].text, "K1 L1 L2 0.98");
     // A card naming a winding the drawing lacks stays directive text.
     let texts = imported
         .directives
@@ -956,6 +1002,13 @@ fn a_coupling_card_over_drawn_inductors_is_a_coupling_part() {
         .map(|directive| directive.text.as_str())
         .collect::<Vec<_>>();
     assert_eq!(texts, ["K2 L1 L9 1"]);
+    let notes = imported
+        .document
+        .design_notes
+        .iter()
+        .map(|note| note.text.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(notes, ["K2 L1 L9 1"], "no note repeats the statement");
     let capacitor = imported
         .document
         .components

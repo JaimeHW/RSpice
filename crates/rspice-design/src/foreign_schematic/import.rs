@@ -2000,7 +2000,16 @@ impl Builder<'_> {
     /// Places a mutual-inductance card (`K1 L1 L2 1`) whose windings are
     /// inductors of the drawing as a coupling part at `position`. Returns
     /// whether it did.
-    fn place_coupling(&mut self, position: Point, line: &str) -> bool {
+    /// A coupling statement over drawn inductors becomes a coupling part. The
+    /// drawing shows the statement and no part, so the part draws no glyph
+    /// and letters the statement where the drawing did, while it still
+    /// couples what the statement says.
+    fn place_coupling(
+        &mut self,
+        position: Point,
+        line: &str,
+        lettering: &ForeignLettering,
+    ) -> bool {
         let words = spice_tokens(line);
         let [name, windings @ .., coupling] = words.as_slice() else {
             return false;
@@ -2029,6 +2038,21 @@ impl Builder<'_> {
         let mut component = Component::new(id, ComponentType::CoupledInductor, position)
             .with_name_value(name, coupling.clone());
         component.params = format!("inductors=\"{}\"", inductors.join(" "));
+        component.set_source_symbol(SymbolDocument::default());
+        component.display_mode = ComponentDisplayMode::ValueOnly;
+        let (horizontal, vertical) = lettering.justification;
+        component.value_pieces = vec![ValuePiece {
+            text: line.trim().to_owned(),
+            position: LabelPosition::Placed {
+                offset: Point::default(),
+                horizontal,
+                vertical,
+                upward: false,
+                size_percent: 100,
+            },
+            size_percent: lettered_percent(lettering.size_percent, INSTANCE_VALUE_WORLD),
+            stands_for: Some(value_and_parameters(&component)),
+        }];
         self.document.components.push(component);
         true
     }
@@ -2039,25 +2063,35 @@ impl Builder<'_> {
             match text.kind {
                 ForeignTextKind::Directive => {
                     let (lettering, line) = (text.lettering, text.line);
-                    let mut couplings = 0;
-                    let text = spice_text_lines(&text.text)
-                        .lines()
-                        .filter(|line| {
-                            let at = position + Point::new(0, 20 * couplings);
-                            let placed = self.place_coupling(at, line);
-                            couplings += i32::from(placed);
-                            !placed
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n");
+                    let advance = i32::from(lettering.size_percent) * 15 / 100;
+                    // A coupling letters its own line of the block, so the
+                    // block keeps that line empty.
+                    let (mut drawn, mut read) = (Vec::new(), Vec::new());
+                    let lines = spice_text_lines(&text.text);
+                    for (index, line) in lines.lines().enumerate() {
+                        let at = position + Point::new(0, advance * index as i32);
+                        if self.place_coupling(at, line, &lettering) {
+                            drawn.push("");
+                        } else {
+                            drawn.push(line);
+                            read.push(line);
+                        }
+                    }
+                    let text = read.join("\n");
                     if !text.trim().is_empty() {
                         // The block stays on the sheet where the source drew
                         // it, whatever a project place takes from it.
                         let id = self.id();
-                        match DesignNote::new(id, position, DesignNoteKind::PlainText, text.trim())
-                        {
+                        let empty = drawn.iter().take_while(|line| line.trim().is_empty());
+                        let first = position + Point::new(0, advance * empty.count() as i32);
+                        match DesignNote::new(
+                            id,
+                            first,
+                            DesignNoteKind::PlainText,
+                            drawn.join("\n").trim(),
+                        ) {
                             Ok(note) => {
-                                let note = lettered_note(note, position, &lettering);
+                                let note = lettered_note(note, first, &lettering);
                                 self.document.design_notes.push(note);
                             }
                             Err(error) => self.notice(format!(
