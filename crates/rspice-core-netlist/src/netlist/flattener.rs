@@ -297,6 +297,37 @@ struct MetadataScope<'a> {
     parent_index: Option<usize>,
 }
 
+/// The subcircuits and model cards a flattener reads for the names a deck
+/// does not define.
+enum FlattenerLibrary {
+    /// The embedded RSpice libraries, parsed only once a deck reaches them.
+    Builtin,
+    /// A library a test parses itself.
+    #[cfg(test)]
+    Given {
+        subcircuits: HashMap<String, &'static SubcircuitDef>,
+        models: &'static [ModelDef],
+    },
+}
+
+impl FlattenerLibrary {
+    fn subcircuit(&self, name: &str) -> Option<&'static SubcircuitDef> {
+        match self {
+            Self::Builtin => super::builtin_subcircuit(name),
+            #[cfg(test)]
+            Self::Given { subcircuits, .. } => subcircuits.get(name).copied(),
+        }
+    }
+
+    fn models(&self) -> &'static [ModelDef] {
+        match self {
+            Self::Builtin => super::builtin_models(),
+            #[cfg(test)]
+            Self::Given { models, .. } => models,
+        }
+    }
+}
+
 /// Flattens a hierarchical netlist into a flat element list
 ///
 /// This is the core hierarchy processor that converts subcircuit instances
@@ -305,14 +336,13 @@ struct MetadataScope<'a> {
 /// - Parameter inheritance and override
 /// - Local options propagation
 pub struct Flattener<'a> {
-    /// Subcircuit definitions indexed by name
+    /// The deck's subcircuit definitions indexed by upper-case name
     subcircuits: HashMap<String, &'a SubcircuitDef>,
     /// Original model definitions, used to clone parameterized local models
     /// when subcircuits are expanded with instance-specific parameter scopes.
     models: &'a [ModelDef],
-    /// The model cards the embedded libraries' subcircuits hold, for a model
-    /// the deck does not define.
-    library_models: &'a [ModelDef],
+    /// Where a subcircuit or model card the deck does not define comes from.
+    library: FlattenerLibrary,
     /// Configuration options
     config: FlattenerConfig,
     /// Parameter resolver for scoped parameter lookup
@@ -400,34 +430,42 @@ impl<'a> Flattener<'a> {
         models: &'a [ModelDef],
         config: FlattenerConfig,
     ) -> Self {
-        Self::with_library(
-            subcircuits,
-            models,
-            super::builtin_subcircuits(),
-            super::builtin_models(),
-            config,
-        )
+        Self::with_library_source(subcircuits, models, FlattenerLibrary::Builtin, config)
     }
 
     /// Create a flattener that resolves the subcircuits and model cards a
     /// deck does not define from a library's.
+    #[cfg(test)]
     pub(crate) fn with_library(
         subcircuits: &'a [SubcircuitDef],
         models: &'a [ModelDef],
-        library_subcircuits: &'a [SubcircuitDef],
-        library_models: &'a [ModelDef],
+        library_subcircuits: &'static [SubcircuitDef],
+        library_models: &'static [ModelDef],
         config: FlattenerConfig,
     ) -> Self {
-        let subcircuit_map: HashMap<String, &SubcircuitDef> = library_subcircuits
-            .iter()
-            .chain(subcircuits)
-            .map(|s| (s.name.to_ascii_uppercase(), s))
-            .collect();
+        let library = FlattenerLibrary::Given {
+            subcircuits: library_subcircuits
+                .iter()
+                .map(|s| (s.name.to_ascii_uppercase(), s))
+                .collect(),
+            models: library_models,
+        };
+        Self::with_library_source(subcircuits, models, library, config)
+    }
 
+    fn with_library_source(
+        subcircuits: &'a [SubcircuitDef],
+        models: &'a [ModelDef],
+        library: FlattenerLibrary,
+        config: FlattenerConfig,
+    ) -> Self {
         Self {
-            subcircuits: subcircuit_map,
+            subcircuits: subcircuits
+                .iter()
+                .map(|s| (s.name.to_ascii_uppercase(), s))
+                .collect(),
             models,
-            library_models,
+            library,
             config,
             param_resolver: ParamResolver::new(),
             instance_metadata: Vec::new(),
@@ -1269,7 +1307,11 @@ impl<'a> Flattener<'a> {
     }
 
     fn find_subcircuit(&self, name: &str) -> Option<&'a SubcircuitDef> {
-        self.subcircuits.get(&name.to_ascii_uppercase()).copied()
+        let name = name.to_ascii_uppercase();
+        self.subcircuits
+            .get(&name)
+            .copied()
+            .or_else(|| self.library.subcircuit(&name))
     }
 
     /// Expand a subcircuit instance into its constituent elements
@@ -3363,8 +3405,13 @@ impl<'a> Flattener<'a> {
         self.scoped_models
             .iter()
             .chain(self.models)
-            .chain(self.library_models)
             .find(|model| model.name.eq_ignore_ascii_case(name))
+            .or_else(|| {
+                self.library
+                    .models()
+                    .iter()
+                    .find(|model| model.name.eq_ignore_ascii_case(name))
+            })
     }
 
     /// Instance fields see enclosing bindings first, then their model's scalar
@@ -4254,14 +4301,15 @@ impl<'a> Flattener<'a> {
         preserve_unresolved: bool,
         abort: &dyn AbortSignal,
     ) -> Result<String, ParseWithAbortError> {
-        let (models, library_models) = (self.models, self.library_models);
-        let Some((source_model_index, model_def)) = models
+        let Some((source_model_index, model_def)) = self
+            .models
             .iter()
             .enumerate()
             .find(|(_, model)| model.name.eq_ignore_ascii_case(model_name))
             .map(|(index, model)| (Some(index), model))
             .or_else(|| {
-                library_models
+                self.library
+                    .models()
                     .iter()
                     .find(|model| model.name.eq_ignore_ascii_case(model_name))
                     .map(|model| (None, model))
@@ -5868,8 +5916,11 @@ mod tests {
     /// subcircuit joins the deck, as written or bound in the instance's scope.
     #[test]
     fn a_library_subcircuit_brings_the_model_cards_it_holds() {
-        let library = Netlist::parse(
-            "library\n\
+        // A flattener reads its library for the life of the process, as it
+        // reads the embedded one.
+        let library: &'static Netlist = Box::leak(Box::new(
+            Netlist::parse(
+                "library\n\
              .subckt LIBCELL a b\n\
              D1 a b DLOCAL\n\
              .model DLOCAL D(IS=1e-15 N=2)\n\
@@ -5879,8 +5930,9 @@ mod tests {
              .model DSCALED D(IS=1e-15 N={n})\n\
              .ends\n\
              .end\n",
-        )
-        .expect("library parses");
+            )
+            .expect("library parses"),
+        ));
         let deck = Netlist::parse("deck\nV1 1 0 1\nX1 1 0 LIBCELL\nX2 1 0 LIBSCALED n=3\n.end\n")
             .expect("deck parses");
         let mut flattener = Flattener::with_library(

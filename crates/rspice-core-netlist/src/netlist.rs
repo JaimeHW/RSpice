@@ -189,15 +189,26 @@ use thiserror::Error;
 use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};
 
-/// Subcircuits supplied by the embedded RSpice foundation and functional
-/// libraries.
+/// The subcircuit the embedded RSpice foundation and functional libraries
+/// define under `name` (upper case).
 ///
 /// `builtin_lib` owns the source text and nothing else: parsing it is this
 /// layer's work, so the leaf that carries the bytes never has to reach up
-/// into the parser to interpret them. Parsed once and cached, because the
-/// flattener asks for it per netlist.
-pub(crate) fn builtin_subcircuits() -> &'static [SubcircuitDef] {
-    &builtin_libraries().0
+/// into the parser to interpret them. Parsed once, on the first deck that
+/// names a subcircuit it does not define itself.
+pub(crate) fn builtin_subcircuit(name: &str) -> Option<&'static SubcircuitDef> {
+    static BY_NAME: std::sync::OnceLock<std::collections::HashMap<String, &'static SubcircuitDef>> =
+        std::sync::OnceLock::new();
+    BY_NAME
+        .get_or_init(|| {
+            builtin_libraries()
+                .0
+                .iter()
+                .map(|subcircuit| (subcircuit.name.to_ascii_uppercase(), subcircuit))
+                .collect()
+        })
+        .get(name)
+        .copied()
 }
 
 /// The model cards the embedded libraries' subcircuits hold, each named by

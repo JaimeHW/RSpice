@@ -7,7 +7,7 @@
 //! One source file is shared by library browsing, source mapping and engine
 //! fallback resolution, so those consumers cannot drift onto different cards.
 //! This module hands out the bytes and nothing more: interpreting them is the
-//! parser's job, and `netlist::builtin_subcircuits` does it there.
+//! parser's job, and `netlist::builtin_subcircuit` does it there.
 
 /// Generic RSpice-authored starter models and the foundation op-amp subcircuit.
 #[doc(hidden)]
