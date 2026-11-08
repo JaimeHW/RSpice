@@ -7,7 +7,7 @@
 use super::flattener::{extract_parenthesized, is_ident_continue, is_ident_start};
 use super::{Element, ElementKind, XspiceDigitalNode, XspicePort};
 use crate::Value;
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 /// Xyce 7.10 `DeviceOptions::zeroResistanceTol` default.
 pub const XYCE_DEFAULT_ZERO_RESISTANCE_TOL: Value = 1.0e-100;

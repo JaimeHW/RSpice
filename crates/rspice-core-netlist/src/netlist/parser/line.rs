@@ -981,10 +981,7 @@ pub(super) fn parse_line(
 
 fn capture_subckt_body_scope(line: &str, def: &mut SubcircuitDef, params: &ParamContext) {
     // Only a parameter card, whose first field is a dot command, is read.
-    if !line
-        .trim_start_matches([',', ' ', '\t'])
-        .starts_with('.')
-    {
+    if !line.trim_start_matches([',', ' ', '\t']).starts_with('.') {
         return;
     }
     let fields = split_spice_fields(line);

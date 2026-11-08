@@ -656,38 +656,37 @@ impl<'a> ResistorEvaluation<'a> {
         // A card with no model reads a context only to evaluate a value
         // expression, and with no retained parameter expression to materialize
         // building one draws no statistical sample: most cards need none.
-        let (eval_ctx, current_temp_c, tnom_c, resistor_level) = if model_def.is_none()
-            && !netlist.params.has_retained_parameter_expressions()
-        {
-            (
-                std::cell::OnceCell::new(),
-                passive_instance_temperature_celsius(instance_params, temperature_kelvin),
-                netlist.options.tnom.unwrap_or(27.0),
-                None,
-            )
-        } else {
-            let (eval_ctx, current_temp_c, tnom_c) = resolve_passive_eval_context(
-                netlist,
-                model_def,
-                instance_params,
-                temperature_kelvin,
-            )?;
-            let resistor_level = match (model_def, model_name) {
-                (Some(model_def), Some(model_name)) => Some(resolve_resistor_model_level(
-                    element_name,
-                    model_name,
+        let (eval_ctx, current_temp_c, tnom_c, resistor_level) =
+            if model_def.is_none() && !netlist.params.has_retained_parameter_expressions() {
+                (
+                    std::cell::OnceCell::new(),
+                    passive_instance_temperature_celsius(instance_params, temperature_kelvin),
+                    netlist.options.tnom.unwrap_or(27.0),
+                    None,
+                )
+            } else {
+                let (eval_ctx, current_temp_c, tnom_c) = resolve_passive_eval_context(
+                    netlist,
                     model_def,
-                    &eval_ctx,
-                )?),
-                _ => None,
+                    instance_params,
+                    temperature_kelvin,
+                )?;
+                let resistor_level = match (model_def, model_name) {
+                    (Some(model_def), Some(model_name)) => Some(resolve_resistor_model_level(
+                        element_name,
+                        model_name,
+                        model_def,
+                        &eval_ctx,
+                    )?),
+                    _ => None,
+                };
+                (
+                    std::cell::OnceCell::from(eval_ctx),
+                    current_temp_c,
+                    tnom_c,
+                    resistor_level,
+                )
             };
-            (
-                std::cell::OnceCell::from(eval_ctx),
-                current_temp_c,
-                tnom_c,
-                resistor_level,
-            )
-        };
 
         Ok(Self {
             netlist,

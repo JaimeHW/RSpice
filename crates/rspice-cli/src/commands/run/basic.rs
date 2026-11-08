@@ -15,8 +15,8 @@ use super::shared::map_hdf5_output_error;
 use crate::cli::{CliError, OutputFormat, map_atomic_output_error};
 use crate::commands::publish;
 use crate::commands::run_signals::{
-    SignalKind, checked_dc_operating_point_signals, dc_export_signals,
-    project_dc_operating_point, transient_export_signals,
+    SignalKind, checked_dc_operating_point_signals, dc_export_signals, project_dc_operating_point,
+    transient_export_signals,
 };
 use crate::hdf5::{Hdf5SimulationData, Hdf5WaveformSection, write_hdf5, write_hdf5_to_writer};
 use std::path::Path;
