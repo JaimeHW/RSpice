@@ -19,7 +19,9 @@ mod verifier;
 
 pub use image::StoredNativeImage;
 pub(crate) use image::X64Image;
-use image::{X64ImageCalls, X64ImageLayout, X64RuntimeFunction};
+#[cfg(all(windows, target_arch = "x86_64"))]
+use image::X64RuntimeFunction;
+use image::{X64ImageCalls, X64ImageLayout};
 
 pub(super) use super::ssa as ir;
 
