@@ -2537,3 +2537,14 @@ fn an_igbt_switches_an_inductor_as_ltspice_does() {
         assert_close(&format!("I(L1) at {time}"), *current, expected, 0.02);
     }
 }
+
+// QSPICE's LEVEL=2010 is a composite SiC cascode with no published equations.
+#[test]
+fn a_level_2010_mosfet_is_refused_by_name() {
+    let netlist =
+        parse("cascode\nVd d 0 10\nM1 d d 0 0 Q1\n.model Q1 NMOS level=2010\n.op\n.end\n");
+    let refusal = Engine::default()
+        .run_dc_op(&netlist)
+        .expect_err("no native LEVEL=2010");
+    assert!(refusal.to_string().contains("LEVEL=2010"), "{refusal}");
+}
