@@ -428,6 +428,9 @@ impl Engine {
             crate::engine::CapabilityAnalysis::Sens,
             abort,
         )?;
+        if frequencies.is_none() {
+            prepared.circuit.keep_gshunt_in_dc_linearization();
+        }
         let circuit = &prepared.circuit;
         let size = circuit.matrix_size();
         let points = frequencies.unwrap_or(&[0.0]);

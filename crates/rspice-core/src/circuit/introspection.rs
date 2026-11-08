@@ -269,6 +269,13 @@ impl CircuitData {
         self.global_shunt_conductance
     }
 
+    /// An analysis that linearizes the DC solution itself keeps
+    /// `.OPTIONS GSHUNT` in its small-signal matrix, so its answer is the
+    /// slope of the operating point it was taken at.
+    pub(crate) fn keep_gshunt_in_dc_linearization(&mut self) {
+        self.large_signal_shunt_conductance = 0.0;
+    }
+
     /// Whether this zero-based matrix row owns an authored RSHUNT resistor.
     pub(crate) fn has_global_shunt_at(&self, index: usize) -> bool {
         self.global_shunt_conductance != 0.0

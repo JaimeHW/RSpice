@@ -597,8 +597,9 @@ pub struct CircuitData {
     /// kept separate from solver-controlled GMIN/conditioning diagonals.
     pub(crate) global_shunt_conductance: Value,
     /// The part of [`Self::global_shunt_conductance`] that `.OPTIONS GSHUNT`
-    /// adds: present in the operating point and the transient, absent from
-    /// the small-signal analyses, and noiseless.
+    /// adds: present in every DC-domain solve (operating point, DC sweep,
+    /// `.TF`, DC `.SENS`) and the transient, absent from the frequency-domain
+    /// analyses, and noiseless.
     pub(crate) large_signal_shunt_conductance: Value,
     /// Private meter nodes map to their authored external terminal. They add no
     /// physical shunts and must not become the implicit ground reference.

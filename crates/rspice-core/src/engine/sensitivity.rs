@@ -453,7 +453,7 @@ impl Engine {
 
         // The adjoint form reads the Jacobian at the held equilibrium (S9).
         let super::small_signal_bias::SmallSignalBias {
-            circuit,
+            mut circuit,
             matrix,
             bias: dc_solution,
         } = engine.prepare_small_signal_bias(
@@ -464,6 +464,7 @@ impl Engine {
             super::small_signal_bias::BiasSource::OperatingPoint,
             abort,
         )?;
+        circuit.keep_gshunt_in_dc_linearization();
         progress.report(0.6)?;
         let derivatives = progress.stage(0.6, 0.95);
         let abort: &dyn AbortSignal = &derivatives;

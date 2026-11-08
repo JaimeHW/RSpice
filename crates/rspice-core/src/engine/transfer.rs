@@ -129,6 +129,7 @@ impl Engine {
             abort,
         )?;
         engine.ensure_result_shape(1, 3)?;
+        circuit.keep_gshunt_in_dc_linearization();
         let mut workspace = ComplexMatrix::from_real_structure(&matrix);
         let solve = |circuit: &mut CircuitData, final_step| {
             linearization.prepare_frequency(circuit, &mut workspace, 0.0, final_step, abort)?;

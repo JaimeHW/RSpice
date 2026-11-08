@@ -1286,3 +1286,92 @@ c1 a 0 1n
         .expect("node a");
     assert_close("Re V(a) ac", point.voltages[index].re, 0.999961, 1e-6);
 }
+
+// 1 V through R1 = 1k into R2 = 1k with GSHUNT=1m on both nodes. The shunt
+// loads every DC-domain answer: QSPICE's .dc gives V(a) = 0.333 and LTspice's
+// .tf gives gain 1/3, Zin 600, Zout 333.33. DC .sens is the slope of that
+// operating point. QSPICE's .ac leaves the shunt out, so the frequency domain
+// sees R1 || R2 alone: the pole is at (G1 + G2) / C = 2e6 rad/s.
+#[test]
+fn gshunt_is_in_every_dc_domain_analysis_and_no_frequency_domain_one() {
+    use rspice_core::analysis::AcSensitivityOutput;
+    let netlist = parse(
+        "* gshunt divider
+.option gshunt=1m
+v1 in 0 dc 1 ac 1
+r1 in a 1k
+r2 a 0 1k
+c1 a 0 1n
+.op
+.end
+",
+    );
+    let engine = Engine::default();
+    assert_close("V(a) op", op_voltage(&netlist, "a"), 1.0 / 3.0, 1e-9);
+
+    let sweep = engine
+        .run_dc_sweep(&netlist, "v1", 1.0, 1.0, 1.0)
+        .expect("DC sweep solves");
+    let swept = sweep[0].1.try_voltage_named("a").expect("V(a)");
+    assert_close("V(a) dc", swept, 1.0 / 3.0, 1e-9);
+
+    let transfer = engine
+        .run_transfer_function(&netlist, "a", None, false, "v1")
+        .expect(".tf solves");
+    assert_close("tf gain", transfer.gain, 1.0 / 3.0, 1e-9);
+    assert_close("tf zin", transfer.input_impedance, 600.0, 1e-6);
+    assert_close("tf zout", transfer.output_impedance, 1000.0 / 3.0, 1e-6);
+
+    let output = engine
+        .build_circuit(&netlist)
+        .expect("circuit builds")
+        .get_node_by_name("a")
+        .expect("node a");
+    let sens = engine
+        .run_sensitivity_dc_complete(
+            &netlist,
+            AcSensitivityOutput::Voltage {
+                positive: output,
+                negative: None,
+            },
+            &["R1".to_owned(), "R2".to_owned(), "V1".to_owned()],
+        )
+        .expect(".sens solves");
+    // dV(a)/dR1 = -(G2 + g) V1 / (1 + R1 (G2 + g))^2, dV(a)/dR2 = R1 G2^2 V1 / (same).
+    assert_close(
+        "sens r1",
+        sens.get("R1").expect("R1").absolute,
+        -2.0e-3 / 9.0,
+        1e-12,
+    );
+    assert_close(
+        "sens r2",
+        sens.get("R2").expect("R2").absolute,
+        1.0e-3 / 9.0,
+        1e-12,
+    );
+    assert_close(
+        "sens v1",
+        sens.get("V1").expect("V1").absolute,
+        1.0 / 3.0,
+        1e-9,
+    );
+
+    let point = engine
+        .run_ac(&netlist, &[1.0])
+        .expect("AC solves")
+        .pop()
+        .expect("one AC point");
+    let index = point
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("a"))
+        .expect("node a");
+    assert_close("Re V(a) ac", point.voltages[index].re, 0.5, 1e-6);
+
+    let roots = engine
+        .run_pz(&netlist, output, output)
+        .expect("pole-zero analysis solves");
+    assert_eq!(roots.poles.len(), 1, "poles={:?}", roots.poles);
+    assert_close("pz pole", roots.poles[0].re, -2.0e6, 1.0);
+}
