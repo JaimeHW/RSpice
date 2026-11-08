@@ -2033,6 +2033,129 @@ R2 b 0 1k
     );
 }
 
+/// One `.step` run per entry: node voltage `node` from each run's operating
+/// point, with each run materialized through the sweep plan.
+fn step_op_voltages(netlist: &Netlist, node: &str) -> Vec<f64> {
+    let engine = Engine::default();
+    let plan = step_plan(&engine, netlist);
+    (0..plan.total_runs())
+        .map(|run| {
+            let materialized = engine.materialize_step_run(&plan, run).expect("run materializes");
+            op_voltage(materialized.netlist(), node)
+        })
+        .collect()
+}
+
+fn step_plan<'a>(engine: &Engine, netlist: &'a Netlist) -> rspice_core::engine::StepPlan<'a> {
+    let steps = netlist
+        .analyses
+        .iter()
+        .filter_map(|analysis| match analysis {
+            rspice_core::netlist::AnalysisCommand::Step(step) => Some(step.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    engine
+        .plan_step_commands(
+            netlist,
+            &steps,
+            rspice_core::engine::StepPlanLimits::from_resource_limits(
+                engine.config().resource_limits,
+            ),
+        )
+        .expect("the sweep plans")
+}
+
+// QSPICE and LTspice 26.1.1 both draw a random function afresh at every `.step`
+// point: QSPICE 1.532, 0.8326, 1.156, 1.240 mA and LTspice 1.574, 0.749, 0.681,
+// 1.237 mA for one resistor over four runs. RSpice's stream is its own.
+#[test]
+fn a_random_function_draws_again_at_every_step_point() {
+    let distinct = |values: &[f64]| {
+        values
+            .iter()
+            .enumerate()
+            .all(|(i, a)| values[..i].iter().all(|b| (a - b).abs() > 1e-9))
+    };
+    for deck in [
+        // A `.param` drawn while the deck is read.
+        "* param draw\n.step param run 0 3 1\n.param r=mc(1k,0.5)\nI1 0 a 1m\nR1 a 0 {r}\n.op\n.end\n",
+        // An element's value, drawn when the circuit is built.
+        "* element draw\n.step param run 0 3 1\nI1 0 a 1m\nR1 a 0 {mc(1k,0.5)}\n.op\n.end\n",
+        // A temperature sweep redraws too.
+        "* temp sweep\n.step temp list 25 50 75 100\n.param r=mc(1k,0.5)\nI1 0 a 1m\nR1 a 0 {r}\n.op\n.end\n",
+        // A sweep of a device redraws the deck's values as well.
+        "* device sweep\n.step V9 list 1 2 3 4\n.param r=mc(1k,0.5)\nI1 0 a 1m\nR1 a 0 {r}\nV9 c 0 1\nR9 c 0 1k\n.op\n.end\n",
+    ] {
+        let netlist = parse(deck);
+        let first = step_op_voltages(&netlist, "a");
+        let again = step_op_voltages(&netlist, "a");
+        assert_eq!(first, again, "a deck reproduces its draws run to run:\n{deck}");
+        assert!(first.iter().all(|v| (0.5..=1.5).contains(v)), "{first:?}\n{deck}");
+        assert!(distinct(&first), "every point draws again: {first:?}\n{deck}");
+    }
+}
+
+// The first run of a sweep is the deck's own sample, so a one-point sweep agrees
+// with the deck run alone.
+#[test]
+fn the_first_step_point_is_the_decks_own_draw() {
+    let body = ".param r=mc(1k,0.5)\nI1 0 a 1m\nR1 a 0 {r}\nI2 0 b 1m\nR2 b 0 {mc(1k,0.5)}\n.op\n.end\n";
+    let alone = parse(&format!("* alone\n{body}"));
+    let swept = parse(&format!("* one point\n.step param run list 7\n{body}"));
+    let runs = step_op_voltages(&swept, "a");
+    assert_eq!(runs.len(), 1);
+    assert_close("first run", runs[0], op_voltage(&alone, "a"), 1e-12);
+}
+
+// A `.param` draw and an element draw are different samples: rewinding the
+// stream at a build must not hand the first element the draw the deck's own
+// `.param` already took. QSPICE and LTspice 26.1.1 draw them independently.
+#[test]
+fn an_element_draw_is_not_the_parameter_draw_before_it() {
+    let netlist = parse(
+        "* draws\n.param r=mc(1k,0.5)\nI1 0 a 1m\nR1 a 0 {r}\nI2 0 b 1m\nR2 b 0 {mc(1k,0.5)}\n\
+         I3 0 c 1m\nR3 c 0 {mc(1k,0.5)}\n.op\n.end\n",
+    );
+    let (a, b, c) = (op_voltage(&netlist, "a"), op_voltage(&netlist, "b"), op_voltage(&netlist, "c"));
+    assert!((a - b).abs() > 1e-9, "R1 and R2 share a draw: {a} {b}");
+    assert!((b - c).abs() > 1e-9, "R2 and R3 share a draw: {b} {c}");
+    // Rebuilding draws the same values again.
+    assert_close("rebuild", op_voltage(&netlist, "a"), a, 1e-15);
+    assert_close("rebuild", op_voltage(&netlist, "b"), b, 1e-15);
+}
+
+// The replay sensitivity runs on one stepped circuit perturbs a parameter and
+// must see that run's draws unchanged, or the difference it takes would hold
+// the random change of another sample.
+#[test]
+fn a_parameter_replay_of_a_step_run_keeps_that_runs_draws() {
+    let netlist = parse(
+        "* draws\n.step param run 0 3 1\n.param p=1k draw=mc(1k,0.5)\nI1 0 a 1m\nR1 a 0 {draw}\n\
+         I2 0 b 1m\nR2 b 0 {mc(1k,0.5)}\nI3 0 c 1m\nR3 c 0 {p}\n.op\n.end\n",
+    );
+    let engine = Engine::default();
+    let plan = step_plan(&engine, &netlist);
+    let nominal: Vec<_> = (0..plan.total_runs())
+        .map(|run| engine.materialize_step_run(&plan, run).unwrap())
+        .collect();
+    let mut seen = Vec::new();
+    for run in &nominal {
+        let (a, b) = (op_voltage(run.netlist(), "a"), op_voltage(run.netlist(), "b"));
+        seen.push((a, b));
+        let (replayed, _) =
+            Engine::create_perturbed_netlist_multi(run.netlist(), &[("P".to_owned(), 2000.0)])
+                .expect("replay");
+        assert_eq!(op_voltage(&replayed, "a"), a, "the .param draw changed on replay");
+        assert_eq!(op_voltage(&replayed, "b"), b, "the element draw changed on replay");
+        assert_close("perturbed parameter", op_voltage(&replayed, "c"), 2.0, 1e-9);
+    }
+    assert!(
+        seen.windows(2).all(|pair| pair[0] != pair[1]),
+        "the runs drew different samples: {seen:?}"
+    );
+}
+
 // QSPICE and LTspice 26.1.1 sweep a `.ac list` or `.noise ... list` in ascending
 // order; QSPICE keeps a repeated point (LTspice drops it). Values are QSPICE's.
 #[test]

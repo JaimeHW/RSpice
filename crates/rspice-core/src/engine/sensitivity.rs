@@ -616,6 +616,26 @@ impl Engine {
         resource_limits: crate::resource::ResourceLimits,
         abort: &dyn AbortSignal,
     ) -> Result<(Netlist, usize), SimulationError> {
+        Self::replay_parameter_overrides_with_seed(
+            netlist,
+            overrides,
+            direction,
+            None,
+            resource_limits,
+            abort,
+        )
+    }
+
+    /// Replay the deck with overrides, drawing from `statistical_seed` when
+    /// given and from the netlist's own stream otherwise.
+    pub(super) fn replay_parameter_overrides_with_seed(
+        netlist: &Netlist,
+        overrides: &[(String, Value)],
+        direction: Option<&str>,
+        statistical_seed: Option<u64>,
+        resource_limits: crate::resource::ResourceLimits,
+        abort: &dyn AbortSignal,
+    ) -> Result<(Netlist, usize), SimulationError> {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
@@ -649,6 +669,9 @@ impl Engine {
         }
 
         let mut perturbed = netlist.clone();
+        if let Some(seed) = statistical_seed {
+            perturbed.params.set_random_seed(seed);
+        }
         let mut retained_parameters = netlist.ast_overlay().parameters.clone();
         retained_parameters.extend(param_overrides.iter().cloned());
         let effective_overrides: Vec<_> = retained_parameters
@@ -697,7 +720,7 @@ impl Engine {
         let parse_options = crate::netlist::NetlistParseOptions {
             retain_control_script: netlist.control_script.is_some(),
             statistical_mode: netlist.params.statistical_mode(),
-            statistical_seed: Some(netlist.params.random().seed()),
+            statistical_seed: Some(statistical_seed.unwrap_or(netlist.params.random().seed())),
             expression_dialect: netlist.params.expression_dialect(),
             spice_dialect: Some(netlist.parse_dialect()),
             parameter_redefinition_policy: netlist.params.parameter_redefinition_policy(),

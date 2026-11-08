@@ -295,13 +295,22 @@ fn collect_behavioral_data_inputs(
             return Err(error_context(message));
         }
     };
-    let expression =
-        crate::expr::parse_expression_strict_with_abort(&prepared, abort).map_err(|error| {
-            match error {
-                ParseExpressionWithAbortError::Aborted => SimulationError::Aborted,
-                ParseExpressionWithAbortError::Parse(error) => error_context(error.to_string()),
-            }
-        })?;
+    let expression = match crate::expr::parse_expression_strict_with_abort(&prepared, abort) {
+        Ok(expression) => expression,
+        Err(ParseExpressionWithAbortError::Aborted) => return Err(SimulationError::Aborted),
+        // A passive's statistical draw is outside the behavioral grammar too.
+        Err(ParseExpressionWithAbortError::Parse(_))
+            if matches!(
+                element.kind,
+                ElementKind::Resistor { .. } | ElementKind::Capacitor { .. }
+            ) =>
+        {
+            return Ok(());
+        }
+        Err(ParseExpressionWithAbortError::Parse(error)) => {
+            return Err(error_context(error.to_string()));
+        }
+    };
     let mut pending = vec![&expression];
     while let Some(node) = pending.pop() {
         check_build_abort(abort)?;

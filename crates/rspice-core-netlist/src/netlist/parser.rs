@@ -1106,6 +1106,7 @@ fn parse_netlist_impl(
     // reported once against the source that defined it.
     let shadowed = shadowed_instance_master_diagnostics(&netlist, input);
     netlist.diagnostics.extend(shadowed);
+    netlist.params.mark_parse_statistical_draws();
     Ok((netlist, temperatures))
 }
 

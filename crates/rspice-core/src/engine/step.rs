@@ -246,7 +246,50 @@ impl MaterializedStepRun {
     }
 }
 
+/// The statistical seed of one `.step` run: the deck's seed and the run's
+/// index decide it, so every run draws its own sample and replaying a run
+/// redraws that same sample. The first run keeps the deck's own stream, so a
+/// sweep of one point agrees with the deck run alone.
+fn step_run_seed(deck_seed: u64, run_index: usize) -> u64 {
+    if run_index == 0 {
+        deck_seed
+    } else {
+        super::monte_carlo_deck_trial_seed(deck_seed, run_index)
+    }
+}
+
 impl Engine {
+    /// The netlist one `.step` run starts from: the deck with `overrides`
+    /// applied, its statistical values drawn for this run. Values drawn while
+    /// the deck was read come back through a replay; those drawn for elements
+    /// follow the stream at the build.
+    fn step_run_netlist(
+        netlist: &Netlist,
+        overrides: &[(String, Value)],
+        run_index: usize,
+        resource_limits: crate::resource::ResourceLimits,
+        abort: &dyn AbortSignal,
+    ) -> Result<(Netlist, usize), SimulationError> {
+        let seed = step_run_seed(netlist.params.random().seed(), run_index);
+        if overrides.is_empty()
+            && (run_index == 0 || netlist.params.parse_statistical_draws() == 0)
+        {
+            let mut stepped = netlist.clone();
+            if run_index != 0 {
+                stepped.params.set_random_seed(seed);
+            }
+            return Ok((stepped, 0));
+        }
+        Self::replay_parameter_overrides_with_seed(
+            netlist,
+            overrides,
+            None,
+            Some(seed),
+            resource_limits,
+            abort,
+        )
+    }
+
     fn push_step_result(
         &self,
         results: &mut Vec<(Value, SimulationResult)>,
@@ -473,6 +516,7 @@ impl Engine {
             &plan.steps,
             &plan.dimensions,
             &bindings,
+            run_index,
             abort,
         )?;
         Ok(MaterializedStepRun {
@@ -488,6 +532,7 @@ impl Engine {
         steps: &[StepCommand],
         dimensions: &[StepPlanDimension],
         bindings: &[StepPlanBindingValue],
+        run_index: usize,
         abort: &dyn AbortSignal,
     ) -> Result<(Vec<Value>, Netlist), SimulationError> {
         if steps.len() != bindings.len() || steps.len() != dimensions.len() {
@@ -550,17 +595,13 @@ impl Engine {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
-        let mut netlist = if reparse_overrides.is_empty() {
-            base_netlist.clone()
-        } else {
-            Self::create_perturbed_netlist_multi_with_limits_and_abort(
-                base_netlist,
-                &reparse_overrides,
-                self.config.resource_limits,
-                abort,
-            )?
-            .0
-        };
+        let (mut netlist, _) = Self::step_run_netlist(
+            base_netlist,
+            &reparse_overrides,
+            run_index,
+            self.config.resource_limits,
+            abort,
+        )?;
         if let Some((temp_c, vt)) = temperature {
             apply_temperature_scalars(&mut netlist, temp_c, vt);
         }
@@ -868,14 +909,14 @@ impl Engine {
         let mut retained_values = 0usize;
         let mut any_binding = false;
 
-        for &value in values {
+        for (run_index, &value) in values.iter().enumerate() {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
-            let (modified_netlist, rebuilt) = Self::create_perturbed_netlist_with_limits_and_abort(
+            let (modified_netlist, rebuilt) = Self::step_run_netlist(
                 netlist,
-                param_name,
-                value,
+                &[(param_name.to_ascii_uppercase(), value)],
+                run_index,
                 self.config.resource_limits,
                 abort,
             )?;
@@ -986,12 +1027,12 @@ impl Engine {
 
         let mut stepped = Vec::with_capacity(values.len());
         let mut any_binding = false;
-        for &value in values {
+        for (run_index, &value) in values.iter().enumerate() {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
             let (netlist, bindings) =
-                self.step_netlist_for_command_value(netlist, step_cmd, value, abort)?;
+                self.step_netlist_for_command_value(netlist, step_cmd, value, run_index, abort)?;
             any_binding |= bindings > 0;
             stepped.push((value, netlist));
         }
@@ -1030,9 +1071,10 @@ impl Engine {
                 .cloned()
                 .zip(row.iter().copied())
                 .collect::<Vec<_>>();
-            let (netlist, _) = Self::create_perturbed_netlist_multi_with_limits_and_abort(
+            let (netlist, _) = Self::step_run_netlist(
                 netlist,
                 &overrides,
+                row_index,
                 self.config.resource_limits,
                 abort,
             )?;
@@ -1131,29 +1173,30 @@ impl Engine {
         netlist: &Netlist,
         step_cmd: &StepCommand,
         value: Value,
+        run_index: usize,
         abort: &dyn AbortSignal,
     ) -> Result<(Netlist, usize), SimulationError> {
         match step_cmd.target {
-            StepTarget::Param => Self::create_perturbed_netlist_with_limits_and_abort(
+            StepTarget::Param => Self::step_run_netlist(
                 netlist,
-                &step_cmd.name,
-                value,
+                &[(step_cmd.name.to_ascii_uppercase(), value)],
+                run_index,
                 self.config.resource_limits,
                 abort,
             ),
-            StepTarget::Device => {
-                let mut stepped = netlist.clone();
+            StepTarget::Device | StepTarget::Model => {
+                let (mut stepped, _) = Self::step_run_netlist(
+                    netlist,
+                    &[],
+                    run_index,
+                    self.config.resource_limits,
+                    abort,
+                )?;
                 Self::apply_ast_step_value_in_place(&mut stepped, step_cmd, value)?;
                 Self::mark_ast_stepped_netlist(&mut stepped);
                 Ok((stepped, 1))
             }
-            StepTarget::Model => {
-                let mut stepped = netlist.clone();
-                Self::apply_ast_step_value_in_place(&mut stepped, step_cmd, value)?;
-                Self::mark_ast_stepped_netlist(&mut stepped);
-                Ok((stepped, 1))
-            }
-            StepTarget::Temp => self.step_temperature_netlist(netlist, value, abort),
+            StepTarget::Temp => self.step_temperature_run_netlist(netlist, value, run_index, abort),
         }
     }
 
@@ -1225,6 +1268,16 @@ impl Engine {
         value: Value,
         abort: &dyn AbortSignal,
     ) -> Result<(Netlist, usize), SimulationError> {
+        self.step_temperature_run_netlist(netlist, value, 0, abort)
+    }
+
+    fn step_temperature_run_netlist(
+        &self,
+        netlist: &Netlist,
+        value: Value,
+        run_index: usize,
+        abort: &dyn AbortSignal,
+    ) -> Result<(Netlist, usize), SimulationError> {
         if abort.is_aborted() {
             return Err(SimulationError::from_abort(abort));
         }
@@ -1239,9 +1292,10 @@ impl Engine {
             ("TEMPER".to_string(), value),
             ("VT".to_string(), vt),
         ];
-        let (mut stepped, bindings) = Self::create_perturbed_netlist_multi_with_limits_and_abort(
+        let (mut stepped, bindings) = Self::step_run_netlist(
             netlist,
             &overrides,
+            run_index,
             self.config.resource_limits,
             abort,
         )?;
@@ -1262,11 +1316,12 @@ impl Engine {
 
         let mut results = Vec::with_capacity(values.len());
         let mut retained_values = 0usize;
-        for &value in values {
+        for (run_index, &value) in values.iter().enumerate() {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
-            let (stepped, _) = self.step_temperature_netlist(netlist, value, abort)?;
+            let (stepped, _) =
+                self.step_temperature_run_netlist(netlist, value, run_index, abort)?;
 
             match self.run_dc_op_with_abort(&stepped, abort) {
                 Ok(result) => {
@@ -1298,16 +1353,24 @@ impl Engine {
         if device_name.contains(':') {
             let mut results = Vec::with_capacity(values.len());
             let mut retained_values = 0usize;
-            for &value in values {
+            for (run_index, &value) in values.iter().enumerate() {
                 if abort.is_aborted() {
                     return Err(SimulationError::Aborted);
                 }
-                let stepped = Self::hierarchical_device_step_netlist(
+                let (mut stepped, _) = Self::step_run_netlist(
                     netlist,
+                    &[],
+                    run_index,
+                    self.config.resource_limits,
+                    abort,
+                )?;
+                Self::apply_hierarchical_device_step_value(
+                    &mut stepped,
                     device_name,
                     param_name,
                     value,
                 )?;
+                Self::mark_ast_stepped_netlist(&mut stepped);
                 match self.run_dc_op_with_abort(&stepped, abort) {
                     Ok(result) => {
                         self.push_step_result(&mut results, &mut retained_values, value, result)?
@@ -1331,11 +1394,17 @@ impl Engine {
 
         let mut results = Vec::with_capacity(values.len());
         let mut retained_values = 0usize;
-        for &value in values {
+        for (run_index, &value) in values.iter().enumerate() {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
-            let mut stepped = netlist.clone();
+            let (mut stepped, _) = Self::step_run_netlist(
+                netlist,
+                &[],
+                run_index,
+                self.config.resource_limits,
+                abort,
+            )?;
             let target = format!(
                 "{}{}",
                 device_name,
@@ -1396,11 +1465,17 @@ impl Engine {
 
         let mut results = Vec::with_capacity(values.len());
         let mut retained_values = 0usize;
-        for &value in values {
+        for (run_index, &value) in values.iter().enumerate() {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
-            let mut stepped = netlist.clone();
+            let (mut stepped, _) = Self::step_run_netlist(
+                netlist,
+                &[],
+                run_index,
+                self.config.resource_limits,
+                abort,
+            )?;
             let model = Self::find_step_model_mut(&mut stepped, model_name)?;
             Self::apply_model_step_value(model, param_name, value);
             Self::mark_ast_stepped_netlist(&mut stepped);
@@ -1445,18 +1520,6 @@ impl Engine {
             ".STEP DEVICE target '{}' not found in netlist",
             target_name
         )))
-    }
-
-    fn hierarchical_device_step_netlist(
-        netlist: &Netlist,
-        target_name: &str,
-        param_name: Option<&str>,
-        value: Value,
-    ) -> Result<Netlist, SimulationError> {
-        let mut stepped = netlist.clone();
-        Self::apply_hierarchical_device_step_value(&mut stepped, target_name, param_name, value)?;
-        Self::mark_ast_stepped_netlist(&mut stepped);
-        Ok(stepped)
     }
 
     fn apply_hierarchical_device_step_value(

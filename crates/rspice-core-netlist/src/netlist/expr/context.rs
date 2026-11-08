@@ -76,7 +76,7 @@ impl RandomState {
         self.seed
     }
 
-    /// Rewind the stream to draw zero, keeping the seed.
+    /// Rewind the stream to `position`, keeping the seed.
     ///
     /// Elaborating a netlist consumes draws, so a second elaboration of the
     /// *same* netlist would otherwise continue the sequence and produce a
@@ -88,8 +88,8 @@ impl RandomState {
     ///
     /// Takes `&self` because the counter is shared: every context derived from
     /// the netlist has to see the rewind.
-    pub(crate) fn restart(&self) {
-        self.counter.store(0, Ordering::Relaxed);
+    pub(crate) fn restart_at(&self, position: u64) {
+        self.counter.store(position, Ordering::Relaxed);
     }
 
     #[inline]
@@ -369,6 +369,9 @@ pub struct ParamContext {
     functions: HashMap<String, FunctionDef>,
     /// Stream for the statistical functions; deterministic by default.
     random: RandomState,
+    /// Draws the deck consumed while it was read. A build rewinds here, so an
+    /// element's draw never repeats a `.param`'s.
+    parse_statistical_draws: u64,
     /// Statistical-function evaluation policy for this parse/evaluation scope.
     statistical_mode: StatisticalParamMode,
     /// Parameter identities whose values are supplied by a native Spectre
@@ -919,6 +922,7 @@ impl ParamContext {
     /// reseed before deriving child contexts that should follow it.
     pub fn set_random_seed(&mut self, seed: u64) {
         self.random = RandomState::new(seed);
+        self.parse_statistical_draws = 0;
     }
 
     /// Adopt another context's random stream (shared draw counter), so this
@@ -932,10 +936,23 @@ impl ParamContext {
         &self.random
     }
 
-    /// Rewind the statistical stream to draw zero. See [`RandomState::restart`].
+    /// Rewind the statistical stream to where reading the deck left it.
     #[doc(hidden)]
     pub fn restart_statistical_stream(&self) {
-        self.random.restart();
+        self.random.restart_at(self.parse_statistical_draws);
+    }
+
+    /// Record the draws consumed so far as the deck's own: every build
+    /// restarts after them.
+    pub(crate) fn mark_parse_statistical_draws(&mut self) {
+        self.parse_statistical_draws = self.random.counter.load(Ordering::Relaxed);
+    }
+
+    /// Draws the deck consumed while it was read, as opposed to those a build
+    /// takes for its elements.
+    #[doc(hidden)]
+    pub fn parse_statistical_draws(&self) -> u64 {
+        self.parse_statistical_draws
     }
 
     /// Set the statistical-function evaluation policy.
