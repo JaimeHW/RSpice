@@ -889,7 +889,11 @@ impl SymbolDocument {
                     PinLabel::InsideFrom(reach) => pin.with_name_offset(Some(reach)),
                     PinLabel::Hidden => pin.with_name_hidden(true),
                     PinLabel::Beside { offset, reach } => SymbolPin {
-                        name_at: Some(PinNamePlacement { offset, reach }),
+                        name_at: Some(PinNamePlacement {
+                            offset,
+                            reach,
+                            upward: false,
+                        }),
                         ..pin
                     },
                 }
