@@ -188,17 +188,13 @@ pub(crate) fn builtin_header(identity: &str) -> Option<(&'static str, &'static s
 /// cannot read the file.
 ///
 /// The parser reads the file's own text, so every row's line is the file's
-/// line and every detail is quoted as the author wrote it. A file mid-edit,
-/// or one whose declarations are themselves macros, does not parse; the
-/// indexed outline stands in for it then, names without detail, rather than
-/// the outline going blank.
+/// line and every detail is quoted as the author wrote it. A line being
+/// written is read around, so the outline holds still under the keyboard. A
+/// file broken in more places than that does not parse; the indexed outline
+/// stands in for it then, names without detail, rather than the outline
+/// going blank.
 fn veriloga_outline(source: &str) -> Option<Vec<SourceOutlineRow>> {
-    let source_id = rspice_veriloga::SourceMap::new().add_source("outline", String::new());
-    let readable = without_preprocessor_syntax(source);
-    let tokens = rspice_veriloga::Lexer::new(&readable, source_id)
-        .collect_tokens()
-        .ok()?;
-    let file = rspice_veriloga::Parser::new(&tokens).parse().ok()?;
+    let file = parsed_around_one_line(&without_preprocessor_syntax(source))?;
     let text = SourceText::new(source);
     let mut rows = Vec::new();
     for item in &file.items {
@@ -209,6 +205,25 @@ fn veriloga_outline(source: &str) -> Option<Vec<SourceOutlineRow>> {
     // Groups in their fixed order; rows keep the order they were declared in.
     rows.sort_by_key(|row| row.group);
     Some(rows)
+}
+
+/// The parse of `readable`, or of `readable` with the one line that stops it
+/// blanked. The parser stops at the first token that cannot continue, which
+/// for a call left open is on a line or two after the one being written.
+fn parsed_around_one_line(readable: &str) -> Option<rspice_veriloga::SourceFile> {
+    use super::veriloga_symbols::{blank_line, line_starts, parse};
+    const BROKEN_LINE_REACH: usize = 2;
+
+    let stopped_at = match parse(readable) {
+        Ok(file) => return Some(file),
+        Err((offset, _)) => offset,
+    };
+    let stopped = line_starts(readable)
+        .partition_point(|start| *start <= stopped_at)
+        .max(1);
+    (stopped.saturating_sub(BROKEN_LINE_REACH).max(1)..=stopped)
+        .rev()
+        .find_map(|line| parse(&blank_line(readable, line)?).ok())
 }
 
 fn module_outline(module: &Module, text: &SourceText<'_>, rows: &mut Vec<SourceOutlineRow>) {

@@ -123,13 +123,34 @@ fn macros_and_directives_keep_the_parsed_outline() {
     assert_eq!(row(&outline, "gain").line, 3);
 }
 
-/// A file the parser cannot read — mid-edit, or leaning on a macro only the
-/// preprocessor expands — keeps the language index's outline of its names
-/// rather than going blank, and still lists a port once rather than again as
-/// the net its discipline declaration names.
+/// The line being written leaves the outline as it was. A call left open on
+/// one line reads on into the next, and the parser stops there.
+#[test]
+fn a_line_being_written_leaves_the_outline_whole() {
+    let whole = "module gain(p, n);\n  inout p, n;\n  electrical p, n;\n  real v;\n  \
+                 analog begin\n    v = V(p, n);\n    I(p, n) <+ v;\n  end\nendmodule\n";
+    let editing = whole.replace(
+        "    v = V(p, n);",
+        "    $strobe(\"%g\", ddt(\n    v = V(p, n);",
+    );
+    let rows = |source: &str| {
+        navigation(&bundle("gain.va", source, &[]), "gain.va")
+            .outline
+            .iter()
+            .map(|row| (row.group, row.name.clone(), row.detail.clone()))
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(rows(&editing), rows(whole));
+    assert!(rows(whole).iter().any(|(_, name, _)| name == "n"));
+}
+
+/// A file broken in two places still lists every name it declares, and lists
+/// a port once rather than again as the net its discipline declaration names.
 #[test]
 fn an_unparsed_file_keeps_its_names() {
-    let source = "module gain(p, n);\n  inout p, n;\n  electrical p, n;\n  parameter real g = `UNDEFINED;\n  analog I(p, n) <+ g * V(p, n)\nendmodule\n";
+    let source = "module gain(p, n);\n  inout p, n;\n  electrical m, k,;\n  \
+                  parameter real g = 1;\n  analog I(p, n) <+ g * V(p, n)\nendmodule\n";
     let bundle = bundle("gain.va", source, &[]);
     let outline = navigation(&bundle, "gain.va").outline;
 
@@ -141,7 +162,10 @@ fn an_unparsed_file_keeps_its_names() {
         [
             (Some(SourceOutlineGroup::Module), "gain", "", 1),
             (Some(SourceOutlineGroup::Ports), "p", "", 2),
+            (Some(SourceOutlineGroup::Ports), "n", "", 2),
             (Some(SourceOutlineGroup::Parameters), "g", "", 4),
+            (Some(SourceOutlineGroup::Nets), "m", "", 3),
+            (Some(SourceOutlineGroup::Nets), "k", "", 3),
         ]
     );
 }

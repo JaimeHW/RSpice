@@ -1370,14 +1370,29 @@ fn verilog_definitions(
         else {
             continue;
         };
-        let Some(candidate) = tokens[index + 1..]
+        let following = &tokens[index + 1..];
+        let Some(first) = following
             .iter()
             .take_while(|candidate| candidate.line <= token.line + 8)
-            .find(|candidate| !verilog_type_keyword(&candidate.name))
+            .position(|candidate| !verilog_type_keyword(&candidate.name))
         else {
             continue;
         };
-        symbols.push(symbol_from_token(logical_path, source, candidate, *kind));
+        symbols.push(symbol_from_token(
+            logical_path,
+            source,
+            &following[first],
+            *kind,
+        ));
+        // `input a, b;` and `electrical a, b;` declare every name they list.
+        if matches!(kind, SourceSymbolKind::Port | SourceSymbolKind::Net) {
+            for pair in following[first..].windows(2) {
+                if source[pair[0].byte_range.end..pair[1].byte_range.start].trim() != "," {
+                    break;
+                }
+                symbols.push(symbol_from_token(logical_path, source, &pair[1], *kind));
+            }
+        }
     }
     deduplicate_symbols(symbols)
 }

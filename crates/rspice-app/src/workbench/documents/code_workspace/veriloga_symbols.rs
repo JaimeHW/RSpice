@@ -264,7 +264,7 @@ impl VerilogASymbols {
 
 /// The byte where the parser stopped, and why, when it could not read
 /// `text`.
-fn parse(text: &str) -> Result<rspice_veriloga::SourceFile, (usize, String)> {
+pub(super) fn parse(text: &str) -> Result<rspice_veriloga::SourceFile, (usize, String)> {
     let source_id = rspice_veriloga::SourceMap::new().add_source("symbols", String::new());
     let tokens = rspice_veriloga::Lexer::new(text, source_id)
         .collect_tokens()
@@ -275,7 +275,7 @@ fn parse(text: &str) -> Result<rspice_veriloga::SourceFile, (usize, String)> {
 }
 
 /// `text` with its one-based `line` made blank, byte for byte.
-fn blank_line(text: &str, line: usize) -> Option<String> {
+pub(super) fn blank_line(text: &str, line: usize) -> Option<String> {
     let starts = line_starts(text);
     let start = *starts.get(line.checked_sub(1)?)?;
     let end = text[start..]
