@@ -427,7 +427,11 @@ use rspice_core::analysis::harmonic_balance::{
 // `IntegratedNoise::spice_band_totals`, ngspice's integrated-noise totals that
 // the control interpreter's noise plot and the CLI noise rawfile both write,
 // brings it to 5,263.
-const MAX_PUBLIC_ITEMS: usize = 5263;
+// `Engine::retain_built_topology` brings it to 5,264: a CLI run of a scalar
+// deck keeps the topology of the circuit its analyses build, so the
+// fingerprint its typed and HDF5 artifacts carry does not elaborate the deck
+// again.
+const MAX_PUBLIC_ITEMS: usize = 5264;
 
 /// The `#[doc(hidden)] pub` items of the family, counted apart from
 /// `MAX_PUBLIC_ITEMS`. A hidden item is plumbing that one crate of the engine

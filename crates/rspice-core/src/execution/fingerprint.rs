@@ -18,7 +18,7 @@ use std::collections::BTreeMap;
 
 use super::{TopologyComponent, TopologyFingerprint};
 use crate::abort_signal::{AbortSignal, NoAbort};
-use crate::engine::{Engine, SimulationError};
+use crate::engine::{BuiltTopology, Engine, SimulationError};
 use crate::netlist::{
     Element, ElementKind, FlattenerConfig, Netlist, ParseWithAbortError, XspicePort,
     flatten_netlist_with_models_config_with_abort, reduce_supernode_topology,
@@ -44,24 +44,26 @@ pub fn topology_fingerprint_with_abort(
     let engine = engine.resolved_for_netlist(netlist);
 
     // The matrix is the authoritative elaborated sparsity, including
-    // generated/private unknowns selected by model options. The deck's own
-    // build has already reported its topology warnings.
-    let circuit = crate::engine::without_repeated_topology_reports(|| {
-        engine.build_circuit_with_abort(netlist, abort)
-    })?;
-    let stamp_sparsity = if circuit.matrix_size() == 0 {
-        Vec::new()
-    } else {
-        engine.build_matrix(&circuit)?.stored_positions().collect()
+    // generated/private unknowns selected by model options. A run that kept
+    // the topology of the circuit its analyses built is named by that build;
+    // otherwise the deck is elaborated here, and its own build has already
+    // reported its topology warnings.
+    let built = match engine.built_topology(netlist) {
+        Some(built) => built,
+        None => {
+            let circuit = crate::engine::without_repeated_topology_reports(|| {
+                engine.build_circuit_with_abort(netlist, abort)
+            })?;
+            BuiltTopology::of(&engine, &circuit)?
+        }
     };
     if abort.is_aborted() {
         return Err(SimulationError::Aborted);
     }
 
-    // `build_circuit_with_abort` restarted and consumed the deterministic
-    // statistical stream. Restart it again so topology descriptors are
-    // produced from the exact same flattened coordinate, not the next
-    // pseudo-random draw.
+    // Every build restarts and consumes the deterministic statistical
+    // stream. Restart it again so topology descriptors are produced from the
+    // exact same flattened coordinate, not the next pseudo-random draw.
     netlist.params.restart_statistical_stream();
     let mut flattened = flatten_netlist_with_models_config_with_abort(
         netlist,
@@ -94,7 +96,7 @@ pub fn topology_fingerprint_with_abort(
     }
 
     let mut nodes = vec!["0".to_string()];
-    nodes.extend(circuit.node_names_sorted());
+    nodes.extend(built.node_names.iter().cloned());
     let canonical_nodes = nodes
         .iter()
         .map(|name| (name.trim().to_ascii_lowercase(), name.clone()))
@@ -165,27 +167,22 @@ pub fn topology_fingerprint_with_abort(
         TopologyComponent::new(
             "assembled-mna",
             "rspice-assembled-circuit",
-            format!("sparse-mna-v1:devices={}", circuit.device_count()),
+            format!("sparse-mna-v1:devices={}", built.devices),
             nodes.iter().cloned(),
-            stamp_sparsity,
+            built.stamp_sparsity,
         )
         .map_err(topology_error)?,
     );
 
-    let mut unknown_layout = circuit
-        .node_names_sorted()
-        .into_iter()
+    let mut unknown_layout = built
+        .node_names
+        .iter()
         .map(|name| format!("v({name})"))
         .collect::<Vec<_>>();
-    unknown_layout.extend(
-        circuit
-            .branch_names_sorted()
-            .into_iter()
-            .map(|name| format!("i({name})")),
-    );
+    unknown_layout.extend(built.branch_names.iter().map(|name| format!("i({name})")));
     unknown_layout
-        .extend((0..circuit.hidden_state_count()).map(|index| format!("state-unknown-{index}")));
-    let state_layout = (0..circuit.hidden_state_count())
+        .extend((0..built.hidden_states).map(|index| format!("state-unknown-{index}")));
+    let state_layout = (0..built.hidden_states)
         .map(|index| format!("state-{index}"))
         .collect::<Vec<_>>();
 

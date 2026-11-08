@@ -816,9 +816,15 @@ fn run_concrete_deck(
     }
 
     let engine = build_observed_engine(args, config, netlist, quiet)?;
+    let scalar = identity.topology.is_none();
     let ctx = RunContext::new(
         &engine, netlist, args, config, verbose, quiet, run_label, identity,
     )?;
+    // A scalar deck's typed and HDF5 results name the topology of the circuit
+    // its analyses build. Keeping that build's topology means naming it does
+    // not elaborate the deck a second time.
+    let _built_topology = (scalar && matches!(ctx.format, OutputFormat::Json | OutputFormat::Hdf5))
+        .then(|| engine.retain_built_topology(netlist));
 
     let base_name = args
         .input

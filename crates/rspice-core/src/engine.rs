@@ -50,6 +50,7 @@ pub use analysis_capability::{
     capability_matrix,
 };
 mod builder;
+mod built_topology;
 pub(crate) use builder::without_repeated_topology_reports;
 pub use builder::{
     ModelBinAxisRange, ModelBinCardGeometry, ModelBinCardInspection, ModelBinCoverageGap,
@@ -136,6 +137,7 @@ pub use builder::{
 pub use config_resolver::{
     ConvergencePreset, SimulationConfigOverrides, resolve_simulation_config,
 };
+pub(crate) use built_topology::BuiltTopology;
 pub use core::Engine;
 pub use dc::{
     DcSweepAxis, DcSweepPointResult, DcSweepRange, DcSweepResult, bounded_dc_sweep_points,

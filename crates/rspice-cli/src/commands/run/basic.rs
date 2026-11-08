@@ -176,11 +176,17 @@ pub(super) fn finish_dc_op_result(
                 )
             },
             |path, format| {
+                // Only an HDF5 artifact carries the run's identity, whose
+                // topology fingerprint can cost an elaboration of its own.
+                let identity = match format {
+                    OutputFormat::Hdf5 => Some(super::document::hdf5_identity(ctx, analysis_id)?),
+                    _ => None,
+                };
                 write_dc_op_output(
                     path,
                     &exported_operating_point_signals,
                     format,
-                    Some(&super::document::hdf5_identity(ctx, analysis_id)?),
+                    identity.as_ref(),
                 )
             },
         )?;

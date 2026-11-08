@@ -1575,10 +1575,20 @@ fn stepped_physical_analyses_are_order_independent_and_never_fabricate_data() {
 
 /// How many circuits one run elaborates, read from the builder's debug record.
 fn elaborated_circuits(deck_text: &str, tag: &str) -> usize {
+    elaborated_circuits_as(deck_text, tag, "csv").0
+}
+
+/// The elaborations of a `format` run, and the directory holding its
+/// `out.<format>` artifact.
+fn elaborated_circuits_as(
+    deck_text: &str,
+    tag: &str,
+    format: &str,
+) -> (usize, common::TestDirectory) {
     let dir = test_dir(tag);
     let deck = dir.join("deck.sp");
     std::fs::write(&deck, deck_text).expect("write deck");
-    let output = dir.join("out.csv");
+    let output = dir.join(format!("out.{format}"));
     let run = run_rspice(&[
         "--log-level",
         "debug",
@@ -1587,7 +1597,7 @@ fn elaborated_circuits(deck_text: &str, tag: &str) -> usize {
         "-o",
         output.to_str().unwrap(),
         "-f",
-        "csv",
+        format,
     ]);
     let stderr = String::from_utf8_lossy(&run.stderr);
     assert!(
@@ -1595,7 +1605,33 @@ fn elaborated_circuits(deck_text: &str, tag: &str) -> usize {
         "stdout: {}; stderr: {stderr}",
         String::from_utf8_lossy(&run.stdout)
     );
-    stderr.matches("Building circuit with").count()
+    (stderr.matches("Building circuit with").count(), dir)
+}
+
+/// A scalar deck is elaborated once. A flat artifact carries no topology, so
+/// publishing one asks for none; a typed artifact names the circuit its solve
+/// built, by the fingerprint an elaboration of its own gives that circuit.
+#[test]
+fn a_scalar_deck_is_elaborated_once() {
+    let deck = "* Divider
+V1 in 0 1
+R1 in out 1k
+R2 out 0 1k
+.op
+.end
+";
+    assert_eq!(elaborated_circuits(deck, "elaborations_scalar_flat"), 1);
+    let (elaborations, dir) = elaborated_circuits_as(deck, "elaborations_scalar_typed", "json");
+    assert_eq!(elaborations, 1);
+    let document = common::read_json(&dir.join("out.json"));
+    let netlist = rspice_core::Netlist::parse(deck).expect("deck parses");
+    let elaborated =
+        rspice_core::execution::topology_fingerprint(&rspice_core::Engine::default(), &netlist)
+            .expect("deck elaborates");
+    assert_eq!(
+        document["topologyFingerprint"].as_str(),
+        Some(elaborated.to_string().as_str())
+    );
 }
 
 /// The preflight elaborates every coordinate before anything solves, and

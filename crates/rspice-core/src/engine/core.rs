@@ -91,6 +91,10 @@ pub struct Engine {
     /// on a copy without it.
     pub(super) small_signal_state:
         Option<std::sync::Arc<super::small_signal_state::TransientStateBias>>,
+    /// Where the first plain build of one netlist records its topology while
+    /// [`Self::retain_built_topology`]'s guard lives.
+    pub(super) retained_topology:
+        std::sync::Mutex<Option<std::sync::Arc<super::built_topology::BuiltTopologyRecord>>>,
 }
 
 /// One elaboration's validated startup netlist and its subcircuit-scoped
@@ -253,6 +257,7 @@ impl Engine {
             compiler_diagnostic_handler: None,
             startup_directives: std::sync::Mutex::new(None),
             small_signal_state: None,
+            retained_topology: std::sync::Mutex::new(None),
         }
     }
 
@@ -279,6 +284,7 @@ impl Engine {
             compiler_diagnostic_handler: None,
             startup_directives: std::sync::Mutex::new(None),
             small_signal_state: None,
+            retained_topology: std::sync::Mutex::new(None),
         })
     }
 
@@ -305,6 +311,7 @@ impl Engine {
             compiler_diagnostic_handler: None,
             startup_directives: std::sync::Mutex::new(None),
             small_signal_state: None,
+            retained_topology: std::sync::Mutex::new(None),
         }
     }
 
@@ -333,6 +340,7 @@ impl Engine {
             compiler_diagnostic_handler: None,
             startup_directives: std::sync::Mutex::new(None),
             small_signal_state: None,
+            retained_topology: std::sync::Mutex::new(None),
         })
     }
 
@@ -586,6 +594,8 @@ impl Engine {
             resolved_engine.compiler_diagnostic_handler = self.compiler_diagnostic_handler.clone();
         }
         resolved_engine.small_signal_state = self.small_signal_state.clone();
+        resolved_engine.retained_topology =
+            std::sync::Mutex::new(self.built_topology_record(netlist));
         resolved_engine
     }
 
