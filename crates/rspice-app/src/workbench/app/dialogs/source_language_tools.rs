@@ -3,9 +3,10 @@
 //!
 //! Go to definition moves the caret to the definition, opening its file when
 //! it lives in another file of the bundle. Find references lists every
-//! occurrence in the Console, one line each with its file and line, and
-//! states the count on the status bar. Rename symbol is a command form: the
-//! new name, and how many occurrences in how many files it rewrites.
+//! occurrence in the bottom dock's References page, one row each with its
+//! file, line, column and text, and states the count on the status bar.
+//! Rename symbol is a command form: the new name, and how many occurrences in
+//! how many files it rewrites.
 //!
 //! These used to be views of a nine-tab "Source navigation and language
 //! tools" dialog (document symbols, completion, hover, signature help,
@@ -22,7 +23,6 @@
 
 use egui::{Context, Id};
 
-use crate::diagnostics::{LogSeverity, LogSource};
 use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine};
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::commands::vocabulary::Command;
@@ -118,20 +118,15 @@ pub(crate) fn navigate_active_source(app: &mut RSpiceApp, command: Command) -> R
         if caret_name.is_empty() {
             return Err("Place the caret on a name to find its references.".to_owned());
         }
-        list_references(app, &tools.index, language, &caret_name);
+        list_references(app, &tools.index, &logical_path, caret, &caret_name);
         return Ok(());
     }
     if caret_name.is_empty() {
         return Err("Place the caret on a name to go to its definition.".to_owned());
     }
-    let definitions = tools.index.definitions(&caret_name);
-    // A definition in the file on screen wins; otherwise the bundle's first.
-    let definition = definitions
-        .iter()
-        .find(|symbol| {
-            crate::state::project_source_paths_equal(&symbol.logical_path, &logical_path)
-        })
-        .or_else(|| definitions.first())
+    let definition = tools
+        .index
+        .definition_at(&logical_path, caret, &caret_name)
         .ok_or_else(|| format!("No definition of {caret_name} exists in this source bundle."))?;
     if !crate::state::project_source_paths_equal(&definition.logical_path, &logical_path) {
         match language {
@@ -156,43 +151,58 @@ pub(crate) fn navigate_active_source(app: &mut RSpiceApp, command: Command) -> R
     Ok(())
 }
 
-/// Find references: one Console line per occurrence ("model.va:6: analog
-/// I(p, n) <+ g * V(p, n);"), the Console brought forward, and the count on
-/// the status bar.
+/// Find references: one row per occurrence on the References page of the
+/// bottom dock, the page brought forward, and the count on the status bar.
 fn list_references(
     app: &mut RSpiceApp,
     index: &code_workspace::LanguageServiceIndex,
-    language: crate::state::ProjectSourceLanguage,
+    logical_path: &str,
+    caret: usize,
     name: &str,
 ) {
-    let references = index.references(name);
-    let source = match language {
-        crate::state::ProjectSourceLanguage::VerilogA => LogSource::VerilogA,
-        crate::state::ProjectSourceLanguage::RSpiceAutomation => LogSource::Studio,
-    };
+    let references = index.references_at(logical_path, caret, name);
     let files = references
         .iter()
         .map(|reference| crate::state::project_source_path_key(&reference.logical_path))
         .collect::<std::collections::BTreeSet<_>>()
         .len();
-    for reference in &references {
-        app.state.record(
-            LogSeverity::Info,
-            source,
-            format!(
-                "{}:{}: {}",
-                reference.logical_path, reference.line, reference.line_preview
-            ),
-        );
-    }
-    if !references.is_empty() {
-        app.state.workbench.open_console();
-        app.state.workbench.console_page = crate::workbench::state::ConsolePage::Console;
+    let rows = references
+        .iter()
+        .map(|reference| crate::workbench::state::SourceReference {
+            logical_path: reference.logical_path.clone(),
+            line: reference.line,
+            column: reference.column,
+            text: reference.line_preview.clone(),
+            route: crate::workbench::app_state::diagnostic_store::DiagnosticRoute::CodeDocument {
+                bundle: index.bundle_id,
+                logical_path: reference.logical_path.as_str().into(),
+                line: Some(reference.line),
+                column: Some(reference.column),
+            },
+        })
+        .collect::<Vec<_>>();
+    let revision = app
+        .state
+        .model
+        .workspace
+        .content
+        .project_sources
+        .get_bundle(index.bundle_id)
+        .map_or(0, |bundle| bundle.revision().get());
+    if !rows.is_empty() {
+        app.state
+            .workbench
+            .show_references(crate::workbench::state::SourceReferences::new(
+                name.to_owned(),
+                index.bundle_id,
+                revision,
+                rows,
+            ));
     }
     app.state.prompt(match references.len() {
         0 => format!("No references to {name} in this source bundle."),
         count => format!(
-            "{count} reference{} to {name} in {files} file{}, listed in the Console.",
+            "{count} reference{} to {name} in {files} file{}.",
             if count == 1 { "" } else { "s" },
             if files == 1 { "" } else { "s" }
         ),
@@ -244,11 +254,17 @@ impl RSpiceApp {
         } else if new_name.is_empty() || new_name == tools.query {
             None
         } else {
-            tools.index.rename_preview(&tools.query, new_name).err()
+            tools
+                .index
+                .rename_preview_at(&tools.active_path, tools.caret, &tools.query, new_name)
+                .err()
         };
         let unchanged = new_name.is_empty() || new_name == tools.query;
         let ready = refusal.is_none() && !unchanged;
-        let (occurrences, files) = tools.index.rename_extent(&tools.query);
+        let (occurrences, files) =
+            tools
+                .index
+                .rename_extent_at(&tools.active_path, tools.caret, &tools.query);
         let extent = format!(
             "Renames {}",
             code_workspace::extent_words(occurrences, files)

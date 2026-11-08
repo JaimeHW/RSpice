@@ -2,8 +2,10 @@
 //!
 //! The compiler and managed Python worker remain the syntax and semantic
 //! authorities. This index supplies bounded source navigation and conservative
-//! refactors: it never edits comments/strings, and rename is refused whenever a
-//! symbol has multiple project-owned definitions.
+//! refactors: it never edits comments/strings. A Verilog-A name is resolved
+//! through its file's [`VerilogASymbols`], so a rename reaches exactly the
+//! uses of the declaration under the caret; elsewhere rename is refused
+//! whenever a symbol has multiple project-owned definitions.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
@@ -11,6 +13,9 @@ use std::ops::Range;
 use crate::product::{ContentDigest, ProjectId};
 use crate::state::{ProjectSourceBundle, ProjectSourceId, ProjectSourceLanguage};
 use crate::workbench::RSpiceApp;
+
+use super::veriloga_catalog::VerilogACatalog;
+use super::veriloga_symbols::{VerilogASymbolKind, VerilogASymbols};
 
 const MAX_INDEX_BYTES: usize = 16 * 1024 * 1024;
 const MAX_INDEX_TOKENS: usize = 500_000;
@@ -48,6 +53,7 @@ pub(crate) struct SourceSymbol {
 pub(crate) struct SymbolOccurrence {
     pub logical_path: String,
     pub line: usize,
+    pub column: usize,
     pub line_preview: String,
 }
 
@@ -72,6 +78,8 @@ pub(crate) struct LanguageServiceIndex {
     symbols: Vec<SourceSymbol>,
     tokens: Vec<IndexedToken>,
     sources: BTreeMap<String, String>,
+    /// Each Verilog-A file's own reading, by path key.
+    veriloga: BTreeMap<String, VerilogASymbols>,
 }
 
 /// An open Rename symbol: the index it was opened against, the name under
@@ -80,6 +88,8 @@ pub(crate) struct LanguageServiceIndex {
 pub(crate) struct CodeLanguageToolsState {
     pub index: LanguageServiceIndex,
     pub active_path: String,
+    /// The character the name was taken from.
+    pub caret: usize,
     pub query: String,
     pub replacement: String,
     /// Why the last Rename was refused, until the name is edited.
@@ -123,6 +133,7 @@ pub(crate) fn open_language_tools_in_bundle(
     app.state.code.code_workspace.language_tools = Some(CodeLanguageToolsState {
         index,
         active_path,
+        caret: caret_char_index,
         query,
         replacement: String::new(),
         error: None,
@@ -132,9 +143,12 @@ pub(crate) fn open_language_tools_in_bundle(
 
 pub(crate) fn commit_language_rename(app: &mut RSpiceApp) -> Result<String, String> {
     let state = current_language_transaction(app)?;
-    let replacements = state
-        .index
-        .rename_preview(&state.query, &state.replacement)?;
+    let replacements = state.index.rename_preview_at(
+        &state.active_path,
+        state.caret,
+        &state.query,
+        &state.replacement,
+    )?;
     if let Some((logical_path, _)) = replacements.iter().find(|(logical_path, _)| {
         !super::source_bundle_document_is_editable(
             app,
@@ -147,7 +161,10 @@ pub(crate) fn commit_language_rename(app: &mut RSpiceApp) -> Result<String, Stri
             "Rename would change governed read-only source '{logical_path}'. No project source was changed."
         ));
     }
-    let (occurrences, _) = state.index.rename_extent(&state.query);
+    let (occurrences, _) =
+        state
+            .index
+            .rename_extent_at(&state.active_path, state.caret, &state.query);
     let changed_files = app
         .state
         .model
@@ -326,6 +343,7 @@ impl LanguageServiceIndex {
         let mut symbols = Vec::new();
         let mut tokens = Vec::new();
         let mut sources = BTreeMap::new();
+        let mut veriloga = BTreeMap::new();
         for (logical_path, source) in documents {
             let syntax = document_syntax(bundle.language(), logical_path);
             let mut document_tokens = lex_identifiers(logical_path, source, syntax);
@@ -343,6 +361,12 @@ impl LanguageServiceIndex {
             }
             symbols.extend(definitions);
             tokens.extend(document_tokens);
+            if syntax == DocumentSyntax::VerilogA {
+                veriloga.insert(
+                    crate::state::project_source_path_key(logical_path),
+                    VerilogASymbols::read(source),
+                );
+            }
             sources.insert(
                 crate::state::project_source_path_key(logical_path),
                 source.to_owned(),
@@ -369,6 +393,7 @@ impl LanguageServiceIndex {
             symbols,
             tokens,
             sources,
+            veriloga,
         })
     }
 
@@ -416,6 +441,7 @@ impl LanguageServiceIndex {
             .map(|token| SymbolOccurrence {
                 logical_path: token.logical_path.clone(),
                 line: token.line,
+                column: token.column,
                 line_preview: self
                     .source_for_path(&token.logical_path)
                     .map_or_else(String::new, |source| {
@@ -499,10 +525,369 @@ impl LanguageServiceIndex {
         Ok(replacements)
     }
 
+    /// The definition of the name at `char_index` of `logical_path`: the
+    /// declaration a Verilog-A name refers to, or the name's only or first
+    /// indexed definition.
+    pub(crate) fn definition_at(
+        &self,
+        logical_path: &str,
+        char_index: usize,
+        name: &str,
+    ) -> Option<SymbolPlace> {
+        if let Some(target) = self.veriloga_target(logical_path, char_index, name) {
+            let source = self.source_for_path(&target.logical_path)?;
+            let place = self.veriloga_symbols(&target.logical_path)?;
+            let declaration = place.declaration(target.declaration)?;
+            let (line, column) = place_of(source, declaration.name_range.start);
+            return Some(SymbolPlace {
+                logical_path: target.logical_path,
+                line,
+                column,
+            });
+        }
+        let definitions = self.definitions(name);
+        definitions
+            .iter()
+            .find(|symbol| {
+                crate::state::project_source_paths_equal(&symbol.logical_path, logical_path)
+            })
+            .or_else(|| definitions.first())
+            .map(|symbol| SymbolPlace {
+                logical_path: symbol.logical_path.clone(),
+                line: symbol.line,
+                column: symbol.column,
+            })
+    }
+
+    /// Every use of the name at `char_index` of `logical_path`, in file and
+    /// text order. A Verilog-A name that resolves lists the uses of its
+    /// declaration alone.
+    pub(crate) fn references_at(
+        &self,
+        logical_path: &str,
+        char_index: usize,
+        name: &str,
+    ) -> Vec<SymbolOccurrence> {
+        let Some(target) = self.veriloga_target(logical_path, char_index, name) else {
+            return self.references(name);
+        };
+        self.veriloga_sites(&target, name)
+            .into_iter()
+            .flat_map(|(path, ranges)| {
+                let source = self.source_for_path(&path).cloned().unwrap_or_default();
+                ranges.into_iter().map(move |range| {
+                    let (line, column) = place_of(&source, range.start);
+                    SymbolOccurrence {
+                        logical_path: path.clone(),
+                        line,
+                        column,
+                        line_preview: source_line_preview(&source, line),
+                    }
+                })
+            })
+            .collect()
+    }
+
+    /// What a rename of the name at `char_index` of `logical_path` rewrites:
+    /// its uses and the files they sit in.
+    pub(crate) fn rename_extent_at(
+        &self,
+        logical_path: &str,
+        char_index: usize,
+        name: &str,
+    ) -> (usize, usize) {
+        match self.veriloga_target(logical_path, char_index, name) {
+            Some(target) => {
+                let sites = self.veriloga_sites(&target, name);
+                (sites.iter().map(|(_, ranges)| ranges.len()).sum(), sites.len())
+            }
+            None => self.rename_extent(name),
+        }
+    }
+
+    /// The new text of every file a rename of the name at `char_index` of
+    /// `logical_path` changes, or why it is refused.
+    pub(crate) fn rename_preview_at(
+        &self,
+        logical_path: &str,
+        char_index: usize,
+        name: &str,
+        replacement: &str,
+    ) -> Result<Vec<(String, String)>, String> {
+        if self.language != ProjectSourceLanguage::VerilogA {
+            return self.rename_preview(name, replacement);
+        }
+        if !valid_identifier(replacement) {
+            return Err(format!("'{replacement}' is not a valid name."));
+        }
+        let catalog = VerilogACatalog::get();
+        if rspice_veriloga::language_catalog::is_reserved_word(replacement) {
+            return Err(format!(
+                "'{replacement}' is a reserved word of Verilog-A, so it cannot be a name."
+            ));
+        }
+        if catalog.reserves(replacement) {
+            return Err(format!(
+                "'{replacement}' already means something in Verilog-A, so it cannot be a name."
+            ));
+        }
+        if catalog.reserves(name) && self.veriloga_target(logical_path, char_index, name).is_none() {
+            return Err(format!("'{name}' is part of Verilog-A and cannot be renamed."));
+        }
+        let symbols = self.veriloga_symbols(logical_path).ok_or_else(|| {
+            format!("The indexed source document '{logical_path}' is no longer available.")
+        })?;
+        let Some(target) = self.veriloga_target(logical_path, char_index, name) else {
+            return self.rename_unresolved(logical_path, symbols, name, replacement);
+        };
+        self.veriloga_rename_refusal(&target, name, replacement)?;
+        let sites = self.veriloga_sites(&target, name);
+        if sites.iter().map(|(_, ranges)| ranges.len()).sum::<usize>() > MAX_RENAME_EDITS {
+            return Err(format!(
+                "Rename would create more than {MAX_RENAME_EDITS} edits. Narrow the source closure first."
+            ));
+        }
+        let mut replacements = Vec::with_capacity(sites.len());
+        for (path, ranges) in sites {
+            let mut source = self
+                .source_for_path(&path)
+                .ok_or_else(|| {
+                    format!("The indexed source document '{path}' is no longer available.")
+                })?
+                .clone();
+            for range in ranges.into_iter().rev() {
+                source.replace_range(range, replacement);
+            }
+            replacements.push((path, source));
+        }
+        Ok(replacements)
+    }
+
+    /// A rename of a name the file on screen does not declare. A fragment
+    /// that is included into a module cannot be read by itself, so the name
+    /// is followed by the text alone, and only when the bundle holds one
+    /// definition of it. A whole file that does not read is refused: where
+    /// its scopes begin and end is unknown.
+    fn rename_unresolved(
+        &self,
+        logical_path: &str,
+        symbols: &VerilogASymbols,
+        name: &str,
+        replacement: &str,
+    ) -> Result<Vec<(String, String)>, String> {
+        if let Some((line, reason)) = symbols.unreadable()
+            && self.has_a_module(logical_path)
+        {
+            return Err(format!(
+                "Rename needs to read the whole file, and line {line} does not read: {reason}"
+            ));
+        }
+        self.rename_preview(name, replacement)
+    }
+
+    fn has_a_module(&self, logical_path: &str) -> bool {
+        self.tokens.iter().any(|token| {
+            token.name == "module"
+                && crate::state::project_source_paths_equal(&token.logical_path, logical_path)
+        })
+    }
+
+    fn veriloga_symbols(&self, logical_path: &str) -> Option<&VerilogASymbols> {
+        self.veriloga
+            .get(&crate::state::project_source_path_key(logical_path))
+    }
+
+    /// The declaration the Verilog-A name at `char_index` refers to.
+    fn veriloga_target(
+        &self,
+        logical_path: &str,
+        char_index: usize,
+        name: &str,
+    ) -> Option<VerilogATarget> {
+        let symbols = self.veriloga_symbols(logical_path)?;
+        let source = self.source_for_path(logical_path)?;
+        let written = symbols
+            .name_at(char_to_byte(source, char_index))
+            .filter(|written| written.name == name)?;
+        Some(VerilogATarget {
+            logical_path: logical_path.to_owned(),
+            declaration: written.declaration?,
+        })
+    }
+
+    /// Every place `target` is written, by file, each file's ranges in text
+    /// order: its uses in its own file and, for a declaration a whole module
+    /// or file can see, the names another file of the bundle leaves
+    /// undeclared. Such a file is a fragment included where the name is
+    /// declared.
+    fn veriloga_sites(
+        &self,
+        target: &VerilogATarget,
+        name: &str,
+    ) -> Vec<(String, Vec<Range<usize>>)> {
+        let Some(symbols) = self.veriloga_symbols(&target.logical_path) else {
+            return Vec::new();
+        };
+        let mut sites = vec![(
+            target.logical_path.clone(),
+            symbols
+                .references(target.declaration)
+                .map(|written| written.range.clone())
+                .collect::<Vec<_>>(),
+        )];
+        let module_wide = symbols
+            .declaration(target.declaration)
+            .is_some_and(|declaration| symbols.is_module_level(declaration.scope));
+        if module_wide {
+            for (path, other) in self.veriloga_documents() {
+                if crate::state::project_source_paths_equal(path, &target.logical_path) {
+                    continue;
+                }
+                let undeclared = other
+                    .names()
+                    .iter()
+                    .filter(|written| written.name == name && written.declaration.is_none())
+                    .map(|written| written.range.clone())
+                    .collect::<Vec<_>>();
+                if !undeclared.is_empty() {
+                    sites.push((path.to_owned(), undeclared));
+                }
+            }
+        }
+        sites
+    }
+
+    /// Every Verilog-A file's logical path and its reading.
+    fn veriloga_documents(&self) -> impl Iterator<Item = (&str, &VerilogASymbols)> {
+        let mut paths = BTreeMap::new();
+        for token in &self.tokens {
+            paths
+                .entry(crate::state::project_source_path_key(&token.logical_path))
+                .or_insert(token.logical_path.as_str());
+        }
+        paths.into_iter().filter_map(|(key, path)| {
+            self.veriloga.get(&key).map(|symbols| (path, symbols))
+        })
+    }
+
+    /// Why renaming `target` to `replacement` would change what the source
+    /// means, when it would.
+    fn veriloga_rename_refusal(
+        &self,
+        target: &VerilogATarget,
+        name: &str,
+        replacement: &str,
+    ) -> Result<(), String> {
+        let Some(symbols) = self.veriloga_symbols(&target.logical_path) else {
+            return Ok(());
+        };
+        let Some(declaration) = symbols.declaration(target.declaration) else {
+            return Ok(());
+        };
+        if symbols.declared_in(declaration.scope, replacement).is_some() {
+            return Err(format!(
+                "'{replacement}' is already declared beside '{name}'."
+            ));
+        }
+        // A use of the name that an inner declaration of the new name would
+        // take over.
+        for written in symbols.references(target.declaration) {
+            let shadowed = symbols
+                .enclosing_scopes(written.range.start)
+                .take_while(|scope| *scope != declaration.scope)
+                .any(|scope| symbols.declared_in(scope, replacement).is_some());
+            if shadowed {
+                return Err(format!(
+                    "'{replacement}' is declared in an inner scope that uses '{name}' at line {}, and would hide it there.",
+                    written.line
+                ));
+            }
+        }
+        // A use of the new name that the renamed declaration would take over.
+        for written in symbols.names().iter().filter(|written| written.name == replacement) {
+            let captured = symbols
+                .enclosing_scopes(written.range.start)
+                .take_while(|scope| symbols.declared_in(*scope, replacement).is_none())
+                .any(|scope| scope == declaration.scope);
+            if captured {
+                return Err(format!(
+                    "Line {} already uses '{replacement}', which would then mean the renamed '{name}'.",
+                    written.line
+                ));
+            }
+        }
+        // A port or parameter written after a `.` in an instance names the
+        // declaration from outside, where its scope cannot be told.
+        if matches!(
+            declaration.kind,
+            VerilogASymbolKind::Port | VerilogASymbolKind::Parameter
+        ) {
+            for (path, other) in self.veriloga_documents() {
+                if let Some(member) = other.member_named(name) {
+                    return Err(format!(
+                        "'{name}' is connected by name at {path}:{}, which Rename cannot follow.",
+                        member.line
+                    ));
+                }
+            }
+        }
+        // A file that leaves the name undeclared means one module's, and
+        // more than one module of the bundle may declare it.
+        let module_wide = symbols.is_module_level(declaration.scope);
+        let leaves_undeclared = self.veriloga_documents().any(|(path, other)| {
+            !crate::state::project_source_paths_equal(path, &target.logical_path)
+                && other
+                    .names()
+                    .iter()
+                    .any(|written| written.name == name && written.declaration.is_none())
+        });
+        if module_wide && leaves_undeclared {
+            let candidates = self
+                .veriloga_documents()
+                .flat_map(|(_, other)| {
+                    other.declarations().iter().filter(move |candidate| {
+                        candidate.name == name && other.is_module_level(candidate.scope)
+                    })
+                })
+                .count();
+            if candidates > 1 {
+                return Err(format!(
+                    "Another file uses '{name}' without declaring it, and {candidates} declarations could be the one it means."
+                ));
+            }
+        }
+        Ok(())
+    }
+
     fn source_for_path(&self, logical_path: &str) -> Option<&String> {
         self.sources
             .get(&crate::state::project_source_path_key(logical_path))
     }
+}
+
+/// A place a definition is written: one-based line and column.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SymbolPlace {
+    pub logical_path: String,
+    pub line: usize,
+    pub column: usize,
+}
+
+/// The declaration a Verilog-A name resolves to, in the file it is written.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct VerilogATarget {
+    logical_path: String,
+    declaration: usize,
+}
+
+/// The one-based line and character column of byte `offset`.
+fn place_of(source: &str, offset: usize) -> (usize, usize) {
+    let before = &source[..offset.min(source.len())];
+    let line_start = before.rfind('\n').map_or(0, |newline| newline + 1);
+    (
+        before.matches('\n').count() + 1,
+        before[line_start..].chars().count() + 1,
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1202,8 +1587,14 @@ mod tests {
         assert_eq!(index.definitions("resistance").len(), 1);
         assert_eq!(index.references("resistance").len(), 3);
         // What the rename form states: three occurrences in the two files.
-        assert_eq!(index.rename_extent("resistance"), (3, 2));
-        let changed = index.rename_preview("resistance", "r_value").unwrap();
+        let caret = "module resistor(p, n);\nparameter real ".chars().count();
+        assert_eq!(
+            index.rename_extent_at("models/resistor.va", caret, "resistance"),
+            (3, 2)
+        );
+        let changed = index
+            .rename_preview_at("models/resistor.va", caret, "resistance", "r_value")
+            .unwrap();
         assert_eq!(changed.len(), 2);
         let root = changed
             .iter()
@@ -1296,6 +1687,155 @@ mod tests {
         let definitions = index.definitions("gain");
         assert_eq!(definitions.len(), 1);
         assert_eq!((definitions[0].line, definitions[0].column), (6, 16));
+    }
+
+    const TWO_SCOPES: &str = "`include \"disciplines.vams\"\nmodule one(a, b);\n  inout a, b;\n  electrical a, b;\n  analog V(a, b) <+ 0;\nendmodule\nmodule two(b, c);\n  inout b, c;\n  electrical b, c;\n  real x;\n  analog begin\n    x = V(b, c);\n    I(b, c) <+ x;\n  end\nendmodule\n";
+
+    fn two_scopes() -> LanguageServiceIndex {
+        let bundle = bundle(
+            ProjectSourceLanguage::VerilogA,
+            "two.va",
+            TWO_SCOPES,
+            Vec::new(),
+        );
+        LanguageServiceIndex::build(ProjectId::new(), &bundle).unwrap()
+    }
+
+    fn char_of(source: &str, written: &str) -> usize {
+        source[..source.find(written).expect("the text is in the source")]
+            .chars()
+            .count()
+    }
+
+    /// Renaming `b` in `electrical a, b;` of the first module rewrites that
+    /// module's `b` and leaves the second module's alone, where the rename
+    /// used to be refused as ambiguous, or to rewrite every `b` of the file.
+    #[test]
+    fn a_verilog_a_rename_touches_only_the_scope_of_the_name_under_the_caret() {
+        let index = two_scopes();
+        let caret = char_of(TWO_SCOPES, "b;\n  analog V(a");
+        let changed = index
+            .rename_preview_at("two.va", caret, "b", "bottom")
+            .unwrap();
+        assert_eq!(changed.len(), 1);
+        assert_eq!(
+            changed[0].1,
+            TWO_SCOPES
+                .replace("module one(a, b);", "module one(a, bottom);")
+                .replace("inout a, b;", "inout a, bottom;")
+                .replace("electrical a, b;", "electrical a, bottom;")
+                .replace("V(a, b)", "V(a, bottom)")
+        );
+        assert_eq!(index.rename_extent_at("two.va", caret, "b"), (4, 1));
+        assert_eq!(index.references_at("two.va", caret, "b").len(), 4);
+        // The second declarator of a list is a declaration of its own.
+        let index = two_scopes();
+        let definition = index.definition_at("two.va", caret, "b").unwrap();
+        assert_eq!(definition.line, 2);
+        assert_eq!(definition.column, 15);
+    }
+
+    /// The whole reserved-word list and the language's own names are
+    /// refused, not the twelve words the guard used to know.
+    #[test]
+    fn a_verilog_a_rename_to_a_keyword_or_a_built_in_is_refused_in_plain_words() {
+        let index = two_scopes();
+        let caret = char_of(TWO_SCOPES, "b;\n  analog V(a");
+        let refusal = |replacement: &str| {
+            index
+                .rename_preview_at("two.va", caret, "b", replacement)
+                .unwrap_err()
+        };
+        assert_eq!(
+            refusal("begin"),
+            "'begin' is a reserved word of Verilog-A, so it cannot be a name."
+        );
+        assert_eq!(
+            refusal("localparam"),
+            "'localparam' is a reserved word of Verilog-A, so it cannot be a name."
+        );
+        assert_eq!(
+            refusal("ddt"),
+            "'ddt' already means something in Verilog-A, so it cannot be a name."
+        );
+        assert_eq!(
+            refusal("$strobe"),
+            "'$strobe' is not a valid name."
+        );
+        assert_eq!(refusal("2b"), "'2b' is not a valid name.");
+    }
+
+    #[test]
+    fn a_verilog_a_rename_that_would_change_the_meaning_is_refused() {
+        let source = "module m(p);\n  inout p;\n  electrical p;\n  real a, b;\n  analog function real f;\n    input c;\n    real d;\n    f = a + c + b;\n  endfunction\n  analog begin : body\n    integer k;\n    k = 1;\n    V(p) <+ a * k;\n  end\nendmodule\n";
+        let bundle = bundle(
+            ProjectSourceLanguage::VerilogA,
+            "m.va",
+            source,
+            Vec::new(),
+        );
+        let index = LanguageServiceIndex::build(ProjectId::new(), &bundle).unwrap();
+        let rename = |written: &str, name: &str, replacement: &str| {
+            index.rename_preview_at("m.va", char_of(source, written), name, replacement)
+        };
+        assert_eq!(
+            rename("a, b;", "a", "b").unwrap_err(),
+            "'b' is already declared beside 'a'."
+        );
+        assert_eq!(
+            rename("a, b;", "a", "d").unwrap_err(),
+            "'d' is declared in an inner scope that uses 'a' at line 8, and would hide it there."
+        );
+        assert_eq!(
+            rename("c;\n", "c", "a").unwrap_err(),
+            "Line 8 already uses 'a', which would then mean the renamed 'c'."
+        );
+        // Fine: nothing inside `body` is called `q`, and `k` is local to it.
+        let renamed = rename("k;\n", "k", "q").unwrap();
+        assert_eq!(renamed[0].1, source.replace("integer k;", "integer q;").replace("k = 1;", "q = 1;").replace("a * k;", "a * q;"));
+    }
+
+    /// A file that does not read has no scopes to rename within.
+    #[test]
+    fn a_verilog_a_rename_in_a_module_that_does_not_read_says_which_line() {
+        let source = "module m(p);\n  inout p;\n  electrical p;\n  parameter real g = ;\n  analog V(p) <+ g;\nendmodule\n";
+        let bundle = bundle(ProjectSourceLanguage::VerilogA, "m.va", source, Vec::new());
+        let index = LanguageServiceIndex::build(ProjectId::new(), &bundle).unwrap();
+        let refusal = index
+            .rename_preview_at("m.va", char_of(source, "g = ;"), "g", "gain")
+            .unwrap_err();
+        assert!(refusal.starts_with("Rename needs to read the whole file, and line 4"), "{refusal}");
+    }
+
+    /// A parameter connected by name from an instance cannot be followed.
+    #[test]
+    fn a_port_or_parameter_connected_by_name_is_not_renamed_behind_it() {
+        let source = "module inner(p);\n  inout p;\n  electrical p;\n  parameter real g = 1;\n  analog V(p) <+ g;\nendmodule\nmodule outer(q);\n  inout q;\n  electrical q;\n  inner #(.g(2)) u1 (.p(q));\nendmodule\n";
+        let bundle = bundle(ProjectSourceLanguage::VerilogA, "m.va", source, Vec::new());
+        let index = LanguageServiceIndex::build(ProjectId::new(), &bundle).unwrap();
+        let refusal = index
+            .rename_preview_at("m.va", char_of(source, "g = 1"), "g", "gain")
+            .unwrap_err();
+        assert_eq!(refusal, "'g' is connected by name at m.va:10, which Rename cannot follow.");
+    }
+
+    /// References list the uses of the one declaration, with their columns.
+    #[test]
+    fn verilog_a_references_are_those_of_the_declaration_under_the_caret() {
+        let index = two_scopes();
+        let caret = char_of(TWO_SCOPES, "x = V(");
+        let references = index.references_at("two.va", caret, "x");
+        assert_eq!(
+            references
+                .iter()
+                .map(|reference| (reference.line, reference.column, reference.line_preview.as_str()))
+                .collect::<Vec<_>>(),
+            [
+                (10, 8, "real x;"),
+                (12, 5, "x = V(b, c);"),
+                (13, 16, "I(b, c) <+ x;"),
+            ]
+        );
     }
 
     #[test]
@@ -1398,6 +1938,7 @@ mod tests {
         app.state.code.code_workspace.language_tools = Some(CodeLanguageToolsState {
             index,
             active_path: root_path.to_owned(),
+            caret: 4,
             query: "protected_name".to_owned(),
             replacement: "renamed".to_owned(),
             error: None,

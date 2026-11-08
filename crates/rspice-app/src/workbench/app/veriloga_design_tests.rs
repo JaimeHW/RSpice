@@ -299,11 +299,11 @@ fn rename_symbol_renames_the_name_under_the_caret_in_that_views_bundle() {
     );
 }
 
-/// Find references lists each occurrence in the Console and says how many
-/// on the status bar; no dialog opens. It was the References tab of the
-/// language-tools dialog.
+/// Find references lists each occurrence on the References page, with its
+/// file, line, column and text and a route to that column, and says how many
+/// on the status bar; no dialog opens and the Console stays out of it.
 #[test]
-fn find_references_lists_each_occurrence_in_the_console() {
+fn find_references_lists_each_occurrence_on_the_references_page() {
     let mut app = open_project_app();
     let (reference, bundle_id) = add_veriloga_cell(&mut app.state, "gain", "model.va", "gain");
     open_in_design(&mut app.state, &reference);
@@ -316,26 +316,56 @@ fn find_references_lists_each_occurrence_in_the_console() {
     super::navigate_active_source(&mut app, Command::FindReferences).expect("the caret is on g");
 
     assert!(app.state.code.code_workspace.language_tools.is_none());
-    let listed = app
+    assert_eq!(
+        app.state
+            .model
+            .log_buffer
+            .entries()
+            .filter(|entry| entry.message.starts_with("model.va:"))
+            .count(),
+        0,
+        "the Console is not where references are listed"
+    );
+    let list = app
         .state
-        .model
-        .log_buffer
-        .entries()
-        .filter(|entry| entry.message.starts_with("model.va:"))
-        .map(|entry| entry.message.clone())
+        .workbench
+        .source_references
+        .as_ref()
+        .expect("the list");
+    let listed = list
+        .rows
+        .iter()
+        .map(|row| {
+            (
+                row.logical_path.as_str(),
+                row.line,
+                row.column,
+                row.text.as_str(),
+            )
+        })
         .collect::<Vec<_>>();
     assert_eq!(
         listed,
         [
-            "model.va:5: parameter real g = 1m;",
-            "model.va:6: analog I(p, n) <+ g * V(p, n);",
+            ("model.va", 5, 18, "parameter real g = 1m;"),
+            ("model.va", 6, 21, "analog I(p, n) <+ g * V(p, n);"),
         ]
+    );
+    assert_eq!(
+        list.rows[1].route,
+        crate::workbench::app_state::diagnostic_store::DiagnosticRoute::CodeDocument {
+            bundle: bundle_id,
+            logical_path: "model.va".into(),
+            line: Some(6),
+            column: Some(21),
+        }
     );
     assert!(app.state.workbench.console_visible);
     assert_eq!(
-        app.state.prompt_text(),
-        Some("2 references to g in 1 file, listed in the Console.")
+        app.state.workbench.console_page,
+        crate::workbench::state::ConsolePage::References
     );
+    assert_eq!(app.state.prompt_text(), Some("2 references to g in 1 file."));
 }
 
 /// Format is the editor's request, and it formats the document that view's
