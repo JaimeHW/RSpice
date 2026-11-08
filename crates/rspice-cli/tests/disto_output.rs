@@ -312,7 +312,7 @@ fn ratio_at_or_above_one_fails_with_the_core_contract() {
 #[test]
 fn a_signal_without_a_fundamental_exports_its_products_without_a_ratio() {
     let dir = test_dir("zero_f1_ratio");
-    for format in ["ascii", "json"] {
+    for format in ["csv", "json"] {
         let output_path = dir.join(format!("quiet.{format}"));
         let output = run(
             &fixture("disto_zero_fundamental_ratio.cir"),
@@ -326,7 +326,7 @@ fn a_signal_without_a_fundamental_exports_its_products_without_a_ratio() {
         let text = std::fs::read_to_string(&output_path)
             .expect("read DISTO output")
             .to_ascii_lowercase();
-        if format == "ascii" {
+        if format == "csv" {
             assert!(text.contains("peak(2f1:i(vquiet))"), "{text}");
             assert!(
                 !text.contains("magnitude_ratio_to_f1(2f1:i(vquiet))"),
