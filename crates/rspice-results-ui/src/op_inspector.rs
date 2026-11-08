@@ -314,6 +314,15 @@ fn magnitude_order(left: &f64, right: &f64) -> Ordering {
         .then_with(|| left.total_cmp(right))
 }
 
+/// Whether `filter` starts a word of `label`, so `linear` finds a device in the
+/// linear region and leaves a nonlinear core alone.
+fn starts_a_word(label: &str, filter: &str) -> bool {
+    let label = label.to_lowercase();
+    label
+        .match_indices(filter)
+        .any(|(at, _)| !label[..at].ends_with(char::is_alphanumeric))
+}
+
 /// A row the filter let through, with what ordering it needs.
 struct ShownRow {
     index: usize,
@@ -322,13 +331,18 @@ struct ShownRow {
 }
 
 impl ShownRow {
-    fn matching(index: usize, name: &str, filter: &str) -> Option<Self> {
+    /// The row, if the filter finds it by its path, its deck name, or one of
+    /// the `also` words a device is known by. A quantity's name is on every
+    /// row of its family, so it finds nothing worth finding and is not offered.
+    fn matching(index: usize, name: &str, also: &[&str], filter: &str) -> Option<Self> {
         let (parent, leaf) = name_parts(name);
         let hierarchical = !parent.is_empty();
         let display = parent + &leaf;
+        let found = |text: &str| text.to_lowercase().contains(filter);
         (filter.is_empty()
-            || display.to_lowercase().contains(filter)
-            || name.to_lowercase().contains(filter))
+            || found(&display)
+            || found(name)
+            || also.iter().any(|word| starts_a_word(word, filter)))
         .then_some(Self {
             index,
             display,
@@ -620,7 +634,7 @@ impl PlanBuilder<'_> {
         let mut shown: Vec<ShownRow> = values
             .iter()
             .enumerate()
-            .filter_map(|(index, row)| ShownRow::matching(index, &row.name, &self.filter))
+            .filter_map(|(index, row)| ShownRow::matching(index, &row.name, &[], &self.filter))
             .collect();
         if shown.is_empty() {
             return 0;
@@ -654,9 +668,10 @@ impl PlanBuilder<'_> {
                 .enumerate()
                 .filter(|(_, entry)| retained_detail_allows(&entry.name, detail))
             {
-                if let Some(row) = ShownRow::matching(index, &entry.name, &self.filter) {
-                    let (family, _) = device_reading(entry);
-                    let title = family_title(family);
+                let (family, _) = device_reading(entry);
+                let title = family_title(family);
+                let also = [family, title.as_str(), entry.region.unwrap_or_default()];
+                if let Some(row) = ShownRow::matching(index, &entry.name, &also, &self.filter) {
                     let key = (family_rank(family), title.to_lowercase(), title);
                     families.entry(key).or_default().push(row);
                 }
@@ -739,7 +754,7 @@ impl OpPlan {
         let device_shown = builder.devices(devices, detail);
         let no_match = (builder.sections.is_empty() && !builder.filter.is_empty()).then(|| {
             format!(
-                "No name matches \u{201c}{}\u{201d}.",
+                "Nothing matches \u{201c}{}\u{201d}.",
                 controls.filter.trim()
             )
         });

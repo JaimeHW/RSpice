@@ -333,14 +333,60 @@ fn the_filter_reads_names_in_every_section_and_drops_empty_ones() {
     assert_eq!(titles(&plan), ["Node voltages", "MOSFET"]);
     assert_eq!(plan.node_shown(), 2);
     assert_eq!(plan.device_shown(), 1);
-    // A quantity or a family is not a name.
-    let plan = plan_with("gm", &sort, &collapsed, Some(&dc), Some(&report));
+    let plan = plan_with("zz", &sort, &collapsed, Some(&dc), Some(&report));
     assert!(plan.sections.is_empty());
     assert_eq!(
         plan.no_match.as_deref(),
-        Some("No name matches \u{201c}gm\u{201d}.")
+        Some("Nothing matches \u{201c}zz\u{201d}.")
     );
     assert_eq!(plan.rows.len(), 0);
+}
+
+#[test]
+fn the_filter_finds_a_device_by_region_and_family_but_not_by_quantity() {
+    let dc = DcOpResult {
+        node_voltages: vec![node("V(out)", 1.0)],
+        branch_currents: vec![node("I(V1)", 1.0e-3)],
+        ..DcOpResult::default()
+    };
+    let report = DeviceOpReport {
+        entries: vec![
+            device("M1", "MOSFET", Some("linear"), vec![("gm", 1.0)]),
+            device("M2", "MOSFET", Some("saturation"), vec![("gm", 1.0)]),
+            device("Q1", "BJT", Some("active"), vec![("gm", 1.0)]),
+            device("D1", "DIODE", None, vec![("gd", 1.0)]),
+            device("B1", "NONLINEAR_CORE", None, vec![("h", 1.0)]),
+        ],
+    };
+    let name = |index: usize| report.entries[index].name.clone();
+    let sort = OpSort::new();
+    let collapsed = BTreeSet::new();
+    let plan_for = |filter| plan_with(filter, &sort, &collapsed, Some(&dc), Some(&report));
+
+    let plan = plan_for("LINEAR");
+    assert_eq!(titles(&plan), ["MOSFET"], "and not the nonlinear core");
+    assert_eq!(section_names(&plan, "MOSFET", name), ["M1"]);
+
+    assert_eq!(titles(&plan_for("sat")), ["MOSFET"]);
+    assert_eq!(titles(&plan_for("bjt")), ["BJT"]);
+    assert_eq!(titles(&plan_for("diode")), ["Diode"]);
+    assert_eq!(
+        titles(&plan_for("nonlinear core")),
+        ["Nonlinear core"],
+        "the family as the section title spells it"
+    );
+    assert_eq!(
+        titles(&plan_for("nonlinear_core")),
+        ["Nonlinear core"],
+        "the family as the report spells it"
+    );
+
+    let plan = plan_for("gm");
+    assert!(plan.sections.is_empty(), "every device reports a gm");
+    assert_eq!(
+        plan.no_match.as_deref(),
+        Some("Nothing matches \u{201c}gm\u{201d}.")
+    );
 }
 
 #[test]
