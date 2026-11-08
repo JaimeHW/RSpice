@@ -22,6 +22,10 @@
 //! apart in chunks of whole elements, each encoded on its own, so that a
 //! reader can decode them side by side and join them.
 
+// The browser build keeps no disk cache: it only sizes records for the
+// shared memory cache, so writing and reading them goes unused there.
+#![cfg_attr(target_arch = "wasm32", allow(dead_code))]
+
 use serde::de::{self, DeserializeSeed, IntoDeserializer, Visitor};
 use serde::ser::{self, Serialize};
 use std::collections::HashMap;
