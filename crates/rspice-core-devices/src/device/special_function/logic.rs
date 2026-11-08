@@ -15,6 +15,9 @@
 //! `S = (Vhigh − Vlow)/T` and `τ = 0.1·Trise·Tfall/(Trise + Tfall)`, a
 //! linear ramp that settles exponentially over its last `S·τ`.
 //!
+//! `Vhigh` may sit below `Vlow`, as LTspice allows: a true output then drives
+//! the lower level. Such an output switches without slewing.
+//!
 //! `IC` above 0.5 starts `Q` high and below it low. A gate or Schmitt
 //! trigger holds that level through the operating point only: from the first
 //! time step its function decides, and a change reaches the outputs `Td`
@@ -87,8 +90,14 @@ impl OutputStage {
         let tfall = p.or("TFALL", trise)?;
         let tripdt = p.get("TRIPDT")?;
         let initial = p.get("IC")?.map(|ic| ic > 0.5);
-        require(vhigh > vlow, || {
-            format!("{device} needs Vhigh above Vlow (Vhigh={vhigh}, Vlow={vlow})")
+        require(vhigh != vlow, || {
+            format!("{device} needs Vhigh apart from Vlow (Vhigh={vhigh}, Vlow={vlow})")
+        })?;
+        require(vhigh > vlow || (trise == 0.0 && tfall == 0.0), || {
+            format!(
+                "{device} slews with Trise or Tfall only with Vhigh above Vlow \
+                 (Vhigh={vhigh}, Vlow={vlow})"
+            )
         })?;
         for (name, value) in [("Rout", rout), ("Rhigh", rhigh), ("Rlow", rlow)] {
             require(value > 0.0, || {

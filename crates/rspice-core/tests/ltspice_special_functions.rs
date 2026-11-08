@@ -427,6 +427,35 @@ A10 in1 0 0 0 0 qb10 q10 0 SCHMITT Vt=0.5 Vh=0.1 IC=0 Td=5u
     );
 }
 
+#[test]
+fn a_logic_output_may_drive_its_high_level_below_its_low_one() {
+    let deck = "* inverted rails
+V1 in 0 PWL(0 0 1m 1 2m 0)
+A1 in 0 0 0 0 qb1 q1 0 SCHMITT Vt=.5 Vh=10m Vhigh=0 Vlow=14 Rout=1k
+R1 q1 0 1k
+A2 in 0 0 0 0 qb2 q2 0 BUF Vhigh=-1 Vlow=3
+.end
+";
+    // LTspice 26.1.1: a true output drives Vhigh, here the lower level, and
+    // a BUF's threshold is still halfway between the rails.
+    let probes = [
+        ("q1", 0.4e-3, 7.0),
+        ("qb1", 0.4e-3, 0.0),
+        ("q1", 0.6e-3, 0.0),
+        ("qb1", 0.6e-3, 14.0),
+        ("q1", 1.6e-3, 7.0),
+        ("q2", 0.6e-3, 3.0),
+        ("qb2", 0.6e-3, -1.0),
+    ];
+    let points: Vec<(&str, f64)> = probes.iter().map(|(n, t, _)| (*n, *t)).collect();
+    let values = tran_at(deck, 2e-3, 1e-6, &points);
+    for ((node, time, expected), actual) in probes.iter().zip(values) {
+        assert_close(&format!("{node} at {time:e}"), actual, *expected, 1e-6);
+    }
+    let slewing = build_error("* bad\nA1 in 0 0 0 0 0 q 0 BUF Vhigh=0 Vlow=1 Trise=1n\n.end\n");
+    assert!(slewing.contains("only with Vhigh above Vlow"), "{slewing}");
+}
+
 fn ota_noise_density(deck: &str, mechanism: &str, frequencies: &[f64]) -> Vec<f64> {
     device_noise_density(deck, "A1", mechanism, frequencies)
 }
