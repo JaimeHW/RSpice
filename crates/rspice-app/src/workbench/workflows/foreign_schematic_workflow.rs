@@ -405,7 +405,7 @@ fn keep_on_sheet(
     plan: &ForeignPlan,
     notices: &mut Vec<(ForeignNoticeSeverity, String)>,
 ) {
-    let mut blocks = BTreeMap::<(i32, i32), (ForeignLettering, Vec<&str>)>::new();
+    let mut blocks = BTreeMap::<(i32, i32), (ForeignLettering, usize, Vec<(usize, &str)>)>::new();
     for (card, reason) in &plan.kept {
         notices.push((
             ForeignNoticeSeverity::Notice,
@@ -416,15 +416,17 @@ fn keep_on_sheet(
         ));
         blocks
             .entry((card.position.x, card.position.y))
-            .or_insert_with(|| (card.lettering, Vec::new()))
-            .1
-            .push(card.text.as_str());
+            .or_insert_with(|| (card.lettering, card.block_lines, Vec::new()))
+            .2
+            .push((card.line, card.text.as_str()));
     }
-    for ((x, y), (lettering, texts)) in blocks {
+    for ((x, y), (lettering, block_lines, mut kept)) in blocks {
+        kept.sort_by_key(|(line, _)| *line);
         if let Err(error) = keep_directive_text(
             document,
             rspice_design_model::Point::new(x, y),
-            &texts.join("\n"),
+            block_lines,
+            &kept,
             lettering,
         ) {
             notices.push((

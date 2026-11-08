@@ -19,6 +19,8 @@ fn card(role: ForeignCardRole, text: &str) -> ForeignCard {
     ForeignCard {
         position: Point::new(10, 20),
         lettering: ForeignLettering::default(),
+        line: 0,
+        block_lines: 1,
         role,
         text: text.to_owned(),
         tokens: rspice_design::netlist_document::card_tokens(text),
@@ -456,6 +458,43 @@ fn an_imported_schematic_is_project_content_a_run_reads() {
         .expect("the imported schematic prepares a run with no further step");
     assert_eq!((prepared.pvt_point_count, prepared.task_count), (2, 2));
     std::fs::remove_dir_all(&folder).ok();
+}
+
+/// A directive block's cards stay on the sheet each on its own line of the
+/// block: the analysis the plan took leaves its line empty, so the coupling
+/// under it stays one line below the point the block stands on, where LTspice
+/// draws it, not lifted into the analysis's place.
+#[test]
+fn a_kept_card_stays_on_its_own_line_of_its_block() {
+    let folder = drawing_folder();
+    let file = folder.join("lines.asc");
+    std::fs::write(
+        &file,
+        "Version 4\nSHEET 1 880 680\n\
+         SYMBOL res 32 64 R0\nSYMATTR InstName R1\nSYMATTR Value 1k\n\
+         TEXT 32 240 Left 2 !.tran 1m\\nK1 L1 L2 1\n\
+         TEXT 400 240 Left 2 !K2 L3 L4 1\n",
+    )
+    .expect("schematic");
+    let mut app = RSpiceApp::test_instance();
+    app.state.open_project_session();
+    import_foreign_schematic_file(&mut app, &file, ForeignTool::Ltspice).expect("imports");
+    std::fs::remove_dir_all(&folder).ok();
+    let notes = &app.state.model.schematic.document().design_notes;
+    let note = |text: &str| {
+        notes
+            .iter()
+            .find(|note| note.text == text)
+            .unwrap_or_else(|| panic!("no note {text:?} in {notes:?}"))
+    };
+    let (second, alone) = (note("K1 L1 L2 1"), note("K2 L3 L4 1"));
+    // The blocks stand on one row, 368 LTspice units apart; the coupling of
+    // the first is its second line.
+    assert_eq!(alone.pos.x - second.pos.x, 460);
+    assert_eq!(
+        second.pos.y - alone.pos.y,
+        second.text_extent_world("").1.round() as i32
+    );
 }
 
 /// Imports `drawing` as `name`.asc and answers the sheet it lies on, and

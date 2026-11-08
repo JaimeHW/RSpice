@@ -3150,7 +3150,8 @@ fn a_comment_draws_no_anchor_mark_where_its_drawing_drew_none() {
     keep_directive_text(
         &mut imported.document,
         Point::new(0, 0),
-        ".options gmin=1p",
+        1,
+        &[(0, ".options gmin=1p")],
         ForeignLettering::default(),
     )
     .unwrap();
@@ -3276,8 +3277,9 @@ fn an_ltspice_comment_of_several_lines_stands_on_its_point_by_its_first_line() {
 }
 
 /// Directive text kept on the sheet is lettered as its block was: at the
-/// block's size, its first line centred on the point the drawing stood the
-/// block on.
+/// block's size, on its own line of the block, whose first line the drawing
+/// centred on its point. The `.backanno` line above it is read by LTspice
+/// alone, and its line stays empty.
 #[test]
 fn directive_text_kept_on_the_sheet_is_lettered_as_its_block_was() {
     let drawing =
@@ -3291,7 +3293,8 @@ fn directive_text_kept_on_the_sheet_is_lettered_as_its_block_was() {
     keep_directive_text(
         &mut imported.document,
         card.position,
-        &card.text,
+        card.block_lines,
+        &[(card.line, card.text.as_str())],
         card.lettering,
     )
     .unwrap();
@@ -3309,7 +3312,7 @@ fn directive_text_kept_on_the_sheet_is_lettered_as_its_block_was() {
     let ([left, top, _, _], line) = note_box(note);
     let (x, y) = label_point(&imported, "base");
     assert!(
-        near(left, x + 3.0) && near(top + line * 0.5, y),
+        near(left, x + 3.0) && near(top - line * 0.5, y),
         "{left},{top} against {x},{y}"
     );
 }

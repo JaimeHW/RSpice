@@ -2443,22 +2443,46 @@ pub(super) fn lettered_note(
     point: Point,
     lettering: &ForeignLettering,
 ) -> DesignNote {
+    let lines = note.text.split('\n').count();
+    lettered_block_note(note, point, lettering, 0, lines)
+}
+
+/// `note` lettered as lines `first_line` on of a block of `block_lines`
+/// lines its drawing stood on `point`: each line where the block drew it.
+pub(super) fn lettered_block_note(
+    note: DesignNote,
+    point: Point,
+    lettering: &ForeignLettering,
+    first_line: usize,
+    block_lines: usize,
+) -> DesignNote {
     let note = note
         .with_text_size_percent(lettering.size_percent)
         .with_anchor_mark_hidden(true);
-    let pos = note_anchor(&note, point, lettering);
+    let pos = note_anchor(&note, point, lettering, first_line, block_lines);
     DesignNote { pos, ..note }
 }
 
-/// Where a note's anchor goes so its text's box stands on `point` the way
-/// the source drawing stood it: by its start, end or centre across, and by
-/// its top, bottom or middle down. A text of several lines LTspice centres
-/// down stands on its point by its first line, the rest running below; its
+/// Where a note's anchor goes so the block of `block_lines` lines it is
+/// part of, from line `first_line` on, stands on `point` the way the source
+/// drawing stood it: by its start, end or centre across, and by its top,
+/// bottom or middle down. A text of several lines LTspice centres down
+/// stands on its point by its first line, the rest running below; its
 /// drawings lay their notes out by that.
-fn note_anchor(note: &DesignNote, point: Point, lettering: &ForeignLettering) -> Point {
-    let (width, height) = note.text_extent_world(&note.text);
+fn note_anchor(
+    note: &DesignNote,
+    point: Point,
+    lettering: &ForeignLettering,
+    first_line: usize,
+    block_lines: usize,
+) -> Point {
+    let (width, own_height) = note.text_extent_world(&note.text);
+    let line_height = note.text_extent_world("").1;
+    let lines = note.text.split('\n').count();
+    let others = block_lines.max(first_line + lines) - lines;
+    let height = own_height + others as f32 * line_height;
     let middle = if lettering.by_first_line {
-        note.text_extent_world("").1
+        line_height
     } else {
         height
     };
@@ -2471,7 +2495,8 @@ fn note_anchor(note: &DesignNote, point: Point, lettering: &ForeignLettering) ->
     let (offset_x, offset_y) = DESIGN_NOTE_TEXT_OFFSET_WORLD;
     Point::new(
         point.x - (reach(across, width, width) + offset_x).round() as i32,
-        point.y - (reach(down, height, middle) + offset_y).round() as i32,
+        point.y - (reach(down, height, middle) + offset_y).round() as i32
+            + (first_line as f32 * line_height).round() as i32,
     )
 }
 

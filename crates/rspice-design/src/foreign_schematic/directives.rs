@@ -9,7 +9,7 @@
 
 use rspice_design_model::Point;
 
-use super::import::lettered_note;
+use super::import::lettered_block_note;
 use super::{ForeignDirective, ForeignLettering};
 use crate::netlist_document::card_tokens;
 use crate::schematic::design_note::{DesignNote, DesignNoteKind};
@@ -49,6 +49,11 @@ pub struct ForeignCard {
     pub position: Point,
     /// How the block holding the card was lettered.
     pub lettering: ForeignLettering,
+    /// The line of its block the card starts on, counting every line the
+    /// block draws.
+    pub line: usize,
+    /// How many lines the block holding the card draws.
+    pub block_lines: usize,
     pub role: ForeignCardRole,
     /// The card as written; a subcircuit is every line through its `.ends`.
     pub text: String,
@@ -71,30 +76,40 @@ impl ForeignCard {
 pub fn foreign_directive_cards(directives: &[ForeignDirective]) -> Vec<ForeignCard> {
     let mut cards = Vec::new();
     for directive in directives {
-        let mut logical: Vec<(String, String)> = Vec::new();
-        for line in directive.text.lines() {
+        let block_lines = directive.text.lines().count();
+        let card = |line, role, text, tokens| ForeignCard {
+            position: directive.position,
+            lettering: directive.lettering,
+            line,
+            block_lines,
+            role,
+            text,
+            tokens,
+        };
+        let mut logical: Vec<(usize, String, String)> = Vec::new();
+        for (index, line) in directive.text.lines().enumerate() {
             let trimmed = line.trim();
             if trimmed.is_empty() || trimmed.starts_with('*') || trimmed.starts_with(';') {
                 continue;
             }
             match (trimmed.strip_prefix('+'), logical.last_mut()) {
-                (Some(rest), Some((text, joined))) => {
+                (Some(rest), Some((_, text, joined))) => {
                     text.push('\n');
                     text.push_str(line.trim_end());
                     joined.push(' ');
                     joined.push_str(rest);
                 }
-                _ => logical.push((line.trim_end().to_owned(), trimmed.to_owned())),
+                _ => logical.push((index, line.trim_end().to_owned(), trimmed.to_owned())),
             }
         }
-        let mut subcircuit: Option<(String, Vec<String>, usize)> = None;
-        for (text, joined) in logical {
+        let mut subcircuit: Option<(usize, String, Vec<String>, usize)> = None;
+        for (line, text, joined) in logical {
             let tokens = card_tokens(&joined);
             let keyword = tokens
                 .first()
                 .map(|word| word.to_ascii_lowercase())
                 .unwrap_or_default();
-            if let Some((body, _, depth)) = subcircuit.as_mut() {
+            if let Some((_, body, _, depth)) = subcircuit.as_mut() {
                 body.push('\n');
                 body.push_str(&text);
                 match keyword.as_str() {
@@ -103,39 +118,21 @@ pub fn foreign_directive_cards(directives: &[ForeignDirective]) -> Vec<ForeignCa
                     _ => {}
                 }
                 if *depth == 0
-                    && let Some((body, tokens, _)) = subcircuit.take()
+                    && let Some((start, body, tokens, _)) = subcircuit.take()
                 {
-                    cards.push(ForeignCard {
-                        position: directive.position,
-                        lettering: directive.lettering,
-                        role: ForeignCardRole::ModelText,
-                        text: body,
-                        tokens,
-                    });
+                    cards.push(card(start, ForeignCardRole::ModelText, body, tokens));
                 }
                 continue;
             }
             if keyword == ".subckt" {
-                subcircuit = Some((text, tokens, 1));
+                subcircuit = Some((line, text, tokens, 1));
                 continue;
             }
-            cards.push(ForeignCard {
-                position: directive.position,
-                lettering: directive.lettering,
-                role: role(&keyword),
-                text,
-                tokens,
-            });
+            cards.push(card(line, role(&keyword), text, tokens));
         }
         // A subcircuit the block never closes is still the block's text.
-        if let Some((body, tokens, _)) = subcircuit {
-            cards.push(ForeignCard {
-                position: directive.position,
-                lettering: directive.lettering,
-                role: ForeignCardRole::Other,
-                text: body,
-                tokens,
-            });
+        if let Some((start, body, tokens, _)) = subcircuit {
+            cards.push(card(start, ForeignCardRole::Other, body, tokens));
         }
     }
     cards
@@ -168,20 +165,41 @@ pub fn defined_model_names(cards: &[ForeignCard]) -> Vec<String> {
         .collect()
 }
 
-/// Writes directive text RSpice keeps on the sheet as a note where its block
-/// was drawn, lettered as the block was. Like a comment, it is lettering
-/// alone, with no anchor mark.
+/// Writes the cards of a directive block RSpice keeps on the sheet as a note
+/// where the block was drawn, lettered as the block was. `kept` holds each
+/// kept card's text with the line of the block it starts on, in block order,
+/// and each card stays on its own line: the lines of the cards a project
+/// place took are left empty, so nothing moves into them. Like a comment, the
+/// note is lettering alone, with no anchor mark.
 pub fn keep_directive_text(
     document: &mut SchematicDocument,
     position: Point,
-    text: &str,
+    block_lines: usize,
+    kept: &[(usize, &str)],
     lettering: ForeignLettering,
 ) -> Result<(), String> {
+    let first = kept.first().map_or(0, |(line, _)| *line);
+    let mut text = String::new();
+    let mut next = first;
+    for (line, card) in kept {
+        if !text.is_empty() {
+            text.push('\n');
+        }
+        for _ in next..*line {
+            text.push('\n');
+        }
+        text.push_str(card);
+        next = next.max(line + card.split('\n').count());
+    }
     let id = SchematicIdentity::with_cursor(1).allocate(document);
-    let note = DesignNote::new(id, position, DesignNoteKind::PlainText, text)
+    let note = DesignNote::new(id, position, DesignNoteKind::PlainText, &text)
         .map_err(|error| error.to_string())?;
-    document
-        .design_notes
-        .push(lettered_note(note, position, &lettering));
+    document.design_notes.push(lettered_block_note(
+        note,
+        position,
+        &lettering,
+        first,
+        block_lines,
+    ));
     Ok(())
 }
