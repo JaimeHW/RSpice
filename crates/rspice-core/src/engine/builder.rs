@@ -2192,6 +2192,12 @@ fn validate_xyce_memristor_generated_namespaces(
     elements: &[Element],
     temperature_kelvin: f64,
 ) -> Result<(), SimulationError> {
+    if !elements
+        .iter()
+        .any(|element| matches!(element.kind, ElementKind::XyceMemristor { .. }))
+    {
+        return Ok(());
+    }
     let mut authored_nodes = BTreeMap::new();
     for node in elements.iter().flat_map(|element| element.nodes.iter()) {
         authored_nodes
@@ -6381,7 +6387,7 @@ impl Engine {
         let authored_net_names: std::cell::OnceCell<std::collections::HashSet<String>> =
             std::cell::OnceCell::new();
         if !self.config.device_voltage_limiting {
-            for element in &flat_elements {
+        for element in &flat_elements {
                 let family = match &element.kind {
                     ElementKind::Diode { .. } => Some("diode"),
                     ElementKind::Mosfet { .. } => Some("MOSFET/VDMOS"),
