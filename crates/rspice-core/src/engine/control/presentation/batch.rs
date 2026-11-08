@@ -35,7 +35,7 @@ impl ControlNamedDataset {
     }
 
     /// The plot name ngspice gives the analysis (`pl_name`).
-    fn plot_title(&self) -> &'static str {
+    pub(super) fn plot_title(&self) -> &'static str {
         match &self.result {
             ControlAnalysisResult::OperatingPoint(_) => "Operating Point",
             ControlAnalysisResult::Ac(_) | ControlAnalysisResult::AcTable(_) => "AC Analysis",
@@ -158,13 +158,14 @@ impl ControlNamedDataset {
         if let ControlAnalysisResult::SParameters(run) = &self.result {
             vectors.extend(super::sparam::names(run));
         }
+        vectors.extend(self.saved_quantities());
         vectors
     }
 }
 
 /// ngspice `ft_typenames` (frontend/typesdef.c:38) for the units a vector
 /// can carry, as `settype` spells them in this host.
-fn type_name(unit: &SignalUnit) -> &'static str {
+pub(super) fn type_name(unit: &SignalUnit) -> &'static str {
     match unit {
         SignalUnit::Volt => "voltage",
         SignalUnit::Ampere => "current",

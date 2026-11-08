@@ -189,31 +189,33 @@ impl ControlCircuit {
 }
 
 impl ControlCircuit {
-    /// The name ngspice gives a vector's scale: a DC sweep's is named for
-    /// what it sweeps (spicelib/analysis/dctrcurv.c:181), not for the source.
     fn scale_name(&self, scale: &ControlVector) -> String {
         match self.dataset(&scale.dataset) {
-            Some(dataset)
-                if matches!(dataset.result, ControlAnalysisResult::DcSweep(_))
-                    && dataset.scale_name() == scale.expression =>
-            {
-                let source = scale.expression.as_str();
-                if source.eq_ignore_ascii_case("temp") || source.eq_ignore_ascii_case("temper") {
-                    return "temp-sweep".into();
-                }
-                match source
-                    .chars()
-                    .next()
-                    .map(|first| first.to_ascii_lowercase())
-                {
-                    Some('v') => "v-sweep".into(),
-                    Some('i') => "i-sweep".into(),
-                    Some('r') => "res-sweep".into(),
-                    _ => scale.expression.clone(),
-                }
-            }
+            Some(dataset) if dataset.scale_name() == scale.expression => plot_scale_name(dataset),
             _ => scale.expression.clone(),
         }
+    }
+}
+
+/// The name ngspice gives a plot's scale: a DC sweep's is named for what it
+/// sweeps (spicelib/analysis/dctrcurv.c:181), not for the source.
+pub(super) fn plot_scale_name(dataset: &ControlNamedDataset) -> String {
+    let source = dataset.scale_name();
+    if !matches!(dataset.result, ControlAnalysisResult::DcSweep(_)) {
+        return source.to_owned();
+    }
+    if source.eq_ignore_ascii_case("temp") || source.eq_ignore_ascii_case("temper") {
+        return "temp-sweep".into();
+    }
+    match source
+        .chars()
+        .next()
+        .map(|first| first.to_ascii_lowercase())
+    {
+        Some('v') => "v-sweep".into(),
+        Some('i') => "i-sweep".into(),
+        Some('r') => "res-sweep".into(),
+        _ => source.to_owned(),
     }
 }
 

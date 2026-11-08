@@ -260,17 +260,16 @@ pub(super) fn run(
                 }
                 ControlCommandEffect::Presentation(request) => match &request.kind {
                     ControlPresentationKind::File { path, text, append } => {
-                        if let Err(reason) = control_files.record(path, text, *append, args)? {
-                            return Err(map_command(
-                                ControlError::new(
-                                    request.command.line,
-                                    ControlErrorKind::Host,
-                                    reason,
-                                ),
-                                script,
-                                args,
-                            ));
-                        }
+                        let line = request.command.line;
+                        control_files.record(path, text.as_bytes(), *append, line, script, args)?;
+                    }
+                    ControlPresentationKind::RawFile {
+                        path,
+                        bytes,
+                        append,
+                    } => {
+                        let line = request.command.line;
+                        control_files.record(path, bytes, *append, line, script, args)?;
                     }
                     ControlPresentationKind::Text(_)
                     | ControlPresentationKind::Listing

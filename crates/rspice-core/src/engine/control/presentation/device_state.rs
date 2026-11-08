@@ -62,6 +62,33 @@ fn report_value(report: &DeviceOpReport, device: &str, quantity: &str) -> Option
     Some(report.entries[entry].params[parameter].1)
 }
 
+impl ControlNamedDataset {
+    /// The vectors a `save` of a device quantity put in this plot.
+    pub(super) fn saved_quantities(&self) -> impl Iterator<Item = (String, &'static str)> + '_ {
+        self.saved_device_quantities
+            .iter()
+            .filter(|(device, quantity)| match &self.result {
+                ControlAnalysisResult::OperatingPoint(_) => self
+                    .device_op_report
+                    .as_deref()
+                    .is_some_and(|report| report_position(report, device, quantity).is_some()),
+                ControlAnalysisResult::DcSweep(result) => {
+                    result.points.first().is_some_and(|point| {
+                        report_position(&point.device_op_report, device, quantity).is_some()
+                    })
+                }
+                ControlAnalysisResult::Transient(result) => {
+                    result.device_op_traces.iter().any(|trace| {
+                        is_device(&trace.device_name, device)
+                            && trace.parameter.eq_ignore_ascii_case(quantity)
+                    })
+                }
+                _ => false,
+            })
+            .map(|(device, quantity)| (format!("@{device}[{quantity}]"), "notype"))
+    }
+}
+
 impl ControlCircuit {
     /// Have ready what the quantities a command names read: the bias of a
     /// small-signal analysis, and a device's instance parameters, which

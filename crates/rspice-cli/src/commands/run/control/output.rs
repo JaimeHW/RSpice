@@ -26,7 +26,8 @@ pub(super) fn present(
         | ControlPresentationKind::Listing
         | ControlPresentationKind::ResourceUsage
         | ControlPresentationKind::Ignored(_)
-        | ControlPresentationKind::File { .. } => return Ok(Vec::new()),
+        | ControlPresentationKind::File { .. }
+        | ControlPresentationKind::RawFile { .. } => return Ok(Vec::new()),
     };
     let summary_stdout = args.summary.as_deref() == Some(Path::new("-"));
     if options.is_none() && !summary_stdout {
@@ -385,11 +386,11 @@ fn same_owner(a: &rspice_core::CurrentImpulseOwner, b: &rspice_core::CurrentImpu
 /// claims a destination once.
 #[derive(Default)]
 pub(super) struct ControlFiles {
-    files: Vec<(PathBuf, String)>,
+    files: Vec<(PathBuf, Vec<u8>)>,
 }
 
 impl ControlFiles {
-    /// Record a redirection's text: `>` replaces the file, `>>` appends to
+    /// Record a file the script writes: `>` replaces it, `>>` appends to
     /// it, to the bytes already on disk when this run has not written it.
     /// A relative path names a file in the deck's directory, where ngspice
     /// -b run from there writes it; a path that leaves that directory is
@@ -397,43 +398,51 @@ impl ControlFiles {
     pub(super) fn record(
         &mut self,
         path: &str,
-        text: &str,
+        bytes: &[u8],
         append: bool,
+        line: usize,
+        script: &ControlScriptSource,
         args: &RunArgs,
-    ) -> Result<Result<(), String>, CliError> {
+    ) -> Result<(), CliError> {
         let destination = match control_file_destination(path, args)? {
             Ok(destination) => destination,
-            Err(reason) => return Ok(Err(reason)),
+            Err(reason) => {
+                return Err(super::map_command(
+                    ControlError::new(line, ControlErrorKind::Host, reason),
+                    script,
+                    args,
+                ));
+            }
         };
         match self
             .files
             .iter_mut()
             .find(|(known, _)| *known == destination)
         {
-            Some((_, contents)) if append => contents.push_str(text),
-            Some((_, contents)) => *contents = text.to_owned(),
+            Some((_, contents)) if append => contents.extend_from_slice(bytes),
+            Some((_, contents)) => *contents = bytes.to_vec(),
             None => {
                 let mut contents = if append {
-                    match std::fs::read_to_string(&destination) {
+                    match std::fs::read(&destination) {
                         Ok(existing) => existing,
-                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
                         Err(error) => return Err(CliError::output_error(&destination, error)),
                     }
                 } else {
-                    String::new()
+                    Vec::new()
                 };
-                contents.push_str(text);
+                contents.extend_from_slice(bytes);
                 self.files.push((destination, contents));
             }
         }
-        Ok(Ok(()))
+        Ok(())
     }
 
     /// Publish every recorded file; returns their paths.
     pub(super) fn publish(self) -> Result<Vec<PathBuf>, CliError> {
         let mut written = Vec::with_capacity(self.files.len());
         for (path, contents) in self.files {
-            publish_bytes(&path, contents.as_bytes())?;
+            publish_bytes(&path, &contents)?;
             written.push(path);
         }
         Ok(written)

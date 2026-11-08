@@ -69,6 +69,47 @@ fn control_redirection_writes_files_in_the_decks_directory() {
     assert!(!outside.exists());
 }
 
+/// `write` puts its raw file in the deck's directory, and is a destination
+/// like any other: neither `-o` nor the deck can be written over, and a path
+/// that leaves the directory is refused by name.
+#[test]
+fn control_write_publishes_a_raw_file_under_the_run_ownership_rules() {
+    let dir = test_dir("control-write");
+    let script =
+        |line: &str| format!("write\nV1 in 0 1\nR1 in 0 1k\n.control\nop\n{line}\n.endc\n.end\n");
+
+    let deck = dir.join("write.cir");
+    std::fs::write(&deck, script("write out.raw v(in)")).unwrap();
+    passed(&run(&deck, &dir.join("result.csv"), &[]));
+    let raw = std::fs::read(dir.join("out.raw")).unwrap();
+    assert!(raw.starts_with(b"Title: write\n"));
+    assert!(raw.windows(8).any(|window| window == b"Binary:\n"));
+
+    let claimed = dir.join("claimed.cir");
+    std::fs::write(&claimed, script("write claimed.csv")).unwrap();
+    let out = run(&claimed, &dir.join("claimed.csv"), &[]);
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("collides with"), "{stderr}");
+
+    let source = dir.join("source.cir");
+    std::fs::write(&source, script("write source.cir")).unwrap();
+    let authored = std::fs::read(&source).unwrap();
+    let out = run(&source, &dir.join("source.csv"), &[]);
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("would overwrite source"), "{stderr}");
+    assert_eq!(std::fs::read(&source).unwrap(), authored);
+
+    let escape = dir.join("escape.cir");
+    std::fs::write(&escape, script("write ../escaped.raw")).unwrap();
+    let out = run(&escape, &dir.join("escape.csv"), &[]);
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("outside the deck's directory"), "{stderr}");
+    assert!(!dir.parent().unwrap().join("escaped.raw").exists());
+}
+
 /// A block the script never closes runs none of itself and nothing after it;
 /// ngspice-46 prints `before` alone and exits 0, saying nothing of the
 /// block, and the run also warns which block is unclosed.

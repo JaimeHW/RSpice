@@ -3272,6 +3272,228 @@ fn a_device_quantity_no_device_answers_is_refused_by_name() {
     assert!(error.contains("@R1[NOPE]"), "{error}");
 }
 
+/// One section of a raw file: its plot, flags, `name type` variables and
+/// points, with each ASCII row's numbers.
+#[derive(Debug, PartialEq)]
+struct RawSection {
+    plot: String,
+    flags: String,
+    variables: Vec<String>,
+    points: usize,
+    values: Vec<Vec<f64>>,
+}
+
+fn ascii_raw(text: &str) -> Vec<RawSection> {
+    let mut sections: Vec<RawSection> = Vec::new();
+    for line in text.lines() {
+        if let Some(plot) = line.strip_prefix("Plotname: ") {
+            sections.push(RawSection {
+                plot: plot.into(),
+                flags: String::new(),
+                variables: Vec::new(),
+                points: 0,
+                values: Vec::new(),
+            });
+        }
+        let Some(section) = sections.last_mut() else {
+            continue;
+        };
+        if let Some(flags) = line.strip_prefix("Flags: ") {
+            section.flags = flags.into();
+        } else if let Some(points) = line.strip_prefix("No. Points: ") {
+            section.points = points.parse().unwrap();
+        } else if let Some(variable) = line
+            .strip_prefix('\t')
+            .filter(|_| section.values.is_empty())
+            && let [_, name, kind, ..] = variable.split('\t').collect::<Vec<_>>()[..]
+                .iter()
+                .map(|field| field.split(' ').next().unwrap())
+                .collect::<Vec<_>>()[..]
+        {
+            section.variables.push(format!("{name} {kind}"));
+        } else if let Some((first, rest)) = line.trim_start().split_once('\t')
+            && first.parse::<usize>().is_ok()
+        {
+            section.values.push(vec![rest.parse().unwrap()]);
+        } else if let Some(value) = line.strip_prefix('\t') {
+            section
+                .values
+                .last_mut()
+                .unwrap()
+                .push(value.parse().unwrap());
+        }
+    }
+    sections
+}
+
+fn raw_files(presented: &[ControlPresentation]) -> Vec<(String, Vec<u8>, bool)> {
+    presented
+        .iter()
+        .filter_map(|request| match &request.kind {
+            ControlPresentationKind::RawFile {
+                path,
+                bytes,
+                append,
+            } => Some((path.clone(), bytes.clone(), *append)),
+            _ => None,
+        })
+        .collect()
+}
+
+fn run_write(deck: &str, script: &str) -> Vec<(String, Vec<u8>, bool)> {
+    let engine = Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Ngspice));
+    let source = format!("{deck}.control\n{script}.endc\n.end\n");
+    let (_, presented) = drive(&source, &engine, |_| {});
+    raw_files(&presented)
+}
+
+fn names_of(section: &RawSection) -> Vec<&str> {
+    section.variables.iter().map(String::as_str).collect()
+}
+
+/// A section lists the plot's scale first, then what was named; a node and a
+/// branch are written `v(name)` and `i(name)`, and arithmetic has no type.
+/// Each list here is the header ngspice-46 writes for the same `write`.
+#[test]
+fn write_names_an_operating_points_vectors_as_ngspice_does() {
+    let deck = "* w op\nV1 a 0 1\nR1 a b 1k\nR2 b 0 1k\nL1 b c 1u\nR3 c 0 10\n";
+    let files = run_write(
+        deck,
+        "set filetype=ascii\nop\nwrite\nwrite one.raw v(b)\n\
+         write three.raw v(b)*2 v(a)-v(b) i(l1)+1\nwrite four.raw v(b) b c\nwrite five.raw 3\n",
+    );
+    let sections = |index: usize| ascii_raw(std::str::from_utf8(&files[index].1).unwrap());
+    assert_eq!(files[0].0, "rawspice.raw");
+    assert_eq!(
+        names_of(&sections(0)[0]),
+        [
+            "v(a) voltage",
+            "v(b) voltage",
+            "v(c) voltage",
+            "i(l1) current",
+            "i(v1) current"
+        ]
+    );
+    let one = sections(1);
+    assert_eq!(names_of(&one[0]), ["v(a) voltage", "v(b) voltage"]);
+    assert_eq!(one[0].plot, "Operating Point");
+    assert_eq!(one[0].points, 1);
+    assert!((one[0].values[0][1] - 9.803921568627451e-3).abs() < 1e-12);
+    assert_eq!(
+        names_of(&sections(2)[0]),
+        [
+            "v(a) voltage",
+            "v(b)*2 notype",
+            "v(a)-v(b) notype",
+            "i(l1)+1 notype"
+        ]
+    );
+    assert_eq!(
+        names_of(&sections(3)[0]),
+        [
+            "v(a) voltage",
+            "v(b) voltage",
+            "v(b) voltage",
+            "v(c) voltage"
+        ]
+    );
+    assert_eq!(names_of(&sections(4)[0]), ["v(a) voltage", "3 notype"]);
+}
+
+/// Vectors of two plots make two sections, in the order first named, and a
+/// name that carries its plot keeps it: ngspice-46 writes `v(op1.v(b))`. A
+/// let of arithmetic has no type, and a short vector is padded with zeros.
+#[test]
+fn write_makes_a_section_per_plot_as_ngspice_does() {
+    let deck = "* w tran\nV1 a 0 PULSE(0 1 1n 1n 1n 5n 20n)\nR1 a b 1k\nR2 b 0 1k\nC1 b 0 1p\n";
+    let files = run_write(
+        deck,
+        "set filetype=ascii\nop\ntran 1n 5n\nwrite both.raw op1.v(b) v(b) i(v1) op1.i(v1)\n\
+         write all.raw\nlet w = v(b)*2\nwrite let.raw w\nwrite short.raw 3 v(b)\n\
+         ac lin 3 1k 100k\nwrite ac.raw v(b)\n",
+    );
+    let both = ascii_raw(std::str::from_utf8(&files[0].1).unwrap());
+    assert_eq!(both.len(), 2);
+    assert_eq!(both[0].plot, "Operating Point");
+    assert_eq!(
+        names_of(&both[0]),
+        [
+            "v(a) voltage",
+            "v(op1.v(b)) voltage",
+            "i(op1.i(v1)) current"
+        ]
+    );
+    assert_eq!(both[1].plot, "Transient Analysis");
+    assert_eq!(
+        names_of(&both[1]),
+        ["time time", "v(b) voltage", "i(v1) current"]
+    );
+    assert_eq!(both[1].points, both[1].values.len());
+    assert!(both[1].points > 1);
+
+    let all = ascii_raw(std::str::from_utf8(&files[1].1).unwrap());
+    assert_eq!(
+        names_of(&all[0]),
+        ["time time", "v(a) voltage", "v(b) voltage", "i(v1) current"]
+    );
+    let of_let = ascii_raw(std::str::from_utf8(&files[2].1).unwrap());
+    assert_eq!(names_of(&of_let[0]), ["time time", "w notype"]);
+
+    let short = std::str::from_utf8(&files[3].1).unwrap();
+    assert!(short.contains("\t1\t3\tnotype dims=1\n"), "{short}");
+    let short = ascii_raw(short);
+    assert_eq!(short[0].values[0][1], 3.0);
+    assert_eq!(short[0].values[1][1], 0.0);
+
+    let ac = std::str::from_utf8(&files[4].1).unwrap();
+    assert!(ac.contains("Flags: complex\n"), "{ac}");
+    assert!(
+        ac.contains(" 0\t1.000000000000000e+03,0.000000000000000e+00\n"),
+        "{ac}"
+    );
+}
+
+/// ngspice's default is binary: doubles after a `Binary:` line. `appendwrite`
+/// asks the host to add to the file.
+#[test]
+fn write_defaults_to_binary_and_appendwrite_appends() {
+    let deck = "* w bin\nV1 a 0 1\nR1 a b 1k\nR2 b 0 1k\n";
+    let files = run_write(
+        deck,
+        "op\nwrite b.raw v(b)\nset appendwrite\nwrite b.raw v(a)\n",
+    );
+    assert!(!files[0].2);
+    assert!(files[1].2);
+    let bytes = &files[0].1;
+    let values = bytes
+        .windows(8)
+        .position(|window| window == b"Binary:\n")
+        .map(|start| &bytes[start + 8..])
+        .expect("a binary section");
+    assert_eq!(values.len(), 16);
+    let b = f64::from_le_bytes(values[8..16].try_into().unwrap());
+    assert!((b - 0.5).abs() < 1e-12, "{b}");
+}
+
+/// `write` with no list writes what `save` kept of a device; ngspice-46 lists
+/// `v(c)`, then `@q1[gm]`, with the gm of the deck above.
+#[test]
+fn write_lists_a_saved_device_quantity() {
+    let deck = "device\nVCC c 0 5\nVB b 0 dc 0.7\nR1 c 0 1k\nQ1 c b 0 npn1\n\
+                .model npn1 NPN(IS=1e-15 BF=100 VAF=20 VAR=30 IKF=10m RB=10 RC=1 RE=1 CJE=1p \
+                CJC=1p TF=1n)\n";
+    let files = run_write(deck, "set filetype=ascii\nsave @q1[gm] c\nop\nwrite\n");
+    let text = std::str::from_utf8(&files[0].1).unwrap();
+    assert!(text.contains("\t@q1[gm]\tnotype\n"), "{text}");
+    assert_eq!(ascii_raw(text)[0].variables[0], "v(c) voltage");
+    assert!(
+        ascii_raw(text)[0]
+            .values
+            .iter()
+            .any(|row| row.iter().any(|value| (value - 2.298115e-2).abs() < 1e-7))
+    );
+}
+
 #[test]
 fn a_save_command_narrows_the_vectors_a_later_analysis_keeps() {
     // ngspice `save` (frontend/breakp2.c:34) narrows what the next run keeps,

@@ -12,6 +12,7 @@ mod linear;
 mod measure;
 mod noise;
 mod pole_zero;
+mod rawfile;
 mod sensitivity;
 mod sparam;
 mod spectrum;
@@ -132,6 +133,13 @@ pub enum ControlPresentationKind {
     File {
         path: String,
         text: String,
+        append: bool,
+    },
+    /// A raw file `write` made, which the presentation host writes as it
+    /// writes `File`; a binary one is not text.
+    RawFile {
+        path: String,
+        bytes: Vec<u8>,
         append: bool,
     },
 }

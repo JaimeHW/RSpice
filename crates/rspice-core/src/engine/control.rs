@@ -130,6 +130,8 @@ enum CommandKind {
     WriteSParameters,
     /// `wrdata file vectors`.
     WriteData,
+    /// `write [file [vectors]]`: a raw file.
+    WriteRaw,
     /// `cutout`: a transient plot of a window of the current one.
     Cutout,
     /// `linearize`: a transient plot of the current one on an even grid.
@@ -198,6 +200,7 @@ impl CommandKind {
             "compose" => Self::Compose,
             "wrs2p" => Self::WriteSParameters,
             "wrdata" => Self::WriteData,
+            "write" => Self::WriteRaw,
             "cutout" => Self::Cutout,
             "linearize" => Self::Linearize,
             "fft" => Self::Fft,
@@ -759,6 +762,17 @@ impl ControlCircuit {
                     ControlCommandEffect::CircuitChanged,
                 )),
             },
+            CommandKind::WriteRaw => {
+                let (path, bytes) = self.write_raw(command, variables, abort)?;
+                Ok(Self::batch_output(
+                    command,
+                    ControlPresentationKind::RawFile {
+                        path: self.script_file(path),
+                        bytes,
+                        append: self.shell.contains_key("appendwrite"),
+                    },
+                ))
+            }
             CommandKind::Compose => {
                 self.compose(command, variables, abort)?;
                 Ok(PreparedCommand::Complete(
@@ -1064,17 +1078,19 @@ impl ControlCircuit {
         engine
             .ensure_result_values(retained_values)
             .map_err(|error| simulation_error(line, error))?;
-        let saved_device_quantities = netlist
+        let mut saved_device_quantities = netlist
             .saves
             .signals
             .iter()
             .filter_map(|signal| match signal {
                 crate::netlist::SaveSignal::DeviceParam { device, param } => {
-                    Some((device.clone(), param.clone()))
+                    Some((device.to_ascii_lowercase(), param.to_ascii_lowercase()))
                 }
                 _ => None,
             })
-            .collect();
+            .collect::<Vec<_>>();
+        saved_device_quantities.sort();
+        saved_device_quantities.dedup();
         self.device_state = match &result {
             ControlAnalysisResult::OperatingPoint(_) => device_op_report
                 .clone()
@@ -1391,7 +1407,11 @@ impl ControlCircuit {
             }
         };
         match self.evaluate_vector(&parsed, variables, line, abort) {
-            Ok(value) => Ok(Evaluated::Vector { value, scalar }),
+            Ok(value) => Ok(Evaluated::Vector {
+                value,
+                scalar,
+                arithmetic: matches!(parsed, Expr::BinOp { .. } | Expr::UnaryOp { .. }),
+            }),
             Err(error)
                 if matches!(
                     error.kind,
@@ -1412,6 +1432,8 @@ enum Evaluated {
     Vector {
         value: VectorValue,
         scalar: Option<ControlError>,
+        /// Whether the value is the result of an operator.
+        arithmetic: bool,
     },
 }
 
@@ -1425,7 +1447,7 @@ impl ControlScalarEvaluator for ControlCircuit {
     ) -> Result<ComplexValue, ControlError> {
         match self.vector_or_scalar(expression, variables, line, abort)? {
             Evaluated::Scalar(value) => Ok(value),
-            Evaluated::Vector { value, scalar } => match value.samples.as_slice() {
+            Evaluated::Vector { value, scalar, .. } => match value.samples.as_slice() {
                 [value] => Ok(*value),
                 samples => Err(scalar.unwrap_or_else(|| {
                     ControlError::new(
@@ -1456,8 +1478,11 @@ impl ControlScalarEvaluator for ControlCircuit {
                 self.bind_scalar(name, value, line)?;
                 Ok(Some(value))
             }
-            Evaluated::Vector { value, .. } => {
+            Evaluated::Vector {
+                value, arithmetic, ..
+            } => {
                 self.bind_vector(name, value, line)?;
+                self.set_vector_untyped(name, arithmetic);
                 Ok(None)
             }
         }

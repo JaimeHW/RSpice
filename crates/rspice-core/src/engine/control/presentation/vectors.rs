@@ -27,6 +27,9 @@ struct UserVector {
     /// A scalar `let` keeps its session parameter, which answers every read
     /// that does not name a plot; this copy answers `plot.name`.
     scalar: bool,
+    /// Bound from arithmetic, which ngspice gives no type however this host
+    /// carries its unit.
+    untyped: bool,
 }
 
 /// A plot `setplot new` made (frontend/vectors.c:1164). It holds only the
@@ -446,6 +449,7 @@ impl ControlCircuit {
                 let vector = &mut self.vectors.vectors[index];
                 vector.value = value;
                 vector.scalar = scalar;
+                vector.untyped = false;
             }
             None => self.push_vector(name, value, scalar),
         }
@@ -651,7 +655,20 @@ impl ControlCircuit {
             plot,
             value,
             scalar,
+            untyped: false,
         });
+    }
+
+    /// Mark the `let` vector just bound as the result of arithmetic or not.
+    pub(in crate::engine::control) fn set_vector_untyped(&mut self, name: &str, untyped: bool) {
+        if let Some(index) = self.find_vector(name, true) {
+            self.vectors.vectors[index].untyped = untyped;
+        }
+    }
+
+    pub(super) fn is_untyped_vector(&self, name: &str) -> bool {
+        self.find_vector(name, true)
+            .is_some_and(|index| self.vectors.vectors[index].untyped)
     }
 
     /// The scale a vector of `length` elements follows, as `vector_scale`
@@ -1129,6 +1146,25 @@ impl ControlCircuit {
             .unwrap_or_else(|| "const".into())
     }
 
+    /// Every point of a plot's scale.
+    pub(super) fn dataset_scale(
+        &self,
+        scale: &ControlNamedDataset,
+        line: usize,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<ComplexValue>, ControlError> {
+        let mut samples = Vec::with_capacity(scale.length());
+        for row in 0..scale.length() {
+            aborted(abort, line)?;
+            let value = scale
+                .scale_value(row)
+                .filter(|value| value.is_finite())
+                .ok_or_else(|| command_error(line, "dataset scale is unavailable or nonfinite"))?;
+            samples.push(value.into());
+        }
+        Ok(samples)
+    }
+
     /// The scale a vector follows (`v_scale`): its plot's, when the lengths
     /// agree, else a user plot's of its length, else its indices.
     pub(in crate::engine::control) fn vector_scale(
@@ -1145,27 +1181,14 @@ impl ControlCircuit {
                 .and_then(|name| self.dataset(name))
                 .filter(|scale| scale.length() == value.samples.len())
             {
-                Some(scale) => {
-                    let mut samples = Vec::with_capacity(scale.length());
-                    for row in 0..scale.length() {
-                        aborted(abort, line)?;
-                        let value = scale
-                            .scale_value(row)
-                            .filter(|value| value.is_finite())
-                            .ok_or_else(|| {
-                                command_error(line, "dataset scale is unavailable or nonfinite")
-                            })?;
-                        samples.push(value.into());
-                    }
-                    ControlVector {
-                        expression: scale.scale_name().into(),
-                        dataset: scale.name.clone(),
-                        unit: scale.scale_unit(),
-                        samples,
-                        current_sources: Vec::new(),
-                        voltage_sources: Vec::new(),
-                    }
-                }
+                Some(scale) => ControlVector {
+                    expression: scale.scale_name().into(),
+                    dataset: scale.name.clone(),
+                    unit: scale.scale_unit(),
+                    samples: self.dataset_scale(scale, line, abort)?,
+                    current_sources: Vec::new(),
+                    voltage_sources: Vec::new(),
+                },
                 None => match self.user_plot_scale(value.samples.len()) {
                     Some(scale) => ControlVector {
                         expression: scale.name.clone(),
