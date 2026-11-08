@@ -30,6 +30,10 @@ use std::collections::BTreeMap;
 use std::collections::{HashMap, HashSet};
 use std::f64::consts::PI;
 
+/// The least squared gain input-referred noise divides by: N_MINGAIN in
+/// ngspice-46 (`noisedef.h`) and Xyce 7.10, and the floor QSPICE applies.
+const MIN_NOISE_GAIN_SQUARED: Value = 1.0e-20;
+
 #[derive(Clone, Copy)]
 pub(in crate::engine) enum NoiseOutputPort<'a> {
     NodeIds {
@@ -417,8 +421,11 @@ impl Engine {
         )
     }
 
+    /// The squared input-to-output transfer `|H|^2` that input-referred noise
+    /// divides by, floored at [`MIN_NOISE_GAIN_SQUARED`]. A transfer null, a
+    /// balanced bridge read differentially say, refers its output noise
+    /// through the floor rather than refusing the analysis.
     fn effective_noise_gain_squared(
-        dialect: crate::engine::SpiceDialect,
         gain: Complex64,
         source_name: &str,
         frequency: Value,
@@ -429,34 +436,13 @@ impl Engine {
             )));
         }
         let magnitude = gain.norm();
-        let compatibility_floor = matches!(
-            dialect,
-            crate::engine::SpiceDialect::Ngspice | crate::engine::SpiceDialect::Xyce
-        );
-        if compatibility_floor && magnitude < 1.0e-10 {
-            // ngspice 46 noisedef.h/noisean.c and Xyce 7.10 N_ANP_NOISE.C
-            // both define N_MINGAIN as a squared-gain floor of 1e-20.
-            return Ok(1.0e-20);
-        }
-        if magnitude == 0.0 {
-            return Ok(0.0);
-        }
         let squared = magnitude * magnitude;
         if !squared.is_finite() {
             return Err(SimulationError::Circuit(format!(
                 "Input-referred noise gain squared overflowed for source '{source_name}' at {frequency} Hz"
             )));
         }
-        if squared == 0.0 {
-            return Err(SimulationError::Circuit(format!(
-                "Input-referred noise gain squared underflowed for source '{source_name}' at {frequency} Hz"
-            )));
-        }
-        Ok(if compatibility_floor {
-            squared.max(1.0e-20)
-        } else {
-            squared
-        })
+        Ok(squared.max(MIN_NOISE_GAIN_SQUARED))
     }
 
     fn referred_noise_density(
@@ -467,11 +453,6 @@ impl Engine {
     ) -> Result<Value, SimulationError> {
         if output_density == 0.0 {
             return Ok(0.0);
-        }
-        if gain_squared == 0.0 {
-            return Err(SimulationError::Circuit(format!(
-                "Input-referred noise is undefined for '{label}' at {frequency} Hz because the physical input-to-output transfer is zero while output noise is positive"
-            )));
         }
         let referred = output_density / gain_squared;
         if !referred.is_finite() {
@@ -3865,12 +3846,7 @@ impl Engine {
                 } else {
                     input.gain(transfer_solution)?
                 };
-                Self::effective_noise_gain_squared(
-                    noise_dialect,
-                    gain,
-                    input_source.unwrap_or("<unknown>"),
-                    freq,
-                )?
+                Self::effective_noise_gain_squared(gain, input_source.unwrap_or("<unknown>"), freq)?
             } else {
                 1.0
             };
@@ -4764,96 +4740,93 @@ mod tests {
     }
 
     #[test]
-    fn gain_floor_is_dialect_specific_and_extremes_fail_closed() {
-        let zero = crate::Complex64::new(0.0, 0.0);
-        for dialect in [
-            crate::engine::SpiceDialect::Ngspice,
-            crate::engine::SpiceDialect::Xyce,
-        ] {
+    fn gain_floor_is_n_mingain_and_overflow_fails_closed() {
+        for gain in [0.0, 1.0e-200, 1.0e-11] {
             assert_eq!(
-                Engine::effective_noise_gain_squared(dialect, zero, "VIN", 1.0e3)
-                    .expect("compatibility gain floor applies"),
+                Engine::effective_noise_gain_squared(
+                    crate::Complex64::new(gain, 0.0),
+                    "VIN",
+                    1.0e3
+                )
+                .expect("a transfer below the floor takes the floor"),
                 1.0e-20
             );
         }
         assert_eq!(
-            Engine::effective_noise_gain_squared(
-                crate::engine::SpiceDialect::BestAvailable,
-                zero,
-                "VIN",
-                1.0e3,
-            )
-            .expect("native exact transfer null is retained"),
-            0.0
+            Engine::effective_noise_gain_squared(crate::Complex64::new(0.0, 0.5), "VIN", 1.0e3)
+                .expect("an ordinary transfer is its own square"),
+            0.25
         );
         assert!(
             Engine::effective_noise_gain_squared(
-                crate::engine::SpiceDialect::BestAvailable,
-                crate::Complex64::new(1.0e-200, 0.0),
-                "VIN",
-                1.0e3,
-            )
-            .expect_err("nonrepresentable native squared gain must fail")
-            .to_string()
-            .contains("underflowed")
-        );
-        assert!(
-            Engine::effective_noise_gain_squared(
-                crate::engine::SpiceDialect::BestAvailable,
                 crate::Complex64::new(1.0e200, 0.0),
                 "VIN",
                 1.0e3,
             )
-            .expect_err("nonrepresentable native squared gain must fail")
+            .expect_err("nonrepresentable squared gain must fail")
             .to_string()
             .contains("overflowed")
         );
     }
 
+    /// A transfer null refers the output noise through the 1e-20 floor in
+    /// every dialect. A balanced bridge read differentially: QSPICE gives
+    /// onoise 1.6576e-17 V^2/Hz, 4kT times 500 Ohm from each leg, and inoise
+    /// 1657.6 V^2/Hz.
     #[test]
-    fn native_transfer_null_is_undefined_only_for_positive_output_noise() {
-        let noisy = Netlist::parse(
-            "Native transfer-null referral\n\
-             VIN in 0 0 AC 1\n\
-             RIN in 0 1k NOISY=0\n\
-             ROUT out 0 1k\n\
-             .END\n",
+    fn a_transfer_null_refers_through_the_gain_floor() {
+        let bridge = Netlist::parse(
+            "Balanced bridge
+             VIN in 0 0 AC 1
+             R1 in a 1000
+             R2 a 0 1000
+             R3 in b 1000
+             R4 b 0 1000
+             .END
+",
         )
-        .expect("transfer-null deck parses");
-        let error = Engine::default()
-            .run_noise_named_with_input_source(&noisy, "out", None, "VIN", &[1.0e3], 300.15)
-            .expect_err("native input referral at a noisy transfer null is undefined");
-        assert!(
-            error
-                .to_string()
-                .contains("physical input-to-output transfer is zero")
-        );
-
+        .expect("bridge deck parses");
         for dialect in [
+            crate::engine::SpiceDialect::BestAvailable,
             crate::engine::SpiceDialect::Ngspice,
             crate::engine::SpiceDialect::Xyce,
         ] {
             let result =
                 Engine::new(crate::engine::SimulationConfig::default().with_spice_dialect(dialect))
-                    .run_noise_named_with_input_source(&noisy, "out", None, "VIN", &[1.0e3], 300.15)
-                    .expect("compatibility dialect retains N_MINGAIN");
+                    .run_noise_named_with_input_source(
+                        &bridge,
+                        "a",
+                        Some("b"),
+                        "VIN",
+                        &[10.0],
+                        300.15,
+                    )
+                    .expect("a transfer null refers through the gain floor");
             assert_eq!(result[0].input_gain_squared, 1.0e-20);
-            assert!(result[0].input_referred_density.is_finite());
-            assert!(result[0].input_referred_density > 0.0);
+            let output = result[0].output_noise_density;
+            assert!(
+                (output - 1.6576e-17).abs() <= 1.0e-3 * 1.6576e-17,
+                "{dialect:?}: output noise {output:e}"
+            );
+            let referred = result[0].input_referred_density;
+            assert!(
+                (referred - output / 1.0e-20).abs() <= 1.0e-12 * referred,
+                "{dialect:?}: input-referred noise {referred:e}"
+            );
         }
 
         let quiet = Netlist::parse(
-            "Quiet native transfer null\n\
-             VIN in 0 0 AC 1\n\
-             RIN in 0 1k NOISY=0\n\
-             ROUT out 0 1k NOISY=0\n\
-             .END\n",
+            "Quiet transfer null
+             VIN in 0 0 AC 1
+             RIN in 0 1k NOISY=0
+             ROUT out 0 1k NOISY=0
+             .END
+",
         )
         .expect("quiet transfer-null deck parses");
         let result = Engine::default()
             .run_noise_named_with_input_source(&quiet, "out", None, "VIN", &[1.0e3], 300.15)
             .expect("zero output noise at a transfer null is exactly zero");
-        assert_eq!(result[0].input_gain_squared, 0.0);
         assert_eq!(result[0].output_noise_density, 0.0);
         assert_eq!(result[0].input_referred_density, 0.0);
     }
