@@ -524,7 +524,9 @@ pub fn nav_row_indented_response(
     meta: Option<&str>,
     level: usize,
 ) -> Response {
-    nav_row_indented_styled(ui, icon, label, selected, meta, level, false)
+    let response = nav_row_indented_styled(ui, icon, label, selected, meta, level, false);
+    rail::row(ui, &response, level + 1, None);
+    response
 }
 
 pub fn schematic_nav_row_indented_response(
