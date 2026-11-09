@@ -1092,6 +1092,47 @@ fn a_qspice_block_names_the_schematic_its_value_names() {
 }
 
 #[test]
+fn a_block_schematic_numbers_its_ports_in_the_order_of_the_symbol_pins() {
+    const DRAWING: &str = "«schematic
+  «component (0,0) 0 0
+    «symbol
+      «shorted pins: false»
+      «rect (-500,500) (500,-500) 0 0 0 0x4000000 0xffffff -1 1 -1»
+      «text (0,750) 1 12 0 0x1000000 -1 -1 \"X1\"»
+      «text (0,-300) 1.36 13 0 0x1000000 -1 -1 \"Buck\"»
+      «pin (-500,0) (0,0) 1 11 0 0x0 -1 \"IN\"»
+      «pin (500,0) (0,0) 1 7 0 0x0 -1 \"OUT\"»
+    »
+  »
+»
+";
+    const BLOCK: &str = "«schematic
+  «net (0,0) 1 7 1 \"out\"»
+  «net (500,0) 1 7 1 \"in\"»
+»
+";
+    let mut source = library();
+    source
+        .blocks
+        .insert("buck".to_owned(), PathBuf::from("Buck.qsch"));
+    let drawing = parse_qsch(&qsch_bytes(DRAWING)).unwrap();
+    let imported = import_foreign_schematic(&drawing, "work", &source);
+    let cell = imported.cells.first().expect("the block's cell");
+    let block = parse_qsch(&qsch_bytes(BLOCK)).unwrap();
+    let mut block = import_foreign_schematic(&block, "work", &source).document;
+    let names = |document: &crate::schematic::document::SchematicDocument| {
+        document
+            .interface_ports()
+            .into_iter()
+            .map(|port| port.name.to_ascii_uppercase())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(names(&block), ["OUT", "IN"], "the order the drawing has");
+    cell.order_block_ports(&mut block);
+    assert_eq!(names(&block), ["IN", "OUT"]);
+}
+
+#[test]
 fn a_qspice_net_flagged_as_a_port_is_a_port_of_its_drawing() {
     const DRAWING: &str = "«schematic
   «net (0,0) 1 7 1 \"LX\"»

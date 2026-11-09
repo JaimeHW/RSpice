@@ -249,7 +249,9 @@ fn import_tree(
                 tree.model_cards.extend(child.model_cards);
                 tree.notices.extend(child.notices);
                 tree.cells.extend(child.cells);
-                Some(child.document)
+                let mut document = child.document;
+                cell.order_block_ports(&mut document);
+                Some(document)
             }
             _ => None,
         };

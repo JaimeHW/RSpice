@@ -205,6 +205,24 @@ impl ForeignSymbolCell {
                 section: section.clone(),
             });
     }
+
+    /// Numbers a block schematic's ports in this cell's pin order. Its
+    /// instances write their terminals in that order, and a drawing's flags
+    /// fall in no order of their own.
+    pub fn order_block_ports(&self, schematic: &mut SchematicDocument) {
+        for component in &mut schematic.components {
+            let Some(port) = component.port_spec() else {
+                continue;
+            };
+            if let Some(place) = self
+                .ports
+                .iter()
+                .position(|pin| pin.name.eq_ignore_ascii_case(&port.name))
+            {
+                component.params = format!("{} interface_order={}", component.params, place + 1);
+            }
+        }
+    }
 }
 
 /// Whether a line of `text` opens `keyword name`.
