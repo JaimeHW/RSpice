@@ -127,6 +127,9 @@ impl NetlistProjectIndex {
         let mut index = Self::default();
         index.index_source(root, None, root_name, document.source());
         for dependency in document.dependencies() {
+            if document.is_veriloga_dependency(dependency) {
+                continue;
+            }
             let Some(source) = dependency.source() else {
                 continue;
             };
@@ -1706,6 +1709,106 @@ mod tests {
         assert_eq!(index.hierarchy()[1].path, "X1/XBUF");
         assert_eq!(index.hierarchy()[1].target, "leaf");
         assert_eq!(index.source_count(), 2);
+    }
+
+    #[test]
+    fn verilog_a_sources_stay_out_of_the_spice_project_index() {
+        let root = "root\n.veriloga \"device.va\"\n.include \"cell.inc\"\nX1 a 0 device\nX2 a 0 cell\n.end\n";
+        let device = "`include \"macros.va\"\nmodule device(a, b);\nendmodule\n";
+        let macros = "XCLIP = 1;\nXLIMIT = 2;\n.param hidden=1\n";
+        let cell = ".include \"leaf.inc\"\n.subckt cell a b\nR1 a b 1k\n.ends cell\n";
+        let leaf = ".subckt leaf a b\nR1 a b 1k\n.ends leaf\n";
+        let locator =
+            |name: &str| crate::state::SourceLocator::try_new(name, name).expect("a locator");
+        let dependencies = vec![
+            crate::state::DependencyMetadata::unresolved_direct_to(
+                0,
+                "device.va",
+                locator("device.va"),
+            )
+            .unwrap()
+            .resolve_utf8(device.as_bytes().to_vec())
+            .unwrap(),
+            crate::state::DependencyMetadata::unresolved_transitive_to(
+                locator("device.va"),
+                0,
+                "macros.va",
+                locator("macros.va"),
+            )
+            .unwrap()
+            .resolve_utf8(macros.as_bytes().to_vec())
+            .unwrap(),
+            crate::state::DependencyMetadata::unresolved_direct_to(
+                1,
+                "cell.inc",
+                locator("cell.inc"),
+            )
+            .unwrap()
+            .resolve_utf8(cell.as_bytes().to_vec())
+            .unwrap(),
+            crate::state::DependencyMetadata::unresolved_transitive_to(
+                locator("cell.inc"),
+                0,
+                "leaf.inc",
+                locator("leaf.inc"),
+            )
+            .unwrap()
+            .resolve_utf8(leaf.as_bytes().to_vec())
+            .unwrap(),
+        ];
+        let provenance = crate::state::GeneratedProvenance::try_new(
+            "language-veriloga-index-test",
+            crate::state::GenerationInput::new(
+                crate::product::ObjectRevision::INITIAL,
+                crate::state::content_digest("language-veriloga-index-input"),
+            ),
+        )
+        .unwrap();
+        let artifact = crate::state::GeneratedArtifact::try_from_utf8(
+            provenance,
+            root.as_bytes().to_vec(),
+            dependencies,
+            Vec::new(),
+        )
+        .unwrap();
+        let document = crate::state::NetlistDocument::from_generated(
+            crate::state::NetlistDocumentId::new(),
+            artifact,
+        )
+        .unwrap();
+
+        let index = NetlistProjectIndex::build(ActiveNetlistDocument::Generated, &document);
+
+        let instances = index
+            .hierarchy()
+            .iter()
+            .map(|instance| instance.path.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            instances,
+            ["X1", "X2"],
+            "only the deck's own instances elaborate"
+        );
+        assert!(index.definitions_named("hidden").is_empty());
+        assert!(
+            index
+                .symbols()
+                .iter()
+                .all(|symbol| !symbol.definition.display_name.ends_with(".va")),
+            "find-symbol must not reach Verilog-A text"
+        );
+        assert_eq!(index.definitions_named("cell").len(), 1);
+        assert_eq!(
+            index.definitions_named("leaf").len(),
+            1,
+            "a SPICE include of a SPICE include is still SPICE"
+        );
+        assert_eq!(index.source_count(), 3);
+        assert_eq!(
+            document.dependencies().len(),
+            4,
+            "the Includes rows read the dependencies, which stay"
+        );
     }
 
     #[test]

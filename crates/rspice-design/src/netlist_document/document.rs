@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 use rspice_vocabulary::product::{ContentDigest, ObjectRevision, RevisionError};
 
-use super::outline::{IncludeDirective, parse_include_directives};
+use super::outline::{IncludeDirective, IncludeKind, parse_include_directives};
 use super::search::{FindError, FindOptions, ReplaceOutcome, ReplaceScope, replace_in_source};
 
 const DOCUMENT_SCHEMA_VERSION: u32 = 1;
@@ -1161,6 +1161,31 @@ impl NetlistDocument {
     #[must_use]
     pub fn include_directives(&self) -> &[IncludeDirective] {
         &self.include_directives
+    }
+
+    /// Whether `dependency` is a `.VERILOGA` source or a file such a source
+    /// includes: Verilog-A text, which a SPICE reader must not parse.
+    #[must_use]
+    pub fn is_veriloga_dependency(&self, dependency: &DependencyMetadata) -> bool {
+        let mut current = dependency;
+        // One step per record at most, so an include cycle ends the walk.
+        for _ in 0..self.dependencies.len() {
+            if let Some(index) = current.direct_include_index {
+                return self
+                    .include_directives
+                    .get(index)
+                    .is_some_and(|include| include.kind() == IncludeKind::VerilogA);
+            }
+            let Some(parent) = self
+                .dependencies
+                .iter()
+                .find(|candidate| Some(&candidate.locator) == current.parent.as_ref())
+            else {
+                return false;
+            };
+            current = parent;
+        }
+        false
     }
 
     pub fn make_editable(
