@@ -18,11 +18,13 @@ mod generate;
 mod hierarchical_names;
 mod implicit_nets;
 mod packages;
+mod paramset;
 mod scope_rules;
 mod specify;
 mod udp;
 
 pub(crate) use config::WORK_LIBRARY;
+pub(crate) use paramset::PARAMSET_OVERLOAD_MARK;
 
 /// The deepest statement nesting the front end reads: every statement inside
 /// another statement, including a `begin` block and each `else if` of a
@@ -255,6 +257,7 @@ impl<'a> Parser<'a> {
         let mut items = Vec::new();
         let mut configs = Vec::new();
         let mut primitives = Vec::new();
+        let mut paramsets = Vec::new();
 
         while !self.at_end() {
             if self.check(TokenKind::KeywordSet) {
@@ -376,6 +379,8 @@ impl<'a> Parser<'a> {
                     )));
                 }
                 items.push(Item::ConnectRules(self.parse_connect_rules()?));
+            } else if self.at_paramset() {
+                paramsets.push(self.parse_paramset(attributes)?);
             } else if self.check(TokenKind::Discipline) {
                 items.push(Item::Discipline(self.parse_discipline()?));
             } else if self.check(TokenKind::Nature) {
@@ -415,6 +420,7 @@ impl<'a> Parser<'a> {
 
         // A primitive may be declared after the modules that instantiate it.
         udp::expand_instances(&mut items, &primitives)?;
+        self.bind_paramsets(paramsets, &mut items)?;
 
         let end_span = self.previous_span();
         Ok(SourceFile {

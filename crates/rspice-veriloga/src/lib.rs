@@ -154,6 +154,13 @@ pub use metrics::{
     PipelineControl, PipelineMetrics, PipelinePhase,
 };
 pub use parameter_override::ScalarParameterValue;
+/// The paramset name and declaration ordinal (from 1) of a module compiled for
+/// one of several paramsets that share a name (Verilog-AMS LRM 2.4 section
+/// 6.4.2), which a simulator picks among per instance.
+pub fn paramset_overload(module: &str) -> Option<(&str, usize)> {
+    let (name, ordinal) = module.rsplit_once(parser::PARAMSET_OVERLOAD_MARK)?;
+    Some((name, ordinal.parse().ok()?))
+}
 pub use parser::Parser;
 pub use preprocessor::{
     FileSystemSourceProvider, PreprocessedDependency, PreprocessedInclude, Preprocessor,

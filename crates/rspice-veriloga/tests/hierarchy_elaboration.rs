@@ -179,6 +179,107 @@ endmodule
     assert!(!lookup.contains(hidden_name.as_str()));
 }
 
+const PARAMSET_MASTER: &str = r#"
+`include "disciplines.vams"
+module res(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real r = 1 from (0:inf);
+    analog I(p, n) <+ V(p, n) / r;
+endmodule
+"#;
+
+/// `paramset` (Verilog-AMS LRM 2.4 section 6.4): a named module plus
+/// overrides, selected as an instance master. An instance sets the
+/// paramset's own parameters, which keep their ranges; the module's
+/// parameters are reached only through the paramset's assignments.
+#[test]
+fn a_paramset_instantiates_its_module_through_its_own_parameters() {
+    let source = format!(
+        "{PARAMSET_MASTER}
+paramset smallres res;
+    (* desc = \"half the resistance\" *) parameter real rr = 1k from (0:inf);
+    localparam real twice = 2;
+    .r = rr * twice;
+endparamset
+"
+    );
+    let model = compile_selected(&source, "smallres");
+    assert_eq!(
+        model
+            .parameters
+            .iter()
+            .filter(|parameter| parameter.is_public)
+            .map(|parameter| parameter.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["rr"]
+    );
+    let mut device = model.device("X1", &[1, 0]);
+    device.update_voltages(&[2.0]);
+    assert_eq!(first_port_currents(&model, &mut device), vec![2.0 / 2000.0]);
+    assert!(device.set_parameter("rr", 500.0));
+    device
+        .try_resolve_parameter_defaults()
+        .expect("a paramset parameter reaches the module through its assignment");
+    assert_eq!(first_port_currents(&model, &mut device), vec![2.0 / 1000.0]);
+    assert!(
+        !device.set_parameter("r", 5.0),
+        "an instance cannot set a module parameter the paramset does not declare"
+    );
+    assert!(
+        device.try_set_parameter("rr", 0.0).is_err(),
+        "rr keeps its range"
+    );
+
+    let compiler = VerilogACompiler::new(CompilerOptions::default());
+    for (paramsets, expected) in [
+        (
+            "paramset b missing; parameter real x = 1; endparamset",
+            "its module 'missing' is not declared in this source",
+        ),
+        (
+            "paramset res res; parameter real x = 1; .r = x; endparamset",
+            "Duplicate module or paramset declaration: 'res'",
+        ),
+        (
+            "paramset c res; analog I(p) <+ 1; endparamset",
+            "a paramset declares parameters and assigns module parameters",
+        ),
+    ] {
+        let error = compiler
+            .compile_module(&format!("{PARAMSET_MASTER}{paramsets}"), Some("res"))
+            .expect_err("the paramset is refused")
+            .to_string();
+        assert!(error.contains(expected), "{error}");
+    }
+}
+
+/// Same-named paramsets (Verilog-AMS LRM 2.4 section 6.4.2) become one module
+/// each, so a simulator can pick among them per instance.
+#[test]
+fn overloaded_paramsets_compile_as_one_module_each() {
+    let source = format!(
+        "{PARAMSET_MASTER}
+paramset rr res;
+    parameter real w = 1 from (0:1];
+    .r = 100;
+endparamset
+paramset rr res;
+    parameter real w = 2 from (1:inf);
+    .r = 200;
+endparamset
+"
+    );
+    for (module, ordinal, resistance) in [("rr#1", 1, 100.0), ("rr#2", 2, 200.0)] {
+        assert_eq!(rspice_veriloga::paramset_overload(module), Some(("rr", ordinal)));
+        let model = compile_selected(&source, module);
+        let mut device = model.device("X1", &[1, 0]);
+        device.update_voltages(&[1.0]);
+        assert_eq!(first_port_currents(&model, &mut device), vec![1.0 / resistance]);
+    }
+    assert_eq!(rspice_veriloga::paramset_overload("rr"), None);
+}
+
 #[test]
 fn defaulted_child_parameter_preserves_param_given_false() {
     let model = compile_selected(

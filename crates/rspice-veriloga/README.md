@@ -176,6 +176,9 @@ which a compile runs on a thread of its own sized for those bounds.
   defaults, ranges and exclusions, localparams, `aliasparam`, attribute
   instances (`(* desc, units *)`), string parameters (with `from '{"a", "b"}`
   and `exclude` value sets, checked per instance).
+- **Paramsets**: `paramset`/`endparamset` read as the module they stand for, with
+  the instance setting exactly the paramset's parameters; same-named paramsets
+  are selected per instance by the rules of LRM 2.4 section 6.4.2.
 - **Structure**: internal nodes, named branches, scalar ground nets, user
   disciplines beyond electrical, ANSI and non-ANSI port styles. Ground
   qualifiers inherit the declared discipline (`thermal g; ground g;`) and typed
