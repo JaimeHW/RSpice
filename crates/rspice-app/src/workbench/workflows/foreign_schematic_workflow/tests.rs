@@ -213,6 +213,26 @@ fn a_parameter_written_twice_is_one_variable_and_two_values_stay_in_order() {
     );
 }
 
+/// A step that only cycles Monte Carlo runs keeps its whole sweep in the
+/// plan: the first value states the variable once, and every value is an
+/// axis point.
+#[test]
+fn a_monte_carlo_step_keeps_every_point_of_its_sweep() {
+    let plan = plan_cards(vec![
+        card(ForeignCardRole::Analysis, ".ac oct 100 300K 10Meg"),
+        card(
+            ForeignCardRole::Step,
+            ".step param X 0 20 1 ; cycles the draws",
+        ),
+    ]);
+    let axes = axes(&plan);
+    assert_eq!(axes.len(), 1);
+    assert_eq!(axes[0].0, RunSetDimensionKind::Parameter);
+    assert_eq!(axes[0].1, (0..=20).map(f64::from).collect::<Vec<_>>());
+    assert_eq!(plan.variables, [("X".to_owned(), "0".to_owned())]);
+    assert!(plan.kept.is_empty(), "{:?}", plan.kept);
+}
+
 fn plan_cards(cards: Vec<ForeignCard>) -> ForeignPlan {
     plan_from_cards(cards, &SchematicDocument::default(), |_| None)
 }
