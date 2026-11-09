@@ -277,6 +277,7 @@ pub fn import_foreign_schematic(
         pin_leads: HashMap::new(),
         markers: Vec::new(),
         device_ties: Vec::new(),
+        supplied_parts: Vec::new(),
         behaviours: Vec::new(),
     };
     let resolved = drawing
@@ -382,6 +383,7 @@ struct Builder<'a> {
     /// Terminals of LTspice A-devices that LTspice grounds when nothing
     /// else reaches them.
     device_ties: Vec<DeviceTie>,
+    supplied_parts: Vec<SuppliedPart>,
     /// The subcircuits written for QSPICE's behavioural devices.
     behaviours: Vec<String>,
 }
@@ -394,6 +396,13 @@ type Resolved = (
 
 /// A terminal of an LTspice A-device, tied to ground unless its source pin
 /// (`None`: it has none) meets a wire, a flag or another pin.
+/// A functional part whose output draws its current through two supply
+/// pins: each pin's source position and terminal.
+struct SuppliedPart {
+    component: u64,
+    supply_pins: [(Point, Point); 2],
+}
+
 struct DeviceTie {
     source: Option<Point>,
     terminal: Point,
@@ -1118,6 +1127,15 @@ impl Builder<'_> {
         } else {
             self.place_fitted(&mut component, &targets, offsets)
         };
+        if let Some([positive, negative]) = plan.supply_pins {
+            self.supplied_parts.push(SuppliedPart {
+                component: id,
+                supply_pins: [
+                    (targets[positive], points[positive]),
+                    (targets[negative], points[negative]),
+                ],
+            });
+        }
         for (terminal, point) in binding.terminal_order.iter().zip(points) {
             self.terminals.push((id, terminal.clone(), point));
         }
@@ -1451,6 +1469,45 @@ impl Builder<'_> {
         )
     }
 
+    /// A part whose supply pins are both open has nothing to draw output
+    /// current from, so LTspice leaves it only its own 100 MOhm output
+    /// resistance and no output swing limit. RSpice's Op-Amp takes its output
+    /// from a source of its own, so the pins go to ground and carry that
+    /// resistance and an out-of-reach swing limit in their settings.
+    fn tie_open_supplies(&mut self) {
+        for part in std::mem::take(&mut self.supplied_parts) {
+            if part
+                .supply_pins
+                .iter()
+                .any(|(source, _)| self.reached(*source))
+            {
+                continue;
+            }
+            if let Some(component) = self
+                .document
+                .components
+                .iter_mut()
+                .find(|component| component.id == part.component)
+            {
+                let kept = component
+                    .params
+                    .split_whitespace()
+                    .filter(|word| !word.to_ascii_uppercase().starts_with("HEADROOM="));
+                component.params = kept
+                    .chain(["ROUT=100Meg", "HEADROOM=-1k"])
+                    .collect::<Vec<_>>()
+                    .join(" ");
+            }
+            for (source, terminal) in part.supply_pins {
+                self.device_ties.push(DeviceTie {
+                    source: Some(source),
+                    terminal,
+                    net: None,
+                });
+            }
+        }
+    }
+
     /// Whether a wire, a label or another pin reaches the drawing's point.
     fn reached(&self, point: Point) -> bool {
         self.source_nets.net(point).is_some()
@@ -1461,6 +1518,7 @@ impl Builder<'_> {
     /// net its source simulator writes there. The source draws such a pin as
     /// open, so the tie draws only the open-pin square.
     fn tie_device_pins(&mut self) {
+        self.tie_open_supplies();
         for tie in std::mem::take(&mut self.device_ties) {
             if tie.source.is_some_and(|source| self.reached(source)) {
                 continue;

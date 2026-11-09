@@ -35,6 +35,18 @@ impl ForeignLibrary for Library {
     }
 }
 
+const UNIVERSAL_OPAMP_ASY: &str = "Version 4\nSymbolType CELL\nLINE Normal -32 -32 32 0\n\
+        LINE Normal -32 32 32 0\nLINE Normal -32 -32 -32 32\nSYMATTR Prefix X\n\
+        SYMATTR SpiceModel level2\nSYMATTR Value2 Avol=1Meg GBW=10Meg Slew=10Meg\n\
+        SYMATTR SpiceLine Ilimit=25m Rail=0 Vos=0\n\
+        SYMATTR SpiceLine2 En=0 Enk=0 In=0 Ink=0 Rin=500Meg\n\
+        SYMATTR ModelFile UniversalOpAmp2.lib\n\
+        PIN -32 16 NONE 0\nPINATTR PinName In+\nPINATTR SpiceOrder 1\n\
+        PIN -32 -16 NONE 0\nPINATTR PinName In-\nPINATTR SpiceOrder 2\n\
+        PIN 0 -32 NONE 0\nPINATTR PinName V+\nPINATTR SpiceOrder 3\n\
+        PIN 0 32 NONE 0\nPINATTR PinName V-\nPINATTR SpiceOrder 4\n\
+        PIN 32 0 NONE 0\nPINATTR PinName OUT\nPINATTR SpiceOrder 5\n";
+
 const AMPLIFIER_ASY: &str = "Version 4\nSymbolType CELL\nLINE Normal -32 -32 32 0\n\
     LINE Normal -32 32 32 0\nLINE Normal -32 -32 -32 32\nSYMATTR Prefix X\n\
     SYMATTR SpiceModel amp.sub\nSYMATTR Value amp\n\
@@ -2626,22 +2638,11 @@ fn qspice_gates_and_gm_amplifiers_come_across_as_behavioural_subcircuits() {
 /// keeps LTspice's part with a notice.
 #[test]
 fn an_ltspice_universal_opamp_at_level2_is_the_functional_op_amp() {
-    const OPAMP_ASY: &str = "Version 4\nSymbolType CELL\nLINE Normal -32 -32 32 0\n\
-        LINE Normal -32 32 32 0\nLINE Normal -32 -32 -32 32\nSYMATTR Prefix X\n\
-        SYMATTR SpiceModel level2\nSYMATTR Value2 Avol=1Meg GBW=10Meg Slew=10Meg\n\
-        SYMATTR SpiceLine Ilimit=25m Rail=0 Vos=0\n\
-        SYMATTR SpiceLine2 En=0 Enk=0 In=0 Ink=0 Rin=500Meg\n\
-        SYMATTR ModelFile UniversalOpAmp2.lib\n\
-        PIN -32 16 NONE 0\nPINATTR PinName In+\nPINATTR SpiceOrder 1\n\
-        PIN -32 -16 NONE 0\nPINATTR PinName In-\nPINATTR SpiceOrder 2\n\
-        PIN 0 -32 NONE 0\nPINATTR PinName V+\nPINATTR SpiceOrder 3\n\
-        PIN 0 32 NONE 0\nPINATTR PinName V-\nPINATTR SpiceOrder 4\n\
-        PIN 32 0 NONE 0\nPINATTR PinName OUT\nPINATTR SpiceOrder 5\n";
     let mut library = Library::default();
     library.symbols.insert(
         "opamps\\universalopamp2".to_owned(),
         ForeignSymbolSource {
-            definition: parse_asy(OPAMP_ASY).expect("the test symbol reads"),
+            definition: parse_asy(UNIVERSAL_OPAMP_ASY).expect("the test symbol reads"),
             location: "opamps/UniversalOpAmp2.asy".to_owned(),
             schematic: None,
         },
@@ -4187,4 +4188,53 @@ fn a_library_symbols_value2_names_its_model_while_its_value_stays_drawn() {
     let drawn = value_pieces(part).expect("the drawing's value text stands");
     assert_eq!(drawn.len(), 1);
     assert_eq!(drawn[0].text, "shown-3");
+}
+
+#[test]
+fn an_op_amp_with_both_supply_pins_open_drives_through_its_own_output_resistance() {
+    // LTspice 26.1.1 batch: with both rails open a universal op-amp behaves as
+    // a 100 MOhm output with no swing limit; a multiple-feedback stage drawn
+    // that way gives V(EQ) 0.1139 at 2 kHz, and these settings give 0.1139065.
+    let mut library = Library::default();
+    library.symbols.insert(
+        "opamps\\universalopamp2".to_owned(),
+        ForeignSymbolSource {
+            definition: parse_asy(UNIVERSAL_OPAMP_ASY).expect("the test symbol reads"),
+            location: "opamps/UniversalOpAmp2.asy".to_owned(),
+            schematic: None,
+        },
+    );
+    let drawing = parse_asc(
+        "Version 4\nSHEET 1 1600 400\n\
+         FLAG -32 16 in\nFLAG -32 -16 out\nFLAG 32 0 out\n\
+         SYMBOL Opamps\\UniversalOpAmp2 0 0 R0\nSYMATTR InstName U1\n\
+         FLAG 288 16 in\nFLAG 288 -16 out2\nFLAG 320 -32 vcc\nFLAG 352 0 out2\n\
+         SYMBOL Opamps\\UniversalOpAmp2 320 0 R0\nSYMATTR InstName U2\n",
+    )
+    .unwrap();
+    let imported = import_foreign_schematic(&drawing, "work", &library);
+    let settings = |name: &str| {
+        imported
+            .document
+            .components
+            .iter()
+            .find(|component| component.name == name)
+            .expect("the part")
+            .params
+            .clone()
+    };
+    let open = settings("U1");
+    assert!(open.contains("ROUT=100Meg"), "{open}");
+    assert!(open.contains("HEADROOM=-1k"), "{open}");
+    assert!(!open.contains("HEADROOM=0"), "{open}");
+    let grounds = imported
+        .document
+        .components
+        .iter()
+        .filter(|component| component.kind == ComponentType::Ground)
+        .count();
+    assert_eq!(grounds, 2, "the two open supply pins are tied");
+    // One supply pin wired is not the open-rail case.
+    let driven = settings("U2");
+    assert!(!driven.contains("ROUT"), "{driven}");
 }

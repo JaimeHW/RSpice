@@ -115,6 +115,9 @@ pub(super) struct FunctionalPlan {
     pub stable_id: &'static str,
     pub pins: Vec<usize>,
     pub params: Vec<(String, String)>,
+    /// Which of `pins` are the part's supply pins, when its output draws
+    /// its current through them.
+    pub supply_pins: Option<[usize; 2]>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -283,6 +286,7 @@ pub(super) fn ltspice_gate(
         stable_id,
         pins,
         params,
+        supply_pins: None,
     }))
 }
 
@@ -334,5 +338,6 @@ pub(super) fn ltspice_opamp(model: &str, words: &[String]) -> Functional {
         stable_id: "rspice.functional.opamp",
         pins: vec![0, 1, 2, 3, 4],
         params,
+        supply_pins: Some([2, 3]),
     })
 }
