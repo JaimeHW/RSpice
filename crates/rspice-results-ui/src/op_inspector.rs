@@ -670,11 +670,7 @@ impl PlanBuilder<'_> {
         shown.len()
     }
 
-    fn devices(
-        &mut self,
-        devices: Option<&DeviceOpReport>,
-        detail: Option<&RetainedDetail>,
-    ) -> usize {
+    fn devices(&mut self, devices: Option<&DeviceOpReport>, detail: Option<&RetainedDetail>) {
         let mut families = BTreeMap::<(usize, String), Vec<ShownRow>>::new();
         if let Some(report) = devices {
             for (index, entry) in report
@@ -704,7 +700,7 @@ impl PlanBuilder<'_> {
                 "No device row satisfies the retained device-detail scope."
             };
             self.add_note(OpRowKind::Device, DEVICES_TITLE, note);
-            return 0;
+            return;
         };
         let mut families: Vec<_> = families.into_iter().collect();
         families.sort_by(|((left_rank, left), _), ((right_rank, right), _)| {
@@ -712,7 +708,6 @@ impl PlanBuilder<'_> {
                 .cmp(right_rank)
                 .then_with(|| natural_cmp(left, right))
         });
-        let mut device_shown = 0;
         for ((rank, title), mut shown) in families {
             let columns = family_columns(report, &shown);
             let key = if rank == MODULE_SECTION_RANK {
@@ -736,10 +731,8 @@ impl PlanBuilder<'_> {
                         .map(|(_, value, _)| value)
                 },
             );
-            device_shown += shown.len();
             self.add(section, &shown);
         }
-        device_shown
     }
 }
 
@@ -752,7 +745,6 @@ pub struct OpPlan {
     offsets: RowOffsets,
     longest_name: usize,
     node_shown: usize,
-    device_shown: usize,
     /// The one line a filter that matched nothing leaves on the sheet.
     no_match: Option<String>,
     scope_note: Option<&'static str>,
@@ -775,7 +767,7 @@ impl OpPlan {
         };
         let node_shown = builder.scalars(&NODES, dc.map(|dc| dc.node_voltages.as_slice()));
         builder.scalars(&BRANCHES, dc.map(|dc| dc.branch_currents.as_slice()));
-        let device_shown = builder.devices(devices, detail);
+        builder.devices(devices, detail);
         let no_match = (builder.sections.is_empty() && !builder.filter.is_empty()).then(|| {
             format!(
                 "Nothing matches \u{201c}{}\u{201d}.",
@@ -788,7 +780,6 @@ impl OpPlan {
             sections: builder.sections,
             rows: builder.rows,
             node_shown,
-            device_shown,
             no_match,
             scope_note: reduced_scope_note(devices, detail),
         }
@@ -827,7 +818,7 @@ impl OpPlan {
 
     #[cfg(any(test, feature = "test-support"))]
     pub fn device_shown(&self) -> usize {
-        self.device_shown
+        self.indices(OpRowKind::Device).count()
     }
     #[cfg(any(test, feature = "test-support"))]
     pub fn node_indices(&self) -> impl Iterator<Item = usize> + '_ {
