@@ -1295,6 +1295,88 @@ mod tests {
         rollback_project_library_publication,
     };
 
+    fn row_text_rects(width: f32) -> Vec<Rect> {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(width, 60.0))),
+                ..Default::default()
+            },
+            |ui| {
+                browser_row(
+                    ui,
+                    BrowserRowSpec {
+                        icon: WorkbenchIcon::Folder,
+                        label: "A library with a long name",
+                        meta: "43",
+                        status: "RO",
+                        selected: false,
+                        read_only: true,
+                    },
+                );
+            },
+        );
+        output
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) => Some(text.galley.rect.translate(text.pos.to_vec2())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A column too narrow for a row's name and its meta keeps the name.
+    #[test]
+    fn a_narrow_row_gives_up_its_meta_before_printing_over_its_name() {
+        let wide = row_text_rects(420.0);
+        assert_eq!(wide.len(), 3, "name, meta and status all fit: {wide:?}");
+
+        let narrow = row_text_rects(170.0);
+        assert_eq!(narrow.len(), 2, "the meta gives way: {narrow:?}");
+        assert!(!narrow[0].intersects(narrow[1]), "{narrow:?}");
+    }
+
+    /// The selection is the one thing in the strip whose length nobody chose:
+    /// it is cut, and Access stays on the page.
+    #[test]
+    fn a_long_selection_is_cut_so_access_stays_on_the_page() {
+        const PAGE_WIDTH: f32 = 600.0;
+        let mut app = RSpiceApp::test_instance();
+        let builtin = &mut app.state.project.builtin_models;
+        builtin.open = true;
+        builtin.model = Some(
+            rspice_app_models::veriloga_library::BUILTIN_VERILOGA_MODELS[0]
+                .registry_name
+                .to_owned(),
+        );
+        builtin.file = Some("a_source_file_whose_name_fills_the_whole_of_the_strip.va".to_owned());
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    vec2(PAGE_WIDTH, 100.0),
+                )),
+                ..Default::default()
+            },
+            |ui| library_context(ui, &mut app.state),
+        );
+        let access = output
+            .shapes
+            .iter()
+            .find_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) if text.galley.text() == "read only" => {
+                    Some(text.galley.rect.translate(text.pos.to_vec2()))
+                }
+                _ => None,
+            })
+            .expect("the access value is drawn");
+        assert!(access.right() <= PAGE_WIDTH, "{access:?}");
+    }
+
     #[test]
     fn selection_repairs_to_real_library_cell_and_view() {
         let app = RSpiceApp::test_instance();
