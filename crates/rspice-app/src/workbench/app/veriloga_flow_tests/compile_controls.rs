@@ -13,7 +13,7 @@ use crate::workbench::documents::code_workspace::{
     self, CompileCancellation, PendingVerilogACompile, VerilogACompileOutcome,
 };
 
-const COMPILE: &str = "Compile Verilog-A/AMS module (F7)";
+const COMPILE: &str = "Compile Verilog-A/AMS (F7)";
 const CANCEL: &str = "Cancel Verilog-A/AMS compile";
 const STALE: &str = "Result discarded: the source changed";
 const DISCARDED: &str = "The source changed during the compile, so its result was discarded.";

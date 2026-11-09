@@ -43,7 +43,7 @@ pub(in crate::workbench) fn veriloga_tools(
             app,
             Command::CompileVerilogA.key(),
             WorkbenchIcon::Run,
-            "Compile Verilog-A/AMS module",
+            "Compile Verilog-A/AMS",
             layout,
         );
     }
