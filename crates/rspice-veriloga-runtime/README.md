@@ -25,7 +25,6 @@ crate, and an edge back to the engine would close a cycle.
 | `analog_effects` | The journal of analog system-task calls, published only when a step is accepted |
 | `ground_reference` | Whether a module's contributions connect one of its ports to node 0 |
 | `noise_frequency` | Frequency substitution for coherently routed noise tangents |
-| `compatibility_catalog` | `GENERATED_VERILOGA_COMPATIBILITY_CATALOG`: each explicitly authenticated migration from an earlier generated format |
 
 ## Boundaries
 
@@ -73,9 +72,6 @@ checks them before reconstructing anything against its own catalog:
 - `GeneratedVerilogAAcceptedStateShapeIdentity` is the exact shape of a
   model's accepted dynamic state, and `GENERATED_PERSISTENT_STATE_VERSION`
   versions the persistent-state record a checkpoint carries.
-- `GENERATED_VERILOGA_COMPATIBILITY_CATALOG` lists each earlier identity
-  explicitly authenticated as equivalent. Matching source text alone is never
-  enough to claim one.
 
 ## Feature flags
 

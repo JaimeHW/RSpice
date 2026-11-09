@@ -34,8 +34,7 @@ pub use rspice_veriloga_models::registry as builtins;
 
 pub use rspice_veriloga_runtime::{
     AnalogEffectJournal, AnalogTaskArgument, AnalogTaskEvent, AnalogTaskInvocation, AnalogTaskKind,
-    GENERATED_PERSISTENT_STATE_VERSION, GENERATED_VERILOGA_COMPATIBILITY_CATALOG,
-    GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION, GENERATED_VERILOGA_V27_COMBINED_IDENTITY_ALIASES,
+    GENERATED_PERSISTENT_STATE_VERSION, GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION,
     GeneratedAnalysisKind, GeneratedDdtCoefficients, GeneratedDerivative, GeneratedEvalContext,
     GeneratedEvaluationError, GeneratedEvaluationMode, GeneratedMappedNoiseDescriptor,
     GeneratedMappedNoiseInjectionDescriptor, GeneratedNoiseComplex, GeneratedNoiseDescriptor,
@@ -45,16 +44,12 @@ pub use rspice_veriloga_runtime::{
     GeneratedNoiseProcessEvaluationRef, GeneratedNoiseProcessVisitor, GeneratedNoiseTopologyError,
     GeneratedReactiveStamper, GeneratedSimulationParameters, GeneratedStampLane, GeneratedStamper,
     GeneratedStaticStampCache, GeneratedVerilogAAcceptedStateShapeIdentity,
-    GeneratedVerilogACompatibilityCatalogEntry, GeneratedVerilogAEvaluationError,
-    GeneratedVerilogAInstanceCheckpoint, GeneratedVerilogAModelDescriptor,
-    GeneratedVerilogAParameterBound, GeneratedVerilogAParameterDescriptor,
-    GeneratedVerilogAParameterScope, GeneratedVerilogAPersistentState,
-    GeneratedVerilogARollbackState, GeneratedVerilogAStampPattern,
-    GeneratedVerilogATerminalDescriptor, GeneratedVerilogATerminalDirection, Value, arithmetic,
-    generated_veriloga_accepted_state_shape_is_compatible,
-    generated_veriloga_checkpoint_compatibility_entry, generated_veriloga_compatibility_entry,
-    generated_veriloga_v26_compatibility_entry, generated_veriloga_wire_compatibility_entry,
-    integer, validate_generated_veriloga_compatibility_catalog,
+    GeneratedVerilogAEvaluationError, GeneratedVerilogAInstanceCheckpoint,
+    GeneratedVerilogAModelDescriptor, GeneratedVerilogAParameterBound,
+    GeneratedVerilogAParameterDescriptor, GeneratedVerilogAParameterScope,
+    GeneratedVerilogAPersistentState, GeneratedVerilogARollbackState,
+    GeneratedVerilogAStampPattern, GeneratedVerilogATerminalDescriptor,
+    GeneratedVerilogATerminalDirection, Value, arithmetic, integer,
 };
 #[cfg(feature = "veriloga-builtins-base")]
 use rspice_veriloga_runtime::{GeneratedParameterAssignment, GeneratedParameterOrigin};
@@ -1098,16 +1093,7 @@ impl BuiltinVerilogAInstance {
                 descriptor.checkpoint_identity,
             ));
         }
-        if checkpoint.accepted_state_shape_identity != descriptor.accepted_state_shape_identity
-            && !generated_veriloga_accepted_state_shape_is_compatible(
-                self.model_name,
-                descriptor.source_identity,
-                descriptor.checkpoint_identity,
-                &checkpoint.accepted_state_shape_identity.to_string(),
-                &descriptor.accepted_state_shape_identity.to_string(),
-            )
-            .map_err(|error| format!("generated compatibility catalog is malformed: {error}"))?
-        {
+        if checkpoint.accepted_state_shape_identity != descriptor.accepted_state_shape_identity {
             return Err(format!(
                 "generated accepted-state shape identity mismatch for '{}' ({}): captured '{}', circuit has '{}'",
                 self.instance_name,
@@ -2642,9 +2628,7 @@ mod tests {
     ))]
     use super::BuiltinVerilogADevices;
     #[cfg(feature = "veriloga-model-diode-cmc")]
-    use super::{
-        GENERATED_VERILOGA_COMPATIBILITY_CATALOG, GeneratedVerilogAAcceptedStateShapeIdentity,
-    };
+    use super::GeneratedVerilogAAcceptedStateShapeIdentity;
 
     #[cfg(feature = "veriloga-model-vbic13")]
     use super::GeneratedEvaluationRequest;
@@ -3051,31 +3035,6 @@ mod tests {
         assert_eq!(devices.checkpoint_states(), accepted);
 
         let baseline = devices.checkpoint_states();
-        let diode_catalog = GENERATED_VERILOGA_COMPATIBILITY_CATALOG
-            .iter()
-            .find(|entry| entry.public_model_name == "DIODE_CMC")
-            .expect("DIODE_CMC compatibility entry");
-        let mut previous_shape = baseline.clone();
-        previous_shape[0].accepted_state_shape_identity =
-            GeneratedVerilogAAcceptedStateShapeIdentity::from_hex(
-                diode_catalog.accepted_state_shape_identity_aliases[0],
-            )
-            .expect("audited previous DIODE_CMC shape");
-        assert!(
-            devices.restore_checkpoint_states(&previous_shape).is_err(),
-            "a shape alias qualified under old compiler semantics cannot authenticate the current model"
-        );
-        assert_eq!(devices.checkpoint_states(), baseline);
-        let mut previous_semantics = baseline.clone();
-        previous_semantics[0].model_identity = diode_catalog.semantic_identity.to_string();
-        assert!(
-            devices
-                .restore_checkpoint_states(&previous_semantics)
-                .is_err(),
-            "matching source and payload shape do not authorize old compiler semantics"
-        );
-        assert_eq!(devices.checkpoint_states(), baseline);
-
         let mut invalid_cases = Vec::new();
         invalid_cases.push(Vec::new());
 

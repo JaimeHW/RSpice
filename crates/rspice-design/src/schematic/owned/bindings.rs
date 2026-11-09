@@ -73,30 +73,17 @@ impl Schematic {
         }
     }
 
-    pub fn migrate_generated_bindings(&mut self) -> (usize, usize) {
-        use super::super::generated_veriloga_catalog::{
-            GeneratedVerilogABindingMigration, migrate_generated_veriloga_binding,
-        };
-        let mut migrated_generated_bindings = 0usize;
-        let mut unresolved_generated_bindings = 0usize;
-        for component in &mut self.document.components {
-            let Some(binding) = component.library_cell.as_mut() else {
-                continue;
-            };
-            if binding.generated_veriloga.is_none() {
-                continue;
-            }
-            match migrate_generated_veriloga_binding(binding) {
-                GeneratedVerilogABindingMigration::Current => {}
-                GeneratedVerilogABindingMigration::Migrated => {
-                    migrated_generated_bindings += 1;
-                }
-                GeneratedVerilogABindingMigration::Unresolved(_reason) => {
-                    unresolved_generated_bindings += 1;
-                }
-            }
-        }
-        (migrated_generated_bindings, unresolved_generated_bindings)
+    /// How many generated Verilog-A placements no longer match the compiled
+    /// catalog. They stay in the document untouched.
+    pub fn unresolved_generated_binding_count(&self) -> usize {
+        use super::super::generated_veriloga_catalog::validate_generated_veriloga_binding;
+        self.document
+            .components
+            .iter()
+            .filter_map(|component| component.library_cell.as_ref())
+            .filter(|binding| binding.generated_veriloga.is_some())
+            .filter(|binding| validate_generated_veriloga_binding(binding).is_err())
+            .count()
     }
 }
 

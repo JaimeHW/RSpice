@@ -6,7 +6,6 @@ use rspice_design::{
     configuration_set::ConfigurationSet,
     library::ViewType,
     project_sources::{CanonicalCellViewOwnerKey, canonical_cell_view_owner_key},
-    schematic::generated_veriloga_catalog::GENERATED_VERILOGA_BINDING_SCHEMA_REVISION,
 };
 use rspice_design_model::cell_view::{CellViewRef, validate_cell_view_name_segment};
 use rspice_results::provenance::AnalysisResultSourceDomain;
@@ -1564,18 +1563,12 @@ pub fn decode_project_text(
         ));
     }
     load_repairs.extend(project.workspace.migrate_document_occurrences());
-    let mut migrated_generated_bindings = 0usize;
-    let mut unresolved_generated_bindings = 0usize;
-    for schematic in project.workspace.schematic_buffers.values_mut() {
-        let (migrated, unresolved) = schematic.migrate_generated_bindings();
-        migrated_generated_bindings += migrated;
-        unresolved_generated_bindings += unresolved;
-    }
-    if migrated_generated_bindings > 0 {
-        load_repairs.push(format!(
-            "Migrated {migrated_generated_bindings} exact generated Verilog-A binding(s) to identity schema {GENERATED_VERILOGA_BINDING_SCHEMA_REVISION}."
-        ));
-    }
+    let unresolved_generated_bindings: usize = project
+        .workspace
+        .schematic_buffers
+        .values()
+        .map(|schematic| schematic.unresolved_generated_binding_count())
+        .sum();
     if unresolved_generated_bindings > 0 {
         load_repairs.push(format!(
             "Preserved {unresolved_generated_bindings} generated Verilog-A binding(s) as unresolved because their persisted identity was not an exact catalog match."

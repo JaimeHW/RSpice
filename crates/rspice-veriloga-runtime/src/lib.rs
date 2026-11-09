@@ -23,7 +23,6 @@ mod analog_effects;
 mod analog_lifecycle;
 pub mod arithmetic;
 pub mod array_index;
-mod compatibility_catalog;
 mod descriptor;
 mod event_control;
 mod ground_reference;
@@ -50,15 +49,6 @@ pub use analog_effects::{
 pub use analog_lifecycle::{
     ANALYSIS_QUERY_COUNT, AnalogAnalysisPhase, AnalogEvaluationPhase, active_analysis_query_names,
     analysis_query_id, analysis_query_mask, analysis_query_name,
-};
-
-pub use compatibility_catalog::{
-    GENERATED_VERILOGA_COMPATIBILITY_CATALOG, GENERATED_VERILOGA_V27_COMBINED_IDENTITY_ALIASES,
-    GeneratedVerilogACompatibilityCatalogEntry,
-    generated_veriloga_accepted_state_shape_is_compatible,
-    generated_veriloga_checkpoint_compatibility_entry, generated_veriloga_compatibility_entry,
-    generated_veriloga_v26_compatibility_entry, generated_veriloga_wire_compatibility_entry,
-    validate_generated_veriloga_compatibility_catalog,
 };
 
 pub use descriptor::*;
@@ -3522,66 +3512,10 @@ mod fixed_lane_tests {
     }
 
     #[test]
-    fn compatibility_catalog_requires_an_exact_strong_source_key() {
-        validate_generated_veriloga_compatibility_catalog().expect("catalog is globally valid");
-        let retained = &GENERATED_VERILOGA_COMPATIBILITY_CATALOG[0];
-        assert_eq!(
-            generated_veriloga_compatibility_entry(retained.module_name, retained.source_identity,),
-            Ok(Some(retained)),
-        );
-        let previous_shape = retained.accepted_state_shape_identity_aliases[0];
-        assert!(
-            generated_veriloga_accepted_state_shape_is_compatible(
-                retained.public_model_name,
-                retained.source_identity,
-                retained.semantic_identity,
-                previous_shape,
-                retained.accepted_state_shape_identity,
-            )
-            .expect("valid shape alias"),
-            "the exact authenticated previous shape must migrate"
-        );
-        assert!(
-            !generated_veriloga_accepted_state_shape_is_compatible(
-                retained.public_model_name,
-                retained.source_identity,
-                retained.semantic_identity,
-                retained.accepted_state_shape_identity,
-                retained.accepted_state_shape_identity,
-            )
-            .expect("valid catalog"),
-            "the current identity is not a migration alias"
-        );
-        assert!(
-            generated_veriloga_compatibility_entry("VBIC13", retained.source_identity,)
-                .expect("valid catalog")
-                .is_none(),
-            "catalog matching must not infer case-insensitive equivalence"
-        );
-        let mut changed_source = retained.source_identity.to_string();
-        changed_source.replace_range(..1, "0");
-        assert!(
-            generated_veriloga_compatibility_entry(retained.module_name, &changed_source,)
-                .expect("valid catalog")
-                .is_none(),
-            "a source near-match must fail closed"
-        );
-        assert_eq!(
-            generated_veriloga_v26_compatibility_entry(
-                retained.public_model_name,
-                retained
-                    .wire_v26_combined_identity_alias
-                    .expect("v26 alias"),
-            ),
-            Ok(Some(retained)),
-        );
-    }
-
-    #[test]
     fn accepted_state_shape_identity_hex_is_strict_and_round_trips() {
-        let value = GENERATED_VERILOGA_COMPATIBILITY_CATALOG[0].accepted_state_shape_identity;
+        let value = "4f86872591b788c93bc9f9921258299197a752e5911d175637f085b4ef3c7919";
         let identity = GeneratedVerilogAAcceptedStateShapeIdentity::from_hex(value)
-            .expect("catalog shape is valid");
+            .expect("a lower-case digest parses");
         assert_eq!(identity.to_string(), value);
         assert!(
             GeneratedVerilogAAcceptedStateShapeIdentity::from_hex(&value.to_uppercase()).is_err()

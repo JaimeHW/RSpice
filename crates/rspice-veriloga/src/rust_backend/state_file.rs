@@ -1728,101 +1728,7 @@ fn hash_identity_field(hasher: &mut blake3::Hasher, field: &[u8]) {
 pub(super) fn finalize_checkpoint_identity(
     device: &mut GeneratedRustDevice,
 ) -> Result<(), RustBackendError> {
-    let compatibility = rspice_veriloga_runtime::generated_veriloga_compatibility_entry(
-        &device.module_name,
-        &device.source_identity,
-    )
-    .map_err(|error| {
-        RustBackendError::internal(
-            device.source_digest.clone(),
-            device.module_name.clone(),
-            error,
-        )
-    })?;
-    // Historical migrations are qualified only for their recorded compiler
-    // semantics. Source and state shape alone cannot authorize a new revision.
-    let compatibility = compatibility.filter(|entry| {
-        entry.target_compiler_semantics_version == GENERATED_MODEL_SEMANTICS_VERSION
-    });
-    finalize_checkpoint_identity_with_compatibility(device, compatibility.copied())
-}
-
-fn finalize_checkpoint_identity_with_compatibility(
-    device: &mut GeneratedRustDevice,
-    compatibility: Option<rspice_veriloga_runtime::GeneratedVerilogACompatibilityCatalogEntry>,
-) -> Result<(), RustBackendError> {
-    let mut artifact_hasher = blake3::Hasher::new();
-    // The schema tag is the manual compatibility boundary for the checkpoint
-    // artifact encoding. This digest qualifies an explicit historical alias;
-    // it is deliberately distinct from the stable semantic model identity.
-    artifact_hasher.update(b"rspice-generated-persistent-state-v4\0");
-    hash_identity_field(&mut artifact_hasher, device.module_name.as_bytes());
-    hash_identity_field(&mut artifact_hasher, device.public_model_name.as_bytes());
-    hash_identity_field(&mut artifact_hasher, device.folder_name.as_bytes());
-    hash_identity_field(&mut artifact_hasher, device.source_identity.as_bytes());
-
-    let mut files = device.files.iter().collect::<Vec<_>>();
-    files.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
-    for file in files {
-        hash_identity_field(&mut artifact_hasher, file.relative_path.as_bytes());
-        hash_identity_field(&mut artifact_hasher, file.contents.as_bytes());
-    }
-    let artifact_identity = artifact_hasher.finalize().to_hex().to_string();
-
-    let generic_semantic_identity = generated_model_semantic_identity(device);
-    let generated_shape_identity =
-        rspice_veriloga_runtime::GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes(
-            device.accepted_state_shape_identity,
-        )
-        .to_string();
-    let identity = if let Some(entry) = compatibility {
-        if entry.target_descriptor_abi_version
-            != rspice_veriloga_runtime::GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION
-        {
-            return Err(RustBackendError::internal(
-                device.source_digest.clone(),
-                device.module_name.clone(),
-                format!(
-                    "generated compatibility target descriptor ABI is {}, current ABI is {}",
-                    entry.target_descriptor_abi_version,
-                    rspice_veriloga_runtime::GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION
-                ),
-            ));
-        }
-        if entry.accepted_state_shape_identity != generated_shape_identity {
-            return Err(RustBackendError::internal(
-                device.source_digest.clone(),
-                device.module_name.clone(),
-                format!(
-                    "generated compatibility accepted-state shape mismatch: catalog={}, generated={generated_shape_identity}",
-                    entry.accepted_state_shape_identity
-                ),
-            ));
-        }
-        if let Some(target_artifact_identity) = entry.semantic_identity_override_artifact {
-            if target_artifact_identity != artifact_identity {
-                return Err(RustBackendError::internal(
-                    device.source_digest.clone(),
-                    device.module_name.clone(),
-                    format!(
-                        "generated compatibility target artifact identity mismatch: catalog={target_artifact_identity}, generated={artifact_identity}"
-                    ),
-                ));
-            }
-        } else if entry.semantic_identity != generic_semantic_identity {
-            return Err(RustBackendError::internal(
-                device.source_digest.clone(),
-                device.module_name.clone(),
-                format!(
-                    "generated compatibility semantic identity mismatch: catalog={}, generated={generic_semantic_identity}",
-                    entry.semantic_identity
-                ),
-            ));
-        }
-        entry.semantic_identity
-    } else {
-        generic_semantic_identity.as_str()
-    };
+    let identity = generated_model_semantic_identity(device);
     let declaration = format!(
         "pub const CHECKPOINT_MODEL_IDENTITY: &'static str = {CHECKPOINT_IDENTITY_PLACEHOLDER:?};"
     );
@@ -3417,8 +3323,7 @@ fn lower_parameter_default_condition(
 mod tests {
     use super::{
         CHECKPOINT_IDENTITY_PLACEHOLDER, ParameterBoundPool, compact_generated_indentation,
-        finalize_checkpoint_identity, finalize_checkpoint_identity_with_compatibility,
-        generated_model_semantic_identity,
+        finalize_checkpoint_identity, generated_model_semantic_identity,
     };
     use crate::rust_backend::{GeneratedRustDevice, GeneratedRustFile};
 
@@ -3448,28 +3353,10 @@ mod tests {
     }
 
     #[test]
-    fn retained_semantic_identity_requires_the_exact_catalog_target_artifact() {
-        const ZERO_IDENTITY: &str =
-            "0000000000000000000000000000000000000000000000000000000000000000";
-        const WRONG_ARTIFACT: &str =
-            "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
-        let catalog = rspice_veriloga_runtime::GeneratedVerilogACompatibilityCatalogEntry {
-            module_name: "fixture",
-            public_model_name: "fixture",
-            source_identity: "fixture-source",
-            target_descriptor_abi_version:
-                rspice_veriloga_runtime::GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION,
-            target_compiler_semantics_version: super::GENERATED_MODEL_SEMANTICS_VERSION,
-            semantic_identity: ZERO_IDENTITY,
-            accepted_state_shape_identity: ZERO_IDENTITY,
-            accepted_state_shape_identity_aliases: &[],
-            semantic_identity_override_artifact: Some(WRONG_ARTIFACT),
-            wire_v26_combined_identity_alias: None,
-            wire_ui_v1_descriptor_signature_alias: None,
-        };
-        let fixture = || GeneratedRustDevice {
-            module_name: catalog.module_name.to_string(),
-            public_model_name: catalog.public_model_name.to_string(),
+    fn checkpoint_identity_is_the_semantic_identity_and_ignores_generated_formatting() {
+        let mut device = GeneratedRustDevice {
+            module_name: "fixture".to_string(),
+            public_model_name: "fixture".to_string(),
             folder_name: "fixture".to_string(),
             files: vec![GeneratedRustFile {
                 relative_path: "state.rs".to_string(),
@@ -3478,30 +3365,17 @@ mod tests {
                 ),
             }],
             source_digest: "aa00e2e747501388".to_string(),
-            source_identity: catalog.source_identity.to_string(),
+            source_identity: "fixture-source".to_string(),
             accepted_state_shape_identity: [0; 32],
         };
-
-        let mut retained = fixture();
-        let error = finalize_checkpoint_identity_with_compatibility(&mut retained, Some(catalog))
-            .expect_err("a source match cannot bless an arbitrary generated artifact");
+        let semantic_identity = generated_model_semantic_identity(&device);
+        finalize_checkpoint_identity(&mut device).expect("identity finalizes");
         assert!(
-            error
-                .to_string()
-                .contains("target artifact identity mismatch"),
-            "unexpected error: {error}"
+            device.files[0].contents.contains(&semantic_identity),
+            "the model carries its stable semantic identity"
         );
 
-        let mut uncataloged = fixture();
-        let semantic_identity = generated_model_semantic_identity(&uncataloged);
-        finalize_checkpoint_identity_with_compatibility(&mut uncataloged, None)
-            .expect("uncataloged identity finalizes");
-        assert!(
-            uncataloged.files[0].contents.contains(&semantic_identity),
-            "uncataloged models use their stable semantic identity"
-        );
-
-        let mut formatting_change = uncataloged.clone();
+        let mut formatting_change = device.clone();
         formatting_change.folder_name = "different-generated-folder".to_string();
         formatting_change.files[0]
             .contents
@@ -3511,47 +3385,5 @@ mod tests {
             semantic_identity,
             "generated paths and file formatting are not model semantics"
         );
-    }
-
-    #[test]
-    fn historical_catalog_does_not_preserve_superseded_compiler_semantics() {
-        for catalog in rspice_veriloga_runtime::GENERATED_VERILOGA_COMPATIBILITY_CATALOG
-            .iter()
-            .filter(|entry| entry.semantic_identity_override_artifact.is_none())
-        {
-            let accepted_state_shape_identity =
-                *rspice_veriloga_runtime::GeneratedVerilogAAcceptedStateShapeIdentity::from_hex(
-                    catalog.accepted_state_shape_identity,
-                )
-                .expect("catalog shape identity")
-                .as_bytes();
-            let mut device = GeneratedRustDevice {
-                module_name: catalog.module_name.to_string(),
-                public_model_name: catalog.module_name.to_string(),
-                folder_name: "formatting-independent-fixture".to_string(),
-                files: vec![GeneratedRustFile {
-                    relative_path: "state.rs".to_string(),
-                    contents: format!(
-                        "pub const CHECKPOINT_MODEL_IDENTITY: &'static str = {CHECKPOINT_IDENTITY_PLACEHOLDER:?};"
-                    ),
-                }],
-                source_digest: "0123456789abcdef".to_string(),
-                source_identity: catalog.source_identity.to_string(),
-                accepted_state_shape_identity,
-            };
-
-            finalize_checkpoint_identity(&mut device)
-                .unwrap_or_else(|error| panic!("{}: {error}", catalog.public_model_name));
-            let expected = generated_model_semantic_identity(&device);
-            assert!(device.files[0].contents.contains(&expected));
-            if catalog.target_compiler_semantics_version != super::GENERATED_MODEL_SEMANTICS_VERSION
-            {
-                assert_ne!(
-                    expected, catalog.semantic_identity,
-                    "{} must not retain a historical identity after a semantic change",
-                    catalog.public_model_name
-                );
-            }
-        }
     }
 }

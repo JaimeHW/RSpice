@@ -117,17 +117,10 @@ fn load_breaks_an_instantiation_cycle_and_names_both_ends() {
 #[cfg(feature = "generated-veriloga-catalog")]
 fn unresolved_generated_veriloga_bindings_survive_project_save_and_reload() {
     use crate::state::{generated_veriloga_library_binding, validate_generated_veriloga_binding};
-    use rspice_core::device::veriloga_builtins::{
-        GENERATED_VERILOGA_COMPATIBILITY_CATALOG, generated_veriloga_model_descriptor,
-    };
+    use rspice_core::device::veriloga_builtins::generated_veriloga_model_descriptor;
     use rspice_design::schematic::component::PersistedGeneratedIdentity;
 
     let descriptor = generated_veriloga_model_descriptor("vbic13").unwrap();
-    let historical = GENERATED_VERILOGA_COMPATIBILITY_CATALOG
-        .iter()
-        .find(|entry| entry.public_model_name == "vbic13")
-        .unwrap();
-    assert_ne!(descriptor.checkpoint_identity, historical.semantic_identity);
     for explicit_null in [false, true] {
         let mut binding = generated_veriloga_library_binding(descriptor).unwrap();
         let contract = binding.generated_veriloga.as_mut().unwrap();
@@ -139,14 +132,8 @@ fn unresolved_generated_veriloga_bindings_survive_project_save_and_reload() {
             PersistedGeneratedIdentity::Missing
         };
         contract.accepted_state_shape_identity = PersistedGeneratedIdentity::Missing;
-        contract.checkpoint_identity = historical
-            .wire_v26_combined_identity_alias
-            .unwrap()
-            .to_owned();
-        contract.descriptor_signature = historical
-            .wire_ui_v1_descriptor_signature_alias
-            .unwrap()
-            .to_owned();
+        contract.checkpoint_identity = "0".repeat(64);
+        contract.descriptor_signature = "f".repeat(64);
 
         let mut libraries = LibraryManager::with_primitives();
         let mut workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);

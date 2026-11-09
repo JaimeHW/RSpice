@@ -5,10 +5,9 @@
 //! reinterpret old terminals or parameters.
 
 use rspice_core_devices::device::veriloga_builtins::{
-    GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION, GeneratedVerilogACompatibilityCatalogEntry,
-    GeneratedVerilogAModelDescriptor, GeneratedVerilogATerminalDirection,
-    generated_veriloga_model_descriptor, generated_veriloga_model_descriptors,
-    generated_veriloga_wire_compatibility_entry,
+    GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION, GeneratedVerilogAModelDescriptor,
+    GeneratedVerilogATerminalDirection, generated_veriloga_model_descriptor,
+    generated_veriloga_model_descriptors,
 };
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
@@ -22,14 +21,7 @@ mod device_glyph;
 
 pub use device_glyph::{DeviceGlyph, GlyphName, compact_model_glyph};
 
-pub const GENERATED_VERILOGA_BINDING_SCHEMA_REVISION: u32 = 2;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum GeneratedVerilogABindingMigration {
-    Current,
-    Migrated,
-    Unresolved(String),
-}
+const GENERATED_VERILOGA_BINDING_SCHEMA_REVISION: u32 = 2;
 
 pub fn generated_veriloga_devices() -> &'static [GeneratedVerilogAModelDescriptor] {
     generated_veriloga_model_descriptors()
@@ -267,132 +259,6 @@ pub fn validate_generated_veriloga_binding(
     Ok(descriptor)
 }
 
-/// Upgrade one exact schema-v1 generated binding to the current split-identity
-/// contract. Near matches remain untouched and unresolved so a project stays
-/// loadable without silently changing executable meaning.
-pub fn migrate_generated_veriloga_binding(
-    binding: &mut LibraryCellInstance,
-) -> GeneratedVerilogABindingMigration {
-    let Some(contract) = binding.generated_veriloga.as_ref() else {
-        return GeneratedVerilogABindingMigration::Current;
-    };
-    if contract.schema_revision == GENERATED_VERILOGA_BINDING_SCHEMA_REVISION {
-        return match validate_generated_veriloga_binding(binding) {
-            Ok(_) => GeneratedVerilogABindingMigration::Current,
-            Err(error) => GeneratedVerilogABindingMigration::Unresolved(error),
-        };
-    }
-    if contract.schema_revision != 1 {
-        return GeneratedVerilogABindingMigration::Unresolved(format!(
-            "generated Verilog-A binding '{}' uses unsupported schema revision {}",
-            contract.stable_id, contract.schema_revision
-        ));
-    }
-    if !contract.source_identity.is_missing()
-        || !contract.accepted_state_shape_identity.is_missing()
-    {
-        return GeneratedVerilogABindingMigration::Unresolved(format!(
-            "generated Verilog-A binding '{}' mixes legacy and current identity fields",
-            contract.stable_id
-        ));
-    }
-    let Some(descriptor) = generated_veriloga_model_descriptor(&contract.model_name) else {
-        return GeneratedVerilogABindingMigration::Unresolved(format!(
-            "generated Verilog-A model '{}' is unavailable in this build",
-            contract.model_name
-        ));
-    };
-    // This lookup validates the entire catalog before returning any alias.
-    let alias = match generated_veriloga_wire_compatibility_entry(
-        &contract.model_name,
-        &contract.checkpoint_identity,
-    ) {
-        Ok(Some(alias)) if alias.module_name == contract.module_name => alias,
-        Ok(_) => {
-            return GeneratedVerilogABindingMigration::Unresolved(format!(
-                "generated Verilog-A binding '{}' has no exact legacy compatibility contract",
-                contract.stable_id
-            ));
-        }
-        Err(error) => {
-            return GeneratedVerilogABindingMigration::Unresolved(format!(
-                "generated Verilog-A compatibility catalog is invalid: {error}"
-            ));
-        }
-    };
-    migrate_resolved_legacy_binding(binding, descriptor, alias, || {
-        generated_veriloga_library_binding(descriptor)
-    })
-}
-
-// Catalog resolution stays in the public entry point. Construct the replacement
-// only after the legacy contract and target are authenticated, and publish it
-// only after its enclosing interface also matches.
-fn migrate_resolved_legacy_binding(
-    binding: &mut LibraryCellInstance,
-    descriptor: &GeneratedVerilogAModelDescriptor,
-    alias: &GeneratedVerilogACompatibilityCatalogEntry,
-    make_current: impl FnOnce() -> Result<LibraryCellInstance, String>,
-) -> GeneratedVerilogABindingMigration {
-    let contract = binding
-        .generated_veriloga
-        .as_ref()
-        .expect("catalog resolution requires a generated legacy contract");
-    let expected_legacy_signature =
-        generated_veriloga_legacy_descriptor_signature(descriptor, &contract.checkpoint_identity);
-    let target_matches = descriptor.abi_version == alias.target_descriptor_abi_version
-        && descriptor.source_identity == alias.source_identity
-        && descriptor.checkpoint_identity == alias.semantic_identity
-        && descriptor.accepted_state_shape_identity.to_string()
-            == alias.accepted_state_shape_identity;
-    let legacy_contract_matches = contract.descriptor_abi_version == 2
-        && contract.stable_id == generated_veriloga_stable_id(descriptor)
-        && contract.module_name == descriptor.module_name
-        && contract.source_digest == descriptor.source_digest
-        && contract.descriptor_signature == expected_legacy_signature;
-    if !target_matches || !legacy_contract_matches {
-        return GeneratedVerilogABindingMigration::Unresolved(format!(
-            "generated Verilog-A binding '{}' does not authenticate the catalog migration target",
-            contract.stable_id
-        ));
-    }
-
-    let Ok(expected) = make_current() else {
-        return GeneratedVerilogABindingMigration::Unresolved(format!(
-            "generated Verilog-A binding '{}' cannot reconstruct its current catalog contract",
-            contract.stable_id
-        ));
-    };
-    if !legacy_outer_binding_matches(binding, &expected) {
-        return GeneratedVerilogABindingMigration::Unresolved(format!(
-            "generated Verilog-A binding '{}' has modified enclosing interface metadata",
-            contract.stable_id
-        ));
-    }
-
-    *binding = expected;
-    GeneratedVerilogABindingMigration::Migrated
-}
-
-fn legacy_outer_binding_matches(
-    legacy: &LibraryCellInstance,
-    current: &LibraryCellInstance,
-) -> bool {
-    legacy.library == current.library
-        && legacy.cell == current.cell
-        && legacy.view == current.view
-        && legacy.source_path.is_none()
-        && legacy.netlist_template.is_none()
-        && legacy.model_section.is_none()
-        && legacy.module_name == current.module_name
-        && legacy.reference_prefix == current.reference_prefix
-        && legacy.parameter_order == current.parameter_order
-        && legacy.terminal_order == current.terminal_order
-        && legacy.terminal_dirs == current.terminal_dirs
-        && legacy.interface_bound == current.interface_bound
-        && legacy.builtin_xspice.is_none()
-}
-
 fn generated_veriloga_stable_id(descriptor: &GeneratedVerilogAModelDescriptor) -> String {
     let model = descriptor
         .model_name
@@ -428,21 +294,6 @@ fn generated_veriloga_descriptor_signature(
     for &index in descriptor.internal_state_nodes {
         hash_u64(&mut hasher, index as u64);
     }
-    hash_generated_veriloga_interface(&mut hasher, descriptor);
-    format!("{:x}", hasher.finalize())
-}
-
-fn generated_veriloga_legacy_descriptor_signature(
-    descriptor: &GeneratedVerilogAModelDescriptor,
-    combined_checkpoint_identity: &str,
-) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(b"rspice-generated-veriloga-descriptor-signature-v2\0");
-    hash_u64(&mut hasher, 2);
-    hash_text(&mut hasher, descriptor.model_name);
-    hash_text(&mut hasher, descriptor.module_name);
-    hash_text(&mut hasher, descriptor.source_digest);
-    hash_text(&mut hasher, combined_checkpoint_identity);
     hash_generated_veriloga_interface(&mut hasher, descriptor);
     format!("{:x}", hasher.finalize())
 }
@@ -613,204 +464,30 @@ mod descriptor_v2_tests {
 #[cfg(all(test, feature = "generated-veriloga-catalog"))]
 mod tests {
     use super::*;
-    use rspice_core_devices::device::veriloga_builtins::{
-        GENERATED_VERILOGA_COMPATIBILITY_CATALOG, GENERATED_VERILOGA_V27_COMBINED_IDENTITY_ALIASES,
-    };
 
     const EXPECTED_SHIPPED_MODEL_COUNT: usize = 43;
 
-    fn v1_binding(
-        model_name: &str,
-        combined_identity: &str,
-    ) -> (LibraryCellInstance, LibraryCellInstance) {
-        let descriptor = generated_veriloga_model_descriptor(model_name)
-            .unwrap_or_else(|| panic!("{model_name} is compiled into the shipped catalog"));
-        let current = generated_veriloga_library_binding(descriptor).expect("current binding");
-        let mut legacy = current.clone();
-        let contract = legacy
+    // A placement written by an earlier binding schema: its strong identity
+    // fields are absent, so it cannot match the compiled catalog.
+    fn v1_binding() -> LibraryCellInstance {
+        let descriptor = generated_veriloga_devices()
+            .first()
+            .expect("shipped catalog is not empty");
+        let mut binding = generated_veriloga_library_binding(descriptor).expect("current binding");
+        let contract = binding
             .generated_veriloga
             .as_mut()
             .expect("generated binding contract");
         contract.schema_revision = 1;
         contract.descriptor_abi_version = 2;
         contract.source_identity = PersistedGeneratedIdentity::Missing;
-        contract.checkpoint_identity = combined_identity.to_owned();
         contract.accepted_state_shape_identity = PersistedGeneratedIdentity::Missing;
-        contract.descriptor_signature =
-            generated_veriloga_legacy_descriptor_signature(descriptor, combined_identity);
-        (legacy, current)
-    }
-
-    // This fixture must match the independently recorded published wire digest,
-    // even though its unchanged interface is materialized from today's catalog.
-    fn vbic13_v1_binding() -> (LibraryCellInstance, LibraryCellInstance) {
-        let alias = GENERATED_VERILOGA_COMPATIBILITY_CATALOG
-            .iter()
-            .find(|entry| entry.public_model_name == "vbic13")
-            .expect("VBIC 1.3 compatibility entry");
-        let combined_identity = alias
-            .wire_v26_combined_identity_alias
-            .expect("VBIC 1.3 v26 checkpoint alias");
-        assert_eq!(
-            alias.wire_ui_v1_descriptor_signature_alias,
-            Some("e169ac7dc9c1e7c7aa1a89ae67f7a49d30a0c08adaae0b897e4b4caa8efc3286")
-        );
-        let (legacy, current) = v1_binding("vbic13", combined_identity);
-        assert_eq!(
-            legacy
-                .generated_veriloga
-                .as_ref()
-                .unwrap()
-                .descriptor_signature,
-            alias.wire_ui_v1_descriptor_signature_alias.unwrap(),
-            "the VBIC fixture must retain its published legacy interface"
-        );
-        (legacy, current)
-    }
-
-    fn approved_vbic13_target() -> (
-        &'static GeneratedVerilogAModelDescriptor,
-        GeneratedVerilogACompatibilityCatalogEntry,
-    ) {
-        static CURRENT_SHAPE: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
-            generated_veriloga_model_descriptor("vbic13")
-                .unwrap()
-                .accepted_state_shape_identity
-                .to_string()
-        });
-        let descriptor = generated_veriloga_model_descriptor("vbic13").unwrap();
-        let historical = GENERATED_VERILOGA_COMPATIBILITY_CATALOG
-            .iter()
-            .find(|entry| entry.public_model_name == "vbic13")
-            .unwrap();
-        // A test-local approval exercises the transaction independently of the
-        // registry. It never grants compatibility to the published catalog.
-        let approved = GeneratedVerilogACompatibilityCatalogEntry {
-            target_descriptor_abi_version: descriptor.abi_version,
-            source_identity: descriptor.source_identity,
-            semantic_identity: descriptor.checkpoint_identity,
-            accepted_state_shape_identity: &CURRENT_SHAPE,
-            ..*historical
-        };
-        (descriptor, approved)
-    }
-
-    #[test]
-    fn an_explicitly_approved_target_migrates_atomically() {
-        let (mut legacy, current) = vbic13_v1_binding();
-        let (descriptor, approved) = approved_vbic13_target();
-        assert_eq!(
-            migrate_resolved_legacy_binding(&mut legacy, descriptor, &approved, || {
-                Ok(current.clone())
-            }),
-            GeneratedVerilogABindingMigration::Migrated
-        );
-        assert_eq!(legacy, current);
-        assert_eq!(
-            migrate_generated_veriloga_binding(&mut legacy),
-            GeneratedVerilogABindingMigration::Current,
-            "an accepted replacement is idempotent"
-        );
-    }
-
-    #[test]
-    fn published_v1_binding_is_preserved_when_compiler_semantics_changed() {
-        let (mut legacy, _) = vbic13_v1_binding();
-        let before = legacy.clone();
-        assert!(matches!(
-            migrate_generated_veriloga_binding(&mut legacy),
-            GeneratedVerilogABindingMigration::Unresolved(reason)
-                if reason.contains("catalog migration target")
-        ));
-        assert_eq!(legacy, before);
-    }
-
-    #[test]
-    fn every_historical_identity_requires_an_approved_current_target() {
-        fn check(model_name: &str, identity: &str) {
-            let descriptor = generated_veriloga_model_descriptor(model_name).unwrap();
-            let target = generated_veriloga_wire_compatibility_entry(model_name, identity)
-                .unwrap()
-                .expect("the historical identity is known");
-            assert_ne!(
-                descriptor.checkpoint_identity, target.semantic_identity,
-                "{model_name}: an approved migration requires explicit qualification and a reviewed test update"
-            );
-            let (mut legacy, _) = v1_binding(model_name, identity);
-            let before = legacy.clone();
-            assert!(
-                matches!(
-                    migrate_generated_veriloga_binding(&mut legacy),
-                    GeneratedVerilogABindingMigration::Unresolved(reason)
-                        if reason.contains("catalog migration target")
-                ),
-                "{model_name}: historical identity {identity} must not authorize new compiler semantics"
-            );
-            assert_eq!(legacy, before, "{model_name}: refusal is non-mutating");
-        }
-        assert_eq!(
-            GENERATED_VERILOGA_COMPATIBILITY_CATALOG.len(),
-            EXPECTED_SHIPPED_MODEL_COUNT
-        );
-        assert_eq!(
-            GENERATED_VERILOGA_V27_COMBINED_IDENTITY_ALIASES.len(),
-            EXPECTED_SHIPPED_MODEL_COUNT
-        );
-        for entry in GENERATED_VERILOGA_COMPATIBILITY_CATALOG {
-            let identity = entry
-                .wire_v26_combined_identity_alias
-                .expect("every published v26 model has an exact alias");
-            check(entry.public_model_name, identity);
-        }
-        for (model_name, identity) in GENERATED_VERILOGA_V27_COMBINED_IDENTITY_ALIASES {
-            check(model_name, identity);
-        }
-    }
-
-    #[test]
-    fn unauthenticated_targets_do_not_construct_a_replacement() {
-        let (legacy, _) = vbic13_v1_binding();
-        let (descriptor, approved) = approved_vbic13_target();
-        const OTHER: &str = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
-        let mutations: [fn(&mut GeneratedVerilogACompatibilityCatalogEntry); 4] = [
-            |target| target.target_descriptor_abi_version += 1,
-            |target| target.source_identity = OTHER,
-            |target| target.semantic_identity = OTHER,
-            |target| target.accepted_state_shape_identity = OTHER,
-        ];
-        for mutate in mutations {
-            let mut target = approved;
-            mutate(&mut target);
-            let mut candidate = legacy.clone();
-            assert!(matches!(
-                migrate_resolved_legacy_binding(&mut candidate, descriptor, &target, || {
-                    panic!("an unauthenticated target must not build a replacement")
-                }),
-                GeneratedVerilogABindingMigration::Unresolved(_)
-            ));
-            assert_eq!(candidate, legacy);
-        }
-    }
-
-    #[test]
-    fn failed_reconstruction_keeps_the_entire_legacy_binding() {
-        let (mut legacy, _) = vbic13_v1_binding();
-        let before = legacy.clone();
-        let (descriptor, approved) = approved_vbic13_target();
-        assert!(matches!(
-            migrate_resolved_legacy_binding(&mut legacy, descriptor, &approved, || {
-                Err("catalog reconstruction failed".to_owned())
-            }),
-            GeneratedVerilogABindingMigration::Unresolved(reason)
-                if reason.contains("cannot reconstruct")
-        ));
-        assert_eq!(legacy, before);
+        binding
     }
 
     #[test]
     fn absent_and_explicit_null_strong_identities_are_distinct() {
-        let (legacy, _) = vbic13_v1_binding();
-        let encoded = serde_json::to_value(&legacy).expect("legacy binding serializes");
+        let encoded = serde_json::to_value(v1_binding()).expect("binding serializes");
         let contract = encoded
             .get("generated_veriloga")
             .and_then(serde_json::Value::as_object)
@@ -824,7 +501,7 @@ mod tests {
             .and_then(serde_json::Value::as_object_mut)
             .expect("serialized generated contract");
         contract.insert("source_identity".to_owned(), serde_json::Value::Null);
-        let mut decoded: LibraryCellInstance =
+        let decoded: LibraryCellInstance =
             serde_json::from_value(explicit_null).expect("explicit null remains loadable");
         assert_eq!(
             decoded
@@ -834,80 +511,14 @@ mod tests {
                 .source_identity,
             PersistedGeneratedIdentity::Null
         );
-        let before = decoded.clone();
-        assert!(matches!(
-            migrate_generated_veriloga_binding(&mut decoded),
-            GeneratedVerilogABindingMigration::Unresolved(_)
-        ));
-        assert_eq!(decoded, before);
-    }
-
-    #[test]
-    fn near_match_v1_binding_stays_unresolved_and_unchanged() {
-        let (legacy, current) = vbic13_v1_binding();
-        let (descriptor, approved) = approved_vbic13_target();
-        let mutations: [fn(&mut LibraryCellInstance); 13] = [
-            |binding| binding.library.push('_'),
-            |binding| binding.cell.push('_'),
-            |binding| binding.view.push('_'),
-            |binding| binding.source_path = Some("other.va".into()),
-            |binding| binding.module_name = Some("other".to_owned()),
-            |binding| binding.netlist_template = Some("X{ref}".to_owned()),
-            |binding| binding.model_section = Some("other".to_owned()),
-            |binding| binding.reference_prefix = Some("Q".to_owned()),
-            |binding| binding.parameter_order.push("other".to_owned()),
-            |binding| binding.terminal_order[0].push('_'),
-            |binding| binding.terminal_dirs[0] = PortDirection::In,
-            |binding| binding.interface_bound = false,
-            |binding| {
-                binding.builtin_xspice = Some(crate::schematic::component::BuiltinXspiceInstance {
-                    schema_revision: 1,
-                    stable_id: "other".to_owned(),
-                    model_type: "other".to_owned(),
-                    symbol_asset: "other".to_owned(),
-                    schema_signature: "other".to_owned(),
-                    ports: vec![],
-                })
-            },
-        ];
-        for mutate in mutations {
-            let mut candidate = legacy.clone();
-            mutate(&mut candidate);
-            let before = candidate.clone();
-            assert!(matches!(
-                migrate_resolved_legacy_binding(&mut candidate, descriptor, &approved, || {
-                    Ok(current.clone())
-                }),
-                GeneratedVerilogABindingMigration::Unresolved(reason)
-                    if reason.contains("enclosing interface")
-            ));
-            assert_eq!(candidate, before);
-        }
+        assert!(validate_generated_veriloga_binding(&decoded).is_err());
     }
 
     #[test]
     fn unknown_v1_identity_round_trips_as_unresolved_without_new_fields() {
-        let descriptor = generated_veriloga_devices()
-            .iter()
-            .find(|descriptor| descriptor.model_name != "vbic13")
-            .expect("shipped catalog contains another model");
-        let mut legacy = generated_veriloga_library_binding(descriptor).expect("current binding");
-        let contract = legacy
-            .generated_veriloga
-            .as_mut()
-            .expect("generated binding contract");
-        contract.schema_revision = 1;
-        contract.descriptor_abi_version = 2;
-        contract.source_identity = PersistedGeneratedIdentity::Missing;
-        contract.accepted_state_shape_identity = PersistedGeneratedIdentity::Missing;
-        let before = legacy.clone();
-
-        assert!(matches!(
-            migrate_generated_veriloga_binding(&mut legacy),
-            GeneratedVerilogABindingMigration::Unresolved(_)
-        ));
-        assert_eq!(legacy, before);
-        let encoded = serde_json::to_value(&legacy).expect("legacy binding serializes");
+        let binding = v1_binding();
+        assert!(validate_generated_veriloga_binding(&binding).is_err());
+        let encoded = serde_json::to_value(&binding).expect("binding serializes");
         let contract = encoded
             .get("generated_veriloga")
             .and_then(serde_json::Value::as_object)
