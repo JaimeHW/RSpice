@@ -953,7 +953,7 @@ pub(super) fn parameters_section(
 /// What an undeclared parameter's row says after its value.
 pub(super) const UNDECLARED_PARAMETER_NOTE: &str = "not in module";
 /// What the row of a value says when the instance's model card owns it.
-pub(super) const MODEL_CARD_PARAMETER_NOTE: &str = "set by the model";
+pub(super) const MODEL_CARD_PARAMETER_NOTE: &str = "model only";
 /// The action that takes an undeclared parameter's value off the instance.
 pub(super) const REMOVE_UNDECLARED_PARAMETER: &str = "Remove";
 
