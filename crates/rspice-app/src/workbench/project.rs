@@ -12,6 +12,8 @@ mod new_project;
 mod revision_history;
 pub(crate) mod workspace_state;
 
+use rspice_app_models::veriloga_library::builtin_veriloga_model;
+
 use crate::state::ViewType;
 use crate::workbench::app::dialogs::design_management::{
     DesignManagementParts, DesignManagementTab, open_design_management_on,
@@ -167,6 +169,12 @@ fn show_inspector(cx: &mut Cx<'_, ProjectFeature>, ui: &mut egui::Ui) {
             dependency_selection: &project.project_dependency_selection,
             checkpoint_recovery: &project.project_checkpoint_recovery,
             checkpoint_selection: &project.project_checkpoint_selection,
+            builtin_library_open: project.builtin_models.open,
+            builtin_model: project
+                .builtin_models
+                .model
+                .as_deref()
+                .and_then(builtin_veriloga_model),
             model,
             facts: SlotFacts {
                 preflight_report_retained: cx.runs.preflight.report.is_some(),
