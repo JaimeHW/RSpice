@@ -1020,9 +1020,9 @@ const fn dependency_authority_message(
 /// itself "resolved", which is the heading reporting that there is nothing to
 /// report.
 pub(super) fn netlist_dependency_status(state: &crate::workbench::AppState) -> Option<MessageId> {
-    let Some(document) = active_canonical_netlist_document(state) else {
-        return Some(MessageId::NetlistNavigatorDependencyUnavailable);
-    };
+    // A run snapshot and a comparison are text with no include graph of their
+    // own: there is nothing wrong to report about one, so nothing is.
+    let document = active_canonical_netlist_document(state)?;
     if document.dependencies().iter().any(|dependency| {
         matches!(
             dependency.resolution(),

@@ -357,7 +357,6 @@ define_messages! {
     NetlistNavigatorSourceMapping => "Source mapping",
     NetlistNavigatorProvenance => "provenance",
     NetlistNavigatorNoMatches => "No symbol, directive, or source line matches this filter.",
-    NetlistNavigatorDependencyUnavailable => "unavailable",
     NetlistNavigatorDependencyError => "error",
     NetlistNavigatorDependencyUnresolved => "unresolved",
     NetlistNavigatorDependencyMissing => "missing",
