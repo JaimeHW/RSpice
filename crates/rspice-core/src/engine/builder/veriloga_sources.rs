@@ -29,6 +29,109 @@ fn source_refusal(
     ElaborationError::new(kind, detail).in_source(path).into()
 }
 
+/// The word counts that say a source file may hold more than one module.
+fn lexical_design_units(path: &Path) -> (usize, usize) {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return (0, 0);
+    };
+    let identifier =
+        |character: char| character.is_ascii_alphanumeric() || "_$".contains(character);
+    let count = |word: &str| {
+        text.match_indices(word)
+            .filter(|(at, _)| {
+                !text[..*at].chars().next_back().is_some_and(identifier)
+                    && !text[at + word.len()..]
+                        .chars()
+                        .next()
+                        .is_some_and(identifier)
+            })
+            .count()
+    };
+    (
+        count("module") + count("macromodule") + count("paramset"),
+        count("paramset"),
+    )
+}
+
+/// One selection per module the deck instantiates from each source that
+/// declares several. Every module of a source a simulator loads is available
+/// (Spectre `ahdl_include`, HSPICE `.hdl`, ngspice OSDI) and an instance names
+/// the one it wants, as does a `.model` card; a name several paramsets share
+/// selects all of them. A source no instance names keeps its refusal.
+pub(super) fn selections_for_instances<'a>(
+    netlist: &'a crate::Netlist,
+    elements: &[crate::netlist::Element],
+    deck: &super::veriloga_cache::DeckHdl,
+    limits: ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<std::borrow::Cow<'a, [VerilogAInclude]>, SimulationError> {
+    use super::veriloga_cache::normalize_model_key;
+    use std::collections::HashSet;
+    let includes = &netlist.veriloga_includes;
+    let may_need_expanding = |include: &VerilogAInclude| {
+        let (units, paramsets) = lexical_design_units(&include.file_path);
+        !declares_connect_items(&include.file_path)
+            && if include.selected_module.is_some() {
+                paramsets > 0
+            } else {
+                units > 1
+            }
+    };
+    if !includes.iter().any(may_need_expanding) {
+        return Ok(std::borrow::Cow::Borrowed(includes));
+    }
+    let mut masters = HashSet::new();
+    for element in elements {
+        if let crate::netlist::ElementKind::Subcircuit { subckt_name, .. } = &element.kind {
+            masters.insert(normalize_model_key(subckt_name));
+            if let Some(card) = super::find_model_def(netlist, subckt_name) {
+                masters.insert(normalize_model_key(&card.model_type));
+            }
+        }
+    }
+    let requested = |module: &str| {
+        masters.contains(&normalize_model_key(module))
+            || rspice_veriloga::paramset_overload(module)
+                .is_some_and(|(name, _)| masters.contains(&normalize_model_key(name)))
+    };
+    let mut selections = Vec::with_capacity(includes.len());
+    for include in includes {
+        if !may_need_expanding(include) {
+            selections.push(include.clone());
+            continue;
+        }
+        let prepared = prepare_veriloga_unit(&[include.file_path.as_path()], None, deck, limits, abort)?;
+        let declared: Vec<&str> = prepared.module_names().collect();
+        let chosen: Vec<&str> = match include.selected_module.as_deref() {
+            Some(selected) if declared.contains(&selected) => Vec::new(),
+            Some(selected) => declared
+                .iter()
+                .copied()
+                .filter(|module| {
+                    rspice_veriloga::paramset_overload(module)
+                        .is_some_and(|(name, _)| name == selected)
+                })
+                .collect(),
+            None if declared.len() < 2 => Vec::new(),
+            None => declared
+                .iter()
+                .copied()
+                .filter(|module| requested(module))
+                .collect(),
+        };
+        if chosen.is_empty() {
+            selections.push(include.clone());
+        }
+        for module in chosen {
+            selections.push(VerilogAInclude {
+                selected_module: Some(module.to_string()),
+                ..include.clone()
+            });
+        }
+    }
+    Ok(std::borrow::Cow::Owned(selections))
+}
+
 #[derive(Default)]
 struct DependencyVersions {
     observed: HashMap<PathBuf, ([u8; 32], PathBuf)>,

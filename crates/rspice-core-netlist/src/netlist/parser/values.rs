@@ -217,6 +217,57 @@ pub(super) fn parse_parametric_field_value(
     ParametricValue::Expression(expr.to_string())
 }
 
+/// `[4 5 6]`, `[4,5,6]` or `'{4,5,6}'`: an array value, in Spectre's and
+/// Verilog-AMS's spellings. `None` when `raw` is neither.
+pub(super) fn parse_parametric_array_value(
+    raw_value: &str,
+    params: &ParamContext,
+) -> Option<ParametricValue> {
+    let raw = raw_value.trim();
+    let inner = raw
+        .strip_prefix('[')
+        .and_then(|rest| rest.strip_suffix(']'))
+        .or_else(|| {
+            raw.strip_prefix("'{")
+                .map(|rest| rest.strip_suffix('\'').unwrap_or(rest))
+                .and_then(|rest| rest.strip_suffix('}'))
+        })?;
+    Some(ParametricValue::Array(
+        split_spice_fields(inner)
+            .iter()
+            .map(|element| parse_parametric_field_value(element, params))
+            .collect(),
+    ))
+}
+
+/// Rejoin `name=[4 5 6]`, which field splitting cut at each space or comma.
+pub(super) fn rejoin_bracketed_array_fields(fields: Vec<String>) -> Vec<String> {
+    let mut joined = Vec::with_capacity(fields.len());
+    let mut open: Option<String> = None;
+    for field in fields {
+        match open.take() {
+            Some(mut array) => {
+                array.push(' ');
+                array.push_str(&field);
+                if field.ends_with(']') {
+                    joined.push(array);
+                } else {
+                    open = Some(array);
+                }
+            }
+            None if field
+                .split_once('=')
+                .is_some_and(|(_, value)| value.starts_with('[') && !value.ends_with(']')) =>
+            {
+                open = Some(field);
+            }
+            None => joined.push(field),
+        }
+    }
+    joined.extend(open);
+    joined
+}
+
 pub(super) fn strip_wrapping_double_quoted_string_literal(raw: &str) -> Option<&str> {
     let trimmed = raw.trim();
     if trimmed.len() >= 2
@@ -2882,6 +2933,86 @@ mod tests {
     #[test]
     fn leading_equals_is_left_for_the_caller_to_diagnose() {
         assert_eq!(coalesce("= 5"), vec!["=", "5"]);
+    }
+
+    #[test]
+    fn an_instance_takes_either_letter_and_every_array_spelling() {
+        use crate::netlist::{ElementKind, ParametricValue};
+        let netlist = Netlist::parse(
+            "array instances
+             X1 a 0 dev pa=[4 5 6]
+             N2 a 0 dev pa=[4,5,6]
+             X3 a 0 dev pa='{4,5,6}' r=2
+             .end
+",
+        )
+        .expect("array values parse");
+        assert_eq!(netlist.elements.len(), 3);
+        for element in &netlist.elements {
+            let ElementKind::Subcircuit {
+                subckt_name,
+                params,
+            } = &element.kind
+            else {
+                panic!("{} is an instance, got {:?}", element.name, element.kind);
+            };
+            assert!(subckt_name.eq_ignore_ascii_case("dev"), "{subckt_name}");
+            assert_eq!(element.nodes, vec!["A", "0"], "{}", element.name);
+            let (_, value) = params
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case("pa"))
+                .expect("pa was parsed");
+            let ParametricValue::Array(values) = value else {
+                panic!("{}: pa is an array, got {value:?}", element.name);
+            };
+            assert_eq!(
+                values
+                    .iter()
+                    .map(|value| match value {
+                        ParametricValue::Resolved(value) => *value,
+                        other => panic!("an element is a number, got {other:?}"),
+                    })
+                    .collect::<Vec<_>>(),
+                [4.0, 5.0, 6.0],
+                "{}",
+                element.name
+            );
+        }
+    }
+
+    #[test]
+    fn an_instance_in_a_subcircuit_finds_a_local_card_of_a_module_only() {
+        use crate::netlist::ElementKind;
+        let netlist = Netlist::parse(
+            "local cards
+             .subckt cell x
+             .model inner somemodule r=1
+             .model res R tc1=0
+             X1 x 0 inner
+             X2 x 0 res
+             .ends
+             .end
+",
+        )
+        .expect("local cards parse");
+        let cell = netlist
+            .subcircuits
+            .iter()
+            .find(|definition| definition.name.eq_ignore_ascii_case("cell"))
+            .expect("the subcircuit was parsed");
+        let master = |name: &str| {
+            let element = cell
+                .elements
+                .iter()
+                .find(|element| element.name.eq_ignore_ascii_case(name))
+                .expect("the instance was parsed");
+            let ElementKind::Subcircuit { subckt_name, .. } = &element.kind else {
+                panic!("{name} is an instance");
+            };
+            subckt_name.to_ascii_uppercase()
+        };
+        assert_eq!(master("X1"), "CELL::INNER");
+        assert_eq!(master("X2"), "RES");
     }
 
     #[test]

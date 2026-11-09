@@ -552,3 +552,253 @@ fn a_recursive_hierarchy_elaborates_the_depth_its_card_names() {
         }
     }
 }
+
+/// A resistor with a model parameter, an instance parameter and an alias.
+const CARD_MODULE: &str = r#"`include "disciplines.vams"
+module cardres(p, n);
+    inout p, n; electrical p, n;
+    parameter real r = 1k from (0:inf);
+    aliasparam res = r;
+    (* type = "instance" *) parameter real w = 1;
+    parameter real pa[0:1] = '{1.0, 2.0};
+    analog I(p, n) <+ V(p, n) * w * pa[0] / (r * pa[1] / 2.0);
+endmodule
+"#;
+
+/// The device divides 1 V against 1 kOhm, which gives its conductance exactly.
+fn conductance_of_node_b(deck: &str) -> f64 {
+    let voltage = node_voltage(deck, "b");
+    (1.0 - voltage) / (1e3 * voltage)
+}
+
+fn device_conductance(master_line: &str, model_line: &str, source: &ModelFile) -> f64 {
+    conductance_of_node_b(&format!(
+        "model card\n.hdl \"{}\"\n{model_line}\nV1 a 0 1\nR1 a b 1k\n{master_line}\n.end\n",
+        source.deck_path()
+    ))
+}
+
+/// A `.model` card binds a module the way Spectre's `model` statement and an
+/// ngspice OSDI `.model` do: `X` and `N` both name it, and the card's values
+/// reach the device.
+#[test]
+fn a_model_card_binds_a_verilog_a_module_under_both_letters() {
+    let source = ModelFile::new("card", CARD_MODULE);
+    for letter in ["X", "N"] {
+        assert_close(
+            letter,
+            device_conductance(
+                &format!("{letter}1 b 0 myr"),
+                ".model myr cardres r=2k",
+                &source,
+            ),
+            1.0 / 2000.0,
+        );
+    }
+    // A card is a master of its own: its name is what the instance writes.
+    assert_close(
+        "card named after its module",
+        device_conductance("X1 b 0 cardres", ".model cardres cardres r=4k", &source),
+        1.0 / 4000.0,
+    );
+    assert_close(
+        "alias on the card",
+        device_conductance("X1 b 0 myr", ".model myr cardres res=5k", &source),
+        1.0 / 5000.0,
+    );
+}
+
+/// An instance of a card sets instance parameters only; the model parameters
+/// are the card's. Direct instantiation keeps every parameter settable.
+#[test]
+fn an_instance_of_a_card_sets_only_instance_parameters() {
+    let source = ModelFile::new("scope", CARD_MODULE);
+    assert_close(
+        "instance parameter on the instance",
+        device_conductance("X1 b 0 myr w=3", ".model myr cardres r=2k", &source),
+        3.0 / 2000.0,
+    );
+    assert_close(
+        "an instance value replaces the card's value of an instance parameter",
+        device_conductance("X1 b 0 myr w=3", ".model myr cardres r=2k w=9", &source),
+        3.0 / 2000.0,
+    );
+    assert_close(
+        "direct instance sets a model parameter",
+        device_conductance("X1 b 0 cardres r=2k w=3", "", &source),
+        3.0 / 2000.0,
+    );
+    let deck = format!(
+        "model card\n.hdl \"{}\"\n.model myr cardres r=2k\nV1 a 0 1\nX1 a 0 myr r=5k\n.end\n",
+        source.deck_path()
+    );
+    let message = refusal(&deck);
+    assert!(
+        message.contains("parameter 'r' is a model parameter")
+            && message.to_ascii_lowercase().contains("model card 'myr'"),
+        "{message}"
+    );
+    let deck = format!(
+        "model card\n.hdl \"{}\"\n.model myr cardres nosuch=1\nV1 a 0 1\nX1 a 0 myr\n.end\n",
+        source.deck_path()
+    );
+    let message = refusal(&deck);
+    assert!(message.contains("unknown parameter 'NOSUCH'"), "{message}");
+}
+
+/// A card written inside a subcircuit takes that instance's parameter values.
+#[test]
+fn a_scoped_model_card_takes_its_instances_parameter_values() {
+    let source = ModelFile::new("scoped", CARD_MODULE);
+    let deck = format!(
+        "scoped card\n.hdl \"{}\"\n.subckt cell x params: rval=1k\n\
+         .model inner cardres r={{rval*2}}\nX1 x 0 inner\n.ends\n\
+         V1 a 0 1\nR1 a b 1k\nXU1 b cell params: rval=3k\n.end\n",
+        source.deck_path()
+    );
+    assert_close(
+        "subcircuit-scoped card",
+        conductance_of_node_b(&deck),
+        1.0 / 6000.0,
+    );
+}
+
+/// Every spelling of an array value overrides every element; a card sets one
+/// as well; a wrong length or a scalar is refused by name.
+#[test]
+fn a_parameter_array_takes_its_elements_from_the_instance_or_the_card() {
+    let source = ModelFile::new("arrays", CARD_MODULE);
+    for (spelling, expected) in [
+        ("pa=[4 2]", 4.0 / 1000.0),
+        ("pa=[4,2]", 4.0 / 1000.0),
+        ("pa='{4,2}'", 4.0 / 1000.0),
+        ("pa=[3 6]", 1.0 / 1000.0),
+        ("pa=[{1+1} 2]", 2.0 / 1000.0),
+    ] {
+        assert_close(
+            spelling,
+            device_conductance(&format!("X1 b 0 cardres {spelling}"), "", &source),
+            expected,
+        );
+    }
+    assert_close(
+        "card",
+        device_conductance("X1 b 0 myr", ".model myr cardres pa=[4 2]", &source),
+        4.0 / 1000.0,
+    );
+    for (line, expected) in [
+        ("X1 a 0 cardres pa=[1 2 3]", "pa"),
+        ("X1 a 0 cardres pa=2", "is an array and takes a value such as [1 2 3]"),
+        ("X1 a 0 cardres r=[1 2]", "is not an array and takes one value"),
+    ] {
+        let deck = format!(
+            "arrays\n.hdl \"{}\"\nV1 a 0 1\n{line}\n.end\n",
+            source.deck_path()
+        );
+        let message = refusal(&deck);
+        assert!(message.contains(expected), "{line}: {message}");
+    }
+}
+
+const PARAMSETS: &str = r#"`include "disciplines.vams"
+module res(p, n);
+    inout p, n; electrical p, n;
+    parameter real r = 1k;
+    analog I(p, n) <+ V(p, n) / r;
+endmodule
+paramset rsmall res;
+    parameter real w = 1u from (0:inf);
+    .r = 100 / w * 1u;
+endparamset
+paramset rr res;
+    parameter real w = 1u from (0:1u];
+    .r = 100;
+endparamset
+paramset rr res;
+    parameter real w = 2u from (1u:inf);
+    .r = 200;
+endparamset
+paramset tied res;
+    parameter real w = 1;
+    .r = 300;
+endparamset
+paramset tied res;
+    parameter real w = 2;
+    .r = 400;
+endparamset
+paramset fewer res;
+    parameter real w = 1;
+    parameter real l = 1;
+    .r = 500;
+endparamset
+paramset fewer res;
+    parameter real w = 1;
+    .r = 600;
+endparamset
+"#;
+
+/// Every module of a loaded source is available, and an instance or card names
+/// the one it wants; a paramset's parameters are the instance's.
+#[test]
+fn an_instance_selects_a_module_or_paramset_from_a_source_declaring_several() {
+    let source = ModelFile::new("paramsets", PARAMSETS);
+    assert_close(
+        "paramset",
+        device_conductance("X1 b 0 rsmall w=2u", "", &source),
+        1.0 / 50.0,
+    );
+    assert_close(
+        "the module beside it",
+        device_conductance("X1 b 0 res r=250", "", &source),
+        1.0 / 250.0,
+    );
+    assert_close(
+        "a card of a paramset",
+        device_conductance("N1 b 0 psc", ".model psc rsmall w=4u", &source),
+        1.0 / 25.0,
+    );
+}
+
+/// Verilog-AMS LRM 2.4 section 6.4.2: the instance's values pick among
+/// same-named paramsets by their ranges, then the fewest unset parameters; no
+/// fit and a tie are errors.
+#[test]
+fn same_named_paramsets_are_selected_per_instance() {
+    let source = ModelFile::new("overloads", PARAMSETS);
+    assert_close(
+        "wide",
+        device_conductance("X1 b 0 rr w=2u", "", &source),
+        1.0 / 200.0,
+    );
+    assert_close(
+        "narrow",
+        device_conductance("X1 b 0 rr w=0.5u", "", &source),
+        1.0 / 100.0,
+    );
+    assert_close(
+        "fewest unset parameters",
+        device_conductance("X1 b 0 fewer w=1", "", &source),
+        1.0 / 600.0,
+    );
+    assert_close(
+        "the only one that declares l",
+        device_conductance("X1 b 0 fewer w=1 l=2", "", &source),
+        1.0 / 500.0,
+    );
+    let deck = |line: &str| {
+        format!(
+            "overloads\n.hdl \"{}\"\nV1 a 0 1\n{line}\n.end\n",
+            source.deck_path()
+        )
+    };
+    let message = refusal(&deck("X1 a 0 rr w=-1"));
+    assert!(
+        message.contains("none of the 2 paramsets named 'rr' accepts"),
+        "{message}"
+    );
+    let message = refusal(&deck("X1 a 0 tied w=3"));
+    assert!(
+        message.contains("2 of the 2 paramsets named 'tied' fit this instance equally"),
+        "{message}"
+    );
+}

@@ -378,6 +378,7 @@ pub(super) fn process_line_with_abort(
             &mut frame.def.elements,
             &frame.nested_aliases,
             &visible_model_aliases,
+            &state.models,
         );
 
         let original_name = frame.def.name.to_ascii_uppercase();
@@ -873,7 +874,8 @@ pub(super) fn parse_line(
             params,
             defer_simple_param_refs,
         ),
-        'X' => parse_subcircuit_instance(line, line_num, elements, params),
+        // `N` is the letter ngspice gives a Verilog-A (OSDI) instance.
+        'X' | 'N' => parse_subcircuit_instance(line, line_num, elements, params),
         'E' => parse_vcvs(
             &mut stream,
             line_num,

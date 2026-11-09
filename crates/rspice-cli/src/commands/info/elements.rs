@@ -434,6 +434,10 @@ fn parametric_value(value: &ParametricValue) -> Value {
         ParametricValue::Expression(value) => record!("expression", value),
         ParametricValue::String(value) => record!("string", value),
         ParametricValue::StringExpression(value) => record!("string_expression", value),
+        ParametricValue::Array(values) => {
+            let elements: Vec<Value> = values.iter().map(parametric_value).collect();
+            record!("array", elements)
+        }
     }
 }
 

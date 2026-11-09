@@ -322,6 +322,12 @@ fn veriloga_instance_numeric_value(
             crate::ElaborationErrorKind::ParameterValue,
             format!("parameter '{name}' expects a numeric value, got string value"),
         )),
+        crate::netlist::ParametricValue::Array(_) => Err(refuse_veriloga_instance(
+            instance,
+            module,
+            crate::ElaborationErrorKind::ParameterValue,
+            format!("parameter '{name}' expects a single numeric value, got an array"),
+        )),
     }
 }
 
@@ -6662,8 +6668,15 @@ impl Engine {
                     self.config.hdl.delay_select,
                 ),
             };
+            let includes = veriloga_sources::selections_for_instances(
+                netlist,
+                &flat_elements,
+                &deck_hdl,
+                self.config.resource_limits,
+                abort,
+            )?;
             let resolved = veriloga_sources::resolve_includes(
-                &netlist.veriloga_includes,
+                &includes,
                 library_map.as_deref(),
                 &mut design_connect_rules,
                 &deck_hdl,
@@ -6671,7 +6684,7 @@ impl Engine {
                 abort,
             )?;
             design_connect_rules.finish_registration()?;
-            for (include, entry) in netlist.veriloga_includes.iter().zip(resolved) {
+            for (include, entry) in includes.iter().zip(resolved) {
                 let Some(entry) = entry else {
                     continue; // Standalone connection library, already registered.
                 };
@@ -6707,6 +6720,12 @@ impl Engine {
                     include.file_path.display()
                 );
             }
+            veriloga_instances::bind_instance_masters(
+                &mut flat_elements,
+                netlist,
+                &veriloga_models,
+                self.config.temperature,
+            )?;
             // A design that instantiates SPICE cells has them built as cards
             // of the deck: the deck is built once more with them in it.
             if !leaves_built

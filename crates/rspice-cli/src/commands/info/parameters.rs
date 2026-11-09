@@ -24,6 +24,19 @@ enum ParameterValue<'a> {
     RealVector(&'a [f64]),
     RealVectorExpression(&'a [String]),
     IntegerVector(&'a [i64]),
+    Array(Vec<ParameterValue<'a>>),
+}
+
+fn instance_value(value: &ParametricValue) -> ParameterValue<'_> {
+    match value {
+        ParametricValue::Resolved(value) => ParameterValue::Real(*value),
+        ParametricValue::Expression(value) => ParameterValue::Expression(value),
+        ParametricValue::String(value) => ParameterValue::String(value),
+        ParametricValue::StringExpression(value) => ParameterValue::StringExpression(value),
+        ParametricValue::Array(values) => {
+            ParameterValue::Array(values.iter().map(instance_value).collect())
+        }
+    }
 }
 
 /// Inspect effective bindings without evaluating expressions or advancing the
@@ -109,12 +122,7 @@ pub(super) fn instance_parameters(params: &[(String, ParametricValue)]) -> Vec<P
         .iter()
         .map(|(name, value)| Parameter {
             name: Cow::Borrowed(name),
-            value: match value {
-                ParametricValue::Resolved(value) => ParameterValue::Real(*value),
-                ParametricValue::Expression(value) => ParameterValue::Expression(value),
-                ParametricValue::String(value) => ParameterValue::String(value),
-                ParametricValue::StringExpression(value) => ParameterValue::StringExpression(value),
-            },
+            value: instance_value(value),
         })
         .collect()
 }
@@ -162,8 +170,13 @@ pub(super) fn model_parameters(model: &ModelDef) -> Vec<Parameter<'_>> {
 
 impl std::fmt::Display for Parameter<'_> {
     fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(out, "{} = ", self.name)?;
-        match &self.value {
+        write!(out, "{} = {}", self.name, self.value)
+    }
+}
+
+impl std::fmt::Display for ParameterValue<'_> {
+    fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
             ParameterValue::Real(value) => write!(out, "{value}"),
             ParameterValue::Complex { real, imaginary } => write!(out, "{real} {imaginary:+}j"),
             ParameterValue::Expression(value) => write!(out, "{{{value}}}"),
@@ -175,6 +188,16 @@ impl std::fmt::Display for Parameter<'_> {
                 write!(out, "{} (expressions)", serde_json::json!(value))
             }
             ParameterValue::IntegerVector(value) => write!(out, "{}", serde_json::json!(value)),
+            ParameterValue::Array(values) => {
+                write!(out, "[")?;
+                for (index, value) in values.iter().enumerate() {
+                    if index > 0 {
+                        write!(out, " ")?;
+                    }
+                    write!(out, "{value}")?;
+                }
+                write!(out, "]")
+            }
         }
     }
 }

@@ -2656,7 +2656,9 @@ fn parse_digital_gate_ic_value(
         // remains safe to materialize at parse time.
         ParametricValue::Resolved(value) => Ok((Some(value), None)),
         ParametricValue::Expression(expression) => Ok((None, Some(expression))),
-        ParametricValue::String(_) | ParametricValue::StringExpression(_) => {
+        ParametricValue::String(_)
+        | ParametricValue::StringExpression(_)
+        | ParametricValue::Array(_) => {
             Err(ParseError::Syntax {
                 line: line_num,
                 message: format!(
@@ -7036,6 +7038,7 @@ pub(super) fn parse_subcircuit_instance(
         line_num,
         params_ctx.expression_dialect() == ExpressionDialect::Xyce,
     )?;
+    let fields = rejoin_bracketed_array_fields(fields);
     if fields.len() < 2 {
         return Err(ParseError::Syntax {
             line: line_num,
@@ -7103,7 +7106,8 @@ pub(super) fn parse_subcircuit_instance(
         if let Some((param_name, raw_value)) = field.split_once('=') {
             params.push((
                 param_name.to_string(),
-                parse_parametric_field_value(raw_value, params_ctx),
+                parse_parametric_array_value(raw_value, params_ctx)
+                    .unwrap_or_else(|| parse_parametric_field_value(raw_value, params_ctx)),
             ));
         }
     }
@@ -8454,6 +8458,10 @@ impl ParsedChebyshevSpec {
                     message: format!("CHEBYSHEV parameter '{value}' must be numeric"),
                 })
             }
+            ParametricValue::Array(_) => Err(ParseError::Syntax {
+                line: line_num,
+                message: "CHEBYSHEV parameter must be a number, not an array".to_string(),
+            }),
         };
         Ok(ChebyshevSpec {
             kind: self.kind,

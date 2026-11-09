@@ -51,6 +51,9 @@ pub enum ParametricValue {
     String(String),
     /// A string parameter reference to be evaluated with a parameter context.
     StringExpression(String),
+    /// The elements of an array value, `[4 5 6]` or `'{4,5,6}'`, which only a
+    /// Verilog-A parameter array can take.
+    Array(Vec<ParametricValue>),
 }
 
 impl ParametricValue {
@@ -91,6 +94,9 @@ impl ParametricValue {
                 "Unable to resolve string expression '{}' as a numeric expression",
                 expr
             )),
+            ParametricValue::Array(_) => {
+                Err("Unable to resolve an array value as a numeric expression".to_string())
+            }
         }
     }
 }

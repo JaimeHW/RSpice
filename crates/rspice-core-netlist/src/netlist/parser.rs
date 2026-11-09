@@ -3554,6 +3554,10 @@ fn resolve_top_level_deferred_chebyshev_with_abort(
                         message: format!("CHEBYSHEV parameter '{value}' must be numeric"),
                     })
                 }
+                ParametricValue::Array(_) => Err(ParseError::Syntax {
+                    line: *source_line,
+                    message: "CHEBYSHEV parameter must be a number, not an array".to_string(),
+                }),
             }
         };
         let spec = ChebyshevSpec {

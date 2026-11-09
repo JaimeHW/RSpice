@@ -49,6 +49,14 @@ pub(super) fn model_family(model_type: &str) -> Option<&'static str> {
         .map(|family| family[0])
 }
 
+/// Whether a card's type names no native device, so that the card can only
+/// stand for a module a source file declares and an `X` or `N` line may name it.
+fn names_no_native_device(model_type: &str) -> bool {
+    model_family(model_type).is_none()
+        && crate::library::ModelType::from_spice_type(model_type)
+            == crate::library::ModelType::Other
+}
+
 /// The alias key of a local model name, upper case, for one family.
 pub(super) fn typed_model_key(local_key: &str, family: &str) -> String {
     format!("{local_key}@{family}")
@@ -760,12 +768,22 @@ pub(super) fn rewrite_scoped_references(
     elements: &mut [Element],
     nested_aliases: &HashMap<String, String>,
     visible_model_aliases: &HashMap<String, String>,
+    models: &[ModelDef],
 ) {
     for element in elements {
-        if let ElementKind::Subcircuit { subckt_name, .. } = &mut element.kind
-            && let Some(qualified) = nested_aliases.get(&subckt_name.to_ascii_uppercase())
-        {
-            *subckt_name = qualified.clone();
+        if let ElementKind::Subcircuit { subckt_name, .. } = &mut element.kind {
+            let key = subckt_name.to_ascii_uppercase();
+            let local_module_card = || {
+                visible_model_aliases.get(&key).filter(|qualified| {
+                    models
+                        .iter()
+                        .rfind(|card| card.name.eq_ignore_ascii_case(qualified))
+                        .is_some_and(|card| names_no_native_device(&card.model_type))
+                })
+            };
+            if let Some(qualified) = nested_aliases.get(&key).or_else(local_module_card) {
+                *subckt_name = qualified.clone();
+            }
         }
 
         let family = element_model_family(&element.kind);

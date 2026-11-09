@@ -860,11 +860,23 @@ impl<'a> Flattener<'a> {
                     // External modules are linked after hierarchy expansion.
                     // An unselected import may declare a name absent from the
                     // deck; the builder must resolve every preserved leaf.
-                    let new_element = self.resolve_external_subcircuit_params(
+                    let mut new_element = self.resolve_external_subcircuit_params(
                         self.remap_element(element, prefix, node_map),
                         scope,
                         abort,
                     )?;
+                    // A `.model` card written inside a subcircuit takes that
+                    // instance's parameter values, as any scoped card does.
+                    let element_path = self.qualify_hierarchy_name(prefix, &element.name);
+                    if let ElementKind::Subcircuit { subckt_name, .. } = &mut new_element.kind {
+                        *subckt_name = self.resolve_native_scoped_model(
+                            subckt_name,
+                            scope,
+                            &element_path,
+                            prefix,
+                            abort,
+                        )?;
+                    }
                     self.push_flattened_element(output, new_element)?;
                 } else {
                     return Err(ParseError::UndefinedSubcircuit(Box::new(
@@ -1307,6 +1319,14 @@ impl<'a> Flattener<'a> {
         for include in &netlist.veriloga_includes {
             names.extend(include.declared_model_names().map(str::to_ascii_uppercase));
         }
+        // A `.model` card of a Verilog-A module is a master as the module is.
+        let cards: Vec<_> = netlist
+            .models
+            .iter()
+            .filter(|card| names.contains(&card.model_type.to_ascii_uppercase()))
+            .map(|card| card.name.to_ascii_uppercase())
+            .collect();
+        names.extend(cards);
         names.extend(super::generated_builtin_masters().keys().cloned());
         names
     }
@@ -4211,6 +4231,16 @@ impl<'a> Flattener<'a> {
         if let ElementKind::Subcircuit { params, .. } = &mut element.kind {
             let mut master_scope = None;
             for (_, value) in params.iter_mut() {
+                if let ParametricValue::Array(elements) = value {
+                    let scope =
+                        master_scope.get_or_insert_with(|| self.external_master_scope(scope));
+                    for element in elements {
+                        let resolved =
+                            resolve_parametric_value(element, scope, &self.random, abort)?;
+                        *element = ParametricValue::Resolved(resolved);
+                    }
+                    continue;
+                }
                 // Two values only the route that binds the master can judge
                 // are carried through unresolved, so that route refuses them
                 // by kind and names the master: a string, where only the
@@ -4828,6 +4858,10 @@ fn resolve_numeric_parameter_binding(
             expr
         ))
         .into()),
+        ParametricValue::Array(_) => Err(ParseError::InvalidValue(
+            "an array value cannot be used as a numeric value".to_string(),
+        )
+        .into()),
     }
 }
 
@@ -4846,9 +4880,11 @@ fn resolve_string_parametric_value(
                     expr
                 ))
             }),
-        ParametricValue::Resolved(_) => Err(ParseError::InvalidValue(
-            "numeric parameter value cannot be used as a string value".to_string(),
-        )),
+        ParametricValue::Resolved(_) | ParametricValue::Array(_) => {
+            Err(ParseError::InvalidValue(
+                "numeric parameter value cannot be used as a string value".to_string(),
+            ))
+        }
     }
 }
 
@@ -5573,9 +5609,9 @@ fn apply_element_multiplicity(element: &mut Element, m: Value) {
                     ParametricValue::Expression(expr) => {
                         ParametricValue::Expression(format!("({})*({})", expr, m))
                     }
-                    ParametricValue::String(_) | ParametricValue::StringExpression(_) => {
-                        value.clone()
-                    }
+                    ParametricValue::String(_)
+                    | ParametricValue::StringExpression(_)
+                    | ParametricValue::Array(_) => value.clone(),
                 };
                 *value = composed;
             } else {
