@@ -234,6 +234,42 @@ fn take_zoom_keys(ctx: &egui::Context) {
     }
 }
 
+/// Shift+F10 and the Menu key open the context menu at the caret.
+fn take_menu_keys(ctx: &egui::Context, editor_id: egui::Id) -> bool {
+    let shift_f10 = ctx.input_mut(|input| input.consume_key(Modifiers::SHIFT, Key::F10));
+    shift_f10 | menu_key_went_down(ctx, editor_id)
+}
+
+/// egui has no name for the Menu key, so the keyboard's own state is read. A
+/// press wakes the frame this runs in like any other key does.
+#[cfg(windows)]
+fn menu_key_went_down(ctx: &egui::Context, editor_id: egui::Id) -> bool {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_APPS};
+    // SAFETY: takes a virtual-key code and returns a value; nothing is borrowed.
+    let down = unsafe { GetAsyncKeyState(i32::from(VK_APPS)) } < 0;
+    press_begins(
+        ctx,
+        editor_id.with("menu key"),
+        down && ctx.input(|input| input.focused),
+    )
+}
+
+#[cfg(not(windows))]
+const fn menu_key_went_down(_ctx: &egui::Context, _editor_id: egui::Id) -> bool {
+    false
+}
+
+/// Whether a key read as `down` has gone down since it was last read.
+#[cfg(windows)]
+pub(crate) fn press_begins(ctx: &egui::Context, id: egui::Id, down: bool) -> bool {
+    let was_down = ctx.data_mut(|data| {
+        let was_down = data.get_temp::<bool>(id).unwrap_or_default();
+        data.insert_temp(id, down);
+        was_down
+    });
+    down && !was_down
+}
+
 /// Show a virtualized source document.
 ///
 /// `source_revision` is the application document revision, not a frame counter.
@@ -335,8 +371,16 @@ pub(crate) fn show_virtual_text_editor(
     let char_width = monospace_advance(ui, &style.font).max(1.0);
     let tab_moves_focus = tab_moves_focus_mode(ui.ctx());
     let mut input = InputOutcome::default();
-    if ui.memory(|memory| memory.has_focus(editor_id)) {
+    let mut menu_raised = false;
+    // While the context menu is open the keys are the menu's: an arrow steps
+    // its rows, a letter picks one, and neither reaches the text behind it.
+    let menu_open = egui::Popup::is_id_open(ui.ctx(), editor_id.with("popup"));
+    if ui.memory(|memory| memory.has_focus(editor_id)) && !menu_open {
         take_zoom_keys(ui.ctx());
+        menu_raised = take_menu_keys(ui.ctx(), editor_id);
+        if menu_raised {
+            reveal = reveal.or(Some(Reveal::Nearest));
+        }
         let keys = KeyContext {
             os: ui.ctx().os(),
             editable,
@@ -892,6 +936,12 @@ pub(crate) fn show_virtual_text_editor(
         style,
         &mut line_diagnostic_context,
     );
+    if menu_raised {
+        crate::workbench::chrome::title_bar::raise_source_editor_menu(
+            &response,
+            caret_anchor.unwrap_or_else(|| response.rect.left_top()),
+        );
+    }
     let unanswered_history = session.unanswered_history.take();
     ui.ctx()
         .data_mut(|data| data.insert_temp(session_id, session));

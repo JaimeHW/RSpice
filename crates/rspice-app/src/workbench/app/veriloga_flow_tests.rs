@@ -38,6 +38,8 @@ pub(in crate::workbench) struct User {
     live: Vec<String>,
     /// What the last frame painted.
     shapes: Vec<egui::epaint::ClippedShape>,
+    /// The name of the node holding the keyboard in the last frame.
+    focused: Option<String>,
 }
 
 impl User {
@@ -52,6 +54,7 @@ impl User {
             described: Vec::new(),
             live: Vec::new(),
             shapes: Vec::new(),
+            focused: None,
         };
         user.app.symbol_library = crate::schematic::symbols::SymbolLibrary::load_embedded().ok();
         user.app.state.workbench.inspector_visible = true;
@@ -71,6 +74,7 @@ impl User {
             described,
             live,
             shapes,
+            focused,
         } = self;
         let output = ctx.run_ui(
             egui::RawInput {
@@ -93,12 +97,15 @@ impl User {
         named.clear();
         described.clear();
         live.clear();
-        for (_, node) in output
-            .platform_output
-            .accesskit_update
-            .into_iter()
-            .flat_map(|update| update.nodes)
-        {
+        *focused = None;
+        let update = output.platform_output.accesskit_update;
+        let focus = update.as_ref().map(|update| update.focus);
+        for (id, node) in update.into_iter().flat_map(|update| update.nodes) {
+            if let Some(name) = node.label() {
+                if Some(id) == focus {
+                    *focused = Some(name.to_owned());
+                }
+            }
             if node.role() == egui::accesskit::Role::Status
                 && node.live() == Some(egui::accesskit::Live::Polite)
                 && let Some(label) = node.label()
@@ -1394,5 +1401,6 @@ fn a_builtin_model_copied_from_the_library_page_compiles_and_places() {
 
 mod compile_controls;
 mod editing;
+mod keyboard_reach;
 mod language_tools;
 mod size_and_zoom;

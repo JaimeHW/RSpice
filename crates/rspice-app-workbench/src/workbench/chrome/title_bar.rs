@@ -20,11 +20,11 @@ pub mod application_menus;
 mod keyboard;
 pub mod menu_entries;
 mod menu_row;
-pub use application_menus::source_editor_context_menu;
 use application_menus::{
     ALL_MENUS, ApplicationMenu, configure_menu_popup, file_menu_shows_exit, menu_popup_max_height,
     shortcut_for_occurrence,
 };
+pub use application_menus::{raise_source_editor_menu, source_editor_context_menu};
 use keyboard::{
     InitialMenuFocus, MENU_RENDER_STATE_ID, MenuRenderState, MenuRowRecord, RowActivation,
     SUBMENU_OPEN_REQUEST, access_cues_shown, access_keys_apply_here, begin_menu_render,

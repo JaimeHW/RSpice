@@ -511,7 +511,17 @@ fn bar_keys(ctx: &Context, triggers: &[MenuTriggerResponse], access: bool, tappe
     let in_bar = focused_trigger.is_some() || open_trigger.is_some();
     // F10, and on Windows and Linux a tap of Alt, takes the focus to the
     // bar, or gives it back.
-    if ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::F10)) || tapped {
+    // Shift+F10 is the focused control's context-menu key, not this one.
+    let f10 = ctx.input_mut(|input| {
+        let shifted = input.events.iter().any(|event| {
+            matches!(
+                event,
+                egui::Event::Key { key: Key::F10, pressed: true, modifiers, .. } if modifiers.shift
+            )
+        });
+        !shifted && input.consume_key(Modifiers::NONE, Key::F10)
+    });
+    if f10 || tapped {
         if in_bar {
             Popup::close_all(ctx);
             let return_focus = ctx.data_mut(|data| {
