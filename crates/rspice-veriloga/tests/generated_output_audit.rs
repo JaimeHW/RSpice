@@ -510,8 +510,12 @@ fn generated_veriloga_sources_stay_compact() {
     /// model's `noise.rs`: the corpus went from about 22.3 MB to 32.40 MB and
     /// the HiSIM-HV leaf from about 2.39 MB to 3.31 MB. The growth is
     /// attributed, not endorsed — see the noise-slice ceiling above.
-    const MAX_TOTAL_MODEL_RUST_BYTES: usize = 35_700_000;
-    const MAX_SINGLE_MODEL_RUST_BYTES: usize = 3_650_000;
+    /// Both raised 2026-11-08, from 35.7 MB and 3.65 MB: every parameter's descriptor
+    /// now carries the `units` and `desc` attributes its source gives (17,789
+    /// strings, 1.02 MB), and a `$limit` junction starts from its critical
+    /// voltage (0.24 MB of branches). Also attributed, not endorsed.
+    const MAX_TOTAL_MODEL_RUST_BYTES: usize = 36_000_000;
+    const MAX_SINGLE_MODEL_RUST_BYTES: usize = 3_700_000;
     const MAX_EMPTY_ELSE_ARMS: usize = 32;
 
     let models_root = generated_veriloga_root().join("models");
