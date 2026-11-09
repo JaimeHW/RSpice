@@ -9,7 +9,7 @@
 //! `.meas` card a measurement the plan defines. A card none of these can
 //! hold stays on the sheet, with the reason.
 
-use rspice_design::foreign_schematic::{ForeignCard, ForeignCardRole};
+use rspice_design::foreign_schematic::{ForeignCard, ForeignCardRole, ForeignTool};
 use rspice_design::schematic::component_type::ComponentType;
 use rspice_design::schematic::document::SchematicDocument;
 use rspice_results::specification::{
@@ -61,11 +61,12 @@ const OUTPUT_OPTIONS: [&str; 10] = [
     "binary",
 ];
 
-/// The plan a drawing's cards state. `document` is the imported drawing,
-/// whose sources a stepped source names; `invalid` says why the plan would
-/// refuse an analysis draft.
+/// The plan a drawing's cards state. `tool` wrote the drawing; `document` is
+/// the imported drawing, whose sources a stepped source names; `invalid` says
+/// why the plan would refuse an analysis draft.
 pub(super) fn plan_from_cards(
     cards: Vec<ForeignCard>,
+    tool: ForeignTool,
     document: &SchematicDocument,
     invalid: impl Fn(&AnalysisDraft) -> Option<String>,
 ) -> ForeignPlan {
@@ -74,7 +75,7 @@ pub(super) fn plan_from_cards(
     let mut measurements = Vec::new();
     for card in cards {
         match card.role {
-            ForeignCardRole::Analysis => match analysis_draft(&card) {
+            ForeignCardRole::Analysis => match analysis_draft(&card, tool) {
                 Ok((draft, ignored)) => {
                     if !ignored.is_empty() {
                         plan.notices.push(format!(
@@ -689,7 +690,10 @@ fn options(plan: &mut ForeignPlan, card: ForeignCard) {
 
 /// The plan draft for one analysis card, and the card's words RSpice has no
 /// equivalent for.
-fn analysis_draft(card: &ForeignCard) -> Result<(AnalysisDraft, Vec<String>), String> {
+fn analysis_draft(
+    card: &ForeignCard,
+    tool: ForeignTool,
+) -> Result<(AnalysisDraft, Vec<String>), String> {
     let words = &card.tokens[1..];
     let number = |word: &str| {
         parse_spice_value_checked(word).map_err(|_| format!("`{word}` is not a number"))
@@ -717,25 +721,29 @@ fn analysis_draft(card: &ForeignCard) -> Result<(AnalysisDraft, Vec<String>), St
                 _ => return Err("a transient card names one to four times".to_owned()),
             };
             let stop_time = number(stop)?;
-            // The source program reads a zero print step as "choose one" and
-            // keeps every step it accepts. A plan's outputs need a bounded
-            // grid, so this one is fine enough to keep the peaks a reader
-            // compares, and the solver's step stays limited as it would be.
-            let (step, solver_limit) = match step {
-                Some(step) if number(step)? > 0.0 => (step.to_owned(), None),
-                _ => (
-                    format_si_value(stop_time / 100_000.0),
-                    Some(format_si_value(stop_time / 1000.0)),
-                ),
-            };
+            if let Some(print_step) = step {
+                number(print_step)?;
+            }
+            // LTspice and QSPICE accept the same steps and keep every one of
+            // them whatever print step the card states. A plan's outputs need
+            // a bounded grid, so this one is fine enough to keep the peaks of
+            // those steps, and the solver takes the ceiling the source program
+            // would: a 1024th of the stop time, which a stated maximum replaces
+            // in LTspice and can only lower in QSPICE.
+            let ceiling = stop_time / 1024.0;
             let mut draft = AnalysisDraft::for_kind(AnalysisKind::Transient);
             if let AnalysisDraft::Transient(tran) = &mut draft {
                 tran.stop = stop.to_owned();
-                tran.step = step;
+                tran.step = format_si_value(stop_time / 100_000.0);
                 tran.start = start.unwrap_or("0").to_owned();
                 tran.max_step = match max_step {
-                    Some(max_step) if number(max_step)? > 0.0 => max_step.to_owned(),
-                    _ => solver_limit.unwrap_or_else(|| "auto".to_owned()),
+                    Some(stated)
+                        if number(stated)? > 0.0
+                            && (tool == ForeignTool::Ltspice || number(stated)? < ceiling) =>
+                    {
+                        stated.to_owned()
+                    }
+                    _ => format_si_value(ceiling),
                 };
                 tran.uic = uic;
             }

@@ -118,12 +118,17 @@ pub(crate) fn import_foreign_schematic_file(
     let mut seen = HashSet::from([path.to_path_buf()]);
     let mut tree = import_tree(tool, path, &access, &library, &mut seen, true)?;
     rename_taken_cells(&app.state, &library, &mut tree);
-    let mut plan = plan_from_cards(std::mem::take(&mut tree.cards), &tree.document, |draft| {
-        app.state
-            .model
-            .sim_setup
-            .analysis_draft_validation_error(draft)
-    });
+    let mut plan = plan_from_cards(
+        std::mem::take(&mut tree.cards),
+        tool,
+        &tree.document,
+        |draft| {
+            app.state
+                .model
+                .sim_setup
+                .analysis_draft_validation_error(draft)
+        },
+    );
     plan.options.source_simulator = match tool {
         ForeignTool::Ltspice => rspice_simulation_contract::options::SourceSimulator::Ltspice,
         ForeignTool::Qspice => rspice_simulation_contract::options::SourceSimulator::Qspice,

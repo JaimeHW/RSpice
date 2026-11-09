@@ -111,6 +111,65 @@ fn analysis_cards_become_the_drafts_of_their_analyses() {
     }
 }
 
+/// LTspice 26.1.1 and QSPICE, batch, with `.tran 1m` against `.tran 1u 1m`,
+/// `.tran 100n 1m` and `.tran 10n 1m`: the same accepted steps, the same
+/// stored points, and a largest step of 976.6 ns every time.
+#[test]
+fn a_stated_print_step_moves_neither_the_stored_points_nor_the_solver_limit() {
+    let transient = |tool, text: &str| {
+        let plan = plan_from_cards(
+            vec![card(ForeignCardRole::Analysis, text)],
+            tool,
+            &SchematicDocument::default(),
+            |_| None,
+        );
+        let [(_, AnalysisDraft::Transient(tran))] = plan.analyses.as_slice() else {
+            panic!("one transient analysis from `{text}`");
+        };
+        (tran.stop.clone(), tran.step.clone(), tran.max_step.clone())
+    };
+    for tool in [ForeignTool::Ltspice, ForeignTool::Qspice] {
+        let unstated = transient(tool, ".tran 1m");
+        assert_eq!(
+            unstated,
+            ("1m".to_owned(), "10n".to_owned(), "976.5625n".to_owned())
+        );
+        for text in [
+            ".tran 0 1m",
+            ".tran 1u 1m",
+            ".tran 100u 1m",
+            ".tran 10n 1m",
+            ".tran 1f 1m",
+        ] {
+            assert_eq!(transient(tool, text), unstated, "{text}");
+        }
+    }
+}
+
+/// A stated maximum replaces LTspice's ceiling; QSPICE keeps the lower of the
+/// two (`.tran 0 1m 0 10u` runs at 10 us in LTspice and 976.6 ns in QSPICE).
+#[test]
+fn a_stated_maximum_step_is_the_limit_the_source_program_applies() {
+    let maximum = |tool, text: &str| {
+        let plan = plan_from_cards(
+            vec![card(ForeignCardRole::Analysis, text)],
+            tool,
+            &SchematicDocument::default(),
+            |_| None,
+        );
+        let [(_, AnalysisDraft::Transient(tran))] = plan.analyses.as_slice() else {
+            panic!("one transient analysis from `{text}`");
+        };
+        tran.max_step.clone()
+    };
+    let coarse = ".tran 0 1m 0 10u";
+    let fine = ".tran 0 1m 0 100n";
+    assert_eq!(maximum(ForeignTool::Ltspice, coarse), "10u");
+    assert_eq!(maximum(ForeignTool::Qspice, coarse), "976.5625n");
+    assert_eq!(maximum(ForeignTool::Ltspice, fine), "100n");
+    assert_eq!(maximum(ForeignTool::Qspice, fine), "100n");
+}
+
 #[test]
 fn parameters_options_and_temperature_find_their_plan_places() {
     let plan = plan_cards(vec![
@@ -135,8 +194,12 @@ fn parameters_options_and_temperature_find_their_plan_places() {
     let [(_, AnalysisDraft::Transient(tran))] = plan.analyses.as_slice() else {
         panic!("one transient analysis");
     };
-    // No times but the stop: the grid is fine and the solver limit is unmoved.
-    assert_eq!((tran.step.as_str(), tran.max_step.as_str()), ("10n", "1u"));
+    // No times but the stop: the grid is fine and the solver limit is the
+    // source program's.
+    assert_eq!(
+        (tran.step.as_str(), tran.max_step.as_str()),
+        ("10n", "976.5625n")
+    );
     let variables = plan
         .variables
         .iter()
@@ -240,7 +303,12 @@ fn a_monte_carlo_step_keeps_every_point_of_its_sweep() {
 }
 
 fn plan_cards(cards: Vec<ForeignCard>) -> ForeignPlan {
-    plan_from_cards(cards, &SchematicDocument::default(), |_| None)
+    plan_from_cards(
+        cards,
+        ForeignTool::Ltspice,
+        &SchematicDocument::default(),
+        |_| None,
+    )
 }
 
 fn axes(plan: &ForeignPlan) -> Vec<(RunSetDimensionKind, Vec<f64>)> {
@@ -279,6 +347,7 @@ fn stepped_runs_are_run_set_axes_and_measurements_are_plan_measurements() {
             ),
             card(Measurement, ".meas TRAN late FIND V(out) AT fall"),
         ],
+        ForeignTool::Ltspice,
         &document,
         |_| None,
     );
@@ -357,6 +426,7 @@ fn sweeps_and_measurements_without_an_analysis_stay_on_the_sheet() {
 fn an_analysis_the_plan_refuses_stays_on_the_sheet() {
     let plan = plan_from_cards(
         vec![card(ForeignCardRole::Analysis, ".tran 1m")],
+        ForeignTool::Ltspice,
         &SchematicDocument::default(),
         |_| Some("refused".to_owned()),
     );
