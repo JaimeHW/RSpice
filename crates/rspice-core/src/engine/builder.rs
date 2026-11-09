@@ -8708,11 +8708,15 @@ impl Engine {
                             native_expr_params,
                             native_string_params,
                         )?;
+                        let ltspice_reading = netlist
+                            .options
+                            .vdmos_subthres_is_ltspice
+                            .then(|| Self::vdmos_params_reading_ltspice_subthres(params_map));
                         Self::build_vdmos(
                             &mut circuit,
                             element,
                             resolved_mos_type,
-                            params_map,
+                            ltspice_reading.as_ref().unwrap_or(params_map),
                             instance_params,
                             self.config.temperature,
                             crate::constants::celsius_to_kelvin(

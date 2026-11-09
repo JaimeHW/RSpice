@@ -1996,6 +1996,73 @@ fn ngspice_vdmos_standard_mtriode_channel_matches_reference_operating_points() {
     }
 }
 
+/// The drain current of a VDMOS card biased at `vov` over its 1 V threshold.
+fn subthres_drain_current(card: &str, reading: &str, vov: f64, vds: f64) -> f64 {
+    let deck = format!(
+        "* VDMOS subthres\n\
+         .options rspice_source={reading}\n\
+         .model P VDMOS(Vto=1 {card})\n\
+         Vd d 0 {vds}\n\
+         Vg g 0 {gate}\n\
+         M1 d g 0 0 P\n\
+         .op\n\
+         .end\n",
+        gate = 1.0 + vov,
+    );
+    let netlist = Netlist::parse(&deck).expect("deck parses");
+    let result = Engine::new(SimulationConfig::default())
+        .run_dc_op(&netlist)
+        .expect("deck runs");
+    let drain = result
+        .branch_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("vd"))
+        .expect("the drain source has a branch");
+    -result.branch_currents[drain]
+}
+
+#[test]
+fn ltspice_reads_vdmos_subthres_as_a_current_per_volt() {
+    // Expected values: LTspice 26.1.1 batch.
+    let close = |card: &str, vov: f64, vds: f64, expected: f64| {
+        let id = subthres_drain_current(card, "ltspice", vov, vds);
+        assert!(
+            (id / expected - 1.0).abs() < 2.0e-3,
+            "{card} at Vov {vov}, Vds {vds}: {id:e}, LTspice {expected:e}"
+        );
+    };
+    let card = "Kp=.1 subthres=100u";
+    close(card, 0.0, 5.0, 4.41786e-5);
+    close(card, -0.1, 5.0, 7.89887e-7);
+    close(card, 0.1, 5.0, 5.40536e-4);
+    // Triode reads the same smoothed overdrive.
+    close(card, 0.0, 0.01, 2.47249e-5);
+    // Channel-length modulation enters the current the slope is solved at.
+    close("Kp=.1 subthres=100u lambda=.1", 0.0, 1.0, 4.43413e-5);
+    close("Kp=.1 subthres=100u lambda=.1", -0.1, 5.0, 8.76921e-7);
+    // A slope the card gives directly wins, whichever is written first.
+    close("Kp=.1 subthres=100u ksubthres=10m", 0.0, 5.0, 2.40237e-6);
+    close("Kp=.1 ksubthres=10m subthres=100u", 0.0, 5.0, 2.40237e-6);
+    // The slope holds at its two limits.
+    let at_zero = |ratio: f64| {
+        let card = format!("Kp=1 subthres={ratio}");
+        (2.0 * subthres_drain_current(&card, "ltspice", 0.0, 50.0)).sqrt() / 2.0_f64.ln()
+    };
+    assert!((at_zero(1.0e-5) / 0.0272207 - 1.0).abs() < 1.0e-3);
+    assert!((at_zero(1.0) / 0.668895 - 1.0).abs() < 1.0e-3);
+    // Below 3.75e-6 of Kp the parameter does nothing at all.
+    assert!(at_zero(3.0e-6) < 1.0e-3);
+}
+
+#[test]
+fn qspice_reads_vdmos_subthres_as_the_slope_in_volts() {
+    // QSPICE batch: 2.4023e-4 at Vov = 0 for Kp=.1 subthres=100m.
+    let id = subthres_drain_current("Kp=.1 subthres=100m", "qspice", 0.0, 5.0);
+    assert!((id / 2.4023e-4 - 1.0).abs() < 2.0e-3, "{id:e}");
+    let unset = Netlist::parse("* default\nV1 a 0 1\nR1 a 0 1k\n.op\n.end\n").unwrap();
+    assert!(!unset.options.vdmos_subthres_is_ltspice);
+}
+
 #[test]
 fn ngspice_vdmos_standard_channel_temperature_matches_ngspice_47() {
     // Unchanged ngspice 47 reference results for this same deck/model are

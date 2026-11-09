@@ -4984,6 +4984,11 @@ pub struct SimulationOptions {
     /// device and numerical compatibility defaults, independently of the
     /// expression syntax chosen when parsing the deck.
     pub spice_dialect: Option<crate::config::SpiceDialect>,
+    /// RSpice `.OPTIONS RSPICE_SOURCE=QSPICE|LTSPICE`, the program a drawn deck
+    /// came from. The two read a VDMOS card's `subthres` differently: QSPICE as
+    /// the weak-inversion slope in volts (the default), LTspice as a current
+    /// per volt of Vds.
+    pub vdmos_subthres_is_ltspice: bool,
     /// Xyce `.OPTIONS FFT FFT_MODE=0|1` compatibility selection. Omission is
     /// mode 0: symmetric windows and normalized magnitudes by default.
     pub fft_mode: Option<XyceFftMode>,

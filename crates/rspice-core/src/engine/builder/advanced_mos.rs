@@ -832,6 +832,26 @@ impl Engine {
     /// Build and register the native VDMOS power MOSFET.
     ///
     /// The same internal device backs Xyce MOS LEVEL=18 and ngspice's
+    /// A VDMOS card's parameters with LTspice's `subthres` read as the slope
+    /// the evaluator takes. An explicit `ksubthres` wins over it, as it does in
+    /// LTspice 26.1.1 whichever comes first on the card.
+    pub(super) fn vdmos_params_reading_ltspice_subthres(
+        params: &HashMap<String, f64>,
+    ) -> HashMap<String, f64> {
+        let mut read = params.clone();
+        if let Some(current) = read.remove("SUBTHRES")
+            && !read.contains_key("KSUBTHRES")
+            && let Some(slope) = ltspice_subthres_slope(
+                current,
+                read.get("KP").copied().unwrap_or(1.0),
+                read.get("LAMBDA").copied().unwrap_or(0.0),
+            )
+        {
+            read.insert("KSUBTHRES".to_owned(), slope);
+        }
+        read
+    }
+
     /// `.model ... VDMOS` compatibility syntax. The current native core is a
     /// source-referenced power MOSFET; Xyce's explicit bulk terminal is parsed
     /// and retained as circuit syntax, but the VDMOS conduction model itself
@@ -1297,6 +1317,27 @@ impl Engine {
         circuit.ekv3s.add(device);
         Ok(())
     }
+}
+
+/// The weak-inversion slope in volts that LTspice 26.1.1 takes from a VDMOS
+/// `subthres`, or `None` below the current where the parameter has no effect.
+///
+/// `subthres` is a current per volt of Vds. `y` is the overdrive at which the
+/// square law at Vds = 1 V carries it, and LTspice solves for the slope when
+/// it reads the model. The rational form fits its batch output within 3.4e-5
+/// for y from .0325 to 1; below that the slope holds at its smallest value,
+/// and from y = 1 it holds at the value there.
+fn ltspice_subthres_slope(current: f64, kp: f64, lambda: f64) -> Option<f64> {
+    const LEAST_EFFECTIVE_RATIO: f64 = 3.75e-6;
+    const LEAST_SLOPE: f64 = 0.0272207;
+    let ratio = current / (kp * (1.0 + lambda));
+    if !ratio.is_finite() || ratio < LEAST_EFFECTIVE_RATIO {
+        return None;
+    }
+    let y = (2.0 * ratio).sqrt().min(1.0);
+    let numerator = y * (1.0 + y * (2.13326 + y * (9.62895 + y * 10.73056)));
+    let denominator = 1.0 + y * (3.13479 + y * (10.70832 + y * 20.27908));
+    Some((numerator / denominator).max(LEAST_SLOPE))
 }
 
 fn b3soi_ic_param_name(name: &str) -> bool {

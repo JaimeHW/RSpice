@@ -156,6 +156,19 @@ pub(in crate::netlist::parser) fn parse_options_command(
                     }
                     stream.advance();
                 }
+                (None, "RSPICE_SOURCE") => {
+                    options.vdmos_subthres_is_ltspice = match &stream.peek().kind {
+                        TokenKind::Ident(name) if name.eq_ignore_ascii_case("QSPICE") => false,
+                        TokenKind::Ident(name) if name.eq_ignore_ascii_case("LTSPICE") => true,
+                        _ => {
+                            return Err(ParseError::Syntax {
+                                line: line_num,
+                                message: "RSPICE_SOURCE expects QSPICE or LTSPICE".to_owned(),
+                            });
+                        }
+                    };
+                    stream.advance();
+                }
                 (None, "RSPICE_DIALECT") => {
                     let dialect = match &stream.peek().kind {
                         TokenKind::Ident(name) => match name.to_ascii_uppercase().as_str() {
