@@ -39,11 +39,15 @@ impl Engine {
     ) {
         if gmin == 0.0 {
             // The floor is what closes a pure event net's placeholder row at
-            // DC. Without it the row is empty, and the system would be
-            // singular for a net no analog equation can reach.
-            for row in circuit.xspice_event_node_matrix_rows() {
-                if circuit.event_only_net_kind(row + 1).is_some() {
-                    matrix.add(row, row, 1.0);
+            // DC, so the attempt without one has to close it instead. Without
+            // it the row is empty, and the system would be singular for a net
+            // no analog equation can reach. Any other assembly at a zero floor
+            // pins these rows itself.
+            if circuit.zero_dc_nodal_floor {
+                for row in circuit.xspice_event_node_matrix_rows() {
+                    if circuit.event_only_net_kind(row + 1).is_some() {
+                        matrix.add(row, row, 1.0);
+                    }
                 }
             }
             return;
@@ -507,6 +511,7 @@ mod tests {
             .net_kinds
             .register(1, crate::circuit::NetKind::Digital);
         circuit.set_analog_touched_nodes(&std::collections::BTreeSet::from([2]));
+        circuit.zero_dc_nodal_floor = true;
         let mut matrix = StaticMatrix::from_triplets(2, 2, &[(0, 0, 0.0), (1, 1, 0.0)]).unwrap();
 
         Engine::stamp_nodal_gmin(&circuit, &mut matrix, 0.0);
