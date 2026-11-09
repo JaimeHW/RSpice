@@ -12,7 +12,7 @@ use crate::state::{
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, input_row, kv_row};
+use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, input_row, kv_row, value_row};
 use crate::workbench::app::dialogs::library::{LIBRARY_CATALOG_STALE_MESSAGE, validate_lcv_name};
 use crate::workbench::app_state::Model;
 use crate::workbench::app_state::model::WorkspacePruned;
@@ -350,7 +350,7 @@ impl ProjectFeature {
                 let t = Tokens::get(ui.ctx());
                 let c = t.color;
 
-                kv_row(ui, "Source", &source);
+                value_row(ui, "Source", &source);
 
                 // Target library — writable only.
                 ui.allocate_ui_with_layout(

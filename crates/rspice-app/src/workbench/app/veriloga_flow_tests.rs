@@ -1279,6 +1279,11 @@ fn a_builtin_model_copied_from_the_library_page_compiles_and_places() {
     assert!(project.copy_cell_dialog, "Copy cell opens");
     assert_eq!(project.copy_cell_target_library, library);
     assert_eq!(project.copy_cell_name, "vbic13");
+    assert_eq!(
+        user.expect("Source").left(),
+        user.expect("New name").left(),
+        "the source reads in the fields' column"
+    );
     user.click("Copy");
 
     let view = CellViewRef::new(&library, "vbic13", "veriloga");

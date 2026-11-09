@@ -188,6 +188,42 @@ pub fn kv_row(ui: &mut Ui, key: &str, value: &str) {
     );
 }
 
+/// A read-only row of a form: dimmed key in the input rows' label column, mono
+/// value where their fields start.
+pub fn value_row(ui: &mut Ui, key: &str, value: &str) {
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
+    let row_h = t.metrics.row_h;
+    ui.allocate_ui_with_layout(
+        vec2(ui.available_width(), row_h),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
+            let (key_rect, _) =
+                ui.allocate_exact_size(vec2(LABEL_COL, row_h), egui::Sense::hover());
+            ui.painter().text(
+                egui::pos2(key_rect.left(), key_rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                key,
+                theme::sans(tokens::FS_1, FontWeight::Regular),
+                c.text_dim,
+            );
+            let (value_rect, response) =
+                ui.allocate_exact_size(vec2(ui.available_width(), row_h), egui::Sense::hover());
+            let font = theme::field_mono();
+            let shown = crate::panels::elide_text(ui, value, &font, value_rect.width());
+            ui.painter().text(
+                egui::pos2(value_rect.left(), value_rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                shown,
+                font,
+                c.text,
+            );
+            crate::panels::announce_row(ui, &response, key, value);
+        },
+    );
+}
+
 /// A labelled on/off row. Returns `true` if the value changed.
 ///
 /// The control is this design system's switch, carried on a tree row so the

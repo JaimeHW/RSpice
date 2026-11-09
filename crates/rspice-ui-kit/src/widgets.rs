@@ -59,7 +59,7 @@ pub use filter_clear::{FILTER_CLEAR_INSET, filter_field_clear};
 pub use form::name_control;
 pub use form::{
     choice_row, field_label, input_row, kv_row, mono_input, mono_input_with_unit, switch_row,
-    text_field,
+    text_field, value_row,
 };
 pub use ordered_chips::{OrderedChipsEdit, ordered_chips};
 pub use pane::{

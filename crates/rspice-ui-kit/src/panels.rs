@@ -1037,7 +1037,7 @@ fn row_slot(ui: &mut Ui, label_width: Option<f32>, sense: Sense) -> (RowSlot, Re
 
 /// Publish a row's bounds and words for assistive technology: the row is
 /// painted rather than laid out from widgets, so nothing else would.
-fn announce_row(ui: &Ui, response: &Response, label: &str, value: &str) {
+pub(crate) fn announce_row(ui: &Ui, response: &Response, label: &str, value: &str) {
     let rect = response.rect;
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_label(label);
