@@ -403,4 +403,46 @@ mod tests {
             ]
         );
     }
+
+    /// A source view has no coordinates to read out, and the project's
+    /// revision counter is nothing a reader acts on: no cell fills the slot
+    /// with it.
+    #[test]
+    fn a_source_view_reports_no_revision() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.open_project_session();
+        let mut cell = crate::state::Cell::new("amp");
+        cell.add_view(crate::state::View::new(
+            "veriloga",
+            crate::state::ViewType::VerilogA,
+        ));
+        let mut library = crate::state::Library::new("analog");
+        library.add_cell(cell);
+        app.state.model.library_manager.add_library(library);
+        app.state
+            .open_workspace_view(crate::state::CellViewRef::new("analog", "amp", "veriloga"));
+        app.state.workbench.activate(Workspace::Design);
+        assert_eq!(
+            app.state.model.workspace.content.active_view_type(),
+            crate::state::ViewType::VerilogA
+        );
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+
+        let readings = status_readings(&mut app.state, EngineAvailability::Ready, &ctx);
+
+        let said = STATUS_ORDER
+            .iter()
+            .filter(|cell| {
+                cell.workspace
+                    .is_none_or(|workspace| workspace == Workspace::Design)
+            })
+            .filter_map(|cell| (cell.content)(&app, &readings))
+            .map(|status| status.text.into_owned())
+            .collect::<Vec<_>>();
+        assert!(
+            !said.iter().any(|text| text.contains("revision")),
+            "{said:?}"
+        );
+    }
 }
