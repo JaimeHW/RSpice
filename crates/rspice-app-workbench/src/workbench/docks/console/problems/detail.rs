@@ -800,11 +800,11 @@ mod tests {
         finding.producer = "rspice.design.drc";
         assert_eq!(
             rule_reference(&finding),
-            "Floating node \u{00b7} DRC-FLOATING-NODE \u{00b7} rspice.design.drc"
+            "Floating node \u{00b7} DRC-FLOATING-NODE \u{00b7} Design rules"
         );
         assert_eq!(
             rule_reference(&row(None)),
-            "Rule VA-REDECLARED \u{00b7} rspice.veriloga.compiler"
+            "Rule VA-REDECLARED \u{00b7} Verilog-A compiler"
         );
     }
 }
