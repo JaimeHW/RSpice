@@ -73,6 +73,11 @@ pub fn foreign_directive_cards(directives: &[ForeignDirective]) -> Vec<ForeignCa
         };
         let mut logical: Vec<(String, String)> = Vec::new();
         for line in directive.text.lines() {
+            // LTspice netlists a line written `..param` as `.param`.
+            let line = match line.trim_start().strip_prefix('.') {
+                Some(rest) if rest.starts_with('.') => rest,
+                _ => line,
+            };
             let trimmed = line.trim();
             if trimmed.is_empty() || trimmed.starts_with('*') || trimmed.starts_with(';') {
                 continue;

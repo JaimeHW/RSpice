@@ -832,6 +832,30 @@ fn an_imported_load_keeps_its_waveform_and_flag_on_its_card() {
     assert!(load.params.is_empty(), "{}", load.params);
 }
 
+/// LTspice netlists a block's line written `..param` as `.param`, whatever
+/// else shares the block.
+#[test]
+fn a_doubled_dot_directive_line_is_its_single_dot_card() {
+    let drawing = parse_asc(
+        "Version 4\nTEXT 0 0 Left 2 !..param Vdd = 15\\n..param Vss = -15\\n.tran 100u\n",
+    )
+    .expect("the drawing reads");
+    let imported = import_foreign_schematic(&drawing, "work", &library());
+    let cards = foreign_directive_cards(&imported.directives);
+    assert_eq!(
+        cards
+            .iter()
+            .map(|card| (card.keyword(), card.role))
+            .collect::<Vec<_>>(),
+        [
+            (".param".to_owned(), ForeignCardRole::Parameter),
+            (".param".to_owned(), ForeignCardRole::Parameter),
+            (".tran".to_owned(), ForeignCardRole::Analysis),
+        ]
+    );
+    assert_eq!(cards[1].text, ".param Vss = -15");
+}
+
 #[test]
 fn directive_cards_sort_by_the_project_place_they_belong_in() {
     let drawing = parse_asc(

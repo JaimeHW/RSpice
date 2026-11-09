@@ -165,6 +165,34 @@ fn parameters_options_and_temperature_find_their_plan_places() {
     );
 }
 
+/// Every assignment of a parameter block reaches the plan: an expression
+/// spaced around its operators, and several assignments on a card, as
+/// QSPICE and LTspice read them (a = 3, c = 4, b = 5, d = 6, g = 4, f = 3
+/// in batch runs of these cards on both, LTspice 26.1.1).
+#[test]
+fn a_parameter_card_reads_spaced_expressions_and_every_assignment() {
+    let plan = plan_cards(vec![
+        card(
+            ForeignCardRole::Parameter,
+            ".param a = 1 + 2 c = 4 b 5 d = a *\n+ 2",
+        ),
+        card(ForeignCardRole::Parameter, ".param g = 2*(1 + 1) f=3"),
+    ]);
+    assert_eq!(
+        plan.variables,
+        [
+            ("c".to_owned(), "4".to_owned()),
+            ("b".to_owned(), "5".to_owned()),
+            ("f".to_owned(), "3".to_owned()),
+        ]
+    );
+    assert_eq!(
+        plan.model_text,
+        [".param a=1 + 2 d=a * 2", ".param g=2*(1 + 1)"]
+    );
+    assert!(plan.kept.is_empty(), "{:?}", plan.kept);
+}
+
 fn plan_cards(cards: Vec<ForeignCard>) -> ForeignPlan {
     plan_from_cards(cards, &SchematicDocument::default(), |_| None)
 }

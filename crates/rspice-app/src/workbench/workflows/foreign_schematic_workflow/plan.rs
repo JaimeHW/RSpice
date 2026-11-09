@@ -533,7 +533,8 @@ fn parameters(plan: &mut ForeignPlan, card: ForeignCard) {
 
 /// The name and value pairs of a `.param` card, written `name=value`,
 /// `name = value` or, as LTspice also reads, `name value`. A value in braces,
-/// quotes or parentheses runs to its closing mark.
+/// quotes or parentheses runs to its closing mark, and an expression runs
+/// across the spaces around its operators (`Vb = Vas / 2`).
 fn assignments(text: &str) -> Result<Vec<(String, String)>, String> {
     let mut pairs = Vec::new();
     let mut rest = text.trim_start();
@@ -560,18 +561,33 @@ fn assignments(text: &str) -> Result<Vec<(String, String)>, String> {
 }
 
 /// The length of the value at the start of `text`: through the bracket or
-/// quote that closes an opening one, and to the next space otherwise.
+/// quote that closes an opening one, and to the next space that no operator
+/// spans otherwise.
 fn value_length(text: &str) -> usize {
+    const OPERATORS: [char; 13] = [
+        '+', '-', '*', '/', '^', '%', '<', '>', '&', '|', '!', '?', ':',
+    ];
     let mut depth = 0_usize;
     let mut quoted = false;
+    let mut previous = None;
     for (index, character) in text.char_indices() {
         match character {
             '"' => quoted = !quoted,
             '{' | '(' if !quoted => depth += 1,
             '}' | ')' if !quoted => depth = depth.saturating_sub(1),
-            _ if character.is_whitespace() && depth == 0 && !quoted => return index,
+            _ if character.is_whitespace() && depth == 0 && !quoted => {
+                let next = text[index..].trim_start();
+                let spanned = previous.is_some_and(|last| OPERATORS.contains(&last) || last == '=')
+                    || next.starts_with(OPERATORS)
+                    || next.starts_with("==");
+                if !spanned {
+                    return index;
+                }
+                continue;
+            }
             _ => {}
         }
+        previous = Some(character);
     }
     text.len()
 }
