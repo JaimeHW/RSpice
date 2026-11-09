@@ -10,8 +10,9 @@ use egui::Key;
 use super::language_tools::{CTRL_SHIFT, EDITOR, NONE, op_amp, source};
 use super::*;
 use crate::workbench::documents::code_workspace::{
-    self, CompileCancellation, PendingVerilogACompile, VerilogACompileOutcome,
+    self, PendingVerilogACompile, VerilogACompileOutcome,
 };
+use rspice_simulation::project_veriloga::compile_service::CompileCancellation;
 
 const COMPILE: &str = "Compile Verilog-A/AMS (F7)";
 const CANCEL: &str = "Cancel Verilog-A/AMS compile";
