@@ -936,6 +936,10 @@ jobs:
         run: >-
           python3 tools/ci/check_browser_workbench.py --software-webgpu
           --output "${{ runner.temp }}/rspice-workbench-${{ github.run_id }}-${{ github.run_attempt }}"
+      - name: Qualify the browser accessibility mirror
+        run: >-
+          python3 tools/ci/check_browser_accessibility.py --software-webgpu
+          --output "${{ runner.temp }}/rspice-accessibility-${{ github.run_id }}-${{ github.run_attempt }}"
       - name: Qualify browser engine failure and retry
         run: >-
           python3 tools/ci/check_browser_engine_recovery.py --software-webgpu
@@ -953,6 +957,7 @@ jobs:
           name: browser-workbench
           path: |
             ${{ runner.temp }}/rspice-workbench-${{ github.run_id }}-${{ github.run_attempt }}
+            ${{ runner.temp }}/rspice-accessibility-${{ github.run_id }}-${{ github.run_attempt }}
             ${{ runner.temp }}/rspice-engine-recovery-${{ github.run_id }}-${{ github.run_attempt }}
             ${{ runner.temp }}/rspice-engine-cancel-${{ github.run_id }}-${{ github.run_attempt }}
           retention-days: 7
