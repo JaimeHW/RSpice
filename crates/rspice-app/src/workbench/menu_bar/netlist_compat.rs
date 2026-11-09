@@ -79,7 +79,11 @@ fn source_folder(
             .unwrap_or("source")
             .to_owned(),
     };
-    let base = format!("{}_veriloga/{}", portable_name(deck_stem), portable_name(&owner));
+    let base = format!(
+        "{}_veriloga/{}",
+        portable_name(deck_stem),
+        portable_name(&owner)
+    );
     let mut folder = base.clone();
     let mut suffix = 2_usize;
     while !taken.insert(folder.clone()) {
@@ -202,7 +206,10 @@ fn push_ahdl_prefix(output: &mut Vec<String>, includes: &[AhdlInclude]) {
         if let Some(origin) = &include.origin {
             output.push(format!("// {origin}"));
         }
-        output.push(format!("ahdl_include {}", quote_netlist_path(&include.path)));
+        output.push(format!(
+            "ahdl_include {}",
+            quote_netlist_path(&include.path)
+        ));
     }
     output.push("simulator lang=spice".to_string());
 }
@@ -259,7 +266,8 @@ mod tests {
 
     #[test]
     fn an_exported_deck_names_its_sources_by_their_relocated_path_and_their_modules() {
-        let relocated = HashMap::from([("key/ota.va".to_owned(), "d_veriloga/ota/ota.va".to_owned())]);
+        let relocated =
+            HashMap::from([("key/ota.va".to_owned(), "d_veriloga/ota/ota.va".to_owned())]);
 
         assert_eq!(
             ahdl_netlist(DECK, &relocated),
