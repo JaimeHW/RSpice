@@ -591,8 +591,8 @@ endmodule
         ("OFFSET", &[("l", 3.0), ("xl", 1.0)][..], 0.8),
         ("CARD", &[("l", 3.0), ("lsp", 0.05)][..], 0.05),
     ] {
-        let mut builder = rspice_veriloga::device::DeviceBuilder::new(model.model.clone(), name)
-            .nodes(&[1, 0]);
+        let mut builder =
+            rspice_veriloga::device::DeviceBuilder::new(model.model.clone(), name).nodes(&[1, 0]);
         for &(parameter, value) in assignments {
             builder = builder.param(parameter, value);
         }

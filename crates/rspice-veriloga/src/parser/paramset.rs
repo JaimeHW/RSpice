@@ -211,7 +211,10 @@ impl Parser<'_> {
                 ));
             };
             let module_name = if overloads > 1 {
-                overload_name(&paramset.name, paramsets[..=index].iter().filter(same_named).count())
+                overload_name(
+                    &paramset.name,
+                    paramsets[..=index].iter().filter(same_named).count(),
+                )
             } else {
                 paramset.name.clone()
             };

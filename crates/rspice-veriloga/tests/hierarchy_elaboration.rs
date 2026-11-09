@@ -271,11 +271,17 @@ endparamset
 "
     );
     for (module, ordinal, resistance) in [("rr#1", 1, 100.0), ("rr#2", 2, 200.0)] {
-        assert_eq!(rspice_veriloga::paramset_overload(module), Some(("rr", ordinal)));
+        assert_eq!(
+            rspice_veriloga::paramset_overload(module),
+            Some(("rr", ordinal))
+        );
         let model = compile_selected(&source, module);
         let mut device = model.device("X1", &[1, 0]);
         device.update_voltages(&[1.0]);
-        assert_eq!(first_port_currents(&model, &mut device), vec![1.0 / resistance]);
+        assert_eq!(
+            first_port_currents(&model, &mut device),
+            vec![1.0 / resistance]
+        );
     }
     assert_eq!(rspice_veriloga::paramset_overload("rr"), None);
 }
