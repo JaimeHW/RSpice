@@ -1680,8 +1680,10 @@ impl VerilogACompiler {
             || artifact.hir.parameters.iter().any(|parameter| {
                 parameter.elaboration_value.is_some()
                     || parameter.elaboration_given.is_some()
-                    // A string value reaches its reads only by specialization.
+                    // A string value or a parameter array reaches its reads
+                    // only by specialization.
                     || parameter.value_type == canonical_ir::CanonicalValueType::String
+                    || !parameter.dimensions.is_empty()
             })
         {
             artifact.parameter_source = Some(source.into());

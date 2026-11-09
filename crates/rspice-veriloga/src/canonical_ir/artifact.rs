@@ -270,6 +270,8 @@ impl CanonicalIrArtifact {
         for (name, value) in &self.source_specialization {
             if !assigned.insert(name)
                 || matches!(value, crate::ScalarParameterValue::Real(value) if !value.is_finite())
+                || matches!(value, crate::ScalarParameterValue::RealArray(values)
+                    if values.iter().any(|value| !value.is_finite()))
             {
                 diagnostics.push(artifact_error(
                     "source specialization has duplicate or invalid assignments",

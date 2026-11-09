@@ -1,6 +1,9 @@
 //! Typed scalar values supplied to source specialization.
 
-use crate::ast::{Expression, FourStateLit, NumberLit, ParamType, ParameterDecl, StringLit};
+use crate::ast::{
+    ArrayLiteralElement, ArrayLiteralExpr, Expression, FourStateLit, NumberLit, ParamType,
+    ParameterDecl, StringLit,
+};
 use crate::canonical_ir::digital_value::FourStateValue;
 use crate::error::{CompileError, CompileResult};
 use crate::semantic::DigitalConstants;
@@ -10,8 +13,8 @@ use crate::source::Span;
 ///
 /// Integral values retain their width, signedness and X/Z bits until the
 /// declaration's assignment conversion. A real is supplied as binary64. A
-/// string reaches only a `string` parameter. Arrays are not represented by
-/// this scalar API.
+/// string reaches only a `string` parameter, and a whole array only a
+/// parameter array.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ScalarParameterValue {
     /// A signed decimal integer with at least 32 bits.
@@ -22,6 +25,8 @@ pub enum ScalarParameterValue {
     Real(f64),
     /// The value of a `string` parameter, without quotes or escapes.
     String(smol_str::SmolStr),
+    /// Every element of a parameter array, in declaration order.
+    RealArray(Vec<f64>),
 }
 
 impl ScalarParameterValue {
@@ -48,6 +53,9 @@ impl ScalarParameterValue {
                     return Err(refusal("exceeds the supported packed width"));
                 }
                 (value.clone(), *signed)
+            }
+            Self::RealArray(_) => {
+                return Err(refusal("is an array and takes no single value"));
             }
             Self::Real(value) => {
                 if !value.is_finite() {
@@ -76,11 +84,57 @@ impl ScalarParameterValue {
         )))
     }
 
+    /// `'{...}` for a parameter array, element by element as its type reads
+    /// them: an integer array takes whole numbers only. A wrong element count
+    /// is the replacement check's to refuse.
+    fn array_expression(parameter: &ParameterDecl, values: &[f64]) -> CompileResult<Expression> {
+        let refuse = |detail: String| {
+            CompileError::ModuleSelection(format!(
+                "parameter override `{}` {detail}",
+                parameter.name
+            ))
+        };
+        if parameter.dimensions.is_empty() {
+            return Err(refuse("is not an array and takes one value".into()));
+        }
+        let integer = parameter.param_type == ParamType::Integer;
+        let span = parameter.span;
+        let mut elements = Vec::with_capacity(values.len());
+        for &value in values {
+            if !value.is_finite() {
+                return Err(refuse("must have finite elements".into()));
+            }
+            if integer && value.fract() != 0.0 {
+                return Err(refuse(format!(
+                    "is an integer array and cannot take {value}"
+                )));
+            }
+            let raw = if integer {
+                format!("{value:.0}")
+            } else {
+                format!("{value:e}")
+            };
+            elements.push(ArrayLiteralElement::Value(Expression::Number(NumberLit {
+                value,
+                raw: raw.into(),
+                span,
+            })));
+        }
+        Ok(Expression::ArrayLiteral(ArrayLiteralExpr {
+            elements,
+            assignment_pattern: true,
+            span,
+        }))
+    }
+
     pub(crate) fn assigned_expression(
         &self,
         parameter: &ParameterDecl,
         time_scale: crate::time_scale::ModuleTimeScale,
     ) -> CompileResult<Expression> {
+        if let Self::RealArray(values) = self {
+            return Self::array_expression(parameter, values);
+        }
         if !parameter.dimensions.is_empty() {
             return Err(CompileError::ModuleSelection(format!(
                 "parameter `{}` requires an array override",
@@ -155,6 +209,13 @@ pub(crate) fn specialization_identity(
                 hash.update(&[3]);
                 hash.update(&(value.len() as u64).to_le_bytes());
                 hash.update(value.as_bytes());
+            }
+            ScalarParameterValue::RealArray(values) => {
+                hash.update(&[4]);
+                hash.update(&(values.len() as u64).to_le_bytes());
+                for value in values {
+                    hash.update(&value.to_bits().to_le_bytes());
+                }
             }
         }
     }

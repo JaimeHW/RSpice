@@ -257,7 +257,7 @@ use smol_str::SmolStr;
 /// fixed constant integer comparisons; version 17 fixed digital range arithmetic.
 /// Version 186 ties to ground an internal node that no contribution reaches.
 /// Version 187 records which module variables are operating-point outputs.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 187;
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 188;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {
