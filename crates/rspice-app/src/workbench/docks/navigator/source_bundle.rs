@@ -15,6 +15,7 @@
 //! reader includes and where each include resolved, what it declares, and
 //! where the cell is placed.
 
+use super::rail;
 use super::*;
 use egui::{Response, ScrollArea, Ui, Vec2};
 
@@ -27,7 +28,7 @@ use crate::state::{ProjectSourceId, ProjectSourceLanguage, ProjectSourceRole};
 use crate::workbench::app::dialogs::source_document::leaf_name;
 use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::cell_usage::CellInstanceUse;
-use crate::workbench::design_system::{Problem, elide_text, paint_problem_mark};
+use crate::workbench::design_system::{PANEL_SECTION_H, Problem, elide_text, paint_problem_mark};
 use crate::workbench::documents::code_workspace::{
     self, CodeSourceFileAction, SourceIncludeTarget, SourceNavigation, SourceOutlineGroup,
     VerilogAHeaderView, document_navigation,
@@ -117,6 +118,9 @@ impl FileActions {
     }
 }
 
+/// The height at which the controls are sized for a finger.
+const TOUCH_CONTROL_HEIGHT: f32 = 44.0;
+
 const FILE_ACTIONS: [(MessageId, CodeSourceFileAction, WorkbenchIcon); 3] = [
     (
         MessageId::CodeSourceNewFile,
@@ -135,6 +139,17 @@ const FILE_ACTIONS: [(MessageId, CodeSourceFileAction, WorkbenchIcon); 3] = [
     ),
 ];
 
+/// The side of a rail's icon: the height of the header it sits in with a
+/// mouse, and as large as every other control where a finger is the pointer.
+fn file_action_side(ctx: &egui::Context) -> f32 {
+    let control = Tokens::get(ctx).metrics.ctl_h;
+    if control >= TOUCH_CONTROL_HEIGHT {
+        control
+    } else {
+        PANEL_SECTION_H
+    }
+}
+
 /// The file operations as icons at the right of a section header that spans
 /// `header`, acting on the file in front of the reader, and Add files, which
 /// adds files from disk beside it.
@@ -145,7 +160,7 @@ fn header_file_actions(
     active: &str,
     messages: MessageCatalog,
 ) -> Option<RailRequest> {
-    let side = (header.height() - 4.0).max(1.0);
+    let side = file_action_side(ui.ctx());
     let mut strip = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(header.shrink2(Vec2::new(6.0, 0.0)))
@@ -357,26 +372,32 @@ fn show_rail(ui: &mut Ui, app: &mut RSpiceApp, rail: Rail) {
         .map(|(identity, _)| identity);
     let mut request = None;
 
+    rail::open(ui.ctx());
     ScrollArea::vertical()
         .id_salt(rail.id_salt)
         .auto_shrink([false, false])
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            if rail.files.is_empty() {
-                muted(ui, &messages.text(MessageId::CodeNavigatorNoBundle));
-                return;
+            'rows: {
+                if rail.files.is_empty() {
+                    muted(ui, &messages.text(MessageId::CodeNavigatorNoBundle));
+                    break 'rows;
+                }
+                files_section(ui, &rail, header, messages, &mut request);
+                let Some(active) = rail.active.as_deref() else {
+                    break 'rows;
+                };
+                if language == ProjectSourceLanguage::VerilogA {
+                    includes_section(ui, &navigation, header, messages, &mut request);
+                }
+                outline_section(ui, &navigation, active, messages, &mut request);
+                if let Some(used_in) = &rail.used_in {
+                    used_in_section(ui, used_in, messages, &mut request);
+                }
             }
-            files_section(ui, &rail, header, messages, &mut request);
-            let Some(active) = rail.active.as_deref() else {
-                return;
-            };
-            if language == ProjectSourceLanguage::VerilogA {
-                includes_section(ui, &navigation, header, messages, &mut request);
-            }
-            outline_section(ui, &navigation, active, messages, &mut request);
-            if let Some(used_in) = &rail.used_in {
-                used_in_section(ui, used_in, messages, &mut request);
-            }
+            // Inside the area and below the last row: the keys need the whole
+            // rail, and the row they land on is scrolled to by this area.
+            let _ = rail::traverse(ui, false);
         });
 
     match request {
@@ -439,6 +460,15 @@ fn files_section(
     request: &mut Option<RailRequest>,
 ) {
     let top = ui.cursor().top();
+    // An icon sized for a finger is taller than the header, so the difference
+    // goes either side of the title and the two stay level.
+    let has_icons = rail.actions.is_some() && rail.active.is_some();
+    let lead = if has_icons {
+        ((file_action_side(ui.ctx()) - PANEL_SECTION_H) * 0.5).max(0.0)
+    } else {
+        0.0
+    };
+    ui.add_space(lead);
     section_header(
         ui,
         &messages.text(rail.files_title),
@@ -447,6 +477,7 @@ fn files_section(
             .then(|| rail.files.len().to_string())
             .as_deref(),
     );
+    ui.add_space(lead);
     if let (Some(file_actions), Some(path)) = (rail.actions.as_ref(), rail.active.as_deref()) {
         let band = egui::Rect::from_x_y_ranges(ui.max_rect().x_range(), top..=ui.cursor().top());
         if let Some(action) = header_file_actions(ui, band, file_actions, path, messages) {

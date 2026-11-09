@@ -38,6 +38,8 @@ pub(in crate::workbench) struct User {
     live: Vec<String>,
     /// What the last frame painted.
     shapes: Vec<egui::epaint::ClippedShape>,
+    /// The nodes of the last frame, by name.
+    node_ids: Vec<(String, egui::accesskit::NodeId)>,
     /// The name of the node holding the keyboard in the last frame.
     focused: Option<String>,
 }
@@ -54,6 +56,7 @@ impl User {
             described: Vec::new(),
             live: Vec::new(),
             shapes: Vec::new(),
+            node_ids: Vec::new(),
             focused: None,
         };
         user.app.symbol_library = crate::schematic::symbols::SymbolLibrary::load_embedded().ok();
@@ -74,6 +77,7 @@ impl User {
             described,
             live,
             shapes,
+            node_ids,
             focused,
         } = self;
         let output = ctx.run_ui(
@@ -97,11 +101,13 @@ impl User {
         named.clear();
         described.clear();
         live.clear();
+        node_ids.clear();
         *focused = None;
         let update = output.platform_output.accesskit_update;
         let focus = update.as_ref().map(|update| update.focus);
         for (id, node) in update.into_iter().flat_map(|update| update.nodes) {
             if let Some(name) = node.label() {
+                node_ids.push((name.to_owned(), id));
                 if Some(id) == focus {
                     *focused = Some(name.to_owned());
                 }
@@ -132,6 +138,25 @@ impl User {
     fn settle(&mut self) {
         self.frame(Vec::new());
         self.frame(Vec::new());
+    }
+
+    /// Put the keyboard on `name`, as a screen reader does.
+    fn focus_on(&mut self, name: &str) {
+        let target = self
+            .node_ids
+            .iter()
+            .find(|(candidate, _)| candidate == name)
+            .unwrap_or_else(|| panic!("no node named {name:?}: {:?}", self.node_ids))
+            .1;
+        self.frame(vec![egui::Event::AccessKitActionRequest(
+            egui::accesskit::ActionRequest {
+                action: egui::accesskit::Action::Focus,
+                target_tree: egui::accesskit::TreeId::ROOT,
+                target_node: target,
+                data: None,
+            },
+        )]);
+        self.settle();
     }
 
     /// Where the last frame drew `name`.
