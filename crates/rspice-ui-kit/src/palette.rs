@@ -127,7 +127,6 @@ pub struct ContrastInks {
     /// Text on [`Self::highlight`].
     pub highlight_text: Color32,
     pub link: Color32,
-    pub disabled_text: Color32,
 }
 
 impl ContrastInks {
@@ -138,7 +137,6 @@ impl ContrastInks {
         highlight: Color32::from_rgb(0x1a, 0xeb, 0xff),
         highlight_text: Color32::from_rgb(0, 0, 0),
         link: Color32::from_rgb(255, 255, 0),
-        disabled_text: Color32::from_rgb(0x3f, 0xf2, 0x3f),
     };
 
     /// Whether text on this theme's ground is lighter than the ground.
@@ -263,7 +261,7 @@ pub const fn high_contrast(inks: ContrastInks) -> Palette {
         border_strong: inks.window_text,
         text: inks.window_text,
         text_dim: blend(inks.window, inks.window_text, 88),
-        text_faint: inks.disabled_text,
+        text_faint: blend(inks.window, inks.window_text, 75),
         accent: inks.highlight,
         accent_ink: inks.highlight_text,
         accent_dim: blend(inks.window, inks.highlight, 30),
@@ -524,7 +522,6 @@ mod tests {
                 highlight: Color32::from_rgb(0x90, 0x39, 0x09),
                 highlight_text: Color32::from_rgb(0xff, 0xf5, 0xe3),
                 link: Color32::from_rgb(0x1c, 0x5e, 0x75),
-                disabled_text: Color32::from_rgb(0x67, 0x67, 0x67),
             },
         ),
         (
@@ -535,7 +532,6 @@ mod tests {
                 highlight: Color32::from_rgb(0xab, 0xcf, 0xf2),
                 highlight_text: Color32::from_rgb(0x21, 0x2d, 0x3b),
                 link: Color32::from_rgb(0x70, 0xeb, 0xde),
-                disabled_text: Color32::from_rgb(0xd6, 0xb4, 0xfd),
             },
         ),
     ];
@@ -548,7 +544,7 @@ mod tests {
             for (name, ink, needed) in [
                 ("text", palette.text, 7.0),
                 ("secondary text", palette.text_dim, 4.5),
-                ("disabled text", palette.text_faint, 4.5),
+                ("tertiary text", palette.text_faint, 4.5),
                 ("border", palette.border, 3.0),
                 ("strong border", palette.border_strong, 3.0),
                 ("accent", palette.accent, 3.0),

@@ -12,7 +12,6 @@ const LIGHT_THEME: ContrastInks = ContrastInks {
     highlight: egui::Color32::from_rgb(0x90, 0x39, 0x09),
     highlight_text: egui::Color32::from_rgb(0xff, 0xf5, 0xe3),
     link: egui::Color32::from_rgb(0x1c, 0x5e, 0x75),
-    disabled_text: egui::Color32::from_rgb(0x67, 0x67, 0x67),
 };
 
 fn panel_color(user: &User) -> egui::Color32 {

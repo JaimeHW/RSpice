@@ -8,8 +8,8 @@ use crate::ui::palette::ContrastInks;
 #[cfg(windows)]
 pub(crate) fn read() -> Option<ContrastInks> {
     use windows_sys::Win32::Graphics::Gdi::{
-        COLOR_GRAYTEXT, COLOR_HIGHLIGHT, COLOR_HIGHLIGHTTEXT, COLOR_HOTLIGHT, COLOR_WINDOW,
-        COLOR_WINDOWTEXT, GetSysColor,
+        COLOR_HIGHLIGHT, COLOR_HIGHLIGHTTEXT, COLOR_HOTLIGHT, COLOR_WINDOW, COLOR_WINDOWTEXT,
+        GetSysColor,
     };
     use windows_sys::Win32::UI::Accessibility::{HCF_HIGHCONTRASTON, HIGHCONTRASTW};
     use windows_sys::Win32::UI::WindowsAndMessaging::{SPI_GETHIGHCONTRAST, SystemParametersInfoW};
@@ -34,7 +34,6 @@ pub(crate) fn read() -> Option<ContrastInks> {
         highlight: system_color(COLOR_HIGHLIGHT),
         highlight_text: system_color(COLOR_HIGHLIGHTTEXT),
         link: system_color(COLOR_HOTLIGHT),
-        disabled_text: system_color(COLOR_GRAYTEXT),
     })
 }
 

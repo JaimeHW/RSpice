@@ -216,18 +216,30 @@ fn appearance(ui: &mut Ui, state: &mut PreferencesDialogs<'_>) {
         ui,
         "Color mode",
         "A Windows contrast theme takes precedence over this.",
-        &["theme", "night", "appearance", "contrast", "accessibility"],
+        &[
+            "Dark",
+            "Light",
+            "System",
+            "High contrast",
+            "theme",
+            "night",
+            "appearance",
+            "accessibility",
+        ],
         |ui| {
             value_column(ui, |ui| {
-                let mut selected = Mode::ALL
+                let active = Mode::ALL
                     .iter()
                     .position(|mode| *mode == state.workbench.theme.mode)
                     .unwrap_or_default();
-                if segmented(
+                let labels = Mode::ALL.map(|mode| mode.label().to_owned());
+                if let Some(selected) = select(
                     ui,
                     "preferences.appearance.color-mode",
-                    &Mode::ALL.map(Mode::label),
-                    &mut selected,
+                    "Color mode",
+                    &labels[active],
+                    &labels,
+                    control_width(ui),
                 ) {
                     state.workbench.theme.mode = Mode::ALL[selected];
                 }
