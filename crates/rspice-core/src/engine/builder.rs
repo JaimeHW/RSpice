@@ -10140,8 +10140,8 @@ impl Engine {
                         Some(henries) => {
                             let internal =
                                 circuit.get_or_create_node(&format!("{}.__lser", element.name));
-                            let branch = circuit
-                                .allocate_branch_named(&format!("{}.__lser", element.name));
+                            let branch =
+                                circuit.allocate_branch_named(&format!("{}.__lser", element.name));
                             circuit.inductors.add(
                                 format!("{}.__lser", element.name),
                                 np,

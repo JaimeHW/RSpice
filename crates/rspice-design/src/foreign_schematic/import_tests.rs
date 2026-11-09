@@ -965,7 +965,10 @@ fn a_prefix_set_on_the_placed_symbol_decides_the_device_it_is() {
             .find(|component| component.name == name)
             .unwrap_or_else(|| panic!("{name} in {:?}", imported.document.components))
     };
-    let binding = part("Q1").library_cell.as_ref().expect("a cell over the model");
+    let binding = part("Q1")
+        .library_cell
+        .as_ref()
+        .expect("a cell over the model");
     assert_eq!(binding.reference_prefix.as_deref(), Some("X"));
     assert_eq!(part("Q1").value, "MYSUB");
     assert_eq!(part("Q2").kind, ComponentType::NpnBjt);
