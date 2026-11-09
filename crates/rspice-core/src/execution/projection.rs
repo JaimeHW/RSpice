@@ -2001,7 +2001,7 @@ mod tests {
     #[test]
     fn a_control_save_passes_over_a_name_no_vector_answers_to() {
         let mut netlist = parse(
-            "missing save\nV1 out 0 1\nR1 out 0 1k\n.TRAN 1u 10u\n.SAVE V(out) @D1[Id]\n.END\n",
+            "missing save\nV1 out 0 1\nR1 out 0 1k\n.TRAN 1u 10u\n.SAVE V(out) V(gone)\n.END\n",
         );
         netlist.saves.ignores_unknown_names = true;
         let projection = SignalProjection::from_netlist(&netlist).expect("projection builds");
