@@ -717,10 +717,16 @@ fn analysis_draft(card: &ForeignCard) -> Result<(AnalysisDraft, Vec<String>), St
                 _ => return Err("a transient card names one to four times".to_owned()),
             };
             let stop_time = number(stop)?;
-            let step = match step {
-                Some(step) if number(step)? > 0.0 => step.to_owned(),
-                // The source program reads a zero print step as "choose one".
-                _ => format_si_value(stop_time / 1000.0),
+            // The source program reads a zero print step as "choose one" and
+            // keeps every step it accepts. A plan's outputs need a bounded
+            // grid, so this one is fine enough to keep the peaks a reader
+            // compares, and the solver's step stays limited as it would be.
+            let (step, solver_limit) = match step {
+                Some(step) if number(step)? > 0.0 => (step.to_owned(), None),
+                _ => (
+                    format_si_value(stop_time / 100_000.0),
+                    Some(format_si_value(stop_time / 1000.0)),
+                ),
             };
             let mut draft = AnalysisDraft::for_kind(AnalysisKind::Transient);
             if let AnalysisDraft::Transient(tran) = &mut draft {
@@ -729,7 +735,7 @@ fn analysis_draft(card: &ForeignCard) -> Result<(AnalysisDraft, Vec<String>), St
                 tran.start = start.unwrap_or("0").to_owned();
                 tran.max_step = match max_step {
                     Some(max_step) if number(max_step)? > 0.0 => max_step.to_owned(),
-                    _ => "auto".to_owned(),
+                    _ => solver_limit.unwrap_or_else(|| "auto".to_owned()),
                 };
                 tran.uic = uic;
             }

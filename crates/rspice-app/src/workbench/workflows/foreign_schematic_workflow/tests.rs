@@ -42,7 +42,8 @@ fn analysis_cards_become_the_drafts_of_their_analyses() {
     let AnalysisDraft::Transient(tran) = drafts[0] else {
         panic!("a transient draft, not {:?}", drafts[0]);
     };
-    // A zero print step is the source program's "choose one".
+    // A zero print step is the source program's "choose one": a grid fine
+    // enough to keep the peaks of the steps it would have kept.
     assert_eq!(
         (
             tran.stop.as_str(),
@@ -51,7 +52,7 @@ fn analysis_cards_become_the_drafts_of_their_analyses() {
             tran.max_step.as_str(),
             tran.uic
         ),
-        ("10m", "10u", "1m", "1u", true)
+        ("10m", "100n", "1m", "1u", true)
     );
     let AnalysisDraft::Ac(ac) = drafts[1] else {
         panic!("an AC draft");
@@ -131,6 +132,11 @@ fn parameters_options_and_temperature_find_their_plan_places() {
         card(ForeignCardRole::SourceOnly, ".backanno"),
         card(ForeignCardRole::Other, "K1 L1 L2 1"),
     ]);
+    let [(_, AnalysisDraft::Transient(tran))] = plan.analyses.as_slice() else {
+        panic!("one transient analysis");
+    };
+    // No times but the stop: the grid is fine and the solver limit is unmoved.
+    assert_eq!((tran.step.as_str(), tran.max_step.as_str()), ("10n", "1u"));
     let variables = plan
         .variables
         .iter()
