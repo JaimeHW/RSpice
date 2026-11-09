@@ -811,6 +811,27 @@ fn a_qspice_drawing_joins_what_its_wire_names_join_and_refuses_a_dll() {
     assert_eq!(imported.directives[0].text, ".tran 3m");
 }
 
+/// A drawn current source that LTspice flags as a load keeps its one
+/// waveform and the flag on its card.
+#[test]
+fn an_imported_load_keeps_its_waveform_and_flag_on_its_card() {
+    let drawing = parse_asc(
+        "Version 4\nSYMBOL current 0 0 R0\nSYMATTR InstName I1\n\
+         SYMATTR Value PULSE(.2 5 300u 100n 100n 300u 600u)\nSYMATTR SpiceLine load\n",
+    )
+    .expect("the drawing reads");
+    let imported = import_foreign_schematic(&drawing, "work", &library());
+    let load = imported
+        .document
+        .components
+        .iter()
+        .find(|part| part.name == "I1")
+        .expect("I1 is placed");
+    assert_eq!(load.kind, ComponentType::CurrentSourcePulse);
+    assert_eq!(load.value, "PULSE(.2 5 300u 100n 100n 300u 600u) load");
+    assert!(load.params.is_empty(), "{}", load.params);
+}
+
 #[test]
 fn directive_cards_sort_by_the_project_place_they_belong_in() {
     let drawing = parse_asc(

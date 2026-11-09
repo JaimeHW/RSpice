@@ -411,6 +411,33 @@ fn a_waveform_written_without_parentheses_keeps_its_arguments() {
     assert_eq!(written.params[0], ("v2".to_owned(), "1".to_owned()));
 }
 
+/// Words a waveform's fields cannot hold stay on its card, after it: the
+/// netlister writes the waveform once, and LTspice's `load` ends the card,
+/// where the engine reads it.
+#[test]
+fn a_waveform_keeps_the_words_of_its_card_with_load_last() {
+    use super::mapping::source_value;
+    use crate::schematic::component_type::ComponentType;
+
+    let load = source_value(false, "PULSE(.2 5 300u 100n 100n 300u 600u) load");
+    assert_eq!(load.kind, ComponentType::CurrentSourcePulse);
+    assert_eq!(load.value, "PULSE(.2 5 300u 100n 100n 300u 600u)");
+    assert_eq!(load.extra, ["load"]);
+    assert!(load.params.is_empty(), "{:?}", load.params);
+
+    // An AC magnitude on a load is written ahead of the flag.
+    let ac = source_value(false, "PWL(0 0 1u 1) AC 2 45 load");
+    assert_eq!(ac.value, "PWL(0 0 1u 1)");
+    assert_eq!(ac.extra, ["AC", "2", "45", "load"]);
+    assert!(ac.params.is_empty(), "{:?}", ac.params);
+
+    // A DC level written after a waveform stays a word of the card.
+    let level = source_value(true, "pulse -75 75 0 .1n .1n 10n 20n DC 0");
+    assert_eq!(level.kind, ComponentType::VoltageSourcePulse);
+    assert_eq!(level.value, "pulse(-75 75 0 .1n .1n 10n 20n)");
+    assert_eq!(level.extra, ["DC", "0"]);
+}
+
 fn named(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
     pairs
         .iter()

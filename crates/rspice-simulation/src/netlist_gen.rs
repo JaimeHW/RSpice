@@ -997,6 +997,32 @@ mod tests {
         );
     }
 
+    /// An imported card's words follow the written waveform: the waveform is
+    /// written once, not wrapped in the kind's named fields.
+    #[test]
+    fn transient_source_formatter_keeps_the_words_after_a_literal_waveform() {
+        let schematic = Schematic::default();
+        let generator = NetlistGenerator::new(
+            &schematic,
+            crate::netlist_gen::NetlistSourceData::new(&crate::netlist_gen::FixtureSourceFiles),
+        );
+        let load = Component::new(1, ComponentType::CurrentSourcePulse, Point::origin())
+            .with_name_value("I1", "PULSE(.2 5 0 1u 1u 5u 10u) load");
+        assert_eq!(
+            generator.format_source_value(&load),
+            "PULSE(.2 5 0 1u 1u 5u 10u) load"
+        );
+        let level = Component::new(2, ComponentType::VoltageSourcePulse, Point::origin())
+            .with_name_value("V1", "pulse(0 1.8 0 1n 1n 5n 10n) DC 0");
+        assert_eq!(
+            generator.format_source_value(&level),
+            "pulse(0 1.8 0 1n 1n 5n 10n) DC 0"
+        );
+        let pwl = Component::new(3, ComponentType::CurrentSourcePwl, Point::origin())
+            .with_name_value("I2", "PWL(0 0 1m 1) load");
+        assert_eq!(generator.format_source_value(&pwl), "PWL(0 0 1m 1) load");
+    }
+
     /// Labels sharing a name connect otherwise-disjoint nets.
     #[test]
     fn same_name_labels_merge_nets() {

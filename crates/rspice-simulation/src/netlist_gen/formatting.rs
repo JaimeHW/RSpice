@@ -547,12 +547,26 @@ impl<'a> NetlistGenerator<'a> {
     /// `Component::value` and the remaining fields in `Component::params`.
     fn legacy_waveform_literal(value: &str, waveform: &str) -> Option<String> {
         let literal = value.trim();
-        if literal.contains(['\r', '\n']) || !literal.ends_with(')') {
+        if literal.contains(['\r', '\n']) {
             return None;
         }
-        let (name, _) = literal.split_once('(')?;
-        name.trim()
-            .eq_ignore_ascii_case(waveform)
+        let (name, arguments) = literal.split_once('(')?;
+        if !name.trim().eq_ignore_ascii_case(waveform) {
+            return None;
+        }
+        // The call closes; words of the card it came from (`load`, `DC 0`)
+        // may follow it.
+        let mut depth = 1_usize;
+        arguments
+            .chars()
+            .any(|character| {
+                match character {
+                    '(' => depth += 1,
+                    ')' => depth -= 1,
+                    _ => {}
+                }
+                depth == 0
+            })
             .then(|| literal.to_owned())
     }
 

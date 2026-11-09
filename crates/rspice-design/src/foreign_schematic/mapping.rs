@@ -381,6 +381,16 @@ pub(super) fn source_value(voltage: bool, text: &str) -> SourceValue {
         let keyword = upper.split('(').next().unwrap_or_default();
         if upper == "DC" {
             index += 1;
+            // A DC level written after a waveform stays beside it on the
+            // card, where the source simulator read it.
+            if !matches!(kind, T::VoltageSource | T::CurrentSource)
+                && let Some(level) = tokens
+                    .get(index)
+                    .filter(|word| is_number_word(word) && !word.eq_ignore_ascii_case("AC"))
+            {
+                extra.extend([token.clone(), level.clone()]);
+                index += 1;
+            }
             continue;
         }
         if upper == "AC" {
@@ -480,6 +490,25 @@ pub(super) fn source_value(voltage: bool, text: &str) -> SourceValue {
             extra.push(token.clone());
         }
         index += 1;
+    }
+    // The engine reads LTspice's `load` as a current source's last word, and
+    // the netlister writes an AC field after the value, so a load's AC stays
+    // with the words ahead of its flag.
+    if !voltage
+        && let Some(flag) = extra
+            .iter()
+            .position(|word| word.eq_ignore_ascii_case("load"))
+    {
+        let flag = extra.remove(flag);
+        let field = |params: &mut Vec<(String, String)>, name: &str| {
+            let at = params.iter().position(|(key, _)| key == name)?;
+            Some(params.remove(at).1)
+        };
+        if let Some(magnitude) = field(&mut params, "ac") {
+            extra.extend(["AC".to_owned(), magnitude]);
+            extra.extend(field(&mut params, "acphase"));
+        }
+        extra.push(flag);
     }
     if extra.is_empty()
         && let Some((first, named)) = named_waveform(kind, &arguments)
