@@ -673,6 +673,7 @@ fn completion_row(
             colors.text_faint,
         );
     }
+    theme::paint_focus_ring(ui, &response, rect);
     response
 }
 
