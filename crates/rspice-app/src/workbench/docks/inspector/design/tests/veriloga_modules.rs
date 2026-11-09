@@ -26,6 +26,9 @@ fn module_parameter(
             range: None,
             units: units.map(str::to_owned),
             description: description.map(str::to_owned),
+            authored_default: None,
+            is_array: false,
+            array_length: None,
         }),
     }
 }
@@ -108,7 +111,7 @@ fn parameter_rows_carry_units_and_descriptions_for_modules_and_native_devices() 
     let nodes = accesskit_nodes(|ui| parameters_section(ui, &mut app, &component, &evidence));
     assert!(
         nodes.iter().any(|(_, node)| {
-            node.label() == Some("gain")
+            node.label() == Some("gain, S")
                 && node
                     .description()
                     .is_some_and(|description| description.starts_with("Transconductance."))
@@ -126,6 +129,86 @@ fn parameter_rows_carry_units_and_descriptions_for_modules_and_native_devices() 
     assert_eq!(
         tc1.description.as_deref(),
         Some("First-order temperature coefficient")
+    );
+}
+
+/// A number typed into a module's parameter stays as typed, and the `M` a
+/// module's source writes for mega reaches the deck as mega.
+#[test]
+fn a_number_typed_for_a_module_stays_as_typed_and_reads_as_the_module_writes_it() {
+    let (mut app, component) = app_with_compiled_veriloga_instance(
+        &[module_parameter("gain", Some("10000000"), None, None)],
+        "",
+    );
+    let field = InlineEditField::Parameter("gain".to_owned());
+    for (typed, stored, value) in [
+        ("1e5", "1e5", 1e5),
+        ("100k", "100k", 1e5),
+        ("10M", "10Meg", 1e7),
+        ("10m", "10m", 1e-2),
+    ] {
+        assert!(begin_edit(&mut app, component.id, field.clone()));
+        update_edit(&mut app, typed.to_owned());
+        assert!(
+            app.state.commit_inline_component_edit().expect(typed),
+            "{typed} commits"
+        );
+        let edited = app.state.model.schematic.document().components[0].clone();
+        assert_eq!(field_value(&edited, &field), stored);
+        let read = rspice_vocabulary::quantity::engineering::parse_engineering_value(stored);
+        assert_eq!(read, Ok(value), "the deck reads {stored}");
+    }
+}
+
+/// A module's array takes its list in either spelling, stored as one, and a
+/// list of the wrong length says so without losing the module's own words,
+/// in a field that is named with its unit and a message that is announced.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn an_array_parameter_takes_a_list_of_its_length_and_reports_one_that_is_not() {
+    let mut breakpoints = module_parameter("pa", None, Some("V"), Some("Breakpoints"));
+    let declaration = breakpoints.declaration.as_mut().expect("a declaration");
+    declaration.is_array = true;
+    declaration.array_length = Some(2);
+    declaration.authored_default = Some("'{1k, 2}".to_owned());
+    let (mut app, component) = app_with_compiled_veriloga_instance(&[breakpoints], "");
+    let rows = inline_parameter_contract(&app.state, &component, &HashMap::new());
+    let row = rows.iter().find(|row| row.key == "pa").expect("a pa row");
+    assert_eq!(row.hint, "'{1k, 2}");
+
+    let field = InlineEditField::Parameter("pa".to_owned());
+    assert!(begin_edit(&mut app, component.id, field.clone()));
+    update_edit(&mut app, "'{4, 5M}'".to_owned());
+    assert!(
+        app.state
+            .commit_inline_component_edit()
+            .expect("a list of two")
+    );
+    let edited = app.state.model.schematic.document().components[0].clone();
+    assert_eq!(field_value(&edited, &field), "[4 5Meg]");
+
+    assert!(begin_edit(&mut app, component.id, field.clone()));
+    update_edit(&mut app, "[1 2 3]".to_owned());
+    let evidence = super::super::component_model_evidence(&app.state, &edited);
+    let nodes = accesskit_nodes(|ui| parameters_section(ui, &mut app, &edited, &evidence));
+    let error = "pa takes 2 values; this has 3";
+    assert!(
+        nodes.iter().any(|(_, node)| {
+            node.label() == Some("pa, V")
+                && node.invalid().is_some()
+                && node.description().is_some_and(|description| {
+                    description.starts_with("Breakpoints.") && description.contains(error)
+                })
+        }),
+        "the field keeps the module's description and adds the error"
+    );
+    assert!(
+        nodes.iter().any(|(_, node)| {
+            node.role() == egui::accesskit::Role::Status
+                && node.label() == Some(error)
+                && node.live() == Some(egui::accesskit::Live::Polite)
+        }),
+        "the message is announced when it appears"
     );
 }
 

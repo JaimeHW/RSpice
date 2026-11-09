@@ -9,6 +9,7 @@
 use super::*;
 use crate::workbench::framework::command_registry::ids;
 use rspice_design::schematic::bom::BomField;
+use rspice_vocabulary::property::{deck_number_spelling, list_elements};
 
 #[cfg(test)]
 mod tests;
@@ -74,10 +75,15 @@ fn prepare_field_edit(
             crate::workbench::app::authoritative_component_property_sheet(state, component)?
         && let Some(definition) = sheet.get(key)
     {
-        typed_value = parameter_source_value(state, definition, source)?;
+        let source = if definition.verilog_numbers {
+            deck_number_spelling(source)
+        } else {
+            source.to_owned()
+        };
+        typed_value = parameter_source_value(state, definition, &source)?;
         authored = typed_value
             .as_ref()
-            .map(crate::properties::property_bridge::property_value_to_string)
+            .map(|value| parameter_source_text(definition, &source, value))
             .unwrap_or_default();
     }
     let candidate = edited_component(component, field, &authored)?;
@@ -150,6 +156,23 @@ fn source_contract_rejection(
     crate::properties::property_bridge::source_commit_refusal(component, &values, sheet)
 }
 
+/// The text a committed value is stored as. A module's number stays as it
+/// was typed, so long as the deck reads the same value from that text.
+fn parameter_source_text(
+    definition: &PropertyDefinition,
+    typed: &str,
+    value: &PropertyValue,
+) -> String {
+    if definition.verilog_numbers
+        && let PropertyValue::Number { value: number, .. } = value
+        && rspice_vocabulary::quantity::engineering::parse_engineering_value(typed.trim())
+            .is_ok_and(|read| (read - number).abs() <= 1e-12 * number.abs())
+    {
+        return typed.trim().to_owned();
+    }
+    crate::properties::property_bridge::property_value_to_string(value)
+}
+
 /// The typed value `candidate` commits as, or why it cannot commit.
 ///
 /// One parse, two readers: the field's own type contract refuses from here, and
@@ -179,6 +202,19 @@ fn parameter_source_value(
                 state.workbench.number_locale,
             )
             .map(Some);
+        }
+        // A list is stored as one spelling however it was typed.
+        PropertyType::String if definition.value_list.is_some() => {
+            PropertyValue::String(list_elements(candidate).map_or_else(
+                || candidate.to_owned(),
+                |elements| {
+                    let spelled: Vec<String> = elements
+                        .iter()
+                        .map(|element| deck_number_spelling(element))
+                        .collect();
+                    format!("[{}]", spelled.join(" "))
+                },
+            ))
         }
         PropertyType::String => PropertyValue::String(candidate.to_owned()),
         PropertyType::Boolean => match candidate.to_ascii_lowercase().as_str() {
@@ -920,8 +956,13 @@ pub(super) fn edit_row_with_hint(
         .error_for(component.id, &field)
         .map(str::to_owned);
     if let Some(reason) = rejection.as_deref() {
+        // The module's own account of the parameter stays; the error joins it.
+        let description = match caption.description.filter(|text| !text.is_empty()) {
+            Some(description) => format!("{description} {reason}"),
+            None => reason.to_owned(),
+        };
         ui.ctx().accesskit_node_builder(response.id, |node| {
-            node.set_description(reason);
+            node.set_description(description);
             node.set_invalid(egui::accesskit::Invalid::True);
         });
     }
@@ -967,6 +1008,7 @@ pub(super) fn rejection_slot(ui: &mut Ui, editing: bool, reason: Option<&str>) -
         ui.ctx().accesskit_node_builder(response.id, |node| {
             node.set_role(egui::accesskit::Role::Status);
             node.set_label(reason);
+            node.set_live(egui::accesskit::Live::Polite);
         });
     }
     rect

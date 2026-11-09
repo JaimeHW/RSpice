@@ -24,6 +24,27 @@ pub struct CellParameter {
     pub declaration: Option<ParameterDeclaration>,
 }
 
+impl CellParameter {
+    /// The default as a reader sees it: the module's own spelling when it
+    /// wrote a literal, otherwise the value in engineering notation. `None`
+    /// when the module computes it from other parameters.
+    pub fn default_display(&self) -> Option<String> {
+        if let Some(authored) = self
+            .declaration
+            .as_ref()
+            .and_then(|declaration| declaration.authored_default.as_deref())
+        {
+            return Some(authored.to_owned());
+        }
+        let default = self.default_value.as_deref()?;
+        Some(
+            default
+                .parse::<f64>()
+                .map_or_else(|_| default.to_owned(), parameter_engineering_text),
+        )
+    }
+}
+
 /// A compiled module's declaration of one of its parameters.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParameterDeclaration {
@@ -33,6 +54,12 @@ pub struct ParameterDeclaration {
     pub range: Option<ParameterRange>,
     pub units: Option<String>,
     pub description: Option<String>,
+    /// The default as the module spells it, when it wrote a literal.
+    pub authored_default: Option<String>,
+    /// Whether the parameter is an array, set one value per element.
+    pub is_array: bool,
+    /// How many values an array takes, when its declared default states it.
+    pub array_length: Option<usize>,
 }
 
 /// The type a module declares a parameter with.
@@ -96,11 +123,51 @@ pub fn parameter_number_text(value: f64) -> String {
     }
 }
 
+/// A computed value as an engineer reads it: `100k`, `10M`, `2.5u`, with the
+/// scale factors of Verilog-AMS. A value the notation cannot state exactly
+/// keeps every digit.
+pub fn parameter_engineering_text(value: f64) -> String {
+    const SCALES: [(i32, &str); 10] = [
+        (12, "T"),
+        (9, "G"),
+        (6, "M"),
+        (3, "k"),
+        (-3, "m"),
+        (-6, "u"),
+        (-9, "n"),
+        (-12, "p"),
+        (-15, "f"),
+        (-18, "a"),
+    ];
+    let magnitude = value.abs();
+    if !magnitude.is_finite()
+        || magnitude == 0.0
+        || (1e-3..1e3).contains(&magnitude)
+        || magnitude >= 1e15
+    {
+        return parameter_number_text(value);
+    }
+    let Some(&(exponent, suffix)) = SCALES
+        .iter()
+        .find(|(exponent, _)| magnitude >= 10f64.powi(*exponent))
+    else {
+        return parameter_number_text(value);
+    };
+    let mantissa = value / 10f64.powi(exponent);
+    (0..=15)
+        .map(|digits| format!("{mantissa:.digits$}"))
+        .find(|text| format!("{text}e{exponent}").parse::<f64>() == Ok(value))
+        .map_or_else(
+            || parameter_number_text(value),
+            |text| format!("{text}{suffix}"),
+        )
+}
+
 impl ParameterRange {
     /// The range as Verilog-A writes it: `from [0:inf) exclude 0.5`.
     pub fn source_text(&self) -> String {
         let value = |value: &RangeValue| match value {
-            RangeValue::Constant(value) => parameter_number_text(*value),
+            RangeValue::Constant(value) => parameter_engineering_text(*value),
             RangeValue::Dependent(text) => text.clone(),
         };
         let bounded = !matches!(
@@ -183,6 +250,12 @@ struct EncodedDeclaredParameter {
     description: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     aliases: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    authored_default: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    is_array: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    array_length: Option<usize>,
 }
 
 /// `parameters` as a `veriloga.parameter_contract` value: a JSON array of
@@ -205,6 +278,9 @@ pub fn encode_veriloga_parameter_contract(parameters: &[CellParameter]) -> Resul
                 units: declaration.units.clone(),
                 description: declaration.description.clone(),
                 aliases: parameter.aliases.clone(),
+                authored_default: declaration.authored_default.clone(),
+                is_array: declaration.is_array,
+                array_length: declaration.array_length,
             })
         })
         .collect::<Result<Vec<_>, String>>()?;
@@ -228,6 +304,9 @@ fn decode_veriloga_parameter_contract(encoded: &str) -> Result<Vec<CellParameter
                 range: parameter.range,
                 units: parameter.units,
                 description: parameter.description,
+                authored_default: parameter.authored_default,
+                is_array: parameter.is_array,
+                array_length: parameter.array_length,
             }),
         })
         .collect())
@@ -577,6 +656,58 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_computed_value_reads_in_engineering_notation_and_keeps_every_digit() {
+        for (value, text) in [
+            (1e5, "100k"),
+            (1e7, "10M"),
+            (5e6, "5M"),
+            (-2.5e-6, "-2.5u"),
+            (1e3, "1k"),
+            (1e-3, "0.001"),
+            (999.5, "999.5"),
+            (1.0, "1"),
+            (0.0, "0"),
+            (123456.789, "123.456789k"),
+            (1e-18, "1a"),
+        ] {
+            assert_eq!(parameter_engineering_text(value), text);
+        }
+        // Past the scale factors, or short of them, a value stays a number.
+        for value in [1e20, 1e-21, f64::INFINITY] {
+            assert_eq!(
+                parameter_engineering_text(value),
+                parameter_number_text(value)
+            );
+        }
+    }
+
+    #[test]
+    fn a_default_is_shown_as_the_module_wrote_it_and_otherwise_as_a_value() {
+        let parameter = |default: Option<&str>, authored: Option<&str>| CellParameter {
+            name: "r".to_owned(),
+            aliases: Vec::new(),
+            required: false,
+            default_value: default.map(str::to_owned),
+            declaration: Some(ParameterDeclaration {
+                value_type: ParameterValueType::Real,
+                scope: ParameterScope::Instance,
+                range: None,
+                units: None,
+                description: None,
+                authored_default: authored.map(str::to_owned),
+                is_array: false,
+                array_length: None,
+            }),
+        };
+        let shown = |default, authored| parameter(default, authored).default_display();
+        assert_eq!(shown(Some("10000000"), Some("10M")).as_deref(), Some("10M"));
+        assert_eq!(shown(Some("100000"), Some("1e5")).as_deref(), Some("1e5"));
+        assert_eq!(shown(Some("100000"), None).as_deref(), Some("100k"));
+        assert_eq!(shown(Some("fast"), None).as_deref(), Some("fast"));
+        assert_eq!(shown(None, None), None);
+    }
+
+    #[test]
     fn port_metadata_accepts_json_and_legacy_lists() {
         let mut metadata = HashMap::new();
         metadata.insert("veriloga.ports".to_owned(), r#"["in","out"]"#.to_owned());
@@ -696,6 +827,9 @@ mod tests {
                 range,
                 units: None,
                 description: None,
+                authored_default: None,
+                is_array: false,
+                array_length: None,
             }),
         }
     }

@@ -225,6 +225,14 @@ fn parameter_property(parameter: &CellParameter, order: i32) -> PropertyDefiniti
         definition = definition.with_unit(units);
     }
     let default = parameter.default_value.as_deref();
+    let shown_default = parameter.default_display();
+    if declaration.is_array {
+        return definition
+            .with_type(PropertyType::String)
+            .with_default(PropertyValue::string(""))
+            .with_default_hint(shown_default.unwrap_or_else(|| COMPUTED_DEFAULT.to_owned()))
+            .with_value_list(declaration.array_length);
+    }
     definition = match declaration.value_type {
         ParameterValueType::String => definition
             .with_type(PropertyType::String)
@@ -234,13 +242,15 @@ fn parameter_property(parameter: &CellParameter, order: i32) -> PropertyDefiniti
                 Some(value) => definition
                     .with_type(PropertyType::Number)
                     .with_default(PropertyValue::number(value))
-                    .with_default_hint(default.unwrap_or_default()),
+                    .with_verilog_numbers()
+                    .with_default_hint(shown_default.unwrap_or_default()),
                 // No number a field could hold stands for a computed default,
                 // so the field is an optional expression and its empty state
                 // says what it means.
                 None => definition
                     .with_type(PropertyType::Expression)
                     .with_default(PropertyValue::expression(""))
+                    .with_verilog_numbers()
                     .with_default_hint(COMPUTED_DEFAULT),
             }
         }
@@ -296,7 +306,7 @@ fn parameter_description(parameter: &CellParameter, declaration: &ParameterDecla
         ParameterScope::Instance => "instance",
         ParameterScope::Model => "model",
     };
-    match parameter.default_value.as_deref() {
+    match parameter.default_display() {
         Some(default) => text.push_str(&format!("{kind} {scope} parameter, default {default}.")),
         None => text.push_str(&format!(
             "{kind} {scope} parameter; its module computes the default from other parameters."

@@ -125,11 +125,19 @@ pub fn property_row_input_captioned(
     let description = caption
         .description
         .filter(|description| !description.is_empty());
+    // A name read without the field's trailing unit would not say what the
+    // number is in.
+    let accessible_name = caption
+        .unit
+        .filter(|unit| !unit.is_empty())
+        .map_or_else(|| label.to_owned(), |unit| format!("{label}, {unit}"));
     ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_label(label);
+        node.set_label(accessible_name);
         match (invalid, description) {
-            (true, _) => node.set_description("Editable engineering value with a validation error"),
-            (false, Some(description)) => node.set_description(description),
+            (true, None) => {
+                node.set_description("Editable engineering value with a validation error")
+            }
+            (_, Some(description)) => node.set_description(description),
             (false, None) => node.set_description("Editable engineering value"),
         }
         if invalid {

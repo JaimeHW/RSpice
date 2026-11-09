@@ -355,6 +355,54 @@ pub struct HirParameter {
     /// The declaration's `desc` attribute.
     #[serde(default)]
     pub description: Option<SmolStr>,
+    /// The default as the source spells it, when it is a literal: a number
+    /// with its scale factor, or an array of them. Presentation only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_text: Option<SmolStr>,
+}
+
+/// The value of a declaration whose default is a literal: what follows its
+/// `=`, ahead of any `from` or `exclude`. A literal holds no identifier, so a
+/// word starting with either can only be that clause.
+fn literal_default_text(declaration: &str) -> String {
+    let value = declaration
+        .split_once('=')
+        .map_or(declaration, |(_, value)| value);
+    value
+        .split_whitespace()
+        .take_while(|word| !word.starts_with("from") && !word.starts_with("exclude"))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Whether `text` is the expression as a literal spells it: a number, signed
+/// or not, or an array of them. A default the compiler folded, `2 * 50k`,
+/// holds a number that no longer matches what was written.
+fn spells_literal(expressions: &[HirExpression], id: ExprId, text: &str) -> bool {
+    let text = text.trim();
+    match expressions
+        .get(usize::from(id))
+        .map(|expression| &expression.kind)
+    {
+        Some(HirExprKind::Number { raw, .. }) => raw.as_str() == text,
+        Some(HirExprKind::Unary { operand, .. }) => text
+            .strip_prefix(['-', '+'])
+            .is_some_and(|rest| spells_literal(expressions, *operand, rest)),
+        Some(HirExprKind::ArrayLiteral { elements, .. }) => text
+            .strip_prefix('\'')
+            .unwrap_or(text)
+            .strip_prefix('{')
+            .and_then(|rest| rest.strip_suffix('}'))
+            .is_some_and(|inner| {
+                let written = inner.split(',').collect::<Vec<_>>();
+                written.len() == elements.len()
+                    && elements
+                        .iter()
+                        .zip(written)
+                        .all(|(element, text)| spells_literal(expressions, *element, text))
+            }),
+        _ => false,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1238,6 +1286,7 @@ impl HirModel {
                     aliases: Vec::new(),
                     units: parameter.units.clone(),
                     description: parameter.description.clone(),
+                    default_text: None,
                 }
             })
             .collect();
@@ -1509,6 +1558,19 @@ impl HirModel {
             .filter_map(|parameter| parameter.range.as_mut())
         {
             range.record_source_text(source);
+        }
+        let expressions = &self.expressions;
+        for parameter in &mut self.parameters {
+            parameter.default_text = parameter
+                .default_expr
+                .as_ref()
+                .and_then(|default| {
+                    let start = usize::try_from(default.span.start).ok()?;
+                    let end = usize::try_from(default.span.end).ok()?;
+                    let text = literal_default_text(source.get(start..end)?);
+                    spells_literal(expressions, default.id, &text).then_some(text)
+                })
+                .map(SmolStr::from);
         }
     }
 

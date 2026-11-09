@@ -396,6 +396,9 @@ pub fn compiled_parameters(abi: &RuntimeAbiSummary) -> Vec<CellParameter> {
                 }),
                 units: parameter.units.as_ref().map(ToString::to_string),
                 description: parameter.description.as_ref().map(ToString::to_string),
+                authored_default: parameter.default_text.as_ref().map(ToString::to_string),
+                is_array: parameter.is_array,
+                array_length: parameter.array_length,
             }),
         })
         .collect()

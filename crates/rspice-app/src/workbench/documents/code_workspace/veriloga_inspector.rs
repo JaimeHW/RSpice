@@ -297,8 +297,7 @@ impl ParameterCells {
             name: parameter.name.clone(),
             kind: messages.text(kind),
             default: parameter
-                .default_value
-                .clone()
+                .default_display()
                 .unwrap_or_else(|| messages.text(MessageId::VerilogAParameterComputed)),
             range,
             units: declaration

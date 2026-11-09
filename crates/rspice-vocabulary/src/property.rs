@@ -135,6 +135,50 @@ pub enum VisibilityCondition {
 // Property Definition
 // =============================================================================
 
+/// A field that takes one value per element of an array.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ValueList {
+    /// How many values the list holds, when it is known before a run.
+    pub length: Option<usize>,
+}
+
+/// The elements of a list written `[1 2 3]`, `[1, 2, 3]` or `'{1, 2, 3}'`;
+/// `None` when the text is not a list or holds no element.
+#[must_use]
+pub fn list_elements(text: &str) -> Option<Vec<String>> {
+    let text = text.trim();
+    let inner = text
+        .strip_prefix('[')
+        .and_then(|rest| rest.strip_suffix(']'))
+        .or_else(|| {
+            text.strip_prefix("'{")
+                .map(|rest| rest.strip_suffix('\'').unwrap_or(rest))
+                .and_then(|rest| rest.strip_suffix('}'))
+        })?;
+    let elements: Vec<String> = inner
+        .split(|character: char| character == ',' || character.is_whitespace())
+        .filter(|element| !element.is_empty())
+        .map(str::to_owned)
+        .collect();
+    (!elements.is_empty()).then_some(elements)
+}
+
+/// A number read as Verilog-A writes it, spelled as a deck must: a bare `M` is
+/// mega in a module's source and milli in a deck.
+#[must_use]
+pub fn deck_number_spelling(text: &str) -> String {
+    let text = text.trim();
+    match text.strip_suffix('M') {
+        Some(number)
+            if number
+                .ends_with(|character: char| character.is_ascii_digit() || character == '.') =>
+        {
+            format!("{number}Meg")
+        }
+        _ => text.to_owned(),
+    }
+}
+
 /// Metadata for a property definition.
 ///
 /// Defines the name, type, constraints, and display information for a property.
@@ -155,6 +199,15 @@ pub struct PropertyDefinition {
 
     /// Default value
     pub default_value: PropertyValue,
+
+    /// The field takes one value per element of an array, as `[1 2 3]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value_list: Option<ValueList>,
+
+    /// The field holds a number a Verilog-A module declares: a bare `M` is
+    /// mega, as the module's own source writes it, and the text typed stays.
+    #[serde(default)]
+    pub verilog_numbers: bool,
 
     /// Unit for numeric properties (e.g., "m", "Ω", "F")
     pub unit: Option<String>,
@@ -238,6 +291,8 @@ impl Default for PropertyDefinition {
             max_exclusive: false,
             integer: false,
             excluded_values: Vec::new(),
+            value_list: None,
+            verilog_numbers: false,
             default_hint: None,
             max_length: None,
             required: false,
@@ -329,6 +384,16 @@ impl PropertyDefinition {
     }
 
     /// Say what an empty field means when that is not a value.
+    pub fn with_verilog_numbers(mut self) -> Self {
+        self.verilog_numbers = true;
+        self
+    }
+
+    pub fn with_value_list(mut self, length: Option<usize>) -> Self {
+        self.value_list = Some(ValueList { length });
+        self
+    }
+
     pub fn with_default_hint(mut self, hint: impl Into<String>) -> Self {
         self.default_hint = Some(hint.into());
         self
@@ -420,6 +485,21 @@ impl PropertyDefinition {
             && !value.is_finite()
         {
             return Err(format!("{} must be finite", self.display_name));
+        }
+
+        if let (Some(list), PropertyValue::String(text)) = (&self.value_list, value)
+            && !text.is_empty()
+        {
+            let elements = list_elements(text).ok_or_else(|| {
+                format!("{} takes a list of values, as [1 2 3]", self.display_name)
+            })?;
+            if let Some(length) = list.length.filter(|length| *length != elements.len()) {
+                return Err(format!(
+                    "{} takes {length} values; this has {}",
+                    self.display_name,
+                    elements.len()
+                ));
+            }
         }
 
         // Check required
@@ -598,6 +678,51 @@ pub fn format_engineering(value: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_list_is_read_in_every_spelling_and_held_to_its_length() {
+        for text in [
+            "[4 5 6]",
+            "[4, 5, 6]",
+            "'{4, 5, 6}'",
+            "'{4,5,6}",
+            " [ 4  5,6 ] ",
+        ] {
+            assert_eq!(list_elements(text).unwrap(), ["4", "5", "6"], "{text}");
+        }
+        for text in ["4 5 6", "[]", "'{}'", "[4 5", ""] {
+            assert_eq!(list_elements(text), None, "{text}");
+        }
+        let definition = PropertyDefinition::new("pa")
+            .with_type(PropertyType::String)
+            .with_default(PropertyValue::string(""))
+            .with_value_list(Some(2));
+        assert!(definition.validate(&PropertyValue::string("[1 2]")).is_ok());
+        assert!(definition.validate(&PropertyValue::string("")).is_ok());
+        assert_eq!(
+            definition.validate(&PropertyValue::string("[1 2 3]")),
+            Err("pa takes 2 values; this has 3".to_owned())
+        );
+        assert_eq!(
+            definition.validate(&PropertyValue::string("1 2")),
+            Err("pa takes a list of values, as [1 2 3]".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_bare_mega_is_spelled_so_a_deck_reads_mega() {
+        for (typed, spelled) in [
+            ("10M", "10Meg"),
+            (" 2.5M ", "2.5Meg"),
+            ("3.M", "3.Meg"),
+            ("10m", "10m"),
+            ("10Meg", "10Meg"),
+            ("VM", "VM"),
+            ("1e5", "1e5"),
+        ] {
+            assert_eq!(deck_number_spelling(typed), spelled);
+        }
+    }
     use crate::quantity::format_engineering_display;
 
     /// Fractional values keep three decimals in the property editor.

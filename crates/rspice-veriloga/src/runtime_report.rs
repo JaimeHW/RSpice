@@ -386,6 +386,14 @@ impl RuntimeAbiSummary {
                     scope: parameter.scope,
                     value_type: parameter.value_type,
                     default: RuntimeAbiParameterValue::constant_default(hir, parameter),
+                    default_text: parameter.default_text.clone(),
+                    is_array: !parameter.dimensions.is_empty(),
+                    array_length: parameter.default_expr.as_ref().and_then(|default| {
+                        match &hir.expressions.get(usize::from(default.id))?.kind {
+                            HirExprKind::ArrayLiteral { elements, .. } => Some(elements.len()),
+                            _ => None,
+                        }
+                    }),
                     range: parameter
                         .range
                         .as_ref()
@@ -472,6 +480,15 @@ pub struct RuntimeAbiParameter {
     /// the default is computed from other parameters, per instance, or the
     /// parameter is an array.
     pub default: Option<RuntimeAbiParameterValue>,
+    /// The default as the source spells it, when it is a literal.
+    #[serde(default)]
+    pub default_text: Option<SmolStr>,
+    /// Whether the parameter is an array, set one value per element.
+    #[serde(default)]
+    pub is_array: bool,
+    /// How many values an array takes, when its declared default states it.
+    #[serde(default)]
+    pub array_length: Option<usize>,
     /// The values the model accepts; `None` when it accepts any value.
     pub range: Option<RuntimeAbiParameterRange>,
     /// The declaration's `units` attribute.

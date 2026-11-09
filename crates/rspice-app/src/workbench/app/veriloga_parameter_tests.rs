@@ -422,6 +422,45 @@ fn each_module_parameter_is_a_typed_range_checked_property() {
     );
 }
 
+/// A default the module writes as a number is shown as the module wrote it, in
+/// the property sheet and in the compiled-parameter table; one it computes is
+/// a value in engineering notation.
+#[test]
+fn a_module_default_is_shown_as_the_module_wrote_it() {
+    let mut app = open_project_app();
+    let declarations = "  parameter real gain = 1;\n  parameter real big = 10M from (0:inf);\n  parameter real raw = 1e5;\n  parameter real folded = 2 * 50k;\n  parameter real pa[0:1] = '{1k, 2};\n";
+    let reference = add_module_cell(&mut app.state, "amp", "amp", &module("amp", declarations));
+    open_in_design(&mut app.state, &reference);
+    compile_and_publish(&mut app);
+    let id = place_from_shelf(&mut app.state, &reference);
+    let sheet = sheet_of(&app.state, id);
+    let hint = |name: &str| {
+        sheet
+            .get(name)
+            .unwrap_or_else(|| panic!("a {name} field"))
+            .default_hint
+            .clone()
+    };
+    assert_eq!(hint("big").as_deref(), Some("10M"));
+    assert_eq!(hint("raw").as_deref(), Some("1e5"));
+    assert_eq!(hint("folded").as_deref(), Some("100k"));
+    assert_eq!(hint("pa").as_deref(), Some("'{1k, 2}"));
+    let array = sheet.get("pa").expect("a pa field");
+    assert_eq!(array.prop_type, PropertyType::String);
+    assert_eq!(array.value_list.map(|list| list.length), Some(Some(2)));
+
+    let contract = stated_contract(&app, &reference);
+    let shown = |name: &str| {
+        contract
+            .iter()
+            .find(|parameter| parameter.name == name)
+            .unwrap_or_else(|| panic!("a {name} parameter"))
+            .default_display()
+    };
+    assert_eq!(shown("big").as_deref(), Some("10M"));
+    assert_eq!(shown("folded").as_deref(), Some("100k"));
+}
+
 /// A value an instance sets for a parameter its module has since dropped is a
 /// design-check finding and never reaches the deck; removing it lets the run
 /// netlist. A module that drops its last parameter accepts none.
