@@ -516,3 +516,36 @@ fn build_settings_follows_compile_on_the_desktop_toolbar_only() {
             .contains(&Command::VerilogABuildSettings)
     );
 }
+
+/// The build targets are a choice most users never make: they stand under
+/// Advanced, after everything a compile needs, in the words a user uses.
+#[test]
+fn build_targets_stand_under_advanced_after_the_checks() {
+    let mut app = veriloga_view_holding(TWO_MODULES);
+    Command::VerilogABuildSettings.execute(&mut app);
+    let ctx = themed_context();
+    frame_with(&ctx, &mut app, DESKTOP, Vec::new());
+    let output = frame_with(&ctx, &mut app, DESKTOP, Vec::new());
+    let top = |id| {
+        use egui::accesskit::Role;
+        node_rect(
+            named_nodes(&output, &messages().text(id))
+                .find(|node| matches!(node.role(), Role::CheckBox | Role::RadioButton))
+                .unwrap_or_else(|| panic!("{id:?} mark")),
+        )
+        .top()
+    };
+    let last_check = top(MessageId::VerilogABuildSettingsPortability);
+    let targets = top(MessageId::VerilogABuildSettingsGeneratedRust);
+    let fallback = top(MessageId::VerilogABuildSettingsUseInterpreter);
+    assert!(last_check < targets, "{last_check} < {targets}");
+    assert!(targets < fallback, "{targets} < {fallback}");
+    for id in [
+        MessageId::VerilogABuildSettingsGeneratedRust,
+        MessageId::VerilogABuildSettingsNativeJit,
+        MessageId::VerilogABuildSettingsUseInterpreter,
+    ] {
+        let shown = messages().text(id);
+        assert!(!shown.contains("Rust") && !shown.contains("JIT"), "{shown}");
+    }
+}

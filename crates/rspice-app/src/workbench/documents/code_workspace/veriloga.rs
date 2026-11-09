@@ -318,7 +318,7 @@ pub(crate) fn request_veriloga_compile(app: &mut RSpiceApp) -> Result<(), String
         >= crate::state::MAX_PROJECT_SOURCE_QUALIFICATION_RECORDS
     {
         return Err(
-            "This source bundle has reached its limit of saved qualification records. Archive the project as a new revision before compiling again."
+            "This source has reached its limit of saved compile records. Archive the project as a new revision before compiling again."
                 .to_owned(),
         );
     }
@@ -603,9 +603,7 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                 app.state.record(
                     LogSeverity::Error,
                     LogSource::Studio,
-                    format!(
-                        "The compiler succeeded, but its qualification record could not be saved: {error}"
-                    ),
+                    format!("The compile succeeded, but its record could not be saved: {error}"),
                 );
                 app.state.code.code_workspace.veriloga.receipt = None;
                 return;
@@ -719,7 +717,7 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                     LogSeverity::Error,
                     LogSource::Studio,
                     format!(
-                        "The failed Verilog-A compile could not be added to the qualification record: {error}"
+                        "The failed Verilog-A compile could not be added to the compile record: {error}"
                     ),
                 );
             }
@@ -793,7 +791,7 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                     LogSeverity::Error,
                     LogSource::Studio,
                     format!(
-                        "The stopped compiler worker could not be added to the qualification record: {error}"
+                        "The stopped compile could not be added to the compile record: {error}"
                     ),
                 );
             }
@@ -889,7 +887,7 @@ fn record_veriloga_qualification(
 ) -> Result<u64, String> {
     let selected = selected_veriloga_source(app)?;
     if !selected.matches_token(app.state.model.workspace.content.project.id(), token) {
-        return Err("qualification result no longer matches the current source bundle".to_owned());
+        return Err("the compile result no longer matches the current source".to_owned());
     }
     let resolved = super::veriloga_profile::resolve_veriloga_build_profile(selected.bundle())?;
     let selected_module = report
@@ -903,7 +901,7 @@ fn record_veriloga_qualification(
         Some(report) => serde_json::to_vec(report),
         None => serde_json::to_vec(diagnostics),
     }
-    .map_err(|error| format!("could not encode the qualification report: {error}"))?;
+    .map_err(|error| format!("could not encode the compile report: {error}"))?;
     let report_digest =
         crate::product::ContentDigest::from_bytes(sha2::Sha256::digest(&report_bytes).into());
     let targets = report
@@ -947,7 +945,7 @@ fn record_veriloga_qualification(
     let recorded_at_unix_ms = crate::time_compat::unix_epoch()
         .as_millis()
         .try_into()
-        .map_err(|_| "qualification timestamp exceeds the persisted range".to_owned())?;
+        .map_err(|_| "the compile time exceeds the range a record can hold".to_owned())?;
     let record = crate::state::ProjectSourceQualificationAttempt {
         attempt_id: uuid::Uuid::new_v4(),
         recorded_at_unix_ms,

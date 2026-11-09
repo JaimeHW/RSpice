@@ -519,7 +519,7 @@ fn create_veriloga_cell_view(
                 .map(|diagnostic| format!("{}: {}", diagnostic.message, diagnostic.detail))
                 .unwrap_or_else(|| "the compiler returned no diagnostic".to_owned());
             cx.state.new_view_error = Some(format!(
-                "The generated Verilog-A starter did not pass semantic compilation: {detail}"
+                "The Verilog-A starter module did not compile: {detail}"
             ));
             return false;
         }

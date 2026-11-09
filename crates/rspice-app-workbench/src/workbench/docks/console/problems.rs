@@ -1126,3 +1126,27 @@ const fn level_shape(level: DiagnosticLevel) -> StatusMark {
         DiagnosticLevel::Info | DiagnosticLevel::Hint => StatusMark::Info,
     }
 }
+
+#[cfg(test)]
+mod producer_name_tests {
+    use super::producer_name;
+
+    #[test]
+    fn a_problem_names_who_raised_it_in_the_words_of_the_product() {
+        for (producer, name) in [
+            ("rspice.veriloga.compiler", "Verilog-A compiler"),
+            ("rspice.veriloga.compiler-worker", "Verilog-A compiler"),
+            ("rspice.veriloga.bundle", "Verilog-A source"),
+            ("rspice.netlist.parser", "Netlist"),
+            ("rspice.design.rules", "Design rules"),
+            ("rspice.simulation.run", "Simulation"),
+        ] {
+            assert_eq!(producer_name(producer), name, "{producer}");
+        }
+    }
+
+    #[test]
+    fn a_producer_without_a_name_is_still_written_as_words() {
+        assert_eq!(producer_name("rspice.some-new_tool"), "some new tool");
+    }
+}

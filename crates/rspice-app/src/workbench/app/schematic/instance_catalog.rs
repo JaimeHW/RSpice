@@ -160,7 +160,7 @@ fn generated_veriloga_entries() -> Vec<InstanceCatalogEntry> {
             Some(InstanceCatalogEntry {
                 identity,
                 display: format!(
-                    "{} · generated Verilog-A · {} pin",
+                    "{} · built-in Verilog-A · {} pin",
                     descriptor.model_name,
                     terminal_names.len()
                 ),

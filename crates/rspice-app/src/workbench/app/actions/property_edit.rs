@@ -357,7 +357,7 @@ fn generated_veriloga_parameter_definition(
         .unwrap_or_else(|| PropertyValue::expression(""));
     // The source's own `desc` where it gives one.
     let mut description = if parameter.description.is_empty() {
-        format!("Generated Verilog-A {scope} parameter for {model_name}.")
+        format!("Built-in Verilog-A {scope} parameter of {model_name}.")
     } else {
         parameter.description.to_owned()
     };
@@ -1002,7 +1002,7 @@ mod tests {
         let row = generated_veriloga_parameter_definition(&bare, 1, "bjt505t_va");
         assert_eq!(
             row.description,
-            "Generated Verilog-A instance parameter for bjt505t_va."
+            "Built-in Verilog-A instance parameter of bjt505t_va."
         );
         assert_eq!(row.unit, None);
     }

@@ -137,8 +137,7 @@ fn refresh_generated_artifact(app: &mut RSpiceApp) {
         return;
     }
 
-    let generated =
-        crate::workbench::menu_bar::build_menu_netlist(&app.state);
+    let generated = crate::workbench::menu_bar::build_menu_netlist(&app.state);
     let failed = |state: &mut AppState, error: String| {
         state.code.netlist.failed_generation_input_digest = Some(input_digest);
         state.model.netlist_artifacts.generation_error = Some(error);
@@ -292,14 +291,14 @@ pub(super) fn generated_project_source_dependencies(
             .get_bundle(binding.source_bundle_id())
             .ok_or_else(|| {
                 format!(
-                    "Generated Verilog-A binding at {} references missing bundle {}",
+                    "The Verilog-A instance at {} names a source that no longer exists ({})",
                     execution.instance_path(),
                     binding.source_bundle_id()
                 )
             })?;
         if bundle.closure_digest() != binding.source_closure_digest() {
             return Err(format!(
-                "Generated Verilog-A bundle {} changed after hierarchy resolution",
+                "Verilog-A source {} changed after the hierarchy was resolved",
                 bundle.id()
             ));
         }

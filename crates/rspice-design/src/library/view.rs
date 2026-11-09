@@ -180,3 +180,16 @@ impl View {
 }
 
 // =============================================================================
+
+#[cfg(test)]
+mod caption_tests {
+    use super::ViewType;
+
+    #[test]
+    fn a_verilog_a_view_reads_as_its_type_until_it_is_given_a_name_of_its_own() {
+        assert_eq!(ViewType::VerilogA.caption_for("veriloga"), "Verilog-A");
+        assert_eq!(ViewType::VerilogA.caption_for("behavioral"), "behavioral");
+        assert_eq!(ViewType::Schematic.caption_for("schematic"), "schematic");
+        assert_eq!(ViewType::VerilogA.caption(), "Verilog-A");
+    }
+}
