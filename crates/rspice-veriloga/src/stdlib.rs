@@ -297,8 +297,8 @@ pub(crate) const BUILTIN_INCLUDE_SOURCE_BYTES: usize = builtin_include_source_by
 
 /// Resolve a built-in standard header by include filename.
 ///
-/// Recognizes both the modern `.vams` names and the legacy `.h` names used
-/// by older ADMS-era compact models.
+/// Recognizes the modern `.vams` names, the legacy `.h` names used by older
+/// ADMS-era compact models, and the `.va` names OpenVAF also accepts.
 pub fn builtin_include(filename: &str) -> Option<&'static str> {
     builtin_include_document(filename).map(|(_, source)| source)
 }
@@ -318,10 +318,9 @@ pub fn builtin_include_document(filename: &str) -> Option<(&'static str, &'stati
         .to_ascii_lowercase();
 
     match basename.as_str() {
-        "disciplines.vams" | "disciplines.h" | "discipline.vams" | "discipline.h" => {
-            Some(BUILTIN_INCLUDE_DOCUMENTS[0])
-        }
-        "constants.vams" | "constants.h" => Some(BUILTIN_INCLUDE_DOCUMENTS[1]),
+        "disciplines.vams" | "disciplines.va" | "disciplines.h" | "discipline.vams"
+        | "discipline.h" => Some(BUILTIN_INCLUDE_DOCUMENTS[0]),
+        "constants.vams" | "constants.va" | "constants.h" => Some(BUILTIN_INCLUDE_DOCUMENTS[1]),
         _ => None,
     }
 }
@@ -392,6 +391,14 @@ mod tests {
         assert!(builtin_include("constants.vams").is_some());
         assert!(builtin_include("discipline.h").is_some());
         assert!(builtin_include("constants.h").is_some());
+        assert_eq!(
+            builtin_include_document("disciplines.va"),
+            builtin_include_document("disciplines.vams")
+        );
+        assert_eq!(
+            builtin_include_document("constants.va"),
+            builtin_include_document("constants.vams")
+        );
         assert!(builtin_include("Disciplines.VAMS").is_some());
         assert!(builtin_include("path/to/disciplines.vams").is_some());
         assert!(builtin_include("mymodel.va").is_none());

@@ -507,6 +507,39 @@ fn source_only_preprocessing_keeps_builtins_out_of_filesystem_dependency_paths()
     );
 }
 
+/// OpenVAF's standard library answers `.va` spellings of the standard headers
+/// (its integration models, EKV among them, include them that way); they are
+/// the same built-in documents as the `.vams` names, never a file lookup.
+#[test]
+fn va_spellings_of_the_standard_headers_resolve_to_the_builtins() {
+    let source = r#"`include "disciplines.va"
+`include "constants.va"
+module charge(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ `P_Q * V(p, n);
+endmodule
+"#;
+    let bundle = VirtualSourceBundle::from_sources("charge.va", [("charge.va", source)])
+        .expect("single-file source bundle");
+    let compilation = VerilogACompiler::default()
+        .compile_virtual_runtime(&bundle, "charge", VirtualCompileLimits::default())
+        .expect("the .va header spellings resolve to the built-in headers");
+    let builtins = compilation
+        .dependency_closure
+        .iter()
+        .filter(|dependency| dependency.origin == SourceDocumentOrigin::BuiltIn)
+        .map(|dependency| dependency.logical_path.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        builtins,
+        [
+            "@rspice/stdlib/disciplines.vams",
+            "@rspice/stdlib/constants.vams"
+        ]
+    );
+}
+
 #[test]
 fn compiler_owned_builtins_do_not_consume_project_file_budget() {
     let bundle = VirtualSourceBundle::from_sources("top.va", [("top.va", BUILTIN_LIMIT_SOURCE)])
