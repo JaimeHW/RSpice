@@ -212,6 +212,116 @@ fn an_array_parameter_takes_a_list_of_its_length_and_reports_one_that_is_not() {
     );
 }
 
+/// A library card typed for the instance's module offers a Model row. Binding
+/// one leaves only instance parameters on the panel, and a model parameter
+/// the instance already sets is flagged with its repair.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_module_instance_binds_a_model_card_and_then_sets_only_instance_parameters() {
+    use rspice_design::library::metadata::ParameterScope;
+
+    let mut model_scoped = module_parameter("r", Some("1000"), None, None);
+    model_scoped.declaration.as_mut().expect("declared").scope = ParameterScope::Model;
+    let (mut app, component) = app_with_compiled_veriloga_instance(
+        &[model_scoped, module_parameter("w", Some("1"), None, None)],
+        "r=2k w=3",
+    );
+    let evidence = super::super::component_model_evidence(&app.state, &component);
+    let painted = |app: &mut RSpiceApp, component: &Component| {
+        painted_panel(|ui| parameters_section(ui, app, component, &evidence))
+    };
+    assert!(
+        !painted(&mut app, &component)
+            .lines()
+            .any(|line| line == "Model"),
+        "no card for this module, no row"
+    );
+
+    let mut library = crate::state::model_library::ModelLibrary::new("cards");
+    let card = |name: &str, spice_type: &str| {
+        let mut card = crate::state::model_library::DeviceModel::new(
+            name,
+            crate::state::model_library::ModelType::Other,
+        );
+        card.spice_type = Some(spice_type.to_owned());
+        card
+    };
+    library.add_model(card("slowamp", "AMP"));
+    library.add_model(card("fastamp", "amp"));
+    library.add_model(card("other", "MIXER"));
+    app.state.model.model_library_manager.add_library(library);
+    assert_eq!(
+        model_cards_of_module(&app.state, "amp"),
+        ["fastamp", "slowamp"]
+    );
+    assert!(
+        painted(&mut app, &component)
+            .lines()
+            .any(|line| line == "Model"),
+        "the row appears with the cards"
+    );
+
+    assert!(
+        app.state
+            .model
+            .schematic
+            .select_instance_model_card(component.id, Some("fastamp".to_owned()))
+    );
+    let bound = app.state.model.schematic.document().components[0].clone();
+    assert_eq!(
+        crate::state::explicit_component_model(&bound).as_deref(),
+        Some("fastamp")
+    );
+    let rows = inline_parameter_contract(
+        &app.state,
+        &bound,
+        &crate::state::parse_params_string(&bound.params),
+    );
+    let row = |key: &str| rows.iter().find(|row| row.key == key);
+    assert!(!row("w").expect("an instance parameter").undeclared);
+    assert!(
+        row("r").expect("the value already set").undeclared,
+        "a value the card owns is flagged, not dropped: {rows:?}"
+    );
+    assert!(app.state.model.model_card_owns_parameter(&bound, "r"));
+    assert!(!app.state.model.model_card_owns_parameter(&bound, "w"));
+    assert_eq!(
+        app.state.model.undeclared_instance_parameters(&bound),
+        [("r".to_owned(), "2k".to_owned())]
+    );
+    assert!(
+        painted(&mut app, &bound)
+            .lines()
+            .any(|line| line == MODEL_CARD_PARAMETER_NOTE),
+        "the row says why"
+    );
+
+    // Unbinding is one undoable step back to the module's own parameters.
+    assert!(app.state.model.schematic.undo());
+    let unbound = app.state.model.schematic.document().components[0].clone();
+    assert!(
+        app.state
+            .model
+            .undeclared_instance_parameters(&unbound)
+            .is_empty()
+    );
+
+    // A card that left the libraries stays named, with the reason.
+    app.state.model.model_library_manager.clear();
+    assert!(
+        app.state
+            .model
+            .schematic
+            .select_instance_model_card(component.id, Some("gone".to_owned()))
+    );
+    let orphaned = app.state.model.schematic.document().components[0].clone();
+    let text = painted(&mut app, &orphaned);
+    assert!(
+        text.contains("Model gone not found in the loaded libraries"),
+        "{text}"
+    );
+}
+
 /// `m` is a module's `$mfactor`: a module instance keeps its multiplicity
 /// row, and an edit there sets the typed multiplicity the deck emits, never
 /// parameter text the netlister would refuse.

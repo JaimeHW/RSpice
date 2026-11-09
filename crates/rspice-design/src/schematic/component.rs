@@ -60,6 +60,10 @@ pub struct LibraryCellInstance {
     /// authoritative source file.
     #[serde(default)]
     pub model_section: Option<String>,
+    /// The model card a Verilog-A instance binds: the instance line names the
+    /// card, and the card names the module and carries its model parameters.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_card: Option<String>,
     /// Variant section captured by the execution projection. It overrides
     /// view defaults, but an explicit configuration override still wins.
     /// Persisted placement metadata cannot acquire this authority.
@@ -272,6 +276,7 @@ impl LibraryCellInstance {
             module_name: None,
             netlist_template: None,
             model_section: None,
+            model_card: None,
             variant_model_section: None,
             source_module: None,
             reference_prefix: None,
@@ -1599,6 +1604,12 @@ pub fn explicit_component_model(component: &Component) -> Option<String> {
         ComponentType::SaturableInductor | ComponentType::GenericSwitch => {
             parameter.map(str::to_owned)
         }
+        // Only the card the instance was bound to: a parameter a module
+        // happens to call `model` is the module's own.
+        ComponentType::CellInstance => component
+            .library_cell
+            .as_ref()
+            .and_then(|binding| binding.model_card.clone()),
         _ => None,
     }
 }

@@ -86,17 +86,34 @@ impl Model {
         };
         // `m` written as text is refused by name as the instance's multiplicity,
         // which is a different repair from this one.
+        let on_a_card = binds_model_card(component);
         let mut undeclared = crate::state::parse_params_string(&component.params)
             .into_iter()
             .filter(|(key, _)| {
                 !is_instance_multiplicity(component, key)
-                    && !contract
-                        .iter()
-                        .any(|parameter| parameter.name.eq_ignore_ascii_case(key))
+                    && !contract.iter().any(|parameter| {
+                        parameter.name.eq_ignore_ascii_case(key)
+                            && (!on_a_card || is_instance_parameter(parameter))
+                    })
             })
             .collect::<Vec<_>>();
         undeclared.sort();
         undeclared
+    }
+
+    /// Whether `key` is a model parameter the instance's model card owns, so
+    /// the instance may not set it.
+    pub fn model_card_owns_parameter(&self, component: &Component, key: &str) -> bool {
+        binds_model_card(component)
+            && self
+                .bound_view(component)
+                .and_then(|(cell, view)| cell_parameter_contract(cell, Some(view)).ok())
+                .is_some_and(|contract| {
+                    contract.iter().any(|parameter| {
+                        parameter.name.eq_ignore_ascii_case(key)
+                            && !is_instance_parameter(parameter)
+                    })
+                })
     }
 
     /// Take the value instance `component_id` sets for `key`, a parameter its
@@ -132,12 +149,18 @@ impl Model {
 
 /// The property sheet of an instance of a compiled Verilog-A view: its
 /// identity, its multiplicity, which a module reads as `$mfactor`, and one
-/// typed field per module parameter.
-pub fn compiled_parameter_sheet(cell: &Cell, view: &View) -> Result<PropertySheet, String> {
+/// typed field per module parameter. An instance bound to a model card takes
+/// its model parameters from the card, so `on_a_card` leaves their fields out.
+pub fn compiled_parameter_sheet(
+    cell: &Cell,
+    view: &View,
+    on_a_card: bool,
+) -> Result<PropertySheet, String> {
     let mut sheet = cell_instance_identity_sheet();
     sheet.add(instance_multiplicity_definition());
     for (index, parameter) in cell_parameter_contract(cell, Some(view))?
         .iter()
+        .filter(|parameter| !on_a_card || is_instance_parameter(parameter))
         .enumerate()
     {
         sheet.add(parameter_property(
@@ -146,6 +169,23 @@ pub fn compiled_parameter_sheet(cell: &Cell, view: &View) -> Result<PropertyShee
         ));
     }
     Ok(sheet)
+}
+
+/// Whether the instance names a model card rather than its module.
+pub fn binds_model_card(component: &Component) -> bool {
+    component
+        .library_cell
+        .as_ref()
+        .is_some_and(|binding| binding.model_card.is_some())
+}
+
+/// Whether an instance line may set `parameter` when a model card sets the
+/// module's model parameters.
+fn is_instance_parameter(parameter: &CellParameter) -> bool {
+    parameter
+        .declaration
+        .as_ref()
+        .is_none_or(|declaration| declaration.scope == ParameterScope::Instance)
 }
 
 /// Identity-only contract for legacy, hierarchical, and review-only cell

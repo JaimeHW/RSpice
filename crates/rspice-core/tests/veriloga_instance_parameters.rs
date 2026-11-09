@@ -803,6 +803,24 @@ fn same_named_paramsets_are_selected_per_instance() {
     );
 }
 
+/// A card names a module by the module's own name even when its source is
+/// loaded under an alias, as every project module is.
+#[test]
+fn a_card_names_a_module_loaded_under_an_alias() {
+    let source = ModelFile::new("alias", CARD_MODULE);
+    let path = source.deck_path();
+    let deck = |sources: &str| {
+        format!(
+            "alias\n{sources}\n.model myr cardres r=4k\nV1 a 0 1\nR1 a b 1k\nX1 b 0 myr\n.end\n"
+        )
+    };
+    assert_close(
+        "one alias",
+        conductance_of_node_b(&deck(&format!(".hdl \"{path}\" sealed_name"))),
+        1.0 / 4000.0,
+    );
+}
+
 /// `.sens` differentiates what the line and the card of a Verilog-A instance
 /// give. With 1 V across 1 kOhm and G = w pa0 / (r pa1 / 2) = 1 mS, the output
 /// is G1 / (G1 + G) and dV/dG = -G1 / (G1 + G)^2 = -250.

@@ -382,6 +382,28 @@ fn level_supported_instance_parameters(
         .then_some(CLASSIC_MOS_INSTANCE_PARAMETERS)
 }
 
+/// The model cards the project's libraries state for `module`, by name.
+pub(super) fn model_cards_of_module(state: &AppState, module: &str) -> Vec<String> {
+    let mut cards = state
+        .model
+        .model_library_manager
+        .libraries_sorted()
+        .into_iter()
+        .flat_map(|library| library.bindable_models())
+        .filter(|model| {
+            model.cards().iter().all(|card| {
+                card.spice_type
+                    .as_deref()
+                    .is_some_and(|name| name.eq_ignore_ascii_case(module))
+            })
+        })
+        .map(|model| model.name().to_owned())
+        .collect::<Vec<_>>();
+    cards.sort_unstable_by_key(|card| card.to_ascii_lowercase());
+    cards.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
+    cards
+}
+
 pub(super) fn bound_model_choices(
     state: &AppState,
     component: &Component,
@@ -683,10 +705,10 @@ pub(super) fn parameters_section(
         "Simulation parameters",
         (!editable).then_some("read-only"),
     );
-    // A Verilog-A instance runs its view's module: that is the one fact to
-    // state here, and only when the module is not the cell the Library cell
-    // row already names. A model card and a library section are model-library
-    // ideas, and the deck gives a module neither.
+    // A Verilog-A instance runs its view's module, named here only when it is
+    // not the cell the Library cell row already names. Its Model row binds a
+    // card from the project's libraries; a library section is a model-library
+    // idea the deck does not give a module.
     let runs_module = app.state.model.instantiates_veriloga_view(component);
     let model_choices = evidence.model.as_deref().map_or_else(Vec::new, |model| {
         bound_model_choices(&app.state, component, model)
@@ -705,6 +727,49 @@ pub(super) fn parameters_section(
                 .is_none_or(|binding| !binding.cell.eq_ignore_ascii_case(module))
         }) {
             property_row(ui, "Module", module);
+        }
+        let mut bound_card = component
+            .library_cell
+            .as_ref()
+            .and_then(|binding| binding.model_card.clone())
+            .unwrap_or_default();
+        let cards = evidence
+            .model
+            .as_deref()
+            .map_or_else(Vec::new, |module| model_cards_of_module(&app.state, module));
+        let listed = cards
+            .iter()
+            .any(|card| card.eq_ignore_ascii_case(&bound_card));
+        if !cards.is_empty() || !bound_card.is_empty() {
+            let choices = std::iter::once((String::new(), "None".to_owned()))
+                .chain(cards.into_iter().map(|card| (card.clone(), card)))
+                .chain(
+                    (!bound_card.is_empty() && !listed)
+                        .then(|| (bound_card.clone(), bound_card.clone())),
+                )
+                .collect::<Vec<_>>();
+            if property_row_combo(
+                ui,
+                "Model",
+                ("design-inspector-model", component.id),
+                &mut bound_card,
+                &choices,
+                editable,
+            ) && app.state.commit_pending_inspector_edit()
+                && app.state.model.schematic.select_instance_model_card(
+                    component.id,
+                    (!bound_card.is_empty()).then(|| bound_card.clone()),
+                )
+            {
+                app.invalidate_simulation_preflight();
+            }
+            if !bound_card.is_empty() && !listed {
+                crate::workbench::design_system::problem_line(
+                    ui,
+                    Problem::Failure,
+                    &format!("Model {bound_card} not found in the loaded libraries"),
+                );
+            }
         }
     } else if model_choices.len() > 1 {
         if property_row_combo(
@@ -810,12 +875,21 @@ pub(super) fn parameters_section(
             let value = declared
                 .get(&parameter.key.to_ascii_lowercase())
                 .map_or("", String::as_str);
+            let note = if app
+                .state
+                .model
+                .model_card_owns_parameter(component, &parameter.key)
+            {
+                MODEL_CARD_PARAMETER_NOTE
+            } else {
+                UNDECLARED_PARAMETER_NOTE
+            };
             if editable {
                 if property_row_flagged(
                     ui,
                     &parameter.label,
                     value,
-                    UNDECLARED_PARAMETER_NOTE,
+                    note,
                     Some(Problem::Warning),
                     REMOVE_UNDECLARED_PARAMETER,
                 ) {
@@ -825,7 +899,7 @@ pub(super) fn parameters_section(
                 crate::workbench::design_system::property_row_problem(
                     ui,
                     &parameter.label,
-                    &format!("{value} {UNDECLARED_PARAMETER_NOTE}"),
+                    &format!("{value} {note}"),
                     Some(Problem::Warning),
                 );
             }
@@ -878,6 +952,8 @@ pub(super) fn parameters_section(
 
 /// What an undeclared parameter's row says after its value.
 pub(super) const UNDECLARED_PARAMETER_NOTE: &str = "not in module";
+/// What the row of a value says when the instance's model card owns it.
+pub(super) const MODEL_CARD_PARAMETER_NOTE: &str = "set by the model";
 /// The action that takes an undeclared parameter's value off the instance.
 pub(super) const REMOVE_UNDECLARED_PARAMETER: &str = "Remove";
 

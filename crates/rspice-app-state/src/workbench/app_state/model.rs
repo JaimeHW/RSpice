@@ -46,8 +46,8 @@ pub use veriloga_interface::{
     interface_pins, port_electrical_type, seed_veriloga_view, with_interface_outcome,
 };
 pub use veriloga_parameters::{
-    cell_instance_identity_sheet, compiled_parameter_sheet, instance_multiplicity_definition,
-    is_instance_multiplicity, states_compiled_parameters,
+    binds_model_card, cell_instance_identity_sheet, compiled_parameter_sheet,
+    instance_multiplicity_definition, is_instance_multiplicity, states_compiled_parameters,
 };
 
 use crate::state::notices::{Notice, NoticeKind, NoticeQueue};

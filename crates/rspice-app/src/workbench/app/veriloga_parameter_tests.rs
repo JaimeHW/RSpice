@@ -461,6 +461,34 @@ fn a_module_default_is_shown_as_the_module_wrote_it() {
     assert_eq!(shown("folded").as_deref(), Some("100k"));
 }
 
+/// An instance bound to a model card names the card in the deck, keeps the
+/// instance parameters it sets, and writes a list as the engine reads it.
+#[test]
+fn a_bound_instance_names_its_card_and_an_array_reaches_the_deck_as_a_list() {
+    let mut app = open_project_app();
+    let declarations = "  parameter real gain = 1;\n  (* type=\"instance\" *) parameter real w = 1;\n  (* type=\"instance\" *) parameter real pa[0:1] = '{1, 2};\n";
+    let reference = add_module_cell(&mut app.state, "amp", "amp", &module("amp", declarations));
+    open_in_design(&mut app.state, &reference);
+    compile_and_publish(&mut app);
+    let id = place_from_shelf(&mut app.state, &reference);
+    set_params(&mut app.state, id, "w=3 pa=\"[4 5]\"");
+    assert!(
+        app.state
+            .model
+            .schematic
+            .select_instance_model_card(id, Some("myamp".to_owned()))
+    );
+    let deck = configured_deck(&app).expect("the instance netlists");
+    let line = deck
+        .lines()
+        .find(|line| line.to_ascii_lowercase().contains(" myamp"))
+        .unwrap_or_else(|| panic!("the instance names its card:\n{deck}"));
+    assert!(
+        line.contains("w=3") && line.contains("pa=[4 5]"),
+        "the array reaches the deck as a list: {line}"
+    );
+}
+
 /// A value an instance sets for a parameter its module has since dropped is a
 /// design-check finding and never reaches the deck; removing it lets the run
 /// netlist. A module that drops its last parameter accepts none.

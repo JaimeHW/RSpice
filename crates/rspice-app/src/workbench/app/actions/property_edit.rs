@@ -8,8 +8,8 @@ use crate::state::{
 };
 use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::model::{
-    cell_instance_identity_sheet, compiled_parameter_sheet, instance_multiplicity_definition,
-    states_compiled_parameters,
+    binds_model_card, cell_instance_identity_sheet, compiled_parameter_sheet,
+    instance_multiplicity_definition, states_compiled_parameters,
 };
 use rspice_core::xspice::{CodeModelRegistry, ParamSpec, ParamType};
 
@@ -48,7 +48,7 @@ fn authoritative_cell_instance_sheet(
     // A Verilog-A view whose compile stated its module's parameters: one
     // typed field each, read from the contract the netlister binds.
     if let Some(view) = bound_view.filter(|view| states_compiled_parameters(cell, view)) {
-        return compiled_parameter_sheet(cell, view).map(Some);
+        return compiled_parameter_sheet(cell, view, binds_model_card(component)).map(Some);
     }
 
     // Current publications keep the definition at cell scope. The view scan

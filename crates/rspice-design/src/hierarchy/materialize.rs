@@ -148,6 +148,7 @@ pub fn materialize_authoritative_source_binding(
         &["netlist.template", "netlist_template"],
     );
     materialized.inherit_variant_model_section(placed);
+    materialized.model_card = placed.model_card.clone();
     materialized.model_section = placed
         .variant_model_section()
         .map(str::to_owned)

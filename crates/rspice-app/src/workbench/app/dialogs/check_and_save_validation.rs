@@ -906,15 +906,20 @@ fn validate_component_contracts<S: AsRef<rspice_design::schematic::document::Sch
         // the netlister; it is named here, with its repair, rather than left
         // to read as a deck error.
         for (key, value) in state.model.undeclared_instance_parameters(component) {
+            let owner = if state.model.model_card_owns_parameter(component, &key) {
+                "its model card sets".to_owned()
+            } else {
+                format!("{}/{} does not declare", binding.library, binding.cell)
+            };
             insert_located_finding(
                 findings,
                 CheckAndSaveFindingLevel::Blocker,
                 "parameters",
                 &format!("{component_identity}:undeclared:{key}"),
                 format!(
-                    "{document_key}: {} sets {key}={value}, which {}/{} does not declare; \
+                    "{document_key}: {} sets {key}={value}, which {owner}; \
                      select it and press Remove beside {key} in the inspector.",
-                    component.name, binding.library, binding.cell
+                    component.name
                 ),
                 at(component),
             );

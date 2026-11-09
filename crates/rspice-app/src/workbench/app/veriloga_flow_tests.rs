@@ -518,7 +518,7 @@ pub(in crate::workbench) fn wired_device() -> (User, Device) {
         .selection
         .select_only_component(instance);
     user.settle();
-    user.click("gain");
+    user.click("gain, V/V");
     user.frame(vec![
         egui::Event::Key {
             key: egui::Key::A,
@@ -548,6 +548,12 @@ pub(in crate::workbench) fn wired_device() -> (User, Device) {
 /// Step 8: Run plan, exactly as the toolbar's run control does, and the
 /// result it publishes.
 fn run_plan(user: &mut User, device: &Device) -> RunOutcome {
+    run_plan_of_instance(user, device, None)
+}
+
+/// [`run_plan`] for an instance whose line names `card` rather than its module
+/// and carries no value of its own.
+fn run_plan_of_instance(user: &mut User, device: &Device, card: Option<&str>) -> RunOutcome {
     assert!(
         user.app
             .state
@@ -655,25 +661,28 @@ fn run_plan(user: &mut User, device: &Device) -> RunOutcome {
     .expect("the view owns its bundle")
     .netlist_alias()
     .to_owned();
+    let master = card.map_or(alias, str::to_owned);
     let line = deck
         .lines()
         .map(|line| line.split_whitespace().collect::<Vec<_>>())
         .find(|tokens| {
             tokens
                 .iter()
-                .any(|token| token.eq_ignore_ascii_case(&alias))
+                .any(|token| token.eq_ignore_ascii_case(&master))
                 && tokens
                     .first()
                     .is_some_and(|name| name.to_ascii_uppercase().starts_with('X'))
         })
-        .unwrap_or_else(|| panic!("the deck instantiates {alias}:\n{deck}"));
+        .unwrap_or_else(|| panic!("the deck instantiates {master}:\n{deck}"));
     assert_eq!(
         line.len(),
-        7,
-        "name, four terminals, the module, gain: {line:?}"
+        if card.is_some() { 6 } else { 7 },
+        "name, four terminals, the master, gain unless a card sets it: {line:?}"
     );
-    assert!(line[5].eq_ignore_ascii_case(&alias), "{line:?}");
-    assert!(line[6].eq_ignore_ascii_case("gain=5"), "{line:?}");
+    assert!(line[5].eq_ignore_ascii_case(&master), "{line:?}");
+    if card.is_none() {
+        assert!(line[6].eq_ignore_ascii_case("gain=5"), "{line:?}");
+    }
     let out_node = line[3].to_owned();
 
     // A new project's plan is one transient: the DC operating point is the
@@ -710,6 +719,84 @@ fn assert_five_volts(outcome: &RunOutcome) {
             .out_volts
             .iter()
             .all(|volts| ((volts - 5.0) / 5.0).abs() <= 1e-9),
+        "V(out) = {:?} V from:\n{}",
+        &outcome.out_volts[..outcome.out_volts.len().min(8)],
+        outcome.deck
+    );
+}
+
+/// A device bound to a card of the project's model library runs with the
+/// card's parameters: the output follows the card's gain of 2, not the
+/// module's default of 10. The value the instance had set is the card's to
+/// set now, so it is flagged and removed first.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_device_bound_to_a_library_card_runs_with_the_cards_parameters() {
+    let (mut user, device) = wired_device();
+    let library = user
+        .app
+        .state
+        .model
+        .model_library_manager
+        .load_library_bytes(
+            "cards.lib",
+            format!(".model doubler {CELL} gain=2\n").into_bytes(),
+            None,
+        )
+        .expect("the card's library loads");
+    let binding = user
+        .app
+        .state
+        .model
+        .model_library_manager
+        .simulation_plan_binding(&library)
+        .expect("the library binds to the plan");
+    user.app.state.model.sim_setup.model_bindings = vec![binding];
+    let instance = user
+        .app
+        .state
+        .model
+        .schematic
+        .document()
+        .components
+        .iter()
+        .find(|component| {
+            component
+                .library_cell
+                .as_ref()
+                .is_some_and(|binding| binding.cell == CELL)
+        })
+        .expect("the placed device")
+        .id;
+    assert!(
+        user.app
+            .state
+            .model
+            .schematic
+            .select_instance_model_card(instance, Some("doubler".to_owned()))
+    );
+    let bound = user.component(instance);
+    assert!(
+        user.app
+            .state
+            .model
+            .model_card_owns_parameter(&bound, "gain")
+    );
+    assert_eq!(
+        user.app
+            .state
+            .model
+            .remove_undeclared_instance_parameter(instance, "gain"),
+        Ok(true)
+    );
+    user.settle();
+
+    let outcome = run_plan_of_instance(&mut user, &device, Some("doubler"));
+    assert!(
+        outcome
+            .out_volts
+            .iter()
+            .all(|volts| ((volts - 2.0) / 2.0).abs() <= 1e-9),
         "V(out) = {:?} V from:\n{}",
         &outcome.out_volts[..outcome.out_volts.len().min(8)],
         outcome.deck

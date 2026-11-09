@@ -37,6 +37,32 @@ impl Schematic {
         changed
     }
 
+    /// Bind a Verilog-A instance to a model card, or to none.
+    pub fn select_instance_model_card(
+        &mut self,
+        component_id: u64,
+        selected: Option<String>,
+    ) -> bool {
+        let before = SchematicSnapshot::capture(&self.document);
+        let Some(binding) = self
+            .document
+            .components
+            .iter_mut()
+            .find(|component| component.id == component_id)
+            .and_then(|component| component.library_cell.as_mut())
+        else {
+            return false;
+        };
+        if binding.model_card == selected {
+            return false;
+        }
+        binding.model_card = selected;
+        self.invalidate_topology();
+        self.begin_operation_from(before, "select instance model card");
+        self.end_operation();
+        true
+    }
+
     pub fn select_instance_model_section(
         &mut self,
         component_id: u64,

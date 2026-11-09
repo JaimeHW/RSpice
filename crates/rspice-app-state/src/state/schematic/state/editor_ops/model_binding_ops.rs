@@ -19,6 +19,20 @@ impl SchematicState {
         changed
     }
 
+    pub fn select_instance_model_card(
+        &mut self,
+        component_id: u64,
+        selected: Option<String>,
+    ) -> bool {
+        let changed = self
+            .design
+            .select_instance_model_card(component_id, selected);
+        if changed {
+            self.session.is_dirty = true;
+        }
+        changed
+    }
+
     pub fn select_instance_model_section(
         &mut self,
         component_id: u64,

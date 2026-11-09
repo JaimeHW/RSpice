@@ -830,8 +830,16 @@ impl<'a> NetlistGenerator<'a> {
                 // A schematic master is named by the deck's one master index —
                 // never by the binding, which does not know which of several
                 // closures of its cell view this occurrence resolved to. A
-                // model-bound master keeps its own engine module name.
-                let subckt_name = indexed_master.unwrap_or_else(|| {
+                // model-bound master keeps its own engine module name. An
+                // instance bound to a model card names the card, which names
+                // its module.
+                let bound_card = binding
+                    .model_card
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|card| !card.is_empty())
+                    .map(str::to_owned);
+                let subckt_name = bound_card.or(indexed_master).unwrap_or_else(|| {
                     binding
                         .module_name
                         .as_deref()
@@ -1520,6 +1528,20 @@ fn render_model_bound_instance_template(
     Ok(rendered)
 }
 
+/// A list of values is stored quoted, being one value with spaces in it; a
+/// deck writes it bare.
+fn bare_value_list(value: &str) -> &str {
+    let inner = value
+        .strip_prefix('"')
+        .and_then(|rest| rest.strip_suffix('"'))
+        .unwrap_or(value);
+    if inner.starts_with('[') && inner.ends_with(']') {
+        inner
+    } else {
+        value
+    }
+}
+
 pub(super) fn model_bound_instance_params(
     binding: &rspice_design::schematic::component::LibraryCellInstance,
     raw: &str,
@@ -1560,7 +1582,7 @@ pub(super) fn model_bound_instance_params(
             parsed
                 .iter()
                 .find(|(parsed_key, _)| parsed_key.eq_ignore_ascii_case(key))
-                .map(|(_, value)| format!("{key}={value}"))
+                .map(|(_, value)| format!("{key}={}", bare_value_list(value)))
         })
         .collect::<Vec<_>>()
         .join(" ");
