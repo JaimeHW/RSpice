@@ -2784,7 +2784,9 @@ impl Engine {
                 ac_matrix.add_real(br - 1, nn - 1, -1.0);
                 ac_matrix.add_real(nn - 1, br - 1, -1.0);
             }
-            if !circuit.xyce_level2_owns_inductor(i) {
+            if !circuit.xyce_level2_owns_inductor(i)
+                && !circuit.inductors.transient_only.contains(&i)
+            {
                 ac_matrix.add_imag(br - 1, br - 1, -omega * l);
             }
         }

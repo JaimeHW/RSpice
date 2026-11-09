@@ -121,7 +121,7 @@ impl IdealizedDiode {
 
 /// Current and slope past one knee. `sign` is `+1` above the forward knee and
 /// `-1` below the reverse knee.
-fn conduction(
+pub(crate) fn conduction(
     bias: Value,
     knee: Value,
     sign: Value,
@@ -158,6 +158,31 @@ fn conduction(
         knee * goff + sign * limit * tangent_past,
         g * (1.0 - tangent_past * tangent_past),
     )
+}
+
+/// How the current of a limited branch past its knee moves with `g`, for a
+/// device whose control sets that conductance.
+pub(crate) fn limited_conduction_slope_against_g(
+    past: Value,
+    g: Value,
+    width: Value,
+    limit: Value,
+    goff: Value,
+) -> Value {
+    if width <= 0.0 {
+        let tangent = (past * g / limit).tanh();
+        return (1.0 - tangent * tangent) * past;
+    }
+    let drive = limit / width;
+    let root = (drive * drive + g * (g + goff)).sqrt();
+    let tangent = entry_tangent(width, g, goff, limit);
+    let tangent_slope = ((2.0 * g + goff) / (2.0 * root) - tangent) / g;
+    if past < width {
+        return limit * tangent_slope * past * past / (width * width);
+    }
+    let tangent_past = (tangent.atanh() + (past - width) * g / limit).tanh();
+    (1.0 - tangent_past * tangent_past)
+        * (limit * tangent_slope / (1.0 - tangent * tangent) + past - width)
 }
 
 /// `tanh` of the limited branch where the quadratic hands over to it: the root

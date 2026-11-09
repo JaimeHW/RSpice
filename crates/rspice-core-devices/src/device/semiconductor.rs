@@ -3,7 +3,7 @@
 //! Includes diode/BJT models and equations shared by native and periodic solvers.
 
 mod bjt;
-mod diode;
+pub(crate) mod diode;
 mod limiting;
 
 #[cfg(any(test, feature = "test-support"))]

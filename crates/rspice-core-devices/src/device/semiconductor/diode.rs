@@ -1,7 +1,7 @@
 //! Diode device model
 
 mod event_regularity;
-mod idealized;
+pub(crate) mod idealized;
 
 use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
 use crate::numerics::integration::{

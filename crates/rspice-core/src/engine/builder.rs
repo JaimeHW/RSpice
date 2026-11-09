@@ -10130,6 +10130,31 @@ impl Engine {
                         ["VT", "VH"],
                     );
 
+                    let series_inductance = settle_ltspice_switch_card_params(
+                        &mut params_map,
+                        self.config.spice_dialect,
+                        &element.name,
+                        model,
+                    )?;
+                    let np = match series_inductance {
+                        Some(henries) => {
+                            let internal =
+                                circuit.get_or_create_node(&format!("{}.__lser", element.name));
+                            let branch = circuit
+                                .allocate_branch_named(&format!("{}.__lser", element.name));
+                            circuit.inductors.add(
+                                format!("{}.__lser", element.name),
+                                np,
+                                internal,
+                                branch,
+                                henries,
+                            );
+                            let index = circuit.inductors.len() - 1;
+                            circuit.inductors.transient_only.insert(index);
+                            internal
+                        }
+                        None => np,
+                    };
                     let mut sw = crate::device::VoltageSwitch::new(
                         element.name.clone(),
                         np,
@@ -10137,7 +10162,8 @@ impl Engine {
                         cp,
                         cn, // Control terminals
                     )
-                    .with_params(&params_map);
+                    .with_params(&params_map)
+                    .with_blocked_conductance(self.config.convergence_config.junction_gmin_target);
                     validate_voltage_switch_physical_parameters(&sw, model)?;
                     if let Some(state) = initial_state {
                         sw = sw.with_initial_state(map_switch_state(*state));
@@ -10165,6 +10191,7 @@ impl Engine {
                         model_def,
                         &["CSW", "ISWITCH", "ISW"],
                     )?;
+                    refuse_unmeasured_current_switch_params(model_def, &element.name, model)?;
                     let mut params_map = resolve_supported_model_params_upper_map(
                         netlist,
                         model_def,

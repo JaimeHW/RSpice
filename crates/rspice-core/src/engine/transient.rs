@@ -2629,13 +2629,7 @@ impl Engine {
                     .map_err(|error| SimulationError::Circuit(error.to_string()))?
             }
             DerivedTransientBranchCurrentKind::VoltageSwitch => {
-                let switch = &circuit.vswitches[branch.index];
-                Self::two_terminal_conductance_current(
-                    solution,
-                    switch.node_pos,
-                    switch.node_neg,
-                    switch.terminal_conductance(solution),
-                )
+                circuit.vswitches[branch.index].terminal_current(solution)
             }
             DerivedTransientBranchCurrentKind::CurrentSwitch => {
                 let switch = &circuit.iswitches[branch.index];

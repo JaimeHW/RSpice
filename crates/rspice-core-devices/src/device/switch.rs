@@ -723,6 +723,12 @@ pub struct VoltageSwitch {
     arctan_curve: bool,
     /// `ILIMIT`: the ceiling on main-branch current.
     current_limit: Option<Value>,
+    /// `VSER` on a level 1 card: a source in series with the switch.
+    series_voltage: Value,
+    /// The level 2 card that conducts from its negative terminal only.
+    one_way: Option<OneWayConduction>,
+    /// The conductance of the side a one-way switch blocks: the circuit's GMIN.
+    blocked_conductance: Value,
 
     // State
     state: SwitchState,
@@ -743,6 +749,17 @@ pub struct VoltageSwitch {
     /// for the parameter values they were computed from; see
     /// [`SwitchParameterCheck`].
     parameter_check: std::cell::Cell<Option<SwitchParameterCheck>>,
+}
+
+/// Where a one-way level 2 switch starts to conduct, as LTspice 26.1.1 runs
+/// `VSER`, `EPSILON` and `ONEWAY`: the idealized diode's knee, its anode the
+/// negative terminal and its conductance the control's.
+#[derive(Debug, Clone, Copy)]
+struct OneWayConduction {
+    /// Voltage from negative to positive terminal where conduction begins.
+    knee: Value,
+    /// Width of the quadratic that rounds the knee.
+    width: Value,
 }
 
 /// A voltage switch's parameter validation and the logarithms its law takes,
@@ -784,6 +801,9 @@ impl VoltageSwitch {
             xyce_curve: None,
             arctan_curve: false,
             current_limit: None,
+            series_voltage: 0.0,
+            one_way: None,
+            blocked_conductance: 1.0e-12,
             state: SwitchState::Off,
             prev_state: SwitchState::Off,
             accepted_state: None,
@@ -845,6 +865,19 @@ impl VoltageSwitch {
             .is_some_and(|level| (*level - 2.0).abs() < 1.0e-9);
         let limit = params.get("ILIMIT").copied().filter(|amps| *amps > 0.0);
         self.current_limit = limit.or(self.arctan_curve.then_some(DEFAULT_LEVEL2_CURRENT_LIMIT));
+        let series_voltage = params.get("VSER").copied().unwrap_or(0.0);
+        let width = params.get("EPSILON").copied().unwrap_or(0.0).max(0.0);
+        self.series_voltage = if self.arctan_curve {
+            0.0
+        } else {
+            series_voltage
+        };
+        self.one_way = (self.arctan_curve
+            && (series_voltage > 0.0 || width > 0.0 || params.contains_key("ONEWAY")))
+        .then_some(OneWayConduction {
+            knee: series_voltage.max(0.0),
+            width,
+        });
         if params.contains_key("VON")
             || params.contains_key("VOFF")
             || params.contains_key("VHON")
@@ -895,6 +928,13 @@ impl VoltageSwitch {
         self.current_dg_dcontrol = 0.0;
         self.prev_resistance = self.current_resistance;
         self.prev_state = self.state;
+        self
+    }
+
+    /// The conductance of the side a one-way switch blocks, the circuit's GMIN.
+    #[must_use]
+    pub fn with_blocked_conductance(mut self, conductance: Value) -> Self {
+        self.blocked_conductance = conductance;
         self
     }
 
@@ -1017,10 +1057,9 @@ impl VoltageSwitch {
             .1
     }
 
-    /// Current over voltage on the main branch at `solution`, which a current
-    /// limit bends away from the switch's conductance.
+    /// Current from the positive to the negative terminal at `solution`.
     #[doc(hidden)]
-    pub fn terminal_conductance(&self, solution: &[Value]) -> Value {
+    pub fn terminal_current(&self, solution: &[Value]) -> Value {
         let voltage = |node: NodeId| {
             if node == 0 {
                 0.0
@@ -1030,26 +1069,68 @@ impl VoltageSwitch {
         };
         let vmain = voltage(self.node_pos) - voltage(self.node_neg);
         let g = 1.0 / self.current_resistance.max(1.0e-30);
-        if vmain == 0.0 {
-            return g;
-        }
-        self.main_branch(g, vmain).0 / vmain
+        self.main_branch(g, vmain).0
     }
 
     /// Main-branch current at conductance `g` and branch voltage `vmain`, with
-    /// its slopes against the voltage and against `g`. `ILIMIT` bends a
-    /// level 2 card by a hyperbolic tangent and clamps a level 1 card outright.
+    /// its slopes against the voltage and against `g`. `VSER` adds to a level 1
+    /// branch's voltage. `ILIMIT` bends a level 2 card by a hyperbolic tangent
+    /// and clamps a level 1 card outright.
     #[inline]
     fn main_branch(&self, g: Value, vmain: Value) -> (Value, Value, Value) {
+        if let Some(one_way) = self.one_way {
+            return self.one_way_branch(one_way, g, vmain);
+        }
+        let across = vmain + self.series_voltage;
+        // LTspice 26.1.1: a smooth level 1 card with a series source conducts
+        // by its control only against that source, and through ROFF with it.
+        if across * self.series_voltage > 0.0 && (self.smooth != 0.0 || self.xyce_curve.is_some()) {
+            let goff = 1.0 / self.roff;
+            return (goff * across, goff, 0.0);
+        }
         match self.current_limit {
             Some(limit) if self.arctan_curve => {
-                let bent = (g * vmain / limit).tanh();
+                let bent = (g * across / limit).tanh();
                 let slope = 1.0 - bent * bent;
-                (limit * bent, g * slope, vmain * slope)
+                (limit * bent, g * slope, across * slope)
             }
-            Some(limit) if (g * vmain).abs() > limit => (limit.copysign(vmain), 0.0, 0.0),
-            _ => (g * vmain, g, vmain),
+            Some(limit) if (g * across).abs() > limit => (limit.copysign(across), 0.0, 0.0),
+            _ => (g * across, g, across),
         }
+    }
+
+    /// The main branch of a one-way switch, whose current runs from the
+    /// negative to the positive terminal past the knee and is GMIN elsewhere.
+    fn one_way_branch(
+        &self,
+        law: OneWayConduction,
+        g: Value,
+        vmain: Value,
+    ) -> (Value, Value, Value) {
+        let goff = self.blocked_conductance;
+        let bias = -vmain;
+        if bias < law.knee {
+            return (vmain * goff, goff, 0.0);
+        }
+        let limit = self.current_limit.unwrap_or(DEFAULT_LEVEL2_CURRENT_LIMIT);
+        let (current, conductance) = crate::device::semiconductor::diode::idealized::conduction(
+            bias,
+            law.knee,
+            1.0,
+            g,
+            law.width,
+            Some(limit),
+            goff,
+        );
+        let against_g =
+            crate::device::semiconductor::diode::idealized::limited_conduction_slope_against_g(
+                bias - law.knee,
+                g,
+                law.width,
+                limit,
+                goff,
+            );
+        (-current, conductance, -against_g)
     }
 
     /// Conductance on the level 2 curve and its control slope: the logarithm

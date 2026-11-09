@@ -1554,6 +1554,10 @@ pub(super) const VSWITCH_MODEL_PARAMS: &[&str] = &[
     "NOISELESS",
     "LEVEL",
     "ILIMIT",
+    "VSER",
+    "LSER",
+    "ONEWAY",
+    "EPSILON",
 ];
 pub(super) const ISWITCH_MODEL_PARAMS: &[&str] = &[
     "IT",
@@ -1571,6 +1575,73 @@ pub(super) const ISWITCH_MODEL_PARAMS: &[&str] = &[
     "SMOOTH",
     "NOISELESS",
 ];
+
+/// Refuse a `W` card's `Vser` or `Lser`: no law for them has been measured.
+pub(super) fn refuse_unmeasured_current_switch_params(
+    model_def: &crate::netlist::ModelDef,
+    element_name: &str,
+    model_name: &str,
+) -> Result<(), SimulationError> {
+    let named = |wanted: &str| {
+        model_def
+            .params
+            .iter()
+            .map(|(name, _)| name)
+            .chain(model_def.expr_params.iter().map(|(name, _)| name))
+            .any(|name| name.eq_ignore_ascii_case(wanted))
+    };
+    for name in ["VSER", "LSER"] {
+        if named(name) {
+            return Err(SimulationError::Circuit(format!(
+                "Current-controlled switch '{element_name}' model '{model_name}' sets {name}, \
+                 which RSpice has no law for on a current switch"
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Settle the parameters that hold only at one LTspice switch level, returning
+/// the series inductance a level 1 card asks for. Measured on LTspice 26.1.1:
+/// `Lser` is read at level 1 alone, `epsilon` at level 2 alone, and each is
+/// passed over at the other level with a warning; `oneway` at level 1 is an
+/// error. ngspice defines none of the four, and they are dropped there with a
+/// warning.
+pub(super) fn settle_ltspice_switch_card_params(
+    params: &mut HashMap<String, Value>,
+    dialect: SpiceDialect,
+    element_name: &str,
+    model_name: &str,
+) -> Result<Option<Value>, SimulationError> {
+    if dialect == SpiceDialect::Ngspice {
+        for name in ["VSER", "LSER", "ONEWAY", "EPSILON"] {
+            if params.remove(name).is_some() {
+                log::warn!(
+                    "Switch '{element_name}' model '{model_name}': ngspice does not define \
+                     {name}; it was not applied"
+                );
+            }
+        }
+        return Ok(None);
+    }
+    let level2 = params
+        .get("LEVEL")
+        .is_some_and(|level| (*level - 2.0).abs() < 1.0e-9);
+    if !level2 && params.contains_key("ONEWAY") {
+        return Err(SimulationError::Circuit(format!(
+            "Switch '{element_name}' model '{model_name}' sets ONEWAY, which applies to a \
+             level 2 switch only"
+        )));
+    }
+    let passed_over = if level2 { "LSER" } else { "EPSILON" };
+    if params.remove(passed_over).is_some() {
+        log::warn!(
+            "Switch '{element_name}' model '{model_name}': {passed_over} does not apply at this \
+             switch level, as in LTspice; it was not applied"
+        );
+    }
+    Ok(params.remove("LSER").filter(|henries| *henries > 0.0))
+}
 
 /// Give a voltage- or current-controlled switch card that names no `ROFF`
 /// the off resistance its dialect's reference simulator gives it.

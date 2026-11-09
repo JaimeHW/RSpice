@@ -51,6 +51,9 @@ pub struct Inductors {
     /// ([`crate::circuit::CircuitData::resolve_dc_inductor_loops`]). Empty when
     /// none does.
     pub(crate) dc_loop: Vec<bool>,
+    /// The windings that act in the transient solve alone, shorts to AC: the
+    /// series inductance LTspice gives a switch card's `Lser`.
+    pub(crate) transient_only: std::collections::BTreeSet<usize>,
 }
 
 impl Inductors {

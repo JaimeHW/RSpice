@@ -430,3 +430,161 @@ fn a_bent_branch_linearizes_along_its_tangent() {
     let response = results[0].voltages[index].norm();
     assert!((response - 0.9991766).abs() < 1e-6, "V(a) {response}");
 }
+
+/// The current into a switch's positive terminal with `drive` across it.
+fn held_switch_current(card: &str, control: f64, drive: f64) -> f64 {
+    let deck = format!(
+        "held switch\nVc c 0 {control}\nVd d 0 {drive}\nS1 d 0 c 0 DUT\n\
+         .model DUT SW({card})\n.end\n"
+    );
+    -branch_currents(&deck, SpiceDialect::BestAvailable, &["Vd"])[0]
+}
+
+fn assert_switch_current(card: &str, control: f64, drive: f64, milliamps: f64) {
+    let current = held_switch_current(card, control, drive) * 1e3;
+    let tolerance = 1e-3_f64.max(milliamps.abs() * 2e-3);
+    assert!(
+        (current - milliamps).abs() < tolerance,
+        "{card} at control {control}, {drive} V: {current} mA, LTspice {milliamps} mA"
+    );
+}
+
+/// LTspice 26.1.1 batch. QSPICE ignores all four parameters with a warning, so
+/// it casts no vote. `Vser` on a level 1 card is a source in series with
+/// either conductance, of either sign, inside any current limit.
+#[test]
+fn a_level_one_card_adds_vser_to_its_branch() {
+    for (card, control, drive, milliamps) in [
+        ("Ron=1 Roff=1k Vt=1 Vser=.5", 3.0, 0.0, 500.0),
+        ("Ron=1 Roff=1k Vt=1 Vser=.5", 3.0, -1.0, -500.0),
+        ("Ron=1 Roff=1k Vt=1 Vser=.5", 0.0, -1.0, -0.5),
+        ("Ron=1 Roff=1k Vt=1 Vser=-.5", 3.0, 0.0, -500.0),
+        ("Ron=1 Roff=1k Vt=1 Vser=.5 ilimit=.2", 3.0, -0.6, -100.0),
+        ("Ron=1 Roff=1k Vt=1 Vser=.5 ilimit=.2", 3.0, 3.0, 200.0),
+        // The smooth transition conducts by its control against the source,
+        // and through ROFF with it.
+        ("Ron=1 Roff=1k Vt=1 Vh=-.5 Vser=.5", 1.0, -8.0, -237.2),
+        ("Ron=1 Roff=1k Vt=1 Vh=-.5 Vser=.5", 3.0, 0.5, 1.0),
+        ("Ron=1 Roff=1k Vt=1 Vh=-.5 Vser=-.5", 1.0, 1.5, 31.623),
+        ("Ron=1 Roff=1k Vt=1 Vh=-.5 Vser=-.5", 3.0, 0.3, -0.2),
+    ] {
+        assert_switch_current(card, control, drive, milliamps);
+    }
+}
+
+/// LTspice 26.1.1 batch: a positive `Vser`, a positive `epsilon` or `oneway`
+/// makes a level 2 card conduct from its negative terminal only, by the law of
+/// the idealized diode, and leaves GMIN on the other side.
+#[test]
+fn a_level_two_card_conducts_one_way_past_its_knee() {
+    let base = "level=2 Ron=1 Roff=1k Vt=1 Vh=-.5";
+    for (extra, control, drive, milliamps) in [
+        ("oneway", 3.0, -1.0, -582.9),
+        ("Vser=.5", 3.0, -1.0, -291.7),
+        ("Vser=.5", 3.0, -0.5, 0.0),
+        ("Vser=.5", 1.0, -1.0, -15.81),
+        ("Vser=.5 oneway", 3.0, -3.0, -1449.0),
+        ("epsilon=.5", 3.0, -0.1, -5.834),
+        ("epsilon=.5", 3.0, -0.6, -204.2),
+        ("epsilon=.5 Vser=.5", 3.0, -1.0, -145.9),
+        ("epsilon=.5 ilimit=.2", 3.0, -0.1, -4.215),
+        ("epsilon=.5 ilimit=.2", 3.0, -0.7, -164.8),
+        ("epsilon=.5 ilimit=1", 3.0, -2.0, -769.5),
+        ("oneway ilimit=.2", 3.0, -0.2, -105.0),
+        // Neither a negative nor a zero value makes it one-way.
+        ("Vser=-.5", 3.0, 1.0, 582.9),
+        ("Vser=0", 3.0, 1.0, 582.9),
+        ("epsilon=-.5", 3.0, 1.0, 582.9),
+    ] {
+        assert_switch_current(&format!("{base} {extra}"), control, drive, milliamps);
+    }
+    for extra in ["oneway", "Vser=.5", "epsilon=.5"] {
+        let blocked = held_switch_current(&format!("{base} {extra}"), 3.0, 1.0);
+        assert!((blocked - 1e-12).abs() < 1e-14, "{extra}: {blocked:e}");
+    }
+    // The small-signal branch is the law's slope.
+    let deck = format!(
+        "one way ac\nVc c 0 3\nVb b 0 -2 AC 1\nR1 b a 1\nS1 a 0 c 0 DUT\n\
+         .model DUT SW({base} oneway)\n.end\n"
+    );
+    let netlist = Netlist::parse(&deck).expect("deck parses");
+    let results = engine(SpiceDialect::BestAvailable)
+        .run_ac(&netlist, &[1.0e3])
+        .expect("AC solves");
+    let a = results[0]
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("a"))
+        .expect("node a");
+    let response = results[0].voltages[a].norm();
+    assert!(response > 0.6 && response < 0.7, "V(a) {response}");
+}
+
+/// LTspice 26.1.1 batch: `Lser` is a series inductance in the transient solve
+/// alone, and only at level 1.
+#[test]
+fn a_level_one_card_takes_lser_in_series_in_a_transient_only() {
+    let card = "Ron=1 Roff=1k Vt=1 Lser=1u";
+    // In series with one more ohm the time constant is .5 us, and the node
+    // between the ohm and the switch falls back from 1 V to 500 mV.
+    let deck = format!(
+        "lser\nVc c 0 3\nV1 a 0 PULSE(0 1 1u 1p 1p 100u)\nR1 a b 1\nS1 b 0 c 0 DUT\n\
+         .model DUT SW({card})\n.end\n"
+    );
+    let netlist = Netlist::parse(&deck).expect("deck parses");
+    let tran = engine(SpiceDialect::BestAvailable)
+        .run_tran(&netlist, 8.0e-6, 1.0e-8)
+        .expect("transient runs");
+    let node = tran.try_voltage_waveform_named("b").expect("node b");
+    for at in [1.5e-6, 2.0e-6, 3.0e-6] {
+        let index = tran.time.partition_point(|&t| t < at);
+        let expected = 1.0 - 0.5 * (1.0 - (-(at - 1.0e-6) / 0.5e-6_f64).exp());
+        assert!(
+            (node[index] - expected).abs() < 2e-3,
+            "at {at}: {} against {expected}",
+            node[index]
+        );
+    }
+    let deck =
+        format!("lser ac\nVc c 0 3\nI1 0 a AC 1\nS1 a 0 c 0 DUT\n.model DUT SW({card})\n.end\n");
+    let netlist = Netlist::parse(&deck).expect("deck parses");
+    let results = engine(SpiceDialect::BestAvailable)
+        .run_ac(&netlist, &[1.0e8])
+        .expect("AC solves");
+    let a = results[0]
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("a"))
+        .expect("node a");
+    assert!((results[0].voltages[a].norm() - 1.0).abs() < 1e-6);
+    // Level 2 passes `Lser` over, as level 1 passes over `epsilon`.
+    assert_switch_current("level=2 Ron=1 Roff=1k Vt=1 Vh=-.5 Lser=1u", 3.0, 1.0, 582.9);
+    assert_switch_current("Ron=1 Roff=1k Vt=1 epsilon=.5", 3.0, 1.0, 1000.0);
+}
+
+#[test]
+fn a_switch_parameter_with_no_law_at_its_level_is_refused_by_name() {
+    let refusal = |card: &str| {
+        let deck =
+            format!("refused\nVc c 0 3\nVd d 0 1\nS1 d 0 c 0 DUT\n.model DUT SW({card})\n.end\n");
+        let netlist = Netlist::parse(&deck).expect("deck parses");
+        engine(SpiceDialect::BestAvailable)
+            .run_dc_op(&netlist)
+            .expect_err("refused")
+            .to_string()
+    };
+    // LTspice 26.1.1 stops on `oneway` at level 1.
+    assert!(refusal("Ron=1 Roff=1k Vt=1 oneway").contains("ONEWAY"));
+    let current = |card: &str| {
+        let deck = format!(
+            "refused\nVm m 0 1m\nR1 m 0 1k\nVd d 0 1\nW1 d 0 Vm DUT\n.model DUT CSW({card})\n.end\n"
+        );
+        let netlist = Netlist::parse(&deck).expect("deck parses");
+        engine(SpiceDialect::BestAvailable)
+            .run_dc_op(&netlist)
+            .expect_err("refused")
+            .to_string()
+    };
+    assert!(current("It=.5m Ron=1 Roff=1k Vser=.5").contains("VSER"));
+    assert!(current("It=.5m Ron=1 Roff=1k Lser=1u").contains("LSER"));
+}
