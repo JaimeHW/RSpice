@@ -203,7 +203,9 @@ pub enum ContextEntry<T = ContextCommand> {
 #[derive(Debug, Clone)]
 pub struct ContextMenuView {
     pub binding: ContextMenuBinding,
-    pub summary: String,
+    /// What the menu acts on, named in its header. A bare canvas has nothing
+    /// to name, and its menu goes without one.
+    pub summary: Option<String>,
     pub entries: Vec<ContextEntry>,
     /// The objects a long press landed on, in pick order, when two or more
     /// did. They head the menu, so a finger can take the one underneath.
@@ -341,7 +343,14 @@ pub fn show(
         .data(|data| data.get_temp::<ContextInvocation>(invocation_id))
         .unwrap_or(ContextInvocation::Pointer);
     let page = arranging(ctx, view);
-    let geometry = SurfaceGeometry::resolve(ctx, invocation, &view.shape(page));
+    let geometry = SurfaceGeometry {
+        header: if view.summary.is_some() {
+            HEADER_HEIGHT
+        } else {
+            0.0
+        },
+        ..SurfaceGeometry::resolve(ctx, invocation, &view.shape(page))
+    };
     let t = Tokens::get(ctx);
     let frame = Frame::new()
         .fill(t.color.bg_elevated)
@@ -430,7 +439,9 @@ pub fn render_context_contents(
     row_height: f32,
     focus_first: bool,
 ) -> Option<ContextMenuRequest> {
-    menu_header(ui, &view.summary);
+    if let Some(summary) = &view.summary {
+        menu_header(ui, summary);
+    }
 
     let mut rows = Vec::with_capacity(16);
     let mut keyboard_or_pointer_action = None;
@@ -929,6 +940,7 @@ struct SurfaceGeometry {
     max_height: f32,
     row_height: f32,
     radius: u8,
+    header: f32,
     /// How many rows and rules the menu being placed is made of.
     commands: u32,
     separators: u32,
@@ -961,6 +973,7 @@ impl SurfaceGeometry {
                 max_height: (viewport.y * TOUCH_VIEWPORT_FRACTION).min(TOUCH_MAX_HEIGHT),
                 row_height: TOUCH_ROW_HEIGHT,
                 radius: TOUCH_RADIUS,
+                header: HEADER_HEIGHT,
                 commands,
                 separators,
             }
@@ -970,6 +983,7 @@ impl SurfaceGeometry {
                 max_height: DESKTOP_MAX_HEIGHT.min((viewport.y - 12.0).max(1.0)),
                 row_height: DESKTOP_ROW_HEIGHT,
                 radius: DESKTOP_RADIUS,
+                header: HEADER_HEIGHT,
                 commands,
                 separators,
             }
@@ -977,7 +991,7 @@ impl SurfaceGeometry {
     }
 
     fn outer_height(self) -> f32 {
-        (HEADER_HEIGHT
+        (self.header
             + self.commands as f32 * self.row_height
             + self.separators as f32 * SEPARATOR_HEIGHT
             + SURFACE_BORDER_WIDTH)

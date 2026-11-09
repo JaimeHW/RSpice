@@ -331,6 +331,12 @@ fn menu_subject(state: &AppState, target: ContextTarget) -> MenuSubject {
     }
 }
 
+/// A click on empty sheet with nothing selected.
+fn is_bare_canvas(state: &AppState, target: ContextTarget) -> bool {
+    menu_subject(state, target) == MenuSubject::Canvas
+        && state.model.schematic.session.editor.selection.is_empty()
+}
+
 /// The Arrange page: the Design menu's Arrange submenu, group by group.
 const ARRANGE_ENTRIES: &[ContextEntry] = &[
     arrange(ArrangeAction::RotateClockwise, ContextIcon::Rotate),
@@ -508,8 +514,7 @@ fn selection_holds_a_standard_value(state: &AppState) -> bool {
 /// left under it goes too.
 fn menu_entries(state: &AppState, target: ContextTarget) -> Vec<ContextEntry> {
     let subject = menu_subject(state, target);
-    let bare_canvas =
-        subject == MenuSubject::Canvas && state.model.schematic.session.editor.selection.is_empty();
+    let bare_canvas = is_bare_canvas(state, target);
     let mut entries: Vec<ContextEntry> = Vec::with_capacity(CONTEXT_ENTRIES.len());
     for entry in CONTEXT_ENTRIES {
         if let ContextEntry::Command(command) = entry
@@ -1004,6 +1009,11 @@ fn keyboard_target(
             fallback_screen_pos,
         ),
     )
+}
+
+/// What the menu's header names, which on a bare canvas is nothing.
+fn menu_summary(state: &AppState, target: ContextTarget) -> Option<String> {
+    (!is_bare_canvas(state, target)).then(|| selection_summary(state, target))
 }
 
 fn selection_summary(state: &AppState, target: ContextTarget) -> String {
@@ -1770,7 +1780,7 @@ fn context_menu_view(state: &AppState, ctx: &Context) -> Option<ContextMenuView>
             .collect::<Vec<_>>()
     };
     Some(ContextMenuView {
-        summary: selection_summary(state, binding.target),
+        summary: menu_summary(state, binding.target),
         entries: resolve(&menu_entries(state, binding.target)),
         arrange: resolve(ARRANGE_ENTRIES),
         binding,

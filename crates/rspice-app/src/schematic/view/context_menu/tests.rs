@@ -563,6 +563,26 @@ fn a_stimulus_verb_goes_where_component_properties_sends_it() {
 }
 
 #[test]
+fn a_bare_canvas_menu_names_nothing_and_offers_paste_from_a_filled_clipboard() {
+    let mut state = state_with_selected_source(0, false);
+    assert!(
+        menu_summary(&state, ContextTarget::Canvas).is_some(),
+        "a menu on a selection keeps its header"
+    );
+
+    state.model.schematic.session.editor.selection = Default::default();
+    assert_eq!(menu_summary(&state, ContextTarget::Canvas), None);
+    assert!(!labels_of(&menu_entries(&state, ContextTarget::Canvas)).contains(&"Paste here"));
+
+    state
+        .design
+        .schematic_clipboard
+        .components
+        .push(Component::new(1, ComponentType::Resistor, Point::origin()));
+    assert!(labels_of(&menu_entries(&state, ContextTarget::Canvas)).contains(&"Paste here"));
+}
+
+#[test]
 fn header_summary_uses_the_selected_instance_identity_and_master() {
     let mut state = AppState::default();
     state
