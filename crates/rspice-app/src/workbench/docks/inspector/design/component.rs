@@ -737,14 +737,12 @@ pub(super) fn parameters_section(
             .model
             .as_deref()
             .map_or_else(Vec::new, |module| model_cards_of_module(&app.state, module));
-        let listed = cards
-            .iter()
-            .any(|card| card.eq_ignore_ascii_case(&bound_card));
+        let listed = |name: &str| cards.iter().any(|card| card.eq_ignore_ascii_case(name));
         if !cards.is_empty() || !bound_card.is_empty() {
             let choices = std::iter::once((String::new(), "None".to_owned()))
-                .chain(cards.into_iter().map(|card| (card.clone(), card)))
+                .chain(cards.iter().map(|card| (card.clone(), card.clone())))
                 .chain(
-                    (!bound_card.is_empty() && !listed)
+                    (!bound_card.is_empty() && !listed(&bound_card))
                         .then(|| (bound_card.clone(), bound_card.clone())),
                 )
                 .collect::<Vec<_>>();
@@ -763,7 +761,7 @@ pub(super) fn parameters_section(
             {
                 app.invalidate_simulation_preflight();
             }
-            if !bound_card.is_empty() && !listed {
+            if !bound_card.is_empty() && !listed(&bound_card) {
                 crate::workbench::design_system::problem_line(
                     ui,
                     Problem::Failure,
