@@ -856,6 +856,46 @@ fn a_doubled_dot_directive_line_is_its_single_dot_card() {
     assert_eq!(cards[1].text, ".param Vss = -15");
 }
 
+/// A value or directive drawn with the micro sign keeps it on the sheet,
+/// while the part's value and the deck's card read `u`.
+#[test]
+fn a_micro_sign_stays_drawn_and_reads_as_micro_on_the_card() {
+    use crate::schematic::value_label::value_pieces;
+
+    let drawing = parse_asc(
+        "Version 4\nSYMBOL res 0 0 R0\nWINDOW 3 36 76 Left 2\nSYMATTR InstName R1\nSYMATTR Value 100\u{B5}\n\
+         TEXT 0 0 Left 2 !.tran 250\u{B5} startup\n",
+    )
+    .expect("the drawing reads");
+    let imported = import_foreign_schematic(&drawing, "work", &library());
+    let part = imported
+        .document
+        .components
+        .iter()
+        .find(|part| part.name == "R1")
+        .expect("R1 is placed");
+    assert_eq!(part.value, "100u");
+    let pieces = value_pieces(part).expect("the micro sign is lettered");
+    assert_eq!(
+        pieces
+            .iter()
+            .map(|piece| piece.text.as_str())
+            .collect::<Vec<_>>(),
+        ["100\u{B5}"]
+    );
+    assert_eq!(
+        imported
+            .document
+            .design_notes
+            .iter()
+            .map(|note| note.text.as_str())
+            .collect::<Vec<_>>(),
+        [".tran 250\u{B5} startup"]
+    );
+    let cards = foreign_directive_cards(&imported.directives);
+    assert_eq!(cards[0].text, ".tran 250u startup");
+}
+
 #[test]
 fn directive_cards_sort_by_the_project_place_they_belong_in() {
     let drawing = parse_asc(

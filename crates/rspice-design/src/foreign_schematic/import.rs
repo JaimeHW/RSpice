@@ -700,8 +700,12 @@ impl Builder<'_> {
                 })
                 .partition(|(number, ..)| *number == 3);
             // A lone value letters as the part's value; a source's waveform,
-            // or any other text the drawing shows, keeps its own place.
-            if source || !others.is_empty() {
+            // any other text the drawing shows, or a value spelled with the
+            // micro sign the part's value writes as `u`, keeps its own place.
+            let spelled_micro = lettered
+                .iter()
+                .any(|(_, text, ..)| text.contains(['\u{B5}', '\u{3BC}']));
+            if source || spelled_micro || !others.is_empty() {
                 pieces = lettered
                     .into_iter()
                     .chain(others)
@@ -2174,12 +2178,15 @@ impl Builder<'_> {
                     // block keeps that line empty.
                     let (mut drawn, mut read) = (Vec::new(), Vec::new());
                     let lines = spice_text_lines(&text.text);
-                    for (index, line) in lines.lines().enumerate() {
+                    // What is drawn keeps the source's micro sign; what is
+                    // read is the netlist's `u`.
+                    for (index, (line, written)) in lines.lines().zip(text.text.lines()).enumerate()
+                    {
                         let at = position + Point::new(0, (advance * index as f32).round() as i32);
                         if self.place_coupling(at, line, &lettering) {
                             drawn.push("");
                         } else {
-                            drawn.push(line);
+                            drawn.push(written.trim_end());
                             read.push(line);
                         }
                     }
