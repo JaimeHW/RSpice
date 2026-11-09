@@ -1189,9 +1189,7 @@ impl Builder<'_> {
                     format!("{line} {}", spice_text(text))
                 }),
             None => library_cell_line(attributes)
-                .or_else(|| {
-                    attribute(attributes, "Value").filter(|value| !value.trim().is_empty())
-                })
+                .or_else(|| attribute(attributes, "Value").filter(|value| !value.trim().is_empty()))
                 .or_else(|| attribute(attributes, "Value2"))
                 .map(spice_text)
                 .unwrap_or_else(|| fallback.to_owned()),

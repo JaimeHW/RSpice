@@ -3578,7 +3578,8 @@ mod tests {
         params.insert("M".to_string(), 0.5);
         params.insert("FC".to_string(), 0.5);
 
-        let vdmos = Vdmos::new_nvdmos("m1".to_string(), 1, 2, 3).with_params(&params, SpiceDialect::Ngspice);
+        let vdmos = Vdmos::new_nvdmos("m1".to_string(), 1, 2, 3)
+            .with_params(&params, SpiceDialect::Ngspice);
         let slope = (24.6e-12 - 2.0e-12) / (1.0 + std::f64::consts::FRAC_PI_2);
         let intercept = 24.6e-12 - slope;
         let expected_cgd = slope * (-5.8_f64).atan() + intercept;
@@ -3633,7 +3634,8 @@ mod tests {
         params.insert("KSUBTHRES".to_string(), 0.1);
         params.insert("SUBSHIFT".to_string(), 0.0);
 
-        let vdmos = Vdmos::new_nvdmos("m1".to_string(), 1, 2, 3).with_params(&params, SpiceDialect::Ngspice);
+        let vdmos = Vdmos::new_nvdmos("m1".to_string(), 1, 2, 3)
+            .with_params(&params, SpiceDialect::Ngspice);
         let (saturated, saturation_region) = vdmos.calculate_id(4.0, 10.0);
         let strong_overdrive = 0.1 * 20.0_f64.exp().ln_1p();
         let expected_saturated = 0.5 * 0.2 * strong_overdrive.powi(2);
@@ -3671,7 +3673,8 @@ mod tests {
             ("RG".to_string(), 0.4),
             ("KSUBTHRES".to_string(), 0.29),
         ]);
-        let mut vdmos = Vdmos::new_nvdmos("m1".to_string(), 1, 2, 3).with_params(&params, SpiceDialect::Ngspice);
+        let mut vdmos = Vdmos::new_nvdmos("m1".to_string(), 1, 2, 3)
+            .with_params(&params, SpiceDialect::Ngspice);
 
         vdmos.set_temperature(400.0, 300.0);
         assert_temperature_value("default MU", vdmos.kp, 0.65 * (4.0_f64 / 3.0).powf(-1.5));
@@ -3721,7 +3724,8 @@ mod tests {
             ("TKSUBTHRES1".to_string(), 5.0e-4),
             ("TKSUBTHRES2".to_string(), 6.0e-6),
         ]);
-        let mut vdmos = Vdmos::new_nvdmos("m1".to_string(), 1, 2, 3).with_params(&params, SpiceDialect::Ngspice);
+        let mut vdmos = Vdmos::new_nvdmos("m1".to_string(), 1, 2, 3)
+            .with_params(&params, SpiceDialect::Ngspice);
         let ratio = 350.0_f64 / 300.0;
         let delta = 50.0_f64;
 
@@ -3751,7 +3755,8 @@ mod tests {
     #[test]
     fn ngspice_pvdmos_threshold_coefficient_is_polarity_normalized() {
         let params = HashMap::from([("VTO".to_string(), -3.0), ("TCVTH".to_string(), 2.0e-3)]);
-        let mut vdmos = Vdmos::new_pvdmos("m1".to_string(), 1, 2, 3).with_params(&params, SpiceDialect::Ngspice);
+        let mut vdmos = Vdmos::new_pvdmos("m1".to_string(), 1, 2, 3)
+            .with_params(&params, SpiceDialect::Ngspice);
 
         vdmos.set_temperature(350.0, 300.0);
 
@@ -3818,7 +3823,8 @@ mod tests {
         // and 786-800 the body diode with DEVpnjlim, each against the
         // previous iterate. Node 1 drain, 2 gate, 3 source.
         let params = HashMap::from([("VTO".to_string(), 3.0), ("IS".to_string(), 1.0e-14)]);
-        let mut vdmos = Vdmos::new_nvdmos("m1".to_string(), 1, 2, 3).with_params(&params, SpiceDialect::Ngspice);
+        let mut vdmos = Vdmos::new_nvdmos("m1".to_string(), 1, 2, 3)
+            .with_params(&params, SpiceDialect::Ngspice);
         assert!(!vdmos.xyce_level18 && vdmos.d1_current_enabled);
         vdmos.update(&[0.0; 3]);
 
@@ -3874,7 +3880,8 @@ mod tests {
 
         // A fresh device's junction starts at vcrit, where MODEINITJCT seeds
         // it, so even its first iterate is limited.
-        let mut fresh = Vdmos::new_nvdmos("m1".to_string(), 1, 2, 3).with_params(&params, SpiceDialect::Ngspice);
+        let mut fresh = Vdmos::new_nvdmos("m1".to_string(), 1, 2, 3)
+            .with_params(&params, SpiceDialect::Ngspice);
         fresh.update(&diode_step);
         let isat = fresh.d1_temperature_adjusted_saturation_current(vt);
         let vcrit = vt * (vt / (std::f64::consts::SQRT_2 * isat)).ln();
