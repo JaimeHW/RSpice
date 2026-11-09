@@ -100,6 +100,14 @@ pub enum ContextAction {
     /// Arm the zoom box: the next drag frames the view. A finger has no
     /// Z key.
     ZoomBox,
+    /// Open the component shelf to place an instance.
+    PlaceInstance,
+    /// Arm the wire tool.
+    PlaceWire,
+    /// Arm the net-label tool.
+    PlaceLabel,
+    /// Open the text and note form.
+    PlaceText,
 }
 
 /// The Arrange page's commands, in the Design menu's order: turn and flip,
@@ -147,6 +155,10 @@ pub enum ContextIcon {
     /// Snap Selection to Grid, as the Design menu's Arrange draws it, and
     /// Snap to standard value, which snaps a value to its series' grid.
     Grid,
+    Instance,
+    Wire,
+    Label,
+    Text,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -903,6 +915,10 @@ impl ContextIcon {
             Self::Back => WorkbenchIcon::ArrowLeft.paint(painter, rect, color),
             Self::ZoomBox => WorkbenchIcon::ZoomIn.paint(painter, rect, color),
             Self::Grid => WorkbenchIcon::Grid.paint(painter, rect, color),
+            Self::Instance => WorkbenchIcon::Instance.paint(painter, rect, color),
+            Self::Wire => WorkbenchIcon::Wire.paint(painter, rect, color),
+            Self::Label => WorkbenchIcon::Label.paint(painter, rect, color),
+            Self::Text => WorkbenchIcon::Text.paint(painter, rect, color),
         }
     }
 }

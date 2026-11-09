@@ -279,26 +279,47 @@ fn each_target_gets_the_catalog_its_instance_master_slot_calls_for() {
         Some(Command::DescendHierarchyDirect.key()),
     );
 
-    // The empty canvas, which alone offers the zoom box: a finger has no Z.
+    // The bare canvas offers what can be started on a sheet and none of the
+    // selection's verbs; the zoom box is here alone because a finger has no Z.
     let state = AppState::default();
     let canvas = menu_entries(&state, ContextTarget::Canvas);
-    let mut expected = menu(&[(
-        "New Verilog-A device…",
-        Some(Command::NewVerilogADevice.key()),
-    )]);
-    let fit = expected
-        .iter()
-        .position(|(label, _)| *label == "Fit schematic content")
-        .expect("the canvas menu fits the content");
-    expected.insert(fit + 1, ("Zoom box", Some(Command::ZoomBox.key())));
-    // A symbol from the sheet's ports is the sheet's verb.
-    let hierarchy = expected
-        .iter()
-        .position(|(label, _)| *label == "Create hierarchy from selection…")
-        .expect("the canvas menu creates hierarchy");
-    expected.insert(hierarchy + 1, ("Create symbol from schematic ports…", None));
-    assert_eq!(catalog_of(&canvas), expected);
-    assert_eq!((catalog_of(&canvas).len(), separators_in(&canvas)), (19, 4));
+    assert_eq!(
+        catalog_of(&canvas),
+        vec![
+            ("Place instance…", Some(Command::PlaceInstance.key())),
+            ("Draw wire", Some(Command::PlaceWire.key())),
+            ("Place net label", Some(Command::PlaceLabel.key())),
+            ("Place text or note…", Some(Command::PlaceText.key())),
+            (
+                "New Verilog-A device…",
+                Some(Command::NewVerilogADevice.key())
+            ),
+            ("Create symbol from schematic ports…", None),
+            ("Sheet properties", Some(ids::SHEET_PROPERTIES)),
+            (
+                "Fit schematic content",
+                Some(Command::FitSchematicContent.key())
+            ),
+            ("Zoom box", Some(Command::ZoomBox.key())),
+            (
+                "Add voltage or current probe…",
+                Some(Command::PlaceProbe.key())
+            ),
+            (
+                "Open operating point",
+                Some(ResultsCommand::ResultViewer(ResultViewer::Op).key())
+            ),
+        ],
+    );
+    // Something selected, then a click on the bare sheet: the selection's
+    // verbs are back, and only the bare canvas offers the creation verbs.
+    let mut selected = state_with_selected_source(0, false);
+    let selected_canvas = labels_of(&menu_entries(&selected, ContextTarget::Canvas));
+    assert!(selected_canvas.contains(&"Cut selection"));
+    assert!(!selected_canvas.contains(&"Draw wire"));
+    selected.model.schematic.session.editor.selection = Default::default();
+    assert!(labels_of(&menu_entries(&selected, ContextTarget::Canvas)).contains(&"Draw wire"));
+    assert_eq!((catalog_of(&canvas).len(), separators_in(&canvas)), (11, 3));
 
     // A schematic instance, and a wire: the master rows, Descend first.
     let mut resistor = AppState::default();

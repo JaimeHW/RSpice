@@ -57,6 +57,32 @@ struct ContextCommand {
 type ContextEntry = context_surface::ContextEntry<ContextCommand>;
 
 const CONTEXT_ENTRIES: &[ContextEntry] = &[
+    // What can be started on a bare sheet: only the empty canvas offers them.
+    ContextEntry::Command(ContextCommand {
+        action: ContextAction::PlaceInstance,
+        icon: ContextIcon::Instance,
+        label: "Place instance…",
+        shortcut_command: Some(Command::PlaceInstance.key()),
+    }),
+    ContextEntry::Command(ContextCommand {
+        action: ContextAction::PlaceWire,
+        icon: ContextIcon::Wire,
+        label: "Draw wire",
+        shortcut_command: Some(Command::PlaceWire.key()),
+    }),
+    ContextEntry::Command(ContextCommand {
+        action: ContextAction::PlaceLabel,
+        icon: ContextIcon::Label,
+        label: "Place net label",
+        shortcut_command: Some(Command::PlaceLabel.key()),
+    }),
+    ContextEntry::Command(ContextCommand {
+        action: ContextAction::PlaceText,
+        icon: ContextIcon::Text,
+        label: "Place text or note…",
+        shortcut_command: Some(Command::PlaceText.key()),
+    }),
+    ContextEntry::Separator,
     ContextEntry::Command(ContextCommand {
         action: ContextAction::Properties,
         icon: ContextIcon::Sliders,
@@ -408,6 +434,27 @@ fn turn(state: &mut AppState, symbol_context: &SchematicSymbolContext, action: A
     }
 }
 
+/// The rows a menu opened on the bare canvas, with nothing selected, leaves
+/// out: they act on a selection there is none of, so they could only ever be
+/// disabled there.
+fn selection_only(action: ContextAction, state: &AppState) -> bool {
+    match action {
+        ContextAction::Properties
+        | ContextAction::Rotate
+        | ContextAction::Mirror
+        | ContextAction::MirrorVertical
+        | ContextAction::Arrange
+        | ContextAction::Cut
+        | ContextAction::Copy
+        | ContextAction::Duplicate
+        | ContextAction::Delete
+        | ContextAction::CreateHierarchy
+        | ContextAction::ShowInNetlist => true,
+        ContextAction::Paste => state.design.schematic_clipboard.is_empty(),
+        _ => false,
+    }
+}
+
 /// Whether the catalog's instance-master slot holds `action` for `subject`.
 fn master_slot_shows(action: ContextAction, subject: MenuSubject) -> bool {
     match action {
@@ -417,7 +464,11 @@ fn master_slot_shows(action: ContextAction, subject: MenuSubject) -> bool {
         // on the sheet's menu; an instance's menu offers its symbol instead.
         ContextAction::NewVerilogADevice
         | ContextAction::ZoomBox
-        | ContextAction::CreateSymbolFromPorts => subject == MenuSubject::Canvas,
+        | ContextAction::CreateSymbolFromPorts
+        | ContextAction::PlaceInstance
+        | ContextAction::PlaceWire
+        | ContextAction::PlaceLabel
+        | ContextAction::PlaceText => subject == MenuSubject::Canvas,
         ContextAction::UpdateInstanceInterface
         | ContextAction::ReplaceInstance
         | ContextAction::EditSymbolInPlace => {
@@ -457,8 +508,16 @@ fn selection_holds_a_standard_value(state: &AppState) -> bool {
 /// left under it goes too.
 fn menu_entries(state: &AppState, target: ContextTarget) -> Vec<ContextEntry> {
     let subject = menu_subject(state, target);
+    let bare_canvas =
+        subject == MenuSubject::Canvas && state.model.schematic.session.editor.selection.is_empty();
     let mut entries: Vec<ContextEntry> = Vec::with_capacity(CONTEXT_ENTRIES.len());
     for entry in CONTEXT_ENTRIES {
+        if let ContextEntry::Command(command) = entry
+            && bare_canvas
+            && selection_only(command.action, state)
+        {
+            continue;
+        }
         let shown = match entry {
             ContextEntry::Separator => {
                 matches!(entries.last(), Some(ContextEntry::Command(_)))
@@ -1322,6 +1381,13 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
             ),
             "The zoom box frames a schematic or testbench canvas",
         ),
+        ContextAction::PlaceInstance
+        | ContextAction::PlaceWire
+        | ContextAction::PlaceLabel
+        | ContextAction::PlaceText => (
+            writable,
+            "The active schematic view is read-only; reopen it in an editable context to add to it",
+        ),
         ContextAction::AdoptStimulus
         | ContextAction::ReadoptStimulus
         | ContextAction::SaveStimulus
@@ -1475,6 +1541,21 @@ fn execute_context_action(
         ContextAction::ZoomBox => {
             state.model.schematic.session.editor.zoom_box.arm();
             state.prompt("Drag a box to zoom to it.");
+        }
+        ContextAction::PlaceInstance => {
+            state.workbench.navigator_visible = true;
+            state.workbench.drawer = Some(crate::workbench::state::Drawer::Navigator);
+            state.design.design_panel = crate::workbench::state::DesignPanel::ComponentShelf;
+            state
+                .workbench
+                .outbox
+                .push(crate::workbench::framework::requests::FocusPlacementSearch);
+        }
+        ContextAction::PlaceWire => state.model.schematic.arm_tool(Tool::Wire),
+        ContextAction::PlaceLabel => state.model.schematic.arm_tool(Tool::Label),
+        ContextAction::PlaceText => {
+            let source = crate::workbench::app::schematic_editor_request_source(state);
+            state.design.design_note.open(source);
         }
         ContextAction::AdoptStimulus
         | ContextAction::ReadoptStimulus
