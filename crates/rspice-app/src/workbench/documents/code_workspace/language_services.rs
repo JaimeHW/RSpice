@@ -165,13 +165,14 @@ pub(crate) fn commit_language_rename(app: &mut RSpiceApp) -> Result<String, Stri
         state
             .index
             .rename_extent_at(&state.active_path, state.caret, &state.query);
-    let changed_files = app
-        .state
-        .model
-        .workspace
-        .content
-        .replace_project_source_bundle_files_transactionally(state.index.bundle_id, replacements)
-        .map_err(|error| error.to_string())?;
+    let changed_files = {
+        let workbench = &mut app.state;
+        workbench.code.code_workspace.source_edit_history.replace(
+            &mut workbench.model.workspace.content,
+            state.index.bundle_id,
+            replacements,
+        )?
+    };
     match state.index.language {
         ProjectSourceLanguage::VerilogA => {
             super::veriloga::invalidate_veriloga_evidence(app, state.index.bundle_id);
@@ -318,12 +319,12 @@ fn write_language_document(
     logical_path: &str,
     replacement: String,
 ) -> Result<(), String> {
-    app.state
-        .model
-        .workspace
-        .content
-        .replace_project_source_bundle_file(bundle_id, logical_path, replacement)
-        .map_err(|error| error.to_string())?;
+    let workbench = &mut app.state;
+    workbench.code.code_workspace.source_edit_history.replace(
+        &mut workbench.model.workspace.content,
+        bundle_id,
+        vec![(logical_path.to_owned(), replacement)],
+    )?;
     match language {
         ProjectSourceLanguage::VerilogA => {
             super::veriloga::invalidate_veriloga_evidence(app, bundle_id);

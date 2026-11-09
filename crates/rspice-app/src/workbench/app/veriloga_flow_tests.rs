@@ -1379,4 +1379,5 @@ fn a_builtin_model_copied_from_the_library_page_compiles_and_places() {
     assert_eq!(placed, 1, "the copy places once");
 }
 
+mod editing;
 mod language_tools;

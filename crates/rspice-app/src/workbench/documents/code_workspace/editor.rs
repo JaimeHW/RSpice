@@ -11,13 +11,14 @@ use egui::{Color32, FontId, Stroke, Ui};
 use crate::state::code_diagnostics::CodeDiagnosticCollection;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::Tokens;
-use crate::ui::widgets::{Problem, paint_problem_mark};
+use crate::ui::widgets::Problem;
 use crate::workbench::MessageId;
 use crate::workbench::documents::text_editor_commands::{
-    EditorSyntax, consume_standard_command, consume_structural_shortcut, queue_caret_position,
-    show_go_to_line, take_reveal_line,
+    EditorSyntax, queue_caret_position, show_go_to_line, take_reveal_line,
     veriloga_syntax::{LineState, SyntaxClass, SyntaxSpan, VerilogAHighlighter, tokenize_line},
 };
+
+use crate::workbench::framework::requests::StandardCommand;
 
 mod assist;
 mod findings;
@@ -27,24 +28,7 @@ use findings::{HeldFinding, HeldFindings};
 const FONT_SIZE: f32 = 11.0;
 const LINE_HEIGHT: f32 = 17.05;
 const GUTTER_WIDTH: f32 = 47.0;
-const NUMBER_RIGHT_PADDING: f32 = 11.0;
-/// Side of a diagnostic's gutter mark, set in the line number's right padding.
-const GUTTER_MARK_SIDE: f32 = 8.0;
 const CODE_LEFT_PADDING: f32 = 12.0;
-// One editor substrate must own cursor, folding, multi-selection, IME, and
-// undo semantics at every document size. Keeping a second small-file TextEdit
-// path made commands such as fold-all change behavior at an arbitrary byte
-// boundary. Empty buffers alone use TextEdit until their first insertion.
-const VIRTUALIZATION_THRESHOLD_BYTES: usize = 1;
-
-fn code_editor_frame() -> egui::Frame {
-    egui::Frame::new().inner_margin(egui::Margin {
-        left: (GUTTER_WIDTH + CODE_LEFT_PADDING) as i8,
-        right: 20,
-        top: 8,
-        bottom: 36,
-    })
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CodeEditorLanguage {
@@ -59,18 +43,20 @@ pub use rspice_vocabulary::diagnostics::{
     DiagnosticSeverity as CodeEditorSeverity, SourceDiagnostic as CodeEditorDiagnostic,
 };
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct CodeDocumentInteraction {
     pub changed: bool,
     pub cursor_char_index: usize,
     pub selected_char_range: Option<(usize, usize)>,
     pub breakpoint_toggled: Option<usize>,
-    /// The source well, for its right-click menu. An empty document is a
-    /// plain text field with nothing to act on, and has none.
-    pub response: Option<egui::Response>,
+    /// The source well, for its right-click menu.
+    pub response: egui::Response,
     /// What a step to the next or previous finding found, for the page to
     /// say on the status bar.
     pub announcement: Option<String>,
+    /// Undo or Redo the editor's own history had no step for: the page steps
+    /// the history of the edits it made across the bundle.
+    pub unanswered_history: Option<StandardCommand>,
 }
 
 /// Where the text an editor shows stands with the last check of it.
@@ -470,296 +456,137 @@ fn show_code_document_impl(
         CodeEditorLanguage::Yaml => EditorSyntax::Yaml,
         CodeEditorLanguage::Toml => EditorSyntax::Toml,
     };
-    if source.len() >= VIRTUALIZATION_THRESHOLD_BYTES {
-        let edited_lines = std::collections::HashSet::new();
-        let accessible_label = messages.text(match (language, editable) {
-            (CodeEditorLanguage::VerilogA, true) => MessageId::EditorVerilogASourceEditor,
-            (CodeEditorLanguage::VerilogA, false) => MessageId::EditorVerilogASourceViewer,
-            (CodeEditorLanguage::Automation, true) => MessageId::EditorAutomationSourceEditor,
-            (CodeEditorLanguage::Automation, false) => MessageId::EditorAutomationSourceViewer,
-            (CodeEditorLanguage::Python, true) => MessageId::EditorPythonSourceEditor,
-            (CodeEditorLanguage::Python, false) => MessageId::EditorPythonSourceViewer,
-            (CodeEditorLanguage::Yaml, true) => MessageId::EditorRunPlanEditor,
-            (CodeEditorLanguage::Yaml, false) => MessageId::EditorRunPlanViewer,
-            (CodeEditorLanguage::Toml, true) => MessageId::EditorTomlManifestEditor,
-            (CodeEditorLanguage::Toml, false) => MessageId::EditorTomlManifestViewer,
-        });
-        let style = crate::workbench::documents::virtual_text_editor::VirtualEditorStyle {
-            accessible_label: &accessible_label,
-            messages,
-            font: font.clone(),
-            line_height: LINE_HEIGHT,
-            gutter_width: GUTTER_WIDTH,
-            code_left_padding: CODE_LEFT_PADDING,
-            top_padding: 8.0,
-            background: colors.bg_inset,
-            hover_background: colors.bg_hover,
-            active_background: colors.syntax.current_line,
-            selection_background: colors.syntax.selection,
-            text: colors.text,
-            text_dim: colors.text_dim,
-            text_faint: colors.text_faint,
-            border: colors.border,
-            accent: colors.accent,
-            error: colors.err,
-            warning: colors.warn,
-            edited_lines: &edited_lines,
-            breakpoints,
-            breakpoints_enabled,
-            current_line,
-            cross_probe_line: None,
-            marks: held.marks(),
-            marks_outdated: held.is_outdated(),
-        };
-        // The reading of each line is kept between frames, so a frame reads
-        // only the lines it shows.
-        let highlighter_id = editor_id.with("veriloga-syntax");
-        let mut highlighter = (language == CodeEditorLanguage::VerilogA).then(|| {
-            ui.ctx()
-                .data_mut(|data| data.remove_temp::<VerilogAHighlighter>(highlighter_id))
-                .unwrap_or_default()
-        });
-        let assist_keys = (language == CodeEditorLanguage::VerilogA)
-            .then(|| assist::consume_keys(ui, editor_id, editable));
-        let output = crate::workbench::documents::virtual_text_editor::show_virtual_text_editor(
+    let edited_lines = std::collections::HashSet::new();
+    let accessible_label = messages.text(match (language, editable) {
+        (CodeEditorLanguage::VerilogA, true) => MessageId::EditorVerilogASourceEditor,
+        (CodeEditorLanguage::VerilogA, false) => MessageId::EditorVerilogASourceViewer,
+        (CodeEditorLanguage::Automation, true) => MessageId::EditorAutomationSourceEditor,
+        (CodeEditorLanguage::Automation, false) => MessageId::EditorAutomationSourceViewer,
+        (CodeEditorLanguage::Python, true) => MessageId::EditorPythonSourceEditor,
+        (CodeEditorLanguage::Python, false) => MessageId::EditorPythonSourceViewer,
+        (CodeEditorLanguage::Yaml, true) => MessageId::EditorRunPlanEditor,
+        (CodeEditorLanguage::Yaml, false) => MessageId::EditorRunPlanViewer,
+        (CodeEditorLanguage::Toml, true) => MessageId::EditorTomlManifestEditor,
+        (CodeEditorLanguage::Toml, false) => MessageId::EditorTomlManifestViewer,
+    });
+    let style = crate::workbench::documents::virtual_text_editor::VirtualEditorStyle {
+        accessible_label: &accessible_label,
+        messages,
+        font: font.clone(),
+        line_height: LINE_HEIGHT,
+        gutter_width: GUTTER_WIDTH,
+        code_left_padding: CODE_LEFT_PADDING,
+        top_padding: 8.0,
+        background: colors.bg_inset,
+        hover_background: colors.bg_hover,
+        active_background: colors.syntax.current_line,
+        selection_background: colors.syntax.selection,
+        text: colors.text,
+        text_dim: colors.text_dim,
+        text_faint: colors.text_faint,
+        border: colors.border,
+        accent: colors.accent,
+        error: colors.err,
+        warning: colors.warn,
+        edited_lines: &edited_lines,
+        breakpoints,
+        breakpoints_enabled,
+        current_line,
+        cross_probe_line: None,
+        marks: held.marks(),
+        marks_outdated: held.is_outdated(),
+    };
+    // The reading of each line is kept between frames, so a frame reads
+    // only the lines it shows.
+    let highlighter_id = editor_id.with("veriloga-syntax");
+    let mut highlighter = (language == CodeEditorLanguage::VerilogA).then(|| {
+        ui.ctx()
+            .data_mut(|data| data.remove_temp::<VerilogAHighlighter>(highlighter_id))
+            .unwrap_or_default()
+    });
+    let assist_keys = (language == CodeEditorLanguage::VerilogA)
+        .then(|| assist::consume_keys(ui, editor_id, editable));
+    let output = crate::workbench::documents::virtual_text_editor::show_virtual_text_editor(
+        ui,
+        editor_id,
+        source,
+        source_revision,
+        editable,
+        syntax,
+        requested_line,
+        &style,
+        |ui, row, font| {
+            let job = match highlighter.as_mut() {
+                Some(highlighter) => {
+                    let (spans, line) = highlighter.line(row.document, row.logical_line);
+                    veriloga_row_job(&spans, &line, row.text, row.first_column, font, &colors)
+                }
+                None => layout_job(row.text, language, font, &[], &colors),
+            };
+            ui.fonts_mut(|fonts| fonts.layout_job(job))
+        },
+        |logical_line| {
+            held.worst_on_line(logical_line)
+                .and_then(|finding| diagnostic_problem(finding.severity))
+        },
+        |logical_line| {
+            held.worst_on_line(logical_line)
+                .map(|finding| line_diagnostic_description(finding, messages))
+        },
+    );
+    let assist_answer = assist_keys.map(|keys| {
+        assist::show(
             ui,
             editor_id,
-            source,
-            source_revision,
-            editable,
-            syntax,
-            requested_line,
-            &style,
-            |ui, row, font| {
-                let job = match highlighter.as_mut() {
-                    Some(highlighter) => {
-                        let (spans, line) = highlighter.line(row.document, row.logical_line);
-                        veriloga_row_job(&spans, &line, row.text, row.first_column, font, &colors)
-                    }
-                    None => layout_job(row.text, language, font, &[], &colors),
-                };
-                ui.fonts_mut(|fonts| fonts.layout_job(job))
+            &assist::AssistFrame {
+                source,
+                source_revision,
+                editable,
+                include_files,
+                messages,
             },
-            |logical_line| {
-                held.worst_on_line(logical_line)
-                    .and_then(|finding| diagnostic_problem(finding.severity))
-            },
-            |logical_line| {
-                held.worst_on_line(logical_line)
-                    .map(|finding| line_diagnostic_description(finding, messages))
-            },
-        );
-        let assist_answer = assist_keys.map(|keys| {
-            assist::show(
-                ui,
-                editor_id,
-                &assist::AssistFrame {
-                    source,
-                    source_revision,
-                    editable,
-                    include_files,
-                    messages,
-                },
-                &output,
-                keys,
-            )
-        });
-        // The findings under the pointer, while the text they were placed in
-        // is the text on screen, and what the name under it is.
-        if let Some(char_index) = output.hover_char_index
-            && !output.changed
-        {
-            let covering = held.covering(char_index);
-            let information = assist_answer
-                .as_ref()
-                .and_then(|answer| answer.hover.as_ref());
-            if !covering.is_empty() || information.is_some() {
-                output.response.clone().on_hover_ui_at_pointer(|ui| {
-                    if !covering.is_empty() {
-                        findings_tooltip(ui, &held, &covering, messages, &colors);
-                    }
-                    if let Some(information) = information {
-                        ui.set_max_width(420.0);
-                        assist::information_body(ui, information, &colors);
-                    }
-                });
-            }
-        }
-        let announcement =
-            announcement.or_else(|| assist_answer.and_then(|answer| answer.announcement));
-        ui.ctx().data_mut(|data| {
-            data.insert_temp(reported_caret_id(editor_id), output.cursor_char_index);
-            data.insert_temp(held_id, held);
-            if let Some(highlighter) = highlighter {
-                data.insert_temp(highlighter_id, highlighter);
-            }
-        });
-        return CodeDocumentInteraction {
-            changed: output.changed,
-            cursor_char_index: output.cursor_char_index,
-            selected_char_range: output.selected_char_range,
-            breakpoint_toggled: output.breakpoint_toggled,
-            response: Some(output.response),
-            announcement,
-        };
-    }
-    let standard_changed = consume_standard_command(ui, editor_id, source, editable);
-    let shortcut_changed = consume_structural_shortcut(ui, editor_id, source, syntax, editable);
-    let mut layouter = |ui: &Ui, text: &dyn egui::TextBuffer, _wrap_width: f32| {
-        let job = layout_job(text.as_str(), language, font.clone(), &[], &colors);
-        ui.fonts_mut(|fonts| fonts.layout_job(job))
-    };
-    let height = ui.available_height().max(120.0);
-    let mut changed = standard_changed || shortcut_changed;
-    let mut breakpoint_toggled = None;
-    ui.allocate_ui(egui::vec2(ui.available_width(), height), |ui| {
-        egui::ScrollArea::both()
-            .id_salt(editor_id.with("scroll"))
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                // Reserve the hover wash before TextEdit emits glyphs and
-                // selection shapes. The row geometry is known only after the
-                // galley is laid out, so the placeholder is filled below.
-                let hover_background = ui.painter().add(egui::Shape::Noop);
-                let output = egui::TextEdit::multiline(source)
-                    .id(editor_id)
-                    .code_editor()
-                    .font(font.clone())
-                    .desired_width(f32::INFINITY)
-                    .desired_rows(24)
-                    .interactive(editable)
-                    // egui intentionally ignores `TextEdit::margin` whenever
-                    // a custom frame is supplied. Put the canonical code-well
-                    // insets on that frame so source glyphs cannot render
-                    // underneath the gutter or against the toolbar divider.
-                    .frame(code_editor_frame())
-                    .layouter(&mut layouter)
-                    .show(ui);
-                changed |= output.response.changed();
-                let painter = ui.painter();
-                let row_rect = |row: &egui::epaint::text::PlacedRow| {
-                    egui::Rect::from_min_max(
-                        egui::pos2(
-                            output.response.rect.left(),
-                            output.galley_pos.y + row.rect().top(),
-                        ),
-                        egui::pos2(
-                            output.response.rect.right(),
-                            output.galley_pos.y + row.rect().bottom(),
-                        ),
-                    )
-                };
-                if let Some(line) = requested_line
-                    && let Some(row) = output.galley.rows.get(line.saturating_sub(1))
-                {
-                    ui.scroll_to_rect(row_rect(row), Some(egui::Align::Center));
+            &output,
+            keys,
+        )
+    });
+    // The findings under the pointer, while the text they were placed in
+    // is the text on screen, and what the name under it is.
+    if let Some(char_index) = output.hover_char_index
+        && !output.changed
+    {
+        let covering = held.covering(char_index);
+        let information = assist_answer
+            .as_ref()
+            .and_then(|answer| answer.hover.as_ref());
+        if !covering.is_empty() || information.is_some() {
+            output.response.clone().on_hover_ui_at_pointer(|ui| {
+                if !covering.is_empty() {
+                    findings_tooltip(ui, &held, &covering, messages, &colors);
                 }
-                if let Some(pointer) = ui.input(|input| input.pointer.hover_pos())
-                    && output.response.rect.contains(pointer)
-                    && let Some(row) = output
-                        .galley
-                        .rows
-                        .iter()
-                        .find(|row| row_rect(row).contains(pointer))
-                {
-                    painter.set(
-                        hover_background,
-                        egui::Shape::rect_filled(row_rect(row), 0.0, colors.bg_hover),
-                    );
-                }
-                painter.vline(
-                    output.response.rect.left() + GUTTER_WIDTH,
-                    output.response.rect.y_range(),
-                    Stroke::new(1.0, colors.border),
-                );
-                let gutter_font = theme::mono(FONT_SIZE, FontWeight::Regular);
-                for (line_index, row) in output.galley.rows.iter().enumerate() {
-                    let line_number = line_index + 1;
-                    let y = output.galley_pos.y + row.rect().center().y;
-                    if !ui.clip_rect().y_range().contains(y) {
-                        continue;
-                    }
-                    let line_rect = row_rect(row);
-                    let gutter_rect = egui::Rect::from_min_max(
-                        line_rect.min,
-                        egui::pos2(line_rect.left() + GUTTER_WIDTH, line_rect.bottom()),
-                    );
-                    if breakpoints_enabled {
-                        let gutter_response = ui.interact(
-                            gutter_rect,
-                            editor_id.with(("breakpoint", line_number)),
-                            egui::Sense::click(),
-                        );
-                        gutter_response.widget_info(|| {
-                            egui::WidgetInfo::labeled(
-                                egui::WidgetType::Button,
-                                ui.is_enabled(),
-                                format!("Toggle breakpoint on line {line_number}"),
-                            )
-                        });
-                        theme::paint_focus_ring(ui, &gutter_response, gutter_rect);
-                        if gutter_response.clicked() {
-                            breakpoint_toggled = Some(line_number);
-                        }
-                    }
-                    if current_line == Some(line_number) {
-                        painter.rect_filled(line_rect, 0.0, colors.accent.linear_multiply(0.12));
-                        painter.circle_filled(
-                            egui::pos2(line_rect.left() + 18.0, y),
-                            4.0,
-                            colors.warn,
-                        );
-                    }
-                    if breakpoints.contains(&line_number) {
-                        painter.circle_filled(
-                            egui::pos2(line_rect.left() + 7.0, y),
-                            4.0,
-                            colors.err,
-                        );
-                    }
-                    // The number is neutral; a warning or an error on the
-                    // line is a mark in the number's right padding.
-                    painter.text(
-                        egui::pos2(
-                            output.response.rect.left() + GUTTER_WIDTH - NUMBER_RIGHT_PADDING,
-                            y,
-                        ),
-                        egui::Align2::RIGHT_CENTER,
-                        line_number.to_string(),
-                        gutter_font.clone(),
-                        colors.text_faint,
-                    );
-                    if let Some(problem) = held
-                        .worst_on_line(line_index)
-                        .and_then(|finding| diagnostic_problem(finding.severity))
-                    {
-                        paint_problem_mark(
-                            painter,
-                            egui::Rect::from_center_size(
-                                egui::pos2(output.response.rect.left() + GUTTER_WIDTH - 5.0, y),
-                                egui::Vec2::splat(GUTTER_MARK_SIDE),
-                            ),
-                            problem,
-                        );
-                    }
+                if let Some(information) = information {
+                    ui.set_max_width(420.0);
+                    assist::information_body(ui, information, &colors);
                 }
             });
+        }
+    }
+    let announcement =
+        announcement.or_else(|| assist_answer.and_then(|answer| answer.announcement));
+    ui.ctx().data_mut(|data| {
+        data.insert_temp(reported_caret_id(editor_id), output.cursor_char_index);
+        data.insert_temp(held_id, held);
+        if let Some(highlighter) = highlighter {
+            data.insert_temp(highlighter_id, highlighter);
+        }
     });
-    let char_range = egui::text_edit::TextEditState::load(ui.ctx(), editor_id)
-        .and_then(|state| state.cursor.char_range());
-    let cursor_char_index = char_range.map_or(0, |range| range.primary.index.0);
-    let selected_char_range = char_range.and_then(|range| {
-        let range = range.as_sorted_char_range();
-        (range.start != range.end).then_some((range.start.0, range.end.0))
-    });
-    ui.ctx().data_mut(|data| data.insert_temp(held_id, held));
     CodeDocumentInteraction {
-        changed,
-        cursor_char_index,
-        selected_char_range,
-        breakpoint_toggled,
-        response: None,
+        changed: output.changed,
+        cursor_char_index: output.cursor_char_index,
+        selected_char_range: output.selected_char_range,
+        breakpoint_toggled: output.breakpoint_toggled,
+        response: output.response,
         announcement,
+        unanswered_history: output.unanswered_history,
     }
 }
 
@@ -1170,15 +997,6 @@ mod tests {
         // A column past the line's end lands at its end.
         assert_eq!(char_index_at(source, 2, 40), caret_at(2, 9));
         assert_eq!(caret_place(source, caret_at(2, 6)), (2, 6));
-    }
-
-    #[test]
-    fn editor_geometry_matches_canonical_code_workspace() {
-        let frame = code_editor_frame();
-        assert_eq!(frame.inner_margin.left, 59);
-        assert_eq!(frame.inner_margin.right, 20);
-        assert_eq!(frame.inner_margin.top, 8);
-        assert_eq!(frame.inner_margin.bottom, 36);
     }
 
     #[test]

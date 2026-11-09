@@ -355,13 +355,14 @@ pub(crate) fn commit_source_search_replace(app: &mut RSpiceApp) -> Result<String
             "The current source bundle contains no matches to replace.".to_owned()
         });
     }
-    let changed_files = app
-        .state
-        .model
-        .workspace
-        .content
-        .replace_project_source_bundle_files_transactionally(search.bundle_id, replacements)
-        .map_err(|error| error.to_string())?;
+    let changed_files = {
+        let workbench = &mut app.state;
+        workbench.code.code_workspace.source_edit_history.replace(
+            &mut workbench.model.workspace.content,
+            search.bundle_id,
+            replacements,
+        )?
+    };
     match search.language {
         ProjectSourceLanguage::VerilogA => {
             super::veriloga::invalidate_veriloga_evidence(app, search.bundle_id);

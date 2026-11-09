@@ -832,8 +832,20 @@ fn code_pane(
             .source_selections
             .remove(&selection_key);
     }
-    if let Some(response) = interaction.response.as_ref() {
-        crate::workbench::chrome::title_bar::source_editor_context_menu(response, app);
+    crate::workbench::chrome::title_bar::source_editor_context_menu(&interaction.response, app);
+    if let Some(step) = interaction.unanswered_history {
+        let workbench = &mut app.state;
+        match workbench.code.code_workspace.source_edit_history.step(
+            &mut workbench.model.workspace.content,
+            bundle.id(),
+            step,
+        ) {
+            Ok(true) => {
+                crate::workbench::documents::code_workspace::invalidate_automation_evidence(app);
+            }
+            Ok(false) => {}
+            Err(error) => app.state.prompt(error),
+        }
     }
     if crate::workbench::documents::text_editor_commands::take_format_document_request(
         ui, editor_id,

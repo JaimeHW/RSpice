@@ -9,9 +9,9 @@ use crate::workbench::documents::code_workspace;
 use crate::workbench::documents::text_editor_commands::queue_caret_char_index;
 use crate::workbench::state::ConsolePage;
 
-const EDITOR: &str = "Verilog-A/AMS source editor";
+pub(super) const EDITOR: &str = "Verilog-A/AMS source editor";
 /// As the keyboard of a Windows or Linux desktop reports the key.
-const CTRL: Modifiers = Modifiers {
+pub(super) const CTRL: Modifiers = Modifiers {
     ctrl: true,
     command: true,
     ..Modifiers::NONE
@@ -22,14 +22,14 @@ const CTRL_SHIFT: Modifiers = Modifiers {
 };
 const NONE: Modifiers = Modifiers::NONE;
 
-fn op_amp() -> User {
+pub(super) fn op_amp() -> User {
     let (mut user, _, _) = new_device("opamp_bhv", "inp:in inn:in out:out vdd vss");
     super::super::veriloga_interface_tests::edit_source(&mut user.app, OPAMP);
     user.settle();
     user
 }
 
-fn source(user: &User) -> String {
+pub(super) fn source(user: &User) -> String {
     let selected = code_workspace::selected_veriloga_source(&user.app).expect("the open view");
     let path = selected.document().logical_path().to_owned();
     selected
@@ -40,7 +40,7 @@ fn source(user: &User) -> String {
 }
 
 /// The editor takes the keyboard, with the caret just after `text`.
-fn caret_after(user: &mut User, text: &str) {
+pub(super) fn caret_after(user: &mut User, text: &str) {
     let source = source(user);
     let end = source.find(text).expect("the text") + text.len();
     caret_at(user, source[..end].chars().count());
@@ -64,7 +64,7 @@ fn on_a_new_line(user: &mut User) {
     user.key(Key::Enter, NONE);
 }
 
-fn type_text(user: &mut User, text: &str) {
+pub(super) fn type_text(user: &mut User, text: &str) {
     user.frame(vec![Event::Text(text.to_owned())]);
     user.settle();
 }

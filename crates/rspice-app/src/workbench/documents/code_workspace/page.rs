@@ -788,6 +788,8 @@ pub struct CodeWorkspaceRuntimeState {
     pub source_import: Option<CodeSourceImportState>,
     pub source_search: Option<CodeSourceSearchState>,
     pub language_tools: Option<super::CodeLanguageToolsState>,
+    /// Format, Rename and Replace, each one step of the bundle it changed.
+    pub(crate) source_edit_history: super::source_edit_history::SourceEditHistory,
     /// Language index retained against the exact closure it was built from,
     /// so the source navigators can run every frame without re-parsing the
     /// bundle on each one.

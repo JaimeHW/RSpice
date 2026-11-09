@@ -11,6 +11,8 @@ use std::ops::Range;
 use ropey::Rope;
 
 const DEFAULT_HISTORY_LIMIT: usize = 512;
+/// Texts the owner's edits can leave behind and still come back to.
+const PARKED_HISTORY_LIMIT: usize = 64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TextEncoding {
@@ -75,6 +77,15 @@ struct HistoryEntry {
     after_selections: Vec<TextSelection>,
 }
 
+/// The history of a text the document's owner replaced, kept for the moment
+/// the owner takes that step back.
+#[derive(Debug, Clone)]
+struct ParkedHistory {
+    text: Rope,
+    undo: Vec<HistoryEntry>,
+    redo: Vec<HistoryEntry>,
+}
+
 #[derive(Debug, Clone, Copy)]
 struct FoldProjection {
     visible_start: usize,
@@ -93,6 +104,7 @@ pub(crate) struct TextDocumentModel {
     fold_projection: Vec<FoldProjection>,
     undo: Vec<HistoryEntry>,
     redo: Vec<HistoryEntry>,
+    parked: Vec<ParkedHistory>,
     history_limit: usize,
     revision: u64,
 }
@@ -119,6 +131,7 @@ impl TextDocumentModel {
             fold_projection: Vec::new(),
             undo: Vec::new(),
             redo: Vec::new(),
+            parked: Vec::new(),
             history_limit: DEFAULT_HISTORY_LIMIT,
             revision: 0,
         })
@@ -218,17 +231,37 @@ impl TextDocumentModel {
     /// Accept a source revision published by the application layer. External
     /// replacement is deliberately not added to the local undo stack: the
     /// project/document service owns undo and conflict semantics across that
-    /// boundary. Cursor locations are retained and clamped when possible.
+    /// boundary. The new text starts with no history of its own, and the
+    /// history of the text it replaced is kept: when the owner takes its step
+    /// back and that exact text returns, so do the edits made in it. Cursor
+    /// locations are retained and clamped when possible.
     pub fn synchronize_source(&mut self, source: &str) -> bool {
         if self.source_equals(source) {
             return false;
         }
-        self.text = Rope::from_str(source);
+        let left = ParkedHistory {
+            text: std::mem::replace(&mut self.text, Rope::from_str(source)),
+            undo: std::mem::take(&mut self.undo),
+            redo: std::mem::take(&mut self.redo),
+        };
+        if !left.undo.is_empty() || !left.redo.is_empty() {
+            self.parked.push(left);
+            if self.parked.len() > PARKED_HISTORY_LIMIT {
+                self.parked.remove(0);
+            }
+        }
+        if let Some(index) = self
+            .parked
+            .iter()
+            .rposition(|parked| parked.text == self.text)
+        {
+            let returned = self.parked.remove(index);
+            self.undo = returned.undo;
+            self.redo = returned.redo;
+        }
         self.preferred_newline = detect_preferred_newline(source);
         self.selections =
             normalize_selections(std::mem::take(&mut self.selections), self.text.len_chars());
-        self.undo.clear();
-        self.redo.clear();
         self.revision = self.revision.wrapping_add(1);
         self.prune_invalid_folds();
         true
@@ -876,6 +909,29 @@ mod tests {
         assert!(!model.undo());
         assert!(model.source_equals("new"));
         assert!(!model.synchronize_source("new"));
+    }
+
+    #[test]
+    fn an_owner_step_taken_back_returns_the_history_of_the_text_it_replaced() {
+        let mut model = TextDocumentModel::from_source("a");
+        model.set_selections(vec![TextSelection::caret(1)]);
+        model.insert_at_selections("b");
+        assert_eq!(model.to_source(), "ab");
+
+        // The owner formats the document: the new text has no history.
+        assert!(model.synchronize_source(
+            "a b
+"
+        ));
+        assert!(!model.undo());
+
+        // The owner undoes the format: the typing is undoable again, then
+        // redoable, and the format's text finds what it had in turn.
+        assert!(model.synchronize_source("ab"));
+        assert!(model.undo());
+        assert_eq!(model.to_source(), "a");
+        assert!(model.redo());
+        assert_eq!(model.to_source(), "ab");
     }
 
     #[test]

@@ -6,7 +6,6 @@
 
 use std::ops::Range;
 
-use egui::text::{CCursor, CCursorRange};
 use egui::{Id, Key, KeyboardShortcut, Modifiers, Ui};
 
 // The workbench session records which source editor a page shows.
@@ -70,66 +69,6 @@ impl ByteSelection {
 pub(crate) struct StructuralEditResult {
     pub changed: bool,
     pub selection: ByteSelection,
-}
-
-/// Apply a structural command the application queued for `editor_id`, or the
-/// editor's own Tab and Shift+Tab while it owns focus. Every other line
-/// command is an application command with a rebindable shortcut, so it
-/// arrives queued. Returns true only when source bytes changed.
-pub(crate) fn consume_structural_shortcut(
-    ui: &Ui,
-    editor_id: Id,
-    source: &mut String,
-    syntax: EditorSyntax,
-    editable: bool,
-) -> bool {
-    let queued = take_queued_structural_command(ui.ctx(), editor_id);
-    if queued.is_none() && !ui.ctx().memory(|memory| memory.has_focus(editor_id)) {
-        return false;
-    }
-    let command = queued.or_else(|| {
-        ui.ctx().input_mut(|input| {
-            if editable && input.consume_key(Modifiers::NONE, Key::Tab) {
-                Some(StructuralCommand::Indent)
-            } else if editable && input.consume_key(Modifiers::SHIFT, Key::Tab) {
-                Some(StructuralCommand::Outdent)
-            } else {
-                None
-            }
-        })
-    });
-    let Some(command) = command else {
-        return false;
-    };
-    if command.mutates_source() && !editable {
-        return false;
-    }
-    let mut state = egui::text_edit::TextEditState::load(ui.ctx(), editor_id).unwrap_or_default();
-    let char_range = state
-        .cursor
-        .char_range()
-        .unwrap_or_else(|| CCursorRange::one(CCursor::new(source.chars().count())));
-    let selection = ByteSelection {
-        anchor: char_to_byte(source, char_range.secondary.index.0),
-        cursor: char_to_byte(source, char_range.primary.index.0),
-    };
-    if command.mutates_source() {
-        let mut undoer = state.undoer();
-        undoer.add_undo(&(char_range, source.clone()));
-        state.set_undoer(undoer);
-    }
-    let result = apply_structural_command(source, selection, syntax, command);
-    let anchor = byte_to_char(source, result.selection.anchor);
-    let cursor = byte_to_char(source, result.selection.cursor);
-    state.cursor.set_char_range(Some(CCursorRange {
-        primary: CCursor::new(cursor),
-        secondary: CCursor::new(anchor),
-        h_pos: None,
-    }));
-    state.store(ui.ctx(), editor_id);
-    ui.ctx()
-        .memory_mut(|memory| memory.request_focus(editor_id));
-    result.changed
 }
 
 pub(crate) fn queue_structural_command(
@@ -201,98 +140,6 @@ pub(crate) fn queue_source_editor_request(
         SourceEditorRequest::RevealLine(line) => queue_reveal_line(context, editor_id, line),
     }
     context.request_repaint();
-}
-
-/// Consume a standard command queued by the application's Edit menu. Keyboard
-/// shortcuts remain owned by TextEdit itself.
-pub(crate) fn consume_standard_command(
-    ui: &Ui,
-    editor_id: Id,
-    source: &mut String,
-    editable: bool,
-) -> bool {
-    let command = take_queued_standard_command(ui.ctx(), editor_id);
-    let Some(command) = command else {
-        return false;
-    };
-    if command.mutates_source() && !editable {
-        return false;
-    }
-
-    let mut state = egui::text_edit::TextEditState::load(ui.ctx(), editor_id).unwrap_or_default();
-    let char_range = state
-        .cursor
-        .char_range()
-        .unwrap_or_else(|| CCursorRange::one(CCursor::new(source.chars().count())));
-    let mut changed = false;
-    match command {
-        StandardCommand::Undo | StandardCommand::Redo => {
-            let current = (char_range, source.clone());
-            let mut undoer = state.undoer();
-            let restored = if command == StandardCommand::Undo {
-                undoer.undo(&current).cloned()
-            } else {
-                undoer.redo(&current).cloned()
-            };
-            state.set_undoer(undoer);
-            if let Some((selection, restored_source)) = restored {
-                *source = restored_source;
-                state.cursor.set_char_range(Some(selection));
-                changed = true;
-            }
-        }
-        StandardCommand::Copy | StandardCommand::Cut => {
-            if !char_range.is_empty() {
-                ui.copy_text(char_range.slice_str(source).to_owned());
-                if command == StandardCommand::Cut {
-                    let sorted = char_range.as_sorted_char_range();
-                    let start = char_to_byte(source, sorted.start.0);
-                    let end = char_to_byte(source, sorted.end.0);
-                    let mut undoer = state.undoer();
-                    undoer.add_undo(&(char_range, source.clone()));
-                    state.set_undoer(undoer);
-                    source.replace_range(start..end, "");
-                    state
-                        .cursor
-                        .set_char_range(Some(CCursorRange::one(CCursor::new(sorted.start.0))));
-                    changed = true;
-                }
-            }
-        }
-        StandardCommand::Paste => {
-            ui.ctx()
-                .send_viewport_cmd(egui::ViewportCommand::RequestPaste);
-        }
-        StandardCommand::Delete => {
-            let sorted = char_range.as_sorted_char_range();
-            let start = char_to_byte(source, sorted.start.0);
-            let end = if char_range.is_empty() {
-                char_to_byte(source, sorted.start.0 + 1)
-            } else {
-                char_to_byte(source, sorted.end.0)
-            };
-            if start < end {
-                let mut undoer = state.undoer();
-                undoer.add_undo(&(char_range, source.clone()));
-                state.set_undoer(undoer);
-                source.replace_range(start..end, "");
-                state
-                    .cursor
-                    .set_char_range(Some(CCursorRange::one(CCursor::new(sorted.start.0))));
-                changed = true;
-            }
-        }
-        StandardCommand::SelectAll => {
-            state.cursor.set_char_range(Some(CCursorRange::two(
-                CCursor::new(0),
-                CCursor::new(source.chars().count()),
-            )));
-        }
-    }
-    state.store(ui.ctx(), editor_id);
-    ui.ctx()
-        .memory_mut(|memory| memory.request_focus(editor_id));
-    changed
 }
 
 pub(crate) fn queue_go_to_line(context: &egui::Context, editor_id: Id) {
@@ -881,19 +728,6 @@ fn shift_after(position: usize, edit_at: usize, delta: isize) -> usize {
     }
 }
 
-fn char_to_byte(source: &str, index: usize) -> usize {
-    source
-        .char_indices()
-        .nth(index)
-        .map_or(source.len(), |(byte, _)| byte)
-}
-
-fn byte_to_char(source: &str, byte: usize) -> usize {
-    source[..previous_char_boundary(source, byte.min(source.len()))]
-        .chars()
-        .count()
-}
-
 fn previous_char_boundary(source: &str, mut byte: usize) -> usize {
     while !source.is_char_boundary(byte) {
         byte -= 1;
@@ -1075,29 +909,5 @@ mod tests {
             accepted = show_go_to_line(ui, editor_id, source);
         });
         assert_eq!(accepted, Some(3));
-    }
-
-    #[test]
-    fn menu_cut_and_undo_share_the_text_edit_history() {
-        let context = egui::Context::default();
-        let editor_id = egui::Id::new("standard-command-test");
-        let mut source = "alpha beta".to_owned();
-        let _ = context.run_ui(Default::default(), |context| {
-            egui::CentralPanel::default().show(context, |ui| {
-                let mut state = egui::text_edit::TextEditState::default();
-                state
-                    .cursor
-                    .set_char_range(Some(CCursorRange::two(CCursor::new(0), CCursor::new(5))));
-                state.store(ui.ctx(), editor_id);
-
-                queue_standard_command(ui.ctx(), editor_id, StandardCommand::Cut);
-                assert!(consume_standard_command(ui, editor_id, &mut source, true));
-                assert_eq!(source, " beta");
-
-                queue_standard_command(ui.ctx(), editor_id, StandardCommand::Undo);
-                assert!(consume_standard_command(ui, editor_id, &mut source, true));
-                assert_eq!(source, "alpha beta");
-            });
-        });
     }
 }

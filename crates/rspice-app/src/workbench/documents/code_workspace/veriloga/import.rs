@@ -557,22 +557,14 @@ pub(crate) fn commit_veriloga_source_replacement(app: &mut RSpiceApp) -> Result<
             review.target.logical_path
         ));
     }
-    let changed = app
-        .state
-        .model
-        .workspace
-        .content
-        .project_sources
-        .replace_bundle_file_content(
-            review.target.bundle_id,
-            &review.target.logical_path,
-            review.contents,
-        )
-        .map_err(|error| error.to_string())?;
+    let workbench = &mut app.state;
+    let changed = workbench.code.code_workspace.source_edit_history.replace(
+        &mut workbench.model.workspace.content,
+        review.target.bundle_id,
+        vec![(review.target.logical_path.clone(), review.contents)],
+    )? > 0;
     if changed {
         invalidate_veriloga_evidence(app, review.target.bundle_id);
-    }
-    if changed {
         app.state.record(
             LogSeverity::Info,
             LogSource::Studio,

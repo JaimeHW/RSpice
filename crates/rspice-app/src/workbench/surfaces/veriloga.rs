@@ -354,9 +354,7 @@ fn source_editor(
         .inner;
     // A built-in header keeps the menu for reading: its writes are disabled
     // and its language group hidden through the editor published above.
-    if let Some(response) = interaction.response.as_ref() {
-        crate::workbench::chrome::title_bar::source_editor_context_menu(response, app);
-    }
+    crate::workbench::chrome::title_bar::source_editor_context_menu(&interaction.response, app);
     if let Some(announcement) = interaction.announcement.clone() {
         app.state.prompt(announcement);
     }
@@ -367,6 +365,20 @@ fn source_editor(
     // language-wide default: Find, Format and the language tools must act on
     // the cell view in front of the reader.
     let bundle_id = selected.bundle().id();
+    if let Some(step) = interaction.unanswered_history {
+        let workbench = &mut app.state;
+        match workbench.code.code_workspace.source_edit_history.step(
+            &mut workbench.model.workspace.content,
+            bundle_id,
+            step,
+        ) {
+            Ok(true) => crate::workbench::documents::code_workspace::invalidate_veriloga_evidence(
+                app, bundle_id,
+            ),
+            Ok(false) => {}
+            Err(error) => app.state.prompt(error),
+        }
+    }
     app.state.code.code_workspace.source_carets.insert(
         (bundle_id, active_path.to_owned()),
         interaction.cursor_char_index,
