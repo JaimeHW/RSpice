@@ -28,7 +28,7 @@ pub(crate) struct BuiltinModelsBrowser {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ProjectState {
     /// The Library page's built-in Verilog-A library.
-    pub builtin_models: BuiltinModelsBrowser,
+    pub builtin_models: Box<BuiltinModelsBrowser>,
     /// New Cell creation dialog
     pub new_cell_dialog: bool,
     /// New Cell name input
