@@ -81,6 +81,7 @@ SLICE_RULES = [
     (W + r"app/browser_history\.rs$", "shell"),
     (W + r"frame\.rs$", "shell"),
     (W + r"frame/dialog_order\.rs$", "shell"),
+    (W + r"system_contrast\.rs$", "shell"),
     # The four session aggregates and their init/serialization.
     (W + r"app_state\.rs$", "session"),
     (W + r"app_state/session\.rs$", "session"),
@@ -212,7 +213,7 @@ SLICE_RULES = [
     (W + r"diagnostic_routes", "shell"),
     # Documents and surfaces.
     (W + r"documents\.rs$", "framework"),
-    (W + r"documents/(code_workspace|text_document_model|text_editor_commands|virtual_text_editor|netlist_document)", "code"),
+    (W + r"documents/(code_workspace|editor_font|text_document_model|text_editor_commands|virtual_text_editor|netlist_document)", "code"),
     (W + r"documents/(model_editor|model_correlation)", "models"),
     (W + r"documents/result_document", "results"),
     (W + r"surfaces\.rs$", "framework"),
