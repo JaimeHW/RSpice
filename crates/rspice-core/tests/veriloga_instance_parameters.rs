@@ -688,8 +688,14 @@ fn a_parameter_array_takes_its_elements_from_the_instance_or_the_card() {
     );
     for (line, expected) in [
         ("X1 a 0 cardres pa=[1 2 3]", "pa"),
-        ("X1 a 0 cardres pa=2", "is an array and takes a value such as [1 2 3]"),
-        ("X1 a 0 cardres r=[1 2]", "is not an array and takes one value"),
+        (
+            "X1 a 0 cardres pa=2",
+            "is an array and takes a value such as [1 2 3]",
+        ),
+        (
+            "X1 a 0 cardres r=[1 2]",
+            "is not an array and takes one value",
+        ),
     ] {
         let deck = format!(
             "arrays\n.hdl \"{}\"\nV1 a 0 1\n{line}\n.end\n",
@@ -845,7 +851,10 @@ fn dc_sensitivity_covers_verilog_a_instance_and_card_parameters() {
             )
             .expect("sensitivity runs")
     };
-    let close = |what: &str, result: &rspice_core::analysis::SensitivityResult, row: &str, expected: f64| {
+    let close = |what: &str,
+                 result: &rspice_core::analysis::SensitivityResult,
+                 row: &str,
+                 expected: f64| {
         let actual = result
             .get(row)
             .unwrap_or_else(|| panic!("{what}: no row {row}: {result:?}"))

@@ -2658,14 +2658,12 @@ fn parse_digital_gate_ic_value(
         ParametricValue::Expression(expression) => Ok((None, Some(expression))),
         ParametricValue::String(_)
         | ParametricValue::StringExpression(_)
-        | ParametricValue::Array(_) => {
-            Err(ParseError::Syntax {
-                line: line_num,
-                message: format!(
-                    "{device_family} '{name}' IC parameter requires a numeric or logic-state value"
-                ),
-            })
-        }
+        | ParametricValue::Array(_) => Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "{device_family} '{name}' IC parameter requires a numeric or logic-state value"
+            ),
+        }),
     }
 }
 

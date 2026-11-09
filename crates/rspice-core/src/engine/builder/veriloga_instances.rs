@@ -358,8 +358,8 @@ pub(super) fn bind_instance_masters(
         else {
             continue;
         };
-        let card = super::find_model_def(netlist, subckt_name)
-            .filter(|card| answers(&card.model_type));
+        let card =
+            super::find_model_def(netlist, subckt_name).filter(|card| answers(&card.model_type));
         let master = card.map_or(subckt_name.as_str(), |card| card.model_type.as_str());
         let key = normalize_model_key(master);
         let group = groups.get(&key);

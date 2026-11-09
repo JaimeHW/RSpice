@@ -4880,11 +4880,9 @@ fn resolve_string_parametric_value(
                     expr
                 ))
             }),
-        ParametricValue::Resolved(_) | ParametricValue::Array(_) => {
-            Err(ParseError::InvalidValue(
-                "numeric parameter value cannot be used as a string value".to_string(),
-            ))
-        }
+        ParametricValue::Resolved(_) | ParametricValue::Array(_) => Err(ParseError::InvalidValue(
+            "numeric parameter value cannot be used as a string value".to_string(),
+        )),
     }
 }
 

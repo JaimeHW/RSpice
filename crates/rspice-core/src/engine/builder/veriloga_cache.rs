@@ -4128,8 +4128,7 @@ endmodule
         let source = root.join("defined.va");
         std::fs::write(&source, "`include \"disciplines.vams\"\nmodule defined(p,n); inout p,n; electrical p,n;\n`ifdef GAIN\nanalog I(p,n) <+ `GAIN*V(p,n);\n`else\nanalog I(p,n) <+ V(p,n);\n`endif\nendmodule\n").unwrap();
         let gain = |value: &str| {
-            DeckHdl::default()
-                .with_source_defines(&[("GAIN".to_owned(), Some(value.to_owned()))])
+            DeckHdl::default().with_source_defines(&[("GAIN".to_owned(), Some(value.to_owned()))])
         };
         assert_eq!(DeckHdl::default().defines_identity(), None);
         assert_ne!(gain("3").defines_identity(), gain("4").defines_identity());
@@ -4148,9 +4147,10 @@ endmodule
         assert!(paths[0] != paths[1] && paths[1] != paths[2] && paths[0] != paths[2]);
         let mut fingerprints = Vec::new();
         for (key, deck) in keys.iter().zip(&decks) {
-            let report = rspice_veriloga::VerilogACompiler::new(deck_include_compiler_options(deck))
-                .compile_file_runtime_with_metadata(&source, None)
-                .unwrap();
+            let report =
+                rspice_veriloga::VerilogACompiler::new(deck_include_compiler_options(deck))
+                    .compile_file_runtime_with_metadata(&source, None)
+                    .unwrap();
             let entry = CachedVerilogAModel {
                 dependencies: fingerprint_paths(&report.dependencies).unwrap(),
                 model: std::sync::Arc::new(report.model),
@@ -4177,8 +4177,11 @@ endmodule
             .unwrap()
             .expect("each set of macros finds its own record");
             assert_eq!(
-                &runtime_artifact_fingerprint(&entry.entry.model, entry.entry.canonical_ir.as_deref())
-                    .unwrap(),
+                &runtime_artifact_fingerprint(
+                    &entry.entry.model,
+                    entry.entry.canonical_ir.as_deref()
+                )
+                .unwrap(),
                 fingerprint
             );
         }
