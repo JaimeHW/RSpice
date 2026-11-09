@@ -880,7 +880,7 @@ mod tests {
                 .and_then(|declaration| declaration.range.as_ref())
                 .map(ParameterRange::source_text)
                 .as_deref(),
-            Some("from (0:vmax] exclude 1e-12")
+            Some("from (0:vmax] exclude 1p")
         );
         assert!(
             encode_veriloga_parameter_contract(&[CellParameter {
@@ -951,7 +951,7 @@ mod tests {
                 Vec::new()
             )
             .source_text(),
-            "from (-inf:2e6)"
+            "from (-inf:2M)"
         );
         let exclude_only = range(
             RangeBound::Unbounded,
