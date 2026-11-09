@@ -50,6 +50,12 @@ const fn chord(
 }
 
 const NONE: &[ShortcutBinding] = &[];
+// The build keys of Visual Studio and VS Code. A browser keeps Ctrl+Shift+B
+// for its bookmarks bar, so there F7 is the only one.
+const COMPILE_VERILOGA: &[ShortcutBinding] = &[
+    primary(chord(Key::F7, false, false, false, "F7"), ALL),
+    alternate(chord(Key::B, true, false, true, "Ctrl+Shift+B"), DESKTOP),
+];
 const OPEN_NETLIST: &[ShortcutBinding] = &[
     primary(chord(Key::L, true, false, true, "Ctrl+Shift+L"), DESKTOP),
     alternate(chord(Key::L, true, true, true, "Ctrl+Alt+Shift+L"), HOST),
@@ -379,6 +385,7 @@ impl Command {
                 | Self::StimulusPlaceDefinition
                 | Self::StimulusShowAdopter
                 | Self::CompileVerilogA
+                | Self::CancelVerilogACompile
                 | Self::VerilogABuildSettings
                 | Self::VerilogAOpenSymbol
                 | Self::AutomationConsole
@@ -578,6 +585,7 @@ impl Command {
             Self::StimulusApplyDraft => STIMULUS_APPLY_DRAFT,
             Self::OpenWorkspace(Workspace::Netlist) => AUTOMATION_WORKSPACE,
             Self::OpenNetlist => OPEN_NETLIST,
+            Self::CompileVerilogA => COMPILE_VERILOGA,
             Self::CloseActiveDocument => CLOSE_DOCUMENT,
             Self::Exit => EXIT,
             Self::Undo => UNDO,
@@ -904,6 +912,7 @@ impl Command {
             }
             Self::NewVerilogADevice => "no library can be written",
             Self::CompileVerilogA => super::code_context::veriloga_compile_refusal(app),
+            Self::CancelVerilogACompile => "no Verilog-A compile is running",
             Self::StimulusNewDefinition | Self::StimulusValidateLibrary => {
                 "open the Stimulus Library"
             }

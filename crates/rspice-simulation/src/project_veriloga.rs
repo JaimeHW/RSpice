@@ -2,7 +2,9 @@
 
 use rspice_design::project_sources::{ProjectSourceBundle, ProjectSourceRole};
 use rspice_veriloga::canonical_ir::digital::DigitalDelaySelect;
-use rspice_veriloga::{ExternalCell, RuntimeCompileReport, VerilogACompiler};
+use rspice_veriloga::{
+    ExternalCell, NoPipelineControl, PipelineControl, RuntimeCompileReport, VerilogACompiler,
+};
 use sha2::{Digest as _, Sha256};
 
 use crate::veriloga::{PreparedRuntimeError, PreparedVerilogARuntime, PreparedVerilogARuntimeSet};
@@ -37,6 +39,24 @@ pub fn compile_project_bundle_source_against(
     cells: Option<&[ExternalCell]>,
     delay_select: DigitalDelaySelect,
 ) -> Result<Box<RuntimeCompileReport>, ProjectVerilogACompileError> {
+    compile_project_bundle_source_with_control(
+        bundle,
+        selected_module,
+        cells,
+        delay_select,
+        &NoPipelineControl,
+    )
+}
+
+/// As [`compile_project_bundle_source_against`], and stopped between its
+/// steps by `control`.
+pub fn compile_project_bundle_source_with_control(
+    bundle: &ProjectSourceBundle,
+    selected_module: Option<&str>,
+    cells: Option<&[ExternalCell]>,
+    delay_select: DigitalDelaySelect,
+    control: &dyn PipelineControl,
+) -> Result<Box<RuntimeCompileReport>, ProjectVerilogACompileError> {
     let resolved = build_profile::resolve_veriloga_build_profile(bundle)
         .map_err(ProjectVerilogACompileError::BuildProfile)?;
     let compiler = VerilogACompiler::new(rspice_veriloga::CompilerOptions {
@@ -61,12 +81,20 @@ pub fn compile_project_bundle_source_against(
         let bundle =
             build_profile::project_bundle_as_virtual_with_profile(bundle, &resolved.profile)
                 .map_err(ProjectVerilogACompileError::SourceClosure)?;
-        return match compiler.compile_virtual_runtime_diagnosed_with_qualifications(
-            &bundle,
-            module_name,
-            project_virtual_compile_limits(),
-            qualifications,
-        ) {
+        let compiled = compiler
+            .prepare_virtual_runtime_source_with_control(
+                &bundle,
+                project_virtual_compile_limits(),
+                control,
+            )
+            .and_then(|prepared| {
+                prepared.compile_runtime_with_qualifications_and_control(
+                    module_name,
+                    qualifications,
+                    control,
+                )
+            });
+        return match compiled {
             Ok(compilation) => successful_compile_outcome(compilation.runtime, &resolved.profile),
             Err(failure) => Err(ProjectVerilogACompileError::Virtual(Box::new(failure))),
         };
@@ -74,7 +102,12 @@ pub fn compile_project_bundle_source_against(
     if has_source_dependencies || resolved.profile.entry_modules.len() > 1 {
         return Err(ProjectVerilogACompileError::RootModuleRequired);
     }
-    match compiler.compile_runtime_with_qualifications(source, None, qualifications) {
+    match compiler.compile_runtime_with_qualifications_and_control(
+        source,
+        None,
+        qualifications,
+        control,
+    ) {
         Ok(report) => successful_compile_outcome(report, &resolved.profile),
         Err(error) => Err(ProjectVerilogACompileError::Compile(Box::new(error))),
     }

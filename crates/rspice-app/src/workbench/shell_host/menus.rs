@@ -427,6 +427,7 @@ const DESIGN_MENU: &[MenuEntry] = &[
         &[
             Separator,
             command(Command::CompileVerilogA).access('M'),
+            command(Command::CancelVerilogACompile),
             command(Command::VerilogABuildSettings).access('B'),
         ],
     ),
@@ -877,6 +878,7 @@ pub(in crate::workbench) fn command_icon(command: Command) -> Option<WorkbenchIc
         Command::SymbolSave => WorkbenchIcon::Save,
         // The Models toolbar's button; the Verilog-A view's wears Run.
         Command::CompileVerilogA => WorkbenchIcon::Netlist,
+        Command::CancelVerilogACompile => WorkbenchIcon::Stop,
         Command::RotateSelection => WorkbenchIcon::Rotate,
         Command::MirrorSelectionHorizontal => WorkbenchIcon::Mirror,
         Command::MirrorSelectionVertical => WorkbenchIcon::MirrorVertical,

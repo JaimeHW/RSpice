@@ -105,12 +105,12 @@ pub(super) fn compile_and_publish(app: &mut RSpiceApp) {
             (**receipt.compilation.report()).clone(),
         )))
         .expect("the channel is open");
-    app.state.code.code_workspace.veriloga.pending = Some(PendingVerilogACompile {
-        token: receipt.compilation.token(),
-        receiver: Arc::new(Mutex::new(receiver)),
-        cells: None,
-        delay_select: Default::default(),
-    });
+    app.state.code.code_workspace.veriloga.pending = Some(PendingVerilogACompile::new(
+        receipt.compilation.token(),
+        receiver,
+        None,
+        Default::default(),
+    ));
     code_workspace::poll_veriloga_compile(app);
     assert!(
         app.state.code.code_workspace.veriloga.receipt.is_some(),

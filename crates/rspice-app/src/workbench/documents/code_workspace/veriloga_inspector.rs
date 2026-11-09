@@ -94,15 +94,36 @@ pub(crate) fn veriloga_compile_status(
     selected: &SelectedVerilogASource,
     messages: MessageCatalog,
 ) -> Option<(String, Option<Problem>)> {
-    if state.pending.is_some() {
-        return Some((messages.text(MessageId::VerilogAStatusCompiling), None));
+    if let Some(pending) = &state.pending {
+        let elapsed = super::veriloga::compile_time_text(pending.started.elapsed(), false);
+        return Some((
+            messages.format(MessageId::VerilogAStatusCompiling, &[("elapsed", &elapsed)]),
+            None,
+        ));
     }
+    if state.compile_discarded {
+        return Some((
+            messages.text(MessageId::VerilogAStatusResultDiscarded),
+            None,
+        ));
+    }
+    let duration = state
+        .last_compile_duration
+        .filter(|(token, _)| selected.matches_token(project_id, *token))
+        .map(|(_, duration)| super::veriloga::compile_time_text(duration, true));
+    let timed = |status: String| match &duration {
+        Some(duration) => messages.format(
+            MessageId::VerilogAStatusTimed,
+            &[("status", &status), ("duration", duration)],
+        ),
+        None => status,
+    };
     let failed = state
         .last_failure_token
         .is_some_and(|token| selected.matches_token(project_id, token));
     match veriloga_receipt(state, project_id, selected) {
         None if failed => Some((
-            messages.text(MessageId::VerilogAStatusFailed),
+            timed(messages.text(MessageId::VerilogAStatusFailed)),
             Some(Problem::Failure),
         )),
         None => Some((messages.text(MessageId::VerilogAStatusModified), None)),
@@ -111,26 +132,31 @@ pub(crate) fn veriloga_compile_status(
             interface: Some(VerilogAInterfaceOutcome::SchematicMismatch { .. }),
             ..
         }) => Some((
-            messages.text(MessageId::VerilogAStatusPortsDiffer),
+            timed(messages.text(MessageId::VerilogAStatusPortsDiffer)),
             Some(Problem::Failure),
         )),
         Some(receipt) => {
             let summary = receipt.diagnostics.summary();
             match summary.total().saturating_sub(summary.errors) {
-                // A clean compile is the state the reader expects. Saying so
-                // is a success report, so the strip says nothing instead.
-                0 => None,
+                // A clean compile is the state the reader expects, so the
+                // strip says only how long it took.
+                0 => duration.is_some().then(|| {
+                    (
+                        timed(messages.text(MessageId::VerilogAStatusCompiled)),
+                        None,
+                    )
+                }),
                 advisories => {
                     let count = advisories.to_string();
                     Some((
-                        messages.format(
+                        timed(messages.format(
                             if advisories == 1 {
                                 MessageId::VerilogAStatusPassAdvisorySingular
                             } else {
                                 MessageId::VerilogAStatusPassAdvisories
                             },
                             &[("count", &count)],
-                        ),
+                        )),
                         // Information is advice, not a warning.
                         (summary.warnings > 0).then_some(Problem::Warning),
                     ))

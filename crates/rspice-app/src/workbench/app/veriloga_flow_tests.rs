@@ -892,7 +892,15 @@ fn a_reviewed_op_amp_compiles_clean_and_each_of_its_errors_is_reached_where_it_w
             user.app.state.model.workspace.content.project.id(),
             &selected,
             user.app.state.workbench.messages(),
-        ),
+        )
+        .map(|(status, problem)| (
+            status
+                .split(" · ")
+                .next()
+                .expect("a status has text")
+                .to_owned(),
+            problem
+        )),
         Some(("1 advisory".to_owned(), None)),
         "advice is not a warning"
     );
@@ -1379,5 +1387,6 @@ fn a_builtin_model_copied_from_the_library_page_compiles_and_places() {
     assert_eq!(placed, 1, "the copy places once");
 }
 
+mod compile_controls;
 mod editing;
 mod language_tools;

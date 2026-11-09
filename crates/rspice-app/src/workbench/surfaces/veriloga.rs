@@ -214,6 +214,11 @@ fn source_editor(
     );
     let messages = app.state.workbench.messages();
     let toolbar_content_right = toolbar.right() - EDITOR_SCROLLBAR_INSET;
+    if app.state.code.code_workspace.veriloga.pending.is_some() {
+        // The strip counts the seconds of a running compile.
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(250));
+    }
     // Neutral text, and a mark only where the reader has to act. A clean
     // compile leaves the corner empty and gives the whole row to the path.
     let status_left = crate::workbench::documents::code_workspace::veriloga_compile_status(

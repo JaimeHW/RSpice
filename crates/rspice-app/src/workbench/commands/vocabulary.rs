@@ -252,6 +252,7 @@ pub enum Command {
     StimulusPlaceDefinition,
     StimulusShowAdopter,
     CompileVerilogA,
+    CancelVerilogACompile,
     VerilogABuildSettings,
     VerilogAOpenSymbol,
     AutomationConsole,
@@ -702,6 +703,9 @@ impl Command {
                 "Stimulus",
             ),
             Self::CompileVerilogA => spec("veriloga", "Compile Verilog-A/AMS", "Design"),
+            Self::CancelVerilogACompile => {
+                spec("veriloga-cancel", "Cancel Verilog-A/AMS compile", "Design")
+            }
             Self::VerilogABuildSettings => spec(
                 "veriloga-build-settings",
                 "Build settings\u{2026}",
@@ -949,6 +953,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::StimulusPlaceDefinition,
     Command::StimulusShowAdopter,
     Command::CompileVerilogA,
+    Command::CancelVerilogACompile,
     Command::VerilogABuildSettings,
     Command::VerilogAOpenSymbol,
     Command::AutomationConsole,
@@ -1274,6 +1279,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     Command::StimulusPlaceDefinition.key(),
     Command::StimulusShowAdopter.key(),
     Command::CompileVerilogA.key(),
+    Command::CancelVerilogACompile.key(),
     Command::VerilogABuildSettings.key(),
     Command::VerilogAOpenSymbol.key(),
     Command::AutomationConsole.key(),

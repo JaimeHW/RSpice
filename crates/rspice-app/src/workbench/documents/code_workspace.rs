@@ -57,7 +57,7 @@ pub use page::{
     AutomationRuntimeLaunchMode, AutomationValidationReceipt, AutomationWatch,
     CodeSourceFileDialogState, CodeSourceHistoryState, CodeSourceImportState,
     CodeSourceSearchScope, CodeSourceSearchState, CodeSourceWorkspaceDialogState,
-    CodeWorkspaceRuntimeState, PendingVerilogACompile, SourceOperationToken,
+    CodeWorkspaceRuntimeState, CompileCancellation, PendingVerilogACompile, SourceOperationToken,
     VerilogACompileOutcome, VerilogAFileSelection, VerilogAImportFormState, VerilogAReplaceReview,
     VerilogAReplaceTarget,
 };
@@ -79,13 +79,13 @@ pub(crate) use source_search::{
     source_search_query_id, source_search_results,
 };
 pub(crate) use veriloga::{
-    PickedSource, SelectedVerilogASource, active_veriloga_file_path, close_veriloga_import_form,
-    commit_veriloga_source_replacement, compile_project_bundle_virtual_for_provenance,
-    import_dropped_veriloga_sources, invalidate_veriloga_evidence, replace_selected_veriloga_file,
-    request_veriloga_add_files, request_veriloga_compile, request_veriloga_import_locate,
-    request_veriloga_source_replacement, selected_veriloga_editor_snapshot,
-    selected_veriloga_source, viewed_veriloga_header, writable_libraries,
-    write_veriloga_build_profile,
+    PickedSource, SelectedVerilogASource, active_veriloga_file_path, cancel_veriloga_compile,
+    close_veriloga_import_form, commit_veriloga_source_replacement,
+    compile_project_bundle_virtual_for_provenance, import_dropped_veriloga_sources,
+    invalidate_veriloga_evidence, replace_selected_veriloga_file, request_veriloga_add_files,
+    request_veriloga_compile, request_veriloga_import_locate, request_veriloga_source_replacement,
+    selected_veriloga_editor_snapshot, selected_veriloga_source, viewed_veriloga_header,
+    writable_libraries, write_veriloga_build_profile,
 };
 #[cfg(test)]
 pub(crate) use veriloga::{complete_veriloga_file_pick, complete_veriloga_files_pick};

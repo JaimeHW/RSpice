@@ -27,14 +27,26 @@ pub(in crate::workbench) fn veriloga_tools(
     app: &mut RSpiceApp,
     layout: LayoutSpec,
 ) {
-    toolbar_text_command(
-        ui,
-        app,
-        Command::CompileVerilogA.key(),
-        WorkbenchIcon::Run,
-        "Compile Verilog-A/AMS module",
-        layout,
-    );
+    // The control is Cancel until the compile finishes, as Run is Stop.
+    if app.state.code.code_workspace.veriloga.pending.is_some() {
+        toolbar_text_command(
+            ui,
+            app,
+            Command::CancelVerilogACompile.key(),
+            WorkbenchIcon::Stop,
+            "Cancel Verilog-A/AMS compile",
+            layout,
+        );
+    } else {
+        toolbar_text_command(
+            ui,
+            app,
+            Command::CompileVerilogA.key(),
+            WorkbenchIcon::Run,
+            "Compile Verilog-A/AMS module",
+            layout,
+        );
+    }
     generated_netlist_tool(ui, app, layout);
     toolbar_text_command(
         ui,

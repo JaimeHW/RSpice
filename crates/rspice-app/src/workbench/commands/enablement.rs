@@ -498,6 +498,9 @@ impl Command {
             // read-only project -- and then the surface refused the request it
             // had just been handed.
             Self::CompileVerilogA => code_context::resolve_veriloga_compile(app).is_some(),
+            Self::CancelVerilogACompile => {
+                app.state.code.code_workspace.veriloga.pending.is_some()
+            }
             // Build settings opens on a read-only project too, to be read;
             // its Save is what that refuses.
             Self::VerilogABuildSettings => {

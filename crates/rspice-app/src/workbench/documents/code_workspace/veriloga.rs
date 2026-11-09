@@ -4,6 +4,7 @@
 #![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
 
 use std::sync::{Arc, Mutex, mpsc};
+use std::time::Duration;
 
 use rspice_veriloga::{
     RuntimeCompileReport, RuntimeTargetMaturity, RuntimeTargetReadiness, VirtualRuntimeCompilation,
@@ -438,14 +439,14 @@ fn start_veriloga_compile(
         .map_or_else(Default::default, |(_, delay_select)| *delay_select);
     let cells = deck.map(|(cells, _)| Arc::<[_]>::from(cells));
     let (sender, receiver) = mpsc::channel();
-    Arc::make_mut(&mut app.state.code.code_workspace.veriloga.last_failure).clear();
-    app.state.code.code_workspace.veriloga.last_failure_token = None;
-    app.state.code.code_workspace.veriloga.pending = Some(PendingVerilogACompile {
-        token,
-        receiver: Arc::new(Mutex::new(receiver)),
-        cells: cells.clone(),
-        delay_select,
-    });
+    let pending = PendingVerilogACompile::new(token, receiver, cells.clone(), delay_select);
+    let cancellation = pending.cancellation.clone();
+    let veriloga = &mut app.state.code.code_workspace.veriloga;
+    Arc::make_mut(&mut veriloga.last_failure).clear();
+    veriloga.last_failure_token = None;
+    veriloga.compile_discarded = false;
+    veriloga.compile_discard_unannounced = false;
+    veriloga.pending = Some(pending);
 
     let wake = repaint.clone();
     if let Err(error) = rspice_simulation::project_veriloga::compile_service::start_compile(
@@ -453,6 +454,7 @@ fn start_veriloga_compile(
         selected.selected_module,
         cells,
         delay_select,
+        cancellation,
         sender.clone(),
         move || wake.request_repaint(),
     ) {
@@ -463,13 +465,32 @@ fn start_veriloga_compile(
     }
 }
 
-/// Cancel transient compile work before source/module identity is replaced.
-/// Native work is detached exactly as before; browser work is also terminated
-/// so abandoned compilation cannot consume CPU or block the next request.
+/// Stop the running compile at the reader's request. The source keeps the
+/// standing it had: what the last finished compile proved is still proved.
 pub(crate) fn cancel_veriloga_compile(app: &mut RSpiceApp) {
-    #[cfg(target_arch = "wasm32")]
-    rspice_simulation::project_veriloga::compile_service::cancel_compile();
-    app.state.code.code_workspace.veriloga.pending = None;
+    let Some(pending) = app.state.code.code_workspace.veriloga.pending.take() else {
+        return;
+    };
+    pending.cancellation.cancel();
+    let cancelled = app
+        .state
+        .workbench
+        .messages()
+        .text(MessageId::VerilogACompileCancelledAnnouncement);
+    app.state.workbench.prompt(cancelled);
+}
+
+/// Time as the compile status gives it: whole seconds while the count runs,
+/// tenths once it is the duration of something finished.
+pub(crate) fn compile_time_text(elapsed: Duration, tenths: bool) -> String {
+    let seconds = elapsed.as_secs();
+    if seconds >= 60 {
+        format!("{} min {:02} s", seconds / 60, seconds % 60)
+    } else if tenths {
+        format!("{:.1} s", elapsed.as_secs_f64())
+    } else {
+        format!("{seconds} s")
+    }
 }
 
 /// Start the compile a Compile command asked for.
@@ -496,6 +517,21 @@ pub fn consume_veriloga_compile_request(app: &mut RSpiceApp, repaint: &egui::Con
 /// The frame loop runs this every frame, so a result is published whether or
 /// not an editor host is on screen when it lands.
 pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
+    if std::mem::take(
+        &mut app
+            .state
+            .code
+            .code_workspace
+            .veriloga
+            .compile_discard_unannounced,
+    ) {
+        let discarded = app
+            .state
+            .workbench
+            .messages()
+            .text(MessageId::VerilogACompileDiscardedAnnouncement);
+        app.state.workbench.prompt(discarded);
+    }
     let Some(pending) = app.state.code.code_workspace.veriloga.pending.clone() else {
         return;
     };
@@ -511,7 +547,8 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
     let Some(received) = received else {
         return;
     };
-    cancel_veriloga_compile(app);
+    let duration = pending.started.elapsed();
+    app.state.code.code_workspace.veriloga.pending = None;
 
     let is_current = selected_veriloga_source(app).is_ok_and(|selected| {
         selected.matches_token(
@@ -524,8 +561,14 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
         // result is rejected because its source/module contract changed, an
         // older receipt must not remain as apparently current evidence.
         app.state.code.code_workspace.veriloga.receipt = None;
+        app.state
+            .code
+            .code_workspace
+            .veriloga
+            .note_compile_discarded();
         return;
     }
+    app.state.code.code_workspace.veriloga.last_compile_duration = Some((pending.token, duration));
 
     match received {
         Ok(VerilogACompileOutcome::Success(report)) => {
@@ -640,8 +683,9 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                         LogSeverity::Info,
                         LogSource::Studio,
                         format!(
-                            "Compiled Verilog-A module {} for every qualified runtime target.",
-                            report.abi.module_name
+                            "Compiled Verilog-A module {} for every qualified runtime target in {}.",
+                            report.abi.module_name,
+                            compile_time_text(duration, true),
                         ),
                     );
                     announce_compiled(
@@ -1564,12 +1608,12 @@ mod tests {
                 (**receipt.compilation.report()).clone(),
             )))
             .unwrap();
-        app.state.code.code_workspace.veriloga.pending = Some(PendingVerilogACompile {
-            token: receipt.compilation.token(),
-            receiver: Arc::new(Mutex::new(receiver)),
-            cells: None,
-            delay_select: Default::default(),
-        });
+        app.state.code.code_workspace.veriloga.pending = Some(PendingVerilogACompile::new(
+            receipt.compilation.token(),
+            receiver,
+            None,
+            Default::default(),
+        ));
 
         poll_veriloga_compile(&mut app);
 
@@ -1673,12 +1717,12 @@ mod tests {
                 (**receipt.compilation.report()).clone(),
             )))
             .unwrap();
-        app.state.code.code_workspace.veriloga.pending = Some(PendingVerilogACompile {
-            token: receipt.compilation.token(),
-            receiver: Arc::new(Mutex::new(receiver)),
-            cells: None,
-            delay_select: Default::default(),
-        });
+        app.state.code.code_workspace.veriloga.pending = Some(PendingVerilogACompile::new(
+            receipt.compilation.token(),
+            receiver,
+            None,
+            Default::default(),
+        ));
         poll_veriloga_compile(&mut app);
 
         // Problems lists every diagnostic of the published receipt.
@@ -1725,12 +1769,12 @@ mod tests {
             )))
             .unwrap();
         app.state.code.code_workspace.veriloga.receipt = None;
-        app.state.code.code_workspace.veriloga.pending = Some(PendingVerilogACompile {
-            token: receipt.compilation.token(),
-            receiver: Arc::new(Mutex::new(receiver)),
-            cells: None,
-            delay_select: Default::default(),
-        });
+        app.state.code.code_workspace.veriloga.pending = Some(PendingVerilogACompile::new(
+            receipt.compilation.token(),
+            receiver,
+            None,
+            Default::default(),
+        ));
         app.state
             .model
             .workspace
@@ -1768,12 +1812,12 @@ mod tests {
                 (**receipt.compilation.report()).clone(),
             )))
             .unwrap();
-        app.state.code.code_workspace.veriloga.pending = Some(PendingVerilogACompile {
-            token: receipt.compilation.token(),
-            receiver: Arc::new(Mutex::new(receiver)),
-            cells: None,
-            delay_select: Default::default(),
-        });
+        app.state.code.code_workspace.veriloga.pending = Some(PendingVerilogACompile::new(
+            receipt.compilation.token(),
+            receiver,
+            None,
+            Default::default(),
+        ));
         app.state
             .model
             .library_manager
@@ -1816,12 +1860,12 @@ mod tests {
         assert!(matches!(outcome, VerilogACompileOutcome::Success(_)));
         let (sender, receiver) = mpsc::channel();
         sender.send(outcome).unwrap();
-        app.state.code.code_workspace.veriloga.pending = Some(PendingVerilogACompile {
-            token: selected.token(app.state.model.workspace.content.project.id()),
-            receiver: Arc::new(Mutex::new(receiver)),
-            cells: None,
-            delay_select: DigitalDelaySelect::Min,
-        });
+        app.state.code.code_workspace.veriloga.pending = Some(PendingVerilogACompile::new(
+            selected.token(app.state.model.workspace.content.project.id()),
+            receiver,
+            None,
+            DigitalDelaySelect::Min,
+        ));
 
         poll_veriloga_compile(&mut app);
 

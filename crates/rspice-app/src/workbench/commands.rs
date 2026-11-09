@@ -412,6 +412,7 @@ impl Command {
             | Self::RenameSymbol
             | Self::CompareGeneratedRevisions
             | Self::CompileVerilogA
+            | Self::CancelVerilogACompile
             | Self::VerilogABuildSettings
             | Self::VerilogAOpenSymbol
             | Self::AutomationConsole => CommandOwner::Code,
@@ -1238,6 +1239,9 @@ impl Command {
                 {
                     app.state.prompt(error);
                 }
+            }
+            Self::CancelVerilogACompile => {
+                crate::workbench::documents::code_workspace::cancel_veriloga_compile(app);
             }
             Self::VerilogABuildSettings => {
                 activate_workspace(app, Workspace::Design);

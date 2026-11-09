@@ -518,12 +518,12 @@ fn a_compile_from_design_starts_without_a_dialog_and_is_published_while_design_i
             (**receipt.compilation.report()).clone(),
         )))
         .unwrap();
-    app.state.code.code_workspace.veriloga.pending = Some(PendingVerilogACompile {
-        token: receipt.compilation.token(),
-        receiver: Arc::new(Mutex::new(receiver)),
-        cells: None,
-        delay_select: Default::default(),
-    });
+    app.state.code.code_workspace.veriloga.pending = Some(PendingVerilogACompile::new(
+        receipt.compilation.token(),
+        receiver,
+        None,
+        Default::default(),
+    ));
     frame(&ctx, &mut app, DESKTOP);
 
     assert!(app.state.code.code_workspace.veriloga.pending.is_none());
@@ -710,7 +710,7 @@ fn a_closure_edited_after_the_click_compiles_to_a_stale_result() {
     .expect("an edited source has something to say");
     assert_eq!(
         status,
-        messages.text(crate::workbench::MessageId::VerilogAStatusModified)
+        messages.text(crate::workbench::MessageId::VerilogAStatusResultDiscarded)
     );
     // Edited-since-the-last-compile is where the source is, not something
     // wrong with it.

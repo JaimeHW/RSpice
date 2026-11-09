@@ -16,11 +16,11 @@ pub(super) const CTRL: Modifiers = Modifiers {
     command: true,
     ..Modifiers::NONE
 };
-const CTRL_SHIFT: Modifiers = Modifiers {
+pub(super) const CTRL_SHIFT: Modifiers = Modifiers {
     shift: true,
     ..CTRL
 };
-const NONE: Modifiers = Modifiers::NONE;
+pub(super) const NONE: Modifiers = Modifiers::NONE;
 
 pub(super) fn op_amp() -> User {
     let (mut user, _, _) = new_device("opamp_bhv", "inp:in inn:in out:out vdd vss");

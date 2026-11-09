@@ -132,6 +132,26 @@ pub struct PendingVerilogACompile {
     /// The min:typ:max selection the design is compiled under, which its
     /// receipt names.
     pub delay_select: rspice_veriloga::canonical_ir::digital::DigitalDelaySelect,
+    pub started: web_time::Instant,
+    pub cancellation: CompileCancellation,
+}
+
+impl PendingVerilogACompile {
+    pub fn new(
+        token: VerilogASourceOperationToken,
+        receiver: mpsc::Receiver<VerilogACompileOutcome>,
+        cells: Option<Arc<[rspice_veriloga::ExternalCell]>>,
+        delay_select: rspice_veriloga::canonical_ir::digital::DigitalDelaySelect,
+    ) -> Self {
+        Self {
+            token,
+            receiver: Arc::new(Mutex::new(receiver)),
+            cells,
+            delay_select,
+            started: web_time::Instant::now(),
+            cancellation: CompileCancellation::default(),
+        }
+    }
 }
 
 impl Clone for PendingVerilogACompile {
@@ -141,11 +161,15 @@ impl Clone for PendingVerilogACompile {
             receiver: Arc::clone(&self.receiver),
             cells: self.cells.clone(),
             delay_select: self.delay_select,
+            started: self.started,
+            cancellation: self.cancellation.clone(),
         }
     }
 }
 
-pub use rspice_simulation::project_veriloga::compile_service::VerilogACompileOutcome;
+pub use rspice_simulation::project_veriloga::compile_service::{
+    CompileCancellation, VerilogACompileOutcome,
+};
 
 #[derive(Debug, Clone, Default)]
 pub struct VerilogAWorkbenchState {
@@ -179,6 +203,13 @@ pub struct VerilogAWorkbenchState {
     pub receipt: Option<VerilogACompileReceipt>,
     pub last_failure: Arc<crate::state::code_diagnostics::CodeDiagnosticCollection>,
     pub last_failure_token: Option<VerilogASourceOperationToken>,
+    /// How long the last finished compile took, and of which source.
+    pub last_compile_duration: Option<(VerilogASourceOperationToken, std::time::Duration)>,
+    /// A compile's result was thrown away because the source moved on while
+    /// it ran. Stands until the next compile starts.
+    pub compile_discarded: bool,
+    /// The status bar has yet to say so.
+    pub compile_discard_unannounced: bool,
     /// Where the open view's cell symbol stands against its interface.
     pub symbol_standing: super::veriloga_interface::VerilogASymbolStanding,
     /// Devices New Verilog-A device… created whose module the reader has not
@@ -215,16 +246,23 @@ pub struct RunningVerilogACheck {
 
 impl VerilogAWorkbenchState {
     /// Drop what the last compile proved, and stop a compile still running:
-    /// the source either was of is not the source any more. Browser work is
-    /// terminated too, so an abandoned compile never holds the next one up.
+    /// the source either was of is not the source any more. The stopped work
+    /// never holds the next compile up, and the reader is told it is gone.
     pub(crate) fn void_evidence(&mut self) {
-        #[cfg(target_arch = "wasm32")]
-        rspice_simulation::project_veriloga::compile_service::cancel_compile();
-        self.pending = None;
+        if let Some(pending) = self.pending.take() {
+            pending.cancellation.cancel();
+            self.note_compile_discarded();
+        }
         self.receipt = None;
         Arc::make_mut(&mut self.last_failure).clear();
         self.last_failure_token = None;
+        self.last_compile_duration = None;
         self.live_check = VerilogALiveCheck::default();
+    }
+
+    pub(crate) fn note_compile_discarded(&mut self) {
+        self.compile_discarded = true;
+        self.compile_discard_unannounced = true;
     }
 }
 
