@@ -46,11 +46,39 @@ pub fn execute(
         options.include_paths.push(parent.to_path_buf());
     }
 
+    // Preprocessor macros, as a project's build settings give them.
+    for name in &args.undefines {
+        options.undefines.push(macro_name(name, "-U")?.to_owned());
+    }
+    for definition in &args.defines {
+        let (name, value) = match definition.split_once('=') {
+            Some((name, value)) => (name, Some(value.to_owned())),
+            None => (definition.as_str(), None),
+        };
+        options
+            .defines
+            .push((macro_name(name, "-D")?.to_owned(), value));
+    }
+
     if verbose && !quiet {
         crate::console::line(format_args!("Verilog-A Compiler Options:"))?;
         crate::console::line(format_args!("  Include paths: {:?}", options.include_paths))?;
+        crate::console::line(format_args!("  Defines: {:?}", options.defines))?;
+        crate::console::line(format_args!("  Undefines: {:?}", options.undefines))?;
         crate::console::line(format_args!(""))?;
     }
+    // The usage example's source line carries the same macros, as `define=`.
+    let usage_defines: String = options
+        .defines
+        .iter()
+        .map(|(name, value)| {
+            let definition = match value {
+                Some(value) => format!("{name}={value}"),
+                None => name.clone(),
+            };
+            format!(" define={}", quote_netlist_token(&definition))
+        })
+        .collect();
 
     // Compile the model
     if !quiet {
@@ -224,9 +252,10 @@ pub fn execute(
         crate::console::line(format_args!(""))?;
         crate::console::line(format_args!("Usage in SPICE netlist:"))?;
         crate::console::line(format_args!(
-            "  .va {} module={}",
+            "  .va {} module={}{}",
             source,
-            quote_netlist_token(&model.name)
+            quote_netlist_token(&model.name),
+            usage_defines
         ))?;
         crate::console::line(format_args!(
             "  X1 {} {}{}",
@@ -371,6 +400,28 @@ fn usage_source_path(input: &std::path::Path) -> Result<String, CliError> {
             suggestion: Some("rename the source file or omit --show-usage".into()),
         })?;
     Ok(quote_netlist_token(source))
+}
+
+/// A `-D`/`-U` macro name: a simple identifier, as `` `define `` takes.
+fn macro_name<'a>(name: &'a str, flag: &str) -> Result<&'a str, CliError> {
+    let mut characters = name.chars();
+    let valid = characters
+        .next()
+        .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
+        && characters.all(|character| {
+            character.is_ascii_alphanumeric() || character == '_' || character == '$'
+        });
+    if valid {
+        Ok(name)
+    } else {
+        Err(CliError::InvalidArgument {
+            message: format!("{flag} '{name}' does not name a preprocessor macro"),
+            suggestion: Some(format!(
+                "write {flag} NAME{}, with NAME a letter or '_' followed by letters, digits, '_' or '$'",
+                if flag == "-D" { "[=VALUE]" } else { "" }
+            )),
+        })
+    }
 }
 
 // The netlist source-directive grammar treats backslashes as escapes inside

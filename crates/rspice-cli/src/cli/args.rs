@@ -776,6 +776,15 @@ pub struct CompileVaArgs {
     #[arg(short = 'I', long = "include", value_name = "DIR")]
     pub includes: Vec<PathBuf>,
 
+    /// Define a preprocessor macro before reading the source, as `NAME` (empty) or
+    /// `NAME=VALUE` (repeatable)
+    #[arg(short = 'D', long = "define", value_name = "NAME[=VALUE]")]
+    pub defines: Vec<String>,
+
+    /// Remove a predefined preprocessor macro before the definitions apply (repeatable)
+    #[arg(short = 'U', long = "undefine", value_name = "NAME")]
+    pub undefines: Vec<String>,
+
     /// Select a module when the source declares more than one
     #[arg(long, value_name = "NAME")]
     pub module: Option<String>,

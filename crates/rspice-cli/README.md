@@ -789,6 +789,8 @@ from other parameters) and their range as a declaration writes it
 | :--- | :--- |
 | `-o`, `--output FILE` | Write a versioned `rspice.compile_va` JSON summary: source, model, terminals, internal nodes, parameters, and compiler warnings. Each public parameter gives its `type`, its constant `default` (a string for a string parameter) or, for a default computed from other parameters, `default: null` with the source text in `default_expression`, and its `min`/`max` bounds with `min_exclusive`/`max_exclusive`, `min_expression`/`max_expression` and `exclude` |
 | `-I`, `--include DIR` | Extra include directory (repeatable) |
+| `-D`, `--define NAME[=VALUE]` | Define a preprocessor macro before reading the source, empty when no value is given (repeatable) |
+| `-U`, `--undefine NAME` | Remove a predefined macro such as `__VAMS_ENABLE__` before the definitions apply (repeatable) |
 | `--module NAME` | Select one module of a multi-module source |
 | `--detailed` | Also print per-branch stamp and Jacobian entry counts |
 | `--show-usage` | Print an example netlist instantiation, with the absolute source path and module selection |

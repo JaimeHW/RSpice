@@ -206,6 +206,62 @@ fn including_source_directory_precedes_cli_and_config_paths() {
     assert_eq!(common::read_json(&result)["parameters"][0]["default"], 42.0);
 }
 
+/// `-D NAME[=VALUE]` and `-U NAME` reach the preprocessor, as a project's
+/// build-settings defines and undefines do. The command once had neither.
+#[test]
+fn defines_and_undefines_reach_the_preprocessor() {
+    let dir = common::test_dir("defines");
+    let input = dir.join("model.va");
+    std::fs::write(
+        &input,
+        SOURCE.replace(
+            "parameter real R=1000;",
+            "`ifdef FAST\nparameter real R=`FAST;\n`else\nparameter real R=1000;\n`endif\n\
+             `ifdef __VAMS_ENABLE__\nparameter real AMS=1;\n`else\nparameter real AMS=0;\n`endif",
+        ),
+    )
+    .unwrap();
+    let result = dir.join("model.json");
+    let defaults = |args: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+            .args(["--quiet", "--error-format", "json", "compile-va"])
+            .arg(&input)
+            .args(args)
+            .arg("-o")
+            .arg(&result)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{args:?}: {output:?}");
+        let json = common::read_json(&result);
+        let parameters = json["parameters"].as_array().unwrap();
+        (
+            parameters[0]["default"].clone(),
+            parameters[1]["default"].clone(),
+        )
+    };
+    assert_eq!(defaults(&[]), (1000.0.into(), 1.0.into()));
+    assert_eq!(defaults(&["-D", "FAST=42"]), (42.0.into(), 1.0.into()));
+    assert_eq!(
+        defaults(&["--define", "FAST=7", "-U", "__VAMS_ENABLE__"]),
+        (7.0.into(), 0.0.into())
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args(["--quiet", "--error-format", "json", "compile-va"])
+        .arg(&input)
+        .args(["-D", "1BAD=2"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success(), "{output:?}");
+    let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert!(
+        error["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("-D '1BAD' does not name a preprocessor macro"),
+        "{error}"
+    );
+}
+
 #[test]
 fn source_io_failures_keep_their_exit_category_and_path() {
     let dir = common::test_dir("source_io");
@@ -324,13 +380,19 @@ fn an_exclusively_open_source_is_an_io_failure() {
 
 #[test]
 fn usage_examples_run_with_nested_paths_and_explicit_module_selection() {
-    for selected in [None, Some("second")] {
+    // A `-D` macro reaches the printed source line as `define=`, so the
+    // example runs the model that was compiled: HALF halves the conductance.
+    for (selected, define) in [(None, None), (Some("second"), None), (None, Some("HALF"))] {
         let dir = common::test_dir("usage_example");
         let models = dir.join("vendor library/nested");
         let examples = dir.join("examples");
         std::fs::create_dir_all(&models).unwrap();
         std::fs::create_dir(&examples).unwrap();
         let source = match selected {
+            None if define.is_some() => SOURCE.replace(
+                "analog I(p,n) <+ V(p,n)/R;",
+                "`ifdef HALF\nanalog I(p,n) <+ 0.5*V(p,n)/R;\n`else\nanalog I(p,n) <+ V(p,n)/R;\n`endif",
+            ),
             None => SOURCE.to_owned(),
             Some(_) => format!(
                 "{SOURCE}\n{}",
@@ -348,6 +410,9 @@ fn usage_examples_run_with_nested_paths_and_explicit_module_selection() {
         ]);
         if let Some(module) = selected {
             compile.args(["--module", module]);
+        }
+        if let Some(define) = define {
+            compile.args(["-D", define]);
         }
         let output = compile.output().unwrap();
         assert!(output.status.success(), "{output:?}");
@@ -386,8 +451,12 @@ fn usage_examples_run_with_nested_paths_and_explicit_module_selection() {
             .unwrap()["values"]["samples"][0]
             .as_f64()
             .unwrap();
-        let expected = if selected.is_some() { 1.0 / 3.0 } else { 0.5 };
-        assert!((voltage - expected).abs() < 1e-8, "{document}");
+        let expected = if selected.is_some() || define.is_some() {
+            1.0 / 3.0
+        } else {
+            0.5
+        };
+        assert!((voltage - expected).abs() < 1e-8, "{text}\n{document}");
     }
 }
 
