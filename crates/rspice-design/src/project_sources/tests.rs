@@ -1163,3 +1163,78 @@ fn a_shared_source_serves_each_of_its_views_and_outlives_its_owner() {
     );
     assert!(registry.get_bundle(id).is_none());
 }
+
+fn compile_attempt(bundle: &ProjectSourceBundle) -> ProjectSourceQualificationAttempt {
+    let digest = ContentDigest::from_bytes([7; 32]);
+    ProjectSourceQualificationAttempt {
+        attempt_id: Uuid::new_v4(),
+        recorded_at_unix_ms: 1,
+        source_revision: bundle.revision().get(),
+        source_closure_digest: bundle.closure_digest(),
+        profile_digest: digest,
+        package_name: "package".to_owned(),
+        package_version: "1".to_owned(),
+        selected_module: "module".to_owned(),
+        compiler_version: "1".to_owned(),
+        disposition: ProjectSourceQualificationDisposition::Passed,
+        report_digest: digest,
+        targets: Vec::new(),
+        checks: Vec::new(),
+        error_count: 0,
+        warning_count: 0,
+    }
+}
+
+fn veriloga_bundle() -> ProjectSourceBundle {
+    ProjectSourceBundle::try_new(
+        ProjectSourceOwner::cell_view(CellViewRef::new("lib", "cell", "veriloga")),
+        ProjectSourceLanguage::VerilogA,
+        "m.va",
+        "module m; endmodule\n",
+        [],
+        [],
+    )
+    .unwrap()
+}
+
+/// A compile is never refused for its bookkeeping: past what a bundle keeps,
+/// the oldest attempt gives way and the numbering goes on.
+#[test]
+fn the_oldest_compile_attempt_gives_way_to_the_newest() {
+    let mut bundle = veriloga_bundle();
+    let attempts = RETAINED_QUALIFICATION_RECORDS as u64 + 3;
+    for _ in 0..attempts {
+        bundle
+            .append_qualification(compile_attempt(&bundle))
+            .unwrap();
+    }
+    let kept = bundle.qualifications();
+    assert_eq!(kept.len(), RETAINED_QUALIFICATION_RECORDS);
+    assert_eq!(kept[0].sequence(), 4);
+    assert_eq!(kept[kept.len() - 1].sequence(), attempts);
+    bundle.validate().unwrap();
+}
+
+/// What a compile proves is kept with the bundle, and does not make the
+/// bundle differ from the one that was saved.
+#[test]
+fn compile_evidence_is_not_authored_content() {
+    let mut saved = ProjectSourceRegistry::try_from_bundles([veriloga_bundle()]).unwrap();
+    let bundle_id = saved.iter_bundles().next().unwrap().id();
+    let mut working = saved.clone();
+    working.mark_bundle_validated(bundle_id).unwrap();
+    let attempt = compile_attempt(working.get_bundle(bundle_id).unwrap());
+    working
+        .append_bundle_qualification(bundle_id, attempt)
+        .unwrap();
+    assert_ne!(working, saved, "the evidence is held");
+    assert!(working.same_authored_content(&saved));
+
+    saved
+        .replace_bundle_file_content(bundle_id, "m.va", "module n; endmodule\n".to_owned())
+        .unwrap();
+    assert!(
+        !working.same_authored_content(&saved),
+        "an edit is authored"
+    );
+}

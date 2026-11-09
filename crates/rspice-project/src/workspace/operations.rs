@@ -399,16 +399,15 @@ impl ProjectWorkspace {
         Ok(changed)
     }
 
+    /// Keep one compile attempt with its bundle. The attempt is saved with
+    /// the next save and marks nothing unsaved: a compile is not an edit.
     pub fn append_project_source_qualification(
         &mut self,
         bundle_id: rspice_design::project_sources::ProjectSourceId,
         record: rspice_design::project_sources::ProjectSourceQualificationAttempt,
     ) -> Result<u64, ProjectSourceError> {
-        let sequence = self
-            .project_sources
-            .append_bundle_qualification(bundle_id, record)?;
-        self.project_sources_dirty = true;
-        Ok(sequence)
+        self.project_sources
+            .append_bundle_qualification(bundle_id, record)
     }
 
     /// Rename a project-owned source while atomically migrating its roles,

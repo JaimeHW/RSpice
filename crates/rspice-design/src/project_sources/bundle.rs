@@ -262,9 +262,6 @@ impl ProjectSourceBundle {
         &mut self,
         record: ProjectSourceQualificationAttempt,
     ) -> Result<u64, ProjectSourceError> {
-        if self.qualifications.len() >= MAX_PROJECT_SOURCE_QUALIFICATION_RECORDS {
-            return Err(ProjectSourceError::QualificationHistoryLimitExceeded);
-        }
         if record.source_revision != self.revision.get()
             || record.source_closure_digest != self.closure_digest()
         {
@@ -274,9 +271,6 @@ impl ProjectSourceBundle {
             .qualifications
             .last()
             .map_or(1, |previous| previous.sequence.saturating_add(1));
-        if sequence == 0 {
-            return Err(ProjectSourceError::QualificationHistoryLimitExceeded);
-        }
         let record = ProjectSourceQualificationRecord {
             sequence,
             attempt_id: record.attempt_id,
@@ -297,7 +291,22 @@ impl ProjectSourceBundle {
         };
         record.validate()?;
         self.qualifications.push(record);
+        if self.qualifications.len() > RETAINED_QUALIFICATION_RECORDS {
+            let oldest = self.qualifications.len() - RETAINED_QUALIFICATION_RECORDS;
+            self.qualifications.drain(..oldest);
+        }
         Ok(sequence)
+    }
+
+    /// This bundle as its author wrote it, without what a compile proved of
+    /// it: the content whose change makes the document unsaved.
+    #[must_use]
+    pub fn authored_content(&self) -> Self {
+        let mut authored = self.clone();
+        authored.root.validated_identity = None;
+        authored.validated_identity = None;
+        authored.qualifications = Vec::new();
+        authored
     }
 
     pub fn paths_for_role(&self, role: ProjectSourceRole) -> impl Iterator<Item = &str> {
@@ -1210,9 +1219,6 @@ impl ProjectSourceBundle {
         }
 
         validate_dependency_graph(&root_key, &graph)?;
-        if self.qualifications.len() > MAX_PROJECT_SOURCE_QUALIFICATION_RECORDS {
-            return Err(ProjectSourceError::QualificationHistoryLimitExceeded);
-        }
         let mut previous_qualification_sequence = 0_u64;
         for record in &self.qualifications {
             record.validate()?;

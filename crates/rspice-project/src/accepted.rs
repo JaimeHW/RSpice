@@ -43,6 +43,8 @@ impl AcceptedProject {
             || working.netlist_document != baseline.netlist_document
             || working.netlist_descriptor != baseline.netlist_descriptor
             || working.retained_netlist_decks != baseline.retained_netlist_decks;
-        working.project_sources_dirty = working.project_sources != baseline.project_sources;
+        working.project_sources_dirty = !working
+            .project_sources
+            .same_authored_content(&baseline.project_sources);
     }
 }

@@ -6,7 +6,7 @@ use super::{
     result_fingerprint,
 };
 use crate::ProjectFile;
-use rspice_design::project_sources::ProjectSourceOwner;
+use rspice_design::project_sources::{ProjectSourceBundle, ProjectSourceOwner};
 use rspice_design_model::cell_view::CellViewRef;
 use rspice_vocabulary::product::ContentDigest;
 use std::collections::{HashMap, HashSet};
@@ -124,6 +124,7 @@ fn document_digests_with_results_cache(
         .project_sources
         .iter_bundles()
         .filter(|bundle| matches!(bundle.owner(), ProjectSourceOwner::CodeWorkspace { .. }))
+        .map(ProjectSourceBundle::authored_content)
         .collect::<Vec<_>>();
     documents.insert(
         ProjectDocumentId::NetlistSource,
@@ -171,7 +172,8 @@ fn document_digests_with_results_cache(
         let project_source = project
             .workspace
             .project_sources
-            .bundle_for_owner(&ProjectSourceOwner::cell_view(reference.clone()));
+            .bundle_for_owner(&ProjectSourceOwner::cell_view(reference.clone()))
+            .map(ProjectSourceBundle::authored_content);
         documents.insert(
             ProjectDocumentId::CellView(reference),
             digest(&(schematic, physical_layout, view, project_source))?,

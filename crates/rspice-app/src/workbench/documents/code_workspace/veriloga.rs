@@ -306,28 +306,14 @@ pub(crate) fn replace_selected_veriloga_file(
 ///
 /// Compile asks nothing: the closure and its build profile are taken here, at
 /// the click, and the frame loop starts exactly that on its next pass. A
-/// source still on the compiler's built-in defaults has them written into the
-/// bundle as its build profile first, so what compiles is always a profile
-/// the project holds.
+/// source on the compiler's built-in defaults stays on them: a build profile
+/// document is written when its settings are changed, never by compiling.
 pub(crate) fn request_veriloga_compile(app: &mut RSpiceApp) -> Result<(), String> {
     if app.state.code.code_workspace.veriloga.pending.is_some() {
         return Err("A Verilog-A compile is already running.".to_owned());
     }
-    let mut selected = selected_veriloga_source(app)?;
-    if selected.bundle().qualifications().len()
-        >= crate::state::MAX_PROJECT_SOURCE_QUALIFICATION_RECORDS
-    {
-        return Err(
-            "This source has reached its limit of saved compile records. Archive the project as a new revision before compiling again."
-                .to_owned(),
-        );
-    }
-    let mut resolved = super::veriloga_profile::resolve_veriloga_build_profile(selected.bundle())?;
-    if resolved.legacy_builtin {
-        persist_legacy_build_profile(app, &selected, &resolved.profile)?;
-        selected = selected_veriloga_source(app)?;
-        resolved = super::veriloga_profile::resolve_veriloga_build_profile(selected.bundle())?;
-    }
+    let selected = selected_veriloga_source(app)?;
+    let resolved = super::veriloga_profile::resolve_veriloga_build_profile(selected.bundle())?;
     let entry_modules = &resolved.profile.entry_modules;
     if let Some(module) = selected.selected_module()
         && !entry_modules.is_empty()
@@ -365,20 +351,6 @@ pub(crate) fn write_veriloga_build_profile(
             add_build_profile_document(app, expected, profile).map(|_| true)
         }
     }
-}
-
-fn persist_legacy_build_profile(
-    app: &mut RSpiceApp,
-    selected: &SelectedVerilogASource,
-    profile: &super::veriloga_profile::VerilogABuildProfile,
-) -> Result<(), String> {
-    let path = add_build_profile_document(app, selected, profile)?;
-    app.state.record(
-        LogSeverity::Info,
-        LogSource::Studio,
-        format!("Saved the Verilog-A compiler defaults as project build profile {path}."),
-    );
-    Ok(())
 }
 
 /// Add `profile` to `selected`'s bundle as its build-profile document, at the
@@ -608,14 +580,6 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                 app.state.code.code_workspace.veriloga.receipt = None;
                 return;
             }
-            let previous_identity = app
-                .state
-                .model
-                .workspace
-                .content
-                .project_sources
-                .get_bundle(pending.token.bundle_id)
-                .and_then(ProjectSourceBundle::validated_identity);
             match app
                 .state
                 .model
@@ -625,18 +589,6 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                 .mark_bundle_validated(pending.token.bundle_id)
             {
                 Ok(_) => {
-                    if previous_identity
-                        != app
-                            .state
-                            .model
-                            .workspace
-                            .content
-                            .project_sources
-                            .get_bundle(pending.token.bundle_id)
-                            .and_then(ProjectSourceBundle::validated_identity)
-                    {
-                        app.state.model.workspace.content.project_sources_dirty = true;
-                    }
                     // The ports become the interface of the view that selects
                     // the module: for a shared source, that module's cell.
                     let selecting = receipt_bundle.as_ref().and_then(|bundle| {
@@ -974,9 +926,6 @@ fn record_veriloga_qualification(
         .content
         .append_project_source_qualification(token.bundle_id, record)
         .map_err(|error| error.to_string())?;
-    // The qualification history is persisted with the bundle, so recording
-    // an attempt is a change to the owning cell view's document.
-    mark_bundle_unsaved(app, token.bundle_id);
     Ok(sequence)
 }
 
@@ -1131,8 +1080,9 @@ mod tests {
     /// them into the bundle as its build profile, and compiles the closure
     /// holding it: the request is taken after the write, not before.
     #[test]
-    fn a_compile_request_writes_legacy_defaults_as_the_build_profile_it_compiles() {
+    fn a_compile_request_leaves_a_source_on_its_defaults_without_a_build_profile() {
         let mut app = portless_module();
+        let before = selected_veriloga_source(&app).unwrap().bundle().revision();
 
         request_veriloga_compile(&mut app).unwrap();
 
@@ -1144,24 +1094,14 @@ mod tests {
             .compile_request
             .clone()
             .expect("the click took the closure");
-        let bundle = app
-            .state
-            .model
-            .workspace
-            .content
-            .project_sources
-            .get_bundle(request.bundle().id())
-            .unwrap();
-        let profile_path = bundle
-            .paths_for_role(ProjectSourceRole::VerilogABuildProfile)
-            .next()
-            .unwrap();
-        assert_eq!(profile_path, ".rspice/veriloga-build.toml");
-        assert!(!bundle.root().content().contains(profile_path));
-        assert!(app.state.model.workspace.content.project_sources_dirty);
-        assert_eq!(request.bundle().revision(), bundle.revision());
-        assert_eq!(request.bundle().closure_digest(), bundle.closure_digest());
-        assert!(request.bundle().contains_file(profile_path));
+        assert_eq!(request.bundle().revision(), before);
+        assert!(
+            request
+                .bundle()
+                .paths_for_role(ProjectSourceRole::VerilogABuildProfile)
+                .next()
+                .is_none()
+        );
     }
 
     /// A build profile written over the one a bundle holds is an ordinary
@@ -1404,6 +1344,21 @@ mod tests {
             Some(original.as_str()),
             "the replaced text stays restorable"
         );
+
+        let workbench = &mut app.state;
+        assert!(
+            workbench
+                .code
+                .code_workspace
+                .source_edit_history
+                .step(
+                    &mut workbench.model.workspace.content,
+                    bundle_id,
+                    crate::workbench::framework::requests::StandardCommand::Undo,
+                )
+                .unwrap()
+        );
+        assert_eq!(content(&app), original, "the replacement is one undo");
     }
 
     /// With no Verilog-A view in front, an imported file is read into the

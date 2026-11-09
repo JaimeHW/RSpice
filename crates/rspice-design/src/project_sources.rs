@@ -36,7 +36,9 @@ pub const MAX_PROJECT_SOURCE_DEPENDENCY_DEPTH: usize = 256;
 /// Maximum UTF-8 length of one portable logical path.
 pub const MAX_PROJECT_SOURCE_LOGICAL_PATH_BYTES: usize = 1024;
 /// Maximum immutable Verilog-A qualification attempts retained per bundle.
-pub const MAX_PROJECT_SOURCE_QUALIFICATION_RECORDS: usize = 100_000;
+/// Compile attempts a bundle keeps. The oldest gives way to the newest, so a
+/// compile is never refused for its bookkeeping.
+const RETAINED_QUALIFICATION_RECORDS: usize = 1_000;
 
 const LEGACY_PROJECT_SOURCE_ID_NAMESPACE: Uuid =
     Uuid::from_u128(0xb50a_3aed_047f_54f8_971b_a2aa_e1e8_4f5b);
@@ -1630,6 +1632,19 @@ impl ProjectSourceRegistry {
             .expect("marking a bundle validates its root"))
     }
 
+    /// Whether `other` holds the same source as its author wrote it, compile
+    /// evidence aside. A compile is not an edit: it leaves the document as
+    /// clean as it found it, and its evidence is saved with the next save.
+    #[must_use]
+    pub fn same_authored_content(&self, other: &Self) -> bool {
+        self.bundles.len() == other.bundles.len()
+            && self
+                .bundles
+                .iter()
+                .zip(&other.bundles)
+                .all(|(ours, theirs)| ours.authored_content() == theirs.authored_content())
+    }
+
     pub fn mark_bundle_validated(
         &mut self,
         id: ProjectSourceId,
@@ -2027,8 +2042,6 @@ pub enum ProjectSourceError {
     CorruptRetainedRevision { revision: u64 },
     #[error("retained source history exceeds its bounded storage contract")]
     RetainedHistoryLimitExceeded,
-    #[error("project source qualification history exceeds its retained-record limit")]
-    QualificationHistoryLimitExceeded,
     #[error("project source qualification record is malformed or out of order")]
     InvalidQualificationRecord,
     #[error("project source qualification evidence does not match the current source identity")]

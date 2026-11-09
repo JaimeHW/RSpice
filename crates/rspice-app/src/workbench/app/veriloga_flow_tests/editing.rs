@@ -1,10 +1,15 @@
-//! Undo at the Verilog-A editor, through whole application frames.
+//! Undo and compile bookkeeping at the Verilog-A editor, through whole
+//! application frames.
 
 use egui::Key;
 
 use super::language_tools::{CTRL, EDITOR, caret_after, op_amp, source, type_text};
 use super::*;
+use crate::state::ProjectSourceRole;
 use crate::workbench::documents::code_workspace;
+use crate::workbench::lifecycle::project_lifecycle::{
+    DestinationAuthority, SaveScope, active_document_is_dirty, save_native,
+};
 
 fn undo(user: &mut User) {
     user.key(Key::Z, CTRL);
@@ -100,4 +105,67 @@ fn an_empty_source_stays_in_the_source_editor() {
     assert_eq!(source(&user), "module");
     undo(&mut user);
     assert_eq!(source(&user), "");
+}
+
+fn open_tab_dirty(user: &User, view: &CellViewRef) -> bool {
+    user.app
+        .state
+        .model
+        .workspace
+        .content
+        .open_views
+        .iter()
+        .find(|open| &open.reference == view)
+        .expect("the view has a tab")
+        .dirty
+}
+
+/// Compiling proves something about the source and changes nothing in it.
+/// The tab stays as clean as the save left it, the attempt is kept, and a
+/// source on the compiler's defaults is not given a build profile file.
+#[test]
+fn compiling_a_saved_source_leaves_its_tab_clean_and_writes_no_profile() {
+    let (mut user, _, view) = new_device(CELL, PORTS);
+    replace_source_with(&mut user, MODULE);
+    // The first compile writes the module's ports to the cell.
+    compile(&mut user);
+
+    let path = std::env::temp_dir().join(format!(
+        "rspice-va-editing-{}-{}.rspiceproj",
+        std::process::id(),
+        uuid::Uuid::new_v4().simple()
+    ));
+    save_native(
+        &mut user.app.state,
+        SaveScope::AllDocuments,
+        &path,
+        DestinationAuthority::UserSelected,
+    )
+    .expect("the project saves");
+    user.settle();
+    assert!(!open_tab_dirty(&user, &view), "the save cleaned the tab");
+    let attempts = |user: &User| {
+        code_workspace::selected_veriloga_source(&user.app)
+            .expect("the open view")
+            .bundle()
+            .qualifications()
+            .len()
+    };
+    let before = attempts(&user);
+
+    compile(&mut user);
+
+    assert_eq!(attempts(&user), before + 1, "the attempt is kept");
+    assert!(!open_tab_dirty(&user, &view), "a compile is not an edit");
+    assert!(!active_document_is_dirty(&user.app.state));
+    let selected = code_workspace::selected_veriloga_source(&user.app).expect("the open view");
+    assert!(
+        selected
+            .bundle()
+            .paths_for_role(ProjectSourceRole::VerilogABuildProfile)
+            .next()
+            .is_none(),
+        "nothing changed a setting, so no build profile exists"
+    );
+    let _ = std::fs::remove_file(path);
 }
