@@ -172,6 +172,10 @@ impl ForeignLibrary for InstalledForeignLibrary {
             .iter()
             .find_map(|text| model_card_in(text, name))
     }
+
+    fn block_schematic(&self, name: &str) -> Option<PathBuf> {
+        Some(self.beside.join(format!("{name}.qsch"))).filter(|path| path.is_file())
+    }
 }
 
 /// Whether a model file is one only its vendor's simulator can read.

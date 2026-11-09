@@ -2,7 +2,7 @@
 //! every point on RSpice's grid, and keeps what it cannot place in view.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use rspice_design_model::Point;
 
@@ -19,6 +19,7 @@ struct Library {
     symbols: HashMap<String, ForeignSymbolSource>,
     models: HashMap<String, ForeignModelFile>,
     cards: HashMap<String, String>,
+    blocks: HashMap<String, PathBuf>,
 }
 
 impl ForeignLibrary for Library {
@@ -32,6 +33,10 @@ impl ForeignLibrary for Library {
 
     fn model_card(&self, name: &str) -> Option<String> {
         self.cards.get(&name.to_ascii_lowercase()).cloned()
+    }
+
+    fn block_schematic(&self, name: &str) -> Option<PathBuf> {
+        self.blocks.get(&name.to_ascii_lowercase()).cloned()
     }
 }
 
@@ -940,6 +945,157 @@ fn directive_cards_sort_by_the_project_place_they_belong_in() {
     assert_eq!(cards[3].text, ".subckt half a b\nR1 a b {R}\n.ends half");
     assert_eq!(cards[3].position, Point::new(0, 40));
     assert_eq!(defined_model_names(&cards), ["d1n", "half"]);
+}
+
+#[test]
+fn a_prefix_set_on_the_placed_symbol_decides_the_device_it_is() {
+    // LTspice: `SYMATTR Prefix X` on an `npn` netlists XQ1 over the model.
+    let drawing = parse_asc(
+        "Version 4\n\
+         SYMBOL npn 0 0 R0\nSYMATTR InstName Q1\nSYMATTR Value MYSUB\nSYMATTR Prefix X\n\
+         SYMBOL npn 256 0 R0\nSYMATTR InstName Q2\nSYMATTR Value 2N3904\n",
+    )
+    .unwrap();
+    let imported = import_foreign_schematic(&drawing, "work", &library());
+    let part = |name: &str| {
+        imported
+            .document
+            .components
+            .iter()
+            .find(|component| component.name == name)
+            .unwrap_or_else(|| panic!("{name} in {:?}", imported.document.components))
+    };
+    let binding = part("Q1").library_cell.as_ref().expect("a cell over the model");
+    assert_eq!(binding.reference_prefix.as_deref(), Some("X"));
+    assert_eq!(part("Q1").value, "MYSUB");
+    assert_eq!(part("Q2").kind, ComponentType::NpnBjt);
+}
+
+#[test]
+fn a_two_letter_device_prefix_reads_its_model_from_the_source_library() {
+    const TO92: &str = "Version 4\nSymbolType CELL\nRECTANGLE Normal -32 -32 32 32\n\
+        SYMATTR Prefix QP\nSYMATTR Value MYPNP\n\
+        PIN -32 0 NONE 0\nPINATTR PinName C\nPINATTR SpiceOrder 1\n\
+        PIN 32 0 NONE 0\nPINATTR PinName B\nPINATTR SpiceOrder 2\n\
+        PIN 0 32 NONE 0\nPINATTR PinName E\nPINATTR SpiceOrder 3\n";
+    let mut source = library();
+    source.symbols.insert(
+        "to92".to_owned(),
+        ForeignSymbolSource {
+            definition: parse_asy(TO92).expect("the test symbol reads"),
+            location: "to92.asy".to_owned(),
+            schematic: None,
+        },
+    );
+    source
+        .cards
+        .insert("mypnp".to_owned(), ".model MYPNP PNP".to_owned());
+    let drawing = parse_asc("Version 4\nSYMBOL to92 0 0 R0\nSYMATTR InstName Q1\n").unwrap();
+    let imported = import_foreign_schematic(&drawing, "work", &source);
+    assert_eq!(imported.model_cards, [".model MYPNP PNP"]);
+}
+
+/// A QSPICE drawing placing one part whose symbol holds the `library` record.
+fn qspice_part_with_library(library_record: &str, value: &str) -> ForeignSchematic {
+    let text = format!(
+        "«schematic
+  «component (0,0) 0 0
+    «symbol QN
+      «type: QN»
+      {library_record}
+      «text (0,300) 1 7 0 0x1000000 -1 -1 \"Q1\"»
+      «text (0,-300) 1 7 0 0x1000000 -1 -1 \"{value}\"»
+      «pin (100,200) (0,0) 1 0 0 0x0 -1 \"C\"»
+      «pin (-200,0) (0,0) 1 0 0 0x0 -1 \"B\"»
+      «pin (100,-200) (0,0) 1 0 0 0x0 -1 \"E\"»
+    »
+  »
+»
+"
+    );
+    parse_qsch(&qsch_bytes(&text)).unwrap()
+}
+
+#[test]
+fn a_qspice_symbol_carries_its_own_model() {
+    let drawing = qspice_part_with_library("«library file: |.model MYNPN NPN(BF=120)»", "MYNPN");
+    let mut source = library();
+    source
+        .cards
+        .insert("mynpn".to_owned(), ".model MYNPN NPN(BF=9)".to_owned());
+    let imported = import_foreign_schematic(&drawing, "work", &source);
+    // The text the symbol carries, not the installed library's card.
+    assert_eq!(imported.model_cards, [".model MYNPN NPN(BF=120)"]);
+}
+
+#[test]
+fn a_qspice_symbol_carries_its_own_subcircuit_on_one_line() {
+    let drawing = qspice_part_with_library(
+        "«library file: |.subckt MYSUB a b\\nR1 a b 1k\\n.ends MYSUB»",
+        "MYSUB",
+    );
+    let imported = import_foreign_schematic(&drawing, "work", &library());
+    assert_eq!(
+        imported.model_cards,
+        [".subckt MYSUB a b\nR1 a b 1k\n.ends MYSUB"]
+    );
+}
+
+#[test]
+fn a_qspice_library_named_by_file_stays_for_the_installed_library() {
+    let drawing = qspice_part_with_library("«library file: NPN.txt»", "MYNPN");
+    let mut source = library();
+    source
+        .cards
+        .insert("mynpn".to_owned(), ".model MYNPN NPN(BF=9)".to_owned());
+    let imported = import_foreign_schematic(&drawing, "work", &source);
+    assert_eq!(imported.model_cards, [".model MYNPN NPN(BF=9)"]);
+}
+
+#[test]
+fn a_qspice_block_names_the_schematic_its_value_names() {
+    const DRAWING: &str = "«schematic
+  «component (0,0) 0 0
+    «symbol
+      «shorted pins: false»
+      «rect (-500,500) (500,-500) 0 0 0 0x4000000 0xffffff -1 1 -1»
+      «text (0,750) 1 12 0 0x1000000 -1 -1 \"X1\"»
+      «text (0,-300) 1.36 13 0 0x1000000 -1 -1 \"Buck\"»
+      «pin (-500,0) (0,0) 1 11 0 0x0 -1 \"IN\"»
+      «pin (500,0) (0,0) 1 7 0 0x0 -1 \"OUT\"»
+    »
+  »
+  «net (-500,0) 1 11 0 \"vin\"»
+  «net (500,0) 1 7 0 \"vout\"»
+»
+";
+    let drawing = parse_qsch(&qsch_bytes(DRAWING)).unwrap();
+    let mut source = library();
+    source
+        .blocks
+        .insert("buck".to_owned(), PathBuf::from("Buck.qsch"));
+    let imported = import_foreign_schematic(&drawing, "work", &source);
+    let [cell] = imported.cells.as_slice() else {
+        panic!("{:?}", imported.cells);
+    };
+    assert_eq!(cell.cell, "Buck");
+    assert_eq!(cell.schematic.as_deref(), Some(Path::new("Buck.qsch")));
+    // Without such a schematic the value is the subcircuit it names.
+    let imported = import_foreign_schematic(&drawing, "work", &library());
+    assert!(imported.cells.iter().all(|cell| cell.schematic.is_none()));
+}
+
+#[test]
+fn a_qspice_net_flagged_as_a_port_is_a_port_of_its_drawing() {
+    const DRAWING: &str = "«schematic
+  «net (0,0) 1 7 1 \"LX\"»
+  «net (500,0) 1 7 0 \"VCC\"»
+»
+";
+    let drawing = parse_qsch(&qsch_bytes(DRAWING)).unwrap();
+    let flag = |name: &str| drawing.flags.iter().find(|flag| flag.name == name).unwrap();
+    assert_eq!(flag("LX").port, Some(ForeignPortDirection::Bidirectional));
+    assert_eq!(flag("VCC").port, None);
 }
 
 #[test]

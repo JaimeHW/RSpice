@@ -10,14 +10,14 @@
 //! a straight lead joins any terminal that does not land on its pin.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use rspice_design_model::Point;
 use rspice_design_model::port::{PortDirection, PortSpec};
 use rspice_design_model::symbol_pin::SymbolPinSide;
 
 use super::behaviour::qspice_behaviour;
-use super::directives::{defined_model_names, foreign_directive_cards};
+use super::directives::{defined_model_names, foreign_directive_cards, text_block_cards};
 use super::functional::{Functional, FunctionalPlan, SourceNets, ltspice_gate, ltspice_opamp};
 use super::mapping::{
     LTSPICE_AWAITING_NATIVE_PARTS, NativeKind, NativeMapping, ltspice_builtin_definition,
@@ -79,6 +79,18 @@ const LETTERED_ATTRIBUTES: [(u32, &str); 6] = [
 /// The device letters whose value names a `.model` card.
 const MODEL_PREFIXES: [&str; 7] = ["D", "Q", "M", "J", "Z", "S", "W"];
 
+/// Whether a part of this prefix reads a model card the source program finds
+/// in its installed library.
+fn device_reads_a_model(prefix: &str) -> bool {
+    prefix
+        .get(..1)
+        .is_some_and(|letter| MODEL_PREFIXES.contains(&letter.to_ascii_uppercase().as_str()))
+}
+
+/// The attribute of a QSPICE symbol that names its library, or holds it after
+/// a leading `|`.
+const QSPICE_LIBRARY_FILE: &str = "library file";
+
 /// What the importer may read beside the drawing or from the source
 /// program's installed libraries. Files are read in place and never copied.
 pub trait ForeignLibrary {
@@ -91,6 +103,11 @@ pub trait ForeignLibrary {
     /// without the drawing defining it (LTspice's `standard.dio`, QSPICE's
     /// `Diode.txt`).
     fn model_card(&self, name: &str) -> Option<String>;
+    /// The schematic beside the drawing that a QSPICE block of this name
+    /// draws the insides of.
+    fn block_schematic(&self, _name: &str) -> Option<PathBuf> {
+        None
+    }
 }
 
 /// A symbol definition found for a placed symbol.
@@ -273,6 +290,7 @@ pub fn import_foreign_schematic(
         terminals: Vec::new(),
         names: BTreeSet::new(),
         models: BTreeSet::new(),
+        embedded_libraries: Vec::new(),
         pin_points: HashMap::new(),
         pin_leads: HashMap::new(),
         markers: Vec::new(),
@@ -373,6 +391,8 @@ struct Builder<'a> {
     names: BTreeSet<String>,
     /// The models native parts name, for the source program's cards.
     models: BTreeSet<String>,
+    /// Each distinct library text a placed symbol carries itself.
+    embedded_libraries: Vec<String>,
     /// How many placed symbols have a pin at each point.
     pin_points: HashMap<Point, usize>,
     /// The way each source pin's lead runs from its point into its body.
@@ -462,7 +482,11 @@ impl Builder<'_> {
     /// of a hierarchical block.
     fn resolve(&self, symbol: &ForeignSymbol) -> Resolved {
         match &symbol.embedded {
-            Some(definition) => (Some(definition.clone()), None, None),
+            Some(definition) => (
+                Some(definition.clone()),
+                None,
+                self.qspice_block_schematic(symbol, definition),
+            ),
             None => match self.access.symbol(&symbol.symbol) {
                 Some(source) => (
                     Some(source.definition),
@@ -472,6 +496,25 @@ impl Builder<'_> {
                 None => (ltspice_builtin_definition(symbol.base_name()), None, None),
             },
         }
+    }
+
+    /// The schematic a QSPICE symbol with no device or library of its own
+    /// is a block of: the one its value names, beside the drawing.
+    fn qspice_block_schematic(
+        &self,
+        symbol: &ForeignSymbol,
+        definition: &ForeignSymbolDefinition,
+    ) -> Option<PathBuf> {
+        if self.drawing.tool != ForeignTool::Qspice
+            || !definition.symbol_type.trim().is_empty()
+            || attribute(&definition.attributes, QSPICE_LIBRARY_FILE).is_some()
+        {
+            return None;
+        }
+        let value = symbol.attribute("Value")?.trim();
+        (!value.is_empty() && !value.contains(char::is_whitespace))
+            .then(|| self.access.block_schematic(value))
+            .flatten()
     }
 
     fn place_symbol(&mut self, symbol: &ForeignSymbol, resolved: Resolved) {
@@ -515,6 +558,11 @@ impl Builder<'_> {
             return;
         };
         let attributes = merged_attributes(&definition, symbol);
+        if let Some(library) = embedded_library(&attributes)
+            && !self.embedded_libraries.contains(&library)
+        {
+            self.embedded_libraries.push(library);
+        }
         // LTspice letters only the attributes a WINDOW shows; a symbol read
         // from its file says which. A stand-in for a missing file says
         // nothing, so its part keeps RSpice's own lettering.
@@ -542,7 +590,9 @@ impl Builder<'_> {
             return;
         }
         let placed = self.document.components.len();
-        match native_mapping(tool, symbol.base_name(), Some(&definition)) {
+        match native_mapping(tool, symbol.base_name(), Some(&definition))
+            .filter(|_| !prefix_names_another_device(symbol, &definition))
+        {
             Some(mapping) if schematic.is_none() => {
                 self.place_native(symbol, &definition, &attributes, mapping, &pins);
             }
@@ -943,7 +993,7 @@ impl Builder<'_> {
             format!("{value} {}", extra.join(" ")).trim().to_owned()
         };
         let prefix = kind.spice_prefix();
-        if MODEL_PREFIXES.contains(&prefix)
+        if device_reads_a_model(prefix)
             && let Some(model) = value.split_whitespace().next()
         {
             self.models.insert(model.to_owned());
@@ -1227,6 +1277,11 @@ impl Builder<'_> {
         );
         let cell = self.cells[cell_index].clone();
         let model = if subcircuit { cell.cell.clone() } else { model };
+        // The prefix's first letter decides the device: LTspice's own parts
+        // spell a PNP `QP` and read their models as any `Q` does.
+        if !subcircuit && device_reads_a_model(&prefix) {
+            self.models.insert(model.clone());
+        }
         let params = words
             .iter()
             .filter(|word| word.contains('='))
@@ -1577,14 +1632,23 @@ impl Builder<'_> {
         if let Some(index) = self.cell_index.get(&key) {
             return *index;
         }
-        let mut name = cell_name(&symbol.symbol);
+        // A QSPICE block's symbol has no name; its schematic does.
+        let stem = schematic
+            .as_deref()
+            .and_then(Path::file_stem)
+            .and_then(|stem| stem.to_str());
+        let base = cell_name(match stem {
+            Some(stem) if symbol.symbol.trim().is_empty() => stem,
+            _ => &symbol.symbol,
+        });
+        let mut name = base.clone();
         let mut suffix = 2;
         while self
             .cells
             .iter()
             .any(|cell| cell.cell.eq_ignore_ascii_case(&name))
         {
-            name = format!("{}_{suffix}", cell_name(&symbol.symbol));
+            name = format!("{base}_{suffix}");
             suffix += 1;
         }
         // A hierarchical block's ports are its schematic's; only a symbol
@@ -2451,14 +2515,24 @@ impl Builder<'_> {
     fn finish(mut self) -> ForeignImport {
         rebuild_connections_from_terminals(&mut self.document, &self.terminals);
         bind_instances_to_sources(&mut self.document, self.library, &self.cells);
-        let defined = defined_model_names(&foreign_directive_cards(&self.directives));
-        let model_cards = self
-            .models
-            .iter()
-            .filter(|model| !defined.contains(&model.to_ascii_lowercase()))
-            .filter_map(|model| self.access.model_card(model))
-            .chain(self.behaviours)
-            .collect();
+        let mut defined = defined_model_names(&foreign_directive_cards(&self.directives));
+        // A library a symbol carries is what that symbol runs, ahead of any
+        // card of the same name in the installed library.
+        let mut model_cards = Vec::new();
+        for library in std::mem::take(&mut self.embedded_libraries) {
+            let names = defined_model_names(&text_block_cards(&library));
+            if names.iter().all(|name| !defined.contains(name)) {
+                defined.extend(names);
+                model_cards.push(library);
+            }
+        }
+        model_cards.extend(
+            self.models
+                .iter()
+                .filter(|model| !defined.contains(&model.to_ascii_lowercase()))
+                .filter_map(|model| self.access.model_card(model)),
+        );
+        model_cards.extend(self.behaviours);
         ForeignImport {
             document: self.document,
             cells: self.cells,
@@ -2511,6 +2585,31 @@ fn merged_attributes(
         }
     }
     attributes
+}
+
+/// The text of the library a QSPICE symbol carries itself, its lines joined
+/// by a literal `\\n`.
+fn embedded_library(attributes: &[ForeignAttribute]) -> Option<String> {
+    let text = attribute(attributes, QSPICE_LIBRARY_FILE)?
+        .trim()
+        .strip_prefix('|')?;
+    Some(text.replace("\\n", "\n"))
+}
+
+/// Whether a placed LTspice symbol's own `Prefix` makes it another device
+/// than its symbol draws, as `X` on an `npn` a subcircuit models does.
+fn prefix_names_another_device(
+    symbol: &ForeignSymbol,
+    definition: &ForeignSymbolDefinition,
+) -> bool {
+    let first = |prefix: &str| prefix.trim().chars().next().map(|c| c.to_ascii_uppercase());
+    match (
+        symbol.attribute("Prefix").and_then(first),
+        attribute(&definition.attributes, "Prefix").and_then(first),
+    ) {
+        (Some(placed), Some(own)) => placed != own,
+        _ => false,
+    }
 }
 
 /// The count of an LTspice parallel-count word (`x2`).

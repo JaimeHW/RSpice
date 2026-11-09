@@ -66,7 +66,10 @@ pub fn parse_qsch(bytes: &[u8]) -> Result<ForeignSchematic, ForeignParseError> {
                     } else {
                         name
                     },
-                    port: None,
+                    // The third number marks a pin of the drawing: a block's
+                    // schematic flags exactly the pins its symbol shows.
+                    port: (numbers_after_points(fields).get(2).map(String::as_str) == Some("1"))
+                        .then_some(super::ForeignPortDirection::Bidirectional),
                     facing: Some(text_run(
                         numbers_after_points(fields).get(1).map(String::as_str),
                     )),

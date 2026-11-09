@@ -65,14 +65,28 @@ impl ForeignCard {
 pub fn foreign_directive_cards(directives: &[ForeignDirective]) -> Vec<ForeignCard> {
     let mut cards = Vec::new();
     for directive in directives {
+        push_block_cards(&mut cards, directive.position, &directive.text);
+    }
+    cards
+}
+
+/// The cards of one block of source text, in order.
+pub(super) fn text_block_cards(text: &str) -> Vec<ForeignCard> {
+    let mut cards = Vec::new();
+    push_block_cards(&mut cards, Point::default(), text);
+    cards
+}
+
+fn push_block_cards(cards: &mut Vec<ForeignCard>, position: Point, text: &str) {
+    {
         let card = |role, text, tokens| ForeignCard {
-            position: directive.position,
+            position,
             role,
             text,
             tokens,
         };
         let mut logical: Vec<(String, String)> = Vec::new();
-        for line in directive.text.lines() {
+        for line in text.lines() {
             // LTspice netlists a line written `..param` as `.param`.
             let line = match line.trim_start().strip_prefix('.') {
                 Some(rest) if rest.starts_with('.') => rest,
@@ -125,7 +139,6 @@ pub fn foreign_directive_cards(directives: &[ForeignDirective]) -> Vec<ForeignCa
             cards.push(card(ForeignCardRole::Other, body, tokens));
         }
     }
-    cards
 }
 
 fn role(keyword: &str) -> ForeignCardRole {
