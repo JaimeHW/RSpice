@@ -1500,16 +1500,18 @@ impl Component {
                 "This component type does not own a SPICE reference designator.".to_owned(),
             );
         }
-        if !value
-            .get(..prefix.len())
-            .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
-        {
-            return Err(format!(
-                "{} designators must begin with `{prefix}`.",
-                self.kind.display_name()
-            ));
-        }
-        let suffix = &value[prefix.len()..];
+        let suffix = match value.get(..prefix.len()) {
+            Some(head) if head.eq_ignore_ascii_case(prefix) => &value[prefix.len()..],
+            // The `X` of a cell instance names no device of its own, so `U1`
+            // and `IC3` are as good as `X1`: the deck writes the `X` in front.
+            _ if prefix.eq_ignore_ascii_case("X") => value,
+            _ => {
+                return Err(format!(
+                    "{} designators must begin with `{prefix}`.",
+                    self.kind.display_name()
+                ));
+            }
+        };
         // An iterated designator such as `X<0:3>` asks one drawn instance to
         // stand for four. RSpice places instances one for one, so the name is
         // refused where it is typed rather than netlisted as a single instance
@@ -1704,6 +1706,31 @@ mod tests {
             );
         }
         assert!(instance.validate_reference_designator("X9").is_ok());
+    }
+
+    /// `U1` is what an integrated circuit is called on a drawing, and the
+    /// deck writes `XU1`. A resistor drawn `C4` is still refused, because its
+    /// first letter would name another device.
+    #[test]
+    fn a_cell_instance_takes_any_reference_a_device_keeps_its_letter() {
+        let instance = Component::new(9, ComponentType::CellInstance, Point::origin())
+            .with_library_cell(LibraryCellInstance::new("work", "amp", "schematic"))
+            .with_name_value("U1", "amp");
+
+        for name in ["U1", "IC3", "X9", "amp_2"] {
+            assert_eq!(
+                instance.validate_reference_designator(name),
+                Ok(()),
+                "{name}"
+            );
+        }
+        assert_eq!(instance.emitted_instance_name(), "XU1");
+        assert!(instance.validate_reference_designator("X").is_err());
+        assert!(instance.validate_reference_designator("U 1").is_err());
+
+        let resistor =
+            Component::new(6, ComponentType::Resistor, Point::origin()).with_name_value("R6", "1k");
+        assert!(resistor.validate_reference_designator("C4").is_err());
     }
 
     #[test]
