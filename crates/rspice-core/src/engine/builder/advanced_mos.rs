@@ -836,6 +836,7 @@ impl Engine {
     /// source-referenced power MOSFET; Xyce's explicit bulk terminal is parsed
     /// and retained as circuit syntax, but the VDMOS conduction model itself
     /// uses source/body-referenced equations.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn build_vdmos(
         circuit: &mut CircuitData,
         element: &crate::netlist::Element,

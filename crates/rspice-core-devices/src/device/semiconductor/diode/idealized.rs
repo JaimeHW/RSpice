@@ -187,7 +187,8 @@ mod tests {
     #[test]
     fn current_matches_measured_law_in_every_region() {
         let on = [("RON", 10.0), ("ROFF", 1e3)];
-        let cases: &[(Vec<(&str, Value)>, Value, Value)] = &[
+        type Case<'a> = (Vec<(&'a str, Value)>, Value, Value);
+        let cases: &[Case<'_>] = &[
             (
                 [&on[..], &[("VFWD", 1.0), ("EPSILON", 0.5)]].concat(),
                 0.5,
