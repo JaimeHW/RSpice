@@ -2677,3 +2677,68 @@ fn a_p_channel_card_keeps_the_sign_of_its_threshold() {
         );
     }
 }
+
+/// QSPICE and LTspice 26.1.1 batch: a card naming nothing is a square-law
+/// device at zero threshold, unit `Kp`, with no capacitance at the gate.
+#[test]
+fn a_bare_card_takes_the_defaults_qspice_and_ltspice_agree_on() {
+    let deck = "bare card\nVD d 0 1\nVG g 0 5 AC 1\nM1 d g 0 0 NN\n.model NN VDMOS\n.op\n.end\n";
+    let netlist = Netlist::parse(deck).expect("bare card parses");
+    let engine = Engine::new(SimulationConfig::default());
+    let result = engine.run_dc_op(&netlist).expect("bare card runs");
+    let drain = result.branch_current_named("VD").expect("drain source");
+    assert!((drain + 4.5).abs() < 1e-6, "triode current {drain}");
+    let results = engine.run_ac(&netlist, &[1.0e6]).expect("bare card AC");
+    let gate = ac_branch_current_named(&results[0], "VG");
+    assert!(gate.norm() < 1e-12, "bare-card gate current {gate}");
+}
+
+/// QSPICE and LTspice 26.1.1 batch: `Cjo` grades with a 1 V junction potential
+/// by default; 500 pF of a 1 nF junction at 3 V is 3.141593 mA at 1 MHz.
+#[test]
+fn a_body_diode_capacitance_grades_at_one_volt_by_default() {
+    let deck = "graded body diode\nVD d 0 3 AC 1\nVG g 0 0\nM1 d g 0 0 NN\n\
+                .model NN VDMOS(Vto=3 Kp=1 Cjo=1n)\n.op\n.end\n";
+    let netlist = Netlist::parse(deck).expect("graded card parses");
+    let results = Engine::new(SimulationConfig::default())
+        .run_ac(&netlist, &[1.0e6])
+        .expect("graded card AC");
+    let drain = ac_branch_current_named(&results[0], "VD");
+    assert!(
+        (drain.im.abs() - 3.141593e-3).abs() < 1e-8,
+        "body-diode current {drain}"
+    );
+}
+
+/// QSPICE and LTspice 26.1.1 batch: `Rds` shunts drain to source, `m` parallel
+/// devices shunt `m` times as hard, and the shunt carries no noise of its own.
+#[test]
+fn a_drain_source_shunt_conducts_with_the_device_off() {
+    let deck = "shunted\nVD d 0 5\nVG g 0 0\nM1 d g 0 0 NN m=2\n\
+                .model NN VDMOS(Vto=3 Rds=1k)\n.op\n.end\n";
+    let netlist = Netlist::parse(deck).expect("shunted card parses");
+    let result = Engine::new(SimulationConfig::default())
+        .run_dc_op(&netlist)
+        .expect("shunted card runs");
+    let drain = result.branch_current_named("VD").expect("drain source");
+    assert!((drain + 1.0e-2).abs() < 1e-9, "shunt current {drain}");
+}
+
+/// QSPICE batch: `subthres` spells `Ksubthres`, which softens the square
+/// law below threshold.
+#[test]
+fn subthres_spells_the_subthreshold_slope() {
+    let current = |spelling: &str| {
+        let deck = format!(
+            "slope\nVD d 0 5\nVG g 0 1\nM1 d g 0 0 NN\n\
+             .model NN VDMOS(Kp=1 Vto=1 {spelling}=.1)\n.op\n.end\n"
+        );
+        Engine::new(SimulationConfig::default())
+            .run_dc_op(&Netlist::parse(&deck).expect("slope card parses"))
+            .expect("slope card runs")
+            .branch_current_named("VD")
+            .expect("drain source")
+    };
+    assert!((current("Ksubthres") + 0.002402265).abs() < 1e-8);
+    assert_eq!(current("subthres"), current("Ksubthres"));
+}

@@ -844,6 +844,7 @@ impl Engine {
         instance_params: &[(String, f64)],
         circuit_temperature_kelvin: f64,
         default_tnom_kelvin: f64,
+        spice_dialect: crate::config::SpiceDialect,
     ) -> Result<(), SimulationError> {
         if element.nodes.len() < 4 {
             return Err(SimulationError::Circuit(format!(
@@ -865,7 +866,7 @@ impl Engine {
                 crate::device::Vdmos::new_pvdmos(element.name.clone(), drain, gate, source)
             }
         }
-        .with_params(params_map)
+        .with_params(params_map, spice_dialect)
         .with_instance_params(params_map, instance_params);
         let tnom_kelvin = params_map
             .get("TNOM")

@@ -108,6 +108,10 @@ pub struct Vdmos {
     pub ngspice_subshift: Value,
     /// ngspice VDMOS weak-inversion softplus slope (V).
     pub ngspice_ksubthres: Value,
+    /// Conductance of the `RDS` shunt between the external drain and source.
+    drain_source_shunt: Value,
+    /// Current through the `RDS` shunt at the last accepted update.
+    shunt_current: Value,
     /// Nominal-temperature threshold retained for repeatable temperature updates.
     nominal_vth: Value,
     /// Nominal-temperature transconductance retained for repeatable temperature updates.
@@ -389,6 +393,8 @@ impl Vdmos {
             ngspice_theta: 0.0,
             ngspice_subshift: 0.0,
             ngspice_ksubthres: 0.1,
+            drain_source_shunt: 0.0,
+            shunt_current: 0.0,
             nominal_vth: 2.0,
             nominal_kp: 2.0,
             nominal_rd: 0.1,
@@ -531,8 +537,13 @@ impl Vdmos {
         self.initial_off
     }
 
-    /// Set model parameters from a parameter map
-    pub fn with_params(mut self, params: &std::collections::HashMap<String, Value>) -> Self {
+    /// Set model parameters from a parameter map. The dialect picks the
+    /// defaults of everything a `.model VDMOS` card omits.
+    pub fn with_params(
+        mut self,
+        params: &std::collections::HashMap<String, Value>,
+        dialect: crate::config::SpiceDialect,
+    ) -> Self {
         let is_xyce_level18 = params
             .get("LEVEL")
             .is_some_and(|level| level.is_finite() && (*level - 18.0).abs() <= 1.0e-9);
@@ -545,9 +556,10 @@ impl Vdmos {
             self.cgd0 = 0.0;
             self.cds = 0.0;
         } else {
-            // A `.model ... VDMOS` card is the ngspice/LTspice dialect, so
-            // omitted parameters must use that device's documented defaults
-            // rather than the convenience values used by `Vdmos::new`.
+            // A `.model ... VDMOS` card takes its dialect's documented defaults
+            // for omitted parameters rather than the convenience values used
+            // by `Vdmos::new`. These are ngspice's; QSPICE and LTspice change
+            // the few they disagree on below.
             self.vth = 3.0;
             self.kp = match self.vdmos_type {
                 VdmosType::NVdmos => 20.0,
@@ -598,6 +610,17 @@ impl Vdmos {
             self.d1_xti = 3.0;
             self.d1_current_enabled = true;
 
+            if dialect == crate::config::SpiceDialect::BestAvailable {
+                self.vth = 0.0;
+                self.kp = 1.0;
+                self.ngspice_ksubthres = 0.0;
+                self.cgs0 = 0.0;
+                self.ngspice_cgd_min = 0.0;
+                self.ngspice_cgd_max = 0.0;
+                self.d1_cjo = 0.0;
+                self.d1_vj = 1.0;
+            }
+
             self.is = self.d1_is;
             self.n = self.d1_n;
         }
@@ -635,7 +658,10 @@ impl Vdmos {
         if let Some(&v) = params.get("SUBSHIFT") {
             self.ngspice_subshift = v;
         }
-        if let Some(&v) = params.get("KSUBTHRES") {
+        if let Some(&v) = params.get("RDS").filter(|ohms| **ohms > 0.0) {
+            self.drain_source_shunt = 1.0 / v;
+        }
+        if let Some(&v) = params.get("KSUBTHRES").or_else(|| params.get("SUBTHRES")) {
             self.ngspice_ksubthres = v.max(1.0e-12);
         }
         if let Some(&v) = params.get("MU").or_else(|| params.get("BEX")) {
@@ -1089,6 +1115,7 @@ impl Vdmos {
                 // `M` parallel devices put their series resistances in
                 // parallel too: ngspice divides RD, RQ, RS, RG and the body
                 // diode's RB by M (`vdmostemp.c`, `vdmosset.c`).
+                self.drain_source_shunt *= multiplier;
                 self.rd /= multiplier;
                 self.rq /= multiplier;
                 self.rs /= multiplier;
@@ -1206,7 +1233,7 @@ impl Vdmos {
     /// Operating-point quantities cached by the last accepted update.
     pub fn op_values(&self) -> (Value, Value, Value, Value, Value, crate::op_label::OpLabel) {
         (
-            self.id,
+            self.id + self.shunt_current,
             self.prev_vgs,
             self.prev_vds,
             self.id_diode,
@@ -2972,6 +2999,7 @@ impl Vdmos {
             let gd = self.drain_conductance_at(voltages, forward);
             Self::stamp_direct_conductance(matrix, dd, di, gd);
         }
+        Self::stamp_direct_conductance(matrix, d, s, self.drain_source_shunt);
 
         // Stamp source resistance (between s and si)
         if self.rs > 1e-12 && si != s {
@@ -3157,13 +3185,16 @@ impl NonlinearDevice for Vdmos {
 
         let (id, region, gm, gds, gmb, id_eq) =
             self.linearized_operating_point(eval_vgs, eval_vds, eval_vbs);
+        let terminal = |node: NodeId| if node > 0 { voltages[node - 1] } else { 0.0 };
+        let external_vds = terminal(self.drain) - terminal(self.source);
+        self.shunt_current = self.drain_source_shunt * external_vds;
         self.id = id;
         self.region = region;
         self.gm = gm;
         self.gds = gds;
         self.gmb = gmb;
         self.id_eq = id_eq;
-        self.power = id * eval_vds;
+        self.power = id * eval_vds + self.shunt_current * external_vds;
         self.has_branch_history = true;
 
         // Update body-diode reporting from the same branch voltage and
@@ -3270,6 +3301,13 @@ impl NonlinearDevice for Vdmos {
             matrix.stamp(di, dd, -gd);
             matrix.stamp(di, di, gd);
         }
+        if self.drain_source_shunt > 0.0 {
+            let shunt = self.drain_source_shunt;
+            matrix.stamp(d, d, shunt);
+            matrix.stamp(d, s, -shunt);
+            matrix.stamp(s, d, -shunt);
+            matrix.stamp(s, s, shunt);
+        }
 
         if self.rs > 1e-12 && si != s {
             let _vs = if s > 0 { voltages[s - 1] } else { 0.0 };
@@ -3367,6 +3405,7 @@ impl NonlinearDevice for Vdmos {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::SpiceDialect;
     use std::collections::HashMap;
 
     fn xyce_level18_test_device(vdmos_type: VdmosType) -> Vdmos {
@@ -3389,7 +3428,7 @@ mod tests {
         ];
 
         let mut vdmos = Vdmos::new("m1".to_string(), vdmos_type, 1, 2, 3)
-            .with_params(&params)
+            .with_params(&params, SpiceDialect::Ngspice)
             .with_instance_params(&params, &instance_params);
         vdmos.set_drain_drift_node(4);
         vdmos
@@ -3450,12 +3489,12 @@ mod tests {
         let mut params = HashMap::new();
         params.insert("VTO".to_string(), 3.5);
         let marked = Vdmos::new("m1".to_string(), VdmosType::NVdmos, 1, 2, 3)
-            .with_params(&params)
+            .with_params(&params, SpiceDialect::Ngspice)
             .with_instance_params(&params, &[("OFF".to_string(), 1.0)]);
         assert!(marked.is_initially_off());
 
         let plain = Vdmos::new("m2".to_string(), VdmosType::NVdmos, 1, 2, 3)
-            .with_params(&params)
+            .with_params(&params, SpiceDialect::Ngspice)
             .with_instance_params(&params, &[]);
         assert!(!plain.is_initially_off());
     }
@@ -3539,7 +3578,7 @@ mod tests {
         params.insert("M".to_string(), 0.5);
         params.insert("FC".to_string(), 0.5);
 
-        let vdmos = Vdmos::new_nvdmos("m1".to_string(), 1, 2, 3).with_params(&params);
+        let vdmos = Vdmos::new_nvdmos("m1".to_string(), 1, 2, 3).with_params(&params, SpiceDialect::Ngspice);
         let slope = (24.6e-12 - 2.0e-12) / (1.0 + std::f64::consts::FRAC_PI_2);
         let intercept = 24.6e-12 - slope;
         let expected_cgd = slope * (-5.8_f64).atan() + intercept;
@@ -3567,10 +3606,10 @@ mod tests {
         params.insert("CGDMAX".to_string(), 0.2e-12);
         params.insert("A".to_string(), 1.2);
         let single = Vdmos::new_pvdmos("m1".to_string(), 1, 2, 3)
-            .with_params(&params)
+            .with_params(&params, SpiceDialect::Ngspice)
             .with_instance_params(&params, &[]);
         let double = Vdmos::new_pvdmos("m2".to_string(), 1, 2, 3)
-            .with_params(&params)
+            .with_params(&params, SpiceDialect::Ngspice)
             .with_instance_params(&params, &[("M".to_string(), 2.0)]);
 
         for vgd in [-5.0, -0.3, 0.0, 0.4, 5.0] {
@@ -3594,7 +3633,7 @@ mod tests {
         params.insert("KSUBTHRES".to_string(), 0.1);
         params.insert("SUBSHIFT".to_string(), 0.0);
 
-        let vdmos = Vdmos::new_nvdmos("m1".to_string(), 1, 2, 3).with_params(&params);
+        let vdmos = Vdmos::new_nvdmos("m1".to_string(), 1, 2, 3).with_params(&params, SpiceDialect::Ngspice);
         let (saturated, saturation_region) = vdmos.calculate_id(4.0, 10.0);
         let strong_overdrive = 0.1 * 20.0_f64.exp().ln_1p();
         let expected_saturated = 0.5 * 0.2 * strong_overdrive.powi(2);
@@ -3632,7 +3671,7 @@ mod tests {
             ("RG".to_string(), 0.4),
             ("KSUBTHRES".to_string(), 0.29),
         ]);
-        let mut vdmos = Vdmos::new_nvdmos("m1".to_string(), 1, 2, 3).with_params(&params);
+        let mut vdmos = Vdmos::new_nvdmos("m1".to_string(), 1, 2, 3).with_params(&params, SpiceDialect::Ngspice);
 
         vdmos.set_temperature(400.0, 300.0);
         assert_temperature_value("default MU", vdmos.kp, 0.65 * (4.0_f64 / 3.0).powf(-1.5));
@@ -3682,7 +3721,7 @@ mod tests {
             ("TKSUBTHRES1".to_string(), 5.0e-4),
             ("TKSUBTHRES2".to_string(), 6.0e-6),
         ]);
-        let mut vdmos = Vdmos::new_nvdmos("m1".to_string(), 1, 2, 3).with_params(&params);
+        let mut vdmos = Vdmos::new_nvdmos("m1".to_string(), 1, 2, 3).with_params(&params, SpiceDialect::Ngspice);
         let ratio = 350.0_f64 / 300.0;
         let delta = 50.0_f64;
 
@@ -3712,7 +3751,7 @@ mod tests {
     #[test]
     fn ngspice_pvdmos_threshold_coefficient_is_polarity_normalized() {
         let params = HashMap::from([("VTO".to_string(), -3.0), ("TCVTH".to_string(), 2.0e-3)]);
-        let mut vdmos = Vdmos::new_pvdmos("m1".to_string(), 1, 2, 3).with_params(&params);
+        let mut vdmos = Vdmos::new_pvdmos("m1".to_string(), 1, 2, 3).with_params(&params, SpiceDialect::Ngspice);
 
         vdmos.set_temperature(350.0, 300.0);
 
@@ -3779,7 +3818,7 @@ mod tests {
         // and 786-800 the body diode with DEVpnjlim, each against the
         // previous iterate. Node 1 drain, 2 gate, 3 source.
         let params = HashMap::from([("VTO".to_string(), 3.0), ("IS".to_string(), 1.0e-14)]);
-        let mut vdmos = Vdmos::new_nvdmos("m1".to_string(), 1, 2, 3).with_params(&params);
+        let mut vdmos = Vdmos::new_nvdmos("m1".to_string(), 1, 2, 3).with_params(&params, SpiceDialect::Ngspice);
         assert!(!vdmos.xyce_level18 && vdmos.d1_current_enabled);
         vdmos.update(&[0.0; 3]);
 
@@ -3835,7 +3874,7 @@ mod tests {
 
         // A fresh device's junction starts at vcrit, where MODEINITJCT seeds
         // it, so even its first iterate is limited.
-        let mut fresh = Vdmos::new_nvdmos("m1".to_string(), 1, 2, 3).with_params(&params);
+        let mut fresh = Vdmos::new_nvdmos("m1".to_string(), 1, 2, 3).with_params(&params, SpiceDialect::Ngspice);
         fresh.update(&diode_step);
         let isat = fresh.d1_temperature_adjusted_saturation_current(vt);
         let vcrit = vt * (vt / (std::f64::consts::SQRT_2 * isat)).ln();

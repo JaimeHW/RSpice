@@ -8718,6 +8718,7 @@ impl Engine {
                             crate::constants::celsius_to_kelvin(
                                 netlist.options.tnom.unwrap_or(27.0),
                             ),
+                            self.config.spice_dialect,
                         )?;
                         model_safety::native_mos(
                             &mut circuit,
