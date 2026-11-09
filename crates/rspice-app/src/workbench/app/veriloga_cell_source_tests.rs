@@ -1077,7 +1077,7 @@ fn open_in_design_from_a_netlist_dependency_row_opens_the_tab() {
     let ctx = themed_context();
     frame(&ctx, &mut app, DESKTOP);
     let output = frame(&ctx, &mut app, DESKTOP);
-    let row = node_center(&output, "gain \u{00b7} veriloga")
+    let row = node_center(&output, "gain \u{00b7} Verilog-A")
         .expect("the dependency row names the module's cell view");
 
     click(&ctx, &mut app, row);
