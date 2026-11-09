@@ -520,7 +520,14 @@ fn parameters(plan: &mut ForeignPlan, card: ForeignCard) {
     let mut expressions = Vec::new();
     for (name, value) in assignments {
         if parse_spice_value_checked(&value).is_ok() {
-            plan.variables.push((name, value));
+            // The same assignment written twice is one variable; two that
+            // differ both stay, in source order.
+            let repeated = plan.variables.iter().any(|(written, was)| {
+                written.eq_ignore_ascii_case(&name) && was.eq_ignore_ascii_case(&value)
+            });
+            if !repeated {
+                plan.variables.push((name, value));
+            }
         } else {
             expressions.push(format!("{name}={value}"));
         }

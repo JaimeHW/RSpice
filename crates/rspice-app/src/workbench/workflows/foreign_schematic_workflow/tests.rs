@@ -193,6 +193,26 @@ fn a_parameter_card_reads_spaced_expressions_and_every_assignment() {
     assert!(plan.kept.is_empty(), "{:?}", plan.kept);
 }
 
+/// A repeated assignment is one design variable; two that differ both stay,
+/// in source order.
+#[test]
+fn a_parameter_written_twice_is_one_variable_and_two_values_stay_in_order() {
+    let plan = plan_cards(vec![
+        card(ForeignCardRole::Parameter, ".param a=1"),
+        card(ForeignCardRole::Parameter, ".param A=1"),
+        card(ForeignCardRole::Parameter, ".param b=1"),
+        card(ForeignCardRole::Parameter, ".param b=2"),
+    ]);
+    assert_eq!(
+        plan.variables,
+        [
+            ("a".to_owned(), "1".to_owned()),
+            ("b".to_owned(), "1".to_owned()),
+            ("b".to_owned(), "2".to_owned()),
+        ]
+    );
+}
+
 fn plan_cards(cards: Vec<ForeignCard>) -> ForeignPlan {
     plan_from_cards(cards, &SchematicDocument::default(), |_| None)
 }
