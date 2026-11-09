@@ -339,6 +339,7 @@ pub(super) fn prepare_pvt_point_source(
         }
         let source = materialize_source_overrides(executable_netlist, &point.source_overrides)?;
         let source = materialize_parameter_overrides(&source, &point.parameter_overrides);
+        let source = materialize_point_draws(source, point);
         return Ok(((source != executable_netlist).then_some(source), None));
     };
 
@@ -393,6 +394,7 @@ pub(super) fn prepare_pvt_point_source(
 
     let source = materialize_source_overrides(&source, &point.source_overrides)?;
     let source = materialize_parameter_overrides(&source, &point.parameter_overrides);
+    let source = materialize_point_draws(source, point);
     let source_override = (source != executable_netlist).then_some(source);
     Ok((source_override, nominal_supply_voltage))
 }
@@ -555,6 +557,26 @@ fn materialize_parameter_overrides(
         block.push('\n');
     }
     splice_before_terminal_end_card(executable_netlist, block.trim_end())
+}
+
+/// A deck whose random functions draw takes its own sample at each Run Set
+/// point. The seed follows the point's identity, so replaying a point redraws
+/// the same sample.
+fn materialize_point_draws(source: String, point: &PreparedPvtPoint) -> String {
+    let Some(key) = point.run_set_point_key.as_deref() else {
+        return source;
+    };
+    if !source
+        .to_ascii_uppercase()
+        .contains("RSPICE_STATISTICS=SAMPLE")
+    {
+        return source;
+    }
+    let mut hash: u32 = 0x811c_9dc5;
+    for byte in key.bytes() {
+        hash = (hash ^ u32::from(byte)).wrapping_mul(0x0100_0193);
+    }
+    splice_before_terminal_end_card(&source, &format!(".options seed={}", hash & 0x7fff_ffff))
 }
 
 fn materialize_source_overrides(

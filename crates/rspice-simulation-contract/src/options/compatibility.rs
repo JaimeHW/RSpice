@@ -10,6 +10,22 @@ pub enum SimulationCompatibility {
     Xyce,
 }
 
+/// The simulator a project's deck was written for, where that changes what
+/// its cards mean.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum SourceSimulator {
+    #[default]
+    Native,
+    Ltspice,
+    Qspice,
+}
+
+impl SourceSimulator {
+    pub const fn is_native(&self) -> bool {
+        matches!(self, Self::Native)
+    }
+}
+
 impl SimulationCompatibility {
     pub const ALL: [Self; 4] = [
         Self::Inherit,

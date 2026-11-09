@@ -566,6 +566,55 @@ fn a_directive_block_stays_on_the_sheet_while_the_plan_takes_its_analysis() {
     );
 }
 
+/// LTspice 26.1.1 and QSPICE read values past the sixth of an `EXP` source
+/// differently, and both draw `mc()` anew at every `.step` point, so the
+/// source program decides what the imported deck's cards mean.
+#[test]
+fn an_imported_drawing_states_the_program_its_deck_was_written_for() {
+    let folder = drawing_folder();
+    let file = folder.join("repeat.asc");
+    std::fs::write(
+        &file,
+        "Version 4
+SHEET 1 880 680
+         SYMBOL res 32 64 R0
+SYMATTR InstName R1
+SYMATTR Value 1k
+         TEXT 32 240 Left 2 !.tran 1m
+",
+    )
+    .expect("schematic");
+    let mut app = RSpiceApp::test_instance();
+    app.state.open_project_session();
+    import_foreign_schematic_file(&mut app, &file, ForeignTool::Ltspice).expect("imports");
+    std::fs::remove_dir_all(&folder).ok();
+    let card = app.state.model.sim_setup.options.to_spice_options();
+    assert!(card.contains("RSPICE_EXP_REPEAT=LTSPICE"), "{card}");
+    assert!(card.contains("RSPICE_STATISTICS=SAMPLE"), "{card}");
+    let deck = format!(
+        "repeat
+V1 a 0 EXP(0 1 0 1u 2u 1u 10u)
+R1 a 0 1k
+{card}
+.tran 1u 12u
+.end
+"
+    );
+    rspice_core::Netlist::parse(&deck).expect("the engine reads the option");
+    let native = rspice_simulation_contract::options::SimulationOptions::default();
+    assert!(
+        !native.to_spice_options().contains("RSPICE_"),
+        "a native project keeps the engine's own readings"
+    );
+    let qspice = rspice_simulation_contract::options::SimulationOptions {
+        source_simulator: rspice_simulation_contract::options::SourceSimulator::Qspice,
+        ..native
+    }
+    .to_spice_options();
+    assert!(qspice.contains("RSPICE_STATISTICS=SAMPLE"), "{qspice}");
+    assert!(!qspice.contains("RSPICE_EXP_REPEAT"), "{qspice}");
+}
+
 /// What a sheet paints, as text: every stroke and every run of lettering.
 fn painted_sheet(state: &mut AppState) -> Vec<String> {
     let symbols = crate::schematic::symbols::SymbolLibrary::load_embedded().ok();

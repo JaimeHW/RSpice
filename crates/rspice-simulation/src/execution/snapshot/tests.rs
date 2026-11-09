@@ -440,6 +440,66 @@ fn global_run_set_expands_every_core_analysis_at_every_point() {
     assert_ne!(transient[0].config_digest, transient[1].config_digest);
 }
 
+/// LTspice 26.1.1 and QSPICE both draw `mc()` anew at every `.step` point:
+/// eight points of `R1 a b {mc(1k,.05)}` into 1 kOhm read V(b) 0.488 to 0.509
+/// and 0.489 to 0.509.
+#[test]
+fn a_run_set_point_of_a_sampling_deck_draws_its_own_values() {
+    let deck = |options: &str| {
+        format!(
+            "draws\n.param x=0\nV1 a 0 1\nR1 a b {{mc(1k,.05)}}\nR2 b 0 1k\n{options}.op\n.end\n"
+        )
+    };
+    let values = |netlist: String| {
+        let mut run = parts();
+        run.executable_netlist = netlist;
+        run.run_set = Some(global_parameter_run_set(
+            "x",
+            &["0", "1", "2", "3", "4", "5", "6", "7"],
+        ));
+        let snapshot = PreparedRunSnapshot::new(run).expect("the Run Set prepares");
+        snapshot
+            .tasks
+            .iter()
+            .map(|task| {
+                let parsed = crate::netlist_preparation::parse_runner_netlist_with_abort(
+                    task.executable_netlist_override
+                        .as_deref()
+                        .expect("each point owns a deck"),
+                    None,
+                    &rspice_core::NoAbort,
+                )
+                .expect("the point deck parses");
+                rspice_core::Engine::new(rspice_core::SimulationConfig::default())
+                    .run_dc_op(&parsed)
+                    .expect("the point solves")
+                    .try_voltage_named("b")
+                    .expect("the point reads its node")
+            })
+            .collect::<Vec<f64>>()
+    };
+    let nominal = values(deck(""));
+    assert!(
+        nominal.iter().all(|v| (v - 0.5).abs() < 1e-12),
+        "{nominal:?}"
+    );
+    const SAMPLE: &str = ".options rspice_statistics=sample\n";
+    let drawn = values(deck(SAMPLE));
+    assert_eq!(drawn.len(), 8);
+    for v in &drawn {
+        assert!((0.4878..=0.5129).contains(v), "{drawn:?}");
+    }
+    let mut distinct = drawn.clone();
+    distinct.sort_by(f64::total_cmp);
+    distinct.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
+    assert_eq!(distinct.len(), drawn.len(), "every point draws: {drawn:?}");
+    assert_eq!(
+        drawn,
+        values(deck(SAMPLE)),
+        "a replay redraws the same sample"
+    );
+}
+
 #[test]
 fn global_parameter_axis_materializes_exact_point_decks_and_identities() {
     let mut run = parts();

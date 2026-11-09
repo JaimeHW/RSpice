@@ -3,7 +3,8 @@
 //! The tolerances, limits, and integration settings a run is executed under.
 
 use super::{
-    DampingStrategy, IntegrationMethod, MatrixSolver, SimulationCompatibility, ValidationError,
+    DampingStrategy, IntegrationMethod, MatrixSolver, SimulationCompatibility, SourceSimulator,
+    ValidationError,
 };
 
 /// A named numerical policy: its label and how to build it.
@@ -21,6 +22,11 @@ pub struct SimulationOptions {
     /// Numerical and available device-model variants, not the source syntax.
     #[serde(default, skip_serializing_if = "SimulationCompatibility::is_inherited")]
     pub compatibility: SimulationCompatibility,
+    /// The simulator the project's deck was written for: its random functions
+    /// draw as that program draws them, and LTspice's seven-value `EXP`
+    /// repeats as LTspice repeats it.
+    #[serde(default, skip_serializing_if = "SourceSimulator::is_native")]
+    pub source_simulator: SourceSimulator,
     pub reltol: f64,
     pub residual_reltol: f64,
     pub vntol: f64,
@@ -108,6 +114,8 @@ pub struct SimulationOptions {
 struct PersistedSimulationOptions {
     #[serde(default)]
     compatibility: SimulationCompatibility,
+    #[serde(default)]
+    source_simulator: SourceSimulator,
     #[serde(default, rename = "itl2")]
     _itl2: serde::de::IgnoredAny,
     #[serde(default, rename = "timestep_factor")]
@@ -159,6 +167,7 @@ impl From<PersistedSimulationOptions> for SimulationOptions {
     fn from(fields: PersistedSimulationOptions) -> Self {
         Self {
             compatibility: fields.compatibility,
+            source_simulator: fields.source_simulator,
             reltol: fields.reltol,
             residual_reltol: fields.residual_reltol,
             vntol: fields.vntol,
@@ -198,6 +207,7 @@ impl Default for SimulationOptions {
     fn default() -> Self {
         Self {
             compatibility: SimulationCompatibility::Inherit,
+            source_simulator: SourceSimulator::Native,
             reltol: 1e-3,
             residual_reltol: 1e-3,
             vntol: 1e-6,
@@ -313,6 +323,7 @@ impl SimulationOptions {
         Self::PRESETS.iter().find_map(|(label, build)| {
             let mut preset = build();
             preset.compatibility = self.compatibility;
+            preset.source_simulator = self.source_simulator;
             preset.rshunt = self.rshunt;
             preset.connect_rules.clone_from(&self.connect_rules);
             serde_json::to_vec(&preset)
@@ -516,6 +527,12 @@ impl SimulationOptions {
 
         if let Some(policy) = self.compatibility.option_value() {
             lines.push(format!("+ RSPICE_DIALECT={policy}"));
+        }
+        if !self.source_simulator.is_native() {
+            lines.push("+ RSPICE_STATISTICS=SAMPLE".to_owned());
+        }
+        if self.source_simulator == SourceSimulator::Ltspice {
+            lines.push("+ RSPICE_EXP_REPEAT=LTSPICE".to_owned());
         }
         if self.reltol != default.reltol {
             lines.push(format!("+ RELTOL={:e}", self.reltol));

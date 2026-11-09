@@ -123,6 +123,10 @@ pub(crate) fn import_foreign_schematic_file(
             .sim_setup
             .analysis_draft_validation_error(draft)
     });
+    plan.options.source_simulator = match tool {
+        ForeignTool::Ltspice => rspice_simulation_contract::options::SourceSimulator::Ltspice,
+        ForeignTool::Qspice => rspice_simulation_contract::options::SourceSimulator::Qspice,
+    };
     let mut notices = std::mem::take(&mut tree.notices);
     notices.extend(
         plan.notices

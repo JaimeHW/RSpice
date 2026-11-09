@@ -19,6 +19,7 @@ use rspice_simulation_contract::options::{
 #[derive(Debug, Clone)]
 pub struct OptionsDialogState {
     pub compatibility: SimulationCompatibility,
+    pub source_simulator: rspice_simulation_contract::options::SourceSimulator,
     pub reltol: String,
     pub residual_reltol: String,
     pub abstol: String,
@@ -65,6 +66,7 @@ impl OptionsDialogState {
     pub fn from_options(opts: &SimulationOptions) -> Self {
         Self {
             compatibility: opts.compatibility,
+            source_simulator: opts.source_simulator,
             reltol: format_si_value(opts.reltol),
             residual_reltol: format_si_value(opts.residual_reltol),
             abstol: format_si_value(opts.abstol),
@@ -168,6 +170,7 @@ impl OptionsDialogState {
 
         Ok(SimulationOptions {
             compatibility: self.compatibility,
+            source_simulator: self.source_simulator,
             reltol,
             residual_reltol,
             abstol,

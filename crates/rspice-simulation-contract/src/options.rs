@@ -6,7 +6,7 @@ mod model;
 mod si;
 mod validation;
 
-pub use compatibility::SimulationCompatibility;
+pub use compatibility::{SimulationCompatibility, SourceSimulator};
 pub use enums::{DampingStrategy, HbTimeDomainMode, IntegrationMethod, MatrixSolver};
 pub use model::{NamedPreset, SimulationOptions};
 pub(crate) use si::format_freq;

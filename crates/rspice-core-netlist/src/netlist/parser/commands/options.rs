@@ -132,6 +132,18 @@ pub(in crate::netlist::parser) fn parse_options_command(
         let value_start = stream.checkpoint();
         let result = (|| -> Result<(), ParseError> {
             match (option_package.as_deref(), key_upper.as_str()) {
+                (None, "RSPICE_STATISTICS") => {
+                    let known = matches!(&stream.peek().kind, TokenKind::Ident(name)
+                        if name.eq_ignore_ascii_case("SAMPLE")
+                            || name.eq_ignore_ascii_case("NOMINAL"));
+                    if !known {
+                        return Err(ParseError::Syntax {
+                            line: line_num,
+                            message: "RSPICE_STATISTICS expects SAMPLE or NOMINAL".to_owned(),
+                        });
+                    }
+                    stream.advance();
+                }
                 (None, "RSPICE_EXP_REPEAT") => {
                     let known = matches!(&stream.peek().kind, TokenKind::Ident(name)
                         if name.eq_ignore_ascii_case("QSPICE")

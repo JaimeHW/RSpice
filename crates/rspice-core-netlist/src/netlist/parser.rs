@@ -928,6 +928,15 @@ fn parse_netlist_impl(
             .params
             .set_statistical_mode(StatisticalParamMode::Nominal);
     }
+    // A deck from a program whose random functions always draw says so, and
+    // no caller's parsing mode reads it another way.
+    if let Some(mode) = prescan_deck_word_option(
+        &scanned_options,
+        "RSPICE_STATISTICS",
+        statistical_mode_named,
+    )? {
+        state.params.set_statistical_mode(mode);
+    }
     let _suffixes = crate::spice_number::read_suffixes_as_ngspice(
         state.spice_dialect == crate::config::SpiceDialect::Ngspice,
     );
@@ -4888,6 +4897,14 @@ fn spice_dialect_named(name: &str) -> Option<crate::config::SpiceDialect> {
         "BEST_AVAILABLE" => Some(crate::config::SpiceDialect::BestAvailable),
         "NGSPICE" => Some(crate::config::SpiceDialect::Ngspice),
         "XYCE" => Some(crate::config::SpiceDialect::Xyce),
+        _ => None,
+    }
+}
+
+fn statistical_mode_named(name: &str) -> Option<StatisticalParamMode> {
+    match name.to_ascii_uppercase().as_str() {
+        "SAMPLE" => Some(StatisticalParamMode::Sample),
+        "NOMINAL" => Some(StatisticalParamMode::Nominal),
         _ => None,
     }
 }
