@@ -1196,12 +1196,11 @@ impl Vdmos {
         }
     }
 
+    /// The polarity-normalized threshold: a positive `VTO` on a P-channel model
+    /// is a depletion device, the mirror of an N-channel model's negative one.
     #[inline]
     fn normalized_threshold(&self, value: Value) -> Value {
-        match self.vdmos_type {
-            VdmosType::NVdmos => value,
-            VdmosType::PVdmos => value.abs(),
-        }
+        self.polarity() * value
     }
 
     /// Operating-point quantities cached by the last accepted update.

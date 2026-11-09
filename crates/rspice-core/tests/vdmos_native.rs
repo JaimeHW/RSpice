@@ -2644,3 +2644,36 @@ fn assert_vdmos_noise_matches_ngspice46(deck: &str, table: &[[f64; 6]; 6]) {
         }
     }
 }
+
+/// QSPICE and LTspice 26.1.1 batch: a positive VTO on a P-channel card is a
+/// depletion device, so a complementary follower biased by the two cards is
+/// symmetric about zero and conducts at zero gate voltage.
+#[test]
+fn a_p_channel_card_keeps_the_sign_of_its_threshold() {
+    let follower = |gate: f64| {
+        let deck = format!(
+            "depletion follower pair\nVP vp 0 15\nVN vn 0 -15\nVG g 0 {gate}\n\
+             M1 vp g out out N\nM2 vn g out out P\nRL out 0 1k\n\
+             .model N VDMOS(Vto=-300m Kp=50m)\n\
+             .model P VDMOS(Vto=300m Kp=50m pchan)\n.op\n.end\n"
+        );
+        let netlist = Netlist::parse(&deck).expect("follower deck parses");
+        Engine::new(SimulationConfig::default())
+            .run_dc_op(&netlist)
+            .expect("follower converges")
+            .try_voltage_named("out")
+            .unwrap()
+    };
+    for (gate, expected) in [(1.5, 1.451613), (3.0, 2.903226)] {
+        let above = follower(gate);
+        let below = follower(-gate);
+        assert!(
+            (above + below).abs() < 1e-6,
+            "follower is not symmetric at {gate} V: {above} and {below}"
+        );
+        assert!(
+            (above - expected).abs() < 0.05 * expected,
+            "V(out) at {gate} V: {above} against {expected}"
+        );
+    }
+}
