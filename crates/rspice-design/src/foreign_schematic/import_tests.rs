@@ -4350,10 +4350,9 @@ fn a_library_symbols_value2_names_its_model_while_its_value_stays_drawn() {
 }
 
 #[test]
-fn an_op_amp_with_both_supply_pins_open_drives_through_its_own_output_resistance() {
-    // LTspice 26.1.1 batch: with both rails open a universal op-amp behaves as
-    // a 100 MOhm output with no swing limit; a multiple-feedback stage drawn
-    // that way gives V(EQ) 0.1139 at 2 kHz, and these settings give 0.1139065.
+fn an_op_amp_with_an_open_supply_pin_keeps_the_source_part() {
+    // RSpice's Op-Amp takes its output from a source of its own; LTspice's
+    // level2 subcircuit takes it through its own rails, floating or driven.
     let mut library = Library::default();
     library.symbols.insert(
         "opamps\\universalopamp2".to_owned(),
@@ -4368,34 +4367,35 @@ fn an_op_amp_with_both_supply_pins_open_drives_through_its_own_output_resistance
          FLAG -32 16 in\nFLAG -32 -16 out\nFLAG 32 0 out\n\
          SYMBOL Opamps\\UniversalOpAmp2 0 0 R0\nSYMATTR InstName U1\n\
          FLAG 288 16 in\nFLAG 288 -16 out2\nFLAG 320 -32 vcc\nFLAG 352 0 out2\n\
-         SYMBOL Opamps\\UniversalOpAmp2 320 0 R0\nSYMATTR InstName U2\n",
+         SYMBOL Opamps\\UniversalOpAmp2 320 0 R0\nSYMATTR InstName U2\n\
+         FLAG 608 16 in\nFLAG 608 -16 out3\nFLAG 640 -32 vcc\nFLAG 640 32 vee\nFLAG 672 0 out3\n\
+         SYMBOL Opamps\\UniversalOpAmp2 640 0 R0\nSYMATTR InstName U3\n",
     )
     .unwrap();
     let imported = import_foreign_schematic(&drawing, "work", &library);
-    let settings = |name: &str| {
+    let functional = |name: &str| {
         imported
             .document
             .components
             .iter()
             .find(|component| component.name == name)
             .expect("the part")
-            .params
-            .clone()
+            .library_cell
+            .as_ref()
+            .and_then(|binding| binding.builtin_functional.as_ref())
+            .is_some()
     };
-    let open = settings("U1");
-    assert!(open.contains("ROUT=100Meg"), "{open}");
-    assert!(open.contains("HEADROOM=-1k"), "{open}");
-    assert!(!open.contains("HEADROOM=0"), "{open}");
-    let grounds = imported
-        .document
-        .components
-        .iter()
-        .filter(|component| component.kind == ComponentType::Ground)
-        .count();
-    assert_eq!(grounds, 2, "the two open supply pins are tied");
-    // One supply pin wired is not the open-rail case.
-    let driven = settings("U2");
-    assert!(!driven.contains("ROUT"), "{driven}");
+    assert!(!functional("U1"), "both rails open");
+    assert!(!functional("U2"), "one rail open");
+    assert!(functional("U3"), "both rails driven");
+    assert!(
+        imported
+            .notices
+            .iter()
+            .any(|notice| notice.message.contains("supply pin nothing reaches")),
+        "{:?}",
+        imported.notices
+    );
 }
 
 #[test]
