@@ -212,7 +212,7 @@ fn project_library(
         }
     });
     let view = model.library_manager.current_view();
-    let view_type = view.map_or("—", |item| item.view_type.display_name());
+    let view_type = view.map_or("—", |item| item.view_type.caption());
     let open_target = match (
         model.library_manager.current_library(),
         model.library_manager.current_cell(),
@@ -528,5 +528,22 @@ mod tests {
         ] {
             assert!(!said.iter().any(|text| text == row), "{row:?} in {said:?}");
         }
+    }
+
+    #[test]
+    fn a_verilog_a_view_reads_as_verilog_a() {
+        let mut state = AppState::default();
+        let mut cell = crate::state::Cell::new("amp");
+        cell.add_view(crate::state::View::new("veriloga", ViewType::VerilogA));
+        let mut library = crate::state::Library::new("analog");
+        library.add_cell(cell);
+        let libraries = &mut state.model.library_manager;
+        libraries.add_library(library);
+        libraries.select_view("analog", "amp", "veriloga");
+
+        let said = announced(&mut state, false, None);
+
+        assert!(said.iter().any(|text| text == "Verilog-A"), "{said:?}");
+        assert!(!said.iter().any(|text| text == "veriloga"), "{said:?}");
     }
 }
