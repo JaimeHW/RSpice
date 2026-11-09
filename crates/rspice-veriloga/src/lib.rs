@@ -986,9 +986,17 @@ impl VerilogACompiler {
         let phase_started = web_time::Instant::now();
         let generator = CodeGenerator::new();
         let model = if self.options.enable_ams {
-            generator.generate_mixed_analog_half_with_source_digest(&executable, source_digest)?
+            generator.generate_mixed_analog_half_with_source_digest(
+                &executable,
+                source_digest,
+                measurements.control(),
+            )?
         } else {
-            generator.generate_analyzed_module_with_source_digest(&executable, source_digest)?
+            generator.generate_analyzed_module_with_source_digest(
+                &executable,
+                source_digest,
+                measurements.control(),
+            )?
         };
         measurements.record(PipelinePhase::BytecodeGeneration, phase_started.elapsed());
         let canonical_ir = self.build_canonical_ir_artifact_from_module(
@@ -1001,7 +1009,7 @@ impl VerilogACompiler {
             replay_origins,
         )?;
         let mut model = model;
-        Self::renumber_state_slots(&mut model, &canonical_ir)?;
+        Self::renumber_state_slots(&mut model, &canonical_ir, measurements.control())?;
         Self::locate_analog_tasks(
             &mut model,
             &executable,
@@ -1135,17 +1143,22 @@ impl VerilogACompiler {
     fn renumber_state_slots(
         model: &mut CompiledModel,
         canonical_ir: &canonical_ir::CanonicalIrArtifact,
+        control: &dyn PipelineControl,
     ) -> CompileResult<()> {
-        codegen::state_renumbering::renumber_state_slots_to_canonical_sites(
+        codegen::state_renumbering::renumber_state_slots_with_control(
             model,
             &canonical_ir.hir,
             &canonical_ir.mir,
+            control,
         )
         .map(drop)
-        .map_err(|error| {
-            CompileError::CodeGen(error::CodeGenError::new(
+        .map_err(|error| match error {
+            codegen::state_renumbering::StateRenumberingError::Cancelled(cancelled) => {
+                CompileError::Cancelled(cancelled)
+            }
+            error => CompileError::CodeGen(error::CodeGenError::new(
                 error::CodeGenErrorKind::StateRenumbering(error),
-            ))
+            )),
         })
     }
 
@@ -1253,9 +1266,17 @@ impl VerilogACompiler {
         // generated here.
         let generator = CodeGenerator::new();
         let model = if self.options.enable_ams {
-            generator.generate_mixed_analog_half_with_source_digest(&executable, source_digest)?
+            generator.generate_mixed_analog_half_with_source_digest(
+                &executable,
+                source_digest,
+                measurements.control(),
+            )?
         } else {
-            generator.generate_analyzed_module_with_source_digest(&executable, source_digest)?
+            generator.generate_analyzed_module_with_source_digest(
+                &executable,
+                source_digest,
+                measurements.control(),
+            )?
         };
         measurements.record(PipelinePhase::BytecodeGeneration, phase_started.elapsed());
 
@@ -2419,9 +2440,17 @@ impl VerilogACompiler {
         // came from.
         let generator = CodeGenerator::new();
         let model = if self.options.enable_ams {
-            generator.generate_mixed_analog_half_with_source_digest(&executable, source_digest)?
+            generator.generate_mixed_analog_half_with_source_digest(
+                &executable,
+                source_digest,
+                measurements.control(),
+            )?
         } else {
-            generator.generate_analyzed_module_with_source_digest(&executable, source_digest)?
+            generator.generate_analyzed_module_with_source_digest(
+                &executable,
+                source_digest,
+                measurements.control(),
+            )?
         };
         measurements.record(PipelinePhase::BytecodeGeneration, phase_started.elapsed());
         let canonical_ir = self.build_canonical_ir_artifact_from_module(
@@ -2434,7 +2463,7 @@ impl VerilogACompiler {
             Some(&prepared.replay_origins),
         )?;
         let mut model = model;
-        Self::renumber_state_slots(&mut model, &canonical_ir)?;
+        Self::renumber_state_slots(&mut model, &canonical_ir, measurements.control())?;
         Self::locate_analog_tasks(
             &mut model,
             &executable,

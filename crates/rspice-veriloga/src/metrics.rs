@@ -295,6 +295,25 @@ pub struct Measured<T> {
     pub metrics: PipelineMetrics,
 }
 
+fn code_generation_checkpoint_at(
+    control: &dyn PipelineControl,
+    phase: PipelinePhase,
+) -> Result<(), PipelineCancelled> {
+    if control.is_cancelled() {
+        Err(PipelineCancelled { phase })
+    } else {
+        Ok(())
+    }
+}
+
+/// A pass over a whole module's assignments takes seconds on a large model,
+/// so it asks between items rather than only when it is done.
+pub(crate) fn code_generation_checkpoint(
+    control: &dyn PipelineControl,
+) -> Result<(), PipelineCancelled> {
+    code_generation_checkpoint_at(control, PipelinePhase::BytecodeGeneration)
+}
+
 /// A pipeline stopped at a cooperative cancellation checkpoint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PipelineCancelled {
@@ -334,11 +353,7 @@ impl<'a> MetricsRecorder<'a> {
     }
 
     pub(crate) fn checkpoint(&self, phase: PipelinePhase) -> Result<(), PipelineCancelled> {
-        if self.control.is_cancelled() {
-            Err(PipelineCancelled { phase })
-        } else {
-            Ok(())
-        }
+        code_generation_checkpoint_at(self.control, phase)
     }
 
     pub(crate) fn record(&mut self, phase: PipelinePhase, elapsed: Duration) {
@@ -363,7 +378,6 @@ impl<'a> MetricsRecorder<'a> {
         &mut self.metrics
     }
 
-    #[cfg(feature = "rust-codegen")]
     pub(crate) fn control(&self) -> &'a dyn PipelineControl {
         self.control
     }

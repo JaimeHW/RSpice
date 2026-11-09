@@ -85,6 +85,9 @@ use crate::codegen::state_slots::{
 use crate::codegen::{
     AssignmentStep, BytecodeProgram, CompiledModel, CompiledZiPolynomial, Instruction,
 };
+use crate::metrics::{
+    NoPipelineControl, PipelineCancelled, PipelineControl, code_generation_checkpoint,
+};
 
 /// Why a compiled model could not be given the canonical per-site state
 /// numbering.
@@ -117,11 +120,14 @@ pub enum StateRenumberingError {
         family: CanonicalStateFamily,
         detail: String,
     },
+    /// The compile was stopped before the numbering was done.
+    Cancelled(PipelineCancelled),
 }
 
 impl std::fmt::Display for StateRenumberingError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Cancelled(cancelled) => write!(f, "{cancelled}"),
             Self::PairingIncomplete { module, detail } => write!(
                 f,
                 "module `{module}` state slots cannot be correlated with their canonical sites: \
@@ -234,6 +240,18 @@ pub(crate) struct StateSlotMapping {
 impl StateSlotMapping {
     /// Walk every program of one compiled module, pairing what has a root.
     pub(crate) fn build(model: &CompiledModel, hir: &HirModel, mir: &MirModel) -> Self {
+        match Self::build_with_control(model, hir, mir, &NoPipelineControl) {
+            Ok(mapping) => mapping,
+            Err(error) => unreachable!("the no-op pipeline control cannot cancel: {error}"),
+        }
+    }
+
+    fn build_with_control(
+        model: &CompiledModel,
+        hir: &HirModel,
+        mir: &MirModel,
+        control: &dyn PipelineControl,
+    ) -> Result<Self, PipelineCancelled> {
         let layout = CanonicalStateLayout::from_hir(hir);
         let statements = CanonicalStateLayout::statement_prefix(hir);
         let mut mapping = Self::default();
@@ -247,17 +265,19 @@ impl StateSlotMapping {
             &statements,
             Pass::Assignment,
             &model.assignment_steps,
-        );
+            control,
+        )?;
         mapping.pair_assignment_pass(
             &layout,
             &statements,
             Pass::NoiseAssignment,
             &model.noise_assignment_steps,
-        );
+            control,
+        )?;
         mapping.walk_stamps(model, mir, &layout, &mut scans);
         mapping.walk_unrooted(model);
 
-        mapping
+        Ok(mapping)
     }
 
     /// Every `(family, slot)` addressed by some program that no canonical site
@@ -802,12 +822,13 @@ impl StateSlotMapping {
         statements: &CanonicalStateLayout,
         pass: Pass,
         steps: &[AssignmentStep],
-    ) {
-        self.note_assignment_pass_programs(steps);
+        control: &dyn PipelineControl,
+    ) -> Result<(), PipelineCancelled> {
+        self.note_assignment_pass_programs(steps, control)?;
         let mut emitted = Vec::new();
-        assignment_pass_state(steps, &mut emitted);
+        assignment_pass_state(steps, &mut emitted, control)?;
         if emitted.is_empty() {
-            return;
+            return Ok(());
         }
         let mut paired = true;
         for operator in CanonicalStateOperator::ALL {
@@ -850,15 +871,21 @@ impl StateSlotMapping {
         if paired {
             self.paired_units += 1;
         }
+        Ok(())
     }
 
     /// Count the programs of an assignment pass and record every slot they
     /// address.
-    fn note_assignment_pass_programs(&mut self, steps: &[AssignmentStep]) {
+    fn note_assignment_pass_programs(
+        &mut self,
+        steps: &[AssignmentStep],
+        control: &dyn PipelineControl,
+    ) -> Result<(), PipelineCancelled> {
         for step in steps {
+            code_generation_checkpoint(control)?;
             match step {
                 AssignmentStep::Initialization { body, .. } => {
-                    self.note_assignment_pass_programs(body)
+                    self.note_assignment_pass_programs(body, control)?
                 }
                 AssignmentStep::Task(task) => {
                     for program in task.expressions() {
@@ -883,10 +910,11 @@ impl StateSlotMapping {
                     self.programs += 1;
                     self.note_allocated(condition);
                     self.state_programs += usize::from(carries_state(condition));
-                    self.note_assignment_pass_programs(body);
+                    self.note_assignment_pass_programs(body, control)?;
                 }
             }
         }
+        Ok(())
     }
 }
 
@@ -896,10 +924,17 @@ impl StateSlotMapping {
 /// Including the ordering detail that decides the answer:
 /// `compile_assignment_items` binds an indexed assignment's *value* program
 /// before it compiles the index expression.
-fn assignment_pass_state(steps: &[AssignmentStep], out: &mut Vec<Instruction>) {
+fn assignment_pass_state(
+    steps: &[AssignmentStep],
+    out: &mut Vec<Instruction>,
+    control: &dyn PipelineControl,
+) -> Result<(), PipelineCancelled> {
     for step in steps {
+        code_generation_checkpoint(control)?;
         match step {
-            AssignmentStep::Initialization { body, .. } => assignment_pass_state(body, out),
+            AssignmentStep::Initialization { body, .. } => {
+                assignment_pass_state(body, out, control)?
+            }
             AssignmentStep::Task(task) => task
                 .expressions()
                 .for_each(|program| push_state(program, out)),
@@ -910,10 +945,11 @@ fn assignment_pass_state(steps: &[AssignmentStep], out: &mut Vec<Instruction>) {
             }
             AssignmentStep::Loop { condition, body } => {
                 push_state(condition, out);
-                assignment_pass_state(body, out);
+                assignment_pass_state(body, out, control)?;
             }
         }
     }
+    Ok(())
 }
 
 fn push_state(program: &BytecodeProgram, out: &mut Vec<Instruction>) {
@@ -944,7 +980,17 @@ pub(crate) fn renumber_state_slots_to_canonical_sites(
     hir: &HirModel,
     mir: &MirModel,
 ) -> Result<usize, StateRenumberingError> {
-    let mapping = StateSlotMapping::build(model, hir, mir);
+    renumber_state_slots_with_control(model, hir, mir, &NoPipelineControl)
+}
+
+pub(crate) fn renumber_state_slots_with_control(
+    model: &mut CompiledModel,
+    hir: &HirModel,
+    mir: &MirModel,
+    control: &dyn PipelineControl,
+) -> Result<usize, StateRenumberingError> {
+    let mapping = StateSlotMapping::build_with_control(model, hir, mir, control)
+        .map_err(StateRenumberingError::Cancelled)?;
     let module = model.name.to_string();
     if let Some(refusal) = mapping.refusal(&module) {
         return Err(refusal);
@@ -956,7 +1002,17 @@ pub(crate) fn renumber_state_slots_to_canonical_sites(
 
     permute_backed_arrays(model, &mapping, &module)?;
 
+    // The walk visits every program of the model. Once told to stop it only
+    // passes over what is left; the half-renumbered model is dropped below.
+    let mut cancelled = None;
     let mut rewrite = |program: &mut BytecodeProgram| {
+        if cancelled.is_some() {
+            return;
+        }
+        if let Err(stop) = code_generation_checkpoint(control) {
+            cancelled = Some(stop);
+            return;
+        }
         for instruction in &mut program.instructions {
             for operator in CanonicalStateOperator::ALL {
                 let Some(emitted) = operator.bytecode_slot(instruction) else {
@@ -980,6 +1036,9 @@ pub(crate) fn renumber_state_slots_to_canonical_sites(
         }
     };
     for_each_program_mut(model, &mut rewrite);
+    if let Some(stop) = cancelled {
+        return Err(StateRenumberingError::Cancelled(stop));
+    }
 
     Ok(moved)
 }

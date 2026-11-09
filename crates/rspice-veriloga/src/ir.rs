@@ -11,6 +11,9 @@ use crate::branch_identity::BranchIdentity;
 use crate::error::CompileResult;
 pub use crate::ir::arena::NodeId;
 use crate::ir::arena::{ExprArena, Heavy, HeavyKind, IndexedRead, IrUnaryOp, Node, unpack_index};
+use crate::metrics::{
+    NoPipelineControl, PipelineCancelled, PipelineControl, code_generation_checkpoint,
+};
 use crate::semantic::AnalyzedModule;
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
@@ -612,7 +615,14 @@ impl DeviceIR {
     /// Conversion failures are hard errors: silently dropping an equation
     /// would produce a wrong (but plausible-looking) device.
     pub fn from_analyzed(module: &AnalyzedModule) -> crate::error::CompileResult<Self> {
-        Self::from_analyzed_inner(module, false)
+        Self::from_analyzed_with_control(module, &NoPipelineControl)
+    }
+
+    pub(crate) fn from_analyzed_with_control(
+        module: &AnalyzedModule,
+        control: &dyn PipelineControl,
+    ) -> crate::error::CompileResult<Self> {
+        Self::from_analyzed_inner(module, false, control)
     }
 
     /// Create the continuous-domain IR for a module whose discrete-domain
@@ -623,13 +633,15 @@ impl DeviceIR {
     /// digital half anywhere else would still be a silent miscompile.
     pub(crate) fn from_analyzed_mixed_analog_half(
         module: &AnalyzedModule,
+        control: &dyn PipelineControl,
     ) -> crate::error::CompileResult<Self> {
-        Self::from_analyzed_inner(module, true)
+        Self::from_analyzed_inner(module, true, control)
     }
 
     fn from_analyzed_inner(
         module: &AnalyzedModule,
         mixed_host_owns_digital: bool,
+        control: &dyn PipelineControl,
     ) -> crate::error::CompileResult<Self> {
         use crate::expr_converter::{ConversionContext, ExprConverter};
 
@@ -1110,6 +1122,7 @@ impl DeviceIR {
             num_nodes,
             num_branches,
             &converted_contribs,
+            control,
         )?;
         span.finish(&format!(
             "module={} shadow_variables={}",
@@ -1127,7 +1140,8 @@ impl DeviceIR {
                 &mut ir,
                 autodiff::AuxiliaryAxes::Noise(noise_process_count),
                 &shadow_roots,
-            );
+                control,
+            )?;
             if shadowed.is_empty() {
                 ir.noise_assignments_mirror_ordinary = true;
             } else {
@@ -1150,7 +1164,7 @@ impl DeviceIR {
         // Resolve ddx() operators now that the shadow context exists
         let span = crate::metrics::FineSpan::new("ir.resolve_ddx");
         let mut assignments = std::mem::take(&mut ir.assignments);
-        autodiff::resolve_ddx_in_items(&mut ir.exprs, &mut assignments, &shadows);
+        autodiff::resolve_ddx_in_items(&mut ir.exprs, &mut assignments, &shadows, control)?;
         ir.assignments = assignments;
         span.finish(&format!(
             "module={} assignments={}",
@@ -1159,7 +1173,7 @@ impl DeviceIR {
         ));
         let span = crate::metrics::FineSpan::new("ir.resolve_ddx_noise");
         let mut noise_assignments = std::mem::take(&mut ir.noise_assignments);
-        autodiff::resolve_ddx_in_items(&mut ir.exprs, &mut noise_assignments, &shadows);
+        autodiff::resolve_ddx_in_items(&mut ir.exprs, &mut noise_assignments, &shadows, control)?;
         ir.noise_assignments = noise_assignments;
         span.finish(&format!(
             "module={} assignments={}",
@@ -1178,7 +1192,8 @@ impl DeviceIR {
                 autodiff::collect_var_names(&ir.exprs, expr, &mut roots);
             }
             let family = autodiff::AuxiliaryAxes::LimiterCorrection;
-            let shadowed = autodiff::auxiliary_shadowed_dependencies(&mut ir, family, &roots);
+            let shadowed =
+                autodiff::auxiliary_shadowed_dependencies(&mut ir, family, &roots, control)?;
             autodiff::build_auxiliary_shadow_assignments(&mut ir, shadowed, &mut shadows, family);
         }
 
@@ -2696,9 +2711,10 @@ pub mod autodiff {
             items: &[IrAssignmentItem],
             variables: &[VarDef],
             arrays: &[ArrayDef],
-        ) -> Self {
+            control: &dyn PipelineControl,
+        ) -> Result<Self, PipelineCancelled> {
             let mut reads_by_target: HashMap<SmolStr, Vec<SmolStr>> = HashMap::new();
-            collect_liveness_edges(arena, items, variables, &mut reads_by_target);
+            collect_liveness_edges(arena, items, variables, &mut reads_by_target, control)?;
             for reads in reads_by_target.values_mut() {
                 reads.sort_unstable();
                 reads.dedup();
@@ -2721,11 +2737,11 @@ pub mod autodiff {
                 families.push(members);
             }
 
-            Self {
+            Ok(Self {
                 reads_by_target,
                 families,
                 family_of,
-            }
+            })
         }
 
         /// Least set containing `roots` and closed under both relations: a
@@ -2767,8 +2783,10 @@ pub mod autodiff {
         items: &[IrAssignmentItem],
         variables: &[VarDef],
         out: &mut HashMap<SmolStr, Vec<SmolStr>>,
-    ) {
+        control: &dyn PipelineControl,
+    ) -> Result<(), PipelineCancelled> {
         for item in items {
+            code_generation_checkpoint(control)?;
             match item {
                 IrAssignmentItem::Initialization { .. } => {}
                 IrAssignmentItem::Task(_) => {}
@@ -2785,10 +2803,11 @@ pub mod autodiff {
                     out.entry(target).or_default().extend(reads);
                 }
                 IrAssignmentItem::Loop { body, .. } => {
-                    collect_liveness_edges(arena, body, variables, out);
+                    collect_liveness_edges(arena, body, variables, out, control)?;
                 }
             }
         }
+        Ok(())
     }
 
     /// Orders needed at each write, rather than a module-wide fixed jet.
@@ -3031,9 +3050,11 @@ pub mod autodiff {
         families: &HashMap<SmolStr, SmolStr>,
         num_nodes: usize,
         num_branches: usize,
-    ) -> Vec<IrAssignmentItem> {
+        control: &dyn PipelineControl,
+    ) -> Result<Vec<IrAssignmentItem>, PipelineCancelled> {
         let mut rewritten = Vec::with_capacity(items.len() * 2);
         for (item, plan) in items.into_iter().zip(plans) {
+            code_generation_checkpoint(control)?;
             match item {
                 IrAssignmentItem::Assign(mut assign) => {
                     let target = assign
@@ -3120,13 +3141,14 @@ pub mod autodiff {
                         families,
                         num_nodes,
                         num_branches,
-                    );
+                        control,
+                    )?;
                     rewritten.push(IrAssignmentItem::Loop { condition, body });
                 }
                 other => rewritten.push(other),
             }
         }
-        rewritten
+        Ok(rewritten)
     }
 
     /// Allocate only the orders actually consumed at each reaching write.
@@ -3135,6 +3157,7 @@ pub mod autodiff {
         num_nodes: usize,
         num_branches: usize,
         contributions: &[NodeId],
+        control: &dyn PipelineControl,
     ) -> CompileResult<ShadowContext> {
         let DeviceIR {
             exprs,
@@ -3294,7 +3317,8 @@ pub mod autodiff {
             &families,
             num_nodes,
             num_branches,
-        );
+            control,
+        )?;
         span.finish(&format!(
             "assignments={} nodes={}",
             assignments.len(),
@@ -3814,8 +3838,10 @@ pub mod autodiff {
         family: AuxiliaryAxes,
         deps: &mut HashMap<SmolStr, BTreeSet<DerivativeWrt>>,
         changed: &mut bool,
-    ) {
+        control: &dyn PipelineControl,
+    ) -> Result<(), PipelineCancelled> {
         for item in items {
+            code_generation_checkpoint(control)?;
             match item {
                 IrAssignmentItem::Initialization { .. } => {}
                 IrAssignmentItem::Task(_) => {}
@@ -3847,11 +3873,12 @@ pub mod autodiff {
                         }
                     }
                 }
-                IrAssignmentItem::Loop { body, .. } => {
-                    scan_auxiliary_shadowed(arena, body, variables, arrays, family, deps, changed)
-                }
+                IrAssignmentItem::Loop { body, .. } => scan_auxiliary_shadowed(
+                    arena, body, variables, arrays, family, deps, changed, control,
+                )?,
             }
         }
+        Ok(())
     }
 
     fn interleave_auxiliary_shadows(
@@ -3941,10 +3968,11 @@ pub mod autodiff {
         ir: &mut DeviceIR,
         family: AuxiliaryAxes,
         shadow_roots: &HashSet<SmolStr>,
-    ) -> HashMap<SmolStr, BTreeSet<DerivativeWrt>> {
+        control: &dyn PipelineControl,
+    ) -> Result<HashMap<SmolStr, BTreeSet<DerivativeWrt>>, PipelineCancelled> {
         let mut deps = HashMap::new();
         if family == AuxiliaryAxes::Noise(0) {
-            return deps;
+            return Ok(deps);
         }
         let DeviceIR {
             exprs,
@@ -3966,17 +3994,18 @@ pub mod autodiff {
                 family,
                 &mut deps,
                 &mut changed,
-            );
+                control,
+            )?;
             if !changed {
                 break;
             }
         }
         span.finish(&format!("passes={passes} shadowed={}", deps.len()));
         if deps.is_empty() {
-            return deps;
+            return Ok(deps);
         }
         let span = crate::metrics::FineSpan::new("ir.auxiliary_liveness");
-        let liveness = LivenessGraph::build(exprs, assignments, variables, arrays);
+        let liveness = LivenessGraph::build(exprs, assignments, variables, arrays, control)?;
         let live = liveness.live_from(shadow_roots);
         span.finish(&format!(
             "assignments={} live={}",
@@ -3984,7 +4013,7 @@ pub mod autodiff {
             live.len()
         ));
         deps.retain(|name, _| live.contains(name));
-        deps
+        Ok(deps)
     }
 
     /// Add the selected auxiliary direction shadows in `deps`. They have no
@@ -4174,11 +4203,13 @@ pub mod autodiff {
         arena: &mut ExprArena,
         items: &mut [IrAssignmentItem],
         shadows: &ShadowContext,
-    ) {
+        control: &dyn PipelineControl,
+    ) -> Result<(), PipelineCancelled> {
         for item in items {
+            code_generation_checkpoint(control)?;
             match item {
                 IrAssignmentItem::Initialization { body, .. } => {
-                    resolve_ddx_in_items(arena, body, shadows)
+                    resolve_ddx_in_items(arena, body, shadows, control)?
                 }
                 IrAssignmentItem::Task(task) => {
                     for expression in task.expressions_mut() {
@@ -4201,10 +4232,11 @@ pub mod autodiff {
                     if contains_ddx(arena, *condition) {
                         *condition = resolve_ddx(arena, *condition, shadows);
                     }
-                    resolve_ddx_in_items(arena, body, shadows);
+                    resolve_ddx_in_items(arena, body, shadows, control)?;
                 }
             }
         }
+        Ok(())
     }
 
     /// Whether a subtree holds a `ddx` operator.

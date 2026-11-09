@@ -10,6 +10,7 @@ use super::*;
 use crate::ir::arena::{
     ArrayIndexBounds, ExprArena, Heavy, IrUnaryOp, Node, NodeId, ZiPolynomial, unpack_index,
 };
+use crate::metrics::{NoPipelineControl, PipelineControl, code_generation_checkpoint};
 use std::collections::HashMap;
 
 #[derive(Default)]
@@ -236,7 +237,7 @@ impl CodeGenerator {
     ) -> CompileResult<CompiledModel> {
         let selected = Self::select_module(analyzed, module_name)?;
         let module = crate::semantic::elaborate_executable_module(analyzed, selected)?;
-        self.generate_analyzed_module_with_source_digest(&module, source_digest)
+        self.generate_analyzed_module_with_source_digest(&module, source_digest, &NoPipelineControl)
     }
 
     /// Lower one already-selected and already-elaborated analyzed module.
@@ -246,8 +247,9 @@ impl CodeGenerator {
         &self,
         module: &AnalyzedModule,
         source_digest: impl Into<SmolStr>,
+        control: &dyn PipelineControl,
     ) -> CompileResult<CompiledModel> {
-        self.generate_analyzed_module_inner(module, source_digest.into(), false)
+        self.generate_analyzed_module_inner(module, source_digest.into(), false, control)
     }
 
     /// Lower only the analog half after a mixed host has taken ownership of
@@ -256,8 +258,9 @@ impl CodeGenerator {
         &self,
         module: &AnalyzedModule,
         source_digest: impl Into<SmolStr>,
+        control: &dyn PipelineControl,
     ) -> CompileResult<CompiledModel> {
-        self.generate_analyzed_module_inner(module, source_digest.into(), true)
+        self.generate_analyzed_module_inner(module, source_digest.into(), true, control)
     }
 
     fn generate_analyzed_module_inner(
@@ -265,15 +268,16 @@ impl CodeGenerator {
         module: &AnalyzedModule,
         source_digest: SmolStr,
         mixed_host_owns_digital: bool,
+        control: &dyn PipelineControl,
     ) -> CompileResult<CompiledModel> {
         let timings = compile_timings_enabled();
 
         // Build IR
         let phase_start = web_time::Instant::now();
         let mut ir = if mixed_host_owns_digital {
-            DeviceIR::from_analyzed_mixed_analog_half(module)?
+            DeviceIR::from_analyzed_mixed_analog_half(module, control)?
         } else {
-            DeviceIR::from_analyzed(module)?
+            DeviceIR::from_analyzed_with_control(module, control)?
         };
         if timings {
             eprintln!(
@@ -289,7 +293,7 @@ impl CodeGenerator {
 
         // Generate code from IR
         let phase_start = web_time::Instant::now();
-        let mut model = self.generate_from_ir(&mut ir)?;
+        let mut model = self.generate_from_ir(&mut ir, control)?;
         model.source_digest = source_digest;
         if timings {
             eprintln!(
@@ -372,7 +376,11 @@ impl CodeGenerator {
     /// The generator's emission state ([`EmitContext`], the site maps, the
     /// per-emission counters) is owned by `self` and by a context built before
     /// the first take, so nothing borrows the IR across a drop.
-    fn generate_from_ir(&self, ir: &mut DeviceIR) -> CompileResult<CompiledModel> {
+    fn generate_from_ir(
+        &self,
+        ir: &mut DeviceIR,
+        control: &dyn PipelineControl,
+    ) -> CompileResult<CompiledModel> {
         let timings = compile_timings_enabled();
         let emit_ctx = EmitContext::from_ir(ir);
         let num_terminals = ir.terminals.len();
@@ -559,8 +567,12 @@ impl CodeGenerator {
         // each item's boxed trees are freed the moment they are in the arena,
         // and the list itself is gone when the call returns. That is what lets
         // the largest shipped models compile inside a 32 GB box.
-        model.assignment_steps =
-            self.compile_assignment_items(std::mem::take(&mut ir.assignments), &arena, &emit_ctx)?;
+        model.assignment_steps = self.compile_assignment_items(
+            std::mem::take(&mut ir.assignments),
+            &arena,
+            &emit_ctx,
+            control,
+        )?;
         // A mirrored noise pass *is* the ordinary pass, so say so by leaving the
         // list empty rather than by carrying a copy of it
         // ([`CompiledModel::noise_assignment_steps`] documents the convention;
@@ -584,6 +596,7 @@ impl CodeGenerator {
                 std::mem::take(&mut ir.noise_assignments),
                 &arena,
                 &emit_ctx,
+                control,
             )?
         };
         if timings {
@@ -695,13 +708,15 @@ impl CodeGenerator {
         items: Vec<crate::ir::IrAssignmentItem>,
         arena: &ExprArena,
         emit_ctx: &EmitContext,
+        control: &dyn PipelineControl,
     ) -> CompileResult<Vec<AssignmentStep>> {
         let mut steps = Vec::with_capacity(items.len());
         for item in items {
+            code_generation_checkpoint(control)?;
             steps.push(match item {
                 crate::ir::IrAssignmentItem::Initialization { phase, body } => {
                     let before = self.requires_nodeset_phase.get();
-                    let body = self.compile_assignment_items(body, arena, emit_ctx);
+                    let body = self.compile_assignment_items(body, arena, emit_ctx, control);
                     self.requires_nodeset_phase.set(before);
                     AssignmentStep::Initialization { phase, body: body? }
                 }
@@ -730,7 +745,7 @@ impl CodeGenerator {
                 }
                 crate::ir::IrAssignmentItem::Loop { condition, body } => {
                     let condition = self.compile_expr(arena, condition, emit_ctx)?;
-                    let body = self.compile_assignment_items(body, arena, emit_ctx)?;
+                    let body = self.compile_assignment_items(body, arena, emit_ctx, control)?;
                     AssignmentStep::Loop { condition, body }
                 }
             });
