@@ -2386,6 +2386,35 @@ fn the_exp_repeat_option_names_what_it_accepts() {
     );
 }
 
+/// Voltages of `node` at `times`, from one transient limited to `maximum_step`.
+fn tran_samples(
+    netlist: &Netlist,
+    stop: f64,
+    maximum_step: f64,
+    times: &[f64],
+    node: &str,
+) -> Vec<f64> {
+    let tran = Engine::default()
+        .run_tran(netlist, stop, maximum_step)
+        .expect("transient solves");
+    let wave = tran
+        .try_voltage_waveform_named(node)
+        .unwrap_or_else(|| panic!("no waveform for {node}"));
+    times
+        .iter()
+        .map(|&time| {
+            let index = tran.time.partition_point(|t| *t < time).max(1);
+            let (t0, t1) = (tran.time[index - 1], tran.time[index]);
+            let fraction = if t1 > t0 {
+                (time - t0) / (t1 - t0)
+            } else {
+                0.0
+            };
+            wave[index - 1] + fraction * (wave[index] - wave[index - 1])
+        })
+        .collect()
+}
+
 /// The collector current of `Z1 c g 0 {instance}` from an operating point.
 fn igbt_collector_current(model: &str, instance: &str, extra: &str, vc: f64, vg: f64) -> f64 {
     let deck = format!(
