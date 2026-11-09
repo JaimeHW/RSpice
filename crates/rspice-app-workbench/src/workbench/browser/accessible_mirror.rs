@@ -46,7 +46,16 @@ pub struct AccessibleProjection {
     pub focused: Option<(NodeId, MirroredControl)>,
     pub caret_line: Option<CaretLine>,
     pub dialog: Option<MirroredDialog>,
-    pub live: Vec<(NodeId, String)>,
+    pub live: Vec<LiveNode>,
+}
+
+/// A node whose words are spoken when they change. An urgent one interrupts
+/// the reader; the rest wait for a pause.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LiveNode {
+    pub id: NodeId,
+    pub text: String,
+    pub urgent: bool,
 }
 
 /// Reduce one frame's tree. Costs one pass over the nodes; the parts that need
@@ -65,10 +74,14 @@ pub fn project(update: &TreeUpdate) -> AccessibleProjection {
         if node.live().is_some_and(|live| live != Live::Off)
             && let Some(text) = live_text(node)
         {
-            live.push((*id, text.to_owned()));
+            live.push(LiveNode {
+                id: *id,
+                text: text.to_owned(),
+                urgent: node.live() == Some(Live::Assertive),
+            });
         }
     }
-    live.sort_unstable_by_key(|(id, _)| *id);
+    live.sort_unstable_by_key(|node| node.id);
 
     let is_root = update
         .tree
@@ -286,6 +299,7 @@ pub struct MirrorPatch {
     pub dialog: Option<Option<MirroredDialog>>,
     pub focus_announcement: Option<String>,
     pub announcement: Option<String>,
+    pub alert: Option<String>,
 }
 
 impl MirrorPatch {
@@ -356,18 +370,26 @@ impl MirrorState {
             self.dialog = projection.dialog;
         }
 
+        let mut alerts = Vec::new();
         let mut live = HashMap::with_capacity(projection.live.len());
-        for (id, text) in projection.live {
-            if self.started && self.live.get(&id) != Some(&text) {
-                announcements.push(text.clone());
+        for node in projection.live {
+            if self.started && self.live.get(&node.id) != Some(&node.text) {
+                if node.urgent {
+                    alerts.push(node.text.clone());
+                } else {
+                    announcements.push(node.text.clone());
+                }
             }
-            live.insert(id, text);
+            live.insert(node.id, node.text);
         }
         self.live = live;
         self.started = true;
 
         if !announcements.is_empty() {
             patch.announcement = Some(announcements.join(". "));
+        }
+        if !alerts.is_empty() {
+            patch.alert = Some(alerts.join(". "));
         }
         patch
     }
@@ -478,6 +500,7 @@ mod dom {
     const DIALOG: &str = "rspice_mirror_dialog";
     const FOCUS_ANNOUNCEMENT: &str = "rspice_mirror_focus_announcement";
     const ANNOUNCEMENT: &str = "rspice_mirror_announcement";
+    const ALERT: &str = "rspice_mirror_alert";
 
     /// Keeps the page's off-screen mirror in step with egui's tree. Registered
     /// once; the tree it reads is built whether or not anything else asks.
@@ -555,6 +578,9 @@ mod dom {
         }
         if let Some(text) = &patch.announcement {
             announce(&document, ANNOUNCEMENT, text);
+        }
+        if let Some(text) = &patch.alert {
+            announce(&document, ALERT, text);
         }
         Ok(())
     }
@@ -877,7 +903,11 @@ mod tests {
 
     fn with_live(id: u64, text: &str) -> AccessibleProjection {
         AccessibleProjection {
-            live: vec![(NodeId(id), text.to_owned())],
+            live: vec![LiveNode {
+                id: NodeId(id),
+                text: text.to_owned(),
+                urgent: false,
+            }],
             ..Default::default()
         }
     }
@@ -896,6 +926,23 @@ mod tests {
                 .as_deref(),
             Some("Compiled")
         );
+    }
+
+    #[test]
+    fn an_urgent_node_is_said_in_the_alert_region() {
+        let urgent = |text: &str| AccessibleProjection {
+            live: vec![LiveNode {
+                id: NodeId(9),
+                text: text.to_owned(),
+                urgent: true,
+            }],
+            ..Default::default()
+        };
+        let mut mirror = MirrorState::default();
+        mirror.patch(urgent("Ready"), catalog());
+        let patch = mirror.patch(urgent("Save failed"), catalog());
+        assert_eq!(patch.alert.as_deref(), Some("Save failed"));
+        assert_eq!(patch.announcement, None);
     }
 
     #[test]
