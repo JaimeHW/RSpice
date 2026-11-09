@@ -254,6 +254,7 @@ jobs:
           --test veriloga_module_timing
           --test veriloga_noise
           --test veriloga_noise_process
+          --test veriloga_operating_points
           --test veriloga_project_runtime_batch
           --test veriloga_project_virtual_identity
           --test veriloga_session_holds
@@ -466,6 +467,7 @@ jobs:
           --test veriloga_module_timing
           --test veriloga_noise
           --test veriloga_noise_process
+          --test veriloga_operating_points
           --test veriloga_project_runtime_batch
           --test veriloga_project_virtual_identity
           --test veriloga_session_holds
