@@ -85,9 +85,7 @@ use crate::codegen::state_slots::{
 use crate::codegen::{
     AssignmentStep, BytecodeProgram, CompiledModel, CompiledZiPolynomial, Instruction,
 };
-use crate::metrics::{
-    NoPipelineControl, PipelineCancelled, PipelineControl, code_generation_checkpoint,
-};
+use crate::metrics::{PipelineCancelled, PipelineControl, code_generation_checkpoint};
 
 /// Why a compiled model could not be given the canonical per-site state
 /// numbering.
@@ -239,8 +237,9 @@ pub(crate) struct StateSlotMapping {
 
 impl StateSlotMapping {
     /// Walk every program of one compiled module, pairing what has a root.
+    #[cfg(any(test, feature = "native", feature = "wasm-jit"))]
     pub(crate) fn build(model: &CompiledModel, hir: &HirModel, mir: &MirModel) -> Self {
-        match Self::build_with_control(model, hir, mir, &NoPipelineControl) {
+        match Self::build_with_control(model, hir, mir, &crate::metrics::NoPipelineControl) {
             Ok(mapping) => mapping,
             Err(error) => unreachable!("the no-op pipeline control cannot cancel: {error}"),
         }
@@ -981,7 +980,7 @@ pub(crate) fn renumber_state_slots_to_canonical_sites(
     hir: &HirModel,
     mir: &MirModel,
 ) -> Result<usize, StateRenumberingError> {
-    renumber_state_slots_with_control(model, hir, mir, &NoPipelineControl)
+    renumber_state_slots_with_control(model, hir, mir, &crate::metrics::NoPipelineControl)
 }
 
 pub(crate) fn renumber_state_slots_with_control(
