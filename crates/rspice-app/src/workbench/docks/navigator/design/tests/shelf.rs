@@ -21,6 +21,35 @@ use crate::state::{
     engine_only_xspice_devices,
 };
 use crate::workbench::framework::requests::FocusPlacementSearch;
+use rspice_app_models::veriloga_library::BUILTIN_VERILOGA_MODELS;
+
+/// The shelf's built-in Verilog-A rows read and stand as the Library page
+/// lists them: its name, its device class and its order.
+#[test]
+fn built_in_veriloga_models_read_and_stand_as_the_library_lists_them() {
+    let library = BUILTIN_VERILOGA_MODELS;
+    let first = &library[0];
+    assert_ne!(first.registry_name, first.name);
+    assert_eq!(builtin_label(first.registry_name), first.name);
+    assert_eq!(
+        builtin_meta(4, first.registry_name, first.module),
+        format!("4 pin \u{00b7} {}", first.class.label())
+    );
+
+    let mut names = library
+        .iter()
+        .rev()
+        .map(|model| model.registry_name)
+        .collect::<Vec<_>>();
+    in_library_order(&mut names, |name| *name);
+    assert_eq!(
+        names,
+        library
+            .iter()
+            .map(|model| model.registry_name)
+            .collect::<Vec<_>>()
+    );
+}
 
 /// Every built-in part is filed under exactly one functional group, and a
 /// label names one row: two rows a reader cannot tell apart are one too many.
