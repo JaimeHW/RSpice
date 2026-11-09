@@ -100,11 +100,13 @@ pub enum Mode {
     Light,
     /// Follow the host operating-system or browser color preference.
     System,
+    /// White on black, with no tint or shadow to read past.
+    HighContrast,
 }
 
 impl Mode {
     /// All modes, in presentation order.
-    pub const ALL: [Mode; 3] = [Mode::Dark, Mode::Light, Mode::System];
+    pub const ALL: [Mode; 4] = [Mode::Dark, Mode::Light, Mode::System, Mode::HighContrast];
 
     /// Human-readable name.
     pub fn label(self) -> &'static str {
@@ -112,6 +114,7 @@ impl Mode {
             Mode::Dark => "Dark",
             Mode::Light => "Light",
             Mode::System => "System",
+            Mode::HighContrast => "High contrast",
         }
     }
 
@@ -248,10 +251,16 @@ impl Tokens {
         let color = match (direction, mode) {
             (Direction::Instrument, Mode::Dark | Mode::System) => palette::INSTRUMENT_DARK,
             (Direction::Instrument, Mode::Light) => palette::INSTRUMENT_LIGHT,
+            (Direction::Instrument, Mode::HighContrast) => palette::INSTRUMENT_HIGH_CONTRAST,
         };
         Self {
             direction,
-            mode,
+            // What is drawn on this set: a contrast selection paints a dark ground.
+            mode: if mode == Mode::HighContrast {
+                Mode::Dark
+            } else {
+                mode
+            },
             density,
             color_safe_traces: false,
             color,

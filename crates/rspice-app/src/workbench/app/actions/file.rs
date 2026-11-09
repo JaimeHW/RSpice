@@ -519,6 +519,7 @@ mod tests {
                 "This test instance runs without a model-pack store.",
             ),
             file_workflow_io: Box::new(file_io),
+            read_system_contrast: crate::workbench::system_contrast::read,
             export_workflow_io: Box::new(TestExportWorkflowIo),
         }
     }

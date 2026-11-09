@@ -174,6 +174,7 @@ pub(crate) mod examples {
 }
 pub(crate) mod features;
 pub(crate) mod frame;
+pub(crate) mod system_contrast;
 pub(crate) use rspice_app_hardcopy::workbench::hardcopy;
 #[cfg(test)]
 pub(crate) use rspice_app_hardcopy::workbench::hardcopy_adapters;

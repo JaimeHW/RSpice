@@ -12,7 +12,7 @@ use egui::{
 use serde::{Deserialize, Serialize};
 
 use super::fonts;
-use super::palette::{INSTRUMENT_DARK, INSTRUMENT_LIGHT, Palette};
+use super::palette::{ContrastInks, INSTRUMENT_DARK, INSTRUMENT_LIGHT, Palette, high_contrast};
 use super::tokens::{self, Density, Direction, Metrics, Mode, Tokens};
 
 /// Paint the design-system keyboard focus indicator for a custom widget.
@@ -144,7 +144,7 @@ impl EngineeringCanvasTheme {
     const fn migrate_from_interface_mode(mode: Mode) -> Self {
         match mode {
             Mode::Light => Self::Light,
-            Mode::Dark | Mode::System => Self::Dark,
+            Mode::Dark | Mode::System | Mode::HighContrast => Self::Dark,
         }
     }
 }
@@ -262,18 +262,57 @@ const OKABE_ITO_TRACES: [Color32; 6] = [
     Color32::from_rgb(0xCC, 0x79, 0xA7), // reddish purple
 ];
 
+fn system_contrast_id() -> egui::Id {
+    egui::Id::new("rspice.theme.system-contrast")
+}
+
 impl Theme {
     /// Resolve this selection into a concrete token set.
     pub fn tokens(self) -> Tokens {
         let mut tokens = Tokens::new(self.direction, self.mode, self.density);
+        tokens.color_safe_traces = self.colorblind_traces;
+        // A contrast palette is whole: its canvas and traces are part of it.
+        if self.mode == Mode::HighContrast {
+            return tokens;
+        }
         let canvas_palette = self.canvas_theme.palette();
         apply_engineering_canvas_palette(&mut tokens, canvas_palette);
-        tokens.color_safe_traces = self.colorblind_traces;
         if self.colorblind_traces {
             tokens.color.traces = OKABE_ITO_TRACES;
         }
         apply_canvas_contrast(&mut tokens, self.canvas_contrast, canvas_palette.text);
         tokens
+    }
+
+    /// This selection's tokens on `ctx`'s host. A contrast theme the operating
+    /// system is running takes precedence over any selection, as it does in
+    /// every other application on the machine.
+    fn tokens_on_host(self, ctx: &Context) -> Tokens {
+        if let Some(inks) = Self::system_contrast(ctx) {
+            let mut tokens = Tokens::new(self.direction, Mode::HighContrast, self.density);
+            tokens.color = high_contrast(inks);
+            tokens.color_safe_traces = self.colorblind_traces;
+            tokens.mode = if inks.has_dark_ground() {
+                Mode::Dark
+            } else {
+                Mode::Light
+            };
+            return tokens;
+        }
+        let mut effective = self;
+        effective.mode = self.mode.effective(ctx);
+        effective.tokens()
+    }
+
+    /// The contrast theme the operating system is running, as last reported.
+    pub fn system_contrast(ctx: &Context) -> Option<ContrastInks> {
+        ctx.data(|data| data.get_temp::<Option<ContrastInks>>(system_contrast_id()))
+            .flatten()
+    }
+
+    /// Report the contrast theme the operating system is running.
+    pub fn report_system_contrast(ctx: &Context, inks: Option<ContrastInks>) {
+        ctx.data_mut(|data| data.insert_temp(system_contrast_id(), inks));
     }
 
     /// Apply the theme to an egui context: install fonts (once), map tokens
@@ -287,9 +326,7 @@ impl Theme {
             ctx.data_mut(|d| d.insert_temp(fonts_installed_key, true));
         }
 
-        let mut effective = self;
-        effective.mode = self.mode.effective(ctx);
-        let t = effective.tokens();
+        let t = self.tokens_on_host(ctx);
         ctx.set_global_style(build_style(&t));
         t.install(ctx);
     }
@@ -301,9 +338,7 @@ impl Theme {
     /// Apply responsive metrics with the user's validated minimum target.
     /// Device capability may increase this value but never reduce it.
     pub fn apply_responsive_metrics_with_target(self, ctx: &Context, touch_target: Option<f32>) {
-        let mut effective = self;
-        effective.mode = self.mode.effective(ctx);
-        let mut t = effective.tokens();
+        let mut t = self.tokens_on_host(ctx);
         if let Some(touch_target) = touch_target {
             let touch_target = touch_target.max(44.0);
             t.metrics = Metrics {

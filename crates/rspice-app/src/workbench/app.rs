@@ -272,6 +272,8 @@ pub struct RSpiceApp {
     /// File workflow IO backend (native in production, injectable in tests).
     pub(crate) file_workflow_io: Box<dyn crate::io::FileWorkflowIo>,
     /// Export workflow IO backend (native in production, injectable in tests).
+    /// Asks the operating system for its contrast theme, once a frame.
+    pub(crate) read_system_contrast: fn() -> Option<crate::ui::palette::ContrastInks>,
     pub(crate) export_workflow_io:
         Box<dyn crate::workbench::workflows::export_workflow::ExportWorkflowIo>,
 }
@@ -408,6 +410,7 @@ impl RSpiceApp {
                 "This test instance runs without a model-pack store.",
             ),
             file_workflow_io: Box::new(crate::io::NativeFileWorkflowIo),
+            read_system_contrast: crate::workbench::system_contrast::read,
             export_workflow_io: Box::new(
                 crate::workbench::workflows::export_workflow::NativeExportWorkflowIo,
             ),
@@ -582,6 +585,7 @@ impl RSpiceApp {
             file_workflow_io: Box::new(
                 crate::io::NativeFileWorkflowIo,
             ),
+            read_system_contrast: crate::workbench::system_contrast::read,
             export_workflow_io: Box::new(
                 crate::workbench::workflows::export_workflow::NativeExportWorkflowIo,
             ),
@@ -613,7 +617,10 @@ impl RSpiceApp {
         );
         // (Re)apply the theme when it changes — this maps the design tokens
         // onto the egui style and republishes the active palette.
-        let system_mode_changed = self.state.workbench.theme.mode == crate::ui::Mode::System
+        let system_contrast = (self.read_system_contrast)();
+        crate::ui::Theme::report_system_contrast(ctx, system_contrast);
+        let system_mode_changed = system_contrast.is_none()
+            && self.state.workbench.theme.mode == crate::ui::Mode::System
             && crate::ui::tokens::Tokens::get(ctx).mode
                 != self.state.workbench.theme.mode.effective(ctx);
         if self.first_frame

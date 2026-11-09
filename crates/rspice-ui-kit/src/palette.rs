@@ -116,6 +116,197 @@ pub struct SyntaxPalette {
     pub current_line: Color32,
 }
 
+/// The colors a contrast theme sets, which everything on screen is drawn from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ContrastInks {
+    /// The ground of every surface.
+    pub window: Color32,
+    pub window_text: Color32,
+    /// Selection and primary actions.
+    pub highlight: Color32,
+    /// Text on [`Self::highlight`].
+    pub highlight_text: Color32,
+    pub link: Color32,
+    pub disabled_text: Color32,
+}
+
+impl ContrastInks {
+    /// White on black, with cyan selection and yellow links.
+    pub const BLACK: Self = Self {
+        window: Color32::from_rgb(0, 0, 0),
+        window_text: Color32::from_rgb(255, 255, 255),
+        highlight: Color32::from_rgb(0x1a, 0xeb, 0xff),
+        highlight_text: Color32::from_rgb(0, 0, 0),
+        link: Color32::from_rgb(255, 255, 0),
+        disabled_text: Color32::from_rgb(0x3f, 0xf2, 0x3f),
+    };
+
+    /// Whether text on this theme's ground is lighter than the ground.
+    pub const fn has_dark_ground(self) -> bool {
+        let ground = self.window;
+        (ground.r() as u32 * 2126 + ground.g() as u32 * 7152 + ground.b() as u32 * 722)
+            < 128 * 10_000
+    }
+}
+
+/// `to` laid over `from` at `percent`, rounded down channel by channel.
+const fn blend(from: Color32, to: Color32, percent: u32) -> Color32 {
+    const fn channel(from: u8, to: u8, percent: u32) -> u8 {
+        ((from as u32 * (100 - percent) + to as u32 * percent) / 100) as u8
+    }
+    Color32::from_rgb(
+        channel(from.r(), to.r(), percent),
+        channel(from.g(), to.g(), percent),
+        channel(from.b(), to.b(), percent),
+    )
+}
+
+/// The states, the canvas classes, the traces and the code a contrast theme
+/// has no system color for, one set per kind of ground.
+struct ContrastGroundInks {
+    ok: Color32,
+    warn: Color32,
+    err: Color32,
+    info: Color32,
+    magenta: Color32,
+    traces: [Color32; 6],
+    keyword: Color32,
+    discipline: Color32,
+    system: Color32,
+    analog_operator: Color32,
+    contribution: Color32,
+    number: Color32,
+    string: Color32,
+    comment: Color32,
+    directive: Color32,
+    attribute: Color32,
+    module_name: Color32,
+    port_name: Color32,
+    parameter_name: Color32,
+}
+
+const ON_DARK_GROUND: ContrastGroundInks = ContrastGroundInks {
+    ok: Color32::from_rgb(0x5c, 0xf2, 0x7a),
+    warn: Color32::from_rgb(0xff, 0xc1, 0x4d),
+    err: Color32::from_rgb(0xff, 0x9a, 0x8c),
+    info: Color32::from_rgb(0x8c, 0xd8, 0xff),
+    magenta: Color32::from_rgb(0xff, 0x8c, 0xf0),
+    traces: [
+        Color32::from_rgb(0xff, 0xe0, 0x33),
+        Color32::from_rgb(0x4d, 0xe8, 0xff),
+        Color32::from_rgb(0xff, 0x8c, 0xf0),
+        Color32::from_rgb(0x5c, 0xf2, 0x7a),
+        Color32::from_rgb(0xff, 0xff, 0xff),
+        Color32::from_rgb(0xff, 0xa8, 0x5c),
+    ],
+    keyword: Color32::from_rgb(0x8c, 0xcb, 0xff),
+    discipline: Color32::from_rgb(0x4e, 0xe6, 0xd0),
+    system: Color32::from_rgb(0xd6, 0xb4, 0xfd),
+    analog_operator: Color32::from_rgb(0xff, 0xa6, 0xe6),
+    contribution: Color32::from_rgb(0xff, 0xe0, 0x66),
+    number: Color32::from_rgb(0xb5, 0xf0, 0xa0),
+    string: Color32::from_rgb(0xff, 0xc0, 0x8a),
+    comment: Color32::from_rgb(0xc4, 0xd2, 0xc4),
+    directive: Color32::from_rgb(0xff, 0xb0, 0xcc),
+    attribute: Color32::from_rgb(0xd0, 0xd8, 0xe6),
+    module_name: Color32::from_rgb(0xff, 0xe0, 0x66),
+    port_name: Color32::from_rgb(0x9c, 0xe8, 0xff),
+    parameter_name: Color32::from_rgb(0xff, 0xd0, 0x80),
+};
+
+const ON_LIGHT_GROUND: ContrastGroundInks = ContrastGroundInks {
+    ok: Color32::from_rgb(0x0a, 0x5c, 0x1e),
+    warn: Color32::from_rgb(0x7a, 0x42, 0x00),
+    err: Color32::from_rgb(0xa8, 0x00, 0x1c),
+    info: Color32::from_rgb(0x00, 0x4a, 0x80),
+    magenta: Color32::from_rgb(0x8a, 0x00, 0x72),
+    traces: [
+        Color32::from_rgb(0x00, 0x33, 0xa0),
+        Color32::from_rgb(0xa8, 0x00, 0x1c),
+        Color32::from_rgb(0x0a, 0x5c, 0x1e),
+        Color32::from_rgb(0x8a, 0x00, 0x72),
+        Color32::from_rgb(0x00, 0x00, 0x00),
+        Color32::from_rgb(0x7a, 0x42, 0x00),
+    ],
+    keyword: Color32::from_rgb(0x00, 0x33, 0x9a),
+    discipline: Color32::from_rgb(0x00, 0x57, 0x4f),
+    system: Color32::from_rgb(0x5a, 0x1e, 0x96),
+    analog_operator: Color32::from_rgb(0x8a, 0x0f, 0x6a),
+    contribution: Color32::from_rgb(0x6b, 0x3e, 0x00),
+    number: Color32::from_rgb(0x1b, 0x5e, 0x20),
+    string: Color32::from_rgb(0x8a, 0x3a, 0x00),
+    comment: Color32::from_rgb(0x35, 0x50, 0x35),
+    directive: Color32::from_rgb(0x8a, 0x1e, 0x50),
+    attribute: Color32::from_rgb(0x3d, 0x4a, 0x5c),
+    module_name: Color32::from_rgb(0x5f, 0x43, 0x00),
+    port_name: Color32::from_rgb(0x00, 0x4f, 0x6e),
+    parameter_name: Color32::from_rgb(0x6b, 0x3e, 0x00),
+};
+
+/// A flat palette built from a contrast theme's colors: one ground, no
+/// shadow, and every state told apart by an ink that stands well off it.
+pub const fn high_contrast(inks: ContrastInks) -> Palette {
+    let ground = if inks.has_dark_ground() {
+        ON_DARK_GROUND
+    } else {
+        ON_LIGHT_GROUND
+    };
+    Palette {
+        bg_app: inks.window,
+        bg_panel: inks.window,
+        bg_panel_2: inks.window,
+        bg_inset: inks.window,
+        bg_elevated: inks.window,
+        bg_hover: blend(inks.window, inks.window_text, 18),
+        bg_active: blend(inks.window, inks.window_text, 30),
+        border: blend(inks.window, inks.window_text, 75),
+        border_strong: inks.window_text,
+        text: inks.window_text,
+        text_dim: blend(inks.window, inks.window_text, 88),
+        text_faint: inks.disabled_text,
+        accent: inks.highlight,
+        accent_ink: inks.highlight_text,
+        accent_dim: blend(inks.window, inks.highlight, 30),
+        ok: ground.ok,
+        warn: ground.warn,
+        err: ground.err,
+        info: ground.info,
+        canvas_bg: inks.window,
+        canvas_grid: blend(inks.window, inks.window_text, 40),
+        wire: inks.link,
+        symbol: inks.window_text,
+        net_label: inks.window_text,
+        canvas_select: inks.highlight,
+        canvas_net_highlight: ground.magenta,
+        net_class_ground: ground.info,
+        net_class_supply: ground.warn,
+        net_class_clock: ground.magenta,
+        traces: ground.traces,
+        shadow_color: Color32::TRANSPARENT,
+        shadow_geom: (0, 0),
+        syntax: SyntaxPalette {
+            keyword: ground.keyword,
+            discipline: ground.discipline,
+            system: ground.system,
+            analog_operator: ground.analog_operator,
+            contribution: ground.contribution,
+            number: ground.number,
+            string: ground.string,
+            comment: ground.comment,
+            directive: ground.directive,
+            attribute: ground.attribute,
+            module_name: ground.module_name,
+            port_name: ground.port_name,
+            parameter_name: ground.parameter_name,
+            selection: blend(inks.window, inks.highlight, 20),
+            current_line: blend(inks.window, inks.window_text, 12),
+        },
+    }
+}
+
+/// Instrument · high contrast
+pub const INSTRUMENT_HIGH_CONTRAST: Palette = high_contrast(ContrastInks::BLACK);
+
 /// Instrument · dark
 pub const INSTRUMENT_DARK: Palette = Palette {
     bg_app: Color32::from_rgb(17, 23, 27),
@@ -320,6 +511,108 @@ mod tests {
     /// up a real share of the secondary tone's contrast — and still be
     /// readable, since a ladder nobody can read at the bottom is a worse
     /// defect than the inversion it replaced.
+    /// The contrast themes Windows ships, light ground and dark, and the one
+    /// the Color mode row selects. What each sets is its own; what is drawn
+    /// from it has to stand off its ground on all of them.
+    const CONTRAST_THEMES: [(&str, ContrastInks); 3] = [
+        ("black", ContrastInks::BLACK),
+        (
+            "desert",
+            ContrastInks {
+                window: Color32::from_rgb(0xff, 0xfa, 0xef),
+                window_text: Color32::from_rgb(0x3d, 0x3d, 0x3d),
+                highlight: Color32::from_rgb(0x90, 0x39, 0x09),
+                highlight_text: Color32::from_rgb(0xff, 0xf5, 0xe3),
+                link: Color32::from_rgb(0x1c, 0x5e, 0x75),
+                disabled_text: Color32::from_rgb(0x67, 0x67, 0x67),
+            },
+        ),
+        (
+            "dusk",
+            ContrastInks {
+                window: Color32::from_rgb(0x2d, 0x32, 0x36),
+                window_text: Color32::from_rgb(0xff, 0xff, 0xff),
+                highlight: Color32::from_rgb(0xab, 0xcf, 0xf2),
+                highlight_text: Color32::from_rgb(0x21, 0x2d, 0x3b),
+                link: Color32::from_rgb(0x70, 0xeb, 0xde),
+                disabled_text: Color32::from_rgb(0xd6, 0xb4, 0xfd),
+            },
+        ),
+    ];
+
+    #[test]
+    fn a_contrast_palette_stands_off_its_ground_everywhere() {
+        for (theme, inks) in CONTRAST_THEMES {
+            let palette = high_contrast(inks);
+            let ground = palette.bg_panel;
+            for (name, ink, needed) in [
+                ("text", palette.text, 7.0),
+                ("secondary text", palette.text_dim, 4.5),
+                ("disabled text", palette.text_faint, 4.5),
+                ("border", palette.border, 3.0),
+                ("strong border", palette.border_strong, 3.0),
+                ("accent", palette.accent, 3.0),
+                ("ok", palette.ok, 4.5),
+                ("warn", palette.warn, 4.5),
+                ("err", palette.err, 4.5),
+                ("info", palette.info, 4.5),
+                ("wire", palette.wire, 4.5),
+                ("symbol", palette.symbol, 7.0),
+            ] {
+                let measured = contrast(ink, ground);
+                assert!(measured >= needed, "{theme} {name}: {measured:.2}:1");
+            }
+            assert!(
+                contrast(palette.text, palette.bg_hover) >= 4.5
+                    && contrast(palette.text, palette.bg_active) >= 4.5
+                    && contrast(palette.text, palette.accent_dim) >= 4.5,
+                "{theme}: text on the row fills"
+            );
+            assert!(
+                contrast(palette.accent_ink, palette.accent) >= 4.5,
+                "{theme}"
+            );
+            for trace in palette.traces {
+                assert!(
+                    contrast(trace, palette.canvas_bg) >= 4.5,
+                    "{theme} {trace:?}"
+                );
+            }
+            let syntax = palette.syntax;
+            for ink in [
+                syntax.keyword,
+                syntax.discipline,
+                syntax.system,
+                syntax.analog_operator,
+                syntax.contribution,
+                syntax.number,
+                syntax.string,
+                syntax.comment,
+                syntax.directive,
+                syntax.attribute,
+                syntax.module_name,
+                syntax.port_name,
+                syntax.parameter_name,
+            ] {
+                for fill in [palette.bg_inset, syntax.current_line, syntax.selection] {
+                    let measured = contrast(ink, fill);
+                    assert!(
+                        measured >= 4.5,
+                        "{theme} {ink:?} on {fill:?}: {measured:.2}:1"
+                    );
+                }
+            }
+            assert_eq!(palette.shadow_color, Color32::TRANSPARENT, "{theme}");
+        }
+    }
+
+    #[test]
+    fn the_ground_decides_which_inks_a_contrast_palette_takes() {
+        assert!(ContrastInks::BLACK.has_dark_ground());
+        assert!(CONTRAST_THEMES[2].1.has_dark_ground());
+        assert!(!CONTRAST_THEMES[1].1.has_dark_ground());
+    }
+
     #[test]
     fn text_tones_descend_against_every_ground() {
         for (mode, palette) in [("dark", INSTRUMENT_DARK), ("light", INSTRUMENT_LIGHT)] {

@@ -212,12 +212,11 @@ fn keyword_choice_row(
 }
 
 fn appearance(ui: &mut Ui, state: &mut PreferencesDialogs<'_>) {
-    const COLOR_MODES: [&str; 3] = ["Dark", "Light", "System"];
     searchable_row(
         ui,
         "Color mode",
-        "Dark, light, or follow the system setting.",
-        &["theme", "night", "appearance"],
+        "A Windows contrast theme takes precedence over this.",
+        &["theme", "night", "appearance", "contrast", "accessibility"],
         |ui| {
             value_column(ui, |ui| {
                 let mut selected = Mode::ALL
@@ -227,7 +226,7 @@ fn appearance(ui: &mut Ui, state: &mut PreferencesDialogs<'_>) {
                 if segmented(
                     ui,
                     "preferences.appearance.color-mode",
-                    &COLOR_MODES,
+                    &Mode::ALL.map(Mode::label),
                     &mut selected,
                 ) {
                     state.workbench.theme.mode = Mode::ALL[selected];
