@@ -1221,7 +1221,7 @@ mod veriloga_parameter_tests;
 mod veriloga_placement_tests;
 
 #[cfg(test)]
-mod veriloga_flow_tests;
+pub(in crate::workbench) mod veriloga_flow_tests;
 #[cfg(test)]
 mod veriloga_import_tests;
 

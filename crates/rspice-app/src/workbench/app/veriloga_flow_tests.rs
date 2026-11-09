@@ -20,18 +20,18 @@ use rspice_design::library::metadata::{cell_parameter_contract, decode_source_vi
 use rspice_design::symbol::generated::GENERATED_SYMBOL_VIEW;
 
 const SIZE: egui::Vec2 = egui::vec2(1440.0, 900.0);
-const CELL: &str = "vcvs_gain";
+pub(in crate::workbench) const CELL: &str = "vcvs_gain";
 const PORTS: &str = "inp:in inn:in out:out gnd";
 /// The module the user writes: `out` driven `gain` times the input
 /// difference above `gnd`.
-const MODULE: &str = "`include \"disciplines.vams\"\n\nmodule vcvs_gain(inp, inn, out, gnd);\n  input inp, inn;\n  output out;\n  inout gnd;\n  electrical inp, inn, out, gnd;\n  (* units=\"V/V\", desc=\"Voltage gain\" *) parameter real gain = 10 from (0:inf);\n  analog V(out, gnd) <+ gain * (V(inp) - V(inn));\nendmodule\n";
+pub(in crate::workbench) const MODULE: &str = "`include \"disciplines.vams\"\n\nmodule vcvs_gain(inp, inn, out, gnd);\n  input inp, inn;\n  output out;\n  inout gnd;\n  electrical inp, inn, out, gnd;\n  (* units=\"V/V\", desc=\"Voltage gain\" *) parameter real gain = 10 from (0:inf);\n  analog V(out, gnd) <+ gain * (V(inp) - V(inn));\nendmodule\n";
 
 /// Someone at the application: its egui context, the application, what the
 /// last frame named for a screen reader, with where it drew each name, and
 /// what its live status regions said.
-struct User {
+pub(in crate::workbench) struct User {
     ctx: egui::Context,
-    app: RSpiceApp,
+    pub(in crate::workbench) app: RSpiceApp,
     named: Vec<(String, egui::Rect)>,
     /// What the last frame's named nodes also said of themselves.
     described: Vec<(String, String)>,
@@ -235,8 +235,8 @@ struct RunOutcome {
 }
 
 /// The device as the flow leaves it: its view.
-struct Device {
-    view: CellViewRef,
+pub(in crate::workbench) struct Device {
+    pub(in crate::workbench) view: CellViewRef,
 }
 
 /// Steps 1 and 2: a new project, and the device `cell` with `ports` created
@@ -312,7 +312,7 @@ fn compile(user: &mut User) {
 
 /// Steps 1 to 7: a new project, the device created from the canvas, written,
 /// compiled, placed in the top schematic, wired and set to `gain=5`.
-fn wired_device() -> (User, Device) {
+pub(in crate::workbench) fn wired_device() -> (User, Device) {
     let (mut user, top, view) = new_device(CELL, PORTS);
     let top_cell = top.cell.clone();
 
@@ -1363,80 +1363,6 @@ fn a_builtin_model_copied_from_the_library_page_compiles_and_places() {
         })
         .count();
     assert_eq!(placed, 1, "the copy places once");
-}
-
-/// A save dialog that answers with `self.0` and writes that reach the disk.
-struct SavesTo(std::path::PathBuf);
-
-impl crate::workbench::workflows::export_workflow::ExportWorkflowIo for SavesTo {
-    fn show_save_dialog(
-        &self,
-        _config: crate::workbench::workflows::export_workflow::SaveDialogConfig<'_>,
-    ) -> Result<Option<std::path::PathBuf>, String> {
-        Ok(Some(self.0.clone()))
-    }
-
-    fn write_text_file(&self, path: &std::path::Path, contents: &str) -> Result<(), String> {
-        let folder = path.parent().expect("the export has a folder");
-        std::fs::create_dir_all(folder).map_err(|error| error.to_string())?;
-        std::fs::write(path, contents).map_err(|error| error.to_string())
-    }
-
-    fn write_waveform_csv(
-        &self,
-        _dataset: &crate::io::WaveformDataset,
-        _path: &std::path::Path,
-    ) -> Result<(), String> {
-        Ok(())
-    }
-}
-
-#[test]
-fn a_spectre_export_copies_its_sources_beside_the_deck_and_names_them_relatively() {
-    let (mut user, device) = wired_device();
-    let folder = std::env::temp_dir().join(format!("rspice_spectre_export_{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&folder);
-    let deck_path = folder.join("amp.scs");
-
-    crate::workbench::menu_bar::action_export_netlist_with_io(
-        &mut user.app.state,
-        crate::io::NetlistFormat::Spectre,
-        &SavesTo(deck_path.clone()),
-    );
-
-    let deck = std::fs::read_to_string(&deck_path).expect("the deck is written");
-    assert!(!deck.contains("__rspice_project__"), "{deck}");
-    let relative = deck
-        .lines()
-        .find_map(|line| line.strip_prefix("ahdl_include "))
-        .unwrap_or_else(|| panic!("the deck includes its source:\n{deck}"))
-        .trim_matches('"');
-    assert!(!std::path::Path::new(relative).is_absolute(), "{relative}");
-    assert_eq!(
-        std::fs::read_to_string(folder.join(relative)).expect("the source is beside the deck"),
-        MODULE
-    );
-    assert!(
-        deck.contains(&format!(
-            "// {}/{CELL}/veriloga (module {CELL})",
-            device.view.library
-        )),
-        "{deck}"
-    );
-    assert!(
-        deck.lines()
-            .any(|line| line.starts_with('X') && line.split(' ').any(|token| token == CELL)),
-        "the instance names the module the source declares:\n{deck}"
-    );
-    let read = rspice_core::netlist::Netlist::parse_with_path(&deck, &deck_path)
-        .unwrap_or_else(|error| panic!("the deck reads back: {error}\n{deck}"));
-    assert!(
-        read.elements
-            .iter()
-            .any(|element| element.name.eq_ignore_ascii_case("X1")),
-        "{deck}"
-    );
-    let _ = std::fs::remove_dir_all(&folder);
 }
 
 mod language_tools;

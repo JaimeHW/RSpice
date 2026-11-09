@@ -12,7 +12,7 @@ use rspice_app_models::veriloga_library::{
 };
 
 use super::*;
-use crate::workbench::shell_host::read_only_veriloga_well;
+use crate::workbench::features::read_only_veriloga_well;
 use crate::workbench::slots::BuiltinModelsBrowser;
 
 /// How much of the page the columns keep while a source is open below them.
@@ -167,7 +167,7 @@ fn matches_filter(model: &BuiltinVerilogAModel, query: &str) -> bool {
 /// The heading a device class's models stand under, on the rows' own pitch.
 fn class_heading(ui: &mut Ui, label: &str) {
     let t = Tokens::get(ui.ctx());
-    let (rect, _) = ui.allocate_exact_size(
+    let (rect, response) = ui.allocate_exact_size(
         vec2(ui.available_width(), BROWSER_ROW_HEIGHT),
         Sense::hover(),
     );
@@ -178,6 +178,7 @@ fn class_heading(ui: &mut Ui, label: &str) {
         theme::sans(tokens::FS_0, FontWeight::SemiBold),
         t.color.text_faint,
     );
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, label));
 }
 
 pub(super) fn cell_column(
@@ -335,7 +336,7 @@ pub(super) fn source_pane(
         vec2(ui.available_width(), height),
         Layout::top_down(Align::Min),
         |ui| {
-            let (bar, _) = ui.allocate_exact_size(
+            let (bar, bar_response) = ui.allocate_exact_size(
                 vec2(ui.available_width(), SOURCE_BAR_HEIGHT),
                 Sense::hover(),
             );
@@ -345,13 +346,16 @@ pub(super) fn source_pane(
                 bar.top(),
                 Stroke::new(1.0, t.color.border_strong),
             );
+            let title = format!("{file}  \u{00b7}  read only");
             ui.painter().text(
                 pos2(bar.left() + 10.0, bar.center().y),
                 Align2::LEFT_CENTER,
-                format!("{file}  \u{00b7}  read only"),
+                &title,
                 theme::mono(tokens::FS_0, FontWeight::Regular),
                 t.color.text_dim,
             );
+            bar_response
+                .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &title));
             let close = egui::Rect::from_min_size(
                 pos2(bar.right() - 70.0, bar.top() + 3.0),
                 vec2(62.0, SOURCE_BAR_HEIGHT - 6.0),
