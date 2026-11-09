@@ -18,6 +18,7 @@ use crate::workbench::documents::text_editor_commands::{
     veriloga_syntax::{LineState, SyntaxClass, SyntaxSpan, VerilogAHighlighter, tokenize_line},
 };
 
+use crate::workbench::documents::editor_font;
 use crate::workbench::framework::requests::StandardCommand;
 
 mod assist;
@@ -25,9 +26,8 @@ mod findings;
 
 use findings::{HeldFinding, HeldFindings};
 
-const FONT_SIZE: f32 = 11.0;
-const LINE_HEIGHT: f32 = 17.05;
-const GUTTER_WIDTH: f32 = 47.0;
+/// The pop-ups beside an editor scale with the interface, not with its text.
+const POPUP_FONT_SIZE: f32 = 11.0;
 const CODE_LEFT_PADDING: f32 = 12.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -449,7 +449,8 @@ fn show_code_document_impl(
     let requested_line = revealed.or_else(|| show_go_to_line(ui, editor_id, source));
     let tokens = Tokens::get(ui.ctx());
     let colors = tokens.color;
-    let font = theme::mono(FONT_SIZE, FontWeight::Regular);
+    let text_size = editor_font::text_size(ui.ctx());
+    let font = theme::mono(text_size, FontWeight::Regular);
     let syntax = match language {
         CodeEditorLanguage::VerilogA => EditorSyntax::VerilogA,
         CodeEditorLanguage::Automation | CodeEditorLanguage::Python => EditorSyntax::Python,
@@ -473,8 +474,8 @@ fn show_code_document_impl(
         accessible_label: &accessible_label,
         messages,
         font: font.clone(),
-        line_height: LINE_HEIGHT,
-        gutter_width: GUTTER_WIDTH,
+        line_height: editor_font::line_height(text_size),
+        gutter_width: editor_font::gutter_width(text_size),
         code_left_padding: CODE_LEFT_PADDING,
         top_padding: 8.0,
         background: colors.bg_inset,
@@ -853,13 +854,14 @@ fn next_token(
 }
 
 fn append(job: &mut LayoutJob, text: &str, font: FontId, color: Color32, underline: Stroke) {
+    let line_height = editor_font::line_height(font.size);
     job.append(
         text,
         0.0,
         TextFormat {
             font_id: font,
             color,
-            line_height: Some(LINE_HEIGHT),
+            line_height: Some(line_height),
             underline,
             ..Default::default()
         },
@@ -917,7 +919,7 @@ fn findings_tooltip(
         );
         ui.label(
             egui::RichText::new(place)
-                .font(theme::mono(FONT_SIZE, FontWeight::Medium))
+                .font(theme::mono(POPUP_FONT_SIZE, FontWeight::Medium))
                 .color(colors.text_dim),
         );
         ui.label(egui::RichText::new(finding.message.as_ref()).color(colors.text));
@@ -1030,7 +1032,7 @@ mod tests {
     fn veriloga_rows_wear_the_syntax_inks_of_their_theme() {
         let line = "  parameter real gain = 10k; // open loop";
         let (spans, _) = tokenize_line(line, LineState::default());
-        let font = FontId::monospace(FONT_SIZE);
+        let font = FontId::monospace(POPUP_FONT_SIZE);
         for colors in [
             crate::ui::palette::INSTRUMENT_DARK,
             crate::ui::palette::INSTRUMENT_LIGHT,

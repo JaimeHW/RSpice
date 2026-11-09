@@ -220,6 +220,20 @@ pub(crate) struct VirtualEditorOutput {
     pub response: Response,
 }
 
+/// Ctrl+= and Ctrl+- make the text a size larger or smaller. Plus answers too:
+/// some keyboards have it without Shift, and the number pad always does.
+fn take_zoom_keys(ctx: &egui::Context) {
+    let step = ctx.input_mut(|input| {
+        let larger = input.consume_key(Modifiers::COMMAND, Key::Equals)
+            | input.consume_key(Modifiers::COMMAND, Key::Plus);
+        let smaller = input.consume_key(Modifiers::COMMAND, Key::Minus);
+        i8::from(larger) - i8::from(smaller)
+    });
+    if step != 0 {
+        crate::workbench::documents::editor_font::request_zoom(ctx, step);
+    }
+}
+
 /// Show a virtualized source document.
 ///
 /// `source_revision` is the application document revision, not a frame counter.
@@ -322,6 +336,7 @@ pub(crate) fn show_virtual_text_editor(
     let tab_moves_focus = tab_moves_focus_mode(ui.ctx());
     let mut input = InputOutcome::default();
     if ui.memory(|memory| memory.has_focus(editor_id)) {
+        take_zoom_keys(ui.ctx());
         let keys = KeyContext {
             os: ui.ctx().os(),
             editable,

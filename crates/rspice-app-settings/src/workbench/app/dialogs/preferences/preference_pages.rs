@@ -268,8 +268,19 @@ fn appearance(ui: &mut Ui, state: &mut PreferencesDialogs<'_>) {
         ChoicePreference::InterfaceScale,
         "Interface scale",
         "Zoom for every panel and dialog.",
-        &["100%", "110%", "125%", "150%"],
+        &["100%", "110%", "125%", "150%", "175%", "200%"],
         &["size", "font", "text", "dpi", "magnify"],
+    );
+    keyword_choice_row(
+        ui,
+        state,
+        ChoicePreference::EditorFontSize,
+        "Editor font size",
+        "Text in the source editors. Ctrl+= and Ctrl+- change it from the keyboard.",
+        &[
+            "9 pt", "10 pt", "11 pt", "12 pt", "13 pt", "14 pt", "16 pt", "18 pt", "20 pt",
+        ],
+        &["zoom", "text", "code", "magnify"],
     );
     // Which installed CJK face letters a Han character. A browser letters
     // none until it fetches them, so the row is the desktop's.
@@ -932,7 +943,11 @@ pub fn restore_defaults(
         PreferenceCategory::Appearance => {
             state.workbench.theme = crate::ui::Theme::default();
             preferences.restore_defaults(
-                &[ChoicePreference::InterfaceScale, ChoicePreference::HanForm],
+                &[
+                    ChoicePreference::InterfaceScale,
+                    ChoicePreference::EditorFontSize,
+                    ChoicePreference::HanForm,
+                ],
                 &[],
                 &[],
             );

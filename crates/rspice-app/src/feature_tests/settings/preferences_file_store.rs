@@ -142,6 +142,31 @@ fn the_han_form_comes_back_from_the_preferences_file() {
     );
 }
 
+/// The sizes a person sets come back with the next start, whichever way they
+/// were set: the editor's own keys step the preference the row shows.
+#[test]
+fn the_text_size_and_interface_scale_come_back_from_the_preferences_file() {
+    let (path, store) = temp_store("sizes");
+    let mut first = AppState::default();
+    first
+        .model
+        .preferences
+        .set_choice(ChoicePreference::InterfaceScale, 5)
+        .expect("double size is one of the scales");
+    first.model.preferences.step_editor_font_size(3);
+    first
+        .preferences_file_parts()
+        .bind_preferences_file(store.clone());
+    assert_eq!(
+        read_json(&path)[PREFERENCES]["choices"]["editor-font-size"],
+        5
+    );
+
+    let second = bound(&store);
+    assert_eq!(second.model.preferences.editor_font_size(), 14.0);
+    assert_eq!(second.model.preferences.interface_scale(), 2.0);
+}
+
 #[test]
 fn settings_round_trip_with_unknown_keys_and_domains_kept() {
     let (path, store) = temp_store("round-trip");

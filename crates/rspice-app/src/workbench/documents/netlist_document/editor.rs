@@ -36,15 +36,10 @@ use super::{
 #[cfg(test)]
 use crate::state::netlist_diagnostics::line_column_for_span;
 use crate::state::netlist_diagnostics::{Diagnostic, NetlistDiagnosticCollection};
+use crate::workbench::documents::editor_font;
 
-/// Editor body font size (gutter follows it).
-const FONT_SIZE: f32 = 11.0;
-/// Width reserved for the mockup's line-number gutter.
-const GUTTER_W: f32 = 47.0;
 const CODE_LEFT_PADDING: f32 = 12.0;
 const CODE_TOP_PADDING: i8 = 8;
-/// Row pitch; the gutter, the squiggles, and a pointer hit-test all step by it.
-const LINE_HEIGHT: f32 = 17.05;
 /// Seconds of typing silence before the buffer re-parses.
 const PARSE_DEBOUNCE: f64 = 0.35;
 const SYNTHETIC_EDITOR_SOURCE: &str = "__rspice_netlist_editor__.cir";
@@ -137,7 +132,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) -> egui::Response {
     let well = ui.available_rect_before_wrap();
     ui.painter().rect_filled(well, 0.0, c.bg_inset);
 
-    let font = theme::mono(FONT_SIZE, FontWeight::Regular);
+    let text_size = editor_font::text_size(ui.ctx());
+    let font = theme::mono(text_size, FontWeight::Regular);
     let diagnostics = Arc::clone(&state.code.netlist.diagnostics);
     let edited_lines = state.runs.manual_run.edited_lines.clone();
     let cross_probe_line = (state.code.netlist.active_document
@@ -193,8 +189,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) -> egui::Response {
             accessible_label: &accessible_label,
             messages,
             font: font.clone(),
-            line_height: LINE_HEIGHT,
-            gutter_width: GUTTER_W,
+            line_height: editor_font::line_height(text_size),
+            gutter_width: editor_font::gutter_width(text_size),
             code_left_padding: CODE_LEFT_PADDING,
             top_padding: CODE_TOP_PADDING as f32,
             background: c.bg_inset,

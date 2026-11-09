@@ -604,6 +604,13 @@ impl RSpiceApp {
         if (ctx.zoom_factor() - desired_zoom).abs() > f32::EPSILON {
             ctx.set_zoom_factor(desired_zoom);
         }
+        if let Some(step) = crate::workbench::documents::editor_font::take_zoom_request(ctx) {
+            self.state.model.preferences.step_editor_font_size(step);
+        }
+        crate::workbench::documents::editor_font::publish(
+            ctx,
+            self.state.model.preferences.editor_font_size(),
+        );
         // (Re)apply the theme when it changes — this maps the design tokens
         // onto the egui style and republishes the active palette.
         let system_mode_changed = self.state.workbench.theme.mode == crate::ui::Mode::System

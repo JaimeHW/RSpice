@@ -4,6 +4,11 @@
 
 use super::*;
 
+/// The editor's layout at the size it opens at.
+const FONT_SIZE: f32 = 11.0;
+const GUTTER_W: f32 = 47.0;
+const LINE_HEIGHT: f32 = 17.05;
+
 /// Two parameters, a derived one, and an element card that reads both, so
 /// a hover has something to answer on every kind of span.
 const HOVER_DECK: &str = "value hover\n\
@@ -1196,6 +1201,43 @@ fn editor_commit_updates_only_an_existing_owned_source() {
     assert_eq!(state.code.netlist.revision, 10);
     assert_eq!(state.code.netlist.last_edit_time, 7.25);
     assert!(state.runs.manual_run.edited_lines.contains(&1));
+}
+
+/// A deck is drawn at the size the source editors are set to.
+#[test]
+fn the_netlist_editor_draws_at_the_preferred_text_size() {
+    let deck = "sized deck\nR1 a 0 1k\n.end\n".to_owned();
+    let mut state = AppState::default();
+    state.model.workspace.content.netlist_source = Some(deck.clone());
+    state.model.simulation.source.netlist_content = deck;
+    state.code.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
+    state.code.netlist.active_document_initialized = true;
+    let context = egui::Context::default();
+    crate::ui::Theme::default().apply(&context);
+    crate::workbench::documents::editor_font::publish(&context, 18.0);
+    let mut output = None;
+    for _ in 0..3 {
+        output = Some(context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(900.0, 500.0),
+                )),
+                ..Default::default()
+            },
+            |ui| {
+                show(ui, &mut state);
+            },
+        ));
+    }
+    let painted = output.expect("three frames").shapes;
+    let size = painted.iter().find_map(|clipped| match &clipped.shape {
+        egui::Shape::Text(text) if text.galley.job.text.contains("R1 a 0 1k") => {
+            Some(text.galley.job.sections[0].format.font_id.size)
+        }
+        _ => None,
+    });
+    assert_eq!(size, Some(18.0));
 }
 
 /// The netlist editor is the shared source editor: arrows move its caret

@@ -149,6 +149,7 @@ pub(crate) mod docks {
 pub(crate) mod documents {
     pub use rspice_app_workbench::workbench::documents::*;
     pub(crate) mod code_workspace;
+    pub(crate) mod editor_font;
     #[cfg(test)]
     pub(crate) use rspice_app_models::workbench::documents::model_correlation;
     pub(crate) use rspice_app_models::workbench::documents::model_editor;

@@ -36,6 +36,8 @@ pub(in crate::workbench) struct User {
     /// What the last frame's named nodes also said of themselves.
     described: Vec<(String, String)>,
     live: Vec<String>,
+    /// What the last frame painted.
+    shapes: Vec<egui::epaint::ClippedShape>,
 }
 
 impl User {
@@ -49,6 +51,7 @@ impl User {
             named: Vec::new(),
             described: Vec::new(),
             live: Vec::new(),
+            shapes: Vec::new(),
         };
         user.app.symbol_library = crate::schematic::symbols::SymbolLibrary::load_embedded().ok();
         user.app.state.workbench.inspector_visible = true;
@@ -67,6 +70,7 @@ impl User {
             named,
             described,
             live,
+            shapes,
         } = self;
         let output = ctx.run_ui(
             egui::RawInput {
@@ -85,6 +89,7 @@ impl User {
                 app.end_frame(&before);
             },
         );
+        *shapes = output.shapes;
         named.clear();
         described.clear();
         live.clear();
@@ -1390,3 +1395,4 @@ fn a_builtin_model_copied_from_the_library_page_compiles_and_places() {
 mod compile_controls;
 mod editing;
 mod language_tools;
+mod size_and_zoom;

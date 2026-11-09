@@ -492,6 +492,9 @@ impl UnitsPreferencesStorage {
     }
 }
 
+/// The sizes a source editor's text comes in, in points.
+const EDITOR_FONT_SIZES: [f32; 9] = [9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 16.0, 18.0, 20.0];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ChoicePreference {
@@ -509,6 +512,7 @@ pub enum ChoicePreference {
     #[serde(rename = "schematic-grid")]
     LegacySchematicGrid,
     InterfaceScale,
+    EditorFontSize,
     MinimumTouchTarget,
     UnitSystem,
     EngineeringSuffixes,
@@ -586,11 +590,12 @@ pub enum ChoicePreference {
 }
 
 impl ChoicePreference {
-    pub const ALL: [Self; 60] = [
+    pub const ALL: [Self; 61] = [
         Self::LegacyWorkspacePreset,
         Self::LegacyConsoleOnLaunch,
         Self::LegacySchematicGrid,
         Self::InterfaceScale,
+        Self::EditorFontSize,
         Self::MinimumTouchTarget,
         Self::UnitSystem,
         Self::EngineeringSuffixes,
@@ -655,6 +660,7 @@ impl ChoicePreference {
             Self::LegacyConsoleOnLaunch => "console-on-launch",
             Self::LegacySchematicGrid => "schematic-grid",
             Self::InterfaceScale => "interface-scale",
+            Self::EditorFontSize => "editor-font-size",
             Self::MinimumTouchTarget => "minimum-touch-target",
             Self::UnitSystem => "unit-system",
             Self::EngineeringSuffixes => "engineering-suffixes",
@@ -764,7 +770,9 @@ impl ChoicePreference {
             | Self::DataResidency
             | Self::SchematicCursor => 1,
             // Junction dots and wire routing are one bit each.
-            Self::InterfaceScale | Self::DefaultSolverPreset | Self::WireJunctionBehavior => 3,
+            Self::DefaultSolverPreset | Self::WireJunctionBehavior => 3,
+            Self::InterfaceScale => 5,
+            Self::EditorFontSize => 8,
             Self::ImportedNetlistDialect => 5,
             Self::CanvasWheel
             | Self::CanvasPanButton
@@ -774,6 +782,15 @@ impl ChoicePreference {
             | Self::StartupProject => 1,
             Self::CanvasZoomSpeed | Self::WaveTraceWidth => 2,
             Self::HanForm => 5,
+        }
+    }
+
+    /// The option a person who chose nothing gets. Almost every list opens
+    /// on its first entry; a size list is in size order, so it does not.
+    const fn default_value(self) -> u8 {
+        match self {
+            Self::EditorFontSize => 2,
+            _ => 0,
         }
     }
 
@@ -1134,7 +1151,7 @@ impl UserPreferences {
                 .and_then(Value::as_u64)
                 .and_then(|value| u8::try_from(value).ok())
                 .filter(|value| *value <= key.max_value())
-                .unwrap_or_default(),
+                .unwrap_or(key.default_value()),
         )
     }
 
@@ -1185,7 +1202,7 @@ impl UserPreferences {
         if value > key.max_value() {
             return Err("choice index is outside the preference domain");
         }
-        if value == 0 {
+        if value == key.default_value() {
             self.choices.remove(key.stable_id());
         } else {
             self.choices
@@ -1461,7 +1478,24 @@ impl UserPreferences {
 
     #[must_use]
     pub fn interface_scale(&self) -> f32 {
-        [1.0, 1.1, 1.25, 1.5][self.choice(ChoicePreference::InterfaceScale)]
+        [1.0, 1.1, 1.25, 1.5, 1.75, 2.0][self.choice(ChoicePreference::InterfaceScale)]
+    }
+
+    /// The size the source editors draw their text at, in points.
+    #[must_use]
+    pub fn editor_font_size(&self) -> f32 {
+        EDITOR_FONT_SIZES[self.choice(ChoicePreference::EditorFontSize)]
+    }
+
+    /// Move the source editors' text `step` sizes up or down the list,
+    /// stopping at either end.
+    pub fn step_editor_font_size(&mut self, step: i8) {
+        let stepped = self
+            .choice(ChoicePreference::EditorFontSize)
+            .saturating_add_signed(isize::from(step))
+            .min(EDITOR_FONT_SIZES.len() - 1);
+        self.set_choice(ChoicePreference::EditorFontSize, stepped)
+            .expect("the list is the preference's whole domain");
     }
 
     /// The Han form the person prefers, which the open document's Language
@@ -1713,6 +1747,45 @@ mod tests {
         assert_eq!(restored.choice(ChoicePreference::DefaultSolverPreset), 3);
         assert!(restored.toggle(TogglePreference::ReducedMotion));
         assert_eq!(restored.interface_scale(), 1.25);
+    }
+
+    #[test]
+    fn the_interface_goes_up_to_double_size() {
+        let mut preferences = UserPreferences::default();
+        preferences
+            .set_choice(ChoicePreference::InterfaceScale, 5)
+            .unwrap();
+        assert_eq!(preferences.interface_scale(), 2.0);
+    }
+
+    #[test]
+    fn the_editor_text_opens_at_eleven_points_and_steps_to_either_end() {
+        let mut preferences = UserPreferences::default();
+        assert_eq!(preferences.editor_font_size(), 11.0);
+
+        preferences.step_editor_font_size(1);
+        assert_eq!(preferences.editor_font_size(), 12.0);
+        let json = serde_json::to_string(&preferences).unwrap();
+        let restored: UserPreferences = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.editor_font_size(), 12.0);
+
+        preferences.step_editor_font_size(-1);
+        assert_eq!(preferences.editor_font_size(), 11.0);
+        assert!(
+            !serde_json::to_string(&preferences)
+                .unwrap()
+                .contains("editor-font-size"),
+            "the size a person left alone is not stored"
+        );
+
+        for _ in 0..20 {
+            preferences.step_editor_font_size(1);
+        }
+        assert_eq!(preferences.editor_font_size(), 20.0);
+        for _ in 0..20 {
+            preferences.step_editor_font_size(-1);
+        }
+        assert_eq!(preferences.editor_font_size(), 9.0);
     }
 
     #[test]

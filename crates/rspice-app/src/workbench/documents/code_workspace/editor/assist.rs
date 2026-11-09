@@ -24,7 +24,8 @@ use super::super::veriloga_assist::{
     candidates, completion_query, information_at, is_callable, signature_help,
 };
 use super::super::veriloga_symbols::VerilogASymbols;
-use super::{FONT_SIZE, LINE_HEIGHT};
+use super::POPUP_FONT_SIZE;
+use crate::workbench::documents::editor_font;
 
 const ROW_HEIGHT: f32 = 24.0;
 const POPUP_WIDTH: f32 = 460.0;
@@ -552,7 +553,10 @@ fn draw_popup(
         (egui::pos2(x, anchor.y), egui::Align2::LEFT_TOP)
     } else {
         (
-            egui::pos2(x, anchor.y - LINE_HEIGHT - 8.0),
+            egui::pos2(
+                x,
+                anchor.y - editor_font::line_height(editor_font::text_size(ui.ctx())) - 8.0,
+            ),
             egui::Align2::LEFT_BOTTOM,
         )
     };
@@ -695,7 +699,10 @@ fn draw_card(
     egui::Area::new(editor_id.with("signature"))
         .order(egui::Order::Foreground)
         .pivot(egui::Align2::LEFT_BOTTOM)
-        .fixed_pos(egui::pos2(x, anchor.y - LINE_HEIGHT - 8.0))
+        .fixed_pos(egui::pos2(
+            x,
+            anchor.y - editor_font::line_height(editor_font::text_size(ui.ctx())) - 8.0,
+        ))
         .interactable(false)
         .show(ui.ctx(), |ui| {
             popup_frame(colors)
@@ -705,7 +712,7 @@ fn draw_card(
                     if let Some(help) = help {
                         ui.horizontal_wrapped(|ui| {
                             ui.spacing_mut().item_spacing.x = 0.0;
-                            let mono = theme::mono(FONT_SIZE, FontWeight::Regular);
+                            let mono = theme::mono(POPUP_FONT_SIZE, FontWeight::Regular);
                             ui.label(
                                 egui::RichText::new(&help.before)
                                     .font(mono.clone())
@@ -713,7 +720,7 @@ fn draw_card(
                             );
                             ui.label(
                                 egui::RichText::new(&help.active)
-                                    .font(theme::mono(FONT_SIZE, FontWeight::SemiBold))
+                                    .font(theme::mono(POPUP_FONT_SIZE, FontWeight::SemiBold))
                                     .color(colors.accent)
                                     .underline(),
                             );
@@ -746,7 +753,7 @@ pub(super) fn information_body(
     ui.horizontal_wrapped(|ui| {
         ui.label(
             egui::RichText::new(&information.title)
-                .font(theme::mono(FONT_SIZE, FontWeight::Medium))
+                .font(theme::mono(POPUP_FONT_SIZE, FontWeight::Medium))
                 .color(colors.text),
         );
         ui.label(
