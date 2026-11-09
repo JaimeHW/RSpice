@@ -660,8 +660,12 @@ const MAX_PUBLIC_ITEMS: usize = 5277;
 // (`rspice-core` engine/step.rs) to tell a deck that drew while it was read.
 // `ExpTrain::first_edge` and `value_and_slope` add two, read by the source
 // waveform and event code (`rspice-core` circuit/storage/sources and
-// engine/transient/source_events.rs). The census is 1,676, with no slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 1676;
+// engine/transient/source_events.rs).
+// `Diode::is_noiseless` (`rspice-core` engine/noise.rs), `set_series_devices`
+// (engine/builder.rs) and `VoltageSwitch::terminal_conductance`
+// (engine/transient.rs) add three the engine reads from its devices crate. The
+// census is 1,679, with no slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 1679;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

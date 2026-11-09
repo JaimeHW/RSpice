@@ -1338,6 +1338,7 @@ impl Diode {
 
     /// `N` on the instance line stacks identical idealized junctions in series.
     /// A junction diode's `N` is the model's emission coefficient.
+    #[doc(hidden)]
     pub fn set_series_devices(&mut self, series: Value) {
         if let Some(idealized) = self.idealized.as_mut()
             && series.is_finite()
