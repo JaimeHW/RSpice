@@ -1054,11 +1054,21 @@ pub fn copy_of(row: &DiagnosticRow<'_>) -> String {
 /// words, without the product prefix.
 pub(crate) fn producer_name(producer: &str) -> Cow<'_, str> {
     let known = match producer {
-        "rspice.veriloga.compiler" | "rspice.veriloga.compiler-worker" => "Verilog-A compiler",
+        "rspice.veriloga.compiler"
+        | "rspice.veriloga.compiler-worker"
+        | "rspice.veriloga.browser-worker" => "Verilog-A compiler",
         "rspice.veriloga.bundle" => "Verilog-A source",
+        "rspice.veriloga.build-profile" => "Build settings",
+        "rspice.veriloga.interface" => "Verilog-A interface",
+        "rspice.veriloga.specialist" => "Verilog-A checks",
         "rspice.netlist.parser" | "rspice.netlist.semantic" => "Netlist",
         "rspice.netlist.generator" => "Netlist generator",
         "rspice.design.rules" | "rspice.design.drc" => "Design rules",
+        "rspice.design.rule-deck" => "Rule deck",
+        "rspice.design.waivers" => "Waivers",
+        "rspice.design.symbol.pins" => "Symbol pins",
+        "rspice.text.lettering" => "Lettering",
+        "rspice.diagnostics" => "Diagnostics",
         "rspice.simulation.run" => "Simulation",
         "rspice.simulation.preflight" => "Run check",
         "rspice.models.binding" => "Model binding",
@@ -1136,7 +1146,16 @@ mod producer_name_tests {
         for (producer, name) in [
             ("rspice.veriloga.compiler", "Verilog-A compiler"),
             ("rspice.veriloga.compiler-worker", "Verilog-A compiler"),
+            ("rspice.veriloga.browser-worker", "Verilog-A compiler"),
             ("rspice.veriloga.bundle", "Verilog-A source"),
+            ("rspice.veriloga.build-profile", "Build settings"),
+            ("rspice.veriloga.interface", "Verilog-A interface"),
+            ("rspice.veriloga.specialist", "Verilog-A checks"),
+            ("rspice.design.rule-deck", "Rule deck"),
+            ("rspice.design.waivers", "Waivers"),
+            ("rspice.design.symbol.pins", "Symbol pins"),
+            ("rspice.text.lettering", "Lettering"),
+            ("rspice.diagnostics", "Diagnostics"),
             ("rspice.netlist.parser", "Netlist"),
             ("rspice.design.rules", "Design rules"),
             ("rspice.simulation.run", "Simulation"),

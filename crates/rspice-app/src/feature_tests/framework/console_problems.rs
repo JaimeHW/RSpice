@@ -513,7 +513,7 @@ fn every_cell_is_painted_under_its_own_heading_and_fits_its_column() {
             severity_cell(&row),
             row.code.to_owned(),
             row.subject.clone(),
-            row.producer.to_owned(),
+            "Design rules".to_owned(),
             row.location.clone(),
             row.message.to_owned(),
         ]
@@ -599,10 +599,9 @@ fn every_cell_is_painted_under_its_own_heading_and_fits_its_column() {
         row[1].0,
     );
     assert_eq!(row[2].0, "Component R1", "the subject is the object named");
-    assert!(
-        row[3].0.ends_with("design.rules"),
-        "the producer column names who reported it: {:?}",
-        row[3].0,
+    assert_eq!(
+        row[3].0, "Design rules",
+        "the producer column names who reported it"
     );
     assert!(
         row[0].1.min.x >= render.header_band().left() + CONSOLE_MARK_GUTTER - 0.5,
@@ -1080,7 +1079,7 @@ fn grouping_prints_a_header_that_carries_its_counts_and_collapses() {
     let mut state = state_with_design_findings();
     netlist_finding_with_a_fix(&mut state);
     state.workbench.problems_view.grouping = ProblemGrouping::Producer;
-    let header = "rspice.design.rules · 1 error · 1 advisory";
+    let header = "Design rules · 1 error · 1 advisory";
 
     let grouped = render(&mut state, sized(egui::RawInput::default()));
     let node = grouped
@@ -1095,10 +1094,7 @@ fn grouping_prints_a_header_that_carries_its_counts_and_collapses() {
     assert_eq!(node.toggled, None, "and not that it is a toggle pressed");
     assert!(grouped.has("R1 has no resistance"));
 
-    state
-        .workbench
-        .problems_view
-        .collapse("rspice.design.rules", true);
+    state.workbench.problems_view.collapse("Design rules", true);
     let collapsed = render(&mut state, sized(egui::RawInput::default()));
     let node = collapsed
         .node(header)
@@ -1117,10 +1113,7 @@ fn copying_what_is_listed_includes_collapsed_groups() {
     let mut state = state_with_design_findings();
     netlist_finding_with_a_fix(&mut state);
     state.workbench.problems_view.grouping = ProblemGrouping::Producer;
-    state
-        .workbench
-        .problems_view
-        .collapse("rspice.design.rules", true);
+    state.workbench.problems_view.collapse("Design rules", true);
 
     let listed = listing(&state);
     let arrangement = Arrangement::build(&listed, &state.workbench.problems_view);
@@ -1158,7 +1151,7 @@ fn a_copied_row_keeps_tabs_and_line_breaks_inside_their_cell() {
     let row = listed.row(0).expect("listed");
     assert_eq!(
         copy_of(&row),
-        "Error\tT-1\tNode 'n1'\trspice.test\t\t\"two\tcolumns\nand \"\"two\"\" lines\"\t",
+        "Error\tT-1\tNode 'n1'\ttest\t\t\"two\tcolumns\nand \"\"two\"\" lines\"\t",
     );
 }
 
@@ -1599,7 +1592,7 @@ fn a_group_closed_with_the_mouse_opens_again_from_the_keyboard() {
     let mut state = state_with_design_findings();
     netlist_finding_with_a_fix(&mut state);
     state.workbench.problems_view.grouping = ProblemGrouping::Producer;
-    let label = "rspice.design.rules";
+    let label = "Design rules";
     let first_of_group = {
         let listed = listing(&state);
         (0..listed.len())
