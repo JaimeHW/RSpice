@@ -1390,6 +1390,7 @@ fn design_follows_the_view_in_front() {
     assert!(
         veriloga.ends_with(&[
             "Compile Verilog-A/AMS".to_owned(),
+            "Cancel Verilog-A/AMS compile".to_owned(),
             "Build settings…".to_owned()
         ]),
         "{veriloga:?}"

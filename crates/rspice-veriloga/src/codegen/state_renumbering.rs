@@ -975,6 +975,7 @@ fn push_state(program: &BytecodeProgram, out: &mut Vec<Instruction>) {
 ///
 /// The pass is idempotent: running it on a model it has already renumbered
 /// maps each site's slot to itself.
+#[cfg(test)]
 pub(crate) fn renumber_state_slots_to_canonical_sites(
     model: &mut CompiledModel,
     hir: &HirModel,

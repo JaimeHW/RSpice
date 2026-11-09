@@ -5,7 +5,7 @@
 //! that is the one layer allowed to reach the frame loop, the commands and the
 //! document engines together.
 
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::mpsc;
 
 use super::*;
 use crate::state::{

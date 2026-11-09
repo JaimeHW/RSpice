@@ -4,7 +4,7 @@
 //! These pins compile real modules and publish them through the frame loop's
 //! own poll, then read what the library, the schematic and the deck say.
 
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::mpsc;
 
 use super::veriloga_design_tests::{open_in_design, open_project_app};
 use super::*;

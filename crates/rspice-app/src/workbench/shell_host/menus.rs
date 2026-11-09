@@ -427,7 +427,7 @@ const DESIGN_MENU: &[MenuEntry] = &[
         &[
             Separator,
             command(Command::CompileVerilogA).access('M'),
-            command(Command::CancelVerilogACompile),
+            command(Command::CancelVerilogACompile).access('V'),
             command(Command::VerilogABuildSettings).access('B'),
         ],
     ),
