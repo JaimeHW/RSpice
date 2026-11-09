@@ -99,15 +99,6 @@ fn a_new_devices_first_compile_with_a_port_offers_to_place_it_where_it_came_from
         .place_offered_veriloga_device()
         .expect("the device arms");
 
-    // Taking the offer says nothing on the status bar: the armed cursor is
-    // the answer, and a sentence about it would outlive the arm.
-    assert!(
-        !app.state
-            .prompt_text()
-            .is_some_and(|text| text.contains("armed")),
-        "{:?}",
-        app.state.prompt_text()
-    );
     assert_eq!(app.state.model.workspace.content.active_view, origin);
     assert_eq!(app.state.workbench.workspace, Workspace::Design);
     assert_eq!(

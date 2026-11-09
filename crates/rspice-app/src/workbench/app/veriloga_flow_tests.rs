@@ -383,6 +383,15 @@ pub(in crate::workbench) fn wired_device() -> (User, Device) {
 
     // 6. Place in …, then a placement click on the schematic.
     user.click(&place);
+    assert!(
+        !user
+            .app
+            .state
+            .prompt_text()
+            .is_some_and(|text| text.contains("armed")),
+        "the armed cursor is the answer: {:?}",
+        user.app.state.prompt_text()
+    );
     assert_eq!(user.app.state.model.workspace.content.active_view, top);
     assert_eq!(
         user.app.state.model.schematic.session.editor.tool,
