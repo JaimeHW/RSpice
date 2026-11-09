@@ -369,8 +369,9 @@ pub struct ParamContext {
     functions: HashMap<String, FunctionDef>,
     /// Stream for the statistical functions; deterministic by default.
     random: RandomState,
-    /// Draws the deck consumed while it was read. A build rewinds here, so an
-    /// element's draw never repeats a `.param`'s.
+    /// Where the stream stood after the last top-level `.param` that drew. A
+    /// build rewinds here, so an element's draw never repeats a `.param`'s.
+    /// A subcircuit body's `.param` is drawn again at elaboration.
     parse_statistical_draws: u64,
     /// Statistical-function evaluation policy for this parse/evaluation scope.
     statistical_mode: StatisticalParamMode,
@@ -938,14 +939,19 @@ impl ParamContext {
         &self.random
     }
 
-    /// Rewind the statistical stream to where reading the deck left it.
+    /// Rewind the statistical stream to just after the deck's `.param` draws.
     #[doc(hidden)]
     pub fn restart_statistical_stream(&self) {
         self.random.restart_at(self.parse_statistical_draws);
     }
 
-    /// Record the draws consumed so far as the deck's own: every build
-    /// restarts after them.
+    /// How many draws the stream has made.
+    pub(crate) fn statistical_draw_count(&self) -> u64 {
+        self.random.counter.load(Ordering::Relaxed)
+    }
+
+    /// Record the draws made so far as the deck's own: every build restarts
+    /// after them.
     pub(crate) fn mark_parse_statistical_draws(&mut self) {
         self.parse_statistical_draws = self.random.counter.load(Ordering::Relaxed);
     }

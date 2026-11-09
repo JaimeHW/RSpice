@@ -5518,6 +5518,41 @@ pub(super) fn parse_param_statement(
     stream: &mut TokenStream,
     line_num: usize,
     params: &mut ParamContext,
+    deferred_params: Option<&mut Vec<(String, String)>>,
+    retain_global_expression: bool,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+    origin: &NetlistSourceLocation,
+    overrides: &[ParameterOverride],
+    root_redefinitions: Option<&mut RootRedefinitions>,
+    temperature_options: &mut temperature::TemperatureOptionPlan,
+    abort: &dyn AbortSignal,
+) -> Result<(), ParseWithAbortError> {
+    let top_level = deferred_params.is_none();
+    let draws_before = params.statistical_draw_count();
+    let parsed = parse_param_statement_cards(
+        stream,
+        line_num,
+        params,
+        deferred_params,
+        retain_global_expression,
+        diagnostics,
+        origin,
+        overrides,
+        root_redefinitions,
+        temperature_options,
+        abort,
+    );
+    if top_level && params.statistical_draw_count() != draws_before {
+        params.mark_parse_statistical_draws();
+    }
+    parsed
+}
+
+#[allow(clippy::too_many_arguments)]
+fn parse_param_statement_cards(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &mut ParamContext,
     mut deferred_params: Option<&mut Vec<(String, String)>>,
     retain_global_expression: bool,
     diagnostics: &mut Vec<ParseDiagnostic>,
