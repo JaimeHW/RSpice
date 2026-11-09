@@ -4148,3 +4148,43 @@ fn imported_text_keeps_the_proportions_of_its_source() {
         Some(IMPORTED_TEXT_WORLD)
     );
 }
+
+#[test]
+fn a_library_symbols_value2_names_its_model_while_its_value_stays_drawn() {
+    use crate::schematic::value_label::value_pieces;
+
+    // LTspice 26.1.1 netlists `Value2` for each of the 2345 cells in its
+    // examples whose `SpiceModel` is a file, whatever `Value` says.
+    const PART: &str = "Version 4\nSymbolType CELL\nRECTANGLE Normal -32 -32 32 32\n\
+        WINDOW 3 0 48 Center 2\n\
+        SYMATTR Prefix X\nSYMATTR Value shown-3\nSYMATTR SpiceModel amp.sub\n\
+        SYMATTR Value2 real-3 top=1K\n\
+        PIN -32 0 NONE 0\nPINATTR PinName IN\nPINATTR SpiceOrder 1\n\
+        PIN 32 0 NONE 0\nPINATTR PinName OUT\nPINATTR SpiceOrder 2\n";
+    let mut library = library();
+    library.symbols.insert(
+        "shown".to_owned(),
+        ForeignSymbolSource {
+            definition: parse_asy(PART).expect("the test symbol reads"),
+            location: "shown.asy".to_owned(),
+            schematic: None,
+        },
+    );
+    let drawing = parse_asc(
+        "Version 4\nSHEET 1 880 680\nFLAG 64 96 in\nFLAG 128 96 out\n\
+         SYMBOL shown 96 96 R0\nSYMATTR InstName U1\n",
+    )
+    .unwrap();
+    let imported = import_foreign_schematic(&drawing, "work", &library);
+    let part = imported
+        .document
+        .components
+        .iter()
+        .find(|component| component.name == "U1")
+        .expect("U1");
+    assert_eq!(part.value, "real-3");
+    assert_eq!(part.params, "top=1K");
+    let drawn = value_pieces(part).expect("the drawing's value text stands");
+    assert_eq!(drawn.len(), 1);
+    assert_eq!(drawn[0].text, "shown-3");
+}

@@ -705,7 +705,8 @@ impl Builder<'_> {
             let spelled_micro = lettered
                 .iter()
                 .any(|(_, text, ..)| text.contains(['\u{B5}', '\u{3BC}']));
-            if source || spelled_micro || !others.is_empty() {
+            let names_another_model = library_cell_line(&attributes).is_some();
+            if source || spelled_micro || names_another_model || !others.is_empty() {
                 pieces = lettered
                     .into_iter()
                     .chain(others)
@@ -1169,8 +1170,10 @@ impl Builder<'_> {
                 .fold(model.to_owned(), |line, text| {
                     format!("{line} {}", spice_text(text))
                 }),
-            None => attribute(attributes, "Value")
-                .filter(|value| !value.trim().is_empty())
+            None => library_cell_line(attributes)
+                .or_else(|| {
+                    attribute(attributes, "Value").filter(|value| !value.trim().is_empty())
+                })
                 .or_else(|| attribute(attributes, "Value2"))
                 .map(spice_text)
                 .unwrap_or_else(|| fallback.to_owned()),
@@ -2510,6 +2513,17 @@ pub(super) fn is_spice_number(text: &str) -> bool {
     };
     rest.chars()
         .all(|character| character.is_ascii_alphabetic())
+}
+
+/// The model line of a subcircuit whose `SpiceModel` is a library file: its
+/// `Value2`, whatever `Value` says. `Value` is only what the drawing shows.
+fn library_cell_line(attributes: &[ForeignAttribute]) -> Option<&str> {
+    let subcircuit = attribute(attributes, "Prefix")
+        .is_some_and(|prefix| prefix.trim().eq_ignore_ascii_case("X"));
+    let from_file =
+        attribute(attributes, "SpiceModel").is_some_and(|model| looks_like_file(model.trim()));
+    attribute(attributes, "Value2")
+        .filter(|line| subcircuit && from_file && !line.trim().is_empty())
 }
 
 fn looks_like_file(name: &str) -> bool {
