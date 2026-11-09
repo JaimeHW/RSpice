@@ -534,8 +534,9 @@ impl XyceTestRunner {
             })
             // The BJT operating report gained `temp` (d8d148918), `power`
             // (310ed2d84) and the six intrinsic junction voltages
-            // (4685ce40a); lead-current output retains the whole report.
-            || result.device_op_traces.len() != 16
+            // (4685ce40a), then the hybrid-pi conductances and stored charges
+            // (2c589fe9cf); lead-current output retains the whole report.
+            || result.device_op_traces.len() != 23
             || device_op_schema
                 != [
                     ("Q1", "ic"),
@@ -546,7 +547,14 @@ impl XyceTestRunner {
                     ("Q1", "vce"),
                     ("Q1", "beta"),
                     ("Q1", "gm"),
+                    ("Q1", "gpi"),
+                    ("Q1", "gmu"),
+                    ("Q1", "go"),
                     ("Q1", "temp"),
+                    ("Q1", "qbe"),
+                    ("Q1", "qbc"),
+                    ("Q1", "cpi"),
+                    ("Q1", "cmu"),
                     ("Q1", "power"),
                     ("Q1", "vbe_intrinsic"),
                     ("Q1", "vce_intrinsic"),
