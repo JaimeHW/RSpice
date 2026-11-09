@@ -349,8 +349,7 @@ pub(super) fn bind_instance_masters(
         bindings.contains_key(&key) || groups.contains_key(&key)
     };
     let mut context = super::InstanceParameterContext::new(netlist, temperature);
-    for index in 0..elements.len() {
-        let element = &elements[index];
+    for element in elements.iter_mut() {
         let crate::netlist::ElementKind::Subcircuit {
             subckt_name,
             params,
@@ -418,7 +417,7 @@ pub(super) fn bind_instance_masters(
         if let crate::netlist::ElementKind::Subcircuit {
             subckt_name,
             params,
-        } = &mut elements[index].kind
+        } = &mut element.kind
         {
             *subckt_name = selected;
             *params = bound;
