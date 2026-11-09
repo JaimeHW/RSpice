@@ -2549,7 +2549,8 @@ pub fn instantiate_builtin_scoped(
                 })?
             }
             crate::netlist::ParametricValue::String(_)
-            | crate::netlist::ParametricValue::StringExpression(_) => {
+            | crate::netlist::ParametricValue::StringExpression(_)
+            | crate::netlist::ParametricValue::Array(_) => {
                 return Err(BuiltinInstantiationError(format!(
                     "Generated Verilog-A parameter '{}' requires a numeric value",
                     assignment.name
