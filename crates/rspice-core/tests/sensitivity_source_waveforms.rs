@@ -64,8 +64,8 @@ fn divider(vin: &str, itest: &str) -> Netlist {
     .expect("deck parses")
 }
 
-/// The solved equations carry the 1e-12 S nodal conditioning on every node,
-/// which moves this divider's closed form by under 1e-12 relative. A
+/// The operating point and its rows are of the circuit without the nodal
+/// floor, so each row is this divider's closed form to roundoff. A
 /// finite-difference row on a zero-valued current source missed it by ~2e-9.
 const CLOSED_FORM: f64 = 1e-11;
 
@@ -227,6 +227,65 @@ fn trrandom_source_rows_differentiate_the_offset() {
         0.6,
         "trrandom(2 1u 0 0.1m 0.6m)",
         0.6e-3,
+    );
+}
+
+/// A 1e9/1e9 Ohm divider beside a diode: `n` is held by 2e-9 S alone, where
+/// the 1e-15 S nodal floor is 5e-7 of its conductance. The operating point
+/// is solved without the floor, so a row of the Jacobian at the floor moved
+/// each derivative by that 5e-7 (dV(n)/dV1 0.49999975, dV(n)/dR1
+/// -2.49999875e-10). The rows are of the circuit the operating point
+/// solved: dV(n)/dV1 = 0.5 and dV(n)/dR1 = -R2 / (R1 + R2)^2 = -2.5e-10
+/// exactly. ngspice-46's forward differences give 4.999999999589e-01 and
+/// -2.49999750013e-10.
+#[test]
+fn a_leakage_held_divider_row_is_the_operating_points_own_derivative() {
+    let netlist = Netlist::parse(
+        "* leakage divider beside a diode\nv1 in 0 1\nr1 in n 1e9\nr2 n 0 1e9\nrd in a 1k\n\
+         d1 a 0 dmod\n.model dmod d(is=1e-14)\n.sens v(n)\n.end\n",
+    )
+    .expect("deck parses");
+    let result = sens(&netlist);
+    assert_relative(result.output_value, 0.5, 1e-15, "v(n)");
+    assert_relative(row(&result, "v1", "dc").absolute, 0.5, 1e-12, "dV(n)/dV1");
+    assert_relative(
+        row(&result, "r1", "r").absolute,
+        -2.5e-10,
+        1e-9,
+        "dV(n)/dR1",
+    );
+}
+
+/// An XSPICE digital net is an event net: its placeholder row is empty
+/// without the nodal floor, and the assembly of the rows above has to close
+/// it as the operating point did, or a deck with a digital part has no rows.
+#[test]
+fn a_row_beside_an_event_net_is_the_operating_points_own_derivative() {
+    let netlist = Netlist::parse(
+        "* event nets beside a leakage divider
+v1 in 0 1
+         A1 [in] [d1] adc1
+.model adc1 adc_bridge(in_low=0.5 in_high=0.5)
+         A2 d1 d2 inv1
+.model inv1 d_inverter
+         A3 [d2] [out] dac1
+.model dac1 dac_bridge
+         rl out 0 1k
+r1 in n 1e9
+r2 n 0 1e9
+.sens v(n)
+.end
+",
+    )
+    .expect("deck parses");
+    let result = sens(&netlist);
+    assert_relative(result.output_value, 0.5, 1e-15, "v(n)");
+    assert_relative(row(&result, "v1", "dc").absolute, 0.5, 1e-12, "dV(n)/dV1");
+    assert_relative(
+        row(&result, "r1", "r").absolute,
+        -2.5e-10,
+        1e-9,
+        "dV(n)/dR1",
     );
 }
 

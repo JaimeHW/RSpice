@@ -518,6 +518,19 @@ impl Engine {
             .all(|(new, old)| (new - old).abs() <= self.voltage_abstol())
     }
 
+    /// The nodal floor the operating point was solved at: none while the
+    /// solve without the floor has not failed on this circuit
+    /// ([`Self::tries_zero_dc_nodal_floor`]), the floor otherwise. The polish
+    /// and the operating-point tangents assemble the system at it, so both
+    /// are of the circuit the operating point solved.
+    fn dc_operating_point_nodal_floor(&self, circuit: &CircuitData) -> Value {
+        if self.tries_zero_dc_nodal_floor(circuit) {
+            0.0
+        } else {
+            self.dc_nodal_gmin_floor(circuit)
+        }
+    }
+
     pub(in crate::engine) fn dc_static_probe_polished_solution(
         &self,
         circuit: &mut CircuitData,
@@ -542,16 +555,11 @@ impl Engine {
         let node_count = circuit.num_nodes().min(size);
         let mut polished_solution = None;
         // The polish is one more solve of the system the operating point
-        // was solved as: without the nodal floor while that solve has not
-        // failed on this circuit. At the floor it was a different circuit's
-        // system, whose answer the voltage test below accepts whenever it
-        // lies within the tolerance, which moved every node only leakage
-        // holds back to the floor.
-        let gmin_floor = if self.tries_zero_dc_nodal_floor(circuit) {
-            0.0
-        } else {
-            self.dc_nodal_gmin_floor(circuit)
-        };
+        // was solved as. At the floor it was a different circuit's system,
+        // whose answer the voltage test below accepts whenever it lies
+        // within the tolerance, which moved every node only leakage holds
+        // back to the floor.
+        let gmin_floor = self.dc_operating_point_nodal_floor(circuit);
         let accepted = matrix.with_probe_values(|probe, rhs| {
             if self
                 .stamp_dc_static_probe_system(circuit, probe, rhs, solution, gmin_floor)
@@ -614,7 +622,12 @@ impl Engine {
         solution: &[Value],
         gmin_floor: Value,
     ) -> Result<(), SimulationError> {
+        // Assembled without the floor, the system closes a pure event net's
+        // row as the solve without the floor did ([`Self::stamp_nodal_gmin`]).
+        let solving_without_floor = circuit.zero_dc_nodal_floor;
+        circuit.zero_dc_nodal_floor |= gmin_floor == 0.0;
         Self::stamp_nodal_gmin(circuit, probe, gmin_floor);
+        circuit.zero_dc_nodal_floor = solving_without_floor;
         circuit.stamp_dc_direct(probe, rhs);
         let mut correction_rhs = Vec::new();
         self.try_stamp_operating_point_newton_system(
@@ -639,10 +652,11 @@ impl Engine {
     /// (an independent source's DC value) moves the solution along
     /// `J(x*)^-1 d`, where `d` is the excitation's derivative with respect to
     /// it and `J(x*)` the Jacobian of the equations the operating point
-    /// solved, assembled at `solution` exactly as the fixed-point polish
-    /// assembles it. That tangent is exact: no re-solve is involved, so it
-    /// carries none of a perturbed operating point's convergence error, which
-    /// on a high-gain loop exceeds the response a finite difference measures.
+    /// solved, at the nodal floor it solved them at, assembled at `solution`
+    /// exactly as the fixed-point polish assembles it. That tangent is exact:
+    /// no re-solve is involved, so it carries none of a perturbed operating
+    /// point's convergence error, which on a high-gain loop exceeds the
+    /// response a finite difference measures.
     /// The circuit's operating-point state is left as it was.
     pub(in crate::engine) fn dc_operating_point_tangents(
         &self,
@@ -662,7 +676,7 @@ impl Engine {
         }
         let snapshot = circuit.nonlinear_state_snapshot();
         let tangents = matrix.with_probe_values(|probe, rhs| {
-            let gmin_floor = self.dc_nodal_gmin_floor(circuit);
+            let gmin_floor = self.dc_operating_point_nodal_floor(circuit);
             self.stamp_dc_static_probe_system(circuit, probe, rhs, solution, gmin_floor)?;
             let denominator_floors = Self::dc_solve_denominator_floors(circuit, size);
             directions
