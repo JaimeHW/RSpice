@@ -84,6 +84,7 @@ impl PhaseDetector {
         let rclamp = positive("PHASEDET", "Rclamp", p.or("RCLAMP", 10.0)?)?;
         let rout = positive("PHASEDET", "Rout", p.or("ROUT", 1e10)?)?;
         p.get("TD")?;
+        p.schmitt_trip_points()?;
         p.finish()?;
         Ok(Self {
             iout,
@@ -141,6 +142,7 @@ impl SampleHold {
         let rout = positive("SAMPLEHOLD", "Rout", p.or("ROUT", 1e3)?)?;
         let (vlow, vhigh) = limits(&mut p)?;
         p.get("TD")?;
+        p.schmitt_trip_points()?;
         p.finish()?;
         Ok(Self {
             reference,
@@ -185,6 +187,7 @@ impl Modulator {
             .ok_or_else(|| SpecialFunctionError::new("MODULATOR needs a space frequency"))?;
         let rout = positive("MODULATOR", "Rout", p.or("ROUT", 1.0)?)?;
         p.get("TD")?;
+        p.schmitt_trip_points()?;
         p.finish()?;
         Ok(Self { mark, space, rout })
     }
@@ -227,6 +230,7 @@ impl Varistor {
             Some(entries)
         };
         p.get("TD")?;
+        p.schmitt_trip_points()?;
         p.finish()?;
         Ok(Self { rclamp, table })
     }

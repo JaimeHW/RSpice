@@ -271,9 +271,7 @@ impl Gate {
         let mut p = InstanceParams::new(device, params);
         let stage = OutputStage::read(&mut p)?;
         let reference = p.or("REF", 0.5 * (stage.vhigh + stage.vlow))?;
-        // LTspice accepts a Schmitt trigger's hysteresis on a gate and
-        // switches without it.
-        p.get("VH")?;
+        p.schmitt_trip_points()?;
         p.finish()?;
         Ok(Self {
             function,

@@ -84,6 +84,7 @@ impl Sequential {
                 )));
             }
         };
+        p.schmitt_trip_points()?;
         p.finish()?;
         Ok(Self {
             function,

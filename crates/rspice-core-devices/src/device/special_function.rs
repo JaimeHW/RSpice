@@ -109,6 +109,15 @@ impl<'a> InstanceParams<'a> {
         Ok(self.get(name)?.unwrap_or(default))
     }
 
+    /// Take a Schmitt trigger's `Vt` and `Vh`. LTspice 26.1.1 accepts them on
+    /// every special function and reads them only on the Schmitt trigger:
+    /// anywhere else neither moves a threshold or an output.
+    fn schmitt_trip_points(&mut self) -> Result<(), SpecialFunctionError> {
+        self.get("VT")?;
+        self.get("VH")?;
+        Ok(())
+    }
+
     /// A bare flag such as `linear`, or `linear=1`.
     fn flag(&mut self, name: &str) -> Result<bool, SpecialFunctionError> {
         Ok(self.get(name)?.is_some_and(|value| value != 0.0))

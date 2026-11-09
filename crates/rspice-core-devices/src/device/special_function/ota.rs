@@ -82,6 +82,7 @@ impl Ota {
             incm: p.or("INCM", 0.0)?,
             incmk: p.or("INCMK", 0.0)?,
         };
+        p.schmitt_trip_points()?;
         p.finish()?;
         if !linear {
             require(iout > isink, || {

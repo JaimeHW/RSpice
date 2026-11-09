@@ -374,6 +374,82 @@ A5 in 0 0 0 0 0 o5 0 OR Ref=0.5 Vh=0.2
 }
 
 #[test]
+fn only_a_schmitt_trigger_reads_the_trip_points_vt_and_vh() {
+    // The input ramps from 0 V to 2 V over 1 ms, crossing the default 0.5 V
+    // threshold at 250 us and the 0.8 V the instances name at 400 us.
+    let deck = "* vt and vh on every special function
+V1 in 0 PWL(0 0 1m 2)
+V2 rmp 0 PWL(0 .1 1m .9)
+V3 one 0 1.5
+V4 low 0 -1
+A1 in 0 0 0 0 0 o1 0 BUF Vt=.8 Vh=.1
+A2 one in 0 0 0 0 o2 0 AND Vt=.8 Vh=.1
+A3 in low 0 0 0 0 o3 0 OR Vt=.8 Vh=.1
+A4 in low 0 0 0 0 o4 0 XOR Vt=.8 Vh=.1
+A5 0 0 in 0 0 0 o5 0 DFLOP Vt=.8 Vh=.1
+A6 in 0 0 0 0 0 o6 0 SRFLOP Vt=.8 Vh=.1
+A7 in 0 0 0 0 0 o7 0 COUNTER cycles=2 Vt=.8 Vh=.1
+A8 rmp 0 in 0 0 0 o8 0 SAMPLEHOLD Vt=.8 Vh=.1
+R8 o8 0 1meg
+A9 in 0 0 0 0 0 o9 0 PHASEDET Vt=.8 Vh=.1
+R9 o9 0 1k
+A10 in 0 0 0 0 0 o10 0 SCHMITT Vt=.8 Vh=.1
+A11 rmp 0 0 0 0 0 o11 0 MODULATOR mark=20k space=10k Vt=.8 Vh=.1
+A12 rmp 0 0 0 0 0 o12 0 MODULATOR mark=20k space=10k
+A13 one 0 0 0 0 0 o13 0 VARISTOR Vt=.8 Vh=.1
+R13 o13 in 1k
+A14 one 0 0 0 0 0 o14 0 VARISTOR
+R14 o14 in 1k
+A15 0 in 0 0 0 0 o15 0 OTA g=1m iout=2m Vhigh=10 Vlow=-10 Vt=.8 Vh=.1
+R15 o15 0 1k
+A16 0 in 0 0 0 0 o16 0 OTA g=1m iout=2m Vhigh=10 Vlow=-10
+R16 o16 0 1k
+.end
+";
+    // LTspice 26.1.1 batch: everything but the Schmitt trigger switches at
+    // 0.5 V, as it does without Vt and Vh.
+    let at_half = |v: f64| v / 2e3;
+    let expected = [
+        ("o1", 0.0, 1.0),
+        ("o2", 0.0, 1.0),
+        ("o3", 0.0, 1.0),
+        ("o4", 0.0, 1.0),
+        ("o5", 0.0, 1.0),
+        ("o6", 0.0, 1.0),
+        ("o7", 1.0, 0.0),
+        ("o9", 0.0, 0.1),
+    ];
+    let mut probes = Vec::new();
+    for (node, before, after) in expected {
+        probes.push((node, at_half(0.48), before));
+        probes.push((node, at_half(0.52), after));
+    }
+    // The sample and hold takes its input at 250 us.
+    probes.push(("o8", 0.9e-3, 0.3));
+    // The Schmitt trigger alone trips at Vt + Vh.
+    probes.push(("o10", at_half(0.88), 0.0));
+    probes.push(("o10", at_half(0.92), 1.0));
+    let points: Vec<(&str, f64)> = probes.iter().map(|(n, t, _)| (*n, *t)).collect();
+    let pairs = [("o11", "o12"), ("o13", "o14"), ("o15", "o16")];
+    let mut compared = Vec::new();
+    for (given, plain) in pairs {
+        for time in [0.13e-3, 0.61e-3, 0.97e-3] {
+            compared.push((given, time));
+            compared.push((plain, time));
+        }
+    }
+    let all: Vec<(&str, f64)> = points.iter().chain(&compared).copied().collect();
+    let values = tran_at(deck, 1e-3, 1e-6, &all);
+    let (level, pair) = values.split_at(points.len());
+    for ((node, time, expected), actual) in probes.iter().zip(level) {
+        assert_close(&format!("{node} at {time:e}"), *actual, *expected, 2e-3);
+    }
+    for values in pair.chunks(2) {
+        assert_close("output without Vt and Vh", values[0], values[1], 1e-9);
+    }
+}
+
+#[test]
 fn an_initial_condition_holds_a_gate_through_the_operating_point_and_starts_a_flip_flop() {
     let deck = "* logic IC
 V1 in1 0 1
