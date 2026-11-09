@@ -140,6 +140,9 @@ pub fn materialize_authoritative_source_binding(
                 ],
             )
         });
+    if let Some(binding) = project_veriloga.as_ref() {
+        materialized.set_source_module(binding.selected_module());
+    }
     materialized.netlist_template = metadata_value(
         [&view.metadata, &cell.metadata],
         &["netlist.template", "netlist_template"],

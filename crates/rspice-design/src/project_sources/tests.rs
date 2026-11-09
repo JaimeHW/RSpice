@@ -884,6 +884,11 @@ fn veriloga_runtime_keys_and_aliases_are_deterministic_and_identity_complete() {
             .next()
             .is_some_and(|character| character.is_ascii_alphabetic())
     );
+    // A deck names the module the engineer wrote, with a short tag beside it.
+    let tag = alias
+        .strip_prefix("ota_core_")
+        .unwrap_or_else(|| panic!("the alias leads with the module: {alias}"));
+    assert_eq!(tag.len(), 8, "{alias}");
 }
 
 #[test]

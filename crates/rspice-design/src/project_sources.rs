@@ -1740,20 +1740,24 @@ impl<'a> VerilogASourceKeyParts<'a> {
     }
 }
 
-/// Collision-resistant, portable SPICE identifier for one selected module in
-/// a project Verilog-A bundle. It deliberately contains no raw user text: the
-/// complete bundle UUID and complete selected-module digest preserve identity
-/// while every emitted byte remains `[A-Za-z0-9_]`.
+/// Portable SPICE identifier for one selected module in a project Verilog-A
+/// bundle: the module's own name, so the deck reads the way the design does,
+/// then a short tag of the bundle and the module that keeps two cells'
+/// same-named modules apart. Every emitted byte is `[A-Za-z0-9_]`, and the
+/// prepared runtime set refuses a deck in which two aliases still collide.
 pub fn project_veriloga_bundle_alias(
     bundle: &ProjectSourceBundle,
     module_name: &str,
 ) -> Result<String, ProjectSourceError> {
     validate_veriloga_runtime_selection(bundle, module_name)?;
-    let id = bundle.id().to_string().replace('-', "");
-    Ok(format!(
-        "rspice_va_{id}_{}",
-        selected_module_digest(module_name)
-    ))
+    let readable = module_name.replace('$', "_");
+    let lead = if readable.starts_with('_') { "va" } else { "" };
+    let mut hasher = Sha256::new();
+    hash_frame(&mut hasher, b"rspice.project-veriloga-netlist-alias/v2");
+    hash_frame(&mut hasher, bundle.id().to_string().as_bytes());
+    hash_frame(&mut hasher, module_name.as_bytes());
+    let tag = ContentDigest::from_bytes(hasher.finalize().into()).to_string();
+    Ok(format!("{lead}{readable}_{}", &tag[..8]))
 }
 
 fn validate_veriloga_runtime_selection(

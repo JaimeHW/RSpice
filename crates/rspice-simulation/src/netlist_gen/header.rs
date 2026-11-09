@@ -36,7 +36,8 @@ impl<'a> NetlistGenerator<'a> {
     /// - Verilog-A bindings emit `.VERILOGA "path" [module]`
     /// - Other source-backed bindings emit `.include "path"`
     pub(super) fn generate_library_view_includes(&mut self) {
-        let mut includes = std::collections::BTreeMap::<String, Option<String>>::new();
+        let mut includes =
+            std::collections::BTreeMap::<String, (Option<String>, Option<String>)>::new();
         let mut generic_includes = std::collections::BTreeMap::<String, Option<String>>::new();
 
         for component in &self.schematic.components {
@@ -89,7 +90,7 @@ impl<'a> NetlistGenerator<'a> {
                         component.name, binding.library, binding.cell, binding.view
                     ));
                 }
-                if let Some(existing_model) = includes.get(&key) {
+                if let Some((existing_model, _)) = includes.get(&key) {
                     if existing_model.as_deref() != model.as_deref() {
                         self.warnings.push(format!(
                             "Conflicting Verilog-A module bindings for include '{}': keeping '{}' and ignoring '{}'",
@@ -99,7 +100,16 @@ impl<'a> NetlistGenerator<'a> {
                         ));
                     }
                 } else {
-                    includes.insert(key, model);
+                    let origin = binding.source_module().map(|module| {
+                        format!(
+                            "* {}/{}/{} (module {})",
+                            binding.library,
+                            binding.cell,
+                            binding.view,
+                            module.trim()
+                        )
+                    });
+                    includes.insert(key, (model, origin));
                 }
             } else {
                 if let Some(existing_section) = generic_includes.get(&key) {
@@ -131,8 +141,9 @@ impl<'a> NetlistGenerator<'a> {
                 self.lines.push(format!(".include {}", quoted_path));
             }
         }
-        for (path, model) in includes {
+        for (path, (model, origin)) in includes {
             let quoted_path = Self::quote_path_for_netlist(&path);
+            self.lines.extend(origin);
             if let Some(model_name) = model {
                 self.lines
                     .push(format!(".VERILOGA {} {}", quoted_path, model_name));
@@ -148,23 +159,37 @@ impl<'a> NetlistGenerator<'a> {
     /// so collect, validate, deduplicate, and hoist those directives once
     /// after the full hierarchy has been assembled.
     pub(super) fn hoist_veriloga_directives(&mut self) {
-        let mut directives = std::collections::BTreeMap::<String, (Option<String>, String)>::new();
-        let mut retained = Vec::with_capacity(self.lines.len());
+        let mut directives =
+            std::collections::BTreeMap::<String, (Option<String>, Option<String>, String)>::new();
+        let mut retained: Vec<String> = Vec::with_capacity(self.lines.len());
         for line in self.lines.drain(..) {
             let Some((path, model)) = parse_veriloga_directive(&line) else {
                 retained.push(line);
                 continue;
             };
+            // The comment naming the design object travels with its source.
+            let origin = retained
+                .last()
+                .is_some_and(|previous| is_veriloga_origin_comment(previous))
+                .then(|| retained.pop())
+                .flatten();
             let model_key = model.as_deref().map(str::to_ascii_lowercase);
             match directives.get(&path) {
-                Some((existing, _)) if *existing == model_key => {}
-                Some((existing, _)) => self.errors.push(format!(
+                Some((existing, _, _)) if *existing == model_key => {}
+                Some((existing, _, _)) => self.errors.push(format!(
                     "Verilog-A source '{path}' has conflicting module selections '{}' and '{}'",
                     existing.as_deref().unwrap_or("<compiler selected>"),
                     model_key.as_deref().unwrap_or("<compiler selected>")
                 )),
                 None => {
-                    directives.insert(path, (model_key, line.trim().to_owned()));
+                    directives.insert(
+                        path,
+                        (
+                            model_key,
+                            origin.map(|comment| comment.trim().to_owned()),
+                            line.trim().to_owned(),
+                        ),
+                    );
                 }
             }
         }
@@ -177,13 +202,25 @@ impl<'a> NetlistGenerator<'a> {
             .iter()
             .position(String::is_empty)
             .map_or(retained.len(), |index| index + 1);
-        let mut section = Vec::with_capacity(directives.len() + 2);
+        let mut section = Vec::with_capacity(directives.len() * 2 + 2);
         section.push("* Verilog-A sources".to_owned());
-        section.extend(directives.into_values().map(|(_, line)| line));
+        section.extend(
+            directives
+                .into_values()
+                .flat_map(|(_, origin, line)| origin.into_iter().chain([line])),
+        );
         section.push(String::new());
         retained.splice(insertion..insertion, section);
         self.lines = retained;
     }
+}
+
+/// Whether `line` is the `* lib/cell/view (module name)` comment written above
+/// a Verilog-A source line.
+fn is_veriloga_origin_comment(line: &str) -> bool {
+    line.trim_start()
+        .strip_prefix("* ")
+        .is_some_and(|comment| comment.contains(" (module ") && comment.ends_with(')'))
 }
 
 fn parse_veriloga_directive(line: &str) -> Option<(String, Option<String>)> {
@@ -342,6 +379,85 @@ mod tests {
                 .lines
                 .iter()
                 .any(|line| line == "* Library includes")
+        );
+    }
+
+    #[test]
+    fn a_veriloga_source_line_is_headed_by_the_cell_and_module_it_serves() {
+        let mut schematic = rspice_design::schematic::owned::Schematic::default();
+        let mut binding = rspice_design::schematic::component::LibraryCellInstance::new(
+            "work", "ota", "veriloga",
+        );
+        binding.source_path = Some(std::path::PathBuf::from("C:/models/ota.va"));
+        binding.module_name = Some("ota_core_1a2b3c4d".to_owned());
+        binding.set_source_module("ota_core");
+        binding.terminal_order = vec!["p".to_owned(), "n".to_owned()];
+        binding.interface_bound = true;
+        schematic.document_mut_for_test().components.push(
+            rspice_design::schematic::component::Component::new(
+                1,
+                rspice_design::schematic::component_type::ComponentType::CellInstance,
+                rspice_design_model::Point::origin(),
+            )
+            .with_library_cell(binding),
+        );
+        let mut generator = NetlistGenerator::new(
+            &schematic,
+            crate::netlist_gen::NetlistSourceData::new(&crate::netlist_gen::FixtureSourceFiles),
+        );
+
+        generator.generate_library_view_includes();
+        generator.hoist_veriloga_directives();
+
+        assert!(generator.errors.is_empty(), "{:?}", generator.errors);
+        let directive = generator
+            .lines
+            .iter()
+            .position(|line| line.starts_with(".VERILOGA"))
+            .expect("the source line is written");
+        assert_eq!(
+            generator.lines[directive - 1],
+            "* work/ota/veriloga (module ota_core)"
+        );
+        assert_eq!(
+            generator.lines[directive],
+            ".VERILOGA \"C:/models/ota.va\" ota_core_1a2b3c4d"
+        );
+    }
+
+    #[test]
+    fn a_hoisted_source_keeps_one_comment_however_many_subcircuits_named_it() {
+        let schematic = rspice_design::schematic::owned::Schematic::default();
+        let mut generator = NetlistGenerator::new(
+            &schematic,
+            crate::netlist_gen::NetlistSourceData::new(&crate::netlist_gen::FixtureSourceFiles),
+        );
+        generator.lines = vec![
+            "* RSpice Netlist".to_owned(),
+            String::new(),
+            "* Library includes".to_owned(),
+            "* work/ota/veriloga (module ota)".to_owned(),
+            ".VERILOGA \"models/ota.va\" ota_1".to_owned(),
+            String::new(),
+            ".subckt child p n".to_owned(),
+            "* Library includes".to_owned(),
+            "* work/ota/veriloga (module ota)".to_owned(),
+            ".VERILOGA \"models/ota.va\" ota_1".to_owned(),
+            String::new(),
+            ".ends child".to_owned(),
+        ];
+
+        generator.hoist_veriloga_directives();
+
+        assert_eq!(
+            generator
+                .lines
+                .iter()
+                .filter(|line| line.as_str() == "* work/ota/veriloga (module ota)")
+                .count(),
+            1,
+            "{:#?}",
+            generator.lines
         );
     }
 

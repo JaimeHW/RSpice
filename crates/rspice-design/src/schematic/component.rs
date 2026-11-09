@@ -65,6 +65,10 @@ pub struct LibraryCellInstance {
     /// Persisted placement metadata cannot acquire this authority.
     #[serde(skip)]
     variant_model_section: Option<String>,
+    /// The module as its source declares it, set where an execution binding
+    /// gives the deck another name for it. Only the deck's comment reads it.
+    #[serde(skip)]
+    source_module: Option<String>,
     /// Preferred reference-designator prefix for newly placed instances.
     /// This does not rewrite existing instances when a library definition is
     /// revised.
@@ -269,6 +273,7 @@ impl LibraryCellInstance {
             netlist_template: None,
             model_section: None,
             variant_model_section: None,
+            source_module: None,
             reference_prefix: None,
             parameter_order: Vec::new(),
             parameters_declared: false,
@@ -284,6 +289,18 @@ impl LibraryCellInstance {
 
     pub fn is_builtin_xspice(&self) -> bool {
         self.builtin_xspice.is_some()
+    }
+
+    /// The module as its source declares it: `module_name` unless the deck
+    /// calls it something else.
+    pub fn source_module(&self) -> Option<&str> {
+        self.source_module
+            .as_deref()
+            .or(self.module_name.as_deref())
+    }
+
+    pub fn set_source_module(&mut self, module: impl Into<String>) {
+        self.source_module = Some(module.into());
     }
 
     pub fn is_generated_veriloga(&self) -> bool {
