@@ -80,9 +80,8 @@ fn capacitance_of(deck: &str, name: &str) -> f64 {
 
 /// The current of 1 V across `X1`, whichever program the deck names.
 fn x_line_current(source: &str, subcircuit: &str, instance: &str) -> f64 {
-    let deck = format!(
-        "x line multiplier\n{source}\nVd d 0 1\n{subcircuit}\n{instance}\n.op\n.end\n"
-    );
+    let deck =
+        format!("x line multiplier\n{source}\nVd d 0 1\n{subcircuit}\n{instance}\n.op\n.end\n");
     let netlist = Netlist::parse(&deck).expect("deck parses");
     let result = Engine::new(SimulationConfig::default())
         .run_dc_op(&netlist)
@@ -104,7 +103,10 @@ fn a_drawn_deck_leaves_an_undeclared_subcircuit_m_as_a_parameter() {
     let declared = ".subckt rr a b params: m=1\nR1 a b {1k/m}\n.ends";
     let unused = ".subckt rr a b params: m=1\nR1 a b 1k\n.ends";
     let nested = ".subckt in a b\nR1 a b 1k\n.ends\n.subckt rr a b\nX2 a b in m=3\n.ends";
-    for source in [".options rspice_source=ltspice", ".options rspice_source=qspice"] {
+    for source in [
+        ".options rspice_source=ltspice",
+        ".options rspice_source=qspice",
+    ] {
         for (subcircuit, milliamps) in [(plain, 1.0), (declared, 2.0), (unused, 1.0), (nested, 1.0)]
         {
             let current = x_line_current(source, subcircuit, "X1 d 0 rr m=2");
