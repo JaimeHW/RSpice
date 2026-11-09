@@ -726,6 +726,7 @@ const WORKBENCH_LAYERS: &[&str] = &[
     // a document file without one is owned here, where its first reach into
     // the shell fails the order.
     "documents",
+    "system_contrast",
     "routing/surface_route",
     "routing/surface_catalog",
     "routing/availability",

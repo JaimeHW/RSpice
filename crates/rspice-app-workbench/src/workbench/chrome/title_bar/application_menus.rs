@@ -116,21 +116,6 @@ pub(super) fn configure_menu_popup(ui: &mut Ui, large_targets: bool, rows: &[Men
     };
 }
 
-/// Where the keyboard last raised the menu with popup id `popup_id`.
-fn raised_at_id(popup_id: egui::Id) -> egui::Id {
-    popup_id.with("raised at")
-}
-
-/// Open the source editor's menu at `position`, for the keys that raise it
-/// where no pointer says where.
-pub fn raise_source_editor_menu(response: &Response, position: egui::Pos2) {
-    let popup_id = Popup::default_response_id(response);
-    response
-        .ctx
-        .data_mut(|data| data.insert_temp(raised_at_id(popup_id), position));
-    Popup::open_id(&response.ctx, popup_id);
-}
-
 /// The source editor's right-click menu, drawn with the menu bar's own rows
 /// and separators so its row height, text edge and rules match the menus
 /// above it. A long press opens it on touch.
@@ -142,14 +127,7 @@ pub fn source_editor_context_menu(
     let large_targets = ctx.content_rect().width() <= 820.0
         || Tokens::get(&ctx).metrics.ctl_h >= MENU_TOUCH_ROW_HEIGHT;
     let popup_id = Popup::default_response_id(response);
-    if response.secondary_clicked() {
-        ctx.data_mut(|data| data.remove_temp::<egui::Pos2>(raised_at_id(popup_id)));
-    }
-    let mut popup = Popup::context_menu(response);
-    if let Some(position) = ctx.data(|data| data.get_temp::<egui::Pos2>(raised_at_id(popup_id))) {
-        popup = popup.at_position(position);
-    }
-    let shown = popup.show(|ui| {
+    let shown = crate::ui::widgets::context_menu_popup(response).show(|ui| {
         let rows = menu_rows(app.source_editor_menu(), app, ui.ctx());
         configure_menu_popup(ui, large_targets, &rows);
         ui.ctx().accesskit_node_builder(popup_id, |node| {

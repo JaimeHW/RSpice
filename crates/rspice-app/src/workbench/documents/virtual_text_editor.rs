@@ -937,7 +937,7 @@ pub(crate) fn show_virtual_text_editor(
         &mut line_diagnostic_context,
     );
     if menu_raised {
-        crate::workbench::chrome::title_bar::raise_source_editor_menu(
+        crate::ui::widgets::raise_context_menu(
             &response,
             caret_anchor.unwrap_or_else(|| response.rect.left_top()),
         );

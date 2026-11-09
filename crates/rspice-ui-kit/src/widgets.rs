@@ -24,6 +24,7 @@ mod canvas_entry;
 mod chip;
 mod combo;
 mod command_form;
+mod context_menu;
 mod dialog;
 mod dialog_tabs;
 mod docbar;
@@ -49,6 +50,7 @@ pub use chip::chip;
 pub use combo::Combo;
 pub(crate) use command_form::middle_elided;
 pub use command_form::{CommandForm, FieldLine, FormRows, ListEdit, ListWords, TableColumn};
+pub use context_menu::{context_menu_popup, raise_context_menu};
 pub use dialog::{
     DIALOG_BODY_INSET, Dialog, DialogChoice, DialogHintTone, DialogInitialFocus, DialogResponse,
     DialogSize, DialogTransactionTone, band_header, focus_is_within_modal,
