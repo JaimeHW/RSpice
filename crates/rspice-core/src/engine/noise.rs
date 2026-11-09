@@ -2830,6 +2830,9 @@ impl Engine {
         // A split RSW sidewall is its owner's sidewall shot and flicker
         // source (dionoise.c's `_idsw`/`_1overfsw`), not a device of its own.
         for diode in &circuit.diodes.devices {
+            if diode.is_noiseless() {
+                continue;
+            }
             let (device, shot, flicker) = match diode.split_sidewall_owner() {
                 Some(owner) => (owner, "IDSW", "FNSW"),
                 None => (diode.name.as_str(), "ID", "FN"),

@@ -1308,3 +1308,25 @@ fn split_sidewall_noise_reports_the_authored_diode() {
         );
     }
 }
+
+/// QSPICE and LTspice 26.1.1 batch: V(b) of a resistor-fed idealized clamp.
+#[test]
+fn an_idealized_card_clamps_at_its_forward_and_reverse_knees() {
+    for (drive, clamped) in [
+        (-8.0, -3.098033),
+        (-4.0, -3.019602),
+        (4.0, 0.7326726),
+        (8.0, 0.7722765),
+    ] {
+        let deck = format!(
+            "idealized clamp\nV1 a 0 {drive}\nR1 a b 100\nD1 b 0 DI\n\
+             .model DI D(Ron=1 Roff=1Meg Vfwd=.7 Vrev=3 Rrev=2)\n.op\n.end\n"
+        );
+        let netlist = Netlist::parse(&deck).expect("idealized deck parses");
+        let result = Engine::new(SimulationConfig::default())
+            .run_dc_op(&netlist)
+            .expect("idealized clamp converges");
+        let voltage = result.try_voltage_named("b").unwrap();
+        assert_close("clamped node", voltage, clamped, 1e-6, 1e-9);
+    }
+}

@@ -7741,6 +7741,9 @@ impl Engine {
                         )));
                     }
                     diode.apply_instance_scaling(area, mult);
+                    if let Some(series) = instance_param(instance_params, &["N"]) {
+                        diode.set_series_devices(series);
+                    }
                     diode.set_sidewall_perimeter(sidewall_perimeter * mult);
                     diode.set_initially_off(
                         instance_param(instance_params, &["OFF"]).is_some_and(|off| off != 0.0),

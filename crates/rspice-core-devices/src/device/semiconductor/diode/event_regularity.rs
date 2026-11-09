@@ -15,6 +15,9 @@ impl Diode {
     /// continuity across a piecewise constitutive join.
     #[doc(hidden)]
     pub fn physical_event_locally_c2(&self, vd: Value) -> bool {
+        if self.idealized.is_some() {
+            return false;
+        }
         if !vd.is_finite()
             || !self.junction_locally_c2(vd, self.bottom_saturation_current(), self.n, true)
         {

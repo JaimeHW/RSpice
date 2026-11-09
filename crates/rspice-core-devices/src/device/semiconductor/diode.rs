@@ -1,6 +1,7 @@
 //! Diode device model
 
 mod event_regularity;
+mod idealized;
 
 use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
 use crate::numerics::integration::{
@@ -8,6 +9,7 @@ use crate::numerics::integration::{
 };
 use crate::solver::{CscIndex, StaticMatrix};
 use crate::{NodeId, Value};
+use idealized::IdealizedDiode;
 
 /// Boltzmann over charge with ngspice-46's CODATA constants
 /// (const.h: CONSTboltz / CHARGE).
@@ -210,6 +212,7 @@ pub struct ResolvedDiodeJunction {
     saturation_current: Value,
     emission_voltage: Value,
     breakdown: Option<(Value, Value)>,
+    idealized: Option<IdealizedDiode>,
 }
 
 impl ResolvedDiodeJunction {
@@ -223,6 +226,7 @@ impl ResolvedDiodeJunction {
             saturation_current,
             emission_voltage,
             breakdown: breakdown_voltage.map(|voltage| (voltage, breakdown_emission_voltage)),
+            idealized: None,
         }
     }
 
@@ -231,6 +235,9 @@ impl ResolvedDiodeJunction {
     /// exponential, cubic reverse continuation, and avalanche breakdown.
     #[doc(hidden)]
     pub fn current_and_conductance(self, voltage: Value) -> (Value, Value) {
+        if let Some(idealized) = self.idealized {
+            return idealized.current_and_conductance(voltage, 0.0);
+        }
         let isat = self.saturation_current;
         let nvt = self.emission_voltage;
         if !(isat.is_finite() && isat > 0.0 && nvt.is_finite() && nvt > 0.0) {
@@ -259,6 +266,9 @@ impl ResolvedDiodeJunction {
 
     #[doc(hidden)]
     pub fn physical_parameter_error(self) -> Option<&'static str> {
+        if self.idealized.is_some() {
+            return None;
+        }
         if !self.saturation_current.is_finite() || self.saturation_current < 0.0 {
             return Some("diode saturation current must be finite and nonnegative");
         }
@@ -420,6 +430,10 @@ pub struct Diode {
     tbv1_given: bool,
     /// Junctions this instance evaluates; see [`DiodeSidewallRole`].
     sidewall_role: DiodeSidewallRole,
+    /// The region-wise linear law, when the model card selects it.
+    idealized: Option<IdealizedDiode>,
+    /// `NOISELESS` on the model card silences shot and flicker noise.
+    noiseless: bool,
     /// The authored diode a split RSW sidewall belongs to. Reports and
     /// terminal currents present the two junctions as that one device.
     sidewall_owner: Option<String>,
@@ -704,6 +718,8 @@ impl Diode {
             tbv1: 0.0,
             tbv1_given: false,
             sidewall_role: DiodeSidewallRole::Combined,
+            idealized: None,
+            noiseless: false,
             sidewall_owner: None,
             tbv2: 0.0,
 
@@ -872,7 +888,12 @@ impl Diode {
         // A tied junction has an exact zero bias. Limiting or seeding it at
         // tVcrit would invent an unreachable voltage and prevent convergence.
         let tied = self.node_anode == self.node_cathode;
-        if tied || (!self.junction_history_valid.get() && (self.initial_off || vcrit.is_finite())) {
+        let idealized = self.idealized.is_some();
+        if tied
+            || (!idealized
+                && !self.junction_history_valid.get()
+                && (self.initial_off || vcrit.is_finite()))
+        {
             self.junction_history_valid.set(true);
             self.limited.set(false);
             let vd = if tied || self.initial_off { 0.0 } else { vcrit };
@@ -897,7 +918,9 @@ impl Diode {
         // ngspice (`here->DIOtBrkdwnV`) and the evaluator above use. Limiting
         // around the raw card value instead would fold the junction about a
         // different point than the branch it is protecting.
-        let (vd, limited) = if let Some(bv) = self.active_breakdown_voltage() {
+        let (vd, limited) = if idealized {
+            (vd_raw, false)
+        } else if let Some(bv) = self.active_breakdown_voltage() {
             let vtebrk = self.breakdown_emission_coefficient.max(EPSMIN) * self.vt;
             if vd_raw < 0.0_f64.min(-bv + 10.0 * vtebrk) {
                 let transformed = -(vd_raw + bv);
@@ -1305,7 +1328,29 @@ impl Diode {
         if !params.contains_key("EG") && self.temperature_model.tlev == 2 {
             self.eg = 1.16;
         }
+        self.idealized = IdealizedDiode::from_model_params(params);
+        if self.idealized.is_some() {
+            self.rs = 0.0;
+        }
+        self.noiseless = params.get("NOISELESS").is_some_and(|flag| *flag != 0.0);
         self
+    }
+
+    /// `N` on the instance line stacks identical idealized junctions in series.
+    /// A junction diode's `N` is the model's emission coefficient.
+    pub fn set_series_devices(&mut self, series: Value) {
+        if let Some(idealized) = self.idealized.as_mut()
+            && series.is_finite()
+            && series > 0.0
+        {
+            idealized.set_series(series);
+        }
+    }
+
+    /// Whether the card's `NOISELESS` flag silences this diode's noise.
+    #[doc(hidden)]
+    pub fn is_noiseless(&self) -> bool {
+        self.noiseless
     }
 
     /// Apply Xyce device-level minimum defaults to model parameters that were
@@ -1413,6 +1458,9 @@ impl Diode {
     /// side-effect-free preview of that load.
     #[inline]
     pub(crate) fn limited_junction_voltage_for(&self, vd_raw: Value) -> Value {
+        if self.idealized.is_some() {
+            return vd_raw;
+        }
         let (vte, vcrit) = self.limiter_thermal_and_critical_voltages();
         let limit_junction =
             |candidate: Value, previous: Value, thermal: Value, critical: Value| {
@@ -1757,6 +1805,9 @@ impl Diode {
         let scale = area * multiplicity;
         self.candidate_eval_valid = false;
         self.multiplicity *= multiplicity;
+        if let Some(idealized) = self.idealized.as_mut() {
+            idealized.scale_parallel(scale);
+        }
         self.is *= scale;
         self.ibv *= if self.xyce_dialect {
             scale
@@ -2115,6 +2166,9 @@ impl Diode {
     /// Xyce multiplies the complete device equations by M, including GMIN.
     /// ngspice folds M into model parameters before adding its unscaled GMIN.
     fn stamped_junction_gmin(&self) -> Value {
+        if self.idealized.is_some() {
+            return 0.0;
+        }
         if self.xyce_dialect {
             self.junction_gmin * self.multiplicity
         } else {
@@ -2129,7 +2183,8 @@ impl Diode {
     #[doc(hidden)]
     pub fn has_monotone_c1_conduction(&self) -> bool {
         let finite_nonnegative = |value: Value| value.is_finite() && value >= 0.0;
-        !self.has_charge_storage()
+        self.idealized.is_none()
+            && !self.has_charge_storage()
             && self.bv.is_none()
             && self.temperature_breakdown_voltage.is_none()
             && self.forward_knee_current == 0.0
@@ -2167,6 +2222,9 @@ impl Diode {
     }
 
     fn current_and_conductance_with_gmin(&self, vd: Value, gmin: Value) -> (Value, Value) {
+        if let Some(idealized) = self.idealized {
+            return idealized.current_and_conductance(vd, self.junction_gmin);
+        }
         let [
             (bottom_i, bottom_g),
             (sidewall_i, sidewall_g),
@@ -2487,7 +2545,11 @@ impl Diode {
     /// junction and is therefore retained here.
     #[doc(hidden)]
     pub fn resolved_level_one_junction(&self) -> ResolvedDiodeJunction {
-        self.resolved_bottom_junction(self.bottom_saturation_current(), self.n)
+        let mut junction = self.resolved_bottom_junction(self.bottom_saturation_current(), self.n);
+        junction.idealized = self
+            .idealized
+            .map(|idealized| idealized.resolved(self.junction_gmin));
+        junction
     }
 
     /// Validate the authored and resolved breakdown inputs before an exact-HB
