@@ -59,6 +59,37 @@ impl ViewType {
         }
     }
 
+    /// How the view type reads in product text. [`Self::display_name`] is also
+    /// the default view name and the canonical word in a `lib/cell/view` path,
+    /// so it stays as stored; this is only ever a caption.
+    pub const fn caption(&self) -> &'static str {
+        match self {
+            ViewType::VerilogA => "Verilog-A",
+            ViewType::Schematic => "schematic",
+            ViewType::Symbol => "symbol",
+            ViewType::Layout => "layout",
+            ViewType::Testbench => "testbench",
+            ViewType::Verilog => "Verilog",
+            ViewType::Spice => "SPICE",
+            ViewType::Document => "document",
+            ViewType::Extracted => "extracted",
+            ViewType::Abstract => "abstract",
+            ViewType::Config => "configuration",
+            ViewType::Custom => "custom",
+        }
+    }
+
+    /// A tab or title caption for the view named `name`: a view keeps the
+    /// name it was given, and the default-named Verilog-A view reads as its
+    /// type.
+    pub fn caption_for<'a>(&self, name: &'a str) -> &'a str {
+        if *self == ViewType::VerilogA && name.eq_ignore_ascii_case("veriloga") {
+            "Verilog-A"
+        } else {
+            name
+        }
+    }
+
     /// Parse view type from string
     pub fn from_name(s: &str) -> Self {
         match s.to_lowercase().as_str() {

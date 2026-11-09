@@ -555,32 +555,6 @@ fn form_body(
         edited = true;
     }
 
-    let (generated, jit) = (
-        text(MessageId::VerilogABuildSettingsGeneratedRust),
-        text(MessageId::VerilogABuildSettingsNativeJit),
-    );
-    edited |= rows.check_columns(
-        &text(MessageId::VerilogABuildSettingsTargets),
-        &mut [
-            (generated.as_str(), &mut draft.generated_rust),
-            (jit.as_str(), &mut draft.native_x64_jit),
-        ],
-    );
-
-    let (interpreter, fail) = (
-        text(MessageId::VerilogABuildSettingsUseInterpreter),
-        text(MessageId::VerilogABuildSettingsFailCompile),
-    );
-    let mut fallback = usize::from(draft.reject_fallback);
-    if rows.choice(
-        &text(MessageId::VerilogABuildSettingsFallback),
-        &[interpreter.as_str(), fail.as_str()],
-        &mut fallback,
-    ) {
-        draft.reject_fallback = fallback == 1;
-        edited = true;
-    }
-
     let remove = text(MessageId::VerilogABuildSettingsRemove);
     let (include_hint, add_include) = (
         text(MessageId::VerilogABuildSettingsIncludeHint),
@@ -678,5 +652,47 @@ fn form_body(
             (portability.as_str(), &mut checks.portability),
         ],
     );
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        edited |= advanced_rows(rows, draft, messages);
+    }
+    edited
+}
+
+/// What the compile also produces and what happens when one of those builds
+/// fails. These choose among native-code back ends, which the browser build
+/// does not have.
+#[cfg(not(target_arch = "wasm32"))]
+fn advanced_rows(
+    rows: &mut FormRows<'_>,
+    draft: &mut VerilogABuildSettingsDraft,
+    messages: &MessageCatalog,
+) -> bool {
+    let text = |id| messages.text(id);
+    rows.section(&text(MessageId::VerilogABuildSettingsAdvanced));
+    let (generated, jit) = (
+        text(MessageId::VerilogABuildSettingsGeneratedRust),
+        text(MessageId::VerilogABuildSettingsNativeJit),
+    );
+    let mut edited = rows.check_columns(
+        &text(MessageId::VerilogABuildSettingsTargets),
+        &mut [
+            (generated.as_str(), &mut draft.generated_rust),
+            (jit.as_str(), &mut draft.native_x64_jit),
+        ],
+    );
+    let (interpreter, fail) = (
+        text(MessageId::VerilogABuildSettingsUseInterpreter),
+        text(MessageId::VerilogABuildSettingsFailCompile),
+    );
+    let mut fallback = usize::from(draft.reject_fallback);
+    if rows.choice(
+        &text(MessageId::VerilogABuildSettingsFallback),
+        &[interpreter.as_str(), fail.as_str()],
+        &mut fallback,
+    ) {
+        draft.reject_fallback = fallback == 1;
+        edited = true;
+    }
     edited
 }

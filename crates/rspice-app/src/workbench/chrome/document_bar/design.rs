@@ -18,7 +18,11 @@ pub(in crate::workbench) fn design_documents(state: &AppState) -> Vec<WorkspaceD
         .iter()
         .map(|document| WorkspaceDocument {
             id: WorkspaceDocumentId::CellView(document.reference.clone()),
-            label: format!("{} · {}", document.reference.cell, document.reference.view),
+            label: format!(
+                "{} · {}",
+                document.reference.cell,
+                document.view_type.caption_for(&document.reference.view)
+            ),
             icon: icon_for_view(document.view_type),
             dirty: document.dirty,
         })

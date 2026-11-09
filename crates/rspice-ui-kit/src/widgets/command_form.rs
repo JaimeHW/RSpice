@@ -230,6 +230,34 @@ impl<'u> FormRows<'u> {
             .inner
     }
 
+    /// A caption over a hairline, opening a named group of the rows after it.
+    pub fn section(&mut self, title: &str) {
+        if self.started {
+            self.gap(ROW_GAP * 2.0);
+        }
+        self.started = true;
+        let t = Tokens::get(self.ui.ctx());
+        let width = self.ui.available_width();
+        let (rect, response) = self
+            .ui
+            .allocate_exact_size(vec2(width, DERIVED_LINE_H + 2.0), egui::Sense::hover());
+        self.ui.painter().text(
+            pos2(rect.left(), rect.top()),
+            egui::Align2::LEFT_TOP,
+            title,
+            theme::sans(tokens::FS_0, FontWeight::Medium),
+            t.color.text_dim,
+        );
+        self.ui.painter().hline(
+            rect.x_range(),
+            rect.bottom() - 0.5,
+            egui::Stroke::new(1.0, t.color.border),
+        );
+        response.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Label, self.ui.is_enabled(), title)
+        });
+    }
+
     /// A stacked row's label, above its control.
     fn paint_label(&mut self, label: &str) {
         let width = self.ui.available_width();

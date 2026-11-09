@@ -37,10 +37,7 @@ pub(in crate::workbench) fn design_engineering_context(
                     state.model.schematic.document().grid_size.max(1)
                 )
             }
-            _ => format!(
-                "revision {}",
-                state.model.workspace.content.project.revision().get()
-            ),
+            _ => String::new(),
         },
         |(x, y)| match view_type {
             crate::state::ViewType::Schematic | crate::state::ViewType::Testbench => {
@@ -70,10 +67,7 @@ pub(in crate::workbench) fn design_engineering_context(
                 "x {x:.0} · y {y:.0} · grid {}",
                 state.model.schematic.document().grid_size.max(1)
             ),
-            _ => format!(
-                "revision {}",
-                state.model.workspace.content.project.revision().get()
-            ),
+            _ => String::new(),
         },
     )
 }

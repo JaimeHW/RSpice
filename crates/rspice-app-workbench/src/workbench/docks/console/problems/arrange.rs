@@ -292,7 +292,7 @@ impl Arrangement {
                         super::severity_cell(&row).chars().count(),
                         facet.code.chars().count(),
                         row.subject.chars().count(),
-                        facet.producer.chars().count(),
+                        super::producer_name(facet.producer).chars().count(),
                         row.location.chars().count(),
                     ];
                     for (widest, cell) in widest.iter_mut().zip(cells) {
@@ -696,7 +696,7 @@ fn group(
             continue;
         };
         let label = match grouping {
-            ProblemGrouping::Producer => facet.producer.to_owned(),
+            ProblemGrouping::Producer => super::producer_name(facet.producer).into_owned(),
             ProblemGrouping::Code => facet.code.to_owned(),
             ProblemGrouping::Subject | ProblemGrouping::None => listed
                 .row(*index)

@@ -108,14 +108,6 @@ pub(super) static STATUS_ORDER: &[StatusCell<RSpiceApp>] = &[
         activate: None,
     },
     StatusCell {
-        key: StatusKey::Context,
-        zone: StatusZone::Leading,
-        order: 2,
-        workspace: None,
-        content: revision_cell,
-        activate: None,
-    },
-    StatusCell {
         key: StatusKey::Selection,
         zone: StatusZone::Leading,
         order: 3,
@@ -203,8 +195,11 @@ fn no_project_cell<'a>(app: &RSpiceApp, _: &'a StatusReadings) -> Option<StatusT
         .then(|| StatusText::label("No project loaded"))
 }
 
+/// Only a drawn view has coordinates to read out; a source or document view
+/// leaves the segment empty rather than filling it.
 fn design_context_cell<'a>(app: &RSpiceApp, _: &'a StatusReadings) -> Option<StatusText<'a>> {
-    Some(StatusText::label(design_engineering_context(&app.state)))
+    let context = design_engineering_context(&app.state);
+    (!context.is_empty()).then(|| StatusText::label(context))
 }
 
 fn results_context_cell<'a>(
@@ -214,13 +209,6 @@ fn results_context_cell<'a>(
     Some(StatusText::label(results_view_summary(
         &app.state.model.simulation,
         readings.results_view.as_ref(),
-    )))
-}
-
-fn revision_cell<'a>(app: &RSpiceApp, _: &'a StatusReadings) -> Option<StatusText<'a>> {
-    Some(StatusText::label(format!(
-        "revision {}",
-        app.state.model.workspace.content.project.revision().get()
     )))
 }
 

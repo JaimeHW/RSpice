@@ -652,7 +652,7 @@ fn finding_row(
             severity: &severity_cell(&row),
             code: row.code,
             subject: &row.subject,
-            producer: row.producer,
+            producer: &producer_name(row.producer),
             location: &row.location,
             message: row.message,
             current: row.current(),
@@ -1039,13 +1039,45 @@ pub fn copy_of(row: &DiagnosticRow<'_>) -> String {
         severity.as_str(),
         row.code,
         row.subject.as_str(),
-        row.producer,
+        producer_name(row.producer).as_ref(),
         row.location.as_str(),
         row.message,
         waiver.as_str(),
     ]
     .map(tsv_field)
     .join("\t")
+}
+
+/// What a producer is called in the table: its dotted identity stays the
+/// filter key and travels with the finding, and the reader sees the part of
+/// the product that spoke. An identity outside this table reads as its own
+/// words, without the product prefix.
+pub(crate) fn producer_name(producer: &str) -> Cow<'_, str> {
+    let known = match producer {
+        "rspice.veriloga.compiler" | "rspice.veriloga.compiler-worker" => "Verilog-A compiler",
+        "rspice.veriloga.bundle" => "Verilog-A source",
+        "rspice.netlist.parser" | "rspice.netlist.semantic" => "Netlist",
+        "rspice.netlist.generator" => "Netlist generator",
+        "rspice.design.rules" | "rspice.design.drc" => "Design rules",
+        "rspice.simulation.run" => "Simulation",
+        "rspice.simulation.preflight" => "Run check",
+        "rspice.models.binding" => "Model binding",
+        "rspice.engine.convergence" => "Convergence",
+        "rspice.engine.elaboration" | "rspice.engine.model" => "Circuit setup",
+        "rspice.engine.timestep" => "Time step",
+        "rspice.engine.measure" => "Measurements",
+        "rspice.engine.boundary" => "Simulator",
+        "rspice.automation.workspace"
+        | "rspice.automation.runtime"
+        | "rspice.automation.permissions"
+        | "rspice.automation.language-service" => "Automation",
+        "rspice.pdk.env" => "PDK",
+        _ => {
+            let words = producer.strip_prefix("rspice.").unwrap_or(producer);
+            return Cow::Owned(words.replace(['.', '-', '_'], " "));
+        }
+    };
+    Cow::Borrowed(known)
 }
 
 /// The heading of the copied waiver column.

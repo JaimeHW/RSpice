@@ -389,7 +389,7 @@ fn view_column(ui: &mut Ui, app: &RSpiceApp, width: f32, height: f32) -> Option<
                 BrowserRowSpec {
                     icon: icon_for_view(*view_type),
                     label: name,
-                    meta: view_type.display_name(),
+                    meta: view_type.caption(),
                     status,
                     selected: selected_view == Some(name.as_str()),
                     read_only: false,
@@ -557,7 +557,7 @@ fn library_detail(ui: &mut Ui, state: &AppState) -> Option<LibraryIntent> {
                                 .color(t.color.text),
                         );
                         ui.separator();
-                        ui.label(view_type.display_name());
+                        ui.label(view_type.caption());
                         ui.separator();
                         ui.label(if *read_only { "read only" } else { "writable" });
                         if *modified {

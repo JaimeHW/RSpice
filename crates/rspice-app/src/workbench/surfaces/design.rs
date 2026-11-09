@@ -528,7 +528,7 @@ fn source_reference_document(ui: &mut Ui, app: &RSpiceApp, view_type: ViewType) 
             ViewType::Spice => super::super::design_system::WorkbenchIcon::Netlist,
             _ => super::super::design_system::WorkbenchIcon::Code,
         },
-        &format!("{} view", view_type.display_name()),
+        &format!("{} view", view_type.caption()),
         &description,
     );
 }

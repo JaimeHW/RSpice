@@ -68,8 +68,8 @@ impl AppState {
     }
 
     /// Take the offered placement: switch to its schematic and arm the
-    /// device there, as the shelf arms a cell. Returns the console line.
-    pub(crate) fn place_offered_veriloga_device(&mut self) -> Result<String, String> {
+    /// device there, as the shelf arms a cell.
+    pub(crate) fn place_offered_veriloga_device(&mut self) -> Result<(), String> {
         let (handoff, target) = self
             .offered_veriloga_placement()
             .ok_or_else(|| "No schematic is open to place the device in.".to_owned())?;
@@ -97,13 +97,10 @@ impl AppState {
         self.open_workspace_view(target.clone());
         self.workbench
             .activate(crate::workbench::state::Workspace::Design);
-        let label = rspice_app_state::workbench::app::schematic::placement::arm_cell_instance(
+        rspice_app_state::workbench::app::schematic::placement::arm_cell_instance(
             &mut self.model,
             candidate.binding,
         );
-        Ok(format!(
-            "{label} is armed for placement in {}.",
-            target.display_path()
-        ))
+        Ok(())
     }
 }

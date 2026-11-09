@@ -459,9 +459,13 @@ fn rule_reference(row: &DiagnosticRow<'_>) -> String {
             "{} \u{00b7} {} \u{00b7} {}",
             rule.rule().title,
             row.code,
-            row.producer
+            super::producer_name(row.producer)
         ),
-        None => format!("Rule {} \u{00b7} {}", row.code, row.producer),
+        None => format!(
+            "Rule {} \u{00b7} {}",
+            row.code,
+            super::producer_name(row.producer)
+        ),
     }
 }
 

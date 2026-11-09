@@ -566,12 +566,11 @@ fn interface_strip(
         StripAction::None => {}
         StripAction::UpdateSymbol => state.update_active_veriloga_symbol(),
         StripAction::Place(_) => match state.place_offered_veriloga_device() {
-            Ok(armed) => {
-                state.prompt(armed);
-                // The canvas takes the keyboard, as the shelf leaves it, so
-                // R, M and Esc work before the pointer reaches the sheet.
-                rspice_schematic_editor::view::canvas::request_focus(ui.ctx());
-            }
+            // The canvas takes the keyboard, as the shelf leaves it, so R, M
+            // and Esc work before the pointer reaches the sheet. No status
+            // line: the armed cursor is the answer, and a sentence about it
+            // outlives the arm.
+            Ok(()) => rspice_schematic_editor::view::canvas::request_focus(ui.ctx()),
             Err(error) => state.prompt(error),
         },
     }

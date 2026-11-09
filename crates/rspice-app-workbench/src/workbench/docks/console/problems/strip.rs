@@ -75,7 +75,7 @@ pub(super) fn filter_strip(ui: &mut Ui, view: &mut ProblemsView, tally: &Tally) 
             tally
                 .producers
                 .iter()
-                .map(|(producer, count)| format!("{producer} {count}")),
+                .map(|(producer, count)| format!("{} {count}", super::producer_name(producer))),
         );
         // The field shows the option the reader picked, spelled the way the
         // list spells it, so the open list has something to match it against.
@@ -87,8 +87,8 @@ pub(super) fn filter_strip(ui: &mut Ui, view: &mut ProblemsView, tally: &Tally) 
                     .iter()
                     .find(|(listed, _)| *listed == producer)
                     .map_or_else(
-                        || producer.to_owned(),
-                        |(listed, count)| format!("{listed} {count}"),
+                        || super::producer_name(producer).into_owned(),
+                        |(listed, count)| format!("{} {count}", super::producer_name(listed)),
                     )
             },
         );
