@@ -184,7 +184,7 @@ mod tests {
             let mut ids = [None, None];
             let _ = ctx.run_ui(raw, |ui| {
                 panes.begin_frame();
-                let left = egui::Panel::left("left").show_inside(ui, |ui| {
+                let left = egui::Panel::left("left").show(ui, |ui| {
                     if first_has_a_control {
                         ids[0] = Some(ui.button("left").id);
                     } else {
@@ -192,7 +192,7 @@ mod tests {
                     }
                 });
                 panes.record(ui.ctx(), Pane::ActivityRail, &left.response);
-                let middle = egui::CentralPanel::default().show_inside(ui, |ui| {
+                let middle = egui::CentralPanel::default().show(ui, |ui| {
                     ids[1] = Some(ui.button("middle").id);
                 });
                 panes.record(ui.ctx(), Pane::Document, &middle.response);
