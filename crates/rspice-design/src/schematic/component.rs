@@ -123,45 +123,6 @@ pub struct LibraryCellInstance {
 }
 
 /// Frozen catalog identity for a build-time generated Verilog-A placement.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub enum PersistedGeneratedIdentity {
-    #[default]
-    Missing,
-    Null,
-    Value(String),
-}
-
-impl PersistedGeneratedIdentity {
-    pub const fn is_missing(&self) -> bool {
-        matches!(self, Self::Missing)
-    }
-}
-
-impl Serialize for PersistedGeneratedIdentity {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        match self {
-            Self::Value(value) => value.serialize(serializer),
-            Self::Missing | Self::Null => serializer.serialize_none(),
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for PersistedGeneratedIdentity {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        Option::<String>::deserialize(deserializer).map(|value| match value {
-            Some(value) => Self::Value(value),
-            None => Self::Null,
-        })
-    }
-}
-
-/// Frozen catalog identity for a build-time generated Verilog-A placement.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GeneratedVerilogAInstance {
     pub schema_revision: u32,
@@ -170,17 +131,9 @@ pub struct GeneratedVerilogAInstance {
     pub model_name: String,
     pub module_name: String,
     pub source_digest: String,
-    #[serde(
-        default,
-        skip_serializing_if = "PersistedGeneratedIdentity::is_missing"
-    )]
-    pub source_identity: PersistedGeneratedIdentity,
+    pub source_identity: String,
     pub checkpoint_identity: String,
-    #[serde(
-        default,
-        skip_serializing_if = "PersistedGeneratedIdentity::is_missing"
-    )]
-    pub accepted_state_shape_identity: PersistedGeneratedIdentity,
+    pub accepted_state_shape_identity: String,
     pub descriptor_signature: String,
 }
 

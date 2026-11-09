@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 
 use super::{
-    component::{GeneratedVerilogAInstance, LibraryCellInstance, PersistedGeneratedIdentity},
+    component::{GeneratedVerilogAInstance, LibraryCellInstance},
     port::{PortDirection, PortSpec},
 };
 
@@ -70,11 +70,9 @@ pub fn generated_veriloga_library_binding(
         model_name: descriptor.model_name.to_owned(),
         module_name: descriptor.module_name.to_owned(),
         source_digest: descriptor.source_digest.to_owned(),
-        source_identity: PersistedGeneratedIdentity::Value(descriptor.source_identity.to_owned()),
+        source_identity: descriptor.source_identity.to_owned(),
         checkpoint_identity: descriptor.checkpoint_identity.to_owned(),
-        accepted_state_shape_identity: PersistedGeneratedIdentity::Value(
-            descriptor.accepted_state_shape_identity.to_string(),
-        ),
+        accepted_state_shape_identity: descriptor.accepted_state_shape_identity.to_string(),
         descriptor_signature: generated_veriloga_descriptor_signature(descriptor),
     });
     Ok(binding)
@@ -466,66 +464,6 @@ mod tests {
     use super::*;
 
     const EXPECTED_SHIPPED_MODEL_COUNT: usize = 43;
-
-    // A placement written by an earlier binding schema: its strong identity
-    // fields are absent, so it cannot match the compiled catalog.
-    fn v1_binding() -> LibraryCellInstance {
-        let descriptor = generated_veriloga_devices()
-            .first()
-            .expect("shipped catalog is not empty");
-        let mut binding = generated_veriloga_library_binding(descriptor).expect("current binding");
-        let contract = binding
-            .generated_veriloga
-            .as_mut()
-            .expect("generated binding contract");
-        contract.schema_revision = 1;
-        contract.descriptor_abi_version = 2;
-        contract.source_identity = PersistedGeneratedIdentity::Missing;
-        contract.accepted_state_shape_identity = PersistedGeneratedIdentity::Missing;
-        binding
-    }
-
-    #[test]
-    fn absent_and_explicit_null_strong_identities_are_distinct() {
-        let encoded = serde_json::to_value(v1_binding()).expect("binding serializes");
-        let contract = encoded
-            .get("generated_veriloga")
-            .and_then(serde_json::Value::as_object)
-            .expect("serialized generated contract");
-        assert!(!contract.contains_key("source_identity"));
-        assert!(!contract.contains_key("accepted_state_shape_identity"));
-
-        let mut explicit_null = encoded;
-        let contract = explicit_null
-            .get_mut("generated_veriloga")
-            .and_then(serde_json::Value::as_object_mut)
-            .expect("serialized generated contract");
-        contract.insert("source_identity".to_owned(), serde_json::Value::Null);
-        let decoded: LibraryCellInstance =
-            serde_json::from_value(explicit_null).expect("explicit null remains loadable");
-        assert_eq!(
-            decoded
-                .generated_veriloga
-                .as_ref()
-                .expect("generated contract")
-                .source_identity,
-            PersistedGeneratedIdentity::Null
-        );
-        assert!(validate_generated_veriloga_binding(&decoded).is_err());
-    }
-
-    #[test]
-    fn unknown_v1_identity_round_trips_as_unresolved_without_new_fields() {
-        let binding = v1_binding();
-        assert!(validate_generated_veriloga_binding(&binding).is_err());
-        let encoded = serde_json::to_value(&binding).expect("binding serializes");
-        let contract = encoded
-            .get("generated_veriloga")
-            .and_then(serde_json::Value::as_object)
-            .expect("serialized generated contract");
-        assert!(!contract.contains_key("source_identity"));
-        assert!(!contract.contains_key("accepted_state_shape_identity"));
-    }
 
     #[test]
     fn every_compiled_model_materializes_and_round_trips_exactly() {

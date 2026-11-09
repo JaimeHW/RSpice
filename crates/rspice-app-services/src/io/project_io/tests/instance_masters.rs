@@ -118,63 +118,95 @@ fn load_breaks_an_instantiation_cycle_and_names_both_ends() {
 fn unresolved_generated_veriloga_bindings_survive_project_save_and_reload() {
     use crate::state::{generated_veriloga_library_binding, validate_generated_veriloga_binding};
     use rspice_core::device::veriloga_builtins::generated_veriloga_model_descriptor;
-    use rspice_design::schematic::component::PersistedGeneratedIdentity;
 
     let descriptor = generated_veriloga_model_descriptor("vbic13").unwrap();
-    for explicit_null in [false, true] {
-        let mut binding = generated_veriloga_library_binding(descriptor).unwrap();
-        let contract = binding.generated_veriloga.as_mut().unwrap();
-        contract.schema_revision = 1;
-        contract.descriptor_abi_version = 2;
-        contract.source_identity = if explicit_null {
-            PersistedGeneratedIdentity::Null
-        } else {
-            PersistedGeneratedIdentity::Missing
-        };
-        contract.accepted_state_shape_identity = PersistedGeneratedIdentity::Missing;
-        contract.checkpoint_identity = "0".repeat(64);
-        contract.descriptor_signature = "f".repeat(64);
+    let mut binding = generated_veriloga_library_binding(descriptor).unwrap();
+    let contract = binding.generated_veriloga.as_mut().unwrap();
+    // The model changed after this placement was saved: same format,
+    // different identities.
+    contract.source_identity = "0".repeat(64);
+    contract.accepted_state_shape_identity = "0".repeat(64);
+    contract.checkpoint_identity = "0".repeat(64);
+    contract.descriptor_signature = "f".repeat(64);
 
-        let mut libraries = LibraryManager::with_primitives();
-        let mut workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
-        let top = workspace.content.active_view.key();
-        let mut stored_schematic = workspace.schematic_editor_mut(&top).unwrap();
-        let schematic = &mut stored_schematic.editor;
-        schematic.add_library_cell_component(Point::new(10, 20), binding);
-        let before = serde_json::to_value(&schematic.document().components[0]).unwrap();
-        drop(stored_schematic);
-        let json = serde_json::to_string(&ProjectSnapshot::new(workspace, libraries)).unwrap();
+    let mut libraries = LibraryManager::with_primitives();
+    let mut workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
+    let top = workspace.content.active_view.key();
+    let mut stored_schematic = workspace.schematic_editor_mut(&top).unwrap();
+    let schematic = &mut stored_schematic.editor;
+    schematic.add_library_cell_component(Point::new(10, 20), binding);
+    let before = serde_json::to_value(&schematic.document().components[0]).unwrap();
+    drop(stored_schematic);
+    let json = serde_json::to_string(&ProjectSnapshot::new(workspace, libraries)).unwrap();
 
-        let loaded =
-            load_project_text(&json, None).expect("an unresolved model must not cost the project");
-        let restored = &loaded.file.workspace.schematic_buffers[&top]
-            .document()
-            .components[0];
-        assert_eq!(serde_json::to_value(restored).unwrap(), before);
-        assert!(
-            validate_generated_veriloga_binding(restored.library_cell.as_ref().unwrap()).is_err()
-        );
-        assert!(
-            loaded
-                .file
-                .workspace_migration_warning
-                .as_deref()
-                .unwrap()
-                .contains("Preserved 1 generated Verilog-A binding(s) as unresolved")
-        );
+    let loaded =
+        load_project_text(&json, None).expect("an unresolved model must not cost the project");
+    let restored = &loaded.file.workspace.schematic_buffers[&top]
+        .document()
+        .components[0];
+    assert_eq!(serde_json::to_value(restored).unwrap(), before);
+    assert!(validate_generated_veriloga_binding(restored.library_cell.as_ref().unwrap()).is_err());
+    assert!(
+        loaded
+            .file
+            .workspace_migration_warning
+            .as_deref()
+            .unwrap()
+            .contains("Preserved 1 generated Verilog-A binding(s) as unresolved")
+    );
 
-        let saved = serialize_project_file(&loaded).expect("unresolved evidence remains saveable");
-        let reloaded =
-            load_project_text(&saved, None).expect("unresolved evidence remains loadable");
-        assert_eq!(
-            serde_json::to_value(
-                &reloaded.file.workspace.schematic_buffers[&top]
-                    .document()
-                    .components[0]
-            )
-            .unwrap(),
-            before,
-            "saving must preserve both absent and explicitly null identity fields"
-        );
-    }
+    let saved = serialize_project_file(&loaded).expect("unresolved evidence remains saveable");
+    let reloaded = load_project_text(&saved, None).expect("unresolved evidence remains loadable");
+    assert_eq!(
+        serde_json::to_value(
+            &reloaded.file.workspace.schematic_buffers[&top]
+                .document()
+                .components[0]
+        )
+        .unwrap(),
+        before,
+        "saving must preserve the stale contract exactly"
+    );
+}
+
+#[test]
+#[cfg(feature = "generated-veriloga-catalog")]
+fn a_project_from_before_the_current_binding_schema_does_not_load() {
+    use crate::state::generated_veriloga_library_binding;
+    use rspice_core::device::veriloga_builtins::generated_veriloga_model_descriptor;
+
+    let descriptor = generated_veriloga_model_descriptor("vbic13").unwrap();
+    let binding = generated_veriloga_library_binding(descriptor).unwrap();
+    let mut libraries = LibraryManager::with_primitives();
+    let mut workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
+    let top = workspace.content.active_view.key();
+    let mut stored_schematic = workspace.schematic_editor_mut(&top).unwrap();
+    stored_schematic
+        .editor
+        .add_library_cell_component(Point::new(10, 20), binding);
+    drop(stored_schematic);
+    let json = serde_json::to_string(&ProjectSnapshot::new(workspace, libraries)).unwrap();
+
+    // The earlier schema wrote neither strong identity.
+    let strip = |text: &str, field: &str, value: &str| {
+        let written = format!("\"{field}\":\"{value}\",");
+        assert!(text.contains(&written), "{field} is a plain field");
+        text.replacen(&written, "", 1)
+    };
+    let earlier = strip(&json, "source_identity", descriptor.source_identity);
+    let earlier = strip(
+        &earlier,
+        "accepted_state_shape_identity",
+        &descriptor.accepted_state_shape_identity.to_string(),
+    );
+
+    let Err(error) = load_project_text(&earlier, None) else {
+        panic!("a binding without its identities has no reading");
+    };
+    assert!(
+        error
+            .to_string()
+            .contains("missing field `source_identity`"),
+        "{error}"
+    );
 }
