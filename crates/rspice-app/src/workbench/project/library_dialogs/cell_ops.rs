@@ -5,6 +5,11 @@
 use egui::Context;
 
 use crate::diagnostics::{LogSeverity, LogSource};
+use crate::state::workspace::ImportedInclude;
+use crate::state::{
+    CellViewRef, ProjectSourceBundle, ProjectSourceDependency, ProjectSourceFile,
+    ProjectSourceLanguage, ProjectSourceOwner,
+};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, input_row, kv_row};
@@ -15,6 +20,10 @@ use crate::workbench::framework::feature::Cx;
 use crate::workbench::project::ProjectFeature;
 use crate::workbench::project::commands::ProjectRequest;
 use crate::workbench::slots::ProjectState;
+use rspice_app_models::veriloga_library::{
+    BUILTIN_VERILOGA_LIBRARY, BuiltinVerilogAModel, builtin_veriloga_model,
+    read_builtin_veriloga_model,
+};
 
 impl ProjectState {
     /// Open Copy Cell pre-filled from a source cell, targeting the first
@@ -48,10 +57,55 @@ impl ProjectState {
                 .ok_or_else(|| "No writable destination library is available.".to_owned())?
         };
 
+        self.copy_cell_builtin_model = None;
         self.copy_cell_source_library = library.to_owned();
         self.copy_cell_source_cell = cell.to_owned();
         self.copy_cell_target_library = target;
         self.copy_cell_name = format!("{cell}_copy");
+        self.copy_cell_error = None;
+        self.copy_cell_library_revision = model.library_manager.revision();
+        self.copy_cell_dialog = true;
+        Ok(())
+    }
+
+    /// Open Copy Cell on a built-in model: the same form, into the design's
+    /// library when it can be written.
+    pub(crate) fn open_copy_builtin_model_dialog(
+        &mut self,
+        model: &Model,
+        registry_name: &'static str,
+    ) -> Result<(), String> {
+        let builtin = builtin_veriloga_model(registry_name)
+            .ok_or_else(|| format!("'{registry_name}' is not a built-in model."))?;
+        let writable: Vec<String> = model
+            .library_manager
+            .libraries_sorted()
+            .iter()
+            .filter(|lib| !lib.read_only)
+            .map(|lib| lib.name.clone())
+            .collect();
+        let active = &model.workspace.content.active_view.library;
+        let target = if writable.contains(active) {
+            active.clone()
+        } else {
+            writable
+                .first()
+                .cloned()
+                .ok_or_else(|| "No writable destination library is available.".to_owned())?
+        };
+        let taken = model
+            .library_manager
+            .get_library(&target)
+            .is_some_and(|library| library.get_cell(builtin.module).is_some());
+        self.copy_cell_builtin_model = Some(builtin.registry_name);
+        self.copy_cell_source_library = BUILTIN_VERILOGA_LIBRARY.to_owned();
+        self.copy_cell_source_cell = builtin.name.to_owned();
+        self.copy_cell_target_library = target;
+        self.copy_cell_name = if taken {
+            format!("{}_copy", builtin.module)
+        } else {
+            builtin.module.to_owned()
+        };
         self.copy_cell_error = None;
         self.copy_cell_library_revision = model.library_manager.revision();
         self.copy_cell_dialog = true;
@@ -101,6 +155,9 @@ fn commit_copy_cell_dialog(cx: &mut Cx<'_, ProjectFeature>) -> Result<usize, Str
     if cx.state.copy_cell_target_library.is_empty() {
         return Err("Please select a library".to_owned());
     }
+    if let Some(registry_name) = cx.state.copy_cell_builtin_model {
+        return commit_copy_builtin_model(cx, registry_name, &name);
+    }
     let source_library = cx.state.copy_cell_source_library.clone();
     let source_cell = cx.state.copy_cell_source_cell.clone();
     let target = cx.state.copy_cell_target_library.clone();
@@ -111,6 +168,111 @@ fn commit_copy_cell_dialog(cx: &mut Cx<'_, ProjectFeature>) -> Result<usize, Str
         cx.wb.prompt(prompt);
     }
     outcome
+}
+
+/// Make the built-in model an editable cell in the target library, the source
+/// and its includes copied, and leave the page on it.
+fn commit_copy_builtin_model(
+    cx: &mut Cx<'_, ProjectFeature>,
+    registry_name: &str,
+    name: &str,
+) -> Result<usize, String> {
+    let builtin = builtin_veriloga_model(registry_name)
+        .ok_or_else(|| format!("'{registry_name}' is not a built-in model."))?;
+    let target = cx.state.copy_cell_target_library.clone();
+    let library = cx
+        .model
+        .library_manager
+        .get_library(&target)
+        .ok_or_else(|| format!("Library '{target}' no longer exists."))?;
+    if library.read_only {
+        return Err(format!("Library '{target}' cannot be written."));
+    }
+    if library.get_cell(name).is_some() {
+        return Err(format!("Cell '{target}/{name}' already exists."));
+    }
+    let reference = CellViewRef::new(&target, name, "veriloga");
+    create_cell_from_builtin_model(cx.model, builtin, &reference)?;
+    cx.model
+        .library_manager
+        .select_view(&reference.library, &reference.cell, &reference.view);
+    cx.state.builtin_models.open = false;
+    Ok(1)
+}
+
+/// Make `reference` a Verilog-A cell from a built-in model's source: the same
+/// bundle and view an import of those files would make.
+fn create_cell_from_builtin_model(
+    model: &mut Model,
+    builtin: &BuiltinVerilogAModel,
+    reference: &CellViewRef,
+) -> Result<(), String> {
+    let source = read_builtin_veriloga_model(builtin);
+    if let Some(missing) = source.closure.missing().next() {
+        return Err(format!("{} is missing.", missing.path));
+    }
+    let declared = source
+        .closure
+        .modules
+        .as_ref()
+        .map_err(|reason| format!("{} cannot be read: {reason}", source.root))?
+        .iter()
+        .find(|module| module.name == builtin.module)
+        .cloned()
+        .ok_or_else(|| format!("{} does not declare {}.", source.root, builtin.module))?;
+    let root = source
+        .files
+        .get(&source.root)
+        .ok_or_else(|| format!("{} is not in the library.", source.root))?;
+    let files = source
+        .closure
+        .files
+        .iter()
+        .filter(|file| file.include == ImportedInclude::Found)
+        .map(|file| {
+            let contents = source
+                .files
+                .get(&file.path)
+                .ok_or_else(|| format!("{} is not in the library.", file.path))?;
+            ProjectSourceFile::try_new(file.path.clone(), contents.clone())
+                .map_err(|error| error.to_string())
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let edges = source
+        .closure
+        .edges
+        .iter()
+        .map(|(importer, imported)| {
+            ProjectSourceDependency::try_new(importer.clone(), imported.clone())
+                .map_err(|error| error.to_string())
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let bundle = ProjectSourceBundle::try_new(
+        ProjectSourceOwner::cell_view(reference.clone()),
+        ProjectSourceLanguage::VerilogA,
+        source.root.as_str(),
+        root.as_str(),
+        files,
+        edges,
+    )
+    .map_err(|error| error.to_string())?;
+    let build_profile = builtin
+        .ngspice_branch
+        .then(|| {
+            let mut profile =
+                rspice_simulation::project_veriloga::build_profile::VerilogABuildProfile::starter(
+                    builtin.module,
+                );
+            profile
+                .preprocessor
+                .defines
+                .insert("__NGSPICE__".to_owned(), String::new());
+            ProjectSourceFile::try_new(".rspice/veriloga-build.toml", profile.to_toml()?)
+                .map_err(|error| error.to_string())
+        })
+        .transpose()?;
+    let plan = [(declared, reference.clone(), true)];
+    model.publish_veriloga_cells(&plan, true, bundle, build_profile)
 }
 
 /// Rename the cell the dialog names: how many instance references now name
@@ -159,7 +321,11 @@ impl ProjectFeature {
             .and_then(|lib| lib.get_cell(&cx.state.copy_cell_source_cell))
             .map(|cell| cell.views.len())
             .unwrap_or(0);
-        let hint = format!("copies all {view_count} views and their content");
+        let hint = if cx.state.copy_cell_builtin_model.is_some() {
+            "copies the model's source and its includes into an editable cell".to_owned()
+        } else {
+            format!("copies all {view_count} views and their content")
+        };
         let catalog_current =
             cx.model.library_manager.revision() == cx.state.copy_cell_library_revision;
         if !catalog_current {
@@ -240,12 +406,17 @@ impl ProjectFeature {
             let source_cell = cx.state.copy_cell_source_cell.clone();
             let target = cx.state.copy_cell_target_library.clone();
             let name = cx.state.copy_cell_name.trim().to_owned();
+            let builtin = cx.state.copy_cell_builtin_model.is_some();
             match commit_copy_cell_dialog(cx) {
                 Ok(views) => {
                     cx.model.record(
                         LogSeverity::Info,
                         LogSource::Studio,
-                        format!("Copied '{source_cell}' to '{target}/{name}' ({views} views)."),
+                        if builtin {
+                            format!("Copied '{source_cell}' to '{target}/{name}'; compile it before use.")
+                        } else {
+                            format!("Copied '{source_cell}' to '{target}/{name}' ({views} views).")
+                        },
                     );
                     cx.state.copy_cell_error = None;
                     should_close = true;

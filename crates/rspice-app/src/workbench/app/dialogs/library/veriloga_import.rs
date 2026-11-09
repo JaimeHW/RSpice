@@ -16,10 +16,7 @@ use egui::Context;
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::workspace::ImportedInclude;
 use crate::state::workspace::VERILOGA_LIBRARY_NAME;
-use crate::state::workspace::{
-    DeclaredModule, declared_cell_interface, place_veriloga_view, veriloga_cell_for_module,
-    veriloga_view,
-};
+use crate::state::workspace::{DeclaredModule, declared_cell_interface, veriloga_cell_for_module};
 use crate::state::{
     CellViewRef, ProjectSourceBundle, ProjectSourceDependency, ProjectSourceFile,
     ProjectSourceLanguage, ProjectSourceOwner,
@@ -417,12 +414,10 @@ impl RSpiceApp {
             .files
             .get(&form.file_name)
             .ok_or_else(|| format!("{} is not in the import.", form.file_name))?;
-        let mut libraries = self.state.model.library_manager.clone();
-        let mut sources = self.state.model.workspace.content.project_sources.clone();
         // One source for every module: the first cell's view owns it, and
         // each other cell's view shares it, so an edit made through any of
         // them is the source all of them compile.
-        let mut bundle = ProjectSourceBundle::try_new(
+        let bundle = ProjectSourceBundle::try_new(
             ProjectSourceOwner::cell_view(first.clone()),
             ProjectSourceLanguage::VerilogA,
             form.file_name.as_str(),
@@ -431,37 +426,9 @@ impl RSpiceApp {
             imported_edges(&form)?,
         )
         .map_err(|error| error.to_string())?;
-        for (module, reference, _) in &plan {
-            if *reference != first {
-                bundle
-                    .share_with(reference.clone())
-                    .map_err(|error| error.to_string())?;
-            }
-            place_veriloga_view(&mut libraries, reference, veriloga_view(Some(module))?)?;
-        }
-        sources
-            .insert_bundle(bundle)
-            .map_err(|error| error.to_string())?;
-        let mutation = if first_is_new {
-            crate::state::ProjectLibraryMutation::CreateCell {
-                library: first.library.clone(),
-                cell: first.cell.clone(),
-            }
-        } else {
-            crate::state::ProjectLibraryMutation::CreateView {
-                library: first.library.clone(),
-                cell: first.cell.clone(),
-                view: first.view.clone(),
-            }
-        };
-        let prepared = self
-            .state
+        self.state
             .model
-            .preflight_project_library_mutation(mutation)?;
-        self.state.model.workspace.content.project_sources = sources;
-        self.state.model.workspace.content.project_sources_dirty = true;
-        self.state.model.library_manager = libraries;
-        self.state.model.publish_project_library_mutation(prepared);
+            .publish_veriloga_cells(&plan, first_is_new, bundle, None)?;
         close_veriloga_import_form(&mut self.state.code.code_workspace.veriloga);
         if form.library == VERILOGA_LIBRARY_NAME {
             persist_global_veriloga_library(&mut self.state.model);

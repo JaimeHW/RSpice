@@ -11,6 +11,8 @@ use crate::workbench::features;
 use crate::workbench::project::ProjectFeature;
 use crate::workbench::project::commands::ProjectCommand;
 
+mod builtin_models;
+
 const CONTEXT_HEIGHT: f32 = 36.0;
 const DETAIL_HEIGHT: f32 = 40.0;
 const COLUMN_HEADER_HEIGHT: f32 = 28.0;
@@ -21,6 +23,7 @@ const AUDIT_REPORT_ID: &str = "workbench.project.library.audit-history";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum LibraryIntent {
+    BuiltinModels(builtin_models::BuiltinModelsIntent),
     SelectLibrary(String),
     SelectCell { library: String, cell: String },
     SelectView(CellViewRef),
@@ -65,7 +68,9 @@ pub(super) fn library(ui: &mut Ui, app: &mut RSpiceApp) {
     library_context(ui, &mut app.state);
 
     let available = ui.available_size();
-    let browser_height = (available.y - DETAIL_HEIGHT).max(120.0);
+    let page_height = (available.y - DETAIL_HEIGHT).max(120.0);
+    let browser_height =
+        builtin_models::columns_height(&app.state.project.builtin_models, page_height);
     let visible_width = available.x.min(visible_workspace_width(ui)).max(1.0);
     let mut intent = None;
     ScrollArea::horizontal()
@@ -89,7 +94,20 @@ pub(super) fn library(ui: &mut Ui, app: &mut RSpiceApp) {
     if let Some(intent) = intent {
         apply_library_intent(&ctx, app, intent);
     }
-    if let Some(intent) = library_detail(ui, &app.state) {
+    if app.state.project.builtin_models.open {
+        let messages = app.state.workbench.messages();
+        if let Some(intent) = builtin_models::source_pane(
+            ui,
+            &mut app.state.project.builtin_models,
+            messages,
+            (page_height - browser_height).max(0.0),
+        ) {
+            apply_library_intent(&ctx, app, intent);
+        }
+        if let Some(intent) = builtin_models::detail(ui, &app.state) {
+            apply_library_intent(&ctx, app, intent);
+        }
+    } else if let Some(intent) = library_detail(ui, &app.state) {
         apply_library_intent(&ctx, app, intent);
     }
     show_library_usage_report(&ctx);
@@ -182,22 +200,31 @@ fn ensure_valid_selection(manager: &mut crate::state::LibraryManager, active_vie
 
 fn library_context(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
-    let selection = state
-        .model
-        .library_manager
-        .selected_lcv_path()
-        .unwrap_or_else(|| "No library selection".to_owned());
-    let access = state
-        .model
-        .library_manager
-        .current_library()
-        .map_or("unavailable", |library| {
-            if library.read_only {
-                "read only"
-            } else {
-                "writable"
-            }
-        });
+    let builtin = &state.project.builtin_models;
+    let selection = if builtin.open {
+        builtin_models::selection_path(builtin)
+    } else {
+        state
+            .model
+            .library_manager
+            .selected_lcv_path()
+            .unwrap_or_else(|| "No library selection".to_owned())
+    };
+    let access = if builtin.open {
+        "read only"
+    } else {
+        state
+            .model
+            .library_manager
+            .current_library()
+            .map_or("unavailable", |library| {
+                if library.read_only {
+                    "read only"
+                } else {
+                    "writable"
+                }
+            })
+    };
     // No rule under this strip: the column header below opens with one of its
     // own, and two hairlines a pixel apart read as one thick, uneven line.
     egui::Frame::new()
@@ -261,8 +288,15 @@ fn library_column(ui: &mut Ui, app: &RSpiceApp, width: f32, height: f32) -> Opti
             )
         })
         .collect::<Vec<_>>();
-    let selected = app.state.model.library_manager.selected_library.as_deref();
-    browser_column(ui, "Library", libraries.len(), width, height, |ui| {
+    let builtin_open = app.state.project.builtin_models.open;
+    let selected = app
+        .state
+        .model
+        .library_manager
+        .selected_library
+        .as_deref()
+        .filter(|_| !builtin_open);
+    browser_column(ui, "Library", libraries.len() + 1, width, height, |ui| {
         let mut intent = None;
         for (name, cells, read_only) in &libraries {
             let cell_count = cells.to_string();
@@ -282,11 +316,20 @@ fn library_column(ui: &mut Ui, app: &RSpiceApp, width: f32, height: f32) -> Opti
                 intent = Some(LibraryIntent::SelectLibrary(name.clone()));
             }
         }
-        intent
+        builtin_models::library_row(ui, &app.state.project.builtin_models).or(intent)
     })
 }
 
 fn cell_column(ui: &mut Ui, app: &RSpiceApp, width: f32, height: f32) -> Option<LibraryIntent> {
+    if app.state.project.builtin_models.open {
+        return builtin_models::cell_column(
+            ui,
+            &app.state.project.builtin_models,
+            &app.state.project.project_library_filter,
+            width,
+            height,
+        );
+    }
     let selected_library = app.state.model.library_manager.selected_library.clone();
     let query = app
         .state
@@ -355,6 +398,9 @@ fn cell_column(ui: &mut Ui, app: &RSpiceApp, width: f32, height: f32) -> Option<
 }
 
 fn view_column(ui: &mut Ui, app: &RSpiceApp, width: f32, height: f32) -> Option<LibraryIntent> {
+    if app.state.project.builtin_models.open {
+        return builtin_models::view_column(ui, &app.state.project.builtin_models, width, height);
+    }
     let selected_library = app.state.model.library_manager.selected_library.clone();
     let selected_cell = app.state.model.library_manager.selected_cell.clone();
     let views = selected_library
@@ -782,7 +828,9 @@ fn selected_view(state: &AppState) -> Option<(CellViewRef, ViewType, bool, bool)
 
 fn apply_library_intent(ctx: &Context, app: &mut RSpiceApp, intent: LibraryIntent) {
     match intent {
+        LibraryIntent::BuiltinModels(intent) => builtin_models::apply(&mut app.state, intent),
         LibraryIntent::SelectLibrary(library) => {
+            app.state.project.builtin_models.open = false;
             app.state.model.library_manager.select_library(&library);
         }
         LibraryIntent::SelectCell { library, cell } => {

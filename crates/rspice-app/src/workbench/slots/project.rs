@@ -5,9 +5,30 @@
 
 use crate::workbench::app::{DesignManagementDialogState, ProjectRevisionHistoryDialogState};
 
+/// What the Library page's built-in Verilog-A library has selected.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct BuiltinModelsBrowser {
+    /// The page shows this library rather than a project library.
+    pub open: bool,
+    /// The selected model's registry name.
+    pub model: Option<String>,
+    /// That model's files, its root first, as the view column lists them.
+    pub files: Vec<String>,
+    /// The selected file.
+    pub file: Option<String>,
+    /// The text of each of the model's files.
+    pub texts: std::collections::BTreeMap<String, String>,
+    /// The text of the file open read-only below the columns.
+    pub source: Option<String>,
+    /// Counts the opens, so the editor well reads each file afresh.
+    pub source_revision: u64,
+}
+
 /// What the project feature keeps open between frames.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ProjectState {
+    /// The Library page's built-in Verilog-A library.
+    pub builtin_models: BuiltinModelsBrowser,
     /// New Cell creation dialog
     pub new_cell_dialog: bool,
     /// New Cell name input
@@ -44,6 +65,8 @@ pub(crate) struct ProjectState {
     pub(crate) new_view_library_revision: u64,
     /// Copy Cell dialog
     pub copy_cell_dialog: bool,
+    /// The built-in model Copy Cell copies, in place of a catalog cell.
+    pub copy_cell_builtin_model: Option<&'static str>,
     /// Copy Cell source library
     pub copy_cell_source_library: String,
     /// Copy Cell source cell

@@ -16,7 +16,11 @@ mod cells;
 mod libraries;
 
 use super::Model;
-use crate::state::{PreparedProjectLibraryMutation, ProjectLibraryMutation, ProjectSourceId};
+use crate::state::workspace::{DeclaredModule, place_veriloga_view, veriloga_view};
+use crate::state::{
+    CellViewRef, PreparedProjectLibraryMutation, ProjectLibraryMutation, ProjectSourceBundle,
+    ProjectSourceFile, ProjectSourceId, ProjectSourceRole,
+};
 
 /// What a change to the catalog leaves for the application to do outside
 /// the model, in the order of its fields: the sync's prompt is stated, the
@@ -54,6 +58,64 @@ pub struct LibraryRemoval {
 }
 
 impl Model {
+    /// Publish `bundle` and a view of it for each module of `plan`: all of it, or,
+    /// when the catalog refuses, none of it. `build_profile` is added to the bundle
+    /// as its build settings.
+    pub fn publish_veriloga_cells(
+        &mut self,
+        plan: &[(DeclaredModule, CellViewRef, bool)],
+        first_is_new: bool,
+        mut bundle: ProjectSourceBundle,
+        build_profile: Option<ProjectSourceFile>,
+    ) -> Result<(), String> {
+        let first = plan
+            .first()
+            .map(|(_, reference, _)| reference.clone())
+            .ok_or_else(|| "The source declares no module.".to_owned())?;
+        let mut libraries = self.library_manager.clone();
+        let mut sources = self.workspace.content.project_sources.clone();
+        for (module, reference, _) in plan {
+            if *reference != first {
+                bundle
+                    .share_with(reference.clone())
+                    .map_err(|error| error.to_string())?;
+            }
+            place_veriloga_view(&mut libraries, reference, veriloga_view(Some(module))?)?;
+        }
+        let (bundle_id, root) = (bundle.id(), bundle.root().logical_path().to_owned());
+        sources
+            .insert_bundle(bundle)
+            .map_err(|error| error.to_string())?;
+        if let Some(profile) = build_profile {
+            sources
+                .add_bundle_file_with_role(
+                    bundle_id,
+                    &root,
+                    profile,
+                    ProjectSourceRole::VerilogABuildProfile,
+                )
+                .map_err(|error| error.to_string())?;
+        }
+        let mutation = if first_is_new {
+            ProjectLibraryMutation::CreateCell {
+                library: first.library.clone(),
+                cell: first.cell.clone(),
+            }
+        } else {
+            ProjectLibraryMutation::CreateView {
+                library: first.library.clone(),
+                cell: first.cell.clone(),
+                view: first.view.clone(),
+            }
+        };
+        let prepared = self.preflight_project_library_mutation(mutation)?;
+        self.workspace.content.project_sources = sources;
+        self.workspace.content.project_sources_dirty = true;
+        self.library_manager = libraries;
+        self.publish_project_library_mutation(prepared);
+        Ok(())
+    }
+
     /// Reserve the next project revision before a library membership
     /// transaction publishes any live state.
     pub fn preflight_project_library_mutation(

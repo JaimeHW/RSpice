@@ -42,6 +42,8 @@ use rspice_app_services::io;
 use rspice_app_state::{diagnostics, product, quantity, state, time_compat};
 use rspice_app_workbench::ui;
 
+pub mod veriloga_library;
+
 pub mod services {
     //! The models feature's services, at their application paths.
 

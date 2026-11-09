@@ -56,6 +56,34 @@ use crate::workbench::state::{WorkbenchSession, Workspace, WorkspaceDocumentId};
 use crate::workbench::{AppState, MessageId, RSpiceApp};
 use menus::{APPLICATION_MENU, COMPACT_MENU, SOURCE_EDITOR_MENU, application_menu_entries};
 
+/// A Verilog-A source, read-only, in the editor well the code feature draws:
+/// how the Library page shows a file of a built-in model. The shell is what
+/// may put one feature's well on another's page.
+pub(in crate::workbench) fn read_only_veriloga_well(
+    ui: &mut egui::Ui,
+    id: impl std::hash::Hash + std::fmt::Debug,
+    source: &mut String,
+    revision: u64,
+    messages: crate::workbench::MessageCatalog,
+) {
+    use crate::workbench::documents::code_workspace::{
+        CodeEditorLanguage, EditorFindings, show_veriloga_document_versioned,
+    };
+
+    show_veriloga_document_versioned(
+        ui,
+        id,
+        source,
+        revision,
+        CodeEditorLanguage::VerilogA,
+        EditorFindings::Outdated,
+        None,
+        false,
+        messages,
+        &[],
+    );
+}
+
 /// A route whose surface brings its own toolbar, in place of its
 /// workspace's.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

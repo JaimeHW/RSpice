@@ -1249,6 +1249,116 @@ fn compact_models_import_from_their_source_folders_compile_and_place() {
     }
 }
 
+/// The built-in library, as the Library page shows it, has a name, a class
+/// heading and a version for each model; a copy of one is a cell the user can
+/// edit, which compiles from its own source and places on the sheet, and it
+/// carries the branch its generated code was built from.
+#[test]
+fn a_builtin_model_copied_from_the_library_page_compiles_and_places() {
+    use crate::workbench::project::workspace_state::ProjectPage;
+
+    let (mut user, top) = new_project();
+    let library = top.library.clone();
+    user.app.state.project.project_page = ProjectPage::Library;
+    user.app.state.workbench.activate(Workspace::Project);
+    user.settle();
+
+    user.click("Verilog-A models");
+    assert!(user.find("BSIM-BULK").is_some(), "the models are listed");
+    user.app.state.project.project_library_filter = "vbic".to_owned();
+    user.settle();
+    user.click("VBIC 3-terminal");
+    user.click("Copy cell…");
+    let project = &user.app.state.project;
+    assert!(project.copy_cell_dialog, "Copy cell opens");
+    assert_eq!(project.copy_cell_target_library, library);
+    assert_eq!(project.copy_cell_name, "vbic13");
+    user.click("Copy");
+
+    let view = CellViewRef::new(&library, "vbic13", "veriloga");
+    assert!(
+        !user.app.state.project.copy_cell_dialog,
+        "{:?}",
+        user.app.state.project.copy_cell_error
+    );
+    assert!(
+        user.app
+            .state
+            .model
+            .library_manager
+            .get_library(&library)
+            .and_then(|library| library.get_cell("vbic13"))
+            .and_then(|cell| cell.get_view("veriloga"))
+            .is_some(),
+        "the copy is a Verilog-A view in the design's library"
+    );
+    assert!(
+        !user.app.state.project.builtin_models.open,
+        "the page moves to the copy"
+    );
+
+    user.app.state.open_workspace_view(view.clone());
+    user.app.state.workbench.activate(Workspace::Design);
+    user.settle();
+    compile(&mut user);
+    let veriloga = &user.app.state.code.code_workspace.veriloga;
+    assert!(
+        veriloga.receipt.is_some(),
+        "the copy compiles: {:?}",
+        veriloga.last_failure
+    );
+    let selected = crate::workbench::documents::code_workspace::selected_veriloga_source(&user.app)
+        .expect("the copy is selected");
+    let profile =
+        rspice_simulation::project_veriloga::build_profile::resolve_veriloga_build_profile(
+            selected.bundle(),
+        )
+        .expect("the copy has a build profile");
+    assert!(
+        profile
+            .profile
+            .preprocessor
+            .defines
+            .contains_key("__NGSPICE__"),
+        "the copy builds the branch the shipped model was built from"
+    );
+
+    let candidate = crate::state::library_cell_placement_candidates(
+        &user.app.state.model.library_manager,
+        &user.app.state.model.workspace,
+    )
+    .into_iter()
+    .find(|candidate| candidate.library == library && candidate.cell == "vbic13")
+    .expect("the copy is on the shelf");
+    assert!(candidate.ready, "{}", candidate.unavailable_reason);
+    user.app.state.open_workspace_view(top.clone());
+    user.settle();
+    crate::workbench::app::schematic::placement::arm_library_cell_placement(
+        &mut user.app.state,
+        candidate.binding,
+    );
+    let canvas = user.expect("Schematic canvas");
+    user.press(canvas.center(), egui::PointerButton::Primary);
+    user.settle();
+    user.app.state.model.schematic.cancel_tool();
+    let placed = user
+        .app
+        .state
+        .model
+        .schematic
+        .document()
+        .components
+        .iter()
+        .filter(|component| {
+            component
+                .library_cell
+                .as_ref()
+                .is_some_and(|binding| binding.cell == "vbic13")
+        })
+        .count();
+    assert_eq!(placed, 1, "the copy places once");
+}
+
 /// A save dialog that answers with `self.0` and writes that reach the disk.
 struct SavesTo(std::path::PathBuf);
 
@@ -1278,10 +1388,7 @@ impl crate::workbench::workflows::export_workflow::ExportWorkflowIo for SavesTo 
 #[test]
 fn a_spectre_export_copies_its_sources_beside_the_deck_and_names_them_relatively() {
     let (mut user, device) = wired_device();
-    let folder = std::env::temp_dir().join(format!(
-        "rspice_spectre_export_{}",
-        std::process::id()
-    ));
+    let folder = std::env::temp_dir().join(format!("rspice_spectre_export_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&folder);
     let deck_path = folder.join("amp.scs");
 
@@ -1311,8 +1418,8 @@ fn a_spectre_export_copies_its_sources_beside_the_deck_and_names_them_relatively
         "{deck}"
     );
     assert!(
-        deck.lines().any(|line| line.starts_with('X')
-            && line.split(' ').any(|token| token == CELL)),
+        deck.lines()
+            .any(|line| line.starts_with('X') && line.split(' ').any(|token| token == CELL)),
         "the instance names the module the source declares:\n{deck}"
     );
     let read = rspice_core::netlist::Netlist::parse_with_path(&deck, &deck_path)

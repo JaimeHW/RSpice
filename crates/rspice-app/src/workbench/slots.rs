@@ -28,7 +28,7 @@ pub(crate) use design::DesignState;
 pub(crate) use hardcopy::HardcopyState;
 pub(crate) use models::ModelsState;
 pub(crate) use platform::PlatformState;
-pub(crate) use project::ProjectState;
+pub(crate) use project::{BuiltinModelsBrowser, ProjectState};
 pub(crate) use results::ResultsState;
 pub(crate) use runs::RunsState;
 pub(crate) use settings::SettingsState;

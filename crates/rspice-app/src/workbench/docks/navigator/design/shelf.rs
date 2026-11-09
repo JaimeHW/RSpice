@@ -43,6 +43,9 @@ use crate::ui::tokens::{self, Tokens};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::framework::requests::{ConfirmPackAttach, FocusPlacementSearch};
+use rspice_app_models::veriloga_library::{
+    BUILTIN_VERILOGA_LIBRARY, BUILTIN_VERILOGA_MODELS, builtin_veriloga_model,
+};
 
 use super::super::super::super::design_system::{
     WorkbenchIcon, section_header as shelf_section_header,
@@ -1131,7 +1134,7 @@ fn resolve_shelf_entry(
             Some(ShelfEntryRow {
                 entry: entry.clone(),
                 glyph: ShelfGlyph::Text("VA"),
-                label: descriptor.model_name.to_owned(),
+                label: builtin_label(descriptor.model_name).to_owned(),
                 meta: Some(format!(
                     "{} pin \u{00b7} {}",
                     descriptor.terminals.len(),
@@ -1895,6 +1898,19 @@ pub(super) fn place_builtin_xspice(
     }
 }
 
+/// What the built-in library calls a model.
+fn builtin_label(registry_name: &'static str) -> &'static str {
+    builtin_veriloga_model(registry_name).map_or(registry_name, |model| model.name)
+}
+
+/// The position `registry_name` holds in the library's grouping.
+fn library_position(registry_name: &str) -> usize {
+    BUILTIN_VERILOGA_MODELS
+        .iter()
+        .position(|model| model.registry_name == registry_name)
+        .unwrap_or(usize::MAX)
+}
+
 fn generated_veriloga_catalog(ui: &mut Ui, state: &mut AppState) -> Option<LibraryCellInstance> {
     let descriptors = generated_veriloga_devices();
     if descriptors.is_empty() {
@@ -1904,7 +1920,7 @@ fn generated_veriloga_catalog(ui: &mut Ui, state: &mut AppState) -> Option<Libra
         ui,
         "component-shelf-generated-veriloga",
         ShelfGlyph::Text("VA"),
-        "Generated Verilog-A",
+        BUILTIN_VERILOGA_LIBRARY,
         descriptors.len(),
         false,
     ) {
@@ -1912,6 +1928,8 @@ fn generated_veriloga_catalog(ui: &mut Ui, state: &mut AppState) -> Option<Libra
     }
 
     let mut armed = None;
+    let mut descriptors = descriptors.iter().collect::<Vec<_>>();
+    descriptors.sort_by_key(|descriptor| library_position(descriptor.model_name));
     for descriptor in descriptors {
         let selected = state
             .model
@@ -1928,12 +1946,13 @@ fn generated_veriloga_catalog(ui: &mut Ui, state: &mut AppState) -> Option<Libra
         let response = shelf_part_row(
             ui,
             ShelfGlyph::Text("VA"),
-            descriptor.model_name,
+            builtin_label(descriptor.model_name),
             selected,
             Some(&format!(
-                "{} pin · {}",
+                "{} pin \u{00b7} {}",
                 descriptor.terminals.len(),
-                descriptor.module_name
+                builtin_veriloga_model(descriptor.model_name)
+                    .map_or(descriptor.module_name, |model| model.class.label())
             )),
             2,
         );
@@ -2313,8 +2332,8 @@ pub(super) fn shelf_hits(
     }
     for descriptor in generated_veriloga_devices() {
         let rank = query.rank(&ShelfTerms {
-            label: descriptor.model_name,
-            keywords: &[],
+            label: builtin_label(descriptor.model_name),
+            keywords: &[descriptor.model_name],
             part_numbers: &[descriptor.module_name, descriptor.source_digest],
         });
         offer(
