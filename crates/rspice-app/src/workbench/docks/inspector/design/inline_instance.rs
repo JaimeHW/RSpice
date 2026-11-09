@@ -992,8 +992,14 @@ pub(super) fn rejection_slot(ui: &mut Ui, editing: bool, reason: Option<&str>) -
     );
     if let Some(reason) = reason {
         let label_rect = rect.shrink2(egui::vec2(inset, 0.0));
-        let label = ui.put(
-            label_rect,
+        // `Ui::put` centres what it places; a message reads from the panel's
+        // left edge, under the row labels.
+        let mut strip = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(label_rect)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
+        let label = strip.add(
             egui::Label::new(
                 egui::RichText::new(reason)
                     .font(theme::sans(tokens::FS_0, FontWeight::Regular))

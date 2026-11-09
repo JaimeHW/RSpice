@@ -128,6 +128,32 @@ pub(crate) fn accesskit_nodes(
     .nodes
 }
 
+/// A rejected value reads from the panel's left edge, under the row labels,
+/// rather than floating in the middle of its strip.
+#[test]
+fn a_rejection_starts_at_the_panels_inset() {
+    use egui::accesskit::Role;
+
+    let mut inset = 0.0;
+    let nodes = accesskit_nodes(|ui| {
+        inset = crate::workbench::design_system::panel_inset(ui);
+        rejection_slot(ui, true, Some("pa takes 2 values; this has 3"));
+    });
+    let left = |role: Role| {
+        nodes
+            .iter()
+            .find(|(_, node)| node.role() == role)
+            .and_then(|(_, node)| node.bounds())
+            .unwrap_or_else(|| panic!("a {role:?} node with bounds"))
+            .x0
+    };
+    let offset = left(Role::Label) - left(Role::Status);
+    assert!(
+        (offset - f64::from(inset)).abs() < 0.5,
+        "the message starts {offset} into its strip, not at the {inset} inset"
+    );
+}
+
 /// Everything one inspector panel paints, at the dock's real width.
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn painted_panel(mut contents: impl FnMut(&mut Ui)) -> String {
