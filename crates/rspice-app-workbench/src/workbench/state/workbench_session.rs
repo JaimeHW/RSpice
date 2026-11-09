@@ -505,7 +505,7 @@ pub struct WorkbenchSession {
     pub active_source_editor: Option<ActiveSourceEditor>,
     /// Where the panes the F6 keys cycle through were drawn this frame, and
     /// the step waiting to be taken. Runtime-only.
-    pub pane_focus: crate::workbench::chrome::pane_focus::PaneFocus,
+    pub pane_focus: super::pane_focus::PaneFocus,
     /// One-shot requests the parts of the workbench raise for one another,
     /// waiting for the frame point that takes each. Runtime-only: a request
     /// is an intent of this process, never session or project data.

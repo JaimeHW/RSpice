@@ -8,6 +8,7 @@ use rspice_app_workbench::workbench::state::console_views;
 pub(in crate::workbench) use rspice_app_workbench::workbench::state::navigator_tree;
 mod session_views;
 mod stimulus_editor;
+pub(crate) use rspice_app_workbench::workbench::state::pane_focus;
 pub(crate) use rspice_app_workbench::workbench::state::workbench_session;
 mod simulate_session;
 mod workflow_drafts;

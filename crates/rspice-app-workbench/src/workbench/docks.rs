@@ -10,8 +10,8 @@ pub use inspector::validate_component_model_catalog_binding;
 use egui::{Context, Frame, Id, Key, Panel, Response, containers::PanelState};
 
 use crate::ui::tokens::Tokens;
-use crate::workbench::chrome::pane_focus::Pane;
 use crate::workbench::framework::workbench_host::WorkbenchHost;
+use crate::workbench::state::pane_focus::Pane;
 
 use super::layout::LayoutSpec;
 

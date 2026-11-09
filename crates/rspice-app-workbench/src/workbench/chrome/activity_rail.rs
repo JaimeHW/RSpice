@@ -7,8 +7,8 @@ use crate::ui::tokens::{self, Tokens};
 use crate::workbench::framework::workbench_host::WorkbenchHost;
 
 use super::super::state::Workspace;
-use super::pane_focus::Pane;
 use crate::ui::panels::{ACTIVITY_RAIL_W, WorkbenchIcon};
+use crate::workbench::state::pane_focus::Pane;
 
 const ACTIVITY_BUTTON_WIDTH: f32 = 50.0;
 const ACTIVITY_BUTTON_HEIGHT: f32 = 45.0;

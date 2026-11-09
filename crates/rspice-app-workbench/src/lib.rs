@@ -89,6 +89,7 @@ pub mod workbench {
     pub mod state {
         pub mod console_views;
         pub mod navigator_tree;
+        pub mod pane_focus;
         pub mod problems_view;
         pub mod retired_documents;
         pub mod workbench_session;

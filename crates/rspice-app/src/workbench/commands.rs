@@ -9,13 +9,13 @@ use crate::schematic::view::selection_transform::{
     SelectionTransform, transform_selection_on_active_sheet,
 };
 use crate::state::{ComponentType, Tool};
-use crate::workbench::chrome::pane_focus::PaneStep;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::framework::command_registry::{CommandOwner, ids};
 use crate::workbench::framework::requests::{FocusNavigatorSearch, FocusPlacementSearch};
 use crate::workbench::menu_bar::{
     FileMenuAction, check_cellview, check_design, dispatch_file_menu_action,
 };
+use crate::workbench::state::pane_focus::PaneStep;
 use crate::workbench::{AppState, RSpiceApp};
 use rspice_schematic_editor::symbol_editor::commands::SymbolTransform;
 use rspice_schematic_editor::view::navigation::ZoomRequest;

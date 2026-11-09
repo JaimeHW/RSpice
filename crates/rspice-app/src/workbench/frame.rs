@@ -12,12 +12,12 @@ use egui::{CentralPanel, Context, Frame};
 
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::ui::tokens::Tokens;
-use crate::workbench::chrome::pane_focus::Pane;
 use crate::workbench::cloud::CloudFeature;
 #[cfg(target_arch = "wasm32")]
 use crate::workbench::models::ModelsFeature;
 use crate::workbench::results::ResultsFeature;
 use crate::workbench::results::commands::ResultsCommand;
+use crate::workbench::state::pane_focus::Pane;
 
 // The shell's submodules and re-exports, as this code saw them when it lived
 // in `workbench.rs` itself.

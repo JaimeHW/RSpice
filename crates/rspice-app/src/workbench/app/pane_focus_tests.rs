@@ -5,8 +5,8 @@ use super::veriloga_design_tests::{
     DESKTOP, add_veriloga_cell, frame, frame_with, open_in_design, open_project_app, themed_context,
 };
 use super::*;
-use crate::workbench::chrome::pane_focus::Pane;
 use crate::workbench::state::Workspace;
+use crate::workbench::state::pane_focus::Pane;
 use egui::accesskit::TreeUpdate;
 
 const EVERY_PANE: [Pane; 5] = [

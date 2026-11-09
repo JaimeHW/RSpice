@@ -760,6 +760,9 @@ const WORKBENCH_LAYERS: &[&str] = &[
     // workbench; the command vocabulary reads the labels it owns, and the
     // editors, docks and surfaces read it.
     "localization",
+    // Reads the accessibility tree egui builds and writes to the page: it needs
+    // nothing of the shell but the words.
+    "browser/accessible_mirror",
     // What the results feature's commands declare, the same way. Its labels
     // read the interface text catalog, so it ranks above it.
     "results/commands",
