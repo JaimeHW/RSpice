@@ -229,7 +229,7 @@ pub(super) fn parse(
             }
             let mut include = parse_veriloga_directive(trimmed).ok_or_else(|| ParseError::Syntax {
                 line: line_num,
-                message: "Invalid Verilog-A include; expected .VERILOGA filename [MODELNAME] [module=MODULE] with closed quotes and no extra fields".to_owned(),
+                message: "Invalid Verilog-A include; expected .VERILOGA filename [MODELNAME] [module=MODULE] [define=NAME[=VALUE]]... with closed quotes and no extra fields".to_owned(),
             })?;
             // A Verilog-A source names a global instance master, the way
             // Spectre's `ahdl_include` does, so writing one inside a

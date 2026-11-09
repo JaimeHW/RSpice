@@ -76,7 +76,8 @@ fn connect_refusal(detail: impl Into<String>) -> ElaborationError {
 /// The original coordinates of a connect source the design retains only as
 /// preprocessed text, prepared again from its file when a refusal needs to
 /// point into it. A file that no longer prepares to the same text is not
-/// mapped, so a location is never taken from a different snapshot.
+/// mapped, so a location is never taken from a different snapshot; nor is
+/// one prepared under a line's `define=` macros, which are not known here.
 pub(super) fn original_coordinates<'a>(
     path: &'a std::path::Path,
     source: &str,

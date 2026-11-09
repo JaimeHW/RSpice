@@ -6667,6 +6667,7 @@ impl Engine {
                 delay_select: crate::xspice::verilog::compiler_delay_select(
                     self.config.hdl.delay_select,
                 ),
+                defines: Vec::new(),
             };
             let includes = veriloga_sources::selections_for_instances(
                 netlist,

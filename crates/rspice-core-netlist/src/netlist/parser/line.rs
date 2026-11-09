@@ -131,9 +131,17 @@ pub(super) fn parse_veriloga_directive(line: &str) -> Option<VerilogAInclude> {
 
     let mut model_name = None;
     let mut selected_module = None;
+    let mut defines = Vec::new();
     let mut rest = rest.trim();
     while !rest.is_empty() {
         if rest
+            .get(..7)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("define="))
+        {
+            let (definition, suffix) = consume_quoted_or_token(&rest[7..])?;
+            defines.push(parse_source_define(&definition)?);
+            rest = suffix.trim();
+        } else if rest
             .get(..7)
             .is_some_and(|prefix| prefix.eq_ignore_ascii_case("module="))
         {
@@ -147,7 +155,7 @@ pub(super) fn parse_veriloga_directive(line: &str) -> Option<VerilogAInclude> {
             selected_module = Some(module);
             rest = suffix.trim();
         } else {
-            if model_name.is_some() || selected_module.is_some() {
+            if model_name.is_some() || selected_module.is_some() || !defines.is_empty() {
                 return None;
             }
             let (alias, suffix) = consume_quoted_or_token(rest)?;
@@ -163,12 +171,31 @@ pub(super) fn parse_veriloga_directive(line: &str) -> Option<VerilogAInclude> {
         file_path: std::path::PathBuf::from(path),
         model_name,
         selected_module,
+        defines,
         // The tokenizer sees one line with no file or position around it. A
         // netlist parse replaces this with the physical location that wrote
         // the directive, which is the directory a relative path resolves
         // against.
         origin: NetlistSourceLocation::in_memory(0),
     })
+}
+
+/// One `define=NAME[=VALUE]` of a Verilog-A source line, as the source's
+/// preprocessor takes it: `NAME` a macro identifier (a letter or `_`, then
+/// letters, digits, `_` or `$`), the empty macro when no value is written.
+fn parse_source_define(definition: &str) -> Option<(String, Option<String>)> {
+    let (name, value) = match definition.split_once('=') {
+        Some((name, value)) => (name, Some(value.to_owned())),
+        None => (definition, None),
+    };
+    let mut characters = name.chars();
+    let identifier = characters
+        .next()
+        .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
+        && characters.all(|character| {
+            character.is_ascii_alphanumeric() || character == '_' || character == '$'
+        });
+    identifier.then(|| (name.to_owned(), value))
 }
 
 pub(super) fn consume_quoted_or_token(input: &str) -> Option<(String, &str)> {

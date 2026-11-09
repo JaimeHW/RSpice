@@ -625,6 +625,7 @@ pub(super) fn prepare<'a>(
                             super::hdl_spice_leaves::hdl_external_cells(netlist),
                         )),
                         delay_select,
+                        defines: Vec::new(),
                     },
                 ),
             );

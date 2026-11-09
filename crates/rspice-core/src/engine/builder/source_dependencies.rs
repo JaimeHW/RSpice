@@ -6,7 +6,9 @@ impl Engine {
     /// using the same compiler options as circuit construction. This performs
     /// bounded preprocessing, without selecting, compiling, or executing a
     /// module. Paths are sorted and deduplicated; built-in headers and registered
-    /// virtual sources have no filesystem dependency and are excluded.
+    /// virtual sources have no filesystem dependency and are excluded. Each
+    /// source is read with the macros its line defines (`define=`), so a
+    /// header only a define includes is a dependency of that line alone.
     ///
     /// The result describes this read of the source tree, not an immutable
     /// snapshot of a later circuit build. Callers must keep their inputs stable.
@@ -26,7 +28,10 @@ impl Engine {
             check_build_abort(abort)?;
             let path = &include.file_path;
             if veriloga_cache::is_sealed_veriloga_virtual_path(path)
-                || !roots.insert(veriloga_cache::canonicalize_for_cache(path))
+                || !roots.insert((
+                    veriloga_cache::canonicalize_for_cache(path),
+                    &include.defines,
+                ))
             {
                 continue;
             }
@@ -54,7 +59,9 @@ impl Engine {
                     &control,
                 );
                 let compiler = rspice_veriloga::VerilogACompiler::new(
-                    veriloga_cache::deck_include_compiler_options(&Default::default()),
+                    veriloga_cache::deck_include_compiler_options(
+                        &veriloga_cache::DeckHdl::default().with_source_defines(&include.defines),
+                    ),
                 );
                 let dependencies = compiler
                     .provider_source_dependencies(&provider, path)

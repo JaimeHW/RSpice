@@ -30,27 +30,53 @@ fn source_refusal(
 }
 
 /// The word counts that say a source file may hold more than one module.
-fn lexical_design_units(path: &Path) -> (usize, usize) {
+fn lexical_design_units(path: &Path) -> Vec<(bool, String)> {
     let Ok(text) = std::fs::read_to_string(path) else {
-        return (0, 0);
+        return Vec::new();
     };
-    let identifier =
-        |character: char| character.is_ascii_alphanumeric() || "_$".contains(character);
-    let count = |word: &str| {
-        text.match_indices(word)
-            .filter(|(at, _)| {
-                !text[..*at].chars().next_back().is_some_and(identifier)
-                    && !text[at + word.len()..]
-                        .chars()
-                        .next()
-                        .is_some_and(identifier)
-            })
-            .count()
-    };
-    (
-        count("module") + count("macromodule") + count("paramset"),
-        count("paramset"),
-    )
+    let mut words = Vec::new();
+    let mut characters = text.char_indices().peekable();
+    while let Some((at, character)) = characters.next() {
+        match character {
+            '/' if characters.peek().is_some_and(|(_, next)| *next == '/') => {
+                characters.find(|(_, character)| *character == '\n');
+            }
+            '/' if characters.peek().is_some_and(|(_, next)| *next == '*') => {
+                characters.next();
+                let mut previous = ' ';
+                characters.find(|(_, character)| {
+                    let closes = previous == '*' && *character == '/';
+                    previous = *character;
+                    closes
+                });
+            }
+            '"' => {
+                let mut escaped = false;
+                characters.find(|(_, character)| {
+                    let closes = !escaped && *character == '"';
+                    escaped = !escaped && *character == '\\';
+                    closes
+                });
+            }
+            character if character.is_ascii_alphabetic() || "_`$\\".contains(character) => {
+                let mut end = at + character.len_utf8();
+                while let Some(&(next_at, next)) = characters.peek() {
+                    if !(next.is_ascii_alphanumeric() || "_$".contains(next)) {
+                        break;
+                    }
+                    end = next_at + next.len_utf8();
+                    characters.next();
+                }
+                words.push(&text[at..end]);
+            }
+            _ => {}
+        }
+    }
+    words
+        .windows(2)
+        .filter(|pair| matches!(pair[0], "module" | "macromodule" | "paramset"))
+        .map(|pair| (pair[0] == "paramset", pair[1].to_owned()))
+        .collect()
 }
 
 /// One selection per module the deck instantiates from each source that
@@ -69,12 +95,12 @@ pub(super) fn selections_for_instances<'a>(
     use std::collections::HashSet;
     let includes = &netlist.veriloga_includes;
     let may_need_expanding = |include: &VerilogAInclude| {
-        let (units, paramsets) = lexical_design_units(&include.file_path);
+        let units = lexical_design_units(&include.file_path);
         !declares_connect_items(&include.file_path)
             && if include.selected_module.is_some() {
-                paramsets > 0
+                units.iter().any(|(is_paramset, _)| *is_paramset)
             } else {
-                units > 1
+                units.len() > 1
             }
     };
     if !includes.iter().any(may_need_expanding) {
@@ -100,7 +126,9 @@ pub(super) fn selections_for_instances<'a>(
             selections.push(include.clone());
             continue;
         }
-        let prepared = prepare_veriloga_unit(&[include.file_path.as_path()], None, deck, limits, abort)?;
+        let deck = &deck.with_source_defines(&include.defines);
+        let prepared =
+            prepare_veriloga_unit(&[include.file_path.as_path()], None, deck, limits, abort)?;
         let declared: Vec<&str> = prepared.module_names().collect();
         let chosen: Vec<&str> = match include.selected_module.as_deref() {
             Some(selected) if declared.contains(&selected) => Vec::new(),
@@ -198,6 +226,97 @@ pub(super) fn resolve_includes(
     limits: ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> Result<Vec<Option<CachedVerilogAModel>>, SimulationError> {
+    resolve_include_units(includes, library_map, rules, deck, limits, abort)
+        .map_err(|error| explain_separate_units(error, includes))
+}
+
+/// The code of the compiler's refusal of an instance whose module its
+/// compilation unit does not declare.
+const UNDEFINED_MODULE_CODE: &str = "VA-SEM-UNDEFINED-MODULE";
+
+/// How the compiler's semantic refusals begin; an explanation keeps it.
+const SEMANTIC_ERROR_LEAD: &str = "Semantic error: ";
+
+/// A source its line gives macros (`define=`) compiles as a unit of its own,
+/// so a module it instantiates from another deck file is undefined in it, and
+/// so is one of its modules another file instantiates. Such a refusal says
+/// that, naming the file that declares the module, instead of "Undefined
+/// module".
+fn explain_separate_units(error: SimulationError, includes: &[VerilogAInclude]) -> SimulationError {
+    if includes.iter().all(|include| include.defines.is_empty()) {
+        return error;
+    }
+    let SimulationError::Elaboration(refusal) = error else {
+        return error;
+    };
+    let mut diagnostics = refusal.compiler_diagnostics().to_vec();
+    let mut explained = false;
+    for diagnostic in &mut diagnostics {
+        if diagnostic.code != UNDEFINED_MODULE_CODE {
+            continue;
+        }
+        let Some(site) = diagnostic.path.as_deref().map(Path::new) else {
+            continue;
+        };
+        let site = canonicalize_for_cache(site);
+        let (here, elsewhere): (Vec<_>, Vec<_>) = includes
+            .iter()
+            .partition(|include| canonicalize_for_cache(&include.file_path) == site);
+        let Some(first) = here.first() else {
+            continue;
+        };
+        // One file loaded both with and without macros is two units; which
+        // one refused is not known here.
+        if here
+            .iter()
+            .any(|include| include.defines.is_empty() != first.defines.is_empty())
+        {
+            continue;
+        }
+        let Some((module, declaring)) = elsewhere.iter().find_map(|include| {
+            lexical_design_units(&include.file_path)
+                .into_iter()
+                .map(|(_, name)| name)
+                .find(|module| diagnostic.message.contains(&format!("'{module}'")))
+                .map(|module| (module, include))
+        }) else {
+            continue;
+        };
+        let declaring_path = declaring.file_path.display();
+        let lead = SEMANTIC_ERROR_LEAD;
+        let lead = if diagnostic.message.starts_with(lead) {
+            lead
+        } else {
+            ""
+        };
+        diagnostic.message = if !first.defines.is_empty() {
+            format!(
+                "{lead}module '{module}' is declared in '{declaring_path}', another file of the deck, but this file was loaded with define= and so compiles on its own, without the deck's other files; `include that file here, or load this one without define="
+            )
+        } else if !declaring.defines.is_empty() {
+            format!(
+                "{lead}module '{module}' is declared in '{declaring_path}', which was loaded with define= and so compiles on its own, without the deck's other files, and no other file can instantiate its modules; load it without define= to share them"
+            )
+        } else {
+            continue;
+        };
+        explained = true;
+    }
+    if explained {
+        SimulationError::Elaboration(Box::new((*refusal).with_compiler_diagnostics(diagnostics)))
+    } else {
+        SimulationError::Elaboration(refusal)
+    }
+}
+
+fn resolve_include_units(
+    includes: &[VerilogAInclude],
+    library_map: Option<&Path>,
+    rules: &mut DesignConnectRules,
+    deck: &super::veriloga_cache::DeckHdl,
+    limits: ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<Option<CachedVerilogAModel>>, SimulationError> {
     // A library map (IEEE 1364-2005 section 13.2) places the unit's files in
     // libraries and brings in files of its own.
     let library_map = library_map
@@ -207,9 +326,20 @@ pub(super) fn resolve_includes(
     let mut groups: Vec<Vec<usize>> = Vec::new();
     for (index, include) in includes.iter().enumerate() {
         super::check_build_abort(abort)?;
+        // A sealed runtime and a registered library were compiled before the
+        // deck was read; no deck macro can reach their preprocessing.
+        if !include.defines.is_empty() && is_sealed_veriloga_virtual_path(&include.file_path) {
+            return Err(source_refusal(
+                &include.file_path,
+                ElaborationErrorKind::CompileRefusal,
+                "this registered Verilog-A runtime was compiled before the deck was read, so define= cannot reach its preprocessor; set the macros in its build settings",
+            ));
+        }
+        // A file is one source per set of macros its lines define: the same
+        // file under different defines compiles once for each.
         let next_group = groups.len();
         let group = *group_indices
-            .entry(canonicalize_for_cache(&include.file_path))
+            .entry((canonicalize_for_cache(&include.file_path), &include.defines))
             .or_insert_with(|| {
                 groups.push(Vec::new());
                 next_group
@@ -220,10 +350,15 @@ pub(super) fn resolve_includes(
     // clause 19), except a sealed runtime, which is registered whole, and a
     // connection library, which is a library of its own that a design selects
     // by source. A unit of one file is that file, as it always was, unless a
-    // library map places it.
+    // library map places it. A source its line gives macros (`define=`)
+    // compiles alone too, so the macros reach that source's preprocessing and
+    // no other file's, and no other file's macros reach it.
     let (unit_groups, groups): (Vec<_>, Vec<_>) = groups.into_iter().partition(|group| {
-        let path = &includes[group[0]].file_path;
-        !is_sealed_veriloga_virtual_path(path) && !declares_connect_items(path)
+        let include = &includes[group[0]];
+        let path = &include.file_path;
+        include.defines.is_empty()
+            && !is_sealed_veriloga_virtual_path(path)
+            && !declares_connect_items(path)
     });
     let (unit_groups, groups) =
         if unit_groups.len() > 1 || (library_map.is_some() && !unit_groups.is_empty()) {
@@ -249,6 +384,7 @@ pub(super) fn resolve_includes(
     for group in groups {
         super::check_build_abort(abort)?;
         let path = &includes[group[0]].file_path;
+        let deck = &deck.with_source_defines(&includes[group[0]].defines);
         if let Some(library) = lookup_registered_connection_library(path, limits, abort)? {
             for &index in &group {
                 if let Some(module) = &includes[index].selected_module {
@@ -406,12 +542,15 @@ pub(super) fn resolve_includes(
     // select a shipped rule set now.
     rules.finish_registration()?;
     let configuration = rules.configuration()?;
+    // A replay reads the artifact's retained source, already preprocessed
+    // under its line's macros.
     let compiler = rspice_veriloga::VerilogACompiler::new(
         super::veriloga_cache::deck_include_compiler_options(deck),
     );
     let control = super::veriloga_cache::VerilogACompileControl { abort };
     for group in frozen {
         let path = &includes[group.indices[0]].file_path;
+        let deck = &deck.with_source_defines(&includes[group.indices[0]].defines);
         let mut compiled_selections = HashMap::new();
         for index in group.indices {
             super::check_build_abort(abort)?;

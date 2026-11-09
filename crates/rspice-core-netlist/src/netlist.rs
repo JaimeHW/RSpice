@@ -1653,8 +1653,8 @@ pub struct ControlCommandRecord {
 /// Verilog-A model include directive
 ///
 /// References an external Verilog-A file to be compiled and used as a model.
-/// Usage: `.VA filename.va [MODELNAME] [module=MODULE]`, spelled `.va`,
-/// `.veriloga`, `.hdl`, `.vams` or `.verilog`.
+/// Usage: `.VA filename.va [MODELNAME] [module=MODULE] [define=NAME[=VALUE]]...`,
+/// spelled `.va`, `.veriloga`, `.hdl`, `.vams` or `.verilog`.
 #[derive(Debug, Clone)]
 pub struct VerilogAInclude {
     /// Path to the Verilog-A source file.
@@ -1668,6 +1668,11 @@ pub struct VerilogAInclude {
     pub model_name: Option<String>,
     /// Explicit, case-sensitive Verilog module selection, independent of the alias.
     pub selected_module: Option<String>,
+    /// Macros `define=NAME[=VALUE]` predefines for this line's source, as
+    /// `(name, value)` in the order written; `None` defines the empty macro.
+    /// They reach only this source's preprocessing, so two lines loading one
+    /// file with different defines compile it twice.
+    pub defines: Vec<(String, Option<String>)>,
     /// The file and line that wrote the directive, which is also the directory
     /// a relative source path resolves against.
     pub origin: NetlistSourceLocation,

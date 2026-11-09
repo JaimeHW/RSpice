@@ -759,6 +759,9 @@ pub(super) struct VerilogADiskCacheRecord {
     pub(super) external_cells: Option<[u8; 32]>,
     #[serde(default)]
     pub(super) delay_select: rspice_veriloga::canonical_ir::digital::DigitalDelaySelect,
+    /// Absent from a record compiled without a line's macros.
+    #[serde(default)]
+    pub(super) defines: Option<[u8; 32]>,
     pub(super) dependencies: Vec<VerilogADependencyFingerprint>,
     pub(super) model: rspice_veriloga::CompiledModel,
     pub(super) canonical_ir: Option<rspice_veriloga::canonical_ir::CanonicalIrArtifact>,
@@ -849,6 +852,9 @@ pub(super) struct VerilogASourceKey {
     /// The value the deck keeps of each min:typ:max expression, which the
     /// parser applies (`.options hdl_delay_select`).
     delay_select: rspice_veriloga::canonical_ir::digital::DigitalDelaySelect,
+    /// The macros the deck line predefined for the source, by identity;
+    /// `None` when it defined none.
+    defines: Option<[u8; 32]>,
 }
 
 #[cfg(feature = "veriloga")]
@@ -862,6 +868,7 @@ impl VerilogASourceKey {
             wreal_resolution: Default::default(),
             external_cells: None,
             delay_select: Default::default(),
+            defines: None,
         }
     }
 
@@ -870,6 +877,7 @@ impl VerilogASourceKey {
         self.wreal_resolution = deck.wreal_resolution;
         self.external_cells = deck.cells_identity();
         self.delay_select = deck.delay_select;
+        self.defines = deck.defines_identity();
         self
     }
 
@@ -896,6 +904,9 @@ struct BorrowedVerilogACacheRecord<'a> {
     wreal_resolution: rspice_veriloga::canonical_ir::digital::DigitalRealResolution,
     external_cells: Option<[u8; 32]>,
     delay_select: rspice_veriloga::canonical_ir::digital::DigitalDelaySelect,
+    // A record compiled without a line's macros is written as it always was.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    defines: Option<[u8; 32]>,
     dependencies: &'a [VerilogADependencyFingerprint],
     model: &'a rspice_veriloga::CompiledModel,
     canonical_ir: Option<&'a rspice_veriloga::canonical_ir::CanonicalIrArtifact>,
@@ -914,6 +925,7 @@ impl<'a> BorrowedVerilogACacheRecord<'a> {
             wreal_resolution: source.wreal_resolution,
             external_cells: source.external_cells,
             delay_select: source.delay_select,
+            defines: source.defines,
             dependencies: &entry.dependencies,
             model: entry.model.as_ref(),
             canonical_ir: entry.canonical_ir.as_deref(),
@@ -1414,6 +1426,10 @@ pub(super) fn cache_record_path_with_root(
     if let Some(cells) = source.external_cells {
         hasher.update(b"\0external-cells\0");
         hasher.update(&cells);
+    }
+    if let Some(defines) = source.defines {
+        hasher.update(b"\0defines\0");
+        hasher.update(&defines);
     }
     if source.delay_select != Default::default() {
         hasher.update(b"\0delay-select\0");
@@ -2305,6 +2321,7 @@ fn load_model_from_disk_at_with_limits(
         || source_path.wreal_resolution != record.wreal_resolution
         || source_path.external_cells != record.external_cells
         || source_path.delay_select != record.delay_select
+        || source_path.defines != record.defines
         || record.configuration.is_some_and(|identity| {
             record.canonical_ir.as_ref().and_then(|artifact| {
                 artifact.connections.configuration().map(|configuration| {
@@ -2425,6 +2442,7 @@ pub(super) fn deck_include_compiler_options(deck: &DeckHdl) -> rspice_veriloga::
         wreal_resolution: deck.wreal_resolution,
         external_cells: deck.external_cells.as_deref().cloned(),
         delay_select: deck.delay_select,
+        defines: deck.defines.clone(),
         ..rspice_veriloga::CompilerOptions::default()
     }
 }
@@ -2441,6 +2459,8 @@ pub(super) struct DeckHdl {
     /// `None` compiles no leaf, as a host that builds none does.
     pub(super) external_cells: Option<std::sync::Arc<Vec<rspice_veriloga::ExternalCell>>>,
     pub(super) delay_select: rspice_veriloga::canonical_ir::digital::DigitalDelaySelect,
+    /// The macros one line's `define=` options predefine for its source alone.
+    pub(super) defines: Vec<(String, Option<String>)>,
 }
 
 #[cfg(feature = "veriloga")]
@@ -2454,7 +2474,44 @@ impl DeckHdl {
             wreal_resolution,
             external_cells: None,
             delay_select: Default::default(),
+            defines: Vec::new(),
         }
+    }
+
+    /// This deck compiling one source under the macros its line defines.
+    pub(super) fn with_source_defines(&self, defines: &[(String, Option<String>)]) -> Self {
+        Self {
+            defines: defines.to_vec(),
+            ..self.clone()
+        }
+    }
+
+    /// The identity of the macros a line predefines for its source, in the
+    /// order written: part of the source's cache key in memory and on disk,
+    /// so a changed define recompiles and an unchanged one hits.
+    fn defines_identity(&self) -> Option<[u8; 32]> {
+        fn text(hash: &mut blake3::Hasher, text: &str) {
+            hash.update(&(text.len() as u64).to_le_bytes());
+            hash.update(text.as_bytes());
+        }
+        if self.defines.is_empty() {
+            return None;
+        }
+        let mut hash = blake3::Hasher::new();
+        hash.update(b"rspice.hdl-defines\0");
+        for (name, value) in &self.defines {
+            text(&mut hash, name);
+            match value {
+                Some(value) => {
+                    hash.update(&[1]);
+                    text(&mut hash, value);
+                }
+                None => {
+                    hash.update(&[0]);
+                }
+            }
+        }
+        Some(*hash.finalize().as_bytes())
     }
 
     /// The identity of the cell table a record's key names: `None` for no
@@ -4056,6 +4113,93 @@ endmodule
         assert!(
             !cache_path.exists(),
             "a mismatched module identity is discarded"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A deck line's `define=` macros key its source's disk record: the same
+    /// file compiled under other macros is another record, a record answers
+    /// only the macros it was compiled under, and a line without defines keys
+    /// and writes its record exactly as before.
+    #[test]
+    fn deck_defines_have_distinct_validated_disk_cache_entries() {
+        let root = unique_test_root("deck-defines");
+        std::fs::create_dir_all(&root).unwrap();
+        let source = root.join("defined.va");
+        std::fs::write(&source, "`include \"disciplines.vams\"\nmodule defined(p,n); inout p,n; electrical p,n;\n`ifdef GAIN\nanalog I(p,n) <+ `GAIN*V(p,n);\n`else\nanalog I(p,n) <+ V(p,n);\n`endif\nendmodule\n").unwrap();
+        let gain = |value: &str| {
+            DeckHdl::default()
+                .with_source_defines(&[("GAIN".to_owned(), Some(value.to_owned()))])
+        };
+        assert_eq!(DeckHdl::default().defines_identity(), None);
+        assert_ne!(gain("3").defines_identity(), gain("4").defines_identity());
+        assert_eq!(
+            VerilogASourceKey::new(&source, None).under(&DeckHdl::default()),
+            VerilogASourceKey::new(&source, None),
+            "no defines keys the source as it was keyed before"
+        );
+        let decks = [DeckHdl::default(), gain("3"), gain("4")];
+        let keys = decks
+            .each_ref()
+            .map(|deck| VerilogASourceKey::new(&source, None).under(deck));
+        let paths = keys
+            .each_ref()
+            .map(|key| cache_record_path_with_root(key, &root));
+        assert!(paths[0] != paths[1] && paths[1] != paths[2] && paths[0] != paths[2]);
+        let mut fingerprints = Vec::new();
+        for (key, deck) in keys.iter().zip(&decks) {
+            let report = rspice_veriloga::VerilogACompiler::new(deck_include_compiler_options(deck))
+                .compile_file_runtime_with_metadata(&source, None)
+                .unwrap();
+            let entry = CachedVerilogAModel {
+                dependencies: fingerprint_paths(&report.dependencies).unwrap(),
+                model: std::sync::Arc::new(report.model),
+                canonical_ir: Some(std::sync::Arc::new(report.canonical_ir)),
+                diagnostics: report.diagnostics.into(),
+            };
+            fingerprints.push(
+                runtime_artifact_fingerprint(&entry.model, entry.canonical_ir.as_deref()).unwrap(),
+            );
+            persist_model_to_disk_at_with_limits(key, &entry, &root, ResourceLimits::default())
+                .unwrap();
+        }
+        assert!(
+            fingerprints[0] != fingerprints[1] && fingerprints[1] != fingerprints[2],
+            "the macros change what the source compiles to"
+        );
+        for (key, fingerprint) in keys.iter().zip(&fingerprints).rev() {
+            let entry = load_model_from_disk_at_with_limits(
+                key,
+                &root,
+                ResourceLimits::default(),
+                &NoAbort,
+            )
+            .unwrap()
+            .expect("each set of macros finds its own record");
+            assert_eq!(
+                &runtime_artifact_fingerprint(&entry.entry.model, entry.entry.canonical_ir.as_deref())
+                    .unwrap(),
+                fingerprint
+            );
+        }
+        // A record that claims other macros than its key's is discarded.
+        let other = gain("4").defines_identity();
+        reseal_record(&paths[1], VERILOGA_CACHE_RECORD_VERSION, |record| {
+            record.defines = other;
+        });
+        assert!(
+            load_model_from_disk_at_with_limits(
+                &keys[1],
+                &root,
+                ResourceLimits::default(),
+                &NoAbort
+            )
+            .unwrap()
+            .is_none()
+        );
+        assert!(
+            !paths[1].exists(),
+            "a mismatched define identity is discarded"
         );
         std::fs::remove_dir_all(root).unwrap();
     }
