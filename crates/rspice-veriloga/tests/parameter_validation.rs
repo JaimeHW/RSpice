@@ -565,3 +565,47 @@ fn packed_real_parameter_boundaries_keep_comparisons_and_branches_dynamic() {
         );
     }
 }
+
+/// BSIM-CMG's `LSP = 0.2 * (L + XL)`: a model parameter defaulted from
+/// instance geometry. Each instance that leaves it unset computes it from its
+/// own `l`, and so does a model default that reads it; one that sets it keeps
+/// that value. The compiler once refused the declaration outright.
+#[test]
+fn model_defaults_that_read_instance_geometry_resolve_per_instance() {
+    let model = DeviceFixture::compile(
+        r#"
+module spacer(p, n);
+    inout p, n;
+    electrical p, n;
+    (* type = "instance" *) parameter real l = 1.0;
+    parameter real xl = 0.0;
+    parameter real lsp = 0.2 * (l + xl) from (0.0:inf);
+    parameter real twice = 2.0 * lsp;
+    analog I(p, n) <+ lsp + 1000.0 * twice;
+endmodule
+"#,
+    );
+    for (name, assignments, lsp) in [
+        ("SHORT", &[("l", 1.0)][..], 0.2),
+        ("LONG", &[("l", 3.0)][..], 0.6),
+        ("OFFSET", &[("l", 3.0), ("xl", 1.0)][..], 0.8),
+        ("CARD", &[("l", 3.0), ("lsp", 0.05)][..], 0.05),
+    ] {
+        let mut builder = rspice_veriloga::device::DeviceBuilder::new(model.model.clone(), name)
+            .nodes(&[1, 0]);
+        for &(parameter, value) in assignments {
+            builder = builder.param(parameter, value);
+        }
+        #[cfg(feature = "native")]
+        let builder = builder.canonical_ir(model.canonical_ir.clone());
+        let mut device = builder
+            .try_build()
+            .expect("a model default may read instance geometry");
+        let current = device.try_evaluate().unwrap()[0];
+        let expected = lsp + 1000.0 * 2.0 * lsp;
+        assert!(
+            (current - expected).abs() <= 1e-12 * expected,
+            "{name}: lsp + 1000*twice = {current}, expected {expected}"
+        );
+    }
+}

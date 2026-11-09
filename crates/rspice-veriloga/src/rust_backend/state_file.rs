@@ -2022,11 +2022,105 @@ fn dependent_parameter_defaults(artifact: &CanonicalIrArtifact) -> Vec<(usize, &
         .collect()
 }
 
+/// Model-scope parameters whose default reads a value that varies per
+/// instance: an instance-only parameter, directly or through another such
+/// default (BSIM-CMG's `LSP = 0.2 * (L + XL)`). Model storage holds no
+/// instance geometry, so each instance recomputes them when its card leaves
+/// them unset.
+fn per_instance_model_defaults(artifact: &CanonicalIrArtifact) -> Vec<bool> {
+    let parameters = &artifact.mir.parameters;
+    let index_of = |name: &str| {
+        parameters.iter().position(|parameter| {
+            parameter.name.eq_ignore_ascii_case(name)
+                || parameter
+                    .aliases
+                    .iter()
+                    .any(|alias| alias.eq_ignore_ascii_case(name))
+        })
+    };
+    let mut varies = parameters
+        .iter()
+        .map(|parameter| {
+            parameter.scope == crate::semantic::ParameterScope::Instance && !parameter.also_model
+        })
+        .collect::<Vec<_>>();
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for (index, parameter) in parameters.iter().enumerate() {
+            let Some(default) = parameter.default_expr.as_ref() else {
+                continue;
+            };
+            if varies[index] || parameter.default.is_some() || !parameter.dimensions.is_empty() {
+                continue;
+            }
+            let mut reads = Vec::new();
+            collect_default_identifiers(artifact, default.id, &mut reads);
+            if reads
+                .iter()
+                .any(|name| index_of(name.as_str()).is_some_and(|read| varies[read]))
+            {
+                varies[index] = true;
+                changed = true;
+            }
+        }
+    }
+    parameters
+        .iter()
+        .zip(varies)
+        .map(|(parameter, varies)| {
+            varies && parameter.scope == crate::semantic::ParameterScope::Model
+        })
+        .collect()
+}
+
+/// Every identifier a parameter default expression names, including the
+/// argument of `$param_given`.
+fn collect_default_identifiers(
+    artifact: &CanonicalIrArtifact,
+    expr: ExprId,
+    reads: &mut Vec<SmolStr>,
+) {
+    let Some(expression) = artifact.mir.expressions.get(usize::from(expr)) else {
+        return;
+    };
+    let mut visit = |child: &ExprId| collect_default_identifiers(artifact, *child, reads);
+    match &expression.kind {
+        HirExprKind::Identifier { name } => reads.push(name.clone()),
+        HirExprKind::SystemFunction { args, .. } | HirExprKind::Call { args, .. } => {
+            args.iter().for_each(visit);
+        }
+        HirExprKind::Binary { left, right, .. } => {
+            visit(left);
+            visit(right);
+        }
+        HirExprKind::Unary { operand, .. } | HirExprKind::ArrayIndex { operand, .. } => {
+            visit(operand);
+        }
+        HirExprKind::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+        } => {
+            visit(condition);
+            visit(then_expr);
+            visit(else_expr);
+        }
+        HirExprKind::ArrayAccess { array, index, .. } => {
+            reads.push(array.clone());
+            collect_default_identifiers(artifact, *index, reads);
+        }
+        HirExprKind::ArrayLiteral { elements, .. } => elements.iter().for_each(visit),
+        _ => {}
+    }
+}
+
 fn emit_parameter_finalization_helpers(
     artifact: &CanonicalIrArtifact,
     parameter_fields: &ParameterBindings<'_>,
     out: &mut String,
 ) -> Result<(), RustBackendError> {
+    let per_instance = per_instance_model_defaults(artifact);
     let dependent_defaults = dependent_parameter_defaults(artifact);
     for (chunk_index, chunk) in dependent_defaults
         .chunks(PARAMETER_FINALIZATION_CHUNK_SIZE)
@@ -2037,6 +2131,9 @@ fn emit_parameter_finalization_helpers(
         out.push_str(&format!(
             "    fn finalize_parameter_vector_chunk_{chunk_index}(params: &mut Parameters, param_given: &[bool; Self::PARAMETER_COUNT], model_storage: bool) -> Result<(), String> {{\n"
         ));
+        if chunk.iter().all(|&(index, _)| per_instance[index]) {
+            out.push_str("        let _ = model_storage;\n");
+        }
         for &(index, parameter) in chunk {
             let default = parameter_default_rust_expr(
                 artifact,
@@ -2044,9 +2141,15 @@ fn emit_parameter_finalization_helpers(
                 parameter_fields,
                 ParameterGivenLowering::Slice("param_given"),
             )?;
-            out.push_str(&format!(
-                "        if (if model_storage {{ PARAMETER_MODEL_FLAGS[{index}] || PARAMETER_DUAL_SCOPE_FLAGS[{index}] }} else {{ !PARAMETER_MODEL_FLAGS[{index}] }}) && !param_given[{index}] {{\n"
-            ));
+            if per_instance[index] {
+                // Both passes: model storage keeps the card's fallback, and
+                // each instance recomputes it from its own geometry.
+                out.push_str(&format!("        if !param_given[{index}] {{\n"));
+            } else {
+                out.push_str(&format!(
+                    "        if (if model_storage {{ PARAMETER_MODEL_FLAGS[{index}] || PARAMETER_DUAL_SCOPE_FLAGS[{index}] }} else {{ !PARAMETER_MODEL_FLAGS[{index}] }}) && !param_given[{index}] {{\n"
+                ));
+            }
             out.push_str("            let value = {\n");
             out.push_str(&format!("                {default}\n"));
             out.push_str("            };\n");

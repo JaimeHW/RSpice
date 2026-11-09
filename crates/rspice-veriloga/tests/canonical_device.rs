@@ -3122,6 +3122,57 @@ assert_eq!(instance.params.values[2], 1.0);
     .unwrap_or_else(|report| panic!("generated dual-scope dependent defaults failed:\n{report}"));
 }
 
+/// BSIM-CMG's `LSP = 0.2 * (L + XL)`: model storage cannot see instance
+/// geometry, so each instance whose card leaves `lsp` unset recomputes it (and
+/// the model default reading it) from its own `l`, and the once-per-card stage
+/// keys on the values each instance ends with.
+#[test]
+fn generated_model_defaults_that_read_instance_geometry_resolve_per_instance() {
+    let (state, stamp, noise) = generated_parts(
+        r#"
+module spacer(p, n);
+    inout p, n;
+    electrical p, n;
+    (* type = "instance" *) parameter real l = 1.0;
+    parameter real xl = 0.0;
+    parameter real lsp = 0.2 * (l + xl);
+    parameter real twice = 2.0 * lsp;
+    analog I(p, n) <+ (lsp + twice) * V(p, n);
+endmodule
+"#,
+        "per-instance model defaults",
+    );
+    let body = r#"
+use runtime::{GeneratedParameterAssignment as Assignment, GeneratedParameterOrigin as Origin};
+let bias = [0.0, 1.0];
+let ctx = runtime::GeneratedEvalContext { voltages: &bias, temperature: 300.15 };
+let mut normalized: Vec<[f64; 32]> = Vec::new();
+for (assignments, lsp) in [
+    (vec![Assignment::new("l", 1.0, Origin::Instance)], 0.2 * (1.0 + 0.0)),
+    (vec![Assignment::new("l", 3.0, Origin::Instance)], 0.2 * (3.0 + 0.0)),
+    (vec![Assignment::new("xl", 1.0, Origin::ModelCard), Assignment::new("l", 3.0, Origin::Instance)], 0.2 * (3.0 + 1.0)),
+    (vec![Assignment::new("lsp", 0.05, Origin::ModelCard), Assignment::new("l", 3.0, Origin::Instance)], 0.05),
+] {
+    let mut instance = device::state::Instance::new(&[1, 0]);
+    instance.apply_parameters(&assignments).unwrap();
+    assert_eq!(instance.params.values[2], lsp, "lsp");
+    assert_eq!(instance.params.values[3], 2.0 * lsp, "twice");
+    let mut sink = [0.0; 32];
+    instance.stamp(&ctx, &mut runtime::GeneratedStamper { sink: Some(&mut sink) });
+    assert!(!ctx.evaluation_failed());
+    normalized.push(sink.map(|entry| entry / (lsp + 2.0 * lsp)));
+}
+assert!(normalized[0].iter().any(|entry| *entry != 0.0));
+for (index, stamp) in normalized.iter().enumerate() {
+    for (entry, first) in stamp.iter().zip(&normalized[0]) {
+        assert!((entry - first).abs() <= 1e-12 * first.abs(), "instance {index}: {stamp:?} vs {:?}", normalized[0]);
+    }
+}
+"#;
+    run_generated_main("per-instance model defaults", &state, &stamp, &noise, body)
+        .unwrap_or_else(|report| panic!("generated per-instance model defaults failed:\n{report}"));
+}
+
 #[test]
 fn generated_model_ranges_validate_against_completed_instance_geometry() {
     let (state, stamp, noise) = generated_parts(

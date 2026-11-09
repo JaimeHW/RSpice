@@ -1577,7 +1577,7 @@ impl SemanticAnalyzer {
             .zip(&parameter_scopes)
             .map(|(parameter, scope)| self.parameter_also_model(parameter, *scope))
             .collect();
-        let canonical_model_storage = module
+        let mut canonical_model_storage = module
             .parameters
             .iter()
             .zip(&parameter_scopes)
@@ -1801,11 +1801,26 @@ impl SemanticAnalyzer {
                 // parameter against instance geometry (for example XGL <= L).
                 // Those bounds are evaluated after instance overrides and do
                 // not make the model parameter itself instance-owned.
-                if default_reads_instance {
+                //
+                // A scalar default that reads instance geometry is legal: in
+                // the LRM every parameter belongs to the instance, so a card
+                // that leaves it unset takes the default each instance
+                // computes from its own geometry (BSIM-CMG's LSP is
+                // 0.2 * (L + XL)). Every later default that reads it varies
+                // per instance too, so it no longer counts as model storage.
+                if default_reads_instance && !is_parameter_array {
+                    canonical_model_storage.insert(param.name.clone(), false);
+                    external_model_storage.insert(param.name.to_ascii_lowercase(), false);
+                    for alias in &module.aliasparams {
+                        if alias.target == param.name {
+                            external_model_storage.insert(alias.alias.to_ascii_lowercase(), false);
+                        }
+                    }
+                } else if default_reads_instance {
                     let storage = if scope == ParameterScope::Model {
-                        "model parameter"
+                        "model parameter array"
                     } else {
-                        "dual-scope parameter model fallback"
+                        "dual-scope parameter-array model fallback"
                     };
                     self.record_error_at(
                         SemanticErrorKind::UnsupportedFeature(format!(

@@ -2494,12 +2494,15 @@ endmodule
     assert!(artifact.validate().is_ok());
 }
 
+/// Every parameter is per instance in the LRM, so a model parameter whose
+/// default reads instance geometry resolves that default per instance when
+/// the card leaves it unset; the values are pinned in parameter_validation.
 #[test]
-fn model_parameter_scope_rejects_instance_dependencies() {
-    let error = VerilogACompiler::default()
+fn model_parameter_defaults_may_read_instance_geometry() {
+    let artifact = VerilogACompiler::default()
         .compile_canonical_ir(
             r#"
-module invalid_scope(p, n);
+module geometry_default(p, n);
     inout p, n;
     electrical p, n;
     (* type = "instance" *) parameter real width = 1.0e-6;
@@ -2508,13 +2511,16 @@ module invalid_scope(p, n);
 endmodule
 "#,
         )
-        .expect_err("shared model-card preprocessing cannot read per-instance geometry");
-    assert!(
-        error
-            .to_string()
-            .contains("model parameter 'model_gain' cannot depend on an instance parameter"),
-        "{error}"
-    );
+        .expect("a model default may read an instance parameter");
+    let gain = artifact
+        .mir
+        .parameters
+        .iter()
+        .find(|parameter| parameter.name == "model_gain")
+        .expect("model_gain is a parameter");
+    assert_eq!(gain.scope, ParameterScope::Model);
+    assert!(gain.default_expr.is_some(), "{gain:?}");
+    assert!(artifact.validate().is_ok());
 }
 
 #[test]

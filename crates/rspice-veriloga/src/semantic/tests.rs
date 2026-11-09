@@ -1673,43 +1673,64 @@ fn model_defaults_may_read_dual_scope_parameter_model_storage() {
     .expect("dual-scope parameters have model storage available to model defaults");
 }
 
+/// In the LRM every parameter belongs to the instance, so a model default may
+/// read instance geometry (BSIM-CMG: `LSP = 0.2 * (L + XL)`), directly, through
+/// an alias in `$param_given`, or as a dual-scope fallback; each instance
+/// evaluates it when the card leaves it unset.
 #[test]
-fn model_defaults_reject_nondual_instance_param_given_aliases() {
-    let error = analyze(&module_src(
+fn scalar_model_defaults_may_read_instance_only_parameters() {
+    for body in [
         r#"
             (* type = "instance" *) parameter real geometry = 2.0;
             parameter real model_value = $param_given(GEOMETRY_ALIAS) ? 1.0 : 0.0;
             aliasparam geometry_alias = geometry;
             analog I(p, n) <+ model_value * V(p, n);
             "#,
-    ))
-    .expect_err("an alias must not hide an instance-only parameter from scope validation")
-    .to_string();
-    assert!(
-        error.contains(
-            "model parameter 'model_value' cannot depend on an instance parameter that lacks model storage"
-        ),
-        "{error}"
-    );
-}
-
-#[test]
-fn dual_scope_model_fallback_rejects_nondual_instance_dependencies() {
-    let error = analyze(&module_src(
         r#"
             (* type = "instance" *) parameter real geometry = 2.0;
             (* type = "instance", xyceAlsoModel = "yes" *) parameter real dual = geometry * 2.0;
             analog I(p, n) <+ dual * V(p, n);
             "#,
-    ))
-    .expect_err("dual model fallback cannot read instance-only storage")
-    .to_string();
-    assert!(
-        error.contains(
-            "dual-scope parameter model fallback 'dual' cannot depend on an instance parameter that lacks model storage"
+        r#"
+            (* type = "instance" *) parameter real l = 1e-6;
+            parameter real lsp = 0.2 * l;
+            parameter real twice = 2.0 * lsp;
+            analog I(p, n) <+ twice * V(p, n);
+            "#,
+    ] {
+        analyze(&module_src(body)).expect("a scalar model default may read instance geometry");
+    }
+}
+
+/// An array default or shape is materialized once per model card, so neither
+/// may read instance-only storage, directly or through a scalar model default
+/// that itself reads instance geometry.
+#[test]
+fn model_parameter_arrays_reject_instance_dependencies() {
+    for (body, expected) in [
+        (
+            r#"
+            (* type = "instance" *) parameter real geometry = 2.0;
+            parameter real table[0:1] = '{geometry, 1.0};
+            analog I(p, n) <+ table[0] * V(p, n);
+            "#,
+            "model parameter array 'table' cannot depend on an instance parameter that lacks model storage",
         ),
-        "{error}"
-    );
+        (
+            r#"
+            (* type = "instance" *) parameter integer count = 2;
+            parameter integer width = count;
+            parameter real table[0:width] = '{1.0, 1.0, 1.0};
+            analog I(p, n) <+ table[0] * V(p, n);
+            "#,
+            "model parameter array 'table' cannot have dimensions that depend on an instance parameter lacking model storage",
+        ),
+    ] {
+        let error = analyze(&module_src(body))
+            .expect_err("a model parameter array cannot vary per instance")
+            .to_string();
+        assert!(error.contains(expected), "{error}");
+    }
 }
 
 #[test]

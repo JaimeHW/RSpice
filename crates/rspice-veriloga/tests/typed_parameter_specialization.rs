@@ -1082,7 +1082,10 @@ endmodule
         "LIMIT must follow BASE"
     );
 
-    let error = compiler
+    // A model default that reads instance geometry through a localparam
+    // resolves per instance (every parameter belongs to the instance in the
+    // LRM); an explicit value still wins.
+    let report = compiler
         .compile_runtime(
             r#"
 module scope(p,q);
@@ -1095,9 +1098,21 @@ endmodule
 "#,
             None,
         )
-        .unwrap_err()
-        .to_string();
-    assert!(error.contains("instance parameter"), "{error}");
+        .unwrap();
+    let mut device = rspice_veriloga::device::VerilogADevice::try_new_with_canonical_ir(
+        "scope",
+        report.model,
+        &report.canonical_ir,
+        &[1],
+    )
+    .unwrap();
+    assert_eq!(device.try_evaluate().unwrap()[0], 3.0);
+    device.try_set_parameter("BASE", 5.0).unwrap();
+    device.try_resolve_parameter_defaults().unwrap();
+    assert_eq!(device.try_evaluate().unwrap()[0], 6.0);
+    device.try_set_parameter("MODEL", 1.0).unwrap();
+    device.try_resolve_parameter_defaults().unwrap();
+    assert_eq!(device.try_evaluate().unwrap()[0], 1.0);
 }
 
 #[test]
