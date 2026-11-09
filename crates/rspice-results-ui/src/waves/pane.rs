@@ -63,6 +63,11 @@ pub fn apply_family_trace_style<'a>(
     trace
 }
 
+/// How far apart, relative to their size, a fit's extremes may be and still
+/// be one level: a node held steady differs from itself only in the rounding
+/// of its solution, far below any tolerance a solver converges to.
+const FLAT_FIT_RELATIVE_SPAN: f64 = 1.0e-9;
+
 /// The Y interval a pane fits itself to when the reader has not pinned one.
 ///
 /// Everything the pane draws widens it: the traces, whatever expressions the
@@ -91,12 +96,12 @@ pub fn pane_auto_y(
     }
     if !lo.is_finite() || !hi.is_finite() {
         None
-    } else if lo == hi && lo > 0.0 {
-        Some((lo / 1.1, hi * 1.1))
-    } else if lo == hi {
-        Some((lo - 1.0, hi + 1.0))
-    } else {
+    } else if hi - lo > FLAT_FIT_RELATIVE_SPAN * lo.abs().max(hi.abs()) {
         Some((lo, hi))
+    } else if lo > 0.0 {
+        Some((lo / 1.1, hi * 1.1))
+    } else {
+        Some((lo - 1.0, hi + 1.0))
     }
 }
 
