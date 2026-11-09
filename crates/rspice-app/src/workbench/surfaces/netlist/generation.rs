@@ -138,7 +138,7 @@ fn refresh_generated_artifact(app: &mut RSpiceApp) {
     }
 
     let generated =
-        crate::workbench::menu_bar::build_menu_netlist(&app.state, crate::io::NetlistFormat::Spice);
+        crate::workbench::menu_bar::build_menu_netlist(&app.state);
     let failed = |state: &mut AppState, error: String| {
         state.code.netlist.failed_generation_input_digest = Some(input_digest);
         state.model.netlist_artifacts.generation_error = Some(error);

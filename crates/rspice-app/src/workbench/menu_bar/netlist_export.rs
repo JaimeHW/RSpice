@@ -29,20 +29,13 @@ pub(crate) fn action_export_netlist_with_io(
                 state.prompt("The generated netlist is out of date; regenerate it to export.");
                 return;
             }
-            match format {
-                crate::io::NetlistFormat::Spectre => {
-                    super::netlist_compat::spice_to_ahdl_compatible_netlist(
-                        &state.model.netlist_artifacts.generated_source,
-                    )
-                }
-                _ => state.model.netlist_artifacts.generated_source.clone(),
-            }
+            state.model.netlist_artifacts.generated_source.clone()
         } else {
             if state.model.schematic.document().components.is_empty() {
                 state.prompt("No circuit to export. Add components first.");
                 return;
             }
-            match build_menu_netlist(state, format) {
+            match build_menu_netlist(state) {
                 Ok(generated) => {
                     record_netlist_warnings(state, generated.warnings);
                     generated.source
@@ -76,18 +69,54 @@ pub(crate) fn action_export_netlist_with_io(
         Ok(Some(mut path)) => {
             crate::io::file_exchange::ensure_file_extension(&mut path, extension);
 
-            let export = io.observe_destination(&path).and_then(|destination| {
-                io.write_text_file_observed(&destination, &netlist_content)
-            });
+            // The deck names its sources relative to where it was saved, so
+            // only now can it be written.
+            let (netlist_content, sources) = match format {
+                crate::io::NetlistFormat::Spectre => {
+                    let deck_stem = path
+                        .file_stem()
+                        .map_or_else(|| "netlist".into(), |stem| stem.to_string_lossy());
+                    let export = super::netlist_compat::spice_to_ahdl_export(
+                        &netlist_content,
+                        &state.model.workspace,
+                        &deck_stem,
+                    );
+                    (export.netlist, export.sources)
+                }
+                _ => (netlist_content, Vec::new()),
+            };
+            if !sources.is_empty() && !io.saved_paths_are_reopenable() {
+                state.prompt(
+                    "This netlist uses project Verilog-A sources; export it from the Netlist \
+                     page as a self-contained bundle.",
+                );
+                return;
+            }
+            let folder = path.parent().map(std::path::Path::to_path_buf);
+            let export = io
+                .observe_destination(&path)
+                .and_then(|destination| io.write_text_file_observed(&destination, &netlist_content))
+                .and_then(|()| {
+                    sources.iter().try_for_each(|source| {
+                        let target = folder
+                            .as_deref()
+                            .unwrap_or(std::path::Path::new(""))
+                            .join(&source.relative_path);
+                        let destination = io.observe_destination(&target)?;
+                        io.write_text_file_observed(&destination, &source.content)
+                    })
+                });
             match export {
                 Ok(()) => {
+                    let detail = (!sources.is_empty())
+                        .then(|| format!("{} Verilog-A source files beside it", sources.len()));
                     state.record(
                         LogSeverity::Info,
                         LogSource::Studio,
                         crate::workbench::workflows::export_workflow::export_completion_message(
                             filter_name,
                             &path,
-                            None,
+                            detail,
                             io,
                         ),
                     );
@@ -273,7 +302,7 @@ pub(crate) fn action_view_netlist(state: &mut AppState) {
         return;
     }
 
-    let netlist_content = match build_menu_netlist(state, crate::io::NetlistFormat::Spice) {
+    let netlist_content = match build_menu_netlist(state) {
         Ok(generated) => {
             record_netlist_warnings(state, generated.warnings);
             generated.source
@@ -309,10 +338,7 @@ pub(crate) struct GeneratedNetlist {
 /// Nothing here writes the Console. A command that asked for the deck records
 /// the outcome; the Netlist page states it where the deck would be. The error
 /// is every reason the generator refused, in its order.
-pub(crate) fn build_menu_netlist(
-    state: &AppState,
-    format: crate::io::NetlistFormat,
-) -> Result<GeneratedNetlist, Vec<String>> {
+pub(crate) fn build_menu_netlist(state: &AppState) -> Result<GeneratedNetlist, Vec<String>> {
     let execution_projection = state
         .model
         .workspace
@@ -395,12 +421,7 @@ pub(crate) fn build_menu_netlist(
     let spice_netlist = crate::simulation::controller::SimulationController::append_plan_measurements_to_generated_netlist(&state.model, &spice_netlist)
         .map_err(|error| vec![error.to_string()])?;
     Ok(GeneratedNetlist {
-        source: match format {
-            crate::io::NetlistFormat::Spectre => {
-                super::netlist_compat::spice_to_ahdl_compatible_netlist(&spice_netlist)
-            }
-            _ => spice_netlist,
-        },
+        source: spice_netlist,
         warnings: generation.warnings,
     })
 }
