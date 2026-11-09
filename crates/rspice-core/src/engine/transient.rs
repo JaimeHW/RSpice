@@ -2634,7 +2634,7 @@ impl Engine {
                     solution,
                     switch.node_pos,
                     switch.node_neg,
-                    1.0 / switch.resistance().max(1.0e-30),
+                    switch.terminal_conductance(solution),
                 )
             }
             DerivedTransientBranchCurrentKind::CurrentSwitch => {

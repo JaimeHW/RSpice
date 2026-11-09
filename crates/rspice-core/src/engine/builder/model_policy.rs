@@ -1552,6 +1552,8 @@ pub(super) const VSWITCH_MODEL_PARAMS: &[&str] = &[
     "ROFF",
     "SMOOTH",
     "NOISELESS",
+    "LEVEL",
+    "ILIMIT",
 ];
 pub(super) const ISWITCH_MODEL_PARAMS: &[&str] = &[
     "IT",
@@ -1668,8 +1670,12 @@ pub(super) fn insert_smooth_switch_transition(
     let Some(&width) = params.get(hysteresis) else {
         return;
     };
+    let level2 = params
+        .get("LEVEL")
+        .is_some_and(|level| (*level - 2.0).abs() < 1.0e-9);
     if dialect == SpiceDialect::Ngspice
         || width >= 0.0
+        || level2
         || CURVE_KEYS.iter().any(|key| params.contains_key(*key))
     {
         return;

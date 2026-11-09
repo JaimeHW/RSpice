@@ -362,3 +362,71 @@ vc2 c2 0 pulse(0 -1 1u 1n 1n 1u 4u)
         }
     }
 }
+
+/// LTspice 26.1.1 batch: a `level=2` card runs the logarithm of its conductance
+/// along an arctangent of the control over a width of `|Vh|`, either sign.
+#[test]
+fn a_level_two_card_follows_the_arctangent_curve() {
+    for (vh, control, expected) in [
+        (0.5, 0.0, 0.002771729),
+        (-0.5, 0.5, 0.005623413),
+        (0.5, 1.0, 0.03162267),
+        (-0.5, 1.5, 0.1778092),
+        (0.5, 2.0, 0.3606291),
+    ] {
+        let deck = format!(
+            "arctan\nVc c 0 {control}\nVd d 0 1\nS1 d 0 c 0 DUT\n\
+             .model DUT SW(level=2 Ron=1 Roff=1k Vt=1 Vh={vh})\n.end\n"
+        );
+        let current = branch_currents(&deck, SpiceDialect::BestAvailable, &["Vd"])[0];
+        assert!(
+            (current.abs() - expected).abs() < 2e-9_f64.max(1e-6 * expected),
+            "control {control}: {current} against {expected}"
+        );
+    }
+}
+
+/// LTspice 26.1.1 batch: `Ilimit` bends a level 2 branch by a hyperbolic
+/// tangent, 10 A when the card names none, and clamps a level 1 branch flat.
+#[test]
+fn a_current_limit_bends_level_two_and_clamps_level_one() {
+    let current = |card: &str, control: f64, drive: f64| {
+        let deck = format!(
+            "limit\nVc c 0 {control}\nVd d 0 {drive}\nR1 d a 1\nS1 a 0 c 0 DUT\n\
+             .model DUT SW({card})\n.end\n"
+        );
+        branch_currents(&deck, SpiceDialect::BestAvailable, &["Vd"])[0].abs()
+    };
+    let bent = "level=2 Ron=1 Roff=1k Vt=1 Vh=-.5 Ilimit=50m";
+    assert!((current(bent, 1.5, 1.0) - 0.04988401).abs() < 1e-7);
+    assert!((current(bent, 1.5, 2.0) - 0.04999991).abs() < 1e-7);
+    let clamped = "Ron=1 Roff=1k Vt=1 Vh=-.5 Ilimit=50m";
+    assert!((current(clamped, 3.0, 1.0) - 0.05).abs() < 1e-6);
+    let open_card = "level=2 Ron=10m Roff=1k Vt=1 Vh=-.5";
+    let default_limit = |drive: f64| {
+        let deck = format!(
+            "default limit\nVc c 0 3\nVd d 0 {drive}\nS1 d 0 c 0 DUT\n\
+             .model DUT SW({open_card})\n.end\n"
+        );
+        branch_currents(&deck, SpiceDialect::BestAvailable, &["Vd"])[0].abs()
+    };
+    assert!((default_limit(1.0) - 9.994224).abs() < 2e-5);
+}
+
+/// LTspice 26.1.1 batch: the small-signal branch of a bent card is its tangent.
+#[test]
+fn a_bent_branch_linearizes_along_its_tangent() {
+    let deck = "tangent\nVc c 0 1.5\nVd d 0 1 AC 1\nR1 d a 1\nS1 a 0 c 0 DUT\n\
+                .model DUT SW(level=2 Ron=1 Roff=1k Vt=1 Vh=-.5 Ilimit=50m)\n.end\n";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let results = engine(SpiceDialect::BestAvailable)
+        .run_ac(&netlist, &[1.0e3])
+        .expect("AC solves");
+    let index = results[0]
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("a"))
+        .expect("node a");
+    let response = results[0].voltages[index].norm();
+    assert!((response - 0.9991766).abs() < 1e-6, "V(a) {response}");
+}

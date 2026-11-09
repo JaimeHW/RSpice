@@ -689,6 +689,9 @@ impl SwitchRuntime {
 // Voltage-Controlled Switch
 //=============================================================================
 
+/// The ceiling a level 2 switch card takes when it names no `ILIMIT`.
+const DEFAULT_LEVEL2_CURRENT_LIMIT: Value = 10.0;
+
 /// Voltage-Controlled Switch (SPICE S element)
 #[derive(Debug, Clone)]
 pub struct VoltageSwitch {
@@ -716,6 +719,10 @@ pub struct VoltageSwitch {
     /// the default, is the ideal SPICE3 switch.
     pub smooth: Value,
     xyce_curve: Option<XyceSwitchCurve>,
+    /// `LEVEL=2` takes the conductance from an arctangent of the control.
+    arctan_curve: bool,
+    /// `ILIMIT`: the ceiling on main-branch current.
+    current_limit: Option<Value>,
 
     // State
     state: SwitchState,
@@ -775,6 +782,8 @@ impl VoltageSwitch {
             roff: 1e6,
             smooth: 0.0,
             xyce_curve: None,
+            arctan_curve: false,
+            current_limit: None,
             state: SwitchState::Off,
             prev_state: SwitchState::Off,
             accepted_state: None,
@@ -831,6 +840,11 @@ impl VoltageSwitch {
         if let Some(&v) = params.get("SMOOTH") {
             self.smooth = v;
         }
+        self.arctan_curve = params
+            .get("LEVEL")
+            .is_some_and(|level| (*level - 2.0).abs() < 1.0e-9);
+        let limit = params.get("ILIMIT").copied().filter(|amps| *amps > 0.0);
+        self.current_limit = limit.or(self.arctan_curve.then_some(DEFAULT_LEVEL2_CURRENT_LIMIT));
         if params.contains_key("VON")
             || params.contains_key("VOFF")
             || params.contains_key("VHON")
@@ -998,8 +1012,67 @@ impl VoltageSwitch {
                 solution.get(node - 1).copied().unwrap_or(Value::NAN)
             }
         };
-        self.control_sensitivity(voltage(self.ctrl_pos) - voltage(self.ctrl_neg))
-            .0
+        let (g, _) = self.control_sensitivity(voltage(self.ctrl_pos) - voltage(self.ctrl_neg));
+        self.main_branch(g, voltage(self.node_pos) - voltage(self.node_neg))
+            .1
+    }
+
+    /// Current over voltage on the main branch at `solution`, which a current
+    /// limit bends away from the switch's conductance.
+    #[doc(hidden)]
+    pub fn terminal_conductance(&self, solution: &[Value]) -> Value {
+        let voltage = |node: NodeId| {
+            if node == 0 {
+                0.0
+            } else {
+                solution.get(node - 1).copied().unwrap_or(Value::NAN)
+            }
+        };
+        let vmain = voltage(self.node_pos) - voltage(self.node_neg);
+        let g = 1.0 / self.current_resistance.max(1.0e-30);
+        if vmain == 0.0 {
+            return g;
+        }
+        self.main_branch(g, vmain).0 / vmain
+    }
+
+    /// Main-branch current at conductance `g` and branch voltage `vmain`, with
+    /// its slopes against the voltage and against `g`. `ILIMIT` bends a
+    /// level 2 card by a hyperbolic tangent and clamps a level 1 card outright.
+    #[inline]
+    fn main_branch(&self, g: Value, vmain: Value) -> (Value, Value, Value) {
+        match self.current_limit {
+            Some(limit) if self.arctan_curve => {
+                let bent = (g * vmain / limit).tanh();
+                let slope = 1.0 - bent * bent;
+                (limit * bent, g * slope, vmain * slope)
+            }
+            Some(limit) if (g * vmain).abs() > limit => (limit.copysign(vmain), 0.0, 0.0),
+            _ => (g * vmain, g, vmain),
+        }
+    }
+
+    /// Conductance on the level 2 curve and its control slope: the logarithm
+    /// of the conductance runs along an arctangent of the control voltage over
+    /// a width of `|VH|`, from `1 / ROFF` well below `VT` to `1 / RON` well above.
+    fn arctan_conductance(&self, vctrl: Value) -> (Value, Value) {
+        let check = self.parameter_check();
+        let width = self.vh.abs();
+        let overdrive = vctrl - self.vt;
+        let scaled = if width > 0.0 {
+            overdrive / width
+        } else {
+            Value::INFINITY.copysign(overdrive)
+        };
+        let gain = (check.log_roff - check.log_ron) / std::f64::consts::PI;
+        let centre = -0.5 * (check.log_roff + check.log_ron);
+        let g = (gain * scaled.atan() + centre).exp();
+        let slope = if width > 0.0 {
+            g * gain / (width * (1.0 + scaled * scaled))
+        } else {
+            0.0
+        };
+        (g, slope)
     }
 
     /// The next step this switch allows after the step `dt` from `accepted`
@@ -1179,7 +1252,7 @@ impl VoltageSwitch {
     /// no transition between them (no `SMOOTH`, no `ON`/`OFF` curve).
     #[inline]
     pub(crate) fn is_ideal(&self) -> bool {
-        self.smooth == 0.0 && self.xyce_curve.is_none()
+        self.smooth == 0.0 && self.xyce_curve.is_none() && !self.arctan_curve
     }
 
     /// Whether this is an ideal switch whose state differs from its state at
@@ -1246,6 +1319,9 @@ impl VoltageSwitch {
         let check = self.parameter_check();
         if check.error.is_some() {
             return (Value::NAN, Value::NAN);
+        }
+        if self.arctan_curve {
+            return self.arctan_conductance(vctrl);
         }
         if self.xyce_curve.is_some() {
             return (1.0 / self.current_resistance, self.current_dg_dcontrol);
@@ -1331,7 +1407,13 @@ impl VoltageSwitch {
 
         self.prev_state = self.state;
         self.prev_resistance = self.current_resistance;
-        if let Some(curve) = &mut self.xyce_curve {
+        if self.arctan_curve {
+            let (g, slope) = self.arctan_conductance(vctrl);
+            self.state = SwitchState::Transitioning;
+            self.in_hysteresis_band = false;
+            self.current_resistance = 1.0 / g;
+            self.current_dg_dcontrol = slope;
+        } else if let Some(curve) = &mut self.xyce_curve {
             let evaluation = curve.evaluate(vctrl, self.ron, self.roff);
             self.state = evaluation.state;
             self.in_hysteresis_band = false;
@@ -1384,11 +1466,11 @@ impl NonlinearDevice for VoltageSwitch {
         };
         let vctrl = vctrl_pos - vctrl_neg;
         let vmain = vp - vn;
-        let (g, dg_dvctrl) = self.control_sensitivity(vctrl);
-        let gm_ctrl = dg_dvctrl * vmain;
+        let (conductance, dg_dvctrl) = self.control_sensitivity(vctrl);
+        // I(p->n) = g(vctrl) * (vp - vn), bent by any current limit.
+        let (i, g, di_dg) = self.main_branch(conductance, vmain);
+        let gm_ctrl = dg_dvctrl * di_dg;
 
-        // I(p->n) = g(vctrl) * (vp - vn)
-        let i = g * vmain;
         // Linearization: I ≈ Σ J_k * x_k + Ieq
         let ieq = i - (g * vp) - (-g * vn) - (gm_ctrl * vctrl_pos) - (-gm_ctrl * vctrl_neg);
 
