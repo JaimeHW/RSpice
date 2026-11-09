@@ -1317,6 +1317,7 @@ impl Builder<'_> {
                 .trim()
                 .to_owned();
         }
+        component.adopt_params_multiplicity();
         let drawn = |name: &String| !cell.unconnected.contains(name);
         let local = cell
             .symbol

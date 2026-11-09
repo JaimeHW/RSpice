@@ -4238,3 +4238,35 @@ fn an_op_amp_with_both_supply_pins_open_drives_through_its_own_output_resistance
     let driven = settings("U2");
     assert!(!driven.contains("ROUT"), "{driven}");
 }
+
+#[test]
+fn an_instance_line_multiplier_on_a_library_cell_becomes_its_multiplicity() {
+    const PART: &str = "Version 4\nSymbolType CELL\nRECTANGLE Normal -32 -32 32 32\n\
+        SYMATTR Prefix X\nSYMATTR Value shown\nSYMATTR SpiceModel amp.sub\n\
+        SYMATTR Value2 real top=1K\nSYMATTR SpiceLine m=1.5\n\
+        PIN -32 0 NONE 0\nPINATTR PinName IN\nPINATTR SpiceOrder 1\n\
+        PIN 32 0 NONE 0\nPINATTR PinName OUT\nPINATTR SpiceOrder 2\n";
+    let mut library = library();
+    library.symbols.insert(
+        "shown".to_owned(),
+        ForeignSymbolSource {
+            definition: parse_asy(PART).expect("the test symbol reads"),
+            location: "shown.asy".to_owned(),
+            schematic: None,
+        },
+    );
+    let drawing = parse_asc(
+        "Version 4\nSHEET 1 880 680\nFLAG 64 96 in\nFLAG 128 96 out\n\
+         SYMBOL shown 96 96 R0\nSYMATTR InstName U1\n",
+    )
+    .unwrap();
+    let imported = import_foreign_schematic(&drawing, "work", &library);
+    let part = imported
+        .document
+        .components
+        .iter()
+        .find(|component| component.name == "U1")
+        .expect("U1");
+    assert_eq!(part.params, "top=1K");
+    assert_eq!(part.multiplicity.map(|m| m.value()), Some(1.5));
+}
