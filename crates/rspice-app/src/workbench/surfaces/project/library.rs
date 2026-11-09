@@ -7,6 +7,7 @@
 use super::*;
 use crate::state::{CellViewRef, ViewType};
 use crate::workbench::app_state::AppState;
+use crate::workbench::design_system::elide_text;
 use crate::workbench::features;
 use crate::workbench::project::ProjectFeature;
 use crate::workbench::project::commands::ProjectCommand;
@@ -17,7 +18,7 @@ const CONTEXT_HEIGHT: f32 = 36.0;
 const DETAIL_HEIGHT: f32 = 40.0;
 const COLUMN_HEADER_HEIGHT: f32 = 28.0;
 const BROWSER_ROW_HEIGHT: f32 = 31.0;
-const MIN_BROWSER_WIDTH: f32 = 620.0;
+const MIN_BROWSER_WIDTH: f32 = 680.0;
 const USAGE_REPORT_ID: &str = "workbench.project.library.where-used";
 const AUDIT_REPORT_ID: &str = "workbench.project.library.audit-history";
 
@@ -68,19 +69,29 @@ pub(super) fn library(ui: &mut Ui, app: &mut RSpiceApp) {
     library_context(ui, &mut app.state);
 
     let available = ui.available_size();
-    let page_height = (available.y - DETAIL_HEIGHT).max(120.0);
+    let visible_width = available.x.min(visible_workspace_width(ui)).max(1.0);
+    // The columns fill a page at least their minimum wide, to a fraction of a
+    // pixel that must not raise a scroll bar. On a narrower one the bar takes
+    // its height from the columns, never from the band under them.
+    let scrolls_sideways = visible_width < MIN_BROWSER_WIDTH;
+    let bar_height = if scrolls_sideways {
+        ui.spacing().scroll.allocated_width()
+    } else {
+        0.0
+    };
+    let page_height = (available.y - DETAIL_HEIGHT - bar_height).max(120.0);
     let browser_height =
         builtin_models::columns_height(&app.state.project.builtin_models, page_height);
-    let visible_width = available.x.min(visible_workspace_width(ui)).max(1.0);
     let mut intent = None;
     ScrollArea::horizontal()
+        .hscroll(scrolls_sideways)
         .id_salt("workbench.project.library.columns")
         .auto_shrink([false, true])
         .max_height(browser_height)
         .show(ui, |ui| {
             let width = visible_width.max(MIN_BROWSER_WIDTH);
             ui.set_min_width(width);
-            let library_width = (width * 0.25).max(150.0);
+            let library_width = (width * 0.25).max(205.0);
             let cell_width = (width * 0.37).max(210.0);
             let view_width = (width - library_width - cell_width).max(220.0);
             ui.horizontal_top(|ui| {
@@ -250,6 +261,9 @@ fn library_context(ui: &mut Ui, state: &mut AppState) {
                     node.set_label("Filter project cells and views");
                 });
                 ui.separator();
+                let room = (ui.available_width() - CONTEXT_FIXED_WIDTH).max(0.0);
+                let font = theme::mono(tokens::FS_0, FontWeight::Regular);
+                let selection = elide_text(ui, &selection, &font, room);
                 context_value(ui, "Selection", &selection, t.color.text);
                 ui.separator();
                 // Writable is the ordinary library. Read-only is the one worth
@@ -258,6 +272,10 @@ fn library_context(ui: &mut Ui, state: &mut AppState) {
             });
         });
 }
+
+/// What the context strip spends beside the selection's own text: its label,
+/// the separator and the access pair.
+const CONTEXT_FIXED_WIDTH: f32 = 190.0;
 
 fn context_value(ui: &mut Ui, label: &str, value: &str, color: Color32) {
     let t = Tokens::get(ui.ctx());
@@ -537,21 +555,37 @@ fn browser_row(ui: &mut Ui, spec: BrowserRowSpec<'_>) -> egui::Response {
             t.color.text_dim
         },
     );
+    let status_width = if spec.status.is_empty() { 0.0 } else { 52.0 };
+    let label_font = theme::sans(tokens::FS_0, FontWeight::Medium);
+    let meta_font = theme::mono(tokens::FS_0, FontWeight::Regular);
+    let measure = |text: &str, font: &egui::FontId| {
+        ui.painter()
+            .layout_no_wrap(text.to_owned(), font.clone(), t.color.text)
+            .size()
+            .x
+    };
+    // The name is what a row is read by: in a narrow column the meta gives way
+    // first, and only then is the name itself cut. They never overprint.
+    let name_room = rect.width() - 31.0 - status_width - 8.0;
+    let meta_width = measure(spec.meta, &meta_font);
+    let meta_fits = measure(spec.label, &label_font) + 10.0 + meta_width <= name_room;
+    let label = elide_text(ui, spec.label, &label_font, name_room);
     ui.painter().text(
         pos2(rect.left() + 31.0, rect.center().y),
         Align2::LEFT_CENTER,
-        spec.label,
-        theme::sans(tokens::FS_0, FontWeight::Medium),
+        label,
+        label_font,
         t.color.text,
     );
-    let status_width = if spec.status.is_empty() { 0.0 } else { 52.0 };
-    ui.painter().text(
-        pos2(rect.right() - status_width - 8.0, rect.center().y),
-        Align2::RIGHT_CENTER,
-        spec.meta,
-        theme::mono(tokens::FS_0, FontWeight::Regular),
-        t.color.text_faint,
-    );
+    if meta_fits {
+        ui.painter().text(
+            pos2(rect.right() - status_width - 8.0, rect.center().y),
+            Align2::RIGHT_CENTER,
+            spec.meta,
+            meta_font,
+            t.color.text_faint,
+        );
+    }
     if !spec.status.is_empty() {
         ui.painter().text(
             pos2(rect.right() - 8.0, rect.center().y),

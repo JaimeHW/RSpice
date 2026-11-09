@@ -1265,6 +1265,12 @@ fn a_builtin_model_copied_from_the_library_page_compiles_and_places() {
 
     user.click("Verilog-A models");
     assert!(user.find("BSIM-BULK").is_some(), "the models are listed");
+    let band = user.expect("Open read-only");
+    let dock = user.expect("Console");
+    assert!(
+        band.bottom() <= dock.top() + 0.5,
+        "the band's buttons stand above the dock: {band:?} {dock:?}"
+    );
     user.app.state.project.project_library_filter = "vbic".to_owned();
     user.settle();
     user.click("VBIC 3-terminal");

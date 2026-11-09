@@ -63,12 +63,36 @@ fn select_model(browser: &mut BuiltinModelsBrowser, registry_name: &str) {
         .collect();
     browser.file = Some(root);
     browser.texts = source.files;
-    browser.source = None;
 }
 
 /// Answer one of the built-in library's intents.
 pub(super) fn apply(state: &mut AppState, intent: BuiltinModelsIntent) {
-    let browser = &mut state.project.builtin_models;
+    if let BuiltinModelsIntent::CopyModel(registry_name) = intent {
+        if let Err(error) = state
+            .project
+            .open_copy_builtin_model_dialog(&state.model, registry_name)
+        {
+            state.prompt(error);
+        }
+    } else {
+        browse(&mut state.project.builtin_models, intent);
+    }
+}
+
+/// Put `file` in the open source pane, when there is one: the pane reads what
+/// the columns have selected.
+fn follow_selection(browser: &mut BuiltinModelsBrowser) {
+    if browser.source.is_some() {
+        browser.source = browser
+            .file
+            .as_ref()
+            .and_then(|file| browser.texts.get(file))
+            .cloned();
+        browser.source_revision = browser.source_revision.wrapping_add(1);
+    }
+}
+
+fn browse(browser: &mut BuiltinModelsBrowser, intent: BuiltinModelsIntent) {
     match intent {
         BuiltinModelsIntent::ShowLibrary => {
             browser.open = true;
@@ -78,22 +102,21 @@ pub(super) fn apply(state: &mut AppState, intent: BuiltinModelsIntent) {
                 select_model(browser, first.registry_name);
             }
         }
-        BuiltinModelsIntent::SelectModel(registry_name) => select_model(browser, registry_name),
-        BuiltinModelsIntent::SelectFile(file) => browser.file = Some(file),
+        BuiltinModelsIntent::SelectModel(registry_name) => {
+            select_model(browser, registry_name);
+            follow_selection(browser);
+        }
+        BuiltinModelsIntent::SelectFile(file) => {
+            browser.file = Some(file);
+            follow_selection(browser);
+        }
         BuiltinModelsIntent::OpenFile(file) => {
             browser.file = Some(file.clone());
             browser.source = browser.texts.get(&file).cloned();
             browser.source_revision = browser.source_revision.wrapping_add(1);
         }
         BuiltinModelsIntent::CloseSource => browser.source = None,
-        BuiltinModelsIntent::CopyModel(registry_name) => {
-            if let Err(error) = state
-                .project
-                .open_copy_builtin_model_dialog(&state.model, registry_name)
-            {
-                state.prompt(error);
-            }
-        }
+        BuiltinModelsIntent::CopyModel(_) => {}
     }
 }
 
@@ -238,8 +261,8 @@ pub(super) fn view_column(
     })
 }
 
-/// The band under the columns: what is selected, and the two things a
-/// read-only library offers.
+/// The band under the columns: what the selected model is, and the two things
+/// a read-only library offers. The strip above already names the selection.
 pub(super) fn detail(ui: &mut Ui, state: &AppState) -> Option<LibraryIntent> {
     let t = Tokens::get(ui.ctx());
     let browser = &state.project.builtin_models;
@@ -257,21 +280,16 @@ pub(super) fn detail(ui: &mut Ui, state: &AppState) -> Option<LibraryIntent> {
         .show(ui, |ui| {
             ui.set_min_height(DETAIL_HEIGHT - 10.0);
             ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new(selection_path(browser))
-                        .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                        .color(t.color.text),
-                );
                 if let Some(model) = model {
-                    ui.separator();
                     ui.label(model.class.label());
                     ui.separator();
                     ui.label(format!("version {}", model.version));
+                    ui.separator();
                 }
-                ui.separator();
                 ui.label("read only");
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if let Some(file) = browser.file.as_ref()
+                    if browser.source.is_none()
+                        && let Some(file) = browser.file.as_ref()
                         && Button::new("Open read-only").accent().show(ui).clicked()
                     {
                         intent = Some(LibraryIntent::BuiltinModels(BuiltinModelsIntent::OpenFile(
@@ -357,4 +375,62 @@ pub(super) fn source_pane(
     );
     browser.source = Some(source);
     intent
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn opened_on_a_model_with_includes() -> (BuiltinModelsBrowser, &'static BuiltinVerilogAModel) {
+        let model = BUILTIN_VERILOGA_MODELS
+            .iter()
+            .find(|model| read_builtin_veriloga_model(model).files.len() > 1)
+            .expect("a model with includes");
+        let mut browser = BuiltinModelsBrowser::default();
+        browse(&mut browser, BuiltinModelsIntent::ShowLibrary);
+        let file = browser.file.clone().expect("the first model's root");
+        browse(&mut browser, BuiltinModelsIntent::OpenFile(file));
+        (browser, model)
+    }
+
+    fn shown_is_selected(browser: &BuiltinModelsBrowser) {
+        let file = browser.file.as_ref().expect("a selected file");
+        assert_eq!(browser.source.as_ref(), browser.texts.get(file), "{file}");
+    }
+
+    #[test]
+    fn an_open_source_reads_what_the_columns_select() {
+        let (mut browser, model) = opened_on_a_model_with_includes();
+        shown_is_selected(&browser);
+
+        let opened = browser.source_revision;
+        browse(
+            &mut browser,
+            BuiltinModelsIntent::SelectModel(model.registry_name),
+        );
+        assert_eq!(browser.file.as_deref(), Some(browser.files[0].as_str()));
+        shown_is_selected(&browser);
+        assert_ne!(browser.source_revision, opened, "the editor reloads");
+
+        let include = browser.files[1].clone();
+        browse(
+            &mut browser,
+            BuiltinModelsIntent::SelectFile(include.clone()),
+        );
+        assert_eq!(browser.file.as_ref(), Some(&include));
+        shown_is_selected(&browser);
+    }
+
+    #[test]
+    fn a_closed_source_stays_closed_while_the_selection_moves() {
+        let (mut browser, model) = opened_on_a_model_with_includes();
+        browse(&mut browser, BuiltinModelsIntent::CloseSource);
+        browse(
+            &mut browser,
+            BuiltinModelsIntent::SelectModel(model.registry_name),
+        );
+        let include = browser.files[1].clone();
+        browse(&mut browser, BuiltinModelsIntent::SelectFile(include));
+        assert!(browser.source.is_none());
+    }
 }
