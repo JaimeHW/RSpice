@@ -10162,8 +10162,8 @@ impl Engine {
                         cp,
                         cn, // Control terminals
                     )
-                    .with_params(&params_map)
-                    .with_blocked_conductance(self.config.convergence_config.junction_gmin_target);
+                    .with_params(&params_map);
+                    sw.blocked_conductance = self.config.convergence_config.junction_gmin_target;
                     validate_voltage_switch_physical_parameters(&sw, model)?;
                     if let Some(state) = initial_state {
                         sw = sw.with_initial_state(map_switch_state(*state));

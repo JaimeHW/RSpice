@@ -728,7 +728,7 @@ pub struct VoltageSwitch {
     /// The level 2 card that conducts from its negative terminal only.
     one_way: Option<OneWayConduction>,
     /// The conductance of the side a one-way switch blocks: the circuit's GMIN.
-    blocked_conductance: Value,
+    pub blocked_conductance: Value,
 
     // State
     state: SwitchState,
@@ -928,13 +928,6 @@ impl VoltageSwitch {
         self.current_dg_dcontrol = 0.0;
         self.prev_resistance = self.current_resistance;
         self.prev_state = self.state;
-        self
-    }
-
-    /// The conductance of the side a one-way switch blocks, the circuit's GMIN.
-    #[must_use]
-    pub fn with_blocked_conductance(mut self, conductance: Value) -> Self {
-        self.blocked_conductance = conductance;
         self
     }
 
