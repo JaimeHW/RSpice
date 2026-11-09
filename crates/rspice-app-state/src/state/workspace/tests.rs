@@ -44,6 +44,26 @@ fn model_bound_source_validation_resolves_the_selected_lib_section() {
     std::fs::remove_file(path).expect("remove sectioned model fixture");
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_library_saved_in_a_legacy_encoding_still_declares_its_subcircuit() {
+    let path = std::env::temp_dir().join(format!(
+        "rspice-legacy-encoded-{}.lib",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::write(
+        &path,
+        b"* Copyright \xa9 Example Corp\n.subckt amp in out\nR1 in out 1k\n.ends amp\n",
+    )
+    .expect("write Latin-1 library fixture");
+    let binding = LibraryCellInstance::new("imported", "amp", "spice");
+
+    validate_source_file(&path, ViewType::Spice, &binding)
+        .expect("a comment outside UTF-8 does not hide the subcircuit");
+
+    std::fs::remove_file(path).expect("remove Latin-1 library fixture");
+}
+
 fn resistance_variable(name: &str, expression: &str, scope: DesignVariableScope) -> DesignVariable {
     DesignVariable::new(
         name,

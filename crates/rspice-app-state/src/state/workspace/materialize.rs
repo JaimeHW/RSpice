@@ -62,15 +62,17 @@ pub(super) fn validate_source_file(
                 )
             })?
     } else {
-        std::fs::read_to_string(source_path).map_err(|error| {
-            format!(
-                "source-backed binding {}/{}/{} cannot read {}: {error}",
-                binding.library,
-                binding.cell,
-                binding.view,
-                source_path.display()
-            )
-        })?
+        std::fs::read(source_path)
+            .and_then(|bytes| rspice_core::netlist::decode_source_bytes(&bytes))
+            .map_err(|error| {
+                format!(
+                    "source-backed binding {}/{}/{} cannot read {}: {error}",
+                    binding.library,
+                    binding.cell,
+                    binding.view,
+                    source_path.display()
+                )
+            })?
     };
     let master = binding
         .module_name
