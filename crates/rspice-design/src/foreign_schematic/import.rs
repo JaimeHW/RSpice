@@ -2557,7 +2557,7 @@ fn prefix_names_another_device(
 ) -> bool {
     let first = |prefix: &str| prefix.trim().chars().next().map(|c| c.to_ascii_uppercase());
     match (
-        symbol.attribute("Prefix").and_then(first),
+        attribute(&symbol.attributes, "Prefix").and_then(first),
         attribute(&definition.attributes, "Prefix").and_then(first),
     ) {
         (Some(placed), Some(own)) => placed != own,

@@ -953,7 +953,8 @@ fn a_prefix_set_on_the_placed_symbol_decides_the_device_it_is() {
     let drawing = parse_asc(
         "Version 4\n\
          SYMBOL npn 0 0 R0\nSYMATTR InstName Q1\nSYMATTR Value MYSUB\nSYMATTR Prefix X\n\
-         SYMBOL npn 256 0 R0\nSYMATTR InstName Q2\nSYMATTR Value 2N3904\n",
+         SYMBOL npn 256 0 R0\nSYMATTR InstName Q2\nSYMATTR Value 2N3904\n\
+         SYMBOL npn 512 0 R0\nSYMATTR InstName Q3\nSYMATTR Value 2N3904\nSYMATTR Prefix \"\"\n",
     )
     .unwrap();
     let imported = import_foreign_schematic(&drawing, "work", &library());
@@ -972,6 +973,8 @@ fn a_prefix_set_on_the_placed_symbol_decides_the_device_it_is() {
     assert_eq!(binding.reference_prefix.as_deref(), Some("X"));
     assert_eq!(part("Q1").value, "MYSUB");
     assert_eq!(part("Q2").kind, ComponentType::NpnBjt);
+    // An emptied Prefix sets nothing.
+    assert_eq!(part("Q3").kind, ComponentType::NpnBjt);
 }
 
 #[test]
