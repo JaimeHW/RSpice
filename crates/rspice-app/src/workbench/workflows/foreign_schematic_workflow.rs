@@ -33,6 +33,7 @@ use rspice_simulation_contract::design_variable_quantity::DesignVariableQuantity
 use rspice_simulation_contract::run_set::{RunSetDimensionKind, RunSetState, value_id};
 
 use crate::diagnostics::{LogSeverity, LogSource};
+use crate::state::model_library::SimulationPlanModelBinding;
 use crate::state::{Cell, CellViewRef, SchematicState, View, ViewType};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
@@ -148,14 +149,14 @@ pub(crate) fn import_foreign_schematic_file(
     own_sheets.extend(top_sheet.map(|sheet| (reference.clone(), sheet)));
     give_own_sheets(&mut app.state, own_sheets, &mut notices);
     adopt_as_top_cell(&mut app.state, &reference, &mut notices);
-    add_model_libraries(
+    let model_bindings = add_model_libraries(
         &mut app.state,
         &reference.cell,
-        model_text(&plan, &tree.model_cards),
+        model_cards(&plan, &tree.model_cards),
         &includes,
         &mut notices,
     );
-    commit_plan(app, &reference.cell, &plan, &mut notices);
+    commit_plan(app, &reference.cell, &plan, model_bindings, &mut notices);
 
     let refusals = notices
         .iter()
@@ -610,29 +611,58 @@ fn adopt_as_top_cell(
 /// The model-library text: the drawing's own model cards and parameter
 /// expressions, then the source program's cards for the models its parts
 /// name.
-fn model_text(plan: &ForeignPlan, library_cards: &[String]) -> String {
+fn model_cards(plan: &ForeignPlan, library_cards: &[String]) -> Vec<String> {
     let mut seen = HashSet::new();
-    let mut text = String::new();
-    for card in plan.model_text.iter().chain(library_cards) {
-        if seen.insert(card.to_ascii_lowercase()) {
-            text.push_str(card);
-            text.push('\n');
-        }
-    }
-    text
+    plan.model_text
+        .iter()
+        .chain(library_cards)
+        .filter(|card| seen.insert(card.to_ascii_lowercase()))
+        .cloned()
+        .collect()
 }
 
-/// Adds the drawing's model text as a model library of the project, and
-/// binds each included file as a model library read in place.
+/// The model library whose text holds `card` word for word, on lines of its
+/// own.
+fn library_holding(state: &AppState, card: &str) -> Option<String> {
+    let card = format!("\n{card}\n");
+    state
+        .model
+        .model_library_manager
+        .libraries_sorted()
+        .into_iter()
+        .find(|library| {
+            library.source_contents.iter().any(|source| {
+                format!("\n{}\n", String::from_utf8_lossy(&source.bytes)).contains(&card)
+            })
+        })
+        .map(|library| library.name.clone())
+}
+
+/// Adds the drawing's model text as a model library of the project, binds
+/// each included file as a model library read in place, and returns what a
+/// plan binds to read them: a run reads only the libraries its plan names. A
+/// card a library already holds is read from that library, because a second
+/// provider of one name refuses every run in the project.
 fn add_model_libraries(
     state: &mut AppState,
     cell: &str,
-    text: String,
+    cards: Vec<String>,
     includes: &[(PathBuf, Option<String>)],
     notices: &mut Vec<(ForeignNoticeSeverity, String)>,
-) {
+) -> Vec<SimulationPlanModelBinding> {
     use crate::workbench::app_state::design_history::publish_model_library_candidate;
 
+    let mut libraries = Vec::new();
+    let mut text = String::new();
+    for card in &cards {
+        match library_holding(state, card) {
+            Some(library) => libraries.push(library),
+            None => {
+                text.push_str(card);
+                text.push('\n');
+            }
+        }
+    }
     if !text.is_empty() {
         let file = format!("{cell}.lib");
         let mut candidate = state.model.model_library_manager.clone();
@@ -653,10 +683,13 @@ fn add_model_libraries(
                 .map(|_| name)
             });
         match loaded {
-            Ok(name) => notices.push((
-                ForeignNoticeSeverity::Notice,
-                format!("The schematic's model text is the project's model library `{name}`."),
-            )),
+            Ok(name) => {
+                notices.push((
+                    ForeignNoticeSeverity::Notice,
+                    format!("The schematic's model text is the project's model library `{name}`."),
+                ));
+                libraries.push(name);
+            }
             Err(error) => notices.push((
                 ForeignNoticeSeverity::Refusal,
                 format!("The schematic's model text could not become a model library: {error}"),
@@ -676,17 +709,91 @@ fn add_model_libraries(
                 )
                 .map(|_| name)
             });
-        if let Err(error) = loaded
-            && !error.contains("already exists")
-        {
-            notices.push((
+        match loaded {
+            Ok(name) => libraries.push(name),
+            Err(error) if error.contains("already exists") => {
+                libraries.extend(
+                    state
+                        .model
+                        .model_library_manager
+                        .libraries_sorted()
+                        .into_iter()
+                        .find(|library| library.root_path.as_deref() == Some(path.as_path()))
+                        .map(|library| library.name.clone()),
+                );
+            }
+            Err(error) => notices.push((
                 ForeignNoticeSeverity::Refusal,
                 format!(
                     "{} could not be bound as a model library: {error}",
                     path.display()
                 ),
-            ));
+            )),
         }
+    }
+    let mut seen = HashSet::new();
+    libraries
+        .into_iter()
+        .filter(|name| seen.insert(name.clone()))
+        .filter_map(|name| {
+            match state
+                .model
+                .model_library_manager
+                .simulation_plan_binding(&name)
+            {
+                Ok(binding) => Some(binding),
+                Err(error) => {
+                    notices.push((
+                        ForeignNoticeSeverity::Refusal,
+                        format!("Model library `{name}` cannot join the simulation plan: {error}"),
+                    ));
+                    None
+                }
+            }
+        })
+        .collect()
+}
+
+/// A drawing with no analysis leaves the active plan's analyses as they are,
+/// but a run of that plan still has to read the models the drawing's parts
+/// name.
+fn bind_to_active_plan(
+    app: &mut RSpiceApp,
+    bindings: Vec<SimulationPlanModelBinding>,
+    notices: &mut Vec<(ForeignNoticeSeverity, String)>,
+) {
+    let mut candidate = app.state.model.sim_setup.clone();
+    let before = candidate.model_bindings.len();
+    for binding in bindings {
+        if !candidate
+            .model_bindings
+            .iter()
+            .any(|existing| existing.library_name == binding.library_name)
+        {
+            candidate.model_bindings.push(binding);
+        }
+    }
+    if candidate.model_bindings.len() == before {
+        return;
+    }
+    let committed = app
+        .state
+        .model
+        .model_library_manager
+        .validate_simulation_plan_bindings(&candidate.model_bindings)
+        .and_then(|()| {
+            candidate
+                .commit_active_plan_configuration_change(
+                    "Attached the schematic's model libraries.",
+                )
+                .map_err(|error| error.to_string())
+        });
+    match committed {
+        Ok(_) => app.state.model.sim_setup = candidate,
+        Err(error) => notices.push((
+            ForeignNoticeSeverity::Refusal,
+            format!("The schematic's model libraries could not join the active plan: {error}"),
+        )),
     }
 }
 
@@ -697,6 +804,7 @@ fn commit_plan(
     app: &mut RSpiceApp,
     cell: &str,
     plan: &ForeignPlan,
+    model_bindings: Vec<SimulationPlanModelBinding>,
     notices: &mut Vec<(ForeignNoticeSeverity, String)>,
 ) {
     let mut analyses = rspice_simulation_contract::plan_model::SimulationPlan::empty();
@@ -714,9 +822,10 @@ fn commit_plan(
     if analyses.instances().is_empty() {
         notices.push((
             ForeignNoticeSeverity::Notice,
-            "The schematic states no analysis RSpice runs; the active simulation plan is unchanged."
+            "The schematic states no analysis RSpice runs; the active simulation plan's analyses are unchanged."
                 .to_owned(),
         ));
+        bind_to_active_plan(app, model_bindings, notices);
         return;
     }
     let mut variables = Vec::new();
@@ -765,6 +874,7 @@ fn commit_plan(
         reference_pvt,
         options,
         run_set(plan),
+        model_bindings,
         &payload,
     ) {
         Ok(name) => notices.push((
@@ -862,6 +972,7 @@ fn commit_plan_document(
     reference_pvt: crate::workbench::app_state::ReferencePvtPoint,
     options: rspice_simulation_contract::options::SimulationOptions,
     run_set: RunSetState,
+    model_bindings: Vec<SimulationPlanModelBinding>,
     payload: &crate::state::SimulationPlanPayload,
 ) -> Result<String, String> {
     use crate::workbench::app_state::{SimulationPlanImportDocument, SimulationPlanName};
@@ -885,7 +996,7 @@ fn commit_plan_document(
         analysis_plan,
         reference_pvt,
         run_set,
-        model_bindings: Vec::new(),
+        model_bindings,
         save_policy: crate::workbench::app_state::SimulationSavePolicy::default(),
         options,
     };

@@ -530,6 +530,61 @@ fn an_imported_schematic_is_project_content_a_run_reads() {
     std::fs::remove_dir_all(&folder).ok();
 }
 
+/// A part runs the model its drawing defines: the card reaches the deck of
+/// the plan the drawing imported with. A second drawing holding the same card
+/// reads that library, since a second provider of the name refuses every run
+/// in the project.
+#[test]
+fn a_part_runs_the_model_its_drawing_defines_and_a_repeat_adds_no_provider() {
+    let folder = drawing_folder();
+    for name in ["one.asc", "two.asc"] {
+        std::fs::write(
+            folder.join(name),
+            "Version 4\nSHEET 1 880 680\nWIRE 96 96 32 96\nFLAG 32 176 0\nFLAG 96 160 0\n\
+             SYMBOL voltage 32 80 R0\nSYMATTR InstName V1\nSYMATTR Value 1\n\
+             SYMBOL diode 80 96 R0\nSYMATTR InstName D1\nSYMATTR Value MYD\n\
+             TEXT 32 240 Left 2 !.op\nTEXT 32 270 Left 2 !.model MYD D(Is=1n)\n",
+        )
+        .expect("schematic");
+    }
+    let mut app = RSpiceApp::test_instance();
+    app.state.open_project_session();
+    let mut controller = crate::simulation::controller::SimulationController::new();
+    let bound = |app: &RSpiceApp| {
+        app.state
+            .model
+            .sim_setup
+            .model_bindings
+            .iter()
+            .map(|binding| binding.library_name.clone())
+            .collect::<Vec<_>>()
+    };
+
+    import_foreign_schematic_file(&mut app, &folder.join("one.asc"), ForeignTool::Ltspice)
+        .expect("the first schematic imports");
+    assert_eq!(bound(&app), ["one"]);
+    controller
+        .prepare_run_set_for_preflight(&app.state)
+        .expect("the diode finds the model its drawing defines");
+
+    import_foreign_schematic_file(&mut app, &folder.join("two.asc"), ForeignTool::Ltspice)
+        .expect("the second schematic imports");
+    assert_eq!(bound(&app), ["one"]);
+    let model = &app.state.model;
+    assert!(
+        model.model_library_manager.get_library("two").is_none(),
+        "the repeated card made no second provider"
+    );
+    model
+        .model_library_manager
+        .reference_process_model_cards(model.sim_setup.reference_pvt.process)
+        .expect("the project's model names stay uncontested");
+    controller
+        .prepare_run_set_for_preflight(&app.state)
+        .expect("the second drawing reads the library holding its card");
+    std::fs::remove_dir_all(&folder).ok();
+}
+
 /// A directive block stays on the sheet as the drawing lettered it, whole,
 /// while the plan takes the analysis it holds: what a run reads and what the
 /// sheet shows are separate.
