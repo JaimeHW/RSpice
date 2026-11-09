@@ -13,7 +13,7 @@ use crate::analysis::sensitivity::{
     ElementType, Sensitivity, SensitivityAnalysisError, SensitivityAnalyzer, SensitivityResult,
     SensitivityValue,
 };
-use crate::netlist::{ElementKind, SourceSpec};
+use crate::netlist::{ElementKind, ParametricValue, SourceSpec};
 use crate::solver::SimulationResult;
 use crate::{CircuitData, Complex64, Netlist, Value};
 use rspice_veriloga_runtime::arithmetic::{ArithmeticError, ScaledValue};
@@ -133,6 +133,17 @@ enum AcSensitivityLocation {
         parameter: String,
     },
     ElementVectorParameter {
+        element_index: usize,
+        parameter_index: usize,
+        entry_index: usize,
+    },
+    /// A value the line of a Verilog-A instance gives one of its parameters.
+    ModuleParameter {
+        element_index: usize,
+        parameter_index: usize,
+    },
+    /// One element of a parameter array the line of a Verilog-A instance gives.
+    ModuleArrayElement {
         element_index: usize,
         parameter_index: usize,
         entry_index: usize,
@@ -1965,6 +1976,68 @@ impl Engine {
             }
         }
 
+        for (element_index, element) in netlist.elements.iter().enumerate() {
+            let ElementKind::Subcircuit {
+                subckt_name,
+                params,
+            } = &element.kind
+            else {
+                continue;
+            };
+            referenced_models.insert(subckt_name.to_ascii_uppercase());
+            let name = &element.name;
+            let element_type = Self::sensitivity_element_type(&element.kind);
+            for (parameter_index, (parameter, value)) in params.iter().enumerate() {
+                if !Self::is_continuous_sensitivity_parameter(parameter, None, false) {
+                    continue;
+                }
+                let upper = parameter.to_ascii_uppercase();
+                match value {
+                    ParametricValue::Resolved(nominal_value) if nominal_value.is_finite() => {
+                        Self::add_ac_sensitivity_target(
+                            &mut targets,
+                            &mut seen,
+                            AcSensitivityTarget {
+                                vector_name: format!("{name}_{upper}"),
+                                element: name.clone(),
+                                element_type,
+                                parameter: upper.clone(),
+                                nominal_value: *nominal_value,
+                                location: AcSensitivityLocation::ModuleParameter {
+                                    element_index,
+                                    parameter_index,
+                                },
+                            },
+                        );
+                    }
+                    ParametricValue::Array(values) => {
+                        for (entry_index, entry) in values.iter().enumerate() {
+                            let ParametricValue::Resolved(nominal_value) = entry else {
+                                continue;
+                            };
+                            Self::add_ac_sensitivity_target(
+                                &mut targets,
+                                &mut seen,
+                                AcSensitivityTarget {
+                                    vector_name: format!("{name}_{upper}[{entry_index}]"),
+                                    element: name.clone(),
+                                    element_type,
+                                    parameter: format!("{upper}[{entry_index}]"),
+                                    nominal_value: *nominal_value,
+                                    location: AcSensitivityLocation::ModuleArrayElement {
+                                        element_index,
+                                        parameter_index,
+                                        entry_index,
+                                    },
+                                },
+                            );
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
         for (model_index, model) in netlist.models.iter().enumerate() {
             if !referenced_models.contains(&model.name.to_ascii_uppercase()) {
                 continue;
@@ -2570,6 +2643,34 @@ impl Engine {
                 })?;
                 *nominal = value;
             }
+            AcSensitivityLocation::ModuleParameter {
+                element_index,
+                parameter_index,
+            } => {
+                *Self::module_parameter_mut(netlist, target, *element_index, *parameter_index)? =
+                    ParametricValue::Resolved(value);
+            }
+            AcSensitivityLocation::ModuleArrayElement {
+                element_index,
+                parameter_index,
+                entry_index,
+            } => {
+                let parameter =
+                    Self::module_parameter_mut(netlist, target, *element_index, *parameter_index)?;
+                let ParametricValue::Array(values) = parameter else {
+                    return Err(SimulationError::Circuit(format!(
+                        "Sensitivity target '{}' is not an array parameter",
+                        target.vector_name
+                    )));
+                };
+                let entry = values.get_mut(*entry_index).ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "Sensitivity target '{}' references missing array element {}",
+                        target.vector_name, entry_index
+                    ))
+                })?;
+                *entry = ParametricValue::Resolved(value);
+            }
             AcSensitivityLocation::DesignParameter { name } => {
                 // A design parameter is differentiated by replaying the deck,
                 // not by editing a field of the flattened circuit. Reaching
@@ -2581,6 +2682,33 @@ impl Engine {
             }
         }
         Ok(())
+    }
+
+    fn module_parameter_mut<'n>(
+        netlist: &'n mut Netlist,
+        target: &AcSensitivityTarget,
+        element_index: usize,
+        parameter_index: usize,
+    ) -> Result<&'n mut ParametricValue, SimulationError> {
+        match netlist
+            .elements
+            .get_mut(element_index)
+            .map(|element| &mut element.kind)
+        {
+            Some(ElementKind::Subcircuit { params, .. }) => params
+                .get_mut(parameter_index)
+                .map(|(_, value)| value)
+                .ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "Sensitivity target '{}' references missing parameter index {}",
+                        target.vector_name, parameter_index
+                    ))
+                }),
+            _ => Err(SimulationError::Circuit(format!(
+                "Sensitivity target '{}' is not a Verilog-A instance parameter",
+                target.vector_name
+            ))),
+        }
     }
 
     fn sensitivity_glob_matches(pattern: &str, candidate: &str) -> bool {

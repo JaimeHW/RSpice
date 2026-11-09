@@ -802,3 +802,48 @@ fn same_named_paramsets_are_selected_per_instance() {
         "{message}"
     );
 }
+
+/// `.sens` differentiates what the line and the card of a Verilog-A instance
+/// give. With 1 V across 1 kOhm and G = w pa0 / (r pa1 / 2) = 1 mS, the output
+/// is G1 / (G1 + G) and dV/dG = -G1 / (G1 + G)^2 = -250.
+#[test]
+fn dc_sensitivity_covers_verilog_a_instance_and_card_parameters() {
+    let source = ModelFile::new("sens", CARD_MODULE);
+    let sensitivities = |model_line: &str, instance: &str| {
+        let deck = format!(
+            "sens\n.hdl \"{}\"\n{model_line}\nV1 a 0 1\nR1 a b 1k\n{instance}\n.end\n",
+            source.deck_path()
+        );
+        let netlist = Netlist::parse(&deck).expect("deck parses");
+        Engine::new(SimulationConfig::default())
+            .run_sensitivity_dc_complete(
+                &netlist,
+                rspice_core::analysis::AcSensitivityOutput::Voltage {
+                    // V1 a 0 names node 1, R1 a b names node 2.
+                    positive: 2,
+                    negative: None,
+                },
+                &[],
+            )
+            .expect("sensitivity runs")
+    };
+    let close = |what: &str, result: &rspice_core::analysis::SensitivityResult, row: &str, expected: f64| {
+        let actual = result
+            .get(row)
+            .unwrap_or_else(|| panic!("{what}: no row {row}: {result:?}"))
+            .absolute;
+        assert!(
+            (actual - expected).abs() <= 1e-6 * expected.abs(),
+            "{what} {row}: got {actual}, expected {expected}"
+        );
+    };
+
+    let direct = sensitivities("", "X1 b 0 cardres r=1k pa=[1 2]");
+    close("direct", &direct, "X1_R", 2.5e-4);
+    close("direct", &direct, "X1_PA[0]", -0.25);
+    close("direct", &direct, "X1_PA[1]", 0.125);
+
+    let carded = sensitivities(".model myr cardres r=1k", "X1 b 0 myr w=1");
+    close("card", &carded, "MYR:R", 2.5e-4);
+    close("card", &carded, "X1_W", -0.25);
+}
