@@ -1631,7 +1631,7 @@ mod tests {
     /// An editor that takes a table cell's place while the cell is edited
     /// keeps the size of the cells around it, so the row does not change type
     /// under the caret; a document is read at its editor's own size.
-    const OWN_SIZE_EDITORS: [(&str, &str); 9] = [
+    const OWN_SIZE_EDITORS: [(&str, &str); 8] = [
         (
             "rspice-app/src/workbench/surfaces/verify/table.rs",
             "edit_cell",
@@ -1659,11 +1659,6 @@ mod tests {
         (
             "rspice-app-models/src/workbench/app/dialogs/pdk_settings.rs",
             "env_add_row",
-        ),
-        // A document is read at its editor's own size.
-        (
-            "rspice-app/src/workbench/documents/code_workspace/editor.rs",
-            "show_code_document_impl",
         ),
         (
             "rspice-app-models/src/workbench/surfaces/models/manager/dialogs.rs",
