@@ -167,6 +167,7 @@ pub(in crate::netlist::parser) fn parse_options_command(
                             });
                         }
                     };
+                    options.undeclared_subcircuit_m_is_ignored = true;
                     stream.advance();
                 }
                 (None, "RSPICE_DIALECT") => {

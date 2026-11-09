@@ -4989,6 +4989,10 @@ pub struct SimulationOptions {
     /// the weak-inversion slope in volts (the default), LTspice as a current
     /// per volt of Vds.
     pub vdmos_subthres_is_ltspice: bool,
+    /// A deck from either program leaves an `m=` on an `X` line whose
+    /// subcircuit declares no `m` as an ordinary parameter that scales nothing:
+    /// both give 1 mA where ngspice, Xyce and a native deck give 2 mA.
+    pub undeclared_subcircuit_m_is_ignored: bool,
     /// Xyce `.OPTIONS FFT FFT_MODE=0|1` compatibility selection. Omission is
     /// mode 0: symmetric windows and normalized magnitudes by default.
     pub fft_mode: Option<XyceFftMode>,

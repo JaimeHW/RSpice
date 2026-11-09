@@ -78,6 +78,46 @@ fn capacitance_of(deck: &str, name: &str) -> f64 {
     capacitors.capacitances[idx]
 }
 
+/// The current of 1 V across `X1`, whichever program the deck names.
+fn x_line_current(source: &str, subcircuit: &str, instance: &str) -> f64 {
+    let deck = format!(
+        "x line multiplier\n{source}\nVd d 0 1\n{subcircuit}\n{instance}\n.op\n.end\n"
+    );
+    let netlist = Netlist::parse(&deck).expect("deck parses");
+    let result = Engine::new(SimulationConfig::default())
+        .run_dc_op(&netlist)
+        .expect("operating point solves");
+    let source = result
+        .branch_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("vd"))
+        .expect("the source has a branch");
+    -result.branch_currents[source]
+}
+
+/// LTspice 26.1.1 and QSPICE batch: an `m=` on an `X` line scales nothing
+/// unless the subcircuit declares `m`, where it is an ordinary parameter. A
+/// native deck keeps the hierarchy multiplier that ngspice and Xyce give it.
+#[test]
+fn a_drawn_deck_leaves_an_undeclared_subcircuit_m_as_a_parameter() {
+    let plain = ".subckt rr a b\nR1 a b 1k\n.ends";
+    let declared = ".subckt rr a b params: m=1\nR1 a b {1k/m}\n.ends";
+    let unused = ".subckt rr a b params: m=1\nR1 a b 1k\n.ends";
+    let nested = ".subckt in a b\nR1 a b 1k\n.ends\n.subckt rr a b\nX2 a b in m=3\n.ends";
+    for source in [".options rspice_source=ltspice", ".options rspice_source=qspice"] {
+        for (subcircuit, milliamps) in [(plain, 1.0), (declared, 2.0), (unused, 1.0), (nested, 1.0)]
+        {
+            let current = x_line_current(source, subcircuit, "X1 d 0 rr m=2");
+            assert!(
+                (current * 1e3 - milliamps).abs() < 1e-9,
+                "{source}, {subcircuit}: {current}"
+            );
+        }
+    }
+    // A native deck multiplies; ngspice-46 and Xyce 7.10 give 2 mA here.
+    assert!((x_line_current("", plain, "X1 d 0 rr m=2") * 1e3 - 2.0).abs() < 1e-9);
+}
+
 #[test]
 fn resistor_m_matches_explicit_parallel_copies() {
     let with_m = "\

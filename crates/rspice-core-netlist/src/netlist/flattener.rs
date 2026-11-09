@@ -371,6 +371,8 @@ pub struct Flattener<'a> {
     /// ngspice dialect: an X-line parameter the subcircuit does not declare
     /// is refused rather than bound.
     refuse_undeclared_instance_params: bool,
+    /// See [`crate::netlist::SimulationOptions::undeclared_subcircuit_m_is_ignored`].
+    undeclared_subcircuit_m_is_ignored: bool,
     /// Xyce's explicit ground-synonym preprocessing policy.
     ground_policy: super::GroundPolicy,
     /// Definitions currently being expanded, outermost first. A definition
@@ -477,6 +479,7 @@ impl<'a> Flattener<'a> {
             global_nodes: HashSet::new(),
             ngspice_global_ports: false,
             refuse_undeclared_instance_params: false,
+            undeclared_subcircuit_m_is_ignored: false,
             ground_policy: super::GroundPolicy::OnlyZero,
             expansion_stack: Vec::new(),
             random: RandomState::default(),
@@ -626,6 +629,8 @@ impl<'a> Flattener<'a> {
             .collect();
         self.ngspice_global_ports = netlist.parse_dialect == crate::config::SpiceDialect::Ngspice;
         self.refuse_undeclared_instance_params = self.ngspice_global_ports;
+        self.undeclared_subcircuit_m_is_ignored =
+            netlist.options.undeclared_subcircuit_m_is_ignored;
         self.ground_policy = netlist.ground_policy();
         self.expansion_stack.clear();
         self.scoped_models.clear();
@@ -1415,13 +1420,16 @@ impl<'a> Flattener<'a> {
         // `M=` as a reserved physical multiplier even when the subcircuit has
         // an ordinary formal parameter with the same name.
         // Other dialects keep the existing policy in which a declared formal
-        // `M` owns the name and remains an ordinary parameter.
+        // `M` owns the name and remains an ordinary parameter. A deck drawn in
+        // QSPICE or LTspice has no multiplier at all: both programs leave an
+        // undeclared `m=` as a parameter that scales nothing.
         let formal_declares_m = subckt
             .params
             .iter()
             .any(|(name, _)| name.eq_ignore_ascii_case("M"));
         let xyce_implicit_multiplier = caller_scope.expression_dialect() == ExpressionDialect::Xyce;
-        let applies_as_physical_multiplier = xyce_implicit_multiplier || !formal_declares_m;
+        let applies_as_physical_multiplier = xyce_implicit_multiplier
+            || (!formal_declares_m && !self.undeclared_subcircuit_m_is_ignored);
         // QSPICE, LTspice and Xyce bind an X-line parameter the subcircuit
         // never declares ("Subcircuit instance parameters do not have to be
         // prototyped on the .subckt line", N_IO_CircuitContext.C). ngspice

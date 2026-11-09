@@ -535,6 +535,9 @@ impl SimulationOptions {
             lines.push("+ RSPICE_EXP_REPEAT=LTSPICE".to_owned());
             lines.push("+ RSPICE_SOURCE=LTSPICE".to_owned());
         }
+        if self.source_simulator == SourceSimulator::Qspice {
+            lines.push("+ RSPICE_SOURCE=QSPICE".to_owned());
+        }
         if self.reltol != default.reltol {
             lines.push(format!("+ RELTOL={:e}", self.reltol));
         }
