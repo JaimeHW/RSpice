@@ -615,6 +615,41 @@ R1 a 0 1k
     assert!(!qspice.contains("RSPICE_EXP_REPEAT"), "{qspice}");
 }
 
+/// A deck's `.ac` needs no `.op` of its own. A plan's AC analysis reads the
+/// operating point the plan states, so the import states one and binds it.
+#[test]
+fn an_imported_ac_analysis_binds_the_operating_point_the_plan_states_for_it() {
+    let folder = drawing_folder();
+    let file = folder.join("ac.asc");
+    std::fs::write(
+        &file,
+        "Version 4
+SHEET 1 880 680
+         SYMBOL res 32 64 R0
+SYMATTR InstName R1
+SYMATTR Value 1k
+         TEXT 32 240 Left 2 !.ac dec 10 1 1k
+",
+    )
+    .expect("schematic");
+    let mut app = RSpiceApp::test_instance();
+    app.state.open_project_session();
+    import_foreign_schematic_file(&mut app, &file, ForeignTool::Ltspice).expect("imports");
+    std::fs::remove_dir_all(&folder).ok();
+    let plan = app
+        .state
+        .model
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("the imported plan");
+    let [op, ac] = plan.instances() else {
+        panic!("{:?}", plan.instances().len());
+    };
+    assert!(matches!(op.draft(), AnalysisDraft::OperatingPoint(_)));
+    assert!(matches!(ac.draft(), AnalysisDraft::Ac(_)));
+    assert_eq!(ac.dependencies().len(), 1, "the AC analysis binds it");
+}
+
 /// What a sheet paints, as text: every stroke and every run of lettering.
 fn painted_sheet(state: &mut AppState) -> Vec<String> {
     let symbols = crate::schematic::symbols::SymbolLibrary::load_embedded().ok();

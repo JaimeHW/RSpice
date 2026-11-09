@@ -26,16 +26,13 @@ use crate::plan_dependency::{
     dependency_configuration_issue, prerequisite_draft_for,
 };
 pub use crate::plan_diagnostics::{AnalysisPlanError, AnalysisPlanIssue};
-#[cfg(test)]
 use crate::pss_draft::PssDialogState;
 
 pub use crate::plan_dependency::AnalysisDependency;
 
-#[cfg(test)]
 #[derive(Default)]
 struct NoCircuitSourceContext;
 
-#[cfg(test)]
 impl PlanDependencySourceContext for NoCircuitSourceContext {
     fn periodic_sources(&self) -> Result<&[String], String> {
         Err("the exact elaborated periodic-source catalog is unavailable".to_owned())
