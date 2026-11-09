@@ -1220,6 +1220,8 @@ pub(crate) mod veriloga_design_tests;
 mod veriloga_cell_source_tests;
 
 #[cfg(test)]
+mod pane_focus_tests;
+#[cfg(test)]
 mod source_editor_command_tests;
 
 #[cfg(test)]

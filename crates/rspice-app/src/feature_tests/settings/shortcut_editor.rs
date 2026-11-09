@@ -167,7 +167,7 @@ fn editor_draft_cancel_never_mutates_live_profile() {
             ShortcutBindingSlot::Primary,
             vec![CommandPlatform::Desktop],
             Some(ShortcutSequence::single(ShortcutStroke::new(
-                Key::F6,
+                Key::F13,
                 false,
                 false,
                 false,
@@ -200,7 +200,7 @@ fn valid_save_atomically_replaces_the_live_profile() {
             ShortcutBindingSlot::Primary,
             vec![CommandPlatform::Desktop],
             Some(ShortcutSequence::single(ShortcutStroke::new(
-                Key::F6,
+                Key::F13,
                 false,
                 false,
                 false,
@@ -221,7 +221,7 @@ fn valid_save_atomically_replaces_the_live_profile() {
             command_registry(),
         )
         .as_deref(),
-        Some("F6")
+        Some("F13")
     );
 }
 
@@ -293,8 +293,8 @@ fn pending_editor_is_immutable_and_exposes_a_disabled_progress_state() {
         egui::RawInput {
             screen_rect: input(1_100.0, 900.0).screen_rect,
             events: vec![egui::Event::Key {
-                key: Key::F6,
-                physical_key: Some(Key::F6),
+                key: Key::F13,
+                physical_key: Some(Key::F13),
                 pressed: true,
                 repeat: false,
                 modifiers: Modifiers::NONE,

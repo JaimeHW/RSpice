@@ -25,7 +25,7 @@ fn user_override_json_is_deterministic_private_and_platform_sliced() {
             ShortcutBindingSlot::Primary,
             CommandPlatform::ALL.to_vec(),
             Some(ShortcutSequence::single(ShortcutStroke::new(
-                egui::Key::F6,
+                egui::Key::F13,
                 false,
                 false,
                 false,

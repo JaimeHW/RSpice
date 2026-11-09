@@ -530,6 +530,8 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 10] = [
             "  Stimulus library | stimulus | Alt+8 | on",
             "Previous document | previous-document | Ctrl+Shift+Tab | off: only one document is open",
             "Next document | next-document | Ctrl+Tab | off: only one document is open",
+            "Previous pane | previous-pane | Shift+F6 | on",
+            "Next pane | next-pane | F6 | on",
             "---",
             "Layout >",
             "  Saved layouts… | workspace-layouts |  | on",

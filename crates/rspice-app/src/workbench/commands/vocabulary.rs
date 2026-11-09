@@ -110,6 +110,10 @@ pub enum Command {
     MonitorRecovery,
     PreviousDocument,
     NextDocument,
+    /// Move the keyboard to the next pane of the workbench. F6.
+    NextPane,
+    /// Move the keyboard to the previous pane of the workbench. Shift+F6.
+    PreviousPane,
     CloseOtherDocuments,
     CloseAllDocuments,
     WindowManager,
@@ -447,6 +451,8 @@ impl Command {
             ),
             Self::PreviousDocument => spec("previous-document", "Previous document", "Window"),
             Self::NextDocument => spec("next-document", "Next document", "Window"),
+            Self::NextPane => spec("next-pane", "Next pane", "Window"),
+            Self::PreviousPane => spec("previous-pane", "Previous pane", "Window"),
             Self::CloseOtherDocuments => spec("close-other-documents", "Close others", "File"),
             Self::CloseAllDocuments => spec("close-all-documents", "Close all", "File"),
             Self::WindowManager => spec(
@@ -838,6 +844,8 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::MonitorRecovery,
     Command::PreviousDocument,
     Command::NextDocument,
+    Command::NextPane,
+    Command::PreviousPane,
     Command::CloseOtherDocuments,
     Command::CloseAllDocuments,
     Command::WindowManager,
@@ -1094,6 +1102,8 @@ static COMMAND_ORDER: &[CommandKey] = &[
     Command::MonitorRecovery.key(),
     Command::PreviousDocument.key(),
     Command::NextDocument.key(),
+    Command::NextPane.key(),
+    Command::PreviousPane.key(),
     Command::CloseOtherDocuments.key(),
     Command::CloseAllDocuments.key(),
     SettingsCommand::WorkspaceLayouts.key(),

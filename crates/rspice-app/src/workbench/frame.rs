@@ -12,6 +12,7 @@ use egui::{CentralPanel, Context, Frame};
 
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::ui::tokens::Tokens;
+use crate::workbench::chrome::pane_focus::Pane;
 use crate::workbench::cloud::CloudFeature;
 #[cfg(target_arch = "wasm32")]
 use crate::workbench::models::ModelsFeature;
@@ -39,6 +40,7 @@ pub(in crate::workbench) mod dialog_order;
 pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
     let ctx = root.ctx().clone();
     let ctx = &ctx;
+    app.state.workbench.pane_focus.begin_frame();
     app.state.reconcile_schematic_drag(ctx, false);
     app.state.apply_schematic_editing_preferences();
     reconcile_platform_full_screen(app);
@@ -141,12 +143,17 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
     docks::show_console(root, app, layout);
 
     let t = Tokens::get(ctx);
-    CentralPanel::default()
+    let document = CentralPanel::default()
         .frame(Frame::new().fill(t.color.bg_app))
         .show(root, |ui| {
             ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
             surfaces::show(ui, app);
         });
+    app.state
+        .workbench
+        .pane_focus
+        .record(ctx, Pane::Document, &document.response);
+    app.state.take_pane_focus_step(ctx);
 
     if layout.has_overlay_drawer {
         docks::show_drawers(root, app, layout);
@@ -655,12 +662,17 @@ fn show_full_screen_presentation(root: &mut egui::Ui, app: &mut RSpiceApp, layou
     docks::show_console(root, app, layout);
 
     let t = Tokens::get(ctx);
-    CentralPanel::default()
+    let document = CentralPanel::default()
         .frame(Frame::new().fill(t.color.bg_app))
         .show(root, |ui| {
             ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
             surfaces::show(ui, app);
         });
+    app.state
+        .workbench
+        .pane_focus
+        .record(ctx, Pane::Document, &document.response);
+    app.state.take_pane_focus_step(ctx);
 
     if layout.has_overlay_drawer {
         docks::show_drawers(root, app, layout);

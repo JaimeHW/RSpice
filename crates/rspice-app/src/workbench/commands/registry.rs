@@ -221,6 +221,9 @@ const NEXT_DOCUMENT: &[ShortcutBinding] = &[
         HOST,
     ),
 ];
+const NEXT_PANE: &[ShortcutBinding] = &[primary(chord(Key::F6, false, false, false, "F6"), ALL)];
+const PREVIOUS_PANE: &[ShortcutBinding] =
+    &[primary(chord(Key::F6, false, false, true, "Shift+F6"), ALL)];
 const NEW_APPLICATION_WINDOW: &[ShortcutBinding] = &[
     primary(chord(Key::N, true, true, true, "Ctrl+Shift+Alt+N"), DESKTOP),
     alternate(chord(Key::W, true, true, true, "Ctrl+Shift+Alt+W"), HOST),
@@ -624,6 +627,8 @@ impl Command {
             Self::NewApplicationWindow => NEW_APPLICATION_WINDOW,
             Self::PreviousDocument => PREVIOUS_DOCUMENT,
             Self::NextDocument => NEXT_DOCUMENT,
+            Self::NextPane => NEXT_PANE,
+            Self::PreviousPane => PREVIOUS_PANE,
             Self::HelpCenter => HELP_CENTER,
             Self::SelectTool => NONE,
             Self::PlaceInstance => PLACE_INSTANCE,

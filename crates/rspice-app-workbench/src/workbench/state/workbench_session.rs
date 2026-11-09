@@ -500,6 +500,9 @@ pub struct WorkbenchSession {
     /// by that page every frame it draws one. The Edit menu, the palette and
     /// the shortcuts act on it rather than on a schematic hidden behind it.
     pub active_source_editor: Option<ActiveSourceEditor>,
+    /// Where the panes the F6 keys cycle through were drawn this frame, and
+    /// the step waiting to be taken. Runtime-only.
+    pub pane_focus: crate::workbench::chrome::pane_focus::PaneFocus,
     /// One-shot requests the parts of the workbench raise for one another,
     /// waiting for the frame point that takes each. Runtime-only: a request
     /// is an intent of this process, never session or project data.
@@ -571,6 +574,7 @@ impl Default for WorkbenchSession {
             text_locale: Default::default(),
             toasts: Default::default(),
             active_source_editor: None,
+            pane_focus: Default::default(),
             outbox: Default::default(),
         }
     }

@@ -154,7 +154,7 @@ fn same_target_conflict_honors_every_resolution_policy() {
     let cases = [
         (
             ShortcutConflictPolicy::KeepCurrentAndReport,
-            "F6",
+            "F13",
             ShortcutImportDecision::KeptCurrent,
         ),
         (
@@ -175,7 +175,7 @@ fn same_target_conflict_honors_every_resolution_policy() {
             Command::ZoomFit,
             ShortcutBindingSlot::Primary,
             CommandPlatform::Desktop,
-            Key::F6,
+            Key::F13,
         );
         let mut imported = ShortcutPreferences::default();
         set(
@@ -221,7 +221,7 @@ fn disjoint_platform_slices_of_one_command_merge_without_conflict() {
         Command::ZoomFit,
         ShortcutBindingSlot::Primary,
         CommandPlatform::Desktop,
-        Key::F6,
+        Key::F13,
     );
     let mut imported = ShortcutPreferences::default();
     set(
@@ -257,7 +257,7 @@ fn disjoint_platform_slices_of_one_command_merge_without_conflict() {
             CommandPlatform::Desktop,
             OperatingSystem::Windows
         ),
-        "F6"
+        "F13"
     );
     assert_eq!(
         plan.candidate_library().active().resolved_label(
@@ -278,7 +278,7 @@ fn single_platform_replace_preserves_other_platform_slices() {
         Command::ZoomFit,
         ShortcutBindingSlot::Primary,
         CommandPlatform::Desktop,
-        Key::F6,
+        Key::F13,
     );
     set(
         base.active_mut().unwrap(),
@@ -339,7 +339,7 @@ fn covered_unbind_only_removes_the_covered_platform_slice() {
         Command::ZoomFit,
         ShortcutBindingSlot::Primary,
         CommandPlatform::Desktop,
-        Key::F6,
+        Key::F13,
     );
     set(
         base.active_mut().unwrap(),
@@ -481,7 +481,7 @@ fn full_replace_resets_omitted_known_and_unknown_command_overrides() {
         Command::ZoomFit,
         ShortcutBindingSlot::Primary,
         CommandPlatform::Desktop,
-        Key::F6,
+        Key::F13,
     );
     let mut raw = serde_json::to_value(profile).unwrap();
     raw["commands"]["future-routing-command"] = serde_json::json!({
@@ -527,7 +527,7 @@ fn imported_unknown_profile_and_command_records_are_preserved() {
         Command::ZoomFit,
         ShortcutBindingSlot::Primary,
         CommandPlatform::Desktop,
-        Key::F6,
+        Key::F13,
     );
     let mut raw = serde_json::to_value(profile).unwrap();
     raw["future-profile"] = serde_json::json!({"mode":"portable"});
@@ -609,7 +609,7 @@ fn named_preset_import_leaves_active_profile_byte_equivalent() {
         Command::ZoomFit,
         ShortcutBindingSlot::Primary,
         CommandPlatform::Desktop,
-        Key::F6,
+        Key::F13,
     );
     let options = ShortcutImportOptions {
         merge_policy: ShortcutMergePolicy::ImportNamedPreset,
@@ -652,7 +652,7 @@ fn named_preset_import_leaves_active_profile_byte_equivalent() {
                 CommandPlatform::Desktop,
                 OperatingSystem::Windows
             ),
-        "F6"
+        "F13"
     );
 }
 

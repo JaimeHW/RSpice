@@ -10,6 +10,7 @@ pub use inspector::validate_component_model_catalog_binding;
 use egui::{Context, Frame, Id, Key, Panel, Response, containers::PanelState};
 
 use crate::ui::tokens::Tokens;
+use crate::workbench::chrome::pane_focus::Pane;
 use crate::workbench::framework::workbench_host::WorkbenchHost;
 
 use super::layout::LayoutSpec;
@@ -231,6 +232,9 @@ pub fn show_navigator(root: &mut egui::Ui, app: &mut impl WorkbenchHost, layout:
             ctx.request_repaint();
         }
     }
+    app.workbench_mut()
+        .pane_focus
+        .record(ctx, Pane::Navigator, &shown.response);
     ctx.accesskit_node_builder(shown.response.id, |node| {
         node.set_role(egui::accesskit::Role::Complementary);
         node.set_label("Workspace navigator");
@@ -290,6 +294,9 @@ pub fn show_inspector(root: &mut egui::Ui, app: &mut impl WorkbenchHost, layout:
             ctx.request_repaint();
         }
     }
+    app.workbench_mut()
+        .pane_focus
+        .record(ctx, Pane::Inspector, &shown.response);
     ctx.accesskit_node_builder(shown.response.id, |node| {
         node.set_role(egui::accesskit::Role::Complementary);
         node.set_label("Inspector");
@@ -319,6 +326,9 @@ pub fn show_console(root: &mut egui::Ui, app: &mut impl WorkbenchHost, layout: L
     let shown = panel.show(root, |ui| {
         fill_dock(ui, |ui| console::show(ui, app, layout))
     });
+    app.workbench_mut()
+        .pane_focus
+        .record(ctx, Pane::BottomDock, &shown.response);
     if layout.console_resizable && splitter_is_dragged(ctx, CONSOLE_PANEL_ID) {
         app.workbench_mut().console_height = shown
             .response

@@ -19,8 +19,8 @@ mod input_snapshot;
 mod platform;
 pub mod resolver;
 
-pub use canvas_focus::engineering_canvas_has_focus;
 pub use canvas_focus::report_engineering_canvas_focus;
+pub use canvas_focus::{engineering_canvas, engineering_canvas_has_focus};
 pub use canvas_focus::{
     escape_owner_was_let_go, report_escape_owner, request_engineering_canvas_focus,
     request_engineering_canvas_focus_in_this_pass,

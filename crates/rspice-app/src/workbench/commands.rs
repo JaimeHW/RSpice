@@ -9,6 +9,7 @@ use crate::schematic::view::selection_transform::{
     SelectionTransform, transform_selection_on_active_sheet,
 };
 use crate::state::{ComponentType, Tool};
+use crate::workbench::chrome::pane_focus::PaneStep;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::framework::command_registry::{CommandOwner, ids};
 use crate::workbench::framework::requests::{FocusNavigatorSearch, FocusPlacementSearch};
@@ -287,6 +288,8 @@ impl Command {
             | Self::MonitorRecovery
             | Self::PreviousDocument
             | Self::NextDocument
+            | Self::NextPane
+            | Self::PreviousPane
             | Self::CloseOtherDocuments
             | Self::CloseAllDocuments
             | Self::WindowManager
@@ -799,6 +802,8 @@ impl Command {
             Self::NextDocument => {
                 crate::workbench::chrome::document_bar::cycle_document(&mut app.state, false);
             }
+            Self::NextPane => app.state.workbench.pane_focus.request(PaneStep::Next),
+            Self::PreviousPane => app.state.workbench.pane_focus.request(PaneStep::Previous),
             Self::CloseOtherDocuments => {
                 let count =
                     crate::workbench::chrome::document_bar::close_other_documents(&mut app.state);

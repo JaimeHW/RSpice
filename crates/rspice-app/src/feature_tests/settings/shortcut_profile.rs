@@ -181,7 +181,7 @@ fn editing_one_slot_preserves_the_other_then_resets_to_defaults() {
             command,
             ShortcutBindingSlot::Primary,
             CommandPlatform::ALL.to_vec(),
-            Some(sequence(Key::F6, false)),
+            Some(sequence(Key::F13, false)),
         )
         .unwrap();
     let resolved = preferences.resolved_bindings(&CommandRegistry, command);
@@ -191,7 +191,7 @@ fn editing_one_slot_preserves_the_other_then_resets_to_defaults() {
             .find(|binding| binding.slot() == ShortcutBindingSlot::Primary)
             .unwrap()
             .display_label(),
-        "F6"
+        "F13"
     );
     assert_eq!(
         resolved
@@ -378,7 +378,7 @@ fn protected_override_acknowledgement_is_persisted_and_invalidated_by_edits() {
             ids::SAVE,
             ShortcutBindingSlot::Primary,
             vec![CommandPlatform::Desktop],
-            Some(sequence(Key::F6, false)),
+            Some(sequence(Key::F13, false)),
         )
         .unwrap();
     assert!(!round_trip.protected_override_acknowledged(ids::SAVE));
@@ -393,7 +393,7 @@ fn unknown_execution_policy_is_preserved_but_fails_closed_until_repaired() {
             "toggle-navigator":{"bindings":[{
                 "slot":"primary",
                 "platforms":["desktop","browser","tablet","phone"],
-                "sequence":[{"key":"F6"}]
+                "sequence":[{"key":"F13"}]
             }]},
             "future-command":{"bindings":[],"future-data":true}
         },
@@ -403,7 +403,7 @@ fn unknown_execution_policy_is_preserved_but_fails_closed_until_repaired() {
     assert_eq!(
         preferences.resolved_bindings(&CommandRegistry, Command::ToggleNavigator.key())[0]
             .display_label(),
-        "F6"
+        "F13"
     );
     let audit = preferences.audit(&CommandRegistry);
     assert!(!audit.is_valid());
@@ -435,7 +435,7 @@ fn unknown_execution_policy_is_preserved_but_fails_closed_until_repaired() {
             CommandPlatform::Desktop,
             OperatingSystem::Windows,
         ),
-        "F6"
+        "F13"
     );
     let repaired = serde_json::to_value(preferences).unwrap();
     assert_eq!(repaired["commands"]["future-command"]["future-data"], true);

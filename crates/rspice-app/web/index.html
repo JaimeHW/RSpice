@@ -170,6 +170,19 @@
         event.preventDefault();
       }
     });
+
+    // Browsers take F6 to the address bar. While the canvas, or the input
+    // eframe keeps for typing, holds the keyboard, F6 is the application's
+    // pane key instead; the event still reaches eframe.
+    document.addEventListener("keydown", (event) => {
+      if (event.key !== "F6" || event.ctrlKey || event.altKey || event.metaKey) {
+        return;
+      }
+      const active = document.activeElement;
+      if (active === canvas || active instanceof HTMLInputElement) {
+        event.preventDefault();
+      }
+    });
   })();
 </script>
 <script type="module">

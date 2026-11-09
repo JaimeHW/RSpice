@@ -8,6 +8,7 @@
 
 pub mod activity_rail;
 pub mod document_bar;
+pub mod pane_focus;
 pub mod phone_navigation;
 pub mod status_bar;
 pub mod title_bar;

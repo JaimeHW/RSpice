@@ -7,6 +7,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::workbench::framework::workbench_host::WorkbenchHost;
 
 use super::super::state::Workspace;
+use super::pane_focus::Pane;
 use crate::ui::panels::{ACTIVITY_RAIL_W, WorkbenchIcon};
 
 const ACTIVITY_BUTTON_WIDTH: f32 = 50.0;
@@ -93,6 +94,9 @@ pub fn show(root: &mut Ui, app: &mut impl WorkbenchHost) {
                 }
             }
         });
+    app.workbench_mut()
+        .pane_focus
+        .record(ctx, Pane::ActivityRail, &shown.response);
     ctx.accesskit_node_builder(shown.response.id, |node| {
         node.set_role(egui::accesskit::Role::Navigation);
         node.set_label("Primary workspaces");

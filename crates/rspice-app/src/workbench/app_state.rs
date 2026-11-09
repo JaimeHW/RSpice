@@ -575,6 +575,23 @@ impl AppState {
         self.workbench.prompt(text);
     }
 
+    /// Take the step the F6 keys asked for, once every pane has drawn. The
+    /// document's own editor or canvas is where a step into the document lands.
+    pub(crate) fn take_pane_focus_step(&mut self, ctx: &egui::Context) {
+        let document_control = self
+            .workbench
+            .active_source_editor
+            .map(|editor| editor.id)
+            .or_else(|| {
+                crate::workbench::app_state::session::shortcuts::engineering_canvas(
+                    ctx,
+                    self.workbench.workspace,
+                    self.model.workspace.content.active_view_type(),
+                )
+            });
+        self.workbench.pane_focus.apply(ctx, document_control);
+    }
+
     /// Close a route-owned transient surface without stranding its canonical
     /// URL. Ordinary opens return to their exact source; a direct deep link
     /// replaces itself with the currently projected primary workspace.

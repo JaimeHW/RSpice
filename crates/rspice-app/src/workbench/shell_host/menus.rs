@@ -734,6 +734,8 @@ const WINDOW_MENU: &[MenuEntry] = &[
     MenuEntry::submenu("Workspace", WORKSPACE_MENU).access('W'),
     command(Command::PreviousDocument).access('P'),
     command(Command::NextDocument).access('D'),
+    command(Command::PreviousPane).access('V'),
+    command(Command::NextPane).access('X'),
     Separator,
     MenuEntry::submenu("Layout", LAYOUT_MENU).access('L'),
     command_as(Command::WindowManager, "Windows\u{2026}").access('S'),

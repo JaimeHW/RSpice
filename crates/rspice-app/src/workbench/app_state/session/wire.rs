@@ -541,6 +541,7 @@ impl<'a> WorkbenchWireRef<'a> {
             active_source_editor: _,
             source_references: _,
             outbox: _,
+            pane_focus: _,
         } = workbench;
         Self {
             workspace,
@@ -772,6 +773,7 @@ impl WorkbenchWire {
             active_source_editor: _,
             source_references: _,
             outbox: _,
+            pane_focus: _,
         } = &mut *state.workbench;
         *workspace = self.workspace;
         *window_session = self.window_session;

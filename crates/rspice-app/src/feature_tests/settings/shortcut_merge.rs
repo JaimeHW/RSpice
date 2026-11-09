@@ -53,14 +53,14 @@ fn exact_cross_command_collision_honors_every_resolution_policy() {
     let cases = [
         (
             ShortcutConflictPolicy::KeepCurrentAndReport,
-            "F6",
+            "F13",
             "",
             ShortcutImportDecision::KeptCurrent,
         ),
         (
             ShortcutConflictPolicy::UseImportedBinding,
             "",
-            "F6",
+            "F13",
             ShortcutImportDecision::ReplacedCurrent,
         ),
         (
@@ -77,7 +77,7 @@ fn exact_cross_command_collision_honors_every_resolution_policy() {
             Command::ZoomFit,
             ShortcutBindingSlot::Primary,
             CommandPlatform::Desktop,
-            Key::F6,
+            Key::F13,
         );
         let mut imported = ShortcutPreferences::default();
         set(
@@ -85,7 +85,7 @@ fn exact_cross_command_collision_honors_every_resolution_policy() {
             Command::SelectTool,
             ShortcutBindingSlot::Primary,
             CommandPlatform::Desktop,
-            Key::F6,
+            Key::F13,
         );
         let plan = plan_shortcut_import(
             &base,
@@ -132,7 +132,7 @@ fn prefix_collision_moves_a_multistroke_sequence_atomically() {
         Command::ZoomFit,
         ShortcutBindingSlot::Primary,
         CommandPlatform::Desktop,
-        Key::F6,
+        Key::F13,
     );
     let mut imported = ShortcutPreferences::default();
     set_sequence(
@@ -140,7 +140,7 @@ fn prefix_collision_moves_a_multistroke_sequence_atomically() {
         Command::SelectTool,
         ShortcutBindingSlot::Primary,
         CommandPlatform::Desktop,
-        &[Key::F6, Key::F7],
+        &[Key::F13, Key::F7],
     );
     let plan = plan_shortcut_import(
         &base,
@@ -174,7 +174,7 @@ fn prefix_collision_moves_a_multistroke_sequence_atomically() {
             CommandPlatform::Desktop,
             OperatingSystem::Windows
         ),
-        "F6 F7"
+        "F13 F7"
     );
 }
 
@@ -186,7 +186,7 @@ fn partial_context_replace_does_not_leak_uncovered_records_or_extras() {
         Command::ZoomFit,
         ShortcutBindingSlot::Primary,
         CommandPlatform::Desktop,
-        Key::F6,
+        Key::F13,
     );
     set_key(
         &mut base_profile,
@@ -348,7 +348,7 @@ fn apply_persists_before_live_mutation() {
         ids::SAVE,
         ShortcutBindingSlot::Primary,
         CommandPlatform::Desktop,
-        Key::F6,
+        Key::F13,
     );
     let plan = plan_shortcut_import(
         &library,

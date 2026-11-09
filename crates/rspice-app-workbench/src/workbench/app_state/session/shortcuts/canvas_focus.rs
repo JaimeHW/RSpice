@@ -141,20 +141,27 @@ pub fn engineering_canvas_has_focus(
     workspace: Workspace,
     active_view: ViewType,
 ) -> bool {
+    engineering_canvas(ctx, workspace, active_view)
+        .is_some_and(|canvas| ctx.memory(|memory| memory.focused() == Some(canvas)))
+}
+
+/// The canvas the document in front draws, if that document is one.
+pub fn engineering_canvas(
+    ctx: &egui::Context,
+    workspace: Workspace,
+    active_view: ViewType,
+) -> Option<Id> {
     if !matches!(workspace, Workspace::Design | Workspace::Models)
         || !matches!(
             active_view,
             ViewType::Schematic | ViewType::Testbench | ViewType::Symbol
         )
     {
-        return false;
+        return None;
     }
-    let record =
-        ctx.data(|data| data.get_temp::<CanvasFocusRecord>(Id::new(CANVAS_FOCUS_RECORD_ID)));
-    record.is_some_and(|record| {
-        record.view_type == active_view
-            && ctx.memory(|memory| memory.focused() == Some(record.response_id))
-    })
+    ctx.data(|data| data.get_temp::<CanvasFocusRecord>(Id::new(CANVAS_FOCUS_RECORD_ID)))
+        .filter(|record| record.view_type == active_view)
+        .map(|record| record.response_id)
 }
 
 #[cfg(test)]
