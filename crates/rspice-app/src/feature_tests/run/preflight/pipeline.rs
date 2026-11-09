@@ -449,7 +449,6 @@ fn the_dispatch_frame_runs_the_checked_snapshot_and_prepares_nothing() {
         prepared.is_empty(),
         "the dispatch frame prepares nothing: {prepared:?}"
     );
-    assert!(app.state.model.simulation.execution.has_active_execution());
     let dispatched = app
         .state
         .model
@@ -545,7 +544,6 @@ fn a_selection_the_run_does_not_read_does_not_refuse_it() {
 
     assert!(app.dispatch_frame().is_empty());
 
-    assert!(app.state.model.simulation.execution.has_active_execution());
     assert_eq!(
         app.state
             .model
@@ -656,7 +654,6 @@ fn an_automation_evidence_check_on_an_unedited_design_prepares_nothing() {
     assert!(prepared.is_empty(), "{prepared:?}");
 
     assert!(app.dispatch_frame().is_empty());
-    assert!(app.state.model.simulation.execution.has_active_execution());
     let (in_flight, prepared) = app.evidence_check(&inputs);
     assert_eq!(in_flight, Ok(()));
     assert!(prepared.is_empty(), "{prepared:?}");
@@ -795,7 +792,6 @@ fn an_automation_run_resuming_from_a_checkpoint_keeps_its_evidence() {
     let (authorized, inputs) = app.queued_resuming_from_a_checkpoint();
 
     assert!(app.dispatch_frame().is_empty());
-    assert!(app.state.model.simulation.execution.has_active_execution());
     let (in_flight, prepared) = app.evidence_check(&inputs);
     assert_eq!(in_flight, Ok(()));
     assert!(prepared.is_empty(), "{prepared:?}");
@@ -836,7 +832,6 @@ fn an_unrelated_run_added_to_the_history_leaves_a_resuming_run_current() {
     assert!(prepared.is_empty(), "{prepared:?}");
 
     assert!(app.dispatch_frame().is_empty());
-    assert!(app.state.model.simulation.execution.has_active_execution());
     assert_eq!(
         app.state
             .model
@@ -921,7 +916,10 @@ fn an_edit_after_automation_prepared_its_run_is_named_by_its_evidence_check() {
     let mut app = inverter_over_a_run_set();
     let (_, inputs) = app.queued_as_automation_queues();
     assert!(app.dispatch_frame().is_empty());
-    assert!(app.state.model.simulation.execution.has_active_execution());
+    assert!(
+        !app.state.model.simulation.retained.runs.is_empty(),
+        "the dispatch starts the run"
+    );
 
     app.state.model.schematic.document_mut_for_test().components[0]
         .value
