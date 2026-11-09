@@ -965,9 +965,10 @@ mod tests {
             let (mut high, mut low) = (point, point);
             high[bias] += step;
             low[bias] -= step;
-            for terminal in 0..TERMINAL_COUNT {
-                let numeric = (at(high)[terminal].value - at(low)[terminal].value) / (2.0 * step);
-                let exact = base[terminal].slope[bias];
+            let (above, below) = (at(high), at(low));
+            for (terminal, current) in base.iter().enumerate() {
+                let numeric = (above[terminal].value - below[terminal].value) / (2.0 * step);
+                let exact = current.slope[bias];
                 assert!(
                     (exact - numeric).abs() <= (1e-4 * numeric.abs()).max(1e-6),
                     "terminal {terminal} bias {bias}: {exact} vs {numeric}"
