@@ -93,6 +93,65 @@ fn rename_is_one_undo_across_the_module() {
     assert_eq!(source(&user), original, "one Undo takes back every use");
 }
 
+#[test]
+fn replace_in_files_is_one_undo_across_the_module() {
+    let mut user = op_amp();
+    let original = source(&user);
+    let selected = code_workspace::selected_veriloga_source(&user.app).expect("the open view");
+    let path = selected.document().logical_path().to_owned();
+    code_workspace::open_source_search_in_bundle(
+        &mut user.app,
+        crate::state::ProjectSourceLanguage::VerilogA,
+        selected.bundle().id(),
+        &path,
+    )
+    .expect("the search opens");
+    let search = user
+        .app
+        .state
+        .code
+        .code_workspace
+        .source_search
+        .as_mut()
+        .expect("the form is open");
+    search.query = "vslew".to_owned();
+    search.replacement = "limited".to_owned();
+    code_workspace::commit_source_search_replace(&mut user.app).expect("the replace applies");
+    user.settle();
+    let replaced = source(&user);
+    assert!(!replaced.contains("vslew"));
+    assert!(replaced.matches("limited").count() > 2);
+
+    user.click(EDITOR);
+    undo(&mut user);
+    assert_eq!(source(&user), original, "one Undo takes back every match");
+    redo(&mut user);
+    assert_eq!(source(&user), replaced, "one Redo puts them all back");
+}
+
+#[test]
+fn replace_source_from_file_is_one_undo() {
+    let mut user = op_amp();
+    let original = source(&user);
+    let path = code_workspace::selected_veriloga_source(&user.app)
+        .expect("the open view")
+        .document()
+        .logical_path()
+        .to_owned();
+    let replacement = original.replace("vslew", "limited");
+    code_workspace::request_veriloga_source_replacement(&mut user.app, &path)
+        .expect("the source can be replaced");
+    code_workspace::complete_veriloga_file_pick(&mut user.app, "next.va", &replacement);
+    code_workspace::commit_veriloga_source_replacement(&mut user.app)
+        .expect("the file replaces it");
+    user.settle();
+    assert_eq!(source(&user), replacement);
+
+    user.click(EDITOR);
+    undo(&mut user);
+    assert_eq!(source(&user), original, "one Undo brings the old text back");
+}
+
 /// An empty source is drawn by the same editor as any other: the one screen
 /// readers name, whose history holds the first thing typed into it.
 #[test]
