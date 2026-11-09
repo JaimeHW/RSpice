@@ -305,7 +305,11 @@ pub(in crate::workbench) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
                         let action = messages.text(MessageId::VerilogAOpenInDesign);
                         // Named the way its Design tab is, so the 312 px dock
                         // keeps the view's name beside the action.
-                        let label = format!("{} \u{00b7} {}", reference.cell, reference.view);
+                        let label = format!(
+                            "{} \u{00b7} {}",
+                            reference.cell,
+                            crate::state::ViewType::VerilogA.caption_for(&reference.view)
+                        );
                         let response = netlist_outline_row(
                             ui,
                             OutlineRowVisual {
