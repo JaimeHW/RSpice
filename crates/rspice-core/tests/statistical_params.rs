@@ -683,3 +683,31 @@ fn runtime_seed_override_reaches_sealed_includes() {
     assert_eq!(parsed.source_path.as_ref(), Some(&root));
     assert_eq!(parsed.elements[0].name, "R1");
 }
+
+/// A resistance drawn by `agauss` builds and solves: Xyce 7.10 runs this
+/// deck outside `.SAMPLING` at the nominal draws, R1 = R2 = 10k, so
+/// I(V1) = -(1/10k + 1/11k) = -1.909091e-4 A and V(2) = 1/11 V.
+#[test]
+fn a_xyce_resistor_drawn_by_agauss_solves_at_its_nominal_value() {
+    let netlist = Netlist::parse_with_options(
+        "agauss\nV1 1 0 1\nR1 1 0 {agauss(10K,0.5K,1)}\nR2 1 2 {gauss(10K,0.05,1)}\n\
+         R3 2 0 1k\n.op\n.end\n",
+        rspice_core::netlist::NetlistParseOptions {
+            spice_dialect: Some(rspice_core::config::SpiceDialect::Xyce),
+            ..Default::default()
+        },
+    )
+    .expect("deck parses");
+    let result = rspice_core::engine::Engine::new(
+        rspice_core::engine::SimulationConfig::default()
+            .with_spice_dialect(rspice_core::config::SpiceDialect::Xyce),
+    )
+    .run_dc_op(&netlist)
+    .expect("a statistical resistance builds and solves");
+    let current = result.branch_current_named("v1").expect("I(V1)");
+    let expected = -(1.0 / 10e3 + 1.0 / 11e3);
+    assert!(
+        (current - expected).abs() <= 1e-12,
+        "I(V1) = {current:e}, expected {expected:e}"
+    );
+}
