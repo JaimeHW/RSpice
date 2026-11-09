@@ -2874,7 +2874,28 @@ impl Bjt {
     pub fn update_static_linearization(&mut self, voltages: &[Value]) {
         if self.mna_promoted {
             self.update_mna_static_probe(voltages);
+            return;
         }
+        // A device built afresh still owes its first Newton load, which
+        // replaces the junctions with the critical voltage whatever the bias.
+        // A probe of the equations at a solution this instance never iterated
+        // to has to read them there, so it stands the device at that solution
+        // as a converged solve leaves it: limiting against its own bias then
+        // changes nothing.
+        if !self.legacy_initial_junction_pending {
+            return;
+        }
+        let [vc, vb, ve, vs] = self.external_terminal_voltages(voltages);
+        let state = self.solve_intrinsic_terminal_state(vc, vb, ve, vs);
+        self.vcx = state.vcx;
+        self.vci = state.vci;
+        self.vbx = state.vbx;
+        self.vbi = state.vbi;
+        self.vei = state.vei;
+        self.vbp = state.vbp;
+        self.vsi = state.vsi;
+        self.vrth = state.vrth;
+        self.legacy_initial_junction_pending = false;
     }
 
     /// Diagnostic accessor for DC iteration tracing.

@@ -3057,6 +3057,9 @@ impl Engine {
         {
             return Ok(None);
         }
+        // This circuit never iterated to `solution`; a BJT must not answer
+        // for it with the first Newton load it still owes.
+        circuit.update_bjt_static_linearizations(solution);
         Ok(sensitivity_trial(engine.dc_operating_point_residual(
             &mut circuit,
             &mut matrix,

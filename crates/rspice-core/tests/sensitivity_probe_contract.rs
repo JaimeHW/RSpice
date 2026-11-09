@@ -33,6 +33,45 @@ fn authored_voltage_sensitivity_retains_physical_names_in_both_domains() {
     }
 }
 
+/// A BJT model row is the slope of the operating point at the bias it solved
+/// to. The circuit rebuilt to difference the equations still owed its first
+/// Newton load, so `IS` read the junction at its critical voltage: a collector
+/// current of `Vt/sqrt(2)` whatever the bias, 322 times too large here.
+///
+/// The second bias sits past the critical voltage by more than the limiter's
+/// `2 Vt`, where a limited probe would still be wrong.
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn a_bjt_model_row_is_the_slope_of_the_operating_point() {
+    for (saturation, base, load) in [(1e-16, 0.7, 1000.0), (1e-14, 0.9, 0.1)] {
+        let deck = |is: f64, card: &str| {
+            format!(
+                "BJT\nVCC vcc 0 5\nVB b 0 {base}\nRC vcc c {load}\nQ1 c b 0 qn\n\
+                 .model qn npn(is={is:e} bf=100)\n{card}\n.end\n"
+            )
+        };
+        let netlist = Netlist::parse(&deck(saturation, ".sens v(c)")).unwrap();
+        let SensitivityCardResult::Dc(result) = Engine::default()
+            .run_sensitivity_from_card_with_abort(&netlist, &netlist.analyses[0], &NoAbort)
+            .unwrap()
+        else {
+            panic!("a DC sensitivity card answers with a DC result");
+        };
+        let actual = result.get("QN:IS").unwrap().absolute;
+        let collector = |is: f64| {
+            let netlist = Netlist::parse(&deck(is, ".op")).unwrap();
+            let solved = Engine::default().run_dc_op(&netlist).unwrap();
+            solved.try_voltage_named("c").unwrap()
+        };
+        let step = 1e-3 * saturation;
+        let expected = (collector(saturation + step) - collector(saturation - step)) / (2.0 * step);
+        assert!(
+            ((actual - expected) / expected).abs() < 1e-4,
+            "IS={saturation:e} VB={base}: {actual:e} != {expected:e}"
+        );
+    }
+}
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn grounded_positive_sensitivity_has_the_signed_rc_derivative() {
