@@ -63,7 +63,6 @@ pub struct BuiltinVerilogAModel {
     pub ngspice_branch: bool,
 }
 
-#[allow(clippy::too_many_arguments)]
 const fn entry(
     registry_name: &'static str,
     name: &'static str,

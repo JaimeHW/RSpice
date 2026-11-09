@@ -33,6 +33,7 @@ const PUBLIC_MODULES: &[(&str, &str)] = &[
     ("lib.rs", "slots"),
     ("lib.rs", "surfaces"),
     ("lib.rs", "toolbar"),
+    ("lib.rs", "veriloga_library"),
     ("lib.rs", "workbench"),
     ("workbench/models.rs", "commands"),
     ("workbench/models.rs", "model_editor_workflow"),
