@@ -235,7 +235,7 @@ impl Finger {
                 return;
             }
             let from = menu.center();
-            let travel = if row.top() > menu.bottom() {
+            let travel = if row.bottom() > menu.bottom() {
                 -120.0
             } else {
                 120.0
