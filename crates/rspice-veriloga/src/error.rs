@@ -469,6 +469,15 @@ pub enum SemanticErrorKind {
         kind: String,
     },
 
+    /// A string parameter's value lies outside its `from '{...}` set or
+    /// inside an `exclude` one. `detail` names the value and why, in one
+    /// string so the variant is no wider than the others.
+    #[error("String parameter '{name}' {detail}")]
+    StringParameterValue {
+        name: smol_str::SmolStr,
+        detail: String,
+    },
+
     #[error("Invalid condition type: expected boolean, found {found}")]
     InvalidCondition { found: String },
 
@@ -538,6 +547,7 @@ impl SemanticErrorKind {
             Self::InvalidAssignment(_) => "VA-SEM-INVALID-ASSIGNMENT",
             Self::InvalidBranch(_) => "VA-SEM-INVALID-BRANCH",
             Self::InvalidNodeReference { .. } => "VA-SEM-INVALID-NODE-REFERENCE",
+            Self::StringParameterValue { .. } => "VA-SEM-STRING-PARAMETER-VALUE",
             Self::InvalidCondition { .. } => "VA-SEM-INVALID-CONDITION",
             Self::IncompatibleDisciplines(_, _) => "VA-SEM-INCOMPATIBLE-DISCIPLINES",
             Self::InvalidAnalogOperator(_) => "VA-SEM-INVALID-ANALOG-OPERATOR",

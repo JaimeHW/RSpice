@@ -992,7 +992,19 @@ pub struct ParameterRange {
     pub bounds: Vec<RangeBound>,
     /// Excluded values
     pub exclude: Vec<Expression>,
+    /// A string parameter's value sets: `from '{"a", "b"}` and
+    /// `exclude '{"a", "b"}` (LRM 2.4 section 3.4.2; `{...}` without the
+    /// apostrophe is the older spelling).
+    pub string_sets: Vec<StringValueSet>,
     /// Source span
+    pub span: Span,
+}
+
+/// The strings a `string` parameter may (`from`) or may not (`exclude`) take.
+#[derive(Debug, Clone)]
+pub struct StringValueSet {
+    pub excluded: bool,
+    pub values: Vec<SmolStr>,
     pub span: Span,
 }
 

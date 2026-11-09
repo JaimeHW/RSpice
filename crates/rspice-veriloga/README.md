@@ -39,7 +39,7 @@ runtime ABI.
 
 | Module | Contents |
 | :--- | :--- |
-| `preprocessor` | `` `include ``/`` `define ``/`` `ifdef `` expansion; supplies the built-in `disciplines.vams` and `constants.vams` when not found on disk; records include dependencies |
+| `preprocessor` | `` `include ``/`` `define ``/`` `ifdef `` expansion; supplies the built-in `disciplines.vams` and `constants.vams` (also under their `.va` and `.h` spellings) when not found on disk; records include dependencies |
 | `lexer` / `parser` / `ast` | Tokenizer, recursive-descent parser producing `SourceFile`/`Module` ASTs in both ANSI and non-ANSI port styles, and the AST types |
 | `semantic` | Symbol table, type inference, discipline validation; rejects unsupported constructs with explicit errors rather than dropping them |
 | `ir` / `expr_converter` | Lowering to device-equation IR; the `autodiff` submodule generates derivative assignments by symbolic forward-mode differentiation, so Jacobians are analytic rather than finite-difference |
@@ -165,7 +165,8 @@ which a compile runs on a thread of its own sized for those bounds.
   unknown, one per source, with analysis-constant control flow and an access
   function (optionally under `ddt`, `idt` or `idtmod`) on the left side.
 - **System functions**: `$temperature`, `$vt`, `$thermal_vt`, `$abstime`,
-  `$realtime`, `$simparam`, `$param_given`, `$port_connected`, `$mfactor`
+  `$realtime`, `$simparam`, `$simparam$str` (`"module"`, the module's name;
+  other names are refused by name), `$param_given`, `$port_connected`, `$mfactor`
   (with automatic multiplicity scaling), `$bound_step`, `$discontinuity`, and
   the `analysis()` query. AC and noise operating points expose `static`;
   transient ones expose `tran`, `ic` and `static`. An unknown query name
@@ -173,7 +174,8 @@ which a compile runs on a thread of its own sized for those bounds.
 - **Data**: 1-D array variables with compile-time and runtime indexing and
   shadowed derivatives, runtime-bounded loops, parameters with dependent
   defaults, ranges and exclusions, localparams, `aliasparam`, attribute
-  instances (`(* desc, units *)`), string parameters.
+  instances (`(* desc, units *)`), string parameters (with `from '{"a", "b"}`
+  and `exclude` value sets, checked per instance).
 - **Structure**: internal nodes, named branches, scalar ground nets, user
   disciplines beyond electrical, ANSI and non-ANSI port styles. Ground
   qualifiers inherit the declared discipline (`thermal g; ground g;`) and typed

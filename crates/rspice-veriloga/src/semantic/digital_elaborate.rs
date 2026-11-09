@@ -1760,7 +1760,12 @@ fn validate_parameter_ranges(source: &Module, path: &str) -> CompileResult<()> {
     use crate::ast::{BinaryExpr, BinaryOp};
     let constants = super::DigitalConstants::from_module(source);
     for parameter in &source.parameters {
-        let Some(range) = &parameter.range else {
+        // A string parameter's value sets are checked when its value closes.
+        let Some(range) = parameter
+            .range
+            .as_ref()
+            .filter(|_| parameter.param_type != crate::ast::ParamType::String)
+        else {
             continue;
         };
         let mut conditions = Vec::new();

@@ -2080,23 +2080,33 @@ impl<'a> Parser<'a> {
             // `exclude <value>` clauses
             let mut bounds = Vec::new();
             let mut exclude = Vec::new();
+            let mut string_sets = Vec::new();
             let range_start = self.current_span();
             loop {
                 if self.match_token(TokenKind::From) {
-                    bounds.push(self.parse_range_bound()?);
+                    if self.at_string_value_set() {
+                        string_sets.push(self.parse_string_value_set(false)?);
+                    } else {
+                        bounds.push(self.parse_range_bound()?);
+                    }
                 } else if self.match_token(TokenKind::Exclude) {
-                    exclude.push(self.parse_expression()?);
+                    if self.at_string_value_set() {
+                        string_sets.push(self.parse_string_value_set(true)?);
+                    } else {
+                        exclude.push(self.parse_expression()?);
+                    }
                 } else {
                     break;
                 }
             }
 
-            let range = if bounds.is_empty() && exclude.is_empty() {
+            let range = if bounds.is_empty() && exclude.is_empty() && string_sets.is_empty() {
                 None
             } else {
                 Some(ParameterRange {
                     bounds,
                     exclude,
+                    string_sets,
                     span: range_start.extend(self.previous_span()),
                 })
             };
@@ -2167,6 +2177,39 @@ impl<'a> Parser<'a> {
             }
         }
         (description, units)
+    }
+
+    /// `'{"a", ...}` or `{"a", ...}` after `from` or `exclude`: a string
+    /// parameter's value set.
+    fn at_string_value_set(&self) -> bool {
+        (self.check(TokenKind::AssignmentPatternStart) || self.check(TokenKind::LBrace))
+            && self.peek_is(TokenKind::StringLiteral)
+    }
+
+    /// Parse `'{"a", "b"}` (or `{"a", "b"}`) after `from`/`exclude`.
+    fn parse_string_value_set(&mut self, excluded: bool) -> Result<StringValueSet, ParseError> {
+        let start = self.current_span();
+        self.advance(); // `'{` or `{`
+        let mut values = Vec::new();
+        loop {
+            if !self.check(TokenKind::StringLiteral) {
+                return Err(self.error(ParseErrorKind::Expected {
+                    expected: "a string in the parameter value set".to_string(),
+                    found: self.current().describe(),
+                }));
+            }
+            values.push(self.current().text.clone().unwrap_or_default().into());
+            self.advance();
+            if !self.match_token(TokenKind::Comma) {
+                break;
+            }
+        }
+        self.expect(TokenKind::RBrace)?;
+        Ok(StringValueSet {
+            excluded,
+            values,
+            span: start.extend(self.previous_span()),
+        })
     }
 
     /// Parse a single range bound: `[lb:ub]`, `(lb:ub)`, `[lb:ub)`, `(lb:ub]`

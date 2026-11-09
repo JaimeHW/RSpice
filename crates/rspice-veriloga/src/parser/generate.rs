@@ -354,6 +354,7 @@ pub(super) fn expand(module: &mut Module, next_process_id: &mut u32) -> Result<(
         time_scale: module.time_scale,
         bindings: HashMap::new(),
         strings: HashMap::new(),
+        module_name: None,
         scoped_names: HashMap::new(),
         scope_prefix: String::new(),
         next_process_id,
@@ -458,7 +459,8 @@ fn expand_instance_arrays(module: &mut Module) -> Result<(), ParseError> {
 /// is elaborated, so `mode == "half"` is `1` or `0` once `values` gives each
 /// string parameter's value. The same exhaustive substitution that binds a
 /// genvar reaches every expression of the module, and a local declaration of
-/// the same name hides the parameter as it hides a genvar.
+/// the same name hides the parameter as it hides a genvar. The same pass gives
+/// `$simparam$str("module")` the module's name.
 pub(super) fn substitute_string_parameters(module: &mut Module, values: HashMap<SmolStr, SmolStr>) {
     let mut hierarchy = hierarchy::Bindings::new(module);
     // The parser bound the authored hierarchical names already.
@@ -471,6 +473,7 @@ pub(super) fn substitute_string_parameters(module: &mut Module, values: HashMap<
         time_scale: module.time_scale,
         bindings: HashMap::new(),
         strings: values,
+        module_name: Some(module.name.clone()),
         scoped_names: HashMap::new(),
         scope_prefix: String::new(),
         next_process_id: &mut next_process_id,
@@ -526,6 +529,9 @@ struct Unroller<'a> {
     bindings: HashMap<SmolStr, i64>,
     /// String parameters and their values, for folding comparisons.
     strings: HashMap<SmolStr, SmolStr>,
+    /// The elaborated module's name, the value of `$simparam$str("module")`;
+    /// `None` while the parser unrolls generate regions.
+    module_name: Option<SmolStr>,
     /// Concrete names of declarations in enclosing generate scopes.
     scoped_names: HashMap<SmolStr, SmolStr>,
     scope_prefix: String,
@@ -1068,6 +1074,20 @@ impl Unroller<'_> {
                 }
                 for argument in &mut function.args {
                     self.substitute(argument);
+                }
+                // `$simparam$str("module")` is the enclosing module's name,
+                // fixed at elaboration like a string parameter's value.
+                if let Some(module_name) = &self.module_name
+                    && function.name == "$simparam$str"
+                    && matches!(
+                        function.args.as_slice(),
+                        [Expression::StringLit(query)] if query.value == "module"
+                    )
+                {
+                    *expression = Expression::StringLit(StringLit {
+                        value: module_name.clone(),
+                        span: function.span,
+                    });
                 }
             }
             Expression::ArrayAccess(access) => {

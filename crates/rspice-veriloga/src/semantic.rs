@@ -1911,13 +1911,28 @@ impl SemanticAnalyzer {
                 );
             }
 
-            if !is_parameter_array && let Some(declared_range) = &param.range {
+            // A string parameter's value sets were checked when its value
+            // was closed (`string_parameters`); it has no numeric range.
+            if !is_parameter_array
+                && param.param_type != ParamType::String
+                && let Some(declared_range) = &param.range
+            {
                 if declared_range.bounds.len() > 1 {
                     self.record_error_at(
                         SemanticErrorKind::UnsupportedFeature(
                             "multiple parameter 'from' ranges are not yet supported".into(),
                         ),
                         declared_range.span,
+                    );
+                }
+                if let Some(set) = declared_range.string_sets.first() {
+                    self.record_error_at(
+                        SemanticErrorKind::TypeMismatch {
+                            expected: "a numeric range".into(),
+                            found: "a set of strings".into(),
+                            context: format!("range of numeric parameter '{}'", param.name),
+                        },
+                        set.span,
                     );
                 }
                 let has_unresolved_constraint = declared_range
@@ -2041,6 +2056,7 @@ impl SemanticAnalyzer {
             module.parameters.iter().zip(&mut analyzed.parameters)
         {
             if parameter.dimensions.is_empty()
+                && parameter.param_type != ParamType::String
                 && let Some(range) = &parameter.range
             {
                 let mut range = range.clone();
@@ -7525,6 +7541,38 @@ impl SemanticAnalyzer {
                 right: Box::new(real(unit)),
                 span: function.span,
             })));
+        }
+        if function.name.eq_ignore_ascii_case("$simparam$str") {
+            // "module" closed to the module's name before analysis
+            // (`string_parameters`); every other name is refused by name.
+            let [Expression::StringLit(query)] = function.args.as_slice() else {
+                return Err(invalid(
+                    "$simparam$str expects one string literal query name".into(),
+                ));
+            };
+            let reason = match query.value.as_str() {
+                "module" => "its value is the module's name, which only a string comparison \
+                             or a string parameter can read"
+                    .to_string(),
+                "instance" | "path" => "a compiled model is shared by every instance, so it \
+                                        holds no instance name or hierarchical path"
+                    .to_string(),
+                "cwd" => "a compiled model is shared across runs and working directories, so \
+                          it cannot hold one"
+                    .to_string(),
+                "analysis_name" | "analysis_type" => "the model reads the analysis through the \
+                                                      analysis() queries, such as \
+                                                      analysis(\"tran\")"
+                    .to_string(),
+                _ => "the only name answered is \"module\"".to_string(),
+            };
+            return Err(CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::UnsupportedFeature(format!(
+                    "$simparam$str(\"{}\") is not supported: {reason}",
+                    query.value
+                )),
+                function.span,
+            )));
         }
         if !function.name.eq_ignore_ascii_case("$simparam") {
             return Ok(None);

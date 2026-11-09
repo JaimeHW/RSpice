@@ -1853,3 +1853,95 @@ endmodule
         .to_string();
     assert!(message.contains("string parameter 's'"), "{message}");
 }
+
+/// A string parameter's value sets (LRM 2.4 section 3.4.2): `from '{...}` (and
+/// the older `from {...}`) admits only the listed strings, `exclude '{...}`
+/// and `exclude "x"` refuse theirs. The value closes per instance, so the
+/// check runs on each specialization and names the set.
+#[test]
+fn string_value_sets_admit_and_refuse_each_instance_value_by_name() {
+    let compiler = compiler();
+    let original = compiler
+        .compile_runtime(
+            r#"
+module strset(p);
+ inout p; electrical p;
+ parameter string mode = "fast" from '{"fast", "slow"};
+ parameter string older = "a" from {"a", "b"} exclude "b";
+ parameter string kind = "n" exclude '{"bad", "worse"};
+ analog I(p) <+ V(p) * ((mode == "slow") ? 2 : 1);
+endmodule
+"#,
+            None,
+        )
+        .expect("the declared defaults lie in their value sets");
+    let specialize = |name: &str, value: &str| {
+        compiler.specialize_mixed_runtime_typed(
+            &original.canonical_ir,
+            &[(name, ScalarParameterValue::String(value.into()))],
+            &NoPipelineControl,
+        )
+    };
+    specialize("mode", "slow").expect("a listed value is admitted");
+    specialize("kind", "good").expect("an unlisted value is not excluded");
+    for (name, value, expected) in [
+        (
+            "mode",
+            "medium",
+            "String parameter 'mode' value \"medium\" is not one of its allowed values {\"fast\", \"slow\"}",
+        ),
+        (
+            "older",
+            "c",
+            "String parameter 'older' value \"c\" is not one of its allowed values {\"a\", \"b\"}",
+        ),
+        (
+            "older",
+            "b",
+            "String parameter 'older' value \"b\" is excluded by {\"b\"}",
+        ),
+        (
+            "kind",
+            "worse",
+            "String parameter 'kind' value \"worse\" is excluded by {\"bad\", \"worse\"}",
+        ),
+    ] {
+        let message = specialize(name, value)
+            .expect_err("a value outside the set is refused")
+            .to_string();
+        assert!(message.contains(expected), "{name}={value}: {message}");
+    }
+    let message = compiler
+        .compile_runtime(
+            "module bad(p);\n inout p; electrical p;\n \
+             parameter string mode = \"x\" from '{\"fast\", \"slow\"};\n \
+             analog I(p) <+ V(p);\nendmodule\n",
+            None,
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(
+        message.contains("value \"x\" is not one of its allowed values"),
+        "{message}"
+    );
+    let message = compiler
+        .compile_runtime(
+            "module bad(p);\n inout p; electrical p;\n \
+             parameter real r = 1 from '{\"fast\"};\n \
+             analog I(p) <+ V(p);\nendmodule\n",
+            None,
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(message.contains("a set of strings"), "{message}");
+    let message = compiler
+        .compile_runtime(
+            "module bad(p);\n inout p; electrical p;\n \
+             parameter string mode = \"x\" from [0:1];\n \
+             analog I(p) <+ V(p);\nendmodule\n",
+            None,
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(message.contains("not a numeric interval"), "{message}");
+}
