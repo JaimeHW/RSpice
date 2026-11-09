@@ -591,10 +591,16 @@ fn module_selection_and_misspelled_masters_say_what_to_write() {
         (output.status.code(), stdout, stderr)
     };
 
-    // Two modules and none named: the refusal said "select one by name",
-    // naming neither the file nor how a deck selects, after "Simulation
-    // complete".
-    let (code, stdout, stderr) = run("unselected.cir", ".hdl \"two.va\"", "top");
+    // Every module of a source is available and the instance names the one
+    // it wants: 2 V across the 2 kOhm that `top` holds draws 1 mA.
+    let (code, stdout, stderr) = run("instanced.cir", ".hdl \"two.va\"", "top");
+    assert_eq!(code, Some(0), "{stdout}{stderr}");
+    assert!(stdout.contains("I(V1) = -1.000000000e-3 A"), "{stdout}");
+
+    // Two modules and no instance of either: the refusal said "select one
+    // by name", naming neither the file nor how a deck selects, after
+    // "Simulation complete".
+    let (code, stdout, stderr) = run("unselected.cir", ".hdl \"two.va\"", "nothere");
     assert_eq!(code, Some(65), "{stdout}{stderr}");
     assert!(
         stderr.contains("two.va: [VA-MODULE-SELECTION]")
