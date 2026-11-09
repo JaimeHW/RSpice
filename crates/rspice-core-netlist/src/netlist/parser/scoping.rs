@@ -53,8 +53,9 @@ pub(super) fn model_family(model_type: &str) -> Option<&'static str> {
 /// stand for a module a source file declares and an `X` or `N` line may name it.
 fn names_no_native_device(model_type: &str) -> bool {
     model_family(model_type).is_none()
-        && crate::library::ModelType::from_spice_type(model_type)
-            == crate::library::ModelType::Other
+        && !["R", "C"]
+            .iter()
+            .any(|kind| kind.eq_ignore_ascii_case(model_type))
 }
 
 /// The alias key of a local model name, upper case, for one family.
