@@ -64,8 +64,9 @@
 <button id="rspice_spoken_feedback" type="button" aria-pressed="false">Enable spoken interaction feedback</button>
 <p id="rspice_canvas_instructions" class="rspice-sr-only">
   RSpice is a keyboard-operable engineering application. Use Tab to move through controls,
-  Shift plus F10 for the focused schematic context menu, Escape to cancel the active tool,
-  and the command palette to find any command by name.
+  F6 and Shift plus F6 to move between panes, Shift plus F10 for the focused schematic
+  context menu, Escape to cancel the active tool, and the command palette to find any
+  command by name.
 </p>
 <div id="rspice_semantic_context" class="rspice-sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
 <div id="rspice_loading" role="status" aria-live="polite" aria-atomic="true">
@@ -94,6 +95,13 @@
   aria-describedby="rspice_canvas_instructions rspice_semantic_context"
   aria-label="RSpice application canvas. Use the preceding control to enable spoken interaction feedback."
 >RSpice requires a browser with canvas and WebGPU support.</canvas>
+<div id="rspice_accessible_mirror" class="rspice-sr-only" role="group" aria-label="Keyboard focus and announcements">
+  <div id="rspice_mirror_focused_control"></div>
+  <div id="rspice_mirror_caret_line"></div>
+  <div id="rspice_mirror_dialog"></div>
+  <div id="rspice_mirror_focus_announcement" role="status" aria-live="polite" aria-atomic="true"></div>
+  <div id="rspice_mirror_announcement" role="status" aria-live="polite" aria-atomic="true"></div>
+</div>
 <script>
   // The current egui/WebGPU stack still requests the WebGPU limit
   // `maxInterStageShaderComponents`, which the spec dropped and Chrome 129+

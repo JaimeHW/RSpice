@@ -54,7 +54,7 @@ rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = f
 wasm-bindgen = "0.2"
 serde-wasm-bindgen = "0.6"
 uuid = { version = "1", features = ["v4", "v5", "v7", "js", "serde"] }
-web-sys = { version = "0.3", features = ["Window", "Location", "History", "PopStateEvent"] }
+web-sys = { version = "0.3", features = ["Window", "Location", "History", "PopStateEvent", "Document", "Element", "HtmlCollection", "Node"] }
 
 [lints]
 workspace = true

@@ -10,6 +10,8 @@ mod keymap;
 mod touch;
 
 pub(crate) use accessibility::bounded_accessible_text;
+#[cfg(any(test, target_arch = "wasm32"))]
+pub(crate) use accessibility::speak_caret_lines;
 use accessibility::{consume_accesskit_text_selection, update_accesskit_text_state};
 use keymap::{KeyAction, Motion, Reach};
 

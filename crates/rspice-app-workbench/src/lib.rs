@@ -70,6 +70,8 @@ pub mod workbench {
         }
     }
     pub mod browser {
+        #[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
+        pub mod accessible_mirror;
         pub use rspice_app_services::workbench::browser::background_alerts;
         pub mod navigation;
     }

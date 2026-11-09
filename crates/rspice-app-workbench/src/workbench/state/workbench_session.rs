@@ -343,6 +343,9 @@ pub struct StatusPrompt {
 
 impl StatusPrompt {
     pub const LIFETIME: std::time::Duration = std::time::Duration::from_secs(6);
+    /// How soon the same words count as a new answer rather than the same
+    /// one restated from a frame loop.
+    const REPEAT_AFTER: std::time::Duration = std::time::Duration::from_millis(400);
 
     /// How long the prompt has left on the bar, or `None` once it has expired.
     pub fn remaining(&self) -> Option<std::time::Duration> {
@@ -598,8 +601,18 @@ impl WorkbenchSession {
     /// [`AppState::prompt`](crate::workbench::app_state::AppState::prompt)
     /// states it.
     pub fn prompt(&mut self, text: impl Into<String>) {
+        let mut text = text.into();
+        // The status line is a live region, and a live region only speaks
+        // when its words change. The same words given again later are a new
+        // answer, so they carry a no-break space the eye cannot see.
+        if let Some(last) = &self.prompt
+            && last.text == text
+            && last.issued.elapsed() >= StatusPrompt::REPEAT_AFTER
+        {
+            text.push('\u{a0}');
+        }
         self.prompt = Some(StatusPrompt {
-            text: text.into(),
+            text,
             issued: crate::time_compat::Instant::now(),
         });
     }

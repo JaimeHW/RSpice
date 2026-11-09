@@ -55,6 +55,8 @@ pub(crate) mod browser {
     pub(crate) use rspice_app_services::workbench::browser::file_import;
     #[cfg(all(target_arch = "wasm32", feature = "browser-qualification"))]
     pub(crate) use rspice_app_services::workbench::browser::qualification;
+    #[cfg(any(test, target_arch = "wasm32"))]
+    pub(crate) use rspice_app_workbench::workbench::browser::accessible_mirror;
     #[cfg(target_arch = "wasm32")]
     pub(crate) use rspice_app_workbench::workbench::browser::navigation;
 }

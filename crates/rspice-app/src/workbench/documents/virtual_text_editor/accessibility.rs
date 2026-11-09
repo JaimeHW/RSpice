@@ -364,6 +364,93 @@ pub(super) fn update_accesskit_text_state(
             node.set_read_only();
         }
     });
+    speak_caret_line(ui, editor_id, response, &window, style);
+}
+
+const SPEAK_CARET_LINES_ID: &str = "source-editor-speak-caret-lines";
+
+/// Have every source editor say the line the caret arrives on. For a reader
+/// with no text control to follow the caret through: the browser's mirror. A
+/// desktop screen reader follows the editor's text itself and would hear it
+/// twice.
+#[cfg(any(test, target_arch = "wasm32"))]
+pub(crate) fn speak_caret_lines(ctx: &egui::Context) {
+    ctx.data_mut(|data| data.insert_temp(egui::Id::new(SPEAK_CARET_LINES_ID), true));
+}
+
+/// The line last said, its words as the caret found them, and a count that
+/// tells one arrival from the next when two lines read the same.
+#[derive(Debug, Clone)]
+struct SpokenCaretLine {
+    line: usize,
+    arrival: u64,
+    words: String,
+}
+
+/// A live status holding the caret's line, renewed each time the caret
+/// reaches another line. Typing on a line leaves it alone: the words are what
+/// the caret found there, so the region does not chatter.
+fn speak_caret_line(
+    ui: &Ui,
+    editor_id: egui::Id,
+    response: &Response,
+    window: &AccessibleLineWindow,
+    style: &VirtualEditorStyle<'_>,
+) {
+    if !response.has_focus()
+        || !ui.ctx().data(|data| {
+            data.get_temp::<bool>(egui::Id::new(SPEAK_CARET_LINES_ID))
+                .unwrap_or(false)
+        })
+    {
+        return;
+    }
+    let key = editor_id.with("spoken-caret-line");
+    let last = ui.ctx().data(|data| data.get_temp::<SpokenCaretLine>(key));
+    let spoken = match last {
+        Some(last) if last.line == window.line => last,
+        last => SpokenCaretLine {
+            line: window.line,
+            arrival: last.map_or(0, |last| last.arrival + 1),
+            words: caret_line_words(window, style),
+        },
+    };
+    ui.ctx()
+        .data_mut(|data| data.insert_temp(key, spoken.clone()));
+    let status = ui.interact(
+        egui::Rect::from_min_size(response.rect.min, Vec2::splat(1.0)),
+        key.with(spoken.arrival),
+        Sense::hover(),
+    );
+    ui.ctx().accesskit_node_builder(status.id, |node| {
+        node.set_role(egui::accesskit::Role::Status);
+        node.set_live(egui::accesskit::Live::Polite);
+        node.set_label(spoken.words);
+    });
+}
+
+fn caret_line_words(window: &AccessibleLineWindow, style: &VirtualEditorStyle<'_>) -> String {
+    let line = window
+        .lines
+        .iter()
+        .find(|entry| entry.line == window.line)
+        .map(|entry| {
+            window
+                .text
+                .chars()
+                .skip(entry.offset)
+                .take(entry.chars)
+                .collect::<String>()
+        })
+        .unwrap_or_default();
+    let words = bounded_accessible_text(&line, MAX_ACCESSIBLE_LINE_CHARS);
+    if words.is_empty() {
+        style
+            .messages
+            .text(crate::workbench::MessageId::EditorAccessibleBlankLine)
+    } else {
+        words
+    }
 }
 
 fn append_accessible_sentence(description: &mut String, sentence: &str) {

@@ -481,6 +481,13 @@ impl RSpiceApp {
         #[cfg(all(target_arch = "wasm32", feature = "browser-qualification"))]
         cc.egui_ctx
             .add_plugin(crate::workbench::browser::qualification::ControlObserver::default());
+        #[cfg(target_arch = "wasm32")]
+        {
+            cc.egui_ctx.add_plugin(
+                crate::workbench::browser::accessible_mirror::AccessibleMirror::default(),
+            );
+            crate::workbench::documents::virtual_text_editor::speak_caret_lines(&cc.egui_ctx);
+        }
         cc.egui_ctx.set_zoom_factor(1.0);
 
         // Restore global user Verilog-A library (commercial-style user library).
@@ -733,6 +740,13 @@ impl RSpiceApp {
         model
             .simulation
             .refresh_yield_evidence(&model.sim_setup, &model.workspace.content);
+        #[cfg(target_arch = "wasm32")]
+        {
+            let messages = self.state.workbench.messages();
+            ctx.with_plugin::<crate::workbench::browser::accessible_mirror::AccessibleMirror, _>(
+                |mirror| mirror.set_messages(messages),
+            );
+        }
         #[cfg(target_arch = "wasm32")]
         crate::workbench::browser::accessibility::publish_workspace_context(
             self.state.workbench.workspace.label(),
@@ -1219,6 +1233,8 @@ pub(crate) mod veriloga_design_tests;
 #[cfg(test)]
 mod veriloga_cell_source_tests;
 
+#[cfg(test)]
+mod accessible_mirror_tests;
 #[cfg(test)]
 mod pane_focus_tests;
 #[cfg(test)]
