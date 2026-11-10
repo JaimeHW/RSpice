@@ -554,6 +554,21 @@ pub(super) fn finish_dc_sweep_result(
         &crate::abort::ProcessAbort,
     )
     .map_err(|error| map_output_projection_error(ctx, error, "DC"))?;
+    super::xyce_files::record_print(
+        ctx,
+        rspice_core::netlist::OutputAnalysisKind::Dc,
+        super::xyce_files::Scale::None,
+        || {
+            Ok(super::export::scalar_table(
+                "dc_sweep",
+                "DC transfer characteristic",
+                source,
+                axis_type,
+                results.iter().map(|(value, _)| *value).collect(),
+                &signals,
+            ))
+        },
+    )?;
 
     if let Some(output) = ctx.resolve_output("dc") {
         let analysis_id = output.analysis("dc")?;
@@ -1162,15 +1177,15 @@ pub(super) fn finish_transient_result(
 
     validate_fft_result_count(&result.fft_results, &ctx.netlist.fft_analyses)?;
 
-    if let Some(resolved) = ctx.resolve_output("tran") {
-        let analysis_id = resolved.analysis("tran")?;
-        let output_path = resolved.path;
+    // The rows a printed table carries: every accepted step, or the times
+    // `.OPTIONS OUTPUT` selects.
+    let output_projection = || {
         let output_start = result
             .time
             .first()
             .copied()
             .map_or(tstart, |first| tstart.max(first));
-        let projection = result
+        result
             .output_projection(
                 &ctx.netlist.options.output_time_points,
                 ctx.netlist.options.output_interval_schedule.as_ref(),
@@ -1178,7 +1193,35 @@ pub(super) fn finish_transient_result(
                 tstop,
                 ctx.engine.config().resource_limits.max_analysis_points,
             )
-            .map_err(|error| CliError::from(rspice_core::SimulationError::from(error)))?;
+            .map_err(|error| CliError::from(rspice_core::SimulationError::from(error)))
+    };
+    super::xyce_files::record_print(
+        ctx,
+        rspice_core::netlist::OutputAnalysisKind::Tran,
+        super::xyce_files::Scale::Time,
+        || {
+            let projection = output_projection()?;
+            let mut printed = signals.clone();
+            for signal in &mut printed {
+                signal.values = projection
+                    .project(&signal.values)
+                    .map_err(|message| CliError::simulation_error_in(message, "Transient"))?;
+            }
+            Ok(super::export::scalar_table(
+                "transient",
+                "Transient Analysis",
+                "time",
+                "time",
+                projection.times().to_vec(),
+                &printed,
+            ))
+        },
+    )?;
+
+    if let Some(resolved) = ctx.resolve_output("tran") {
+        let analysis_id = resolved.analysis("tran")?;
+        let output_path = resolved.path;
+        let projection = output_projection()?;
         let output_time = projection.times().to_vec();
         for signal in &mut signals {
             signal.values = projection

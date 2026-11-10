@@ -1791,3 +1791,216 @@ fn analyses_without_an_event_timeline_refuse_vcd_output() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Run a deck in the Xyce dialect without `-o`, from `dir`, and return what
+/// the run printed.
+fn run_xyce_files(dir: &Path, name: &str, deck: &str, extra_args: &[&str]) -> std::process::Output {
+    let deck_path = dir.join(name);
+    std::fs::write(&deck_path, deck).expect("write deck");
+    Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .arg("run")
+        .arg(&deck_path)
+        .args(["--spice-dialect", "xyce"])
+        .args(extra_args)
+        .output()
+        .expect("run rspice")
+}
+
+fn measure_line(text: &str, name: &str) -> f64 {
+    let value = text
+        .strip_prefix(&format!("{name} = "))
+        .and_then(|rest| rest.strip_suffix('\n'))
+        .unwrap_or_else(|| panic!("not one `{name} = value` line: {text:?}"));
+    let (mantissa, exponent) = value.split_once('e').expect("scientific value");
+    assert_eq!(
+        mantissa.trim_start_matches('-').len(),
+        8,
+        "%e keeps six digits: {value}"
+    );
+    assert!(
+        exponent.len() == 3 && exponent.starts_with(['+', '-']),
+        "{value}"
+    );
+    value.parse().expect("number")
+}
+
+/// In the Xyce dialect without `-o`, a run writes the files Xyce writes beside
+/// the deck: the `.PRINT TRAN` table as `deck.cir.prn` in Xyce's padded
+/// layout (`Index`, then `TIME`, %.8e in 17 columns) and the measures as
+/// `deck.cir.mt0`. Xyce 7.10 on this deck: `MX = 4.999385e-01`.
+#[test]
+fn xyce_writes_the_print_table_and_the_measures_beside_the_deck() {
+    let dir = test_dir("xyce_files_tran");
+    let deck = "* xyce files\nV1 1 0 sin 0 1 1k\nR1 1 2 1k\nR2 2 0 1k\n.tran 10u 1m\n\
+                .print tran v(2)\n.meas tran mx max v(2)\n.end\n";
+    let output = run_xyce_files(&dir, "rc.cir", deck, &[]);
+    assert!(output.status.success(), "{output:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for file in ["rc.cir.prn", "rc.cir.mt0"] {
+        let shown = dir.join(file).display().to_string();
+        assert_eq!(
+            stdout
+                .lines()
+                .filter(|line| *line == format!("wrote {shown}"))
+                .count(),
+            1,
+            "{stdout}"
+        );
+    }
+
+    let table = std::fs::read_to_string(dir.join("rc.cir.prn")).expect("deck.cir.prn");
+    let lines: Vec<&str> = table.lines().collect();
+    assert_eq!(lines[0], "Index       TIME              V(2)       ");
+    assert_eq!(lines[1], "0        0.00000000e+00    0.00000000e+00");
+    assert_eq!(*lines.last().unwrap(), "End of Xyce(TM) Simulation");
+    let rows = &lines[1..lines.len() - 1];
+    assert!(rows.len() > 100, "{table}");
+    for (index, row) in rows.iter().enumerate() {
+        let fields: Vec<&str> = row.split_whitespace().collect();
+        assert_eq!(fields.len(), 3, "{row}");
+        assert_eq!(fields[0], index.to_string());
+    }
+    assert!(rows.last().unwrap().contains("1.00000000e-03"), "{table}");
+
+    let measures = std::fs::read_to_string(dir.join("rc.cir.mt0")).expect("deck.cir.mt0");
+    assert!(
+        (measure_line(&measures, "MX") - 0.5).abs() < 1e-3,
+        "{measures}"
+    );
+
+    // `-o` names the run's one result: no Xyce files beside the deck.
+    let other = test_dir("xyce_files_dash_o");
+    let output = run_xyce_files(
+        &other,
+        "rc.cir",
+        deck,
+        &["-o", other.join("out.csv").to_str().unwrap(), "-f", "csv"],
+    );
+    assert!(output.status.success(), "{output:?}");
+    assert!(other.join("out.csv").exists());
+    assert!(!other.join("rc.cir.prn").exists());
+    assert!(!other.join("rc.cir.mt0").exists());
+}
+
+/// An AC table goes to `deck.cir.FD.prn`, each phasor as `Re(..)` and
+/// `Im(..)`, and AC measures to `deck.cir.ma0`. `.PRINT FILE=` names a card's
+/// own file and `FORMAT=CSV` its layout (comma separated, no `Index`, no
+/// closing line). Each row is Xyce 7.10's own for this deck. A `FILE=` that
+/// leaves the deck's directory is refused with a warning, as a control
+/// script's files are, and the run still succeeds.
+#[test]
+fn xyce_writes_ac_tables_where_the_cards_name_them() {
+    let dir = test_dir("xyce_files_ac");
+    let deck_dir = dir.join("deck");
+    std::fs::create_dir_all(&deck_dir).expect("deck directory");
+    let deck = "* ac files\nV1 1 0 dc 0 ac 1\nR1 1 2 1k\nC1 2 0 1u\n.ac dec 1 100 1k\n\
+                .print ac vm(2) v(2)\n.print ac file=gain.csv format=csv vdb(2)\n\
+                .print ac file=../escape.prn vm(2)\n.meas ac g3 find vdb(2) at=1k\n.end\n";
+    let output = run_xyce_files(&deck_dir, "rc.cir", deck, &[]);
+    assert!(output.status.success(), "{output:?}");
+
+    let table = std::fs::read_to_string(deck_dir.join("rc.cir.FD.prn")).expect("deck.cir.FD.prn");
+    let lines: Vec<&str> = table.lines().collect();
+    assert_eq!(
+        lines[0].split_whitespace().collect::<Vec<_>>(),
+        ["Index", "FREQ", "VM(2)", "Re(V(2))", "Im(V(2))"]
+    );
+    assert_eq!(
+        lines[1..],
+        [
+            "0        1.00000000e+02    8.46733016e-01    7.16956800e-01   -4.50477243e-01",
+            "1        1.00000000e+03    1.57176725e-01    2.47045230e-02   -1.55223096e-01",
+            "End of Xyce(TM) Simulation",
+        ]
+    );
+    assert_eq!(
+        std::fs::read_to_string(deck_dir.join("gain.csv")).expect("FILE= table"),
+        "FREQ,VDB(2)\n1.00000000e+02,-1.44507012e+00\n1.00000000e+03,-1.60722353e+01\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(deck_dir.join("rc.cir.ma0")).expect("AC measures"),
+        "G3 = -1.607224e+01\n"
+    );
+
+    assert!(!dir.join("escape.prn").exists());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("warning: ../escape.prn is not written")
+            && stderr.contains("outside the deck's directory"),
+        "{stderr}"
+    );
+}
+
+/// Under `.STEP`, Xyce 7.10 writes every coordinate's rows into one table,
+/// each restarting its `Index`, closes it with `End of Xyce(TM) Parameter
+/// Sweep`, writes coordinate k's measures to `deck.cir.mt<k>`, and lists each
+/// coordinate's stepped value in `deck.cir.res`. Xyce on this deck:
+/// `MX = 4.999385e-01` and `MX = 3.333277e-01`.
+#[test]
+fn xyce_writes_one_measure_file_per_step_and_the_step_table() {
+    let dir = test_dir("xyce_files_step");
+    let deck = "* step files\nV1 1 0 sin 0 1 1k\nR1 1 2 {r}\nR2 2 0 1k\n.param r=1k\n\
+                .step r list 1k 2k\n.tran 10u 1m\n.print tran v(2)\n\
+                .meas tran mx max v(2)\n.end\n";
+    let output = run_xyce_files(&dir, "st.cir", deck, &[]);
+    assert!(output.status.success(), "{output:?}");
+
+    let table = std::fs::read_to_string(dir.join("st.cir.prn")).expect("deck.cir.prn");
+    let lines: Vec<&str> = table.lines().collect();
+    assert_eq!(lines[0], "Index       TIME              V(2)       ");
+    assert_eq!(
+        lines
+            .iter()
+            .filter(|line| line.starts_with("Index"))
+            .count(),
+        1
+    );
+    assert_eq!(
+        lines
+            .iter()
+            .filter(|line| line.starts_with("0        0.00000000e+00"))
+            .count(),
+        2,
+        "{table}"
+    );
+    assert_eq!(*lines.last().unwrap(), "End of Xyce(TM) Parameter Sweep");
+
+    for (step, expected) in [(0, 0.5), (1, 1.0 / 3.0)] {
+        let measures = std::fs::read_to_string(dir.join(format!("st.cir.mt{step}")))
+            .unwrap_or_else(|error| panic!("st.cir.mt{step}: {error}"));
+        assert!(
+            (measure_line(&measures, "MX") - expected).abs() < 1e-3,
+            "{measures}"
+        );
+    }
+    assert!(!dir.join("st.cir.mt2").exists());
+    assert_eq!(
+        std::fs::read_to_string(dir.join("st.cir.res")).expect("deck.cir.res"),
+        "STEP                    R\n\
+         0          1.00000000e+03      \n\
+         1          2.00000000e+03      \n\
+         End of Xyce(TM) Parameter Sweep\n"
+    );
+}
+
+/// A file that cannot be written is a warning: the run's result and exit
+/// status stand, and the other files are still written.
+#[test]
+fn an_unwritable_xyce_file_warns_and_keeps_the_exit_status() {
+    let dir = test_dir("xyce_files_unwritable");
+    std::fs::create_dir_all(dir.join("rc.cir.prn")).expect("a directory where the table goes");
+    let deck = "* blocked\nV1 1 0 1\nR1 1 2 1k\nR2 2 0 1k\n.dc V1 0 2 1\n.print dc v(2)\n\
+                .meas dc mx max v(2)\n.end\n";
+    let output = run_xyce_files(&dir, "rc.cir", deck, &[]);
+    assert!(output.status.success(), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("warning: rc.cir.prn is not written"),
+        "{stderr}"
+    );
+    assert!(dir.join("rc.cir.prn").is_dir());
+    assert_eq!(
+        std::fs::read_to_string(dir.join("rc.cir.ms0")).expect("DC measures"),
+        "MX = 1.000000e+00\n"
+    );
+}

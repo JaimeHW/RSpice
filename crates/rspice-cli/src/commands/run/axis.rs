@@ -271,7 +271,7 @@ fn implicit_axis_value(assignment: &AxisAssignment) -> Result<f64, CliError> {
     }
 }
 
-fn implicit_axis_scale_name(assignment: &AxisAssignment) -> String {
+pub(super) fn implicit_axis_scale_name(assignment: &AxisAssignment) -> String {
     match assignment.value() {
         RunAxisValue::DataRow(_) => format!("DATA({})", assignment.name()),
         _ => match assignment.step_target() {

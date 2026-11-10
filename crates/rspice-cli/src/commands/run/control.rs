@@ -9,6 +9,7 @@ use rspice_core::execution::control::{ControlError, ControlErrorKind};
 use rspice_core::netlist::ControlScriptSource;
 
 mod output;
+pub(super) use output::{deck_directory_destination, publish_bytes};
 mod transient;
 
 pub(super) fn run(

@@ -911,6 +911,19 @@ fn finish_ac(
         &crate::abort::ProcessAbort,
     )
     .map_err(ac_projection_error)?;
+    super::xyce_files::record_print(
+        ctx,
+        rspice_core::netlist::OutputAnalysisKind::Ac,
+        super::xyce_files::Scale::Frequency,
+        || {
+            Ok(super::export::complex_table(
+                "ac",
+                "AC Analysis",
+                frequencies.clone(),
+                &signals,
+            ))
+        },
+    )?;
 
     if let Some(output) = ctx.resolve_output("ac") {
         let analysis_id = output.analysis("ac")?;
@@ -1476,6 +1489,22 @@ fn finish_noise_projected(
         source,
         analysis: Some("NOISE output projection".to_string()),
     })?;
+
+    if let Some(signals) = &printed {
+        super::xyce_files::record_print(
+            ctx,
+            rspice_core::netlist::OutputAnalysisKind::Noise,
+            super::xyce_files::Scale::Frequency,
+            || {
+                Ok(super::export::complex_table(
+                    "noise",
+                    "Noise Spectral Density Curves",
+                    results.iter().map(|result| result.frequency).collect(),
+                    signals,
+                ))
+            },
+        )?;
+    }
 
     if let Some(output) = ctx.resolve_output("noise") {
         let analysis_id = output.analysis("noise")?;

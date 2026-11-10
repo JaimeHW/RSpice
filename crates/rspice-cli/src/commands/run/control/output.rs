@@ -454,6 +454,25 @@ fn control_file_destination(
     path: &str,
     args: &RunArgs,
 ) -> Result<Result<PathBuf, String>, CliError> {
+    Ok(
+        deck_directory_destination(path, args)?.map_err(|(destination, directory)| {
+            format!(
+                "`{path}` resolves to {}, outside the deck's directory {}; a control script \
+                 writes files only inside it",
+                destination.display(),
+                directory.display()
+            )
+        }),
+    )
+}
+
+/// Where a file a deck names goes: a relative path names a file in the deck's
+/// directory, and one that leaves it is refused with where it resolved and
+/// the directory it left.
+pub(in crate::commands::run) fn deck_directory_destination(
+    path: &str,
+    args: &RunArgs,
+) -> Result<Result<PathBuf, (PathBuf, PathBuf)>, CliError> {
     let directory = if crate::commands::is_stdin(&args.input) {
         PathBuf::from(".")
     } else {
@@ -469,12 +488,7 @@ fn control_file_destination(
     if destination.starts_with(&directory) && destination != directory {
         Ok(Ok(destination))
     } else {
-        Ok(Err(format!(
-            "`{path}` resolves to {}, outside the deck's directory {}; a control script \
-             writes files only inside it",
-            destination.display(),
-            directory.display()
-        )))
+        Ok(Err((destination, directory)))
     }
 }
 
@@ -497,7 +511,7 @@ fn lexical(path: &Path) -> PathBuf {
     out
 }
 
-fn publish_bytes(path: &Path, bytes: &[u8]) -> Result<(), CliError> {
+pub(in crate::commands::run) fn publish_bytes(path: &Path, bytes: &[u8]) -> Result<(), CliError> {
     publish::artifact(path, |writer| {
         writer
             .write_all(bytes)

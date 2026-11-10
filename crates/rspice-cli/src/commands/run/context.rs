@@ -350,6 +350,7 @@ impl<'a> RunContext<'a> {
         if results.is_empty() {
             return Ok(());
         }
+        super::xyce_files::record_measures(self, &results);
         self.evaluated_meas
             .borrow_mut()
             .insert(analysis.to_ascii_uppercase());

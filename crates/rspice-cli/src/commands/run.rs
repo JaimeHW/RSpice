@@ -37,6 +37,7 @@ mod quasi_periodic;
 mod restart;
 mod shared;
 mod sources;
+mod xyce_files;
 
 pub(crate) use crate::commands::export_table as export;
 pub(crate) use document::PublishedResult;
@@ -433,6 +434,10 @@ fn execute_with_destinations(
     let abort_reason = crate::abort::reason();
     if let Some(reason) = abort_reason {
         ensure_cancellation_report(&mut reports, &args.input, args.timeout, reason);
+    } else {
+        // In the Xyce dialect without `-o`, the files Xyce writes beside the
+        // deck, inside the same destination policy as every other artifact.
+        outputs.extend(xyce_files::publish(&args, config, quiet)?);
     }
     // A result that collided with a reserved report must never be overwritten
     // by that report while unwinding the failed invocation.
@@ -820,6 +825,7 @@ fn run_concrete_deck(
     let ctx = RunContext::new(
         &engine, netlist, args, config, verbose, quiet, run_label, identity,
     )?;
+    xyce_files::record_coordinate(&ctx);
     // A scalar deck's typed and HDF5 results name the topology of the circuit
     // its analyses build. Keeping that build's topology means naming it does
     // not elaborate the deck a second time.
