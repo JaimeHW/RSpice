@@ -462,6 +462,23 @@ pub fn canonical_device_parameter_sweep_source(
     ))
 }
 
+/// An analysis that solves only DC operating points, so a Xyce source is
+/// loaded at its DC value throughout it.
+fn is_dc_mode_analysis(analysis: &crate::netlist::AnalysisCommand) -> bool {
+    use crate::netlist::AnalysisCommand;
+    matches!(
+        analysis,
+        AnalysisCommand::Op
+            | AnalysisCommand::Dc { .. }
+            | AnalysisCommand::Sensitivity { .. }
+            | AnalysisCommand::Tf { .. }
+            | AnalysisCommand::DcMatch(_)
+            | AnalysisCommand::Step(_)
+            | AnalysisCommand::Temp { .. }
+            | AnalysisCommand::MonteCarlo(_)
+    )
+}
+
 impl DcSweepSource {
     fn set_value(&self, circuit: &mut CircuitData, value: Value) {
         match self {
@@ -589,6 +606,53 @@ impl Engine {
         source_name: &str,
     ) -> Option<String> {
         canonical_device_parameter_sweep_source(netlist, source_name)
+    }
+
+    /// Build the circuit a DC-mode analysis (`.OP`, `.DC`, `.SENS`) solves.
+    ///
+    /// Xyce loads a source's DC value there, and its transient function only
+    /// in a transient, a harmonic balance, or an AC or noise analysis of a
+    /// source given no DC value (N_DEV_Vsrc.C:773-793, N_DEV_ISRC.C:781-799;
+    /// `.AC` and `.NOISE` set that flag for the whole deck,
+    /// N_DEV_DeviceMgr.C:473,487). A source given only a PULSE, SIN, PWL,
+    /// EXP, SFFM or PAT function therefore holds 0 in a Xyce deck whose
+    /// analyses are all DC-mode. ngspice reads the function's t = 0 value for
+    /// every operating point (vsrcload.c), as the builder does for the other
+    /// dialects and for the transient and small-signal biases.
+    fn build_dc_mode_circuit_with_abort(
+        &self,
+        netlist: &Netlist,
+        abort: &dyn AbortSignal,
+    ) -> Result<CircuitData, SimulationError> {
+        let mut circuit = self.build_circuit_with_abort(netlist, abort)?;
+        // A deck that names no analysis (an engine call such as run_dc_op on a
+        // netlist without cards) states no DC-only intent, so its sources keep
+        // their t = 0 values; Xyce itself refuses a deck with no analysis.
+        if self.config.spice_dialect == crate::config::SpiceDialect::Xyce
+            && !netlist.analyses.is_empty()
+            && netlist.analyses.iter().all(is_dc_mode_analysis)
+        {
+            let hold_at_zero =
+                |values: &mut [Value], specs: &[Option<crate::netlist::SourceSpec>]| {
+                    for (value, spec) in values.iter_mut().zip(specs) {
+                        if spec
+                            .as_ref()
+                            .is_some_and(|spec| !super::source_values::has_dc_value(spec))
+                        {
+                            *value = 0.0;
+                        }
+                    }
+                };
+            hold_at_zero(
+                &mut circuit.voltage_sources.dc_values,
+                &circuit.voltage_sources.source_specs,
+            );
+            hold_at_zero(
+                &mut circuit.current_sources.dc_values,
+                &circuit.current_sources.source_specs,
+            );
+        }
+        Ok(circuit)
     }
 
     /// The override a `.DC` source that is no independent source, parameter
@@ -1211,7 +1275,7 @@ impl Engine {
         let run_scope = crate::abort_signal::ModelRunSignal::if_needed(abort);
         let abort: &dyn AbortSignal = run_scope.as_ref().map_or(abort, |scope| scope);
         Self::ensure_model_run_active(abort)?;
-        let mut circuit = self.build_circuit_with_abort(netlist, abort)?;
+        let mut circuit = self.build_dc_mode_circuit_with_abort(netlist, abort)?;
         circuit
             .begin_veriloga_equilibrium_analysis(0)
             .map_err(SimulationError::Circuit)?;
@@ -1246,7 +1310,7 @@ impl Engine {
         let engine = self.resolved_for_netlist(netlist);
 
         // Build circuit from netlist
-        let mut circuit = engine.build_circuit_with_abort(netlist, abort)?;
+        let mut circuit = engine.build_dc_mode_circuit_with_abort(netlist, abort)?;
         // An operating point publishes no voltage for a net only the event
         // domain resolves, so a card that named one asserted something this
         // run cannot honour. Refused here, before the solve, for the same
@@ -1843,7 +1907,7 @@ impl Engine {
         }
 
         // Build circuit once
-        let mut circuit = engine.build_circuit_with_abort(netlist, abort)?;
+        let mut circuit = engine.build_dc_mode_circuit_with_abort(netlist, abort)?;
         // Every point of this sweep publishes the same namespace, so a card
         // naming an event-only net is refused once, before the first point,
         // rather than once per point after the fact.
@@ -2697,6 +2761,63 @@ mod tests {
         assert_voltage(&points[3].result, "out", 20.0 / 3.0);
         assert_voltage(&points[4].result, "out", 5.0);
         assert_voltage(&points[5].result, "out", 4.0);
+    }
+
+    #[test]
+    fn xyce_operating_point_holds_a_transient_only_source_at_zero() {
+        let devices = "transient-only sources\n\
+             V1 1 0 PULSE(5 0 1u 1n 1n 1u 2u)\nR1 1 0 1k\n\
+             V2 2 0 SIN(2 1 1k)\nR2 2 0 1k\n\
+             V3 3 0 PWL(0 3 1u 0)\nR3 3 0 1k\n\
+             V4 4 0 DC 1 PULSE(5 0 1u 1n 1n 1u 2u)\nR4 4 0 1k\n\
+             I1 0 5 PULSE(1m 0 1u 1n 1n 1u 2u)\nR5 5 0 1k\n\
+             V6 6 0 EXP(4 0 1u 1u 2u 1u)\nR6 6 0 1k\n";
+        let op = Netlist::parse(&format!("{devices}.op\n.end\n")).expect("deck parses");
+        // Xyce 7.10 prints V(1..6) = 0 0 0 1 0 0 for this `.OP`, and the same
+        // on both points of `.DC VS 1 2 1`; ngspice reads the t = 0 values.
+        let xyce = xyce_engine().run_dc_op(&op).expect("Xyce operating point");
+        let ngspice = Engine::default()
+            .run_dc_op(&op)
+            .expect("ngspice operating point");
+        for (node, xyce_value, ngspice_value) in [
+            ("1", 0.0, 5.0),
+            ("2", 0.0, 2.0),
+            ("3", 0.0, 3.0),
+            ("4", 1.0, 1.0),
+            ("5", 0.0, 1.0),
+            ("6", 0.0, 4.0),
+        ] {
+            assert_voltage(&xyce, node, xyce_value);
+            assert_voltage(&ngspice, node, ngspice_value);
+        }
+
+        let dc = Netlist::parse(&format!(
+            "{devices}VS 7 0 1\nR7 7 0 1k\n.dc VS 1 2 1\n.end\n"
+        ))
+        .expect("deck parses");
+        let points = xyce_engine()
+            .run_dc_sweep_spec_with_report_and_abort(
+                &dc,
+                "VS",
+                &crate::netlist::DcSweepSpec::linear(1.0, 2.0, 1.0),
+                &NoAbort,
+            )
+            .expect("Xyce DC sweep");
+        assert_eq!(points.len(), 2);
+        for point in &points {
+            assert_voltage(&point.result, "1", 0.0);
+            assert_voltage(&point.result, "4", 1.0);
+            assert_voltage(&point.result, "5", 0.0);
+        }
+
+        // `.AC` loads a source given no DC value at its t = 0 value for the
+        // whole deck (Xyce's AC bias of PULSE(5 ...) is 5 V).
+        let ac =
+            Netlist::parse(&format!("{devices}.ac lin 1 1k 1k\n.op\n.end\n")).expect("deck parses");
+        let biased = xyce_engine()
+            .run_dc_op(&ac)
+            .expect("Xyce AC-deck operating point");
+        assert_voltage(&biased, "1", 5.0);
     }
 
     #[test]

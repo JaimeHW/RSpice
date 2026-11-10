@@ -109,6 +109,33 @@ pub(crate) fn extract_dc_value_with_limits(
     }
 }
 
+/// Whether a source states a DC value of its own (`DC 1`, or a bare value
+/// before its transient function), rather than only a transient function.
+pub(crate) fn has_dc_value(spec: &SourceSpec) -> bool {
+    match spec {
+        SourceSpec::Distortion { inner, .. } | SourceSpec::RfPort { inner, .. } => {
+            has_dc_value(inner)
+        }
+        SourceSpec::Dc(_)
+        | SourceSpec::DcAc { .. }
+        | SourceSpec::DcTransient { .. }
+        | SourceSpec::DcAcTransient { .. } => true,
+        SourceSpec::Ac { .. }
+        | SourceSpec::AcTransient { .. }
+        | SourceSpec::Pulse { .. }
+        | SourceSpec::Sin { .. }
+        | SourceSpec::Pwl { .. }
+        | SourceSpec::PwlFile { .. }
+        | SourceSpec::Pat { .. }
+        | SourceSpec::Exp { .. }
+        | SourceSpec::ExpTrain(_)
+        | SourceSpec::Sffm { .. }
+        | SourceSpec::Am { .. }
+        | SourceSpec::TrNoise { .. }
+        | SourceSpec::TrRandom { .. } => false,
+    }
+}
+
 /// Extract AC value (magnitude, phase in radians) from a SourceSpec enum
 ///
 /// Only an explicit AC keyword contributes: like ngspice, a transient
