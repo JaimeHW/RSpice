@@ -399,7 +399,8 @@ pub(super) fn parse_command(
                     parsed.operands,
                 )
                 .with_print_delimiter(parsed.delimiter)
-                .with_print_layout(parsed.precision, parsed.width),
+                .with_print_layout(parsed.precision, parsed.width)
+                .with_print_destination(parsed.file, parsed.format),
             );
         }
         _ => {
@@ -1040,6 +1041,8 @@ pub(super) struct ParsedSaveCommand {
     delimiter: PrintDelimiter,
     precision: Option<i32>,
     width: Option<i32>,
+    file: Option<String>,
+    format: Option<String>,
     operands: Vec<OutputOperand>,
 }
 
@@ -1172,6 +1175,8 @@ pub(super) fn parse_save_command(
     let mut delimiter = PrintDelimiter::Whitespace;
     let mut precision = None;
     let mut width = None;
+    let mut file = None;
+    let mut format = None;
     let mut analysis = None;
     let mut operands = Vec::new();
 
@@ -1312,6 +1317,17 @@ pub(super) fn parse_save_command(
                             precision = Some(parsed);
                         } else {
                             width = Some(parsed);
+                        }
+                    } else if upper == "FILE" || upper == "FORMAT" {
+                        let unquoted = authored_value
+                            .strip_prefix('"')
+                            .and_then(|value| value.strip_suffix('"'))
+                            .unwrap_or(&authored_value)
+                            .to_string();
+                        if upper == "FILE" {
+                            file = Some(unquoted);
+                        } else {
+                            format = Some(unquoted.to_ascii_uppercase());
                         }
                     }
                     continue;
@@ -1551,6 +1567,8 @@ pub(super) fn parse_save_command(
         delimiter,
         precision,
         width,
+        file,
+        format,
         operands,
     })
 }
@@ -7294,6 +7312,35 @@ mod tests {
             diagnostic.origin.as_ref().map(|origin| origin.line),
             Some(3)
         );
+    }
+
+    #[test]
+    fn a_print_keeps_the_file_and_format_its_table_is_written_in() {
+        let netlist = Netlist::parse_validated(
+            "print destination\n\
+             V1 out 0 1\n\
+             .PRINT DC FILE=\"sweep out.txt\" FORMAT=csv V(out)\n\
+             .PRINT DC file=table.prn V(out)\n\
+             .PRINT DC V(out)\n\
+             .DC V1 0 1 1\n\
+             .END\n",
+        )
+        .expect("FILE= and FORMAT= are print metadata");
+
+        let [quoted, bare, plain] = netlist.output_requests.as_slice() else {
+            panic!("expected three typed output requests");
+        };
+        assert_eq!(quoted.print_file.as_deref(), Some("sweep out.txt"));
+        assert_eq!(quoted.print_format.as_deref(), Some("CSV"));
+        assert_eq!(bare.print_file.as_deref(), Some("table.prn"));
+        assert_eq!(bare.print_format, None);
+        assert_eq!(
+            (plain.print_file.as_ref(), plain.print_format.as_ref()),
+            (None, None)
+        );
+        for request in [quoted, bare, plain] {
+            assert_eq!(request.operands, ["V(out)"]);
+        }
     }
 
     #[test]

@@ -211,6 +211,12 @@ pub struct OutputRequest {
     /// conversion, retained independently from the probe list so output
     /// writers can reproduce the requested layout.
     pub print_width: Option<i32>,
+    /// Xyce `.PRINT FILE=`: the file this table is written to, as authored,
+    /// without quotes. `None` writes it to the file named after the deck.
+    pub print_file: Option<String>,
+    /// Xyce `.PRINT FORMAT=`, upper case (`STD`, `NOINDEX`, `CSV`, ...).
+    /// `None` is Xyce's standard table.
+    pub print_format: Option<String>,
     /// Complete source-authored output operands in card order.
     ///
     /// Unlike `dependencies`, this retains one entry per rendered column, so
@@ -393,6 +399,8 @@ impl OutputRequest {
                 .then_some(PrintDelimiter::Whitespace),
             print_precision: None,
             print_width: None,
+            print_file: None,
+            print_format: None,
             operands: Vec::new(),
             operand_kinds: Vec::new(),
             expressions,
@@ -426,6 +434,8 @@ impl OutputRequest {
             print_delimiter: None,
             print_precision: None,
             print_width: None,
+            print_file: None,
+            print_format: None,
             operands: Vec::new(),
             operand_kinds: Vec::new(),
             expressions: extract_output_expressions(source),
@@ -451,6 +461,8 @@ impl OutputRequest {
             print_delimiter: None,
             print_precision: None,
             print_width: None,
+            print_file: None,
+            print_format: None,
             operands: Vec::new(),
             operand_kinds: Vec::new(),
             expressions: Vec::new(),
@@ -538,6 +550,8 @@ impl OutputRequest {
             print_delimiter: None,
             print_precision: None,
             print_width: None,
+            print_file: None,
+            print_format: None,
             operands: vec![authored.clone()],
             operand_kinds: vec![kind],
             expressions,
@@ -556,6 +570,18 @@ impl OutputRequest {
         if self.directive == OutputDirectiveKind::Print {
             self.print_precision = precision;
             self.print_width = width;
+        }
+        self
+    }
+
+    pub(crate) fn with_print_destination(
+        mut self,
+        file: Option<String>,
+        format: Option<String>,
+    ) -> Self {
+        if self.directive == OutputDirectiveKind::Print {
+            self.print_file = file;
+            self.print_format = format;
         }
         self
     }
@@ -595,6 +621,8 @@ impl OutputRequest {
                 .then_some(PrintDelimiter::Whitespace),
             print_precision: None,
             print_width: None,
+            print_file: None,
+            print_format: None,
             operands,
             operand_kinds,
             expressions,
