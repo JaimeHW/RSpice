@@ -1488,11 +1488,16 @@ fn complex_alias_selects(selection: &SaveSet, candidate: &ProjectionSourceSignal
 
 /// The complex column an authored accessor renders: `VM(out)`, `IDB(v1)`,
 /// or ngspice's vector functions of one probe, `db(i(v1))`, `ph(v(out))`.
+/// A lead accessor, `IG(M1)`, reads the spectrum of that lead, `@M1[ig]`.
 fn complex_accessor(authored: &str) -> Option<(SignalKind, String)> {
     let (operator, argument) = split_accessor(authored)?;
     match operator.as_str() {
         "V" | "VR" | "VI" | "VM" | "VP" | "VDB" => Some((SignalKind::Voltage, argument)),
         "I" | "IR" | "II" | "IM" | "IP" | "IDB" => Some((SignalKind::Current, argument)),
+        lead if is_lead_accessor(lead) => Some((
+            SignalKind::Current,
+            format!("@{argument}[{}]", lead.to_ascii_lowercase()),
+        )),
         "DB" | "MAG" | "PH" | "PHASE" | "CPH" | "REAL" | "RE" | "IMAG" => {
             let (inner, argument) = split_accessor(&argument)?;
             match inner.as_str() {
@@ -1503,6 +1508,16 @@ fn complex_accessor(authored: &str) -> Option<(SignalKind, String)> {
         }
         _ => None,
     }
+}
+
+/// A Xyce lead current: the drain, gate, source, bulk, collector, base,
+/// emitter or substrate current of a device, `ID(M1)` ... `IE(Q1)`, each the
+/// current into that terminal.
+pub(super) fn is_lead_accessor(operator: &str) -> bool {
+    matches!(
+        operator.to_ascii_uppercase().as_str(),
+        "ID" | "IG" | "IS" | "IB" | "IC" | "IE"
+    )
 }
 
 fn split_accessor(authored: &str) -> Option<(String, String)> {
@@ -1795,7 +1810,7 @@ fn complex_accessor_column(
     authored: &str,
 ) -> Option<ProjectedSignal> {
     let (expected, argument) = complex_accessor(authored)?;
-    source
+    let column = source
         .signals
         .iter()
         .find(|candidate| {
@@ -1805,7 +1820,34 @@ fn complex_accessor_column(
                     .eq_ignore_ascii_case(&argument)
         })
         .cloned()
-        .map(ProjectionSourceSignal::into_projected)
+        .map(ProjectionSourceSignal::into_projected)?;
+    // A lead prints under its accessor, `IG(M1)`, as Xyce prints it, not
+    // under the spectrum's `@M1[ig]`.
+    let (operator, _) = split_accessor(authored)?;
+    if !is_lead_accessor(&operator) {
+        return Some(column);
+    }
+    let display = format!(
+        "{operator}({})",
+        column
+            .descriptor
+            .display_name()
+            .strip_prefix('@')?
+            .split_once('[')?
+            .0
+    );
+    let descriptor = signal_descriptor(
+        &display,
+        &display,
+        SignalKind::Current,
+        SignalValueType::Complex,
+    )
+    .ok()?;
+    Some(ProjectedSignal {
+        descriptor,
+        values: column.values,
+        validity: column.validity,
+    })
 }
 
 /// The complex small-signal node voltages and branch currents of a noise

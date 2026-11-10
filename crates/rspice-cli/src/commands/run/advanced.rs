@@ -685,12 +685,22 @@ fn export_hb(
                     spectrum.current_coefficients.as_slice(),
                 )
             });
-        let devices = analysis.device_currents.iter().filter_map(|current| {
-            let name = current.probe.strip_prefix("I(")?.strip_suffix(')')?;
-            Some((name, current.coefficients.as_slice()))
+        // A device's own current, `I(D1)`, or one of its leads, `@M1[ig]`,
+        // which `IG(M1)` reads.
+        let devices = analysis.device_currents.iter().map(|current| {
+            let name = current
+                .probe
+                .strip_prefix("I(")
+                .and_then(|name| name.strip_suffix(')'))
+                .unwrap_or(&current.probe);
+            (name, current.coefficients.as_slice())
         });
         for (name, coefficients) in reactive.chain(devices) {
-            let display_name = format!("I({name})");
+            let display_name = if name.starts_with('@') {
+                name.to_owned()
+            } else {
+                format!("I({name})")
+            };
             if named.insert(display_name.to_ascii_uppercase()) {
                 signals.push(column(
                     display_name,

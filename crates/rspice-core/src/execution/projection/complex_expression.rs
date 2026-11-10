@@ -15,7 +15,7 @@ use std::collections::{HashMap, HashSet};
 
 use super::{
     ProjectedSignal, ProjectionSource, ProjectionValues, SignalKind, SignalValueType,
-    resolve_complex_operand, signal_descriptor,
+    is_lead_accessor, resolve_complex_operand, signal_descriptor,
 };
 use crate::Value;
 use crate::abort_signal::AbortSignal;
@@ -191,12 +191,14 @@ fn real_column(
     })
 }
 
-/// An accessor reading the AC result: a phasor or one of its renderings.
+/// An accessor reading the AC result: a phasor, a lead current or one of
+/// their renderings.
 fn is_phasor_accessor(name: &str) -> bool {
-    matches!(
-        name.to_ascii_uppercase().as_str(),
-        "V" | "VR" | "VI" | "VM" | "VP" | "VDB" | "I" | "IR" | "II" | "IM" | "IP" | "IDB"
-    )
+    is_lead_accessor(name)
+        || matches!(
+            name.to_ascii_uppercase().as_str(),
+            "V" | "VR" | "VI" | "VM" | "VP" | "VDB" | "I" | "IR" | "II" | "IM" | "IP" | "IDB"
+        )
 }
 
 /// A node or branch name as an accessor's argument parses: a name, or a
@@ -239,6 +241,7 @@ fn is_complex(expression: &Expr) -> bool {
             Expr::BinOp { .. } => {}
             Expr::FnCall { name, args } => match name.to_ascii_uppercase().as_str() {
                 "V" | "I" => return true,
+                lead if is_lead_accessor(lead) => return true,
                 "IF" => pending.extend(args.iter().skip(1)),
                 "VR" | "VI" | "VM" | "VP" | "VDB" | "IR" | "II" | "IM" | "IP" | "IDB" | "ABS"
                 | "REAL" | "RE" | "IMAG" | "IMG" | "PH" | "PHASE" | "MAG" | "M" | "DB" | "MAX"

@@ -774,6 +774,61 @@ fn xyce_prints_an_hb_resistor_and_capacitor_current() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A Xyce `.PRINT HB` lead accessor, `ID(M1)` ... `IE(Q1)`, reads the
+/// current into that terminal from the solved spectrum, as `I(D1)` reads a
+/// diode's. Xyce 7.10 prints, at the 100 kHz bin of this deck, these
+/// currents over V(D) (each ratio cancels the bin convention): ID(M1)
+/// -3.37902494e-2-1.06070555e-5j, IG(M1) 1.47302841e-10-6.63089803e-7j,
+/// IS(M1) 3.37902492e-2+1.12701453e-5j, I(D1) 3.32902494e-2+1.06070555e-5j,
+/// IC(Q1) -8.45207099e-4+1.17219572e-6j, IB(Q1) -8.45173265e-6-3.92718064e-6j
+/// and IE(Q1) 8.53658829e-4+2.75498492e-6j.
+#[test]
+fn xyce_prints_hb_lead_currents_by_their_accessors() {
+    let dir = test_dir("print_hb_lead_current");
+    let deck = "* hb leads\n.hb 1e5\n\
+                .print hb v(d) id(M1) ig(M1) is(M1) i(D1) ic(Q1) ib(Q1) ie(Q1)\n\
+                .options hbint numfreq=5\nVDD vdd 0 3\nVG g 0 sin 1.5 0.2 1e5 0 0\n\
+                RD vdd d 2k\nM1 d g 0 0 nm L=1u W=10u\n\
+                .model nm NMOS level=1 VTO=0.7 KP=1e-4 CGSO=1e-9 CGDO=1e-9\n\
+                D1 d 0 dm\n.model dm D IS=1e-14 CJO=10p\nVB b 0 sin 0.65 0.01 1e5 0 0\n\
+                RC vdd c 1k\nQ1 c b 0 qm\n.model qm NPN IS=1e-16 BF=100 CJE=1p CJC=1p\n.end\n";
+    let path = run_export_with_args(&dir, "leads", deck, "csv", &["--spice-dialect", "xyce"]);
+    let text = std::fs::read_to_string(&path).expect("read csv");
+    let frequency = common::csv_column(&text, "frequency");
+    let row = frequency
+        .iter()
+        .position(|value| (value - 1e5).abs() < 1e-3)
+        .unwrap_or_else(|| panic!("no 100 kHz row: {text}"));
+    let phasor = |name: &str| {
+        let re = common::csv_column(&text, &format!("Re({name})"));
+        let im = common::csv_column(&text, &format!("Im({name})"));
+        (re[row], im[row])
+    };
+    let (v_re, v_im) = phasor("V(D)");
+    let norm = v_re * v_re + v_im * v_im;
+    for (name, expected) in [
+        ("id(M1)", (-3.37902494e-2, -1.06070555e-5)),
+        ("ig(M1)", (1.47302841e-10, -6.63089803e-7)),
+        ("is(M1)", (3.37902492e-2, 1.12701453e-5)),
+        ("I(D1)", (3.32902494e-2, 1.06070555e-5)),
+        ("ic(Q1)", (-8.45207099e-4, 1.17219572e-6)),
+        ("ib(Q1)", (-8.45173265e-6, -3.92718064e-6)),
+        ("ie(Q1)", (8.53658829e-4, 2.75498492e-6)),
+    ] {
+        let (i_re, i_im) = phasor(name);
+        let ratio = (
+            (i_re * v_re + i_im * v_im) / norm,
+            (i_im * v_re - i_re * v_im) / norm,
+        );
+        let error = (ratio.0 - expected.0).hypot(ratio.1 - expected.1);
+        assert!(
+            error <= 1e-5 * expected.0.hypot(expected.1),
+            "{name}: {ratio:?}, expected {expected:?}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A two-point LIN sweep visits both ends in every dialect, as Xyce, LTspice,
 /// QSPICE and ngspice's noise analysis step it; ngspice's AC analysis alone
 /// visits only the start (acan.c:104-113). `.DISTO`, which only ngspice runs,
