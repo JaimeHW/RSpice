@@ -711,15 +711,9 @@ fn generated_mos_target(
             Some(GeneratedTarget::new("bsimsoi_va"))
         }
         // Xyce registers each BSIM-CMG release it ships as its own LEVEL: 107,
-        // 108, 110 and 111 (111.2.1). The built-in is BSIM-CMG 112.1.0, a later
-        // release with its own equations and parameter set, so a LEVEL that
-        // names an earlier release is not run on it; the card is refused as a
-        // release this build lacks. A card that also states VERSION=112 asks
-        // for the release the built-in is.
-        Some(107 | 108 | 110 | 111) => card_version_in(model, 112.0..113.0).then_some(
-            GeneratedTarget::consuming_geometry_bin_metadata("bsimcmg_va")
-                .consuming_version_metadata(),
-        ),
+        // 108, 110 and 111 (111.2.1), and each runs on the built-in of that
+        // release.
+        Some(level @ (107 | 108 | 110 | 111)) => bsimcmg_release_target(model, level),
         Some(260) => Some(GeneratedTarget::new("ekv_va")),
         Some(70470) => Some(GeneratedTarget::new("bsimsoi__18c250bc")),
         Some(1000) => Some(GeneratedTarget::with_level_parameter("mosvar")),
@@ -736,6 +730,28 @@ fn generated_mos_target(
 /// release a built-in is, rather than for the one its LEVEL names.
 fn card_version_in(model: &ModelDef, releases: std::ops::Range<f64>) -> bool {
     card_version(model).is_some_and(|version| releases.contains(&version))
+}
+
+/// The BSIM-CMG release a LEVEL 107, 108, 110 or 111 card runs. A card
+/// VERSION picks the release, as Spectre's and HSPICE's version selector
+/// does: 107, 108, 110, 111 (111.2.1) or 112 (112.1.0); any other VERSION
+/// names a release this build lacks and the card is refused. Without one the
+/// LEVEL names it. No release declares VERSION, so it never reaches a module.
+fn bsimcmg_release_target(model: &ModelDef, level: i32) -> Option<GeneratedTarget> {
+    let release = match card_version(model) {
+        Some(version) if (107.0..113.0).contains(&version) => version.trunc() as i32,
+        Some(_) => return None,
+        None => level,
+    };
+    let module = match release {
+        107 => "bsimcmg107",
+        108 => "bsimcmg108",
+        110 => "bsimcmg110",
+        111 => "bsimcmg111",
+        112 => "bsimcmg_va",
+        _ => return None,
+    };
+    Some(GeneratedTarget::consuming_geometry_bin_metadata(module).consuming_version_metadata())
 }
 
 /// The card's VERSION, numeric or dotted (`4.6.1`).
@@ -762,6 +778,12 @@ fn generated_mos_target_by_type(model_type: &str) -> Option<GeneratedTarget> {
             match_normalized(model_type, &["BSIMCMG", "BSIMCMG_VA"]).then_some(
                 GeneratedTarget::consuming_geometry_bin_metadata("bsimcmg_va"),
             )
+        })
+        .or_else(|| {
+            ["bsimcmg107", "bsimcmg108", "bsimcmg110", "bsimcmg111"]
+                .into_iter()
+                .find(|release| match_normalized(model_type, &[release]))
+                .map(GeneratedTarget::consuming_geometry_bin_metadata)
         })
         .or_else(|| {
             match_normalized(model_type, &["BSIMIMG"]).then_some(GeneratedTarget::new("bsimimg"))
@@ -1373,6 +1395,10 @@ fn generated_card_current_aliases(
                 target.model_name,
                 &[
                     "BSIMCMG_VA",
+                    "BSIMCMG107",
+                    "BSIMCMG108",
+                    "BSIMCMG110",
+                    "BSIMCMG111",
                     "BSIMSOI_VA",
                     "HISIMSOI_VA__5BE18005",
                     "HISIMSOI_VA__242BC21D",
@@ -1564,13 +1590,15 @@ fn append_generated_mos_polarity_param(
     model_def: Option<&ModelDef>,
     params: &mut Vec<BuiltinParameterAssignment>,
 ) {
-    if !needs_inferred_generated_mos_type(target.model_name) {
+    let Some(polarity) = generated_mos_polarity(target.model_name) else {
         return;
-    }
-    if params
-        .iter()
-        .any(|assignment| assignment.name.eq_ignore_ascii_case("TYPE"))
-    {
+    };
+    if params.iter().any(|assignment| {
+        polarity
+            .stated_by
+            .iter()
+            .any(|name| assignment.name.eq_ignore_ascii_case(name))
+    }) {
         return;
     }
     let Some(model) = model_def else {
@@ -1579,14 +1607,51 @@ fn append_generated_mos_polarity_param(
     let Some(mos_type) = resolve_mos_type_from_model(&model.model_type) else {
         return;
     };
-    let type_value = match mos_type {
-        crate::netlist::MosType::Nmos => 1.0,
-        crate::netlist::MosType::Pmos => -1.0,
+    let value = match mos_type {
+        crate::netlist::MosType::Nmos => polarity.nmos,
+        crate::netlist::MosType::Pmos => polarity.pmos,
     };
     params.push(BuiltinParameterAssignment::model_card(
-        "TYPE",
-        ParametricValue::Resolved(type_value),
+        polarity.parameter,
+        ParametricValue::Resolved(value),
     ));
+}
+
+/// The parameter a generated MOS module reads its channel from, its NMOS and
+/// PMOS values, and every parameter by which a card states the channel itself.
+struct GeneratedMosPolarity {
+    parameter: &'static str,
+    nmos: f64,
+    pmos: f64,
+    stated_by: &'static [&'static str],
+}
+
+fn generated_mos_polarity(model_name: &str) -> Option<GeneratedMosPolarity> {
+    // BSIM-CMG 107 reads DEVTYPE, 1 NMOS and 0 PMOS. 108 and 110 read TYPE
+    // with the same values, defaulting to DEVTYPE, so a card stating either
+    // has stated its channel.
+    if match_normalized(model_name, &["BSIMCMG107"]) {
+        return Some(GeneratedMosPolarity {
+            parameter: "DEVTYPE",
+            nmos: 1.0,
+            pmos: 0.0,
+            stated_by: &["DEVTYPE"],
+        });
+    }
+    if match_normalized(model_name, &["BSIMCMG108", "BSIMCMG110"]) {
+        return Some(GeneratedMosPolarity {
+            parameter: "TYPE",
+            nmos: 1.0,
+            pmos: 0.0,
+            stated_by: &["TYPE", "DEVTYPE"],
+        });
+    }
+    needs_inferred_generated_mos_type(model_name).then_some(GeneratedMosPolarity {
+        parameter: "TYPE",
+        nmos: 1.0,
+        pmos: -1.0,
+        stated_by: &["TYPE"],
+    })
 }
 
 /// The generated MOS modules an `NMOS`/`PMOS` card reaches by LEVEL whose
@@ -1601,6 +1666,7 @@ fn needs_inferred_generated_mos_type(model_name: &str) -> bool {
             "EKV_VA",
             "BSIMSOI_VA",
             "BSIMCMG_VA",
+            "BSIMCMG111",
             "PSP102VA",
             "PSP103VA",
             "PSP103TVA",
@@ -2414,17 +2480,86 @@ mod release_routing_tests {
     }
 
     #[test]
-    fn xyce_bsimcmg_release_levels_do_not_run_on_the_112_built_in() {
-        for level in [107, 108, 110, 111] {
+    fn xyce_bsimcmg_release_levels_run_their_own_release() {
+        for (card, module) in [
+            ("NMOS LEVEL=107", "bsimcmg107"),
+            ("PMOS LEVEL=108", "bsimcmg108"),
+            ("NMOS LEVEL=110", "bsimcmg110"),
+            ("NMOS LEVEL=111", "bsimcmg111"),
+            ("NMOS LEVEL=107 VERSION=111.2", "bsimcmg111"),
+            ("NMOS LEVEL=111 VERSION=\"110.0.0\"", "bsimcmg110"),
+            ("NMOS LEVEL=110 VERSION=108", "bsimcmg108"),
+            ("BSIMCMG107", "bsimcmg107"),
+            ("BSIMCMG108", "bsimcmg108"),
+            ("BSIMCMG110", "bsimcmg110"),
+            ("BSIMCMG111", "bsimcmg111"),
+        ] {
+            let target =
+                mos_model_target(card).unwrap_or_else(|| panic!("`{card}` selects a release"));
+            assert_eq!(target.model_name, module, "{card}");
+            assert!(!should_pass_model_param(target, "NFINMAX"), "{card}");
+        }
+        assert!(
+            !should_pass_model_param(
+                mos_model_target("NMOS LEVEL=110 VERSION=110").expect("release 110"),
+                "VERSION"
+            ),
+            "no BSIM-CMG release declares VERSION"
+        );
+        for card in ["NMOS LEVEL=107 VERSION=109", "NMOS LEVEL=111 VERSION=4.6"] {
             assert!(
-                mos_model_target(&format!("NMOS LEVEL={level}")).is_none(),
-                "BSIM-CMG LEVEL={level} names an earlier release than the 112.1.0 built-in"
-            );
-            assert!(
-                mos_model_target(&format!("NMOS LEVEL={level} VERSION=111.2")).is_none(),
-                "a VERSION outside release 112 must not select the 112.1.0 built-in"
+                mos_model_target(card).is_none(),
+                "`{card}` names a BSIM-CMG release this build lacks"
             );
         }
+    }
+
+    /// BSIM-CMG 107 reads its channel from DEVTYPE and 108 and 110 from TYPE,
+    /// 1 NMOS and 0 PMOS, as Xyce sets them from the card's type; 111.2.1
+    /// reads TYPE, 1 and -1.
+    #[test]
+    fn a_bsimcmg_card_runs_its_release_with_the_card_polarity() {
+        for (level, parameter, pmos) in [
+            ("107", "DEVTYPE", 0.0),
+            ("108", "TYPE", 0.0),
+            ("110", "TYPE", 0.0),
+            ("111", "TYPE", -1.0),
+        ] {
+            for (polarity, expected) in [("NMOS", 1.0), ("PMOS", pmos)] {
+                let card = format!("{polarity} LEVEL={level}");
+                let netlist = mos_model(&card);
+                let model = find_model_def(&netlist, "model").expect("fixture model exists");
+                let target =
+                    generated_mos_target("model", Some(model), crate::config::SpiceDialect::Xyce)
+                        .expect("level classification succeeds")
+                        .unwrap_or_else(|| panic!("`{card}` selects a release"));
+                let mut params = Vec::new();
+                append_generated_mos_polarity_param(target, Some(model), &mut params);
+                assert_eq!(params.len(), 1, "{card}");
+                assert!(
+                    params[0].name.eq_ignore_ascii_case(parameter)
+                        && matches!(params[0].value, ParametricValue::Resolved(value) if value == expected),
+                    "`{card}` must run with {parameter}={expected}, got {:?}",
+                    params[0]
+                );
+            }
+        }
+        // A 108 card stating DEVTYPE has stated its channel; TYPE defaults to it.
+        let netlist = mos_model("PMOS LEVEL=108 DEVTYPE=0");
+        let model = find_model_def(&netlist, "model").expect("fixture model exists");
+        let target = generated_mos_target("model", Some(model), crate::config::SpiceDialect::Xyce)
+            .expect("level classification succeeds")
+            .expect("LEVEL=108 selects release 108");
+        let mut params = vec![BuiltinParameterAssignment::model_card(
+            "DEVTYPE",
+            ParametricValue::Resolved(0.0),
+        )];
+        append_generated_mos_polarity_param(target, Some(model), &mut params);
+        assert_eq!(
+            params.len(),
+            1,
+            "an authored DEVTYPE is the 108 card's channel"
+        );
     }
 
     #[test]

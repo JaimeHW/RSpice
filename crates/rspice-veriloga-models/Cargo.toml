@@ -38,6 +38,10 @@ veriloga-model-bjtd504va = ["dep:rspice-veriloga-model-bjtd504va"]
 veriloga-model-bjtd505-va = ["dep:rspice-veriloga-model-bjtd505-va"]
 veriloga-model-bjtd505t-va = ["dep:rspice-veriloga-model-bjtd505t-va"]
 veriloga-model-bsimbulk = ["dep:rspice-veriloga-model-bsimbulk"]
+veriloga-model-bsimcmg107 = ["dep:rspice-veriloga-model-bsimcmg107"]
+veriloga-model-bsimcmg108 = ["dep:rspice-veriloga-model-bsimcmg108"]
+veriloga-model-bsimcmg110 = ["dep:rspice-veriloga-model-bsimcmg110"]
+veriloga-model-bsimcmg111 = ["dep:rspice-veriloga-model-bsimcmg111"]
 veriloga-model-bsimcmg-va = ["dep:rspice-veriloga-model-bsimcmg-va"]
 veriloga-model-bsimimg = ["dep:rspice-veriloga-model-bsimimg"]
 veriloga-model-bsimsoi-18c250bc = ["dep:rspice-veriloga-model-bsimsoi-18c250bc"]
@@ -95,6 +99,10 @@ veriloga-builtins-noise = [
     "rspice-veriloga-model-bjtd505-va?/veriloga-builtins-noise",
     "rspice-veriloga-model-bjtd505t-va?/veriloga-builtins-noise",
     "rspice-veriloga-model-bsimbulk?/veriloga-builtins-noise",
+    "rspice-veriloga-model-bsimcmg107?/veriloga-builtins-noise",
+    "rspice-veriloga-model-bsimcmg108?/veriloga-builtins-noise",
+    "rspice-veriloga-model-bsimcmg110?/veriloga-builtins-noise",
+    "rspice-veriloga-model-bsimcmg111?/veriloga-builtins-noise",
     "rspice-veriloga-model-bsimcmg-va?/veriloga-builtins-noise",
     "rspice-veriloga-model-bsimimg?/veriloga-builtins-noise",
     "rspice-veriloga-model-bsimsoi-18c250bc?/veriloga-builtins-noise",
@@ -155,6 +163,10 @@ rspice-veriloga-model-bjtd504va = { path = "models/bjtd504va", version = "0.1.0"
 rspice-veriloga-model-bjtd505-va = { path = "models/bjtd505-va", version = "0.1.0", optional = true }
 rspice-veriloga-model-bjtd505t-va = { path = "models/bjtd505t-va", version = "0.1.0", optional = true }
 rspice-veriloga-model-bsimbulk = { path = "models/bsimbulk", version = "0.1.0", optional = true }
+rspice-veriloga-model-bsimcmg107 = { path = "models/bsimcmg107", version = "0.1.0", optional = true }
+rspice-veriloga-model-bsimcmg108 = { path = "models/bsimcmg108", version = "0.1.0", optional = true }
+rspice-veriloga-model-bsimcmg110 = { path = "models/bsimcmg110", version = "0.1.0", optional = true }
+rspice-veriloga-model-bsimcmg111 = { path = "models/bsimcmg111", version = "0.1.0", optional = true }
 rspice-veriloga-model-bsimcmg-va = { path = "models/bsimcmg-va", version = "0.1.0", optional = true }
 rspice-veriloga-model-bsimimg = { path = "models/bsimimg", version = "0.1.0", optional = true }
 rspice-veriloga-model-bsimsoi-18c250bc = { path = "models/bsimsoi-18c250bc", version = "0.1.0", optional = true }

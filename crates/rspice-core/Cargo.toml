@@ -277,6 +277,34 @@ veriloga-model-bsimbulk = [
     "rspice-core-netlist/veriloga-model-bsimbulk",
     "rspice-core-devices/veriloga-model-bsimbulk",
 ]
+veriloga-model-bsimcmg107 = [
+    "veriloga-builtins-base",
+    "rspice-veriloga-models/veriloga-model-bsimcmg107",
+    "rspice-core-base/veriloga-model-bsimcmg107",
+    "rspice-core-netlist/veriloga-model-bsimcmg107",
+    "rspice-core-devices/veriloga-model-bsimcmg107",
+]
+veriloga-model-bsimcmg108 = [
+    "veriloga-builtins-base",
+    "rspice-veriloga-models/veriloga-model-bsimcmg108",
+    "rspice-core-base/veriloga-model-bsimcmg108",
+    "rspice-core-netlist/veriloga-model-bsimcmg108",
+    "rspice-core-devices/veriloga-model-bsimcmg108",
+]
+veriloga-model-bsimcmg110 = [
+    "veriloga-builtins-base",
+    "rspice-veriloga-models/veriloga-model-bsimcmg110",
+    "rspice-core-base/veriloga-model-bsimcmg110",
+    "rspice-core-netlist/veriloga-model-bsimcmg110",
+    "rspice-core-devices/veriloga-model-bsimcmg110",
+]
+veriloga-model-bsimcmg111 = [
+    "veriloga-builtins-base",
+    "rspice-veriloga-models/veriloga-model-bsimcmg111",
+    "rspice-core-base/veriloga-model-bsimcmg111",
+    "rspice-core-netlist/veriloga-model-bsimcmg111",
+    "rspice-core-devices/veriloga-model-bsimcmg111",
+]
 veriloga-model-bsimcmg-va = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-model-bsimcmg-va",
@@ -497,6 +525,10 @@ veriloga-builtins-models = [
     "veriloga-model-bjtd505-va",
     "veriloga-model-bjtd505t-va",
     "veriloga-model-bsimbulk",
+    "veriloga-model-bsimcmg107",
+    "veriloga-model-bsimcmg108",
+    "veriloga-model-bsimcmg110",
+    "veriloga-model-bsimcmg111",
     "veriloga-model-bsimcmg-va",
     "veriloga-model-bsimimg",
     "veriloga-model-bsimsoi-18c250bc",

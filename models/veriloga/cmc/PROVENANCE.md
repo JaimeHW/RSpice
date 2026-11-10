@@ -12,7 +12,8 @@ License: stated per release, in that release's own license file.
 
 - Educational Community License, Version 2.0, in `LICENSE.txt`:
   `ASM-ESD101.1.0_04042025`, `ASM-HEMT101.6.0_05132026`,
-  `BSIM-BULK107.2.1_02112025`, `BSIM-CMG_112.1.0_04282026`,
+  `BSIM-BULK107.2.1_02112025`, `BSIM-CMG_111.2.1_06062022`,
+  `BSIM-CMG_112.1.0_04282026`,
   `BSIM-IMG_103.0.0_20200102` (under `code/`), `BSIM_SOI_100.1.1_09152025`,
   `HiSIM_HV_2.5.1_Release_20230209`, `HiSIM_SOI_1.5.0_Release_20211008`,
   `HiSIM_SOTB_1.3.0_Release_20211116`, `L_UTSOI_102.9.0_code_package`,
@@ -25,6 +26,9 @@ License: stated per release, in that release's own license file.
 - `BSIM-SOI_4.7.0_05192025`: no separate license file; the University of
   California grant is carried in the header of `code/bsimsoi.va`, with
   `NOTICE.txt` naming the CMC standard.
+- `BSIMCMG107.0.0_20130712`, `BSIMCMG108.0.0_20140822`,
+  `BSIMCMG110.0.0_20160101`: no separate license file; the University of
+  California grant is carried in the header of each `code/bsimcmg.va`.
 
 - `vacode_504.12.1`: Mextram 504.12.1 (July 2016), taken from the Mextram
   site at Auburn University,
@@ -70,6 +74,31 @@ License: stated per release, in that release's own license file.
   `WMIN`/`WMAX` to the unbinned module; that copy is not used here. The
   authors' reference results for this release are published beside it as
   `psp_VA_and_CMC_ref_data.tar.gz` and are not vendored.
+
+- `BSIMCMG107.0.0_20130712`, `BSIMCMG108.0.0_20140822` and
+  `BSIMCMG110.0.0_20160101`: BSIM-CMG 107.0.0 (July 2013), 108.0.0 (August
+  2014) and 110.0.0 (January 2016), taken from the BSIM group at UC Berkeley,
+  https://www.bsim.berkeley.edu/BSIMCMG/BSIMCMG107.0.0_20130712.tar.gz (SHA-256
+  `315fa1cf6d52648b95acfdb0d9127605c51c46ebb72e073f470d2164deb7759d`),
+  https://www.bsim.berkeley.edu/BSIMCMG/BSIMCMG108.0.0_20140822.tar.gz (SHA-256
+  `c713997d043e79a77093bda2dc7c68713d94d8a13da712ff97909fa39e9cb1d8`) and
+  https://www.bsim.berkeley.edu/BSIMCMG/BSIMCMG110.0.0_20160101.tar.gz (SHA-256
+  `f2be93227964263ee7c4fa04df7c673a0a691a17d283cc406cb4d5f13afe93ca`), with
+  `code/` vendored unmodified. No separate license file: the University of
+  California grant is carried in the header of each `code/bsimcmg.va`. In 107
+  and 108, `bsimcmg.va` is `bsimcmg_main.va` with `__RDSMOD__` defined, and
+  `bsimcmg_nqsmod3.va` is a second `bsimcmg` module; both are kept as shipped
+  and the compile profile builds `bsimcmg.va` alone. The archives' benchmark
+  decks and HSPICE results are not vendored. Xyce 7.10 registers these
+  releases as M LEVEL=107, 108 and 110 from copies its `README_Xyce` records
+  as modified (instance-parameter attributes, renamed modules, 108's
+  TNOIMOD=1 removed); those copies are not used here.
+- `BSIM-CMG_111.2.1_06062022`: BSIM-CMG 111.2.1 (June 2022), taken from
+  https://www.bsim.berkeley.edu/BSIMCMG/BSIM-CMG_111.2.1_06062022.tar.gz
+  (SHA-256 `39f9ab340b24e51d56488b64b5d689314e0583d111a7c1c297ca0db2e013e266`),
+  with `code/`, `LICENSE.txt` and `NOTICE.txt` vendored unmodified. Its module
+  is `bsimcmg_va`, as is 112.1.0's; the compile profile names this one
+  `bsimcmg111`. Xyce 7.10 registers it as M LEVEL=111.
 
 None of these releases carries a non-commercial or no-derivatives restriction;
 `tools/models/license_audit.py` enforces that across the whole `models/` tree.

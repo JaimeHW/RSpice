@@ -44,6 +44,10 @@ compared without regard to case.
 | `bjtd505t_va` | `bjtd505t_va` | `veriloga-model-bjtd505t-va` |
 | `bsimbulk` | `bsimbulk` | `veriloga-model-bsimbulk` |
 | `bsimcmg_va` | `bsimcmg_va` | `veriloga-model-bsimcmg-va` |
+| `bsimcmg107` | `bsimcmg` | `veriloga-model-bsimcmg107` |
+| `bsimcmg108` | `bsimcmg` | `veriloga-model-bsimcmg108` |
+| `bsimcmg110` | `bsimcmg` | `veriloga-model-bsimcmg110` |
+| `bsimcmg111` | `bsimcmg_va` | `veriloga-model-bsimcmg111` |
 | `bsimimg` | `bsimimg` | `veriloga-model-bsimimg` |
 | `bsimsoi__18c250bc` | `bsimsoi` | `veriloga-model-bsimsoi-18c250bc` |
 | `bsimsoi__e2aff994` | `bsimsoi` | `veriloga-model-bsimsoi-e2aff994` |

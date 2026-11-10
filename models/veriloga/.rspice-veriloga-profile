@@ -1,4 +1,16 @@
 # Published generated namespaces. Keep these IDs when repairing sources or headers.
+# BSIM-CMG 107.0.0 and 108.0.0 build bsimcmg.va, which defines __RDSMOD__ and
+# includes bsimcmg_main.va; the main file alone is that model without RDSMOD, and
+# bsimcmg_nqsmod3.va is a segmented NQS variant no other simulator ships.
+skip cmc/BSIMCMG107.0.0_20130712/code/bsimcmg_main.va
+skip cmc/BSIMCMG107.0.0_20130712/code/bsimcmg_nqsmod3.va
+skip cmc/BSIMCMG108.0.0_20140822/code/bsimcmg_main.va
+skip cmc/BSIMCMG108.0.0_20140822/code/bsimcmg_nqsmod3.va
+# Each BSIM-CMG release publishes its own built-in; 112.1.0 keeps bsimcmg_va.
+name cmc/BSIMCMG107.0.0_20130712/code/bsimcmg.va::bsimcmg=bsimcmg107
+name cmc/BSIMCMG108.0.0_20140822/code/bsimcmg.va::bsimcmg=bsimcmg108
+name cmc/BSIMCMG110.0.0_20160101/code/bsimcmg.va::bsimcmg=bsimcmg110
+name cmc/BSIM-CMG_111.2.1_06062022/code/bsimcmg.va::bsimcmg_va=bsimcmg111
 namespace angelov_2.0/vacode/angelov.va::angelov=98b92059
 namespace angelov_2.0/vacode/angelov_gan.va::angelov_gan=98687686
 namespace bsimsoi_4.6.1/vacode/bsimsoi.va::bsimsoi_va=3b1f6b5e
@@ -55,3 +67,7 @@ namespace vbic_1.3/vacode/vbic_1p3.va::vbic13_4t=132cb4e0
 namespace vbic_1.3/vacode/vbic_3T.va::vbic13=aa00e2e7
 namespace vbic_1.3/vacode/vbic_3T_et.va::vbic13_3t_et=bd2f63d4
 namespace vbic_1.3/vacode/vbic_4T_et_cf.va::vbic_4T_et_cf=3990c5a1
+namespace cmc/BSIM-CMG_111.2.1_06062022/code/bsimcmg.va::bsimcmg_va=8faa17c3
+namespace cmc/BSIMCMG110.0.0_20160101/code/bsimcmg.va::bsimcmg=30c9f617
+namespace cmc/BSIMCMG108.0.0_20140822/code/bsimcmg.va::bsimcmg=fda3bcb1
+namespace cmc/BSIMCMG107.0.0_20130712/code/bsimcmg.va::bsimcmg=2942a719

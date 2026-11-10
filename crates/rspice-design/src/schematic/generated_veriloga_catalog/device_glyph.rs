@@ -114,6 +114,8 @@ enum Polarity {
     Fixed,
     /// The sign of this parameter: non-negative N or NPN, negative P or PNP.
     Parameter(&'static str),
+    /// A 1/0 channel flag: 1 N, 0 P (BSIM-CMG before 111).
+    Flag(&'static str),
 }
 
 /// One shipped compact model: its module and terminals as compiled, and how
@@ -212,6 +214,8 @@ macro_rules! glyph {
 }
 
 const TYPE: Polarity = Polarity::Parameter("TYPE");
+const TYPE_FLAG: Polarity = Polarity::Flag("TYPE");
+const DEVTYPE_FLAG: Polarity = Polarity::Flag("DEVTYPE");
 const FIXED: Polarity = Polarity::Fixed;
 
 /// Every shipped compact model, by module and compiled terminals.
@@ -266,6 +270,30 @@ static COMPACT_MODELS: &[CompactModelGlyph] = &[
         SoiFourTerminal,
         SOI4_T,
         TYPE
+    ),
+    // BSIM-CMG 107, 108 and 110 all declare `module bsimcmg`; each release
+    // is its own row, by registry name, since 107 reads DEVTYPE and the
+    // later two TYPE.
+    glyph!(
+        "bsimcmg107",
+        ["d", "g", "s", "e"],
+        SoiFourTerminal,
+        SOI4,
+        DEVTYPE_FLAG
+    ),
+    glyph!(
+        "bsimcmg108",
+        ["d", "g", "s", "e"],
+        SoiFourTerminal,
+        SOI4,
+        TYPE_FLAG
+    ),
+    glyph!(
+        "bsimcmg110",
+        ["d", "g", "s", "e", "t"],
+        SoiFourTerminal,
+        SOI4_T,
+        TYPE_FLAG
     ),
     glyph!(
         "bsimimg",
@@ -419,13 +447,15 @@ pub struct DeviceGlyph {
 }
 
 /// The device glyph for a placement of a shipped compact model, matched by
-/// its module and its terminals as compiled; `None` for any other binding.
+/// its module, or its registry name where releases share a module, and its
+/// terminals as compiled; `None` for any other binding.
 pub fn compact_model_glyph(binding: &LibraryCellInstance) -> Option<DeviceGlyph> {
     let generated = binding.generated_veriloga.as_ref()?;
     COMPACT_MODELS
         .iter()
         .find(|model| {
-            model.module.eq_ignore_ascii_case(&generated.module_name)
+            (model.module.eq_ignore_ascii_case(&generated.model_name)
+                || model.module.eq_ignore_ascii_case(&generated.module_name))
                 && model.terminals.len() == binding.terminal_order.len()
                 && model
                     .terminals
@@ -443,11 +473,17 @@ impl DeviceGlyph {
     }
 
     /// The artwork a placement whose instance parameters are `params` draws:
-    /// P when its polarity parameter, stated or by default, is negative.
+    /// P when its polarity parameter, stated or by default, is negative, or
+    /// 0 for a channel flag.
     pub fn asset(&self, binding: &LibraryCellInstance, params: &str) -> &'static str {
         let (n, p) = self.model.core.assets();
-        let (Some(p), Polarity::Parameter(name)) = (p, self.model.polarity) else {
+        let (Some(p), Polarity::Parameter(name) | Polarity::Flag(name)) = (p, self.model.polarity)
+        else {
             return n;
+        };
+        let is_p = |value: f64| match self.model.polarity {
+            Polarity::Flag(_) => value < 0.5,
+            _ => value < 0.0,
         };
         let stated = crate::parameters::parse_params_string(params)
             .get(&name.to_ascii_lowercase())
@@ -466,7 +502,7 @@ impl DeviceGlyph {
                 })?
                 .default
         };
-        if stated.or_else(by_default).is_some_and(|sign| sign < 0.0) {
+        if stated.or_else(by_default).is_some_and(is_p) {
             p
         } else {
             n
@@ -641,7 +677,7 @@ mod tests {
                     descriptor.model_name
                 );
             }
-            if let Polarity::Parameter(name) = glyph.model.polarity {
+            if let Polarity::Parameter(name) | Polarity::Flag(name) = glyph.model.polarity {
                 assert!(
                     descriptor.parameters.iter().any(|parameter| {
                         parameter.name.eq_ignore_ascii_case(name)
@@ -674,6 +710,36 @@ mod tests {
             .find(|descriptor| descriptor.model_name == model)
             .expect("the model is shipped");
         generated_veriloga_library_binding(descriptor).expect("a binding")
+    }
+
+    /// BSIM-CMG 107, 108 and 110 share a module but not a channel
+    /// parameter: each release draws P from its own 1/0 flag.
+    #[test]
+    fn bsim_cmg_releases_before_111_draw_p_from_their_own_flag() {
+        for (model, flag, other) in [
+            ("bsimcmg107", "devtype", "type"),
+            ("bsimcmg108", "type", "nfin"),
+            ("bsimcmg110", "type", "nfin"),
+        ] {
+            let binding = binding(model);
+            let glyph = compact_model_glyph(&binding).expect("a device glyph");
+            assert_eq!(glyph.asset(&binding, ""), "mos_n_soi_4t.svg", "{model}");
+            assert_eq!(
+                glyph.asset(&binding, &format!("{flag}=0")),
+                "mos_p_soi_4t.svg",
+                "{model}"
+            );
+            assert_eq!(
+                glyph.asset(&binding, &format!("{flag}=1")),
+                "mos_n_soi_4t.svg",
+                "{model}"
+            );
+            assert_eq!(
+                glyph.asset(&binding, &format!("{other}=0")),
+                "mos_n_soi_4t.svg",
+                "{model}"
+            );
+        }
     }
 
     /// BSIM-CMG draws the four-terminal SOI glyph with its back gate and

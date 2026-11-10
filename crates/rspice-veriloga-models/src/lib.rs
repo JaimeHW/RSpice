@@ -38,6 +38,14 @@ pub use rspice_veriloga_model_bjtd505t_va::bjtd505t__bjtd505t_va__06e24760;
 pub use rspice_veriloga_model_bsimbulk::bsimbulk__bsimbulk__0f953aae;
 #[cfg(feature = "veriloga-model-bsimcmg-va")]
 pub use rspice_veriloga_model_bsimcmg_va::bsimcmg__bsimcmg_va__f3a4082f;
+#[cfg(feature = "veriloga-model-bsimcmg107")]
+pub use rspice_veriloga_model_bsimcmg107::bsimcmg__bsimcmg__2942a719;
+#[cfg(feature = "veriloga-model-bsimcmg108")]
+pub use rspice_veriloga_model_bsimcmg108::bsimcmg__bsimcmg__fda3bcb1;
+#[cfg(feature = "veriloga-model-bsimcmg110")]
+pub use rspice_veriloga_model_bsimcmg110::bsimcmg__bsimcmg__30c9f617;
+#[cfg(feature = "veriloga-model-bsimcmg111")]
+pub use rspice_veriloga_model_bsimcmg111::bsimcmg__bsimcmg_va__8faa17c3;
 #[cfg(feature = "veriloga-model-bsimimg")]
 pub use rspice_veriloga_model_bsimimg::bsimimg__bsimimg__25eb6a31;
 #[cfg(feature = "veriloga-model-bsimsoi-18c250bc")]

@@ -70,9 +70,27 @@ fn shipped_cmc_tree_discovers_veriloga_models_without_omi() {
         "OMI must not be part of the shipped Verilog-A discovery tree"
     );
 
+    for (package, module) in [
+        ("cmc/BSIMCMG107.0.0_20130712", "bsimcmg"),
+        ("cmc/BSIMCMG108.0.0_20140822", "bsimcmg"),
+        ("cmc/BSIMCMG110.0.0_20160101", "bsimcmg"),
+        ("cmc/BSIM-CMG_111.2.1_06062022", "bsimcmg_va"),
+    ] {
+        // 107 and 108 keep the module in bsimcmg_main.va, which their
+        // bsimcmg.va includes; the scan reads each file as written.
+        assert!(
+            entries
+                .iter()
+                .any(|entry| entry.package == package && entry.modules == [module]),
+            "{package} should discover module {module}"
+        );
+    }
     let bsim_cmg = entries
         .iter()
-        .find(|entry| entry.source_path.ends_with("code/bsimcmg.va"))
+        .find(|entry| {
+            entry.package == "cmc/BSIM-CMG_112.1.0_04282026"
+                && entry.source_path.ends_with("code/bsimcmg.va")
+        })
         .expect("BSIM-CMG Verilog-A entry");
     assert!(
         bsim_cmg

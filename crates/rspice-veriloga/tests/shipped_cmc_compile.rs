@@ -10,6 +10,7 @@
 //! `RSPICE_CMC_COMPILE_JOBS=4 RSPICE_CMC_COMPILE_TIMEOUT_SECS=60 cargo test -p rspice-veriloga --test shipped_cmc_compile shipped_veriloga_models_compile_end_to_end -- --ignored --nocapture`
 
 use rspice_veriloga::preprocessor::MacroDef;
+use rspice_veriloga::rust_backend::discover_veriloga_sources;
 use rspice_veriloga::{
     CodeGenerator, CompiledModel, CompilerOptions, Lexer, Parser, Preprocessor, SemanticAnalyzer,
     SourceMap, VerilogACompiler,
@@ -565,10 +566,26 @@ fn trim_output(output: &str) -> String {
 fn discover_model_sources(root: &Path) -> io::Result<Vec<ModelSource>> {
     let mut files = Vec::new();
     collect_va_files(root, &mut files)?;
+    // A file the compile profile skips is not built, so it is no root here.
+    let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let built: BTreeSet<PathBuf> = discover_veriloga_sources(root)
+        .map_err(|error| io::Error::other(error.to_string()))?
+        .into_iter()
+        .filter_map(|candidate| {
+            candidate
+                .path
+                .strip_prefix(&canonical_root)
+                .ok()
+                .map(Path::to_path_buf)
+        })
+        .collect();
 
     let mut sources = Vec::new();
     for path in files {
         let relative = path.strip_prefix(root).unwrap_or(&path);
+        if !built.contains(relative) {
+            continue;
+        }
         let package = package_name(relative).unwrap_or_else(|| ".".to_string());
         let package_root = package_root(root, relative);
         let include_dirs = discover_include_dirs(&package_root)?;

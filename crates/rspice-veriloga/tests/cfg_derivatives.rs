@@ -2129,7 +2129,7 @@ fn every_shipped_device_has_one_identity() {
     );
     assert_eq!(
         declared.len() - bare.len(),
-        4,
+        7,
         "shared module names {shared:?} cost {} of {} keys; a bare-name key \
          would merge exactly those devices",
         declared.len() - bare.len(),

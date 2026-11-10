@@ -1210,8 +1210,8 @@ fn cmc_mos_levels_fail_closed_as_veriloga_codegen_targets() {
     let generated = [
         (58, cfg!(feature = "veriloga-model-bsimsoi-va")),
         (70, cfg!(feature = "veriloga-model-bsimsoi-va")),
-        (107, cfg!(feature = "veriloga-model-bsimcmg-va")),
-        (111, cfg!(feature = "veriloga-model-bsimcmg-va")),
+        (107, cfg!(feature = "veriloga-model-bsimcmg107")),
+        (111, cfg!(feature = "veriloga-model-bsimcmg111")),
         (70470, cfg!(feature = "veriloga-model-bsimsoi-18c250bc")),
         (10240, cfg!(feature = "veriloga-model-l-utsoi-832ce87d")),
     ];

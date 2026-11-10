@@ -57,6 +57,10 @@ pub struct FamilyFeatures {
     pub veriloga_model_bjtd505_va: bool,
     pub veriloga_model_bjtd505t_va: bool,
     pub veriloga_model_bsimbulk: bool,
+    pub veriloga_model_bsimcmg107: bool,
+    pub veriloga_model_bsimcmg108: bool,
+    pub veriloga_model_bsimcmg110: bool,
+    pub veriloga_model_bsimcmg111: bool,
     pub veriloga_model_bsimcmg_va: bool,
     pub veriloga_model_bsimimg: bool,
     pub veriloga_model_bsimsoi_18c250bc: bool,
@@ -155,6 +159,10 @@ macro_rules! family_features {
             veriloga_model_bjtd505_va "veriloga-model-bjtd505-va"
             veriloga_model_bjtd505t_va "veriloga-model-bjtd505t-va"
             veriloga_model_bsimbulk "veriloga-model-bsimbulk"
+            veriloga_model_bsimcmg107 "veriloga-model-bsimcmg107"
+            veriloga_model_bsimcmg108 "veriloga-model-bsimcmg108"
+            veriloga_model_bsimcmg110 "veriloga-model-bsimcmg110"
+            veriloga_model_bsimcmg111 "veriloga-model-bsimcmg111"
             veriloga_model_bsimcmg_va "veriloga-model-bsimcmg-va"
             veriloga_model_bsimimg "veriloga-model-bsimimg"
             veriloga_model_bsimsoi_18c250bc "veriloga-model-bsimsoi-18c250bc"

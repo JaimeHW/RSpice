@@ -6314,6 +6314,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "rspice-veriloga-model-bsimcmg107"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-bsimcmg108"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-bsimcmg110"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-bsimcmg111"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
 name = "rspice-veriloga-model-bsimimg"
 version = "0.1.0"
 dependencies = [
@@ -6619,6 +6647,10 @@ dependencies = [
  "rspice-veriloga-model-bjtd505t-va",
  "rspice-veriloga-model-bsimbulk",
  "rspice-veriloga-model-bsimcmg-va",
+ "rspice-veriloga-model-bsimcmg107",
+ "rspice-veriloga-model-bsimcmg108",
+ "rspice-veriloga-model-bsimcmg110",
+ "rspice-veriloga-model-bsimcmg111",
  "rspice-veriloga-model-bsimimg",
  "rspice-veriloga-model-bsimsoi-18c250bc",
  "rspice-veriloga-model-bsimsoi-e2aff994",

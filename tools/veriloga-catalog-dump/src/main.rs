@@ -8,7 +8,7 @@ use rspice_core::device::veriloga_builtins::{
     generated_veriloga_model_descriptor, generated_veriloga_model_descriptors,
 };
 
-const EXPECTED_SHIPPED_MODEL_COUNT: usize = 56;
+const EXPECTED_SHIPPED_MODEL_COUNT: usize = 60;
 
 fn main() -> ExitCode {
     let validate_only = match parse_arguments() {
