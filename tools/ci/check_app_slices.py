@@ -163,6 +163,7 @@ SLICE_RULES = [
     (W + r"app/accesskit_dump_tests\.rs$", "shell"),
     (W + r"app/accessible_mirror_tests\.rs$", "shell"),
     (W + r"app/pane_focus_tests\.rs$", "shell"),
+    (W + r"app/run_flow_tests\.rs$", "shell"),
     # Chrome, docks, commands and menus.
     (W + r"chrome/presence", "cloud"),
     (W + r"chrome/(sheet_strip|status_bar/sheets)", "sheets"),
