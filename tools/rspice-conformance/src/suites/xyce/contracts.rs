@@ -594,7 +594,7 @@ impl XyceTestRunner {
             XyceAbmPowKind::NegativeIntegerExponent => {
                 &[("b5", "5", "(v(1))**-2"), ("b6", "6", "(v(1))**-3")]
             }
-            XyceAbmPowKind::FractionalPrincipalComplex => {
+            XyceAbmPowKind::FractionalExponent => {
                 &[("b5", "5", "(v(1))**2.1"), ("b6", "6", "(-v(1))**3.1")]
             }
         };

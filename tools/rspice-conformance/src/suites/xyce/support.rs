@@ -586,17 +586,25 @@ impl XyceTestRunner {
                 (XyceAbmPowKind::NegativeIntegerExponent, true) => {
                     vec![input * input, input * input * input]
                 }
-                (XyceAbmPowKind::FractionalPrincipalComplex, false) => vec![
-                    Complex64::new(input, 0.0).powf(2.1).re,
-                    Complex64::new(-input, 0.0).powf(3.1).re,
-                ],
-                (XyceAbmPowKind::FractionalPrincipalComplex, true) => vec![
+                // The Release 7.10 sidecar projects the principal complex power,
+                // so (-2.5)**3.1 is -16.29 there. QSPICE gives zero for a negative
+                // base at a fractional exponent that is not the reciprocal of an
+                // odd integer, LTspice agrees, and QSPICE outranks Xyce where they
+                // differ, so RSpice's power rule is QSPICE's in every dialect. The
+                // negative-base rows take that branch, the positive-base rows keep
+                // the sidecar's formula, and Xyce's projection is the counterfactual
+                // this oracle must tell apart.
+                (XyceAbmPowKind::FractionalExponent, false) => vec![
                     if input < 0.0 { 0.0 } else { input.powf(2.1) },
                     if -input < 0.0 {
                         0.0
                     } else {
                         (-input).powf(3.1)
                     },
+                ],
+                (XyceAbmPowKind::FractionalExponent, true) => vec![
+                    Complex64::new(input, 0.0).powf(2.1).re,
+                    Complex64::new(-input, 0.0).powf(3.1).re,
                 ],
             };
             let mut derived = vec![row[0], input];

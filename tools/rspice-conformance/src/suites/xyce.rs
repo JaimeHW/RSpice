@@ -3119,14 +3119,14 @@ struct XyceXdmReplaceGroundElementSnapshot {
 enum XyceAbmPowKind {
     UnaryMinusPrecedence,
     NegativeIntegerExponent,
-    FractionalPrincipalComplex,
+    FractionalExponent,
 }
 
 impl XyceAbmPowKind {
     const ALL: [Self; 3] = [
         Self::UnaryMinusPrecedence,
         Self::NegativeIntegerExponent,
-        Self::FractionalPrincipalComplex,
+        Self::FractionalExponent,
     ];
 
     fn for_record(relative_path: &str) -> Option<Self> {
@@ -3138,7 +3138,7 @@ impl XyceAbmPowKind {
         match self {
             Self::UnaryMinusPrecedence => "netlists/abm_pow/abmpow1.cir",
             Self::NegativeIntegerExponent => "netlists/abm_pow/abmpow2.cir",
-            Self::FractionalPrincipalComplex => "netlists/abm_pow/abmpow3.cir",
+            Self::FractionalExponent => "netlists/abm_pow/abmpow3.cir",
         }
     }
 
@@ -3146,14 +3146,14 @@ impl XyceAbmPowKind {
         match self {
             Self::UnaryMinusPrecedence => &["Index", "V(1)", "V(4)"],
             Self::NegativeIntegerExponent => &["Index", "V(1)", "V(5)", "V(6)"],
-            Self::FractionalPrincipalComplex => &["Index", "V(1)", "V(5)", "V(6)"],
+            Self::FractionalExponent => &["Index", "V(1)", "V(5)", "V(6)"],
         }
     }
 
     fn expected_rows(self) -> usize {
         match self {
             Self::UnaryMinusPrecedence => 51,
-            Self::NegativeIntegerExponent | Self::FractionalPrincipalComplex => 26,
+            Self::NegativeIntegerExponent | Self::FractionalExponent => 26,
         }
     }
 }
