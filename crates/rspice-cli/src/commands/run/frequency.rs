@@ -21,7 +21,9 @@ use crate::report::format_spice_exponent;
 use super::payload_report as report;
 mod state;
 mod table;
+mod xyce_sensitivity;
 pub(super) use state::{StatePublication, run_at_transient_state, shared_state_times};
+pub(super) use xyce_sensitivity::{is_xyce_sensitivity, run_xyce_sensitivity};
 
 /// A noise sweep and the `device:param` values of its bias point.
 type NoiseWithBias = (Vec<rspice_core::analysis::NoiseResult>, Vec<(String, f64)>);

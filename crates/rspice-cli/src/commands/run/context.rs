@@ -1097,6 +1097,11 @@ impl<'a> RunContext<'a> {
                 input_source,
                 table_name,
             )?,
+            AnalysisCommand::Sensitivity { .. }
+                if frequency::is_xyce_sensitivity(self, analysis) =>
+            {
+                frequency::run_xyce_sensitivity(self, analysis)?
+            }
             AnalysisCommand::Sensitivity { .. } => {
                 frequency::run_sensitivity_from_command(self, analysis)?
             }

@@ -89,6 +89,8 @@ pub enum OutputAnalysisKind {
     Sp,
     /// Periodic steady-state analysis.
     Pss,
+    /// Xyce's `.SENS` table, one row per point of the primary DC analysis.
+    Sens,
 }
 
 impl OutputAnalysisKind {
@@ -105,6 +107,7 @@ impl OutputAnalysisKind {
             "TF" => Some(Self::Tf),
             "SP" => Some(Self::Sp),
             "PSS" => Some(Self::Pss),
+            "SENS" => Some(Self::Sens),
             _ => None,
         }
     }

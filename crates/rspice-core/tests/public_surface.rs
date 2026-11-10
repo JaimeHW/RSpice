@@ -451,7 +451,11 @@ use rspice_core::analysis::harmonic_balance::{
 // `Engine::run_noise_named_reporting_operating_point_with_abort`, the
 // `device:param` values a Xyce `.PRINT AC` or `.PRINT NOISE` card prints at
 // the analysis's own bias point, bring it to 5,279.
-const MAX_PUBLIC_ITEMS: usize = 5279;
+// `Engine::run_sensitivity_dc_sweep_with_abort`, its `DcSweepSensitivityPoint`
+// and that type's re-export, and `execution::sensitivity_print_columns`, a
+// Xyce `.SENS` study at every `.DC` point and its `.PRINT SENS` columns, bring
+// it to 5,283.
+const MAX_PUBLIC_ITEMS: usize = 5283;
 
 /// The `#[doc(hidden)] pub` items of the family, counted apart from
 /// `MAX_PUBLIC_ITEMS`. A hidden item is plumbing that one crate of the engine

@@ -210,3 +210,76 @@ fn invalid_sensitivity_print_keeps_existing_exports() {
     );
     assert!(!dir.join("result.control-001.json").exists());
 }
+
+/// A diode divider at its operating point. Xyce 7.10 writes `.SENS.prn` as
+/// `Index V(2) I(V1) {I(V1)} d_{I(V1)}/d_R1:R_adj ... d_{I(V1)}/d_DM:N_adj`:
+/// the `.PRINT SENS` columns, the objective, then the adjoint derivatives
+/// Xyce prints by default. Its default Newton tolerances leave the
+/// derivatives up to 1% off the converged tangent (d/dR2 = 9.01884554e-09);
+/// with `.options nonlin deltaxtol=1e-12 reltol=1e-12` it prints the values
+/// asserted here, which are the closed-form derivatives of the divider.
+/// `DM:N` is a default the model does not author, so its column is omitted
+/// with a warning.
+#[test]
+fn a_xyce_sens_card_writes_xyce_s_table_of_the_objective_and_its_derivatives() {
+    let dir = common::test_dir("xyce_sensitivity_table");
+    let deck = dir.join("divider.cir");
+    std::fs::write(
+        &deck,
+        "* diode divider\nV1 1 0 DC 3\nR1 1 2 2k\nR2 2 0 1k\nD1 2 0 DM\n.model DM D(IS=1e-12)\n\
+         .op\n.print sens v(2) i(v1)\n.SENS objfunc={I(V1)} param=R1:R,R2:R,V1:DCV0,DM:IS,DM:N\n\
+         .end\n",
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .env("RUST_LOG", "warn")
+        .args(["run", "--spice-dialect", "xyce"])
+        .arg(&deck)
+        .arg("-o")
+        .arg(dir.join("out.csv"))
+        .args(["-f", "csv"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("DM:N"), "{stderr}");
+    let table = std::fs::read_to_string(dir.join("out.sens-001.csv")).unwrap();
+    let mut rows = table.lines().filter(|line| !line.starts_with('#'));
+    let header = rows.next().unwrap().split(',').collect::<Vec<_>>();
+    assert_eq!(
+        header,
+        [
+            "Index",
+            "v(2)",
+            "i(v1)",
+            "{I(V1)}",
+            "d_{I(V1)}/d_R1:R_adj",
+            "d_{I(V1)}/d_R2:R_adj",
+            "d_{I(V1)}/d_V1:DCV0_adj",
+            "d_{I(V1)}/d_DM:IS_adj",
+        ]
+    );
+    let values = rows
+        .next()
+        .unwrap()
+        .split(',')
+        .map(|value| value.parse::<f64>().unwrap())
+        .collect::<Vec<_>>();
+    assert!(rows.next().is_none(), "an operating point is one row");
+    let expected = [
+        0.0,
+        5.27108047e-01,
+        -1.23644598e-03,
+        -1.23644598e-03,
+        6.07536513e-07,
+        9.11148068e-09,
+        -4.91357103e-04,
+        -1.22614687e+07,
+    ];
+    for ((name, actual), expected) in header.iter().zip(&values).zip(expected) {
+        assert!(
+            (actual - expected).abs() <= 1e-6 * expected.abs(),
+            "{name}: expected {expected:e}, got {actual:e}"
+        );
+    }
+}

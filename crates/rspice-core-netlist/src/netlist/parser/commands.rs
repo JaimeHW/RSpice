@@ -1824,6 +1824,7 @@ pub fn option_package_key_is_known(key_upper: &str) -> bool {
             | "RESTART"
             | "HBINT"
             | "LINSOL-HB"
+            | "SENSITIVITY"
     )
 }
 

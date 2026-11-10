@@ -827,6 +827,24 @@ pub(in crate::netlist::parser) fn parse_options_command(
                         );
                     }
                 }
+                // Which derivative columns a `.SENS` table prints; Xyce reads
+                // each as a boolean (N_IO_OutputMgr.C:2845-2870).
+                (Some("SENSITIVITY"), "DIRECT" | "ADJOINT" | "OUTPUTSCALED" | "OUTPUTUNSCALED") => {
+                    let name = format!("SENSITIVITY.{key_upper}");
+                    let value = expect_value(stream, line_num, params)?;
+                    let enabled = parse_xyce_i32_option(&name, value, line_num)? != 0;
+                    let slot = match key_upper.as_str() {
+                        "DIRECT" => &mut options.sensitivity_direct,
+                        "ADJOINT" => &mut options.sensitivity_adjoint,
+                        "OUTPUTSCALED" => &mut options.sensitivity_output_scaled,
+                        _ => &mut options.sensitivity_output_unscaled,
+                    };
+                    if slot.is_none() {
+                        *slot = Some(enabled);
+                    } else {
+                        warn_duplicate_packaged_option(&name, line_num, diagnostics);
+                    }
+                }
                 (Some("TIMEINT"), "MINORD") => {
                     let value = expect_value(stream, line_num, params)?;
                     if options.timeint_min_order.is_none() {

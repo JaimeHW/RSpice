@@ -412,6 +412,7 @@ fn with_intended_master<'n>(
 
 mod geometry_scale;
 mod model_policy;
+pub(crate) use model_policy::BJT_MODEL_ALIAS_GROUPS;
 pub(crate) use model_policy::without_repeated_topology_reports;
 use model_policy::*;
 mod advanced_mos;

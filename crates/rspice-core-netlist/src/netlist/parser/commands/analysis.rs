@@ -36,6 +36,9 @@ const LTSPICE_STARTUP_RAMP: Value = 20e-6;
 #[derive(Debug)]
 pub(super) struct ParsedAnalysisCard {
     analysis: Option<AnalysisCommand>,
+    /// The studies after the first that one card authors: each further
+    /// objective of a Xyce `.SENS`.
+    further_analyses: Vec<AnalysisCommand>,
     lin_analysis: Option<LinAnalysis>,
     fft_analysis: Option<FftAnalysis>,
     monte_carlo_source_card: Option<monte_carlo_identity::SourceCard>,
@@ -230,6 +233,7 @@ impl ParsedAnalysisCard {
             current_noise,
         } = context;
         let mut analysis = None;
+        let mut further_analyses = Vec::new();
         let mut lin_analysis = None;
         let mut fft_analysis = None;
         let mut monte_carlo_source_card = None;
@@ -492,6 +496,31 @@ impl ParsedAnalysisCard {
                 let noise = parse_noise_command(stream, line_num, params, &mut frequency_list)?;
                 analysis = Some(noise);
             }
+            AnalysisHead::Sensitivity
+                if spice_dialect == crate::config::SpiceDialect::Xyce
+                    && starts_xyce_sens_fields(stream) =>
+            {
+                let card = parse_xyce_sens_command(stream);
+                for message in card.warnings {
+                    diagnostics.push(ParseDiagnostic::warning_at(
+                        origin.clone(),
+                        "xyce-sens-field",
+                        message,
+                    ));
+                }
+                let mut objectives = card.objectives.into_iter();
+                analysis = objectives.next();
+                further_analyses.extend(objectives);
+                if analysis.is_none() {
+                    diagnostics.push(ParseDiagnostic::warning_at(
+                        origin.clone(),
+                        "xyce-sens-no-objective",
+                        ".SENS names no OBJFUNC objective (OBJVARS and ACOBJFUNC select AC \
+                         sensitivity outputs), so no DC sensitivity is computed"
+                            .to_string(),
+                    ));
+                }
+            }
             AnalysisHead::Sensitivity => {
                 let sens = parse_sens_command(stream, line_num, params)?;
                 analysis = Some(sens);
@@ -533,6 +562,7 @@ impl ParsedAnalysisCard {
         source_map_diagnostics(&mut collected_diagnostics, origin);
         let card = Self {
             analysis,
+            further_analyses,
             lin_analysis,
             fft_analysis,
             monte_carlo_source_card,
@@ -607,6 +637,7 @@ impl ParsedAnalysisCard {
         if let Some(analysis) = self.analysis {
             sink.analyses.push(analysis);
         }
+        sink.analyses.extend(self.further_analyses);
         if let Some(lin) = self.lin_analysis {
             *sink.lin_analysis = Some(lin);
         }

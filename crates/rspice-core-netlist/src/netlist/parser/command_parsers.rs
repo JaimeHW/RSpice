@@ -1647,6 +1647,175 @@ pub(super) fn parse_sens_command(
     })
 }
 
+/// Whether a `.SENS` card is written in Xyce's `KEY=value` form
+/// (`.SENS OBJFUNC={I(VM)} PARAM=RB1:R`) rather than SPICE's positional one.
+pub(super) fn starts_xyce_sens_fields(stream: &TokenStream) -> bool {
+    matches!(stream.peek().kind, TokenKind::Ident(_))
+        && matches!(stream.peek_n(1).kind, TokenKind::Equals)
+}
+
+/// A Xyce `.SENS` card: one sensitivity study per objective, all of them over
+/// the one parameter list, and the warnings the card's fields earned.
+pub(super) struct XyceSensCard {
+    pub(super) objectives: Vec<AnalysisCommand>,
+    pub(super) warnings: Vec<String>,
+}
+
+/// Parse Xyce's `.SENS OBJFUNC={obj}[,{obj}...] PARAM=p[,p...]`
+/// (N_IO_OutputMgr.C:2568-2660).
+///
+/// `PARAM` is a list that runs on across whitespace and continuation lines
+/// until the next `KEY=`; each entry is kept as authored, uppercased, since
+/// Xyce names its columns that way. `SENSDEVICENAME=M1` asks for every
+/// parameter of one device, the filter `M1:*`. An objective is a `V()` or
+/// `I()` probe; an expression objective keeps its braced text as the output
+/// name, which the DC study refuses by name when it runs, so a deck whose
+/// sensitivities are never computed (a transient one) still runs. `OBJVARS`
+/// and `ACOBJFUNC` select AC sensitivity outputs and are read but not used.
+pub(super) fn parse_xyce_sens_command(stream: &mut TokenStream) -> XyceSensCard {
+    let mut text = String::new();
+    let mut previous_end = None;
+    while !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        let token = stream.advance();
+        if previous_end.is_some_and(|end| end != token.span.start) {
+            text.push(' ');
+        }
+        if token.lexeme.is_empty() {
+            text.push_str(&token.kind.to_string());
+        } else {
+            text.push_str(&token.lexeme);
+        }
+        previous_end = Some(token.span.end);
+    }
+
+    // `KEY = value`, `KEY= value` and `KEY =value` are one field.
+    let mut words: Vec<String> = Vec::new();
+    let mut join_next = false;
+    for word in split_xyce_sens_text(&text, char::is_whitespace) {
+        let joins = join_next || word.starts_with('=');
+        match words.last_mut() {
+            Some(last) if joins => last.push_str(&word),
+            _ => words.push(word),
+        }
+        join_next = words.last().is_some_and(|last| last.ends_with('='));
+    }
+
+    let mut warnings = Vec::new();
+    let mut fields: Vec<(String, String)> = Vec::new();
+    for word in words {
+        match word.split_once('=') {
+            Some((key, value))
+                if !key.is_empty()
+                    && key
+                        .chars()
+                        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_') =>
+            {
+                fields.push((key.to_ascii_uppercase(), value.to_owned()));
+            }
+            // A list continued past whitespace or a continuation line.
+            _ => match fields.last_mut() {
+                Some((_, list)) => {
+                    if !list.is_empty() && !list.ends_with(',') {
+                        list.push(',');
+                    }
+                    list.push_str(&word);
+                }
+                None => warnings.push(format!("Xyce .SENS field '{word}' has no name; ignored")),
+            },
+        }
+    }
+
+    let mut objectives = Vec::new();
+    let mut filters = Vec::new();
+    for (key, value) in fields {
+        let entries = split_xyce_sens_text(&value, |ch| ch == ',');
+        match key.as_str() {
+            "OBJFUNC" => objectives.extend(entries),
+            "PARAM" | "PARAMS" => filters.extend(entries.iter().map(|entry| entry.to_uppercase())),
+            "SENSDEVICENAME" => filters.extend(
+                entries
+                    .iter()
+                    .map(|entry| format!("{}:*", entry.to_uppercase())),
+            ),
+            "OBJVARS" | "ACOBJFUNC" => {}
+            _ => warnings.push(format!(
+                "{key} is not a recognized sensitivity solver option; ignored"
+            )),
+        }
+    }
+
+    let objectives = objectives
+        .into_iter()
+        .map(|objective| {
+            let body = objective
+                .strip_prefix('{')
+                .and_then(|inner| inner.strip_suffix('}'))
+                .unwrap_or(&objective)
+                .trim()
+                .to_uppercase();
+            let probe = |prefix: &str| {
+                body.strip_prefix(prefix)
+                    .and_then(|rest| rest.strip_suffix(')'))
+                    .filter(|inner| !inner.contains(['(', ')']))
+                    .map(str::trim)
+            };
+            let (output_node, reference_node, output_is_current) =
+                if let Some(element) = probe("I(").filter(|inner| !inner.contains(',')) {
+                    (element.to_owned(), None, true)
+                } else if let Some(nodes) = probe("V(") {
+                    match nodes.split_once(',') {
+                        Some((node, reference)) => (
+                            node.trim().to_owned(),
+                            Some(reference.trim().to_owned()),
+                            false,
+                        ),
+                        None => (nodes.to_owned(), None, false),
+                    }
+                } else {
+                    (format!("{{{body}}}"), None, false)
+                };
+            AnalysisCommand::Sensitivity {
+                output_node,
+                reference_node,
+                output_is_current,
+                filters: filters.clone(),
+                ac_sweep: None,
+            }
+        })
+        .collect();
+    XyceSensCard {
+        objectives,
+        warnings,
+    }
+}
+
+/// Split Xyce `.SENS` text at each separator outside braces and parentheses,
+/// dropping empty pieces (the trailing comma of a continued list).
+fn split_xyce_sens_text(text: &str, separator: impl Fn(char) -> bool) -> Vec<String> {
+    let mut pieces = Vec::new();
+    let mut current = String::new();
+    let mut depth = 0usize;
+    for ch in text.chars() {
+        match ch {
+            '{' | '(' => depth += 1,
+            '}' | ')' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+        if depth == 0 && separator(ch) {
+            if !current.trim().is_empty() {
+                pieces.push(current.trim().to_owned());
+            }
+            current.clear();
+        } else {
+            current.push(ch);
+        }
+    }
+    if !current.trim().is_empty() {
+        pieces.push(current.trim().to_owned());
+    }
+    pieces
+}
+
 /// Consume one whitespace-delimited `.SENS` device specification. Wildcards
 /// are separate lexer tokens, so source spans are used to join adjacent pieces
 /// (`M*`, `MOD:*`, `R?_TC1`) without merging the next whitespace-separated

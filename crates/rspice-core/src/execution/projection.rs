@@ -990,6 +990,21 @@ fn unanswered_device_quantity(
     )
 }
 
+/// Evaluate a deck's `.PRINT SENS` columns at each operating point of a Xyce
+/// `.SENS` study, in card and operand order.
+pub fn sensitivity_print_columns(
+    netlist: &Netlist,
+    sweep: &[(Value, crate::solver::SimulationResult)],
+    limits: crate::ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<ProjectedSignals, SimulationError> {
+    crate::analysis::measure_signals::evaluate_sens_output_requests_with_abort(
+        netlist, sweep, limits, abort,
+    )
+    .and_then(frontend_columns)
+    .map(|signals| ProjectedSignals { signals })
+}
+
 /// Convert the core resolver's frontend column tuples into typed columns.
 fn frontend_columns(
     columns: Vec<crate::analysis::measure_signals::FrontendOutputColumn>,

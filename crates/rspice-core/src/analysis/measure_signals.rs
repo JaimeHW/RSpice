@@ -131,7 +131,9 @@ enum MeasurementSignalDomain {
 impl MeasurementSignalDomain {
     fn for_analysis(analysis: OutputAnalysisKind) -> Result<Self, String> {
         match analysis {
-            OutputAnalysisKind::Tran | OutputAnalysisKind::Dc => Ok(Self::Real),
+            OutputAnalysisKind::Tran | OutputAnalysisKind::Dc | OutputAnalysisKind::Sens => {
+                Ok(Self::Real)
+            }
             OutputAnalysisKind::Ac | OutputAnalysisKind::Hb | OutputAnalysisKind::Noise => {
                 Ok(Self::Complex)
             }
@@ -2185,13 +2187,29 @@ pub(crate) fn evaluate_tran_output_requests(
 /// Evaluate source-authored real `.PRINT DC` requests in exact card and
 /// operand order. DC columns are rebuilt by canonical name at every point;
 /// result-shape changes can therefore never be silently zero-filled.
+///
+/// `.PRINT SENS` reads the same operating points, one per `.SENS` row, but
+/// only a card that names SENS prints there: Xyce has no unqualified card.
 fn evaluate_dc_output_columns_with_abort(
     netlist: &Netlist,
     sweep: &[(Value, SimulationResult)],
+    analysis: OutputAnalysisKind,
     limits: ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> Result<Vec<OutputColumn>, OutputProjectionError> {
-    let requests = matching_print_requests(netlist, OutputAnalysisKind::Dc);
+    let requests = match analysis {
+        OutputAnalysisKind::Sens => netlist
+            .output_requests
+            .iter()
+            .filter(|request| {
+                matches!(
+                    request.directive,
+                    OutputDirectiveKind::Print | OutputDirectiveKind::Plot
+                ) && request.analysis == Some(OutputAnalysisKind::Sens)
+            })
+            .collect(),
+        _ => matching_print_requests(netlist, analysis),
+    };
     let Some(&first_request) = requests.first() else {
         return Ok(Vec::new());
     };
@@ -2214,7 +2232,7 @@ fn evaluate_dc_output_columns_with_abort(
     });
     let projection = preflight_real_output_requests(
         &requests,
-        OutputAnalysisKind::Dc,
+        analysis,
         sweep.len(),
         node_metadata,
         netlist,
@@ -2229,29 +2247,25 @@ fn evaluate_dc_output_columns_with_abort(
                     OutputProjectionError::ResourceLimit(error)
                 }
                 DcOutputSeriesBuildError::Detail(detail) => {
-                    output_request_error(first_request, OutputAnalysisKind::Dc, 0, None, detail)
+                    output_request_error(first_request, analysis, 0, None, detail)
                 }
             },
         )?;
-    let alias_projection = InterfaceNodeAliasProjection::new_with_abort(
-        netlist,
-        OutputAnalysisKind::Dc,
-        series.axis.len(),
-        abort,
-    )
-    .map_err(|error| match error {
-        InterfaceNodeAliasProjectionError::Aborted => OutputProjectionError::Aborted,
-        InterfaceNodeAliasProjectionError::Detail(detail) => {
-            output_request_error(first_request, OutputAnalysisKind::Dc, 0, None, detail)
-        }
-    })?;
-    let measure_error =
-        |detail| output_request_error(first_request, OutputAnalysisKind::Dc, 0, None, detail);
-    let printed = match printed::prints_measures(netlist, "DC")
-        .then(|| DcSweepSeries::from_sweep(sweep))
-        .transpose()
-        .map_err(|error| measure_error(error.to_string()))?
-        .flatten()
+    let alias_projection =
+        InterfaceNodeAliasProjection::new_with_abort(netlist, analysis, series.axis.len(), abort)
+            .map_err(|error| match error {
+            InterfaceNodeAliasProjectionError::Aborted => OutputProjectionError::Aborted,
+            InterfaceNodeAliasProjectionError::Detail(detail) => {
+                output_request_error(first_request, analysis, 0, None, detail)
+            }
+        })?;
+    let measure_error = |detail| output_request_error(first_request, analysis, 0, None, detail);
+    let printed = match (analysis == OutputAnalysisKind::Dc
+        && printed::prints_measures(netlist, "DC"))
+    .then(|| DcSweepSeries::from_sweep(sweep))
+    .transpose()
+    .map_err(|error| measure_error(error.to_string()))?
+    .flatten()
     {
         Some(measure_series) => {
             let mut measure_signals = measure_series.signal_map();
@@ -2260,7 +2274,7 @@ fn evaluate_dc_output_columns_with_abort(
                 .map_err(measure_error)?;
             printed::printed_real_measure_traces(
                 netlist,
-                OutputAnalysisKind::Dc,
+                analysis,
                 measure_series.axis(),
                 &measure_signals,
                 None,
@@ -2276,9 +2290,9 @@ fn evaluate_dc_output_columns_with_abort(
     };
     let sweep_variables = DcSweepVariables::of(netlist, series.axis.len());
     let mut signals = series.signal_map();
-    alias_projection.augment(&mut signals).map_err(|detail| {
-        output_request_error(first_request, OutputAnalysisKind::Dc, 0, None, detail)
-    })?;
+    alias_projection
+        .augment(&mut signals)
+        .map_err(|detail| output_request_error(first_request, analysis, 0, None, detail))?;
     insert_printed_measure_traces(&mut signals, &printed);
     sweep_variables.insert(
         &mut signals,
@@ -2287,7 +2301,7 @@ fn evaluate_dc_output_columns_with_abort(
     );
     evaluate_real_output_requests(
         &requests,
-        OutputAnalysisKind::Dc,
+        analysis,
         &series.axis,
         &signals,
         &netlist.params,
@@ -2402,7 +2416,20 @@ pub fn evaluate_dc_output_requests_with_abort(
     limits: ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> Result<Vec<FrontendOutputColumn>, SimulationError> {
-    evaluate_dc_output_columns_with_abort(netlist, sweep, limits, abort)
+    evaluate_dc_output_columns_with_abort(netlist, sweep, OutputAnalysisKind::Dc, limits, abort)
+        .map(frontend_output_columns)
+        .map_err(frontend_output_error)
+}
+
+/// Evaluate ordered real `.PRINT SENS` columns at the operating points of a
+/// Xyce `.SENS` study, one row per point.
+pub(crate) fn evaluate_sens_output_requests_with_abort(
+    netlist: &Netlist,
+    sweep: &[(Value, SimulationResult)],
+    limits: ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<FrontendOutputColumn>, SimulationError> {
+    evaluate_dc_output_columns_with_abort(netlist, sweep, OutputAnalysisKind::Sens, limits, abort)
         .map(frontend_output_columns)
         .map_err(frontend_output_error)
 }
@@ -2412,7 +2439,13 @@ pub(crate) fn evaluate_dc_output_requests(
     netlist: &Netlist,
     sweep: &[(Value, SimulationResult)],
 ) -> Result<Vec<OutputColumn>, OutputProjectionError> {
-    evaluate_dc_output_columns_with_abort(netlist, sweep, ResourceLimits::default(), &NoAbort)
+    evaluate_dc_output_columns_with_abort(
+        netlist,
+        sweep,
+        OutputAnalysisKind::Dc,
+        ResourceLimits::default(),
+        &NoAbort,
+    )
 }
 
 fn frontend_output_columns(columns: Vec<OutputColumn>) -> Vec<FrontendOutputColumn> {

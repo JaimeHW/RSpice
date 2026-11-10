@@ -922,6 +922,19 @@ pub(crate) fn dc_export_signals(
     )
 }
 
+/// The `.PRINT SENS` columns at each operating point of a Xyce `.SENS`
+/// study, in card and operand order.
+pub(crate) fn sensitivity_print_signals(
+    netlist: &rspice_core::Netlist,
+    results: &[(Value, SimulationResult)],
+    limits: rspice_core::ResourceLimits,
+    abort: &dyn rspice_core::AbortSignal,
+) -> Result<Vec<ScalarSignal>, rspice_core::SimulationError> {
+    let projected =
+        rspice_core::execution::sensitivity_print_columns(netlist, results, limits, abort)?;
+    scalar_signals("SENS", projected)
+}
+
 pub(crate) fn transient_export_signals(
     netlist: &rspice_core::Netlist,
     result: &TransientResult,

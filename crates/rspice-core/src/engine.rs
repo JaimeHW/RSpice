@@ -101,7 +101,7 @@ use crate::analysis::transient as result;
 pub use pstb::PeriodicStabilityResult;
 mod progress;
 mod sensitivity;
-pub use sensitivity::SensitivityCardResult;
+pub use sensitivity::{DcSweepSensitivityPoint, SensitivityCardResult};
 mod small_signal_bias;
 mod small_signal_state;
 pub use small_signal_state::{SmallSignalCardResult, StateLinearizedResult, TransientState};

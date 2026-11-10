@@ -1,9 +1,11 @@
+mod dc_sweep;
 #[cfg(test)]
 mod design_parameter_tests;
 #[cfg(test)]
 mod expression_value_tests;
 mod parameter;
 mod refinement;
+pub use dc_sweep::DcSweepSensitivityPoint;
 
 use super::progress::StudyProgress;
 use super::{Engine, SimulationError};
@@ -3467,6 +3469,19 @@ impl Engine {
         filters: &[String],
         abort: &dyn AbortSignal,
     ) -> Result<SensitivityResult, SimulationError> {
+        self.dc_sensitivity_with_operating_point(netlist, output, filters, abort)
+            .map(|(result, _)| result)
+    }
+
+    /// [`Self::run_sensitivity_dc_complete_with_abort`], also returning the
+    /// operating point every row was taken at.
+    pub(crate) fn dc_sensitivity_with_operating_point(
+        &self,
+        netlist: &Netlist,
+        output: AcSensitivityOutput,
+        filters: &[String],
+        abort: &dyn AbortSignal,
+    ) -> Result<(SensitivityResult, SimulationResult), SimulationError> {
         let progress = StudyProgress::new(abort)?;
         let setup = progress.stage(0.0, 0.1);
         let abort: &dyn AbortSignal = &setup;
@@ -3652,7 +3667,7 @@ impl Engine {
         }
         result.one_sided = one_sided;
 
-        progress.complete(result)
+        progress.complete((result, nominal_result))
     }
 
     /// Differentiate one AC probe, at every frequency, with respect to the

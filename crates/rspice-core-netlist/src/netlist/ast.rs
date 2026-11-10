@@ -5104,6 +5104,20 @@ pub struct SimulationOptions {
     /// Xyce `TIMEINT NLSMALLUPDATE`: whether a transient Newton solve that
     /// stops on a tiny update succeeds (`+4`) rather than fails (`-4`).
     pub timeint_nl_small_update: Option<bool>,
+    /// Xyce `.OPTIONS SENSITIVITY DIRECT`: whether a `.SENS` table prints the
+    /// direct-method derivative columns (`d_{obj}/d_<param>_dir`); off when
+    /// not given (N_IO_OutputMgr.C:2853-2856).
+    pub sensitivity_direct: Option<bool>,
+    /// Xyce `.OPTIONS SENSITIVITY ADJOINT`: whether a `.SENS` table prints the
+    /// adjoint derivative columns (`_adj`); on when not given.
+    pub sensitivity_adjoint: Option<bool>,
+    /// Xyce `.OPTIONS SENSITIVITY OUTPUTSCALED`: whether a `.SENS` table also
+    /// prints each derivative scaled by the parameter's value over 100
+    /// (`_dir_scaled`, `_adj_scaled`); off when not given.
+    pub sensitivity_output_scaled: Option<bool>,
+    /// Xyce `.OPTIONS SENSITIVITY OUTPUTUNSCALED`: whether a `.SENS` table
+    /// prints the unscaled derivatives; on when not given.
+    pub sensitivity_output_unscaled: Option<bool>,
     /// Xyce `.OPTIONS TIMEINT DEBUGLEVEL`: signed 32-bit time-integrator
     /// diagnostic verbosity after Xyce-compatible numeric conversion. This
     /// is retained as metadata and does not alter transient equations or

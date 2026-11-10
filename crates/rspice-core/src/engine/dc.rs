@@ -66,6 +66,18 @@ pub fn bounded_dc_sweep_points(
         })
 }
 
+/// What one `.DC` sweep variable sets at each point.
+#[derive(Debug, Clone)]
+pub(crate) enum DcSweepVariable {
+    /// `TEMP`/`TEMPER`: the circuit temperature in degrees Celsius.
+    Temperature,
+    /// A numeric design parameter, or the device parameter a swept name
+    /// stands for.
+    Parameter(String),
+    /// An independent source's DC value.
+    Source(String),
+}
+
 /// One accepted point from a DC sweep, including the solved node/branch result
 /// and the per-device operating-point report cached at that bias.
 #[derive(Debug, Clone)]
@@ -2202,13 +2214,7 @@ impl Engine {
         lifecycle: &mut DcSweepLifecycle,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<DcSweepPointResult>, SimulationError> {
-        let is_temp =
-            source_name.eq_ignore_ascii_case("TEMP") || source_name.eq_ignore_ascii_case("TEMPER");
-        let parameter = if Self::netlist_has_numeric_parameter(netlist, source_name) {
-            Some(source_name.to_owned())
-        } else {
-            self.dc_sweep_parameter_override(netlist, source_name)
-        };
+        let variable = self.dc_sweep_variable(netlist, source_name);
         let mut results =
             Vec::with_capacity(sweep_points.len().min(DC_SWEEP_RESULT_PREALLOC_LIMIT));
         let mut retained_values = 0usize;
@@ -2216,27 +2222,8 @@ impl Engine {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
-            let swept = if is_temp {
-                Self::temperature_point_netlist(netlist, sweep_value)
-            } else if let Some(parameter) = &parameter {
-                Self::create_perturbed_netlist_with_limits_and_abort(
-                    netlist,
-                    parameter,
-                    sweep_value,
-                    self.config.resource_limits,
-                    abort,
-                )?
-                .0
-            } else {
-                let mut swept = netlist.clone();
-                Self::override_independent_source_dc(&mut swept, source_name, sweep_value)?;
-                swept
-            };
-            let temperature_engine = if is_temp {
-                Some(self.temperature_point_engine(&swept, sweep_value)?)
-            } else {
-                None
-            };
+            let (swept, temperature_engine) =
+                self.dc_sweep_point(netlist, &variable, sweep_value, abort)?;
             lifecycle.sweep_value = sweep_value;
             let (result, device_op_report) = temperature_engine
                 .as_ref()
@@ -2258,6 +2245,59 @@ impl Engine {
             results.push(point);
         }
         Ok(results)
+    }
+
+    /// What a `.DC` card's swept name sets: the circuit temperature, a
+    /// numeric design or device parameter, or an independent source's DC
+    /// value, in that order of precedence.
+    pub(crate) fn dc_sweep_variable(
+        &self,
+        netlist: &Netlist,
+        source_name: &str,
+    ) -> DcSweepVariable {
+        if source_name.eq_ignore_ascii_case("TEMP") || source_name.eq_ignore_ascii_case("TEMPER") {
+            DcSweepVariable::Temperature
+        } else if Self::netlist_has_numeric_parameter(netlist, source_name) {
+            DcSweepVariable::Parameter(source_name.to_owned())
+        } else if let Some(parameter) = self.dc_sweep_parameter_override(netlist, source_name) {
+            DcSweepVariable::Parameter(parameter)
+        } else {
+            DcSweepVariable::Source(source_name.to_owned())
+        }
+    }
+
+    /// The deck one independent DC sweep point solves, and for a temperature
+    /// point the engine that solves it at that temperature.
+    pub(crate) fn dc_sweep_point(
+        &self,
+        netlist: &Netlist,
+        variable: &DcSweepVariable,
+        sweep_value: Value,
+        abort: &dyn AbortSignal,
+    ) -> Result<(Netlist, Option<Self>), SimulationError> {
+        Ok(match variable {
+            DcSweepVariable::Temperature => {
+                let swept = Self::temperature_point_netlist(netlist, sweep_value);
+                let engine = self.temperature_point_engine(&swept, sweep_value)?;
+                (swept, Some(engine))
+            }
+            DcSweepVariable::Parameter(parameter) => (
+                Self::create_perturbed_netlist_with_limits_and_abort(
+                    netlist,
+                    parameter,
+                    sweep_value,
+                    self.config.resource_limits,
+                    abort,
+                )?
+                .0,
+                None,
+            ),
+            DcSweepVariable::Source(source_name) => {
+                let mut swept = netlist.clone();
+                Self::override_independent_source_dc(&mut swept, source_name, sweep_value)?;
+                (swept, None)
+            }
+        })
     }
 
     fn run_dc_parameter_sweep_spec_with_report_and_abort(

@@ -1194,6 +1194,35 @@ pub(super) fn validate_bjt_instance_controls(
     Ok(())
 }
 
+/// The BJT model parameters that name one quantity under several spellings,
+/// each group with the quantity it sets.
+pub(crate) const BJT_MODEL_ALIAS_GROUPS: &[(&str, &[&str])] = &[
+    ("forward beta", &["BF", "BFM"]),
+    ("forward Early voltage", &["VAF", "VA", "VBF"]),
+    ("forward high-current roll-off", &["IKF", "IK", "JBF"]),
+    ("base-emitter leakage current", &["ISE", "JLE"]),
+    ("base-emitter leakage emission coefficient", &["NE", "NLE"]),
+    ("reverse beta", &["BR", "BRM"]),
+    ("reverse Early voltage", &["VAR", "VB", "VRB", "BV"]),
+    ("reverse high-current roll-off", &["IKR", "JBR"]),
+    ("base-collector leakage current", &["ISC", "JLC"]),
+    ("base-resistance half-current", &["IRB", "JRB", "IOB"]),
+    ("base-emitter built-in potential", &["VJE", "PE"]),
+    ("base-emitter grading coefficient", &["MJE", "ME"]),
+    ("base-collector built-in potential", &["VJC", "PC"]),
+    ("base-collector grading coefficient", &["MJC", "MC"]),
+    ("base-collector capacitance partition", &["XCJC", "CDIS"]),
+    ("collector-substrate capacitance", &["CJS", "CCS", "CSUB"]),
+    ("substrate built-in potential", &["VJS", "PS", "PSUB"]),
+    ("substrate grading coefficient", &["MJS", "MS", "ESUB"]),
+    (
+        "forward transit-time high-current parameter",
+        &["ITF", "JTF"],
+    ),
+    ("beta temperature exponent", &["XTB", "TB", "TCB"]),
+    ("saturation-current temperature exponent", &["XTI", "PT"]),
+];
+
 fn validate_bjt_model_alias_groups(
     element_name: &str,
     model: &str,
@@ -1201,33 +1230,6 @@ fn validate_bjt_model_alias_groups(
     expr_params: &[(String, String)],
     string_params: &[(String, String)],
 ) -> Result<(), SimulationError> {
-    const ALIAS_GROUPS: &[(&str, &[&str])] = &[
-        ("forward beta", &["BF", "BFM"]),
-        ("forward Early voltage", &["VAF", "VA", "VBF"]),
-        ("forward high-current roll-off", &["IKF", "IK", "JBF"]),
-        ("base-emitter leakage current", &["ISE", "JLE"]),
-        ("base-emitter leakage emission coefficient", &["NE", "NLE"]),
-        ("reverse beta", &["BR", "BRM"]),
-        ("reverse Early voltage", &["VAR", "VB", "VRB", "BV"]),
-        ("reverse high-current roll-off", &["IKR", "JBR"]),
-        ("base-collector leakage current", &["ISC", "JLC"]),
-        ("base-resistance half-current", &["IRB", "JRB", "IOB"]),
-        ("base-emitter built-in potential", &["VJE", "PE"]),
-        ("base-emitter grading coefficient", &["MJE", "ME"]),
-        ("base-collector built-in potential", &["VJC", "PC"]),
-        ("base-collector grading coefficient", &["MJC", "MC"]),
-        ("base-collector capacitance partition", &["XCJC", "CDIS"]),
-        ("collector-substrate capacitance", &["CJS", "CCS", "CSUB"]),
-        ("substrate built-in potential", &["VJS", "PS", "PSUB"]),
-        ("substrate grading coefficient", &["MJS", "MS", "ESUB"]),
-        (
-            "forward transit-time high-current parameter",
-            &["ITF", "JTF"],
-        ),
-        ("beta temperature exponent", &["XTB", "TB", "TCB"]),
-        ("saturation-current temperature exponent", &["XTI", "PT"]),
-    ];
-
     let is_authored = |candidate: &str| {
         params.contains_key(candidate)
             || expr_params
@@ -1235,7 +1237,7 @@ fn validate_bjt_model_alias_groups(
                 .chain(string_params.iter())
                 .any(|(name, _)| name.eq_ignore_ascii_case(candidate))
     };
-    for (quantity, aliases) in ALIAS_GROUPS {
+    for (quantity, aliases) in BJT_MODEL_ALIAS_GROUPS {
         let authored = aliases
             .iter()
             .copied()
