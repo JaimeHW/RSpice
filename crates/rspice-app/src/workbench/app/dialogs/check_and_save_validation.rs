@@ -159,11 +159,7 @@ impl CheckAndSaveValidationReport {
                 error,
             );
         }
-        match state
-            .model
-            .model_library_manager
-            .reference_process_model_cards(state.model.sim_setup.reference_pvt.process)
-        {
+        match state.model.run_reference_model_cards() {
             Ok(cards) => {
                 dependencies.insert(
                     "models:reference-process-cards".to_owned(),

@@ -292,7 +292,8 @@ pub(super) fn catalog_model_location(
     let provider = state
         .model
         .model_library_manager
-        .effective_definition_provider(
+        .effective_plan_definition_provider(
+            &state.model.sim_setup.model_bindings,
             crate::state::model_library::ModelConsumerScope::PrimitiveModel,
             &model_name,
         )
@@ -356,7 +357,8 @@ fn foundation_default_model_location(
     let provider = state
         .model
         .model_library_manager
-        .effective_definition_provider(
+        .effective_plan_definition_provider(
+            &state.model.sim_setup.model_bindings,
             crate::state::model_library::ModelConsumerScope::PrimitiveModel,
             family.default_model_name(),
         )
@@ -561,7 +563,8 @@ pub(crate) fn bind_component_model_from_catalog(
         .state
         .model
         .model_library_manager
-        .effective_definition_provider(
+        .effective_plan_definition_provider(
+            &app.state.model.sim_setup.model_bindings,
             crate::state::model_library::ModelConsumerScope::PrimitiveModel,
             model_name,
         )?

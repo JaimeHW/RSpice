@@ -8,6 +8,23 @@ use crate::state::pdk_config::{
 use super::Model;
 
 impl Model {
+    /// The reference-process cards a run of the active plan reads: the
+    /// libraries the plan binds, joined by the signed package while the
+    /// project's technology is in effect. A technology failing its own
+    /// contract has its own finding, so that failure answers nothing here.
+    pub fn run_reference_model_cards(&self) -> Result<Vec<String>, String> {
+        let technology = self.technology_inputs();
+        let sealed = if !technology.project_technology_in_effect() {
+            self.model_library_manager
+                .seal_execution_sources_for_plan(&self.sim_setup.model_bindings)?
+        } else if technology.validate_project_technology_contract().is_ok() {
+            technology.seal_project_execution_model_sources()?
+        } else {
+            return Ok(Vec::new());
+        };
+        sealed.reference_process_model_cards(self.sim_setup.reference_pvt.process)
+    }
+
     /// Resolve the project-owned technology contract against both mutable
     /// execution catalogs. No simulation or governed save may infer authority
     /// from a display label, an active registry package, or model paths alone.

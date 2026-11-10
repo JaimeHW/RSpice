@@ -308,7 +308,11 @@ fn validate_model_binding_authority(
     let effective = state
         .model
         .model_library_manager
-        .effective_definition_provider(ModelConsumerScope::PrimitiveModel, &declared)?
+        .effective_plan_definition_provider(
+            &state.model.sim_setup.model_bindings,
+            ModelConsumerScope::PrimitiveModel,
+            &declared,
+        )?
         .expect("a non-empty provider set has one effective provider");
     if let Some(library_name) = selected_library.as_deref()
         && !effective.library.eq_ignore_ascii_case(library_name)

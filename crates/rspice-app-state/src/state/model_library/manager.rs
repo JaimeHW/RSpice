@@ -275,6 +275,23 @@ impl ModelLibraryManager {
             .effective_definition_provider(&self.catalog, scope, definition)
     }
 
+    /// The provider a run of a plan bound to `bindings` reads: its one bound
+    /// provider of the name, or the project-global decision. What a surface
+    /// says about an instance in the design follows this.
+    pub fn effective_plan_definition_provider(
+        &self,
+        bindings: &[SimulationPlanModelBinding],
+        scope: ModelConsumerScope,
+        definition: &str,
+    ) -> Result<Option<ModelDefinitionProvider>, String> {
+        self.resolution_records.effective_plan_definition_provider(
+            &self.catalog,
+            bindings,
+            scope,
+            definition,
+        )
+    }
+
     pub fn resolve_definition_provider(
         &mut self,
         scope: ModelConsumerScope,
@@ -863,7 +880,8 @@ impl ModelLibraryManager {
         Ok(lib_name)
     }
 
-    /// Resolve deterministic, self-contained model cards for a nominal run.
+    /// Every executable library's cards for the nominal process.
+    #[cfg(test)]
     pub fn reference_process_model_cards(
         &self,
         process: crate::product::ProcessCorner,

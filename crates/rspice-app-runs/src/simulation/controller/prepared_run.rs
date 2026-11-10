@@ -516,6 +516,7 @@ impl SimulationController {
         validate_projected_model_binding_authority(
             model.model_library_manager.catalog(),
             model.model_library_manager.resolution_records(),
+            &model.sim_setup.model_bindings,
             model.library_manager.catalog(),
             model.workspace.content.project.technology_binding(),
             model.pdk_config.technology_registry.validated_packages(),

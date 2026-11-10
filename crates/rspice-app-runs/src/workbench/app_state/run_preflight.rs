@@ -76,11 +76,25 @@ pub fn run_preflight_block_reason(
     // The technology demand row owns this failure when nothing is attached and
     // the plan demands a technology; reporting both would name two remedies.
     let technology_attached = workspace.content.project.has_audited_technology_binding();
-    if (technology_attached
-        || technology_demand(sim_setup, workspace.content.physical_layout_documents()).is_empty())
-        && let Err(error) =
-            model_library.reference_process_model_cards(sim_setup.reference_pvt.process)
+    // A run seals the libraries its plan binds, and only those. With a
+    // technology attached the signed package holds the process sections, which
+    // the full preflight seals; here only the plan's own libraries are read.
+    let reference = if technology_attached {
+        model_library
+            .seal_execution_sources_for_plan(&sim_setup.model_bindings)
+            .map(drop)
+    } else if technology_demand(sim_setup, workspace.content.physical_layout_documents()).is_empty()
     {
+        model_library
+            .seal_execution_sources_for_plan(&sim_setup.model_bindings)
+            .and_then(|sealed| {
+                sealed.reference_process_model_cards(sim_setup.reference_pvt.process)
+            })
+            .map(drop)
+    } else {
+        Ok(())
+    };
+    if let Err(error) = reference {
         return Some(error);
     }
     // The retained editor DRC result describes only the active schematic.

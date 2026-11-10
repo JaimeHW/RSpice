@@ -2052,6 +2052,37 @@ fn the_inspector_reads_the_projection_so_coincident_pages_stay_two_nets() {
     );
 }
 
+/// A plan's run reads the library it binds, so the instance states that
+/// provider's card even when another drawing's library defines the same name.
+#[test]
+fn a_model_the_plan_binds_reads_as_resolved_beside_another_drawings_copy() {
+    let mut state = AppState::default();
+    state.model.model_library_manager.clear();
+    for name in ["alpha", "beta"] {
+        let bytes = format!(".model shared_diode D(Is=1n) ; {name}\n");
+        state
+            .model
+            .model_library_manager
+            .load_library_bytes(&format!("{name}.lib"), bytes.into_bytes(), None)
+            .expect("the fixture source parses");
+    }
+    let component = Component::new(77, ComponentType::Diode, Point::origin())
+        .with_name_value("D77", "shared_diode");
+    let ambiguous = super::component_model_evidence(&state, &component)
+        .problem
+        .expect("two libraries and no plan binding is a contest");
+    assert_eq!(ambiguous.0, Problem::Failure);
+
+    let binding = state
+        .model
+        .model_library_manager
+        .simulation_plan_binding("beta")
+        .expect("the fixture library is bindable");
+    state.model.sim_setup.model_bindings.push(binding);
+    let evidence = super::component_model_evidence(&state, &component);
+    assert_eq!(evidence.problem, None, "the run reads beta alone");
+}
+
 #[test]
 fn a_resolved_contested_model_reads_as_resolved_and_keeps_its_source_jump() {
     use crate::state::model_library::ModelConsumerScope;

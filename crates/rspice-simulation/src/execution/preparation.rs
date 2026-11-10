@@ -190,6 +190,7 @@ where
     validate_projected_model_binding_authority(
         inputs.technology.models,
         inputs.technology.resolutions,
+        &inputs.technology.sim_setup.model_bindings,
         inputs.libraries,
         inputs.technology.project.technology_binding(),
         inputs.technology.registry.validated_packages(),

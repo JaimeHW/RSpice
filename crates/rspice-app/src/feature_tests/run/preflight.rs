@@ -1366,8 +1366,9 @@ fn a_model_binding_blocker_remediates_to_corners_and_sections() {
         .selected_corner = Some("zz".to_owned());
     // A second declarer, authored rather than assumed: a library declares TT
     // only by carrying a TT section, so the ambiguity this case is about has to
-    // be built from a source that has one.
-    state
+    // be built from a source that has one. Both are the plan's, since the check
+    // judges what the run will read.
+    let second = state
         .model
         .model_library_manager
         .load_library_bytes(
@@ -1376,6 +1377,14 @@ fn a_model_binding_blocker_remediates_to_corners_and_sections() {
             None,
         )
         .expect("the second fixture source parses");
+    for library in [&name, &second] {
+        let binding = state
+            .model
+            .model_library_manager
+            .simulation_plan_binding(library)
+            .expect("the fixture library is bindable");
+        state.model.sim_setup.model_bindings.push(binding);
+    }
     let report = collect_report(&state);
     let binding = report
         .blockers
@@ -1438,6 +1447,12 @@ fn a_model_binding_blocker_lands_on_the_only_library_that_declares_the_process()
         .get_library_mut(&name)
         .expect("the fixture library is retained")
         .selected_corner = Some("zz".to_owned());
+    let bound = state
+        .model
+        .model_library_manager
+        .simulation_plan_binding(&name)
+        .expect("the fixture library is bindable");
+    state.model.sim_setup.model_bindings.push(bound);
 
     let report = collect_report(&state);
     let binding = report
@@ -1498,6 +1513,12 @@ fn a_model_binding_blocker_with_no_single_library_names_what_to_select() {
             .get_library_mut(&name)
             .expect("the fixture library is retained")
             .selected_corner = Some("zz".to_owned());
+        let binding = state
+            .model
+            .model_library_manager
+            .simulation_plan_binding(&name)
+            .expect("the fixture library is bindable");
+        state.model.sim_setup.model_bindings.push(binding);
     }
 
     let report = collect_report(&state);

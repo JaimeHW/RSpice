@@ -9,15 +9,17 @@ use crate::pdk::{ValidatedPdkTechnologyPackage, project_signed_technology_packag
 use crate::preparation::{PreparationError, PreparationStage};
 use rspice_design::library::LibraryCatalog;
 use rspice_model_library::ProjectTechnologyBinding;
-use rspice_model_library::{ModelCatalog, ModelResolutionRecords};
+use rspice_model_library::{ModelCatalog, ModelResolutionRecords, SimulationPlanModelBinding};
 
 /// Revalidate every model-bearing instance in the frozen hierarchy against
-/// the project-global provider decision. Editor properties are not an
-/// execution authority: restored projects and older symbol revisions must
-/// pass this boundary immediately before their sources are sealed.
+/// the provider its run reads: the one library the plan binds for the name,
+/// or the project-global decision. Editor properties are not an execution
+/// authority: restored projects and older symbol revisions must pass this
+/// boundary immediately before their sources are sealed.
 pub fn validate_projected_model_binding_authority(
     models: &ModelCatalog,
     resolutions: &ModelResolutionRecords,
+    plan_bindings: &[SimulationPlanModelBinding],
     libraries: &LibraryCatalog,
     technology_binding: Option<&ProjectTechnologyBinding>,
     packages: &[ValidatedPdkTechnologyPackage],
@@ -124,7 +126,7 @@ pub fn validate_projected_model_binding_authority(
                 continue;
             }
             let effective = resolutions
-                .effective_definition_provider(models, scope, &definition)
+                .effective_plan_definition_provider(models, plan_bindings, scope, &definition)
                 .map_err(|error| {
                     PreparationError::new(
                         PreparationStage::ModelBindings,

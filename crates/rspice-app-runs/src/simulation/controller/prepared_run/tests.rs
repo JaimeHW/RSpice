@@ -172,6 +172,7 @@ fn frozen_hierarchy_rejects_stale_instance_model_library_metadata() {
     let error = validate_projected_model_binding_authority(
         state.model.model_library_manager.catalog(),
         state.model.model_library_manager.resolution_records(),
+        &state.model.sim_setup.model_bindings,
         state.model.library_manager.catalog(),
         state.model.workspace.content.project.technology_binding(),
         state
@@ -209,6 +210,7 @@ fn frozen_hierarchy_rejects_stale_instance_model_library_metadata() {
     validate_projected_model_binding_authority(
         state.model.model_library_manager.catalog(),
         state.model.model_library_manager.resolution_records(),
+        &state.model.sim_setup.model_bindings,
         state.model.library_manager.catalog(),
         state.model.workspace.content.project.technology_binding(),
         state

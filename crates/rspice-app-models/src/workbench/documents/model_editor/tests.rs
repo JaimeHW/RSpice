@@ -1048,7 +1048,8 @@ fn sectioned_editor_publishes_metadata_only_revision_without_losing_execution_se
     let cards = app
         .model
         .model_library_manager
-        .reference_process_model_cards(crate::product::ProcessCorner::TT)
+        .seal_execution_sources()
+        .and_then(|sealed| sealed.reference_process_model_cards(crate::product::ProcessCorner::TT))
         .expect("materialize saved section")
         .join("\n");
     assert!(cards.contains("VTH0=0.5"), "{cards}");

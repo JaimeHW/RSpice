@@ -9,7 +9,7 @@
 
 use egui::Ui;
 
-use crate::state::model_library::{ModelSourceAuthority, short_digest};
+use crate::state::model_library::{ModelSourceAuthority, SimulationPlanModelBinding, short_digest};
 use crate::ui::accessibility::{counted, plural_suffix};
 use crate::ui::icons::Icon;
 use crate::ui::widgets::{Button, IconButton, select};
@@ -29,18 +29,30 @@ use crate::ui::tokens::{self, Tokens};
 
 const CLOSURE_COLUMNS: [f32; 7] = [0.05, 0.18, 0.15, 0.12, 0.16, 0.20, 0.14];
 
-/// How many contested names this library provides, by the manager's own index.
+/// How many of this library's names another library of the plan also provides,
+/// by the manager's own index.
 ///
 /// Never recomputed here —
 /// [`Model::definition_index`](crate::workbench::app_state::Model::definition_index)
 /// is the models workspace's one answer to "who provides this name", and the
 /// studio states it rather than deriving a second opinion that would
-/// eventually disagree with the workspace an operator repairs it in.
-fn contested_names(definitions: &[DefinitionRow], library: &str) -> usize {
+/// eventually disagree with the workspace an operator repairs it in. A provider
+/// the plan does not bind is not one its run reads, so it contests nothing here.
+fn contested_names(
+    definitions: &[DefinitionRow],
+    bindings: &[SimulationPlanModelBinding],
+    library: &str,
+) -> usize {
     definitions
         .iter()
         .filter(|row| {
+            let bound = |provider: &String| {
+                bindings
+                    .iter()
+                    .any(|binding| binding.library_name.eq_ignore_ascii_case(provider))
+            };
             row.contested()
+                && row.providers.iter().filter(|name| bound(name)).count() > 1
                 && row
                     .providers
                     .iter()
@@ -108,7 +120,7 @@ fn closure(ui: &mut Ui, app: &mut RSpiceApp) {
         .count();
     let contested = bindings
         .iter()
-        .map(|binding| contested_names(&definitions, &binding.library_name))
+        .map(|binding| contested_names(&definitions, &bindings, &binding.library_name))
         .sum::<usize>();
     // Ordered by how badly each stops a reproducible run: an invalid binding
     // cannot resolve at all, a contested name fails closed at bind time, and
@@ -266,7 +278,8 @@ fn closure(ui: &mut Ui, app: &mut RSpiceApp) {
                 // more than one library claims. A contested name fails closed at
                 // bind time, so it belongs beside the count it spoils rather than
                 // in a separate advisory the reader has to correlate.
-                let contested_here = contested_names(&definitions, &binding.library_name);
+                let contested_here =
+                    contested_names(&definitions, &bindings, &binding.library_name);
                 let provides = match (library, contested_here) {
                     (None, _) => "—".to_owned(),
                     (Some(library), 0) => format!(

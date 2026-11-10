@@ -718,24 +718,29 @@ fn collect(state: &impl RunHost) -> PreflightReport {
         .technology_inputs()
         .project_technology_in_effect()
         || demand.is_empty())
-        && let Err(error) = state
-            .model()
-            .model_library_manager
-            .reference_process_model_cards(state.model().sim_setup.reference_pvt.process)
+        && let Err(error) = state.model().run_reference_model_cards()
     {
         let process = state.model().sim_setup.reference_pvt.process;
-        // The check is asked of the whole closure and its answer is a sentence
-        // about the closure, so the destination is resolved from what the
+        // The check is asked of the libraries the plan binds and its answer is
+        // a sentence about them, so the destination is resolved from what the
         // failure *names* — the process — rather than parsed back out of that
-        // sentence. A process declared by exactly one library has an
+        // sentence. A process declared by exactly one of them has an
         // unambiguous home and the route lands on it with the corner matrix
         // inspected; anything else keeps the page destination and says which
         // library the reader has to pick, because Corners & sections renders
         // from a selection and landing there with none is landing nowhere.
+        let bindings = &state.model().sim_setup.model_bindings;
         let providers = state
             .model()
             .model_library_manager
-            .libraries_declaring_process(process);
+            .libraries_declaring_process(process)
+            .into_iter()
+            .filter(|library| {
+                bindings
+                    .iter()
+                    .any(|binding| binding.library_name.eq_ignore_ascii_case(library))
+            })
+            .collect::<Vec<_>>();
         let (required, remediation) = match providers.as_slice() {
             [library] => (
                 format!("A resolved {} model section", process.short_name()),

@@ -174,8 +174,11 @@ pub(super) fn component_model_evidence(
         return match state
             .model
             .model_library_manager
-            .effective_definition_provider(ModelConsumerScope::PrimitiveModel, &model_name)
-        {
+            .effective_plan_definition_provider(
+                &state.model.sim_setup.model_bindings,
+                ModelConsumerScope::PrimitiveModel,
+                &model_name,
+            ) {
             Ok(Some(provider)) => state
                 .model
                 .model_library_manager

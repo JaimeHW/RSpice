@@ -652,13 +652,153 @@ fn a_part_runs_the_model_its_drawing_defines_and_a_repeat_adds_no_provider() {
         "the repeated card made no second provider"
     );
     model
-        .model_library_manager
-        .reference_process_model_cards(model.sim_setup.reference_pvt.process)
+        .run_reference_model_cards()
         .expect("the project's model names stay uncontested");
     controller
         .prepare_run_set_for_preflight(&app.state)
         .expect("the second drawing reads the library holding its card");
     std::fs::remove_dir_all(&folder).ok();
+}
+
+/// Run the active plan as the Run command does, through its checks, to the end.
+fn run_the_active_plan(app: &mut RSpiceApp) {
+    // The frame after an import, on which the controller lets go of the
+    // design it replaced; a check started before it would be dropped with it.
+    app.simulation_controller
+        .update(&mut app.state, &*app.export_workflow_io);
+    crate::workbench::preflight::start(&mut app.state, &mut app.simulation_controller, true);
+    app.settle_preflight();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    loop {
+        app.simulation_controller
+            .update(&mut app.state, &*app.export_workflow_io);
+        let execution = &app.state.model.simulation.execution;
+        if !app.simulation_controller.is_running()
+            && !execution.has_active_execution()
+            && !execution.trigger_simulation
+        {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the run did not finish"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+}
+
+/// The current the newest run drew through source `V1`, by its magnitude.
+fn v1_current(app: &RSpiceApp) -> f64 {
+    let run = app.state.model.simulation.active_run().expect("a run");
+    assert!(run.success, "{:?}", run.analyses);
+    let op = run
+        .analyses
+        .iter()
+        .find_map(|analysis| analysis.dc_op.as_ref())
+        .expect("the run retained its operating point");
+    op.branch_currents
+        .iter()
+        .find(|value| value.name.to_ascii_lowercase().contains("v1"))
+        .unwrap_or_else(|| panic!("no V1 current in {:?}", op.branch_currents))
+        .value
+        .abs()
+}
+
+/// Two drawings may each define one model name with their own text, and each
+/// plan runs the card its own drawing defined: a model belongs to the drawing
+/// that wrote it, as in LTspice. A run judges only the libraries its plan
+/// binds, so the other drawing's card contests nothing.
+#[test]
+fn each_plan_runs_the_model_its_own_drawing_defined() {
+    let folder = drawing_folder();
+    for (name, saturation) in [("one.asc", "1n"), ("two.asc", "2n")] {
+        std::fs::write(
+            folder.join(name),
+            format!(
+                "Version 4
+SHEET 1 880 680
+WIRE 96 96 32 96
+FLAG 32 176 0
+FLAG 96 160 0
+                 SYMBOL voltage 32 80 R0
+SYMATTR InstName V1
+SYMATTR Value 0.3
+                 SYMBOL diode 80 96 R0
+SYMATTR InstName D1
+SYMATTR Value MYD
+                 TEXT 32 240 Left 2 !.op
+TEXT 32 270 Left 2 !.model MYD D(Is={saturation})
+"
+            ),
+        )
+        .expect("schematic");
+    }
+    let mut app = RSpiceApp::test_instance();
+    app.state.open_project_session();
+    import_foreign_schematic_file(&mut app, &folder.join("one.asc"), ForeignTool::Ltspice)
+        .expect("the first schematic imports");
+    let first_plan = app
+        .state
+        .model
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("a plan")
+        .id();
+    import_foreign_schematic_file(&mut app, &folder.join("two.asc"), ForeignTool::Ltspice)
+        .expect("the second schematic imports");
+    std::fs::remove_dir_all(&folder).ok();
+    let bound = |app: &RSpiceApp| {
+        app.state
+            .model
+            .sim_setup
+            .model_bindings
+            .iter()
+            .map(|binding| binding.library_name.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(bound(&app), ["two"]);
+
+    run_the_active_plan(&mut app);
+    let two = v1_current(&app);
+
+    app.state
+        .model
+        .sim_setup
+        .activate_plan(first_plan)
+        .expect("the first drawing's plan is retained");
+    assert_eq!(bound(&app), ["one"], "the plan carries its own library");
+    run_the_active_plan(&mut app);
+    let one = v1_current(&app);
+
+    assert!(one > 1e-6, "the diode conducted: {one}");
+    let ratio = two / one;
+    assert!(
+        (ratio - 2.0).abs() < 1e-3,
+        "Is=2n against Is=1n at one voltage: {two} / {one} = {ratio}"
+    );
+
+    // A plan bound to both providers reads both, so it fails closed and says
+    // which libraries claim the name.
+    let binding = app
+        .state
+        .model
+        .model_library_manager
+        .simulation_plan_binding("two")
+        .expect("the second drawing's library is bindable");
+    app.state.model.sim_setup.model_bindings.push(binding);
+    let report = crate::workbench::preflight::collect_report(&app.state);
+    let refusal = report
+        .blockers
+        .iter()
+        .find(|issue| issue.check == "Reference model binding")
+        .unwrap_or_else(|| panic!("two providers in one plan refuse: {report:?}"));
+    for name in ["myd", "one", "two"] {
+        assert!(
+            refusal.observed.to_ascii_lowercase().contains(name),
+            "the refusal names {name}: {}",
+            refusal.observed
+        );
+    }
 }
 
 /// A directive block stays on the sheet as the drawing lettered it, whole,

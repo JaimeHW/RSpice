@@ -123,10 +123,13 @@ pub fn validate_component_model_catalog_binding(
             candidate,
         )?;
     }
-    let effective = model.model_library_manager.effective_definition_provider(
-        crate::state::model_library::ModelConsumerScope::PrimitiveModel,
-        model_name,
-    )?;
+    let effective = model
+        .model_library_manager
+        .effective_plan_definition_provider(
+            &model.sim_setup.model_bindings,
+            crate::state::model_library::ModelConsumerScope::PrimitiveModel,
+            model_name,
+        )?;
     let effective = effective
         .ok_or_else(|| format!("Model '{model_name}' has no executable catalog provider."))?;
     if !effective.library.eq_ignore_ascii_case(library_name) {

@@ -1,7 +1,9 @@
 //! Durable provider decisions, validated against the current portable catalog.
 
 use super::{MODEL_RESOLUTION_RECORD_SCHEMA_VERSION, ModelConsumerScope, ModelResolutionRecord};
-use crate::{ModelCatalog, ModelDefinitionProvider, model_library_source_digest};
+use crate::{
+    ModelCatalog, ModelDefinitionProvider, SimulationPlanModelBinding, model_library_source_digest,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -45,6 +47,32 @@ impl ModelResolutionRecords {
 
     pub fn owned_records(&self) -> Vec<ModelResolutionRecord> {
         self.records.values().cloned().collect()
+    }
+
+    /// The provider a run of a plan bound to `bindings` reads for `definition`.
+    ///
+    /// A run seals only the libraries its plan binds, so a plan binding exactly
+    /// one provider of a name reads that one whatever else the project holds.
+    /// A plan binding several, or none, falls to the project-global decision.
+    pub fn effective_plan_definition_provider(
+        &self,
+        catalog: &ModelCatalog,
+        bindings: &[SimulationPlanModelBinding],
+        scope: ModelConsumerScope,
+        definition: &str,
+    ) -> Result<Option<ModelDefinitionProvider>, String> {
+        let mut bound = catalog
+            .definition_providers(scope, definition)
+            .into_iter()
+            .filter(|provider| {
+                bindings
+                    .iter()
+                    .any(|binding| binding.library_name.eq_ignore_ascii_case(&provider.library))
+            });
+        match (bound.next(), bound.next()) {
+            (Some(provider), None) => Ok(Some(provider)),
+            _ => self.effective_definition_provider(catalog, scope, definition),
+        }
     }
 
     pub fn effective_definition_provider(
