@@ -487,6 +487,9 @@ pub struct SignalProjection {
     /// Whether a `.PRINT DC` card also prints the deck's `.OP`, which Xyce
     /// runs as a one-point DC analysis (IOInterfacePKG/N_IO_OutputMgr.C:635-641).
     dc_cards_print_operating_point: bool,
+    /// The names a `.PRINT AC` operand prints the sweep frequency by
+    /// ([`frequency_axis_column`]).
+    frequency_axis_names: &'static [&'static str],
 }
 
 #[derive(Debug, Clone)]
@@ -576,6 +579,11 @@ impl SignalProjection {
             complex_expressions: netlist.parse_dialect() == crate::config::SpiceDialect::Xyce,
             dc_cards_print_operating_point: netlist.parse_dialect()
                 == crate::config::SpiceDialect::Xyce,
+            frequency_axis_names: match netlist.parse_dialect() {
+                crate::config::SpiceDialect::Xyce => &["FREQ", "HERTZ"],
+                crate::config::SpiceDialect::Ngspice => &["FREQUENCY"],
+                crate::config::SpiceDialect::BestAvailable => &["FREQ"],
+            },
         })
     }
 
@@ -899,6 +907,9 @@ impl SignalProjection {
     ) -> Result<ProjectedSignal, SimulationError> {
         if let Some(column) = select_exact_inventory(source, authored, kind) {
             return Ok(column);
+        }
+        if let Some(column) = frequency_axis_column(source, authored, self.frequency_axis_names) {
+            return column;
         }
         match source_value_type(source) {
             // A real series the caller looked up for a complex result, as the
@@ -1668,6 +1679,38 @@ fn render_complex_column(
     })
 }
 
+/// The sweep frequency an AC print operand names, as a real column beside
+/// the phasors. Each dialect reads its own simulator's names: Xyce prints
+/// `FREQ` and `HERTZ` (and refuses `FREQUENCY`), ngspice prints
+/// `frequency` (and cannot parse `freq`), and the default dialect reads
+/// `FREQ`, since neither QSPICE nor LTspice prints a table a name could
+/// select. Xyce writes the column under the authored name after its own
+/// `FREQ` column.
+fn frequency_axis_column(
+    source: &ProjectionSource<'_>,
+    authored: &str,
+    names: &[&str],
+) -> Option<Result<ProjectedSignal, SimulationError>> {
+    let name = authored.trim();
+    if source.kind != AnalysisResultKind::Ac
+        || !names.iter().any(|axis| name.eq_ignore_ascii_case(axis))
+    {
+        return None;
+    }
+    let length = source.axis.len();
+    Some(
+        signal_descriptor(name, name, SignalKind::Scalar, SignalValueType::Real)
+            .map_err(|error| {
+                SimulationError::Netlist(format!("output '{name}' cannot be described: {error}"))
+            })
+            .map(|descriptor| ProjectedSignal {
+                descriptor,
+                values: ProjectionValues::Real(Cow::Owned(source.axis.to_vec())),
+                validity: vec![true; length],
+            }),
+    )
+}
+
 /// The complex column one authored operand selects, before any rendering.
 fn complex_operand_column(
     source: &ProjectionSource<'_>,
@@ -2251,6 +2294,72 @@ mod tests {
             Some((&[3.0, -1.0][..], &[4.0, 0.0][..]))
         );
         assert!(projected.signals()[10].complex().is_some());
+    }
+
+    /// `.PRINT AC FREQ VM(a)` prints the sweep frequency as a real column
+    /// before the magnitude, by the names each dialect's simulator prints it
+    /// under: `FREQ` and `HERTZ` in Xyce 7.10, `frequency` in ngspice 46,
+    /// `FREQ` in the default dialect. A name the dialect's simulator does not
+    /// know stays the unavailable signal it was; before, every one was.
+    #[test]
+    fn an_ac_print_reads_the_sweep_frequency_by_the_dialect_s_names() {
+        for (dialect, read, refused) in [
+            (crate::SpiceDialect::Xyce, "FREQ HERTZ", "frequency"),
+            (crate::SpiceDialect::Ngspice, "frequency", "freq"),
+            (crate::SpiceDialect::BestAvailable, "freq", "hertz"),
+        ] {
+            let parse = |operands: &str| {
+                Netlist::parse_with_options(
+                    &format!(
+                        "axis\nV1 a 0 AC 1\nR1 a 0 1k\n.AC DEC 1 1 10\n\
+                         .PRINT AC {operands} VM(a)\n.END\n"
+                    ),
+                    crate::netlist::NetlistParseOptions {
+                        spice_dialect: Some(dialect),
+                        ..Default::default()
+                    },
+                )
+                .expect("test netlist parses")
+            };
+            let netlist = parse(read);
+            let projected = SignalProjection::from_netlist(&netlist)
+                .expect("projection builds")
+                .project(
+                    &netlist.params,
+                    &rendering_source(),
+                    &crate::abort_signal::NoAbort,
+                )
+                .unwrap_or_else(|error| panic!("{dialect:?}: {error}"));
+            let names = names(&projected);
+            let axis = read.split_whitespace().count();
+            assert_eq!(
+                names[..axis],
+                read.split_whitespace().collect::<Vec<_>>()[..]
+            );
+            assert_eq!(names[axis], "VM(a)", "{dialect:?}");
+            for index in 0..axis {
+                assert_eq!(rendered(&projected, index), [1.0, 10.0], "{dialect:?}");
+                assert_eq!(
+                    projected.signals()[index].descriptor().kind(),
+                    SignalKind::Scalar
+                );
+            }
+            assert_eq!(rendered(&projected, axis), [5.0, 1.0]);
+
+            let netlist = parse(refused);
+            let error = SignalProjection::from_netlist(&netlist)
+                .expect("projection builds")
+                .project(
+                    &netlist.params,
+                    &rendering_source(),
+                    &crate::abort_signal::NoAbort,
+                )
+                .expect_err("a name the dialect's simulator does not know");
+            assert!(
+                matches!(error, SimulationError::RequestedSignalUnavailable(_)),
+                "{dialect:?}: {error}"
+            );
+        }
     }
 
     /// Xyce's `.OPTIONS OUTPUT PHASE_OUTPUT_RADIANS` prints `VP()` in radians.
