@@ -689,6 +689,39 @@ fn xyce_prints_an_ac_expression_in_complex_arithmetic() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A Xyce `.PRINT HB` expression is evaluated over the spectrum in complex
+/// arithmetic, bin by bin: a constant lands on every bin, the DC one and each
+/// harmonic alike. Xyce 7.10 prints, for this divider driven by a 1 V sine,
+/// `Re({V(OUT)+1.0})` = 1 on all eleven bins, `Im({V(OUT)+1.0})` =
+/// `Im(V(OUT))`, and `{V(OUT)*2}` = twice `V(OUT)`.
+#[test]
+fn xyce_prints_an_hb_expression_in_complex_arithmetic() {
+    let dir = test_dir("print_hb_expression");
+    let deck = "* hb expression\n.hb 1e5\n.print hb v(out) {v(out)+1.0} {v(out)*2}\n\
+                .options hbint numfreq=5\nV1 in 0 sin 0 1 1e5 0 0\nR1 in out 1k\n\
+                R2 out 0 1k\n.end\n";
+    let path = run_export_with_args(&dir, "xyce", deck, "csv", &["--spice-dialect", "xyce"]);
+    let text = std::fs::read_to_string(&path).expect("read csv");
+    let re = common::csv_column(&text, "Re(V(OUT))");
+    let im = common::csv_column(&text, "Im(V(OUT))");
+    let shifted_re = common::csv_column(&text, "Re({v(out)+1.0})");
+    let shifted_im = common::csv_column(&text, "Im({v(out)+1.0})");
+    let doubled_re = common::csv_column(&text, "Re({v(out)*2})");
+    let doubled_im = common::csv_column(&text, "Im({v(out)*2})");
+    assert!(re.len() > 1, "{text}");
+    for bin in 0..re.len() {
+        assert!((shifted_re[bin] - (re[bin] + 1.0)).abs() <= 1e-12, "{text}");
+        assert!((shifted_im[bin] - im[bin]).abs() <= 1e-12, "{text}");
+        assert!((doubled_re[bin] - 2.0 * re[bin]).abs() <= 1e-12, "{text}");
+        assert!((doubled_im[bin] - 2.0 * im[bin]).abs() <= 1e-12, "{text}");
+    }
+    assert!(
+        im.iter().any(|value| value.abs() > 0.1),
+        "the drive reaches V(OUT): {text}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A two-point LIN sweep visits both ends in every dialect, as Xyce, LTspice,
 /// QSPICE and ngspice's noise analysis step it; ngspice's AC analysis alone
 /// visits only the start (acan.c:104-113). `.DISTO`, which only ngspice runs,

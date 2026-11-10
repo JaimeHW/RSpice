@@ -481,8 +481,8 @@ pub struct SignalProjection {
     authored: bool,
     /// The unit a rendered phase (`VP(x)`, `ph(v(x))`) is printed in.
     phase_unit: PhaseUnit,
-    /// Whether an AC expression is evaluated in complex arithmetic, as Xyce
-    /// evaluates it ([`complex_expression`]).
+    /// Whether an AC or HB spectrum expression is evaluated in complex
+    /// arithmetic, as Xyce evaluates it ([`complex_expression`]).
     complex_expressions: bool,
     /// Whether a `.PRINT DC` card also prints the deck's `.OP`, which Xyce
     /// runs as a one-point DC analysis (IOInterfacePKG/N_IO_OutputMgr.C:635-641).
@@ -799,7 +799,10 @@ impl SignalProjection {
                     rendered_sources.push(column.identity());
                 }
                 if self.complex_expressions
-                    && source.kind == AnalysisResultKind::Ac
+                    && matches!(
+                        source.kind,
+                        AnalysisResultKind::Ac | AnalysisResultKind::HarmonicBalance
+                    )
                     && let OutputOperandKind::Expression { body } = kind
                     && let Some(expression) = complex_expression::xyce_ac_expression_columns(
                         source,

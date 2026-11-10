@@ -1,5 +1,6 @@
-//! A Xyce `.PRINT AC` expression, evaluated in complex arithmetic over the
-//! sweep. Xyce compiles an AC output expression over complex values and
+//! A Xyce `.PRINT AC` or `.PRINT HB` expression, evaluated in complex
+//! arithmetic over the sweep or the spectrum's bins. Xyce compiles an AC or
+//! HB frequency-domain output expression over complex values and
 //! prints one column when the expression's type is real, and its real and
 //! imaginary parts as `Re(...)` and `Im(...)` when it is complex
 //! (IOInterfacePKG/N_IO_OutputterLocal.C:368-377). The type is static, one
