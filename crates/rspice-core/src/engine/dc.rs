@@ -2870,6 +2870,21 @@ mod tests {
         assert_voltage(&biased, "1", 5.0);
     }
 
+    /// A netlist with no analysis card states no DC-only intent: an engine
+    /// call such as `run_dc_op` on it keeps a PWL source's t = 0 value in the
+    /// Xyce dialect too, where `all()` over no analyses would otherwise call
+    /// it all DC-mode and hold the source at 0.
+    #[test]
+    fn a_card_less_xyce_netlist_keeps_a_transient_source_at_its_t0_value() {
+        let netlist = Netlist::parse("card-less\nV1 1 0 PWL(0 3 1u 0)\nR1 1 0 1k\n.end\n")
+            .expect("deck parses");
+        assert!(netlist.analyses.is_empty());
+        let result = xyce_engine()
+            .run_dc_op(&netlist)
+            .expect("Xyce operating point");
+        assert_voltage(&result, "1", 3.0);
+    }
+
     #[test]
     fn xyce_dc_sweep_sets_a_model_card_parameter() {
         let netlist = Netlist::parse(
