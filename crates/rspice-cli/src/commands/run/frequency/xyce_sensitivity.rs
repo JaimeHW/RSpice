@@ -143,18 +143,6 @@ pub(in crate::commands::run) fn run_xyce_sensitivity(
     let Some(output) = output else {
         return Ok(());
     };
-    let single = matches!((points.as_slice(), cards.len()), ([_], 1));
-    if ctx.format == OutputFormat::Json && !single {
-        return Err(super::map_frequency_error(
-            ctx,
-            "Sensitivity",
-            rspice_core::SimulationError::Circuit(
-                "a .SENS table with more than one point or objective has no JSON result \
-                 document; write it as CSV, raw or HDF5"
-                    .to_owned(),
-            ),
-        ));
-    }
     let analysis_id = output.analysis("sens")?;
     let index = (0..points.len()).map(|row| row as f64).collect::<Vec<_>>();
     let table = crate::commands::export_table::scalar_table(
@@ -165,20 +153,26 @@ pub(in crate::commands::run) fn run_xyce_sensitivity(
         index,
         &signals,
     );
-    super::super::document::publish_table_result(
-        ctx,
-        &output.path,
-        analysis_id,
-        super::super::document::scalar_schema(&signals)?,
-        &table,
-        // Only a one-point, one-objective table reaches the typed document.
-        || {
-            rspice_core::execution::AnalysisResultDocument::from_sensitivity(
-                analysis_id,
-                &points[0].objectives[0],
-            )
-        },
-    )?;
+    let schema = super::super::document::scalar_schema(&signals)?;
+    // Xyce's result is this table, whatever its points and objectives, so
+    // every format writes the table: JSON carries the CSV's columns the way a
+    // .STEP sweep's JSON does.
+    if ctx.format == OutputFormat::Hdf5 {
+        crate::hdf5::write_table(
+            &output.path,
+            &table,
+            Some(super::super::document::hdf5_identity(ctx, analysis_id)?),
+        )?;
+    } else {
+        table.write(&output.path, ctx.format)?;
+    }
+    ctx.record_published(super::super::PublishedResult {
+        analysis_id: analysis_id.tag(),
+        result_kind: None,
+        schema,
+        artifact: output.path.clone(),
+        source_sample_presence: None,
+    });
     if !ctx.quiet {
         crate::console::line(format_args!(
             "  Sensitivities exported to: {}",

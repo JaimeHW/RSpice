@@ -283,3 +283,66 @@ fn a_xyce_sens_card_writes_xyce_s_table_of_the_objective_and_its_derivatives() {
         );
     }
 }
+
+/// A swept, two-objective `.SENS` table is one table in JSON too: the JSON
+/// carries the CSV's Index scale and columns, one row per `.DC` point, the
+/// way a `.STEP` sweep's JSON does, and Xyce writes the same rows and columns
+/// to `.SENS.prn`. On this divider I(V1) = -V1/(R1+R2) and V(2) = V1 R2/(R1+R2),
+/// so dI(V1)/dR1 = V1/9e6 and dV(2)/dR1 = -V1/9000 per ohm.
+#[test]
+fn a_swept_xyce_sens_table_with_two_objectives_writes_json() {
+    let dir = common::test_dir("xyce_sensitivity_json");
+    let deck = dir.join("divider.cir");
+    std::fs::write(
+        &deck,
+        "* divider\nV1 1 0 DC 3\nR1 1 2 2k\nR2 2 0 1k\n.dc V1 1 3 1\n\
+         .SENS objfunc={I(V1)},{V(2)} param=R1:R\n.end\n",
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args(["--quiet", "run", "--spice-dialect", "xyce"])
+        .arg(&deck)
+        .arg("-o")
+        .arg(dir.join("out.json"))
+        .args(["-f", "json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let document: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(dir.join("out.sens-001.json")).unwrap())
+            .unwrap();
+    assert_eq!(document["scale"]["name"], "Index");
+    assert_eq!(
+        document["scale"]["values"],
+        serde_json::json!([0.0, 1.0, 2.0])
+    );
+    let column = |name: &str| {
+        document["signals"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|signal| signal["name"] == name)
+            .unwrap_or_else(|| panic!("no column {name} in {document}"))["values"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|value| value.as_f64().unwrap())
+            .collect::<Vec<_>>()
+    };
+    let sources = [1.0, 2.0, 3.0];
+    for (name, expected) in [
+        ("{I(V1)}", sources.map(|v1| -v1 / 3.0e3)),
+        ("d_{I(V1)}/d_R1:R_adj", sources.map(|v1| v1 / 9.0e6)),
+        ("{V(2)}", sources.map(|v1| v1 / 3.0)),
+        ("d_{V(2)}/d_R1:R_adj", sources.map(|v1| -v1 / 9.0e3)),
+    ] {
+        let actual = column(name);
+        assert_eq!(actual.len(), expected.len(), "{name}");
+        for (actual, expected) in actual.iter().zip(expected) {
+            assert!(
+                (actual - expected).abs() <= 1e-9 * expected.abs(),
+                "{name}: expected {expected:e}, got {actual:e}"
+            );
+        }
+    }
+}
