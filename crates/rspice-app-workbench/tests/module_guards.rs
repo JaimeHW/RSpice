@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 /// Every `pub mod` declaration, as (file relative to `src/`, module name). A
 /// name `lib.rs` declares twice, under two `cfg`s or two parents, is one entry.
 const PUBLIC_MODULES: &[(&str, &str)] = &[
+    ("lib.rs", "accessible_mirror"),
     ("lib.rs", "app"),
     ("lib.rs", "app_state"),
     ("lib.rs", "browser"),
@@ -33,6 +34,7 @@ const PUBLIC_MODULES: &[(&str, &str)] = &[
     ("lib.rs", "navigation"),
     ("lib.rs", "navigator_tree"),
     ("lib.rs", "notification_center"),
+    ("lib.rs", "pane_focus"),
     ("lib.rs", "problems_view"),
     ("lib.rs", "retired_documents"),
     ("lib.rs", "review_primitives"),
