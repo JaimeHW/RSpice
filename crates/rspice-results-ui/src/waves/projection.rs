@@ -31,7 +31,7 @@ fn unique_analysis<'a>(
 /// Resolve the result in an overlay run that was produced by the same
 /// prepared analysis instance. Kind/label inference is permitted only for
 /// unambiguous legacy history, where neither side has prepared provenance.
-fn matching_overlay_analysis<'a, A: AsRef<AnalysisResult<RetainedTrace>>>(
+pub fn matching_overlay_analysis<'a, A: AsRef<AnalysisResult<RetainedTrace>>>(
     analysis: &AnalysisResult<RetainedTrace>,
     overlay_run: &'a SimulationRun<A>,
 ) -> Option<&'a AnalysisResult<RetainedTrace>> {

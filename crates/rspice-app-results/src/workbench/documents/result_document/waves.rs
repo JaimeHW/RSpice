@@ -40,8 +40,8 @@ mod readout;
 mod viewport;
 
 use expression_evaluation::{evaluate_expression, evaluate_expression_with_policy};
-pub use expressions::toggle_visibility;
 pub(crate) use expressions::*;
+pub use expressions::{toggle_visibility, waveform_plotted};
 pub(crate) use readout::*;
 pub(crate) use viewport::*;
 

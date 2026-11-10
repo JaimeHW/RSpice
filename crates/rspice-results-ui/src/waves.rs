@@ -28,7 +28,9 @@ pub mod readout;
 pub mod stack;
 pub use policy::{ReadoutPolicy, cursor_interpolation};
 mod units;
-pub use projection::{AcDisplay, ProjectionOptions, build_models, family_color};
+pub use projection::{
+    AcDisplay, ProjectionOptions, build_models, family_color, matching_overlay_analysis,
+};
 use units::signal_unit;
 pub use units::{
     NOISE_DENSITY_UNIT, analysis_default_unit, browser_signal_is_current, browser_signal_unit,

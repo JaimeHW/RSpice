@@ -161,7 +161,16 @@ fn selected_result_trace(
 
     let waveform_name = waveform.name.clone();
     let waveform_color = waveform.color.clone();
-    let waveform_visible = waveform.visible;
+    let waveform_visible = crate::workbench::documents::result_document::waveform_plotted(
+        state.model,
+        state.results,
+        &rspice_results::result_presentation::SourceWaveformPresentationKey::new(
+            selected.analysis_key(),
+            waveform.name.clone(),
+        ),
+        &waveform.name,
+        waveform.visible,
+    );
     let sample_count = waveform.x.len().min(waveform.y.len());
     let statistics = finite_trace_statistics(&waveform.y);
     let available_sample_count = waveform.y.iter().filter(|value| value.is_finite()).count();

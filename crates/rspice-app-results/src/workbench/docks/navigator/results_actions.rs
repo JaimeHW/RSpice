@@ -1,10 +1,10 @@
-//! What a data-browser row does when the reader acts on it: batch membership,
-//! the keyboard, plot visibility, selection, and the context menus.
+//! What a data-browser row does when the reader acts on it: its tick, the
+//! keyboard, selection, and the context menus.
 
 use crate::state::command_catalog::CommandKey;
 use crate::workbench::documents::result_document::{
     AnalysisPresentationKey, ResultsParts, compare_availability, exact_result_artifact_text,
-    exact_result_signal_last_sample, exact_result_signal_tsv,
+    exact_result_signal_last_sample, exact_result_signal_tsv, waveform_plotted,
 };
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::feature::{Execute, held_back};
@@ -19,9 +19,7 @@ use super::super::super::commands::result_navigation::{open_run_log, producing_r
 use super::results::{RESULT_BROWSER_CLIPBOARD_SAMPLE_LIMIT, ResultArtifact};
 use rspice_app_workbench::workbench::docks::navigator::row_context_menu;
 
-/// Put every checked quantity of the active dataset into the requested plot
-/// state. Toggling one at a time is the same act repeated, so the batch runs
-/// through the same visibility path rather than writing the flag itself.
+/// A tick on a row, or a tick drawn across a range of rows with Shift.
 pub(super) fn update_result_browser_multi_selection(
     state: &mut ResultsParts<'_>,
     target: &ResultBrowserSelectionKey,
@@ -29,20 +27,195 @@ pub(super) fn update_result_browser_multi_selection(
     modifiers: egui::Modifiers,
 ) {
     if modifiers.shift {
-        state
-            .results
-            .session
-            .select_checked_result_range(target, ordered_visible);
+        tick_result_range(state, target, ordered_visible);
     } else {
-        state
-            .results
-            .session
-            .toggle_checked_result_quantity(target.clone());
+        let ticked = result_quantity_ticked(state, target);
+        set_result_quantity_ticked(state, target, !ticked);
         state
             .results
             .session
             .set_browser_range_anchor(target.clone());
     }
+}
+
+fn tick_result_range(
+    state: &mut ResultsParts<'_>,
+    target: &ResultBrowserSelectionKey,
+    ordered_visible: &[ResultBrowserSelectionKey],
+) {
+    let range = state.results.session.browser_range(target, ordered_visible);
+    for key in &range {
+        set_result_quantity_ticked(state, key, true);
+    }
+}
+
+/// Whether a row's tick is on. A waveform's tick is whether it is on the plot:
+/// there is no second record of it that the legend or the Inspector could
+/// disagree with.
+fn result_quantity_ticked(state: &ResultsParts<'_>, key: &ResultBrowserSelectionKey) -> bool {
+    match key {
+        ResultBrowserSelectionKey::Waveform(key) => result_signal_ticked(state, key),
+        ResultBrowserSelectionKey::Artifact(_) => state
+            .results
+            .session
+            .checked_result_quantities
+            .contains(key),
+    }
+}
+
+pub fn set_result_quantity_ticked(
+    state: &mut ResultsParts<'_>,
+    key: &ResultBrowserSelectionKey,
+    ticked: bool,
+) {
+    match key {
+        ResultBrowserSelectionKey::Waveform(key) => set_result_signal_plotted(state, key, ticked),
+        ResultBrowserSelectionKey::Artifact(_) => {
+            let checked = &mut state.results.session.checked_result_quantities;
+            if ticked {
+                checked.insert(key.clone());
+            } else {
+                checked.remove(key);
+            }
+        }
+    }
+}
+
+/// The active run's analysis and waveform that a signal of another run
+/// overlays: the strip draws a run over the curves of the same name.
+fn active_counterpart(
+    state: &ResultsParts<'_>,
+    key: &SourceWaveformPresentationKey,
+) -> Option<(usize, usize, SourceWaveformPresentationKey, String, bool)> {
+    let simulation = &state.model.simulation;
+    let (run_index, analysis_index, _, waveform) = key.resolve(&simulation.retained.runs)?;
+    let run = &simulation.retained.runs[run_index];
+    let analysis: &rspice_results::analysis_result::AnalysisResult<
+        rspice_results::waveform::RetainedTrace,
+    > = run.analyses[analysis_index].as_ref();
+    let active = simulation.active_run()?;
+    active
+        .analyses
+        .iter()
+        .enumerate()
+        .find_map(|(index, candidate)| {
+            let matched =
+                rspice_results_ui::waves::matching_overlay_analysis(candidate.as_ref(), run)?;
+            if !std::ptr::eq(matched, analysis) {
+                return None;
+            }
+            let (waveform_index, counterpart) = candidate
+                .waveforms
+                .iter()
+                .enumerate()
+                .find(|(_, counterpart)| counterpart.name == waveform.name)?;
+            Some((
+                index,
+                waveform_index,
+                SourceWaveformPresentationKey::new(
+                    AnalysisPresentationKey::new(active.dataset_id, candidate),
+                    counterpart.name.clone(),
+                ),
+                counterpart.name.clone(),
+                counterpart.visible,
+            ))
+        })
+}
+
+/// A signal of the active run is ticked while it is on the plot; one of
+/// another run while the strip overlays it.
+fn result_signal_ticked(state: &ResultsParts<'_>, key: &SourceWaveformPresentationKey) -> bool {
+    let simulation = &state.model.simulation;
+    let Some((run_index, _, _, waveform)) = key.resolve(&simulation.retained.runs) else {
+        return false;
+    };
+    if simulation.view.active_run_idx == Some(run_index) {
+        return waveform_plotted(
+            state.model,
+            state.results,
+            key,
+            &waveform.name,
+            waveform.visible,
+        );
+    }
+    simulation.is_dataset_overlaid(simulation.retained.runs[run_index].dataset_id)
+        && active_counterpart(state, key).is_some_and(|(.., key, name, default)| {
+            waveform_plotted(state.model, state.results, &key, &name, default)
+        })
+}
+
+/// Put a signal on the plot or take it off, at once. A signal of another run
+/// goes on over the active run's curve of its name, and comes off with its
+/// run: the strip overlays whole runs.
+pub(super) fn set_result_signal_plotted(
+    state: &mut ResultsParts<'_>,
+    key: &SourceWaveformPresentationKey,
+    plotted: bool,
+) {
+    let Some((run_index, analysis_index, waveform_index, _)) =
+        key.resolve(&state.model.simulation.retained.runs)
+    else {
+        return;
+    };
+    if state.model.simulation.view.active_run_idx == Some(run_index) {
+        if result_signal_ticked(state, key) != plotted {
+            crate::workbench::documents::result_document::toggle_visibility(
+                state,
+                analysis_index,
+                waveform_index,
+            );
+        }
+        if plotted {
+            reveal_strip(state, key.analysis());
+        }
+        return;
+    }
+    let dataset = state.model.simulation.retained.runs[run_index].dataset_id;
+    let overlaid = state.model.simulation.is_dataset_overlaid(dataset);
+    if !plotted {
+        if overlaid {
+            state.model.simulation.toggle_dataset_overlay(dataset);
+        }
+        return;
+    }
+    let Some((analysis, waveform, counterpart, name, default)) = active_counterpart(state, key)
+    else {
+        state
+            .workbench
+            .prompt("The active result has no curve of this name to overlay.");
+        return;
+    };
+    if !overlaid {
+        state.model.simulation.toggle_dataset_overlay(dataset);
+    }
+    if !waveform_plotted(state.model, state.results, &counterpart, &name, default) {
+        crate::workbench::documents::result_document::toggle_visibility(state, analysis, waveform);
+    }
+    reveal_strip(state, counterpart.analysis());
+}
+
+/// A strip closed or crowded out by another's maximizing comes back for a
+/// curve just put on it.
+fn reveal_strip(state: &mut ResultsParts<'_>, analysis: AnalysisPresentationKey) {
+    let session = &mut state.results.session;
+    session.hidden_strips.remove(&analysis);
+    if session
+        .maximized_strip
+        .is_some_and(|maximized| maximized != analysis)
+    {
+        session.maximized_strip = None;
+    }
+}
+
+/// A double click on a row: the signal goes on the plot and its statistics
+/// come up in the Inspector.
+pub(super) fn plot_and_inspect_signal(
+    state: &mut ResultsParts<'_>,
+    key: &SourceWaveformPresentationKey,
+) {
+    select_result_signal_by_key(state, key);
+    set_result_signal_plotted(state, key, true);
+    state.workbench.inspector_visible = true;
 }
 
 pub(super) fn result_signal_row_id(key: &ResultBrowserSelectionKey) -> egui::Id {
@@ -102,10 +275,7 @@ pub(super) fn handle_result_signal_keyboard(
         return;
     };
     if modifiers.shift {
-        state
-            .results
-            .session
-            .select_checked_result_range(next, ordered_visible);
+        tick_result_range(state, next, ordered_visible);
     } else {
         state.results.session.set_browser_range_anchor(next.clone());
     }
@@ -163,10 +333,7 @@ pub(super) fn handle_result_artifact_keyboard(
         return;
     };
     if modifiers.shift {
-        state
-            .results
-            .session
-            .select_checked_result_range(next, ordered_visible);
+        tick_result_range(state, next, ordered_visible);
     } else {
         state.results.session.set_browser_range_anchor(next.clone());
     }
@@ -174,57 +341,6 @@ pub(super) fn handle_result_artifact_keyboard(
     response
         .ctx
         .memory_mut(|memory| memory.request_focus(result_signal_row_id(next)));
-}
-
-pub fn set_checked_signal_visibility(
-    state: &mut ResultsParts<'_>,
-    checked: &std::collections::HashSet<ResultBrowserSelectionKey>,
-    visible: bool,
-) {
-    let Some(run_index) = state.model.simulation.view.active_run_idx else {
-        return;
-    };
-    let targets = checked
-        .iter()
-        .filter_map(|key| {
-            let key = key.waveform()?;
-            let (target_run, analysis_index, waveform_index, waveform) =
-                key.resolve(&state.model.simulation.retained.runs)?;
-            let currently_visible = state
-                .results
-                .session
-                .waveform_visibility(key, waveform.visible);
-            (target_run == run_index && currently_visible != visible)
-                .then_some((analysis_index, waveform_index))
-        })
-        .collect::<Vec<_>>();
-    for (analysis_index, waveform_index) in targets {
-        crate::workbench::documents::result_document::toggle_visibility(
-            state,
-            analysis_index,
-            waveform_index,
-        );
-    }
-}
-
-pub(super) fn toggle_result_signal_visibility(
-    state: &mut ResultsParts<'_>,
-    key: &SourceWaveformPresentationKey,
-) -> bool {
-    let Some((run_index, analysis_index, waveform_index, _)) =
-        key.resolve(&state.model.simulation.retained.runs)
-    else {
-        return false;
-    };
-    if state.model.simulation.view.active_run_idx != Some(run_index) {
-        return false;
-    }
-    crate::workbench::documents::result_document::toggle_visibility(
-        state,
-        analysis_index,
-        waveform_index,
-    );
-    true
 }
 
 pub fn select_result_dataset(state: &mut ResultsParts<'_>, run_index: usize) -> bool {
@@ -539,7 +655,7 @@ pub(super) fn result_signal_context_menu(
             membership.clone().on_disabled_hover_text(error);
         }
         if membership.clicked() {
-            toggle_result_signal_visibility(state, &key);
+            set_result_signal_plotted(state, &key, !visible);
             ui.close();
         }
         let add = ui.add_enabled(exact_available, egui::Button::new("Add to new pane..."));

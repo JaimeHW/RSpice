@@ -89,13 +89,10 @@ fn browser_signal_marks_do_not_alias_equal_names_from_different_datasets() {
     let mut results = ResultViewerState::default();
 
     results.toggle_favorite_signal(first.clone());
-    results.toggle_checked_result_quantity(first.clone().into());
     results.note_recent_signal(first.clone());
 
     assert!(results.is_favorite_signal(&first));
-    assert!(results.is_checked_signal(&first));
     assert_eq!(results.recent_signal_rank(&first), Some(0));
     assert!(!results.is_favorite_signal(&second));
-    assert!(!results.is_checked_signal(&second));
     assert_eq!(results.recent_signal_rank(&second), None);
 }

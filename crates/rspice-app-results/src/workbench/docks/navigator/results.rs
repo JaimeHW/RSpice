@@ -18,11 +18,11 @@ use rspice_results::result_presentation::{
 };
 use rspice_results_ui::selection::{ResultBrowserSelectionKey, ResultExpressionPresentationKey};
 
-use super::super::super::commands::result_navigation::open_run_log;
+use super::super::super::commands::result_navigation::{open_run_log, ticked_result_quantities};
 use super::super::super::design_system::WorkbenchIcon;
 use super::results_actions::{
     compare_enabled, execute, locate_on_schematic_menu, select_result_analysis_by_key,
-    select_result_browser_key, select_result_dataset, set_checked_signal_visibility,
+    select_result_browser_key, select_result_dataset, set_result_quantity_ticked,
 };
 use super::results_rows::{
     ResultCompletenessClass, expression_header, result_analysis_browser_status,
@@ -68,6 +68,7 @@ pub(in crate::workbench) fn results(
         state.results.session.clear_checked_signals();
     }
     let query = state.workbench.navigator_filter().trim().to_lowercase();
+    let ticked = ticked_result_quantities(state.model, state.results);
     let active_browser_tab = results_browser_active_tab(ui.ctx());
     // Kind/sort read the values the toolbar stored last frame — the row
     // renders below the tab band while filtering happens here, the same
@@ -286,8 +287,9 @@ pub(in crate::workbench) fn results(
                             let samples = waveform.y.len();
                             Some(ResultSignal {
                                 waveform_index,
-                                visible: state.results
-                                    .session.waveform_visibility(&identity, waveform.visible),
+                                visible: ticked.contains(&ResultBrowserSelectionKey::Waveform(
+                                    identity.clone(),
+                                )),
                                 identity,
                                 name: waveform.name.clone(),
                                 color: waveform.color.clone(),
@@ -605,15 +607,12 @@ pub(in crate::workbench) fn results(
             );
         }
     }
-    // What a batch action would act on, with only the actions RSpice actually
-    // performs on a set of quantities — plot membership, and letting the set
-    // go. The band belongs to a selection: with nothing checked it held one
-    // button, and the row checkboxes under it are how a selection starts.
-    if tab == ResultsBrowserTab::Signals
-        && !state.results.session.checked_result_quantities.is_empty()
-    {
+    // What a batch action acts on: the ticked quantities, which for a
+    // waveform are the curves on the plot. The band belongs to the ticks, and
+    // the row ticks under it are how a set starts.
+    if tab == ResultsBrowserTab::Signals && !ticked.is_empty() {
         let t = Tokens::get(ui.ctx());
-        let checked = state.results.session.checked_result_quantities.clone();
+        let checked = ticked;
         let checked_ordered =
             ordered_checked_result_keys(&checked, &state.model.simulation.retained.runs);
         let exact_validation_error = checked_ordered.iter().find_map(|key| {
@@ -624,9 +623,6 @@ pub(in crate::workbench) fn results(
             .err()
         });
         let exact_evidence_available = exact_validation_error.is_none();
-        let plot_compatible = !checked.is_empty()
-            && exact_evidence_available
-            && checked.iter().all(|quantity| quantity.waveform().is_some());
         let clipboard_sample_count = checked_ordered
             .iter()
             .filter_map(ResultBrowserSelectionKey::waveform)
@@ -666,7 +662,7 @@ pub(in crate::workbench) fn results(
                     .rect_filled(ui.available_rect_before_wrap(), 0.0, t.color.accent_dim);
                 ui.add_space(8.0);
                 ui.label(
-                    egui::RichText::new(format!("{} selected", checked.len()))
+                    egui::RichText::new(format!("{} ticked", checked.len()))
                         .font(theme::sans(tokens::FS_0, FontWeight::Medium))
                         .color(t.color.text),
                 );
@@ -676,46 +672,23 @@ pub(in crate::workbench) fn results(
                         if ui
                             .add_enabled(
                                 !visible_result_keys.is_empty(),
-                                egui::Button::new("Select visible quantities"),
+                                egui::Button::new("Tick visible quantities"),
                             )
                             .clicked()
                         {
-                            state.results
-                                .session.select_visible_signals(&visible_result_keys);
+                            for key in &visible_result_keys {
+                                set_result_quantity_ticked(state, key, true);
+                            }
+                            if let Some(last) = visible_result_keys.last() {
+                                state.results.session.set_browser_range_anchor(last.clone());
+                            }
                             ui.close();
                         }
-                        if ui.button("Clear selection").clicked() {
+                        if ui.button("Clear ticks").clicked() {
+                            for key in &checked_ordered {
+                                set_result_quantity_ticked(state, key, false);
+                            }
                             state.results.session.clear_checked_signals();
-                            ui.close();
-                        }
-                        let show = ui.add_enabled(
-                            plot_compatible,
-                            egui::Button::new("Show selected waveforms"),
-                        );
-                        if !plot_compatible {
-                            show.clone().on_disabled_hover_text(
-                                exact_validation_error.as_deref().unwrap_or(
-                                    "Only waveforms can be plotted",
-                                ),
-                            );
-                        }
-                        if show.clicked() {
-                            set_checked_signal_visibility(state, &checked, true);
-                            ui.close();
-                        }
-                        let hide = ui.add_enabled(
-                            plot_compatible,
-                            egui::Button::new("Hide selected waveforms"),
-                        );
-                        if !plot_compatible {
-                            hide.clone().on_disabled_hover_text(
-                                exact_validation_error.as_deref().unwrap_or(
-                                    "Only waveforms can be plotted",
-                                ),
-                            );
-                        }
-                        if hide.clicked() {
-                            set_checked_signal_visibility(state, &checked, false);
                             ui.close();
                         }
                         ui.separator();

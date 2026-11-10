@@ -263,6 +263,36 @@ pub(super) fn expr_cache_key(analysis: AnalysisPresentationKey, text: &str) -> u
     hasher.finish() | (1 << 63)
 }
 
+/// Whether a source waveform is drawn: as the open saved pane says when it
+/// holds the waveform, otherwise as the quick view does.
+pub fn waveform_plotted(
+    model: &crate::workbench::app_state::Model,
+    results: &crate::workbench::documents::result_document::ResultsState,
+    key: &SourceWaveformPresentationKey,
+    name: &str,
+    dataset_default: bool,
+) -> bool {
+    if let Some(context) = results
+        .session
+        .persistent_pane_context
+        .filter(|context| context.analysis == key.analysis())
+        && let Some(document) = model
+            .workspace
+            .content
+            .visualization_document(context.document_id)
+    {
+        let mut traces = document
+            .traces()
+            .iter()
+            .filter(|trace| trace.pane_id == context.pane_id && trace.label == name)
+            .peekable();
+        if traces.peek().is_some() {
+            return traces.all(|trace| trace.visible);
+        }
+    }
+    results.session.waveform_visibility(key, dataset_default)
+}
+
 /// Flip a source waveform's quick-view visibility without mutating result data.
 pub fn toggle_visibility(
     state: &mut crate::workbench::documents::result_document::ResultsParts<'_>,

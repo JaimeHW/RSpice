@@ -8,10 +8,59 @@
 use crate::state::{RetainedSimulationState, SimulationState};
 use crate::ui::widgets::NotificationAction;
 use crate::workbench::app_state::Model;
-use crate::workbench::documents::result_document::ResultsReads;
+use crate::workbench::documents::result_document::{ResultsReads, waveform_plotted};
 use crate::workbench::state::ConsoleChannel;
 use crate::workbench::state::WorkbenchSession;
 use crate::workbench::state::plan_provenance::{self, ProducingPlanHop};
+use rspice_results::result_presentation::{AnalysisPresentationKey, SourceWaveformPresentationKey};
+use rspice_results_ui::selection::ResultBrowserSelectionKey;
+use rspice_results_ui::waves::matching_overlay_analysis;
+use std::collections::HashSet;
+
+/// What the browser's ticks say: every curve the strips draw, the active
+/// run's and those of the runs overlaid on them, and the quantities ticked
+/// that have no curve.
+pub(crate) fn ticked_result_quantities(
+    model: &Model,
+    results: &crate::workbench::documents::result_document::ResultsState,
+) -> HashSet<ResultBrowserSelectionKey> {
+    let mut ticked = results.session.checked_result_quantities.clone();
+    let simulation = &model.simulation;
+    let Some(active) = simulation.active_run() else {
+        return ticked;
+    };
+    let overlaid = simulation
+        .view
+        .overlay_dataset_ids
+        .iter()
+        .filter_map(|dataset| simulation.retained.run_by_dataset_id(*dataset))
+        .collect::<Vec<_>>();
+    for analysis in &active.analyses {
+        let analysis_key = AnalysisPresentationKey::new(active.dataset_id, analysis);
+        let matches = overlaid
+            .iter()
+            .filter_map(|run| {
+                let other = matching_overlay_analysis(analysis.as_ref(), run)?;
+                Some((AnalysisPresentationKey::new(run.dataset_id, other), other))
+            })
+            .collect::<Vec<_>>();
+        for waveform in &analysis.waveforms {
+            let key = SourceWaveformPresentationKey::new(analysis_key, waveform.name.clone());
+            if !waveform_plotted(model, results, &key, &waveform.name, waveform.visible) {
+                continue;
+            }
+            ticked.insert(ResultBrowserSelectionKey::Waveform(key));
+            for (other_key, other) in &matches {
+                if other.waveforms.iter().any(|w| w.name == waveform.name) {
+                    ticked.insert(ResultBrowserSelectionKey::Waveform(
+                        SourceWaveformPresentationKey::new(*other_key, waveform.name.clone()),
+                    ));
+                }
+            }
+        }
+    }
+    ticked
+}
 
 /// Whether "Export dataset…" has a displayed view to write.
 ///
@@ -197,8 +246,9 @@ pub(crate) fn task_deck_hop(state: ResultsReads<'_>) -> Result<u64, &'static str
     Ok(run.id)
 }
 
-/// The run that produced the one check-marked Data Browser quantity, whose
-/// log the hop would open.
+/// The run that produced the one check-marked Data Browser quantity, or,
+/// with no quantity check-marked, the one run whose curves are on the plot:
+/// the log the hop would open.
 ///
 /// The context menus that offer this act on the row they were opened on. The
 /// palette has no row, so it acts on the browser's check-marks — and refuses
@@ -209,11 +259,28 @@ pub(crate) fn producer_log_hop(state: ResultsReads<'_>) -> Result<u64, &'static 
         return Err("no run is selected");
     }
     let checked = &state.results.session.checked_result_quantities;
-    let key = match checked.len() {
-        0 => return Err("check-mark the Data Browser quantity whose run log to open"),
-        1 => checked.iter().next().expect("one check-marked quantity"),
+    let dataset = match checked.len() {
+        // Plotted curves are ticks too, and any number of them can come from
+        // one run, which is one destination.
+        0 => {
+            let ticked = ticked_result_quantities(state.model, state.results);
+            let datasets = ticked
+                .iter()
+                .map(ResultBrowserSelectionKey::dataset_id)
+                .collect::<HashSet<_>>();
+            match (datasets.len(), datasets.into_iter().next()) {
+                (1, Some(dataset)) => dataset,
+                (0, _) => return Err("check-mark the Data Browser quantity whose run log to open"),
+                _ => return Err("check-mark exactly one Data Browser quantity"),
+            }
+        }
+        1 => checked
+            .iter()
+            .next()
+            .expect("one check-marked quantity")
+            .dataset_id(),
         _ => return Err("check-mark exactly one Data Browser quantity"),
     };
-    producing_run(&state.model.simulation.retained.runs, key.dataset_id())
+    producing_run(&state.model.simulation.retained.runs, dataset)
         .ok_or("the run that produced the check-marked quantity is no longer held")
 }

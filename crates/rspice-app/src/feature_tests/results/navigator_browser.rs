@@ -200,7 +200,7 @@ fn result_navigator_app() -> RSpiceApp {
 }
 
 /// The scope band states a count only while a filter is holding rows back,
-/// and the selection band belongs to a selection.
+/// and the band of batch actions belongs to the ticks.
 ///
 /// Unfiltered, "2 / 2" repeated the tab band's own count under it, and a
 /// permanent 29 px strip carried one rarely used command across a browser
@@ -221,8 +221,8 @@ fn the_data_browser_counts_only_what_a_filter_holds_back() {
         "nothing is held back, so no fraction: {shown:?}"
     );
     assert!(
-        !shown.iter().any(|line| line.starts_with("Select visible")),
-        "nothing is checked, so no selection band: {shown:?}"
+        !shown.iter().any(|line| line.ends_with(" ticked")),
+        "nothing is ticked, so no band of batch actions: {shown:?}"
     );
 
     let mut app = result_navigator_app();
@@ -340,11 +340,10 @@ fn analysis_groups_default_to_disclosing_only_the_active_analysis() {
     );
 }
 
-/// A batch plot action is the single-row act repeated: it must reach the
-/// same visibility path, skip rows already in the requested state, and
-/// leave the checked set intact so a second action can follow.
+/// A tick puts its own quantity on the plot or takes it off, through the
+/// quick view's visibility path, and an act repeated is the same state.
 #[test]
-fn batch_plot_action_moves_only_the_checked_quantities() {
+fn a_tick_moves_only_its_own_quantity() {
     let mut app = result_navigator_app();
     assert!(select_result_dataset(&mut app.state.results_parts(), 0));
     let run = &app.state.model.simulation.retained.runs[0];
@@ -356,20 +355,18 @@ fn batch_plot_action_moves_only_the_checked_quantities() {
         AnalysisPresentationKey::new(run.dataset_id, &run.analyses[1]),
         "V(in)",
     );
-    let checked = [ResultBrowserSelectionKey::Waveform(checked_key.clone())]
-        .into_iter()
-        .collect();
+    let checked = ResultBrowserSelectionKey::Waveform(checked_key.clone());
     let source_default = run.analyses[0].waveforms[0].visible;
     let untouched_default = run.analyses[1].waveforms[0].visible;
 
-    results_actions::set_checked_signal_visibility(&mut app.state.results_parts(), &checked, false);
+    results_actions::set_result_quantity_ticked(&mut app.state.results_parts(), &checked, false);
     assert!(
         !app.state
             .results
             .results
             .session
             .waveform_visibility(&checked_key, source_default),
-        "the checked quantity leaves its pane"
+        "the unticked quantity leaves its pane"
     );
     assert_eq!(
         app.state
@@ -378,7 +375,7 @@ fn batch_plot_action_moves_only_the_checked_quantities() {
             .session
             .waveform_visibility(&untouched_key, untouched_default),
         untouched_default,
-        "an unchecked quantity in another analysis is not disturbed"
+        "a quantity in another analysis is not disturbed"
     );
     assert_eq!(
         app.state.model.simulation.retained.runs[0].analyses[0].waveforms[0].visible,
@@ -386,17 +383,17 @@ fn batch_plot_action_moves_only_the_checked_quantities() {
         "browser presentation never mutates immutable retained evidence"
     );
 
-    results_actions::set_checked_signal_visibility(&mut app.state.results_parts(), &checked, true);
+    results_actions::set_result_quantity_ticked(&mut app.state.results_parts(), &checked, true);
     assert!(
         app.state
             .results
             .results
             .session
             .waveform_visibility(&checked_key, source_default),
-        "the same act returns it"
+        "a tick returns it"
     );
-    // Idempotent: repeating the request cannot toggle it back off.
-    results_actions::set_checked_signal_visibility(&mut app.state.results_parts(), &checked, true);
+    // A tick asked for twice does not take it back off.
+    results_actions::set_result_quantity_ticked(&mut app.state.results_parts(), &checked, true);
     assert!(
         app.state
             .results
@@ -404,6 +401,59 @@ fn batch_plot_action_moves_only_the_checked_quantities() {
             .session
             .waveform_visibility(&checked_key, source_default)
     );
+}
+
+/// A signal of another run, ticked, overlays that run on the active run's
+/// curve of the same name, as the strip draws overlays; unticked, the overlay
+/// goes and the active run's curve stays.
+#[test]
+fn a_tick_on_another_run_overlays_it_on_the_active_run() {
+    let mut app = result_navigator_app();
+    let earlier = app.state.model.simulation.retained.runs[0].clone();
+    let mut later = SimulationRun::new(2);
+    later.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+            RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 2.0], "#ffbd2e"),
+        ]),
+    );
+    app.state.model.simulation.retained.runs = vec![earlier, later].into();
+    assert!(select_result_dataset(&mut app.state.results_parts(), 1));
+    let runs = &app.state.model.simulation.retained.runs;
+    let earlier_dataset = runs[0].dataset_id;
+    let other = ResultBrowserSelectionKey::Waveform(SourceWaveformPresentationKey::new(
+        AnalysisPresentationKey::new(earlier_dataset, &runs[0].analyses[0]),
+        "V(out)",
+    ));
+    let active_key = SourceWaveformPresentationKey::new(
+        AnalysisPresentationKey::new(runs[1].dataset_id, &runs[1].analyses[0]),
+        "V(out)",
+    );
+    let active_default = runs[1].analyses[0].waveforms[0].visible;
+    let active_plotted = |app: &RSpiceApp| {
+        app.state
+            .results
+            .results
+            .session
+            .waveform_visibility(&active_key, active_default)
+    };
+
+    results_actions::set_result_quantity_ticked(&mut app.state.results_parts(), &other, true);
+    assert!(
+        app.state
+            .model
+            .simulation
+            .is_dataset_overlaid(earlier_dataset)
+    );
+    assert!(active_plotted(&app), "the curve it overlays is on the plot");
+
+    results_actions::set_result_quantity_ticked(&mut app.state.results_parts(), &other, false);
+    assert!(
+        !app.state
+            .model
+            .simulation
+            .is_dataset_overlaid(earlier_dataset)
+    );
+    assert!(active_plotted(&app), "the active run's own curve stays");
 }
 
 #[test]
@@ -535,13 +585,19 @@ fn browser_range_selection_uses_stable_filtered_order() {
         .results
         .session
         .set_browser_range_anchor(first_selection);
-    app.state
+    let range = app
+        .state
         .results
         .results
         .session
-        .select_checked_result_range(&second_selection, &visible);
-    assert!(app.state.results.results.session.is_checked_signal(&first));
-    assert!(app.state.results.results.session.is_checked_signal(&second));
+        .browser_range(&second_selection, &visible);
+    assert_eq!(
+        range,
+        vec![
+            ResultBrowserSelectionKey::Waveform(first),
+            ResultBrowserSelectionKey::Waveform(second),
+        ]
+    );
 }
 
 /// The browser offers one facet per independent question. Kind carries the

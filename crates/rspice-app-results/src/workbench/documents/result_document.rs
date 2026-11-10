@@ -164,7 +164,7 @@ pub use waves::{
     analysis_default_unit, browser_signal_is_current, browser_signal_unit,
 };
 
-pub use waves::toggle_visibility;
+pub use waves::{toggle_visibility, waveform_plotted};
 
 use bars::show as show_sheet_bar;
 use retained_memo::RetainedMemo;

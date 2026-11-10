@@ -3,10 +3,13 @@
 use super::veriloga_flow_tests::User;
 use super::*;
 use crate::workbench::ResultViewer;
+use crate::workbench::documents::result_document::AnalysisPresentationKey;
 use crate::workbench::simulate::commands::SimulateCommand;
 use crate::workbench::state::{ConsolePage, Workspace};
 use crate::workbench::tools::examples_browser::create_example_project;
+use rspice_app_results::workbench::documents::result_document::waveform_plotted;
 use rspice_app_state::workbench::examples::EXAMPLES;
+use rspice_results::result_presentation::SourceWaveformPresentationKey;
 
 /// An example project with a short transient, the session settled on it.
 fn example_project() -> User {
@@ -263,4 +266,154 @@ fn an_operating_point_run_opens_on_its_operating_point() {
         user.app.state.results.results.session.viewer,
         ResultViewer::Op
     );
+}
+
+/// The Results page on Waves after a run, as a completed run opens it.
+fn results_after_a_run() -> User {
+    let mut user = example_project();
+    run_to_its_end(&mut user);
+    assert_eq!(user.app.state.workbench.workspace, Workspace::Results);
+    user.app.state.workbench.navigator_visible = true;
+    user.app.state.workbench.inspector_visible = true;
+    user.settle();
+    user
+}
+
+/// The presentation key of the active run's signal `name`, and whether the
+/// run drew it by default.
+fn signal(user: &User, name: &str) -> (SourceWaveformPresentationKey, bool) {
+    let run = user
+        .app
+        .state
+        .model
+        .simulation
+        .active_run()
+        .expect("a run is open");
+    run.analyses
+        .iter()
+        .find_map(|analysis| {
+            let waveform = analysis
+                .waveforms
+                .iter()
+                .find(|waveform| waveform.name == name)?;
+            Some((
+                SourceWaveformPresentationKey::new(
+                    AnalysisPresentationKey::new(run.dataset_id, analysis),
+                    name,
+                ),
+                waveform.visible,
+            ))
+        })
+        .expect("the run holds the signal")
+}
+
+/// Whether the active run's signal `name` is on the plot.
+fn plotted(user: &User, name: &str) -> bool {
+    let (key, default) = signal(user, name);
+    waveform_plotted(
+        &user.app.state.model,
+        &user.app.state.results.results,
+        &key,
+        name,
+        default,
+    )
+}
+
+/// A signal of the active run that is not on the plot.
+fn unplotted_signal(user: &User) -> String {
+    let run = user
+        .app
+        .state
+        .model
+        .simulation
+        .active_run()
+        .expect("a run is open");
+    let names = run
+        .analyses
+        .iter()
+        .flat_map(|analysis| {
+            analysis
+                .waveforms
+                .iter()
+                .map(|waveform| waveform.name.clone())
+        })
+        .collect::<Vec<_>>();
+    names
+        .into_iter()
+        .find(|name| !plotted(user, name))
+        .expect("a signal is off the plot")
+}
+
+fn selected_signal(user: &User) -> Option<String> {
+    user.app
+        .state
+        .results
+        .results
+        .valid_selected_trace(&user.app.state.model.simulation)
+        .map(|selected| selected.source_name().to_owned())
+}
+
+/// A tick plots its signal at once and unticking removes it, and the row's
+/// tick, the strip's legend and the Inspector say the same thing throughout.
+#[test]
+fn ticking_a_signal_plots_it_and_unticking_removes_it() {
+    let mut user = results_after_a_run();
+    let name = unplotted_signal(&user);
+    let tick = format!("Plot {name}");
+    let chip = format!("Toggle {name} visibility");
+    assert_eq!(user.ticked(&tick), Some(false));
+
+    user.click(&tick);
+    assert!(plotted(&user, &name), "a tick plots at once");
+    assert_eq!(user.ticked(&tick), Some(true));
+    assert_eq!(user.ticked(&chip), Some(true), "the legend shows it");
+    assert_eq!(selected_signal(&user), None, "a tick selects nothing");
+
+    user.click(&tick);
+    assert!(!plotted(&user, &name), "unticking removes it");
+    assert_eq!(user.ticked(&tick), Some(false));
+    assert_ne!(user.ticked(&chip), Some(true), "and the legend lets it go");
+}
+
+/// A click on a row selects it for the Inspector and plots nothing; a double
+/// click plots it and shows its statistics. The Inspector's button toggles
+/// the same membership the tick shows.
+#[test]
+fn a_click_selects_a_signal_and_a_double_click_plots_and_inspects_it() {
+    let mut user = results_after_a_run();
+    let name = unplotted_signal(&user);
+    let tick = format!("Plot {name}");
+    // On the row's name, just right of its tick: the Inspector's list of
+    // saved outputs prints the same name.
+    let tick_rect = user.expect(&tick);
+    let row = egui::pos2(tick_rect.right() + 24.0, tick_rect.center().y);
+
+    user.press(row, egui::PointerButton::Primary);
+    user.settle();
+    assert_eq!(selected_signal(&user).as_deref(), Some(name.as_str()));
+    assert!(!plotted(&user, &name), "a click plots nothing");
+    assert!(user.find("Show trace").is_some());
+
+    // Past the double-click interval, so the next two presses are their own.
+    for _ in 0..30 {
+        user.frame(Vec::new());
+    }
+    user.press(row, egui::PointerButton::Primary);
+    user.press(row, egui::PointerButton::Primary);
+    user.settle();
+    assert!(plotted(&user, &name), "a double click plots it");
+    assert_eq!(selected_signal(&user).as_deref(), Some(name.as_str()));
+    assert!(user.app.state.workbench.inspector_visible);
+    assert!(user.find("Mean").is_some(), "with its statistics");
+    assert_eq!(user.ticked(&tick), Some(true));
+
+    user.click("Hide trace");
+    assert!(
+        !plotted(&user, &name),
+        "the Inspector's button takes it off"
+    );
+    assert_eq!(user.ticked(&tick), Some(false), "and the tick follows");
+    user.click("Show trace");
+    assert!(plotted(&user, &name), "and puts it back");
+    assert_eq!(user.ticked(&tick), Some(true));
 }

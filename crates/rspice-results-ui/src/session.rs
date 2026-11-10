@@ -347,9 +347,10 @@ pub struct ResultViewerState {
     pub recent_signals: Vec<SourceWaveformPresentationKey>,
     /// Most-recent-first typed artifact identities.
     pub recent_result_artifacts: Vec<ResultArtifactPresentationKey>,
-    /// Quantities check-marked in the browser for a batch action. Session
-    /// state like the marks above it; the immutable dataset never sees it and
-    /// equal names in another retained analysis are not selected implicitly.
+    /// Quantities ticked in the browser that have no curve to plot: a
+    /// waveform's tick is its plot membership, and only that. Session state
+    /// like the marks above it; the immutable dataset never sees it and equal
+    /// names in another retained analysis are not selected implicitly.
     pub checked_result_quantities: HashSet<ResultBrowserSelectionKey>,
     /// Stable end point for Shift+click / Shift+Arrow range selection in the
     /// filtered browser inventory. The range itself is recomputed from the
@@ -889,17 +890,6 @@ impl ResultViewerState {
         self.recent_signals.iter().position(|recent| recent == key)
     }
 
-    pub fn toggle_checked_result_quantity(&mut self, key: ResultBrowserSelectionKey) {
-        if !self.checked_result_quantities.remove(&key) {
-            self.checked_result_quantities.insert(key);
-        }
-    }
-
-    pub fn is_checked_signal(&self, key: &SourceWaveformPresentationKey) -> bool {
-        self.checked_result_quantities
-            .contains(&ResultBrowserSelectionKey::Waveform(key.clone()))
-    }
-
     pub fn is_checked_result_artifact(&self, key: &ResultArtifactPresentationKey) -> bool {
         self.checked_result_quantities
             .contains(&ResultBrowserSelectionKey::Artifact(key.clone()))
@@ -914,33 +904,27 @@ impl ResultViewerState {
         self.browser_range_anchor = Some(key);
     }
 
-    pub fn select_checked_result_range(
+    /// The rows from the range anchor to `target`, in list order. An anchor
+    /// the list no longer holds starts the range over at `target`.
+    pub fn browser_range(
         &mut self,
         target: &ResultBrowserSelectionKey,
         ordered_visible: &[ResultBrowserSelectionKey],
-    ) {
+    ) -> Vec<ResultBrowserSelectionKey> {
         let anchor = self.browser_range_anchor.as_ref().unwrap_or(target);
         let Some(anchor_index) = ordered_visible.iter().position(|key| key == anchor) else {
-            self.checked_result_quantities.insert(target.clone());
             self.browser_range_anchor = Some(target.clone());
-            return;
+            return vec![target.clone()];
         };
         let Some(target_index) = ordered_visible.iter().position(|key| key == target) else {
-            return;
+            return Vec::new();
         };
         let (start, end) = if anchor_index <= target_index {
             (anchor_index, target_index)
         } else {
             (target_index, anchor_index)
         };
-        self.checked_result_quantities
-            .extend(ordered_visible[start..=end].iter().cloned());
-    }
-
-    pub fn select_visible_signals(&mut self, ordered_visible: &[ResultBrowserSelectionKey]) {
-        self.checked_result_quantities
-            .extend(ordered_visible.iter().cloned());
-        self.browser_range_anchor = ordered_visible.last().cloned();
+        ordered_visible[start..=end].to_vec()
     }
 
     pub fn toggle_favorite_result_artifact(&mut self, key: ResultArtifactPresentationKey) {

@@ -33,6 +33,8 @@ pub(in crate::workbench) struct User {
     ctx: egui::Context,
     pub(in crate::workbench) app: RSpiceApp,
     named: Vec<(String, egui::Rect)>,
+    /// The named nodes of the last frame that are ticked or not.
+    toggled: Vec<(String, bool)>,
     /// What the last frame's named nodes also said of themselves.
     described: Vec<(String, String)>,
     live: Vec<String>,
@@ -53,6 +55,7 @@ impl User {
             ctx,
             app,
             named: Vec::new(),
+            toggled: Vec::new(),
             described: Vec::new(),
             live: Vec::new(),
             shapes: Vec::new(),
@@ -74,6 +77,7 @@ impl User {
             ctx,
             app,
             named,
+            toggled,
             described,
             live,
             shapes,
@@ -99,6 +103,7 @@ impl User {
         );
         *shapes = output.shapes;
         named.clear();
+        toggled.clear();
         described.clear();
         live.clear();
         node_ids.clear();
@@ -108,6 +113,9 @@ impl User {
         for (id, node) in update.into_iter().flat_map(|update| update.nodes) {
             if let Some(name) = node.label() {
                 node_ids.push((name.to_owned(), id));
+                if let Some(state) = node.toggled() {
+                    toggled.push((name.to_owned(), state == egui::accesskit::Toggled::True));
+                }
                 if Some(id) == focus {
                     *focused = Some(name.to_owned());
                 }
@@ -165,6 +173,14 @@ impl User {
             .iter()
             .find(|(candidate, _)| candidate == name)
             .map(|(_, rect)| *rect)
+    }
+
+    /// Whether the control named `name` was ticked in the last frame.
+    pub(in crate::workbench) fn ticked(&self, name: &str) -> Option<bool> {
+        self.toggled
+            .iter()
+            .find(|(candidate, _)| candidate == name)
+            .map(|(_, ticked)| *ticked)
     }
 
     pub(in crate::workbench) fn expect(&self, name: &str) -> egui::Rect {

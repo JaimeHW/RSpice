@@ -20,9 +20,9 @@ use super::results::{
 };
 use super::results_actions::{
     execute, handle_result_artifact_keyboard, handle_result_signal_keyboard,
-    result_artifact_context_menu, result_signal_context_menu, result_signal_row_id,
-    select_result_analysis_by_key, select_result_artifact, select_result_signal_by_key,
-    toggle_result_signal_visibility, update_result_browser_multi_selection,
+    plot_and_inspect_signal, result_artifact_context_menu, result_signal_context_menu,
+    result_signal_row_id, select_result_analysis_by_key, select_result_artifact,
+    select_result_signal_by_key, update_result_browser_multi_selection,
 };
 use rspice_app_workbench::workbench::docks::navigator::grouped_count;
 use rspice_app_workbench::workbench::docks::navigator::muted;
@@ -875,7 +875,6 @@ pub(super) fn show_virtualized_result_signals(
                                 signal_selected,
                                 signal.visible,
                                 state.results.session.is_favorite_signal(&signal.identity),
-                                state.results.session.is_checked_signal(&signal.identity),
                             );
                             if responses.check.clicked() {
                                 let modifiers = ui.input(|input| input.modifiers);
@@ -884,9 +883,6 @@ pub(super) fn show_virtualized_result_signals(
                                     ordered_visible,
                                     modifiers,
                                 );
-                            }
-                            if responses.visibility.clicked() {
-                                toggle_result_signal_visibility(state, &signal.identity);
                             }
                             if responses
                                 .favorite
@@ -915,6 +911,9 @@ pub(super) fn show_virtualized_result_signals(
                                         );
                                 }
                                 select_result_signal_by_key(state, &signal.identity);
+                            }
+                            if responses.selection.double_clicked() {
+                                plot_and_inspect_signal(state, &signal.identity);
                             }
                             handle_result_signal_keyboard(
                                 &responses.selection,
@@ -1506,10 +1505,10 @@ pub(super) fn expression_header(ui: &mut Ui, state: &mut ResultsParts<'_>) {
 
 pub(super) struct SignalRowResponses {
     pub(super) selection: egui::Response,
-    /// Plot membership. On a quantity row this is the hover-revealed ±
-    /// action; expression rows keep it on their swatch.
+    /// Plot membership, on an expression row's swatch. A quantity row's is
+    /// its tick.
     pub(super) visibility: egui::Response,
-    /// The batch-selection checkbox, on quantity rows only.
+    /// The tick, on quantity rows only.
     pub(super) check: egui::Response,
     /// Hover-revealed star toggle; present only while the row shows it.
     pub(super) favorite: Option<egui::Response>,
@@ -1535,7 +1534,6 @@ fn result_quantity_row(
     selected: bool,
     visible: bool,
     favorite: bool,
-    checked: bool,
 ) -> SignalRowResponses {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
@@ -1557,15 +1555,15 @@ fn result_quantity_row(
         egui::pos2(visibility_rect.right(), rect.top()),
         rect.right_bottom(),
     );
-    // The checkbox marks the row for a batch action; plotting is the row's
-    // own affordance in the action cluster, as the mockup separates them.
+    // The tick is the row's plot membership; a click anywhere else selects
+    // the row for the Inspector and plots nothing.
     let check = ui.interact(visibility_rect, id.with("check"), egui::Sense::click());
     check.widget_info(|| {
         egui::WidgetInfo::selected(
             egui::WidgetType::Checkbox,
             ui.is_enabled(),
-            checked,
-            format!("Select {name}"),
+            visible,
+            format!("Plot {name}"),
         )
     });
     let selection = ui.interact(selection_rect, id.with("selection"), egui::Sense::click());
@@ -1606,12 +1604,8 @@ fn result_quantity_row(
         ui.painter().rect_filled(rect, 0.0, c.bg_hover);
     }
 
-    // The checkbox states one thing: whether this row is in the batch. It
-    // used to double as the plot-membership light, tinted in the trace's
-    // colour, which left an unselected-but-plotted row looking checked.
-    // Plot membership moved to the name below.
     let box_rect = egui::Rect::from_center_size(visibility_rect.center(), egui::vec2(13.0, 13.0));
-    if checked {
+    if visible {
         ui.painter().rect_stroke(
             box_rect,
             3.0,
@@ -1637,8 +1631,7 @@ fn result_quantity_row(
     //
     // The name carries the trace's own colour while the signal is plotted,
     // so the list answers "which curve is this" in the place the eye already
-    // is — no swatch column, and no second meaning loaded onto the checkbox.
-    // A signal that is not on a pane stays neutral.
+    // is, with no swatch column. A signal that is not on a pane stays neutral.
     let (name_y, meta_y) = if meta.is_empty() {
         (rect.center().y, rect.center().y)
     } else {
@@ -1666,40 +1659,8 @@ fn result_quantity_row(
         );
     }
 
-    // The action cluster and the preview value share the right column: on an
-    // idle row the value owns it, on intent the actions take it.
-    // The action cluster: plot membership, then the favorite mark.
-    let plot_response = hovered.then(|| {
-        let plot_rect = egui::Rect::from_center_size(
-            egui::pos2(rect.right() - 3.0 - 22.0 - 11.0, rect.center().y),
-            egui::vec2(22.0, 24.0),
-        );
-        let response = ui.interact(plot_rect, id.with("plot"), egui::Sense::click());
-        response.widget_info(|| {
-            egui::WidgetInfo::selected(
-                egui::WidgetType::Button,
-                ui.is_enabled(),
-                visible,
-                format!("{name} plotted"),
-            )
-        });
-        if response.hovered() {
-            ui.painter().rect_filled(plot_rect, 3.0, c.bg_active);
-        }
-        ui.painter().text(
-            plot_rect.center(),
-            egui::Align2::CENTER_CENTER,
-            if visible { "−" } else { "+" },
-            theme::mono(tokens::FS_1, FontWeight::Medium),
-            if visible { color } else { c.text_faint },
-        );
-        theme::paint_focus_ring(ui, &response, plot_rect);
-        response.on_hover_text(if visible {
-            format!("Remove {name} from its pane")
-        } else {
-            format!("Add {name} to its pane")
-        })
-    });
+    // The favorite mark and the preview value share the right column: on an
+    // idle row the value owns it, on intent the mark takes it.
     let favorite_response = if hovered {
         let star_rect = egui::Rect::from_center_size(
             egui::pos2(rect.right() - 3.0 - 11.0, rect.center().y),
@@ -1758,15 +1719,15 @@ fn result_quantity_row(
 
     theme::paint_focus_ring(ui, &check, visibility_rect);
     theme::paint_focus_ring(ui, &selection, selection_rect);
-    let check = check.on_hover_text(if checked {
-        format!("Deselect {name}")
+    let check = check.on_hover_text(if visible {
+        format!("Remove {name} from the plot")
     } else {
-        format!("Select {name} for a batch action")
+        format!("Plot {name}")
     });
     let selection = selection.on_hover_text(format!("Inspect {name}"));
     SignalRowResponses {
         selection,
-        visibility: plot_response.unwrap_or_else(|| check.clone()),
+        visibility: check.clone(),
         check,
         favorite: favorite_response,
     }
