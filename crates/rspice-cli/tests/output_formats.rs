@@ -476,6 +476,30 @@ r2 out 0 1k
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A Xyce `.PRINT DC` card prints a deck's `.OP`, which Xyce runs as a
+/// one-point DC analysis: Xyce 7.10 prints one row of V(1) 1, V(2) 0.5 and
+/// I(V1) -5e-4 for this deck.
+#[test]
+fn xyce_print_dc_card_prints_an_operating_point() {
+    let dir = test_dir("print_dc_operating_point");
+    let deck = "* print dc over op\nV1 1 0 1\nR1 1 2 1k\nR2 2 0 1k\n\
+                .op\n.print dc v(1) v(2) i(v1)\n.end\n";
+    let path = run_export_with_args(&dir, "op", deck, "csv", &["--spice-dialect", "xyce"]);
+    let text = std::fs::read_to_string(&path).expect("read csv");
+    for (name, expected) in [("V(1)", 1.0), ("V(2)", 0.5), ("I(V1)", -5e-4)] {
+        let row = text
+            .lines()
+            .find_map(|line| line.strip_prefix(&format!("{name},")))
+            .unwrap_or_else(|| panic!("no {name} row: {text}"));
+        let value: f64 = row.parse().expect("value");
+        assert!(
+            (value - expected).abs() <= 1e-9 * f64::abs(expected),
+            "{name}: {value}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A Xyce `.PRINT AC` or `.PRINT NOISE` card prints a `device:param` on every
 /// row, the value `.PRINT DC` prints at the analysis's own bias point: Xyce
 /// 7.10 prints R1:R 1e3, C1:C 1e-6, M1:W 1e-5 and M1:L 2e-6 on both rows of

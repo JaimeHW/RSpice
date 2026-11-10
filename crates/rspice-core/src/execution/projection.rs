@@ -484,6 +484,9 @@ pub struct SignalProjection {
     /// Whether an AC expression is evaluated in complex arithmetic, as Xyce
     /// evaluates it ([`complex_expression`]).
     complex_expressions: bool,
+    /// Whether a `.PRINT DC` card also prints the deck's `.OP`, which Xyce
+    /// runs as a one-point DC analysis (IOInterfacePKG/N_IO_OutputMgr.C:635-641).
+    dc_cards_print_operating_point: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -571,6 +574,8 @@ impl SignalProjection {
             authored,
             phase_unit: PhaseUnit::of(netlist),
             complex_expressions: netlist.parse_dialect() == crate::config::SpiceDialect::Xyce,
+            dc_cards_print_operating_point: netlist.parse_dialect()
+                == crate::config::SpiceDialect::Xyce,
         })
     }
 
@@ -729,6 +734,9 @@ impl SignalProjection {
             .iter()
             .filter(|card| match (card.analysis, analysis) {
                 (None, _) => true,
+                (Some(OutputAnalysisKind::Dc), Some(OutputAnalysisKind::Op)) => {
+                    self.dc_cards_print_operating_point
+                }
                 (Some(card_analysis), Some(analysis)) => card_analysis == analysis,
                 (Some(_), None) => false,
             })
