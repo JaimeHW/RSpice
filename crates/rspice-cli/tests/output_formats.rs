@@ -722,6 +722,58 @@ fn xyce_prints_an_hb_expression_in_complex_arithmetic() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A Xyce `.PRINT HB` reads a resistor's and a capacitor's current from the
+/// solved spectrum, as it reads an inductor's or a source's branch unknown.
+/// Xyce 7.10 prints, at the 100 kHz bin of this RLC driven by a 1 V sine,
+/// V(OUT) 0.249824676-0.259361152j, I(R1) -2.49824676e-4-2.40638848e-4j and
+/// I(C1) 1.62961418e-4+1.56969473e-4j: I(R1)/V(OUT) = -9.63230901e-4j and
+/// I(C1)/V(OUT) = 6.28318530e-4j (jwC). A deck that names no device current
+/// keeps the node voltages and branch unknowns alone.
+#[test]
+fn xyce_prints_an_hb_resistor_and_capacitor_current() {
+    let dir = test_dir("print_hb_device_current");
+    let circuit = ".options hbint numfreq=5\nV1 in 0 sin 0 1 1e5 0 0\nR1 in out 1k\n\
+                   C1 out 0 1n\nL1 out 0 1m\n.end\n";
+    let deck = format!("* hb currents\n.hb 1e5\n.print hb v(out) i(R1) i(C1) i(L1)\n{circuit}");
+    let path = run_export_with_args(&dir, "named", &deck, "csv", &["--spice-dialect", "xyce"]);
+    let text = std::fs::read_to_string(&path).expect("read csv");
+    let at_fundamental = |name: &str| {
+        let frequency = common::csv_column(&text, "frequency");
+        let row = frequency
+            .iter()
+            .position(|value| (value - 1e5).abs() < 1e-3)
+            .unwrap_or_else(|| panic!("no 100 kHz row: {text}"));
+        let re = common::csv_column(&text, &format!("Re({name})"));
+        let im = common::csv_column(&text, &format!("Im({name})"));
+        (re[row], im[row])
+    };
+    let (v_re, v_im) = at_fundamental("V(OUT)");
+    let norm = v_re * v_re + v_im * v_im;
+    assert!(norm > 0.01, "the drive reaches V(OUT): {text}");
+    for (name, expected) in [("I(R1)", -9.63230901e-4), ("I(C1)", 6.28318530e-4)] {
+        let (i_re, i_im) = at_fundamental(name);
+        // I / V = (i_re + j i_im)(v_re - j v_im) / |V|^2
+        let ratio_re = (i_re * v_re + i_im * v_im) / norm;
+        let ratio_im = (i_im * v_re - i_re * v_im) / norm;
+        assert!(ratio_re.abs() <= 1e-9, "{name}: {ratio_re}+{ratio_im}j");
+        assert!(
+            (ratio_im - expected).abs() <= 1e-8 * expected.abs(),
+            "{name}: {ratio_im}j, expected {expected}j"
+        );
+    }
+
+    let bare = format!("* hb currents\n.hb 1e5\n{circuit}");
+    let path = run_export_with_args(&dir, "bare", &bare, "csv", &["--spice-dialect", "xyce"]);
+    let header = std::fs::read_to_string(&path).expect("read csv");
+    let header = header.lines().next().expect("csv header");
+    assert!(header.contains("Re(I(L1))"), "{header}");
+    assert!(
+        !header.contains("I(R1)") && !header.contains("I(C1)"),
+        "{header}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A two-point LIN sweep visits both ends in every dialect, as Xyce, LTspice,
 /// QSPICE and ngspice's noise analysis step it; ngspice's AC analysis alone
 /// visits only the start (acan.c:104-113). `.DISTO`, which only ngspice runs,

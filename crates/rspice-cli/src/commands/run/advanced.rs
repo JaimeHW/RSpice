@@ -73,7 +73,7 @@ pub(super) fn run_hb_from_command(
             artifact.analysis,
             path,
             config.fundamental_freq,
-            &hb_result.result,
+            &hb_result,
         )?;
     }
     ctx.retain_hb(artifact.analysis, hb_result.operating_point, config);
@@ -531,7 +531,7 @@ pub(super) fn run_hb(ctx: &RunContext<'_>, freq: f64, harmonics: usize) -> Resul
     let artifact = ctx.resolve_periodic_analysis("hb")?;
     let hb_result = solve_hb(ctx, config)?;
     if let Some(path) = &artifact.path {
-        export_hb(ctx, artifact.analysis, path, fundamental, &hb_result.result)?;
+        export_hb(ctx, artifact.analysis, path, fundamental, &hb_result)?;
     }
     Ok(())
 }
@@ -579,15 +579,17 @@ fn solve_hb(
 }
 
 /// Write the harmonic-balance spectrum: harmonic frequencies as the scale,
-/// one complex column per retained node voltage or MNA branch current.
+/// one complex column per retained node voltage or MNA branch current, and
+/// per device current the deck names.
 fn export_hb(
     ctx: &RunContext<'_>,
     analysis_id: rspice_core::execution::AnalysisInstanceId,
     output_path: &std::path::Path,
     fundamental: f64,
-    result: &rspice_core::analysis::HbResult,
+    analysis: &rspice_core::engine::HbAnalysisResult,
 ) -> Result<(), CliError> {
     ensure_not_cancelled(ctx)?;
+    let result = &analysis.result;
 
     let num_coeffs = result
         .spectral_voltages
@@ -615,52 +617,90 @@ fn export_hb(
         .cloned()
         .unwrap_or_else(|| (0..num_coeffs).map(|k| fundamental * k as f64).collect());
 
-    let mut signals: Vec<crate::commands::run_signals::ComplexSignal> = result
-        .spectral_voltages
-        .iter()
-        .map(|sv| {
-            let mut real = Vec::with_capacity(num_coeffs);
-            let mut imag = Vec::with_capacity(num_coeffs);
-            for k in 0..num_coeffs {
-                let c = sv
-                    .coefficients
-                    .get(k)
-                    .copied()
-                    .unwrap_or_else(|| rspice_core::Complex64::new(0.0, 0.0));
-                real.push(c.re);
-                imag.push(c.im);
-            }
-            crate::commands::run_signals::ComplexSignal {
-                display_name: format!("V({})", sv.node_name),
-                raw_name: sv.node_name.clone(),
-                kind: crate::commands::run_signals::SignalKind::Voltage,
-                real,
-                imag,
-                real_only: false,
-            }
-        })
-        .collect();
-    signals.extend(result.mna_branch_currents.iter().map(|branch| {
-        let mut real = Vec::with_capacity(num_coeffs);
-        let mut imag = Vec::with_capacity(num_coeffs);
-        for harmonic in 0..num_coeffs {
-            let coefficient = branch
-                .coefficients
-                .get(harmonic)
-                .copied()
-                .unwrap_or_else(|| rspice_core::Complex64::new(0.0, 0.0));
-            real.push(coefficient.re);
-            imag.push(coefficient.im);
-        }
-        crate::commands::run_signals::ComplexSignal {
-            display_name: format!("I({})", branch.device_name),
-            raw_name: branch.device_name.clone(),
-            kind: crate::commands::run_signals::SignalKind::Current,
+    use crate::commands::run_signals::{ComplexSignal, SignalKind};
+    // One column per harmonic of the solved grid; a shorter spectrum reads 0
+    // past its end.
+    let column = |display_name: String,
+                  raw_name: &str,
+                  kind: SignalKind,
+                  coefficients: &[rspice_core::Complex64]| {
+        let (real, imag): (Vec<f64>, Vec<f64>) = (0..num_coeffs)
+            .map(|harmonic| {
+                coefficients
+                    .get(harmonic)
+                    .map_or((0.0, 0.0), |coefficient| (coefficient.re, coefficient.im))
+            })
+            .unzip();
+        ComplexSignal {
+            display_name,
+            raw_name: raw_name.to_owned(),
+            kind,
             real,
             imag,
             real_only: false,
         }
+    };
+    let mut signals = result
+        .spectral_voltages
+        .iter()
+        .map(|sv| {
+            column(
+                format!("V({})", sv.node_name),
+                &sv.node_name,
+                SignalKind::Voltage,
+                &sv.coefficients,
+            )
+        })
+        .collect::<Vec<_>>();
+    signals.extend(result.mna_branch_currents.iter().map(|branch| {
+        column(
+            format!("I({})", branch.device_name),
+            &branch.device_name,
+            SignalKind::Current,
+            &branch.coefficients,
+        )
     }));
+    // A deck that names a device's current (`.PRINT HB I(R1)`, `.SAVE I(C1)`)
+    // reads it from the spectra the solve derives for every device, as Xyce
+    // prints it; with nothing named, the spectrum keeps the node voltages and
+    // branch unknowns, as Spectre saves only the currents it is asked for.
+    let projection = crate::commands::run_signals::projection(ctx.netlist).map_err(|source| {
+        CliError::CoreSimulationError {
+            source,
+            analysis: Some("HB output projection".to_string()),
+        }
+    })?;
+    if projection.authored() && !projection.keeps_everything() {
+        let mut named = signals
+            .iter()
+            .map(|signal| signal.display_name.to_ascii_uppercase())
+            .collect::<std::collections::HashSet<_>>();
+        let reactive = result
+            .reactive_spectra
+            .iter()
+            .filter(|spectrum| spectrum.dc_current_is_exact)
+            .map(|spectrum| {
+                (
+                    spectrum.device_name.as_str(),
+                    spectrum.current_coefficients.as_slice(),
+                )
+            });
+        let devices = analysis.device_currents.iter().filter_map(|current| {
+            let name = current.probe.strip_prefix("I(")?.strip_suffix(')')?;
+            Some((name, current.coefficients.as_slice()))
+        });
+        for (name, coefficients) in reactive.chain(devices) {
+            let display_name = format!("I({name})");
+            if named.insert(display_name.to_ascii_uppercase()) {
+                signals.push(column(
+                    display_name,
+                    name,
+                    SignalKind::Current,
+                    coefficients,
+                ));
+            }
+        }
+    }
     let signals = crate::commands::run_signals::complex_export_signals(
         ctx.netlist,
         rspice_core::execution::AnalysisResultKind::HarmonicBalance,
