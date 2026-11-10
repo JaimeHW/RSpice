@@ -1742,6 +1742,12 @@ impl Engine {
         .map_err(SimulationError::into_exhausted_circuit_error)
     }
 
+    /// Every dialect but ngspice holds each `.IC` node at its value through
+    /// the operating point. QSPICE and LTspice do: a 2 V divider of two 1k
+    /// resistors with `.ic v(m)=0.3` prints V(m) = 0.3000014 in QSPICE and
+    /// 0.3000028 in LTspice, where ngspice, which reads `.IC` only for a
+    /// transient, prints 1.
+    ///
     /// Xyce holds each `.IC` node at its value through every DC-mode solve:
     /// given `.IC`, its nonlinear solver augments the system with
     /// AugmentLinSys_IC (N_NLS_NOX_Interface.C:483-489 and 1602-1621), which
@@ -1757,7 +1763,7 @@ impl Engine {
         circuit: &crate::CircuitData,
         startup: DcOpStartup<'a>,
     ) -> DcOpStartup<'a> {
-        if self.config.spice_dialect == super::SpiceDialect::Xyce
+        if self.config.spice_dialect != super::SpiceDialect::Ngspice
             && matches!(startup, DcOpStartup::Automatic { use_hints: true })
             && !self
                 .collect_initial_condition_hints(netlist, circuit)

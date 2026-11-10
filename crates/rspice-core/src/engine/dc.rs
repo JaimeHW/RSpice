@@ -2357,13 +2357,15 @@ mod tests {
         );
     }
 
-    /// Xyce holds each `.IC` node at its value through its DC operating point
-    /// (AugmentLinSys_IC). Xyce 7.10 prints V(m) = 0.3 for the divider, and
-    /// V(g) = 0.25 both where the diode alone would settle at 0.476 V and
-    /// where only a capacitor and a current source meet the node. ngspice
+    /// QSPICE, LTspice and Xyce hold each `.IC` node at its value through the
+    /// operating point (Xyce's AugmentLinSys_IC). For the divider QSPICE
+    /// prints V(m) = 0.3000014, LTspice 0.3000028 and Xyce 7.10 0.3. For the
+    /// diode, where it alone would settle at 0.476 V, QSPICE prints V(g) =
+    /// 0.2500000010 and LTspice 0.2500000020; where only a capacitor and a
+    /// current source meet the node, 0.250000001 and 0.250000002. ngspice
     /// reads `.IC` only for a transient, so its `.op` solves the divider.
     #[test]
-    fn a_xyce_dialect_operating_point_holds_its_ic_nodes() {
+    fn an_operating_point_holds_its_ic_nodes_unless_the_dialect_is_ngspice() {
         let divider = "ic divider\nV1 a 0 2\nR1 a m 1k\nR2 m 0 1k\n.ic v(m)=0.3\n.op\n.end\n";
         for (deck, node, held) in [
             (divider, "m", 0.3),
@@ -2380,13 +2382,19 @@ mod tests {
             ),
         ] {
             let netlist = Netlist::parse(deck).unwrap();
-            let result = xyce_engine()
-                .run_dc_op(&netlist)
-                .unwrap_or_else(|error| panic!("{deck}: {error}"));
-            assert_voltage(&result, node, held);
+            for engine in [Engine::default(), xyce_engine()] {
+                let result = engine
+                    .run_dc_op(&netlist)
+                    .unwrap_or_else(|error| panic!("{deck}: {error}"));
+                assert_voltage(&result, node, held);
+            }
         }
         let netlist = Netlist::parse(divider).unwrap();
-        let result = Engine::default().run_dc_op(&netlist).unwrap();
+        let result = Engine::new(
+            crate::engine::SimulationConfig::default().with_spice_dialect(SpiceDialect::Ngspice),
+        )
+        .run_dc_op(&netlist)
+        .unwrap();
         assert_voltage(&result, "m", 1.0);
     }
 
