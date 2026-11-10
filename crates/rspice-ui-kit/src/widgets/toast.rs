@@ -250,7 +250,12 @@ struct ToastLayout {
 }
 
 impl ToastLayout {
-    fn resolve(viewport_width: f32, title_bar_height: f32, toolbar_height: f32) -> Self {
+    fn resolve(
+        viewport_width: f32,
+        title_bar_height: f32,
+        toolbar_height: f32,
+        right_dock_width: f32,
+    ) -> Self {
         if viewport_width <= TOAST_PHONE_BREAKPOINT {
             Self {
                 // The final mobile mockup rule deliberately omits the title
@@ -262,7 +267,10 @@ impl ToastLayout {
         } else {
             Self {
                 top: title_bar_height + toolbar_height + 12.0,
-                right: TOAST_DESKTOP_INSET,
+                // Clear of the dock on the right. A notice is hit before what
+                // lies under it, and the dock's first section is where a
+                // finished run's own link sits.
+                right: TOAST_DESKTOP_INSET + right_dock_width,
                 width: TOAST_DESKTOP_WIDTH
                     .min((viewport_width - TOAST_DESKTOP_INSET * 2.0).max(0.0)),
             }
@@ -609,6 +617,7 @@ impl Toasts {
         ctx: &Context,
         title_bar_height: f32,
         toolbar_height: f32,
+        right_dock_width: f32,
         large_targets: bool,
     ) -> Option<NotificationAction> {
         let now = ctx.input(|i| i.time);
@@ -642,7 +651,12 @@ impl Toasts {
         let t = Tokens::get(ctx);
         let c = t.color;
         let viewport_width = ctx.content_rect().width();
-        let layout = ToastLayout::resolve(viewport_width, title_bar_height, toolbar_height);
+        let layout = ToastLayout::resolve(
+            viewport_width,
+            title_bar_height,
+            toolbar_height,
+            right_dock_width,
+        );
         if layout.width <= 0.0 {
             return None;
         }
@@ -1280,7 +1294,7 @@ mod tests {
     #[test]
     fn placement_matches_final_desktop_and_phone_mockup_rules() {
         assert_eq!(
-            ToastLayout::resolve(1440.0, 35.0, 45.0),
+            ToastLayout::resolve(1440.0, 35.0, 45.0, 0.0),
             ToastLayout {
                 top: 92.0,
                 right: 14.0,
@@ -1288,7 +1302,16 @@ mod tests {
             }
         );
         assert_eq!(
-            ToastLayout::resolve(390.0, 40.0, 46.0),
+            ToastLayout::resolve(1440.0, 35.0, 45.0, 278.0),
+            ToastLayout {
+                top: 92.0,
+                right: 292.0,
+                width: 350.0,
+            },
+            "a dock on the right keeps its own controls"
+        );
+        assert_eq!(
+            ToastLayout::resolve(390.0, 40.0, 46.0, 0.0),
             ToastLayout {
                 top: 54.0,
                 right: 8.0,
@@ -1489,7 +1512,7 @@ mod tests {
         };
         input.viewports.insert(egui::ViewportId::ROOT, viewport);
         ctx.run_ui(input, |ui| {
-            let _ = toasts.show(ui.ctx(), 35.0, 45.0, false);
+            let _ = toasts.show(ui.ctx(), 35.0, 45.0, 0.0, false);
         })
     }
 

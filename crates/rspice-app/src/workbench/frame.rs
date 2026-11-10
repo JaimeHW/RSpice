@@ -222,10 +222,16 @@ fn show_toasts(
         return None;
     }
     let large_targets = tools::notification_center::large_targets(ctx, &state.workbench);
+    let right_dock_width = if layout.show_inspector_dock {
+        layout.inspector_width
+    } else {
+        0.0
+    };
     state.workbench.toasts.show(
         ctx,
         layout.title_bar_height,
         layout.toolbar_height,
+        right_dock_width,
         large_targets,
     )
 }
@@ -708,7 +714,7 @@ fn show_full_screen_presentation(root: &mut egui::Ui, app: &mut RSpiceApp, layou
             .state
             .workbench
             .toasts
-            .show(ctx, 0.0, 0.0, large_targets)
+            .show(ctx, 0.0, 0.0, 0.0, large_targets)
         {
             ResultsFeature::perform_notification_action(&mut features::cx(app), action);
             app.after_contribution();
@@ -1850,7 +1856,7 @@ mod tests {
                 ..Default::default()
             },
             |ctx| {
-                toasts.show(ctx, 32.0, 40.0, false);
+                toasts.show(ctx, 32.0, 40.0, 0.0, false);
             },
         );
         output

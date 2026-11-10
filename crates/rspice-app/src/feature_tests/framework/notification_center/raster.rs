@@ -129,6 +129,7 @@ fn raster(case: &Case) -> Canvas {
                 ui.ctx(),
                 layout.title_bar_height,
                 layout.toolbar_height,
+                0.0,
                 large,
             );
         }

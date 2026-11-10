@@ -45,7 +45,7 @@ pub(in crate::workbench) struct User {
 }
 
 impl User {
-    fn new(app: RSpiceApp) -> Self {
+    pub(in crate::workbench) fn new(app: RSpiceApp) -> Self {
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
@@ -69,7 +69,7 @@ impl User {
     /// at its own boundary: every step that drives the design, the compile,
     /// the run and the selection's cross-probe. The account, live session and
     /// autosave have no part in this flow.
-    fn frame(&mut self, events: Vec<egui::Event>) {
+    pub(in crate::workbench) fn frame(&mut self, events: Vec<egui::Event>) {
         let Self {
             ctx,
             app,
@@ -135,7 +135,7 @@ impl User {
         }
     }
 
-    fn settle(&mut self) {
+    pub(in crate::workbench) fn settle(&mut self) {
         self.frame(Vec::new());
         self.frame(Vec::new());
     }
@@ -160,14 +160,14 @@ impl User {
     }
 
     /// Where the last frame drew `name`.
-    fn find(&self, name: &str) -> Option<egui::Rect> {
+    pub(in crate::workbench) fn find(&self, name: &str) -> Option<egui::Rect> {
         self.named
             .iter()
             .find(|(candidate, _)| candidate == name)
             .map(|(_, rect)| *rect)
     }
 
-    fn expect(&self, name: &str) -> egui::Rect {
+    pub(in crate::workbench) fn expect(&self, name: &str) -> egui::Rect {
         self.find(name).unwrap_or_else(|| {
             panic!(
                 "nothing on screen is named {name:?}; named: {:?}",
@@ -176,7 +176,7 @@ impl User {
         })
     }
 
-    fn press(&mut self, at: egui::Pos2, button: egui::PointerButton) {
+    pub(in crate::workbench) fn press(&mut self, at: egui::Pos2, button: egui::PointerButton) {
         self.frame(vec![
             egui::Event::PointerMoved(at),
             egui::Event::PointerButton {
@@ -201,7 +201,7 @@ impl User {
     }
 
     /// Frame until `done` holds, as the application would while it waits.
-    fn wait_for(&mut self, what: &str, done: impl Fn(&RSpiceApp) -> bool) {
+    pub(in crate::workbench) fn wait_for(&mut self, what: &str, done: impl Fn(&RSpiceApp) -> bool) {
         let deadline = Instant::now() + Duration::from_secs(300);
         while !done(&self.app) {
             assert!(Instant::now() < deadline, "timed out waiting for {what}");
