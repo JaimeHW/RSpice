@@ -113,7 +113,10 @@ pub use {
     distortion::{
         DistortionAnalysisResult, DistortionPointResult, DistortionProduct, DistortionProductResult,
     },
-    fourier::{FourierAnalysis, FourierConfig, FourierError, FourierResult, HarmonicComponent},
+    fourier::{
+        FourierAnalysis, FourierConfig, FourierError, FourierMethod, FourierResult,
+        HarmonicComponent,
+    },
     harmonic_balance::{
         HbConfig, HbContinuationLimitation, HbError, HbFft, HbPhaseProjectionError, HbPhaseState,
         HbReactiveKind, HbReactivePhaseState, HbReactiveSpectrum, HbResult, HbSolver,

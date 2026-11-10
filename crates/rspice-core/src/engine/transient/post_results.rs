@@ -13,7 +13,7 @@ use super::super::{
 use crate::Netlist;
 use crate::abort_signal::AbortSignal;
 use crate::analysis::{
-    FourierAnalysis, FourierConfig, FourierError, evaluate_tran_assertions,
+    FourierAnalysis, FourierConfig, FourierError, FourierMethod, evaluate_tran_assertions,
     evaluate_tran_continuous_measurements_with_limits_and_abort,
     evaluate_tran_four_output_requests_with_abort, evaluate_tran_measurements_with_abort,
 };
@@ -111,12 +111,14 @@ pub fn evaluate_transient_fourier_results(
         // The card is the only statement of what this spectrum is taken over,
         // window included; reading it in one place is what keeps every surface
         // integrating the same interval.
-        let config = FourierConfig::try_from(card).map_err(|error| {
-            SimulationError::Netlist(format!(
-                ".FOUR request {} could not be read: {error}",
-                card_index + 1
-            ))
-        })?;
+        let config = FourierConfig::try_from(card)
+            .map_err(|error| {
+                SimulationError::Netlist(format!(
+                    ".FOUR request {} could not be read: {error}",
+                    card_index + 1
+                ))
+            })?
+            .with_method(FourierMethod::for_dialect(netlist.parse_dialect()));
         let columns = evaluate_tran_four_output_requests_with_abort(
             netlist, result, card_index, limits, abort,
         )?;

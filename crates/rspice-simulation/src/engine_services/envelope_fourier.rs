@@ -2212,12 +2212,18 @@ mod tests {
             run_fourier_from_signal_with_abort(&time, &signal, &config(false, true), &NoAbort)
                 .expect("normalized Fourier decomposition");
 
+        // The interpolant's integral reads harmonic k of N samples a period
+        // at sinc^2(pi k / N) of its amplitude; its mean is exact.
+        let gain = |harmonic: Value| {
+            let x = PI * harmonic / 800.0;
+            (x.sin() / x).powi(2)
+        };
         assert!(raw.thd_percent.is_some());
         assert_eq!(normalized.thd_percent, None);
-        assert!((raw.response[1].norm() - 2.0).abs() < 1.0e-9);
+        assert!((raw.response[1].norm() - 2.0 * gain(1.0)).abs() < 1.0e-9);
         assert!((normalized.response[1].norm() - 1.0).abs() < 1.0e-9);
-        assert!((normalized.response[2].norm() - 0.25).abs() < 1.0e-9);
-        assert!((normalized.dc_component - 0.125).abs() < 1.0e-9);
+        assert!((normalized.response[2].norm() - 0.25 * gain(2.0) / gain(1.0)).abs() < 1.0e-9);
+        assert!((normalized.dc_component - 0.125 / gain(1.0)).abs() < 1.0e-9);
     }
 
     #[test]

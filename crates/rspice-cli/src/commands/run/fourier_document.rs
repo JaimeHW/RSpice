@@ -23,17 +23,19 @@ pub(super) fn run_fourier(
     four_index: usize,
     card: &rspice_core::netlist::AnalysisCommand,
 ) -> Result<(), CliError> {
-    use rspice_core::analysis::{FourierAnalysis, FourierConfig};
+    use rspice_core::analysis::{FourierAnalysis, FourierConfig, FourierMethod};
 
     // The card states the spectrum AND the window it is taken over, and core
     // reads both in one place. Rebuilding either here would let the command
     // line integrate a different interval from every other surface.
-    let config = FourierConfig::try_from(card).map_err(|error| {
-        CliError::simulation_error_in(
-            format!("the .FOUR card could not be read: {error}"),
-            "Fourier",
-        )
-    })?;
+    let config = FourierConfig::try_from(card)
+        .map_err(|error| {
+            CliError::simulation_error_in(
+                format!("the .FOUR card could not be read: {error}"),
+                "Fourier",
+            )
+        })?
+        .with_method(FourierMethod::for_dialect(ctx.netlist.parse_dialect()));
     let fundamental = config.fundamental_freq;
     let num_harmonics = config.num_harmonics;
 

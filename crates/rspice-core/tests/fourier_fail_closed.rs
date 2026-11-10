@@ -4,7 +4,9 @@ use std::f64::consts::PI;
 
 use rspice_core::Netlist;
 use rspice_core::abort_signal::{CountingAbort, NoAbort};
-use rspice_core::analysis::fourier::{FourierAnalysis, FourierConfig, FourierError, FourierResult};
+use rspice_core::analysis::fourier::{
+    FourierAnalysis, FourierConfig, FourierError, FourierMethod, FourierResult,
+};
 use rspice_core::netlist::OutputSymbolKind::{Device, Node};
 use rspice_core::netlist::{
     NetlistParseOptions, OutputDirectiveKind, ParseError, validate_output_requests,
@@ -13,6 +15,14 @@ use rspice_core::netlist::{
 
 fn analyzer(fundamental: f64, harmonics: usize) -> FourierAnalysis {
     FourierAnalysis::new(FourierConfig::new(fundamental).with_harmonics(harmonics))
+}
+
+/// What the default rule reads of harmonic `k` sampled `per_period` times a
+/// period: it integrates the samples' piecewise-linear interpolant, whose
+/// series is the waveform's scaled by `sinc^2(pi k / N)`, with no phase shift.
+fn interpolant_gain(harmonic: usize, per_period: usize) -> f64 {
+    let x = PI * harmonic as f64 / per_period as f64;
+    (x.sin() / x).powi(2)
 }
 
 fn full_period_fixture() -> (Vec<f64>, Vec<f64>) {
@@ -37,9 +47,12 @@ fn fourier_and_pss_share_finite_scale_invariant_quadrature() {
             pss.time = time.clone();
             pss.waveforms[0] = rspice_core::analysis::PeriodicWaveform::from_values(values);
             let periodic = pss.harmonics(1, 1);
-            for harmonics in [&fourier.harmonics, &periodic] {
+            for (harmonics, gain) in [
+                (&fourier.harmonics, interpolant_gain(1, 128)),
+                (&periodic, 1.0),
+            ] {
                 assert!((harmonics[0].magnitude / amplitude - 0.25).abs() < 2e-14);
-                assert!((harmonics[1].magnitude / amplitude - 1.0).abs() < 2e-14);
+                assert!((harmonics[1].magnitude / amplitude - gain).abs() < 2e-14);
                 assert!((harmonics[1].phase + 90.0).abs() < 2e-12);
             }
         }
@@ -338,20 +351,51 @@ fn insufficient_or_nonmonotone_sampling_is_rejected() {
     ));
 }
 
+/// Steps coarser than an eighth of the highest harmonic's period are computed,
+/// never refused: every simulator computes them. Four steps of a triangle
+/// interpolate to an exact triangle wave, `8/pi^2 sum cos(2 pi k t)/k^2` over
+/// odd `k`, and that interpolant is what the default rule integrates (QSPICE,
+/// LTspice); a trapezoidal sum of the samples would read 1 for the
+/// fundamental. ngspice's grid samples the same triangle 200 times, so it
+/// differs only by aliases of order 1/200^2.
 #[test]
-fn sample_rate_must_resolve_the_highest_requested_harmonic() {
+fn a_coarsely_sampled_window_is_computed_by_each_dialect_s_rule() {
     let time = [0.0, 0.25, 0.5, 0.75, 1.0];
     let values = [1.0, 0.0, -1.0, 0.0, 1.0];
+    let fundamental = 8.0 / (PI * PI);
 
-    assert!(matches!(
-        analyzer(1.0, 2).analyze(&time, &values),
-        Err(FourierError::InsufficientSampleRate {
-            harmonic: 2,
-            interval,
-            maximum
-        }) if (interval - 0.25).abs() < f64::EPSILON
-            && (maximum - 0.0625).abs() < f64::EPSILON
-    ));
+    let exact = analyzer(1.0, 3).analyze(&time, &values).unwrap();
+    assert!(exact.dc_component.abs() < 1e-15, "{exact:?}");
+    assert!(
+        (exact.harmonics[1].magnitude - fundamental).abs() < 1e-14,
+        "{exact:?}"
+    );
+    assert!(exact.harmonics[1].phase.abs() < 1e-10, "{exact:?}");
+    assert!(exact.harmonics[2].magnitude < 1e-14, "{exact:?}");
+    assert!(
+        (exact.harmonics[3].magnitude - fundamental / 9.0).abs() < 1e-14,
+        "{exact:?}"
+    );
+    assert!(
+        (exact.thd.unwrap() - 100.0 / 9.0).abs() < 1e-10,
+        "{exact:?}"
+    );
+
+    let by = |method| {
+        FourierAnalysis::new(
+            FourierConfig::new(1.0)
+                .with_harmonics(3)
+                .with_method(method),
+        )
+        .analyze(&time, &values)
+        .unwrap()
+    };
+    let linear = by(FourierMethod::LinearGrid);
+    assert!(
+        (linear.harmonics[1].magnitude / fundamental - 1.0).abs() < 1e-4,
+        "{linear:?}"
+    );
+    assert!(by(FourierMethod::SplineGrid).thd.unwrap().is_finite());
 }
 
 #[test]
@@ -411,8 +455,10 @@ fn thd_remains_scale_invariant_below_the_old_absolute_cutoff() {
     let result = analyzer(FUNDAMENTAL, 4)
         .analyze(&time, &values)
         .expect("tiny but finite nonzero harmonics remain analyzable");
+    let thd =
+        25.0 * interpolant_gain(2, SAMPLES_PER_PERIOD) / interpolant_gain(1, SAMPLES_PER_PERIOD);
     assert_eq!(
-        result.thd.map(|thd| (thd - 25.0).abs() < 1.0e-9),
+        result.thd.map(|value| (value - thd).abs() < 1.0e-9),
         Some(true)
     );
 }
@@ -480,13 +526,19 @@ fn known_dc_fundamental_and_second_harmonic_oracle_remains_accurate() {
         .expect("fundamental component retained");
     let second = result.harmonic(2).expect("second harmonic retained");
 
+    let (first_gain, second_gain) = (
+        interpolant_gain(1, SAMPLES_PER_PERIOD),
+        interpolant_gain(2, SAMPLES_PER_PERIOD),
+    );
     assert!((result.dc_component - 1.25).abs() < 1.0e-10);
-    assert!((fundamental.magnitude - 2.0).abs() < 1.0e-10);
+    assert!((fundamental.magnitude - 2.0 * first_gain).abs() < 1.0e-10);
     assert!((fundamental.phase - 30.0).abs() < 1.0e-9);
-    assert!((second.magnitude - 0.5).abs() < 1.0e-10);
+    assert!((second.magnitude - 0.5 * second_gain).abs() < 1.0e-10);
     assert!((second.phase + 45.0).abs() < 1.0e-9);
     assert_eq!(
-        result.thd.map(|thd| (thd - 25.0).abs() < 1.0e-9),
+        result
+            .thd
+            .map(|thd| (thd - 25.0 * second_gain / first_gain).abs() < 1.0e-9),
         Some(true)
     );
     assert!(result.harmonics.iter().all(|component| {
@@ -511,11 +563,10 @@ fn windowed(fundamental: f64, harmonics: usize, periods: usize) -> FourierConfig
 /// harmonic cosine decomposes back into exactly those terms, and the answer
 /// does not depend on how many whole periods of it are integrated.
 ///
-/// Tolerance 1e-12 on the magnitudes: the trapezoidal rule applied to a
-/// trigonometric polynomial over a whole number of periods on a uniform grid
-/// of 256 points per period is exact up to rounding for every harmonic below
-/// 128, so what is asserted here is accumulated floating-point error and
-/// nothing else. Phases are asserted to 1e-10 degrees because a coefficient
+/// Tolerance 1e-12 on the magnitudes: on a uniform grid of 256 points per
+/// period the samples' piecewise-linear interpolant carries every harmonic
+/// below 128 scaled by exactly `sinc^2(pi k / 256)` and no other, so what is
+/// asserted here is accumulated floating-point error and nothing else. Phases are asserted to 1e-10 degrees because a coefficient
 /// error of `e` shows up in the angle as `e/|c| * 180/pi`, two orders larger;
 /// a wrong phase reference would be off by 90 degrees or more.
 #[test]
@@ -545,6 +596,8 @@ fn a_sine_with_a_third_harmonic_has_the_coefficients_it_was_built_from() {
     // window below begins on a period boundary and shares one cosine
     // reference: a sine of phase `PHASE` is a cosine of `PHASE - pi/2`.
     let expected_fundamental_phase = (PHASE - std::f64::consts::FRAC_PI_2).to_degrees();
+    let amplitude = AMPLITUDE * interpolant_gain(1, PER_PERIOD);
+    let third_amplitude = THIRD * interpolant_gain(3, PER_PERIOD);
     for periods in [1, 4] {
         let result = FourierAnalysis::new(windowed(FUNDAMENTAL, 5, periods))
             .analyze(&time, &values)
@@ -556,8 +609,8 @@ fn a_sine_with_a_third_harmonic_has_the_coefficients_it_was_built_from() {
         );
         let first = result.harmonic(1).expect("fundamental");
         assert!(
-            (first.magnitude - AMPLITUDE).abs() < 1e-12,
-            "{periods}: |c1| {} != {AMPLITUDE}",
+            (first.magnitude - amplitude).abs() < 1e-12,
+            "{periods}: |c1| {} != {amplitude}",
             first.magnitude
         );
         assert!(
@@ -567,8 +620,8 @@ fn a_sine_with_a_third_harmonic_has_the_coefficients_it_was_built_from() {
         );
         let third = result.harmonic(3).expect("third harmonic");
         assert!(
-            (third.magnitude - THIRD).abs() < 1e-12,
-            "{periods}: |c3| {} != {THIRD}",
+            (third.magnitude - third_amplitude).abs() < 1e-12,
+            "{periods}: |c3| {} != {third_amplitude}",
             third.magnitude
         );
         assert!(
@@ -586,7 +639,7 @@ fn a_sine_with_a_third_harmonic_has_the_coefficients_it_was_built_from() {
         }
         let thd = result.thd.expect("a non-zero fundamental defines THD");
         assert!(
-            (thd - 100.0 * THIRD / AMPLITUDE).abs() < 1e-10,
+            (thd - 100.0 * third_amplitude / amplitude).abs() < 1e-10,
             "{periods}: THD {thd}"
         );
     }
@@ -596,11 +649,11 @@ fn a_sine_with_a_third_harmonic_has_the_coefficients_it_was_built_from() {
 /// `A/pi + (A/2) sin(wt) - (2A/pi) sum_m cos(2 m wt)/(4 m^2 - 1)`: every odd
 /// harmonic above the fundamental is absent, and THD follows from those terms.
 ///
-/// Tolerance 1e-7: the integrand's derivative jumps by `2 pi A` where the
-/// rectifier turns off, and Euler-Maclaurin leaves that single kink as the
-/// whole error of the composite rule, `(h^2/12) 2 pi A` per coefficient, about
-/// 6e-9 at 16384 samples per period. Every term asserted below differs from
-/// its neighbours by more than 1e-2.
+/// Tolerance 1e-7: the samples' piecewise-linear interpolant scales harmonic
+/// `k` by about `1 - (pi k / N)^2 / 3` and folds in only harmonics above `N`,
+/// which at 16384 samples per period leaves every coefficient within 2e-8 of
+/// the series. Every term asserted below differs from its neighbours by more
+/// than 1e-2.
 #[test]
 fn a_half_wave_rectified_sine_has_its_closed_form_series() {
     const FUNDAMENTAL: f64 = 1.0;

@@ -198,3 +198,58 @@ fn each_fourier_card_is_named_and_parented_by_the_canonical_plan() {
         "the second .FOUR card post-processes the second authored transient"
     );
 }
+
+/// Each dialect reads `.FOUR` by its own simulator's rule, and none refuses
+/// steps that are coarse next to the ninth harmonic (1 ns against its 5.6 ns
+/// period). On this inverter the oracles print THD 33.2195 % (Xyce 7.10: a
+/// natural spline through the last period's steps onto 200 points, then a
+/// DFT), 32.8192 % (ngspice 46: linear interpolation onto 200 points, then a
+/// DFT) and 33.2106 % (QSPICE: the Fourier integral of the piecewise-linear
+/// waveform, which on LTspice's own waveform gives LTspice's nine-harmonic
+/// 33.1254 %). Each rule applied to its oracle's own waveform reproduces that
+/// oracle; what is left between RSpice and QSPICE here is RSpice's coarser
+/// steps (69 per period against 514), not the rule.
+#[test]
+fn each_dialect_reads_a_coarse_four_window_by_its_own_simulator_s_rule() {
+    let directory = test_dir("four_dialects");
+    let deck = directory.join("inverter.cir");
+    std::fs::write(
+        &deck,
+        "* CMOS INVERTER\nM1 2 1 0 0 NMOS W = 20U L = 5U\nM2 2 1 3 3 PMOS W = 40U L = 5U\n\
+         VDD 3 0 5\nVIN 1 0 SIN 2.5 2.5 20MEG\n\
+         .MODEL NMOS NMOS LEVEL = 3 CGDO = .2N CGSO = .2N CGBO = 2N\n\
+         .MODEL PMOS PMOS LEVEL = 3 CGDO = .2N CGSO = .2N CGBO = 2N\n\
+         .TRAN 1N 100N\n.PRINT TRAN V(2) V(1)\n.FOUR 20MEG V(2)\n.END\n",
+    )
+    .expect("write the inverter deck");
+    for (dialect, expected) in [("best", 33.0416), ("ngspice", 32.8118), ("xyce", 33.2192)] {
+        let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+            .args(["--quiet", "run", "--spice-dialect", dialect])
+            .arg(&deck)
+            .arg("--output")
+            .arg(directory.join(format!("{dialect}.csv")))
+            .args(["--format", "csv"])
+            .output()
+            .expect("run the inverter deck");
+        assert!(
+            output.status.success(),
+            "{dialect}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let table = std::fs::read_to_string(directory.join(format!("{dialect}.four-001.csv")))
+            .expect("the Fourier table");
+        let row = table
+            .lines()
+            .find(|line| !line.starts_with('#') && !line.starts_with("parent_analysis_id"))
+            .expect("a harmonic row");
+        let thd = row
+            .rsplit(',')
+            .next()
+            .and_then(|value| value.parse::<f64>().ok())
+            .expect("a THD column");
+        assert!(
+            (thd - expected).abs() < 2e-3,
+            "{dialect}: THD {thd} %, expected {expected} %"
+        );
+    }
+}

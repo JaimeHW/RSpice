@@ -16,8 +16,11 @@
 //! Also computes THD (Total Harmonic Distortion).
 //!
 //! # Algorithm
-//! Uses trapezoidal Fourier integration over the last configured period(s) of
-//! the analysis window. The window ends at the authored `TO` or, when the card
+//! Reads the last configured period(s) of the analysis window by the rule of
+//! the dialect's own simulator ([`FourierMethod`]): the exact integral of the
+//! samples' piecewise-linear interpolant (QSPICE, LTspice), or a DFT of a
+//! 200-point-per-period grid interpolated linearly (ngspice) or by a natural
+//! cubic spline (Xyce). The window ends at the authored `TO` or, when the card
 //! states none, at the last accepted transient time; `FROM` is the earliest
 //! time that window may reach, so a card can refuse rather than integrate over
 //! a start-up transient it was meant to skip.
@@ -57,7 +60,47 @@ pub struct FourierConfig {
     /// would integrate over a fraction of a period and bias every coefficient,
     /// so a window that reaches back past this time is refused by name.
     pub earliest_start: Option<Value>,
+    /// How the window's samples become coefficients.
+    pub method: FourierMethod,
 }
+
+/// How a `.FOUR` card turns the samples of its window into harmonics.
+///
+/// The simulators disagree, and on a coarsely sampled waveform their spectra
+/// differ by whole percent of THD, so each dialect reads its own simulator's
+/// rule.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FourierMethod {
+    /// The exact Fourier integral of the samples' piecewise-linear
+    /// interpolant. QSPICE resamples that interpolant finely and takes an FFT
+    /// (QPOST); LTspice prints the same spectrum. This is the limit both
+    /// converge to.
+    #[default]
+    Interpolant,
+    /// ngspice's: the samples interpolated linearly onto 200 equally spaced
+    /// points per period from the window start, then a DFT of those points
+    /// (frontend/fourier.c: fourgridsize 200, polydegree 1, CKTfour).
+    LinearGrid,
+    /// Xyce's: a natural cubic spline through the samples from the last one at
+    /// or before the window start, evaluated at 200 equally spaced points per
+    /// period, then a DFT of those points (N_IO_FourierMgr.C:722-905).
+    SplineGrid,
+}
+
+impl FourierMethod {
+    /// The rule each dialect's own simulator applies.
+    pub fn for_dialect(dialect: crate::config::SpiceDialect) -> Self {
+        match dialect {
+            crate::config::SpiceDialect::Ngspice => Self::LinearGrid,
+            crate::config::SpiceDialect::Xyce => Self::SplineGrid,
+            crate::config::SpiceDialect::BestAvailable => Self::Interpolant,
+        }
+    }
+}
+
+/// Grid points per fundamental period of ngspice's and Xyce's Fourier
+/// resampling (ngspice DEF_FOURGRIDSIZE; Xyce gridSize_).
+const FOURIER_GRID_POINTS_PER_PERIOD: usize = 200;
 
 impl FourierConfig {
     /// Create new Fourier config with fundamental frequency
@@ -68,7 +111,14 @@ impl FourierConfig {
             num_periods: 1,
             window_stop: None,
             earliest_start: None,
+            method: FourierMethod::Interpolant,
         }
+    }
+
+    /// Set how the window's samples become coefficients.
+    pub fn with_method(mut self, method: FourierMethod) -> Self {
+        self.method = method;
+        self
     }
 
     /// Set number of harmonics
@@ -136,6 +186,7 @@ impl TryFrom<&AnalysisCommand> for FourierConfig {
             num_periods: *periods,
             window_stop: *window_to,
             earliest_start: *window_from,
+            method: FourierMethod::Interpolant,
         };
         config.validate()?;
         Ok(config)
@@ -231,15 +282,6 @@ pub enum FourierError {
     /// The covered window does not contain enough integration points.
     #[error("Fourier analysis window contains only {samples} sample(s)")]
     InsufficientWindowSamples { samples: usize },
-    /// The retained window cannot resolve the highest requested harmonic.
-    #[error(
-        "waveform sample interval {interval} s does not resolve harmonic {harmonic}; it must be no greater than {maximum} s"
-    )]
-    InsufficientSampleRate {
-        harmonic: usize,
-        interval: Value,
-        maximum: Value,
-    },
     /// A requested harmonic frequency overflowed.
     #[error("frequency for harmonic {harmonic} is non-finite ({frequency})")]
     NonFiniteHarmonicFrequency { harmonic: usize, frequency: Value },
@@ -442,21 +484,22 @@ impl FourierAnalysis {
                 frequency: highest_frequency,
             });
         }
+        // A step longer than an eighth of the highest harmonic's period leaves
+        // that harmonic to the interpolation rule rather than to the samples.
+        // Every simulator computes it anyway, and so does this; Spectre warns.
         let maximum_interval = 0.125 / highest_frequency;
         let largest_interval = window_time
             .windows(2)
             .map(|pair| pair[1] - pair[0])
             .fold(0.0, Value::max);
-        let interval_tolerance = maximum_interval * (1.0 + 16.0 * Value::EPSILON);
-        if !maximum_interval.is_finite()
-            || maximum_interval <= 0.0
-            || largest_interval > interval_tolerance
-        {
-            return Err(FourierError::InsufficientSampleRate {
-                harmonic: self.config.num_harmonics,
-                interval: largest_interval,
-                maximum: maximum_interval,
-            });
+        if largest_interval > maximum_interval * (1.0 + 16.0 * Value::EPSILON) {
+            log::warn!(
+                "[four.coarse] .FOUR {} Hz: a {largest_interval:e} s sample interval is longer than \
+                 an eighth of harmonic {}'s period, so its harmonics read the interpolation \
+                 between samples",
+                self.config.fundamental_freq,
+                self.config.num_harmonics
+            );
         }
 
         // Compute Fourier coefficients using DFT
@@ -474,12 +517,31 @@ impl FourierAnalysis {
             }
         })?;
 
-        let quadrature = FourierQuadrature::new(
-            &window_time,
-            &window_values,
-            window_time[window_time.len() - 1] - window_time[0],
-            abort,
-        )?;
+        let duration = window_time[window_time.len() - 1] - window_time[0];
+        let grid;
+        let quadrature = match self.config.method {
+            FourierMethod::Interpolant => {
+                FourierQuadrature::new(&window_time, &window_values, duration, abort)?
+                    .with_rule(QuadratureRule::Interpolant)
+            }
+            method => {
+                let points = FOURIER_GRID_POINTS_PER_PERIOD
+                    .checked_mul(self.config.num_periods)
+                    .ok_or(FourierError::WindowCapacity {
+                        samples: usize::MAX,
+                    })?;
+                grid = uniform_grid(
+                    method,
+                    (time, values),
+                    (&window_time, &window_values),
+                    points,
+                    abort,
+                )?;
+                FourierQuadrature::new(&grid.0, &grid.1, duration, abort)?
+                    .with_rule(QuadratureRule::Uniform)
+                    .ending_at(window_time[window_time.len() - 1])
+            }
+        };
         for n in 0..=self.config.num_harmonics {
             if abort.is_aborted() {
                 return Err(FourierError::Aborted);
@@ -617,6 +679,21 @@ pub(crate) struct FourierQuadrature<'a> {
     values: &'a [Value],
     duration: Value,
     scale: Value,
+    rule: QuadratureRule,
+    /// The window's end; an impulse at it is counted, one after it is not.
+    end: Value,
+}
+
+/// How a [`FourierQuadrature`] weighs its samples.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum QuadratureRule {
+    /// The trapezoidal rule on the samples.
+    Trapezoid,
+    /// The exact integral of the samples' piecewise-linear interpolant.
+    Interpolant,
+    /// Equal weights on a grid of equally spaced samples from the window
+    /// start, its end excluded: a DFT.
+    Uniform,
 }
 
 impl<'a> FourierQuadrature<'a> {
@@ -647,7 +724,20 @@ impl<'a> FourierQuadrature<'a> {
             // divide large signals down: that could erase a tiny DC term
             // between exactly canceling large samples.
             scale: scale.min(1.0),
+            rule: QuadratureRule::Trapezoid,
+            end: time[time.len() - 1],
         })
+    }
+
+    fn with_rule(mut self, rule: QuadratureRule) -> Self {
+        self.rule = rule;
+        self
+    }
+
+    /// A grid's last sample lies a step short of the window's end.
+    fn ending_at(mut self, end: Value) -> Self {
+        self.end = end;
+        self
     }
 
     /// Signed DC or physical peak magnitude and cosine-referenced phase.
@@ -686,7 +776,7 @@ impl<'a> FourierQuadrature<'a> {
                 if index.is_multiple_of(256) && abort.is_aborted() {
                     return Err(FourierError::Aborted);
                 }
-                if point.time <= self.time[0] || point.time > self.time[self.time.len() - 1] {
+                if point.time <= self.time[0] || point.time > self.end {
                     continue;
                 }
                 let rate = crate::numerics::scaled_exp_product(
@@ -706,7 +796,7 @@ impl<'a> FourierQuadrature<'a> {
                 if index.is_multiple_of(256) && abort.is_aborted() {
                     return Err(FourierError::Aborted);
                 }
-                if point.time <= self.time[0] || point.time > self.time[self.time.len() - 1] {
+                if point.time <= self.time[0] || point.time > self.end {
                     continue;
                 }
                 let rate = point
@@ -729,15 +819,33 @@ impl<'a> FourierQuadrature<'a> {
             let turns = ((time - self.time[0]) / self.duration) * cycles;
             std::f64::consts::TAU * turns.fract()
         };
-        for index in 0..self.time.len() {
+        // The interpolant's DC term is the trapezoidal one; its harmonics are
+        // integrated step by step.
+        let samples = if self.rule == QuadratureRule::Interpolant && harmonic != 0 {
+            self.add_interpolant(
+                cycles,
+                scale,
+                (&mut cosine_integral, &mut cosine_correction),
+                (&mut sine_integral, &mut sine_correction),
+                abort,
+            )?;
+            0
+        } else {
+            self.time.len()
+        };
+        for index in 0..samples {
             if index.is_multiple_of(256) && abort.is_aborted() {
                 return Err(FourierError::Aborted);
             }
-            let before = index.saturating_sub(1);
-            let after = (index + 1).min(self.time.len() - 1);
-            let span = self.time[after] - self.time[before];
             let value = self.values[index] / scale;
-            let sample = self.weighted_sample(0.5 * value, span);
+            let sample = if self.rule == QuadratureRule::Uniform {
+                self.weighted_sample(value, self.duration / self.time.len() as Value)
+            } else {
+                let before = index.saturating_sub(1);
+                let after = (index + 1).min(self.time.len() - 1);
+                let span = self.time[after] - self.time[before];
+                self.weighted_sample(0.5 * value, span)
+            };
             let (cosine, sine) = if harmonic == 0 {
                 (1.0, 0.0)
             } else {
@@ -761,7 +869,7 @@ impl<'a> FourierQuadrature<'a> {
                 if index.is_multiple_of(256) && abort.is_aborted() {
                     return Err(FourierError::Aborted);
                 }
-                if point.time <= self.time[0] || point.time > self.time[self.time.len() - 1] {
+                if point.time <= self.time[0] || point.time > self.end {
                     continue;
                 }
                 let sample = crate::numerics::scaled_exp_product(
@@ -789,7 +897,7 @@ impl<'a> FourierQuadrature<'a> {
                     if index.is_multiple_of(256) && abort.is_aborted() {
                         return Err(FourierError::Aborted);
                     }
-                    if point.time <= self.time[0] || point.time > self.time[self.time.len() - 1] {
+                    if point.time <= self.time[0] || point.time > self.end {
                         continue;
                     }
                     let sample = point
@@ -828,6 +936,54 @@ impl<'a> FourierQuadrature<'a> {
         Ok((magnitude, phase))
     }
 
+    /// Add the exact integral of the piecewise-linear interpolant times the
+    /// harmonic's cosine and sine over each step: on a step of `h` seconds
+    /// and `phi` radians from `v0` to `v1`, `h e^{-j theta0} (v0 (I0 - I1) +
+    /// v1 I1)` with `Ik = int_0^1 s^k e^{-j phi s} ds`.
+    fn add_interpolant(
+        &self,
+        cycles: Value,
+        scale: Value,
+        cosine: (&mut Value, &mut Value),
+        sine: (&mut Value, &mut Value),
+        abort: &dyn AbortSignal,
+    ) -> Result<(), FourierError> {
+        let (cosine_integral, cosine_correction) = cosine;
+        let (sine_integral, sine_correction) = sine;
+        for index in 0..self.time.len() - 1 {
+            if index.is_multiple_of(256) && abort.is_aborted() {
+                return Err(FourierError::Aborted);
+            }
+            let start = self.time[index];
+            let span = self.time[index + 1] - start;
+            let turns = ((start - self.time[0]) / self.duration) * cycles;
+            let theta = std::f64::consts::TAU * turns.fract();
+            let phi = std::f64::consts::TAU * (span / self.duration) * cycles;
+            let ((i0_re, i0_im), (i1_re, i1_im)) = linear_basis_moments(phi);
+            let v0 = self.values[index] / scale;
+            let v1 = self.values[index + 1] / scale;
+            let weight_re = v0 * (i0_re - i1_re) + v1 * i1_re;
+            let weight_im = v0 * (i0_im - i1_im) + v1 * i1_im;
+            // The step's integral of v e^{-j omega t} is its weight turned by
+            // e^{-j theta0}; the cosine integral is the real part, the sine
+            // integral minus the imaginary part.
+            let (sin_theta, cos_theta) = theta.sin_cos();
+            let real = weight_re * cos_theta + weight_im * sin_theta;
+            let imaginary = weight_im * cos_theta - weight_re * sin_theta;
+            compensated_add(
+                cosine_integral,
+                cosine_correction,
+                self.weighted_sample(real, span),
+            );
+            compensated_add(
+                sine_integral,
+                sine_correction,
+                self.weighted_sample(-imaginary, span),
+            );
+        }
+        Ok(())
+    }
+
     fn weighted_sample(&self, value: Value, span: Value) -> Value {
         let weight = span / self.duration;
         if weight.is_normal() {
@@ -846,6 +1002,159 @@ impl<'a> FourierQuadrature<'a> {
         }
         value * weight
     }
+}
+
+/// `int_0^1 e^{-j phi s} ds` and `int_0^1 s e^{-j phi s} ds` as `(re, im)`
+/// pairs: their power series below a radian, where the closed forms cancel,
+/// and the closed forms above.
+fn linear_basis_moments(phi: Value) -> ((Value, Value), (Value, Value)) {
+    if phi.abs() < 1.0 {
+        // sum_n (-j phi)^n / (n! (n + k + 1))
+        let mut moments = [(0.0, 0.0); 2];
+        let mut term = (1.0, 0.0);
+        for n in 0..24 {
+            for (k, moment) in moments.iter_mut().enumerate() {
+                let denominator = (n + k + 1) as Value;
+                moment.0 += term.0 / denominator;
+                moment.1 += term.1 / denominator;
+            }
+            let factor = phi / (n + 1) as Value;
+            term = (term.1 * factor, -term.0 * factor);
+        }
+        return (moments[0], moments[1]);
+    }
+    let (sin_phi, cos_phi) = phi.sin_cos();
+    let half = (0.5 * phi).sin();
+    let phi2 = phi * phi;
+    (
+        (sin_phi / phi, -2.0 * half * half / phi),
+        (
+            (cos_phi + phi * sin_phi - 1.0) / phi2,
+            (phi * cos_phi - sin_phi) / phi2,
+        ),
+    )
+}
+
+/// The window resampled onto `points` equally spaced times from its start,
+/// its end excluded, the way ngspice (linearly, from the window's own
+/// samples) or Xyce (by a natural cubic spline from the last raw sample at or
+/// before the start) does.
+fn uniform_grid(
+    method: FourierMethod,
+    (time, values): (&[Value], &[Value]),
+    (window_time, window_values): (&[Value], &[Value]),
+    points: usize,
+    abort: &dyn AbortSignal,
+) -> Result<(Vec<Value>, Vec<Value>), FourierError> {
+    let start = window_time[0];
+    let stop = window_time[window_time.len() - 1];
+    let step = (stop - start) / points as Value;
+    let mut grid_time = Vec::new();
+    grid_time
+        .try_reserve_exact(points)
+        .map_err(|_| FourierError::WindowCapacity { samples: points })?;
+    grid_time.extend((0..points).map(|index| start + index as Value * step));
+    let spline = match method {
+        FourierMethod::SplineGrid => {
+            let first = time
+                .partition_point(|&sample| sample <= start)
+                .saturating_sub(1);
+            let last = time
+                .partition_point(|&sample| sample < stop)
+                .min(time.len() - 1);
+            natural_spline_grid(
+                &time[first..=last],
+                &values[first..=last],
+                start,
+                step,
+                points,
+            )
+        }
+        FourierMethod::Interpolant | FourierMethod::LinearGrid => None,
+    };
+    if let Some(grid_values) = spline {
+        return Ok((grid_time, grid_values));
+    }
+    // ngspice's linear interpolation, and a spline's through two samples.
+    let mut grid_values = Vec::new();
+    grid_values
+        .try_reserve_exact(points)
+        .map_err(|_| FourierError::WindowCapacity { samples: points })?;
+    let mut segment = 0;
+    for (index, &at) in grid_time.iter().enumerate() {
+        if index.is_multiple_of(256) && abort.is_aborted() {
+            return Err(FourierError::Aborted);
+        }
+        while segment + 2 < window_time.len() && window_time[segment + 1] <= at {
+            segment += 1;
+        }
+        let (t0, t1) = (window_time[segment], window_time[segment + 1]);
+        let (v0, v1) = (window_values[segment], window_values[segment + 1]);
+        grid_values.push(v0 + (v1 - v0) * ((at - t0) / (t1 - t0)));
+    }
+    Ok((grid_time, grid_values))
+}
+
+/// Xyce's Fourier resampling (N_IO_FourierMgr.C interpolateData_, and the
+/// `FOUR` measure's N_IO_MeasureFourier.C:244-308): a natural cubic spline
+/// through `time`/`values`, whose first sample is the last one at or before
+/// `start`, evaluated at `grid_size` points `step` apart from `start`. A grid
+/// point at or past the last sample reads that sample's value. `None` for
+/// fewer than three samples, which have no spline.
+pub(crate) fn natural_spline_grid(
+    time: &[Value],
+    values: &[Value],
+    start: Value,
+    step: Value,
+    grid_size: usize,
+) -> Option<Vec<Value>> {
+    let n = time.len();
+    if n < 3 || values.len() != n {
+        return None;
+    }
+    // The natural spline's second derivatives z.
+    let h = time
+        .windows(2)
+        .map(|pair| pair[1] - pair[0])
+        .collect::<Vec<_>>();
+    let b = (0..n - 1)
+        .map(|i| (6.0 / h[i]) * (values[i + 1] - values[i]))
+        .collect::<Vec<_>>();
+    let mut u = vec![0.0; n - 1];
+    let mut v = vec![0.0; n - 1];
+    u[1] = 2.0 * (h[0] + h[1]);
+    v[1] = b[1] - b[0];
+    for i in 2..n - 1 {
+        u[i] = 2.0 * (h[i] + h[i - 1]) - h[i - 1] * h[i - 1] / u[i - 1];
+        v[i] = b[i] - b[i - 1] - h[i - 1] * v[i - 1] / u[i - 1];
+    }
+    let mut z = vec![0.0; n];
+    for i in (1..n - 1).rev() {
+        z[i] = (v[i] - h[i] * z[i + 1]) / u[i];
+    }
+
+    let mut grid = Vec::with_capacity(grid_size);
+    let mut grid_time = start;
+    for i in 0..grid_size {
+        if i > 0 {
+            grid_time += step;
+        }
+        let mut j = n - 1;
+        while grid_time - time[j] < 0.0 {
+            j = j.checked_sub(1)?;
+        }
+        grid.push(if j == n - 1 {
+            values[j]
+        } else {
+            let a = (z[j + 1] - z[j]) / (6.0 * h[j]);
+            let b = z[j] / 2.0;
+            let c =
+                -(h[j] / 6.0) * z[j + 1] - (h[j] / 3.0) * z[j] + (values[j + 1] - values[j]) / h[j];
+            let offset = grid_time - time[j];
+            values[j] + offset * (c + offset * (b + offset * a))
+        });
+    }
+    Some(grid)
 }
 
 fn validate_waveform(

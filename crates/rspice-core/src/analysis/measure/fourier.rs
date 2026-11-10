@@ -40,56 +40,22 @@ pub(super) fn xyce_total_harmonic_distortion(
     };
     let time = &time[start..];
     let values = &values[start..];
-    let n = time.len();
-    if n < 3 || num_freq < 2 || grid_size == 0 {
+    if num_freq < 2 || grid_size == 0 {
         return None;
     }
 
-    // interpolateData_: the natural spline's second derivatives z.
-    let h = time
-        .windows(2)
-        .map(|pair| pair[1] - pair[0])
-        .collect::<Vec<_>>();
-    let b = (0..n - 1)
-        .map(|i| (6.0 / h[i]) * (values[i + 1] - values[i]))
-        .collect::<Vec<_>>();
-    let mut u = vec![0.0; n - 1];
-    let mut v = vec![0.0; n - 1];
-    u[1] = 2.0 * (h[0] + h[1]);
-    v[1] = b[1] - b[0];
-    for i in 2..n - 1 {
-        u[i] = 2.0 * (h[i] + h[i - 1]) - h[i - 1] * h[i - 1] / u[i - 1];
-        v[i] = b[i] - b[i - 1] - h[i - 1] * v[i - 1] / u[i - 1];
-    }
-    let mut z = vec![0.0; n];
-    for i in (1..n - 1).rev() {
-        z[i] = (v[i] - h[i] * z[i + 1]) / u[i];
-    }
-
+    // interpolateData_ and calculateFT_.
     let step = period / grid_size as Value;
-    let mut grid_time = last_period_start;
+    let grid = crate::analysis::fourier::natural_spline_grid(
+        time,
+        values,
+        last_period_start,
+        step,
+        grid_size,
+    )?;
     let mut sine = vec![0.0; num_freq];
     let mut cosine = vec![0.0; num_freq];
-    for i in 0..grid_size {
-        if i > 0 {
-            grid_time += step;
-        }
-        let mut j = n - 1;
-        while grid_time - time[j] < 0.0 {
-            j = j.checked_sub(1)?;
-        }
-        // A grid point on the last step reads that step's own value.
-        let value = if j == n - 1 {
-            values[j]
-        } else {
-            let a = (z[j + 1] - z[j]) / (6.0 * h[j]);
-            let b = z[j] / 2.0;
-            let c =
-                -(h[j] / 6.0) * z[j + 1] - (h[j] / 3.0) * z[j] + (values[j + 1] - values[j]) / h[j];
-            let offset = grid_time - time[j];
-            values[j] + offset * (c + offset * (b + offset * a))
-        };
-        // calculateFT_.
+    for (i, value) in grid.into_iter().enumerate() {
         for (harmonic, (sine, cosine)) in sine.iter_mut().zip(cosine.iter_mut()).enumerate() {
             let angle =
                 harmonic as Value * 2.0 * std::f64::consts::PI * i as Value / grid_size as Value;

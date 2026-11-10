@@ -454,8 +454,10 @@ use rspice_core::analysis::harmonic_balance::{
 // `Engine::run_sensitivity_dc_sweep_with_abort`, its `DcSweepSensitivityPoint`
 // and that type's re-export, and `execution::sensitivity_print_columns`, a
 // Xyce `.SENS` study at every `.DC` point and its `.PRINT SENS` columns, bring
-// it to 5,283.
-const MAX_PUBLIC_ITEMS: usize = 5283;
+// it to 5,283. `FourierMethod`, its `for_dialect` and `FourierConfig::with_method`,
+// the rule each dialect's simulator reads a `.FOUR` window by, bring it to
+// 5,286.
+const MAX_PUBLIC_ITEMS: usize = 5286;
 
 /// The `#[doc(hidden)] pub` items of the family, counted apart from
 /// `MAX_PUBLIC_ITEMS`. A hidden item is plumbing that one crate of the engine
