@@ -599,9 +599,8 @@ const MAX_PUBLIC_ITEMS: usize = 5286;
 // measure_signals.rs) parses a Xyce `.PRINT` expression under Xyce's lexer, which
 // reads `X1:R1:R` as one name. The census is 1,606.
 // `Mosfet::set_ngspice_dialect` adds one: the builder (`rspice-core`
-// engine/builder.rs) selects ngspice's classic-MOS rules (its current-only
-// convergence test and its level-2 cutoff) outside the Xyce dialect. The
-// census is 1,607.
+// engine/builder.rs) selects ngspice's current-only classic-MOS convergence
+// test outside the Xyce dialect. The census is 1,607.
 // `Mosfet::set_xyce_initial_fix` and `Mosfet::begin_operating_point_load` add
 // two: the builder (`rspice-core` engine/builder.rs) holds a Xyce-dialect
 // `OFF` instance through Xyce's initFixFlag, and the circuit store (circuit/
@@ -682,7 +681,10 @@ const MAX_PUBLIC_ITEMS: usize = 5286;
 // (`rspice-core` engine/builder.rs and builder/advanced_mos.rs) applies Xyce's
 // `DEVICE VOLTLIM` to each BSIMSOI, classic MOS, BSIM3 and BSIM4 instance it
 // builds. The census is 1,683, with no slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 1683;
+// `Mosfet::set_level2_vbin_cutoff` adds one: the builder (`rspice-core`
+// engine/builder.rs) keeps ngspice's level-2 cutoff at VBIN in the ngspice
+// dialect alone. The census is 1,684, with no slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 1684;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

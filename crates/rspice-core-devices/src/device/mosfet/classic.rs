@@ -522,11 +522,14 @@ pub struct Mosfet {
     /// Report Xyce's transient device-convergence status (no junction
     /// limiting) instead of the SPICE current-prediction test.
     native_xyce_transient_convergence: bool,
-    /// Follow ngspice's classic-MOS rules where Xyce's differ (the ngspice
-    /// and default dialects): its convTest on the drain and bulk currents
-    /// alone, not Xyce's branch-voltage step test, and its level-2 cutoff
-    /// at VBIN, not Xyce's at VON.
+    /// Follow ngspice's classic-MOS convergence test where Xyce's differs
+    /// (the ngspice and default dialects): its convTest on the drain and bulk
+    /// currents alone, not Xyce's branch-voltage step test.
     ngspice_dialect: bool,
+    /// Cut a level-2 channel without fast surface states off at VBIN, as
+    /// ngspice does (the ngspice dialect), not at VON as QSPICE, LTspice and
+    /// Xyce do.
+    level2_vbin_cutoff: bool,
     /// Hold an `OFF` instance through Xyce's initFixFlag (the Xyce dialect)
     /// instead of ngspice's MODEINITFIX.
     xyce_initial_fix: bool,
@@ -762,17 +765,27 @@ impl Mosfet {
             enabled && matches!(self.level, 1..=3) && !self.uses_legacy_bsim();
     }
 
-    /// Select ngspice's classic-MOS rules for this instance where Xyce's
-    /// differ. The engine clears it in the Xyce dialect.
-    /// - convTest on the drain and bulk currents alone, as in every ngspice
-    ///   MOS1/2/3/6/9 and BSIM1 convTest (mos2conv.c:42-95, b1cvtest.c);
-    ///   Xyce keeps its branch-voltage step test.
-    /// - Without fast surface states, a level-2 channel cuts off at
-    ///   `vgs <= vbin` (mos2load.c:676); Xyce's cuts off at `vgs <= von`
-    ///   (N_DEV_MOSFET2.C:2183-2190).
+    /// Select ngspice's classic-MOS convergence test for this instance where
+    /// Xyce's differs: convTest on the drain and bulk currents alone, as in
+    /// every ngspice MOS1/2/3/6/9 and BSIM1 convTest (mos2conv.c:42-95,
+    /// b1cvtest.c); Xyce keeps its branch-voltage step test. The engine
+    /// clears it in the Xyce dialect.
     #[doc(hidden)]
     pub fn set_ngspice_dialect(&mut self, enabled: bool) {
         self.ngspice_dialect = enabled;
+        self.forget_level2_bias_states();
+    }
+
+    /// Without fast surface states, cut a level-2 channel off at
+    /// `vgs <= vbin`, as ngspice does (mos2load.c:676), instead of at
+    /// `vgs <= von`. Between the two, ngspice runs the strong-inversion
+    /// equations with a negative overdrive, and its drain current flows
+    /// backwards; QSPICE, LTspice and Xyce (N_DEV_MOSFET2.C:2183-2190) carry
+    /// no channel current there. The engine sets it in the ngspice dialect
+    /// alone.
+    #[doc(hidden)]
+    pub fn set_level2_vbin_cutoff(&mut self, enabled: bool) {
+        self.level2_vbin_cutoff = enabled;
         self.forget_level2_bias_states();
     }
 

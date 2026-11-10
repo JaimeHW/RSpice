@@ -196,6 +196,7 @@ impl Mosfet {
             ngspice_dialect: true,
             xyce_initial_fix: false,
             voltage_limiting: true,
+            level2_vbin_cutoff: true,
             indices: MosfetIndices::default(),
         }
     }

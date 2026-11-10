@@ -1588,6 +1588,49 @@ M1 d g s 0 NENH L=2u W=3u
 }
 
 #[test]
+fn a_level2_channel_cuts_off_at_von_outside_the_ngspice_dialect() {
+    use rspice_core::config::SpiceDialect;
+    // A CircuitSim90 voter enhancement device at 125 C with NFS=0, at
+    // VGS = 0.2 V: above VBIN (0.13 V), below VON (0.41 V). QSPICE and
+    // LTspice cut the channel off up to VON, as Xyce does, and carry only
+    // the drain junction's reverse current: QSPICE -8.936215e-10 A, LTspice
+    // -8.936126e-10 A. ngspice-46 cuts off at VBIN (mos2load.c:676) and
+    // runs the strong-inversion equations with a negative overdrive there:
+    // -1.81008e-6 A, flowing backwards and falling as the gate rises, until
+    // it vanishes at VON.
+    let netlist = Netlist::parse(
+        "MOS2 between VBIN and VON
+VG g 0 0.2
+VA a 0 0.1
+M1 a g 0 0 NENH L=2u W=7u
+.MODEL NENH NMOS LEVEL=2 VTO=0.6 PB=0.7 CJ=1.75e-4 MJ=0.65 CJSW=4e-10 MJSW=0.3
++ TOX=3.5e-8 NSUB=7e15 XJ=2e-7 LD=2.5e-7 UO=700 UCRIT=7e4 UEXP=0.13 VMAX=5e4
++ NEFF=3 DELTA=1.5
+.TEMP 125
+.end
+",
+    )
+    .unwrap();
+    let drain = |dialect: SpiceDialect| {
+        Engine::new(SimulationConfig::default().with_spice_dialect(dialect))
+            .run_dc_op(&netlist)
+            .unwrap_or_else(|err| panic!("{dialect:?}: {err}"))
+            .branch_current_named("VA")
+            .expect("drain source current")
+    };
+    let default = drain(SpiceDialect::BestAvailable);
+    assert!(
+        (default + 8.936e-10).abs() <= 1.0e-3 * 8.936e-10,
+        "I(VA) = {default:e}, QSPICE and LTspice -8.936e-10"
+    );
+    let ngspice = drain(SpiceDialect::Ngspice);
+    assert!(
+        (ngspice + 1.81008e-6).abs() <= 1.0e-4 * 1.81008e-6,
+        "I(VA) = {ngspice:e}, ngspice-46 -1.81008e-6"
+    );
+}
+
+#[test]
 fn classic_mos_series_zero_retains_xyce_sheet_resistance() {
     use rspice_core::config::SpiceDialect;
     for level in [1, 2, 3, 6] {

@@ -90,11 +90,11 @@ impl Mosfet {
     /// The gate bias at or below which a level-2 channel without fast
     /// surface states carries no current. ngspice tests VBIN
     /// (mos2load.c:676) and so sends VBIN < VGS <= VON through the
-    /// strong-inversion equations with a negative overdrive; Xyce tests VON
-    /// (N_DEV_MOSFET2.C:2183-2190).
+    /// strong-inversion equations with a negative overdrive; QSPICE, LTspice
+    /// and Xyce (N_DEV_MOSFET2.C:2183-2190) test VON.
     #[inline]
     fn level2_cutoff_voltage(&self, vbin: Value, von: Value) -> Value {
-        if self.ngspice_dialect { vbin } else { von }
+        if self.level2_vbin_cutoff { vbin } else { von }
     }
 
     #[inline]
@@ -1501,8 +1501,8 @@ mod tests {
             .chain([0.0, 1.0e-11, -1.0e-11, 0.03]);
         let drains: Vec<Value> = drains.collect();
         for mut mos in devices {
-            for ngspice in [true, false] {
-                mos.set_ngspice_dialect(ngspice);
+            for vbin_cutoff in [true, false] {
+                mos.set_level2_vbin_cutoff(vbin_cutoff);
                 let p = mos.polarity();
                 for gate in (0..25).map(|step| -1.0 + 0.25 * step as Value) {
                     for &drain in &drains {
@@ -1830,32 +1830,33 @@ mod tests {
     }
 
     #[test]
-    fn level2_cuts_off_at_von_in_the_xyce_dialect_and_at_vbin_in_ngspice() {
+    fn level2_cuts_off_at_von_and_at_vbin_only_in_ngspice() {
         // With NFS=0 a reverse body bias opens a window VBIN < VGS <= VON.
         // ngspice cuts off only at VBIN (mos2load.c:676) and runs the window
-        // through the strong-inversion equations; Xyce cuts off at VON
-        // (N_DEV_MOSFET2.C:2183-2190), with no drain current or conductance.
+        // through the strong-inversion equations; QSPICE, LTspice and Xyce
+        // (N_DEV_MOSFET2.C:2183-2190) cut off at VON, with no drain current
+        // or conductance.
         let mut mos = mos2_vmax_device();
         let (vds, vbs) = (2.5, -2.8);
         let von = mos.level2_evaluate(0.0, vds, vbs).von;
         for vgs in [von - 0.05, von - 1.0e-6] {
-            mos.set_ngspice_dialect(false);
-            let xyce = mos.level2_evaluate(vgs, vds, vbs);
-            assert_eq!(xyce.id, 0.0, "vgs={vgs}");
-            assert!(matches!(xyce.region, MosRegion::Cutoff), "vgs={vgs}");
+            mos.set_level2_vbin_cutoff(false);
+            let at_von = mos.level2_evaluate(vgs, vds, vbs);
+            assert_eq!(at_von.id, 0.0, "vgs={vgs}");
+            assert!(matches!(at_von.region, MosRegion::Cutoff), "vgs={vgs}");
             let (_, _, gm, gds, gmb, _) = mos.level2_operating_point(vgs, vds, vbs);
             assert_eq!((gm, gds, gmb), (0.0, 0.0, 0.0), "vgs={vgs}");
 
-            mos.set_ngspice_dialect(true);
+            mos.set_level2_vbin_cutoff(true);
             let ngspice = mos.level2_evaluate(vgs, vds, vbs);
             assert_ne!(ngspice.id, 0.0, "vgs={vgs}");
         }
-        // Above VON both dialects run the same strong-inversion equations.
+        // Above VON both cutoffs run the same strong-inversion equations.
         let vgs = von + 0.5;
-        mos.set_ngspice_dialect(false);
-        let xyce = mos.level2_evaluate(vgs, vds, vbs).id;
-        mos.set_ngspice_dialect(true);
-        assert_eq!(xyce, mos.level2_evaluate(vgs, vds, vbs).id);
+        mos.set_level2_vbin_cutoff(false);
+        let at_von = mos.level2_evaluate(vgs, vds, vbs).id;
+        mos.set_level2_vbin_cutoff(true);
+        assert_eq!(at_von, mos.level2_evaluate(vgs, vds, vbs).id);
     }
 
     fn assert_relative(actual: Value, expected: Value, tolerance: Value) {
