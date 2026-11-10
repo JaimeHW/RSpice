@@ -2004,3 +2004,108 @@ fn an_unwritable_xyce_file_warns_and_keeps_the_exit_status() {
         "MX = 1.000000e+00\n"
     );
 }
+
+/// A `.PRINT HB` card writes Xyce's two files: the two-sided spectrum as
+/// `deck.cir.HB.FD.prn` and one period of the waveform as
+/// `deck.cir.HB.TD.prn`, sampled at as many points as the spectrum has bins.
+/// The waveform row is Xyce 7.10's own for this deck:
+/// `1  9.09090909e-07  7.00774234e-01 -1.60133416e-04  1.04455529e-04
+/// -2.64588945e-04  1.60133416e-04`.
+#[test]
+fn xyce_writes_the_hb_spectrum_and_waveform_files() {
+    let dir = test_dir("xyce_files_hb");
+    let deck = "* hb files\n.hb 1e5\n.print hb v(out) i(R1) i(C1) i(L1) i(V1)\n\
+                .options hbint numfreq=5\nV1 in 0 sin 0 1 1e5 0 0\nR1 in out 1k\n\
+                C1 out 0 1n\nL1 out 0 1m\n.end\n";
+    let output = run_xyce_files(&dir, "rc.cir", deck, &[]);
+    assert!(output.status.success(), "{output:?}");
+
+    let spectrum = std::fs::read_to_string(dir.join("rc.cir.HB.FD.prn")).expect("HB.FD.prn");
+    let lines: Vec<&str> = spectrum.lines().collect();
+    assert_eq!(
+        lines[0].split_whitespace().collect::<Vec<_>>(),
+        [
+            "Index",
+            "FREQ",
+            "Re(V(OUT))",
+            "Im(V(OUT))",
+            "Re(I(R1))",
+            "Im(I(R1))",
+            "Re(I(C1))",
+            "Im(I(C1))",
+            "Re(I(L1))",
+            "Im(I(L1))",
+            "Re(I(V1))",
+            "Im(I(V1))",
+        ]
+    );
+    assert_eq!(lines.len(), 13, "{spectrum}");
+    assert!(
+        lines[1].starts_with("0       -5.00000000e+05"),
+        "{spectrum}"
+    );
+    assert!(
+        lines[11].starts_with("10       5.00000000e+05"),
+        "{spectrum}"
+    );
+
+    let waveform = std::fs::read_to_string(dir.join("rc.cir.HB.TD.prn")).expect("HB.TD.prn");
+    let lines: Vec<&str> = waveform.lines().collect();
+    assert_eq!(
+        lines[0].split_whitespace().collect::<Vec<_>>(),
+        [
+            "Index", "TIME", "V(OUT)", "I(R1)", "I(C1)", "I(L1)", "I(V1)"
+        ]
+    );
+    assert_eq!(lines.len(), 13, "{waveform}");
+    assert_eq!(lines[12], "End of Xyce(TM) Simulation");
+    let row: Vec<f64> = lines[2]
+        .split_whitespace()
+        .map(|field| field.parse().expect("number"))
+        .collect();
+    let xyce = [
+        1.0,
+        9.09090909e-07,
+        7.00774234e-01,
+        -1.60133416e-04,
+        1.04455529e-04,
+        -2.64588945e-04,
+        1.60133416e-04,
+    ];
+    for (actual, expected) in row.iter().zip(xyce) {
+        assert!(
+            (actual - expected).abs() <= 1e-6 * expected.abs(),
+            "{actual} vs Xyce {expected}: {waveform}"
+        );
+    }
+
+    // A lead current keeps its `Re(..)` and `Im(..)` around the upper-cased
+    // name in the spectrum, and is one column in the waveform. Xyce 7.10 on
+    // this deck: `1  9.09090909e-07  4.12348384e-04`.
+    let deck = "* hb lead\n.hb 1e5\n.print hb id(M1)\n.options hbint numfreq=5\n\
+                VDD vdd 0 3\nVG g 0 sin 1.5 0.2 1e5 0 0\nRD vdd d 2k\n\
+                M1 d g 0 0 nm L=1u W=10u\n.model nm NMOS level=1 VTO=0.7 KP=1e-4\n.end\n";
+    let output = run_xyce_files(&dir, "lead.cir", deck, &[]);
+    assert!(output.status.success(), "{output:?}");
+    let spectrum = std::fs::read_to_string(dir.join("lead.cir.HB.FD.prn")).expect("HB.FD.prn");
+    assert_eq!(
+        spectrum
+            .lines()
+            .next()
+            .unwrap()
+            .split_whitespace()
+            .collect::<Vec<_>>(),
+        ["Index", "FREQ", "Re(ID(M1))", "Im(ID(M1))"]
+    );
+    let waveform = std::fs::read_to_string(dir.join("lead.cir.HB.TD.prn")).expect("HB.TD.prn");
+    let lines: Vec<&str> = waveform.lines().collect();
+    assert_eq!(
+        lines[0].split_whitespace().collect::<Vec<_>>(),
+        ["Index", "TIME", "ID(M1)"]
+    );
+    let current: f64 = lines[2].split_whitespace().nth(2).unwrap().parse().unwrap();
+    assert!(
+        (current - 4.12348384e-04).abs() <= 1e-6 * 4.12348384e-04,
+        "{waveform}"
+    );
+}

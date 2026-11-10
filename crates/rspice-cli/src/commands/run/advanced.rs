@@ -67,11 +67,11 @@ pub(super) fn run_hb_from_command(
 
     let artifact = ctx.resolve_periodic_analysis("hb")?;
     let hb_result = solve_hb(ctx, config.clone())?;
-    if let Some(path) = &artifact.path {
+    if artifact.path.is_some() || super::xyce_files::writes_files(ctx) {
         export_hb(
             ctx,
             artifact.analysis,
-            path,
+            artifact.path.as_deref(),
             config.fundamental_freq,
             &hb_result,
         )?;
@@ -530,8 +530,14 @@ pub(super) fn run_hb(ctx: &RunContext<'_>, freq: f64, harmonics: usize) -> Resul
     let fundamental = config.fundamental_freq;
     let artifact = ctx.resolve_periodic_analysis("hb")?;
     let hb_result = solve_hb(ctx, config)?;
-    if let Some(path) = &artifact.path {
-        export_hb(ctx, artifact.analysis, path, fundamental, &hb_result)?;
+    if artifact.path.is_some() || super::xyce_files::writes_files(ctx) {
+        export_hb(
+            ctx,
+            artifact.analysis,
+            artifact.path.as_deref(),
+            fundamental,
+            &hb_result,
+        )?;
     }
     Ok(())
 }
@@ -586,7 +592,7 @@ fn solve_hb(
 fn export_hb(
     ctx: &RunContext<'_>,
     analysis_id: rspice_core::execution::AnalysisInstanceId,
-    output_path: &std::path::Path,
+    output_path: Option<&std::path::Path>,
     fundamental: f64,
     analysis: &rspice_core::engine::HbAnalysisResult,
 ) -> Result<(), CliError> {
@@ -731,6 +737,32 @@ fn export_hb(
         source,
         analysis: Some("HB output projection".to_string()),
     })?;
+    super::xyce_files::record_print(
+        ctx,
+        rspice_core::netlist::OutputAnalysisKind::Hb,
+        super::xyce_files::Scale::Frequency,
+        || {
+            Ok(super::export::complex_table(
+                "hb",
+                "Harmonic Balance Spectrum",
+                frequencies.clone(),
+                &signals,
+            ))
+        },
+    )?;
+    if super::xyce_files::writes_files(ctx)
+        && let Some(waveform) = hb_waveform(&frequencies, &signals, fundamental)
+    {
+        super::xyce_files::record_print(
+            ctx,
+            rspice_core::netlist::OutputAnalysisKind::Hb,
+            super::xyce_files::Scale::Time,
+            || Ok(waveform),
+        )?;
+    }
+    let Some(output_path) = output_path else {
+        return Ok(());
+    };
 
     super::document::publish_analysis_result(
         ctx,
@@ -779,6 +811,88 @@ fn export_hb(
         ))?;
     }
     Ok(())
+}
+
+/// The waveform Xyce prints beside a two-sided HB spectrum: one period of
+/// the fundamental sampled at as many points as the spectrum has bins,
+/// `t_m = m / (f0 M)`, each value `sum_k Re(X_k exp(j 2 pi f_k t_m))` over
+/// the bins (IOInterfacePKG/N_IO_OutputterHBTimePrn.C). A value printed as
+/// its `Re(..)` and `Im(..)` columns, as a lead current is, is one waveform.
+/// A spectrum that is not one tone's harmonics, a printed magnitude, or an
+/// expression, which Xyce evaluates on the waveform itself, has none.
+fn hb_waveform(
+    frequencies: &[f64],
+    signals: &[crate::commands::run_signals::ComplexSignal],
+    fundamental: f64,
+) -> Option<ExportTable> {
+    use crate::commands::export_table::{ColumnData, ExportColumn};
+    let points = frequencies.len();
+    let harmonic = |frequency: f64| {
+        let order = frequency / fundamental;
+        (order - order.round()).abs() <= 1e-9 * order.abs().max(1.0)
+    };
+    if points == 0 || fundamental <= 0.0 || !frequencies.iter().copied().all(harmonic) {
+        return None;
+    }
+    // (signal, name, real part, imaginary part) of each printed spectrum.
+    let mut spectra: Vec<(_, String, &[f64], &[f64])> = Vec::with_capacity(signals.len());
+    let mut remaining = signals.iter();
+    while let Some(signal) = remaining.next() {
+        if !signal.real_only {
+            spectra.push((
+                signal,
+                signal.display_name.clone(),
+                &signal.real,
+                &signal.imag,
+            ));
+            continue;
+        }
+        let name = signal
+            .display_name
+            .strip_prefix("Re(")
+            .and_then(|name| name.strip_suffix(')'))
+            .filter(|name| !name.starts_with('{'))?;
+        let imaginary = remaining
+            .next()
+            .filter(|next| next.real_only && next.display_name == format!("Im({name})"))?;
+        spectra.push((signal, name.to_string(), &signal.real, &imaginary.real));
+    }
+    let times: Vec<f64> = (0..points)
+        .map(|point| point as f64 / (fundamental * points as f64))
+        .collect();
+    let columns = spectra
+        .into_iter()
+        .map(|(signal, name, real, imag)| ExportColumn {
+            unit: signal.unit_symbol(),
+            name,
+            var_type: signal.raw_variable_type().to_string(),
+            data: ColumnData::Real(
+                times
+                    .iter()
+                    .map(|&time| {
+                        frequencies
+                            .iter()
+                            .enumerate()
+                            .map(|(bin, &frequency)| {
+                                let phase = std::f64::consts::TAU * frequency * time;
+                                real.get(bin).copied().unwrap_or(0.0) * phase.cos()
+                                    - imag.get(bin).copied().unwrap_or(0.0) * phase.sin()
+                            })
+                            .sum()
+                    })
+                    .collect(),
+            ),
+        })
+        .collect();
+    Some(ExportTable {
+        scale_unit: None,
+        analysis: "hb".to_string(),
+        plot_name: "Harmonic Balance Waveform".to_string(),
+        scale_name: "time".to_string(),
+        scale_type: "time".to_string(),
+        scale: times,
+        columns,
+    })
 }
 
 /// The two-sided spectrum Xyce prints for one-sided peak phasors: one row

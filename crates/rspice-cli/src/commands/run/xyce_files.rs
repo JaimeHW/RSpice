@@ -1,13 +1,14 @@
 //! The files a run in the Xyce dialect writes beside its deck.
 //!
 //! Xyce writes each `.PRINT` table to a file named after the deck:
-//! `deck.cir.prn` for a transient or DC table, `deck.cir.FD.prn` for AC and
-//! `deck.cir.NOISE.prn` for noise, or the file `.PRINT FILE=` names, in the
-//! layout `FORMAT=` selects. It writes the measures to `deck.cir.mt0`
-//! (`.ma0` in an AC or noise run, `.ms0` in a DC sweep), one file per `.STEP`
-//! coordinate, and the value each coordinate stepped to `deck.cir.res`. A
-//! run in that dialect without `-o` writes the same files in the same
-//! layouts, so a flow built on them runs unchanged.
+//! `deck.cir.prn` for a transient or DC table, `deck.cir.FD.prn` for AC,
+//! `deck.cir.NOISE.prn` for noise, and `deck.cir.HB.FD.prn` with
+//! `deck.cir.HB.TD.prn` for a harmonic-balance spectrum and its waveform; or
+//! the file `.PRINT FILE=` names, in the layout `FORMAT=` selects. It writes
+//! the measures to `deck.cir.mt0` (`.ma0` in an AC or noise run, `.ms0` in a
+//! DC sweep), one file per `.STEP` coordinate, and the value each coordinate
+//! stepped to `deck.cir.res`. A run in that dialect without `-o` writes the
+//! same files in the same layouts, so a flow built on them runs unchanged.
 //!
 //! They are outputs beside the run's result, not the result: a file the
 //! deck's directory refuses, or that cannot be written, is a warning, and the
@@ -40,9 +41,9 @@ const BYTES_PER_VALUE: usize = 128;
 /// The coordinate column Xyce writes before a table's own columns.
 #[derive(Debug, Clone, Copy)]
 pub(super) enum Scale {
-    /// `TIME`, before a transient table.
+    /// `TIME`, before a transient table or a harmonic-balance waveform.
     Time,
-    /// `FREQ`, before an AC or noise table.
+    /// `FREQ`, before an AC, noise or harmonic-balance spectrum.
     Frequency,
     /// None: a DC table holds only what its card names.
     None,
@@ -142,7 +143,7 @@ fn log() -> MutexGuard<'static, Log> {
 
 /// Whether this run writes Xyce's files: the Xyce dialect, a deck read from
 /// a file, and no `-o`, which names the run's one result instead.
-fn writes_files(ctx: &RunContext<'_>) -> bool {
+pub(super) fn writes_files(ctx: &RunContext<'_>) -> bool {
     ctx.engine.config().spice_dialect == SpiceDialect::Xyce
         && ctx.args.output.is_none()
         && ctx.args.corners.is_none()
@@ -196,9 +197,14 @@ fn layout(request: &OutputRequest, options: &SimulationOptions) -> Result<Layout
     })
 }
 
-/// The extension Xyce gives an analysis's table in the deck's name.
-fn extension(kind: OutputAnalysisKind, csv: bool) -> Option<&'static str> {
+/// The extension Xyce gives an analysis's table in the deck's name; a
+/// harmonic-balance card writes its spectrum and its waveform.
+fn extension(kind: OutputAnalysisKind, scale: Scale, csv: bool) -> Option<&'static str> {
     Some(match (kind, csv) {
+        (OutputAnalysisKind::Hb, false) if matches!(scale, Scale::Time) => ".HB.TD.prn",
+        (OutputAnalysisKind::Hb, true) if matches!(scale, Scale::Time) => ".HB.TD.csv",
+        (OutputAnalysisKind::Hb, false) => ".HB.FD.prn",
+        (OutputAnalysisKind::Hb, true) => ".HB.FD.csv",
         (OutputAnalysisKind::Tran | OutputAnalysisKind::Dc, false) => ".prn",
         (OutputAnalysisKind::Tran | OutputAnalysisKind::Dc, true) => ".csv",
         (OutputAnalysisKind::Ac, false) => ".FD.prn",
@@ -271,10 +277,17 @@ pub(super) fn record_print(
                 continue;
             }
         };
-        let Some(extension) = extension(kind, layout.csv) else {
+        let Some(extension) = extension(kind, scale, layout.csv) else {
             return Ok(());
         };
         let file = file_name(&deck, request.print_file.as_deref(), extension);
+        // A `.PRINT HB FILE=` names one file, which Xyce gives the spectrum.
+        if matches!(scale, Scale::Time)
+            && kind == OutputAnalysisKind::Hb
+            && request.print_file.as_deref() == Some(file.as_str())
+        {
+            continue;
+        }
         match files.iter_mut().find(|(known, ..)| *known == file) {
             Some((_, _, known)) if by_card => known.extend(columns),
             Some(_) => {}
@@ -295,6 +308,20 @@ pub(super) fn record_print(
         }
     }
     Ok(())
+}
+
+/// A column's name as Xyce prints it: upper case, except the `Re(..)` or
+/// `Im(..)` around one part of a complex value.
+fn xyce_name(name: &str) -> String {
+    for part in ["Re(", "Im("] {
+        if let Some(inner) = name
+            .strip_prefix(part)
+            .and_then(|inner| inner.strip_suffix(')'))
+        {
+            return format!("{part}{})", inner.to_ascii_uppercase());
+        }
+    }
+    name.to_ascii_uppercase()
 }
 
 /// One coordinate's rows: Xyce's `Index`, the scale, then each column under
@@ -329,7 +356,7 @@ fn prn_table(
     };
     for &column in columns {
         let column = &table.columns[column];
-        let name = column.name.to_ascii_uppercase();
+        let name = xyce_name(&column.name);
         match &column.data {
             ColumnData::Real(real) => {
                 names.push(name);
@@ -599,6 +626,13 @@ mod tests {
             file_name("rc.cir", Some("three.cir"), ".prn"),
             "three.cir.prn"
         );
+    }
+
+    #[test]
+    fn a_complex_part_keeps_its_re_or_im() {
+        assert_eq!(xyce_name("v(out)"), "V(OUT)");
+        assert_eq!(xyce_name("Re(id(M1))"), "Re(ID(M1))");
+        assert_eq!(xyce_name("Im({v(1)*2})"), "Im({V(1)*2})");
     }
 
     #[test]
