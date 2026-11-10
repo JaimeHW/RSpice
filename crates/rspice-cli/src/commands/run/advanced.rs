@@ -580,7 +580,9 @@ fn solve_hb(
 
 /// Write the harmonic-balance spectrum: harmonic frequencies as the scale,
 /// one complex column per retained node voltage or MNA branch current, and
-/// per device current the deck names.
+/// per device current the deck names. The Xyce dialect writes Xyce's
+/// two-sided spectrum ([`two_sided_spectrum`]); the others write one-sided
+/// peak phasors.
 fn export_hb(
     ctx: &RunContext<'_>,
     analysis_id: rspice_core::execution::AnalysisInstanceId,
@@ -711,6 +713,12 @@ fn export_hb(
             }
         }
     }
+    let (frequencies, signals) =
+        if ctx.engine.config().spice_dialect == rspice_core::config::SpiceDialect::Xyce {
+            two_sided_spectrum(&frequencies, signals)
+        } else {
+            (frequencies, signals)
+        };
     let signals = crate::commands::run_signals::complex_export_signals(
         ctx.netlist,
         rspice_core::execution::AnalysisResultKind::HarmonicBalance,
@@ -771,6 +779,51 @@ fn export_hb(
         ))?;
     }
     Ok(())
+}
+
+/// The two-sided spectrum Xyce prints for one-sided peak phasors: one row
+/// per frequency-domain bin, from the most negative frequency to the most
+/// positive (IOInterfacePKG/N_IO_OutputterHBFreqPrn.C:126-152). The DC bin
+/// is kept as it is; every other bin is half its peak phasor, and its mirror
+/// at the negative frequency is that half's conjugate. A print expression
+/// is then evaluated bin by bin over these values, as Xyce evaluates it.
+fn two_sided_spectrum(
+    frequencies: &[f64],
+    signals: Vec<crate::commands::run_signals::ComplexSignal>,
+) -> (Vec<f64>, Vec<crate::commands::run_signals::ComplexSignal>) {
+    // (frequency, one-sided bin, whether it is the negative mirror)
+    let mut bins = Vec::with_capacity(2 * frequencies.len());
+    for (index, &frequency) in frequencies.iter().enumerate() {
+        bins.push((frequency, index, false));
+        if frequency != 0.0 {
+            bins.push((-frequency, index, true));
+        }
+    }
+    bins.sort_by(|left, right| left.0.total_cmp(&right.0));
+    let axis = bins.iter().map(|&(frequency, ..)| frequency).collect();
+    let signals = signals
+        .into_iter()
+        .map(|signal| {
+            let (real, imag) = bins
+                .iter()
+                .map(|&(frequency, index, mirror)| {
+                    let re = signal.real.get(index).copied().unwrap_or(0.0);
+                    let im = signal.imag.get(index).copied().unwrap_or(0.0);
+                    match (mirror, frequency == 0.0) {
+                        (false, true) => (re, im),
+                        (false, false) => (0.5 * re, 0.5 * im),
+                        (true, _) => (0.5 * re, -0.5 * im),
+                    }
+                })
+                .unzip();
+            crate::commands::run_signals::ComplexSignal {
+                real,
+                imag,
+                ..signal
+            }
+        })
+        .collect();
+    (axis, signals)
 }
 
 /// Run one authored `.SP` card and publish its scattering sweep.

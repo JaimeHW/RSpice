@@ -829,6 +829,42 @@ fn xyce_prints_hb_lead_currents_by_their_accessors() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A Xyce `.PRINT HB` writes the two-sided spectrum, a row per bin from
+/// -NUMFREQ f0 to NUMFREQ f0: Xyce 7.10 prints eleven rows for NUMFREQ=5,
+/// V(OUT) 0.249824676+0.259361152j at -100 kHz and its conjugate at
+/// +100 kHz, half the peak phasor. The default dialect keeps the one-sided
+/// peak phasors, DC to the fifth harmonic.
+#[test]
+fn xyce_prints_the_two_sided_hb_spectrum() {
+    let dir = test_dir("print_hb_two_sided");
+    let deck = "* hb rows\n.hb 1e5\n.print hb v(out)\n.options hbint numfreq=5\n\
+                V1 in 0 sin 0 1 1e5 0 0\nR1 in out 1k\nC1 out 0 1n\nL1 out 0 1m\n.end\n";
+    let path = run_export_with_args(&dir, "xyce", deck, "csv", &["--spice-dialect", "xyce"]);
+    let text = std::fs::read_to_string(&path).expect("read csv");
+    let frequency = common::csv_column(&text, "frequency");
+    let expected = (-5..=5).map(|k| f64::from(k) * 1e5).collect::<Vec<_>>();
+    assert_eq!(frequency.len(), expected.len(), "{text}");
+    for (actual, expected) in frequency.iter().zip(&expected) {
+        assert!((actual - expected).abs() <= 1e-6, "{text}");
+    }
+    let re = common::csv_column(&text, "Re(V(OUT))");
+    let im = common::csv_column(&text, "Im(V(OUT))");
+    for (row, sign) in [(4, 1.0), (6, -1.0)] {
+        assert!((re[row] - 0.249824676).abs() <= 1e-9, "{text}");
+        assert!((im[row] - sign * 0.259361152).abs() <= 1e-9, "{text}");
+    }
+
+    let path = run_export_with_args(&dir, "best", deck, "csv", &[]);
+    let text = std::fs::read_to_string(&path).expect("read csv");
+    let frequency = common::csv_column(&text, "frequency");
+    assert_eq!(frequency.len(), 6, "{text}");
+    let re = common::csv_column(&text, "Re(V(OUT))");
+    let im = common::csv_column(&text, "Im(V(OUT))");
+    assert!((re[1] - 2.0 * 0.249824676).abs() <= 2e-9, "{text}");
+    assert!((im[1] + 2.0 * 0.259361152).abs() <= 2e-9, "{text}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A two-point LIN sweep visits both ends in every dialect, as Xyce, LTspice,
 /// QSPICE and ngspice's noise analysis step it; ngspice's AC analysis alone
 /// visits only the start (acan.c:104-113). `.DISTO`, which only ngspice runs,
