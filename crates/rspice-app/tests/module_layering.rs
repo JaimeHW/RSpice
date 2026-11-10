@@ -921,6 +921,9 @@ const WORKBENCH_LAYERS: &[&str] = &[
     "shell_host",
     // The frame is painted last and may reach anything below it.
     "frame",
+    // A run driven through whole frames: it opens an example project and
+    // reads what the frame drew, so it ranks above both.
+    "app/run_flow_tests",
 ];
 
 /// Order violations inside `workbench` today, with exact counts.

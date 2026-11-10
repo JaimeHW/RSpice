@@ -666,7 +666,11 @@ fn run_the_active_plan(app: &mut RSpiceApp) {
     // design it replaced; a check started before it would be dropped with it.
     app.simulation_controller
         .update(&mut app.state, &*app.export_workflow_io);
-    crate::workbench::preflight::start(&mut app.state, &mut app.simulation_controller, true);
+    rspice_app_runs::workbench::preflight::start(
+        &mut app.state,
+        &mut app.simulation_controller,
+        true,
+    );
     app.settle_preflight();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
     loop {
@@ -786,7 +790,7 @@ TEXT 32 270 Left 2 !.model MYD D(Is={saturation})
         .simulation_plan_binding("two")
         .expect("the second drawing's library is bindable");
     app.state.model.sim_setup.model_bindings.push(binding);
-    let report = crate::workbench::preflight::collect_report(&app.state);
+    let report = rspice_app_runs::workbench::preflight::collect_report(&app.state);
     let refusal = report
         .blockers
         .iter()

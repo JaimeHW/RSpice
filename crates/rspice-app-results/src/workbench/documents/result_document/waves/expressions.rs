@@ -266,7 +266,7 @@ pub(super) fn expr_cache_key(analysis: AnalysisPresentationKey, text: &str) -> u
 /// Whether a source waveform is drawn: as the open saved pane says when it
 /// holds the waveform, otherwise as the quick view does.
 pub fn waveform_plotted(
-    model: &crate::workbench::app_state::Model,
+    model: &rspice_app_state::workbench::app_state::model::Model,
     results: &crate::workbench::documents::result_document::ResultsState,
     key: &SourceWaveformPresentationKey,
     name: &str,
