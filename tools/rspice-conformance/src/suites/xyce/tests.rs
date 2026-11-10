@@ -27285,3 +27285,27 @@ fn typed_capability_refusals_are_expected_unsupported() {
         &SimulationError::Circuit("Convergence failed after 100 iterations".into())
     ));
 }
+
+/// A card routed to a generated model the build does not link is expected
+/// unsupported in every device family, not a failure: the deck asks for a
+/// model this build lacks.
+#[test]
+fn a_routed_but_unlinked_generated_model_is_expected_unsupported() {
+    for refusal in [
+        "MOSFET 'M1': model 'NMOS1' requests LEVEL=103 (PSP 103.4.0), but no generated \
+         Verilog-A builtin for that exact advanced compact-model family is available in this \
+         build.",
+        "BJT 'Q1': model 'MYMODEL' selects generated Verilog-A model 'bjt504va' under Xyce \
+         compatibility, but that exact model is not available in this build",
+        "BJT 'Q1': model 'HIC' selects the HICUM/L2 compact model (type 'HICUML2'), which is \
+         delivered by the Verilog-A model program as generated module 'hicuml2va' and is not \
+         compiled into this build.",
+    ] {
+        assert!(
+            XyceTestRunner::is_expected_unsupported_runtime_error(&SimulationError::Circuit(
+                refusal.into()
+            )),
+            "{refusal}"
+        );
+    }
+}

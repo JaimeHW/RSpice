@@ -3791,6 +3791,10 @@ impl XyceTestRunner {
     pub(super) fn is_expected_unsupported_runtime_error(err: &SimulationError) -> bool {
         // A typed capability refusal is the engine naming an unsupported
         // surface outright; the untyped messages below are matched by wording.
+        // A card routed to a generated model this build does not link is
+        // refused in every device family: MOS as "no generated Verilog-A
+        // builtin", BJT by LEVEL as "not available in this build", and BJT by a
+        // Verilog-A-delivered type as "not compiled into this build".
         if matches!(err, SimulationError::UnsupportedCapability(_)) {
             return true;
         }
@@ -3805,6 +3809,8 @@ impl XyceTestRunner {
             || normalized.contains("no native implementation")
             || normalized.contains("no generated verilog-a builtin")
             || normalized.contains("no generated builtin")
+            || normalized.contains("not available in this build")
+            || normalized.contains("not compiled into this build")
             || normalized.contains("not yet")
             || normalized.contains("refusing")
             || normalized.contains("must not run through")
