@@ -901,8 +901,12 @@ pub(super) fn parse_line(
             params,
             defer_simple_param_refs,
         ),
-        // `N` is the letter ngspice gives a Verilog-A (OSDI) instance.
-        'X' | 'N' => parse_subcircuit_instance(line, line_num, elements, params),
+        'X' => parse_subcircuit_instance(line, line_num, elements, params),
+        // `N` is the letter ngspice gives a Verilog-A (OSDI) instance. Xyce
+        // has no such element, and a line it starts there is refused.
+        'N' if params.expression_dialect() != crate::config::ExpressionDialect::Xyce => {
+            parse_subcircuit_instance(line, line_num, elements, params)
+        }
         'E' => parse_vcvs(
             &mut stream,
             line_num,
@@ -1529,5 +1533,33 @@ mod tests {
                 if message.contains("does not match open .SUBCKT `rlclump`")
         ));
         assert_eq!(state.subckt_stack.len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod element_letter_tests {
+    use super::super::{NetlistParseOptions, parse_netlist_with_options};
+    use crate::config::ExpressionDialect;
+
+    /// An `N` line is ngspice's Verilog-A (OSDI) instance. Xyce has no `N`
+    /// element, and its dialect refuses the line as Xyce does.
+    #[test]
+    fn an_n_line_is_an_instance_except_in_the_xyce_dialect() {
+        let deck = "N lines
+N1 a 0 gain_cell
+R1 a 0 1k
+.end
+";
+        let ngspice = parse_netlist_with_options(deck, NetlistParseOptions::default());
+        assert!(ngspice.is_ok(), "{ngspice:?}");
+        let xyce = parse_netlist_with_options(
+            deck,
+            NetlistParseOptions {
+                expression_dialect: ExpressionDialect::Xyce,
+                ..NetlistParseOptions::default()
+            },
+        );
+        let error = xyce.expect_err("Xyce has no N element").to_string();
+        assert!(error.contains("Unknown element type: N"), "{error}");
     }
 }
