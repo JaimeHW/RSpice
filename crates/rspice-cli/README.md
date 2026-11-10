@@ -13,6 +13,10 @@ cargo build --release -p rspice-cli      # target/release/rspice
 cargo install --path crates/rspice-cli   # puts rspice on PATH
 ```
 
+| Flag | Effect |
+| :--- | :--- |
+| `generated-veriloga-catalog` | Forwards to `rspice-simulation` so the build ships the generated Verilog-A compact models (Mextram, PSP, BSIM-CMG, HICUM and the rest of `crates/rspice-veriloga-models`). Every release binary sets it; a build without it refuses a card that needs one of those models with exit code 80, naming the model's feature |
+
 ## Commands
 
 | Command | Purpose |

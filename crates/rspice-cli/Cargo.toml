@@ -11,6 +11,12 @@ rust-version.workspace = true
 name = "rspice"
 path = "src/main.rs"
 
+[features]
+default = []
+# Compiles in the generated Verilog-A compact models, as rspice-app's feature
+# of the same name does. Every release build sets it.
+generated-veriloga-catalog = ["rspice-simulation/generated-veriloga-catalog"]
+
 [dependencies]
 rspice-formats = { path = "../rspice-formats", version = "0.1.0", default-features = false, features = ["project-results"] }
 rspice-veriloga = { path = "../rspice-veriloga", version = "0.1.0" }

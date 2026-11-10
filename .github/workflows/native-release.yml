@@ -251,7 +251,7 @@ jobs:
         env:
           RSPICE_BUILD_COMMIT: ${{ needs.validate.outputs.commit }}
           RUSTFLAGS: -D warnings
-        run: cargo build --locked --release -p rspice-cli --target ${{ matrix.target }}
+        run: cargo build --locked --release -p rspice-cli --features generated-veriloga-catalog --target ${{ matrix.target }}
       - name: Build locked desktop application with the release trust root
         env:
           RSPICE_BUILD_COMMIT: ${{ needs.validate.outputs.commit }}
