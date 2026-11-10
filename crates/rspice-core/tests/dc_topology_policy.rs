@@ -321,6 +321,38 @@ fn the_polish_of_an_operating_point_solved_without_the_floor_keeps_its_system() 
     assert!((n - 0.5).abs() <= 1.0e-12, "v(n) = {n:e}, ngspice-46 0.5");
 }
 
+/// Every point of a DC sweep is an operating point solved without the nodal
+/// floor while that solve succeeds. Polished at the 1e-15 S floor, the
+/// source feeding a cubic behavioural current read the floor's 1e-15 * V on
+/// top of the device's 1e-20 * V^3. ngspice ends each point at
+/// CKTdiagGmin = gshunt = 0; Xyce 7.10 prints I(V1) = -1e-20, -3.375e-20,
+/// -8e-20.
+#[test]
+fn a_dc_sweep_point_carries_no_nodal_floor_current() {
+    let netlist = parse(
+        "Cubic behavioural current
+V1 n1 0 1
+B1 n1 0 I=1e-20*V(n1)*V(n1)*V(n1)
+         .dc V1 1 2 0.5
+.end
+",
+    );
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::BestAvailable] {
+        let sweep = Engine::new(SimulationConfig::default().with_spice_dialect(dialect))
+            .run_dc_sweep(&netlist, "v1", 1.0, 2.0, 0.5)
+            .expect("the sweep solves");
+        assert_eq!(sweep.len(), 3, "{dialect:?}");
+        for (v, point) in &sweep {
+            let current = point.branch_current_named("V1").expect("I(V1)");
+            let expected = -1.0e-20 * v * v * v;
+            assert!(
+                (current - expected).abs() <= 1.0e-30,
+                "{dialect:?} V1 = {v}: I(V1) = {current:e}, Xyce 7.10 {expected:e}",
+            );
+        }
+    }
+}
+
 /// An XSPICE digital net between two code models is an event net. Its node
 /// owns an MNA placeholder row that no analog stamp reaches, and without
 /// the nodal floor that row made the system singular ("singular matrix:
