@@ -29,6 +29,46 @@ pub(super) const XYCE_DECK_DISPOSITIONS: &[XyceDeckDisposition] = &[
         reason: "deck prints white_NOI2_gnd_igig, a noise source of Xyce's modified PSP 103 \
                  copy; the unmodified 103.4.0 release names it white_NOI_gnd_igig",
     },
+    XyceDeckDisposition {
+        deck: "Netlists/BSIMCMG/gummel_n_outvars.cir",
+        contract: "unsupported_xyce_contract",
+        reason: "deck prints N(M1:gm), N(M1:vth) and N(M1:vdssat), output variables of the \
+                 release; generated built-ins do not report module output variables",
+    },
+    XyceDeckDisposition {
+        deck: "Netlists/BSIMCMG_108/gummel_n_outvars.cir",
+        contract: "unsupported_xyce_contract",
+        reason: "deck prints N(M1:gm), N(M1:vth) and N(M1:vdssat), output variables of the \
+                 release; generated built-ins do not report module output variables",
+    },
+    XyceDeckDisposition {
+        deck: "Netlists/BSIMCMG_110/gummel_n_outvars.cir",
+        contract: "unsupported_xyce_contract",
+        reason: "deck prints N(M1:gm) and N(M1:vth), output variables of the release, and \
+                 vds/vgs/vbs/vdsat, which Xyce's modified copy adds; generated built-ins \
+                 do not report module output variables",
+    },
+    XyceDeckDisposition {
+        deck: "Netlists/BSIMCMG_110/gummel_p_outvars.cir",
+        contract: "unsupported_xyce_contract",
+        reason: "deck prints N(M1:gm) and N(M1:vth), output variables of the release, and \
+                 vds/vgs/vbs/vdsat, which Xyce's modified copy adds; generated built-ins \
+                 do not report module output variables",
+    },
+    XyceDeckDisposition {
+        deck: "Netlists/BSIMCMG_111/gummel_n_outvars.cir",
+        contract: "unsupported_xyce_contract",
+        reason: "deck prints N(M1:gm) and N(M1:vth), output variables of the release, and \
+                 vds/vgs/vbs/vdsat, which Xyce's modified copy adds; generated built-ins \
+                 do not report module output variables",
+    },
+    XyceDeckDisposition {
+        deck: "Netlists/BSIMCMG_111/gummel_p_outvars.cir",
+        contract: "unsupported_xyce_contract",
+        reason: "deck prints N(M1:gm) and N(M1:vth), output variables of the release, and \
+                 vds/vgs/vbs/vdsat, which Xyce's modified copy adds; generated built-ins \
+                 do not report module output variables",
+    },
 ];
 
 impl XyceTestRunner {

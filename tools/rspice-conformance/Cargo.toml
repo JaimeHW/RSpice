@@ -64,6 +64,10 @@ circuit-suites = [
     "veriloga-model-bjt504va",
     "veriloga-model-psp102va",
     "veriloga-model-psp103va",
+    "veriloga-model-bsimcmg107",
+    "veriloga-model-bsimcmg108",
+    "veriloga-model-bsimcmg110",
+    "veriloga-model-bsimcmg111",
 ]
 
 # Forwarded, not local. The ngspice suite marks decks that instantiate a
@@ -127,6 +131,24 @@ veriloga-model-psp103va = [
     "veriloga-builtins-base",
     "rspice-core/veriloga-model-psp103va",
 ]
+# BSIM-CMG 107.0.0, 108.0.0, 110.0.0 and 111.2.1, which the Xyce suite's M
+# LEVEL=107, 108, 110 and 111 decks run.
+veriloga-model-bsimcmg107 = [
+    "veriloga-builtins-base",
+    "rspice-core/veriloga-model-bsimcmg107",
+]
+veriloga-model-bsimcmg108 = [
+    "veriloga-builtins-base",
+    "rspice-core/veriloga-model-bsimcmg108",
+]
+veriloga-model-bsimcmg110 = [
+    "veriloga-builtins-base",
+    "rspice-core/veriloga-model-bsimcmg110",
+]
+veriloga-model-bsimcmg111 = [
+    "veriloga-builtins-base",
+    "rspice-core/veriloga-model-bsimcmg111",
+]
 veriloga-builtins-models = [
     "veriloga-builtins-base",
     "rspice-core/veriloga-builtins-models",
@@ -139,6 +161,10 @@ veriloga-builtins-models = [
     "veriloga-model-bjt504va",
     "veriloga-model-psp102va",
     "veriloga-model-psp103va",
+    "veriloga-model-bsimcmg107",
+    "veriloga-model-bsimcmg108",
+    "veriloga-model-bsimcmg110",
+    "veriloga-model-bsimcmg111",
 ]
 # Preserve the compatibility umbrella while exposing the individual VBIC and
 # noise capabilities above for feature-shard builds. Production admission asks
