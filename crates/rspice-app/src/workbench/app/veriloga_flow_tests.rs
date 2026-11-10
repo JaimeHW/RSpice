@@ -194,7 +194,7 @@ impl User {
         }]);
     }
 
-    fn click(&mut self, name: &str) {
+    pub(in crate::workbench) fn click(&mut self, name: &str) {
         let at = self.expect(name).center();
         self.press(at, egui::PointerButton::Primary);
         self.settle();

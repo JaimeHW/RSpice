@@ -181,6 +181,7 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
     // for it. Consumed before the dialog so a blocked report opens this frame.
     if app.state.runs.preflight.take_run_and_queue_request() {
         preflight::start(&mut app.state, &mut app.simulation_controller, true);
+        note_run_press(app);
     }
     // A finding the reader chose to follow. The page that offered it holds
     // the session, not the application root, so the jump happens here.
@@ -309,6 +310,91 @@ fn answer_result_requests(ctx: &Context, app: &mut RSpiceApp) {
 /// rather than reading the log, so the offer is bound to a run identity
 /// instead of to the wording of a message. A campaign's end is not a run, so
 /// the controller reports it.
+/// Remember the page Run was pressed on, when the press started a run or
+/// waits on the engine's check to start one. A press the gate refused, or one
+/// made while a run was going, leaves nothing to follow.
+fn note_run_press(app: &mut RSpiceApp) {
+    if app.state.model.simulation.execution.trigger_simulation
+        || app.state.runs.preflight.run_awaits_check()
+    {
+        app.state.workbench.run_press_route = Some(app.state.workbench.current_route());
+        app.state.runs.run_watch.finished_run = None;
+    }
+}
+
+/// Answer the end of the run a press of Run asked for. One that completed
+/// opens in Results if the reader is still on the page they pressed from, and
+/// waits one click away on the status bar if they have moved on. One that
+/// failed brings its own account up in the Console. Only the first of these
+/// changes the page, and only for a reader who stayed.
+fn follow_pressed_run(app: &mut RSpiceApp, ended: &[crate::product::RunId]) {
+    use crate::state::SimulationRunLifecycle as Lifecycle;
+    use crate::ui::widgets::NotificationAction;
+
+    let Some(route) = app.state.workbench.run_press_route else {
+        return;
+    };
+    let simulation = &app.state.model.simulation;
+    let pressed = ended
+        .iter()
+        .rev()
+        .filter_map(|run_id| simulation.retained.run_by_stable_id(*run_id))
+        .find(|run| run.campaign_membership().is_none());
+    let Some(run) = pressed else {
+        // A check that refused the run leaves no run to wait for.
+        let execution = &simulation.execution;
+        let live = simulation.retained.runs.iter().any(|run| {
+            matches!(
+                run.lifecycle,
+                Lifecycle::Preparing | Lifecycle::Running | Lifecycle::Cancelling
+            )
+        });
+        if !live
+            && !execution.trigger_simulation
+            && !execution.has_active_execution()
+            && !app.state.runs.preflight.run_awaits_check()
+        {
+            app.state.workbench.run_press_route = None;
+        }
+        return;
+    };
+    let (run_id, sequence, lifecycle, has_results) =
+        (run.run_id, run.id, run.lifecycle, !run.analyses.is_empty());
+    app.state.workbench.run_press_route = None;
+    match lifecycle {
+        Lifecycle::Completed if has_results => {
+            if app.state.workbench.current_route() == route {
+                app.open_finished_run(sequence);
+            } else {
+                app.state.runs.run_watch.finished_run = Some(run_id);
+            }
+        }
+        Lifecycle::Failed => {
+            if let Some(log_id) = run_end_line(&app.state, sequence) {
+                ResultsFeature::perform_notification_action(
+                    &mut features::cx(app),
+                    NotificationAction::ShowInConsole { log_id },
+                );
+                app.after_contribution();
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The line the run wrote in the session's log as it ended.
+fn run_end_line(state: &AppState, run_sequence: u64) -> Option<u64> {
+    state
+        .model
+        .log_buffer
+        .entries()
+        .filter(|entry| {
+            entry.anchor == Some(crate::diagnostics::LogAnchor::ResultRun { run_sequence })
+        })
+        .last()
+        .map(|entry| entry.id)
+}
+
 fn announce_run_completion(ctx: &Context, app: &mut RSpiceApp) {
     let runs = app
         .state
@@ -319,6 +405,7 @@ fn announce_run_completion(ctx: &Context, app: &mut RSpiceApp) {
         .iter()
         .map(|run| (run.run_id, run.lifecycle));
     let ended = app.state.runs.run_watch.observe(runs);
+    follow_pressed_run(app, &ended);
     let campaigns = app.state.runs.run_watch.take_campaign_outcomes();
     if ended.is_empty() && campaigns.is_empty() {
         return;
@@ -550,18 +637,7 @@ fn run_notice(state: &AppState, run_id: crate::product::RunId) -> Option<RunNoti
         // that arrives at an empty dataset would be worse than none. A
         // failure still has an account of itself, and it starts at the
         // run's line in the session's log, which the run wrote as it ended.
-        state
-            .model
-            .log_buffer
-            .entries()
-            .filter(|entry| {
-                entry.anchor
-                    == Some(crate::diagnostics::LogAnchor::ResultRun {
-                        run_sequence: sequence,
-                    })
-            })
-            .last()
-            .map(|entry| NotificationAction::ShowInConsole { log_id: entry.id })
+        run_end_line(state, sequence).map(|log_id| NotificationAction::ShowInConsole { log_id })
     } else {
         None
     };

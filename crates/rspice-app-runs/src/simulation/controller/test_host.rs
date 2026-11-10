@@ -174,8 +174,7 @@ impl RunHost for RunTestHost {
     /// Bringing the reader to the findings is the workbench's.
     fn show_problem_findings(&mut self) {}
 
-    /// The run set is queued on the model; showing the workspace that runs
-    /// it is the workbench's.
+    /// The run set is queued on the model.
     fn queue_run_set(&mut self) {
         self.model.simulation.execution.request_simulate_run_set();
     }

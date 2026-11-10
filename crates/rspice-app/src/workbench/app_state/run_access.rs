@@ -12,7 +12,6 @@ use super::design_checks::CheckScope;
 use super::{AppState, Model, RunsState, SlotFacts};
 use crate::simulation::{NetlistShown, RunHost, ViewerHost, ViewerReading};
 use crate::state::{CellViewRef, SpecializedViewerCacheProvenance};
-use crate::workbench::state::Workspace;
 
 impl AppState {
     /// [`Model::active_plan_revision`].
@@ -91,7 +90,6 @@ impl RunHost for AppState {
 
     fn queue_run_set(&mut self) {
         self.request_run_set_simulation();
-        self.workbench.activate(Workspace::Simulate);
     }
 
     fn sync_active_schematic_to_workspace(&mut self) {

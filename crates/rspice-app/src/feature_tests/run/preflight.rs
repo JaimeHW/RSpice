@@ -202,9 +202,10 @@ fn a_current_retained_report_queues_without_reauthoring_preflight() {
         prepared: Some(prepared_contract()),
     });
 
+    let workspace = app.state.workbench.workspace;
     assert!(queue_retained_run(&mut app.state));
     assert!(app.state.model.simulation.execution.trigger_simulation);
-    assert_eq!(app.state.workbench.workspace, Workspace::Simulate);
+    assert_eq!(app.state.workbench.workspace, workspace);
 }
 
 #[test]

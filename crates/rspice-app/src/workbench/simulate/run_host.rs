@@ -20,7 +20,7 @@ use crate::workbench::framework::command_registry::Registry;
 use crate::workbench::framework::feature::{Cx, Peers};
 use crate::workbench::framework::ports::ResultsPeer;
 use crate::workbench::slots::{PlatformState, RunsState};
-use crate::workbench::state::{WorkbenchSession, Workspace};
+use crate::workbench::state::WorkbenchSession;
 
 /// The run tier's host over a simulate command's context.
 pub(super) struct RunView<'v, 'a> {
@@ -130,7 +130,6 @@ impl RunHost for RunView<'_, '_> {
 
     fn queue_run_set(&mut self) {
         request_run_set(self.model, self.runs);
-        self.wb.activate(Workspace::Simulate);
     }
 
     fn sync_active_schematic_to_workspace(&mut self) {

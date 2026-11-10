@@ -395,6 +395,8 @@ pub struct WorkbenchSession {
     pub inspector_visible: bool,
     pub console_visible: bool,
     pub console_maximized: bool,
+    /// The page Run was pressed on, until the run that press asked for ends.
+    pub run_press_route: Option<SurfaceRoute>,
     pub focus_mode: bool,
     /// Device-local presentation toggle for the mockup's equal schematic /
     /// result stage. The immutable datasets and result-document state remain
@@ -542,6 +544,7 @@ impl Default for WorkbenchSession {
             inspector_visible: true,
             console_visible: false,
             console_maximized: false,
+            run_press_route: None,
             focus_mode: false,
             split_with_results: false,
             full_screen: false,

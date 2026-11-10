@@ -56,6 +56,29 @@ impl ResultsFeature {
         selected
     }
 
+    /// Open Results on the run a press of Run finished, on Waves, as LTspice
+    /// opens its waveform window and ADE plots on completion; a run with no
+    /// curve to draw opens on its operating point rather than an empty sheet.
+    /// A run that has left the history opens nothing. The shell answers the
+    /// command it raises straight after.
+    pub fn open_finished_run(cx: &mut Cx<'_, Self>, run_sequence: u64) {
+        if !cx.model.simulation.select_run_by_sequence(run_sequence) {
+            return;
+        }
+        let draws = cx.model.simulation.active_run().is_some_and(|run| {
+            run.analyses
+                .iter()
+                .any(|analysis| !analysis.waveforms.is_empty())
+        });
+        cx.state.results.session.viewer =
+            if draws || !viewer_is_available(cx.state.reads(cx.model, cx.wb), ResultViewer::Op) {
+                ResultViewer::Waves
+            } else {
+                ResultViewer::Op
+            };
+        cx.execute(ids::OPEN_RUN_IN_RESULTS);
+    }
+
     /// Take the navigation offer a notice carried: open Results on the run
     /// it names, or the Console on the line it names. The shell answers the
     /// command it raises straight after.

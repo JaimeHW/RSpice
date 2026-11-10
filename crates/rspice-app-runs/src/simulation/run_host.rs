@@ -56,8 +56,8 @@ pub trait RunHost: ViewerHost {
     fn netlist_shown(&self) -> NetlistShown;
     /// A run gate filed findings that stop the run: bring the reader to them.
     fn show_problem_findings(&mut self);
-    /// The run gate authorized the retained run set: queue it, and show the
-    /// workspace that runs it.
+    /// The run gate authorized the retained run set: queue it. The reader
+    /// stays on the page they are on.
     fn queue_run_set(&mut self);
     /// The run gate reads the design as the open schematic edits it.
     fn sync_active_schematic_to_workspace(&mut self);

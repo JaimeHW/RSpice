@@ -158,6 +158,8 @@ pub(super) static STATUS_ORDER: &[StatusCell<RSpiceApp>] = &[
                         format!("Engine startup could not be retried: {error}"),
                     );
                 }
+            } else if let Some(run) = finished_run(app).map(|run| run.id) {
+                app.open_finished_run(run);
             } else if can_open {
                 app.open_newest_retained_run();
             }
@@ -278,7 +280,9 @@ fn engine_cell<'a>(app: &RSpiceApp, readings: &'a StatusReadings) -> Option<Stat
     let text = match checking {
         Some(stage) => Some(preflight_status(stage)),
         None => simulation_engine_status(&app.state.model.simulation, availability),
-    }?;
+    };
+    let finished = finished_run(app).map(|run| run.id);
+    let text = text.or_else(|| finished.map(|run| format!("Run {run} complete")))?;
     let mark = engine_status_mark(
         availability,
         app.state.model.simulation.execution.has_active_execution() || checking.is_some(),
@@ -296,6 +300,8 @@ fn engine_cell<'a>(app: &RSpiceApp, readings: &'a StatusReadings) -> Option<Stat
                 ))
             },
         )
+    } else if let Some(run) = finished {
+        Cow::Owned(format!("Open Run {run} in Results"))
     } else if can_open {
         Cow::Borrowed("Open the newest retained result dataset in Results")
     } else {
@@ -313,13 +319,34 @@ fn engine_cell<'a>(app: &RSpiceApp, readings: &'a StatusReadings) -> Option<Stat
         text: Cow::Owned(text),
         mark,
         control: StatusControl::Guarded {
-            enabled: can_open || can_retry,
+            enabled: can_open || can_retry || finished.is_some(),
         },
         hover: Some(hover),
     })
 }
 
+/// The finished run the status bar offers: one that ended while the reader
+/// was on another page, until they have reached it by any path.
+fn finished_run(app: &RSpiceApp) -> Option<&crate::state::SimulationRun> {
+    let run_id = app.state.runs.run_watch.finished_run?;
+    let simulation = &app.state.model.simulation;
+    let run = simulation.retained.run_by_stable_id(run_id)?;
+    let reached = app.state.workbench.workspace == Workspace::Results
+        && simulation
+            .active_run()
+            .is_some_and(|active| active.run_id == run_id);
+    (!reached).then_some(run)
+}
+
 impl RSpiceApp {
+    /// Open Results on a run a press of Run finished, in the results feature's
+    /// context, then answer what it raised.
+    pub(crate) fn open_finished_run(&mut self, run_sequence: u64) {
+        self.state.runs.run_watch.finished_run = None;
+        ResultsFeature::open_finished_run(&mut features::cx(self), run_sequence);
+        self.after_contribution();
+    }
+
     /// Open Results on the newest run that holds a dataset, in the results
     /// feature's context, then answer what it raised; false when there is
     /// none.

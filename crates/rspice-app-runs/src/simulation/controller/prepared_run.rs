@@ -333,6 +333,9 @@ pub struct RunWatch {
     /// Campaign outcomes the controller reported that the shell has not
     /// announced yet, oldest first.
     campaign_outcomes: Vec<CampaignOutcome>,
+    /// The finished run offered on the status bar, for a reader who had moved
+    /// to another page while it ran.
+    pub finished_run: Option<crate::product::RunId>,
 }
 
 impl RunWatch {
