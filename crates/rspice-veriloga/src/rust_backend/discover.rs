@@ -6,6 +6,11 @@
 //! `.rspice-veriloga-profile` file supplies the [`VerilogACompileProfile`] —
 //! the `defines`/`undefines` a source needs to preprocess, and optional
 //! `namespace SOURCE::MODULE=HEX_ID` declarations that preserve published names.
+//! A profile's `name SOURCE::MODULE=NAME` line gives a module the built-in name
+//! it publishes, where its own module name is one another release publishes.
+//! A profile's `skip SOURCE` line names a file that declares a module but is
+//! not a root of its release: another root includes it, so building it alone
+//! would publish a second, partial copy of that root's model.
 //!
 //! Results are sorted, since discovery order determines generation order and
 //! generation has to be reproducible.
@@ -25,6 +30,10 @@ pub struct VerilogACompileProfile {
     pub undefines: Vec<String>,
     /// Authored namespaces keep published model paths stable as sources change.
     pub namespaces: BTreeMap<String, String>,
+    /// Authored built-in names, by module. Two releases of one model often
+    /// share a module name; naming the later one keeps the published name of
+    /// the first, where the registry would otherwise suffix both.
+    pub public_names: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,7 +57,10 @@ pub fn discover_veriloga_sources(
 
     let mut candidates = Vec::new();
     for path in files {
-        let compile_profile = compile_profile_for_source(root, &path)?;
+        let (compile_profile, skipped) = compile_profile_for_source(root, &path)?;
+        if skipped {
+            continue;
+        }
         let modules = module_names_in_file(root, &path, &compile_profile)?;
         for module in compile_profile.namespaces.keys() {
             if !modules.contains(module) {
@@ -56,6 +68,15 @@ pub fn discover_veriloga_sources(
                     path.display().to_string(),
                     module,
                     "namespace selects a module absent from the preprocessed source",
+                ));
+            }
+        }
+        for module in compile_profile.public_names.keys() {
+            if !modules.contains(module) {
+                return Err(RustBackendError::internal(
+                    path.display().to_string(),
+                    module,
+                    "name selects a module absent from the preprocessed source",
                 ));
             }
         }
@@ -145,10 +166,11 @@ fn module_names_in_file(
     Ok(module_names_in_source(&preprocessed))
 }
 
+/// The profile that applies to `path`, and whether a profile skips it.
 fn compile_profile_for_source(
     root: &Path,
     path: &Path,
-) -> Result<VerilogACompileProfile, RustBackendError> {
+) -> Result<(VerilogACompileProfile, bool), RustBackendError> {
     let mut directories = Vec::new();
     let mut current = path.parent();
     while let Some(directory) = current {
@@ -166,6 +188,8 @@ fn compile_profile_for_source(
     let mut defines = BTreeMap::<String, Option<String>>::new();
     let mut undefines = BTreeSet::<String>::new();
     let mut namespaces = BTreeMap::<String, String>::new();
+    let mut public_names = BTreeMap::<String, String>::new();
+    let mut skipped = false;
     for directory in directories {
         let profile_path = directory.join(VERILOGA_COMPILE_PROFILE_FILE_NAME);
         if !profile_path.is_file() {
@@ -185,14 +209,20 @@ fn compile_profile_for_source(
             &mut defines,
             &mut undefines,
             &mut namespaces,
+            &mut public_names,
+            &mut skipped,
         )?;
     }
 
-    Ok(VerilogACompileProfile {
-        defines: defines.into_iter().collect(),
-        undefines: undefines.into_iter().collect(),
-        namespaces,
-    })
+    Ok((
+        VerilogACompileProfile {
+            defines: defines.into_iter().collect(),
+            undefines: undefines.into_iter().collect(),
+            namespaces,
+            public_names,
+        },
+        skipped,
+    ))
 }
 
 fn apply_compile_profile(
@@ -202,6 +232,8 @@ fn apply_compile_profile(
     defines: &mut BTreeMap<String, Option<String>>,
     undefines: &mut BTreeSet<String>,
     namespaces: &mut BTreeMap<String, String>,
+    public_names: &mut BTreeMap<String, String>,
+    skipped: &mut bool,
 ) -> Result<(), RustBackendError> {
     for (index, raw_line) in contents.lines().enumerate() {
         let line_number = index + 1;
@@ -246,36 +278,8 @@ fn apply_compile_profile(
                         "namespace module cannot be empty",
                     ));
                 }
-                let relative_source = Path::new(relative_source.trim());
-                if relative_source.as_os_str().is_empty()
-                    || relative_source
-                        .components()
-                        .any(|component| !matches!(component, std::path::Component::Normal(_)))
-                {
-                    return Err(profile_error(
-                        path,
-                        line_number,
-                        "namespace source must be a relative path inside the profile directory",
-                    ));
-                }
-                let selected_source = path
-                    .parent()
-                    .unwrap_or_else(|| Path::new("."))
-                    .join(relative_source);
-                if !selected_source.is_file() {
-                    return Err(profile_error(
-                        path,
-                        line_number,
-                        "namespace source file does not exist",
-                    ));
-                }
-                let selected_source = selected_source.canonicalize().map_err(|error| {
-                    profile_error(
-                        path,
-                        line_number,
-                        &format!("cannot resolve namespace source: {error}"),
-                    )
-                })?;
+                let selected_source =
+                    profile_source(path, line_number, "namespace", relative_source)?;
                 if selected_source == source
                     && namespaces
                         .insert(module.to_string(), namespace.to_ascii_lowercase())
@@ -286,6 +290,60 @@ fn apply_compile_profile(
                         line_number,
                         "duplicate namespace for source module",
                     ));
+                }
+            }
+            "name" => {
+                let (selector, public_name) = arguments.split_once('=').ok_or_else(|| {
+                    profile_error(path, line_number, "expected name SOURCE::MODULE=NAME")
+                })?;
+                let (relative_source, module) =
+                    selector.trim().rsplit_once("::").ok_or_else(|| {
+                        profile_error(path, line_number, "name selector must name SOURCE::MODULE")
+                    })?;
+                let (module, public_name) = (module.trim(), public_name.trim());
+                if module.is_empty() {
+                    return Err(profile_error(
+                        path,
+                        line_number,
+                        "name module cannot be empty",
+                    ));
+                }
+                if !public_name
+                    .chars()
+                    .next()
+                    .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
+                    || !public_name
+                        .chars()
+                        .all(|character| character.is_ascii_alphanumeric() || character == '_')
+                {
+                    return Err(profile_error(
+                        path,
+                        line_number,
+                        "a built-in name is a letter or underscore followed by letters, digits and underscores",
+                    ));
+                }
+                if profile_source(path, line_number, "name", relative_source)? == source
+                    && public_names
+                        .insert(module.to_string(), public_name.to_string())
+                        .is_some()
+                {
+                    return Err(profile_error(
+                        path,
+                        line_number,
+                        "duplicate name for source module",
+                    ));
+                }
+            }
+            "skip" => {
+                if arguments.split_whitespace().count() != 1 {
+                    return Err(profile_error(
+                        path,
+                        line_number,
+                        "skip requires exactly one source path",
+                    ));
+                }
+                if profile_source(path, line_number, "skip", arguments)? == source {
+                    *skipped = true;
                 }
             }
             "define" => {
@@ -320,12 +378,51 @@ fn apply_compile_profile(
                 return Err(profile_error(
                     path,
                     line_number,
-                    "expected `define NAME[=VALUE]`, `undef NAME`, or `namespace SOURCE::MODULE=HEX_ID`",
+                    "expected `define NAME[=VALUE]`, `undef NAME`, `namespace SOURCE::MODULE=HEX_ID`, `name SOURCE::MODULE=NAME`, or `skip SOURCE`",
                 ));
             }
         }
     }
     Ok(())
+}
+
+/// The file a profile line names, relative to the profile's directory.
+fn profile_source(
+    path: &Path,
+    line_number: usize,
+    directive: &str,
+    relative_source: &str,
+) -> Result<PathBuf, RustBackendError> {
+    let relative_source = Path::new(relative_source.trim());
+    if relative_source.as_os_str().is_empty()
+        || relative_source
+            .components()
+            .any(|component| !matches!(component, std::path::Component::Normal(_)))
+    {
+        return Err(profile_error(
+            path,
+            line_number,
+            &format!("{directive} source must be a relative path inside the profile directory"),
+        ));
+    }
+    let selected_source = path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(relative_source);
+    if !selected_source.is_file() {
+        return Err(profile_error(
+            path,
+            line_number,
+            &format!("{directive} source file does not exist"),
+        ));
+    }
+    selected_source.canonicalize().map_err(|error| {
+        profile_error(
+            path,
+            line_number,
+            &format!("cannot resolve {directive} source: {error}"),
+        )
+    })
 }
 
 fn validate_profile_macro(
@@ -671,5 +768,96 @@ mod tests {
             .flat_map(|candidate| candidate.modules)
             .collect();
         assert_eq!(modules, ["top"]);
+    }
+
+    /// A release root that another root includes, as BSIM-CMG 107's
+    /// bsimcmg.va includes bsimcmg_main.va after defining __RDSMOD__, is left
+    /// out when the profile skips it; a skip that names no file is refused.
+    #[test]
+    fn a_profile_skip_leaves_an_included_root_out() {
+        let root = std::env::temp_dir().join(format!(
+            "rspice-veriloga-discover-skip-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("code")).unwrap();
+        std::fs::write(
+            root.join("code").join("main.va"),
+            "module dev(p, n); inout p, n; electrical p, n;\n\
+             analog I(p, n) <+ V(p, n);\nendmodule\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("code").join("dev.va"),
+            "`define EXTRA\n`include \"main.va\"\n",
+        )
+        .unwrap();
+        let roots = |profile: &str| {
+            std::fs::write(
+                root.join(super::VERILOGA_COMPILE_PROFILE_FILE_NAME),
+                profile,
+            )
+            .unwrap();
+            super::discover_veriloga_sources(&root).map(|found| {
+                found
+                    .into_iter()
+                    .map(|candidate| {
+                        candidate
+                            .path
+                            .file_name()
+                            .unwrap()
+                            .to_string_lossy()
+                            .into_owned()
+                    })
+                    .collect::<Vec<_>>()
+            })
+        };
+        let before = roots("");
+        let after = roots("skip code/main.va\n");
+        let missing = roots("skip code/absent.va\n");
+        let _ = std::fs::remove_dir_all(&root);
+        assert_eq!(before.unwrap(), ["dev.va", "main.va"]);
+        assert_eq!(after.unwrap(), ["dev.va"]);
+        assert!(missing.is_err());
+    }
+
+    /// `name` gives a module its built-in name; a name that is not an
+    /// identifier, or that selects a module the source lacks, is refused.
+    #[test]
+    fn a_profile_name_names_the_module_it_selects() {
+        let root = std::env::temp_dir().join(format!(
+            "rspice-veriloga-discover-name-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("dev.va"),
+            "module dev(p, n); inout p, n; electrical p, n;\n\
+             analog I(p, n) <+ V(p, n);\nendmodule\n",
+        )
+        .unwrap();
+        let names = |profile: &str| {
+            std::fs::write(
+                root.join(super::VERILOGA_COMPILE_PROFILE_FILE_NAME),
+                profile,
+            )
+            .unwrap();
+            super::discover_veriloga_sources(&root).map(|found| {
+                found
+                    .into_iter()
+                    .flat_map(|candidate| candidate.compile_profile.public_names)
+                    .collect::<Vec<_>>()
+            })
+        };
+        let named = names("name dev.va::dev=dev107\n");
+        let unnamed = names("");
+        let bad_name = names("name dev.va::dev=107dev\n");
+        let absent_module = names("name dev.va::other=dev107\n");
+        let _ = std::fs::remove_dir_all(&root);
+        assert_eq!(named.unwrap(), [("dev".to_string(), "dev107".to_string())]);
+        assert!(unnamed.unwrap().is_empty());
+        assert!(bad_name.is_err());
+        assert!(absent_module.is_err());
     }
 }

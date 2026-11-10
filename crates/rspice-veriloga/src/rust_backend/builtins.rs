@@ -1886,6 +1886,9 @@ fn generate_device_work_item(
         )
         .folder;
     }
+    if let Some(public_name) = item.compile_profile.public_names.get(&item.module) {
+        device.public_model_name = public_name.clone();
+    }
 
     Ok(GeneratedBuiltinModule {
         index,
