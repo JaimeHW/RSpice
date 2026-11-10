@@ -181,6 +181,15 @@ impl XyceTestRunner {
             );
         }
 
+        if let Some(disposition) = Self::deck_disposition(&deck.relative_path) {
+            return self.expected_unsupported_result(
+                deck,
+                start,
+                disposition.contract,
+                disposition.reason,
+            );
+        }
+
         if let Some(role) = Bug113Role::for_record(&deck.relative_path) {
             let contract = role.contract();
             let result = match self.validate_bug113_oracle(start) {

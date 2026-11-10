@@ -6,7 +6,40 @@
 
 use super::*;
 
+/// A deck the suite declines to judge, decided before it runs, with the
+/// contract it is recorded under and why. Each reason is one a reviewer can
+/// check against the deck and its stored reference; a failure RSpice could
+/// fix does not belong here.
+pub(super) struct XyceDeckDisposition {
+    pub(super) deck: &'static str,
+    pub(super) contract: &'static str,
+    pub(super) reason: &'static str,
+}
+
+pub(super) const XYCE_DECK_DISPOSITIONS: &[XyceDeckDisposition] = &[
+    XyceDeckDisposition {
+        deck: "Netlists/PSP103/psp_asym_pmos_idvg0.cir",
+        contract: "unsupported_xyce_reference",
+        reason: "stored Ig/Is reference predates PSP 103.4.0 (gate-channel Dch moved); RSpice \
+                 equals Xyce 7.10 within 2e-6",
+    },
+    XyceDeckDisposition {
+        deck: "Netlists/VANOISE/gain-stage1_psp.cir",
+        contract: "unsupported_xyce_contract",
+        reason: "deck prints white_NOI2_gnd_igig, a noise source of Xyce's modified PSP 103 \
+                 copy; the unmodified 103.4.0 release names it white_NOI_gnd_igig",
+    },
+];
+
 impl XyceTestRunner {
+    /// The disposition the suite records for `relative_path`, if it has one.
+    pub(super) fn deck_disposition(relative_path: &str) -> Option<&'static XyceDeckDisposition> {
+        let key = Self::normalize_manifest_key(relative_path);
+        XYCE_DECK_DISPOSITIONS
+            .iter()
+            .find(|disposition| Self::normalize_manifest_key(disposition.deck) == key)
+    }
+
     pub(super) fn expected_unsupported_result(
         &self,
         deck: &XyceDeck,

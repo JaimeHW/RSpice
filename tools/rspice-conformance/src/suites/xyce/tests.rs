@@ -5,6 +5,7 @@
 //! measurement parsing — not the vendored deck corpus, which is driven by
 //! `tests/xyce_regression.rs`.
 
+use super::contracts::XYCE_DECK_DISPOSITIONS;
 use super::output::XyceGeneratedVbicNoiseIssue;
 use super::*;
 
@@ -27284,6 +27285,48 @@ fn typed_capability_refusals_are_expected_unsupported() {
     assert!(!XyceTestRunner::is_expected_unsupported_runtime_error(
         &SimulationError::Circuit("Convergence failed after 100 iterations".into())
     ));
+}
+
+/// Every deck disposition names a vendored deck, and the runner records that
+/// deck under the disposition's contract with its reason, before running it.
+#[test]
+fn deck_dispositions_name_vendored_decks_and_are_recorded_with_their_reason() {
+    let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let runner = XyceTestRunner::new(&corpus, XyceRunnerConfig::default());
+    assert!(!XYCE_DECK_DISPOSITIONS.is_empty());
+    for disposition in XYCE_DECK_DISPOSITIONS {
+        let path = corpus.join(disposition.deck);
+        assert!(
+            path.is_file(),
+            "{} is not a vendored deck",
+            disposition.deck
+        );
+        assert!(
+            !disposition.reason.trim().is_empty(),
+            "{}",
+            disposition.deck
+        );
+        let result = runner.run_test(path);
+        assert!(
+            result.passed && result.expected_unsupported && !result.upstream_excluded,
+            "{}: {result:?}",
+            disposition.deck
+        );
+        assert_eq!(
+            result.contract, disposition.contract,
+            "{}",
+            disposition.deck
+        );
+        assert!(
+            result
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains(disposition.reason)),
+            "{}: {:?}",
+            disposition.deck,
+            result.error
+        );
+    }
 }
 
 /// A card routed to a generated model the build does not link is expected
