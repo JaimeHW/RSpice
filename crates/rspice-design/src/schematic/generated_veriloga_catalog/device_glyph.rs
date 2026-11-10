@@ -329,6 +329,16 @@ static COMPACT_MODELS: &[CompactModelGlyph] = &[
         BJT_THERMAL,
         FIXED
     ),
+    glyph!("bjtd504va", ["c", "b", "e"], Bjt, THREE, TYPE),
+    glyph!("bjtd504tva", ["c", "b", "e", "dt"], Bjt, BJT_T, TYPE),
+    glyph!("bjt504va", ["c", "b", "e", "s"], BjtSubstrate, MOS, TYPE),
+    glyph!(
+        "bjt504tva",
+        ["c", "b", "e", "s", "dt"],
+        BjtThermal,
+        BJT_THERMAL,
+        TYPE
+    ),
     glyph!("bjtd505_va", ["c", "b", "e"], Bjt, THREE, TYPE),
     glyph!("bjtd505t_va", ["c", "b", "e", "dt"], Bjt, BJT_T, TYPE),
     glyph!("bjt505_va", ["c", "b", "e", "s"], BjtSubstrate, MOS, TYPE),
