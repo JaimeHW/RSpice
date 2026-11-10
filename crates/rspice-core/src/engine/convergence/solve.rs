@@ -527,6 +527,48 @@ impl Engine {
         self.solve_nonlinear_with_guess_and_abort(circuit, matrix, Some(&initial_guess), abort)
     }
 
+    /// An operating point that holds each `.IC` node at its value. The
+    /// nodeset phase runs first when an authored `.NODESET` or a model asks
+    /// for it, with the `.IC` nodes held through it; the operating point then
+    /// solves from there with the `.IC` nodes alone held. Both solves start
+    /// where the forced `.IC` operating point does, from zero.
+    pub(in crate::engine) fn solve_nonlinear_holding_initial_conditions_and_abort(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        initial_conditions: &[StartupVoltageConstraint],
+        hints: &StartupVoltageHints,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Value>, SimulationError> {
+        let mut seed = vec![0.0; circuit.matrix_size()];
+        if hints.has_nodesets {
+            match Self::with_nodeset_phase(circuit, true, |circuit| {
+                self.solve_nonlinear_dc_startup_with_constraints_and_abort(
+                    circuit,
+                    matrix,
+                    &seed,
+                    &hints.constraints,
+                    abort,
+                )
+            }) {
+                Ok(nodeset_solution) => seed = nodeset_solution,
+                Err(err) if Self::is_recoverable_startup_error(&err) => {
+                    log::debug!(
+                        "NODESET-constrained DC startup did not converge: {err}; holding the .IC nodes from the zero seed."
+                    );
+                }
+                Err(err) => return Err(err),
+            }
+        }
+        self.solve_nonlinear_dc_startup_with_constraints_and_abort(
+            circuit,
+            matrix,
+            &seed,
+            initial_conditions,
+            abort,
+        )
+    }
+
     /// The nodeset qualifier belongs to the temporary model/authored nodeset
     /// interval, not the generic constrained Newton solver (also used for
     /// hard `.IC` clamps and heuristic seeds). Restore equilibrium after

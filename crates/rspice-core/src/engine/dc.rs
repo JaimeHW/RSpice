@@ -1324,6 +1324,8 @@ impl Engine {
             startup
         };
         let force_initial_conditions = matches!(startup, DcOpStartup::ForceInitialConditions);
+        let holds_initial_conditions =
+            force_initial_conditions || matches!(startup, DcOpStartup::HoldInitialConditions);
 
         let veriloga_analysis = if force_initial_conditions { 4 } else { 0 };
         if lifecycle
@@ -1447,14 +1449,14 @@ impl Engine {
         }
         let requires_nonlinear_observation =
             circuit.has_nonlinear_devices() || !circuit.generic_switches.is_empty();
-        let solution = if !force_initial_conditions && requires_nonlinear_observation {
+        let solution = if !holds_initial_conditions && requires_nonlinear_observation {
             engine
                 .dc_static_probe_polished_solution(&mut circuit, &mut matrix, &solution)
                 .unwrap_or(solution)
         } else {
             solution
         };
-        if !force_initial_conditions {
+        if !holds_initial_conditions {
             engine.ensure_solved_dc_paths_to_ground(&mut circuit, &mut matrix, &solution)?;
         }
         if requires_nonlinear_observation {

@@ -7,8 +7,18 @@ use super::{
 
 #[derive(Clone, Copy)]
 pub(in crate::engine) enum DcOpStartup<'a> {
-    Automatic { use_hints: bool },
+    Automatic {
+        use_hints: bool,
+    },
+    /// The forced `.IC` operating point ahead of a transient: the `.IC`
+    /// nodes are held through the solve and a Verilog-A model sees the
+    /// `"ic"` analysis.
     ForceInitialConditions,
+    /// An operating point that holds each `.IC` node at its value. Holding
+    /// them is a node constraint, not another analysis: a Verilog-A model
+    /// still sees `"dc"` and `"static"`, and the nodeset phase runs, with
+    /// the `.IC` nodes held through it.
+    HoldInitialConditions,
     PreviousSolution(&'a [Value]),
     Zero,
 }
@@ -1753,10 +1763,15 @@ impl Engine {
     /// AugmentLinSys_IC (N_NLS_NOX_Interface.C:483-489 and 1602-1621), which
     /// zeroes the node's residual and replaces its Jacobian row with a unit
     /// diagonal (N_NLS_NOX_AugmentLinSys_IC.C:98-164), so the node keeps the
-    /// value written into the starting vector. That is RSpice's forced `.IC`
-    /// operating point. A `.IC` that names no node of the circuit holds
-    /// nothing, as in Xyce, which augments only once it found one
-    /// (`found > 0`).
+    /// value written into the starting vector. A `.IC` that names no node of
+    /// the circuit holds nothing, as in Xyce, which augments only once it
+    /// found one (`found > 0`).
+    ///
+    /// The held operating point is still a DC operating point to a
+    /// Verilog-A model, as in Spectre: `analysis("dc")` and
+    /// `analysis("static")` hold, `analysis("ic")` does not, and the `"ic"`
+    /// initial and final steps do not fire. Only the forced `.IC` operating
+    /// point that precedes a transient carries the `"ic"` identity.
     pub(in crate::engine) fn dialect_dc_op_startup<'a>(
         &self,
         netlist: &Netlist,
@@ -1769,7 +1784,7 @@ impl Engine {
                 .collect_initial_condition_hints(netlist, circuit)
                 .is_empty()
         {
-            DcOpStartup::ForceInitialConditions
+            DcOpStartup::HoldInitialConditions
         } else {
             startup
         }
@@ -1790,8 +1805,11 @@ impl Engine {
         // key cannot separate two of them. Starting each solve from silence is
         // what keeps it a per-point suppression.
         circuit.clear_xspice_evaluation_warning();
-        let force_initial_conditions = matches!(startup, DcOpStartup::ForceInitialConditions);
-        if !force_initial_conditions {
+        let holds_initial_conditions = matches!(
+            startup,
+            DcOpStartup::ForceInitialConditions | DcOpStartup::HoldInitialConditions
+        );
+        if !holds_initial_conditions {
             self.ensure_dc_paths_to_ground(circuit)?;
         }
         let mut solution = match startup {
@@ -1806,6 +1824,17 @@ impl Engine {
                 let seed = vec![0.0; circuit.matrix_size()];
                 self.solve_nonlinear_dc_startup_with_constraints_and_abort(
                     circuit, matrix, &seed, &hints, abort,
+                )
+            }
+            DcOpStartup::HoldInitialConditions => {
+                let initial_conditions = self.collect_initial_condition_hints(netlist, circuit);
+                let hints = self.collect_node_voltage_hints(netlist, circuit);
+                self.solve_nonlinear_holding_initial_conditions_and_abort(
+                    circuit,
+                    matrix,
+                    &initial_conditions,
+                    &hints,
+                    abort,
                 )
             }
             DcOpStartup::PreviousSolution(solution) => {
@@ -1853,11 +1882,12 @@ impl Engine {
                 }
             }
         }?;
-        // A forced `.IC` solve deliberately replaces authored node KCL rows
-        // with ideal voltage constraints. It is a constrained state, not a
-        // physical unconstrained DC equilibrium, so reconstructing ordinary
-        // DC KCL here would apply the wrong equation contract.
-        if !force_initial_conditions {
+        // A solve that holds the `.IC` nodes deliberately replaces their
+        // authored KCL rows with ideal voltage constraints. It is a
+        // constrained state, not a physical unconstrained DC equilibrium, so
+        // reconstructing ordinary DC KCL here would apply the wrong equation
+        // contract.
+        if !holds_initial_conditions {
             circuit.settle_capacitive_islands(matrix, &mut solution, &[]);
             self.ensure_solved_dc_paths_to_ground(circuit, matrix, &solution)?;
         }

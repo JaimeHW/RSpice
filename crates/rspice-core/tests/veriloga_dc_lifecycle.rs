@@ -1523,6 +1523,70 @@ endmodule
 }
 
 #[test]
+fn an_operating_point_that_holds_its_ic_nodes_stays_a_dc_analysis() {
+    // QSPICE and LTspice hold each .IC node through an operating point: this
+    // divider prints V(m) = 0.3000014 in QSPICE and 0.3000028 in LTspice.
+    // Neither runs Verilog-A, so the model's view follows Spectre: holding a
+    // node is a constraint, not another analysis. The model reads "dc" and
+    // "static", never "ic", and the "ic" initial and final steps stay
+    // silent: 1 + 10 = 11. ngspice reads .IC only for a transient.
+    use rspice_core::engine::{SimulationConfig, SpiceDialect};
+    let model = write_model(
+        "held_ic_identity",
+        r#"
+`include "disciplines.vams"
+module va_held_ic_identity(sense, out);
+    inout sense, out;
+    electrical sense, out;
+    real level;
+    analog begin
+        level = 0.0;
+        if (analysis("dc")) level = level + 1.0;
+        if (analysis("static")) level = level + 10.0;
+        if (analysis("ic")) level = level + 100.0;
+        @(initial_step("ic")) level = level + 1000.0;
+        @(final_step("ic")) level = level + 10000.0;
+        V(out) <+ level;
+    end
+endmodule
+"#,
+    );
+    let netlist = Netlist::parse(&format!(
+        "* held .IC operating point identity
+         V1 a 0 2
+         R1 a m 1k
+         R2 m 0 1k
+         X1 m out va_held_ic_identity
+         .ic v(m)=0.3
+         .va \"{}\" va_held_ic_identity
+         .end
+",
+        deck_path(&model)
+    ))
+    .expect("parse held .IC deck");
+    for (dialect, held) in [
+        (SpiceDialect::BestAvailable, 0.3),
+        (SpiceDialect::Xyce, 0.3),
+        (SpiceDialect::Ngspice, 1.0),
+    ] {
+        let result = Engine::new(SimulationConfig::default().with_spice_dialect(dialect))
+            .run_dc_op(&netlist)
+            .unwrap_or_else(|error| panic!("{dialect:?}: {error}"));
+        assert!(
+            (node_voltage(&result, "m") - held).abs() < 1.0e-9,
+            "{dialect:?}: {:?}",
+            result.node_voltages
+        );
+        assert!(
+            (node_voltage(&result, "out") - 11.0).abs() < 1.0e-12,
+            "{dialect:?}: the operating point is not a DC analysis to the model: {:?}",
+            result.node_voltages
+        );
+    }
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
 fn dc_operating_point_exposes_initial_and_final_step_together() {
     let model = write_model(
         "single_point",
