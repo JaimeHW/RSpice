@@ -259,7 +259,22 @@ pub(super) fn parse_command(
         ".MEAS" | ".MEASURE" => {
             // Parse measurement statement: .MEAS TRAN name TYPE signal [options]
             let authored_source = remaining_command_source(stream);
-            let statement = parse_meas_command(stream, line_num, params)?;
+            let mut statement = parse_meas_command(stream, line_num, params, spice_dialect)?;
+            if spice_dialect == crate::config::SpiceDialect::Ngspice
+                && take_ngspice_ignored_delay(&mut statement.measure_type).is_some()
+            {
+                let message = format!(
+                    "measure '{}': TD has no effect on this measure in ngspice, which delays \
+                     only TRIG, TARG, WHEN and FIND ... WHEN; it is ignored",
+                    statement.name
+                );
+                log::warn!("line {line_num}: {message}");
+                diagnostics.push(ParseDiagnostic::warning(
+                    line_num,
+                    "measure-delay-ignored",
+                    message,
+                ));
+            }
             if let Some(previous) = measurements
                 .iter()
                 .position(|candidate| candidate.name.eq_ignore_ascii_case(&statement.name))
@@ -3421,12 +3436,41 @@ fn parse_measure_expression_operand(
 ///   .MEAS TRAN vout FIND V(out) AT=1u
 ///   .MEAS AC vimag FIND VI(out) AT 10k
 ///   .MEAS TRAN delay TRIG V(in) VAL=0.5 RISE=1 TARG V(out) VAL=0.5 RISE=1
+/// The `TD` of a measure whose ngspice evaluator never reads it, taken off
+/// the measure. ngspice stores a TD on every measure (com_measure2.c:1339),
+/// but only `com_measure_when`, behind TRIG, TARG, WHEN and FIND ... WHEN,
+/// skips the points before it (com_measure2.c:500); `measure_at` (FIND ...
+/// AT), `measure_minMaxAvg` (MAX, MIN, AVG, PP) and `measure_rms_integral`
+/// (RMS, INTEG) never read it.
+fn take_ngspice_ignored_delay(
+    measure_type: &mut crate::netlist::measure::MeasureType,
+) -> Option<crate::Value> {
+    use crate::netlist::measure::MeasureType;
+    match measure_type {
+        MeasureType::Avg { td, .. }
+        | MeasureType::Max { td, .. }
+        | MeasureType::Min { td, .. }
+        | MeasureType::PeakToPeak { td, .. }
+        | MeasureType::Rms { td, .. }
+        | MeasureType::Integ { td, .. }
+        | MeasureType::Find {
+            at: Some(_), td, ..
+        } => td.take(),
+        _ => None,
+    }
+}
+
 pub(super) fn parse_meas_command(
     stream: &mut TokenStream,
     line_num: usize,
     params: &ParamContext,
+    spice_dialect: crate::config::SpiceDialect,
 ) -> Result<crate::netlist::measure::MeasureStatement, ParseError> {
     use crate::netlist::measure::{MeasureStatement, MeasureType};
+
+    // ngspice reads a TD on a range or extrema measure, which the caller then
+    // drops with a warning (take_ngspice_ignored_delay).
+    let ignored_delay = spice_dialect == crate::config::SpiceDialect::Ngspice;
 
     // Parse analysis type (TRAN, AC, DC)
     let parsed_analysis = expect_ident(stream, line_num)?.to_ascii_uppercase();
@@ -3642,7 +3686,8 @@ pub(super) fn parse_meas_command(
 
             match measure_type_key.as_str() {
                 "AVG" => {
-                    let (from, to, td) = parse_measure_range_options(stream, line_num, params)?;
+                    let (from, to, td) =
+                        parse_measure_range_options(stream, line_num, params, ignored_delay)?;
                     MeasureType::Avg {
                         signal: signal.clone(),
                         from,
@@ -3651,8 +3696,13 @@ pub(super) fn parse_meas_command(
                     }
                 }
                 "MAX" | "MAX_AT" => {
-                    let mut options =
-                        parse_measure_extrema_options(stream, line_num, params, true)?;
+                    let mut options = parse_measure_extrema_options(
+                        stream,
+                        line_num,
+                        params,
+                        true,
+                        ignored_delay,
+                    )?;
                     if measure_type_key == "MAX_AT" {
                         options.output = crate::netlist::measure::ExtremaOutput::IndependentAxis;
                     }
@@ -3667,8 +3717,13 @@ pub(super) fn parse_meas_command(
                     }
                 }
                 "MIN" | "MIN_AT" => {
-                    let mut options =
-                        parse_measure_extrema_options(stream, line_num, params, true)?;
+                    let mut options = parse_measure_extrema_options(
+                        stream,
+                        line_num,
+                        params,
+                        true,
+                        ignored_delay,
+                    )?;
                     if measure_type_key == "MIN_AT" {
                         options.output = crate::netlist::measure::ExtremaOutput::IndependentAxis;
                     }
@@ -3683,7 +3738,13 @@ pub(super) fn parse_meas_command(
                     }
                 }
                 "PP" => {
-                    let options = parse_measure_extrema_options(stream, line_num, params, false)?;
+                    let options = parse_measure_extrema_options(
+                        stream,
+                        line_num,
+                        params,
+                        false,
+                        ignored_delay,
+                    )?;
                     MeasureType::PeakToPeak {
                         signal: signal.clone(),
                         from: options.from,
@@ -3694,7 +3755,8 @@ pub(super) fn parse_meas_command(
                     }
                 }
                 "RMS" => {
-                    let (from, to, td) = parse_measure_range_options(stream, line_num, params)?;
+                    let (from, to, td) =
+                        parse_measure_range_options(stream, line_num, params, ignored_delay)?;
                     MeasureType::Rms {
                         signal: signal.clone(),
                         from,
@@ -3703,7 +3765,8 @@ pub(super) fn parse_meas_command(
                     }
                 }
                 "INTEG" | "INTEGRAL" => {
-                    let (from, to, td) = parse_measure_range_options(stream, line_num, params)?;
+                    let (from, to, td) =
+                        parse_measure_range_options(stream, line_num, params, ignored_delay)?;
                     MeasureType::Integ {
                         signal: signal.clone(),
                         from,
@@ -5044,15 +5107,17 @@ fn parse_measure_event_occurrence(
     Ok(truncated as isize)
 }
 
-/// `FROM`, `TO` and, in the Xyce dialect, `TD` of a range measure.
+/// `FROM`, `TO` and, in the Xyce and ngspice dialects, `TD` of a range
+/// measure.
 type MeasureRange = (
     Option<crate::Value>,
     Option<crate::Value>,
     Option<crate::Value>,
 );
 
-/// Xyce's `TD` delays a range or extrema measure; the other dialects keep
-/// refusing it there.
+/// Xyce's `TD` delays a range or extrema measure; ngspice reads one there
+/// and ignores it (`ignored_delay`); the other dialects refuse it there, as
+/// LTspice does.
 fn accepts_measure_delay(params: &ParamContext, key: &str) -> bool {
     key.eq_ignore_ascii_case("TD")
         && params.expression_dialect() == crate::config::ExpressionDialect::Xyce
@@ -5062,6 +5127,7 @@ pub(super) fn parse_measure_range_options(
     stream: &mut TokenStream,
     line_num: usize,
     params: &ParamContext,
+    ignored_delay: bool,
 ) -> Result<MeasureRange, ParseError> {
     let mut from = None;
     let mut to = None;
@@ -5085,7 +5151,8 @@ pub(super) fn parse_measure_range_options(
             TokenKind::Ident(s)
                 if s.eq_ignore_ascii_case("FROM")
                     || s.eq_ignore_ascii_case("TO")
-                    || accepts_measure_delay(params, s) =>
+                    || accepts_measure_delay(params, s)
+                    || (ignored_delay && s.eq_ignore_ascii_case("TD")) =>
             {
                 let key = s.to_ascii_uppercase();
                 stream.advance();
@@ -5390,6 +5457,7 @@ fn parse_measure_extrema_options(
     line_num: usize,
     params: &ParamContext,
     allow_output: bool,
+    ignored_delay: bool,
 ) -> Result<ExtremaMeasureOptions, ParseError> {
     use crate::netlist::measure::{EdgeType, EventOccurrence, ExtremaOutput};
 
@@ -5424,7 +5492,8 @@ fn parse_measure_extrema_options(
             key.as_str(),
             "FROM" | "TO" | "RISE" | "FALL" | "CROSS" | "RFC_LEVEL"
         ) || (key == "OUTPUT" && allow_output)
-            || accepts_measure_delay(params, &key);
+            || accepts_measure_delay(params, &key)
+            || (ignored_delay && key == "TD");
         if !known {
             return Err(ParseError::Syntax {
                 line: line_num,
@@ -9549,6 +9618,73 @@ mod tests {
         assert!(xyce.is_err(), "{xyce:?}");
     }
 
+    /// ngspice reads a TD on a MAX, MIN, AVG, RMS, PP, INTEG or FIND ... AT
+    /// measure and ignores it: ngspice-46 prints MX 2, MN 0, AV 0.75,
+    /// RM 0.912871, PP 2, IG 3e-3 and FD 1 for this deck, where TD=1.5m would
+    /// have cut off the 2 V peak and put AT=0.5m outside the window. Each such
+    /// measure loses its TD with one warning; WHEN keeps its TD (ngspice gives
+    /// 1.75e-3). Xyce keeps every TD, and LTspice refuses one on MAX.
+    #[test]
+    fn ngspice_ignores_td_where_its_measure_never_reads_one() {
+        use crate::config::SpiceDialect;
+        use crate::netlist::measure::MeasureType;
+        let deck = "td\nV1 1 0 PWL(0 0 1m 2 2m 0 3m 1 4m 0)\nR1 1 0 1k\n.tran 10u 4m\n\
+                    .meas tran mx max v(1) td=1.5m\n.meas tran mn min v(1) td=1.5m\n\
+                    .meas tran av avg v(1) td=1.5m\n.meas tran rm rms v(1) td=1.5m\n\
+                    .meas tran pp pp v(1) td=1.5m\n.meas tran ig integ v(1) td=1.5m\n\
+                    .meas tran fd find v(1) at=0.5m td=1.5m\n\
+                    .meas tran wh when v(1)=0.5 td=1.5m\n.end\n";
+        let delay = |measure: &MeasureType| match measure {
+            MeasureType::Avg { td, .. }
+            | MeasureType::Max { td, .. }
+            | MeasureType::Min { td, .. }
+            | MeasureType::PeakToPeak { td, .. }
+            | MeasureType::Rms { td, .. }
+            | MeasureType::Integ { td, .. }
+            | MeasureType::Find { td, .. }
+            | MeasureType::When { td, .. } => *td,
+            other => panic!("unexpected measure {other:?}"),
+        };
+
+        let ngspice = parse_in(deck, SpiceDialect::Ngspice).expect("ngspice reads every TD");
+        let kept = ngspice
+            .measurements
+            .iter()
+            .filter_map(|measure| delay(&measure.measure_type).map(|_| measure.name.as_str()))
+            .collect::<Vec<_>>();
+        assert_eq!(kept, ["WH"]);
+        let warnings = ngspice
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "measure-delay-ignored")
+            .count();
+        assert_eq!(warnings, 7, "{:?}", ngspice.diagnostics);
+
+        let xyce = Netlist::parse_with_options(
+            deck,
+            crate::netlist::NetlistParseOptions {
+                spice_dialect: Some(SpiceDialect::Xyce),
+                expression_dialect: crate::config::ExpressionDialect::Xyce,
+                ..Default::default()
+            },
+        )
+        .expect("Xyce reads every TD");
+        assert!(xyce.measurements.iter().all(|measure| {
+            delay(&measure.measure_type).is_some_and(|td| (td - 1.5e-3).abs() < 1e-15)
+        }));
+        assert!(
+            xyce.diagnostics
+                .iter()
+                .all(|d| d.code != "measure-delay-ignored")
+        );
+
+        let refused = parse_in(deck, SpiceDialect::BestAvailable).expect_err("TD on MAX");
+        assert!(
+            refused.to_string().contains("Unexpected option 'TD'"),
+            "{refused}"
+        );
+    }
+
     fn parse_in(deck: &str, dialect: crate::config::SpiceDialect) -> Result<Netlist, ParseError> {
         Netlist::parse_with_options(
             deck,
@@ -9642,7 +9778,7 @@ mod tests {
     }
 
     /// Xyce's `TD` delays a range or extrema measure (N_IO_MeasureBase.C:668);
-    /// the other dialects keep refusing it there.
+    /// the default dialect refuses it there, as LTspice does.
     #[test]
     fn xyce_range_and_extrema_measures_take_a_delay() {
         use crate::netlist::measure::MeasureType;
@@ -9666,8 +9802,8 @@ mod tests {
             &xyce.measurements[1].measure_type,
             MeasureType::Avg { td: Some(td), from: Some(from), .. } if *td == 1.5 && *from == 0.2
         ));
-        let error = parse_in(deck, crate::config::SpiceDialect::Ngspice)
-            .expect_err("ngspice dialect refuses TD on MAX");
+        let error = parse_in(deck, crate::config::SpiceDialect::BestAvailable)
+            .expect_err("the default dialect refuses TD on MAX");
         assert!(error.to_string().contains("TD"), "{error}");
     }
 
