@@ -12,8 +12,17 @@ default = []
 veriloga-model-diode-cmc = ["dep:rspice-veriloga-model-diode-cmc"]
 veriloga-model-epfl-hemt-10a = ["dep:rspice-veriloga-model-epfl-hemt-10a"]
 veriloga-model-juncap200 = ["dep:rspice-veriloga-model-juncap200"]
+veriloga-model-psp102bva = ["dep:rspice-veriloga-model-psp102bva"]
+veriloga-model-psp102eva = ["dep:rspice-veriloga-model-psp102eva"]
+veriloga-model-psp102va = ["dep:rspice-veriloga-model-psp102va"]
+veriloga-model-psp103tva = ["dep:rspice-veriloga-model-psp103tva"]
+veriloga-model-psp103va = ["dep:rspice-veriloga-model-psp103va"]
 veriloga-model-psp104tva = ["dep:rspice-veriloga-model-psp104tva"]
 veriloga-model-psp104va = ["dep:rspice-veriloga-model-psp104va"]
+veriloga-model-pspnqs102bva = ["dep:rspice-veriloga-model-pspnqs102bva"]
+veriloga-model-pspnqs102eva = ["dep:rspice-veriloga-model-pspnqs102eva"]
+veriloga-model-pspnqs102va = ["dep:rspice-veriloga-model-pspnqs102va"]
+veriloga-model-pspnqs103va = ["dep:rspice-veriloga-model-pspnqs103va"]
 veriloga-model-pspnqs104va = ["dep:rspice-veriloga-model-pspnqs104va"]
 veriloga-model-angelov = ["dep:rspice-veriloga-model-angelov"]
 veriloga-model-angelov-gan = ["dep:rspice-veriloga-model-angelov-gan"]
@@ -60,8 +69,17 @@ veriloga-builtins-noise = [
     "rspice-veriloga-model-diode-cmc?/veriloga-builtins-noise",
     "rspice-veriloga-model-epfl-hemt-10a?/veriloga-builtins-noise",
     "rspice-veriloga-model-juncap200?/veriloga-builtins-noise",
+    "rspice-veriloga-model-psp102bva?/veriloga-builtins-noise",
+    "rspice-veriloga-model-psp102eva?/veriloga-builtins-noise",
+    "rspice-veriloga-model-psp102va?/veriloga-builtins-noise",
+    "rspice-veriloga-model-psp103tva?/veriloga-builtins-noise",
+    "rspice-veriloga-model-psp103va?/veriloga-builtins-noise",
     "rspice-veriloga-model-psp104tva?/veriloga-builtins-noise",
     "rspice-veriloga-model-psp104va?/veriloga-builtins-noise",
+    "rspice-veriloga-model-pspnqs102bva?/veriloga-builtins-noise",
+    "rspice-veriloga-model-pspnqs102eva?/veriloga-builtins-noise",
+    "rspice-veriloga-model-pspnqs102va?/veriloga-builtins-noise",
+    "rspice-veriloga-model-pspnqs103va?/veriloga-builtins-noise",
     "rspice-veriloga-model-pspnqs104va?/veriloga-builtins-noise",
     "rspice-veriloga-model-angelov?/veriloga-builtins-noise",
     "rspice-veriloga-model-angelov-gan?/veriloga-builtins-noise",
@@ -111,8 +129,17 @@ rspice-veriloga-runtime.workspace = true
 rspice-veriloga-model-diode-cmc = { path = "models/diode-cmc", version = "0.1.0", optional = true }
 rspice-veriloga-model-epfl-hemt-10a = { path = "models/epfl-hemt-10a", version = "0.1.0", optional = true }
 rspice-veriloga-model-juncap200 = { path = "models/juncap200", version = "0.1.0", optional = true }
+rspice-veriloga-model-psp102bva = { path = "models/psp102bva", version = "0.1.0", optional = true }
+rspice-veriloga-model-psp102eva = { path = "models/psp102eva", version = "0.1.0", optional = true }
+rspice-veriloga-model-psp102va = { path = "models/psp102va", version = "0.1.0", optional = true }
+rspice-veriloga-model-psp103tva = { path = "models/psp103tva", version = "0.1.0", optional = true }
+rspice-veriloga-model-psp103va = { path = "models/psp103va", version = "0.1.0", optional = true }
 rspice-veriloga-model-psp104tva = { path = "models/psp104tva", version = "0.1.0", optional = true }
 rspice-veriloga-model-psp104va = { path = "models/psp104va", version = "0.1.0", optional = true }
+rspice-veriloga-model-pspnqs102bva = { path = "models/pspnqs102bva", version = "0.1.0", optional = true }
+rspice-veriloga-model-pspnqs102eva = { path = "models/pspnqs102eva", version = "0.1.0", optional = true }
+rspice-veriloga-model-pspnqs102va = { path = "models/pspnqs102va", version = "0.1.0", optional = true }
+rspice-veriloga-model-pspnqs103va = { path = "models/pspnqs103va", version = "0.1.0", optional = true }
 rspice-veriloga-model-pspnqs104va = { path = "models/pspnqs104va", version = "0.1.0", optional = true }
 rspice-veriloga-model-angelov = { path = "models/angelov", version = "0.1.0", optional = true }
 rspice-veriloga-model-angelov-gan = { path = "models/angelov-gan", version = "0.1.0", optional = true }

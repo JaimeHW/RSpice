@@ -66,8 +66,17 @@ compared without regard to case.
 | `l_utsoi__832ce87d` | `l_utsoi` | `veriloga-model-l-utsoi-832ce87d` |
 | `mosvar` | `mosvar` | `veriloga-model-mosvar` |
 | `mvsg_cmc` | `mvsg_cmc` | `veriloga-model-mvsg-cmc` |
+| `PSP102BVA` | `PSP102BVA` | `veriloga-model-psp102bva` |
+| `PSP102EVA` | `PSP102EVA` | `veriloga-model-psp102eva` |
+| `PSP102VA` | `PSP102VA` | `veriloga-model-psp102va` |
+| `PSP103TVA` | `PSP103TVA` | `veriloga-model-psp103tva` |
+| `PSP103VA` | `PSP103VA` | `veriloga-model-psp103va` |
 | `PSP104TVA` | `PSP104TVA` | `veriloga-model-psp104tva` |
 | `PSP104VA` | `PSP104VA` | `veriloga-model-psp104va` |
+| `PSPNQS102BVA` | `PSPNQS102BVA` | `veriloga-model-pspnqs102bva` |
+| `PSPNQS102EVA` | `PSPNQS102EVA` | `veriloga-model-pspnqs102eva` |
+| `PSPNQS102VA` | `PSPNQS102VA` | `veriloga-model-pspnqs102va` |
+| `PSPNQS103VA` | `PSPNQS103VA` | `veriloga-model-pspnqs103va` |
 | `PSPNQS104VA` | `PSPNQS104VA` | `veriloga-model-pspnqs104va` |
 | `r2_cmc` | `r2_cmc` | `veriloga-model-r2-cmc` |
 | `r2_et_cmc` | `r2_et_cmc` | `veriloga-model-r2-et-cmc` |

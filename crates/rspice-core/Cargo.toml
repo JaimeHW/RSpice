@@ -95,6 +95,69 @@ veriloga-model-juncap200 = [
     "rspice-core-netlist/veriloga-model-juncap200",
     "rspice-core-devices/veriloga-model-juncap200",
 ]
+veriloga-model-psp102bva = [
+    "veriloga-builtins-base",
+    "rspice-veriloga-models/veriloga-model-psp102bva",
+    "rspice-core-base/veriloga-model-psp102bva",
+    "rspice-core-netlist/veriloga-model-psp102bva",
+    "rspice-core-devices/veriloga-model-psp102bva",
+]
+veriloga-model-psp102eva = [
+    "veriloga-builtins-base",
+    "rspice-veriloga-models/veriloga-model-psp102eva",
+    "rspice-core-base/veriloga-model-psp102eva",
+    "rspice-core-netlist/veriloga-model-psp102eva",
+    "rspice-core-devices/veriloga-model-psp102eva",
+]
+veriloga-model-psp102va = [
+    "veriloga-builtins-base",
+    "rspice-veriloga-models/veriloga-model-psp102va",
+    "rspice-core-base/veriloga-model-psp102va",
+    "rspice-core-netlist/veriloga-model-psp102va",
+    "rspice-core-devices/veriloga-model-psp102va",
+]
+veriloga-model-psp103tva = [
+    "veriloga-builtins-base",
+    "rspice-veriloga-models/veriloga-model-psp103tva",
+    "rspice-core-base/veriloga-model-psp103tva",
+    "rspice-core-netlist/veriloga-model-psp103tva",
+    "rspice-core-devices/veriloga-model-psp103tva",
+]
+veriloga-model-psp103va = [
+    "veriloga-builtins-base",
+    "rspice-veriloga-models/veriloga-model-psp103va",
+    "rspice-core-base/veriloga-model-psp103va",
+    "rspice-core-netlist/veriloga-model-psp103va",
+    "rspice-core-devices/veriloga-model-psp103va",
+]
+veriloga-model-pspnqs102bva = [
+    "veriloga-builtins-base",
+    "rspice-veriloga-models/veriloga-model-pspnqs102bva",
+    "rspice-core-base/veriloga-model-pspnqs102bva",
+    "rspice-core-netlist/veriloga-model-pspnqs102bva",
+    "rspice-core-devices/veriloga-model-pspnqs102bva",
+]
+veriloga-model-pspnqs102eva = [
+    "veriloga-builtins-base",
+    "rspice-veriloga-models/veriloga-model-pspnqs102eva",
+    "rspice-core-base/veriloga-model-pspnqs102eva",
+    "rspice-core-netlist/veriloga-model-pspnqs102eva",
+    "rspice-core-devices/veriloga-model-pspnqs102eva",
+]
+veriloga-model-pspnqs102va = [
+    "veriloga-builtins-base",
+    "rspice-veriloga-models/veriloga-model-pspnqs102va",
+    "rspice-core-base/veriloga-model-pspnqs102va",
+    "rspice-core-netlist/veriloga-model-pspnqs102va",
+    "rspice-core-devices/veriloga-model-pspnqs102va",
+]
+veriloga-model-pspnqs103va = [
+    "veriloga-builtins-base",
+    "rspice-veriloga-models/veriloga-model-pspnqs103va",
+    "rspice-core-base/veriloga-model-pspnqs103va",
+    "rspice-core-netlist/veriloga-model-pspnqs103va",
+    "rspice-core-devices/veriloga-model-pspnqs103va",
+]
 veriloga-model-psp104tva = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-model-psp104tva",
@@ -408,6 +471,15 @@ veriloga-builtins-models = [
     "veriloga-model-diode-cmc",
     "veriloga-model-epfl-hemt-10a",
     "veriloga-model-juncap200",
+    "veriloga-model-psp102bva",
+    "veriloga-model-psp102eva",
+    "veriloga-model-psp102va",
+    "veriloga-model-psp103tva",
+    "veriloga-model-psp103va",
+    "veriloga-model-pspnqs102bva",
+    "veriloga-model-pspnqs102eva",
+    "veriloga-model-pspnqs102va",
+    "veriloga-model-pspnqs103va",
     "veriloga-model-psp104tva",
     "veriloga-model-psp104va",
     "veriloga-model-pspnqs104va",

@@ -31,6 +31,15 @@ pub struct FamilyFeatures {
     pub veriloga_model_diode_cmc: bool,
     pub veriloga_model_epfl_hemt_10a: bool,
     pub veriloga_model_juncap200: bool,
+    pub veriloga_model_psp102bva: bool,
+    pub veriloga_model_psp102eva: bool,
+    pub veriloga_model_psp102va: bool,
+    pub veriloga_model_psp103tva: bool,
+    pub veriloga_model_psp103va: bool,
+    pub veriloga_model_pspnqs102bva: bool,
+    pub veriloga_model_pspnqs102eva: bool,
+    pub veriloga_model_pspnqs102va: bool,
+    pub veriloga_model_pspnqs103va: bool,
     pub veriloga_model_psp104tva: bool,
     pub veriloga_model_psp104va: bool,
     pub veriloga_model_pspnqs104va: bool,
@@ -120,6 +129,15 @@ macro_rules! family_features {
             veriloga_model_diode_cmc "veriloga-model-diode-cmc"
             veriloga_model_epfl_hemt_10a "veriloga-model-epfl-hemt-10a"
             veriloga_model_juncap200 "veriloga-model-juncap200"
+            veriloga_model_psp102bva "veriloga-model-psp102bva"
+            veriloga_model_psp102eva "veriloga-model-psp102eva"
+            veriloga_model_psp102va "veriloga-model-psp102va"
+            veriloga_model_psp103tva "veriloga-model-psp103tva"
+            veriloga_model_psp103va "veriloga-model-psp103va"
+            veriloga_model_pspnqs102bva "veriloga-model-pspnqs102bva"
+            veriloga_model_pspnqs102eva "veriloga-model-pspnqs102eva"
+            veriloga_model_pspnqs102va "veriloga-model-pspnqs102va"
+            veriloga_model_pspnqs103va "veriloga-model-pspnqs103va"
             veriloga_model_psp104tva "veriloga-model-psp104tva"
             veriloga_model_psp104va "veriloga-model-psp104va"
             veriloga_model_pspnqs104va "veriloga-model-pspnqs104va"

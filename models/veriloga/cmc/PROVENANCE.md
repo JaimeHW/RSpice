@@ -40,5 +40,36 @@ License: stated per release, in that release's own license file.
   copy is not used here. The archive holds the four modules, their include
   files, and the license; it ships no test circuits or reference results.
 
+- `PSP103p4_vacode`: PSP 103.4.0 with JUNCAP 200.5.0 (August 2016), taken
+  from CEA-Leti's PSP support site,
+  https://www.cea.fr/cea-tech/leti/pspsupport/Documents/PSP103p4_vacode.zip
+  (SHA-256
+  `1d53a9adc6792141691a8bbdeaa44896b936aefee1a57fd88bf77820532616c0`), and
+  vendored unmodified under `vacode/` except that `juncap200.va` is left out:
+  JUNCAP200 is already built from `PSP104.1.0_vacode`, and a second module of
+  that name would rename it. The archive has no separate license file. The
+  license is the Si2 Compact Model Coalition In-Code Statement that opens
+  `vacode/releasenotesPSP103p4.txt` (NXP Semiconductors, Delft University of
+  Technology and CEA: a royalty-free right to modify, copy and redistribute),
+  copied verbatim into `LICENSE.txt`. Xyce 7.10 registers this release as M
+  LEVEL=103 (`PSP103VA`) and LEVEL=1031 (`PSP103TVA`) from a copy its
+  `README_Xyce` records as modified (a second correlated-noise node
+  reinstated, `M` as an alias of `MULT`, unit strings); that copy is not used
+  here. The archive ships no test circuits or reference results.
+- `vacode_102.5.0`: PSP 102.5.0 (December 2013), taken from CEA-Leti's PSP
+  support site,
+  https://www.cea.fr/cea-tech/leti/pspsupport/Documents/Level%20102.5.0/vacode_102.5.0.tar.gz
+  (SHA-256
+  `245fdafcc9e0c7c65a38e187963b5b6c9cb6602180a43ef635e3428b6c416ea8`), and
+  vendored unmodified: six modules (plain, binned and local, each with an NQS
+  variant) and their include files. The intellectual-property notice,
+  disclaimer and license are in `IP_NOTICE_DISCLAIMER_LICENSE` and
+  `IP_ACKNOWLEDGMENT`, copyright NXP Semiconductors, Delft University of
+  Technology and Arizona State University. Xyce 7.10 registers `PSP102VA` as
+  M LEVEL=102 from a copy that adds `M` and the binning labels `LMIN`/`LMAX`/
+  `WMIN`/`WMAX` to the unbinned module; that copy is not used here. The
+  authors' reference results for this release are published beside it as
+  `psp_VA_and_CMC_ref_data.tar.gz` and are not vendored.
+
 None of these releases carries a non-commercial or no-derivatives restriction;
 `tools/models/license_audit.py` enforces that across the whole `models/` tree.

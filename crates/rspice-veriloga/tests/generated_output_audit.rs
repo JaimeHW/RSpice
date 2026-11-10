@@ -102,7 +102,7 @@ fn generated_veriloga_devices_are_portable_direct_rust_artifacts() {
         }
     }
 
-    assert_eq!(model_crates, 47, "audit every generated model crate");
+    assert_eq!(model_crates, 56, "audit every generated model crate");
     assert!(
         failures.is_empty(),
         "generated models must be portable direct Rust and independent of interpreter/JIT/compiler implementation:\n{}",
@@ -470,7 +470,11 @@ fn generated_veriloga_noise_is_a_slice_rather_than_a_second_model() {
     // corpus from 4.23 MB to 11.40 MB. The 2.4x is a real question for the
     // program's owner and is recorded as such; a red ratchet over landed work
     // answers nothing, so the ceiling states the new size instead.
-    const MAX_TOTAL_NOISE_BYTES: usize = 12_900_000;
+    //
+    // Raised 2026-11-10 from 12,900,000: the nine PSP 103.4.0 and 102.5.0
+    // packages carry 2.85 MB of noise, which took the corpus from 12.22 MB to
+    // 15.08 MB. No other model's noise grew.
+    const MAX_TOTAL_NOISE_BYTES: usize = 15_900_000;
 
     let generated_root = generated_veriloga_root();
     let mut total = 0usize;
@@ -516,7 +520,9 @@ fn generated_veriloga_sources_stay_compact() {
     /// voltage (0.24 MB of branches). Also attributed, not endorsed.
     /// The total raised 2026-11-09, from 36.0 MB: the four Mextram 504.12.1
     /// packages are 1.08 MB of their own code. No other model grew.
-    const MAX_TOTAL_MODEL_RUST_BYTES: usize = 37_100_000;
+    /// Raised 2026-11-10, from 37.1 MB: the nine PSP 103.4.0 and 102.5.0
+    /// packages are 9.50 MB of their own code. No other model grew.
+    const MAX_TOTAL_MODEL_RUST_BYTES: usize = 46_600_000;
     const MAX_SINGLE_MODEL_RUST_BYTES: usize = 3_700_000;
     const MAX_EMPTY_ELSE_ARMS: usize = 32;
 
@@ -658,7 +664,7 @@ fn generated_veriloga_bodies_are_protected_from_rustfmt_rewrites() {
             display_path(&lib_path)
         );
     }
-    assert_eq!(model_crates, 47, "audit every generated model crate");
+    assert_eq!(model_crates, 56, "audit every generated model crate");
 
     let mut unmarked = Vec::new();
     scan_generated_rust(&generated_root, &mut |path, source| {
@@ -699,7 +705,7 @@ fn generated_state_files_use_compact_tab_indentation() {
         }
     });
 
-    assert_eq!(state_files, 47, "audit every generated state file");
+    assert_eq!(state_files, 56, "audit every generated state file");
     assert!(
         tab_indented_lines > 0,
         "generated state files must be indented"
@@ -746,7 +752,7 @@ fn generated_static_parameter_bounds_are_interned() {
         }
     });
 
-    assert_eq!(state_files, 47, "audit every generated state file");
+    assert_eq!(state_files, 56, "audit every generated state file");
     assert_eq!(pooled_state_files, state_files);
     assert!(
         failures.is_empty(),
@@ -815,7 +821,7 @@ fn generated_parameter_names_use_sorted_compact_lookup_tables() {
         total_entries += names_count;
     });
 
-    assert_eq!(state_files, 47, "audit every generated state file");
+    assert_eq!(state_files, 56, "audit every generated state file");
     assert!(total_entries > 0, "lookup corpus must not be empty");
     assert!(
         failures.is_empty(),
@@ -859,7 +865,7 @@ fn generated_model_features_match_the_core_feature_catalog() {
 
     assert_eq!(
         model_features.len(),
-        47,
+        56,
         "every generated model must have one stable compile feature"
     );
     for feature in &model_features {

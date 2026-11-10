@@ -158,8 +158,15 @@ pub(super) fn generate_state_file_with_extensions(
     } else {
         ""
     };
+    // A module whose parameters declare no range (PSP 102 checks its ranges
+    // in code) has no descriptor bound to name.
+    let bound_import = if public_parameter_descriptors_use_bounds(artifact) {
+        "GeneratedVerilogAParameterBound as B, "
+    } else {
+        ""
+    };
     out.push_str(&format!(
-        "use {}::{{{cross_event_imports}GeneratedEvalContext, GeneratedSimulationParameters, GeneratedDdtCoefficients, GeneratedParameterAssignment, GeneratedParameterOrigin, GeneratedVerilogAAcceptedStateShapeIdentity, GeneratedVerilogAParameterBound as B, GeneratedVerilogAParameterDescriptor as P, GeneratedVerilogAPersistentState, GeneratedVerilogARollbackState, GeneratedVerilogATerminalDescriptor, GeneratedVerilogATerminalDirection, boxed_zero_bool_array, boxed_zero_f64_array}};\n",
+        "use {}::{{{cross_event_imports}GeneratedEvalContext, GeneratedSimulationParameters, GeneratedDdtCoefficients, GeneratedParameterAssignment, GeneratedParameterOrigin, GeneratedVerilogAAcceptedStateShapeIdentity, {bound_import}GeneratedVerilogAParameterDescriptor as P, GeneratedVerilogAPersistentState, GeneratedVerilogARollbackState, GeneratedVerilogATerminalDescriptor, GeneratedVerilogATerminalDirection, boxed_zero_bool_array, boxed_zero_f64_array}};\n",
         options.runtime_path,
     ));
     if idtmod_state_count > 0 {
@@ -1439,6 +1446,18 @@ fn generated_terminal_descriptor_literal(port: &HirPort) -> String {
         port.discipline.as_str(),
         format!("i{}", port.name.to_ascii_lowercase())
     )
+}
+
+/// Whether any public parameter descriptor states a minimum or a maximum,
+/// which [`emit_public_parameter_descriptors`] writes through `B`.
+fn public_parameter_descriptors_use_bounds(artifact: &CanonicalIrArtifact) -> bool {
+    artifact
+        .mir
+        .parameters
+        .iter()
+        .filter(|parameter| parameter.is_public)
+        .filter_map(|parameter| parameter.range.as_ref())
+        .any(|range| range.min.is_some() || range.max.is_some())
 }
 
 fn emit_public_parameter_descriptors(artifact: &CanonicalIrArtifact, out: &mut String) {

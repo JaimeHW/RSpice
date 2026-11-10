@@ -35,6 +35,34 @@ fn shipped_cmc_tree_discovers_veriloga_models_without_omi() {
         HashSet::from(["bjt504va", "bjt504tva", "bjtd504va", "bjtd504tva"]),
         "the Mextram 504.12.1 package should discover its four modules"
     );
+    for (package, expected) in [
+        (
+            "cmc/PSP103p4_vacode",
+            &["PSP103VA", "PSP103TVA", "PSPNQS103VA"][..],
+        ),
+        (
+            "cmc/vacode_102.5.0",
+            &[
+                "PSP102VA",
+                "PSP102BVA",
+                "PSP102EVA",
+                "PSPNQS102VA",
+                "PSPNQS102BVA",
+                "PSPNQS102EVA",
+            ][..],
+        ),
+    ] {
+        let modules = entries
+            .iter()
+            .filter(|entry| entry.package == package)
+            .flat_map(|entry| entry.modules.iter().map(String::as_str))
+            .collect::<HashSet<_>>();
+        assert_eq!(
+            modules,
+            expected.iter().copied().collect::<HashSet<_>>(),
+            "{package} should discover its PSP modules"
+        );
+    }
     assert!(
         packages
             .iter()

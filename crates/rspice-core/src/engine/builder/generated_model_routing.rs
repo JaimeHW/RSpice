@@ -395,7 +395,8 @@ pub(super) fn try_route_generated_mos_model(
 }
 
 /// Whether a MOS card's instance key means anything to `target`: a parameter
-/// the module declares for instances, or a keyword the route owns. A
+/// the module declares, for instances or for the model (see
+/// [`generated_instance_line_assignment`]), or a keyword the route owns. A
 /// multiplier stays too: the generated registry takes `m` as the instance's
 /// multiplicity when the module declares no `m` of its own.
 fn generated_mos_instance_key_is_known(target: GeneratedTarget, name: &str) -> bool {
@@ -405,10 +406,28 @@ fn generated_mos_instance_key_is_known(target: GeneratedTarget, name: &str) -> b
             generated_instance_key_role(target, name),
             GeneratedInstanceKeyRole::Parameter
         )
-        || matches!(
-            builtins::parameter_scope(target.model_name, name),
-            Some(GeneratedVerilogAParameterScope::Instance | GeneratedVerilogAParameterScope::Dual)
-        )
+        || builtins::parameter_scope(target.model_name, name).is_some()
+}
+
+/// An instance-line value for a generated module. A parameter the module
+/// declares for the model alone takes it too, for this instance only, over the
+/// card's value: HSPICE and ADS let any Verilog-A parameter be given on the
+/// instance and the instance value win. PSP 102's own reference flow relies on
+/// it, passing W, L and the junction geometry on the instance; its source
+/// marks them `type="instance"` only through a macro that compiles to nothing.
+fn generated_instance_line_assignment(
+    target: GeneratedTarget,
+    name: &str,
+    value: ParametricValue,
+) -> BuiltinParameterAssignment {
+    if matches!(
+        builtins::parameter_scope(target.model_name, name),
+        Some(GeneratedVerilogAParameterScope::Model)
+    ) {
+        BuiltinParameterAssignment::model_card(name, value)
+    } else {
+        BuiltinParameterAssignment::instance(name, value)
+    }
 }
 
 fn generated_mos_route<'a>(
@@ -664,7 +683,18 @@ fn generated_mos_target(
     {
         return Ok(None);
     }
+    let xyce = spice_dialect == crate::config::SpiceDialect::Xyce;
     Ok(match checked_model_level("MOSFET", model_name, model)? {
+        // Xyce registers PSP 102.5.0 as MOS LEVEL=102 (PSP102VA) and PSP
+        // 103.4.0 as LEVEL=103 (PSP103VA) and LEVEL=1031 (PSP103TVA, with a
+        // thermal node). Its PSP102VA copy adds the LMIN/LMAX/WMIN/WMAX
+        // binning labels so a deck can bin the unbinned module; they select a
+        // bin here and never reach a module.
+        Some(102) if xyce => Some(GeneratedTarget::consuming_geometry_bin_metadata("PSP102VA")),
+        Some(103) if xyce => Some(GeneratedTarget::consuming_geometry_bin_metadata("PSP103VA")),
+        Some(1031) if xyce => Some(GeneratedTarget::consuming_geometry_bin_metadata(
+            "PSP103TVA",
+        )),
         Some(104) => Some(GeneratedTarget::with_level_parameter("PSP104VA")),
         // Xyce registers the canonical BSIM-SOI 4.6.1 ADMS device as MOS
         // LEVEL=70. LEVEL=10/57 select Xyce's native BSIM3-SOI front, while
@@ -762,6 +792,42 @@ fn generated_mos_target_by_type(model_type: &str) -> Option<GeneratedTarget> {
         .or_else(|| {
             match_normalized(model_type, &["PSPNQS104VA", "PSP104NQS"])
                 .then_some(GeneratedTarget::with_level_parameter("PSPNQS104VA"))
+        })
+        .or_else(|| {
+            match_normalized(model_type, &["PSP103", "PSP103VA"])
+                .then_some(GeneratedTarget::with_level_parameter("PSP103VA"))
+        })
+        .or_else(|| {
+            match_normalized(model_type, &["PSP103TVA"])
+                .then_some(GeneratedTarget::with_level_parameter("PSP103TVA"))
+        })
+        .or_else(|| {
+            match_normalized(model_type, &["PSPNQS103VA", "PSP103NQS"])
+                .then_some(GeneratedTarget::with_level_parameter("PSPNQS103VA"))
+        })
+        .or_else(|| {
+            match_normalized(model_type, &["PSP102", "PSP102VA"])
+                .then_some(GeneratedTarget::with_level_parameter("PSP102VA"))
+        })
+        .or_else(|| {
+            match_normalized(model_type, &["PSP102BVA"])
+                .then_some(GeneratedTarget::with_level_parameter("PSP102BVA"))
+        })
+        .or_else(|| {
+            match_normalized(model_type, &["PSP102EVA"])
+                .then_some(GeneratedTarget::with_level_parameter("PSP102EVA"))
+        })
+        .or_else(|| {
+            match_normalized(model_type, &["PSPNQS102VA", "PSP102NQS"])
+                .then_some(GeneratedTarget::with_level_parameter("PSPNQS102VA"))
+        })
+        .or_else(|| {
+            match_normalized(model_type, &["PSPNQS102BVA"])
+                .then_some(GeneratedTarget::with_level_parameter("PSPNQS102BVA"))
+        })
+        .or_else(|| {
+            match_normalized(model_type, &["PSPNQS102EVA"])
+                .then_some(GeneratedTarget::with_level_parameter("PSPNQS102EVA"))
         })
         .or_else(|| {
             match_normalized(model_type, &["L_UTSOI", "LUTSOI", "L_UTSOI__832CE87D"])
@@ -1535,6 +1601,9 @@ fn needs_inferred_generated_mos_type(model_name: &str) -> bool {
             "EKV_VA",
             "BSIMSOI_VA",
             "BSIMCMG_VA",
+            "PSP102VA",
+            "PSP103VA",
+            "PSP103TVA",
             "PSP104VA",
             "BSIMSOI__18C250BC",
             "L_UTSOI__832CE87D",
@@ -1598,7 +1667,8 @@ fn append_generated_instance_params(
             if is_internal_routing_param(name) || is_generated_card_keyword(target, name) {
                 continue;
             }
-            params.push(BuiltinParameterAssignment::instance(
+            params.push(generated_instance_line_assignment(
+                target,
                 name,
                 ParametricValue::Resolved(*value),
             ));
@@ -1607,7 +1677,8 @@ fn append_generated_instance_params(
             if is_generated_card_keyword(target, name) {
                 continue;
             }
-            params.push(BuiltinParameterAssignment::instance(
+            params.push(generated_instance_line_assignment(
+                target,
                 name,
                 ParametricValue::Expression(expr.clone()),
             ));
@@ -2125,6 +2196,27 @@ mod card_keyword_tests {
     }
 }
 
+#[cfg(all(test, feature = "veriloga-model-psp102va"))]
+mod instance_line_model_parameter_tests {
+    use super::*;
+
+    /// PSP 102 declares W for the model; the instance line still sets it, for
+    /// that instance, after the card's own value.
+    #[test]
+    fn an_instance_line_sets_a_parameter_the_module_declares_for_the_model() {
+        let target = GeneratedTarget::consuming_geometry_bin_metadata("PSP102VA");
+        assert_eq!(
+            builtins::parameter_scope(target.model_name, "W"),
+            Some(GeneratedVerilogAParameterScope::Model)
+        );
+        assert!(generated_mos_instance_key_is_known(target, "W"));
+        assert!(!generated_mos_instance_key_is_known(target, "WW"));
+        let assignment =
+            generated_instance_line_assignment(target, "W", ParametricValue::Resolved(1.0e-6));
+        assert_eq!(assignment.origin, GeneratedParameterOrigin::ModelCard);
+    }
+}
+
 #[cfg(all(test, feature = "veriloga-model-vbic13"))]
 mod tests {
     use super::*;
@@ -2415,6 +2507,9 @@ mod release_routing_tests {
     #[test]
     fn a_pmos_card_routed_by_level_runs_its_module_as_a_pmos() {
         for (level, module) in [
+            ("102", "PSP102VA"),
+            ("103", "PSP103VA"),
+            ("1031", "PSP103TVA"),
             ("104", "PSP104VA"),
             ("70", "bsimsoi_va"),
             ("70470", "bsimsoi__18c250bc"),
@@ -2441,6 +2536,24 @@ mod release_routing_tests {
                     matches!(inferred, Some(ParametricValue::Resolved(value)) if value == expected),
                     "`{card}` on {module} must run with TYPE={expected}, got {inferred:?}"
                 );
+            }
+        }
+    }
+
+    /// LEVEL=102, 103 and 1031 are Xyce's numbers for PSP 102 and 103; under
+    /// another dialect they name nothing this build runs.
+    #[test]
+    fn psp_102_and_103_levels_route_only_under_the_xyce_dialect() {
+        for level in ["102", "103", "1031"] {
+            let netlist = mos_model(&format!("NMOS LEVEL={level}"));
+            let model = find_model_def(&netlist, "model").expect("fixture model exists");
+            for dialect in [
+                crate::config::SpiceDialect::Ngspice,
+                crate::config::SpiceDialect::BestAvailable,
+            ] {
+                let target = generated_mos_target("model", Some(model), dialect)
+                    .expect("level classification succeeds");
+                assert!(target.is_none(), "LEVEL={level} under {dialect:?}");
             }
         }
     }

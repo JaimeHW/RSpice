@@ -287,6 +287,73 @@ fn an_xyce_level_504_card_runs_mextram_504_with_the_card_polarity() {
     );
 }
 
+/// Xyce's PSP LEVELs reach the PSP releases it registers them for, and a
+/// PMOS card runs as a PMOS. PSP's defaults are not polarity-symmetric, so
+/// the default NMOS at +1 V and PMOS at -1 V draw different currents; each
+/// must be the one Xyce 7.10 draws for the same card.
+#[cfg(all(
+    feature = "veriloga-model-psp102va",
+    feature = "veriloga-model-psp103va",
+    feature = "veriloga-model-psp103tva"
+))]
+#[test]
+fn xyce_psp_levels_run_their_release_with_the_card_polarity() {
+    use rspice_core::engine::SpiceDialect;
+    let engine = Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
+    for (level, module, xyce) in [
+        ("102", "PSP102VA", [-5.58343334e-5, 5.33090534e-5]),
+        ("103", "PSP103VA", [-1.11098110e-4, 1.05259187e-4]),
+        ("1031", "PSP103TVA", [-1.11098110e-4, 1.05259187e-4]),
+    ] {
+        let mut drain_currents = Vec::new();
+        // PSP103TVA has a fifth, thermal terminal.
+        let thermal = if level == "1031" { " t" } else { "" };
+        for (polarity, v) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+            let deck = format!(
+                "* Xyce PSP by level
+                 VD d 0 DC {v}
+                 VG g 0 DC {v}
+                 M1 d g 0 0{thermal} mmod W=1u L=1u
+                 .model mmod {polarity} LEVEL={level}
+                 .end
+"
+            );
+            let netlist = Netlist::parse(&deck).expect("PSP deck parses");
+            let circuit = engine
+                .build_circuit(&netlist)
+                .expect("an Xyce PSP LEVEL card builds through the generated backend");
+            let report = circuit.device_op_report();
+            let entry = report
+                .entries
+                .iter()
+                .find(|entry| entry.name.eq_ignore_ascii_case("M1"))
+                .expect("M1 is reported");
+            assert_eq!(
+                entry.device_kind.to_ascii_uppercase(),
+                module,
+                "LEVEL={level}"
+            );
+            let op = engine
+                .run_dc_op(&netlist)
+                .expect("the PSP operating point solves");
+            let current = op
+                .branch_currents
+                .iter()
+                .zip(&op.branch_names)
+                .find(|(_, name)| name.eq_ignore_ascii_case("VD"))
+                .map(|(current, _)| *current)
+                .expect("VD branch current");
+            drain_currents.push(current);
+        }
+        for (current, expected) in drain_currents.iter().zip(xyce) {
+            assert!(
+                (current - expected).abs() <= 1.0e-6 * expected.abs(),
+                "LEVEL={level}: {drain_currents:?}, Xyce draws {xyce:?}"
+            );
+        }
+    }
+}
+
 #[cfg(feature = "veriloga-model-bjt505-va")]
 mod compiled_mextram {
     use super::*;

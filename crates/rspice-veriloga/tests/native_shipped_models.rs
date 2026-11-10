@@ -94,6 +94,16 @@ fn shipped_models_compile_and_execute_through_the_public_native_jit() {
             Some("PSP104VA"),
         ),
         (
+            "psp103",
+            shipped_model_path(&["cmc", "PSP103p4_vacode", "vacode", "psp103.va"]),
+            Some("PSP103VA"),
+        ),
+        (
+            "psp102",
+            shipped_model_path(&["cmc", "vacode_102.5.0", "psp102.va"]),
+            Some("PSP102VA"),
+        ),
+        (
             "bsimimg",
             shipped_model_path(&["cmc", "BSIM-IMG_103.0.0_20200102", "code", "bsimimg.va"]),
             Some("bsimimg"),
@@ -454,7 +464,7 @@ fn terminal_bias(name: &str, terminal: usize) -> f64 {
         "diode_cmc" => &[0.7, 0.0],
         "vbic13_4t" => &[0.2, 0.75, 0.0, 0.0],
         "bsimbulk" | "bsimcmg" => &[0.05, 0.7, 0.0, 0.0, 0.0],
-        "psp104" | "psp104_nqs" | "hisimsoi" => &[0.05, 0.7, 0.0, 0.0],
+        "psp104" | "psp104_nqs" | "psp103" | "psp102" | "hisimsoi" => &[0.05, 0.7, 0.0, 0.0],
         "bsimimg" => &[0.15, 0.7, 0.05, -0.05, 0.01],
         "hicuml0" | "hicuml2" => &[0.2, 0.8, 0.0, 0.0, 0.0],
         "mextram504" => &[0.2, 0.8, 0.0, 0.0],

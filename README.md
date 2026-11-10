@@ -28,7 +28,7 @@ RSpice is a circuit simulator for standard SPICE netlists. It has DC operating
 point, transient, small-signal AC, noise and distortion analyses, plus RF
 steady-state coverage through harmonic balance, periodic and quasi-periodic
 steady state, and phase noise. Its device library spans the classic SPICE
-elements, native BSIM3, BSIM4, BSIM-SOI, VBIC and EKV compact models, and 47
+elements, native BSIM3, BSIM4, BSIM-SOI, VBIC and EKV compact models, and 56
 compact models generated from their Verilog-A sources. Mixed-signal decks are
 first-class: RSpice has both halves of Verilog-AMS, so digital and real-number
 modules simulate alongside the analog solve, with connect modules inserted
@@ -164,7 +164,7 @@ Compact-model families with redistributable sources under
 [models/veriloga/](models/veriloga/) are not hand-ported. They are generated to
 Rust from the upstream Verilog-A and checked in under
 [`crates/rspice-veriloga-models/`](crates/rspice-veriloga-models/README.md),
-one reusable Cargo artifact per model; that crate's README lists all 47 models
+one reusable Cargo artifact per model; that crate's README lists all 56 models
 with their features.
 
 A deck reaches a generated device in either of two ways: by its model name on
@@ -176,7 +176,7 @@ proportional to the models a build uses. `M LEVEL=260` is the one deliberate
 overlap: the generated EKV 2.6 when it is compiled in, the native port
 otherwise.
 
-All 47 models reach every shipped target: desktop through
+All 56 models reach every shipped target: desktop through
 `rspice-app --features generated-veriloga-catalog`, WebAssembly with no native
 JIT dependency, and Android or iOS ARM64 through
 `rspice-core --no-default-features --features veriloga-builtins`.

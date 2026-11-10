@@ -6468,6 +6468,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "rspice-veriloga-model-psp102bva"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-psp102eva"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-psp102va"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-psp103tva"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-psp103va"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
 name = "rspice-veriloga-model-psp104tva"
 version = "0.1.0"
 dependencies = [
@@ -6476,6 +6511,34 @@ dependencies = [
 
 [[package]]
 name = "rspice-veriloga-model-psp104va"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-pspnqs102bva"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-pspnqs102eva"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-pspnqs102va"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-pspnqs103va"
 version = "0.1.0"
 dependencies = [
  "rspice-veriloga-runtime",
@@ -6578,8 +6641,17 @@ dependencies = [
  "rspice-veriloga-model-l-utsoi-832ce87d",
  "rspice-veriloga-model-mosvar",
  "rspice-veriloga-model-mvsg-cmc",
+ "rspice-veriloga-model-psp102bva",
+ "rspice-veriloga-model-psp102eva",
+ "rspice-veriloga-model-psp102va",
+ "rspice-veriloga-model-psp103tva",
+ "rspice-veriloga-model-psp103va",
  "rspice-veriloga-model-psp104tva",
  "rspice-veriloga-model-psp104va",
+ "rspice-veriloga-model-pspnqs102bva",
+ "rspice-veriloga-model-pspnqs102eva",
+ "rspice-veriloga-model-pspnqs102va",
+ "rspice-veriloga-model-pspnqs103va",
  "rspice-veriloga-model-pspnqs104va",
  "rspice-veriloga-model-r2-cmc",
  "rspice-veriloga-model-r2-et-cmc",
