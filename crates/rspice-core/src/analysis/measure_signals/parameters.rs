@@ -21,11 +21,18 @@ pub(crate) struct MeasureParameterSeries {
 pub(crate) struct MeasureParameters<'a> {
     pub base: &'a ParamContext,
     pub rows: Option<&'a MeasureParameterSeries>,
+    /// The unit of a phase the measures read through a live operator,
+    /// `VP(a,b)` or an `EQN` over one ([`super::PhaseUnit::of`]).
+    pub phase_unit: super::PhaseUnit,
 }
 
 impl<'a> From<&'a ParamContext> for MeasureParameters<'a> {
     fn from(base: &'a ParamContext) -> Self {
-        Self { base, rows: None }
+        Self {
+            base,
+            rows: None,
+            phase_unit: super::PhaseUnit::Degrees,
+        }
     }
 }
 

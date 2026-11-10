@@ -159,6 +159,7 @@ fn with_aliases(
         MeasureParameters {
             base: &netlist.params,
             rows: parameters,
+            phase_unit: PhaseUnit::of(netlist),
         },
         limits,
         abort,

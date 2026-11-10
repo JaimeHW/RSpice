@@ -429,6 +429,8 @@ struct IndexedMeasureSignal<'a> {
 pub(crate) struct CanonicalMeasureSignalIndex<'a> {
     parameters: Option<&'a MeasureParameterSeries>,
     signals: HashMap<String, IndexedMeasureSignal<'a>>,
+    /// The unit of a phase a live operator derives, `VP(a,b)` or `IP(x)`.
+    phase_unit: PhaseUnit,
 }
 
 impl<'a> CanonicalMeasureSignalIndex<'a> {
@@ -436,6 +438,7 @@ impl<'a> CanonicalMeasureSignalIndex<'a> {
         let mut index = Self {
             parameters: None,
             signals: HashMap::with_capacity(signals.len()),
+            phase_unit: PhaseUnit::Degrees,
         };
         for (name, waveform) in signals {
             index.insert(name, waveform);
@@ -450,6 +453,7 @@ impl<'a> CanonicalMeasureSignalIndex<'a> {
         let mut index = Self {
             parameters: None,
             signals: HashMap::new(),
+            phase_unit: PhaseUnit::Degrees,
         };
         for (work, (name, waveform)) in signals.iter().enumerate() {
             super::measure::continuous::poll(abort, work)?;
@@ -460,6 +464,11 @@ impl<'a> CanonicalMeasureSignalIndex<'a> {
 
     fn with_parameters(mut self, parameters: Option<&'a MeasureParameterSeries>) -> Self {
         self.parameters = parameters;
+        self
+    }
+
+    fn with_phase_unit(mut self, phase_unit: PhaseUnit) -> Self {
+        self.phase_unit = phase_unit;
         self
     }
 
@@ -1358,7 +1367,7 @@ impl LiveRawOutputOperator {
                 "I" | "IR" => value,
                 "II" => 0.0,
                 "IM" => magnitude,
-                "IP" => 0.0_f64.atan2(value).to_degrees(),
+                "IP" => signals.phase_unit.express(0.0_f64.atan2(value)),
                 "IDB" => 20.0 * magnitude.log10(),
                 other => {
                     return Err(format!(
@@ -1433,7 +1442,7 @@ impl LiveRawOutputOperator {
                 let magnitude = real.hypot(imaginary);
                 Ok(match voltage.prefix.as_str() {
                     "VM" => magnitude,
-                    "VP" => imaginary.atan2(real).to_degrees(),
+                    "VP" => signals.phase_unit.express(imaginary.atan2(real)),
                     "VDB" => 20.0 * magnitude.log10(),
                     other => {
                         return Err(format!(
@@ -3485,7 +3494,9 @@ fn evaluate_equation_measurements_with_observations(
                 })
         });
     }
-    let signal_index = CanonicalMeasureSignalIndex::new(signals).with_parameters(parameters);
+    let signal_index = CanonicalMeasureSignalIndex::new(signals)
+        .with_parameters(parameters)
+        .with_phase_unit(PhaseUnit::of(netlist));
 
     let segment_starts = if analysis.eq_ignore_ascii_case("DC") {
         dc_primary_segment_starts(netlist, axis.len())
@@ -6201,6 +6212,7 @@ fn evaluate_noise_measurements_with_parameters(
             MeasureParameters {
                 base: &netlist.params,
                 rows: parameters,
+                phase_unit: PhaseUnit::of(netlist),
             },
             &[],
             traces,
@@ -6214,6 +6226,7 @@ fn evaluate_noise_measurements_with_parameters(
             MeasureParameters {
                 base: &netlist.params,
                 rows: parameters,
+                phase_unit: PhaseUnit::of(netlist),
             },
             policy,
             abort,
@@ -6619,8 +6632,9 @@ fn materialize_measure_expression_signals_with_limits_and_abort(
     limits: &ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> Result<Vec<(String, Vec<Value>)>, SimulationError> {
-    let signal_index =
-        CanonicalMeasureSignalIndex::new_with_abort(signals, abort)?.with_parameters(params.rows);
+    let signal_index = CanonicalMeasureSignalIndex::new_with_abort(signals, abort)?
+        .with_parameters(params.rows)
+        .with_phase_unit(params.phase_unit);
     let mut names = Vec::new();
     let mut add = |name: &str| {
         let expression = name.starts_with('{') && name.ends_with('}');
@@ -6939,6 +6953,7 @@ pub fn evaluate_fft_measurements_with_abort(
         MeasureParameters {
             base: &netlist.params,
             rows: None,
+            phase_unit: PhaseUnit::of(netlist),
         },
         abort,
     )
@@ -7640,6 +7655,7 @@ fn evaluate_ac_measurements_with_parameters(
             MeasureParameters {
                 base: &netlist.params,
                 rows: parameters,
+                phase_unit: PhaseUnit::of(netlist),
             },
             &[],
             traces,
@@ -7653,6 +7669,7 @@ fn evaluate_ac_measurements_with_parameters(
             MeasureParameters {
                 base: &netlist.params,
                 rows: parameters,
+                phase_unit: PhaseUnit::of(netlist),
             },
             policy,
             abort,
@@ -10940,6 +10957,61 @@ mod tests {
             assert_eq!(results.len(), 3, "{dialect:?} {options}");
             for result in results {
                 let value = result.value.expect("phase measure has a value");
+                assert!(
+                    (value - expected).abs() < 1e-12,
+                    "{dialect:?} {options}{}: {value}",
+                    result.name
+                );
+            }
+        }
+    }
+
+    /// A differential `VP(a,b)` and an `EQN` over one read the phase in the
+    /// deck's unit too: on an RC pole at its corner Xyce 7.10 gives
+    /// `find vp(out,in) at=1k` -135 (degrees), or -2.356195 under
+    /// PHASE_OUTPUT_RADIANS, the phase of V(out) - V(in) = -0.5 - 0.5j.
+    #[test]
+    fn a_differential_phase_measure_reads_the_decks_unit() {
+        use crate::config::SpiceDialect;
+        let ac = |frequency| AcResult {
+            frequency,
+            node_names: vec!["in".to_string(), "out".to_string()],
+            branch_names: Vec::new(),
+            voltages: vec![
+                crate::Complex64::new(1.0, 0.0),
+                crate::Complex64::new(0.5, -0.5),
+            ],
+            currents: Vec::new(),
+        };
+        let sweep = [ac(1.0), ac(2.0)];
+        let three_quarters = -3.0 * std::f64::consts::FRAC_PI_4;
+        for (dialect, options, expected) in [
+            (SpiceDialect::Xyce, "", -135.0),
+            (
+                SpiceDialect::Xyce,
+                ".options output phase_output_radians=1\n",
+                three_quarters,
+            ),
+            (SpiceDialect::BestAvailable, "", -135.0),
+        ] {
+            let netlist = Netlist::parse_with_options(
+                &format!(
+                    "differential phase\nV1 in 0 AC 1\nR1 in out 1\nC1 out 0 1\n.ac lin 2 1 2\n\
+                     {options}.meas ac pd find vp(out,in) at=1.5\n\
+                     .meas ac pe eqn vp(out,in)\n.end\n"
+                ),
+                crate::netlist::NetlistParseOptions {
+                    spice_dialect: Some(dialect),
+                    ..Default::default()
+                },
+            )
+            .expect("differential phase deck parses");
+            let results = evaluate_ac_measurements(&netlist, &sweep);
+            assert_eq!(results.len(), 2, "{dialect:?} {options}");
+            for result in results {
+                let value = result
+                    .value
+                    .unwrap_or_else(|| panic!("{dialect:?} {}: {:?}", result.name, result.error));
                 assert!(
                     (value - expected).abs() < 1e-12,
                     "{dialect:?} {options}{}: {value}",
