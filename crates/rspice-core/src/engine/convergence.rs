@@ -164,8 +164,9 @@ mod failure_attribution_tests {
     }
 
     /// A device that is not finite at the linear seed assembly's all-zero
-    /// probe admits another startup seed; a model's own evaluation refusal
-    /// from a real solve still does not.
+    /// probe admits another startup seed in every startup ladder; a model's
+    /// own evaluation refusal from a real solve still does not, outside the
+    /// outermost transient startup that hands it to the DC aids.
     ///
     /// The reachable shape is an `.IC`-constrained transient operating point
     /// over a code model that divides by a control input: at the all-zero
@@ -173,8 +174,8 @@ mod failure_attribution_tests {
     /// refuses. Before that refusal existed the same value went into the
     /// solve and came back as `SolverError::SingularMatrix`, which
     /// `is_recoverable_startup_error` has always answered `true` for — so
-    /// carrying a `NonFiniteTrial` out of the assembly would end a run the
-    /// base recovered.
+    /// carrying a `NonFiniteTrial` out of the assembly would skip retries the
+    /// base ran.
     ///
     /// It is pinned here rather than through a deck because no shipped analog
     /// code model is non-finite at V = 0 (`divide` clamps its denominator at

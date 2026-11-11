@@ -473,6 +473,9 @@ impl Engine {
             // seed assembly, where the "iterate" is a fixed all-zero probe
             // rather than a point the solver proposed; that site reports the
             // unsolvable system it produces instead (`Self::linear_seed_probe_error`).
+            // The outermost transient startup (`solve_transient_initial_solution`)
+            // alone goes further: it hands a non-finite trial to the DC aids
+            // and reports it only when every aid fails.
             _ => false,
         }
     }

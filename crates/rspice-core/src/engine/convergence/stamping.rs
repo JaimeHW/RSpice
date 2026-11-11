@@ -346,10 +346,10 @@ impl Engine {
     /// producer of that classification is answering about a point the solver
     /// proposed. Here the point is a fixed zero vector that the seed path will
     /// never vary, so there is nothing to reject — and the callers treat the
-    /// two answers very differently: the `.IC`-constrained transient
-    /// operating-point solve (`transient::startup`) deliberately lets a
-    /// model's own evaluation refusal end the run, so a `NonFiniteTrial` from
-    /// this probe would end a run that the base recovered by handing the
+    /// two answers differently: the startup ladders inside the transient
+    /// operating-point solve (`is_recoverable_startup_error`) let a model's
+    /// own evaluation refusal end their attempt, so a `NonFiniteTrial` from
+    /// this probe would skip the retries the base ran after handing the
     /// non-finite value to the factorization and reading back a singular
     /// matrix. Reporting the unsolvable system directly is that same
     /// behaviour, without the wasted solve.

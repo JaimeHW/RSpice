@@ -629,6 +629,7 @@ impl Engine {
             )
         };
 
+        let mut nonfinite_startup_failure = None;
         match transient_op {
             Ok(solution) => {
                 // A hard `.IC` solve is a fully converged constrained
@@ -644,10 +645,21 @@ impl Engine {
                 };
                 return Ok((solution.values, mode, solution.accepted_contract));
             }
-            // Only numerical failure admits a different startup seed. Model
-            // evaluation and phase-setup errors must survive this outer
-            // recovery layer, including errors during a nodeset interval.
-            Err(error) if !Self::is_recoverable_startup_error(&error) => return Err(error),
+            // Only numerical failure admits a different startup seed, and a
+            // device that is not finite at a trial iterate counts. The
+            // iterate grew from a startup seed, Xyce's zero start or the
+            // linear presolve, and a seed outside a model's domain says
+            // nothing about the operating point, so the DC aids below get
+            // their turn. If every aid fails too, this error is the one
+            // reported, so the model's own diagnostic survives, including
+            // one from a nodeset interval. Every other model-evaluation or
+            // phase-setup error ends the run here.
+            Err(error)
+                if !Self::is_recoverable_startup_error(&error)
+                    && error.nonfinite_trial().is_none() =>
+            {
+                return Err(error);
+            }
             Err(transient_err) => {
                 if !transient_ic_constraints.is_empty()
                     || circuit.inductors.has_operating_point_initial_conditions()
@@ -680,13 +692,19 @@ impl Engine {
                     "Transient initial operating point failed: {}. Trying direct DC operating point startup.",
                     transient_err
                 );
+                if transient_err.nonfinite_trial().is_some() {
+                    nonfinite_startup_failure = Some(transient_err);
+                }
             }
         }
 
         // The configured aids open with this same direct Newton from the same
         // seed, and answer as it does when it converges; run alone first, it
-        // would only be repeated.
-        let configured_aids_follow = Self::should_try_configured_dc_startup_aids(circuit);
+        // would only be repeated. After a non-finite trial they run whatever
+        // the circuit's size: the linearized seeds that stand in for them on a
+        // large circuit are closed to that failure (see below).
+        let configured_aids_follow = nonfinite_startup_failure.is_some()
+            || Self::should_try_configured_dc_startup_aids(circuit);
         if !(configured_aids_follow
             && self.configured_dc_solve_opens_with_the_direct_newton(circuit))
         {
@@ -738,6 +756,14 @@ impl Engine {
                     );
                 }
             }
+        }
+
+        // A device that was not finite at the transient operating point, and
+        // that no DC aid could evaluate its way past, has no t=0 state. The
+        // paths below would integrate from a linearized state the model never
+        // accepted and hide its refusal, so the refusal ends the run.
+        if let Some(error) = nonfinite_startup_failure {
+            return Err(error);
         }
 
         if let Some(seed) = self.t0_linearized_transient_startup_seed(circuit, matrix, abort)? {
@@ -1190,6 +1216,41 @@ mod tests {
                 "{stacks} stacks"
             );
         }
+    }
+
+    /// With B1 open, the linear presolve puts node a at the 2 V rail, where
+    /// ln(1.5 - V(a)) is not a number. The transient operating point starts
+    /// there and fails at its first trial iterate. That says nothing about the
+    /// operating point: the DC aids reach V(a) = 1.000347 V under GMIN
+    /// stepping, as `.op` does. A source that is never finite has no operating
+    /// point, and its own diagnostic ends the run rather than a linearized
+    /// t=0 state it never evaluated at.
+    #[test]
+    fn a_non_finite_trial_at_the_startup_seed_falls_through_to_the_dc_aids() {
+        let deck = |current: &str| {
+            Netlist::parse(&format!(
+                "non-finite startup seed\n\
+                 V1 in 0 2\n\
+                 R1 in a 1k\n\
+                 B1 a 0 I={current}\n\
+                 .tran 1u 10u\n\
+                 .end\n"
+            ))
+            .expect("deck parses")
+        };
+        let result = Engine::default()
+            .run_tran(&deck("V(a)/1k+1u*ln(1.5-V(a))"), 1e-6, 10e-6)
+            .expect("the DC aids find the operating point");
+        let a = result.voltage_at(result.node_index_named("a").expect("a"), 0);
+        assert!((a - 1.000_346_921).abs() < 1e-6, "V(a) = {a}");
+
+        let error = Engine::default()
+            .run_tran(&deck("V(a)/1k+1u*ln(-1-abs(V(a)))"), 1e-6, 10e-6)
+            .expect_err("a source that is never finite has no operating point");
+        assert!(
+            matches!(error, SimulationError::Circuit(_)) && error.to_string().contains("'B1'"),
+            "{error}"
+        );
     }
 
     fn assert_close(lhs: Value, rhs: Value) {
