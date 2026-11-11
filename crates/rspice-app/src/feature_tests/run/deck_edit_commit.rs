@@ -5,7 +5,8 @@
 //! and the next frame draws the committed deck with the caret and the
 //! selection where the reader left them. An edit the project refuses is
 //! drawn only until the next frame, which draws the deck as the project
-//! holds it.
+//! holds it. The editor raises the commit and the shell carries it out once
+//! the page has drawn, before anything else the frame raised.
 
 use egui::{Key, Modifiers};
 
@@ -65,6 +66,14 @@ fn caret(replay: &Replay) -> usize {
     replay.app.state.code.netlist.cursor_char_index
 }
 
+/// Whether `output` asks for the next frame at once.
+fn repaints_at_once(output: &egui::FullOutput) -> bool {
+    output
+        .viewport_output
+        .get(&egui::ViewportId::ROOT)
+        .is_some_and(|viewport| viewport.repaint_delay.is_zero())
+}
+
 /// A typed character is committed by the end of its frame, and the next
 /// frame draws the committed deck with the caret and the selection kept.
 #[test]
@@ -82,11 +91,15 @@ fn a_keystroke_is_committed_in_its_frame_and_the_next_frame_keeps_caret_and_sele
     // One frame types a character and selects it.
     let mut events = vec![egui::Event::Text("x".to_owned())];
     events.extend(key(Key::ArrowLeft, Modifiers::SHIFT));
-    replay.frame(events);
+    let output = replay.frame(events);
     assert_eq!(
         committed(&replay),
         format!("{before}x"),
         "the character is committed by the end of its frame"
+    );
+    assert!(
+        repaints_at_once(&output),
+        "the frame of the keystroke asks for the next one at once"
     );
 
     replay.frame(Vec::new());
@@ -208,8 +221,12 @@ fn a_refused_edit_reverts_on_the_next_frame() {
     let end = before.chars().count();
     replay.app.state.model.live_write_locks.netlist = Some("Another session".to_owned());
 
-    typed(&mut replay, "q");
+    let output = replay.frame(vec![egui::Event::Text("q".to_owned())]);
     assert_eq!(committed(&replay), before, "the project refuses the edit");
+    assert!(
+        repaints_at_once(&output),
+        "the frame of the refusal asks for the next one at once"
+    );
     assert_eq!(
         replay.app.state.prompt_text(),
         Some("Another session holds the netlist write lease; no source was changed."),

@@ -19,7 +19,7 @@ use crate::state::command_catalog::{
 use crate::state::{ProjectSourceLanguage, ProjectSourceRole};
 use crate::workbench::framework::command_registry::{CommandFlags, CommandOwner, CommandSpec, ids};
 use crate::workbench::framework::requests::{
-    Drain, EditorViewCommand, Request, SourceEditorRequest, StructuralCommand,
+    Drain, EditorViewCommand, Request, SourceEditorRequest, StandardCommand, StructuralCommand,
 };
 use rspice_app_workbench::workbench::documents::CodeSourceFileAction;
 
@@ -179,6 +179,28 @@ pub(in crate::workbench) enum CodeRequest {
 }
 
 impl Request for CodeRequest {
+    const DRAIN: Drain = Drain::AfterContribution;
+}
+
+/// What the netlist page's editor typed, undid or redid in its frame, which
+/// the shell carries out before anything else the frame raised: the editor
+/// made its commit while the page drew, so everything answered after the
+/// page saw the keystroke committed. Raised in the order the editor made
+/// them.
+#[derive(Clone, Debug, PartialEq)]
+pub(in crate::workbench) enum NetlistEditorRequest {
+    /// Commit the text the editor showed at the end of its frame, typed on
+    /// `cursor_line` at input time `now`, through the ownership guard.
+    Commit {
+        buffer: String,
+        cursor_line: usize,
+        now: f64,
+    },
+    /// Take the undo or redo step the editor's own history could not.
+    StepHistory(StandardCommand),
+}
+
+impl Request for NetlistEditorRequest {
     const DRAIN: Drain = Drain::AfterContribution;
 }
 

@@ -7,9 +7,11 @@ use crate::workbench::app::dialogs::project::configuration_dialogs::{Leaving, go
 use crate::workbench::app::dialogs::project::new_project::NewProjectDialogState;
 pub(super) use crate::workbench::app::dialogs::selection::commands::schematic_selection_has_live_object;
 use crate::workbench::app::dialogs::source_document;
-use crate::workbench::code::commands::{CodeCommand, CodeRequest, SourceDocumentRequest};
+use crate::workbench::code::commands::{
+    CodeCommand, CodeRequest, NetlistEditorRequest, SourceDocumentRequest,
+};
 use crate::workbench::documents::code_workspace::persist_global_veriloga_library;
-use crate::workbench::framework::requests::ProjectFileAction;
+use crate::workbench::framework::requests::{ProjectFileAction, StandardCommand};
 use crate::workbench::project::commands::{ProjectRequest, ReservedLibraryRevision};
 use crate::workbench::project::workspace_state::ProjectPage;
 use crate::workbench::session::project_transactions::{
@@ -261,6 +263,40 @@ pub(in crate::workbench) fn run_project_file_action(
             ProjectFileAction::CloseProject => FileMenuAction::CloseProject,
         },
     );
+}
+
+/// Carry out what the netlist page's editor raised in its frame, as the
+/// editor did in place: commit the text it showed, or take the undo or redo
+/// step past its own history, saying why when the deck refuses it.
+// Interim: each answer is the body the editor ran, until the code feature
+// carries it out over its own parts.
+pub(in crate::workbench) fn answer_netlist_editor_request(
+    app: &mut RSpiceApp,
+    request: NetlistEditorRequest,
+) {
+    let state = &mut app.state;
+    match request {
+        NetlistEditorRequest::Commit {
+            buffer,
+            cursor_line,
+            now,
+        } => crate::workbench::documents::netlist_document::commit_editor_edit(
+            state,
+            &buffer,
+            cursor_line,
+            now,
+        ),
+        NetlistEditorRequest::StepHistory(step) => {
+            let stepped = if step == StandardCommand::Undo {
+                crate::workbench::documents::netlist_document::undo_netlist_edit(state)
+            } else {
+                crate::workbench::documents::netlist_document::redo_netlist_edit(state)
+            };
+            if let Err(error) = stepped {
+                state.prompt(error);
+            }
+        }
+    }
 }
 
 /// Carry out what the code feature handed over, as the shell's table did in

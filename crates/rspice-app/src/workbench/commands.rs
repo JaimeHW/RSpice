@@ -833,8 +833,8 @@ mod command_helpers;
 pub(crate) use command_helpers::menu_label;
 use command_helpers::*;
 pub(in crate::workbench) use command_helpers::{
-    active_schematic_editor, answer_code_request, answer_project_request, file_action,
-    foreign_import_refusal, run_project_file_action,
+    active_schematic_editor, answer_code_request, answer_netlist_editor_request,
+    answer_project_request, file_action, foreign_import_refusal, run_project_file_action,
 };
 
 #[cfg(test)]

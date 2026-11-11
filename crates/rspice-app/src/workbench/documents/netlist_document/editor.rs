@@ -24,8 +24,8 @@ use rspice_core::abort_signal::{AbortSignal, NoAbort};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::Tokens;
 use crate::ui::widgets::Problem;
+use crate::workbench::code::commands::NetlistEditorRequest;
 use crate::workbench::documents::text_editor_commands::{EditorSyntax, show_go_to_line};
-use crate::workbench::framework::requests::StandardCommand;
 use crate::workbench::{AppState, MessageId};
 
 use super::{
@@ -315,31 +315,28 @@ pub fn show(ui: &mut Ui, state: &mut AppState) -> egui::Response {
     let hover_value =
         hover_char_index.and_then(|index| super::language::value_hover_at(state, &buffer, index));
 
-    // All editor writes pass through the ownership guard. Even if a future UI
-    // path reports a change for read-only content, it cannot implicitly create
-    // `workspace.netlist_source`.
-    let source_changed = (changed || completion_changed)
-        && commit_owned_source_edit(state, &buffer, cursor_line, now);
-    if !source_changed {
-        // The buffer was taken at the beginning of the frame; restore it on
-        // unchanged and generated-document frames.
-        state.model.simulation.source.netlist_content = buffer;
+    // All editor writes pass through the ownership guard, which the shell
+    // runs once the page has drawn, before anything else the frame raised.
+    // Even if a future UI path reports a change for read-only content, it
+    // cannot implicitly create `workspace.netlist_source`.
+    if changed || completion_changed {
+        state.workbench.outbox.push(NetlistEditorRequest::Commit {
+            buffer: buffer.clone(),
+            cursor_line,
+            now,
+        });
     }
-    if source_changed && state.code.netlist.active_dependency_identity.is_none() {
-        super::refresh_diff_pips_from_baseline(state);
-    }
+    // The buffer was taken at the beginning of the frame. What the guard
+    // refuses is shown until the next frame draws the project's deck again.
+    state.model.simulation.source.netlist_content = buffer;
     // The editor's history starts again whenever the document is replaced
     // underneath it, so once it is spent the next older step is the
     // netlist's own: a replace-all or a rename.
     if let Some(step) = unanswered_history {
-        let stepped = if step == StandardCommand::Undo {
-            super::undo_netlist_edit(state)
-        } else {
-            super::redo_netlist_edit(state)
-        };
-        if let Err(error) = stepped {
-            state.prompt(error);
-        }
+        state
+            .workbench
+            .outbox
+            .push(NetlistEditorRequest::StepHistory(step));
     }
     // A value the deck actually answers outranks the project symbol, and so
     // does the parser's word that a line is not read: the project symbol
@@ -423,6 +420,17 @@ fn show_signature_help(
                 ui.weak("Signature help · Esc to close");
             });
         });
+}
+
+/// Commit the text the editor showed at the end of its frame, typed on
+/// `cursor_line` at input time `now`, and mark the lines it changed against
+/// the run's baseline when the deck itself is in front.
+pub(crate) fn commit_edit(state: &mut AppState, buffer: &str, cursor_line: usize, now: f64) {
+    if commit_owned_source_edit(state, buffer, cursor_line, now)
+        && state.code.netlist.active_dependency_identity.is_none()
+    {
+        super::refresh_diff_pips_from_baseline(state);
+    }
 }
 
 /// Commit a text/completion edit without promoting generated output to owned

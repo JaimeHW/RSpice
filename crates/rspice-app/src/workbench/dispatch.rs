@@ -20,13 +20,13 @@ use crate::state::command_catalog::CommandKey;
 use crate::workbench::app::HardcopyWorkflow;
 use crate::workbench::app::dialogs::design_request::DesignRequest;
 use crate::workbench::app_state::PlatformState;
-use crate::workbench::code::commands::CodeRequest;
+use crate::workbench::code::commands::{CodeRequest, NetlistEditorRequest};
 #[cfg(test)]
 use crate::workbench::commands::dispatch_probe;
 use crate::workbench::commands::vocabulary::{Command, legacy_command};
 use crate::workbench::commands::{
-    active_schematic_editor, answer_code_request, answer_project_request, command_edits_schematic,
-    file_action, run_project_file_action,
+    active_schematic_editor, answer_code_request, answer_netlist_editor_request,
+    answer_project_request, command_edits_schematic, file_action, run_project_file_action,
 };
 use crate::workbench::features;
 use crate::workbench::framework::command_registry::{
@@ -179,7 +179,10 @@ impl RSpiceApp {
         hardcopy::open_workflow(&mut features::cx(self), workflow);
     }
 
-    /// Answer what a feature's call raised for straight after it: the
+    /// Answer what a feature's call raised for straight after it: first the
+    /// netlist editor's commit, undo and redo, which the editor once made
+    /// while the page drew, so everything else the frame raised is answered
+    /// over the committed deck; then the
     /// commands it ran next and what it said once they had run, the print
     /// workflow it asked for, the snap that follows a new schematic grid, the
     /// shortcut resolver's reset when a shortcut library was put in use, the
@@ -194,6 +197,11 @@ impl RSpiceApp {
     /// application, the descent Descend into hierarchy checked, and last what
     /// the project feature hands over and the project's file commands.
     pub(crate) fn after_contribution(&mut self) {
+        requests::drain(
+            self,
+            |app| &mut app.state.workbench.outbox,
+            |app, request: NetlistEditorRequest| answer_netlist_editor_request(app, request),
+        );
         requests::drain(
             self,
             |app| &mut app.state.workbench.outbox,

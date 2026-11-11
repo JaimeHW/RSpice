@@ -423,9 +423,15 @@ const DISPATCH_FEATURE_COMMAND: &[Step] = &[
 ];
 
 /// `RSpiceApp::after_contribution`, in the order a feature's call has what
-/// it raised answered. The commands it ran next go first, so a report's
-/// Save is carried out before anything else the call raised.
+/// it raised answered. The netlist editor's commit, undo and redo go before
+/// all of it, as when the editor made them while the page drew. The
+/// commands the call ran next go next, so a report's Save is carried out
+/// before anything else the call raised.
 const AFTER_CONTRIBUTION: &[Step] = &[
+    (
+        "0",
+        &["|app, request: NetlistEditorRequest| answer_netlist_editor_request(app, request)"],
+    ),
     ("1", &["|app, Execute(key)| app.execute_command_key(key)"]),
     (
         "1.1",
@@ -1464,8 +1470,8 @@ fn a_feature_command_has_what_it_raised_answered_in_the_same_dispatch() {
     assert_runs_in_order("RSpiceApp::after_contribution", &after, AFTER_CONTRIBUTION);
     assert_eq!(
         after.matches("requests::drain(").count(),
-        27,
-        "`after_contribution` answers exactly the twenty-seven requests it lists"
+        28,
+        "`after_contribution` answers exactly the twenty-eight requests it lists"
     );
 }
 
