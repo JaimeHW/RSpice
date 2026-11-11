@@ -5,6 +5,7 @@
 
 use egui::Context;
 
+use crate::workbench::app::dialogs::connectivity_manager::ConnectivityManager;
 use crate::workbench::app::dialogs::design_review_comments::ReviewComments;
 use crate::workbench::app::dialogs::engineering_table::EngineeringTable;
 use crate::workbench::app::dialogs::hierarchy::descend;
@@ -278,5 +279,19 @@ impl DesignFeature {
             workbench: cx.wb,
         }
         .render_property_dialog(ctx);
+    }
+
+    /// The connectivity and bus manager, over its draft. Revealing a finding,
+    /// opening the source map and applying reviewed repairs go to the shell.
+    pub(in crate::workbench) fn render_connectivity_manager_dialog(
+        cx: &mut Cx<'_, Self>,
+        ctx: &Context,
+    ) {
+        ConnectivityManager {
+            dialog: &mut cx.state.connectivity_manager,
+            model: cx.model,
+            workbench: cx.wb,
+        }
+        .render_connectivity_manager_dialog(ctx);
     }
 }

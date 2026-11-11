@@ -30,8 +30,12 @@ use rspice_design::drc::{
 };
 use rspice_design::hierarchy::HierarchySource;
 
+use crate::workbench::app::actions::workspace::sync_active_schematic;
+use crate::workbench::app::dialogs::design_request::DesignRequest;
+use crate::workbench::app::schematic::conductor_routes::start_canvas_wire;
 use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::state::WorkbenchSession;
 
 const TITLE: &str = "Connectivity, buses and global nets";
 const DESCRIPTION: &str = "Inspect extracted nets, typed vector connectivity, global aliases, and reviewed corrective actions without changing electrical intent implicitly.";
@@ -219,7 +223,7 @@ enum ConnectivityRepairAction {
 }
 
 #[derive(Debug, Clone)]
-enum RevealTarget {
+pub(crate) enum RevealTarget {
     Net {
         wire_ids: Vec<u64>,
         component_ids: Vec<u64>,
@@ -266,7 +270,7 @@ pub(crate) fn open_connectivity_manager(state: &mut AppState) {
     crate::schematic::view::retain_selection_on_active_sheet(state);
     state.sync_active_schematic_to_workspace();
     let contract = (*state.model.workspace.content.connectivity).clone();
-    let (report, error) = match build_report(state, &contract.policy) {
+    let (report, error) = match build_report(&state.model, &contract.policy) {
         Ok(report) => (report, None),
         Err(error) => (ConnectivityReport::default(), Some(error)),
     };
@@ -289,37 +293,36 @@ pub(crate) fn open_connectivity_manager(state: &mut AppState) {
 /// one projects a workspace carrying it, so a preview is a real resolution
 /// and never a second reading of the live editor buffers.
 fn preview_projection(
-    state: &AppState,
+    model: &Model,
     policy: &ConnectivityPolicy,
 ) -> Result<std::sync::Arc<DesignProjection>, String> {
-    projection_with_open_view(state, policy, &state.model.schematic)
+    projection_with_open_view(model, policy, &model.schematic)
 }
 
 /// The design as `policy` resolves it with `open_view` standing for the open
 /// view's buffer, which is how a repair candidate is projected exactly as the
 /// design it would replace.
 fn projection_with_open_view(
-    state: &AppState,
+    model: &Model,
     policy: &ConnectivityPolicy,
     open_view: &SchematicState,
 ) -> Result<std::sync::Arc<DesignProjection>, String> {
-    if state.model.workspace.content.connectivity.policy == *policy {
-        return state
-            .model
+    if model.workspace.content.connectivity.policy == *policy {
+        return model
             .workspace
             .design_projection(
-                &state.model.library_manager,
-                &state.model.workspace.content.active_view,
+                &model.library_manager,
+                &model.workspace.content.active_view,
                 open_view,
             )
             .map_err(|error| error.to_string());
     }
-    let mut preview = state.model.workspace.clone();
+    let mut preview = model.workspace.clone();
     preview.content.connectivity.policy = policy.clone();
     preview
         .design_projection(
-            &state.model.library_manager,
-            &state.model.workspace.content.active_view,
+            &model.library_manager,
+            &model.workspace.content.active_view,
             open_view,
         )
         .map_err(|error| error.to_string())
@@ -338,20 +341,18 @@ fn projection_with_open_view(
 /// was resolved under — standing for the project's, so this page cannot state
 /// a finding the Problems page and the run gate judge differently.
 fn check_projected_open_view(
-    state: &AppState,
+    model: &Model,
     policy: &ConnectivityPolicy,
     projection: &DesignProjection,
 ) -> Result<DrcResult, String> {
-    let subject = projected_open_view(state, projection)?;
+    let subject = projected_open_view(model, projection)?;
     let hierarchy =
-        HierarchySource::from_design_projection(state.model.library_manager.catalog(), projection);
-    let mut config = state
-        .model
-        .design_check_config(&state.model.workspace.content.active_view);
+        HierarchySource::from_design_projection(model.library_manager.catalog(), projection);
+    let mut config = model.design_check_config(&model.workspace.content.active_view);
     config.connectivity = policy.clone();
     Ok(run_check_of_cellview(
         subject,
-        &state.model.workspace.content.active_view,
+        &model.workspace.content.active_view,
         &hierarchy,
         config,
         CheckReach::Hierarchy,
@@ -364,10 +365,10 @@ fn check_projected_open_view(
 /// this document, so the manager cannot report a net the generator will not
 /// emit.
 fn projected_open_view<'a>(
-    state: &AppState,
+    model: &Model,
     projection: &'a DesignProjection,
 ) -> Result<&'a rspice_design::projection::ProjectedSchematic, String> {
-    let active_key = state.model.workspace.content.active_view.key();
+    let active_key = model.workspace.content.active_view.key();
     projection
         .schematic_buffers()
         .iter()
@@ -376,28 +377,24 @@ fn projected_open_view<'a>(
         .ok_or_else(|| format!("The open view {active_key} is not part of the configured design."))
 }
 
-fn build_report(
-    state: &AppState,
-    policy: &ConnectivityPolicy,
-) -> Result<ConnectivityReport, String> {
-    let projection = preview_projection(state, policy)?;
-    let subject = projected_open_view(state, &projection)?;
+fn build_report(model: &Model, policy: &ConnectivityPolicy) -> Result<ConnectivityReport, String> {
+    let projection = preview_projection(model, policy)?;
+    let subject = projected_open_view(model, &projection)?;
     let design_nets = projection_nets(
-        state.model.library_manager.catalog(),
+        model.library_manager.catalog(),
         &projection,
-        &state.model.workspace.content.active_view.key(),
+        &model.workspace.content.active_view.key(),
     );
-    let drc = check_projected_open_view(state, policy, &projection)?;
+    let drc = check_projected_open_view(model, policy, &projection)?;
     // The bus rows and every reveal anchor below stay on the document the
     // canvas paints: a materialized page carries namespaced coordinates that
     // would scroll the editor off the design.
-    let bus_analysis = canvas_bus_analysis(state, subject);
+    let bus_analysis = canvas_bus_analysis(model, subject);
     let nets = design_nets
         .iter()
         .map(|net| build_net_row(net, subject, &drc))
         .collect();
-    let buses = state
-        .model
+    let buses = model
         .schematic
         .document()
         .buses
@@ -409,8 +406,7 @@ fn build_report(
                 .filter(|diagnostic| diagnostic.bus_id == Some(bus.id))
                 .map(|diagnostic| diagnostic.message.as_str())
                 .collect::<Vec<_>>();
-            let taps = state
-                .model
+            let taps = model
                 .schematic
                 .document()
                 .bus_taps
@@ -458,9 +454,9 @@ fn build_report(
             }
         })
         .collect::<Vec<_>>();
-    let globals = build_global_rows(state, policy, &projection);
-    let mut repairs = build_global_repairs(state, policy, &globals);
-    repairs.extend(build_manual_repairs(state, &drc, &bus_analysis));
+    let globals = build_global_rows(model, policy, &projection);
+    let mut repairs = build_global_repairs(model, policy, &globals);
+    repairs.extend(build_manual_repairs(model, &drc, &bus_analysis));
     Ok(ConnectivityReport {
         nets,
         buses,
@@ -478,19 +474,13 @@ fn build_report(
 /// declared in two notations is still one deck name across sheets. Each
 /// finding's point is then taken back off its sheet's stride, onto the canvas.
 fn canvas_bus_analysis(
-    state: &AppState,
+    model: &Model,
     subject: &rspice_design::projection::ProjectedSchematic,
 ) -> rspice_design::connectivity::bus::BusConnectivityAnalysis {
     let mut analysis =
         rspice_design::connectivity::bus::analyze_bus_connectivity(subject.document());
-    let key = state
-        .model
-        .workspace
-        .content
-        .active_schematic_reference()
-        .key();
-    let Some(sheets) = state
-        .model
+    let key = model.workspace.content.active_schematic_reference().key();
+    let Some(sheets) = model
         .workspace
         .content
         .design_management
@@ -633,18 +623,18 @@ fn violation_targets_net(violation: &DrcViolation, net: &DesignNet) -> bool {
 /// design at once — and only over the design as configured: an alias that a
 /// variant removes is not a shadow anybody has to review.
 fn build_global_rows(
-    state: &AppState,
+    model: &Model,
     policy: &ConnectivityPolicy,
     projection: &DesignProjection,
 ) -> Vec<GlobalNetRow> {
-    let mut preview_contract = (*state.model.workspace.content.connectivity).clone();
+    let mut preview_contract = (*model.workspace.content.connectivity).clone();
     preview_contract.policy = policy.clone();
     let contract = &preview_contract;
     let mut declarations = Vec::<LabelOccurrence>::new();
     let mut locals = Vec::<LabelOccurrence>::new();
     let mut nets_by_view = HashMap::<String, std::sync::Arc<Vec<DesignNet>>>::new();
     for (view_key, schematic) in projection.schematic_buffers() {
-        let nets = projection_nets(state.model.library_manager.catalog(), projection, view_key);
+        let nets = projection_nets(model.library_manager.catalog(), projection, view_key);
         nets_by_view.insert(view_key.clone(), nets);
         for label in &schematic.document().net_labels {
             let occurrence = LabelOccurrence {
@@ -759,19 +749,14 @@ fn alias_matches(
 }
 
 fn build_global_repairs(
-    state: &AppState,
+    model: &Model,
     policy: &ConnectivityPolicy,
     globals: &[GlobalNetRow],
 ) -> Vec<ConnectivityRepair> {
     if policy.global_promotion == GlobalNetPromotionPolicy::TechnologyDefinedOnly {
         return Vec::new();
     }
-    let active_key = state
-        .model
-        .workspace
-        .content
-        .active_schematic_reference()
-        .key();
+    let active_key = model.workspace.content.active_schematic_reference().key();
     let mut repairs = Vec::new();
     for global in globals {
         let active_aliases = global
@@ -838,7 +823,7 @@ fn build_global_repairs(
 }
 
 fn build_manual_repairs(
-    state: &AppState,
+    model: &Model,
     drc: &DrcResult,
     bus_analysis: &rspice_design::connectivity::bus::BusConnectivityAnalysis,
 ) -> Vec<ConnectivityRepair> {
@@ -879,7 +864,7 @@ fn build_manual_repairs(
             identity_effect: "No automatic identity rewrite".to_owned(),
             validation: "Manual endpoint choice required".to_owned(),
             action: None,
-            endpoint_choices: endpoint_choices_for_violation(state, violation),
+            endpoint_choices: endpoint_choices_for_violation(model, violation),
             reveal: RevealTarget::Violation(violation.location.clone()),
         });
     }
@@ -927,10 +912,7 @@ fn build_manual_repairs(
     repairs
 }
 
-fn endpoint_choices_for_violation(
-    state: &AppState,
-    violation: &DrcViolation,
-) -> Vec<EndpointChoice> {
+fn endpoint_choices_for_violation(model: &Model, violation: &DrcViolation) -> Vec<EndpointChoice> {
     if !matches!(
         violation.violation_type,
         DrcViolationType::UnconnectedPin
@@ -950,8 +932,7 @@ fn endpoint_choices_for_violation(
     else {
         return Vec::new();
     };
-    let Some(component) = state
-        .model
+    let Some(component) = model
         .schematic
         .document()
         .components
@@ -960,7 +941,7 @@ fn endpoint_choices_for_violation(
     else {
         return Vec::new();
     };
-    let symbol_context = crate::schematic::view::schematic_symbol_context(state);
+    let symbol_context = model.schematic_symbol_context();
     let Some(start) = symbol_context
         .named_terminal_points(component)
         .into_iter()
@@ -970,14 +951,14 @@ fn endpoint_choices_for_violation(
     };
 
     let mut destinations = BTreeMap::<(i32, i32), String>::new();
-    for wire in &state.model.schematic.document().wires {
+    for wire in &model.schematic.document().wires {
         for point in &wire.points {
             destinations
                 .entry((point.x, point.y))
                 .or_insert_with(|| format!("Wire #{} at {}, {}", wire.id, point.x, point.y));
         }
     }
-    for junction in &state.model.schematic.document().junctions {
+    for junction in &model.schematic.document().junctions {
         destinations
             .entry((junction.pos.x, junction.pos.y))
             .or_insert_with(|| {
@@ -987,12 +968,12 @@ fn endpoint_choices_for_violation(
                 )
             });
     }
-    for label in &state.model.schematic.document().net_labels {
+    for label in &model.schematic.document().net_labels {
         destinations
             .entry((label.pos.x, label.pos.y))
             .or_insert_with(|| format!("Net {} at {}, {}", label.name, label.pos.x, label.pos.y));
     }
-    for other in &state.model.schematic.document().components {
+    for other in &model.schematic.document().components {
         for (name, point) in symbol_context.named_terminal_points(other) {
             if other.id == *id && point == start {
                 continue;
@@ -1025,26 +1006,32 @@ fn validate_bus_draft(dialog: &ConnectivityManagerDialogState) -> Result<BusDecl
     Ok(declaration)
 }
 
-impl RSpiceApp {
+/// What the connectivity and bus manager draws over and changes: its draft,
+/// the model and the session. Revealing a finding, opening the source map and
+/// applying reviewed repairs reach the whole session, so it hands those to
+/// the shell.
+pub(in crate::workbench) struct ConnectivityManager<'a> {
+    pub(in crate::workbench) dialog: &'a mut ConnectivityManagerDialogState,
+    pub(in crate::workbench) model: &'a mut Model,
+    pub(in crate::workbench) workbench: &'a mut WorkbenchSession,
+}
+
+impl ConnectivityManager<'_> {
     pub(in crate::workbench) fn render_connectivity_manager_dialog(&mut self, ctx: &Context) {
-        if !self.state.design.connectivity_manager.open {
+        if !self.dialog.open {
             return;
         }
-        let page = self.state.design.connectivity_manager.page;
-        let stale = connectivity_authority_error(&self.state);
-        let write_allowed = !self.state.model.schematic.session.read_only
-            && !self.state.active_view_read_only()
-            && !self.state.model.safe_mode.project_read_only();
-        let selected = self
-            .state
-            .design
-            .connectivity_manager
-            .selected_actionable_count();
-        let bus_validation = validate_bus_draft(&self.state.design.connectivity_manager);
-        let policy_changed = self.state.design.connectivity_manager.policy_changed();
+        let page = self.dialog.page;
+        let stale = connectivity_authority_error(self.dialog, self.model);
+        let write_allowed = !self.model.schematic.session.read_only
+            && !self.model.active_view_read_only()
+            && !self.model.safe_mode.project_read_only();
+        let selected = self.dialog.selected_actionable_count();
+        let bus_validation = validate_bus_draft(self.dialog);
+        let policy_changed = self.dialog.policy_changed();
         let policy_authority_error = validate_policy_authority(
-            &self.state.design.connectivity_manager.policy,
-            &self.state.model.workspace.content.connectivity,
+            &self.dialog.policy,
+            &self.model.workspace.content.connectivity,
         )
         .err();
         let primary_enabled = match page {
@@ -1062,9 +1049,7 @@ impl RSpiceApp {
             }
         };
         let error = self
-            .state
-            .design
-            .connectivity_manager
+            .dialog
             .error
             .as_deref()
             .or(stale.as_deref())
@@ -1076,29 +1061,23 @@ impl RSpiceApp {
             } else {
                 error.as_deref().map_or(Ok(None), Err)
             };
-            let choice = create_bus_form(
-                ctx,
-                &mut self.state.design.connectivity_manager,
-                write_allowed,
-                primary_enabled,
-                status,
-            );
+            let choice = create_bus_form(ctx, self.dialog, write_allowed, primary_enabled, status);
             match choice {
                 DialogChoice::Primary => {
                     if let Err(error) = self.commit_connectivity_bus() {
-                        self.state.design.connectivity_manager.error = Some(error);
+                        self.dialog.error = Some(error);
                     }
                 }
                 DialogChoice::Ghost | DialogChoice::Cancelled => {
-                    self.state.design.connectivity_manager.page = ConnectivityManagerPage::Manager;
-                    self.state.design.connectivity_manager.error = None;
-                    self.state.design.connectivity_manager.body_scroll_offset = 0.0;
+                    self.dialog.page = ConnectivityManagerPage::Manager;
+                    self.dialog.error = None;
+                    self.dialog.body_scroll_offset = 0.0;
                 }
                 DialogChoice::None | DialogChoice::Secondary => {}
             }
             return;
         }
-        let mut body_scroll_offset = self.state.design.connectivity_manager.body_scroll_offset;
+        let mut body_scroll_offset = self.dialog.body_scroll_offset;
         let mut dialog = Dialog::new(TITLE, PRIMARY)
             .description(DESCRIPTION)
             .size(DialogSize::SimulationWorkflow)
@@ -1130,25 +1109,21 @@ impl RSpiceApp {
 
         let mut action = ConnectivityBodyAction::None;
         let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
-            action = connectivity_manager_body(
-                ui,
-                &mut self.state.design.connectivity_manager,
-                write_allowed,
-                stale.is_none(),
-            );
+            action = connectivity_manager_body(ui, self.dialog, write_allowed, stale.is_none());
             None
         });
-        self.state.design.connectivity_manager.body_scroll_offset = body_scroll_offset;
+        self.dialog.body_scroll_offset = body_scroll_offset;
         self.handle_connectivity_body_action(ctx, action);
 
         match choice {
             DialogChoice::Primary => {
-                if let Err(error) = self.apply_selected_connectivity_repairs() {
-                    self.state.design.connectivity_manager.error = Some(error);
-                }
+                // The shell applies them straight after this step draws.
+                self.workbench
+                    .outbox
+                    .push(DesignRequest::ApplyConnectivityRepairs);
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.design.connectivity_manager.close();
+                self.dialog.close();
             }
             DialogChoice::None | DialogChoice::Secondary => {}
         }
@@ -1158,18 +1133,18 @@ impl RSpiceApp {
         match action {
             ConnectivityBodyAction::None => {}
             ConnectivityBodyAction::Refresh => {
-                self.state.sync_active_schematic_to_workspace();
-                let contract_changed = *self.state.model.workspace.content.connectivity
-                    != self.state.design.connectivity_manager.contract_at_open;
+                sync_active_schematic(self.model, self.workbench);
+                let contract_changed =
+                    *self.model.workspace.content.connectivity != self.dialog.contract_at_open;
                 if contract_changed {
-                    let contract = (*self.state.model.workspace.content.connectivity).clone();
-                    self.state.design.connectivity_manager.policy = contract.policy.clone();
-                    self.state.design.connectivity_manager.contract_at_open = contract;
+                    let contract = (*self.model.workspace.content.connectivity).clone();
+                    self.dialog.policy = contract.policy.clone();
+                    self.dialog.contract_at_open = contract;
                 }
-                let policy = self.state.design.connectivity_manager.policy.clone();
-                let refreshed = build_report(&self.state, &policy);
-                let authority = SchematicEditAuthority::capture(&self.state);
-                let dialog = &mut self.state.design.connectivity_manager;
+                let policy = self.dialog.policy.clone();
+                let refreshed = build_report(self.model, &policy);
+                let authority = SchematicEditAuthority::capture(&*self.model);
+                let dialog = &mut *self.dialog;
                 dialog.authority = Some(authority);
                 dialog.selected_repairs.clear();
                 match refreshed {
@@ -1187,12 +1162,12 @@ impl RSpiceApp {
                 }
             }
             ConnectivityBodyAction::CreateBus => {
-                self.state.design.connectivity_manager.page = ConnectivityManagerPage::CreateBus;
-                self.state.design.connectivity_manager.error = None;
-                self.state.design.connectivity_manager.body_scroll_offset = 0.0;
+                self.dialog.page = ConnectivityManagerPage::CreateBus;
+                self.dialog.error = None;
+                self.dialog.body_scroll_offset = 0.0;
             }
             ConnectivityBodyAction::ReviewAliases => {
-                let dialog = &mut self.state.design.connectivity_manager;
+                let dialog = &mut *self.dialog;
                 dialog.active_tab = ConnectivityManagerTab::RepairPreview;
                 dialog.selected_repairs.extend(
                     dialog
@@ -1208,157 +1183,243 @@ impl RSpiceApp {
                         .map(|repair| repair.id.clone()),
                 );
             }
-            ConnectivityBodyAction::Reveal(target) => self.reveal_connectivity_target(target),
+            ConnectivityBodyAction::Reveal(target) => {
+                // The shell reveals it straight after this step draws.
+                self.workbench
+                    .outbox
+                    .push(DesignRequest::RevealConnectivity(target));
+            }
             ConnectivityBodyAction::RouteRepair(repair_id) => {
                 if let Err(error) = self.arm_explicit_endpoint_route(ctx, &repair_id) {
-                    self.state.design.connectivity_manager.error = Some(error);
+                    self.dialog.error = Some(error);
                 }
             }
             ConnectivityBodyAction::OpenSourceMap => {
-                self.state.design.connectivity_manager.close();
-                self.state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
-                self.state.workbench.navigator_visible = true;
-                self.state.workbench.drawer = Some(crate::workbench::state::Drawer::Navigator);
-                self.state.code.netlist.active_document =
-                    crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated;
-                self.state.workbench.set_navigator_filter("source mapping");
-                if let Some(line) = self
-                    .state
-                    .model
-                    .netlist_artifacts
-                    .generated_document
-                    .as_ref()
-                    .and_then(|document| document.generated_artifact())
-                    .and_then(|artifact| artifact.source_map().first())
-                    .map(|entry| entry.generated_line())
-                {
-                    self.state.code.netlist.cursor_line = line.saturating_sub(1);
-                    self.state.code.netlist.requested_line = Some(line);
-                }
+                // The shell opens it straight after this step draws.
+                self.workbench.outbox.push(DesignRequest::OpenSourceMap);
             }
         }
     }
 
-    fn reveal_connectivity_target(&mut self, target: RevealTarget) {
-        // The checks locate a terminal or a bare point on the projected
-        // document, which lays later sheets a stride along; the canvas centres
-        // on it where its sheet draws it. A point read off the editor's own
-        // document is on no stride, and stays where it is.
-        let sheets = self
-            .state
-            .model
-            .workspace
-            .content
-            .design_management
-            .sheet_catalog(
-                &self
-                    .state
-                    .model
-                    .workspace
-                    .content
-                    .active_schematic_reference()
-                    .key(),
-            );
-        let target = match target {
-            RevealTarget::Violation(DrcLocation::Terminal {
-                component_id,
-                component_name,
-                pin_name,
-                point,
-            }) => RevealTarget::Violation(DrcLocation::Terminal {
-                point: rspice_schematic_editor::view::violations::live_terminal_point(
-                    sheets,
-                    component_id,
-                    point,
-                ),
-                component_id,
-                component_name,
-                pin_name,
-            }),
-            RevealTarget::Violation(DrcLocation::Point { x, y }) => {
-                let projected = Point::new(x as i32, y as i32);
-                let point = sheets
-                    .and_then(|sheets| {
-                        rspice_design::schematic::owned::projected_point_sheet(sheets, projected)
-                    })
-                    .map_or(projected, |(_, point)| point);
-                RevealTarget::Violation(DrcLocation::Point {
-                    x: f64::from(point.x),
-                    y: f64::from(point.y),
-                })
-            }
-            other => other,
-        };
-        self.state.design.connectivity_manager.close();
-        self.state.workbench.workspace = crate::workbench::state::Workspace::Design;
-        if let RevealTarget::Label { view_key, .. } = &target
-            && *view_key
-                != self
-                    .state
-                    .model
-                    .workspace
-                    .content
-                    .active_schematic_reference()
-                    .key()
-            && let Some(reference) = CellViewRef::from_key(view_key)
+    fn commit_connectivity_bus(&mut self) -> Result<(), String> {
+        connectivity_authority_error(self.dialog, self.model).map_or(Ok(()), Err)?;
+        if self.model.schematic.session.read_only
+            || self.model.active_view_read_only()
+            || self.model.safe_mode.project_read_only()
         {
-            self.state.open_workspace_view(reference);
+            return Err("The active schematic or project is read-only.".to_owned());
         }
-        let schematic = &mut self.state.model.schematic;
-        schematic.session.editor.selection.clear();
-        schematic.session.editor.net_highlight.clear();
-        match target {
-            RevealTarget::Net {
-                wire_ids,
-                component_ids,
-            } => {
-                for id in &wire_ids {
-                    schematic.session.editor.selection.select_wire(*id);
-                }
-                for id in component_ids {
-                    schematic.session.editor.selection.select_component(id);
-                }
-                schematic
-                    .session
-                    .editor
-                    .net_highlight
-                    .highlight_wires(wire_ids.iter().copied().collect::<HashSet<_>>());
-                schematic.session.editor.center_request = wire_ids
-                    .first()
-                    .and_then(|id| {
-                        schematic
-                            .document()
-                            .wires
-                            .iter()
-                            .find(|wire| wire.id == *id)
-                    })
-                    .and_then(|wire| wire.points.first().copied());
-            }
-            RevealTarget::Bus { id, point } => {
-                schematic.session.editor.selection.select_only_bus(id);
-                schematic.session.editor.center_request = Some(point);
-            }
-            RevealTarget::BusTap { id, point } => {
-                schematic.session.editor.selection.select_only_bus_tap(id);
-                schematic.session.editor.center_request = Some(point);
-            }
-            RevealTarget::Label { view_key: _, id } => {
-                schematic.session.editor.selection.select_only_net_label(id);
-                schematic.session.editor.center_request = schematic
-                    .document()
-                    .net_labels
-                    .iter()
-                    .find(|label| label.id == id)
-                    .map(|label| label.pos);
-            }
-            RevealTarget::Violation(location) => {
-                reveal_drc_location(schematic, &location);
-            }
-        }
+        let declaration = validate_bus_draft(self.dialog)?;
+        let mut contract = (*self.model.workspace.content.connectivity).clone();
+        contract.policy = self.dialog.policy.clone();
+        validate_policy_authority(&contract.policy, &contract)?;
+        contract.validate()?;
+        *self.model.workspace.content.connectivity = contract;
+        self.model.workspace.content.project_metadata_dirty = true;
+        self.model.schematic.session.editor.bus_drawing.cancel();
+        self.model.schematic.session.editor.bus_drawing.declaration = Some(declaration);
+        self.model.schematic.session.editor.tool = Tool::Bus;
+        self.dialog.close();
+        self.workbench
+            .prompt("Bus placement armed. Click the first point, route the bus, then finish it.");
+        Ok(())
     }
 
-    fn apply_selected_connectivity_repairs(&mut self) -> Result<(), String> {
-        connectivity_authority_error(&self.state).map_or(Ok(()), Err)?;
+    fn arm_explicit_endpoint_route(
+        &mut self,
+        ctx: &Context,
+        repair_id: &str,
+    ) -> Result<(), String> {
+        connectivity_authority_error(self.dialog, self.model).map_or(Ok(()), Err)?;
+        if self.model.schematic.session.read_only
+            || self.model.active_view_read_only()
+            || self.model.safe_mode.project_read_only()
+        {
+            return Err("The active schematic or project is read-only.".to_owned());
+        }
+        let dialog = &*self.dialog;
+        let repair = dialog
+            .report
+            .repairs
+            .iter()
+            .find(|repair| repair.id == repair_id)
+            .ok_or_else(|| {
+                "The selected repair no longer exists. Refresh the report.".to_owned()
+            })?;
+        let choice_index = dialog
+            .endpoint_choices
+            .get(repair_id)
+            .copied()
+            .ok_or_else(|| "Choose one destination endpoint first.".to_owned())?;
+        let choice = repair
+            .endpoint_choices
+            .get(choice_index)
+            .cloned()
+            .ok_or_else(|| "The selected endpoint is stale. Refresh the report.".to_owned())?;
+        if choice.start == choice.destination {
+            return Err("The selected source and destination are identical.".to_owned());
+        }
+        self.dialog.close();
+        self.workbench.workspace = crate::workbench::state::Workspace::Design;
+        self.model.schematic.arm_tool(Tool::Wire);
+        start_canvas_wire(self.model, self.workbench, ctx, choice.start);
+        self.model.schematic.session.editor.center_request = Some(choice.destination);
+        self.workbench.prompt(format!(
+            "Wire routing armed from {}, {} to {}. The destination is centred; finish the wire on \
+             its endpoint.",
+            choice.start.x, choice.start.y, choice.label
+        ));
+        Ok(())
+    }
+}
+
+/// Reveal one finding of the report on the canvas, on the view it is drawn
+/// on, with the manager closed.
+pub(crate) fn reveal_connectivity_target(state: &mut AppState, target: RevealTarget) {
+    // The checks locate a terminal or a bare point on the projected
+    // document, which lays later sheets a stride along; the canvas centres
+    // on it where its sheet draws it. A point read off the editor's own
+    // document is on no stride, and stays where it is.
+    let sheets = state
+        .model
+        .workspace
+        .content
+        .design_management
+        .sheet_catalog(
+            &state
+                .model
+                .workspace
+                .content
+                .active_schematic_reference()
+                .key(),
+        );
+    let target = match target {
+        RevealTarget::Violation(DrcLocation::Terminal {
+            component_id,
+            component_name,
+            pin_name,
+            point,
+        }) => RevealTarget::Violation(DrcLocation::Terminal {
+            point: rspice_schematic_editor::view::violations::live_terminal_point(
+                sheets,
+                component_id,
+                point,
+            ),
+            component_id,
+            component_name,
+            pin_name,
+        }),
+        RevealTarget::Violation(DrcLocation::Point { x, y }) => {
+            let projected = Point::new(x as i32, y as i32);
+            let point = sheets
+                .and_then(|sheets| {
+                    rspice_design::schematic::owned::projected_point_sheet(sheets, projected)
+                })
+                .map_or(projected, |(_, point)| point);
+            RevealTarget::Violation(DrcLocation::Point {
+                x: f64::from(point.x),
+                y: f64::from(point.y),
+            })
+        }
+        other => other,
+    };
+    state.design.connectivity_manager.close();
+    state.workbench.workspace = crate::workbench::state::Workspace::Design;
+    if let RevealTarget::Label { view_key, .. } = &target
+        && *view_key
+            != state
+                .model
+                .workspace
+                .content
+                .active_schematic_reference()
+                .key()
+        && let Some(reference) = CellViewRef::from_key(view_key)
+    {
+        state.open_workspace_view(reference);
+    }
+    let schematic = &mut state.model.schematic;
+    schematic.session.editor.selection.clear();
+    schematic.session.editor.net_highlight.clear();
+    match target {
+        RevealTarget::Net {
+            wire_ids,
+            component_ids,
+        } => {
+            for id in &wire_ids {
+                schematic.session.editor.selection.select_wire(*id);
+            }
+            for id in component_ids {
+                schematic.session.editor.selection.select_component(id);
+            }
+            schematic
+                .session
+                .editor
+                .net_highlight
+                .highlight_wires(wire_ids.iter().copied().collect::<HashSet<_>>());
+            schematic.session.editor.center_request = wire_ids
+                .first()
+                .and_then(|id| {
+                    schematic
+                        .document()
+                        .wires
+                        .iter()
+                        .find(|wire| wire.id == *id)
+                })
+                .and_then(|wire| wire.points.first().copied());
+        }
+        RevealTarget::Bus { id, point } => {
+            schematic.session.editor.selection.select_only_bus(id);
+            schematic.session.editor.center_request = Some(point);
+        }
+        RevealTarget::BusTap { id, point } => {
+            schematic.session.editor.selection.select_only_bus_tap(id);
+            schematic.session.editor.center_request = Some(point);
+        }
+        RevealTarget::Label { view_key: _, id } => {
+            schematic.session.editor.selection.select_only_net_label(id);
+            schematic.session.editor.center_request = schematic
+                .document()
+                .net_labels
+                .iter()
+                .find(|label| label.id == id)
+                .map(|label| label.pos);
+        }
+        RevealTarget::Violation(location) => {
+            reveal_drc_location(schematic, &location);
+        }
+    }
+}
+
+/// Open the generated netlist on its source map, at the first line it maps,
+/// with the manager closed.
+pub(crate) fn open_connectivity_source_map(state: &mut AppState) {
+    state.design.connectivity_manager.close();
+    state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
+    state.workbench.navigator_visible = true;
+    state.workbench.drawer = Some(crate::workbench::state::Drawer::Navigator);
+    state.code.netlist.active_document =
+        crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated;
+    state.workbench.set_navigator_filter("source mapping");
+    if let Some(line) = state
+        .model
+        .netlist_artifacts
+        .generated_document
+        .as_ref()
+        .and_then(|document| document.generated_artifact())
+        .and_then(|artifact| artifact.source_map().first())
+        .map(|entry| entry.generated_line())
+    {
+        state.code.netlist.cursor_line = line.saturating_sub(1);
+        state.code.netlist.requested_line = Some(line);
+    }
+}
+
+impl RSpiceApp {
+    pub(in crate::workbench) fn apply_selected_connectivity_repairs(
+        &mut self,
+    ) -> Result<(), String> {
+        connectivity_authority_error(&self.state.design.connectivity_manager, &self.state.model)
+            .map_or(Ok(()), Err)?;
         if self.state.model.schematic.session.read_only
             || self.state.active_view_read_only()
             || self.state.model.safe_mode.project_read_only()
@@ -1389,7 +1450,7 @@ impl RSpiceApp {
         }
         if !selected.is_empty() {
             candidate.recalculate_runtime_state();
-            validate_repair_candidate(&self.state, &candidate, &contract_candidate.policy)?;
+            validate_repair_candidate(&self.state.model, &candidate, &contract_candidate.policy)?;
             let after = SchematicSnapshot::capture(candidate.document());
             let changed = self.state.model.schematic.with_undo(
                 "apply reviewed connectivity repairs",
@@ -1423,7 +1484,7 @@ impl RSpiceApp {
             .connectivity
             .policy
             .clone();
-        let report = build_report(&self.state, &policy)?;
+        let report = build_report(&self.state.model, &policy)?;
         let authority = SchematicEditAuthority::capture(&self.state);
         self.state
             .publish_active_design_check_result(report.drc.clone())?;
@@ -1447,104 +1508,22 @@ impl RSpiceApp {
         ));
         Ok(())
     }
-
-    fn commit_connectivity_bus(&mut self) -> Result<(), String> {
-        connectivity_authority_error(&self.state).map_or(Ok(()), Err)?;
-        if self.state.model.schematic.session.read_only
-            || self.state.active_view_read_only()
-            || self.state.model.safe_mode.project_read_only()
-        {
-            return Err("The active schematic or project is read-only.".to_owned());
-        }
-        let declaration = validate_bus_draft(&self.state.design.connectivity_manager)?;
-        let mut contract = (*self.state.model.workspace.content.connectivity).clone();
-        contract.policy = self.state.design.connectivity_manager.policy.clone();
-        validate_policy_authority(&contract.policy, &contract)?;
-        contract.validate()?;
-        *self.state.model.workspace.content.connectivity = contract;
-        self.state.model.workspace.content.project_metadata_dirty = true;
-        self.state
-            .model
-            .schematic
-            .session
-            .editor
-            .bus_drawing
-            .cancel();
-        self.state
-            .model
-            .schematic
-            .session
-            .editor
-            .bus_drawing
-            .declaration = Some(declaration);
-        self.state.model.schematic.session.editor.tool = Tool::Bus;
-        self.state.design.connectivity_manager.close();
-        self.state
-            .prompt("Bus placement armed. Click the first point, route the bus, then finish it.");
-        Ok(())
-    }
-
-    fn arm_explicit_endpoint_route(
-        &mut self,
-        ctx: &Context,
-        repair_id: &str,
-    ) -> Result<(), String> {
-        connectivity_authority_error(&self.state).map_or(Ok(()), Err)?;
-        if self.state.model.schematic.session.read_only
-            || self.state.active_view_read_only()
-            || self.state.model.safe_mode.project_read_only()
-        {
-            return Err("The active schematic or project is read-only.".to_owned());
-        }
-        let dialog = &self.state.design.connectivity_manager;
-        let repair = dialog
-            .report
-            .repairs
-            .iter()
-            .find(|repair| repair.id == repair_id)
-            .ok_or_else(|| {
-                "The selected repair no longer exists. Refresh the report.".to_owned()
-            })?;
-        let choice_index = dialog
-            .endpoint_choices
-            .get(repair_id)
-            .copied()
-            .ok_or_else(|| "Choose one destination endpoint first.".to_owned())?;
-        let choice = repair
-            .endpoint_choices
-            .get(choice_index)
-            .cloned()
-            .ok_or_else(|| "The selected endpoint is stale. Refresh the report.".to_owned())?;
-        if choice.start == choice.destination {
-            return Err("The selected source and destination are identical.".to_owned());
-        }
-        self.state.design.connectivity_manager.close();
-        self.state.workbench.workspace = crate::workbench::state::Workspace::Design;
-        self.state.model.schematic.arm_tool(Tool::Wire);
-        self.state.start_canvas_wire(ctx, choice.start);
-        self.state.model.schematic.session.editor.center_request = Some(choice.destination);
-        self.state.prompt(format!(
-            "Wire routing armed from {}, {} to {}. The destination is centred; finish the wire on \
-             its endpoint.",
-            choice.start.x, choice.start.y, choice.label
-        ));
-        Ok(())
-    }
 }
 
-fn connectivity_authority_error(state: &AppState) -> Option<String> {
-    let authority = state.design.connectivity_manager.authority.as_ref()?;
+fn connectivity_authority_error(
+    dialog: &ConnectivityManagerDialogState,
+    model: &Model,
+) -> Option<String> {
+    let authority = dialog.authority.as_ref()?;
     let stale = !authority.matches_source(&crate::workbench::app::schematic_editor_request_source(
-        state,
-    )) || authority.view_path
-        != state.model.workspace.content.active_view.display_path()
-        || authority.grid_size != state.model.schematic.document().grid_size
-        || authority.document_policy != state.model.schematic.document().document_policy
+        model,
+    )) || authority.view_path != model.workspace.content.active_view.display_path()
+        || authority.grid_size != model.schematic.document().grid_size
+        || authority.document_policy != model.schematic.document().document_policy
         || !authority
             .snapshot
-            .is_equal_document(state.model.schematic.document())
-        || state.design.connectivity_manager.contract_at_open
-            != *state.model.workspace.content.connectivity;
+            .is_equal_document(model.schematic.document())
+        || dialog.contract_at_open != *model.workspace.content.connectivity;
     stale.then(|| {
         "The design changed after this report was extracted. Refresh the report before applying repairs or creating a bus.".to_owned()
     })
@@ -1593,25 +1572,25 @@ fn apply_repair_to_candidate(
 /// master the configuration does not run was judged in one and not the other,
 /// and every repair was refused for that master's findings.
 fn validate_repair_candidate(
-    state: &AppState,
+    model: &Model,
     candidate: &SchematicState,
     policy: &ConnectivityPolicy,
 ) -> Result<(), String> {
     // Typed-bus findings are counted on the same projected page as the check,
     // so neither count pairs buses drawn on different sheets.
     let check = |open_view: &SchematicState| -> Result<(DrcResult, usize), String> {
-        let projection = projection_with_open_view(state, policy, open_view)?;
+        let projection = projection_with_open_view(model, policy, open_view)?;
         let bus_findings = rspice_design::connectivity::bus::analyze_bus_connectivity(
-            projected_open_view(state, &projection)?.document(),
+            projected_open_view(model, &projection)?.document(),
         )
         .diagnostics
         .len();
         Ok((
-            check_projected_open_view(state, policy, &projection)?,
+            check_projected_open_view(model, policy, &projection)?,
             bus_findings,
         ))
     };
-    let (before, before_bus) = check(&state.model.schematic)?;
+    let (before, before_bus) = check(&model.schematic)?;
     let (after, after_bus) = check(candidate)?;
     let before = severe_drc_counts(&before);
     for (kind, count) in severe_drc_counts(&after) {

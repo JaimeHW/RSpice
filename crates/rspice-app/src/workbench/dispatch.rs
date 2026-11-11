@@ -21,7 +21,7 @@
 
 use crate::state::command_catalog::CommandKey;
 use crate::workbench::app::HardcopyWorkflow;
-use crate::workbench::app::dialogs::design_request::{DesignRequest, answer_design_request};
+use crate::workbench::app::dialogs::design_request::DesignRequest;
 use crate::workbench::app_state::PlatformState;
 use crate::workbench::code::commands::CodeRequest;
 #[cfg(test)]
@@ -422,7 +422,7 @@ impl RSpiceApp {
         requests::drain(
             self,
             |app| &mut app.state.workbench.outbox,
-            |app, request: DesignRequest| answer_design_request(&mut app.state, request),
+            |app, request: DesignRequest| app.answer_design_request(request),
         );
         requests::drain(
             self,

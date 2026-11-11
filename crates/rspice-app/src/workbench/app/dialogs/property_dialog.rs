@@ -659,7 +659,6 @@ fn component_property_session_error(
 mod tests {
     use super::*;
     use crate::state::{CellViewRef, Component, ComponentType, Point, PropertyValue};
-    use crate::workbench::app::dialogs::design_request::answer_design_request;
     use crate::workbench::app::open_property_editor;
     use crate::workbench::app_state::AppState;
     use rspice_design::schematic::document_policy::PropertyCommitPolicy;
@@ -679,8 +678,10 @@ mod tests {
             workbench: &mut state.workbench,
         }
         .render_property_dialog(ctx);
-        if let Some(request) = state.workbench.outbox.take::<DesignRequest>() {
-            answer_design_request(state, request);
+        if let Some(DesignRequest::ReopenPropertyEditor(component_id)) =
+            state.workbench.outbox.take::<DesignRequest>()
+        {
+            open_property_editor(state, component_id);
         }
         result
     }

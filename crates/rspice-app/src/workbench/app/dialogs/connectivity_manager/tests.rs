@@ -21,9 +21,9 @@ fn global_alias_repairs_are_derived_from_real_label_ids() {
         .push(NetLabel::new(11, Point::new(1, 0), "VDD"));
     state.sync_active_schematic_to_workspace();
     let policy = ConnectivityPolicy::default();
-    let projection = preview_projection(&state, &policy).expect("a design projection");
-    let globals = build_global_rows(&state, &policy, &projection);
-    let repairs = build_global_repairs(&state, &policy, &globals);
+    let projection = preview_projection(&state.model, &policy).expect("a design projection");
+    let globals = build_global_rows(&state.model, &policy, &projection);
+    let repairs = build_global_repairs(&state.model, &policy, &globals);
     assert_eq!(repairs.len(), 1);
     match repairs[0].action.as_ref().expect("action") {
         ConnectivityRepairAction::RenameLabels { canonical, labels } => {
@@ -60,8 +60,8 @@ fn technology_catalog_promotes_exact_declared_aliases() {
         ..ConnectivityPolicy::default()
     };
     validate_policy_authority(&policy, &state.model.workspace.content.connectivity).unwrap();
-    let projection = preview_projection(&state, &policy).expect("a design projection");
-    let globals = build_global_rows(&state, &policy, &projection);
+    let projection = preview_projection(&state.model, &policy).expect("a design projection");
+    let globals = build_global_rows(&state.model, &policy, &projection);
     assert_eq!(globals.len(), 1);
     assert_eq!(globals[0].canonical, "VDD");
     assert_eq!(globals[0].state, "resolved");
@@ -184,7 +184,14 @@ fn rendered_nodes(mut app: RSpiceApp) -> HashMap<egui::accesskit::NodeId, egui::
                 )),
                 ..egui::RawInput::default()
             },
-            |ctx| app.render_connectivity_manager_dialog(ctx),
+            |ctx| {
+                ConnectivityManager {
+                    dialog: &mut app.state.design.connectivity_manager,
+                    model: &mut app.state.model,
+                    workbench: &mut app.state.workbench,
+                }
+                .render_connectivity_manager_dialog(ctx);
+            },
         );
         if let Some(update) = output.platform_output.accesskit_update {
             nodes.extend(update.nodes);
@@ -289,7 +296,8 @@ fn the_bus_report_is_exactly_the_schematics_typed_buses() {
         .push(Wire::segment(11, Point::origin(), Point::new(20, 0)));
     state.sync_active_schematic_to_workspace();
 
-    let report = build_report(&state, &ConnectivityPolicy::default()).expect("a resolved design");
+    let report =
+        build_report(&state.model, &ConnectivityPolicy::default()).expect("a resolved design");
 
     assert_eq!(
         report.buses.len(),
@@ -341,7 +349,7 @@ fn the_report_states_an_unresolved_configuration_instead_of_buffer_connectivity(
         .net_labels
         .push(NetLabel::new(2, Point::origin(), "VOUT"));
     state.sync_active_schematic_to_workspace();
-    let resolved = build_report(&state, &ConnectivityPolicy::default())
+    let resolved = build_report(&state.model, &ConnectivityPolicy::default())
         .expect("the fixture configuration resolves");
     assert!(
         resolved.nets.iter().any(|row| row.name == "VOUT"),
@@ -350,7 +358,7 @@ fn the_report_states_an_unresolved_configuration_instead_of_buffer_connectivity(
 
     unresolve_configuration(&mut state);
 
-    let reason = build_report(&state, &ConnectivityPolicy::default())
+    let reason = build_report(&state.model, &ConnectivityPolicy::default())
         .expect_err("an unresolvable configuration has no report");
     assert!(
         reason.contains("XABSENT"),
@@ -394,7 +402,8 @@ fn only_this_views_findings_are_net_issues_and_repairs() {
         .add_component(crate::state::ComponentType::Resistor, Point::new(30, 0));
     state.sync_active_schematic_to_workspace();
 
-    let report = build_report(&state, &ConnectivityPolicy::default()).expect("a resolved design");
+    let report =
+        build_report(&state.model, &ConnectivityPolicy::default()).expect("a resolved design");
 
     assert!(
         report
@@ -552,7 +561,7 @@ fn a_repair_candidate_is_checked_as_the_configuration_runs_it() {
         .expect("the fixture configuration is well formed");
 
     let policy = state.model.workspace.content.connectivity.policy.clone();
-    let report = build_report(&state, &policy).expect("the configuration resolves");
+    let report = build_report(&state.model, &policy).expect("the configuration resolves");
     assert!(
         report
             .drc
@@ -574,7 +583,7 @@ fn a_repair_candidate_is_checked_as_the_configuration_runs_it() {
     // The candidate as its own buffer follows the placed binding into the
     // master the configuration replaced, which is the reading that
     // refused every repair here.
-    let projection = preview_projection(&state, &policy).expect("a design projection");
+    let projection = preview_projection(&state.model, &policy).expect("a design projection");
     let hierarchy =
         HierarchySource::from_design_projection(state.model.library_manager.catalog(), &projection);
     let drawn = rspice_design::drc::run_check_with_hierarchy(
@@ -593,7 +602,7 @@ fn a_repair_candidate_is_checked_as_the_configuration_runs_it() {
         drawn.violations()
     );
 
-    validate_repair_candidate(&state, &candidate, &policy)
+    validate_repair_candidate(&state.model, &candidate, &policy)
         .expect("the repair adds no finding to the design the configuration runs");
 }
 
@@ -611,8 +620,8 @@ fn every_pane_reads_one_projection_of_the_design() {
     state.sync_active_schematic_to_workspace();
     let policy = ConnectivityPolicy::default();
 
-    let projection = preview_projection(&state, &policy).expect("a design projection");
-    let globals = build_global_rows(&state, &policy, &projection);
+    let projection = preview_projection(&state.model, &policy).expect("a design projection");
+    let globals = build_global_rows(&state.model, &policy, &projection);
 
     assert!(!globals.is_empty(), "the authored global declares itself");
     for occurrence in globals.iter().flat_map(|row| &row.declarations) {
@@ -694,7 +703,8 @@ fn buses_on_two_sheets() -> AppState {
 fn the_bus_report_pairs_touching_buses_only_on_one_sheet() {
     let state = buses_on_two_sheets();
 
-    let report = build_report(&state, &ConnectivityPolicy::default()).expect("a resolved design");
+    let report =
+        build_report(&state.model, &ConnectivityPolicy::default()).expect("a resolved design");
 
     let status = |index: usize| report.buses[index].status.as_str();
     assert_eq!(status(0), "valid");
@@ -714,8 +724,11 @@ fn the_bus_report_pairs_touching_buses_only_on_one_sheet() {
 
     // The finding is located where Sheet 2 draws the bus, not where the
     // projection lays Sheet 2.
-    let projection = preview_projection(&state, &ConnectivityPolicy::default()).unwrap();
-    let analysis = canvas_bus_analysis(&state, projected_open_view(&state, &projection).unwrap());
+    let projection = preview_projection(&state.model, &ConnectivityPolicy::default()).unwrap();
+    let analysis = canvas_bus_analysis(
+        &state.model,
+        projected_open_view(&state.model, &projection).unwrap(),
+    );
     let located: Vec<_> = analysis
         .diagnostics
         .iter()

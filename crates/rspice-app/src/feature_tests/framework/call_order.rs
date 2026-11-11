@@ -351,7 +351,10 @@ const DIALOG_STEPS: &[(&str, &str)] = &[
     ("DesignFeature::render_stimulus_link_dialog", "design"),
     ("render_create_hierarchy_dialog", "design"),
     ("ProjectFeature::render_check_and_save_dialog", "project"),
-    ("render_connectivity_manager_dialog", "design"),
+    (
+        "DesignFeature::render_connectivity_manager_dialog",
+        "design",
+    ),
     ("features::render_dialog", "sheets"),
     ("ProjectFeature::render_design_management_dialog", "project"),
     ("DesignFeature::render_selection_bulk_edit_dialog", "design"),
@@ -596,7 +599,7 @@ const AFTER_CONTRIBUTION: &[Step] = &[
     ),
     (
         "21",
-        &["|app, request: DesignRequest| answer_design_request(&mut app.state, request)"],
+        &["|app, request: DesignRequest| app.answer_design_request(request)"],
     ),
     (
         "22",

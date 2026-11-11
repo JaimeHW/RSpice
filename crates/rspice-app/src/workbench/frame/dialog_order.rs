@@ -234,7 +234,10 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         key: DialogKey("design.connectivity_manager"),
         modality: Modality::Dialog,
         is_open: Some(|state| state.design.connectivity_manager.open),
-        render: |app, ctx| app.render_connectivity_manager_dialog(ctx),
+        render: |app, ctx| {
+            DesignFeature::render_connectivity_manager_dialog(&mut features::cx(app), ctx);
+            app.after_contribution();
+        },
     },
     DialogSpec {
         key: DialogKey("sheets.delete_sheet"),

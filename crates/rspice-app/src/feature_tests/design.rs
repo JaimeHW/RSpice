@@ -479,3 +479,48 @@ fn a_readoption_reopens_the_editor_in_the_frame_it_is_chosen() {
         Some("V1 re-adopted sensor_drive r2; its card is the library's again.")
     );
 }
+
+#[test]
+fn the_connectivity_manager_opens_and_draws_in_the_frame() {
+    let mut app = design_app();
+    resistor(&mut app, Point::new(0, 0));
+    crate::workbench::app::open_connectivity_manager(&mut app.state);
+    assert!(draws_dialog(
+        &mut app,
+        "Connectivity, buses and global nets"
+    ));
+    assert!(app.state.design.connectivity_manager.open);
+}
+
+/// A net revealed from the connectivity manager is revealed in the frame it
+/// is chosen: the manager closes and the canvas selects what the net joins.
+#[test]
+fn a_connectivity_reveal_is_carried_out_in_the_frame_it_is_chosen() {
+    let mut replay = Replay::of(RSpiceApp::test_instance());
+    replay.app.state.workbench.activate(Workspace::Design);
+    replay
+        .app
+        .state
+        .model
+        .schematic
+        .add_component(ComponentType::Resistor, Point::new(0, 0));
+    crate::workbench::app::open_connectivity_manager(&mut replay.app.state);
+    let at = replay
+        .frames(Vec::new())
+        .into_iter()
+        .find(|control| control.role == Role::Button && control.label == "Reveal")
+        .expect("a net row offers Reveal")
+        .center;
+    let press = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    replay.frames(vec![egui::Event::PointerMoved(at), press(true)]);
+    replay.frames(vec![press(false)]);
+    let state = &replay.app.state;
+    assert!(!state.design.connectivity_manager.open);
+    assert_eq!(state.workbench.workspace, Workspace::Design);
+    assert!(!state.model.schematic.session.editor.selection.is_empty());
+}
