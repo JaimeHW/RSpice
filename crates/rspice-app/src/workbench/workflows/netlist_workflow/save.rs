@@ -22,8 +22,29 @@ pub(crate) fn save_owned_netlist_source(
     save_as_encoding: crate::state::NetlistTextEncoding,
     commit_message: &str,
 ) -> bool {
-    if state.code.netlist.active_dependency_identity.is_some() {
-        state.prompt(
+    save_owned_netlist_source_in(
+        &mut state.model,
+        &mut state.code.netlist,
+        &mut state.workbench,
+        io,
+        save_as,
+        save_as_encoding,
+        commit_message,
+    )
+}
+
+/// [`save_owned_netlist_source`], over the model, the netlist editor's state and the session.
+pub(crate) fn save_owned_netlist_source_in(
+    model: &mut crate::workbench::app_state::Model,
+    netlist: &mut crate::workbench::documents::netlist_document::NetlistDocumentState,
+    wb: &mut crate::workbench::state::WorkbenchSession,
+    io: &(impl ExportWorkflowIo + ?Sized),
+    save_as: bool,
+    save_as_encoding: crate::state::NetlistTextEncoding,
+    commit_message: &str,
+) -> bool {
+    if netlist.active_dependency_identity.is_some() {
+        wb.prompt(
             "Include files are saved with the project. Return to the top-level deck to save it \
              as a file.",
         );
@@ -31,7 +52,7 @@ pub(crate) fn save_owned_netlist_source(
     }
     let commit_message = commit_message.trim();
     if commit_message.chars().any(char::is_control) || commit_message.chars().count() > 240 {
-        state.prompt("A revision note is one line of at most 240 characters.");
+        wb.prompt("A revision note is one line of at most 240 characters.");
         return false;
     }
     let commit_message = if commit_message.is_empty() {
@@ -39,17 +60,16 @@ pub(crate) fn save_owned_netlist_source(
     } else {
         commit_message
     };
-    let Some(source) = state.model.workspace.content.netlist_source.clone() else {
-        state.prompt("There is no editable deck to save.");
+    let Some(source) = model.workspace.content.netlist_source.clone() else {
+        wb.prompt("There is no editable deck to save.");
         return false;
     };
-    if source != state.model.simulation.source.netlist_content {
-        state.prompt("The deck was not saved: the editor and the project's deck differ.");
+    if source != model.simulation.source.netlist_content {
+        wb.prompt("The deck was not saved: the editor and the project's deck differ.");
         return false;
     }
     let visible_digest = crate::state::content_digest(&source);
-    let default_name = state
-        .model
+    let default_name = model
         .workspace
         .content
         .netlist_source_path
@@ -57,8 +77,7 @@ pub(crate) fn save_owned_netlist_source(
         .and_then(std::path::Path::file_name)
         .map(|name| name.to_string_lossy().into_owned())
         .or_else(|| {
-            state
-                .model
+            model
                 .workspace
                 .content
                 .netlist_descriptor
@@ -75,18 +94,16 @@ pub(crate) fn save_owned_netlist_source(
         .unwrap_or_else(|| "top.cir".to_owned());
     let reopenable_origin = io
         .saved_paths_are_reopenable()
-        .then(|| state.model.workspace.content.netlist_source_path.clone())
+        .then(|| model.workspace.content.netlist_source_path.clone())
         .flatten();
     let ordinary_save_to_origin = !save_as && reopenable_origin.is_some();
-    let expected_external_sha256 = state
-        .model
+    let expected_external_sha256 = model
         .workspace
         .content
         .netlist_descriptor
         .as_ref()
         .and_then(|descriptor| descriptor.external_file_sha256);
-    let source_encoding = state
-        .model
+    let source_encoding = model
         .workspace
         .content
         .netlist_descriptor
@@ -102,7 +119,7 @@ pub(crate) fn save_owned_netlist_source(
     let encoded_source = match encoding.encode(&source) {
         Ok(bytes) => bytes,
         Err(error) => {
-            record_save_failure(state, &error.to_string());
+            record_save_failure(model, &error.to_string());
             return false;
         }
     };
@@ -124,7 +141,7 @@ pub(crate) fn save_owned_netlist_source(
     let Some(mut path) = (match picked {
         Ok(path) => path,
         Err(error) => {
-            record_save_failure(state, &error);
+            record_save_failure(model, &error);
             return false;
         }
     }) else {
@@ -136,9 +153,9 @@ pub(crate) fn save_owned_netlist_source(
 
     #[cfg(not(target_arch = "wasm32"))]
     if ordinary_save_to_origin && let Some(expected) = expected_external_sha256 {
-        match stage_external_netlist_change(state, &path, expected, &source) {
+        match stage_external_netlist_change(model, netlist, wb, &path, expected, &source) {
             Ok(true) => {
-                state.prompt(
+                wb.prompt(
                     "The source changed outside RSpice. Review the local, external and merged \
                      versions before saving.",
                 );
@@ -146,7 +163,7 @@ pub(crate) fn save_owned_netlist_source(
             }
             Ok(false) => {}
             Err(error) => {
-                record_save_failure(state, &error);
+                record_save_failure(model, &error);
                 return false;
             }
         }
@@ -154,7 +171,7 @@ pub(crate) fn save_owned_netlist_source(
 
     let canonical_publication = io.saved_paths_are_reopenable();
     let next_owned_document = if canonical_publication
-        && let Some(document) = state.code.netlist.owned_document.as_ref()
+        && let Some(document) = netlist.owned_document.as_ref()
     {
         let display_name = path
             .file_name()
@@ -167,7 +184,7 @@ pub(crate) fn save_owned_netlist_source(
         match locator.and_then(|locator| next.acknowledge_save(next.content_digest(), locator)) {
             Ok(_) => Some(next),
             Err(error) => {
-                record_save_failure(state, &error.to_string());
+                record_save_failure(model, &error.to_string());
                 return false;
             }
         }
@@ -176,7 +193,7 @@ pub(crate) fn save_owned_netlist_source(
     };
     let next_descriptor = match (
         canonical_publication
-            .then_some(state.model.workspace.content.netlist_descriptor.as_ref())
+            .then_some(model.workspace.content.netlist_descriptor.as_ref())
             .flatten(),
         next_owned_document.as_ref(),
     ) {
@@ -200,14 +217,14 @@ pub(crate) fn save_owned_netlist_source(
                     });
             }
             if let Err(error) = descriptor.retain_revision(document, commit_message) {
-                record_save_failure(state, &error);
+                record_save_failure(model, &error);
                 return false;
             }
             Some(descriptor)
         }
         (None, None) => None,
         _ => {
-            record_save_failure(state, "the deck's save record is incomplete");
+            record_save_failure(model, "the deck's save record is incomplete");
             return false;
         }
     };
@@ -230,18 +247,18 @@ pub(crate) fn save_owned_netlist_source(
     match result {
         Ok(()) => {
             if canonical_publication {
-                state.model.workspace.content.netlist_source_path = Some(path.clone());
+                model.workspace.content.netlist_source_path = Some(path.clone());
             }
             if let Some(descriptor) = next_descriptor {
-                state.model.workspace.content.netlist_descriptor = Some(descriptor);
+                model.workspace.content.netlist_descriptor = Some(descriptor);
             }
             if let Some(document) = next_owned_document {
-                state.model.workspace.content.netlist_document = Some(document.clone());
-                state.code.netlist.owned_document = Some(document);
+                model.workspace.content.netlist_document = Some(document.clone());
+                netlist.owned_document = Some(document);
             }
             if canonical_publication {
-                state.code.netlist.externally_saved_content_digest = Some(visible_digest);
-                state.record(
+                netlist.externally_saved_content_digest = Some(visible_digest);
+                model.record(
                     LogSeverity::Info,
                     LogSource::Studio,
                     crate::workbench::workflows::export_workflow::export_completion_message(
@@ -252,7 +269,7 @@ pub(crate) fn save_owned_netlist_source(
                     ),
                 );
             } else {
-                state.record(
+                model.record(
                     LogSeverity::Info,
                     LogSource::Studio,
                     format!(
@@ -269,24 +286,24 @@ pub(crate) fn save_owned_netlist_source(
             if ordinary_save_to_origin
                 && let Some(expected) = expected_external_sha256
                 && matches!(
-                    stage_external_netlist_change(state, &path, expected, &source),
+                    stage_external_netlist_change(model, netlist, wb, &path, expected, &source),
                     Ok(true)
                 )
             {
-                state.prompt(
+                wb.prompt(
                     "The source changed while it was being saved; nothing was overwritten. \
                      Review the external version.",
                 );
                 return false;
             }
-            record_save_failure(state, &error);
+            record_save_failure(model, &error);
             false
         }
     }
 }
 
-fn record_save_failure(state: &mut AppState, error: &str) {
-    state.record(
+fn record_save_failure(model: &mut crate::workbench::app_state::Model, error: &str) {
+    model.record(
         LogSeverity::Error,
         LogSource::Studio,
         format!("SPICE source save failed: {error}"),

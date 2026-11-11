@@ -138,43 +138,59 @@ pub(crate) fn action_export_generated_netlist_with_options(
     include_source_map: bool,
     io: &(impl ExportWorkflowIo + ?Sized),
 ) -> bool {
-    let Some(document) = state.model.netlist_artifacts.generated_document.as_ref() else {
-        state.prompt("There is no generated netlist to export.");
+    action_export_generated_netlist_with_options_in(
+        &mut state.model,
+        &mut state.workbench,
+        format,
+        bundle_dependencies,
+        include_source_map,
+        io,
+    )
+}
+
+/// [`action_export_generated_netlist_with_options`], over the model and the session.
+pub(crate) fn action_export_generated_netlist_with_options_in(
+    model: &mut crate::workbench::app_state::Model,
+    wb: &mut crate::workbench::state::WorkbenchSession,
+    format: crate::io::NetlistFormat,
+    bundle_dependencies: bool,
+    include_source_map: bool,
+    io: &(impl ExportWorkflowIo + ?Sized),
+) -> bool {
+    let Some(document) = model.netlist_artifacts.generated_document.as_ref() else {
+        wb.prompt("There is no generated netlist to export.");
         return false;
     };
     let Some(artifact) = document.generated_artifact().cloned() else {
-        state.prompt("The selected document is not a generated netlist.");
+        wb.prompt("The selected document is not a generated netlist.");
         return false;
     };
-    if state.model.netlist_artifacts.generation_error.is_some()
-        || state.model.netlist_artifacts.generated_input_digest
-            != state
-                .model
-                .netlist_artifacts
-                .current_generation_input_digest
-        || state.model.netlist_artifacts.generated_input_digest
+    if model.netlist_artifacts.generation_error.is_some()
+        || model.netlist_artifacts.generated_input_digest
+            != model.netlist_artifacts.current_generation_input_digest
+        || model.netlist_artifacts.generated_input_digest
             != Some(artifact.provenance().input().digest())
     {
-        state.prompt("The generated netlist is out of date; regenerate it to export.");
+        wb.prompt("The generated netlist is out of date; regenerate it to export.");
         return false;
     }
     if include_source_map && !bundle_dependencies {
-        state.prompt("A source map is exported only with a self-contained bundle.");
+        wb.prompt("A source map is exported only with a self-contained bundle.");
         return false;
     }
     if include_source_map && format != crate::io::NetlistFormat::Spice {
-        state.prompt("A source map maps SPICE lines; it cannot be attached to another dialect.");
+        wb.prompt("A source map maps SPICE lines; it cannot be attached to another dialect.");
         return false;
     }
     if !bundle_dependencies && !artifact.dependencies().is_empty() {
-        state.prompt(
+        wb.prompt(
             "This netlist includes project or external files; export it as a self-contained \
              bundle.",
         );
         return false;
     }
     if !bundle_dependencies {
-        return publish_generated_source(state, &artifact, format, io);
+        return publish_generated_source(model, &artifact, format, io);
     }
 
     let bundle =
@@ -183,7 +199,7 @@ pub(crate) fn action_export_generated_netlist_with_options(
         }) {
             Ok(bundle) => bundle,
             Err(error) => {
-                state.report_failure("Netlist bundle export failed", error.to_string());
+                model.report_failure("Netlist bundle export failed", error.to_string());
                 return false;
             }
         };
@@ -200,7 +216,7 @@ pub(crate) fn action_export_generated_netlist_with_options(
     let Some(mut path) = (match picked {
         Ok(path) => path,
         Err(error) => {
-            state.report_failure("Netlist bundle export failed", error.to_string());
+            model.report_failure("Netlist bundle export failed", error.to_string());
             return false;
         }
     }) else {
@@ -212,7 +228,7 @@ pub(crate) fn action_export_generated_netlist_with_options(
     });
     match result {
         Ok(()) => {
-            state.record(
+            model.record(
                 LogSeverity::Info,
                 LogSource::Studio,
                 crate::workbench::workflows::export_workflow::export_completion_message(
@@ -225,14 +241,14 @@ pub(crate) fn action_export_generated_netlist_with_options(
             true
         }
         Err(error) => {
-            state.report_failure("Netlist bundle export failed", error.to_string());
+            model.report_failure("Netlist bundle export failed", error.to_string());
             false
         }
     }
 }
 
 fn publish_generated_source(
-    state: &mut AppState,
+    model: &mut crate::workbench::app_state::Model,
     artifact: &crate::state::GeneratedArtifact,
     format: crate::io::NetlistFormat,
     io: &(impl ExportWorkflowIo + ?Sized),
@@ -256,7 +272,7 @@ fn publish_generated_source(
     }) {
         Ok(path) => path,
         Err(error) => {
-            state.report_failure("Netlist export failed", error.to_string());
+            model.report_failure("Netlist export failed", error.to_string());
             return false;
         }
     }) else {
@@ -268,7 +284,7 @@ fn publish_generated_source(
         .and_then(|destination| io.write_text_file_observed(&destination, &source));
     match result {
         Ok(()) => {
-            state.record(
+            model.record(
                 LogSeverity::Info,
                 LogSource::Studio,
                 crate::workbench::workflows::export_workflow::export_completion_message(
@@ -281,7 +297,7 @@ fn publish_generated_source(
             true
         }
         Err(error) => {
-            state.report_failure("Netlist export failed", error.to_string());
+            model.report_failure("Netlist export failed", error.to_string());
             false
         }
     }

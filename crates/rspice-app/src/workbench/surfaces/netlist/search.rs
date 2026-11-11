@@ -12,7 +12,7 @@ use std::ops::Range;
 
 use crate::ui::widgets::{Dialog, DialogChoice, DialogHintTone, DialogInitialFocus, DialogSize};
 use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
-use crate::workbench::{AppState, MessageCatalog, MessageId, RSpiceApp};
+use crate::workbench::{MessageCatalog, MessageId, RSpiceApp};
 
 use super::ownership::open_owned_source;
 
@@ -55,6 +55,17 @@ struct NetlistSearchMatch {
     found: crate::state::FindMatch,
     /// The card the match sits on, captured while the document was walked.
     card: String,
+}
+
+/// What a netlist search reads: the model, the netlist editor's state, the
+/// include tabs open and the runs.
+#[derive(Clone, Copy)]
+pub(super) struct SearchSources<'a> {
+    pub(super) model: &'a crate::workbench::app_state::Model,
+    pub(super) netlist: &'a crate::workbench::documents::netlist_document::NetlistDocumentState,
+    pub(super) open_documents:
+        &'a std::collections::HashSet<crate::workbench::state::WorkspaceDocumentId>,
+    pub(super) runs: &'a rspice_app_runs::workbench::slots::runs::RunsState,
 }
 
 /// The match an action names, held independently of the scan it came from.
@@ -142,7 +153,7 @@ fn plan_scoped_replacements(
 }
 
 fn netlist_search_documents(
-    state: &AppState,
+    sources: SearchSources<'_>,
     scope: crate::workbench::documents::netlist_document::NetlistFindScope,
 ) -> Vec<NetlistSearchDocument<'_>> {
     use crate::workbench::documents::netlist_document::NetlistFindScope;
@@ -153,7 +164,7 @@ fn netlist_search_documents(
         dependency_identity: None,
         editable: false,
         label: "generated.sp".to_owned(),
-        source: state.model.netlist_artifacts.generated_source.as_str(),
+        source: sources.model.netlist_artifacts.generated_source.as_str(),
         search_byte_range: None,
     };
     let owned = || NetlistSearchDocument {
@@ -161,7 +172,7 @@ fn netlist_search_documents(
         deck_id: None,
         dependency_identity: None,
         editable: true,
-        label: state
+        label: sources
             .model
             .workspace
             .content
@@ -169,7 +180,7 @@ fn netlist_search_documents(
             .as_ref()
             .map(|descriptor| descriptor.artifact_name.clone())
             .or_else(|| {
-                state
+                sources
                     .model
                     .workspace
                     .content
@@ -179,7 +190,7 @@ fn netlist_search_documents(
                     .map(|name| name.to_string_lossy().into_owned())
             })
             .unwrap_or_else(|| "owned-source.sp".to_owned()),
-        source: state
+        source: sources
             .model
             .workspace
             .content
@@ -191,25 +202,29 @@ fn netlist_search_documents(
 
     let current = || {
         if let Some(dependency) =
-            crate::workbench::documents::netlist_document::active_dependency(state)
+            crate::workbench::documents::netlist_document::active_dependency_in(
+                sources.model,
+                sources.netlist,
+            )
         {
             NetlistSearchDocument {
-                active_document: state
-                    .code
+                active_document: sources
                     .netlist
                     .active_dependency_root
-                    .unwrap_or(state.code.netlist.active_document),
+                    .unwrap_or(sources.netlist.active_document),
                 deck_id: None,
                 dependency_identity: Some(dependency.locator().logical_identity()),
-                editable: crate::workbench::documents::netlist_document::active_dependency_is_owned(
-                    state,
-                ),
+                editable:
+                    crate::workbench::documents::netlist_document::active_dependency_is_owned_in(
+                        sources.model,
+                        sources.netlist,
+                    ),
                 label: dependency.locator().display_name().to_owned(),
                 source: dependency.source().unwrap_or_default(),
                 search_byte_range: None,
             }
         } else {
-            match state.code.netlist.active_document {
+            match sources.netlist.active_document {
                 ActiveNetlistDocument::Generated => generated(),
                 ActiveNetlistDocument::OwnedSource => owned(),
                 ActiveNetlistDocument::GeneratedDiff => NetlistSearchDocument {
@@ -218,7 +233,7 @@ fn netlist_search_documents(
                     dependency_identity: None,
                     editable: false,
                     label: "generated.diff".to_owned(),
-                    source: state.code.netlist.generated_diff_source.as_str(),
+                    source: sources.netlist.generated_diff_source.as_str(),
                     search_byte_range: None,
                 },
                 ActiveNetlistDocument::RunSnapshot => NetlistSearchDocument {
@@ -226,10 +241,10 @@ fn netlist_search_documents(
                     deck_id: None,
                     dependency_identity: None,
                     editable: false,
-                    label: crate::workbench::documents::netlist_document::run_deck_snapshot_artifact_name(
-                        state,
+                    label: crate::workbench::documents::netlist_document::run_deck_snapshot_artifact_name_in(
+                        sources.runs,
                     ),
-                    source: state
+                    source: sources
                         .runs.manual_run
                         .last_run_buffer
                         .as_deref()
@@ -244,17 +259,12 @@ fn netlist_search_documents(
         NetlistFindScope::CurrentDocument => vec![current()],
         NetlistFindScope::Selection => {
             let mut document = current();
-            document.search_byte_range = state
-                .code
-                .netlist
-                .selected_byte_range
-                .clone()
-                .or(Some(0..0));
+            document.search_byte_range = sources.netlist.selected_byte_range.clone().or(Some(0..0));
             vec![document]
         }
-        NetlistFindScope::OpenDocuments => open_netlist_search_documents(state),
+        NetlistFindScope::OpenDocuments => open_netlist_search_documents(sources),
         NetlistFindScope::ActiveLanguageProject => {
-            let mut documents = state
+            let mut documents = sources
                 .model
                 .workspace
                 .content
@@ -263,15 +273,15 @@ fn netlist_search_documents(
                 .map(|_| vec![owned()])
                 .unwrap_or_default();
             documents.extend(dependency_search_documents(
-                state,
+                sources,
                 ActiveNetlistDocument::OwnedSource,
                 false,
             ));
-            documents.extend(retained_deck_search_documents(state));
-            if state.code.netlist.find.include_generated_references {
+            documents.extend(retained_deck_search_documents(sources));
+            if sources.netlist.find.include_generated_references {
                 documents.push(generated());
                 documents.extend(dependency_search_documents(
-                    state,
+                    sources,
                     ActiveNetlistDocument::Generated,
                     false,
                 ));
@@ -280,25 +290,25 @@ fn netlist_search_documents(
         }
         NetlistFindScope::ProjectReferences => {
             let mut documents = Vec::new();
-            if state.code.netlist.find.include_generated_references
-                && !state.model.netlist_artifacts.generated_source.is_empty()
+            if sources.netlist.find.include_generated_references
+                && !sources.model.netlist_artifacts.generated_source.is_empty()
             {
                 documents.push(generated());
                 documents.extend(dependency_search_documents(
-                    state,
+                    sources,
                     ActiveNetlistDocument::Generated,
                     false,
                 ));
             }
-            if state.model.workspace.content.netlist_source.is_some() {
+            if sources.model.workspace.content.netlist_source.is_some() {
                 documents.extend(dependency_search_documents(
-                    state,
+                    sources,
                     ActiveNetlistDocument::OwnedSource,
                     false,
                 ));
             }
             documents.extend(
-                retained_deck_search_documents(state)
+                retained_deck_search_documents(sources)
                     .into_iter()
                     .filter(|document| document.dependency_identity.is_some()),
             );
@@ -307,45 +317,45 @@ fn netlist_search_documents(
     }
 }
 
-fn open_netlist_search_documents(state: &AppState) -> Vec<NetlistSearchDocument<'_>> {
+fn open_netlist_search_documents(sources: SearchSources<'_>) -> Vec<NetlistSearchDocument<'_>> {
     use crate::workbench::state::WorkspaceDocumentId;
 
     let mut documents = Vec::new();
-    if let Some(generated) = state.model.netlist_artifacts.generated_document.as_ref() {
+    if let Some(generated) = sources.model.netlist_artifacts.generated_document.as_ref() {
         documents.push(NetlistSearchDocument {
             active_document: ActiveNetlistDocument::Generated,
             deck_id: None,
             dependency_identity: None,
             editable: false,
             label: "generated.sp".to_owned(),
-            source: state.model.netlist_artifacts.generated_source.as_str(),
+            source: sources.model.netlist_artifacts.generated_source.as_str(),
             search_byte_range: None,
         });
-        if state.code.netlist.find.include_generated_references {
+        if sources.netlist.find.include_generated_references {
             documents.extend(
-                dependency_search_documents(state, ActiveNetlistDocument::Generated, false)
+                dependency_search_documents(sources, ActiveNetlistDocument::Generated, false)
                     .into_iter()
                     .filter(|dependency| {
-                        state.code.netlist_open_documents.contains(
-                            &WorkspaceDocumentId::NetlistDependency {
+                        sources
+                            .open_documents
+                            .contains(&WorkspaceDocumentId::NetlistDependency {
                                 root: generated.id(),
                                 logical_identity: dependency
                                     .dependency_identity
                                     .unwrap_or_default()
                                     .to_owned(),
-                            },
-                        )
+                            })
                     }),
             );
         }
     }
-    if let Some(owned) = state.code.netlist.owned_document.as_ref() {
+    if let Some(owned) = sources.netlist.owned_document.as_ref() {
         documents.push(NetlistSearchDocument {
             active_document: ActiveNetlistDocument::OwnedSource,
             deck_id: None,
             dependency_identity: None,
             editable: true,
-            label: state
+            label: sources
                 .model
                 .workspace
                 .content
@@ -353,7 +363,7 @@ fn open_netlist_search_documents(state: &AppState) -> Vec<NetlistSearchDocument<
                 .as_ref()
                 .map(|descriptor| descriptor.artifact_name.clone())
                 .unwrap_or_else(|| "owned-source.sp".to_owned()),
-            source: state
+            source: sources
                 .model
                 .workspace
                 .content
@@ -363,29 +373,29 @@ fn open_netlist_search_documents(state: &AppState) -> Vec<NetlistSearchDocument<
             search_byte_range: None,
         });
         documents.extend(
-            dependency_search_documents(state, ActiveNetlistDocument::OwnedSource, false)
+            dependency_search_documents(sources, ActiveNetlistDocument::OwnedSource, false)
                 .into_iter()
                 .filter(|dependency| {
-                    state.code.netlist_open_documents.contains(
-                        &WorkspaceDocumentId::NetlistDependency {
+                    sources
+                        .open_documents
+                        .contains(&WorkspaceDocumentId::NetlistDependency {
                             root: owned.id(),
                             logical_identity: dependency
                                 .dependency_identity
                                 .unwrap_or_default()
                                 .to_owned(),
-                        },
-                    )
+                        })
                 }),
         );
     }
-    if !state.code.netlist.generated_diff_source.is_empty() {
+    if !sources.netlist.generated_diff_source.is_empty() {
         documents.push(NetlistSearchDocument {
             active_document: ActiveNetlistDocument::GeneratedDiff,
             deck_id: None,
             dependency_identity: None,
             editable: false,
             label: "generated.diff".to_owned(),
-            source: state.code.netlist.generated_diff_source.as_str(),
+            source: sources.netlist.generated_diff_source.as_str(),
             search_byte_range: None,
         });
     }
@@ -393,18 +403,18 @@ fn open_netlist_search_documents(state: &AppState) -> Vec<NetlistSearchDocument<
 }
 
 fn dependency_search_documents(
-    state: &AppState,
+    sources: SearchSources<'_>,
     root: ActiveNetlistDocument,
     owned_only: bool,
 ) -> Vec<NetlistSearchDocument<'_>> {
     let document = match root {
         ActiveNetlistDocument::Generated => {
-            state.model.netlist_artifacts.generated_document.as_ref()
+            sources.model.netlist_artifacts.generated_document.as_ref()
         }
-        ActiveNetlistDocument::OwnedSource => state.code.netlist.owned_document.as_ref(),
+        ActiveNetlistDocument::OwnedSource => sources.netlist.owned_document.as_ref(),
         ActiveNetlistDocument::GeneratedDiff | ActiveNetlistDocument::RunSnapshot => None,
     };
-    let owned = state.model.workspace.content.netlist_descriptor.as_ref();
+    let owned = sources.model.workspace.content.netlist_descriptor.as_ref();
     document
         .into_iter()
         .flat_map(crate::state::NetlistDocument::dependencies)
@@ -428,9 +438,9 @@ fn dependency_search_documents(
         .collect()
 }
 
-fn retained_deck_search_documents(state: &AppState) -> Vec<NetlistSearchDocument<'_>> {
+fn retained_deck_search_documents(sources: SearchSources<'_>) -> Vec<NetlistSearchDocument<'_>> {
     let mut documents = Vec::new();
-    for deck in &state.model.workspace.content.retained_netlist_decks {
+    for deck in &sources.model.workspace.content.retained_netlist_decks {
         let artifact = deck.descriptor.artifact_name.as_str();
         documents.push(NetlistSearchDocument {
             active_document: ActiveNetlistDocument::OwnedSource,
@@ -605,7 +615,15 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
         whole_word: find.whole_symbol,
         regular_expression: find.regular_expression,
     };
-    let documents = netlist_search_documents(&app.state, find.scope);
+    let documents = netlist_search_documents(
+        SearchSources {
+            model: &app.state.model,
+            netlist: &app.state.code.netlist,
+            open_documents: &app.state.code.netlist_open_documents,
+            runs: &app.state.runs,
+        },
+        find.scope,
+    );
     let found = scan_documents(&documents, &find.find, options, find.include_comments);
     find.error = if find.scope == NetlistFindScope::Selection
         && app.state.code.netlist.selected_byte_range.is_none()

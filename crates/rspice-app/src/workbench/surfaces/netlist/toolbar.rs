@@ -421,7 +421,8 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) -> CodeToolbarLayou
                         }
                     }
                     ActiveNetlistDocument::OwnedSource => {
-                        let save_ready = owned_source_save_ready(app);
+                        let save_ready =
+                            owned_source_save_ready(&app.state.model, &app.state.code.netlist);
                         let save = ui
                             .add_enabled_ui(save_ready, |ui| {
                                 ui.add_sized(
@@ -581,7 +582,8 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) -> CodeToolbarLayou
                         }
                     }
                     ActiveNetlistDocument::OwnedSource => {
-                        let save_ready = owned_source_save_ready(app);
+                        let save_ready =
+                            owned_source_save_ready(&app.state.model, &app.state.code.netlist);
                         if ui
                             .add_enabled(save_ready, egui::Button::new(save_source_label.as_str()))
                             .on_disabled_hover_text(

@@ -1414,7 +1414,8 @@ mod tests {
             state.model.netlist_artifacts.generated_source.clone();
 
         ownership::create_owned_source(
-            &mut state,
+            &mut state.model,
+            &mut state.code.netlist,
             "top_override.sp",
             crate::state::OwnedNetlistEditStrategy::OwnedSource,
         )

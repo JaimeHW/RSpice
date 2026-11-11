@@ -1110,8 +1110,17 @@ pub(super) fn commit_owned_netlist_profile_review(
 }
 
 pub(crate) fn cancel_staged_netlist_import(state: &mut AppState) {
-    if state.code.netlist.import_review.take().is_some() {
-        crate::workbench::lifecycle::project_lifecycle::cancel_transaction(&mut state.platform);
+    cancel_staged_netlist_import_in(&mut state.code.netlist, &mut state.platform);
+}
+
+/// [`cancel_staged_netlist_import`], over the netlist editor's state and the
+/// platform's.
+pub(crate) fn cancel_staged_netlist_import_in(
+    netlist: &mut crate::workbench::documents::netlist_document::NetlistDocumentState,
+    platform: &mut rspice_app_services::workbench::slots::platform::PlatformState,
+) {
+    if netlist.import_review.take().is_some() {
+        crate::workbench::lifecycle::project_lifecycle::cancel_transaction(platform);
     }
 }
 

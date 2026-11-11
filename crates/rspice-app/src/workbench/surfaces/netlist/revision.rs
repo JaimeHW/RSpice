@@ -236,15 +236,18 @@ pub(super) fn comparison_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp)
     app.state.code.netlist.comparison_dialog = dialog;
 }
 
-pub(super) fn owned_source_save_ready(app: &RSpiceApp) -> bool {
-    if app.state.code.netlist.active_document != ActiveNetlistDocument::OwnedSource
-        || app.state.code.netlist.active_dependency_identity.is_some()
-        || app.state.model.workspace.content.netlist_source.is_none()
+pub(super) fn owned_source_save_ready(
+    model: &crate::workbench::app_state::Model,
+    netlist: &crate::workbench::documents::netlist_document::NetlistDocumentState,
+) -> bool {
+    if netlist.active_document != ActiveNetlistDocument::OwnedSource
+        || netlist.active_dependency_identity.is_some()
+        || model.workspace.content.netlist_source.is_none()
     {
         return false;
     }
-    let digest = crate::state::content_digest(&app.state.model.simulation.source.netlist_content);
-    app.state.code.netlist.externally_saved_content_digest != Some(digest)
+    let digest = crate::state::content_digest(&model.simulation.source.netlist_content);
+    netlist.externally_saved_content_digest != Some(digest)
 }
 
 pub(super) fn save_source_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) {

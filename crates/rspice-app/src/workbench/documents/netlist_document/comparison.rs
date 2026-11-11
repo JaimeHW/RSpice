@@ -34,14 +34,20 @@ pub(crate) fn open_netlist_comparison(
 }
 
 pub fn compare_generated_revision(state: &mut AppState, index: usize) -> Result<(), String> {
-    let previous = state
-        .code
-        .netlist
+    compare_generated_revision_in(&mut state.model, &mut state.code.netlist, index)
+}
+
+/// [`compare_generated_revision`], over the model and the netlist editor's state.
+pub(crate) fn compare_generated_revision_in(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    index: usize,
+) -> Result<(), String> {
+    let previous = netlist
         .generated_history
         .get(index)
         .ok_or_else(|| "The selected generated revision is no longer retained.".to_owned())?;
-    let current = state
-        .model
+    let current = model
         .netlist_artifacts
         .generated_document
         .as_ref()
@@ -54,36 +60,41 @@ pub fn compare_generated_revision(state: &mut AppState, index: usize) -> Result<
         .context_radius(3)
         .header(&previous_label, &current_label)
         .to_string();
-    state.code.netlist.generated_diff_source = if diff.is_empty() {
+    netlist.generated_diff_source = if diff.is_empty() {
         format!("--- {previous_label}\n+++ {current_label}\n No source changes\n")
     } else {
         diff
     };
-    state.code.netlist.comparison_return_document = ActiveNetlistDocument::Generated;
-    state.code.netlist.active_dependency_identity = None;
-    state.code.netlist.active_dependency_root = None;
-    state.code.netlist.active_document = ActiveNetlistDocument::GeneratedDiff;
-    state.code.netlist.active_document_initialized = true;
-    state.model.simulation.source.netlist_content =
-        state.code.netlist.generated_diff_source.clone();
-    state.code.netlist.revision = state.code.netlist.revision.wrapping_add(1);
-    state.code.netlist.completion_open = false;
-    state.model.invalidate_source_evidence();
+    netlist.comparison_return_document = ActiveNetlistDocument::Generated;
+    netlist.active_dependency_identity = None;
+    netlist.active_dependency_root = None;
+    netlist.active_document = ActiveNetlistDocument::GeneratedDiff;
+    netlist.active_document_initialized = true;
+    model.simulation.source.netlist_content = netlist.generated_diff_source.clone();
+    netlist.revision = netlist.revision.wrapping_add(1);
+    netlist.completion_open = false;
+    model.invalidate_source_evidence();
     Ok(())
 }
 
 pub fn compare_owned_revision(state: &mut AppState, index: usize) -> Result<(), String> {
-    let snapshot = state
-        .model
+    compare_owned_revision_in(&mut state.model, &mut state.code.netlist, index)
+}
+
+/// [`compare_owned_revision`], over the model and the netlist editor's state.
+pub(crate) fn compare_owned_revision_in(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    index: usize,
+) -> Result<(), String> {
+    let snapshot = model
         .workspace
         .content
         .netlist_descriptor
         .as_ref()
         .and_then(|descriptor| descriptor.revision_history.get(index))
         .ok_or_else(|| "The selected owned-source revision is no longer retained.".to_owned())?;
-    let current = state
-        .code
-        .netlist
+    let current = netlist
         .owned_document
         .as_ref()
         .ok_or_else(|| "No current owned source document is available.".to_owned())?;
@@ -102,21 +113,20 @@ pub fn compare_owned_revision(state: &mut AppState, index: usize) -> Result<(), 
         .context_radius(3)
         .header(&previous_label, &current_label)
         .to_string();
-    state.code.netlist.generated_diff_source = if diff.is_empty() {
+    netlist.generated_diff_source = if diff.is_empty() {
         format!("--- {previous_label}\n+++ {current_label}\n No source changes\n")
     } else {
         diff
     };
-    state.code.netlist.comparison_return_document = ActiveNetlistDocument::OwnedSource;
-    state.code.netlist.active_dependency_identity = None;
-    state.code.netlist.active_dependency_root = None;
-    state.code.netlist.active_document = ActiveNetlistDocument::GeneratedDiff;
-    state.code.netlist.active_document_initialized = true;
-    state.model.simulation.source.netlist_content =
-        state.code.netlist.generated_diff_source.clone();
-    state.code.netlist.revision = state.code.netlist.revision.wrapping_add(1);
-    state.code.netlist.completion_open = false;
-    state.model.invalidate_source_evidence();
+    netlist.comparison_return_document = ActiveNetlistDocument::OwnedSource;
+    netlist.active_dependency_identity = None;
+    netlist.active_dependency_root = None;
+    netlist.active_document = ActiveNetlistDocument::GeneratedDiff;
+    netlist.active_document_initialized = true;
+    model.simulation.source.netlist_content = netlist.generated_diff_source.clone();
+    netlist.revision = netlist.revision.wrapping_add(1);
+    netlist.completion_open = false;
+    model.invalidate_source_evidence();
     Ok(())
 }
 
@@ -255,11 +265,6 @@ pub(crate) fn run_deck_snapshot_run_id_in(runs: &RunsState) -> Option<u64> {
 /// The synthetic filename the run snapshot is filed under. It is an
 /// identifier, not translated copy, and it names the run so two snapshots from
 /// different runs can never be mistaken for one document.
-pub(crate) fn run_deck_snapshot_artifact_name(state: &AppState) -> String {
-    run_deck_snapshot_artifact_name_in(&state.runs)
-}
-
-/// [`run_deck_snapshot_artifact_name`], over the runs.
 pub(crate) fn run_deck_snapshot_artifact_name_in(runs: &RunsState) -> String {
     format!("run-{}.sp", runs.manual_run.last_run_id.unwrap_or_default())
 }

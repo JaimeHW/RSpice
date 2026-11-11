@@ -50,8 +50,7 @@ pub use comparison::{
 };
 pub(crate) use comparison::{
     close_run_deck_snapshot, open_netlist_comparison, open_run_deck_snapshot_in,
-    run_deck_snapshot_artifact_name, run_deck_snapshot_artifact_name_in, run_deck_snapshot_run_id,
-    run_deck_snapshot_run_id_in,
+    run_deck_snapshot_artifact_name_in, run_deck_snapshot_run_id, run_deck_snapshot_run_id_in,
 };
 pub use diagnostics::{DiagnosticSeverity, control_disposition_summary};
 pub(crate) use editor::editor_id;

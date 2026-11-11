@@ -210,7 +210,9 @@ pub(super) fn merge_conflict_block(local: &str, external: &str) -> String {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(super) fn stage_external_netlist_change(
-    state: &mut AppState,
+    model: &mut crate::workbench::app_state::Model,
+    netlist: &mut crate::workbench::documents::netlist_document::NetlistDocumentState,
+    wb: &mut crate::workbench::state::WorkbenchSession,
     path: &std::path::Path,
     expected_sha256: [u8; 32],
     local_source: &str,
@@ -229,8 +231,7 @@ pub(super) fn stage_external_netlist_change(
         return Ok(false);
     }
     let (external_source, external_encoding) = decode_import_bytes(&bytes)?;
-    let descriptor = state
-        .model
+    let descriptor = model
         .workspace
         .content
         .netlist_descriptor
@@ -263,7 +264,7 @@ pub(super) fn stage_external_netlist_change(
         .context_radius(3)
         .header("RSpice local editor", "External file")
         .to_string();
-    state.code.netlist.external_change = Some(
+    netlist.external_change = Some(
         crate::workbench::documents::netlist_document::NetlistExternalChangeState {
             path: path.to_path_buf(),
             expected_sha256,
@@ -279,9 +280,7 @@ pub(super) fn stage_external_netlist_change(
             error: None,
         },
     );
-    state
-        .workbench
-        .activate(crate::workbench::state::Workspace::Netlist);
+    wb.activate(crate::workbench::state::Workspace::Netlist);
     Ok(true)
 }
 
