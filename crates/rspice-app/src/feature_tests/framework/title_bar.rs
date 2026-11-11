@@ -850,17 +850,11 @@ fn the_grid_rows_choose_the_drawn_style() {
     assert_eq!(read("Lines"), (Role::MenuItemRadio, Some(Toggled::False)));
     assert_eq!(read("Off"), (Role::MenuItemRadio, Some(Toggled::False)));
 
-    app.execute(Command::SetGridStyle(GridStyle::Off).key());
+    app.execute(DesignCommand::GridOff.key());
     assert_eq!(app.state.design.grid, GridStyle::Off);
-    assert_eq!(
-        app.checked(Command::SetGridStyle(GridStyle::Off).key()),
-        Some(true)
-    );
-    assert_eq!(
-        app.checked(Command::SetGridStyle(GridStyle::Dots).key()),
-        Some(false)
-    );
-    app.execute(Command::CycleGrid.key());
+    assert_eq!(app.checked(DesignCommand::GridOff.key()), Some(true));
+    assert_eq!(app.checked(DesignCommand::GridDots.key()), Some(false));
+    app.execute(DesignCommand::CycleGrid.key());
     assert_eq!(app.state.design.grid, GridStyle::Dots);
 }
 

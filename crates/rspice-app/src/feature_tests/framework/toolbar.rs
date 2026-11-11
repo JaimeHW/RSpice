@@ -17,7 +17,6 @@ use crate::workbench::chrome::toolbar::results::{
 };
 use crate::workbench::chrome::toolbar::simulate::pvt_menu_height_for_viewport;
 use crate::workbench::chrome::toolbar::*;
-use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::layout::LayoutSpec;
 use crate::workbench::state::{WorkbenchSession, Workspace};
@@ -177,7 +176,7 @@ fn desktop_design_toolbar_matches_the_upgraded_mockup() {
     assert_eq!(
         DESIGN_DIRECT_TOOLBAR_COMMANDS.map(|(key, _, _)| key),
         [
-            Command::SelectTool.key(),
+            DesignCommand::SelectTool.key(),
             DesignCommand::PlaceInstance.key(),
             DesignCommand::PlaceWire.key(),
             DesignCommand::PlaceBus.key(),

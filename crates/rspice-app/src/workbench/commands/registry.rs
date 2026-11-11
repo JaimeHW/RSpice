@@ -96,9 +96,6 @@ const ZOOM_IN: &[ShortcutBinding] = &[
 ];
 const ZOOM_OUT: &[ShortcutBinding] = &[primary(chord(Key::Minus, false, false, false, "−"), ALL)];
 const ZOOM_FIT: &[ShortcutBinding] = &[primary(chord(Key::F, false, false, false, "F"), ALL)];
-const FIT_SCHEMATIC_CONTENT: &[ShortcutBinding] =
-    &[primary(chord(Key::F, false, false, true, "Shift+F"), ALL)];
-const GRID: &[ShortcutBinding] = &[primary(chord(Key::G, false, false, false, "G"), ALL)];
 // The mockup gives the results managers M, A and Q. Every one of those bare
 // letters already has a single canonical owner in this product — move,
 // symbol arc, object properties — and that one-owner rule is pinned by test
@@ -308,14 +305,10 @@ impl Command {
             | Self::ZoomIn
             | Self::ZoomOut
             | Self::ZoomFit
-            | Self::FitSchematicContent
             | Self::ZoomOneToOne
-            | Self::ZoomPrevious
-            | Self::SelectTool => ShortcutContext::EditContext,
+            | Self::ZoomPrevious => ShortcutContext::EditContext,
             Self::FindInDesign
             | Self::FindReplace
-            | Self::CycleGrid
-            | Self::SetGridStyle(_)
             | Self::MoveSelection
             | Self::StretchSelection
             | Self::ArraySelection
@@ -384,14 +377,12 @@ impl Command {
             Self::ZoomIn => ZOOM_IN,
             Self::ZoomOut => ZOOM_OUT,
             Self::ZoomFit => ZOOM_FIT,
-            Self::FitSchematicContent => FIT_SCHEMATIC_CONTENT,
             Self::ZoomBox => ZOOM_BOX,
             Self::ZoomPrevious => ZOOM_PREVIOUS,
             Self::RotateSelection => ROTATE_SELECTION,
             Self::RotateSelectionCounterClockwise => ROTATE_SELECTION_CCW,
             Self::MirrorSelectionHorizontal => MIRROR_SELECTION_HORIZONTAL,
             Self::MirrorSelectionVertical => MIRROR_SELECTION_VERTICAL,
-            Self::CycleGrid => GRID,
             Self::ZoomOneToOne => ZOOM_ONE_TO_ONE,
             Self::ToggleFullScreen => FULL_SCREEN,
             Self::ToggleNavigator => TOGGLE_NAVIGATOR,
@@ -404,7 +395,6 @@ impl Command {
             Self::NextPane => NEXT_PANE,
             Self::PreviousPane => PREVIOUS_PANE,
             Self::HelpCenter => HELP_CENTER,
-            Self::SelectTool => NONE,
             Self::MoveSelection => MOVE_SELECTION,
             Self::StretchSelection => STRETCH_SELECTION,
             Self::ArraySelection => NONE,
@@ -588,9 +578,9 @@ impl Command {
             Self::SelectOfKind(kind) => kind.absent(),
             Self::NextViolation | Self::PreviousViolation => "the last check found no violations",
             Self::ClearChecks => "no check has run",
-            Self::SetGridStyle(_)
-            | Self::AnnotateOperatingPoint
-            | Self::AnnotateTransientVoltages => "open a schematic or testbench",
+            Self::AnnotateOperatingPoint | Self::AnnotateTransientVoltages => {
+                "open a schematic or testbench"
+            }
             Self::CloseOtherDocuments => "no other closable document is open",
             Self::CloseAllDocuments => "no closable document is open",
             Self::PreviousDocument | Self::NextDocument => "only one document is open",
@@ -860,7 +850,12 @@ mod tests {
             Command::StretchSelection.shortcut_context(),
             ShortcutContext::EngineeringCanvas
         );
-        assert!(Command::SelectTool.shortcut_bindings().is_empty());
+        assert!(
+            DesignCommand::SelectTool
+                .declared_spec()
+                .bindings
+                .is_empty()
+        );
         for platform in CommandPlatform::ALL {
             assert_eq!(
                 Command::StretchSelection.default_shortcut_label(platform),

@@ -1,6 +1,7 @@
 //! The commands the design feature declares, as the registry lists them:
 //! so far the Stimulus Library's verbs, the dialogs the Design, Edit and
-//! View menus open over the schematic, and the schematic's placements.
+//! View menus open over the schematic, the schematic's placements, and the
+//! canvas's select tool, grid and Fit content.
 //!
 //! What each command does is the feature's own; what it declares here is all
 //! the shell's order, menus, palette and shortcut profile read of it.
@@ -87,6 +88,20 @@ pub(crate) enum DesignCommand {
     PlaceVoltageSource,
     /// Arm the current source placement.
     PlaceCurrentSource,
+    /// Arm the select tool on the schematic or the symbol in front.
+    SelectTool,
+    /// Fit the schematic's content, rather than its drawing sheet, to the
+    /// canvas.
+    FitSchematicContent,
+    /// Step the canvas grid on: the schematic's through its styles, the
+    /// symbol editor's on or off.
+    CycleGrid,
+    /// Draw the schematic grid as dots.
+    GridDots,
+    /// Draw the schematic grid as lines.
+    GridLines,
+    /// Draw no schematic grid.
+    GridOff,
 }
 
 const EVERYWHERE: &[CommandPlatform] = &CommandPlatform::ALL;
@@ -173,10 +188,16 @@ const PLACE_VOLTAGE_SOURCE: &[ShortcutBinding] =
     &[primary(chord(Key::V, false, false, false, "V"), EVERYWHERE)];
 const PLACE_CURRENT_SOURCE: &[ShortcutBinding] =
     &[primary(chord(Key::I, false, false, false, "I"), EVERYWHERE)];
+const FIT_SCHEMATIC_CONTENT: &[ShortcutBinding] = &[primary(
+    chord(Key::F, false, false, true, "Shift+F"),
+    EVERYWHERE,
+)];
+const CYCLE_GRID: &[ShortcutBinding] =
+    &[primary(chord(Key::G, false, false, false, "G"), EVERYWHERE)];
 
 impl DesignCommand {
     /// Every command the registry lists, in the feature's own order.
-    pub(crate) const ALL: [Self; 36] = [
+    pub(crate) const ALL: [Self; 42] = [
         Self::NewStimulusDefinition,
         Self::DuplicateStimulusDefinition,
         Self::DeleteStimulusDefinition,
@@ -213,6 +234,12 @@ impl DesignCommand {
         Self::PlaceGround,
         Self::PlaceVoltageSource,
         Self::PlaceCurrentSource,
+        Self::SelectTool,
+        Self::FitSchematicContent,
+        Self::CycleGrid,
+        Self::GridDots,
+        Self::GridLines,
+        Self::GridOff,
     ];
 
     /// The key a shortcut profile names this command by.
@@ -254,6 +281,12 @@ impl DesignCommand {
             Self::PlaceGround => CommandKey::new("place-ground"),
             Self::PlaceVoltageSource => CommandKey::new("place-voltage-source"),
             Self::PlaceCurrentSource => CommandKey::new("place-current-source"),
+            Self::SelectTool => CommandKey::new("select-tool"),
+            Self::FitSchematicContent => CommandKey::new("canvas-fit-content"),
+            Self::CycleGrid => CommandKey::new("cycle-grid"),
+            Self::GridDots => CommandKey::new("grid-dots"),
+            Self::GridLines => CommandKey::new("grid-lines"),
+            Self::GridOff => CommandKey::new("grid-off"),
         }
     }
 
@@ -296,7 +329,8 @@ impl DesignCommand {
     /// hierarchy edit the drawing, so each commits the inspector's pending
     /// edit and is refused on a read-only schematic; only Rename has a chord.
     /// Every placement but the probe edits the drawing and is one Repeat
-    /// last command runs again.
+    /// last command runs again. The select tool, the grid and Fit content
+    /// change only what the canvas shows, so none needs a project.
     pub(crate) const fn declared_spec(self) -> CommandSpec {
         let palette = CommandFlags::PALETTE_VISIBLE;
         let open = palette.with(CommandFlags::REQUIRES_OPEN_PROJECT, true);
@@ -421,6 +455,14 @@ impl DesignCommand {
                 canvas,
                 PLACE_CURRENT_SOURCE,
             ),
+            Self::SelectTool => ("Select tool", "Design", palette, edit, NONE),
+            Self::FitSchematicContent => {
+                ("Fit content", "View", palette, edit, FIT_SCHEMATIC_CONTENT)
+            }
+            Self::CycleGrid => ("Cycle grid display", "View", palette, canvas, CYCLE_GRID),
+            Self::GridDots => ("Dot grid", "View", palette, canvas, NONE),
+            Self::GridLines => ("Line grid", "View", palette, canvas, NONE),
+            Self::GridOff => ("No grid", "View", palette, canvas, NONE),
         };
         CommandSpec {
             key: self.key(),

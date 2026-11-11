@@ -105,7 +105,7 @@ fn default_profile_is_valid_with_complete_symbol_tool_registry() {
     }
     assert!(
         preferences
-            .effective_bindings(&CommandRegistry, Command::SelectTool.key())
+            .effective_bindings(&CommandRegistry, DesignCommand::SelectTool.key())
             .is_empty(),
         "Select tool intentionally has no factory key; Escape remains the universal return path"
     );

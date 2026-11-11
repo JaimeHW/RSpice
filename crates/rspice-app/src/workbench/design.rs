@@ -7,8 +7,10 @@ pub(crate) mod commands;
 mod routed;
 
 use egui::Context;
+use rspice_schematic_editor::symbol_editor::commands::activate_tool;
+use rspice_schematic_editor::symbol_editor::session::SymbolTool;
 
-use crate::state::{ComponentType, Tool};
+use crate::state::{ComponentType, GridStyle, Tool};
 use crate::workbench::app::actions::stimulus;
 use crate::workbench::app::dialogs::connectivity_manager::{
     ConnectivityManager, open_connectivity_manager,
@@ -82,12 +84,25 @@ impl CommandSet for DesignCommand {
     /// because a library with nothing in it is exactly where New belongs.
     /// Placing is an edit of the schematic, so a read-only view is the one
     /// extra thing it needs beyond a definition to place.
+    ///
+    /// The select tool and the grid cycle act on a schematic or a symbol in
+    /// front; the grid styles and Fit content on a schematic alone.
     fn availability(self, reads: &Reads<'_, DesignFeature>) -> CommandAvailability {
         let schematic = schematic_editor(reads);
         let selected = reads.state.selected_stimulus_definition.is_some();
         let refusal = match self {
-            Self::GridSnapRouting | Self::VisibilityOptions | Self::EngineeringTableView => {
+            Self::GridSnapRouting
+            | Self::VisibilityOptions
+            | Self::EngineeringTableView
+            | Self::FitSchematicContent => {
                 (!schematic).then_some("command is unavailable in this context")
+            }
+            Self::SelectTool | Self::CycleGrid => {
+                let symbol = routed::symbol_editor(reads.wb.workspace, reads.model);
+                (!schematic && !symbol).then_some("command is unavailable in this context")
+            }
+            Self::GridDots | Self::GridLines | Self::GridOff => {
+                (!schematic).then_some("open a schematic or testbench")
             }
             Self::ConnectivityManager => (!schematic).then_some("open a schematic or testbench"),
             Self::SelectionBulkEdit | Self::ReviewComments => {
@@ -168,6 +183,18 @@ impl CommandSet for DesignCommand {
             CommandAvailability::Available,
             CommandAvailability::Disabled,
         )
+    }
+
+    /// The grid styles are one choice: the style the schematic draws is the
+    /// one checked.
+    fn checked(self, reads: &Reads<'_, DesignFeature>) -> Option<bool> {
+        let style = match self {
+            Self::GridDots => GridStyle::Dots,
+            Self::GridLines => GridStyle::Lines,
+            Self::GridOff => GridStyle::Off,
+            _ => return None,
+        };
+        Some(reads.state.grid == style)
     }
 
     fn execute(self, cx: &mut Cx<'_, DesignFeature>) {
@@ -310,6 +337,31 @@ impl CommandSet for DesignCommand {
             Self::PlaceGround => arm_tool(cx, Tool::Place(ComponentType::Ground)),
             Self::PlaceVoltageSource => arm_tool(cx, Tool::Place(ComponentType::VoltageSource)),
             Self::PlaceCurrentSource => arm_tool(cx, Tool::Place(ComponentType::CurrentSource)),
+            Self::SelectTool => {
+                if routed::symbol_editor(cx.wb.workspace, cx.model) {
+                    activate_tool(&mut cx.state.symbol.editor, SymbolTool::Select, None);
+                } else {
+                    arm_tool(cx, Tool::Select);
+                }
+            }
+            Self::FitSchematicContent => {
+                let editor = &mut cx.model.schematic.session.editor;
+                editor.needs_fit = true;
+                editor.needs_drawing_sheet_fit = false;
+            }
+            // G changes only what the canvas shows: snap pitch and target
+            // classes stay with Grid, snap and wire routing.
+            Self::CycleGrid => {
+                if routed::symbol_editor(cx.wb.workspace, cx.model) {
+                    let editor = &mut cx.state.symbol.editor;
+                    editor.show_grid = !editor.show_grid;
+                } else {
+                    cx.state.cycle_grid_style();
+                }
+            }
+            Self::GridDots => cx.state.set_grid_style(GridStyle::Dots),
+            Self::GridLines => cx.state.set_grid_style(GridStyle::Lines),
+            Self::GridOff => cx.state.set_grid_style(GridStyle::Off),
             Self::ShowAdopterOnSchematic => {
                 stimulus::show_adopter_on_schematic(
                     cx.state.selected_stimulus_definition.as_deref(),

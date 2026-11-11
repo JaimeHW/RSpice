@@ -72,7 +72,7 @@ pub(super) const ROUTED: &[RoutedCommand<DesignFeature>] = &[
 
 /// Whether the symbol editor is in front: a symbol open in the Design or
 /// Models workspace.
-fn symbol_editor(workspace: Workspace, model: &Model) -> bool {
+pub(super) fn symbol_editor(workspace: Workspace, model: &Model) -> bool {
     matches!(workspace, Workspace::Design | Workspace::Models)
         && model.workspace.content.active_view_type() == ViewType::Symbol
 }

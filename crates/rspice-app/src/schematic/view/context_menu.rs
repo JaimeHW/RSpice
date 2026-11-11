@@ -253,7 +253,7 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
         action: ContextAction::FitContent,
         icon: ContextIcon::Fit,
         label: "Fit schematic content",
-        shortcut_command: Some(Command::FitSchematicContent.key()),
+        shortcut_command: Some(DesignCommand::FitSchematicContent.key()),
     }),
     // Only on the empty canvas's menu: a finger has no Z key, and the next
     // drag after this row frames the view.

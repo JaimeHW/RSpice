@@ -153,18 +153,6 @@ pub(super) fn active_symbol_editor(app: &RSpiceApp) -> bool {
     ) && app.state.model.workspace.content.active_view_type() == crate::state::ViewType::Symbol
 }
 
-/// Mockup-owned `G` command: cycle only the canvas presentation. Snap pitch
-/// and target classes remain independent in Grid, snap and wire routing.
-pub(super) fn cycle_canvas_grid(app: &mut RSpiceApp) {
-    if active_symbol_editor(app) {
-        let enabled = !app.state.design.symbol.editor.show_grid;
-        app.state.design.symbol.editor.show_grid = enabled;
-        return;
-    }
-
-    app.state.design.cycle_grid_style();
-}
-
 pub(in crate::workbench) fn active_schematic_editor(app: &RSpiceApp) -> bool {
     app.state.workbench.workspace == Workspace::Design
         && matches!(

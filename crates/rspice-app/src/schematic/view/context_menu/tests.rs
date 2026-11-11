@@ -240,7 +240,7 @@ fn each_target_gets_the_catalog_its_instance_master_slot_calls_for() {
         ("Sheet properties", Some(ids::SHEET_PROPERTIES)),
         (
             "Fit schematic content",
-            Some(Command::FitSchematicContent.key()),
+            Some(DesignCommand::FitSchematicContent.key()),
         ),
         ("Show in netlist", Some(ids::SHOW_IN_NETLIST)),
         (
@@ -298,7 +298,7 @@ fn each_target_gets_the_catalog_its_instance_master_slot_calls_for() {
             ("Sheet properties", Some(ids::SHEET_PROPERTIES)),
             (
                 "Fit schematic content",
-                Some(Command::FitSchematicContent.key())
+                Some(DesignCommand::FitSchematicContent.key())
             ),
             ("Zoom box", Some(Command::ZoomBox.key())),
             (

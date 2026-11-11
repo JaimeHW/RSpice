@@ -6,6 +6,7 @@
 //! window or the dock layout moves.
 
 use super::*;
+use crate::workbench::design::commands::DesignCommand;
 
 #[test]
 fn canvas_grid_command_cycles_display_without_mutating_snap_configuration() {
@@ -24,10 +25,13 @@ fn canvas_grid_command_cycles_display_without_mutating_snap_configuration() {
         .snap_to_wire_segments = false;
     app.state.design.schematic_snap = app.state.model.schematic.session.editor.snap_engine.clone();
 
-    assert_eq!(Command::CycleGrid.stable_id(), "cycle-grid");
-    assert_eq!(Command::CycleGrid.spec().label, "Cycle grid display");
+    assert_eq!(DesignCommand::CycleGrid.key().as_str(), "cycle-grid");
+    assert_eq!(
+        DesignCommand::CycleGrid.declared_spec().label,
+        "Cycle grid display"
+    );
 
-    Command::CycleGrid.execute(&mut app);
+    app.execute_command_key(DesignCommand::CycleGrid.key());
     assert_eq!(app.state.design.grid, crate::state::GridStyle::Lines);
     assert!(app.state.model.schematic.session.editor.snap_engine.enabled);
     assert!(app.state.design.schematic_snap.enabled);
@@ -42,11 +46,11 @@ fn canvas_grid_command_cycles_display_without_mutating_snap_configuration() {
         "display cycling must preserve detailed snap target choices"
     );
 
-    Command::CycleGrid.execute(&mut app);
+    app.execute_command_key(DesignCommand::CycleGrid.key());
     assert_eq!(app.state.design.grid, crate::state::GridStyle::Off);
     assert!(app.state.model.schematic.session.editor.snap_engine.enabled);
 
-    Command::CycleGrid.execute(&mut app);
+    app.execute_command_key(DesignCommand::CycleGrid.key());
     assert_eq!(app.state.design.grid, crate::state::GridStyle::Dots);
 }
 
@@ -63,11 +67,11 @@ fn canvas_grid_command_does_not_reinterpret_symbol_snap_policy() {
     app.state.design.symbol.editor.show_grid = true;
     app.state.design.symbol.editor.snap_to_grid = false;
 
-    Command::CycleGrid.execute(&mut app);
+    app.execute_command_key(DesignCommand::CycleGrid.key());
     assert!(!app.state.design.symbol.editor.show_grid);
     assert!(!app.state.design.symbol.editor.snap_to_grid);
 
-    Command::CycleGrid.execute(&mut app);
+    app.execute_command_key(DesignCommand::CycleGrid.key());
     assert!(app.state.design.symbol.editor.show_grid);
     assert!(!app.state.design.symbol.editor.snap_to_grid);
 }
@@ -128,7 +132,7 @@ fn schematic_zoom_commands_match_the_mockup_bounds_and_request_a_real_fit() {
             .needs_drawing_sheet_fit
     );
 
-    Command::FitSchematicContent.execute(&mut app);
+    app.execute_command_key(DesignCommand::FitSchematicContent.key());
     assert!(app.state.model.schematic.session.editor.needs_fit);
     assert!(
         !app.state

@@ -325,7 +325,7 @@ const VIEW_MENU: &[MenuEntry] = &[
     command(Command::ZoomOut).access('O'),
     command(Command::ZoomOneToOne).access('Z'),
     command(Command::ZoomFit).access('S'),
-    command(Command::FitSchematicContent).access('F'),
+    design(DesignCommand::FitSchematicContent).access('F'),
     command(Command::ZoomToSelection).access('T'),
     command(Command::ZoomBox).access('B'),
     command(Command::ZoomPrevious).access('V'),
@@ -350,21 +350,9 @@ const VIEW_MENU: &[MenuEntry] = &[
 
 /// The grid's styles, one of which is drawn; G steps through them.
 const GRID_MENU: &[MenuEntry] = &[
-    MenuEntry::radio(
-        Command::SetGridStyle(crate::state::GridStyle::Dots).key(),
-        "Dots",
-    )
-    .access('D'),
-    MenuEntry::radio(
-        Command::SetGridStyle(crate::state::GridStyle::Lines).key(),
-        "Lines",
-    )
-    .access('L'),
-    MenuEntry::radio(
-        Command::SetGridStyle(crate::state::GridStyle::Off).key(),
-        "Off",
-    )
-    .access('O'),
+    MenuEntry::radio(DesignCommand::GridDots.key(), "Dots").access('D'),
+    MenuEntry::radio(DesignCommand::GridLines.key(), "Lines").access('L'),
+    MenuEntry::radio(DesignCommand::GridOff.key(), "Off").access('O'),
     Separator,
     MenuEntry::command_as(
         DesignCommand::GridSnapRouting.key(),
@@ -880,7 +868,6 @@ pub(in crate::workbench) const SOURCE_EDITOR_MENU: &[MenuEntry] = &[
 /// Check design, Check and netlist and Validate would read as switched on.
 pub(in crate::workbench) fn command_icon(command: Command) -> Option<WorkbenchIcon> {
     let icon = match command {
-        Command::SelectTool => WorkbenchIcon::Select,
         Command::SymbolSave => WorkbenchIcon::Save,
         Command::RotateSelection => WorkbenchIcon::Rotate,
         Command::MirrorSelectionHorizontal => WorkbenchIcon::Mirror,
@@ -894,7 +881,6 @@ pub(in crate::workbench) fn command_icon(command: Command) -> Option<WorkbenchIc
         Command::ZoomIn => WorkbenchIcon::ZoomIn,
         Command::ZoomOut => WorkbenchIcon::ZoomOut,
         Command::ZoomFit => WorkbenchIcon::ZoomFit,
-        Command::CycleGrid => WorkbenchIcon::Grid,
         _ => return None,
     };
     Some(icon)
@@ -915,6 +901,8 @@ pub(in crate::workbench) fn feature_command_icon(key: CommandKey) -> Option<Work
     if let Some(command) = DesignCommand::from_key(key) {
         return match command {
             DesignCommand::VisibilityOptions => Some(WorkbenchIcon::Visibility),
+            DesignCommand::SelectTool => Some(WorkbenchIcon::Select),
+            DesignCommand::CycleGrid => Some(WorkbenchIcon::Grid),
             DesignCommand::PlaceInstance => Some(WorkbenchIcon::Instance),
             DesignCommand::PlaceWire => Some(WorkbenchIcon::Wire),
             DesignCommand::PlaceBus => Some(WorkbenchIcon::Bus),

@@ -155,7 +155,7 @@ fn schematic_accessibility_shortcuts(
         platform,
         operating_system,
         &[
-            Command::SelectTool.key(),
+            DesignCommand::SelectTool.key(),
             DesignCommand::PlaceWire.key(),
             DesignCommand::PlaceBus.key(),
             DesignCommand::PlaceBusTap.key(),

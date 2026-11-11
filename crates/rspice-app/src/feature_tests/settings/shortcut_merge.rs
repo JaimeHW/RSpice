@@ -5,7 +5,7 @@ use crate::feature_tests::settings::shortcut_merge_rollback::{
     artifact_from, artifact_value_with_coverage, artifact_with_coverage, set, set_key,
     with_command_extra,
 };
-use crate::state::command_catalog::CommandPlatform;
+use crate::state::command_catalog::{CommandKey, CommandPlatform};
 use crate::state::shortcuts::ProtectedShortcutPolicy;
 use crate::state::shortcuts::ShortcutBindingSlot;
 use crate::state::shortcuts::ShortcutPreferences;
@@ -15,6 +15,7 @@ use crate::state::shortcuts::ShortcutStroke;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::commands::vocabulary::CommandRegistry;
 use crate::workbench::commands::vocabulary::command_registry;
+use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::shortcuts::artifacts::merge::*;
@@ -24,7 +25,7 @@ use std::collections::BTreeSet;
 
 fn set_sequence(
     profile: &mut ShortcutPreferences,
-    command: Command,
+    command: CommandKey,
     slot: ShortcutBindingSlot,
     platform: CommandPlatform,
     keys: &[Key],
@@ -32,7 +33,7 @@ fn set_sequence(
     profile
         .set_binding(
             &CommandRegistry,
-            command.key(),
+            command,
             slot,
             vec![platform],
             Some(
@@ -80,9 +81,9 @@ fn exact_cross_command_collision_honors_every_resolution_policy() {
             Key::F13,
         );
         let mut imported = ShortcutPreferences::default();
-        set(
+        set_key(
             &mut imported,
-            Command::SelectTool,
+            DesignCommand::SelectTool.key(),
             ShortcutBindingSlot::Primary,
             CommandPlatform::Desktop,
             Key::F13,
@@ -115,7 +116,7 @@ fn exact_cross_command_collision_honors_every_resolution_policy() {
         assert_eq!(
             plan.candidate_library().active().resolved_label(
                 &CommandRegistry,
-                Command::SelectTool.key(),
+                DesignCommand::SelectTool.key(),
                 CommandPlatform::Desktop,
                 OperatingSystem::Windows
             ),
@@ -137,7 +138,7 @@ fn prefix_collision_moves_a_multistroke_sequence_atomically() {
     let mut imported = ShortcutPreferences::default();
     set_sequence(
         &mut imported,
-        Command::SelectTool,
+        DesignCommand::SelectTool.key(),
         ShortcutBindingSlot::Primary,
         CommandPlatform::Desktop,
         &[Key::F13, Key::F7],
@@ -170,7 +171,7 @@ fn prefix_collision_moves_a_multistroke_sequence_atomically() {
     assert_eq!(
         plan.candidate_library().active().resolved_label(
             &CommandRegistry,
-            Command::SelectTool.key(),
+            DesignCommand::SelectTool.key(),
             CommandPlatform::Desktop,
             OperatingSystem::Windows
         ),

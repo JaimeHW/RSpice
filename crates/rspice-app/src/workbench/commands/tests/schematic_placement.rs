@@ -32,7 +32,7 @@ fn safe_mode_disables_schematic_mutation_commands_but_keeps_canvas_settings_avai
     ] {
         assert!(!app.command_key_enabled(key), "{key:?}");
     }
-    assert!(Command::CycleGrid.is_enabled(&app));
+    assert!(app.command_key_enabled(DesignCommand::CycleGrid.key()));
     assert!(app.command_key_enabled(DesignCommand::GridSnapRouting.key()));
 
     app.execute_command_key(DesignCommand::PlaceWire.key());
@@ -312,7 +312,7 @@ fn repeat_last_command_rearms_a_feature_placement() {
         app.state.workbench.last_repeatable_command.as_deref(),
         Some(DesignCommand::PlaceWire.key().as_str())
     );
-    Command::SelectTool.execute(&mut app);
+    app.execute_command_key(DesignCommand::SelectTool.key());
     assert_eq!(
         app.state.model.schematic.session.editor.tool,
         crate::state::Tool::Select

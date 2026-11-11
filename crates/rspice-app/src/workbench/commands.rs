@@ -8,7 +8,6 @@ use crate::schematic::view::schematic_symbol_context;
 use crate::schematic::view::selection_transform::{
     SelectionTransform, transform_selection_on_active_sheet,
 };
-use crate::state::Tool;
 use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::framework::command_registry::{CommandOwner, ids};
@@ -246,8 +245,7 @@ impl Command {
             | Self::ZoomWindow
             | Self::CommandPalette => CommandOwner::Framework,
             Self::ConfigurationSets => CommandOwner::Project,
-            Self::SelectTool
-            | Self::SelectOfKind(_)
+            Self::SelectOfKind(_)
             | Self::MoveSelection
             | Self::StretchSelection
             | Self::ArraySelection
@@ -294,9 +292,6 @@ impl Command {
             | Self::PreviousViolation
             | Self::ObjectProperties
             | Self::FindReplace
-            | Self::FitSchematicContent
-            | Self::CycleGrid
-            | Self::SetGridStyle(_)
             | Self::AnnotateOperatingPoint
             | Self::AnnotateTransientVoltages => CommandOwner::Design,
         }
@@ -420,17 +415,6 @@ impl Command {
             | Self::ZoomPrevious => {
                 app.route_command_key(self.key());
             }
-            Self::FitSchematicContent => {
-                app.state.model.schematic.session.editor.needs_fit = true;
-                app.state
-                    .model
-                    .schematic
-                    .session
-                    .editor
-                    .needs_drawing_sheet_fit = false;
-            }
-            Self::CycleGrid => cycle_canvas_grid(app),
-            Self::SetGridStyle(style) => app.state.design.set_grid_style(style),
             // Off leaves the violations on the drawing: hiding them as well
             // is the visibility dialog's choice.
             Self::AnnotateOperatingPoint => {
@@ -586,20 +570,6 @@ impl Command {
                 .workbench
                 .outbox
                 .push(crate::workbench::framework::requests::WindowFrame::Zoom),
-            Self::SelectTool => {
-                if active_symbol_editor(app) {
-                    app.activate_symbol_tool(crate::workbench::SymbolTool::Select);
-                } else {
-                    crate::workbench::app::arm_schematic_tool(
-                        &mut app.state.design.move_selection,
-                        &mut app.state.design.stretch_selection,
-                        &mut app.state.design.array_selection,
-                        &mut app.state.model,
-                        &mut app.state.workbench,
-                        Tool::Select,
-                    );
-                }
-            }
             Self::MoveSelection => {
                 crate::workbench::app::arm_move_selection(&mut app.state);
             }

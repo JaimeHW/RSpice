@@ -22,7 +22,7 @@ use super::{
 
 pub(crate) const DESIGN_DIRECT_TOOLBAR_COMMANDS: [(CommandKey, WorkbenchIcon, &str); 11] = [
     (
-        Command::SelectTool.key(),
+        DesignCommand::SelectTool.key(),
         WorkbenchIcon::Select,
         "Select (Esc)",
     ),
@@ -85,44 +85,44 @@ pub(crate) const DESIGN_DIRECT_TOOLBAR_COMMANDS: [(CommandKey, WorkbenchIcon, &s
 /// keyboard shortcuts declare them. A symbol cellview is a design document,
 /// so its tools live in the shared workspace toolbar rather than in a bar
 /// of the editor's own.
-const SYMBOL_DIRECT_TOOLBAR_COMMANDS: [(Command, WorkbenchIcon, SymbolTool); 8] = [
+const SYMBOL_DIRECT_TOOLBAR_COMMANDS: [(CommandKey, WorkbenchIcon, SymbolTool); 8] = [
     (
-        Command::SelectTool,
+        DesignCommand::SelectTool.key(),
         WorkbenchIcon::Select,
         SymbolTool::Select,
     ),
     (
-        Command::SymbolPinTool,
+        Command::SymbolPinTool.key(),
         WorkbenchIcon::Probe,
         SymbolTool::PlacePin,
     ),
     (
-        Command::SymbolPolylineTool,
+        Command::SymbolPolylineTool.key(),
         WorkbenchIcon::Wire,
         SymbolTool::Line,
     ),
     (
-        Command::SymbolRectangleTool,
+        Command::SymbolRectangleTool.key(),
         WorkbenchIcon::Grid,
         SymbolTool::Rectangle,
     ),
     (
-        Command::SymbolCircleTool,
+        Command::SymbolCircleTool.key(),
         WorkbenchIcon::Target,
         SymbolTool::Circle,
     ),
     (
-        Command::SymbolArcTool,
+        Command::SymbolArcTool.key(),
         WorkbenchIcon::Refresh,
         SymbolTool::Arc,
     ),
     (
-        Command::SymbolPolygonTool,
+        Command::SymbolPolygonTool.key(),
         WorkbenchIcon::Layers,
         SymbolTool::Polygon,
     ),
     (
-        Command::SymbolTextTool,
+        Command::SymbolTextTool.key(),
         WorkbenchIcon::Label,
         SymbolTool::Text,
     ),
@@ -279,10 +279,8 @@ pub(in crate::workbench) fn design_tools(
 }
 
 pub(crate) fn design_toolbar_command_selected(tool: Tool, key: CommandKey) -> bool {
-    if key == Command::SelectTool.key() {
-        return tool == Tool::Select;
-    }
     match DesignCommand::from_key(key) {
+        Some(DesignCommand::SelectTool) => tool == Tool::Select,
         Some(DesignCommand::PlaceInstance) => {
             matches!(tool, Tool::Place(component) if component != ComponentType::Port)
         }
@@ -307,14 +305,15 @@ fn design_grid_and_snap_menu(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: Lay
             selected: grid_visible,
             label: Some("Cycle grid display"),
         };
-        let tool = overflow::OverflowTool::command(app, Command::CycleGrid.key(), presentation);
+        let tool =
+            overflow::OverflowTool::command(app, DesignCommand::CycleGrid.key(), presentation);
         overflow::set_aside(ui, tool);
         return;
     }
     let height = layout.toolbar_control_height;
     let response = ui.add(egui::Button::selectable(grid_visible, "").min_size(Vec2::splat(height)));
     if response.clicked() {
-        Command::CycleGrid.execute(app);
+        app.execute_command_key(DesignCommand::CycleGrid.key());
     }
     let grid_visible = app.state.design.grid != crate::state::GridStyle::Off;
     let t = Tokens::get(ui.ctx());
@@ -344,8 +343,8 @@ pub(in crate::workbench) fn symbol_tools(
     layout: LayoutSpec,
 ) {
     let active = app.state.design.symbol.editor.tool;
-    for (command, icon, tool) in SYMBOL_DIRECT_TOOLBAR_COMMANDS {
-        toolbar_icon_command_selected(ui, app, command.key(), icon, active == tool, layout);
+    for (key, icon, tool) in SYMBOL_DIRECT_TOOLBAR_COMMANDS {
+        toolbar_icon_command_selected(ui, app, key, icon, active == tool, layout);
     }
     context_separator(ui, layout);
     toolbar_icon_command(

@@ -29,7 +29,7 @@ use crate::state::{
     AnalysisResult, AnalysisResultProvenance, AnalysisResultSourceDomain, AnalysisType,
     PreparedRunReceipt, PreparedRunTaskReceipt, PreparedSourceCheckReceipt,
 };
-use crate::state::{ComponentType, ModelsPage};
+use crate::state::{ComponentType, ModelsPage, Tool};
 use crate::state::{SimulationPage, VerificationPage};
 use crate::workbench::framework::command_registry::CommandAvailability;
 use crate::workbench::project::workspace_state::ProjectPage;

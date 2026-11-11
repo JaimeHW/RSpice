@@ -941,8 +941,9 @@ mod symbol_action_tests {
             .workbench
             .activate(crate::workbench::state::Workspace::Design);
 
+        let select = crate::workbench::design::commands::DesignCommand::SelectTool.key();
+        assert!(app.command_availability(select).is_available());
         for command in [
-            ShortcutCommand::SelectTool,
             ShortcutCommand::SymbolPinTool,
             ShortcutCommand::SymbolPolylineTool,
             ShortcutCommand::SymbolRectangleTool,
@@ -994,10 +995,6 @@ mod symbol_action_tests {
                 ShortcutCommand::SymbolTextTool,
                 crate::workbench::SymbolTool::Text,
             ),
-            (
-                ShortcutCommand::SelectTool,
-                crate::workbench::SymbolTool::Select,
-            ),
         ] {
             app.state.design.symbol.editor.shape_start = Some(Point::new(10, 10));
             app.execute_shortcut_command(command);
@@ -1011,6 +1008,12 @@ mod symbol_action_tests {
                 assert!(app.state.design.symbol.editor.shape_start.is_none());
             }
         }
+        app.state.design.symbol.editor.shape_start = Some(Point::new(10, 10));
+        app.execute_command_key(select);
+        assert_eq!(
+            app.state.design.symbol.editor.tool,
+            crate::workbench::SymbolTool::Select
+        );
 
         app.state.design.symbol.editor.needs_fit = false;
         app.execute_shortcut_command(ShortcutCommand::ZoomFit);

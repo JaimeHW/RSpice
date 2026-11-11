@@ -245,7 +245,6 @@ impl Command {
             | Self::ZoomToSelection
             | Self::ZoomBox
             | Self::ZoomPrevious => app.routed_command_key_enabled(self.key()) == Some(true),
-            Self::FitSchematicContent => active_schematic_editor(app),
             Self::NewApplicationWindow
             | Self::DetachDocument
             | Self::MoveDocumentToWindow
@@ -296,11 +295,9 @@ impl Command {
                     .iter()
                     .any(|document| document.open && document.closable)
             }
-            Self::CycleGrid => active_symbol_editor(app) || active_schematic_editor(app),
-            Self::SetGridStyle(_)
-            | Self::AnnotateOperatingPoint
-            | Self::AnnotateTransientVoltages => active_schematic_editor(app),
-            Self::SelectTool => active_symbol_editor(app) || active_schematic_editor(app),
+            Self::AnnotateOperatingPoint | Self::AnnotateTransientVoltages => {
+                active_schematic_editor(app)
+            }
             Self::SymbolPinTool
             | Self::SymbolPolylineTool
             | Self::SymbolRectangleTool
@@ -406,7 +403,6 @@ impl Command {
             Self::ToggleConsole => Some(workbench.console_visible && !workbench.focus_mode),
             Self::ToggleFocusMode => Some(workbench.focus_mode),
             Self::ToggleFullScreen => Some(workbench.full_screen_presentation),
-            Self::SetGridStyle(style) => Some(app.state.design.grid == style),
             Self::SetStandardValueSeries(series) => {
                 Some(app.state.model.workspace.content.standard_value_series == series)
             }
