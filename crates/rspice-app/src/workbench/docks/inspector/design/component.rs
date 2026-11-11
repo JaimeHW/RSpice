@@ -1469,15 +1469,6 @@ pub(super) fn violation_targets_component(violation: &DrcViolation, component: &
             .any(|related| this(&related.location))
 }
 
-/// A safe-operating-area verdict as a row states it: the worst margin, or the
-/// violation count, with a problem's mark when the stress is near or past a
-/// limit. A pass is neutral.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct ComponentSoaDisplay {
-    pub(crate) label: String,
-    pub(crate) problem: Option<Problem>,
-}
-
 /// Resolve only current, source-attributed SOA evidence for the selected
 /// instance. A retained run from another project revision is deliberately
 /// ignored; showing its margin beside a changed schematic would be unsafe.
@@ -1517,66 +1508,4 @@ pub(super) fn retained_component_soa(
     }
 
     component_soa_display(&evaluations, violations)
-}
-
-/// The worst verdict one SOA analysis holds across every device it checked,
-/// or `None` when the analysis carries no evaluations to judge.
-pub(crate) fn analysis_soa_display(
-    analysis: &crate::state::AnalysisResult,
-) -> Option<ComponentSoaDisplay> {
-    let Some(AnalysisResultPayload::Soa {
-        evaluations,
-        violations,
-        ..
-    }) = analysis.result_payload.as_ref()
-    else {
-        return None;
-    };
-    component_soa_display(&evaluations.iter().collect::<Vec<_>>(), violations.len())
-}
-
-/// The verdict a set of evaluations and violations amounts to: the violation
-/// count when any limit was crossed, else the worst margin. `None` when there
-/// is nothing to judge.
-pub(super) fn component_soa_display(
-    evaluations: &[&crate::state::SoaEvaluationEvidence],
-    violations: usize,
-) -> Option<ComponentSoaDisplay> {
-    if violations > 0 {
-        return Some(ComponentSoaDisplay {
-            label: count_label(violations, "violation"),
-            problem: Some(Problem::Failure),
-        });
-    }
-    if evaluations.is_empty() {
-        return None;
-    }
-
-    let verdict = evaluations
-        .iter()
-        .map(|evaluation| evaluation.verdict)
-        .max()
-        .unwrap_or(SoaRuleVerdictEvidence::Pass);
-    let margin_percent = evaluations
-        .iter()
-        .filter_map(|evaluation| {
-            let limit = evaluation.limit_value.abs();
-            (limit > f64::EPSILON)
-                .then_some((limit - evaluation.worst_actual_value.abs()) / limit * 100.0)
-        })
-        .min_by(f64::total_cmp);
-    let (problem, without_margin) = match verdict {
-        SoaRuleVerdictEvidence::Pass => (None, "within limits"),
-        SoaRuleVerdictEvidence::Warning => (Some(Problem::Warning), "near a limit"),
-        SoaRuleVerdictEvidence::Violation | SoaRuleVerdictEvidence::Critical => {
-            (Some(Problem::Failure), "past a limit")
-        }
-    };
-    Some(ComponentSoaDisplay {
-        label: margin_percent.map_or_else(
-            || without_margin.to_owned(),
-            |margin| format!("{margin:.1}% margin"),
-        ),
-        problem,
-    })
 }

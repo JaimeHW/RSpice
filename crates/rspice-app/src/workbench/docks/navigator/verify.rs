@@ -244,7 +244,7 @@ pub(super) fn verification_flow_presentation(
             // A retained verdict is stated as the instance inspector states
             // it; only evidence without one is said to lack it.
             if let Some(verdict) =
-                soa_evidence.and_then(super::super::inspector::analysis_soa_display)
+                soa_evidence.and_then(super::super::inspector::soa::analysis_soa_display)
             {
                 return VerificationFlowPresentation {
                     label: verification_flow_label(page).to_owned(),

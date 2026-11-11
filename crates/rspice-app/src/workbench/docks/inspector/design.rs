@@ -9,7 +9,7 @@
 mod component;
 mod model_evidence;
 
-pub(crate) use component::{analysis_soa_display, bind_component_model_from_catalog};
+pub(crate) use component::bind_component_model_from_catalog;
 
 use component::*;
 use model_evidence::{ComponentModelEvidence, component_model_evidence};
@@ -21,7 +21,7 @@ use egui::Ui;
 use crate::schematic::view::sheet_visibility::{self, SheetScope};
 use crate::state::{
     AnalysisResultPayload, CellViewRef, Component, ComponentType, DisplayMode, PropertyDefinition,
-    PropertyType, PropertyValue, SoaRuleVerdictEvidence,
+    PropertyType, PropertyValue,
 };
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
@@ -45,6 +45,7 @@ use rspice_design::hierarchy::HierarchySource;
 use super::shared::{
     action_stack, checks_current, count_label, current_findings, findings_problem,
 };
+use super::soa::{ComponentSoaDisplay, component_soa_display};
 use rspice_ui_kit::panels::inspector::muted_inspector_copy;
 use rspice_ui_kit::panels::{
     panel_bleed, panel_inset, section_block_gap, section_header, section_header_action,

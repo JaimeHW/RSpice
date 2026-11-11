@@ -129,9 +129,6 @@ pub(crate) mod docks {
         pub(in crate::workbench) mod symbol;
         pub(in crate::workbench) mod verify;
         pub(in crate::workbench) mod veriloga;
-        /// The SOA verdict the Verify flow states is the one an instance's Checks row
-        /// states, read the same way.
-        pub(super) use design::analysis_soa_display;
     }
     pub(super) mod navigator {
         pub use rspice_app_workbench::workbench::docks::navigator::*;

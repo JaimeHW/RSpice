@@ -794,57 +794,6 @@ fn a_component_does_not_claim_a_placed_cells_finding_of_the_same_name() {
     ));
 }
 
-#[test]
-fn soa_display_reports_real_worst_margin_and_failures() {
-    let pass = crate::state::SoaEvaluationEvidence {
-        duration: None,
-        thresholds: Default::default(),
-        envelope: None,
-        derating: None,
-        device_id: "M1".to_owned(),
-        parameter: crate::state::SoaParameterEvidence::DrainSourceVoltage,
-        limit_value: 5.0,
-        worst_actual_value: 3.0,
-        worst_time_s: 2.0e-6,
-        sample_count: 101,
-        unit: "V".to_owned(),
-        description: "Drain-source voltage".to_owned(),
-        verdict: SoaRuleVerdictEvidence::Pass,
-    };
-    let warning = crate::state::SoaEvaluationEvidence {
-        duration: None,
-        thresholds: Default::default(),
-        envelope: None,
-        derating: None,
-        device_id: "M1".to_owned(),
-        parameter: crate::state::SoaParameterEvidence::PowerDissipation,
-        limit_value: 1.0,
-        worst_actual_value: 0.75,
-        worst_time_s: 3.0e-6,
-        sample_count: 101,
-        unit: "W".to_owned(),
-        description: "Power dissipation".to_owned(),
-        verdict: SoaRuleVerdictEvidence::Warning,
-    };
-
-    let display = component_soa_display(&[&pass, &warning], 0).expect("a verdict");
-    assert_eq!(display.label, "25.0% margin");
-    assert_eq!(display.problem, Some(Problem::Warning));
-
-    let passed = component_soa_display(&[&pass], 0).expect("a verdict");
-    assert_eq!(passed.label, "40.0% margin");
-    assert_eq!(passed.problem, None, "a pass is neutral");
-
-    let failed = component_soa_display(&[&pass], 2).expect("a verdict");
-    assert_eq!(failed.label, "2 violations");
-    assert_eq!(failed.problem, Some(Problem::Failure));
-}
-
-#[test]
-fn soa_display_does_not_invent_evidence() {
-    assert_eq!(component_soa_display(&[], 0), None);
-}
-
 /// An instance's Checks section lists only what is wrong with it. A clean
 /// instance, or one whose check predates the drawing, has no section: the
 /// sheet's own Checks section owns the check.

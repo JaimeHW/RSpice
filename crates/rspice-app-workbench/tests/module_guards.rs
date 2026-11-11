@@ -71,6 +71,7 @@ const PUBLIC_MODULES: &[(&str, &str)] = &[
     ("workbench/docks/console/problems.rs", "grid"),
     ("workbench/docks/console/transcript.rs", "lines"),
     ("workbench/docks/inspector.rs", "shared"),
+    ("workbench/docks/inspector.rs", "soa"),
     ("workbench/docks/navigator.rs", "rail"),
     ("workbench/framework.rs", "command_registry"),
     ("workbench/framework.rs", "dialogs"),

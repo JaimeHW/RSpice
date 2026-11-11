@@ -1,6 +1,7 @@
 //! Context inspector with authoritative object and provenance details.
 
 pub mod shared;
+pub mod soa;
 
 use rspice_ui_kit::panels::{PANEL_INSET, panel_body};
 
