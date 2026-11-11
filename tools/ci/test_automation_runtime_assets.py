@@ -369,7 +369,7 @@ class BrowserAutomationRuntimeAssets(unittest.TestCase):
         self.assertIn("self.worker = None;", runtime)
         self.assertIn("self.active_limits = None;", runtime)
         self.assertIn("self.events.borrow_mut().clear();", runtime)
-        self.assertIn("let _ = app.automation_runtime.terminate();", automation)
+        self.assertIn("let _ = app.code.automation_runtime.terminate();", automation)
         self.assertIn('case "cancel":', self.worker)
         self.assertIn('enqueueDebugCommand({ operation: "stop" });', self.worker)
         self.assertIn(

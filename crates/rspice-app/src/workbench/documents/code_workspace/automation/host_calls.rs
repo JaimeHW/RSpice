@@ -524,7 +524,7 @@ pub(super) fn send_runtime_host_response(
     call_id: u64,
     response: rspice_automation_protocol::HostResponse,
 ) {
-    if let Err(error) = app.automation_runtime.send_request(
+    if let Err(error) = app.code.automation_runtime.send_request(
         rspice_automation_protocol::RuntimeRequest::HostResponse {
             session_id,
             call_id,
@@ -547,7 +547,7 @@ pub(super) fn runtime_protocol_failure(app: &mut RSpiceApp, message: &str) {
         .runtime_execution
         .as_ref()
         .is_some_and(|pending| pending.mode.is_debug());
-    let _ = app.automation_runtime.terminate();
+    let _ = app.code.automation_runtime.terminate();
     let runtime = &mut app.state.code.code_workspace.automation;
     runtime.pending_runtime_validation = None;
     runtime.deferred_runtime_launch = None;

@@ -404,7 +404,7 @@ features! {
     simulate: SimulateFeature,
     project: ProjectFeature,
     design: DesignFeature,
-    code: CodeFeature,
+    code: CodeFeature => code,
 }
 
 /// Draw `F`'s inspector section in the container's `ui`. The caller answers

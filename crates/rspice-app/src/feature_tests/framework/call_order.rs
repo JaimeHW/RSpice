@@ -92,7 +92,7 @@ const PREPARE_FRAME: &[Step] = &[
         "5.6",
         &["self.terminate_automation_runtime_after_project_change()"],
     ),
-    ("5.7", &["self.automation_runtime.poll_discovery()"]),
+    ("5.7", &["self.code.automation_runtime.poll_discovery()"]),
     ("5.8", &["code_workspace::poll_veriloga_import(self)"]),
     ("5.9", &["code_workspace::poll_veriloga_compile(self)"]),
     (

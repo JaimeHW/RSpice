@@ -193,7 +193,7 @@ pub fn refresh_automation_debugger(app: &mut RSpiceApp) {
         .map(|watch| watch.expression.clone())
         .collect::<Vec<_>>();
     for expression in expressions {
-        match app.automation_runtime.send_request(
+        match app.code.automation_runtime.send_request(
             rspice_automation_protocol::RuntimeRequest::Evaluate {
                 session_id,
                 frame_id,
@@ -259,7 +259,7 @@ pub(super) fn send_debug_control(
         rspice_automation_protocol::DebugControl::Restart => "Restart",
         rspice_automation_protocol::DebugControl::Stop => "Stop",
     };
-    match app.automation_runtime.send_request(
+    match app.code.automation_runtime.send_request(
         rspice_automation_protocol::RuntimeRequest::DebugControl {
             session_id,
             control,
@@ -399,7 +399,7 @@ pub(super) fn synchronize_runtime_breakpoints(app: &mut RSpiceApp) {
         return;
     };
     let breakpoints = runtime_breakpoints(app, &snapshot);
-    if let Err(error) = app.automation_runtime.send_request(
+    if let Err(error) = app.code.automation_runtime.send_request(
         rspice_automation_protocol::RuntimeRequest::SetBreakpoints {
             session_id,
             breakpoints,
@@ -413,7 +413,7 @@ pub(super) fn synchronize_runtime_breakpoints(app: &mut RSpiceApp) {
 }
 
 pub(super) fn request_debug_stack(app: &mut RSpiceApp, session_id: uuid::Uuid) {
-    match app.automation_runtime.send_request(
+    match app.code.automation_runtime.send_request(
         rspice_automation_protocol::RuntimeRequest::StackTrace {
             session_id,
             start: 0,
@@ -522,7 +522,7 @@ pub(super) fn request_debug_variables(
     let Some((session_id, _)) = active_debug_session(app) else {
         return;
     };
-    match app.automation_runtime.send_request(
+    match app.code.automation_runtime.send_request(
         rspice_automation_protocol::RuntimeRequest::Variables {
             session_id,
             reference,

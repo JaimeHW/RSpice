@@ -330,8 +330,10 @@ fn test_app() -> RSpiceApp {
         last_window_title: String::new(),
         symbol_library: None,
         simulation_controller: crate::simulation::SimulationController::new(),
-        automation_runtime: crate::automation_runtime::NativeAutomationRuntime::discover(),
-        automation_runtime_project_id,
+        code: crate::workbench::documents::code_workspace::CodeHandles {
+            automation_runtime: crate::automation_runtime::NativeAutomationRuntime::discover(),
+            automation_runtime_project_id,
+        },
         cloud: crate::workbench::live_session::CloudHandles {
             account: crate::services::cloud_account::CloudAccountService::unconfigured(),
             live_session: crate::workbench::live_session::LiveSessionEngine::default(),

@@ -252,16 +252,9 @@ pub struct RSpiceApp {
     pub(crate) symbol_library: Option<crate::schematic::symbols::SymbolLibrary>,
     /// Simulation controller for running analyses
     pub(crate) simulation_controller: crate::simulation::SimulationController,
-    /// Verified application-local Python worker service. It is deliberately
-    /// outside persisted state and absent from browser builds, which own a Web
-    /// Worker backend instead.
-    #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) automation_runtime: crate::automation_runtime::NativeAutomationRuntime,
-    #[cfg(target_arch = "wasm32")]
-    pub(crate) automation_runtime: crate::automation_runtime::BrowserAutomationRuntime,
-    /// Project identity currently authorized to own the process/worker. Any
-    /// identity change terminates the worker before another event is polled.
-    pub(crate) automation_runtime_project_id: crate::product::ProjectId,
+    /// What the code feature runs: the automation runtime and the project it
+    /// is authorized to serve.
+    pub(crate) code: crate::workbench::documents::code_workspace::CodeHandles,
     /// What the cloud feature runs: the account session boundary and the
     /// live-session engine that drains it.
     pub(crate) cloud: crate::workbench::live_session::CloudHandles,
@@ -293,11 +286,11 @@ fn configure_platform_input_contract(ctx: &Context) {
 impl RSpiceApp {
     fn terminate_automation_runtime_after_project_change(&mut self) {
         let project_id = self.state.model.workspace.content.project.id();
-        if project_id == self.automation_runtime_project_id {
+        if project_id == self.code.automation_runtime_project_id {
             return;
         }
-        let _ = self.automation_runtime.terminate();
-        self.automation_runtime_project_id = project_id;
+        let _ = self.code.automation_runtime.terminate();
+        self.code.automation_runtime_project_id = project_id;
         self.state.code.code_workspace = Default::default();
         self.simulation_controller.clear_prepared_run();
     }
@@ -305,14 +298,15 @@ impl RSpiceApp {
     pub(crate) fn automation_runtime_unavailable_reason(&mut self) -> Option<String> {
         #[cfg(not(target_arch = "wasm32"))]
         {
-            self.automation_runtime.poll_discovery();
-            self.automation_runtime
+            self.code.automation_runtime.poll_discovery();
+            self.code
+                .automation_runtime
                 .availability_reason()
                 .map(str::to_owned)
         }
         #[cfg(target_arch = "wasm32")]
         {
-            self.automation_runtime.availability_reason()
+            self.code.automation_runtime.availability_reason()
         }
     }
 
@@ -395,11 +389,13 @@ impl RSpiceApp {
             last_window_title: String::new(),
             symbol_library: None,
             simulation_controller: crate::simulation::SimulationController::new(),
-            #[cfg(not(target_arch = "wasm32"))]
-            automation_runtime: crate::automation_runtime::NativeAutomationRuntime::discover(),
-            #[cfg(target_arch = "wasm32")]
-            automation_runtime: crate::automation_runtime::BrowserAutomationRuntime::discover(),
-            automation_runtime_project_id,
+            code: crate::workbench::documents::code_workspace::CodeHandles {
+                #[cfg(not(target_arch = "wasm32"))]
+                automation_runtime: crate::automation_runtime::NativeAutomationRuntime::discover(),
+                #[cfg(target_arch = "wasm32")]
+                automation_runtime: crate::automation_runtime::BrowserAutomationRuntime::discover(),
+                automation_runtime_project_id,
+            },
             cloud: crate::workbench::live_session::CloudHandles {
                 account: crate::services::cloud_account::CloudAccountService::unconfigured(),
                 live_session: crate::workbench::live_session::LiveSessionEngine::default(),
@@ -570,11 +566,13 @@ impl RSpiceApp {
             last_window_title: String::new(),
             symbol_library,
             simulation_controller,
-            #[cfg(not(target_arch = "wasm32"))]
-            automation_runtime: crate::automation_runtime::NativeAutomationRuntime::discover(),
-            #[cfg(target_arch = "wasm32")]
-            automation_runtime: crate::automation_runtime::BrowserAutomationRuntime::discover(),
-            automation_runtime_project_id,
+            code: crate::workbench::documents::code_workspace::CodeHandles {
+                #[cfg(not(target_arch = "wasm32"))]
+                automation_runtime: crate::automation_runtime::NativeAutomationRuntime::discover(),
+                #[cfg(target_arch = "wasm32")]
+                automation_runtime: crate::automation_runtime::BrowserAutomationRuntime::discover(),
+                automation_runtime_project_id,
+            },
             cloud: crate::workbench::live_session::CloudHandles {
                 account: crate::services::cloud_account::CloudAccountService::new(Some(
                     cc.egui_ctx.clone(),
@@ -648,7 +646,7 @@ impl RSpiceApp {
 
         self.terminate_automation_runtime_after_project_change();
         #[cfg(not(target_arch = "wasm32"))]
-        self.automation_runtime.poll_discovery();
+        self.code.automation_runtime.poll_discovery();
         // Both source imports record intent and complete from the frame loop.
         // Neither was driven from anywhere, so a requested import stayed
         // pending forever and blocked every later one.
@@ -1103,7 +1101,7 @@ impl eframe::App for RSpiceApp {
 
     /// Called by eframe when the application is shutting down.
     fn on_exit(&mut self) {
-        let _ = self.automation_runtime.terminate();
+        let _ = self.code.automation_runtime.terminate();
         log::info!("eframe on_exit — application shutting down");
         #[cfg(target_arch = "wasm32")]
         if let Err(error) = crate::workbench::browser::navigation::uninstall_popstate_listener() {

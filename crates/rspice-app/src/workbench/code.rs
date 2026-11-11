@@ -35,7 +35,7 @@ use crate::workbench::framework::command_registry::{CommandAvailability, Command
 use crate::workbench::framework::dialogs::DialogKey;
 use crate::workbench::framework::feature::{
     CommandSet, Cx, Feature, FeatureDialog, FeatureInspector, FeatureNavigator, FeatureRegistry,
-    NoHandles, Reads,
+    Reads,
 };
 use crate::workbench::slots::CodeState;
 use crate::workbench::state::{WorkbenchSession, Workspace};
@@ -47,7 +47,7 @@ pub(crate) struct CodeFeature;
 impl Feature for CodeFeature {
     type State = CodeState;
     type Session = WorkbenchSession;
-    type Handles = NoHandles;
+    type Handles = crate::workbench::documents::code_workspace::CodeHandles;
     /// The Netlist inspector offers the tuning sandbox while the dispatcher
     /// would open it.
     const FOREIGN_AVAILABILITY: &'static [CommandKey] = &[ids::TUNING];
