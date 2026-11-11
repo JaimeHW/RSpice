@@ -42,7 +42,7 @@ use crate::workbench::framework::requests::{
     OpenPropertyEditor, OpenStimulusDefinition, OpenSymbolAuthoring, PrintActiveView,
     ProjectFileAction, PromptAfterCommands, RevealExecutedDeck, RevealModel,
     SelectAnalysisInstance, SetFamilyFilter, ShowProjectModels, ShowSchematicAnnotations,
-    ShowWaveforms, SourceEditorRequest, SubcircuitSymbolSource,
+    ShowWaveforms, SourceEditorRequest, StageComponentTuning, SubcircuitSymbolSource,
 };
 use crate::workbench::hardcopy;
 use crate::workbench::menu_bar::FileMenuAction;
@@ -279,6 +279,18 @@ impl RSpiceApp {
             |app| &mut app.state.workbench.outbox,
             |app, OpenStimulusDefinition(definition)| {
                 crate::workbench::app::open_stimulus_definition(&mut app.state, &definition);
+            },
+        );
+        requests::drain(
+            self,
+            |app| &mut app.state.workbench.outbox,
+            |app, StageComponentTuning { component_id }| {
+                if crate::workbench::simulate::SimulateFeature::stage_component_tuning(
+                    &mut features::cx(app),
+                    component_id,
+                ) {
+                    app.execute_command_key(ids::TUNING);
+                }
             },
         );
         requests::drain(

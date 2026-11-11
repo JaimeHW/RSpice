@@ -152,6 +152,7 @@ SLICE_RULES = [
     (W + r"app/actions/(hierarchy_net_highlight|property_edit|stimulus|symbol|workspace)", "design"),
     (W + r"app/actions/reveal", "shell"),
     (W + r"app/actions/sheets", "sheets"),
+    (W + r"app/actions/tuning_staging", "simulate"),
     (W + r"app/actions/veriloga", "code"),
     (W + r"app/command_palette", "framework"),
     (W + r"app/drawing_sheet_edit", "sheets"),
@@ -254,7 +255,6 @@ SLICE_RULES = [
     # retired document identity reads back.
     (W + r"state/(navigator_tree|workbench_session|console_views|retired_documents)", "framework"),
     (W + r"state/plan_provenance", "results"),
-    (W + r"state/session_views", "session"),
     (W + r"state/stimulus_", "design"),
     (W + r"state/(workflow_drafts|simulate_session)", "simulate"),
     (W + r"shortcuts", "settings"),

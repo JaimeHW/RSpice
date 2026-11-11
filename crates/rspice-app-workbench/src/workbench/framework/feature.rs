@@ -234,6 +234,10 @@ impl Default for PublicationDraft {
 pub trait SimulatePort {
     /// The specification the reader selected in the plan, if any.
     fn selected_specification(&self) -> Option<&str>;
+    /// Why the parameter tuner would refuse to stage `component`'s Value as
+    /// `model` stands, or `None` when it would stage it.
+    fn component_tuning_block_reason(&self, model: &Model, component: &Component)
+    -> Option<String>;
 }
 
 /// What the models feature shows that another part reads: whether its

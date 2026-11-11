@@ -280,6 +280,18 @@ impl Request for OpenStimulusDefinition {
     const DRAIN: Drain = Drain::AfterContribution;
 }
 
+/// Stage placed instance `component_id`'s Value in the parameter tuner and,
+/// once it is staged, open the Tuning page. Raised by design's instance
+/// inspector, and taken straight after the inspector has drawn.
+#[derive(Clone, Copy, Debug)]
+pub struct StageComponentTuning {
+    pub component_id: u64,
+}
+
+impl Request for StageComponentTuning {
+    const DRAIN: Drain = Drain::AfterContribution;
+}
+
 /// Show these waveforms in the waveform viewer: each revealed where its
 /// dataset hides it, `selected` made the selected trace, and the cursors
 /// cleared. Raised by a hand-off that opens the viewer on them, just before

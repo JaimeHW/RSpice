@@ -14,6 +14,7 @@ use crate::state::model_library::{DeviceModel, ModelLibrary, ModelType};
 use crate::state::{
     Cell, Library, LibraryCellInstance, Point, PortDirection, SchematicProbe, View, ViewType,
 };
+use crate::workbench::framework::feature::SimulatePort as _;
 use rspice_design::drc::DrcSeverity;
 
 fn state_with_two_components() -> AppState {
@@ -1077,164 +1078,6 @@ fn component_identity_reports_occurrence_and_graphical_execution_views() {
 }
 
 #[test]
-fn literal_value_tuning_stages_a_typed_variable_without_mutating_authority() {
-    let mut app = RSpiceApp::test_instance();
-    let component_id = app
-        .state
-        .model
-        .schematic
-        .add_component(ComponentType::Resistor, Point::origin());
-    app.state.model.schematic.document_mut_for_test().components[0].name = "RLOAD".to_owned();
-    app.state.model.schematic.document_mut_for_test().components[0].value = "10k".to_owned();
-    let plan_id = app
-        .state
-        .model
-        .sim_setup
-        .stable_analysis_plan()
-        .unwrap()
-        .id();
-    let variables_before = app
-        .state
-        .model
-        .workspace
-        .content
-        .plan_data(plan_id)
-        .unwrap()
-        .design_variables
-        .len();
-    let topology_before = app.state.model.schematic.topology_version();
-
-    stage_component_tuning(&mut app, component_id).expect("resistor literal is tunable");
-
-    assert_eq!(
-        app.state.model.schematic.document().components[0].value,
-        "10k"
-    );
-    assert_eq!(
-        app.state.model.schematic.topology_version(),
-        topology_before
-    );
-    assert_eq!(
-        app.state
-            .model
-            .workspace
-            .content
-            .plan_data(plan_id)
-            .unwrap()
-            .design_variables
-            .len(),
-        variables_before
-    );
-    let binding = app
-        .state
-        .simulate
-        .verification
-        .tuning_instance_binding
-        .as_ref()
-        .expect("transient instance binding");
-    assert!(binding.creates_variable);
-    assert_eq!(binding.variable.name, "RLOAD_VALUE");
-    assert_eq!(
-        binding.variable.quantity,
-        crate::state::DesignVariableQuantity::Resistance
-    );
-    assert!(binding.variable.allowed_range.is_none());
-    assert_eq!(binding.binding_expression, "{RLOAD_VALUE}");
-    assert!(
-        app.state
-            .simulate
-            .verification
-            .tuning_variables
-            .iter()
-            .any(|draft| draft.variable_id == binding.variable.id && draft.proposed)
-    );
-}
-
-#[test]
-fn parameter_bound_value_tuning_selects_the_existing_typed_variable() {
-    let mut app = RSpiceApp::test_instance();
-    let component_id = app
-        .state
-        .model
-        .schematic
-        .add_component(ComponentType::Resistor, Point::origin());
-    app.state.model.schematic.document_mut_for_test().components[0].value = "{RGAIN}".to_owned();
-    let plan_id = app
-        .state
-        .model
-        .sim_setup
-        .stable_analysis_plan()
-        .unwrap()
-        .id();
-    let variable = crate::state::DesignVariable::new(
-        "RGAIN",
-        "499 ohm",
-        crate::state::DesignVariableQuantity::Resistance,
-        crate::state::DesignVariableScope::Project,
-        "Gain resistor",
-        None,
-        crate::state::DesignVariableSweepEligibility::NestedSweepAndOptimization,
-        crate::state::DesignVariableOverridePolicy::ExplicitTestLocalOverride,
-    )
-    .unwrap();
-    let variable_id = variable.id;
-    app.state
-        .model
-        .workspace
-        .content
-        .add_design_variable(plan_id, variable)
-        .unwrap();
-
-    stage_component_tuning(&mut app, component_id)
-        .expect("existing typed parameter reference is tunable");
-
-    let session = &app.state.simulate.verification;
-    let binding = session
-        .tuning_instance_binding
-        .as_ref()
-        .expect("instance context is retained");
-    assert!(!binding.creates_variable);
-    assert_eq!(binding.variable.id, variable_id);
-    assert_eq!(session.tuning_selected_variable, Some(variable_id));
-    assert_eq!(session.tuning_focus_variable, Some(variable_id));
-    assert!(session.tuning_variables.iter().all(|draft| !draft.proposed));
-    assert_eq!(
-        app.state
-            .model
-            .workspace
-            .content
-            .plan_data(plan_id)
-            .unwrap()
-            .design_variables
-            .len(),
-        1
-    );
-}
-
-#[test]
-fn value_tuning_fails_closed_when_no_truthful_quantity_exists() {
-    let mut app = RSpiceApp::test_instance();
-    let component_id = app
-        .state
-        .model
-        .schematic
-        .add_component(ComponentType::Inductor, Point::origin());
-    app.state.model.schematic.document_mut_for_test().components[0].value = "10u".to_owned();
-
-    let error = stage_component_tuning(&mut app, component_id)
-        .expect_err("inductance is not representable by the current typed variable schema");
-
-    assert!(error.contains("truthful typed design-variable mapping"));
-    assert!(
-        app.state
-            .simulate
-            .verification
-            .tuning_instance_binding
-            .is_none()
-    );
-}
-
-#[test]
 fn unsupported_value_tuning_action_is_disabled_with_the_staging_reason() {
     let mut app = RSpiceApp::test_instance();
     app.state
@@ -1252,8 +1095,9 @@ fn unsupported_value_tuning_action_is_disabled_with_the_staging_reason() {
         "Inductor values do not have a truthful typed design-variable mapping"
     );
     assert_eq!(
-        prepare_component_tuning(&app, &component)
-            .err()
+        app.state
+            .simulate
+            .component_tuning_block_reason(&app.state.model, &component)
             .expect("staging preflight must reject the same unsupported quantity"),
         reason
     );

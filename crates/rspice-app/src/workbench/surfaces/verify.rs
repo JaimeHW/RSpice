@@ -26,6 +26,7 @@ use crate::state::SpecEntry;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, Problem};
+use crate::workbench::app::actions::tuning_staging;
 use crate::workbench::app_state::run_preflight::simulation_run_block_reason;
 use crate::workbench::app_state::{Model, SlotFacts};
 use crate::workbench::framework::feature::Cx;
@@ -608,6 +609,39 @@ struct RegressionCoverageIssue {
     target: Option<crate::state::RegressionTargetSelector>,
     label: String,
     detail: String,
+}
+
+impl SimulateFeature {
+    /// Stage placed instance `component_id`'s Value in the parameter tuner.
+    /// Returns whether it staged; a refusal is stated on the Tuning page and
+    /// on the status bar.
+    pub(in crate::workbench) fn stage_component_tuning(
+        cx: &mut Cx<'_, Self>,
+        component_id: u64,
+    ) -> bool {
+        let Err(error) = tuning_staging::stage_component_tuning(
+            cx.model,
+            &mut cx.state.verification,
+            component_id,
+        ) else {
+            return true;
+        };
+        let name = cx
+            .model
+            .schematic
+            .document()
+            .components
+            .iter()
+            .find(|component| component.id == component_id)
+            .map_or_else(
+                || "the instance".to_owned(),
+                |component| component.name.clone(),
+            );
+        let problem = format!("Could not tune {name}: {error}");
+        cx.state.verification.action_problem = Some(problem.clone());
+        cx.wb.prompt(problem);
+        false
+    }
 }
 
 #[cfg(test)]

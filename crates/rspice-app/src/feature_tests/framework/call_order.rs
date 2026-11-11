@@ -489,6 +489,14 @@ const AFTER_CONTRIBUTION: &[Step] = &[
         ],
     ),
     (
+        "8.3",
+        &[
+            "|app, StageComponentTuning { component_id }|",
+            "crate::workbench::simulate::SimulateFeature::stage_component_tuning(",
+            "app.execute_command_key(ids::TUNING);",
+        ],
+    ),
+    (
         "9",
         &[
             "|app, ShowWaveforms { visibility, selected, }|",
@@ -1437,8 +1445,8 @@ fn a_feature_command_has_what_it_raised_answered_in_the_same_dispatch() {
     assert_runs_in_order("RSpiceApp::after_contribution", &after, AFTER_CONTRIBUTION);
     assert_eq!(
         after.matches("requests::drain(").count(),
-        26,
-        "`after_contribution` answers exactly the twenty-six requests it lists"
+        27,
+        "`after_contribution` answers exactly the twenty-seven requests it lists"
     );
 }
 
