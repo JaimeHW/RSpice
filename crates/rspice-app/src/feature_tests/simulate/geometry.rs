@@ -5,6 +5,13 @@
 //! laid out by two separate measurements have to agree about the space
 //! between them, and only their coordinates answer that.
 
+use crate::workbench::surfaces::simulate::catalog::ANALYSIS_CATALOG_COLUMN_MIN_WIDTH;
+use crate::workbench::surfaces::simulate::lifecycle::{
+    analysis_catalog_group, insert_analysis_instance,
+};
+use crate::workbench::surfaces::simulate::{
+    ANALYSIS_CATEGORY_ORDER, analysis_split_widths, show_on_stage, workflow_dialog_tests,
+};
 use egui::{Rect, vec2};
 
 use crate::simulation::plan::AnalysisKind;
@@ -65,7 +72,7 @@ fn analyses_route_painted_lines(width: f32) -> Vec<PaintedLine> {
         |ctx| {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
-                .show(ctx, |ui| super::show_on_stage(ui, &mut app));
+                .show(ctx, |ui| show_on_stage(ui, &mut app));
         },
     );
     painted_lines(&output.shapes)
@@ -237,7 +244,7 @@ fn analyses_form_lines(kind: AnalysisKind, width: f32) -> Option<Vec<PaintedLine
             |ctx| {
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE)
-                    .show(ctx, |ui| super::show_on_stage(ui, &mut app));
+                    .show(ctx, |ui| show_on_stage(ui, &mut app));
             },
         )
     };
@@ -366,7 +373,7 @@ fn analysis_catalogue_code_rows(viewport_width: f32) -> Vec<Vec<PaintedLine>> {
                 )),
                 ..egui::RawInput::default()
             },
-            |ctx| super::workflow_dialog_tests::show_workflow_dialogs_on_stage(ctx, &mut app),
+            |ctx| workflow_dialog_tests::show_workflow_dialogs_on_stage(ctx, &mut app),
         )
     };
     // A content-height surface lays out against its previous measurement.
@@ -421,7 +428,7 @@ fn the_analysis_catalogue_takes_its_columns_from_its_body_not_the_viewport() {
         .unwrap_or_else(|| panic!("an 1199-point viewport pairs its rows: {wide:?}"));
     let column_width = pair[1].left - pair[0].left;
     assert!(
-        column_width > super::ANALYSIS_CATALOG_COLUMN_MIN_WIDTH,
+        column_width > ANALYSIS_CATALOG_COLUMN_MIN_WIDTH,
         "each of the two columns clears the row's own minimum: {column_width}"
     );
 
@@ -475,7 +482,7 @@ impl AnalysesRoute {
             |ctx| {
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE)
-                    .show(ctx, |ui| super::show_on_stage(ui, app));
+                    .show(ctx, |ui| show_on_stage(ui, app));
             },
         );
         painted_lines(&output.shapes)
@@ -502,7 +509,7 @@ impl AnalysesRoute {
     fn divider(&self) -> f32 {
         let gutter = self.ctx.global_style().spacing.scroll.allocated_width();
         let surface = ROUTE_WIDTH - gutter;
-        super::analysis_split_widths(surface, surface).0
+        analysis_split_widths(surface, surface).0
     }
 }
 
@@ -735,18 +742,18 @@ fn an_analysis_made_active_below_the_stacks_view_is_scrolled_into_it() {
             .iter()
             .map(|instance| instance.kind())
             .collect::<Vec<_>>();
-        super::ANALYSIS_CATEGORY_ORDER
+        ANALYSIS_CATEGORY_ORDER
             .into_iter()
             .rev()
             .find_map(|group| {
                 insertable
                     .iter()
                     .copied()
-                    .find(|kind| super::analysis_catalog_group(*kind) == group)
+                    .find(|kind| analysis_catalog_group(*kind) == group)
             })
             .expect("the plan holds an analysis")
     };
-    let inserted = super::insert_analysis_instance(
+    let inserted = insert_analysis_instance(
         &mut crate::workbench::features::cx(&mut route.app),
         last_kind,
     )

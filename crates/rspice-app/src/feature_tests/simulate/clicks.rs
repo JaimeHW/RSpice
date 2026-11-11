@@ -18,6 +18,8 @@
 //! *and* a receipt recording it, because the two together are what
 //! `apply_analysis_action` is for.
 
+use crate::workbench::surfaces::simulate::catalog::ANALYSIS_CATALOG_SEARCH_LABEL;
+use crate::workbench::surfaces::simulate::{show_on_stage, workflow_dialog_tests};
 use egui::vec2;
 
 use crate::state::SimulationPage;
@@ -138,14 +140,14 @@ impl Studio {
                             let layout = LayoutSpec::resolve(size.0, size.1, &app.state.workbench);
                             crate::workbench::docks::show_navigator(root, app, layout);
                         }
-                        super::show_on_stage(root, app);
+                        show_on_stage(root, app);
                     });
                 if shell {
                     // Where the plan dialogs and the analysis catalogue are
                     // actually drawn. A harness that ran only the surface could
                     // press the control that opens one and see nothing appear,
                     // which is the defect these cases exist to hold shut.
-                    super::workflow_dialog_tests::show_workflow_dialogs_on_stage(ctx, app);
+                    workflow_dialog_tests::show_workflow_dialogs_on_stage(ctx, app);
                 }
             },
         );
@@ -660,7 +662,7 @@ fn adding_an_analysis_from_another_route_opens_the_catalogue_and_lands_on_the_ne
 
     let mut studio = Studio::open_with_shell(app, SimulationPage::Solver, DESKTOP_WITH_SHELL);
     assert!(
-        !studio.announces(|label| label == super::ANALYSIS_CATALOG_SEARCH_LABEL),
+        !studio.announces(|label| label == ANALYSIS_CATALOG_SEARCH_LABEL),
         "nothing is open before the press"
     );
 
@@ -670,7 +672,7 @@ fn adding_an_analysis_from_another_route_opens_the_catalogue_and_lands_on_the_ne
         "the press arms the catalogue"
     );
     assert!(
-        studio.announces(|label| label == super::ANALYSIS_CATALOG_SEARCH_LABEL),
+        studio.announces(|label| label == ANALYSIS_CATALOG_SEARCH_LABEL),
         "and the frame draws it, from the Solver route it was pressed on"
     );
 

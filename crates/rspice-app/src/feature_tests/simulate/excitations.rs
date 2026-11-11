@@ -3,7 +3,9 @@
 //! Split out of `page_tests.rs` when that file crossed its line budget: the
 //! family arrived as one self-contained block and reads as one.
 
-use super::{RSpiceApp, SimulationPage, render_with};
+use crate::state::SimulationPage;
+use crate::workbench::RSpiceApp;
+use crate::workbench::surfaces::simulate::page_tests::render_with;
 
 /// Give the fixture project one more schematic master: the library cell view,
 /// and the content the projection will materialize for it.

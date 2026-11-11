@@ -8,7 +8,7 @@ use super::*;
 
 /// The simulation plan workflows as the frame's dialog walk draws them, with
 /// what they raised answered straight after.
-pub(super) fn show_workflow_dialogs_on_stage(ctx: &egui::Context, app: &mut RSpiceApp) {
+pub(crate) fn show_workflow_dialogs_on_stage(ctx: &egui::Context, app: &mut RSpiceApp) {
     SimulateFeature::render_workflow_dialogs(&mut crate::workbench::features::cx(app), ctx);
     app.after_contribution();
 }

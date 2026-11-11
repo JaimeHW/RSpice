@@ -2,7 +2,7 @@
 
 mod advanced_options;
 mod analysis_form;
-mod catalog;
+pub(crate) mod catalog;
 pub(crate) mod checkpoint_exchange;
 pub(crate) mod lifecycle;
 mod output_evidence;
@@ -13,7 +13,7 @@ mod page_outputs;
 pub(crate) mod page_runset;
 mod page_save;
 mod page_solver;
-mod page_specs;
+pub(crate) mod page_specs;
 mod page_variables;
 mod pages;
 mod participation;
@@ -120,7 +120,7 @@ const ANALYSIS_CATALOG_ROW_HEIGHT: f32 = 57.0;
 /// The action column: as wide as its longest line, "Add another · 9 in plan",
 /// set on one line.
 const ANALYSIS_CATALOG_READINESS_WIDTH: f32 = 160.0;
-const ANALYSIS_CATEGORY_ORDER: [&str; 10] = [
+pub(crate) const ANALYSIS_CATEGORY_ORDER: [&str; 10] = [
     "Core analyses",
     "Transfer & linearization",
     "RF & periodic solvers",
@@ -524,7 +524,7 @@ fn analysis_workspace_is_split(viewport_width: f32, surface_width: f32) -> bool 
         && surface_width >= analysis_split_min_width(viewport_width)
 }
 
-fn analysis_split_widths(available: f32, viewport_width: f32) -> (f32, f32) {
+pub(crate) fn analysis_split_widths(available: f32, viewport_width: f32) -> (f32, f32) {
     let usable = (available - 1.0).max(1.0);
     let (left_fraction, left_min, right_min) = analysis_column_constraints(viewport_width);
     let left = (usable * left_fraction)
@@ -2455,20 +2455,16 @@ pub(crate) fn show_on_stage(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 #[cfg(test)]
-mod click_tests;
-#[cfg(test)]
-mod geometry_tests;
-#[cfg(test)]
 mod page_navigation_tests;
 #[cfg(test)]
 mod page_raster;
 #[cfg(test)]
 mod page_runset_parity_tests;
 #[cfg(test)]
-mod page_tests;
+pub(crate) mod page_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
-mod workflow_dialog_tests;
+pub(crate) mod workflow_dialog_tests;
 #[cfg(test)]
 mod workload_coherence_tests;

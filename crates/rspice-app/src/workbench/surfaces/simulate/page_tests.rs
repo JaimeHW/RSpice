@@ -7,11 +7,9 @@
 
 mod accessibility;
 mod capture_groups;
-mod excitations;
 mod field_editing;
 mod plan_removal;
 mod press_sweep;
-mod registry_honesty;
 mod run_set;
 mod settings_switch;
 mod solver_options;
@@ -43,7 +41,11 @@ const RENDER_VIEWPORT_HEIGHT: f32 = 2600.0;
 /// A registry page shows its record editor only once something is selected, so
 /// a test that wants to see those controls has to put a record in the plan and
 /// select it before the frame runs.
-fn render_with(page: SimulationPage, width: f32, seed: impl FnOnce(&mut RSpiceApp)) -> String {
+pub(crate) fn render_with(
+    page: SimulationPage,
+    width: f32,
+    seed: impl FnOnce(&mut RSpiceApp),
+) -> String {
     fn collect(shape: &egui::epaint::Shape, rendered: &mut String) {
         match shape {
             egui::epaint::Shape::Text(text) => {
@@ -88,7 +90,7 @@ fn render_with(page: SimulationPage, width: f32, seed: impl FnOnce(&mut RSpiceAp
 }
 
 /// The active plan's identity, for tests that seed plan-owned records.
-fn plan_id(app: &RSpiceApp) -> crate::product::SimulationPlanId {
+pub(crate) fn plan_id(app: &RSpiceApp) -> crate::product::SimulationPlanId {
     app.state
         .model
         .sim_setup

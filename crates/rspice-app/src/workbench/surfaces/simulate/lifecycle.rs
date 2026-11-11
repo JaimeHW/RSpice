@@ -287,7 +287,7 @@ pub(super) type InsertAnalysisResult = Result<
 ///
 /// `None` is every refusal, each of which has already stated itself: a plan
 /// that does not resolve, an insert the plan rejected.
-pub(super) fn insert_analysis_instance(
+pub(crate) fn insert_analysis_instance(
     cx: &mut Cx<'_, SimulateFeature>,
     kind: AnalysisKind,
 ) -> Option<AnalysisInstanceId> {
@@ -854,7 +854,7 @@ pub(super) const fn availability_label(kind: AnalysisKind) -> &'static str {
     kind.availability().label()
 }
 
-pub(super) const fn analysis_catalog_group(kind: AnalysisKind) -> &'static str {
+pub(crate) const fn analysis_catalog_group(kind: AnalysisKind) -> &'static str {
     kind.category().label
 }
 

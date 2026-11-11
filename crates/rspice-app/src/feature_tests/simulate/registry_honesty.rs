@@ -14,7 +14,11 @@
 
 use egui::{Pos2, Rect, pos2, vec2};
 
-use super::{RSpiceApp, SimulationPage, plan_id, render_with};
+use crate::state::SimulationPage;
+use crate::workbench::RSpiceApp;
+use crate::workbench::surfaces::simulate::page_specs;
+use crate::workbench::surfaces::simulate::page_tests::{plan_id, render_with};
+use crate::workbench::surfaces::simulate::show_on_stage;
 
 /// The routes that resolve a plan payload before drawing a registry, each with
 /// a phrase from its own refusal card and column headings that exist only when
@@ -118,7 +122,7 @@ fn a_specification_commit_lands_in_the_plan_log_without_a_receipts_card() {
                 scope: SpecPointScope::AllPoints,
             }],
         );
-        super::super::page_specs::commit_scope(
+        page_specs::commit_scope(
             &mut crate::workbench::features::cx(app),
             "gain",
             SpecPointScope::Nominal,
@@ -193,7 +197,7 @@ impl Registry {
             |ctx| {
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE)
-                    .show(ctx, |ui| super::super::show_on_stage(ui, app));
+                    .show(ctx, |ui| show_on_stage(ui, app));
             },
         );
         self.fields = output

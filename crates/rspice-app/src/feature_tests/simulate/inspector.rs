@@ -3,6 +3,7 @@
 //! The Simulate inspector is painted in the three states its last run can be
 //! in: complete, failed, and never run, and the Verify inspector beside them.
 
+use crate::workbench::docks::inspector;
 use egui::Vec2;
 
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
@@ -200,7 +201,7 @@ fn simulate_pass(
         |ui| {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
-                .show(ui, |ui| super::super::show(ui, app));
+                .show(ui, |ui| inspector::show(ui, app));
         },
     );
     let mut painted = Vec::new();

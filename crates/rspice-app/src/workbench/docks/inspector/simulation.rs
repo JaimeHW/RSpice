@@ -186,6 +186,3 @@ pub(in crate::workbench) fn simulate(ui: &mut Ui, inspector: &mut SimulateInspec
     }
     open_results
 }
-
-#[cfg(test)]
-mod tests;

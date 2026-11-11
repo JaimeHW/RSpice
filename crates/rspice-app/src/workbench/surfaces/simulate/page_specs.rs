@@ -1072,7 +1072,7 @@ fn selected_record(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, payload: &Simu
 /// The specs vector is replaced whole because that is the only mutation the
 /// workspace exposes for it; matching is case-insensitive for the same reason
 /// selection is.
-pub(super) fn commit_scope(
+pub(crate) fn commit_scope(
     cx: &mut Cx<'_, SimulateFeature>,
     measurement: &str,
     scope: SpecPointScope,
