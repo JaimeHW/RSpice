@@ -8843,9 +8843,8 @@ impl Engine {
                         }
                     });
                     mosfet.set_ngspice_dialect(self.config.spice_dialect != SpiceDialect::Xyce);
-                    mosfet.set_level2_vbin_cutoff(
-                        self.config.spice_dialect == SpiceDialect::Ngspice,
-                    );
+                    mosfet
+                        .set_level2_vbin_cutoff(self.config.spice_dialect == SpiceDialect::Ngspice);
                     mosfet.set_xyce_initial_fix(self.config.spice_dialect == SpiceDialect::Xyce);
                     mosfet.set_voltage_limiting_enabled(self.config.device_voltage_limiting);
 
