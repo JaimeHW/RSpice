@@ -1096,7 +1096,7 @@ fn selected_record(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, payload: &Simu
 /// The receipt is the authority, not the waveform list: a name that happens
 /// to match is not evidence that this contract produced it, and a contract
 /// that was deferred, suppressed or refused says so in its own words.
-pub(super) fn materialized_traces(
+pub(crate) fn materialized_traces(
     model: &Model,
     output: &SavedOutput,
 ) -> Result<(usize, Vec<usize>), String> {
@@ -1178,7 +1178,7 @@ pub(super) fn materialized_traces(
 }
 
 /// Reveal every member of one stored output without altering retained data.
-pub(super) fn open_materialized_traces(
+pub(crate) fn open_materialized_traces(
     cx: &mut Cx<'_, SimulateFeature>,
     analysis_index: usize,
     waveform_indices: &[usize],

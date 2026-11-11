@@ -170,31 +170,29 @@ fn configured_pvt_count(model: &Model) -> usize {
 mod tests {
     use super::super::{TOOLBAR_CONTEXT_GAP, trailing_controls_width};
     use super::*;
-    use crate::workbench::RSpiceApp;
+    use crate::state::pdk_config::PdkConfig;
     use crate::workbench::layout::LayoutSpec;
-    use crate::workbench::simulate::commands::SimulateCommand;
-    use crate::workbench::state::{WorkbenchSession, Workspace};
+    use crate::workbench::state::WorkbenchSession;
+    use rspice_app_state::workbench::workspace::restore_model_library_manager;
 
     /// The chip is the product's global entry to the plan manager, so the plan
     /// it names has to be the plan that is active — not the name the fixture
     /// project happened to ship with.
     #[test]
     fn plan_chip_copy_follows_a_rename_of_the_active_plan() {
-        let mut app = RSpiceApp::test_instance();
-        let plan_id = app
-            .state
-            .model
+        let mut model =
+            Model::session_start(PdkConfig::default(), None, restore_model_library_manager);
+        let plan_id = model
             .sim_setup
             .stable_analysis_plan()
             .expect("default plan")
             .id();
 
-        app.state
-            .model
+        model
             .sim_setup
             .rename_plan(plan_id, "Automotive temperature sweep")
             .expect("rename the active plan");
-        let copy = run_config_chip_copy(&app.state.model);
+        let copy = run_config_chip_copy(&model);
 
         assert_eq!(copy.title, "Automotive temperature sweep");
         assert_eq!(
@@ -236,30 +234,14 @@ mod tests {
         );
     }
 
-    /// The chip's whole purpose is the plan manager. Navigating to Simulation
-    /// Studio instead left the manager reachable only from a button inside it.
-    #[test]
-    fn the_plan_chip_owns_no_dialog_construction_of_its_own() {
-        let mut app = RSpiceApp::test_instance();
-        app.state.open_project_session();
-        app.state.workbench.workspace = Workspace::Design;
-
-        app.execute_command_key(SimulateCommand::ManagePlans.key());
-
-        assert!(matches!(
-            app.state.simulate.simulation_workflow,
-            Some(crate::workbench::state::SimulationWorkflowDialog::PlanManager(_))
-        ));
-        assert_ne!(app.state.workbench.workspace, Workspace::Simulate);
-    }
-
     #[test]
     fn toolbar_pvt_summary_uses_the_global_run_set_exactly_once() {
         use crate::product::ProcessCorner;
         use rspice_simulation_contract::corner_config::{CornerBaseAnalysis, CornerConfig};
 
-        let mut app = RSpiceApp::test_instance();
-        app.state.model.sim_setup.run_set =
+        let mut model =
+            Model::session_start(PdkConfig::default(), None, restore_model_library_manager);
+        model.sim_setup.run_set =
             crate::simulation::controller::test_execution::pvt::from_corner_config(&CornerConfig {
                 process_corners: vec![ProcessCorner::TT, ProcessCorner::SS],
                 voltages: vec![1.0],
@@ -270,6 +252,6 @@ mod tests {
                 base_analysis: CornerBaseAnalysis::Op,
             });
 
-        assert_eq!(configured_pvt_count(&app.state.model), 6);
+        assert_eq!(configured_pvt_count(&model), 6);
     }
 }

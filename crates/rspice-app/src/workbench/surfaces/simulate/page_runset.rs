@@ -1450,7 +1450,7 @@ fn point_table(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, frame: &RunSetFram
 /// Only the metadata's presence is checked, not the expanded manifest: this
 /// runs every frame the page draws, and expanding a thousand-trial Monte Carlo
 /// family to answer "is there one" would be a per-frame cost paid for nothing.
-pub(super) fn family_target(model: &Model) -> Result<usize, &'static str> {
+pub(crate) fn family_target(model: &Model) -> Result<usize, &'static str> {
     let run = super::output_evidence::selected_plan_dataset(model).ok_or_else(|| {
         if model.simulation.active_run().is_some() {
             "The active dataset was not produced by this plan, so its family does not describe \
@@ -1489,7 +1489,7 @@ pub(super) fn family_target(model: &Model) -> Result<usize, &'static str> {
 /// rather than made into a clause that fails to compile — and if nothing is
 /// left, the hop refuses instead of landing on the whole family and calling
 /// that the point.
-pub(super) fn open_point_in_family(
+pub(crate) fn open_point_in_family(
     cx: &mut Cx<'_, SimulateFeature>,
     analysis_index: usize,
     coordinates: &[(String, String, String)],
@@ -1518,7 +1518,7 @@ pub(super) fn open_point_in_family(
 }
 
 /// Compile one point into the family view's filter, or say why it cannot be.
-pub(super) fn family_query_for_point(
+pub(crate) fn family_query_for_point(
     cx: &mut Cx<'_, SimulateFeature>,
     analysis_index: usize,
     coordinates: &[(String, String, String)],

@@ -7,6 +7,7 @@
 //! it is disabled with its own reason when the object is not there, and that
 //! the resolution behind it names the exact retained record.
 
+use crate::workbench::surfaces::simulate::{page_outputs, page_runset, show_on_stage};
 use egui::{Rect, vec2};
 
 use crate::product::ContentDigest;
@@ -54,7 +55,7 @@ fn render_with(page: SimulationPage, width: f32, seed: impl FnOnce(&mut AppState
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
                 .show(ctx, |ui| {
-                    super::show_on_stage(ui, &mut app);
+                    show_on_stage(ui, &mut app);
                 });
         },
     );
@@ -272,7 +273,7 @@ fn a_point_without_a_retained_family_says_which_kind_of_nothing_it_has() {
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
     assert_eq!(
-        super::page_runset::family_target(&app.state.model),
+        page_runset::family_target(&app.state.model),
         Err("No run has been retained, so there is no family to open a point in.")
     );
 
@@ -281,7 +282,7 @@ fn a_point_without_a_retained_family_says_which_kind_of_nothing_it_has() {
         AnalysisResult::new(1, AnalysisType::Transient, "retained TRAN"),
     );
     assert_eq!(
-        super::page_runset::family_target(&app.state.model),
+        page_runset::family_target(&app.state.model),
         Err(
             "The retained dataset holds no analysis with a family, so there are no members to slice."
         ),
@@ -309,7 +310,7 @@ fn a_point_is_carried_into_the_family_view_as_a_filter_over_its_own_axes() {
         },
     );
     retain_run_for_active_plan(&mut app.state, analysis);
-    assert_eq!(super::page_runset::family_target(&app.state.model), Ok(0));
+    assert_eq!(page_runset::family_target(&app.state.model), Ok(0));
 
     // An axis the family does not declare contributes no clause, and one it
     // does is matched by the dimension's own identity.
@@ -326,7 +327,7 @@ fn a_point_is_carried_into_the_family_view_as_a_filter_over_its_own_axes() {
         ),
     ];
     assert_eq!(
-        super::page_runset::family_query_for_point(
+        page_runset::family_query_for_point(
             &mut crate::workbench::features::cx(&mut app),
             0,
             &coordinates
@@ -335,7 +336,7 @@ fn a_point_is_carried_into_the_family_view_as_a_filter_over_its_own_axes() {
         "only the axes the retained family declares reach the filter"
     );
 
-    super::page_runset::open_point_in_family(
+    page_runset::open_point_in_family(
         &mut crate::workbench::features::cx(&mut app),
         0,
         &coordinates,
@@ -366,7 +367,7 @@ fn a_point_is_carried_into_the_family_view_as_a_filter_over_its_own_axes() {
     )];
     let before = app.state.model.log_buffer.revision();
     assert_eq!(
-        super::page_runset::family_query_for_point(
+        page_runset::family_query_for_point(
             &mut crate::workbench::features::cx(&mut app),
             0,
             &absent
@@ -392,7 +393,7 @@ fn a_saved_output_trace_is_resolved_from_the_receipt_not_the_waveform_names() {
     let mut app = RSpiceApp::test_instance();
     let output = saved_output();
     assert_eq!(
-        super::page_outputs::materialized_traces(&app.state.model, &output),
+        page_outputs::materialized_traces(&app.state.model, &output),
         Err("No run has been retained, so this output has no stored trace.".to_owned())
     );
 
@@ -403,7 +404,7 @@ fn a_saved_output_trace_is_resolved_from_the_receipt_not_the_waveform_names() {
     ]);
     retain_run_for_active_plan(&mut app.state, analysis);
     assert_eq!(
-        super::page_outputs::materialized_traces(&app.state.model, &output),
+        page_outputs::materialized_traces(&app.state.model, &output),
         Err(
             "The retained dataset holds no receipt for this output, so it was never stored."
                 .to_owned()
@@ -430,7 +431,7 @@ fn a_saved_output_trace_is_resolved_from_the_receipt_not_the_waveform_names() {
             status: SavedOutputMaterializationStatus::Deferred,
         });
     assert!(
-        super::page_outputs::materialized_traces(&app.state.model, &output)
+        page_outputs::materialized_traces(&app.state.model, &output)
             .expect_err("a deferred output has no trace")
             .contains("deferred in the retained dataset"),
         "the refusal names the status rather than the absence"
@@ -443,16 +444,12 @@ fn a_saved_output_trace_is_resolved_from_the_receipt_not_the_waveform_names() {
             sample_count: 2,
         };
     assert_eq!(
-        super::page_outputs::materialized_traces(&app.state.model, &output),
+        page_outputs::materialized_traces(&app.state.model, &output),
         Ok((0, vec![0])),
         "the analysis and waveform the receipt names are what the hop carries"
     );
 
-    super::page_outputs::open_materialized_traces(
-        &mut crate::workbench::features::cx(&mut app),
-        0,
-        &[0],
-    );
+    page_outputs::open_materialized_traces(&mut crate::workbench::features::cx(&mut app), 0, &[0]);
     // The shell answers the hand-off once the page has drawn.
     app.after_contribution();
     assert_eq!(
@@ -553,9 +550,9 @@ fn a_saved_output_dc_family_reveals_all_members_without_changing_retained_data()
         .iter()
         .map(|waveform| SourceWaveformPresentationKey::new(key, waveform.name.clone()))
         .collect::<Vec<_>>();
-    let resolved = super::page_outputs::materialized_traces(&app.state.model, &output).unwrap();
+    let resolved = page_outputs::materialized_traces(&app.state.model, &output).unwrap();
     assert_eq!(resolved, (0, vec![0, 1]));
-    super::page_outputs::open_materialized_traces(
+    page_outputs::open_materialized_traces(
         &mut crate::workbench::features::cx(&mut app),
         resolved.0,
         &resolved.1,

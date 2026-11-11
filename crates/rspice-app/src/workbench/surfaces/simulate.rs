@@ -9,13 +9,13 @@ mod output_evidence;
 mod page_excitations;
 pub(crate) mod page_kit;
 pub(crate) mod page_models;
-mod page_outputs;
+pub(crate) mod page_outputs;
 pub(crate) mod page_runset;
 mod page_save;
 mod page_solver;
 pub(crate) mod page_specs;
 mod page_variables;
-mod pages;
+pub(crate) mod pages;
 mod participation;
 mod plan_issue_wording;
 pub(crate) mod plan_manager;
@@ -2455,9 +2455,7 @@ pub(crate) fn show_on_stage(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 #[cfg(test)]
-mod page_navigation_tests;
-#[cfg(test)]
-mod page_raster;
+pub(crate) mod page_raster;
 #[cfg(test)]
 mod page_runset_parity_tests;
 #[cfg(test)]
