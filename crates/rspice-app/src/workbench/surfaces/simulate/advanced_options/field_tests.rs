@@ -692,17 +692,17 @@ fn a_refused_value_is_announced_once_and_leaves_the_plan_alone() {
         "a refused value is not a plan change"
     );
     assert!(
-        app.state.simulate.analysis_lifecycle_status.is_refusal(),
+        app.state.model.analysis_lifecycle_status.is_refusal(),
         "the refusal is stated, not swallowed"
     );
     assert!(
         app.state
-            .simulate
+            .model
             .analysis_lifecycle_status
             .message()
             .contains("TRTOL"),
         "and it names the option it refused: {}",
-        app.state.simulate.analysis_lifecycle_status.message()
+        app.state.model.analysis_lifecycle_status.message()
     );
     assert_eq!(
         plan_records(&app),

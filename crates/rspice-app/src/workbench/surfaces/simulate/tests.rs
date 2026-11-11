@@ -683,20 +683,20 @@ fn validating_a_dependent_checks_every_transitive_prerequisite_draft() {
 
     assert!(
         app.state
-            .simulate
+            .model
             .analysis_lifecycle_status
             .message()
             .contains(&pss.to_string())
     );
     assert!(
         app.state
-            .simulate
+            .model
             .analysis_lifecycle_status
             .message()
             .starts_with("Validate rejected fail-closed")
     );
     assert!(
-        app.state.simulate.analysis_lifecycle_status.is_refusal(),
+        app.state.model.analysis_lifecycle_status.is_refusal(),
         "a rejected validation is a refusal, not a receipt"
     );
 }
@@ -838,7 +838,7 @@ fn disabled_dependents_can_prepare_required_prerequisites_in_one_action() {
     assert!(op.enabled());
     assert!(
         app.state
-            .simulate
+            .model
             .analysis_lifecycle_status
             .message()
             .contains("Prerequisites repaired")
@@ -892,7 +892,7 @@ fn phase_noise_guides_autonomous_pss_authoring_when_it_cannot_be_inferred() {
     assert!(plan.instance(pnoise).unwrap().dependencies().is_empty());
     assert!(
         app.state
-            .simulate
+            .model
             .analysis_lifecycle_status
             .message()
             .contains("Enter the oscillator node")
@@ -924,7 +924,7 @@ fn phase_noise_guides_autonomous_pss_authoring_when_it_cannot_be_inferred() {
     assert_eq!(app.state.simulate.active_analysis_instance, Some(prepared));
     assert!(
         app.state
-            .simulate
+            .model
             .analysis_lifecycle_status
             .message()
             .contains("without creating a duplicate")
@@ -1995,14 +1995,14 @@ fn simulate_frame(app: &mut RSpiceApp, page: Option<crate::state::SimulationPage
 #[test]
 fn a_restored_session_starts_from_the_default_lifecycle_outcome() {
     use crate::workbench::AppState;
+    use crate::workbench::app_state::model::AnalysisLifecycleOutcome;
     use crate::workbench::app_state::session::wire::{WorkbenchWire, WorkbenchWireRef};
-    use crate::workbench::state::AnalysisLifecycleOutcome;
 
     assert!(!AnalysisLifecycleOutcome::default().message().is_empty());
 
     let mut app = RSpiceApp::test_instance();
     app.state
-        .simulate
+        .model
         .analysis_lifecycle_status
         .record_receipt("Receipt #9 · Insert committed for instance 5.");
     let saved = serde_json::to_value(WorkbenchWireRef::capture(&app.state))
@@ -2013,7 +2013,7 @@ fn a_restored_session_starts_from_the_default_lifecycle_outcome() {
         .scatter(&mut restored);
 
     assert_eq!(
-        restored.simulate.analysis_lifecycle_status,
+        restored.model.analysis_lifecycle_status,
         AnalysisLifecycleOutcome::default(),
         "the outcome is runtime-only, so a restore starts from the default line"
     );
@@ -2035,7 +2035,7 @@ fn a_render_path_refusal_restated_every_frame_is_one_event() {
     }
     app.state.drain_notices(&egui::Context::default());
 
-    let outcome = &app.state.simulate.analysis_lifecycle_status;
+    let outcome = &app.state.model.analysis_lifecycle_status;
     assert!(outcome.is_refusal(), "{}", outcome.message());
     assert!(
         app.state.workbench.toasts.activity().is_empty(),

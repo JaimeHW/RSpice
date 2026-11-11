@@ -322,9 +322,9 @@ fn the_model_reference_temperature_commits_without_moving_the_run_temperature() 
     assert_eq!(app.state.model.sim_setup.options.tnom, 40.0);
     assert_eq!(app.state.model.sim_setup.options.temp, run_temperature);
     assert!(
-        !app.state.simulate.analysis_lifecycle_status.is_refusal(),
+        !app.state.model.analysis_lifecycle_status.is_refusal(),
         "{}",
-        app.state.simulate.analysis_lifecycle_status.message()
+        app.state.model.analysis_lifecycle_status.message()
     );
 }
 
@@ -1545,7 +1545,7 @@ fn a_scope_change_commits_as_a_plan_transaction_and_a_rejected_one_changes_nothi
         "an accepted edit moves the plan revision"
     );
     assert!(
-        !app.state.simulate.analysis_lifecycle_status.is_refusal(),
+        !app.state.model.analysis_lifecycle_status.is_refusal(),
         "the transaction reports its receipt"
     );
 
@@ -1636,7 +1636,7 @@ fn specification_policy_commits_atomically_and_rejects_an_invalid_yield_gate() {
         after_accept,
         "a rejected policy cannot move the plan revision"
     );
-    assert!(app.state.simulate.analysis_lifecycle_status.is_refusal());
+    assert!(app.state.model.analysis_lifecycle_status.is_refusal());
 }
 
 /// A solver value the page refuses to apply has to say so on the channel the
@@ -1659,7 +1659,7 @@ fn a_refused_solver_value_reports_on_the_plan_lifecycle_channel() {
 
     super::page_solver::commit_draft(&mut crate::workbench::features::cx(&mut app));
 
-    let outcome = &app.state.simulate.analysis_lifecycle_status;
+    let outcome = &app.state.model.analysis_lifecycle_status;
     assert!(outcome.is_refusal(), "{}", outcome.message());
     assert!(
         plan_records(&app) > committed,
@@ -1679,7 +1679,7 @@ fn a_refused_solver_value_reports_on_the_plan_lifecycle_channel() {
     // Repairing the value applies it, and the channel carries the receipt.
     app.state.model.sim_setup.session.options_draft.reltol = "2e-3".to_owned();
     super::page_solver::commit_draft(&mut crate::workbench::features::cx(&mut app));
-    let outcome = &app.state.simulate.analysis_lifecycle_status;
+    let outcome = &app.state.model.analysis_lifecycle_status;
     assert!(!outcome.is_refusal(), "{}", outcome.message());
     assert_eq!(app.state.model.sim_setup.options.reltol, 2e-3);
 }

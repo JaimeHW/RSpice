@@ -157,7 +157,7 @@ impl Registry {
     fn receipt(&self) -> String {
         self.app
             .state
-            .simulate
+            .model
             .analysis_lifecycle_status
             .message()
             .to_owned()
@@ -837,7 +837,7 @@ fn a_removal_costing_only_retained_runs_still_stages_and_commits() {
     );
     let status = app
         .state
-        .simulate
+        .model
         .analysis_lifecycle_status
         .message()
         .to_owned();
@@ -848,7 +848,7 @@ fn a_removal_costing_only_retained_runs_still_stages_and_commits() {
     apply_confirmed_analysis_removal(&mut crate::workbench::features::cx(&mut app));
     assert_eq!(
         app.state
-            .simulate
+            .model
             .analysis_lifecycle_status
             .message()
             .to_owned(),
@@ -928,7 +928,7 @@ fn the_plan_transaction_refuses_a_blocked_removal_and_names_the_analyses() {
     );
     let status = app
         .state
-        .simulate
+        .model
         .analysis_lifecycle_status
         .message()
         .to_owned();

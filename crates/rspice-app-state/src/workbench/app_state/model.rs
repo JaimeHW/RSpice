@@ -17,6 +17,7 @@ mod export_name;
 mod generated_instance;
 mod library_catalog;
 mod owned_source;
+mod plan_outcome;
 mod project_technology;
 mod run_specifications;
 mod schematic_sync;
@@ -37,6 +38,7 @@ pub use library_catalog::{LibraryRemoval, WorkspacePruned};
 pub use owned_source::{
     LiveOwnedSource, prune_owned_include_authority, replace_root_document_preserving_dependencies,
 };
+pub use plan_outcome::AnalysisLifecycleOutcome;
 #[cfg(any(test, feature = "test-support"))]
 pub use source_drift::SOURCE_DRIFT_HASHES;
 pub use source_drift::{ModelSourceDrift, ModelSourceDriftFinding, ModelSourceDriftScope};
@@ -84,6 +86,9 @@ pub struct Model {
     pub diagnostics: DiagnosticStore,
     /// Typed analysis configuration behind the Simulate view.
     pub sim_setup: SimSetupState,
+    /// The last outcome any plan command announced. Runtime only: a restored
+    /// session starts from the default line.
+    pub analysis_lifecycle_status: AnalysisLifecycleOutcome,
     /// Structured log history buffer (ring-buffer, filterable).
     pub log_buffer: crate::diagnostics::LogBuffer,
     /// Failures and warnings reported and not yet toasted. Each one's line is

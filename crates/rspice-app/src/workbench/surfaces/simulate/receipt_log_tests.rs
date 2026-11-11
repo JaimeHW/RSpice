@@ -68,7 +68,7 @@ fn a_committed_plan_command_leaves_one_plan_receipt_in_the_console() {
     assert_eq!(entries[0].0, LogSeverity::Info);
     assert_eq!(
         entries[0].1,
-        app.state.simulate.analysis_lifecycle_status.message(),
+        app.state.model.analysis_lifecycle_status.message(),
         "the Console records the receipt itself, not a paraphrase of it"
     );
     assert!(
@@ -104,7 +104,7 @@ fn a_refused_plan_command_is_recorded_once_and_raises_no_toast() {
     assert_eq!(entries[0].0, LogSeverity::Warning);
     assert_eq!(
         entries[0].1,
-        app.state.simulate.analysis_lifecycle_status.message()
+        app.state.model.analysis_lifecycle_status.message()
     );
     assert_eq!(
         app.state
@@ -139,6 +139,7 @@ fn a_restated_outcome_is_recorded_once_and_a_changed_one_again() {
     assert_eq!(plan_entries(&app).len(), 1);
 
     app.state
+        .model
         .record_plan_receipt("Receipt #2 \u{00b7} Edit committed for instance 1.");
     let entries = plan_entries(&app);
     assert_eq!(entries.len(), 2, "{entries:?}");

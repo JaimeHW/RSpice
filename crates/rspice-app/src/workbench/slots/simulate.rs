@@ -1,7 +1,6 @@
 //! The simulate feature's dialogs: the analysis plan's removal review; and
-//! the Simulation and Verification
-//! Studios' session: their pages, selections, drafts and filters, the
-//! analysis lifecycle outcome and the Jobs manager's review context.
+//! the Simulation and Verification Studios' session: their pages,
+//! selections, drafts and filters, and the Jobs manager's review context.
 
 use crate::workbench::framework::feature::SimulatePort;
 
@@ -38,8 +37,6 @@ pub(crate) struct SimulateState {
     /// position so scroll compensation follows egui's rendered geometry and
     /// status-message height changes cannot move the editable controls.
     pub simulation_surface_editor_anchor_y: Option<f32>,
-    /// Last analysis lifecycle outcome announced by the transaction owner.
-    pub analysis_lifecycle_status: crate::workbench::state::AnalysisLifecycleOutcome,
     /// Active Simulation Studio transaction. Drafts are runtime-only and are
     /// committed atomically by the dialog's primary action.
     pub simulation_workflow: Option<crate::workbench::state::SimulationWorkflowDialog>,
@@ -120,7 +117,6 @@ impl Default for SimulateState {
             simulation_surface_scroll_y: 0.0,
             simulation_surface_pending_scroll_delta_y: 0.0,
             simulation_surface_editor_anchor_y: None,
-            analysis_lifecycle_status: Default::default(),
             simulation_workflow: None,
             selected_specification: None,
             selected_design_variable: None,

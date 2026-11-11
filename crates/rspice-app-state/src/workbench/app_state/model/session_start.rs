@@ -57,6 +57,7 @@ impl Model {
             design_checks: Default::default(),
             diagnostics: Default::default(),
             sim_setup,
+            analysis_lifecycle_status: Default::default(),
             log_buffer: crate::diagnostics::LogBuffer::default(),
             notices: Default::default(),
             netlist_artifacts: Box::default(),

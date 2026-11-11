@@ -612,16 +612,6 @@ impl AppState {
         }
     }
 
-    /// [`AnalysisLifecycleOutcome::announce_receipt`] for the application's
-    /// state.
-    ///
-    /// [`AnalysisLifecycleOutcome::announce_receipt`]: crate::workbench::state::AnalysisLifecycleOutcome::announce_receipt
-    pub(crate) fn record_plan_receipt(&mut self, message: impl Into<String>) {
-        self.simulate
-            .analysis_lifecycle_status
-            .announce_receipt(&mut self.model.log_buffer, message);
-    }
-
     /// Select a model library, reporting a name the project no longer holds.
     ///
     /// One reporter for a refusal every caller would otherwise have to spell

@@ -470,7 +470,7 @@ pub(crate) fn commit_reference_pvt(
         .map_err(|error| error.to_string())?;
     app.state.model.sim_setup = setup;
     app.invalidate_simulation_preflight();
-    app.state.record_plan_receipt(receipt.status_line());
+    app.state.model.record_plan_receipt(receipt.status_line());
     Ok(true)
 }
 

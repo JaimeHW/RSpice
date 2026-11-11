@@ -350,7 +350,7 @@ fn a_refused_variable_expression_stays_on_the_field_that_was_typed_into() {
         registry
             .app
             .state
-            .simulate
+            .model
             .analysis_lifecycle_status
             .is_refusal(),
         "100kohm is outside the variable's own 1k…10k bound, so the workspace must refuse it"
@@ -419,7 +419,7 @@ fn an_accepted_variable_expression_clears_the_draft_it_committed() {
         !registry
             .app
             .state
-            .simulate
+            .model
             .analysis_lifecycle_status
             .is_refusal()
     );
@@ -480,7 +480,7 @@ fn a_refused_saved_output_edit_stays_on_the_fields_that_were_typed_into() {
         registry
             .app
             .state
-            .simulate
+            .model
             .analysis_lifecycle_status
             .is_refusal(),
         "a name that duplicates another output's must be refused"

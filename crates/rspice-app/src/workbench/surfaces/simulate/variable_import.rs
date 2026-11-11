@@ -914,7 +914,7 @@ fn commit_selected_rows(
             .map_err(|error| error.to_string())
     });
 
-    let status = &cx.state.analysis_lifecycle_status;
+    let status = &cx.model.analysis_lifecycle_status;
     if status.is_refusal() {
         return Err(status.message().to_owned());
     }

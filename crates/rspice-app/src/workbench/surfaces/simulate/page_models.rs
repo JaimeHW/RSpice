@@ -1065,7 +1065,7 @@ mod tests {
             app.state.model.sim_setup.model_bindings[0].library_name,
             second
         );
-        assert!(!app.state.simulate.analysis_lifecycle_status.is_refusal());
+        assert!(!app.state.model.analysis_lifecycle_status.is_refusal());
     }
 
     #[test]
@@ -1090,7 +1090,7 @@ mod tests {
         );
         assert_eq!(app.state.model.sim_setup.model_bindings, before_bindings);
         assert_eq!(active_plan_revision(&app), before_revision);
-        assert!(app.state.simulate.analysis_lifecycle_status.is_refusal());
+        assert!(app.state.model.analysis_lifecycle_status.is_refusal());
 
         apply_model_binding_action(
             &mut crate::workbench::features::cx(&mut app),
@@ -1098,7 +1098,7 @@ mod tests {
         );
         assert_eq!(app.state.model.sim_setup.model_bindings, before_bindings);
         assert_eq!(active_plan_revision(&app), before_revision);
-        assert!(app.state.simulate.analysis_lifecycle_status.is_refusal());
+        assert!(app.state.model.analysis_lifecycle_status.is_refusal());
     }
 
     const fn model_gate<'a>(

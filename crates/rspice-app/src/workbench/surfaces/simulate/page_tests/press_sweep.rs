@@ -363,8 +363,9 @@ impl Sweep {
 fn studio_state(app: &RSpiceApp) -> String {
     let state: &AppState = &app.state;
     format!(
-        "{:?}\n{:?}\n{:?}\n{:?}",
+        "{:?}\n{:?}\n{:?}\n{:?}\n{:?}",
         state.model.sim_setup,
+        state.model.analysis_lifecycle_status,
         state.workbench,
         (
             &state.shell,
@@ -1613,7 +1614,7 @@ impl Sweep {
             .entries()
             .filter(|entry| entry.source == crate::diagnostics::LogSource::Plan)
             .count();
-        let status = &self.app.state.simulate.analysis_lifecycle_status;
+        let status = &self.app.state.model.analysis_lifecycle_status;
         (recorded, status.message().to_owned())
     }
 

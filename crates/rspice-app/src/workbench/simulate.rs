@@ -197,28 +197,27 @@ pub(in crate::workbench) fn invalidate_preflight(cx: &mut Cx<'_, SimulateFeature
     );
 }
 
-/// [`AnalysisLifecycleOutcome::announce_receipt`] in the feature's context.
+/// [`Model::record_plan_receipt`] in the feature's context.
 ///
-/// [`AnalysisLifecycleOutcome::announce_receipt`]: crate::workbench::state::AnalysisLifecycleOutcome::announce_receipt
+/// [`Model::record_plan_receipt`]: crate::workbench::app_state::Model::record_plan_receipt
 pub(in crate::workbench) fn record_plan_receipt(
     cx: &mut Cx<'_, SimulateFeature>,
     message: impl Into<String>,
 ) {
-    cx.state
-        .analysis_lifecycle_status
-        .announce_receipt(&mut cx.model.log_buffer, message);
+    cx.model.record_plan_receipt(message);
 }
 
-/// [`AnalysisLifecycleOutcome::announce_refusal`] in the feature's context.
+/// [`Model::record_plan_refusal`] in the feature's context, answering the
+/// gesture on the status bar when the outcome is new.
 ///
-/// [`AnalysisLifecycleOutcome::announce_refusal`]: crate::workbench::state::AnalysisLifecycleOutcome::announce_refusal
+/// [`Model::record_plan_refusal`]: crate::workbench::app_state::Model::record_plan_refusal
 pub(in crate::workbench) fn record_plan_refusal(
     cx: &mut Cx<'_, SimulateFeature>,
     message: impl Into<String>,
 ) {
-    cx.state
-        .analysis_lifecycle_status
-        .announce_refusal(&mut cx.model.log_buffer, cx.wb, message);
+    if let Some(prompt) = cx.model.record_plan_refusal(message) {
+        cx.wb.prompt(prompt);
+    }
 }
 
 /// Show the run history on its own route.

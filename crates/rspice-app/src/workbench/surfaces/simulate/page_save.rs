@@ -878,7 +878,7 @@ mod tests {
         assert_eq!(app.state.model.sim_setup.save_policy, policy);
         assert_ne!(active_plan_revision(&app), before_revision);
         assert!(app.state.runs.preflight.report.is_none());
-        assert!(!app.state.simulate.analysis_lifecycle_status.is_refusal());
+        assert!(!app.state.model.analysis_lifecycle_status.is_refusal());
     }
 
     #[test]
@@ -901,7 +901,7 @@ mod tests {
         assert_eq!(app.state.model.sim_setup.save_policy, before_policy);
         assert_eq!(active_plan_revision(&app), before_revision);
         assert!(app.state.runs.preflight.report.is_some());
-        assert!(app.state.simulate.analysis_lifecycle_status.is_refusal());
+        assert!(app.state.model.analysis_lifecycle_status.is_refusal());
     }
 
     #[test]
@@ -919,6 +919,6 @@ mod tests {
         ));
 
         assert_eq!(app.state.model.sim_setup.save_policy, before_policy);
-        assert!(app.state.simulate.analysis_lifecycle_status.is_refusal());
+        assert!(app.state.model.analysis_lifecycle_status.is_refusal());
     }
 }

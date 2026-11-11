@@ -922,7 +922,7 @@ pub(super) fn commit_capture_group(
         // `commit_plan_change` already reported the refusal on the lifecycle
         // channel; the dialog needs it too so it stays open on the field that
         // caused it.
-        return Err(cx.state.analysis_lifecycle_status.message().to_owned());
+        return Err(cx.model.analysis_lifecycle_status.message().to_owned());
     }
     Ok(format!(
         "{} capture group {name} in plan {}.",
