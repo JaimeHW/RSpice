@@ -99,8 +99,10 @@ pub enum CircuitLuRobustness {
     /// Retry dangerous growth, refine inaccurate solutions, and fall back to
     /// the supernodal backend when circuit LU cannot certify a result.
     Enhanced,
-    /// Return the circuit-LU result or error directly, without RSpice-specific
-    /// growth retries, iterative refinement, or backend fallback.
+    /// Return the circuit-LU result or error directly, without iterative
+    /// refinement or backend fallback. A fresh factor whose element growth
+    /// passes 1/sqrt(eps) still refactors once with maximum partial pivots,
+    /// because KLU's threshold pivoting never checks the growth it causes.
     BackendFaithful,
 }
 

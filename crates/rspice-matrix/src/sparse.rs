@@ -657,8 +657,11 @@ fn configure_klu_backend(
     backend.set_row_scaling_enabled(
         options.circuit_lu_row_scaling == CircuitLuRowScaling::AdaptiveExtremeRows,
     );
-    backend
-        .set_growth_retry_enabled(options.circuit_lu_robustness == CircuitLuRobustness::Enhanced);
+    // Both profiles rebuild a fresh factor whose element growth passes
+    // 1/sqrt(eps) with maximum partial pivots. KLU's threshold pivoting
+    // never checks that growth, and a factor carrying it solves a
+    // well-conditioned system wrongly.
+    backend.set_growth_retry_enabled(true);
     backend.set_pivot_tolerance(options.pivot_tolerance)?;
     backend.set_absolute_pivot_tolerance(options.absolute_pivot_tolerance)
 }
@@ -8720,6 +8723,72 @@ mod tests {
                 .any(|(native, amesos)| native.to_bits() != amesos.to_bits()),
             "the nonsymmetric probe must distinguish factor(A) from the Amesos factor(A^T) path"
         );
+    }
+
+    /// SuiteSparse KLU, which Xyce runs through Amesos, keeps a diagonal
+    /// pivot that is at least 1e-3 of its column and never checks the element
+    /// growth that choice causes. This matrix is well conditioned (2-norm
+    /// condition 9.3): 2e-3 on the diagonal, -1 below it and a last column of
+    /// ones. Each kept 2e-3 pivot multiplies the last column by about 500, so
+    /// the threshold factor carries a growth of 1.6e16, and the faithful solve
+    /// of `W x = W * ones` came back 3.6 away from all ones. A ring of
+    /// BSIM-CMG inverters (cmg_ring31) gave its Xyce-dialect Newton systems
+    /// the same growth along the ring. A faithful factor whose growth passes
+    /// 1/sqrt(eps) refactors once with maximum partial pivots.
+    #[test]
+    fn a_backend_faithful_factor_with_damaging_growth_refactors_with_partial_pivots() {
+        const N: usize = 7;
+        let mut col_ptr = vec![0];
+        let mut row_idx = Vec::new();
+        let mut values = Vec::new();
+        for col in 0..N {
+            let last = col + 1 == N;
+            for row in if last { 0..N } else { col..N } {
+                row_idx.push(row);
+                values.push(if last {
+                    1.0
+                } else if row == col {
+                    2.0e-3
+                } else {
+                    -1.0
+                });
+            }
+            col_ptr.push(row_idx.len());
+        }
+
+        let mut threshold = crate::KluSolver::new();
+        threshold.set_growth_retry_enabled(false);
+        threshold.set_row_scaling_enabled(false);
+        threshold.analyze(N, &col_ptr, &row_idx).unwrap();
+        threshold.factor(&values).unwrap();
+        let growth = threshold.diagnostics().reciprocal_pivot_growth;
+        assert!(
+            growth < f64::EPSILON.sqrt(),
+            "threshold pivots alone must show damaging growth, reciprocal {growth:e}"
+        );
+
+        // Amesos factors the transpose of the matrix it is handed, so the
+        // transpose of W puts W itself in the factor.
+        let mut transposed = Vec::new();
+        let mut rhs = [0.0; N];
+        for col in 0..N {
+            for entry in col_ptr[col]..col_ptr[col + 1] {
+                transposed.push((col, row_idx[entry], values[entry]));
+                rhs[col] += values[entry];
+            }
+        }
+        let mut matrix =
+            StaticMatrix::from_triplets_with_options(N, N, &transposed, amesos_klu_options())
+                .unwrap();
+        let mut solution = Vec::new();
+        matrix.solve_newton_into(&rhs, &mut solution).unwrap();
+
+        let error = solution
+            .iter()
+            .map(|value| (value - 1.0).abs())
+            .fold(0.0, f64::max);
+        assert!(error <= 1.0e-12, "{solution:?}");
+        assert_eq!(matrix.klu.as_ref().unwrap().full_factorization_count(), 2);
     }
 
     #[test]
