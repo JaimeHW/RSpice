@@ -1876,29 +1876,27 @@ mod ledger_head_tests {
 #[cfg(test)]
 mod transaction_tests {
     use super::*;
-    use crate::workbench::RSpiceApp;
+    use crate::workbench::simulate::test_host::SimulateTestHost;
 
     #[test]
     fn solver_options_commit_advances_the_plan_and_invalidates_preflight() {
-        let mut app = RSpiceApp::test_instance();
-        let (plan_id, source_revision) = app
-            .state
+        let mut harness = SimulateTestHost::harness();
+        let (plan_id, source_revision) = harness
             .model
             .sim_setup
             .stable_analysis_plan()
             .map(|plan| (plan.id(), plan.revision()))
             .expect("default plan");
-        let topology_root = app
-            .state
+        let topology_root = harness
             .model
             .workspace
             .content
             .simulation_root_reference()
             .key();
-        let topology_revision = app.state.model.schematic.topology_version();
+        let topology_revision = harness.model.schematic.topology_version();
         let topology_closure = vec![(topology_root.to_ascii_lowercase(), topology_revision)];
-        app.state.runs.preflight.report = Some(crate::state::PreflightReport {
-            project_revision: app.state.model.workspace.content.project.revision().get(),
+        harness.runs.preflight.report = Some(crate::state::PreflightReport {
+            project_revision: harness.model.workspace.content.project.revision().get(),
             topology_root,
             topology_revision,
             topology_closure,
@@ -1908,16 +1906,16 @@ mod transaction_tests {
             advisories: Vec::new(),
             prepared: None,
         });
-        let mut options = app.state.model.sim_setup.options.clone();
+        let mut options = harness.model.sim_setup.options.clone();
         options.reltol *= 2.0;
 
         assert!(
-            commit_options_transaction(&mut crate::workbench::features::cx(&mut app), &options)
+            commit_options_transaction(&mut harness.cx(), &options)
                 .expect("validated options commit atomically")
         );
 
         assert_eq!(
-            app.state
+            harness
                 .model
                 .sim_setup
                 .stable_analysis_plan()
@@ -1925,28 +1923,24 @@ mod transaction_tests {
                 .revision(),
             source_revision.next().expect("revision advances")
         );
-        assert_eq!(app.state.model.sim_setup.options.reltol, options.reltol);
-        assert!(app.state.runs.preflight.report.is_none());
+        assert_eq!(harness.model.sim_setup.options.reltol, options.reltol);
+        assert!(harness.runs.preflight.report.is_none());
     }
 
     #[test]
     fn unchanged_solver_options_do_not_fabricate_a_plan_revision() {
-        let mut app = RSpiceApp::test_instance();
-        let revision = app
-            .state
+        let mut harness = SimulateTestHost::harness();
+        let revision = harness
             .model
             .sim_setup
             .stable_analysis_plan()
             .expect("default plan")
             .revision();
-        let options = app.state.model.sim_setup.options.clone();
+        let options = harness.model.sim_setup.options.clone();
 
-        assert!(
-            !commit_options_transaction(&mut crate::workbench::features::cx(&mut app), &options)
-                .expect("no-op succeeds")
-        );
+        assert!(!commit_options_transaction(&mut harness.cx(), &options).expect("no-op succeeds"));
         assert_eq!(
-            app.state
+            harness
                 .model
                 .sim_setup
                 .stable_analysis_plan()

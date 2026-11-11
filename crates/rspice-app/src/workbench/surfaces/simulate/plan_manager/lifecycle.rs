@@ -305,6 +305,9 @@ mod tests {
         PreparedSourceCheckReceipt, SimulationRun,
     };
     use crate::workbench::app_state::sim_setup::plan_catalog::SimulationPlanCatalogError;
+    use crate::workbench::framework::feature::harness::FeatureHarness;
+    use crate::workbench::simulate::SimulateFeature;
+    use crate::workbench::simulate::test_host::SimulateTestHost;
 
     /// One prepared run whose authenticated receipt names `id`.
     ///
@@ -347,41 +350,47 @@ mod tests {
     /// `create_plan` activates what it creates, so the fixture's original plan
     /// becomes the retained entry — which is the one the archive and restore
     /// transactions can act on.
-    fn app_with_a_referenced_plan() -> (RSpiceApp, SimulationPlanId, SimulationPlanId) {
-        let mut app = RSpiceApp::test_instance();
-        let retained = app
-            .state
+    fn app_with_a_referenced_plan() -> (
+        FeatureHarness<SimulateFeature>,
+        SimulationPlanId,
+        SimulationPlanId,
+    ) {
+        let mut harness = SimulateTestHost::harness();
+        let retained = harness
             .model
             .sim_setup
             .stable_analysis_plan()
             .expect("the fixture has a stable plan")
             .id();
-        let mut setup = app.state.model.sim_setup.clone();
+        let mut setup = harness.model.sim_setup.clone();
         let active = setup
             .create_plan("Corner characterization")
             .expect("a fresh root plan is created");
-        app.state
+        harness
             .model
             .workspace
             .content
             .migrate_active_plan_data(retained);
-        app.state
+        harness
             .model
             .workspace
             .content
             .migrate_inactive_plan_data(active);
-        app.state.model.sim_setup = setup;
-        app.state
+        harness.model.sim_setup = setup;
+        harness
             .model
             .simulation
             .retained
             .runs
             .push(run_referencing(retained));
-        (app, active, retained)
+        (harness, active, retained)
     }
 
-    fn record_for(app: &RSpiceApp, id: SimulationPlanId) -> PlanCatalogRecord {
-        plan_catalog_records(&app.state.model)
+    fn record_for(
+        harness: &FeatureHarness<SimulateFeature>,
+        id: SimulationPlanId,
+    ) -> PlanCatalogRecord {
+        plan_catalog_records(&harness.model)
             .into_iter()
             .find(|record| record.id == id)
             .unwrap_or_else(|| panic!("plan {id} is projected"))
@@ -390,21 +399,17 @@ mod tests {
     /// The rename dialog's whole claim: the name moves and nothing else does.
     #[test]
     fn a_rename_preserves_the_identity_the_revision_and_the_result_references() {
-        let (mut app, _, retained) = app_with_a_referenced_plan();
-        let before = record_for(&app, retained);
+        let (mut harness, _, retained) = app_with_a_referenced_plan();
+        let before = record_for(&harness, retained);
         assert_eq!(
             before.results, 1,
             "the fixture's run must reference the plan, or this proves nothing"
         );
 
-        commit_rename_plan(
-            &mut crate::workbench::features::cx(&mut app),
-            retained,
-            "  Retained sweep · release  ",
-        )
-        .expect("a retained plan renames");
+        commit_rename_plan(&mut harness.cx(), retained, "  Retained sweep · release  ")
+            .expect("a retained plan renames");
 
-        let after = record_for(&app, retained);
+        let after = record_for(&harness, retained);
         assert_eq!(
             after.name, "Retained sweep · release",
             "the name is trimmed and written"
@@ -419,7 +424,7 @@ mod tests {
             "a result stopped resolving to the renamed plan"
         );
         assert_eq!(
-            app.state.model.simulation.retained.runs[0]
+            harness.model.simulation.retained.runs[0]
                 .prepared_receipt()
                 .and_then(PreparedRunReceipt::simulation_plan_id),
             Some(retained),
@@ -431,14 +436,14 @@ mod tests {
     /// references, which is what the stored record's own documentation promises.
     #[test]
     fn archiving_retains_the_configuration_and_every_result_reference() {
-        let (mut app, _, retained) = app_with_a_referenced_plan();
-        let before = record_for(&app, retained);
+        let (mut harness, _, retained) = app_with_a_referenced_plan();
+        let before = record_for(&harness, retained);
         assert!(!before.archived);
 
-        commit_archive_plan(&mut app.state.model.sim_setup, retained)
+        commit_archive_plan(&mut harness.model.sim_setup, retained)
             .expect("an inactive plan archives");
 
-        let after = record_for(&app, retained);
+        let after = record_for(&harness, retained);
         assert!(after.archived, "the plan is not archived");
         assert_eq!(after.name, before.name);
         assert_eq!(after.id, before.id);
@@ -463,23 +468,23 @@ mod tests {
     /// button: it is the catalog's, and it is typed.
     #[test]
     fn archiving_the_active_plan_is_refused_by_the_catalog() {
-        let (mut app, active, _) = app_with_a_referenced_plan();
+        let (mut harness, active, _) = app_with_a_referenced_plan();
 
         assert_eq!(
-            app.state.model.sim_setup.clone().archive_plan(active),
+            harness.model.sim_setup.clone().archive_plan(active),
             Err(SimulationPlanCatalogError::ActivePlanCannotBeArchived(
                 active
             )),
             "the catalog does not refuse the active plan on its own account"
         );
 
-        let error = commit_archive_plan(&mut app.state.model.sim_setup, active)
+        let error = commit_archive_plan(&mut harness.model.sim_setup, active)
             .expect_err("archiving the active plan is refused");
         assert!(
             error.to_ascii_lowercase().contains("active"),
             "the refusal does not say the plan is active: {error}"
         );
-        let record = record_for(&app, active);
+        let record = record_for(&harness, active);
         assert!(
             record.active && !record.archived,
             "the refused archive still moved the plan"
@@ -490,15 +495,15 @@ mod tests {
     /// carries.
     #[test]
     fn restoring_reverses_an_archive() {
-        let (mut app, _, retained) = app_with_a_referenced_plan();
-        let before = record_for(&app, retained);
+        let (mut harness, _, retained) = app_with_a_referenced_plan();
+        let before = record_for(&harness, retained);
 
-        commit_archive_plan(&mut app.state.model.sim_setup, retained)
+        commit_archive_plan(&mut harness.model.sim_setup, retained)
             .expect("an inactive plan archives");
-        commit_restore_plan(&mut app.state.model.sim_setup, retained)
+        commit_restore_plan(&mut harness.model.sim_setup, retained)
             .expect("an archived plan restores");
 
-        let after = record_for(&app, retained);
+        let after = record_for(&harness, retained);
         assert!(!after.archived, "the restore left the plan archived");
         assert_eq!(after.lifecycle_label(), before.lifecycle_label());
         assert_eq!(after.name, before.name);
@@ -508,7 +513,7 @@ mod tests {
         assert_eq!(after.model_bindings, before.model_bindings);
         assert_eq!(after.results, before.results);
         assert_eq!(
-            app.state.model.sim_setup.restore_plan(retained),
+            harness.model.sim_setup.restore_plan(retained),
             Err(SimulationPlanCatalogError::PlanNotArchived(retained)),
             "a restored plan is no longer archived, so restoring it again is refused"
         );

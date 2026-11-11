@@ -668,7 +668,9 @@ mod tests {
         DATASETS_LISTED, ExecutedDeckStorage, commit_save_policy, executed_deck_summary,
         format_bytes, retention_ledger,
     };
-    use crate::workbench::app::RSpiceApp;
+    use crate::workbench::framework::feature::harness::FeatureHarness;
+    use crate::workbench::simulate::SimulateFeature;
+    use crate::workbench::simulate::test_host::SimulateTestHost;
 
     /// The Executed decks row does not call a project empty that is not.
     ///
@@ -739,8 +741,10 @@ mod tests {
         );
     }
 
-    fn active_plan_revision(app: &RSpiceApp) -> crate::product::ObjectRevision {
-        app.state
+    fn active_plan_revision(
+        harness: &FeatureHarness<SimulateFeature>,
+    ) -> crate::product::ObjectRevision {
+        harness
             .model
             .sim_setup
             .analysis_plan
@@ -861,64 +865,64 @@ mod tests {
 
     #[test]
     fn valid_save_policy_commit_is_revisioned_and_invalidates_preflight() {
-        let mut app = RSpiceApp::test_instance();
-        let before_revision = active_plan_revision(&app);
-        app.state.runs.preflight.report = Some(crate::state::PreflightReport::retained_for_test(
-            app.state.model.workspace.content.project.revision().get(),
+        let mut harness = SimulateTestHost::harness();
+        let before_revision = active_plan_revision(&harness);
+        harness.runs.preflight.report = Some(crate::state::PreflightReport::retained_for_test(
+            harness.model.workspace.content.project.revision().get(),
         ));
-        let mut policy = app.state.model.sim_setup.save_policy;
+        let mut policy = harness.model.sim_setup.save_policy;
         policy.maximum_storage_bytes /= 2;
 
         assert!(commit_save_policy(
-            &mut crate::workbench::features::cx(&mut app),
+            &mut harness.cx(),
             policy,
             "Save policy test commit"
         ));
 
-        assert_eq!(app.state.model.sim_setup.save_policy, policy);
-        assert_ne!(active_plan_revision(&app), before_revision);
-        assert!(app.state.runs.preflight.report.is_none());
-        assert!(!app.state.model.analysis_lifecycle_status.is_refusal());
+        assert_eq!(harness.model.sim_setup.save_policy, policy);
+        assert_ne!(active_plan_revision(&harness), before_revision);
+        assert!(harness.runs.preflight.report.is_none());
+        assert!(!harness.model.analysis_lifecycle_status.is_refusal());
     }
 
     #[test]
     fn invalid_save_policy_is_refused_without_mutating_plan_or_preflight() {
-        let mut app = RSpiceApp::test_instance();
-        let before_policy = app.state.model.sim_setup.save_policy;
-        let before_revision = active_plan_revision(&app);
-        app.state.runs.preflight.report = Some(crate::state::PreflightReport::retained_for_test(
-            app.state.model.workspace.content.project.revision().get(),
+        let mut harness = SimulateTestHost::harness();
+        let before_policy = harness.model.sim_setup.save_policy;
+        let before_revision = active_plan_revision(&harness);
+        harness.runs.preflight.report = Some(crate::state::PreflightReport::retained_for_test(
+            harness.model.workspace.content.project.revision().get(),
         ));
         let mut invalid = before_policy;
         invalid.maximum_storage_bytes = 0;
 
         assert!(!commit_save_policy(
-            &mut crate::workbench::features::cx(&mut app),
+            &mut harness.cx(),
             invalid,
             "Invalid save policy test"
         ));
 
-        assert_eq!(app.state.model.sim_setup.save_policy, before_policy);
-        assert_eq!(active_plan_revision(&app), before_revision);
-        assert!(app.state.runs.preflight.report.is_some());
-        assert!(app.state.model.analysis_lifecycle_status.is_refusal());
+        assert_eq!(harness.model.sim_setup.save_policy, before_policy);
+        assert_eq!(active_plan_revision(&harness), before_revision);
+        assert!(harness.runs.preflight.report.is_some());
+        assert!(harness.model.analysis_lifecycle_status.is_refusal());
     }
 
     #[test]
     fn failed_plan_commit_rolls_back_the_candidate_save_policy() {
-        let mut app = RSpiceApp::test_instance();
-        let before_policy = app.state.model.sim_setup.save_policy;
+        let mut harness = SimulateTestHost::harness();
+        let before_policy = harness.model.sim_setup.save_policy;
         let mut candidate = before_policy;
         candidate.retained_dataset_limit += 1;
-        app.state.model.sim_setup.analysis_plan = None;
+        harness.model.sim_setup.analysis_plan = None;
 
         assert!(!commit_save_policy(
-            &mut crate::workbench::features::cx(&mut app),
+            &mut harness.cx(),
             candidate,
             "Save policy rollback test"
         ));
 
-        assert_eq!(app.state.model.sim_setup.save_policy, before_policy);
-        assert!(app.state.model.analysis_lifecycle_status.is_refusal());
+        assert_eq!(harness.model.sim_setup.save_policy, before_policy);
+        assert!(harness.model.analysis_lifecycle_status.is_refusal());
     }
 }

@@ -13,52 +13,44 @@
 //! because dropping it would change what a saved project resolves to.
 
 use super::*;
+use crate::workbench::framework::feature::harness::FeatureHarness;
+use crate::workbench::simulate::SimulateFeature;
+use crate::workbench::simulate::test_host::SimulateTestHost;
 
 use crate::simulation::plan::{AnalysisKind, NumericOverrideOption as O, SolverOwnership};
 use crate::state::SimulationPage;
-use crate::workbench::RSpiceApp;
 
 #[test]
 fn hb_transient_startup_controls_reach_the_solver_and_follow_mode_changes() {
-    let (mut app, id) = studio(AnalysisKind::HarmonicBalance);
+    let (mut harness, id) = studio(AnalysisKind::HarmonicBalance);
     assert!(
-        !offered(&app, id)
+        !offered(&harness, id)
             .iter()
             .any(|(option, _)| *option == O::Itl4)
     );
-    super::super::page_solver::write_numeric_record(
-        &mut crate::workbench::features::cx(&mut app),
-        id,
-        O::HbInitialState,
-        "1",
-    )
-    .unwrap();
+    super::super::page_solver::write_numeric_record(&mut harness.cx(), id, O::HbInitialState, "1")
+        .unwrap();
     for (option, value) in [
         (O::Itl4, "80"),
         (O::MaximumTimestep, "2u"),
         (O::LteReltol, "2e-4"),
     ] {
         assert!(
-            offered(&app, id)
+            offered(&harness, id)
                 .iter()
                 .any(|(offered, _)| *offered == option)
         );
-        super::super::page_solver::write_numeric_record(
-            &mut crate::workbench::features::cx(&mut app),
-            id,
-            option,
-            value,
-        )
-        .unwrap();
+        super::super::page_solver::write_numeric_record(&mut harness.cx(), id, option, value)
+            .unwrap();
     }
     for option in [O::StrobeInterval, O::OutputTimePoints, O::RetainEverySignal] {
         assert!(
-            !offered(&app, id)
+            !offered(&harness, id)
                 .iter()
                 .any(|(offered, _)| *offered == option)
         );
     }
-    let plan = app.state.model.sim_setup.stable_analysis_plan().unwrap();
+    let plan = harness.model.sim_setup.stable_analysis_plan().unwrap();
     let record = plan
         .instance(id)
         .unwrap()
@@ -91,7 +83,7 @@ fn hb_transient_startup_controls_reach_the_solver_and_follow_mode_changes() {
     let before = serde_json::to_value(plan).unwrap();
     assert!(
         super::super::page_solver::write_numeric_record(
-            &mut crate::workbench::features::cx(&mut app),
+            &mut harness.cx(),
             id,
             O::HbInitialState,
             "0"
@@ -99,25 +91,16 @@ fn hb_transient_startup_controls_reach_the_solver_and_follow_mode_changes() {
         .is_err()
     );
     assert_eq!(
-        serde_json::to_value(app.state.model.sim_setup.stable_analysis_plan().unwrap()).unwrap(),
+        serde_json::to_value(harness.model.sim_setup.stable_analysis_plan().unwrap()).unwrap(),
         before
     );
     for option in [O::Itl4, O::MaximumTimestep, O::LteReltol] {
-        commit(
-            &mut crate::workbench::features::cx(&mut app),
-            id,
-            &[OptionEdit::Clear(option)],
-        );
+        commit(&mut harness.cx(), id, &[OptionEdit::Clear(option)]);
     }
-    super::super::page_solver::write_numeric_record(
-        &mut crate::workbench::features::cx(&mut app),
-        id,
-        O::HbInitialState,
-        "0",
-    )
-    .unwrap();
+    super::super::page_solver::write_numeric_record(&mut harness.cx(), id, O::HbInitialState, "0")
+        .unwrap();
     assert!(
-        !offered(&app, id)
+        !offered(&harness, id)
             .iter()
             .any(|(option, _)| *option == O::Itl4)
     );
@@ -125,13 +108,8 @@ fn hb_transient_startup_controls_reach_the_solver_and_follow_mode_changes() {
 
 #[test]
 fn configured_study_form_writer_and_solver_ledger_share_base_ownership() {
-    let (mut app, id) = studio(AnalysisKind::MonteCarlo);
-    let plan = app
-        .state
-        .model
-        .sim_setup
-        .stable_analysis_plan_mut()
-        .unwrap();
+    let (mut harness, id) = studio(AnalysisKind::MonteCarlo);
+    let plan = harness.model.sim_setup.stable_analysis_plan_mut().unwrap();
     let ac = plan.insert(AnalysisKind::Ac).unwrap().0;
     let tran = plan.insert(AnalysisKind::Transient).unwrap().0;
     plan.edit(id, |draft| {
@@ -142,36 +120,26 @@ fn configured_study_form_writer_and_solver_ledger_share_base_ownership() {
     })
     .unwrap();
     assert!(
-        !offered(&app, id)
+        !offered(&harness, id)
             .iter()
             .any(|(option, _)| *option == O::Itl4)
     );
     assert!(
-        super::super::page_solver::write_numeric_record(
-            &mut crate::workbench::features::cx(&mut app),
-            id,
-            O::Itl4,
-            "91"
-        )
-        .is_err()
+        super::super::page_solver::write_numeric_record(&mut harness.cx(), id, O::Itl4, "91")
+            .is_err()
     );
-    super::super::page_solver::write_numeric_record(
-        &mut crate::workbench::features::cx(&mut app),
-        id,
-        O::Reltol,
-        "1e-5",
-    )
-    .unwrap();
-    assert_eq!(row_of(&app, id, O::Reltol).origin, STUDY_DEFAULT_ORIGIN);
-    assert!(offered(&app, id).contains(&(O::Reltol, STUDY_DEFAULT_ORIGIN)));
-    let rows = super::super::page_solver::analysis_overrides(&app.state.model);
+    super::super::page_solver::write_numeric_record(&mut harness.cx(), id, O::Reltol, "1e-5")
+        .unwrap();
+    assert_eq!(row_of(&harness, id, O::Reltol).origin, STUDY_DEFAULT_ORIGIN);
+    assert!(offered(&harness, id).contains(&(O::Reltol, STUDY_DEFAULT_ORIGIN)));
+    let rows = super::super::page_solver::analysis_overrides(&harness.model);
     let row = rows
         .iter()
         .find(|row| row.option == O::Reltol.label())
         .unwrap();
     assert_eq!(row.origin, STUDY_DEFAULT_ORIGIN);
     assert_eq!(row.effective, "10u");
-    app.state
+    harness
         .model
         .sim_setup
         .stable_analysis_plan_mut()
@@ -184,18 +152,12 @@ fn configured_study_form_writer_and_solver_ledger_share_base_ownership() {
         })
         .unwrap();
     assert!(
-        offered(&app, id)
+        offered(&harness, id)
             .iter()
             .any(|(option, _)| *option == O::Itl4)
     );
-    super::super::page_solver::write_numeric_record(
-        &mut crate::workbench::features::cx(&mut app),
-        id,
-        O::Itl4,
-        "91",
-    )
-    .unwrap();
-    assert_eq!(authored(&app, id, O::Itl4).as_deref(), Some("91"));
+    super::super::page_solver::write_numeric_record(&mut harness.cx(), id, O::Itl4, "91").unwrap();
+    assert_eq!(authored(&harness, id, O::Itl4).as_deref(), Some("91"));
 }
 
 #[test]
@@ -205,13 +167,8 @@ fn time_stepped_forms_can_author_and_clear_their_step_ceiling() {
         AnalysisKind::Envelope,
         AnalysisKind::Optimization,
     ] {
-        let (mut app, instance) = studio(kind);
-        let plan = app
-            .state
-            .model
-            .sim_setup
-            .stable_analysis_plan_mut()
-            .unwrap();
+        let (mut harness, instance) = studio(kind);
+        let plan = harness.model.sim_setup.stable_analysis_plan_mut().unwrap();
         if kind == AnalysisKind::Optimization {
             let op = plan.insert(AnalysisKind::OperatingPoint).unwrap().0;
             let pss = plan.insert(AnalysisKind::Pss).unwrap().0;
@@ -226,20 +183,20 @@ fn time_stepped_forms_can_author_and_clear_their_step_ceiling() {
             .unwrap();
         }
         assert!(
-            offered(&app, instance)
+            offered(&harness, instance)
                 .iter()
                 .any(|(option, _)| *option == O::MaximumTimestep)
         );
         commit(
-            &mut crate::workbench::features::cx(&mut app),
+            &mut harness.cx(),
             instance,
             &[OptionEdit::Set(O::MaximumTimestep, "2n".into())],
         );
         assert_eq!(
-            authored(&app, instance, O::MaximumTimestep).as_deref(),
+            authored(&harness, instance, O::MaximumTimestep).as_deref(),
             Some("2n")
         );
-        let plan = app.state.model.sim_setup.stable_analysis_plan().unwrap();
+        let plan = harness.model.sim_setup.stable_analysis_plan().unwrap();
         let options = plan
             .instance(instance)
             .unwrap()
@@ -252,13 +209,13 @@ fn time_stepped_forms_can_author_and_clear_their_step_ceiling() {
         let engine = rspice_core::Engine::default().resolved_for_netlist(&netlist);
         assert_eq!(engine.config().transient_timeint_max_timestep, Some(2e-9));
         commit(
-            &mut crate::workbench::features::cx(&mut app),
+            &mut harness.cx(),
             instance,
             &[OptionEdit::Clear(O::MaximumTimestep)],
         );
-        assert_eq!(authored(&app, instance, O::MaximumTimestep), None);
+        assert_eq!(authored(&harness, instance, O::MaximumTimestep), None);
         assert!(
-            offered(&app, instance)
+            offered(&harness, instance)
                 .iter()
                 .any(|(option, _)| *option == O::MaximumTimestep)
         );
@@ -303,10 +260,9 @@ fn hb_startup_field_tracks_selected_envelope_initializer() {
 
 /// The test instance, with one analysis of `kind` selected on the Analyses
 /// route.
-fn studio(kind: AnalysisKind) -> (RSpiceApp, AnalysisInstanceId) {
-    let mut app = RSpiceApp::test_instance();
-    let plan = app
-        .state
+fn studio(kind: AnalysisKind) -> (FeatureHarness<SimulateFeature>, AnalysisInstanceId) {
+    let mut harness = SimulateTestHost::harness();
+    let plan = harness
         .model
         .sim_setup
         .stable_analysis_plan_mut()
@@ -321,15 +277,17 @@ fn studio(kind: AnalysisKind) -> (RSpiceApp, AnalysisInstanceId) {
                 .map(|(id, _)| id)
                 .unwrap_or_else(|error| panic!("{kind:?} inserts into the default plan: {error}"))
         });
-    app.state.simulate.simulation_page = SimulationPage::Analyses;
-    app.state.simulate.active_analysis_instance = Some(instance);
-    (app, instance)
+    harness.state.simulation_page = SimulationPage::Analyses;
+    harness.state.active_analysis_instance = Some(instance);
+    (harness, instance)
 }
 
 /// Every option field one analysis's form offers, as `(option, origin)`.
-fn offered(app: &RSpiceApp, instance: AnalysisInstanceId) -> Vec<(O, &'static str)> {
-    let plan = app
-        .state
+fn offered(
+    harness: &FeatureHarness<SimulateFeature>,
+    instance: AnalysisInstanceId,
+) -> Vec<(O, &'static str)> {
+    let plan = harness
         .model
         .sim_setup
         .stable_analysis_plan()
@@ -341,7 +299,7 @@ fn offered(app: &RSpiceApp, instance: AnalysisInstanceId) -> Vec<(O, &'static st
         target.kind(),
         target.draft(),
         target.numeric_override(),
-        &app.state.model.sim_setup.options,
+        &harness.model.sim_setup.options,
         plan.solver_ownership(instance),
     )
     .into_iter()
@@ -351,9 +309,12 @@ fn offered(app: &RSpiceApp, instance: AnalysisInstanceId) -> Vec<(O, &'static st
 }
 
 /// One option's row on one analysis, whether or not a form offers it.
-fn row_of(app: &RSpiceApp, instance: AnalysisInstanceId, option: O) -> AdvancedOptionRow {
-    let plan = app
-        .state
+fn row_of(
+    harness: &FeatureHarness<SimulateFeature>,
+    instance: AnalysisInstanceId,
+    option: O,
+) -> AdvancedOptionRow {
+    let plan = harness
         .model
         .sim_setup
         .stable_analysis_plan()
@@ -365,7 +326,7 @@ fn row_of(app: &RSpiceApp, instance: AnalysisInstanceId, option: O) -> AdvancedO
         target.kind(),
         target.draft(),
         target.numeric_override(),
-        &app.state.model.sim_setup.options,
+        &harness.model.sim_setup.options,
         plan.solver_ownership(instance),
     )
     .into_iter()
@@ -375,8 +336,12 @@ fn row_of(app: &RSpiceApp, instance: AnalysisInstanceId, option: O) -> AdvancedO
 }
 
 /// The authored bound one analysis currently carries for one option.
-fn authored(app: &RSpiceApp, instance: AnalysisInstanceId, option: O) -> Option<String> {
-    app.state
+fn authored(
+    harness: &FeatureHarness<SimulateFeature>,
+    instance: AnalysisInstanceId,
+    option: O,
+) -> Option<String> {
+    harness
         .model
         .sim_setup
         .stable_analysis_plan()
@@ -387,8 +352,8 @@ fn authored(app: &RSpiceApp, instance: AnalysisInstanceId, option: O) -> Option<
 }
 
 /// The revision the plan currently stands at.
-fn revision(app: &RSpiceApp) -> crate::product::ObjectRevision {
-    app.state
+fn revision(harness: &FeatureHarness<SimulateFeature>) -> crate::product::ObjectRevision {
+    harness
         .model
         .sim_setup
         .stable_analysis_plan()
@@ -420,8 +385,8 @@ const GLOBAL: [O; 12] = [
 /// would be offering to resolve one number twenty ways.
 #[test]
 fn a_form_offers_the_options_its_own_kind_owns() {
-    let (app, transient) = studio(AnalysisKind::Transient);
-    let offered_on_the_transient: Vec<O> = offered(&app, transient)
+    let (harness, transient) = studio(AnalysisKind::Transient);
+    let offered_on_the_transient: Vec<O> = offered(&harness, transient)
         .into_iter()
         .map(|(option, _)| option)
         .collect();
@@ -478,8 +443,8 @@ fn a_form_offers_the_options_its_own_kind_owns() {
         "a transient runs no harmonic-balance solve"
     );
 
-    let (app, operating_point) = studio(AnalysisKind::OperatingPoint);
-    let offered_on_the_op: Vec<O> = offered(&app, operating_point)
+    let (harness, operating_point) = studio(AnalysisKind::OperatingPoint);
+    let offered_on_the_op: Vec<O> = offered(&harness, operating_point)
         .into_iter()
         .map(|(option, _)| option)
         .collect();
@@ -491,8 +456,8 @@ fn a_form_offers_the_options_its_own_kind_owns() {
          accuracy tier; and arc length continues a sweep, which it is not"
     );
 
-    let (app, dc_sweep) = studio(AnalysisKind::DcSweep);
-    let offered_on_the_sweep: Vec<O> = offered(&app, dc_sweep)
+    let (harness, dc_sweep) = studio(AnalysisKind::DcSweep);
+    let offered_on_the_sweep: Vec<O> = offered(&harness, dc_sweep)
         .into_iter()
         .map(|(option, _)| option)
         .collect();
@@ -516,8 +481,8 @@ fn a_form_offers_the_options_its_own_kind_owns() {
         AnalysisKind::DcSweep,
         AnalysisKind::Ac,
     ] {
-        let (app, instance) = studio(kind);
-        let offered: Vec<O> = offered(&app, instance)
+        let (harness, instance) = studio(kind);
+        let offered: Vec<O> = offered(&harness, instance)
             .into_iter()
             .map(|(option, _)| option)
             .collect();
@@ -538,7 +503,7 @@ fn a_form_offers_the_options_its_own_kind_owns() {
 /// An analysis with nothing authored states the plan as every field's origin.
 #[test]
 fn an_untouched_form_states_the_plan_as_every_origin() {
-    let (app, transient) = studio(AnalysisKind::Transient);
+    let (harness, transient) = studio(AnalysisKind::Transient);
     // The plan states no truncation bound of its own, and it states no policy
     // at all for the two packages the engine reads straight off the deck: an
     // output schedule and a transient Newton bound belong to one analysis, not
@@ -559,7 +524,7 @@ fn an_untouched_form_states_the_plan_as_every_origin() {
         O::OutputTimePoints,
         O::RetainEverySignal,
     ];
-    for (option, origin) in offered(&app, transient) {
+    for (option, origin) in offered(&harness, transient) {
         let expected = if ENGINE_DEFAULTED.contains(&option) {
             ENGINE_ORIGIN
         } else {
@@ -577,8 +542,8 @@ fn an_untouched_form_states_the_plan_as_every_origin() {
 /// value a reader could edit, which is exactly what they are not.
 #[test]
 fn a_bound_the_plan_does_not_state_opens_on_an_empty_well() {
-    let (mut app, transient) = studio(AnalysisKind::Transient);
-    let inherited = row_of(&app, transient, O::LteReltol);
+    let (mut harness, transient) = studio(AnalysisKind::Transient);
+    let inherited = row_of(&harness, transient, O::LteReltol);
     assert_eq!(inherited.origin, ENGINE_ORIGIN);
     assert_eq!(
         inherited.effective, ENGINE_ORIGIN,
@@ -594,11 +559,11 @@ fn a_bound_the_plan_does_not_state_opens_on_an_empty_well() {
     // A number typed into it is an override like any other, and the well then
     // opens on what the solve will use.
     commit(
-        &mut crate::workbench::features::cx(&mut app),
+        &mut harness.cx(),
         transient,
         &[OptionEdit::Set(O::LteReltol, "2e-3".to_owned())],
     );
-    let authored = row_of(&app, transient, O::LteReltol);
+    let authored = row_of(&harness, transient, O::LteReltol);
     assert_eq!(authored.origin, OVERRIDE_ORIGIN);
     assert_eq!(well_value(&authored), authored.effective);
     assert!(!well_value(&authored).is_empty());
@@ -611,26 +576,25 @@ fn a_bound_the_plan_does_not_state_opens_on_an_empty_well() {
 /// stops.
 #[test]
 fn a_well_authors_what_it_holds_and_clears_when_it_is_emptied() {
-    let (mut app, transient) = studio(AnalysisKind::Transient);
-    let before = revision(&app);
+    let (mut harness, transient) = studio(AnalysisKind::Transient);
+    let before = revision(&harness);
 
-    let inherited = row_of(&app, transient, O::Trtol);
+    let inherited = row_of(&harness, transient, O::Trtol);
     assert_eq!(inherited.origin, PLAN_ORIGIN);
     let edit = well_edit(&inherited, " 4 ").expect("a new value asks to be authored");
     assert_eq!(edit, OptionEdit::Set(O::Trtol, "4".to_owned()));
-    commit(
-        &mut crate::workbench::features::cx(&mut app),
-        transient,
-        &[edit],
-    );
+    commit(&mut harness.cx(), transient, &[edit]);
 
-    assert_eq!(authored(&app, transient, O::Trtol).as_deref(), Some("4"));
+    assert_eq!(
+        authored(&harness, transient, O::Trtol).as_deref(),
+        Some("4")
+    );
     assert_ne!(
-        revision(&app),
+        revision(&harness),
         before,
         "a committed override advances the plan, which is what invalidates preflight"
     );
-    let overridden = row_of(&app, transient, O::Trtol);
+    let overridden = row_of(&harness, transient, O::Trtol);
     assert_eq!(overridden.origin, OVERRIDE_ORIGIN);
     assert_eq!(overridden.effective, "4");
 
@@ -640,17 +604,13 @@ fn a_well_authors_what_it_holds_and_clears_when_it_is_emptied() {
 
     let cleared = well_edit(&overridden, "   ").expect("an emptied well asks to be cleared");
     assert_eq!(cleared, OptionEdit::Clear(O::Trtol));
-    commit(
-        &mut crate::workbench::features::cx(&mut app),
-        transient,
-        &[cleared],
-    );
-    assert_eq!(authored(&app, transient, O::Trtol), None);
-    let inherited = row_of(&app, transient, O::Trtol);
+    commit(&mut harness.cx(), transient, &[cleared]);
+    assert_eq!(authored(&harness, transient, O::Trtol), None);
+    let inherited = row_of(&harness, transient, O::Trtol);
     assert_eq!(inherited.origin, PLAN_ORIGIN);
     assert_eq!(
         inherited.effective,
-        super::super::page_solver::plan_preset_value(O::Trtol, &app.state.model.sim_setup.options),
+        super::super::page_solver::plan_preset_value(O::Trtol, &harness.model.sim_setup.options),
         "and the field states the plan's own value once more"
     );
 
@@ -667,51 +627,51 @@ fn a_well_authors_what_it_holds_and_clears_when_it_is_emptied() {
 /// value the solve is actually using.
 #[test]
 fn a_refused_value_is_announced_once_and_leaves_the_plan_alone() {
-    let plan_records = |app: &RSpiceApp| {
-        app.state
+    let plan_records = |harness: &FeatureHarness<SimulateFeature>| {
+        harness
             .model
             .log_buffer
             .entries()
             .filter(|entry| entry.source == crate::diagnostics::LogSource::Plan)
             .count()
     };
-    let (mut app, transient) = studio(AnalysisKind::Transient);
-    let before = revision(&app);
-    let announced = plan_records(&app);
+    let (mut harness, transient) = studio(AnalysisKind::Transient);
+    let before = revision(&harness);
+    let announced = plan_records(&harness);
 
     commit(
-        &mut crate::workbench::features::cx(&mut app),
+        &mut harness.cx(),
         transient,
         &[OptionEdit::Set(O::Trtol, "banana".to_owned())],
     );
 
-    assert_eq!(authored(&app, transient, O::Trtol), None);
+    assert_eq!(authored(&harness, transient, O::Trtol), None);
     assert_eq!(
-        revision(&app),
+        revision(&harness),
         before,
         "a refused value is not a plan change"
     );
     assert!(
-        app.state.model.analysis_lifecycle_status.is_refusal(),
+        harness.model.analysis_lifecycle_status.is_refusal(),
         "the refusal is stated, not swallowed"
     );
     assert!(
-        app.state
+        harness
             .model
             .analysis_lifecycle_status
             .message()
             .contains("TRTOL"),
         "and it names the option it refused: {}",
-        app.state.model.analysis_lifecycle_status.message()
+        harness.model.analysis_lifecycle_status.message()
     );
     assert_eq!(
-        plan_records(&app),
+        plan_records(&harness),
         announced + 1,
         "one refused field is one announcement, not two"
     );
     assert_eq!(
-        row_of(&app, transient, O::Trtol).effective,
-        super::super::page_solver::plan_preset_value(O::Trtol, &app.state.model.sim_setup.options),
+        row_of(&harness, transient, O::Trtol).effective,
+        super::super::page_solver::plan_preset_value(O::Trtol, &harness.model.sim_setup.options),
         "the field states what the solve uses, which the refusal did not change"
     );
 }
@@ -724,8 +684,8 @@ fn a_refused_value_is_announced_once_and_leaves_the_plan_alone() {
 /// policy it departed from.
 #[test]
 fn a_setting_returned_to_the_plan_clears_its_override() {
-    let (mut app, operating_point) = studio(AnalysisKind::OperatingPoint);
-    let inherited = row_of(&app, operating_point, O::GminStepping);
+    let (mut harness, operating_point) = studio(AnalysisKind::OperatingPoint);
+    let inherited = row_of(&harness, operating_point, O::GminStepping);
     assert_eq!(inherited.origin, PLAN_ORIGIN);
     let departed = if inherited.preset.eq_ignore_ascii_case("on") {
         "off"
@@ -740,25 +700,17 @@ fn a_setting_returned_to_the_plan_clears_its_override() {
 
     let edit = setting_edit(&inherited, departed).expect("a departure asks to be authored");
     assert_eq!(edit, OptionEdit::Set(O::GminStepping, departed.to_owned()));
-    commit(
-        &mut crate::workbench::features::cx(&mut app),
-        operating_point,
-        &[edit],
-    );
-    let overridden = row_of(&app, operating_point, O::GminStepping);
+    commit(&mut harness.cx(), operating_point, &[edit]);
+    let overridden = row_of(&harness, operating_point, O::GminStepping);
     assert_eq!(overridden.origin, OVERRIDE_ORIGIN);
 
     let back = setting_edit(&overridden, &preset)
         .expect("the plan's own setting is how a switch returns to it");
     assert_eq!(back, OptionEdit::Clear(O::GminStepping));
-    commit(
-        &mut crate::workbench::features::cx(&mut app),
-        operating_point,
-        &[back],
-    );
-    assert_eq!(authored(&app, operating_point, O::GminStepping), None);
+    commit(&mut harness.cx(), operating_point, &[back]);
+    assert_eq!(authored(&harness, operating_point, O::GminStepping), None);
     assert_eq!(
-        row_of(&app, operating_point, O::GminStepping).origin,
+        row_of(&harness, operating_point, O::GminStepping).origin,
         PLAN_ORIGIN
     );
 }
@@ -771,9 +723,9 @@ fn a_setting_returned_to_the_plan_clears_its_override() {
 /// moment it is cleared — while no form offers to author a new one.
 #[test]
 fn a_legacy_override_of_a_global_option_stays_until_it_is_cleared() {
-    let (mut app, transient) = studio(AnalysisKind::Transient);
+    let (mut harness, transient) = studio(AnalysisKind::Transient);
     assert!(
-        !offered(&app, transient)
+        !offered(&harness, transient)
             .iter()
             .any(|(option, _)| *option == O::Reltol),
         "no form offers to author the plan's update bound"
@@ -788,7 +740,7 @@ fn a_legacy_override_of_a_global_option_stays_until_it_is_cleared() {
             "4e-9",
         )
         .expect("every kind carries an update bound");
-    app.state
+    harness
         .model
         .sim_setup
         .stable_analysis_plan_mut()
@@ -797,7 +749,7 @@ fn a_legacy_override_of_a_global_option_stays_until_it_is_cleared() {
         .expect("the plan accepts a bound the transient can use");
 
     assert_eq!(
-        offered(&app, transient)
+        offered(&harness, transient)
             .into_iter()
             .find(|(option, _)| *option == O::Reltol)
             .map(|(_, origin)| origin),
@@ -806,13 +758,13 @@ fn a_legacy_override_of_a_global_option_stays_until_it_is_cleared() {
     );
 
     commit(
-        &mut crate::workbench::features::cx(&mut app),
+        &mut harness.cx(),
         transient,
         &[OptionEdit::Clear(O::Reltol)],
     );
-    assert_eq!(authored(&app, transient, O::Reltol), None);
+    assert_eq!(authored(&harness, transient, O::Reltol), None);
     assert!(
-        !offered(&app, transient)
+        !offered(&harness, transient)
             .iter()
             .any(|(option, _)| *option == O::Reltol),
         "and once it is cleared the field is gone with it"

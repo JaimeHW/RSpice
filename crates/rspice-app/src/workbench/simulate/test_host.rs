@@ -9,6 +9,9 @@ use rspice_app_state::workbench::workspace::restore_model_library_manager;
 
 use crate::state::pdk_config::PdkConfig;
 use crate::workbench::app_state::Model;
+use crate::workbench::framework::feature::harness::FeatureHarness;
+use crate::workbench::simulate::SimulateFeature;
+use crate::workbench::state::WorkbenchSession;
 
 /// The shared model the simulate feature reads, under the name `AppState`
 /// gives it.
@@ -24,5 +27,14 @@ impl Default for SimulateTestHost {
         Self {
             model: Model::session_start(PdkConfig::default(), None, restore_model_library_manager),
         }
+    }
+}
+
+impl SimulateTestHost {
+    /// The simulate feature on its own, for a test that lends its context:
+    /// the model a new session starts with, a new session, and every peer
+    /// answering as a fresh session does.
+    pub(crate) fn harness() -> FeatureHarness<SimulateFeature> {
+        FeatureHarness::with_model(Self::default().model, WorkbenchSession::default())
     }
 }
