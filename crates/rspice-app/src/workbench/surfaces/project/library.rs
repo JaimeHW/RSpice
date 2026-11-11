@@ -60,65 +60,26 @@ struct BrowserRowSpec<'a> {
     read_only: bool,
 }
 
+/// The Library page as the shell composes it: the browser, then the open
+/// built-in source and the detail, each in the project feature's context, and
+/// what the reader asked of each carried out as its call returns. The detail
+/// reads the selection the browser's intent writes, so that intent is carried
+/// out before the detail draws. Then the reports, publication and the
+/// membership dialogs.
 pub(super) fn library(ui: &mut Ui, app: &mut RSpiceApp) {
     let ctx = ui.ctx().clone();
-    ensure_valid_selection(
-        &mut app.state.model.library_manager,
-        &app.state.model.workspace.content.active_view,
-    );
-    library_context(ui, &mut app.state);
-
-    let available = ui.available_size();
-    let visible_width = available.x.min(visible_workspace_width(ui)).max(1.0);
-    // The columns fill a page at least their minimum wide, to a fraction of a
-    // pixel that must not raise a scroll bar. On a narrower one the bar takes
-    // its height from the columns, never from the band under them.
-    let scrolls_sideways = visible_width < MIN_BROWSER_WIDTH;
-    let bar_height = if scrolls_sideways {
-        ui.spacing().scroll.allocated_width()
-    } else {
-        0.0
-    };
-    let page_height = (available.y - DETAIL_HEIGHT - bar_height).max(120.0);
-    let browser_height =
-        builtin_models::columns_height(&app.state.project.builtin_models, page_height);
-    let mut intent = None;
-    ScrollArea::horizontal()
-        .hscroll(scrolls_sideways)
-        .id_salt("workbench.project.library.columns")
-        .auto_shrink([false, true])
-        .max_height(browser_height)
-        .show(ui, |ui| {
-            let width = visible_width.max(MIN_BROWSER_WIDTH);
-            ui.set_min_width(width);
-            let library_width = (width * 0.25).max(205.0);
-            let cell_width = (width * 0.37).max(210.0);
-            let view_width = (width - library_width - cell_width).max(220.0);
-            ui.horizontal_top(|ui| {
-                ui.spacing_mut().item_spacing.x = 0.0;
-                let library_intent = library_column(ui, app, library_width, browser_height);
-                let cell_intent = cell_column(ui, app, cell_width, browser_height);
-                let view_intent = view_column(ui, app, view_width, browser_height);
-                intent = library_intent.or(cell_intent).or(view_intent);
-            });
-        });
+    let (intent, source_height) = library_browser(ui, &mut features::cx(app));
     if let Some(intent) = intent {
         apply_library_intent(&ctx, app, intent);
     }
     if app.state.project.builtin_models.open {
-        let messages = app.state.workbench.messages();
-        if let Some(intent) = builtin_models::source_pane(
-            ui,
-            &mut app.state.project.builtin_models,
-            messages,
-            (page_height - browser_height).max(0.0),
-        ) {
+        if let Some(intent) = builtin_source(ui, &mut features::cx(app), source_height) {
             apply_library_intent(&ctx, app, intent);
         }
-        if let Some(intent) = builtin_models::detail(ui, &app.state) {
+        if let Some(intent) = builtin_detail(ui, &features::cx(app)) {
             apply_library_intent(&ctx, app, intent);
         }
-    } else if let Some(intent) = library_detail(ui, &app.state) {
+    } else if let Some(intent) = library_detail(ui, &features::cx(app)) {
         apply_library_intent(&ctx, app, intent);
     }
     show_library_usage_report(&ctx);
@@ -135,6 +96,69 @@ pub(super) fn library(ui: &mut Ui, app: &mut RSpiceApp) {
     app.after_contribution();
     ProjectFeature::process_rename_view_dialog(&mut features::cx(app), &ctx);
     app.after_contribution();
+}
+
+/// The browser: the selection repaired to a real library, cell and view, the
+/// context strip, and the library, cell and view columns. It returns what the
+/// reader asked of a column, and the height the columns leave an open
+/// built-in source above the band.
+fn library_browser(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) -> (Option<LibraryIntent>, f32) {
+    ensure_valid_selection(
+        &mut cx.model.library_manager,
+        &cx.model.workspace.content.active_view,
+    );
+    library_context(ui, cx);
+
+    let cx = &*cx;
+    let available = ui.available_size();
+    let visible_width = available.x.min(visible_workspace_width(ui)).max(1.0);
+    // The columns fill a page at least their minimum wide, to a fraction of a
+    // pixel that must not raise a scroll bar. On a narrower one the bar takes
+    // its height from the columns, never from the band under them.
+    let scrolls_sideways = visible_width < MIN_BROWSER_WIDTH;
+    let bar_height = if scrolls_sideways {
+        ui.spacing().scroll.allocated_width()
+    } else {
+        0.0
+    };
+    let page_height = (available.y - DETAIL_HEIGHT - bar_height).max(120.0);
+    let browser_height = builtin_models::columns_height(&cx.state.builtin_models, page_height);
+    let mut intent = None;
+    ScrollArea::horizontal()
+        .hscroll(scrolls_sideways)
+        .id_salt("workbench.project.library.columns")
+        .auto_shrink([false, true])
+        .max_height(browser_height)
+        .show(ui, |ui| {
+            let width = visible_width.max(MIN_BROWSER_WIDTH);
+            ui.set_min_width(width);
+            let library_width = (width * 0.25).max(205.0);
+            let cell_width = (width * 0.37).max(210.0);
+            let view_width = (width - library_width - cell_width).max(220.0);
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
+                let library_intent = library_column(ui, cx, library_width, browser_height);
+                let cell_intent = cell_column(ui, cx, cell_width, browser_height);
+                let view_intent = view_column(ui, cx, view_width, browser_height);
+                intent = library_intent.or(cell_intent).or(view_intent);
+            });
+        });
+    (intent, (page_height - browser_height).max(0.0))
+}
+
+/// The open built-in source, `height` tall, between the columns and the band.
+fn builtin_source(
+    ui: &mut Ui,
+    cx: &mut Cx<'_, ProjectFeature>,
+    height: f32,
+) -> Option<LibraryIntent> {
+    let messages = cx.wb.messages();
+    builtin_models::source_pane(ui, &mut cx.state.builtin_models, messages, height)
+}
+
+/// The built-in library's band under the columns.
+fn builtin_detail(ui: &mut Ui, cx: &Cx<'_, ProjectFeature>) -> Option<LibraryIntent> {
+    builtin_models::detail(ui, &cx.state.builtin_models, &cx.model.library_manager)
 }
 
 fn ensure_valid_selection(manager: &mut crate::state::LibraryManager, active_view: &CellViewRef) {
@@ -209,14 +233,13 @@ fn ensure_valid_selection(manager: &mut crate::state::LibraryManager, active_vie
     }
 }
 
-fn library_context(ui: &mut Ui, state: &mut AppState) {
+fn library_context(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
     let t = Tokens::get(ui.ctx());
-    let builtin = &state.project.builtin_models;
+    let builtin = &cx.state.builtin_models;
     let selection = if builtin.open {
         builtin_models::selection_path(builtin)
     } else {
-        state
-            .model
+        cx.model
             .library_manager
             .selected_lcv_path()
             .unwrap_or_else(|| "No library selection".to_owned())
@@ -224,8 +247,7 @@ fn library_context(ui: &mut Ui, state: &mut AppState) {
     let access = if builtin.open {
         "read only"
     } else {
-        state
-            .model
+        cx.model
             .library_manager
             .current_library()
             .map_or("unavailable", |library| {
@@ -254,7 +276,7 @@ fn library_context(ui: &mut Ui, state: &mut AppState) {
                 let search_width = (ui.available_width() * 0.38).clamp(180.0, 420.0);
                 let search = ui.add_sized(
                     [search_width, t.metrics.ctl_h.min(28.0)],
-                    egui::TextEdit::singleline(&mut state.project.project_library_filter)
+                    egui::TextEdit::singleline(&mut cx.state.project_library_filter)
                         .hint_text("Filter cells and views\u{2026}"),
                 );
                 ui.ctx().accesskit_node_builder(search.id, |node| {
@@ -291,9 +313,13 @@ fn context_value(ui: &mut Ui, label: &str, value: &str, color: Color32) {
     );
 }
 
-fn library_column(ui: &mut Ui, app: &RSpiceApp, width: f32, height: f32) -> Option<LibraryIntent> {
-    let libraries = app
-        .state
+fn library_column(
+    ui: &mut Ui,
+    cx: &Cx<'_, ProjectFeature>,
+    width: f32,
+    height: f32,
+) -> Option<LibraryIntent> {
+    let libraries = cx
         .model
         .library_manager
         .libraries_sorted()
@@ -306,9 +332,8 @@ fn library_column(ui: &mut Ui, app: &RSpiceApp, width: f32, height: f32) -> Opti
             )
         })
         .collect::<Vec<_>>();
-    let builtin_open = app.state.project.builtin_models.open;
-    let selected = app
-        .state
+    let builtin_open = cx.state.builtin_models.open;
+    let selected = cx
         .model
         .library_manager
         .selected_library
@@ -334,30 +359,30 @@ fn library_column(ui: &mut Ui, app: &RSpiceApp, width: f32, height: f32) -> Opti
                 intent = Some(LibraryIntent::SelectLibrary(name.clone()));
             }
         }
-        builtin_models::library_row(ui, &app.state.project.builtin_models).or(intent)
+        builtin_models::library_row(ui, &cx.state.builtin_models).or(intent)
     })
 }
 
-fn cell_column(ui: &mut Ui, app: &RSpiceApp, width: f32, height: f32) -> Option<LibraryIntent> {
-    if app.state.project.builtin_models.open {
+fn cell_column(
+    ui: &mut Ui,
+    cx: &Cx<'_, ProjectFeature>,
+    width: f32,
+    height: f32,
+) -> Option<LibraryIntent> {
+    if cx.state.builtin_models.open {
         return builtin_models::cell_column(
             ui,
-            &app.state.project.builtin_models,
-            &app.state.project.project_library_filter,
+            &cx.state.builtin_models,
+            &cx.state.project_library_filter,
             width,
             height,
         );
     }
-    let selected_library = app.state.model.library_manager.selected_library.clone();
-    let query = app
-        .state
-        .project
-        .project_library_filter
-        .trim()
-        .to_ascii_lowercase();
+    let selected_library = cx.model.library_manager.selected_library.clone();
+    let query = cx.state.project_library_filter.trim().to_ascii_lowercase();
     let cells = selected_library
         .as_deref()
-        .and_then(|library| app.state.model.library_manager.get_library(library))
+        .and_then(|library| cx.model.library_manager.get_library(library))
         .map(|library| {
             library
                 .cells_sorted()
@@ -381,7 +406,7 @@ fn cell_column(ui: &mut Ui, app: &RSpiceApp, width: f32, height: f32) -> Option<
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    let selected_cell = app.state.model.library_manager.selected_cell.as_deref();
+    let selected_cell = cx.model.library_manager.selected_cell.as_deref();
     browser_column(ui, "Cell", cells.len(), width, height, |ui| {
         let mut intent = None;
         for (name, views, description) in &cells {
@@ -415,15 +440,20 @@ fn cell_column(ui: &mut Ui, app: &RSpiceApp, width: f32, height: f32) -> Option<
     })
 }
 
-fn view_column(ui: &mut Ui, app: &RSpiceApp, width: f32, height: f32) -> Option<LibraryIntent> {
-    if app.state.project.builtin_models.open {
-        return builtin_models::view_column(ui, &app.state.project.builtin_models, width, height);
+fn view_column(
+    ui: &mut Ui,
+    cx: &Cx<'_, ProjectFeature>,
+    width: f32,
+    height: f32,
+) -> Option<LibraryIntent> {
+    if cx.state.builtin_models.open {
+        return builtin_models::view_column(ui, &cx.state.builtin_models, width, height);
     }
-    let selected_library = app.state.model.library_manager.selected_library.clone();
-    let selected_cell = app.state.model.library_manager.selected_cell.clone();
+    let selected_library = cx.model.library_manager.selected_library.clone();
+    let selected_cell = cx.model.library_manager.selected_cell.clone();
     let views = selected_library
         .as_deref()
-        .and_then(|library| app.state.model.library_manager.get_library(library))
+        .and_then(|library| cx.model.library_manager.get_library(library))
         .and_then(|library| {
             selected_cell
                 .as_deref()
@@ -443,7 +473,7 @@ fn view_column(ui: &mut Ui, app: &RSpiceApp, width: f32, height: f32) -> Option<
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    let selected_view = app.state.model.library_manager.selected_view.as_deref();
+    let selected_view = cx.model.library_manager.selected_view.as_deref();
     browser_column(ui, "View", views.len(), width, height, |ui| {
         let mut intent = None;
         for (name, view_type, modified, path) in &views {
@@ -607,16 +637,16 @@ fn browser_row(ui: &mut Ui, spec: BrowserRowSpec<'_>) -> egui::Response {
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
-fn library_detail(ui: &mut Ui, state: &AppState) -> Option<LibraryIntent> {
+fn library_detail(ui: &mut Ui, cx: &Cx<'_, ProjectFeature>) -> Option<LibraryIntent> {
     let t = Tokens::get(ui.ctx());
-    let selected = selected_view(state);
-    let selected_cell = selected_cell(state);
-    let selected_library = state
+    let selected = selected_view(&cx.model.library_manager);
+    let selected_cell = selected_cell(&cx.model.library_manager);
+    let selected_library = cx
         .model
         .library_manager
         .current_library()
         .map(|library| (library.name.clone(), library.read_only));
-    let writable_library_available = state
+    let writable_library_available = cx
         .model
         .library_manager
         .libraries_sorted()
@@ -657,18 +687,18 @@ fn library_detail(ui: &mut Ui, state: &AppState) -> Option<LibraryIntent> {
                     }
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let governance_write_allowed = state.platform.project_lifecycle.is_open()
-                        && !state.model.safe_mode.project_read_only()
-                        && !state.model.simulation.execution.has_active_execution();
+                    let governance_write_allowed = cx.platform.project_lifecycle.is_open()
+                        && !cx.model.safe_mode.project_read_only()
+                        && !cx.model.simulation.execution.has_active_execution();
                     let rollback = Button::new("Rollback\u{2026}")
                         .enabled(
                             governance_write_allowed
-                                && !state.model.workspace.content.project.library_publications().is_empty(),
+                                && !cx.model.workspace.content.project.library_publications().is_empty(),
                         )
                         .show(ui)
-                        .on_disabled_hover_text(if state.model.simulation.execution.has_active_execution() {
+                        .on_disabled_hover_text(if cx.model.simulation.execution.has_active_execution() {
                             "Library rollback is unavailable while a simulation is running."
-                        } else if state.model.safe_mode.project_read_only() {
+                        } else if cx.model.safe_mode.project_read_only() {
                             "Library rollback is unavailable while the project is read-only."
                         } else {
                             "No retained library publication is available to roll back."
@@ -679,7 +709,7 @@ fn library_detail(ui: &mut Ui, state: &AppState) -> Option<LibraryIntent> {
                     let publish = Button::new("Publish\u{2026}")
                         .enabled(governance_write_allowed)
                         .show(ui)
-                        .on_disabled_hover_text(if state.model.simulation.execution.has_active_execution() {
+                        .on_disabled_hover_text(if cx.model.simulation.execution.has_active_execution() {
                             "Library publication is unavailable while a simulation is running."
                         } else {
                             "Library publication is unavailable while the project is read-only."
@@ -840,15 +870,15 @@ fn library_detail(ui: &mut Ui, state: &AppState) -> Option<LibraryIntent> {
     intent
 }
 
-fn selected_cell(state: &AppState) -> Option<(String, String, bool)> {
-    let manager = &state.model.library_manager;
+fn selected_cell(manager: &crate::state::LibraryManager) -> Option<(String, String, bool)> {
     let library = manager.current_library()?;
     let cell = manager.current_cell()?;
     Some((library.name.clone(), cell.name.clone(), library.read_only))
 }
 
-fn selected_view(state: &AppState) -> Option<(CellViewRef, ViewType, bool, bool)> {
-    let manager = &state.model.library_manager;
+fn selected_view(
+    manager: &crate::state::LibraryManager,
+) -> Option<(CellViewRef, ViewType, bool, bool)> {
     let library = manager.current_library()?;
     let cell = manager.current_cell()?;
     let view = manager.current_view()?;
@@ -1362,7 +1392,7 @@ mod tests {
                 )),
                 ..Default::default()
             },
-            |ui| library_context(ui, &mut app.state),
+            |ui| library_context(ui, &mut features::cx(&mut app)),
         );
         let access = output
             .shapes

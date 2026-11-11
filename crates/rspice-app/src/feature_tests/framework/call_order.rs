@@ -1925,6 +1925,51 @@ fn the_configuration_dialogs_draw_in_the_project_context_and_what_they_raise_is_
     );
 }
 
+/// The Library page's calls in the project feature's context, each intent
+/// carried out as its call returns: the detail reads the selection the
+/// browser's intent writes, so it draws after that intent is carried out.
+/// With the built-in library open, its source and its band take the detail's
+/// place, in that order.
+const LIBRARY_PAGE: &[Step] = &[
+    (
+        "browser",
+        &[
+            "let (intent, source_height) = library_browser(ui, &mut features::cx(app));",
+            "if let Some(intent) = intent {\
+             apply_library_intent(&ctx, app, intent);\
+             }",
+        ],
+    ),
+    (
+        "built-in source and band",
+        &[
+            "if app.state.project.builtin_models.open {",
+            "if let Some(intent) = builtin_source(ui, &mut features::cx(app), source_height) {\
+             apply_library_intent(&ctx, app, intent);\
+             }",
+            "if let Some(intent) = builtin_detail(ui, &features::cx(app)) {\
+             apply_library_intent(&ctx, app, intent);\
+             }",
+        ],
+    ),
+    (
+        "detail",
+        &[
+            "} else if let Some(intent) = library_detail(ui, &features::cx(app)) {\
+             apply_library_intent(&ctx, app, intent);\
+             }",
+        ],
+    ),
+    (
+        "reports and publication",
+        &[
+            "show_library_usage_report(&ctx);",
+            "show_library_audit_history(&ctx, &app.state);",
+            "super::library_publication::show(&ctx, app);",
+        ],
+    ),
+];
+
 /// The library and view membership dialogs the Library surface draws, in
 /// today's order, each in the project feature's context. New Library raises
 /// nothing; each of the others has what it raised answered as it returns.
@@ -1974,7 +2019,11 @@ const CATALOG_CHANGED: &[Step] = &[(
 #[test]
 fn the_library_dialogs_draw_in_the_project_context_and_a_change_is_answered_as_it_returns() {
     let library = body(LIBRARY_SURFACE, "pub(super) fn library(");
-    assert_runs_in_order("surfaces::project::library", &library, LIBRARY_DIALOGS);
+    assert_runs_in_order(
+        "surfaces::project::library",
+        &library,
+        &[LIBRARY_PAGE, LIBRARY_DIALOGS].concat(),
+    );
     assert!(
         without_whitespace(&library).ends_with("app.after_contribution();"),
         "the Library surface draws nothing after its last dialog has what it raised answered"

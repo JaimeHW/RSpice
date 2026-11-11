@@ -160,6 +160,8 @@ pub(in crate::workbench) fn page(ui: &mut Ui, app: &mut RSpiceApp) {
     let page = app.state.project.project_page;
     let panel = ui.scope(|ui| match page {
         ProjectPage::Overview => overview::overview(ui, app),
+        // The Library page carries out what the reader asked of it between
+        // its own calls, which the shell still does over the application.
         ProjectPage::Library => library::library(ui, app),
         ProjectPage::Recovery => recovery(ui, &mut features::cx(app)),
         ProjectPage::Configuration => configuration::configuration(ui, &mut features::cx(app)),
@@ -1157,6 +1159,43 @@ mod tests {
             .filter_map(|(_, node)| node.label().map(str::to_owned))
             .collect::<Vec<_>>();
         assert_eq!(panels, ["Project Configuration"]);
+    }
+
+    /// The detail under the Library browser shows the view a click in the
+    /// browser selects, in the frame that took the click: what the reader
+    /// asked of the browser is carried out before the detail draws.
+    #[test]
+    fn the_library_detail_shows_the_view_the_browser_selects_in_the_frame_it_was_clicked_in() {
+        use crate::state::{Cell, CellViewRef, Library, View, ViewType};
+        let (ctx, mut app, _) = settled_on(ProjectPage::Library);
+        let mut library = Library::new("frame_test");
+        let mut cell = Cell::new("divider");
+        cell.add_view(View::new("schematic_a", ViewType::Schematic));
+        cell.add_view(View::new("symbol_b", ViewType::Symbol));
+        library.add_cell(cell);
+        let manager = &mut app.state.model.library_manager;
+        manager.add_library(library);
+        manager.select_view("frame_test", "divider", "schematic_a");
+        let mut settled = project_frame(&ctx, &mut app, Vec::new());
+        for _ in 0..2 {
+            settled = project_frame(&ctx, &mut app, Vec::new());
+        }
+        let first = CellViewRef::new("frame_test", "divider", "schematic_a").display_path();
+        let second = CellViewRef::new("frame_test", "divider", "symbol_b").display_path();
+        let painted = painted_text(&settled);
+        assert!(
+            painted.contains(&first) && !painted.contains(&second),
+            "{painted}"
+        );
+
+        let clicked = click_announced(&ctx, &mut app, settled, "symbol_b");
+
+        assert_eq!(
+            app.state.model.library_manager.selected_view.as_deref(),
+            Some("symbol_b")
+        );
+        let painted = painted_text(&clicked);
+        assert!(painted.contains(&second), "{painted}");
     }
 
     /// Model paths… on the Dependencies page is answered as the page returns,

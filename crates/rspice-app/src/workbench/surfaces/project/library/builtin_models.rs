@@ -263,14 +263,16 @@ pub(super) fn view_column(
 }
 
 /// The band under the columns: what the selected model is, and the two things
-/// a read-only library offers. The strip above already names the selection.
-pub(super) fn detail(ui: &mut Ui, state: &AppState) -> Option<LibraryIntent> {
+/// a read-only library offers, Copy cell… while `libraries` holds a writable
+/// one. The strip above already names the selection.
+pub(super) fn detail(
+    ui: &mut Ui,
+    browser: &BuiltinModelsBrowser,
+    libraries: &crate::state::LibraryManager,
+) -> Option<LibraryIntent> {
     let t = Tokens::get(ui.ctx());
-    let browser = &state.project.builtin_models;
     let model = selected_model(browser);
-    let writable_library_available = state
-        .model
-        .library_manager
+    let writable_library_available = libraries
         .libraries_sorted()
         .into_iter()
         .any(|library| !library.read_only);
@@ -441,7 +443,11 @@ mod tests {
         };
         let pass = |ctx: &mut Ui| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                let _ = detail(ui, state);
+                let _ = detail(
+                    ui,
+                    &state.project.builtin_models,
+                    &state.model.library_manager,
+                );
             });
         };
         // Two passes: the first builds the fonts the band is measured in.
