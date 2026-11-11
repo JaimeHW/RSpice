@@ -1568,6 +1568,7 @@ mod tests {
             stop_time: 1.125,
             compute_thd: true,
             normalize: false,
+            method: rspice_core::analysis::FourierMethod::Interpolant,
         };
         crate::engine_services::run_fourier_from_signal_with_abort(
             &time,

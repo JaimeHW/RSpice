@@ -215,6 +215,7 @@ fn an_authored_fourier_run_reports_every_output() {
         stop_time: 1.0,
         compute_thd: true,
         normalize: false,
+        method: rspice_core::analysis::FourierMethod::Interpolant,
     };
     let SimulationResult::Ac {
         frequencies,
@@ -339,6 +340,7 @@ fn convergence_fourier_retains_its_source_quality_through_native_conversion() {
             stop_time: 1.0,
             compute_thd: true,
             normalize: false,
+            method: rspice_core::analysis::FourierMethod::Interpolant,
         },
         artifact.trajectory().unwrap(),
         svc_runner::ServiceContext::with_defaults(None, &rspice_core::abort_signal::NoAbort),
@@ -361,6 +363,107 @@ fn convergence_fourier_retains_its_source_quality_through_native_conversion() {
             .unwrap()
             .force_accepted_times_s,
         [10.0 / 64.0]
+    );
+}
+
+/// A studio or headless Fourier analysis reads its window by the rule the
+/// deck's dialect's own simulator applies, as the engine's `.FOUR` and the
+/// CLI do: QSPICE's interpolant by default, ngspice's linear grid, Xyce's
+/// spline. On a clipped sine sampled 64 times a period the three THDs
+/// differ, and each is the core analysis's for its method; before, every
+/// dialect read the interpolant.
+#[test]
+fn a_fourier_window_is_read_by_the_rule_of_the_deck_s_dialect() {
+    use crate::execution_artifact::ExecutionArtifactEnvelope;
+    use rspice_core::analysis::{FourierAnalysis, FourierConfig, FourierMethod};
+    use rspice_vocabulary::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
+    let time = (0..=64)
+        .map(|index| f64::from(index) / 64.0)
+        .collect::<Vec<_>>();
+    let clipped = time
+        .iter()
+        .map(|time| (1.5 * (std::f64::consts::TAU * time).sin()).clamp(-1.0, 1.0))
+        .collect::<Vec<_>>();
+    let transient = SimulationResult::Transient {
+        spectra: Vec::new(),
+        hdl_output: Vec::new(),
+        checks: Default::default(),
+        time: time.clone(),
+        waveforms: HashMap::from([(
+            "out".to_owned(),
+            SampledWaveform::new_time_domain("out", time.clone(), clipped.clone()),
+        )]),
+        measurements: Vec::new(),
+        periodic_state: None,
+        convergence: None,
+        events: Default::default(),
+    };
+    let artifact = ExecutionArtifactEnvelope::from_transient_result(
+        ContentDigest::from_bytes([3; 32]),
+        AnalysisInstanceId::new(),
+        ObjectRevision::new(1).unwrap(),
+        ContentDigest::from_bytes([4; 32]),
+        &transient,
+        &["out".to_owned()],
+        false,
+    )
+    .unwrap()
+    .unwrap();
+    let context =
+        svc_runner::ServiceContext::with_defaults(None, &rspice_core::abort_signal::NoAbort);
+    let mut readings = Vec::new();
+    for (option, expected) in [
+        ("", FourierMethod::Interpolant),
+        (
+            ".options rspice_dialect=ngspice\n",
+            FourierMethod::LinearGrid,
+        ),
+        (".options rspice_dialect=xyce\n", FourierMethod::SplineGrid),
+    ] {
+        let deck = format!("fourier\nV1 out 0 sin(0 1 1)\nR1 out 0 1k\n{option}.tran 1m 1\n.end\n");
+        let method = fourier_method(&deck, context).unwrap();
+        assert_eq!(method, expected, "{deck}");
+        let SimulationResult::Ac { waveforms, .. } = run_fourier(
+            1.0,
+            FourierRunRequest {
+                num_harmonics: 3,
+                num_periods: 1,
+                output_node: "out".to_owned(),
+                output_ref: "0".to_owned(),
+                additional_outputs: Vec::new(),
+                start_time: 0.0,
+                stop_time: 1.0,
+                compute_thd: true,
+                normalize: false,
+                method,
+            },
+            artifact.trajectory().unwrap(),
+            context,
+        )
+        .unwrap() else {
+            panic!("a Fourier run reports a spectrum");
+        };
+        let thd = waveforms["THD(%)"].y_values[0];
+        let core = FourierAnalysis::new(
+            FourierConfig::new(1.0)
+                .with_harmonics(3)
+                .with_method(method),
+        )
+        .analyze(&time, &clipped)
+        .unwrap()
+        .thd
+        .unwrap();
+        assert!(
+            (thd - core).abs() <= 1.0e-9 * core,
+            "{method:?}: {thd} vs core {core}"
+        );
+        readings.push(thd);
+    }
+    assert!(
+        (readings[0] - readings[1]).abs() > 1.0e-6
+            && (readings[1] - readings[2]).abs() > 1.0e-6
+            && (readings[0] - readings[2]).abs() > 1.0e-6,
+        "{readings:?}"
     );
 }
 
@@ -417,6 +520,7 @@ fn fourier_limits_cover_source_copies_and_every_selected_output() {
         run_spectral_from_trajectory(
             spec,
             &trajectory,
+            rspice_core::analysis::FourierMethod::Interpolant,
             svc_runner::ServiceContext {
                 source_path: None,
                 limits,

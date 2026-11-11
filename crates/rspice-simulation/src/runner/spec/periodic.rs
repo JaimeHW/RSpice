@@ -186,6 +186,7 @@ pub(super) fn run_periodic_spec(
             dependencies
                 .transient_trajectory()
                 .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?,
+            fourier_method(netlist, context)?,
             context,
         ),
         AnalysisSpec::Disto {
@@ -1074,6 +1075,24 @@ struct FourierRunRequest {
     stop_time: f64,
     compute_thd: bool,
     normalize: bool,
+    method: rspice_core::analysis::FourierMethod,
+}
+
+/// The rule a Fourier window is read by: the one the deck's dialect's own
+/// simulator applies ([`FourierMethod::for_dialect`]), as the engine's
+/// `.FOUR` and the CLI read it. The dialect is the deck's
+/// `.OPTIONS RSPICE_DIALECT`, which a studio run's execution profile writes
+/// into the deck it runs.
+///
+/// [`FourierMethod::for_dialect`]: rspice_core::analysis::FourierMethod::for_dialect
+fn fourier_method(
+    netlist: &str,
+    context: svc_runner::ServiceContext<'_>,
+) -> Result<rspice_core::analysis::FourierMethod, SimulationError> {
+    let deck = super::run_abort_aware_service(context.abort, || context.parse(netlist))?;
+    Ok(rspice_core::analysis::FourierMethod::for_dialect(
+        deck.parse_dialect(),
+    ))
 }
 
 /// Decompose every output the card named, from the one transient trajectory
@@ -1103,6 +1122,7 @@ fn run_fourier(
         stop_time,
         compute_thd,
         normalize,
+        method,
     } = request;
     let harmonics = num_harmonics.saturating_add(1);
     let outputs = additional_outputs.len().saturating_add(1);
@@ -1167,6 +1187,7 @@ fn run_fourier(
             stop_time,
             compute_thd,
             normalize,
+            method,
         };
         cfg.validate().map_err(SimulationError::InvalidConfig)?;
         let data = fourier_from_transient_artifact(trajectory, &cfg, context)?;
@@ -1610,6 +1631,7 @@ fn fourier_output_unit(output_expression: &str) -> &'static str {
 pub(in crate::runner) fn run_spectral_from_trajectory(
     spec: AnalysisSpec,
     trajectory: &TransientTrajectoryArtifact,
+    method: rspice_core::analysis::FourierMethod,
     context: svc_runner::ServiceContext<'_>,
 ) -> Result<SimulationResult, SimulationError> {
     super::ensure_not_aborted(context.abort)?;
@@ -1638,6 +1660,7 @@ pub(in crate::runner) fn run_spectral_from_trajectory(
                 stop_time,
                 compute_thd,
                 normalize,
+                method,
             },
             trajectory,
             context,

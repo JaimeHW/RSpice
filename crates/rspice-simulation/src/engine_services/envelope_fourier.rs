@@ -1174,9 +1174,23 @@ pub struct FourierRunConfig {
     pub stop_time: Value,
     pub compute_thd: bool,
     pub normalize: bool,
+    /// The rule the window's samples become harmonics by: the one the deck's
+    /// dialect's own simulator applies ([`FourierMethod::for_dialect`]).
+    ///
+    /// [`FourierMethod::for_dialect`]: rspice_core::analysis::FourierMethod::for_dialect
+    pub method: rspice_core::analysis::FourierMethod,
 }
 
 impl FourierRunConfig {
+    /// The core analysis this run reads its window with.
+    fn core_config(&self) -> rspice_core::analysis::fourier::FourierConfig {
+        let mut config = rspice_core::analysis::fourier::FourierConfig::new(self.fundamental_freq)
+            .with_harmonics(self.num_harmonics)
+            .with_method(self.method);
+        config.num_periods = self.num_periods;
+        config
+    }
+
     pub(crate) fn validate(&self) -> Result<(), String> {
         if !self.fundamental_freq.is_finite() || self.fundamental_freq <= 0.0 {
             return Err("Fourier fundamental frequency must be positive".to_string());
@@ -1290,9 +1304,7 @@ pub(crate) fn run_fourier_from_impulses_with_abort(
     let mut decomposition = analyze_fourier_with_abort(
         &window_time,
         &window_values,
-        config.fundamental_freq,
-        config.num_harmonics,
-        config.num_periods,
+        config.core_config(),
         impulses,
         abort,
     )?;
@@ -1457,15 +1469,10 @@ struct FourierDecomposition {
 fn analyze_fourier_with_abort(
     time: &[Value],
     values: &[Value],
-    fundamental_freq: Value,
-    num_harmonics: usize,
-    num_periods: usize,
+    config: rspice_core::analysis::fourier::FourierConfig,
     impulses: &[(rspice_core::ImpulseTraceRef<'_>, Value)],
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<FourierDecomposition> {
-    let mut config = rspice_core::analysis::fourier::FourierConfig::new(fundamental_freq)
-        .with_harmonics(num_harmonics);
-    config.num_periods = num_periods;
     let analysis = rspice_core::analysis::fourier::FourierAnalysis::new(config);
     let first = time.first().copied().unwrap_or(0.0);
     let last = time.last().copied().unwrap_or(0.0);
@@ -1927,7 +1934,13 @@ mod tests {
             .map(|time| (2.0 * std::f64::consts::PI * 10.0e6 * time).sin())
             .collect();
 
-        let result = analyze_fourier_with_abort(&time, &values, 10.0e6, 10, 1, &[], &abort);
+        let result = analyze_fourier_with_abort(
+            &time,
+            &values,
+            rspice_core::analysis::FourierConfig::new(10.0e6).with_harmonics(10),
+            &[],
+            &abort,
+        );
 
         assert!(matches!(result, Err(ServiceRunError::Aborted)));
     }
@@ -1957,6 +1970,7 @@ mod tests {
             stop_time: 2.0,
             compute_thd: false,
             normalize: false,
+            method: rspice_core::analysis::FourierMethod::Interpolant,
         };
         let result = run_fourier_from_observation_with_abort(
             &time,
@@ -2043,6 +2057,7 @@ mod tests {
             stop_time: 2.0,
             compute_thd: false,
             normalize: false,
+            method: rspice_core::analysis::FourierMethod::Interpolant,
         };
         let result =
             run_fourier_from_impulses_with_abort(&time, &samples, &terms, &config, &NoAbort)
@@ -2083,6 +2098,7 @@ mod tests {
             stop_time: 2.0,
             compute_thd: false,
             normalize: false,
+            method: rspice_core::analysis::FourierMethod::Interpolant,
         };
         let last = run_fourier_from_signal_with_abort(&time, &signal, &config, &NoAbort).unwrap();
         config.num_periods = 2;
@@ -2110,8 +2126,14 @@ mod tests {
             .analyze(&time, &values)
             .expect("qualified waveform should have a core Fourier decomposition");
 
-        let actual = analyze_fourier_with_abort(&time, &values, fundamental, 6, 1, &[], &NoAbort)
-            .expect("cancellable decomposition should succeed");
+        let actual = analyze_fourier_with_abort(
+            &time,
+            &values,
+            FourierConfig::new(fundamental).with_harmonics(6),
+            &[],
+            &NoAbort,
+        )
+        .expect("cancellable decomposition should succeed");
 
         assert_eq!(actual.response.len(), expected.harmonics.len());
         assert!((actual.dc_component - expected.dc_component).abs() < 1.0e-12);
@@ -2152,6 +2174,7 @@ mod tests {
             stop_time: 1.0,
             compute_thd: true,
             normalize: false,
+            method: rspice_core::analysis::FourierMethod::Interpolant,
         };
 
         let result = run_fourier_from_signal_with_abort(&time, &signal, &config, &NoAbort)
@@ -2176,6 +2199,7 @@ mod tests {
             stop_time: 1.0,
             compute_thd: true,
             normalize: false,
+            method: rspice_core::analysis::FourierMethod::Interpolant,
         };
 
         let error = run_fourier_from_signal_with_abort(&time, &signal, &config, &NoAbort)
@@ -2203,6 +2227,7 @@ mod tests {
             stop_time: 1.0,
             compute_thd,
             normalize,
+            method: rspice_core::analysis::FourierMethod::Interpolant,
         };
 
         let raw =
@@ -2245,6 +2270,7 @@ mod tests {
             stop_time: 1.005,
             compute_thd: true,
             normalize: false,
+            method: rspice_core::analysis::FourierMethod::Interpolant,
         };
 
         let result = run_fourier_from_signal_with_abort(&time, &signal, &config, &NoAbort)
@@ -2266,6 +2292,7 @@ mod tests {
             stop_time: 1.0,
             compute_thd: true,
             normalize: false,
+            method: rspice_core::analysis::FourierMethod::Interpolant,
         };
 
         assert_eq!(

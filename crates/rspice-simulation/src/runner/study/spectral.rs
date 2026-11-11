@@ -154,6 +154,7 @@ pub(super) fn run_trial(
     super::super::spec::run_spectral_from_trajectory(
         postprocess.request.clone(),
         &trajectory,
+        rspice_core::analysis::FourierMethod::for_dialect(trial.parse_dialect()),
         context,
     )
 }
