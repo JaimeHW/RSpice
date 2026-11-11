@@ -227,7 +227,7 @@ pub(crate) mod surfaces {
     pub(super) mod library_cellview_manager;
     pub(super) mod netlist;
     pub(super) mod project;
-    pub(super) mod simulate;
+    pub(crate) mod simulate;
     pub(super) mod stimulus;
     pub(super) mod verify;
     mod veriloga;

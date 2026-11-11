@@ -363,7 +363,7 @@ pub(super) fn insert_analysis_instance(
     }
 }
 
-pub(super) fn apply_analysis_action(
+pub(crate) fn apply_analysis_action(
     cx: &mut Cx<'_, SimulateFeature>,
     id: AnalysisInstanceId,
     action: AnalysisAction,

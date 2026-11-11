@@ -210,10 +210,7 @@ pub(in crate::workbench) fn invalidate_preflight(cx: &mut Cx<'_, SimulateFeature
 /// gesture on the status bar when the outcome is new.
 ///
 /// [`Model::record_plan_refusal`]: crate::workbench::app_state::Model::record_plan_refusal
-pub(in crate::workbench) fn record_plan_refusal(
-    cx: &mut Cx<'_, SimulateFeature>,
-    message: impl Into<String>,
-) {
+pub(crate) fn record_plan_refusal(cx: &mut Cx<'_, SimulateFeature>, message: impl Into<String>) {
     if let Some(prompt) = cx.model.record_plan_refusal(message) {
         cx.wb.prompt(prompt);
     }

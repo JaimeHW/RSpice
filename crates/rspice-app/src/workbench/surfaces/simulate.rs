@@ -4,7 +4,7 @@ mod advanced_options;
 mod analysis_form;
 mod catalog;
 mod checkpoint_exchange;
-mod lifecycle;
+pub(crate) mod lifecycle;
 mod output_evidence;
 mod page_excitations;
 mod page_kit;
@@ -275,7 +275,7 @@ struct AnalysisCatalogRowLayout {
 }
 
 #[derive(Debug, Clone, Copy)]
-enum AnalysisAction {
+pub(crate) enum AnalysisAction {
     Clone,
     Earlier(usize),
     Later(usize),
@@ -2468,8 +2468,6 @@ mod page_raster;
 mod page_runset_parity_tests;
 #[cfg(test)]
 mod page_tests;
-#[cfg(test)]
-mod receipt_log_tests;
 #[cfg(test)]
 mod statement_tests;
 #[cfg(test)]
