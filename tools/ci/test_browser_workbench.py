@@ -204,12 +204,16 @@ class BrowserWorkbenchTests(unittest.TestCase):
         published = {**snapshot_only, "new.manifest": json.dumps(manifest)}
         with tempfile.TemporaryDirectory() as directory:
             browser = Mock(output=Path(directory))
-            with (patch("check_browser_workbench.choose_command"),
+            with (patch("check_browser_workbench.choose_command") as choose,
                   patch("check_browser_workbench.controls", return_value=[{"value": "Run 1 finished"}]),
                   patch("check_browser_workbench.time.time_ns", return_value=105_000_000),
                   patch("check_browser_workbench.checkpoint_records",
                         side_effect=[before, before, snapshot_only, published]) as read):
                 result = run_with_saved_provider(browser, decision)
+            # Run no longer moves the reader, so the outcome is read on the
+            # Simulation workspace the check opens before the recovery center.
+            self.assertEqual([call.args[1] for call in choose.call_args_list],
+                             ["Open simulation workspace", "Open recovery center"])
             self.assertEqual(read.call_count, 4)
             self.assertEqual(result, {"worker_run": "passed", "waveforms": {"V(out)": 2}})
             self.assertEqual((Path(directory) / "model-provider-results.rspiceproj").read_bytes(), raw)

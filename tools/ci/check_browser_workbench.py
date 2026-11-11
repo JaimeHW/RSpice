@@ -415,6 +415,11 @@ def run_with_saved_provider(browser, decision):
     # Run the circuit authored above after restoring the model decision,
     # including its multiline audit reason, through the normal project loader.
     browser.click("Run active simulation plan at TT · 27 °C (Ctrl+Enter)", "button")
+    # Run leaves the reader on the schematic and opens Results when the run
+    # completes there; how fast this deck finishes decides which of the two
+    # the next frame shows. The Simulation workspace states the plan's newest
+    # run either way, so read the outcome there rather than race the hop.
+    choose_command(browser, "Open simulation workspace")
     wait_for(lambda: any(c["value"] == "Run 1 finished"
                         for c in controls(browser.snapshot())), "the saved-provider simulation", 120)
     browser.capture("provider-run-completed")
