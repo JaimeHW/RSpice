@@ -1,6 +1,6 @@
 //! The commands the design feature declares, as the registry lists them:
-//! so far the Stimulus Library's verbs and the dialogs the Design, Edit
-//! and View menus open over the schematic.
+//! so far the Stimulus Library's verbs, the dialogs the Design, Edit and
+//! View menus open over the schematic, and the schematic's placements.
 //!
 //! What each command does is the feature's own; what it declares here is all
 //! the shell's order, menus, palette and shortcut profile read of it.
@@ -51,8 +51,29 @@ pub(crate) enum DesignCommand {
     ReplaceInstance,
     /// Open Create hierarchy over the selection.
     CreateHierarchy,
+    /// Pick an instance from the component shelf.
+    PlaceInstance,
+    /// Arm the wire tool.
+    PlaceWire,
+    /// Arm the bus tool.
+    PlaceBus,
+    /// Open Place bus tap.
+    PlaceBusTap,
+    /// Arm the junction tool.
+    PlaceJunction,
+    /// Arm the net label tool.
+    PlaceLabel,
+    /// Arm the off-sheet connector tool.
+    PlaceOffSheetConnector,
+    /// Arm the probe tool.
+    PlaceProbe,
+    /// Open Place text or note.
+    PlaceText,
+    /// Open Draw documentation shape.
+    PlaceShape,
 }
 
+const EVERYWHERE: &[CommandPlatform] = &CommandPlatform::ALL;
 const DESKTOP: &[CommandPlatform] = &[CommandPlatform::Desktop];
 const DESKTOP_BROWSER: &[CommandPlatform] = &[CommandPlatform::Desktop, CommandPlatform::Browser];
 
@@ -96,10 +117,30 @@ const RENAME_SELECTION: &[ShortcutBinding] = &[primary(
     chord(Key::F2, false, false, false, "F2"),
     DESKTOP_BROWSER,
 )];
+const PLACE_INSTANCE: &[ShortcutBinding] = &[primary(
+    chord(Key::I, false, false, true, "Shift+I"),
+    EVERYWHERE,
+)];
+const PLACE_WIRE: &[ShortcutBinding] =
+    &[primary(chord(Key::W, false, false, false, "W"), EVERYWHERE)];
+const PLACE_BUS: &[ShortcutBinding] =
+    &[primary(chord(Key::B, false, false, false, "B"), EVERYWHERE)];
+const PLACE_BUS_TAP: &[ShortcutBinding] =
+    &[primary(chord(Key::T, false, false, false, "T"), EVERYWHERE)];
+const PLACE_JUNCTION: &[ShortcutBinding] =
+    &[primary(chord(Key::J, false, false, false, "J"), EVERYWHERE)];
+const PLACE_LABEL: &[ShortcutBinding] =
+    &[primary(chord(Key::N, false, false, false, "N"), EVERYWHERE)];
+const PLACE_PROBE: &[ShortcutBinding] =
+    &[primary(chord(Key::P, false, false, false, "P"), EVERYWHERE)];
+const PLACE_TEXT: &[ShortcutBinding] = &[primary(
+    chord(Key::T, false, false, true, "Shift+T"),
+    EVERYWHERE,
+)];
 
 impl DesignCommand {
     /// Every command the registry lists, in the feature's own order.
-    pub(crate) const ALL: [Self; 18] = [
+    pub(crate) const ALL: [Self; 28] = [
         Self::NewStimulusDefinition,
         Self::DuplicateStimulusDefinition,
         Self::DeleteStimulusDefinition,
@@ -118,6 +159,16 @@ impl DesignCommand {
         Self::RenameSelection,
         Self::ReplaceInstance,
         Self::CreateHierarchy,
+        Self::PlaceInstance,
+        Self::PlaceWire,
+        Self::PlaceBus,
+        Self::PlaceBusTap,
+        Self::PlaceJunction,
+        Self::PlaceLabel,
+        Self::PlaceOffSheetConnector,
+        Self::PlaceProbe,
+        Self::PlaceText,
+        Self::PlaceShape,
     ];
 
     /// The key a shortcut profile names this command by.
@@ -141,7 +192,34 @@ impl DesignCommand {
             Self::RenameSelection => CommandKey::new("rename-selection"),
             Self::ReplaceInstance => CommandKey::new("replace-instance"),
             Self::CreateHierarchy => CommandKey::new("create-hierarchy"),
+            Self::PlaceInstance => CommandKey::new("place-instance"),
+            Self::PlaceWire => CommandKey::new("place-wire"),
+            Self::PlaceBus => CommandKey::new("place-bus"),
+            Self::PlaceBusTap => CommandKey::new("place-bus-tap"),
+            Self::PlaceJunction => CommandKey::new("place-junction"),
+            Self::PlaceLabel => CommandKey::new("place-label"),
+            Self::PlaceOffSheetConnector => CommandKey::new("place-off-sheet-connector"),
+            Self::PlaceProbe => CommandKey::new("place-probe"),
+            Self::PlaceText => CommandKey::new("place-text"),
+            Self::PlaceShape => CommandKey::new("place-shape"),
         }
+    }
+
+    /// Whether the command arms a placement on the schematic.
+    pub(crate) const fn places(self) -> bool {
+        matches!(
+            self,
+            Self::PlaceInstance
+                | Self::PlaceWire
+                | Self::PlaceBus
+                | Self::PlaceBusTap
+                | Self::PlaceJunction
+                | Self::PlaceLabel
+                | Self::PlaceOffSheetConnector
+                | Self::PlaceProbe
+                | Self::PlaceText
+                | Self::PlaceShape
+        )
     }
 
     /// The command a shortcut profile names by `key`, if the feature
@@ -157,6 +235,8 @@ impl DesignCommand {
     /// a chord of the design workspace. Rename, Replace instance and Create
     /// hierarchy edit the drawing, so each commits the inspector's pending
     /// edit and is refused on a read-only schematic; only Rename has a chord.
+    /// Every placement but the probe edits the drawing and is one Repeat
+    /// last command runs again.
     pub(crate) const fn declared_spec(self) -> CommandSpec {
         let palette = CommandFlags::PALETTE_VISIBLE;
         let open = palette.with(CommandFlags::REQUIRES_OPEN_PROJECT, true);
@@ -171,6 +251,7 @@ impl DesignCommand {
             .with(CommandFlags::COMMITS_INSPECTOR_EDIT, true);
         let edit = ShortcutContext::EditContext;
         let canvas = ShortcutContext::EngineeringCanvas;
+        let place = edits.with(CommandFlags::REPEATABLE, true);
         let (label, group, flags, context, bindings) = match self {
             Self::NewStimulusDefinition => {
                 ("New stimulus definition", STIMULUS, open, global, NONE)
@@ -233,6 +314,30 @@ impl DesignCommand {
                 "Create hierarchy\u{2026}",
                 "Design",
                 project_edits,
+                canvas,
+                NONE,
+            ),
+            Self::PlaceInstance => ("Place instance…", "Design", place, canvas, PLACE_INSTANCE),
+            Self::PlaceWire => ("Draw wire", "Design", place, canvas, PLACE_WIRE),
+            Self::PlaceBus => ("Draw bus", "Design", place, canvas, PLACE_BUS),
+            Self::PlaceBusTap => ("Place bus tap", "Design", place, canvas, PLACE_BUS_TAP),
+            Self::PlaceJunction => ("Place junction", "Design", place, canvas, PLACE_JUNCTION),
+            Self::PlaceLabel => ("Place net label", "Design", place, canvas, PLACE_LABEL),
+            // Every plausible mnemonic in the placement family is taken; the
+            // toolbar and the palette are its routes.
+            Self::PlaceOffSheetConnector => ("Off-sheet connector", "Design", place, canvas, NONE),
+            Self::PlaceProbe => ("Place probe", "Design", palette, canvas, PLACE_PROBE),
+            Self::PlaceText => (
+                "Place text or note\u{2026}",
+                "Design",
+                place,
+                canvas,
+                PLACE_TEXT,
+            ),
+            Self::PlaceShape => (
+                "Draw documentation shape\u{2026}",
+                "Design",
+                place,
                 canvas,
                 NONE,
             ),

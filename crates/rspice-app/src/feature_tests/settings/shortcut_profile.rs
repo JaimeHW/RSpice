@@ -14,6 +14,7 @@ use crate::state::shortcuts::ShortcutStroke;
 use crate::state::shortcuts::SingleKeyCanvasPolicy;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::commands::vocabulary::CommandRegistry;
+use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::state::Workspace;
@@ -151,7 +152,7 @@ fn default_profile_keeps_place_text_on_the_mockup_binding() {
 
     for platform in CommandPlatform::ALL {
         let labels = preferences
-            .resolved_bindings(&CommandRegistry, Command::PlaceText.key())
+            .resolved_bindings(&CommandRegistry, DesignCommand::PlaceText.key())
             .into_iter()
             .filter(|binding| binding.supports(platform))
             .map(|binding| {
@@ -275,7 +276,7 @@ fn single_key_canvas_policy_is_part_of_the_effective_projection() {
     assert_eq!(
         preferences.resolved_label(
             &CommandRegistry,
-            Command::PlaceWire.key(),
+            DesignCommand::PlaceWire.key(),
             CommandPlatform::Desktop,
             OperatingSystem::Windows,
         ),
@@ -288,7 +289,7 @@ fn single_key_canvas_policy_is_part_of_the_effective_projection() {
     assert_eq!(
         preferences.resolved_label(
             &CommandRegistry,
-            Command::PlaceWire.key(),
+            DesignCommand::PlaceWire.key(),
             CommandPlatform::Desktop,
             OperatingSystem::Windows,
         ),
@@ -300,7 +301,7 @@ fn single_key_canvas_policy_is_part_of_the_effective_projection() {
         .set_single_key_canvas(SingleKeyCanvasPolicy::Disabled);
     assert!(
         preferences
-            .effective_bindings(&CommandRegistry, Command::PlaceWire.key())
+            .effective_bindings(&CommandRegistry, DesignCommand::PlaceWire.key())
             .is_empty()
     );
 }

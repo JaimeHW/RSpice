@@ -170,11 +170,11 @@ fn protected_commands_keep_the_exact_mockup_action_ids() {
         DesignCommand::RenameSelection.key().as_str(),
         "rename-selection"
     );
-    assert_eq!(Command::PlaceBus.spec().id, "place-bus");
-    assert_eq!(Command::PlaceBusTap.spec().id, "place-bus-tap");
+    assert_eq!(DesignCommand::PlaceBus.key().as_str(), "place-bus");
+    assert_eq!(DesignCommand::PlaceBusTap.key().as_str(), "place-bus-tap");
     assert_eq!(Command::PlacePin.spec().id, "place-pin");
-    assert_eq!(Command::PlaceText.spec().id, "place-text");
-    assert_eq!(Command::PlaceShape.spec().id, "place-shape");
+    assert_eq!(DesignCommand::PlaceText.key().as_str(), "place-text");
+    assert_eq!(DesignCommand::PlaceShape.key().as_str(), "place-shape");
     assert_eq!(Command::ConfigurationSets.spec().id, "configuration-sets");
     assert_eq!(
         ProjectCommand::DesignManagement.key().as_str(),

@@ -20,22 +20,22 @@ fn safe_mode_disables_schematic_mutation_commands_but_keeps_canvas_settings_avai
         String::new(),
     );
 
-    for command in [
-        Command::PlaceInstance,
-        Command::PlaceWire,
-        Command::PlaceBus,
-        Command::PlaceBusTap,
-        Command::PlaceJunction,
-        Command::PlaceLabel,
-        Command::PlacePin,
-        Command::PlaceText,
+    for key in [
+        DesignCommand::PlaceInstance.key(),
+        DesignCommand::PlaceWire.key(),
+        DesignCommand::PlaceBus.key(),
+        DesignCommand::PlaceBusTap.key(),
+        DesignCommand::PlaceJunction.key(),
+        DesignCommand::PlaceLabel.key(),
+        Command::PlacePin.key(),
+        DesignCommand::PlaceText.key(),
     ] {
-        assert!(!command.is_enabled(&app), "{command:?}");
+        assert!(!app.command_key_enabled(key), "{key:?}");
     }
     assert!(Command::CycleGrid.is_enabled(&app));
     assert!(app.command_key_enabled(DesignCommand::GridSnapRouting.key()));
 
-    Command::PlaceWire.execute(&mut app);
+    app.execute_command_key(DesignCommand::PlaceWire.key());
     assert_eq!(app.state.model.schematic.session.editor.tool, Tool::Select);
 }
 
@@ -44,11 +44,11 @@ fn draw_bus_arms_directly_but_bus_tap_waits_for_its_validated_dialog() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;
 
-    Command::PlaceBus.execute(&mut app);
+    app.execute_command_key(DesignCommand::PlaceBus.key());
     assert_eq!(app.state.model.schematic.session.editor.tool, Tool::Bus);
 
     app.state.model.schematic.session.editor.tool = Tool::Select;
-    Command::PlaceBusTap.execute(&mut app);
+    app.execute_command_key(DesignCommand::PlaceBusTap.key());
     assert!(app.state.design.bus_tap.open);
     assert_eq!(
         app.state.design.bus_tap.source,
@@ -115,7 +115,7 @@ fn place_text_opens_the_isolated_mockup_transaction_without_mutating_the_documen
     let dirty = app.state.model.schematic.session.is_dirty;
     let tool = app.state.model.schematic.session.editor.tool;
 
-    Command::PlaceText.execute(&mut app);
+    app.execute_command_key(DesignCommand::PlaceText.key());
 
     assert!(app.state.design.design_note.open);
     // The form opens empty. The sample it used to open holding was written
@@ -152,7 +152,7 @@ fn place_shape_opens_the_isolated_mockup_transaction_without_mutating_the_docume
     let dirty = app.state.model.schematic.session.is_dirty;
     let tool = app.state.model.schematic.session.editor.tool;
 
-    Command::PlaceShape.execute(&mut app);
+    app.execute_command_key(DesignCommand::PlaceShape.key());
 
     assert!(app.state.design.documentation_shape.open);
     assert_eq!(
@@ -241,23 +241,23 @@ fn port_undo_and_redo_resynchronize_the_generated_symbol_contract() {
 fn bus_authoring_commands_are_unavailable_on_read_only_schematics() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;
-    assert!(Command::PlaceBus.is_enabled(&app));
-    assert!(Command::PlaceBusTap.is_enabled(&app));
+    assert!(app.command_key_enabled(DesignCommand::PlaceBus.key()));
+    assert!(app.command_key_enabled(DesignCommand::PlaceBusTap.key()));
     assert!(Command::PlacePin.is_enabled(&app));
-    assert!(Command::PlaceText.is_enabled(&app));
-    assert!(Command::PlaceShape.is_enabled(&app));
+    assert!(app.command_key_enabled(DesignCommand::PlaceText.key()));
+    assert!(app.command_key_enabled(DesignCommand::PlaceShape.key()));
 
     app.state.model.schematic.session.read_only = true;
-    assert!(!Command::PlaceBus.is_enabled(&app));
-    assert!(!Command::PlaceBusTap.is_enabled(&app));
+    assert!(!app.command_key_enabled(DesignCommand::PlaceBus.key()));
+    assert!(!app.command_key_enabled(DesignCommand::PlaceBusTap.key()));
     assert!(!Command::PlacePin.is_enabled(&app));
-    assert!(!Command::PlaceText.is_enabled(&app));
-    assert!(!Command::PlaceShape.is_enabled(&app));
+    assert!(!app.command_key_enabled(DesignCommand::PlaceText.key()));
+    assert!(!app.command_key_enabled(DesignCommand::PlaceShape.key()));
     app.state.model.schematic.session.read_only = false;
     app.state.workbench.workspace = Workspace::Results;
     assert!(!Command::PlacePin.is_enabled(&app));
-    assert!(!Command::PlaceText.is_enabled(&app));
-    assert!(!Command::PlaceShape.is_enabled(&app));
+    assert!(!app.command_key_enabled(DesignCommand::PlaceText.key()));
+    assert!(!app.command_key_enabled(DesignCommand::PlaceShape.key()));
 }
 
 #[test]
@@ -298,4 +298,30 @@ fn escape_walks_transaction_route_tool_and_selection_without_collapsing_stages()
 
     schematic.cancel_interaction_step();
     assert!(schematic.session.editor.selection.is_empty());
+}
+
+/// Repeat last command runs a feature's placement again: the wire tool a key
+/// armed comes back after the select tool replaced it.
+#[test]
+fn repeat_last_command_rearms_a_feature_placement() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.activate(Workspace::Design);
+    app.state.open_project_session();
+    app.execute_command_key(DesignCommand::PlaceWire.key());
+    assert_eq!(
+        app.state.workbench.last_repeatable_command.as_deref(),
+        Some(DesignCommand::PlaceWire.key().as_str())
+    );
+    Command::SelectTool.execute(&mut app);
+    assert_eq!(
+        app.state.model.schematic.session.editor.tool,
+        crate::state::Tool::Select
+    );
+
+    assert!(app.command_key_enabled(Command::RepeatLastCommand.key()));
+    Command::RepeatLastCommand.execute(&mut app);
+    assert_eq!(
+        app.state.model.schematic.session.editor.tool,
+        crate::state::Tool::Wire
+    );
 }

@@ -287,7 +287,7 @@ fn feature_row(index: usize, spec: &CommandSpec, apps: [&RSpiceApp; 3]) -> Comma
         palette_visible: spec.flags.contains(CommandFlags::PALETTE_VISIBLE),
         source_editor_only: code.is_some_and(CodeCommand::source_editor_only),
         navigates_source_language: code.is_some_and(CodeCommand::navigates_source_language),
-        repeatable: false,
+        repeatable: spec.flags.contains(CommandFlags::REPEATABLE),
         commits_inspector_edit: spec.flags.contains(CommandFlags::COMMITS_INSPECTOR_EDIT),
         edits_active_document: spec.flags.contains(CommandFlags::EDITS_ACTIVE_DOCUMENT),
         source_editor_request: code
@@ -519,7 +519,7 @@ fn the_registry_order_breaks_ties_as_the_command_registry_does() {
 const TIED_PAIRS: [(CommandKey, CommandKey); 2] = [
     (Command::Duplicate.key(), CodeCommand::DuplicateLine.key()),
     (
-        Command::PlaceWire.key(),
+        DesignCommand::PlaceWire.key(),
         CodeCommand::ToggleLineComment.key(),
     ),
 ];

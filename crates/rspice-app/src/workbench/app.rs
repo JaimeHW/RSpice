@@ -120,7 +120,6 @@ pub(crate) use dialogs::design_review_comments::DesignReviewCommentsDialogState;
 pub(crate) use dialogs::library::new_veriloga_device::{
     new_veriloga_device_available, open_new_veriloga_device_form,
 };
-pub(crate) use dialogs::placement::bus_tap::open_bus_tap;
 pub(crate) use dialogs::placement::pin_port::open_create_pins;
 pub(crate) use dialogs::project::{
     TechnologyAttachmentDialogState, new_project::open_new_project_dialog,
@@ -168,7 +167,7 @@ pub(crate) use rspice_app_state::workbench::app::schematic::placement::arm_pack_
 pub(crate) use schematic::edit_authority::{
     SchematicEditAuthority, schematic_editor_request_source, symbol_context_revision,
 };
-pub(crate) use schematic::placement::arm_library_cell_placement;
+pub(crate) use schematic::placement::{arm_library_cell_placement, arm_schematic_tool};
 
 pub(crate) use schematic::named_net::{
     NamedNetTarget, apply_named_net_rename, selected_named_net_target, validate_named_net_rename,
@@ -1228,11 +1227,11 @@ mod tests {
 
     #[test]
     fn window_rendering_preserves_primary_drawers_and_console_expansion() {
-        use crate::workbench::{commands::vocabulary::Command, state::Drawer};
+        use crate::workbench::{design::commands::DesignCommand, state::Drawer};
 
         let ctx = Context::default();
         let mut app = RSpiceApp::test_instance();
-        Command::PlaceInstance.execute(&mut app);
+        app.execute_command_key(DesignCommand::PlaceInstance.key());
         assert_eq!(app.state.workbench.drawer, Some(Drawer::Navigator));
         app.state.workbench.console_maximized = true;
 

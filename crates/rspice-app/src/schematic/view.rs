@@ -144,7 +144,10 @@ fn schematic_accessibility_shortcuts(
     platform: crate::state::command_catalog::CommandPlatform,
     operating_system: egui::os::OperatingSystem,
 ) -> String {
-    use crate::workbench::commands::vocabulary::{Command, CommandRegistry, command_registry};
+    use crate::workbench::{
+        commands::vocabulary::{Command, CommandRegistry, command_registry},
+        design::commands::DesignCommand,
+    };
     crate::workbench::app_state::accessibility_shortcut_summary(
         state.model.preferences.shortcuts(),
         &CommandRegistry,
@@ -153,14 +156,14 @@ fn schematic_accessibility_shortcuts(
         operating_system,
         &[
             Command::SelectTool.key(),
-            Command::PlaceWire.key(),
-            Command::PlaceBus.key(),
-            Command::PlaceBusTap.key(),
-            Command::PlaceJunction.key(),
-            Command::PlaceProbe.key(),
+            DesignCommand::PlaceWire.key(),
+            DesignCommand::PlaceBus.key(),
+            DesignCommand::PlaceBusTap.key(),
+            DesignCommand::PlaceJunction.key(),
+            DesignCommand::PlaceProbe.key(),
             Command::PlacePin.key(),
-            Command::PlaceText.key(),
-            Command::PlaceShape.key(),
+            DesignCommand::PlaceText.key(),
+            DesignCommand::PlaceShape.key(),
             Command::MoveSelection.key(),
             Command::StretchSelection.key(),
             Command::ArraySelection.key(),

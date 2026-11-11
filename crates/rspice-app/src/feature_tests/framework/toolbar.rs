@@ -18,6 +18,7 @@ use crate::workbench::chrome::toolbar::results::{
 use crate::workbench::chrome::toolbar::simulate::pvt_menu_height_for_viewport;
 use crate::workbench::chrome::toolbar::*;
 use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::layout::LayoutSpec;
 use crate::workbench::state::{WorkbenchSession, Workspace};
 use egui::Vec2;
@@ -174,19 +175,19 @@ fn run_control_label_tracks_stable_execution_and_cancellation_lifecycle() {
 #[test]
 fn desktop_design_toolbar_matches_the_upgraded_mockup() {
     assert_eq!(
-        DESIGN_DIRECT_TOOLBAR_COMMANDS.map(|(command, _, _)| command),
+        DESIGN_DIRECT_TOOLBAR_COMMANDS.map(|(key, _, _)| key),
         [
-            Command::SelectTool,
-            Command::PlaceInstance,
-            Command::PlaceWire,
-            Command::PlaceBus,
-            Command::PlaceBusTap,
-            Command::PlaceJunction,
-            Command::PlaceLabel,
-            Command::PlaceOffSheetConnector,
-            Command::PlacePin,
-            Command::PlaceProbe,
-            Command::PlaceText,
+            Command::SelectTool.key(),
+            DesignCommand::PlaceInstance.key(),
+            DesignCommand::PlaceWire.key(),
+            DesignCommand::PlaceBus.key(),
+            DesignCommand::PlaceBusTap.key(),
+            DesignCommand::PlaceJunction.key(),
+            DesignCommand::PlaceLabel.key(),
+            DesignCommand::PlaceOffSheetConnector.key(),
+            Command::PlacePin.key(),
+            DesignCommand::PlaceProbe.key(),
+            DesignCommand::PlaceText.key(),
         ]
     );
 }
@@ -235,27 +236,27 @@ fn schematic_tooltips_use_the_upgraded_mockup_copy() {
 fn direct_schematic_toolbar_selection_tracks_every_armed_tool() {
     assert!(design_toolbar_command_selected(
         Tool::Place(ComponentType::Resistor),
-        Command::PlaceInstance,
+        DesignCommand::PlaceInstance.key(),
     ));
     assert!(!design_toolbar_command_selected(
         Tool::Place(ComponentType::Port),
-        Command::PlaceInstance,
+        DesignCommand::PlaceInstance.key(),
     ));
     assert!(design_toolbar_command_selected(
         Tool::Place(ComponentType::Port),
-        Command::PlacePin,
+        Command::PlacePin.key(),
     ));
     assert!(design_toolbar_command_selected(
         Tool::BusTap,
-        Command::PlaceBusTap,
+        DesignCommand::PlaceBusTap.key(),
     ));
     assert!(design_toolbar_command_selected(
         Tool::Junction,
-        Command::PlaceJunction,
+        DesignCommand::PlaceJunction.key(),
     ));
     assert!(design_toolbar_command_selected(
         Tool::DesignNote,
-        Command::PlaceText,
+        DesignCommand::PlaceText.key(),
     ));
 }
 

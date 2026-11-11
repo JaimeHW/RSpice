@@ -77,7 +77,7 @@ fn labelled(app: &mut RSpiceApp, label: &str) -> usize {
 #[test]
 fn place_bus_tap_opens_and_draws_in_the_frame() {
     let mut app = design_app();
-    Command::PlaceBusTap.execute(&mut app);
+    app.execute_command_key(DesignCommand::PlaceBusTap.key());
     assert!(draws_dialog(&mut app, "Place bus tap"));
     assert!(app.state.design.bus_tap.open);
 }
@@ -107,7 +107,7 @@ fn create_pins_opens_and_draws_in_the_frame() {
 #[test]
 fn place_text_opens_and_draws_in_the_frame() {
     let mut app = design_app();
-    Command::PlaceText.execute(&mut app);
+    app.execute_command_key(DesignCommand::PlaceText.key());
     assert!(draws_dialog(&mut app, "Place text or design note"));
     assert!(app.state.design.design_note.open);
 }
@@ -115,7 +115,7 @@ fn place_text_opens_and_draws_in_the_frame() {
 #[test]
 fn draw_documentation_shape_opens_and_draws_in_the_frame() {
     let mut app = design_app();
-    Command::PlaceShape.execute(&mut app);
+    app.execute_command_key(DesignCommand::PlaceShape.key());
     assert!(draws_dialog(&mut app, "Draw documentation shape"));
     assert!(app.state.design.documentation_shape.open);
 }

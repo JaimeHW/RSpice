@@ -679,13 +679,17 @@ fn menu_shortcuts_are_projected_from_the_typed_registry() {
 #[test]
 fn core_menu_commands_are_all_real_dispatch_commands() {
     let commands = [
-        Command::Undo,
-        Command::PlaceWire,
-        Command::PlaceBus,
-        Command::PlaceBusTap,
-        Command::PlaceJunction,
+        Command::Undo.key(),
+        DesignCommand::PlaceWire.key(),
+        DesignCommand::PlaceBus.key(),
+        DesignCommand::PlaceBusTap.key(),
+        DesignCommand::PlaceJunction.key(),
     ];
-    assert!(commands.iter().all(|command| !command.spec().id.is_empty()));
+    assert!(
+        commands
+            .iter()
+            .all(|key| command_registry().spec(*key).is_some())
+    );
     assert!(
         command_registry()
             .spec(CodeCommand::AutomationConsole.key())
@@ -733,17 +737,17 @@ fn the_view_menu_lists_each_viewport_row_exactly_once() {
     assert!(listed.contains(&DesignCommand::VisibilityOptions.key()));
 }
 
-const DESIGN_PLACEMENT_COMMANDS: [Command; 10] = [
-    Command::PlaceInstance,
-    Command::PlaceWire,
-    Command::PlaceBus,
-    Command::PlaceBusTap,
-    Command::PlaceJunction,
-    Command::PlaceLabel,
-    Command::PlaceProbe,
-    Command::PlacePin,
-    Command::PlaceText,
-    Command::PlaceShape,
+const DESIGN_PLACEMENT_COMMANDS: [CommandKey; 10] = [
+    DesignCommand::PlaceInstance.key(),
+    DesignCommand::PlaceWire.key(),
+    DesignCommand::PlaceBus.key(),
+    DesignCommand::PlaceBusTap.key(),
+    DesignCommand::PlaceJunction.key(),
+    DesignCommand::PlaceLabel.key(),
+    DesignCommand::PlaceProbe.key(),
+    Command::PlacePin.key(),
+    DesignCommand::PlaceText.key(),
+    DesignCommand::PlaceShape.key(),
 ];
 const SELECTION_EDIT_COMMANDS: [CommandKey; 6] = [
     Command::MoveSelection.key(),
@@ -1097,11 +1101,9 @@ fn design_sheet_menu_reads_navigation_before_authoring() {
 
 #[test]
 fn upgraded_design_menu_commands_remain_palette_discoverable() {
-    for command in DESIGN_PLACEMENT_COMMANDS {
-        assert!(command.palette_visible());
-    }
-    for key in DESIGN_MANAGEMENT_COMMANDS
+    for key in DESIGN_PLACEMENT_COMMANDS
         .into_iter()
+        .chain(DESIGN_MANAGEMENT_COMMANDS)
         .chain(SELECTION_EDIT_COMMANDS)
     {
         assert!(
@@ -1313,21 +1315,16 @@ fn simulate_menu_plan_manager_row_reports_the_commands_truthful_unavailable_reas
 #[test]
 fn menu_icons_mark_only_the_toolbars_twins_with_the_buttons_icon() {
     let app = RSpiceApp::test_instance();
-    for (command, icon) in [
-        (Command::PlaceInstance, WorkbenchIcon::Instance),
-        (Command::PlaceJunction, WorkbenchIcon::Junction),
-        (Command::PlacePin, WorkbenchIcon::Pin),
-        (Command::PlaceText, WorkbenchIcon::Text),
-        (Command::Delete, WorkbenchIcon::Trash),
-        (Command::AscendHierarchy, WorkbenchIcon::ArrowUp),
-        (Command::DescendHierarchyDirect, WorkbenchIcon::Layers),
+    for (key, icon) in [
+        (DesignCommand::PlaceInstance.key(), WorkbenchIcon::Instance),
+        (DesignCommand::PlaceJunction.key(), WorkbenchIcon::Junction),
+        (Command::PlacePin.key(), WorkbenchIcon::Pin),
+        (DesignCommand::PlaceText.key(), WorkbenchIcon::Text),
+        (Command::Delete.key(), WorkbenchIcon::Trash),
+        (Command::AscendHierarchy.key(), WorkbenchIcon::ArrowUp),
+        (Command::DescendHierarchyDirect.key(), WorkbenchIcon::Layers),
     ] {
-        assert_eq!(
-            app.command_icon(command.key()),
-            Some(icon),
-            "{}",
-            command.spec().id
-        );
+        assert_eq!(app.command_icon(key), Some(icon), "{key:?}");
     }
     assert_eq!(
         app.command_icon(DesignCommand::VisibilityOptions.key()),

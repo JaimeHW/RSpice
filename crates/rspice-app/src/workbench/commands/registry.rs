@@ -170,17 +170,7 @@ const AUTOMATION_WORKSPACE: &[ShortcutBinding] =
 /// the four chords under it — a shortcut every reader has already learned.
 const STIMULUS_WORKSPACE: &[ShortcutBinding] =
     &[primary(chord(Key::Num8, false, true, false, "Alt+8"), ALL)];
-const PLACE_INSTANCE: &[ShortcutBinding] =
-    &[primary(chord(Key::I, false, false, true, "Shift+I"), ALL)];
-const PLACE_WIRE: &[ShortcutBinding] = &[primary(chord(Key::W, false, false, false, "W"), ALL)];
-const PLACE_BUS: &[ShortcutBinding] = &[primary(chord(Key::B, false, false, false, "B"), ALL)];
-const PLACE_BUS_TAP: &[ShortcutBinding] = &[primary(chord(Key::T, false, false, false, "T"), ALL)];
-const PLACE_JUNCTION: &[ShortcutBinding] = &[primary(chord(Key::J, false, false, false, "J"), ALL)];
-const PLACE_LABEL: &[ShortcutBinding] = &[primary(chord(Key::N, false, false, false, "N"), ALL)];
-const PLACE_PROBE: &[ShortcutBinding] = &[primary(chord(Key::P, false, false, false, "P"), ALL)];
 const PLACE_PIN: &[ShortcutBinding] = &[primary(chord(Key::P, false, false, true, "Shift+P"), ALL)];
-const PLACE_TEXT: &[ShortcutBinding] =
-    &[primary(chord(Key::T, false, false, true, "Shift+T"), ALL)];
 const MOVE_SELECTION: &[ShortcutBinding] = &[primary(chord(Key::M, false, false, false, "M"), ALL)];
 // The symbol canvas gives Ctrl+R and Ctrl+M the same meaning for its pins;
 // the two contexts never match the same view.
@@ -338,17 +328,7 @@ impl Command {
             | Self::FindReplace
             | Self::CycleGrid
             | Self::SetGridStyle(_)
-            | Self::PlaceInstance
-            | Self::PlaceWire
-            | Self::PlaceBus
-            | Self::PlaceBusTap
-            | Self::PlaceJunction
-            | Self::PlaceLabel
-            | Self::PlaceOffSheetConnector
-            | Self::PlaceProbe
             | Self::PlacePin
-            | Self::PlaceText
-            | Self::PlaceShape
             | Self::MoveSelection
             | Self::StretchSelection
             | Self::ArraySelection
@@ -439,19 +419,7 @@ impl Command {
             Self::PreviousPane => PREVIOUS_PANE,
             Self::HelpCenter => HELP_CENTER,
             Self::SelectTool => NONE,
-            Self::PlaceInstance => PLACE_INSTANCE,
-            Self::PlaceWire => PLACE_WIRE,
-            Self::PlaceBus => PLACE_BUS,
-            Self::PlaceBusTap => PLACE_BUS_TAP,
-            Self::PlaceJunction => PLACE_JUNCTION,
-            Self::PlaceLabel => PLACE_LABEL,
-            // Every plausible mnemonic in the placement family is taken; the
-            // toolbar and the palette are its routes.
-            Self::PlaceOffSheetConnector => NONE,
-            Self::PlaceProbe => PLACE_PROBE,
             Self::PlacePin => PLACE_PIN,
-            Self::PlaceText => PLACE_TEXT,
-            Self::PlaceShape => NONE,
             Self::MoveSelection => MOVE_SELECTION,
             Self::StretchSelection => STRETCH_SELECTION,
             Self::ArraySelection => NONE,
@@ -551,36 +519,10 @@ impl Command {
             Self::UpdateInstanceInterface => {
                 "select one instance whose master interface changed after it was placed"
             }
-            Self::PlaceInstance
-            | Self::PlaceWire
-            | Self::PlaceBus
-            | Self::PlaceBusTap
-            | Self::PlaceJunction
-            | Self::PlaceLabel
-            | Self::PlaceOffSheetConnector
-            | Self::PlaceProbe
-            | Self::PlacePin
-            | Self::PlaceText
-            | Self::PlaceShape
-            | Self::Place(_)
-                if !super::active_schematic_editor(app) =>
-            {
+            Self::PlacePin | Self::Place(_) if !super::active_schematic_editor(app) => {
                 "open an editable schematic or testbench"
             }
-            Self::PlaceInstance
-            | Self::PlaceWire
-            | Self::PlaceBus
-            | Self::PlaceBusTap
-            | Self::PlaceJunction
-            | Self::PlaceLabel
-            | Self::PlaceOffSheetConnector
-            | Self::PlaceProbe
-            | Self::PlacePin
-            | Self::PlaceText
-            | Self::PlaceShape
-            | Self::Place(_)
-                if app.state.schematic_edit_read_only() =>
-            {
+            Self::PlacePin | Self::Place(_) if app.state.schematic_edit_read_only() => {
                 "the active schematic is read-only"
             }
             Self::MoveSelection
@@ -719,6 +661,14 @@ mod tests {
             .collect()
     }
 
+    /// What a profile on `platform` shows as the chord of `bindings`.
+    fn label(bindings: &[ShortcutBinding], platform: CommandPlatform) -> &'static str {
+        bindings
+            .iter()
+            .find(|binding| binding.supports(platform))
+            .map_or("", |binding| binding.chord.label)
+    }
+
     /// Every command the registry orders, the shell's and the features',
     /// that binds `chord` on `platform`, in the registry's order.
     fn ordered_binding_owners(chord: ShortcutChord, platform: CommandPlatform) -> Vec<CommandKey> {
@@ -805,12 +755,6 @@ mod tests {
     fn rename_shortcut_is_unambiguous_and_desktop_browser_only() {
         let rename = DesignCommand::RenameSelection.declared_spec();
         let rename_symbol = CodeCommand::RenameSymbol.declared_spec();
-        let label = |bindings: &[ShortcutBinding], platform: CommandPlatform| {
-            bindings
-                .iter()
-                .find(|binding| binding.supports(platform))
-                .map_or("", |binding| binding.chord.label)
-        };
         for platform in [CommandPlatform::Desktop, CommandPlatform::Browser] {
             assert_eq!(
                 ordered_binding_owners(rename.bindings[0].chord, platform),
@@ -849,30 +793,27 @@ mod tests {
             }
         }
 
-        assert_eq!(
-            Command::PlaceProbe.shortcut_context(),
-            ShortcutContext::EngineeringCanvas
-        );
-        assert_eq!(
-            Command::PlaceWire.shortcut_context(),
-            ShortcutContext::EngineeringCanvas
-        );
-        assert_eq!(
-            Command::PlaceBus.shortcut_context(),
-            ShortcutContext::EngineeringCanvas
-        );
-        assert_eq!(
-            Command::PlaceBusTap.shortcut_context(),
-            ShortcutContext::EngineeringCanvas
-        );
-        assert_eq!(
-            Command::PlaceJunction.shortcut_context(),
-            ShortcutContext::EngineeringCanvas
-        );
+        for command in [
+            DesignCommand::PlaceProbe,
+            DesignCommand::PlaceWire,
+            DesignCommand::PlaceBus,
+            DesignCommand::PlaceBusTap,
+            DesignCommand::PlaceJunction,
+        ] {
+            assert_eq!(
+                command.declared_spec().context,
+                ShortcutContext::EngineeringCanvas,
+                "{command:?}"
+            );
+        }
         for platform in CommandPlatform::ALL {
-            assert_eq!(Command::PlaceBus.default_shortcut_label(platform), "B");
-            assert_eq!(Command::PlaceBusTap.default_shortcut_label(platform), "T");
-            assert_eq!(Command::PlaceJunction.default_shortcut_label(platform), "J");
+            for (command, chord) in [
+                (DesignCommand::PlaceBus, "B"),
+                (DesignCommand::PlaceBusTap, "T"),
+                (DesignCommand::PlaceJunction, "J"),
+            ] {
+                assert_eq!(label(command.declared_spec().bindings, platform), chord);
+            }
         }
     }
 
@@ -882,10 +823,8 @@ mod tests {
             Command::PlacePin.shortcut_context(),
             ShortcutContext::EngineeringCanvas
         );
-        assert_eq!(
-            Command::PlaceProbe.shortcut_context(),
-            ShortcutContext::EngineeringCanvas
-        );
+        let probe = DesignCommand::PlaceProbe.declared_spec();
+        assert_eq!(probe.context, ShortcutContext::EngineeringCanvas);
         assert_eq!(
             Command::SymbolPinTool.shortcut_context(),
             ShortcutContext::SymbolCanvas
@@ -896,42 +835,35 @@ mod tests {
                 Command::PlacePin.default_shortcut_label(platform),
                 "Shift+P"
             );
-            assert_eq!(Command::PlaceProbe.default_shortcut_label(platform), "P");
+            assert_eq!(label(probe.bindings, platform), "P");
             assert_eq!(Command::SymbolPinTool.default_shortcut_label(platform), "P");
             assert_eq!(
                 binding_owners(PLACE_PIN[0].chord, platform),
                 vec![Command::PlacePin]
             );
             assert_eq!(
-                binding_owners(PLACE_PROBE[0].chord, platform),
-                vec![Command::PlaceProbe, Command::SymbolPinTool]
+                ordered_binding_owners(probe.bindings[0].chord, platform),
+                vec![probe.key, Command::SymbolPinTool.key()]
             );
         }
     }
 
     #[test]
     fn schematic_place_text_is_shift_t_without_displacing_bus_tap() {
-        assert_eq!(
-            Command::PlaceText.shortcut_context(),
-            ShortcutContext::EngineeringCanvas
-        );
-        assert_eq!(
-            Command::PlaceBusTap.shortcut_context(),
-            ShortcutContext::EngineeringCanvas
-        );
+        let text = DesignCommand::PlaceText.declared_spec();
+        let bus_tap = DesignCommand::PlaceBusTap.declared_spec();
+        assert_eq!(text.context, ShortcutContext::EngineeringCanvas);
+        assert_eq!(bus_tap.context, ShortcutContext::EngineeringCanvas);
         for platform in CommandPlatform::ALL {
+            assert_eq!(label(text.bindings, platform), "Shift+T");
+            assert_eq!(label(bus_tap.bindings, platform), "T");
             assert_eq!(
-                Command::PlaceText.default_shortcut_label(platform),
-                "Shift+T"
-            );
-            assert_eq!(Command::PlaceBusTap.default_shortcut_label(platform), "T");
-            assert_eq!(
-                binding_owners(PLACE_TEXT[0].chord, platform),
-                vec![Command::PlaceText]
+                ordered_binding_owners(text.bindings[0].chord, platform),
+                vec![text.key]
             );
             assert_eq!(
-                binding_owners(PLACE_BUS_TAP[0].chord, platform),
-                vec![Command::PlaceBusTap, Command::SymbolTextTool]
+                ordered_binding_owners(bus_tap.bindings[0].chord, platform),
+                vec![bus_tap.key, Command::SymbolTextTool.key()]
             );
             assert_eq!(
                 Command::SymbolTextTool.shortcut_context(),
@@ -1017,29 +949,18 @@ mod tests {
     /// a command nobody can invoke.
     #[test]
     fn the_off_sheet_connector_is_reachable_without_a_chord_of_its_own() {
-        let spec = Command::PlaceOffSheetConnector.spec();
-        assert_eq!(spec.id, "place-off-sheet-connector");
+        let key = DesignCommand::PlaceOffSheetConnector.key();
+        let spec = crate::workbench::commands::vocabulary::command_registry()
+            .spec(key)
+            .expect("the palette projects the registry, so an unlisted command has no seat");
+        assert_eq!(key.as_str(), "place-off-sheet-connector");
         assert_eq!(spec.label, "Off-sheet connector");
         assert_eq!(spec.group, "Design");
-        assert!(
-            crate::workbench::commands::vocabulary::COMMAND_REGISTRY
-                .contains(&Command::PlaceOffSheetConnector),
-            "the palette projects the registry, so an unlisted command has no seat"
-        );
-        assert!(Command::PlaceOffSheetConnector.palette_visible());
-        assert!(
-            Command::PlaceOffSheetConnector
-                .shortcut_bindings()
-                .is_empty()
-        );
-        assert_eq!(
-            Command::PlaceOffSheetConnector.shortcut_context(),
-            ShortcutContext::EngineeringCanvas
-        );
-        assert!(!Command::PlaceOffSheetConnector.requires_open_project());
-        assert!(super::super::command_edits_schematic(
-            Command::PlaceOffSheetConnector
-        ));
+        assert!(spec.flags.contains(CommandFlags::PALETTE_VISIBLE));
+        assert!(spec.bindings.is_empty());
+        assert_eq!(spec.context, ShortcutContext::EngineeringCanvas);
+        assert!(!spec.flags.contains(CommandFlags::REQUIRES_OPEN_PROJECT));
+        assert!(spec.flags.contains(CommandFlags::EDITS_ACTIVE_DOCUMENT));
     }
 
     /// Arming is what separates the two naming tools: they share one placement
@@ -1049,15 +970,15 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         app.state.workbench.activate(Workspace::Design);
         app.state.open_project_session();
-        assert!(Command::PlaceOffSheetConnector.is_enabled(&app));
+        assert!(app.command_key_enabled(DesignCommand::PlaceOffSheetConnector.key()));
 
-        Command::PlaceOffSheetConnector.execute(&mut app);
+        app.execute_command_key(DesignCommand::PlaceOffSheetConnector.key());
         assert_eq!(
             app.state.model.schematic.session.editor.tool,
             crate::state::Tool::OffSheetConnector
         );
 
-        Command::PlaceLabel.execute(&mut app);
+        app.execute_command_key(DesignCommand::PlaceLabel.key());
         assert_eq!(
             app.state.model.schematic.session.editor.tool,
             crate::state::Tool::Label

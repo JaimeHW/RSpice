@@ -2,7 +2,7 @@
 
 use crate::state::Tool;
 use crate::ui::widgets::{CommandForm, DialogChoice};
-use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::app_state::Model;
 use egui::Context;
 use rspice_schematic_editor::{
     bus_tap_placement::{self, DraftValidation},
@@ -93,10 +93,10 @@ pub(in crate::workbench) fn render_bus_tap_dialog(
     }
 }
 
-pub(crate) fn open_bus_tap(state: &mut AppState) {
-    let source = crate::workbench::app::schematic_editor_request_source(state);
-    let bus = sole_declared_bus(state);
-    state.design.bus_tap.open(source, bus);
+pub(crate) fn open_bus_tap(dialog: &mut BusTapDialogState, model: &Model) {
+    let source = crate::workbench::app::schematic_editor_request_source(model);
+    let bus = sole_declared_bus(model);
+    dialog.open(source, bus);
 }
 
 /// The bus a tap starts from when the sheet leaves no doubt: the one
@@ -107,9 +107,8 @@ pub(crate) fn open_bus_tap(state: &mut AppState) {
 /// reader who pressed Enter. One declared bus is not a sample; it is the only
 /// answer. Anything else starts empty, with the shape of a declaration as the
 /// field's hint.
-fn sole_declared_bus(state: &AppState) -> String {
-    let mut declarations = state
-        .model
+fn sole_declared_bus(model: &Model) -> String {
+    let mut declarations = model
         .schematic
         .document()
         .buses
@@ -148,6 +147,7 @@ mod tests {
     use super::*;
     use crate::state::{Bus, BusDeclaration, BusTapOrientation, Point};
     use crate::workbench::app::RSpiceApp;
+    use crate::workbench::app_state::AppState;
 
     /// Draw the form as its dialog step does.
     fn render(app: &mut RSpiceApp, ctx: &Context) {
@@ -213,7 +213,7 @@ mod tests {
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let mut app = RSpiceApp::test_instance();
-        open_bus_tap(&mut app.state);
+        open_bus_tap(&mut app.state.design.bus_tap, &app.state.model);
 
         // The form asks for the caret once its rows exist, so the frame that
         // builds them is the frame before the one that can be typed into.
@@ -240,7 +240,7 @@ mod tests {
     #[test]
     fn an_untouched_form_taps_nothing_and_prefills_only_the_one_declared_bus() {
         let mut app = RSpiceApp::test_instance();
-        open_bus_tap(&mut app.state);
+        open_bus_tap(&mut app.state.design.bus_tap, &app.state.model);
         assert_eq!(app.state.design.bus_tap.fields.bus, "");
         assert_eq!(app.state.design.bus_tap.fields.slice, "");
         assert!(!app.state.design.bus_tap.fields.validate().can_commit());
@@ -249,7 +249,7 @@ mod tests {
         // slice is still the reader's, so the form still cannot commit.
         app.state.design.bus_tap.close();
         declare_bus(&mut app.state, "DATA[15:0]");
-        open_bus_tap(&mut app.state);
+        open_bus_tap(&mut app.state.design.bus_tap, &app.state.model);
         assert_eq!(app.state.design.bus_tap.fields.bus, "DATA[15:0]");
         assert_eq!(app.state.design.bus_tap.fields.slice, "");
         assert!(!app.state.design.bus_tap.fields.validate().can_commit());
@@ -258,7 +258,7 @@ mod tests {
         // reader.
         app.state.design.bus_tap.close();
         declare_bus(&mut app.state, "ADDR[7:0]");
-        open_bus_tap(&mut app.state);
+        open_bus_tap(&mut app.state.design.bus_tap, &app.state.model);
         assert_eq!(app.state.design.bus_tap.fields.bus, "");
     }
 
@@ -286,7 +286,7 @@ mod tests {
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let mut app = RSpiceApp::test_instance();
-        open_bus_tap(&mut app.state);
+        open_bus_tap(&mut app.state.design.bus_tap, &app.state.model);
         fill(&mut app.state, "DATA[15:0]", "DATA[7:0]");
 
         let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| render(&mut app, ctx));
@@ -312,7 +312,7 @@ mod tests {
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let mut app = RSpiceApp::test_instance();
-        open_bus_tap(&mut app.state);
+        open_bus_tap(&mut app.state.design.bus_tap, &app.state.model);
         fill(&mut app.state, "DATA[15:0]", "DATA[7:0]");
 
         let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| render(&mut app, ctx));
@@ -370,7 +370,7 @@ mod tests {
                 .design_management
                 .bootstrap_for_cell_view(&master.key(), "Sheet 1", [])
                 .unwrap();
-            open_bus_tap(&mut app.state);
+            open_bus_tap(&mut app.state.design.bus_tap, &app.state.model);
             fill(&mut app.state, "DATA[15:0]", "DATA[7:0]");
             let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| render(&mut app, ctx));
             match change {

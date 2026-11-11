@@ -133,6 +133,9 @@ impl RSpiceApp {
         {
             return;
         }
+        if flags.contains(CommandFlags::REPEATABLE) && self.command_key_enabled(spec.key) {
+            self.state.workbench.last_repeatable_command = Some(spec.key.as_str().to_owned());
+        }
         if self.netlist_takes_run(spec.key) {
             if self.manual_deck_run_block_reason().is_none() {
                 self.state.request_netlist_manual_deck_run();

@@ -4,6 +4,7 @@
 
 use egui::Vec2;
 
+use crate::state::command_catalog::CommandKey;
 use crate::state::{ComponentType, Tool};
 use crate::ui::tokens::Tokens;
 use crate::workbench::RSpiceApp;
@@ -19,34 +20,58 @@ use super::{
     toolbar_icon_command_selected_as, toolbar_text_command,
 };
 
-pub(crate) const DESIGN_DIRECT_TOOLBAR_COMMANDS: [(Command, WorkbenchIcon, &str); 11] = [
-    (Command::SelectTool, WorkbenchIcon::Select, "Select (Esc)"),
+pub(crate) const DESIGN_DIRECT_TOOLBAR_COMMANDS: [(CommandKey, WorkbenchIcon, &str); 11] = [
     (
-        Command::PlaceInstance,
+        Command::SelectTool.key(),
+        WorkbenchIcon::Select,
+        "Select (Esc)",
+    ),
+    (
+        DesignCommand::PlaceInstance.key(),
         WorkbenchIcon::Instance,
         "Place instance",
     ),
-    (Command::PlaceWire, WorkbenchIcon::Wire, "Draw wire"),
-    (Command::PlaceBus, WorkbenchIcon::Bus, "Draw bus"),
-    (Command::PlaceBusTap, WorkbenchIcon::BusTap, "Place bus tap"),
     (
-        Command::PlaceJunction,
+        DesignCommand::PlaceWire.key(),
+        WorkbenchIcon::Wire,
+        "Draw wire",
+    ),
+    (
+        DesignCommand::PlaceBus.key(),
+        WorkbenchIcon::Bus,
+        "Draw bus",
+    ),
+    (
+        DesignCommand::PlaceBusTap.key(),
+        WorkbenchIcon::BusTap,
+        "Place bus tap",
+    ),
+    (
+        DesignCommand::PlaceJunction.key(),
         WorkbenchIcon::Junction,
         "Place junction",
     ),
-    (Command::PlaceLabel, WorkbenchIcon::Label, "Net label"),
+    (
+        DesignCommand::PlaceLabel.key(),
+        WorkbenchIcon::Label,
+        "Net label",
+    ),
     // Not `Layers`: that glyph already sits in this same row for descending
     // into an instance, and a sheet crossing is a sideways continuation of a
     // net rather than a step down the hierarchy.
     (
-        Command::PlaceOffSheetConnector,
+        DesignCommand::PlaceOffSheetConnector.key(),
         WorkbenchIcon::ArrowRight,
         "Off-sheet connector",
     ),
-    (Command::PlacePin, WorkbenchIcon::Pin, "Create pin"),
-    (Command::PlaceProbe, WorkbenchIcon::Probe, "Probe signal"),
+    (Command::PlacePin.key(), WorkbenchIcon::Pin, "Create pin"),
     (
-        Command::PlaceText,
+        DesignCommand::PlaceProbe.key(),
+        WorkbenchIcon::Probe,
+        "Probe signal",
+    ),
+    (
+        DesignCommand::PlaceText.key(),
         WorkbenchIcon::Text,
         "Place text or note",
     ),
@@ -137,13 +162,13 @@ pub(in crate::workbench) fn design_tools(
     app: &mut RSpiceApp,
     layout: LayoutSpec,
 ) {
-    for (index, (command, icon, label)) in DESIGN_DIRECT_TOOLBAR_COMMANDS.into_iter().enumerate() {
+    for (index, (key, icon, label)) in DESIGN_DIRECT_TOOLBAR_COMMANDS.into_iter().enumerate() {
         if index == 1 {
             context_separator(ui, layout);
         }
         let selected =
-            design_toolbar_command_selected(app.state.model.schematic.session.editor.tool, command);
-        toolbar_icon_command_selected_as(ui, app, command.key(), icon, selected, label, layout);
+            design_toolbar_command_selected(app.state.model.schematic.session.editor.tool, key);
+        toolbar_icon_command_selected_as(ui, app, key, icon, selected, label, layout);
     }
     context_separator(ui, layout);
     toolbar_icon_command(
@@ -249,21 +274,25 @@ pub(in crate::workbench) fn design_tools(
     );
 }
 
-pub(crate) fn design_toolbar_command_selected(tool: Tool, command: Command) -> bool {
-    match command {
-        Command::SelectTool => tool == Tool::Select,
-        Command::PlaceInstance => {
+pub(crate) fn design_toolbar_command_selected(tool: Tool, key: CommandKey) -> bool {
+    if key == Command::SelectTool.key() {
+        return tool == Tool::Select;
+    }
+    if key == Command::PlacePin.key() {
+        return tool == Tool::Place(ComponentType::Port);
+    }
+    match DesignCommand::from_key(key) {
+        Some(DesignCommand::PlaceInstance) => {
             matches!(tool, Tool::Place(component) if component != ComponentType::Port)
         }
-        Command::PlaceWire => tool == Tool::Wire,
-        Command::PlaceBus => tool == Tool::Bus,
-        Command::PlaceBusTap => tool == Tool::BusTap,
-        Command::PlaceJunction => tool == Tool::Junction,
-        Command::PlaceLabel => tool == Tool::Label,
-        Command::PlaceOffSheetConnector => tool == Tool::OffSheetConnector,
-        Command::PlacePin => tool == Tool::Place(ComponentType::Port),
-        Command::PlaceProbe => tool == Tool::Probe,
-        Command::PlaceText => tool == Tool::DesignNote,
+        Some(DesignCommand::PlaceWire) => tool == Tool::Wire,
+        Some(DesignCommand::PlaceBus) => tool == Tool::Bus,
+        Some(DesignCommand::PlaceBusTap) => tool == Tool::BusTap,
+        Some(DesignCommand::PlaceJunction) => tool == Tool::Junction,
+        Some(DesignCommand::PlaceLabel) => tool == Tool::Label,
+        Some(DesignCommand::PlaceOffSheetConnector) => tool == Tool::OffSheetConnector,
+        Some(DesignCommand::PlaceProbe) => tool == Tool::Probe,
+        Some(DesignCommand::PlaceText) => tool == Tool::DesignNote,
         _ => false,
     }
 }

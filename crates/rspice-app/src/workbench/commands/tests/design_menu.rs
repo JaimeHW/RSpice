@@ -11,21 +11,21 @@ use crate::workbench::project::commands::ProjectCommand;
 #[test]
 fn design_menu_commands_explain_wrong_context_and_read_only_states() {
     let authoring_commands = [
-        Command::PlaceInstance,
-        Command::PlaceWire,
-        Command::PlaceBus,
-        Command::PlaceBusTap,
-        Command::PlaceJunction,
-        Command::PlaceLabel,
-        Command::PlaceProbe,
         Command::PlacePin,
-        Command::PlaceText,
-        Command::PlaceShape,
         Command::MoveSelection,
         Command::StretchSelection,
         Command::ArraySelection,
     ];
     let design_authoring = [
+        DesignCommand::PlaceInstance,
+        DesignCommand::PlaceWire,
+        DesignCommand::PlaceBus,
+        DesignCommand::PlaceBusTap,
+        DesignCommand::PlaceJunction,
+        DesignCommand::PlaceLabel,
+        DesignCommand::PlaceProbe,
+        DesignCommand::PlaceText,
+        DesignCommand::PlaceShape,
         DesignCommand::ReplaceInstance,
         DesignCommand::CreateHierarchy,
     ];

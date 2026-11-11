@@ -1203,7 +1203,7 @@ fn pinned_band(
     }
     let shortcut = state.model.preferences.shortcuts().resolved_label(
         &crate::workbench::commands::vocabulary::CommandRegistry,
-        crate::workbench::commands::vocabulary::Command::PlaceInstance.key(),
+        crate::workbench::design::commands::DesignCommand::PlaceInstance.key(),
         crate::workbench::app_state::runtime_command_platform(ui.ctx()),
         ui.ctx().os(),
     );

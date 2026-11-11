@@ -452,16 +452,24 @@ const DESIGN_MENU: &[MenuEntry] = &[
 /// What a schematic places: the tools, then a part of each kind the
 /// one-key placements put down.
 const PLACE_MENU: &[MenuEntry] = &[
-    command_as(Command::PlaceInstance, "Instance\u{2026}").access('I'),
-    command_as(Command::PlaceWire, "Wire").access('W'),
-    command_as(Command::PlaceBus, "Bus").access('B'),
-    command_as(Command::PlaceBusTap, "Bus tap").access('T'),
-    command_as(Command::PlaceLabel, "Net label").access('L'),
-    command_as(Command::PlaceOffSheetConnector, "Off-sheet connector").access('O'),
+    MenuEntry::command_as(DesignCommand::PlaceInstance.key(), "Instance\u{2026}").access('I'),
+    MenuEntry::command_as(DesignCommand::PlaceWire.key(), "Wire").access('W'),
+    MenuEntry::command_as(DesignCommand::PlaceBus.key(), "Bus").access('B'),
+    MenuEntry::command_as(DesignCommand::PlaceBusTap.key(), "Bus tap").access('T'),
+    MenuEntry::command_as(DesignCommand::PlaceLabel.key(), "Net label").access('L'),
+    MenuEntry::command_as(
+        DesignCommand::PlaceOffSheetConnector.key(),
+        "Off-sheet connector",
+    )
+    .access('O'),
     command_as(Command::PlacePin, "Pins\u{2026}").access('P'),
-    command_as(Command::PlaceJunction, "Junction").access('J'),
-    command_as(Command::PlaceText, "Text or note\u{2026}").access('N'),
-    command_as(Command::PlaceShape, "Documentation shape\u{2026}").access('S'),
+    MenuEntry::command_as(DesignCommand::PlaceJunction.key(), "Junction").access('J'),
+    MenuEntry::command_as(DesignCommand::PlaceText.key(), "Text or note\u{2026}").access('N'),
+    MenuEntry::command_as(
+        DesignCommand::PlaceShape.key(),
+        "Documentation shape\u{2026}",
+    )
+    .access('S'),
     Separator,
     command_as(Command::Place(ComponentType::Resistor), "Resistor").access('R'),
     command_as(Command::Place(ComponentType::Capacitor), "Capacitor").access('A'),
@@ -594,7 +602,7 @@ const SIMULATE_MENU: &[MenuEntry] = &[
     code(CodeCommand::GenerateNetlist).access('G'),
     simulate(SimulateCommand::JobsManager).access('H'),
     Separator,
-    command_as(Command::PlaceProbe, "Probe").access('P'),
+    MenuEntry::command_as(DesignCommand::PlaceProbe.key(), "Probe").access('P'),
     command(Command::AnnotateOperatingPoint).access('D'),
     command(Command::AnnotateTransientVoltages).access('T'),
     MenuEntry::command_as(
@@ -882,16 +890,7 @@ pub(in crate::workbench) const SOURCE_EDITOR_MENU: &[MenuEntry] = &[
 pub(in crate::workbench) fn command_icon(command: Command) -> Option<WorkbenchIcon> {
     let icon = match command {
         Command::SelectTool => WorkbenchIcon::Select,
-        Command::PlaceInstance => WorkbenchIcon::Instance,
-        Command::PlaceWire => WorkbenchIcon::Wire,
-        Command::PlaceBus => WorkbenchIcon::Bus,
-        Command::PlaceBusTap => WorkbenchIcon::BusTap,
-        Command::PlaceJunction => WorkbenchIcon::Junction,
-        Command::PlaceLabel => WorkbenchIcon::Label,
-        Command::PlaceOffSheetConnector => WorkbenchIcon::ArrowRight,
         Command::PlacePin => WorkbenchIcon::Pin,
-        Command::PlaceProbe => WorkbenchIcon::Probe,
-        Command::PlaceText => WorkbenchIcon::Text,
         Command::SymbolSave => WorkbenchIcon::Save,
         Command::RotateSelection => WorkbenchIcon::Rotate,
         Command::MirrorSelectionHorizontal => WorkbenchIcon::Mirror,
@@ -923,8 +922,20 @@ pub(in crate::workbench) fn feature_command_icon(key: CommandKey) -> Option<Work
             _ => None,
         };
     }
-    if DesignCommand::from_key(key) == Some(DesignCommand::VisibilityOptions) {
-        return Some(WorkbenchIcon::Visibility);
+    if let Some(command) = DesignCommand::from_key(key) {
+        return match command {
+            DesignCommand::VisibilityOptions => Some(WorkbenchIcon::Visibility),
+            DesignCommand::PlaceInstance => Some(WorkbenchIcon::Instance),
+            DesignCommand::PlaceWire => Some(WorkbenchIcon::Wire),
+            DesignCommand::PlaceBus => Some(WorkbenchIcon::Bus),
+            DesignCommand::PlaceBusTap => Some(WorkbenchIcon::BusTap),
+            DesignCommand::PlaceJunction => Some(WorkbenchIcon::Junction),
+            DesignCommand::PlaceLabel => Some(WorkbenchIcon::Label),
+            DesignCommand::PlaceOffSheetConnector => Some(WorkbenchIcon::ArrowRight),
+            DesignCommand::PlaceProbe => Some(WorkbenchIcon::Probe),
+            DesignCommand::PlaceText => Some(WorkbenchIcon::Text),
+            _ => None,
+        };
     }
     if let Some(command) = ProjectCommand::from_key(key) {
         return match command {

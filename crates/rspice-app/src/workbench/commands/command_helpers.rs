@@ -301,20 +301,6 @@ pub(super) fn schematic_selection_has_duplicable_object(
                 .any(|probe| selection.has_probe(probe.id)))
 }
 
-pub(super) fn set_tool(app: &mut RSpiceApp, tool: Tool) {
-    activate_workspace(app, Workspace::Design);
-    if app.state.design.move_selection.armed && tool != Tool::MoveSelection {
-        app.state.design.move_selection.close();
-    }
-    if app.state.design.stretch_selection.armed && tool != Tool::StretchSelection {
-        app.state.design.stretch_selection.close();
-    }
-    if app.state.design.array_selection.armed && tool != Tool::ArraySelection {
-        app.state.design.array_selection.close();
-    }
-    app.state.model.schematic.arm_tool(tool);
-}
-
 pub(in crate::workbench) fn file_action(app: &mut RSpiceApp, action: FileMenuAction) {
     dispatch_file_menu_action(&mut app.state, action, app.file_workflow_io.as_ref());
 }

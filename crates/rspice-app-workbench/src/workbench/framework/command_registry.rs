@@ -71,6 +71,9 @@ impl CommandFlags {
     /// Commits the inspector's pending edit first, and does not run when that
     /// edit cannot be applied.
     pub const COMMITS_INSPECTOR_EDIT: Self = Self(1 << 5);
+    /// Repeat last command runs it again: dispatching it while it can run
+    /// records it as the last repeatable command.
+    pub const REPEATABLE: Self = Self(1 << 6);
 
     /// These flags, with `flag` set when `set` holds.
     #[must_use]

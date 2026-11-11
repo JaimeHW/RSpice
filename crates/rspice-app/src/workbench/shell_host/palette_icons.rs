@@ -17,18 +17,8 @@ use crate::workbench::simulate::commands::SimulateCommand;
 pub(super) fn palette_icon(command: Command) -> Option<Icon> {
     let icon = match command {
         Command::SelectTool => Icon::Select,
-        // Placing an instance picks one from the library.
-        Command::PlaceInstance => Icon::Library,
-        Command::PlaceOffSheetConnector => Icon::ChevronRight,
-        Command::PlaceWire | Command::JoinCollinearWires => Icon::Wire,
-        Command::PlaceBus => Icon::Bus,
-        Command::PlaceBusTap => Icon::Bus,
-        Command::PlaceJunction => Icon::Grid,
-        Command::PlaceLabel => Icon::NetLabel,
-        Command::PlaceProbe => Icon::Probe,
+        Command::JoinCollinearWires => Icon::Wire,
         Command::PlacePin => Icon::Pin,
-        Command::PlaceText => Icon::NetLabel,
-        Command::PlaceShape => Icon::Grid,
         Command::MoveSelection | Command::StretchSelection => Icon::Select,
         Command::ArraySelection => Icon::Grid,
         Command::SwapToRSpiceSymbols => Icon::Refresh,
@@ -66,6 +56,14 @@ pub(super) fn feature_palette_icon(key: CommandKey) -> Option<Icon> {
         return match command {
             DesignCommand::ConnectivityManager => Some(Icon::Bus),
             DesignCommand::RuleSetup => Some(Icon::Check),
+            // Placing an instance picks one from the library.
+            DesignCommand::PlaceInstance => Some(Icon::Library),
+            DesignCommand::PlaceOffSheetConnector => Some(Icon::ChevronRight),
+            DesignCommand::PlaceWire => Some(Icon::Wire),
+            DesignCommand::PlaceBus | DesignCommand::PlaceBusTap => Some(Icon::Bus),
+            DesignCommand::PlaceJunction | DesignCommand::PlaceShape => Some(Icon::Grid),
+            DesignCommand::PlaceLabel | DesignCommand::PlaceText => Some(Icon::NetLabel),
+            DesignCommand::PlaceProbe => Some(Icon::Probe),
             DesignCommand::ReplaceInstance => Some(Icon::Refresh),
             DesignCommand::CreateHierarchy => Some(Icon::Folder),
             _ => None,

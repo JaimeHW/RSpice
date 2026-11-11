@@ -7,6 +7,7 @@ pub(crate) mod commands;
 
 use egui::Context;
 
+use crate::state::Tool;
 use crate::workbench::app::actions::stimulus;
 use crate::workbench::app::dialogs::connectivity_manager::{
     ConnectivityManager, open_connectivity_manager,
@@ -23,6 +24,7 @@ use crate::workbench::app::dialogs::hierarchy::create::{
 };
 use crate::workbench::app::dialogs::hierarchy::descend;
 use crate::workbench::app::dialogs::placement::builtin_xspice::BuiltinXspicePlacement;
+use crate::workbench::app::dialogs::placement::bus_tap::open_bus_tap;
 use crate::workbench::app::dialogs::property_dialog::PropertyDialog;
 use crate::workbench::app::dialogs::replace_instance::{
     ReplaceInstance, open_replace_instance_dialog, replace_instance_available,
@@ -32,13 +34,15 @@ use crate::workbench::app::dialogs::{
     create_model_bound_symbol, find_replace, object_properties, placement, rule_setup,
     stimulus_link, symbol_definition, visibility_options,
 };
+use crate::workbench::app::{arm_schematic_tool, schematic_editor_request_source};
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec};
 use crate::workbench::framework::dialogs::DialogKey;
 use crate::workbench::framework::feature::{
     CommandSet, Cx, Feature, FeatureDialog, FeatureRegistry, NoHandles, Reads,
 };
+use crate::workbench::framework::requests::FocusPlacementSearch;
 use crate::workbench::slots::DesignState;
-use crate::workbench::state::{WorkbenchSession, Workspace};
+use crate::workbench::state::{DesignPanel, Drawer, WorkbenchSession, Workspace};
 use commands::DesignCommand;
 
 /// The design feature.
@@ -67,7 +71,8 @@ impl CommandSet for DesignCommand {
     /// reader; Design rule setup needs only the project, which the registry
     /// already asks for. Rename names what it can act on; Replace instance and
     /// Create hierarchy name the first thing missing: the schematic, an
-    /// editable one, then something in it to act on.
+    /// editable one, then something in it to act on. A placement needs an
+    /// editable schematic or testbench in front of the reader.
     ///
     /// Every library verb needs the instrument open, because they all act on
     /// the definition it is reading; New and Validate need only that,
@@ -109,6 +114,20 @@ impl CommandSet for DesignCommand {
                 Some("the active schematic is read-only")
             }
             Self::ReplaceInstance | Self::CreateHierarchy => Some("select an editable object"),
+            _ if self.places() && !schematic => Some("open an editable schematic or testbench"),
+            _ if self.places() && reads.model.schematic_edit_read_only() => {
+                Some("the active schematic is read-only")
+            }
+            Self::PlaceInstance
+            | Self::PlaceWire
+            | Self::PlaceBus
+            | Self::PlaceBusTap
+            | Self::PlaceJunction
+            | Self::PlaceLabel
+            | Self::PlaceOffSheetConnector
+            | Self::PlaceProbe
+            | Self::PlaceText
+            | Self::PlaceShape => None,
             _ if reads.wb.workspace != Workspace::Stimulus => Some("open the Stimulus Library"),
             Self::NewStimulusDefinition | Self::ValidateStimulusLibrary => None,
             Self::DuplicateStimulusDefinition | Self::DeleteStimulusDefinition => {
@@ -241,6 +260,34 @@ impl CommandSet for DesignCommand {
             Self::CreateHierarchy => {
                 open_create_hierarchy_dialog(&mut cx.state.create_hierarchy, cx.model, cx.wb);
             }
+            Self::PlaceInstance => {
+                cx.wb.activate(Workspace::Design);
+                cx.wb.navigator_visible = true;
+                cx.wb.drawer = Some(Drawer::Navigator);
+                cx.state.design_panel = DesignPanel::ComponentShelf;
+                cx.wb.outbox.push(FocusPlacementSearch);
+            }
+            Self::PlaceWire => arm_tool(cx, Tool::Wire),
+            Self::PlaceBus => arm_tool(cx, Tool::Bus),
+            Self::PlaceBusTap => {
+                cx.wb.activate(Workspace::Design);
+                open_bus_tap(&mut cx.state.bus_tap, cx.model);
+            }
+            Self::PlaceJunction => arm_tool(cx, Tool::Junction),
+            Self::PlaceLabel => arm_tool(cx, Tool::Label),
+            Self::PlaceOffSheetConnector => arm_tool(cx, Tool::OffSheetConnector),
+            Self::PlaceProbe => arm_tool(cx, Tool::Probe),
+            Self::PlaceText => {
+                cx.wb.activate(Workspace::Design);
+                let source = schematic_editor_request_source(&*cx.model);
+                cx.state.design_note.open(source);
+            }
+            Self::PlaceShape => {
+                cx.wb.activate(Workspace::Design);
+                let source = schematic_editor_request_source(&*cx.model);
+                let expected_shapes = cx.model.schematic.document().documentation_shapes.clone();
+                cx.state.documentation_shape.open(source, expected_shapes);
+            }
             Self::ShowAdopterOnSchematic => {
                 stimulus::show_adopter_on_schematic(
                     cx.state.selected_stimulus_definition.as_deref(),
@@ -251,6 +298,18 @@ impl CommandSet for DesignCommand {
             }
         }
     }
+}
+
+/// Arm `tool` on the schematic, as every placement that is a tool does.
+fn arm_tool(cx: &mut Cx<'_, DesignFeature>, tool: Tool) {
+    arm_schematic_tool(
+        &mut cx.state.move_selection,
+        &mut cx.state.stretch_selection,
+        &mut cx.state.array_selection,
+        cx.model,
+        cx.wb,
+        tool,
+    );
 }
 
 /// Whether a schematic or testbench is the document in front of the reader

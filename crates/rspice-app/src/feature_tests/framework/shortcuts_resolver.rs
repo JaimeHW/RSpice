@@ -17,6 +17,7 @@ use crate::workbench::app_state::session::shortcuts::ShortcutInputSnapshot;
 use crate::workbench::app_state::session::shortcuts::resolver::*;
 use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::commands::vocabulary::{Command, CommandRegistry};
+use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::state::Workspace;
@@ -432,7 +433,10 @@ fn invalid_whole_profile_executes_immutable_defaults_only() {
         Duration::from_millis(2),
         |_| true,
     );
-    assert_eq!(rejected_policy.command, Some(Command::PlaceWire.key()));
+    assert_eq!(
+        rejected_policy.command,
+        Some(DesignCommand::PlaceWire.key())
+    );
 }
 
 #[test]
@@ -458,7 +462,7 @@ fn canvas_focus_policy_requires_exact_canvas_focus() {
         Duration::from_millis(1),
         |_| true,
     );
-    assert_eq!(focused.command, Some(Command::PlaceWire.key()));
+    assert_eq!(focused.command, Some(DesignCommand::PlaceWire.key()));
 
     let model_symbol = state.resolve(
         &snapshot(&[event(Key::L, Modifiers::NONE, false)], false),
@@ -564,7 +568,7 @@ fn shift_p_resolves_schematic_place_pin_without_breaking_plain_p_contexts() {
     );
     assert_eq!(
         resolve(Key::P, Modifiers::NONE, design(true)).command,
-        Some(Command::PlaceProbe.key())
+        Some(DesignCommand::PlaceProbe.key())
     );
     assert_eq!(
         resolve(Key::P, Modifiers::NONE, models_symbol(true)).command,
@@ -594,11 +598,11 @@ fn shift_t_resolves_schematic_text_without_breaking_plain_bus_tap() {
 
     assert_eq!(
         resolve(shift, design(true)).command,
-        Some(Command::PlaceText.key())
+        Some(DesignCommand::PlaceText.key())
     );
     assert_eq!(
         resolve(Modifiers::NONE, design(true)).command,
-        Some(Command::PlaceBusTap.key())
+        Some(DesignCommand::PlaceBusTap.key())
     );
     assert_eq!(resolve(shift, models_symbol(true)).command, None);
 }
@@ -854,7 +858,7 @@ fn single_key_canvas_require_alt_and_disabled_use_shared_projection() {
         Duration::from_millis(1),
         |_| true,
     );
-    assert_eq!(alt.command, Some(Command::PlaceWire.key()));
+    assert_eq!(alt.command, Some(DesignCommand::PlaceWire.key()));
 
     let mut disabled = ShortcutPreferences::default();
     disabled

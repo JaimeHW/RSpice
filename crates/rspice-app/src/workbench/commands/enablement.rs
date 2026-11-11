@@ -222,8 +222,7 @@ impl Command {
                     && vocabulary::last_repeatable(
                         state.workbench.last_repeatable_command.as_deref(),
                     )
-                    .and_then(|spec| vocabulary::legacy_command(spec.key))
-                    .is_some_and(|command| command.is_enabled(app))
+                    .is_some_and(|spec| app.command_key_enabled(spec.key))
             }
             Self::ConfigurationSets => state.platform.project_lifecycle.is_open(),
             Self::ObjectProperties => {
@@ -329,18 +328,9 @@ impl Command {
             | Self::AnnotateOperatingPoint
             | Self::AnnotateTransientVoltages => active_schematic_editor(app),
             Self::SelectTool => active_symbol_editor(app) || active_schematic_editor(app),
-            Self::PlaceWire
-            | Self::PlaceBus
-            | Self::PlaceBusTap
-            | Self::PlaceJunction
-            | Self::PlaceProbe
-            | Self::PlacePin
-            | Self::PlaceText
-            | Self::PlaceShape => active_schematic_editor(app) && !state.schematic_edit_read_only(),
-            Self::PlaceInstance
-            | Self::PlaceLabel
-            | Self::PlaceOffSheetConnector
-            | Self::Place(_) => active_schematic_editor(app) && !state.schematic_edit_read_only(),
+            Self::PlacePin | Self::Place(_) => {
+                active_schematic_editor(app) && !state.schematic_edit_read_only()
+            }
             Self::SymbolPinTool
             | Self::SymbolPolylineTool
             | Self::SymbolRectangleTool

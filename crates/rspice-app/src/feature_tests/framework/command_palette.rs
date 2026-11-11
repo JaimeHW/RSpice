@@ -177,7 +177,7 @@ fn a_command_is_found_under_the_menu_that_holds_it() {
 
     for (key, scope, detail) in [
         (
-            Command::PlaceWire.key(),
+            DesignCommand::PlaceWire.key(),
             PaletteScope::Design,
             "Design \u{203a} Place",
         ),
@@ -219,27 +219,33 @@ fn a_command_is_found_under_the_menu_that_holds_it() {
 
 #[test]
 fn command_scopes_and_metadata_search_only_return_registered_commands() {
-    let design = palette_commands_listed()
-        .into_iter()
-        .filter(|command| palette_entry(*command).scope() == PaletteScope::Design)
-        .filter(|command| match_entry(&palette_entry(*command), "wire").is_some())
+    let design = palette_commands(&RSpiceApp::test_instance())
+        .map(|listed| listed.key())
+        .filter(|key| palette_entry_for(*key).scope() == PaletteScope::Design)
+        .filter(|key| match_entry(&palette_entry_for(*key), "wire").is_some())
         .collect::<Vec<_>>();
     assert_eq!(
         design,
-        vec![Command::PlaceWire, Command::JoinCollinearWires]
+        vec![
+            DesignCommand::PlaceWire.key(),
+            Command::JoinCollinearWires.key()
+        ]
     );
 
     // Probe is Simulate's; the other three are Design ▸ Place's.
     assert_eq!(
-        palette_entry(Command::PlaceProbe).scope(),
+        palette_entry_for(DesignCommand::PlaceProbe.key()).scope(),
         PaletteScope::Simulate
     );
     for command in [
-        Command::PlaceBus,
-        Command::PlaceBusTap,
-        Command::PlaceJunction,
+        DesignCommand::PlaceBus,
+        DesignCommand::PlaceBusTap,
+        DesignCommand::PlaceJunction,
     ] {
-        assert_eq!(palette_entry(command).scope(), PaletteScope::Design);
+        assert_eq!(
+            palette_entry_for(command.key()).scope(),
+            PaletteScope::Design
+        );
     }
     // Export ▸ Dataset… is File's.
     assert_eq!(
@@ -261,8 +267,14 @@ fn command_scopes_and_metadata_search_only_return_registered_commands() {
 
 #[test]
 fn bus_commands_use_the_mockup_palette_glyphs() {
-    assert_eq!(row_icon(&palette_entry(Command::PlaceBus)), Icon::Bus);
-    assert_eq!(row_icon(&palette_entry(Command::PlaceBusTap)), Icon::Bus);
+    assert_eq!(
+        row_icon(&palette_entry_for(DesignCommand::PlaceBus.key())),
+        Icon::Bus
+    );
+    assert_eq!(
+        row_icon(&palette_entry_for(DesignCommand::PlaceBusTap.key())),
+        Icon::Bus
+    );
 }
 
 #[test]
@@ -646,7 +658,7 @@ fn opening_input_is_owned_before_background_text_edits() {
 #[test]
 fn empty_all_scope_uses_mockup_suggestions_and_explicit_scopes_remain_complete() {
     let mut app = test_app();
-    app.state.workbench.command_palette.recent = vec![Command::PlaceProbe.key(), ids::SAVE];
+    app.state.workbench.command_palette.recent = vec![DesignCommand::PlaceProbe.key(), ids::SAVE];
     let all = palette_rows(
         &app,
         "",
@@ -654,7 +666,10 @@ fn empty_all_scope_uses_mockup_suggestions_and_explicit_scopes_remain_complete()
         CommandPlatform::Desktop,
         egui::os::OperatingSystem::Windows,
     );
-    assert_eq!(all[0].entry.command(), Some(Command::PlaceProbe.key()));
+    assert_eq!(
+        all[0].entry.command(),
+        Some(DesignCommand::PlaceProbe.key())
+    );
     assert_eq!(all[1].entry.command(), Some(ids::SAVE));
     assert_eq!(all.len(), SUGGESTION_LIMIT);
     assert_eq!(

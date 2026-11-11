@@ -12,7 +12,6 @@ use crate::state::command_catalog::CommandKey;
 use crate::state::{Point, Tool, ViewType};
 use crate::workbench::app_state::{AppState, ContextTarget};
 use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::state::Workspace;
 use crate::workbench::{
     ResultViewer,
@@ -21,6 +20,7 @@ use crate::workbench::{
         open_replace_instance_dialog, open_stimulus_definition, open_stimulus_link,
         replace_instance_available,
     },
+    design::commands::DesignCommand,
     framework::command_registry::ids,
     framework::requests::RevealSheetSection,
 };
@@ -63,25 +63,25 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
         action: ContextAction::PlaceInstance,
         icon: ContextIcon::Instance,
         label: "Place instance…",
-        shortcut_command: Some(Command::PlaceInstance.key()),
+        shortcut_command: Some(DesignCommand::PlaceInstance.key()),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::PlaceWire,
         icon: ContextIcon::Wire,
         label: "Draw wire",
-        shortcut_command: Some(Command::PlaceWire.key()),
+        shortcut_command: Some(DesignCommand::PlaceWire.key()),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::PlaceLabel,
         icon: ContextIcon::Label,
         label: "Place net label",
-        shortcut_command: Some(Command::PlaceLabel.key()),
+        shortcut_command: Some(DesignCommand::PlaceLabel.key()),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::PlaceText,
         icon: ContextIcon::Text,
         label: "Place text or note…",
-        shortcut_command: Some(Command::PlaceText.key()),
+        shortcut_command: Some(DesignCommand::PlaceText.key()),
     }),
     ContextEntry::Separator,
     ContextEntry::Command(ContextCommand {
@@ -274,7 +274,7 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
         action: ContextAction::Probe,
         icon: ContextIcon::Probe,
         label: "Add voltage or current probe…",
-        shortcut_command: Some(Command::PlaceProbe.key()),
+        shortcut_command: Some(DesignCommand::PlaceProbe.key()),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::OperatingPoint,

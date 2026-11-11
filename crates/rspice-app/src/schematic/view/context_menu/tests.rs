@@ -245,7 +245,7 @@ fn each_target_gets_the_catalog_its_instance_master_slot_calls_for() {
         ("Show in netlist", Some(ids::SHOW_IN_NETLIST)),
         (
             "Add voltage or current probe…",
-            Some(Command::PlaceProbe.key()),
+            Some(DesignCommand::PlaceProbe.key()),
         ),
         (
             "Open operating point",
@@ -289,10 +289,10 @@ fn each_target_gets_the_catalog_its_instance_master_slot_calls_for() {
     assert_eq!(
         catalog_of(&canvas),
         vec![
-            ("Place instance…", Some(Command::PlaceInstance.key())),
-            ("Draw wire", Some(Command::PlaceWire.key())),
-            ("Place net label", Some(Command::PlaceLabel.key())),
-            ("Place text or note…", Some(Command::PlaceText.key())),
+            ("Place instance…", Some(DesignCommand::PlaceInstance.key())),
+            ("Draw wire", Some(DesignCommand::PlaceWire.key())),
+            ("Place net label", Some(DesignCommand::PlaceLabel.key())),
+            ("Place text or note…", Some(DesignCommand::PlaceText.key())),
             ("New Verilog-A device…", Some(ids::NEW_VERILOGA_DEVICE)),
             ("Create symbol from schematic ports…", None),
             ("Sheet properties", Some(ids::SHEET_PROPERTIES)),
@@ -303,7 +303,7 @@ fn each_target_gets_the_catalog_its_instance_master_slot_calls_for() {
             ("Zoom box", Some(Command::ZoomBox.key())),
             (
                 "Add voltage or current probe…",
-                Some(Command::PlaceProbe.key())
+                Some(DesignCommand::PlaceProbe.key())
             ),
             (
                 "Open operating point",

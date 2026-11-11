@@ -12,7 +12,7 @@ use crate::state::{ComponentType, Tool};
 use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::framework::command_registry::{CommandOwner, ids};
-use crate::workbench::framework::requests::{FocusNavigatorSearch, FocusPlacementSearch};
+use crate::workbench::framework::requests::FocusNavigatorSearch;
 use crate::workbench::menu_bar::{
     FileMenuAction, check_cellview, check_design, dispatch_file_menu_action,
 };
@@ -92,16 +92,7 @@ pub(crate) const fn command_edits_schematic(command: Command) -> bool {
             | Command::Duplicate
             | Command::Delete
             | Command::FindReplace
-            | Command::PlaceInstance
-            | Command::PlaceWire
-            | Command::PlaceBus
-            | Command::PlaceBusTap
-            | Command::PlaceJunction
-            | Command::PlaceLabel
-            | Command::PlaceOffSheetConnector
             | Command::PlacePin
-            | Command::PlaceText
-            | Command::PlaceShape
             | Command::MoveSelection
             | Command::StretchSelection
             | Command::ArraySelection
@@ -154,16 +145,7 @@ impl Command {
         matches!(
             self,
             Self::Place(_)
-                | Self::PlaceInstance
-                | Self::PlaceWire
-                | Self::PlaceBus
-                | Self::PlaceBusTap
-                | Self::PlaceJunction
-                | Self::PlaceLabel
-                | Self::PlaceOffSheetConnector
                 | Self::PlacePin
-                | Self::PlaceText
-                | Self::PlaceShape
                 | Self::Duplicate
                 | Self::Paste
                 | Self::MoveSelection
@@ -273,17 +255,7 @@ impl Command {
             Self::ConfigurationSets => CommandOwner::Project,
             Self::SelectTool
             | Self::SelectOfKind(_)
-            | Self::PlaceInstance
-            | Self::PlaceWire
-            | Self::PlaceBus
-            | Self::PlaceBusTap
-            | Self::PlaceJunction
-            | Self::PlaceLabel
-            | Self::PlaceOffSheetConnector
-            | Self::PlaceProbe
             | Self::PlacePin
-            | Self::PlaceText
-            | Self::PlaceShape
             | Self::Place(_)
             | Self::MoveSelection
             | Self::StretchSelection
@@ -710,49 +682,19 @@ impl Command {
                 if active_symbol_editor(app) {
                     app.activate_symbol_tool(crate::workbench::SymbolTool::Select);
                 } else {
-                    set_tool(app, Tool::Select);
+                    crate::workbench::app::arm_schematic_tool(
+                        &mut app.state.design.move_selection,
+                        &mut app.state.design.stretch_selection,
+                        &mut app.state.design.array_selection,
+                        &mut app.state.model,
+                        &mut app.state.workbench,
+                        Tool::Select,
+                    );
                 }
             }
-            Self::PlaceInstance => {
-                activate_workspace(app, Workspace::Design);
-                app.state.workbench.navigator_visible = true;
-                app.state.workbench.drawer = Some(super::state::Drawer::Navigator);
-                app.state.design.design_panel = super::state::DesignPanel::ComponentShelf;
-                app.state.workbench.outbox.push(FocusPlacementSearch);
-            }
-            Self::PlaceWire => set_tool(app, Tool::Wire),
-            Self::PlaceBus => set_tool(app, Tool::Bus),
-            Self::PlaceBusTap => {
-                activate_workspace(app, Workspace::Design);
-                crate::workbench::app::open_bus_tap(&mut app.state);
-            }
-            Self::PlaceJunction => set_tool(app, Tool::Junction),
-            Self::PlaceLabel => set_tool(app, Tool::Label),
-            Self::PlaceOffSheetConnector => set_tool(app, Tool::OffSheetConnector),
-            Self::PlaceProbe => set_tool(app, Tool::Probe),
             Self::PlacePin => {
                 activate_workspace(app, Workspace::Design);
                 crate::workbench::app::open_create_pins(&mut app.state);
-            }
-            Self::PlaceText => {
-                activate_workspace(app, Workspace::Design);
-                let source = crate::workbench::app::schematic_editor_request_source(&app.state);
-                app.state.design.design_note.open(source);
-            }
-            Self::PlaceShape => {
-                activate_workspace(app, Workspace::Design);
-                let source = crate::workbench::app::schematic_editor_request_source(&app.state);
-                let expected_shapes = app
-                    .state
-                    .model
-                    .schematic
-                    .document()
-                    .documentation_shapes
-                    .clone();
-                app.state
-                    .design
-                    .documentation_shape
-                    .open(source, expected_shapes);
             }
             Self::MoveSelection => {
                 crate::workbench::app::arm_move_selection(&mut app.state);
@@ -836,7 +778,16 @@ impl Command {
                 super::app::actions::workspace::symbol_in_place::SymbolInPlaceExit::Parent,
             ),
             Self::Place(ComponentType::Port) => Self::PlacePin.execute(app),
-            Self::Place(kind) => set_tool(app, Tool::Place(kind)),
+            Self::Place(kind) => {
+                crate::workbench::app::arm_schematic_tool(
+                    &mut app.state.design.move_selection,
+                    &mut app.state.design.stretch_selection,
+                    &mut app.state.design.array_selection,
+                    &mut app.state.model,
+                    &mut app.state.workbench,
+                    Tool::Place(kind),
+                );
+            }
             Self::RotateSelection if active_symbol_editor(app) => {
                 app.transform_selected_symbol_item(SymbolTransform::Rotate);
             }
