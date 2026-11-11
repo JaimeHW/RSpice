@@ -196,7 +196,7 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
     app.state
         .design
         .follow_workspace(app.state.workbench.workspace);
-    if let Some(action) = show_toasts(ctx, &mut app.state, layout) {
+    if let Some(action) = show_toasts(ctx, &mut app.state, layout, document.response.rect) {
         ResultsFeature::perform_notification_action(&mut features::cx(app), action);
         app.after_contribution();
     }
@@ -215,6 +215,7 @@ fn show_toasts(
     ctx: &Context,
     state: &mut AppState,
     layout: LayoutSpec,
+    document: egui::Rect,
 ) -> Option<crate::ui::widgets::NotificationAction> {
     state.drain_notices(ctx);
     if tools::notification_center::focused_window(ctx) != ctx.viewport_id()
@@ -223,19 +224,28 @@ fn show_toasts(
         return None;
     }
     let large_targets = tools::notification_center::large_targets(ctx, &state.workbench);
-    let right_dock_width = if layout.show_inspector_dock {
-        layout.inspector_width
-    } else {
-        0.0
-    };
+    // A notice is hit before what lies under it, so it sits over the page's
+    // content and over none of its controls: below the toolbar row each page
+    // draws at the top of its document area, which carries the page's own
+    // Run, and clear of the right dock, whose first section carries a
+    // finished run's Open results link. Hung from the shell's toolbar alone,
+    // a failed run's notice covered the Netlist & Script Editor's Run deck.
+    let below_page_toolbar =
+        (document.top() + PAGE_TOOLBAR_ROW - layout.title_bar_height).max(layout.toolbar_height);
+    let right_of_document = (ctx.content_rect().right() - document.right()).max(0.0);
     state.workbench.toasts.show(
         ctx,
         layout.title_bar_height,
-        layout.toolbar_height,
-        right_dock_width,
+        below_page_toolbar,
+        right_of_document,
         large_targets,
     )
 }
+
+/// The tallest toolbar row a page draws at the top of its document area: the
+/// Netlist & Script Editor's and the code editors' rows are 33 px, the netlist
+/// preview's and the project tables' 34 px.
+const PAGE_TOOLBAR_ROW: f32 = 34.0;
 
 fn outbox(app: &mut RSpiceApp) -> &mut Outbox {
     &mut app.state.workbench.outbox
@@ -855,7 +865,7 @@ pub(crate) fn show_secondary(root: &mut egui::Ui, app: &mut RSpiceApp) {
     docks::show_console(root, app, layout);
 
     let t = Tokens::get(ctx);
-    CentralPanel::default()
+    let document = CentralPanel::default()
         .frame(Frame::new().fill(t.color.bg_app))
         .show(root, |ui| {
             ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
@@ -866,7 +876,7 @@ pub(crate) fn show_secondary(root: &mut egui::Ui, app: &mut RSpiceApp) {
     }
     app.state.drain_notices(ctx);
     tools::notification_center::show(ctx, app, layout.title_bar_height);
-    if let Some(action) = show_toasts(ctx, &mut app.state, layout) {
+    if let Some(action) = show_toasts(ctx, &mut app.state, layout, document.response.rect) {
         ResultsFeature::perform_notification_action(&mut features::cx(app), action);
         app.after_contribution();
     }

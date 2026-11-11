@@ -135,6 +135,12 @@ impl Replay {
         }
     }
 
+    /// The context the frames run in, for a test that raises what the shell
+    /// raises between frames.
+    pub(super) fn ctx(&self) -> &Context {
+        &self.ctx
+    }
+
     /// Three frames, the first carrying `events`; what the last one published.
     pub(super) fn frames(&mut self, mut events: Vec<egui::Event>) -> Vec<Control> {
         let mut tree = None;

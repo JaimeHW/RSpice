@@ -14,20 +14,16 @@ use egui::accesskit::Role;
 use egui::{Key, Modifiers};
 
 use crate::feature_tests::replay::{PRIMARY, Replay, only};
+use crate::ui::widgets::{NotificationAction, NotificationCategory, ToastKind};
 use crate::workbench::state::Workspace;
 
 /// The deck the script types into its new source document.
 const DECK: &str = "* Engine recovery analytic check\nV1 in 0 1\nR1 in 0 1k\n.op\n.end\n";
 
-/// `author_deck` and the native half of `run`: the Netlist & Script Editor's
-/// New source document opens its Logical path, Tab then Enter creates the
-/// deck and closes the form, the editor takes the typed deck, Validate
-/// source and Run deck run it, the finished run opens in Results, a press of
-/// the Task log tab shows its DONE row there, and the palette opens the
-/// recovery center on its Create checkpoint.
-#[test]
-fn the_engine_recovery_script_authors_validates_and_runs_its_deck() {
-    let mut replay = Replay::new();
+/// The script's `author_deck`: the Netlist & Script Editor's New source
+/// document opens its Logical path, Tab then Enter creates the deck and closes
+/// the form, and the editor takes the typed deck.
+fn author_deck(replay: &mut Replay) {
     replay.frames(Vec::new());
 
     replay.click("Netlist & Script Editor", Role::Button);
@@ -55,6 +51,18 @@ fn the_engine_recovery_script_authors_validates_and_runs_its_deck() {
         replay.app.state.model.simulation.source.netlist_content, DECK,
         "select-all then typing replaces the new deck's text"
     );
+}
+
+/// `author_deck` and the native half of `run`: the Netlist & Script Editor's
+/// New source document opens its Logical path, Tab then Enter creates the
+/// deck and closes the form, the editor takes the typed deck, Validate
+/// source and Run deck run it, the finished run opens in Results, a press of
+/// the Task log tab shows its DONE row there, and the palette opens the
+/// recovery center on its Create checkpoint.
+#[test]
+fn the_engine_recovery_script_authors_validates_and_runs_its_deck() {
+    let mut replay = Replay::new();
+    author_deck(&mut replay);
     replay.click("Validate source", Role::Button);
 
     replay.click("Run deck", Role::Button);
@@ -88,4 +96,40 @@ fn the_engine_recovery_script_authors_validates_and_runs_its_deck() {
 
     let recovery = replay.choose_command("Open recovery center");
     only(&recovery, "Create checkpoint", Role::Button);
+}
+
+/// A failed run's notice leaves the editor's Run deck where the reader can
+/// press it. The browser job retries a failed run from the Netlist & Script
+/// Editor while the run's failure notice is still up; the notice used to land
+/// over the editor's toolbar row, took the press, and the retry never started.
+#[test]
+fn a_run_failure_notice_leaves_run_deck_pressable() {
+    let mut replay = Replay::new();
+    author_deck(&mut replay);
+    replay.click("Validate source", Role::Button);
+    let ctx = replay.ctx().clone();
+    replay.app.state.workbench.toasts.notify_with_action(
+        &ctx,
+        NotificationCategory::Job,
+        ToastKind::Error,
+        "Run 1 failed",
+        "DC Operating Point failed: The simulation engine stopped unexpectedly.",
+        NotificationAction::ShowInConsole { log_id: 0 },
+    );
+    only(
+        &replay.frames(Vec::new()),
+        "Dismiss Run 1 failed",
+        Role::Button,
+    );
+
+    replay.click("Run deck", Role::Button);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while replay.app.state.model.simulation.retained.runs.is_empty() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "Run deck under a failure notice never started a run"
+        );
+        replay.frames(Vec::new());
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
 }
