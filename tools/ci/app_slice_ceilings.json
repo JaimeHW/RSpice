@@ -3,8 +3,7 @@
     "design->code": 18,
     "design->results": 1,
     "project->code": 1,
-    "project->design": 9,
-    "simulate->design": 2
+    "project->design": 9
   },
   "lower->upper": {},
   "whole-app": {

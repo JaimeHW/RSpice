@@ -30,6 +30,7 @@ use crate::state::InstancePath;
 use crate::state::stimulus_library::provenance::ProvenanceState;
 use crate::workbench::app_state::{AppState, Model};
 use crate::workbench::framework::feature::Cx;
+use crate::workbench::framework::requests::{OpenPropertyEditor, OpenStimulusDefinition};
 use crate::workbench::simulate::SimulateFeature;
 
 use super::page_kit;
@@ -114,11 +115,22 @@ pub(super) fn show(
                 for source in sources {
                     let row = excitation_row(ui, cx.model, source);
                     if let Some(verb) = source_row_verbs(ui, cx.model, source, row.rect) {
-                        taken = Some(SourceVerbIntent {
-                            component_id: source.component_id,
-                            occurrence: source.occurrence.clone(),
-                            verb,
-                        });
+                        match verb {
+                            SourceVerb::Properties => cx.wb.outbox.push(OpenPropertyEditor {
+                                component_id: source.component_id,
+                                occurrence: source.occurrence.clone(),
+                            }),
+                            SourceVerb::OpenDefinition(definition) => {
+                                cx.wb.outbox.push(OpenStimulusDefinition(definition));
+                            }
+                            SourceVerb::Readopt(definition) => {
+                                taken = Some(SourceVerbIntent {
+                                    component_id: source.component_id,
+                                    occurrence: source.occurrence.clone(),
+                                    definition,
+                                });
+                            }
+                        }
                     } else if row.clicked() {
                         reveal(cx, source.occurrence.as_ref(), source.component_id);
                     }
@@ -431,48 +443,33 @@ fn source_row_verbs(
     verbs.get(taken).cloned()
 }
 
-/// A row verb the page raised, for its caller to run once the page has drawn.
+/// A re-adoption a row raised, for the page's caller to run once the page
+/// has drawn.
 ///
-/// Each verb is a transaction against the whole design (the property editor,
-/// the Stimulus Library, a re-adoption), so it is handed back rather than run
-/// from inside the table.
+/// It is a transaction against the whole design, so it is handed back rather
+/// than run from inside the table. The row's other verbs open the property
+/// editor or the Stimulus Library, which the shell answers as requests.
 pub(in crate::workbench) struct SourceVerbIntent {
     component_id: u64,
     occurrence: Option<InstancePath>,
-    verb: SourceVerb,
+    definition: String,
 }
 
 impl SourceVerbIntent {
-    /// Run the row verb against the design.
+    /// Show the instance in the design and re-adopt its definition.
     pub(in crate::workbench) fn apply(self, state: &mut AppState) {
         let Self {
             component_id,
             occurrence,
-            verb,
+            definition,
         } = self;
-        let occurrence = occurrence.as_ref();
-        match &verb {
-            SourceVerb::Properties => {
-                crate::workbench::app::actions::reveal::placed_instance(
-                    state,
-                    occurrence,
-                    component_id,
-                );
-                crate::workbench::app::open_property_editor(state, component_id);
-            }
-            SourceVerb::OpenDefinition(definition) => {
-                crate::workbench::app::open_stimulus_definition(state, definition);
-            }
-            SourceVerb::Readopt(definition) => {
-                crate::workbench::app::actions::reveal::placed_instance(
-                    state,
-                    occurrence,
-                    component_id,
-                );
-                match state.model.readopt_stimulus(component_id, definition) {
-                    Ok(line) | Err(line) => state.prompt(line),
-                }
-            }
+        crate::workbench::app::actions::reveal::placed_instance(
+            state,
+            occurrence.as_ref(),
+            component_id,
+        );
+        match state.model.readopt_stimulus(component_id, &definition) {
+            Ok(line) | Err(line) => state.prompt(line),
         }
     }
 }

@@ -475,7 +475,8 @@ const AFTER_CONTRIBUTION: &[Step] = &[
         "7",
         &[
             "|app, SelectAnalysisInstance(instance)|",
-            "app.state.simulate.active_analysis_instance = instance",
+            "crate::workbench::simulate::select_analysis_instance(",
+            "&mut app.state.simulate,",
         ],
     ),
     (
@@ -484,6 +485,21 @@ const AFTER_CONTRIBUTION: &[Step] = &[
             "|app, RevealExecutedDeck { seq, close_manager_on_success, }|",
             "if open_task_deck(&mut app.state, seq) && close_manager_on_success {",
             "crate::workbench::simulate::close_jobs_manager(&mut app.state.workbench);",
+        ],
+    ),
+    (
+        "8.1",
+        &[
+            "|app, OpenPropertyEditor { component_id, occurrence, }|",
+            "crate::workbench::app::actions::reveal::placed_instance(",
+            "crate::workbench::app::open_property_editor(&mut app.state, component_id);",
+        ],
+    ),
+    (
+        "8.2",
+        &[
+            "|app, OpenStimulusDefinition(definition)|",
+            "crate::workbench::app::open_stimulus_definition(&mut app.state, &definition);",
         ],
     ),
     (
@@ -1411,8 +1427,8 @@ fn a_feature_command_has_what_it_raised_answered_in_the_same_dispatch() {
     assert_runs_in_order("RSpiceApp::after_contribution", &after, AFTER_CONTRIBUTION);
     assert_eq!(
         after.matches("requests::drain(").count(),
-        24,
-        "`after_contribution` answers exactly the twenty-four requests it lists"
+        26,
+        "`after_contribution` answers exactly the twenty-six requests it lists"
     );
 }
 

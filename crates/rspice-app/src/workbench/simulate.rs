@@ -210,6 +210,14 @@ pub(in crate::workbench) fn record_plan_refusal(
     }
 }
 
+/// Select analysis instance `instance` on the Analyses page, or none.
+pub(in crate::workbench) fn select_analysis_instance(
+    state: &mut SimulateState,
+    instance: Option<crate::product::AnalysisInstanceId>,
+) {
+    state.active_analysis_instance = instance;
+}
+
 /// Show the run history on its own route.
 fn open_jobs_manager(wb: &mut WorkbenchSession) {
     let route = SurfaceRoute::surface(SurfaceId::JobsManager);

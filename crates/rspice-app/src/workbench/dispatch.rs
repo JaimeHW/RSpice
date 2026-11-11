@@ -39,9 +39,10 @@ use crate::workbench::framework::feature::{Execute, held_back};
 use crate::workbench::framework::requests::{
     self, ApplyWaveformDefaults, ArmPartPlacement, BindComponentModel, CloseForLiveMirror,
     ConfirmPackAttach, ExportDataset, FollowSchematicGrid, MarkFailureSites, OpenInDesign,
-    OpenSymbolAuthoring, PrintActiveView, ProjectFileAction, PromptAfterCommands,
-    RevealExecutedDeck, RevealModel, SelectAnalysisInstance, SetFamilyFilter, ShowProjectModels,
-    ShowSchematicAnnotations, ShowWaveforms, SourceEditorRequest, SubcircuitSymbolSource,
+    OpenPropertyEditor, OpenStimulusDefinition, OpenSymbolAuthoring, PrintActiveView,
+    ProjectFileAction, PromptAfterCommands, RevealExecutedDeck, RevealModel,
+    SelectAnalysisInstance, SetFamilyFilter, ShowProjectModels, ShowSchematicAnnotations,
+    ShowWaveforms, SourceEditorRequest, SubcircuitSymbolSource,
 };
 use crate::workbench::hardcopy;
 use crate::workbench::menu_bar::FileMenuAction;
@@ -238,7 +239,10 @@ impl RSpiceApp {
             self,
             |app| &mut app.state.workbench.outbox,
             |app, SelectAnalysisInstance(instance)| {
-                app.state.simulate.active_analysis_instance = instance;
+                crate::workbench::simulate::select_analysis_instance(
+                    &mut app.state.simulate,
+                    instance,
+                );
             },
         );
         requests::drain(
@@ -252,6 +256,29 @@ impl RSpiceApp {
                 if open_task_deck(&mut app.state, seq) && close_manager_on_success {
                     crate::workbench::simulate::close_jobs_manager(&mut app.state.workbench);
                 }
+            },
+        );
+        requests::drain(
+            self,
+            |app| &mut app.state.workbench.outbox,
+            |app,
+             OpenPropertyEditor {
+                 component_id,
+                 occurrence,
+             }| {
+                crate::workbench::app::actions::reveal::placed_instance(
+                    &mut app.state,
+                    occurrence.as_ref(),
+                    component_id,
+                );
+                crate::workbench::app::open_property_editor(&mut app.state, component_id);
+            },
+        );
+        requests::drain(
+            self,
+            |app| &mut app.state.workbench.outbox,
+            |app, OpenStimulusDefinition(definition)| {
+                crate::workbench::app::open_stimulus_definition(&mut app.state, &definition);
             },
         );
         requests::drain(

@@ -256,6 +256,30 @@ impl Request for RevealExecutedDeck {
     const DRAIN: Drain = Drain::AfterContribution;
 }
 
+/// Open Component Properties on placed instance `component_id`, once the
+/// design shows it selected and centred at `occurrence` (the top sheet when
+/// `None`). Raised by the Simulation Studio's Excitations rows, and taken
+/// straight after the page that raised it has drawn.
+#[derive(Clone, Debug)]
+pub struct OpenPropertyEditor {
+    pub component_id: u64,
+    pub occurrence: Option<crate::state::InstancePath>,
+}
+
+impl Request for OpenPropertyEditor {
+    const DRAIN: Drain = Drain::AfterContribution;
+}
+
+/// Show the named definition in the Stimulus Library workspace. Raised by the
+/// Simulation Studio's Excitations rows, and taken straight after the page
+/// that raised it has drawn.
+#[derive(Clone, Debug)]
+pub struct OpenStimulusDefinition(pub String);
+
+impl Request for OpenStimulusDefinition {
+    const DRAIN: Drain = Drain::AfterContribution;
+}
+
 /// Show these waveforms in the waveform viewer: each revealed where its
 /// dataset hides it, `selected` made the selected trace, and the cursors
 /// cleared. Raised by a hand-off that opens the viewer on them, just before
