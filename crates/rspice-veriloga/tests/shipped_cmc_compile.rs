@@ -8,6 +8,13 @@
 //!
 //! To tune qualification runtime:
 //! `RSPICE_CMC_COMPILE_JOBS=4 RSPICE_CMC_COMPILE_TIMEOUT_SECS=60 cargo test -p rspice-veriloga --test shipped_cmc_compile shipped_veriloga_models_compile_end_to_end -- --ignored --nocapture`
+//!
+//! The emitter's source discovery says which files a compile profile skips,
+//! and it exists only with the `rust-codegen` feature, so the gate does too.
+//! The gate sits here rather than in Cargo.toml because that manifest is a
+//! generator digest input: editing it would stale every generated built-in.
+
+#![cfg(feature = "rust-codegen")]
 
 use rspice_veriloga::preprocessor::MacroDef;
 use rspice_veriloga::rust_backend::discover_veriloga_sources;
