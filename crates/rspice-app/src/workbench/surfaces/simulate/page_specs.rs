@@ -327,7 +327,7 @@ fn evidence_for(
     definition: Option<&SpecificationDefinition>,
     gate: &MonteCarloSpecificationGate,
 ) -> Evidence {
-    let Some(run) = super::output_evidence::selected_plan_dataset(app) else {
+    let Some(run) = super::output_evidence::selected_plan_dataset(&app.state.model) else {
         return Evidence::None;
     };
     if let Some(verdict) = run.specification_verdicts().and_then(|verdicts| {
@@ -934,19 +934,20 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
     // Why the evidence hop cannot land, when it cannot. Restated from what the
     // coverage row already says, because a limit is judged against the dataset
     // this plan produced and no other.
-    let evidence_block = if super::output_evidence::selected_plan_dataset(app).is_none() {
-        Some(if app.state.model.simulation.active_run().is_some() {
-            "The active dataset was not produced by this plan, so it holds no result for this \
+    let evidence_block =
+        if super::output_evidence::selected_plan_dataset(&app.state.model).is_none() {
+            Some(if app.state.model.simulation.active_run().is_some() {
+                "The active dataset was not produced by this plan, so it holds no result for this \
              limit."
+            } else {
+                "No run has been retained, so there are no results to open."
+            })
         } else {
-            "No run has been retained, so there are no results to open."
-        })
-    } else {
-        match app.command_availability(ids::RESULT_SPECIFICATIONS) {
-            CommandAvailability::Disabled(reason) => Some(reason),
-            _ => None,
-        }
-    };
+            match app.command_availability(ids::RESULT_SPECIFICATIONS) {
+                CommandAvailability::Disabled(reason) => Some(reason),
+                _ => None,
+            }
+        };
     let mut picked = None;
     let mut open_evidence = false;
     let mut select_producer = false;
@@ -1117,7 +1118,7 @@ fn evidence_coverage(
     spec: &SpecEntry,
     definition: Option<&SpecificationDefinition>,
 ) -> String {
-    let Some(run) = super::output_evidence::selected_plan_dataset(app) else {
+    let Some(run) = super::output_evidence::selected_plan_dataset(&app.state.model) else {
         // Through the one owner of the ownership question, so this page and
         // Verify give the same reason for declining the same dataset.
         return app
@@ -1165,7 +1166,7 @@ fn monte_carlo_policy_label(policy: &MonteCarloSpecificationGate) -> String {
 }
 
 fn evaluation_policy(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
-    let dataset = super::output_evidence::selected_plan_dataset(app).map_or_else(
+    let dataset = super::output_evidence::selected_plan_dataset(&app.state.model).map_or_else(
         || {
             app.state.model.simulation.active_run().map_or_else(
                 || "none · no dataset is loaded".to_owned(),
@@ -1195,7 +1196,7 @@ fn evaluation_policy(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanP
             )
         },
     );
-    let acceptance = super::output_evidence::selected_plan_dataset(app).map_or_else(
+    let acceptance = super::output_evidence::selected_plan_dataset(&app.state.model).map_or_else(
         || {
             if app.state.model.simulation.active_run().is_some() {
                 "not evaluated · active dataset does not belong to this plan".to_owned()

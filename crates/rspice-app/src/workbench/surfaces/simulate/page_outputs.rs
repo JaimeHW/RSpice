@@ -15,10 +15,12 @@ use crate::state::{
     UNGROUPED_NAME,
 };
 use crate::ui::widgets::{Button, mono_input, select};
-use crate::workbench::RSpiceApp;
 use crate::workbench::app::{PlanRemovalConsequence, PlanRemovalTarget, PlanRemovalTone};
 use crate::workbench::app_state::Model;
 use crate::workbench::framework::command_registry::ids;
+use crate::workbench::framework::feature::Cx;
+use crate::workbench::simulate::SimulateFeature;
+use rspice_app_runs::simulation::SimulationController;
 use rspice_simulation::capture_ledger;
 use rspice_simulation::output_contract::SavedOutputPreflightReport;
 use rspice_simulation::output_contract::SavedOutputSemanticStatus;
@@ -48,12 +50,12 @@ struct OutputRegistryRow {
     size_tone: Tone,
 }
 
-pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
+pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
     // Before anything is priced or drawn. A plan that cannot be resolved owns
     // no outputs to forecast, and the registry that would list them has to say
     // so in its own words rather than paint the empty table an authored plan
     // with nothing saved in it paints.
-    let payload = match plan_payload(&app.state.model) {
+    let payload = match plan_payload(cx.model) {
         Ok(payload) => payload,
         Err(reason) => {
             unresolved_plan(ui, &reason);
@@ -63,13 +65,13 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     // Priced once for the route. Pricing the capture workload expands the
     // declared space, and both halves of this page price against it: the
     // registry to give each row its size, the storage card to total them.
-    let (workload, _) = super::page_save::capture_workload(&app.state.model);
-    registry(ui, app, &payload, &workload);
+    let (workload, _) = super::page_save::capture_workload(cx.model);
+    registry(ui, cx, &payload, &workload);
     card_row(
         ui,
-        app,
-        |ui, app| selected_record(ui, app, &payload),
-        |ui, app| storage_read(ui, app, &payload, &workload),
+        cx,
+        |ui, cx| selected_record(ui, cx, &payload),
+        |ui, cx| storage_read(ui, cx.model, cx.handles.run_controller, &payload, &workload),
     );
 }
 
@@ -133,16 +135,13 @@ fn unresolved_plan(ui: &mut Ui, reason: &str) {
 /// the authored one: schematic probes are appended to it, and an `Automatic`
 /// plan synthesizes it outright.
 pub(super) fn projected_output_bytes_for(
-    app: &RSpiceApp,
+    model: &Model,
+    controller: &SimulationController,
     payload: &SimulationPlanPayload,
     workload: &rspice_simulation::capture_ledger::CaptureWorkload,
 ) -> std::collections::HashMap<crate::product::SavedOutputId, Option<u64>> {
-    app.simulation_controller
-        .effective_saved_outputs_preflight(
-            &app.state.model,
-            &payload.saved_outputs,
-            &payload.capture_groups,
-        )
+    controller
+        .effective_saved_outputs_preflight(model, &payload.saved_outputs, &payload.capture_groups)
         .map(|(effective, reports, _, _)| {
             effective
                 .iter()
@@ -160,22 +159,24 @@ pub(super) fn projected_output_bytes_for(
 
 fn registry(
     ui: &mut Ui,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, SimulateFeature>,
     payload: &SimulationPlanPayload,
     workload: &rspice_simulation::capture_ledger::CaptureWorkload,
 ) {
     let outputs = &payload.saved_outputs;
-    let reports = app
-        .simulation_controller
-        .saved_outputs_preflight(&app.state.model, outputs);
-    let query = app.state.simulate.saved_output_filter.clone();
+    let reports = cx
+        .handles
+        .run_controller
+        .saved_outputs_preflight(cx.model, outputs);
+    let query = cx.state.saved_output_filter.clone();
     // Which group holds each output, and what it will cost. Both were readable
     // only after selecting a row, so the registry could not be scanned for the
     // one output that dominates the forecast or for the one that landed in the
     // wrong group. Membership comes from the resolver the Save page's ledger
     // uses.
     let membership = CaptureGroupMembership::resolve(&payload.capture_groups, outputs);
-    let projected = projected_output_bytes_for(app, payload, workload);
+    let projected =
+        projected_output_bytes_for(cx.model, cx.handles.run_controller, payload, workload);
     let group_name = |index: usize| -> String {
         let owner = membership.owner(index);
         payload
@@ -202,10 +203,8 @@ fn registry(
             let (size, size_tone) = size_cell(output);
             // Which enabled analyses would write this output, from the
             // derivation the Add-output dialog previews it with.
-            let consumers = super::workflows::saved_output_consumers_of(
-                &app.state.model,
-                &output.compatible_analyses,
-            );
+            let consumers =
+                super::workflows::saved_output_consumers_of(cx.model, &output.compatible_analyses);
             let shown = row_matches(
                 &query,
                 &[
@@ -241,7 +240,7 @@ fn registry(
     if shown != outputs.len() {
         status.push_str(&format!(" · showing {shown} of {}", outputs.len()));
     }
-    let selected = app.state.simulate.selected_saved_output.clone();
+    let selected = cx.state.selected_saved_output.clone();
     let selected_output = selected
         .as_deref()
         .and_then(|name| outputs.iter().find(|output| output.name == name))
@@ -272,7 +271,7 @@ fn registry(
                         ui,
                         "simulation-plan.output-registry.filter",
                         "Filter name, expression or status…",
-                        &mut app.state.simulate.saved_output_filter,
+                        &mut cx.state.saved_output_filter,
                     );
                 });
             }
@@ -309,8 +308,8 @@ fn registry(
                 empty_registry_row(
                     ui,
                     &empty_registry_text(
-                        app.state.model.sim_setup.save_policy.output_selection_mode,
-                        enabled_schematic_probe_outputs(app),
+                        cx.model.sim_setup.save_policy.output_selection_mode,
+                        enabled_schematic_probe_outputs(cx.model),
                     ),
                     Tone::Neutral,
                 );
@@ -351,8 +350,7 @@ fn registry(
             );
         },
     );
-    let plan_id = app
-        .state
+    let plan_id = cx
         .model
         .sim_setup
         .stable_analysis_plan()
@@ -368,12 +366,7 @@ fn registry(
     // change, so the frame is asked to run again: the confirming click landed
     // in the modal, and nothing else is coming to repaint the row it removed.
     let mut removal = plan_id
-        .and_then(|plan_id| {
-            app.state
-                .simulate
-                .plan_removal_review
-                .take_confirmed_output(plan_id)
-        })
+        .and_then(|plan_id| cx.state.plan_removal_review.take_confirmed_output(plan_id))
         .inspect(|_| ui.ctx().request_repaint())
         .and_then(|id| {
             outputs
@@ -392,31 +385,26 @@ fn registry(
             });
             let detail = format!("Duplicated saved output {name} as {copy}.");
             let committed = copy.clone();
-            if commit_plan_change(
-                &mut crate::workbench::features::cx(app),
-                plan_id,
-                &detail,
-                move |workspace, plan_id| {
-                    workspace
-                        .content
-                        .duplicate_saved_output(plan_id, output_id, copy)
-                        .map(|_| ())
-                        .map_err(|error| error.to_string())
-                },
-            ) {
+            if commit_plan_change(cx, plan_id, &detail, move |workspace, plan_id| {
+                workspace
+                    .content
+                    .duplicate_saved_output(plan_id, output_id, copy)
+                    .map(|_| ())
+                    .map_err(|error| error.to_string())
+            }) {
                 // Selecting the copy is what makes duplicating useful: every
                 // capture decision is already carried over, so the record
                 // editor opens on the one field the copy exists to change.
-                app.state.simulate.saved_output_name_draft = None;
-                app.state.simulate.saved_output_expression_draft = None;
-                app.state.simulate.selected_saved_output = Some(committed);
+                cx.state.saved_output_name_draft = None;
+                cx.state.saved_output_expression_draft = None;
+                cx.state.selected_saved_output = Some(committed);
             }
         } else if remove {
             // An output a group holds or a specification reads is not removed
             // on one click: the group's forecast and the requirement's source
             // both change with it, and neither is visible from this row.
             match removal_consequences(payload, &membership, output_id) {
-                Some(consequences) => app.state.simulate.plan_removal_review.open(
+                Some(consequences) => cx.state.plan_removal_review.open(
                     PlanRemovalTarget::Output {
                         plan: plan_id,
                         id: output_id,
@@ -435,30 +423,25 @@ fn registry(
         // A refused removal leaves the record in the registry, so the
         // selection has to survive with it — clearing regardless would
         // close the editor on a row that is still there.
-        if commit_plan_change(
-            &mut crate::workbench::features::cx(app),
-            plan_id,
-            &detail,
-            move |workspace, plan_id| {
-                workspace
-                    .content
-                    .remove_saved_output(plan_id, output_id)
-                    .map(|_| ())
-                    .map_err(|error| error.to_string())
-            },
-        ) && app.state.simulate.selected_saved_output.as_deref() == Some(name.as_str())
+        if commit_plan_change(cx, plan_id, &detail, move |workspace, plan_id| {
+            workspace
+                .content
+                .remove_saved_output(plan_id, output_id)
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }) && cx.state.selected_saved_output.as_deref() == Some(name.as_str())
         {
-            app.state.simulate.selected_saved_output = None;
+            cx.state.selected_saved_output = None;
         }
     }
     if let Some(name) = pick {
         // A draft belongs to the row it was typed into. Selecting another row
         // must not carry a half-typed name or expression onto it.
-        if app.state.simulate.selected_saved_output.as_deref() != Some(name.as_str()) {
-            app.state.simulate.saved_output_name_draft = None;
-            app.state.simulate.saved_output_expression_draft = None;
+        if cx.state.selected_saved_output.as_deref() != Some(name.as_str()) {
+            cx.state.saved_output_name_draft = None;
+            cx.state.saved_output_expression_draft = None;
         }
-        app.state.simulate.selected_saved_output = Some(name);
+        cx.state.selected_saved_output = Some(name);
     }
 }
 
@@ -671,14 +654,10 @@ pub(super) fn empty_registry_outcome(
 /// The root the run would execute, not the sheet on screen: the two are the
 /// same sheet most of the time, and where they are not it is the run this
 /// registry is about.
-fn enabled_schematic_probe_outputs(app: &RSpiceApp) -> usize {
-    app.state
-        .model
+fn enabled_schematic_probe_outputs(model: &Model) -> usize {
+    model
         .workspace
-        .simulation_root_schematic(
-            &app.state.model.workspace.content.active_view,
-            &app.state.model.schematic,
-        )
+        .simulation_root_schematic(&model.workspace.content.active_view, &model.schematic)
         .map_or(0, |schematic| {
             rspice_simulation::output_contract::selection::enabled_probe_output_count(
                 &schematic.document().probes,
@@ -718,10 +697,9 @@ fn status_cell(
 /// streaming page reports totals over exactly them. Presenting them read-only
 /// would leave an engineer able to see a capture budget they had no way to
 /// change short of deleting the output and authoring it again.
-fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
-    let selected = app
+fn selected_record(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, payload: &SimulationPlanPayload) {
+    let selected = cx
         .state
-        .simulate
         .selected_saved_output
         .as_ref()
         .and_then(|name| {
@@ -747,7 +725,7 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
         return;
     };
     let title = format!("Selected output · {}", output.name);
-    let scopes = compatibility_options(app);
+    let scopes = compatibility_options(cx.model);
     let policies: Vec<String> = SavedOutputPolicy::ALL
         .iter()
         .map(|policy| policy.label().to_owned())
@@ -795,15 +773,13 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
             .map(|group| group.name.clone()),
     );
 
-    let mut name = app
+    let mut name = cx
         .state
-        .simulate
         .saved_output_name_draft
         .clone()
         .unwrap_or_else(|| output.name.clone());
-    let mut expression = app
+    let mut expression = cx
         .state
-        .simulate
         .saved_output_expression_draft
         .clone()
         .unwrap_or_else(|| output.source_expression.clone());
@@ -819,8 +795,8 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
     let released = std::cell::Cell::new(false);
     let handoff: std::cell::Cell<Option<EditorHandoff>> = std::cell::Cell::new(None);
     let view_trace = std::cell::Cell::new(false);
-    let dataset = super::output_evidence::selected_plan_dataset(app).is_some();
-    let dataset_rule = if app.state.model.simulation.active_run().is_some() {
+    let dataset = super::output_evidence::selected_plan_dataset(cx.model).is_some();
+    let dataset_rule = if cx.model.simulation.active_run().is_some() {
         "The active dataset was not produced by this simulation plan, so its measurements and units cannot be used here."
     } else {
         EditorHandoff::DATASET_RULE
@@ -828,7 +804,7 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
     // Resolved once, before the card draws: the control's label promises a
     // retained trace, so what it costs to know whether one exists is paid
     // here rather than after a click that would have to apologise.
-    let trace = materialized_traces(app, &output);
+    let trace = materialized_traces(cx.model, &output);
     card(
         ui,
         &title,
@@ -1024,8 +1000,7 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
         let target = request.or(held);
         if held != request
             && let Some(target) = target
-            && let Ok(plan_id) = app
-                .state
+            && let Ok(plan_id) = cx
                 .model
                 .sim_setup
                 .stable_analysis_plan()
@@ -1045,21 +1020,16 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
                     output.name
                 ),
             };
-            commit_plan_change(
-                &mut crate::workbench::features::cx(app),
-                plan_id,
-                &detail,
-                move |workspace, plan_id| {
-                    workspace
-                        .content
-                        .set_capture_group_member(plan_id, target, output_id, named)
-                        .map_err(|error| error.to_string())
-                },
-            );
+            commit_plan_change(cx, plan_id, &detail, move |workspace, plan_id| {
+                workspace
+                    .content
+                    .set_capture_group_member(plan_id, target, output_id, named)
+                    .map_err(|error| error.to_string())
+            });
         }
     } else if let Some(edit) = edit.take() {
         let detail = edit.detail(&output.name, &scopes);
-        replace_output(app, output.id, &detail, |target| edit.apply(target));
+        replace_output(cx, output.id, &detail, |target| edit.apply(target));
     } else if released.get() {
         let renamed = name.trim() != output.name;
         let rewritten = expression.trim() != output.source_expression;
@@ -1076,48 +1046,48 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
                     expression.trim()
                 )
             };
-            let committed = replace_output(app, output.id, &detail, |target| {
+            let committed = replace_output(cx, output.id, &detail, |target| {
                 target.name = name.trim().to_owned();
                 target.source_expression = expression.trim().to_owned();
             });
             // The registry selects by name, so a rename has to carry the
             // selection with it or the record would deselect itself.
             if committed && renamed {
-                app.state.simulate.selected_saved_output = Some(name.trim().to_owned());
+                cx.state.selected_saved_output = Some(name.trim().to_owned());
             }
             committed
         } else {
             true
         };
         if settled {
-            app.state.simulate.saved_output_name_draft = None;
-            app.state.simulate.saved_output_expression_draft = None;
+            cx.state.saved_output_name_draft = None;
+            cx.state.saved_output_expression_draft = None;
         } else {
             // A refused edit keeps both fields exactly as they were typed. The
             // refusal is reported on the lifecycle channel; clearing the drafts
             // as well snapped the card back to the stored record, so the reader
             // was told an expression was rejected and simultaneously shown the
             // one it replaced, with no way back to what they had written.
-            app.state.simulate.saved_output_name_draft = Some(name);
-            app.state.simulate.saved_output_expression_draft = Some(expression);
+            cx.state.saved_output_name_draft = Some(name);
+            cx.state.saved_output_expression_draft = Some(expression);
         }
     } else {
         if name != output.name {
-            app.state.simulate.saved_output_name_draft = Some(name);
+            cx.state.saved_output_name_draft = Some(name);
         }
         if expression != output.source_expression {
-            app.state.simulate.saved_output_expression_draft = Some(expression);
+            cx.state.saved_output_expression_draft = Some(expression);
         }
     }
     // Dispatched after the record's own edits so that clicking a hand-off,
     // which takes focus off the field being typed into, commits that edit
     // rather than discarding it.
     if let Some(action) = handoff.take() {
-        action.dispatch(app);
+        action.dispatch(cx);
     } else if view_trace.get()
         && let Ok((analysis_index, waveform_indices)) = trace
     {
-        open_materialized_traces(app, analysis_index, &waveform_indices);
+        open_materialized_traces(cx, analysis_index, &waveform_indices);
     }
 }
 
@@ -1127,11 +1097,11 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
 /// to match is not evidence that this contract produced it, and a contract
 /// that was deferred, suppressed or refused says so in its own words.
 pub(super) fn materialized_traces(
-    app: &RSpiceApp,
+    model: &Model,
     output: &SavedOutput,
 ) -> Result<(usize, Vec<usize>), String> {
-    let run = super::output_evidence::selected_plan_dataset(app).ok_or_else(|| {
-        if app.state.model.simulation.active_run().is_some() {
+    let run = super::output_evidence::selected_plan_dataset(model).ok_or_else(|| {
+        if model.simulation.active_run().is_some() {
             "The active dataset was not produced by this plan, so it holds no trace for this \
              output."
                 .to_owned()
@@ -1209,7 +1179,7 @@ pub(super) fn materialized_traces(
 
 /// Reveal every member of one stored output without altering retained data.
 pub(super) fn open_materialized_traces(
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, SimulateFeature>,
     analysis_index: usize,
     waveform_indices: &[usize],
 ) {
@@ -1217,7 +1187,7 @@ pub(super) fn open_materialized_traces(
     use crate::workbench::framework::requests::ShowWaveforms;
     use rspice_results::result_presentation::SourceWaveformPresentationKey;
     use rspice_results_ui::selection::SelectedResultTrace;
-    let Some(run) = app.state.model.simulation.active_run() else {
+    let Some(run) = cx.model.simulation.active_run() else {
         return;
     };
     let Some(analysis) = run.analyses.get(analysis_index) else {
@@ -1246,7 +1216,7 @@ pub(super) fn open_materialized_traces(
     } else {
         None
     };
-    if !app.state.model.simulation.select_analysis(analysis_index) {
+    if !cx.model.simulation.select_analysis(analysis_index) {
         return;
     }
     // Raised first and taken once the viewer's command has run, so the
@@ -1254,11 +1224,11 @@ pub(super) fn open_materialized_traces(
     // command only chooses the waveform viewer and activates Results, and
     // reads none of the visibility, the selection or the cursors, so they
     // end as if they had been written before it.
-    app.state.workbench.outbox.push(ShowWaveforms {
+    cx.wb.outbox.push(ShowWaveforms {
         visibility,
         selected,
     });
-    app.execute_command_key(ids::RESULT_WAVEFORMS);
+    cx.execute(ids::RESULT_WAVEFORMS);
 }
 
 /// The surfaces the expression editor hands off to.
@@ -1334,18 +1304,16 @@ impl EditorHandoff {
         }
     }
 
-    pub(super) fn dispatch(self, app: &mut RSpiceApp) {
+    pub(super) fn dispatch(self, cx: &mut Cx<'_, SimulateFeature>) {
         // Add measurement draws over the result viewer. Activating Results
         // first is what makes the hand-off land somewhere the reader can see,
         // rather than opening a form behind this page. The calculator and the
         // diagnostics window are modeless tools the frame paints over
         // whatever workspace is open, so they need no route change.
         if matches!(self, Self::ScalarMeasurement) {
-            app.state
-                .workbench
-                .activate(crate::workbench::state::Workspace::Results);
+            cx.wb.activate(crate::workbench::state::Workspace::Results);
         }
-        app.execute_command_key(self.command());
+        cx.execute(self.command());
     }
 }
 
@@ -1406,7 +1374,7 @@ impl OutputEdit {
 /// Each analysis is offered under the name it is shown by everywhere else —
 /// `SimulationPlan::instance_list_label`, which adds an execution position only
 /// to the instances naming deliberately leaves sharing one label.
-fn compatibility_options(app: &RSpiceApp) -> Vec<(String, SavedOutputCompatibility)> {
+fn compatibility_options(model: &Model) -> Vec<(String, SavedOutputCompatibility)> {
     let mut options = vec![
         (
             SavedOutputCompatibility::AllCompatibleAnalyses
@@ -1419,7 +1387,7 @@ fn compatibility_options(app: &RSpiceApp) -> Vec<(String, SavedOutputCompatibili
             SavedOutputCompatibility::OpTranAc,
         ),
     ];
-    if let Ok(plan) = app.state.model.sim_setup.stable_analysis_plan() {
+    if let Ok(plan) = model.sim_setup.stable_analysis_plan() {
         options.extend(
             plan.instances()
                 .iter()
@@ -1464,13 +1432,12 @@ fn scope_label(
 /// record — a rename moving the registry selection — only does so when the
 /// plan actually took the edit.
 fn replace_output(
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, SimulateFeature>,
     output_id: crate::product::SavedOutputId,
     detail: &str,
     apply: impl FnOnce(&mut SavedOutput),
 ) -> bool {
-    let Ok(plan_id) = app
-        .state
+    let Ok(plan_id) = cx
         .model
         .sim_setup
         .stable_analysis_plan()
@@ -1478,8 +1445,7 @@ fn replace_output(
     else {
         return false;
     };
-    let Some(mut replacement) = app
-        .state
+    let Some(mut replacement) = cx
         .model
         .workspace
         .content
@@ -1495,18 +1461,13 @@ fn replace_output(
         return false;
     };
     apply(&mut replacement);
-    commit_plan_change(
-        &mut crate::workbench::features::cx(app),
-        plan_id,
-        detail,
-        move |workspace, plan_id| {
-            workspace
-                .content
-                .replace_saved_output(plan_id, output_id, replacement)
-                .map(|_| ())
-                .map_err(|error| error.to_string())
-        },
-    )
+    commit_plan_change(cx, plan_id, detail, move |workspace, plan_id| {
+        workspace
+            .content
+            .replace_saved_output(plan_id, output_id, replacement)
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    })
 }
 
 /// What a run will retain.
@@ -1524,12 +1485,13 @@ fn replace_output(
 /// exactly the outputs the plan knows least about.
 fn storage_read(
     ui: &mut Ui,
-    app: &RSpiceApp,
+    model: &Model,
+    controller: &SimulationController,
     payload: &SimulationPlanPayload,
     workload: &rspice_simulation::capture_ledger::CaptureWorkload,
 ) {
-    let selection = app.simulation_controller.effective_saved_outputs_preflight(
-        &app.state.model,
+    let selection = controller.effective_saved_outputs_preflight(
+        model,
         &payload.saved_outputs,
         &payload.capture_groups,
     );
@@ -1544,7 +1506,7 @@ fn storage_read(
                 &effective,
                 &reports,
                 &membership,
-                app.state.model.sim_setup.save_policy.output_selection_mode,
+                model.sim_setup.save_policy.output_selection_mode,
                 workload,
             );
             let named = ledger
@@ -1634,7 +1596,7 @@ mod tests {
             (first, second, named)
         };
 
-        let options = compatibility_options(&app);
+        let options = compatibility_options(&app.state.model);
         let label_of = |wanted| {
             options
                 .iter()

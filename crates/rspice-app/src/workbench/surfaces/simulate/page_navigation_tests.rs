@@ -386,7 +386,7 @@ fn a_saved_output_trace_is_resolved_from_the_receipt_not_the_waveform_names() {
     let mut app = RSpiceApp::test_instance();
     let output = saved_output();
     assert_eq!(
-        super::page_outputs::materialized_traces(&app, &output),
+        super::page_outputs::materialized_traces(&app.state.model, &output),
         Err("No run has been retained, so this output has no stored trace.".to_owned())
     );
 
@@ -397,7 +397,7 @@ fn a_saved_output_trace_is_resolved_from_the_receipt_not_the_waveform_names() {
     ]);
     retain_run_for_active_plan(&mut app.state, analysis);
     assert_eq!(
-        super::page_outputs::materialized_traces(&app, &output),
+        super::page_outputs::materialized_traces(&app.state.model, &output),
         Err(
             "The retained dataset holds no receipt for this output, so it was never stored."
                 .to_owned()
@@ -424,7 +424,7 @@ fn a_saved_output_trace_is_resolved_from_the_receipt_not_the_waveform_names() {
             status: SavedOutputMaterializationStatus::Deferred,
         });
     assert!(
-        super::page_outputs::materialized_traces(&app, &output)
+        super::page_outputs::materialized_traces(&app.state.model, &output)
             .expect_err("a deferred output has no trace")
             .contains("deferred in the retained dataset"),
         "the refusal names the status rather than the absence"
@@ -437,12 +437,18 @@ fn a_saved_output_trace_is_resolved_from_the_receipt_not_the_waveform_names() {
             sample_count: 2,
         };
     assert_eq!(
-        super::page_outputs::materialized_traces(&app, &output),
+        super::page_outputs::materialized_traces(&app.state.model, &output),
         Ok((0, vec![0])),
         "the analysis and waveform the receipt names are what the hop carries"
     );
 
-    super::page_outputs::open_materialized_traces(&mut app, 0, &[0]);
+    super::page_outputs::open_materialized_traces(
+        &mut crate::workbench::features::cx(&mut app),
+        0,
+        &[0],
+    );
+    // The shell answers the hand-off once the page has drawn.
+    app.after_contribution();
     assert_eq!(
         app.state.workbench.workspace,
         crate::workbench::state::Workspace::Results
@@ -541,9 +547,15 @@ fn a_saved_output_dc_family_reveals_all_members_without_changing_retained_data()
         .iter()
         .map(|waveform| SourceWaveformPresentationKey::new(key, waveform.name.clone()))
         .collect::<Vec<_>>();
-    let resolved = super::page_outputs::materialized_traces(&app, &output).unwrap();
+    let resolved = super::page_outputs::materialized_traces(&app.state.model, &output).unwrap();
     assert_eq!(resolved, (0, vec![0, 1]));
-    super::page_outputs::open_materialized_traces(&mut app, resolved.0, &resolved.1);
+    super::page_outputs::open_materialized_traces(
+        &mut crate::workbench::features::cx(&mut app),
+        resolved.0,
+        &resolved.1,
+    );
+    // The shell answers the hand-off once the page has drawn.
+    app.after_contribution();
     assert!(app.state.results.results.session.selected_trace.is_none());
     for (index, key) in keys.iter().enumerate() {
         assert_eq!(

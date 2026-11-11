@@ -2163,7 +2163,9 @@ fn every_expression_editor_handoff_opens_the_surface_it_names() {
     use super::page_outputs::EditorHandoff;
 
     let mut app = RSpiceApp::test_instance();
-    EditorHandoff::Calculator.dispatch(&mut app);
+    EditorHandoff::Calculator.dispatch(&mut crate::workbench::features::cx(&mut app));
+    // The shell answers the hand-off once the page has drawn.
+    app.after_contribution();
     assert!(
         app.state.results.waveform_calculator_dialog,
         "the calculator hand-off opens the calculator"
@@ -2171,7 +2173,9 @@ fn every_expression_editor_handoff_opens_the_surface_it_names() {
 
     let mut app = RSpiceApp::test_instance();
     seed_two_specifications(&mut app.state);
-    EditorHandoff::UnitDiagnostics.dispatch(&mut app);
+    EditorHandoff::UnitDiagnostics.dispatch(&mut crate::workbench::features::cx(&mut app));
+    // The shell answers the hand-off once the page has drawn.
+    app.after_contribution();
     assert!(
         app.state.results.expression_diagnostics_dialog,
         "the diagnostics hand-off opens the diagnostics window"
@@ -2179,7 +2183,9 @@ fn every_expression_editor_handoff_opens_the_surface_it_names() {
 
     let mut app = RSpiceApp::test_instance();
     seed_two_specifications(&mut app.state);
-    EditorHandoff::ScalarMeasurement.dispatch(&mut app);
+    EditorHandoff::ScalarMeasurement.dispatch(&mut crate::workbench::features::cx(&mut app));
+    // The shell answers the hand-off once the page has drawn.
+    app.after_contribution();
     assert_eq!(
         app.state.workbench.current_route().surface_id(),
         crate::workbench::SurfaceId::Results,

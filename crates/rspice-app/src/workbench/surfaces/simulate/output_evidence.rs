@@ -43,16 +43,14 @@ pub(super) fn specification_limit(spec: &crate::state::SpecEntry) -> String {
 /// deck or another plan can never become evidence merely because it is the
 /// selected result.
 pub(super) fn selected_plan_dataset(
-    app: &crate::workbench::RSpiceApp,
+    model: &crate::workbench::app_state::Model,
 ) -> Option<&crate::state::SimulationRun> {
-    let plan_id = app
-        .state
-        .model
+    let plan_id = model
         .sim_setup
         .stable_analysis_plan()
         .ok()
         .map(|plan| plan.id())?;
-    app.state.model.simulation.active_run_for_plan(plan_id)
+    model.simulation.active_run_for_plan(plan_id)
 }
 
 /// The dataset a specification is judged against.

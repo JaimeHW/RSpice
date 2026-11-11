@@ -1369,7 +1369,7 @@ fn point_table(ui: &mut Ui, app: &mut RSpiceApp, frame: &RunSetFrame) {
     // says which retained analysis it opens rather than repeating one word
     // twenty-seven times.
     let family_label = family.ok().and_then(|index| {
-        super::output_evidence::selected_plan_dataset(app)
+        super::output_evidence::selected_plan_dataset(&app.state.model)
             .and_then(|run| run.analyses.get(index))
             .map(|analysis| analysis.label.clone())
     });
@@ -1471,7 +1471,7 @@ fn point_table(ui: &mut Ui, app: &mut RSpiceApp, frame: &RunSetFrame) {
 /// runs every frame the page draws, and expanding a thousand-trial Monte Carlo
 /// family to answer "is there one" would be a per-frame cost paid for nothing.
 pub(super) fn family_target(app: &RSpiceApp) -> Result<usize, &'static str> {
-    let run = super::output_evidence::selected_plan_dataset(app).ok_or_else(|| {
+    let run = super::output_evidence::selected_plan_dataset(&app.state.model).ok_or_else(|| {
         if app.state.model.simulation.active_run().is_some() {
             "The active dataset was not produced by this plan, so its family does not describe \
              these points."

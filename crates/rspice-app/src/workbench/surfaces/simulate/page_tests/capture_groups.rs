@@ -648,7 +648,8 @@ fn the_registry_size_and_the_ledger_row_price_one_output_once() {
         .expect("payload");
     let ledger = page_capture_ledger(&app);
     let registry = super::super::page_outputs::projected_output_bytes_for(
-        &app,
+        &app.state.model,
+        &app.simulation_controller,
         &payload,
         &super::super::page_save::capture_workload(&app.state.model).0,
     );
