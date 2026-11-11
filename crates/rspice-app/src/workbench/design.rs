@@ -8,6 +8,7 @@ use egui::Context;
 use crate::workbench::app::dialogs::connectivity_manager::ConnectivityManager;
 use crate::workbench::app::dialogs::design_review_comments::ReviewComments;
 use crate::workbench::app::dialogs::engineering_table::EngineeringTable;
+use crate::workbench::app::dialogs::hierarchy::create::CreateHierarchy;
 use crate::workbench::app::dialogs::hierarchy::descend;
 use crate::workbench::app::dialogs::property_dialog::PropertyDialog;
 use crate::workbench::app::dialogs::selection::{array, bulk_edit, rename, shared_properties};
@@ -293,5 +294,19 @@ impl DesignFeature {
             workbench: cx.wb,
         }
         .render_connectivity_manager_dialog(ctx);
+    }
+
+    /// Create hierarchy, over its draft and the model it checks the draft
+    /// against. A checked extraction goes to the shell.
+    pub(in crate::workbench) fn render_create_hierarchy_dialog(
+        cx: &mut Cx<'_, Self>,
+        ctx: &Context,
+    ) {
+        CreateHierarchy {
+            dialog: &mut cx.state.create_hierarchy,
+            model: cx.model,
+            workbench: cx.wb,
+        }
+        .render_create_hierarchy_dialog(ctx);
     }
 }

@@ -3,6 +3,7 @@
 use crate::workbench::app::dialogs::connectivity_manager::{
     RevealTarget, open_connectivity_source_map, reveal_connectivity_target,
 };
+use crate::workbench::app::dialogs::hierarchy::create::commit_create_hierarchy;
 use crate::workbench::app::dialogs::hierarchy::descend::{
     DescendHierarchy, answer_descend_hierarchy,
 };
@@ -26,6 +27,8 @@ pub(crate) enum DesignRequest {
     OpenSourceMap,
     /// Apply the connectivity repairs and policy the manager has under review.
     ApplyConnectivityRepairs,
+    /// Extract the selection into the new cell Create hierarchy describes.
+    CreateHierarchy,
 }
 
 impl Request for DesignRequest {
@@ -52,6 +55,11 @@ impl RSpiceApp {
             DesignRequest::ApplyConnectivityRepairs => {
                 if let Err(error) = self.apply_selected_connectivity_repairs() {
                     self.state.design.connectivity_manager.error = Some(error);
+                }
+            }
+            DesignRequest::CreateHierarchy => {
+                if let Err(error) = commit_create_hierarchy(&mut self.state) {
+                    self.state.design.create_hierarchy.validation_error = Some(error);
                 }
             }
         }

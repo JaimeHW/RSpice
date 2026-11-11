@@ -18,10 +18,10 @@ use crate::state::{
     RegressionTargetSelector, SavedOutput, SavedOutputCompatibility, SavedOutputKind,
 };
 
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::Model;
 
 pub(in crate::workbench) fn validate_hierarchy_reference_impact(
-    state: &AppState,
+    model: &Model,
     extraction: &HierarchyExtractionPlan,
 ) -> Result<(), String> {
     let affected = extraction
@@ -37,15 +37,15 @@ pub(in crate::workbench) fn validate_hierarchy_reference_impact(
     }
 
     let mut findings = Vec::new();
-    if let Some(plan) = state.model.sim_setup.analysis_plan.as_ref() {
+    if let Some(plan) = model.sim_setup.analysis_plan.as_ref() {
         scan_plan(
-            state.model.sim_setup.active_plan_name().as_str(),
+            model.sim_setup.active_plan_name().as_str(),
             plan,
             &affected,
             &mut findings,
         );
     }
-    for stored in state.model.sim_setup.inactive_plans() {
+    for stored in model.sim_setup.inactive_plans() {
         scan_plan(
             stored.name().as_str(),
             stored.analysis_plan(),
@@ -53,8 +53,8 @@ pub(in crate::workbench) fn validate_hierarchy_reference_impact(
             &mut findings,
         );
     }
-    for record in &state.model.workspace.content.simulation_plan_payloads {
-        let label = plan_label(state, record.plan_id);
+    for record in &model.workspace.content.simulation_plan_payloads {
+        let label = plan_label(model, record.plan_id);
         for (index, output) in record.payload.saved_outputs.iter().enumerate() {
             if let Some(symbol) = affected_reference(&output.source_expression, &affected) {
                 findings.push(format!(
@@ -64,7 +64,7 @@ pub(in crate::workbench) fn validate_hierarchy_reference_impact(
                 ));
             }
         }
-        let plan = simulation_plan(state, record.plan_id);
+        let plan = simulation_plan(model, record.plan_id);
         for (index, tolerance) in record.payload.regression_tolerances.iter().enumerate() {
             if tolerance.target.kind != RegressionTargetKind::Waveform
                 || record
@@ -222,16 +222,14 @@ const fn identifier_byte(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'$'
 }
 
-fn simulation_plan(state: &AppState, id: SimulationPlanId) -> Option<&SimulationPlan> {
-    state
-        .model
+fn simulation_plan(model: &Model, id: SimulationPlanId) -> Option<&SimulationPlan> {
+    model
         .sim_setup
         .analysis_plan
         .as_ref()
         .filter(|plan| plan.id() == id)
         .or_else(|| {
-            state
-                .model
+            model
                 .sim_setup
                 .inactive_plans()
                 .iter()
@@ -320,21 +318,16 @@ const fn saved_output_kind_supports_analysis(
     }
 }
 
-fn plan_label(state: &AppState, id: SimulationPlanId) -> String {
-    if state
-        .model
+fn plan_label(model: &Model, id: SimulationPlanId) -> String {
+    if model
         .sim_setup
         .analysis_plan
         .as_ref()
         .is_some_and(|plan| plan.id() == id)
     {
-        return format!(
-            "plan '{}'",
-            state.model.sim_setup.active_plan_name().as_str()
-        );
+        return format!("plan '{}'", model.sim_setup.active_plan_name().as_str());
     }
-    state
-        .model
+    model
         .sim_setup
         .inactive_plans()
         .iter()

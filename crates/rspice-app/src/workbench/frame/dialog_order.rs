@@ -219,7 +219,10 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         key: DialogKey("design.create_hierarchy"),
         modality: Modality::Dialog,
         is_open: Some(|state| state.design.create_hierarchy.open),
-        render: |app, ctx| app.render_create_hierarchy_dialog(ctx),
+        render: |app, ctx| {
+            DesignFeature::render_create_hierarchy_dialog(&mut features::cx(app), ctx);
+            app.after_contribution();
+        },
     },
     DialogSpec {
         key: DialogKey("project.check_and_save"),

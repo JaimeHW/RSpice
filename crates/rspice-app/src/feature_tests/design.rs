@@ -524,3 +524,45 @@ fn a_connectivity_reveal_is_carried_out_in_the_frame_it_is_chosen() {
     assert_eq!(state.workbench.workspace, Workspace::Design);
     assert!(!state.model.schematic.session.editor.selection.is_empty());
 }
+
+/// Three resistors in a chain with the first two selected; the ids of the
+/// selected two.
+fn two_of_three_resistors_selected(app: &mut RSpiceApp) -> (u64, u64) {
+    let schematic = &mut app.state.model.schematic;
+    let first = schematic.add_component(ComponentType::Resistor, Point::origin());
+    let second = schematic.add_component(ComponentType::Resistor, Point::new(80, 0));
+    schematic.add_component(ComponentType::Resistor, Point::new(160, 0));
+    schematic.add_wire(vec![Point::new(20, 0), Point::new(60, 0)]);
+    schematic.add_wire(vec![Point::new(100, 0), Point::new(140, 0)]);
+    schematic.session.editor.selection.select_component(first);
+    schematic.session.editor.selection.select_component(second);
+    (first, second)
+}
+
+#[test]
+fn create_hierarchy_opens_and_draws_in_the_frame() {
+    let mut app = design_app();
+    two_of_three_resistors_selected(&mut app);
+    crate::workbench::app::open_create_hierarchy_dialog(&mut app.state);
+    assert!(draws_dialog(&mut app, "Create hierarchical cell"));
+    assert!(app.state.design.create_hierarchy.open);
+}
+
+/// An extraction chosen in Create hierarchy is carried out in the frame it is
+/// chosen: the new cell opens and the form closes.
+#[test]
+fn an_extraction_is_carried_out_in_the_frame_it_is_chosen() {
+    let mut replay = Replay::of(RSpiceApp::test_instance());
+    replay.app.state.workbench.activate(Workspace::Design);
+    two_of_three_resistors_selected(&mut replay.app);
+    let parent = replay.app.state.model.workspace.content.active_view.clone();
+    crate::workbench::app::open_create_hierarchy_dialog(&mut replay.app.state);
+    let child = replay.app.state.design.create_hierarchy.cell_name.clone();
+    replay.click("Create and descend", Role::Button);
+    let state = &replay.app.state;
+    assert!(!state.design.create_hierarchy.open);
+    assert_eq!(
+        state.model.workspace.content.active_view,
+        CellViewRef::new(&parent.library, &child, "schematic")
+    );
+}

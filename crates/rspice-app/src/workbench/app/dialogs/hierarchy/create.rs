@@ -17,12 +17,14 @@ use crate::ui::widgets::{CommandForm, DialogChoice, TableColumn};
 use rspice_design::drc::{DrcConfig, DrcViolation, run_check_with_hierarchy};
 use rspice_design::hierarchy::HierarchySource;
 
+use crate::workbench::app::SchematicEditAuthority;
+use crate::workbench::app::dialogs::design_request::DesignRequest;
 use crate::workbench::app::schematic::hierarchy_reference_impact::validate_hierarchy_reference_impact;
-use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
 use crate::workbench::app_state::design_history::{
     HierarchyExtractionHistoryEntry, validate_hierarchy_target_unreferenced,
 };
 use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::state::WorkbenchSession;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CreateHierarchyPortDraft {
@@ -160,13 +162,23 @@ fn default_cell_name(state: &AppState) -> String {
         .expect("the numbered names are unbounded")
 }
 
-impl RSpiceApp {
+/// What Create hierarchy draws over: its draft, the model it checks the
+/// draft against and the session it hands the extraction to.
+pub(in crate::workbench) struct CreateHierarchy<'a> {
+    pub(in crate::workbench) dialog: &'a mut CreateHierarchyDialogState,
+    pub(in crate::workbench) model: &'a Model,
+    pub(in crate::workbench) workbench: &'a mut WorkbenchSession,
+}
+
+impl CreateHierarchy<'_> {
+    /// Draw Create hierarchy. A checked extraction goes to the shell, which
+    /// carries it out over the whole session.
     pub(in crate::workbench) fn render_create_hierarchy_dialog(&mut self, ctx: &Context) {
-        if !self.state.design.create_hierarchy.open {
+        if !self.dialog.open {
             return;
         }
-        let validation = validate_draft(&self.state);
-        let draft = &mut self.state.design.create_hierarchy;
+        let validation = validate_draft(self.dialog, self.model);
+        let draft = &mut *self.dialog;
         let instances = draft
             .plan
             .as_ref()
@@ -220,13 +232,12 @@ impl RSpiceApp {
         }
         match choice {
             DialogChoice::Primary => {
-                // The footer states the refusal.
-                if let Err(error) = commit_create_hierarchy(&mut self.state) {
-                    self.state.design.create_hierarchy.validation_error = Some(error);
-                }
+                // The shell extracts it straight after this step draws; the
+                // footer states a refusal.
+                self.workbench.outbox.push(DesignRequest::CreateHierarchy);
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.design.create_hierarchy.close();
+                self.dialog.close();
             }
             DialogChoice::Secondary | DialogChoice::None => {}
         }
@@ -241,43 +252,37 @@ const fn direction_label(direction: PortDirection) -> &'static str {
     }
 }
 
-fn validate_draft(state: &AppState) -> Result<HierarchyExtractionPlan, String> {
-    if let Some(error) = state.design.create_hierarchy.validation_error.as_deref() {
+fn validate_draft(
+    dialog: &CreateHierarchyDialogState,
+    model: &Model,
+) -> Result<HierarchyExtractionPlan, String> {
+    if let Some(error) = dialog.validation_error.as_deref() {
         return Err(error.to_owned());
     }
-    let authority = state
-        .design
-        .create_hierarchy
-        .authority
-        .as_ref()
-        .ok_or_else(|| {
-            "The retained source authority is unavailable. Close and reopen Create hierarchy."
-                .to_owned()
-        })?;
-    authority.validate(state, "Create hierarchy")?;
-    if state.design.create_hierarchy.library_revision != state.model.library_manager.revision() {
+    let authority = dialog.authority.as_ref().ok_or_else(|| {
+        "The retained source authority is unavailable. Close and reopen Create hierarchy."
+            .to_owned()
+    })?;
+    authority.validate(model, "Create hierarchy")?;
+    if dialog.library_revision != model.library_manager.revision() {
         return Err(
             "The library or symbol contract changed. Close and reopen Create hierarchy.".to_owned(),
         );
     }
-    let mut plan = state.design.create_hierarchy.plan.clone().ok_or_else(|| {
+    let mut plan = dialog.plan.clone().ok_or_else(|| {
         "The retained hierarchy plan is unavailable. Close and reopen Create hierarchy.".to_owned()
     })?;
-    if plan.ports.len() != state.design.create_hierarchy.ports.len() {
+    if plan.ports.len() != dialog.ports.len() {
         return Err("The inferred interface draft is inconsistent.".to_owned());
     }
     let mut names = HashSet::new();
-    for (port, draft) in plan
-        .ports
-        .iter_mut()
-        .zip(&state.design.create_hierarchy.ports)
-    {
+    for (port, draft) in plan.ports.iter_mut().zip(&dialog.ports) {
         if port.source_net != draft.source_net {
             return Err("A boundary net identity changed inside the isolated draft.".to_owned());
         }
         NetLabel::validate_name(
             draft.name.trim(),
-            state.model.schematic.document().document_policy.net_naming,
+            model.schematic.document().document_policy.net_naming,
         )
         .map_err(|error| format!("Port '{}': {error}", draft.name.trim()))?;
         if !names.insert(draft.name.trim().to_ascii_lowercase()) {
@@ -287,25 +292,21 @@ fn validate_draft(state: &AppState) -> Result<HierarchyExtractionPlan, String> {
         port.direction = draft.direction;
         port.discipline = draft.discipline;
     }
-    validate_hierarchy_reference_impact(state, &plan)?;
+    validate_hierarchy_reference_impact(model, &plan)?;
 
-    let cell_name = state.design.create_hierarchy.cell_name.trim();
+    let cell_name = dialog.cell_name.trim();
     let target = CellViewRef::new(
-        &state.model.workspace.content.active_view.library,
+        &model.workspace.content.active_view.library,
         cell_name,
-        state.design.create_hierarchy.target_view.display_name(),
+        dialog.target_view.display_name(),
     );
     target
         .validate_name_segments()
         .map_err(|error| format!("Cell and view: {error}"))?;
-    if !matches!(
-        state.design.create_hierarchy.target_view,
-        ViewType::Schematic | ViewType::Symbol
-    ) {
+    if !matches!(dialog.target_view, ViewType::Schematic | ViewType::Symbol) {
         return Err("Create hierarchy supports the schematic or symbol child view.".to_owned());
     }
-    let library = state
-        .model
+    let library = model
         .library_manager
         .get_library(&target.library)
         .ok_or_else(|| format!("Library '{}' no longer exists.", target.library))?;
@@ -324,8 +325,7 @@ fn validate_draft(state: &AppState) -> Result<HierarchyExtractionPlan, String> {
     }
     for view in ["schematic", "symbol"] {
         let reference = CellViewRef::new(&target.library, cell_name, view);
-        if state
-            .model
+        if model
             .workspace
             .content
             .schematic_buffers
@@ -337,12 +337,12 @@ fn validate_draft(state: &AppState) -> Result<HierarchyExtractionPlan, String> {
             ));
         }
     }
-    validate_hierarchy_target_unreferenced(&state.model, &target)?;
+    validate_hierarchy_target_unreferenced(model, &target)?;
     Ok(plan)
 }
 
-fn commit_create_hierarchy(state: &mut AppState) -> Result<(), String> {
-    let plan = validate_draft(state)?;
+pub(in crate::workbench) fn commit_create_hierarchy(state: &mut AppState) -> Result<(), String> {
+    let plan = validate_draft(&state.design.create_hierarchy, &state.model)?;
     let authority = state
         .design
         .create_hierarchy
@@ -679,6 +679,7 @@ mod tests {
         ComponentType, Point, SavedOutput, SavedOutputCompatibility, SavedOutputKind,
         SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming, SymbolDocument,
     };
+    use crate::workbench::app::RSpiceApp;
 
     fn two_selected_resistors() -> AppState {
         let mut state = AppState::default();
@@ -766,7 +767,14 @@ mod tests {
                         )),
                         ..Default::default()
                     },
-                    |ui| app.render_create_hierarchy_dialog(ui.ctx()),
+                    |ui| {
+                        CreateHierarchy {
+                            dialog: &mut app.state.design.create_hierarchy,
+                            model: &app.state.model,
+                            workbench: &mut app.state.workbench,
+                        }
+                        .render_create_hierarchy_dialog(ui.ctx());
+                    },
                 )
                 .platform_output
                 .accesskit_update
