@@ -350,9 +350,14 @@ fn a_nonlinear_state_linearizes_like_its_frozen_time_twin() {
     else {
         panic!("the deck's first card is its .TRAN card")
     };
-    let max_step =
-        rspice_core::execution::resolve_transient_maximum_step(step, stop, start, max_step)
-            .expect("the window resolves");
+    let max_step = rspice_core::execution::resolve_dialect_transient_maximum_step(
+        netlist.parse_dialect(),
+        step,
+        stop,
+        start,
+        max_step,
+    )
+    .expect("the window resolves");
     let transient = engine
         .run_tran(&netlist, stop, max_step)
         .expect("the transient runs");
@@ -470,9 +475,16 @@ fn transient_window(netlist: &Netlist) -> (f64, f64) {
     else {
         panic!("the deck has a .TRAN card")
     };
-    let max_step =
-        rspice_core::execution::resolve_transient_maximum_step(step, stop, start, max_step)
-            .expect("the window resolves");
+    // The window every frontend gives the run: its maximum step follows the
+    // deck's dialect, as the state a card is taken at resolves it.
+    let max_step = rspice_core::execution::resolve_dialect_transient_maximum_step(
+        netlist.parse_dialect(),
+        step,
+        stop,
+        start,
+        max_step,
+    )
+    .expect("the window resolves");
     (stop, max_step)
 }
 

@@ -105,9 +105,14 @@ fn directory_for(circuit: &str, test: &str) -> Directory {
     else {
         panic!("the writer deck has a .TRAN card");
     };
-    let max_step =
-        rspice_core::execution::resolve_transient_maximum_step(*step, *stop, *start, *max_step)
-            .expect("the window resolves");
+    let max_step = rspice_core::execution::resolve_dialect_transient_maximum_step(
+        writer.parse_dialect(),
+        *step,
+        *stop,
+        *start,
+        *max_step,
+    )
+    .expect("the window resolves");
     let (_, checkpoint) = rspice_core::Engine::default()
         .run_tran_checkpointed(&writer, *stop, max_step)
         .expect("the transient checkpoints");
