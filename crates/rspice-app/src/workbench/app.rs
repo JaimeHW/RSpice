@@ -135,7 +135,8 @@ pub(crate) use dialogs::project::{
 pub(crate) use dialogs::project_revision_history::ProjectRevisionHistoryDialogState;
 
 pub(crate) use dialogs::source_document::{
-    begin_new_top_deck, open_source_document_dialog, source_document_dialog_is_available,
+    begin_new_top_deck, begin_new_top_deck_in, open_source_document_dialog,
+    open_source_document_dialog_in, source_document_dialog_is_available,
 };
 
 pub(crate) use dialogs::source_language_tools::navigate_active_source;

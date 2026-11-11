@@ -141,22 +141,29 @@ impl Replay {
         &self.ctx
     }
 
+    /// One frame carrying `events`, and everything it put out.
+    pub(super) fn frame(&mut self, events: Vec<egui::Event>) -> egui::FullOutput {
+        self.time += 0.1;
+        self.ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 1000.0))),
+                time: Some(self.time),
+                focused: true,
+                events,
+                ..Default::default()
+            },
+            |ui| eframe::App::ui(&mut self.app, ui, &mut self.frame),
+        )
+    }
+
     /// Three frames, the first carrying `events`; what the last one published.
     pub(super) fn frames(&mut self, mut events: Vec<egui::Event>) -> Vec<Control> {
         let mut tree = None;
         for _ in 0..3 {
-            self.time += 0.1;
-            let output = self.ctx.run_ui(
-                egui::RawInput {
-                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 1000.0))),
-                    time: Some(self.time),
-                    focused: true,
-                    events: std::mem::take(&mut events),
-                    ..Default::default()
-                },
-                |ui| eframe::App::ui(&mut self.app, ui, &mut self.frame),
-            );
-            tree = output.platform_output.accesskit_update;
+            tree = self
+                .frame(std::mem::take(&mut events))
+                .platform_output
+                .accesskit_update;
         }
         controls(&tree.expect("a frame with AccessKit on publishes its tree"))
     }

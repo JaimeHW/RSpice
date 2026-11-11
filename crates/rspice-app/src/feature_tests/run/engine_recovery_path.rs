@@ -23,7 +23,7 @@ const DECK: &str = "* Engine recovery analytic check\nV1 in 0 1\nR1 in 0 1k\n.op
 /// The script's `author_deck`: the Netlist & Script Editor's New source
 /// document opens its Logical path, Tab then Enter creates the deck and closes
 /// the form, and the editor takes the typed deck.
-fn author_deck(replay: &mut Replay) {
+pub(super) fn author_deck(replay: &mut Replay) {
     replay.frames(Vec::new());
 
     replay.click("Netlist & Script Editor", Role::Button);

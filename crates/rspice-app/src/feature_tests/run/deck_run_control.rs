@@ -1,0 +1,112 @@
+//! The deck page's Run and Stop, pressed and released in whole frames of the
+//! application.
+//!
+//! The toolbar raises both for the dispatcher, which carries them out once
+//! the page has drawn. A press must still take effect in the frame of its
+//! release, and that frame must ask for the next at once, so what the press
+//! changed is drawn without waiting for the reader to move the pointer.
+
+use egui::accesskit::Role;
+use egui::{Modifiers, Pos2};
+
+use super::engine_recovery_path::author_deck;
+use crate::feature_tests::replay::{Replay, only};
+
+/// Press the control at `at` in one frame and release it in the next; what
+/// the frame of the release put out.
+fn press_and_release(replay: &mut Replay, at: Pos2) -> egui::FullOutput {
+    let button = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    };
+    replay.frame(vec![egui::Event::PointerMoved(at), button(true)]);
+    replay.frame(vec![button(false)])
+}
+
+/// Whether `output` asks for the next frame at once.
+fn repaints_at_once(output: &egui::FullOutput) -> bool {
+    output
+        .viewport_output
+        .get(&egui::ViewportId::ROOT)
+        .is_some_and(|viewport| viewport.repaint_delay.is_zero())
+}
+
+/// Whether a run of the deck was asked for, has started or has been kept.
+fn run_requested(replay: &Replay) -> bool {
+    let simulation = &replay.app.state.model.simulation;
+    simulation.execution.trigger_simulation
+        || simulation.execution.has_active_execution()
+        || !simulation.retained.runs.is_empty()
+}
+
+/// Run deck runs the deck in the frame of its release, and that frame asks
+/// for the next at once.
+#[test]
+fn run_deck_runs_in_the_frame_it_is_released_and_repaints() {
+    let mut replay = Replay::new();
+    author_deck(&mut replay);
+    replay.click("Validate source", Role::Button);
+    let at = only(&replay.frames(Vec::new()), "Run deck", Role::Button).center;
+    assert!(!run_requested(&replay), "nothing has run before the press");
+    assert!(
+        !repaints_at_once(&replay.frame(Vec::new())),
+        "the settled page waits for input before its next frame"
+    );
+
+    let output = press_and_release(&mut replay, at);
+    assert!(
+        run_requested(&replay),
+        "Run deck runs the deck in the frame of its release"
+    );
+    assert!(
+        repaints_at_once(&output),
+        "the frame Run deck ran the deck in asks for the next at once"
+    );
+}
+
+/// Stop asks the run to stop in the frame of its release, and that frame
+/// asks for the next at once.
+#[test]
+fn stop_stops_the_run_in_the_frame_it_is_released_and_repaints() {
+    let mut replay = Replay::new();
+    author_deck(&mut replay);
+    replay.click("Validate source", Role::Button);
+    let run_at = only(&replay.frames(Vec::new()), "Run deck", Role::Button).center;
+    // A run that stays going: the native engine finishes this deck's
+    // operating point before a frame could press Stop.
+    let simulation = &mut replay.app.state.model.simulation;
+    let identity = simulation
+        .start_run()
+        .execution_identity()
+        .expect("a started run has an execution identity");
+    simulation.execution.active_execution = Some(identity);
+    simulation.execution.is_running = false;
+    // The deck page's Stop is where its Run deck was.
+    let at = replay
+        .frames(Vec::new())
+        .into_iter()
+        .filter(|control| control.label == "Stop" && control.role == Role::Button)
+        .map(|control| control.center)
+        .min_by(|a, b| a.distance(run_at).total_cmp(&b.distance(run_at)))
+        .expect("the deck page's Run deck turns to Stop while a run is going");
+    assert!(
+        !replay.app.state.model.simulation.cancellation_is_pending(),
+        "nothing has asked the run to stop before the press"
+    );
+    assert!(
+        !repaints_at_once(&replay.frame(Vec::new())),
+        "the settled page waits for input before its next frame"
+    );
+
+    let output = press_and_release(&mut replay, at);
+    assert!(
+        replay.app.state.model.simulation.cancellation_is_pending(),
+        "Stop asks the run to stop in the frame of its release"
+    );
+    assert!(
+        repaints_at_once(&output),
+        "the frame Stop asked the run to stop in asks for the next at once"
+    );
+}

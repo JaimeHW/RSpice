@@ -50,8 +50,10 @@ impl Feature for CodeFeature {
     type Session = WorkbenchSession;
     type Handles = crate::workbench::documents::code_workspace::CodeHandles;
     /// The Netlist inspector offers the tuning sandbox while the dispatcher
-    /// would open it.
-    const FOREIGN_AVAILABILITY: &'static [CommandKey] = &[ids::TUNING];
+    /// would open it, and the deck page's toolbar offers Run or Stop while
+    /// the dispatcher would run or stop, stating Stop's refusal in its words.
+    const FOREIGN_AVAILABILITY: &'static [CommandKey] =
+        &[ids::TUNING, ids::RUN_SIMULATION, ids::STOP_SIMULATION];
 
     fn register(registry: &mut FeatureRegistry<Self>) {
         registry.commands::<CodeCommand>();

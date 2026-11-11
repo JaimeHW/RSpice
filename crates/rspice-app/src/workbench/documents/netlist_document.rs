@@ -55,8 +55,8 @@ pub(crate) use comparison::{
 };
 pub(crate) use comparison::{compare_generated_revision, compare_owned_revision};
 pub use diagnostics::{DiagnosticSeverity, control_disposition_summary};
-pub(crate) use editor::editor_id;
 pub use editor::show as show_editor;
+pub(crate) use editor::{editor_id, editor_id_in};
 pub(crate) use executed_deck::run_snapshot_source_in;
 pub use executed_deck::{ExecutedDeckSelection, ExecutedDeckVerification};
 pub(crate) use source_index::{root_deck_source_index, visible_source_index_in};

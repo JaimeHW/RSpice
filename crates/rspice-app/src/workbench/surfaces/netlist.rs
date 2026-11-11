@@ -167,7 +167,11 @@ pub(in crate::workbench) fn prepare_workspace(app: &mut RSpiceApp) {
 
 pub(in crate::workbench) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
     handle_netlist_file_drop(ui.ctx(), app);
-    let toolbar = toolbar::code_toolbar(ui, app);
+    let (toolbar, pressed) =
+        toolbar::code_toolbar(ui, &mut features::cx_with_foreign_answers(app, |_| true));
+    if let Some(pressed) = pressed {
+        toolbar::run_app_toolbar_action(app, pressed);
+    }
     // The strip aligns to the toolbar's own content rect, so the two rows keep
     // one padding and one edge rather than each deriving a width. The strip
     // states the run and reports what was clicked; routing that click is this
