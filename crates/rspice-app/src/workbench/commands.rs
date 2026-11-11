@@ -8,6 +8,10 @@ use crate::schematic::view::schematic_symbol_context;
 use crate::schematic::view::selection_transform::{
     SelectionTransform, transform_selection_on_active_sheet,
 };
+use crate::workbench::app::actions::{
+    copy_selected_symbol_shape, delete_selected_symbol_item, duplicate_selected_symbol_shape,
+    paste_symbol_shape, select_all_symbol_items,
+};
 use crate::workbench::app::{
     copy_active_schematic_selection, cut_schematic_selection, delete_schematic_selection,
     duplicate_schematic_selection, select_all_schematic_objects,
@@ -323,7 +327,14 @@ impl Command {
             Self::Redo => app.action_edit_redo(),
             Self::Cut => {
                 if active_symbol_editor(app) {
-                    app.delete_selected_symbol_item(true);
+                    let modal_open = app.state.application_modal_open();
+                    delete_selected_symbol_item(
+                        &mut app.state.design.symbol,
+                        &mut app.state.model,
+                        &mut app.state.workbench,
+                        modal_open,
+                        true,
+                    );
                 } else {
                     cut_schematic_selection(
                         &mut app.state.design.schematic_clipboard,
@@ -336,7 +347,11 @@ impl Command {
                 if app.route_command_key(ids::COPY) {
                     // The workspace in front copied what it has selected.
                 } else if active_symbol_editor(app) {
-                    app.copy_selected_symbol_shape();
+                    copy_selected_symbol_shape(
+                        &mut app.state.design.symbol,
+                        &app.state.model,
+                        &mut app.state.workbench,
+                    );
                 } else {
                     crate::schematic::view::sheet_visibility::retain_selection_on_active_sheet(
                         &mut app.state,
@@ -349,14 +364,30 @@ impl Command {
             }
             Self::Paste => {
                 if active_symbol_editor(app) {
-                    app.paste_symbol_shape();
+                    let modal_open = app.state.application_modal_open();
+                    paste_symbol_shape(
+                        &mut app.state.design.symbol,
+                        &mut app.state.model,
+                        &mut app.state.workbench,
+                        app.state.design.canvas_hover,
+                        app.state.design.canvas_view_center,
+                        modal_open,
+                    );
                 } else {
                     app.action_edit_paste();
                 }
             }
             Self::Duplicate => {
                 if active_symbol_editor(app) {
-                    app.duplicate_selected_symbol_shape();
+                    let modal_open = app.state.application_modal_open();
+                    duplicate_selected_symbol_shape(
+                        &mut app.state.design.symbol,
+                        &mut app.state.model,
+                        &mut app.state.workbench,
+                        app.state.design.canvas_hover,
+                        app.state.design.canvas_view_center,
+                        modal_open,
+                    );
                 } else {
                     duplicate_schematic_selection(
                         app.state.design.floating_copy_parts(),
@@ -367,14 +398,25 @@ impl Command {
             }
             Self::Delete => {
                 if active_symbol_editor(app) {
-                    app.delete_selected_symbol_item(false);
+                    let modal_open = app.state.application_modal_open();
+                    delete_selected_symbol_item(
+                        &mut app.state.design.symbol,
+                        &mut app.state.model,
+                        &mut app.state.workbench,
+                        modal_open,
+                        false,
+                    );
                 } else {
                     delete_schematic_selection(&mut app.state.model, &mut app.state.workbench);
                 }
             }
             Self::SelectAll => {
                 if active_symbol_editor(app) {
-                    app.select_all_symbol_items();
+                    select_all_symbol_items(
+                        &mut app.state.design.symbol,
+                        &app.state.model,
+                        &mut app.state.workbench,
+                    );
                 } else {
                     select_all_schematic_objects(
                         app.state.design.schematic_selection_filter,

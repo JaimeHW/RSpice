@@ -235,7 +235,11 @@ fn queued_symbol_commands_recheck_source_selection_tool_clipboard_and_authority(
     ] {
         let mut app = open_symbol();
         app.state.design.symbol.editor.select_shape(0);
-        app.copy_selected_symbol_shape();
+        copy_selected_symbol_shape(
+            &mut app.state.design.symbol,
+            &app.state.model,
+            &mut app.state.workbench,
+        );
         let request = edit_request(
             &app.state,
             SymbolEditAction::Paste {

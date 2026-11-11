@@ -16,6 +16,10 @@ pub(crate) use rspice_app_sheets::workbench::app::actions::sheets;
 pub(in crate::workbench) mod stimulus;
 pub(in crate::workbench) mod stimulus_placement;
 mod symbol;
+pub(crate) use symbol::{
+    copy_selected_symbol_shape, delete_selected_symbol_item, duplicate_selected_symbol_shape,
+    paste_symbol_shape, select_all_symbol_items,
+};
 pub(crate) mod tuning_staging;
 pub(in crate::workbench) mod veriloga_placement;
 pub(in crate::workbench) mod veriloga_symbol;
