@@ -286,7 +286,8 @@ fn resolve(state: &mut AppState) -> Option<Stage> {
         .stimulus_library
         .get(&name)?
         .clone();
-    let timing = crate::workbench::app::actions::property_edit::stimulus_preview_timing(state);
+    let timing =
+        crate::workbench::app::actions::property_edit::stimulus_preview_timing(&state.model);
     let editor = &mut state.design.stimulus_editor;
     let draft = editor.draft_for(&saved);
     let working = draft.working().clone();

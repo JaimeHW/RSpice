@@ -89,7 +89,8 @@ pub(in crate::workbench) fn show(ui: &mut Ui, state: &mut AppState) {
     // sixty-four samples per definition per frame to draw a picture the cache
     // is already holding.
     let mut browser = std::mem::take(&mut state.design.stimulus_browser);
-    let timing = crate::workbench::app::actions::property_edit::stimulus_preview_timing(state);
+    let timing =
+        crate::workbench::app::actions::property_edit::stimulus_preview_timing(&state.model);
     browser.minis(&state.model.workspace.content.stimulus_library, timing);
     let tally = stimulus_actions::design_adopter_tally(state);
     let counts = scope_counts(state, &tally);

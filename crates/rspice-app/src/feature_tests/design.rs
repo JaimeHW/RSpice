@@ -385,7 +385,8 @@ fn stimulus_link_opens_and_draws_in_the_frame() {
         .expect("the source is placed")
         .spice_instance_name();
     crate::workbench::app::open_stimulus_link(
-        &mut app.state,
+        &mut app.state.design.stimulus_link,
+        &app.state.model,
         id,
         crate::workbench::app::StimulusLinkMode::Extract,
     )

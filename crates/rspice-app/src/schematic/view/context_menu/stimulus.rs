@@ -112,14 +112,24 @@ pub(super) fn execute(action: ContextAction, state: &mut AppState) {
         return;
     };
     let outcome = match action {
-        ContextAction::AdoptStimulus => {
-            open_stimulus_link(state, component_id, StimulusLinkMode::Adopt).map(|()| None)
-        }
-        ContextAction::SaveStimulus => {
-            open_stimulus_link(state, component_id, StimulusLinkMode::Extract).map(|()| None)
-        }
+        ContextAction::AdoptStimulus => open_stimulus_link(
+            &mut state.design.stimulus_link,
+            &state.model,
+            component_id,
+            StimulusLinkMode::Adopt,
+        )
+        .map(|()| None),
+        ContextAction::SaveStimulus => open_stimulus_link(
+            &mut state.design.stimulus_link,
+            &state.model,
+            component_id,
+            StimulusLinkMode::Extract,
+        )
+        .map(|()| None),
         ContextAction::ReadoptStimulus => match definition {
-            Some(definition) => commit_readoption(state, component_id, &definition).map(Some),
+            Some(definition) => {
+                commit_readoption(&mut state.model, component_id, &definition).map(Some)
+            }
             None => Ok(None),
         },
         ContextAction::OpenStimulusDefinition => {

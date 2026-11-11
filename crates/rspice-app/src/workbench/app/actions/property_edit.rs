@@ -741,7 +741,7 @@ pub(crate) fn open_property_editor(state: &mut AppState, component_id: u64) {
                     .data_root()
                     .map(std::path::Path::to_path_buf),
             )
-            .with_preview_timing(stimulus_preview_timing(state)),
+            .with_preview_timing(stimulus_preview_timing(&state.model)),
         );
     } else {
         log::warn!("No property sheet found for {:?}", component_type);
@@ -755,21 +755,16 @@ pub(crate) fn open_property_editor(state: &mut AppState, component_id: u64) {
 /// a transient yet gets the setup's own defaults, which is what a run would use
 /// if the user added one and changed nothing, and the card says the numbers came
 /// from there rather than from an analysis.
-pub(in crate::workbench) fn stimulus_preview_timing(state: &AppState) -> PreviewTiming {
-    let authored = state
-        .model
-        .sim_setup
-        .analysis_plan
-        .as_ref()
-        .and_then(|plan| {
-            plan.instances()
-                .iter()
-                .filter(|instance| instance.enabled())
-                .find_map(|instance| match instance.draft() {
-                    AnalysisDraft::Transient(setup) => Some(setup.clone()),
-                    _ => None,
-                })
-        });
+pub(in crate::workbench) fn stimulus_preview_timing(model: &Model) -> PreviewTiming {
+    let authored = model.sim_setup.analysis_plan.as_ref().and_then(|plan| {
+        plan.instances()
+            .iter()
+            .filter(|instance| instance.enabled())
+            .find_map(|instance| match instance.draft() {
+                AnalysisDraft::Transient(setup) => Some(setup.clone()),
+                _ => None,
+            })
+    });
     let from_analysis = authored.is_some();
     let setup = authored.unwrap_or_default();
     let seconds = |text: &str| crate::quantity::parse_engineering_value(text).ok();
@@ -991,14 +986,14 @@ mod tests {
     #[test]
     fn the_preview_reads_the_plans_transient_and_falls_back_when_there_is_none() {
         let mut state = AppState::default();
-        let planned = stimulus_preview_timing(&state);
+        let planned = stimulus_preview_timing(&state.model);
         assert!(
             planned.from_analysis,
             "a new project's plan opens with a transient in it"
         );
 
         state.model.sim_setup.analysis_plan = None;
-        let fallback = stimulus_preview_timing(&state);
+        let fallback = stimulus_preview_timing(&state.model);
         assert_eq!(fallback, PreviewTiming::default());
         assert!(!fallback.from_analysis);
     }

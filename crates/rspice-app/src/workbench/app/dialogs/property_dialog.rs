@@ -213,7 +213,12 @@ pub fn render_property_dialog(
             };
             if let Some(component_id) = state.design.tabbed_property_dialog.component_id {
                 state.design.tabbed_property_dialog.close();
-                if let Err(refusal) = open_stimulus_link(state, component_id, mode) {
+                if let Err(refusal) = open_stimulus_link(
+                    &mut state.design.stimulus_link,
+                    &state.model,
+                    component_id,
+                    mode,
+                ) {
                     state.prompt(refusal);
                 }
             }
@@ -238,7 +243,7 @@ pub fn render_property_dialog(
             if let (Some(component_id), Some(definition)) =
                 (state.design.tabbed_property_dialog.component_id, definition)
             {
-                match commit_readoption(state, component_id, &definition) {
+                match commit_readoption(&mut state.model, component_id, &definition) {
                     Ok(line) => {
                         state.prompt(line);
                         // Reopened rather than patched in place: the copy is a

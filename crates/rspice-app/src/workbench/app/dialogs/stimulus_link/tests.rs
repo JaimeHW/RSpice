@@ -462,7 +462,13 @@ fn the_list_minis_are_evaluated_once_per_definition_revision() {
 #[test]
 fn extraction_publishes_the_instance_card_and_leaves_it_adopted() {
     let (mut app, id) = fixture();
-    open_stimulus_link(&mut app.state, id, StimulusLinkMode::Extract).expect("opens");
+    open_stimulus_link(
+        &mut app.state.design.stimulus_link,
+        &app.state.model,
+        id,
+        StimulusLinkMode::Extract,
+    )
+    .expect("opens");
     assert_eq!(app.state.design.stimulus_link.name, "v1_pulse");
     app.state.design.stimulus_link.purpose = "bench clock".to_owned();
 
@@ -505,7 +511,13 @@ fn extraction_publishes_the_instance_card_and_leaves_it_adopted() {
 #[test]
 fn a_refused_extraction_leaves_both_the_library_and_the_instance_as_they_were() {
     let (mut app, id) = fixture();
-    open_stimulus_link(&mut app.state, id, StimulusLinkMode::Extract).expect("opens");
+    open_stimulus_link(
+        &mut app.state.design.stimulus_link,
+        &app.state.model,
+        id,
+        StimulusLinkMode::Extract,
+    )
+    .expect("opens");
     let held = app.state.model.workspace.content.stimulus_library.clone();
 
     // A name the library already holds is refused before anything moves.
@@ -558,7 +570,13 @@ fn an_extraction_leaves_the_project_with_unsaved_changes() {
         "the fixture starts from an accepted baseline"
     );
 
-    open_stimulus_link(&mut app.state, id, StimulusLinkMode::Extract).expect("opens");
+    open_stimulus_link(
+        &mut app.state.design.stimulus_link,
+        &app.state.model,
+        id,
+        StimulusLinkMode::Extract,
+    )
+    .expect("opens");
     commit_extraction(&mut app.state, id).expect("the extraction commits");
 
     assert!(has_unsaved_changes(&app.state));
@@ -596,8 +614,13 @@ fn adopt_refuses_to_open_over_an_empty_library() {
         .model
         .schematic
         .add_component(ComponentType::VoltageSourcePulse, Point::new(40, 40));
-    let refusal = open_stimulus_link(&mut app.state, id, StimulusLinkMode::Adopt)
-        .expect_err("there is nothing to adopt");
+    let refusal = open_stimulus_link(
+        &mut app.state.design.stimulus_link,
+        &app.state.model,
+        id,
+        StimulusLinkMode::Adopt,
+    )
+    .expect_err("there is nothing to adopt");
     assert!(
         refusal.contains("holds no stimulus definitions"),
         "{refusal}"
@@ -620,7 +643,13 @@ fn adopt_opens_on_the_definition_the_instance_already_carries() {
         .expect("held");
     commit_adoption(&mut app.state.model, id, &held).expect("adopted");
 
-    open_stimulus_link(&mut app.state, id, StimulusLinkMode::Adopt).expect("opens");
+    open_stimulus_link(
+        &mut app.state.design.stimulus_link,
+        &app.state.model,
+        id,
+        StimulusLinkMode::Adopt,
+    )
+    .expect("opens");
     assert_eq!(
         app.state.design.stimulus_link.pick.as_deref(),
         Some("sensor_drive")
@@ -896,7 +925,13 @@ impl Scene {
             Self::Save(_) => StimulusLinkMode::Extract,
             _ => StimulusLinkMode::Adopt,
         };
-        open_stimulus_link(&mut app.state, id, mode).expect("opens");
+        open_stimulus_link(
+            &mut app.state.design.stimulus_link,
+            &app.state.model,
+            id,
+            mode,
+        )
+        .expect("opens");
         match self {
             Self::Adopt(pick) => app.state.design.stimulus_link.pick = pick.map(str::to_owned),
             Self::Save(Some(name)) => {

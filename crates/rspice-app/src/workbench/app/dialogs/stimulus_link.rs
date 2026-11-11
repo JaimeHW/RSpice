@@ -135,12 +135,11 @@ impl StimulusLinkDialogState {
 }
 
 /// Whether one instance can be linked at all: an editable independent source.
-fn stimulus_link_target(state: &AppState, component_id: u64) -> Option<&Component> {
-    if state.schematic_edit_read_only() {
+fn stimulus_link_target(model: &Model, component_id: u64) -> Option<&Component> {
+    if model.schematic_edit_read_only() {
         return None;
     }
-    state
-        .model
+    model
         .schematic
         .document()
         .components
@@ -154,19 +153,19 @@ fn stimulus_link_target(state: &AppState, component_id: u64) -> Option<&Componen
 /// Returns the sentence to show the reader when it refuses, so the surface
 /// that asked states it where they are looking.
 pub(crate) fn open_stimulus_link(
-    state: &mut AppState,
+    link: &mut StimulusLinkDialogState,
+    model: &Model,
     component_id: u64,
     mode: StimulusLinkMode,
 ) -> Result<(), String> {
-    let Some(component) = stimulus_link_target(state, component_id) else {
+    let Some(component) = stimulus_link_target(model, component_id) else {
         return Err(
             "Select one independent source on an editable sheet to link it to the stimulus \
              library."
                 .to_owned(),
         );
     };
-    if mode == StimulusLinkMode::Adopt && state.model.workspace.content.stimulus_library.is_empty()
-    {
+    if mode == StimulusLinkMode::Adopt && model.workspace.content.stimulus_library.is_empty() {
         return Err(
             "This project holds no stimulus definitions yet. Save this source as one first, or \
              author one in the Stimulus Library workspace."
@@ -174,7 +173,7 @@ pub(crate) fn open_stimulus_link(
         );
     }
     let component = component.clone();
-    let nets = instance_nets(state, component_id);
+    let nets = instance_nets(model, component_id);
     let card = stimulus_realize::source_card_text(&component, [nets[0].as_str(), nets[1].as_str()])
         .unwrap_or_else(|errors| errors.join("; "));
     let reference = component.spice_instance_name();
@@ -191,24 +190,15 @@ pub(crate) fn open_stimulus_link(
         .stimulus_provenance
         .as_ref()
         .map(|provenance| provenance.definition.clone())
-        .filter(|name| {
-            state
-                .model
-                .workspace
-                .content
-                .stimulus_library
-                .get(name)
-                .is_some()
-        })
-        .or_else(|| first_equal_definition(state, &component));
-    let provenance = state
-        .model
+        .filter(|name| model.workspace.content.stimulus_library.get(name).is_some())
+        .or_else(|| first_equal_definition(model, &component));
+    let provenance = model
         .workspace
         .content
         .stimulus_library
         .provenance_state(&component);
 
-    state.design.stimulus_link = StimulusLinkDialogState {
+    *link = StimulusLinkDialogState {
         open: true,
         mode,
         component_id,
@@ -217,16 +207,14 @@ pub(crate) fn open_stimulus_link(
         reference,
         card,
         nets,
-        timing: crate::workbench::app::actions::property_edit::stimulus_preview_timing(state),
-        data_root: state
-            .model
+        timing: crate::workbench::app::actions::property_edit::stimulus_preview_timing(model),
+        data_root: model
             .workspace
             .content
             .project
             .data_root()
             .map(std::path::Path::to_path_buf),
-        retained_table: state
-            .model
+        retained_table: model
             .workspace
             .content
             .stimulus_library
@@ -242,9 +230,8 @@ pub(crate) fn open_stimulus_link(
 
 /// The definition an instance's own card already equals, if the library holds
 /// one. It is the pick a reader almost always wants when nothing was adopted.
-fn first_equal_definition(state: &AppState, component: &Component) -> Option<String> {
-    state
-        .model
+fn first_equal_definition(model: &Model, component: &Component) -> Option<String> {
+    model
         .workspace
         .content
         .stimulus_library
@@ -285,7 +272,7 @@ fn family_stem(component: &Component) -> Option<&'static str> {
 /// dialog header is the card in the deck. A source whose terminals are not
 /// both wired has no net names to show, and the detached pair the preview
 /// bridge uses stands in — the card's shape is what the reader is here for.
-fn instance_nets(state: &AppState, component_id: u64) -> [String; 2] {
+fn instance_nets(model: &Model, component_id: u64) -> [String; 2] {
     let detached = || {
         [
             stimulus_realize::DETACHED_NETS[0].to_owned(),
@@ -293,8 +280,8 @@ fn instance_nets(state: &AppState, component_id: u64) -> [String; 2] {
         ]
     };
     let sources = crate::simulation::placed_sources::placed_sources(
-        &state.model.schematic,
-        &state.model.workspace.content.stimulus_library,
+        &model.schematic,
+        &model.workspace.content.stimulus_library,
         None,
     );
     let Some(source) = sources
@@ -498,20 +485,18 @@ pub(crate) fn commit_adoption(
 /// pane, the schematic's own menu — comes through here, so one re-adoption is
 /// one transaction and one console sentence wherever it is asked for.
 pub(crate) fn commit_readoption(
-    state: &mut AppState,
+    model: &mut Model,
     component_id: u64,
     definition: &str,
 ) -> Result<String, String> {
-    let held = state
-        .model
+    let held = model
         .workspace
         .content
         .stimulus_library
         .get(definition)
         .cloned()
         .ok_or_else(|| format!("This project defines no '{definition}' to re-adopt."))?;
-    let expected = state
-        .model
+    let expected = model
         .schematic
         .document()
         .components
@@ -522,9 +507,7 @@ pub(crate) fn commit_readoption(
     let mut candidate = expected.clone();
     held.readopt_onto(&mut candidate)?;
     let reference = candidate.spice_instance_name();
-    state
-        .model
-        .edit_component_transaction(&expected, candidate, "re-adopt stimulus definition")?;
+    model.edit_component_transaction(&expected, candidate, "re-adopt stimulus definition")?;
     Ok(format!(
         "{reference} re-adopted {definition} r{}; its card is the library's again.",
         held.revision()
@@ -585,8 +568,22 @@ fn commit_extraction(
 
 /// Open the Stimulus Library workspace on one definition.
 pub(crate) fn open_stimulus_definition(state: &mut AppState, name: &str) {
-    state.design.selected_stimulus_definition = Some(name.to_owned());
-    state.workbench.activate(Workspace::Stimulus);
+    show_stimulus_definition(
+        &mut state.design.selected_stimulus_definition,
+        &mut state.workbench,
+        name,
+    );
+}
+
+/// Select one definition in the Stimulus Library and bring its workspace
+/// forward.
+pub(crate) fn show_stimulus_definition(
+    selected: &mut Option<String>,
+    workbench: &mut WorkbenchSession,
+    name: &str,
+) {
+    *selected = Some(name.to_owned());
+    workbench.activate(Workspace::Stimulus);
 }
 
 #[cfg(test)]
