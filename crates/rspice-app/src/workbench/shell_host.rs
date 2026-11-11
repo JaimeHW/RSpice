@@ -30,6 +30,7 @@ use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::chrome::title_bar::application_menus::{self, ApplicationMenu};
 use crate::workbench::chrome::title_bar::menu_entries::{MenuEntry, menu_keys};
 use crate::workbench::cloud::CloudFeature;
+use crate::workbench::code::CodeFeature;
 use crate::workbench::commands::vocabulary::{
     Command, CommandRegistry, command_registry, legacy_command,
 };
@@ -244,8 +245,7 @@ impl Host for RSpiceApp {
             }
             // A workspace's own inspector section.
             Point::Inspector(InspectorScope::Workspace(workspace)) => {
-                use crate::workbench::docks::inspector::code_workspace::code_workspace_inspector;
-                use crate::workbench::docks::inspector::{design, stimulus, symbol, veriloga};
+                use crate::workbench::docks::inspector::{design, stimulus, symbol};
 
                 match workspace {
                     // What the reader asked of the project inspector is
@@ -270,7 +270,7 @@ impl Host for RSpiceApp {
                         if app.state.model.workspace.content.active_view_type()
                             == crate::state::ViewType::VerilogA =>
                     {
-                        veriloga::show(ui, app);
+                        features::show_inspector::<CodeFeature>(app, ui);
                     }
                     // A hand-off the inspector raised into another
                     // workspace is answered once it has drawn.
@@ -289,7 +289,15 @@ impl Host for RSpiceApp {
                     }
                     Workspace::Verify => features::show_inspector::<SimulateFeature>(app, ui),
                     Workspace::Models => features::show_inspector::<ModelsFeature>(app, ui),
-                    Workspace::Netlist => code_workspace_inspector(ui, app),
+                    // Tuning the deck, asked of the Netlist inspector, is
+                    // answered once it has drawn.
+                    Workspace::Netlist => {
+                        features::show_inspector_reading::<CodeFeature>(app, ui, |app| {
+                            app.state.code.code_workspace.page
+                                == crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist
+                        });
+                        app.after_contribution();
+                    }
                 }
             }
             // The section that inspects a workspace's document itself: the

@@ -2,6 +2,7 @@
 //! only when the deck needs attention.
 
 use super::*;
+use crate::workbench::AppState;
 
 #[test]
 fn netlist_diagnostic_locations_are_one_based_and_exact() {
@@ -30,7 +31,7 @@ fn generated_provenance_speaks_only_when_the_deck_is_not_the_schematic() {
         .model
         .netlist_artifacts
         .current_generation_input_digest = Some(input);
-    assert_eq!(generated_state(&state), None);
+    assert_eq!(generated_state(&state.model), None);
 
     state
         .model
@@ -38,13 +39,13 @@ fn generated_provenance_speaks_only_when_the_deck_is_not_the_schematic() {
         .current_generation_input_digest =
         Some(crate::product::ContentDigest::from_bytes([0x32; 32]));
     assert_eq!(
-        generated_state(&state),
+        generated_state(&state.model),
         Some(("Older than the schematic", Problem::Warning))
     );
 
     state.model.netlist_artifacts.generated_source.clear();
     assert_eq!(
-        generated_state(&state),
+        generated_state(&state.model),
         Some(("Not generated yet", Problem::Warning))
     );
 }
@@ -67,9 +68,15 @@ fn owned_provenance_requires_exact_saved_and_validated_bytes() {
 
     // Saved and validated is the ordinary state, and so is a dirty project —
     // the document tab's marker owns that one.
-    assert_eq!(owned_source_state(&state, digest), None);
+    assert_eq!(
+        owned_source_state(&state.model, &state.code.netlist, digest),
+        None
+    );
     state.model.workspace.content.netlist_source_dirty = true;
-    assert_eq!(owned_source_state(&state, digest), None);
+    assert_eq!(
+        owned_source_state(&state.model, &state.code.netlist, digest),
+        None
+    );
 
     // Edited since the validation receipt was taken: the receipt no longer
     // describes these bytes, and the panel says so.
@@ -80,5 +87,8 @@ fn owned_provenance_requires_exact_saved_and_validated_bytes() {
         .netlist_content
         .push_str("* edit\n");
     let edited = crate::state::content_digest(&state.model.simulation.source.netlist_content);
-    assert_eq!(owned_source_state(&state, edited), Some("Not checked yet"));
+    assert_eq!(
+        owned_source_state(&state.model, &state.code.netlist, edited),
+        Some("Not checked yet")
+    );
 }

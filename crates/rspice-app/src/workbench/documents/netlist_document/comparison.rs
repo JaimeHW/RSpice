@@ -256,10 +256,12 @@ pub(crate) fn run_deck_snapshot_run_id_in(runs: &RunsState) -> Option<u64> {
 /// identifier, not translated copy, and it names the run so two snapshots from
 /// different runs can never be mistaken for one document.
 pub(crate) fn run_deck_snapshot_artifact_name(state: &AppState) -> String {
-    format!(
-        "run-{}.sp",
-        state.runs.manual_run.last_run_id.unwrap_or_default()
-    )
+    run_deck_snapshot_artifact_name_in(&state.runs)
+}
+
+/// [`run_deck_snapshot_artifact_name`], over the runs.
+pub(crate) fn run_deck_snapshot_artifact_name_in(runs: &RunsState) -> String {
+    format!("run-{}.sp", runs.manual_run.last_run_id.unwrap_or_default())
 }
 
 /// Open the deck a completed manual run consumed, pinned to that run.

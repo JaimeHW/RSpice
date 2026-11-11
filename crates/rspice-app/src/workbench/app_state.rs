@@ -418,62 +418,11 @@ impl AppState {
 
     /// User-facing reason the Netlist workspace cannot run the current deck.
     pub fn manual_deck_run_block_reason(&self) -> Option<String> {
-        if self.model.simulation.execution.has_active_execution() {
-            return Some("A simulation execution is already active".to_string());
-        }
-        let active_document =
-            crate::workbench::documents::netlist_document::effective_active_document(self);
-        if self.code.netlist.active_dependency_identity.is_some() {
-            return Some(
-                self.workbench
-                    .messages()
-                    .text(crate::workbench::MessageId::NetlistDependencyCannotRun),
-            );
-        }
-        let source = crate::workbench::documents::netlist_document::working_deck_source(self);
-        if source.trim().is_empty() {
-            return Some("Enter a netlist before running".to_string());
-        }
-        if active_document
-            == crate::workbench::documents::netlist_document::ActiveNetlistDocument::GeneratedDiff
-        {
-            return Some("Generated comparison documents cannot be executed".to_owned());
-        }
-        if active_document
-            == crate::workbench::documents::netlist_document::ActiveNetlistDocument::RunSnapshot
-        {
-            return Some(
-                "The deck a completed run used is sealed with that run; return to the working deck to run it again."
-                    .to_owned(),
-            );
-        }
-        let current_digest = crate::state::content_digest(source);
-        if active_document
-            == crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated
-            && (self.model.netlist_artifacts.generation_error.is_some()
-                || self.model.netlist_artifacts.generated_input_digest
-                    != self.model.netlist_artifacts.current_generation_input_digest)
-        {
-            return Some(
-                self.model
-                    .netlist_artifacts
-                    .generation_error
-                    .clone()
-                    .unwrap_or_else(|| "Regenerate the stale netlist before running".to_owned()),
-            );
-        }
-        let publication =
-            crate::workbench::documents::netlist_document::owned_netlist_publication_state(
-                self,
-                current_digest,
-            );
-        if !publication.validated {
-            return Some(
-                "Validate the current source and project revision before running".to_owned(),
-            );
-        }
-        debug_assert!(publication.run_eligible);
-        None
+        crate::workbench::documents::netlist_document::manual_deck_run_block_reason_in(
+            &self.model,
+            &self.code.netlist,
+            self.workbench.messages(),
+        )
     }
 
     /// Request a Netlist workspace run, queuing one re-run if the engine is busy.

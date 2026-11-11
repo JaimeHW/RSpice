@@ -10,9 +10,12 @@
 use crate::product::{ContentDigest, ProjectId};
 use crate::state::command_catalog::CommandPlatform;
 use crate::state::{ProjectSourceLanguage, ProjectSourceOwner};
+use crate::workbench::MessageCatalog;
 use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::documents::code_workspace::{CodeWorkspacePage, CodeWorkspaceRuntimeState};
-use crate::workbench::{RSpiceApp, state::Workspace};
+use crate::workbench::documents::netlist_document::NetlistDocumentState;
+use crate::workbench::state::Workspace;
+use rspice_app_runs::workbench::slots::runs::RunsState;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CodeDocumentKind {
@@ -57,32 +60,37 @@ pub(crate) struct CodeCommandContext {
 }
 
 /// The code document in front of the reader: the Netlist workspace's visible
-/// page, or a Verilog-A cell view the Design workspace is showing.
+/// page, or a Verilog-A cell view the Design workspace is showing. It reads
+/// the model, the netlist editor's and the Code & Automation page's state,
+/// the runs that sealed a deck, the workspace in front, whether a project is
+/// open and the message catalogue.
 #[must_use]
-pub(crate) fn resolve(app: &RSpiceApp) -> Option<CodeCommandContext> {
-    if !app.state.platform.project_lifecycle.is_open() {
+pub(crate) fn resolve(
+    model: &Model,
+    netlist: &NetlistDocumentState,
+    code: &CodeWorkspaceRuntimeState,
+    runs: &RunsState,
+    workspace: Workspace,
+    project_open: bool,
+    messages: MessageCatalog,
+) -> Option<CodeCommandContext> {
+    if !project_open {
         return None;
     }
-    match app.state.workbench.workspace {
-        Workspace::Netlist => match app.state.code.code_workspace.page {
-            CodeWorkspacePage::Netlist => resolve_netlist(app),
-            CodeWorkspacePage::Automation => resolve_project_source(
-                &app.state.model,
-                &app.state.code.code_workspace,
-                ProjectSourceLanguage::RSpiceAutomation,
-            ),
+    match workspace {
+        Workspace::Netlist => match code.page {
+            CodeWorkspacePage::Netlist => resolve_netlist(model, netlist, runs, messages),
+            CodeWorkspacePage::Automation => {
+                resolve_project_source(model, code, ProjectSourceLanguage::RSpiceAutomation)
+            }
         },
         workspace
             if crate::workbench::documents::code_workspace::design_hosts_veriloga(
                 workspace,
-                &app.state.model.workspace,
+                &model.workspace,
             ) =>
         {
-            resolve_project_source(
-                &app.state.model,
-                &app.state.code.code_workspace,
-                ProjectSourceLanguage::VerilogA,
-            )
+            resolve_project_source(model, code, ProjectSourceLanguage::VerilogA)
         }
         _ => None,
     }
@@ -143,31 +151,32 @@ pub(crate) fn veriloga_compile_refusal(
     }
 }
 
-fn resolve_netlist(app: &RSpiceApp) -> Option<CodeCommandContext> {
+fn resolve_netlist(
+    model: &Model,
+    netlist: &NetlistDocumentState,
+    runs: &RunsState,
+    messages: MessageCatalog,
+) -> Option<CodeCommandContext> {
     use crate::workbench::documents::netlist_document::{
-        ActiveNetlistDocument, active_dependency, active_dependency_is_owned,
+        ActiveNetlistDocument, active_dependency_in, active_dependency_is_owned_in,
     };
 
-    let state = &app.state;
-    let project_id = state.model.workspace.content.project.id();
-    let active = state.code.netlist.active_document;
-    if let Some(dependency) = active_dependency(state) {
+    let project_id = model.workspace.content.project.id();
+    let active = netlist.active_document;
+    if let Some(dependency) = active_dependency_in(model, netlist) {
         let source = dependency.source()?;
-        let owned = active_dependency_is_owned(state);
-        let root = state.code.netlist.active_dependency_root?;
-        if root != active || state.model.simulation.source.netlist_content != source {
+        let owned = active_dependency_is_owned_in(model, netlist);
+        let root = netlist.active_dependency_root?;
+        if root != active || model.simulation.source.netlist_content != source {
             return None;
         }
         let root_document = match root {
-            ActiveNetlistDocument::Generated => {
-                state.model.netlist_artifacts.generated_document.as_ref()
-            }
-            ActiveNetlistDocument::OwnedSource => state.code.netlist.owned_document.as_ref(),
+            ActiveNetlistDocument::Generated => model.netlist_artifacts.generated_document.as_ref(),
+            ActiveNetlistDocument::OwnedSource => netlist.owned_document.as_ref(),
             ActiveNetlistDocument::GeneratedDiff | ActiveNetlistDocument::RunSnapshot => None,
         }?;
         let owned_descriptor = owned.then(|| {
-            state
-                .model
+            model
                 .workspace
                 .content
                 .netlist_descriptor
@@ -210,9 +219,9 @@ fn resolve_netlist(app: &RSpiceApp) -> Option<CodeCommandContext> {
     let (document_kind, ownership, document_identity, logical_path, revision, source, compare) =
         match active {
             ActiveNetlistDocument::Generated => {
-                let document = state.model.netlist_artifacts.generated_document.as_ref()?;
-                if state.model.netlist_artifacts.generated_source != document.source()
-                    || state.model.simulation.source.netlist_content != document.source()
+                let document = model.netlist_artifacts.generated_document.as_ref()?;
+                if model.netlist_artifacts.generated_source != document.source()
+                    || model.simulation.source.netlist_content != document.source()
                 {
                     return None;
                 }
@@ -223,16 +232,15 @@ fn resolve_netlist(app: &RSpiceApp) -> Option<CodeCommandContext> {
                     "generated.sp".to_owned(),
                     document.revision().get(),
                     document.source(),
-                    !state.code.netlist.generated_history.is_empty(),
+                    !netlist.generated_history.is_empty(),
                 )
             }
             ActiveNetlistDocument::OwnedSource => {
-                let document = state.code.netlist.owned_document.as_ref()?;
-                let descriptor = state.model.workspace.content.netlist_descriptor.as_ref()?;
-                let canonical = state.model.workspace.content.netlist_document.as_ref()?;
-                if state.model.workspace.content.netlist_source.as_deref()
-                    != Some(document.source())
-                    || state.model.simulation.source.netlist_content != document.source()
+                let document = netlist.owned_document.as_ref()?;
+                let descriptor = model.workspace.content.netlist_descriptor.as_ref()?;
+                let canonical = model.workspace.content.netlist_document.as_ref()?;
+                if model.workspace.content.netlist_source.as_deref() != Some(document.source())
+                    || model.simulation.source.netlist_content != document.source()
                     || canonical.id() != document.id()
                     || canonical.revision() != document.revision()
                     || canonical.source() != document.source()
@@ -250,13 +258,11 @@ fn resolve_netlist(app: &RSpiceApp) -> Option<CodeCommandContext> {
                 )
             }
             ActiveNetlistDocument::GeneratedDiff => {
-                let document = state.model.netlist_artifacts.generated_document.as_ref()?;
-                if state.code.netlist.generated_diff_source.is_empty() {
+                let document = model.netlist_artifacts.generated_document.as_ref()?;
+                if netlist.generated_diff_source.is_empty() {
                     return None;
                 }
-                if state.model.simulation.source.netlist_content
-                    != state.code.netlist.generated_diff_source
-                {
+                if model.simulation.source.netlist_content != netlist.generated_diff_source {
                     return None;
                 }
                 (
@@ -265,7 +271,7 @@ fn resolve_netlist(app: &RSpiceApp) -> Option<CodeCommandContext> {
                     format!("{}:comparison", document.id()),
                     "generated.diff".to_owned(),
                     document.revision().get(),
-                    state.code.netlist.generated_diff_source.as_str(),
+                    netlist.generated_diff_source.as_str(),
                     false,
                 )
             }
@@ -275,13 +281,14 @@ fn resolve_netlist(app: &RSpiceApp) -> Option<CodeCommandContext> {
             // the run's own receipt rather than restated here.
             ActiveNetlistDocument::RunSnapshot => {
                 let run_id =
-                    crate::workbench::documents::netlist_document::run_deck_snapshot_run_id(state)?;
-                let snapshot = state.runs.manual_run.last_run_buffer.as_deref()?;
-                if state.model.simulation.source.netlist_content != snapshot {
+                    crate::workbench::documents::netlist_document::run_deck_snapshot_run_id_in(
+                        runs,
+                    )?;
+                let snapshot = runs.manual_run.last_run_buffer.as_deref()?;
+                if model.simulation.source.netlist_content != snapshot {
                     return None;
                 }
-                let revision = state
-                    .model
+                let revision = model
                     .simulation
                     .retained
                     .run_by_sequence(run_id)?
@@ -292,8 +299,8 @@ fn resolve_netlist(app: &RSpiceApp) -> Option<CodeCommandContext> {
                     CodeDocumentKind::NetlistRunSnapshot,
                     CodeDocumentOwnership::GovernedReadOnly,
                     format!("run:{run_id}"),
-                    crate::workbench::documents::netlist_document::run_deck_snapshot_artifact_name(
-                        state,
+                    crate::workbench::documents::netlist_document::run_deck_snapshot_artifact_name_in(
+                        runs,
                     ),
                     revision,
                     snapshot,
@@ -303,14 +310,11 @@ fn resolve_netlist(app: &RSpiceApp) -> Option<CodeCommandContext> {
         };
     let source_is_present = !source.trim().is_empty();
     let generated_current = active != ActiveNetlistDocument::Generated
-        || (state.model.netlist_artifacts.generation_error.is_none()
-            && state.model.netlist_artifacts.generated_input_digest
-                == state
-                    .model
-                    .netlist_artifacts
-                    .current_generation_input_digest);
-    let editable = ownership == CodeDocumentOwnership::ProjectOwned
-        && !state.model.safe_mode.project_read_only();
+        || (model.netlist_artifacts.generation_error.is_none()
+            && model.netlist_artifacts.generated_input_digest
+                == model.netlist_artifacts.current_generation_input_digest);
+    let editable =
+        ownership == CodeDocumentOwnership::ProjectOwned && !model.safe_mode.project_read_only();
     Some(CodeCommandContext {
         project_id,
         document_kind,
@@ -333,7 +337,10 @@ fn resolve_netlist(app: &RSpiceApp) -> Option<CodeCommandContext> {
                     document_kind,
                     CodeDocumentKind::NetlistComparison | CodeDocumentKind::NetlistRunSnapshot
                 )
-                && state.manual_deck_run_block_reason().is_none(),
+                && crate::workbench::documents::netlist_document::manual_deck_run_block_reason_in(
+                    model, netlist, messages,
+                )
+                .is_none(),
             compare_revisions: compare,
             save: editable,
         },

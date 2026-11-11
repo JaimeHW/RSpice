@@ -4,11 +4,13 @@
 //! What it has not registered yet, the shell's legacy tables still serve.
 
 pub(crate) mod commands;
+mod docks;
 
 use egui::Context;
 
 use crate::io::NetlistFormat;
 use crate::state::ViewType;
+use crate::state::command_catalog::CommandKey;
 use crate::workbench::app::actions::veriloga_symbol::can_open_veriloga_symbol;
 use crate::workbench::app::dialogs::library::new_veriloga_device::{
     self, new_veriloga_device_available_in, open_new_veriloga_device_form_in,
@@ -29,10 +31,10 @@ use crate::workbench::documents::code_workspace::{
     netlist_page_shown,
 };
 use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
-use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec};
+use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec, ids};
 use crate::workbench::framework::dialogs::DialogKey;
 use crate::workbench::framework::feature::{
-    CommandSet, Cx, Feature, FeatureDialog, FeatureRegistry, NoHandles, Reads,
+    CommandSet, Cx, Feature, FeatureDialog, FeatureInspector, FeatureRegistry, NoHandles, Reads,
 };
 use crate::workbench::slots::CodeState;
 use crate::workbench::state::{WorkbenchSession, Workspace};
@@ -45,10 +47,18 @@ impl Feature for CodeFeature {
     type State = CodeState;
     type Session = WorkbenchSession;
     type Handles = NoHandles;
+    /// The Netlist inspector offers the tuning sandbox while the dispatcher
+    /// would open it.
+    const FOREIGN_AVAILABILITY: &'static [CommandKey] = &[ids::TUNING];
 
     fn register(registry: &mut FeatureRegistry<Self>) {
         registry.commands::<CodeCommand>();
         registry.dialogs(DIALOGS);
+        registry.inspector(FeatureInspector {
+            show: docks::show_inspector,
+            // Nothing the section draws holds an edit for the shell to commit.
+            commit_pending_edit: |_, _| {},
+        });
     }
 }
 

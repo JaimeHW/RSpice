@@ -7,42 +7,64 @@ use rspice_ui_kit::panels::{Problem, code_inspector_section, panel_inset, sectio
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::workbench::{AppState, MessageId, RSpiceApp};
+use crate::workbench::commands::code_context::{CodeDocumentOwnership, resolve};
+use crate::workbench::documents::code_workspace::{CodeWorkspacePage, CodeWorkspaceRuntimeState};
+use crate::workbench::documents::netlist_document::{NetlistDocumentState, active_dependency_in};
+use crate::workbench::state::Workspace;
+use crate::workbench::{MessageCatalog, MessageId};
+use rspice_app_runs::workbench::slots::runs::RunsState;
+use rspice_app_state::workbench::app_state::model::Model;
 
 use super::super::super::design_system::{WorkbenchIcon, property_row, property_row_problem};
 
-pub(in crate::workbench) fn code_workspace_inspector(ui: &mut Ui, app: &mut RSpiceApp) {
-    if app.state.code.code_workspace.page
-        == crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist
-    {
-        netlist(ui, app);
-        return;
+/// What the Netlist workspace's inspector reads: the model, the netlist
+/// editor's and the Code & Automation page's state, the runs that sealed a
+/// deck, the workspace in front, whether a project is open, the message
+/// catalogue and whether tuning the deck's parameters would run.
+#[derive(Clone, Copy)]
+pub(crate) struct CodeInspector<'a> {
+    pub(crate) model: &'a Model,
+    pub(crate) netlist: &'a NetlistDocumentState,
+    pub(crate) code_workspace: &'a CodeWorkspaceRuntimeState,
+    pub(crate) runs: &'a RunsState,
+    pub(crate) workspace: Workspace,
+    pub(crate) project_open: bool,
+    pub(crate) messages: MessageCatalog,
+    pub(crate) tuning_available: bool,
+}
+
+/// Draw the inspector of the page in front, and say whether the reader asked
+/// to tune the deck's parameters.
+pub(in crate::workbench) fn code_workspace_inspector(
+    ui: &mut Ui,
+    reads: &CodeInspector<'_>,
+) -> bool {
+    if reads.code_workspace.page == CodeWorkspacePage::Netlist {
+        return netlist(ui, reads);
     }
 
-    let messages = app.state.workbench.messages();
-    let Some(context) = crate::workbench::commands::code_context::resolve(app) else {
+    let messages = reads.messages;
+    let Some(context) = resolve(
+        reads.model,
+        reads.netlist,
+        reads.code_workspace,
+        reads.runs,
+        reads.workspace,
+        reads.project_open,
+        messages,
+    ) else {
         muted_inspector_copy(
             ui,
             &messages.text(MessageId::CodeInspectorContextUnavailable),
         );
-        return;
+        return false;
     };
     let ownership = messages.text(match context.ownership {
-        crate::workbench::commands::code_context::CodeDocumentOwnership::GeneratedReadOnly => {
-            MessageId::CodeInspectorGeneratedReadOnly
-        }
-        crate::workbench::commands::code_context::CodeDocumentOwnership::ProjectOwned => {
-            MessageId::CodeInspectorProjectOwned
-        }
-        crate::workbench::commands::code_context::CodeDocumentOwnership::ExternalReadOnly => {
-            MessageId::CodeInspectorExternalReadOnly
-        }
-        crate::workbench::commands::code_context::CodeDocumentOwnership::ComparisonReadOnly => {
-            MessageId::CodeInspectorComparisonReadOnly
-        }
-        crate::workbench::commands::code_context::CodeDocumentOwnership::GovernedReadOnly => {
-            MessageId::CodeInspectorGovernedReadOnly
-        }
+        CodeDocumentOwnership::GeneratedReadOnly => MessageId::CodeInspectorGeneratedReadOnly,
+        CodeDocumentOwnership::ProjectOwned => MessageId::CodeInspectorProjectOwned,
+        CodeDocumentOwnership::ExternalReadOnly => MessageId::CodeInspectorExternalReadOnly,
+        CodeDocumentOwnership::ComparisonReadOnly => MessageId::CodeInspectorComparisonReadOnly,
+        CodeDocumentOwnership::GovernedReadOnly => MessageId::CodeInspectorGovernedReadOnly,
     });
     // Whether this document can be edited, and nothing else. The page tab
     // names the page, the document tab names the path, and the toolbar's own
@@ -53,16 +75,17 @@ pub(in crate::workbench) fn code_workspace_inspector(ui: &mut Ui, app: &mut RSpi
         &messages.text(MessageId::CodeInspectorOwnership),
         &ownership,
     );
+    false
 }
 
-fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
+fn netlist(ui: &mut Ui, reads: &CodeInspector<'_>) -> bool {
     use crate::workbench::documents::netlist_document::{
         ActiveNetlistDocument, DiagnosticSeverity,
     };
 
-    let messages = app.state.workbench.messages();
+    let messages = reads.messages;
     const DIAGNOSTIC_PREVIEW_LIMIT: usize = 20;
-    let diagnostics = std::sync::Arc::clone(&app.state.code.netlist.diagnostics);
+    let diagnostics = std::sync::Arc::clone(&reads.netlist.diagnostics);
     let summary = diagnostics.summary();
 
     if summary.current_errors > 0 {
@@ -134,8 +157,8 @@ fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
     }
 
     // The sandbox itself, rather than a paragraph recommending it.
-    let tuning = crate::workbench::framework::command_registry::ids::TUNING;
-    if app.command_availability(tuning).is_available() {
+    let mut tune = false;
+    if reads.tuning_available {
         section_header(
             ui,
             &messages.text(crate::workbench::MessageId::NetlistParameterExploration),
@@ -147,19 +170,20 @@ fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
         .show(ui)
         .clicked()
         {
-            app.execute_command_key(tuning);
+            tune = true;
         }
     }
 
-    if crate::workbench::documents::netlist_document::active_dependency(&app.state).is_some() {
-        dependency_provenance(ui, &app.state);
+    if active_dependency_in(reads.model, reads.netlist).is_some() {
+        dependency_provenance(ui, reads);
     } else {
-        match app.state.code.netlist.active_document {
-            ActiveNetlistDocument::OwnedSource => owned_source_provenance(ui, &app.state),
+        match reads.netlist.active_document {
+            ActiveNetlistDocument::OwnedSource => owned_source_provenance(ui, reads),
             ActiveNetlistDocument::RunSnapshot => {} // its run's, stated by the strip over the deck
-            _ => generated_provenance(ui, &app.state),
+            _ => generated_provenance(ui, reads.model),
         }
     }
+    tune
 }
 
 fn diagnostic_row(ui: &mut Ui, diagnostic: &crate::state::netlist_diagnostics::Diagnostic) {
@@ -248,9 +272,8 @@ fn empty_diagnostic_row(ui: &mut Ui, message: &str) {
 /// counters and hashes a designer cannot act on; the generator's healthy
 /// states reported success. What is left is the cellview that produced the
 /// deck, and a marked line when the deck is not the one the schematic implies.
-fn generated_provenance(ui: &mut Ui, state: &AppState) {
-    let source = state
-        .model
+fn generated_provenance(ui: &mut Ui, model: &Model) {
+    let source = model
         .netlist_artifacts
         .generated_document
         .as_ref()
@@ -260,7 +283,7 @@ fn generated_provenance(ui: &mut Ui, state: &AppState) {
     if let Some(source) = source {
         property_row(ui, "Generated from", &source);
     }
-    if let Some((label, problem)) = generated_state(state) {
+    if let Some((label, problem)) = generated_state(model) {
         property_row_problem(ui, "State", label, Some(problem));
     }
 }
@@ -271,17 +294,16 @@ fn generated_provenance(ui: &mut Ui, state: &AppState) {
 /// two digests were five counters and hashes with nothing a designer can do
 /// about them; the document state reported success in catalog words. What is
 /// left is the file and a marked line when the deck needs attention.
-fn owned_source_provenance(ui: &mut Ui, state: &AppState) {
-    if let Some(path) = state.model.workspace.content.netlist_source_path.as_ref() {
+fn owned_source_provenance(ui: &mut Ui, reads: &CodeInspector<'_>) {
+    if let Some(path) = reads.model.workspace.content.netlist_source_path.as_ref() {
         property_row(ui, "File", &path.display().to_string());
     }
-    let digest = crate::state::content_digest(&state.model.simulation.source.netlist_content);
-    if let Some(label) = owned_source_state(state, digest) {
+    let digest = crate::state::content_digest(&reads.model.simulation.source.netlist_content);
+    if let Some(label) = owned_source_state(reads.model, reads.netlist, digest) {
         // The same split the deck toolbar paints, and for the same reason:
         // not yet checked is where the deck is, not a verdict on it. A file
         // that changed underneath the editor is the one to act on.
-        let problem = state
-            .code
+        let problem = reads
             .netlist
             .external_change
             .is_some()
@@ -290,12 +312,11 @@ fn owned_source_provenance(ui: &mut Ui, state: &AppState) {
     }
 }
 
-fn dependency_provenance(ui: &mut Ui, state: &AppState) {
-    let Some(dependency) = crate::workbench::documents::netlist_document::active_dependency(state)
-    else {
+fn dependency_provenance(ui: &mut Ui, reads: &CodeInspector<'_>) {
+    let Some(dependency) = active_dependency_in(reads.model, reads.netlist) else {
         return;
     };
-    let messages = state.workbench.messages();
+    let messages = reads.messages;
     section_header(
         ui,
         &messages.text(crate::workbench::MessageId::NetlistIncludeProvenance),
@@ -351,7 +372,7 @@ fn dependency_provenance(ui: &mut Ui, state: &AppState) {
             parent.display_name(),
         );
     }
-    let owned = state
+    let owned = reads
         .model
         .workspace
         .content
@@ -385,8 +406,8 @@ fn dependency_provenance(ui: &mut Ui, state: &AppState) {
 
 /// What is wrong with the generated deck, or nothing when it matches the
 /// schematic. A deck that is current — validated or not — says nothing.
-fn generated_state(state: &AppState) -> Option<(&'static str, Problem)> {
-    let netlist = &state.model.netlist_artifacts;
+fn generated_state(model: &Model) -> Option<(&'static str, Problem)> {
+    let netlist = &model.netlist_artifacts;
     if netlist.generated_source.is_empty() {
         Some(("Not generated yet", Problem::Warning))
     } else if netlist.generation_error.is_some() {
@@ -402,11 +423,14 @@ fn generated_state(state: &AppState) -> Option<(&'static str, Problem)> {
 }
 
 fn owned_source_state(
-    state: &AppState,
+    model: &Model,
+    netlist: &NetlistDocumentState,
     digest: crate::product::ContentDigest,
 ) -> Option<&'static str> {
-    crate::workbench::documents::netlist_document::owned_netlist_publication_state(state, digest)
-        .label()
+    crate::workbench::documents::netlist_document::owned_netlist_publication_state_in(
+        model, netlist, digest,
+    )
+    .label()
 }
 
 fn diagnostic_location(diagnostic: &crate::state::netlist_diagnostics::Diagnostic) -> String {

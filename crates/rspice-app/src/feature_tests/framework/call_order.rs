@@ -770,6 +770,29 @@ const SIMULATE_CONTRIBUTIONS: &[Step] = &[
     ),
 ];
 
+/// The shell's `contribute`, at the code feature's points. The inspector
+/// draws in the feature's context on a Verilog-A view the Design workspace
+/// shows and on the Netlist workspace: a Verilog-A view's raises nothing, so
+/// it answers nothing where it draws; the Netlist inspector, holding the
+/// dispatcher's answers while the deck's page is in front, has the command it
+/// raised answered once it has drawn, before the next point draws.
+const CODE_CONTRIBUTIONS: &[Step] = &[(
+    "workspace inspector",
+    &[
+        "== crate::state::ViewType::VerilogA =>\
+         {\
+         features::show_inspector::<CodeFeature>(app, ui);\
+         }",
+        "Workspace::Netlist => {\
+         features::show_inspector_reading::<CodeFeature>(app, ui, |app| {\
+         app.state.code.code_workspace.page\
+         == crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist\
+         });\
+         app.after_contribution();\
+         }",
+    ],
+)];
+
 /// The shell's `contribute`, at the project feature's points: the open
 /// workspace's chrome, the navigator and the inspector draw in the feature's
 /// context and the toolbars over the workbench host. The chrome has what it
@@ -1457,6 +1480,15 @@ fn a_simulate_surface_or_dock_has_the_command_it_raised_answered_once_it_draws()
         "RSpiceApp::contribute",
         &body(SHELL_HOST, "fn contribute("),
         SIMULATE_CONTRIBUTIONS,
+    );
+}
+
+#[test]
+fn a_code_dock_has_what_it_raised_answered_once_it_draws() {
+    assert_runs_in_order(
+        "RSpiceApp::contribute",
+        &body(SHELL_HOST, "fn contribute("),
+        CODE_CONTRIBUTIONS,
     );
 }
 

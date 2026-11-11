@@ -50,7 +50,8 @@ pub use comparison::{
 };
 pub(crate) use comparison::{
     close_run_deck_snapshot, open_netlist_comparison, open_run_deck_snapshot_in,
-    run_deck_snapshot_artifact_name, run_deck_snapshot_run_id, run_deck_snapshot_run_id_in,
+    run_deck_snapshot_artifact_name, run_deck_snapshot_artifact_name_in, run_deck_snapshot_run_id,
+    run_deck_snapshot_run_id_in,
 };
 pub use diagnostics::{DiagnosticSeverity, control_disposition_summary};
 pub(crate) use editor::editor_id;
@@ -101,25 +102,34 @@ pub(crate) fn owned_netlist_publication_state(
     state: &AppState,
     digest: crate::product::ContentDigest,
 ) -> OwnedNetlistPublicationState {
-    let saved_digest = state.code.netlist.externally_saved_content_digest;
+    owned_netlist_publication_state_in(&state.model, &state.code.netlist, digest)
+}
+
+/// [`owned_netlist_publication_state`], over the model and the netlist
+/// editor's state.
+#[must_use]
+pub(crate) fn owned_netlist_publication_state_in(
+    model: &Model,
+    netlist: &NetlistDocumentState,
+    digest: crate::product::ContentDigest,
+) -> OwnedNetlistPublicationState {
+    let saved_digest = netlist.externally_saved_content_digest;
     let saved = saved_digest == Some(digest);
-    let validated = state
-        .model
+    let validated = model
         .netlist_artifacts
         .validation
         .as_ref()
         .is_some_and(|receipt| {
             receipt.visible_content_digest == digest
-                && receipt.project_revision
-                    == state.model.workspace.content.project.revision().get()
+                && receipt.project_revision == model.workspace.content.project.revision().get()
         });
     OwnedNetlistPublicationState {
-        project_modified: state.model.workspace.content.netlist_source_dirty,
+        project_modified: model.workspace.content.netlist_source_dirty,
         source_modified: saved_digest.is_some() && !saved,
         published_before: saved_digest.is_some(),
         saved,
         validated,
-        external_change_pending: state.code.netlist.external_change.is_some(),
+        external_change_pending: netlist.external_change.is_some(),
         // Execution consumes the exact validated in-memory snapshot. External
         // synchronization is deliberately independent from run readiness.
         run_eligible: validated,
@@ -800,9 +810,18 @@ pub fn active_netlist_source_is_editable(state: &AppState) -> bool {
 /// source outranks the generated primary; afterwards the active document is
 /// the answer and nothing infers one from the visible buffer.
 pub(crate) fn effective_active_document(state: &AppState) -> ActiveNetlistDocument {
-    if state.code.netlist.active_document_initialized {
-        state.code.netlist.active_document
-    } else if state.model.workspace.content.netlist_source.is_some() {
+    effective_active_document_in(&state.model, &state.code.netlist)
+}
+
+/// [`effective_active_document`], over the model and the netlist editor's
+/// state.
+pub(crate) fn effective_active_document_in(
+    model: &Model,
+    netlist: &NetlistDocumentState,
+) -> ActiveNetlistDocument {
+    if netlist.active_document_initialized {
+        netlist.active_document
+    } else if model.workspace.content.netlist_source.is_some() {
         ActiveNetlistDocument::OwnedSource
     } else {
         ActiveNetlistDocument::Generated
@@ -815,17 +834,73 @@ pub(crate) fn effective_active_document(state: &AppState) -> ActiveNetlistDocume
 /// decides whether the deck may run, the other whether the deck still matches
 /// the run that already happened.
 pub(crate) fn working_deck_source(state: &AppState) -> &str {
-    if effective_active_document(state) == ActiveNetlistDocument::OwnedSource {
-        state
-            .model
+    working_deck_source_in(&state.model, &state.code.netlist)
+}
+
+/// [`working_deck_source`], over the model and the netlist editor's state.
+pub(crate) fn working_deck_source_in<'a>(
+    model: &'a Model,
+    netlist: &NetlistDocumentState,
+) -> &'a str {
+    if effective_active_document_in(model, netlist) == ActiveNetlistDocument::OwnedSource {
+        model
             .workspace
             .content
             .netlist_source
             .as_deref()
-            .unwrap_or(state.model.simulation.source.netlist_content.as_str())
+            .unwrap_or(model.simulation.source.netlist_content.as_str())
     } else {
-        state.model.simulation.source.netlist_content.as_str()
+        model.simulation.source.netlist_content.as_str()
     }
+}
+
+/// User-facing reason the Netlist workspace cannot run the current deck. It
+/// reads the model, the netlist editor's state and the message catalogue.
+pub(crate) fn manual_deck_run_block_reason_in(
+    model: &Model,
+    netlist: &NetlistDocumentState,
+    messages: crate::workbench::MessageCatalog,
+) -> Option<String> {
+    if model.simulation.execution.has_active_execution() {
+        return Some("A simulation execution is already active".to_string());
+    }
+    let active_document = effective_active_document_in(model, netlist);
+    if netlist.active_dependency_identity.is_some() {
+        return Some(messages.text(crate::workbench::MessageId::NetlistDependencyCannotRun));
+    }
+    let source = working_deck_source_in(model, netlist);
+    if source.trim().is_empty() {
+        return Some("Enter a netlist before running".to_string());
+    }
+    if active_document == ActiveNetlistDocument::GeneratedDiff {
+        return Some("Generated comparison documents cannot be executed".to_owned());
+    }
+    if active_document == ActiveNetlistDocument::RunSnapshot {
+        return Some(
+            "The deck a completed run used is sealed with that run; return to the working deck to run it again."
+                .to_owned(),
+        );
+    }
+    let current_digest = crate::state::content_digest(source);
+    if active_document == ActiveNetlistDocument::Generated
+        && (model.netlist_artifacts.generation_error.is_some()
+            || model.netlist_artifacts.generated_input_digest
+                != model.netlist_artifacts.current_generation_input_digest)
+    {
+        return Some(
+            model
+                .netlist_artifacts
+                .generation_error
+                .clone()
+                .unwrap_or_else(|| "Regenerate the stale netlist before running".to_owned()),
+        );
+    }
+    let publication = owned_netlist_publication_state_in(model, netlist, current_digest);
+    if !publication.validated {
+        return Some("Validate the current source and project revision before running".to_owned());
+    }
+    debug_assert!(publication.run_eligible);
+    None
 }
 
 /// Open a resolved direct or transitive dependency without changing its root
