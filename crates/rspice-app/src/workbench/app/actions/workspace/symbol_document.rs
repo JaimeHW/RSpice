@@ -23,7 +23,11 @@ use crate::state::{
     SYMBOL_DOCUMENT_METADATA_KEY, SymbolDocument, SymbolEditorMetadata,
 };
 use crate::ui::accessibility::counted;
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::state::WorkbenchSession;
+
+use super::read_only_master_message;
+use super::symbol_in_place::in_place_session;
 use crate::workbench::app_state::design_checks::location_key;
 use crate::workbench::app_state::diagnostic_store::{
     DiagnosticInputs, DiagnosticLevel, DiagnosticRecord, DiagnosticRoute, DiagnosticSubject,
@@ -53,16 +57,9 @@ pub struct SymbolUiState {
 }
 
 impl AppState {
+    /// [`symbol_editor_request_source`] for the session.
     pub(crate) fn symbol_editor_request_source(&self) -> SymbolRequestSource {
-        SymbolRequestSource {
-            project: self.model.workspace.content.project.id(),
-            document: self.model.workspace.content.active_view.clone(),
-            occurrence: self.model.workspace.content.active_occurrence().cloned(),
-            design_epoch: self.model.design_execution_epoch,
-            document_epoch: self.model.active_schematic_epoch,
-            library_revision: self.model.library_manager.revision(),
-            window: self.workbench.window_session.current().value(),
-        }
+        symbol_editor_request_source(&self.model, &self.workbench)
     }
 
     /// Project one retained view session into the active editor slot. Navigation
@@ -147,31 +144,12 @@ impl AppState {
             .symbol_ports(&self.model.workspace.content.active_view)
     }
 
+    /// [`load_active_symbol_editor_metadata`] for the session's model.
     pub(crate) fn load_active_symbol_editor_metadata(
         &self,
         document: &SymbolDocument,
     ) -> Result<SymbolEditorMetadata, String> {
-        self.model
-            .load_symbol_editor_metadata(&self.model.workspace.content.active_view, document)
-    }
-
-    fn active_symbol_snapshot(&self, fallback: &SymbolDocument) -> SymbolDocumentSnapshot {
-        let reference = &self.model.workspace.content.active_view;
-        let current_document = self.model.load_active_symbol_document().ok();
-        self.model
-            .library_manager
-            .get_library(&reference.library)
-            .and_then(|library| library.get_cell(&reference.cell))
-            .and_then(|cell| cell.get_view(&reference.view))
-            .map(|view| {
-                let preserve_missing_metadata =
-                    !view.metadata.contains_key(SYMBOL_DOCUMENT_METADATA_KEY)
-                        && current_document
-                            .as_ref()
-                            .is_some_and(|document| document == fallback);
-                symbol_snapshot_from_view(view, fallback, preserve_missing_metadata)
-            })
-            .unwrap_or_else(|| SymbolDocumentSnapshot::from_document(fallback))
+        load_active_symbol_editor_metadata(&self.model, document)
     }
 
     fn active_symbol_metadata_snapshot(&self, fallback: &SymbolDocument) -> SymbolDocumentSnapshot {
@@ -193,9 +171,8 @@ impl AppState {
         if self.active_view_read_only() {
             return Err(self.read_only_master_message());
         }
-        self.with_symbol_parent_edit(|state| {
-            let Some(()) = state
-                .model
+        with_symbol_parent_edit(&mut self.design.symbol, &mut self.model, |symbol, model| {
+            let Some(()) = model
                 .library_manager
                 .edit_library(&reference.library)
                 .and_then(|mut library| {
@@ -204,189 +181,57 @@ impl AppState {
             else {
                 return Err(format!("View '{}' not found", reference.display_path()));
             };
-            state.apply_symbol_parent_edit(&snapshot.document, &snapshot.renames);
-            state.apply_symbol_pin_renames(&reference, &snapshot.renames);
+            apply_symbol_parent_edit(symbol, model, &snapshot.document, &snapshot.renames);
+            apply_symbol_pin_renames(model, &reference, &snapshot.renames);
             Ok(())
         })?;
         self.model.workspace.content.set_active_dirty(true);
         Ok(())
     }
 
+    /// [`store_active_symbol_document`] for the session.
     pub(crate) fn store_active_symbol_document(
         &mut self,
         document: &SymbolDocument,
     ) -> Result<(), String> {
-        let reference = self.model.workspace.content.active_view.clone();
-        if self.active_view_read_only() {
-            return Err(self.read_only_master_message());
-        }
-        self.with_symbol_parent_edit(|state| {
-            let Some(result) = state
-                .model
-                .library_manager
-                .edit_library(&reference.library)
-                .and_then(|mut library| {
-                    library.store_symbol_document(&reference.cell, &reference.view, document)
-                })
-            else {
-                return Err(format!("View '{}' not found", reference.display_path()));
-            };
-            result?;
-            state.apply_symbol_parent_edit(document, &BTreeMap::new());
-            Ok(())
-        })?;
-        self.model.workspace.content.set_active_dirty(true);
-        Ok(())
+        store_active_symbol_document(&mut self.design.symbol, &mut self.model, document)
     }
 
-    /// Run one complete symbol edit: its parent wiring is resolved before it
-    /// and recorded in each parent's history after it.
-    fn with_symbol_parent_edit<R>(&mut self, edit: impl FnOnce(&mut Self) -> R) -> R {
-        self.begin_symbol_parent_edit();
-        let result = edit(self);
-        self.finish_symbol_parent_edit();
-        result
-    }
-
-    /// Hold, in every open schematic that places the active symbol's cell,
-    /// the wire vertices each instance terminal holds now.
-    ///
-    /// Any edit still held open is finished first: its end never arrived, and
-    /// resolving over it would read its half-moved vertices as the baseline.
-    pub(crate) fn begin_symbol_parent_edit(&mut self) {
-        self.finish_symbol_parent_edit();
-        let Ok(base) = self.model.load_active_symbol_document() else {
-            return;
-        };
-        let key = self.model.workspace.content.active_key();
-        // Edited in place, the parent's wires are in view and a pin is moved
-        // against them: one left behind is the open-pin mark's to show, not
-        // a wire the edit drags along unseen.
-        if self.symbol_in_place().is_some() {
-            let parents = Vec::new();
-            self.design
-                .symbol
-                .history
-                .begin_parent_edit(key, SymbolParentEdit { base, parents });
-            return;
-        }
-        let reference = self.model.workspace.content.active_view.clone();
-        let content = &self.model.workspace.content;
-        let mut parents: Vec<SymbolParentWiring> = content
-            .schematic_buffers
-            .iter()
-            .filter_map(|(key, design)| {
-                parent_wiring(
-                    Some(key.clone()),
-                    design.document(),
-                    content.design_management.sheet_catalog(key),
-                    &reference,
-                    &base,
-                )
-            })
-            .collect();
-        let active_key = content.active_schematic_reference().key();
-        parents.extend(parent_wiring(
-            None,
-            self.model.schematic.document(),
-            content.design_management.sheet_catalog(&active_key),
-            &reference,
-            &base,
-        ));
-        self.design
-            .symbol
-            .history
-            .begin_parent_edit(key, SymbolParentEdit { base, parents });
-    }
-
-    /// Carry the held wire ends to where `document` puts their terminals.
-    fn apply_symbol_parent_edit(
-        &mut self,
-        document: &SymbolDocument,
-        renames: &BTreeMap<String, String>,
-    ) {
-        let key = self.model.workspace.content.active_key();
-        let Some(edit) = self.design.symbol.history.parent_edit(&key) else {
-            return;
-        };
-        let pin_remaps = symbol_pin_position_remaps(&edit.base, document, renames);
-        for parent in &edit.parents {
-            match &parent.buffer {
-                Some(buffer) => {
-                    self.model
-                        .workspace
-                        .for_each_schematic_editor_mut(|key, schematic| {
-                            if key == buffer {
-                                schematic.apply_symbol_instance_wiring(&parent.wiring, &pin_remaps);
-                            }
-                        });
-                }
-                None => {
-                    self.model
-                        .schematic
-                        .apply_symbol_instance_wiring(&parent.wiring, &pin_remaps);
-                }
-            }
-        }
-    }
-
-    /// Close the held edit: each parent it changed gets one undo record
-    /// spanning the whole edit.
+    /// [`finish_symbol_parent_edit`] for the session.
     pub(crate) fn finish_symbol_parent_edit(&mut self) {
-        const DESCRIPTION: &str = "move wires with symbol pins";
-        let Some(edit) = self.design.symbol.history.take_parent_edit() else {
-            return;
-        };
-        for parent in edit.parents {
-            match parent.buffer {
-                Some(buffer) => {
-                    let mut before = Some(parent.before);
-                    self.model
-                        .workspace
-                        .for_each_schematic_editor_mut(|key, schematic| {
-                            if key == buffer
-                                && let Some(before) = before.take()
-                            {
-                                schematic.commit_undo_from(before, DESCRIPTION);
-                            }
-                        });
-                }
-                None => {
-                    self.model
-                        .schematic
-                        .commit_undo_from(parent.before, DESCRIPTION);
-                }
-            }
-        }
+        finish_symbol_parent_edit(&mut self.design.symbol, &mut self.model);
     }
 
-    /// Atomically publish symbol geometry and its authoring-only metadata.
+    /// [`store_active_symbol_editor_bundle`] for the session.
     pub(crate) fn store_active_symbol_editor_bundle(
         &mut self,
         document: &SymbolDocument,
         metadata: &SymbolEditorMetadata,
     ) -> Result<(), String> {
-        self.commit_active_symbol_edit(document, metadata, &SymbolCommitIntent::default())
+        store_active_symbol_editor_bundle(
+            &mut self.design.symbol,
+            &mut self.model,
+            &mut self.workbench,
+            document,
+            metadata,
+        )
     }
 
-    /// Publish symbol geometry and metadata, carrying what the author meant.
-    ///
-    /// The intent is the half of the edit that comparing two documents
-    /// cannot recover. A pin rename reaches every instance from here and
-    /// nowhere else, because this is the one point at which the old name and
-    /// the new one are both still known.
+    /// [`commit_active_symbol_edit`] for the session.
     pub(crate) fn commit_active_symbol_edit(
         &mut self,
         document: &SymbolDocument,
         metadata: &SymbolEditorMetadata,
         intent: &SymbolCommitIntent,
     ) -> Result<(), String> {
-        if self.active_view_read_only() {
-            return Err(self.read_only_master_message());
-        }
-        self.with_symbol_parent_edit(|state| {
-            state.publish_active_symbol_edit(document, metadata, intent)
-        })
+        commit_active_symbol_edit(
+            &mut self.design.symbol,
+            &mut self.model,
+            &mut self.workbench,
+            document,
+            metadata,
+            intent,
+        )
     }
 
     /// Publish one frame of a canvas gesture.
@@ -405,50 +250,16 @@ impl AppState {
         }
         let key = self.model.workspace.content.active_key();
         if self.design.symbol.history.parent_edit(&key).is_none() {
-            self.begin_symbol_parent_edit();
+            begin_symbol_parent_edit(&mut self.design.symbol, &mut self.model);
         }
-        self.publish_active_symbol_edit(document, metadata, &SymbolCommitIntent::default())
-    }
-
-    fn publish_active_symbol_edit(
-        &mut self,
-        document: &SymbolDocument,
-        metadata: &SymbolEditorMetadata,
-        intent: &SymbolCommitIntent,
-    ) -> Result<(), String> {
-        let reference = self.model.workspace.content.active_view.clone();
-        let bundle = EncodedSymbolEditorBundle::encode(document, metadata)?;
-        let Some(()) = self
-            .model
-            .library_manager
-            .edit_library(&reference.library)
-            .and_then(|mut library| {
-                library.store_symbol_editor_bundle(&reference.cell, &reference.view, bundle)
-            })
-        else {
-            return Err(format!("View '{}' not found", reference.display_path()));
-        };
-
-        self.apply_symbol_parent_edit(document, &intent.renames);
-        let renamed = self.apply_symbol_pin_renames(&reference, &intent.renames);
-        if renamed > 0 {
-            self.prompt(format!(
-                "Renamed {} across placed instances of {}.",
-                counted(renamed, "instance terminal", "instance terminals"),
-                reference.display_path()
-            ));
-        }
-        // The undo entry this edit sits on top of has to be able to put the
-        // names back, so it carries the reverse of what was just applied.
-        if !intent.renames.is_empty() {
-            let key = self.model.workspace.content.active_key();
-            self.design
-                .symbol
-                .history
-                .record_inverse_renames(&key, &intent.renames);
-        }
-        self.model.workspace.content.set_active_dirty(true);
-        Ok(())
+        publish_active_symbol_edit(
+            &mut self.design.symbol,
+            &mut self.model,
+            &mut self.workbench,
+            document,
+            metadata,
+            &SymbolCommitIntent::default(),
+        )
     }
 
     /// The model definition the active symbol view is bound to, if any.
@@ -588,62 +399,16 @@ impl AppState {
             && !self.model.workspace.content.active_read_only_reference()
     }
 
-    /// Carry a pin rename to every placement of the cellview.
-    ///
-    /// An instance wires to a pin by name, in `WireConnection::terminal_name`
-    /// and in the binding's `terminal_order`. Leaving either behind after a
-    /// rename does not merely mislabel the connection — it detaches it, and
-    /// the netlist emits the instance with a terminal nothing drives.
-    /// Returns how many terminal names were rewritten.
-    fn apply_symbol_pin_renames(
-        &mut self,
-        reference: &CellViewRef,
-        renames: &BTreeMap<String, String>,
-    ) -> usize {
-        if renames.is_empty() {
-            return 0;
-        }
-        let lowered: BTreeMap<String, String> = renames
-            .iter()
-            .map(|(from, to)| (from.to_ascii_lowercase(), to.clone()))
-            .collect();
-        let mut renamed = 0;
-        self.model
-            .workspace
-            .for_each_schematic_editor_mut(|_, schematic| {
-                renamed += schematic.rename_instance_terminals(reference, &lowered);
-            });
-        renamed += self
-            .model
-            .schematic
-            .rename_instance_terminals(reference, &lowered);
-        renamed
-    }
-
+    /// [`record_symbol_edit`] for the session.
     pub(crate) fn record_symbol_edit(&mut self, before: &SymbolDocument) {
-        const MAX_SYMBOL_UNDO: usize = 128;
-        let key = self.model.workspace.content.active_key();
-        let snapshot = self.active_symbol_snapshot(before);
-        self.push_symbol_undo_snapshot(key, snapshot, MAX_SYMBOL_UNDO);
+        record_symbol_edit(&mut self.design.symbol, &self.model, before);
     }
 
     pub(super) fn record_symbol_metadata_edit(&mut self, before: &SymbolDocument) {
         const MAX_SYMBOL_UNDO: usize = 128;
         let key = self.model.workspace.content.active_key();
         let snapshot = self.active_symbol_metadata_snapshot(before);
-        self.push_symbol_undo_snapshot(key, snapshot, MAX_SYMBOL_UNDO);
-    }
-
-    fn push_symbol_undo_snapshot(
-        &mut self,
-        key: String,
-        snapshot: SymbolDocumentSnapshot,
-        max_len: usize,
-    ) {
-        self.design
-            .symbol
-            .history
-            .record_edit(key, snapshot, max_len);
+        push_symbol_undo_snapshot(&mut self.design.symbol, key, snapshot, MAX_SYMBOL_UNDO);
     }
 
     pub(crate) fn can_undo_active_symbol_document(&self) -> bool {
@@ -697,6 +462,326 @@ impl AppState {
         self.restore_active_symbol_snapshot(&next)?;
         Ok(true)
     }
+}
+
+pub(crate) fn symbol_editor_request_source(
+    model: &Model,
+    wb: &WorkbenchSession,
+) -> SymbolRequestSource {
+    SymbolRequestSource {
+        project: model.workspace.content.project.id(),
+        document: model.workspace.content.active_view.clone(),
+        occurrence: model.workspace.content.active_occurrence().cloned(),
+        design_epoch: model.design_execution_epoch,
+        document_epoch: model.active_schematic_epoch,
+        library_revision: model.library_manager.revision(),
+        window: wb.window_session.current().value(),
+    }
+}
+
+pub(crate) fn load_active_symbol_editor_metadata(
+    model: &Model,
+    document: &SymbolDocument,
+) -> Result<SymbolEditorMetadata, String> {
+    model.load_symbol_editor_metadata(&model.workspace.content.active_view, document)
+}
+
+fn active_symbol_snapshot(model: &Model, fallback: &SymbolDocument) -> SymbolDocumentSnapshot {
+    let reference = &model.workspace.content.active_view;
+    let current_document = model.load_active_symbol_document().ok();
+    model
+        .library_manager
+        .get_library(&reference.library)
+        .and_then(|library| library.get_cell(&reference.cell))
+        .and_then(|cell| cell.get_view(&reference.view))
+        .map(|view| {
+            let preserve_missing_metadata =
+                !view.metadata.contains_key(SYMBOL_DOCUMENT_METADATA_KEY)
+                    && current_document
+                        .as_ref()
+                        .is_some_and(|document| document == fallback);
+            symbol_snapshot_from_view(view, fallback, preserve_missing_metadata)
+        })
+        .unwrap_or_else(|| SymbolDocumentSnapshot::from_document(fallback))
+}
+
+pub(crate) fn store_active_symbol_document(
+    symbol: &mut SymbolUiState,
+    model: &mut Model,
+    document: &SymbolDocument,
+) -> Result<(), String> {
+    let reference = model.workspace.content.active_view.clone();
+    if model.active_view_read_only() {
+        return Err(read_only_master_message(model));
+    }
+    with_symbol_parent_edit(symbol, model, |symbol, model| {
+        let Some(result) = model
+            .library_manager
+            .edit_library(&reference.library)
+            .and_then(|mut library| {
+                library.store_symbol_document(&reference.cell, &reference.view, document)
+            })
+        else {
+            return Err(format!("View '{}' not found", reference.display_path()));
+        };
+        result?;
+        apply_symbol_parent_edit(symbol, model, document, &BTreeMap::new());
+        Ok(())
+    })?;
+    model.workspace.content.set_active_dirty(true);
+    Ok(())
+}
+
+/// Run one complete symbol edit: its parent wiring is resolved before it
+/// and recorded in each parent's history after it.
+fn with_symbol_parent_edit<R>(
+    symbol: &mut SymbolUiState,
+    model: &mut Model,
+    edit: impl FnOnce(&mut SymbolUiState, &mut Model) -> R,
+) -> R {
+    begin_symbol_parent_edit(symbol, model);
+    let result = edit(symbol, model);
+    finish_symbol_parent_edit(symbol, model);
+    result
+}
+
+/// Hold, in every open schematic that places the active symbol's cell,
+/// the wire vertices each instance terminal holds now.
+///
+/// Any edit still held open is finished first: its end never arrived, and
+/// resolving over it would read its half-moved vertices as the baseline.
+fn begin_symbol_parent_edit(symbol: &mut SymbolUiState, model: &mut Model) {
+    finish_symbol_parent_edit(symbol, model);
+    let Ok(base) = model.load_active_symbol_document() else {
+        return;
+    };
+    let key = model.workspace.content.active_key();
+    // Edited in place, the parent's wires are in view and a pin is moved
+    // against them: one left behind is the open-pin mark's to show, not
+    // a wire the edit drags along unseen.
+    if in_place_session(&symbol.in_place, model).is_some() {
+        let parents = Vec::new();
+        symbol
+            .history
+            .begin_parent_edit(key, SymbolParentEdit { base, parents });
+        return;
+    }
+    let reference = model.workspace.content.active_view.clone();
+    let content = &model.workspace.content;
+    let mut parents: Vec<SymbolParentWiring> = content
+        .schematic_buffers
+        .iter()
+        .filter_map(|(key, design)| {
+            parent_wiring(
+                Some(key.clone()),
+                design.document(),
+                content.design_management.sheet_catalog(key),
+                &reference,
+                &base,
+            )
+        })
+        .collect();
+    let active_key = content.active_schematic_reference().key();
+    parents.extend(parent_wiring(
+        None,
+        model.schematic.document(),
+        content.design_management.sheet_catalog(&active_key),
+        &reference,
+        &base,
+    ));
+    symbol
+        .history
+        .begin_parent_edit(key, SymbolParentEdit { base, parents });
+}
+
+/// Carry the held wire ends to where `document` puts their terminals.
+fn apply_symbol_parent_edit(
+    symbol: &SymbolUiState,
+    model: &mut Model,
+    document: &SymbolDocument,
+    renames: &BTreeMap<String, String>,
+) {
+    let key = model.workspace.content.active_key();
+    let Some(edit) = symbol.history.parent_edit(&key) else {
+        return;
+    };
+    let pin_remaps = symbol_pin_position_remaps(&edit.base, document, renames);
+    for parent in &edit.parents {
+        match &parent.buffer {
+            Some(buffer) => {
+                model
+                    .workspace
+                    .for_each_schematic_editor_mut(|key, schematic| {
+                        if key == buffer {
+                            schematic.apply_symbol_instance_wiring(&parent.wiring, &pin_remaps);
+                        }
+                    });
+            }
+            None => {
+                model
+                    .schematic
+                    .apply_symbol_instance_wiring(&parent.wiring, &pin_remaps);
+            }
+        }
+    }
+}
+
+/// Close the held edit: each parent it changed gets one undo record
+/// spanning the whole edit.
+pub(crate) fn finish_symbol_parent_edit(symbol: &mut SymbolUiState, model: &mut Model) {
+    const DESCRIPTION: &str = "move wires with symbol pins";
+    let Some(edit) = symbol.history.take_parent_edit() else {
+        return;
+    };
+    for parent in edit.parents {
+        match parent.buffer {
+            Some(buffer) => {
+                let mut before = Some(parent.before);
+                model
+                    .workspace
+                    .for_each_schematic_editor_mut(|key, schematic| {
+                        if key == buffer
+                            && let Some(before) = before.take()
+                        {
+                            schematic.commit_undo_from(before, DESCRIPTION);
+                        }
+                    });
+            }
+            None => {
+                model.schematic.commit_undo_from(parent.before, DESCRIPTION);
+            }
+        }
+    }
+}
+
+/// Atomically publish symbol geometry and its authoring-only metadata.
+pub(crate) fn store_active_symbol_editor_bundle(
+    symbol: &mut SymbolUiState,
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
+    document: &SymbolDocument,
+    metadata: &SymbolEditorMetadata,
+) -> Result<(), String> {
+    commit_active_symbol_edit(
+        symbol,
+        model,
+        wb,
+        document,
+        metadata,
+        &SymbolCommitIntent::default(),
+    )
+}
+
+/// Publish symbol geometry and metadata, carrying what the author meant.
+///
+/// The intent is the half of the edit that comparing two documents
+/// cannot recover. A pin rename reaches every instance from here and
+/// nowhere else, because this is the one point at which the old name and
+/// the new one are both still known.
+pub(crate) fn commit_active_symbol_edit(
+    symbol: &mut SymbolUiState,
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
+    document: &SymbolDocument,
+    metadata: &SymbolEditorMetadata,
+    intent: &SymbolCommitIntent,
+) -> Result<(), String> {
+    if model.active_view_read_only() {
+        return Err(read_only_master_message(model));
+    }
+    with_symbol_parent_edit(symbol, model, |symbol, model| {
+        publish_active_symbol_edit(symbol, model, wb, document, metadata, intent)
+    })
+}
+
+fn publish_active_symbol_edit(
+    symbol: &mut SymbolUiState,
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
+    document: &SymbolDocument,
+    metadata: &SymbolEditorMetadata,
+    intent: &SymbolCommitIntent,
+) -> Result<(), String> {
+    let reference = model.workspace.content.active_view.clone();
+    let bundle = EncodedSymbolEditorBundle::encode(document, metadata)?;
+    let Some(()) = model
+        .library_manager
+        .edit_library(&reference.library)
+        .and_then(|mut library| {
+            library.store_symbol_editor_bundle(&reference.cell, &reference.view, bundle)
+        })
+    else {
+        return Err(format!("View '{}' not found", reference.display_path()));
+    };
+
+    apply_symbol_parent_edit(symbol, model, document, &intent.renames);
+    let renamed = apply_symbol_pin_renames(model, &reference, &intent.renames);
+    if renamed > 0 {
+        wb.prompt(format!(
+            "Renamed {} across placed instances of {}.",
+            counted(renamed, "instance terminal", "instance terminals"),
+            reference.display_path()
+        ));
+    }
+    // The undo entry this edit sits on top of has to be able to put the
+    // names back, so it carries the reverse of what was just applied.
+    if !intent.renames.is_empty() {
+        let key = model.workspace.content.active_key();
+        symbol.history.record_inverse_renames(&key, &intent.renames);
+    }
+    model.workspace.content.set_active_dirty(true);
+    Ok(())
+}
+
+/// Carry a pin rename to every placement of the cellview.
+///
+/// An instance wires to a pin by name, in `WireConnection::terminal_name`
+/// and in the binding's `terminal_order`. Leaving either behind after a
+/// rename does not merely mislabel the connection — it detaches it, and
+/// the netlist emits the instance with a terminal nothing drives.
+/// Returns how many terminal names were rewritten.
+fn apply_symbol_pin_renames(
+    model: &mut Model,
+    reference: &CellViewRef,
+    renames: &BTreeMap<String, String>,
+) -> usize {
+    if renames.is_empty() {
+        return 0;
+    }
+    let lowered: BTreeMap<String, String> = renames
+        .iter()
+        .map(|(from, to)| (from.to_ascii_lowercase(), to.clone()))
+        .collect();
+    let mut renamed = 0;
+    model
+        .workspace
+        .for_each_schematic_editor_mut(|_, schematic| {
+            renamed += schematic.rename_instance_terminals(reference, &lowered);
+        });
+    renamed += model
+        .schematic
+        .rename_instance_terminals(reference, &lowered);
+    renamed
+}
+
+pub(crate) fn record_symbol_edit(
+    symbol: &mut SymbolUiState,
+    model: &Model,
+    before: &SymbolDocument,
+) {
+    const MAX_SYMBOL_UNDO: usize = 128;
+    let key = model.workspace.content.active_key();
+    let snapshot = active_symbol_snapshot(model, before);
+    push_symbol_undo_snapshot(symbol, key, snapshot, MAX_SYMBOL_UNDO);
+}
+
+fn push_symbol_undo_snapshot(
+    symbol: &mut SymbolUiState,
+    key: String,
+    snapshot: SymbolDocumentSnapshot,
+    max_len: usize,
+) {
+    symbol.history.record_edit(key, snapshot, max_len);
 }
 
 impl AppState {
