@@ -58,7 +58,7 @@ pub(crate) use editor::editor_id;
 pub use editor::show as show_editor;
 pub use executed_deck::{ExecutedDeckSelection, ExecutedDeckVerification};
 pub(crate) use executed_deck::{run_snapshot_source, run_snapshot_source_in};
-pub(crate) use source_index::{root_deck_source_index, visible_source_index};
+pub(crate) use source_index::{root_deck_source_index, visible_source_index_in};
 
 /// Exact, derived state of one project-owned netlist publication.
 ///
@@ -796,11 +796,21 @@ pub(crate) fn active_dependency_is_owned_in(model: &Model, netlist: &NetlistDocu
 /// Whether editor mutations are authorized for the exact visible source.
 #[must_use]
 pub fn active_netlist_source_is_editable(state: &AppState) -> bool {
-    if state.code.netlist.active_dependency_identity.is_some() {
-        active_dependency_is_owned(state)
+    active_netlist_source_is_editable_in(&state.model, &state.code.netlist)
+}
+
+/// [`active_netlist_source_is_editable`], over the model and the netlist
+/// editor's state.
+#[must_use]
+pub(crate) fn active_netlist_source_is_editable_in(
+    model: &Model,
+    netlist: &NetlistDocumentState,
+) -> bool {
+    if netlist.active_dependency_identity.is_some() {
+        active_dependency_is_owned_in(model, netlist)
     } else {
-        state.code.netlist.active_document == ActiveNetlistDocument::OwnedSource
-            && state.model.workspace.content.has_editable_netlist_source()
+        netlist.active_document == ActiveNetlistDocument::OwnedSource
+            && model.workspace.content.has_editable_netlist_source()
     }
 }
 
@@ -907,12 +917,35 @@ pub(crate) fn manual_deck_run_block_reason_in(
 /// document selection or ownership. Unresolved and stale identities fail
 /// closed and leave the current buffer unchanged.
 pub fn open_netlist_dependency(state: &mut AppState, logical_identity: &str) -> Result<(), String> {
-    let root = state
-        .code
-        .netlist
+    open_netlist_dependency_in(
+        &mut state.model,
+        &mut state.code.netlist,
+        &mut state.code.netlist_open_documents,
+        &mut state.runs,
+        logical_identity,
+    )
+}
+
+/// [`open_netlist_dependency`], over the model, the netlist editor's state,
+/// the include tabs the reader opened and the runs.
+pub(crate) fn open_netlist_dependency_in(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut HashSet<crate::workbench::state::WorkspaceDocumentId>,
+    runs: &mut RunsState,
+    logical_identity: &str,
+) -> Result<(), String> {
+    let root = netlist
         .active_dependency_root
-        .unwrap_or(state.code.netlist.active_document);
-    open_netlist_dependency_from_root(state, root, logical_identity)
+        .unwrap_or(netlist.active_document);
+    open_netlist_dependency_from_root_in(
+        model,
+        netlist,
+        open_documents,
+        runs,
+        root,
+        logical_identity,
+    )
 }
 
 pub(crate) fn open_netlist_dependency_from_root(
@@ -1243,13 +1276,8 @@ pub(crate) fn open_generated_primary_in(
 }
 
 /// Activate the retained project-owned root without creating or promoting a
-/// document. Document tabs use this exact transition so switching tabs never
-/// changes source ownership.
-pub(crate) fn open_owned_primary(state: &mut AppState) -> bool {
-    open_owned_primary_in(&mut state.model, &mut state.code.netlist)
-}
-
-/// [`open_owned_primary`], over the model and the netlist editor's state.
+/// document, over the model and the netlist editor's state. Document tabs use
+/// this exact transition so switching tabs never changes source ownership.
 pub(crate) fn open_owned_primary_in(model: &mut Model, netlist: &mut NetlistDocumentState) -> bool {
     let Some(document) = netlist.owned_document.as_ref().or(model
         .workspace

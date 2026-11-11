@@ -95,8 +95,8 @@ fn owned_dependency_state() -> AppState {
 fn the_visible_outline_is_parsed_once_per_change_and_never_reused_across_one() {
     let mut state = owned_dependency_state();
 
-    let first = visible_source_index(&mut state);
-    let again = visible_source_index(&mut state);
+    let first = visible_source_index_in(&state.model, &mut state.code.netlist);
+    let again = visible_source_index_in(&state.model, &mut state.code.netlist);
     assert!(
         std::sync::Arc::ptr_eq(&first, &again),
         "an unchanged buffer must not be parsed twice"
@@ -108,13 +108,13 @@ fn the_visible_outline_is_parsed_once_per_change_and_never_reused_across_one() {
         &mut state,
         format!("{ROOT}* one more card\n")
     ));
-    let edited = visible_source_index(&mut state);
+    let edited = visible_source_index_in(&state.model, &mut state.code.netlist);
     assert!(!std::sync::Arc::ptr_eq(&first, &edited));
     assert_eq!(edited.line_count(), first.line_count() + 1);
 
     // Switching documents changes the buffer without editing it.
     assert!(open_generated_primary(&mut state));
-    assert!(visible_source_index(&mut state).describes(ROOT));
+    assert!(visible_source_index_in(&state.model, &mut state.code.netlist).describes(ROOT));
 }
 
 #[test]
@@ -132,8 +132,14 @@ fn reactivating_the_active_owned_root_preserves_validation_evidence() {
     });
     let validation = state.model.netlist_artifacts.validation.clone();
 
-    assert!(open_owned_primary(&mut state));
-    assert!(open_owned_primary(&mut state));
+    assert!(open_owned_primary_in(
+        &mut state.model,
+        &mut state.code.netlist
+    ));
+    assert!(open_owned_primary_in(
+        &mut state.model,
+        &mut state.code.netlist
+    ));
 
     assert_eq!(state.code.netlist.revision, 9);
     assert_eq!(state.model.netlist_artifacts.validation, validation);
@@ -1136,7 +1142,10 @@ fn project_replace_is_atomic_across_active_and_retained_top_decks() {
     let mut state = owned_dependency_state();
     open_netlist_dependency(&mut state, INCLUDE_IDENTITY).unwrap();
     copy_active_dependency_to_project(&mut state).unwrap();
-    assert!(open_owned_primary(&mut state));
+    assert!(open_owned_primary_in(
+        &mut state.model,
+        &mut state.code.netlist
+    ));
     let retained_id = state
         .model
         .workspace

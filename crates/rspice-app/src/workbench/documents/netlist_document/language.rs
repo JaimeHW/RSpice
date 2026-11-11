@@ -10,8 +10,11 @@ use rspice_core::netlist::{
     NetlistSourceMap, NetlistValueKind, NetlistValueSpan, UnreadSourceReason, UnreadSourceRegion,
 };
 
-use super::{ActiveNetlistDocument, AppState, canonical_root_document};
+use super::{
+    ActiveNetlistDocument, AppState, Model, NetlistDocumentState, canonical_root_document_in,
+};
 use crate::workbench::{MessageCatalog, MessageId};
+use rspice_app_runs::workbench::slots::runs::RunsState;
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct NetlistRenameDialogState {
@@ -466,38 +469,41 @@ pub(super) struct CachedProjectIndex {
 }
 
 pub(crate) fn project_index(state: &mut AppState) -> Option<Arc<NetlistProjectIndex>> {
-    let root = state
-        .code
-        .netlist
+    project_index_in(&state.model, &mut state.code.netlist)
+}
+
+/// [`project_index`], over the model and the netlist editor's state.
+pub(crate) fn project_index_in(
+    model: &Model,
+    netlist: &mut NetlistDocumentState,
+) -> Option<Arc<NetlistProjectIndex>> {
+    let root = netlist
         .active_dependency_root
-        .unwrap_or(state.code.netlist.active_document);
-    let document = canonical_root_document(state, root)?.clone();
-    if let Some(cached) = state.code.netlist.project_indexes.get(&document.id())
+        .unwrap_or(netlist.active_document);
+    let document = canonical_root_document_in(model, netlist, root)?.clone();
+    if let Some(cached) = netlist.project_indexes.get(&document.id())
         && cached.revision == document.revision()
     {
         return Some(Arc::clone(&cached.index));
     }
     let index = Arc::new(NetlistProjectIndex::build(root, &document));
-    state.code.netlist.project_indexes.insert(
+    netlist.project_indexes.insert(
         document.id(),
         CachedProjectIndex {
             revision: document.revision(),
             index: Arc::clone(&index),
         },
     );
-    let generated_id = state
-        .model
+    let generated_id = model
         .netlist_artifacts
         .generated_document
         .as_ref()
         .map(crate::state::NetlistDocument::id);
-    let owned_id = state
-        .code
-        .netlist
+    let owned_id = netlist
         .owned_document
         .as_ref()
         .map(crate::state::NetlistDocument::id);
-    state.code.netlist.project_indexes.retain(|document_id, _| {
+    netlist.project_indexes.retain(|document_id, _| {
         Some(*document_id) == generated_id || Some(*document_id) == owned_id
     });
     Some(index)
@@ -808,19 +814,44 @@ pub(crate) fn open_project_location(
     state: &mut AppState,
     location: &ProjectSourceLocation,
 ) -> Result<(), String> {
+    open_project_location_in(
+        &mut state.model,
+        &mut state.code.netlist,
+        &mut state.code.netlist_open_documents,
+        &mut state.runs,
+        location,
+    )
+}
+
+/// [`open_project_location`], over the model, the netlist editor's state, the
+/// include tabs the reader opened and the runs.
+pub(crate) fn open_project_location_in(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut std::collections::HashSet<crate::workbench::state::WorkspaceDocumentId>,
+    runs: &mut RunsState,
+    location: &ProjectSourceLocation,
+) -> Result<(), String> {
     if let Some(identity) = location.dependency_identity.as_deref() {
-        super::open_netlist_dependency_from_root(state, location.root, identity)?;
+        super::open_netlist_dependency_from_root_in(
+            model,
+            netlist,
+            open_documents,
+            runs,
+            location.root,
+            identity,
+        )?;
     } else {
         match location.root {
             ActiveNetlistDocument::Generated => {
-                if state.code.netlist.active_document != ActiveNetlistDocument::Generated
-                    || state.code.netlist.active_dependency_identity.is_some()
+                if netlist.active_document != ActiveNetlistDocument::Generated
+                    || netlist.active_dependency_identity.is_some()
                 {
-                    super::open_generated_primary(state);
+                    super::open_generated_primary_in(model, netlist);
                 }
             }
             ActiveNetlistDocument::OwnedSource => {
-                if !super::open_owned_primary(state) {
+                if !super::open_owned_primary_in(model, netlist) {
                     return Err("The project-owned root is no longer available.".to_owned());
                 }
             }
@@ -834,8 +865,8 @@ pub(crate) fn open_project_location(
             }
         }
     }
-    state.code.netlist.cursor_line = location.line.saturating_sub(1);
-    state.code.netlist.requested_line = Some(location.line);
+    netlist.cursor_line = location.line.saturating_sub(1);
+    netlist.requested_line = Some(location.line);
     Ok(())
 }
 

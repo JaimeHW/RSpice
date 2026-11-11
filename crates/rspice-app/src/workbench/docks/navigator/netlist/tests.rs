@@ -15,7 +15,7 @@ fn a_run_snapshot_and_a_comparison_report_no_include_status() {
         ActiveNetlistDocument::GeneratedDiff,
     ] {
         state.code.netlist.active_document = document;
-        assert!(netlist_dependency_status(&state).is_none());
+        assert!(netlist_dependency_status(&state.model, &state.code.netlist).is_none());
     }
 }
 

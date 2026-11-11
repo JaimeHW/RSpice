@@ -30,16 +30,17 @@ use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::cell_usage::CellInstanceUse;
 use crate::workbench::design_system::{PANEL_SECTION_H, Problem, elide_text, paint_problem_mark};
 use crate::workbench::documents::code_workspace::{
-    self, CodeSourceFileAction, SourceIncludeTarget, SourceNavigation, SourceOutlineGroup,
-    VerilogAHeaderView, document_navigation,
+    self, CodeSourceFileAction, CodeWorkspaceRuntimeState, SourceIncludeTarget, SourceNavigation,
+    SourceOutlineGroup, VerilogAHeaderView, document_navigation,
 };
 use crate::workbench::{MessageCatalog, MessageId};
+use rspice_app_state::workbench::app_state::model::Model;
 
 /// The rail of a Verilog-A cell view's bundle, with its file operations.
 pub(super) fn veriloga(ui: &mut Ui, app: &mut RSpiceApp) {
     let language = ProjectSourceLanguage::VerilogA;
     let reference = app.state.model.workspace.content.active_view.clone();
-    let actions = active_bundle(&app.state, language).map(|bundle| FileActions {
+    let actions = active_bundle(&app.state.model, language).map(|bundle| FileActions {
         bundle_id: bundle.id(),
         root: bundle.root().logical_path().to_owned(),
         writable: !app.state.active_view_read_only()
@@ -50,8 +51,8 @@ pub(super) fn veriloga(ui: &mut Ui, app: &mut RSpiceApp) {
         // One list: the build profile is a file of the bundle like any
         // other, and its row says what it is.
         files_title: MessageId::CodeNavigatorFiles,
-        files: bundle_rows(&app.state, language),
-        active: active_path(&app.state, language),
+        files: bundle_rows(&app.state.model, language),
+        active: active_path(&app.state.model, &app.state.code.code_workspace, language),
         language,
         actions,
         used_in: Some(
@@ -68,8 +69,8 @@ pub(in crate::workbench) fn automation(ui: &mut Ui, app: &mut RSpiceApp) {
     let rail = Rail {
         id_salt: "workbench.automation.navigator",
         files_title: MessageId::CodeNavigatorWorkflowFiles,
-        files: bundle_rows(&app.state, language),
-        active: active_path(&app.state, language),
+        files: bundle_rows(&app.state.model, language),
+        active: active_path(&app.state.model, &app.state.code.code_workspace, language),
         language,
         actions: None,
         used_in: None,
@@ -261,8 +262,8 @@ struct BundleRow {
     role: Option<ProjectSourceRole>,
 }
 
-fn bundle_rows(state: &AppState, language: ProjectSourceLanguage) -> Vec<BundleRow> {
-    let Some(bundle) = active_bundle(state, language) else {
+fn bundle_rows(model: &Model, language: ProjectSourceLanguage) -> Vec<BundleRow> {
+    let Some(bundle) = active_bundle(model, language) else {
         return Vec::new();
     };
     let root = bundle.root();
@@ -311,23 +312,27 @@ const fn role_message(role: Option<ProjectSourceRole>) -> Option<MessageId> {
 /// The bundle this rail lists: the one every editor host and command resolves,
 /// so the rail can never offer the files of a bundle the editor is not showing.
 fn active_bundle(
-    state: &AppState,
+    model: &Model,
     language: ProjectSourceLanguage,
 ) -> Option<&crate::state::ProjectSourceBundle> {
-    state.model.workspace.active_source_bundle(language)
+    model.workspace.active_source_bundle(language)
 }
 
-fn active_path(state: &AppState, language: ProjectSourceLanguage) -> Option<String> {
-    code_workspace::active_bundle_path(&state.model.workspace, &state.code.code_workspace, language)
+fn active_path(
+    model: &Model,
+    code: &CodeWorkspaceRuntimeState,
+    language: ProjectSourceLanguage,
+) -> Option<String> {
+    code_workspace::active_bundle_path(&model.workspace, code, language)
 }
 
-fn select(state: &mut AppState, language: ProjectSourceLanguage, logical_path: &str) {
-    code_workspace::select_source_document(
-        &state.model.workspace,
-        &mut state.code.code_workspace,
-        language,
-        logical_path,
-    );
+fn select(
+    model: &Model,
+    code: &mut CodeWorkspaceRuntimeState,
+    language: ProjectSourceLanguage,
+    logical_path: &str,
+) {
+    code_workspace::select_source_document(&model.workspace, code, language, logical_path);
 }
 
 /// What a click in the rail asked for, applied once the rows are painted.
@@ -402,7 +407,12 @@ fn show_rail(ui: &mut Ui, app: &mut RSpiceApp, rail: Rail) {
 
     match request {
         None => {}
-        Some(RailRequest::Select(path)) => select(&mut app.state, language, &path),
+        Some(RailRequest::Select(path)) => select(
+            &app.state.model,
+            &mut app.state.code.code_workspace,
+            language,
+            &path,
+        ),
         Some(RailRequest::FileAction(action, path)) => {
             if let Some(file_actions) = rail.actions.as_ref() {
                 open_file_action(app, language, file_actions.bundle_id, action, &path);
@@ -426,7 +436,12 @@ fn show_rail(ui: &mut Ui, app: &mut RSpiceApp, rail: Rail) {
             }
         }
         Some(RailRequest::Reveal { path, line }) => {
-            select(&mut app.state, language, &path);
+            select(
+                &app.state.model,
+                &mut app.state.code.code_workspace,
+                language,
+                &path,
+            );
             if let Some(bundle_id) = bundle_id {
                 // The shared code editor consumes this on its next frame,
                 // which is the frame it shows `path` in.

@@ -24,8 +24,11 @@ use crate::ui::panels::{WorkbenchIcon, section_header};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::RSpiceApp;
-use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
+use crate::workbench::documents::code_workspace::CodeWorkspaceRuntimeState;
+use crate::workbench::documents::netlist_document::{ActiveNetlistDocument, NetlistDocumentState};
 use crate::workbench::{MessageCatalog, MessageId};
+use rspice_app_runs::workbench::slots::runs::RunsState;
+use rspice_app_state::workbench::app_state::model::Model;
 
 mod lib_sections;
 
@@ -117,21 +120,36 @@ pub(in crate::workbench) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
         netlist_diff(ui, app);
         return;
     }
-    let root_label = active_netlist_artifact_name(&app.state);
+    let root_label =
+        active_netlist_artifact_name(&app.state.model, &app.state.code.netlist, &app.state.runs);
     let messages = app.state.workbench.messages();
-    let index = crate::workbench::documents::netlist_document::visible_source_index(&mut app.state);
-    lib_sections::refresh(&mut app.state);
+    let index = crate::workbench::documents::netlist_document::visible_source_index_in(
+        &app.state.model,
+        &mut app.state.code.netlist,
+    );
+    lib_sections::refresh(
+        &app.state.model,
+        &app.state.code.netlist,
+        &mut app.state.code.code_workspace,
+    );
     let projection = NetlistNavigatorProjection::from_index(
         &index,
         app.state.workbench.navigator_filter(),
         &root_label,
         app.state.code.netlist.active_document == ActiveNetlistDocument::Generated,
         &app.state.code.netlist_outline_collapsed,
-        &retained_include_facts(&app.state, messages),
+        &retained_include_facts(
+            &app.state.model,
+            &app.state.code.netlist,
+            &app.state.code.code_workspace,
+            messages,
+        ),
         messages,
     );
-    let project_index =
-        crate::workbench::documents::netlist_document::language::project_index(&mut app.state);
+    let project_index = crate::workbench::documents::netlist_document::language::project_index_in(
+        &app.state.model,
+        &mut app.state.code.netlist,
+    );
     let symbol_query = app
         .state
         .workbench
@@ -196,7 +214,7 @@ pub(in crate::workbench) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
             .collect::<Vec<_>>()
     });
     let active_line = app.state.code.netlist.cursor_line.saturating_add(1);
-    let height = outline_row_height(ui, &app.state);
+    let height = outline_row_height(ui, app.state.workbench.coarse_pointer);
 
     let mut goto = None;
     let mut goto_project_location = None;
@@ -208,8 +226,9 @@ pub(in crate::workbench) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
     // document offers the choice and states why it cannot take it rather than
     // hiding what the library declares.
     let source_editable =
-        crate::workbench::documents::netlist_document::active_netlist_source_is_editable(
-            &app.state,
+        crate::workbench::documents::netlist_document::active_netlist_source_is_editable_in(
+            &app.state.model,
+            &app.state.code.netlist,
         );
 
     ScrollArea::vertical()
@@ -286,7 +305,8 @@ pub(in crate::workbench) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
 
             if !projection.include_rows.is_empty() {
                 let dependency_status =
-                    netlist_dependency_status(&app.state).map(|id| messages.text(id));
+                    netlist_dependency_status(&app.state.model, &app.state.code.netlist)
+                        .map(|id| messages.text(id));
                 section_header(
                     ui,
                     &messages.text(MessageId::NetlistNavigatorIncludes),
@@ -612,19 +632,20 @@ pub(in crate::workbench) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
             .activate(crate::workbench::state::Workspace::Design);
     }
     if let Some(requested) = open_include {
-        let dependency = active_canonical_netlist_document(&app.state)
-            .and_then(|document| {
-                document
-                    .dependencies()
-                    .iter()
-                    .find(|dependency| dependency.requested_locator() == requested)
-            })
-            .map(|dependency| {
-                (
-                    dependency.locator().logical_identity().to_owned(),
-                    dependency.source().is_some(),
-                )
-            });
+        let dependency =
+            active_canonical_netlist_document(&app.state.model, &app.state.code.netlist)
+                .and_then(|document| {
+                    document
+                        .dependencies()
+                        .iter()
+                        .find(|dependency| dependency.requested_locator() == requested)
+                })
+                .map(|dependency| {
+                    (
+                        dependency.locator().logical_identity().to_owned(),
+                        dependency.source().is_some(),
+                    )
+                });
         match dependency {
             Some((identity, true)) => {
                 if let Err(error) =
@@ -660,8 +681,8 @@ pub(in crate::workbench) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
     }
 }
 
-fn outline_row_height(ui: &Ui, state: &crate::workbench::AppState) -> f32 {
-    if state.workbench.coarse_pointer || ui.ctx().content_rect().width() <= 820.0 {
+fn outline_row_height(ui: &Ui, coarse_pointer: bool) -> f32 {
+    if coarse_pointer || ui.ctx().content_rect().width() <= 820.0 {
         NETLIST_OUTLINE_TOUCH_ROW_HEIGHT
     } else {
         NETLIST_OUTLINE_ROW_HEIGHT
@@ -700,19 +721,21 @@ fn outline_group_row(
     response.clicked()
 }
 
-pub(super) fn active_netlist_artifact_name(state: &crate::workbench::AppState) -> String {
-    match state.code.netlist.active_document {
+pub(super) fn active_netlist_artifact_name(
+    model: &Model,
+    netlist: &NetlistDocumentState,
+    runs: &RunsState,
+) -> String {
+    match netlist.active_document {
         ActiveNetlistDocument::Generated => "generated.sp".to_owned(),
-        ActiveNetlistDocument::OwnedSource => state
-            .model
+        ActiveNetlistDocument::OwnedSource => model
             .workspace
             .content
             .netlist_descriptor
             .as_ref()
             .map(|descriptor| descriptor.artifact_name.clone())
             .or_else(|| {
-                state
-                    .model
+                model
                     .workspace
                     .content
                     .netlist_source_path
@@ -725,19 +748,18 @@ pub(super) fn active_netlist_artifact_name(state: &crate::workbench::AppState) -
         // A synthetic filename, like the two above it: an identifier, never
         // translated copy.
         ActiveNetlistDocument::RunSnapshot => {
-            crate::workbench::documents::netlist_document::run_deck_snapshot_artifact_name(state)
+            crate::workbench::documents::netlist_document::run_deck_snapshot_artifact_name_in(runs)
         }
     }
 }
 
-pub(super) fn active_canonical_netlist_document(
-    state: &crate::workbench::AppState,
-) -> Option<&crate::state::NetlistDocument> {
-    match state.code.netlist.active_document {
-        ActiveNetlistDocument::Generated => {
-            state.model.netlist_artifacts.generated_document.as_ref()
-        }
-        ActiveNetlistDocument::OwnedSource => state.code.netlist.owned_document.as_ref(),
+pub(super) fn active_canonical_netlist_document<'a>(
+    model: &'a Model,
+    netlist: &'a NetlistDocumentState,
+) -> Option<&'a crate::state::NetlistDocument> {
+    match netlist.active_document {
+        ActiveNetlistDocument::Generated => model.netlist_artifacts.generated_document.as_ref(),
+        ActiveNetlistDocument::OwnedSource => netlist.owned_document.as_ref(),
         ActiveNetlistDocument::GeneratedDiff | ActiveNetlistDocument::RunSnapshot => None,
     }
 }
@@ -949,23 +971,19 @@ fn section_catalog_text(
 /// trace, retained when the closure was resolved, so no second resolver has to
 /// be consulted to say where a file came from.
 pub(super) fn retained_include_facts(
-    state: &crate::workbench::AppState,
+    model: &Model,
+    netlist: &NetlistDocumentState,
+    code_workspace: &CodeWorkspaceRuntimeState,
     messages: MessageCatalog,
 ) -> Vec<IncludeRowFacts> {
-    let project_paths = state
-        .model
-        .workspace
-        .content
-        .project
-        .include_search_paths()
-        .len();
-    active_canonical_netlist_document(state).map_or_else(Vec::new, |document| {
+    let project_paths = model.workspace.content.project.include_search_paths().len();
+    active_canonical_netlist_document(model, netlist).map_or_else(Vec::new, |document| {
         document
             .dependencies()
             .iter()
             .map(|dependency| {
                 let locator = dependency.requested_locator().to_owned();
-                let resolution = state.code.code_workspace.include_resolutions.get(&locator);
+                let resolution = code_workspace.include_resolutions.get(&locator);
                 IncludeRowFacts {
                     state: match dependency.resolution() {
                         crate::state::DependencyResolution::Missing { .. } => {
@@ -990,7 +1008,7 @@ pub(super) fn retained_include_facts(
                             .next()
                             .map(|candidate| candidate.path().display().to_string())
                     }),
-                    sections: lib_sections::declared(state, &locator),
+                    sections: lib_sections::declared(code_workspace, &locator),
                     locator,
                 }
             })
@@ -1023,10 +1041,13 @@ const fn dependency_authority_message(
 /// Every include resolving is the ordinary case: the section used to head
 /// itself "resolved", which is the heading reporting that there is nothing to
 /// report.
-pub(super) fn netlist_dependency_status(state: &crate::workbench::AppState) -> Option<MessageId> {
+pub(super) fn netlist_dependency_status(
+    model: &Model,
+    netlist: &NetlistDocumentState,
+) -> Option<MessageId> {
     // A run snapshot and a comparison are text with no include graph of their
     // own: there is nothing wrong to report about one, so nothing is.
-    let document = active_canonical_netlist_document(state)?;
+    let document = active_canonical_netlist_document(model, netlist)?;
     if document.dependencies().iter().any(|dependency| {
         matches!(
             dependency.resolution(),
@@ -1068,7 +1089,7 @@ pub(super) fn netlist_diff(ui: &mut Ui, app: &mut RSpiceApp) {
         .filter(|hunk| query.matches_diff_hunk(hunk))
         .cloned()
         .collect::<Vec<_>>();
-    let height = outline_row_height(ui, &app.state);
+    let height = outline_row_height(ui, app.state.workbench.coarse_pointer);
     let active_line = app.state.code.netlist.cursor_line.saturating_add(1);
     let mut goto = None;
 

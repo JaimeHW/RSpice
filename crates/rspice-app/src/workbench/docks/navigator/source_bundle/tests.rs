@@ -13,23 +13,29 @@ use super::*;
 fn every_file_in_the_bundle_is_offered_and_selectable() {
     let mut app = RSpiceApp::test_instance();
     let language = ProjectSourceLanguage::RSpiceAutomation;
-    let rows = bundle_rows(&app.state, language);
+    let rows = bundle_rows(&app.state.model, language);
     assert!(
         rows.len() > 1,
         "an automation bundle carries an entry, a run plan, a lock, and a manifest"
     );
 
-    let root = active_path(&app.state, language).expect("bundle root is the default document");
+    let root = active_path(&app.state.model, &app.state.code.code_workspace, language)
+        .expect("bundle root is the default document");
     let other = rows
         .iter()
         .find(|row| row.logical_path != root)
         .expect("a non-root file to select");
     let target = other.logical_path.clone();
 
-    select(&mut app.state, language, &target);
+    select(
+        &app.state.model,
+        &mut app.state.code.code_workspace,
+        language,
+        &target,
+    );
 
     assert_eq!(
-        active_path(&app.state, language).as_deref(),
+        active_path(&app.state.model, &app.state.code.code_workspace, language).as_deref(),
         Some(target.as_str())
     );
 }
@@ -40,7 +46,7 @@ fn every_file_in_the_bundle_is_offered_and_selectable() {
 fn rows_state_the_recorded_role_rather_than_guessing_from_the_name() {
     let app = RSpiceApp::test_instance();
     let messages = MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates);
-    let rows = bundle_rows(&app.state, ProjectSourceLanguage::RSpiceAutomation);
+    let rows = bundle_rows(&app.state.model, ProjectSourceLanguage::RSpiceAutomation);
     let roles = rows
         .iter()
         .filter_map(|row| role_message(row.role))

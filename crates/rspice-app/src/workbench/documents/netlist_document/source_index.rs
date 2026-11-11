@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use super::AppState;
+use super::{AppState, Model, NetlistDocumentState};
 use crate::state::NetlistSourceIndex;
 
 /// The outline and line offsets of the buffer the editor is showing.
@@ -15,11 +15,19 @@ use crate::state::NetlistSourceIndex;
 /// unlike a revision counter it cannot go stale behind a writer that forgets
 /// to bump it.
 pub(crate) fn visible_source_index(state: &mut AppState) -> Arc<NetlistSourceIndex> {
-    let source = state.model.simulation.source.netlist_content.as_str();
-    if !state.code.netlist.source_index.describes(source) {
-        state.code.netlist.source_index = Arc::new(NetlistSourceIndex::parse(source));
+    visible_source_index_in(&state.model, &mut state.code.netlist)
+}
+
+/// [`visible_source_index`], over the model and the netlist editor's state.
+pub(crate) fn visible_source_index_in(
+    model: &Model,
+    netlist: &mut NetlistDocumentState,
+) -> Arc<NetlistSourceIndex> {
+    let source = model.simulation.source.netlist_content.as_str();
+    if !netlist.source_index.describes(source) {
+        netlist.source_index = Arc::new(NetlistSourceIndex::parse(source));
     }
-    Arc::clone(&state.code.netlist.source_index)
+    Arc::clone(&netlist.source_index)
 }
 
 /// [`visible_source_index`] for the project's own top-level deck, whatever

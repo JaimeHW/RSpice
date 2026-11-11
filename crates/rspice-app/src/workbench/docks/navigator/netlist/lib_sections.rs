@@ -16,9 +16,12 @@
 use rspice_core::library::LibSectionSummary;
 
 use crate::workbench::AppState;
+use crate::workbench::documents::code_workspace::CodeWorkspaceRuntimeState;
 use crate::workbench::documents::netlist_document::{
-    OwnedNetlistReplacement, active_netlist_source_is_editable, replace_owned_sources_atomically,
+    NetlistDocumentState, OwnedNetlistReplacement, active_netlist_source_is_editable_in,
+    replace_owned_sources_atomically,
 };
+use rspice_app_state::workbench::app_state::model::Model;
 
 /// Bring the retained-section cache level with the active closure.
 ///
@@ -26,12 +29,16 @@ use crate::workbench::documents::netlist_document::{
 /// parse, so an entry survives until the bytes behind its locator change; an
 /// entry whose locator left the closure is dropped, which is what bounds the
 /// map to the dependencies the document actually has.
-pub(super) fn refresh(state: &mut AppState) {
-    let Some(document) = super::active_canonical_netlist_document(state) else {
-        state.code.code_workspace.include_lib_sections.clear();
+pub(super) fn refresh(
+    model: &Model,
+    netlist: &NetlistDocumentState,
+    code_workspace: &mut CodeWorkspaceRuntimeState,
+) {
+    let Some(document) = super::active_canonical_netlist_document(model, netlist) else {
+        code_workspace.include_lib_sections.clear();
         return;
     };
-    let cache = &state.code.code_workspace.include_lib_sections;
+    let cache = &code_workspace.include_lib_sections;
     let mut live = std::collections::BTreeSet::new();
     let mut computed = Vec::new();
     for dependency in document.dependencies() {
@@ -56,7 +63,7 @@ pub(super) fn refresh(state: &mut AppState) {
     if computed.is_empty() && live.len() == cache.len() {
         return;
     }
-    let cache = &mut state.code.code_workspace.include_lib_sections;
+    let cache = &mut code_workspace.include_lib_sections;
     cache.retain(|locator, _| live.contains(locator));
     cache.extend(computed);
 }
@@ -64,10 +71,11 @@ pub(super) fn refresh(state: &mut AppState) {
 /// The sections the retained bytes behind `locator` declare, in declaration
 /// order. A locator with no retained bytes, or one whose library declares
 /// none, offers nothing.
-pub(super) fn declared(state: &AppState, locator: &str) -> Vec<LibSectionSummary> {
-    state
-        .code
-        .code_workspace
+pub(super) fn declared(
+    code_workspace: &CodeWorkspaceRuntimeState,
+    locator: &str,
+) -> Vec<LibSectionSummary> {
+    code_workspace
         .include_lib_sections
         .get(locator)
         .map_or_else(Vec::new, |(_, sections)| sections.to_vec())
@@ -92,12 +100,25 @@ pub(super) fn use_section(
     line: usize,
     section: &str,
 ) -> Result<String, String> {
-    if !active_netlist_source_is_editable(state) {
+    let (edit, selected) = section_edit(&state.model, &state.code.netlist, line, section)?;
+    replace_owned_sources_atomically(state, vec![edit])?;
+    Ok(selected)
+}
+
+/// The replacement [`use_section`] commits, over the model and the netlist
+/// editor's state, with what it reports once committed.
+pub(super) fn section_edit(
+    model: &Model,
+    netlist: &NetlistDocumentState,
+    line: usize,
+    section: &str,
+) -> Result<(OwnedNetlistReplacement, String), String> {
+    if !active_netlist_source_is_editable_in(model, netlist) {
         return Err(
             "This netlist source is read-only; its .lib section cannot be changed.".to_owned(),
         );
     }
-    let source = state.model.simulation.source.netlist_content.clone();
+    let source = model.simulation.source.netlist_content.clone();
     let span = section_token_span(&source, line)
         .ok_or_else(|| format!("Line {line} does not write a `.lib \"file\" section` card."))?;
     if source[span.clone()].trim_matches(['"', '\'']) == section {
@@ -105,13 +126,15 @@ pub(super) fn use_section(
     }
     let mut replacement = source.clone();
     replacement.replace_range(span, section);
-    let edit = if let Some(identity) = state.code.netlist.active_dependency_identity.as_deref() {
+    let edit = if let Some(identity) = netlist.active_dependency_identity.as_deref() {
         OwnedNetlistReplacement::dependency(identity, &source, replacement, 1)
     } else {
         OwnedNetlistReplacement::root(&source, replacement, 1)
     };
-    replace_owned_sources_atomically(state, vec![edit])?;
-    Ok(format!("Selected .lib section {section} on line {line}."))
+    Ok((
+        edit,
+        format!("Selected .lib section {section} on line {line}."),
+    ))
 }
 
 /// The byte range of the section token on a `.lib "file" section` card.
@@ -242,10 +265,14 @@ mod tests {
     #[test]
     fn sections_are_enumerated_from_retained_bytes_once_per_revision() {
         let mut state = corner_deck_state(ROOT);
-        refresh(&mut state);
+        refresh(
+            &state.model,
+            &state.code.netlist,
+            &mut state.code.code_workspace,
+        );
 
         assert_eq!(
-            declared(&state, LOCATOR)
+            declared(&state.code.code_workspace, LOCATOR)
                 .iter()
                 .map(|section| section.name.clone())
                 .collect::<Vec<_>>(),
@@ -255,7 +282,11 @@ mod tests {
         let first = state.code.code_workspace.include_lib_sections[LOCATOR]
             .1
             .clone();
-        refresh(&mut state);
+        refresh(
+            &state.model,
+            &state.code.netlist,
+            &mut state.code.code_workspace,
+        );
         assert!(
             std::sync::Arc::ptr_eq(
                 &first,
@@ -267,7 +298,11 @@ mod tests {
         // A locator that leaves the closure leaves the cache with it.
         state.code.netlist.owned_document = None;
         state.model.workspace.content.netlist_document = None;
-        refresh(&mut state);
+        refresh(
+            &state.model,
+            &state.code.netlist,
+            &mut state.code.code_workspace,
+        );
         assert!(state.code.code_workspace.include_lib_sections.is_empty());
     }
 
