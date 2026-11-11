@@ -109,7 +109,7 @@ pub fn topology_fingerprint_with_abort(
         let candidate = model.model_type.to_ascii_lowercase();
         model_types
             .entry(model.name.to_ascii_lowercase())
-            .and_modify(|kind| {
+            .and_modify(|kind: &mut String| {
                 if candidate < *kind {
                     kind.clone_from(&candidate);
                 }
