@@ -2234,6 +2234,7 @@ TLAMBDA=0.15 TCVL=0 TCVW=0 TCVWL=0";
 /// it does read.
 #[test]
 fn every_native_mos_family_names_an_unknown_instance_parameter_and_builds() {
+    let _guard = LOG_CAPTURE_LOCK.lock().expect("serialize log capture");
     init_log_capture();
     let families = [
         ("BSIM3", ".model m nmos level=49 version=3.3", "nrd=2"),
