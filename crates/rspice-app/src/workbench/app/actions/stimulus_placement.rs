@@ -13,8 +13,8 @@
 //! library never published.
 
 use crate::state::{PendingStimulusPlacement, Tool};
-use crate::workbench::app_state::AppState;
-use crate::workbench::state::Workspace;
+use crate::workbench::app_state::Model;
+use crate::workbench::state::{WorkbenchSession, Workspace};
 
 /// Arm the next placement with the saved revision of one definition.
 ///
@@ -22,16 +22,17 @@ use crate::workbench::state::Workspace;
 /// it where the reader asked, rather than this pushing a console line for a
 /// failure the reader is standing in front of.
 pub(crate) fn arm_placement_from_definition(
-    state: &mut AppState,
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
     name: &str,
 ) -> Result<(), String> {
-    if state.schematic_edit_read_only() {
+    if model.schematic_edit_read_only() {
         return Err(format!(
             "The active schematic view is read-only, so '{name}' cannot be placed on it. Reopen \
              the view in an editable context first."
         ));
     }
-    let Some(definition) = state.model.workspace.content.stimulus_library.get(name) else {
+    let Some(definition) = model.workspace.content.stimulus_library.get(name) else {
         return Err(format!(
             "This project defines no '{name}', so there is no stimulus to place."
         ));
@@ -40,13 +41,12 @@ pub(crate) fn arm_placement_from_definition(
     let reference = definition.kind().letter().to_owned();
     let armed = format!("{} r{}", placement.definition(), placement.revision());
 
-    state
-        .model
+    model
         .schematic
         .arm_tool(Tool::Place(placement.component_type));
-    state.model.schematic.session.editor.pending_stimulus = Some(placement);
-    state.workbench.activate(Workspace::Design);
-    state.prompt(format!(
+    model.schematic.session.editor.pending_stimulus = Some(placement);
+    wb.activate(Workspace::Design);
+    wb.prompt(format!(
         "{reference}\u{2026} from {armed} follows the pointer; click to place, Esc cancels."
     ));
     Ok(())
@@ -83,7 +83,12 @@ mod tests {
     #[test]
     fn arming_carries_the_saved_revision_onto_the_next_placement() {
         let mut app = app_with_definition();
-        arm_placement_from_definition(&mut app.state, "sensor_drive").expect("armed");
+        arm_placement_from_definition(
+            &mut app.state.model,
+            &mut app.state.workbench,
+            "sensor_drive",
+        )
+        .expect("armed");
 
         assert_eq!(
             app.state.model.schematic.session.editor.tool,
@@ -130,7 +135,8 @@ mod tests {
     fn arming_refuses_a_definition_the_library_does_not_hold() {
         let mut app = app_with_definition();
         let refusal =
-            arm_placement_from_definition(&mut app.state, "absent").expect_err("nothing to arm");
+            arm_placement_from_definition(&mut app.state.model, &mut app.state.workbench, "absent")
+                .expect_err("nothing to arm");
         assert!(refusal.contains("defines no 'absent'"), "{refusal}");
         assert!(
             app.state
@@ -148,8 +154,12 @@ mod tests {
     fn arming_refuses_a_read_only_view() {
         let mut app = app_with_definition();
         app.state.model.schematic.session.read_only = true;
-        let refusal = arm_placement_from_definition(&mut app.state, "sensor_drive")
-            .expect_err("a read-only sheet takes no placement");
+        let refusal = arm_placement_from_definition(
+            &mut app.state.model,
+            &mut app.state.workbench,
+            "sensor_drive",
+        )
+        .expect_err("a read-only sheet takes no placement");
         assert!(refusal.contains("read-only"), "{refusal}");
         assert!(
             app.state

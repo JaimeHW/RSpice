@@ -348,15 +348,7 @@ impl Command {
             | Self::AnnotateTransientVoltages
             | Self::GridSnapRouting
             | Self::VisibilityOptions
-            | Self::EngineeringTableView
-            | Self::StimulusNewDefinition
-            | Self::StimulusDuplicateDefinition
-            | Self::StimulusDeleteDefinition
-            | Self::StimulusApplyDraft
-            | Self::StimulusRevertDraft
-            | Self::StimulusValidateLibrary
-            | Self::StimulusPlaceDefinition
-            | Self::StimulusShowAdopter => CommandOwner::Design,
+            | Self::EngineeringTableView => CommandOwner::Design,
         }
     }
 
@@ -1038,31 +1030,6 @@ impl Command {
             }
             Self::PreviousViolation => {
                 crate::schematic::view::violations::cycle_violation(&mut app.state, -1);
-            }
-            Self::StimulusNewDefinition => {
-                crate::workbench::app::actions::stimulus::new_definition(&mut app.state);
-            }
-            Self::StimulusDuplicateDefinition => {
-                crate::workbench::app::actions::stimulus::duplicate_definition(&mut app.state);
-            }
-            Self::StimulusDeleteDefinition => {
-                crate::workbench::app::actions::stimulus::delete_definition(&mut app.state);
-            }
-            Self::StimulusApplyDraft => {
-                crate::workbench::app::actions::stimulus::apply_draft(&mut app.state);
-            }
-            Self::StimulusRevertDraft => {
-                crate::workbench::app::actions::stimulus::revert_draft(&mut app.state);
-            }
-            Self::StimulusValidateLibrary => {
-                crate::workbench::app::actions::stimulus::validate_library(&mut app.state);
-            }
-            Self::StimulusPlaceDefinition => {
-                crate::workbench::app::actions::stimulus::place_selected_definition(&mut app.state);
-            }
-            Self::StimulusShowAdopter => {
-                crate::workbench::app::actions::stimulus::show_adopter_on_schematic(&mut app.state);
-                activate_workspace(app, Workspace::Design);
             }
             Self::CommandPalette => open_command_palette(&mut app.state),
             Self::KeyboardShortcuts => app.state.shell.shortcuts_help = true,

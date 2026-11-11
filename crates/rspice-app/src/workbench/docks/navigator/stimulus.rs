@@ -211,7 +211,8 @@ fn scope_counts(state: &AppState, tally: &Tally) -> ScopeCounts {
         {
             counts.errors += 1;
         }
-        for finding in stimulus_actions::contract_findings(state, &record) {
+        for finding in stimulus_actions::contract_findings(&state.design.property_registry, &record)
+        {
             if finding.strength == ContractStrength::Refusal {
                 counts.errors += 1;
             } else {
@@ -332,7 +333,7 @@ fn row<'a>(
 fn draft_is_refused(state: &AppState, definition: &StimulusDefinition) -> bool {
     let record = live_record(state, definition);
     crate::simulation::stimulus_realize::definition_card_text(&record, DETACHED_NETS).is_err()
-        || stimulus_actions::contract_findings(state, &record)
+        || stimulus_actions::contract_findings(&state.design.property_registry, &record)
             .iter()
             .any(|finding| finding.strength == ContractStrength::Refusal)
 }
@@ -492,7 +493,12 @@ fn show_empty(ui: &mut Ui, state: &mut AppState) {
         create |= labeled_icon_button(ui, WorkbenchIcon::Add, &label, false, 150.0).clicked();
     });
     if create {
-        stimulus_actions::new_definition(state);
+        stimulus_actions::new_definition(
+            &mut state.design.selected_stimulus_definition,
+            &mut state.design.stimulus_editor,
+            &mut state.model,
+            &mut state.workbench,
+        );
     }
 }
 

@@ -89,7 +89,7 @@ pub(in crate::workbench) fn show(ui: &mut Ui, state: &mut AppState) {
         return;
     };
 
-    let adopters = stimulus_actions::design_adopters(state, definition.name());
+    let adopters = stimulus_actions::design_adopters(&state.model, definition.name());
     let mut verbs = Vec::new();
     adopters_section(ui, state, &adopters, &definition, &mut verbs);
     if consumers_section(ui, state, &adopters) {

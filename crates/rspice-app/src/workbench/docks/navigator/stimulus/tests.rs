@@ -610,7 +610,12 @@ fn place_arms_the_saved_revision_and_warns_about_an_unapplied_draft() {
 
     let mut app = RSpiceApp::test_instance();
     library(&mut app.state);
-    stimulus_verbs::place_selected_definition(&mut app.state);
+    stimulus_verbs::place_selected_definition(
+        app.state.design.selected_stimulus_definition.as_deref(),
+        &app.state.design.stimulus_editor,
+        &mut app.state.model,
+        &mut app.state.workbench,
+    );
 
     assert_eq!(
         app.state.model.schematic.session.editor.tool,
@@ -646,7 +651,12 @@ fn place_arms_the_saved_revision_and_warns_about_an_unapplied_draft() {
         .stimulus_editor
         .draft_for(&saved)
         .edit(|working| working.params = "va=9m freq=1k".to_owned());
-    stimulus_verbs::place_selected_definition(&mut app.state);
+    stimulus_verbs::place_selected_definition(
+        app.state.design.selected_stimulus_definition.as_deref(),
+        &app.state.design.stimulus_editor,
+        &mut app.state.model,
+        &mut app.state.workbench,
+    );
     assert!(
         prompt_says(
             &app.state,

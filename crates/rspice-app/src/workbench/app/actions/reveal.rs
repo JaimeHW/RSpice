@@ -66,12 +66,6 @@ pub(in crate::workbench) fn placed_instance_in(
 /// the sheet in front of the reader. Every verb that edits one instance asks
 /// this first, because the component id it holds means nothing anywhere else.
 #[must_use]
-pub(in crate::workbench) fn reaches(state: &AppState, occurrence: Option<&InstancePath>) -> bool {
-    reaches_in(&state.model, occurrence)
-}
-
-/// [`reaches`] over the model it reads.
-#[must_use]
-fn reaches_in(model: &Model, occurrence: Option<&InstancePath>) -> bool {
+pub(in crate::workbench) fn reaches_in(model: &Model, occurrence: Option<&InstancePath>) -> bool {
     occurrence.is_none_or(|occurrence| *occurrence == model.workspace.content.occurrence_path())
 }

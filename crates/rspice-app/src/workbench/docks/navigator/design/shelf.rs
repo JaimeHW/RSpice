@@ -1752,7 +1752,11 @@ fn stimulus_library_rows(state: &AppState) -> Vec<StimulusShelfRow> {
 
 /// Arm one definition from the shelf; a refusal answers on the status bar.
 fn arm_stimulus_definition(state: &mut AppState, name: &str, ctx: &egui::Context) {
-    match crate::workbench::app::arm_placement_from_definition(state, name) {
+    match crate::workbench::app::arm_placement_from_definition(
+        &mut state.model,
+        &mut state.workbench,
+        name,
+    ) {
         Ok(()) => finish_shelf_placement(state, ctx),
         Err(refusal) => state.prompt(refusal),
     }

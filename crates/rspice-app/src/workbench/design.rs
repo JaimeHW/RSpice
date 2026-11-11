@@ -3,8 +3,11 @@
 //!
 //! What it has not registered yet, the shell's legacy tables still serve.
 
+pub(crate) mod commands;
+
 use egui::Context;
 
+use crate::workbench::app::actions::stimulus;
 use crate::workbench::app::dialogs::connectivity_manager::ConnectivityManager;
 use crate::workbench::app::dialogs::design_review_comments::ReviewComments;
 use crate::workbench::app::dialogs::engineering_table::EngineeringTable;
@@ -18,12 +21,14 @@ use crate::workbench::app::dialogs::{
     create_model_bound_symbol, find_replace, object_properties, placement, rule_setup,
     stimulus_link, symbol_definition,
 };
+use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec};
 use crate::workbench::framework::dialogs::DialogKey;
 use crate::workbench::framework::feature::{
-    Cx, Feature, FeatureDialog, FeatureRegistry, NoHandles,
+    CommandSet, Cx, Feature, FeatureDialog, FeatureRegistry, NoHandles, Reads,
 };
 use crate::workbench::slots::DesignState;
-use crate::workbench::state::WorkbenchSession;
+use crate::workbench::state::{WorkbenchSession, Workspace};
+use commands::DesignCommand;
 
 /// The design feature.
 pub(crate) struct DesignFeature;
@@ -34,7 +39,113 @@ impl Feature for DesignFeature {
     type Handles = NoHandles;
 
     fn register(registry: &mut FeatureRegistry<Self>) {
+        registry.commands::<DesignCommand>();
         registry.dialogs(DIALOGS);
+    }
+}
+
+impl CommandSet for DesignCommand {
+    type Feature = DesignFeature;
+    const REGISTERED: &'static [Self] = &Self::ALL;
+
+    fn spec(self) -> CommandSpec {
+        self.declared_spec()
+    }
+
+    /// Every library verb needs the instrument open, because they all act on
+    /// the definition it is reading; New and Validate need only that,
+    /// because a library with nothing in it is exactly where New belongs.
+    /// Placing is an edit of the schematic, so a read-only view is the one
+    /// extra thing it needs beyond a definition to place.
+    fn availability(self, reads: &Reads<'_, DesignFeature>) -> CommandAvailability {
+        if reads.wb.workspace != Workspace::Stimulus {
+            return CommandAvailability::Disabled("open the Stimulus Library");
+        }
+        let selected = reads.state.selected_stimulus_definition.is_some();
+        let refusal = match self {
+            Self::NewStimulusDefinition | Self::ValidateStimulusLibrary => None,
+            Self::DuplicateStimulusDefinition | Self::DeleteStimulusDefinition => {
+                (!selected).then_some("select a stimulus definition")
+            }
+            Self::PlaceSourceFromDefinition => {
+                if reads.model.schematic_edit_read_only() {
+                    Some("the active schematic view is read-only")
+                } else {
+                    (!selected).then_some("select a stimulus definition")
+                }
+            }
+            Self::ApplyStimulusDraft | Self::RevertStimulusDraft => {
+                (!stimulus::selected_draft_is_dirty(
+                    reads.state.selected_stimulus_definition.as_deref(),
+                    &reads.state.stimulus_editor,
+                ))
+                .then_some("this definition has no draft to apply")
+            }
+            Self::ShowAdopterOnSchematic => (!stimulus::selected_definition_has_adopter(
+                reads.state.selected_stimulus_definition.as_deref(),
+                reads.model,
+            ))
+            .then_some("no placed source has adopted this definition"),
+        };
+        refusal.map_or(
+            CommandAvailability::Available,
+            CommandAvailability::Disabled,
+        )
+    }
+
+    fn execute(self, cx: &mut Cx<'_, DesignFeature>) {
+        match self {
+            Self::NewStimulusDefinition => stimulus::new_definition(
+                &mut cx.state.selected_stimulus_definition,
+                &mut cx.state.stimulus_editor,
+                cx.model,
+                cx.wb,
+            ),
+            Self::DuplicateStimulusDefinition => {
+                stimulus::duplicate_definition(
+                    &mut cx.state.selected_stimulus_definition,
+                    cx.model,
+                    cx.wb,
+                );
+            }
+            Self::DeleteStimulusDefinition => stimulus::delete_definition(
+                &mut cx.state.selected_stimulus_definition,
+                &mut cx.state.stimulus_editor,
+                cx.model,
+            ),
+            Self::ApplyStimulusDraft => stimulus::apply_draft(
+                &mut cx.state.selected_stimulus_definition,
+                &mut cx.state.stimulus_editor,
+                cx.model,
+                cx.wb,
+            ),
+            Self::RevertStimulusDraft => stimulus::revert_draft(
+                cx.state.selected_stimulus_definition.as_deref(),
+                &mut cx.state.stimulus_editor,
+                cx.model,
+            ),
+            Self::ValidateStimulusLibrary => stimulus::validate_library(
+                &cx.state.stimulus_editor,
+                &cx.state.property_registry,
+                cx.model,
+            ),
+            Self::PlaceSourceFromDefinition => {
+                stimulus::place_selected_definition(
+                    cx.state.selected_stimulus_definition.as_deref(),
+                    &cx.state.stimulus_editor,
+                    cx.model,
+                    cx.wb,
+                );
+            }
+            Self::ShowAdopterOnSchematic => {
+                stimulus::show_adopter_on_schematic(
+                    cx.state.selected_stimulus_definition.as_deref(),
+                    cx.model,
+                    cx.wb,
+                );
+                cx.wb.activate(Workspace::Design);
+            }
+        }
     }
 }
 

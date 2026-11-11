@@ -246,7 +246,11 @@ fn ask_before_deleting(ui: &Ui, state: &mut AppState) {
     match choice {
         DialogChoice::Primary => {
             state.design.stimulus_editor.take_pending_delete();
-            crate::workbench::app::actions::stimulus::delete_definition(state);
+            crate::workbench::app::actions::stimulus::delete_definition(
+                &mut state.design.selected_stimulus_definition,
+                &mut state.design.stimulus_editor,
+                &mut state.model,
+            );
         }
         DialogChoice::Ghost | DialogChoice::Cancelled => {
             state.design.stimulus_editor.take_pending_delete();
@@ -266,7 +270,12 @@ fn show_empty(ui: &mut Ui, state: &mut AppState) {
         create |= labeled_icon_button(ui, WorkbenchIcon::Add, &label, false, 150.0).clicked();
     });
     if create {
-        crate::workbench::app::actions::stimulus::new_definition(state);
+        crate::workbench::app::actions::stimulus::new_definition(
+            &mut state.design.selected_stimulus_definition,
+            &mut state.design.stimulus_editor,
+            &mut state.model,
+            &mut state.workbench,
+        );
     }
 }
 
@@ -299,7 +308,7 @@ fn resolve(state: &mut AppState) -> Option<Stage> {
     let focus_name = editor.take_focus_name();
     let live = editor.live_record(saved.name(), &working);
     let spec = StimulusRealization::spec(&live);
-    let adopters = crate::workbench::app::actions::stimulus::design_adopters(state, &name);
+    let adopters = crate::workbench::app::actions::stimulus::design_adopters(&state.model, &name);
     let findings = findings(state, &live, &spec);
     let realization = state
         .design
@@ -390,7 +399,10 @@ fn findings(
             });
         }
     }
-    for finding in crate::workbench::app::actions::stimulus::contract_findings(state, record) {
+    for finding in crate::workbench::app::actions::stimulus::contract_findings(
+        &state.design.property_registry,
+        record,
+    ) {
         findings.push(Finding {
             field: Some(finding.field),
             blocking: finding.strength == ContractStrength::Refusal,
@@ -580,15 +592,32 @@ fn apply(state: &mut AppState, stage: &Stage, action: StageAction) {
             state.design.stimulus_editor.select_point(&name, index);
         }
         StageAction::SetSpan(span) => state.design.stimulus_editor.span = span,
-        StageAction::Apply => stimulus::apply_draft(state),
-        StageAction::Revert => stimulus::revert_draft(state),
-        StageAction::Duplicate => stimulus::duplicate_definition(state),
+        StageAction::Apply => stimulus::apply_draft(
+            &mut state.design.selected_stimulus_definition,
+            &mut state.design.stimulus_editor,
+            &mut state.model,
+            &mut state.workbench,
+        ),
+        StageAction::Revert => stimulus::revert_draft(
+            state.design.selected_stimulus_definition.as_deref(),
+            &mut state.design.stimulus_editor,
+            &state.model,
+        ),
+        StageAction::Duplicate => stimulus::duplicate_definition(
+            &mut state.design.selected_stimulus_definition,
+            &mut state.model,
+            &mut state.workbench,
+        ),
         StageAction::Delete => {
             if stimulus::delete_needs_confirmation(state).is_some() {
                 let name = stage.saved.name().to_owned();
                 state.design.stimulus_editor.ask_before_deleting(&name);
             } else {
-                stimulus::delete_definition(state);
+                stimulus::delete_definition(
+                    &mut state.design.selected_stimulus_definition,
+                    &mut state.design.stimulus_editor,
+                    &mut state.model,
+                );
             }
         }
         StageAction::ImportDataFile => stimulus::import_data_file(state),
@@ -596,6 +625,11 @@ fn apply(state: &mut AppState, stage: &Stage, action: StageAction) {
             .workbench
             .outbox
             .push(crate::workbench::framework::requests::ClipboardText(text)),
-        StageAction::Place => stimulus::place_selected_definition(state),
+        StageAction::Place => stimulus::place_selected_definition(
+            state.design.selected_stimulus_definition.as_deref(),
+            &state.design.stimulus_editor,
+            &mut state.model,
+            &mut state.workbench,
+        ),
     }
 }

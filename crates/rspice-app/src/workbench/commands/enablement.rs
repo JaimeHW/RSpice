@@ -440,34 +440,6 @@ impl Command {
                 .active_design_check_status()
                 .current_receipt()
                 .is_some_and(|receipt| !receipt.result.violations().is_empty()),
-            // Every library verb needs the instrument open, because they all
-            // act on the definition it is reading; New and Validate need only
-            // that, because a library with nothing in it is exactly where New
-            // belongs.
-            Self::StimulusNewDefinition | Self::StimulusValidateLibrary => {
-                state.workbench.workspace == Workspace::Stimulus
-            }
-            Self::StimulusDuplicateDefinition | Self::StimulusDeleteDefinition => {
-                state.workbench.workspace == Workspace::Stimulus
-                    && state.design.selected_stimulus_definition.is_some()
-            }
-            // Placing is an edit of the schematic, so a read-only view is the
-            // one extra thing it needs beyond a definition to place.
-            Self::StimulusPlaceDefinition => {
-                state.workbench.workspace == Workspace::Stimulus
-                    && state.design.selected_stimulus_definition.is_some()
-                    && !state.schematic_edit_read_only()
-            }
-            Self::StimulusApplyDraft | Self::StimulusRevertDraft => {
-                state.workbench.workspace == Workspace::Stimulus
-                    && crate::workbench::app::actions::stimulus::selected_draft_is_dirty(state)
-            }
-            Self::StimulusShowAdopter => {
-                state.workbench.workspace == Workspace::Stimulus
-                    && crate::workbench::app::actions::stimulus::selected_definition_has_adopter(
-                        state,
-                    )
-            }
             // A run's log is a record; only the session's log is cleared.
             Self::ClearConsole => match state.workbench.console_page {
                 ConsolePage::Console => {

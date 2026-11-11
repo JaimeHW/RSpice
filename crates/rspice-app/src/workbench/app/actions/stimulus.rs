@@ -14,14 +14,16 @@
 use std::collections::HashMap;
 
 use crate::diagnostics::{LogSeverity, LogSource};
+use crate::properties::PropertyEditorSchema;
 use crate::state::stimulus_library::definition::{
     RetainedPwlFile, StimulusDefinition, StimulusFamily, StimulusKind,
 };
 use crate::state::stimulus_library::draft::DefinitionDraft;
 use crate::state::stimulus_library::provenance::ProvenanceState;
 use crate::ui::accessibility::counted;
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::{AppState, Model};
 use crate::workbench::state::write_field;
+use crate::workbench::state::{StimulusEditorState, WorkbenchSession};
 
 /// The family a new definition opens on.
 ///
@@ -32,33 +34,36 @@ const NEW_DEFINITION_FAMILY: crate::state::ComponentType =
     crate::state::ComponentType::VoltageSourcePulse;
 
 /// Create a definition, select it, and leave the reader in its name field.
-pub(crate) fn new_definition(state: &mut AppState) {
-    match state
-        .model
-        .workspace
-        .content
-        .stimulus_library
-        .new_definition(
-            NEW_DEFINITION_FAMILY,
-            crate::state::stimulus_library::now_unix_ms,
-        ) {
+pub(crate) fn new_definition(
+    selection: &mut Option<String>,
+    editor: &mut StimulusEditorState,
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
+) {
+    match model.workspace.content.stimulus_library.new_definition(
+        NEW_DEFINITION_FAMILY,
+        crate::state::stimulus_library::now_unix_ms,
+    ) {
         Ok(definition) => {
             let name = definition.name().to_owned();
-            state.design.selected_stimulus_definition = Some(name.clone());
-            state.design.stimulus_editor.focus_name();
-            state.prompt(format!("Stimulus definition '{name}' created at r1."));
+            *selection = Some(name.clone());
+            editor.focus_name();
+            wb.prompt(format!("Stimulus definition '{name}' created at r1."));
         }
-        Err(error) => state.prompt(error.to_string()),
+        Err(error) => wb.prompt(error.to_string()),
     }
 }
 
 /// Copy the selected definition into an editable duplicate.
-pub(crate) fn duplicate_definition(state: &mut AppState) {
-    let Some(name) = selected(state) else {
+pub(crate) fn duplicate_definition(
+    selection: &mut Option<String>,
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
+) {
+    let Some(name) = selected(selection.as_deref(), model) else {
         return;
     };
-    match state
-        .model
+    match model
         .workspace
         .content
         .stimulus_library
@@ -66,23 +71,26 @@ pub(crate) fn duplicate_definition(state: &mut AppState) {
     {
         Ok(copy) => {
             let copy = copy.name().to_owned();
-            state.design.selected_stimulus_definition = Some(copy.clone());
-            state.prompt(format!(
+            *selection = Some(copy.clone());
+            wb.prompt(format!(
                 "Stimulus definition '{name}' duplicated as '{copy}' at r1."
             ));
         }
-        Err(error) => state.prompt(error.to_string()),
+        Err(error) => wb.prompt(error.to_string()),
     }
 }
 
 /// Remove the selected definition. Adopters keep the cards they copied.
-pub(crate) fn delete_definition(state: &mut AppState) {
-    let Some(name) = selected(state) else {
+pub(crate) fn delete_definition(
+    selection: &mut Option<String>,
+    editor: &mut StimulusEditorState,
+    model: &mut Model,
+) {
+    let Some(name) = selected(selection.as_deref(), model) else {
         return;
     };
-    let adopters = design_adopters(state, &name).len();
-    if state
-        .model
+    let adopters = design_adopters(model, &name).len();
+    if model
         .workspace
         .content
         .stimulus_library
@@ -91,16 +99,15 @@ pub(crate) fn delete_definition(state: &mut AppState) {
     {
         return;
     }
-    state.design.stimulus_editor.close(&name);
-    state.design.selected_stimulus_definition = state
-        .model
+    editor.close(&name);
+    *selection = model
         .workspace
         .content
         .stimulus_library
         .definitions()
         .first()
         .map(|definition| definition.name().to_owned());
-    state.record(
+    model.record(
         LogSeverity::Info,
         LogSource::Studio,
         if adopters == 0 {
@@ -126,7 +133,7 @@ pub(crate) fn delete_definition(state: &mut AppState) {
 #[must_use]
 pub(crate) fn delete_needs_confirmation(state: &AppState) -> Option<String> {
     let name = state.design.selected_stimulus_definition.as_deref()?;
-    let adopters = design_adopters(state, name).len();
+    let adopters = design_adopters(&state.model, name).len();
     let dirty = state.design.stimulus_editor.is_dirty(name);
     match (adopters, dirty) {
         (0, false) => None,
@@ -161,63 +168,58 @@ pub(crate) fn delete_needs_confirmation(state: &AppState) -> Option<String> {
 /// Nothing reaches into the design to repoint adopters: an instance that
 /// adopted before the rename is on whatever sheet it is on, and the definition
 /// keeps answering to the name that instance copied.
-pub(crate) fn apply_draft(state: &mut AppState) {
-    let Some(name) = selected(state) else {
+pub(crate) fn apply_draft(
+    selection: &mut Option<String>,
+    editor: &mut StimulusEditorState,
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
+) {
+    let Some(name) = selected(selection.as_deref(), model) else {
         return;
     };
-    let Some(saved) = state
-        .model
-        .workspace
-        .content
-        .stimulus_library
-        .get(&name)
-        .cloned()
-    else {
+    let Some(saved) = model.workspace.content.stimulus_library.get(&name).cloned() else {
         return;
     };
-    let draft = state.design.stimulus_editor.draft_for(&saved);
+    let draft = editor.draft_for(&saved);
     if !draft.is_dirty() {
         return;
     }
     let renamed = draft.working().name().to_owned();
     let mut published = draft.clone();
     if !renamed.eq_ignore_ascii_case(&name)
-        && let Err(error) = state
-            .model
+        && let Err(error) = model
             .workspace
             .content
             .stimulus_library
             .rename(&name, &renamed)
     {
-        state.prompt(error.to_string());
+        wb.prompt(error.to_string());
         return;
     }
-    let revision = state
-        .model
+    let revision = model
         .workspace
         .content
         .stimulus_library
         .apply(&mut published, crate::state::stimulus_library::now_unix_ms);
     if !renamed.eq_ignore_ascii_case(&name) {
-        state.design.stimulus_editor.rename_key(&name, &renamed);
+        editor.rename_key(&name, &renamed);
     }
     // The draft the editor holds is the one this publish came from, so it is
     // still the pre-publish record. Replacing it keeps the reader's editing
     // session open on the revision they just published rather than silently
     // reopening it on the next frame.
-    if let Some(record) = state
-        .model
+    if let Some(record) = model
         .workspace
         .content
         .stimulus_library
         .get(&renamed)
         .cloned()
     {
-        *state.design.stimulus_editor.draft_for(&record) = published;
+        *editor.draft_for(&record) = published;
     }
-    state.design.selected_stimulus_definition = Some(renamed.clone());
-    let behind = design_adopters(state, &renamed).len();
-    state.record(
+    *selection = Some(renamed.clone());
+    let behind = design_adopters(model, &renamed).len();
+    model.record(
         LogSeverity::Info,
         LogSource::Studio,
         if behind == 0 {
@@ -233,52 +235,86 @@ pub(crate) fn apply_draft(state: &mut AppState) {
 }
 
 /// Throw the draft away, as one undoable step.
-pub(crate) fn revert_draft(state: &mut AppState) {
-    with_draft(state, DefinitionDraft::revert);
+pub(crate) fn revert_draft(
+    selection: Option<&str>,
+    editor: &mut StimulusEditorState,
+    model: &Model,
+) {
+    with_draft(selection, editor, model, DefinitionDraft::revert);
 }
 
 /// Step the selected definition's draft back, if it has one.
 pub(crate) fn undo_draft(state: &mut AppState) -> bool {
     let mut stepped = false;
-    with_draft(state, |draft| stepped = draft.undo());
+    with_draft(
+        state.design.selected_stimulus_definition.as_deref(),
+        &mut state.design.stimulus_editor,
+        &state.model,
+        |draft| stepped = draft.undo(),
+    );
     stepped
 }
 
 /// Step the selected definition's draft forward, if it has one.
 pub(crate) fn redo_draft(state: &mut AppState) -> bool {
     let mut stepped = false;
-    with_draft(state, |draft| stepped = draft.redo());
+    with_draft(
+        state.design.selected_stimulus_definition.as_deref(),
+        &mut state.design.stimulus_editor,
+        &state.model,
+        |draft| stepped = draft.redo(),
+    );
     stepped
 }
 
 /// Rename the working record.
 pub(crate) fn edit_name(state: &mut AppState, name: &str) {
-    with_draft(state, |draft| {
-        draft.edit(|working| {
-            let _ = working.rename(name.trim());
-        });
-    });
+    with_draft(
+        state.design.selected_stimulus_definition.as_deref(),
+        &mut state.design.stimulus_editor,
+        &state.model,
+        |draft| {
+            draft.edit(|working| {
+                let _ = working.rename(name.trim());
+            });
+        },
+    );
 }
 
 /// Switch the waveform shape. The shape parameters reset; undo restores them.
 pub(crate) fn edit_family(state: &mut AppState, family: StimulusFamily) {
-    with_draft(state, |draft| {
-        draft.edit(|working| *working = working.with_family(family));
-    });
+    with_draft(
+        state.design.selected_stimulus_definition.as_deref(),
+        &mut state.design.stimulus_editor,
+        &state.model,
+        |draft| {
+            draft.edit(|working| *working = working.with_family(family));
+        },
+    );
 }
 
 /// Switch the driven quantity, keeping the card.
 pub(crate) fn edit_kind(state: &mut AppState, kind: StimulusKind) {
-    with_draft(state, |draft| {
-        draft.edit(|working| *working = working.with_kind(kind));
-    });
+    with_draft(
+        state.design.selected_stimulus_definition.as_deref(),
+        &mut state.design.stimulus_editor,
+        &state.model,
+        |draft| {
+            draft.edit(|working| *working = working.with_kind(kind));
+        },
+    );
 }
 
 /// Write one waveform field, in the instance's own spelling.
 pub(crate) fn edit_field(state: &mut AppState, field: &str, value: &str) {
-    with_draft(state, |draft| {
-        draft.edit(|working| write_field(working, field, value));
-    });
+    with_draft(
+        state.design.selected_stimulus_definition.as_deref(),
+        &mut state.design.stimulus_editor,
+        &state.model,
+        |draft| {
+            draft.edit(|working| write_field(working, field, value));
+        },
+    );
 }
 
 /// Import a data file and retain its bytes in the definition.
@@ -357,12 +393,17 @@ pub(crate) fn import_data_file(state: &mut AppState) {
         }
     };
     let retained_bytes = retained.contents.len();
-    with_draft(state, |draft| {
-        draft.edit(|working| {
-            write_field(working, "file", &reference);
-            working.pwl_file = Some(retained.clone());
-        });
-    });
+    with_draft(
+        state.design.selected_stimulus_definition.as_deref(),
+        &mut state.design.stimulus_editor,
+        &state.model,
+        |draft| {
+            draft.edit(|working| {
+                write_field(working, "file", &reference);
+                working.pwl_file = Some(retained.clone());
+            });
+        },
+    );
     state.record(
         LogSeverity::Info,
         LogSource::Studio,
@@ -417,33 +458,40 @@ pub(crate) fn readopt_adopter(state: &mut AppState, component_id: u64, definitio
 /// the reader asked to place the definition, the library's published revision
 /// is the only thing anything can adopt, and a verb that declines rather than
 /// stating what it did sends them looking for a setting.
-pub(crate) fn place_selected_definition(state: &mut AppState) {
-    let Some(name) = selected(state) else {
+pub(crate) fn place_selected_definition(
+    selection: Option<&str>,
+    editor: &StimulusEditorState,
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
+) {
+    let Some(name) = selected(selection, model) else {
         return;
     };
-    let saved = state
-        .model
+    let saved = model
         .workspace
         .content
         .stimulus_library
         .get(&name)
         .map_or(0, StimulusDefinition::revision);
-    match crate::workbench::app::arm_placement_from_definition(state, &name) {
+    match crate::workbench::app::arm_placement_from_definition(model, wb, &name) {
         // Issued after arming, so it replaces the arming prompt rather than
         // being replaced by it: which revision is armed is the news.
-        Ok(()) if state.design.stimulus_editor.is_dirty(&name) => state.prompt(format!(
+        Ok(()) if editor.is_dirty(&name) => wb.prompt(format!(
             "Placement copies the saved r{saved} of '{name}'; apply the draft first to place what \
              you are editing."
         )),
         Ok(()) => {}
-        Err(refusal) => state.prompt(refusal),
+        Err(refusal) => wb.prompt(refusal),
     }
 }
 
 /// Audit every definition in the library and report the totals.
-pub(crate) fn validate_library(state: &mut AppState) {
-    let definitions = state
-        .model
+pub(crate) fn validate_library(
+    editor: &StimulusEditorState,
+    registry: &PropertyEditorSchema,
+    model: &mut Model,
+) {
+    let definitions = model
         .workspace
         .content
         .stimulus_library
@@ -452,15 +500,13 @@ pub(crate) fn validate_library(state: &mut AppState) {
     let mut errors = 0_usize;
     let mut advisories = 0_usize;
     for definition in &definitions {
-        let record = state
-            .design
-            .stimulus_editor
+        let record = editor
             .draft(definition.name())
             .map_or_else(|| definition.clone(), |draft| draft.working().clone());
         if crate::simulation::stimulus_realize::definition_card_text(&record, ["p", "n"]).is_err() {
             errors += 1;
         }
-        for finding in contract_findings(state, &record) {
+        for finding in contract_findings(registry, &record) {
             if finding.strength == crate::state::ContractStrength::Refusal {
                 errors += 1;
             } else {
@@ -468,7 +514,7 @@ pub(crate) fn validate_library(state: &mut AppState) {
             }
         }
     }
-    state.record(
+    model.record(
         LogSeverity::Info,
         LogSource::Studio,
         format!(
@@ -486,17 +532,15 @@ pub(crate) fn validate_library(state: &mut AppState) {
 /// tally a console line reports cannot disagree with the verdict the
 /// instrument is showing.
 pub(crate) fn contract_findings(
-    state: &AppState,
+    registry: &PropertyEditorSchema,
     record: &StimulusDefinition,
 ) -> Vec<crate::state::SourceContractFinding> {
     let component = record.transient_component();
-    let Some(sheet) = state.design.property_registry.get(component.kind) else {
+    let Some(sheet) = registry.get(component.kind) else {
         return Vec::new();
     };
-    let values = crate::properties::property_bridge::collect_properties_from_component(
-        &component,
-        &state.design.property_registry,
-    );
+    let values =
+        crate::properties::property_bridge::collect_properties_from_component(&component, registry);
     crate::properties::property_bridge::component_source_contract(&component, &values, sheet)
 }
 
@@ -515,16 +559,16 @@ pub(crate) fn contract_findings(
 /// renamed still answers to the name its adopters copied, and a hand-written
 /// comparison would report every one of them as an adopter of nothing.
 #[must_use]
-pub(crate) fn design_adopters(state: &AppState, name: &str) -> Vec<StimulusAdopter> {
-    let library = &state.model.workspace.content.stimulus_library;
+pub(crate) fn design_adopters(model: &Model, name: &str) -> Vec<StimulusAdopter> {
+    let library = &model.workspace.content.stimulus_library;
     let Some(held) = library.get(name).map(StimulusDefinition::name) else {
         return Vec::new();
     };
     let (sources, _) = crate::simulation::placed_sources::whole_design_excitations(
-        &state.model.library_manager,
-        &state.model.workspace,
-        &state.model.schematic,
-        state.model.sim_setup.analysis_plan.as_ref(),
+        &model.library_manager,
+        &model.workspace,
+        &model.schematic,
+        model.sim_setup.analysis_plan.as_ref(),
     );
     sources
         .into_iter()
@@ -536,8 +580,8 @@ pub(crate) fn design_adopters(state: &AppState, name: &str) -> Vec<StimulusAdopt
                 .is_some_and(|resolved| resolved.name() == held)
         })
         .map(|source| StimulusAdopter {
-            on_this_sheet: crate::workbench::app::actions::reveal::reaches(
-                state,
+            on_this_sheet: crate::workbench::app::actions::reveal::reaches_in(
+                model,
                 source.occurrence.as_ref(),
             ),
             occurrence: source.occurrence_label(),
@@ -632,24 +676,25 @@ pub(crate) struct AdopterTally {
 
 /// Whether anything in the design has adopted the selected definition.
 #[must_use]
-pub(crate) fn selected_definition_has_adopter(state: &AppState) -> bool {
-    state
-        .design
-        .selected_stimulus_definition
-        .as_deref()
-        .is_some_and(|name| !design_adopters(state, name).is_empty())
+pub(crate) fn selected_definition_has_adopter(selection: Option<&str>, model: &Model) -> bool {
+    selection.is_some_and(|name| !design_adopters(model, name).is_empty())
 }
 
 /// Show the first adopter of the selected definition on the drawing.
-pub(crate) fn show_adopter_on_schematic(state: &mut AppState) {
-    let Some(name) = selected(state) else {
+pub(crate) fn show_adopter_on_schematic(
+    selection: Option<&str>,
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
+) {
+    let Some(name) = selected(selection, model) else {
         return;
     };
-    let Some(first) = design_adopters(state, &name).first().cloned() else {
+    let Some(first) = design_adopters(model, &name).first().cloned() else {
         return;
     };
-    crate::workbench::app::actions::reveal::placed_instance(
-        state,
+    crate::workbench::app::actions::reveal::placed_instance_in(
+        model,
+        wb,
         first.source.occurrence.as_ref(),
         first.source.component_id,
     );
@@ -657,37 +702,33 @@ pub(crate) fn show_adopter_on_schematic(state: &mut AppState) {
 
 /// Whether the selected definition has an unapplied draft.
 #[must_use]
-pub(crate) fn selected_draft_is_dirty(state: &AppState) -> bool {
-    state
-        .design
-        .selected_stimulus_definition
-        .as_deref()
-        .is_some_and(|name| state.design.stimulus_editor.is_dirty(name))
+pub(crate) fn selected_draft_is_dirty(
+    selection: Option<&str>,
+    editor: &StimulusEditorState,
+) -> bool {
+    selection.is_some_and(|name| editor.is_dirty(name))
 }
 
 /// Run one edit against the selected definition's draft.
-fn with_draft(state: &mut AppState, edit: impl FnOnce(&mut DefinitionDraft)) {
-    let Some(name) = selected(state) else {
+fn with_draft(
+    selection: Option<&str>,
+    editor: &mut StimulusEditorState,
+    model: &Model,
+    edit: impl FnOnce(&mut DefinitionDraft),
+) {
+    let Some(name) = selected(selection, model) else {
         return;
     };
-    let Some(saved) = state
-        .model
-        .workspace
-        .content
-        .stimulus_library
-        .get(&name)
-        .cloned()
-    else {
+    let Some(saved) = model.workspace.content.stimulus_library.get(&name).cloned() else {
         return;
     };
-    edit(state.design.stimulus_editor.draft_for(&saved));
+    edit(editor.draft_for(&saved));
 }
 
 /// The definition the library browser is on, by the name the library spells.
-fn selected(state: &AppState) -> Option<String> {
-    let name = state.design.selected_stimulus_definition.as_deref()?;
-    state
-        .model
+fn selected(selection: Option<&str>, model: &Model) -> Option<String> {
+    let name = selection?;
+    model
         .workspace
         .content
         .stimulus_library

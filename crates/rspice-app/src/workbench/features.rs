@@ -507,6 +507,7 @@ mod tests {
         let models = <ModelsFeature as Registered>::registry();
         let simulate = <SimulateFeature as Registered>::registry();
         let project = <ProjectFeature as Registered>::registry();
+        let design = <DesignFeature as Registered>::registry();
         let code = <CodeFeature as Registered>::registry();
         for key in registry.order() {
             let Some(spec) = spec(*key) else { continue };
@@ -523,6 +524,7 @@ mod tests {
                 models.command(*key).is_some(),
                 simulate.command(*key).is_some(),
                 project.command(*key).is_some(),
+                design.command(*key).is_some(),
                 code.command(*key).is_some(),
             ];
             assert_eq!(
@@ -545,6 +547,7 @@ mod tests {
                 + crate::workbench::models::commands::ModelsCommand::ALL.len()
                 + crate::workbench::simulate::commands::SimulateCommand::ALL.len()
                 + crate::workbench::project::commands::ProjectCommand::ALL.len()
+                + crate::workbench::design::commands::DesignCommand::ALL.len()
                 + crate::workbench::code::commands::CodeCommand::ALL.len()
         );
     }

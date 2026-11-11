@@ -22,6 +22,7 @@ use crate::state::{ComponentType, ModelsPage};
 use crate::state::{SimulationPage, VerificationPage};
 use crate::workbench::cloud::commands::CloudCommand;
 use crate::workbench::code::commands::CodeCommand;
+use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::framework::command_registry::{self, CommandFlags, Registry};
 use crate::workbench::hardcopy::commands::HardcopyCommand;
 use crate::workbench::models::commands::ModelsCommand;
@@ -203,14 +204,6 @@ pub enum Command {
     ClearChecks,
     NextViolation,
     PreviousViolation,
-    StimulusNewDefinition,
-    StimulusDuplicateDefinition,
-    StimulusDeleteDefinition,
-    StimulusApplyDraft,
-    StimulusRevertDraft,
-    StimulusValidateLibrary,
-    StimulusPlaceDefinition,
-    StimulusShowAdopter,
     CommandPalette,
     KeyboardShortcuts,
     HelpCenter,
@@ -566,32 +559,6 @@ impl Command {
                 "Annotate transient voltages",
                 "Simulate",
             ),
-            Self::StimulusNewDefinition => {
-                spec("stimulus-new", "New stimulus definition", "Stimulus")
-            }
-            Self::StimulusDuplicateDefinition => spec(
-                "stimulus-duplicate",
-                "Duplicate stimulus definition",
-                "Stimulus",
-            ),
-            Self::StimulusDeleteDefinition => {
-                spec("stimulus-delete", "Delete stimulus definition", "Stimulus")
-            }
-            Self::StimulusApplyDraft => spec("stimulus-apply", "Apply stimulus draft", "Stimulus"),
-            Self::StimulusRevertDraft => {
-                spec("stimulus-revert", "Revert stimulus draft", "Stimulus")
-            }
-            Self::StimulusValidateLibrary => {
-                spec("stimulus-validate", "Validate stimulus library", "Stimulus")
-            }
-            Self::StimulusPlaceDefinition => {
-                spec("stimulus-place", "Place source from definition", "Stimulus")
-            }
-            Self::StimulusShowAdopter => spec(
-                "stimulus-show-adopter",
-                "Show adopter on schematic",
-                "Stimulus",
-            ),
             Self::CommandPalette => spec("command-palette", "Command palette", "Navigate"),
             Self::KeyboardShortcuts => spec("command-reference", "Keyboard shortcuts", "Help"),
             Self::HelpCenter => spec("help-center", "RSpice Help", "Help"),
@@ -790,14 +757,6 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ClearChecks,
     Command::NextViolation,
     Command::PreviousViolation,
-    Command::StimulusNewDefinition,
-    Command::StimulusDuplicateDefinition,
-    Command::StimulusDeleteDefinition,
-    Command::StimulusApplyDraft,
-    Command::StimulusRevertDraft,
-    Command::StimulusValidateLibrary,
-    Command::StimulusPlaceDefinition,
-    Command::StimulusShowAdopter,
     Command::CommandPalette,
     Command::KeyboardShortcuts,
     Command::HelpCenter,
@@ -1113,14 +1072,14 @@ static COMMAND_ORDER: &[CommandKey] = &[
     ModelsCommand::ModelBrowser.key(),
     ModelsCommand::PdkSettings.key(),
     ModelsCommand::RescanModelLibraries.key(),
-    Command::StimulusNewDefinition.key(),
-    Command::StimulusDuplicateDefinition.key(),
-    Command::StimulusDeleteDefinition.key(),
-    Command::StimulusApplyDraft.key(),
-    Command::StimulusRevertDraft.key(),
-    Command::StimulusValidateLibrary.key(),
-    Command::StimulusPlaceDefinition.key(),
-    Command::StimulusShowAdopter.key(),
+    DesignCommand::NewStimulusDefinition.key(),
+    DesignCommand::DuplicateStimulusDefinition.key(),
+    DesignCommand::DeleteStimulusDefinition.key(),
+    DesignCommand::ApplyStimulusDraft.key(),
+    DesignCommand::RevertStimulusDraft.key(),
+    DesignCommand::ValidateStimulusLibrary.key(),
+    DesignCommand::PlaceSourceFromDefinition.key(),
+    DesignCommand::ShowAdopterOnSchematic.key(),
     CodeCommand::CompileVerilogA.key(),
     CodeCommand::CancelVerilogACompile.key(),
     CodeCommand::VerilogABuildSettings.key(),
@@ -1192,6 +1151,7 @@ pub(crate) fn command_registry() -> &'static Registry {
                 .chain(SimulateCommand::ALL.map(SimulateCommand::declared_spec))
                 .chain(ProjectCommand::ALL.map(ProjectCommand::declared_spec))
                 .chain(CodeCommand::ALL.map(CodeCommand::declared_spec))
+                .chain(DesignCommand::ALL.map(DesignCommand::declared_spec))
                 .collect(),
             LEGACY_ALIASES,
         )

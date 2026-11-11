@@ -432,7 +432,12 @@ fn applying_a_rename_repoints_every_adopter() {
     let mut app = seeded("bridge_cal_step");
     let id = adopter(&mut app.state, "bridge_cal_step", "V1");
     crate::workbench::app::actions::stimulus::edit_name(&mut app.state, "bridge_cal_pulse");
-    crate::workbench::app::actions::stimulus::apply_draft(&mut app.state);
+    crate::workbench::app::actions::stimulus::apply_draft(
+        &mut app.state.design.selected_stimulus_definition,
+        &mut app.state.design.stimulus_editor,
+        &mut app.state.model,
+        &mut app.state.workbench,
+    );
 
     assert_eq!(
         app.state

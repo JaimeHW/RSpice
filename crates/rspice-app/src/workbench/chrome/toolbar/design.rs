@@ -8,6 +8,7 @@ use crate::state::{ComponentType, Tool};
 use crate::ui::tokens::Tokens;
 use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::design_system::{WorkbenchIcon, icon_button};
 use crate::workbench::layout::LayoutSpec;
 use crate::workbench::lifecycle::session::SymbolTool;
@@ -98,33 +99,37 @@ const SYMBOL_DIRECT_TOOLBAR_COMMANDS: [(Command, WorkbenchIcon, SymbolTool); 8] 
     ),
 ];
 
-const STIMULUS_TOOLBAR_COMMANDS: [(Command, WorkbenchIcon, Option<&str>); 6] = [
+const STIMULUS_TOOLBAR_COMMANDS: [(DesignCommand, WorkbenchIcon, Option<&str>); 6] = [
     (
-        Command::StimulusNewDefinition,
+        DesignCommand::NewStimulusDefinition,
         WorkbenchIcon::Add,
         Some("New definition"),
     ),
     (
-        Command::StimulusPlaceDefinition,
+        DesignCommand::PlaceSourceFromDefinition,
         WorkbenchIcon::Source,
         Some("Place source from definition"),
     ),
     (
-        Command::StimulusDuplicateDefinition,
+        DesignCommand::DuplicateStimulusDefinition,
         WorkbenchIcon::Copy,
         None,
     ),
     (
-        Command::StimulusDeleteDefinition,
+        DesignCommand::DeleteStimulusDefinition,
         WorkbenchIcon::Trash,
         None,
     ),
     (
-        Command::StimulusValidateLibrary,
+        DesignCommand::ValidateStimulusLibrary,
         WorkbenchIcon::Check,
         Some("Validate library"),
     ),
-    (Command::StimulusShowAdopter, WorkbenchIcon::Target, None),
+    (
+        DesignCommand::ShowAdopterOnSchematic,
+        WorkbenchIcon::Target,
+        None,
+    ),
 ];
 
 pub(in crate::workbench) fn design_tools(

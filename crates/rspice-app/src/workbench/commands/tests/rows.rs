@@ -27,6 +27,7 @@ use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::commands::vocabulary::{
     COMMAND_REGISTRY, CommandRegistry, command_registry, legacy_command,
 };
+use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::framework::command_registry::{CommandFlags, CommandSpec, ids};
 use crate::workbench::framework::host::Host;
 use crate::workbench::hardcopy::commands::HardcopyCommand;
@@ -145,6 +146,12 @@ pub(crate) fn legacy_command_rows() -> Vec<CommandRow> {
                     .or_else(|| SimulateCommand::from_key(key).map(SimulateCommand::declared_spec))
                     .or_else(|| ProjectCommand::from_key(key).map(ProjectCommand::declared_spec))
                     .or_else(|| CodeCommand::from_key(key).map(CodeCommand::declared_spec))
+                    .or_else(|| {
+                        DesignCommand::ALL
+                            .into_iter()
+                            .find(|command| command.key() == key)
+                            .map(DesignCommand::declared_spec)
+                    })
                     .unwrap_or_else(|| panic!("{key:?} is ordered but nothing declares it"));
                 return feature_row(index, &spec, apps);
             };
