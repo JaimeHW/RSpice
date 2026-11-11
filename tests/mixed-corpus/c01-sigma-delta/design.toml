@@ -27,6 +27,15 @@ phase = "P0"
 [[analysis]]
 id = "op"
 variants = ["xs", "vams"]
+oracles = ["O1", "O2", "O6", "O8"]
+timeout_s = 300
+phase = "P1"
+
+# The operating point as ngspice solves it, which reads .IC only for a
+# transient: the deck selects the ngspice dialect.
+[[analysis]]
+id = "op-ngspice"
+variants = ["xs", "vams"]
 oracles = ["O1", "O2", "O6"]
 timeout_s = 300
 phase = "P1"

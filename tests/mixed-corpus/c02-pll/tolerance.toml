@@ -197,8 +197,19 @@ analysis = "op"
 variants = ["xs"]
 kind = "op"
 signals = ["v(xlf.u1n)", "v(xlf.d1)", "v(cont)"]
+oracle = "O8"
+ref = "ref/xs.op.O8.out"
+abs = 1e-3
+why = "BSIM3 3.3.0 in both; QSPICE ties each .IC node through 1 mΩ to its value, so cont holds its .IC 2.5 V against the off pump switches"
+
+[[q]]
+id = "op"
+analysis = "op-ngspice"
+variants = ["xs"]
+kind = "op"
+signals = ["v(xlf.u1n)", "v(xlf.d1)", "v(cont)"]
 oracle = "O1"
-ref = "ref/xs.op.O1.out"
+ref = "ref/xs.op-ngspice.O1.out"
 abs = 1e-3
 why = "BSIM3 3.3.0 in both"
 

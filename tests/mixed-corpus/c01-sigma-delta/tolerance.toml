@@ -62,6 +62,18 @@ analysis = "op"
 variants = ["xs", "vams"]
 kind = "op"
 signal = { xs = "v(xmod.outintp)-v(xmod.outintn)", vams = "v(outintp)-v(outintn)" }
+oracle = "O8"
+ref = "ref/xs.op.O8.out"
+rel = 1e-6
+abs = 1e-6
+why = "linear circuit; QSPICE ties each .IC node through 1 mΩ to its value, so the integrator's inputs sit 2 µV off ground and its output at 1e5 × 4 µV"
+
+[[q]]
+id = "opdiff"
+analysis = "op-ngspice"
+variants = ["xs", "vams"]
+kind = "op"
+signal = { xs = "v(xmod.outintp)-v(xmod.outintn)", vams = "v(outintp)-v(outintn)" }
 oracle = "O6"
 expect = "c01::opdiff"
 rel = 1e-4
@@ -69,12 +81,12 @@ why = "Rshunt 100 MΩ vs 500 Ω loading ≤ 1e-5"
 
 [[q]]
 id = "opdiff"
-analysis = "op"
+analysis = "op-ngspice"
 variants = ["xs", "vams"]
 kind = "op"
 signal = { xs = "v(xmod.outintp)-v(xmod.outintn)", vams = "v(outintp)-v(outintn)" }
 oracle = "O1"
-ref = "ref/xs.op.O1.out"
+ref = "ref/xs.op-ngspice.O1.out"
 rel = 1e-6
 abs = 1e-6
 why = "linear circuit"

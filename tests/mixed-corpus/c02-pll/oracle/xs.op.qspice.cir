@@ -1,0 +1,16 @@
+* C2 charge-pump PLL, variant xs, op: O8 (QSPICE) oracle deck
+* loopf (net/loop-filter-2.cir) at the operating point: its pump switches
+* and filter are loopf_mx's, and its dac_bridge is the out_undef level
+* (vcc/2) it holds on u1n and d1 with no digital input yet. The VCO does not
+* load cont.
+.include ../net/loopf_mx.cir
+.include ../net/pll-models.cir
+.param vcc=3.3 r1v=300 c1v=10n
+.subckt loopf vout
+vu1n u1n 0 {vcc/2}
+vd1 d1 0 {vcc/2}
+xmx u1n d1 vout loopf_mx
+.ends loopf
+Xlf cont loopf
+.op
+.end

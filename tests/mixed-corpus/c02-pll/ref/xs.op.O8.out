@@ -1,0 +1,8 @@
+# RSPICE-QSPICE-ORACLE 2
+# qspice: QSPICE64, Build Oct 27 2026 09:06:44
+# executable-sha256: df2c88afaf5b390476ab8d2fe24720170760c9ef5cb857980250e5191f1b8dbf
+# input-blake3: 5be892339a3a66d29012ab0368b6cad26c87f0a9ae0cb3d0ba9c32ee22a77a58
+# analysis: op
+Index op v(cont) v(xlf.d1) v(xlf.u1n) v(xlf.xmx.c1) v(xlf.xmx.dd) v(xlf.xmx.dra) v(xlf.xmx.int1) v(xlf.xmx.ss)
+0 0 2.5 1.6500000000000001 1.6500000000000001 2.4999999999999996 3.3 2.499999277579728 2.4999999999975917 0
+# end-analysis

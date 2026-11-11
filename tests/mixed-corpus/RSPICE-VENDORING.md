@@ -15,7 +15,7 @@ files carry no third-party material.
 ## References
 
 `ref/*.out` tables were captured from the oracle decks by
-`rspice-mixed-corpus capture --oracle <O1|O5-O1|O5-O4|O2> --update` and are
+`rspice-mixed-corpus capture --oracle <O1|O5-O1|O5-O4|O2|O8> --update` and are
 verified byte for byte by the same command without `--update`. Each table
 records the producing executable's version and SHA-256 and the BLAKE3 of its
 oracle deck's expanded source; the integrity checks fail when a deck changes
@@ -28,11 +28,19 @@ oracle's own grid (uniform by index, ends kept); only measures are compared.
 | O5-O4 | Xyce 7.10 `Xyce.exe` | `e1f572cd2406bc04b8fbbddba85931346e6ab2b5f0750563848fcabecb10dfe1` |
 | O5-O1 JUNCAP200 | ngspice-46 `lib/ngspice/juncap200.osdi` | `55972abf968b2cd58eed7adf95af4a6c0acd058196fa2bc5ae70668fced62af2` |
 | O2 | ngspice-46 + `d_cosim` (`ivlng.dll`, `ivlng.vpi`) + Icarus Verilog 13.0 (`--enable-libvvp`) | recorded per table |
+| O8 | QSPICE `QSPICE64.exe`, Build Oct 27 2026 09:06:44 | `df2c88afaf5b390476ab8d2fe24720170760c9ef5cb857980250e5191f1b8dbf` |
 
 O2 decks name `simulation="ivlng"`; the capture binds the shim, its VPI module
 (`RSPICE_NGSPICE_COSIM_LIB`, `RSPICE_NGSPICE_COSIM_VPI`) and runs under the
 oracle environment that puts `libvvp` on `PATH`. A deck that needs ngspice's
 own library directory (OSDI models) spells it `{ngspice_lib}`.
+
+O8 decks are RSpice-authored reductions of a design to the parts QSPICE
+models, since it runs no XSPICE code model and no Verilog-AMS: a digital
+block enters as the sources it holds at the analysis point. A QSPICE run
+whose log reports an unknown or ignored card refuses the capture. The
+`op-ngspice` analyses keep each design's ngspice operating point (ngspice
+reads `.IC` only for a transient) beside its default-dialect `op`.
 
 ## C1 — sigma-delta modulator (`c01-sigma-delta`)
 
@@ -58,7 +66,9 @@ Edits:
 
 RSpice-authored: `net/mod1int.cir` (the integrator half of `mod1`),
 `net/sdq.vams` (comparator, flip-flop and ±1 V DAC as one Verilog-AMS module),
-`oracle/vams.o2/sdq_dig.v`.
+`oracle/vams.o2/sdq_dig.v`, `oracle/xs.op.qspice.cir` (mod1's analog half
+with the gain block as an E source and the flip-flop's DAC levels as
+sources).
 
 ## C2 — charge-pump PLL (`c02-pll`)
 
@@ -86,8 +96,9 @@ Edits:
 
 RSpice-authored: `net/pll-mx.cir`, `net/loopf_mx.cir` (loopf without its
 `dac_bridge`), `net/vco_pwl.va` (the `d_osc` table as a Verilog-A VCO),
-`net/div20_pfd.v` (divide-by-20 and PFD), the O5 and O2 oracle decks. The O5
-circuit drops the VCO, which does not load `cont`.
+`net/div20_pfd.v` (divide-by-20 and PFD), the O5, O2 and O8 oracle decks. The
+O5 and O8 circuits drop the VCO, which does not load `cont`; the O8 deck
+drives `loopf_mx` with the `dac_bridge`'s `out_undef` level.
 
 ## C3 — d_cosim examples (`c03-dcosim`)
 

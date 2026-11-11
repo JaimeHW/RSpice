@@ -1,0 +1,27 @@
+* C1 sigma-delta modulator, variant xs, op: O8 (QSPICE) oracle deck
+* RSpice-authored from net/mod1-ct.cir. The integrator and summer are
+* unchanged, with their .IC lines; the XSPICE gain block is the E source it
+* is; the comparator, flip-flop and dac_bridge are the levels they hold at
+* the operating point: flop2 starts at ic=0, so adffq is out_low (-1 V) and
+* adffqb out_high (+1 V).
+.subckt mod1 ainp ainn adffq adffqb
+Ri1 ainn inintn 500
+Rf1 adffq inintn 500
+Cint1 outintp inintn 1n
+.IC v(outintp) = 0 v(inintp) = 0
+Rshunt1 outintp 0 100Meg
+Rshunt2 inintn 0 100Meg
+Ri2 ainp inintp 500
+Rf2 adffqb inintp 500
+Cint2 outintn inintp 1n
+.IC v(outintn) = 0 v(inintn) = 0
+Rshunt3 outintn 0 100Meg
+Rshunt4 inintp 0 100Meg
+Eint outintp outintn inintp inintn 100000
+.ends mod1
+Xmod inp inm adffq adffqb mod1
+vin inp inm dc 0
+vq adffq 0 -1
+vqb adffqb 0 1
+.op
+.end
