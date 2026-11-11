@@ -8847,6 +8847,22 @@ impl Engine {
                         .set_level2_vbin_cutoff(self.config.spice_dialect == SpiceDialect::Ngspice);
                     mosfet.set_xyce_initial_fix(self.config.spice_dialect == SpiceDialect::Xyce);
                     mosfet.set_voltage_limiting_enabled(self.config.device_voltage_limiting);
+                    // Diffusion squares the instance does not name. QSPICE
+                    // and LTspice give a level 1-3 MOSFET none, so RSH alone
+                    // adds no series resistance, where ngspice (mos1set.c:130)
+                    // and Xyce (N_DEV_MOSFET1.C:93) give one. LTspice and
+                    // ngspice give MOS6 none and Xyce one. BSIM1, BSIM2 and
+                    // level 9 keep one, as ngspice and LTspice (BSIM1, BSIM2)
+                    // give them.
+                    let unnamed_squares_are_zero = match level {
+                        1..=3 => self.config.spice_dialect == SpiceDialect::BestAvailable,
+                        6 => self.config.spice_dialect != SpiceDialect::Xyce,
+                        _ => false,
+                    };
+                    if unnamed_squares_are_zero {
+                        mosfet.nrd = 0.0;
+                        mosfet.nrs = 0.0;
+                    }
 
                     // Device temperature: instance TEMP is absolute (C),
                     // DTEMP offsets the circuit temperature; model TNOM

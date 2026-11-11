@@ -2310,3 +2310,85 @@ fn classic_mos_levels_solve_with_voltage_limiting_disabled() {
         );
     }
 }
+
+/// QSPICE and LTspice give a classic MOSFET no diffusion squares unless the
+/// instance names them, so RSH alone adds no series resistance. ngspice
+/// (mos2set.c:159) and Xyce (N_DEV_MOSFET2.C:96) default NRD and NRS to
+/// one. Four level-2 NMOS in series under a PMOS load at 125 C, RSH 28 and
+/// 92 ohm, no NRD or NRS: QSPICE V(out) = 4.006006 and LTspice 4.006222;
+/// ngspice-46 3.943343 and Xyce 7.10 3.943384, as LTspice prints with
+/// nrd=1 nrs=1 on every device (3.943376).
+#[test]
+fn a_classic_mosfet_without_diffusion_squares_has_no_sheet_resistance_in_the_default_dialect() {
+    use rspice_core::engine::SpiceDialect;
+    let deck = "nmos stack
+.model nenh nmos level=2 vto=0.6 pb=0.7 cgso=1.5e-10 cgdo=1.5e-10 rsh=28 cj=1.75e-4
++ mj=0.65 cjsw=4e-10 mjsw=0.3 tox=3.5e-8 nsub=7e15 xj=2e-7 ld=2.5e-7 uo=700
++ ucrit=7e4 uexp=0.13 vmax=5e4 neff=3 delta=1.5
+.model penh pmos level=2 vto=-0.6 pb=0.7 cgso=1.3e-10 cgdo=1.3e-10 rsh=92 cj=2.25e-4
++ mj=0.5 cjsw=3e-10 mjsw=0.3 tox=3.5e-8 nsub=5e15 xj=1e-7 ld=2.5e-7 uo=270
++ ucrit=9e4 uexp=0.35 vmax=3e4 neff=1.5 delta=1
+vdd vdd 0 5
+vg g 0 5
+va a 0 0
+mp out a vdd vdd penh w=20u l=2u
+m0 out g n0 0 nenh w=10u l=2u ad=50p as=50p pd=30u ps=30u
+m1 n0 g n1 0 nenh w=10u l=2u ad=50p as=50p pd=30u ps=30u
+m2 n1 g n2 0 nenh w=10u l=2u ad=50p as=50p pd=30u ps=30u
+m3 n2 g 0 0 nenh w=10u l=2u ad=50p as=50p pd=30u ps=30u
+.temp 125
+.op
+.end
+";
+    let netlist = Netlist::parse(deck).expect("stack deck parses");
+    for (dialect, expected) in [
+        (SpiceDialect::BestAvailable, 4.006006),
+        (SpiceDialect::Ngspice, 3.943343),
+        (SpiceDialect::Xyce, 3.943384),
+    ] {
+        let out = Engine::new(SimulationConfig::default().with_spice_dialect(dialect))
+            .run_dc_op(&netlist)
+            .unwrap_or_else(|err| panic!("{dialect:?}: {err}"))
+            .try_voltage_named("out")
+            .expect("V(out)");
+        assert!(
+            (out - expected).abs() <= 1.0e-3,
+            "{dialect:?}: V(out) = {out}, expected {expected}"
+        );
+    }
+}
+
+/// LTspice and ngspice-46 give a MOS6 MOSFET no diffusion squares unless the
+/// instance names them, and a BSIM2 MOSFET one; Xyce 7.10 gives MOS6 one and
+/// has no BSIM2, and QSPICE has neither model. A 50u/10u NMOS at VGS 1.8 V
+/// and VDS 50 mV with RSH 35 ohm: MOS6 I(VDS) LTspice and ngspice
+/// -2.590772e-5 (-2.500139e-5 with nrd=1 nrs=1), Xyce -2.500139e-5; BSIM2
+/// LTspice and ngspice -1.549564e-5 (-1.583432e-5 with nrd=0 nrs=0).
+#[test]
+fn mos6_and_bsim2_default_their_diffusion_squares_as_ltspice_and_ngspice() {
+    use rspice_core::engine::SpiceDialect::{BestAvailable, Ngspice, Xyce};
+    let mos6 = "level=6 vto=0.7 kc=1e-4";
+    let bsim2 = "level=5 tox=0.03 vdd=5";
+    for (card, dialect, expected) in [
+        (mos6, BestAvailable, -2.590772e-5),
+        (mos6, Ngspice, -2.590772e-5),
+        (mos6, Xyce, -2.500139e-5),
+        (bsim2, BestAvailable, -1.549564e-5),
+        (bsim2, Ngspice, -1.549564e-5),
+    ] {
+        let deck = format!(
+            "diffusion squares\nvds d 0 0.05\nvgs g 0 1.8\nm1 d g 0 0 nm l=10u w=50u\n\
+             .model nm nmos {card} rsh=35\n.op\n.end\n"
+        );
+        let netlist = Netlist::parse(&deck).expect("deck parses");
+        let current = Engine::new(SimulationConfig::default().with_spice_dialect(dialect))
+            .run_dc_op(&netlist)
+            .unwrap_or_else(|err| panic!("{card} {dialect:?}: {err}"))
+            .branch_current_named("vds")
+            .expect("I(vds)");
+        assert!(
+            (current - expected).abs() <= 1.0e-6 * expected.abs(),
+            "{card} {dialect:?}: I(vds) = {current:e}, expected {expected:e}"
+        );
+    }
+}
