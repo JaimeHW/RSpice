@@ -709,9 +709,16 @@ fn apply_klu_numeric_action(
     match action {
         KluNumericAction::Reuse => Ok(()),
         KluNumericAction::Factor => backend.factor(values),
+        // A values-only factorization that fails re-pivots, as ngspice
+        // reorders when its values-only factorization fails (niiter.c). The
+        // stored pivots fail either on a zero or tiny pivot or by overflowing
+        // the elimination with their growth; both are this Jacobian's, and a
+        // fresh pivot search factors it.
         KluNumericAction::Refactor => match refactored(backend) {
             Ok(()) => Ok(()),
-            Err(SolverError::PivotGrowth) if robustness == CircuitLuRobustness::Enhanced => {
+            Err(SolverError::PivotGrowth | SolverError::Overflow)
+                if robustness == CircuitLuRobustness::Enhanced =>
+            {
                 backend.factor(values)
             }
             Err(error) => Err(error),
@@ -8681,6 +8688,48 @@ mod tests {
         )
         .unwrap();
         assert_eq!(backend.full_factorization_count(), 2);
+    }
+
+    #[test]
+    fn a_refactor_that_overflows_under_its_reused_pivots_re_pivots() {
+        let mut backend = crate::KluSolver::new();
+        backend.analyze(2, &[0, 2, 4], &[0, 1, 0, 1]).unwrap();
+        backend.factor(&[1.0, 1.0, 1.0, 2.0]).unwrap();
+        assert_eq!(backend.full_factorization_count(), 1);
+
+        // The diagonal pivot of the first column is still nonzero, so a
+        // Newton solve keeps it, but its multiplier 1e200 / 1e-200 overflows
+        // the second column's elimination.
+        let changed = [1.0e-200, 1.0e200, 1.0e200, 1.0];
+        assert!(matches!(
+            apply_klu_numeric_action(
+                &mut backend,
+                &changed,
+                KluNumericAction::Refactor,
+                CircuitLuRobustness::BackendFaithful,
+                true,
+            ),
+            Err(SolverError::Overflow)
+        ));
+        assert_eq!(backend.full_factorization_count(), 1);
+
+        backend.factor(&[1.0, 1.0, 1.0, 2.0]).unwrap();
+        apply_klu_numeric_action(
+            &mut backend,
+            &changed,
+            KluNumericAction::Refactor,
+            CircuitLuRobustness::Enhanced,
+            true,
+        )
+        .expect("an overflowing refactor re-pivots instead of handing the solve to faer");
+        assert_eq!(backend.full_factorization_count(), 3);
+        // A x = b for x = (1, 1): a fresh pivot search factors it accurately.
+        let mut solution = Vec::new();
+        backend.solve(&[1.0e200, 1.0e200], &mut solution).unwrap();
+        assert!(
+            solution.iter().all(|x| (x - 1.0).abs() <= 1.0e-12),
+            "{solution:?}"
+        );
     }
 
     #[test]
