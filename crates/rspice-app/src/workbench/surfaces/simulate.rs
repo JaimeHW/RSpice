@@ -345,7 +345,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                     workspace_title_row(ui, |ui| plan_heading(ui, app, surface_width));
                     let participation = participation::PlanParticipation::resolve(&app.state.model);
                     ordered_instance_stack(ui, app, &participation);
-                    pages::dispatch_contract(ui, app);
+                    pages::dispatch_contract(ui, &app.state.model, &app.state.runs);
                     ui.add_space(STACKED_WORKSPACE_GAP);
                     analysis_editor(
                         ui,
@@ -355,7 +355,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                         &participation,
                     );
                 } else {
-                    pages::show(ui, app, page);
+                    pages::show_over_app(ui, app, page);
                 }
             });
         settle_surface_scroll(ui, &mut app.state, output.state.offset.y);
@@ -475,7 +475,7 @@ fn split_analysis_route(
         .show(&mut stack, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
             ordered_instance_stack(ui, app, &participation);
-            pages::dispatch_contract(ui, app);
+            pages::dispatch_contract(ui, &app.state.model, &app.state.runs);
         });
 
     // The editor's height follows its width, so it withholds the scrollbar's
@@ -1230,7 +1230,7 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
     // will dispatch was the one page that never said whether the report
     // authorizing it still held.
     let mut rerun_preflight = false;
-    let chip = pages::PreflightChip::resolve(app);
+    let chip = pages::PreflightChip::resolve(&app.state.model, &app.state.runs);
     let chip_reserve = chip.as_ref().map_or(0.0, |chip| chip.reserve(ui));
     let actions_width =
         title_action_group_width(ui, &open_prior_label, split_label, TITLE_ACTION_SPACING);

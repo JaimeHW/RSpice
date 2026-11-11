@@ -13,23 +13,6 @@ use super::{AppState, Model, RunsState, SlotFacts};
 use crate::simulation::{NetlistShown, RunHost, ViewerHost, ViewerReading};
 use crate::state::{CellViewRef, SpecializedViewerCacheProvenance};
 
-impl AppState {
-    /// [`Model::active_plan_revision`].
-    pub(crate) fn active_plan_revision(
-        &self,
-    ) -> Option<(
-        crate::product::SimulationPlanId,
-        crate::product::ObjectRevision,
-    )> {
-        self.model.active_plan_revision()
-    }
-
-    /// [`Model::configured_topology_revision`].
-    pub(crate) fn configured_topology_revision(&self) -> (String, u64, Vec<(String, u64)>) {
-        self.model.configured_topology_revision()
-    }
-}
-
 impl ViewerHost for AppState {
     fn model(&self) -> &Model {
         &self.model

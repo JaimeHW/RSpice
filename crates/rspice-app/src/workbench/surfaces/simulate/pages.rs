@@ -11,10 +11,15 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
 use crate::workbench::RSpiceApp;
+use crate::workbench::app_state::Model;
 use crate::workbench::app_state::run_preflight::PreflightCurrency;
+use crate::workbench::framework::feature::Cx;
+use crate::workbench::simulate::SimulateFeature;
 use crate::workbench::simulate::commands::SimulateCommand;
+use rspice_app_runs::workbench::slots::runs::RunsState;
 
 use super::super::super::design_system::{heading, workspace_title_row};
+use super::page_excitations::SourceVerbIntent;
 use super::page_kit::setup_page;
 
 /// Horizontal padding inside the preflight chip, and the gap it keeps from
@@ -23,59 +28,61 @@ const CHIP_PADDING_X: f32 = 9.0;
 const CHIP_GAP: f32 = 8.0;
 const CHIP_HEIGHT: f32 = 22.0;
 
+/// Render the selected setup page over the whole application, until the
+/// surface draws in the feature's context: the context holds the
+/// dispatcher's answers when the page reads them, and a row verb the
+/// Excitations page raised runs once the page has drawn, as a transaction
+/// against the whole design.
+pub(super) fn show_over_app(ui: &mut Ui, app: &mut RSpiceApp, page: SimulationPage) {
+    let cx = &mut crate::workbench::features::cx_with_foreign_answers(app, |app| {
+        reads_foreign_answers(&app.state.model, page)
+    });
+    if let Some(verb) = show(ui, cx, page) {
+        verb.apply(&mut app.state);
+    }
+}
+
+/// Whether `page` reads the dispatcher's answers this frame: the
+/// Specifications page states Results' reason for not opening a limit's
+/// evidence, which it reads only once the plan's dataset exists.
+pub(super) fn reads_foreign_answers(model: &Model, page: SimulationPage) -> bool {
+    page == SimulationPage::Specifications
+        && super::output_evidence::selected_plan_dataset(model).is_some()
+}
+
 /// Render the selected setup page. The analyses route is handled by the
 /// surface itself and never reaches here.
-pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, page: SimulationPage) {
+///
+/// Returns the row verb the Excitations page raised, for the caller to run
+/// once the page has drawn.
+pub(super) fn show(
+    ui: &mut Ui,
+    cx: &mut Cx<'_, SimulateFeature>,
+    page: SimulationPage,
+) -> Option<SourceVerbIntent> {
     // Resolving either list walks the design's nets, so only the page that
     // shows them pays for it.
     let (excitations, rf_ports) = if page == SimulationPage::Excitations {
-        design_excitations(app)
+        design_excitations(cx.model)
     } else {
         (Vec::new(), Vec::new())
     };
-    workspace_title_row(ui, |ui| page_heading(ui, app, page));
+    workspace_title_row(ui, |ui| page_heading(ui, cx, page));
+    let mut verb = None;
     setup_page(ui, |ui| match page {
         SimulationPage::Analyses => {}
         SimulationPage::Excitations => {
-            let verb = super::page_excitations::show(
-                ui,
-                &mut crate::workbench::features::cx(app),
-                &excitations,
-                &rf_ports,
-            );
-            // A row verb is a transaction against the whole design, run once
-            // the page has drawn.
-            if let Some(verb) = verb {
-                verb.apply(&mut app.state);
-            }
+            verb = super::page_excitations::show(ui, cx, &excitations, &rf_ports);
         }
-        SimulationPage::Variables => {
-            super::page_variables::show(ui, &mut crate::workbench::features::cx(app));
-        }
-        SimulationPage::Outputs => {
-            super::page_outputs::show(ui, &mut crate::workbench::features::cx(app));
-        }
-        SimulationPage::Specifications => {
-            // Results' reason for not opening a limit's evidence, which the
-            // page reads only once the plan's dataset exists.
-            let cx = &mut crate::workbench::features::cx_with_foreign_answers(app, |app| {
-                super::output_evidence::selected_plan_dataset(&app.state.model).is_some()
-            });
-            super::page_specs::show(ui, cx);
-        }
-        SimulationPage::RunSet => {
-            super::page_runset::show(ui, &mut crate::workbench::features::cx(app));
-        }
-        SimulationPage::Models => {
-            super::page_models::show(ui, &mut crate::workbench::features::cx(app));
-        }
-        SimulationPage::Solver => {
-            super::page_solver::show(ui, &mut crate::workbench::features::cx(app));
-        }
-        SimulationPage::Save => {
-            super::page_save::show(ui, &mut crate::workbench::features::cx(app));
-        }
+        SimulationPage::Variables => super::page_variables::show(ui, cx),
+        SimulationPage::Outputs => super::page_outputs::show(ui, cx),
+        SimulationPage::Specifications => super::page_specs::show(ui, cx),
+        SimulationPage::RunSet => super::page_runset::show(ui, cx),
+        SimulationPage::Models => super::page_models::show(ui, cx),
+        SimulationPage::Solver => super::page_solver::show(ui, cx),
+        SimulationPage::Save => super::page_save::show(ui, cx),
     });
+    verb
 }
 
 /// What the run is driven by: every excitation the configured design places,
@@ -98,22 +105,22 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, page: SimulationPage) {
 /// beside the count the navigator rail states for this page, so the number on
 /// the way in and the rows on the way out cannot come from different designs.
 fn design_excitations(
-    app: &RSpiceApp,
+    model: &Model,
 ) -> (
     Vec<crate::simulation::placed_sources::PlacedSource>,
     Vec<crate::simulation::placed_sources::PlacedRfPort>,
 ) {
     crate::simulation::placed_sources::whole_design_excitations(
-        &app.state.model.library_manager,
-        &app.state.model.workspace,
-        &app.state.model.schematic,
-        app.state.model.sim_setup.analysis_plan.as_ref(),
+        &model.library_manager,
+        &model.workspace,
+        &model.schematic,
+        model.sim_setup.analysis_plan.as_ref(),
     )
 }
 
 /// The page's title, its preflight standing, and its own primary action.
-fn page_heading(ui: &mut Ui, app: &mut RSpiceApp, page: SimulationPage) {
-    let chip = PreflightChip::resolve(app);
+fn page_heading(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, page: SimulationPage) {
+    let chip = PreflightChip::resolve(cx.model, cx.runs);
     ui.horizontal(|ui| {
         let available = ui.available_width();
         let action = primary_action(page);
@@ -136,12 +143,12 @@ fn page_heading(ui: &mut Ui, app: &mut RSpiceApp, page: SimulationPage) {
             if let Some((label, command)) = action
                 && Button::new(label).accent().show(ui).clicked()
             {
-                command(app);
+                command(cx);
             }
             if let Some(chip) = &chip {
                 ui.add_space(CHIP_GAP);
                 if chip.show(ui) {
-                    app.execute_command_key(SimulateCommand::Preflight.key());
+                    cx.execute(SimulateCommand::Preflight.key());
                 }
             }
         });
@@ -173,8 +180,8 @@ impl PreflightChip {
     /// A report that authorizes dispatch owes nothing: there is no problem to
     /// state, and the route that needs the task count has it. The chip is for
     /// the two standings that leave the reader something to do.
-    pub(super) fn resolve(app: &RSpiceApp) -> Option<Self> {
-        let currency = preflight_currency(app);
+    pub(super) fn resolve(model: &Model, runs: &RunsState) -> Option<Self> {
+        let currency = preflight_currency(model, runs);
         currency.wants_rerun().then(|| Self {
             currency,
             text: chip_text(currency),
@@ -206,18 +213,16 @@ impl PreflightChip {
 /// expired report has no contract to state, and fabricating one would be
 /// stating a dispatch nobody is authorized to make; the chip beside the
 /// heading already says which of the two it is.
-pub(super) fn dispatch_contract(ui: &mut Ui, app: &RSpiceApp) {
+pub(super) fn dispatch_contract(ui: &mut Ui, model: &Model, runs: &RunsState) {
     use crate::workbench::design_system::{property_card, property_row};
 
     if !matches!(
-        preflight_currency(app),
+        preflight_currency(model, runs),
         PreflightCurrency::Authorized { .. }
     ) {
         return;
     }
-    let Some(prepared) = app
-        .state
-        .runs
+    let Some(prepared) = runs
         .preflight
         .report
         .as_ref()
@@ -257,18 +262,17 @@ const CONTRACT_GAP: f32 = 12.0;
 /// walked: that walk traverses the configured hierarchy, and paying it on
 /// every frame of every setup route to learn "no preflight yet" would be the
 /// header charging the whole design for a fact the state already holds.
-fn preflight_currency(app: &RSpiceApp) -> PreflightCurrency {
-    if app.state.runs.preflight.report.is_none() {
+fn preflight_currency(model: &Model, runs: &RunsState) -> PreflightCurrency {
+    if runs.preflight.report.is_none() {
         return PreflightCurrency::Absent;
     }
-    let (topology_root, topology_revision, topology_closure) =
-        app.state.configured_topology_revision();
-    app.state.runs.preflight.currency(
-        app.state.model.workspace.content.project.revision().get(),
+    let (topology_root, topology_revision, topology_closure) = model.configured_topology_revision();
+    runs.preflight.currency(
+        model.workspace.content.project.revision().get(),
         &topology_root,
         topology_revision,
         &topology_closure,
-        app.state.active_plan_revision(),
+        model.active_plan_revision(),
     )
 }
 
@@ -396,7 +400,7 @@ fn preflight_chip(ui: &mut Ui, currency: PreflightCurrency, text: &str) -> bool 
     }
 }
 
-type PageCommand = fn(&mut RSpiceApp);
+type PageCommand = fn(&mut Cx<'_, SimulateFeature>);
 
 fn primary_action(page: SimulationPage) -> Option<(&'static str, PageCommand)> {
     match page {
@@ -415,16 +419,16 @@ fn primary_action(page: SimulationPage) -> Option<(&'static str, PageCommand)> {
     }
 }
 
-fn open_variable_dialog(app: &mut RSpiceApp) {
-    app.state.simulate.simulation_workflow = Some(
+fn open_variable_dialog(cx: &mut Cx<'_, SimulateFeature>) {
+    cx.state.simulation_workflow = Some(
         crate::workbench::state::SimulationWorkflowDialog::DesignVariable(
             crate::workbench::state::DesignVariableDraft::default(),
         ),
     );
 }
 
-fn open_output_dialog(app: &mut RSpiceApp) {
-    app.state.simulate.simulation_workflow = Some(
+fn open_output_dialog(cx: &mut Cx<'_, SimulateFeature>) {
+    cx.state.simulation_workflow = Some(
         crate::workbench::state::SimulationWorkflowDialog::SavedOutput(
             crate::workbench::state::SavedOutputDraft::default(),
         ),
@@ -444,8 +448,8 @@ mod tests {
         prepared: Option<PreparedPreflightContract>,
     ) -> PreflightReport {
         let (topology_root, topology_revision, topology_closure) =
-            state.configured_topology_revision();
-        let plan = state.active_plan_revision();
+            state.model.configured_topology_revision();
+        let plan = state.model.active_plan_revision();
         PreflightReport {
             project_revision: state.model.workspace.content.project.revision().get(),
             topology_root,
@@ -487,7 +491,10 @@ mod tests {
     #[test]
     fn every_setup_route_states_the_preflight_report_it_was_frozen_against() {
         let mut app = RSpiceApp::test_instance();
-        assert_eq!(preflight_currency(&app), PreflightCurrency::Absent);
+        assert_eq!(
+            preflight_currency(&app.state.model, &app.state.runs),
+            PreflightCurrency::Absent
+        );
         assert!(!PreflightCurrency::Absent.wants_rerun());
 
         app.state.runs.preflight.report = Some(current_report(
@@ -496,10 +503,10 @@ mod tests {
             Some(prepared_contract(3)),
         ));
         assert_eq!(
-            preflight_currency(&app),
+            preflight_currency(&app.state.model, &app.state.runs),
             PreflightCurrency::Authorized { tasks: 3 }
         );
-        assert!(!preflight_currency(&app).wants_rerun());
+        assert!(!preflight_currency(&app.state.model, &app.state.runs).wants_rerun());
 
         app.state.runs.preflight.report = Some(current_report(
             &app.state,
@@ -507,7 +514,7 @@ mod tests {
             Some(prepared_contract(3)),
         ));
         assert_eq!(
-            preflight_currency(&app),
+            preflight_currency(&app.state.model, &app.state.runs),
             PreflightCurrency::Blocked { blockers: 1 }
         );
 
@@ -516,8 +523,11 @@ mod tests {
         let mut stale = current_report(&app.state, Vec::new(), Some(prepared_contract(3)));
         stale.project_revision += 1;
         app.state.runs.preflight.report = Some(stale);
-        assert_eq!(preflight_currency(&app), PreflightCurrency::Expired);
-        assert!(preflight_currency(&app).wants_rerun());
+        assert_eq!(
+            preflight_currency(&app.state.model, &app.state.runs),
+            PreflightCurrency::Expired
+        );
+        assert!(preflight_currency(&app.state.model, &app.state.runs).wants_rerun());
     }
 
     /// Render one route through the surface entry point and return its

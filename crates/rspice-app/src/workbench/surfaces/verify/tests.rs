@@ -204,7 +204,7 @@ fn retain_preflight_report(app: &mut RSpiceApp) {
         .map(|plan| (plan.id(), plan.revision()))
         .expect("default plan");
     let (topology_root, topology_revision, topology_closure) =
-        app.state.configured_topology_revision();
+        app.state.model.configured_topology_revision();
     app.state.runs.preflight = crate::workbench::app_state::run_preflight::PreflightDialogState {
         report: Some(crate::state::PreflightReport {
             project_revision: app.state.model.workspace.content.project.revision().get(),

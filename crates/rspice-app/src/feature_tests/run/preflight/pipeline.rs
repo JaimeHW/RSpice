@@ -286,13 +286,13 @@ fn a_run_press_after_an_edit_restarts_the_pass_on_the_edited_design() {
         .clone()
         .expect("the pass retains its report");
     let (topology_root, topology_revision, topology_closure) =
-        app.state.configured_topology_revision();
+        app.state.model.configured_topology_revision();
     assert!(report.is_runnable_for(
         app.state.model.workspace.content.project.revision().get(),
         &topology_root,
         topology_revision,
         &topology_closure,
-        app.state.active_plan_revision(),
+        app.state.model.active_plan_revision(),
     ));
     let (deck, digest) = app
         .simulation_controller

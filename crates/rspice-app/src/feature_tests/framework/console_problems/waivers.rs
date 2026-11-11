@@ -432,8 +432,9 @@ fn a_waiver_recorded_on_the_page_drops_the_report_that_refused_the_run() {
 /// Retain a preflight report over the design as it stands, as a pass does,
 /// with `blockers` against it.
 fn retain_report(state: &mut AppState, blockers: Vec<crate::state::PreflightIssue>) {
-    let (topology_root, topology_revision, topology_closure) = state.configured_topology_revision();
-    let plan = state.active_plan_revision();
+    let (topology_root, topology_revision, topology_closure) =
+        state.model.configured_topology_revision();
+    let plan = state.model.active_plan_revision();
     state.runs.preflight.report = Some(crate::state::PreflightReport {
         project_revision: state.model.workspace.content.project.revision().get(),
         topology_root,

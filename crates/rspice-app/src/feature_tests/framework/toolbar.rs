@@ -339,7 +339,7 @@ fn reference_pvt_commit_advances_the_plan_and_invalidates_preflight() {
         .map(|plan| (plan.id(), plan.revision()))
         .expect("default plan");
     let (topology_root, topology_revision, topology_closure) =
-        app.state.configured_topology_revision();
+        app.state.model.configured_topology_revision();
     app.state.runs.preflight.report = Some(crate::state::PreflightReport {
         project_revision: app.state.model.workspace.content.project.revision().get(),
         topology_root,

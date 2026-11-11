@@ -188,8 +188,8 @@ fn a_pass_states_its_outcome_where_the_notice_centre_lifts_it() {
 fn a_current_retained_report_queues_without_reauthoring_preflight() {
     let mut app = RSpiceApp::test_instance();
     let (topology_root, topology_revision, topology_closure) =
-        app.state.configured_topology_revision();
-    let current_plan = app.state.active_plan_revision();
+        app.state.model.configured_topology_revision();
+    let current_plan = app.state.model.active_plan_revision();
     app.state.runs.preflight.report = Some(PreflightReport {
         project_revision: app.state.model.workspace.content.project.revision().get(),
         topology_root,
@@ -225,14 +225,15 @@ fn report_collects_all_independent_blocker_classes() {
     crate::workbench::menu_bar::check_design(&mut state);
 
     let report = collect_report(&state);
-    let (topology_root, topology_revision, topology_closure) = state.configured_topology_revision();
+    let (topology_root, topology_revision, topology_closure) =
+        state.model.configured_topology_revision();
 
     assert!(!report.is_runnable_for(
         state.model.workspace.content.project.revision().get(),
         &topology_root,
         topology_revision,
         &topology_closure,
-        state.active_plan_revision(),
+        state.model.active_plan_revision(),
     ));
     assert!(
         report
@@ -509,8 +510,9 @@ fn report_is_bound_to_the_exact_project_topology_and_plan_revision() {
         report.project_revision,
         state.model.workspace.content.project.revision().get()
     );
-    let (plan_id, plan_revision) = state.active_plan_revision().expect("active plan");
-    let (topology_root, topology_revision, topology_closure) = state.configured_topology_revision();
+    let (plan_id, plan_revision) = state.model.active_plan_revision().expect("active plan");
+    let (topology_root, topology_revision, topology_closure) =
+        state.model.configured_topology_revision();
     assert_eq!(report.topology_root, topology_root);
     assert_eq!(report.topology_revision, topology_revision);
     assert_eq!(report.topology_closure, topology_closure);
@@ -543,7 +545,7 @@ fn report_is_bound_to_the_exact_project_topology_and_plan_revision() {
         &topology_root,
         topology_revision,
         &topology_closure,
-        state.active_plan_revision(),
+        state.model.active_plan_revision(),
     ));
 }
 
@@ -581,13 +583,13 @@ fn report_currentness_tracks_the_configured_root_not_an_unrelated_active_editor(
         crate::state::ComponentType::Capacitor,
         crate::state::Point::new(120, 80),
     );
-    let (live_root, live_revision, live_closure) = state.configured_topology_revision();
+    let (live_root, live_revision, live_closure) = state.model.configured_topology_revision();
     assert!(report.is_current_for(
         state.model.workspace.content.project.revision().get(),
         &live_root,
         live_revision,
         &live_closure,
-        state.active_plan_revision(),
+        state.model.active_plan_revision(),
     ));
 }
 
@@ -632,14 +634,14 @@ fn report_currentness_expires_when_a_referenced_child_topology_changes() {
         crate::state::ComponentType::Resistor,
         crate::state::Point::new(80, 20),
     );
-    let (live_root, live_revision, live_closure) = state.configured_topology_revision();
+    let (live_root, live_revision, live_closure) = state.model.configured_topology_revision();
     assert_eq!(live_revision, root_revision);
     assert!(!report.is_current_for(
         state.model.workspace.content.project.revision().get(),
         &live_root,
         live_revision,
         &live_closure,
-        state.active_plan_revision(),
+        state.model.active_plan_revision(),
     ));
 }
 

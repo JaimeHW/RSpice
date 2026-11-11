@@ -53,7 +53,7 @@ fn paint(
                             super::super::show(ui, &mut app);
                         } else {
                             egui::ScrollArea::vertical()
-                                .show(ui, |ui| pages::show(ui, &mut app, page));
+                                .show(ui, |ui| pages::show_over_app(ui, &mut app, page));
                         }
                     });
             },

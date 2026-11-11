@@ -78,7 +78,8 @@ fn render_with(page: SimulationPage, width: f32, seed: impl FnOnce(&mut RSpiceAp
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
                 .show(ctx, |ui| {
-                    egui::ScrollArea::vertical().show(ui, |ui| pages::show(ui, &mut app, page));
+                    egui::ScrollArea::vertical()
+                        .show(ui, |ui| pages::show_over_app(ui, &mut app, page));
                 });
         },
     );

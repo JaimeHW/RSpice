@@ -72,7 +72,8 @@ impl Registry {
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE)
                     .show(ctx, |ui| {
-                        egui::ScrollArea::vertical().show(ui, |ui| pages::show(ui, app, page));
+                        egui::ScrollArea::vertical()
+                            .show(ui, |ui| pages::show_over_app(ui, app, page));
                     });
             },
         );

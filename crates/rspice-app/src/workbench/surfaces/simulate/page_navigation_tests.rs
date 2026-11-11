@@ -61,7 +61,8 @@ fn render_with(page: SimulationPage, width: f32, seed: impl FnOnce(&mut AppState
                     if page == SimulationPage::Analyses {
                         super::show(ui, &mut app);
                     } else {
-                        egui::ScrollArea::vertical().show(ui, |ui| pages::show(ui, &mut app, page));
+                        egui::ScrollArea::vertical()
+                            .show(ui, |ui| pages::show_over_app(ui, &mut app, page));
                     }
                 });
         },
