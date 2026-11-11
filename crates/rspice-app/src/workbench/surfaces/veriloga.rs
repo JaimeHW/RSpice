@@ -349,9 +349,19 @@ fn source_editor(
                 ) {
                     Ok(true) => {}
                     Ok(false) => {}
-                    Err(error) => app
-                        .state
-                        .prompt(format!("Could not update {active_path}: {error}")),
+                    Err(error) => {
+                        app.state
+                            .prompt(format!("Could not update {active_path}: {error}"));
+                        // The editor goes back to the source as it is stored.
+                        crate::workbench::documents::virtual_text_editor::resynchronize(
+                            ui.ctx(),
+                            crate::workbench::documents::code_workspace::source_editor_id(
+                                crate::state::ProjectSourceLanguage::VerilogA,
+                                selected.bundle().id(),
+                                active_path,
+                            ),
+                        );
+                    }
                 }
             }
             interaction

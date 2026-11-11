@@ -272,6 +272,30 @@ pub(crate) fn press_begins(ctx: &egui::Context, id: egui::Id, down: bool) -> boo
     down && !was_down
 }
 
+/// Have the editor `editor_id` take its source again the next time it is
+/// drawn, as it does when the document's owner publishes a new revision. An
+/// owner that refused to store what the editor typed asks for this, so the
+/// editor goes back to the stored text, with the history, the caret and the
+/// selection it had before the refused edits.
+pub(crate) fn resynchronize(ctx: &egui::Context, editor_id: egui::Id) {
+    let session_id = editor_id.with("virtual-session");
+    ctx.data_mut(|data| {
+        if let Some(mut session) = data.remove_temp::<VirtualEditorSession>(session_id) {
+            session.bound_revision = u64::MAX;
+            data.insert_temp(session_id, session);
+        }
+    });
+}
+
+/// The text the editor `editor_id` showed when it was last drawn.
+#[cfg(test)]
+pub(crate) fn shown_source(ctx: &egui::Context, editor_id: egui::Id) -> Option<String> {
+    ctx.data(|data| {
+        data.get_temp::<VirtualEditorSession>(editor_id.with("virtual-session"))
+            .map(|session| session.model.to_source())
+    })
+}
+
 /// Show a virtualized source document.
 ///
 /// `source_revision` is the application document revision, not a frame counter.

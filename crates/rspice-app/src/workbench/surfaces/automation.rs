@@ -804,9 +804,19 @@ fn code_pane(
                     );
                 }
                 Ok(false) => {}
-                Err(error) => app
-                    .state
-                    .prompt(format!("Could not update {selected_path}: {error}")),
+                Err(error) => {
+                    app.state
+                        .prompt(format!("Could not update {selected_path}: {error}"));
+                    // The editor goes back to the source as it is stored.
+                    crate::workbench::documents::virtual_text_editor::resynchronize(
+                        ui.ctx(),
+                        crate::workbench::documents::code_workspace::source_editor_id(
+                            crate::state::ProjectSourceLanguage::RSpiceAutomation,
+                            bundle.id(),
+                            selected_path,
+                        ),
+                    );
+                }
             }
         }
         interaction
