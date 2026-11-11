@@ -45,13 +45,11 @@ pub(crate) use relink::{
     commit_dependency_relink,
 };
 
-pub use comparison::{
-    close_revision_comparison, compare_run_deck_snapshot, open_executed_deck,
-    open_run_deck_snapshot, restore_owned_revision, reveal_executed_deck,
-};
+pub use comparison::{close_revision_comparison, restore_owned_revision, reveal_executed_deck};
 pub(crate) use comparison::{
-    close_run_deck_snapshot, open_netlist_comparison, open_run_deck_snapshot_in,
-    run_deck_snapshot_artifact_name_in, run_deck_snapshot_run_id_in,
+    close_run_deck_snapshot, compare_run_deck_snapshot_in, open_executed_deck_in,
+    open_netlist_comparison, open_run_deck_snapshot_in, run_deck_snapshot_artifact_name_in,
+    run_deck_snapshot_run_id_in,
 };
 pub(crate) use comparison::{compare_generated_revision, compare_owned_revision};
 pub use diagnostics::{DiagnosticSeverity, control_disposition_summary};
@@ -820,12 +818,8 @@ pub(crate) fn active_netlist_source_is_editable_in(
 /// Before the session has activated a document, a retained project-owned
 /// source outranks the generated primary; afterwards the active document is
 /// the answer and nothing infers one from the visible buffer.
-pub(crate) fn effective_active_document(state: &AppState) -> ActiveNetlistDocument {
-    effective_active_document_in(&state.model, &state.code.netlist)
-}
-
-/// [`effective_active_document`], over the model and the netlist editor's
-/// state.
+///
+/// It reads the model and the netlist editor's state.
 pub(crate) fn effective_active_document_in(
     model: &Model,
     netlist: &NetlistDocumentState,
@@ -844,11 +838,8 @@ pub(crate) fn effective_active_document_in(
 /// The run gate and the post-run strip both have to name the same bytes: one
 /// decides whether the deck may run, the other whether the deck still matches
 /// the run that already happened.
-pub(crate) fn working_deck_source(state: &AppState) -> &str {
-    working_deck_source_in(&state.model, &state.code.netlist)
-}
-
-/// [`working_deck_source`], over the model and the netlist editor's state.
+///
+/// It reads the model and the netlist editor's state.
 pub(crate) fn working_deck_source_in<'a>(
     model: &'a Model,
     netlist: &NetlistDocumentState,

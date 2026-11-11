@@ -13,7 +13,7 @@
 
 // Through the parent rather than `crate::workbench`: the module's edge onto
 // `app_state` is being retired, and a submodule of it does not need its own.
-use super::{AppState, Model, NetlistDocumentState};
+use super::{Model, NetlistDocumentState};
 use rspice_app_runs::workbench::slots::runs::RunsState;
 
 /// The text the run-snapshot document is showing right now.
@@ -82,11 +82,10 @@ impl ExecutedDeckVerification {
     /// deck text — see [`rspice_simulation::sealed_source::sealed_executable_source_digest`]
     /// — so it is the one thing a retained deck can be checked against.
     #[must_use]
-    pub fn of(state: &AppState, run_id: u64, point: usize) -> Option<Self> {
-        let record = state.model.simulation.retained.executed_decks.get(run_id)?;
+    pub fn of(model: &Model, run_id: u64, point: usize) -> Option<Self> {
+        let record = model.simulation.retained.executed_decks.get(run_id)?;
         let selected = record.point(point)?;
-        let Some(receipt) = state
-            .model
+        let Some(receipt) = model
             .simulation
             .retained
             .run_by_sequence(run_id)

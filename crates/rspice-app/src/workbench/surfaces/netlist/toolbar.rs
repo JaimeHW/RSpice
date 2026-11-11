@@ -327,7 +327,7 @@ pub(super) fn code_toolbar(
             .response
             .on_disabled_hover_text(messages.text(MessageId::NetlistSearchUnavailable));
             if find_clicked {
-                action = Some(NetlistToolbarAction::App(AppToolbarAction::Find));
+                action = Some(NetlistToolbarAction::Find);
             }
             let manage_source = icon_button(
                 ui,
@@ -501,7 +501,7 @@ pub(super) fn code_toolbar(
             .response
             .on_disabled_hover_text(messages.text(MessageId::NetlistSearchUnavailable));
             if find_clicked {
-                action = Some(NetlistToolbarAction::App(AppToolbarAction::Find));
+                action = Some(NetlistToolbarAction::Find);
             }
             let manage_source = icon_button(
                 ui,
@@ -871,6 +871,12 @@ pub(super) fn code_toolbar(
                 );
             cx.wb.prompt(answer.unwrap_or_else(|refusal| refusal));
         }
+        Some(NetlistToolbarAction::Find) => {
+            // What Find in source does on this page: the deck belongs to no
+            // project source bundle, so the command opens the page's own
+            // find window, which draws later in this frame.
+            cx.state.netlist.find.open = true;
+        }
         Some(NetlistToolbarAction::FormatDocument) => {
             crate::workbench::documents::text_editor_commands::queue_format_document(
                 ui.ctx(),
@@ -897,8 +903,8 @@ pub(super) fn code_toolbar(
 }
 
 /// Carry out the press the toolbar left to the application, straight after
-/// the toolbar has drawn and before anything under it does. Validating and
-/// finding open what the editor and the find window draw in the same frame;
+/// the toolbar has drawn and before anything under it does. Validating
+/// opens what the editor draws in the same frame;
 /// copying an include into the project, relinking one and the quick fix
 /// commit through the whole state.
 pub(super) fn run_app_toolbar_action(app: &mut RSpiceApp, action: AppToolbarAction) {
@@ -932,11 +938,6 @@ pub(super) fn run_app_toolbar_action(app: &mut RSpiceApp, action: AppToolbarActi
         AppToolbarAction::Validate => {
             app.execute_command_key(
                 crate::workbench::code::commands::CodeCommand::ValidateCodeDocument.key(),
-            );
-        }
-        AppToolbarAction::Find => {
-            app.execute_command_key(
-                crate::workbench::code::commands::CodeCommand::FindCodeDocument.key(),
             );
         }
         AppToolbarAction::ApplyQuickFix => {
@@ -1228,6 +1229,7 @@ enum NetlistToolbarAction {
     FindReferences,
     RenameSymbol,
     WorkspaceSymbols,
+    Find,
     FormatDocument,
     App(AppToolbarAction),
 }
@@ -1239,7 +1241,6 @@ pub(super) enum AppToolbarAction {
     CopyDependency,
     RelinkDependency,
     Validate,
-    Find,
     ApplyQuickFix,
 }
 

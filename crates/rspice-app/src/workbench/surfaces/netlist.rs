@@ -33,25 +33,23 @@ use crate::workbench::documents::netlist_document::{
 };
 use crate::workbench::features;
 use crate::workbench::framework::feature::Cx;
-use crate::workbench::{AppState, MessageId, RSpiceApp};
+use crate::workbench::{MessageId, RSpiceApp};
 
 /// Publish the source editor a page shows as its document, and hand it any
 /// request the menus, palette or shortcuts made for it. Called before the
 /// editor is drawn so it applies the request in the same frame.
 pub(super) fn publish_source_editor(
     ctx: &egui::Context,
-    app: &mut RSpiceApp,
+    workbench: &mut crate::workbench::WorkbenchSession,
     editor: crate::workbench::documents::text_editor_commands::ActiveSourceEditor,
 ) {
-    app.state.workbench.active_source_editor = Some(editor);
-    if let Some(request) = app.state.workbench.outbox.take() {
+    workbench.active_source_editor = Some(editor);
+    if let Some(request) = workbench.outbox.take() {
         crate::workbench::documents::text_editor_commands::queue_source_editor_request(
             ctx, editor.id, request,
         );
     }
-    if let Some(step) = app
-        .state
-        .workbench
+    if let Some(step) = workbench
         .outbox
         .take::<crate::workbench::documents::code_workspace::ProblemStep>()
     {
@@ -61,14 +59,20 @@ pub(super) fn publish_source_editor(
 
 /// Step the netlist editor's caret to the next or previous finding of the
 /// deck it shows, when F8 or Shift+F8 asked, and say which it reached.
-fn step_netlist_problem(ctx: &egui::Context, state: &mut AppState, editor_id: egui::Id) {
+fn step_netlist_problem(
+    ctx: &egui::Context,
+    model: &crate::workbench::app_state::Model,
+    netlist: &crate::workbench::documents::netlist_document::NetlistDocumentState,
+    workbench: &mut crate::workbench::WorkbenchSession,
+    editor_id: egui::Id,
+) {
     use crate::workbench::documents::code_workspace;
 
     let Some(step) = code_workspace::take_problem_step(ctx, editor_id) else {
         return;
     };
-    let buffer = &state.model.simulation.source.netlist_content;
-    let diagnostics = std::sync::Arc::clone(&state.code.netlist.diagnostics);
+    let buffer = &model.simulation.source.netlist_content;
+    let diagnostics = std::sync::Arc::clone(&netlist.diagnostics);
     // The buffer's own findings, in source order. A finding in an included
     // file names no line of this buffer, so it is not stepped to.
     let mut located = diagnostics
@@ -91,13 +95,13 @@ fn step_netlist_problem(ctx: &egui::Context, state: &mut AppState, editor_id: eg
         .iter()
         .map(|(line, column, _)| (*line, *column))
         .collect::<Vec<_>>();
-    let messages = state.workbench.messages();
+    let messages = workbench.messages();
     if step == code_workspace::ProblemStep::AtCaret {
         // The finding the caret is at or after on its line, or else the
         // line's first.
         let before = buffer
             .char_indices()
-            .nth(state.code.netlist.cursor_char_index)
+            .nth(netlist.cursor_char_index)
             .map_or(buffer.as_str(), |(byte, _)| &buffer[..byte]);
         let line = before.matches('\n').count() + 1;
         let column = before
@@ -123,7 +127,7 @@ fn step_netlist_problem(ctx: &egui::Context, state: &mut AppState, editor_id: eg
                 )
             },
         );
-        state.prompt(announcement);
+        workbench.prompt(announcement);
         return;
     }
     let Some(index) = code_workspace::problem_step_index(
@@ -131,10 +135,10 @@ fn step_netlist_problem(ctx: &egui::Context, state: &mut AppState, editor_id: eg
         editor_id,
         buffer,
         &places,
-        state.code.netlist.cursor_char_index,
+        netlist.cursor_char_index,
         step,
     ) else {
-        state.prompt(messages.text(MessageId::SourceDiagnosticNone));
+        workbench.prompt(messages.text(MessageId::SourceDiagnosticNone));
         return;
     };
     let (line, column, diagnostic) = located[index];
@@ -147,19 +151,24 @@ fn step_netlist_problem(ctx: &egui::Context, state: &mut AppState, editor_id: eg
         &diagnostic.message,
     );
     code_workspace::reveal_source_location(ctx, editor_id, line, column.unwrap_or(1));
-    state.prompt(announcement);
+    workbench.prompt(announcement);
 }
 
 /// Hand a line revealed in the netlist editor to it the way this page asks
 /// for a line.
-fn reveal_in_netlist(ui: &Ui, state: &mut AppState, editor_id: egui::Id) {
-    let buffer = &state.model.simulation.source.netlist_content;
+fn reveal_in_netlist(
+    ui: &Ui,
+    model: &crate::workbench::app_state::Model,
+    netlist: &mut crate::workbench::documents::netlist_document::NetlistDocumentState,
+    editor_id: egui::Id,
+) {
+    let buffer = &model.simulation.source.netlist_content;
     let Some(line) =
         crate::workbench::documents::text_editor_commands::take_reveal_line(ui, editor_id, buffer)
     else {
         return;
     };
-    state.code.netlist.requested_line = Some(line);
+    netlist.requested_line = Some(line);
 }
 
 /// Before the page draws, in the code feature's context: rebuild the
@@ -186,10 +195,19 @@ pub(in crate::workbench) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
     // one padding and one edge rather than each deriving a width. The strip
     // states the run and reports what was clicked; routing that click is this
     // surface's transaction, not the painter's.
-    match run_strip(ui, &app.state, toolbar.content) {
+    match run_strip(
+        ui,
+        &app.state.model,
+        &app.state.code.netlist,
+        &app.state.runs,
+        app.state.workbench.messages(),
+        toolbar.content,
+    ) {
         Some(RunStripAction::OpenDeckSnapshot) => {
-            if !crate::workbench::documents::netlist_document::open_run_deck_snapshot(
-                &mut app.state,
+            if !crate::workbench::documents::netlist_document::open_run_deck_snapshot_in(
+                &mut app.state.model,
+                &mut app.state.code.netlist,
+                &app.state.runs,
             ) {
                 app.state.prompt(format!(
                     "The deck this run used cannot be opened: {}.",
@@ -199,16 +217,20 @@ pub(in crate::workbench) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
         }
         Some(RunStripAction::Compare) => {
             if let Err(error) =
-                crate::workbench::documents::netlist_document::compare_run_deck_snapshot(
-                    &mut app.state,
+                crate::workbench::documents::netlist_document::compare_run_deck_snapshot_in(
+                    &mut app.state.model,
+                    &mut app.state.code.netlist,
+                    &app.state.runs,
                 )
             {
                 app.state.prompt(error);
             }
         }
         Some(RunStripAction::OpenTaskDeck { run_id, point }) => {
-            if !crate::workbench::documents::netlist_document::open_executed_deck(
-                &mut app.state,
+            if !crate::workbench::documents::netlist_document::open_executed_deck_in(
+                &mut app.state.model,
+                &mut app.state.code.netlist,
+                &app.state.runs,
                 run_id,
                 point,
             ) {
@@ -238,8 +260,12 @@ pub(in crate::workbench) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
         }
         None => {}
     }
-    execution_profile_review_banner(ui, app);
-    control_disposition_band(ui, &app.state);
+    if execution_profile_review_banner(ui, &app.state.model, app.state.workbench.messages()) {
+        crate::workbench::workflows::netlist_workflow::begin_owned_netlist_profile_review(
+            &mut app.state,
+        );
+    }
+    control_disposition_band(ui, &app.state.code.netlist, app.state.workbench.messages());
     if crate::workbench::documents::text_editor_commands::take_format_document_request(
         ui,
         crate::workbench::documents::netlist_document::editor_id(&app.state),
@@ -249,10 +275,15 @@ pub(in crate::workbench) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
     let t = Tokens::get(ui.ctx());
     egui::Frame::new().fill(t.color.bg_inset).show(ui, |ui| {
         ui.set_min_size(ui.available_size());
-        if generated_primary_unavailable(&app.state) {
+        if generated_primary_unavailable(&app.state.model, &app.state.code.netlist) {
             let messages = app.state.workbench.messages();
             if app.state.model.workspace.content.netlist_source.is_none()
-                && app.state.model.netlist_artifacts.generated_document.is_none()
+                && app
+                    .state
+                    .model
+                    .netlist_artifacts
+                    .generated_document
+                    .is_none()
             {
                 let mut action = None;
                 empty_state_with_actions(
@@ -277,13 +308,16 @@ pub(in crate::workbench) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
                 );
                 match action {
                     Some(EmptyNetlistAction::NewTopDeck) => {
-                        if let Err(error) = crate::workbench::app::begin_new_top_deck(&mut app.state)
+                        if let Err(error) =
+                            crate::workbench::app::begin_new_top_deck(&mut app.state)
                         {
                             app.state.prompt(error);
                         }
                     }
                     Some(EmptyNetlistAction::ImportDeck) => {
-                        app.execute_command_key(crate::workbench::code::commands::CodeCommand::ImportNetlist.key());
+                        app.execute_command_key(
+                            crate::workbench::code::commands::CodeCommand::ImportNetlist.key(),
+                        );
                     }
                     None => {}
                 }
@@ -296,7 +330,8 @@ pub(in crate::workbench) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
                     WorkbenchIcon::Netlist,
                     &title,
                     app.state
-                        .model.netlist_artifacts
+                        .model
+                        .netlist_artifacts
                         .generation_error
                         .as_deref()
                         .unwrap_or(&default_description),
@@ -304,20 +339,27 @@ pub(in crate::workbench) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
             }
         } else {
             let editor_id = crate::workbench::documents::netlist_document::editor_id(&app.state);
+            let editable =
+                crate::workbench::documents::netlist_document::active_netlist_source_is_editable(
+                    &app.state,
+                );
             publish_source_editor(
                 ui.ctx(),
-                app,
+                &mut app.state.workbench,
                 crate::workbench::documents::text_editor_commands::ActiveSourceEditor {
                     id: editor_id,
-                    editable:
-                        crate::workbench::documents::netlist_document::active_netlist_source_is_editable(
-                            &app.state,
-                        ),
+                    editable,
                     navigable: true,
                 },
             );
-            step_netlist_problem(ui.ctx(), &mut app.state, editor_id);
-            reveal_in_netlist(ui, &mut app.state, editor_id);
+            step_netlist_problem(
+                ui.ctx(),
+                &app.state.model,
+                &app.state.code.netlist,
+                &mut app.state.workbench,
+                editor_id,
+            );
+            reveal_in_netlist(ui, &app.state.model, &mut app.state.code.netlist, editor_id);
             let response =
                 crate::workbench::documents::netlist_document::show_editor(ui, &mut app.state);
             crate::workbench::chrome::title_bar::source_editor_context_menu(&response, app);
@@ -398,25 +440,29 @@ pub(super) struct RunStripProjection {
     pub verification: Option<ExecutedDeckVerification>,
 }
 
-pub(super) fn run_strip_projection(state: &AppState) -> Option<RunStripProjection> {
+pub(super) fn run_strip_projection(
+    model: &crate::workbench::app_state::Model,
+    netlist: &crate::workbench::documents::netlist_document::NetlistDocumentState,
+    runs: &rspice_app_runs::workbench::slots::runs::RunsState,
+) -> Option<RunStripProjection> {
     use crate::workbench::documents::netlist_document::{
-        effective_active_document, working_deck_source,
+        effective_active_document_in, working_deck_source_in,
     };
 
-    let active = effective_active_document(state);
+    let active = effective_active_document_in(model, netlist);
     let (run_id, phase) = if active == ActiveNetlistDocument::RunSnapshot {
         // Which run the snapshot belongs to is whichever binding put it there.
         // `last_run_id` is the *manual baseline* binding, and an executed deck
         // is opened from a run that never touched it — reading only that one
         // left the header silent about exactly the runs this viewer was added
         // for.
-        let run_id = match state.code.netlist.executed_deck_view {
+        let run_id = match netlist.executed_deck_view {
             Some(selection) => selection.run_id,
-            None => state.runs.manual_run.last_run_id?,
+            None => runs.manual_run.last_run_id?,
         };
         (run_id, RunStripPhase::Snapshot)
     } else {
-        if state.code.netlist.active_dependency_identity.is_some()
+        if netlist.active_dependency_identity.is_some()
             || !matches!(
                 active,
                 ActiveNetlistDocument::Generated | ActiveNetlistDocument::OwnedSource
@@ -424,12 +470,12 @@ pub(super) fn run_strip_projection(state: &AppState) -> Option<RunStripProjectio
         {
             return None;
         }
-        match state.runs.manual_run.pending_manual_run_id {
+        match runs.manual_run.pending_manual_run_id {
             Some(running) => (running, RunStripPhase::Running),
             None => {
-                let run_id = state.runs.manual_run.last_run_id?;
-                let baseline = state.runs.manual_run.last_run_buffer.as_deref()?;
-                let phase = if working_deck_source(state) == baseline {
+                let run_id = runs.manual_run.last_run_id?;
+                let baseline = runs.manual_run.last_run_buffer.as_deref()?;
+                let phase = if working_deck_source_in(model, netlist) == baseline {
                     RunStripPhase::Current
                 } else {
                     RunStripPhase::Edited
@@ -442,9 +488,8 @@ pub(super) fn run_strip_projection(state: &AppState) -> Option<RunStripProjectio
     // schematic run has no editor buffer to be current with or edited against,
     // so there is nothing to state about it there. An executed deck is a
     // statement about the run itself, which every run can make.
-    let point = state.code.netlist.executed_deck_view.and_then(|selection| {
-        state
-            .model
+    let point = netlist.executed_deck_view.and_then(|selection| {
+        model
             .simulation
             .retained
             .executed_decks
@@ -452,8 +497,7 @@ pub(super) fn run_strip_projection(state: &AppState) -> Option<RunStripProjectio
             .and_then(|deck| deck.point(selection.point))
             .map(|point| point.label.clone())
     });
-    let receipt = state
-        .model
+    let receipt = model
         .simulation
         .retained
         .run_by_sequence(run_id)?
@@ -465,8 +509,7 @@ pub(super) fn run_strip_projection(state: &AppState) -> Option<RunStripProjectio
     // The run named by the strip, not the run whose deck is open: in the
     // baseline phases they are the same run, and this is what decides whether
     // the hop to its task decks can be offered at all.
-    let tasks = state
-        .model
+    let tasks = model
         .simulation
         .retained
         .executed_decks
@@ -476,9 +519,7 @@ pub(super) fn run_strip_projection(state: &AppState) -> Option<RunStripProjectio
     // has since dropped shows no deck, and a verdict about bytes nobody can
     // see is worse than silence.
     let verification = point.as_ref().and_then(|_| {
-        state
-            .code
-            .netlist
+        netlist
             .executed_deck_view
             .map(|selection| selection.verification)
     });
@@ -493,9 +534,7 @@ pub(super) fn run_strip_projection(state: &AppState) -> Option<RunStripProjectio
         revision: receipt.project_revision().get(),
         phase,
         point,
-        point_index: state
-            .code
-            .netlist
+        point_index: netlist
             .executed_deck_view
             .map_or(0, |selection| selection.point),
         tasks,
@@ -521,9 +560,15 @@ enum RunStripAction {
 /// One 24-point row between the deck toolbar and the editor: what ran, what it
 /// ran over, and the two routes out of it. While a run is in flight the row
 /// states that and offers nothing that could race it.
-fn run_strip(ui: &mut Ui, state: &AppState, toolbar_content: egui::Rect) -> Option<RunStripAction> {
-    let projection = run_strip_projection(state)?;
-    let messages = state.workbench.messages();
+fn run_strip(
+    ui: &mut Ui,
+    model: &crate::workbench::app_state::Model,
+    netlist: &crate::workbench::documents::netlist_document::NetlistDocumentState,
+    runs: &rspice_app_runs::workbench::slots::runs::RunsState,
+    messages: crate::workbench::MessageCatalog,
+    toolbar_content: egui::Rect,
+) -> Option<RunStripAction> {
+    let projection = run_strip_projection(model, netlist, runs)?;
     let run_id = projection.run_id.to_string();
     let t = Tokens::get(ui.ctx());
     let (rect, _) = ui.allocate_exact_size(
@@ -859,19 +904,22 @@ fn advisory_band(ui: &mut Ui, problem: Option<Problem>, contents: impl FnOnce(&m
         });
 }
 
-fn execution_profile_review_banner(ui: &mut Ui, app: &mut RSpiceApp) {
-    if !app
-        .state
-        .model
+/// The banner over a deck whose execution profile needs review, and whether
+/// its action was pressed.
+fn execution_profile_review_banner(
+    ui: &mut Ui,
+    model: &crate::workbench::app_state::Model,
+    messages: crate::workbench::MessageCatalog,
+) -> bool {
+    if !model
         .workspace
         .content
         .netlist_descriptor
         .as_ref()
         .is_some_and(|descriptor| descriptor.execution_profile_review_required())
     {
-        return;
+        return false;
     }
-    let messages = app.state.workbench.messages();
     let description = messages.text(MessageId::NetlistProfileReviewRequiredDescription);
     let mut review = false;
     advisory_band(ui, Some(Problem::Warning), |ui| {
@@ -883,11 +931,7 @@ fn execution_profile_review_banner(ui: &mut Ui, app: &mut RSpiceApp) {
             .button(messages.text(MessageId::NetlistProfileReviewAction))
             .clicked();
     });
-    if review {
-        crate::workbench::workflows::netlist_workflow::begin_owned_netlist_profile_review(
-            &mut app.state,
-        );
-    }
+    review
 }
 
 /// What became of the active document's `.control` region, stated once above
@@ -897,13 +941,16 @@ fn execution_profile_review_banner(ui: &mut Ui, app: &mut RSpiceApp) {
 /// parse; this band exists so the loss is visible without hunting for the
 /// block, and it counts the same published diagnostics those rows read rather
 /// than deriving a second tally from the buffer.
-fn control_disposition_band(ui: &mut Ui, state: &AppState) {
+fn control_disposition_band(
+    ui: &mut Ui,
+    netlist: &crate::workbench::documents::netlist_document::NetlistDocumentState,
+    messages: crate::workbench::MessageCatalog,
+) {
     let Some(summary) = crate::workbench::documents::netlist_document::control_disposition_summary(
-        &state.code.netlist.diagnostics,
+        &netlist.diagnostics,
     ) else {
         return;
     };
-    let messages = state.workbench.messages();
     let promoted = summary.promoted.to_string();
     let dropped = summary.dropped.to_string();
     let arguments = [
@@ -1112,17 +1159,16 @@ fn normalize_owned_netlist_whitespace(source: &str) -> String {
     formatted
 }
 
-fn generated_primary_unavailable(state: &AppState) -> bool {
-    state.code.netlist.active_dependency_identity.is_none()
-        && state.code.netlist.active_document == ActiveNetlistDocument::Generated
-        && !generated_primary_ready(state)
+fn generated_primary_unavailable(
+    model: &crate::workbench::app_state::Model,
+    netlist: &crate::workbench::documents::netlist_document::NetlistDocumentState,
+) -> bool {
+    netlist.active_dependency_identity.is_none()
+        && netlist.active_document == ActiveNetlistDocument::Generated
+        && !generated_primary_ready_in(model)
 }
 
-fn generated_primary_ready(state: &AppState) -> bool {
-    generated_primary_ready_in(&state.model)
-}
-
-/// [`generated_primary_ready`], over the model.
+/// Whether the generated deck is there to show, over the model.
 fn generated_primary_ready_in(model: &crate::workbench::app_state::Model) -> bool {
     model.netlist_artifacts.generated_document.is_some()
         && !model.netlist_artifacts.generated_source.is_empty()
@@ -1221,6 +1267,7 @@ mod tests {
     use egui::vec2;
 
     use super::*;
+    use crate::workbench::AppState;
 
     /// F8 in the netlist editor goes to the deck's next finding, on its
     /// column, and Shift+F8 back; each says which finding it reached. A
@@ -1270,8 +1317,14 @@ mod tests {
                         ui.ctx().memory_mut(|memory| memory.request_focus(editor));
                         queue_problem_step(ui.ctx(), editor, step);
                     }
-                    step_netlist_problem(ui.ctx(), &mut app.state, editor);
-                    reveal_in_netlist(ui, &mut app.state, editor);
+                    step_netlist_problem(
+                        ui.ctx(),
+                        &app.state.model,
+                        &app.state.code.netlist,
+                        &mut app.state.workbench,
+                        editor,
+                    );
+                    reveal_in_netlist(ui, &app.state.model, &mut app.state.code.netlist, editor);
                     netlist_document::show_editor(ui, &mut app.state);
                 });
             }
@@ -1523,8 +1576,11 @@ mod tests {
         state.model.netlist_artifacts.generation_error =
             Some("Add a circuit before generating the primary netlist.".to_owned());
 
-        assert!(generated_primary_unavailable(&state));
-        assert!(!generated_primary_ready(&state));
+        assert!(generated_primary_unavailable(
+            &state.model,
+            &state.code.netlist
+        ));
+        assert!(!generated_primary_ready_in(&state.model));
         assert_eq!(
             document_syntax_status(
                 &state.model,
@@ -1542,8 +1598,11 @@ mod tests {
         state.code.netlist.active_document = ActiveNetlistDocument::Generated;
         state.model.netlist_artifacts.generation_error = Some("Regeneration failed.".to_owned());
 
-        assert!(!generated_primary_unavailable(&state));
-        assert!(generated_primary_ready(&state));
+        assert!(!generated_primary_unavailable(
+            &state.model,
+            &state.code.netlist
+        ));
+        assert!(generated_primary_ready_in(&state.model));
         assert_eq!(
             document_syntax_status(
                 &state.model,
@@ -1563,8 +1622,11 @@ mod tests {
         state.model.netlist_artifacts.generation_error = None;
 
         assert!(state.model.netlist_artifacts.generated_document.is_some());
-        assert!(generated_primary_unavailable(&state));
-        assert!(!generated_primary_ready(&state));
+        assert!(generated_primary_unavailable(
+            &state.model,
+            &state.code.netlist
+        ));
+        assert!(!generated_primary_ready_in(&state.model));
         assert!(!active_document_available(
             &state.model,
             &state.code.netlist,
@@ -1634,7 +1696,8 @@ mod tests {
     fn run_strip_states_the_run_identity_from_the_run_receipt_alone() {
         let state = ran_owned_deck("deck\nR1 out 0 1k\n.op\n.end\n");
 
-        let projection = run_strip_projection(&state).expect("a completed run owns the strip");
+        let projection = run_strip_projection(&state.model, &state.code.netlist, &state.runs)
+            .expect("a completed run owns the strip");
         assert_eq!(projection.phase, RunStripPhase::Current);
         assert_eq!(projection.run_id, 7);
         assert_eq!(projection.revision, 4);
@@ -1656,7 +1719,8 @@ mod tests {
         state.model.simulation.source.netlist_content = "deck\nR1 out 0 2k\n.op\n.end\n".to_owned();
 
         assert_eq!(
-            run_strip_projection(&state).map(|projection| projection.phase),
+            run_strip_projection(&state.model, &state.code.netlist, &state.runs)
+                .map(|projection| projection.phase),
             Some(RunStripPhase::Edited)
         );
     }
@@ -1669,7 +1733,8 @@ mod tests {
         seal_manual_run(&mut state, 8, 0xCD, 5);
         state.runs.manual_run.pending_manual_run_id = Some(8);
 
-        let projection = run_strip_projection(&state).expect("an active run owns the strip");
+        let projection = run_strip_projection(&state.model, &state.code.netlist, &state.runs)
+            .expect("an active run owns the strip");
         assert_eq!(projection.phase, RunStripPhase::Running);
         assert_eq!(projection.run_id, 8);
         assert_eq!(projection.revision, 5);
@@ -1680,26 +1745,33 @@ mod tests {
         let mut state = ran_owned_deck("deck\nR1 out 0 1k\n.op\n.end\n");
         state.model.simulation.retained.runs.clear();
 
-        assert!(run_strip_projection(&state).is_none());
+        assert!(run_strip_projection(&state.model, &state.code.netlist, &state.runs).is_none());
     }
 
     #[test]
     fn run_strip_does_not_speak_for_an_include_or_a_comparison() {
         let mut state = ran_owned_deck("deck\nR1 out 0 1k\n.op\n.end\n");
         state.code.netlist.active_document = ActiveNetlistDocument::GeneratedDiff;
-        assert!(run_strip_projection(&state).is_none());
+        assert!(run_strip_projection(&state.model, &state.code.netlist, &state.runs).is_none());
 
         state.code.netlist.active_document = ActiveNetlistDocument::OwnedSource;
         state.code.netlist.active_dependency_identity = Some("models/r.inc".to_owned());
-        assert!(run_strip_projection(&state).is_none());
+        assert!(run_strip_projection(&state.model, &state.code.netlist, &state.runs).is_none());
     }
 
     #[test]
     fn run_snapshot_document_owns_the_strip_as_its_immutable_header() {
         let mut state = ran_owned_deck("deck\nR1 out 0 1k\n.op\n.end\n");
-        assert!(crate::workbench::documents::netlist_document::open_run_deck_snapshot(&mut state));
+        assert!(
+            crate::workbench::documents::netlist_document::open_run_deck_snapshot_in(
+                &mut state.model,
+                &mut state.code.netlist,
+                &state.runs
+            )
+        );
 
-        let projection = run_strip_projection(&state).expect("the snapshot states its run");
+        let projection = run_strip_projection(&state.model, &state.code.netlist, &state.runs)
+            .expect("the snapshot states its run");
         assert_eq!(projection.phase, RunStripPhase::Snapshot);
         assert_eq!(projection.run_id, 7);
         assert!(
@@ -1724,7 +1796,8 @@ mod tests {
         const DECK: &str = "deck\nR1 out 0 1k\n.op\n.end\n";
 
         let mut state = ran_owned_deck(DECK);
-        let baseline = run_strip_projection(&state).expect("a completed run owns the strip");
+        let baseline = run_strip_projection(&state.model, &state.code.netlist, &state.runs)
+            .expect("a completed run owns the strip");
         assert_eq!(baseline.tasks, 0);
         assert_eq!(
             task_deck_hop(&baseline),
@@ -1754,7 +1827,8 @@ mod tests {
                 ],
             });
 
-        let held = run_strip_projection(&state).expect("the run still owns the strip");
+        let held = run_strip_projection(&state.model, &state.code.netlist, &state.runs)
+            .expect("the run still owns the strip");
         assert_eq!(held.tasks, 2);
         assert_eq!(
             task_deck_hop(&held),
@@ -1763,10 +1837,17 @@ mod tests {
         );
 
         assert!(
-            crate::workbench::documents::netlist_document::open_executed_deck(&mut state, 7, 0),
+            crate::workbench::documents::netlist_document::open_executed_deck_in(
+                &mut state.model,
+                &mut state.code.netlist,
+                &state.runs,
+                7,
+                0,
+            ),
             "the route the strip offers is one the document honours"
         );
-        let first = run_strip_projection(&state).expect("the executed deck owns the strip");
+        let first = run_strip_projection(&state.model, &state.code.netlist, &state.runs)
+            .expect("the executed deck owns the strip");
         assert_eq!(first.phase, RunStripPhase::Snapshot);
         assert_eq!(first.point.as_deref(), Some("TT 27C"));
         assert_eq!(first.point_index, 0);
@@ -1781,9 +1862,16 @@ mod tests {
         );
 
         assert!(
-            crate::workbench::documents::netlist_document::open_executed_deck(&mut state, 7, 1)
+            crate::workbench::documents::netlist_document::open_executed_deck_in(
+                &mut state.model,
+                &mut state.code.netlist,
+                &state.runs,
+                7,
+                1,
+            )
         );
-        let last = run_strip_projection(&state).expect("the executed deck owns the strip");
+        let last = run_strip_projection(&state.model, &state.code.netlist, &state.runs)
+            .expect("the executed deck owns the strip");
         assert_eq!(last.point.as_deref(), Some("SS 27C"));
         assert_eq!(
             task_deck_hop(&last),
@@ -1814,8 +1902,10 @@ mod tests {
             RunStripPhase::Current => {}
             RunStripPhase::Snapshot => {
                 assert!(
-                    crate::workbench::documents::netlist_document::open_run_deck_snapshot(
-                        &mut app.state
+                    crate::workbench::documents::netlist_document::open_run_deck_snapshot_in(
+                        &mut app.state.model,
+                        &mut app.state.code.netlist,
+                        &app.state.runs,
                     )
                 );
             }
@@ -1829,7 +1919,8 @@ mod tests {
             }
         }
         assert_eq!(
-            run_strip_projection(&app.state).map(|projection| projection.phase),
+            run_strip_projection(&app.state.model, &app.state.code.netlist, &app.state.runs)
+                .map(|projection| projection.phase),
             Some(phase),
             "the raster fixture must actually be in the phase it renders"
         );

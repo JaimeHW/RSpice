@@ -1302,7 +1302,11 @@ fn run_deck_snapshot_projects_the_sealed_deck_and_leaves_the_working_deck_alone(
     state.runs.manual_run.last_run_buffer = Some(RAN.to_owned());
     state.runs.manual_run.last_run_id = Some(3);
 
-    assert!(open_run_deck_snapshot(&mut state));
+    assert!(open_run_deck_snapshot_in(
+        &mut state.model,
+        &mut state.code.netlist,
+        &state.runs
+    ));
     assert_eq!(
         state.code.netlist.active_document,
         ActiveNetlistDocument::RunSnapshot
@@ -1338,9 +1342,13 @@ fn run_deck_snapshot_comparison_reports_the_edits_made_since_the_run() {
     state.code.netlist.active_document_initialized = true;
     state.runs.manual_run.last_run_buffer = Some(RAN.to_owned());
     state.runs.manual_run.last_run_id = Some(3);
-    assert!(open_run_deck_snapshot(&mut state));
+    assert!(open_run_deck_snapshot_in(
+        &mut state.model,
+        &mut state.code.netlist,
+        &state.runs
+    ));
 
-    compare_run_deck_snapshot(&mut state).unwrap();
+    compare_run_deck_snapshot_in(&mut state.model, &mut state.code.netlist, &state.runs).unwrap();
 
     assert_eq!(
         state.code.netlist.active_document,
@@ -1366,12 +1374,20 @@ fn run_deck_snapshot_needs_both_the_run_and_its_deck() {
     let mut state = owned_dependency_state();
     state.runs.manual_run.last_run_buffer = Some("ran\n.end\n".to_owned());
     assert!(run_deck_snapshot_run_id_in(&state.runs).is_none());
-    assert!(!open_run_deck_snapshot(&mut state));
+    assert!(!open_run_deck_snapshot_in(
+        &mut state.model,
+        &mut state.code.netlist,
+        &state.runs
+    ));
 
     state.runs.manual_run.last_run_id = Some(9);
     state.runs.manual_run.last_run_buffer = None;
     assert!(run_deck_snapshot_run_id_in(&state.runs).is_none());
-    assert!(!open_run_deck_snapshot(&mut state));
+    assert!(!open_run_deck_snapshot_in(
+        &mut state.model,
+        &mut state.code.netlist,
+        &state.runs
+    ));
 }
 
 /// The executed-deck viewer: read-only, per point, and never substituting.
@@ -1430,7 +1446,8 @@ fn an_executed_deck_opens_read_only_at_the_point_it_was_asked_for() {
         "and its own comments name the release it was given"
     );
     assert!(
-        compare_run_deck_snapshot(&mut state).is_err(),
+        compare_run_deck_snapshot_in(&mut state.model, &mut state.code.netlist, &state.runs)
+            .is_err(),
         "there is no working copy of a deck nobody typed"
     );
 
@@ -1530,12 +1547,12 @@ fn an_executed_deck_claims_verification_only_when_it_reproduces_the_sealed_diges
         });
 
     assert_eq!(
-        ExecutedDeckVerification::of(&state, sequence, 0),
+        ExecutedDeckVerification::of(&state.model, sequence, 0),
         Some(ExecutedDeckVerification::Verified),
         "the point that solved the sealed source reproduces its digest"
     );
     assert_eq!(
-        ExecutedDeckVerification::of(&state, sequence, 1),
+        ExecutedDeckVerification::of(&state.model, sequence, 1),
         Some(ExecutedDeckVerification::PointVariant),
         "a corner's materialized source is unsealed, which is not the same as wrong"
     );
@@ -1565,7 +1582,7 @@ fn an_executed_deck_claims_verification_only_when_it_reproduces_the_sealed_diges
             points: vec![point("TT 27C", "rewritten deck\n.end\n")],
         });
     assert_eq!(
-        ExecutedDeckVerification::of(&state, sequence, 0),
+        ExecutedDeckVerification::of(&state.model, sequence, 0),
         Some(ExecutedDeckVerification::Unmatched),
         "a deck the run was never authorized over says exactly that"
     );
@@ -1586,12 +1603,12 @@ fn an_executed_deck_claims_verification_only_when_it_reproduces_the_sealed_diges
             points: vec![point("TT 27C", SEALED)],
         });
     assert_eq!(
-        ExecutedDeckVerification::of(&unsealed, 3, 0),
+        ExecutedDeckVerification::of(&unsealed.model, 3, 0),
         Some(ExecutedDeckVerification::NotRecorded),
         "a run with no receipt digest has nothing to be checked against"
     );
     assert_eq!(
-        ExecutedDeckVerification::of(&unsealed, 4, 0),
+        ExecutedDeckVerification::of(&unsealed.model, 4, 0),
         None,
         "and a run whose decks are not held is not a verdict at all"
     );

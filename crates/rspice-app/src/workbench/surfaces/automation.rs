@@ -713,7 +713,7 @@ fn code_pane(
         .map(|input| input.preceding_scope(ui.ctx()));
     super::netlist::publish_source_editor(
         ui.ctx(),
-        app,
+        &mut app.state.workbench,
         crate::workbench::documents::text_editor_commands::ActiveSourceEditor {
             id: editor_id,
             editable,

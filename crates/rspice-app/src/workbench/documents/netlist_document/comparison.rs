@@ -262,13 +262,9 @@ pub(crate) fn run_deck_snapshot_artifact_name_in(runs: &RunsState) -> String {
 /// Open the deck a completed manual run consumed, pinned to that run.
 ///
 /// The text is the sealed source the dispatch captured, not a re-derivation
-/// from the live editor, so what this shows is what the engine read.
-pub fn open_run_deck_snapshot(state: &mut AppState) -> bool {
-    open_run_deck_snapshot_in(&mut state.model, &mut state.code.netlist, &state.runs)
-}
-
-/// [`open_run_deck_snapshot`], over the model, the netlist editor's state and
-/// the runs that sealed the deck.
+/// from the live editor, so what this shows is what the engine read. It
+/// writes the model and the netlist editor's state, and reads the runs that
+/// sealed the deck.
 pub(crate) fn open_run_deck_snapshot_in(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
@@ -296,27 +292,34 @@ pub(crate) fn open_run_deck_snapshot_in(
 ///
 /// The deck is checked against its run's receipt here, once, and the verdict
 /// travels with the selection. Opening is the only moment the answer can
-/// change, because both of its inputs are sealed.
-pub fn open_executed_deck(state: &mut AppState, run_id: u64, point: usize) -> bool {
-    let Some(deck) = state.model.simulation.retained.executed_decks.get(run_id) else {
+/// change, because both of its inputs are sealed. It writes the model and the
+/// netlist editor's state, and reads the runs that sealed the deck.
+pub(crate) fn open_executed_deck_in(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    runs: &RunsState,
+    run_id: u64,
+    point: usize,
+) -> bool {
+    let Some(deck) = model.simulation.retained.executed_decks.get(run_id) else {
         return false;
     };
     let point = point.min(deck.points.len().saturating_sub(1));
     let Some(verification) =
         crate::workbench::documents::netlist_document::ExecutedDeckVerification::of(
-            state, run_id, point,
+            model, run_id, point,
         )
     else {
         return false;
     };
-    state.code.netlist.executed_deck_view = Some(
+    netlist.executed_deck_view = Some(
         crate::workbench::documents::netlist_document::ExecutedDeckSelection {
             run_id,
             point,
             verification,
         },
     );
-    project_run_snapshot(state);
+    project_run_snapshot_in(model, netlist, runs);
     true
 }
 
@@ -347,7 +350,13 @@ pub fn open_executed_deck(state: &mut AppState, run_id: u64, point: usize) -> bo
 /// This returns `false` in exactly that case, so a caller that offers the
 /// route unconditionally still cannot open a deck that is not held.
 pub fn reveal_executed_deck(state: &mut AppState, run_id: u64, point: usize) -> bool {
-    if !open_executed_deck(state, run_id, point) {
+    if !open_executed_deck_in(
+        &mut state.model,
+        &mut state.code.netlist,
+        &state.runs,
+        run_id,
+        point,
+    ) {
         return false;
     }
     state
@@ -356,13 +365,8 @@ pub fn reveal_executed_deck(state: &mut AppState, run_id: u64, point: usize) -> 
     true
 }
 
-/// Projects whatever the run-snapshot document is currently bound to.
-fn project_run_snapshot(state: &mut AppState) {
-    project_run_snapshot_in(&mut state.model, &mut state.code.netlist, &state.runs);
-}
-
-/// [`project_run_snapshot`], over the model, the netlist editor's state and
-/// the runs that sealed the deck.
+/// Projects whatever the run-snapshot document is currently bound to, over
+/// the model, the netlist editor's state and the runs that sealed the deck.
 fn project_run_snapshot_in(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
@@ -399,9 +403,15 @@ pub(crate) fn close_run_deck_snapshot(
     true
 }
 
-/// Diff the run's sealed deck against the working revision it was opened from.
-pub fn compare_run_deck_snapshot(state: &mut AppState) -> Result<(), String> {
-    if state.code.netlist.executed_deck_view.is_some() {
+/// Diff the run's sealed deck against the working revision it was opened
+/// from. It writes the model and the netlist editor's state, and reads the
+/// runs that sealed the deck.
+pub(crate) fn compare_run_deck_snapshot_in(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    runs: &RunsState,
+) -> Result<(), String> {
+    if netlist.executed_deck_view.is_some() {
         // Not a refusal to be worked around: an executed deck is the source a
         // point was handed after expansion, corner materialization and
         // per-point overrides. Diffing it against the deck somebody is editing
@@ -412,73 +422,67 @@ pub fn compare_run_deck_snapshot(state: &mut AppState) -> Result<(), String> {
                 .to_owned(),
         );
     }
-    let run_id = state
-        .runs
+    let run_id = runs
         .manual_run
         .last_run_id
         .ok_or_else(|| "No completed manual run owns a deck snapshot.".to_owned())?;
-    let snapshot = state
-        .runs
+    let snapshot = runs
         .manual_run
         .last_run_buffer
         .clone()
         .ok_or_else(|| "The deck this run used is no longer retained.".to_owned())?;
-    let root = state.code.netlist.run_snapshot_return_document;
-    let (working, current_label) =
-        match root {
-            ActiveNetlistDocument::OwnedSource => {
-                let document =
-                    state.code.netlist.owned_document.as_ref().ok_or_else(|| {
-                        "No current owned source document is available.".to_owned()
-                    })?;
-                (
-                    state
-                        .model
-                        .workspace
-                        .content
-                        .netlist_source
-                        .clone()
-                        .unwrap_or_else(|| document.source().to_owned()),
-                    format!(
-                        "owned-r{}-{}",
-                        document.revision().get(),
-                        short_digest(document.content_digest())
-                    ),
-                )
-            }
-            _ => {
-                let document = state
-                    .model
-                    .netlist_artifacts
-                    .generated_document
-                    .as_ref()
-                    .ok_or_else(|| "No current generated artifact is available.".to_owned())?;
-                (
-                    state.model.netlist_artifacts.generated_source.clone(),
-                    format!("generated-{}", short_digest(document.content_digest())),
-                )
-            }
-        };
+    let root = netlist.run_snapshot_return_document;
+    let (working, current_label) = match root {
+        ActiveNetlistDocument::OwnedSource => {
+            let document = netlist
+                .owned_document
+                .as_ref()
+                .ok_or_else(|| "No current owned source document is available.".to_owned())?;
+            (
+                model
+                    .workspace
+                    .content
+                    .netlist_source
+                    .clone()
+                    .unwrap_or_else(|| document.source().to_owned()),
+                format!(
+                    "owned-r{}-{}",
+                    document.revision().get(),
+                    short_digest(document.content_digest())
+                ),
+            )
+        }
+        _ => {
+            let document = model
+                .netlist_artifacts
+                .generated_document
+                .as_ref()
+                .ok_or_else(|| "No current generated artifact is available.".to_owned())?;
+            (
+                model.netlist_artifacts.generated_source.clone(),
+                format!("generated-{}", short_digest(document.content_digest())),
+            )
+        }
+    };
     let previous_label = format!("run-{run_id}");
     let diff = similar::TextDiff::from_lines(snapshot.as_str(), working.as_str())
         .unified_diff()
         .context_radius(3)
         .header(&previous_label, &current_label)
         .to_string();
-    state.code.netlist.generated_diff_source = if diff.is_empty() {
+    netlist.generated_diff_source = if diff.is_empty() {
         format!("--- {previous_label}\n+++ {current_label}\n No source changes\n")
     } else {
         diff
     };
-    state.code.netlist.comparison_return_document = root;
-    state.code.netlist.active_dependency_identity = None;
-    state.code.netlist.active_dependency_root = None;
-    state.code.netlist.active_document = ActiveNetlistDocument::GeneratedDiff;
-    state.code.netlist.active_document_initialized = true;
-    state.model.simulation.source.netlist_content =
-        state.code.netlist.generated_diff_source.clone();
-    state.code.netlist.revision = state.code.netlist.revision.wrapping_add(1);
-    state.code.netlist.completion_open = false;
-    state.model.invalidate_source_evidence();
+    netlist.comparison_return_document = root;
+    netlist.active_dependency_identity = None;
+    netlist.active_dependency_root = None;
+    netlist.active_document = ActiveNetlistDocument::GeneratedDiff;
+    netlist.active_document_initialized = true;
+    model.simulation.source.netlist_content = netlist.generated_diff_source.clone();
+    netlist.revision = netlist.revision.wrapping_add(1);
+    netlist.completion_open = false;
+    model.invalidate_source_evidence();
     Ok(())
 }
