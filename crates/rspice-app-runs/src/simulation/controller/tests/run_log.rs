@@ -68,9 +68,30 @@ fn a_tasks_last_engine_lines_land_in_its_run_before_the_next_task_dispatches() {
 
     test_execution::wait_until_finished_unpolled(&controller.runner);
     controller.poll_completion(&mut state, &export_io);
+    // A batch that ended or failed on its first task resets the index to 0;
+    // say how it ended rather than only that it did.
     assert_eq!(
-        controller.current_analysis_idx, 2,
-        "the second task was dispatched"
+        controller.current_analysis_idx,
+        2,
+        "the second task was dispatched: status {:?}, session log {:?}, run log {:?}",
+        state.model.simulation.execution.status,
+        state
+            .model
+            .log_buffer
+            .entries()
+            .map(|entry| entry.message.as_str())
+            .collect::<Vec<_>>(),
+        state
+            .model
+            .simulation
+            .retained
+            .run_by_sequence(run_sequence)
+            .map(|run| run
+                .log
+                .lines()
+                .iter()
+                .map(|line| line.message.clone())
+                .collect::<Vec<_>>())
     );
     assert_eq!(
         inventory_lines(&state, run_sequence),
