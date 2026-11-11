@@ -486,64 +486,58 @@ fn run_set_roster(run_set: &RunSetState) -> Vec<PlanEntry> {
 mod tests {
     use super::*;
     use crate::product::ProcessCorner;
-    use crate::workbench::RSpiceApp;
+    use crate::workbench::simulate::test_host::SimulateTestHost;
     use rspice_simulation_contract::run_set::RunSetCompositionMode;
 
     /// A second plan retained inactive, so the projection has both kinds of
     /// catalog entry to report on. Returns the active and inactive ids.
-    fn app_with_an_inactive_plan() -> (RSpiceApp, SimulationPlanId, SimulationPlanId) {
-        let mut app = RSpiceApp::test_instance();
-        let first = app
-            .state
+    fn app_with_an_inactive_plan() -> (SimulateTestHost, SimulationPlanId, SimulationPlanId) {
+        let mut state = SimulateTestHost::default();
+        let first = state
             .model
             .sim_setup
             .stable_analysis_plan()
             .expect("the fixture has a stable plan")
             .id();
-        let mut setup = app.state.model.sim_setup.clone();
+        let mut setup = state.model.sim_setup.clone();
         let second = setup
             .create_plan("Second characterization")
             .expect("a fresh root plan is created");
-        app.state
+        state
             .model
             .workspace
             .content
             .migrate_active_plan_data(first);
-        app.state
+        state
             .model
             .workspace
             .content
             .migrate_inactive_plan_data(second);
-        app.state.model.sim_setup = setup;
+        state.model.sim_setup = setup;
         // `create_plan` activates what it creates, so the original plan is now
         // the retained inactive entry.
-        (app, second, first)
+        (state, second, first)
     }
 
     #[test]
     fn the_active_plan_reports_every_field_from_its_owner() {
-        let mut app = RSpiceApp::test_instance();
-        let id = app
-            .state
+        let mut state = SimulateTestHost::default();
+        let id = state
             .model
             .sim_setup
             .stable_analysis_plan()
             .expect("stable plan")
             .id();
-        let mut setup = app.state.model.sim_setup.clone();
+        let mut setup = state.model.sim_setup.clone();
         setup
             .set_reference_pvt(ProcessCorner::FF, -40.0)
             .expect("a physical reference corner");
-        app.state.model.sim_setup = setup;
-        app.state
-            .model
-            .workspace
-            .content
-            .migrate_active_plan_data(id);
+        state.model.sim_setup = setup;
+        state.model.workspace.content.migrate_active_plan_data(id);
 
-        let records = plan_catalog_records(&app.state.model);
+        let records = plan_catalog_records(&state.model);
         let record = records.first().expect("the active plan is projected");
-        let plan = app.state.model.sim_setup.stable_analysis_plan().unwrap();
+        let plan = state.model.sim_setup.stable_analysis_plan().unwrap();
 
         assert_eq!(record.id, id);
         assert!(record.active);
@@ -551,7 +545,7 @@ mod tests {
         assert_eq!(record.lifecycle_label(), "active");
         assert_eq!(
             record.name,
-            app.state.model.sim_setup.active_plan_name().as_str(),
+            state.model.sim_setup.active_plan_name().as_str(),
             "the name comes from the setup's active plan name"
         );
         assert_eq!(record.revision, plan.revision().get());
@@ -560,10 +554,10 @@ mod tests {
         assert_eq!(record.enabled, enabled_instance_count(plan));
         assert_eq!(
             record.model_bindings,
-            app.state.model.sim_setup.model_bindings.len()
+            state.model.sim_setup.model_bindings.len()
         );
         assert_eq!(
-            record.reference_pvt, app.state.model.sim_setup.reference_pvt,
+            record.reference_pvt, state.model.sim_setup.reference_pvt,
             "the active plan's reference corner is the setup's"
         );
         assert_eq!(
@@ -572,8 +566,7 @@ mod tests {
             "and it tracks a committed change to it"
         );
 
-        let payload = app
-            .state
+        let payload = state
             .model
             .workspace
             .content
@@ -585,7 +578,7 @@ mod tests {
         assert_eq!(record.regression_baseline, payload.regression_baseline_run);
         assert_eq!(
             record.lineage,
-            app.state.model.sim_setup.active_plan_lineage(),
+            state.model.sim_setup.active_plan_lineage(),
             "a plan reports the lineage its own owner holds"
         );
         assert_eq!(
@@ -606,16 +599,15 @@ mod tests {
 
     #[test]
     fn an_inactive_plan_reports_its_own_stored_facts() {
-        let (app, active_id, inactive_id) = app_with_an_inactive_plan();
+        let (state, active_id, inactive_id) = app_with_an_inactive_plan();
 
-        let records = plan_catalog_records(&app.state.model);
+        let records = plan_catalog_records(&state.model);
         assert_eq!(records.len(), 2, "both catalog entries are projected");
         let record = records
             .iter()
             .find(|record| record.id == inactive_id)
             .expect("the retained plan is projected");
-        let stored = app
-            .state
+        let stored = state
             .model
             .sim_setup
             .inactive_plans()
@@ -649,7 +641,7 @@ mod tests {
         // The counts belong to this plan's own payload, never to the active
         // plan's: reading a neighbour's payload would be a lie, so an absent
         // record reports zero.
-        let own = app.state.model.workspace.content.plan_data(inactive_id);
+        let own = state.model.workspace.content.plan_data(inactive_id);
         assert_eq!(
             record.design_variables,
             own.map_or(0, |payload| payload.design_variables.len())
@@ -670,8 +662,8 @@ mod tests {
     /// plan's numbers.
     #[test]
     fn a_plan_with_no_payload_record_reports_zero_rather_than_a_neighbours_counts() {
-        let (mut app, active_id, inactive_id) = app_with_an_inactive_plan();
-        app.state
+        let (mut state, active_id, inactive_id) = app_with_an_inactive_plan();
+        state
             .model
             .workspace
             .content
@@ -689,14 +681,14 @@ mod tests {
                 )
                 .expect("a raw node output is valid"),
             );
-        app.state
+        state
             .model
             .workspace
             .content
             .simulation_plan_payloads
             .retain(|record| record.plan_id != inactive_id);
 
-        let records = plan_catalog_records(&app.state.model);
+        let records = plan_catalog_records(&state.model);
         let active = records
             .iter()
             .find(|record| record.id == active_id)
@@ -721,9 +713,8 @@ mod tests {
     /// which is the same defect as reporting it unknown — just harder to see.
     #[test]
     fn an_inactive_plans_reference_corner_is_its_own_not_the_active_plans() {
-        let (mut app, active_id, inactive_id) = app_with_an_inactive_plan();
-        let stored_corner = app
-            .state
+        let (mut state, active_id, inactive_id) = app_with_an_inactive_plan();
+        let stored_corner = state
             .model
             .sim_setup
             .inactive_plans()
@@ -731,13 +722,13 @@ mod tests {
             .find(|plan| plan.id() == inactive_id)
             .expect("the retained plan is in the catalog")
             .reference_pvt();
-        let mut setup = app.state.model.sim_setup.clone();
+        let mut setup = state.model.sim_setup.clone();
         setup
             .set_reference_pvt(ProcessCorner::SS, 125.0)
             .expect("a physical reference corner");
-        app.state.model.sim_setup = setup;
+        state.model.sim_setup = setup;
 
-        let records = plan_catalog_records(&app.state.model);
+        let records = plan_catalog_records(&state.model);
         let active = records
             .iter()
             .find(|record| record.id == active_id)
@@ -758,14 +749,14 @@ mod tests {
 
     #[test]
     fn an_archived_plan_reports_the_archived_lifecycle() {
-        let (mut app, _, inactive_id) = app_with_an_inactive_plan();
-        let mut setup = app.state.model.sim_setup.clone();
+        let (mut state, _, inactive_id) = app_with_an_inactive_plan();
+        let mut setup = state.model.sim_setup.clone();
         setup
             .archive_plan(inactive_id)
             .expect("an inactive plan archives");
-        app.state.model.sim_setup = setup;
+        state.model.sim_setup = setup;
 
-        let records = plan_catalog_records(&app.state.model);
+        let records = plan_catalog_records(&state.model);
         let record = records
             .iter()
             .find(|record| record.id == inactive_id)
@@ -776,15 +767,15 @@ mod tests {
 
     #[test]
     fn an_invalid_run_set_carries_no_forecast() {
-        let mut app = RSpiceApp::test_instance();
-        let mut setup = app.state.model.sim_setup.clone();
+        let mut state = SimulateTestHost::default();
+        let mut setup = state.model.sim_setup.clone();
         // Nested composition with a zero maximum depth is a declared run-space
         // error, so there is no workload to forecast.
         setup.run_set.composition.mode = RunSetCompositionMode::Nested;
         setup.run_set.composition.maximum_depth = 0;
-        app.state.model.sim_setup = setup;
+        state.model.sim_setup = setup;
 
-        let records = plan_catalog_records(&app.state.model);
+        let records = plan_catalog_records(&state.model);
         let record = records.first().expect("the active plan is projected");
         assert!(
             record.forecast.is_none(),
@@ -798,9 +789,9 @@ mod tests {
 
     #[test]
     fn the_order_is_the_active_plan_then_the_catalog_order() {
-        let (app, active_id, inactive_id) = app_with_an_inactive_plan();
+        let (state, active_id, inactive_id) = app_with_an_inactive_plan();
 
-        let first = plan_catalog_records(&app.state.model);
+        let first = plan_catalog_records(&state.model);
         assert_eq!(first[0].id, active_id, "the active plan leads");
         assert!(first[0].active);
         assert_eq!(first[1].id, inactive_id);
@@ -809,7 +800,7 @@ mod tests {
                 .iter()
                 .map(|record| record.id)
                 .collect::<Vec<_>>(),
-            app.state
+            state
                 .model
                 .sim_setup
                 .inactive_plans()
@@ -821,7 +812,7 @@ mod tests {
 
         // Stable across frames: the projection reads state, never a clock, a
         // hash iteration order, or a frame counter.
-        let second = plan_catalog_records(&app.state.model);
+        let second = plan_catalog_records(&state.model);
         assert_eq!(
             first.iter().map(|record| record.id).collect::<Vec<_>>(),
             second.iter().map(|record| record.id).collect::<Vec<_>>()
@@ -830,8 +821,8 @@ mod tests {
 
     #[test]
     fn every_derived_quantity_is_the_forecasts_own_number() {
-        let app = RSpiceApp::test_instance();
-        let records = plan_catalog_records(&app.state.model);
+        let state = SimulateTestHost::default();
+        let records = plan_catalog_records(&state.model);
         let record = records.first().expect("the active plan is projected");
         let forecast = record.forecast.expect("the default run set validates");
 
@@ -855,10 +846,9 @@ mod tests {
     /// removals against every entry in the table.
     #[test]
     fn a_retired_instance_is_counted_on_the_active_and_on_the_stored_record() {
-        let mut app = RSpiceApp::test_instance();
+        let mut state = SimulateTestHost::default();
         let retired_from = {
-            let plan = app
-                .state
+            let plan = state
                 .model
                 .sim_setup
                 .stable_analysis_plan_mut()
@@ -871,7 +861,7 @@ mod tests {
             plan.id()
         };
 
-        let records = plan_catalog_records(&app.state.model);
+        let records = plan_catalog_records(&state.model);
         let active = records.first().expect("the active plan is projected");
         assert_eq!(active.id, retired_from);
         assert_eq!(
@@ -880,7 +870,7 @@ mod tests {
         );
         assert_eq!(
             active.analyses,
-            app.state
+            state
                 .model
                 .sim_setup
                 .stable_analysis_plan()
@@ -890,15 +880,14 @@ mod tests {
             "and a tombstone is not counted as an analysis"
         );
 
-        let mut setup = app.state.model.sim_setup.clone();
+        let mut setup = state.model.sim_setup.clone();
         setup
             .create_plan("Second characterization")
             .expect("a fresh root plan is created");
-        app.state.model.sim_setup = setup;
+        state.model.sim_setup = setup;
 
-        let records = plan_catalog_records(&app.state.model);
-        let stored = app
-            .state
+        let records = plan_catalog_records(&state.model);
+        let stored = state
             .model
             .sim_setup
             .inactive_plans()

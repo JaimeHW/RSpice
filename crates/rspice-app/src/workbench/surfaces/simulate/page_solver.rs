@@ -1763,12 +1763,12 @@ pub(super) fn commit_draft(cx: &mut Cx<'_, SimulateFeature>) {
 #[cfg(test)]
 mod ledger_head_tests {
     use super::{PolicyRow, analysis_overrides, plan_policy_rows, resolution_summary};
-    use crate::workbench::RSpiceApp;
+    use crate::workbench::simulate::test_host::SimulateTestHost;
 
     /// Every row of one plan's ledger, as the card assembles them.
-    fn ledger_rows(app: &RSpiceApp) -> Vec<PolicyRow> {
-        let mut rows = plan_policy_rows(&app.state.model);
-        rows.extend(analysis_overrides(&app.state.model));
+    fn ledger_rows(state: &SimulateTestHost) -> Vec<PolicyRow> {
+        let mut rows = plan_policy_rows(&state.model);
+        rows.extend(analysis_overrides(&state.model));
         rows
     }
 
@@ -1797,8 +1797,8 @@ mod ledger_head_tests {
     /// with it — `ITL1 · 50 → 150 · Balanced` — and the head still said none.
     #[test]
     fn the_ledger_head_counts_the_analyses_its_rows_show_departing() {
-        let app = RSpiceApp::test_instance();
-        let rows = ledger_rows(&app);
+        let state = SimulateTestHost::default();
+        let rows = ledger_rows(&state);
 
         // The shape that made the old head wrong: nothing here is removable,
         // so counting authored rows answers zero over a ledger that shows one.
@@ -1817,8 +1817,8 @@ mod ledger_head_tests {
             "1 analysis resolves away from the plan policy"
         );
 
-        let mut app = app;
-        app.state
+        let mut state = state;
+        state
             .model
             .sim_setup
             .analysis_plan
@@ -1826,7 +1826,7 @@ mod ledger_head_tests {
             .expect("the test instance holds a stable plan")
             .insert(crate::simulation::plan::AnalysisKind::OperatingPoint)
             .expect("an operating point joins the plan");
-        let rows = ledger_rows(&app);
+        let rows = ledger_rows(&state);
         assert_eq!(
             rows.iter().filter(|row| row.target.is_some()).count(),
             0,
@@ -1850,7 +1850,7 @@ mod ledger_head_tests {
     /// is spelled in the singular.
     #[test]
     fn the_ledger_head_agrees_with_its_own_verb() {
-        let mut rows = ledger_rows(&RSpiceApp::test_instance());
+        let mut rows = ledger_rows(&SimulateTestHost::default());
         for row in &mut rows {
             row.effective = row.preset.clone();
         }

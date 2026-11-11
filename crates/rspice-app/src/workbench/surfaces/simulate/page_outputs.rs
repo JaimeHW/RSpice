@@ -1562,7 +1562,7 @@ mod tests {
     use super::{Tone, compatibility_options, output_registry_summary};
     use crate::simulation::plan::AnalysisKind;
     use crate::state::SavedOutputCompatibility;
-    use crate::workbench::RSpiceApp;
+    use crate::workbench::simulate::test_host::SimulateTestHost;
     use rspice_simulation::output_contract::SavedOutputSemanticStatus;
 
     /// The scope picker offers each analysis under the name the rest of the
@@ -1576,10 +1576,9 @@ mod tests {
     /// called.
     #[test]
     fn the_scope_picker_offers_analyses_by_the_name_they_are_shown_by() {
-        let mut app = RSpiceApp::test_instance();
+        let mut state = SimulateTestHost::default();
         let (first, second, named) = {
-            let plan = app
-                .state
+            let plan = state
                 .model
                 .sim_setup
                 .stable_analysis_plan_mut()
@@ -1596,7 +1595,7 @@ mod tests {
             (first, second, named)
         };
 
-        let options = compatibility_options(&app.state.model);
+        let options = compatibility_options(&state.model);
         let label_of = |wanted| {
             options
                 .iter()
