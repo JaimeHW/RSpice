@@ -14,8 +14,10 @@ use crate::state::{
     RegressionSpecificationPolicy, SpecEntry, SpecPointScope, SpecificationDefinition,
     SpecificationPolicy, SpecificationRole,
 };
-use crate::workbench::RSpiceApp;
+use crate::workbench::app_state::Model;
 use crate::workbench::framework::command_registry::{CommandAvailability, ids};
+use crate::workbench::framework::feature::Cx;
+use crate::workbench::simulate::SimulateFeature;
 use crate::workbench::simulate::commands::SimulateCommand;
 use crate::workbench::state::SpecificationEvidenceFilter;
 
@@ -54,24 +56,24 @@ const REGISTRY_EVIDENCE_NOTE: &str = "A limit is evaluated against the active da
      sign-off cannot be produced by hiding the rows that fail. Authoring lives in the \
      specification editor, which owns the limits this page reads.";
 
-pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
+pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
     // Before the registry. A plan that cannot be resolved holds no limits, and
     // a table that says so by being empty is indistinguishable from the plan
     // whose author has written no requirement yet — which is the one thing an
     // acceptance page must never leave ambiguous.
-    let payload = match super::page_outputs::plan_payload(&app.state.model) {
+    let payload = match super::page_outputs::plan_payload(cx.model) {
         Ok(payload) => payload,
         Err(reason) => {
             unresolved_plan(ui, &reason);
             return;
         }
     };
-    registry(ui, app, &payload);
+    registry(ui, cx, &payload);
     card_row(
         ui,
-        app,
-        |ui, app| selected_record(ui, app, &payload),
-        |ui, app| evaluation_policy(ui, app, &payload),
+        cx,
+        |ui, cx| selected_record(ui, cx, &payload),
+        |ui, cx| evaluation_policy(ui, cx, &payload),
     );
 }
 
@@ -122,10 +124,10 @@ fn role_label(role: SpecificationRole) -> &'static str {
 /// a specification scoped to a corner the run set does not declare is a claim
 /// nothing will ever answer. A run set with no process axis still runs one
 /// corner — the plan's reference section — so that is what it declares.
-fn declared_process_corners(app: &RSpiceApp) -> Vec<String> {
+fn declared_process_corners(model: &Model) -> Vec<String> {
     use rspice_simulation_contract::run_set::RunSetDimensionKind;
 
-    let run_set = &app.state.model.sim_setup.run_set;
+    let run_set = &model.sim_setup.run_set;
     match run_set.enabled_dimension_of(RunSetDimensionKind::ProcessSection) {
         Some(dimension) if !dimension.values.is_empty() => dimension
             .values
@@ -133,8 +135,7 @@ fn declared_process_corners(app: &RSpiceApp) -> Vec<String> {
             .map(|value| value.lexical.trim().to_owned())
             .collect(),
         _ => vec![
-            app.state
-                .model
+            model
                 .sim_setup
                 .reference_pvt
                 .process
@@ -322,12 +323,12 @@ fn worst_member_suffix(member: Option<&crate::state::FamilyMemberId>) -> String 
 /// The dataset join itself is owned by [`super::output_evidence`]; this only
 /// applies the specification's own bound to the value it found.
 fn evidence_for(
-    app: &RSpiceApp,
+    model: &Model,
     spec: &SpecEntry,
     definition: Option<&SpecificationDefinition>,
     gate: &MonteCarloSpecificationGate,
 ) -> Evidence {
-    let Some(run) = super::output_evidence::selected_plan_dataset(&app.state.model) else {
+    let Some(run) = super::output_evidence::selected_plan_dataset(model) else {
         return Evidence::None;
     };
     if let Some(verdict) = run.specification_verdicts().and_then(|verdicts| {
@@ -459,14 +460,14 @@ fn coverage_advisory(
     (covered < demanded.len()).then(|| format!("\u{25b3} {covered}/{} pts", demanded.len()))
 }
 
-fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
+fn registry(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, payload: &SimulationPlanPayload) {
     let specs = &payload.specs;
-    let declared = declared_process_corners(app);
+    let declared = declared_process_corners(cx.model);
     // Resolved once for the registry rather than per row: each resolution
     // re-expands the declared space, and this page draws every frame.
-    let resolved = super::participation::PlanParticipation::resolve(&app.state.model);
-    let query = app.state.simulate.specification_filter.clone();
-    let class = app.state.simulate.specification_evidence_filter;
+    let resolved = super::participation::PlanParticipation::resolve(cx.model);
+    let query = cx.state.specification_filter.clone();
+    let class = cx.state.specification_evidence_filter;
     let mut passing = 0usize;
     let mut failing = 0usize;
     let mut unmapped = 0usize;
@@ -478,7 +479,7 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
         .map(|spec| {
             let governed = governed_definition(payload, spec);
             let evidence = evidence_for(
-                app,
+                cx.model,
                 spec,
                 governed,
                 &payload.specification_policy.monte_carlo,
@@ -593,7 +594,7 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
     } else {
         Tone::Neutral
     };
-    let selected = app.state.simulate.selected_specification.clone();
+    let selected = cx.state.selected_specification.clone();
     let classes: Vec<String> = SpecificationEvidenceFilter::ALL
         .iter()
         .map(|class| (*class).label().to_owned())
@@ -623,7 +624,7 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
                         ui,
                         "simulation-plan.spec-registry.filter",
                         "Filter measurement, definition or limit…",
-                        &mut app.state.simulate.specification_filter,
+                        &mut cx.state.specification_filter,
                     );
                     picked_class = select(
                         ui,
@@ -717,13 +718,13 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
         // The limits are plan-owned data with one editor; this page reads
         // them and hands off rather than giving the same records a second
         // author.
-        app.execute_command_key(ids::EDIT_SPECIFICATIONS);
+        cx.execute(ids::EDIT_SPECIFICATIONS);
     }
     if let Some(index) = picked_class {
-        app.state.simulate.specification_evidence_filter = SpecificationEvidenceFilter::ALL[index];
+        cx.state.specification_evidence_filter = SpecificationEvidenceFilter::ALL[index];
     }
     if let Some(measurement) = pick {
-        app.state.simulate.selected_specification = Some(measurement);
+        cx.state.selected_specification = Some(measurement);
     }
 }
 
@@ -778,8 +779,8 @@ fn guard_banded_margin(
 /// held that none of the derived entries reproduces — several corners at once,
 /// or a corner the run set has since dropped — is appended so that opening the
 /// record and picking nothing cannot quietly rewrite the requirement.
-fn scope_options(app: &RSpiceApp, current: &SpecPointScope) -> Vec<(String, SpecPointScope)> {
-    let points = app.state.model.sim_setup.run_set.point_count();
+fn scope_options(model: &Model, current: &SpecPointScope) -> Vec<(String, SpecPointScope)> {
+    let points = model.sim_setup.run_set.point_count();
     let mut options = vec![
         (
             format!("All {points} PVT points"),
@@ -787,7 +788,7 @@ fn scope_options(app: &RSpiceApp, current: &SpecPointScope) -> Vec<(String, Spec
         ),
         ("Nominal only".to_owned(), SpecPointScope::Nominal),
     ];
-    options.extend(declared_process_corners(app).into_iter().map(|corner| {
+    options.extend(declared_process_corners(model).into_iter().map(|corner| {
         (
             format!("Corner {corner} only"),
             SpecPointScope::SelectedCorners {
@@ -812,14 +813,13 @@ fn scope_label(scope: &SpecPointScope) -> String {
     }
 }
 
-fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
+fn selected_record(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, payload: &SimulationPlanPayload) {
     // Resolved case-insensitively, which is how a measurement name is matched
     // everywhere else: a specification whose case changed is still the same
     // requirement, and one that was deleted resolves to nothing rather than to
     // whichever requirement now sits in its place.
-    let selected = app
+    let selected = cx
         .state
-        .simulate
         .selected_specification
         .as_deref()
         .and_then(|measurement| {
@@ -846,20 +846,20 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
     };
     let title = format!("Selected specification · {}", spec.measurement);
     let evidence = evidence_for(
-        app,
+        cx.model,
         spec,
         governed.as_ref(),
         &payload.specification_policy.monte_carlo,
     );
-    let coverage = evidence_coverage(app, spec, governed.as_ref());
+    let coverage = evidence_coverage(cx.model, spec, governed.as_ref());
     let (result, tone) = evidence.cell(spec);
-    let options = scope_options(app, &spec.scope);
+    let options = scope_options(cx.model, &spec.scope);
     let option_labels: Vec<String> = options.iter().map(|(label, _)| label.clone()).collect();
     let current_scope = options
         .iter()
         .find(|(_, scope)| *scope == spec.scope)
         .map_or_else(|| scope_label(&spec.scope), |(label, _)| label.clone());
-    let missing = undeclared_corners(spec, &declared_process_corners(app));
+    let missing = undeclared_corners(spec, &declared_process_corners(cx.model));
     let stable_identity = governed.as_ref().map_or_else(
         || "legacy row · migrate on edit".to_owned(),
         |definition| definition.id.to_string(),
@@ -883,8 +883,7 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
         .as_ref()
         .and_then(|definition| definition.producing_analysis);
     let producer_position = producer_id.and_then(|id| {
-        app.state
-            .model
+        cx.model
             .sim_setup
             .stable_analysis_plan()
             .ok()
@@ -934,20 +933,19 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
     // Why the evidence hop cannot land, when it cannot. Restated from what the
     // coverage row already says, because a limit is judged against the dataset
     // this plan produced and no other.
-    let evidence_block =
-        if super::output_evidence::selected_plan_dataset(&app.state.model).is_none() {
-            Some(if app.state.model.simulation.active_run().is_some() {
-                "The active dataset was not produced by this plan, so it holds no result for this \
+    let evidence_block = if super::output_evidence::selected_plan_dataset(cx.model).is_none() {
+        Some(if cx.model.simulation.active_run().is_some() {
+            "The active dataset was not produced by this plan, so it holds no result for this \
              limit."
-            } else {
-                "No run has been retained, so there are no results to open."
-            })
         } else {
-            match app.command_availability(ids::RESULT_SPECIFICATIONS) {
-                CommandAvailability::Disabled(reason) => Some(reason),
-                _ => None,
-            }
-        };
+            "No run has been retained, so there are no results to open."
+        })
+    } else {
+        match cx.foreign_availability(ids::RESULT_SPECIFICATIONS) {
+            CommandAvailability::Disabled(reason) => Some(reason),
+            _ => None,
+        }
+    };
     let mut picked = None;
     let mut open_evidence = false;
     let mut select_producer = false;
@@ -1055,17 +1053,17 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
     if let Some(index) = picked
         && options[index].1 != spec.scope
     {
-        commit_scope(app, &spec.measurement, options[index].1.clone());
+        commit_scope(cx, &spec.measurement, options[index].1.clone());
     }
     // Both hops carry the selection they were drawn for. `selected_specification`
     // is the one owner of "which limit is being read", so the Results viewer
     // arrives on the same row this card describes without a second copy of it.
     if select_producer && let Some(id) = producer_id {
-        app.state.simulate.active_analysis_instance = Some(id);
-        app.execute_command_key(SimulateCommand::Page(SimulationPage::Analyses).key());
+        cx.state.active_analysis_instance = Some(id);
+        cx.execute(SimulateCommand::Page(SimulationPage::Analyses).key());
     } else if open_evidence {
-        app.state.simulate.selected_specification = Some(spec.measurement.clone());
-        app.execute_command_key(ids::RESULT_SPECIFICATIONS);
+        cx.state.selected_specification = Some(spec.measurement.clone());
+        cx.execute(ids::RESULT_SPECIFICATIONS);
     }
 }
 
@@ -1074,9 +1072,12 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
 /// The specs vector is replaced whole because that is the only mutation the
 /// workspace exposes for it; matching is case-insensitive for the same reason
 /// selection is.
-pub(super) fn commit_scope(app: &mut RSpiceApp, measurement: &str, scope: SpecPointScope) {
-    let Ok(plan_id) = app
-        .state
+pub(super) fn commit_scope(
+    cx: &mut Cx<'_, SimulateFeature>,
+    measurement: &str,
+    scope: SpecPointScope,
+) {
+    let Ok(plan_id) = cx
         .model
         .sim_setup
         .stable_analysis_plan()
@@ -1089,22 +1090,17 @@ pub(super) fn commit_scope(app: &mut RSpiceApp, measurement: &str, scope: SpecPo
         scope_label(&scope).to_lowercase()
     );
     let measurement = measurement.to_owned();
-    commit_plan_change(
-        &mut crate::workbench::features::cx(app),
-        plan_id,
-        &detail,
-        move |workspace, plan_id| {
-            let mut specs = workspace.content.active_specs(plan_id).to_vec();
-            let target = specs
-                .iter_mut()
-                .find(|spec| spec.measurement.eq_ignore_ascii_case(&measurement))
-                .ok_or_else(|| format!("specification {measurement} no longer exists"))?;
-            target.scope = scope;
-            target.validate()?;
-            workspace.content.replace_active_specs(plan_id, specs);
-            Ok(())
-        },
-    );
+    commit_plan_change(cx, plan_id, &detail, move |workspace, plan_id| {
+        let mut specs = workspace.content.active_specs(plan_id).to_vec();
+        let target = specs
+            .iter_mut()
+            .find(|spec| spec.measurement.eq_ignore_ascii_case(&measurement))
+            .ok_or_else(|| format!("specification {measurement} no longer exists"))?;
+        target.scope = scope;
+        target.validate()?;
+        workspace.content.replace_active_specs(plan_id, specs);
+        Ok(())
+    });
 }
 
 /// How much of the dataset the reported value speaks for.
@@ -1114,20 +1110,17 @@ pub(super) fn commit_scope(app: &mut RSpiceApp, measurement: &str, scope: SpecPo
 /// is the one *in the specification's scope*, which is the only honest number:
 /// a limit narrowed to one corner was never judged against the rest.
 fn evidence_coverage(
-    app: &RSpiceApp,
+    model: &Model,
     spec: &SpecEntry,
     definition: Option<&SpecificationDefinition>,
 ) -> String {
-    let Some(run) = super::output_evidence::selected_plan_dataset(&app.state.model) else {
+    let Some(run) = super::output_evidence::selected_plan_dataset(model) else {
         // Through the one owner of the ownership question, so this page and
         // Verify give the same reason for declining the same dataset.
-        return app
-            .state
-            .model
+        return model
             .simulation
             .evidence_domain(
-                app.state
-                    .model
+                model
                     .sim_setup
                     .stable_analysis_plan()
                     .ok()
@@ -1165,10 +1158,14 @@ fn monte_carlo_policy_label(policy: &MonteCarloSpecificationGate) -> String {
     }
 }
 
-fn evaluation_policy(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
-    let dataset = super::output_evidence::selected_plan_dataset(&app.state.model).map_or_else(
+fn evaluation_policy(
+    ui: &mut Ui,
+    cx: &mut Cx<'_, SimulateFeature>,
+    payload: &SimulationPlanPayload,
+) {
+    let dataset = super::output_evidence::selected_plan_dataset(cx.model).map_or_else(
         || {
-            app.state.model.simulation.active_run().map_or_else(
+            cx.model.simulation.active_run().map_or_else(
                 || "none · no dataset is loaded".to_owned(),
                 |run| format!("Run {} · belongs to another plan or a manual deck", run.id),
             )
@@ -1196,9 +1193,9 @@ fn evaluation_policy(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanP
             )
         },
     );
-    let acceptance = super::output_evidence::selected_plan_dataset(&app.state.model).map_or_else(
+    let acceptance = super::output_evidence::selected_plan_dataset(cx.model).map_or_else(
         || {
-            if app.state.model.simulation.active_run().is_some() {
+            if cx.model.simulation.active_run().is_some() {
                 "not evaluated · active dataset does not belong to this plan".to_owned()
             } else {
                 "not evaluated · no dataset is loaded".to_owned()
@@ -1339,13 +1336,15 @@ fn evaluation_policy(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanP
         };
     }
     if !edited.bitwise_eq(&policy) {
-        commit_specification_policy(app, edited);
+        commit_specification_policy(cx, edited);
     }
 }
 
-pub(super) fn commit_specification_policy(app: &mut RSpiceApp, policy: SpecificationPolicy) {
-    let Ok(plan_id) = app
-        .state
+pub(super) fn commit_specification_policy(
+    cx: &mut Cx<'_, SimulateFeature>,
+    policy: SpecificationPolicy,
+) {
+    let Ok(plan_id) = cx
         .model
         .sim_setup
         .stable_analysis_plan()
@@ -1369,20 +1368,15 @@ pub(super) fn commit_specification_policy(app: &mut RSpiceApp, policy: Specifica
             RegressionSpecificationPolicy::LimitOnly => "checks limits only",
         }
     );
-    commit_plan_change(
-        &mut crate::workbench::features::cx(app),
-        plan_id,
-        &detail,
-        move |workspace, plan_id| {
-            policy.validate()?;
-            let payload = workspace
-                .content
-                .plan_data_mut(plan_id)
-                .ok_or_else(|| format!("simulation plan {plan_id} has no active payload"))?;
-            payload.specification_policy = policy;
-            Ok(())
-        },
-    );
+    commit_plan_change(cx, plan_id, &detail, move |workspace, plan_id| {
+        policy.validate()?;
+        let payload = workspace
+            .content
+            .plan_data_mut(plan_id)
+            .ok_or_else(|| format!("simulation plan {plan_id} has no active payload"))?;
+        payload.specification_policy = policy;
+        Ok(())
+    });
 }
 
 #[cfg(test)]

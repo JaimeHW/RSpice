@@ -55,7 +55,14 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, page: SimulationPage) {
         SimulationPage::Outputs => {
             super::page_outputs::show(ui, &mut crate::workbench::features::cx(app));
         }
-        SimulationPage::Specifications => super::page_specs::show(ui, app),
+        SimulationPage::Specifications => {
+            // Results' reason for not opening a limit's evidence, which the
+            // page reads only once the plan's dataset exists.
+            let cx = &mut crate::workbench::features::cx_with_foreign_answers(app, |app| {
+                super::output_evidence::selected_plan_dataset(&app.state.model).is_some()
+            });
+            super::page_specs::show(ui, cx);
+        }
         SimulationPage::RunSet => {
             super::page_runset::show(ui, &mut crate::workbench::features::cx(app));
         }

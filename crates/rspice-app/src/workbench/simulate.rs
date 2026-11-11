@@ -8,7 +8,7 @@ mod run_host;
 use crate::state::SimulationPage;
 use crate::state::command_catalog::CommandKey;
 use crate::workbench::app_state::Model;
-use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec};
+use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec, ids};
 use crate::workbench::framework::feature::{
     CommandSet, Cx, Feature, FeatureInspector, FeatureNavigator, FeatureRegistry, NoHandles, Reads,
 };
@@ -29,9 +29,13 @@ impl Feature for SimulateFeature {
     type Handles = NoHandles;
     /// The run history's primary runs or stops what the dispatcher would:
     /// on the Netlist workspace the shell runs that page's deck in place
-    /// of the active plan.
-    const FOREIGN_AVAILABILITY: &'static [CommandKey] =
-        &[SimulateCommand::Run.key(), SimulateCommand::Stop.key()];
+    /// of the active plan. The Specifications page states why Results will
+    /// not open a limit's evidence in the dispatcher's own words.
+    const FOREIGN_AVAILABILITY: &'static [CommandKey] = &[
+        SimulateCommand::Run.key(),
+        SimulateCommand::Stop.key(),
+        ids::RESULT_SPECIFICATIONS,
+    ];
 
     fn register(registry: &mut FeatureRegistry<Self>) {
         registry.commands::<SimulateCommand>();

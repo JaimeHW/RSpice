@@ -1523,7 +1523,11 @@ fn a_scope_change_commits_as_a_plan_transaction_and_a_rejected_one_changes_nothi
     let before = revision(&app);
 
     // Matched case-insensitively, exactly as the selection resolves it.
-    super::page_specs::commit_scope(&mut app, "GAIN", SpecPointScope::Nominal);
+    super::page_specs::commit_scope(
+        &mut crate::workbench::features::cx(&mut app),
+        "GAIN",
+        SpecPointScope::Nominal,
+    );
     assert_eq!(
         app.state.model.workspace.content.active_specs(id)[0].scope,
         SpecPointScope::Nominal
@@ -1540,7 +1544,7 @@ fn a_scope_change_commits_as_a_plan_transaction_and_a_rejected_one_changes_nothi
 
     let after_accept = revision(&app);
     super::page_specs::commit_scope(
-        &mut app,
+        &mut crate::workbench::features::cx(&mut app),
         "gain",
         SpecPointScope::SelectedCorners {
             corners: Vec::new(),
@@ -1583,7 +1587,10 @@ fn specification_policy_commits_atomically_and_rejects_an_invalid_yield_gate() {
         missing_measurement: MissingMeasurementPolicy::ReportUnmapped,
     };
 
-    super::page_specs::commit_specification_policy(&mut app, accepted.clone());
+    super::page_specs::commit_specification_policy(
+        &mut crate::workbench::features::cx(&mut app),
+        accepted.clone(),
+    );
 
     let stored = &app
         .state
@@ -1602,7 +1609,7 @@ fn specification_policy_commits_atomically_and_rejects_an_invalid_yield_gate() {
 
     let after_accept = revision(&app);
     super::page_specs::commit_specification_policy(
-        &mut app,
+        &mut crate::workbench::features::cx(&mut app),
         SpecificationPolicy {
             monte_carlo: MonteCarloSpecificationGate::YieldAtLeast { percent: 100.1 },
             ..accepted.clone()

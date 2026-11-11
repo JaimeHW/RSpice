@@ -118,7 +118,11 @@ fn a_specification_commit_lands_in_the_plan_log_without_a_receipts_card() {
                 scope: SpecPointScope::AllPoints,
             }],
         );
-        super::super::page_specs::commit_scope(app, "gain", SpecPointScope::Nominal);
+        super::super::page_specs::commit_scope(
+            &mut crate::workbench::features::cx(app),
+            "gain",
+            SpecPointScope::Nominal,
+        );
         last_receipt = app
             .state
             .model
