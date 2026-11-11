@@ -3,7 +3,7 @@
 mod advanced_options;
 mod analysis_form;
 mod catalog;
-mod checkpoint_exchange;
+pub(crate) mod checkpoint_exchange;
 pub(crate) mod lifecycle;
 mod output_evidence;
 mod page_excitations;
@@ -19,7 +19,7 @@ mod pages;
 mod participation;
 mod plan_issue_wording;
 mod plan_manager;
-mod transient_checkpoint_exchange;
+pub(crate) mod transient_checkpoint_exchange;
 mod variable_import;
 mod workflows;
 mod workload;
@@ -2449,7 +2449,7 @@ pub(crate) fn measurement_in_output_dataset_for_test(
 
 /// The Simulate workspace as the shell draws it on the stage.
 #[cfg(test)]
-fn show_on_stage(ui: &mut Ui, app: &mut RSpiceApp) {
+pub(crate) fn show_on_stage(ui: &mut Ui, app: &mut RSpiceApp) {
     use crate::workbench::framework::host::{Host, Point};
     app.contribute(Point::Surface(Workspace::Simulate), ui);
 }

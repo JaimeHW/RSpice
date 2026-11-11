@@ -15,7 +15,6 @@ mod registry_honesty;
 mod run_set;
 mod settings_switch;
 mod solver_options;
-mod value_size;
 
 use egui::{Rect, vec2};
 

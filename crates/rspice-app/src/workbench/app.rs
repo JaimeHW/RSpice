@@ -78,7 +78,7 @@ thread_local! {
         const { std::cell::RefCell::new(None) };
 }
 
-pub(in crate::workbench) mod actions;
+pub(crate) mod actions;
 #[cfg(target_arch = "wasm32")]
 mod browser_history;
 pub(crate) use rspice_app_workbench::workbench::app::command_palette;

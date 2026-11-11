@@ -1,6 +1,12 @@
 //! Checkpoint exchange tests preserve project ownership and stored file identity.
 
-use super::*;
+use rspice_formats::monte_carlo_checkpoint as checkpoint_file;
+
+use crate::io::file_exchange;
+use crate::state::MonteCarloCheckpointEvidence;
+use crate::workbench::surfaces::simulate::checkpoint_exchange::{
+    begin_export, begin_import, import_id, poll,
+};
 use crate::workbench::{AppState, RSpiceApp};
 
 #[test]

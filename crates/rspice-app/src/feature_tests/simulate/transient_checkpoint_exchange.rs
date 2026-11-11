@@ -3,8 +3,12 @@
 //! the byte limit is enforced before decoding; a repeated import is stored once
 //! and survives a project round trip; a stale inspection closes.
 
-use super::*;
+use crate::io::file_exchange;
 use crate::workbench::RSpiceApp;
+use crate::workbench::surfaces::simulate::transient_checkpoint_exchange::{
+    Action, Inspection, KIND, apply, import_id, inspection_id, poll,
+};
+use rspice_results::transient_checkpoint::TransientCheckpointEvidence;
 
 #[test]
 #[cfg(not(target_arch = "wasm32"))]

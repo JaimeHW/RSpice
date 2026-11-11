@@ -8,20 +8,20 @@ use crate::workbench::framework::feature::Cx;
 use crate::workbench::simulate::{SimulateFeature, invalidate_preflight};
 use rspice_results::transient_checkpoint::TransientCheckpointEvidence;
 
-pub(super) enum Action {
+pub(crate) enum Action {
     Import,
     Export(TransientCheckpointEvidence),
     Inspect(String, TransientCheckpointEvidence),
     Remove(ContentDigest),
 }
 
-const KIND: FileKind = FileKind {
+pub(crate) const KIND: FileKind = FileKind {
     label: "RSpice transient checkpoint",
     extensions: &["rspice-tran"],
     subject: "The transient checkpoint",
     fallback_name: "Transient checkpoint",
 };
-fn import_id() -> egui::Id {
+pub(crate) fn import_id() -> egui::Id {
     egui::Id::new("simulation.tran.import")
 }
 fn export_id() -> egui::Id {
@@ -30,7 +30,7 @@ fn export_id() -> egui::Id {
 fn owner_id() -> egui::Id {
     egui::Id::new("simulation.tran.import-owner")
 }
-fn inspection_id() -> egui::Id {
+pub(crate) fn inspection_id() -> egui::Id {
     egui::Id::new("simulation.tran.inspection")
 }
 
@@ -48,7 +48,7 @@ impl Owner {
     }
 }
 
-pub(super) fn apply(ctx: &egui::Context, cx: &mut Cx<'_, SimulateFeature>, action: Action) {
+pub(crate) fn apply(ctx: &egui::Context, cx: &mut Cx<'_, SimulateFeature>, action: Action) {
     match action {
         Action::Import => {
             let limits = rspice_core::ResourceLimits::default();
@@ -103,14 +103,14 @@ fn export(ctx: &egui::Context, model: &mut Model, checkpoint: &TransientCheckpoi
 }
 
 #[derive(Clone)]
-struct Inspection {
+pub(crate) struct Inspection {
     owner: Owner,
     label: String,
-    checkpoint: TransientCheckpointEvidence,
+    pub(crate) checkpoint: TransientCheckpointEvidence,
 }
 
 /// Drain even when the editor closes; a delayed picker cannot target a new design.
-pub(super) fn poll(ctx: &egui::Context, cx: &mut Cx<'_, SimulateFeature>) {
+pub(crate) fn poll(ctx: &egui::Context, cx: &mut Cx<'_, SimulateFeature>) {
     if let Some(outcome) = file_exchange::take_opened_binary(ctx, import_id()) {
         let owner = ctx.data_mut(|data| {
             let owner = data.get_temp::<Owner>(owner_id());
@@ -194,6 +194,3 @@ pub(super) fn poll(ctx: &egui::Context, cx: &mut Cx<'_, SimulateFeature>) {
         ctx.data_mut(|data| data.remove::<Inspection>(inspection_id()));
     }
 }
-
-#[cfg(test)]
-mod tests;
