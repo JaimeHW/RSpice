@@ -5340,6 +5340,36 @@ fn source_directive_rejection_fails_closed_on_loca_continuation_options() {
         err.contains("LOCA continuation"),
         "unexpected rejection message: {err}"
     );
+
+    for declined in [
+        ".options nonlin continuation=1\n",
+        ".options nonlin continuation=natural\n",
+        ".options nonlin maxstep=200 continuation=mos\n",
+        ".options nonlin continuation=gmin\n.options loca stepper=natural\n",
+    ] {
+        assert!(
+            XyceTestRunner::reject_unsupported_source_directives(declined).is_err(),
+            "{declined:?} needs LOCA's stepper"
+        );
+    }
+}
+
+#[test]
+fn source_directive_rejection_admits_continuation_the_operating_point_runs() {
+    for admitted in [
+        ".options nonlin continuation=gmin\n",
+        ".OPTIONS NONLIN CONTINUATION=3\n",
+        ".options nonlin continuation =sourcestep\n",
+        ".options nonlin continuation = sourcestep2\n",
+        ".options nonlin maxstep=100 continuation=0\n",
+        ".options nonlin nlstrategy=0 continuation=9\n",
+        ".options nonlin continuation=34, maxstep=20\n",
+    ] {
+        assert!(
+            XyceTestRunner::reject_unsupported_source_directives(admitted).is_ok(),
+            "{admitted:?} is a continuation the operating-point solve runs"
+        );
+    }
 }
 
 #[test]
@@ -20488,6 +20518,83 @@ fn checked_in_bsimsoi461_inverter_uses_only_qualified_generated_devices() {
     }));
     XyceTestRunner::validate_native_transient_contract(&netlist)
         .expect("checked-in inverter uses the qualified generated model family");
+}
+
+#[cfg(all(
+    feature = "veriloga-model-bsimcmg107",
+    feature = "veriloga-model-bsimcmg108",
+    feature = "veriloga-model-bsimcmg110",
+    feature = "veriloga-model-bsimcmg111"
+))]
+#[test]
+fn checked_in_bsimcmg_inverters_use_only_qualified_generated_devices() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root")
+        .join("tests/xyce");
+    for folder in ["BSIMCMG", "BSIMCMG_108", "BSIMCMG_110", "BSIMCMG_111"] {
+        let path = root.join(format!("Netlists/{folder}/inverter_transient.cir"));
+        let source = fs::read_to_string(&path).expect("read checked-in BSIM-CMG inverter");
+        let netlist = XyceTestRunner::parse_xyce_netlist(&source, &path)
+            .expect("checked-in BSIM-CMG inverter parses with included model cards");
+        let flat = rspice_core::netlist::flatten_netlist_with_models(&netlist)
+            .expect("the inverter chain flattens");
+        let mosfets = flat
+            .elements
+            .iter()
+            .filter(|element| matches!(element.kind, ElementKind::Mosfet { .. }))
+            .collect::<Vec<_>>();
+        assert_eq!(mosfets.len(), 10, "{folder}");
+        assert!(
+            mosfets.iter().all(|element| {
+                XyceTestRunner::netlist_element_is_generated_bsimcmg(&netlist, element)
+            }),
+            "{folder}"
+        );
+        XyceTestRunner::validate_native_transient_contract(&netlist)
+            .unwrap_or_else(|error| panic!("{folder}: {error}"));
+    }
+
+    let source = "\
+generated BSIM-CMG single-device transient
+VD d 0 1
+VG g 0 PULSE(0 1 10p 5p 5p 20p 50p)
+M1 d g 0 0 NM TFIN=15n L=30n NFIN=10
+R1 d 0 10k
+.MODEL NM NMOS LEVEL=107 TYPE=1
+.TRAN 1p 100p
+.PRINT TRAN V(g) V(d)
+.END
+";
+    let netlist = Netlist::parse(source).expect("generated BSIM-CMG fixture parses");
+    let mosfet = netlist
+        .elements
+        .iter()
+        .find(|element| matches!(element.kind, ElementKind::Mosfet { .. }))
+        .expect("fixture contains one MOSFET");
+    assert!(XyceTestRunner::netlist_element_is_generated_bsimcmg(
+        &netlist, mosfet
+    ));
+    for (label, mutation) in [
+        (
+            "an unlinked level",
+            source.replace("LEVEL=107", "LEVEL=109"),
+        ),
+        ("inconsistent polarity", source.replace("TYPE=1", "TYPE=0")),
+        ("deferred geometry", source.replace("L=30n", "L={LEN}")),
+    ] {
+        let mutated = Netlist::parse(&mutation).expect("negative BSIM-CMG fixture parses");
+        let mosfet = mutated
+            .elements
+            .iter()
+            .find(|element| matches!(element.kind, ElementKind::Mosfet { .. }))
+            .expect("negative fixture contains one MOSFET");
+        assert!(
+            !XyceTestRunner::netlist_element_is_generated_bsimcmg(&mutated, mosfet),
+            "{label} must stay outside the generated BSIM-CMG family"
+        );
+    }
 }
 
 #[test]

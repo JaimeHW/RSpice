@@ -40,6 +40,14 @@ pub(super) const XYCE_DECK_DISPOSITIONS: &[XyceDeckDisposition] = &[
                  analytic N(X1:M1:GM) matches",
     },
     XyceDeckDisposition {
+        deck: "Netlists/Certification_Tests/BUG_277_SON/ring51_srcstep1.cir",
+        contract: "unsupported_xyce_reference",
+        reason: "the deck's TIMEINT RELTOL=1e-4 does not resolve its ring's edge times: \
+                 RSpice's edge at 9.3 ns moves 30 ps between RELTOL 1e-4 and 1e-6, while at \
+                 1e-4 its edges sit within 4 ps of Xyce's; on 36 mV/ps edges those 4 ps reach \
+                 0.13 V, so 122 edge points miss the 1e-2 tolerance",
+    },
+    XyceDeckDisposition {
         deck: "Netlists/VANOISE/gain-stage1_psp.cir",
         contract: "unsupported_xyce_contract",
         reason: "deck prints white_NOI2_gnd_igig, a noise source of Xyce's modified PSP 103 \

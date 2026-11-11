@@ -1657,9 +1657,9 @@ impl XyceTestRunner {
                     .collect::<Vec<_>>();
                 if option_tokens.contains(&"loca")
                     || (option_tokens.contains(&"nonlin")
-                        && option_tokens
-                            .iter()
-                            .any(|token| token.starts_with("continuation")))
+                        && rest.split_once("continuation").is_some_and(|(_, mode)| {
+                            !Self::operating_point_runs_continuation(mode)
+                        }))
                 {
                     return Err(
                         "deck requires Xyce LOCA continuation options; the native Xyce adapter does not yet implement continuation analysis semantics"
@@ -1669,6 +1669,25 @@ impl XyceTestRunner {
             }
         }
         Ok(())
+    }
+
+    /// Whether the operating-point solve runs the `.OPTIONS NONLIN
+    /// CONTINUATION` mode written after the keyword. Standard Newton, GMIN
+    /// stepping, pseudo-transient and both source-stepping modes each end at
+    /// the unmodified circuit's operating point, so they change how the point
+    /// is found, not what the deck prints. Natural-parameter and MOSFET
+    /// continuation follow LOCA's stepper, which the adapter does not run.
+    fn operating_point_runs_continuation(mode: &str) -> bool {
+        let mode = mode.trim_start();
+        let mode = mode.strip_prefix('=').unwrap_or(mode).trim_start();
+        let mode = mode
+            .split(|ch: char| ch.is_ascii_whitespace() || ch == ',')
+            .next()
+            .unwrap_or_default();
+        matches!(mode, "0" | "3" | "9" | "34" | "35")
+            || ["stan", "gmin", "pseudo", "sourcestep"]
+                .iter()
+                .any(|prefix| mode.starts_with(prefix))
     }
 
     pub(super) fn subckt_parameter_resolution_family_contract(

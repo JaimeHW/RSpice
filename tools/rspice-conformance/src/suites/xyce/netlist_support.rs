@@ -4485,6 +4485,86 @@ impl XyceTestRunner {
                 .is_none_or(|model_type| model_type.to_bits() == expected_type.to_bits())
     }
 
+    /// Return true for a four-terminal BSIM-CMG instance whose card's LEVEL
+    /// names a generated built-in this build links: 107, 108, 110 or 111. As
+    /// for BSIM-SOI 4.6.1, the generated artifact owns the equations and the
+    /// parameter validation; the contract only keeps expressions, string
+    /// parameters, compact syntax and deferred instance values out.
+    pub(super) fn netlist_element_is_generated_bsimcmg(
+        netlist: &Netlist,
+        element: &rspice_core::netlist::Element,
+    ) -> bool {
+        if netlist.options.gmin.is_some() {
+            return false;
+        }
+        let ElementKind::Mosfet {
+            model,
+            compact_syntax,
+            instance_params,
+            deferred_params,
+            ..
+        } = &element.kind
+        else {
+            return false;
+        };
+        element.nodes.len() == 4
+            && !compact_syntax
+            && deferred_params.is_empty()
+            && instance_params
+                .iter()
+                .all(|(name, value)| !name.trim().is_empty() && value.is_finite())
+            && Self::find_unique_model_in(&netlist.models, model)
+                .is_some_and(Self::model_is_generated_bsimcmg)
+    }
+
+    pub(super) fn model_is_generated_bsimcmg(model: &rspice_core::netlist::ModelDef) -> bool {
+        // BSIM-CMG's TYPE is 1 for n-type and 0 for p-type.
+        let expected_type: Value = if model.model_type.eq_ignore_ascii_case("NMOS") {
+            1.0
+        } else if model.model_type.eq_ignore_ascii_case("PMOS") {
+            0.0
+        } else {
+            return false;
+        };
+        if !model.expr_params.is_empty()
+            || !model.string_params.is_empty()
+            || !model.string_vector_params.is_empty()
+            || !model.real_vector_params.is_empty()
+            || !model.real_vector_expr_params.is_empty()
+            || !model.integer_vector_params.is_empty()
+        {
+            return false;
+        }
+        let mut values = HashMap::with_capacity(model.params.len());
+        for (name, value) in &model.params {
+            if name.trim().is_empty()
+                || !value.is_finite()
+                || values.insert(name.to_ascii_uppercase(), *value).is_some()
+            {
+                return false;
+            }
+        }
+        let linked = match values.get("LEVEL").map(|level| level.to_bits()) {
+            Some(level) if level == 107.0f64.to_bits() => {
+                cfg!(feature = "veriloga-model-bsimcmg107")
+            }
+            Some(level) if level == 108.0f64.to_bits() => {
+                cfg!(feature = "veriloga-model-bsimcmg108")
+            }
+            Some(level) if level == 110.0f64.to_bits() => {
+                cfg!(feature = "veriloga-model-bsimcmg110")
+            }
+            Some(level) if level == 111.0f64.to_bits() => {
+                cfg!(feature = "veriloga-model-bsimcmg111")
+            }
+            _ => false,
+        };
+        linked
+            && values
+                .get("TYPE")
+                .is_none_or(|model_type| model_type.to_bits() == expected_type.to_bits())
+    }
+
     /// Return true only for an element that is validated by the native EKV
     /// 2.6 evaluator used by the engine's LEVEL=260 route.
     ///
