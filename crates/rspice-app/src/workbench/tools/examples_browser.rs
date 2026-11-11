@@ -13,8 +13,10 @@ use egui::{Context, Sense, vec2};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogHintTone, DialogSize};
-use crate::workbench::app_state::AppState;
-use crate::workbench::framework::feature::ModelsPort;
+use crate::workbench::app_state::{AppState, Model, PlatformState};
+use crate::workbench::framework::feature::{Cx, ModelsPort};
+use crate::workbench::project::ProjectFeature;
+use crate::workbench::slots::ProjectState;
 use crate::workbench::workflows::project_workflow::{NewProjectParams, save_project_as};
 use rspice_app_state::workbench::examples::{EXAMPLES, Example, load_example};
 
@@ -48,9 +50,17 @@ fn open_example(state: &mut AppState, name: &str) {
     }
 }
 
+/// Open the example New project's prompt let through, once the project it
+/// replaces was saved or let go.
+pub(crate) fn open_confirmed(state: &mut AppState) {
+    if let Some(name) = state.project.examples_confirmed.take() {
+        open_example(state, &name);
+    }
+}
+
 /// Open `example` in place of the open project, asking first about any
 /// changes it has, as New project does.
-fn request_example(state: &mut AppState, example: Example) {
+pub(crate) fn request_example(state: &mut AppState, example: Example) {
     let unsaved = state.platform.project_lifecycle.is_open()
         && (crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(state)
             || ModelsPort::model_editor_has_unsaved_changes(&*state.models));
@@ -66,14 +76,17 @@ fn request_example(state: &mut AppState, example: Example) {
 
 /// Why Open is refused, if it is: configuration edits not applied, which
 /// no save prompt resolves.
-fn open_refusal(state: &AppState) -> Option<&'static str> {
-    if !state.platform.project_lifecycle.is_open() {
+fn open_refusal(
+    project: &ProjectState,
+    model: &Model,
+    platform: &PlatformState,
+) -> Option<&'static str> {
+    if !platform.project_lifecycle.is_open() {
         return None;
     }
-    state
-        .project
+    project
         .configuration
-        .is_dirty(&state.model.workspace.content.configuration_sets)
+        .is_dirty(&model.workspace.content.configuration_sets)
         .then_some("Apply or revert the configuration edits first: an example replaces the project")
 }
 
@@ -129,18 +142,12 @@ fn example_row(ui: &mut egui::Ui, example: Example, selected: bool) -> egui::Res
     response
 }
 
-/// The Examples dialog, while it is open.
-pub(crate) fn show(ctx: &Context, state: &mut AppState) {
-    // The example New project's prompt let through, once the project it
-    // replaces was saved or let go.
-    if let Some(name) = state.project.examples_confirmed.take() {
-        open_example(state, &name);
-    }
-    let Some(mut selected) = state.project.examples_selection else {
-        return;
-    };
+/// The Examples dialog, while it is open. It returns the example the reader
+/// asked to open, for the shell to request in place of the open project.
+pub(crate) fn show(ctx: &Context, cx: &mut Cx<'_, ProjectFeature>) -> Option<Example> {
+    let mut selected = cx.state.examples_selection?;
     selected = selected.min(EXAMPLES.len() - 1);
-    let refusal = open_refusal(state);
+    let refusal = open_refusal(cx.state, cx.model, cx.platform);
     let (hint, tone) = match refusal {
         Some(refusal) => (refusal, DialogHintTone::Warn),
         None if cfg!(target_arch = "wasm32") => (
@@ -182,19 +189,20 @@ pub(crate) fn show(ctx: &Context, state: &mut AppState) {
                 selected = selected.saturating_sub(1);
             }
         });
-    state.project.examples_selection = Some(selected);
+    cx.state.examples_selection = Some(selected);
     match choice {
         DialogChoice::Primary => open = true,
         DialogChoice::None => {}
         _ => {
-            state.project.examples_selection = None;
-            return;
+            cx.state.examples_selection = None;
+            return None;
         }
     }
     if open {
-        state.project.examples_selection = None;
-        request_example(state, EXAMPLES[selected]);
+        cx.state.examples_selection = None;
+        return Some(EXAMPLES[selected]);
     }
+    None
 }
 
 #[cfg(test)]
@@ -340,7 +348,7 @@ mod tests {
         state.open_project_session();
         load_example("Voltage Divider", &mut state.model.schematic);
         state.sync_active_schematic_to_workspace();
-        assert!(open_refusal(&state).is_none());
+        assert!(open_refusal(&state.project, &state.model, &state.platform).is_none());
         let components = state.model.schematic.document().components.len();
         request_example(&mut state, EXAMPLES[0]);
         let confirmation = &state.workbench.confirmation_dialog;
@@ -355,6 +363,69 @@ mod tests {
         );
         assert_eq!(
             state.model.schematic.document().components.len(),
+            components
+        );
+    }
+
+    /// Open hands the shell the example the reader selected, in the frame it
+    /// was pressed in, and the dialog closes; the dialog itself replaces
+    /// nothing.
+    #[test]
+    fn open_hands_back_the_selected_example_and_closes_the_dialog() {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut app = RSpiceApp::test_instance();
+        app.state.project.examples_selection = Some(1);
+        let components = app.state.model.schematic.document().components.len();
+        let frame = |app: &mut RSpiceApp, events: Vec<egui::Event>| {
+            let mut asked = None;
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        vec2(1440.0, 900.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| asked = show(ui.ctx(), &mut crate::workbench::features::cx(app)),
+            );
+            (output, asked)
+        };
+        let mut settled = frame(&mut app, Vec::new());
+        for _ in 0..2 {
+            settled = frame(&mut app, Vec::new());
+        }
+        assert_eq!(settled.1, None);
+        let bounds = settled
+            .0
+            .platform_output
+            .accesskit_update
+            .expect("the settled frame publishes its tree")
+            .nodes
+            .iter()
+            .find_map(|(_, node)| (node.label()? == "Open").then_some(node.bounds()?))
+            .expect("the dialog announces Open");
+        let at = egui::pos2(
+            ((bounds.x0 + bounds.x1) / 2.0) as f32,
+            ((bounds.y0 + bounds.y1) / 2.0) as f32,
+        );
+        let press = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::default(),
+        };
+        let (_, asked) = frame(
+            &mut app,
+            vec![egui::Event::PointerMoved(at), press(true), press(false)],
+        );
+
+        assert_eq!(asked, Some(EXAMPLES[1]));
+        assert_eq!(app.state.project.examples_selection, None);
+        assert_eq!(
+            app.state.model.schematic.document().components.len(),
             components
         );
     }

@@ -176,7 +176,13 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
         app.state.project.project_launcher_open = false;
     }
     tools::project_launcher::show(ctx, app);
-    tools::examples_browser::show(ctx, &mut app.state);
+    // The example New project's prompt let through opens first. Then the
+    // Examples dialog draws in the project feature's context, and the example
+    // it asked for is requested in place of the open project as it returns.
+    tools::examples_browser::open_confirmed(&mut app.state);
+    if let Some(example) = tools::examples_browser::show(ctx, &mut features::cx(app)) {
+        tools::examples_browser::request_example(&mut app.state, example);
+    }
     // Shortcuts and dialogs record the intent to run; the pass itself belongs
     // to the frame loop, so a caller never has to name the workflow to ask
     // for it. Consumed before the dialog so a blocked report opens this frame.
