@@ -263,7 +263,6 @@ pub(in crate::netlist::parser) fn parse_options_command(
                             let message = format!(
                                 "MEASURE.MEASFAIL expects 0 or 1; defaulting invalid value {value} to 1"
                             );
-                            log::warn!("line {line_num}: {message}");
                             diagnostics.push(ParseDiagnostic::warning(
                                 line_num,
                                 "invalid-option-defaulted",
@@ -310,7 +309,6 @@ pub(in crate::netlist::parser) fn parse_options_command(
                             let message = format!(
                                 "MEASURE.USE_LTTM expects 0 or 1; defaulting invalid value {value} to 1"
                             );
-                            log::warn!("line {line_num}: {message}");
                             diagnostics.push(ParseDiagnostic::warning(
                                 line_num,
                                 "invalid-option-defaulted",

@@ -268,7 +268,6 @@ pub(super) fn parse_command(
                      only TRIG, TARG, WHEN and FIND ... WHEN; it is ignored",
                     statement.name
                 );
-                log::warn!("line {line_num}: {message}");
                 diagnostics.push(ParseDiagnostic::warning(
                     line_num,
                     "measure-delay-ignored",
@@ -292,7 +291,6 @@ pub(super) fn parse_command(
                     "measure '{previous_name}' redefined as '{}'; ignoring the previous definition",
                     statement.name
                 );
-                log::warn!("line {line_num}: {message}");
                 diagnostics.push(ParseDiagnostic::warning(
                     line_num,
                     "measure-redefined",
@@ -411,7 +409,6 @@ pub(super) fn parse_command(
             if unknown_warned.insert(key) {
                 if analysis {
                     let message = format!("unsupported analysis '{cmd}': RSpice does not run it");
-                    log::warn!("line {line_num}: {message}");
                     diagnostics.push(ParseDiagnostic::warning_at(
                         origin.clone(),
                         "unsupported-analysis",
@@ -422,7 +419,6 @@ pub(super) fn parse_command(
                         "unsupported dot-command '{cmd}' ignored; whatever it requests \
                          (analysis, option, output) will not run"
                     );
-                    log::warn!("line {line_num}: {message}");
                     diagnostics.push(ParseDiagnostic::warning(
                         line_num,
                         "unsupported-dot-command",
@@ -1293,7 +1289,8 @@ pub(super) fn parse_save_command(
                                 delimiter = PrintDelimiter::Whitespace;
                                 let message =
                                     "Invalid value of DELIMITER in .PRINT statment, ignoring";
-                                log::warn!("line {line_num}: {message}");
+                                // A caller without a diagnostics list still
+                                // hears of it; one with a list reports it there.
                                 if let Some(diagnostics) = diagnostics.as_deref_mut() {
                                     diagnostics.push(match origin {
                                         Some(origin) => ParseDiagnostic::warning_at(
@@ -1307,6 +1304,8 @@ pub(super) fn parse_save_command(
                                             message,
                                         ),
                                     });
+                                } else {
+                                    log::warn!("line {line_num}: {message}");
                                 }
                             }
                         }
@@ -1732,7 +1731,6 @@ fn warn_duplicate_packaged_option(
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) {
     let message = format!("duplicate .OPTIONS {name} ignored; using the first value");
-    log::warn!("line {line_num}: {message}");
     diagnostics.push(ParseDiagnostic::warning(
         line_num,
         "duplicate-option",
@@ -1755,7 +1753,6 @@ fn ignore_unknown_option(
     // scoped key once.
     if unknown_warned.insert(format!(".options {warning_key}")) {
         let message = format!("unknown .options key '{warning_key}' ignored");
-        log::warn!("line {line_num}: {message}");
         diagnostics.push(ParseDiagnostic::warning(
             line_num,
             "unknown-option",

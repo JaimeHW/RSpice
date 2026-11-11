@@ -179,3 +179,45 @@ fn veriloga_native_compilation_obeys_quiet_levels_and_json_logging() {
         }
     }
 }
+
+/// A parse warning reaches stderr once, as the run's own diagnostic line, in
+/// text and in JSON; the parser does not also log it.
+#[test]
+fn a_parse_warning_is_reported_once() {
+    let directory = common::test_dir("logging_parse_warning");
+    let deck = directory.join("unknown_option.cir");
+    std::fs::write(
+        &deck,
+        "unknown option\nV1 in 0 1\nR1 in 0 1k\n.options foo=1\n.op\n.end\n",
+    )
+    .unwrap();
+    let run = |flags: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_rspice"))
+            .args(flags)
+            .arg("run")
+            .arg(&deck)
+            .env_remove("RUST_LOG")
+            .env_remove("RUST_LOG_STYLE")
+            .output()
+            .unwrap()
+    };
+    let warning = "unknown .options key 'FOO' ignored";
+
+    let output = run(&[]);
+    assert!(output.status.success(), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let lines: Vec<&str> = stderr
+        .lines()
+        .filter(|line| line.contains(warning))
+        .collect();
+    assert_eq!(lines, [format!("warning: line 4: {warning}")], "{stderr}");
+
+    let output = run(&["--error-format", "json"]);
+    let mentions: Vec<serde_json::Value> = records(&output)
+        .into_iter()
+        .filter(|record| record.to_string().contains(warning))
+        .collect();
+    assert_eq!(mentions.len(), 1, "{mentions:?}");
+    assert_eq!(mentions[0]["diagnostic"]["code"], "unknown-option");
+    assert_eq!(mentions[0]["diagnostic"]["line"], 4);
+}
