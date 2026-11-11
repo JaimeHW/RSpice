@@ -704,8 +704,11 @@ const MAX_PUBLIC_ITEMS: usize = 5292;
 // adds one: the circuit's candidate inspection (`rspice-core`
 // circuit/mixed_signal.rs) hands a design's `$finish`, `$stop` or `$fatal`
 // to the analog finish path under its own task name. The census is 1,690,
-// with no slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 1690;
+// with no slack. `Bjt::stamp_mna_with_correction` adds one: the transient
+// residual (`rspice-core` engine/transient/state.rs) stamps a promoted BJT's
+// Newton load and its direct correction from one evaluation. The census is
+// 1,691, with no slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 1691;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

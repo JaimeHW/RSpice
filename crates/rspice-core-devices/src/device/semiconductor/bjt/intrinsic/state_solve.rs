@@ -977,21 +977,23 @@ impl Bjt {
         })
     }
 
-    pub(in crate::device::semiconductor::bjt) fn internal_kcl_linearization_from_eval_with_source(
+    pub(in crate::device::semiconductor::bjt) fn internal_kcl_linearization_from_eval_with_source<
+        S: Copy + Default,
+    >(
         &self,
         state: IntrinsicTerminalState,
         eval: EvaluatedBjtState,
         external: [Value; EXTERNAL_DIM],
         dissipation_drops: Option<[Value; VBIC_PARASITIC_DROP_DIM]>,
-        source_for_branch: impl Fn(BranchLinearization) -> Value,
+        source_for_branch: impl Fn(BranchLinearization) -> S,
     ) -> (
         [[Value; INTERNAL_DIM]; INTERNAL_DIM],
         [[Value; EXTERNAL_DIM]; INTERNAL_DIM],
-        [Value; INTERNAL_DIM],
+        [S; INTERNAL_DIM],
     ) {
         let mut jacobian = [[0.0; INTERNAL_DIM]; INTERNAL_DIM];
         let mut external_partials = [[0.0; EXTERNAL_DIM]; INTERNAL_DIM];
-        let mut source = [0.0; INTERNAL_DIM];
+        let mut source = [S::default(); INTERNAL_DIM];
         // Inactive private coordinates retain their exact alias constraints.
         for (row, active, internal_parent, external_parent) in [
             (IDX_VCX, Self::series_active(self.rcx), None, Some(EXT_C)),

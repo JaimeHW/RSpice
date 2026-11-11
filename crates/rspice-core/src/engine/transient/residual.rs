@@ -2030,48 +2030,18 @@ impl Engine {
                 );
             }
             let phase = ctx.bjt_phase.bind(ctx.bjt_history)?;
-            for direct in [true, false] {
-                let mut stamper = charge_stamper::BjtTransientStamper {
-                    matrix: if direct { None } else { Some(&mut *matrix) },
-                    rhs: if direct { &mut *correction } else { &mut *rhs },
-                    weight: 1.0,
-                };
-                for (index, bjt) in circuit.bjts.devices.iter().enumerate() {
-                    if !bjt.mna_promoted() {
-                        continue;
-                    }
-                    stamper.weight = if ctx.xyce_one_step_order2 { 0.5 } else { 1.0 };
-                    if direct {
-                        bjt.stamp_mna_correction(&mut stamper, solution);
-                    } else {
-                        use crate::device::NonlinearDevice;
-                        bjt.stamp_nonlinear(solution, &mut stamper, &mut []);
-                    }
-                    stamper.weight = 1.0;
-                    let anchor = direct.then_some(solution);
-                    Self::stamp_bjt_external_bc_companion(
-                        &mut stamper,
-                        bjt,
-                        index,
-                        solution,
-                        &companion_coeff,
-                        dt,
-                        ctx.bjt_history,
-                        anchor,
-                    )?;
-                    Self::stamp_promoted_bjt_companions(
-                        &mut stamper,
-                        bjt,
-                        index,
-                        &companion_coeff,
-                        dt,
-                        ctx.bjt_history,
-                        phase.trial(index, time),
-                        ctx.xyce_one_step_order2,
-                        anchor,
-                    )?;
-                }
-            }
+            Self::stamp_promoted_bjt_loads_with_correction(
+                matrix,
+                rhs,
+                correction,
+                circuit,
+                solution,
+                &companion_coeff,
+                dt,
+                ctx.bjt_history,
+                |index| phase.trial(index, time),
+                ctx.xyce_one_step_order2,
+            )?;
         }
         circuit
             .capacitors

@@ -55,3 +55,82 @@ impl crate::device::MatrixStamper for BjtTransientStamper<'_> {
         }
     }
 }
+
+/// Where a promoted BJT's companions write: `newton` takes the Jacobian and
+/// the right-hand side about `anchor`, and the direct correction, when there
+/// is one, takes only its own right-hand side, about the voltages it carries.
+pub(super) struct BjtLoadTargets<'s, N, C> {
+    pub newton: &'s mut N,
+    pub anchor: Option<&'s [Value]>,
+    pub correction: Option<(&'s mut C, &'s [Value])>,
+}
+
+impl<'s, N> BjtLoadTargets<'s, N, N> {
+    /// One stamper taking the Jacobian and the right-hand side about `anchor`.
+    pub(super) fn single(newton: &'s mut N, anchor: Option<&'s [Value]>) -> Self {
+        Self {
+            newton,
+            anchor,
+            correction: None,
+        }
+    }
+}
+
+impl<N: crate::device::MatrixStamper, C: crate::device::MatrixStamper> BjtLoadTargets<'_, N, C> {
+    /// `source(anchor)` for each right-hand side, about its own anchor.
+    pub(super) fn sources(
+        &self,
+        mut source: impl FnMut(Option<&[Value]>) -> Value,
+    ) -> BjtLoadSources {
+        BjtLoadSources {
+            newton: source(self.anchor),
+            correction: self
+                .correction
+                .as_ref()
+                .map(|(_, anchor)| source(Some(anchor))),
+        }
+    }
+
+    pub(super) fn stamp(&mut self, row: crate::NodeId, col: crate::NodeId, value: Value) {
+        self.newton.stamp(row, col, value);
+    }
+
+    /// Add each right-hand side's entry of `sources` at `row`.
+    pub(super) fn stamp_rhs(&mut self, row: crate::NodeId, sources: BjtLoadSources) {
+        self.newton.stamp_rhs(row, sources.newton);
+        if let (Some((stamper, _)), Some(value)) = (self.correction.as_mut(), sources.correction) {
+            stamper.stamp_rhs(row, value);
+        }
+    }
+}
+
+/// One value for each right-hand side a promoted BJT's companions write.
+#[derive(Clone, Copy)]
+pub(super) struct BjtLoadSources {
+    newton: Value,
+    correction: Option<Value>,
+}
+
+impl BjtLoadSources {
+    pub(super) fn map(self, f: impl Fn(Value) -> Value) -> Self {
+        Self {
+            newton: f(self.newton),
+            correction: self.correction.map(f),
+        }
+    }
+
+    pub(super) fn all(self, f: impl Fn(Value) -> bool) -> bool {
+        f(self.newton) && self.correction.is_none_or(f)
+    }
+}
+
+/// The right-hand side additions of a stamp, without its Jacobian.
+pub(super) struct RhsOnly<'s, S>(pub &'s mut S);
+
+impl<S: crate::device::MatrixStamper> crate::device::MatrixStamper for RhsOnly<'_, S> {
+    fn stamp(&mut self, _row: crate::NodeId, _col: crate::NodeId, _value: Value) {}
+
+    fn stamp_rhs(&mut self, row: crate::NodeId, value: Value) {
+        self.0.stamp_rhs(row, value);
+    }
+}

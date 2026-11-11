@@ -1143,19 +1143,19 @@ impl Engine {
                 matrix: &mut *matrix,
                 rhs: &mut *rhs,
             };
+            let mut targets = charge_stamper::BjtLoadTargets::single(&mut stamper, None);
             Self::stamp_bjt_external_bc_companion(
-                &mut stamper,
+                &mut targets,
                 bjt,
                 idx,
                 voltages,
                 coeff,
                 dt,
                 history,
-                None,
             )?;
             if bjt.mna_promoted() {
                 Self::stamp_promoted_bjt_companions(
-                    &mut stamper,
+                    &mut targets,
                     bjt,
                     idx,
                     coeff,
@@ -1163,7 +1163,6 @@ impl Engine {
                     history,
                     phase.trial(idx, time),
                     xyce_one_step_order2,
-                    None,
                 )?;
                 continue;
             }
@@ -1287,16 +1286,84 @@ impl Engine {
         Ok(())
     }
 
+    /// Stamp every promoted BJT's static load and companions from one
+    /// evaluation into two systems: the Jacobian with the Newton right-hand
+    /// side about zero, and the direct correction's right-hand side about
+    /// `solution`. Each right-hand side receives exactly the additions, in
+    /// exactly the order, of a pass over the devices that stamped it alone.
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn stamp_bjt_external_bc_companion(
-        stamper: &mut impl crate::device::MatrixStamper,
+    pub(super) fn stamp_promoted_bjt_loads_with_correction<'h>(
+        matrix: &mut crate::solver::StaticMatrix,
+        rhs: &mut [Value],
+        correction: &mut [Value],
+        circuit: &crate::circuit::CircuitData,
+        solution: &[Value],
+        coeff: &CompanionCoefficients,
+        dt: Value,
+        history: &'h BjtTransientHistory,
+        phase_trial: impl Fn(usize) -> Option<bjt::BjtPhaseTrial<'h>>,
+        xyce_one_step_order2: bool,
+    ) -> Result<(), SimulationError> {
+        let static_weight = if xyce_one_step_order2 { 0.5 } else { 1.0 };
+        let mut newton = charge_stamper::BjtTransientStamper {
+            matrix: Some(matrix),
+            rhs,
+            weight: 1.0,
+        };
+        let mut direct = charge_stamper::BjtTransientStamper {
+            matrix: None,
+            rhs: correction,
+            weight: 1.0,
+        };
+        for (index, bjt) in circuit.bjts.devices.iter().enumerate() {
+            if !bjt.mna_promoted() {
+                continue;
+            }
+            newton.weight = static_weight;
+            direct.weight = static_weight;
+            bjt.stamp_mna_with_correction(&mut newton, &mut direct, solution);
+            newton.weight = 1.0;
+            direct.weight = 1.0;
+            let mut targets = charge_stamper::BjtLoadTargets {
+                newton: &mut newton,
+                anchor: None,
+                correction: Some((&mut direct, solution)),
+            };
+            Self::stamp_bjt_external_bc_companion(
+                &mut targets,
+                bjt,
+                index,
+                solution,
+                coeff,
+                dt,
+                history,
+            )?;
+            Self::stamp_promoted_bjt_companions(
+                &mut targets,
+                bjt,
+                index,
+                coeff,
+                dt,
+                history,
+                phase_trial(index),
+                xyce_one_step_order2,
+            )?;
+        }
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn stamp_bjt_external_bc_companion<
+        N: crate::device::MatrixStamper,
+        C: crate::device::MatrixStamper,
+    >(
+        targets: &mut charge_stamper::BjtLoadTargets<'_, N, C>,
         bjt: &crate::device::Bjt,
         idx: usize,
         voltages: &[Value],
         coeff: &CompanionCoefficients,
         dt: Value,
         history: &BjtTransientHistory,
-        anchor: Option<&[Value]>,
     ) -> Result<(), SimulationError> {
         let charge_factor = Self::jfet_companion_geq(coeff, 1.0, dt);
         if let Some(charge) = bjt.legacy_external_bc_charge(voltages) {
@@ -1311,13 +1378,15 @@ impl Engine {
                 },
             );
             let conductance = charge_factor * charge.capacitance;
-            let voltage = charge.voltage
-                - anchor.map_or(0.0, |point| {
-                    Self::node_voltage(point, charge.nodes[0])
-                        - Self::node_voltage(point, charge.nodes[1])
-                });
-            let source = conductance * voltage - current;
-            if !conductance.is_finite() || !source.is_finite() {
+            let source = targets.sources(|anchor| {
+                let voltage = charge.voltage
+                    - anchor.map_or(0.0, |point| {
+                        Self::node_voltage(point, charge.nodes[0])
+                            - Self::node_voltage(point, charge.nodes[1])
+                    });
+                conductance * voltage - current
+            });
+            if !conductance.is_finite() || !source.all(Value::is_finite) {
                 return Err(SimulationError::Circuit(format!(
                     "BJT '{}' has a nonfinite external BC companion",
                     bjt.name
@@ -1328,12 +1397,12 @@ impl Engine {
             // stamping its four entries onto one cell would only round away
             // whatever else that cell holds.
             if pos != neg {
-                stamper.stamp(pos, pos, conductance);
-                stamper.stamp(pos, neg, -conductance);
-                stamper.stamp(neg, neg, conductance);
-                stamper.stamp(neg, pos, -conductance);
-                stamper.stamp_rhs(pos, source);
-                stamper.stamp_rhs(neg, -source);
+                targets.stamp(pos, pos, conductance);
+                targets.stamp(pos, neg, -conductance);
+                targets.stamp(neg, neg, conductance);
+                targets.stamp(neg, pos, -conductance);
+                targets.stamp_rhs(pos, source);
+                targets.stamp_rhs(neg, source.map(|source| -source));
             }
         }
         Ok(())
@@ -1343,8 +1412,11 @@ impl Engine {
     /// tied-terminal projection its static load also uses when its
     /// collector, base or emitter share a node.
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn stamp_promoted_bjt_companions(
-        stamper: &mut impl crate::device::MatrixStamper,
+    pub(super) fn stamp_promoted_bjt_companions<
+        N: crate::device::MatrixStamper,
+        C: crate::device::MatrixStamper,
+    >(
+        targets: &mut charge_stamper::BjtLoadTargets<'_, N, C>,
         bjt: &crate::device::Bjt,
         idx: usize,
         coeff: &CompanionCoefficients,
@@ -1352,11 +1424,10 @@ impl Engine {
         history: &BjtTransientHistory,
         phase_trial: Option<bjt::BjtPhaseTrial<'_>>,
         xyce_one_step_order2: bool,
-        anchor: Option<&[Value]>,
     ) -> Result<(), SimulationError> {
-        match bjt.promoted_tied_terminal_reference() {
-            Some(reference) => Self::stamp_promoted_bjt_companions_unprojected(
-                &mut bjt.tied_terminal_projection(stamper, reference),
+        let Some(reference) = bjt.promoted_tied_terminal_reference() else {
+            return Self::stamp_promoted_bjt_companions_unprojected(
+                targets,
                 bjt,
                 idx,
                 coeff,
@@ -1364,25 +1435,39 @@ impl Engine {
                 history,
                 phase_trial,
                 xyce_one_step_order2,
-                anchor,
-            ),
-            None => Self::stamp_promoted_bjt_companions_unprojected(
-                stamper,
-                bjt,
-                idx,
-                coeff,
-                dt,
-                history,
-                phase_trial,
-                xyce_one_step_order2,
-                anchor,
-            ),
-        }
+            );
+        };
+        let mut newton = bjt.tied_terminal_projection(&mut *targets.newton, reference);
+        let mut correction = targets.correction.as_mut().map(|(stamper, anchor)| {
+            (
+                bjt.tied_terminal_projection(&mut **stamper, reference),
+                *anchor,
+            )
+        });
+        Self::stamp_promoted_bjt_companions_unprojected(
+            &mut charge_stamper::BjtLoadTargets {
+                newton: &mut newton,
+                anchor: targets.anchor,
+                correction: correction
+                    .as_mut()
+                    .map(|(stamper, anchor)| (stamper, *anchor)),
+            },
+            bjt,
+            idx,
+            coeff,
+            dt,
+            history,
+            phase_trial,
+            xyce_one_step_order2,
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn stamp_promoted_bjt_companions_unprojected(
-        stamper: &mut impl crate::device::MatrixStamper,
+    fn stamp_promoted_bjt_companions_unprojected<
+        N: crate::device::MatrixStamper,
+        C: crate::device::MatrixStamper,
+    >(
+        targets: &mut charge_stamper::BjtLoadTargets<'_, N, C>,
         bjt: &crate::device::Bjt,
         idx: usize,
         coeff: &CompanionCoefficients,
@@ -1390,7 +1475,6 @@ impl Engine {
         history: &BjtTransientHistory,
         phase_trial: Option<bjt::BjtPhaseTrial<'_>>,
         xyce_one_step_order2: bool,
-        anchor: Option<&[Value]>,
     ) -> Result<(), SimulationError> {
         let charge_factor = Self::jfet_companion_geq(coeff, 1.0, dt);
         if charge_factor <= 0.0 {
@@ -1403,7 +1487,7 @@ impl Engine {
         let (branches, internal, external) = bjt.mna_charge_state();
         if let Some(phase) = phase_trial {
             phase
-                .stamp_promoted(bjt, stamper, xyce_one_step_order2, anchor)
+                .stamp_promoted(bjt, targets, xyce_one_step_order2)
                 .map_err(|error| {
                     SimulationError::Circuit(format!("BJT '{}' phase companion: {error}", bjt.name))
                 })?;
@@ -1436,14 +1520,13 @@ impl Engine {
             }
             let polarity = bjt.charge_branch_polarity(branch_idx);
             Self::stamp_vbic_mna_charge_branch(
-                stamper,
+                targets,
                 bjt,
                 branch,
                 polarity * charge_factor,
                 polarity * cq,
                 &internal,
                 &external,
-                anchor,
             );
         }
         Ok(())
@@ -1455,16 +1538,17 @@ impl Engine {
     /// negative node, with conductance `ag0 * dq/dv` across every coupled
     /// column and the linearization point folded into the source term.
     #[inline]
-    #[allow(clippy::too_many_arguments)]
-    fn stamp_vbic_mna_charge_branch(
-        stamper: &mut impl crate::device::MatrixStamper,
+    fn stamp_vbic_mna_charge_branch<
+        N: crate::device::MatrixStamper,
+        C: crate::device::MatrixStamper,
+    >(
+        targets: &mut charge_stamper::BjtLoadTargets<'_, N, C>,
         bjt: &crate::device::Bjt,
         branch: &BjtChargeBranch,
         ag0: Value,
         cq: Value,
         internal: &[Value; BJT_INTERNAL_STATE_DIM],
         external: &[Value; BJT_EXTERNAL_STATE_DIM],
-        anchor: Option<&[Value]>,
     ) {
         let external_nodes = [
             bjt.node_collector,
@@ -1472,20 +1556,24 @@ impl Engine {
             bjt.node_emitter,
             bjt.node_substrate,
         ];
-        let mut source = -cq;
-        for (index, (derivative, voltage)) in branch.d_internal.iter().zip(internal).enumerate() {
-            let offset = voltage
-                - anchor.map_or(0.0, |point| {
-                    Self::node_voltage(point, bjt.mna_internal_node(index))
-                });
-            source += ag0 * derivative * offset;
-        }
-        for ((derivative, voltage), node) in
-            branch.d_external.iter().zip(external).zip(external_nodes)
-        {
-            let offset = voltage - anchor.map_or(0.0, |point| Self::node_voltage(point, node));
-            source += ag0 * derivative * offset;
-        }
+        let source = targets.sources(|anchor| {
+            let mut source = -cq;
+            for (index, (derivative, voltage)) in branch.d_internal.iter().zip(internal).enumerate()
+            {
+                let offset = voltage
+                    - anchor.map_or(0.0, |point| {
+                        Self::node_voltage(point, bjt.mna_internal_node(index))
+                    });
+                source += ag0 * derivative * offset;
+            }
+            for ((derivative, voltage), node) in
+                branch.d_external.iter().zip(external).zip(external_nodes)
+            {
+                let offset = voltage - anchor.map_or(0.0, |point| Self::node_voltage(point, node));
+                source += ag0 * derivative * offset;
+            }
+            source
+        });
 
         // A ground row reaches the stamper too, which discards it; the
         // tied-terminal projection needs every row to recover KCL.
@@ -1493,7 +1581,7 @@ impl Engine {
             for col in 0..BJT_INTERNAL_STATE_DIM {
                 let g = ag0 * branch.d_internal[col];
                 if g != 0.0 {
-                    stamper.stamp(row, bjt.mna_internal_node(col), sign * g);
+                    targets.stamp(row, bjt.mna_internal_node(col), sign * g);
                 }
             }
             for (derivative, node) in branch
@@ -1504,10 +1592,10 @@ impl Engine {
             {
                 let g = ag0 * derivative;
                 if g != 0.0 {
-                    stamper.stamp(row, node, sign * g);
+                    targets.stamp(row, node, sign * g);
                 }
             }
-            stamper.stamp_rhs(row, sign * source);
+            targets.stamp_rhs(row, source.map(|source| sign * source));
         };
 
         let pos = branch

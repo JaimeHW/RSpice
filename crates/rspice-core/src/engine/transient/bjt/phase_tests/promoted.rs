@@ -181,7 +181,7 @@ fn gp_phase_promoted_companion_retains_the_limited_newton_anchor() {
             device.stamp_mna_correction(&mut stamper, &raw);
             let phase = BjtPhaseContext::default().bind(&history).unwrap();
             Engine::stamp_promoted_bjt_companions(
-                &mut stamper,
+                &mut charge_stamper::BjtLoadTargets::single(&mut stamper, Some(&raw)),
                 device,
                 0,
                 &coeff,
@@ -189,7 +189,6 @@ fn gp_phase_promoted_companion_retains_the_limited_newton_anchor() {
                 &history,
                 phase.trial(0, time),
                 false,
-                Some(&raw),
             )
             .unwrap();
             for (row, direct) in direct.iter().enumerate() {
@@ -217,6 +216,213 @@ fn gp_phase_promoted_companion_retains_the_limited_newton_anchor() {
                 }
             }
             assert_eq!(history, before);
+        }
+    }
+}
+
+/// Two promoted copies of `bjt` in parallel, each with its own internal
+/// nodes and base-resistance current.
+fn promoted_pair(bjt: &Bjt) -> crate::CircuitData {
+    let mut circuit = crate::CircuitData::new();
+    for name in ["c", "b", "e"] {
+        circuit.get_or_create_node(name);
+    }
+    let names = ["q1", "q2"];
+    let mut devices: Vec<Bjt> = names
+        .iter()
+        .map(|name| {
+            let mut device = bjt.clone();
+            device.assign_mna_internal_nodes(|suffix| {
+                circuit.get_or_create_node(&format!("{name}{suffix}"))
+            });
+            device
+        })
+        .collect();
+    for (device, name) in devices.iter_mut().zip(names) {
+        if device.needs_mna_rbi_branch() {
+            device.assign_mna_rbi_branch(circuit.allocate_branch_named(&format!("{name}irbi")));
+        }
+    }
+    let nodes = circuit.num_nodes();
+    for mut device in devices {
+        device.resolve_mna_rbi_branch(nodes);
+        circuit.bjts.add(Box::new(device));
+    }
+    circuit
+}
+
+/// The residual used to stamp the promoted devices' direct correction in one
+/// pass and their Newton system in another. Stamped in one pass from one
+/// evaluation, every entry of the matrix, the Newton right-hand side and the
+/// correction receives the same additions in the same order, so each keeps
+/// its bits: with base resistance or without, tied terminals, excess phase
+/// and OneStep's half weight.
+#[test]
+fn one_promoted_pass_stamps_the_bits_of_the_newton_and_correction_passes() {
+    let coeff = CompanionCoefficients::backward_euler();
+    let bits = |values: &[Value]| {
+        values
+            .iter()
+            .map(|value| value.to_bits())
+            .collect::<Vec<_>>()
+    };
+    for p in [1.0, -1.0] {
+        for private in [false, true] {
+            for tied in [false, true] {
+                for phase in [false, true] {
+                    for one_step in [false, true] {
+                        let case = format!(
+                            "p={p} private={private} tied={tied} phase={phase} one_step={one_step}"
+                        );
+                        let mut device = transistor(p, private, 1.0);
+                        device.set_voltage_limiting_enabled(true);
+                        if tied {
+                            device.node_base = device.node_collector;
+                        }
+                        let mut circuit = promoted_pair(&device);
+                        let snapshot = device.charge_snapshot(p * 2.0, p * 0.6, 0.0, 0.0);
+                        let mut solution = vec![0.0; circuit.matrix_size()];
+                        solution[..3].copy_from_slice(&snapshot.reduction.external_voltages[..3]);
+                        for device in &circuit.bjts.devices {
+                            for (index, value) in
+                                snapshot.reduction.internal_voltages.iter().enumerate()
+                            {
+                                let node = device.mna_internal_node(index);
+                                if node != 0 {
+                                    solution[node - 1] = *value;
+                                }
+                            }
+                            if let Some(node) =
+                                device.mna_rbi_branch_matrix_node(circuit.num_nodes())
+                            {
+                                solution[node - 1] = 1e-5;
+                            }
+                        }
+                        let mut history = Engine::initialize_bjt_history(
+                            &circuit,
+                            &solution,
+                            ReactiveHistorySeed::SolvedBias,
+                        )
+                        .unwrap();
+                        for (index, device) in circuit.bjts.devices.iter().enumerate() {
+                            assert_eq!(
+                                device.promoted_tied_terminal_reference().is_some(),
+                                tied,
+                                "{case}"
+                            );
+                            history.phase[index] = phase.then(|| {
+                                let forward = device
+                                    .legacy_forward_transport_branch(
+                                        &history.dynamic_internal_prev[index],
+                                    )
+                                    .unwrap()
+                                    .current;
+                                delay_history(device, forward)
+                            });
+                        }
+                        let mut raw = solution.clone();
+                        raw[circuit.bjts.devices[0].node_bi - 1] += p * 1.0;
+                        for device in circuit.bjts.devices.iter_mut() {
+                            device.update_mna_static_probe(&solution);
+                            device.update(&raw);
+                        }
+                        let delay = device.legacy_excess_phase_delay();
+                        let time = 2.5 * delay;
+                        let dt = time - 2.0 * delay;
+                        let view = BjtPhaseContext::default().bind(&history).unwrap();
+
+                        let mut prefilled = || {
+                            let mut matrix = Engine::default().build_matrix(&circuit).unwrap();
+                            circuit.link_indices(&matrix);
+                            for (index, value) in matrix.values_mut().iter_mut().enumerate() {
+                                *value = 1e-3 * (index as Value + 1.0).sqrt();
+                            }
+                            matrix
+                        };
+                        let (mut two_matrix, mut one_matrix) = (prefilled(), prefilled());
+                        let rhs: Vec<Value> = (0..raw.len())
+                            .map(|index| 1e-4 * (index as Value + 2.0).ln())
+                            .collect();
+                        let correction: Vec<Value> = rhs.iter().map(|value| -0.7 * value).collect();
+
+                        let (mut two_rhs, mut two_correction) = (rhs.clone(), correction.clone());
+                        for direct in [true, false] {
+                            let mut stamper = charge_stamper::BjtTransientStamper {
+                                matrix: if direct { None } else { Some(&mut two_matrix) },
+                                rhs: if direct {
+                                    &mut two_correction
+                                } else {
+                                    &mut two_rhs
+                                },
+                                weight: 1.0,
+                            };
+                            for (index, bjt) in circuit.bjts.devices.iter().enumerate() {
+                                stamper.weight = if one_step { 0.5 } else { 1.0 };
+                                if direct {
+                                    bjt.stamp_mna_correction(&mut stamper, &raw);
+                                } else {
+                                    bjt.stamp_nonlinear(&raw, &mut stamper, &mut []);
+                                }
+                                stamper.weight = 1.0;
+                                let mut targets = charge_stamper::BjtLoadTargets::single(
+                                    &mut stamper,
+                                    direct.then_some(raw.as_slice()),
+                                );
+                                Engine::stamp_bjt_external_bc_companion(
+                                    &mut targets,
+                                    bjt,
+                                    index,
+                                    &raw,
+                                    &coeff,
+                                    dt,
+                                    &history,
+                                )
+                                .unwrap();
+                                Engine::stamp_promoted_bjt_companions(
+                                    &mut targets,
+                                    bjt,
+                                    index,
+                                    &coeff,
+                                    dt,
+                                    &history,
+                                    view.trial(index, time),
+                                    one_step,
+                                )
+                                .unwrap();
+                            }
+                        }
+
+                        let (mut one_rhs, mut one_correction) = (rhs.clone(), correction.clone());
+                        Engine::stamp_promoted_bjt_loads_with_correction(
+                            &mut one_matrix,
+                            &mut one_rhs,
+                            &mut one_correction,
+                            &circuit,
+                            &raw,
+                            &coeff,
+                            dt,
+                            &history,
+                            |index| view.trial(index, time),
+                            one_step,
+                        )
+                        .unwrap();
+
+                        assert_ne!(bits(&two_correction), bits(&correction), "{case}");
+                        assert_ne!(bits(&two_rhs), bits(&rhs), "{case}");
+                        assert_eq!(
+                            bits(one_matrix.values_mut()),
+                            bits(two_matrix.values_mut()),
+                            "matrix {case}"
+                        );
+                        assert_eq!(bits(&one_rhs), bits(&two_rhs), "Newton rhs {case}");
+                        assert_eq!(
+                            bits(&one_correction),
+                            bits(&two_correction),
+                            "correction {case}"
+                        );
+                    }
+                }
+            }
         }
     }
 }
@@ -525,12 +731,14 @@ fn gp_right_trial_promoted_stamp_matches_physical_current_and_tangent() {
                     phase
                         .stamp_promoted(
                             &circuit.bjts.devices[0],
-                            &mut StaticMatrixChargeStamper {
-                                matrix: &mut matrix,
-                                rhs: &mut rhs,
-                            },
+                            &mut charge_stamper::BjtLoadTargets::single(
+                                &mut StaticMatrixChargeStamper {
+                                    matrix: &mut matrix,
+                                    rhs: &mut rhs,
+                                },
+                                None,
+                            ),
                             one_step,
-                            None,
                         )
                         .unwrap();
                     let residual = matrix.residual_vector(values, &rhs).unwrap();

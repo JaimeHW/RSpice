@@ -238,12 +238,16 @@ impl BjtPhaseTrial<'_> {
             .output)
     }
 
-    pub(in crate::engine::transient) fn stamp_promoted(
+    /// Stamp the phase companion into each of `targets` from one evaluation
+    /// of the transport history.
+    pub(in crate::engine::transient) fn stamp_promoted<
+        N: crate::device::MatrixStamper,
+        C: crate::device::MatrixStamper,
+    >(
         self,
         bjt: &crate::device::Bjt,
-        stamper: &mut impl crate::device::MatrixStamper,
+        targets: &mut super::charge_stamper::BjtLoadTargets<'_, N, C>,
         xyce_one_step_order2: bool,
-        anchor: Option<&[Value]>,
     ) -> Result<(), String> {
         let (_, internal, _) = bjt.mna_charge_state();
         let mut correction = self.correction(bjt, &internal)?;
@@ -261,7 +265,21 @@ impl BjtPhaseTrial<'_> {
         } else {
             1.0
         };
-        bjt.stamp_legacy_mna_phase_correction(stamper, &correction, weight, anchor)
+        bjt.stamp_legacy_mna_phase_correction(
+            &mut *targets.newton,
+            &correction,
+            weight,
+            targets.anchor,
+        )?;
+        if let Some((stamper, anchor)) = targets.correction.as_mut() {
+            bjt.stamp_legacy_mna_phase_correction(
+                &mut super::charge_stamper::RhsOnly(&mut **stamper),
+                &correction,
+                weight,
+                Some(anchor),
+            )?;
+        }
+        Ok(())
     }
 
     pub(in crate::engine::transient) fn correction(
