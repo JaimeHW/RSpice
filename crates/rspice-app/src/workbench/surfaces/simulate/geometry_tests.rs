@@ -366,7 +366,7 @@ fn analysis_catalogue_code_rows(viewport_width: f32) -> Vec<Vec<PaintedLine>> {
                 )),
                 ..egui::RawInput::default()
             },
-            |ctx| super::show_workflow_dialogs(ctx, &mut app),
+            |ctx| super::workflow_dialog_tests::show_workflow_dialogs_on_stage(ctx, &mut app),
         )
     };
     // A content-height surface lays out against its previous measurement.

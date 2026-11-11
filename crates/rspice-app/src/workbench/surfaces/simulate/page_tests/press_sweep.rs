@@ -229,7 +229,7 @@ impl Sweep {
                 // the frame, not by the surface. A sweep that ran only the
                 // surface would watch every control that opens one of them
                 // produce nothing at all.
-                super::super::show_workflow_dialogs(ctx, app);
+                super::super::workflow_dialog_tests::show_workflow_dialogs_on_stage(ctx, app);
             },
         );
         let platform = &output.platform_output;

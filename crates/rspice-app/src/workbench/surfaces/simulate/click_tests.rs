@@ -142,7 +142,7 @@ impl Studio {
                     // actually drawn. A harness that ran only the surface could
                     // press the control that opens one and see nothing appear,
                     // which is the defect these cases exist to hold shut.
-                    super::show_workflow_dialogs(ctx, app);
+                    super::workflow_dialog_tests::show_workflow_dialogs_on_stage(ctx, app);
                 }
             },
         );

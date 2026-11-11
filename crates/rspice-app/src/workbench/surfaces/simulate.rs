@@ -51,6 +51,8 @@ use crate::ui::widgets::{
     Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, Problem, mono_input,
     paint_problem_mark, select,
 };
+#[cfg(test)]
+use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::{Model, SimSetupState};
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::feature::{CommandSet, Cx};
@@ -61,7 +63,6 @@ use crate::workbench::state::{
     SavedOutputDraft, SimulationPlanManagerDraft, SimulationPlanManagerMode,
     SimulationWorkflowDialog, WorkbenchSession, Workspace,
 };
-use crate::workbench::{RSpiceApp, features};
 use rspice_simulation::output_contract::SavedOutputSemanticStatus;
 use rspice_simulation::output_contract::SavedOutputStorageEstimate;
 use rspice_simulation::runner::{TfRunConfig, infer_tf_run_config};
@@ -388,32 +389,37 @@ fn settle_surface_scroll(ui: &Ui, state: &mut SimulateState, offset_y: f32) {
     }
 }
 
-/// Paint whichever plan-editing overlay is open, over whatever workspace the
-/// reader is on, and carry any refusal it raised to a toast.
-///
-/// The frame calls this, not [`show`]. Only one of the nine overlays is
-/// genuinely chrome: the plan manager, which the toolbar's run configuration
-/// chip and `SimulateCommand::ManagePlans` open from the menu bar, the
-/// palette and the shortcut map, on any workspace. The other seven drafts are
-/// each opened by a control on one setup page — cloning the plan and renaming
-/// an analysis from the Analyses route, a design variable from Variables, a
-/// saved output from Outputs, and so on.
-///
-/// The catalogue is the reason they are hosted together anyway. Its invoker is
-/// the navigator's creating action, which the panel draws on all nine setup
-/// routes, and `SimulateCommand::AddAnalysis`, which reaches it from the Simulate menu
-/// and the palette on any workspace — but the catalogue itself was drawn from
-/// the Analyses rail, so pressing that action anywhere else set
-/// `palette_open` with nothing to render it. That flag is one of the terms
-/// of [`crate::workbench::AppState::application_modal_open`], so the press
-/// took every keyboard shortcut in the application with it and left no
-/// painted modal to press Escape on. A host that runs once a frame wherever
-/// the reader is standing cannot arm an overlay that no pass draws.
-pub(in crate::workbench) fn show_workflow_dialogs(ctx: &egui::Context, app: &mut RSpiceApp) {
-    checkpoint_exchange::poll(ctx, &mut features::cx(app));
-    transient_checkpoint_exchange::poll(ctx, &mut features::cx(app));
-    simulation_workflow_dialog(ctx, &mut features::cx(app));
-    analysis_catalog(ctx, &mut features::cx(app));
+impl SimulateFeature {
+    /// Paint whichever plan-editing overlay is open, over whatever workspace the
+    /// reader is on, and carry any refusal it raised to a toast.
+    ///
+    /// The frame calls this, not [`show`]. Only one of the nine overlays is
+    /// genuinely chrome: the plan manager, which the toolbar's run configuration
+    /// chip and `SimulateCommand::ManagePlans` open from the menu bar, the
+    /// palette and the shortcut map, on any workspace. The other seven drafts are
+    /// each opened by a control on one setup page — cloning the plan and renaming
+    /// an analysis from the Analyses route, a design variable from Variables, a
+    /// saved output from Outputs, and so on.
+    ///
+    /// The catalogue is the reason they are hosted together anyway. Its invoker is
+    /// the navigator's creating action, which the panel draws on all nine setup
+    /// routes, and `SimulateCommand::AddAnalysis`, which reaches it from the Simulate menu
+    /// and the palette on any workspace — but the catalogue itself was drawn from
+    /// the Analyses rail, so pressing that action anywhere else set
+    /// `palette_open` with nothing to render it. That flag is one of the terms
+    /// of [`crate::workbench::AppState::application_modal_open`], so the press
+    /// took every keyboard shortcut in the application with it and left no
+    /// painted modal to press Escape on. A host that runs once a frame wherever
+    /// the reader is standing cannot arm an overlay that no pass draws.
+    pub(in crate::workbench) fn render_workflow_dialogs(
+        cx: &mut Cx<'_, Self>,
+        ctx: &egui::Context,
+    ) {
+        checkpoint_exchange::poll(ctx, cx);
+        transient_checkpoint_exchange::poll(ctx, cx);
+        simulation_workflow_dialog(ctx, cx);
+        analysis_catalog(ctx, cx);
+    }
 }
 
 /// Host the analysis catalogue, and act on the kind it chose.

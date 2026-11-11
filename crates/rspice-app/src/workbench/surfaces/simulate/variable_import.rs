@@ -1623,7 +1623,11 @@ mod tests {
                         )),
                         ..Default::default()
                     },
-                    |ctx| super::super::show_workflow_dialogs(ctx, &mut app),
+                    |ctx| {
+                        super::super::workflow_dialog_tests::show_workflow_dialogs_on_stage(
+                            ctx, &mut app,
+                        )
+                    },
                 )
             };
             // A content-height surface lays out against the height and width
@@ -1712,7 +1716,11 @@ mod tests {
                         )),
                         ..Default::default()
                     },
-                    |ctx| super::super::show_workflow_dialogs(ctx, &mut app),
+                    |ctx| {
+                        super::super::workflow_dialog_tests::show_workflow_dialogs_on_stage(
+                            ctx, &mut app,
+                        )
+                    },
                 )
             };
             let _ = run();

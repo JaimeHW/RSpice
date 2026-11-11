@@ -6,6 +6,13 @@
 
 use super::*;
 
+/// The simulation plan workflows as the frame's dialog walk draws them, with
+/// what they raised answered straight after.
+pub(super) fn show_workflow_dialogs_on_stage(ctx: &egui::Context, app: &mut RSpiceApp) {
+    SimulateFeature::render_workflow_dialogs(&mut crate::workbench::features::cx(app), ctx);
+    app.after_contribution();
+}
+
 /// The rename dialog opens on the name the analysis already has, and refuses
 /// to commit it.
 ///
@@ -55,7 +62,7 @@ fn the_rename_dialog_refuses_a_rename_that_renames_nothing() {
                     screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1_200.0, 800.0))),
                     ..egui::RawInput::default()
                 },
-                |ctx| super::show_workflow_dialogs(ctx, &mut app),
+                |ctx| show_workflow_dialogs_on_stage(ctx, &mut app),
             )
         };
         // A content-height surface lays out against its previous measurement.
@@ -133,7 +140,7 @@ fn the_analysis_catalogue_opens_over_a_plan_that_does_not_resolve() {
                 screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1_200.0, 900.0))),
                 ..egui::RawInput::default()
             },
-            |ctx| super::show_workflow_dialogs(ctx, &mut app),
+            |ctx| show_workflow_dialogs_on_stage(ctx, &mut app),
         )
     };
     // A content-height surface lays out against its previous measurement.

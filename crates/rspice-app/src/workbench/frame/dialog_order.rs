@@ -594,7 +594,10 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
             state.simulate.simulation_workflow.is_some()
                 || state.model.sim_setup.session.palette_open
         }),
-        render: |app, ctx| crate::workbench::surfaces::show_simulation_workflow_dialogs(ctx, app),
+        render: |app, ctx| {
+            SimulateFeature::render_workflow_dialogs(&mut features::cx(app), ctx);
+            app.after_contribution();
+        },
     },
 ];
 

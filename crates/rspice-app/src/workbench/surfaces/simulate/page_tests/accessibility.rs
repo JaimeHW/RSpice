@@ -225,7 +225,7 @@ pub(super) fn studio_route_nodes(
                 // The dialogs are drawn outside the surface, so a sweep that
                 // ran only the surface reached none of their controls — which
                 // is where two nameless text fields were living.
-                super::super::show_workflow_dialogs(ctx, &mut app);
+                super::super::workflow_dialog_tests::show_workflow_dialogs_on_stage(ctx, &mut app);
             },
         );
         nodes = output
@@ -264,7 +264,7 @@ fn studio_route_passes(
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE)
                     .show(ctx, |ui| super::super::show_on_stage(ui, &mut app));
-                super::super::show_workflow_dialogs(ctx, &mut app);
+                super::super::workflow_dialog_tests::show_workflow_dialogs_on_stage(ctx, &mut app);
             },
         );
         let mut controls: Vec<(egui::accesskit::NodeId, egui::accesskit::Rect)> = output
@@ -295,7 +295,7 @@ fn studio_route_passes(
 /// Only the frame's overlay host, with the studio surface not drawn.
 ///
 /// This is what a reader anywhere but Simulate actually gets:
-/// [`show_workflow_dialogs`](super::super::show_workflow_dialogs) runs every
+/// [`SimulateFeature::render_workflow_dialogs`] runs every
 /// frame on every workspace, and `simulate::show` does not run at all. A sweep
 /// that drew the surface as well would let an overlay the *surface* happens to
 /// draw pass as one the frame hosts, which is exactly the confusion that left
@@ -317,7 +317,9 @@ fn workflow_host_nodes(
                 )),
                 ..Default::default()
             },
-            |ctx| super::super::show_workflow_dialogs(ctx, &mut app),
+            |ctx| {
+                super::super::workflow_dialog_tests::show_workflow_dialogs_on_stage(ctx, &mut app)
+            },
         );
         nodes = output
             .platform_output

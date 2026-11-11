@@ -1906,7 +1906,11 @@ mod tests {
                     ctx,
                 );
                 app.after_contribution();
-                surfaces::show_simulation_workflow_dialogs(ctx, &mut app);
+                crate::workbench::simulate::SimulateFeature::render_workflow_dialogs(
+                    &mut crate::workbench::features::cx(&mut app),
+                    ctx,
+                );
+                app.after_contribution();
             },
         );
         let nodes = output

@@ -231,10 +231,6 @@ pub(crate) mod surfaces {
     pub(super) mod stimulus;
     pub(super) mod verify;
     mod veriloga;
-    /// The simulation plan workflows are opened from global chrome, so the frame
-    /// hosts them rather than the Simulate surface. See
-    /// [`simulate::show_workflow_dialogs`].
-    pub(in crate::workbench) use simulate::show_workflow_dialogs as show_simulation_workflow_dialogs;
 }
 pub(crate) mod tools;
 pub(crate) mod workflows;

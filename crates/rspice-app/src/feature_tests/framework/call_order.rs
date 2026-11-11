@@ -422,7 +422,7 @@ const SYNTHETIC_DIALOG_STEPS: &[&str] = &[
 const ROUTE_OVERLAYS: &[(&str, &str)] = &[
     ("features::render_dialog", "cloud"),
     ("SimulateFeature::render_jobs_manager", "simulate"),
-    ("surfaces::show_simulation_workflow_dialogs", "simulate"),
+    ("SimulateFeature::render_workflow_dialogs", "simulate"),
 ];
 
 /// `RSpiceApp::dispatch_feature_command`: a feature's command runs behind

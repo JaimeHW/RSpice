@@ -1981,7 +1981,7 @@ fn simulate_frame(app: &mut RSpiceApp, page: Option<crate::state::SimulationPage
                     .frame(egui::Frame::NONE)
                     .show(ctx, |ui| super::show_on_stage(ui, app));
             }
-            super::show_workflow_dialogs(ctx, app);
+            super::workflow_dialog_tests::show_workflow_dialogs_on_stage(ctx, app);
         },
     );
 }
