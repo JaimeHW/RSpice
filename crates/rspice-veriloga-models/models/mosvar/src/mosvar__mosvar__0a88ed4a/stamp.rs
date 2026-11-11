@@ -4359,4 +4359,12 @@ impl Instance {
 
 
     pub const STAMP_PATTERN: rspice_veriloga_runtime::GeneratedVerilogAStampPattern = rspice_veriloga_runtime::GeneratedVerilogAStampPattern { resistive: &[(0, 0), (0, 3), (0, 7), (1, 1), (1, 2), (1, 4), (1, 5), (1, 6), (1, 9), (1, 10), (2, 1), (2, 2), (2, 10), (3, 0), (3, 3), (3, 4), (3, 7), (3, 8), (4, 1), (4, 3), (4, 4), (4, 5), (4, 6), (4, 8), (5, 1), (5, 4), (5, 5), (5, 6), (5, 9), (6, 4), (6, 5), (6, 6), (7, 0), (7, 3), (7, 7), (8, 3), (8, 4), (8, 8), (9, 1), (9, 5), (9, 9), (10, 1), (10, 2), (10, 10)], dynamic: &[(1, 3), (3, 1)], reactive: &[(1, 1), (1, 3), (3, 1), (3, 3), (4, 4), (4, 5), (4, 6), (5, 4), (5, 5), (5, 6), (6, 6)], rhs_rows: &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10] };
+
+    pub const SWITCH_SHORTS: [rspice_veriloga_runtime::GeneratedSwitchShort; 0] = [];
+
+    /// Bit `i` is set while `SWITCH_SHORTS[i]` is in its potential arm.
+    pub fn switch_branch_shorts(&mut self, ctx: &GeneratedEvalContext<'_>) -> u64 {
+        let _ = ctx;
+        0
+    }
 }

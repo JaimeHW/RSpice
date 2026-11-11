@@ -818,4 +818,12 @@ impl Instance {
 
 
     pub const STAMP_PATTERN: rspice_veriloga_runtime::GeneratedVerilogAStampPattern = rspice_veriloga_runtime::GeneratedVerilogAStampPattern { resistive: &[(0, 0), (0, 1), (1, 0), (1, 1)], dynamic: &[], reactive: &[], rhs_rows: &[0, 1] };
+
+    pub const SWITCH_SHORTS: [rspice_veriloga_runtime::GeneratedSwitchShort; 0] = [];
+
+    /// Bit `i` is set while `SWITCH_SHORTS[i]` is in its potential arm.
+    pub fn switch_branch_shorts(&mut self, ctx: &GeneratedEvalContext<'_>) -> u64 {
+        let _ = ctx;
+        0
+    }
 }

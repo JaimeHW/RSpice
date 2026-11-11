@@ -21251,4 +21251,16 @@ impl Instance {
 
 
     pub const STAMP_PATTERN: rspice_veriloga_runtime::GeneratedVerilogAStampPattern = rspice_veriloga_runtime::GeneratedVerilogAStampPattern { resistive: &[(0, 15), (1, 16), (2, 17), (3, 14), (4, 4), (4, 6), (4, 7), (4, 8), (4, 9), (5, 4), (5, 5), (5, 6), (5, 7), (5, 8), (5, 9), (5, 13), (6, 4), (6, 6), (6, 7), (6, 8), (6, 9), (6, 10), (6, 11), (6, 12), (6, 13), (6, 17), (7, 4), (7, 6), (7, 7), (7, 8), (7, 9), (7, 12), (7, 13), (7, 15), (8, 4), (8, 6), (8, 7), (8, 8), (8, 9), (8, 14), (9, 4), (9, 6), (9, 7), (9, 8), (9, 9), (9, 10), (9, 11), (9, 16), (10, 4), (10, 6), (10, 7), (10, 8), (10, 9), (10, 10), (11, 4), (11, 6), (11, 7), (11, 8), (11, 9), (11, 11), (12, 4), (12, 6), (12, 7), (12, 8), (12, 9), (12, 12), (13, 13), (14, 3), (14, 8), (14, 14), (15, 0), (15, 7), (15, 15), (16, 1), (16, 9), (16, 16), (17, 2), (17, 6), (17, 17)], dynamic: &[(6, 5), (7, 5), (9, 5)], reactive: &[(4, 4), (5, 4), (5, 5), (5, 6), (5, 7), (5, 8), (5, 9), (6, 4), (6, 5), (6, 6), (6, 7), (6, 8), (6, 9), (7, 4), (7, 5), (7, 6), (7, 7), (7, 8), (7, 9), (8, 4), (8, 6), (8, 7), (8, 8), (8, 9), (9, 4), (9, 5), (9, 6), (9, 7), (9, 8), (9, 9), (10, 4), (10, 6), (10, 7), (10, 8), (10, 9), (10, 10), (11, 4), (11, 6), (11, 7), (11, 8), (11, 9), (11, 11), (12, 4), (12, 6), (12, 7), (12, 8), (12, 9), (12, 12)], rhs_rows: &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17] };
+
+    pub const SWITCH_SHORTS: [rspice_veriloga_runtime::GeneratedSwitchShort; 4] = [rspice_veriloga_runtime::GeneratedSwitchShort { state: 14, pos: Some(3), neg: Some(8) }, rspice_veriloga_runtime::GeneratedSwitchShort { state: 15, pos: Some(0), neg: Some(7) }, rspice_veriloga_runtime::GeneratedSwitchShort { state: 16, pos: Some(1), neg: Some(9) }, rspice_veriloga_runtime::GeneratedSwitchShort { state: 17, pos: Some(2), neg: Some(6) }];
+
+    /// Bit `i` is set while `SWITCH_SHORTS[i]` is in its potential arm.
+    pub fn switch_branch_shorts(&mut self, ctx: &GeneratedEvalContext<'_>) -> u64 {
+        self.canonical_model_stage(ctx);
+        if ctx.evaluation_failed() { return 0; }
+        self.canonical_instance_stage(ctx);
+        if ctx.evaluation_failed() { return 0; }
+        let staged = &*self.canonical_staged;
+        (u64::from(staged[474] != 0.0) << 0) | (u64::from(staged[475] != 0.0) << 1) | (u64::from(staged[476] != 0.0) << 2) | (u64::from(staged[477] != 0.0) << 3)
+    }
 }

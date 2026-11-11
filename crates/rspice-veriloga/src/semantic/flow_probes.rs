@@ -455,6 +455,19 @@ pub(crate) fn lower<'a>(
         .into_iter()
         .filter_map(|(key, kinds)| (kinds == 3).then_some(key))
         .collect();
+    // In potential mode a switch whose every potential write is zero shorts
+    // its nodes. Its current is private when nothing probes the branch or a
+    // port flow it carries.
+    let mut shorts: BTreeSet<_> = switches
+        .iter()
+        .filter(|key| !branches.contains_key(*key) && incident[*key].pos != incident[*key].neg)
+        .cloned()
+        .collect();
+    for contribution in &module.contributions {
+        if !contribution.is_current && !contribution.indirect && !writes_zero(contribution) {
+            shorts.remove(&resolver.contribution(contribution).0);
+        }
+    }
     for key in &switches {
         existing_unknowns.remove(key);
         branches
@@ -526,11 +539,17 @@ pub(crate) fn lower<'a>(
             index,
         });
         if switches.contains(key) {
-            branch.switch = Some(super::switch_branches::SwitchState::allocate(
-                target,
-                &branch.state,
-                branch.span,
-            ));
+            let switch =
+                super::switch_branches::SwitchState::allocate(target, &branch.state, branch.span);
+            if shorts.contains(key) {
+                target.switch_shorts.push(SwitchShort {
+                    kind: switch.kind_slot(),
+                    state: branch.state.clone(),
+                    pos: branch.pos.clone(),
+                    neg: branch.neg.clone(),
+                });
+            }
+            branch.switch = Some(switch);
         }
     }
 
@@ -681,6 +700,17 @@ pub(crate) fn lower<'a>(
         }
     }
     Ok(module)
+}
+
+/// Whether a source writes the literal zero, read through the flat copy's
+/// recorded guard as the switch lowering reads it.
+fn writes_zero(contribution: &AnalyzedContribution) -> bool {
+    let value = match (contribution.expression_guard, &contribution.expression) {
+        (AnalogSiteGuard::Select, Expression::Conditional(conditional)) => &*conditional.then_expr,
+        (AnalogSiteGuard::Select | AnalogSiteGuard::Conjunction, _) => return false,
+        (AnalogSiteGuard::None, expression) => expression,
+    };
+    matches!(value, Expression::Number(number) if number.value == 0.0)
 }
 
 fn potential(pos: &str, neg: &str, span: Span) -> Expression {

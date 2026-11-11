@@ -262,7 +262,10 @@ use smol_str::SmolStr;
 /// line it is written on), which a refusal of a read that found `x` or `z`
 /// names. On a replay a read is placed where the artifact placed its span's
 /// offset. Earlier artifacts carry no read lines and must be rebuilt.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 189;
+/// Version 190 records the switch branches a card's potential-mode short
+/// merges at setup (`HirModel::switch_shorts`). An earlier artifact carries no
+/// shorts and would keep every such branch as an unknown, so it must be rebuilt.
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 190;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {

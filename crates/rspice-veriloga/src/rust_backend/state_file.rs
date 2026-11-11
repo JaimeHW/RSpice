@@ -874,6 +874,11 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("        assert_eq!(branches.len(), Self::BRANCH_COUNT, \"generated Verilog-A branch count mismatch\");\n");
     out.push_str("        self.branches.copy_from_slice(branches);\n");
     out.push_str("    }\n\n");
+    out.push_str("    #[inline]\n");
+    out.push_str("    pub fn set_node_indices(&mut self, nodes: &[usize]) {\n");
+    out.push_str("        assert_eq!(nodes.len(), Self::NODE_COUNT, \"generated Verilog-A node count mismatch\");\n");
+    out.push_str("        self.nodes.copy_from_slice(nodes);\n");
+    out.push_str("    }\n\n");
     out.push_str(
         "    pub fn set_parameter(&mut self, name: &str, value: f64) -> Result<(), String> {\n",
     );

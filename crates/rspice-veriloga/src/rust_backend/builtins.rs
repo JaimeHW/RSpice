@@ -3409,6 +3409,55 @@ fn write_registry(
         out.push_str("    }\n\n");
     }
     out.push_str(
+        "    /// The model's setup-fixed switch shorts; see `switch_branch_shorts`.\n    pub fn switch_shorts(&self) -> &'static [super::GeneratedSwitchShort] {\n",
+    );
+    if devices.is_empty() {
+        out.push_str("        let _ = self;\n        &[]\n");
+    } else {
+        out.push_str("        match self {\n");
+        for (index, (device, feature)) in devices.iter().zip(&feature_names).enumerate() {
+            writeln!(
+                out,
+                "            #[cfg(feature = {feature:?})]\n            Self::Device{index}(_) => &{}::Instance::SWITCH_SHORTS,",
+                device.folder_name,
+            )?;
+        }
+        out.push_str("            Self::__NonExhaustive(value) => match *value {},\n        }\n");
+    }
+    out.push_str("    }\n\n");
+    out.push_str(
+        "    /// Bit `i` is set while `switch_shorts()[i]` is in its potential arm.\n    pub fn switch_branch_shorts(&mut self, ctx: &super::GeneratedEvalContext<'_>) -> u64 {\n",
+    );
+    if devices.is_empty() {
+        out.push_str("        let _ = (self, ctx);\n        0\n");
+    } else {
+        out.push_str("        let _ = &ctx;\n        match self {\n");
+        for (index, feature) in feature_names.iter().enumerate() {
+            writeln!(
+                out,
+                "            #[cfg(feature = {feature:?})]\n            Self::Device{index}(device) => device.switch_branch_shorts(ctx),"
+            )?;
+        }
+        out.push_str("            Self::__NonExhaustive(value) => match *value {},\n        }\n");
+    }
+    out.push_str("    }\n\n");
+    out.push_str(
+        "    /// Rebind the instance's unknowns, in the order it was built with.\n    pub fn set_node_indices(&mut self, nodes: &[usize]) {\n",
+    );
+    if devices.is_empty() {
+        out.push_str("        let _ = (self, nodes);\n");
+    } else {
+        out.push_str("        let _ = &nodes;\n        match self {\n");
+        for (index, feature) in feature_names.iter().enumerate() {
+            writeln!(
+                out,
+                "            #[cfg(feature = {feature:?})]\n            Self::Device{index}(device) => device.set_node_indices(nodes),"
+            )?;
+        }
+        out.push_str("            Self::__NonExhaustive(value) => match *value {},\n        }\n");
+    }
+    out.push_str("    }\n\n");
+    out.push_str(
         "    pub fn noise_descriptors(&self) -> &'static [super::GeneratedNoiseDescriptor] {\n",
     );
     if devices.is_empty() {

@@ -51,6 +51,11 @@ impl SwitchState {
         Self { value, kind, span }
     }
 
+    /// The event-state slot holding the branch's source kind.
+    pub(super) fn kind_slot(&self) -> usize {
+        self.kind.1
+    }
+
     pub(super) fn balance(&self, current: Expression, voltage: Expression) -> Expression {
         SemanticAnalyzer::binary_expr(
             BinaryOp::Sub,

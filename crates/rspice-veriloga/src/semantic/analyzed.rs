@@ -116,6 +116,9 @@ pub struct AnalyzedModule {
     /// Sorted event-state slots holding the retained kind of each switch branch.
     /// A change from the accepted kind implies an order-zero discontinuity.
     pub switch_branch_variables: Vec<usize>,
+    /// The switch branches that short their nodes in potential mode, in the
+    /// order their private currents were allocated.
+    pub switch_shorts: Vec<SwitchShort>,
     pub branches: Vec<AnalyzedBranch>,
     pub contributions: Vec<AnalyzedContribution>,
     /// Ordered evaluation statements (assignments and runtime loops),
@@ -504,6 +507,22 @@ pub struct AnalyzedInternalNode {
     pub name: SmolStr,
     pub discipline: SmolStr,
     pub index: usize, // Index within internal nodes array
+}
+
+/// A switch branch whose every potential write is zero and whose current no
+/// expression reads.
+///
+/// In potential mode it holds `pos` and `neg` at one potential through the
+/// private current `state`. A host that knows the mode before it builds the
+/// matrix may merge the two nodes instead and drop `state`: the current's
+/// injections cancel on the merged node and its equation becomes `0 = 0`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SwitchShort {
+    /// The event-state slot holding the branch's source kind.
+    pub kind: usize,
+    pub state: SmolStr,
+    pub pos: SmolStr,
+    pub neg: SmolStr,
 }
 
 /// Analyzed branch

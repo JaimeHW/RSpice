@@ -11232,4 +11232,16 @@ impl Instance {
 
 
     pub const STAMP_PATTERN: rspice_veriloga_runtime::GeneratedVerilogAStampPattern = rspice_veriloga_runtime::GeneratedVerilogAStampPattern { resistive: &[(0, 0), (0, 2), (1, 9), (2, 0), (2, 2), (2, 9), (3, 6), (4, 7), (5, 8), (6, 0), (6, 2), (6, 3), (6, 6), (7, 0), (7, 2), (7, 4), (7, 7), (8, 0), (8, 2), (8, 5), (8, 8), (9, 1), (9, 2), (9, 9)], dynamic: &[(0, 3), (0, 4), (0, 5), (2, 3), (2, 4), (2, 5)], reactive: &[(0, 0), (0, 2), (0, 3), (0, 4), (0, 5), (2, 0), (2, 2), (2, 3), (2, 4), (2, 5), (6, 3), (7, 4), (8, 5)], rhs_rows: &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9] };
+
+    pub const SWITCH_SHORTS: [rspice_veriloga_runtime::GeneratedSwitchShort; 3] = [rspice_veriloga_runtime::GeneratedSwitchShort { state: 6, pos: None, neg: Some(3) }, rspice_veriloga_runtime::GeneratedSwitchShort { state: 7, pos: None, neg: Some(4) }, rspice_veriloga_runtime::GeneratedSwitchShort { state: 8, pos: None, neg: Some(5) }];
+
+    /// Bit `i` is set while `SWITCH_SHORTS[i]` is in its potential arm.
+    pub fn switch_branch_shorts(&mut self, ctx: &GeneratedEvalContext<'_>) -> u64 {
+        self.canonical_model_stage(ctx);
+        if ctx.evaluation_failed() { return 0; }
+        self.canonical_instance_stage(ctx);
+        if ctx.evaluation_failed() { return 0; }
+        let staged = &*self.canonical_staged;
+        (u64::from(staged[802] != 0.0) << 0) | (u64::from(staged[803] != 0.0) << 1) | (u64::from(staged[804] != 0.0) << 2)
+    }
 }

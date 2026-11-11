@@ -2358,6 +2358,12 @@ impl Instance {
 		self.branches.copy_from_slice(branches);
 	}
 
+	#[inline]
+	pub fn set_node_indices(&mut self, nodes: &[usize]) {
+		assert_eq!(nodes.len(), Self::NODE_COUNT, "generated Verilog-A node count mismatch");
+		self.nodes.copy_from_slice(nodes);
+	}
+
 	pub fn set_parameter(&mut self, name: &str, value: f64) -> Result<(), String> {
 		self.apply_parameters(&[GeneratedParameterAssignment::for_declared_scope(name, value)])
 	}

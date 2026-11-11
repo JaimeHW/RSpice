@@ -6391,6 +6391,62 @@ assert!(!ctx.evaluation_failed());
 }
 
 #[test]
+fn a_switch_short_the_parameters_hold_is_published_for_the_host_to_merge() {
+    let (state, stamp, noise) = generated_parts(
+        r#"
+module shorts(a, c);
+    inout a, c;
+    electrical a, c, ai, ci, cj;
+    parameter real ra = 0.0;
+    parameter real rc = 0.0;
+    parameter real k1 = 1.1, k2 = 0.7, k3 = 2.3;
+    real g;
+    analog begin
+        // Enough setup-only work for the body to split into stages, as every
+        // model that carries resistances does.
+        g = exp(k1) * ln(k2 + k3) + sqrt(k1 * k2 + k3) * pow(k3, k1)
+            + atan(k1 / k3) + tanh(k2) * cosh(k3) + sinh(k1) / (1.0 + k2 * k2)
+            + exp(k2 / k3) * ln(1.0 + k1 * k3) + sqrt(1.0 + k3 * k3) / pow(k1, k2);
+        if (ra > 0.0) I(a, ai) <+ V(a, ai) / ra; else V(a, ai) <+ 0.0;
+        if (V(ai, ci) > 1.0) I(ai, ci) <+ V(ai, ci); else V(ai, ci) <+ 0.0;
+        if (rc > 0.0) I(ci, cj) <+ V(ci, cj) / rc; else V(ci, cj) <+ 0.1;
+        I(cj, c) <+ 1e-3 * g * V(cj, c);
+    end
+endmodule
+"#,
+        "switch shorts",
+    );
+    run_generated_main(
+        "switch shorts",
+        &state,
+        &stamp,
+        &noise,
+        r#"
+use device::state::Instance;
+// Only `ra`'s arm is fixed by a parameter and writes zero: the bias picks the
+// second switch's arm, and the third holds its nodes 0.1 V apart.
+assert_eq!(Instance::SWITCH_SHORTS.len(), 1, "{:?}", Instance::SWITCH_SHORTS);
+let short = Instance::SWITCH_SHORTS[0];
+let local = |name: &str| 2 + Instance::INTERNAL_NODE_NAMES.iter().position(|n| *n == name).unwrap();
+assert_eq!((short.pos, short.neg), (Some(0), Some(local("ai"))));
+assert!(Instance::INTERNAL_STATE_NODES.contains(&(short.state - 2)));
+let nodes = (0..Instance::NODE_COUNT).collect::<Vec<_>>();
+let bias = vec![0.0; Instance::NODE_COUNT + Instance::BRANCH_COUNT];
+let ctx = runtime::GeneratedEvalContext { voltages: &bias, temperature: 300.15 };
+let mut shorted = Instance::new(&nodes);
+shorted.finalize_parameters().unwrap();
+assert_eq!(shorted.switch_branch_shorts(&ctx), 1);
+let mut resistive = Instance::new(&nodes);
+resistive.set_parameter("ra", 10.0).unwrap();
+resistive.finalize_parameters().unwrap();
+assert_eq!(resistive.switch_branch_shorts(&ctx), 0);
+assert!(!ctx.evaluation_failed());
+"#,
+    )
+    .unwrap_or_else(|report| panic!("{report}"));
+}
+
+#[test]
 fn generated_outputs_read_what_a_loop_ended_with() {
     let (state, stamp, noise) = generated_parts(
         r#"

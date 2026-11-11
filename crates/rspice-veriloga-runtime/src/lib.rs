@@ -375,6 +375,9 @@ pub enum GeneratedEvaluationError {
         target: &'static str,
     },
     DiscontinuityDegree,
+    /// A switch branch the host merged at setup, because its parameters held
+    /// it in its potential arm, is no longer in that arm.
+    ShortedSwitchBranch,
     SmallSignal {
         reason: &'static str,
     },
@@ -436,6 +439,9 @@ impl std::fmt::Display for GeneratedEvaluationError {
             Self::DiscontinuityDegree => {
                 f.write_str("$discontinuity degree must have a finite integer value >= -1")
             }
+            Self::ShortedSwitchBranch => f.write_str(
+                "a switch branch merged as a short at setup left its potential arm; its nodes can no longer be one net",
+            ),
             Self::SmallSignal { reason } => write!(
                 f,
                 "generated Verilog-A small-signal evaluation failed: {reason}"

@@ -2071,6 +2071,7 @@ mod tests {
             analog_drivers: Vec::new(),
             discrete_event_reads: Vec::new(),
             switch_branch_variables: Vec::new(),
+            switch_shorts: Vec::new(),
             module_id: crate::canonical_ir::ModuleId::from(0usize),
             module_name: "cfg-program-test".into(),
             schema_version: 0,

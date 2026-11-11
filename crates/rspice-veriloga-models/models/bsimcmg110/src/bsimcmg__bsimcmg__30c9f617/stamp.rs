@@ -11271,4 +11271,16 @@ impl Instance {
 
 
     pub const STAMP_PATTERN: rspice_veriloga_runtime::GeneratedVerilogAStampPattern = rspice_veriloga_runtime::GeneratedVerilogAStampPattern { resistive: &[(0, 10), (1, 11), (2, 12), (3, 3), (3, 4), (3, 5), (3, 6), (3, 7), (4, 0), (4, 2), (4, 3), (4, 4), (4, 5), (4, 6), (4, 7), (5, 3), (5, 4), (5, 5), (5, 6), (5, 7), (5, 8), (5, 12), (6, 3), (6, 4), (6, 5), (6, 6), (6, 7), (6, 8), (6, 10), (7, 3), (7, 4), (7, 5), (7, 6), (7, 7), (7, 11), (8, 9), (9, 3), (9, 4), (9, 5), (9, 6), (9, 7), (9, 8), (9, 9), (10, 0), (10, 4), (10, 5), (10, 6), (10, 7), (10, 10), (11, 1), (11, 7), (11, 11), (12, 2), (12, 4), (12, 5), (12, 6), (12, 7), (12, 12)], dynamic: &[(0, 0), (0, 2), (0, 6), (0, 7), (2, 0), (2, 2), (2, 5), (2, 7), (7, 0), (7, 2), (7, 8)], reactive: &[(0, 0), (0, 2), (0, 6), (0, 7), (2, 0), (2, 2), (2, 5), (2, 7), (3, 3), (3, 4), (3, 5), (3, 6), (3, 7), (4, 4), (5, 3), (5, 4), (5, 5), (5, 6), (5, 7), (5, 8), (6, 3), (6, 4), (6, 5), (6, 6), (6, 7), (6, 8), (7, 0), (7, 2), (7, 3), (7, 4), (7, 5), (7, 6), (7, 7), (7, 8)], rhs_rows: &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] };
+
+    pub const SWITCH_SHORTS: [rspice_veriloga_runtime::GeneratedSwitchShort; 4] = [rspice_veriloga_runtime::GeneratedSwitchShort { state: 9, pos: None, neg: Some(8) }, rspice_veriloga_runtime::GeneratedSwitchShort { state: 10, pos: Some(0), neg: Some(6) }, rspice_veriloga_runtime::GeneratedSwitchShort { state: 11, pos: Some(1), neg: Some(7) }, rspice_veriloga_runtime::GeneratedSwitchShort { state: 12, pos: Some(2), neg: Some(5) }];
+
+    /// Bit `i` is set while `SWITCH_SHORTS[i]` is in its potential arm.
+    pub fn switch_branch_shorts(&mut self, ctx: &GeneratedEvalContext<'_>) -> u64 {
+        self.canonical_model_stage(ctx);
+        if ctx.evaluation_failed() { return 0; }
+        self.canonical_instance_stage(ctx);
+        if ctx.evaluation_failed() { return 0; }
+        let staged = &*self.canonical_staged;
+        (u64::from(staged[566] != 0.0) << 0) | (u64::from(staged[567] != 0.0) << 1) | (u64::from(staged[568] != 0.0) << 2) | (u64::from(staged[569] != 0.0) << 3)
+    }
 }

@@ -264,6 +264,23 @@ pub struct GeneratedVerilogAStampPattern {
     pub rhs_rows: &'static [usize],
 }
 
+/// A switch branch whose arm the model and instance parameters choose and
+/// whose potential arm writes zero.
+///
+/// Nodes are device-local, as in [`GeneratedVerilogAStampPattern`]; `None` is
+/// ground. While the potential arm is on, the branch holds `pos` and `neg` at
+/// one potential through the private current on node `state`. A host that
+/// reads the arm before it builds the matrix may bind both nodes to one net
+/// and `state` to ground: the current's injections then cancel and its
+/// equation reads `0 = 0`. The arm can only change with a parameter, and the
+/// host must refuse an evaluation whose arm moved off a short it merged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GeneratedSwitchShort {
+    pub state: usize,
+    pub pos: Option<usize>,
+    pub neg: Option<usize>,
+}
+
 impl GeneratedVerilogAStampPattern {
     /// No location at all, for a model whose stamps write nothing.
     pub const EMPTY: Self = Self {

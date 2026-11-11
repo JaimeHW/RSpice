@@ -27712,4 +27712,16 @@ impl Instance {
 
 
     pub const STAMP_PATTERN: rspice_veriloga_runtime::GeneratedVerilogAStampPattern = rspice_veriloga_runtime::GeneratedVerilogAStampPattern { resistive: &[(0, 18), (1, 19), (2, 20), (3, 14), (4, 0), (4, 2), (4, 4), (4, 6), (4, 7), (4, 8), (4, 9), (5, 4), (5, 5), (5, 6), (5, 7), (5, 8), (5, 9), (5, 13), (6, 4), (6, 5), (6, 6), (6, 7), (6, 8), (6, 9), (6, 19), (7, 4), (7, 5), (7, 6), (7, 7), (7, 8), (7, 9), (7, 11), (7, 13), (7, 20), (8, 4), (8, 5), (8, 6), (8, 7), (8, 8), (8, 9), (8, 11), (8, 12), (8, 13), (8, 18), (9, 4), (9, 6), (9, 7), (9, 8), (9, 9), (9, 16), (10, 14), (10, 15), (10, 16), (10, 17), (11, 6), (11, 7), (11, 8), (11, 9), (11, 11), (11, 17), (12, 6), (12, 7), (12, 8), (12, 9), (12, 11), (12, 12), (12, 15), (13, 13), (14, 3), (14, 10), (14, 14), (15, 10), (15, 12), (15, 15), (16, 9), (16, 10), (16, 16), (17, 10), (17, 11), (17, 17), (18, 0), (18, 8), (18, 18), (19, 1), (19, 6), (19, 19), (20, 2), (20, 7), (20, 20)], dynamic: &[], reactive: &[(4, 4), (5, 4), (5, 5), (5, 6), (5, 7), (5, 8), (5, 9), (6, 4), (6, 5), (6, 6), (6, 7), (6, 8), (6, 9), (7, 4), (7, 5), (7, 6), (7, 7), (7, 8), (7, 9), (7, 11), (8, 4), (8, 5), (8, 6), (8, 7), (8, 8), (8, 9), (8, 11), (8, 12), (9, 4), (9, 6), (9, 7), (9, 8), (9, 9), (11, 7), (11, 11), (12, 7), (12, 8), (12, 11), (12, 12)], rhs_rows: &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20] };
+
+    pub const SWITCH_SHORTS: [rspice_veriloga_runtime::GeneratedSwitchShort; 7] = [rspice_veriloga_runtime::GeneratedSwitchShort { state: 14, pos: Some(3), neg: Some(10) }, rspice_veriloga_runtime::GeneratedSwitchShort { state: 15, pos: Some(12), neg: Some(10) }, rspice_veriloga_runtime::GeneratedSwitchShort { state: 16, pos: Some(10), neg: Some(9) }, rspice_veriloga_runtime::GeneratedSwitchShort { state: 17, pos: Some(10), neg: Some(11) }, rspice_veriloga_runtime::GeneratedSwitchShort { state: 18, pos: Some(0), neg: Some(8) }, rspice_veriloga_runtime::GeneratedSwitchShort { state: 19, pos: Some(1), neg: Some(6) }, rspice_veriloga_runtime::GeneratedSwitchShort { state: 20, pos: Some(2), neg: Some(7) }];
+
+    /// Bit `i` is set while `SWITCH_SHORTS[i]` is in its potential arm.
+    pub fn switch_branch_shorts(&mut self, ctx: &GeneratedEvalContext<'_>) -> u64 {
+        self.canonical_model_stage(ctx);
+        if ctx.evaluation_failed() { return 0; }
+        self.canonical_instance_stage(ctx);
+        if ctx.evaluation_failed() { return 0; }
+        let staged = &*self.canonical_staged;
+        (u64::from(staged[1579] != 0.0) << 0) | (u64::from(staged[1580] != 0.0) << 1) | (u64::from(staged[1581] != 0.0) << 2) | (u64::from(staged[1582] != 0.0) << 3) | (u64::from(staged[1583] != 0.0) << 4) | (u64::from(staged[1584] != 0.0) << 5) | (u64::from(staged[1585] != 0.0) << 6)
+    }
 }
