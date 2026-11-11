@@ -8,16 +8,14 @@ use crate::state::command_catalog::CommandKey;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::RSpiceApp;
-use crate::workbench::commands::vocabulary::CommandRegistry;
+use crate::workbench::app_state::Model;
 use crate::workbench::design_system::WorkbenchIcon;
-use crate::workbench::framework::command_registry::{CommandAvailability, ids};
-use crate::workbench::framework::host::Host;
+use crate::workbench::framework::command_registry::ids;
 use crate::workbench::layout::LayoutSpec;
 use crate::workbench::simulate::commands::SimulateCommand;
-use crate::workbench::state::Workspace;
 
 use super::{
-    context_separator, pvt_temperature_label, run_control_label, toolbar_icon_command,
+    context_separator, pvt_temperature_label, run_control_label_for, toolbar_icon_command,
     toolbar_text_command,
 };
 
@@ -58,21 +56,46 @@ pub(in crate::workbench) fn verification_tools(
     );
 }
 
+/// What the run control and its menu show and offer: whether a preflight is
+/// preparing its run, Run or Stop with the menu's two other entries, and why
+/// Run or Stop is unavailable while it is.
+pub(in crate::workbench) struct RunControls<'a> {
+    pub(in crate::workbench) model: &'a Model,
+    /// A preflight is preparing its run or building its decks.
+    pub(in crate::workbench) checking: bool,
+    /// Run, or Stop while a run or a preflight is active.
+    pub(in crate::workbench) primary: RunEntry,
+    pub(in crate::workbench) preflight: RunEntry,
+    pub(in crate::workbench) options: RunEntry,
+    /// Why the primary is unavailable, read only while it is.
+    pub(in crate::workbench) unavailable_reason: Option<String>,
+}
+
+/// One run command as the control or its menu offers it: what it is called,
+/// whether it would run now, and the shortcut the reader's profile binds to
+/// it, or nothing.
+pub(in crate::workbench) struct RunEntry {
+    pub(in crate::workbench) key: CommandKey,
+    pub(in crate::workbench) label: &'static str,
+    pub(in crate::workbench) enabled: bool,
+    pub(in crate::workbench) shortcut: String,
+}
+
+/// Draw Run or Stop and its menu from `controls`. Returns the command the
+/// reader pressed, for the caller to raise.
 pub(in crate::workbench) fn run_controls(
     ui: &mut egui::Ui,
-    app: &mut RSpiceApp,
+    controls: &RunControls<'_>,
     layout: LayoutSpec,
-) {
+) -> Option<CommandKey> {
+    let model = controls.model;
     // A preflight preparing its run or building its decks is stopped the way
     // a run is: the control is Stop until it finishes.
-    let checking = app.state.runs.preflight.checking.is_some();
-    let execution_active = app.state.model.simulation.execution.has_active_execution() || checking;
-    let cancellation_pending = app.state.model.simulation.cancellation_is_pending();
-    let command = if execution_active {
-        SimulateCommand::Stop.key()
-    } else {
-        SimulateCommand::Run.key()
-    };
+    let checking = controls.checking;
+    let execution_active = model.simulation.execution.has_active_execution() || checking;
+    let cancellation_pending = model.simulation.cancellation_is_pending();
+    let command = controls.primary.key;
+    let mut pressed = None;
     let icon = if execution_active {
         WorkbenchIcon::Stop
     } else {
@@ -80,7 +103,7 @@ pub(in crate::workbench) fn run_controls(
     };
     let t = Tokens::get(ui.ctx());
     let radius = t.radius.round().clamp(0.0, u8::MAX as f32) as u8;
-    let label = run_control_label(app, layout);
+    let label = run_control_label_for(model, checking, layout);
     let label_width = ui
         .painter()
         .layout_no_wrap(
@@ -109,26 +132,21 @@ pub(in crate::workbench) fn run_controls(
             } else if execution_active {
                 "Stop active simulation".to_owned()
             } else {
-                let reference = app.state.model.sim_setup.reference_pvt;
-                let quantity_policy = app.state.model.preferences.quantity_presentation_policy();
+                let reference = model.sim_setup.reference_pvt;
+                let quantity_policy = model.preferences.quantity_presentation_policy();
                 format!(
                     "Run active simulation plan at {} · {}",
                     reference.process.short_name(),
                     pvt_temperature_label(reference.temperature_celsius, quantity_policy)
                 )
             };
-            let shortcut = app.state.model.preferences.shortcuts().resolved_label(
-                &CommandRegistry,
-                command,
-                crate::workbench::app_state::runtime_command_platform(ui.ctx()),
-                ui.ctx().os(),
-            );
+            let shortcut = &controls.primary.shortcut;
             let accessibility_label = if shortcut.is_empty() {
                 accessibility_label
             } else {
                 format!("{accessibility_label} ({shortcut})")
             };
-            let enabled = app.command_key_enabled(command);
+            let enabled = controls.primary.enabled;
             let (rect, response) = ui.allocate_exact_size(
                 Vec2::new(primary_width, layout.run_control_height),
                 if enabled {
@@ -198,27 +216,12 @@ pub(in crate::workbench) fn run_controls(
             );
             theme::paint_focus_ring_outset(ui, &response, rect);
             if response.clicked() && enabled {
-                app.execute_command_key(command);
+                pressed = Some(command);
             }
             if enabled {
                 response.clone().on_hover_text(&accessibility_label);
             }
-            if !enabled {
-                let reason = if execution_active {
-                    match app.command_availability(command) {
-                        CommandAvailability::Disabled(reason) => reason.to_owned(),
-                        CommandAvailability::Available | CommandAvailability::Hidden => {
-                            "Command unavailable".to_owned()
-                        }
-                    }
-                } else if app.state.workbench.workspace == Workspace::Netlist {
-                    app.manual_deck_run_block_reason()
-                        .unwrap_or_else(|| "Command unavailable".to_owned())
-                } else {
-                    app.state
-                        .simulation_run_block_reason()
-                        .unwrap_or_else(|| "Command unavailable".to_owned())
-                };
+            if !enabled && let Some(reason) = &controls.unavailable_reason {
                 response.on_hover_text(reason);
             }
 
@@ -233,15 +236,15 @@ pub(in crate::workbench) fn run_controls(
                     .ui(ui, |ui| {
                         ui.set_min_width(210.0);
                         ui.spacing_mut().item_spacing.y = 0.0;
-                        let primary = if execution_active {
-                            SimulateCommand::Stop.key()
-                        } else {
-                            SimulateCommand::Run.key()
-                        };
-                        run_menu_item(ui, app, primary);
-                        run_menu_item(ui, app, SimulateCommand::Preflight.key());
+                        for entry in [&controls.primary, &controls.preflight] {
+                            if run_menu_item(ui, entry) {
+                                pressed = Some(entry.key);
+                            }
+                        }
                         ui.separator();
-                        run_menu_item(ui, app, SimulateCommand::Options.key());
+                        if run_menu_item(ui, &controls.options) {
+                            pressed = Some(controls.options.key);
+                        }
                     })
                 })
                 .inner;
@@ -280,31 +283,28 @@ pub(in crate::workbench) fn run_controls(
             theme::paint_focus_ring_outset(ui, &more_response, more_response.rect);
         },
     );
+    pressed
 }
 
-fn run_menu_item(ui: &mut egui::Ui, app: &mut RSpiceApp, command: CommandKey) {
-    let enabled = app.command_key_enabled(command);
-    let shortcut = app.state.model.preferences.shortcuts().resolved_label(
-        &CommandRegistry,
-        command,
-        crate::workbench::app_state::runtime_command_platform(ui.ctx()),
-        ui.ctx().os(),
-    );
+/// One entry of the run menu. Returns whether the reader pressed it.
+fn run_menu_item(ui: &mut egui::Ui, entry: &RunEntry) -> bool {
+    let shortcut = &entry.shortcut;
     let label = if shortcut.is_empty() {
-        app.label(command).to_owned()
+        entry.label.to_owned()
     } else {
-        format!("{} ({shortcut})", app.label(command))
+        format!("{} ({shortcut})", entry.label)
     };
-    let response = ui.add_enabled(enabled, egui::Button::new(label).frame(false));
-    if enabled && !shortcut.is_empty() {
+    let response = ui.add_enabled(entry.enabled, egui::Button::new(label).frame(false));
+    if entry.enabled && !shortcut.is_empty() {
         ui.ctx().accesskit_node_builder(response.id, |node| {
             node.set_keyboard_shortcut(shortcut.as_str());
         });
     }
-    if response.clicked() {
-        app.execute_command_key(command);
+    let pressed = response.clicked();
+    if pressed {
         ui.close();
     }
+    pressed
 }
 
 /// From the reference PVT chip's left edge to its label. The chip is a
@@ -313,10 +313,25 @@ const PVT_CHIP_TEXT_INSET: f32 = 10.0;
 /// The chip's right end: the chevron and the space around it.
 const PVT_CHIP_CHEVRON_SPAN: f32 = 21.0;
 
-pub(in crate::workbench) fn pvt_selector(ui: &mut egui::Ui, app: &mut RSpiceApp, height: f32) {
+/// A reference PVT the chip's menu chose: the corner, the temperature, and
+/// the option's label.
+pub(in crate::workbench) struct PvtChoice {
+    pub(in crate::workbench) process: crate::product::ProcessCorner,
+    pub(in crate::workbench) temperature_celsius: f64,
+    pub(in crate::workbench) label: String,
+}
+
+/// Draw the reference PVT chip over `model`. Returns the PVT the reader
+/// chose from its menu, for the caller to commit.
+pub(in crate::workbench) fn pvt_selector(
+    ui: &mut egui::Ui,
+    model: &Model,
+    height: f32,
+) -> Option<PvtChoice> {
     let t = Tokens::get(ui.ctx());
-    let reference = app.state.model.sim_setup.reference_pvt;
-    let quantity_policy = app.state.model.preferences.quantity_presentation_policy();
+    let reference = model.sim_setup.reference_pvt;
+    let quantity_policy = model.preferences.quantity_presentation_policy();
+    let mut chosen = None;
     let label = format!(
         "{} · {}",
         reference.process.short_name(),
@@ -380,15 +395,11 @@ pub(in crate::workbench) fn pvt_selector(ui: &mut egui::Ui, app: &mut RSpiceApp,
                                     )
                                     .clicked()
                                 {
-                                    match commit_reference_pvt(app, process, temperature) {
-                                        Ok(true) => app
-                                            .state
-                                            .prompt(format!("Reference PVT changed to {label}.")),
-                                        Ok(false) => {}
-                                        Err(error) => app.state.prompt(format!(
-                                            "Reference PVT was not changed: {error}"
-                                        )),
-                                    }
+                                    chosen = Some(PvtChoice {
+                                        process,
+                                        temperature_celsius: temperature,
+                                        label,
+                                    });
                                     ui.close();
                                 }
                             }
@@ -443,35 +454,11 @@ pub(in crate::workbench) fn pvt_selector(ui: &mut egui::Ui, app: &mut RSpiceApp,
         t.color.text_faint,
     );
     theme::paint_focus_ring_outset(ui, &response, response.rect);
+    chosen
 }
 
 pub(crate) fn pvt_menu_height_for_viewport(viewport_height: f32, row_height: f32) -> f32 {
     (viewport_height - 72.0).clamp(row_height * 3.0, 484.0)
-}
-
-pub(crate) fn commit_reference_pvt(
-    app: &mut RSpiceApp,
-    process: crate::product::ProcessCorner,
-    temperature_celsius: f64,
-) -> Result<bool, String> {
-    let current = app.state.model.sim_setup.reference_pvt;
-    if current.process == process
-        && (current.temperature_celsius - temperature_celsius).abs() < f64::EPSILON
-    {
-        return Ok(false);
-    }
-    let mut setup = app.state.model.sim_setup.clone();
-    setup.set_reference_pvt(process, temperature_celsius)?;
-    let receipt = setup
-        .commit_active_plan_configuration_change(format!(
-            "Reference PVT changed to {} at {temperature_celsius} degrees Celsius.",
-            process.short_name()
-        ))
-        .map_err(|error| error.to_string())?;
-    app.state.model.sim_setup = setup;
-    app.invalidate_simulation_preflight();
-    app.state.model.record_plan_receipt(receipt.status_line());
-    Ok(true)
 }
 
 fn brighten_srgb(color: egui::Color32, factor: f32) -> egui::Color32 {

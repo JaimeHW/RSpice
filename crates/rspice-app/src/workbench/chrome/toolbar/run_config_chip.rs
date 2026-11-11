@@ -12,11 +12,10 @@ use egui::Vec2;
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::workbench::RSpiceApp;
+use crate::workbench::app_state::Model;
 use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::framework::command_registry::CommandAvailability;
 use crate::workbench::layout::RUN_CONFIG_CHIP_MAX_WIDTH;
-use crate::workbench::simulate::commands::SimulateCommand;
 
 /// Every string the plan chip measures, paints, and announces.
 struct RunConfigChipCopy {
@@ -25,16 +24,10 @@ struct RunConfigChipCopy {
     accessibility: String,
 }
 
-fn run_config_chip_copy(app: &RSpiceApp) -> RunConfigChipCopy {
-    let title = app
-        .state
-        .model
-        .sim_setup
-        .active_plan_name()
-        .as_str()
-        .to_owned();
-    let analysis_count = app.state.model.sim_setup.enabled_analysis_instance_count();
-    let pvt_count = configured_pvt_count(app);
+fn run_config_chip_copy(model: &Model) -> RunConfigChipCopy {
+    let title = model.sim_setup.active_plan_name().as_str().to_owned();
+    let analysis_count = model.sim_setup.enabled_analysis_instance_count();
+    let pvt_count = configured_pvt_count(model);
     RunConfigChipCopy {
         accessibility: format!("Simulation plan {title}; manage and switch simulation plans"),
         title,
@@ -51,14 +44,17 @@ fn run_config_chip_width(title_width: f32, summary_width: f32) -> f32 {
     (31.0 + title_width.max(summary_width) + 22.0).min(RUN_CONFIG_CHIP_MAX_WIDTH)
 }
 
+/// Draw the plan chip over `model`, enabled as `manage`, the dispatcher's
+/// answer for Manage plans, says. Returns whether the reader pressed it.
 pub(in crate::workbench) fn run_config_selector(
     ui: &mut egui::Ui,
-    app: &mut RSpiceApp,
+    model: &Model,
+    manage: CommandAvailability,
     height: f32,
-) {
+) -> bool {
     let t = Tokens::get(ui.ctx());
-    let copy = run_config_chip_copy(app);
-    let availability = app.command_availability(SimulateCommand::ManagePlans.key());
+    let copy = run_config_chip_copy(model);
+    let availability = manage;
     let enabled = availability == CommandAvailability::Available && ui.is_enabled();
     let title_width = ui
         .painter()
@@ -154,28 +150,29 @@ pub(in crate::workbench) fn run_config_selector(
         t.color.text_faint,
     );
     theme::paint_focus_ring_outset(ui, &response, rect);
-    if response.clicked() && enabled {
-        app.execute_command_key(SimulateCommand::ManagePlans.key());
-    }
+    let pressed = response.clicked() && enabled;
     if enabled {
         response.on_hover_text(&copy.accessibility);
     } else if let CommandAvailability::Disabled(reason) = availability {
         response.on_hover_text(reason);
     }
+    pressed
 }
 
-fn configured_pvt_count(app: &RSpiceApp) -> usize {
+fn configured_pvt_count(model: &Model) -> usize {
     // The plan-wide Run Set expands every enabled analysis. Legacy Corner and
     // Temperature analysis drafts no longer own the workspace's PVT count and
     // must not be added a second time in the chrome summary.
-    app.state.model.sim_setup.run_set.point_count().max(1)
+    model.sim_setup.run_set.point_count().max(1)
 }
 
 #[cfg(test)]
 mod tests {
     use super::super::{TOOLBAR_CONTEXT_GAP, trailing_controls_width};
     use super::*;
+    use crate::workbench::RSpiceApp;
     use crate::workbench::layout::LayoutSpec;
+    use crate::workbench::simulate::commands::SimulateCommand;
     use crate::workbench::state::{WorkbenchSession, Workspace};
 
     /// The chip is the product's global entry to the plan manager, so the plan
@@ -197,7 +194,7 @@ mod tests {
             .sim_setup
             .rename_plan(plan_id, "Automotive temperature sweep")
             .expect("rename the active plan");
-        let copy = run_config_chip_copy(&app);
+        let copy = run_config_chip_copy(&app.state.model);
 
         assert_eq!(copy.title, "Automotive temperature sweep");
         assert_eq!(
@@ -273,6 +270,6 @@ mod tests {
                 base_analysis: CornerBaseAnalysis::Op,
             });
 
-        assert_eq!(configured_pvt_count(&app), 6);
+        assert_eq!(configured_pvt_count(&app.state.model), 6);
     }
 }

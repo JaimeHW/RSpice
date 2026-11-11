@@ -729,7 +729,9 @@ const DESIGN_CONTRIBUTIONS: &[Step] = &[
 /// reads. The navigator and the inspector draw in the feature's context on
 /// both its workspaces: on Simulate each has the command it raised answered
 /// once it has drawn; on Verify they raise nothing, so they answer nothing
-/// where they draw.
+/// where they draw. The toolbar's trailing group draws in the feature's
+/// context with the dispatcher's answers, and has what it raised answered
+/// once it has drawn.
 const SIMULATE_CONTRIBUTIONS: &[Step] = &[
     (
         "workspace surface",
@@ -768,6 +770,17 @@ const SIMULATE_CONTRIBUTIONS: &[Step] = &[
            }",
             "Workspace::Verify => features::show_inspector::<SimulateFeature>(app, ui),",
         ],
+    ),
+    (
+        "trailing",
+        &["Point::Toolbar(ToolbarSlot::Trailing, layout) => {\
+           crate::workbench::simulate::chrome::show_trailing(\
+           &mut features::cx_with_foreign_answers(app, |_| true),\
+           ui,\
+           layout,\
+           );\
+           app.after_contribution();\
+           }"],
     ),
 ];
 

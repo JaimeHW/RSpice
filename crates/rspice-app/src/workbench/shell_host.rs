@@ -361,18 +361,16 @@ impl Host for RSpiceApp {
                 }
             }
             // The trailing group: the run controls, then the plan chip and the
-            // PVT selector where the layout has room for them.
+            // PVT selector where the layout has room for them, drawn in the
+            // simulate feature's context with the dispatcher's answers; what
+            // it raised is answered once it has drawn.
             Point::Toolbar(ToolbarSlot::Trailing, layout) => {
-                use crate::workbench::chrome::toolbar::run_config_chip::run_config_selector;
-                use crate::workbench::chrome::toolbar::simulate::{pvt_selector, run_controls};
-
-                run_controls(ui, app, layout);
-                if layout.show_run_config_selector {
-                    run_config_selector(ui, app, layout.run_control_height);
-                }
-                if layout.show_pvt_selector {
-                    pvt_selector(ui, app, layout.toolbar_control_height);
-                }
+                crate::workbench::simulate::chrome::show_trailing(
+                    &mut features::cx_with_foreign_answers(app, |_| true),
+                    ui,
+                    layout,
+                );
+                app.after_contribution();
             }
             // The live session's presence, which the cloud feature draws and
             // answers in its context.

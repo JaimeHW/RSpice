@@ -15,9 +15,7 @@ use crate::workbench::chrome::toolbar::design::{
 use crate::workbench::chrome::toolbar::results::{
     results_document_is_historical, run_has_current_success_authority,
 };
-use crate::workbench::chrome::toolbar::simulate::{
-    commit_reference_pvt, pvt_menu_height_for_viewport,
-};
+use crate::workbench::chrome::toolbar::simulate::pvt_menu_height_for_viewport;
 use crate::workbench::chrome::toolbar::*;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::layout::LayoutSpec;
@@ -353,8 +351,12 @@ fn reference_pvt_commit_advances_the_plan_and_invalidates_preflight() {
     });
 
     assert!(
-        commit_reference_pvt(&mut app, crate::product::ProcessCorner::FF, -40.0,)
-            .expect("PVT selection commits")
+        crate::workbench::simulate::chrome::commit_reference_pvt(
+            &mut crate::workbench::features::cx(&mut app),
+            crate::product::ProcessCorner::FF,
+            -40.0,
+        )
+        .expect("PVT selection commits")
     );
 
     assert_eq!(
@@ -367,4 +369,206 @@ fn reference_pvt_commit_advances_the_plan_and_invalidates_preflight() {
         source_revision.next().expect("revision advances")
     );
     assert!(app.state.runs.preflight.report.is_none());
+}
+
+/// One application at the desktop size, every frame a whole one as eframe
+/// runs it.
+struct Desk {
+    ctx: egui::Context,
+    frame: eframe::Frame,
+    app: RSpiceApp,
+    time: f64,
+    /// What the last frame named for a screen reader, and where.
+    named: Vec<(String, egui::Rect)>,
+    /// Whether the last frame asked for the next one straight away.
+    repaint_now: bool,
+}
+
+impl Desk {
+    fn new(app: RSpiceApp) -> Self {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut desk = Self {
+            ctx,
+            frame: eframe::Frame::_new_kittest(),
+            app,
+            time: 0.0,
+            named: Vec::new(),
+            repaint_now: false,
+        };
+        // The fonts exist from the second frame on, and the toolbar lays out
+        // against them on the third.
+        for _ in 0..3 {
+            desk.frame(Vec::new());
+        }
+        desk
+    }
+
+    fn frame(&mut self, events: Vec<egui::Event>) {
+        self.time += 0.1;
+        let Self {
+            ctx, frame, app, ..
+        } = self;
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(1440.0, 900.0),
+                )),
+                time: Some(self.time),
+                focused: true,
+                events,
+                ..Default::default()
+            },
+            |ui| eframe::App::ui(app, ui, frame),
+        );
+        self.repaint_now = output
+            .viewport_output
+            .get(&egui::ViewportId::ROOT)
+            .is_some_and(|viewport| viewport.repaint_delay.is_zero());
+        self.named = output
+            .platform_output
+            .accesskit_update
+            .into_iter()
+            .flat_map(|update| update.nodes)
+            .filter_map(|(_, node)| {
+                let bounds = node.bounds()?;
+                Some((
+                    node.label()?.to_owned(),
+                    egui::Rect::from_min_max(
+                        egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+                        egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+                    ),
+                ))
+            })
+            .collect();
+    }
+
+    /// The one control the last frame named starting with `prefix`.
+    fn control(&self, prefix: &str) -> egui::Rect {
+        let hits = self
+            .named
+            .iter()
+            .filter(|(name, _)| name.starts_with(prefix))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            hits.len(),
+            1,
+            "one control named {prefix:?}: {:?}",
+            self.named
+        );
+        hits[0].1
+    }
+
+    /// Press the control named starting with `prefix`, in one frame.
+    fn press(&mut self, prefix: &str) {
+        let at = self.control(prefix).center();
+        self.frame(vec![
+            egui::Event::PointerMoved(at),
+            egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::default(),
+            },
+            egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::default(),
+            },
+        ]);
+    }
+
+    /// The run control draws what the model holds: the last frame named it
+    /// the way the model now says it, over a run that has started.
+    fn assert_run_control_paints_the_model(&self) {
+        let simulation = &self.app.state.model.simulation;
+        assert!(self.app.state.runs.preflight.checking.is_none());
+        self.control(if simulation.cancellation_is_pending() {
+            "Simulation cancellation in progress"
+        } else if simulation.execution.has_active_execution() {
+            "Stop active simulation"
+        } else {
+            "Run active simulation plan at "
+        });
+    }
+
+    /// The plan chip and the PVT chip draw what the model holds: the last
+    /// frame named each the way the model now says it.
+    fn assert_chips_paint_the_model(&self) {
+        let model = &self.app.state.model;
+        let reference = model.sim_setup.reference_pvt;
+        for chip in [
+            format!(
+                "Simulation plan {}; manage and switch simulation plans",
+                model.sim_setup.active_plan_name().as_str()
+            ),
+            format!(
+                "{} \u{00b7} {}",
+                reference.process.short_name(),
+                pvt_temperature_label(
+                    reference.temperature_celsius,
+                    model.preferences.quantity_presentation_policy()
+                )
+            ),
+        ] {
+            assert!(
+                self.named.iter().any(|(name, _)| *name == chip),
+                "the frame names {chip:?}: {:?}",
+                self.named
+            );
+        }
+    }
+}
+
+/// The trailing group raises what it pressed and the shell answers it once
+/// the group has drawn, so the plan chip and the PVT chip beside the run
+/// control draw the state from before the command on the press frame. The
+/// press frame asks for the next one at once, and that frame draws what the
+/// command left.
+#[test]
+fn a_run_control_press_is_answered_and_the_next_frame_draws_what_it_left() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.open_project_session();
+    let mut desk = Desk::new(app);
+
+    desk.press("Run active simulation plan at ");
+    assert!(desk.repaint_now, "the press frame asks for the next frame");
+    let preflight = &desk.app.state.runs.preflight;
+    assert!(
+        preflight.checking.is_some() || preflight.report.is_some(),
+        "Run was answered in the frame that drew its press: the pass started"
+    );
+    desk.frame(Vec::new());
+    desk.assert_chips_paint_the_model();
+    desk.app.settle_preflight();
+
+    // Stop, over a run the model holds as executing. No runner owns it, so
+    // the runner refuses the cancellation at the start of the next frame and
+    // the control goes on naming Stop: that frame draws what the model holds
+    // once the command and its refusal have both run.
+    let mut app = RSpiceApp::test_instance();
+    app.state.open_project_session();
+    let identity = app
+        .state
+        .model
+        .simulation
+        .start_run()
+        .execution_identity()
+        .expect("current run has execution identity");
+    app.state.model.simulation.execution.active_execution = Some(identity);
+    app.state.model.simulation.execution.is_running = false;
+    let mut desk = Desk::new(app);
+
+    desk.press("Stop active simulation");
+    assert!(desk.repaint_now, "the press frame asks for the next frame");
+    assert!(
+        desk.app.state.model.simulation.cancellation_is_pending(),
+        "Stop was answered in the frame that drew its press"
+    );
+    desk.frame(Vec::new());
+    desk.assert_run_control_paints_the_model();
+    desk.assert_chips_paint_the_model();
 }
