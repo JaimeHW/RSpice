@@ -368,9 +368,14 @@ fn terminal_transient(
             "transient base sweep requires a transient command".to_owned(),
         ));
     };
-    let maximum_step =
-        rspice_core::execution::resolve_transient_maximum_step(step, stop, start, max_step)
-            .map_err(|error| rspice_core::SimulationError::Circuit(error.to_string()))?;
+    let maximum_step = rspice_core::execution::resolve_dialect_transient_maximum_step(
+        netlist.parse_dialect(),
+        step,
+        stop,
+        start,
+        max_step,
+    )
+    .map_err(|error| rspice_core::SimulationError::Circuit(error.to_string()))?;
 
     // The step expansion already owns this netlist. Bind its transient card
     // in place so startup, initial-step hints and source defaults all belong

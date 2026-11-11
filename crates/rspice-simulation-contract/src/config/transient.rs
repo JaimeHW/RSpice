@@ -52,10 +52,14 @@ impl TransientAnalysisConfig {
         cmd
     }
 
+    /// The solver ceiling a run of this card takes in `dialect`, as the CLI's
+    /// run of the same `.TRAN` card takes it.
     pub fn resolved_maximum_step(
         &self,
+        dialect: rspice_core::SpiceDialect,
     ) -> Result<f64, rspice_core::execution::TransientMaximumStepError> {
-        rspice_core::execution::resolve_transient_maximum_step(
+        rspice_core::execution::resolve_dialect_transient_maximum_step(
+            dialect,
             self.step_time,
             self.stop_time,
             Some(self.start_time),
@@ -63,10 +67,16 @@ impl TransientAnalysisConfig {
         )
     }
 
-    /// Validate the same authored fields and derived solver limit used at execution.
+    /// Validate the same authored fields a run validates; every dialect
+    /// refuses the same ones.
     pub fn validate(&self) -> Result<(), Vec<String>> {
-        self.resolved_maximum_step()
-            .map(|_| ())
-            .map_err(|error| vec![error.to_string()])
+        rspice_core::execution::resolve_transient_maximum_step(
+            self.step_time,
+            self.stop_time,
+            Some(self.start_time),
+            self.max_timestep,
+        )
+        .map(|_| ())
+        .map_err(|error| vec![error.to_string()])
     }
 }

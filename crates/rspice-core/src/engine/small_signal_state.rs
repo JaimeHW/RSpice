@@ -105,13 +105,18 @@ impl StateTransientWindow {
         else {
             return Ok(None);
         };
-        let max_step =
-            crate::analysis::transient::resolve_transient_maximum_step(step, stop, start, max_step)
-                .map_err(|error| {
-                    SimulationError::Netlist(format!(
-                        "the .TRAN card a small-signal state is taken from is invalid: {error}"
-                    ))
-                })?;
+        let max_step = crate::analysis::transient::resolve_dialect_transient_maximum_step(
+            netlist.parse_dialect(),
+            step,
+            stop,
+            start,
+            max_step,
+        )
+        .map_err(|error| {
+            SimulationError::Netlist(format!(
+                "the .TRAN card a small-signal state is taken from is invalid: {error}"
+            ))
+        })?;
         Ok(Some(Self {
             tstop: stop,
             max_step,

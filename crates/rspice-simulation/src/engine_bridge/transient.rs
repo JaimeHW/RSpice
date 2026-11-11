@@ -48,7 +48,7 @@ impl EngineBridge {
                 &netlist,
                 config.stop_time,
                 config
-                    .resolved_maximum_step()
+                    .resolved_maximum_step(netlist.parse_dialect())
                     .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?,
                 start,
                 times,
@@ -76,7 +76,7 @@ impl EngineBridge {
     ) -> Result<SimulationResult, SimulationError> {
         ensure_not_aborted(abort)?;
         let max_step = config
-            .resolved_maximum_step()
+            .resolved_maximum_step(netlist.parse_dialect())
             .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
         let prepared_netlist = netlist_for_transient_config(netlist, config, abort)?;
         let netlist = prepared_netlist.as_ref();
@@ -1302,17 +1302,26 @@ mod tests {
         );
     }
 
+    /// The studio steps a card by the ceiling the CLI gives it in the deck's
+    /// dialect: an Xyce deck with no TMAX up to a tenth of its window, as
+    /// Xyce does, rather than the ngspice rule.
     #[test]
     fn transient_execution_uses_core_default_and_explicit_step_limits() {
         use rspice_simulation_contract::config::AnalysisConfig;
 
         let bridge = EngineBridge::new();
-        let deck = "transient step limits\nV1 out 0 1\nR1 out 0 1k\n.end\n";
-        for (step_time, start_time, max_timestep, ceiling) in [
-            (0.01, 0.9, None, 0.002),
-            (0.001, 0.9, Some(0.007), 0.007),
-            (2.0, 0.0, None, 0.02),
-            (0.001, 0.0, None, 0.001),
+        let default_deck = "transient step limits\nV1 out 0 1\nR1 out 0 1k\n.end\n";
+        let xyce_deck =
+            "transient step limits\n.options rspice_dialect=xyce\nV1 out 0 1\nR1 out 0 1k\n.end\n";
+        for (deck, step_time, start_time, max_timestep, ceiling) in [
+            (xyce_deck, 0.01, 0.9, None, 0.01),
+            (xyce_deck, 0.001, 0.9, Some(0.007), 0.007),
+            (xyce_deck, 2.0, 0.0, None, 0.1),
+            (xyce_deck, 0.001, 0.0, None, 0.1),
+            (default_deck, 0.01, 0.9, None, 0.002),
+            (default_deck, 0.001, 0.9, Some(0.007), 0.007),
+            (default_deck, 2.0, 0.0, None, 0.02),
+            (default_deck, 0.001, 0.0, None, 0.001),
         ] {
             let config = TransientAnalysisConfig {
                 stop_time: 1.0,
@@ -1351,7 +1360,7 @@ mod tests {
             let roundoff = 64.0 * f64::EPSILON;
             assert!(
                 largest_step <= ceiling + roundoff,
-                "step={step_time}, start={start_time}, TMAX={max_timestep:?}: observed {largest_step}, ceiling {ceiling}"
+                "{deck:?} step={step_time}, start={start_time}, TMAX={max_timestep:?}: observed {largest_step}, ceiling {ceiling}"
             );
             assert!(
                 largest_step > 0.9 * ceiling,

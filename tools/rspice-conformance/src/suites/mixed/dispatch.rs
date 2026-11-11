@@ -1290,11 +1290,16 @@ fn engine_case(request: &CaseRequest<'_>, kind: &str, origin: &Path, source: &st
     else {
         return result.failed(harness_error("deck has no .tran card"));
     };
-    let internal_max =
-        match rspice_core::execution::resolve_transient_maximum_step(step, stop, start, max_step) {
-            Ok(value) => value,
-            Err(error) => return result.failed(harness_error(error.to_string())),
-        };
+    let internal_max = match rspice_core::execution::resolve_dialect_transient_maximum_step(
+        engine.config().spice_dialect,
+        step,
+        stop,
+        start,
+        max_step,
+    ) {
+        Ok(value) => value,
+        Err(error) => return result.failed(harness_error(error.to_string())),
+    };
     let startup = rspice_core::engine::TransientStartupMode::from_uic(uic);
     let outcome = match kind {
         "mc-tran" => monte_carlo(
