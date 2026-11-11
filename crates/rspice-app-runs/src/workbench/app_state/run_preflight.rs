@@ -146,6 +146,21 @@ pub fn simulation_run_preflight_block_reason(model: &Model, facts: SlotFacts) ->
     })
 }
 
+/// Why a manual deck run cannot start on the authorization `controller`
+/// retains: the current netlist's validation is not the one it authorized.
+/// `None` when no validation is held, or when the held one is authorized.
+/// The deck and the editor's half of the answer is code's.
+pub fn manual_deck_authorization_block_reason(
+    model: &Model,
+    controller: &crate::simulation::SimulationController,
+) -> Option<String> {
+    let receipt = model.netlist_artifacts.validation.as_ref()?;
+    (!controller.has_retained_manual_authorization(receipt.prepared_snapshot_digest)).then(|| {
+        "Validate the current netlist again before running; the earlier validation can no longer be used"
+            .to_owned()
+    })
+}
+
 /// The current error-level schematic DRC result that blocks generated runs.
 /// Only an exact, current receipt for the active cell/view can block. The
 /// legacy dialog projection is presentation state and is never execution

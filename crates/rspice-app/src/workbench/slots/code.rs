@@ -137,4 +137,16 @@ impl CodePort for CodeState {
             libraries,
         )
     }
+
+    fn manual_deck_run_block_reason(
+        &self,
+        model: &crate::workbench::app_state::Model,
+        messages: crate::workbench::MessageCatalog,
+    ) -> Option<String> {
+        crate::workbench::documents::netlist_document::manual_deck_run_block_reason_in(
+            model,
+            &self.netlist,
+            messages,
+        )
+    }
 }

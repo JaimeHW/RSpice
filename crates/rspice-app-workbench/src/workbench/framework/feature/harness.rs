@@ -204,6 +204,14 @@ impl CodePort for NullPorts {
     ) -> Option<(crate::state::CellViewRef, String)> {
         None
     }
+
+    fn manual_deck_run_block_reason(
+        &self,
+        _model: &Model,
+        _messages: crate::workbench::localization::MessageCatalog,
+    ) -> Option<String> {
+        None
+    }
 }
 
 /// A fresh session's models authoring holds nothing unsaved, and it has

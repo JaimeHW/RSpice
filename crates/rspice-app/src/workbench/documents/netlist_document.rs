@@ -867,24 +867,19 @@ pub(crate) fn working_deck_source_in<'a>(
 
 /// Why Run on the Netlist workspace will not run the deck: what
 /// [`manual_deck_run_block_reason_in`] finds, then a validation whose
-/// authorization the run controller no longer holds.
+/// authorization the run controller no longer holds, which is the run
+/// tier's half of the answer.
 pub(crate) fn manual_deck_run_block_reason_for_run(
     model: &Model,
     netlist: &NetlistDocumentState,
     messages: crate::workbench::MessageCatalog,
     controller: &rspice_app_runs::simulation::SimulationController,
 ) -> Option<String> {
-    if let Some(reason) = manual_deck_run_block_reason_in(model, netlist, messages) {
-        return Some(reason);
-    }
-    let receipt = model.netlist_artifacts.validation.as_ref()?;
-    if !controller.has_retained_manual_authorization(receipt.prepared_snapshot_digest) {
-        return Some(
-            "Validate the current netlist again before running; the earlier validation can no longer be used"
-                .to_owned(),
-        );
-    }
-    None
+    manual_deck_run_block_reason_in(model, netlist, messages).or_else(|| {
+        rspice_app_runs::workbench::app_state::run_preflight::manual_deck_authorization_block_reason(
+            model, controller,
+        )
+    })
 }
 
 /// User-facing reason the Netlist workspace cannot run the current deck. It

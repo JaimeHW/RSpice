@@ -2015,6 +2015,14 @@ mod tests {
         ) -> Option<(crate::state::CellViewRef, String)> {
             None
         }
+
+        fn manual_deck_run_block_reason(
+            &self,
+            _model: &crate::workbench::app_state::Model,
+            _messages: rspice_app_workbench::workbench::localization::MessageCatalog,
+        ) -> Option<String> {
+            None
+        }
     }
 
     impl ResultPresentationSource for NoReads {
