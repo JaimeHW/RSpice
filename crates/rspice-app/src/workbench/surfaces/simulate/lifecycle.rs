@@ -11,7 +11,7 @@ use super::*;
 use crate::simulation::plan::AnalysisPlanError;
 use crate::workbench::app::{PlanRemovalConsequence, PlanRemovalTarget, PlanRemovalTone};
 use crate::workbench::framework::feature::Cx;
-use crate::workbench::simulate::SimulateFeature;
+use crate::workbench::simulate::{SimulateFeature, record_plan_receipt, record_plan_refusal};
 
 pub(super) fn resolve_active_analysis_instance(app: &mut AppState) -> Result<(), String> {
     let current = app.simulate.active_analysis_instance;
@@ -212,8 +212,12 @@ pub(super) fn contextual_dependency_error(
         })
 }
 
-pub(super) fn commit_draft(app: &mut RSpiceApp, id: AnalysisInstanceId, draft: AnalysisDraft) {
-    let result = match app.state.model.sim_setup.stable_analysis_plan_mut() {
+pub(super) fn commit_draft(
+    cx: &mut Cx<'_, SimulateFeature>,
+    id: AnalysisInstanceId,
+    draft: AnalysisDraft,
+) {
+    let result = match cx.model.sim_setup.stable_analysis_plan_mut() {
         Ok(plan) => plan
             .edit(id, |target| target.clone_from(&draft))
             .map_err(|error| error.to_string()),
@@ -221,10 +225,10 @@ pub(super) fn commit_draft(app: &mut RSpiceApp, id: AnalysisInstanceId, draft: A
     };
     match result {
         Ok(((), receipt)) => {
-            refresh_analysis_projections(app);
-            record_receipt(&mut app.state, &receipt);
+            refresh_analysis_projections(cx);
+            record_receipt(cx, &receipt);
         }
-        Err(error) => record_failure(&mut app.state, "Edit", &error),
+        Err(error) => record_failure(cx, "Edit", &error),
     }
 }
 
@@ -236,11 +240,11 @@ pub(super) fn commit_draft(app: &mut RSpiceApp, id: AnalysisInstanceId, draft: A
 /// uses. A refusal leaves the plan untouched and is reported verbatim, because
 /// the reason names which owner already holds the value.
 pub(super) fn commit_numeric_override(
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, SimulateFeature>,
     id: AnalysisInstanceId,
     record: Option<crate::simulation::plan::AnalysisNumericOverride>,
 ) -> Result<(), String> {
-    let result = match app.state.model.sim_setup.stable_analysis_plan_mut() {
+    let result = match cx.model.sim_setup.stable_analysis_plan_mut() {
         Ok(plan) => plan
             .set_numeric_override(id, record)
             .map_err(|error| error.to_string()),
@@ -248,12 +252,12 @@ pub(super) fn commit_numeric_override(
     };
     match result {
         Ok(receipt) => {
-            refresh_analysis_projections(app);
-            record_receipt(&mut app.state, &receipt);
+            refresh_analysis_projections(cx);
+            record_receipt(cx, &receipt);
             Ok(())
         }
         Err(error) => {
-            record_failure(&mut app.state, "Edit", &error);
+            record_failure(cx, "Edit", &error);
             Err(error)
         }
     }
@@ -304,7 +308,7 @@ pub(super) fn insert_analysis_instance(
     };
     match result {
         Ok((id, insert_receipt, bind_receipt)) => {
-            refresh_analysis_projections_in(cx);
+            refresh_analysis_projections(cx);
             cx.state.active_analysis_instance = Some(id);
             match bind_receipt {
                 None => crate::workbench::simulate::record_plan_receipt(
@@ -362,27 +366,27 @@ pub(super) fn insert_analysis_instance(
 }
 
 pub(super) fn apply_analysis_action(
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, SimulateFeature>,
     id: AnalysisInstanceId,
     action: AnalysisAction,
 ) {
     match action {
         AnalysisAction::Clone => {
-            let result = match app.state.model.sim_setup.stable_analysis_plan_mut() {
+            let result = match cx.model.sim_setup.stable_analysis_plan_mut() {
                 Ok(plan) => plan.clone_instance(id).map_err(|error| error.to_string()),
                 Err(error) => Err(error),
             };
             match result {
                 Ok((clone_id, receipt)) => {
-                    refresh_analysis_projections(app);
-                    app.state.simulate.active_analysis_instance = Some(clone_id);
-                    record_receipt(&mut app.state, &receipt);
+                    refresh_analysis_projections(cx);
+                    cx.state.active_analysis_instance = Some(clone_id);
+                    record_receipt(cx, &receipt);
                 }
-                Err(error) => record_failure(&mut app.state, "Clone", &error),
+                Err(error) => record_failure(cx, "Clone", &error),
             }
         }
         AnalysisAction::Earlier(position) | AnalysisAction::Later(position) => {
-            let result = match app.state.model.sim_setup.stable_analysis_plan_mut() {
+            let result = match cx.model.sim_setup.stable_analysis_plan_mut() {
                 Ok(plan) => plan
                     .reorder(id, position)
                     .map_err(|error| error.to_string()),
@@ -390,16 +394,16 @@ pub(super) fn apply_analysis_action(
             };
             match result {
                 Ok(receipt) => {
-                    refresh_analysis_projections(app);
-                    record_receipt(&mut app.state, &receipt);
+                    refresh_analysis_projections(cx);
+                    record_receipt(cx, &receipt);
                 }
-                Err(error) => record_failure(&mut app.state, "Reorder", &error),
+                Err(error) => record_failure(cx, "Reorder", &error),
             }
         }
         AnalysisAction::BindDependencies => {
             let repair_context =
-                build_envelope_source_catalog(&app.state.model).dependency_repair_context();
-            let result = match app.state.model.sim_setup.stable_analysis_plan_mut() {
+                build_envelope_source_catalog(cx.model).dependency_repair_context();
+            let result = match cx.model.sim_setup.stable_analysis_plan_mut() {
                 Ok(plan) => plan
                     .auto_bind_dependencies_with_context(id, &repair_context)
                     .map_err(|error| error.to_string()),
@@ -407,17 +411,17 @@ pub(super) fn apply_analysis_action(
             };
             match result {
                 Ok(receipt) => {
-                    refresh_analysis_projections(app);
-                    record_receipt(&mut app.state, &receipt);
+                    refresh_analysis_projections(cx);
+                    record_receipt(cx, &receipt);
                 }
-                Err(error) => record_failure(&mut app.state, "Bind dependencies", &error),
+                Err(error) => record_failure(cx, "Bind dependencies", &error),
             }
         }
         AnalysisAction::BindDependency {
             prerequisite,
             target,
         } => {
-            let result = match app.state.model.sim_setup.stable_analysis_plan_mut() {
+            let result = match cx.model.sim_setup.stable_analysis_plan_mut() {
                 Ok(plan) => plan
                     .bind_dependency(id, prerequisite, target)
                     .map_err(|error| error.to_string()),
@@ -425,16 +429,16 @@ pub(super) fn apply_analysis_action(
             };
             match result {
                 Ok(receipt) => {
-                    refresh_analysis_projections(app);
-                    record_receipt(&mut app.state, &receipt);
+                    refresh_analysis_projections(cx);
+                    record_receipt(cx, &receipt);
                 }
-                Err(error) => record_failure(&mut app.state, "Bind prerequisite", &error),
+                Err(error) => record_failure(cx, "Bind prerequisite", &error),
             }
         }
         AnalysisAction::RepairDependencies => {
             let repair_context =
-                build_envelope_source_catalog(&app.state.model).dependency_repair_context();
-            let result = match app.state.model.sim_setup.stable_analysis_plan_mut() {
+                build_envelope_source_catalog(cx.model).dependency_repair_context();
+            let result = match cx.model.sim_setup.stable_analysis_plan_mut() {
                 Ok(plan) => plan
                     .repair_dependencies_with_context(id, &repair_context)
                     .map_err(|error| error.to_string()),
@@ -442,33 +446,38 @@ pub(super) fn apply_analysis_action(
             };
             match result {
                 Ok((repair, receipt)) => {
-                    refresh_analysis_projections(app);
-                    app.state.record_plan_receipt(format!(
-                        "Receipt #{} committed for instance {id}. Prerequisites repaired: {} added, {} enabled, {} moved earlier, {} bindings updated, and {} invalid bindings removed.",
-                        receipt.sequence(),
-                        repair.inserted().len(),
-                        repair.enabled().len(),
-                        repair.moved().len(),
-                        repair.bound().len(),
-                        repair.removed().len(),
-                    ));
+                    refresh_analysis_projections(cx);
+                    record_plan_receipt(
+                        cx,
+                        format!(
+                            "Receipt #{} committed for instance {id}. Prerequisites repaired: {} added, {} enabled, {} moved earlier, {} bindings updated, and {} invalid bindings removed.",
+                            receipt.sequence(),
+                            repair.inserted().len(),
+                            repair.enabled().len(),
+                            repair.moved().len(),
+                            repair.bound().len(),
+                            repair.removed().len(),
+                        ),
+                    );
                 }
-                Err(error) => record_failure(&mut app.state, "Repair prerequisites", &error),
+                Err(error) => record_failure(cx, "Repair prerequisites", &error),
             }
         }
         AnalysisAction::PrepareAutonomousPss => {
-            let existing = app
-                .state
+            let existing = cx
                 .model
                 .sim_setup
                 .stable_analysis_plan()
                 .ok()
                 .and_then(|plan| prepared_autonomous_pss_id(plan, id));
             if let Some(pss_id) = existing {
-                app.state.simulate.active_analysis_instance = Some(pss_id);
-                app.state.record_plan_receipt(format!(
-                    "Selected the existing autonomous PSS {pss_id} for phase-noise analysis {id}. Complete its oscillator node and remaining settings, enable it, then run dependency repair to link it without creating a duplicate."
-                ));
+                cx.state.active_analysis_instance = Some(pss_id);
+                record_plan_receipt(
+                    cx,
+                    format!(
+                        "Selected the existing autonomous PSS {pss_id} for phase-noise analysis {id}. Complete its oscillator node and remaining settings, enable it, then run dependency repair to link it without creating a duplicate."
+                    ),
+                );
                 return;
             }
             let pss = PssDialogState {
@@ -478,8 +487,8 @@ pub(super) fn apply_analysis_action(
                 ..Default::default()
             };
             let repair_context =
-                build_envelope_source_catalog(&app.state.model).dependency_repair_context();
-            let result = match app.state.model.sim_setup.stable_analysis_plan_mut() {
+                build_envelope_source_catalog(cx.model).dependency_repair_context();
+            let result = match cx.model.sim_setup.stable_analysis_plan_mut() {
                 Ok(plan) => plan
                     .prepare_prerequisite_for_configuration(
                         id,
@@ -492,20 +501,23 @@ pub(super) fn apply_analysis_action(
             };
             match result {
                 Ok((pss_id, receipt)) => {
-                    refresh_analysis_projections(app);
-                    app.state.simulate.active_analysis_instance = Some(pss_id);
-                    app.state.record_plan_receipt(format!(
-                        "Receipt #{} committed. Added autonomous PSS {pss_id} and its own prerequisites ahead of phase-noise analysis {id}. Enter the oscillator node, review the remaining PSS settings, then enable it; dependency repair will reuse it, and runs stay blocked until it is complete.",
-                        receipt.sequence(),
-                    ));
+                    refresh_analysis_projections(cx);
+                    cx.state.active_analysis_instance = Some(pss_id);
+                    record_plan_receipt(
+                        cx,
+                        format!(
+                            "Receipt #{} committed. Added autonomous PSS {pss_id} and its own prerequisites ahead of phase-noise analysis {id}. Enter the oscillator node, review the remaining PSS settings, then enable it; dependency repair will reuse it, and runs stay blocked until it is complete.",
+                            receipt.sequence(),
+                        ),
+                    );
                 }
-                Err(error) => record_failure(&mut app.state, "Configure PSS prerequisite", &error),
+                Err(error) => record_failure(cx, "Configure PSS prerequisite", &error),
             }
         }
-        AnalysisAction::Validate => validate_analysis_instance(&mut app.state, id),
-        AnalysisAction::Remove => remove_analysis_instance(app, id),
+        AnalysisAction::Validate => validate_analysis_instance(cx, id),
+        AnalysisAction::Remove => remove_analysis_instance(cx, id),
         AnalysisAction::SetEnabled(enabled) => {
-            let result = match app.state.model.sim_setup.stable_analysis_plan_mut() {
+            let result = match cx.model.sim_setup.stable_analysis_plan_mut() {
                 Ok(plan) => plan
                     .set_enabled(id, enabled)
                     .map_err(|error| error.to_string()),
@@ -513,19 +525,19 @@ pub(super) fn apply_analysis_action(
             };
             match result {
                 Ok(receipt) => {
-                    refresh_analysis_projections(app);
-                    record_receipt(&mut app.state, &receipt);
+                    refresh_analysis_projections(cx);
+                    record_receipt(cx, &receipt);
                 }
-                Err(error) => record_failure(&mut app.state, "Enable state", &error),
+                Err(error) => record_failure(cx, "Enable state", &error),
             }
         }
     }
 }
 
-pub(super) fn validate_analysis_instance(app: &mut AppState, id: AnalysisInstanceId) {
-    let envelope_sources = build_envelope_source_catalog(&app.model);
+pub(super) fn validate_analysis_instance(cx: &mut Cx<'_, SimulateFeature>, id: AnalysisInstanceId) {
+    let envelope_sources = build_envelope_source_catalog(cx.model);
     let result = (|| {
-        let plan = app.model.sim_setup.stable_analysis_plan()?;
+        let plan = cx.model.sim_setup.stable_analysis_plan()?;
         let instance = plan
             .instance(id)
             .ok_or_else(|| format!("analysis instance {id} no longer exists"))?;
@@ -542,9 +554,11 @@ pub(super) fn validate_analysis_instance(app: &mut AppState, id: AnalysisInstanc
             .iter()
             .filter(|candidate| closure_ids.contains(&candidate.id()))
         {
-            if let Some(error) =
-                analysis_validation_error(app, closure_instance.draft(), Some(&envelope_sources))
-            {
+            if let Some(error) = analysis_validation_error(
+                cx.model,
+                closure_instance.draft(),
+                Some(&envelope_sources),
+            ) {
                 return Err(format!(
                     "{} ({}): {error}",
                     closure_instance.display_name(),
@@ -557,18 +571,20 @@ pub(super) fn validate_analysis_instance(app: &mut AppState, id: AnalysisInstanc
 
     match result {
         Ok(name) => {
-            app.record_plan_receipt(format!(
-                "Validation passed for {name} ({id}). Dependency identity, order, and enabled state are valid for this instance."
-            ));
+            record_plan_receipt(
+                cx,
+                format!(
+                    "Validation passed for {name} ({id}). Dependency identity, order, and enabled state are valid for this instance."
+                ),
+            );
         }
-        Err(error) => record_failure(app, "Validate", &error),
+        Err(error) => record_failure(cx, "Validate", &error),
     }
 }
 
 /// Retained runs holding a result attributed to this analysis.
-fn retained_runs_for_analysis(app: &RSpiceApp, id: AnalysisInstanceId) -> usize {
-    app.state
-        .model
+fn retained_runs_for_analysis(model: &Model, id: AnalysisInstanceId) -> usize {
+    model
         .simulation
         .retained
         .runs
@@ -583,11 +599,10 @@ fn retained_runs_for_analysis(app: &RSpiceApp, id: AnalysisInstanceId) -> usize 
 /// a notice listing "Transient, Transient" tells them nothing about what is in
 /// the way — and the id is what a hop to it needs.
 fn analyses_depending_on(
-    app: &RSpiceApp,
+    model: &Model,
     id: AnalysisInstanceId,
 ) -> Vec<(AnalysisInstanceId, String)> {
-    app.state
-        .model
+    model
         .sim_setup
         .stable_analysis_plan()
         .ok()
@@ -608,9 +623,8 @@ fn analyses_depending_on(
 }
 
 /// What this analysis shows under, or a phrase that stands in for it.
-fn analysis_display_name(app: &RSpiceApp, id: AnalysisInstanceId) -> String {
-    app.state
-        .model
+fn analysis_display_name(model: &Model, id: AnalysisInstanceId) -> String {
+    model
         .sim_setup
         .stable_analysis_plan()
         .ok()
@@ -640,24 +654,21 @@ fn analysis_display_name(app: &RSpiceApp, id: AnalysisInstanceId) -> String {
 ///
 /// Anything else is removed at once, because a confirmation with nothing behind
 /// it only teaches the reader to click through the ones that matter.
-pub(super) fn remove_analysis_instance(app: &mut RSpiceApp, id: AnalysisInstanceId) {
-    let dependents = analyses_depending_on(app, id);
+pub(super) fn remove_analysis_instance(cx: &mut Cx<'_, SimulateFeature>, id: AnalysisInstanceId) {
+    let dependents = analyses_depending_on(cx.model, id);
     if !dependents.is_empty() {
-        let label = analysis_display_name(app, id);
-        app.state
-            .simulate
-            .plan_removal_refusal
-            .open(id, label, dependents);
+        let label = analysis_display_name(cx.model, id);
+        cx.state.plan_removal_refusal.open(id, label, dependents);
         return;
     }
 
-    let retained_runs = retained_runs_for_analysis(app, id);
+    let retained_runs = retained_runs_for_analysis(cx.model, id);
     if retained_runs == 0 {
-        commit_analysis_removal(app, id);
+        commit_analysis_removal(cx, id);
         return;
     }
 
-    let label = analysis_display_name(app, id);
+    let label = analysis_display_name(cx.model, id);
     // Rows in the order the review states them; each paragraph is carried by
     // the row it explains, and the dialog puts the warnings before the asides.
     let retained = PlanRemovalConsequence::stated(
@@ -669,7 +680,7 @@ pub(super) fn remove_analysis_instance(app: &mut RSpiceApp, id: AnalysisInstance
     // never reaches this review. It is still stated, because a reader deciding
     // what retained results cost needs to know that nothing else is at stake.
     let dependents = PlanRemovalConsequence::stated("Analyses bound to it", "none");
-    app.state.simulate.plan_removal_review.open(
+    cx.state.plan_removal_review.open(
         PlanRemovalTarget::Analysis(id),
         label,
         vec![retained, dependents],
@@ -680,14 +691,9 @@ pub(super) fn remove_analysis_instance(app: &mut RSpiceApp, id: AnalysisInstance
 ///
 /// Called once per frame from the surface, so the modal records an answer
 /// rather than reaching into the plan itself.
-pub(super) fn apply_confirmed_analysis_removal(app: &mut RSpiceApp) {
-    if let Some(id) = app
-        .state
-        .simulate
-        .plan_removal_review
-        .take_confirmed_analysis()
-    {
-        commit_analysis_removal(app, id);
+pub(super) fn apply_confirmed_analysis_removal(cx: &mut Cx<'_, SimulateFeature>) {
+    if let Some(id) = cx.state.plan_removal_review.take_confirmed_analysis() {
+        commit_analysis_removal(cx, id);
     }
 }
 
@@ -702,14 +708,13 @@ pub(super) fn apply_confirmed_analysis_removal(app: &mut RSpiceApp) {
 /// application could mutate every subsystem to do it.
 pub(super) fn apply_requested_blocker_reveal(state: &mut AppState) {
     if let Some(blocker) = state.simulate.plan_removal_refusal.take_reveal_target() {
-        super::advanced_options::reveal_in_analyses(state, blocker);
+        super::advanced_options::reveal_in_analyses(&mut state.simulate, blocker);
     }
 }
 
 /// Perform the removal itself, after any review has been answered.
-fn commit_analysis_removal(app: &mut RSpiceApp, id: AnalysisInstanceId) {
-    let prior_run_ids = app
-        .state
+fn commit_analysis_removal(cx: &mut Cx<'_, SimulateFeature>, id: AnalysisInstanceId) {
+    let prior_run_ids = cx
         .model
         .simulation
         .retained
@@ -718,8 +723,7 @@ fn commit_analysis_removal(app: &mut RSpiceApp, id: AnalysisInstanceId) {
         .filter(|run| run.find_analysis_by_source_instance(id).is_some())
         .map(|run| run.run_id)
         .collect();
-    let position = app
-        .state
+    let position = cx
         .model
         .sim_setup
         .stable_analysis_plan()
@@ -734,7 +738,7 @@ fn commit_analysis_removal(app: &mut RSpiceApp, id: AnalysisInstanceId) {
     // inside it: the plan speaks in instance ids and is right to, and the names
     // that make a refusal readable are only resolvable out here, against the
     // plan a refused transaction left standing.
-    let result = match app.state.model.sim_setup.stable_analysis_plan_mut() {
+    let result = match cx.model.sim_setup.stable_analysis_plan_mut() {
         Ok(plan) => plan
             .remove(id, prior_run_ids)
             .map_err(RemovalFailure::Refused),
@@ -742,9 +746,8 @@ fn commit_analysis_removal(app: &mut RSpiceApp, id: AnalysisInstanceId) {
     };
     match result {
         Ok(receipt) => {
-            refresh_analysis_projections(app);
-            let next = app
-                .state
+            refresh_analysis_projections(cx);
+            let next = cx
                 .model
                 .sim_setup
                 .stable_analysis_plan()
@@ -755,15 +758,15 @@ fn commit_analysis_removal(app: &mut RSpiceApp, id: AnalysisInstanceId) {
                         .get(next_position)
                         .map(|instance| instance.id())
                 });
-            app.state.simulate.active_analysis_instance = next;
-            record_receipt(&mut app.state, &receipt);
+            cx.state.active_analysis_instance = next;
+            record_receipt(cx, &receipt);
         }
         Err(RemovalFailure::Unavailable(error)) => {
-            record_failure(&mut app.state, "Remove", &error);
+            record_failure(cx, "Remove", &error);
         }
         Err(RemovalFailure::Refused(error)) => {
-            let message = removal_refusal_naming_instances(app, &error);
-            record_failure(&mut app.state, "Remove", &message);
+            let message = removal_refusal_naming_instances(cx.model, &error);
+            record_failure(cx, "Remove", &message);
         }
     }
 }
@@ -787,11 +790,11 @@ enum RemovalFailure {
 /// `Analysis 4f2a1b3c-… is still required by 9d10e2f4-…`. Only the identities
 /// are rewritten: the sentence, and the fail-closed guarantee it reports, stay
 /// the plan's own.
-fn removal_refusal_naming_instances(app: &RSpiceApp, error: &AnalysisPlanError) -> String {
+fn removal_refusal_naming_instances(model: &Model, error: &AnalysisPlanError) -> String {
     let AnalysisPlanError::ReferencedBy { target, dependents } = error else {
         return error.to_string();
     };
-    let named = |id: AnalysisInstanceId| format!("{} ({id})", analysis_display_name(app, id));
+    let named = |id: AnalysisInstanceId| format!("{} ({id})", analysis_display_name(model, id));
     format!(
         "Analysis {} is still required by {}.",
         named(*target),
@@ -803,26 +806,23 @@ fn removal_refusal_naming_instances(app: &RSpiceApp, error: &AnalysisPlanError) 
     )
 }
 
-pub(super) fn refresh_analysis_projections(app: &mut RSpiceApp) {
-    refresh_analysis_projections_in(&mut crate::workbench::features::cx(app));
-}
-
-/// [`refresh_analysis_projections`] in the simulate feature's context.
-pub(super) fn refresh_analysis_projections_in(cx: &mut Cx<'_, SimulateFeature>) {
+/// Refresh the plan's legacy projections and drop what preflight authorised,
+/// after any edit to the analysis stack.
+pub(super) fn refresh_analysis_projections(cx: &mut Cx<'_, SimulateFeature>) {
     cx.model.sim_setup.refresh_legacy_analysis_projections();
     crate::workbench::simulate::invalidate_preflight(cx);
 }
 
 /// Both of these only announce an outcome — the lifecycle status line and the
 /// Console record of it, through the funnel that writes the pair — so they
-/// take the session aggregate rather than the application. A handler that took
-/// the whole app could mutate every subsystem to announce an outcome.
-pub(super) fn record_receipt(state: &mut AppState, receipt: &AnalysisLifecycleReceipt) {
-    state.record_plan_receipt(receipt_line(receipt));
+/// take the simulate feature's context rather than the application. A handler
+/// that took the whole app could mutate every subsystem to announce an outcome.
+pub(super) fn record_receipt(cx: &mut Cx<'_, SimulateFeature>, receipt: &AnalysisLifecycleReceipt) {
+    record_plan_receipt(cx, receipt_line(receipt));
 }
 
-pub(super) fn record_failure(state: &mut AppState, action: &str, error: &str) {
-    state.record_plan_refusal(failure_line(action, error));
+pub(super) fn record_failure(cx: &mut Cx<'_, SimulateFeature>, action: &str, error: &str) {
+    record_plan_refusal(cx, failure_line(action, error));
 }
 
 /// The line [`record_receipt`] announces for `receipt`.

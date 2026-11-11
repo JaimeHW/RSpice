@@ -605,7 +605,7 @@ fn bound_pair() -> (
         .expect("AC inserts")
         .0;
     super::super::lifecycle::apply_analysis_action(
-        &mut app,
+        &mut crate::workbench::features::cx(&mut app),
         dependent,
         super::super::AnalysisAction::RepairDependencies,
     );
@@ -645,7 +645,7 @@ fn an_analysis_something_is_bound_to_refuses_removal_instead_of_reviewing_it() {
 
     let (mut app, dependent, prerequisite) = bound_pair();
 
-    remove_analysis_instance(&mut app, prerequisite);
+    remove_analysis_instance(&mut crate::workbench::features::cx(&mut app), prerequisite);
 
     assert!(
         app.state.simulate.plan_removal_review.target.is_none(),
@@ -700,7 +700,7 @@ fn the_refusal_hops_to_the_blocking_analysis_exactly_once() {
     app.state.simulate.simulation_page = SimulationPage::Solver;
     app.state.simulate.active_analysis_instance = Some(prerequisite);
 
-    remove_analysis_instance(&mut app, prerequisite);
+    remove_analysis_instance(&mut crate::workbench::features::cx(&mut app), prerequisite);
     // Nothing moves until the reader asks for it.
     apply_requested_blocker_reveal(&mut app.state);
     assert_eq!(
@@ -782,7 +782,7 @@ fn a_removal_costing_only_retained_runs_still_stages_and_commits() {
     );
     app.state.model.simulation.retained.runs = vec![run].into();
 
-    remove_analysis_instance(&mut app, ac);
+    remove_analysis_instance(&mut crate::workbench::features::cx(&mut app), ac);
     assert_eq!(
         app.state.simulate.plan_removal_review.target,
         Some(crate::workbench::app::PlanRemovalTarget::Analysis(ac)),
@@ -823,7 +823,7 @@ fn a_removal_costing_only_retained_runs_still_stages_and_commits() {
     );
 
     app.state.simulate.plan_removal_review.confirmed = true;
-    apply_confirmed_analysis_removal(&mut app);
+    apply_confirmed_analysis_removal(&mut crate::workbench::features::cx(&mut app));
     assert!(
         app.state.simulate.plan_removal_review.target.is_none(),
         "the review must close once its answer has been applied"
@@ -848,7 +848,7 @@ fn a_removal_costing_only_retained_runs_still_stages_and_commits() {
         status.contains("Remove committed"),
         "the commit must leave the receipt the immediate route writes, got: {status}"
     );
-    apply_confirmed_analysis_removal(&mut app);
+    apply_confirmed_analysis_removal(&mut crate::workbench::features::cx(&mut app));
     assert_eq!(
         app.state
             .simulate
@@ -877,7 +877,7 @@ fn an_analysis_with_no_dependents_and_no_results_is_removed_at_once() {
         .expect("AC inserts")
         .0;
 
-    remove_analysis_instance(&mut app, ac);
+    remove_analysis_instance(&mut crate::workbench::features::cx(&mut app), ac);
     assert!(
         app.state.simulate.plan_removal_review.target.is_none()
             && app.state.simulate.plan_removal_refusal.analysis.is_none(),
@@ -917,7 +917,7 @@ fn the_plan_transaction_refuses_a_blocked_removal_and_names_the_analyses() {
         Vec::new(),
     );
     app.state.simulate.plan_removal_review.confirmed = true;
-    apply_confirmed_analysis_removal(&mut app);
+    apply_confirmed_analysis_removal(&mut crate::workbench::features::cx(&mut app));
 
     assert!(
         app.state

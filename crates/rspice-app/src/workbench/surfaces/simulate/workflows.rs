@@ -179,7 +179,7 @@ fn commit_clear_analysis_name(
             plan.clear_instance_name(draft.instance_id)
                 .map_err(|error| error.to_string())
         })?;
-    super::lifecycle::refresh_analysis_projections_in(cx);
+    super::lifecycle::refresh_analysis_projections(cx);
     cx.state.active_analysis_instance = Some(draft.instance_id);
     let message = receipt.detail().to_owned();
     crate::workbench::simulate::record_plan_receipt(cx, super::lifecycle::receipt_line(&receipt));
@@ -198,7 +198,7 @@ fn commit_rename_analysis(
             plan.set_instance_name(draft.instance_id, &draft.name)
                 .map_err(|error| error.to_string())
         })?;
-    super::lifecycle::refresh_analysis_projections_in(cx);
+    super::lifecycle::refresh_analysis_projections(cx);
     // Selection is held by identity, and a rename does not mint one, so the
     // renamed analysis stays selected. Saying so here is what keeps a later
     // change from quietly moving selection to a position instead.

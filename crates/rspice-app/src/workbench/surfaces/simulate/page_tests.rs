@@ -310,7 +310,7 @@ fn the_model_reference_temperature_commits_without_moving_the_run_temperature() 
     let run_temperature = app.state.model.sim_setup.options.temp;
 
     app.state.model.sim_setup.session.options_draft.tnom = "40.0".to_owned();
-    super::page_solver::commit_draft(&mut app);
+    super::page_solver::commit_draft(&mut crate::workbench::features::cx(&mut app));
 
     assert_eq!(app.state.model.sim_setup.options.tnom, 40.0);
     assert_eq!(app.state.model.sim_setup.options.temp, run_temperature);
@@ -339,7 +339,7 @@ fn the_bypass_voltage_floor_commits_through_the_pages_own_channel() {
         .session
         .options_draft
         .bypass_abstol = "4e-9".to_owned();
-    super::page_solver::commit_draft(&mut app);
+    super::page_solver::commit_draft(&mut crate::workbench::features::cx(&mut app));
 
     assert!(app.state.model.sim_setup.options.bypass_enabled);
     assert_eq!(app.state.model.sim_setup.options.bypass_abstol, 4e-9);
@@ -1643,7 +1643,7 @@ fn a_refused_solver_value_reports_on_the_plan_lifecycle_channel() {
     let committed = plan_records(&app);
     app.state.model.sim_setup.session.options_draft.reltol = "not a number".to_owned();
 
-    super::page_solver::commit_draft(&mut app);
+    super::page_solver::commit_draft(&mut crate::workbench::features::cx(&mut app));
 
     let outcome = &app.state.simulate.analysis_lifecycle_status;
     assert!(outcome.is_refusal(), "{}", outcome.message());
@@ -1664,7 +1664,7 @@ fn a_refused_solver_value_reports_on_the_plan_lifecycle_channel() {
 
     // Repairing the value applies it, and the channel carries the receipt.
     app.state.model.sim_setup.session.options_draft.reltol = "2e-3".to_owned();
-    super::page_solver::commit_draft(&mut app);
+    super::page_solver::commit_draft(&mut crate::workbench::features::cx(&mut app));
     let outcome = &app.state.simulate.analysis_lifecycle_status;
     assert!(!outcome.is_refusal(), "{}", outcome.message());
     assert_eq!(app.state.model.sim_setup.options.reltol, 2e-3);
@@ -1692,7 +1692,7 @@ fn the_operating_points_newton_budget_is_reported_as_its_accuracy_tiers() {
     .expect("an operating point inserts into the test instance plan");
 
     let budget_label = NumericOverrideOption::Itl1.label();
-    let rows = super::page_solver::analysis_overrides(&app);
+    let rows = super::page_solver::analysis_overrides(&app.state.model);
     let row = rows
         .iter()
         .find(|row| row.option == budget_label)
@@ -1720,7 +1720,7 @@ fn the_operating_points_newton_budget_is_reported_as_its_accuracy_tiers() {
 
     // The plan-level ITL1 row is still stated, honestly, for the DC solves no
     // tier touches — and it no longer claims the operating point.
-    let plan_rows = super::page_solver::plan_policy_rows(&app);
+    let plan_rows = super::page_solver::plan_policy_rows(&app.state.model);
     let plan_row = plan_rows
         .iter()
         .find(|row| row.option == budget_label)
@@ -1753,7 +1753,7 @@ fn the_transfer_functions_newton_budget_is_never_claimed_for_the_plan() {
     .expect("a transfer function inserts into the test instance plan");
 
     let budget_label = NumericOverrideOption::Itl1.label();
-    let rows = super::page_solver::analysis_overrides(&app);
+    let rows = super::page_solver::analysis_overrides(&app.state.model);
     let row = rows
         .iter()
         .find(|row| row.option == budget_label)
@@ -1791,7 +1791,7 @@ fn a_step_ceiling_looser_than_the_plans_reports_the_bound_the_run_honours() {
     use crate::simulation::plan::AnalysisDraft;
 
     fn ceiling_row(app: &RSpiceApp) -> (String, String, &'static str) {
-        let rows = super::page_solver::analysis_overrides(app);
+        let rows = super::page_solver::analysis_overrides(&app.state.model);
         let row = rows
             .iter()
             .find(|row| row.option == "Step ceiling")

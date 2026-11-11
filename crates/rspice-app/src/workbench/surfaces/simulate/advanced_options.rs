@@ -40,8 +40,9 @@ use crate::simulation::plan::{
     AnalysisDraft, AnalysisKind, AnalysisNumericOverride, NumericOverrideOption, OverrideSection,
     SolverOwnership,
 };
-use crate::workbench::AppState;
-use crate::workbench::RSpiceApp;
+use crate::workbench::framework::feature::Cx;
+use crate::workbench::simulate::SimulateFeature;
+use crate::workbench::slots::SimulateState;
 
 pub(super) const PLAN_ORIGIN: &str = "plan policy";
 pub(super) const OVERRIDE_ORIGIN: &str = "analysis override";
@@ -604,17 +605,20 @@ pub(super) fn setting_edit(row: &AdvancedOptionRow, chosen: &str) -> Option<Opti
 /// it is where a refusal is announced: `write_numeric_record` states a value the
 /// record refuses through the same funnel every refused plan command uses, and
 /// `commit_numeric_override` states one the plan refuses.
-pub(super) fn commit(app: &mut RSpiceApp, instance: AnalysisInstanceId, edits: &[OptionEdit]) {
+pub(super) fn commit(
+    cx: &mut Cx<'_, SimulateFeature>,
+    instance: AnalysisInstanceId,
+    edits: &[OptionEdit],
+) {
     for edit in edits {
         // The outcome is announced by the writer, not here: a second report of
         // one refusal is a second toast for one press.
         let _ = match edit {
             OptionEdit::Set(option, authored) => {
-                super::page_solver::write_numeric_record(app, instance, *option, authored.trim())
+                super::page_solver::write_numeric_record(cx, instance, *option, authored.trim())
             }
             OptionEdit::Clear(option) => {
-                let cleared = app
-                    .state
+                let cleared = cx
                     .model
                     .sim_setup
                     .stable_analysis_plan()
@@ -627,7 +631,7 @@ pub(super) fn commit(app: &mut RSpiceApp, instance: AnalysisInstanceId, edits: &
                     });
                 match cleared {
                     Some(record) => {
-                        super::lifecycle::commit_numeric_override(app, instance, Some(record))
+                        super::lifecycle::commit_numeric_override(cx, instance, Some(record))
                     }
                     None => Ok(()),
                 }
@@ -645,13 +649,13 @@ pub(super) const REVEAL_ACTION: &str = "Open in Analyses";
 /// Show one analysis on the page that edits it.
 ///
 /// The two facts a hop needs are the route and the instance, and a caller
-/// holding either of the surfaces that hop has both. Takes the workbench rather
-/// than the application: moving what is on screen touches nothing else, and a
-/// handler that asked for the whole application could mutate every subsystem to
-/// do it.
-pub(super) fn reveal_in_analyses(state: &mut AppState, instance: AnalysisInstanceId) {
-    state.simulate.simulation_page = crate::state::SimulationPage::Analyses;
-    state.simulate.active_analysis_instance = Some(instance);
+/// holding either of the surfaces that hop has both. Takes the simulate state
+/// rather than the application: moving what is on screen touches nothing else,
+/// and a handler that asked for the whole application could mutate every
+/// subsystem to do it.
+pub(super) fn reveal_in_analyses(simulate: &mut SimulateState, instance: AnalysisInstanceId) {
+    simulate.simulation_page = crate::state::SimulationPage::Analyses;
+    simulate.active_analysis_instance = Some(instance);
 }
 
 #[cfg(test)]

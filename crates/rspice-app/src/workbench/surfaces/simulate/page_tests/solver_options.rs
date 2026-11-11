@@ -53,10 +53,13 @@ fn solver_options_iteration_edit_preserves_precise_temperatures() {
         tnom: -40.123_456_789,
         ..app.state.model.sim_setup.options.clone()
     };
-    page_solver::commit_options_transaction(&mut app, &options)
-        .expect("valid temperatures commit through the plan transaction");
+    page_solver::commit_options_transaction(
+        &mut crate::workbench::features::cx(&mut app),
+        &options,
+    )
+    .expect("valid temperatures commit through the plan transaction");
     app.state.model.sim_setup.session.options_draft.itl1 = "73".to_owned();
-    page_solver::commit_draft(&mut app);
+    page_solver::commit_draft(&mut crate::workbench::features::cx(&mut app));
 
     let mut expected = options;
     expected.itl1 = 73;
@@ -125,7 +128,7 @@ fn solver_options_invalid_drafts_cannot_replace_effective_policy() {
             let mut app = RSpiceApp::test_instance();
             let before = serde_json::to_value(&app.state.model.sim_setup.options).unwrap();
             edit(&mut app.state.model.sim_setup.session.options_draft, value);
-            page_solver::commit_draft(&mut app);
+            page_solver::commit_draft(&mut crate::workbench::features::cx(&mut app));
             assert!(
                 app.state.simulate.analysis_lifecycle_status.is_refusal(),
                 "{name}={value} was accepted"
@@ -155,8 +158,11 @@ fn solver_options_transaction_rejects_invalid_policy_before_mutation() {
         tnom: f64::NAN,
         ..app.state.model.sim_setup.options.clone()
     };
-    let error = page_solver::commit_options_transaction(&mut app, &invalid)
-        .expect_err("the effective-options transaction must validate its own input");
+    let error = page_solver::commit_options_transaction(
+        &mut crate::workbench::features::cx(&mut app),
+        &invalid,
+    )
+    .expect_err("the effective-options transaction must validate its own input");
     assert!(
         error.contains("tnom"),
         "the refusal must identify the invalid field: {error}"
@@ -177,7 +183,7 @@ fn simulation_compatibility_commits_through_the_solver_transaction() {
         .session
         .options_draft
         .compatibility = SimulationCompatibility::Xyce;
-    page_solver::commit_draft(&mut app);
+    page_solver::commit_draft(&mut crate::workbench::features::cx(&mut app));
     assert!(!app.state.simulate.analysis_lifecycle_status.is_refusal());
     assert_eq!(
         app.state.model.sim_setup.options.compatibility,
@@ -193,7 +199,7 @@ fn simulation_compatibility_commits_through_the_solver_transaction() {
         rspice_core::SpiceDialect::Xyce
     );
     app.state.model.sim_setup.session.options_draft.itl1 = "81".into();
-    page_solver::commit_draft(&mut app);
+    page_solver::commit_draft(&mut crate::workbench::features::cx(&mut app));
     assert_eq!(
         app.state.model.sim_setup.options.compatibility,
         SimulationCompatibility::Xyce

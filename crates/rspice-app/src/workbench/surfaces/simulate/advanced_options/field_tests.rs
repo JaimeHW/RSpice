@@ -16,6 +16,7 @@ use super::*;
 
 use crate::simulation::plan::{AnalysisKind, NumericOverrideOption as O, SolverOwnership};
 use crate::state::SimulationPage;
+use crate::workbench::RSpiceApp;
 
 #[test]
 fn hb_transient_startup_controls_reach_the_solver_and_follow_mode_changes() {
@@ -25,7 +26,13 @@ fn hb_transient_startup_controls_reach_the_solver_and_follow_mode_changes() {
             .iter()
             .any(|(option, _)| *option == O::Itl4)
     );
-    super::super::page_solver::write_numeric_record(&mut app, id, O::HbInitialState, "1").unwrap();
+    super::super::page_solver::write_numeric_record(
+        &mut crate::workbench::features::cx(&mut app),
+        id,
+        O::HbInitialState,
+        "1",
+    )
+    .unwrap();
     for (option, value) in [
         (O::Itl4, "80"),
         (O::MaximumTimestep, "2u"),
@@ -36,7 +43,13 @@ fn hb_transient_startup_controls_reach_the_solver_and_follow_mode_changes() {
                 .iter()
                 .any(|(offered, _)| *offered == option)
         );
-        super::super::page_solver::write_numeric_record(&mut app, id, option, value).unwrap();
+        super::super::page_solver::write_numeric_record(
+            &mut crate::workbench::features::cx(&mut app),
+            id,
+            option,
+            value,
+        )
+        .unwrap();
     }
     for option in [O::StrobeInterval, O::OutputTimePoints, O::RetainEverySignal] {
         assert!(
@@ -77,17 +90,32 @@ fn hb_transient_startup_controls_reach_the_solver_and_follow_mode_changes() {
     );
     let before = serde_json::to_value(plan).unwrap();
     assert!(
-        super::super::page_solver::write_numeric_record(&mut app, id, O::HbInitialState, "0")
-            .is_err()
+        super::super::page_solver::write_numeric_record(
+            &mut crate::workbench::features::cx(&mut app),
+            id,
+            O::HbInitialState,
+            "0"
+        )
+        .is_err()
     );
     assert_eq!(
         serde_json::to_value(app.state.model.sim_setup.stable_analysis_plan().unwrap()).unwrap(),
         before
     );
     for option in [O::Itl4, O::MaximumTimestep, O::LteReltol] {
-        commit(&mut app, id, &[OptionEdit::Clear(option)]);
+        commit(
+            &mut crate::workbench::features::cx(&mut app),
+            id,
+            &[OptionEdit::Clear(option)],
+        );
     }
-    super::super::page_solver::write_numeric_record(&mut app, id, O::HbInitialState, "0").unwrap();
+    super::super::page_solver::write_numeric_record(
+        &mut crate::workbench::features::cx(&mut app),
+        id,
+        O::HbInitialState,
+        "0",
+    )
+    .unwrap();
     assert!(
         !offered(&app, id)
             .iter()
@@ -118,11 +146,25 @@ fn configured_study_form_writer_and_solver_ledger_share_base_ownership() {
             .iter()
             .any(|(option, _)| *option == O::Itl4)
     );
-    assert!(super::super::page_solver::write_numeric_record(&mut app, id, O::Itl4, "91").is_err());
-    super::super::page_solver::write_numeric_record(&mut app, id, O::Reltol, "1e-5").unwrap();
+    assert!(
+        super::super::page_solver::write_numeric_record(
+            &mut crate::workbench::features::cx(&mut app),
+            id,
+            O::Itl4,
+            "91"
+        )
+        .is_err()
+    );
+    super::super::page_solver::write_numeric_record(
+        &mut crate::workbench::features::cx(&mut app),
+        id,
+        O::Reltol,
+        "1e-5",
+    )
+    .unwrap();
     assert_eq!(row_of(&app, id, O::Reltol).origin, STUDY_DEFAULT_ORIGIN);
     assert!(offered(&app, id).contains(&(O::Reltol, STUDY_DEFAULT_ORIGIN)));
-    let rows = super::super::page_solver::analysis_overrides(&app);
+    let rows = super::super::page_solver::analysis_overrides(&app.state.model);
     let row = rows
         .iter()
         .find(|row| row.option == O::Reltol.label())
@@ -146,7 +188,13 @@ fn configured_study_form_writer_and_solver_ledger_share_base_ownership() {
             .iter()
             .any(|(option, _)| *option == O::Itl4)
     );
-    super::super::page_solver::write_numeric_record(&mut app, id, O::Itl4, "91").unwrap();
+    super::super::page_solver::write_numeric_record(
+        &mut crate::workbench::features::cx(&mut app),
+        id,
+        O::Itl4,
+        "91",
+    )
+    .unwrap();
     assert_eq!(authored(&app, id, O::Itl4).as_deref(), Some("91"));
 }
 
@@ -183,7 +231,7 @@ fn time_stepped_forms_can_author_and_clear_their_step_ceiling() {
                 .any(|(option, _)| *option == O::MaximumTimestep)
         );
         commit(
-            &mut app,
+            &mut crate::workbench::features::cx(&mut app),
             instance,
             &[OptionEdit::Set(O::MaximumTimestep, "2n".into())],
         );
@@ -203,7 +251,11 @@ fn time_stepped_forms_can_author_and_clear_their_step_ceiling() {
                 .unwrap();
         let engine = rspice_core::Engine::default().resolved_for_netlist(&netlist);
         assert_eq!(engine.config().transient_timeint_max_timestep, Some(2e-9));
-        commit(&mut app, instance, &[OptionEdit::Clear(O::MaximumTimestep)]);
+        commit(
+            &mut crate::workbench::features::cx(&mut app),
+            instance,
+            &[OptionEdit::Clear(O::MaximumTimestep)],
+        );
         assert_eq!(authored(&app, instance, O::MaximumTimestep), None);
         assert!(
             offered(&app, instance)
@@ -542,7 +594,7 @@ fn a_bound_the_plan_does_not_state_opens_on_an_empty_well() {
     // A number typed into it is an override like any other, and the well then
     // opens on what the solve will use.
     commit(
-        &mut app,
+        &mut crate::workbench::features::cx(&mut app),
         transient,
         &[OptionEdit::Set(O::LteReltol, "2e-3".to_owned())],
     );
@@ -566,7 +618,11 @@ fn a_well_authors_what_it_holds_and_clears_when_it_is_emptied() {
     assert_eq!(inherited.origin, PLAN_ORIGIN);
     let edit = well_edit(&inherited, " 4 ").expect("a new value asks to be authored");
     assert_eq!(edit, OptionEdit::Set(O::Trtol, "4".to_owned()));
-    commit(&mut app, transient, &[edit]);
+    commit(
+        &mut crate::workbench::features::cx(&mut app),
+        transient,
+        &[edit],
+    );
 
     assert_eq!(authored(&app, transient, O::Trtol).as_deref(), Some("4"));
     assert_ne!(
@@ -584,7 +640,11 @@ fn a_well_authors_what_it_holds_and_clears_when_it_is_emptied() {
 
     let cleared = well_edit(&overridden, "   ").expect("an emptied well asks to be cleared");
     assert_eq!(cleared, OptionEdit::Clear(O::Trtol));
-    commit(&mut app, transient, &[cleared]);
+    commit(
+        &mut crate::workbench::features::cx(&mut app),
+        transient,
+        &[cleared],
+    );
     assert_eq!(authored(&app, transient, O::Trtol), None);
     let inherited = row_of(&app, transient, O::Trtol);
     assert_eq!(inherited.origin, PLAN_ORIGIN);
@@ -620,7 +680,7 @@ fn a_refused_value_is_announced_once_and_leaves_the_plan_alone() {
     let announced = plan_records(&app);
 
     commit(
-        &mut app,
+        &mut crate::workbench::features::cx(&mut app),
         transient,
         &[OptionEdit::Set(O::Trtol, "banana".to_owned())],
     );
@@ -680,14 +740,22 @@ fn a_setting_returned_to_the_plan_clears_its_override() {
 
     let edit = setting_edit(&inherited, departed).expect("a departure asks to be authored");
     assert_eq!(edit, OptionEdit::Set(O::GminStepping, departed.to_owned()));
-    commit(&mut app, operating_point, &[edit]);
+    commit(
+        &mut crate::workbench::features::cx(&mut app),
+        operating_point,
+        &[edit],
+    );
     let overridden = row_of(&app, operating_point, O::GminStepping);
     assert_eq!(overridden.origin, OVERRIDE_ORIGIN);
 
     let back = setting_edit(&overridden, &preset)
         .expect("the plan's own setting is how a switch returns to it");
     assert_eq!(back, OptionEdit::Clear(O::GminStepping));
-    commit(&mut app, operating_point, &[back]);
+    commit(
+        &mut crate::workbench::features::cx(&mut app),
+        operating_point,
+        &[back],
+    );
     assert_eq!(authored(&app, operating_point, O::GminStepping), None);
     assert_eq!(
         row_of(&app, operating_point, O::GminStepping).origin,
@@ -737,7 +805,11 @@ fn a_legacy_override_of_a_global_option_stays_until_it_is_cleared() {
         "a stated global bound is a field, resolved from the analysis that states it"
     );
 
-    commit(&mut app, transient, &[OptionEdit::Clear(O::Reltol)]);
+    commit(
+        &mut crate::workbench::features::cx(&mut app),
+        transient,
+        &[OptionEdit::Clear(O::Reltol)],
+    );
     assert_eq!(authored(&app, transient, O::Reltol), None);
     assert!(
         !offered(&app, transient)

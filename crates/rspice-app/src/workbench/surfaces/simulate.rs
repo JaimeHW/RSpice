@@ -57,7 +57,7 @@ use crate::workbench::state::{
     SavedOutputDraft, SimulationPlanManagerDraft, SimulationPlanManagerMode,
     SimulationWorkflowDialog, Workspace,
 };
-use crate::workbench::{AppState, RSpiceApp};
+use crate::workbench::{AppState, RSpiceApp, features};
 use rspice_simulation::output_contract::SavedOutputSemanticStatus;
 use rspice_simulation::output_contract::SavedOutputStorageEstimate;
 use rspice_simulation::runner::{TfRunConfig, infer_tf_run_config};
@@ -298,10 +298,10 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     // A removal confirmed in the destructive review is applied here, by the
     // surface that owns the plan, rather than by the modal that asked. The hop
     // a refused removal offers is taken here for the same reason.
-    apply_confirmed_analysis_removal(app);
+    apply_confirmed_analysis_removal(&mut features::cx(app));
     lifecycle::apply_requested_blocker_reveal(&mut app.state);
     if let Err(error) = resolve_active_analysis_instance(&mut app.state) {
-        record_failure(&mut app.state, "Analysis selection", &error);
+        record_failure(&mut features::cx(app), "Analysis selection", &error);
     }
 
     let t = Tokens::get(ui.ctx());
@@ -396,10 +396,10 @@ fn settle_surface_scroll(ui: &Ui, state: &mut AppState, offset_y: f32) {
 /// Escape on. A host that runs once a frame wherever the reader is standing
 /// cannot arm an overlay that no pass draws.
 pub(in crate::workbench) fn show_workflow_dialogs(ctx: &egui::Context, app: &mut RSpiceApp) {
-    checkpoint_exchange::poll(ctx, &mut crate::workbench::features::cx(app));
-    transient_checkpoint_exchange::poll(ctx, &mut crate::workbench::features::cx(app));
-    simulation_workflow_dialog(ctx, &mut crate::workbench::features::cx(app));
-    analysis_catalog(ctx, &mut crate::workbench::features::cx(app));
+    checkpoint_exchange::poll(ctx, &mut features::cx(app));
+    transient_checkpoint_exchange::poll(ctx, &mut features::cx(app));
+    simulation_workflow_dialog(ctx, &mut features::cx(app));
+    analysis_catalog(ctx, &mut features::cx(app));
 }
 
 /// Host the analysis catalogue, and act on the kind it chose.
@@ -629,7 +629,11 @@ fn ordered_instance_stack(
             app.state.simulate.active_analysis_instance = Some(id);
         }
         Some(StackAction::SetEnabled(id, enabled)) => {
-            apply_analysis_action(app, id, AnalysisAction::SetEnabled(enabled));
+            apply_analysis_action(
+                &mut features::cx(app),
+                id,
+                AnalysisAction::SetEnabled(enabled),
+            );
         }
         None => {}
     }
@@ -1595,7 +1599,7 @@ fn analysis_editor(
         }
         Err(error) => {
             app.state.simulate.simulation_surface_editor_anchor_y = None;
-            record_failure(&mut app.state, "Analysis editor", &error);
+            record_failure(&mut features::cx(app), "Analysis editor", &error);
             flat_notice(ui, |ui| {
                 page_kit::note_line(ui, "Plan unavailable", page_kit::Tone::Error);
                 page_kit::note_line(ui, &error, page_kit::Tone::Dim);
@@ -1619,7 +1623,7 @@ fn analysis_editor(
     let mut open_prior_dataset = false;
     let envelope_sources = matches!(draft, AnalysisDraft::Envelope(_) | AnalysisDraft::Pss(_))
         .then_some(&dependency_sources);
-    let validation_error = analysis_validation_error(&app.state, &draft, envelope_sources);
+    let validation_error = analysis_validation_error(&app.state.model, &draft, envelope_sources);
     // Distinct fields, borrowed separately, so the projection can be written
     // into the state while the controller that reads it stays shared.
     let plan_statement = plan_statement_for(&mut app.state, &app.simulation_controller, &draft);
@@ -1686,7 +1690,7 @@ fn analysis_editor(
         (Ok(before), Ok(after)) => before != after,
         (Err(error), _) | (_, Err(error)) => {
             record_failure(
-                &mut app.state,
+                &mut features::cx(app),
                 "Analysis edit",
                 &format!("the draft could not be serialized: {error}"),
             );
@@ -1705,7 +1709,7 @@ fn analysis_editor(
     // focus lands somewhere else, and that must not also commit an edit to the
     // analysis's own parameters.
     if !option_edits.is_empty() {
-        advanced_options::commit(app, selected.id, &option_edits);
+        advanced_options::commit(&mut features::cx(app), selected.id, &option_edits);
         ui.ctx().request_repaint();
         return;
     }
@@ -1738,11 +1742,7 @@ fn analysis_editor(
     if let Some(asked) = participation_action {
         match asked {
             participation::ParticipationAction::Set(run_at) => {
-                let _ = participation::commit_run_at(
-                    &mut crate::workbench::features::cx(app),
-                    selected.id,
-                    run_at,
-                );
+                let _ = participation::commit_run_at(&mut features::cx(app), selected.id, run_at);
             }
             participation::ParticipationAction::ChoosePoints => {
                 participation::open_point_picker(&mut app.state, selected.id);
@@ -1752,11 +1752,11 @@ fn analysis_editor(
         return;
     }
     if draft_changed {
-        commit_draft(app, selected.id, draft);
+        commit_draft(&mut features::cx(app), selected.id, draft);
         ui.ctx().request_repaint();
     }
     if let Some(action) = action {
-        apply_analysis_action(app, selected.id, action);
+        apply_analysis_action(&mut features::cx(app), selected.id, action);
         ui.ctx().request_repaint();
     }
 }
@@ -2403,11 +2403,11 @@ fn analysis_form_body(
 }
 
 fn analysis_validation_error(
-    app: &AppState,
+    model: &Model,
     draft: &AnalysisDraft,
     envelope_sources: Option<&EnvelopeSourceCatalog>,
 ) -> Option<String> {
-    app.model
+    model
         .sim_setup
         .analysis_draft_validation_error(draft)
         .or_else(|| match (draft, envelope_sources) {

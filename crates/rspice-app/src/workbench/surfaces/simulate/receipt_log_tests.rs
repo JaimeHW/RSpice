@@ -56,7 +56,11 @@ fn a_committed_plan_command_leaves_one_plan_receipt_in_the_console() {
     let mut app = RSpiceApp::test_instance();
     let id = first_instance(&app);
 
-    apply_analysis_action(&mut app, id, AnalysisAction::SetEnabled(false));
+    apply_analysis_action(
+        &mut crate::workbench::features::cx(&mut app),
+        id,
+        AnalysisAction::SetEnabled(false),
+    );
     app.state.drain_notices(&egui::Context::default());
 
     let entries = plan_entries(&app);
@@ -89,7 +93,7 @@ fn a_refused_plan_command_is_recorded_once_and_raises_no_toast() {
     let mut app = RSpiceApp::test_instance();
 
     apply_analysis_action(
-        &mut app,
+        &mut crate::workbench::features::cx(&mut app),
         AnalysisInstanceId::new(),
         AnalysisAction::SetEnabled(true),
     );

@@ -679,7 +679,7 @@ fn validating_a_dependent_checks_every_transitive_prerequisite_draft() {
 
     let mut app = RSpiceApp::test_instance();
     app.state.model.sim_setup.analysis_plan = Some(plan);
-    validate_analysis_instance(&mut app.state, pac);
+    validate_analysis_instance(&mut crate::workbench::features::cx(&mut app), pac);
 
     assert!(
         app.state
@@ -826,7 +826,11 @@ fn disabled_dependents_can_prepare_required_prerequisites_in_one_action() {
         Some("Add Operating point")
     );
 
-    apply_analysis_action(&mut app, ac, AnalysisAction::RepairDependencies);
+    apply_analysis_action(
+        &mut crate::workbench::features::cx(&mut app),
+        ac,
+        AnalysisAction::RepairDependencies,
+    );
     let plan = app.state.model.sim_setup.stable_analysis_plan().unwrap();
     let dependency = plan.instance(ac).unwrap().dependencies()[0];
     let op = plan.instance(dependency.target()).unwrap();
@@ -866,7 +870,11 @@ fn phase_noise_guides_autonomous_pss_authoring_when_it_cannot_be_inferred() {
         Some("Add and configure autonomous PSS")
     );
 
-    apply_analysis_action(&mut app, pnoise, AnalysisAction::PrepareAutonomousPss);
+    apply_analysis_action(
+        &mut crate::workbench::features::cx(&mut app),
+        pnoise,
+        AnalysisAction::PrepareAutonomousPss,
+    );
     let prepared = app
         .state
         .simulate
@@ -906,7 +914,11 @@ fn phase_noise_guides_autonomous_pss_authoring_when_it_cannot_be_inferred() {
         .unwrap()
         .instances()
         .len();
-    apply_analysis_action(&mut app, pnoise, AnalysisAction::PrepareAutonomousPss);
+    apply_analysis_action(
+        &mut crate::workbench::features::cx(&mut app),
+        pnoise,
+        AnalysisAction::PrepareAutonomousPss,
+    );
     let plan = app.state.model.sim_setup.stable_analysis_plan().unwrap();
     assert_eq!(plan.instances().len(), before_count);
     assert_eq!(app.state.simulate.active_analysis_instance, Some(prepared));
