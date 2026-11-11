@@ -30,11 +30,13 @@ impl Feature for SimulateFeature {
     /// The run history's primary runs or stops what the dispatcher would:
     /// on the Netlist workspace the shell runs that page's deck in place
     /// of the active plan. The Specifications page states why Results will
-    /// not open a limit's evidence in the dispatcher's own words.
+    /// not open a limit's evidence, and the Analyses route's heading why the
+    /// split stage will not open, in the dispatcher's own words.
     const FOREIGN_AVAILABILITY: &'static [CommandKey] = &[
         SimulateCommand::Run.key(),
         SimulateCommand::Stop.key(),
         ids::RESULT_SPECIFICATIONS,
+        ids::TOGGLE_SPLIT_VIEW,
     ];
 
     fn register(registry: &mut FeatureRegistry<Self>) {

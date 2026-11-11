@@ -23,7 +23,7 @@ use crate::product::AnalysisInstanceId;
 use crate::simulation::plan::{AnalysisDraft, NumericOverrideOption, OverrideValueKind};
 use crate::ui::tokens::Tokens;
 use crate::ui::widgets::select;
-use crate::workbench::RSpiceApp;
+use crate::workbench::app_state::Model;
 
 use super::super::advanced_options::{self, AdvancedOptionRow, AdvancedOptionSection, OptionEdit};
 
@@ -36,11 +36,11 @@ use super::super::advanced_options::{self, AdvancedOptionRow, AdvancedOptionSect
 /// what decides whether an option reaches the solve at all.
 pub(in crate::workbench::surfaces::simulate) fn fields(
     ui: &mut Ui,
-    app: &RSpiceApp,
+    model: &Model,
     draft: &AnalysisDraft,
     instance: AnalysisInstanceId,
 ) -> Vec<OptionEdit> {
-    let plan = app.state.model.sim_setup.stable_analysis_plan().ok();
+    let plan = model.sim_setup.stable_analysis_plan().ok();
     let record = plan
         .and_then(|plan| plan.instance(instance))
         .and_then(|target| target.numeric_override());
@@ -53,16 +53,11 @@ pub(in crate::workbench::surfaces::simulate) fn fields(
             draft.kind(),
             draft,
             record,
-            &app.state.model.sim_setup.options,
+            &model.sim_setup.options,
             ownership,
         )
     } else {
-        advanced_options::form_rows(
-            draft.kind(),
-            draft,
-            record,
-            &app.state.model.sim_setup.options,
-        )
+        advanced_options::form_rows(draft.kind(), draft, record, &model.sim_setup.options)
     };
     if ownership.study_inherited_options.is_some() {
         super::field_note(

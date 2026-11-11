@@ -9,7 +9,6 @@
 
 use egui::{Rect, vec2};
 
-use super::pages;
 use crate::product::ContentDigest;
 use crate::state::SimulationPage;
 use crate::state::{
@@ -55,15 +54,7 @@ fn render_with(page: SimulationPage, width: f32, seed: impl FnOnce(&mut AppState
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
                 .show(ctx, |ui| {
-                    // The Analyses route is drawn by the surface itself and
-                    // never reaches `pages::show`, so the whole surface is
-                    // what a test of the plan heading has to run.
-                    if page == SimulationPage::Analyses {
-                        super::show(ui, &mut app);
-                    } else {
-                        egui::ScrollArea::vertical()
-                            .show(ui, |ui| pages::show_over_app(ui, &mut app, page));
-                    }
+                    super::show_on_stage(ui, &mut app);
                 });
         },
     );

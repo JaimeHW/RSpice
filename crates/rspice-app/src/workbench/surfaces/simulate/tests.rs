@@ -723,7 +723,7 @@ fn selected_analysis_exposes_every_compatible_earlier_prerequisite() {
         netlist_source: None,
         diagnostic: None,
     };
-    let selected = selected_analysis(&app, &dependency_sources)
+    let selected = selected_analysis(&app.state.model, &app.state.simulate, &dependency_sources)
         .expect("selection resolves")
         .expect("analysis is selected");
     let candidates = selected
@@ -777,7 +777,7 @@ fn selected_dependent_reports_contextual_pss_mismatch_and_only_offers_executable
             ),
             diagnostic: None,
         };
-    let selected = selected_analysis(&app, &exact_sources)
+    let selected = selected_analysis(&app.state.model, &app.state.simulate, &exact_sources)
         .expect("selection resolves")
         .expect("PAC remains selected");
     assert!(
@@ -797,7 +797,7 @@ fn selected_dependent_reports_contextual_pss_mismatch_and_only_offers_executable
         netlist_source: None,
         diagnostic: Some("netlist elaboration failed".to_owned()),
     };
-    let selected = selected_analysis(&app, &unavailable_sources)
+    let selected = selected_analysis(&app.state.model, &app.state.simulate, &unavailable_sources)
         .expect("selection resolves fail-closed")
         .expect("PAC remains selected");
     assert!(selected.contextual_dependency_error.is_some());
@@ -817,7 +817,7 @@ fn disabled_dependents_can_prepare_required_prerequisites_in_one_action() {
     app.state.simulate.active_analysis_instance = Some(ac);
     let sources = build_envelope_source_catalog(&app.state.model);
 
-    let selected = selected_analysis(&app, &sources)
+    let selected = selected_analysis(&app.state.model, &app.state.simulate, &sources)
         .expect("selection resolves")
         .expect("AC remains selected");
     assert!(!selected.enabled);
@@ -861,7 +861,7 @@ fn phase_noise_guides_autonomous_pss_authoring_when_it_cannot_be_inferred() {
     app.state.simulate.active_analysis_instance = Some(pnoise);
     let sources = build_envelope_source_catalog(&app.state.model);
 
-    let selected = selected_analysis(&app, &sources)
+    let selected = selected_analysis(&app.state.model, &app.state.simulate, &sources)
         .expect("selection resolves")
         .expect("PNOISE remains selected");
     assert_eq!(selected.repair_label, None);
@@ -899,7 +899,7 @@ fn phase_noise_guides_autonomous_pss_authoring_when_it_cannot_be_inferred() {
     );
 
     app.state.simulate.active_analysis_instance = Some(pnoise);
-    let selected = selected_analysis(&app, &sources)
+    let selected = selected_analysis(&app.state.model, &app.state.simulate, &sources)
         .expect("selection resolves after prerequisite preparation")
         .expect("PNOISE becomes selected again");
     assert_eq!(
@@ -1979,7 +1979,7 @@ fn simulate_frame(app: &mut RSpiceApp, page: Option<crate::state::SimulationPage
             if page.is_some() {
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE)
-                    .show(ctx, |ui| super::show(ui, app));
+                    .show(ctx, |ui| super::show_on_stage(ui, app));
             }
             super::show_workflow_dialogs(ctx, app);
         },

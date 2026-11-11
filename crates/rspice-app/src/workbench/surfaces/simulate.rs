@@ -29,6 +29,9 @@ use lifecycle::*;
 use plan_issue_wording::*;
 use workflows::*;
 
+use page_excitations::SourceVerbIntent;
+pub(in crate::workbench) use pages::reads_foreign_answers;
+
 use std::collections::HashSet;
 
 use egui::{Align, Align2, Color32, Layout, Rect, ScrollArea, Sense, Stroke, Ui, Vec2, vec2};
@@ -50,14 +53,15 @@ use crate::ui::widgets::{
 };
 use crate::workbench::app_state::{Model, SimSetupState};
 use crate::workbench::framework::command_registry::ids;
-use crate::workbench::framework::feature::Cx;
+use crate::workbench::framework::feature::{CommandSet, Cx};
 use crate::workbench::simulate::SimulateFeature;
+use crate::workbench::slots::SimulateState;
 use crate::workbench::state::{
     AnalysisRunPointsDraft, ClonePlanDraft, DesignVariableDraft, RenameAnalysisDraft,
     SavedOutputDraft, SimulationPlanManagerDraft, SimulationPlanManagerMode,
-    SimulationWorkflowDialog, Workspace,
+    SimulationWorkflowDialog, WorkbenchSession, Workspace,
 };
-use crate::workbench::{AppState, RSpiceApp, features};
+use crate::workbench::{RSpiceApp, features};
 use rspice_simulation::output_contract::SavedOutputSemanticStatus;
 use rspice_simulation::output_contract::SavedOutputStorageEstimate;
 use rspice_simulation::runner::{TfRunConfig, infer_tf_run_config};
@@ -66,7 +70,6 @@ use super::super::design_system::{
     StatusMark, WorkbenchIcon, elide_text, heading, property_row, property_row_control_columns,
     property_row_problem, property_row_wrapped, workspace_title_row,
 };
-use crate::workbench::framework::host::Host;
 use crate::workbench::simulate::commands::SimulateCommand;
 
 const SIMULATION_STACK_BREAKPOINT: f32 = 820.0;
@@ -294,17 +297,28 @@ enum StackAction {
     SetEnabled(AnalysisInstanceId, bool),
 }
 
-pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
-    // A removal confirmed in the destructive review is applied here, by the
-    // surface that owns the plan, rather than by the modal that asked. The hop
-    // a refused removal offers is taken here for the same reason.
-    apply_confirmed_analysis_removal(&mut features::cx(app));
-    lifecycle::apply_requested_blocker_reveal(&mut app.state);
-    if let Err(error) = resolve_active_analysis_instance(&mut app.state) {
-        record_failure(&mut features::cx(app), "Analysis selection", &error);
+/// Apply what the frame before left for the surface. A removal confirmed in
+/// the destructive review is applied here, by the surface that owns the
+/// plan, rather than by the modal that asked, and the hop a refused removal
+/// offers is taken here for the same reason. Both land before the shell
+/// takes the dispatcher's answers the surface reads, so those answers are
+/// taken on the plan and the route it draws.
+pub(in crate::workbench) fn prepare(cx: &mut Cx<'_, SimulateFeature>) {
+    apply_confirmed_analysis_removal(cx);
+    lifecycle::apply_requested_blocker_reveal(cx.state);
+    if let Err(error) = resolve_active_analysis_instance(cx.model, cx.state) {
+        record_failure(cx, "Analysis selection", &error);
     }
+}
 
+/// Draw the surface [`prepare`] readied. Returns the row verb the Excitations
+/// page raised, for the shell to run once the surface has drawn.
+pub(in crate::workbench) fn show(
+    ui: &mut Ui,
+    cx: &mut Cx<'_, SimulateFeature>,
+) -> Option<SourceVerbIntent> {
     let t = Tokens::get(ui.ctx());
+    let mut verb = None;
     egui::Frame::new().fill(t.color.bg_app).show(ui, |ui| {
         // The track this surface is laid out in, with the scrollbar's gutter
         // withheld from it whether or not a bar is showing.
@@ -322,17 +336,17 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         let track = ui.available_width();
         let gutter = ui.spacing().scroll.allocated_width();
         let surface_width = (track - gutter).max(1.0);
-        let page = app.state.simulate.simulation_page;
+        let page = cx.state.simulation_page;
         let responsive_width = ui.ctx().content_rect().width().min(surface_width);
         if page == SimulationPage::Analyses
             && analysis_workspace_is_split(responsive_width, surface_width)
         {
-            split_analysis_route(ui, app, surface_width, responsive_width);
+            split_analysis_route(ui, cx, surface_width, responsive_width);
             return;
         }
         let output = ScrollArea::vertical()
             .id_salt("workbench.simulate.surface")
-            .vertical_scroll_offset(app.state.simulate.simulation_surface_scroll_y)
+            .vertical_scroll_offset(cx.state.simulation_surface_scroll_y)
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 let scroll_content_origin_y = ui.min_rect().top();
@@ -342,32 +356,32 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                     // A narrow surface: the stack above the editor, both in
                     // this one scroll, on one resolution of the plan's
                     // participation as on the split route.
-                    workspace_title_row(ui, |ui| plan_heading(ui, app, surface_width));
-                    let participation = participation::PlanParticipation::resolve(&app.state.model);
-                    ordered_instance_stack(ui, app, &participation);
-                    pages::dispatch_contract(ui, &app.state.model, &app.state.runs);
+                    workspace_title_row(ui, |ui| plan_heading(ui, cx, surface_width));
+                    let participation = participation::PlanParticipation::resolve(cx.model);
+                    ordered_instance_stack(ui, cx, &participation);
+                    pages::dispatch_contract(ui, cx.model, cx.runs);
                     ui.add_space(STACKED_WORKSPACE_GAP);
                     analysis_editor(
                         ui,
-                        app,
+                        cx,
                         responsive_width,
                         scroll_content_origin_y,
                         &participation,
                     );
                 } else {
-                    pages::show_over_app(ui, app, page);
+                    verb = pages::show(ui, cx, page);
                 }
             });
-        settle_surface_scroll(ui, &mut app.state, output.state.offset.y);
+        settle_surface_scroll(ui, cx.state, output.state.offset.y);
     });
+    verb
 }
 
 /// Keep the offset the surface's scroll ended on, moved by whatever the
 /// editor's anchor asked for this frame.
-fn settle_surface_scroll(ui: &Ui, state: &mut AppState, offset_y: f32) {
-    let pending_delta =
-        std::mem::take(&mut state.simulate.simulation_surface_pending_scroll_delta_y);
-    state.simulate.simulation_surface_scroll_y =
+fn settle_surface_scroll(ui: &Ui, state: &mut SimulateState, offset_y: f32) {
+    let pending_delta = std::mem::take(&mut state.simulation_surface_pending_scroll_delta_y);
+    state.simulation_surface_scroll_y =
         adjusted_scroll_for_stack_delta(offset_y, 0.0, pending_delta);
     if pending_delta != 0.0 {
         ui.ctx().request_repaint();
@@ -390,11 +404,11 @@ fn settle_surface_scroll(ui: &Ui, state: &mut AppState, offset_y: f32) {
 /// routes, and `SimulateCommand::AddAnalysis`, which reaches it from the Simulate menu
 /// and the palette on any workspace — but the catalogue itself was drawn from
 /// the Analyses rail, so pressing that action anywhere else set
-/// `palette_open` with nothing to render it. That flag is one of the terms of
-/// [`AppState::application_modal_open`], so the press took every keyboard
-/// shortcut in the application with it and left no painted modal to press
-/// Escape on. A host that runs once a frame wherever the reader is standing
-/// cannot arm an overlay that no pass draws.
+/// `palette_open` with nothing to render it. That flag is one of the terms
+/// of [`crate::workbench::AppState::application_modal_open`], so the press
+/// took every keyboard shortcut in the application with it and left no
+/// painted modal to press Escape on. A host that runs once a frame wherever
+/// the reader is standing cannot arm an overlay that no pass draws.
 pub(in crate::workbench) fn show_workflow_dialogs(ctx: &egui::Context, app: &mut RSpiceApp) {
     checkpoint_exchange::poll(ctx, &mut features::cx(app));
     transient_checkpoint_exchange::poll(ctx, &mut features::cx(app));
@@ -443,18 +457,18 @@ fn analysis_catalog(ctx: &egui::Context, cx: &mut Cx<'_, SimulateFeature>) {
 /// height with nothing below to scroll to.
 fn split_analysis_route(
     ui: &mut Ui,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, SimulateFeature>,
     surface_width: f32,
     responsive_width: f32,
 ) {
-    workspace_title_row(ui, |ui| plan_heading(ui, app, surface_width));
+    workspace_title_row(ui, |ui| plan_heading(ui, cx, surface_width));
     // Resolved once for the route and lent to both columns. Resolving it
     // expands the declared space, and the two columns each did it: the rail
     // through the workload it prices its rows from, the editor through the
     // participation its run-points control reads. One expansion answers both,
     // and it is the same one, so the two columns cannot report a different
     // space on the same frame.
-    let participation = participation::PlanParticipation::resolve(&app.state.model);
+    let participation = participation::PlanParticipation::resolve(cx.model);
     let body = ui.available_rect_before_wrap();
     let (stack_width, _) = analysis_split_widths(surface_width, responsive_width);
     let stack_rect = Rect::from_min_size(body.min, vec2(stack_width, body.height()));
@@ -474,8 +488,8 @@ fn split_analysis_route(
         .auto_shrink([false, false])
         .show(&mut stack, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
-            ordered_instance_stack(ui, app, &participation);
-            pages::dispatch_contract(ui, &app.state.model, &app.state.runs);
+            ordered_instance_stack(ui, cx, &participation);
+            pages::dispatch_contract(ui, cx.model, cx.runs);
         });
 
     // The editor's height follows its width, so it withholds the scrollbar's
@@ -488,7 +502,7 @@ fn split_analysis_route(
     let editor_width = (editor_rect.width() - editor.spacing().scroll.allocated_width()).max(1.0);
     let output = ScrollArea::vertical()
         .id_salt("workbench.simulate.analysis-editor")
-        .vertical_scroll_offset(app.state.simulate.simulation_surface_scroll_y)
+        .vertical_scroll_offset(cx.state.simulation_surface_scroll_y)
         .auto_shrink([false, false])
         .show(&mut editor, |ui| {
             let scroll_content_origin_y = ui.min_rect().top();
@@ -496,13 +510,13 @@ fn split_analysis_route(
             ui.set_width(editor_width);
             analysis_editor(
                 ui,
-                app,
+                cx,
                 responsive_width,
                 scroll_content_origin_y,
                 &participation,
             );
         });
-    settle_surface_scroll(ui, &mut app.state, output.state.offset.y);
+    settle_surface_scroll(ui, cx.state, output.state.offset.y);
     ui.advance_cursor_after_rect(body);
 }
 
@@ -553,10 +567,10 @@ const fn analysis_row_content_min_width() -> f32 {
 
 fn ordered_instance_stack(
     ui: &mut Ui,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, SimulateFeature>,
     participation: &participation::PlanParticipation,
 ) {
-    let rows = match analysis_stack_rows(&app.state.model, participation) {
+    let rows = match analysis_stack_rows(cx.model, participation) {
         Ok(rows) => rows,
         Err(error) => {
             flat_notice(ui, |ui| {
@@ -566,7 +580,7 @@ fn ordered_instance_stack(
             return;
         }
     };
-    let active = app.state.simulate.active_analysis_instance;
+    let active = cx.state.active_analysis_instance;
     let mut action = None;
     let mut add_analysis = false;
     let t = Tokens::get(ui.ctx());
@@ -581,7 +595,7 @@ fn ordered_instance_stack(
             flat_notice(ui, |ui| {
                 page_kit::note_line(ui, "No analysis instances", page_kit::Tone::Text);
                 ui.add_space(4.0);
-                add_analysis = Button::new(app.label(SimulateCommand::AddAnalysis.key()))
+                add_analysis = Button::new(SimulateCommand::AddAnalysis.spec().label)
                     .accent()
                     .min_width(ui.available_width())
                     .show(ui)
@@ -621,19 +635,15 @@ fn ordered_instance_stack(
     });
 
     if add_analysis {
-        app.execute_command_key(SimulateCommand::AddAnalysis.key());
+        cx.execute(SimulateCommand::AddAnalysis.key());
     }
 
     match action {
         Some(StackAction::Select(id)) => {
-            app.state.simulate.active_analysis_instance = Some(id);
+            cx.state.active_analysis_instance = Some(id);
         }
         Some(StackAction::SetEnabled(id, enabled)) => {
-            apply_analysis_action(
-                &mut features::cx(app),
-                id,
-                AnalysisAction::SetEnabled(enabled),
-            );
+            apply_analysis_action(cx, id, AnalysisAction::SetEnabled(enabled));
         }
         None => {}
     }
@@ -1184,19 +1194,13 @@ fn prior_plan_run(model: &Model) -> Option<PriorPlanRun> {
     })
 }
 
-fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
-    let plan_name = app
-        .state
-        .model
-        .sim_setup
-        .active_plan_name()
-        .as_str()
-        .to_owned();
+fn plan_heading(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, surface_width: f32) {
+    let plan_name = cx.model.sim_setup.active_plan_name().as_str().to_owned();
     // The heading is the plan's name. What the plan holds is the rail's, and
     // its last run is the hop's: the hop's label and its own availability read
     // the one derivation, so they cannot disagree.
-    let prior = prior_plan_run(&app.state.model);
-    let plan_available = app.state.model.sim_setup.stable_analysis_plan().is_ok();
+    let prior = prior_plan_run(cx.model);
+    let plan_available = cx.model.sim_setup.stable_analysis_plan().is_ok();
 
     // The split toggle sits beside the hop because both answer "and now show
     // me what the last run produced" — one by leaving this page, one by
@@ -1205,7 +1209,7 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
         || "Open prior run".to_owned(),
         |prior| format!("Open Run {}", prior.sequence),
     );
-    let split_availability = app.command_availability(ids::TOGGLE_SPLIT_VIEW);
+    let split_availability = cx.foreign_availability(ids::TOGGLE_SPLIT_VIEW);
     let split_enabled = split_availability.is_available();
     let split_reason = match split_availability {
         crate::workbench::framework::command_registry::CommandAvailability::Disabled(reason) => {
@@ -1214,7 +1218,7 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
         crate::workbench::framework::command_registry::CommandAvailability::Available
         | crate::workbench::framework::command_registry::CommandAvailability::Hidden => None,
     };
-    let split_label = if app.state.workbench.split_with_results {
+    let split_label = if cx.wb.split_with_results {
         "Unsplit results"
     } else {
         "Split with results"
@@ -1230,7 +1234,7 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
     // will dispatch was the one page that never said whether the report
     // authorizing it still held.
     let mut rerun_preflight = false;
-    let chip = pages::PreflightChip::resolve(&app.state.model, &app.state.runs);
+    let chip = pages::PreflightChip::resolve(cx.model, cx.runs);
     let chip_reserve = chip.as_ref().map_or(0.0, |chip| chip.reserve(ui));
     let actions_width =
         title_action_group_width(ui, &open_prior_label, split_label, TITLE_ACTION_SPACING);
@@ -1312,17 +1316,12 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
         });
     }
     if manage_plans {
-        app.execute_command_key(SimulateCommand::ManagePlans.key());
+        cx.execute(SimulateCommand::ManagePlans.key());
     }
     if clone_plan {
-        app.state.simulate.simulation_workflow = Some(SimulationWorkflowDialog::ClonePlan(
+        cx.state.simulation_workflow = Some(SimulationWorkflowDialog::ClonePlan(
             ClonePlanDraft::for_source(
-                app.state
-                    .model
-                    .sim_setup
-                    .stable_analysis_plan()
-                    .unwrap()
-                    .id(),
+                cx.model.sim_setup.stable_analysis_plan().unwrap().id(),
                 &plan_name,
             ),
         ));
@@ -1331,17 +1330,17 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
     // the standing and the offer to refresh it, and the accent action is the
     // same refresh named as a step.
     if validate || rerun_preflight {
-        app.execute_command_key(SimulateCommand::Preflight.key());
+        cx.execute(SimulateCommand::Preflight.key());
     }
     if open_prior && let Some(PriorPlanRun { index, .. }) = prior {
         // Selecting first is what carries the object: the command owns the
         // workspace half of the destination and nothing else.
-        if app.state.model.simulation.select_run(index) {
-            app.execute_command_key(ids::OPEN_RUN_IN_RESULTS);
+        if cx.model.simulation.select_run(index) {
+            cx.execute(ids::OPEN_RUN_IN_RESULTS);
         }
     }
     if toggle_split {
-        app.execute_command_key(ids::TOGGLE_SPLIT_VIEW);
+        cx.execute(ids::TOGGLE_SPLIT_VIEW);
     }
 }
 
@@ -1404,8 +1403,8 @@ fn split_button(ui: &mut Ui, label: &str, enabled: bool, reason: Option<&str>) -
         .clicked()
 }
 
-fn envelope_source_catalog(ui: &Ui, app: &RSpiceApp) -> EnvelopeSourceCatalog {
-    let source_digest = envelope_source_catalog_input_digest(&app.state.model);
+fn envelope_source_catalog(ui: &Ui, model: &Model) -> EnvelopeSourceCatalog {
+    let source_digest = envelope_source_catalog_input_digest(model);
     let cache_id = egui::Id::new("simulation-envelope-source-catalog");
     if let Some(cached) = ui
         .ctx()
@@ -1415,7 +1414,7 @@ fn envelope_source_catalog(ui: &Ui, app: &RSpiceApp) -> EnvelopeSourceCatalog {
         return cached;
     }
 
-    let catalog = build_envelope_source_catalog_with_digest(&app.state.model, source_digest);
+    let catalog = build_envelope_source_catalog_with_digest(model, source_digest);
     ui.ctx()
         .data_mut(|data| data.insert_temp(cache_id, catalog.clone()));
     catalog
@@ -1481,8 +1480,8 @@ impl NoiseDomainCatalog {
 /// Elaborating a design costs a full circuit build, so the catalog is keyed by
 /// the same cheap digest the periodic-source catalog uses and rebuilt only
 /// when the design behind it changes.
-fn noise_domain_catalog(ui: &Ui, app: &RSpiceApp) -> NoiseDomainCatalog {
-    let source_digest = envelope_source_catalog_input_digest(&app.state.model);
+fn noise_domain_catalog(ui: &Ui, model: &Model) -> NoiseDomainCatalog {
+    let source_digest = envelope_source_catalog_input_digest(model);
     let cache_id = egui::Id::new("simulation-noise-domain-catalog");
     if let Some(cached) = ui
         .ctx()
@@ -1492,20 +1491,20 @@ fn noise_domain_catalog(ui: &Ui, app: &RSpiceApp) -> NoiseDomainCatalog {
         return cached;
     }
 
-    let catalog = build_noise_domain_catalog_with_digest(app, source_digest);
+    let catalog = build_noise_domain_catalog_with_digest(model, source_digest);
     ui.ctx()
         .data_mut(|data| data.insert_temp(cache_id, catalog.clone()));
     catalog
 }
 
 fn build_noise_domain_catalog_with_digest(
-    app: &RSpiceApp,
+    model: &Model,
     source_digest: ContentDigest,
 ) -> NoiseDomainCatalog {
     let catalog = (|| -> Result<(Vec<String>, Vec<String>), String> {
         let source =
             crate::simulation::controller::SimulationController::prepare_design_netlist_for_inspection(
-                &app.state.model,
+                model,
             )
             .map_err(|error| error.to_string())?;
         let netlist = rspice_core::Netlist::parse(&source).map_err(|error| error.to_string())?;
@@ -1551,8 +1550,8 @@ struct TfInferenceCatalog {
 /// Reading a design costs a netlist build and a parse, so this is keyed by the
 /// same cheap digest the noise and periodic-source catalogs use and rebuilt
 /// only when the design behind it changes.
-fn tf_inference_catalog(ui: &Ui, app: &RSpiceApp) -> TfInferenceCatalog {
-    let source_digest = envelope_source_catalog_input_digest(&app.state.model);
+fn tf_inference_catalog(ui: &Ui, model: &Model) -> TfInferenceCatalog {
+    let source_digest = envelope_source_catalog_input_digest(model);
     let cache_id = egui::Id::new("simulation-tf-inference-catalog");
     if let Some(cached) = ui
         .ctx()
@@ -1565,7 +1564,7 @@ fn tf_inference_catalog(ui: &Ui, app: &RSpiceApp) -> TfInferenceCatalog {
     let inference = (|| -> Result<TfRunConfig, String> {
         let source =
             crate::simulation::controller::SimulationController::prepare_design_netlist_for_inspection(
-                &app.state.model,
+                model,
             )
             .map_err(|error| error.to_string())?;
         let netlist = rspice_core::Netlist::parse(&source).map_err(|error| error.to_string())?;
@@ -1582,24 +1581,24 @@ fn tf_inference_catalog(ui: &Ui, app: &RSpiceApp) -> TfInferenceCatalog {
 
 fn analysis_editor(
     ui: &mut Ui,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, SimulateFeature>,
     viewport_width: f32,
     scroll_content_origin_y: f32,
     resolved_participation: &participation::PlanParticipation,
 ) {
-    let dependency_sources = envelope_source_catalog(ui, app);
-    let selected = match selected_analysis(app, &dependency_sources) {
+    let dependency_sources = envelope_source_catalog(ui, cx.model);
+    let selected = match selected_analysis(cx.model, cx.state, &dependency_sources) {
         Ok(Some(selected)) => selected,
         Ok(None) => {
-            app.state.simulate.simulation_surface_editor_anchor_y = None;
+            cx.state.simulation_surface_editor_anchor_y = None;
             flat_notice(ui, |ui| {
                 page_kit::note_line(ui, "Add an analysis to start.", page_kit::Tone::Dim);
             });
             return;
         }
         Err(error) => {
-            app.state.simulate.simulation_surface_editor_anchor_y = None;
-            record_failure(&mut features::cx(app), "Analysis editor", &error);
+            cx.state.simulation_surface_editor_anchor_y = None;
+            record_failure(cx, "Analysis editor", &error);
             flat_notice(ui, |ui| {
                 page_kit::note_line(ui, "Plan unavailable", page_kit::Tone::Error);
                 page_kit::note_line(ui, &error, page_kit::Tone::Dim);
@@ -1612,7 +1611,7 @@ fn analysis_editor(
     // The summary used to find its own, over a predicate that accepted a run
     // holding nothing — so a started run made the card claim a retained
     // immutable dataset while the hop beside it stayed disabled.
-    let prior_run = prior_plan_run(&app.state.model);
+    let prior_run = prior_plan_run(cx.model);
     let prior_datasets = prior_run.map_or_else(
         || "No prior datasets".to_owned(),
         PriorPlanRun::contract_summary,
@@ -1623,14 +1622,14 @@ fn analysis_editor(
     let mut open_prior_dataset = false;
     let envelope_sources = matches!(draft, AnalysisDraft::Envelope(_) | AnalysisDraft::Pss(_))
         .then_some(&dependency_sources);
-    let validation_error = analysis_validation_error(&app.state.model, &draft, envelope_sources);
+    let validation_error = analysis_validation_error(cx.model, &draft, envelope_sources);
     // Distinct fields, borrowed separately, so the projection can be written
     // into the state while the controller that reads it stays shared.
-    let plan_statement = plan_statement_for(&mut app.state, &app.simulation_controller, &draft);
+    let plan_statement = plan_statement_for(cx.model, cx.handles.run_controller, &draft);
     let mut participation_action = None;
     // The run-space forms route to the page that owns the declaration rather
     // than editing it in place. Collected here and applied below, for the same
-    // reason the participation action is: the frame is already borrowing `app`.
+    // reason the participation action is: the frame is already borrowing `cx`.
     let mut run_space_route = None;
     let mut option_edits = Vec::new();
     let mut checkpoint_action = None;
@@ -1656,7 +1655,8 @@ fn analysis_editor(
         );
         let form_anchor_y = analysis_form_body(
             ui,
-            app,
+            cx.model,
+            cx.wb,
             &mut draft,
             envelope_sources,
             &mut run_space_route,
@@ -1667,10 +1667,10 @@ fn analysis_editor(
         (form_anchor_y, rename_requested)
     });
     if let Some(action) = checkpoint_action {
-        checkpoint_exchange::apply(ui.ctx(), app, action);
+        checkpoint_exchange::apply(ui.ctx(), cx, action);
     }
     if let Some(page) = run_space_route {
-        app.state.simulate.simulation_page = page;
+        cx.state.simulation_page = page;
     }
     let (form_anchor_y, rename_requested) = editor_response.inner;
     let form_anchor_content_y = content_space_anchor(form_anchor_y, scroll_content_origin_y);
@@ -1681,8 +1681,8 @@ fn analysis_editor(
         Stroke::new(1.0, t.color.border_strong),
     );
 
-    if let Some(anchor_y) = app.state.simulate.simulation_surface_editor_anchor_y.take() {
-        app.state.simulate.simulation_surface_pending_scroll_delta_y +=
+    if let Some(anchor_y) = cx.state.simulation_surface_editor_anchor_y.take() {
+        cx.state.simulation_surface_pending_scroll_delta_y +=
             editor_anchor_scroll_delta(anchor_y, form_anchor_content_y);
     }
 
@@ -1690,11 +1690,11 @@ fn analysis_editor(
         (Ok(before), Ok(after)) => before != after,
         (Err(error), _) | (_, Err(error)) => {
             record_failure(
-                &mut features::cx(app),
+                cx,
                 "Analysis edit",
                 &format!("the draft could not be serialized: {error}"),
             );
-            app.state.simulate.simulation_surface_editor_anchor_y = Some(form_anchor_content_y);
+            cx.state.simulation_surface_editor_anchor_y = Some(form_anchor_content_y);
             return;
         }
     };
@@ -1703,13 +1703,13 @@ fn analysis_editor(
     // dependency bind, enable toggle, insertion, removal, or repair that changes
     // content above it is then compensated on the next frame without maintaining
     // a fragile action whitelist.
-    app.state.simulate.simulation_surface_editor_anchor_y = Some(form_anchor_content_y);
+    cx.state.simulation_surface_editor_anchor_y = Some(form_anchor_content_y);
     // Ahead of every commit below, for the reason the participation action is:
     // an option field commits when it is let go of, which is the same instant
     // focus lands somewhere else, and that must not also commit an edit to the
     // analysis's own parameters.
     if !option_edits.is_empty() {
-        advanced_options::commit(&mut features::cx(app), selected.id, &option_edits);
+        advanced_options::commit(cx, selected.id, &option_edits);
         ui.ctx().request_repaint();
         return;
     }
@@ -1718,15 +1718,15 @@ fn analysis_editor(
     // commit an unintended edit on the way out of the page.
     if open_prior_dataset
         && let Some(PriorPlanRun { index, .. }) = prior_run
-        && app.state.model.simulation.select_run(index)
+        && cx.model.simulation.select_run(index)
     {
-        app.execute_command_key(ids::OPEN_RUN_IN_RESULTS);
+        cx.execute(ids::OPEN_RUN_IN_RESULTS);
         return;
     }
     if rename_requested {
         // Opened on what the header showed, and told which analysis it is by
         // the two facts the header's own second line states.
-        app.state.simulate.simulation_workflow = Some(SimulationWorkflowDialog::RenameAnalysis(
+        cx.state.simulation_workflow = Some(SimulationWorkflowDialog::RenameAnalysis(
             RenameAnalysisDraft::for_instance(
                 selected.id,
                 format!("{} · {}", selected.kind.label(), selected.id),
@@ -1742,21 +1742,21 @@ fn analysis_editor(
     if let Some(asked) = participation_action {
         match asked {
             participation::ParticipationAction::Set(run_at) => {
-                let _ = participation::commit_run_at(&mut features::cx(app), selected.id, run_at);
+                let _ = participation::commit_run_at(cx, selected.id, run_at);
             }
             participation::ParticipationAction::ChoosePoints => {
-                participation::open_point_picker(&mut features::cx(app), selected.id);
+                participation::open_point_picker(cx, selected.id);
             }
         }
         ui.ctx().request_repaint();
         return;
     }
     if draft_changed {
-        commit_draft(&mut features::cx(app), selected.id, draft);
+        commit_draft(cx, selected.id, draft);
         ui.ctx().request_repaint();
     }
     if let Some(action) = action {
-        apply_analysis_action(&mut features::cx(app), selected.id, action);
+        apply_analysis_action(cx, selected.id, action);
         ui.ctx().request_repaint();
     }
 }
@@ -1997,8 +1997,8 @@ struct ContractDatasets<'a> {
 ///
 /// The builders read the legacy singleton slots rather than the draft, so the
 /// draft has to be projected into the state first. Projected in place and
-/// restored exactly, rather than onto a cloned application: a whole `AppState`
-/// carries the design, the datasets and the model libraries, and cloning that
+/// restored exactly, rather than onto a cloned model: the model carries the
+/// design, the datasets and the model libraries, and cloning that
 /// once a frame to read one line of text would be the most expensive thing on
 /// this route.
 ///
@@ -2015,16 +2015,16 @@ struct ContractDatasets<'a> {
 /// business reaching the schematic, the workspace or the documents, and saying
 /// so in the signature is what keeps that true.
 fn plan_statement_for(
-    state: &mut AppState,
+    model: &mut Model,
     controller: &SimulationController,
     draft: &AnalysisDraft,
 ) -> Result<String, String> {
-    let stored_plans = std::mem::take(&mut state.model.sim_setup.inactive_plans);
-    let restore = state.model.sim_setup.clone();
-    state.model.sim_setup.apply_analysis_draft_projection(draft);
-    let statement = controller.analysis_draft_directive(&state.model, draft);
-    state.model.sim_setup = restore;
-    state.model.sim_setup.inactive_plans = stored_plans;
+    let stored_plans = std::mem::take(&mut model.sim_setup.inactive_plans);
+    let restore = model.sim_setup.clone();
+    model.sim_setup.apply_analysis_draft_projection(draft);
+    let statement = controller.analysis_draft_directive(model, draft);
+    model.sim_setup = restore;
+    model.sim_setup.inactive_plans = stored_plans;
     statement
 }
 
@@ -2217,7 +2217,8 @@ fn analysis_contract(
 
 fn analysis_form_body(
     ui: &mut Ui,
-    app: &RSpiceApp,
+    model: &Model,
+    wb: &WorkbenchSession,
     draft: &mut AnalysisDraft,
     envelope_sources: Option<&EnvelopeSourceCatalog>,
     route: &mut Option<crate::state::SimulationPage>,
@@ -2228,22 +2229,16 @@ fn analysis_form_body(
     option_edits: &mut Vec<advanced_options::OptionEdit>,
     checkpoint_action: &mut Option<checkpoint_exchange::Action>,
 ) -> f32 {
-    let project_revision = app.state.model.workspace.content.project.revision();
-    let previous_state = app
-        .state
-        .model
+    let project_revision = model.workspace.content.project.revision();
+    let previous_state = model
         .simulation
         .retained
         .has_retained_op_state(project_revision, false);
-    let compatible_previous_state = app
-        .state
-        .model
+    let compatible_previous_state = model
         .simulation
         .retained
         .has_retained_op_state(project_revision, true);
-    let soa_violations = app
-        .state
-        .model
+    let soa_violations = model
         .simulation
         .active_soa_violation_context(project_revision)
         .is_some();
@@ -2257,21 +2252,19 @@ fn analysis_form_body(
     // plan's, and the only way to guarantee that is to give them no copy of
     // their own to state instead.
     let run_space = analysis_form::RunSpaceContext {
-        run_set: &app.state.model.sim_setup.run_set,
-        reference: app.state.model.sim_setup.reference_pvt,
+        run_set: &model.sim_setup.run_set,
+        reference: model.sim_setup.reference_pvt,
         // Borrowed, not `plan_payload`: that clones the whole payload, and
         // this runs once per analysis form per frame for one Copy enum.
-        nominal_failure: app
-            .state
-            .model
+        nominal_failure: model
             .sim_setup
             .stable_analysis_plan()
             .ok()
             .map(|plan| plan.id())
-            .and_then(|plan_id| app.state.model.workspace.content.plan_data(plan_id))
+            .and_then(|plan_id| model.workspace.content.plan_data(plan_id))
             .map(|payload| payload.specification_policy.nominal_failure)
             .unwrap_or_default(),
-        model_binding_count: app.state.model.sim_setup.model_bindings.len(),
+        model_binding_count: model.sim_setup.model_bindings.len(),
         parallelism: crate::simulation::execution::execution_target_parallelism(),
     };
     // The noise and transfer-function forms ask for the same two quantities —
@@ -2283,11 +2276,11 @@ fn analysis_form_body(
         draft,
         AnalysisDraft::Noise(_) | AnalysisDraft::TransferFunction(_)
     )
-    .then(|| noise_domain_catalog(ui, app));
+    .then(|| noise_domain_catalog(ui, model));
     // Only the stability forms offer the drawing's loop probes, and the scan
     // allocates. Every other analysis leaves it unmeasured.
     let placed_loop_probes = if analysis_form::offers_placed_loop_probes(draft) {
-        app.state.model.schematic.placed_loop_probe_names()
+        model.schematic.placed_loop_probe_names()
     } else {
         Vec::new()
     };
@@ -2295,15 +2288,13 @@ fn analysis_form_body(
     // derivation walks the design's nets. Every other analysis leaves it
     // unmeasured.
     let placed_rf_ports = matches!(draft, AnalysisDraft::SParameter(_))
-        .then(|| {
-            crate::simulation::placed_sources::placed_rf_ports(&app.state.model.schematic, None)
-        })
+        .then(|| crate::simulation::placed_sources::placed_rf_ports(&model.schematic, None))
         .unwrap_or_default();
     // Only the transfer-function form offers to fill itself from the deck, and
     // reading one costs a netlist build. Every other analysis leaves it
     // unmeasured.
-    let tf_inference =
-        matches!(draft, AnalysisDraft::TransferFunction(_)).then(|| tf_inference_catalog(ui, app));
+    let tf_inference = matches!(draft, AnalysisDraft::TransferFunction(_))
+        .then(|| tf_inference_catalog(ui, model));
     let study_bases = if matches!(
         draft,
         AnalysisDraft::MonteCarlo(_)
@@ -2311,8 +2302,7 @@ fn analysis_form_body(
             | AnalysisDraft::Temperature(_)
             | AnalysisDraft::Corner(_)
     ) {
-        app.state
-            .model
+        model
             .sim_setup
             .analysis_plan
             .as_ref()
@@ -2359,8 +2349,8 @@ fn analysis_form_body(
                 analysis_form::form(
                     ui,
                     draft,
-                    app.state.model.preferences.quantity_presentation_policy(),
-                    app.state.workbench.number_locale,
+                    model.preferences.quantity_presentation_policy(),
+                    wb.number_locale,
                     envelope_sources.map_or(&[], |catalog| catalog.names.as_slice()),
                     &placed_loop_probes,
                     &placed_rf_ports,
@@ -2378,23 +2368,19 @@ fn analysis_form_body(
                 // they are: a bound this analysis states, in the same grid and
                 // with the same label over the same well.
                 if let AnalysisDraft::MonteCarlo(setup) = draft {
-                    *checkpoint_action = analysis_form::checkpoint_sources(
-                        ui,
-                        setup,
-                        &app.state.model.simulation,
-                        selected,
-                    );
+                    *checkpoint_action =
+                        analysis_form::checkpoint_sources(ui, setup, &model.simulation, selected);
                 }
                 if let AnalysisDraft::Transient(setup) = draft {
                     *checkpoint_action = analysis_form::transient_checkpoint_sources(
                         ui,
                         setup,
-                        &app.state.model.simulation,
+                        &model.simulation,
                         selected,
                     )
                     .map(checkpoint_exchange::Action::Transient);
                 }
-                *option_edits = analysis_form::options::fields(ui, app, draft, selected);
+                *option_edits = analysis_form::options::fields(ui, model, draft, selected);
             });
         })
         .response
@@ -2460,6 +2446,13 @@ pub(crate) fn measurement_in_output_dataset_for_test(
     spec: &crate::state::SpecEntry,
 ) -> Option<f64> {
     output_evidence::measurement_in_output_dataset(run, spec).map(|evidence| evidence.value)
+}
+
+/// The Simulate workspace as the shell draws it on the stage.
+#[cfg(test)]
+fn show_on_stage(ui: &mut Ui, app: &mut RSpiceApp) {
+    use crate::workbench::framework::host::{Host, Point};
+    app.contribute(Point::Surface(Workspace::Simulate), ui);
 }
 
 #[cfg(test)]

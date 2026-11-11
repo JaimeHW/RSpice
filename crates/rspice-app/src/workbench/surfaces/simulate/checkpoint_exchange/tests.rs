@@ -1,7 +1,7 @@
 //! Checkpoint exchange tests preserve project ownership and stored file identity.
 
 use super::*;
-use crate::workbench::AppState;
+use crate::workbench::{AppState, RSpiceApp};
 
 #[test]
 #[cfg(not(target_arch = "wasm32"))]

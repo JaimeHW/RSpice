@@ -65,7 +65,7 @@ fn analyses_route_painted_lines(width: f32) -> Vec<PaintedLine> {
         |ctx| {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
-                .show(ctx, |ui| super::show(ui, &mut app));
+                .show(ctx, |ui| super::show_on_stage(ui, &mut app));
         },
     );
     painted_lines(&output.shapes)
@@ -237,7 +237,7 @@ fn analyses_form_lines(kind: AnalysisKind, width: f32) -> Option<Vec<PaintedLine
             |ctx| {
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE)
-                    .show(ctx, |ui| super::show(ui, &mut app));
+                    .show(ctx, |ui| super::show_on_stage(ui, &mut app));
             },
         )
     };
@@ -475,7 +475,7 @@ impl AnalysesRoute {
             |ctx| {
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE)
-                    .show(ctx, |ui| super::show(ui, app));
+                    .show(ctx, |ui| super::show_on_stage(ui, app));
             },
         );
         painted_lines(&output.shapes)

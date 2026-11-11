@@ -20,7 +20,6 @@ mod value_size;
 use egui::{Rect, vec2};
 
 use super::page_kit::column_rects;
-use super::pages;
 use crate::simulation::dialog::SimulationOptions;
 use crate::simulation::plan::OptionsDialogState;
 use crate::state::SimulationPage;
@@ -78,8 +77,7 @@ fn render_with(page: SimulationPage, width: f32, seed: impl FnOnce(&mut RSpiceAp
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
                 .show(ctx, |ui| {
-                    egui::ScrollArea::vertical()
-                        .show(ui, |ui| pages::show_over_app(ui, &mut app, page));
+                    super::show_on_stage(ui, &mut app);
                 });
         },
     );
@@ -108,6 +106,10 @@ fn plan_id(app: &RSpiceApp) -> crate::product::SimulationPlanId {
 /// fragments below are what each page used to say.
 #[test]
 fn no_studio_page_paints_a_sentence_under_its_title() {
+    // The Analyses route is headed by its plan's name, every other route by
+    // its page's.
+    let app = RSpiceApp::test_instance();
+    let plan = app.state.model.sim_setup.active_plan_name();
     for (page, lecture) in [
         (
             SimulationPage::Analyses,
@@ -126,8 +128,12 @@ fn no_studio_page_paints_a_sentence_under_its_title() {
         (SimulationPage::Save, "Own what is stored"),
     ] {
         let rendered = render(page, 1200.0);
+        let title = match page {
+            SimulationPage::Analyses => plan.as_str(),
+            _ => page.title(),
+        };
         assert!(
-            rendered.contains(page.title()),
+            rendered.contains(title),
             "{page:?} must still paint its title:\n{rendered}"
         );
         assert!(

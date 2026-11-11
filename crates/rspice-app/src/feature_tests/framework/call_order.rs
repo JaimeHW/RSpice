@@ -613,7 +613,7 @@ const RESULTS_CONTRIBUTIONS: &[Step] = &[
     (
         "surface",
         &[
-            "Workspace::Simulate => simulate::show(ui, app),",
+            "let verb = simulate::show(",
             "Workspace::Results => features::show_surface::<ResultsFeature>(app, ui),",
             "app.after_contribution();",
             "Point::SplitResults =>",
@@ -718,9 +718,11 @@ const DESIGN_CONTRIBUTIONS: &[Step] = &[
     ),
 ];
 
-/// The shell's `contribute`, at the simulate feature's points. The Verify
-/// surface draws in the feature's context and has the command it raised
-/// answered once it has drawn, before the next point draws. The navigator
+/// The shell's `contribute`, at the simulate feature's points. Both surfaces
+/// draw in the feature's context and have the command they raised answered
+/// once they have drawn, before the next point draws; the Simulate surface's
+/// carried-over transactions land before the shell takes the answers it
+/// reads, and the row verb it raised runs once it has drawn. The navigator
 /// and the inspector draw in the feature's context on both its workspaces:
 /// on Simulate each has the command it raised answered once it has drawn;
 /// on Verify they raise nothing, so they answer nothing where they draw.
@@ -728,6 +730,19 @@ const SIMULATE_CONTRIBUTIONS: &[Step] = &[
     (
         "workspace surface",
         &[
+            "Workspace::Simulate => {\
+           simulate::prepare(&mut features::cx(app));\
+           let page = app.state.simulate.simulation_page;\
+           let verb = simulate::show(\
+           ui,\
+           &mut features::cx_with_foreign_answers(app, |app| {\
+           simulate::reads_foreign_answers(&app.state.model, page)\
+           }),\
+           );\
+           if let Some(verb) = verb {\
+           verb.apply(&mut app.state);\
+           }\
+           }",
             "Workspace::Verify => verify::show(ui, &mut features::cx(app)),",
             "app.after_contribution();",
             "Point::SplitResults =>",

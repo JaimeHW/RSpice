@@ -34,7 +34,7 @@ fn the_displayed_statement_is_the_directive_the_controller_emits() {
     ] {
         let draft = AnalysisDraft::for_kind(kind);
         let displayed =
-            super::plan_statement_for(&mut app.state, &app.simulation_controller, &draft);
+            super::plan_statement_for(&mut app.state.model, &app.simulation_controller, &draft);
 
         // The same call the page makes, against the same projection, reached
         // independently here. If the page ever starts spelling its own
@@ -77,7 +77,7 @@ fn a_displayed_statement_is_a_directive_the_engine_accepts() {
         // directive at all, and the page shows the refusal instead. That is
         // the editor's contract, not a claim about the parser.
         let Ok(statement) =
-            super::plan_statement_for(&mut app.state, &app.simulation_controller, &draft)
+            super::plan_statement_for(&mut app.state.model, &app.simulation_controller, &draft)
         else {
             continue;
         };
@@ -135,7 +135,7 @@ fn a_displayed_statement_is_spelled_in_engineering_notation_the_engine_accepts()
     for kind in AnalysisKind::ALL {
         let draft = AnalysisDraft::for_kind(kind);
         let Ok(statement) =
-            super::plan_statement_for(&mut app.state, &app.simulation_controller, &draft)
+            super::plan_statement_for(&mut app.state.model, &app.simulation_controller, &draft)
         else {
             continue;
         };
@@ -169,12 +169,12 @@ fn reading_a_statement_leaves_the_plan_exactly_as_it_found_it() {
     // serialization already answers exactly that over every field.
     let before = serde_json::to_vec(&app.state.model.sim_setup).expect("the setup view serializes");
     let _ = super::plan_statement_for(
-        &mut app.state,
+        &mut app.state.model,
         &app.simulation_controller,
         &AnalysisDraft::for_kind(AnalysisKind::Transient),
     );
     let _ = super::plan_statement_for(
-        &mut app.state,
+        &mut app.state.model,
         &app.simulation_controller,
         &AnalysisDraft::for_kind(AnalysisKind::Ac),
     );

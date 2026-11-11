@@ -86,7 +86,7 @@ fn raster(page: SimulationPage, width: f32, seed: impl FnOnce(&mut RSpiceApp)) -
     crate::ui::raster::render(vec2(width, PAGE_HEIGHT), |ui, background| {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(background))
-            .show(ui, |ui| super::show(ui, &mut app));
+            .show(ui, |ui| super::show_on_stage(ui, &mut app));
     })
 }
 

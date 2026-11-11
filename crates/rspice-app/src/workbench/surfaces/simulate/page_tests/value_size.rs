@@ -3,7 +3,6 @@
 use egui::accesskit::Role;
 use egui::{Rect, vec2};
 
-use super::super::pages;
 use crate::state::SimulationPage;
 use crate::workbench::RSpiceApp;
 
@@ -46,15 +45,7 @@ fn paint(
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE)
                     .show(ctx, |ui| {
-                        // The Analyses route is drawn by the surface itself and
-                        // never reaches `pages::show`, so its page is the
-                        // whole surface.
-                        if page == SimulationPage::Analyses {
-                            super::super::show(ui, &mut app);
-                        } else {
-                            egui::ScrollArea::vertical()
-                                .show(ui, |ui| pages::show_over_app(ui, &mut app, page));
-                        }
+                        super::super::show_on_stage(ui, &mut app);
                     });
             },
         );

@@ -6,7 +6,6 @@ use crate::io::file_exchange::{self, FileKind};
 use crate::product::ProjectId;
 use crate::state::MonteCarloCheckpointEvidence;
 use crate::ui::widgets::Button;
-use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::Model;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::simulate::{SimulateFeature, invalidate_preflight};
@@ -18,22 +17,21 @@ pub(super) enum Action {
     Inspect(String, MonteCarloCheckpointEvidence),
     Remove(crate::product::ContentDigest),
 }
-pub(super) fn apply(ctx: &egui::Context, app: &mut RSpiceApp, action: Action) {
+pub(super) fn apply(ctx: &egui::Context, cx: &mut Cx<'_, SimulateFeature>, action: Action) {
     match action {
-        Action::Transient(action) => super::transient_checkpoint_exchange::apply(ctx, app, action),
-        Action::Import => begin_import(ctx, &mut app.state.model),
-        Action::Export(checkpoint) => begin_export(ctx, &mut app.state.model, &checkpoint),
-        Action::Inspect(label, checkpoint) => inspect(ctx, &mut app.state.model, label, checkpoint),
+        Action::Transient(action) => super::transient_checkpoint_exchange::apply(ctx, cx, action),
+        Action::Import => begin_import(ctx, cx.model),
+        Action::Export(checkpoint) => begin_export(ctx, cx.model, &checkpoint),
+        Action::Inspect(label, checkpoint) => inspect(ctx, cx.model, label, checkpoint),
         Action::Remove(digest) => {
-            if app
-                .state
+            if cx
                 .model
                 .simulation
                 .retained
                 .imported_monte_carlo_checkpoints
                 .remove(digest)
             {
-                app.invalidate_simulation_preflight();
+                invalidate_preflight(cx);
             }
         }
     }

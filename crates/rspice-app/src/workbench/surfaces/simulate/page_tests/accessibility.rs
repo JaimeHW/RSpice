@@ -221,7 +221,7 @@ pub(super) fn studio_route_nodes(
             |ctx| {
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE)
-                    .show(ctx, |ui| super::super::show(ui, &mut app));
+                    .show(ctx, |ui| super::super::show_on_stage(ui, &mut app));
                 // The dialogs are drawn outside the surface, so a sweep that
                 // ran only the surface reached none of their controls — which
                 // is where two nameless text fields were living.
@@ -263,7 +263,7 @@ fn studio_route_passes(
             |ctx| {
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE)
-                    .show(ctx, |ui| super::super::show(ui, &mut app));
+                    .show(ctx, |ui| super::super::show_on_stage(ui, &mut app));
                 super::super::show_workflow_dialogs(ctx, &mut app);
             },
         );

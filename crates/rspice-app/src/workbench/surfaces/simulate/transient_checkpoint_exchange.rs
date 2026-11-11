@@ -3,7 +3,6 @@ use super::page_kit::{Tone, note_line, rule_row};
 use crate::io::file_exchange::{self, FileKind};
 use crate::product::{ContentDigest, ProjectId};
 use crate::ui::widgets::Button;
-use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::Model;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::simulate::{SimulateFeature, invalidate_preflight};
@@ -49,7 +48,7 @@ impl Owner {
     }
 }
 
-pub(super) fn apply(ctx: &egui::Context, app: &mut RSpiceApp, action: Action) {
+pub(super) fn apply(ctx: &egui::Context, cx: &mut Cx<'_, SimulateFeature>, action: Action) {
     match action {
         Action::Import => {
             let limits = rspice_core::ResourceLimits::default();
@@ -60,32 +59,31 @@ pub(super) fn apply(ctx: &egui::Context, app: &mut RSpiceApp, action: Action) {
                 limits.max_external_data_bytes,
             ) {
                 Ok(()) => ctx.data_mut(|data| {
-                    data.insert_temp(owner_id(), Owner::of(&app.state.model));
+                    data.insert_temp(owner_id(), Owner::of(cx.model));
                 }),
-                Err(error) => app.state.report_failure("Checkpoint import failed", error),
+                Err(error) => cx.model.report_failure("Checkpoint import failed", error),
             }
         }
-        Action::Export(checkpoint) => export(ctx, &mut app.state.model, &checkpoint),
+        Action::Export(checkpoint) => export(ctx, cx.model, &checkpoint),
         Action::Inspect(label, checkpoint) => ctx.data_mut(|data| {
             data.insert_temp(
                 inspection_id(),
                 Inspection {
-                    owner: Owner::of(&app.state.model),
+                    owner: Owner::of(cx.model),
                     label,
                     checkpoint,
                 },
             );
         }),
         Action::Remove(digest) => {
-            if app
-                .state
+            if cx
                 .model
                 .simulation
                 .retained
                 .imported_transient_checkpoints
                 .remove(digest)
             {
-                app.invalidate_simulation_preflight();
+                invalidate_preflight(cx);
             }
         }
     }

@@ -13,11 +13,14 @@ use crate::workbench::app::{PlanRemovalConsequence, PlanRemovalTarget, PlanRemov
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::simulate::{SimulateFeature, record_plan_receipt, record_plan_refusal};
 
-pub(super) fn resolve_active_analysis_instance(app: &mut AppState) -> Result<(), String> {
-    let current = app.simulate.active_analysis_instance;
-    let legacy_index = app.simulate.active_analysis;
+pub(super) fn resolve_active_analysis_instance(
+    model: &Model,
+    state: &mut SimulateState,
+) -> Result<(), String> {
+    let current = state.active_analysis_instance;
+    let legacy_index = state.active_analysis;
     let resolved = {
-        let plan = app.model.sim_setup.stable_analysis_plan()?;
+        let plan = model.sim_setup.stable_analysis_plan()?;
         match current {
             Some(id) if plan.instance(id).is_some() => Some(id),
             Some(_) => plan.instances().first().map(|instance| instance.id()),
@@ -31,18 +34,19 @@ pub(super) fn resolve_active_analysis_instance(app: &mut AppState) -> Result<(),
                 .map(|instance| instance.id()),
         }
     };
-    app.simulate.active_analysis_instance = resolved;
+    state.active_analysis_instance = resolved;
     Ok(())
 }
 
 pub(super) fn selected_analysis(
-    app: &RSpiceApp,
+    model: &Model,
+    state: &SimulateState,
     dependency_sources: &EnvelopeSourceCatalog,
 ) -> Result<Option<SelectedAnalysis>, String> {
-    let Some(id) = app.state.simulate.active_analysis_instance else {
+    let Some(id) = state.active_analysis_instance else {
         return Ok(None);
     };
-    let plan = app.state.model.sim_setup.stable_analysis_plan()?;
+    let plan = model.sim_setup.stable_analysis_plan()?;
     let Some((position, instance)) = plan
         .instances()
         .iter()
@@ -706,9 +710,9 @@ pub(super) fn apply_confirmed_analysis_removal(cx: &mut Cx<'_, SimulateFeature>)
 /// Takes the state rather than the application. Answering a notice moves what
 /// is on screen and touches nothing else, and a handler holding the whole
 /// application could mutate every subsystem to do it.
-pub(super) fn apply_requested_blocker_reveal(state: &mut AppState) {
-    if let Some(blocker) = state.simulate.plan_removal_refusal.take_reveal_target() {
-        super::advanced_options::reveal_in_analyses(&mut state.simulate, blocker);
+pub(super) fn apply_requested_blocker_reveal(state: &mut SimulateState) {
+    if let Some(blocker) = state.plan_removal_refusal.take_reveal_target() {
+        super::advanced_options::reveal_in_analyses(state, blocker);
     }
 }
 

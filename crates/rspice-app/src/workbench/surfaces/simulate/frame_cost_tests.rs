@@ -52,7 +52,7 @@ fn the_analyses_route_expands_the_declared_space_once_a_frame() {
         |ctx| {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
-                .show(ctx, |ui| super::show(ui, &mut app));
+                .show(ctx, |ui| super::show_on_stage(ui, &mut app));
         },
     );
     assert!(
@@ -103,7 +103,7 @@ fn derivations_for_route(page: crate::state::SimulationPage) -> (usize, usize, u
         |ctx| {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
-                .show(ctx, |ui| super::show(ui, &mut app));
+                .show(ctx, |ui| super::show_on_stage(ui, &mut app));
         },
     );
     assert!(!output.shapes.is_empty(), "the frame drew {page:?}");

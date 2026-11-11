@@ -140,7 +140,23 @@ impl Host for RSpiceApp {
                         project::show_technology_attachment_dialog(&ctx, &mut features::cx(app));
                     }
                     Workspace::Design => design::show(ui, app),
-                    Workspace::Simulate => simulate::show(ui, app),
+                    // The surface's carried-over transactions land before
+                    // the shell takes the answers it reads, and a row verb
+                    // it raised runs once it has drawn, as a transaction
+                    // against the whole design.
+                    Workspace::Simulate => {
+                        simulate::prepare(&mut features::cx(app));
+                        let page = app.state.simulate.simulation_page;
+                        let verb = simulate::show(
+                            ui,
+                            &mut features::cx_with_foreign_answers(app, |app| {
+                                simulate::reads_foreign_answers(&app.state.model, page)
+                            }),
+                        );
+                        if let Some(verb) = verb {
+                            verb.apply(&mut app.state);
+                        }
+                    }
                     Workspace::Stimulus => stimulus::show(ui, &mut app.state),
                     Workspace::Results => features::show_surface::<ResultsFeature>(app, ui),
                     Workspace::Verify => verify::show(ui, &mut features::cx(app)),

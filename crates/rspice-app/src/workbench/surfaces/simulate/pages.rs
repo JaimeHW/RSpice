@@ -10,7 +10,6 @@ use crate::state::SimulationPage;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
-use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::Model;
 use crate::workbench::app_state::run_preflight::PreflightCurrency;
 use crate::workbench::framework::feature::Cx;
@@ -28,26 +27,18 @@ const CHIP_PADDING_X: f32 = 9.0;
 const CHIP_GAP: f32 = 8.0;
 const CHIP_HEIGHT: f32 = 22.0;
 
-/// Render the selected setup page over the whole application, until the
-/// surface draws in the feature's context: the context holds the
-/// dispatcher's answers when the page reads them, and a row verb the
-/// Excitations page raised runs once the page has drawn, as a transaction
-/// against the whole design.
-pub(super) fn show_over_app(ui: &mut Ui, app: &mut RSpiceApp, page: SimulationPage) {
-    let cx = &mut crate::workbench::features::cx_with_foreign_answers(app, |app| {
-        reads_foreign_answers(&app.state.model, page)
-    });
-    if let Some(verb) = show(ui, cx, page) {
-        verb.apply(&mut app.state);
-    }
-}
-
-/// Whether `page` reads the dispatcher's answers this frame: the
-/// Specifications page states Results' reason for not opening a limit's
+/// Whether the surface reads the dispatcher's answers this frame on `page`:
+/// the Analyses route's heading states why the split stage will not open,
+/// and the Specifications page Results' reason for not opening a limit's
 /// evidence, which it reads only once the plan's dataset exists.
-pub(super) fn reads_foreign_answers(model: &Model, page: SimulationPage) -> bool {
-    page == SimulationPage::Specifications
-        && super::output_evidence::selected_plan_dataset(model).is_some()
+pub(in crate::workbench) fn reads_foreign_answers(model: &Model, page: SimulationPage) -> bool {
+    match page {
+        SimulationPage::Analyses => true,
+        SimulationPage::Specifications => {
+            super::output_evidence::selected_plan_dataset(model).is_some()
+        }
+        _ => false,
+    }
 }
 
 /// Render the selected setup page. The analyses route is handled by the
@@ -441,6 +432,7 @@ mod tests {
     use crate::state::{
         PreflightIssue, PreflightRemediation, PreflightReport, PreparedPreflightContract,
     };
+    use crate::workbench::RSpiceApp;
 
     fn current_report(
         state: &crate::workbench::AppState,
@@ -533,7 +525,7 @@ mod tests {
     /// Render one route through the surface entry point and return its
     /// AccessKit node labels.
     ///
-    /// Deliberately `simulate::show` rather than this module's own `show`:
+    /// Deliberately the surface as the shell draws it, not this module's `show`:
     /// Analyses is routed past this module entirely and paints its heading in
     /// `super`, so a helper that called `pages::show` could only ever ask
     /// eight of the nine routes whether they state their preflight standing —
@@ -559,7 +551,7 @@ mod tests {
             |ctx| {
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE)
-                    .show(ctx, |ui| super::super::show(ui, &mut app));
+                    .show(ctx, |ui| super::super::show_on_stage(ui, &mut app));
             },
         );
         output
@@ -631,7 +623,7 @@ mod tests {
             |ctx| {
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE)
-                    .show(ctx, |ui| super::super::show(ui, &mut app));
+                    .show(ctx, |ui| super::super::show_on_stage(ui, &mut app));
             },
         );
         output

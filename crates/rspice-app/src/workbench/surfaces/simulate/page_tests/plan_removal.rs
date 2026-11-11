@@ -16,7 +16,7 @@
 
 use egui::vec2;
 
-use super::{AppState, RSpiceApp, SimulationPage, pages, plan_id};
+use super::{AppState, RSpiceApp, SimulationPage, plan_id};
 use crate::product::SimulationPlanId;
 use crate::state::{
     CaptureGroup, CaptureGroupRule, DesignVariable, DesignVariableOverridePolicy,
@@ -30,7 +30,6 @@ use crate::state::{
 struct Registry {
     ctx: egui::Context,
     app: RSpiceApp,
-    page: SimulationPage,
     controls: Vec<(String, egui::Rect)>,
 }
 
@@ -45,7 +44,6 @@ impl Registry {
         let mut registry = Self {
             ctx,
             app,
-            page,
             controls: Vec::new(),
         };
         // Twice: the first pass builds the font set and the second lays out
@@ -58,7 +56,6 @@ impl Registry {
 
     fn pass(&mut self, events: Vec<egui::Event>) {
         let app = &mut self.app;
-        let page = self.page;
         let output = self.ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
@@ -72,8 +69,7 @@ impl Registry {
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE)
                     .show(ctx, |ui| {
-                        egui::ScrollArea::vertical()
-                            .show(ui, |ui| pages::show_over_app(ui, app, page));
+                        super::super::show_on_stage(ui, app);
                     });
             },
         );
@@ -144,7 +140,7 @@ impl Registry {
 
     /// Answer the review the way the dialog's primary action answers it, then
     /// run the frame that applies it. The dialog itself is drawn by the
-    /// application shell, which these page-only passes do not run.
+    /// application shell, which these stage-only passes do not run.
     fn confirm(&mut self) {
         assert!(self.review_open(), "no review is staged to confirm");
         self.app.state.simulate.plan_removal_review.confirmed = true;
@@ -703,7 +699,7 @@ fn the_refusal_hops_to_the_blocking_analysis_exactly_once() {
 
     remove_analysis_instance(&mut crate::workbench::features::cx(&mut app), prerequisite);
     // Nothing moves until the reader asks for it.
-    apply_requested_blocker_reveal(&mut app.state);
+    apply_requested_blocker_reveal(&mut app.state.simulate);
     assert_eq!(
         app.state.simulate.simulation_page,
         SimulationPage::Solver,
@@ -711,7 +707,7 @@ fn the_refusal_hops_to_the_blocking_analysis_exactly_once() {
     );
 
     app.state.simulate.plan_removal_refusal.reveal = true;
-    apply_requested_blocker_reveal(&mut app.state);
+    apply_requested_blocker_reveal(&mut app.state.simulate);
     assert_eq!(
         app.state.simulate.simulation_page,
         SimulationPage::Analyses,
@@ -728,7 +724,7 @@ fn the_refusal_hops_to_the_blocking_analysis_exactly_once() {
     );
 
     app.state.simulate.simulation_page = SimulationPage::Solver;
-    apply_requested_blocker_reveal(&mut app.state);
+    apply_requested_blocker_reveal(&mut app.state.simulate);
     assert_eq!(
         app.state.simulate.simulation_page,
         SimulationPage::Solver,

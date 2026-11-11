@@ -193,7 +193,7 @@ impl Registry {
             |ctx| {
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE)
-                    .show(ctx, |ui| super::super::show(ui, app));
+                    .show(ctx, |ui| super::super::show_on_stage(ui, app));
             },
         );
         self.fields = output

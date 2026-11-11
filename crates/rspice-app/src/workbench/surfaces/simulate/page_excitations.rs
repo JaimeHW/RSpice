@@ -436,7 +436,7 @@ fn source_row_verbs(
 /// Each verb is a transaction against the whole design (the property editor,
 /// the Stimulus Library, a re-adoption), so it is handed back rather than run
 /// from inside the table.
-pub(super) struct SourceVerbIntent {
+pub(in crate::workbench) struct SourceVerbIntent {
     component_id: u64,
     occurrence: Option<InstancePath>,
     verb: SourceVerb,
@@ -444,7 +444,7 @@ pub(super) struct SourceVerbIntent {
 
 impl SourceVerbIntent {
     /// Run the row verb against the design.
-    pub(super) fn apply(self, state: &mut AppState) {
+    pub(in crate::workbench) fn apply(self, state: &mut AppState) {
         let Self {
             component_id,
             occurrence,

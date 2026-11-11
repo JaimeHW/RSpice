@@ -224,7 +224,7 @@ impl Sweep {
             |ctx| {
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE)
-                    .show(ctx, |ui| super::super::show(ui, app));
+                    .show(ctx, |ui| super::super::show_on_stage(ui, app));
                 // The analysis catalogue and the workflow dialogs are hosted by
                 // the frame, not by the surface. A sweep that ran only the
                 // surface would watch every control that opens one of them

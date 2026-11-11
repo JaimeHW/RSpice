@@ -4,6 +4,7 @@
 //! and survives a project round trip; a stale inspection closes.
 
 use super::*;
+use crate::workbench::RSpiceApp;
 
 #[test]
 #[cfg(not(target_arch = "wasm32"))]
@@ -37,12 +38,20 @@ fn transient_checkpoint_file_actions_preserve_binary_identity_owner_and_project(
     std::fs::create_dir(&directory).unwrap();
     let path = directory.join("accepted.rspice-tran");
     file_exchange::script_next_choice(file_exchange::ScriptedChoice::Chose(path.clone()));
-    apply(&ctx, &mut app, Action::Export(checkpoint.clone()));
+    apply(
+        &ctx,
+        &mut crate::workbench::features::cx(&mut app),
+        Action::Export(checkpoint.clone()),
+    );
     poll(&ctx, &mut crate::workbench::features::cx(&mut app));
     assert_eq!(std::fs::read(&path).unwrap(), checkpoint.bytes());
 
     file_exchange::script_next_choice(file_exchange::ScriptedChoice::Chose(path.clone()));
-    apply(&ctx, &mut app, Action::Import);
+    apply(
+        &ctx,
+        &mut crate::workbench::features::cx(&mut app),
+        Action::Import,
+    );
     app.state.model.design_execution_epoch += 1;
     poll(&ctx, &mut crate::workbench::features::cx(&mut app));
     assert!(
@@ -68,7 +77,11 @@ fn transient_checkpoint_file_actions_preserve_binary_identity_owner_and_project(
     let before = crate::workbench::lifecycle::project_lifecycle::snapshot(&app.state).unwrap();
     for _ in 0..2 {
         file_exchange::script_next_choice(file_exchange::ScriptedChoice::Chose(path.clone()));
-        apply(&ctx, &mut app, Action::Import);
+        apply(
+            &ctx,
+            &mut crate::workbench::features::cx(&mut app),
+            Action::Import,
+        );
         poll(&ctx, &mut crate::workbench::features::cx(&mut app));
     }
     let after = crate::workbench::lifecycle::project_lifecycle::snapshot(&app.state).unwrap();
@@ -100,7 +113,7 @@ fn transient_checkpoint_file_actions_preserve_binary_identity_owner_and_project(
 
     apply(
         &ctx,
-        &mut app,
+        &mut crate::workbench::features::cx(&mut app),
         Action::Inspect("accepted".into(), checkpoint.clone()),
     );
     assert_eq!(
@@ -116,7 +129,11 @@ fn transient_checkpoint_file_actions_preserve_binary_identity_owner_and_project(
         ctx.data(|data| data.get_temp::<Inspection>(inspection_id()))
             .is_none()
     );
-    apply(&ctx, &mut app, Action::Remove(checkpoint.digest()));
+    apply(
+        &ctx,
+        &mut crate::workbench::features::cx(&mut app),
+        Action::Remove(checkpoint.digest()),
+    );
     assert!(
         app.state
             .model
@@ -128,7 +145,11 @@ fn transient_checkpoint_file_actions_preserve_binary_identity_owner_and_project(
 
     std::fs::write(&path, b"wrong checkpoint kind").unwrap();
     file_exchange::script_next_choice(file_exchange::ScriptedChoice::Chose(path));
-    apply(&ctx, &mut app, Action::Import);
+    apply(
+        &ctx,
+        &mut crate::workbench::features::cx(&mut app),
+        Action::Import,
+    );
     poll(&ctx, &mut crate::workbench::features::cx(&mut app));
     assert!(
         app.state
