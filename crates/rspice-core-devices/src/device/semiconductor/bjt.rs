@@ -1277,6 +1277,11 @@ pub struct Bjt {
     /// stamping consumes it. The next iterate may have identical voltages
     /// while still needing to advance the limiter toward that candidate.
     mna_limited_from: Cell<Option<[Value; EXTERNAL_DIM + BJT_INTERNAL_STATE_DIM]>>,
+    /// Whether `mna_eval` is the model evaluated at exactly the bias the
+    /// state holds (`eval_anchor`, the internal voltages and the RBI branch
+    /// current) under the junction GMIN in force: an evaluation of that bias
+    /// would reproduce it bit for bit.
+    mna_eval_at_state: bool,
     /// Whether a promoted instance still owes vbicload.c's MODEINITJCT load.
     /// Set until the first limited evaluation, which is the only one with no
     /// previous iterate to limit against.
@@ -1921,6 +1926,7 @@ impl Bjt {
             self.reduced_linearization_cache_valid.set(false);
             self.charge_snapshot_cache_valid.set(false);
             self.mna_limited_from.set(None);
+            self.mna_eval_at_state = false;
         }
     }
 
@@ -2209,6 +2215,7 @@ impl Bjt {
             mna_eval: None,
             mna_rbi_current: 0.0,
             mna_limited_from: Cell::new(None),
+            mna_eval_at_state: false,
             vbic_startup_load_pending: true,
             mna_dissipation_drops: None,
             mna_delay_branches: [BjtCurrentBranch::default(); VBIC_DELAY_BRANCH_COUNT],

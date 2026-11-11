@@ -464,6 +464,7 @@ impl Bjt {
         self.checkpoint_restore_evaluation_state(values, &mut cursor);
         self.junction_gmin = values[cursor];
         self.clear_thermal_variant_cache();
+        self.mna_eval_at_state = false;
         cursor += 1;
         let flags = Self::checkpoint_take_array::<4>(values, &mut cursor);
         let limited_from = Self::checkpoint_take_array(values, &mut cursor);
@@ -1101,6 +1102,17 @@ impl Bjt {
             }
             return;
         }
+        if !apply_limiting && self.mna_eval_is_unlimited_at(&candidate, rbi_current) {
+            // A static probe of the bias the last load evaluated without
+            // limiting it: the evaluation below would reproduce the cached
+            // one bit for bit, so only the probe's bookkeeping runs.
+            self.mna_limited_from.set(None);
+            self.remember_mna_iteration();
+            self.legacy_junction_limited = false;
+            self.reduced_linearization_cache_valid.set(false);
+            self.charge_snapshot_cache_valid.set(false);
+            return;
+        }
         self.mna_limited_from
             .set(apply_limiting.then_some(candidate));
         self.remember_mna_iteration();
@@ -1234,9 +1246,46 @@ impl Bjt {
         self.isub = terminal_currents[EXT_S].current;
         self.intrinsic_linearization = eval.linearized;
         self.mna_eval = Some(eval);
+        // A parasitic-drop anchor expands the evaluation about drops that
+        // are not the state's own.
+        self.mna_eval_at_state = self.mna_dissipation_drops.is_none();
         self.refresh_mna_dynamic_state();
         self.reduced_linearization_cache_valid.set(false);
         self.charge_snapshot_cache_valid.set(false);
+    }
+
+    /// Whether the cached evaluation, and the charge branches refreshed with
+    /// it, are the model's at `candidate` read without limiting: the four
+    /// terminal voltages as they stand and the internal ones under the ideal
+    /// connections.
+    fn mna_eval_is_unlimited_at(
+        &self,
+        candidate: &[Value; EXTERNAL_DIM + BJT_INTERNAL_STATE_DIM],
+        rbi_current: Value,
+    ) -> bool {
+        if !self.mna_eval_at_state || self.mna_eval.is_none() || !self.mna_charge_cache_valid.get()
+        {
+            return false;
+        }
+        let [vc, vb, ve, vs] = [candidate[0], candidate[1], candidate[2], candidate[3]];
+        let mut state = [0.0; INTERNAL_DIM];
+        state.copy_from_slice(&candidate[EXTERNAL_DIM..EXTERNAL_DIM + INTERNAL_DIM]);
+        self.impose_intrinsic_node_constraints(&mut state, vc, vb, ve, vs);
+        let held = [
+            self.vcx, self.vci, self.vbx, self.vbi, self.vei, self.vbp, self.vsi, self.vrth,
+        ];
+        let same = |left: &[Value], right: &[Value]| {
+            left.iter()
+                .zip(right)
+                .all(|(left, right)| left.to_bits() == right.to_bits())
+        };
+        same(&self.eval_anchor, &[vc, vb, ve, vs])
+            && same(&held, &state)
+            && same(
+                &[self.vxf1, self.vxf2],
+                &candidate[EXTERNAL_DIM + IDX_VXF1..=EXTERNAL_DIM + IDX_VXF2],
+            )
+            && self.mna_rbi_current.to_bits() == rbi_current.to_bits()
     }
 
     /// Per-iteration update for the promoted device: read the internal node
@@ -3083,5 +3132,83 @@ mod tests {
             (second[IDX_VBI] - second[IDX_VEI]).abs() > 1e-6,
             "the OFF load must apply once, not pin the instance off for the solve"
         );
+    }
+
+    /// Promoted Gummel-Poon cards: the fourbitadder gate transistor (base
+    /// resistance only, so collector, emitter and substrate collapse onto
+    /// their terminals) and one with every series resistance.
+    const GUMMEL_POON_CARDS: [&[(&str, Value)]; 2] = [
+        &[("BF", 75.0), ("RB", 100.0), ("CJE", 1e-12), ("CJC", 3e-12)],
+        &[
+            ("BF", 75.0),
+            ("RB", 100.0),
+            ("RC", 2.0),
+            ("RE", 1.0),
+            ("CJE", 1e-12),
+            ("CJC", 3e-12),
+            ("TF", 1e-10),
+            ("VAF", 50.0),
+        ],
+    ];
+
+    /// A promoted instance numbered as the builder numbers a transient's,
+    /// loaded at a forward-active bias until its loads stop limiting. The
+    /// grounded emitter keeps the limiter's projection exact, so the last
+    /// load lands on the bias itself.
+    fn settled_gummel_poon(card: &[(&str, Value)]) -> (Bjt, Vec<Value>) {
+        let params = card
+            .iter()
+            .map(|&(name, value)| (name.to_owned(), value))
+            .collect();
+        let mut bjt = Bjt::new_npn("qsettled".into(), 1, 2, 3).with_params(&params);
+        let mut nodes = 4;
+        bjt.assign_mna_internal_nodes(|_| {
+            nodes += 1;
+            nodes
+        });
+        if bjt.needs_mna_rbi_branch() {
+            bjt.assign_mna_rbi_branch(1);
+            bjt.resolve_mna_rbi_branch(nodes);
+            nodes += 1;
+        }
+        assert!(bjt.mna_promoted());
+        let mut bias = promoted_bias(&bjt, nodes, 1.4, 0.76, 0.0);
+        if bjt.needs_mna_rbi_branch() {
+            bias[nodes - 1] = 2e-5;
+        }
+        for _ in 0..40 {
+            bjt.update(&bias);
+            bjt.stamp_mna(&mut DenseStamper::new(nodes));
+        }
+        bjt.update(&bias);
+        (bjt, bias)
+    }
+
+    /// A static probe of the bias the last load evaluated without limiting
+    /// keeps that evaluation, and leaves the instance exactly as a probe that
+    /// evaluates again does. Another bias, or a GMIN change in between,
+    /// evaluates again.
+    #[test]
+    fn a_static_probe_of_an_unlimited_load_keeps_its_evaluation() {
+        for card in GUMMEL_POON_CARDS {
+            let (mut bjt, bias) = settled_gummel_poon(card);
+            let rbi = Bjt::node_voltage(&bias, bjt.mna_rbi_matrix_node);
+            let candidate = bjt.mna_solution_bias(&bias);
+            assert!(
+                bjt.mna_eval_is_unlimited_at(&candidate, rbi),
+                "the load must settle unlimited for this to test anything"
+            );
+            let mut evaluated = bjt.clone();
+            evaluated.mna_eval_at_state = false;
+            bjt.update_static_linearization(&bias);
+            evaluated.update_static_linearization(&bias);
+            assert_eq!(format!("{bjt:?}"), format!("{evaluated:?}"));
+
+            let mut moved = bias.clone();
+            moved[bjt.node_base - 1] += 1e-3;
+            assert!(!bjt.mna_eval_is_unlimited_at(&bjt.mna_solution_bias(&moved), rbi));
+            bjt.set_junction_gmin(1e-9);
+            assert!(!bjt.mna_eval_is_unlimited_at(&candidate, rbi));
+        }
     }
 }

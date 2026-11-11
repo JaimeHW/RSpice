@@ -79,6 +79,7 @@ struct BjtEvaluationImage {
     mna_eval: Option<EvaluatedBjtState>,
     mna_rbi_current: Value,
     mna_limited_from: Option<[Value; EXTERNAL_DIM + BJT_INTERNAL_STATE_DIM]>,
+    mna_eval_at_state: bool,
     vbic_startup_load_pending: bool,
     mna_dissipation_drops: Option<[Value; VBIC_PARASITIC_DROP_DIM]>,
     mna_delay_branches: [BjtCurrentBranch; VBIC_DELAY_BRANCH_COUNT],
@@ -144,6 +145,7 @@ impl Bjt {
         image.mna_eval = self.mna_eval;
         image.mna_rbi_current = self.mna_rbi_current;
         image.mna_limited_from = self.mna_limited_from.get();
+        image.mna_eval_at_state = self.mna_eval_at_state;
         image.vbic_startup_load_pending = self.vbic_startup_load_pending;
         image.mna_dissipation_drops = self.mna_dissipation_drops;
         image.mna_delay_branches = self.mna_delay_branches;
@@ -217,6 +219,7 @@ impl Bjt {
         self.mna_eval = image.mna_eval;
         self.mna_rbi_current = image.mna_rbi_current;
         self.mna_limited_from.set(image.mna_limited_from);
+        self.mna_eval_at_state = image.mna_eval_at_state;
         self.vbic_startup_load_pending = image.vbic_startup_load_pending;
         self.mna_dissipation_drops = image.mna_dissipation_drops;
         self.mna_delay_branches = image.mna_delay_branches;
