@@ -30,8 +30,9 @@ use crate::workbench::documents::code_workspace::{
 };
 use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec};
+use crate::workbench::framework::dialogs::DialogKey;
 use crate::workbench::framework::feature::{
-    CommandSet, Cx, Feature, FeatureRegistry, NoHandles, Reads,
+    CommandSet, Cx, Feature, FeatureDialog, FeatureRegistry, NoHandles, Reads,
 };
 use crate::workbench::slots::CodeState;
 use crate::workbench::state::{WorkbenchSession, Workspace};
@@ -47,8 +48,54 @@ impl Feature for CodeFeature {
 
     fn register(registry: &mut FeatureRegistry<Self>) {
         registry.commands::<CodeCommand>();
+        registry.dialogs(DIALOGS);
     }
 }
+
+/// The dialog steps the feature draws, under the keys the shell's dialog
+/// order lists them by: the source document dialogs, Find in source,
+/// Rename symbol, New Verilog-A device, Import Verilog-A/AMS, Replace
+/// source from file and Build settings. Each is open while its form is.
+const DIALOGS: &[FeatureDialog<CodeFeature>] = &[
+    FeatureDialog {
+        key: DialogKey("code.source_document"),
+        is_open: |code| {
+            code.code_workspace.source_document_dialog
+                || code.code_workspace.source_workspace_dialog.is_some()
+        },
+        render: CodeFeature::render_source_document_dialog,
+    },
+    FeatureDialog {
+        key: DialogKey("code.source_find"),
+        is_open: |code| code.code_workspace.source_search.is_some(),
+        render: CodeFeature::render_source_find_dialog,
+    },
+    FeatureDialog {
+        key: DialogKey("code.rename_symbol"),
+        is_open: |code| code.code_workspace.language_tools.is_some(),
+        render: CodeFeature::render_rename_symbol_form,
+    },
+    FeatureDialog {
+        key: DialogKey("code.new_veriloga_device"),
+        is_open: |code| code.new_veriloga_device.open,
+        render: CodeFeature::render_new_veriloga_device_form,
+    },
+    FeatureDialog {
+        key: DialogKey("code.veriloga_import"),
+        is_open: |code| code.code_workspace.veriloga.import_form.is_some(),
+        render: CodeFeature::render_veriloga_import_dialog,
+    },
+    FeatureDialog {
+        key: DialogKey("code.veriloga_replace"),
+        is_open: |code| code.code_workspace.veriloga.replace_review.is_some(),
+        render: CodeFeature::render_veriloga_replace_dialog,
+    },
+    FeatureDialog {
+        key: DialogKey("code.veriloga_build_settings"),
+        is_open: |code| code.veriloga_build_settings.is_some(),
+        render: CodeFeature::render_veriloga_build_settings,
+    },
+];
 
 /// Why a command the feature cannot run here says no more than that.
 const UNAVAILABLE: &str = "command is unavailable in this context";
@@ -339,15 +386,12 @@ fn schematic_in_front(reads: &Reads<'_, CodeFeature>) -> bool {
         )
 }
 
-/// The dialogs the shell's dialog order draws, each over the parts of the
-/// code slot it owns. What a dialog's choice still needs of the whole
-/// application it hands the shell, which the step answers as it returns.
+/// The feature's dialog steps, each over the parts of the code slot it
+/// owns. What a dialog's choice still needs of the whole application it
+/// hands the shell, which the step answers as it returns.
 impl CodeFeature {
     /// New Verilog-A device….
-    pub(in crate::workbench) fn render_new_veriloga_device_form(
-        cx: &mut Cx<'_, Self>,
-        ctx: &Context,
-    ) {
+    fn render_new_veriloga_device_form(cx: &mut Cx<'_, Self>, ctx: &Context) {
         let messages = cx.wb.messages();
         if new_veriloga_device::render_new_veriloga_device_form(
             &mut cx.state.new_veriloga_device,
@@ -360,10 +404,7 @@ impl CodeFeature {
     }
 
     /// Build settings.
-    pub(in crate::workbench) fn render_veriloga_build_settings(
-        cx: &mut Cx<'_, Self>,
-        ctx: &Context,
-    ) {
+    fn render_veriloga_build_settings(cx: &mut Cx<'_, Self>, ctx: &Context) {
         let messages = cx.wb.messages();
         if let Some(compile) = veriloga_build_settings::render_veriloga_build_settings(
             &mut cx.state.veriloga_build_settings,
@@ -378,10 +419,7 @@ impl CodeFeature {
     }
 
     /// Import Verilog-A/AMS….
-    pub(in crate::workbench) fn render_veriloga_import_dialog(
-        cx: &mut Cx<'_, Self>,
-        ctx: &Context,
-    ) {
+    fn render_veriloga_import_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
         let messages = cx.wb.messages();
         if veriloga_import::render_veriloga_import_dialog(
             &mut cx.state.code_workspace.veriloga,
@@ -394,10 +432,7 @@ impl CodeFeature {
     }
 
     /// Replace source from file….
-    pub(in crate::workbench) fn render_veriloga_replace_dialog(
-        cx: &mut Cx<'_, Self>,
-        ctx: &Context,
-    ) {
+    fn render_veriloga_replace_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
         let messages = cx.wb.messages();
         if veriloga_import::render_veriloga_replace_dialog(
             &mut cx.state.code_workspace.veriloga.replace_review,
@@ -410,10 +445,7 @@ impl CodeFeature {
 
     /// The source document dialogs: the Automation workspace's draft, else
     /// the lifecycle of the document on the page in front.
-    pub(in crate::workbench) fn render_source_document_dialog(
-        cx: &mut Cx<'_, Self>,
-        ctx: &Context,
-    ) {
+    fn render_source_document_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
         let code = &mut *cx.state;
         if let Some(request) = source_document::render_source_document_dialog(
             &mut code.code_workspace,
@@ -428,7 +460,7 @@ impl CodeFeature {
     }
 
     /// Find in source.
-    pub(in crate::workbench) fn render_source_find_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
+    fn render_source_find_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
         let messages = cx.wb.messages();
         let code = &mut *cx.state;
         if source_find::render_source_find_dialog(
@@ -444,7 +476,7 @@ impl CodeFeature {
     }
 
     /// Rename symbol….
-    pub(in crate::workbench) fn render_rename_symbol_form(cx: &mut Cx<'_, Self>, ctx: &Context) {
+    fn render_rename_symbol_form(cx: &mut Cx<'_, Self>, ctx: &Context) {
         if source_language_tools::render_rename_symbol_form(
             &mut cx.state.code_workspace,
             cx.model,

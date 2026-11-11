@@ -8,7 +8,6 @@
 
 use crate::workbench::app::{command_palette, dialogs};
 use crate::workbench::app_state::AppState;
-use crate::workbench::code::CodeFeature;
 use crate::workbench::design::DesignFeature;
 use crate::workbench::features;
 use crate::workbench::framework::dialogs::{DialogKey, DialogSpec, ModalGate, ModalSpec, Modality};
@@ -271,28 +270,19 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         key: DialogKey("code.source_document"),
         modality: Modality::Modeless,
         is_open: None,
-        render: |app, ctx| {
-            CodeFeature::render_source_document_dialog(&mut features::cx(app), ctx);
-            app.after_contribution();
-        },
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("code.source_document")),
     },
     DialogSpec {
         key: DialogKey("code.source_find"),
         modality: Modality::Modeless,
         is_open: None,
-        render: |app, ctx| {
-            CodeFeature::render_source_find_dialog(&mut features::cx(app), ctx);
-            app.after_contribution();
-        },
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("code.source_find")),
     },
     DialogSpec {
         key: DialogKey("code.rename_symbol"),
         modality: Modality::Modeless,
         is_open: None,
-        render: |app, ctx| {
-            CodeFeature::render_rename_symbol_form(&mut features::cx(app), ctx);
-            app.after_contribution();
-        },
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("code.rename_symbol")),
     },
     DialogSpec {
         key: DialogKey("design.create_model_bound_symbol"),
@@ -468,37 +458,29 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
     DialogSpec {
         key: DialogKey("code.new_veriloga_device"),
         modality: Modality::Dialog,
-        is_open: Some(|state| state.code.new_veriloga_device.open),
-        render: |app, ctx| {
-            CodeFeature::render_new_veriloga_device_form(&mut features::cx(app), ctx);
-            app.after_contribution();
-        },
+        is_open: Some(|state| features::dialog_open(state, DialogKey("code.new_veriloga_device"))),
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("code.new_veriloga_device")),
     },
     DialogSpec {
         key: DialogKey("code.veriloga_import"),
         modality: Modality::Modeless,
         is_open: None,
-        render: |app, ctx| {
-            CodeFeature::render_veriloga_import_dialog(&mut features::cx(app), ctx);
-            app.after_contribution();
-        },
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("code.veriloga_import")),
     },
     DialogSpec {
         key: DialogKey("code.veriloga_replace"),
         modality: Modality::Modeless,
         is_open: None,
-        render: |app, ctx| {
-            CodeFeature::render_veriloga_replace_dialog(&mut features::cx(app), ctx);
-            app.after_contribution();
-        },
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("code.veriloga_replace")),
     },
     DialogSpec {
         key: DialogKey("code.veriloga_build_settings"),
         modality: Modality::Dialog,
-        is_open: Some(|state| state.code.veriloga_build_settings.is_some()),
+        is_open: Some(|state| {
+            features::dialog_open(state, DialogKey("code.veriloga_build_settings"))
+        }),
         render: |app, ctx| {
-            CodeFeature::render_veriloga_build_settings(&mut features::cx(app), ctx);
-            app.after_contribution();
+            features::render_dialog(app, ctx, DialogKey("code.veriloga_build_settings"))
         },
     },
     DialogSpec {
