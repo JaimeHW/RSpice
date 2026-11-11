@@ -18,11 +18,15 @@ use crate::workbench::app::dialogs::engineering_table::{
     EngineeringTable, open_engineering_table_dialog,
 };
 use crate::workbench::app::dialogs::grid_snap_routing::open_grid_snap_routing_dialog;
-use crate::workbench::app::dialogs::hierarchy::create::CreateHierarchy;
+use crate::workbench::app::dialogs::hierarchy::create::{
+    CreateHierarchy, open_create_hierarchy_dialog,
+};
 use crate::workbench::app::dialogs::hierarchy::descend;
 use crate::workbench::app::dialogs::placement::builtin_xspice::BuiltinXspicePlacement;
 use crate::workbench::app::dialogs::property_dialog::PropertyDialog;
-use crate::workbench::app::dialogs::replace_instance::ReplaceInstance;
+use crate::workbench::app::dialogs::replace_instance::{
+    ReplaceInstance, open_replace_instance_dialog, replace_instance_available,
+};
 use crate::workbench::app::dialogs::selection::{array, bulk_edit, rename, shared_properties};
 use crate::workbench::app::dialogs::{
     create_model_bound_symbol, find_replace, object_properties, placement, rule_setup,
@@ -61,7 +65,9 @@ impl CommandSet for DesignCommand {
 
     /// The schematic dialogs need a schematic or testbench in front of the
     /// reader; Design rule setup needs only the project, which the registry
-    /// already asks for.
+    /// already asks for. Rename names what it can act on; Replace instance and
+    /// Create hierarchy name the first thing missing: the schematic, an
+    /// editable one, then something in it to act on.
     ///
     /// Every library verb needs the instrument open, because they all act on
     /// the definition it is reading; New and Validate need only that,
@@ -80,6 +86,29 @@ impl CommandSet for DesignCommand {
                 (!schematic).then_some("open a schematic project")
             }
             Self::RuleSetup => None,
+            Self::RenameSelection
+                if schematic && rename::rename_selection_available(reads.model) =>
+            {
+                None
+            }
+            Self::RenameSelection => {
+                Some("select one editable component, net label, or declared bus")
+            }
+            Self::ReplaceInstance | Self::CreateHierarchy if !schematic => {
+                Some("open an editable schematic or testbench")
+            }
+            Self::ReplaceInstance
+                if replace_instance_available(&reads.state.property_registry, reads.model) =>
+            {
+                None
+            }
+            Self::CreateHierarchy if reads.model.create_hierarchy_available() => None,
+            Self::ReplaceInstance | Self::CreateHierarchy
+                if reads.model.schematic_edit_read_only() =>
+            {
+                Some("the active schematic is read-only")
+            }
+            Self::ReplaceInstance | Self::CreateHierarchy => Some("select an editable object"),
             _ if reads.wb.workspace != Workspace::Stimulus => Some("open the Stimulus Library"),
             Self::NewStimulusDefinition | Self::ValidateStimulusLibrary => None,
             Self::DuplicateStimulusDefinition | Self::DeleteStimulusDefinition => {
@@ -196,6 +225,22 @@ impl CommandSet for DesignCommand {
                 cx.model,
                 cx.platform,
             ),
+            Self::RenameSelection => {
+                rename::open_selected_object_rename(
+                    &mut cx.state.rename_selection,
+                    cx.state.object_properties.open || cx.state.tabbed_property_dialog.open,
+                    cx.model,
+                );
+            }
+            Self::ReplaceInstance => open_replace_instance_dialog(
+                &mut cx.state.replace_instance,
+                &cx.state.property_registry,
+                cx.model,
+                cx.wb,
+            ),
+            Self::CreateHierarchy => {
+                open_create_hierarchy_dialog(&mut cx.state.create_hierarchy, cx.model, cx.wb);
+            }
             Self::ShowAdopterOnSchematic => {
                 stimulus::show_adopter_on_schematic(
                     cx.state.selected_stimulus_definition.as_deref(),

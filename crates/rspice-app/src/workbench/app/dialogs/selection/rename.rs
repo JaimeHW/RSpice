@@ -17,7 +17,7 @@ use crate::state::{BusDeclaration, Component, NetLabel, SchematicState};
 use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine};
 use rspice_schematic_editor::object_properties::clause;
 
-use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::app_state::Model;
 use crate::workbench::state::WorkbenchSession;
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -154,35 +154,37 @@ fn rename_status<'a>(
 /// Whether the active schematic currently owns exactly one live, renameable
 /// object. This is the single availability predicate used by menus, the
 /// command palette, and keyboard dispatch.
-pub(crate) fn rename_selection_available(state: &AppState) -> bool {
-    !state.schematic_edit_read_only() && selected_rename_target(state).is_some()
+pub(crate) fn rename_selection_available(model: &Model) -> bool {
+    !model.schematic_edit_read_only() && selected_rename_target(model).is_some()
 }
 
-/// Capture the current selection into an isolated stable-identity draft.
-pub(crate) fn open_selected_object_rename(state: &mut AppState) -> bool {
-    if state.design.rename_selection.open
-        || state.design.object_properties.open
-        || state.design.tabbed_property_dialog.open
-        || state.schematic_edit_read_only()
-    {
+/// Capture the current selection into an isolated stable-identity draft;
+/// nothing opens while the form or another property form
+/// (`another_form_open`) is open, or on a read-only schematic.
+pub(crate) fn open_selected_object_rename(
+    dialog: &mut RenameSelectionDialogState,
+    another_form_open: bool,
+    model: &Model,
+) -> bool {
+    if dialog.open || another_form_open || model.schematic_edit_read_only() {
         return false;
     }
-    let Some(target) = selected_rename_target(state) else {
+    let Some(target) = selected_rename_target(model) else {
         return false;
     };
-    state.design.rename_selection.open(
+    dialog.open(
         target,
-        state.model.design_execution_epoch,
-        state.model.active_schematic_epoch,
-        state.model.schematic.topology_version(),
-        state.model.workspace.content.active_view.display_path(),
+        model.design_execution_epoch,
+        model.active_schematic_epoch,
+        model.schematic.topology_version(),
+        model.workspace.content.active_view.display_path(),
     );
     true
 }
 
-fn selected_rename_target(state: &AppState) -> Option<RenameSelectionTarget> {
-    let schematic = &state.model.schematic;
-    if let Some(target) = crate::workbench::app::selected_named_net_target(state) {
+fn selected_rename_target(model: &Model) -> Option<RenameSelectionTarget> {
+    let schematic = &model.schematic;
+    if let Some(target) = crate::workbench::app::selected_named_net_target(model) {
         return Some(RenameSelectionTarget::NamedNet(target));
     }
     if let Some(id) = schematic.session.editor.selection.single_component() {
@@ -558,6 +560,7 @@ mod tests {
     use super::*;
     use crate::state::{Bus, ComponentType, NetLabel, Point, Wire};
     use crate::workbench::app::RSpiceApp;
+    use crate::workbench::app_state::AppState;
 
     /// Draw the dialog as its dialog step does.
     fn render(app: &mut RSpiceApp, ctx: &Context) {
@@ -617,7 +620,7 @@ mod tests {
     #[test]
     fn the_object_row_names_the_object_without_its_internal_id() {
         let (app, _) = component_app();
-        let target = selected_rename_target(&app.state).expect("one renameable object");
+        let target = selected_rename_target(&app.state.model).expect("one renameable object");
         let context = object_context(&target);
         assert_eq!(context, "Resistor R1");
         assert!(!context.contains("COMPONENT-"));
@@ -643,7 +646,7 @@ mod tests {
     #[test]
     fn availability_requires_one_live_renameable_object_and_write_access() {
         let (mut app, id) = component_app();
-        assert!(rename_selection_available(&app.state));
+        assert!(rename_selection_available(&app.state.model));
 
         app.state
             .model
@@ -652,7 +655,7 @@ mod tests {
             .editor
             .selection
             .select_component(id + 999);
-        assert!(!rename_selection_available(&app.state));
+        assert!(!rename_selection_available(&app.state.model));
         app.state
             .model
             .schematic
@@ -661,7 +664,7 @@ mod tests {
             .selection
             .select_only_component(id);
         app.state.model.schematic.session.read_only = true;
-        assert!(!rename_selection_available(&app.state));
+        assert!(!rename_selection_available(&app.state.model));
     }
 
     #[test]
@@ -686,7 +689,11 @@ mod tests {
             .editor
             .selection
             .select_only_wire(81);
-        assert!(open_selected_object_rename(&mut app.state));
+        assert!(open_selected_object_rename(
+            &mut app.state.design.rename_selection,
+            app.state.design.object_properties.open || app.state.design.tabbed_property_dialog.open,
+            &app.state.model
+        ));
         assert!(matches!(
             app.state.design.rename_selection.target,
             Some(RenameSelectionTarget::NamedNet(ref target))
@@ -709,7 +716,11 @@ mod tests {
             .editor
             .selection
             .select_only_component(83);
-        assert!(open_selected_object_rename(&mut app.state));
+        assert!(open_selected_object_rename(
+            &mut app.state.design.rename_selection,
+            app.state.design.object_properties.open || app.state.design.tabbed_property_dialog.open,
+            &app.state.model
+        ));
         assert!(matches!(
             app.state.design.rename_selection.target,
             Some(RenameSelectionTarget::NamedNet(ref target))
@@ -781,7 +792,11 @@ mod tests {
         let original_name = app.state.model.schematic.document().components[0]
             .name
             .clone();
-        assert!(open_selected_object_rename(&mut app.state));
+        assert!(open_selected_object_rename(
+            &mut app.state.design.rename_selection,
+            app.state.design.object_properties.open || app.state.design.tabbed_property_dialog.open,
+            &app.state.model
+        ));
         let target = app.state.design.rename_selection.target.clone().unwrap();
         let commit = match validate_draft(&app.state.model.schematic, &target, "R_GAIN", &|_| true)
         {
@@ -817,7 +832,11 @@ mod tests {
     fn stale_target_and_cancel_never_mutate() {
         let (mut app, id) = component_app();
         let original = app.state.model.schematic.document().components[0].clone();
-        assert!(open_selected_object_rename(&mut app.state));
+        assert!(open_selected_object_rename(
+            &mut app.state.design.rename_selection,
+            app.state.design.object_properties.open || app.state.design.tabbed_property_dialog.open,
+            &app.state.model
+        ));
         app.state.design.rename_selection.draft = "R_CANCELLED".to_owned();
         app.state.design.rename_selection.close();
         assert_eq!(app.state.model.schematic.document().components[0], original);
@@ -830,7 +849,11 @@ mod tests {
             .editor
             .selection
             .select_only_component(id);
-        assert!(open_selected_object_rename(&mut app.state));
+        assert!(open_selected_object_rename(
+            &mut app.state.design.rename_selection,
+            app.state.design.object_properties.open || app.state.design.tabbed_property_dialog.open,
+            &app.state.model
+        ));
         let target = app.state.design.rename_selection.target.clone().unwrap();
         let pending_commit =
             match validate_draft(&app.state.model.schematic, &target, "R_STALE", &|_| true) {
@@ -936,7 +959,11 @@ mod tests {
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let (mut app, id) = component_app();
-        assert!(open_selected_object_rename(&mut app.state));
+        assert!(open_selected_object_rename(
+            &mut app.state.design.rename_selection,
+            app.state.design.object_properties.open || app.state.design.tabbed_property_dialog.open,
+            &app.state.model
+        ));
         app.state.design.rename_selection.draft = "R_ENTER".to_owned();
         let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| render(&mut app, ctx));
         let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
@@ -956,7 +983,11 @@ mod tests {
             .editor
             .selection
             .select_only_component(id);
-        assert!(open_selected_object_rename(&mut app.state));
+        assert!(open_selected_object_rename(
+            &mut app.state.design.rename_selection,
+            app.state.design.object_properties.open || app.state.design.tabbed_property_dialog.open,
+            &app.state.model
+        ));
         app.state.design.rename_selection.draft = "R_ESCAPE".to_owned();
         let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| render(&mut app, ctx));
         let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Escape)]), |ctx| {
@@ -1031,7 +1062,11 @@ mod tests {
             .editor
             .selection
             .select_only_component(id);
-        assert!(open_selected_object_rename(&mut app.state));
+        assert!(open_selected_object_rename(
+            &mut app.state.design.rename_selection,
+            app.state.design.object_properties.open || app.state.design.tabbed_property_dialog.open,
+            &app.state.model
+        ));
         let target = app.state.design.rename_selection.target.clone().unwrap();
         let commit = match validate_draft(&app.state.model.schematic, &target, "RLOAD", &|_| true) {
             RenameValidation::Valid(commit) => commit,

@@ -12,6 +12,7 @@ use crate::state::command_catalog::CommandKey;
 use crate::state::{Point, Tool, ViewType};
 use crate::workbench::app_state::{AppState, ContextTarget};
 use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::state::Workspace;
 use crate::workbench::{
     ResultViewer,
@@ -223,13 +224,13 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
         action: ContextAction::ReplaceInstance,
         icon: ContextIcon::Hierarchy,
         label: "Replace instance…",
-        shortcut_command: Some(Command::ReplaceInstance.key()),
+        shortcut_command: Some(DesignCommand::ReplaceInstance.key()),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::CreateHierarchy,
         icon: ContextIcon::Hierarchy,
         label: "Create hierarchy from selection…",
-        shortcut_command: Some(Command::CreateHierarchy.key()),
+        shortcut_command: Some(DesignCommand::CreateHierarchy.key()),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::CreateSymbolFromPorts,
@@ -1451,7 +1452,7 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
         // connected terminal contract. Restating any of that here would offer
         // the row where the dialog would immediately refuse.
         ContextAction::ReplaceInstance => (
-            replace_instance_available(state),
+            replace_instance_available(&state.design.property_registry, &state.model),
             "Select one editable instance that a different ready master can stand in for",
         ),
         ContextAction::CreateHierarchy => (
@@ -1613,9 +1614,18 @@ fn execute_context_action(
                 Err(error) => error.to_string(),
             });
         }
-        ContextAction::ReplaceInstance => open_replace_instance_dialog(state),
+        ContextAction::ReplaceInstance => open_replace_instance_dialog(
+            &mut state.design.replace_instance,
+            &state.design.property_registry,
+            &state.model,
+            &mut state.workbench,
+        ),
         ContextAction::CreateHierarchy => {
-            crate::workbench::app::open_create_hierarchy_dialog(state);
+            crate::workbench::app::open_create_hierarchy_dialog(
+                &mut state.design.create_hierarchy,
+                &state.model,
+                &mut state.workbench,
+            );
         }
         ContextAction::CreateSymbolFromPorts => {
             crate::workbench::app::open_create_model_bound_symbol_dialog(state);

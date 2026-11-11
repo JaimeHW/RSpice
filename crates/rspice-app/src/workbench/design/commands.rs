@@ -45,9 +45,16 @@ pub(crate) enum DesignCommand {
     RuleSetup,
     /// Open Review comments.
     ReviewComments,
+    /// Rename the one selected object.
+    RenameSelection,
+    /// Open Replace instance on the selected instance.
+    ReplaceInstance,
+    /// Open Create hierarchy over the selection.
+    CreateHierarchy,
 }
 
 const DESKTOP: &[CommandPlatform] = &[CommandPlatform::Desktop];
+const DESKTOP_BROWSER: &[CommandPlatform] = &[CommandPlatform::Desktop, CommandPlatform::Browser];
 
 const fn primary(chord: ShortcutChord, platforms: &'static [CommandPlatform]) -> ShortcutBinding {
     ShortcutBinding {
@@ -85,10 +92,14 @@ const ENGINEERING_TABLE_VIEW: &[ShortcutBinding] = &[primary(
     chord(Key::T, true, false, true, "Ctrl+Shift+T"),
     DESKTOP,
 )];
+const RENAME_SELECTION: &[ShortcutBinding] = &[primary(
+    chord(Key::F2, false, false, false, "F2"),
+    DESKTOP_BROWSER,
+)];
 
 impl DesignCommand {
     /// Every command the registry lists, in the feature's own order.
-    pub(crate) const ALL: [Self; 15] = [
+    pub(crate) const ALL: [Self; 18] = [
         Self::NewStimulusDefinition,
         Self::DuplicateStimulusDefinition,
         Self::DeleteStimulusDefinition,
@@ -104,6 +115,9 @@ impl DesignCommand {
         Self::SelectionBulkEdit,
         Self::RuleSetup,
         Self::ReviewComments,
+        Self::RenameSelection,
+        Self::ReplaceInstance,
+        Self::CreateHierarchy,
     ];
 
     /// The key a shortcut profile names this command by.
@@ -124,6 +138,9 @@ impl DesignCommand {
             Self::SelectionBulkEdit => CommandKey::new("design-bulk-tools"),
             Self::RuleSetup => CommandKey::new("design-rule-setup"),
             Self::ReviewComments => CommandKey::new("review-comments"),
+            Self::RenameSelection => CommandKey::new("rename-selection"),
+            Self::ReplaceInstance => CommandKey::new("replace-instance"),
+            Self::CreateHierarchy => CommandKey::new("create-hierarchy"),
         }
     }
 
@@ -137,13 +154,23 @@ impl DesignCommand {
     /// needs an open project and keeps the global shortcut context; only
     /// Apply has a chord of its own. The project dialogs also wait for a
     /// project operation, and every schematic dialog but the object table is
-    /// a chord of the design workspace.
+    /// a chord of the design workspace. Rename, Replace instance and Create
+    /// hierarchy edit the drawing, so each commits the inspector's pending
+    /// edit and is refused on a read-only schematic; only Rename has a chord.
     pub(crate) const fn declared_spec(self) -> CommandSpec {
         let palette = CommandFlags::PALETTE_VISIBLE;
         let open = palette.with(CommandFlags::REQUIRES_OPEN_PROJECT, true);
         let project = open.with(CommandFlags::BLOCKED_BY_PROJECT_OPERATION, true);
         let global = ShortcutContext::Global;
         let design = ShortcutContext::DesignWorkspace;
+        let edits = palette
+            .with(CommandFlags::EDITS_ACTIVE_DOCUMENT, true)
+            .with(CommandFlags::COMMITS_INSPECTOR_EDIT, true);
+        let project_edits = project
+            .with(CommandFlags::EDITS_ACTIVE_DOCUMENT, true)
+            .with(CommandFlags::COMMITS_INSPECTOR_EDIT, true);
+        let edit = ShortcutContext::EditContext;
+        let canvas = ShortcutContext::EngineeringCanvas;
         let (label, group, flags, context, bindings) = match self {
             Self::NewStimulusDefinition => {
                 ("New stimulus definition", STIMULUS, open, global, NONE)
@@ -200,6 +227,15 @@ impl DesignCommand {
             Self::SelectionBulkEdit => ("Bulk edit\u{2026}", "Edit", project, design, NONE),
             Self::RuleSetup => ("Design rule setup\u{2026}", "Design", project, design, NONE),
             Self::ReviewComments => ("Review comments\u{2026}", "Design", project, design, NONE),
+            Self::RenameSelection => ("Rename…", "Edit", edits, edit, RENAME_SELECTION),
+            Self::ReplaceInstance => ("Replace instance\u{2026}", "Edit", edits, canvas, NONE),
+            Self::CreateHierarchy => (
+                "Create hierarchy\u{2026}",
+                "Design",
+                project_edits,
+                canvas,
+                NONE,
+            ),
         };
         CommandSpec {
             key: self.key(),

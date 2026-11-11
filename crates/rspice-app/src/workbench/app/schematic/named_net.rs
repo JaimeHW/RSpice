@@ -15,15 +15,14 @@ use crate::state::named_net::{NetMembership, net_name_eq, port_terminal};
 use crate::state::{Component, ComponentType, Point, SchematicState};
 use rspice_design::connectivity::summary::{DesignNet, NetClass};
 
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::Model;
 
 /// Resolve a wire/segment/vertex-only selection or one selected interface
 /// port to exactly one authored, non-ground net.
-pub(crate) fn selected_named_net_target(state: &AppState) -> Option<NamedNetTarget> {
-    let selection = &state.model.schematic.session.editor.selection;
+pub(crate) fn selected_named_net_target(model: &Model) -> Option<NamedNetTarget> {
+    let selection = &model.schematic.session.editor.selection;
     let selected_port = selection.single_component().and_then(|id| {
-        state
-            .model
+        model
             .schematic
             .document()
             .components
@@ -31,7 +30,7 @@ pub(crate) fn selected_named_net_target(state: &AppState) -> Option<NamedNetTarg
             .find(|component| component.id == id && component.kind == ComponentType::Port)
     });
     let wire_ids = if selected_port.is_none() {
-        if !wire_geometry_only(state) {
+        if !wire_geometry_only(model) {
             return None;
         }
         let mut ids = selection.all_selected_wire_ids();
@@ -47,19 +46,18 @@ pub(crate) fn selected_named_net_target(state: &AppState) -> Option<NamedNetTarg
     // the same place as an ambiguous selection: no editable target, so the
     // rename commands are unavailable rather than acting on a name the run
     // would not use.
-    let projection = state
-        .model
+    let projection = model
         .workspace
         .design_projection(
-            &state.model.library_manager,
-            &state.model.workspace.content.active_view,
-            &state.model.schematic,
+            &model.library_manager,
+            &model.workspace.content.active_view,
+            &model.schematic,
         )
         .ok()?;
     let nets = rspice_design::connectivity::summary::projection_nets(
-        state.model.library_manager.catalog(),
+        model.library_manager.catalog(),
         &projection,
-        &state.model.workspace.content.active_view.key(),
+        &model.workspace.content.active_view.key(),
     );
     let net = if let Some(port) = selected_port {
         let port = port.port_spec()?;
@@ -74,11 +72,11 @@ pub(crate) fn selected_named_net_target(state: &AppState) -> Option<NamedNetTarg
         return None;
     }
 
-    capture_target(&state.model.schematic, net, selected_port, &wire_ids)
+    capture_target(&model.schematic, net, selected_port, &wire_ids)
 }
 
-fn wire_geometry_only(state: &AppState) -> bool {
-    let selection = &state.model.schematic.session.editor.selection;
+fn wire_geometry_only(model: &Model) -> bool {
+    let selection = &model.schematic.session.editor.selection;
     selection.has_any_wire_selection()
         && selection.components.is_empty()
         && selection.junctions.is_empty()
@@ -192,6 +190,7 @@ fn exactly_one<'a>(mut values: impl Iterator<Item = &'a DesignNet>) -> Option<&'
 mod tests {
     use super::*;
     use crate::state::{ComponentType, Point, Wire};
+    use crate::workbench::app_state::AppState;
 
     fn named_wire_state(name: &str) -> AppState {
         let mut state = AppState::default();
@@ -220,7 +219,7 @@ mod tests {
     #[test]
     fn wire_geometry_resolves_one_stable_named_net_and_renames_atomically() {
         let mut state = named_wire_state("sense");
-        let target = selected_named_net_target(&state).expect("named wire target");
+        let target = selected_named_net_target(&state.model).expect("named wire target");
         assert_eq!(target.name, "sense");
         assert_eq!(
             target
@@ -288,7 +287,7 @@ mod tests {
             .selection
             .select_only_wire(11);
 
-        let target = selected_named_net_target(&state).expect("named wire target");
+        let target = selected_named_net_target(&state.model).expect("named wire target");
         assert_eq!(target.name, "VDD");
         assert_eq!(target.wire_ids, [11, 12]);
         assert_eq!(
@@ -344,7 +343,7 @@ mod tests {
             .editor
             .selection
             .select_only_wire(1);
-        assert!(selected_named_net_target(&state).is_none());
+        assert!(selected_named_net_target(&state.model).is_none());
 
         state
             .model
@@ -378,7 +377,7 @@ mod tests {
             .editor
             .selection
             .select_wire(2);
-        assert!(selected_named_net_target(&state).is_none());
+        assert!(selected_named_net_target(&state.model).is_none());
     }
 
     #[test]
@@ -413,7 +412,7 @@ mod tests {
             .selection
             .select_only_component(31);
 
-        let target = selected_named_net_target(&state).expect("selected port net target");
+        let target = selected_named_net_target(&state.model).expect("selected port net target");
         assert_eq!(
             target.ports.iter().map(|port| port.id).collect::<Vec<_>>(),
             [31]
@@ -444,7 +443,7 @@ mod tests {
     #[test]
     fn stale_authority_and_existing_net_name_are_rejected_without_mutation() {
         let mut state = named_wire_state("sense");
-        let target = selected_named_net_target(&state).expect("named wire target");
+        let target = selected_named_net_target(&state.model).expect("named wire target");
         state.model.schematic.document_mut_for_test().net_labels[0].name =
             "changed_elsewhere".to_owned();
         assert!(
@@ -473,7 +472,7 @@ mod tests {
                 .push(NetLabel::new(22, Point::new(20, 20), "taken"));
             state
         };
-        let target = selected_named_net_target(&state).expect("named wire target");
+        let target = selected_named_net_target(&state.model).expect("named wire target");
         assert!(validate_named_net_rename(&state.model.schematic, &target, "taken").is_err());
     }
 }

@@ -1876,7 +1876,11 @@ const CREATE_HIERARCHY_OPENED: &[Step] = &[(
     "OpenCreateHierarchy",
     &[
         "ProjectRequest::OpenCreateHierarchy => {",
-        "crate::workbench::app::open_create_hierarchy_dialog(&mut app.state);",
+        "crate::workbench::app::open_create_hierarchy_dialog(
+            &mut app.state.design.create_hierarchy,
+            &app.state.model,
+            &mut app.state.workbench,
+        );",
     ],
 )];
 

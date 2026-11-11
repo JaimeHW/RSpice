@@ -649,7 +649,7 @@ pub(crate) fn selected_object_properties_available(state: &AppState) -> bool {
         .selection
         .has_any_wire_selection()
     {
-        return crate::workbench::app::selected_named_net_target(state).is_some();
+        return crate::workbench::app::selected_named_net_target(&state.model).is_some();
     }
     false
 }
@@ -857,7 +857,7 @@ pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
         .editor
         .selection
         .has_any_wire_selection()
-        && let Some(target) = crate::workbench::app::selected_named_net_target(state)
+        && let Some(target) = crate::workbench::app::selected_named_net_target(&state.model)
     {
         state.design.object_properties.open_named_net(
             target,

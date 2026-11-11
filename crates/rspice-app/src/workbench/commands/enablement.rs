@@ -129,10 +129,6 @@ impl Command {
                     )
                     .is_empty()
             }
-            Self::RenameSelection => {
-                active_schematic_editor(app)
-                    && crate::workbench::app::rename_selection_available(state)
-            }
             Self::RotateSelection
             | Self::RotateSelectionCounterClockwise
             | Self::MirrorSelectionHorizontal
@@ -200,10 +196,6 @@ impl Command {
                         .validate_array_source_selection()
                         .is_ok()
             }
-            Self::ReplaceInstance => {
-                active_schematic_editor(app)
-                    && crate::workbench::app::replace_instance_available(state)
-            }
             Self::SwapToRSpiceSymbols => {
                 active_schematic_editor(app)
                     && !state.schematic_edit_read_only()
@@ -220,9 +212,6 @@ impl Command {
                         &state.model.library_manager,
                         &state.model.workspace.content.schematic_buffers,
                     )
-            }
-            Self::CreateHierarchy => {
-                active_schematic_editor(app) && state.model.create_hierarchy_available()
             }
             Self::HighlightNet => {
                 active_schematic_editor(app) && crate::schematic::view::selected_net(state).is_ok()

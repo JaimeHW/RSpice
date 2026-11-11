@@ -235,7 +235,7 @@ fn each_target_gets_the_catalog_its_instance_master_slot_calls_for() {
     let tail = [
         (
             "Create hierarchy from selection…",
-            Some(Command::CreateHierarchy.key()),
+            Some(DesignCommand::CreateHierarchy.key()),
         ),
         ("Sheet properties", Some(ids::SHEET_PROPERTIES)),
         (
@@ -268,7 +268,10 @@ fn each_target_gets_the_catalog_its_instance_master_slot_calls_for() {
             "Update instance interface",
             Some(Command::UpdateInstanceInterface.key()),
         ),
-        ("Replace instance…", Some(Command::ReplaceInstance.key())),
+        (
+            "Replace instance…",
+            Some(DesignCommand::ReplaceInstance.key()),
+        ),
     ];
     let descend = (
         "Descend into selected instance",
@@ -1143,7 +1146,7 @@ fn the_replace_instance_row_is_offered_and_runs_only_for_one_replaceable_instanc
     assert!(action_availability(ContextAction::ReplaceInstance, &state).0);
     assert_eq!(
         action_availability(ContextAction::ReplaceInstance, &state).0,
-        replace_instance_available(&state),
+        replace_instance_available(&state.design.property_registry, &state.model),
         "the row must answer with the command's own predicate"
     );
 

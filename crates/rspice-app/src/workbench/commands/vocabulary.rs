@@ -56,7 +56,6 @@ pub enum Command {
     DeselectAll,
     /// Select every object of one kind on the active sheet.
     SelectOfKind(SchematicObjectKind),
-    RenameSelection,
     ObjectProperties,
     FindInDesign,
     FindReplace,
@@ -127,16 +126,14 @@ pub enum Command {
     MoveSelection,
     StretchSelection,
     ArraySelection,
-    ReplaceInstance,
     /// Draw the selected parts, or the whole sheet, with RSpice's own symbols
     /// instead of the artwork their drawing brought.
     SwapToRSpiceSymbols,
     /// Re-place a stale instance on its own master: same cell, the interface
     /// the master presents now. It is a degenerate replacement, which is why
-    /// it sits beside [`Self::ReplaceInstance`] rather than in a repair
+    /// it sits beside [`DesignCommand::ReplaceInstance`] rather than in a repair
     /// vocabulary of its own.
     UpdateInstanceInterface,
-    CreateHierarchy,
     /// Light the net the selection is on.
     HighlightNet,
     ConfigurationSets,
@@ -290,7 +287,6 @@ impl Command {
             Self::SelectOfKind(SchematicObjectKind::Shapes) => {
                 spec("select-shapes", "Select shapes", "Edit")
             }
-            Self::RenameSelection => spec("rename-selection", "Rename…", "Edit"),
             Self::ObjectProperties => spec("object-properties", "Properties…", "Edit"),
             Self::FindInDesign => spec("find-design", "Find…", "Edit"),
             Self::FindReplace => spec("find-replace", "Find and replace…", "Edit"),
@@ -376,7 +372,6 @@ impl Command {
             Self::MoveSelection => spec("move-selection", "Move", "Edit"),
             Self::StretchSelection => spec("stretch-selection", "Stretch", "Edit"),
             Self::ArraySelection => spec("array-selection", "Create array\u{2026}", "Edit"),
-            Self::ReplaceInstance => spec("replace-instance", "Replace instance\u{2026}", "Edit"),
             Self::SwapToRSpiceSymbols => {
                 spec("swap-to-rspice-symbols", "Swap to RSpice symbols", "Edit")
             }
@@ -385,7 +380,6 @@ impl Command {
                 "Update instance interface",
                 "Design",
             ),
-            Self::CreateHierarchy => spec("create-hierarchy", "Create hierarchy\u{2026}", "Design"),
             Self::HighlightNet => spec("highlight-net", "Highlight net", "Design"),
             Self::ConfigurationSets => spec(
                 "configuration-sets",
@@ -597,7 +591,6 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::SelectOfKind(SchematicObjectKind::Pins),
     Command::SelectOfKind(SchematicObjectKind::Text),
     Command::SelectOfKind(SchematicObjectKind::Shapes),
-    Command::RenameSelection,
     Command::ObjectProperties,
     Command::FindInDesign,
     Command::FindReplace,
@@ -665,10 +658,8 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::MoveSelection,
     Command::StretchSelection,
     Command::ArraySelection,
-    Command::ReplaceInstance,
     Command::SwapToRSpiceSymbols,
     Command::UpdateInstanceInterface,
-    Command::CreateHierarchy,
     Command::HighlightNet,
     Command::ConfigurationSets,
     Command::SymbolPinTool,
@@ -782,7 +773,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     Command::SelectOfKind(SchematicObjectKind::Pins).key(),
     Command::SelectOfKind(SchematicObjectKind::Text).key(),
     Command::SelectOfKind(SchematicObjectKind::Shapes).key(),
-    Command::RenameSelection.key(),
+    DesignCommand::RenameSelection.key(),
     Command::ObjectProperties.key(),
     Command::FindInDesign.key(),
     Command::FindReplace.key(),
@@ -881,10 +872,10 @@ static COMMAND_ORDER: &[CommandKey] = &[
     Command::MoveSelection.key(),
     Command::StretchSelection.key(),
     Command::ArraySelection.key(),
-    Command::ReplaceInstance.key(),
+    DesignCommand::ReplaceInstance.key(),
     Command::SwapToRSpiceSymbols.key(),
     Command::UpdateInstanceInterface.key(),
-    Command::CreateHierarchy.key(),
+    DesignCommand::CreateHierarchy.key(),
     ProjectCommand::CreateSymbol.key(),
     ProjectCommand::DesignManagement.key(),
     ProjectCommand::Variants.key(),

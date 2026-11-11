@@ -152,7 +152,7 @@ fn rename_opens_and_draws_in_the_frame() {
     let id = resistor(&mut app, Point::new(0, 0));
     let selection = &mut app.state.model.schematic.session.editor.selection;
     selection.select_only_component(id);
-    Command::RenameSelection.execute(&mut app);
+    app.execute_command_key(DesignCommand::RenameSelection.key());
     assert!(draws_dialog(&mut app, "Rename"));
     assert!(app.state.design.rename_selection.open);
 }
@@ -553,7 +553,11 @@ fn two_of_three_resistors_selected(app: &mut RSpiceApp) -> (u64, u64) {
 fn create_hierarchy_opens_and_draws_in_the_frame() {
     let mut app = design_app();
     two_of_three_resistors_selected(&mut app);
-    crate::workbench::app::open_create_hierarchy_dialog(&mut app.state);
+    crate::workbench::app::open_create_hierarchy_dialog(
+        &mut app.state.design.create_hierarchy,
+        &app.state.model,
+        &mut app.state.workbench,
+    );
     assert!(draws_dialog(&mut app, "Create hierarchical cell"));
     assert!(app.state.design.create_hierarchy.open);
 }
@@ -566,7 +570,11 @@ fn an_extraction_is_carried_out_in_the_frame_it_is_chosen() {
     replay.app.state.workbench.activate(Workspace::Design);
     two_of_three_resistors_selected(&mut replay.app);
     let parent = replay.app.state.model.workspace.content.active_view.clone();
-    crate::workbench::app::open_create_hierarchy_dialog(&mut replay.app.state);
+    crate::workbench::app::open_create_hierarchy_dialog(
+        &mut replay.app.state.design.create_hierarchy,
+        &replay.app.state.model,
+        &mut replay.app.state.workbench,
+    );
     let child = replay.app.state.design.create_hierarchy.cell_name.clone();
     replay.click("Create and descend", Role::Button);
     let state = &replay.app.state;
@@ -589,7 +597,12 @@ fn selected_voltage_source(app: &mut RSpiceApp) -> u64 {
 fn replace_instance_opens_and_draws_in_the_frame() {
     let mut app = design_app();
     selected_voltage_source(&mut app);
-    crate::workbench::app::open_replace_instance_dialog(&mut app.state);
+    crate::workbench::app::open_replace_instance_dialog(
+        &mut app.state.design.replace_instance,
+        &app.state.design.property_registry,
+        &app.state.model,
+        &mut app.state.workbench,
+    );
     assert!(draws_dialog(&mut app, "Replace instance"));
     assert!(app.state.design.replace_instance.open);
 }
@@ -601,7 +614,12 @@ fn a_replacement_is_carried_out_in_the_frame_it_is_chosen() {
     let mut replay = Replay::of(RSpiceApp::test_instance());
     replay.app.state.workbench.activate(Workspace::Design);
     selected_voltage_source(&mut replay.app);
-    crate::workbench::app::open_replace_instance_dialog(&mut replay.app.state);
+    crate::workbench::app::open_replace_instance_dialog(
+        &mut replay.app.state.design.replace_instance,
+        &replay.app.state.design.property_registry,
+        &replay.app.state.model,
+        &mut replay.app.state.workbench,
+    );
     assert!(replay.app.state.design.replace_instance.open);
     replay.click("Replace", Role::Button);
     let state = &replay.app.state;

@@ -216,10 +216,6 @@ pub(crate) use dialogs::symbol_definition::{
     open_symbol_parameter_form_dialog,
 };
 
-pub(crate) use dialogs::selection::rename::{
-    open_selected_object_rename, rename_selection_available,
-};
-
 // =============================================================================
 // Main Application
 // =============================================================================

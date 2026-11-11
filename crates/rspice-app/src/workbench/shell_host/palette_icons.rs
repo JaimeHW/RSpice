@@ -31,8 +31,7 @@ pub(super) fn palette_icon(command: Command) -> Option<Icon> {
         Command::PlaceShape => Icon::Grid,
         Command::MoveSelection | Command::StretchSelection => Icon::Select,
         Command::ArraySelection => Icon::Grid,
-        Command::ReplaceInstance | Command::SwapToRSpiceSymbols => Icon::Refresh,
-        Command::CreateHierarchy => Icon::Folder,
+        Command::SwapToRSpiceSymbols => Icon::Refresh,
         Command::ConfigurationSets => Icon::Grid,
         Command::CheckCellview | Command::CheckDesign => Icon::Check,
         _ => return None,
@@ -67,6 +66,8 @@ pub(super) fn feature_palette_icon(key: CommandKey) -> Option<Icon> {
         return match command {
             DesignCommand::ConnectivityManager => Some(Icon::Bus),
             DesignCommand::RuleSetup => Some(Icon::Check),
+            DesignCommand::ReplaceInstance => Some(Icon::Refresh),
+            DesignCommand::CreateHierarchy => Some(Icon::Folder),
             _ => None,
         };
     }

@@ -91,7 +91,6 @@ pub(crate) const fn command_edits_schematic(command: Command) -> bool {
             | Command::Paste
             | Command::Duplicate
             | Command::Delete
-            | Command::RenameSelection
             | Command::FindReplace
             | Command::PlaceInstance
             | Command::PlaceWire
@@ -106,10 +105,8 @@ pub(crate) const fn command_edits_schematic(command: Command) -> bool {
             | Command::MoveSelection
             | Command::StretchSelection
             | Command::ArraySelection
-            | Command::ReplaceInstance
             | Command::SwapToRSpiceSymbols
             | Command::UpdateInstanceInterface
-            | Command::CreateHierarchy
             | Command::Place(_)
             | Command::RotateSelection
             | Command::RotateSelectionCounterClockwise
@@ -291,10 +288,8 @@ impl Command {
             | Self::MoveSelection
             | Self::StretchSelection
             | Self::ArraySelection
-            | Self::ReplaceInstance
             | Self::SwapToRSpiceSymbols
             | Self::UpdateInstanceInterface
-            | Self::CreateHierarchy
             | Self::HighlightNet
             | Self::SymbolPinTool
             | Self::SymbolPolylineTool
@@ -334,7 +329,6 @@ impl Command {
             | Self::ClearChecks
             | Self::NextViolation
             | Self::PreviousViolation
-            | Self::RenameSelection
             | Self::ObjectProperties
             | Self::FindReplace
             | Self::FitSchematicContent
@@ -418,9 +412,6 @@ impl Command {
                     &mut app.state,
                     kind,
                 );
-            }
-            Self::RenameSelection => {
-                crate::workbench::app::open_selected_object_rename(&mut app.state);
             }
             Self::ObjectProperties => {
                 if active_symbol_editor(app) {
@@ -772,9 +763,6 @@ impl Command {
             Self::ArraySelection => {
                 crate::workbench::app::open_array_selection_dialog(&mut app.state);
             }
-            Self::ReplaceInstance => {
-                crate::workbench::app::open_replace_instance_dialog(&mut app.state);
-            }
             Self::SwapToRSpiceSymbols => {
                 app.state.model.schematic.swap_to_rspice_symbols();
             }
@@ -794,9 +782,6 @@ impl Command {
                     Ok(summary) => summary,
                     Err(error) => error.to_string(),
                 });
-            }
-            Self::CreateHierarchy => {
-                crate::workbench::app::open_create_hierarchy_dialog(&mut app.state);
             }
             Self::FindReplace => crate::workbench::app::open_find_replace(&mut app.state),
             Self::RepeatLastCommand => match vocabulary::last_repeatable(

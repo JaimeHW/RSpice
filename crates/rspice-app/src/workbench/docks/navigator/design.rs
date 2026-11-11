@@ -39,6 +39,7 @@ use super::{
     SCHEMATIC_NAV_LABEL_SIZE, SCHEMATIC_NAV_META_SIZE, SCHEMATIC_NAV_ROW_HEIGHT,
     empty_navigator_row, panel_search, schematic_nav_row_indented_response, search_focus_requested,
 };
+use crate::workbench::design::commands::DesignCommand;
 
 mod find_matches;
 mod hierarchy_tree;
@@ -1908,11 +1909,11 @@ fn navigator_object_context_menu(
             ui.close();
         }
         let rename = ui.add_enabled(
-            Command::RenameSelection.is_enabled(app),
+            app.command_key_enabled(DesignCommand::RenameSelection.key()),
             egui::Button::new("Rename…"),
         );
         if rename.clicked() {
-            Command::RenameSelection.execute(app);
+            app.execute_command_key(DesignCommand::RenameSelection.key());
             ui.close();
         }
         // Only an instance emits a deck card, so the row that is not one

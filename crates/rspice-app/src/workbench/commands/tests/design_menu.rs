@@ -24,8 +24,10 @@ fn design_menu_commands_explain_wrong_context_and_read_only_states() {
         Command::MoveSelection,
         Command::StretchSelection,
         Command::ArraySelection,
-        Command::ReplaceInstance,
-        Command::CreateHierarchy,
+    ];
+    let design_authoring = [
+        DesignCommand::ReplaceInstance,
+        DesignCommand::CreateHierarchy,
     ];
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
@@ -34,6 +36,13 @@ fn design_menu_commands_explain_wrong_context_and_read_only_states() {
     for command in authoring_commands {
         assert_eq!(
             command.availability(&app),
+            CommandAvailability::Disabled("open an editable schematic or testbench"),
+            "{command:?}"
+        );
+    }
+    for command in design_authoring {
+        assert_eq!(
+            app.command_availability(command.key()),
             CommandAvailability::Disabled("open an editable schematic or testbench"),
             "{command:?}"
         );
@@ -56,6 +65,13 @@ fn design_menu_commands_explain_wrong_context_and_read_only_states() {
     for command in authoring_commands {
         assert_eq!(
             command.availability(&app),
+            CommandAvailability::Disabled("the active schematic is read-only"),
+            "{command:?}"
+        );
+    }
+    for command in design_authoring {
+        assert_eq!(
+            app.command_availability(command.key()),
             CommandAvailability::Disabled("the active schematic is read-only"),
             "{command:?}"
         );

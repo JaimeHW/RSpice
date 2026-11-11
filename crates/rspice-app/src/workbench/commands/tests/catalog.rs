@@ -162,8 +162,14 @@ fn protected_commands_keep_the_exact_mockup_action_ids() {
     assert_eq!(Command::MoveSelection.spec().id, "move-selection");
     assert_eq!(Command::StretchSelection.spec().id, "stretch-selection");
     assert_eq!(Command::ArraySelection.spec().id, "array-selection");
-    assert_eq!(Command::ReplaceInstance.spec().id, "replace-instance");
-    assert_eq!(Command::RenameSelection.spec().id, "rename-selection");
+    assert_eq!(
+        DesignCommand::ReplaceInstance.key().as_str(),
+        "replace-instance"
+    );
+    assert_eq!(
+        DesignCommand::RenameSelection.key().as_str(),
+        "rename-selection"
+    );
     assert_eq!(Command::PlaceBus.spec().id, "place-bus");
     assert_eq!(Command::PlaceBusTap.spec().id, "place-bus-tap");
     assert_eq!(Command::PlacePin.spec().id, "place-pin");

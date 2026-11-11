@@ -788,7 +788,11 @@ pub(in crate::workbench) fn answer_project_request(app: &mut RSpiceApp, request:
             }
         }
         ProjectRequest::OpenCreateHierarchy => {
-            crate::workbench::app::open_create_hierarchy_dialog(&mut app.state);
+            crate::workbench::app::open_create_hierarchy_dialog(
+                &mut app.state.design.create_hierarchy,
+                &app.state.model,
+                &mut app.state.workbench,
+            );
         }
         ProjectRequest::CommitCheckAndSave => app.commit_check_and_save(),
         ProjectRequest::GoOnLeaving { action, recent } => {

@@ -109,23 +109,27 @@ const PORT_COLUMNS: [TableColumn<'static>; 4] = [
     },
 ];
 
-pub(crate) fn open_create_hierarchy_dialog(state: &mut AppState) {
+pub(crate) fn open_create_hierarchy_dialog(
+    dialog: &mut CreateHierarchyDialogState,
+    model: &Model,
+    workbench: &mut WorkbenchSession,
+) {
     // The command is greyed whenever this does not hold.
-    if !state.model.create_hierarchy_available() {
+    if !model.create_hierarchy_available() {
         return;
     }
-    let plan = match state.model.hierarchy_source_plan() {
+    let plan = match model.hierarchy_source_plan() {
         Ok(plan) => plan,
         Err(error) => {
-            state.prompt(format!("Create hierarchy cannot open: {error}"));
+            workbench.prompt(format!("Create hierarchy cannot open: {error}"));
             return;
         }
     };
-    let cell_name = default_cell_name(state);
-    state.design.create_hierarchy.open(
-        SchematicEditAuthority::capture(state),
+    let cell_name = default_cell_name(model);
+    dialog.open(
+        SchematicEditAuthority::capture(model),
         plan,
-        state.model.library_manager.revision(),
+        model.library_manager.revision(),
         cell_name,
     );
 }
@@ -133,11 +137,10 @@ pub(crate) fn open_create_hierarchy_dialog(state: &mut AppState) {
 /// The new cell's first name: the parent cell's with "_sub", numbered from 2
 /// when that is taken in the parent's library or among the open documents.
 /// A fixed sample name was offered whatever the design was.
-fn default_cell_name(state: &AppState) -> String {
-    let parent = &state.model.workspace.content.active_view;
+fn default_cell_name(model: &Model) -> String {
+    let parent = &model.workspace.content.active_view;
     let taken = |name: &str| {
-        state
-            .model
+        model
             .library_manager
             .get_library(&parent.library)
             .is_some_and(|library| {
@@ -147,8 +150,7 @@ fn default_cell_name(state: &AppState) -> String {
                     .any(|cell| cell.name.eq_ignore_ascii_case(name))
             })
             || ["schematic", "symbol"].into_iter().any(|view| {
-                state
-                    .model
+                model
                     .workspace
                     .content
                     .schematic_buffers
@@ -705,7 +707,11 @@ mod tests {
     fn the_new_cell_is_named_after_its_parent() {
         let mut state = two_selected_resistors();
         let parent = state.model.workspace.content.active_view.clone();
-        open_create_hierarchy_dialog(&mut state);
+        open_create_hierarchy_dialog(
+            &mut state.design.create_hierarchy,
+            &state.model,
+            &mut state.workbench,
+        );
         assert_eq!(
             state.design.create_hierarchy.cell_name,
             format!("{}_sub", parent.cell)
@@ -718,7 +724,11 @@ mod tests {
             .get_library_mut(&parent.library)
             .expect("the parent's library")
             .add_cell(Cell::new(format!("{}_sub", parent.cell)));
-        open_create_hierarchy_dialog(&mut state);
+        open_create_hierarchy_dialog(
+            &mut state.design.create_hierarchy,
+            &state.model,
+            &mut state.workbench,
+        );
         assert_eq!(
             state.design.create_hierarchy.cell_name,
             format!("{}_sub2", parent.cell)
@@ -751,7 +761,11 @@ mod tests {
             .editor
             .selection
             .select_only_component(r1);
-        open_create_hierarchy_dialog(&mut app.state);
+        open_create_hierarchy_dialog(
+            &mut app.state.design.create_hierarchy,
+            &app.state.model,
+            &mut app.state.workbench,
+        );
         assert!(app.state.design.create_hierarchy.open);
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
@@ -905,7 +919,11 @@ mod tests {
         let parent_ref = state.model.workspace.content.active_view.clone();
         let library_name = parent_ref.library.clone();
 
-        open_create_hierarchy_dialog(&mut state);
+        open_create_hierarchy_dialog(
+            &mut state.design.create_hierarchy,
+            &state.model,
+            &mut state.workbench,
+        );
         assert!(state.design.create_hierarchy.open);
         let child = state.design.create_hierarchy.cell_name.clone();
         commit_create_hierarchy(&mut state).expect("transaction commits");
@@ -1028,7 +1046,11 @@ mod tests {
             );
         let before = crate::state::SchematicSnapshot::capture(state.model.schematic.document());
 
-        open_create_hierarchy_dialog(&mut state);
+        open_create_hierarchy_dialog(
+            &mut state.design.create_hierarchy,
+            &state.model,
+            &mut state.workbench,
+        );
         assert!(state.design.create_hierarchy.open);
         let child = state.design.create_hierarchy.cell_name.clone();
         let error = commit_create_hierarchy(&mut state).expect_err("reference must block");

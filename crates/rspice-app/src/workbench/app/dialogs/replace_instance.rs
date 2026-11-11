@@ -20,7 +20,7 @@ use crate::workbench::app::actions::workspace::sync_active_schematic;
 use crate::workbench::app::schematic::instance_catalog::{
     InstanceCatalogEntry, instance_catalog, resolve_instance_catalog_entry,
 };
-use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::app_state::Model;
 use crate::workbench::state::WorkbenchSession;
 
 /// Isolated authority and draft for the Replace instance form. Current is a
@@ -254,22 +254,14 @@ impl ReplacementValidation {
     }
 }
 
-pub(crate) fn replace_instance_available(state: &AppState) -> bool {
-    if state.schematic_edit_read_only() {
+pub(crate) fn replace_instance_available(registry: &PropertyEditorSchema, model: &Model) -> bool {
+    if model.schematic_edit_read_only() {
         return false;
     }
-    let Some(component_id) = state
-        .model
-        .schematic
-        .session
-        .editor
-        .selection
-        .single_component()
-    else {
+    let Some(component_id) = model.schematic.session.editor.selection.single_component() else {
         return false;
     };
-    let Some(source) = state
-        .model
+    let Some(source) = model
         .schematic
         .document()
         .components
@@ -279,31 +271,31 @@ pub(crate) fn replace_instance_available(state: &AppState) -> bool {
     else {
         return false;
     };
-    instance_catalog(&state.design.property_registry, &state.model)
+    instance_catalog(registry, model)
         .into_iter()
         .any(|entry| !entry.is_same_master(source))
 }
 
-pub(crate) fn open_replace_instance_dialog(state: &mut AppState) {
+pub(crate) fn open_replace_instance_dialog(
+    dialog: &mut ReplaceInstanceDialogState,
+    registry: &PropertyEditorSchema,
+    model: &Model,
+    workbench: &mut WorkbenchSession,
+) {
     // Replace instance is greyed on a read-only schematic.
-    if state.schematic_edit_read_only() {
+    if model.schematic_edit_read_only() {
         return;
     }
-    let replacement_authority =
-        match replacement_authority(&state.design.property_registry, &state.model) {
-            Ok(authority) => authority,
-            Err(message) => {
-                state.prompt(message);
-                return;
-            }
-        };
-    let ranked = ranked_replacements(
-        &state.design.property_registry,
-        &state.model,
-        &replacement_authority,
-    );
-    let Some(resolved) = best_replacement(&state.model, &replacement_authority, &ranked) else {
-        state.prompt("No other ready master keeps every connection of the selected instance.");
+    let replacement_authority = match replacement_authority(registry, model) {
+        Ok(authority) => authority,
+        Err(message) => {
+            workbench.prompt(message);
+            return;
+        }
+    };
+    let ranked = ranked_replacements(registry, model, &replacement_authority);
+    let Some(resolved) = best_replacement(model, &replacement_authority, &ranked) else {
+        workbench.prompt("No other ready master keeps every connection of the selected instance.");
         return;
     };
     let current = current_display(replacement_authority.source_component());
@@ -316,8 +308,8 @@ pub(crate) fn open_replace_instance_dialog(state: &mut AppState) {
                 .filter(|display| *display != resolved.display),
         )
         .collect();
-    state.design.replace_instance.open(ReplaceInstanceOpen {
-        authority: SchematicEditAuthority::capture(state),
+    dialog.open(ReplaceInstanceOpen {
+        authority: SchematicEditAuthority::capture(model),
         replacement_authority: replacement_authority.clone(),
         source_component_id: replacement_authority.component_id(),
         current,
@@ -836,6 +828,7 @@ mod tests {
     use super::*;
     use crate::state::{Component, ComponentType};
     use crate::workbench::app::RSpiceApp;
+    use crate::workbench::app_state::AppState;
 
     fn placed_source(params: &str) -> AppState {
         let mut state = AppState::default();
@@ -872,7 +865,12 @@ mod tests {
     fn replace_instance_is_a_command_form_with_a_pick_list_and_a_mapping_table() {
         let mut app = RSpiceApp::test_instance();
         app.state = placed_source("");
-        open_replace_instance_dialog(&mut app.state);
+        open_replace_instance_dialog(
+            &mut app.state.design.replace_instance,
+            &app.state.design.property_registry,
+            &app.state.model,
+            &mut app.state.workbench,
+        );
         assert!(app.state.design.replace_instance.open);
         let candidates = &app.state.design.replace_instance.candidates;
         assert!(
@@ -941,7 +939,11 @@ mod tests {
 
     #[test]
     fn replacement_is_unavailable_without_exactly_one_instance() {
-        assert!(!replace_instance_available(&AppState::default()));
+        let state = AppState::default();
+        assert!(!replace_instance_available(
+            &state.design.property_registry,
+            &state.model
+        ));
     }
 
     #[test]
@@ -966,8 +968,16 @@ mod tests {
             .selection
             .select_only_component(id);
 
-        assert!(replace_instance_available(&state));
-        open_replace_instance_dialog(&mut state);
+        assert!(replace_instance_available(
+            &state.design.property_registry,
+            &state.model
+        ));
+        open_replace_instance_dialog(
+            &mut state.design.replace_instance,
+            &state.design.property_registry,
+            &state.model,
+            &mut state.workbench,
+        );
 
         assert!(state.design.replace_instance.open);
         assert_eq!(state.design.replace_instance.source_component_id, id);
@@ -996,7 +1006,12 @@ mod tests {
             .editor
             .selection
             .select_only_component(id);
-        open_replace_instance_dialog(&mut state);
+        open_replace_instance_dialog(
+            &mut state.design.replace_instance,
+            &state.design.property_registry,
+            &state.model,
+            &mut state.workbench,
+        );
         assert!(state.design.replace_instance.open);
 
         state.design.replace_instance.replacement = "voltage".to_owned();
@@ -1028,7 +1043,12 @@ mod tests {
             .editor
             .selection
             .select_only_component(id);
-        open_replace_instance_dialog(&mut state);
+        open_replace_instance_dialog(
+            &mut state.design.replace_instance,
+            &state.design.property_registry,
+            &state.model,
+            &mut state.workbench,
+        );
         assert!(
             validate_draft(
                 &state.design.replace_instance,
@@ -1057,7 +1077,12 @@ mod tests {
     #[test]
     fn the_evidence_names_a_parameter_the_new_master_cannot_carry() {
         let mut state = placed_source("legacy_tail=3n");
-        open_replace_instance_dialog(&mut state);
+        open_replace_instance_dialog(
+            &mut state.design.replace_instance,
+            &state.design.property_registry,
+            &state.model,
+            &mut state.workbench,
+        );
         assert!(state.design.replace_instance.open);
 
         let validation = validate_draft(
@@ -1112,7 +1137,12 @@ mod tests {
             .editor
             .selection
             .select_only_component(id);
-        open_replace_instance_dialog(&mut state);
+        open_replace_instance_dialog(
+            &mut state.design.replace_instance,
+            &state.design.property_registry,
+            &state.model,
+            &mut state.workbench,
+        );
         let context = Context::default();
         assert!(
             validation_for_repaint(

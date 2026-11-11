@@ -349,7 +349,11 @@ fn a_create_hierarchy_handed_to_the_shell_opens_where_it_opened_in_place() {
                 .push(ProjectRequest::OpenCreateHierarchy);
             app.after_contribution();
         } else {
-            crate::workbench::app::open_create_hierarchy_dialog(&mut app.state);
+            crate::workbench::app::open_create_hierarchy_dialog(
+                &mut app.state.design.create_hierarchy,
+                &app.state.model,
+                &mut app.state.workbench,
+            );
         }
 
         let dialog = &app.state.design.create_hierarchy;

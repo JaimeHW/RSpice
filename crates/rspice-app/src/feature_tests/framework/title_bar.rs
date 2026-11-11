@@ -749,12 +749,12 @@ const SELECTION_EDIT_COMMANDS: [CommandKey; 6] = [
     Command::MoveSelection.key(),
     Command::StretchSelection.key(),
     Command::ArraySelection.key(),
-    Command::ReplaceInstance.key(),
+    DesignCommand::ReplaceInstance.key(),
     Command::SwapToRSpiceSymbols.key(),
     DesignCommand::SelectionBulkEdit.key(),
 ];
 const DESIGN_MANAGEMENT_COMMANDS: [CommandKey; 6] = [
-    Command::CreateHierarchy.key(),
+    DesignCommand::CreateHierarchy.key(),
     ProjectCommand::DesignManagement.key(),
     DesignCommand::ConnectivityManager.key(),
     Command::ConfigurationSets.key(),
@@ -1119,7 +1119,12 @@ fn upgraded_design_menu_commands_remain_palette_discoverable() {
                 .contains(CommandFlags::PALETTE_VISIBLE)
         );
     }
-    assert!(Command::CreateHierarchy.palette_visible());
+    assert!(
+        DesignCommand::CreateHierarchy
+            .declared_spec()
+            .flags
+            .contains(CommandFlags::PALETTE_VISIBLE)
+    );
     assert!(
         ProjectCommand::CheckAndSave
             .declared_spec()
@@ -1359,7 +1364,6 @@ fn menu_icons_mark_only_the_toolbars_twins_with_the_buttons_icon() {
         Command::HelpCenter,
         Command::Exit,
         Command::SelectAll,
-        Command::RenameSelection,
         Command::DescendHierarchy,
         Command::KeyboardShortcuts,
         Command::CheckCellview,
@@ -1373,6 +1377,7 @@ fn menu_icons_mark_only_the_toolbars_twins_with_the_buttons_icon() {
         );
     }
     for key in [
+        DesignCommand::RenameSelection.key(),
         CodeCommand::ValidateCodeDocument.key(),
         SimulateCommand::Preflight.key(),
         ModelsCommand::ModelValidate.key(),

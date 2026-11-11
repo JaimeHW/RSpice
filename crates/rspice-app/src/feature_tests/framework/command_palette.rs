@@ -7,6 +7,7 @@ use crate::ui::icons::Icon;
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::command_palette::*;
 use crate::workbench::code::commands::CodeCommand;
+use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::framework::command_registry::CommandSpec;
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::project::commands::ProjectCommand;
@@ -283,7 +284,7 @@ fn create_array_uses_the_exact_grid_glyph() {
 #[test]
 fn replace_instance_uses_the_exact_refresh_glyph() {
     assert_eq!(
-        row_icon(&palette_entry(Command::ReplaceInstance)),
+        row_icon(&palette_entry_for(DesignCommand::ReplaceInstance.key())),
         Icon::Refresh
     );
 }

@@ -7,6 +7,7 @@
 //! empty or read-only selection has already lied to the user.
 
 use super::*;
+use crate::workbench::design::commands::DesignCommand;
 
 #[test]
 fn descend_requires_a_resolved_schematic_master() {
@@ -851,8 +852,8 @@ fn rename_command_opens_the_stable_target_dialog() {
         .editor
         .selection
         .select_only_component(id);
-    assert!(Command::RenameSelection.is_enabled(&app));
-    Command::RenameSelection.execute(&mut app);
+    assert!(app.command_key_enabled(DesignCommand::RenameSelection.key()));
+    app.execute_command_key(DesignCommand::RenameSelection.key());
     assert!(app.state.design.rename_selection.open);
     assert!(matches!(
         app.state.design.rename_selection.target.as_ref(),

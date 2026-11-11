@@ -77,11 +77,6 @@ const DELETE: &[ShortcutBinding] = &[primary(
     ALL,
 )];
 const SELECT_ALL: &[ShortcutBinding] = &[primary(chord(Key::A, true, false, false, "Ctrl+A"), ALL)];
-const DESKTOP_BROWSER: &[CommandPlatform] = &[CommandPlatform::Desktop, CommandPlatform::Browser];
-const RENAME_SELECTION: &[ShortcutBinding] = &[primary(
-    chord(Key::F2, false, false, false, "F2"),
-    DESKTOP_BROWSER,
-)];
 const OBJECT_PROPERTIES: &[ShortcutBinding] =
     &[primary(chord(Key::Q, false, false, false, "Q"), ALL)];
 const FIND_DESIGN: &[ShortcutBinding] =
@@ -275,7 +270,6 @@ impl Command {
                 | Self::CheckDesign
                 | Self::FindReplace
                 | Self::ConfigurationSets
-                | Self::CreateHierarchy
                 | Self::DescendHierarchyDirect
         )
     }
@@ -289,7 +283,6 @@ impl Command {
                 | Self::CloseAllDocuments
                 | Self::FindReplace
                 | Self::ConfigurationSets
-                | Self::CreateHierarchy
         )
     }
 
@@ -333,7 +326,6 @@ impl Command {
             | Self::SelectAll
             | Self::DeselectAll
             | Self::SelectOfKind(_)
-            | Self::RenameSelection
             | Self::ObjectProperties
             | Self::ZoomIn
             | Self::ZoomOut
@@ -360,10 +352,8 @@ impl Command {
             | Self::MoveSelection
             | Self::StretchSelection
             | Self::ArraySelection
-            | Self::ReplaceInstance
             | Self::SwapToRSpiceSymbols
             | Self::UpdateInstanceInterface
-            | Self::CreateHierarchy
             | Self::Place(_)
             | Self::RotateSelection
             | Self::RotateSelectionCounterClockwise
@@ -421,7 +411,6 @@ impl Command {
             Self::Duplicate => DUPLICATE,
             Self::Delete => DELETE,
             Self::SelectAll => SELECT_ALL,
-            Self::RenameSelection => RENAME_SELECTION,
             Self::ObjectProperties => OBJECT_PROPERTIES,
             Self::FindInDesign => FIND_DESIGN,
             Self::FindReplace => FIND_REPLACE,
@@ -466,10 +455,8 @@ impl Command {
             Self::MoveSelection => MOVE_SELECTION,
             Self::StretchSelection => STRETCH_SELECTION,
             Self::ArraySelection => NONE,
-            Self::ReplaceInstance => NONE,
             Self::SwapToRSpiceSymbols => NONE,
             Self::UpdateInstanceInterface => NONE,
-            Self::CreateHierarchy => NONE,
             Self::ConfigurationSets => NONE,
             Self::SymbolPinTool => SYMBOL_PIN,
             Self::SymbolPolylineTool => SYMBOL_POLYLINE,
@@ -599,9 +586,7 @@ impl Command {
             Self::MoveSelection
             | Self::StretchSelection
             | Self::ArraySelection
-            | Self::ReplaceInstance
             | Self::SwapToRSpiceSymbols
-            | Self::CreateHierarchy
             | Self::RotateSelection
             | Self::RotateSelectionCounterClockwise
             | Self::MirrorSelectionHorizontal
@@ -616,9 +601,7 @@ impl Command {
             Self::MoveSelection
             | Self::StretchSelection
             | Self::ArraySelection
-            | Self::ReplaceInstance
             | Self::SwapToRSpiceSymbols
-            | Self::CreateHierarchy
             | Self::RotateSelection
             | Self::RotateSelectionCounterClockwise
             | Self::MirrorSelectionHorizontal
@@ -636,8 +619,6 @@ impl Command {
             | Self::MoveSelection
             | Self::StretchSelection
             | Self::ArraySelection
-            | Self::ReplaceInstance
-            | Self::CreateHierarchy
             | Self::RotateSelection
             | Self::RotateSelectionCounterClockwise
             | Self::MirrorSelectionHorizontal
@@ -657,7 +638,6 @@ impl Command {
                 .unwrap_or("command is unavailable in this context"),
             Self::ConfigurationSets => "open a project",
             Self::Paste => "clipboard has no compatible content",
-            Self::RenameSelection => "select one editable component, net label, or declared bus",
             Self::ObjectProperties => "select one inspectable object",
             Self::AscendHierarchy if !super::active_schematic_editor(app) => {
                 "open a schematic or testbench"
@@ -721,6 +701,7 @@ mod tests {
     use crate::state::command_catalog::{CommandCatalog, CommandKey};
     use crate::workbench::ResultViewer;
     use crate::workbench::code::commands::CodeCommand;
+    use crate::workbench::design::commands::DesignCommand;
     use crate::workbench::framework::command_registry::CommandFlags;
     use crate::workbench::results::commands::ResultsCommand;
     use crate::workbench::simulate::commands::SimulateCommand;
@@ -822,40 +803,31 @@ mod tests {
     /// owners live in contexts that can never be active together.
     #[test]
     fn rename_shortcut_is_unambiguous_and_desktop_browser_only() {
+        let rename = DesignCommand::RenameSelection.declared_spec();
         let rename_symbol = CodeCommand::RenameSymbol.declared_spec();
+        let label = |bindings: &[ShortcutBinding], platform: CommandPlatform| {
+            bindings
+                .iter()
+                .find(|binding| binding.supports(platform))
+                .map_or("", |binding| binding.chord.label)
+        };
         for platform in [CommandPlatform::Desktop, CommandPlatform::Browser] {
             assert_eq!(
-                ordered_binding_owners(RENAME_SELECTION[0].chord, platform),
-                vec![Command::RenameSelection.key(), rename_symbol.key]
+                ordered_binding_owners(rename.bindings[0].chord, platform),
+                vec![rename.key, rename_symbol.key]
             );
             assert!(!crate::state::shortcuts::shortcut_contexts_overlap(
-                Command::RenameSelection.shortcut_context(),
+                rename.context,
                 rename_symbol.context,
             ));
-            assert_eq!(
-                rename_symbol
-                    .bindings
-                    .iter()
-                    .find(|binding| binding.supports(platform))
-                    .map_or("", |binding| binding.chord.label),
-                "F2"
-            );
-            assert_eq!(
-                Command::RenameSelection.default_shortcut_label(platform),
-                "F2"
-            );
+            assert_eq!(label(rename_symbol.bindings, platform), "F2");
+            assert_eq!(label(rename.bindings, platform), "F2");
         }
         for platform in [CommandPlatform::Tablet, CommandPlatform::Phone] {
-            assert!(ordered_binding_owners(RENAME_SELECTION[0].chord, platform).is_empty());
-            assert_eq!(
-                Command::RenameSelection.default_shortcut_label(platform),
-                ""
-            );
+            assert!(ordered_binding_owners(rename.bindings[0].chord, platform).is_empty());
+            assert_eq!(label(rename.bindings, platform), "");
         }
-        assert_eq!(
-            Command::RenameSelection.shortcut_context(),
-            ShortcutContext::EditContext
-        );
+        assert_eq!(rename.context, ShortcutContext::EditContext);
     }
 
     #[test]
