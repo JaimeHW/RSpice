@@ -1274,14 +1274,9 @@ impl Bjt {
         let held = [
             self.vcx, self.vci, self.vbx, self.vbi, self.vei, self.vbp, self.vsi, self.vrth,
         ];
-        let same = |left: &[Value], right: &[Value]| {
-            left.iter()
-                .zip(right)
-                .all(|(left, right)| left.to_bits() == right.to_bits())
-        };
-        same(&self.eval_anchor, &[vc, vb, ve, vs])
-            && same(&held, &state)
-            && same(
+        same_bits(&self.eval_anchor, &[vc, vb, ve, vs])
+            && same_bits(&held, &state)
+            && same_bits(
                 &[self.vxf1, self.vxf2],
                 &candidate[EXTERNAL_DIM + IDX_VXF1..=EXTERNAL_DIM + IDX_VXF2],
             )
@@ -1442,15 +1437,57 @@ impl Bjt {
         let internal = self.mna_internal_state_at_solution(voltages);
         let branches = if forward_limit && self.uses_legacy_gummel_poon() {
             self.legacy_dynamic_charge_branches_with_forward_limit(external, internal, true)
+        } else if self.mna_charge_cache_is_at(external, internal) {
+            // The last evaluation was of this very bias.
+            self.mna_charge_cache.get()
         } else {
             self.dynamic_charge_branches_at_bias(external, internal)
         };
         (branches, internal, external)
     }
 
+    /// Whether the charge branches refreshed with the cached evaluation are
+    /// those of exactly this bias.
+    fn mna_charge_cache_is_at(
+        &self,
+        external: [Value; EXTERNAL_DIM],
+        internal: [Value; BJT_INTERNAL_STATE_DIM],
+    ) -> bool {
+        self.mna_eval_at_state
+            && self.mna_charge_cache_valid.get()
+            && same_bits(&self.mna_external_state(), &external)
+            && same_bits(&self.mna_internal_state(), &internal)
+    }
+
+    /// The cached evaluation, when it is the model's at exactly the bias
+    /// `bias` (a solution read by `mna_solution_bias`) and RBI branch current
+    /// `rbi_current`.
+    fn mna_eval_at(
+        &self,
+        bias: &[Value; EXTERNAL_DIM + BJT_INTERNAL_STATE_DIM],
+        rbi_current: Value,
+    ) -> Option<EvaluatedBjtState> {
+        let held = [
+            self.vcx, self.vci, self.vbx, self.vbi, self.vei, self.vbp, self.vsi, self.vrth,
+        ];
+        let at = self.mna_eval_at_state
+            && same_bits(&self.eval_anchor, &bias[..EXTERNAL_DIM])
+            && same_bits(&held, &bias[EXTERNAL_DIM..EXTERNAL_DIM + INTERNAL_DIM])
+            && self.mna_rbi_current.to_bits() == rbi_current.to_bits();
+        self.mna_eval.filter(|_| at)
+    }
+
     #[doc(hidden)]
     pub fn mna_terminal_currents_at_solution(&self, solution: &[Value]) -> [Value; EXTERNAL_DIM] {
         let v = self.mna_solution_bias(solution);
+        let delayed = self.uses_vbic_dynamic_charges() && self.td > 0.0;
+        let rbi_current = Self::node_voltage(solution, self.mna_rbi_matrix_node);
+        if !delayed && let Some(eval) = self.mna_eval_at(&v, rbi_current) {
+            // The last evaluation was of this very bias.
+            return self
+                .external_terminal_branches(eval)
+                .map(|branch| branch.current);
+        }
         let eval = self.evaluate_state_with_rbi_current(
             BjtNodeVoltages {
                 vc: v[0],
@@ -2156,6 +2193,15 @@ impl Bjt {
             visit(external_nodes[idx], -1.0);
         }
     }
+}
+
+/// Whether two value lists hold the same bits, entry by entry.
+fn same_bits(left: &[Value], right: &[Value]) -> bool {
+    left.len() == right.len()
+        && left
+            .iter()
+            .zip(right)
+            .all(|(left, right)| left.to_bits() == right.to_bits())
 }
 
 #[cfg(test)]
@@ -3210,5 +3256,48 @@ mod tests {
             bjt.set_junction_gmin(1e-9);
             assert!(!bjt.mna_eval_is_unlimited_at(&candidate, rbi));
         }
+    }
+
+    /// An accepted step reads the charges and terminal currents at its
+    /// solution. When the last evaluation was of exactly that bias the reads
+    /// return it, bit for bit what evaluating the solution again gives.
+    #[test]
+    fn accepted_point_reads_of_the_evaluated_bias_return_that_evaluation() {
+        for card in GUMMEL_POON_CARDS {
+            let (bjt, bias) = settled_gummel_poon(card);
+            assert_accepted_reads_reuse_the_evaluation(&bjt, &bias);
+        }
+        // A VBIC load expands about the solution's resistor drops, so only a
+        // static probe leaves an evaluation of the bias itself.
+        let mut bjt = diffamp_pnp(4.0);
+        let bias = promoted_bias(&bjt, 13, 2.0, 2.6, 3.3);
+        bjt.update(&bias);
+        assert!(!bjt.mna_charge_cache_is_at(
+            bjt.external_terminal_voltages(&bias),
+            bjt.mna_internal_state_at_solution(&bias)
+        ));
+        bjt.update_static_linearization(&bias);
+        assert_accepted_reads_reuse_the_evaluation(&bjt, &bias);
+    }
+
+    fn assert_accepted_reads_reuse_the_evaluation(bjt: &Bjt, bias: &[Value]) {
+        let external = bjt.external_terminal_voltages(bias);
+        let internal = bjt.mna_internal_state_at_solution(bias);
+        assert!(bjt.mna_charge_cache_is_at(external, internal));
+        let rbi = Bjt::node_voltage(bias, bjt.mna_rbi_matrix_node);
+        assert!(bjt.mna_eval_at(&bjt.mna_solution_bias(bias), rbi).is_some());
+        let mut evaluated = bjt.clone();
+        evaluated.mna_eval_at_state = false;
+        assert_eq!(
+            format!("{:?}", bjt.mna_charge_state_at_solution(bias)),
+            format!("{:?}", evaluated.mna_charge_state_at_solution(bias))
+        );
+        assert_eq!(
+            bjt.mna_terminal_currents_at_solution(bias)
+                .map(Value::to_bits),
+            evaluated
+                .mna_terminal_currents_at_solution(bias)
+                .map(Value::to_bits)
+        );
     }
 }
