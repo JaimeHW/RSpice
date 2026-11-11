@@ -11,8 +11,8 @@ use crate::ui::widgets::{CommandForm, DialogChoice, FormRows};
 use crate::workbench::app::SchematicEditAuthority;
 use crate::workbench::app::actions::workspace::selected_hierarchy_master;
 use crate::workbench::app::actions::workspace::symbol_in_place::selected_symbol_in_place_target;
+use crate::workbench::app::dialogs::design_request::DesignRequest;
 use crate::workbench::app_state::{AppState, Model};
-use crate::workbench::framework::requests::{Drain, Request};
 use crate::workbench::state::WorkbenchSession;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -98,8 +98,8 @@ pub(crate) fn open_descend_hierarchy_dialog(state: &mut AppState) -> bool {
 }
 
 /// Draw Descend into hierarchy over its draft and the model it reads. A
-/// checked choice goes to the shell as [`DescendHierarchy`]; a refused one
-/// stays on the form with its reason.
+/// checked choice goes to the shell as [`DesignRequest::Descend`]; a refused
+/// one stays on the form with its reason.
 pub(in crate::workbench) fn render_descend_hierarchy_dialog(
     dialog: &mut DescendHierarchyDialogState,
     model: &Model,
@@ -134,7 +134,7 @@ pub(in crate::workbench) fn render_descend_hierarchy_dialog(
 
     match choice {
         DialogChoice::Primary => match descend_request(dialog, model) {
-            Ok(request) => workbench.outbox.push(request),
+            Ok(choice) => workbench.outbox.push(DesignRequest::Descend(choice)),
             Err(error) => dialog.validation_error = Some(error),
         },
         DialogChoice::Ghost | DialogChoice::Cancelled => {
@@ -158,9 +158,8 @@ fn descend_target_path(workspace: &crate::state::ProjectWorkspace, instance: &st
         .map_or_else(|error| error.to_string(), |path| path.to_string())
 }
 
-/// Descend into hierarchy's checked choice. Raised by the dialog's step and
-/// taken straight after it, so the shell carries it out in the frame the
-/// reader chose it, as the dialog once did in place.
+/// Descend into hierarchy's checked choice, which the dialog's step hands the
+/// shell as [`DesignRequest::Descend`].
 #[derive(Debug, Clone)]
 pub(crate) enum DescendHierarchy {
     /// Edit the selected instance's symbol on this sheet.
@@ -171,10 +170,6 @@ pub(crate) enum DescendHierarchy {
         instance: String,
         reference: crate::state::CellViewRef,
     },
-}
-
-impl Request for DescendHierarchy {
-    const DRAIN: Drain = Drain::AfterContribution;
 }
 
 /// Check the draft against the model as it stands: the choice to carry out,
@@ -219,11 +214,8 @@ fn descend_request(
 }
 
 /// Carry out a checked Descend into hierarchy choice over the whole session,
-/// as the dialog once did in place.
-///
-/// The shell answers it for now, because opening a view, descending and
-/// editing a symbol in place still reach the whole session. Design carries it
-/// out itself once those sit on its own parts.
+/// as the dialog once did in place: opening a view, descending and editing a
+/// symbol in place still reach the whole session.
 pub(crate) fn answer_descend_hierarchy(state: &mut AppState, request: DescendHierarchy) {
     match request {
         DescendHierarchy::EditSymbolInPlace => {

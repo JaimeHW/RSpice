@@ -596,7 +596,7 @@ const AFTER_CONTRIBUTION: &[Step] = &[
     ),
     (
         "21",
-        &["|app, request: DescendHierarchy| answer_descend_hierarchy(&mut app.state, request)"],
+        &["|app, request: DesignRequest| answer_design_request(&mut app.state, request)"],
     ),
     (
         "22",

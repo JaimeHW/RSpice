@@ -130,7 +130,8 @@ SLICE_RULES = [
     (D + r"library(\.rs$|/)", "project"),
     (D + r"plan_removal(\.rs$|/)", "simulate"),
     (D + r"(confirmation|confirmation_state|operation_primitives|review_primitives|window_session)(\.rs$|/)", "framework"),
-    (D + r"(connectivity_manager|design_review_comments|engineering_table|find_replace|grid_snap_routing|hierarchy"
+    (D + r"(connectivity_manager|design_request|design_review_comments|engineering_table|find_replace"
+         r"|grid_snap_routing|hierarchy"
          r"|object_properties|placement|property_dialog|replace_instance|rule_setup|selection"
          r"|visibility_options|create_model_bound_symbol|symbol_definition|stimulus_link)(\.rs$|/)", "design"),
     (D + r"(drawing_sheet_\w+|delete_sheet)(\.rs$|/)", "sheets"),
