@@ -1026,7 +1026,7 @@ impl Engine {
                     anchor_solution,
                     pseudo_conductance,
                 );
-                Self::stamp_matrix_conditioning_diagonal(circuit, matrix, rhs.len(), 1e-12);
+                Self::stamp_node_conditioning_diagonal(circuit, matrix, rhs.len(), 1e-12);
                 circuit.stamp_dc_direct(matrix, rhs);
             },
         )
@@ -1238,7 +1238,7 @@ impl Engine {
                 anchor_solution,
                 pseudo_conductance,
             );
-            Self::stamp_matrix_conditioning_diagonal(circuit, matrix, rhs.len(), gmin_floor);
+            Self::stamp_node_conditioning_diagonal(circuit, matrix, rhs.len(), gmin_floor);
             circuit.stamp_dc_direct(matrix, rhs);
         })
     }

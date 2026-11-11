@@ -561,7 +561,7 @@ impl Engine {
                     &anchor_solution,
                     pseudo_conductance,
                 );
-                Self::stamp_matrix_conditioning_diagonal(circuit, matrix, size, 1e-12);
+                Self::stamp_node_conditioning_diagonal(circuit, matrix, size, 1e-12);
 
                 circuit.stamp_dc_direct(matrix, &mut rhs);
                 // As for a failed linear solve: a non-finite device evaluation
@@ -1895,13 +1895,36 @@ m2 d2 g 0 0 nmos150 w=150e-9 l=150e-9 nf=1 off
     /// operating point itself.
     #[test]
     fn pseudo_transient_solves_circuits_ideal_voltage_sources_drive() {
-        let decks = [
+        assert_pseudo_transient_reaches_the_direct_operating_point(&[
             "* resistor divider\nv1 in 0 2\nr1 in out 1k\nr2 out 0 1k\n.op\n.end\n",
             "* diode divider\nv1 in 0 5\nr1 in out 1k\nd1 out 0 dmod\n\
              .model dmod d is=1e-14\n.op\n.end\n",
             "* bipolar stage\nvcc vcc 0 5\nvb b 0 0.7\nrc vcc c 1k\nq1 c b 0 qmod\n\
              .model qmod npn is=1e-16 bf=100\n.op\n.end\n",
-        ];
+        ]);
+    }
+
+    /// A 5 V supply feeds a 0.1 ohm load through 1 mohm, about 50 A, as the
+    /// CircuitSim90 voter's supply feeds its 10 000 nodes through `rin`. The
+    /// old stages put a 1e-12 conditioning term on the supply's branch row,
+    /// asking for V(1) = 5 V - 50 pV, then projected V(1) back to 5 V; across
+    /// the 1 mohm resistor that left a 50 nA KCL error, and no stage passed
+    /// its residual test. ngspice's OPtran and Xyce's pseudo-transient solve
+    /// the circuit. A node tied only through a capacitor keeps the node-row
+    /// conditioning that holds it as the stages lengthen.
+    #[test]
+    fn pseudo_transient_stages_converge_with_amperes_through_the_supply() {
+        assert_pseudo_transient_reaches_the_direct_operating_point(&[
+            "* heavy supply\nv1 1 0 5\nrin 1 3 1m\nrload 3 0 0.1\nr2 3 4 1k\n\
+             d1 4 0 dmod\n.model dmod d is=1e-14\n.op\n.end\n",
+            "* capacitor-only node\nv1 in 0 5\nr1 in a 1k\nd1 a 0 dmod\nc1 a f 1p\n\
+             .model dmod d is=1e-14\n.op\n.end\n",
+        ]);
+    }
+
+    /// Pseudo-transient, from zero and from the direct solve's own answer,
+    /// reaches the operating point the direct solve finds from zero.
+    fn assert_pseudo_transient_reaches_the_direct_operating_point(decks: &[&str]) {
         for deck in decks {
             let netlist = crate::netlist::Netlist::parse(deck).unwrap();
             let title = deck.lines().next().unwrap_or_default();

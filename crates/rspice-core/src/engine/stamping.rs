@@ -28,6 +28,31 @@ impl Engine {
         }
     }
 
+    /// [`Self::stamp_matrix_conditioning_diagonal`] on the node rows alone.
+    ///
+    /// A pseudo-transient stage projects every ideal source's nodes back onto
+    /// the source's value after each iterate. A conditioning term on a branch
+    /// row turns `V = E` into `V = E - value * I`, which the projection then
+    /// breaks by `value * I`, and the stage's pseudo-capacitors draw amperes
+    /// through a supply: the KCL error that leaves beside the supply exceeds
+    /// the residual tolerance, at every stage. The stage anchor leaves branch
+    /// rows out for the same reason.
+    pub(in crate::engine) fn stamp_node_conditioning_diagonal(
+        circuit: &CircuitData,
+        matrix: &mut StaticMatrix,
+        matrix_size: usize,
+        value: Value,
+    ) {
+        if value == 0.0 {
+            return;
+        }
+        for index in 0..circuit.num_nodes().min(matrix_size) {
+            if !circuit.is_non_electrical_state_matrix_index(index) {
+                matrix.add(index, index, value);
+            }
+        }
+    }
+
     /// Add the nodal GMIN floor to the node-voltage equations that take it
     /// ([`CircuitData::receives_nodal_gmin`]). Private DAE state rows share the
     /// matrix's nodal prefix but are not voltages, and a compact model's
