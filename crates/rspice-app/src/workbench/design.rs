@@ -18,7 +18,10 @@ use crate::workbench::app::dialogs::{
     create_model_bound_symbol, find_replace, object_properties, placement, rule_setup,
     stimulus_link, symbol_definition,
 };
-use crate::workbench::framework::feature::{Cx, Feature, FeatureRegistry, NoHandles};
+use crate::workbench::framework::dialogs::DialogKey;
+use crate::workbench::framework::feature::{
+    Cx, Feature, FeatureDialog, FeatureRegistry, NoHandles,
+};
 use crate::workbench::slots::DesignState;
 use crate::workbench::state::WorkbenchSession;
 
@@ -30,19 +33,152 @@ impl Feature for DesignFeature {
     type Session = WorkbenchSession;
     type Handles = NoHandles;
 
-    fn register(_registry: &mut FeatureRegistry<Self>) {}
+    fn register(registry: &mut FeatureRegistry<Self>) {
+        registry.dialogs(DIALOGS);
+    }
 }
 
-/// The dialogs the shell's dialog order draws, each over the parts of the
-/// design slot it owns.
+/// The dialog steps the feature draws, under the keys the shell's dialog
+/// order lists them by and in that order. Each is open while its form is;
+/// Import symbol definition while either of its two forms is.
+const DIALOGS: &[FeatureDialog<DesignFeature>] = &[
+    FeatureDialog {
+        key: DialogKey("design.property"),
+        is_open: |design| design.tabbed_property_dialog.open,
+        render: DesignFeature::render_property_dialog,
+    },
+    FeatureDialog {
+        key: DialogKey("design.bus_tap"),
+        is_open: |design| design.bus_tap.open,
+        render: DesignFeature::render_bus_tap_dialog,
+    },
+    FeatureDialog {
+        key: DialogKey("design.builtin_xspice_placement"),
+        is_open: |design| design.builtin_xspice_placement.open,
+        render: DesignFeature::render_builtin_xspice_placement_dialog,
+    },
+    FeatureDialog {
+        key: DialogKey("design.net_label"),
+        is_open: |design| design.net_label_placement.open,
+        render: DesignFeature::render_net_label_dialog,
+    },
+    FeatureDialog {
+        key: DialogKey("design.grid_snap_routing"),
+        is_open: |design| design.grid_snap_routing.open,
+        render: DesignFeature::render_grid_snap_routing_dialog,
+    },
+    FeatureDialog {
+        key: DialogKey("design.schematic_visibility"),
+        is_open: |design| design.schematic_visibility_dialog.open,
+        render: DesignFeature::render_schematic_visibility_dialog,
+    },
+    FeatureDialog {
+        key: DialogKey("design.descend_hierarchy"),
+        is_open: |design| design.descend_hierarchy.open,
+        render: DesignFeature::render_descend_hierarchy_dialog,
+    },
+    FeatureDialog {
+        key: DialogKey("design.engineering_table"),
+        is_open: |design| design.engineering_table.open,
+        render: DesignFeature::render_engineering_table_dialog,
+    },
+    FeatureDialog {
+        key: DialogKey("design.pin_port"),
+        is_open: |design| design.pin_port.open,
+        render: DesignFeature::render_pin_port_dialog,
+    },
+    FeatureDialog {
+        key: DialogKey("design.design_review_comments"),
+        is_open: |design| design.design_review_comments.open,
+        render: DesignFeature::render_design_review_comments_dialog,
+    },
+    FeatureDialog {
+        key: DialogKey("design.design_note"),
+        is_open: |design| design.design_note.open,
+        render: DesignFeature::render_design_note_dialog,
+    },
+    FeatureDialog {
+        key: DialogKey("design.documentation_shape"),
+        is_open: |design| design.documentation_shape.open,
+        render: DesignFeature::render_documentation_shape_dialog,
+    },
+    FeatureDialog {
+        key: DialogKey("design.array_selection"),
+        is_open: |design| design.array_selection.open,
+        render: DesignFeature::render_array_selection_dialog,
+    },
+    FeatureDialog {
+        key: DialogKey("design.replace_instance"),
+        is_open: |design| design.replace_instance.open,
+        render: DesignFeature::render_replace_instance_dialog,
+    },
+    FeatureDialog {
+        key: DialogKey("design.stimulus_link"),
+        is_open: |design| design.stimulus_link.open,
+        render: DesignFeature::render_stimulus_link_dialog,
+    },
+    FeatureDialog {
+        key: DialogKey("design.create_hierarchy"),
+        is_open: |design| design.create_hierarchy.open,
+        render: DesignFeature::render_create_hierarchy_dialog,
+    },
+    FeatureDialog {
+        key: DialogKey("design.connectivity_manager"),
+        is_open: |design| design.connectivity_manager.open,
+        render: DesignFeature::render_connectivity_manager_dialog,
+    },
+    FeatureDialog {
+        key: DialogKey("design.selection_bulk_edit"),
+        is_open: |design| design.selection_bulk_edit.open,
+        render: DesignFeature::render_selection_bulk_edit_dialog,
+    },
+    FeatureDialog {
+        key: DialogKey("design.create_model_bound_symbol"),
+        is_open: |design| design.create_model_bound_symbol.open,
+        render: DesignFeature::render_create_model_bound_symbol_dialog,
+    },
+    FeatureDialog {
+        key: DialogKey("design.symbol_definition"),
+        is_open: |design| design.symbol_import.open || design.symbol_parameter_form.open,
+        render: DesignFeature::render_symbol_definition_dialogs,
+    },
+    FeatureDialog {
+        key: DialogKey("design.rule_setup"),
+        is_open: |design| design.rule_setup.open,
+        render: DesignFeature::render_rule_setup_dialog,
+    },
+    FeatureDialog {
+        key: DialogKey("design.object_properties"),
+        is_open: |design| design.object_properties.open,
+        render: DesignFeature::render_object_properties_dialog,
+    },
+    FeatureDialog {
+        key: DialogKey("design.rename_selection"),
+        is_open: |design| design.rename_selection.open,
+        render: DesignFeature::render_rename_selection_dialog,
+    },
+    FeatureDialog {
+        key: DialogKey("design.find_replace"),
+        is_open: |design| design.find_replace.open,
+        render: DesignFeature::render_find_replace_dialog,
+    },
+    FeatureDialog {
+        key: DialogKey("design.shared_properties"),
+        is_open: |design| design.shared_properties.open,
+        render: DesignFeature::render_shared_properties_dialog,
+    },
+];
+
+/// The feature's dialog steps, each over the parts of the design slot it
+/// owns.
 impl DesignFeature {
     /// Place bus tap.
-    pub(in crate::workbench) fn render_bus_tap_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
+    fn render_bus_tap_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
         placement::bus_tap::render_bus_tap_dialog(&mut cx.state.bus_tap, cx.model, ctx);
     }
 
     /// Net label, or the off-sheet connector form.
-    pub(in crate::workbench) fn render_net_label_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
+    fn render_net_label_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
         placement::net_label::render_net_label_dialog(
             &mut cx.state.net_label_placement,
             cx.model,
@@ -52,20 +188,17 @@ impl DesignFeature {
     }
 
     /// Create pins.
-    pub(in crate::workbench) fn render_pin_port_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
+    fn render_pin_port_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
         placement::pin_port::render_pin_port_dialog(&mut cx.state.pin_port, cx.model, ctx);
     }
 
     /// Place text or design note.
-    pub(in crate::workbench) fn render_design_note_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
+    fn render_design_note_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
         placement::design_note::render_design_note_dialog(&mut cx.state.design_note, cx.model, ctx);
     }
 
     /// Draw documentation shape.
-    pub(in crate::workbench) fn render_documentation_shape_dialog(
-        cx: &mut Cx<'_, Self>,
-        ctx: &Context,
-    ) {
+    fn render_documentation_shape_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
         placement::documentation_shape::render_documentation_shape_dialog(
             &mut cx.state.documentation_shape,
             cx.model,
@@ -74,18 +207,12 @@ impl DesignFeature {
     }
 
     /// Create array.
-    pub(in crate::workbench) fn render_array_selection_dialog(
-        cx: &mut Cx<'_, Self>,
-        ctx: &Context,
-    ) {
+    fn render_array_selection_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
         array::render_array_selection_dialog(&mut cx.state.array_selection, cx.model, ctx);
     }
 
     /// Object properties.
-    pub(in crate::workbench) fn render_object_properties_dialog(
-        cx: &mut Cx<'_, Self>,
-        ctx: &Context,
-    ) {
+    fn render_object_properties_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
         object_properties::render_object_properties_dialog(
             &mut cx.state.object_properties,
             cx.model,
@@ -95,10 +222,7 @@ impl DesignFeature {
     }
 
     /// Rename.
-    pub(in crate::workbench) fn render_rename_selection_dialog(
-        cx: &mut Cx<'_, Self>,
-        ctx: &Context,
-    ) {
+    fn render_rename_selection_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
         rename::render_rename_selection_dialog(
             &mut cx.state.rename_selection,
             cx.model,
@@ -108,7 +232,7 @@ impl DesignFeature {
     }
 
     /// Find and replace.
-    pub(in crate::workbench) fn render_find_replace_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
+    fn render_find_replace_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
         let edit_in_progress = cx.state.schematic_edit_in_progress(cx.model);
         find_replace::render_find_replace_dialog(
             &mut cx.state.find_replace,
@@ -120,10 +244,7 @@ impl DesignFeature {
     }
 
     /// Properties, for the instances selected together.
-    pub(in crate::workbench) fn render_shared_properties_dialog(
-        cx: &mut Cx<'_, Self>,
-        ctx: &Context,
-    ) {
+    fn render_shared_properties_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
         shared_properties::render_shared_properties_dialog(
             &mut cx.state.shared_properties,
             &cx.state.property_registry,
@@ -134,29 +255,20 @@ impl DesignFeature {
     }
 
     /// Grid, snap and wire routing.
-    pub(in crate::workbench) fn render_grid_snap_routing_dialog(
-        cx: &mut Cx<'_, Self>,
-        ctx: &Context,
-    ) {
+    fn render_grid_snap_routing_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
         cx.state
             .render_grid_snap_routing_dialog(cx.model, cx.wb, ctx);
     }
 
     /// Display options.
-    pub(in crate::workbench) fn render_schematic_visibility_dialog(
-        cx: &mut Cx<'_, Self>,
-        ctx: &Context,
-    ) {
+    fn render_schematic_visibility_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
         cx.state
             .render_schematic_visibility_dialog(cx.model, cx.wb, ctx);
     }
 
     /// Descend into hierarchy. A checked choice goes to the shell, which
     /// answers it straight after the dialog's step draws.
-    pub(in crate::workbench) fn render_descend_hierarchy_dialog(
-        cx: &mut Cx<'_, Self>,
-        ctx: &Context,
-    ) {
+    fn render_descend_hierarchy_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
         descend::render_descend_hierarchy_dialog(
             &mut cx.state.descend_hierarchy,
             cx.model,
@@ -166,10 +278,7 @@ impl DesignFeature {
     }
 
     /// Import symbol definition, then the symbol's parameter form.
-    pub(in crate::workbench) fn render_symbol_definition_dialogs(
-        cx: &mut Cx<'_, Self>,
-        ctx: &Context,
-    ) {
+    fn render_symbol_definition_dialogs(cx: &mut Cx<'_, Self>, ctx: &Context) {
         symbol_definition::render_symbol_definition_dialogs(
             &mut cx.state.symbol_import,
             &mut cx.state.symbol_parameter_form,
@@ -180,10 +289,7 @@ impl DesignFeature {
 
     /// Design review comments, signed with the name the cloud gives the
     /// reviewer.
-    pub(in crate::workbench) fn render_design_review_comments_dialog(
-        cx: &mut Cx<'_, Self>,
-        ctx: &Context,
-    ) {
+    fn render_design_review_comments_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
         ReviewComments {
             dialog: &mut cx.state.design_review_comments,
             design_note: &mut cx.state.design_note,
@@ -197,7 +303,7 @@ impl DesignFeature {
 
     /// Design rule setup. A new deck changes what blocks a run, so an applied
     /// one drops the run prepared under the old deck with its preflight.
-    pub(in crate::workbench) fn render_rule_setup_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
+    fn render_rule_setup_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
         let review_markers = cx.state.schematic_visibility.review_markers;
         if rule_setup::render_rule_setup_dialog(
             &mut cx.state.rule_setup,
@@ -214,10 +320,7 @@ impl DesignFeature {
     }
 
     /// Bulk edit, over its draft and the saved filters.
-    pub(in crate::workbench) fn render_selection_bulk_edit_dialog(
-        cx: &mut Cx<'_, Self>,
-        ctx: &Context,
-    ) {
+    fn render_selection_bulk_edit_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
         bulk_edit::render_selection_bulk_edit_dialog(
             &mut cx.state.selection_bulk_edit,
             &mut cx.state.schematic_bulk_edit_filters,
@@ -229,10 +332,7 @@ impl DesignFeature {
 
     /// Engineering table view, over its draft and the views saved on this
     /// device.
-    pub(in crate::workbench) fn render_engineering_table_dialog(
-        cx: &mut Cx<'_, Self>,
-        ctx: &Context,
-    ) {
+    fn render_engineering_table_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
         EngineeringTable {
             dialog: &mut cx.state.engineering_table,
             views: &mut cx.state.engineering_table_views,
@@ -245,7 +345,7 @@ impl DesignFeature {
 
     /// Adopt a stimulus definition onto a placed source, or save its card as
     /// one, over the draft and the definition the Stimulus Library selects.
-    pub(in crate::workbench) fn render_stimulus_link_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
+    fn render_stimulus_link_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
         stimulus_link::render_stimulus_link_dialog(
             &mut cx.state.stimulus_link,
             &mut cx.state.selected_stimulus_definition,
@@ -257,10 +357,7 @@ impl DesignFeature {
 
     /// Create model-bound symbol, over its draft. A created symbol asks for
     /// its view to open in the Design workspace.
-    pub(in crate::workbench) fn render_create_model_bound_symbol_dialog(
-        cx: &mut Cx<'_, Self>,
-        ctx: &Context,
-    ) {
+    fn render_create_model_bound_symbol_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
         create_model_bound_symbol::render_create_model_bound_symbol_dialog(
             &mut cx.state.create_model_bound_symbol,
             cx.model,
@@ -272,7 +369,7 @@ impl DesignFeature {
     /// The schematic component editor, over its draft, the property sheets
     /// and the stimulus link it hands an instance to. A re-adopted stimulus
     /// asks for the editor to reopen on the instance's new card.
-    pub(in crate::workbench) fn render_property_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
+    fn render_property_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
         PropertyDialog {
             dialog: &mut cx.state.tabbed_property_dialog,
             registry: &mut cx.state.property_registry,
@@ -286,10 +383,7 @@ impl DesignFeature {
 
     /// The connectivity and bus manager, over its draft. Revealing a finding,
     /// opening the source map and applying reviewed repairs go to the shell.
-    pub(in crate::workbench) fn render_connectivity_manager_dialog(
-        cx: &mut Cx<'_, Self>,
-        ctx: &Context,
-    ) {
+    fn render_connectivity_manager_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
         ConnectivityManager {
             dialog: &mut cx.state.connectivity_manager,
             model: cx.model,
@@ -300,10 +394,7 @@ impl DesignFeature {
 
     /// Create hierarchy, over its draft and the model it checks the draft
     /// against. A checked extraction goes to the shell.
-    pub(in crate::workbench) fn render_create_hierarchy_dialog(
-        cx: &mut Cx<'_, Self>,
-        ctx: &Context,
-    ) {
+    fn render_create_hierarchy_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
         CreateHierarchy {
             dialog: &mut cx.state.create_hierarchy,
             model: cx.model,
@@ -314,10 +405,7 @@ impl DesignFeature {
 
     /// Replace instance, over its draft, the property sheets its catalog reads,
     /// the model and the session.
-    pub(in crate::workbench) fn render_replace_instance_dialog(
-        cx: &mut Cx<'_, Self>,
-        ctx: &Context,
-    ) {
+    fn render_replace_instance_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
         ReplaceInstance {
             dialog: &mut cx.state.replace_instance,
             registry: &cx.state.property_registry,
@@ -329,10 +417,7 @@ impl DesignFeature {
 
     /// The built-in XSPICE placement form, over its draft, the model it arms
     /// the placement on and the session.
-    pub(in crate::workbench) fn render_builtin_xspice_placement_dialog(
-        cx: &mut Cx<'_, Self>,
-        ctx: &Context,
-    ) {
+    fn render_builtin_xspice_placement_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
         BuiltinXspicePlacement {
             dialog: &mut cx.state.builtin_xspice_placement,
             model: cx.model,

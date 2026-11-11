@@ -8,7 +8,6 @@
 
 use crate::workbench::app::{command_palette, dialogs};
 use crate::workbench::app_state::AppState;
-use crate::workbench::design::DesignFeature;
 use crate::workbench::features;
 use crate::workbench::framework::dialogs::{DialogKey, DialogSpec, ModalGate, ModalSpec, Modality};
 use crate::workbench::project::ProjectFeature;
@@ -42,11 +41,8 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
     DialogSpec {
         key: DialogKey("design.property"),
         modality: Modality::Application,
-        is_open: Some(|state| state.design.tabbed_property_dialog.open),
-        render: |app, ctx| {
-            DesignFeature::render_property_dialog(&mut features::cx(app), ctx);
-            app.after_contribution();
-        },
+        is_open: Some(|state| features::dialog_open(state, DialogKey("design.property"))),
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("design.property")),
     },
     DialogSpec {
         key: DialogKey("models.pdk_settings"),
@@ -108,30 +104,30 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
     DialogSpec {
         key: DialogKey("design.bus_tap"),
         modality: Modality::Dialog,
-        is_open: Some(|state| state.design.bus_tap.open),
-        render: |app, ctx| DesignFeature::render_bus_tap_dialog(&mut features::cx(app), ctx),
+        is_open: Some(|state| features::dialog_open(state, DialogKey("design.bus_tap"))),
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("design.bus_tap")),
     },
     DialogSpec {
         key: DialogKey("design.builtin_xspice_placement"),
         modality: Modality::Dialog,
-        is_open: Some(|state| state.design.builtin_xspice_placement.open),
+        is_open: Some(|state| {
+            features::dialog_open(state, DialogKey("design.builtin_xspice_placement"))
+        }),
         render: |app, ctx| {
-            DesignFeature::render_builtin_xspice_placement_dialog(&mut features::cx(app), ctx)
+            features::render_dialog(app, ctx, DialogKey("design.builtin_xspice_placement"))
         },
     },
     DialogSpec {
         key: DialogKey("design.net_label"),
         modality: Modality::Dialog,
-        is_open: Some(|state| state.design.net_label_placement.open),
-        render: |app, ctx| DesignFeature::render_net_label_dialog(&mut features::cx(app), ctx),
+        is_open: Some(|state| features::dialog_open(state, DialogKey("design.net_label"))),
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("design.net_label")),
     },
     DialogSpec {
         key: DialogKey("design.grid_snap_routing"),
         modality: Modality::Dialog,
-        is_open: Some(|state| state.design.grid_snap_routing.open),
-        render: |app, ctx| {
-            DesignFeature::render_grid_snap_routing_dialog(&mut features::cx(app), ctx)
-        },
+        is_open: Some(|state| features::dialog_open(state, DialogKey("design.grid_snap_routing"))),
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("design.grid_snap_routing")),
     },
     DialogSpec {
         key: DialogKey("sheets.drawing_sheet_overflow"),
@@ -146,87 +142,81 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
     DialogSpec {
         key: DialogKey("design.schematic_visibility"),
         modality: Modality::Dialog,
-        is_open: Some(|state| state.design.schematic_visibility_dialog.open),
+        is_open: Some(|state| {
+            features::dialog_open(state, DialogKey("design.schematic_visibility"))
+        }),
         render: |app, ctx| {
-            DesignFeature::render_schematic_visibility_dialog(&mut features::cx(app), ctx)
+            features::render_dialog(app, ctx, DialogKey("design.schematic_visibility"))
         },
     },
     DialogSpec {
         key: DialogKey("design.descend_hierarchy"),
         modality: Modality::Modeless,
         is_open: None,
-        render: |app, ctx| {
-            DesignFeature::render_descend_hierarchy_dialog(&mut features::cx(app), ctx);
-            app.after_contribution();
-        },
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("design.descend_hierarchy")),
     },
     DialogSpec {
         key: DialogKey("design.engineering_table"),
         modality: Modality::Dialog,
-        is_open: Some(|state| state.design.engineering_table.open),
-        render: |app, ctx| {
-            DesignFeature::render_engineering_table_dialog(&mut features::cx(app), ctx)
-        },
+        is_open: Some(|state| features::dialog_open(state, DialogKey("design.engineering_table"))),
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("design.engineering_table")),
     },
     DialogSpec {
         key: DialogKey("design.pin_port"),
         modality: Modality::Dialog,
-        is_open: Some(|state| state.design.pin_port.open),
-        render: |app, ctx| DesignFeature::render_pin_port_dialog(&mut features::cx(app), ctx),
+        is_open: Some(|state| features::dialog_open(state, DialogKey("design.pin_port"))),
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("design.pin_port")),
     },
     // New comment hands input to the note editor in this same frame.
     DialogSpec {
         key: DialogKey("design.design_review_comments"),
         modality: Modality::Dialog,
-        is_open: Some(|state| state.design.design_review_comments.open),
+        is_open: Some(|state| {
+            features::dialog_open(state, DialogKey("design.design_review_comments"))
+        }),
         render: |app, ctx| {
-            DesignFeature::render_design_review_comments_dialog(&mut features::cx(app), ctx)
+            features::render_dialog(app, ctx, DialogKey("design.design_review_comments"))
         },
     },
     DialogSpec {
         key: DialogKey("design.design_note"),
         modality: Modality::Dialog,
-        is_open: Some(|state| state.design.design_note.open),
-        render: |app, ctx| DesignFeature::render_design_note_dialog(&mut features::cx(app), ctx),
+        is_open: Some(|state| features::dialog_open(state, DialogKey("design.design_note"))),
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("design.design_note")),
     },
     DialogSpec {
         key: DialogKey("design.documentation_shape"),
         modality: Modality::Dialog,
-        is_open: Some(|state| state.design.documentation_shape.open),
+        is_open: Some(|state| {
+            features::dialog_open(state, DialogKey("design.documentation_shape"))
+        }),
         render: |app, ctx| {
-            DesignFeature::render_documentation_shape_dialog(&mut features::cx(app), ctx)
+            features::render_dialog(app, ctx, DialogKey("design.documentation_shape"))
         },
     },
     DialogSpec {
         key: DialogKey("design.array_selection"),
         modality: Modality::Dialog,
-        is_open: Some(|state| state.design.array_selection.open),
-        render: |app, ctx| {
-            DesignFeature::render_array_selection_dialog(&mut features::cx(app), ctx)
-        },
+        is_open: Some(|state| features::dialog_open(state, DialogKey("design.array_selection"))),
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("design.array_selection")),
     },
     DialogSpec {
         key: DialogKey("design.replace_instance"),
         modality: Modality::Dialog,
-        is_open: Some(|state| state.design.replace_instance.open),
-        render: |app, ctx| {
-            DesignFeature::render_replace_instance_dialog(&mut features::cx(app), ctx)
-        },
+        is_open: Some(|state| features::dialog_open(state, DialogKey("design.replace_instance"))),
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("design.replace_instance")),
     },
     DialogSpec {
         key: DialogKey("design.stimulus_link"),
         modality: Modality::Dialog,
-        is_open: Some(|state| state.design.stimulus_link.open),
-        render: |app, ctx| DesignFeature::render_stimulus_link_dialog(&mut features::cx(app), ctx),
+        is_open: Some(|state| features::dialog_open(state, DialogKey("design.stimulus_link"))),
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("design.stimulus_link")),
     },
     DialogSpec {
         key: DialogKey("design.create_hierarchy"),
         modality: Modality::Dialog,
-        is_open: Some(|state| state.design.create_hierarchy.open),
-        render: |app, ctx| {
-            DesignFeature::render_create_hierarchy_dialog(&mut features::cx(app), ctx);
-            app.after_contribution();
-        },
+        is_open: Some(|state| features::dialog_open(state, DialogKey("design.create_hierarchy"))),
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("design.create_hierarchy")),
     },
     DialogSpec {
         key: DialogKey("project.check_and_save"),
@@ -240,10 +230,11 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
     DialogSpec {
         key: DialogKey("design.connectivity_manager"),
         modality: Modality::Dialog,
-        is_open: Some(|state| state.design.connectivity_manager.open),
+        is_open: Some(|state| {
+            features::dialog_open(state, DialogKey("design.connectivity_manager"))
+        }),
         render: |app, ctx| {
-            DesignFeature::render_connectivity_manager_dialog(&mut features::cx(app), ctx);
-            app.after_contribution();
+            features::render_dialog(app, ctx, DialogKey("design.connectivity_manager"))
         },
     },
     DialogSpec {
@@ -264,9 +255,11 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
     DialogSpec {
         key: DialogKey("design.selection_bulk_edit"),
         modality: Modality::Dialog,
-        is_open: Some(|state| state.design.selection_bulk_edit.open),
+        is_open: Some(|state| {
+            features::dialog_open(state, DialogKey("design.selection_bulk_edit"))
+        }),
         render: |app, ctx| {
-            DesignFeature::render_selection_bulk_edit_dialog(&mut features::cx(app), ctx)
+            features::render_dialog(app, ctx, DialogKey("design.selection_bulk_edit"))
         },
     },
     DialogSpec {
@@ -298,21 +291,18 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
     DialogSpec {
         key: DialogKey("design.create_model_bound_symbol"),
         modality: Modality::Dialog,
-        is_open: Some(|state| state.design.create_model_bound_symbol.open),
+        is_open: Some(|state| {
+            features::dialog_open(state, DialogKey("design.create_model_bound_symbol"))
+        }),
         render: |app, ctx| {
-            DesignFeature::render_create_model_bound_symbol_dialog(&mut features::cx(app), ctx);
-            app.after_contribution();
+            features::render_dialog(app, ctx, DialogKey("design.create_model_bound_symbol"))
         },
     },
     DialogSpec {
         key: DialogKey("design.symbol_definition"),
         modality: Modality::Dialog,
-        is_open: Some(|state| {
-            state.design.symbol_import.open || state.design.symbol_parameter_form.open
-        }),
-        render: |app, ctx| {
-            DesignFeature::render_symbol_definition_dialogs(&mut features::cx(app), ctx)
-        },
+        is_open: Some(|state| features::dialog_open(state, DialogKey("design.symbol_definition"))),
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("design.symbol_definition")),
     },
     DialogSpec {
         key: DialogKey("project.configuration"),
@@ -330,8 +320,8 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
     DialogSpec {
         key: DialogKey("design.rule_setup"),
         modality: Modality::Dialog,
-        is_open: Some(|state| state.design.rule_setup.open),
-        render: |app, ctx| DesignFeature::render_rule_setup_dialog(&mut features::cx(app), ctx),
+        is_open: Some(|state| features::dialog_open(state, DialogKey("design.rule_setup"))),
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("design.rule_setup")),
     },
     DialogSpec {
         key: DialogKey("sheets.drawing_sheet_defaults"),
@@ -372,32 +362,26 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
     DialogSpec {
         key: DialogKey("design.object_properties"),
         modality: Modality::Dialog,
-        is_open: Some(|state| state.design.object_properties.open),
-        render: |app, ctx| {
-            DesignFeature::render_object_properties_dialog(&mut features::cx(app), ctx)
-        },
+        is_open: Some(|state| features::dialog_open(state, DialogKey("design.object_properties"))),
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("design.object_properties")),
     },
     DialogSpec {
         key: DialogKey("design.rename_selection"),
         modality: Modality::Dialog,
-        is_open: Some(|state| state.design.rename_selection.open),
-        render: |app, ctx| {
-            DesignFeature::render_rename_selection_dialog(&mut features::cx(app), ctx)
-        },
+        is_open: Some(|state| features::dialog_open(state, DialogKey("design.rename_selection"))),
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("design.rename_selection")),
     },
     DialogSpec {
         key: DialogKey("design.find_replace"),
         modality: Modality::Dialog,
-        is_open: Some(|state| state.design.find_replace.open),
-        render: |app, ctx| DesignFeature::render_find_replace_dialog(&mut features::cx(app), ctx),
+        is_open: Some(|state| features::dialog_open(state, DialogKey("design.find_replace"))),
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("design.find_replace")),
     },
     DialogSpec {
         key: DialogKey("design.shared_properties"),
         modality: Modality::Dialog,
-        is_open: Some(|state| state.design.shared_properties.open),
-        render: |app, ctx| {
-            DesignFeature::render_shared_properties_dialog(&mut features::cx(app), ctx)
-        },
+        is_open: Some(|state| features::dialog_open(state, DialogKey("design.shared_properties"))),
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("design.shared_properties")),
     },
     DialogSpec {
         key: DialogKey("framework.window_session"),

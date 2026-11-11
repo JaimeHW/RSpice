@@ -221,9 +221,9 @@ fn descend_into_hierarchy_opens_and_draws_in_the_frame() {
     assert!(app.state.design.descend_hierarchy.open);
 }
 
-/// Descend into hierarchy's step has what it raised answered straight after
-/// it draws, so nothing runs between the reader's choice and the shell
-/// carrying it out.
+/// Descend into hierarchy's step draws through the feature registry, which
+/// answers what it raised straight after it draws, so nothing runs between
+/// the reader's choice and the shell carrying it out.
 #[test]
 fn the_descend_step_has_its_choice_answered_straight_after_it_draws() {
     let squeeze = |text: &str| text.split_whitespace().collect::<String>();
@@ -233,10 +233,9 @@ fn the_descend_step_has_its_choice_answered_straight_after_it_draws() {
         .find(|spec| spec.contains("DialogKey(\"design.descend_hierarchy\")"))
         .expect("the shell's dialog order draws Descend into hierarchy");
     assert!(spec.contains(&squeeze(
-        "render: |app, ctx| {
-            DesignFeature::render_descend_hierarchy_dialog(&mut features::cx(app), ctx);
-            app.after_contribution();
-        },"
+        "render: |app, ctx| features::render_dialog(
+            app, ctx, DialogKey(\"design.descend_hierarchy\")
+        ),"
     )));
 }
 
