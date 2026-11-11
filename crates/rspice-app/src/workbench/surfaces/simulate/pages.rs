@@ -37,7 +37,17 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, page: SimulationPage) {
     setup_page(ui, |ui| match page {
         SimulationPage::Analyses => {}
         SimulationPage::Excitations => {
-            super::page_excitations::show(ui, &mut app.state, &excitations, &rf_ports);
+            let verb = super::page_excitations::show(
+                ui,
+                &mut crate::workbench::features::cx(app),
+                &excitations,
+                &rf_ports,
+            );
+            // A row verb is a transaction against the whole design, run once
+            // the page has drawn.
+            if let Some(verb) = verb {
+                verb.apply(&mut app.state);
+            }
         }
         SimulationPage::Variables => {
             super::page_variables::show(ui, &mut crate::workbench::features::cx(app));

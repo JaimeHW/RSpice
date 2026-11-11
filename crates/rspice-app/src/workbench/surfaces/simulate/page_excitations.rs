@@ -28,7 +28,9 @@ use crate::simulation::placed_sources::{
 };
 use crate::state::InstancePath;
 use crate::state::stimulus_library::provenance::ProvenanceState;
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::framework::feature::Cx;
+use crate::workbench::simulate::SimulateFeature;
 
 use super::page_kit;
 use super::page_kit::{RowPress, Tone, card, card_note, ledger_head, ledger_row};
@@ -83,15 +85,16 @@ const PORT_HEAD: [&str; 8] = [
 /// twice.
 pub(super) fn show(
     ui: &mut Ui,
-    state: &mut AppState,
+    cx: &mut Cx<'_, SimulateFeature>,
     sources: &[PlacedSource],
     ports: &[PlacedRfPort],
-) {
+) -> Option<SourceVerbIntent> {
     // Readership is run-scoped: a disabled instance is not in the run this plan
     // would dispatch, so a source only it names is one the run drives without
     // reading.
     let unread = sources.iter().filter(|source| !source.is_read()).count();
     let verdict = verdict(sources, ports);
+    let mut taken = None;
 
     card(
         ui,
@@ -108,17 +111,17 @@ pub(super) fn show(
             }
             if !sources.is_empty() {
                 ledger_head(ui, &EXCITATION_COLUMNS, &EXCITATION_HEAD);
-                let mut taken = None;
                 for source in sources {
-                    let row = excitation_row(ui, state, source);
-                    if let Some(verb) = source_row_verbs(ui, state, source, row.rect) {
-                        taken = Some((source.component_id, source.occurrence.clone(), verb));
+                    let row = excitation_row(ui, cx.model, source);
+                    if let Some(verb) = source_row_verbs(ui, cx.model, source, row.rect) {
+                        taken = Some(SourceVerbIntent {
+                            component_id: source.component_id,
+                            occurrence: source.occurrence.clone(),
+                            verb,
+                        });
                     } else if row.clicked() {
-                        reveal(state, source.occurrence.as_ref(), source.component_id);
+                        reveal(cx, source.occurrence.as_ref(), source.component_id);
                     }
-                }
-                if let Some((component_id, occurrence, verb)) = taken {
-                    take_source_verb(state, component_id, occurrence.as_ref(), &verb);
                 }
             }
             // A second head rather than a group caption: a port's third cell
@@ -128,9 +131,9 @@ pub(super) fn show(
             if !ports.is_empty() {
                 ledger_head(ui, &EXCITATION_COLUMNS, &PORT_HEAD);
                 for port in ports {
-                    let row = port_row(ui, state, port);
+                    let row = port_row(ui, cx.model, port);
                     if row.clicked() {
-                        reveal(state, port.occurrence.as_ref(), port.component_id);
+                        reveal(cx, port.occurrence.as_ref(), port.component_id);
                     }
                 }
             }
@@ -146,6 +149,7 @@ pub(super) fn show(
             }
         },
     );
+    taken
 }
 
 /// What the card's chip says this design's excitations amount to.
@@ -270,10 +274,10 @@ fn duplicate_port_note(collisions: &[u32]) -> String {
 
 /// One source's row. The reader column carries the finding, so it is the only
 /// cell that takes a tone.
-fn excitation_row(ui: &mut Ui, state: &AppState, source: &PlacedSource) -> egui::Response {
+fn excitation_row(ui: &mut Ui, model: &Model, source: &PlacedSource) -> egui::Response {
     let (readers, tone) = readers_cell(&source.consumers, ("no reader", Tone::Warn));
     let terminals = source.nets.join(" \u{2192} ");
-    let selected = reveals(state, source.occurrence.as_ref(), source.component_id);
+    let selected = reveals(model, source.occurrence.as_ref(), source.component_id);
     let summary = source.summary();
     let occurrence = source.occurrence_label();
     ledger_row(
@@ -302,7 +306,7 @@ fn excitation_row(ui: &mut Ui, state: &AppState, source: &PlacedSource) -> egui:
         ),
         &source.consumers,
         "No analysis in this plan names this source, and none reads every source",
-        elsewhere(state, source.occurrence.as_ref()),
+        elsewhere(model, source.occurrence.as_ref()),
     ))
 }
 
@@ -390,14 +394,14 @@ fn source_verbs(source: &PlacedSource) -> Vec<SourceVerb> {
 /// per-row controls keep.
 fn source_row_verbs(
     ui: &mut Ui,
-    state: &AppState,
+    model: &Model,
     source: &PlacedSource,
     row: egui::Rect,
 ) -> Option<SourceVerb> {
     let verbs = source_verbs(source);
     let cells = page_kit::column_rects(row, &EXCITATION_COLUMNS);
     let cell = *cells.last()?;
-    let unreachable = elsewhere(state, source.occurrence.as_ref())
+    let unreachable = elsewhere(model, source.occurrence.as_ref())
         .is_some()
         .then_some(
             "This instance is drawn inside another occurrence; descend to it from the design \
@@ -427,28 +431,50 @@ fn source_row_verbs(
     verbs.get(taken).cloned()
 }
 
-/// Run one row verb against the design.
-fn take_source_verb(
-    state: &mut AppState,
+/// A row verb the page raised, for its caller to run once the page has drawn.
+///
+/// Each verb is a transaction against the whole design (the property editor,
+/// the Stimulus Library, a re-adoption), so it is handed back rather than run
+/// from inside the table.
+pub(super) struct SourceVerbIntent {
     component_id: u64,
-    occurrence: Option<&InstancePath>,
-    verb: &SourceVerb,
-) {
-    match verb {
-        SourceVerb::Properties => {
-            reveal(state, occurrence, component_id);
-            crate::workbench::app::open_property_editor(state, component_id);
-        }
-        SourceVerb::OpenDefinition(definition) => {
-            crate::workbench::app::open_stimulus_definition(state, definition);
-        }
-        SourceVerb::Readopt(definition) => {
-            reveal(state, occurrence, component_id);
-            crate::workbench::app::actions::stimulus::readopt_adopter(
-                state,
-                component_id,
-                definition,
-            );
+    occurrence: Option<InstancePath>,
+    verb: SourceVerb,
+}
+
+impl SourceVerbIntent {
+    /// Run the row verb against the design.
+    pub(super) fn apply(self, state: &mut AppState) {
+        let Self {
+            component_id,
+            occurrence,
+            verb,
+        } = self;
+        let occurrence = occurrence.as_ref();
+        match &verb {
+            SourceVerb::Properties => {
+                crate::workbench::app::actions::reveal::placed_instance(
+                    state,
+                    occurrence,
+                    component_id,
+                );
+                crate::workbench::app::open_property_editor(state, component_id);
+            }
+            SourceVerb::OpenDefinition(definition) => {
+                crate::workbench::app::open_stimulus_definition(state, definition);
+            }
+            SourceVerb::Readopt(definition) => {
+                crate::workbench::app::actions::reveal::placed_instance(
+                    state,
+                    occurrence,
+                    component_id,
+                );
+                crate::workbench::app::actions::stimulus::readopt_adopter(
+                    state,
+                    component_id,
+                    definition,
+                );
+            }
         }
     }
 }
@@ -459,10 +485,10 @@ fn take_source_verb(
 /// is still terminating the design, which is not the case a `no reader` warning
 /// was written for, and painting every termination in a time-domain testbench
 /// as a finding is how a page stops being read.
-fn port_row(ui: &mut Ui, state: &AppState, port: &PlacedRfPort) -> egui::Response {
+fn port_row(ui: &mut Ui, model: &Model, port: &PlacedRfPort) -> egui::Response {
     let (readers, tone) = readers_cell(&port.consumers, ("no S-parameter run", Tone::Neutral));
     let terminals = port.nets.join(" \u{2192} ");
-    let selected = reveals(state, port.occurrence.as_ref(), port.component_id);
+    let selected = reveals(model, port.occurrence.as_ref(), port.component_id);
     let summary = port.summary();
     let occurrence = port.occurrence_label();
     ledger_row(
@@ -488,7 +514,7 @@ fn port_row(ui: &mut Ui, state: &AppState, port: &PlacedRfPort) -> egui::Respons
         ),
         &port.consumers,
         "No S-parameter analysis in this plan reads this port",
-        elsewhere(state, port.occurrence.as_ref()),
+        elsewhere(model, port.occurrence.as_ref()),
     ))
 }
 
@@ -496,11 +522,8 @@ fn port_row(ui: &mut Ui, state: &AppState, port: &PlacedRfPort) -> egui::Respons
 ///
 /// `None` means the row's instance is in the buffer in front of the reader, so
 /// the page's own select-and-centre transaction reaches it.
-fn elsewhere<'a>(
-    state: &AppState,
-    occurrence: Option<&'a InstancePath>,
-) -> Option<&'a InstancePath> {
-    occurrence.filter(|occurrence| **occurrence != state.model.workspace.content.occurrence_path())
+fn elsewhere<'a>(model: &Model, occurrence: Option<&'a InstancePath>) -> Option<&'a InstancePath> {
+    occurrence.filter(|occurrence| **occurrence != model.workspace.content.occurrence_path())
 }
 
 /// Whether the drawing on screen is showing this row's instance selected.
@@ -509,10 +532,9 @@ fn elsewhere<'a>(
 /// component id is unique inside one buffer and repeats across them, so a row
 /// naming an instance of a child master would otherwise paint itself selected
 /// whenever the sheet on screen happened to hold that id.
-fn reveals(state: &AppState, occurrence: Option<&InstancePath>, component_id: u64) -> bool {
-    elsewhere(state, occurrence).is_none()
-        && state
-            .model
+fn reveals(model: &Model, occurrence: Option<&InstancePath>, component_id: u64) -> bool {
+    elsewhere(model, occurrence).is_none()
+        && model
             .schematic
             .session
             .editor
@@ -613,12 +635,17 @@ fn row_tooltip(
 /// Select the instance and centre the drawing on it, then show the drawing.
 ///
 /// The transaction itself is
-/// [`crate::workbench::app::actions::reveal::placed_instance`], which every
+/// [`crate::workbench::app::actions::reveal::placed_instance_in`], which every
 /// list that names an instance elsewhere comes through; the tooltip on this
 /// page is what says which occurrence to descend to when the row's instance is
 /// not in the buffer on screen.
-fn reveal(state: &mut AppState, occurrence: Option<&InstancePath>, component_id: u64) {
-    crate::workbench::app::actions::reveal::placed_instance(state, occurrence, component_id);
+fn reveal(cx: &mut Cx<'_, SimulateFeature>, occurrence: Option<&InstancePath>, component_id: u64) {
+    crate::workbench::app::actions::reveal::placed_instance_in(
+        cx.model,
+        cx.wb,
+        occurrence,
+        component_id,
+    );
 }
 
 #[cfg(test)]

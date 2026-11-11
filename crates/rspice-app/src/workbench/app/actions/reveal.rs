@@ -14,7 +14,8 @@
 //! which occurrence to descend to instead.
 
 use crate::state::InstancePath;
-use crate::workbench::app_state::AppState;
+use crate::workbench::WorkbenchSession;
+use crate::workbench::app_state::{AppState, Model};
 use crate::workbench::state::Workspace;
 
 /// Show the design with this instance selected and centred.
@@ -23,27 +24,40 @@ pub(in crate::workbench) fn placed_instance(
     occurrence: Option<&InstancePath>,
     component_id: u64,
 ) {
-    state.workbench.activate(Workspace::Design);
-    if !reaches(state, occurrence) {
+    placed_instance_in(
+        &mut state.model,
+        &mut state.workbench,
+        occurrence,
+        component_id,
+    );
+}
+
+/// [`placed_instance`] over the parts it reads and writes.
+pub(in crate::workbench) fn placed_instance_in(
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
+    occurrence: Option<&InstancePath>,
+    component_id: u64,
+) {
+    wb.activate(Workspace::Design);
+    if !reaches_in(model, occurrence) {
         return;
     }
-    let position = state
-        .model
+    let position = model
         .schematic
         .document()
         .components
         .iter()
         .find(|component| component.id == component_id)
         .map(|component| component.pos);
-    state
-        .model
+    model
         .schematic
         .session
         .editor
         .selection
         .select_only_component(component_id);
-    state.model.schematic.session.editor.net_highlight.clear();
-    state.model.schematic.session.editor.center_request = position;
+    model.schematic.session.editor.net_highlight.clear();
+    model.schematic.session.editor.center_request = position;
 }
 
 /// Whether the buffer on screen is the one this occurrence names.
@@ -53,6 +67,11 @@ pub(in crate::workbench) fn placed_instance(
 /// this first, because the component id it holds means nothing anywhere else.
 #[must_use]
 pub(in crate::workbench) fn reaches(state: &AppState, occurrence: Option<&InstancePath>) -> bool {
-    occurrence
-        .is_none_or(|occurrence| *occurrence == state.model.workspace.content.occurrence_path())
+    reaches_in(&state.model, occurrence)
+}
+
+/// [`reaches`] over the model it reads.
+#[must_use]
+fn reaches_in(model: &Model, occurrence: Option<&InstancePath>) -> bool {
+    occurrence.is_none_or(|occurrence| *occurrence == model.workspace.content.occurrence_path())
 }
