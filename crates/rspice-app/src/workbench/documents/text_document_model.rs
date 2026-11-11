@@ -86,6 +86,18 @@ struct ParkedHistory {
     redo: Vec<HistoryEntry>,
 }
 
+/// The text the document's owner last published, as the editor had it then:
+/// its history, and the selections from just before the first edit made
+/// since. `revision` is the model's revision when it was kept.
+#[derive(Debug, Clone)]
+struct PublishedText {
+    text: Rope,
+    undo: Vec<HistoryEntry>,
+    redo: Vec<HistoryEntry>,
+    selections: Vec<TextSelection>,
+    revision: u64,
+}
+
 #[derive(Debug, Clone, Copy)]
 struct FoldProjection {
     visible_start: usize,
@@ -105,6 +117,7 @@ pub(crate) struct TextDocumentModel {
     undo: Vec<HistoryEntry>,
     redo: Vec<HistoryEntry>,
     parked: Vec<ParkedHistory>,
+    published: Option<PublishedText>,
     history_limit: usize,
     revision: u64,
 }
@@ -132,6 +145,7 @@ impl TextDocumentModel {
             undo: Vec::new(),
             redo: Vec::new(),
             parked: Vec::new(),
+            published: None,
             history_limit: DEFAULT_HISTORY_LIMIT,
             revision: 0,
         })
@@ -233,38 +247,89 @@ impl TextDocumentModel {
     /// project/document service owns undo and conflict semantics across that
     /// boundary. The new text starts with no history of its own, and the
     /// history of the text it replaced is kept: when the owner takes its step
-    /// back and that exact text returns, so do the edits made in it. Cursor
-    /// locations are retained and clamped when possible.
+    /// back and that exact text returns, so do the edits made in it. The text
+    /// the owner last published, published again over edits made since, is
+    /// the owner refusing them: the refused edits are dropped, and the
+    /// history and the selections are what they were before the first of
+    /// them. Otherwise cursor locations are retained and clamped when
+    /// possible.
     pub fn synchronize_source(&mut self, source: &str) -> bool {
         if self.source_equals(source) {
+            self.keep_published();
             return false;
         }
-        let left = ParkedHistory {
-            text: std::mem::replace(&mut self.text, Rope::from_str(source)),
-            undo: std::mem::take(&mut self.undo),
-            redo: std::mem::take(&mut self.redo),
-        };
-        if !left.undo.is_empty() || !left.redo.is_empty() {
-            self.parked.push(left);
-            if self.parked.len() > PARKED_HISTORY_LIMIT {
-                self.parked.remove(0);
-            }
-        }
-        if let Some(index) = self
-            .parked
-            .iter()
-            .rposition(|parked| parked.text == self.text)
+        if let Some(published) = self
+            .published
+            .take()
+            .filter(|published| published.text == source)
         {
-            let returned = self.parked.remove(index);
-            self.undo = returned.undo;
-            self.redo = returned.redo;
+            self.text = published.text;
+            self.undo = published.undo;
+            self.redo = published.redo;
+            self.selections = published.selections;
+        } else {
+            let left = ParkedHistory {
+                text: std::mem::replace(&mut self.text, Rope::from_str(source)),
+                undo: std::mem::take(&mut self.undo),
+                redo: std::mem::take(&mut self.redo),
+            };
+            if !left.undo.is_empty() || !left.redo.is_empty() {
+                self.parked.push(left);
+                if self.parked.len() > PARKED_HISTORY_LIMIT {
+                    self.parked.remove(0);
+                }
+            }
+            if let Some(index) = self
+                .parked
+                .iter()
+                .rposition(|parked| parked.text == self.text)
+            {
+                let returned = self.parked.remove(index);
+                self.undo = returned.undo;
+                self.redo = returned.redo;
+            }
         }
         self.preferred_newline = detect_preferred_newline(source);
         self.selections =
             normalize_selections(std::mem::take(&mut self.selections), self.text.len_chars());
         self.revision = self.revision.wrapping_add(1);
         self.prune_invalid_folds();
+        self.keep_published();
         true
+    }
+
+    /// Keep the text as the owner published it, with its history and the
+    /// selections; nothing is copied when neither changed since it was last
+    /// kept.
+    fn keep_published(&mut self) {
+        if self
+            .published
+            .as_ref()
+            .is_some_and(|published| published.revision == self.revision)
+        {
+            return;
+        }
+        self.published = Some(PublishedText {
+            text: self.text.clone(),
+            undo: self.undo.clone(),
+            redo: self.redo.clone(),
+            selections: self.selections.clone(),
+            revision: self.revision,
+        });
+    }
+
+    /// Before the first change to the text since the owner published it,
+    /// keep the selections the editor had then, which a refusal returns to.
+    fn keep_selections_before_change(
+        published: &mut Option<PublishedText>,
+        revision: u64,
+        selections: &[TextSelection],
+    ) {
+        if let Some(published) = published
+            && published.revision == revision
+        {
+            published.selections = selections.to_vec();
+        }
     }
 
     #[cfg(test)]
@@ -467,6 +532,7 @@ impl TextDocumentModel {
         let Some(entry) = self.undo.pop() else {
             return false;
         };
+        Self::keep_selections_before_change(&mut self.published, self.revision, &self.selections);
         self.text = entry.before.clone();
         self.selections = entry.before_selections.clone();
         self.redo.push(entry);
@@ -479,6 +545,7 @@ impl TextDocumentModel {
         let Some(entry) = self.redo.pop() else {
             return false;
         };
+        Self::keep_selections_before_change(&mut self.published, self.revision, &self.selections);
         self.text = entry.after.clone();
         self.selections = entry.after_selections.clone();
         self.undo.push(entry);
@@ -677,6 +744,7 @@ impl TextDocumentModel {
     }
 
     fn commit_history(&mut self, before: Rope, before_selections: Vec<TextSelection>) {
+        Self::keep_selections_before_change(&mut self.published, self.revision, &before_selections);
         self.undo.push(HistoryEntry {
             before,
             before_selections,
@@ -932,6 +1000,80 @@ mod tests {
         assert_eq!(model.to_source(), "a");
         assert!(model.redo());
         assert_eq!(model.to_source(), "ab");
+    }
+
+    #[test]
+    fn an_edit_the_owner_refuses_leaves_the_history_and_the_selections_as_they_were() {
+        let mut model = TextDocumentModel::from_source("a");
+        model.set_selections(vec![TextSelection::caret(1)]);
+        model.insert_at_selections("b");
+        assert!(!model.synchronize_source("ab"), "the owner takes the edit");
+
+        // The caret moves, then two edits the owner refuses.
+        model.set_selections(vec![TextSelection::caret(0)]);
+        model.insert_at_selections("q");
+        model.insert_at_selections("r");
+        assert_eq!(model.to_source(), "qrab");
+        assert!(
+            model.synchronize_source("ab"),
+            "the owner publishes its text again"
+        );
+
+        assert_eq!(model.to_source(), "ab");
+        assert_eq!(model.selections(), &[TextSelection::caret(0)]);
+        assert!(
+            model.undo(),
+            "the edit before the refusal is still undoable"
+        );
+        assert_eq!(model.to_source(), "a");
+        assert!(model.redo());
+        assert_eq!(model.to_source(), "ab");
+        assert!(!model.redo(), "the refused edits are gone");
+    }
+
+    #[test]
+    fn a_refused_undo_leaves_undo_and_redo_as_they_were() {
+        let mut model = TextDocumentModel::from_source("");
+        model.insert_at_selections("a");
+        model.insert_at_selections("b");
+        assert!(!model.synchronize_source("ab"));
+        assert!(model.undo());
+        assert!(!model.synchronize_source("a"), "the owner takes the undo");
+
+        assert!(model.undo());
+        assert_eq!(model.to_source(), "");
+        assert!(
+            model.synchronize_source("a"),
+            "the owner refuses the second"
+        );
+        assert!(model.redo(), "the first undo is still redoable");
+        assert_eq!(model.to_source(), "ab");
+        assert!(model.undo());
+        assert!(model.undo(), "and the typing before it undoable");
+        assert_eq!(model.to_source(), "");
+    }
+
+    #[test]
+    fn the_owner_publishing_its_text_again_unchanged_copies_nothing() {
+        let mut model = TextDocumentModel::from_source("a");
+        model.set_selections(vec![TextSelection::caret(1)]);
+        model.insert_at_selections("b");
+        assert!(!model.synchronize_source("ab"));
+        let kept = model
+            .published
+            .as_ref()
+            .map(|published| published.undo.as_ptr());
+        assert!(kept.is_some(), "the published text is kept");
+
+        assert!(!model.synchronize_source("ab"));
+        assert_eq!(
+            model
+                .published
+                .as_ref()
+                .map(|published| published.undo.as_ptr()),
+            kept,
+            "an unchanged text and history are not copied again"
+        );
     }
 
     #[test]
