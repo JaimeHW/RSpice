@@ -137,6 +137,10 @@ pub struct EmitBindings {
     pub limit_previous: String,
     /// Indexed as `staged[slot]` — what coarser invalidation stages cached.
     pub staged: String,
+    /// What each [`CfgValueKind::Outer`] index reads: an expression over
+    /// names the surrounding code already has in scope. The body's own names
+    /// step around every name these mention, so none is shadowed.
+    pub outer: Vec<String>,
     /// Ordered `$finish` callback `(site, time, diagnostic_level) -> ()`.
     /// The owner journals calls and retains any task evaluation error.
     pub analog_finish: String,
@@ -196,6 +200,7 @@ impl Default for EmitBindings {
             limit_slots: HashMap::new(),
             limit_previous: "limit_previous".into(),
             staged: "staged".into(),
+            outer: Vec::new(),
         }
     }
 }
@@ -338,22 +343,7 @@ pub fn emit_body(
     outputs: &[ValueId],
     bindings: &EmitBindings,
 ) -> Result<(String, Vec<String>), EmitError> {
-    let mut emitter = Emitter {
-        function,
-        bindings,
-        source: String::new(),
-        declared: HashSet::new(),
-        loop_headers: back_edge_targets(function),
-        loop_header_exports: HashSet::new(),
-        post_dominators: immediate_post_dominators(function),
-        predecessor_counts: predecessor_counts(function),
-        emitted: vec![false; function.values.len()],
-        effectful_branches: HashSet::new(),
-        inlined: HashMap::new(),
-        names: Vec::new(),
-        wanted: outputs.iter().copied().collect(),
-        captured: BTreeMap::new(),
-    };
+    let mut emitter = Emitter::new(function, outputs, bindings);
     emitter.plan_emission_liveness(outputs);
     emitter.plan_inlining(outputs);
     emitter.plan_names();
@@ -370,6 +360,17 @@ pub fn emit_body(
         .map(|value| emitter.output_name(*value))
         .collect();
     Ok((emitter.source, names))
+}
+
+/// Which values of `function` a body emitted for `outputs` computes: what
+/// the outputs read, and the conditions of the branches that decide any of
+/// it. The canonical function still names conditions whose arms compute
+/// nothing wanted; the emitted body does not evaluate those.
+pub(super) fn emitted_values(function: &CfgFunction, outputs: &[ValueId]) -> Vec<bool> {
+    let bindings = EmitBindings::default();
+    let mut emitter = Emitter::new(function, outputs, &bindings);
+    emitter.plan_emission_liveness(outputs);
+    emitter.emitted
 }
 
 pub const MAX_FIXED_LANE_WIDTH: usize = 32;
@@ -543,7 +544,25 @@ struct Emitter<'a> {
 /// rather than generated runtime storage.
 const MAX_INLINED_EXPRESSION_NODES: usize = 32;
 
-impl Emitter<'_> {
+impl<'a> Emitter<'a> {
+    fn new(function: &'a CfgFunction, outputs: &[ValueId], bindings: &'a EmitBindings) -> Self {
+        Emitter {
+            function,
+            bindings,
+            source: String::new(),
+            declared: HashSet::new(),
+            loop_headers: back_edge_targets(function),
+            loop_header_exports: HashSet::new(),
+            post_dominators: immediate_post_dominators(function),
+            predecessor_counts: predecessor_counts(function),
+            emitted: vec![false; function.values.len()],
+            effectful_branches: HashSet::new(),
+            inlined: HashMap::new(),
+            names: Vec::new(),
+            wanted: outputs.iter().copied().collect(),
+            captured: BTreeMap::new(),
+        }
+    }
     /// Find values and control decisions that can affect `outputs`.
     ///
     /// This deliberately starts without branch conditions. A branch becomes
@@ -821,7 +840,8 @@ impl Emitter<'_> {
                 && self
                     .constant_leaf_expression_len(value.id)
                     .is_some_and(|length| constant_inlining_saves_source(length, uses[index]));
-            if block_of[index].is_none() && (single_use_leaf || cheaper_constant) {
+            let outer_read = !must_bind[index] && matches!(value.kind, CfgValueKind::Outer(_));
+            if block_of[index].is_none() && (single_use_leaf || cheaper_constant || outer_read) {
                 // Marked now, filled in by `leaves` in value-id order.
                 self.inlined.insert(value.id, String::new());
             }
@@ -894,12 +914,25 @@ impl Emitter<'_> {
 
     fn plan_names(&mut self) {
         self.names = vec![String::new(); self.function.values.len()];
+        // Names the outer reads spell, which a local of the same name would
+        // shadow.
+        let taken: HashSet<&str> = self
+            .bindings
+            .outer
+            .iter()
+            .flat_map(|read| read.split(|c: char| !c.is_ascii_alphanumeric() && c != '_'))
+            .collect();
         let mut ordinal = 0usize;
         for value in &self.function.values {
             if !self.emitted[usize::from(value.id)] || self.inlined.contains_key(&value.id) {
                 continue;
             }
-            self.names[usize::from(value.id)] = compact_local_name(ordinal);
+            let mut name = compact_local_name(ordinal);
+            while taken.contains(name.as_str()) {
+                ordinal += 1;
+                name = compact_local_name(ordinal);
+            }
+            self.names[usize::from(value.id)] = name;
             ordinal += 1;
         }
     }
@@ -1870,6 +1903,11 @@ impl Emitter<'_> {
         {
             return false;
         }
+        if let CfgValueKind::Outer(index) = self.function.value(value).kind {
+            return self.bindings.outer[index as usize]
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '[' | ']'));
+        }
         matches!(
             self.function.value(value).kind,
             CfgValueKind::RealConstant(_)
@@ -1886,6 +1924,7 @@ impl Emitter<'_> {
                 | CfgValueKind::BranchFlow(_)
                 | CfgValueKind::BranchUnknownFlow(_)
                 | CfgValueKind::Staged { .. }
+                | CfgValueKind::Outer(_)
                 | CfgValueKind::Ddt { .. }
                 | CfgValueKind::DdtDerivative { .. }
                 | CfgValueKind::Idt { .. }
@@ -1915,6 +1954,7 @@ impl Emitter<'_> {
                 | CfgValueKind::BranchFlow(_)
                 | CfgValueKind::BranchUnknownFlow(_)
                 | CfgValueKind::Staged { .. }
+                | CfgValueKind::Outer(_)
         )
     }
 
@@ -2617,6 +2657,7 @@ impl Emitter<'_> {
                     staged
                 }
             }
+            CfgValueKind::Outer(index) => bindings.outer[*index as usize].clone(),
 
             CfgValueKind::FourStateConstant(_)
             | CfgValueKind::IntegerConstant(_)

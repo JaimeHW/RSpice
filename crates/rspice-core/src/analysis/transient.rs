@@ -1512,11 +1512,20 @@ impl TransientResult {
         let mut seen = vec![false; self.device_op_traces.len()];
         let mut added_values = 0usize;
 
+        // A Verilog-A instance's module quantities are read by the names the
+        // module gives them, beside the device's own.
         let reported = report.entries.iter().flat_map(|entry| {
+            let module = entry.module.iter().flat_map(|module| {
+                module
+                    .quantities
+                    .iter()
+                    .map(|quantity| (entry.name.as_str(), quantity.name.as_str(), quantity.value))
+            });
             entry
                 .params
                 .iter()
                 .map(|&(parameter, value)| (entry.name.as_str(), parameter, value))
+                .chain(module)
         });
         let observed = observed
             .iter()

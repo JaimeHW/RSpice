@@ -200,6 +200,45 @@ pub(crate) fn optimize_with_control_and_tracking(
     ))
 }
 
+/// Keep what `outputs` need of `function` and nothing else, following
+/// `tracked` through the compaction as the optimizer does.
+///
+/// Dead-value elimination and empty-arm pruning only: no folding and no
+/// common subexpressions, so every surviving value is the computation it was,
+/// in the block it was in. That is what lets two slices cut from one optimized
+/// function be compared value for value: a value both keep is computed by
+/// each on the same paths.
+#[cfg(feature = "rust-codegen")]
+pub(crate) fn prune_with_tracking(
+    function: &CfgFunction,
+    outputs: &[ValueId],
+    tracked: &[ValueId],
+) -> (CfgFunction, Vec<ValueId>, Vec<Option<ValueId>>) {
+    let mut optimizer = Optimizer {
+        entry: function.entry,
+        values: function.values.clone(),
+        blocks: function.blocks.clone(),
+        shapes: function.shapes.clone(),
+        outputs: outputs.to_vec(),
+        tracked: tracked.iter().copied().map(Some).collect(),
+        replacement: vec![None; function.values.len()],
+    };
+    optimizer.eliminate_dead_code();
+    let blocks = std::mem::take(&mut optimizer.blocks);
+    (optimizer.blocks, optimizer.entry) = super::schedule::prune_blocks(blocks, optimizer.entry);
+    optimizer.eliminate_dead_code();
+    (
+        CfgFunction {
+            entry: optimizer.entry,
+            blocks: optimizer.blocks,
+            values: optimizer.values,
+            shapes: optimizer.shapes,
+        },
+        optimizer.outputs,
+        optimizer.tracked,
+    )
+}
+
 fn check_cancelled(control: &dyn PipelineControl) -> Result<(), PipelineCancelled> {
     if control.is_cancelled() {
         Err(PipelineCancelled {

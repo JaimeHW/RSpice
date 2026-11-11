@@ -335,6 +335,11 @@ impl Instance {
 		let HC=L2([0f64;2]);
 		let HU=0f64;
 		let HX=L3([0f64;3]);
+		let mut oAT=false;
+		let mut oCF=false;
+		let mut oDK=false;
+		let mut oDO=false;
+		let mut oDP=0.0;
 		if A{
 		analog_finish(2, time, B);
 		}
@@ -393,6 +398,7 @@ impl Instance {
 		analog_finish(33, time, B);
 		}
 		let AT=AL> O;
+		oAT=AT;
 		let BB;
 		let BC;
 		let BD;
@@ -466,6 +472,7 @@ impl Instance {
 		analog_finish(63, time, B);
 		}
 		let CF=BX> O;
+		oCF=CF;
 		let CL;
 		let CM;
 		let CN;
@@ -541,6 +548,7 @@ impl Instance {
 		let DI=AI* T;
 		let DJ=DI+ AK;
 		let DK=DA> O;
+		oDK=DK;
 		let DM;
 		if DK{
 		let DL=DJ< O;
@@ -548,9 +556,11 @@ impl Instance {
 		analog_finish(97, time, B);
 		}
 		let DO=DJ> O;
+		oDO=DO;
 		let DQ;
 		if DO{
 		let DP=AU* (DJ/ DA);
+		oDP=DP;
 		DQ=DP;
 		}else{
 		DQ=O;
@@ -794,6 +804,29 @@ impl Instance {
 		let IS=ID;
 		let IT=IJ;
 		let IU=IK;
+        {
+            let record = &mut *self.canonical_output_record;
+            record[0] = f64::from(u8::from(oAT));
+            record[1] = f64::from(u8::from(oCF));
+            record[2] = f64::from(u8::from(oDK));
+            record[3] = f64::from(u8::from(oDO));
+            record[4] = oDP;
+            record[5] = AA;
+            record[6] = AB;
+            record[7] = f64::from(u8::from(DW));
+            record[8] = AC;
+            record[9] = EZ;
+            record[10] = FA;
+            record[11] = GE;
+            record[12] = GI;
+            record[13] = HD;
+            record[14] = HF;
+            record[15] = HH;
+            record[16] = GF;
+            record[17] = HI.0[0];
+            record[18] = HI.0[1];
+            record[19] = HI.0[2];
+        }
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(0),
             Some(1),
@@ -873,6 +906,168 @@ impl Instance {
         self.canonical_reactive[6] = staged[17];
         self.canonical_reactive[7] = staged[18];
         if ctx.analog_tasks_enabled() && !ctx.evaluation_failed() { self.analog_effects.as_mut().expect("task evaluation began").complete_evaluation(); }
+    }
+
+    #[cold]
+    #[inline(never)]
+    pub fn operating_point_outputs(&self, ctx: &GeneratedEvalContext<'_>, outputs: &mut [f64]) {
+        let record = &*self.canonical_output_record;
+        let _ = ctx;
+        let o2 = record[0]!=0.0;
+        let o6 = record[1]!=0.0;
+        let o9 = record[2]!=0.0;
+        let o10 = record[3]!=0.0;
+        let o11 = record[4];
+        let o12 = record[5];
+        let o13 = record[6];
+        let o14 = record[7]!=0.0;
+        let o15 = record[8];
+        let o16 = record[9];
+        let o17 = record[10];
+        let o18 = record[11];
+        let o19 = record[12];
+        let o20 = record[13];
+        let o21 = record[14];
+        let o22 = record[15];
+        let o23 = record[16];
+        let o24 = L3([record[17], record[18], record[19]]);
+        let parameters = &self.params.values;
+        let multiplicity = self.multiplicity;
+        let staged = &*self.canonical_staged;
+        let node_potentials = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2])];
+		let A=0f64;
+		let B=1f64;
+		let C=staged[9]!=0.0;
+		let D=parameters[2];
+		let E=staged[10]!=0.0;
+		let F=1e99f64;
+		let G=o2;
+		let I=staged[11]!=0.0;
+		let J=staged[12]!=0.0;
+		let K=staged[14]!=0.0;
+		let L=o6;
+		let N=staged[13]!=0.0;
+		let O=staged[15]!=0.0;
+		let P=o9;
+		let Q=o10;
+		let S=o12;
+		let T=o13;
+		let U=o15;
+		let V=o17;
+		let W=node_potentials[2];
+		let AJ=o19;
+		let AK=o21;
+		let AL=o22;
+		let X;
+		if C{
+		let Y;
+		if E{
+		Y=F;
+		}else{
+		let Z=if G{
+		let H=B/ D;
+		H
+		}else{
+		F
+		};
+		Y=Z;
+		}
+		X=Y;
+		}else{
+		let AA;
+		if I{
+		let AB;
+		if J{
+		AB=F;
+		}else{
+		let AC;
+		if K{
+		AC=A;
+		}else{
+		let AD=if L{
+		let M=B/ D;
+		M
+		}else{
+		A
+		};
+		AC=AD;
+		}
+		AB=AC;
+		}
+		AA=AB;
+		}else{
+		let AE;
+		if N{
+		AE=A;
+		}else{
+		let AF;
+		if O{
+		AF=F;
+		}else{
+		let AG;
+		if P{
+		let AH=if Q{
+		let R=B/ o11;
+		R
+		}else{
+		F
+		};
+		AG=AH;
+		}else{
+		AG=A;
+		}
+		AF=AG;
+		}
+		AE=AF;
+		}
+		AA=AE;
+		}
+		X=AA;
+		}
+		let AI=X/ o18;
+		let BC=product_div(o23,(-AI),o18);
+		let AM=X> A;
+		let AN=AL* AJ;
+		let AO=o14&& AM;
+		let AZ;
+		let BA;
+		if AO{
+		let AP=ctx.checked_derivative_value(AL, o24[0]);
+		let AQ=ctx.checked_derivative_value(AI, BC);
+		let AR=(AJ* AQ)/ (o16* o20);
+		let AS=B- (AJ* AR);
+		let AT=AS!= A;
+		let AV=if AT{
+		let AU=(AP+ (AL* AR))/ AS;
+		AU
+		}else{
+		F
+		};
+		let AW=AV!= A;
+		let BB=if AW{
+		let AX=B/ AV;
+		AX
+		}else{
+		F
+		};
+		AZ=AK;
+		BA=BB;
+		}else{
+		AZ=T;
+		BA=T;
+		}
+		let AY=B/ o16;
+        outputs[0] = AJ;
+        outputs[1] = (AL) * self.multiplicity;
+        outputs[2] = (AN) * self.multiplicity;
+        outputs[3] = S;
+        outputs[4] = U;
+        outputs[5] = (T) / self.multiplicity;
+        outputs[6] = (AZ) / self.multiplicity;
+        outputs[7] = (BA) / self.multiplicity;
+        outputs[8] = (AY) / self.multiplicity;
+        outputs[9] = (V) * self.multiplicity;
+        outputs[10] = W;
     }
 
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {

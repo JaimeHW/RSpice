@@ -769,3 +769,147 @@ mod xyce_vbic_generated {
         }
     }
 }
+
+/// A generated model reports the operating-point outputs its module
+/// describes, read from the module at the solution and under the module's own
+/// names: BSIM-CMG 107's `IDS`, `GM`, `VTH` and `VDSSAT` at one point of
+/// Xyce's own outputs deck, against what Xyce 7.10 prints there, and
+/// `N(M1:GM)` reads the same value the report lists.
+#[cfg(feature = "veriloga-model-bsimcmg107")]
+#[test]
+fn a_generated_model_reports_the_outputs_its_module_describes() {
+    use rspice_core::engine::SpiceDialect;
+    const CARD: &str = include_str!("../../../tests/xyce/Netlists/BSIMCMG/modelcard.nmos_xyce");
+    // gummel_n_outvars.cir at V(drain) = 0.097 V, V(gate) = 0.2 V, with the
+    // source at -V(drain).
+    let deck = format!(
+        "* BSIM-CMG 107 operating-point outputs\n\
+         .temp 25\n\
+         {CARD}\n\
+         VD d 0 DC 0.097\n\
+         VS s 0 DC -0.097\n\
+         VG g 0 DC 0.2\n\
+         M1 d g s 0 nmos1 TFIN=15n L=30n NFIN=10 NRS=1 NRD=1\n\
+         .end\n"
+    );
+    let engine = Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
+    let netlist = Netlist::parse(&deck).expect("the BSIM-CMG deck parses");
+    let (result, report) = engine
+        .run_dc_op_with_report(&netlist)
+        .expect("the BSIM-CMG operating point solves");
+    let entry = report
+        .entries
+        .iter()
+        .find(|entry| entry.name.eq_ignore_ascii_case("M1"))
+        .expect("M1 is reported");
+    assert!(
+        entry.params.iter().any(|(label, _)| *label == "id"),
+        "the terminal currents stay beside the outputs: {entry:?}"
+    );
+    let module = entry
+        .module
+        .as_ref()
+        .expect("a generated instance lists its module's outputs");
+    for (name, xyce) in [
+        ("IDS", 1.29114885e-05),
+        ("GM", 2.31037805e-04),
+        ("VTH", 2.91453482e-01),
+        ("VDSSAT", 1.05599033e-01),
+    ] {
+        let value = module
+            .quantity(name)
+            .unwrap_or_else(|| panic!("{name} is reported: {module:?}"))
+            .value;
+        assert!(
+            (value - xyce).abs() <= 1.0e-6 * xyce.abs(),
+            "{name} = {value:e}, Xyce prints {xyce:e}"
+        );
+    }
+    let gm = module
+        .quantity("gm")
+        .expect("names compare as a deck compares them");
+    assert_eq!(result.try_dc_observable_named("M1:GM"), Some(gm.value));
+}
+
+/// `.PRINT TRAN N(M1:GM)` reads the output at every accepted time point, from
+/// the load that point converged from: where the gate has settled at 0.2 V,
+/// what Xyce 7.10 prints at that bias; where it has settled at 0.4 V, what
+/// the operating point there reports.
+#[cfg(feature = "veriloga-model-bsimcmg107")]
+#[test]
+fn a_generated_model_output_is_read_at_every_accepted_time_point() {
+    use rspice_core::engine::SpiceDialect;
+    const CARD: &str = include_str!("../../../tests/xyce/Netlists/BSIMCMG/modelcard.nmos_xyce");
+    let deck = |gate: &str, print: &str| {
+        format!(
+            "* BSIM-CMG 107 output over time\n\
+             .temp 25\n\
+             {CARD}\n\
+             VD d 0 DC 0.097\n\
+             VS s 0 DC -0.097\n\
+             VG g 0 {gate}\n\
+             M1 d g s 0 nmos1 TFIN=15n L=30n NFIN=10 NRS=1 NRD=1\n\
+             {print}\n\
+             .end\n"
+        )
+    };
+    let engine = Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
+    let ramp = Netlist::parse(&deck(
+        "PWL(0 0 1u 0.2 2u 0.2 3u 0.4 4u 0.4)",
+        ".PRINT TRAN N(M1:GM)",
+    ))
+    .expect("the BSIM-CMG ramp parses");
+    let result = engine
+        .run_tran(&ramp, 4e-6, 20e-9)
+        .expect("the BSIM-CMG ramp solves");
+    let gm = result
+        .try_device_op_waveform_named("M1", "GM")
+        .expect("N(M1:GM) is recorded over time");
+    assert_eq!(gm.len(), result.time.len(), "one value per accepted point");
+
+    let settled = |from: f64, to: f64| {
+        result
+            .time
+            .iter()
+            .zip(gm)
+            .filter(move |(time, _)| (from..=to).contains(*time))
+            .map(|(_, gm)| *gm)
+    };
+    let xyce = 2.31037805e-04;
+    assert!(settled(1.5e-6, 2e-6).count() > 0);
+    for value in settled(1.5e-6, 2e-6) {
+        assert!(
+            (value - xyce).abs() <= 1.0e-6 * xyce,
+            "GM = {value:e} at 0.2 V, Xyce prints {xyce:e}"
+        );
+    }
+    assert!(
+        gm[0] < 0.1 * xyce,
+        "at 0 V the device is off: GM = {:e}",
+        gm[0]
+    );
+
+    let (_, report) = engine
+        .run_dc_op_with_report(
+            &Netlist::parse(&deck("DC 0.4", "")).expect("the 0.4 V point parses"),
+        )
+        .expect("the 0.4 V point solves");
+    let operating_point = report
+        .entries
+        .iter()
+        .find(|entry| entry.name.eq_ignore_ascii_case("M1"))
+        .and_then(|entry| entry.module.as_ref())
+        .and_then(|module| module.quantity("GM"))
+        .expect("the operating point reports GM")
+        .value;
+    assert!(
+        operating_point > xyce,
+        "GM grows with the gate: {operating_point:e}"
+    );
+    for value in settled(3.5e-6, 4e-6) {
+        assert!(
+            (value - operating_point).abs() <= 1.0e-6 * operating_point,
+            "GM = {value:e} settled at 0.4 V, the operating point reports {operating_point:e}"
+        );
+    }
+}

@@ -3481,7 +3481,7 @@ mod fixed_lane_tests {
         const INSTANCE_PARAMETER: GeneratedVerilogAParameterDescriptor =
             GeneratedVerilogAParameterDescriptor::instance("instance_only", Some(1.0));
 
-        assert_eq!(GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION, 6);
+        assert_eq!(GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION, 7);
         const ARRAY: GeneratedVerilogAParameterDescriptor =
             GeneratedVerilogAParameterDescriptor::instance("coefficients", Some(0.0)).array();
         const {

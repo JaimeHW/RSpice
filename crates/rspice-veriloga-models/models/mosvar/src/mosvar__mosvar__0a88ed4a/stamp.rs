@@ -4012,6 +4012,13 @@ impl Instance {
 		let CJU=BPQ;
 		let CJV=BPU[0];
 		let CJW=BPU[1];
+        {
+            let record = &mut *self.canonical_output_record;
+            record[0] = BPM;
+            record[1] = BPF;
+            record[2] = BPG;
+            record[3] = CIT;
+        }
         if (staged[118] != 0.0) {
             stamper.stamp_potential_branch_local(Some(0), Some(3), 0, multiplicity);
         } else {
@@ -4280,6 +4287,42 @@ impl Instance {
         self.canonical_reactive[25] = staged[115];
         self.canonical_reactive[26] = staged[116];
         self.canonical_reactive[27] = staged[117];
+    }
+
+    #[cold]
+    #[inline(never)]
+    pub fn operating_point_outputs(&self, ctx: &GeneratedEvalContext<'_>, outputs: &mut [f64]) {
+        let record = &*self.canonical_output_record;
+        let _ = ctx;
+        let o1 = record[0];
+        let o2 = record[1];
+        let o3 = record[2];
+        let o4 = record[3];
+        let parameters = &self.params.values;
+        let multiplicity = self.multiplicity;
+        let staged = &*self.canonical_staged;
+        let node_potentials = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5]), ctx.node_voltage(self.nodes[6])];
+        let branch_unknown_flows = [ctx.branch_current(self.branches[0]), ctx.branch_current(self.branches[1]), ctx.branch_current(self.branches[2]), ctx.branch_current(self.branches[3])];
+		let A=parameters[16];
+		let B=o1;
+		let C=node_potentials[0];
+		let D=o2;
+		let E=o3;
+		let H=branch_unknown_flows[0];
+		let F=C- node_potentials[2];
+		let J=if A!=0.0{
+		let G=(C- node_potentials[3])* staged[72];
+		G
+		}else{
+		H
+		};
+		let I=ctx.checked_derivative_value(B, o4);
+        outputs[0] = F;
+        outputs[1] = (J) * self.multiplicity;
+        outputs[2] = (I) * self.multiplicity;
+        outputs[3] = (B) * self.multiplicity;
+        outputs[4] = (D) * self.multiplicity;
+        outputs[5] = (E) * self.multiplicity;
     }
 
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {

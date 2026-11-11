@@ -558,7 +558,8 @@ pub(crate) fn push_value(
 /// difference cannot change control, effects, state inputs or public readbacks.
 /// Failure selects the ordinary companion formulation; it does not refuse the model.
 pub(crate) fn one_step_dae_split_safe(artifact: &super::CanonicalIrArtifact) -> bool {
-    let Ok(mut cfg) = super::CfgModel::from_hir_for_dae_proof(&artifact.hir, &artifact.mir) else {
+    let Ok(mut cfg) = super::CfgModel::from_hir_with_observations(&artifact.hir, &artifact.mir)
+    else {
         return false;
     };
     let reaches = values_reaching_a_ddt(&cfg.function);

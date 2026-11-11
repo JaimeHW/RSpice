@@ -878,6 +878,15 @@ pub enum CfgValueKind {
         slot: u32,
     },
 
+    /// A value the code around this function already holds, under the
+    /// `index`th name the emitter is given.
+    ///
+    /// What a model's operating-point outputs read from the load that ran
+    /// just before them: the stamp computed it, so the outputs' slice takes it
+    /// as an input instead of deriving it again. A leaf for the reason
+    /// [`Self::Staged`] is one.
+    Outer(u32),
+
     // ---- Discrete domain ---------------------------------------------------
     //
     // These appear only in a digital process function. None of them is
@@ -1464,7 +1473,8 @@ impl CfgValueKind {
             | Self::LaneBinary { .. }
             | Self::LaneScalar { .. }
             | Self::LaneExtract { .. }
-            | Self::Staged { .. } => false,
+            | Self::Staged { .. }
+            | Self::Outer(_) => false,
 
             Self::FourStateConstant(_)
             | Self::IntegerConstant(_)
@@ -2749,7 +2759,11 @@ impl CfgFunction {
         for value in &self.values {
             let lanes = self.value_lanes(value.id);
             match &value.kind {
-                CfgValueKind::LaneSplat(_) | CfgValueKind::BlockParameter => {}
+                // An outer value is whatever the code around the function
+                // holds, packed as that value is.
+                CfgValueKind::LaneSplat(_)
+                | CfgValueKind::BlockParameter
+                | CfgValueKind::Outer(_) => {}
                 CfgValueKind::DigitalRealNegate { input } => {
                     if value.value_type != CfgValueType::Real
                         || self.value(*input).value_type != CfgValueType::Real
@@ -3028,6 +3042,7 @@ fn is_leaf(kind: &CfgValueKind) -> bool {
             | CfgValueKind::NoiseProcess(_)
             | CfgValueKind::LaneSplat(_)
             | CfgValueKind::Staged { .. }
+            | CfgValueKind::Outer(_)
             // Digital constants are leaves for the same reason a real constant
             // is: they read nothing and rebuilding one is free.
             //

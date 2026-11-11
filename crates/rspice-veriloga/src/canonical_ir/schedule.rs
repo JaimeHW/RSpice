@@ -541,8 +541,14 @@ pub(crate) fn natural_loops(function: &CfgFunction) -> Vec<HashSet<BlockId>> {
     let mut loops = Vec::new();
     for (tail, header) in back_edges(function) {
         // Everything that reaches the tail without passing through the header.
+        // A block that loops to itself is its own tail, and what reaches it
+        // passes through it.
         let mut body: HashSet<BlockId> = HashSet::from([header, tail]);
-        let mut stack = vec![tail];
+        let mut stack = if tail == header {
+            Vec::new()
+        } else {
+            vec![tail]
+        };
         while let Some(block) = stack.pop() {
             for predecessor in &predecessors[usize::from(block)] {
                 if body.insert(*predecessor) {
@@ -2143,6 +2149,59 @@ mod tests {
     use super::*;
     use crate::canonical_ir::cfg::{CfgBinaryOp, CfgValueType, CfgVariable, SsaBuilder};
     use crate::canonical_ir::{NodeId, ParamId, VariableId};
+
+    /// A block that branches back to itself is the whole of its loop. What
+    /// reaches it from outside runs once, before the loop.
+    #[test]
+    fn a_block_that_loops_to_itself_is_its_whole_loop() {
+        let mut builder = SsaBuilder::new();
+        let entry = builder.create_block();
+        let header = builder.create_block();
+        let exit = builder.create_block();
+        let param = builder.push_leaf(
+            CfgValueType::Real,
+            CfgValueKind::Parameter(ParamId::from(0usize)),
+        );
+        let doubled = builder.push(
+            entry,
+            CfgValueType::Real,
+            CfgValueKind::Binary {
+                op: CfgBinaryOp::Add,
+                left: param,
+                right: param,
+            },
+        );
+        let again = builder.push_leaf(CfgValueType::Boolean, CfgValueKind::BooleanConstant(false));
+        builder.set_terminator(
+            entry,
+            CfgTerminator::Jump {
+                target: header,
+                args: Vec::new(),
+            },
+        );
+        builder.set_terminator(
+            header,
+            CfgTerminator::Branch {
+                condition: again,
+                then_target: header,
+                then_args: Vec::new(),
+                else_target: exit,
+                else_args: Vec::new(),
+            },
+        );
+        builder.set_terminator(exit, CfgTerminator::Return);
+        for block in [entry, header, exit] {
+            builder.seal_block(block);
+        }
+        let (function, _) = builder
+            .finish_with_outputs(entry, &[doubled])
+            .expect("the fixture is well formed");
+
+        let loops = natural_loops(&function);
+        assert_eq!(loops.len(), 1, "one back edge: {loops:?}");
+        assert_eq!(loops[0].len(), 1, "the loop is its one block: {loops:?}");
+        assert!(!loops[0].contains(&function.entry), "{loops:?}");
+    }
 
     /// Straight-line arithmetic keeps the class of what it reads.
     #[test]

@@ -74,7 +74,7 @@ use crate::canonical_ir::schedule::{
 };
 use crate::canonical_ir::{
     AdSeed, BlockId, CanonicalIrArtifact, CanonicalValueType, ExprId, HirAnalogOperator,
-    HirExprKind, MirEquationKind, NodeId, SourceSpanRef, ValueId, optimize_cfg,
+    HirExprKind, HirOutputScaling, MirEquationKind, NodeId, SourceSpanRef, ValueId, optimize_cfg,
 };
 use crate::metrics::{
     CfgStructureMetrics, KernelRegionMetric, MetricsRecorder, PipelineCancelled, PipelineControl,
@@ -82,7 +82,8 @@ use crate::metrics::{
 };
 
 use super::emit::{
-    EmitBindings, back_edge_targets, emit_body, lane_runtime_types, math_runtime_imports,
+    EmitBindings, back_edge_targets, emit_body, lane_runtime_types, lane_type_name,
+    math_runtime_imports,
 };
 use super::expr::parameter_field_names;
 use super::stamp_plan::{StampPlan, StampRow, split_row};
@@ -145,6 +146,7 @@ pub(crate) fn generate_device_measured(
     checkpoint_phase(artifact, measurements, PipelinePhase::NoiseEmission)?;
     let phase_started = web_time::Instant::now();
     let noise = plan.noise_file(artifact, options, measurements.control())?;
+    let outputs = plan.outputs_file(options);
     measurements.record(PipelinePhase::NoiseEmission, phase_started.elapsed());
 
     let files = vec![
@@ -161,6 +163,7 @@ pub(crate) fn generate_device_measured(
             contents: stamp,
         },
         noise,
+        outputs,
     ];
 
     Ok(GeneratedRustDevice {
@@ -499,6 +502,7 @@ fn kernel_region_metrics(
                 write!(out, "lane-extract:{}", lane_signature(*lane))
             }
             CfgValueKind::Staged { slot } => write!(out, "staged:{}", staged_indices[slot]),
+            CfgValueKind::Outer(index) => write!(out, "outer:{index}"),
 
             // A digital value never reaches an emitted analog device — the
             // backend refuses a module with processes before it gets here —
@@ -969,6 +973,14 @@ struct ModelPlan {
     event_state_candidate_positions: Vec<usize>,
     timestep_bound_position: Option<usize>,
     discontinuity_position: Option<usize>,
+    /// Output position of each operating-point output, parallel to
+    /// [`Self::output_variables`], where the load computes them itself.
+    output_positions: Vec<usize>,
+    /// The outputs as a slice run after the load, where the load's values
+    /// carry everything stateful they read; then `output_positions` is empty.
+    output_tail: Option<super::outputs::OutputTail>,
+    /// The variables the module reports, in `OUTPUTS` order.
+    output_variables: Vec<super::outputs::OutputVariable>,
     /// The noise magnitudes, as their own body.
     ///
     /// `None` where the canonical level cannot express them and the generator
@@ -1025,7 +1037,15 @@ impl ModelPlan {
     ) -> Result<Self, RustBackendError> {
         checkpoint_phase(artifact, measurements, PipelinePhase::CfgLowering)?;
         let phase_started = web_time::Instant::now();
-        let mut cfg = CfgModel::from_hir(&artifact.hir, &artifact.mir).map_err(|diagnostics| {
+        let output_selection = super::outputs::select_outputs(artifact);
+        // A module that reports nothing keeps no readback, so its body lowers
+        // exactly as it did before outputs existed.
+        let lowered = if output_selection.is_empty() {
+            CfgModel::from_hir(&artifact.hir, &artifact.mir)
+        } else {
+            CfgModel::from_hir_with_observations(&artifact.hir, &artifact.mir)
+        };
+        let mut cfg = lowered.map_err(|diagnostics| {
             let mut reasons: Vec<String> = diagnostics
                 .iter()
                 .map(|diagnostic| diagnostic.message.to_string())
@@ -1039,6 +1059,18 @@ impl ModelPlan {
             )
         })?;
         reject_unsupported_kinds(artifact, &cfg.function)?;
+        if !output_selection.is_empty()
+            && cfg.observation_roots.len() != artifact.hir.variables.len()
+        {
+            return Err(unsupported(
+                artifact,
+                "the operating-point readback does not cover every module variable",
+            ));
+        }
+        let output_roots: Vec<ValueId> = output_selection
+            .iter()
+            .map(|(index, _)| cfg.observation_roots[*index])
+            .collect();
         // This CFG excludes declaration/analog initial phases. Inspect the
         // emitted body once, rather than searching source or scanning it for
         // every runtime instance.
@@ -1344,13 +1376,18 @@ impl ModelPlan {
         wanted.extend(cfg.function.values.iter().filter_map(|value| {
             matches!(value.kind, CfgValueKind::AnalogTask(_)).then_some(value.id)
         }));
-        let tracked_primal = (0..cfg.function.values.len())
+        // The operating-point outputs last. Each `ddx` among them was resolved
+        // with the rest, so a model's `gm` reads the lane its current already
+        // carries.
+        let output_wanted = wanted.len();
+        wanted.extend(output_roots.iter().copied());
+        let tracked = (0..differentiated.function.values.len())
             .map(ValueId::from)
             .collect::<Vec<_>>();
-        let (function, mapped, stamp_primal_values) = optimize_with_control_and_tracking(
+        let (function, mapped, tracked) = optimize_with_control_and_tracking(
             &differentiated.function,
             &wanted,
-            &tracked_primal,
+            &tracked,
             measurements.control(),
         )
         .map_err(|error| {
@@ -1360,6 +1397,36 @@ impl ModelPlan {
                 error,
             )
         })?;
+        let parameter_scopes: Vec<_> = artifact
+            .mir
+            .parameters
+            .iter()
+            .map(|parameter| parameter.scope)
+            .collect();
+        // Then the outputs leave the load for a tail of their own wherever
+        // what they read is the load's to hand over, so a load nobody reads
+        // outputs from computes none of them.
+        let split_outputs = (output_wanted < mapped.len())
+            .then(|| {
+                super::outputs::split_output_tail(
+                    &function,
+                    &mapped,
+                    output_wanted,
+                    &parameter_scopes,
+                )
+            })
+            .flatten();
+        let (function, mapped, tracked, mut output_tail) = match split_outputs {
+            Some(split) => {
+                let tracked = tracked
+                    .iter()
+                    .map(|value| value.and_then(|value| split.stamp_ids[usize::from(value)]))
+                    .collect::<Vec<_>>();
+                (split.stamp, split.stamp_roots, tracked, Some(split.tail))
+            }
+            None => (function, mapped, tracked, None),
+        };
+        let stamp_primal_values = tracked[..cfg.function.values.len()].to_vec();
         conduction.remap(&mapped[..conduction_wanted]);
         reactive.remap(&mapped[conduction_wanted..frequency_start]);
         for (entry, value) in frequency
@@ -1399,7 +1466,8 @@ impl ModelPlan {
         let timestep_bound = cfg.timestep_bound.map(|_| mapped[event_state_end]);
         let bound_end = event_state_end + usize::from(timestep_bound.is_some());
         let discontinuity = cfg.discontinuity.map(|_| mapped[bound_end]);
-        let task_effects = &mapped[bound_end + usize::from(discontinuity.is_some())..];
+        let task_effects = &mapped[bound_end + usize::from(discontinuity.is_some())..output_wanted];
+        let output_values = &mapped[output_wanted..];
         conduction.drop_zeros(&function);
         reactive.drop_zeros(&function);
         let mut scalar_derivatives = 0usize;
@@ -1474,13 +1542,24 @@ impl ModelPlan {
         // These positions keep execution live through scheduling and emission;
         // they produce no numerical stamp or exported device state.
         outputs.extend(task_effects.iter().copied());
-
-        let parameter_scopes: Vec<_> = artifact
-            .mir
-            .parameters
+        let output_positions = output_values
             .iter()
-            .map(|parameter| parameter.scope)
+            .map(|value| {
+                outputs.push(*value);
+                outputs.len() - 1
+            })
             .collect();
+        if let Some(tail) = &mut output_tail {
+            tail.positions = tail
+                .shared
+                .iter()
+                .map(|value| {
+                    outputs.push(*value);
+                    outputs.len() - 1
+                })
+                .collect();
+        }
+
         let schedule = schedule_with_parameter_scopes(&function, &parameter_scopes);
         // A coefficient held during AC differentiation can still vary between
         // timepoints or Newton iterates. Its reactive primitive is not a
@@ -1633,6 +1712,12 @@ impl ModelPlan {
             event_state_candidate_positions,
             timestep_bound_position,
             discontinuity_position,
+            output_positions,
+            output_tail,
+            output_variables: output_selection
+                .into_iter()
+                .map(|(_, variable)| variable)
+                .collect(),
             noise,
             ddt_slots,
             idt_slots,
@@ -2488,12 +2573,15 @@ impl ModelPlan {
         lane_types.extend(
             self.stages
                 .iter()
-                .flat_map(|stage| lane_runtime_types(&stage.function)),
+                .map(|stage| &stage.function)
+                .chain(self.output_tail.iter().map(|tail| &tail.function))
+                .flat_map(lane_runtime_types),
         );
         runtime_support.extend(lane_types);
         if std::iter::once(&self.function)
             .chain(self.stages.iter().map(|stage| &stage.function))
             .chain(self.initialization.iter().map(|plan| &plan.function))
+            .chain(self.output_tail.iter().map(|tail| &tail.function))
             .any(uses_checked_operations)
         {
             runtime_support.push("integer".to_string());
@@ -2501,6 +2589,7 @@ impl ModelPlan {
         if std::iter::once(&self.function)
             .chain(self.stages.iter().map(|stage| &stage.function))
             .chain(self.initialization.iter().map(|plan| &plan.function))
+            .chain(self.output_tail.iter().map(|tail| &tail.function))
             .any(|function| {
                 function.values.iter().any(|value| {
                     matches!(
@@ -3054,6 +3143,7 @@ impl ModelPlan {
         let (body, values) = self.newton_outputs(artifact, newton, control)?;
         self.emit_prologue(artifact, function, 2, out, false)?;
         out.push_str(&indent(&body, 2));
+        let outputs_method = self.emit_operating_point_outputs(artifact, newton, &values, out)?;
 
         if let Some(position) = self.timestep_bound_position {
             let _ = writeln!(
@@ -3143,6 +3233,7 @@ impl ModelPlan {
             out.push_str("        if ctx.analog_tasks_enabled() && !ctx.evaluation_failed() { self.analog_effects.as_mut().expect(\"task evaluation began\").complete_evaluation(); }\n");
         }
         out.push_str("    }\n\n");
+        out.push_str(&outputs_method);
         Ok(())
     }
 
@@ -3565,6 +3656,22 @@ impl ModelPlan {
         })
     }
 
+    /// `outputs.rs`: the `OUTPUTS` table. The stamp writes the values.
+    fn outputs_file(&self, options: &RustTranspileOptions) -> GeneratedRustFile {
+        let mut out = String::from(
+            "// @generated by rspice-veriloga; do not edit.\n\nuse super::state::Instance;\n\nimpl Instance {\n",
+        );
+        out.push_str(&super::outputs::descriptor_table(
+            &self.output_variables,
+            options.runtime_path.as_str(),
+        ));
+        out.push_str("}\n");
+        GeneratedRustFile {
+            relative_path: "outputs.rs".to_string(),
+            contents: out,
+        }
+    }
+
     /// The noise body's bindings.
     ///
     /// Not [`Self::emit_prologue`]: that one forces `multiplicity` in because
@@ -3741,6 +3848,228 @@ impl ModelPlan {
                 numeric_output_names(function, &[value], &values[position..=position]).remove(0)
             }
             None => values[position].clone(),
+        }
+    }
+
+    /// `values[position]` as the `f64` an operating-point output reports.
+    fn reported_newton_output(
+        &self,
+        newton: Option<&Stage>,
+        values: &[String],
+        position: usize,
+    ) -> String {
+        let native = match newton {
+            None => Some((&self.function, self.outputs[position])),
+            Some(stage) => stage.outputs[position].map(|value| (&stage.function, value)),
+        };
+        match native {
+            Some((function, value)) => reported_output(function, value, values[position].clone()),
+            None => values[position].clone(),
+        }
+    }
+
+    /// `values[position]` as the output tail reads it: in its own type where
+    /// the Newton pass computed it, a `bool` again where a stage cache held
+    /// it as a number.
+    fn outer_value(&self, newton: Option<&Stage>, values: &[String], position: usize) -> String {
+        let native = newton.is_none_or(|stage| stage.outputs[position].is_some());
+        let value = &values[position];
+        if !native
+            && self.function.value(self.outputs[position]).value_type == CfgValueType::Boolean
+        {
+            format!("{value}!=0.0")
+        } else {
+            value.clone()
+        }
+    }
+
+    /// The load's values the operating-point outputs are computed from, in
+    /// the order of the tail's `Outer` leaves (of the outputs themselves
+    /// without a tail), and how many record slots the load fills.
+    ///
+    /// Without a tail the load records each output already reported as a
+    /// number, so every recorded one takes one slot.
+    fn output_record(&self) -> (Vec<RecordedValue>, usize) {
+        let newton = self
+            .stages
+            .iter()
+            .find(|stage| stage.class == InvalidationClass::Newton);
+        let positions = self
+            .output_tail
+            .as_ref()
+            .map_or(self.output_positions.as_slice(), |tail| {
+                tail.positions.as_slice()
+            });
+        let mut kinds = vec![RecordedKind::Real; positions.len()];
+        if let Some(tail) = &self.output_tail {
+            for value in &tail.function.values {
+                if let CfgValueKind::Outer(index) = value.kind {
+                    // A single lane is emitted as a plain number.
+                    let lanes = tail.function.lanes_of(value.id).map_or(0, <[u32]>::len);
+                    kinds[index as usize] = match value.value_type {
+                        CfgValueType::Boolean => RecordedKind::Boolean,
+                        CfgValueType::Lanes(_) if lanes > 1 => RecordedKind::Lanes(lanes),
+                        _ => RecordedKind::Real,
+                    };
+                }
+            }
+        }
+        let mut width = 0;
+        let layout = positions
+            .iter()
+            .zip(kinds)
+            .map(|(position, kind)| {
+                if newton.is_none_or(|stage| stage.outputs[*position].is_some()) {
+                    let at = width;
+                    width += kind.width();
+                    RecordedValue::Recorded { at, kind }
+                } else {
+                    RecordedValue::Staged
+                }
+            })
+            .collect();
+        (layout, width)
+    }
+
+    /// Record what the operating-point outputs are computed from, and return
+    /// the method that computes them, for the caller to emit after the stamp.
+    ///
+    /// The load only stores the values it computed. Computing the outputs in
+    /// it slowed every load by up to 15% (PSP 103) whether anything asked or
+    /// not, inlined or behind a call: a call that is handed the load's
+    /// pointers keeps the optimizer from holding a value across it. The host
+    /// asks at a solved point, so the outputs are those of the load the
+    /// solution converged from, as a SPICE device reports its operating
+    /// point. What a coarser stage cached, the method reads from the cache.
+    fn emit_operating_point_outputs(
+        &self,
+        artifact: &CanonicalIrArtifact,
+        newton: Option<&Stage>,
+        values: &[String],
+        out: &mut String,
+    ) -> Result<String, RustBackendError> {
+        let mut method = "    #[cold]\n    #[inline(never)]\n    pub fn operating_point_outputs(&self, ctx: &GeneratedEvalContext<'_>, outputs: &mut [f64]) {\n".to_string();
+        if self.output_variables.is_empty() {
+            method.push_str("        let _ = (ctx, outputs);\n    }\n\n");
+            return Ok(method);
+        }
+        let (layout, width) = self.output_record();
+        let positions = self
+            .output_tail
+            .as_ref()
+            .map_or(self.output_positions.as_slice(), |tail| {
+                tail.positions.as_slice()
+            });
+        if width > 0 {
+            out.push_str(
+                "        {\n            let record = &mut *self.canonical_output_record;\n",
+            );
+            for (position, recorded) in positions.iter().zip(&layout) {
+                let RecordedValue::Recorded { at, kind } = *recorded else {
+                    continue;
+                };
+                let value = &values[*position];
+                match kind {
+                    RecordedKind::Real if self.output_tail.is_none() => {
+                        let reported = self.reported_newton_output(newton, values, *position);
+                        let _ = writeln!(out, "            record[{at}] = {reported};");
+                    }
+                    RecordedKind::Real => {
+                        let _ = writeln!(out, "            record[{at}] = {value};");
+                    }
+                    RecordedKind::Boolean => {
+                        let _ = writeln!(
+                            out,
+                            "            record[{at}] = f64::from(u8::from({value}));"
+                        );
+                    }
+                    RecordedKind::Lanes(lanes) => {
+                        for lane in 0..lanes {
+                            let _ = writeln!(
+                                out,
+                                "            record[{}] = {value}.0[{lane}];",
+                                at + lane
+                            );
+                        }
+                    }
+                }
+            }
+            out.push_str("        }\n");
+            method.push_str("        let record = &*self.canonical_output_record;\n");
+        }
+        method.push_str("        let _ = ctx;\n");
+        let Some(tail) = &self.output_tail else {
+            if layout
+                .iter()
+                .any(|recorded| matches!(recorded, RecordedValue::Staged))
+            {
+                method.push_str("        let staged = &*self.canonical_staged;\n");
+            }
+            let reported = positions
+                .iter()
+                .zip(&layout)
+                .map(|(position, recorded)| match recorded {
+                    RecordedValue::Recorded { at, .. } => format!("record[{at}]"),
+                    RecordedValue::Staged => values[*position].clone(),
+                })
+                .collect();
+            self.emit_output_writes(reported, "        ", &mut method);
+            method.push_str("    }\n\n");
+            return Ok(method);
+        };
+        let mut outer = Vec::with_capacity(positions.len());
+        for (position, recorded) in positions.iter().zip(&layout) {
+            let RecordedValue::Recorded { at, kind } = *recorded else {
+                outer.push(self.outer_value(newton, values, *position));
+                continue;
+            };
+            let read = match kind {
+                RecordedKind::Real => format!("record[{at}]"),
+                RecordedKind::Boolean => format!("record[{at}]!=0.0"),
+                RecordedKind::Lanes(lanes) => format!(
+                    "{}([{}])",
+                    lane_type_name(lanes),
+                    (at..at + lanes)
+                        .map(|slot| format!("record[{slot}]"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            };
+            let name = format!("o{}", outer.len());
+            let _ = writeln!(method, "        let {name} = {read};");
+            outer.push(name);
+        }
+        self.emit_prologue(artifact, &tail.function, 2, &mut method, false)?;
+        let bindings = EmitBindings {
+            outer,
+            ..self.emit_bindings()
+        };
+        let (body, names) = emit_body(&tail.function, &tail.outputs, &bindings)
+            .map_err(|error| unsupported(artifact, format!("operating-point outputs: {error}")))?;
+        method.push_str(&indent(&body, 2));
+        let reported = tail
+            .outputs
+            .iter()
+            .zip(names)
+            .map(|(value, name)| reported_output(&tail.function, *value, name))
+            .collect();
+        self.emit_output_writes(reported, "        ", &mut method);
+        method.push_str("    }\n\n");
+        Ok(method)
+    }
+
+    /// `outputs[index] = value;` for each reported variable, scaled by the
+    /// instance's multiplicity as its declaration says.
+    fn emit_output_writes(&self, reported: Vec<String>, pad: &str, out: &mut String) {
+        for (index, (value, variable)) in
+            reported.into_iter().zip(&self.output_variables).enumerate()
+        {
+            let value = match variable.scaling {
+                HirOutputScaling::Unscaled => value,
+                HirOutputScaling::Multiply => format!("({value}) * self.multiplicity"),
+                HirOutputScaling::Divide => format!("({value}) / self.multiplicity"),
+            };
+            let _ = writeln!(out, "{pad}outputs[{index}] = {value};");
         }
     }
 
@@ -4613,6 +4942,30 @@ let idtmod_branch_derivative = |primal: f64, ic: f64, modulus: f64, offset: f64,
                 .new_initializers
                 .push_str("            canonical_reactive: boxed_zero_f64_array(),\n");
         }
+        let (_, record) = self.output_record();
+        if record > 0 {
+            let _ = writeln!(
+                extensions.instance_fields,
+                "    pub(crate) canonical_output_record: Box<[f64; {record}]>,"
+            );
+            extensions.clone_fields.push_str(
+                "            canonical_output_record: self.canonical_output_record.clone(),\n",
+            );
+            extensions
+                .new_initializers
+                .push_str("            canonical_output_record: boxed_zero_f64_array(),\n");
+            // A trial the solver throws away, or the probe a one-step history
+            // takes between accepted loads, leaves the outputs of the load it
+            // went back to, as it leaves the terminal currents.
+            extensions.rollback_value_count += record;
+            extensions
+                .rollback_capture_values
+                .push_str("        values.extend_from_slice(&*self.canonical_output_record);\n");
+            let _ = writeln!(
+                extensions.rollback_restore_fields,
+                "        let (record, remaining) = rollback_values.split_at({record});\n        self.canonical_output_record.copy_from_slice(record);\n        rollback_values = remaining;"
+            );
+        }
         if self.slots == 0 {
             return extensions;
         }
@@ -5447,6 +5800,36 @@ enum Reactive {
     Yes,
 }
 
+/// Where the operating-point outputs find one value of the load they are
+/// computed from.
+#[derive(Clone, Copy)]
+enum RecordedValue {
+    /// A coarser stage's cache holds it, and the outputs read it there.
+    Staged,
+    /// The load records it from slot `at` of the instance's output record.
+    Recorded { at: usize, kind: RecordedKind },
+}
+
+/// How a recorded value sits in the record's `f64` slots.
+#[derive(Clone, Copy)]
+enum RecordedKind {
+    /// One slot.
+    Real,
+    /// One slot, holding 0 or 1.
+    Boolean,
+    /// One slot per lane.
+    Lanes(usize),
+}
+
+impl RecordedKind {
+    fn width(self) -> usize {
+        match self {
+            Self::Real | Self::Boolean => 1,
+            Self::Lanes(lanes) => lanes,
+        }
+    }
+}
+
 /// Which bindings a body actually reads.
 #[derive(Default)]
 struct Wants {
@@ -5718,6 +6101,16 @@ fn integer_context_argument(function: &CfgFunction) -> &'static str {
         "            ctx,\n"
     } else {
         ""
+    }
+}
+
+/// `name`, which reads `value` of `function`, as the `f64` an operating-point
+/// output reports.
+fn reported_output(function: &CfgFunction, value: ValueId, name: String) -> String {
+    match function.value(value).value_type {
+        CfgValueType::Boolean => format!("f64::from(u8::from({name}))"),
+        CfgValueType::Integer => format!("(({name}) as f64)"),
+        _ => name,
     }
 }
 

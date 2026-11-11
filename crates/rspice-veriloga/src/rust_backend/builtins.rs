@@ -3352,6 +3352,40 @@ fn write_registry(
         out.push_str("            Self::__NonExhaustive(value) => match *value {},\n        }\n");
     }
     out.push_str("    }\n\n");
+    out.push_str(
+        "    pub fn output_descriptors(&self) -> &'static [super::GeneratedVerilogAOutputDescriptor] {\n",
+    );
+    if devices.is_empty() {
+        out.push_str("        let _ = self;\n        &[]\n");
+    } else {
+        out.push_str("        match self {\n");
+        for (index, (device, feature)) in devices.iter().zip(&feature_names).enumerate() {
+            writeln!(
+                out,
+                "            #[cfg(feature = {feature:?})]\n            Self::Device{index}(_) => &{}::Instance::OUTPUTS,",
+                device.folder_name,
+            )?;
+        }
+        out.push_str("            Self::__NonExhaustive(value) => match *value {},\n        }\n");
+    }
+    out.push_str("    }\n\n");
+    out.push_str(
+        "    pub fn operating_point_outputs(&self, ctx: &super::GeneratedEvalContext<'_>, outputs: &mut [crate::Value]) {\n",
+    );
+    if devices.is_empty() {
+        out.push_str("        let _ = (self, ctx, outputs);\n");
+    } else {
+        // Every model feature can be off, which leaves no arm reading them.
+        out.push_str("        let _ = (&ctx, &outputs);\n        match self {\n");
+        for (index, feature) in feature_names.iter().enumerate() {
+            writeln!(
+                out,
+                "            #[cfg(feature = {feature:?})]\n            Self::Device{index}(device) => device.operating_point_outputs(ctx, outputs),"
+            )?;
+        }
+        out.push_str("            Self::__NonExhaustive(value) => match *value {},\n        }\n");
+    }
+    out.push_str("    }\n\n");
     for (method, empty) in [
         ("limiter_converged", true),
         ("limits_newton_steps", false),
@@ -3717,10 +3751,11 @@ fn write_registry(
     {
         writeln!(
             out,
-            "    #[cfg(feature = {feature:?})]\n    super::GeneratedVerilogAModelDescriptor {{ abi_version: super::GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION, model_name: {registry_name:?}, module_name: {:?}, source_digest: {:?}, source_identity: {:?}, checkpoint_identity: {}::Instance::CHECKPOINT_MODEL_IDENTITY, accepted_state_shape_identity: {}::Instance::ACCEPTED_STATE_SHAPE_IDENTITY, terminals: &{}::Instance::TERMINALS, parameters: &{}::Instance::PARAMETER_DESCRIPTORS, total_node_count: {}::Instance::NODE_COUNT, internal_node_names: &{}::Instance::INTERNAL_NODE_NAMES, internal_state_nodes: {}::Instance::INTERNAL_STATE_NODES, branch_count: {}::Instance::BRANCH_COUNT, stamp_pattern: {}::Instance::STAMP_PATTERN }},",
+            "    #[cfg(feature = {feature:?})]\n    super::GeneratedVerilogAModelDescriptor {{ abi_version: super::GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION, model_name: {registry_name:?}, module_name: {:?}, source_digest: {:?}, source_identity: {:?}, checkpoint_identity: {}::Instance::CHECKPOINT_MODEL_IDENTITY, accepted_state_shape_identity: {}::Instance::ACCEPTED_STATE_SHAPE_IDENTITY, terminals: &{}::Instance::TERMINALS, parameters: &{}::Instance::PARAMETER_DESCRIPTORS, total_node_count: {}::Instance::NODE_COUNT, internal_node_names: &{}::Instance::INTERNAL_NODE_NAMES, internal_state_nodes: {}::Instance::INTERNAL_STATE_NODES, branch_count: {}::Instance::BRANCH_COUNT, stamp_pattern: {}::Instance::STAMP_PATTERN, outputs: &{}::Instance::OUTPUTS }},",
             device.module_name,
             device.source_digest,
             device.source_identity,
+            device.folder_name,
             device.folder_name,
             device.folder_name,
             device.folder_name,

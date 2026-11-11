@@ -1318,6 +1318,11 @@ impl<S: CfgScalar> Evaluator<'_, S> {
                 .staged
                 .get(slot as usize)
                 .ok_or(CfgEvalError::MissingInput("staged value", slot as usize))?,
+            // Only the generated device's outputs read one, from the stamp it
+            // follows; nothing hands this interpreter a stamp.
+            CfgValueKind::Outer(index) => {
+                return Err(CfgEvalError::MissingInput("outer value", index as usize));
+            }
             // The proposed value, not the limiter body — this interpreter is the
             // limiting-disabled semantics, which is what the generated device
             // does when `ctx.limiting_enabled()` is false.

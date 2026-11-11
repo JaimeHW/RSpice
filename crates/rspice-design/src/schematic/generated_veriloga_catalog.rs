@@ -429,6 +429,7 @@ mod descriptor_v2_tests {
             branch_count: 0,
             stamp_pattern:
                 rspice_core_devices::device::veriloga_builtins::GeneratedVerilogAStampPattern::EMPTY,
+            outputs: &[],
         };
         const CHANGED: GeneratedVerilogAModelDescriptor = GeneratedVerilogAModelDescriptor {
             terminals: &TERMINALS_B,

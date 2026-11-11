@@ -2086,6 +2086,14 @@ impl Instance {
 		let AJX=ZY[0];
 		let AJY=ZY[1];
 		let AJZ=ADH;
+        {
+            let record = &mut *self.canonical_output_record;
+            record[0] = AG;
+            record[1] = OU;
+            record[2] = OV;
+            record[3] = OW;
+            record[4] = OX;
+        }
         if ctx.dynamic_operators_enabled() { self.event_state_candidate[0] = staged[36]; }
         if ctx.dynamic_operators_enabled() { self.event_state_candidate[1] = staged[37]; }
         if ctx.dynamic_operators_enabled() { self.event_state_candidate[2] = staged[38]; }
@@ -2810,6 +2818,30 @@ impl Instance {
         self.canonical_reactive[92] = AEO;
         self.canonical_reactive[93] = AEQ;
         self.canonical_reactive[94] = AEZ;
+    }
+
+    #[cold]
+    #[inline(never)]
+    pub fn operating_point_outputs(&self, ctx: &GeneratedEvalContext<'_>, outputs: &mut [f64]) {
+        let record = &*self.canonical_output_record;
+        let _ = ctx;
+        let o0 = record[0];
+        let o1 = record[1];
+        let o2 = record[2];
+        let o3 = record[3];
+        let o4 = record[4];
+        let multiplicity = self.multiplicity;
+        let staged = &*self.canonical_staged;
+		let A=o0;
+		let B=o1;
+		let C=o2;
+		let D=o3;
+		let E=o4;
+        outputs[0] = A;
+        outputs[1] = E;
+        outputs[2] = D;
+        outputs[3] = C;
+        outputs[4] = B;
     }
 
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {

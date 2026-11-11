@@ -24,7 +24,7 @@ impl Instance {
 		if !self.multiplicity.is_finite() || self.multiplicity <= 0.0 {
 			return Err(GeneratedNoiseEvaluationError::InvalidMultiplicity { value: self.multiplicity });
 		}
-		let mut prepared = [0.0; 1646];
+		let mut prepared = [0.0; 1665];
 		let produced = canonical_model_preprocess(
 			&self.params.values,
 			&self.param_given[..],
@@ -113,7 +113,7 @@ impl Instance {
 		let AY=staged[310];
 		let AZ=staged[312];
 		let BA=staged[313];
-		let BB=staged[1006]!=0.0;
+		let BB=staged[1003]!=0.0;
 		let BE=staged[406];
 		let BF=staged[382];
 		let BH=1e-3f64;
@@ -177,150 +177,146 @@ impl Instance {
 		let FB=staged[984]!=0.0;
 		let FF=staged[985]!=0.0;
 		let FK=staged[989]!=0.0;
-		let FP=staged[998]!=0.0;
-		let FT=staged[999]!=0.0;
-		let FX=staged[1000]!=0.0;
-		let GA=staged[687];
-		let GB=staged[95];
-		let GD=staged[418];
-		let GE=staged[427];
-		let GF=staged[430];
-		let GG=0.25f64;
-		let GH=staged[388];
-		let GI=staged[389];
-		let GJ=staged[384];
-		let GK=staged[434];
-		let GL=staged[420];
-		let GM=staged[419];
-		let GN=staged[421];
-		let GO=staged[422];
-		let GP=staged[413];
-		let GQ=staged[416];
-		let GR=staged[426];
-		let GS=staged[703];
-		let GV=staged[704]!=0.0;
-		let GZ=staged[453];
-		let HA=staged[472];
-		let HB=staged[1021]!=0.0;
-		let HC=staged[1022]!=0.0;
-		let HD=staged[1023]!=0.0;
-		let HE=staged[1024];
-		let HF=1e-10f64;
-		let HG=staged[1041]!=0.0;
-		let HH=230.25850929940458f64;
-		let HI=1e-100f64;
-		let HJ=1e100f64;
-		let HK=0.2f64;
-		let HL=0.375f64;
-		let HM=parameters[29];
-		let HN=staged[1048]!=0.0;
-		let HO=node_potentials[5];
-		let HP=node_potentials[6];
-		let HR=node_potentials[7];
-		let HT=node_potentials[8];
-		let HV=node_potentials[10];
-		let HX=node_potentials[11];
-		let IN=-1f64;
-		let JA=staged[1539]!=0.0;
-		let JH=staged[400];
-		let JN=staged[1540]!=0.0;
-		let JR=staged[402];
-		let KB=staged[403];
-		let KV=staged[1541]!=0.0;
-		let KW=1e-5f64;
-		let KZ=460.51701859880916f64;
-		let LC=1e-200f64;
-		let LG=-1f64;
-		let LP=8f64;
-		let MK=0.7071067811865475f64;
-		let MU=0.16666666666666666f64;
-		let MZ=1.25f64;
-		let NT=12f64;
-		let OR=1e-40f64;
-		let SB=staged[417];
-		let VE=-0.99f64;
-		let ZE=staged[428];
-		let ACM=staged[435]!=0.0;
-		let ACN=staged[1543]!=0.0;
-		let ACO=staged[1544]!=0.0;
-		let ACP=staged[1542]!=0.0;
-		let ACU=staged[452];
-		let ACZ=staged[454];
-		let AEN=staged[1545]!=0.0;
-		let AFF=staged[468];
-		let AIA=staged[497];
-		let AIJ=staged[498];
-		let AIS=staged[499];
-		let ALN=staged[1556]!=0.0;
-		let ALS=staged[552];
-		let AMC=staged[556];
-		let AMJ=staged[1558]!=0.0;
-		let AMK=staged[559];
-		let AMP=staged[561];
-		let ANC=staged[564];
-		let ANM=staged[568];
-		let ANT=staged[1559]!=0.0;
-		let ANU=staged[571];
-		let ANZ=staged[573];
-		let AOI=staged[1557]!=0.0;
-		let AOO=staged[1572]!=0.0;
-		let AOR=staged[1574]!=0.0;
-		let AOS=staged[1576]!=0.0;
-		let AOT=staged[1585]!=0.0;
-		let AOU=staged[1573]!=0.0;
-		let AOV=staged[605];
-		let APV=staged[609];
-		let AQB=staged[1578]!=0.0;
-		let AQC=staged[1575]!=0.0;
-		let AQH=staged[1577]!=0.0;
-		let ARB=staged[1579]!=0.0;
-		let ASE=staged[1580]!=0.0;
-		let ASF=staged[1581]!=0.0;
-		let ASV=staged[1582]!=0.0;
-		let ATM=staged[1587]!=0.0;
-		let ATN=staged[1584]!=0.0;
-		let ATQ=staged[1586]!=0.0;
-		let AUL=staged[1588]!=0.0;
-		let AVQ=staged[1589]!=0.0;
-		let AVR=staged[1590]!=0.0;
-		let AWG=staged[1591]!=0.0;
-		let AWW=staged[1596]!=0.0;
-		let AWX=staged[1593]!=0.0;
-		let AXA=staged[1595]!=0.0;
-		let AXV=staged[1597]!=0.0;
-		let AZA=staged[1598]!=0.0;
-		let AZB=staged[1599]!=0.0;
-		let BAN=staged[1594]!=0.0;
-		let BAT=staged[1601]!=0.0;
-		let BAW=staged[1603]!=0.0;
-		let BAX=staged[1605]!=0.0;
-		let BAY=staged[1614]!=0.0;
-		let BAZ=staged[1602]!=0.0;
-		let BBA=staged[649];
-		let BCA=staged[653];
-		let BCG=staged[1607]!=0.0;
-		let BCH=staged[1604]!=0.0;
-		let BCM=staged[1606]!=0.0;
-		let BDI=staged[1608]!=0.0;
-		let BEN=staged[1609]!=0.0;
-		let BEO=staged[1610]!=0.0;
-		let BFE=staged[1611]!=0.0;
-		let BFV=staged[1616]!=0.0;
-		let BFW=staged[1613]!=0.0;
-		let BFZ=staged[1615]!=0.0;
-		let BGU=staged[1617]!=0.0;
-		let BHZ=staged[1618]!=0.0;
-		let BIA=staged[1619]!=0.0;
-		let BIP=staged[1620]!=0.0;
-		let BJF=staged[1624]!=0.0;
-		let BJG=staged[1622]!=0.0;
-		let BJJ=staged[1623]!=0.0;
-		let BKE=staged[1625]!=0.0;
-		let BLJ=staged[1626]!=0.0;
-		let BLK=staged[1627]!=0.0;
-		let BMX=parameters[32];
-		let BNO=parameters[34];
-		let BOH=1e-20f64;
+		let GA=staged[95];
+		let GC=staged[418];
+		let GD=staged[427];
+		let GE=staged[430];
+		let GF=0.25f64;
+		let GG=staged[388];
+		let GH=staged[389];
+		let GI=staged[384];
+		let GJ=staged[434];
+		let GK=staged[420];
+		let GL=staged[419];
+		let GM=staged[421];
+		let GN=staged[422];
+		let GO=staged[413];
+		let GP=staged[416];
+		let GQ=staged[426];
+		let GR=staged[703];
+		let GU=staged[704]!=0.0;
+		let GY=staged[453];
+		let GZ=staged[472];
+		let HA=staged[1018]!=0.0;
+		let HB=staged[1019]!=0.0;
+		let HC=staged[1020]!=0.0;
+		let HD=staged[1021];
+		let HE=1e-10f64;
+		let HF=staged[1038]!=0.0;
+		let HG=230.25850929940458f64;
+		let HH=1e-100f64;
+		let HI=1e100f64;
+		let HJ=0.2f64;
+		let HK=0.375f64;
+		let HL=parameters[29];
+		let HM=staged[1045]!=0.0;
+		let HN=node_potentials[5];
+		let HO=node_potentials[6];
+		let HQ=node_potentials[7];
+		let HS=node_potentials[8];
+		let HU=node_potentials[10];
+		let HW=node_potentials[11];
+		let IM=-1f64;
+		let IZ=staged[1536]!=0.0;
+		let JG=staged[400];
+		let JM=staged[1537]!=0.0;
+		let JQ=staged[402];
+		let KA=staged[403];
+		let KU=staged[1538]!=0.0;
+		let KV=1e-5f64;
+		let KY=460.51701859880916f64;
+		let LB=1e-200f64;
+		let LF=-1f64;
+		let LO=8f64;
+		let MJ=0.7071067811865475f64;
+		let MT=0.16666666666666666f64;
+		let MY=1.25f64;
+		let NS=12f64;
+		let OQ=1e-40f64;
+		let SA=staged[417];
+		let VD=-0.99f64;
+		let ZD=staged[428];
+		let ACL=staged[435]!=0.0;
+		let ACM=staged[1540]!=0.0;
+		let ACN=staged[1541]!=0.0;
+		let ACO=staged[1539]!=0.0;
+		let ACT=staged[452];
+		let ACY=staged[454];
+		let AEM=staged[1542]!=0.0;
+		let AFE=staged[468];
+		let AHZ=staged[497];
+		let AII=staged[498];
+		let AIR=staged[499];
+		let ALM=staged[1553]!=0.0;
+		let ALR=staged[552];
+		let AMB=staged[556];
+		let AMI=staged[1555]!=0.0;
+		let AMJ=staged[559];
+		let AMO=staged[561];
+		let ANB=staged[564];
+		let ANL=staged[568];
+		let ANS=staged[1556]!=0.0;
+		let ANT=staged[571];
+		let ANY=staged[573];
+		let AOH=staged[1554]!=0.0;
+		let AON=staged[1569]!=0.0;
+		let AOQ=staged[1571]!=0.0;
+		let AOR=staged[1573]!=0.0;
+		let AOS=staged[1582]!=0.0;
+		let AOT=staged[1570]!=0.0;
+		let AOU=staged[605];
+		let APU=staged[609];
+		let AQA=staged[1575]!=0.0;
+		let AQB=staged[1572]!=0.0;
+		let AQG=staged[1574]!=0.0;
+		let ARA=staged[1576]!=0.0;
+		let ASD=staged[1577]!=0.0;
+		let ASE=staged[1578]!=0.0;
+		let ASU=staged[1579]!=0.0;
+		let ATL=staged[1584]!=0.0;
+		let ATM=staged[1581]!=0.0;
+		let ATP=staged[1583]!=0.0;
+		let AUK=staged[1585]!=0.0;
+		let AVP=staged[1586]!=0.0;
+		let AVQ=staged[1587]!=0.0;
+		let AWF=staged[1588]!=0.0;
+		let AWV=staged[1593]!=0.0;
+		let AWW=staged[1590]!=0.0;
+		let AWZ=staged[1592]!=0.0;
+		let AXU=staged[1594]!=0.0;
+		let AYZ=staged[1595]!=0.0;
+		let AZA=staged[1596]!=0.0;
+		let BAM=staged[1591]!=0.0;
+		let BAS=staged[1598]!=0.0;
+		let BAV=staged[1600]!=0.0;
+		let BAW=staged[1602]!=0.0;
+		let BAX=staged[1611]!=0.0;
+		let BAY=staged[1599]!=0.0;
+		let BAZ=staged[649];
+		let BBZ=staged[653];
+		let BCF=staged[1604]!=0.0;
+		let BCG=staged[1601]!=0.0;
+		let BCL=staged[1603]!=0.0;
+		let BDH=staged[1605]!=0.0;
+		let BEM=staged[1606]!=0.0;
+		let BEN=staged[1607]!=0.0;
+		let BFD=staged[1608]!=0.0;
+		let BFU=staged[1613]!=0.0;
+		let BFV=staged[1610]!=0.0;
+		let BFY=staged[1612]!=0.0;
+		let BGT=staged[1614]!=0.0;
+		let BHY=staged[1615]!=0.0;
+		let BHZ=staged[1616]!=0.0;
+		let BIO=staged[1617]!=0.0;
+		let BJE=staged[1621]!=0.0;
+		let BJF=staged[1619]!=0.0;
+		let BJI=staged[1620]!=0.0;
+		let BKD=staged[1622]!=0.0;
+		let BLI=staged[1623]!=0.0;
+		let BLJ=staged[1624]!=0.0;
+		let BNM=parameters[34];
+		let BOF=1e-20f64;
+		let BSE=staged[1664];
 		let BC=(temperature+ parameters[55])+ parameters[35];
 		let BD=BC/ J;
 		let BG=(J/ BC).ln();
@@ -482,373 +478,447 @@ impl Instance {
 		}else{
 		A
 		};
+		let FP=FN> A;
 		let FQ=if FP{
 		FN
 		}else{
 		A
 		};
+		let FT=FR> A;
 		let FU=if FT{
 		FR
 		}else{
 		A
 		};
+		let FX=FV> A;
 		let FY=if FX{
 		FV
 		}else{
 		A
 		};
-		let GC=GB/ 1.6021918e-19f64;
-		let GT=BE* BE;
-		let GU=(GT* GK)/ GC;
-		let AKP;
-		let BRG;
-		let BSB;
-		if GV{
-		let GW=(parameters[18]* (FL* ((staged[133]* BG).exp())))* GB;
-		let GX=(GT* GW)/ GC;
-		let GY=((FM* BI)* 1.3806505e-23f64)* BC;
-		AKP=GW;
-		BRG=GX;
-		BSB=GY;
+		let GB=GA/ 1.6021918e-19f64;
+		let GS=BE* BE;
+		let GT=(GS* GJ)/ GB;
+		let AKO;
+		let BRE;
+		let BRZ;
+		if GU{
+		let GV=(parameters[18]* (FL* ((staged[133]* BG).exp())))* GA;
+		let GW=(GS* GV)/ GB;
+		let GX=((FM* BI)* 1.3806505e-23f64)* BC;
+		AKO=GV;
+		BRE=GW;
+		BRZ=GX;
 		}else{
-		AKP=A;
-		BRG=A;
-		BSB=I;
+		AKO=A;
+		BRE=A;
+		BRZ=I;
 		}
-		let ADU=if HD{
-		HE
+		let ADT=if HC{
+		HD
 		}else{
 		B
 		};
+		let ID;
 		let IE;
-		let IF;
-		let IH;
-		let ALO;
-		let AMY;
-		if HN{
-		let HQ=HO- HP;
-		let HS=HR- HP;
-		let HU=HP- HT;
-		let HW=-(HP- HV);
-		let HY=-(HR- HX);
-		IE=HQ;
-		IF=HU;
-		IH=HS;
-		ALO=HW;
-		AMY=HY;
+		let IG;
+		let ALN;
+		let AMX;
+		if HM{
+		let HP=HN- HO;
+		let HR=HQ- HO;
+		let HT=HO- HS;
+		let HV=-(HO- HU);
+		let HX=-(HQ- HW);
+		ID=HP;
+		IE=HT;
+		IG=HR;
+		ALN=HV;
+		AMX=HX;
 		}else{
-		let HZ=-(HO- HP);
-		let IA=-(HR- HP);
-		let IB=-(HP- HT);
-		let IC=HP- HV;
-		let ID=HR- HX;
-		IE=HZ;
-		IF=IB;
-		IH=IA;
-		ALO=IC;
-		AMY=ID;
+		let HY=-(HN- HO);
+		let HZ=-(HQ- HO);
+		let IA=-(HO- HS);
+		let IB=HO- HU;
+		let IC=HQ- HW;
+		ID=HY;
+		IE=IA;
+		IG=HZ;
+		ALN=IB;
+		AMX=IC;
 		}
-		let IG=IE+ IF;
-		let II=IH+ IF;
-		let IJ=IE- IH;
-		let IK=(-IE)* BF;
-		let IL=(-IJ)* BF;
-		let IM=IH< A;
+		let IF=ID+ IE;
+		let IH=IG+ IE;
+		let II=ID- IG;
+		let IJ=(-ID)* BF;
+		let IK=(-II)* BF;
+		let IL=IG< A;
+		let IO;
 		let IP;
-		let IQ;
-		let AFP;
-		let ALM;
-		if IM{
-		let IO=-IH;
-		IP=IO;
-		IQ=II;
-		AFP=IJ;
-		ALM=IN;
-		}else{
+		let AFO;
+		let ALL;
+		if IL{
+		let IN=-IG;
+		IO=IN;
 		IP=IH;
-		IQ=IF;
-		AFP=IE;
-		ALM=I;
+		AFO=II;
+		ALL=IM;
+		}else{
+		IO=IG;
+		IP=IE;
+		AFO=ID;
+		ALL=I;
 		}
-		let IR=IP+ IQ;
-		let IS=IP* IP;
-		let IT=IS/ (((IS+ 0.01f64).sqrt())+ 0.1f64);
-		let IU=IR+ IQ;
-		let IV=IR- IQ;
-		let IW=IV* IV;
-		let IX=(K* (IU- ((IW+ GJ).sqrt())))+ staged[385];
-		let IY=((IX* IX)+ GJ).sqrt();
-		let IZ=(IQ- (K* ((IX+ A)- IY)))+ staged[386];
+		let IQ=IO+ IP;
+		let IR=IO* IO;
+		let IS=IR/ (((IR+ 0.01f64).sqrt())+ 0.1f64);
+		let IT=IQ+ IP;
+		let IU=IQ- IP;
+		let IV=IU* IU;
+		let IW=(K* (IT- ((IV+ GI).sqrt())))+ staged[385];
+		let IX=((IW* IW)+ GI).sqrt();
+		let IY=(IP- (K* ((IW+ A)- IX)))+ staged[386];
+		let JH;
 		let JI;
-		let JJ;
-		if JA{
-		let JB=K* (IP- IT);
-		let JC=(((IZ+ JB)+ GH).sqrt())- GI;
-		let JD=((X* (JC- staged[390]))/ staged[391])- I;
-		let JE=JC- (staged[393]* (JD+ (((JD* JD)+ 0.4804530139182f64).sqrt())));
-		let JF=((JE* JE)+ (staged[394]* JE))- JB;
-		let JG=IZ- JF;
+		if IZ{
+		let JA=K* (IO- IS);
+		let JB=(((IY+ JA)+ GG).sqrt())- GH;
+		let JC=((X* (JB- staged[390]))/ staged[391])- I;
+		let JD=JB- (staged[393]* (JC+ (((JC* JC)+ 0.4804530139182f64).sqrt())));
+		let JE=((JD* JD)+ (staged[394]* JD))- JA;
+		let JF=IY- JE;
+		JH=JE;
 		JI=JF;
-		JJ=JG;
 		}else{
-		JI=IZ;
-		JJ=A;
+		JH=IY;
+		JI=A;
 		}
-		let JK=(IG- JJ)- staged[383];
-		let JL=K* (IP- IT);
-		let JM=JI+ JL;
-		let KH;
-		if JN{
-		let JO=JM* BF;
-		let JP=JK* BF;
-		let JQ=(((JP- staged[395])/ staged[396])+ staged[397])- (staged[398]* JO);
-		let JS=staged[399]+ JO;
-		let JT=(X* (((JP- JS)- (JH* (JS.sqrt())))- staged[401]))+ JR;
-		let JU=JQ- JT;
-		let JV=K* ((JQ+ JT)+ (((JU* JU)+ 20f64).sqrt()));
-		let JW=(X* (JP- JO))- JR;
-		let JX=JV- JW;
-		let JY=K* ((JV+ JW)- (((JX* JX)+ 20f64).sqrt()));
-		let JZ=JY- JR;
-		let KA=K* ((JY+ JR)- (((JZ* JZ)+ W).sqrt()));
-		let KC=KA- KB;
-		let KD=staged[404]* (((K* ((KA+ KB)+ (((KC* KC)+ 20f64).sqrt())))/ JR)+ I);
-		let KE=KD> -230.25850929940458f64;
-		let KI=if KE{
-		let KF=KD.exp();
+		let JJ=(IF- JI)- staged[383];
+		let JK=K* (IO- IS);
+		let JL=JH+ JK;
+		let KG;
+		if JM{
+		let JN=JL* BF;
+		let JO=JJ* BF;
+		let JP=(((JO- staged[395])/ staged[396])+ staged[397])- (staged[398]* JN);
+		let JR=staged[399]+ JN;
+		let JS=(X* (((JO- JR)- (JG* (JR.sqrt())))- staged[401]))+ JQ;
+		let JT=JP- JS;
+		let JU=K* ((JP+ JS)+ (((JT* JT)+ 20f64).sqrt()));
+		let JV=(X* (JO- JN))- JQ;
+		let JW=JU- JV;
+		let JX=K* ((JU+ JV)- (((JW* JW)+ 20f64).sqrt()));
+		let JY=JX- JQ;
+		let JZ=K* ((JX+ JQ)- (((JY* JY)+ W).sqrt()));
+		let KB=JZ- KA;
+		let KC=staged[404]* (((K* ((JZ+ KA)+ (((KB* KB)+ 20f64).sqrt())))/ JQ)+ I);
+		let KD=KC> -230.25850929940458f64;
+		let KH=if KD{
+		let KE=KC.exp();
+		KE
+		}else{
+		let KF=HH/ (I+ ((-230.25850929940458f64- KC)* (I+ (K* ((-230.25850929940458f64- KC)* (I+ ((-230.25850929940458f64- KC)* DQ)))))));
 		KF
-		}else{
-		let KG=HI/ (I+ ((-230.25850929940458f64- KD)* (I+ (K* ((-230.25850929940458f64- KD)* (I+ ((-230.25850929940458f64- KD)* DQ)))))));
-		KG
 		};
-		KH=KI;
+		KG=KH;
 		}else{
-		KH=I;
+		KG=I;
 		}
-		let KJ=(BE* (I+ (staged[405]* KH)))* (I+ ((staged[408]* (I+ (staged[407]* IT)))* (I+ (staged[409]* JM))));
-		let KK=I/ KJ;
-		let KL=JH* ((BE* KK).sqrt());
-		let KM=KL* KL;
-		let KN=I/ KM;
-		let KO=JK* KK;
-		let KP=X* IT;
-		let KQ=(staged[411]* (KP/ (I+ ((I+ (staged[410]* IT)).sqrt()))))* (I+ (staged[412]* JM));
-		let KR=IX- KQ;
-		let KS=(K* KK)* ((KQ+ IY)- (((KR* KR)+ GJ).sqrt()));
-		let KT=(GH* KK)+ (JI* KK);
-		let KU=KT- KS;
+		let KI=(BE* (I+ (staged[405]* KG)))* (I+ ((staged[408]* (I+ (staged[407]* IS)))* (I+ (staged[409]* JL))));
+		let KJ=I/ KI;
+		let KK=JG* ((BE* KJ).sqrt());
+		let KL=KK* KK;
+		let KM=I/ KL;
+		let KN=JJ* KJ;
+		let KO=X* IS;
+		let KP=(staged[411]* (KO/ (I+ ((I+ (staged[410]* IS)).sqrt()))))* (I+ (staged[412]* JL));
+		let KQ=IW- KP;
+		let KR=(K* KJ)* ((KP+ IX)- (((KQ* KQ)+ GI).sqrt()));
+		let KS=(GG* KJ)+ (JH* KJ);
+		let KT=KS- KR;
+		let LK;
+		if KU{
+		let KW=(KT.abs())< KV;
 		let LL;
-		if KV{
-		let KX=(KU.abs())< KW;
-		let LM;
-		if KX{
-		let KY=I+ (KL* (I- ((K* KU)* (I- (0.3125f64* KU)))));
-		LM=KY;
+		if KW{
+		let KX=I+ (KK* (I- ((K* KT)* (I- (0.3125f64* KT)))));
+		LL=KX;
 		}else{
-		let LA=KU< KZ;
-		let LI=if LA{
-		let LB=(-KU).exp();
-		LB
+		let KZ=KT< KY;
+		let LH=if KZ{
+		let LA=(-KT).exp();
+		LA
 		}else{
-		let LD=KU- KZ;
-		let LE=LC/ (I+ (LD* (I+ (K* (LD* (I+ (LD* DQ)))))));
-		LE
+		let LC=KT- KY;
+		let LD=LB/ (I+ (LC* (I+ (K* (LC* (I+ (LC* DQ)))))));
+		LD
 		};
-		let LF=KU> A;
-		let LH=if LF{
+		let LE=KT> A;
+		let LG=if LE{
 		I
 		}else{
-		LG
+		LF
 		};
-		let LJ=I+ (((LH* KL)* (I- (LI* (I- KU))))/ (X* ((KU* (I- LI)).sqrt())));
-		LM=LJ;
+		let LI=I+ (((LG* KK)* (I- (LH* (I- KT))))/ (X* ((KT* (I- LH)).sqrt())));
+		LL=LI;
 		}
-		LL=LM;
+		LK=LL;
 		}else{
-		let LK=I+ ((K* KL)/ (KU.sqrt()));
-		LL=LK;
+		let LJ=I+ ((K* KK)/ (KT.sqrt()));
+		LK=LJ;
 		}
-		let LN=(KO- ((KU+ (KL* (KU.sqrt())))- (LL* ((LL- I).ln()))))/ LL;
-		let LO=K* KM;
-		let LQ=LN> -30f64;
-		let MO;
-		if LQ{
-		let LR=(LL* LN)- I;
-		let LS=LN- ((K* (LR+ (((LR* LR)+ EJ).sqrt()))).ln());
-		let LT=K* (LS+ (((LS* LS)+ X).sqrt()));
-		let LU=LN- LT;
-		let LV=LU< HH;
-		let LZ=if LV{
-		let LW=LU.exp();
-		LW
+		let LM=(KN- ((KT+ (KK* (KT.sqrt())))- (LK* ((LK- I).ln()))))/ LK;
+		let LN=K* KL;
+		let LP=LM> -30f64;
+		let MN;
+		if LP{
+		let LQ=(LK* LM)- I;
+		let LR=LM- ((K* (LQ+ (((LQ* LQ)+ EJ).sqrt()))).ln());
+		let LS=K* (LR+ (((LR* LR)+ X).sqrt()));
+		let LT=LM- LS;
+		let LU=LT< HG;
+		let LY=if LU{
+		let LV=LT.exp();
+		LV
 		}else{
-		let LX=LU- HH;
-		let LY=HJ* (I+ (LX* (I+ (K* (LX* (I+ (LX* DQ)))))));
-		LY
+		let LW=LT- HG;
+		let LX=HI* (I+ (LW* (I+ (K* (LW* (I+ (LW* DQ)))))));
+		LX
 		};
-		let MA=LZ/ LL;
-		let MB=(X* (LT+ I))- MA;
-		let MC=MA> CF;
-		let MF=if MC{
-		let MD=LL* ((LT- ((((I+ (MA* MB)).sqrt())- I)/ MA))+ I);
+		let LZ=LY/ LK;
+		let MA=(X* (LS+ I))- LZ;
+		let MB=LZ> CF;
+		let ME=if MB{
+		let MC=LK* ((LS- ((((I+ (LZ* MA)).sqrt())- I)/ LZ))+ I);
+		MC
+		}else{
+		let MD=((LK* K)* LZ)* (I+ ((GF* MA)* MA));
 		MD
-		}else{
-		let ME=((LL* K)* MA)* (I+ ((GG* MB)* MB));
-		ME
 		};
-		let MG=KO- MF;
-		let MH=MG- X;
-		let MI=LO* (((I+ ((BI/ KM)* (K* ((MG+ X)+ (((MH* MH)+ I).sqrt()))))).sqrt())- I);
-		let MJ=KT- ((MI/ (MI+ MF))* KS);
-		MO=MJ;
+		let MF=KN- ME;
+		let MG=MF- X;
+		let MH=LN* (((I+ ((BI/ KL)* (K* ((MF+ X)+ (((MG* MG)+ I).sqrt()))))).sqrt())- I);
+		let MI=KS- ((MH/ (MH+ ME))* KR);
+		MN=MI;
 		}else{
-		MO=KU;
+		MN=KT;
 		}
-		let ML=I+ (KL* MK);
-		let MM=KW* ML;
-		let MN=I/ ML;
-		let MP=MO< KZ;
-		let MV=if MP{
-		let MQ=(-MO).exp();
-		MQ
+		let MK=I+ (KK* MJ);
+		let ML=KV* MK;
+		let MM=I/ MK;
+		let MO=MN< KY;
+		let MU=if MO{
+		let MP=(-MN).exp();
+		MP
 		}else{
-		let MR=MO- KZ;
-		let MS=LC/ (I+ (MR* (I+ (K* (MR* (I+ (MR* DQ)))))));
-		MS
+		let MQ=MN- KY;
+		let MR=LB/ (I+ (MQ* (I+ (K* (MQ* (I+ (MQ* DQ)))))));
+		MR
 		};
-		let MT=(KO.abs())<= MM;
+		let MS=(KN.abs())<= ML;
+		let PY;
+		let SM;
+		if MS{
+		let MV=(KN* MM)* (I+ (((KN* (I- MU))* KK)* (((MM* MM)* MT)* MJ)));
+		PY=MV;
+		SM=A;
+		}else{
+		let MW=KN< (-ML);
 		let PZ;
 		let SN;
-		if MT{
-		let MW=(KO* MN)* (I+ (((KO* (I- MV))* KL)* (((MN* MN)* MU)* MK)));
-		PZ=MW;
+		if MW{
+		let MX=-KN;
+		let MZ=MY* (MX* MM);
+		let NA=MZ- 6f64;
+		let NB=K* ((MZ+ EJ)- (((NA* NA)+ 64f64).sqrt()));
+		let NC=MX- NB;
+		let ND=(NC* NC)+ (KL* (NB+ I));
+		let NE=(X* NC)- KL;
+		let NF=(-NB)+ ((ND* KM).ln());
+		let NG=ND+ NE;
+		let NH=NE* NE;
+		let NI=(NG* NG)+ (NF* ((K* NH)- ND));
+		let NJ=NB+ (((ND* NG)* NF)/ (NI+ (((((NG/ NI)* NF)* NF)* NE)* ((NH* DQ)- ND))));
+		let NK=NJ< HG;
+		let NO=if NK{
+		let NL=NJ.exp();
+		NL
+		}else{
+		let NM=NJ- HG;
+		let NN=HI* (I+ (NM* (I+ (K* (NM* (I+ (NM* DQ)))))));
+		NN
+		};
+		let NP=NJ* NJ;
+		let NQ=I/ (X+ NP);
+		let NR=NP* NQ;
+		let NT=MX- NJ;
+		let NU=MU* (I/ NO);
+		let NV=(X* NT)+ (KL* (((NO- I)- NU)+ (MU* (I- (BI* ((NJ* NQ)* NQ))))));
+		let NW=(NT* NT)- (KL* ((((NO- NJ)- I)+ NU)+ (MU* ((NJ- I)- NR))));
+		let NX=NW/ (NV+ (((NV* NV)- (X* (NW* (X- (KL* ((NO+ NU)- (MU* ((((LO* NQ)- (NS* NR))* NQ)* NQ)))))))).sqrt()));
+		let NY=(-NJ)- (X* NX);
+		PZ=NY;
 		SN=A;
 		}else{
-		let MX=KO< (-MM);
-		let QA;
-		let SO;
-		if MX{
-		let MY=-KO;
-		let NA=MZ* (MY* MN);
-		let NB=NA- 6f64;
-		let NC=K* ((NA+ EJ)- (((NB* NB)+ 64f64).sqrt()));
-		let ND=MY- NC;
-		let NE=(ND* ND)+ (KM* (NC+ I));
-		let NF=(X* ND)- KM;
-		let NG=(-NC)+ ((NE* KN).ln());
-		let NH=NE+ NF;
-		let NI=NF* NF;
-		let NJ=(NH* NH)+ (NG* ((K* NI)- NE));
-		let NK=NC+ (((NE* NH)* NG)/ (NJ+ (((((NH/ NJ)* NG)* NG)* NF)* ((NI* DQ)- NE))));
-		let NL=NK< HH;
-		let NP=if NL{
-		let NM=NK.exp();
-		NM
+		let NZ=I/ (MY+ (KK* 0.7324648775608221f64));
+		let OA=-((KN* MM)* (I+ (((((MK* MY)* NZ)- I)* NZ)* KN)));
+		let OB=OA> -230.25850929940458f64;
+		let OE=if OB{
+		let OC=OA.exp();
+		OC
 		}else{
-		let NN=NK- HH;
-		let NO=HJ* (I+ (NN* (I+ (K* (NN* (I+ (NN* DQ)))))));
-		NO
-		};
-		let NQ=NK* NK;
-		let NR=I/ (X+ NQ);
-		let NS=NQ* NR;
-		let NU=MY- NK;
-		let NV=MV* (I/ NP);
-		let NW=(X* NU)+ (KM* (((NP- I)- NV)+ (MV* (I- (BI* ((NK* NR)* NR))))));
-		let NX=(NU* NU)- (KM* ((((NP- NK)- I)+ NV)+ (MV* ((NK- I)- NS))));
-		let NY=NX/ (NW+ (((NW* NW)- (X* (NX* (X- (KM* ((NP+ NV)- (MV* ((((LP* NR)- (NT* NS))* NR)* NR)))))))).sqrt()));
-		let NZ=(-NK)- (X* NY);
-		QA=NZ;
-		SO=A;
-		}else{
-		let OA=I/ (MZ+ (KL* 0.7324648775608221f64));
-		let OB=-((KO* MN)* (I+ (((((ML* MZ)* OA)- I)* OA)* KO)));
-		let OC=OB> -230.25850929940458f64;
-		let OF=if OC{
-		let OD=OB.exp();
+		let OD=HH/ (I+ ((-230.25850929940458f64- OA)* (I+ (K* ((-230.25850929940458f64- OA)* (I+ ((-230.25850929940458f64- OA)* DQ)))))));
 		OD
-		}else{
-		let OE=HI/ (I+ ((-230.25850929940458f64- OB)* (I+ (K* ((-230.25850929940458f64- OB)* (I+ ((-230.25850929940458f64- OB)* DQ)))))));
-		OE
 		};
-		let OG=(KO+ LO)- (KL* (((KO+ (KM* GG))- (I- OF)).sqrt()));
-		let OH=MO+ Y;
-		let OI=OG- OH;
-		let OJ=(K* ((OG+ OH)- (((OI* OI)+ W).sqrt())))- (K* (OH- (((OH* OH)+ W).sqrt())));
-		let OK=KO- OJ;
-		let OL=(-OJ).exp();
-		let OM=OJ* OJ;
-		let ON=I/ (X+ OM);
-		let OO=OM* ON;
-		let OP=BI* ((OJ* ON)* ON);
-		let OQ=(((LP* ON)- (NT* OO))* ON)* ON;
-		let OS=(OK* OK)- (KM* (((OL+ OJ)- I)- (MV* ((OJ+ I)+ OO))));
-		let OT=OR> OS;
-		let OU=if OT{
+		let OF=(KN+ LN)- (KK* (((KN+ (KL* GF))- (I- OE)).sqrt()));
+		let OG=MN+ Y;
+		let OH=OF- OG;
+		let OI=(K* ((OF+ OG)- (((OH* OH)+ W).sqrt())))- (K* (OG- (((OG* OG)+ W).sqrt())));
+		let OJ=KN- OI;
+		let OK=(-OI).exp();
+		let OL=OI* OI;
+		let OM=I/ (X+ OL);
+		let ON=OL* OM;
+		let OO=BI* ((OI* OM)* OM);
+		let OP=(((LO* OM)- (NS* ON))* OM)* OM;
+		let OR=(OJ* OJ)- (KL* (((OK+ OI)- I)- (MU* ((OI+ I)+ ON))));
+		let OS=OQ> OR;
+		let OT=if OS{
+		OQ
+		}else{
 		OR
-		}else{
-		OS
 		};
-		let OV=(X* OK)+ (KM* ((I- OL)- (MV* (I+ OP))));
-		let OW=(MO- OJ)+ ((OU/ KM).ln());
-		let OX=OU+ OV;
-		let OY=OV* OV;
-		let OZ=OU* (I- (K* (KM* (OL- (MV* OQ)))));
-		let PA=(OX* OX)+ (OW* ((K* OY)- OZ));
-		let PB=OJ+ (((OU* OX)* OW)/ (PA+ (((((OX/ PA)* OW)* OW)* OV)* ((OY* DQ)- OZ))));
-		let PC=PB< HH;
+		let OU=(X* OJ)+ (KL* ((I- OK)- (MU* (I+ OO))));
+		let OV=(MN- OI)+ ((OT/ KL).ln());
+		let OW=OT+ OU;
+		let OX=OU* OU;
+		let OY=OT* (I- (K* (KL* (OK- (MU* OP)))));
+		let OZ=(OW* OW)+ (OV* ((K* OX)- OY));
+		let PA=OI+ (((OT* OW)* OV)/ (OZ+ (((((OW/ OZ)* OV)* OV)* OU)* ((OX* DQ)- OY))));
+		let PB=PA< HG;
+		let PQ;
+		let PS;
+		if PB{
+		let PC=PA.exp();
+		let PD=I/ PC;
+		let PE=MU* PC;
+		PQ=PD;
+		PS=PE;
+		}else{
+		let PF=PA> (MN- HG);
 		let PR;
 		let PT;
-		if PC{
-		let PD=PB.exp();
-		let PE=I/ PD;
-		let PF=MV* PD;
-		PR=PE;
-		PT=PF;
+		if PF{
+		let PG=(PA- MN).exp();
+		let PH=MU/ PG;
+		PR=PH;
+		PT=PG;
 		}else{
-		let PG=PB> (MO- HH);
-		let PS;
-		let PU;
-		if PG{
-		let PH=(PB- MO).exp();
-		let PI=MV/ PH;
-		PS=PI;
-		PU=PH;
-		}else{
-		let PJ=(MO- PB)- HH;
-		let PK=HI/ (I+ (PJ* (I+ (K* (PJ* (I+ (PJ* DQ)))))));
-		let PL=PB- HH;
-		let PM=HI/ (I+ (PL* (I+ (K* (PL* (I+ (PL* DQ)))))));
-		PS=PM;
-		PU=PK;
+		let PI=(MN- PA)- HG;
+		let PJ=HH/ (I+ (PI* (I+ (K* (PI* (I+ (PI* DQ)))))));
+		let PK=PA- HG;
+		let PL=HH/ (I+ (PK* (I+ (K* (PK* (I+ (PK* DQ)))))));
+		PR=PL;
+		PT=PJ;
 		}
-		PR=PS;
-		PT=PU;
+		PQ=PR;
+		PS=PT;
 		}
-		let PN=PB* PB;
-		let PO=I/ (X+ PN);
-		let PP=PN* PO;
-		let PQ=KO- PB;
-		let PV=(X* PQ)+ (KM* (((I- PR)+ PT)- (MV* (I+ (BI* ((PB* PO)* PO))))));
-		let PW=(PQ* PQ)- (KM* ((((PR+ PB)- I)+ PT)- (MV* ((PB+ I)+ PP))));
-		let PX=PW/ (PV+ (((PV* PV)- (X* (PW* (X- (KM* ((PR+ PT)- (MV* ((((LP* PO)- (NT* PP))* PO)* PO)))))))).sqrt()));
-		let PY=PB+ (X* PX);
-		QA=PY;
-		SO=OG;
+		let PM=PA* PA;
+		let PN=I/ (X+ PM);
+		let PO=PM* PN;
+		let PP=KN- PA;
+		let PU=(X* PP)+ (KL* (((I- PQ)+ PS)- (MU* (I+ (BI* ((PA* PN)* PN))))));
+		let PV=(PP* PP)- (KL* ((((PQ+ PA)- I)+ PS)- (MU* ((PA+ I)+ PO))));
+		let PW=PV/ (PU+ (((PU* PU)- (X* (PV* (X- (KL* ((PQ+ PS)- (MU* ((((LO* PN)- (NS* PO))* PN)* PN)))))))).sqrt()));
+		let PX=PA+ (X* PW);
+		PZ=PX;
+		SN=OF;
 		}
-		PZ=QA;
-		SN=SO;
+		PY=PZ;
+		SM=SN;
 		}
-		let QB=KO- PZ;
-		let QC=KJ* QB;
-		let QD=KO> A;
+		let QA=KN- PY;
+		let QB=KI* QA;
+		let QC=KN> A;
+		let SO;
 		let SP;
 		let SQ;
 		let SR;
 		let SS;
 		let ST;
-		let SU;
+		let SV;
 		let SW;
+		let SY;
+		let TA;
+		let TC;
+		let TE;
+		let TG;
+		let TI;
+		let TK;
+		if QC{
+		let QD=PY* PY;
+		let QE=I/ (X+ QD);
+		let QF=QD* QE;
+		let QG=BI* ((PY* QE)* QE);
+		let QH=(((LO* QE)- (NS* QF))* QE)* QE;
+		let QI=PY< HG;
+		let QT;
+		let RD;
+		if QI{
+		let QJ=PY.exp();
+		let QK=I/ QJ;
+		let QL=MU* QJ;
+		QT=QL;
+		RD=QK;
+		}else{
+		let QM=PY> (MN- HG);
+		let QU;
+		let RE;
+		if QM{
+		let QN=(PY- MN).exp();
+		let QO=MU/ QN;
+		QU=QN;
+		RE=QO;
+		}else{
+		let QP=(MN- PY)- HG;
+		let QQ=HH/ (I+ (QP* (I+ (K* (QP* (I+ (QP* DQ)))))));
+		let QR=PY- HG;
+		let QS=HH/ (I+ (QR* (I+ (K* (QR* (I+ (QR* DQ)))))));
+		QU=QQ;
+		RE=QS;
+		}
+		QT=QU;
+		RD=RE;
+		}
+		let QV=QT- (MU* ((PY+ I)+ QF));
+		let QW=PY< KV;
+		let RJ;
+		let RL;
+		let RO;
+		let SU;
+		if QW{
+		let QX=I- (DQ* (PY* (I- (GF* PY))));
+		let QY=K* (QD* QX);
+		let QZ=MT* ((((MU* PY)* PY)* PY)* (I+ (1.75f64* PY)));
+		let RA=QX.sqrt();
+		let RB=MJ* (PY* RA);
+		let RC=I+ (MJ* ((KK* ((I- (K* PY))+ (MT* QD)))/ RA));
+		RJ=QZ;
+		RL=QY;
+		RO=RB;
+		SU=RC;
+		}else{
+		let RF=(PY- I)+ RD;
+		let RG=RF.sqrt();
+		let RH=I+ (K* ((KK* (I- RD))/ RG));
+		RJ=QV;
+		RL=RF;
+		RO=RG;
+		SU=RH;
+		}
+		let RI=(I+ ((HJ* GO)* JL))/ (I+ (GO* JL));
+		let RK=RJ> HH;
 		let SX;
 		let SZ;
 		let TB;
@@ -857,176 +927,106 @@ impl Instance {
 		let TH;
 		let TJ;
 		let TL;
-		if QD{
-		let QE=PZ* PZ;
-		let QF=I/ (X+ QE);
-		let QG=QE* QF;
-		let QH=BI* ((PZ* QF)* QF);
-		let QI=(((LP* QF)- (NT* QG))* QF)* QF;
-		let QJ=PZ< HH;
-		let QU;
-		let RE;
-		if QJ{
-		let QK=PZ.exp();
-		let QL=I/ QK;
-		let QM=MV* QK;
-		QU=QM;
-		RE=QL;
+		if RK{
+		let RM=RL+ RJ;
+		let RN=KK* (RM.sqrt());
+		let RP=KK* RO;
+		let RQ=((KL* RJ)* KI)/ (RN+ RP);
+		let RR=RP* KI;
+		let RS=EM< A;
+		let RY=if RS{
+		let RT=I/ (I- (EM* JL));
+		RT
 		}else{
-		let QN=PZ> (MO- HH);
-		let QV;
-		let RF;
-		if QN{
-		let QO=(PZ- MO).exp();
-		let QP=MV/ QO;
-		QV=QO;
-		RF=QP;
-		}else{
-		let QQ=(MO- PZ)- HH;
-		let QR=HI/ (I+ (QQ* (I+ (K* (QQ* (I+ (QQ* DQ)))))));
-		let QS=PZ- HH;
-		let QT=HI/ (I+ (QS* (I+ (K* (QS* (I+ (QS* DQ)))))));
-		QV=QR;
-		RF=QT;
-		}
-		QU=QV;
-		RE=RF;
-		}
-		let QW=QU- (MV* ((PZ+ I)+ QG));
-		let QX=PZ< KW;
-		let RK;
-		let RM;
-		let RP;
-		let SV;
-		if QX{
-		let QY=I- (DQ* (PZ* (I- (GG* PZ))));
-		let QZ=K* (QE* QY);
-		let RA=MU* ((((MV* PZ)* PZ)* PZ)* (I+ (1.75f64* PZ)));
-		let RB=QY.sqrt();
-		let RC=MK* (PZ* RB);
-		let RD=I+ (MK* ((KL* ((I- (K* PZ))+ (MU* QE)))/ RB));
-		RK=RA;
-		RM=QZ;
-		RP=RC;
-		SV=RD;
-		}else{
-		let RG=(PZ- I)+ RE;
-		let RH=RG.sqrt();
-		let RI=I+ (K* ((KL* (I- RE))/ RH));
-		RK=QW;
-		RM=RG;
-		RP=RH;
-		SV=RI;
-		}
-		let RJ=(I+ ((HK* GP)* JM))/ (I+ (GP* JM));
-		let RL=RK> HI;
-		let SY;
-		let TA;
-		let TC;
-		let TE;
-		let TG;
-		let TI;
-		let TK;
-		let TM;
-		if RL{
-		let RN=RM+ RK;
-		let RO=KL* (RN.sqrt());
-		let RQ=KL* RP;
-		let RR=((KM* RK)* KJ)/ (RO+ RQ);
-		let RS=RQ* KJ;
-		let RT=EM< A;
-		let RZ=if RT{
-		let RU=I/ (I- (EM* JM));
+		let RU=I+ (EM* JL);
 		RU
-		}else{
-		let RV=I+ (EM* JM);
-		RV
 		};
-		let RW=EN< A;
-		let SA=if RW{
-		let RX=I- (EN* RR);
+		let RV=EN< A;
+		let RZ=if RV{
+		let RW=I- (EN* RQ);
+		RW
+		}else{
+		let RX=I/ (I+ (EN* RQ));
 		RX
-		}else{
-		let RY=I/ (I+ (EN* RR));
-		RY
 		};
-		let SC=(I+ ((((GD* (RS+ (SB* RR)))* GM).powf(GL))+ (GO* (((K* GN)* ((RM/ (RN+ 1e-14f64)).ln())).exp()))))+ (((GQ* RZ)* SA)* RR);
-		let SD=SC* RJ;
-		let SE=EO< A;
-		let SH=if SE{
-		let SF=I/ (I- (EO* JM));
+		let SB=(I+ ((((GC* (RR+ (SA* RQ)))* GL).powf(GK))+ (GN* (((K* GM)* ((RL/ (RM+ 1e-14f64)).ln())).exp()))))+ (((GP* RY)* RZ)* RQ);
+		let SC=SB* RI;
+		let SD=EO< A;
+		let SG=if SD{
+		let SE=I/ (I- (EO* JL));
+		SE
+		}else{
+		let SF=I+ (EO* JL);
 		SF
-		}else{
-		let SG=I+ (EO* JM);
-		SG
 		};
-		let SI=RR* SH;
-		let SJ=SI/ (EQ+ SI);
-		let SK=EP< A;
-		let TN=if SK{
-		let SL=I/ (I- (EP* SJ));
+		let SH=RQ* SG;
+		let SI=SH/ (EQ+ SH);
+		let SJ=EP< A;
+		let TM=if SJ{
+		let SK=I/ (I- (EP* SI));
+		SK
+		}else{
+		let SL=I+ (EP* SI);
 		SL
-		}else{
-		let SM=I+ (EP* SJ);
-		SM
 		};
-		SY=RO;
-		TA=RR;
-		TC=RS;
-		TE=RZ;
-		TG=SA;
-		TI=SD;
-		TK=SH;
-		TM=TN;
-		}else{
-		SY=QB;
-		TA=A;
-		TC=QC;
-		TE=I;
-		TG=I;
-		TI=I;
-		TK=I;
-		TM=I;
-		}
-		SP=QH;
-		SQ=QI;
-		SR=QU;
-		SS=RE;
-		ST=RK;
-		SU=SV;
-		SW=RJ;
-		SX=SY;
-		SZ=TA;
-		TB=TC;
-		TD=TE;
-		TF=TG;
-		TH=TI;
-		TJ=TK;
+		SX=RN;
+		SZ=RQ;
+		TB=RR;
+		TD=RY;
+		TF=RZ;
+		TH=SC;
+		TJ=SG;
 		TL=TM;
 		}else{
-		SP=A;
-		SQ=A;
-		SR=A;
-		SS=A;
-		ST=A;
-		SU=I;
-		SW=I;
-		SX=QB;
+		SX=QA;
 		SZ=A;
-		TB=QC;
+		TB=QB;
 		TD=I;
 		TF=I;
 		TH=I;
 		TJ=I;
 		TL=I;
 		}
-		let TO=KJ* 4.60517018598809f64;
-		let TP=IP* KK;
+		SO=QG;
+		SP=QH;
+		SQ=QT;
+		SR=RD;
+		SS=RJ;
+		ST=SU;
+		SV=RI;
+		SW=SX;
+		SY=SZ;
+		TA=TB;
+		TC=TD;
+		TE=TF;
+		TG=TH;
+		TI=TJ;
+		TK=TL;
+		}else{
+		SO=A;
+		SP=A;
+		SQ=A;
+		SR=A;
+		SS=A;
+		ST=I;
+		SV=I;
+		SW=QA;
+		SY=A;
+		TA=QB;
+		TC=I;
+		TE=I;
+		TG=I;
+		TI=I;
+		TK=I;
+		}
+		let TN=KI* 4.60517018598809f64;
+		let TO=IO* KJ;
+		let ABJ;
 		let ABK;
 		let ABL;
-		let ABM;
+		let ABO;
 		let ABP;
-		let ABQ;
+		let ABS;
 		let ABT;
 		let ABU;
 		let ABV;
@@ -1034,2476 +1034,2474 @@ impl Instance {
 		let ABX;
 		let ABY;
 		let ABZ;
-		let ACA;
-		if QD{
-		let TQ=ST> HI;
-		let VI;
-		if TQ{
-		let TR=(GR* TL)/ TH;
-		let TS=SX+ LO;
-		let TT=((KM* SR)/ TS)/ TS;
-		let TU=TT> 1e-4f64;
-		let TZ;
-		if TU{
-		let TV=I- TT;
-		let TW=TV< HF;
-		let UA=if TW{
+		if QC{
+		let TP=SS> HH;
+		let VH;
+		if TP{
+		let TQ=(GQ* TK)/ TG;
+		let TR=SW+ LN;
+		let TS=((KL* SQ)/ TR)/ TR;
+		let TT=TS> 1e-4f64;
+		let TY;
+		if TT{
+		let TU=I- TS;
+		let TV=TU< HE;
+		let TZ=if TV{
 		I
 		}else{
-		let TX=I- (TV.sqrt());
-		TX
+		let TW=I- (TU.sqrt());
+		TW
 		};
-		TZ=UA;
+		TY=TZ;
 		}else{
-		let TY=K* TT;
-		TZ=TY;
+		let TX=K* TS;
+		TY=TX;
 		}
-		let UB=TZ* TS;
-		let UC=(GO> A)&& (GN> A);
-		let UV;
-		if UC{
-		let UD=(0.475f64* KJ)* UB;
-		let UE=SZ- (SU* UD);
-		let UF=K* (UE+ (((UE* UE)+ 1e-12f64).sqrt()));
-		let UG=((KJ* SX)- SZ)+ ((SU- I)* UD);
-		let UH=I+ ((LO* KJ)/ UG);
-		let UI=UG+ (SB* UF);
-		let UJ=((GD* UI)* GM).powf(GL);
-		let UK=I+ (UF/ UG);
-		let UL=GO* (UK.powf((-GN)));
-		let UM=((GN* ((UH- I)+ (I/ UK)))/ UG)* UL;
-		let UN=(GQ* TD)* TF;
-		let UO=UN* UF;
-		let UP=I+ (((((GL* ((UH* (I- SB))- I))/ UI)* UJ)- (UN* UH))/ UM);
-		let UQ=UP< HH;
-		let US=if UQ{
-		let UR=K* ((I+ ((X* UP).exp())).ln());
-		UR
+		let UA=TY* TR;
+		let UB=(GN> A)&& (GM> A);
+		let UU;
+		if UB{
+		let UC=(0.475f64* KI)* UA;
+		let UD=SY- (ST* UC);
+		let UE=K* (UD+ (((UD* UD)+ 1e-12f64).sqrt()));
+		let UF=((KI* SW)- SY)+ ((ST- I)* UC);
+		let UG=I+ ((LN* KI)/ UF);
+		let UH=UF+ (SA* UE);
+		let UI=((GC* UH)* GL).powf(GK);
+		let UJ=I+ (UE/ UF);
+		let UK=GN* (UJ.powf((-GM)));
+		let UL=((GM* ((UG- I)+ (I/ UJ)))/ UF)* UK;
+		let UM=(GP* TC)* TE;
+		let UN=UM* UE;
+		let UO=I+ (((((GK* ((UG* (I- SA))- I))/ UH)* UI)- (UM* UG))/ UL);
+		let UP=UO< HG;
+		let UR=if UP{
+		let UQ=K* ((I+ ((X* UO).exp())).ln());
+		UQ
 		}else{
-		UP
+		UO
 		};
-		let UT=(((-UD)* UM)* US)/ (((I+ UJ)+ UL)+ UO);
-		let UU=UB* (I+ (UT/ (I+ ((I+ (UT* UT)).sqrt()))));
-		UV=UU;
+		let US=(((-UC)* UL)* UR)/ (((I+ UI)+ UK)+ UN);
+		let UT=UA* (I+ (US/ (I+ ((I+ (US* US)).sqrt()))));
+		UU=UT;
 		}else{
-		UV=UB;
+		UU=UA;
 		}
-		let UW=((KJ* TR)* UV)* MK;
-		let UY=if BB{
-		let UX=UW/ ((I+ UW).sqrt());
-		UX
-		}else{
+		let UV=((KI* TQ)* UU)* MJ;
+		let UX=if BB{
+		let UW=UV/ ((I+ UV).sqrt());
 		UW
-		};
-		let UZ=X/ (I+ ((I+ (BI* UY)).sqrt()));
-		let VA=UZ* UY;
-		let VB=0.99f64* ((UV* UZ)* (I+ (((0.86f64* VA)* (I- (VA* UZ)))/ (I+ (((BI* VA)* VA)* UZ)))));
-		let VC=((VB* (VB- (X* TS)))* KN)/ ST;
-		let VD=VC> -0.99f64;
-		let VF=if VD{
-		VC
 		}else{
-		VE
+		UV
 		};
-		let VG=KJ* (VB- ((I+ VF).ln()));
-		VI=VG;
+		let UY=X/ (I+ ((I+ (BI* UX)).sqrt()));
+		let UZ=UY* UX;
+		let VA=0.99f64* ((UU* UY)* (I+ (((0.86f64* UZ)* (I- (UZ* UY)))/ (I+ (((BI* UZ)* UZ)* UY)))));
+		let VB=((VA* (VA- (X* TR)))* KM)/ SS;
+		let VC=VB> -0.99f64;
+		let VE=if VC{
+		VB
 		}else{
-		VI=TO;
+		VD
+		};
+		let VF=KI* (VA- ((I+ VE).ln()));
+		VH=VF;
+		}else{
+		VH=TN;
 		}
-		let VH=I+ GE;
-		let VJ=((VH.sqrt())* IP)/ VI;
-		let VK=(VJ* VJ)+ VH;
-		let VL=X* VJ;
-		let VM=(VI* VL)/ (((VK- VL).sqrt())+ ((VK+ VL).sqrt()));
-		let VN=VM* KK;
-		let VO=MO+ VN;
-		let VP=VN< KZ;
-		let VT=if VP{
-		let VQ=(-VN).exp();
-		VQ
+		let VG=I+ GD;
+		let VI=((VG.sqrt())* IO)/ VH;
+		let VJ=(VI* VI)+ VG;
+		let VK=X* VI;
+		let VL=(VH* VK)/ (((VJ- VK).sqrt())+ ((VJ+ VK).sqrt()));
+		let VM=VL* KJ;
+		let VN=MN+ VM;
+		let VO=VM< KY;
+		let VS=if VO{
+		let VP=(-VM).exp();
+		VP
 		}else{
-		let VR=VN- KZ;
-		let VS=LC/ (I+ (VR* (I+ (K* (VR* (I+ (VR* DQ)))))));
-		VS
+		let VQ=VM- KY;
+		let VR=LB/ (I+ (VQ* (I+ (K* (VQ* (I+ (VQ* DQ)))))));
+		VR
 		};
-		let VU=MV* VT;
-		let XN;
-		if MT{
-		let VV=(KO* MN)* (I+ (((KO* (I- VU))* KL)* (((MN* MN)* MU)* MK)));
-		XN=VV;
+		let VT=MU* VS;
+		let XM;
+		if MS{
+		let VU=(KN* MM)* (I+ (((KN* (I- VT))* KK)* (((MM* MM)* MT)* MJ)));
+		XM=VU;
 		}else{
-		let VW=VO+ Y;
-		let VX=SN- VW;
-		let VY=(K* ((SN+ VW)- (((VX* VX)+ W).sqrt())))- (K* (VW- (((VW* VW)+ W).sqrt())));
-		let VZ=KO- VY;
-		let WA=(-VY).exp();
-		let WB=VY* VY;
-		let WC=I/ (X+ WB);
-		let WD=WB* WC;
-		let WE=BI* ((VY* WC)* WC);
-		let WF=(((LP* WC)- (NT* WD))* WC)* WC;
-		let WG=(VZ* VZ)- (KM* (((WA+ VY)- I)- (VU* ((VY+ I)+ WD))));
-		let WH=OR> WG;
-		let WI=if WH{
-		OR
+		let VV=VN+ Y;
+		let VW=SM- VV;
+		let VX=(K* ((SM+ VV)- (((VW* VW)+ W).sqrt())))- (K* (VV- (((VV* VV)+ W).sqrt())));
+		let VY=KN- VX;
+		let VZ=(-VX).exp();
+		let WA=VX* VX;
+		let WB=I/ (X+ WA);
+		let WC=WA* WB;
+		let WD=BI* ((VX* WB)* WB);
+		let WE=(((LO* WB)- (NS* WC))* WB)* WB;
+		let WF=(VY* VY)- (KL* (((VZ+ VX)- I)- (VT* ((VX+ I)+ WC))));
+		let WG=OQ> WF;
+		let WH=if WG{
+		OQ
 		}else{
-		WG
+		WF
 		};
-		let WJ=(X* VZ)+ (KM* ((I- WA)- (VU* (I+ WE))));
-		let WK=(VO- VY)+ ((WI/ KM).ln());
-		let WL=WI+ WJ;
-		let WM=WJ* WJ;
-		let WN=WI* (I- (K* (KM* (WA- (VU* WF)))));
-		let WO=(WL* WL)+ (WK* ((K* WM)- WN));
-		let WP=VY+ (((WI* WL)* WK)/ (WO+ (((((WL/ WO)* WK)* WK)* WJ)* ((WM* DQ)- WN))));
-		let WQ=WP< HH;
+		let WI=(X* VY)+ (KL* ((I- VZ)- (VT* (I+ WD))));
+		let WJ=(VN- VX)+ ((WH/ KL).ln());
+		let WK=WH+ WI;
+		let WL=WI* WI;
+		let WM=WH* (I- (K* (KL* (VZ- (VT* WE)))));
+		let WN=(WK* WK)+ (WJ* ((K* WL)- WM));
+		let WO=VX+ (((WH* WK)* WJ)/ (WN+ (((((WK/ WN)* WJ)* WJ)* WI)* ((WL* DQ)- WM))));
+		let WP=WO< HG;
+		let XE;
+		let XG;
+		if WP{
+		let WQ=WO.exp();
+		let WR=I/ WQ;
+		let WS=VT* WQ;
+		XE=WR;
+		XG=WS;
+		}else{
+		let WT=WO> (VN- HG);
 		let XF;
 		let XH;
-		if WQ{
-		let WR=WP.exp();
-		let WS=I/ WR;
-		let WT=VU* WR;
-		XF=WS;
-		XH=WT;
+		if WT{
+		let WU=(WO- VN).exp();
+		let WV=VT/ WU;
+		XF=WV;
+		XH=WU;
 		}else{
-		let WU=WP> (VO- HH);
-		let XG;
-		let XI;
-		if WU{
-		let WV=(WP- VO).exp();
-		let WW=VU/ WV;
-		XG=WW;
-		XI=WV;
+		let WW=(VN- WO)- HG;
+		let WX=HH/ (I+ (WW* (I+ (K* (WW* (I+ (WW* DQ)))))));
+		let WY=WO- HG;
+		let WZ=HH/ (I+ (WY* (I+ (K* (WY* (I+ (WY* DQ)))))));
+		XF=WZ;
+		XH=WX;
+		}
+		XE=XF;
+		XG=XH;
+		}
+		let XA=WO* WO;
+		let XB=I/ (X+ XA);
+		let XC=XA* XB;
+		let XD=KN- WO;
+		let XI=(X* XD)+ (KL* (((I- XE)+ XG)- (VT* (I+ (BI* ((WO* XB)* XB))))));
+		let XJ=(XD* XD)- (KL* ((((XE+ WO)- I)+ XG)- (VT* ((WO+ I)+ XC))));
+		let XK=XJ/ (XI+ (((XI* XI)- (X* (XJ* (X- (KL* ((XE+ XG)- (VT* ((((LO* XB)- (NS* XC))* XB)* XB)))))))).sqrt()));
+		let XL=WO+ (X* XK);
+		XM=XL;
+		}
+		let XN=XM- PY;
+		let XO=XN< HE;
+		let XU;
+		let XW;
+		if XO{
+		let XP=SQ* VS;
+		let XQ=(X* QA)+ (KL* (((I- SR)+ XP)- (VT* (I+ SO))));
+		let XR=(KL* (I- VS))* SS;
+		let XS=X* (XR/ (XQ+ (((XQ* XQ)- (X* ((X- (KL* ((SR+ XP)- (VT* SP))))* XR))).sqrt())));
+		let XT=PY+ XS;
+		XU=XS;
+		XW=XT;
 		}else{
-		let WX=(VO- WP)- HH;
-		let WY=HI/ (I+ (WX* (I+ (K* (WX* (I+ (WX* DQ)))))));
-		let WZ=WP- HH;
-		let XA=HI/ (I+ (WZ* (I+ (K* (WZ* (I+ (WZ* DQ)))))));
-		XG=XA;
-		XI=WY;
+		XU=XN;
+		XW=XM;
 		}
-		XF=XG;
-		XH=XI;
-		}
-		let XB=WP* WP;
-		let XC=I/ (X+ XB);
-		let XD=XB* XC;
-		let XE=KO- WP;
-		let XJ=(X* XE)+ (KM* (((I- XF)+ XH)- (VU* (I+ (BI* ((WP* XC)* XC))))));
-		let XK=(XE* XE)- (KM* ((((XF+ WP)- I)+ XH)- (VU* ((WP+ I)+ XD))));
-		let XL=XK/ (XJ+ (((XJ* XJ)- (X* (XK* (X- (KM* ((XF+ XH)- (VU* ((((LP* XC)- (NT* XD))* XC)* XC)))))))).sqrt()));
-		let XM=WP+ (X* XL);
-		XN=XM;
-		}
-		let XO=XN- PZ;
-		let XP=XO< HF;
-		let XV;
-		let XX;
-		if XP{
-		let XQ=SR* VT;
-		let XR=(X* QB)+ (KM* (((I- SS)+ XQ)- (VU* (I+ SP))));
-		let XS=(KM* (I- VT))* ST;
-		let XT=X* (XS/ (XR+ (((XR* XR)- (X* ((X- (KM* ((SS+ XQ)- (VU* SQ))))* XS))).sqrt())));
-		let XU=PZ+ XT;
-		XV=XT;
-		XX=XU;
+		let XV=XU* KI;
+		let XX=XW* XW;
+		let XY=XX/ (X+ XX);
+		let XZ=XW< HG;
+		let YO;
+		let YS;
+		if XZ{
+		let YA=(-XW).exp();
+		let YB=XW< KV;
+		let YT=if YB{
+		let YC=((((MT* VT)* XW)* XW)* XW)* (I+ (1.75f64* XW));
+		YC
 		}else{
-		XV=XO;
-		XX=XN;
-		}
-		let XW=XV* KJ;
-		let XY=XX* XX;
-		let XZ=XY/ (X+ XY);
-		let YA=XX< HH;
-		let YP;
-		let YT;
-		if YA{
-		let YB=(-XX).exp();
-		let YC=XX< KW;
-		let YU=if YC{
-		let YD=((((MU* VU)* XX)* XX)* XX)* (I+ (1.75f64* XX));
+		let YD=VT* ((((I/ YA)- XW)- I)- XY);
 		YD
-		}else{
-		let YE=VU* ((((I/ YB)- XX)- I)- XZ);
-		YE
 		};
-		YP=YB;
-		YT=YU;
+		YO=YA;
+		YS=YT;
 		}else{
-		let YF=XX> (VO- HH);
-		let YN;
-		let YV;
-		if YF{
-		let YG=(XX- VO).exp();
-		let YH=VU/ YG;
-		let YI=YG- (VU* ((XX+ I)+ XZ));
-		YN=YH;
-		YV=YI;
+		let YE=XW> (VN- HG);
+		let YM;
+		let YU;
+		if YE{
+		let YF=(XW- VN).exp();
+		let YG=VT/ YF;
+		let YH=YF- (VT* ((XW+ I)+ XY));
+		YM=YG;
+		YU=YH;
 		}else{
-		let YJ=XX- HH;
-		let YK=HI/ (I+ (YJ* (I+ (K* (YJ* (I+ (YJ* DQ)))))));
-		let YL=(VO- XX)- HH;
-		let YM=(HI/ (I+ (YL* (I+ (K* (YL* (I+ (YL* DQ))))))))- (VU* ((XX+ I)+ XZ));
-		YN=YK;
-		YV=YM;
+		let YI=XW- HG;
+		let YJ=HH/ (I+ (YI* (I+ (K* (YI* (I+ (YI* DQ)))))));
+		let YK=(VN- XW)- HG;
+		let YL=(HH/ (I+ (YK* (I+ (K* (YK* (I+ (YK* DQ))))))))- (VT* ((XW+ I)+ XY));
+		YM=YJ;
+		YU=YL;
 		}
-		YP=YN;
-		YT=YV;
+		YO=YM;
+		YS=YU;
 		}
-		let YO=K* (PZ+ XX);
-		let YQ=YP* SS;
-		let YR=YQ> A;
-		let YX=if YR{
-		let YS=YQ.sqrt();
-		YS
+		let YN=K* (PY+ XW);
+		let YP=YO* SR;
+		let YQ=YP> A;
+		let YW=if YQ{
+		let YR=YP.sqrt();
+		YR
 		}else{
 		A
 		};
-		let YW=K* (ST+ YT);
-		let YY=YW+ (0.125f64* ((XV* XV)* (YX- (X* KN))));
-		let YZ=YO< KW;
+		let YV=K* (SS+ YS);
+		let YX=YV+ (0.125f64* ((XU* XU)* (YW- (X* KM))));
+		let YY=YN< KV;
+		let AAH;
+		let AAJ;
+		let AAL;
+		let AAO;
+		let AAV;
+		let AAY;
+		let ABM;
+		let ABQ;
+		if YY{
+		let YZ=YN* YN;
+		let ZA=I- (DQ* (YN* (I- (GF* YN))));
+		let ZB=K* (YZ* ZA);
+		let ZC=KK* ((YX+ ZB).sqrt());
+		let ZE=ZD> A;
+		let ZI=if ZE{
+		let ZF=I/ ((I+ (ZD* ZC)).sqrt());
+		ZF
+		}else{
+		I
+		};
+		let ZG=ZA.sqrt();
+		let ZH=MJ* (YN* ZG);
+		let ZJ=ZI+ (MJ* ((KK* ((I- (K* YN))+ (MT* YZ)))/ ZG));
+		AAH=YX;
+		AAJ=ZC;
+		AAL=ZH;
+		AAO=ZJ;
+		AAV=ZB;
+		AAY=XV;
+		ABM=XU;
+		ABQ=YN;
+		}else{
+		let ZK=(YN- I)+ YW;
+		let ZL=KK* ((YX+ ZK).sqrt());
+		let ZM=ZD> A;
+		let AAC;
+		let AAE;
+		let AAF;
 		let AAI;
 		let AAK;
-		let AAM;
-		let AAP;
-		let AAW;
 		let AAZ;
 		let ABN;
 		let ABR;
-		if YZ{
-		let ZA=YO* YO;
-		let ZB=I- (DQ* (YO* (I- (GG* YO))));
-		let ZC=K* (ZA* ZB);
-		let ZD=KL* ((YY+ ZC).sqrt());
-		let ZF=ZE> A;
-		let ZJ=if ZF{
-		let ZG=I/ ((I+ (ZE* ZD)).sqrt());
-		ZG
+		if ZM{
+		let ZN=I- YW;
+		let ZO=I/ ((I+ (ZD* ZL)).sqrt());
+		let ZP=ZO/ (ZO+ I);
+		let ZQ=ZD* (((ZP* ZP)* KL)* YX);
+		let ZR=(X* (ZL- ZQ))+ (KL* (ZN+ YX));
+		let ZS=ZQ* (ZQ- (X* ZL));
+		let ZT=(ZS* ZR)/ ((ZR* ZR)- ((I- (K* (KL* (YW+ YX))))* ZS));
+		let ZU=YN+ ZT;
+		let ZV=ZT.exp();
+		let ZW=YW/ ZV;
+		let ZX=YX* ZV;
+		let ZY=(ZU- I)+ ZW;
+		let ZZ=KK* ((ZX+ ZY).sqrt());
+		let AAA=((XU* ZV)* ((ZN+ (X* (ZL* KM)))+ YV))/ (((I- ZW)+ (X* ((ZZ* ZO)* KM)))+ (ZV* YV));
+		let AAB=AAA* KI;
+		AAC=ZY;
+		AAE=ZO;
+		AAF=ZW;
+		AAI=ZX;
+		AAK=ZZ;
+		AAZ=AAB;
+		ABN=AAA;
+		ABR=ZU;
 		}else{
-		I
-		};
-		let ZH=ZB.sqrt();
-		let ZI=MK* (YO* ZH);
-		let ZK=ZJ+ (MK* ((KL* ((I- (K* YO))+ (MU* ZA)))/ ZH));
-		AAI=YY;
-		AAK=ZD;
-		AAM=ZI;
-		AAP=ZK;
-		AAW=ZC;
-		AAZ=XW;
-		ABN=XV;
-		ABR=YO;
-		}else{
-		let ZL=(YO- I)+ YX;
-		let ZM=KL* ((YY+ ZL).sqrt());
-		let ZN=ZE> A;
-		let AAD;
-		let AAF;
-		let AAG;
-		let AAJ;
-		let AAL;
-		let ABA;
-		let ABO;
-		let ABS;
-		if ZN{
-		let ZO=I- YX;
-		let ZP=I/ ((I+ (ZE* ZM)).sqrt());
-		let ZQ=ZP/ (ZP+ I);
-		let ZR=ZE* (((ZQ* ZQ)* KM)* YY);
-		let ZS=(X* (ZM- ZR))+ (KM* (ZO+ YY));
-		let ZT=ZR* (ZR- (X* ZM));
-		let ZU=(ZT* ZS)/ ((ZS* ZS)- ((I- (K* (KM* (YX+ YY))))* ZT));
-		let ZV=YO+ ZU;
-		let ZW=ZU.exp();
-		let ZX=YX/ ZW;
-		let ZY=YY* ZW;
-		let ZZ=(ZV- I)+ ZX;
-		let AAA=KL* ((ZY+ ZZ).sqrt());
-		let AAB=((XV* ZW)* ((ZO+ (X* (ZM* KN)))+ YW))/ (((I- ZX)+ (X* ((AAA* ZP)* KN)))+ (ZW* YW));
-		let AAC=AAB* KJ;
-		AAD=ZZ;
-		AAF=ZP;
-		AAG=ZX;
-		AAJ=ZY;
-		AAL=AAA;
-		ABA=AAC;
-		ABO=AAB;
-		ABS=ZV;
-		}else{
-		AAD=ZL;
-		AAF=I;
-		AAG=YX;
-		AAJ=YY;
-		AAL=ZM;
-		ABA=XW;
-		ABO=XV;
-		ABS=YO;
+		AAC=ZK;
+		AAE=I;
+		AAF=YW;
+		AAI=YX;
+		AAK=ZL;
+		AAZ=XV;
+		ABN=XU;
+		ABR=YN;
 		}
-		let AAE=AAD.sqrt();
-		let AAH=AAF+ (K* ((KL* (I- AAG))/ AAE));
-		AAI=AAJ;
-		AAK=AAL;
-		AAM=AAE;
-		AAP=AAH;
-		AAW=AAD;
-		AAZ=ABA;
-		ABN=ABO;
-		ABR=ABS;
-		}
-		let AAN=KL* AAM;
-		let AAO=KJ* ((KM* AAI)/ (AAK+ AAN));
-		let AAQ=AAO+ (KJ* AAP);
-		let AAR=AAN* KJ;
-		let AAS=EN< A;
-		let AAV=if AAS{
-		let AAT=I- (EN* AAO);
-		AAT
-		}else{
-		let AAU=I/ (I+ (EN* AAO));
-		AAU
-		};
-		let AAX=(I+ ((((GD* (AAR+ (SB* AAO)))* GM).powf(GL))+ (GO* (((K* GN)* ((AAW/ ((AAW+ AAI)+ 1e-14f64)).ln())).exp()))))+ (((GQ* TD)* AAV)* AAO);
-		let AAY=AAX* SW;
-		let ABB=((I+ ((IP- AAZ)* GF))/ (I+ ((VM- AAZ)* GF))).ln();
-		let ABC=AAO* TJ;
-		let ABD=ABC/ (EQ+ ABC);
-		let ABE=EP< A;
-		let ABH=if ABE{
-		let ABF=I/ (I- (EP* ABD));
-		ABF
-		}else{
-		let ABG=I+ (EP* ABD);
-		ABG
-		};
-		let ABI=GR* ABH;
-		let ABJ=AAK* KJ;
-		ABK=VM;
-		ABL=VN;
+		let AAD=AAC.sqrt();
+		let AAG=AAE+ (K* ((KK* (I- AAF))/ AAD));
+		AAH=AAI;
+		AAJ=AAK;
+		AAL=AAD;
+		AAO=AAG;
+		AAV=AAC;
+		AAY=AAZ;
 		ABM=ABN;
-		ABP=AAZ;
 		ABQ=ABR;
-		ABT=AAP;
-		ABU=AAO;
-		ABV=AAQ;
-		ABW=AAR;
-		ABX=AAY;
-		ABY=ABB;
-		ABZ=ABI;
-		ACA=ABJ;
-		}else{
-		ABK=IP;
-		ABL=TP;
-		ABM=A;
-		ABP=A;
-		ABQ=PZ;
-		ABT=I;
-		ABU=SZ;
-		ABV=A;
-		ABW=TB;
-		ABX=I;
-		ABY=A;
-		ABZ=GR;
-		ACA=QC;
 		}
-		let AGP;
-		let ALF;
-		let BNV;
-		if QD{
-		let ACB=(KJ* ABT)/ ABV;
-		let ACC=((((staged[432]+ (staged[431]/ ABV))* ABU)/ ABV)* ABY)+ ((((staged[433]* ABW)* ACB)* ACB)* ((I+ (IT* GF)).ln()));
-		let ACD=ABX* (I/ ((I+ ACC)+ (ACC* ACC)));
-		let ACE=ABZ/ ACD;
-		let ACF=((ACE* ACE)* ABP)* ABP;
-		let ACH=if BB{
-		let ACG=ACF/ (I+ (ACE* ABP));
-		ACG
+		let AAM=KK* AAL;
+		let AAN=KI* ((KL* AAH)/ (AAJ+ AAM));
+		let AAP=AAN+ (KI* AAO);
+		let AAQ=AAM* KI;
+		let AAR=EN< A;
+		let AAU=if AAR{
+		let AAS=I- (EN* AAN);
+		AAS
 		}else{
-		ACF
+		let AAT=I/ (I+ (EN* AAN));
+		AAT
 		};
-		let ACI=I/ (K* (ACD* (I+ ((I+ (X* ACH)).sqrt()))));
-		let ACJ=ACD* ACI;
-		let ACK=(ACJ* ABV)/ (ABT* (I+ (K* ((ACH* ACJ)* ACJ))));
-		let ACL=((GK* ABV)* ABP)* ACI;
-		AGP=ACK;
-		ALF=ACL;
-		BNV=ACI;
+		let AAW=(I+ ((((GC* (AAQ+ (SA* AAN)))* GL).powf(GK))+ (GN* (((K* GM)* ((AAV/ ((AAV+ AAH)+ 1e-14f64)).ln())).exp()))))+ (((GP* TC)* AAU)* AAN);
+		let AAX=AAW* SV;
+		let ABA=((I+ ((IO- AAY)* GE))/ (I+ ((VL- AAY)* GE))).ln();
+		let ABB=AAN* TI;
+		let ABC=ABB/ (EQ+ ABB);
+		let ABD=EP< A;
+		let ABG=if ABD{
+		let ABE=I/ (I- (EP* ABC));
+		ABE
 		}else{
-		AGP=I;
-		ALF=A;
-		BNV=I;
-		}
-		let ACX;
-		let ADJ;
-		let ADS;
-		let AEE;
-		if ACP{
-		let ACQ=K* (IK+ (((IK* IK)+ staged[440]).sqrt()));
-		let ACR=(((-ACQ)- staged[441])+ (staged[444]* (((ACQ+ staged[442])+ staged[443]).sqrt())))+ staged[445];
-		let ACS=K* (IL+ (((IL* IL)+ staged[446]).sqrt()));
-		let ACT=(((-ACS)- staged[447])+ (staged[450]* (((ACS+ staged[448])+ staged[449]).sqrt())))+ staged[451];
-		let ACV=ACU* (IK+ ACR);
-		let ACW=ACU* (IL+ ACT);
-		ACX=ACV;
-		ADJ=ACR;
-		ADS=ACW;
-		AEE=ACT;
+		let ABF=I+ (EP* ABC);
+		ABF
+		};
+		let ABH=GQ* ABG;
+		let ABI=AAJ* KI;
+		ABJ=VL;
+		ABK=VM;
+		ABL=ABM;
+		ABO=AAY;
+		ABP=ABQ;
+		ABS=AAO;
+		ABT=AAN;
+		ABU=AAP;
+		ABV=AAQ;
+		ABW=AAX;
+		ABX=ABA;
+		ABY=ABH;
+		ABZ=ABI;
 		}else{
-		ACX=A;
-		ADJ=A;
-		ADS=A;
-		AEE=A;
+		ABJ=IO;
+		ABK=TO;
+		ABL=A;
+		ABO=A;
+		ABP=PY;
+		ABS=I;
+		ABT=SY;
+		ABU=A;
+		ABV=TA;
+		ABW=I;
+		ABX=A;
+		ABY=GQ;
+		ABZ=QB;
 		}
+		let AGO;
+		let ALE;
+		let BNT;
+		if QC{
+		let ACA=(KI* ABS)/ ABU;
+		let ACB=((((staged[432]+ (staged[431]/ ABU))* ABT)/ ABU)* ABX)+ ((((staged[433]* ABV)* ACA)* ACA)* ((I+ (IS* GE)).ln()));
+		let ACC=ABW* (I/ ((I+ ACB)+ (ACB* ACB)));
+		let ACD=ABY/ ACC;
+		let ACE=((ACD* ACD)* ABO)* ABO;
+		let ACG=if BB{
+		let ACF=ACE/ (I+ (ACD* ABO));
+		ACF
+		}else{
+		ACE
+		};
+		let ACH=I/ (K* (ACC* (I+ ((I+ (X* ACG)).sqrt()))));
+		let ACI=ACC* ACH;
+		let ACJ=(ACI* ABU)/ (ABS* (I+ (K* ((ACG* ACI)* ACI))));
+		let ACK=((GJ* ABU)* ABO)* ACH;
+		AGO=ACJ;
+		ALE=ACK;
+		BNT=ACH;
+		}else{
+		AGO=I;
+		ALE=A;
+		BNT=I;
+		}
+		let ACW;
+		let ADI;
+		let ADR;
+		let AED;
+		if ACO{
+		let ACP=K* (IJ+ (((IJ* IJ)+ staged[440]).sqrt()));
+		let ACQ=(((-ACP)- staged[441])+ (staged[444]* (((ACP+ staged[442])+ staged[443]).sqrt())))+ staged[445];
+		let ACR=K* (IK+ (((IK* IK)+ staged[446]).sqrt()));
+		let ACS=(((-ACR)- staged[447])+ (staged[450]* (((ACR+ staged[448])+ staged[449]).sqrt())))+ staged[451];
+		let ACU=ACT* (IJ+ ACQ);
+		let ACV=ACT* (IK+ ACS);
+		ACW=ACU;
+		ADI=ACQ;
+		ADR=ACV;
+		AED=ACS;
+		}else{
+		ACW=A;
+		ADI=A;
+		ADR=A;
+		AED=A;
+		}
+		let BMZ;
 		let BNB;
 		let BND;
 		let BNF;
-		let BNH;
+		if ACL{
+		let BNE;
 		if ACM{
+		let ACX=(((ACW* ACW)+ CF).sqrt())* GY;
+		let ADB=if HB{
+		let ACZ=ACX- ACY;
+		let ADA=K* ((ACX+ ACY)- (((ACZ* ACZ)+ CF).sqrt()));
+		ADA
+		}else{
+		ACX
+		};
+		let ADC=staged[457]* (-1.5f64+ (ADB* (staged[456]+ (staged[455]* ADB))));
+		let ADD=ADC> A;
+		let ADO;
+		if ADD{
+		let ADE=I+ (ADC* (I+ (K* (ADC* (I+ (ADC* DQ))))));
+		ADO=ADE;
+		}else{
+		let ADF=ADC> -230.25850929940458f64;
+		let ADP=if ADF{
+		let ADG=ADC.exp();
+		ADG
+		}else{
+		let ADH=HH/ (I+ ((-230.25850929940458f64- ADC)* (I+ (K* ((-230.25850929940458f64- ADC)* (I+ ((-230.25850929940458f64- ADC)* DQ)))))));
+		ADH
+		};
+		ADO=ADP;
+		}
+		let ADJ=Y+ ADI;
+		let ADK=30f64* ID;
+		let ADL=ADJ+ ADK;
+		let ADM=0.6451612903225806f64* (ADL- (((ADL* ADL)- ((3.1f64* ADJ)* ADK)).sqrt()));
+		let ADN=staged[459]+ ADM;
+		let ADQ=staged[461]* (ADO* (0.5405405405405405f64* (ADN+ (((ADN* ADN)- (staged[460]* ADM)).sqrt()))));
+		BNE=ADQ;
+		}else{
+		BNE=A;
+		}
 		let BNG;
 		if ACN{
-		let ACY=(((ACX* ACX)+ CF).sqrt())* GZ;
-		let ADC=if HC{
-		let ADA=ACY- ACZ;
-		let ADB=K* ((ACY+ ACZ)- (((ADA* ADA)+ CF).sqrt()));
-		ADB
+		let ADS=(((ADR* ADR)+ CF).sqrt())* GY;
+		let ADW=if HC{
+		let ADU=ADS- ADT;
+		let ADV=K* ((ADS+ ADT)- (((ADU* ADU)+ CF).sqrt()));
+		ADV
 		}else{
-		ACY
+		ADS
 		};
-		let ADD=staged[457]* (-1.5f64+ (ADC* (staged[456]+ (staged[455]* ADC))));
-		let ADE=ADD> A;
-		let ADP;
-		if ADE{
-		let ADF=I+ (ADD* (I+ (K* (ADD* (I+ (ADD* DQ))))));
-		ADP=ADF;
+		let ADX=staged[464]* (-1.5f64+ (ADW* (staged[463]+ (staged[462]* ADW))));
+		let ADY=ADX> A;
+		let AEJ;
+		if ADY{
+		let ADZ=I+ (ADX* (I+ (K* (ADX* (I+ (ADX* DQ))))));
+		AEJ=ADZ;
 		}else{
-		let ADG=ADD> -230.25850929940458f64;
-		let ADQ=if ADG{
-		let ADH=ADD.exp();
-		ADH
+		let AEA=ADX> -230.25850929940458f64;
+		let AEK=if AEA{
+		let AEB=ADX.exp();
+		AEB
 		}else{
-		let ADI=HI/ (I+ ((-230.25850929940458f64- ADD)* (I+ (K* ((-230.25850929940458f64- ADD)* (I+ ((-230.25850929940458f64- ADD)* DQ)))))));
-		ADI
+		let AEC=HH/ (I+ ((-230.25850929940458f64- ADX)* (I+ (K* ((-230.25850929940458f64- ADX)* (I+ ((-230.25850929940458f64- ADX)* DQ)))))));
+		AEC
 		};
-		ADP=ADQ;
+		AEJ=AEK;
 		}
-		let ADK=Y+ ADJ;
-		let ADL=30f64* IE;
-		let ADM=ADK+ ADL;
-		let ADN=0.6451612903225806f64* (ADM- (((ADM* ADM)- ((3.1f64* ADK)* ADL)).sqrt()));
-		let ADO=staged[459]+ ADN;
-		let ADR=staged[461]* (ADP* (0.5405405405405405f64* (ADO+ (((ADO* ADO)- (staged[460]* ADN)).sqrt()))));
-		BNG=ADR;
+		let AEE=Y+ AED;
+		let AEF=30f64* II;
+		let AEG=AEE+ AEF;
+		let AEH=0.6451612903225806f64* (AEG- (((AEG* AEG)- ((3.1f64* AEE)* AEF)).sqrt()));
+		let AEI=staged[465]+ AEH;
+		let AEL=staged[467]* (AEJ* (0.5405405405405405f64* (AEI+ (((AEI* AEI)- (staged[466]* AEH)).sqrt()))));
+		BNG=AEL;
 		}else{
 		BNG=A;
 		}
-		let BNI;
-		if ACO{
-		let ADT=(((ADS* ADS)+ CF).sqrt())* GZ;
-		let ADX=if HD{
-		let ADV=ADT- ADU;
-		let ADW=K* ((ADT+ ADU)- (((ADV* ADV)+ CF).sqrt()));
-		ADW
-		}else{
-		ADT
-		};
-		let ADY=staged[464]* (-1.5f64+ (ADX* (staged[463]+ (staged[462]* ADX))));
-		let ADZ=ADY> A;
-		let AEK;
-		if ADZ{
-		let AEA=I+ (ADY* (I+ (K* (ADY* (I+ (ADY* DQ))))));
-		AEK=AEA;
-		}else{
-		let AEB=ADY> -230.25850929940458f64;
-		let AEL=if AEB{
-		let AEC=ADY.exp();
-		AEC
-		}else{
-		let AED=HI/ (I+ ((-230.25850929940458f64- ADY)* (I+ (K* ((-230.25850929940458f64- ADY)* (I+ ((-230.25850929940458f64- ADY)* DQ)))))));
-		AED
-		};
-		AEK=AEL;
-		}
-		let AEF=Y+ AEE;
-		let AEG=30f64* IJ;
-		let AEH=AEF+ AEG;
-		let AEI=0.6451612903225806f64* (AEH- (((AEH* AEH)- ((3.1f64* AEF)* AEG)).sqrt()));
-		let AEJ=staged[465]+ AEI;
-		let AEM=staged[467]* (AEK* (0.5405405405405405f64* (AEJ+ (((AEJ* AEJ)- (staged[466]* AEI)).sqrt()))));
-		BNI=AEM;
-		}else{
-		BNI=A;
-		}
+		let BNA;
 		let BNC;
-		let BNE;
-		if AEN{
-		let AEO=KO<= A;
-		let AEU=if AEO{
-		let AEP=I+ GE;
-		let AEQ=((AEP.sqrt())* IP)/ TO;
-		let AER=(AEQ* AEQ)+ AEP;
-		let AES=X* AEQ;
-		let AET=((TO* KK)* AES)/ (((AER- AES).sqrt())+ ((AER+ AES).sqrt()));
-		AET
+		if AEM{
+		let AEN=KN<= A;
+		let AET=if AEN{
+		let AEO=I+ GD;
+		let AEP=((AEO.sqrt())* IO)/ TN;
+		let AEQ=(AEP* AEP)+ AEO;
+		let AER=X* AEP;
+		let AES=((TN* KJ)* AER)/ (((AEQ- AER).sqrt())+ ((AEQ+ AER).sqrt()));
+		AES
 		}else{
-		ABL
+		ABK
 		};
-		let AEV=ABM- AEU;
-		let AEW=AEV> -230.25850929940458f64;
-		let AEZ=if AEW{
-		let AEX=AEV.exp();
+		let AEU=ABL- AET;
+		let AEV=AEU> -230.25850929940458f64;
+		let AEY=if AEV{
+		let AEW=AEU.exp();
+		AEW
+		}else{
+		let AEX=HH/ (I+ ((-230.25850929940458f64- AEU)* (I+ (K* ((-230.25850929940458f64- AEU)* (I+ ((-230.25850929940458f64- AEU)* DQ)))))));
 		AEX
-		}else{
-		let AEY=HI/ (I+ ((-230.25850929940458f64- AEV)* (I+ (K* ((-230.25850929940458f64- AEV)* (I+ ((-230.25850929940458f64- AEV)* DQ)))))));
-		AEY
 		};
-		let AFA=JI+ (KJ* ((K* ABM)- ((K* (I+ AEZ)).ln())));
-		let AFB=ACA+ (staged[458]* KJ);
-		let AFC=A- AFB;
-		let AFD=K* ((A+ AFB)- (((AFC* AFC)+ 0.01f64).sqrt()));
-		let AFE=(((ACA* ACA)+ CF).sqrt())* GZ;
-		let AGC=if HB{
-		let AFG=AFE- AFF;
-		let AFH=K* ((AFE+ AFF)- (((AFG* AFG)+ CF).sqrt()));
-		AFH
+		let AEZ=JH+ (KI* ((K* ABL)- ((K* (I+ AEY)).ln())));
+		let AFA=ABZ+ (staged[458]* KI);
+		let AFB=A- AFA;
+		let AFC=K* ((A+ AFA)- (((AFB* AFB)+ 0.01f64).sqrt()));
+		let AFD=(((ABZ* ABZ)+ CF).sqrt())* GY;
+		let AGB=if HA{
+		let AFF=AFD- AFE;
+		let AFG=K* ((AFD+ AFE)- (((AFF* AFF)+ CF).sqrt()));
+		AFG
 		}else{
-		AFE
+		AFD
 		};
-		let AFI=ABQ+ (((AFD- staged[469])- AFA)* KK);
-		let AFJ=(AFI.abs())< HH;
-		let AFX;
-		if AFJ{
-		let AFK=AFI.exp();
-		AFX=AFK;
+		let AFH=ABP+ (((AFC- staged[469])- AEZ)* KJ);
+		let AFI=(AFH.abs())< HG;
+		let AFW;
+		if AFI{
+		let AFJ=AFH.exp();
+		AFW=AFJ;
 		}else{
-		let AFL=AFI< A;
-		let AFY=if AFL{
-		let AFM=HI/ (I+ ((-230.25850929940458f64- AFI)* (I+ (K* ((-230.25850929940458f64- AFI)* (I+ ((-230.25850929940458f64- AFI)* DQ)))))));
-		AFM
+		let AFK=AFH< A;
+		let AFX=if AFK{
+		let AFL=HH/ (I+ ((-230.25850929940458f64- AFH)* (I+ (K* ((-230.25850929940458f64- AFH)* (I+ ((-230.25850929940458f64- AFH)* DQ)))))));
+		AFL
 		}else{
-		let AFN=AFI- HH;
-		let AFO=HJ* (I+ (AFN* (I+ (K* (AFN* (I+ (AFN* DQ)))))));
-		AFO
+		let AFM=AFH- HG;
+		let AFN=HI* (I+ (AFM* (I+ (K* (AFM* (I+ (AFM* DQ)))))));
+		AFN
 		};
-		AFX=AFY;
+		AFW=AFX;
 		}
-		let AFQ=(-((AFP+ JI)- AFA))* KK;
-		let AFR=(AFQ.abs())< HH;
-		let AFZ;
-		if AFR{
-		let AFS=AFQ.exp();
-		AFZ=AFS;
+		let AFP=(-((AFO+ JH)- AEZ))* KJ;
+		let AFQ=(AFP.abs())< HG;
+		let AFY;
+		if AFQ{
+		let AFR=AFP.exp();
+		AFY=AFR;
 		}else{
-		let AFT=AFQ< A;
-		let AGA=if AFT{
-		let AFU=HI/ (I+ ((-230.25850929940458f64- AFQ)* (I+ (K* ((-230.25850929940458f64- AFQ)* (I+ ((-230.25850929940458f64- AFQ)* DQ)))))));
-		AFU
+		let AFS=AFP< A;
+		let AFZ=if AFS{
+		let AFT=HH/ (I+ ((-230.25850929940458f64- AFP)* (I+ (K* ((-230.25850929940458f64- AFP)* (I+ ((-230.25850929940458f64- AFP)* DQ)))))));
+		AFT
 		}else{
-		let AFV=AFQ- HH;
-		let AFW=HJ* (I+ (AFV* (I+ (K* (AFV* (I+ (AFV* DQ)))))));
-		AFW
+		let AFU=AFP- HG;
+		let AFV=HI* (I+ (AFU* (I+ (K* (AFU* (I+ (AFU* DQ)))))));
+		AFV
 		};
-		AFZ=AGA;
+		AFY=AFZ;
 		}
-		let AGB=AFX* AFZ;
-		let AGD=HA* (-1.5f64+ (AGC* (ES+ (ET* AGC))));
-		let AGE=AGD> A;
-		let AGJ;
-		if AGE{
-		let AGF=I+ (AGD* (I+ (K* (AGD* (I+ (AGD* DQ))))));
-		AGJ=AGF;
+		let AGA=AFW* AFY;
+		let AGC=GZ* (-1.5f64+ (AGB* (ES+ (ET* AGB))));
+		let AGD=AGC> A;
+		let AGI;
+		if AGD{
+		let AGE=I+ (AGC* (I+ (K* (AGC* (I+ (AGC* DQ))))));
+		AGI=AGE;
 		}else{
-		let AGG=AGD> -230.25850929940458f64;
-		let AGK=if AGG{
-		let AGH=AGD.exp();
+		let AGF=AGC> -230.25850929940458f64;
+		let AGJ=if AGF{
+		let AGG=AGC.exp();
+		AGG
+		}else{
+		let AGH=HH/ (I+ ((-230.25850929940458f64- AGC)* (I+ (K* ((-230.25850929940458f64- AGC)* (I+ ((-230.25850929940458f64- AGC)* DQ)))))));
 		AGH
-		}else{
-		let AGI=HI/ (I+ ((-230.25850929940458f64- AGD)* (I+ (K* ((-230.25850929940458f64- AGD)* (I+ ((-230.25850929940458f64- AGD)* DQ)))))));
-		AGI
 		};
-		AGJ=AGK;
+		AGI=AGJ;
 		}
-		let AGL=staged[473]* (AGJ* (((I+ AFX)/ (I+ AGB)).ln()));
-		let AGM=AEO|| (staged[474]!=0.0);
+		let AGK=staged[473]* (AGI* (((I+ AFW)/ (I+ AGA)).ln()));
+		let AGL=AEN|| (staged[474]!=0.0);
+		let AHM;
+		let AHO;
+		if AGL{
+		AHM=I;
+		AHO=K;
+		}else{
+		let AGM=staged[475]/ ((ES+ ((X* ET)* AGB))* GZ);
+		let AGN=K* (ABO/ AGM);
+		let AGP=AGM/ AGO;
+		let AGQ=I- AGP;
+		let AGR=(AGP* AGQ)* K;
+		let AGS=K- (Y* AGR);
+		let AGT=AGN< BH;
 		let AHN;
 		let AHP;
-		if AGM{
-		AHN=I;
-		AHP=K;
+		if AGT{
+		let AGU=AGN* AGN;
+		let AGV=I+ (AGU* ((MT+ (AGP* DQ))+ (MT* (AGU* (0.05f64+ (HJ* AGP))))));
+		let AGW=(K* AGV)- (MT* (AGN* (I+ (AGU* ((0.4f64* (AGR+ GF))+ (0.0285714285714f64* (AGU* (0.125f64+ AGR))))))));
+		AHN=AGV;
+		AHP=AGW;
 		}else{
-		let AGN=staged[475]/ ((ES+ ((X* ET)* AGC))* HA);
-		let AGO=K* (ABP/ AGN);
-		let AGQ=AGN/ AGP;
-		let AGR=I- AGQ;
-		let AGS=(AGQ* AGR)* K;
-		let AGT=K- (Y* AGS);
-		let AGU=AGO< BH;
-		let AHO;
-		let AHQ;
-		if AGU{
-		let AGV=AGO* AGO;
-		let AGW=I+ (AGV* ((MU+ (AGQ* DQ))+ (MU* (AGV* (0.05f64+ (HK* AGQ))))));
-		let AGX=(K* AGW)- (MU* (AGO* (I+ (AGV* ((0.4f64* (AGS+ GG))+ (0.0285714285714f64* (AGV* (0.125f64+ AGS))))))));
-		AHO=AGW;
-		AHQ=AGX;
+		let AGX=I/ AGN;
+		let AGY=(AGN.abs())< HG;
+		let AHE;
+		if AGY{
+		let AGZ=AGN.exp();
+		AHE=AGZ;
 		}else{
-		let AGY=I/ AGO;
-		let AGZ=(AGO.abs())< HH;
-		let AHF;
-		if AGZ{
-		let AHA=AGO.exp();
-		AHF=AHA;
+		let AHA=AGN< A;
+		let AHF=if AHA{
+		let AHB=HH/ (I+ ((-230.25850929940458f64- AGN)* (I+ (K* ((-230.25850929940458f64- AGN)* (I+ ((-230.25850929940458f64- AGN)* DQ)))))));
+		AHB
 		}else{
-		let AHB=AGO< A;
-		let AHG=if AHB{
-		let AHC=HI/ (I+ ((-230.25850929940458f64- AGO)* (I+ (K* ((-230.25850929940458f64- AGO)* (I+ ((-230.25850929940458f64- AGO)* DQ)))))));
-		AHC
-		}else{
-		let AHD=AGO- HH;
-		let AHE=HJ* (I+ (AHD* (I+ (K* (AHD* (I+ (AHD* DQ)))))));
-		AHE
+		let AHC=AGN- HG;
+		let AHD=HI* (I+ (AHC* (I+ (K* (AHC* (I+ (AHC* DQ)))))));
+		AHD
 		};
-		AHF=AHG;
+		AHE=AHF;
 		}
-		let AHH=I/ AHF;
-		let AHI=AHF- AHH;
-		let AHJ=AHF+ AHH;
-		let AHK=K* (((AGR* AHI)* AGY)+ (AGQ* AHJ));
-		let AHL=K* ((AHK- (AHI* (AGS- ((AGT* AGY)* AGY))))- ((AGT* AHJ)* AGY));
-		AHO=AHK;
-		AHQ=AHL;
+		let AHG=I/ AHE;
+		let AHH=AHE- AHG;
+		let AHI=AHE+ AHG;
+		let AHJ=K* (((AGQ* AHH)* AGX)+ (AGP* AHI));
+		let AHK=K* ((AHJ- (AHH* (AGR- ((AGS* AGX)* AGX))))- ((AGS* AHI)* AGX));
+		AHN=AHJ;
+		AHP=AHK;
 		}
-		AHN=AHO;
-		AHP=AHQ;
+		AHM=AHN;
+		AHO=AHP;
 		}
-		let AHM=K* (I+ (KO/ (((KO* KO)+ CF).sqrt())));
-		let AHR=(AGL* AHP)* AHM;
-		let AHS=((AGL* AHN)* AHM)- AHR;
-		BNC=AHS;
-		BNE=AHR;
+		let AHL=K* (I+ (KN/ (((KN* KN)+ CF).sqrt())));
+		let AHQ=(AGK* AHO)* AHL;
+		let AHR=((AGK* AHM)* AHL)- AHQ;
+		BNA=AHR;
+		BNC=AHQ;
 		}else{
+		BNA=A;
 		BNC=A;
-		BNE=A;
 		}
+		BMZ=BNA;
 		BNB=BNC;
 		BND=BNE;
 		BNF=BNG;
-		BNH=BNI;
 		}else{
+		BMZ=A;
 		BNB=A;
 		BND=A;
 		BNF=A;
-		BNH=A;
 		}
-		let ALG;
+		let ALF;
+		let BQQ;
 		let BQS;
-		let BQU;
-		let BQZ;
-		let BRC;
-		let BRD;
-		if GV{
-		let AHT=(K* (IU- ((IW+ staged[484]).sqrt())))+ staged[485];
-		let AHU=(IQ- (K* ((AHT+ A)- (((AHT* AHT)+ staged[486]).sqrt()))))+ staged[487];
-		let AHV=AHU+ JL;
-		let AHW=staged[491]* (I+ ((staged[489]* (I+ (staged[488]* IT)))* (I+ (staged[490]* AHV))));
-		let AHX=I/ AHW;
-		let AHY=AHX* ((IG+ ((staged[493]* (KP/ (I+ ((I+ (staged[492]* IT)).sqrt()))))* (I+ (staged[494]* AHV))))- staged[495]);
-		let AHZ=AHX* staged[496];
-		let AIB=X* (((AHZ/ AIA)+ (AHZ.sqrt())).ln());
-		let AIC=AHX* AHU;
-		let AID=AHZ+ AIC;
-		let AIE=AID.sqrt();
-		let AIF=I+ (AIA/ (X* AIE));
-		let AIG=I/ AIF;
-		let AIH=AHY- ((AID+ (AIA* AIE))+ AIB);
-		let AII=AIH> -12f64;
-		let AJB;
-		if AII{
-		let AIK=(AIH+ AIJ)- I;
-		let AIL=(AIH- (AIF* ((K* (AIK+ (((AIK* AIK)+ EJ).sqrt()))).ln())))+ AIJ;
-		let AIM=K* (AIL+ (((AIL* AIL)+ X).sqrt()));
-		let AIN=AIH- AIM;
-		let AIO=AIN< HH;
-		let AIT=if AIO{
-		let AIP=AIN.exp();
-		AIP
+		let BQX;
+		let BRA;
+		let BRB;
+		if GU{
+		let AHS=(K* (IT- ((IV+ staged[484]).sqrt())))+ staged[485];
+		let AHT=(IP- (K* ((AHS+ A)- (((AHS* AHS)+ staged[486]).sqrt()))))+ staged[487];
+		let AHU=AHT+ JK;
+		let AHV=staged[491]* (I+ ((staged[489]* (I+ (staged[488]* IS)))* (I+ (staged[490]* AHU))));
+		let AHW=I/ AHV;
+		let AHX=AHW* ((IF+ ((staged[493]* (KO/ (I+ ((I+ (staged[492]* IS)).sqrt()))))* (I+ (staged[494]* AHU))))- staged[495]);
+		let AHY=AHW* staged[496];
+		let AIA=X* (((AHY/ AHZ)+ (AHY.sqrt())).ln());
+		let AIB=AHW* AHT;
+		let AIC=AHY+ AIB;
+		let AID=AIC.sqrt();
+		let AIE=I+ (AHZ/ (X* AID));
+		let AIF=I/ AIE;
+		let AIG=AHX- ((AIC+ (AHZ* AID))+ AIA);
+		let AIH=AIG> -12f64;
+		let AJA;
+		if AIH{
+		let AIJ=(AIG+ AII)- I;
+		let AIK=(AIG- (AIE* ((K* (AIJ+ (((AIJ* AIJ)+ EJ).sqrt()))).ln())))+ AII;
+		let AIL=K* (AIK+ (((AIK* AIK)+ X).sqrt()));
+		let AIM=AIG- AIL;
+		let AIN=AIM< HG;
+		let AIS=if AIN{
+		let AIO=AIM.exp();
+		AIO
 		}else{
-		let AIQ=AIN- HH;
-		let AIR=HJ* (I+ (AIQ* (I+ (K* (AIQ* (I+ (AIQ* DQ)))))));
-		AIR
+		let AIP=AIM- HG;
+		let AIQ=HI* (I+ (AIP* (I+ (K* (AIP* (I+ (AIP* DQ)))))));
+		AIQ
 		};
-		let AIU=(AIS* AIT).powf(AIG);
-		let AIV=AIM- (AIF* ((((((AIF* AIF)+ (((X* (AIM+ AIF))- AIU)* AIU)).sqrt())- AIF)/ AIU)- I));
-		AJB=AIV;
+		let AIT=(AIR* AIS).powf(AIF);
+		let AIU=AIL- (AIE* ((((((AIE* AIE)+ (((X* (AIL+ AIE))- AIT)* AIT)).sqrt())- AIE)/ AIT)- I));
+		AJA=AIU;
 		}else{
-		let AIW=AIG* (AIH+ AIJ);
-		let AIX=AIW> -230.25850929940458f64;
-		let AJC=if AIX{
-		let AIY=AIW.exp();
+		let AIV=AIF* (AIG+ AII);
+		let AIW=AIV> -230.25850929940458f64;
+		let AJB=if AIW{
+		let AIX=AIV.exp();
+		AIX
+		}else{
+		let AIY=HH/ (I+ ((-230.25850929940458f64- AIV)* (I+ (K* ((-230.25850929940458f64- AIV)* (I+ ((-230.25850929940458f64- AIV)* DQ)))))));
 		AIY
-		}else{
-		let AIZ=HI/ (I+ ((-230.25850929940458f64- AIW)* (I+ (K* ((-230.25850929940458f64- AIW)* (I+ ((-230.25850929940458f64- AIW)* DQ)))))));
-		AIZ
 		};
-		AJB=AJC;
+		AJA=AJB;
 		}
-		let AJA=AHX* (ABK+ AHU);
-		let AJD=(AJB< BH)&& (ABK< CF);
-		let AKJ;
-		let AKQ;
-		if AJD{
-		let AJE=(-AJA)+ AIC;
-		let AJF=AJE> -230.25850929940458f64;
-		let AJI=if AJF{
-		let AJG=AJE.exp();
+		let AIZ=AHW* (ABJ+ AHT);
+		let AJC=(AJA< BH)&& (ABJ< CF);
+		let AKI;
+		let AKP;
+		if AJC{
+		let AJD=(-AIZ)+ AIB;
+		let AJE=AJD> -230.25850929940458f64;
+		let AJH=if AJE{
+		let AJF=AJD.exp();
+		AJF
+		}else{
+		let AJG=HH/ (I+ ((-230.25850929940458f64- AJD)* (I+ (K* ((-230.25850929940458f64- AJD)* (I+ ((-230.25850929940458f64- AJD)* DQ)))))));
 		AJG
-		}else{
-		let AJH=HI/ (I+ ((-230.25850929940458f64- AJE)* (I+ (K* ((-230.25850929940458f64- AJE)* (I+ ((-230.25850929940458f64- AJE)* DQ)))))));
-		AJH
 		};
-		let AJJ=AJB* (AJI- I);
-		let AJK=AJJ+ AJB;
-		AKJ=AJK;
-		AKQ=AJJ;
+		let AJI=AJA* (AJH- I);
+		let AJJ=AJI+ AJA;
+		AKI=AJJ;
+		AKP=AJI;
 		}else{
-		let AJL=AHZ+ AJA;
-		let AJM=AJL.sqrt();
-		let AJN=I+ (AIA/ (X* AJM));
-		let AJO=I/ AJN;
-		let AJP=AHY- ((AJL+ (AIA* AJM))+ AIB);
-		let AJQ=AJP> -12f64;
-		let AKG;
-		if AJQ{
-		let AJR=(AJP+ AIJ)- I;
-		let AJS=(AJP- (AJN* ((K* (AJR+ (((AJR* AJR)+ EJ).sqrt()))).ln())))+ AIJ;
-		let AJT=K* (AJS+ (((AJS* AJS)+ X).sqrt()));
-		let AJU=AJP- AJT;
-		let AJV=AJU< HH;
-		let AJZ=if AJV{
-		let AJW=AJU.exp();
-		AJW
+		let AJK=AHY+ AIZ;
+		let AJL=AJK.sqrt();
+		let AJM=I+ (AHZ/ (X* AJL));
+		let AJN=I/ AJM;
+		let AJO=AHX- ((AJK+ (AHZ* AJL))+ AIA);
+		let AJP=AJO> -12f64;
+		let AKF;
+		if AJP{
+		let AJQ=(AJO+ AII)- I;
+		let AJR=(AJO- (AJM* ((K* (AJQ+ (((AJQ* AJQ)+ EJ).sqrt()))).ln())))+ AII;
+		let AJS=K* (AJR+ (((AJR* AJR)+ X).sqrt()));
+		let AJT=AJO- AJS;
+		let AJU=AJT< HG;
+		let AJY=if AJU{
+		let AJV=AJT.exp();
+		AJV
 		}else{
-		let AJX=AJU- HH;
-		let AJY=HJ* (I+ (AJX* (I+ (K* (AJX* (I+ (AJX* DQ)))))));
-		AJY
+		let AJW=AJT- HG;
+		let AJX=HI* (I+ (AJW* (I+ (K* (AJW* (I+ (AJW* DQ)))))));
+		AJX
 		};
-		let AKA=(AIS* AJZ).powf(AJO);
-		let AKB=AJT- (AJN* ((((((AJN* AJN)+ (((X* (AJT+ AJN))- AKA)* AKA)).sqrt())- AJN)/ AKA)- I));
-		AKG=AKB;
+		let AJZ=(AIR* AJY).powf(AJN);
+		let AKA=AJS- (AJM* ((((((AJM* AJM)+ (((X* (AJS+ AJM))- AJZ)* AJZ)).sqrt())- AJM)/ AJZ)- I));
+		AKF=AKA;
 		}else{
-		let AKC=AJO* (AJP+ AIJ);
-		let AKD=AKC> -230.25850929940458f64;
-		let AKH=if AKD{
-		let AKE=AKC.exp();
+		let AKB=AJN* (AJO+ AII);
+		let AKC=AKB> -230.25850929940458f64;
+		let AKG=if AKC{
+		let AKD=AKB.exp();
+		AKD
+		}else{
+		let AKE=HH/ (I+ ((-230.25850929940458f64- AKB)* (I+ (K* ((-230.25850929940458f64- AKB)* (I+ ((-230.25850929940458f64- AKB)* DQ)))))));
 		AKE
-		}else{
-		let AKF=HI/ (I+ ((-230.25850929940458f64- AKC)* (I+ (K* ((-230.25850929940458f64- AKC)* (I+ ((-230.25850929940458f64- AKC)* DQ)))))));
-		AKF
 		};
-		AKG=AKH;
+		AKF=AKG;
 		}
-		let AKI=AKG- AJB;
-		AKJ=AKG;
-		AKQ=AKI;
+		let AKH=AKF- AJA;
+		AKI=AKF;
+		AKP=AKH;
 		}
-		let AKK=K* (AKJ+ AJB);
-		let AKL=AHY- AKK;
-		let AKM=AKL> OR;
-		let AKN=if AKM{
-		AKL
+		let AKJ=K* (AKI+ AJA);
+		let AKK=AHX- AKJ;
+		let AKL=AKK> OQ;
+		let AKM=if AKL{
+		AKK
 		}else{
-		OR
+		OQ
 		};
-		let AKO=I- (staged[501]/ ((AKN+ staged[500]).sqrt()));
-		let AKR=((((staged[502]* AHW)* AHW)* ((AKO* AKK)+ I))* AKQ)/ ABX;
-		ALG=AKR;
-		BQS=AHY;
-		BQU=AKN;
-		BQZ=AKK;
-		BRC=AKO;
-		BRD=AKQ;
+		let AKN=I- (staged[501]/ ((AKM+ staged[500]).sqrt()));
+		let AKQ=((((staged[502]* AHV)* AHV)* ((AKN* AKJ)+ I))* AKP)/ ABW;
+		ALF=AKQ;
+		BQQ=AHX;
+		BQS=AKM;
+		BQX=AKJ;
+		BRA=AKN;
+		BRB=AKP;
 		}else{
-		ALG=A;
-		BQS=A;
-		BQU=OR;
-		BQZ=A;
-		BRC=I;
-		BRD=A;
+		ALF=A;
+		BQQ=A;
+		BQS=OQ;
+		BQX=A;
+		BRA=I;
+		BRB=A;
 		}
-		let AKS=QD&& (staged[503]!=0.0);
-		let BMY;
-		let BQH;
-		if AKS{
-		let AKT=IP- (staged[504]* ABP);
-		let AKU=AKT> A;
-		let BMZ;
-		let BQI;
-		if AKU{
-		let AKV=-(staged[506]* ((I+ (staged[505]* (((GH+ JI).sqrt())- GI)))/ (AKT+ 1e-30f64)));
-		let AKW=(AKV.abs())< HH;
-		let ALC;
-		if AKW{
-		let AKX=AKV.exp();
-		ALC=AKX;
+		let AKR=QC&& (staged[503]!=0.0);
+		let BMW;
+		let BQF;
+		if AKR{
+		let AKS=IO- (staged[504]* ABO);
+		let AKT=AKS> A;
+		let BMX;
+		let BQG;
+		if AKT{
+		let AKU=-(staged[506]* ((I+ (staged[505]* (((GG+ JH).sqrt())- GH)))/ (AKS+ 1e-30f64)));
+		let AKV=(AKU.abs())< HG;
+		let ALB;
+		if AKV{
+		let AKW=AKU.exp();
+		ALB=AKW;
 		}else{
-		let AKY=AKV< A;
-		let ALD=if AKY{
-		let AKZ=HI/ (I+ ((-230.25850929940458f64- AKV)* (I+ (K* ((-230.25850929940458f64- AKV)* (I+ ((-230.25850929940458f64- AKV)* DQ)))))));
-		AKZ
+		let AKX=AKU< A;
+		let ALC=if AKX{
+		let AKY=HH/ (I+ ((-230.25850929940458f64- AKU)* (I+ (K* ((-230.25850929940458f64- AKU)* (I+ ((-230.25850929940458f64- AKU)* DQ)))))));
+		AKY
 		}else{
-		let ALA=AKV- HH;
-		let ALB=HJ* (I+ (ALA* (I+ (K* (ALA* (I+ (ALA* DQ)))))));
-		ALB
+		let AKZ=AKU- HG;
+		let ALA=HI* (I+ (AKZ* (I+ (K* (AKZ* (I+ (AKZ* DQ)))))));
+		ALA
 		};
-		ALC=ALD;
+		ALB=ALC;
 		}
-		let ALE=staged[507]* (AKT* ALC);
-		let ALH=ALE* (ALF+ ALG);
-		let ALI=K* ER;
-		let ALJ=ALH> ALI;
-		let BNA=if ALJ{
-		let ALK=((X* ALH)/ ER)- I;
-		let ALL=ALI* (I+ (ALK/ ((I+ (ALK* ALK)).sqrt())));
-		ALL
+		let ALD=staged[507]* (AKS* ALB);
+		let ALG=ALD* (ALE+ ALF);
+		let ALH=K* ER;
+		let ALI=ALG> ALH;
+		let BMY=if ALI{
+		let ALJ=((X* ALG)/ ER)- I;
+		let ALK=ALH* (I+ (ALJ/ ((I+ (ALJ* ALJ)).sqrt())));
+		ALK
 		}else{
-		ALH
+		ALG
 		};
-		BMZ=BNA;
-		BQI=ALE;
+		BMX=BMY;
+		BQG=ALD;
 		}else{
-		BMZ=A;
-		BQI=A;
+		BMX=A;
+		BQG=A;
 		}
-		BMY=BMZ;
-		BQH=BQI;
+		BMW=BMX;
+		BQF=BQG;
 		}else{
-		BMY=A;
-		BQH=A;
+		BMW=A;
+		BQF=A;
 		}
+		let BNH;
 		let BNJ;
-		let BNL;
-		if HG{
+		if HF{
+		let BNI;
 		let BNK;
-		let BNM;
-		if ALN{
-		let ALP=ALO* BL;
-		let ALQ=ALP< -230.25850929940458f64;
-		let ALX;
-		if ALQ{
-		let ALR=HI/ ((-230.25850929940458f64- ALP)+ I);
-		ALX=ALR;
+		if ALM{
+		let ALO=ALN* BL;
+		let ALP=ALO< -230.25850929940458f64;
+		let ALW;
+		if ALP{
+		let ALQ=HH/ ((-230.25850929940458f64- ALO)+ I);
+		ALW=ALQ;
 		}else{
-		let ALT=ALP> ALS;
-		let ALW=if ALT{
-		let ALU=staged[553]* ((ALP- ALS)+ I);
+		let ALS=ALO> ALR;
+		let ALV=if ALS{
+		let ALT=staged[553]* ((ALO- ALR)+ I);
+		ALT
+		}else{
+		let ALU=ALO.exp();
 		ALU
-		}else{
-		let ALV=ALP.exp();
-		ALV
 		};
-		ALX=ALW;
+		ALW=ALV;
 		}
-		let ALY=staged[554]* (ALX- I);
-		let ALZ=ALP* staged[555];
-		let AMA=ALZ< -230.25850929940458f64;
-		let AMH;
-		if AMA{
-		let AMB=HI/ ((-230.25850929940458f64- ALZ)+ I);
-		AMH=AMB;
+		let ALX=staged[554]* (ALW- I);
+		let ALY=ALO* staged[555];
+		let ALZ=ALY< -230.25850929940458f64;
+		let AMG;
+		if ALZ{
+		let AMA=HH/ ((-230.25850929940458f64- ALY)+ I);
+		AMG=AMA;
 		}else{
-		let AMD=ALZ> AMC;
-		let AMG=if AMD{
-		let AME=staged[557]* ((ALZ- AMC)+ I);
+		let AMC=ALY> AMB;
+		let AMF=if AMC{
+		let AMD=staged[557]* ((ALY- AMB)+ I);
+		AMD
+		}else{
+		let AME=ALY.exp();
 		AME
-		}else{
-		let AMF=ALZ.exp();
-		AMF
 		};
-		AMH=AMG;
+		AMG=AMF;
 		}
-		let AMI=staged[558]* (AMH- I);
-		let AMW;
-		if AMJ{
-		let AML=ALO* (staged[560]+ (ALO* AMK));
-		AMW=AML;
+		let AMH=staged[558]* (AMG- I);
+		let AMV;
+		if AMI{
+		let AMK=ALN* (staged[560]+ (ALN* AMJ));
+		AMV=AMK;
 		}else{
-		let AMM=((-ALO)* BL)* AMK;
-		let AMN=AMM< -230.25850929940458f64;
-		let AMU;
-		if AMN{
-		let AMO=HI/ ((-230.25850929940458f64- AMM)+ I);
-		AMU=AMO;
+		let AML=((-ALN)* BL)* AMJ;
+		let AMM=AML< -230.25850929940458f64;
+		let AMT;
+		if AMM{
+		let AMN=HH/ ((-230.25850929940458f64- AML)+ I);
+		AMT=AMN;
 		}else{
-		let AMQ=AMM> AMP;
-		let AMT=if AMQ{
-		let AMR=staged[562]* ((AMM- AMP)+ I);
+		let AMP=AML> AMO;
+		let AMS=if AMP{
+		let AMQ=staged[562]* ((AML- AMO)+ I);
+		AMQ
+		}else{
+		let AMR=AML.exp();
 		AMR
-		}else{
-		let AMS=AMM.exp();
-		AMS
 		};
-		AMU=AMT;
+		AMT=AMS;
 		}
-		let AMV=staged[563]* (AMU- I);
-		AMW=AMV;
+		let AMU=staged[563]* (AMT- I);
+		AMV=AMU;
 		}
-		let AMX=(ALY+ AMI)+ AMW;
-		let AMZ=AMY* BL;
-		let ANA=AMZ< -230.25850929940458f64;
-		let ANH;
-		if ANA{
-		let ANB=HI/ ((-230.25850929940458f64- AMZ)+ I);
-		ANH=ANB;
+		let AMW=(ALX+ AMH)+ AMV;
+		let AMY=AMX* BL;
+		let AMZ=AMY< -230.25850929940458f64;
+		let ANG;
+		if AMZ{
+		let ANA=HH/ ((-230.25850929940458f64- AMY)+ I);
+		ANG=ANA;
 		}else{
-		let AND=AMZ> ANC;
-		let ANG=if AND{
-		let ANE=staged[565]* ((AMZ- ANC)+ I);
+		let ANC=AMY> ANB;
+		let ANF=if ANC{
+		let AND=staged[565]* ((AMY- ANB)+ I);
+		AND
+		}else{
+		let ANE=AMY.exp();
 		ANE
-		}else{
-		let ANF=AMZ.exp();
-		ANF
 		};
-		ANH=ANG;
+		ANG=ANF;
 		}
-		let ANI=staged[566]* (ANH- I);
-		let ANJ=AMZ* staged[567];
-		let ANK=ANJ< -230.25850929940458f64;
-		let ANR;
-		if ANK{
-		let ANL=HI/ ((-230.25850929940458f64- ANJ)+ I);
-		ANR=ANL;
+		let ANH=staged[566]* (ANG- I);
+		let ANI=AMY* staged[567];
+		let ANJ=ANI< -230.25850929940458f64;
+		let ANQ;
+		if ANJ{
+		let ANK=HH/ ((-230.25850929940458f64- ANI)+ I);
+		ANQ=ANK;
 		}else{
-		let ANN=ANJ> ANM;
-		let ANQ=if ANN{
-		let ANO=staged[569]* ((ANJ- ANM)+ I);
+		let ANM=ANI> ANL;
+		let ANP=if ANM{
+		let ANN=staged[569]* ((ANI- ANL)+ I);
+		ANN
+		}else{
+		let ANO=ANI.exp();
 		ANO
-		}else{
-		let ANP=ANJ.exp();
-		ANP
 		};
-		ANR=ANQ;
+		ANQ=ANP;
 		}
-		let ANS=staged[570]* (ANR- I);
-		let AOG;
-		if ANT{
-		let ANV=AMY* (staged[572]+ (AMY* ANU));
-		AOG=ANV;
+		let ANR=staged[570]* (ANQ- I);
+		let AOF;
+		if ANS{
+		let ANU=AMX* (staged[572]+ (AMX* ANT));
+		AOF=ANU;
 		}else{
-		let ANW=((-AMY)* BL)* ANU;
-		let ANX=ANW< -230.25850929940458f64;
-		let AOE;
-		if ANX{
-		let ANY=HI/ ((-230.25850929940458f64- ANW)+ I);
-		AOE=ANY;
+		let ANV=((-AMX)* BL)* ANT;
+		let ANW=ANV< -230.25850929940458f64;
+		let AOD;
+		if ANW{
+		let ANX=HH/ ((-230.25850929940458f64- ANV)+ I);
+		AOD=ANX;
 		}else{
-		let AOA=ANW> ANZ;
-		let AOD=if AOA{
-		let AOB=staged[574]* ((ANW- ANZ)+ I);
+		let ANZ=ANV> ANY;
+		let AOC=if ANZ{
+		let AOA=staged[574]* ((ANV- ANY)+ I);
+		AOA
+		}else{
+		let AOB=ANV.exp();
 		AOB
-		}else{
-		let AOC=ANW.exp();
-		AOC
 		};
-		AOE=AOD;
+		AOD=AOC;
 		}
-		let AOF=staged[575]* (AOE- I);
-		AOG=AOF;
+		let AOE=staged[575]* (AOD- I);
+		AOF=AOE;
 		}
-		let AOH=(ANI+ ANS)+ AOG;
-		BNK=AMX;
-		BNM=AOH;
+		let AOG=(ANH+ ANR)+ AOF;
+		BNI=AMW;
+		BNK=AOG;
 		}else{
-		let AZR;
-		let AZV;
-		let BAB;
-		if AOI{
-		let AOJ=AFP+ IQ;
-		let AOK=parameters[865]* (((K* ((AOJ+ A)+ (((AOJ* AOJ)+ 1e-6f64).sqrt()))).powf(parameters[866]))- staged[600]);
-		let AOL=AH+ AOK;
-		let AOM=I/ AOL;
-		let AON=AJ/ (I+ (AOK/ AH));
-		AZR=AOL;
-		AZV=AOM;
-		BAB=AON;
+		let AZQ;
+		let AZU;
+		let BAA;
+		if AOH{
+		let AOI=AFO+ IP;
+		let AOJ=parameters[865]* (((K* ((AOI+ A)+ (((AOI* AOI)+ 1e-6f64).sqrt()))).powf(parameters[866]))- staged[600]);
+		let AOK=AH+ AOJ;
+		let AOL=I/ AOK;
+		let AOM=AJ/ (I+ (AOJ/ AH));
+		AZQ=AOK;
+		AZU=AOL;
+		BAA=AOM;
 		}else{
-		AZR=AH;
-		AZV=AI;
-		BAB=AJ;
+		AZQ=AH;
+		AZU=AI;
+		BAA=AJ;
 		}
-		let AZG=if AOO{
-		let AOP=AFP+ IQ;
-		let AOQ=BP* (I+ (parameters[867]* (((K* ((AOP+ A)+ (((AOP* AOP)+ 1e-6f64).sqrt()))).powf(parameters[868]))- staged[601])));
-		AOQ
+		let AZF=if AON{
+		let AOO=AFO+ IP;
+		let AOP=BP* (I+ (parameters[867]* (((K* ((AOO+ A)+ (((AOO* AOO)+ 1e-6f64).sqrt()))).powf(parameters[868]))- staged[601])));
+		AOP
 		}else{
 		BP
 		};
-		let APZ;
-		let AQD;
-		let AQF;
-		let AQP;
-		let ASG;
-		let ASW;
-		if AOU{
-		let AOW=ALO< AOV;
-		let APK;
-		let APN;
-		let APP;
-		if AOW{
-		let AOX=ALO* BL;
-		let AOY=((-0.5f64* AOX).abs())< HH;
-		let APD;
-		if AOY{
-		let AOZ=(-0.5f64* AOX).exp();
-		APD=AOZ;
+		let APY;
+		let AQC;
+		let AQE;
+		let AQO;
+		let ASF;
+		let ASV;
+		if AOT{
+		let AOV=ALN< AOU;
+		let APJ;
+		let APM;
+		let APO;
+		if AOV{
+		let AOW=ALN* BL;
+		let AOX=((-0.5f64* AOW).abs())< HG;
+		let APC;
+		if AOX{
+		let AOY=(-0.5f64* AOW).exp();
+		APC=AOY;
 		}else{
-		let APA=(-0.5f64* AOX)< A;
-		let APE=if APA{
-		let APB=HI/ (I+ ((-230.25850929940458f64- (-0.5f64* AOX))* (I+ (K* ((-230.25850929940458f64- (-0.5f64* AOX))* (I+ ((-230.25850929940458f64- (-0.5f64* AOX))* DQ)))))));
+		let AOZ=(-0.5f64* AOW)< A;
+		let APD=if AOZ{
+		let APA=HH/ (I+ ((-230.25850929940458f64- (-0.5f64* AOW))* (I+ (K* ((-230.25850929940458f64- (-0.5f64* AOW))* (I+ ((-230.25850929940458f64- (-0.5f64* AOW))* DQ)))))));
+		APA
+		}else{
+		let APB=HI* (I+ (((-0.5f64* AOW)- HG)* (I+ (K* (((-0.5f64* AOW)- HG)* (I+ (((-0.5f64* AOW)- HG)* DQ)))))));
 		APB
-		}else{
-		let APC=HJ* (I+ (((-0.5f64* AOX)- HH)* (I+ (K* (((-0.5f64* AOX)- HH)* (I+ (((-0.5f64* AOX)- HH)* DQ)))))));
-		APC
 		};
-		APD=APE;
+		APC=APD;
 		}
-		let APF=I/ APD;
-		let APG=APF* APF;
-		APK=APG;
-		APN=APD;
-		APP=APF;
+		let APE=I/ APC;
+		let APF=APE* APE;
+		APJ=APF;
+		APM=APC;
+		APO=APE;
 		}else{
-		let APH=(I+ ((ALO- AOV)* BL))* staged[606];
-		let API=APH.sqrt();
-		let APJ=I/ API;
-		APK=APH;
-		APN=APJ;
-		APP=API;
+		let APG=(I+ ((ALN- AOU)* BL))* staged[606];
+		let APH=APG.sqrt();
+		let API=I/ APH;
+		APJ=APG;
+		APM=API;
+		APO=APH;
 		}
-		let APL=APK- I;
-		let APM=ALO> A;
-		let APR=if APM{
-		let APO=X* (BK* (((X+ APN)+ (((APN+ I)* (APN+ Y)).sqrt())).ln()));
-		APO
+		let APK=APJ- I;
+		let APL=ALN> A;
+		let APQ=if APL{
+		let APN=X* (BK* (((X+ APM)+ (((APM+ I)* (APM+ Y)).sqrt())).ln()));
+		APN
 		}else{
-		let APQ=(-ALO)+ (X* (BK* ((((X* APP)+ I)+ (((I+ APP)* (I+ (Y* APP))).sqrt())).ln())));
-		APQ
+		let APP=(-ALN)+ (X* (BK* ((((X* APO)+ I)+ (((I+ APO)* (I+ (Y* APO))).sqrt())).ln())));
+		APP
 		};
-		let APS=staged[607]- APR;
-		let APT=ALO- APS;
-		let APU=K* ((ALO+ APS)- (((APT* APT)+ staged[608]).sqrt()));
-		let APW=ALO- APV;
-		let APX=K* ((ALO+ APV)- (((APW* APW)+ staged[610]).sqrt()));
-		let APY=K* ((ALO+ A)- (((ALO* ALO)+ 4e-12f64).sqrt()));
-		APZ=APL;
-		AQD=APU;
-		AQF=APR;
-		AQP=APP;
-		ASG=APX;
-		ASW=APY;
+		let APR=staged[607]- APQ;
+		let APS=ALN- APR;
+		let APT=K* ((ALN+ APR)- (((APS* APS)+ staged[608]).sqrt()));
+		let APV=ALN- APU;
+		let APW=K* ((ALN+ APU)- (((APV* APV)+ staged[610]).sqrt()));
+		let APX=K* ((ALN+ A)- (((ALN* ALN)+ 4e-12f64).sqrt()));
+		APY=APK;
+		AQC=APT;
+		AQE=APQ;
+		AQO=APO;
+		ASF=APW;
+		ASV=APX;
 		}else{
-		APZ=A;
-		AQD=A;
-		AQF=A;
-		AQP=A;
-		ASG=A;
-		ASW=A;
+		APY=A;
+		AQC=A;
+		AQE=A;
+		AQO=A;
+		ASF=A;
+		ASV=A;
 		}
-		let AUB;
-		let AUD;
-		let AUP;
-		let AVO;
-		let BAJ;
-		if AOR{
-		AUB=A;
-		AUD=A;
-		AUP=A;
-		AVO=A;
-		BAJ=A;
-		}else{
-		let AQA=staged[611]* APZ;
-		let AQS;
-		let AQT;
-		let ARE;
-		let ASC;
-		let ATF;
-		if AQC{
-		AQS=A;
-		AQT=A;
-		ARE=A;
-		ASC=A;
-		ATF=A;
-		}else{
-		let AQE=staged[612]- AQD;
-		let AQG=I- ((I- (AQF/ AQE)).sqrt());
-		let AQJ=if AQH{
-		A
-		}else{
-		let AQI=((((AQG* AQG)* (AQG.ln()))/ (I- AQG))+ AQG)* staged[613];
-		AQI
-		};
-		let AQK=AQG+ AQJ;
-		let AQN=if AQH{
-		let AQL=(AQE* P).sqrt();
-		AQL
-		}else{
-		let AQM=(AQE* P).powf(L);
-		AQM
-		};
-		let AQO=staged[163]* AQN;
-		let AQQ=staged[614]* ((AQP- I)* AQO);
-		let AQR=parameters[833]* (AQQ* AQK);
-		AQS=AQO;
-		AQT=AQE;
-		ARE=AQK;
-		ASC=AQQ;
-		ATF=AQR;
-		}
-		let ATG;
-		if AQB{
-		ATG=A;
-		}else{
-		let AQU=staged[615]* ((AQS* staged[164])/ AQT);
-		let AQV=staged[616]/ AQU;
-		let AQW=AQV* AQV;
-		let AQX=AQW* AQW;
-		let AQY=(AQX/ (AQX+ I)).sqrt();
-		let AQZ=AQY.sqrt();
-		let ARA=AQY* AQZ;
-		let ARF=if ARB{
-		let ARC=I/ (I+ (AQU* ARA));
-		ARC
-		}else{
-		let ARD=(I+ (AQU* ARA)).powf(staged[617]);
-		ARD
-		};
-		let ARG=(ARE* ARF)/ (ARE+ ARF);
-		let ARH=(HL* (AQU/ AQZ)).sqrt();
-		let ARI=(((BM* AQV)* AQZ)- (BM* AQY))+ (K* (AQU* ARA));
-		let ARJ=(((X* (AQV* AQZ))- AQY)- I)* ARH;
-		let ARK=ARJ* ARJ;
-		let ARL=ARJ> A;
-		let ARS=if ARL{
-		let ARM=I/ (I+ (V* ARJ));
-		ARM
-		}else{
-		let ARN=I/ (I- (V* ARJ));
-		ARN
-		};
-		let ARO=(-ARK)+ ARI;
-		let ARP=ARO> -230.25850929940458f64;
-		let ARU=if ARP{
-		let ARQ=ARO.exp();
-		ARQ
-		}else{
-		let ARR=HI/ (I+ ((-230.25850929940458f64- ARO)* (I+ (K* ((-230.25850929940458f64- ARO)* (I+ ((-230.25850929940458f64- ARO)* DQ)))))));
-		ARR
-		};
-		let ART=ARS* ARS;
-		let ARV=(((U* ARS)+ (Z* ART))+ (AA* (ART* ARS)))* ARU;
-		let ASB;
-		if ARL{
-		ASB=ARV;
-		}else{
-		let ARW=ARI> -230.25850929940458f64;
-		let ARZ=if ARW{
-		let ARX=ARI.exp();
-		ARX
-		}else{
-		let ARY=HI/ (I+ ((-230.25850929940458f64- ARI)* (I+ (K* ((-230.25850929940458f64- ARI)* (I+ ((-230.25850929940458f64- ARI)* DQ)))))));
-		ARY
-		};
-		let ASA=(X* ARZ)- ARV;
-		ASB=ASA;
-		}
-		let ASD=parameters[838]* ((ASC* (0.886226925452758f64* ((BM* ASB)/ ARH)))* ARG);
-		ATG=ASD;
-		}
-		let ATH;
-		if ASE{
-		ATH=A;
-		}else{
-		let ASJ=if ASF{
-		let ASH=((O- ASG)* P).sqrt();
-		ASH
-		}else{
-		let ASI=((O- ASG)* P).powf(L);
-		ASI
-		};
-		let ASK=staged[5]* (((O- ASG)* staged[166])/ ASJ);
-		let ASL=staged[619]/ ASK;
-		let ASM=(ASL.abs())< HH;
-		let ASS;
-		if ASM{
-		let ASN=ASL.exp();
-		ASS=ASN;
-		}else{
-		let ASO=ASL< A;
-		let AST=if ASO{
-		let ASP=HI/ (I+ ((-230.25850929940458f64- ASL)* (I+ (K* ((-230.25850929940458f64- ASL)* (I+ ((-230.25850929940458f64- ASL)* DQ)))))));
-		ASP
-		}else{
-		let ASQ=ASL- HH;
-		let ASR=HJ* (I+ (ASQ* (I+ (K* (ASQ* (I+ (ASQ* DQ)))))));
-		ASR
-		};
-		ASS=AST;
-		}
-		let ASU=parameters[844]* (((ALO* ASK)* ASK)* ASS);
-		ATH=ASU;
-		}
-		let ATI;
-		if ASV{
-		ATI=I;
-		}else{
-		let ASX=ASW> staged[620];
-		let ATJ;
-		if ASX{
-		let ASY=AC== BI;
-		let ATC=if ASY{
-		let ASZ=ASW* AF;
-		let ATA=((ASZ* ASZ)* ASZ)* ASZ;
-		ATA
-		}else{
-		let ATB=((ASW* AF).abs()).powf(AC);
-		ATB
-		};
-		let ATD=I/ (I- ATC);
-		ATJ=ATD;
-		}else{
-		let ATE=staged[172]+ ((ASW+ (AB* parameters[853]))* staged[171]);
-		ATJ=ATE;
-		}
-		ATI=ATJ;
-		}
-		let ATK=(HM* (((AQA+ ATF)+ ATG)+ ATH))* ATI;
-		AUB=AQS;
-		AUD=AQT;
-		AUP=ARE;
-		AVO=ASC;
-		BAJ=ATK;
-		}
-		let AXL;
-		let AXN;
-		let AXZ;
-		let AYY;
-		let BAK;
-		if AOS{
-		AXL=AUB;
-		AXN=AUD;
-		AXZ=AUP;
-		AYY=AVO;
-		BAK=A;
-		}else{
-		let ATL=staged[621]* APZ;
 		let AUA;
 		let AUC;
 		let AUO;
 		let AVN;
-		let AWP;
-		if ATN{
-		AUA=AUB;
-		AUC=AUD;
-		AUO=AUP;
-		AVN=AVO;
-		AWP=A;
+		let BAI;
+		if AOQ{
+		AUA=A;
+		AUC=A;
+		AUO=A;
+		AVN=A;
+		BAI=A;
 		}else{
-		let ATO=staged[622]- AQD;
-		let ATP=I- ((I- (AQF/ ATO)).sqrt());
-		let ATS=if ATQ{
+		let APZ=staged[611]* APY;
+		let AQR;
+		let AQS;
+		let ARD;
+		let ASB;
+		let ATE;
+		if AQB{
+		AQR=A;
+		AQS=A;
+		ARD=A;
+		ASB=A;
+		ATE=A;
+		}else{
+		let AQD=staged[612]- AQC;
+		let AQF=I- ((I- (AQE/ AQD)).sqrt());
+		let AQI=if AQG{
 		A
 		}else{
-		let ATR=((((ATP* ATP)* (ATP.ln()))/ (I- ATP))+ ATP)* staged[623];
-		ATR
+		let AQH=((((AQF* AQF)* (AQF.ln()))/ (I- AQF))+ AQF)* staged[613];
+		AQH
 		};
-		let ATT=ATP+ ATS;
-		let ATW=if ATQ{
-		let ATU=(ATO* R).sqrt();
-		ATU
+		let AQJ=AQF+ AQI;
+		let AQM=if AQG{
+		let AQK=(AQD* P).sqrt();
+		AQK
 		}else{
-		let ATV=(ATO* R).powf(M);
-		ATV
+		let AQL=(AQD* P).powf(L);
+		AQL
 		};
-		let ATX=staged[176]* ATW;
-		let ATY=staged[624]* ((AQP- I)* ATX);
-		let ATZ=parameters[834]* (ATY* ATT);
-		AUA=ATX;
-		AUC=ATO;
-		AUO=ATT;
-		AVN=ATY;
-		AWP=ATZ;
+		let AQN=staged[163]* AQM;
+		let AQP=staged[614]* ((AQO- I)* AQN);
+		let AQQ=parameters[833]* (AQP* AQJ);
+		AQR=AQN;
+		AQS=AQD;
+		ARD=AQJ;
+		ASB=AQP;
+		ATE=AQQ;
 		}
-		let AWQ;
-		if ATM{
-		AWQ=A;
+		let ATF;
+		if AQA{
+		ATF=A;
 		}else{
-		let AUE=staged[625]* ((AUA* staged[177])/ AUC);
-		let AUF=staged[626]/ AUE;
-		let AUG=AUF* AUF;
-		let AUH=AUG* AUG;
-		let AUI=(AUH/ (AUH+ I)).sqrt();
-		let AUJ=AUI.sqrt();
-		let AUK=AUI* AUJ;
-		let AUQ=if AUL{
-		let AUM=I/ (I+ (AUE* AUK));
-		AUM
+		let AQT=staged[615]* ((AQR* staged[164])/ AQS);
+		let AQU=staged[616]/ AQT;
+		let AQV=AQU* AQU;
+		let AQW=AQV* AQV;
+		let AQX=(AQW/ (AQW+ I)).sqrt();
+		let AQY=AQX.sqrt();
+		let AQZ=AQX* AQY;
+		let ARE=if ARA{
+		let ARB=I/ (I+ (AQT* AQZ));
+		ARB
 		}else{
-		let AUN=(I+ (AUE* AUK)).powf(staged[627]);
-		AUN
+		let ARC=(I+ (AQT* AQZ)).powf(staged[617]);
+		ARC
 		};
-		let AUR=(AUO* AUQ)/ (AUO+ AUQ);
-		let AUS=(HL* (AUE/ AUJ)).sqrt();
-		let AUT=(((BN* AUF)* AUJ)- (BN* AUI))+ (K* (AUE* AUK));
-		let AUU=(((X* (AUF* AUJ))- AUI)- I)* AUS;
-		let AUV=AUU* AUU;
-		let AUW=AUU> A;
-		let AVD=if AUW{
-		let AUX=I/ (I+ (V* AUU));
-		AUX
+		let ARF=(ARD* ARE)/ (ARD+ ARE);
+		let ARG=(HK* (AQT/ AQY)).sqrt();
+		let ARH=(((BM* AQU)* AQY)- (BM* AQX))+ (K* (AQT* AQZ));
+		let ARI=(((X* (AQU* AQY))- AQX)- I)* ARG;
+		let ARJ=ARI* ARI;
+		let ARK=ARI> A;
+		let ARR=if ARK{
+		let ARL=I/ (I+ (V* ARI));
+		ARL
 		}else{
-		let AUY=I/ (I- (V* AUU));
-		AUY
+		let ARM=I/ (I- (V* ARI));
+		ARM
 		};
-		let AUZ=(-AUV)+ AUT;
-		let AVA=AUZ> -230.25850929940458f64;
-		let AVF=if AVA{
-		let AVB=AUZ.exp();
-		AVB
+		let ARN=(-ARJ)+ ARH;
+		let ARO=ARN> -230.25850929940458f64;
+		let ART=if ARO{
+		let ARP=ARN.exp();
+		ARP
 		}else{
-		let AVC=HI/ (I+ ((-230.25850929940458f64- AUZ)* (I+ (K* ((-230.25850929940458f64- AUZ)* (I+ ((-230.25850929940458f64- AUZ)* DQ)))))));
-		AVC
+		let ARQ=HH/ (I+ ((-230.25850929940458f64- ARN)* (I+ (K* ((-230.25850929940458f64- ARN)* (I+ ((-230.25850929940458f64- ARN)* DQ)))))));
+		ARQ
 		};
-		let AVE=AVD* AVD;
-		let AVG=(((U* AVD)+ (Z* AVE))+ (AA* (AVE* AVD)))* AVF;
-		let AVM;
-		if AUW{
-		AVM=AVG;
+		let ARS=ARR* ARR;
+		let ARU=(((U* ARR)+ (Z* ARS))+ (AA* (ARS* ARR)))* ART;
+		let ASA;
+		if ARK{
+		ASA=ARU;
 		}else{
-		let AVH=AUT> -230.25850929940458f64;
-		let AVK=if AVH{
-		let AVI=AUT.exp();
-		AVI
+		let ARV=ARH> -230.25850929940458f64;
+		let ARY=if ARV{
+		let ARW=ARH.exp();
+		ARW
 		}else{
-		let AVJ=HI/ (I+ ((-230.25850929940458f64- AUT)* (I+ (K* ((-230.25850929940458f64- AUT)* (I+ ((-230.25850929940458f64- AUT)* DQ)))))));
-		AVJ
+		let ARX=HH/ (I+ ((-230.25850929940458f64- ARH)* (I+ (K* ((-230.25850929940458f64- ARH)* (I+ ((-230.25850929940458f64- ARH)* DQ)))))));
+		ARX
 		};
-		let AVL=(X* AVK)- AVG;
-		AVM=AVL;
+		let ARZ=(X* ARY)- ARU;
+		ASA=ARZ;
 		}
-		let AVP=parameters[839]* ((AVN* (0.886226925452758f64* ((BN* AVM)/ AUS)))* AUR);
-		AWQ=AVP;
+		let ASC=parameters[838]* ((ASB* (0.886226925452758f64* ((BM* ASA)/ ARG)))* ARF);
+		ATF=ASC;
 		}
-		let AWR;
-		if AVQ{
-		AWR=A;
+		let ATG;
+		if ASD{
+		ATG=A;
 		}else{
-		let AVU=if AVR{
-		let AVS=((Q- ASG)* R).sqrt();
-		AVS
+		let ASI=if ASE{
+		let ASG=((O- ASF)* P).sqrt();
+		ASG
 		}else{
-		let AVT=((Q- ASG)* R).powf(M);
-		AVT
+		let ASH=((O- ASF)* P).powf(L);
+		ASH
 		};
-		let AVV=staged[6]* (((Q- ASG)* staged[179])/ AVU);
-		let AVW=staged[629]/ AVV;
-		let AVX=(AVW.abs())< HH;
-		let AWD;
-		if AVX{
-		let AVY=AVW.exp();
-		AWD=AVY;
+		let ASJ=staged[5]* (((O- ASF)* staged[166])/ ASI);
+		let ASK=staged[619]/ ASJ;
+		let ASL=(ASK.abs())< HG;
+		let ASR;
+		if ASL{
+		let ASM=ASK.exp();
+		ASR=ASM;
 		}else{
-		let AVZ=AVW< A;
-		let AWE=if AVZ{
-		let AWA=HI/ (I+ ((-230.25850929940458f64- AVW)* (I+ (K* ((-230.25850929940458f64- AVW)* (I+ ((-230.25850929940458f64- AVW)* DQ)))))));
-		AWA
+		let ASN=ASK< A;
+		let ASS=if ASN{
+		let ASO=HH/ (I+ ((-230.25850929940458f64- ASK)* (I+ (K* ((-230.25850929940458f64- ASK)* (I+ ((-230.25850929940458f64- ASK)* DQ)))))));
+		ASO
 		}else{
-		let AWB=AVW- HH;
-		let AWC=HJ* (I+ (AWB* (I+ (K* (AWB* (I+ (AWB* DQ)))))));
-		AWC
+		let ASP=ASK- HG;
+		let ASQ=HI* (I+ (ASP* (I+ (K* (ASP* (I+ (ASP* DQ)))))));
+		ASQ
 		};
-		AWD=AWE;
+		ASR=ASS;
 		}
-		let AWF=parameters[845]* (((ALO* AVV)* AVV)* AWD);
-		AWR=AWF;
+		let AST=parameters[844]* (((ALN* ASJ)* ASJ)* ASR);
+		ATG=AST;
 		}
-		let AWS;
-		if AWG{
-		AWS=I;
+		let ATH;
+		if ASU{
+		ATH=I;
 		}else{
-		let AWH=ASW> staged[630];
-		let AWT;
-		if AWH{
-		let AWI=AD== BI;
-		let AWM=if AWI{
-		let AWJ=ASW* AG;
-		let AWK=((AWJ* AWJ)* AWJ)* AWJ;
-		AWK
+		let ASW=ASV> staged[620];
+		let ATI;
+		if ASW{
+		let ASX=AC== BI;
+		let ATB=if ASX{
+		let ASY=ASV* AF;
+		let ASZ=((ASY* ASY)* ASY)* ASY;
+		ASZ
 		}else{
-		let AWL=((ASW* AG).abs()).powf(AD);
-		AWL
+		let ATA=((ASV* AF).abs()).powf(AC);
+		ATA
 		};
-		let AWN=I/ (I- AWM);
-		AWT=AWN;
+		let ATC=I/ (I- ATB);
+		ATI=ATC;
 		}else{
-		let AWO=staged[184]+ ((ASW+ (AB* parameters[854]))* staged[183]);
-		AWT=AWO;
+		let ATD=staged[172]+ ((ASV+ (AB* parameters[853]))* staged[171]);
+		ATI=ATD;
 		}
-		AWS=AWT;
+		ATH=ATI;
 		}
-		let AWU=(HM* (((ATL+ AWP)+ AWQ)+ AWR))* AWS;
-		AXL=AUA;
-		AXN=AUC;
-		AXZ=AUO;
-		AYY=AVN;
-		BAK=AWU;
+		let ATJ=(HL* (((APZ+ ATE)+ ATF)+ ATG))* ATH;
+		AUA=AQR;
+		AUC=AQS;
+		AUO=ARD;
+		AVN=ASB;
+		BAI=ATJ;
 		}
-		let BAL;
-		let BCY;
-		let BDA;
-		let BDM;
-		let BEL;
-		if AOT{
-		BAL=A;
-		BCY=AXL;
-		BDA=AXN;
-		BDM=AXZ;
-		BEL=AYY;
-		}else{
-		let AWV=staged[631]* APZ;
 		let AXK;
 		let AXM;
 		let AXY;
 		let AYX;
-		let BAD;
-		if AWX{
-		AXK=AXL;
-		AXM=AXN;
-		AXY=AXZ;
-		AYX=AYY;
-		BAD=A;
+		let BAJ;
+		if AOR{
+		AXK=AUA;
+		AXM=AUC;
+		AXY=AUO;
+		AYX=AVN;
+		BAJ=A;
 		}else{
-		let AWY=staged[632]- AQD;
-		let AWZ=I- ((I- (AQF/ AWY)).sqrt());
-		let AXC=if AXA{
+		let ATK=staged[621]* APY;
+		let ATZ;
+		let AUB;
+		let AUN;
+		let AVM;
+		let AWO;
+		if ATM{
+		ATZ=AUA;
+		AUB=AUC;
+		AUN=AUO;
+		AVM=AVN;
+		AWO=A;
+		}else{
+		let ATN=staged[622]- AQC;
+		let ATO=I- ((I- (AQE/ ATN)).sqrt());
+		let ATR=if ATP{
 		A
 		}else{
-		let AXB=((((AWZ* AWZ)* (AWZ.ln()))/ (I- AWZ))+ AWZ)* staged[633];
-		AXB
+		let ATQ=((((ATO* ATO)* (ATO.ln()))/ (I- ATO))+ ATO)* staged[623];
+		ATQ
 		};
-		let AXD=AWZ+ AXC;
-		let AXG=if AXA{
-		let AXE=(AWY* T).sqrt();
-		AXE
+		let ATS=ATO+ ATR;
+		let ATV=if ATP{
+		let ATT=(ATN* R).sqrt();
+		ATT
 		}else{
-		let AXF=(AWY* T).powf(N);
-		AXF
+		let ATU=(ATN* R).powf(M);
+		ATU
 		};
-		let AXH=staged[188]* AXG;
-		let AXI=staged[634]* ((AQP- I)* AXH);
-		let AXJ=parameters[835]* (AXI* AXD);
-		AXK=AXH;
-		AXM=AWY;
-		AXY=AXD;
-		AYX=AXI;
-		BAD=AXJ;
+		let ATW=staged[176]* ATV;
+		let ATX=staged[624]* ((AQO- I)* ATW);
+		let ATY=parameters[834]* (ATX* ATS);
+		ATZ=ATW;
+		AUB=ATN;
+		AUN=ATS;
+		AVM=ATX;
+		AWO=ATY;
 		}
-		let BAE;
-		if AWW{
-		BAE=A;
+		let AWP;
+		if ATL{
+		AWP=A;
 		}else{
-		let AXO=staged[635]* ((AXK* staged[189])/ AXM);
-		let AXP=staged[636]/ AXO;
-		let AXQ=AXP* AXP;
-		let AXR=AXQ* AXQ;
-		let AXS=(AXR/ (AXR+ I)).sqrt();
-		let AXT=AXS.sqrt();
-		let AXU=AXS* AXT;
-		let AYA=if AXV{
-		let AXW=I/ (I+ (AXO* AXU));
-		AXW
+		let AUD=staged[625]* ((ATZ* staged[177])/ AUB);
+		let AUE=staged[626]/ AUD;
+		let AUF=AUE* AUE;
+		let AUG=AUF* AUF;
+		let AUH=(AUG/ (AUG+ I)).sqrt();
+		let AUI=AUH.sqrt();
+		let AUJ=AUH* AUI;
+		let AUP=if AUK{
+		let AUL=I/ (I+ (AUD* AUJ));
+		AUL
 		}else{
-		let AXX=(I+ (AXO* AXU)).powf(staged[637]);
-		AXX
+		let AUM=(I+ (AUD* AUJ)).powf(staged[627]);
+		AUM
 		};
-		let AYB=(AXY* AYA)/ (AXY+ AYA);
-		let AYC=(HL* (AXO/ AXT)).sqrt();
-		let AYD=(((BO* AXP)* AXT)- (BO* AXS))+ (K* (AXO* AXU));
-		let AYE=(((X* (AXP* AXT))- AXS)- I)* AYC;
-		let AYF=AYE* AYE;
-		let AYG=AYE> A;
-		let AYN=if AYG{
-		let AYH=I/ (I+ (V* AYE));
-		AYH
+		let AUQ=(AUN* AUP)/ (AUN+ AUP);
+		let AUR=(HK* (AUD/ AUI)).sqrt();
+		let AUS=(((BN* AUE)* AUI)- (BN* AUH))+ (K* (AUD* AUJ));
+		let AUT=(((X* (AUE* AUI))- AUH)- I)* AUR;
+		let AUU=AUT* AUT;
+		let AUV=AUT> A;
+		let AVC=if AUV{
+		let AUW=I/ (I+ (V* AUT));
+		AUW
 		}else{
-		let AYI=I/ (I- (V* AYE));
-		AYI
+		let AUX=I/ (I- (V* AUT));
+		AUX
 		};
-		let AYJ=(-AYF)+ AYD;
-		let AYK=AYJ> -230.25850929940458f64;
-		let AYP=if AYK{
-		let AYL=AYJ.exp();
-		AYL
+		let AUY=(-AUU)+ AUS;
+		let AUZ=AUY> -230.25850929940458f64;
+		let AVE=if AUZ{
+		let AVA=AUY.exp();
+		AVA
 		}else{
-		let AYM=HI/ (I+ ((-230.25850929940458f64- AYJ)* (I+ (K* ((-230.25850929940458f64- AYJ)* (I+ ((-230.25850929940458f64- AYJ)* DQ)))))));
-		AYM
+		let AVB=HH/ (I+ ((-230.25850929940458f64- AUY)* (I+ (K* ((-230.25850929940458f64- AUY)* (I+ ((-230.25850929940458f64- AUY)* DQ)))))));
+		AVB
 		};
-		let AYO=AYN* AYN;
-		let AYQ=(((U* AYN)+ (Z* AYO))+ (AA* (AYO* AYN)))* AYP;
-		let AYW;
-		if AYG{
-		AYW=AYQ;
+		let AVD=AVC* AVC;
+		let AVF=(((U* AVC)+ (Z* AVD))+ (AA* (AVD* AVC)))* AVE;
+		let AVL;
+		if AUV{
+		AVL=AVF;
 		}else{
-		let AYR=AYD> -230.25850929940458f64;
-		let AYU=if AYR{
-		let AYS=AYD.exp();
-		AYS
+		let AVG=AUS> -230.25850929940458f64;
+		let AVJ=if AVG{
+		let AVH=AUS.exp();
+		AVH
 		}else{
-		let AYT=HI/ (I+ ((-230.25850929940458f64- AYD)* (I+ (K* ((-230.25850929940458f64- AYD)* (I+ ((-230.25850929940458f64- AYD)* DQ)))))));
-		AYT
+		let AVI=HH/ (I+ ((-230.25850929940458f64- AUS)* (I+ (K* ((-230.25850929940458f64- AUS)* (I+ ((-230.25850929940458f64- AUS)* DQ)))))));
+		AVI
 		};
-		let AYV=(X* AYU)- AYQ;
-		AYW=AYV;
+		let AVK=(X* AVJ)- AVF;
+		AVL=AVK;
 		}
-		let AYZ=parameters[840]* ((AYX* (0.886226925452758f64* ((BO* AYW)/ AYC)))* AYB);
-		BAE=AYZ;
+		let AVO=parameters[839]* ((AVM* (0.886226925452758f64* ((BN* AVL)/ AUR)))* AUQ);
+		AWP=AVO;
 		}
-		let BAF;
-		if AZA{
-		BAF=A;
+		let AWQ;
+		if AVP{
+		AWQ=A;
 		}else{
-		let AZE=if AZB{
-		let AZC=((S- ASG)* T).sqrt();
-		AZC
+		let AVT=if AVQ{
+		let AVR=((Q- ASF)* R).sqrt();
+		AVR
 		}else{
-		let AZD=((S- ASG)* T).powf(N);
-		AZD
+		let AVS=((Q- ASF)* R).powf(M);
+		AVS
 		};
-		let AZF=staged[7]* (((S- ASG)* staged[191])/ AZE);
-		let AZH=(-AZG)/ AZF;
-		let AZI=(AZH.abs())< HH;
-		let AZO;
-		if AZI{
-		let AZJ=AZH.exp();
-		AZO=AZJ;
+		let AVU=staged[6]* (((Q- ASF)* staged[179])/ AVT);
+		let AVV=staged[629]/ AVU;
+		let AVW=(AVV.abs())< HG;
+		let AWC;
+		if AVW{
+		let AVX=AVV.exp();
+		AWC=AVX;
 		}else{
-		let AZK=AZH< A;
-		let AZP=if AZK{
-		let AZL=HI/ (I+ ((-230.25850929940458f64- AZH)* (I+ (K* ((-230.25850929940458f64- AZH)* (I+ ((-230.25850929940458f64- AZH)* DQ)))))));
-		AZL
+		let AVY=AVV< A;
+		let AWD=if AVY{
+		let AVZ=HH/ (I+ ((-230.25850929940458f64- AVV)* (I+ (K* ((-230.25850929940458f64- AVV)* (I+ ((-230.25850929940458f64- AVV)* DQ)))))));
+		AVZ
 		}else{
-		let AZM=AZH- HH;
-		let AZN=HJ* (I+ (AZM* (I+ (K* (AZM* (I+ (AZM* DQ)))))));
-		AZN
+		let AWA=AVV- HG;
+		let AWB=HI* (I+ (AWA* (I+ (K* (AWA* (I+ (AWA* DQ)))))));
+		AWB
 		};
-		AZO=AZP;
+		AWC=AWD;
 		}
-		let AZQ=parameters[846]* (((ALO* AZF)* AZF)* AZO);
-		BAF=AZQ;
+		let AWE=parameters[845]* (((ALN* AVU)* AVU)* AWC);
+		AWQ=AWE;
 		}
-		let AZS=AZR> 1e3f64;
-		let BAG;
-		if AZS{
-		BAG=I;
+		let AWR;
+		if AWF{
+		AWR=I;
 		}else{
-		let AZT=ASW> ((-AB)* AZR);
-		let BAH;
-		if AZT{
-		let AZU=AE== BI;
-		let AZZ=if AZU{
-		let AZW=ASW* AZV;
-		let AZX=((AZW* AZW)* AZW)* AZW;
-		AZX
+		let AWG=ASV> staged[630];
+		let AWS;
+		if AWG{
+		let AWH=AD== BI;
+		let AWL=if AWH{
+		let AWI=ASV* AG;
+		let AWJ=((AWI* AWI)* AWI)* AWI;
+		AWJ
 		}else{
-		let AZY=((ASW* AZV).abs()).powf(AE);
-		AZY
+		let AWK=((ASV* AG).abs()).powf(AD);
+		AWK
 		};
-		let BAA=I/ (I- AZZ);
-		BAH=BAA;
+		let AWM=I/ (I- AWL);
+		AWS=AWM;
 		}else{
-		let BAC=staged[196]+ ((ASW+ (AB* AZR))* BAB);
-		BAH=BAC;
+		let AWN=staged[184]+ ((ASV+ (AB* parameters[854]))* staged[183]);
+		AWS=AWN;
 		}
-		BAG=BAH;
+		AWR=AWS;
 		}
-		let BAI=(HM* (((AWV+ BAD)+ BAE)+ BAF))* BAG;
-		BAL=BAI;
-		BCY=AXK;
-		BDA=AXM;
-		BDM=AXY;
-		BEL=AYX;
+		let AWT=(HL* (((ATK+ AWO)+ AWP)+ AWQ))* AWR;
+		AXK=ATZ;
+		AXM=AUB;
+		AXY=AUN;
+		AYX=AVM;
+		BAJ=AWT;
 		}
-		let BAM=((staged[150]* BAJ)+ (staged[151]* BAK))+ (staged[152]* BAL);
-		let BMA;
-		let BME;
-		let BMK;
-		if BAN{
-		let BAO=AFP+ IQ;
-		let BAP=staged[640]* (((K* ((BAO+ A)+ (((BAO* BAO)+ 1e-6f64).sqrt()))).powf(staged[641]))- staged[642]);
-		let BAQ=AY+ BAP;
-		let BAR=I/ BAQ;
-		let BAS=BA/ (I+ (BAP/ AY));
-		BMA=BAQ;
-		BME=BAR;
-		BMK=BAS;
-		}else{
-		BMA=AY;
-		BME=AZ;
-		BMK=BA;
-		}
-		let BLP=if BAT{
-		let BAU=AFP+ IQ;
-		let BAV=BT* (I+ (staged[645]* (((K* ((BAU+ A)+ (((BAU* BAU)+ 1e-6f64).sqrt()))).powf(staged[643]))- staged[644])));
-		BAV
-		}else{
-		BT
-		};
-		let BCE;
-		let BCI;
-		let BCK;
-		let BCU;
-		let BEP;
-		let BFF;
-		if BAZ{
-		let BBB=AMY< BBA;
-		let BBP;
-		let BBS;
-		let BBU;
-		if BBB{
-		let BBC=AMY* BL;
-		let BBD=((-0.5f64* BBC).abs())< HH;
-		let BBI;
-		if BBD{
-		let BBE=(-0.5f64* BBC).exp();
-		BBI=BBE;
-		}else{
-		let BBF=(-0.5f64* BBC)< A;
-		let BBJ=if BBF{
-		let BBG=HI/ (I+ ((-230.25850929940458f64- (-0.5f64* BBC))* (I+ (K* ((-230.25850929940458f64- (-0.5f64* BBC))* (I+ ((-230.25850929940458f64- (-0.5f64* BBC))* DQ)))))));
-		BBG
-		}else{
-		let BBH=HJ* (I+ (((-0.5f64* BBC)- HH)* (I+ (K* (((-0.5f64* BBC)- HH)* (I+ (((-0.5f64* BBC)- HH)* DQ)))))));
-		BBH
-		};
-		BBI=BBJ;
-		}
-		let BBK=I/ BBI;
-		let BBL=BBK* BBK;
-		BBP=BBL;
-		BBS=BBI;
-		BBU=BBK;
-		}else{
-		let BBM=(I+ ((AMY- BBA)* BL))* staged[650];
-		let BBN=BBM.sqrt();
-		let BBO=I/ BBN;
-		BBP=BBM;
-		BBS=BBO;
-		BBU=BBN;
-		}
-		let BBQ=BBP- I;
-		let BBR=AMY> A;
-		let BBW=if BBR{
-		let BBT=X* (BK* (((X+ BBS)+ (((BBS+ I)* (BBS+ Y)).sqrt())).ln()));
-		BBT
-		}else{
-		let BBV=(-AMY)+ (X* (BK* ((((X* BBU)+ I)+ (((I+ BBU)* (I+ (Y* BBU))).sqrt())).ln())));
-		BBV
-		};
-		let BBX=staged[651]- BBW;
-		let BBY=AMY- BBX;
-		let BBZ=K* ((AMY+ BBX)- (((BBY* BBY)+ staged[652]).sqrt()));
-		let BCB=AMY- BCA;
-		let BCC=K* ((AMY+ BCA)- (((BCB* BCB)+ staged[654]).sqrt()));
-		let BCD=K* ((AMY+ A)- (((AMY* AMY)+ 4e-12f64).sqrt()));
-		BCE=BBQ;
-		BCI=BBZ;
-		BCK=BBW;
-		BCU=BBU;
-		BEP=BCC;
-		BFF=BCD;
-		}else{
-		BCE=APZ;
-		BCI=AQD;
-		BCK=A;
-		BCU=AQP;
-		BEP=A;
-		BFF=ASW;
-		}
-		let BGK;
-		let BGM;
-		let BGY;
-		let BHX;
-		let BMS;
-		if BAW{
-		BGK=BCY;
-		BGM=BDA;
-		BGY=BDM;
-		BHX=BEL;
-		BMS=A;
-		}else{
-		let BCF=staged[655]* BCE;
+		let BAK;
 		let BCX;
 		let BCZ;
 		let BDL;
 		let BEK;
-		let BFO;
-		if BCH{
-		BCX=BCY;
-		BCZ=BDA;
-		BDL=BDM;
-		BEK=BEL;
-		BFO=A;
+		if AOS{
+		BAK=A;
+		BCX=AXK;
+		BCZ=AXM;
+		BDL=AXY;
+		BEK=AYX;
 		}else{
-		let BCJ=staged[656]- BCI;
-		let BCL=I- ((I- (BCK/ BCJ)).sqrt());
-		let BCO=if BCM{
+		let AWU=staged[631]* APY;
+		let AXJ;
+		let AXL;
+		let AXX;
+		let AYW;
+		let BAC;
+		if AWW{
+		AXJ=AXK;
+		AXL=AXM;
+		AXX=AXY;
+		AYW=AYX;
+		BAC=A;
+		}else{
+		let AWX=staged[632]- AQC;
+		let AWY=I- ((I- (AQE/ AWX)).sqrt());
+		let AXB=if AWZ{
 		A
 		}else{
-		let BCN=((((BCL* BCL)* (BCL.ln()))/ (I- BCL))+ BCL)* staged[657];
-		BCN
+		let AXA=((((AWY* AWY)* (AWY.ln()))/ (I- AWY))+ AWY)* staged[633];
+		AXA
 		};
-		let BCP=BCL+ BCO;
-		let BCS=if BCM{
-		let BCQ=(BCJ* AO).sqrt();
-		BCQ
+		let AXC=AWY+ AXB;
+		let AXF=if AWZ{
+		let AXD=(AWX* T).sqrt();
+		AXD
 		}else{
-		let BCR=(BCJ* AO).powf(AK);
-		BCR
+		let AXE=(AWX* T).powf(N);
+		AXE
 		};
-		let BCT=staged[269]* BCS;
-		let BCV=staged[658]* ((BCU- I)* BCT);
-		let BCW=staged[265]* (BCV* BCP);
-		BCX=BCT;
-		BCZ=BCJ;
-		BDL=BCP;
-		BEK=BCV;
-		BFO=BCW;
+		let AXG=staged[188]* AXF;
+		let AXH=staged[634]* ((AQO- I)* AXG);
+		let AXI=parameters[835]* (AXH* AXC);
+		AXJ=AXG;
+		AXL=AWX;
+		AXX=AXC;
+		AYW=AXH;
+		BAC=AXI;
 		}
-		let BFP;
-		if BCG{
-		BFP=A;
+		let BAD;
+		if AWV{
+		BAD=A;
 		}else{
-		let BDB=staged[659]* ((BCX* staged[270])/ BCZ);
-		let BDC=staged[660]/ BDB;
-		let BDD=BDC* BDC;
-		let BDE=BDD* BDD;
-		let BDF=(BDE/ (BDE+ I)).sqrt();
-		let BDG=BDF.sqrt();
-		let BDH=BDF* BDG;
-		let BDN=if BDI{
-		let BDJ=I/ (I+ (BDB* BDH));
-		BDJ
+		let AXN=staged[635]* ((AXJ* staged[189])/ AXL);
+		let AXO=staged[636]/ AXN;
+		let AXP=AXO* AXO;
+		let AXQ=AXP* AXP;
+		let AXR=(AXQ/ (AXQ+ I)).sqrt();
+		let AXS=AXR.sqrt();
+		let AXT=AXR* AXS;
+		let AXZ=if AXU{
+		let AXV=I/ (I+ (AXN* AXT));
+		AXV
 		}else{
-		let BDK=(I+ (BDB* BDH)).powf(staged[661]);
-		BDK
+		let AXW=(I+ (AXN* AXT)).powf(staged[637]);
+		AXW
 		};
-		let BDO=(BDL* BDN)/ (BDL+ BDN);
-		let BDP=(HL* (BDB/ BDG)).sqrt();
-		let BDQ=(((BQ* BDC)* BDG)- (BQ* BDF))+ (K* (BDB* BDH));
-		let BDR=(((X* (BDC* BDG))- BDF)- I)* BDP;
-		let BDS=BDR* BDR;
-		let BDT=BDR> A;
-		let BEA=if BDT{
-		let BDU=I/ (I+ (V* BDR));
-		BDU
+		let AYA=(AXX* AXZ)/ (AXX+ AXZ);
+		let AYB=(HK* (AXN/ AXS)).sqrt();
+		let AYC=(((BO* AXO)* AXS)- (BO* AXR))+ (K* (AXN* AXT));
+		let AYD=(((X* (AXO* AXS))- AXR)- I)* AYB;
+		let AYE=AYD* AYD;
+		let AYF=AYD> A;
+		let AYM=if AYF{
+		let AYG=I/ (I+ (V* AYD));
+		AYG
 		}else{
-		let BDV=I/ (I- (V* BDR));
-		BDV
+		let AYH=I/ (I- (V* AYD));
+		AYH
 		};
-		let BDW=(-BDS)+ BDQ;
-		let BDX=BDW> -230.25850929940458f64;
-		let BEC=if BDX{
-		let BDY=BDW.exp();
-		BDY
+		let AYI=(-AYE)+ AYC;
+		let AYJ=AYI> -230.25850929940458f64;
+		let AYO=if AYJ{
+		let AYK=AYI.exp();
+		AYK
 		}else{
-		let BDZ=HI/ (I+ ((-230.25850929940458f64- BDW)* (I+ (K* ((-230.25850929940458f64- BDW)* (I+ ((-230.25850929940458f64- BDW)* DQ)))))));
-		BDZ
+		let AYL=HH/ (I+ ((-230.25850929940458f64- AYI)* (I+ (K* ((-230.25850929940458f64- AYI)* (I+ ((-230.25850929940458f64- AYI)* DQ)))))));
+		AYL
 		};
-		let BEB=BEA* BEA;
-		let BED=(((U* BEA)+ (Z* BEB))+ (AA* (BEB* BEA)))* BEC;
-		let BEJ;
-		if BDT{
-		BEJ=BED;
+		let AYN=AYM* AYM;
+		let AYP=(((U* AYM)+ (Z* AYN))+ (AA* (AYN* AYM)))* AYO;
+		let AYV;
+		if AYF{
+		AYV=AYP;
 		}else{
-		let BEE=BDQ> -230.25850929940458f64;
-		let BEH=if BEE{
-		let BEF=BDQ.exp();
-		BEF
+		let AYQ=AYC> -230.25850929940458f64;
+		let AYT=if AYQ{
+		let AYR=AYC.exp();
+		AYR
 		}else{
-		let BEG=HI/ (I+ ((-230.25850929940458f64- BDQ)* (I+ (K* ((-230.25850929940458f64- BDQ)* (I+ ((-230.25850929940458f64- BDQ)* DQ)))))));
-		BEG
+		let AYS=HH/ (I+ ((-230.25850929940458f64- AYC)* (I+ (K* ((-230.25850929940458f64- AYC)* (I+ ((-230.25850929940458f64- AYC)* DQ)))))));
+		AYS
 		};
-		let BEI=(X* BEH)- BED;
-		BEJ=BEI;
+		let AYU=(X* AYT)- AYP;
+		AYV=AYU;
 		}
-		let BEM=staged[266]* ((BEK* (0.886226925452758f64* ((BQ* BEJ)/ BDP)))* BDO);
-		BFP=BEM;
+		let AYY=parameters[840]* ((AYW* (0.886226925452758f64* ((BO* AYV)/ AYB)))* AYA);
+		BAD=AYY;
 		}
-		let BFQ;
-		if BEN{
-		BFQ=A;
+		let BAE;
+		if AYZ{
+		BAE=A;
 		}else{
-		let BES=if BEO{
-		let BEQ=((AN- BEP)* AO).sqrt();
-		BEQ
+		let AZD=if AZA{
+		let AZB=((S- ASF)* T).sqrt();
+		AZB
 		}else{
-		let BER=((AN- BEP)* AO).powf(AK);
-		BER
+		let AZC=((S- ASF)* T).powf(N);
+		AZC
 		};
-		let BET=staged[36]* (((AN- BEP)* staged[273])/ BES);
-		let BEU=staged[663]/ BET;
-		let BEV=(BEU.abs())< HH;
-		let BFB;
-		if BEV{
-		let BEW=BEU.exp();
-		BFB=BEW;
+		let AZE=staged[7]* (((S- ASF)* staged[191])/ AZD);
+		let AZG=(-AZF)/ AZE;
+		let AZH=(AZG.abs())< HG;
+		let AZN;
+		if AZH{
+		let AZI=AZG.exp();
+		AZN=AZI;
 		}else{
-		let BEX=BEU< A;
-		let BFC=if BEX{
-		let BEY=HI/ (I+ ((-230.25850929940458f64- BEU)* (I+ (K* ((-230.25850929940458f64- BEU)* (I+ ((-230.25850929940458f64- BEU)* DQ)))))));
-		BEY
+		let AZJ=AZG< A;
+		let AZO=if AZJ{
+		let AZK=HH/ (I+ ((-230.25850929940458f64- AZG)* (I+ (K* ((-230.25850929940458f64- AZG)* (I+ ((-230.25850929940458f64- AZG)* DQ)))))));
+		AZK
 		}else{
-		let BEZ=BEU- HH;
-		let BFA=HJ* (I+ (BEZ* (I+ (K* (BEZ* (I+ (BEZ* DQ)))))));
-		BFA
+		let AZL=AZG- HG;
+		let AZM=HI* (I+ (AZL* (I+ (K* (AZL* (I+ (AZL* DQ)))))));
+		AZM
 		};
-		BFB=BFC;
+		AZN=AZO;
 		}
-		let BFD=staged[272]* (((AMY* BET)* BET)* BFB);
-		BFQ=BFD;
+		let AZP=parameters[846]* (((ALN* AZE)* AZE)* AZN);
+		BAE=AZP;
 		}
-		let BFR;
-		if BFE{
-		BFR=I;
+		let AZR=AZQ> 1e3f64;
+		let BAF;
+		if AZR{
+		BAF=I;
 		}else{
-		let BFG=BFF> staged[664];
-		let BFS;
-		if BFG{
-		let BFH=AT== BI;
-		let BFL=if BFH{
-		let BFI=BFF* AW;
-		let BFJ=((BFI* BFI)* BFI)* BFI;
-		BFJ
+		let AZS=ASV> ((-AB)* AZQ);
+		let BAG;
+		if AZS{
+		let AZT=AE== BI;
+		let AZY=if AZT{
+		let AZV=ASV* AZU;
+		let AZW=((AZV* AZV)* AZV)* AZV;
+		AZW
 		}else{
-		let BFK=((BFF* AW).abs()).powf(AT);
-		BFK
+		let AZX=((ASV* AZU).abs()).powf(AE);
+		AZX
 		};
-		let BFM=I/ (I- BFL);
-		BFS=BFM;
+		let AZZ=I/ (I- AZY);
+		BAG=AZZ;
 		}else{
-		let BFN=staged[280]+ ((BFF+ (AB* staged[276]))* staged[279]);
-		BFS=BFN;
+		let BAB=staged[196]+ ((ASV+ (AB* AZQ))* BAA);
+		BAG=BAB;
 		}
-		BFR=BFS;
+		BAF=BAG;
 		}
-		let BFT=(HM* (((BCF+ BFO)+ BFP)+ BFQ))* BFR;
-		BGK=BCX;
-		BGM=BCZ;
-		BGY=BDL;
-		BHX=BEK;
-		BMS=BFT;
+		let BAH=(HL* (((AWU+ BAC)+ BAD)+ BAE))* BAF;
+		BAK=BAH;
+		BCX=AXJ;
+		BCZ=AXL;
+		BDL=AXX;
+		BEK=AYW;
 		}
-		let BJU;
-		let BJW;
-		let BKI;
-		let BLH;
-		let BMT;
-		if BAX{
-		BJU=BGK;
-		BJW=BGM;
-		BKI=BGY;
-		BLH=BHX;
-		BMT=A;
+		let BAL=((staged[150]* BAI)+ (staged[151]* BAJ))+ (staged[152]* BAK);
+		let BLZ;
+		let BMD;
+		let BMJ;
+		if BAM{
+		let BAN=AFO+ IP;
+		let BAO=staged[640]* (((K* ((BAN+ A)+ (((BAN* BAN)+ 1e-6f64).sqrt()))).powf(staged[641]))- staged[642]);
+		let BAP=AY+ BAO;
+		let BAQ=I/ BAP;
+		let BAR=BA/ (I+ (BAO/ AY));
+		BLZ=BAP;
+		BMD=BAQ;
+		BMJ=BAR;
 		}else{
-		let BFU=staged[665]* BCE;
+		BLZ=AY;
+		BMD=AZ;
+		BMJ=BA;
+		}
+		let BLO=if BAS{
+		let BAT=AFO+ IP;
+		let BAU=BT* (I+ (staged[645]* (((K* ((BAT+ A)+ (((BAT* BAT)+ 1e-6f64).sqrt()))).powf(staged[643]))- staged[644])));
+		BAU
+		}else{
+		BT
+		};
+		let BCD;
+		let BCH;
+		let BCJ;
+		let BCT;
+		let BEO;
+		let BFE;
+		if BAY{
+		let BBA=AMX< BAZ;
+		let BBO;
+		let BBR;
+		let BBT;
+		if BBA{
+		let BBB=AMX* BL;
+		let BBC=((-0.5f64* BBB).abs())< HG;
+		let BBH;
+		if BBC{
+		let BBD=(-0.5f64* BBB).exp();
+		BBH=BBD;
+		}else{
+		let BBE=(-0.5f64* BBB)< A;
+		let BBI=if BBE{
+		let BBF=HH/ (I+ ((-230.25850929940458f64- (-0.5f64* BBB))* (I+ (K* ((-230.25850929940458f64- (-0.5f64* BBB))* (I+ ((-230.25850929940458f64- (-0.5f64* BBB))* DQ)))))));
+		BBF
+		}else{
+		let BBG=HI* (I+ (((-0.5f64* BBB)- HG)* (I+ (K* (((-0.5f64* BBB)- HG)* (I+ (((-0.5f64* BBB)- HG)* DQ)))))));
+		BBG
+		};
+		BBH=BBI;
+		}
+		let BBJ=I/ BBH;
+		let BBK=BBJ* BBJ;
+		BBO=BBK;
+		BBR=BBH;
+		BBT=BBJ;
+		}else{
+		let BBL=(I+ ((AMX- BAZ)* BL))* staged[650];
+		let BBM=BBL.sqrt();
+		let BBN=I/ BBM;
+		BBO=BBL;
+		BBR=BBN;
+		BBT=BBM;
+		}
+		let BBP=BBO- I;
+		let BBQ=AMX> A;
+		let BBV=if BBQ{
+		let BBS=X* (BK* (((X+ BBR)+ (((BBR+ I)* (BBR+ Y)).sqrt())).ln()));
+		BBS
+		}else{
+		let BBU=(-AMX)+ (X* (BK* ((((X* BBT)+ I)+ (((I+ BBT)* (I+ (Y* BBT))).sqrt())).ln())));
+		BBU
+		};
+		let BBW=staged[651]- BBV;
+		let BBX=AMX- BBW;
+		let BBY=K* ((AMX+ BBW)- (((BBX* BBX)+ staged[652]).sqrt()));
+		let BCA=AMX- BBZ;
+		let BCB=K* ((AMX+ BBZ)- (((BCA* BCA)+ staged[654]).sqrt()));
+		let BCC=K* ((AMX+ A)- (((AMX* AMX)+ 4e-12f64).sqrt()));
+		BCD=BBP;
+		BCH=BBY;
+		BCJ=BBV;
+		BCT=BBT;
+		BEO=BCB;
+		BFE=BCC;
+		}else{
+		BCD=APY;
+		BCH=AQC;
+		BCJ=A;
+		BCT=AQO;
+		BEO=A;
+		BFE=ASV;
+		}
 		let BGJ;
 		let BGL;
 		let BGX;
 		let BHW;
-		let BIY;
-		if BFW{
-		BGJ=BGK;
-		BGL=BGM;
-		BGX=BGY;
-		BHW=BHX;
-		BIY=A;
+		let BMR;
+		if BAV{
+		BGJ=BCX;
+		BGL=BCZ;
+		BGX=BDL;
+		BHW=BEK;
+		BMR=A;
 		}else{
-		let BFX=staged[666]- BCI;
-		let BFY=I- ((I- (BCK/ BFX)).sqrt());
-		let BGB=if BFZ{
+		let BCE=staged[655]* BCD;
+		let BCW;
+		let BCY;
+		let BDK;
+		let BEJ;
+		let BFN;
+		if BCG{
+		BCW=BCX;
+		BCY=BCZ;
+		BDK=BDL;
+		BEJ=BEK;
+		BFN=A;
+		}else{
+		let BCI=staged[656]- BCH;
+		let BCK=I- ((I- (BCJ/ BCI)).sqrt());
+		let BCN=if BCL{
 		A
 		}else{
-		let BGA=((((BFY* BFY)* (BFY.ln()))/ (I- BFY))+ BFY)* staged[667];
-		BGA
+		let BCM=((((BCK* BCK)* (BCK.ln()))/ (I- BCK))+ BCK)* staged[657];
+		BCM
 		};
-		let BGC=BFY+ BGB;
-		let BGF=if BFZ{
-		let BGD=(BFX* AQ).sqrt();
-		BGD
+		let BCO=BCK+ BCN;
+		let BCR=if BCL{
+		let BCP=(BCI* AO).sqrt();
+		BCP
 		}else{
-		let BGE=(BFX* AQ).powf(AL);
-		BGE
+		let BCQ=(BCI* AO).powf(AK);
+		BCQ
 		};
-		let BGG=staged[286]* BGF;
-		let BGH=staged[668]* ((BCU- I)* BGG);
-		let BGI=staged[282]* (BGH* BGC);
-		BGJ=BGG;
-		BGL=BFX;
-		BGX=BGC;
-		BHW=BGH;
-		BIY=BGI;
+		let BCS=staged[269]* BCR;
+		let BCU=staged[658]* ((BCT- I)* BCS);
+		let BCV=staged[265]* (BCU* BCO);
+		BCW=BCS;
+		BCY=BCI;
+		BDK=BCO;
+		BEJ=BCU;
+		BFN=BCV;
 		}
-		let BIZ;
-		if BFV{
-		BIZ=A;
+		let BFO;
+		if BCF{
+		BFO=A;
 		}else{
-		let BGN=staged[669]* ((BGJ* staged[287])/ BGL);
-		let BGO=staged[670]/ BGN;
-		let BGP=BGO* BGO;
-		let BGQ=BGP* BGP;
-		let BGR=(BGQ/ (BGQ+ I)).sqrt();
-		let BGS=BGR.sqrt();
-		let BGT=BGR* BGS;
-		let BGZ=if BGU{
-		let BGV=I/ (I+ (BGN* BGT));
-		BGV
+		let BDA=staged[659]* ((BCW* staged[270])/ BCY);
+		let BDB=staged[660]/ BDA;
+		let BDC=BDB* BDB;
+		let BDD=BDC* BDC;
+		let BDE=(BDD/ (BDD+ I)).sqrt();
+		let BDF=BDE.sqrt();
+		let BDG=BDE* BDF;
+		let BDM=if BDH{
+		let BDI=I/ (I+ (BDA* BDG));
+		BDI
 		}else{
-		let BGW=(I+ (BGN* BGT)).powf(staged[671]);
-		BGW
+		let BDJ=(I+ (BDA* BDG)).powf(staged[661]);
+		BDJ
 		};
-		let BHA=(BGX* BGZ)/ (BGX+ BGZ);
-		let BHB=(HL* (BGN/ BGS)).sqrt();
-		let BHC=(((BR* BGO)* BGS)- (BR* BGR))+ (K* (BGN* BGT));
-		let BHD=(((X* (BGO* BGS))- BGR)- I)* BHB;
-		let BHE=BHD* BHD;
-		let BHF=BHD> A;
-		let BHM=if BHF{
-		let BHG=I/ (I+ (V* BHD));
-		BHG
+		let BDN=(BDK* BDM)/ (BDK+ BDM);
+		let BDO=(HK* (BDA/ BDF)).sqrt();
+		let BDP=(((BQ* BDB)* BDF)- (BQ* BDE))+ (K* (BDA* BDG));
+		let BDQ=(((X* (BDB* BDF))- BDE)- I)* BDO;
+		let BDR=BDQ* BDQ;
+		let BDS=BDQ> A;
+		let BDZ=if BDS{
+		let BDT=I/ (I+ (V* BDQ));
+		BDT
 		}else{
-		let BHH=I/ (I- (V* BHD));
-		BHH
+		let BDU=I/ (I- (V* BDQ));
+		BDU
 		};
-		let BHI=(-BHE)+ BHC;
-		let BHJ=BHI> -230.25850929940458f64;
-		let BHO=if BHJ{
-		let BHK=BHI.exp();
-		BHK
+		let BDV=(-BDR)+ BDP;
+		let BDW=BDV> -230.25850929940458f64;
+		let BEB=if BDW{
+		let BDX=BDV.exp();
+		BDX
 		}else{
-		let BHL=HI/ (I+ ((-230.25850929940458f64- BHI)* (I+ (K* ((-230.25850929940458f64- BHI)* (I+ ((-230.25850929940458f64- BHI)* DQ)))))));
-		BHL
+		let BDY=HH/ (I+ ((-230.25850929940458f64- BDV)* (I+ (K* ((-230.25850929940458f64- BDV)* (I+ ((-230.25850929940458f64- BDV)* DQ)))))));
+		BDY
 		};
-		let BHN=BHM* BHM;
-		let BHP=(((U* BHM)+ (Z* BHN))+ (AA* (BHN* BHM)))* BHO;
-		let BHV;
-		if BHF{
-		BHV=BHP;
+		let BEA=BDZ* BDZ;
+		let BEC=(((U* BDZ)+ (Z* BEA))+ (AA* (BEA* BDZ)))* BEB;
+		let BEI;
+		if BDS{
+		BEI=BEC;
 		}else{
-		let BHQ=BHC> -230.25850929940458f64;
-		let BHT=if BHQ{
-		let BHR=BHC.exp();
-		BHR
+		let BED=BDP> -230.25850929940458f64;
+		let BEG=if BED{
+		let BEE=BDP.exp();
+		BEE
 		}else{
-		let BHS=HI/ (I+ ((-230.25850929940458f64- BHC)* (I+ (K* ((-230.25850929940458f64- BHC)* (I+ ((-230.25850929940458f64- BHC)* DQ)))))));
-		BHS
+		let BEF=HH/ (I+ ((-230.25850929940458f64- BDP)* (I+ (K* ((-230.25850929940458f64- BDP)* (I+ ((-230.25850929940458f64- BDP)* DQ)))))));
+		BEF
 		};
-		let BHU=(X* BHT)- BHP;
-		BHV=BHU;
+		let BEH=(X* BEG)- BEC;
+		BEI=BEH;
 		}
-		let BHY=staged[283]* ((BHW* (0.886226925452758f64* ((BR* BHV)/ BHB)))* BHA);
-		BIZ=BHY;
+		let BEL=staged[266]* ((BEJ* (0.886226925452758f64* ((BQ* BEI)/ BDO)))* BDN);
+		BFO=BEL;
 		}
-		let BJA;
-		if BHZ{
-		BJA=A;
+		let BFP;
+		if BEM{
+		BFP=A;
 		}else{
-		let BID=if BIA{
-		let BIB=((AP- BEP)* AQ).sqrt();
-		BIB
+		let BER=if BEN{
+		let BEP=((AN- BEO)* AO).sqrt();
+		BEP
 		}else{
-		let BIC=((AP- BEP)* AQ).powf(AL);
-		BIC
+		let BEQ=((AN- BEO)* AO).powf(AK);
+		BEQ
 		};
-		let BIE=staged[37]* (((AP- BEP)* staged[290])/ BID);
-		let BIF=staged[673]/ BIE;
-		let BIG=(BIF.abs())< HH;
-		let BIM;
-		if BIG{
-		let BIH=BIF.exp();
-		BIM=BIH;
+		let BES=staged[36]* (((AN- BEO)* staged[273])/ BER);
+		let BET=staged[663]/ BES;
+		let BEU=(BET.abs())< HG;
+		let BFA;
+		if BEU{
+		let BEV=BET.exp();
+		BFA=BEV;
 		}else{
-		let BII=BIF< A;
-		let BIN=if BII{
-		let BIJ=HI/ (I+ ((-230.25850929940458f64- BIF)* (I+ (K* ((-230.25850929940458f64- BIF)* (I+ ((-230.25850929940458f64- BIF)* DQ)))))));
-		BIJ
+		let BEW=BET< A;
+		let BFB=if BEW{
+		let BEX=HH/ (I+ ((-230.25850929940458f64- BET)* (I+ (K* ((-230.25850929940458f64- BET)* (I+ ((-230.25850929940458f64- BET)* DQ)))))));
+		BEX
 		}else{
-		let BIK=BIF- HH;
-		let BIL=HJ* (I+ (BIK* (I+ (K* (BIK* (I+ (BIK* DQ)))))));
-		BIL
+		let BEY=BET- HG;
+		let BEZ=HI* (I+ (BEY* (I+ (K* (BEY* (I+ (BEY* DQ)))))));
+		BEZ
 		};
-		BIM=BIN;
+		BFA=BFB;
 		}
-		let BIO=staged[289]* (((AMY* BIE)* BIE)* BIM);
-		BJA=BIO;
+		let BFC=staged[272]* (((AMX* BES)* BES)* BFA);
+		BFP=BFC;
 		}
-		let BJB;
-		if BIP{
-		BJB=I;
+		let BFQ;
+		if BFD{
+		BFQ=I;
 		}else{
-		let BIQ=BFF> staged[674];
-		let BJC;
-		if BIQ{
-		let BIR=AU== BI;
-		let BIV=if BIR{
-		let BIS=BFF* AX;
-		let BIT=((BIS* BIS)* BIS)* BIS;
-		BIT
+		let BFF=BFE> staged[664];
+		let BFR;
+		if BFF{
+		let BFG=AT== BI;
+		let BFK=if BFG{
+		let BFH=BFE* AW;
+		let BFI=((BFH* BFH)* BFH)* BFH;
+		BFI
 		}else{
-		let BIU=((BFF* AX).abs()).powf(AU);
-		BIU
+		let BFJ=((BFE* AW).abs()).powf(AT);
+		BFJ
 		};
-		let BIW=I/ (I- BIV);
-		BJC=BIW;
+		let BFL=I/ (I- BFK);
+		BFR=BFL;
 		}else{
-		let BIX=staged[297]+ ((BFF+ (AB* staged[293]))* staged[296]);
-		BJC=BIX;
+		let BFM=staged[280]+ ((BFE+ (AB* staged[276]))* staged[279]);
+		BFR=BFM;
 		}
-		BJB=BJC;
+		BFQ=BFR;
 		}
-		let BJD=(HM* (((BFU+ BIY)+ BIZ)+ BJA))* BJB;
-		BJU=BGJ;
-		BJW=BGL;
-		BKI=BGX;
-		BLH=BHW;
-		BMT=BJD;
+		let BFS=(HL* (((BCE+ BFN)+ BFO)+ BFP))* BFQ;
+		BGJ=BCW;
+		BGL=BCY;
+		BGX=BDK;
+		BHW=BEJ;
+		BMR=BFS;
 		}
-		let BMU;
-		if BAY{
-		BMU=A;
-		}else{
-		let BJE=staged[675]* BCE;
 		let BJT;
 		let BJV;
 		let BKH;
 		let BLG;
+		let BMS;
+		if BAW{
+		BJT=BGJ;
+		BJV=BGL;
+		BKH=BGX;
+		BLG=BHW;
+		BMS=A;
+		}else{
+		let BFT=staged[665]* BCD;
+		let BGI;
+		let BGK;
+		let BGW;
+		let BHV;
+		let BIX;
+		if BFV{
+		BGI=BGJ;
+		BGK=BGL;
+		BGW=BGX;
+		BHV=BHW;
+		BIX=A;
+		}else{
+		let BFW=staged[666]- BCH;
+		let BFX=I- ((I- (BCJ/ BFW)).sqrt());
+		let BGA=if BFY{
+		A
+		}else{
+		let BFZ=((((BFX* BFX)* (BFX.ln()))/ (I- BFX))+ BFX)* staged[667];
+		BFZ
+		};
+		let BGB=BFX+ BGA;
+		let BGE=if BFY{
+		let BGC=(BFW* AQ).sqrt();
+		BGC
+		}else{
+		let BGD=(BFW* AQ).powf(AL);
+		BGD
+		};
+		let BGF=staged[286]* BGE;
+		let BGG=staged[668]* ((BCT- I)* BGF);
+		let BGH=staged[282]* (BGG* BGB);
+		BGI=BGF;
+		BGK=BFW;
+		BGW=BGB;
+		BHV=BGG;
+		BIX=BGH;
+		}
+		let BIY;
+		if BFU{
+		BIY=A;
+		}else{
+		let BGM=staged[669]* ((BGI* staged[287])/ BGK);
+		let BGN=staged[670]/ BGM;
+		let BGO=BGN* BGN;
+		let BGP=BGO* BGO;
+		let BGQ=(BGP/ (BGP+ I)).sqrt();
+		let BGR=BGQ.sqrt();
+		let BGS=BGQ* BGR;
+		let BGY=if BGT{
+		let BGU=I/ (I+ (BGM* BGS));
+		BGU
+		}else{
+		let BGV=(I+ (BGM* BGS)).powf(staged[671]);
+		BGV
+		};
+		let BGZ=(BGW* BGY)/ (BGW+ BGY);
+		let BHA=(HK* (BGM/ BGR)).sqrt();
+		let BHB=(((BR* BGN)* BGR)- (BR* BGQ))+ (K* (BGM* BGS));
+		let BHC=(((X* (BGN* BGR))- BGQ)- I)* BHA;
+		let BHD=BHC* BHC;
+		let BHE=BHC> A;
+		let BHL=if BHE{
+		let BHF=I/ (I+ (V* BHC));
+		BHF
+		}else{
+		let BHG=I/ (I- (V* BHC));
+		BHG
+		};
+		let BHH=(-BHD)+ BHB;
+		let BHI=BHH> -230.25850929940458f64;
+		let BHN=if BHI{
+		let BHJ=BHH.exp();
+		BHJ
+		}else{
+		let BHK=HH/ (I+ ((-230.25850929940458f64- BHH)* (I+ (K* ((-230.25850929940458f64- BHH)* (I+ ((-230.25850929940458f64- BHH)* DQ)))))));
+		BHK
+		};
+		let BHM=BHL* BHL;
+		let BHO=(((U* BHL)+ (Z* BHM))+ (AA* (BHM* BHL)))* BHN;
+		let BHU;
+		if BHE{
+		BHU=BHO;
+		}else{
+		let BHP=BHB> -230.25850929940458f64;
+		let BHS=if BHP{
+		let BHQ=BHB.exp();
+		BHQ
+		}else{
+		let BHR=HH/ (I+ ((-230.25850929940458f64- BHB)* (I+ (K* ((-230.25850929940458f64- BHB)* (I+ ((-230.25850929940458f64- BHB)* DQ)))))));
+		BHR
+		};
+		let BHT=(X* BHS)- BHO;
+		BHU=BHT;
+		}
+		let BHX=staged[283]* ((BHV* (0.886226925452758f64* ((BR* BHU)/ BHA)))* BGZ);
+		BIY=BHX;
+		}
+		let BIZ;
+		if BHY{
+		BIZ=A;
+		}else{
+		let BIC=if BHZ{
+		let BIA=((AP- BEO)* AQ).sqrt();
+		BIA
+		}else{
+		let BIB=((AP- BEO)* AQ).powf(AL);
+		BIB
+		};
+		let BID=staged[37]* (((AP- BEO)* staged[290])/ BIC);
+		let BIE=staged[673]/ BID;
+		let BIF=(BIE.abs())< HG;
+		let BIL;
+		if BIF{
+		let BIG=BIE.exp();
+		BIL=BIG;
+		}else{
+		let BIH=BIE< A;
+		let BIM=if BIH{
+		let BII=HH/ (I+ ((-230.25850929940458f64- BIE)* (I+ (K* ((-230.25850929940458f64- BIE)* (I+ ((-230.25850929940458f64- BIE)* DQ)))))));
+		BII
+		}else{
+		let BIJ=BIE- HG;
+		let BIK=HI* (I+ (BIJ* (I+ (K* (BIJ* (I+ (BIJ* DQ)))))));
+		BIK
+		};
+		BIL=BIM;
+		}
+		let BIN=staged[289]* (((AMX* BID)* BID)* BIL);
+		BIZ=BIN;
+		}
+		let BJA;
+		if BIO{
+		BJA=I;
+		}else{
+		let BIP=BFE> staged[674];
+		let BJB;
+		if BIP{
+		let BIQ=AU== BI;
+		let BIU=if BIQ{
+		let BIR=BFE* AX;
+		let BIS=((BIR* BIR)* BIR)* BIR;
+		BIS
+		}else{
+		let BIT=((BFE* AX).abs()).powf(AU);
+		BIT
+		};
+		let BIV=I/ (I- BIU);
+		BJB=BIV;
+		}else{
+		let BIW=staged[297]+ ((BFE+ (AB* staged[293]))* staged[296]);
+		BJB=BIW;
+		}
+		BJA=BJB;
+		}
+		let BJC=(HL* (((BFT+ BIX)+ BIY)+ BIZ))* BJA;
+		BJT=BGI;
+		BJV=BGK;
+		BKH=BGW;
+		BLG=BHV;
+		BMS=BJC;
+		}
+		let BMT;
+		if BAX{
+		BMT=A;
+		}else{
+		let BJD=staged[675]* BCD;
+		let BJS;
+		let BJU;
+		let BKG;
+		let BLF;
+		let BML;
+		if BJF{
+		BJS=BJT;
+		BJU=BJV;
+		BKG=BKH;
+		BLF=BLG;
+		BML=A;
+		}else{
+		let BJG=staged[676]- BCH;
+		let BJH=I- ((I- (BCJ/ BJG)).sqrt());
+		let BJK=if BJI{
+		A
+		}else{
+		let BJJ=((((BJH* BJH)* (BJH.ln()))/ (I- BJH))+ BJH)* staged[677];
+		BJJ
+		};
+		let BJL=BJH+ BJK;
+		let BJO=if BJI{
+		let BJM=(BJG* AS).sqrt();
+		BJM
+		}else{
+		let BJN=(BJG* AS).powf(AM);
+		BJN
+		};
+		let BJP=staged[303]* BJO;
+		let BJQ=staged[678]* ((BCT- I)* BJP);
+		let BJR=staged[299]* (BJQ* BJL);
+		BJS=BJP;
+		BJU=BJG;
+		BKG=BJL;
+		BLF=BJQ;
+		BML=BJR;
+		}
 		let BMM;
-		if BJG{
-		BJT=BJU;
-		BJV=BJW;
-		BKH=BKI;
-		BLG=BLH;
+		if BJE{
 		BMM=A;
 		}else{
-		let BJH=staged[676]- BCI;
-		let BJI=I- ((I- (BCK/ BJH)).sqrt());
-		let BJL=if BJJ{
-		A
+		let BJW=staged[679]* ((BJS* staged[304])/ BJU);
+		let BJX=staged[680]/ BJW;
+		let BJY=BJX* BJX;
+		let BJZ=BJY* BJY;
+		let BKA=(BJZ/ (BJZ+ I)).sqrt();
+		let BKB=BKA.sqrt();
+		let BKC=BKA* BKB;
+		let BKI=if BKD{
+		let BKE=I/ (I+ (BJW* BKC));
+		BKE
 		}else{
-		let BJK=((((BJI* BJI)* (BJI.ln()))/ (I- BJI))+ BJI)* staged[677];
-		BJK
+		let BKF=(I+ (BJW* BKC)).powf(staged[681]);
+		BKF
 		};
-		let BJM=BJI+ BJL;
-		let BJP=if BJJ{
-		let BJN=(BJH* AS).sqrt();
-		BJN
+		let BKJ=(BKG* BKI)/ (BKG+ BKI);
+		let BKK=(HK* (BJW/ BKB)).sqrt();
+		let BKL=(((BS* BJX)* BKB)- (BS* BKA))+ (K* (BJW* BKC));
+		let BKM=(((X* (BJX* BKB))- BKA)- I)* BKK;
+		let BKN=BKM* BKM;
+		let BKO=BKM> A;
+		let BKV=if BKO{
+		let BKP=I/ (I+ (V* BKM));
+		BKP
 		}else{
-		let BJO=(BJH* AS).powf(AM);
-		BJO
+		let BKQ=I/ (I- (V* BKM));
+		BKQ
 		};
-		let BJQ=staged[303]* BJP;
-		let BJR=staged[678]* ((BCU- I)* BJQ);
-		let BJS=staged[299]* (BJR* BJM);
-		BJT=BJQ;
-		BJV=BJH;
-		BKH=BJM;
-		BLG=BJR;
-		BMM=BJS;
+		let BKR=(-BKN)+ BKL;
+		let BKS=BKR> -230.25850929940458f64;
+		let BKX=if BKS{
+		let BKT=BKR.exp();
+		BKT
+		}else{
+		let BKU=HH/ (I+ ((-230.25850929940458f64- BKR)* (I+ (K* ((-230.25850929940458f64- BKR)* (I+ ((-230.25850929940458f64- BKR)* DQ)))))));
+		BKU
+		};
+		let BKW=BKV* BKV;
+		let BKY=(((U* BKV)+ (Z* BKW))+ (AA* (BKW* BKV)))* BKX;
+		let BLE;
+		if BKO{
+		BLE=BKY;
+		}else{
+		let BKZ=BKL> -230.25850929940458f64;
+		let BLC=if BKZ{
+		let BLA=BKL.exp();
+		BLA
+		}else{
+		let BLB=HH/ (I+ ((-230.25850929940458f64- BKL)* (I+ (K* ((-230.25850929940458f64- BKL)* (I+ ((-230.25850929940458f64- BKL)* DQ)))))));
+		BLB
+		};
+		let BLD=(X* BLC)- BKY;
+		BLE=BLD;
+		}
+		let BLH=staged[300]* ((BLF* (0.886226925452758f64* ((BS* BLE)/ BKK)))* BKJ);
+		BMM=BLH;
 		}
 		let BMN;
-		if BJF{
+		if BLI{
 		BMN=A;
 		}else{
-		let BJX=staged[679]* ((BJT* staged[304])/ BJV);
-		let BJY=staged[680]/ BJX;
-		let BJZ=BJY* BJY;
-		let BKA=BJZ* BJZ;
-		let BKB=(BKA/ (BKA+ I)).sqrt();
-		let BKC=BKB.sqrt();
-		let BKD=BKB* BKC;
-		let BKJ=if BKE{
-		let BKF=I/ (I+ (BJX* BKD));
-		BKF
+		let BLM=if BLJ{
+		let BLK=((AR- BEO)* AS).sqrt();
+		BLK
 		}else{
-		let BKG=(I+ (BJX* BKD)).powf(staged[681]);
-		BKG
-		};
-		let BKK=(BKH* BKJ)/ (BKH+ BKJ);
-		let BKL=(HL* (BJX/ BKC)).sqrt();
-		let BKM=(((BS* BJY)* BKC)- (BS* BKB))+ (K* (BJX* BKD));
-		let BKN=(((X* (BJY* BKC))- BKB)- I)* BKL;
-		let BKO=BKN* BKN;
-		let BKP=BKN> A;
-		let BKW=if BKP{
-		let BKQ=I/ (I+ (V* BKN));
-		BKQ
-		}else{
-		let BKR=I/ (I- (V* BKN));
-		BKR
-		};
-		let BKS=(-BKO)+ BKM;
-		let BKT=BKS> -230.25850929940458f64;
-		let BKY=if BKT{
-		let BKU=BKS.exp();
-		BKU
-		}else{
-		let BKV=HI/ (I+ ((-230.25850929940458f64- BKS)* (I+ (K* ((-230.25850929940458f64- BKS)* (I+ ((-230.25850929940458f64- BKS)* DQ)))))));
-		BKV
-		};
-		let BKX=BKW* BKW;
-		let BKZ=(((U* BKW)+ (Z* BKX))+ (AA* (BKX* BKW)))* BKY;
-		let BLF;
-		if BKP{
-		BLF=BKZ;
-		}else{
-		let BLA=BKM> -230.25850929940458f64;
-		let BLD=if BLA{
-		let BLB=BKM.exp();
-		BLB
-		}else{
-		let BLC=HI/ (I+ ((-230.25850929940458f64- BKM)* (I+ (K* ((-230.25850929940458f64- BKM)* (I+ ((-230.25850929940458f64- BKM)* DQ)))))));
-		BLC
-		};
-		let BLE=(X* BLD)- BKZ;
-		BLF=BLE;
-		}
-		let BLI=staged[300]* ((BLG* (0.886226925452758f64* ((BS* BLF)/ BKL)))* BKK);
-		BMN=BLI;
-		}
-		let BMO;
-		if BLJ{
-		BMO=A;
-		}else{
-		let BLN=if BLK{
-		let BLL=((AR- BEP)* AS).sqrt();
+		let BLL=((AR- BEO)* AS).powf(AM);
 		BLL
-		}else{
-		let BLM=((AR- BEP)* AS).powf(AM);
-		BLM
 		};
-		let BLO=staged[38]* (((AR- BEP)* staged[307])/ BLN);
-		let BLQ=(-BLP)/ BLO;
-		let BLR=(BLQ.abs())< HH;
-		let BLX;
-		if BLR{
-		let BLS=BLQ.exp();
-		BLX=BLS;
+		let BLN=staged[38]* (((AR- BEO)* staged[307])/ BLM);
+		let BLP=(-BLO)/ BLN;
+		let BLQ=(BLP.abs())< HG;
+		let BLW;
+		if BLQ{
+		let BLR=BLP.exp();
+		BLW=BLR;
 		}else{
-		let BLT=BLQ< A;
-		let BLY=if BLT{
-		let BLU=HI/ (I+ ((-230.25850929940458f64- BLQ)* (I+ (K* ((-230.25850929940458f64- BLQ)* (I+ ((-230.25850929940458f64- BLQ)* DQ)))))));
-		BLU
+		let BLS=BLP< A;
+		let BLX=if BLS{
+		let BLT=HH/ (I+ ((-230.25850929940458f64- BLP)* (I+ (K* ((-230.25850929940458f64- BLP)* (I+ ((-230.25850929940458f64- BLP)* DQ)))))));
+		BLT
 		}else{
-		let BLV=BLQ- HH;
-		let BLW=HJ* (I+ (BLV* (I+ (K* (BLV* (I+ (BLV* DQ)))))));
-		BLW
+		let BLU=BLP- HG;
+		let BLV=HI* (I+ (BLU* (I+ (K* (BLU* (I+ (BLU* DQ)))))));
+		BLV
 		};
-		BLX=BLY;
+		BLW=BLX;
 		}
-		let BLZ=staged[306]* (((AMY* BLO)* BLO)* BLX);
-		BMO=BLZ;
+		let BLY=staged[306]* (((AMX* BLN)* BLN)* BLW);
+		BMN=BLY;
 		}
-		let BMB=BMA> 1e3f64;
+		let BMA=BLZ> 1e3f64;
+		let BMO;
+		if BMA{
+		BMO=I;
+		}else{
+		let BMB=BFE> ((-AB)* BLZ);
 		let BMP;
 		if BMB{
-		BMP=I;
+		let BMC=AV== BI;
+		let BMH=if BMC{
+		let BME=BFE* BMD;
+		let BMF=((BME* BME)* BME)* BME;
+		BMF
 		}else{
-		let BMC=BFF> ((-AB)* BMA);
-		let BMQ;
-		if BMC{
-		let BMD=AV== BI;
-		let BMI=if BMD{
-		let BMF=BFF* BME;
-		let BMG=((BMF* BMF)* BMF)* BMF;
+		let BMG=((BFE* BMD).abs()).powf(AV);
 		BMG
-		}else{
-		let BMH=((BFF* BME).abs()).powf(AV);
-		BMH
 		};
-		let BMJ=I/ (I- BMI);
-		BMQ=BMJ;
+		let BMI=I/ (I- BMH);
+		BMP=BMI;
 		}else{
-		let BML=staged[314]+ ((BFF+ (AB* BMA))* BMK);
-		BMQ=BML;
+		let BMK=staged[314]+ ((BFE+ (AB* BLZ))* BMJ);
+		BMP=BMK;
 		}
-		BMP=BMQ;
+		BMO=BMP;
 		}
-		let BMR=(HM* (((BJE+ BMM)+ BMN)+ BMO))* BMP;
-		BMU=BMR;
+		let BMQ=(HL* (((BJD+ BML)+ BMM)+ BMN))* BMO;
+		BMT=BMQ;
 		}
-		let BMV=((staged[154]* BMS)+ (staged[155]* BMT))+ (staged[156]* BMU);
-		BNK=BAM;
-		BNM=BMV;
+		let BMU=((staged[154]* BMR)+ (staged[155]* BMS))+ (staged[156]* BMT);
+		BNI=BAL;
+		BNK=BMU;
 		}
+		BNH=BNI;
 		BNJ=BNK;
-		BNL=BNM;
 		}else{
+		BNH=A;
 		BNJ=A;
-		BNL=A;
 		}
-		let BMW=ALM> A;
-		let BNN=QD&& (staged[699]!=0.0);
-		let BSD;
-		let BSH;
-		let BSI;
-		let BSM;
+		let BMV=ALL> A;
+		let BNL=QC&& (staged[699]!=0.0);
+		let BSB;
+		let BSF;
+		let BSG;
+		let BSK;
+		if BNL{
+		let BNN=BNM> A;
+		let BSL;
 		if BNN{
-		let BNP=BNO> A;
-		let BSN;
-		if BNP{
-		let BNQ=GC* ABT;
-		let BNR=BNQ* BE;
-		let BNS=GC* ABV;
-		let BNT=BNQ* ABP;
-		let BNU=K* BNT;
-		let BNW=((GU* ALF)* BNV)* ((((EY- (FC* BNR))+ (FG* (BNR* BNR)))* (((BNS+ BNU)/ (BNS- BNU)).ln()))+ ((FC+ (FG* (BNS- (X* BNR))))* BNT));
-		let BNX=BNW/ BNR;
-		let BNY=BNX> A;
-		let BNZ=if BNY{
-		BNX
+		let BNO=GB* ABS;
+		let BNP=BNO* BE;
+		let BNQ=GB* ABU;
+		let BNR=BNO* ABO;
+		let BNS=K* BNR;
+		let BNU=((GT* ALE)* BNT)* ((((EY- (FC* BNP))+ (FG* (BNP* BNP)))* (((BNQ+ BNS)/ (BNQ- BNS)).ln()))+ ((FC+ (FG* (BNQ- (X* BNP))))* BNR));
+		let BNV=BNU/ BNP;
+		let BNW=BNV> A;
+		let BNX=if BNW{
+		BNV
 		}else{
 		A
 		};
-		BSN=BNZ;
+		BSL=BNX;
 		}else{
-		BSN=A;
+		BSL=A;
 		}
-		let BOA=BMX> A;
-		let BPB;
+		let BNY=parameters[32]> A;
+		let BOZ;
+		let BPA;
 		let BPC;
-		let BPE;
-		let BPI;
+		let BPG;
+		let BPH;
 		let BPJ;
-		let BPL;
-		let BPO;
-		let BPU;
-		if BOA{
-		let BOB=ABV/ ABT;
-		let BOC=ABU/ ABV;
-		let BOD=0.08333333333333333f64* (ABP/ BOB);
-		let BOE=BOD* BOD;
-		let BOF=(BOB/ AGP)- I;
-		let BOG=I- (NT* (BOF* BOE));
-		let BOI=BOG> BOH;
-		let BOJ=if BOI{
-		BOG
-		}else{
-		BOH
-		};
-		let BOK=I/ (BOJ* BOJ);
-		let BOL=(GK* ABV)* BNV;
-		let BOM=(BOC+ (NT* BOE))- (24f64* (((I+ BOC)* BOE)* BOF));
-		let BON=BOM> OR;
-		let BOO=if BON{
-		BOM
-		}else{
-		OR
-		};
-		let BOP=(BOL* BOK)* BOO;
-		let BOQ=EU> A;
-		let BOY;
-		let BPP;
-		if BOQ{
-		let BOR=ABZ/ ABX;
-		let BOS=((BOR* BOR)* ABP)* ABP;
-		let BOU=if BB{
-		let BOT=BOS/ (I+ (BOR* ABP));
-		BOT
-		}else{
-		BOS
-		};
-		let BOV=ABX/ ((K* (ABX* (I+ ((I+ (X* BOU)).sqrt()))))* BOJ);
-		let BOW=(((staged[701]* ALF)* ABK)* BOV)* BOV;
-		let BOX=BOP+ (BOW/ BJ);
-		BOY=BOX;
-		BPP=BOW;
-		}else{
-		BOY=BOP;
-		BPP=A;
-		}
-		let BOZ=(GS* BOY).sqrt();
-		BPB=BOC;
-		BPC=BOE;
-		BPE=BOF;
-		BPI=BOK;
-		BPJ=BOL;
-		BPL=BOD;
-		BPO=BPP;
-		BPU=BOZ;
-		}else{
-		BPB=C;
-		BPC=E;
-		BPE=F;
-		BPI=G;
-		BPJ=H;
-		BPL=D;
-		BPO=A;
-		BPU=A;
-		}
-		let BPA=(((parameters[50]== I)&& (GS> A))&& BOA)&& (parameters[33]> A);
-		let BSE;
-		let BSJ;
-		if BPA{
-		let BPD=NT* BPC;
-		let BPF=((BPB/ NT)- (BPC* ((BPB+ HK)- BPD)))- (1.6f64* ((BPC* ((BPB+ I)- BPD))* BPE));
-		let BPG=BPF> OR;
-		let BPH=if BPG{
-		BPF
-		}else{
-		OR
-		};
-		let BPK=(BPI/ BPJ)* BPH;
-		let BPM=(BPI* BPL)* ((I- BPD)- (((BPB+ (19.2f64* BPC))- (NT* (BPB* BPC)))* BPE));
-		let BPN=EU> A;
+		let BPM;
 		let BPS;
-		let BPW;
-		if BPN{
-		let BPQ=BPK+ ((BPO* (I+ BPD))/ (((NT* BPJ)* BPJ)* BJ));
-		let BPR=BPM- (((BPO* BPL)* (I+ BPE))/ (BPJ* BJ));
-		BPS=BPQ;
-		BPW=BPR;
+		if BNY{
+		let BNZ=ABU/ ABS;
+		let BOA=ABT/ ABU;
+		let BOB=0.08333333333333333f64* (ABO/ BNZ);
+		let BOC=BOB* BOB;
+		let BOD=(BNZ/ AGO)- I;
+		let BOE=I- (NS* (BOD* BOC));
+		let BOG=BOE> BOF;
+		let BOH=if BOG{
+		BOE
 		}else{
-		BPS=BPK;
-		BPW=BPM;
+		BOF
+		};
+		let BOI=I/ (BOH* BOH);
+		let BOJ=(GJ* ABU)* BNT;
+		let BOK=(BOA+ (NS* BOC))- (24f64* (((I+ BOA)* BOC)* BOD));
+		let BOL=BOK> OQ;
+		let BOM=if BOL{
+		BOK
+		}else{
+		OQ
+		};
+		let BON=(BOJ* BOI)* BOM;
+		let BOO=EU> A;
+		let BOW;
+		let BPN;
+		if BOO{
+		let BOP=ABY/ ABW;
+		let BOQ=((BOP* BOP)* ABO)* ABO;
+		let BOS=if BB{
+		let BOR=BOQ/ (I+ (BOP* ABO));
+		BOR
+		}else{
+		BOQ
+		};
+		let BOT=ABW/ ((K* (ABW* (I+ ((I+ (X* BOS)).sqrt()))))* BOH);
+		let BOU=(((staged[701]* ALE)* ABJ)* BOT)* BOT;
+		let BOV=BON+ (BOU/ BJ);
+		BOW=BOV;
+		BPN=BOU;
+		}else{
+		BOW=BON;
+		BPN=A;
 		}
-		let BPT=(GS/ BPS).sqrt();
-		let BPV=BPU<= A;
-		let BPY=if BPV{
+		let BOX=(GR* BOW).sqrt();
+		BOZ=BOA;
+		BPA=BOC;
+		BPC=BOD;
+		BPG=BOI;
+		BPH=BOJ;
+		BPJ=BOB;
+		BPM=BPN;
+		BPS=BOX;
+		}else{
+		BOZ=C;
+		BPA=E;
+		BPC=F;
+		BPG=G;
+		BPH=H;
+		BPJ=D;
+		BPM=A;
+		BPS=A;
+		}
+		let BOY=(((parameters[50]== I)&& (GR> A))&& BNY)&& (parameters[33]> A);
+		let BSC;
+		let BSH;
+		if BOY{
+		let BPB=NS* BPA;
+		let BPD=((BOZ/ NS)- (BPA* ((BOZ+ HJ)- BPB)))- (1.6f64* ((BPA* ((BOZ+ I)- BPB))* BPC));
+		let BPE=BPD> OQ;
+		let BPF=if BPE{
+		BPD
+		}else{
+		OQ
+		};
+		let BPI=(BPG/ BPH)* BPF;
+		let BPK=(BPG* BPJ)* ((I- BPB)- (((BOZ+ (19.2f64* BPA))- (NS* (BOZ* BPA)))* BPC));
+		let BPL=EU> A;
+		let BPQ;
+		let BPU;
+		if BPL{
+		let BPO=BPI+ ((BPM* (I+ BPB))/ (((NS* BPH)* BPH)* BJ));
+		let BPP=BPK- (((BPM* BPJ)* (I+ BPC))/ (BPH* BJ));
+		BPQ=BPO;
+		BPU=BPP;
+		}else{
+		BPQ=BPI;
+		BPU=BPK;
+		}
+		let BPR=(GR/ BPQ).sqrt();
+		let BPT=BPS<= A;
+		let BPW=if BPT{
 		A
 		}else{
-		let BPX=(BPW* BPT)/ BPU;
-		BPX
+		let BPV=(BPU* BPR)/ BPS;
+		BPV
 		};
-		let BPZ=BPY> A;
-		let BQC;
-		if BPZ{
-		let BQA=BPY< I;
-		let BQB=if BQA{
-		BPY
+		let BPX=BPW> A;
+		let BQA;
+		if BPX{
+		let BPY=BPW< I;
+		let BPZ=if BPY{
+		BPW
 		}else{
 		I
 		};
-		BQC=BQB;
+		BQA=BPZ;
 		}else{
-		BQC=A;
+		BQA=A;
 		}
-		BSE=BPS;
-		BSJ=BQC;
+		BSC=BPQ;
+		BSH=BQA;
 		}else{
-		BSE=OR;
-		BSJ=A;
-		}
-		BSD=BSE;
-		BSH=BPU;
-		BSI=BSJ;
-		BSM=BSN;
-		}else{
-		BSD=OR;
+		BSC=OQ;
 		BSH=A;
-		BSI=A;
-		BSM=A;
 		}
-		let BQD=3.2043836e-19f64* (BNB.abs());
-		let BQE=3.2043836e-19f64* (BND.abs());
-		let BQF=3.2043836e-19f64* (BNF.abs());
-		let BQG=3.2043836e-19f64* (BNH.abs());
-		let BQJ=3.2043836e-19f64* ((BQH+ I)* (BMY.abs()));
-		let BQK=3.2043836e-19f64* (BNJ.abs());
-		let BQL=3.2043836e-19f64* (BNL.abs());
+		BSB=BSC;
+		BSF=BPS;
+		BSG=BSH;
+		BSK=BSL;
+		}else{
+		BSB=OQ;
+		BSF=A;
+		BSG=A;
+		BSK=A;
+		}
+		let BQB=3.2043836e-19f64* (BMZ.abs());
+		let BQC=3.2043836e-19f64* (BNB.abs());
+		let BQD=3.2043836e-19f64* (BND.abs());
+		let BQE=3.2043836e-19f64* (BNF.abs());
+		let BQH=3.2043836e-19f64* ((BQF+ I)* (BMW.abs()));
+		let BQI=3.2043836e-19f64* (BNH.abs());
+		let BQJ=3.2043836e-19f64* (BNJ.abs());
+		let BSN;
 		let BSP;
 		let BSR;
 		let BST;
-		let BSV;
-		if BMW{
-		let BQM=BQD+ BQF;
-		let BQN=BQE+ BQG;
-		let BQO=BQL+ BQJ;
-		BSP=BQM;
-		BSR=BQN;
-		BST=BQK;
-		BSV=BQO;
+		if BMV{
+		let BQK=BQB+ BQD;
+		let BQL=BQC+ BQE;
+		let BQM=BQJ+ BQH;
+		BSN=BQK;
+		BSP=BQL;
+		BSR=BQI;
+		BST=BQM;
 		}else{
-		let BQP=BQE+ BQF;
-		let BQQ=BQD+ BQG;
-		let BQR=BQK+ BQJ;
-		BSP=BQP;
-		BSR=BQQ;
-		BST=BQR;
-		BSV=BQL;
+		let BQN=BQC+ BQD;
+		let BQO=BQB+ BQE;
+		let BQP=BQI+ BQH;
+		BSN=BQN;
+		BSP=BQO;
+		BSR=BQP;
+		BST=BQJ;
 		}
-		let BQT=GV&& (BQS> A);
+		let BQR=GU&& (BQQ> A);
+		let BSV;
 		let BSX;
-		let BSZ;
-		if BQT{
-		let BQV=(BI* BQU)/ AIS;
-		let BQW=((BQV+ I).sqrt())/ (((BQV+ 1.1f64).sqrt())- I);
-		let BQX=GC* BE;
-		let BQY=BQX* BQW;
-		let BRA=BQZ+ BQW;
-		let BRB=BQX* BRA;
-		let BRE=(((-BQX)* BQW)* BRC)* BRD;
-		let BRF=K* BRE;
-		let BRH=((BRG* ALG)* BNV)* (((FQ- ((FU- (FY* BQY))* BQY))* (((BRB+ BRF)/ (BRB- BRF)).ln()))+ ((FU+ (FY* (BRB- (X* BQY))))* BRE));
-		let BRI=BRH/ BQY;
-		let BRJ=BRI> A;
-		let BRK=if BRJ{
-		BRI
+		if BQR{
+		let BQT=(BI* BQS)/ AIR;
+		let BQU=((BQT+ I).sqrt())/ (((BQT+ 1.1f64).sqrt())- I);
+		let BQV=GB* BE;
+		let BQW=BQV* BQU;
+		let BQY=BQX+ BQU;
+		let BQZ=BQV* BQY;
+		let BRC=(((-BQV)* BQU)* BRA)* BRB;
+		let BRD=K* BRC;
+		let BRF=((BRE* ALF)* BNT)* (((FQ- ((FU- (FY* BQW))* BQW))* (((BQZ+ BRD)/ (BQZ- BRD)).ln()))+ ((FU+ (FY* (BQZ- (X* BQW))))* BRC));
+		let BRG=BRF/ BQW;
+		let BRH=BRG> A;
+		let BRI=if BRH{
+		BRG
 		}else{
 		A
 		};
-		let BRL=(BE* BRA)/ BQW;
-		let BRM=((KJ/ BE)* BQZ)/ BRA;
-		let BRN=(((-0.08333333333333333f64* BE)* BRC)* BRD)/ BRL;
-		let BRO=BRN* BRN;
-		let BRP=ABT* AGP;
-		let BRQ=BRP> HF;
-		let BRS=if BRQ{
-		let BRR=((BQW* BRL)/ BRP)- I;
+		let BRJ=(BE* BQY)/ BQU;
+		let BRK=((KI/ BE)* BQX)/ BQY;
+		let BRL=(((-0.08333333333333333f64* BE)* BRA)* BRB)/ BRJ;
+		let BRM=BRL* BRL;
+		let BRN=ABS* AGO;
+		let BRO=BRN> HE;
+		let BRQ=if BRO{
+		let BRP=((BQU* BRJ)/ BRN)- I;
+		BRP
+		}else{
+		A
+		};
+		let BRR=I- (NS* (BRQ* BRM));
+		let BRS=BRR> BOF;
+		let BRT=if BRS{
 		BRR
 		}else{
-		A
+		BOF
 		};
-		let BRT=I- (NT* (BRS* BRO));
-		let BRU=BRT> BOH;
-		let BRV=if BRU{
-		BRT
+		let BRU=I/ (BRT* BRT);
+		let BRV=((AKO* BE)* BQY)* BNT;
+		let BRW=(BRK+ (NS* BRM))- (24f64* (((I+ BRK)* BRM)* BRQ));
+		let BRX=BRW> OQ;
+		let BRY=if BRX{
+		BRW
 		}else{
-		BOH
+		OQ
 		};
-		let BRW=I/ (BRV* BRV);
-		let BRX=((AKP* BE)* BRA)* BNV;
-		let BRY=(BRM+ (NT* BRO))- (24f64* (((I+ BRM)* BRO)* BRS));
-		let BRZ=BRY> OR;
-		let BSA=if BRZ{
-		BRY
+		let BSA=(BRZ* ((BRV* BRU)* BRY)).sqrt();
+		BSV=BRI;
+		BSX=BSA;
 		}else{
-		OR
-		};
-		let BSC=(BSB* ((BRX* BRW)* BSA)).sqrt();
-		BSX=BRK;
-		BSZ=BSC;
-		}else{
+		BSV=A;
 		BSX=A;
-		BSZ=A;
 		}
-		let BSF=GS/ BSD;
-		let BSG=GA* BMX;
-		let BSK=((BSG* BSH)* BSH)* (I- (BSI* BSI));
-		let BSL=(ALM* GA)* BNO;
-		let BSO=BSL* BSM;
-		let BSQ=BSG* BSP;
-		let BSS=BSG* BSR;
-		let BSU=BSG* BST;
-		let BSW=BSG* BSV;
-		let BSY=BSL* BSX;
-		let BTA=(BSG* BSZ)* BSZ;
+		let BSD=GR/ BSB;
+		let BSI=((BSE* BSF)* BSF)* (I- (BSG* BSG));
+		let BSJ=(ALL* staged[687])* BNM;
+		let BSM=BSJ* BSK;
+		let BSO=BSE* BSN;
+		let BSQ=BSE* BSP;
+		let BSS=BSE* BSR;
+		let BSU=BSE* BST;
+		let BSW=BSJ* BSV;
+		let BSY=(BSE* BSX)* BSX;
 		{
-			let psd = BSF;
+			let psd = BSD;
 			if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 0, quantity: "psd", value: psd }); }
 			let psd = psd.abs();
 			let exponent: Option<f64> = None;
@@ -3513,7 +3511,7 @@ impl Instance {
 			if !visitor.visit(0, GeneratedNoiseEvaluationRef { active: true, psd, exponent, table_operands: &table_operands }) { return Ok(()); }
 		}
 		{
-			let psd = BSK;
+			let psd = BSI;
 			if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 1, quantity: "psd", value: psd }); }
 			let psd = psd.abs();
 			let exponent: Option<f64> = None;
@@ -3523,7 +3521,7 @@ impl Instance {
 			if !visitor.visit(1, GeneratedNoiseEvaluationRef { active: true, psd, exponent, table_operands: &table_operands }) { return Ok(()); }
 		}
 		{
-			let psd = BSO;
+			let psd = BSM;
 			if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 2, quantity: "psd", value: psd }); }
 			let psd = psd.abs();
 			let exponent: Option<f64> = Some(FH);
@@ -3534,7 +3532,7 @@ impl Instance {
 			if !visitor.visit(2, GeneratedNoiseEvaluationRef { active: true, psd, exponent, table_operands: &table_operands }) { return Ok(()); }
 		}
 		{
-			let psd = BSQ;
+			let psd = BSO;
 			if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 3, quantity: "psd", value: psd }); }
 			let psd = psd.abs();
 			let exponent: Option<f64> = None;
@@ -3544,7 +3542,7 @@ impl Instance {
 			if !visitor.visit(3, GeneratedNoiseEvaluationRef { active: true, psd, exponent, table_operands: &table_operands }) { return Ok(()); }
 		}
 		{
-			let psd = BSS;
+			let psd = BSQ;
 			if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 4, quantity: "psd", value: psd }); }
 			let psd = psd.abs();
 			let exponent: Option<f64> = None;
@@ -3554,7 +3552,7 @@ impl Instance {
 			if !visitor.visit(4, GeneratedNoiseEvaluationRef { active: true, psd, exponent, table_operands: &table_operands }) { return Ok(()); }
 		}
 		{
-			let psd = BSU;
+			let psd = BSS;
 			if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 5, quantity: "psd", value: psd }); }
 			let psd = psd.abs();
 			let exponent: Option<f64> = None;
@@ -3564,7 +3562,7 @@ impl Instance {
 			if !visitor.visit(5, GeneratedNoiseEvaluationRef { active: true, psd, exponent, table_operands: &table_operands }) { return Ok(()); }
 		}
 		{
-			let psd = BSW;
+			let psd = BSU;
 			if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 6, quantity: "psd", value: psd }); }
 			let psd = psd.abs();
 			let exponent: Option<f64> = None;
@@ -3574,7 +3572,7 @@ impl Instance {
 			if !visitor.visit(6, GeneratedNoiseEvaluationRef { active: true, psd, exponent, table_operands: &table_operands }) { return Ok(()); }
 		}
 		{
-			let psd = BSY;
+			let psd = BSW;
 			if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 7, quantity: "psd", value: psd }); }
 			let psd = psd.abs();
 			let exponent: Option<f64> = Some(FZ);
@@ -3585,7 +3583,7 @@ impl Instance {
 			if !visitor.visit(7, GeneratedNoiseEvaluationRef { active: true, psd, exponent, table_operands: &table_operands }) { return Ok(()); }
 		}
 		{
-			let psd = BTA;
+			let psd = BSY;
 			if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 8, quantity: "psd", value: psd }); }
 			let psd = psd.abs();
 			let exponent: Option<f64> = None;

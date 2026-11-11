@@ -303,6 +303,11 @@ impl Instance {
 		let FB=parameters[28];
 		let FC=parameters[26];
 		let FF=L2([0f64;2]);
+		let mut oAP=false;
+		let mut oBT=false;
+		let mut oCU=false;
+		let mut oCY=false;
+		let mut oCZ=0.0;
 		if A{
 		analog_finish(2, time, B);
 		}
@@ -357,6 +362,7 @@ impl Instance {
 		analog_finish(43, time, B);
 		}
 		let AP=AI> O;
+		oAP=AP;
 		let AV;
 		let AW;
 		if AP{
@@ -416,6 +422,7 @@ impl Instance {
 		analog_finish(73, time, B);
 		}
 		let BT=BM> O;
+		oBT=BT;
 		let BZ;
 		let CA;
 		let CB;
@@ -482,6 +489,7 @@ impl Instance {
 		let CS=AF* S;
 		let CT=CS+ AH;
 		let CU=CL> O;
+		oCU=CU;
 		let CW;
 		if CU{
 		let CV=CT< O;
@@ -489,9 +497,11 @@ impl Instance {
 		analog_finish(107, time, B);
 		}
 		let CY=CT> O;
+		oCY=CY;
 		let DA;
 		if CY{
 		let CZ=AQ* (CT/ CL);
+		oCZ=CZ;
 		DA=CZ;
 		}else{
 		DA=O;
@@ -616,6 +626,23 @@ impl Instance {
 		let FL=O+ FJ;
 		let FM=FK[0];
 		let FN=FK[1];
+        {
+            let record = &mut *self.canonical_output_record;
+            record[0] = f64::from(u8::from(oAP));
+            record[1] = f64::from(u8::from(oBT));
+            record[2] = f64::from(u8::from(oCU));
+            record[3] = f64::from(u8::from(oCY));
+            record[4] = oCZ;
+            record[5] = Y;
+            record[6] = Z;
+            record[7] = f64::from(u8::from(DG));
+            record[8] = AA;
+            record[9] = EL;
+            record[10] = FI;
+            record[11] = FJ;
+            record[12] = FK.0[0];
+            record[13] = FK.0[1];
+        }
         stamper.stamp_current_sparse_local::<2, 0>(
             Some(0),
             Some(1),
@@ -647,6 +674,143 @@ impl Instance {
             multiplicity,
         );
         if ctx.analog_tasks_enabled() && !ctx.evaluation_failed() { self.analog_effects.as_mut().expect("task evaluation began").complete_evaluation(); }
+    }
+
+    #[cold]
+    #[inline(never)]
+    pub fn operating_point_outputs(&self, ctx: &GeneratedEvalContext<'_>, outputs: &mut [f64]) {
+        let record = &*self.canonical_output_record;
+        let _ = ctx;
+        let o2 = record[0]!=0.0;
+        let o6 = record[1]!=0.0;
+        let o9 = record[2]!=0.0;
+        let o10 = record[3]!=0.0;
+        let o11 = record[4];
+        let o12 = record[5];
+        let o13 = record[6];
+        let o14 = record[7]!=0.0;
+        let o15 = record[8];
+        let o16 = record[9];
+        let o17 = record[10];
+        let o18 = record[11];
+        let o19 = L2([record[12], record[13]]);
+        let parameters = &self.params.values;
+        let multiplicity = self.multiplicity;
+        let staged = &*self.canonical_staged;
+		let A=0f64;
+		let B=staged[11]!=0.0;
+		let C=parameters[2];
+		let D=staged[12]!=0.0;
+		let E=1e99f64;
+		let F=o2;
+		let H=staged[13]!=0.0;
+		let I=staged[14]!=0.0;
+		let J=staged[16]!=0.0;
+		let K=o6;
+		let M=staged[15]!=0.0;
+		let N=staged[17]!=0.0;
+		let O=o9;
+		let P=o10;
+		let R=o12;
+		let S=o13;
+		let T=o15;
+		let AF=o16;
+		let AG=o17;
+		let AH=o18;
+		let U;
+		if B{
+		let V;
+		if D{
+		V=E;
+		}else{
+		let W=if F{
+		let G=1f64/ C;
+		G
+		}else{
+		E
+		};
+		V=W;
+		}
+		U=V;
+		}else{
+		let X;
+		if H{
+		let Y;
+		if I{
+		Y=E;
+		}else{
+		let Z;
+		if J{
+		Z=A;
+		}else{
+		let AA=if K{
+		let L=1f64/ C;
+		L
+		}else{
+		A
+		};
+		Z=AA;
+		}
+		Y=Z;
+		}
+		X=Y;
+		}else{
+		let AB;
+		if M{
+		AB=A;
+		}else{
+		let AC;
+		if N{
+		AC=E;
+		}else{
+		let AD;
+		if O{
+		let AE=if P{
+		let Q=1f64/ o11;
+		Q
+		}else{
+		E
+		};
+		AD=AE;
+		}else{
+		AD=A;
+		}
+		AC=AD;
+		}
+		AB=AC;
+		}
+		X=AB;
+		}
+		U=X;
+		}
+		let AI=U> A;
+		let AJ=AH* AF;
+		let AK=o14&& AI;
+		let AO;
+		let AP;
+		if AK{
+		let AL=ctx.checked_derivative_value(AH, o19[0]);
+		let AM=AL!= A;
+		let AQ=if AM{
+		let AN=1f64/ AL;
+		AN
+		}else{
+		E
+		};
+		AO=AG;
+		AP=AQ;
+		}else{
+		AO=S;
+		AP=S;
+		}
+        outputs[0] = AF;
+        outputs[1] = (AH) * self.multiplicity;
+        outputs[2] = (AJ) * self.multiplicity;
+        outputs[3] = R;
+        outputs[4] = T;
+        outputs[5] = (S) / self.multiplicity;
+        outputs[6] = (AO) / self.multiplicity;
+        outputs[7] = (AP) / self.multiplicity;
     }
 
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {

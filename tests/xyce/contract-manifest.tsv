@@ -263,13 +263,13 @@ Netlists/BSIM6/inverter_transient_xyce.cir	expected_unsupported	unsupported_xyce
 Netlists/BSIM6/ringosc_17_xyce.cir	expected_unsupported	unsupported_xyce_contract
 Netlists/BSIMCMG/ac.cir	expected_unsupported	unsupported_xyce_contract
 Netlists/BSIMCMG/gummel_n.cir	executed	static_prn_dc
-Netlists/BSIMCMG/gummel_n_outvars.cir	expected_unsupported	unsupported_xyce_contract
+Netlists/BSIMCMG/gummel_n_outvars.cir	executed	static_prn_dc
 Netlists/BSIMCMG/gummel_p.cir	executed	static_prn_dc
 Netlists/BSIMCMG/inverter_transient.cir	expected_unsupported	unsupported_xyce_contract
 Netlists/BSIMCMG_108/ac.cir	expected_unsupported	unsupported_xyce_contract
 Netlists/BSIMCMG_108/gummel_n.cir	executed	static_prn_dc
 Netlists/BSIMCMG_108/gummel_n_mult.cir	expected_unsupported	unsupported_xyce_contract
-Netlists/BSIMCMG_108/gummel_n_outvars.cir	expected_unsupported	unsupported_xyce_contract
+Netlists/BSIMCMG_108/gummel_n_outvars.cir	executed	static_prn_dc
 Netlists/BSIMCMG_108/gummel_p.cir	executed	static_prn_dc
 Netlists/BSIMCMG_108/gummel_p_mult.cir	expected_unsupported	unsupported_xyce_contract
 Netlists/BSIMCMG_108/inverter_transient.cir	expected_unsupported	unsupported_xyce_contract
@@ -3241,7 +3241,7 @@ Netlists/PSEUDO/pseudo.cir	expected_unsupported	unsupported_xyce_contract
 Netlists/PSP102/idvg0_Id_T27.cir	executed	static_prn_dc
 Netlists/PSP102/idvg0_Id_T27_pmos.cir	executed	static_prn_dc
 Netlists/PSP102/invert_psp.cir	expected_unsupported	unsupported_xyce_contract
-Netlists/PSP102/psp102_outvars.cir	expected_unsupported	unsupported_xyce_contract
+Netlists/PSP102/psp102_outvars.cir	expected_unsupported	unsupported_xyce_reference
 Netlists/PSP103/asym_nmos_idvdh_dt.cir	expected_unsupported	unsupported_xyce_contract
 Netlists/PSP103/asym_pmos_idvdh_dt.cir	expected_unsupported	unsupported_xyce_contract
 Netlists/PSP103/invert_psp.cir	expected_unsupported	unsupported_xyce_contract
@@ -3257,7 +3257,7 @@ Netlists/PSP103/psp_symm_nmos_idvg0_swigate1.cir	executed	static_prn_step_dc
 Netlists/PSP103/psp_symm_nmos_idvg0_swimpact1.cir	executed	static_prn_step_dc
 Netlists/PSP103/psp_symm_nmos_idvgh.cir	executed	static_prn_step_dc
 Netlists/PSP103/psp_symm_nmos_idvgh_allsw0.cir	executed	static_prn_step_dc
-Netlists/PSP103/psp_symm_nmos_idvgh_outvars.cir	expected_unsupported	unsupported_xyce_contract
+Netlists/PSP103/psp_symm_nmos_idvgh_outvars.cir	expected_unsupported	unsupported_xyce_reference
 Netlists/PSP103/psp_symm_nmos_idvgh_swigate1.cir	executed	static_prn_step_dc
 Netlists/PSP103/psp_symm_nmos_idvgh_swimpact1.cir	executed	static_prn_step_dc
 Netlists/PSP103/psp_symm_pmos_idvg0.cir	executed	static_prn_step_dc

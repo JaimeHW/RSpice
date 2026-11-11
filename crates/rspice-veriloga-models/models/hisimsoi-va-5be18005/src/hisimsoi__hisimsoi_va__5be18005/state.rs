@@ -558,6 +558,7 @@ pub struct Instance {
 	pub(crate) event_state_accepted: Box<[f64; 14]>,
 	pub(crate) event_state_candidate: Box<[f64; 14]>,
 	pub(crate) canonical_reactive: Box<[f64; 86]>,
+	pub(crate) canonical_output_record: Box<[f64; 87]>,
 }
 
 impl Clone for Instance {
@@ -579,6 +580,7 @@ impl Clone for Instance {
 			event_state_accepted: self.event_state_accepted.clone(),
 			event_state_candidate: self.event_state_candidate.clone(),
 			canonical_reactive: self.canonical_reactive.clone(),
+			canonical_output_record: self.canonical_output_record.clone(),
 		}
 	}
 }
@@ -934,6 +936,7 @@ impl Instance {
 			event_state_accepted: boxed_zero_f64_array(),
 			event_state_candidate: boxed_zero_f64_array(),
 			canonical_reactive: boxed_zero_f64_array(),
+			canonical_output_record: boxed_zero_f64_array(),
 		};
 		instance.apply_parameters(assignments)?;
 		Ok(instance)
@@ -941,7 +944,7 @@ impl Instance {
 
 	#[doc(hidden)]
 	pub fn capture_rollback_state(&self) -> GeneratedVerilogARollbackState {
-		let mut values = Vec::with_capacity(103);
+		let mut values = Vec::with_capacity(190);
 		values.extend_from_slice(&self.stamp_state.ddt_current);
 		values.extend_from_slice(&self.stamp_state.ddt_previous);
 		values.extend_from_slice(&self.stamp_state.ddt_older);
@@ -955,6 +958,7 @@ impl Instance {
 		values.extend_from_slice(&self.stamp_state.idt_input_previous);
 		values.extend_from_slice(&*self.event_state_accepted);
 		values.extend_from_slice(&*self.event_state_candidate);
+		values.extend_from_slice(&*self.canonical_output_record);
 		let mut flags = Vec::with_capacity(30);
 		flags.extend_from_slice(&self.stamp_state.ddt_initialized);
 		flags.extend_from_slice(&self.stamp_state.idt_initialized);
@@ -965,7 +969,7 @@ impl Instance {
 
 	#[doc(hidden)]
 	pub fn restore_rollback_state(&mut self, state: &GeneratedVerilogARollbackState) {
-		debug_assert_eq!(state.values.len(), 103);
+		debug_assert_eq!(state.values.len(), 190);
 		debug_assert_eq!(state.flags.len(), 30);
 		debug_assert_eq!(state.idtmod.len(), Self::IDTMOD_STATE_COUNT);
 		let mut rollback_values = state.values.as_slice();
@@ -1021,6 +1025,9 @@ impl Instance {
 		let (field, remaining) = rollback_flags.split_at(Self::IDT_STATE_COUNT);
 		self.stamp_state.idt_candidate_valid.copy_from_slice(field);
 		rollback_flags = remaining;
+		let (record, remaining) = rollback_values.split_at(87);
+		self.canonical_output_record.copy_from_slice(record);
+		rollback_values = remaining;
 		debug_assert!(rollback_values.is_empty());
 		debug_assert!(rollback_flags.is_empty());
 	}

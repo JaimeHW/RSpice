@@ -25,8 +25,9 @@ pub struct DeviceOpEntry {
     pub region: Option<&'static str>,
     /// Named operating-point quantities in display order.
     pub params: Vec<(&'static str, Value)>,
-    /// What a runtime-compiled Verilog-A instance reports under its module's
-    /// own names; `None` for every other device.
+    /// What a Verilog-A instance reports under its module's own names: every
+    /// quantity of a runtime-compiled one, the described outputs of a
+    /// generated one at a solved point. `None` for every other device.
     pub module: Option<ModuleOpReport>,
 }
 
@@ -1115,9 +1116,55 @@ impl CircuitData {
         self.apply_veriloga_terminal_meters(&mut report, solution)?;
         self.add_conductive_power_observations(&mut report, solution)?;
         self.add_intrinsic_voltage_observations(&mut report, solution)?;
+        #[cfg(feature = "veriloga-builtins-base")]
+        self.add_generated_veriloga_outputs(&mut report, solution);
         #[cfg(feature = "veriloga")]
         self.add_runtime_veriloga_operating_points(&mut report, solution)?;
         Ok(report)
+    }
+
+    /// Give each generated Verilog-A instance the operating-point outputs its
+    /// module describes at `solution`, under the module's names and units
+    /// beside the terminal currents its entry already carries. Like those
+    /// currents, they come from the instance's last load: at a solved point,
+    /// the evaluation the solver converged from.
+    ///
+    /// An output that shares a terminal current's label is the module's and
+    /// keeps the name, as on a runtime-compiled instance.
+    #[cfg(feature = "veriloga-builtins-base")]
+    fn add_generated_veriloga_outputs(&self, report: &mut DeviceOpReport, solution: &[Value]) {
+        for device in self.generated_veriloga_devices.iter() {
+            let outputs = device.output_descriptors();
+            if outputs.is_empty() {
+                continue;
+            }
+            let values = device.operating_point_outputs(solution, self.num_nodes);
+            let Some(entry) = report.entries.iter_mut().find(|entry| {
+                entry.module.is_none()
+                    && entry.device_kind == device.model_name
+                    && entry.name == device.instance_name
+            }) else {
+                continue;
+            };
+            entry.params.retain(|(label, _)| {
+                !outputs
+                    .iter()
+                    .any(|output| output.name.eq_ignore_ascii_case(label))
+            });
+            entry.module = Some(ModuleOpReport {
+                module: device.model_name.to_owned(),
+                quantities: outputs
+                    .iter()
+                    .zip(values)
+                    .map(|(output, value)| ModuleOpQuantity {
+                        name: output.name.to_owned(),
+                        value,
+                        units: output.units.to_owned(),
+                        description: output.description.to_owned(),
+                    })
+                    .collect(),
+            });
+        }
     }
 
     fn replace_mosfet_report_currents(
@@ -1200,7 +1247,8 @@ impl CircuitData {
     /// BJT lead currents with the exact totals from their committed
     /// companions. Ordinary `.OP` and every other parameter retain the static
     /// report; these overrides exist only for this transient sample and cannot
-    /// leak into a later analysis.
+    /// leak into a later analysis. A generated Verilog-A instance lists its
+    /// module's outputs at the sample, as at an operating point.
     pub(crate) fn transient_device_op_report(
         &self,
         solution: &[Value],
@@ -1220,6 +1268,8 @@ impl CircuitData {
         let mut report = self.device_op_report();
         self.add_conductive_power_observations(&mut report, solution)?;
         self.add_intrinsic_voltage_observations(&mut report, solution)?;
+        #[cfg(feature = "veriloga-builtins-base")]
+        self.add_generated_veriloga_outputs(&mut report, solution);
         self.replace_mosfet_report_currents(
             &mut report,
             solution,

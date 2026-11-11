@@ -1634,6 +1634,30 @@ impl BuiltinVerilogAInstance {
         Ok(evaluated)
     }
 
+    /// The module's operating-point outputs, in source declaration order.
+    pub fn output_descriptors(
+        &self,
+    ) -> &'static [rspice_veriloga_runtime::GeneratedVerilogAOutputDescriptor] {
+        self.kind.output_descriptors()
+    }
+
+    /// Each operating-point output at `solution`, in
+    /// [`Self::output_descriptors`] order and scaled by the instance's
+    /// multiplicity as its declaration says.
+    ///
+    /// The module computes them from what its most recent static evaluation
+    /// recorded: at a converged point, the load the solver accepted
+    /// `solution` from, as a SPICE device reports its operating point. The
+    /// load only records; nothing is computed until this asks.
+    pub fn operating_point_outputs(&self, solution: &[Value], num_nodes: usize) -> Vec<Value> {
+        let mut outputs = vec![0.0; self.kind.output_descriptors().len()];
+        if !outputs.is_empty() {
+            let ctx = GeneratedEvalContext::new(solution, self.temperature, num_nodes);
+            self.kind.operating_point_outputs(&ctx, &mut outputs);
+        }
+        outputs
+    }
+
     /// Whether this is the first negative power the run meets for the grouped
     /// noise process `mechanism`; every copy of the instance shares the answer.
     #[doc(hidden)]

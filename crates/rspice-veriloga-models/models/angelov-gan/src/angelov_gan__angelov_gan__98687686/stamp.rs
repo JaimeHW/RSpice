@@ -2393,6 +2393,21 @@ impl Instance {
 		let ASQ=ANF[3];
 		let ASR=ANE[4];
 		let ASS=ANF[4];
+        {
+            let record = &mut *self.canonical_output_record;
+            record[0] = AK;
+            record[1] = HJ;
+            record[2] = RY;
+            record[3] = RZ;
+            record[4] = SA;
+            record[5] = SB;
+            record[6] = HL.0[0];
+            record[7] = HL.0[1];
+            record[8] = HL.0[2];
+            record[9] = HL.0[3];
+            record[10] = HL.0[4];
+            record[11] = HL.0[5];
+        }
         if ctx.dynamic_operators_enabled() { self.event_state_candidate[0] = staged[51]; }
         if ctx.dynamic_operators_enabled() { self.event_state_candidate[1] = staged[52]; }
         if ctx.dynamic_operators_enabled() { self.event_state_candidate[2] = staged[53]; }
@@ -3087,6 +3102,38 @@ impl Instance {
         self.canonical_reactive[37] = ASO;
         self.canonical_reactive[38] = ASQ;
         self.canonical_reactive[39] = ASS;
+    }
+
+    #[cold]
+    #[inline(never)]
+    pub fn operating_point_outputs(&self, ctx: &GeneratedEvalContext<'_>, outputs: &mut [f64]) {
+        let record = &*self.canonical_output_record;
+        let _ = ctx;
+        let o0 = record[0];
+        let o1 = record[1];
+        let o2 = record[2];
+        let o3 = record[3];
+        let o4 = record[4];
+        let o5 = record[5];
+        let o6 = L6([record[6], record[7], record[8], record[9], record[10], record[11]]);
+        let parameters = &self.params.values;
+        let multiplicity = self.multiplicity;
+        let staged = &*self.canonical_staged;
+		let A=o0;
+		let B=o2;
+		let C=o3;
+		let D=o4;
+		let E=o5;
+		let F=ctx.checked_derivative_value(o1, o6[5]);
+		let G=F/ (1f64+ (F* parameters[50]));
+		let H=ctx.checked_derivative_value(o1, o6[2]);
+        outputs[0] = A;
+        outputs[1] = C;
+        outputs[2] = B;
+        outputs[3] = E;
+        outputs[4] = D;
+        outputs[5] = G;
+        outputs[6] = H;
     }
 
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {

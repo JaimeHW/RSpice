@@ -1521,7 +1521,9 @@ impl XyceTestRunner {
                     original
                 ));
             }
-            if Self::canonical_device_op_parameter(&parameter).is_some() {
+            if Self::canonical_device_op_parameter(&parameter).is_some()
+                || Self::module_reports_output(netlist, &element_name, &parameter, probe_index)
+            {
                 return Ok(());
             }
             return Err(format!(

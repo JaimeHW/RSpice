@@ -58,7 +58,7 @@ pub(super) struct InstancePorts {
     /// no device parameter other than these terminal currents.
     pub(super) runtime: bool,
     pub(super) ports: Vec<InstancePort>,
-    /// The module variables a runtime instance reports beside its terminal
+    /// The module variables an instance reports beside its terminal
     /// currents, lower case. One that shares a terminal current's label is
     /// what the label reads, so that terminal gets no meter for it.
     pub(super) outputs: Vec<String>,
@@ -388,7 +388,11 @@ fn catalog_ports(
         subject,
         runtime: false,
         ports,
-        outputs: Vec::new(),
+        outputs: descriptor
+            .outputs
+            .iter()
+            .map(|output| output.name.to_ascii_lowercase())
+            .collect(),
     })
 }
 

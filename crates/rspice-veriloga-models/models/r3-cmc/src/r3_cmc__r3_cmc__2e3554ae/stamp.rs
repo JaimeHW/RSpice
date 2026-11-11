@@ -6,7 +6,7 @@ use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, Ge
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 pub(super) const CANONICAL_MODEL_STAGE_SLOTS: [u32; 36] = [2, 3, 1, 0, 43, 6, 75, 7, 76, 77, 9, 11, 13, 14, 15, 81, 21, 82, 22, 83, 27, 28, 84, 29, 30, 85, 31, 32, 53, 54, 55, 58, 59, 63, 64, 65];
-pub(super) const CANONICAL_INSTANCE_STAGE_SLOTS: [u32; 37] = [23, 24, 25, 26, 69, 70, 71, 35, 4, 5, 8, 10, 79, 80, 12, 18, 17, 56, 57, 47, 86, 33, 34, 78, 93, 94, 60, 61, 95, 62, 96, 98, 99, 100, 101, 102, 103];
+pub(super) const CANONICAL_INSTANCE_STAGE_SLOTS: [u32; 39] = [23, 24, 25, 26, 69, 70, 71, 104, 105, 35, 4, 5, 8, 10, 79, 80, 12, 18, 17, 56, 57, 47, 86, 33, 34, 78, 93, 94, 60, 61, 95, 62, 96, 98, 99, 100, 101, 102, 103];
 pub(super) const CANONICAL_TEMPERATURE_STAGE_SLOTS: [u32; 31] = [16, 67, 68, 44, 72, 38, 73, 74, 40, 42, 45, 20, 19, 36, 37, 39, 41, 87, 46, 88, 48, 97, 89, 90, 91, 49, 50, 92, 51, 52, 66];
 
 pub(super) fn canonical_model_preprocess(
@@ -124,7 +124,7 @@ pub(super) fn canonical_instance_preprocess(
     temperature: f64,
     thermal_voltage: f64,
     ctx: &GeneratedEvalContext<'_>,
-) -> [f64; 37] {
+) -> [f64; 39] {
 	let A=staged[2];
 	let D=staged[3];
 	let J=parameters[5];
@@ -340,7 +340,7 @@ pub(super) fn canonical_instance_preprocess(
 	DE=K;
 	DF=K;
 	}
-    [E, F, G, H, oAL as u8 as f64, oAS as u8 as f64, oAW as u8 as f64, BA, BG, BJ, oBP, BO, BU as u8 as f64, BZ as u8 as f64, oCC, CF, CG, CJ, CK, CP as u8 as f64, CQ as u8 as f64, oCS, oCT, oBS, CU as u8 as f64, CV as u8 as f64, CE, BY, CX as u8 as f64, CB, CZ as u8 as f64, CY, DA, DC, DD, DE, DF]
+    [E, F, G, H, oAL as u8 as f64, oAS as u8 as f64, oAW as u8 as f64, AM, AN, BA, BG, BJ, oBP, BO, BU as u8 as f64, BZ as u8 as f64, oCC, CF, CG, CJ, CK, CP as u8 as f64, CQ as u8 as f64, oCS, oCT, oBS, CU as u8 as f64, CV as u8 as f64, CE, BY, CX as u8 as f64, CB, CZ as u8 as f64, CY, DA, DC, DD, DE, DF]
 }
 
 pub(super) fn canonical_temperature_preprocess(
@@ -2566,6 +2566,16 @@ impl Instance {
 		let AVI=ALO[1];
 		let AVJ=ALO[2];
 		let AVK=ALR;
+        {
+            let record = &mut *self.canonical_output_record;
+            record[0] = H;
+            record[1] = XG;
+            record[2] = ABC;
+            record[3] = AEG;
+            record[4] = BY;
+            record[5] = ATE;
+            record[6] = ATF;
+        }
         if ctx.dynamic_operators_enabled() { self.event_state_candidate[0] = staged[98]; }
         if ctx.dynamic_operators_enabled() { self.event_state_candidate[1] = staged[99]; }
         stamper.stamp_current_sparse_local::<4, 0>(
@@ -2773,6 +2783,62 @@ impl Instance {
         self.canonical_reactive[22] = ATN;
         self.canonical_reactive[23] = ATO;
         self.canonical_reactive[24] = ATV;
+    }
+
+    #[cold]
+    #[inline(never)]
+    pub fn operating_point_outputs(&self, ctx: &GeneratedEvalContext<'_>, outputs: &mut [f64]) {
+        let record = &*self.canonical_output_record;
+        let _ = ctx;
+        let o3 = record[0];
+        let o4 = record[1];
+        let o5 = record[2];
+        let o8 = record[3];
+        let o11 = record[4];
+        let o13 = record[5];
+        let o14 = record[6];
+        let multiplicity = self.multiplicity;
+        let staged = &*self.canonical_staged;
+        let node_potentials = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5]), ctx.node_voltage(self.nodes[6]), ctx.node_voltage(self.nodes[7])];
+		let A=0f64;
+		let B=staged[104];
+		let C=staged[105];
+		let D=staged[20];
+		let E=node_potentials[3];
+		let F=o5;
+		let G=staged[97]!=0.0;
+		let H=o8;
+		let I=staged[60];
+		let S=1e99f64;
+		let J=node_potentials[2]- node_potentials[0];
+		let K=(1f64/ o4)+ (o11* (staged[61]+ staged[62]));
+		let M=if G{
+		let L=1f64/ staged[48];
+		L
+		}else{
+		A
+		};
+		let N=ctx.checked_derivative_value(H, o13);
+		let O=ctx.checked_derivative_value(H, o14);
+		let P=N+ ((O* M)* (H+ (o3* N)));
+		let Q=(P.abs())> 1e-99f64;
+		let T=if Q{
+		let R=1f64/ P;
+		R
+		}else{
+		S
+		};
+        outputs[0] = J;
+        outputs[1] = (H) * self.multiplicity;
+        outputs[2] = (F) * self.multiplicity;
+        outputs[3] = C;
+        outputs[4] = B;
+        outputs[5] = (D) / self.multiplicity;
+        outputs[6] = (K) / self.multiplicity;
+        outputs[7] = (T) / self.multiplicity;
+        outputs[8] = (M) / self.multiplicity;
+        outputs[9] = (I) * self.multiplicity;
+        outputs[10] = E;
     }
 
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {

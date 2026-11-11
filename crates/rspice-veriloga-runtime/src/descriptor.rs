@@ -10,7 +10,8 @@ use super::Value;
 /// can be reconstructed from the compiled model catalog.
 ///
 /// Version 6 carries each parameter's units and description from its source.
-pub const GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION: u32 = 6;
+/// Version 7 carries the module's operating-point outputs.
+pub const GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION: u32 = 7;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GeneratedVerilogAParameterScope {
@@ -176,6 +177,35 @@ impl GeneratedVerilogAParameterDescriptor {
     }
 }
 
+/// How an instance's multiplicity scales an operating-point output, as the
+/// variable's `multiplicity` attribute says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GeneratedVerilogAOutputScaling {
+    /// The module's value, whatever the multiplicity.
+    Unscaled,
+    /// `m` times the module's value: a current, a charge, a conductance.
+    Multiply,
+    /// A `1/m` share of the module's value: a resistance.
+    Divide,
+}
+
+/// A module-scope variable the source describes as an operating-point output
+/// with `desc` and `units`.
+///
+/// An instance reports it beside its terminal currents, read from the module
+/// at the solution, and a deck reads it by name: `@m1[gm]`, Xyce's `N(m1:gm)`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GeneratedVerilogAOutputDescriptor {
+    /// The variable's name as the source spells it.
+    pub name: &'static str,
+    /// The declaration's `units` attribute, empty when it has none.
+    pub units: &'static str,
+    /// The declaration's `desc` attribute, empty when it has none.
+    pub description: &'static str,
+    /// How the reported value is scaled by the instance's multiplicity.
+    pub scaling: GeneratedVerilogAOutputScaling,
+}
+
 /// Stable identity and exact external contract for one compiled Verilog-A
 /// catalog entry.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -205,6 +235,8 @@ pub struct GeneratedVerilogAModelDescriptor {
     /// Every matrix location and right-hand-side row the model's stamps can
     /// write, whatever its parameters and bias.
     pub stamp_pattern: GeneratedVerilogAStampPattern,
+    /// The module's operating-point outputs, in source declaration order.
+    pub outputs: &'static [GeneratedVerilogAOutputDescriptor],
 }
 
 /// The matrix locations a generated model's stamp calls name, read from the

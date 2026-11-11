@@ -6315,6 +6315,140 @@ fn shared_noise_preprocessing_is_fresh_and_call_order_independent() {
 }
 
 #[test]
+fn generated_outputs_are_recorded_by_the_load_and_computed_on_request() {
+    let (state, stamp, noise) = generated_parts(
+        r#"
+module outputs(a, c);
+    inout a, c;
+    electrical a, c;
+    parameter real is = 1e-14;
+    (* desc = "diode current", units = "A" *) real id;
+    (* desc = "small-signal conductance", units = "S" *) real gd;
+    (* desc = "a value only the report reads", units = "V" *) real vlog;
+    analog begin
+        id = is * (exp(V(a, c) / 0.025) - 1.0);
+        gd = ddx(id, V(a));
+        vlog = ln(1.0 + V(a, c) * V(a, c));
+        I(a, c) <+ id;
+    end
+endmodule
+"#,
+        "output tail",
+    );
+    let (load, tail) = stamp
+        .split_once("#[cold]\n    #[inline(never)]\n    pub fn operating_point_outputs(")
+        .unwrap_or_else(|| panic!("the outputs are a function out of the load's line:\n{stamp}"));
+    assert!(
+        load.contains("let record = &mut *self.canonical_output_record;")
+            && !load.contains("operating_point_outputs"),
+        "the load records what it computed and calls nothing:\n{stamp}"
+    );
+    assert!(
+        !load.contains(".ln()") && tail.contains(".ln()"),
+        "only a request computes what only the report reads:\n{stamp}"
+    );
+    assert!(
+        load.contains(".exp()") && !tail.contains(".exp()"),
+        "the request reads what the load computed instead of deriving it again:\n{stamp}"
+    );
+    run_generated_main(
+        "output tail",
+        &state,
+        &stamp,
+        &noise,
+        r#"
+let mut instance = device::state::Instance::new(&[0, 1]);
+instance.finalize_parameters().unwrap();
+let bias = [0.6, 0.0];
+let ctx = runtime::GeneratedEvalContext { voltages: &bias, temperature: 300.15 };
+instance.stamp(&ctx, &mut runtime::GeneratedStamper { sink: None });
+let mut outputs = [0.0; 3];
+instance.operating_point_outputs(&ctx, &mut outputs);
+let expected = [
+    1e-14 * ((0.6f64 / 0.025).exp() - 1.0),
+    1e-14 * (0.6f64 / 0.025).exp() / 0.025,
+    (1.0f64 + 0.36).ln(),
+];
+for (name, (got, want)) in ["id", "gd", "vlog"].iter().zip(outputs.iter().zip(expected)) {
+    assert!((got - want).abs() <= 1e-12 * want.abs(), "{name}: {got} against {want}");
+}
+// A trial the solver throws away goes back to the load it followed.
+let accepted = instance.capture_rollback_state();
+let trial = [0.7, 0.0];
+let trial_ctx = runtime::GeneratedEvalContext { voltages: &trial, temperature: 300.15 };
+instance.stamp(&trial_ctx, &mut runtime::GeneratedStamper { sink: None });
+let mut moved = [0.0; 3];
+instance.operating_point_outputs(&trial_ctx, &mut moved);
+assert!(moved[0] > 10.0 * outputs[0], "the trial's load recorded its own bias: {moved:?}");
+instance.restore_rollback_state(&accepted);
+let mut restored = [0.0; 3];
+instance.operating_point_outputs(&ctx, &mut restored);
+assert_eq!(restored, outputs);
+assert!(!ctx.evaluation_failed());
+"#,
+    )
+    .unwrap_or_else(|report| panic!("{report}"));
+}
+
+#[test]
+fn generated_outputs_read_what_a_loop_ended_with() {
+    let (state, stamp, noise) = generated_parts(
+        r#"
+module stepped(a, c);
+    inout a, c;
+    electrical a, c;
+    real x, s;
+    (* desc = "stepped current", units = "A" *) real ix;
+    (* desc = "a value only the report reads", units = "A" *) real isq;
+    (* desc = "a sum only the report reads", units = "V2" *) real ssum;
+    analog begin
+        x = 0.0;
+        s = 0.0;
+        while (x < V(a, c)) begin
+            s = s + x * x;
+            x = x + 0.125;
+        end
+        ix = x * 1e-3;
+        isq = ix * ix + x;
+        ssum = s;
+        I(a, c) <+ ix;
+    end
+endmodule
+"#,
+        "loop output tail",
+    );
+    let (load, tail) = stamp
+        .split_once("fn operating_point_outputs(")
+        .unwrap_or_else(|| panic!("the outputs are a function of their own:\n{stamp}"));
+    assert!(
+        load.contains("loop{") && !tail.contains("loop{"),
+        "the request reads the loop's last iteration instead of running it again, \
+         even for what only the report reads:\n{stamp}"
+    );
+    run_generated_main(
+        "loop output tail",
+        &state,
+        &stamp,
+        &noise,
+        r#"
+let mut instance = device::state::Instance::new(&[0, 1]);
+instance.finalize_parameters().unwrap();
+let bias = [0.6, 0.0];
+let ctx = runtime::GeneratedEvalContext { voltages: &bias, temperature: 300.15 };
+instance.stamp(&ctx, &mut runtime::GeneratedStamper { sink: None });
+let mut outputs = [0.0; 3];
+instance.operating_point_outputs(&ctx, &mut outputs);
+let expected = [0.625e-3, 0.625e-3 * 0.625e-3 + 0.625, 0.46875];
+for (name, (got, want)) in ["ix", "isq", "ssum"].iter().zip(outputs.iter().zip(expected)) {
+    assert!((got - want).abs() <= 1e-12 * want.abs(), "{name}: {got} against {want}");
+}
+assert!(!ctx.evaluation_failed());
+"#,
+    )
+    .unwrap_or_else(|report| panic!("{report}"));
+}
+
+#[test]
 fn repeated_static_hot_guards_are_specialized_with_a_source_size_cap() {
     let source = repeated_structure_source();
     let artifact = VerilogACompiler::default()

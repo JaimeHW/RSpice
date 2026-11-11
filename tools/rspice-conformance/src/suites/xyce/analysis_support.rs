@@ -3320,17 +3320,28 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
         element_name: &str,
         parameter: &str,
     ) -> Result<f64, String> {
-        let canonical_parameter =
-            Self::canonical_device_op_parameter(parameter).ok_or_else(|| {
-                format!(
-                    "device operating-point probe 'N({element_name}:{parameter})' targets an unsupported operating-point parameter"
-                )
-            })?;
+        let unsupported = || {
+            format!(
+                "device operating-point probe 'N({element_name}:{parameter})' targets an unsupported operating-point parameter"
+            )
+        };
+        let canonical_parameter = Self::canonical_device_op_parameter(parameter);
 
         for entry in &op_report.entries {
             if !Self::device_instance_names_match(&entry.name, element_name) {
                 continue;
             }
+            // A Verilog-A module's outputs answer to the names it declares
+            // them by, ahead of the fixed vocabulary: BSIM-CMG's `ids` is its
+            // channel current, not the drain lead's.
+            if let Some(quantity) = entry
+                .module
+                .as_ref()
+                .and_then(|module| module.quantity(parameter))
+            {
+                return Ok(quantity.value);
+            }
+            let canonical_parameter = canonical_parameter.ok_or_else(unsupported)?;
             if let Some(value) = Self::xyce_device_operating_point_value(entry, canonical_parameter)
             {
                 return Ok(value);
@@ -3341,6 +3352,9 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             ));
         }
 
+        if canonical_parameter.is_none() {
+            return Err(unsupported());
+        }
         Err(format!(
             "device operating-point probe 'N({element_name}:{parameter})' targets a device with no operating-point report"
         ))
@@ -3669,6 +3683,48 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             model_name,
             parameter,
         )
+    }
+
+    /// Whether `instance` assembles as a generated Verilog-A instance whose
+    /// module reports an operating-point output named `parameter`, which a
+    /// probe reads under the module's own name.
+    pub(super) fn module_reports_output(
+        netlist: &Netlist,
+        instance: &str,
+        parameter: &str,
+        probe_index: &mut XyceDcProbeIndex,
+    ) -> bool {
+        let outputs = probe_index.module_outputs.get_or_insert_with(|| {
+            let engine =
+                Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
+            let Ok(circuit) = engine.build_circuit(netlist) else {
+                return Vec::new();
+            };
+            let descriptors =
+                rspice_core::device::veriloga_builtins::generated_veriloga_model_descriptors();
+            circuit
+                .device_op_report()
+                .entries
+                .into_iter()
+                .filter_map(|entry| {
+                    let descriptor = descriptors
+                        .iter()
+                        .find(|descriptor| descriptor.model_name == entry.device_kind)?;
+                    Some((
+                        entry.name,
+                        descriptor
+                            .outputs
+                            .iter()
+                            .map(|output| output.name.to_ascii_lowercase())
+                            .collect(),
+                    ))
+                })
+                .collect()
+        });
+        let parameter = parameter.to_ascii_lowercase();
+        outputs.iter().any(|(name, outputs)| {
+            Self::device_instance_names_match(name, instance) && outputs.contains(&parameter)
+        })
     }
 
     pub(super) fn dc_probe_index(netlist: &Netlist) -> XyceDcProbeIndex {

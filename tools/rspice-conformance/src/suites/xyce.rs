@@ -119,6 +119,10 @@ struct XyceDcProbeIndex {
     flattened_diode_names: Option<HashSet<String>>,
     flattened_recorded_branch_names: Option<HashSet<String>>,
     flattened_lookup_attempted: bool,
+    /// The operating-point output names, lower case, of each generated
+    /// Verilog-A instance the deck assembles, read at the first probe that asks for a
+    /// name outside the fixed vocabulary.
+    module_outputs: Option<Vec<(String, HashSet<String>)>>,
 }
 const PRN_TIME_NEIGHBOR_HALF_ULPS: f64 = 4.0;
 const XYCE_VERIFY_DEFAULT_RELATIVE_TOLERANCE: f64 = 1.0e-2;

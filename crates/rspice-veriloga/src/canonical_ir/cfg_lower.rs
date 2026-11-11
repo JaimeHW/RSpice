@@ -234,8 +234,10 @@ impl CfgModel {
         )
     }
 
-    /// Retain effects, event bodies and named readbacks for equation qualification.
-    pub(crate) fn from_hir_for_dae_proof(
+    /// [`Self::from_hir`] with every named variable's final value kept: the
+    /// effects, event bodies and named readbacks equation qualification reads,
+    /// and the operating-point outputs a generated device reports.
+    pub(crate) fn from_hir_with_observations(
         hir: &HirModel,
         mir: &MirModel,
     ) -> Result<Self, Vec<IrDiagnostic>> {

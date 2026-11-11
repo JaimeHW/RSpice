@@ -37,6 +37,7 @@ mod files;
 mod manifest;
 mod names;
 mod noise;
+mod outputs;
 mod registry;
 pub mod stamp_plan;
 mod state_file;

@@ -529,7 +529,11 @@ fn generated_veriloga_sources_stay_compact() {
     /// Raised 2026-11-10, from 46.6 MB: the four BSIM-CMG 107.0.0, 108.0.0,
     /// 110.0.0 and 111.2.1 packages are 3.65 MB of their own code, taking the
     /// corpus to 50.13 MB. No other model grew.
-    const MAX_TOTAL_MODEL_RUST_BYTES: usize = 51_000_000;
+    /// Raised 2026-11-10, from 51.0 MB: the 52 models that describe
+    /// operating-point outputs record what the load computed for them,
+    /// compute them when the host asks and list them in an `OUTPUTS` table,
+    /// 2.04 MB, taking the corpus to 52.17 MB.
+    const MAX_TOTAL_MODEL_RUST_BYTES: usize = 52_500_000;
     const MAX_SINGLE_MODEL_RUST_BYTES: usize = 3_700_000;
     const MAX_EMPTY_ELSE_ARMS: usize = 32;
 

@@ -511,7 +511,7 @@ impl<const DDT: usize, const IDT: usize> StampState<DDT, IDT> {
 	}
 }
 
-pub(crate) type CanonicalModelValues = [f64; 56];
+pub(crate) type CanonicalModelValues = [f64; 55];
 pub struct Instance {
 	pub nodes: [usize; 11],
 	pub branches: [usize; 0],
@@ -526,8 +526,9 @@ pub struct Instance {
 	pub(crate) timestep: f64,
 	pub(crate) ddt_coefficients: GeneratedDdtCoefficients,
 	pub(crate) canonical_reactive: Box<[f64; 108]>,
+	pub(crate) canonical_output_record: Box<[f64; 134]>,
 	pub(crate) canonical_model_values: Option<std::sync::Arc<CanonicalModelValues>>,
-	pub(crate) canonical_staged: Box<[f64; 229]>,
+	pub(crate) canonical_staged: Box<[f64; 230]>,
 	pub(crate) canonical_instance_valid: bool,
 	pub(crate) canonical_temperature_valid: bool,
 	pub(crate) canonical_temperature: f64,
@@ -551,6 +552,7 @@ impl Clone for Instance {
 			timestep: self.timestep,
 			ddt_coefficients: self.ddt_coefficients,
 			canonical_reactive: self.canonical_reactive.clone(),
+			canonical_output_record: self.canonical_output_record.clone(),
 			canonical_model_values: self.canonical_model_values.clone(),
 			canonical_staged: self.canonical_staged.clone(),
 			canonical_instance_valid: self.canonical_instance_valid,
@@ -876,6 +878,7 @@ impl Instance {
 			timestep: 0.0,
 			ddt_coefficients: GeneratedDdtCoefficients::inactive(),
 			canonical_reactive: boxed_zero_f64_array(),
+			canonical_output_record: boxed_zero_f64_array(),
 			canonical_model_values: None,
 			canonical_staged: boxed_zero_f64_array(),
 			canonical_instance_valid: false,
@@ -889,7 +892,7 @@ impl Instance {
 
 	#[doc(hidden)]
 	pub fn capture_rollback_state(&self) -> GeneratedVerilogARollbackState {
-		let mut values = Vec::with_capacity(120);
+		let mut values = Vec::with_capacity(254);
 		values.extend_from_slice(&self.stamp_state.ddt_current);
 		values.extend_from_slice(&self.stamp_state.ddt_previous);
 		values.extend_from_slice(&self.stamp_state.ddt_older);
@@ -901,6 +904,7 @@ impl Instance {
 		values.extend_from_slice(&self.stamp_state.idt_previous);
 		values.extend_from_slice(&self.stamp_state.idt_older);
 		values.extend_from_slice(&self.stamp_state.idt_input_previous);
+		values.extend_from_slice(&*self.canonical_output_record);
 		let mut flags = Vec::with_capacity(48);
 		flags.extend_from_slice(&self.stamp_state.ddt_initialized);
 		flags.extend_from_slice(&self.stamp_state.idt_initialized);
@@ -911,7 +915,7 @@ impl Instance {
 
 	#[doc(hidden)]
 	pub fn restore_rollback_state(&mut self, state: &GeneratedVerilogARollbackState) {
-		debug_assert_eq!(state.values.len(), 120);
+		debug_assert_eq!(state.values.len(), 254);
 		debug_assert_eq!(state.flags.len(), 48);
 		debug_assert_eq!(state.idtmod.len(), Self::IDTMOD_STATE_COUNT);
 		let mut rollback_values = state.values.as_slice();
@@ -961,6 +965,9 @@ impl Instance {
 		let (field, remaining) = rollback_flags.split_at(Self::IDT_STATE_COUNT);
 		self.stamp_state.idt_candidate_valid.copy_from_slice(field);
 		rollback_flags = remaining;
+		let (record, remaining) = rollback_values.split_at(134);
+		self.canonical_output_record.copy_from_slice(record);
+		rollback_values = remaining;
 		debug_assert!(rollback_values.is_empty());
 		debug_assert!(rollback_flags.is_empty());
 	}
