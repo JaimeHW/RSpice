@@ -1107,6 +1107,14 @@ impl Engine {
         let gmin_scales = self.gmin_nonlinear_schedule_for_circuit(circuit);
         let start_gmin = gmin_scales.first().copied().unwrap_or(1.0e-3).max(0.0);
         let final_gmin = self.dc_nodal_gmin_floor(circuit);
+        // ngspice steps CKTdiagGmin down to gtarget = MAX(CKTgmin, CKTgshunt)
+        // and then solves once at CKTgshunt (`dynamic_gmin`, cktop.c): the
+        // walk stops at the device GMIN and closes on the floor in one solve.
+        let walk_end = self
+            .config
+            .convergence_config
+            .junction_gmin_target
+            .max(final_gmin);
 
         let size = circuit.matrix_size();
 
@@ -1138,8 +1146,8 @@ impl Engine {
         let mut step_decades = MAX_GMIN_STEP_DECADES;
         let mut attempts = 0usize;
 
-        while accepted_gmin > final_gmin {
-            let target_gmin = Self::next_descending_gmin(accepted_gmin, final_gmin, step_decades);
+        while accepted_gmin > walk_end {
+            let target_gmin = Self::next_descending_gmin(accepted_gmin, walk_end, step_decades);
             if attempts >= MAX_GMIN_ATTEMPTS || target_gmin >= accepted_gmin {
                 return Err(stopped(
                     reached,
@@ -1211,6 +1219,27 @@ impl Engine {
                     .map(|v| format!("{:.2}", v))
                     .collect::<Vec<_>>()
             );
+        }
+
+        if walk_end > final_gmin {
+            // The closing solve takes the direct solve's ITL1 budget, as
+            // `NIiter(ckt, iterlim)` does after the walk.
+            let (candidate, converged, used_iterations) = self.solve_gmin_nonlinear_corrector(
+                circuit,
+                matrix,
+                final_gmin,
+                CorrectorRun {
+                    initial_solution: &solution,
+                    damping_state: &mut damping_state,
+                    max_iterations: self.dc_direct_newton_budget(),
+                },
+                abort,
+            )?;
+            total_iterations = total_iterations.saturating_add(used_iterations);
+            if !converged {
+                return Err(stopped(reached, final_gmin, total_iterations));
+            }
+            solution = candidate;
         }
 
         // Log the actual GMIN stepping result for debugging
@@ -1557,6 +1586,37 @@ mod operating_point_rule_tests {
             stepped[0],
             direct[0]
         );
+    }
+
+    /// ngspice's dynamic GMIN stepping walks CKTdiagGmin down to
+    /// gtarget = MAX(CKTgmin, CKTgshunt) and then solves once at CKTgshunt
+    /// (`dynamic_gmin`, cktop.c). Where the nodal floor is zero, the old walk
+    /// went on below the device GMIN, holding a node that only a current
+    /// source feeds at ever larger voltages until a stage failed. The walk
+    /// stops at the device GMIN, where the node sits at 1 V, and the floor is
+    /// a single solve.
+    #[test]
+    fn nonlinear_gmin_stepping_stops_at_the_device_gmin_and_closes_on_the_floor() {
+        let engine = Engine::default();
+        let mut circuit = CircuitData::new();
+        let node = circuit.get_or_create_node("n");
+        circuit
+            .current_sources
+            .add("i1".to_string(), 0, node, 1e-12);
+        let (mut circuit, mut matrix) = linked(&engine, circuit);
+        circuit.zero_dc_nodal_floor = true;
+        assert_eq!(engine.dc_nodal_gmin_floor(&circuit), 0.0);
+        let zero = vec![0.0; circuit.matrix_size()];
+
+        let failure = continuation_failure(
+            engine
+                .gmin_stepping_nonlinear_with_abort(&mut circuit, &mut matrix, &zero, &NoAbort)
+                .expect_err("a node only a current source feeds is singular without a floor"),
+        );
+
+        let device_gmin = engine.config.convergence_config.junction_gmin_target;
+        assert_eq!(failure.reached, Some(device_gmin), "{failure}");
+        assert_eq!(failure.unsolved, ContinuationStage::Step(0.0), "{failure}");
     }
 
     /// One deck for each family that reopens on its MODEINITJCT load.
