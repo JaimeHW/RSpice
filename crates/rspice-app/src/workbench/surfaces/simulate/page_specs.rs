@@ -59,7 +59,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     // a table that says so by being empty is indistinguishable from the plan
     // whose author has written no requirement yet — which is the one thing an
     // acceptance page must never leave ambiguous.
-    let payload = match super::page_outputs::plan_payload(app) {
+    let payload = match super::page_outputs::plan_payload(&app.state.model) {
         Ok(payload) => payload,
         Err(reason) => {
             unresolved_plan(ui, &reason);

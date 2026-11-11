@@ -14,7 +14,9 @@ use crate::state::workspace::SimulationPlanPayload;
 use crate::state::{
     CaptureGroupMembership, RunRetention, SavedOutputPrecision, SavedOutputStreaming,
 };
-use crate::workbench::{AppState, RSpiceApp};
+use crate::workbench::app_state::Model;
+use crate::workbench::framework::feature::Cx;
+use crate::workbench::simulate::{SimulateFeature, record_plan_receipt, record_plan_refusal};
 use rspice_simulation::capture_ledger::CaptureLedger;
 use rspice_simulation::capture_ledger::CaptureWorkload;
 pub(super) use rspice_simulation_contract::run_set::format_bytes;
@@ -28,21 +30,21 @@ use super::page_kit::{
 
 const DATASET_COLUMNS: [f32; 4] = [0.26, 0.14, 0.20, 0.40];
 
-pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
+pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
     // Before preflight is asked anything. Handing a defaulted payload to the
     // controller gets a clean answer over an empty selection, and the page then
     // states a save policy, a group ledger and a forecast for a plan it could
     // not resolve — numbers that read as "this run keeps nothing" rather than
     // "there is no run to price".
-    let payload = match super::page_outputs::plan_payload(app) {
+    let payload = match super::page_outputs::plan_payload(cx.model) {
         Ok(payload) => payload,
         Err(reason) => {
             unresolved_plan(ui, &reason);
             return;
         }
     };
-    let selection = app.simulation_controller.effective_saved_outputs_preflight(
-        &app.state.model,
+    let selection = cx.handles.run_controller.effective_saved_outputs_preflight(
+        cx.model,
         &payload.saved_outputs,
         &payload.capture_groups,
     );
@@ -66,13 +68,13 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     // The page states one forecast, and this is where it comes from: the same
     // fold `validate_plan_saved_output_budget` prices the run with, over the
     // same participation-aware workload. The page adds nothing to it.
-    let (workload, workload_error) = capture_workload(app);
+    let (workload, workload_error) = capture_workload(cx.model);
     let ledger = CaptureLedger::resolve(
         &payload.capture_groups,
         &effective_outputs,
         &reports,
         &membership,
-        app.state.model.sim_setup.save_policy.output_selection_mode,
+        cx.model.sim_setup.save_policy.output_selection_mode,
         &workload,
     );
     // A forecast whose basis changed has to say so. Over-pricing is the safe
@@ -84,7 +86,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     // a plan transaction, and those belong to the frame that owns preflight.
     let command = groups::capture_groups(
         ui,
-        &mut app.state,
+        cx,
         &effective_outputs,
         &ledger,
         &membership,
@@ -92,12 +94,12 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         selection_error.as_deref(),
     );
     if let Some(command) = command {
-        groups::apply_group_command(app, &payload.capture_groups, command);
+        groups::apply_group_command(cx, &payload.capture_groups, command);
     }
     card_row(
         ui,
-        &mut app.state,
-        |ui, state| streaming_contract(ui, state, &payload),
+        cx,
+        |ui, cx| streaming_contract(ui, cx, &payload),
         retention_contract,
     );
 }
@@ -115,9 +117,9 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 /// Fails closed on an unresolvable workload — every analysis at every declared
 /// point — and returns the reason so the page can say the forecast is a
 /// ceiling rather than an estimate.
-pub(super) fn capture_workload(app: &RSpiceApp) -> (CaptureWorkload, Option<String>) {
-    let matrix = u64::try_from(app.state.model.sim_setup.run_set.point_count()).unwrap_or(u64::MAX);
-    match super::workload::PlanWorkload::resolve(app) {
+pub(super) fn capture_workload(model: &Model) -> (CaptureWorkload, Option<String>) {
+    let matrix = u64::try_from(model.sim_setup.run_set.point_count()).unwrap_or(u64::MAX);
+    match super::workload::PlanWorkload::resolve(model) {
         Ok(workload) => {
             let engine_task_points = workload.rows.iter().fold(0u64, |total, row| {
                 total.saturating_add(u64::try_from(row.tasks()).unwrap_or(u64::MAX))
@@ -137,10 +139,7 @@ pub(super) fn capture_workload(app: &RSpiceApp) -> (CaptureWorkload, Option<Stri
             )
         }
         Err(error) => (
-            CaptureWorkload::uniform(
-                matrix,
-                app.state.model.sim_setup.enabled_analysis_instance_count(),
-            ),
+            CaptureWorkload::uniform(matrix, model.sim_setup.enabled_analysis_instance_count()),
             Some(format!(
                 "The plan's task workload could not be resolved, so this forecast prices every \
                  analysis at every declared point: {error}"
@@ -243,7 +242,11 @@ fn unresolved_plan(ui: &mut Ui, reason: &str) {
     );
 }
 
-fn streaming_contract(ui: &mut Ui, state: &mut AppState, payload: &SimulationPlanPayload) {
+fn streaming_contract(
+    ui: &mut Ui,
+    cx: &mut Cx<'_, SimulateFeature>,
+    payload: &SimulationPlanPayload,
+) {
     // What the run will do, not what the rows were authored as. A capture group
     // rewrites the streaming and precision of every output it owns, and this
     // card counted the authored records — so a plan whose group overrode both
@@ -280,7 +283,7 @@ fn streaming_contract(ui: &mut Ui, state: &mut AppState, payload: &SimulationPla
         Some((format!("{streamed} streamed").as_str(), Tone::Neutral)),
         |ui| {
             card_body(ui, |ui| {
-                let mut policy = state.model.sim_setup.save_policy;
+                let mut policy = cx.model.sim_setup.save_policy;
                 let mut changed = false;
                 changed |= super::page_kit::switch_row(
                     ui,
@@ -312,7 +315,7 @@ fn streaming_contract(ui: &mut Ui, state: &mut AppState, payload: &SimulationPla
                     "never changes what is stored · the dataset keeps every accepted point",
                 );
                 if changed {
-                    commit_save_policy(state, policy, "Save policy · streaming and diagnostics");
+                    commit_save_policy(cx, policy, "Save policy · streaming and diagnostics");
                 }
             });
             card_note(
@@ -428,9 +431,9 @@ fn retention_ledger(
     (rows, summarized, decks)
 }
 
-fn retention_contract(ui: &mut Ui, state: &mut AppState) {
-    let simulation = &state.model.simulation;
-    let Some(plan_id) = state
+fn retention_contract(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
+    let simulation = &cx.model.simulation;
+    let Some(plan_id) = cx
         .model
         .sim_setup
         .stable_analysis_plan()
@@ -451,14 +454,14 @@ fn retention_contract(ui: &mut Ui, state: &mut AppState) {
         return;
     };
     let retained = simulation.retained.retained_plan_dataset_count(plan_id);
-    let limit = state.model.sim_setup.save_policy.retained_dataset_limit;
+    let limit = cx.model.sim_setup.save_policy.retained_dataset_limit;
     let pinned = simulation.retained.pinned_plan_run_count(plan_id);
     // Pinning can put the limit out of reach entirely. The card states that
     // rather than a count that reads as a policy still being enforced.
     let unenforceable = pinned >= limit;
     let at_limit = retained >= limit;
     let active_run_id = simulation.active_run().map(|run| run.run_id);
-    let regression_baseline = state
+    let regression_baseline = cx
         .model
         .workspace
         .content
@@ -614,46 +617,46 @@ fn retention_contract(ui: &mut Ui, state: &mut AppState) {
         },
     );
     if let Some((run_id, retention)) = reclassified {
-        state.model.simulation.set_run_retention(run_id, retention);
+        cx.model.simulation.set_run_retention(run_id, retention);
     }
     if let Some(index) = picked
         && let Some(depth) = RETENTION_CHOICES.get(index)
     {
-        let mut policy = state.model.sim_setup.save_policy;
+        let mut policy = cx.model.sim_setup.save_policy;
         policy.retained_dataset_limit = *depth;
-        if commit_save_policy(state, policy, "Save policy · dataset retention") {
-            state.model.simulation.prune_plan_runs(plan_id, *depth);
+        if commit_save_policy(cx, policy, "Save policy · dataset retention") {
+            cx.model.simulation.prune_plan_runs(plan_id, *depth);
         }
     }
 }
 
 fn commit_save_policy(
-    state: &mut AppState,
+    cx: &mut Cx<'_, SimulateFeature>,
     policy: crate::workbench::app_state::SimulationSavePolicy,
     detail: &str,
 ) -> bool {
-    if policy == state.model.sim_setup.save_policy {
+    if policy == cx.model.sim_setup.save_policy {
         return false;
     }
     if let Err(error) = policy.validate() {
-        state.record_plan_refusal(error);
+        record_plan_refusal(cx, error);
         return false;
     }
-    let previous = state.model.sim_setup.save_policy;
-    state.model.sim_setup.save_policy = policy;
-    match state
+    let previous = cx.model.sim_setup.save_policy;
+    cx.model.sim_setup.save_policy = policy;
+    match cx
         .model
         .sim_setup
         .commit_active_plan_configuration_change(detail)
     {
         Ok(receipt) => {
-            state.record_plan_receipt(receipt.status_line());
-            state.runs.preflight.invalidate();
+            record_plan_receipt(cx, receipt.status_line());
+            cx.runs.preflight.invalidate();
             true
         }
         Err(error) => {
-            state.model.sim_setup.save_policy = previous;
-            state.record_plan_refusal(error.to_string());
+            cx.model.sim_setup.save_policy = previous;
+            record_plan_refusal(cx, error.to_string());
             false
         }
     }
@@ -867,7 +870,7 @@ mod tests {
         policy.maximum_storage_bytes /= 2;
 
         assert!(commit_save_policy(
-            &mut app.state,
+            &mut crate::workbench::features::cx(&mut app),
             policy,
             "Save policy test commit"
         ));
@@ -890,7 +893,7 @@ mod tests {
         invalid.maximum_storage_bytes = 0;
 
         assert!(!commit_save_policy(
-            &mut app.state,
+            &mut crate::workbench::features::cx(&mut app),
             invalid,
             "Invalid save policy test"
         ));
@@ -910,7 +913,7 @@ mod tests {
         app.state.model.sim_setup.analysis_plan = None;
 
         assert!(!commit_save_policy(
-            &mut app.state,
+            &mut crate::workbench::features::cx(&mut app),
             candidate,
             "Save policy rollback test"
         ));

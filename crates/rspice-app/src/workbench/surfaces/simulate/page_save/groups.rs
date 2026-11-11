@@ -22,8 +22,10 @@ use crate::state::{
 use crate::ui::icons::Icon;
 use crate::ui::widgets::{Button, select};
 use crate::workbench::app::{PlanRemovalConsequence, PlanRemovalTarget, PlanRemovalTone};
+use crate::workbench::app_state::Model;
+use crate::workbench::framework::feature::Cx;
+use crate::workbench::simulate::SimulateFeature;
 use crate::workbench::state::{CaptureGroupDraft, SimulationWorkflowDialog};
-use crate::workbench::{AppState, RSpiceApp};
 use rspice_simulation::capture_ledger::CaptureLedger;
 
 use super::super::page_kit::{
@@ -47,15 +49,15 @@ const GROUP_NOTE: &str = "A group's forecast is its own outputs summed across th
 /// that decide which outputs there are to group at all.
 pub(super) fn capture_groups(
     ui: &mut Ui,
-    state: &mut AppState,
+    cx: &mut Cx<'_, SimulateFeature>,
     outputs: &[SavedOutput],
     ledger: &CaptureLedger,
     membership: &CaptureGroupMembership,
     automatic_fallback: bool,
     selection_error: Option<&str>,
 ) -> Option<GroupCommand> {
-    let selection_mode = state.model.sim_setup.save_policy.output_selection_mode;
-    let budget = state.model.sim_setup.save_policy.maximum_storage_bytes;
+    let selection_mode = cx.model.sim_setup.save_policy.output_selection_mode;
+    let budget = cx.model.sim_setup.save_policy.maximum_storage_bytes;
     let total = ledger.total_bytes();
     let indeterminate = ledger.indeterminate_count();
     let over_budget = total > budget;
@@ -79,8 +81,8 @@ pub(super) fn capture_groups(
             format_bytes(total)
         )
     };
-    let groups = plan_capture_groups(state);
-    let selected = state.simulate.selected_capture_group;
+    let groups = plan_capture_groups(cx.model);
+    let selected = cx.state.selected_capture_group;
     let mut command = None;
     // The head strip and the row list both answer with a command, and one
     // variable cannot be borrowed by both closures at once. Row selection wins
@@ -232,7 +234,7 @@ pub(super) fn capture_groups(
             );
         },
     );
-    let mut policy = state.model.sim_setup.save_policy;
+    let mut policy = cx.model.sim_setup.save_policy;
     if let Some(index) = picked_mode
         && let Some(mode) = OutputSelectionMode::ALL.get(index).copied()
     {
@@ -243,17 +245,17 @@ pub(super) fn capture_groups(
     {
         policy.maximum_storage_bytes = bytes;
     }
-    if policy != state.model.sim_setup.save_policy {
-        commit_save_policy(state, policy, "Save policy · output selection and storage");
+    if policy != cx.model.sim_setup.save_policy {
+        commit_save_policy(cx, policy, "Save policy · output selection and storage");
     }
     // A group that holds outputs is not removed on one click. What falls back
     // to the fallback group, and which overrides stop applying to it, is the
     // entire cost of removing a capture policy — and none of it is legible from
     // the strip that removes it.
-    let plan = plan_id(state);
+    let plan = plan_id(cx.model);
     let requested = match head_command.or(command) {
         Some(GroupCommand::Remove(id)) => {
-            stage_group_removal(state, plan, &groups, id, outputs, membership)
+            stage_group_removal(cx, plan, &groups, id, outputs, membership)
         }
         other => other,
     };
@@ -267,8 +269,7 @@ pub(super) fn capture_groups(
     // change, so the frame is asked to run again: the confirming click landed
     // in the modal, and nothing else is coming to repaint the row it removed.
     plan.and_then(|plan| {
-        state
-            .simulate
+        cx.state
             .plan_removal_review
             .take_confirmed_capture_group(plan)
     })
@@ -278,9 +279,8 @@ pub(super) fn capture_groups(
 }
 
 /// The plan a capture-group edit belongs to.
-fn plan_id(state: &AppState) -> Option<crate::product::SimulationPlanId> {
-    state
-        .model
+fn plan_id(model: &Model) -> Option<crate::product::SimulationPlanId> {
+    model
         .sim_setup
         .stable_analysis_plan()
         .ok()
@@ -295,7 +295,7 @@ fn plan_id(state: &AppState) -> Option<crate::product::SimulationPlanId> {
 /// a policy with nothing under it: removing it orphans nothing, and stopping to
 /// ask would only teach the reader to click through the reviews that matter.
 fn stage_group_removal(
-    state: &mut AppState,
+    cx: &mut Cx<'_, SimulateFeature>,
     plan: Option<crate::product::SimulationPlanId>,
     groups: &[CaptureGroup],
     id: CaptureGroupId,
@@ -342,7 +342,7 @@ fn stage_group_removal(
         PlanRemovalConsequence::stated("Rules it resolves by", group.rules.len().to_string())
             .explained(PlanRemovalTone::Aside, "Its outputs are still captured."),
     ];
-    state.simulate.plan_removal_review.open(
+    cx.state.plan_removal_review.open(
         PlanRemovalTarget::CaptureGroup { plan, id },
         group.name.clone(),
         consequences,
@@ -484,14 +484,13 @@ fn group_commands(
 }
 
 /// The plan's authored capture groups, in resolution order.
-fn plan_capture_groups(state: &AppState) -> Vec<CaptureGroup> {
-    state
-        .model
+fn plan_capture_groups(model: &Model) -> Vec<CaptureGroup> {
+    model
         .sim_setup
         .stable_analysis_plan()
         .ok()
         .map(|plan| plan.id())
-        .and_then(|plan_id| state.model.workspace.content.plan_data(plan_id))
+        .and_then(|plan_id| model.workspace.content.plan_data(plan_id))
         .map(|payload| payload.capture_groups.clone())
         .unwrap_or_default()
 }
@@ -504,7 +503,7 @@ fn plan_capture_groups(state: &AppState) -> Vec<CaptureGroup> {
 /// preflight invalidation as well as the workspace — the two must move
 /// together, and a narrower parameter could only move one of them.
 pub(super) fn apply_group_command(
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, SimulateFeature>,
     groups: &[CaptureGroup],
     command: GroupCommand,
 ) {
@@ -516,24 +515,22 @@ pub(super) fn apply_group_command(
     };
     match command {
         GroupCommand::Select(id) => {
-            app.state.simulate.selected_capture_group = Some(id);
+            cx.state.selected_capture_group = Some(id);
         }
         GroupCommand::Add => {
-            app.state.simulate.simulation_workflow = Some(SimulationWorkflowDialog::CaptureGroup(
+            cx.state.simulation_workflow = Some(SimulationWorkflowDialog::CaptureGroup(
                 CaptureGroupDraft::default(),
             ));
         }
         GroupCommand::Edit(id) => {
             if let Some(group) = groups.iter().find(|group| group.id == id) {
-                app.state.simulate.simulation_workflow =
-                    Some(SimulationWorkflowDialog::CaptureGroup(
-                        super::super::workflows::group_draft(group),
-                    ));
+                cx.state.simulation_workflow = Some(SimulationWorkflowDialog::CaptureGroup(
+                    super::super::workflows::group_draft(group),
+                ));
             }
         }
         GroupCommand::Remove(id) => {
-            let Ok(plan_id) = app
-                .state
+            let Ok(plan_id) = cx
                 .model
                 .sim_setup
                 .stable_analysis_plan()
@@ -543,7 +540,7 @@ pub(super) fn apply_group_command(
             };
             let detail = format!("Removed capture group {}.", named(id));
             if super::super::workflows::commit_plan_change(
-                &mut crate::workbench::features::cx(app),
+                cx,
                 plan_id,
                 &detail,
                 move |workspace, plan_id| {
@@ -554,12 +551,11 @@ pub(super) fn apply_group_command(
                         .map_err(|error| error.to_string())
                 },
             ) {
-                app.state.simulate.selected_capture_group = None;
+                cx.state.selected_capture_group = None;
             }
         }
         GroupCommand::Raise(id) | GroupCommand::Lower(id) => {
-            let Ok(plan_id) = app
-                .state
+            let Ok(plan_id) = cx
                 .model
                 .sim_setup
                 .stable_analysis_plan()
@@ -574,7 +570,7 @@ pub(super) fn apply_group_command(
                 if toward_front { "earlier" } else { "later" }
             );
             super::super::workflows::commit_plan_change(
-                &mut crate::workbench::features::cx(app),
+                cx,
                 plan_id,
                 &detail,
                 move |workspace, plan_id| {

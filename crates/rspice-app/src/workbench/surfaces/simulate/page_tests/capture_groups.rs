@@ -189,7 +189,7 @@ fn page_capture_ledger(app: &RSpiceApp) -> rspice_simulation::capture_ledger::Ca
         &reports,
         &membership,
         app.state.model.sim_setup.save_policy.output_selection_mode,
-        &super::super::page_save::capture_workload(app).0,
+        &super::super::page_save::capture_workload(&app.state.model).0,
     )
 }
 
@@ -650,7 +650,7 @@ fn the_registry_size_and_the_ledger_row_price_one_output_once() {
     let registry = super::super::page_outputs::projected_output_bytes_for(
         &app,
         &payload,
-        &super::super::page_save::capture_workload(&app).0,
+        &super::super::page_save::capture_workload(&app.state.model).0,
     );
     assert!(
         !registry.is_empty(),

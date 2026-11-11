@@ -47,7 +47,9 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, page: SimulationPage) {
             super::page_models::show(ui, &mut crate::workbench::features::cx(app));
         }
         SimulationPage::Solver => super::page_solver::show(ui, app),
-        SimulationPage::Save => super::page_save::show(ui, app),
+        SimulationPage::Save => {
+            super::page_save::show(ui, &mut crate::workbench::features::cx(app));
+        }
     });
 }
 

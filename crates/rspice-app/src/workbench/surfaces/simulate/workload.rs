@@ -174,11 +174,11 @@ impl PlanWorkload {
     /// Fails closed: a draft whose workload cannot be read is an error rather
     /// than a row priced at one, because a plan that silently under-counts is
     /// exactly the budget an operator would approve by mistake.
-    pub(super) fn resolve(app: &RSpiceApp) -> Result<Self, String> {
+    pub(super) fn resolve(model: &Model) -> Result<Self, String> {
         Self::resolve_for(
-            app.state.model.sim_setup.enabled_analysis_instances(),
-            &app.state.model.sim_setup.run_set,
-            app.state.model.sim_setup.reference_pvt,
+            model.sim_setup.enabled_analysis_instances(),
+            &model.sim_setup.run_set,
+            model.sim_setup.reference_pvt,
         )
     }
 

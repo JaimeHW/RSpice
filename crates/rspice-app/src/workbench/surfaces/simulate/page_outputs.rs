@@ -17,6 +17,7 @@ use crate::state::{
 use crate::ui::widgets::{Button, mono_input, select};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::{PlanRemovalConsequence, PlanRemovalTarget, PlanRemovalTone};
+use crate::workbench::app_state::Model;
 use crate::workbench::framework::command_registry::ids;
 use rspice_simulation::capture_ledger;
 use rspice_simulation::output_contract::SavedOutputPreflightReport;
@@ -52,7 +53,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     // no outputs to forecast, and the registry that would list them has to say
     // so in its own words rather than paint the empty table an authored plan
     // with nothing saved in it paints.
-    let payload = match plan_payload(app) {
+    let payload = match plan_payload(&app.state.model) {
         Ok(payload) => payload,
         Err(reason) => {
             unresolved_plan(ui, &reason);
@@ -62,7 +63,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     // Priced once for the route. Pricing the capture workload expands the
     // declared space, and both halves of this page price against it: the
     // registry to give each row its size, the storage card to total them.
-    let (workload, _) = super::page_save::capture_workload(app);
+    let (workload, _) = super::page_save::capture_workload(&app.state.model);
     registry(ui, app, &payload, &workload);
     card_row(
         ui,
@@ -83,10 +84,9 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 /// "author an output", the other is "this plan is broken", and a page that
 /// spells them the same way states a fact about a plan when in truth nothing
 /// here is known about it at all.
-pub(super) fn plan_payload(app: &RSpiceApp) -> Result<SimulationPlanPayload, String> {
-    let plan_id = app.state.model.sim_setup.stable_analysis_plan()?.id();
-    app.state
-        .model
+pub(super) fn plan_payload(model: &Model) -> Result<SimulationPlanPayload, String> {
+    let plan_id = model.sim_setup.stable_analysis_plan()?.id();
+    model
         .workspace
         .content
         .plan_data(plan_id)

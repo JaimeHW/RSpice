@@ -165,7 +165,8 @@ fn the_per_point_task_cells_price_participation_and_rate() {
     scope_to_the_nominal_point(&mut app.state, AnalysisKind::Pss);
 
     let participation = super::participation::PlanParticipation::resolve(&app.state.model);
-    let workload = super::workload::PlanWorkload::resolve(&app).expect("the plan prices");
+    let workload =
+        super::workload::PlanWorkload::resolve(&app.state.model).expect("the plan prices");
     let nominal = participation
         .nominal_key
         .clone()
@@ -252,7 +253,7 @@ fn the_save_page_engine_ceiling_counts_the_queue_preparation_mints() {
     let points = enable_only_the_temperature_axis(&mut app.state);
     assert!(points > 1, "the fixture space must actually multiply");
 
-    let (workload, notice) = super::page_save::capture_workload(&app);
+    let (workload, notice) = super::page_save::capture_workload(&app.state.model);
     assert!(
         notice.is_none(),
         "this plan's workload resolves exactly: {notice:?}"

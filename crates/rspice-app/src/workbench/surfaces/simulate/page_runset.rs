@@ -1989,7 +1989,7 @@ fn enabled_analysis_kinds(app: &RSpiceApp) -> Vec<AnalysisKind> {
 /// table whose rows did not add up to the number the budget is checked against
 /// would be the more convincing of the two and the wrong one.
 pub(super) fn exact_plan_task_count(app: &RSpiceApp) -> Result<Option<usize>, String> {
-    super::workload::PlanWorkload::resolve(app)?
+    super::workload::PlanWorkload::resolve(&app.state.model)?
         .total_tasks()
         .map(Some)
 }
@@ -2042,7 +2042,10 @@ fn worst_point_task_cost_of(
 /// [`plan_run_set_validation_from`], which is the one that runs on a frame.
 #[cfg(test)]
 pub(super) fn plan_run_set_validation(app: &RSpiceApp) -> RunSetValidation {
-    plan_run_set_validation_from(app, &super::workload::PlanWorkload::resolve(app))
+    plan_run_set_validation_from(
+        app,
+        &super::workload::PlanWorkload::resolve(&app.state.model),
+    )
 }
 
 /// The same validation, against a workload the frame already priced.

@@ -32,7 +32,7 @@ fn the_task_rate_rows_add_up_to_the_number_the_budget_is_checked_against() {
     let points = enable_only_the_temperature_axis(&mut app.state);
     assert!(points > 1, "the fixture space must actually multiply");
 
-    let workload = PlanWorkload::resolve(&app).expect("the fixture workload prices");
+    let workload = PlanWorkload::resolve(&app.state.model).expect("the fixture workload prices");
     let summed: usize = workload.rows.iter().map(|row| row.tasks()).sum();
     let scalar = exact_plan_task_count(&app)
         .expect("the page can forecast this workload")
@@ -55,7 +55,7 @@ fn a_row_prices_the_rate_times_the_participation() {
     drive_pss_from_the_fixture_supply(&mut app.state);
     let points = enable_only_the_temperature_axis(&mut app.state);
 
-    let workload = PlanWorkload::resolve(&app).expect("the fixture workload prices");
+    let workload = PlanWorkload::resolve(&app.state.model).expect("the fixture workload prices");
     let pss = workload
         .rows
         .iter()
@@ -94,7 +94,7 @@ fn narrowing_one_analysis_shrinks_its_row_and_the_plan_duration() {
     // about narrowing, and the refusal is pinned separately below.
     app.state.model.sim_setup.reference_pvt.temperature_celsius = 25.0;
 
-    let before = PlanWorkload::resolve(&app).expect("the fixture workload prices");
+    let before = PlanWorkload::resolve(&app.state.model).expect("the fixture workload prices");
     let before_tasks = before
         .total_tasks()
         .expect("the fixture is within capacity");
@@ -113,7 +113,7 @@ fn narrowing_one_analysis_shrinks_its_row_and_the_plan_duration() {
         .set_run_at(op, AnalysisRunAt::NominalPoint)
         .expect("the operating point narrows to the nominal condition");
 
-    let after = PlanWorkload::resolve(&app).expect("the narrowed workload prices");
+    let after = PlanWorkload::resolve(&app.state.model).expect("the narrowed workload prices");
     let op_row = after
         .rows
         .iter()
@@ -163,7 +163,7 @@ fn a_participation_that_refuses_is_priced_at_the_whole_matrix() {
         .set_run_at(op, AnalysisRunAt::NominalPoint)
         .expect("the plan stores the participation it cannot yet resolve");
 
-    let workload = PlanWorkload::resolve(&app).expect("an unresolved row still prices");
+    let workload = PlanWorkload::resolve(&app.state.model).expect("an unresolved row still prices");
     let op_row = workload
         .rows
         .iter()
@@ -226,7 +226,7 @@ fn every_surface_prices_the_same_queue_in_the_same_currency() {
     drive_pss_from_the_fixture_supply(&mut app.state);
     enable_only_the_temperature_axis(&mut app.state);
 
-    let workload = PlanWorkload::resolve(&app).expect("the fixture workload prices");
+    let workload = PlanWorkload::resolve(&app.state.model).expect("the fixture workload prices");
     let tasks = workload
         .total_tasks()
         .expect("the fixture is within capacity");
@@ -267,7 +267,7 @@ fn a_plan_with_no_axes_prices_every_analysis_once() {
     // enabled analysis costs its rate exactly once. This is the case a table
     // built on point counts would divide by zero on.
     let app = app_with(&[AnalysisKind::OperatingPoint]);
-    let workload = PlanWorkload::resolve(&app).expect("an axis-free plan prices");
+    let workload = PlanWorkload::resolve(&app.state.model).expect("an axis-free plan prices");
 
     assert_eq!(workload.matrix_points, 1);
     for row in &workload.rows {
@@ -310,7 +310,7 @@ fn an_invalid_workload_refuses_rather_than_pricing_the_plan_short() {
         })
         .expect("the temperature list edits");
 
-    let refusal = PlanWorkload::resolve(&app);
+    let refusal = PlanWorkload::resolve(&app.state.model);
     assert!(
         refusal.is_err(),
         "an unreadable workload is a refusal, never a row priced at one"
@@ -344,7 +344,7 @@ fn a_retracing_dc_sweep_is_still_one_task_per_point() {
     let dc = instance_of(&app.state, AnalysisKind::DcSweep);
 
     let rate_of = |app: &RSpiceApp| {
-        let workload = PlanWorkload::resolve(app).expect("the DC fixture prices");
+        let workload = PlanWorkload::resolve(&app.state.model).expect("the DC fixture prices");
         let row = workload
             .rows
             .iter()
