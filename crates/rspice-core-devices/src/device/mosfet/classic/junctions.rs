@@ -12,6 +12,30 @@ impl Mosfet {
         v: Value,
         gmin: Value,
     ) -> (Value, Value) {
+        let law = self.junction_diode_law(isat, v, gmin);
+        self.with_legacy_bsim_second_junction_gmin(law, gmin, v)
+    }
+
+    /// ngspice loads a BSIM1 or BSIM2 body junction's equivalent current as
+    /// `cb - (gb - GMIN) * vb` (b1ld.c:669-670, b2ld.c:663-664) while `gb`
+    /// already holds GMIN, so the converged junction carries GMIN twice; the
+    /// conductance it stamps holds it once. LTspice prints the same current.
+    #[inline]
+    fn with_legacy_bsim_second_junction_gmin(
+        &self,
+        (current, conductance): (Value, Value),
+        gmin: Value,
+        v: Value,
+    ) -> (Value, Value) {
+        if matches!(self.level, 4 | 5) {
+            (current + gmin.max(0.0) * v, conductance)
+        } else {
+            (current, conductance)
+        }
+    }
+
+    #[inline]
+    fn junction_diode_law(&self, isat: Value, v: Value, gmin: Value) -> (Value, Value) {
         let isat = if isat.is_finite() && isat > 0.0 {
             isat
         } else {
@@ -46,6 +70,18 @@ impl Mosfet {
         constants: &ClassicMosTransientConstants,
     ) -> (Value, Value) {
         let gmin = self.junction_gmin.max(0.0);
+        let law = self.junction_diode_law_with_constants(isat, v, gmin, constants);
+        self.with_legacy_bsim_second_junction_gmin(law, gmin, v)
+    }
+
+    #[inline]
+    fn junction_diode_law_with_constants(
+        &self,
+        isat: Value,
+        v: Value,
+        gmin: Value,
+        constants: &ClassicMosTransientConstants,
+    ) -> (Value, Value) {
         let nvt = constants.body_junction_nvt;
         if constants.uses_linearized_reverse_body_junction && v <= 0.0 {
             let conductance = isat / nvt + gmin;

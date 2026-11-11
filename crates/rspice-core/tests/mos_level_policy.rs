@@ -632,6 +632,56 @@ fn legacy_bsim_body_junctions_match_reference_laws() {
     }
 }
 
+/// ngspice loads a BSIM1 or BSIM2 body junction's equivalent current as
+/// cb - (gb - GMIN) * vb (b1ld.c:669-670, b2ld.c:663-664) while gb already
+/// holds GMIN, so the converged junction carries GMIN twice. LTspice prints
+/// the same currents. With the bulk at -1 V under a grounded 50u/10u NMOS,
+/// I(VB) is LTspice 4.077325e-12 and ngspice 4.077325e-12 for both families,
+/// against 2.02e-12 for level 1. On the default BSIM1 card (no mobility, so
+/// the channel carries nothing) at VDS 50 mV, I(VDS) is LTspice -1.019331e-13
+/// and ngspice -1.019330e-13: the drain junction's 2 * GMIN * 50 mV.
+#[test]
+fn legacy_bsim_junctions_carry_gmin_twice_as_ngspice_and_ltspice() {
+    use rspice_core::engine::SpiceDialect;
+    for dialect in [SpiceDialect::BestAvailable, SpiceDialect::Ngspice] {
+        let run = |deck: String, source: &str| {
+            let netlist = Netlist::parse(&deck).expect("deck parses");
+            Engine::new(SimulationConfig::default().with_spice_dialect(dialect))
+                .run_dc_op(&netlist)
+                .unwrap_or_else(|err| panic!("{dialect:?}: {err}"))
+                .branch_current_named(source)
+                .expect("source current")
+        };
+        for (card, expected) in [
+            ("level=1 vto=0.7 kp=1e-4", 2.02e-12),
+            ("level=4 tox=0.03 vdd=5", 4.077325e-12),
+            ("level=5 tox=0.03 vdd=5", 4.077325e-12),
+        ] {
+            let current = run(
+                format!(
+                    "junction gmin\nvb b 0 -1\nvg g 0 0\nm1 0 g 0 b nm l=10u w=50u\n\
+                     .model nm nmos {card}\n.op\n.end\n"
+                ),
+                "vb",
+            );
+            assert!(
+                (current - expected).abs() <= 1.0e-17,
+                "{card} {dialect:?}: I(vb) = {current:e}, expected {expected:e}"
+            );
+        }
+        let current = run(
+            "default BSIM1\nvds d 0 0.05\nvgs g 0 1.8\nm1 d g 0 0 b1 l=10u w=50u\n\
+             .model b1 nmos level=4 tox=0.03 vdd=5 rsh=35\n.op\n.end\n"
+                .to_string(),
+            "vds",
+        );
+        assert!(
+            (current + 1.019331e-13).abs() <= 1.0e-18,
+            "{dialect:?}: BSIM1 I(vds) = {current:e}, expected -1.019331e-13"
+        );
+    }
+}
+
 #[test]
 fn native_mos_body_area_selection_matches_junction_equations() {
     use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect};
