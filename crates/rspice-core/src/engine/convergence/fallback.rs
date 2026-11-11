@@ -174,6 +174,33 @@ impl Engine {
         abort: &dyn AbortSignal,
         seed_mode: CorrectorSeedMode,
     ) -> Result<(Vec<Value>, bool, usize), SimulationError> {
+        let floor = self.dc_nodal_gmin_floor(circuit);
+        self.solve_scaled_nonlinear_corrector_at_nodal_gmin(
+            circuit,
+            matrix,
+            source_scale,
+            floor,
+            run,
+            abort,
+            seed_mode,
+        )
+    }
+
+    /// The source-scaled corrector with a nodal GMIN stage `nodal_gmin`, at
+    /// or above the floor, on every node: the diagonal GMIN `gillespie_src`
+    /// (cktop.c) steps while every supply is at zero. At the floor it is the
+    /// scaled circuit's own system.
+    #[allow(clippy::too_many_arguments)]
+    pub(in crate::engine::convergence) fn solve_scaled_nonlinear_corrector_at_nodal_gmin(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        source_scale: Value,
+        nodal_gmin: Value,
+        run: CorrectorRun<'_>,
+        abort: &dyn AbortSignal,
+        seed_mode: CorrectorSeedMode,
+    ) -> Result<(Vec<Value>, bool, usize), SimulationError> {
         let CorrectorRun {
             initial_solution,
             damping_state,
@@ -213,7 +240,7 @@ impl Engine {
             rhs.fill(0.0);
             matrix.clear_values();
 
-            Self::stamp_nodal_gmin(circuit, matrix, gmin_floor);
+            Self::stamp_nodal_gmin_stage(circuit, matrix, nodal_gmin, gmin_floor);
             let node_count = circuit.num_nodes().min(solution.len());
 
             circuit.stamp_dc_direct_scaled(matrix, &mut rhs, source_scale);
@@ -245,7 +272,9 @@ impl Engine {
                 }
                 return Ok((solution, false, used_iterations));
             }
-            Self::settle_compact_model_private_nodes(circuit, matrix, &rhs, gmin_floor)?;
+            if nodal_gmin <= gmin_floor {
+                Self::settle_compact_model_private_nodes(circuit, matrix, &rhs, gmin_floor)?;
+            }
             let solve_result = if uses_vbic_correction {
                 Self::solve_direct_dc_correction(
                     matrix,
@@ -275,7 +304,15 @@ impl Engine {
                     damping_state,
                 },
                 junction_owns_steps,
-                |trial| self.nonlinear_merit_scaled(circuit, matrix, trial, source_scale),
+                |trial| {
+                    self.nonlinear_merit_scaled_at_nodal_gmin(
+                        circuit,
+                        matrix,
+                        trial,
+                        source_scale,
+                        nodal_gmin,
+                    )
+                },
             );
             if (source_scale - 1.0).abs() <= 1.0e-12 {
                 circuit.enforce_dc_ideal_voltage_constraints(&mut new_solution)?;
@@ -305,11 +342,12 @@ impl Engine {
             let device_converged = circuit.nonlinear_converged(self.device_convergence_criteria());
             let nonlinear_residual_converged = voltage_converged
                 && device_converged
-                && self.try_nonlinear_residual_converged_scaled(
+                && self.try_nonlinear_residual_converged_scaled_at_nodal_gmin(
                     circuit,
                     matrix,
                     &new_solution,
                     source_scale,
+                    nodal_gmin,
                 )?;
             solution = new_solution;
 

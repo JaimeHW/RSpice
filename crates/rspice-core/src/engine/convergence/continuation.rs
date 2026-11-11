@@ -355,15 +355,35 @@ impl Engine {
             circuit.restore_nonlinear_state(entry_state);
             return Err(SimulationError::Aborted);
         }
-        if !bootstrap_converged {
-            circuit.restore_nonlinear_state(entry_state);
-            return Err(stopped(
-                None,
-                ContinuationStage::Step(0.0),
-                total_iterations.max(source_iterations),
-            ));
-        }
-        solution = bootstrap_solution;
+        solution = if bootstrap_converged {
+            bootstrap_solution
+        } else {
+            damping_state = NewtonDampingState::default();
+            let ladder = self.zero_supply_gmin_ladder(
+                circuit,
+                matrix,
+                CorrectorRun {
+                    initial_solution: &zero_guess,
+                    damping_state: &mut damping_state,
+                    max_iterations: source_iterations,
+                },
+                &mut total_iterations,
+                abort,
+            )?;
+            if abort.is_aborted() {
+                circuit.restore_nonlinear_state(entry_state);
+                return Err(SimulationError::Aborted);
+            }
+            let Some(solved) = ladder else {
+                circuit.restore_nonlinear_state(entry_state);
+                return Err(stopped(
+                    None,
+                    ContinuationStage::Step(0.0),
+                    total_iterations.max(source_iterations),
+                ));
+            };
+            solved
+        };
 
         let mut accepted_scale = 0.0;
         let mut source_step = policy.initial_step;
@@ -461,6 +481,59 @@ impl Engine {
         }
 
         Ok(polished_solution)
+    }
+
+    /// `gillespie_src` (cktop.c:503-547): when the straight solve with every
+    /// supply at zero fails, a nodal GMIN steps down by decades from 1e10
+    /// times GMIN to GMIN, still at zero supplies, the first stage from the
+    /// MODEINITJCT load and each later one from the last. The junctions keep
+    /// their own GMIN throughout. A stage that fails ends the walk.
+    fn zero_supply_gmin_ladder(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        run: CorrectorRun<'_>,
+        total_iterations: &mut usize,
+        abort: &dyn AbortSignal,
+    ) -> Result<Option<Vec<Value>>, SimulationError> {
+        let CorrectorRun {
+            initial_solution,
+            damping_state,
+            max_iterations,
+        } = run;
+        let floor = self.dc_nodal_gmin_floor(circuit);
+        let gmin = self.config.convergence_config.gmin_target;
+        if gmin <= 0.0 {
+            return Ok(None);
+        }
+        circuit.reopen_operating_point();
+        let mut solution = initial_solution.to_vec();
+        for decade in (0..=10).rev() {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            let nodal_gmin = (gmin * 10.0_f64.powi(decade)).max(floor);
+            let (candidate, converged, used_iterations) = self
+                .solve_scaled_nonlinear_corrector_at_nodal_gmin(
+                    circuit,
+                    matrix,
+                    0.0,
+                    nodal_gmin,
+                    CorrectorRun {
+                        initial_solution: &solution,
+                        damping_state: &mut *damping_state,
+                        max_iterations,
+                    },
+                    abort,
+                    super::fallback::CorrectorSeedMode::Limited,
+                )?;
+            *total_iterations = total_iterations.saturating_add(used_iterations);
+            if !converged {
+                return Ok(None);
+            }
+            solution = candidate;
+        }
+        Ok(Some(solution))
     }
 
     /// Pseudo-transient continuation for difficult nonlinear circuits.
@@ -1924,6 +1997,65 @@ m2 d2 g 0 0 nmos150 w=150e-9 l=150e-9 nf=1 off
 
     /// Pseudo-transient, from zero and from the direct solve's own answer,
     /// reaches the operating point the direct solve finds from zero.
+    /// Four NMOS in series under a PMOS load at 125 C. With every supply at
+    /// zero, the MODEINITJCT load reverse-biases each junction by a volt,
+    /// and its 1e-9 A saturation current flows into stack nodes only GMIN
+    /// holds, so the first iterate is hundreds of volts. ngspice-46's
+    /// straight solve at zero supplies fails here too, and `gillespie_src`
+    /// (cktop.c:503-547) then steps a diagonal GMIN from 1e10 times GMIN
+    /// down to GMIN, still at zero supplies, before it raises them.
+    #[test]
+    fn source_stepping_opens_on_a_gmin_ladder_when_the_zero_supply_solve_fails() {
+        let deck = "* nmos stack at 125 C
+.model nenh nmos level=2 vto=0.6 pb=0.7 cgso=1.5e-10 cgdo=1.5e-10 rsh=28 cj=1.75e-4
++ mj=0.65 cjsw=4e-10 mjsw=0.3 tox=3.5e-8 nsub=7e15 xj=2e-7 ld=2.5e-7 uo=700
++ ucrit=7e4 uexp=0.13 vmax=5e4 neff=3 delta=1.5
+.model penh pmos level=2 vto=-0.6 pb=0.7 cgso=1.3e-10 cgdo=1.3e-10 rsh=92 cj=2.25e-4
++ mj=0.5 cjsw=3e-10 mjsw=0.3 tox=3.5e-8 nsub=5e15 xj=1e-7 ld=2.5e-7 uo=270
++ ucrit=9e4 uexp=0.35 vmax=3e4 neff=1.5 delta=1
+vdd vdd 0 5
+vg g 0 5
+va a 0 0
+mp out a vdd vdd penh w=20u l=1.2u
+m0 out g n0 0 nenh w=10u l=1.2u ad=50p as=50p pd=30u ps=30u
+m1 n0 g n1 0 nenh w=10u l=1.2u ad=50p as=50p pd=30u ps=30u
+m2 n1 g n2 0 nenh w=10u l=1.2u ad=50p as=50p pd=30u ps=30u
+m3 n2 g 0 0 nenh w=10u l=1.2u ad=50p as=50p pd=30u ps=30u
+.temp 125
+.op
+.end
+";
+        let netlist = crate::netlist::Netlist::parse(deck).unwrap();
+        let engine = Engine::new(SimulationConfig {
+            spice_dialect: crate::engine::SpiceDialect::Ngspice,
+            ..SimulationConfig::default()
+        })
+        .resolved_for_netlist(&netlist);
+        let fresh = || linked(&engine, engine.build_circuit(&netlist).unwrap());
+        let (mut circuit, mut matrix) = fresh();
+        let zero = vec![0.0; circuit.matrix_size()];
+        let direct = engine
+            .solve_nonlinear_with_guess_and_abort(&mut circuit, &mut matrix, Some(&zero), &NoAbort)
+            .unwrap_or_else(|error| panic!("direct solve: {error}"));
+        let (mut circuit, mut matrix) = fresh();
+        let stepped = engine
+            .source_stepping_nonlinear_with_guess_and_abort(
+                &mut circuit,
+                &mut matrix,
+                &zero,
+                &NoAbort,
+            )
+            .unwrap_or_else(|error| panic!("source stepping: {error}"));
+        // Two Newton solves of one circuit, each converged to RELTOL 1e-3
+        // and VNTOL 1e-6 from its own side.
+        for (index, (&stepped, &direct)) in stepped.iter().zip(&direct).enumerate() {
+            assert!(
+                (stepped - direct).abs() <= 1e-3 * direct.abs() + 1e-6,
+                "x[{index}] = {stepped:e}, direct {direct:e}"
+            );
+        }
+    }
+
     fn assert_pseudo_transient_reaches_the_direct_operating_point(decks: &[&str]) {
         for deck in decks {
             let netlist = crate::netlist::Netlist::parse(deck).unwrap();

@@ -964,12 +964,15 @@ impl Engine {
         )
     }
 
-    pub(in crate::engine::convergence) fn try_nonlinear_residual_converged_scaled(
+    /// The source-scaled residual check with a nodal GMIN stage `nodal_gmin`,
+    /// at or above the floor, on every node.
+    pub(in crate::engine::convergence) fn try_nonlinear_residual_converged_scaled_at_nodal_gmin(
         &self,
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
         solution: &[Value],
         source_scale: Value,
+        nodal_gmin: Value,
     ) -> Result<bool, SimulationError> {
         let gmin_floor = self.dc_nodal_gmin_floor(circuit);
         self.try_nonlinear_residual_converged_with_linear_stamp_and_junction_gmin(
@@ -978,7 +981,7 @@ impl Engine {
             solution,
             self.effective_device_junction_gmin(self.config.convergence_config.gmin_target),
             |circuit, matrix, rhs| {
-                Self::stamp_nodal_gmin(circuit, matrix, gmin_floor);
+                Self::stamp_nodal_gmin_stage(circuit, matrix, nodal_gmin, gmin_floor);
                 circuit.stamp_dc_direct_scaled(matrix, rhs, source_scale);
             },
         )
@@ -1194,8 +1197,28 @@ impl Engine {
         source_scale: Value,
     ) -> Option<Value> {
         let gmin_floor = self.dc_nodal_gmin_floor(circuit);
+        self.nonlinear_merit_scaled_at_nodal_gmin(
+            circuit,
+            matrix,
+            solution,
+            source_scale,
+            gmin_floor,
+        )
+    }
+
+    /// [`Self::nonlinear_merit_scaled`] with a nodal GMIN stage `nodal_gmin`
+    /// at or above the floor.
+    pub(in crate::engine::convergence) fn nonlinear_merit_scaled_at_nodal_gmin(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        solution: &[Value],
+        source_scale: Value,
+        nodal_gmin: Value,
+    ) -> Option<Value> {
+        let gmin_floor = self.dc_nodal_gmin_floor(circuit);
         self.nonlinear_merit_with_linear_stamp(circuit, matrix, solution, |circuit, matrix, rhs| {
-            Self::stamp_nodal_gmin(circuit, matrix, gmin_floor);
+            Self::stamp_nodal_gmin_stage(circuit, matrix, nodal_gmin, gmin_floor);
             circuit.stamp_dc_direct_scaled(matrix, rhs, source_scale);
         })
     }
