@@ -16,11 +16,11 @@ mod page_solver;
 pub(crate) mod page_specs;
 mod page_variables;
 pub(crate) mod pages;
-mod participation;
+pub(crate) mod participation;
 mod plan_issue_wording;
 pub(crate) mod plan_manager;
 pub(crate) mod transient_checkpoint_exchange;
-mod variable_import;
+pub(crate) mod variable_import;
 mod workflows;
 mod workload;
 

@@ -87,7 +87,8 @@ use egui::accesskit::{Action, ActionRequest, Node, NodeId, Role, TreeId};
 use egui::{Rect, vec2};
 
 use super::accessibility::{studio_overlays, studio_route, studio_routes};
-use super::{AppState, RSpiceApp};
+use crate::workbench::surfaces::simulate::{show_on_stage, workflow_dialog_tests};
+use crate::workbench::{AppState, RSpiceApp};
 
 /// The surface size every sweep lays out at.
 ///
@@ -224,12 +225,12 @@ impl Sweep {
             |ctx| {
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE)
-                    .show(ctx, |ui| super::super::show_on_stage(ui, app));
+                    .show(ctx, |ui| show_on_stage(ui, app));
                 // The analysis catalogue and the workflow dialogs are hosted by
                 // the frame, not by the surface. A sweep that ran only the
                 // surface would watch every control that opens one of them
                 // produce nothing at all.
-                super::super::workflow_dialog_tests::show_workflow_dialogs_on_stage(ctx, app);
+                workflow_dialog_tests::show_workflow_dialogs_on_stage(ctx, app);
             },
         );
         let platform = &output.platform_output;

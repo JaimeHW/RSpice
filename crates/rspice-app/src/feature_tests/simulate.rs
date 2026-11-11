@@ -5,6 +5,7 @@
 //! application's state (a project snapshot, a session round trip) or reach
 //! an action the application ranks above the feature (tuning staging).
 
+mod accessibility;
 mod checkpoint_exchange;
 mod clicks;
 mod excitations;
@@ -18,10 +19,12 @@ mod page_raster;
 mod page_runset_toolbar;
 mod pages;
 mod plan_exchange;
+mod press_sweep;
 mod receipt_log;
 mod registry_honesty;
 mod run_config_chip;
 mod run_host;
+mod solver_options;
 mod statement;
 mod transient_checkpoint_exchange;
 mod tuning_staging;

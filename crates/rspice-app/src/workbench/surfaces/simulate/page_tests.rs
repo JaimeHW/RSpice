@@ -5,11 +5,9 @@
 //! screen, and the numerical controls resolve to exactly the values the run
 //! will use.
 
-mod accessibility;
 mod capture_groups;
 mod field_editing;
 mod plan_removal;
-mod press_sweep;
 mod run_set;
 mod settings_switch;
 mod solver_options;
@@ -34,7 +32,7 @@ fn render(page: SimulationPage, width: f32) -> String {
 /// on its lower half fails for a reason that has nothing to do with the page.
 /// The measure is therefore taller than the tallest page rather than tuned to
 /// a particular one: what a test wants to see is the whole page.
-const RENDER_VIEWPORT_HEIGHT: f32 = 2600.0;
+pub(crate) const RENDER_VIEWPORT_HEIGHT: f32 = 2600.0;
 
 /// Render one page over an app the caller has seeded first.
 ///

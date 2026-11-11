@@ -17,7 +17,13 @@
 
 use egui::{Rect, vec2};
 
-use super::{RENDER_VIEWPORT_HEIGHT, RSpiceApp, SimulationPage};
+use crate::state::SimulationPage;
+use crate::workbench::RSpiceApp;
+use crate::workbench::surfaces::simulate::catalog::ANALYSIS_CATALOG_SEARCH_LABEL;
+use crate::workbench::surfaces::simulate::page_tests::RENDER_VIEWPORT_HEIGHT;
+use crate::workbench::surfaces::simulate::{
+    participation, show_on_stage, variable_import, workflow_dialog_tests,
+};
 
 /// A studio fixture that reaches every analysis form and every participation
 /// state the routes have a cell for.
@@ -221,11 +227,11 @@ pub(super) fn studio_route_nodes(
             |ctx| {
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE)
-                    .show(ctx, |ui| super::super::show_on_stage(ui, &mut app));
+                    .show(ctx, |ui| show_on_stage(ui, &mut app));
                 // The dialogs are drawn outside the surface, so a sweep that
                 // ran only the surface reached none of their controls — which
                 // is where two nameless text fields were living.
-                super::super::workflow_dialog_tests::show_workflow_dialogs_on_stage(ctx, &mut app);
+                workflow_dialog_tests::show_workflow_dialogs_on_stage(ctx, &mut app);
             },
         );
         nodes = output
@@ -263,8 +269,8 @@ fn studio_route_passes(
             |ctx| {
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE)
-                    .show(ctx, |ui| super::super::show_on_stage(ui, &mut app));
-                super::super::workflow_dialog_tests::show_workflow_dialogs_on_stage(ctx, &mut app);
+                    .show(ctx, |ui| show_on_stage(ui, &mut app));
+                workflow_dialog_tests::show_workflow_dialogs_on_stage(ctx, &mut app);
             },
         );
         let mut controls: Vec<(egui::accesskit::NodeId, egui::accesskit::Rect)> = output
@@ -317,9 +323,7 @@ fn workflow_host_nodes(
                 )),
                 ..Default::default()
             },
-            |ctx| {
-                super::super::workflow_dialog_tests::show_workflow_dialogs_on_stage(ctx, &mut app)
-            },
+            |ctx| workflow_dialog_tests::show_workflow_dialogs_on_stage(ctx, &mut app),
         );
         nodes = output
             .platform_output
@@ -462,7 +466,7 @@ fn the_analysis_catalogue_is_hosted_by_the_frame_on_every_route() {
             .into_iter()
             .any(|(_, node)| {
                 node.label()
-                    .is_some_and(|label| label == super::super::ANALYSIS_CATALOG_SEARCH_LABEL)
+                    .is_some_and(|label| label == ANALYSIS_CATALOG_SEARCH_LABEL)
             });
         if !named {
             missing.push(surface);
@@ -555,10 +559,7 @@ pub(super) fn studio_overlays() -> Vec<(String, RSpiceApp)> {
     // The run-points picker.
     let mut app = studio_route(SimulationPage::Analyses, None);
     let instance = first_enabled_instance(&app);
-    super::super::participation::open_point_picker(
-        &mut crate::workbench::features::cx(&mut app),
-        instance,
-    );
+    participation::open_point_picker(&mut crate::workbench::features::cx(&mut app), instance);
     overlays.push(("run points".to_owned(), app));
 
     // A new design variable.
@@ -608,7 +609,7 @@ pub(super) fn studio_overlays() -> Vec<(String, RSpiceApp)> {
         .stable_analysis_plan()
         .expect("the fixture holds a stable plan")
         .id();
-    let draft = super::super::variable_import::import_draft_for_sheet(
+    let draft = variable_import::import_draft_for_sheet(
         &app.state.model,
         &app.state.simulate,
         plan_id,

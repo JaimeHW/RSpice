@@ -1,76 +1,32 @@
 //! Effective solver-policy precision and transaction validation.
 
 use super::super::page_solver;
-use super::accessibility::{studio_route, studio_route_nodes};
-use super::{OptionsDialogState, RSpiceApp, SimulationOptions};
-
-/// The Solver page offers no way to author an override.
-///
-/// It carried a single-row editor over the same record the Advanced options
-/// section authors: two editors, two pages, one fact, and the two surfaces drew
-/// their own sets of authorable fields to do it. The ledger reports and hops
-/// now, so the controls that opened, retargeted and removed a draft here are
-/// gone — and a control a reader can still reach is a control the page still
-/// has, which is why this asks the accessibility tree rather than the source.
-#[test]
-fn the_solver_page_publishes_no_override_authoring_control() {
-    use crate::state::SimulationPage;
-
-    let names: Vec<String> = studio_route_nodes(studio_route(SimulationPage::Solver, None), 1280.0)
-        .into_iter()
-        .filter_map(|(_, node)| node.label().map(str::to_owned))
-        .collect();
-    // A sweep of an undrawn route would pass this forever. The named policy
-    // chooser is the first control on the page, so its presence is what says
-    // the route was actually laid out.
-    assert!(
-        names.iter().any(|name| name == "Balanced"),
-        "the route has to have been drawn for this to mean anything: {names:?}"
-    );
-    assert!(
-        names
-            .iter()
-            .any(|name| name.contains("Simulation compatibility")),
-        "compatibility selector must be accessible: {names:?}"
-    );
-    for gone in [
-        "Add override\u{2026}",
-        "Override value",
-        "Analysis to override",
-    ] {
-        assert!(
-            !names.iter().any(|name| name == gone),
-            "the Solver page still publishes {gone:?}: {names:?}"
-        );
-    }
-}
+use super::{OptionsDialogState, SimulationOptions};
+use crate::workbench::simulate::test_host::SimulateTestHost;
 
 #[test]
 fn solver_options_iteration_edit_preserves_precise_temperatures() {
-    let mut app = RSpiceApp::test_instance();
+    let mut harness = SimulateTestHost::harness();
     let options = SimulationOptions {
         temp: 27.123_456_789,
         tnom: -40.123_456_789,
-        ..app.state.model.sim_setup.options.clone()
+        ..harness.model.sim_setup.options.clone()
     };
-    page_solver::commit_options_transaction(
-        &mut crate::workbench::features::cx(&mut app),
-        &options,
-    )
-    .expect("valid temperatures commit through the plan transaction");
-    app.state.model.sim_setup.session.options_draft.itl1 = "73".to_owned();
-    page_solver::commit_draft(&mut crate::workbench::features::cx(&mut app));
+    page_solver::commit_options_transaction(&mut harness.cx(), &options)
+        .expect("valid temperatures commit through the plan transaction");
+    harness.model.sim_setup.session.options_draft.itl1 = "73".to_owned();
+    page_solver::commit_draft(&mut harness.cx());
 
     let mut expected = options;
     expected.itl1 = 73;
     assert_eq!(
-        serde_json::to_value(&app.state.model.sim_setup.options).unwrap(),
+        serde_json::to_value(&harness.model.sim_setup.options).unwrap(),
         serde_json::to_value(&expected).unwrap(),
         "editing the iteration budget changed an unrelated authored option"
     );
-    assert!(!app.state.model.analysis_lifecycle_status.is_refusal());
+    assert!(!harness.model.analysis_lifecycle_status.is_refusal());
     assert_eq!(
-        app.state
+        harness
             .model
             .sim_setup
             .op
@@ -125,16 +81,16 @@ fn solver_options_invalid_drafts_cannot_replace_effective_policy() {
     ];
     for (name, edit, values) in fields {
         for value in values {
-            let mut app = RSpiceApp::test_instance();
-            let before = serde_json::to_value(&app.state.model.sim_setup.options).unwrap();
-            edit(&mut app.state.model.sim_setup.session.options_draft, value);
-            page_solver::commit_draft(&mut crate::workbench::features::cx(&mut app));
+            let mut harness = SimulateTestHost::harness();
+            let before = serde_json::to_value(&harness.model.sim_setup.options).unwrap();
+            edit(&mut harness.model.sim_setup.session.options_draft, value);
+            page_solver::commit_draft(&mut harness.cx());
             assert!(
-                app.state.model.analysis_lifecycle_status.is_refusal(),
+                harness.model.analysis_lifecycle_status.is_refusal(),
                 "{name}={value} was accepted"
             );
             assert!(
-                app.state
+                harness
                     .model
                     .analysis_lifecycle_status
                     .message()
@@ -142,7 +98,7 @@ fn solver_options_invalid_drafts_cannot_replace_effective_policy() {
                 "the refusal must identify {name}"
             );
             assert_eq!(
-                serde_json::to_value(&app.state.model.sim_setup.options).unwrap(),
+                serde_json::to_value(&harness.model.sim_setup.options).unwrap(),
                 before,
                 "invalid {name} changed effective options"
             );
@@ -152,23 +108,20 @@ fn solver_options_invalid_drafts_cannot_replace_effective_policy() {
 
 #[test]
 fn solver_options_transaction_rejects_invalid_policy_before_mutation() {
-    let mut app = RSpiceApp::test_instance();
-    let before = serde_json::to_value(&app.state.model.sim_setup.options).unwrap();
+    let mut harness = SimulateTestHost::harness();
+    let before = serde_json::to_value(&harness.model.sim_setup.options).unwrap();
     let invalid = SimulationOptions {
         tnom: f64::NAN,
-        ..app.state.model.sim_setup.options.clone()
+        ..harness.model.sim_setup.options.clone()
     };
-    let error = page_solver::commit_options_transaction(
-        &mut crate::workbench::features::cx(&mut app),
-        &invalid,
-    )
-    .expect_err("the effective-options transaction must validate its own input");
+    let error = page_solver::commit_options_transaction(&mut harness.cx(), &invalid)
+        .expect_err("the effective-options transaction must validate its own input");
     assert!(
         error.contains("tnom"),
         "the refusal must identify the invalid field: {error}"
     );
     assert_eq!(
-        serde_json::to_value(&app.state.model.sim_setup.options).unwrap(),
+        serde_json::to_value(&harness.model.sim_setup.options).unwrap(),
         before
     );
 }
@@ -176,33 +129,28 @@ fn solver_options_transaction_rejects_invalid_policy_before_mutation() {
 #[test]
 fn simulation_compatibility_commits_through_the_solver_transaction() {
     use crate::simulation::dialog::SimulationCompatibility;
-    let mut app = RSpiceApp::test_instance();
-    app.state
-        .model
-        .sim_setup
-        .session
-        .options_draft
-        .compatibility = SimulationCompatibility::Xyce;
-    page_solver::commit_draft(&mut crate::workbench::features::cx(&mut app));
-    assert!(!app.state.model.analysis_lifecycle_status.is_refusal());
+    let mut harness = SimulateTestHost::harness();
+    harness.model.sim_setup.session.options_draft.compatibility = SimulationCompatibility::Xyce;
+    page_solver::commit_draft(&mut harness.cx());
+    assert!(!harness.model.analysis_lifecycle_status.is_refusal());
     assert_eq!(
-        app.state.model.sim_setup.options.compatibility,
+        harness.model.sim_setup.options.compatibility,
         SimulationCompatibility::Xyce
     );
     let deck = rspice_simulation::analysis_preparation::apply_simulation_options_to_netlist(
         "solver choice\nV1 in 0 1\nR1 in 0 1k\n.end\n",
-        &app.state.model.sim_setup.options,
+        &harness.model.sim_setup.options,
     );
     let parsed = rspice_core::Netlist::parse(&deck).unwrap();
     assert_eq!(
         rspice_simulation::netlist_preparation::build_engine_config(&parsed, None).spice_dialect,
         rspice_core::SpiceDialect::Xyce
     );
-    app.state.model.sim_setup.session.options_draft.itl1 = "81".into();
-    page_solver::commit_draft(&mut crate::workbench::features::cx(&mut app));
+    harness.model.sim_setup.session.options_draft.itl1 = "81".into();
+    page_solver::commit_draft(&mut harness.cx());
     assert_eq!(
-        app.state.model.sim_setup.options.compatibility,
+        harness.model.sim_setup.options.compatibility,
         SimulationCompatibility::Xyce
     );
-    assert_eq!(app.state.model.sim_setup.options.itl1, 81);
+    assert_eq!(harness.model.sim_setup.options.itl1, 81);
 }

@@ -305,7 +305,7 @@ pub(super) const fn picker_columns(points: usize) -> usize {
 }
 
 /// Open the picker on one instance, pre-ticked with the points it visits.
-pub(super) fn open_point_picker(cx: &mut Cx<'_, SimulateFeature>, id: AnalysisInstanceId) {
+pub(crate) fn open_point_picker(cx: &mut Cx<'_, SimulateFeature>, id: AnalysisInstanceId) {
     let resolved = PlanParticipation::resolve(cx.model);
     let selected = resolved
         .for_instance(id)
