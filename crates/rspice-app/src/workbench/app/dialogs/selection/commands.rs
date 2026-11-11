@@ -460,6 +460,59 @@ fn promote_wire_handles_to_complete_wires(
     promoted_wire_count
 }
 
+/// Whether the selection holds at least one object the open schematic
+/// still has.
+pub(in crate::workbench) fn schematic_selection_has_live_object(
+    schematic: &SchematicState,
+) -> bool {
+    let selection = &schematic.session.editor.selection;
+    schematic
+        .document()
+        .components
+        .iter()
+        .any(|component| selection.has_component(component.id))
+        || schematic
+            .document()
+            .wires
+            .iter()
+            .any(|wire| selection.has_wire(wire.id))
+        || schematic
+            .document()
+            .junctions
+            .iter()
+            .any(|junction| selection.has_junction(junction.pos))
+        || schematic
+            .document()
+            .net_labels
+            .iter()
+            .any(|label| selection.has_net_label(label.id))
+        || schematic
+            .document()
+            .buses
+            .iter()
+            .any(|bus| selection.has_bus(bus.id))
+        || schematic
+            .document()
+            .bus_taps
+            .iter()
+            .any(|tap| selection.has_bus_tap(tap.id))
+        || schematic
+            .document()
+            .design_notes
+            .iter()
+            .any(|note| selection.has_design_note(note.id))
+        || schematic
+            .document()
+            .documentation_shapes
+            .iter()
+            .any(|shape| selection.has_documentation_shape(shape.id))
+        || schematic
+            .document()
+            .probes
+            .iter()
+            .any(|probe| selection.has_probe(probe.id))
+}
+
 fn complete_selection_count(schematic: &SchematicState, selection: &Selection) -> usize {
     schematic
         .document()

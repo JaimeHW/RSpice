@@ -641,11 +641,13 @@ mod tests {
     #[test]
     fn every_routed_command_is_one_the_shell_orders() {
         let registry = command_registry();
-        let routed = <ResultsFeature as Registered>::registry().registered_routed();
-        assert!(!routed.is_empty());
-        for part in routed {
-            assert!(registry.order().contains(&part.key), "{:?}", part.key);
-            assert!(spec(part.key).is_none(), "{:?}", part.key);
+        let results = <ResultsFeature as Registered>::registry().registered_routed();
+        let design = <DesignFeature as Registered>::registry().registered_routed();
+        assert!(!results.is_empty() && !design.is_empty());
+        let keys = results.iter().map(|part| part.key);
+        for key in keys.chain(design.iter().map(|part| part.key)) {
+            assert!(registry.order().contains(&key), "{key:?}");
+            assert!(spec(key).is_none(), "{key:?}");
         }
     }
 

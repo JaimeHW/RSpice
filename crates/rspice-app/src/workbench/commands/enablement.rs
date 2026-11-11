@@ -235,44 +235,17 @@ impl Command {
                             || crate::workbench::app::shared_properties_available(state))
                 }
             }
-            Self::ZoomFit => {
-                active_symbol_editor(app)
-                    || active_schematic_editor(app)
-                    || app.routed_command_key_enabled(ids::ZOOM_FIT) == Some(true)
-            }
+            // A view command is the answer of the part that takes it where the
+            // reader is working: Results where it is in front, the design
+            // feature in a schematic or symbol editor.
+            Self::ZoomIn
+            | Self::ZoomOut
+            | Self::ZoomFit
+            | Self::ZoomOneToOne
+            | Self::ZoomToSelection
+            | Self::ZoomBox
+            | Self::ZoomPrevious => app.routed_command_key_enabled(self.key()) == Some(true),
             Self::FitSchematicContent => active_schematic_editor(app),
-            // Magnifying a result viewport needs the sheet's own extents, so
-            // it is offered on the unit-pane stack and nowhere it could not
-            // be carried out.
-            Self::ZoomIn | Self::ZoomOut => {
-                active_symbol_editor(app)
-                    || active_schematic_editor(app)
-                    || app.routed_command_key_enabled(self.key()) == Some(true)
-            }
-            Self::ZoomOneToOne => active_symbol_editor(app) || active_schematic_editor(app),
-            Self::ZoomToSelection => {
-                active_schematic_editor(app)
-                    && schematic_selection_has_live_object(&state.model.schematic)
-            }
-            Self::ZoomBox => active_schematic_editor(app),
-            Self::ZoomPrevious => {
-                if let Some(enabled) = app.routed_command_key_enabled(ids::ZOOM_PREVIOUS) {
-                    enabled
-                } else if let Some(session) = state.symbol_in_place() {
-                    session.view_history.can_step_back()
-                } else if active_symbol_editor(app) {
-                    state.design.symbol.editor.view_history.can_step_back()
-                } else {
-                    active_schematic_editor(app)
-                        && state
-                            .model
-                            .schematic
-                            .session
-                            .editor
-                            .view_history
-                            .can_step_back()
-                }
-            }
             Self::NewApplicationWindow
             | Self::DetachDocument
             | Self::MoveDocumentToWindow

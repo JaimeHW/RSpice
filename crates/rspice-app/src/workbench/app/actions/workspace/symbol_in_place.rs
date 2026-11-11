@@ -205,6 +205,78 @@ fn symbol_in_place_target(
     ))
 }
 
+/// The in-place session the open document of `model` belongs to.
+pub(crate) fn in_place_session<'a>(
+    in_place: &'a Option<Box<SymbolInPlace>>,
+    model: &Model,
+) -> Option<&'a SymbolInPlace> {
+    in_place
+        .as_deref()
+        .filter(|session| session.symbol == model.workspace.content.active_view)
+}
+
+/// [`in_place_session`], to write to.
+pub(crate) fn in_place_session_mut<'a>(
+    in_place: &'a mut Option<Box<SymbolInPlace>>,
+    model: &Model,
+) -> Option<&'a mut SymbolInPlace> {
+    let active = &model.workspace.content.active_view;
+    in_place
+        .as_deref_mut()
+        .filter(|session| &session.symbol == active)
+}
+
+/// Where the edited instance puts its symbol on the parent, read from the
+/// parent as it stands. `None` once the parent or the instance is gone,
+/// which ends the session.
+pub(crate) fn in_place_placement(
+    session: &SymbolInPlace,
+    model: &Model,
+) -> Option<SymbolPlacement> {
+    let parent = model
+        .workspace
+        .content
+        .schematic_buffers
+        .get(&session.parent.key())?;
+    parent
+        .document()
+        .components
+        .iter()
+        .find(|component| component.id == session.instance_id)
+        .map(|instance| SymbolPlacement::of_instance(instance, session.origin))
+}
+
+/// The parent-sheet rectangle the edited symbol covers, which Fit frames.
+pub(crate) fn in_place_bounds(
+    session: &SymbolInPlace,
+    model: &Model,
+) -> Option<(f64, f64, f64, f64)> {
+    const MARGIN: f64 = 20.0;
+    let placement = in_place_placement(session, model)?;
+    let document = model.load_active_symbol_document().ok()?;
+    let body = document.drawn_body_bounds();
+    let points = document
+        .pins
+        .iter()
+        .filter_map(|pin| pin.position)
+        .chain(body.into_iter().flat_map(|(min, max)| [min, max]))
+        .chain([document.origin])
+        .map(|point| placement.place(point));
+    let (low, high) = points.fold(
+        ((f64::MAX, f64::MAX), (f64::MIN, f64::MIN)),
+        |(low, high), point| {
+            let (x, y) = (f64::from(point.x), f64::from(point.y));
+            ((low.0.min(x), low.1.min(y)), (high.0.max(x), high.1.max(y)))
+        },
+    );
+    Some((
+        low.0 - MARGIN,
+        low.1 - MARGIN,
+        high.0 + MARGIN,
+        high.1 + MARGIN,
+    ))
+}
+
 impl AppState {
     /// [`selected_symbol_in_place_target`] for the session's model.
     pub(crate) fn selected_symbol_in_place_target(
@@ -213,69 +285,19 @@ impl AppState {
         selected_symbol_in_place_target(&self.model)
     }
 
-    /// The in-place session the open document belongs to.
+    /// [`in_place_session`] for the session's model.
     pub(crate) fn symbol_in_place(&self) -> Option<&SymbolInPlace> {
-        self.design
-            .symbol
-            .in_place
-            .as_deref()
-            .filter(|session| session.symbol == self.model.workspace.content.active_view)
+        in_place_session(&self.design.symbol.in_place, &self.model)
     }
 
+    /// [`in_place_session_mut`] for the session's model.
     pub(crate) fn symbol_in_place_mut(&mut self) -> Option<&mut SymbolInPlace> {
-        let active = &self.model.workspace.content.active_view;
-        self.design
-            .symbol
-            .in_place
-            .as_deref_mut()
-            .filter(|session| &session.symbol == active)
+        in_place_session_mut(&mut self.design.symbol.in_place, &self.model)
     }
 
-    /// Where the edited instance puts its symbol on the parent, read from
-    /// the parent as it stands. `None` once the parent or the instance is
-    /// gone, which ends the session.
+    /// [`in_place_placement`] for the session's model.
     pub(crate) fn symbol_in_place_placement(&self) -> Option<SymbolPlacement> {
-        let session = self.symbol_in_place()?;
-        let parent = self
-            .model
-            .workspace
-            .content
-            .schematic_buffers
-            .get(&session.parent.key())?;
-        parent
-            .document()
-            .components
-            .iter()
-            .find(|component| component.id == session.instance_id)
-            .map(|instance| SymbolPlacement::of_instance(instance, session.origin))
-    }
-
-    /// The parent-sheet rectangle the edited symbol covers, which Fit frames.
-    pub(crate) fn symbol_in_place_bounds(&self) -> Option<(f64, f64, f64, f64)> {
-        const MARGIN: f64 = 20.0;
-        let placement = self.symbol_in_place_placement()?;
-        let document = self.model.load_active_symbol_document().ok()?;
-        let body = document.drawn_body_bounds();
-        let points = document
-            .pins
-            .iter()
-            .filter_map(|pin| pin.position)
-            .chain(body.into_iter().flat_map(|(min, max)| [min, max]))
-            .chain([document.origin])
-            .map(|point| placement.place(point));
-        let (low, high) = points.fold(
-            ((f64::MAX, f64::MAX), (f64::MIN, f64::MIN)),
-            |(low, high), point| {
-                let (x, y) = (f64::from(point.x), f64::from(point.y));
-                ((low.0.min(x), low.1.min(y)), (high.0.max(x), high.1.max(y)))
-            },
-        );
-        Some((
-            low.0 - MARGIN,
-            low.1 - MARGIN,
-            high.0 + MARGIN,
-            high.1 + MARGIN,
-        ))
+        in_place_placement(self.symbol_in_place()?, &self.model)
     }
 
     /// Open the selected instance's symbol where the instance stands.

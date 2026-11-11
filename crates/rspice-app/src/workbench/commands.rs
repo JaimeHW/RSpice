@@ -19,7 +19,6 @@ use crate::workbench::menu_bar::{
 use crate::workbench::state::pane_focus::PaneStep;
 use crate::workbench::{AppState, RSpiceApp};
 use rspice_schematic_editor::symbol_editor::commands::SymbolTransform;
-use rspice_schematic_editor::view::navigation::ZoomRequest;
 
 use super::state::{ConsoleChannel, ConsolePage, Workspace};
 
@@ -28,8 +27,6 @@ mod enablement;
 mod registry;
 pub(crate) use rspice_app_results::workbench::commands::result_navigation;
 pub(crate) mod vocabulary;
-
-const COMMAND_ZOOM_FACTOR: f64 = 1.2;
 
 /// A test seam on the dispatch boundary. While a recording is open,
 /// [`Command::execute`] notes the command it was handed and returns before
@@ -410,51 +407,18 @@ impl Command {
                     app.state.workbench.outbox.push(FocusNavigatorSearch);
                 }
             }
-            Self::ZoomIn => {
-                if app.route_command_key(ids::ZOOM_IN) {
-                    // The workspace in front zoomed its own view.
-                } else if let Some(session) = app.state.symbol_in_place_mut() {
-                    session.zoom_request = Some(ZoomRequest::By(COMMAND_ZOOM_FACTOR));
-                } else if active_symbol_editor(app) {
-                    app.state.design.symbol.editor.zoom = (app.state.design.symbol.editor.zoom
-                        * COMMAND_ZOOM_FACTOR as f32)
-                        .min(16.0);
-                } else {
-                    app.state.model.schematic.session.editor.zoom_request =
-                        Some(ZoomRequest::By(COMMAND_ZOOM_FACTOR));
-                }
-            }
-            Self::ZoomOut => {
-                if app.route_command_key(ids::ZOOM_OUT) {
-                    // The workspace in front zoomed its own view.
-                } else if let Some(session) = app.state.symbol_in_place_mut() {
-                    session.zoom_request = Some(ZoomRequest::By(COMMAND_ZOOM_FACTOR.recip()));
-                } else if active_symbol_editor(app) {
-                    app.state.design.symbol.editor.zoom =
-                        (app.state.design.symbol.editor.zoom / COMMAND_ZOOM_FACTOR as f32).max(0.1);
-                } else {
-                    app.state.model.schematic.session.editor.zoom_request =
-                        Some(ZoomRequest::By(COMMAND_ZOOM_FACTOR.recip()));
-                }
-            }
-            Self::ZoomFit => {
-                if app.route_command_key(ids::ZOOM_FIT) {
-                    // The workspace in front fitted its own view.
-                } else if let Some(bounds) = app.state.symbol_in_place_bounds()
-                    && let Some(session) = app.state.symbol_in_place_mut()
-                {
-                    session.zoom_request = Some(ZoomRequest::Frame(bounds));
-                } else if active_symbol_editor(app) {
-                    app.state.design.symbol.editor.needs_fit = true;
-                } else {
-                    app.state
-                        .model
-                        .schematic
-                        .session
-                        .editor
-                        .needs_drawing_sheet_fit = true;
-                    app.state.model.schematic.session.editor.needs_fit = false;
-                }
+            // A view command moves the view the reader is working in, and the
+            // part that takes it there carries it out: Results where it is in
+            // front, the design feature in a schematic or symbol editor.
+            // Anywhere else there is no view to move, so nothing happens.
+            Self::ZoomIn
+            | Self::ZoomOut
+            | Self::ZoomFit
+            | Self::ZoomOneToOne
+            | Self::ZoomToSelection
+            | Self::ZoomBox
+            | Self::ZoomPrevious => {
+                app.route_command_key(self.key());
             }
             Self::FitSchematicContent => {
                 app.state.model.schematic.session.editor.needs_fit = true;
@@ -464,56 +428,6 @@ impl Command {
                     .session
                     .editor
                     .needs_drawing_sheet_fit = false;
-            }
-            Self::ZoomOneToOne => {
-                if let Some(session) = app.state.symbol_in_place_mut() {
-                    session.zoom_request = Some(ZoomRequest::To(1.0));
-                } else if active_symbol_editor(app) {
-                    app.state.design.symbol.editor.zoom = 1.0;
-                } else {
-                    app.state.model.schematic.session.editor.zoom_request =
-                        Some(ZoomRequest::To(1.0));
-                }
-            }
-            Self::ZoomToSelection => {
-                let symbol_context = schematic_symbol_context(&app.state);
-                let schematic = &app.state.model.schematic;
-                if let Some((min_x, min_y, max_x, max_y)) = symbol_context
-                    .selection_bounds(schematic.document(), &schematic.session.editor.selection)
-                {
-                    app.state.model.schematic.session.editor.zoom_request =
-                        Some(ZoomRequest::Frame((
-                            f64::from(min_x),
-                            f64::from(min_y),
-                            f64::from(max_x),
-                            f64::from(max_y),
-                        )));
-                }
-            }
-            Self::ZoomBox => {
-                activate_workspace(app, Workspace::Design);
-                app.state.model.schematic.session.editor.zoom_box.arm();
-            }
-            // The canvas in front steps back to the view it showed before;
-            // stepping back is not itself a view the history keeps.
-            Self::ZoomPrevious => {
-                if app.route_command_key(ids::ZOOM_PREVIOUS) {
-                    // The waveform sheet in front stepped back its own view.
-                } else if let Some(session) = app.state.symbol_in_place_mut() {
-                    if let Some(view) = session.view_history.step_back() {
-                        (session.zoom, session.pan) = view;
-                    }
-                } else if active_symbol_editor(app) {
-                    let editor = &mut app.state.design.symbol.editor;
-                    if let Some(view) = editor.view_history.step_back() {
-                        (editor.zoom, editor.pan) = view;
-                    }
-                } else {
-                    let editor = &mut app.state.model.schematic.session.editor;
-                    if let Some(view) = editor.view_history.step_back() {
-                        (editor.zoom, editor.pan) = view;
-                    }
-                }
             }
             Self::CycleGrid => cycle_canvas_grid(app),
             Self::SetGridStyle(style) => app.state.design.set_grid_style(style),

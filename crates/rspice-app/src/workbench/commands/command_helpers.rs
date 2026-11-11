@@ -5,6 +5,7 @@ use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::ViewType;
 use crate::workbench::app::dialogs::project::configuration_dialogs::{Leaving, go_on_leaving};
 use crate::workbench::app::dialogs::project::new_project::NewProjectDialogState;
+pub(super) use crate::workbench::app::dialogs::selection::commands::schematic_selection_has_live_object;
 use crate::workbench::app::dialogs::source_document;
 use crate::workbench::code::commands::{CodeCommand, CodeRequest, SourceDocumentRequest};
 use crate::workbench::documents::code_workspace::persist_global_veriloga_library;
@@ -170,57 +171,6 @@ pub(in crate::workbench) fn active_schematic_editor(app: &RSpiceApp) -> bool {
             app.state.model.workspace.content.active_view_type(),
             crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
         )
-}
-
-pub(super) fn schematic_selection_has_live_object(
-    schematic: &crate::state::SchematicState,
-) -> bool {
-    let selection = &schematic.session.editor.selection;
-    schematic
-        .document()
-        .components
-        .iter()
-        .any(|component| selection.has_component(component.id))
-        || schematic
-            .document()
-            .wires
-            .iter()
-            .any(|wire| selection.has_wire(wire.id))
-        || schematic
-            .document()
-            .junctions
-            .iter()
-            .any(|junction| selection.has_junction(junction.pos))
-        || schematic
-            .document()
-            .net_labels
-            .iter()
-            .any(|label| selection.has_net_label(label.id))
-        || schematic
-            .document()
-            .buses
-            .iter()
-            .any(|bus| selection.has_bus(bus.id))
-        || schematic
-            .document()
-            .bus_taps
-            .iter()
-            .any(|tap| selection.has_bus_tap(tap.id))
-        || schematic
-            .document()
-            .design_notes
-            .iter()
-            .any(|note| selection.has_design_note(note.id))
-        || schematic
-            .document()
-            .documentation_shapes
-            .iter()
-            .any(|shape| selection.has_documentation_shape(shape.id))
-        || schematic
-            .document()
-            .probes
-            .iter()
-            .any(|probe| selection.has_probe(probe.id))
 }
 
 /// Return whether Delete can resolve at least one selected identity to a live

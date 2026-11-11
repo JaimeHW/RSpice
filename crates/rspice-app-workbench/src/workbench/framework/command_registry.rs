@@ -377,10 +377,13 @@ pub mod ids {
         VERIFY_WORKSPACE = "verify";
         VISIBILITY_OPTIONS = "visibility-options";
         WORKSPACE_LAYOUTS = "workspace-layouts";
+        ZOOM_BOX = "zoom-box";
         ZOOM_FIT = "canvas-fit-sheet";
         ZOOM_IN = "zoom-in";
+        ZOOM_ONE_TO_ONE = "zoom-one-to-one";
         ZOOM_OUT = "zoom-out";
         ZOOM_PREVIOUS = "zoom-previous";
+        ZOOM_TO_SELECTION = "zoom-to-selection";
     }
 }
 

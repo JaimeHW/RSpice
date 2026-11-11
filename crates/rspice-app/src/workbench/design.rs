@@ -4,6 +4,7 @@
 //! What it has not registered yet, the shell's legacy tables still serve.
 
 pub(crate) mod commands;
+mod routed;
 
 use egui::Context;
 
@@ -57,6 +58,7 @@ impl Feature for DesignFeature {
     fn register(registry: &mut FeatureRegistry<Self>) {
         registry.commands::<DesignCommand>();
         registry.dialogs(DIALOGS);
+        registry.routed(routed::ROUTED);
     }
 }
 

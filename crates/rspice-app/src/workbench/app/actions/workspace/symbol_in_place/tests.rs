@@ -503,3 +503,45 @@ fn leaving_in_place_asks_only_when_the_symbol_has_unsaved_edits() {
     assert!(fixture.on_parent(), "Discard leaves");
     assert_eq!(fixture.symbol_pin("A"), Some(Point::new(-40, -10)));
 }
+
+/// Zoom previous follows the canvas in front. A symbol still edited in place
+/// keeps its session when another workspace comes forward, but its canvas is
+/// not shown there, so Zoom previous is not offered; back in Design it steps
+/// the in-place view back.
+#[test]
+fn zoom_previous_steps_back_the_in_place_view_only_where_it_is_shown() {
+    use rspice_app_workbench::workbench::framework::command_registry::CommandAvailability;
+
+    let mut fixture = Fixture::new(&[(Point::new(100, 80), Rotation::R0, false)]);
+    fixture.enter(0);
+    let view = |fixture: &Fixture| {
+        let session = fixture.app.state.symbol_in_place().unwrap();
+        (session.zoom, session.pan)
+    };
+    let entered = view(&fixture);
+    Command::ZoomIn.execute(&mut fixture.app);
+    fixture.frame(vec![]);
+    let nearer = view(&fixture);
+    assert_ne!(nearer, entered, "Zoom in magnifies the in-place view");
+
+    fixture.app.state.workbench.activate(Workspace::Simulate);
+    assert_eq!(fixture.app.state.workbench.workspace, Workspace::Simulate);
+    assert!(fixture.app.state.symbol_in_place().is_some());
+    assert_eq!(
+        Command::ZoomPrevious.availability(&fixture.app),
+        CommandAvailability::Disabled("open a schematic or symbol"),
+        "the in-place canvas is not shown in Simulate"
+    );
+
+    fixture.app.state.workbench.activate(Workspace::Design);
+    assert_eq!(
+        Command::ZoomPrevious.availability(&fixture.app),
+        CommandAvailability::Available
+    );
+    Command::ZoomPrevious.execute(&mut fixture.app);
+    assert_eq!(
+        view(&fixture),
+        entered,
+        "Zoom previous steps the in-place view back"
+    );
+}
