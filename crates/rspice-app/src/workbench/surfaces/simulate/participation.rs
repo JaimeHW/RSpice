@@ -22,7 +22,6 @@ use crate::state::SpecPointScope;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogSize, Problem, problem_line};
-use crate::workbench::AppState;
 use crate::workbench::app_state::Model;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::simulate::SimulateFeature;
@@ -306,13 +305,13 @@ pub(super) const fn picker_columns(points: usize) -> usize {
 }
 
 /// Open the picker on one instance, pre-ticked with the points it visits.
-pub(super) fn open_point_picker(app: &mut AppState, id: AnalysisInstanceId) {
-    let resolved = PlanParticipation::resolve(&app.model);
+pub(super) fn open_point_picker(cx: &mut Cx<'_, SimulateFeature>, id: AnalysisInstanceId) {
+    let resolved = PlanParticipation::resolve(cx.model);
     let selected = resolved
         .for_instance(id)
         .filter(|entry| entry.refusal.is_none())
         .map_or_else(|| resolved.point_keys.clone(), |entry| entry.keys.clone());
-    app.simulate.simulation_workflow = Some(
+    cx.state.simulation_workflow = Some(
         crate::workbench::state::SimulationWorkflowDialog::AnalysisRunPoints(
             AnalysisRunPointsDraft::new(id, selected),
         ),
@@ -842,8 +841,8 @@ fn dropped_point_names(state: &run_set::RunSetState, keys: &[String]) -> String 
     }
 }
 
-pub(super) fn reconcile_selections(app: &AppState) -> Result<Vec<PendingPrune>, String> {
-    let Some(points) = run_set::resolve(&app.model.sim_setup.run_set) else {
+pub(super) fn reconcile_selections(model: &Model) -> Result<Vec<PendingPrune>, String> {
+    let Some(points) = run_set::resolve(&model.sim_setup.run_set) else {
         // A space that does not expand exactly names no points, so there is
         // nothing to judge a selection against. The Run Set page already
         // refuses such a declaration on its own terms.
@@ -852,7 +851,7 @@ pub(super) fn reconcile_selections(app: &AppState) -> Result<Vec<PendingPrune>, 
     let declared: HashSet<String> = points.iter().map(RunSetPoint::point_key).collect();
 
     let mut prunes = Vec::new();
-    for instance in app.model.sim_setup.enabled_analysis_instances() {
+    for instance in model.sim_setup.enabled_analysis_instances() {
         let AnalysisRunAt::SelectedPoints(keys) = instance.run_at() else {
             continue;
         };
@@ -861,7 +860,7 @@ pub(super) fn reconcile_selections(app: &AppState) -> Result<Vec<PendingPrune>, 
         if dropped.is_empty() {
             continue;
         }
-        let named = dropped_point_names(&app.model.sim_setup.run_set, &dropped);
+        let named = dropped_point_names(&model.sim_setup.run_set, &dropped);
         if kept.is_empty() {
             return Err(format!(
                 "This edit removes every run-set point \"{}\" is scoped to ({named}). It would \
@@ -995,7 +994,7 @@ mod tests {
             }
         }
 
-        let Err(refusal) = reconcile_selections(&app.state) else {
+        let Err(refusal) = reconcile_selections(&app.state.model) else {
             panic!("dropping every point an instance is scoped to is a refusal");
         };
         assert!(

@@ -553,7 +553,10 @@ pub(super) fn studio_overlays() -> Vec<(String, RSpiceApp)> {
     // The run-points picker.
     let mut app = studio_route(SimulationPage::Analyses, None);
     let instance = first_enabled_instance(&app);
-    super::super::participation::open_point_picker(&mut app.state, instance);
+    super::super::participation::open_point_picker(
+        &mut crate::workbench::features::cx(&mut app),
+        instance,
+    );
     overlays.push(("run points".to_owned(), app));
 
     // A new design variable.

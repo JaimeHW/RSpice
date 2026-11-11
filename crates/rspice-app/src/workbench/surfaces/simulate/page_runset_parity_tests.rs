@@ -217,7 +217,7 @@ fn the_page_forecast_equals_the_prepared_task_count_over_a_declared_space() {
     let points = enable_only_the_temperature_axis(&mut app.state);
     assert!(points > 1, "the fixture space must actually multiply");
 
-    let forecast = exact_plan_task_count(&app)
+    let forecast = exact_plan_task_count(&app.state.model)
         .expect("the page can forecast this workload")
         .expect("a reference-only Run Set has an exact count");
     let frozen = app.state.clone();
@@ -295,7 +295,7 @@ fn the_page_forecast_equals_the_prepared_task_count_with_no_global_axes() {
         dimension.enabled = false;
     }
 
-    let forecast = exact_plan_task_count(&app)
+    let forecast = exact_plan_task_count(&app.state.model)
         .expect("the page can forecast this workload")
         .expect("a reference-only Run Set has an exact count");
     let frozen = app.state.clone();
@@ -337,7 +337,7 @@ fn a_nested_point_declaration_under_global_axes_is_refused_by_both_derivations()
     let validation = rspice_simulation_contract::run_set::validate_for_plan(
         &app.state.model.sim_setup.run_set,
         &kinds,
-        exact_plan_task_count(&app).expect("the page can still forecast"),
+        exact_plan_task_count(&app.state.model).expect("the page can still forecast"),
     );
     assert!(
         validation
@@ -434,7 +434,7 @@ pub(super) fn scope_to_points(
 
 /// The page forecast and the prepared task count, for the plan as it stands.
 fn both_derivations(app: &mut RSpiceApp) -> (usize, usize) {
-    let forecast = exact_plan_task_count(app)
+    let forecast = exact_plan_task_count(&app.state.model)
         .expect("the page can forecast this workload")
         .expect("a declared Run Set has an exact count");
     let frozen = app.state.clone();
@@ -611,7 +611,7 @@ fn the_worst_point_is_priced_at_a_point_the_plan_actually_has() {
     );
 
     assert_eq!(
-        worst_point_task_cost(&app),
+        worst_point_task_cost(&app.state.model),
         Some(observed),
         "the tile prices the worst point of {per_point:?}, not the rate sum"
     );

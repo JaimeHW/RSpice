@@ -1,7 +1,7 @@
 //! Run Set commands and responsive status layout.
 
 use super::super::page_kit::{self, CARD_PAD_X};
-use super::{RSpiceApp, RunSetAction, RunSetValidation, commit};
+use super::{Cx, Model, RunSetAction, RunSetValidation, SimulateFeature, commit};
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -18,7 +18,7 @@ use rspice_simulation_contract::run_set::{self, RunSetStatus};
 ///
 /// The status word is printed only when it is not `Ready`: a run set that
 /// validates says so by having a forecast at all.
-fn forecast_line(app: &RSpiceApp, validation: &RunSetValidation, revision: u32) -> String {
+fn forecast_line(model: &Model, validation: &RunSetValidation, revision: u32) -> String {
     let forecast = validation.forecast;
     let points = if forecast.exact {
         format!(
@@ -36,7 +36,7 @@ fn forecast_line(app: &RSpiceApp, validation: &RunSetValidation, revision: u32) 
         "working revision {revision} \u{b7} {points} \u{b7} {} task{} \u{b7} {} \u{b7} {}",
         forecast.task_count,
         if forecast.task_count == 1 { "" } else { "s" },
-        super::super::workload::modelled_duration(&app.state, forecast.task_count),
+        super::super::workload::modelled_duration(model, forecast.task_count),
         run_set::format_bytes(forecast.storage_bytes),
     );
     if !matches!(validation.status, RunSetStatus::Ready) {
@@ -45,18 +45,14 @@ fn forecast_line(app: &RSpiceApp, validation: &RunSetValidation, revision: u32) 
     line
 }
 
-pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) {
+pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, validation: &RunSetValidation) {
     let t = Tokens::get(ui.ctx());
-    let addable = app.state.model.sim_setup.run_set.addable_kinds();
-    let can_undo = !app.state.model.sim_setup.run_set.history.is_empty();
-    let can_redo = !app.state.model.sim_setup.run_set.future.is_empty();
-    let revision = app.state.model.sim_setup.run_set.revision;
+    let addable = cx.model.sim_setup.run_set.addable_kinds();
+    let can_undo = !cx.model.sim_setup.run_set.history.is_empty();
+    let can_redo = !cx.model.sim_setup.run_set.future.is_empty();
+    let revision = cx.model.sim_setup.run_set.revision;
     let mut action: Option<RunSetAction> = None;
-    let minimum_height = if app.state.workbench.coarse_pointer {
-        44.0
-    } else {
-        0.0
-    };
+    let minimum_height = if cx.wb.coarse_pointer { 44.0 } else { 0.0 };
 
     let width = ui.available_width();
     egui::Frame::new()
@@ -83,7 +79,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidati
                 .icon(Icon::Grid)
                 .min_height(minimum_height)
                 .max_width(inner_width);
-            let status_text = forecast_line(app, validation, revision);
+            let status_text = forecast_line(cx.model, validation, revision);
             let status_font = theme::mono(tokens::FS_0, FontWeight::Regular);
             let status_width = ui
                 .painter()
@@ -148,6 +144,6 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidati
         });
 
     if let Some(action) = action {
-        commit(app, action);
+        commit(cx, action);
     }
 }

@@ -280,7 +280,7 @@ fn a_point_without_a_retained_family_says_which_kind_of_nothing_it_has() {
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
     assert_eq!(
-        super::page_runset::family_target(&app),
+        super::page_runset::family_target(&app.state.model),
         Err("No run has been retained, so there is no family to open a point in.")
     );
 
@@ -289,7 +289,7 @@ fn a_point_without_a_retained_family_says_which_kind_of_nothing_it_has() {
         AnalysisResult::new(1, AnalysisType::Transient, "retained TRAN"),
     );
     assert_eq!(
-        super::page_runset::family_target(&app),
+        super::page_runset::family_target(&app.state.model),
         Err(
             "The retained dataset holds no analysis with a family, so there are no members to slice."
         ),
@@ -317,7 +317,7 @@ fn a_point_is_carried_into_the_family_view_as_a_filter_over_its_own_axes() {
         },
     );
     retain_run_for_active_plan(&mut app.state, analysis);
-    assert_eq!(super::page_runset::family_target(&app), Ok(0));
+    assert_eq!(super::page_runset::family_target(&app.state.model), Ok(0));
 
     // An axis the family does not declare contributes no clause, and one it
     // does is matched by the dimension's own identity.
@@ -334,12 +334,22 @@ fn a_point_is_carried_into_the_family_view_as_a_filter_over_its_own_axes() {
         ),
     ];
     assert_eq!(
-        super::page_runset::family_query_for_point(&mut app.state, 0, &coordinates),
+        super::page_runset::family_query_for_point(
+            &mut crate::workbench::features::cx(&mut app),
+            0,
+            &coordinates
+        ),
         Some("temperature = 125".to_owned()),
         "only the axes the retained family declares reach the filter"
     );
 
-    super::page_runset::open_point_in_family(&mut app, 0, &coordinates);
+    super::page_runset::open_point_in_family(
+        &mut crate::workbench::features::cx(&mut app),
+        0,
+        &coordinates,
+    );
+    // The shell answers the hand-off once the page has drawn.
+    app.after_contribution();
     assert_eq!(
         app.state.workbench.workspace,
         crate::workbench::state::Workspace::Results,
@@ -364,7 +374,11 @@ fn a_point_is_carried_into_the_family_view_as_a_filter_over_its_own_axes() {
     )];
     let before = app.state.model.log_buffer.revision();
     assert_eq!(
-        super::page_runset::family_query_for_point(&mut app.state, 0, &absent),
+        super::page_runset::family_query_for_point(
+            &mut crate::workbench::features::cx(&mut app),
+            0,
+            &absent
+        ),
         None
     );
     assert_eq!(

@@ -34,7 +34,7 @@ fn the_task_rate_rows_add_up_to_the_number_the_budget_is_checked_against() {
 
     let workload = PlanWorkload::resolve(&app.state.model).expect("the fixture workload prices");
     let summed: usize = workload.rows.iter().map(|row| row.tasks()).sum();
-    let scalar = exact_plan_task_count(&app)
+    let scalar = exact_plan_task_count(&app.state.model)
         .expect("the page can forecast this workload")
         .expect("a reference-only Run Set has an exact count");
 
@@ -44,7 +44,9 @@ fn the_task_rate_rows_add_up_to_the_number_the_budget_is_checked_against() {
     );
     assert_eq!(
         scalar,
-        plan_run_set_validation(&app).forecast.task_count,
+        plan_run_set_validation(&app.state.model)
+            .forecast
+            .task_count,
         "the forecast the tile and the point table read is the same count"
     );
 }
@@ -137,7 +139,7 @@ fn narrowing_one_analysis_shrinks_its_row_and_the_plan_duration() {
         "a shorter queue is a shorter run: {after_ms} ms must be under {before_ms} ms"
     );
     assert_eq!(
-        exact_plan_task_count(&app)
+        exact_plan_task_count(&app.state.model)
             .expect("the page still forecasts")
             .expect("still exact"),
         after_tasks,
@@ -194,7 +196,7 @@ fn a_refused_composition_is_not_priced_at_all() {
     let mut app = app_with(&[AnalysisKind::OperatingPoint, AnalysisKind::Temperature]);
     enable_only_the_temperature_axis(&mut app.state);
 
-    let validation = plan_run_set_validation(&app);
+    let validation = plan_run_set_validation(&app.state.model);
     assert!(
         validation
             .errors
@@ -230,14 +232,14 @@ fn every_surface_prices_the_same_queue_in_the_same_currency() {
     let tasks = workload
         .total_tasks()
         .expect("the fixture is within capacity");
-    let validation = plan_run_set_validation(&app);
+    let validation = plan_run_set_validation(&app.state.model);
     let forecast = validation.forecast;
 
     // The preview receipt reads `forecast.cost_ms`; the toolbar's forecast
     // line calls `modelled_duration`; the task-rate card's rows sum to a
     // third. All three have to be one sentence about one queue.
     let receipt = run_set::format_duration_ms(forecast.cost_ms);
-    let priced = modelled_duration(&app.state, forecast.task_count);
+    let priced = modelled_duration(&app.state.model, forecast.task_count);
     let card = workload.total_duration().expect("the fixture prices");
 
     assert_eq!(forecast.task_count, tasks, "one queue");
@@ -279,7 +281,7 @@ fn a_plan_with_no_axes_prices_every_analysis_once() {
     }
     assert_eq!(
         workload.total_tasks().expect("within capacity"),
-        exact_plan_task_count(&app)
+        exact_plan_task_count(&app.state.model)
             .expect("the page forecasts")
             .expect("exact"),
     );
@@ -316,7 +318,7 @@ fn an_invalid_workload_refuses_rather_than_pricing_the_plan_short() {
         "an unreadable workload is a refusal, never a row priced at one"
     );
     assert!(
-        exact_plan_task_count(&app).is_err(),
+        exact_plan_task_count(&app.state.model).is_err(),
         "the scalar count refuses wherever its table refuses"
     );
 }
@@ -386,7 +388,7 @@ fn a_retracing_dc_sweep_is_still_one_task_per_point() {
     // point: the rows and the authorized queue stay one number.
     assert_eq!(
         retrace_total,
-        exact_plan_task_count(&app)
+        exact_plan_task_count(&app.state.model)
             .expect("the page forecasts")
             .expect("exact"),
     );

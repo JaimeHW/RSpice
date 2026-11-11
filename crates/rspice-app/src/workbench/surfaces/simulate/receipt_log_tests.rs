@@ -131,8 +131,10 @@ fn a_refused_plan_command_is_recorded_once_and_raises_no_toast() {
 fn a_restated_outcome_is_recorded_once_and_a_changed_one_again() {
     let mut app = RSpiceApp::test_instance();
     for _ in 0..3 {
-        app.state
-            .record_plan_refusal("Remove rejected fail-closed: another analysis is bound to it.");
+        crate::workbench::simulate::record_plan_refusal(
+            &mut crate::workbench::features::cx(&mut app),
+            "Remove rejected fail-closed: another analysis is bound to it.",
+        );
     }
     assert_eq!(plan_entries(&app).len(), 1);
 

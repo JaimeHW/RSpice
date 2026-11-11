@@ -1745,7 +1745,7 @@ fn analysis_editor(
                 let _ = participation::commit_run_at(&mut features::cx(app), selected.id, run_at);
             }
             participation::ParticipationAction::ChoosePoints => {
-                participation::open_point_picker(&mut app.state, selected.id);
+                participation::open_point_picker(&mut features::cx(app), selected.id);
             }
         }
         ui.ctx().request_repaint();

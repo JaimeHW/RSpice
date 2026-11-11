@@ -33,7 +33,6 @@
 use crate::product::AnalysisInstanceId;
 use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
 use crate::workbench::app_state::Model;
-use crate::workbench::{AppState, RSpiceApp};
 use rspice_simulation_contract::analysis_run_at::AnalysisRunAt;
 use rspice_simulation_contract::run_set::{self, RunSetPoint};
 
@@ -475,10 +474,10 @@ fn task_rate(
 /// state can state the same duration as one that holds the frame. Every caller
 /// passes a task count it already displayed, so the duration is never an
 /// independent claim about the same queue.
-pub(super) fn modelled_duration(app: &AppState, task_count: usize) -> String {
+pub(super) fn modelled_duration(model: &Model, task_count: usize) -> String {
     run_set::format_duration_ms(run_set::modelled_cost_ms(
         task_count,
-        app.model.sim_setup.run_set.budgets.cost_per_point_ms,
+        model.sim_setup.run_set.budgets.cost_per_point_ms,
     ))
 }
 
@@ -539,7 +538,7 @@ pub(super) fn composition_refusals(
 /// of the declaration.
 pub(super) fn task_rate_card(
     ui: &mut egui::Ui,
-    app: &RSpiceApp,
+    model: &Model,
     validation: &run_set::RunSetValidation,
     resolved: Result<&PlanWorkload, &String>,
 ) {
@@ -600,7 +599,7 @@ pub(super) fn task_rate_card(
             // different queues under one heading. `instance_list_label` is the
             // plan's answer to what an instance is called beside its siblings, and
             // the tab strip above this card now asks the same question of it.
-            let plan = app.state.model.sim_setup.stable_analysis_plan().ok();
+            let plan = model.sim_setup.stable_analysis_plan().ok();
             for row in &workload.rows {
                 let listed = plan
                     .and_then(|plan| {

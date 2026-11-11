@@ -53,7 +53,7 @@ fn named_saved_output_draft() -> SavedOutputDraft {
 #[test]
 fn run_set_workload_counts_analysis_owned_temperature_points_and_assembly() {
     let mut app = RSpiceApp::test_instance();
-    let before = page_runset::exact_plan_task_count(&app)
+    let before = page_runset::exact_plan_task_count(&app.state.model)
         .unwrap()
         .expect("baseline workload");
     insert_analysis_instance(
@@ -62,7 +62,7 @@ fn run_set_workload_counts_analysis_owned_temperature_points_and_assembly() {
     )
     .expect("a temperature controller inserts");
 
-    let tasks = page_runset::exact_plan_task_count(&app)
+    let tasks = page_runset::exact_plan_task_count(&app.state.model)
         .expect("workload is valid")
         .expect("reference-only Run Set has an exact workload");
 
@@ -74,7 +74,7 @@ fn run_set_workload_counts_analysis_owned_temperature_points_and_assembly() {
 #[test]
 fn run_set_workload_counts_generated_pss_spectrum_task() {
     let mut app = RSpiceApp::test_instance();
-    let before = page_runset::exact_plan_task_count(&app)
+    let before = page_runset::exact_plan_task_count(&app.state.model)
         .unwrap()
         .expect("baseline workload");
     insert_analysis_instance(
@@ -90,7 +90,7 @@ fn run_set_workload_counts_generated_pss_spectrum_task() {
             .expect("stable plan"),
     );
 
-    let tasks = page_runset::exact_plan_task_count(&app)
+    let tasks = page_runset::exact_plan_task_count(&app.state.model)
         .expect("workload is valid")
         .expect("reference-only Run Set has an exact workload");
 

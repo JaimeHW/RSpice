@@ -1,6 +1,7 @@
 //! Real toolbar geometry and pointer actions across pane widths and input sizes.
 
 use super::*;
+use crate::workbench::RSpiceApp;
 use egui::{Context, Event, Pos2};
 use rspice_simulation_contract::run_set::RunSetDimensionKind;
 
@@ -22,14 +23,17 @@ impl Fixture {
         let mut app = RSpiceApp::test_instance();
         app.state.workbench.coarse_pointer = coarse;
         commit(
-            &mut app,
+            &mut crate::workbench::features::cx(&mut app),
             RunSetAction::AddDimension(RunSetDimensionKind::Parameter),
         );
         commit(
-            &mut app,
+            &mut crate::workbench::features::cx(&mut app),
             RunSetAction::AddDimension(RunSetDimensionKind::Parameter),
         );
-        commit(&mut app, RunSetAction::Undo);
+        commit(
+            &mut crate::workbench::features::cx(&mut app),
+            RunSetAction::Undo,
+        );
         app.state.model.sim_setup.run_set.revision = revision;
         let mut fixture = Self {
             app,
@@ -47,7 +51,7 @@ impl Fixture {
 
     fn frame(&mut self, events: Vec<Event>) {
         self.time += 0.02;
-        let validation = RunSetFrame::resolve(&self.app).validation;
+        let validation = RunSetFrame::resolve(&self.app.state.model).validation;
         let output = self.ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(self.width, 400.0))),
@@ -61,7 +65,11 @@ impl Fixture {
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE)
                     .show(root, |ui| {
-                        toolbar::show(ui, &mut self.app, &validation);
+                        toolbar::show(
+                            ui,
+                            &mut crate::workbench::features::cx(&mut self.app),
+                            &validation,
+                        );
                     });
             },
         );
