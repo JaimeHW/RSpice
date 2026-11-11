@@ -114,7 +114,7 @@ impl RunHost for RunView<'_, '_> {
     }
 
     fn slot_facts(&self) -> SlotFacts {
-        slot_facts(self.runs, self.peers.design().review_markers())
+        self.runs.slot_facts(self.peers.design().review_markers())
     }
 
     fn veriloga_compilation(&self) -> Option<&ProjectCompileReceipt> {
@@ -235,7 +235,7 @@ impl RunHost for FrozenRun {
     fn prompt(&mut self, _text: impl Into<String>) {}
 
     fn slot_facts(&self) -> SlotFacts {
-        slot_facts(&self.runs, self.review_markers)
+        self.runs.slot_facts(self.review_markers)
     }
 
     fn veriloga_compilation(&self) -> Option<&ProjectCompileReceipt> {
@@ -264,15 +264,6 @@ impl RunHost for FrozenRun {
         self.model
             .ensure_design_check(subject, CheckScope::Design, facts)
             .0
-    }
-}
-
-/// What model operations read of the slots: whether the runs retain a
-/// preflight report, and which review markers design shows.
-fn slot_facts(runs: &RunsState, review_markers: SchematicReviewMarkerVisibility) -> SlotFacts {
-    SlotFacts {
-        preflight_report_retained: runs.preflight.report.is_some(),
-        review_markers,
     }
 }
 
