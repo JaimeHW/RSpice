@@ -609,6 +609,57 @@ pub(crate) fn stage_dropped_netlist_import(
     )
 }
 
+/// Stage the files dropped on the netlist page as an import into the
+/// project: one SPICE deck or RSpice netlist bundle at a time, and nothing
+/// while a modal holds the application.
+pub(crate) fn import_dropped_netlist(state: &mut AppState, dropped: Vec<egui::DroppedFile>) {
+    if state.application_modal_open() {
+        return;
+    }
+    if dropped.len() != 1 {
+        state.prompt("Drop one SPICE deck or RSpice netlist bundle at a time.");
+        return;
+    }
+    let file = &dropped[0];
+    let source_path = file.path.clone();
+    let display_name = (!file.name.trim().is_empty())
+        .then(|| file.name.clone())
+        .or_else(|| {
+            source_path
+                .as_deref()
+                .and_then(std::path::Path::file_name)
+                .map(|name| name.to_string_lossy().into_owned())
+        })
+        .unwrap_or_else(|| "dropped-netlist.spice".to_owned());
+    let bytes = if let Some(bytes) = file.bytes.as_ref() {
+        Ok(bytes.to_vec())
+    } else {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            source_path
+                .as_deref()
+                .ok_or_else(|| "Dropped file has neither bytes nor a native path.".to_owned())
+                .and_then(|path| std::fs::read(path).map_err(|error| error.to_string()))
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            Err("The browser did not provide the dropped file's contents.".to_owned())
+        }
+    };
+    match bytes {
+        Ok(bytes) => {
+            stage_dropped_netlist_import(state, bytes, source_path, display_name);
+        }
+        Err(error) => {
+            state.record(
+                LogSeverity::Error,
+                LogSource::Netlist,
+                format!("The dropped SPICE file could not be read: {error}"),
+            );
+        }
+    }
+}
+
 /// Stage a deck dropped on the project launcher as a new netlist-first
 /// project. This uses the same review transaction as the explicit Open deck
 /// command rather than importing into whichever project happened to be open.

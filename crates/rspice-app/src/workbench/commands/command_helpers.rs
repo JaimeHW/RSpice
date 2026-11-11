@@ -582,6 +582,45 @@ pub(in crate::workbench) fn answer_code_request(app: &mut RSpiceApp, request: Co
                 );
             }
         }
+        CodeRequest::CopyNetlistDependency => {
+            let messages = app.state.workbench.messages();
+            match crate::workbench::documents::netlist_document::copy_active_dependency_to_project(
+                &mut app.state,
+            ) {
+                Ok(_) => {
+                    app.state.record(
+                        LogSeverity::Info,
+                        LogSource::Studio,
+                        messages.text(crate::workbench::MessageId::NetlistCopySucceeded),
+                    );
+                }
+                Err(error) => {
+                    app.state
+                        .record(LogSeverity::Error, LogSource::Studio, error);
+                }
+            }
+        }
+        CodeRequest::ApplyNetlistQuickFix => {
+            let answer =
+                crate::workbench::documents::netlist_document::language::apply_preferred_quick_fix(
+                    &mut app.state,
+                );
+            app.state.prompt(answer.unwrap_or_else(|refusal| refusal));
+        }
+        CodeRequest::BeginNetlistProfileReview => {
+            crate::workbench::workflows::netlist_workflow::begin_owned_netlist_profile_review(
+                &mut app.state,
+            );
+        }
+        CodeRequest::FormatNetlistDocument => {
+            crate::workbench::workflows::netlist_workflow::format_owned_netlist(app);
+        }
+        CodeRequest::ImportDroppedNetlist(dropped) => {
+            crate::workbench::workflows::netlist_workflow::import_dropped_netlist(
+                &mut app.state,
+                dropped,
+            );
+        }
     }
 }
 

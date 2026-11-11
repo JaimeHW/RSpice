@@ -27,7 +27,7 @@ pub(crate) use platform::{import_netlist, open_netlist_project, request_dependen
 pub(crate) use save::save_owned_netlist_source;
 pub(crate) use staging::{
     begin_owned_netlist_profile_review, cancel_staged_netlist_import, commit_staged_netlist_import,
-    stage_dropped_netlist_import, stage_dropped_netlist_project,
+    import_dropped_netlist, stage_dropped_netlist_project,
 };
 
 pub const NETLIST_FILTER: (&str, &[&str]) = ("SPICE Deck", &["cir", "sp", "spice", "net", "ckt"]);
@@ -134,6 +134,133 @@ pub(crate) fn validate_visible_netlist_source(app: &mut RSpiceApp) -> bool {
             false
         }
     }
+}
+
+/// Format the deck or the include the netlist editor shows, when it is
+/// editable: trailing blanks come off every card but the title, and the
+/// text ends with a line end. An include is formatted only when it parses
+/// without errors, and the deck only when it validates, after validating
+/// it when its validation is not current.
+pub(crate) fn format_owned_netlist(app: &mut RSpiceApp) {
+    if !crate::workbench::documents::netlist_document::active_netlist_source_is_editable(&app.state)
+    {
+        return;
+    }
+    let source = app.state.model.simulation.source.netlist_content.clone();
+    let dependency_document = app.state.code.netlist.active_dependency_identity.is_some();
+    if dependency_document {
+        let has_errors = app.state.code.netlist.diagnostics.iter().any(|diagnostic| {
+            diagnostic.is_current()
+                && diagnostic.severity
+                    == crate::workbench::documents::netlist_document::DiagnosticSeverity::Error
+        });
+        if has_errors {
+            app.state
+                .prompt("Fix the include file's syntax errors before formatting it.");
+            return;
+        }
+        let formatted = normalize_owned_netlist_whitespace(&source);
+        if formatted == source {
+            app.state.prompt("The include file is already formatted.");
+        } else if crate::workbench::documents::netlist_document::replace_owned_dependency_source(
+            &mut app.state,
+            formatted,
+        ) {
+            app.state
+                .prompt("Formatted the include file; the top-level deck needs validating again.");
+        }
+        return;
+    }
+    let digest = crate::state::content_digest(&source);
+    let validation_current = app
+        .state
+        .model
+        .netlist_artifacts
+        .validation
+        .as_ref()
+        .is_some_and(|receipt| {
+            receipt.visible_content_digest == digest
+                && receipt.project_revision
+                    == app.state.model.workspace.content.project.revision().get()
+        });
+    if !validation_current {
+        validate_visible_netlist_source(app);
+    }
+    let validation_current = app
+        .state
+        .model
+        .netlist_artifacts
+        .validation
+        .as_ref()
+        .is_some_and(|receipt| {
+            receipt.visible_content_digest == digest
+                && receipt.project_revision
+                    == app.state.model.workspace.content.project.revision().get()
+        });
+    if !validation_current {
+        let message = app
+            .state
+            .model
+            .netlist_artifacts
+            .validation_error
+            .clone()
+            .unwrap_or_else(|| "the netlist does not validate".to_owned());
+        // Validation has already recorded why it failed; this answers the
+        // format gesture.
+        app.state
+            .prompt(format!("The netlist was not formatted: {message}"));
+        return;
+    }
+
+    let formatted = normalize_owned_netlist_whitespace(&source);
+    if formatted == source {
+        app.state.prompt("The netlist is already formatted.");
+        return;
+    }
+    if crate::workbench::documents::netlist_document::replace_owned_source(
+        &mut app.state,
+        formatted,
+    ) {
+        app.state
+            .prompt("Formatted the netlist; it needs validating again.");
+    } else {
+        app.state
+            .prompt("The netlist changed before formatting finished. Review it and try again.");
+    }
+}
+
+fn normalize_owned_netlist_whitespace(source: &str) -> String {
+    if source.is_empty() {
+        return String::new();
+    }
+    let preferred_eol = if source.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    };
+    let mut formatted = String::with_capacity(source.len().saturating_add(preferred_eol.len()));
+    for (line, segment) in source.split_inclusive('\n').enumerate() {
+        let (body, eol) = segment.strip_suffix("\r\n").map_or_else(
+            || {
+                segment
+                    .strip_suffix('\n')
+                    .map_or((segment, ""), |body| (body, "\n"))
+            },
+            |body| (body, "\r\n"),
+        );
+        // The first physical card is the circuit title and is user data, not
+        // executable whitespace. Preserve it byte-for-byte.
+        if line == 0 {
+            formatted.push_str(body);
+        } else {
+            formatted.push_str(body.trim_end_matches([' ', '\t']));
+        }
+        formatted.push_str(eol);
+    }
+    if !source.ends_with('\n') {
+        formatted.push_str(preferred_eol);
+    }
+    formatted
 }
 
 fn record_validation_failure(state: &mut AppState, error: &str) {

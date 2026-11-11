@@ -11,14 +11,14 @@
 use egui::containers::menu::MenuButton;
 use egui::{Align, Layout, Ui, vec2};
 
-use crate::diagnostics::{LogSeverity, LogSource};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+use crate::workbench::MessageId;
 use crate::workbench::code::CodeFeature;
+use crate::workbench::code::commands::CodeRequest;
 use crate::workbench::design_system::{Problem, WorkbenchIcon, icon_button, paint_problem_mark};
 use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
 use crate::workbench::framework::feature::Cx;
-use crate::workbench::{MessageId, RSpiceApp};
 
 use super::ownership::open_ownership_dialog;
 use super::revision::owned_source_save_ready;
@@ -151,13 +151,11 @@ struct ActionSetContext {
 
 /// Draw the toolbar in the code feature's context, lent with the dispatcher's
 /// answers for Run and Stop, and do what was pressed: in place for what the
-/// context holds, Run and Stop raised for the dispatcher. What it returns
-/// beside where it drew is the press the application carries out with
-/// [`run_app_toolbar_action`].
-pub(super) fn code_toolbar(
-    ui: &mut Ui,
-    cx: &mut Cx<'_, CodeFeature>,
-) -> (CodeToolbarLayout, Option<AppToolbarAction>) {
+/// context holds, and raised for what the application carries out once the
+/// page has drawn: Run and Stop, copying an include into the project,
+/// picking its file again, validating the deck and the quick fix. It
+/// returns where it drew.
+pub(super) fn code_toolbar(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) -> CodeToolbarLayout {
     let messages = cx.wb.messages();
     let save_source_label = messages.text(if cfg!(target_arch = "wasm32") {
         MessageId::NetlistDownloadSourceCopy
@@ -357,7 +355,7 @@ pub(super) fn code_toolbar(
                 } else {
                     (
                         messages.text(MessageId::NetlistCopyProject),
-                        NetlistToolbarAction::App(AppToolbarAction::CopyDependency),
+                        NetlistToolbarAction::CopyDependency,
                     )
                 };
                 if ui
@@ -390,9 +388,7 @@ pub(super) fn code_toolbar(
                 )
                 .clicked()
                 {
-                    action = Some(NetlistToolbarAction::App(
-                        AppToolbarAction::RelinkDependency,
-                    ));
+                    action = Some(NetlistToolbarAction::RelinkDependency);
                 }
             } else {
                 match active {
@@ -531,16 +527,14 @@ pub(super) fn code_toolbar(
                     action = Some(NetlistToolbarAction::CloseDependency);
                 }
                 if ui.button(messages.text(MessageId::NetlistRelink)).clicked() {
-                    action = Some(NetlistToolbarAction::App(
-                        AppToolbarAction::RelinkDependency,
-                    ));
+                    action = Some(NetlistToolbarAction::RelinkDependency);
                 }
                 if !dependency_owned
                     && ui
                         .button(messages.text(MessageId::NetlistCopyProject))
                         .clicked()
                 {
-                    action = Some(NetlistToolbarAction::App(AppToolbarAction::CopyDependency));
+                    action = Some(NetlistToolbarAction::CopyDependency);
                 }
             } else {
                 match active {
@@ -612,7 +606,7 @@ pub(super) fn code_toolbar(
                             .button(messages.text(MessageId::NetlistValidateSource))
                             .clicked()
                         {
-                            action = Some(NetlistToolbarAction::App(AppToolbarAction::Validate));
+                            action = Some(NetlistToolbarAction::Validate);
                         }
                         if generated_ready {
                             if ui
@@ -735,7 +729,6 @@ pub(super) fn code_toolbar(
         });
     }
 
-    let mut pressed = None;
     match action {
         Some(NetlistToolbarAction::OpenOwned) => {
             let _ = open_owned_source_in(cx.model, &mut cx.state.netlist);
@@ -886,67 +879,31 @@ pub(super) fn code_toolbar(
                 ),
             );
         }
-        Some(NetlistToolbarAction::App(app_action)) => pressed = Some(app_action),
+        Some(NetlistToolbarAction::CopyDependency) => {
+            cx.wb.outbox.push(CodeRequest::CopyNetlistDependency);
+        }
+        Some(NetlistToolbarAction::RelinkDependency) => {
+            if let Some(identity) = cx.state.netlist.active_dependency_identity.clone() {
+                cx.wb
+                    .outbox
+                    .push(CodeRequest::RelinkNetlistDependency(identity));
+            }
+        }
+        Some(NetlistToolbarAction::Validate) => {
+            cx.wb.outbox.push(CodeRequest::ValidateCodeDocument);
+        }
+        Some(NetlistToolbarAction::ApplyQuickFix) => {
+            cx.wb.outbox.push(CodeRequest::ApplyNetlistQuickFix);
+        }
         None => {}
     }
 
-    (
-        CodeToolbarLayout {
-            content,
-            #[cfg(test)]
-            status: status_rect,
-            #[cfg(test)]
-            actions: regions.1,
-        },
-        pressed,
-    )
-}
-
-/// Carry out the press the toolbar left to the application, straight after
-/// the toolbar has drawn and before anything under it does. Validating
-/// opens what the editor draws in the same frame;
-/// copying an include into the project, relinking one and the quick fix
-/// commit through the whole state.
-pub(super) fn run_app_toolbar_action(app: &mut RSpiceApp, action: AppToolbarAction) {
-    let messages = app.state.workbench.messages();
-    match action {
-        AppToolbarAction::CopyDependency => {
-            match crate::workbench::documents::netlist_document::copy_active_dependency_to_project(
-                &mut app.state,
-            ) {
-                Ok(_) => {
-                    app.state.record(
-                        LogSeverity::Info,
-                        LogSource::Studio,
-                        messages.text(MessageId::NetlistCopySucceeded),
-                    );
-                }
-                Err(error) => {
-                    app.state
-                        .record(LogSeverity::Error, LogSource::Studio, error);
-                }
-            }
-        }
-        AppToolbarAction::RelinkDependency => {
-            if let Some(identity) = app.state.code.netlist.active_dependency_identity.clone() {
-                crate::workbench::workflows::netlist_workflow::request_dependency_relink(
-                    &mut app.state,
-                    &identity,
-                );
-            }
-        }
-        AppToolbarAction::Validate => {
-            app.execute_command_key(
-                crate::workbench::code::commands::CodeCommand::ValidateCodeDocument.key(),
-            );
-        }
-        AppToolbarAction::ApplyQuickFix => {
-            let answer =
-                crate::workbench::documents::netlist_document::language::apply_preferred_quick_fix(
-                    &mut app.state,
-                );
-            app.state.prompt(answer.unwrap_or_else(|refusal| refusal));
-        }
+    CodeToolbarLayout {
+        content,
+        #[cfg(test)]
+        status: status_rect,
+        #[cfg(test)]
+        actions: regions.1,
     }
 }
 
@@ -1086,7 +1043,7 @@ fn language_tools_menu(
                         )
                         .clicked()
                     {
-                        action = Some(NetlistToolbarAction::App(AppToolbarAction::ApplyQuickFix));
+                        action = Some(NetlistToolbarAction::ApplyQuickFix);
                         ui.close();
                     }
                     if ui
@@ -1231,13 +1188,6 @@ enum NetlistToolbarAction {
     WorkspaceSymbols,
     Find,
     FormatDocument,
-    App(AppToolbarAction),
-}
-
-/// A toolbar press the application carries out with
-/// [`run_app_toolbar_action`] once the toolbar has drawn.
-#[derive(Debug, Clone, Copy)]
-pub(super) enum AppToolbarAction {
     CopyDependency,
     RelinkDependency,
     Validate,
@@ -1247,6 +1197,7 @@ pub(super) enum AppToolbarAction {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::RSpiceApp;
 
     /// A netlist-first project: an owned deck and no generated primary. This is
     /// the shape whose action set is widest, because the third full-set button
@@ -1287,16 +1238,12 @@ mod tests {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE.fill(background))
                 .show(ui, |ui| {
-                    captured = Some(
-                        code_toolbar(
-                            ui,
-                            &mut crate::workbench::features::cx_with_foreign_answers(
-                                &mut app,
-                                |_| true,
-                            ),
-                        )
-                        .0,
-                    );
+                    captured = Some(code_toolbar(
+                        ui,
+                        &mut crate::workbench::features::cx_with_foreign_answers(&mut app, |_| {
+                            true
+                        }),
+                    ));
                 });
         });
         captured.expect("the toolbar paints on every pass")

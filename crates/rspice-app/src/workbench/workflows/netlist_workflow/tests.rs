@@ -1895,3 +1895,15 @@ fn ordinary_source_save_refuses_to_overwrite_external_changes() {
     );
     std::fs::remove_file(path).expect("remove conflict fixture");
 }
+
+#[test]
+fn deterministic_netlist_format_preserves_line_ending_policy() {
+    assert_eq!(
+        super::normalize_owned_netlist_whitespace("deck  \r\nR1 1 0 1k\t\r\n.end"),
+        "deck  \r\nR1 1 0 1k\r\n.end\r\n"
+    );
+    assert_eq!(
+        super::normalize_owned_netlist_whitespace("deck\n.end\n"),
+        "deck\n.end\n"
+    );
+}

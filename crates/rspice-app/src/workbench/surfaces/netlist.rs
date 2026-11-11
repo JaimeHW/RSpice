@@ -21,10 +21,10 @@ mod transfer;
 
 use egui::Ui;
 
-use crate::diagnostics::{LogSeverity, LogSource};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::code::CodeFeature;
+use crate::workbench::code::commands::CodeRequest;
 use crate::workbench::design_system::{
     Problem, WorkbenchIcon, empty_state, empty_state_with_actions, paint_problem_mark,
 };
@@ -185,12 +185,16 @@ pub(in crate::workbench) fn prepare_workspace(cx: &mut Cx<'_, CodeFeature>) {
 }
 
 pub(in crate::workbench) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
-    handle_netlist_file_drop(ui.ctx(), app);
-    let (toolbar, pressed) =
-        toolbar::code_toolbar(ui, &mut features::cx_with_foreign_answers(app, |_| true));
-    if let Some(pressed) = pressed {
-        toolbar::run_app_toolbar_action(app, pressed);
+    // A file dropped on the page is staged as an import once the page has
+    // drawn.
+    let dropped = ui.ctx().input(|input| input.raw.dropped_files.clone());
+    if !dropped.is_empty() {
+        app.state
+            .workbench
+            .outbox
+            .push(CodeRequest::ImportDroppedNetlist(dropped));
     }
+    let toolbar = toolbar::code_toolbar(ui, &mut features::cx_with_foreign_answers(app, |_| true));
     // The strip aligns to the toolbar's own content rect, so the two rows keep
     // one padding and one edge rather than each deriving a width. The strip
     // states the run and reports what was clicked; routing that click is this
@@ -261,16 +265,25 @@ pub(in crate::workbench) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
         None => {}
     }
     if execution_profile_review_banner(ui, &app.state.model, app.state.workbench.messages()) {
-        crate::workbench::workflows::netlist_workflow::begin_owned_netlist_profile_review(
-            &mut app.state,
-        );
+        app.state
+            .workbench
+            .outbox
+            .push(CodeRequest::BeginNetlistProfileReview);
     }
     control_disposition_band(ui, &app.state.code.netlist, app.state.workbench.messages());
     if crate::workbench::documents::text_editor_commands::take_format_document_request(
         ui,
         crate::workbench::documents::netlist_document::editor_id(&app.state),
     ) {
-        format_owned_netlist(app);
+        // Formatting is carried out once the page has drawn. A format the
+        // palette, a menu or a shortcut asked for is taken a frame after it
+        // was asked, in a frame no input began, so this frame asks for the
+        // next at once to draw what formatting wrote.
+        ui.ctx().request_repaint();
+        app.state
+            .workbench
+            .outbox
+            .push(CodeRequest::FormatNetlistDocument);
     }
     let t = Tokens::get(ui.ctx());
     egui::Frame::new().fill(t.color.bg_inset).show(ui, |ui| {
@@ -979,186 +992,6 @@ fn control_disposition_band(
     });
 }
 
-fn handle_netlist_file_drop(ctx: &egui::Context, app: &mut RSpiceApp) {
-    if app.state.application_modal_open() {
-        return;
-    }
-    let dropped = ctx.input(|input| input.raw.dropped_files.clone());
-    if dropped.is_empty() {
-        return;
-    }
-    if dropped.len() != 1 {
-        app.state
-            .prompt("Drop one SPICE deck or RSpice netlist bundle at a time.");
-        return;
-    }
-    let file = &dropped[0];
-    let source_path = file.path.clone();
-    let display_name = (!file.name.trim().is_empty())
-        .then(|| file.name.clone())
-        .or_else(|| {
-            source_path
-                .as_deref()
-                .and_then(std::path::Path::file_name)
-                .map(|name| name.to_string_lossy().into_owned())
-        })
-        .unwrap_or_else(|| "dropped-netlist.spice".to_owned());
-    let bytes = if let Some(bytes) = file.bytes.as_ref() {
-        Ok(bytes.to_vec())
-    } else {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            source_path
-                .as_deref()
-                .ok_or_else(|| "Dropped file has neither bytes nor a native path.".to_owned())
-                .and_then(|path| std::fs::read(path).map_err(|error| error.to_string()))
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            Err("The browser did not provide the dropped file's contents.".to_owned())
-        }
-    };
-    match bytes {
-        Ok(bytes) => {
-            crate::workbench::workflows::netlist_workflow::stage_dropped_netlist_import(
-                &mut app.state,
-                bytes,
-                source_path,
-                display_name,
-            );
-        }
-        Err(error) => {
-            app.state.record(
-                LogSeverity::Error,
-                LogSource::Netlist,
-                format!("The dropped SPICE file could not be read: {error}"),
-            );
-        }
-    }
-}
-
-fn format_owned_netlist(app: &mut RSpiceApp) {
-    if !crate::workbench::documents::netlist_document::active_netlist_source_is_editable(&app.state)
-    {
-        return;
-    }
-    let source = app.state.model.simulation.source.netlist_content.clone();
-    let dependency_document = app.state.code.netlist.active_dependency_identity.is_some();
-    if dependency_document {
-        let has_errors = app.state.code.netlist.diagnostics.iter().any(|diagnostic| {
-            diagnostic.is_current()
-                && diagnostic.severity
-                    == crate::workbench::documents::netlist_document::DiagnosticSeverity::Error
-        });
-        if has_errors {
-            app.state
-                .prompt("Fix the include file's syntax errors before formatting it.");
-            return;
-        }
-        let formatted = normalize_owned_netlist_whitespace(&source);
-        if formatted == source {
-            app.state.prompt("The include file is already formatted.");
-        } else if crate::workbench::documents::netlist_document::replace_owned_dependency_source(
-            &mut app.state,
-            formatted,
-        ) {
-            app.state
-                .prompt("Formatted the include file; the top-level deck needs validating again.");
-        }
-        return;
-    }
-    let digest = crate::state::content_digest(&source);
-    let validation_current = app
-        .state
-        .model
-        .netlist_artifacts
-        .validation
-        .as_ref()
-        .is_some_and(|receipt| {
-            receipt.visible_content_digest == digest
-                && receipt.project_revision
-                    == app.state.model.workspace.content.project.revision().get()
-        });
-    if !validation_current {
-        crate::workbench::workflows::netlist_workflow::validate_visible_netlist_source(app);
-    }
-    let validation_current = app
-        .state
-        .model
-        .netlist_artifacts
-        .validation
-        .as_ref()
-        .is_some_and(|receipt| {
-            receipt.visible_content_digest == digest
-                && receipt.project_revision
-                    == app.state.model.workspace.content.project.revision().get()
-        });
-    if !validation_current {
-        let message = app
-            .state
-            .model
-            .netlist_artifacts
-            .validation_error
-            .clone()
-            .unwrap_or_else(|| "the netlist does not validate".to_owned());
-        // Validation has already recorded why it failed; this answers the
-        // format gesture.
-        app.state
-            .prompt(format!("The netlist was not formatted: {message}"));
-        return;
-    }
-
-    let formatted = normalize_owned_netlist_whitespace(&source);
-    if formatted == source {
-        app.state.prompt("The netlist is already formatted.");
-        return;
-    }
-    if crate::workbench::documents::netlist_document::replace_owned_source(
-        &mut app.state,
-        formatted,
-    ) {
-        app.state
-            .prompt("Formatted the netlist; it needs validating again.");
-    } else {
-        app.state
-            .prompt("The netlist changed before formatting finished. Review it and try again.");
-    }
-}
-
-fn normalize_owned_netlist_whitespace(source: &str) -> String {
-    if source.is_empty() {
-        return String::new();
-    }
-    let preferred_eol = if source.contains("\r\n") {
-        "\r\n"
-    } else {
-        "\n"
-    };
-    let mut formatted = String::with_capacity(source.len().saturating_add(preferred_eol.len()));
-    for (line, segment) in source.split_inclusive('\n').enumerate() {
-        let (body, eol) = segment.strip_suffix("\r\n").map_or_else(
-            || {
-                segment
-                    .strip_suffix('\n')
-                    .map_or((segment, ""), |body| (body, "\n"))
-            },
-            |body| (body, "\r\n"),
-        );
-        // The first physical card is the circuit title and is user data, not
-        // executable whitespace. Preserve it byte-for-byte.
-        if line == 0 {
-            formatted.push_str(body);
-        } else {
-            formatted.push_str(body.trim_end_matches([' ', '\t']));
-        }
-        formatted.push_str(eol);
-    }
-    if !source.ends_with('\n') {
-        formatted.push_str(preferred_eol);
-    }
-    formatted
-}
-
 fn generated_primary_unavailable(
     model: &crate::workbench::app_state::Model,
     netlist: &crate::workbench::documents::netlist_document::NetlistDocumentState,
@@ -1349,18 +1182,6 @@ mod tests {
         );
         assert_eq!(press(&mut app, ProblemStep::Previous).0, (2, 1));
         assert_eq!(press(&mut app, ProblemStep::Previous).0, (3, 8), "wraps");
-    }
-
-    #[test]
-    fn deterministic_netlist_format_preserves_line_ending_policy() {
-        assert_eq!(
-            normalize_owned_netlist_whitespace("deck  \r\nR1 1 0 1k\t\r\n.end"),
-            "deck  \r\nR1 1 0 1k\r\n.end\r\n"
-        );
-        assert_eq!(
-            normalize_owned_netlist_whitespace("deck\n.end\n"),
-            "deck\n.end\n"
-        );
     }
 
     fn configured_veriloga_state() -> (AppState, String) {

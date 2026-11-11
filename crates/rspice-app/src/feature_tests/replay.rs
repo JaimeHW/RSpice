@@ -113,6 +113,7 @@ pub(super) struct Replay {
     pub(super) app: RSpiceApp,
     frame: eframe::Frame,
     time: f64,
+    screen: egui::Vec2,
 }
 
 impl Replay {
@@ -132,7 +133,15 @@ impl Replay {
             app,
             frame: eframe::Frame::_new_kittest(),
             time: 0.0,
+            screen: vec2(1440.0, 1000.0),
         }
+    }
+
+    /// The same session in a window `screen` points in size, for what only
+    /// a window of another size shows.
+    pub(super) fn sized(mut self, screen: egui::Vec2) -> Self {
+        self.screen = screen;
+        self
     }
 
     /// The context the frames run in, for a test that raises what the shell
@@ -146,7 +155,7 @@ impl Replay {
         self.time += 0.1;
         self.ctx.run_ui(
             egui::RawInput {
-                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 1000.0))),
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, self.screen)),
                 time: Some(self.time),
                 focused: true,
                 events,

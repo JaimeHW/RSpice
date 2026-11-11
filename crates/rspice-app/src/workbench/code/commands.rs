@@ -98,8 +98,10 @@ pub(crate) enum CodeCommand {
 /// a source rail's file action and opening a placed instance of the
 /// Verilog-A cell; and, from the netlist page's dialogs, the rename, the
 /// revision restore, the external change and the import each confirmed, and
-/// a find window press.
-/// Each command, dialog step, navigator or page dialog that raises one
+/// a find window press; and, from the netlist page itself, copying an
+/// include into the project, picking its file again, validating the deck,
+/// the quick fix, the profile review, formatting and a dropped file.
+/// Each command, dialog step, navigator, page dialog or page that raises one
 /// raises one. Taken straight after the call that raised it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::workbench) enum CodeRequest {
@@ -163,6 +165,17 @@ pub(in crate::workbench) enum CodeRequest {
     /// Carry out the press the netlist page's find window stored: going to a
     /// match, replacing it, or replacing every match.
     ApplyNetlistFind,
+    /// Copy the include the netlist page shows into the project.
+    CopyNetlistDependency,
+    /// Apply the preferred quick fix at the netlist editor's caret.
+    ApplyNetlistQuickFix,
+    /// Begin reviewing the owned deck's execution profile, as the netlist
+    /// page's banner asked.
+    BeginNetlistProfileReview,
+    /// Format the deck or the include the netlist editor shows.
+    FormatNetlistDocument,
+    /// Stage the files dropped on the netlist page as an import.
+    ImportDroppedNetlist(Vec<egui::DroppedFile>),
 }
 
 impl Request for CodeRequest {
