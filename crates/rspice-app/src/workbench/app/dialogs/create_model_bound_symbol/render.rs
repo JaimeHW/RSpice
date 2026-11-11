@@ -13,71 +13,72 @@ use super::controller::{
     commit_create_model_bound_symbol, target_syntax_error, validate_create_symbol_draft,
 };
 use super::state::*;
-use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::dialogs::review_primitives::{configure_field_validation, field_label};
+use crate::workbench::app_state::Model;
+use crate::workbench::state::WorkbenchSession;
 
-impl RSpiceApp {
-    pub(in crate::workbench) fn render_create_model_bound_symbol_dialog(&mut self, ctx: &Context) {
-        if !self.state.design.create_model_bound_symbol.open {
-            return;
-        }
+/// Draw Create symbol over its draft, the model it publishes into and the
+/// session that opens what it created.
+pub(in crate::workbench) fn render_create_model_bound_symbol_dialog(
+    draft: &mut CreateModelBoundSymbolDialogState,
+    model: &mut Model,
+    workbench: &mut WorkbenchSession,
+    ctx: &Context,
+) {
+    if !draft.open {
+        return;
+    }
 
-        let validation = validate_create_symbol_draft(&self.state);
-        let discard_confirm = self.state.design.create_model_bound_symbol.discard_confirm;
-        let pin_count = self.state.design.create_model_bound_symbol.pins.len();
-        let footer_hint = format!(
-            "{} pin{} \u{00b7} atomic library revision",
-            pin_count,
-            if pin_count == 1 { "" } else { "s" }
+    let validation = validate_create_symbol_draft(draft, model);
+    let discard_confirm = draft.discard_confirm;
+    let pin_count = draft.pins.len();
+    let footer_hint = format!(
+        "{} pin{} \u{00b7} atomic library revision",
+        pin_count,
+        if pin_count == 1 { "" } else { "s" }
+    );
+    let mut dialog = Dialog::new(TITLE, PRIMARY)
+        .description(DESCRIPTION)
+        .size(DialogSize::Transaction)
+        .fixed_height(SURFACE_HEIGHT)
+        .ghost(if discard_confirm {
+            "Discard changes"
+        } else {
+            "Cancel"
+        })
+        .hint(&footer_hint)
+        .primary_enabled(validation.is_ok())
+        .primary_on_enter(false)
+        .initial_focus(DialogInitialFocus::BodyControl);
+    if discard_confirm {
+        dialog = dialog.transaction_state(
+            DialogTransactionTone::Error,
+            "Discard symbol definition?",
+            "The library is unchanged. Discarding closes this draft and its reviewed pin contract.",
         );
-        let mut dialog = Dialog::new(TITLE, PRIMARY)
-            .description(DESCRIPTION)
-            .size(DialogSize::Transaction)
-            .fixed_height(SURFACE_HEIGHT)
-            .ghost(if discard_confirm {
-                "Discard changes"
-            } else {
-                "Cancel"
-            })
-            .hint(&footer_hint)
-            .primary_enabled(validation.is_ok())
-            .primary_on_enter(false)
-            .initial_focus(DialogInitialFocus::BodyControl);
-        if discard_confirm {
-            dialog = dialog.transaction_state(
-                DialogTransactionTone::Error,
-                "Discard symbol definition?",
-                "The library is unchanged. Discarding closes this draft and its reviewed pin contract.",
-            );
-        } else if let Err(error) = &validation {
-            dialog = dialog.transaction_state(
-                DialogTransactionTone::Error,
-                "Symbol revision cannot be created",
-                error,
-            );
-        }
+    } else if let Err(error) = &validation {
+        dialog = dialog.transaction_state(
+            DialogTransactionTone::Error,
+            "Symbol revision cannot be created",
+            error,
+        );
+    }
 
-        let mut response = dialog.show_transaction(ctx, |ui| {
-            Some(create_symbol_body(
-                ui,
-                &mut self.state.design.create_model_bound_symbol,
-            ))
-        });
-        match response.choice {
-            DialogChoice::Primary => {
-                if let Err(error) = commit_create_model_bound_symbol(&mut self.state) {
-                    // The dialog stays open and states the refusal in place.
-                    self.state.design.create_model_bound_symbol.validation_error = Some(error);
-                }
+    let mut response = dialog.show_transaction(ctx, |ui| Some(create_symbol_body(ui, &mut *draft)));
+    match response.choice {
+        DialogChoice::Primary => {
+            if let Err(error) = commit_create_model_bound_symbol(draft, model, workbench) {
+                // The dialog stays open and states the refusal in place.
+                draft.validation_error = Some(error);
             }
-            DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.design.create_model_bound_symbol.attempt_close();
-                if self.state.design.create_model_bound_symbol.open {
-                    response.retain_cancel_focus(DialogInitialFocus::Ghost);
-                }
-            }
-            DialogChoice::Secondary | DialogChoice::None => {}
         }
+        DialogChoice::Ghost | DialogChoice::Cancelled => {
+            draft.attempt_close();
+            if draft.open {
+                response.retain_cancel_focus(DialogInitialFocus::Ghost);
+            }
+        }
+        DialogChoice::Secondary | DialogChoice::None => {}
     }
 }
 

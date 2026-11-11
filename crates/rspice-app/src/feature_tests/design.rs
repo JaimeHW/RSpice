@@ -396,3 +396,11 @@ fn stimulus_link_opens_and_draws_in_the_frame() {
     ));
     assert!(app.state.design.stimulus_link.open);
 }
+
+#[test]
+fn create_model_bound_symbol_opens_and_draws_in_the_frame() {
+    let mut app = design_app();
+    crate::workbench::app::open_create_model_bound_symbol_dialog(&mut app.state);
+    assert!(draws_dialog(&mut app, "Create model-bound symbol"));
+    assert!(app.state.design.create_model_bound_symbol.open);
+}

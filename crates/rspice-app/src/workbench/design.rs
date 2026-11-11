@@ -10,7 +10,8 @@ use crate::workbench::app::dialogs::engineering_table::EngineeringTable;
 use crate::workbench::app::dialogs::hierarchy::descend;
 use crate::workbench::app::dialogs::selection::{array, bulk_edit, rename, shared_properties};
 use crate::workbench::app::dialogs::{
-    find_replace, object_properties, placement, rule_setup, stimulus_link, symbol_definition,
+    create_model_bound_symbol, find_replace, object_properties, placement, rule_setup,
+    stimulus_link, symbol_definition,
 };
 use crate::workbench::framework::feature::{Cx, Feature, FeatureRegistry, NoHandles};
 use crate::workbench::slots::DesignState;
@@ -243,6 +244,20 @@ impl DesignFeature {
         stimulus_link::render_stimulus_link_dialog(
             &mut cx.state.stimulus_link,
             &mut cx.state.selected_stimulus_definition,
+            cx.model,
+            cx.wb,
+            ctx,
+        );
+    }
+
+    /// Create model-bound symbol, over its draft. A created symbol asks for
+    /// its view to open in the Design workspace.
+    pub(in crate::workbench) fn render_create_model_bound_symbol_dialog(
+        cx: &mut Cx<'_, Self>,
+        ctx: &Context,
+    ) {
+        create_model_bound_symbol::render_create_model_bound_symbol_dialog(
+            &mut cx.state.create_model_bound_symbol,
             cx.model,
             cx.wb,
             ctx,

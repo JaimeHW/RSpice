@@ -5,9 +5,8 @@ use std::path::PathBuf;
 use egui::{Context, Rect, vec2};
 
 use super::controller::{
-    build_create_symbol_definition, commit_create_model_bound_symbol, inferred_model_pins,
-    open_create_model_bound_symbol_dialog, open_create_subcircuit_bound_symbol_dialog,
-    parse_target, validate_create_symbol_draft,
+    inferred_model_pins, open_create_model_bound_symbol_dialog,
+    open_create_subcircuit_bound_symbol_dialog, parse_target,
 };
 use super::state::*;
 use crate::state::{
@@ -16,6 +15,56 @@ use crate::state::{
 };
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
+use crate::workbench::framework::requests::OpenInDesign;
+
+/// Draw the dialog as the frame's step does, over the application's parts.
+fn render(app: &mut RSpiceApp, ctx: &Context) {
+    let state = &mut app.state;
+    super::render::render_create_model_bound_symbol_dialog(
+        &mut state.design.create_model_bound_symbol,
+        &mut state.model,
+        &mut state.workbench,
+        ctx,
+    );
+}
+
+/// Check the draft as the dialog does, over the whole state.
+fn validate_create_symbol_draft(state: &AppState) -> Result<(), String> {
+    super::controller::validate_create_symbol_draft(
+        &state.design.create_model_bound_symbol,
+        &state.model,
+    )
+}
+
+/// The definition the draft describes, over the whole state.
+fn build_create_symbol_definition(
+    state: &AppState,
+) -> Result<crate::state::ModelBoundSymbolDefinition, String> {
+    super::controller::build_symbol_definition(
+        &state.model,
+        &state.design.create_model_bound_symbol,
+    )
+}
+
+/// Create the symbol as the dialog's primary does, then open what it created
+/// as the shell answers the dialog's request.
+fn commit_create_model_bound_symbol(state: &mut AppState) -> Result<(), String> {
+    super::controller::commit_create_model_bound_symbol(
+        &mut state.design.create_model_bound_symbol,
+        &mut state.model,
+        &mut state.workbench,
+    )?;
+    let OpenInDesign(reference) = state
+        .workbench
+        .outbox
+        .take()
+        .expect("the created view is asked for");
+    state.open_workspace_view(reference);
+    state
+        .workbench
+        .activate(crate::workbench::state::Workspace::Design);
+    Ok(())
+}
 
 fn render_accessibility_frame(
     app: &mut RSpiceApp,
@@ -27,7 +76,7 @@ fn render_accessibility_frame(
             screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, size)),
             ..egui::RawInput::default()
         },
-        |ctx| app.render_create_model_bound_symbol_dialog(ctx),
+        |ctx| render(app, ctx),
     )
     .platform_output
     .accesskit_update
@@ -372,7 +421,7 @@ fn accessibility_tree_exposes_the_mockup_dialog_and_complete_actions() {
             screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1280.0, 900.0))),
             ..egui::RawInput::default()
         },
-        |ctx| app.render_create_model_bound_symbol_dialog(ctx),
+        |ctx| render(&mut app, ctx),
     );
     let nodes = output
         .platform_output

@@ -11,6 +11,7 @@ pub(crate) use controller::{
     open_create_model_bound_symbol_dialog, open_create_subcircuit_bound_symbol_dialog,
     symbol_attribute_definition,
 };
+pub(in crate::workbench) use render::render_create_model_bound_symbol_dialog;
 pub(crate) use state::CreateModelBoundSymbolDialogState;
 
 #[cfg(test)]

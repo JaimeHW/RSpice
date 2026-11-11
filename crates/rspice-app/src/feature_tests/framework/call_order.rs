@@ -362,7 +362,10 @@ const DIALOG_STEPS: &[(&str, &str)] = &[
     ("features::render_dialog", "code"),
     ("features::render_dialog", "code"),
     ("features::render_dialog", "code"),
-    ("render_create_model_bound_symbol_dialog", "design"),
+    (
+        "DesignFeature::render_create_model_bound_symbol_dialog",
+        "design",
+    ),
     ("DesignFeature::render_symbol_definition_dialogs", "design"),
     ("ProjectFeature::render_configuration_dialog", "project"),
     ("DesignFeature::render_rule_setup_dialog", "design"),

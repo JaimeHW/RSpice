@@ -15,6 +15,8 @@ use super::state::*;
 use crate::workbench::app_state::{
     AppState, Model, SymbolDefinitionFixtureDelta, publish_symbol_definition_candidate_with_fixture,
 };
+use crate::workbench::framework::requests::OpenInDesign;
+use crate::workbench::state::WorkbenchSession;
 
 pub(crate) fn open_create_model_bound_symbol_dialog(state: &mut AppState) {
     let library = state
@@ -225,17 +227,18 @@ pub(crate) fn open_create_subcircuit_bound_symbol_dialog(
     Ok(())
 }
 
-pub(super) fn validate_create_symbol_draft(state: &AppState) -> Result<(), String> {
-    let draft = &state.design.create_model_bound_symbol;
-    if state.model.library_manager.revision() != draft.expected_library_revision {
+pub(super) fn validate_create_symbol_draft(
+    draft: &CreateModelBoundSymbolDialogState,
+    model: &Model,
+) -> Result<(), String> {
+    if model.library_manager.revision() != draft.expected_library_revision {
         return Err(
             "The design library changed after this transaction opened. Close and reopen Create symbol."
                 .to_owned(),
         );
     }
     let (library_name, cell_name) = parse_target(&draft.target)?;
-    let library = state
-        .model
+    let library = model
         .library_manager
         .get_library(library_name)
         .ok_or_else(|| format!("Library '{library_name}' no longer exists."))?;
@@ -302,7 +305,7 @@ pub(super) fn validate_create_symbol_draft(state: &AppState) -> Result<(), Strin
     if let Some(error) = draft.validation_error.as_ref() {
         return Err(error.clone());
     }
-    build_create_symbol_definition(state)?;
+    build_symbol_definition(model, draft)?;
     Ok(())
 }
 
@@ -649,13 +652,7 @@ pub(crate) fn symbol_attribute_definition(
     build_symbol_definition(model, &draft)
 }
 
-pub(super) fn build_create_symbol_definition(
-    state: &AppState,
-) -> Result<ModelBoundSymbolDefinition, String> {
-    build_symbol_definition(&state.model, &state.design.create_model_bound_symbol)
-}
-
-fn build_symbol_definition(
+pub(super) fn build_symbol_definition(
     model: &Model,
     draft: &CreateModelBoundSymbolDialogState,
 ) -> Result<ModelBoundSymbolDefinition, String> {
@@ -1172,16 +1169,20 @@ const fn model_device_prefix(model_type: ModelType) -> &'static str {
 // The domain-owned construction plan is the final authority after every
 // retained UI authority check. Conversion happens once at the transaction
 // boundary, so controls edit typed draft input and never mutate a live cell.
-pub(super) fn commit_create_model_bound_symbol(state: &mut AppState) -> Result<(), String> {
-    validate_create_symbol_draft(state)?;
-    let definition = build_create_symbol_definition(state)?;
+pub(super) fn commit_create_model_bound_symbol(
+    draft: &mut CreateModelBoundSymbolDialogState,
+    model: &mut Model,
+    workbench: &mut WorkbenchSession,
+) -> Result<(), String> {
+    validate_create_symbol_draft(draft, model)?;
+    let definition = build_symbol_definition(model, draft)?;
     let library_name = definition.identity.library.clone();
     let cell_name = definition.identity.cell.clone();
     let revision = definition.identity.revision;
     definition
         .validation_digest()
         .map_err(|error| error.to_string())?;
-    let mut candidate = state.model.library_manager.clone();
+    let mut candidate = model.library_manager.clone();
     candidate
         .edit_library(&library_name)
         .ok_or_else(|| format!("Library '{library_name}' no longer exists."))?
@@ -1190,13 +1191,10 @@ pub(super) fn commit_create_model_bound_symbol(state: &mut AppState) -> Result<(
 
     let fixture = if definition.generated_views.simulation_test_fixture {
         let reference = CellViewRef::new(&library_name, &cell_name, "testbench");
-        let before = if state.model.workspace.content.active_view == reference {
-            Some(state.model.schematic.clone())
+        let before = if model.workspace.content.active_view == reference {
+            Some(model.schematic.clone())
         } else {
-            state
-                .model
-                .workspace
-                .clone_schematic_editor(&reference.key())
+            model.workspace.clone_schematic_editor(&reference.key())
         };
         let after = crate::state::build_symbol_test_fixture(&definition)
             .map_err(|error| error.to_string())?;
@@ -1210,14 +1208,14 @@ pub(super) fn commit_create_model_bound_symbol(state: &mut AppState) -> Result<(
     };
 
     publish_symbol_definition_candidate_with_fixture(
-        &mut state.model,
+        model,
         candidate,
         &library_name,
         &cell_name,
         format!("Create symbol revision {revision} for {library_name}/{cell_name}"),
         fixture,
     )?;
-    state.design.create_model_bound_symbol.close();
+    draft.close();
     let view_name = if definition.generated_views.symbol {
         "symbol"
     } else if definition.generated_views.parameter_form {
@@ -1227,11 +1225,12 @@ pub(super) fn commit_create_model_bound_symbol(state: &mut AppState) -> Result<(
     } else {
         unreachable!("the validated definition owns at least one generated view")
     };
-    state.open_workspace_view(CellViewRef::new(&library_name, &cell_name, view_name));
-    state
-        .workbench
-        .activate(crate::workbench::state::Workspace::Design);
-    state.record(
+    workbench.outbox.push(OpenInDesign(CellViewRef::new(
+        &library_name,
+        &cell_name,
+        view_name,
+    )));
+    model.record(
         LogSeverity::Info,
         LogSource::Studio,
         format!("Created symbol {library_name}/{cell_name} at revision {revision}."),

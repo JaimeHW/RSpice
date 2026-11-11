@@ -288,7 +288,10 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         key: DialogKey("design.create_model_bound_symbol"),
         modality: Modality::Dialog,
         is_open: Some(|state| state.design.create_model_bound_symbol.open),
-        render: |app, ctx| app.render_create_model_bound_symbol_dialog(ctx),
+        render: |app, ctx| {
+            DesignFeature::render_create_model_bound_symbol_dialog(&mut features::cx(app), ctx);
+            app.after_contribution();
+        },
     },
     DialogSpec {
         key: DialogKey("design.symbol_definition"),
