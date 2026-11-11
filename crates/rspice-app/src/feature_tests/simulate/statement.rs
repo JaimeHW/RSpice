@@ -16,6 +16,7 @@
 use crate::simulation::controller::SimulationController;
 use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
 use crate::workbench::RSpiceApp;
+use crate::workbench::surfaces::simulate::{engineering_statement, plan_statement_for};
 
 #[test]
 fn the_displayed_statement_is_the_directive_the_controller_emits() {
@@ -34,7 +35,7 @@ fn the_displayed_statement_is_the_directive_the_controller_emits() {
     ] {
         let draft = AnalysisDraft::for_kind(kind);
         let displayed =
-            super::plan_statement_for(&mut app.state.model, &app.simulation_controller, &draft);
+            plan_statement_for(&mut app.state.model, &app.simulation_controller, &draft);
 
         // The same call the page makes, against the same projection, reached
         // independently here. If the page ever starts spelling its own
@@ -77,7 +78,7 @@ fn a_displayed_statement_is_a_directive_the_engine_accepts() {
         // directive at all, and the page shows the refusal instead. That is
         // the editor's contract, not a claim about the parser.
         let Ok(statement) =
-            super::plan_statement_for(&mut app.state.model, &app.simulation_controller, &draft)
+            plan_statement_for(&mut app.state.model, &app.simulation_controller, &draft)
         else {
             continue;
         };
@@ -106,20 +107,20 @@ fn a_displayed_statement_is_a_directive_the_engine_accepts() {
 #[test]
 fn a_displayed_statement_is_spelled_in_engineering_notation_the_engine_accepts() {
     assert_eq!(
-        super::engineering_statement(".tran 0.00000001 0.001"),
+        engineering_statement(".tran 0.00000001 0.001"),
         ".tran 10n 1m"
     );
     assert_eq!(
-        super::engineering_statement(".ac dec 10 1 1000000000"),
+        engineering_statement(".ac dec 10 1 1000000000"),
         ".ac dec 10 1 1G"
     );
     assert_eq!(
-        super::engineering_statement(".options reltol=0.001 V(out) 1000"),
+        engineering_statement(".options reltol=0.001 V(out) 1000"),
         ".options reltol=1m V(out) 1000",
         "a keyword value is respelled; a name and a count are not"
     );
     assert_eq!(
-        super::engineering_statement(".tran 0.0000000012345678901 1"),
+        engineering_statement(".tran 0.0000000012345678901 1"),
         ".tran 0.0000000012345678901 1",
         "a number engineering notation would round keeps its digits"
     );
@@ -135,12 +136,12 @@ fn a_displayed_statement_is_spelled_in_engineering_notation_the_engine_accepts()
     for kind in AnalysisKind::ALL {
         let draft = AnalysisDraft::for_kind(kind);
         let Ok(statement) =
-            super::plan_statement_for(&mut app.state.model, &app.simulation_controller, &draft)
+            plan_statement_for(&mut app.state.model, &app.simulation_controller, &draft)
         else {
             continue;
         };
         checked += 1;
-        let shown = super::engineering_statement(&statement);
+        let shown = engineering_statement(&statement);
         assert!(
             rspice_core::netlist::parse_netlist(&format!("{DECK}{shown}\n.end\n")).is_ok(),
             "{} shows `{shown}` for `{statement}`, which the engine refuses",
@@ -168,12 +169,12 @@ fn reading_a_statement_leaves_the_plan_exactly_as_it_found_it() {
     // to a struct this large: the question is whether any field moved, and the
     // serialization already answers exactly that over every field.
     let before = serde_json::to_vec(&app.state.model.sim_setup).expect("the setup view serializes");
-    let _ = super::plan_statement_for(
+    let _ = plan_statement_for(
         &mut app.state.model,
         &app.simulation_controller,
         &AnalysisDraft::for_kind(AnalysisKind::Transient),
     );
-    let _ = super::plan_statement_for(
+    let _ = plan_statement_for(
         &mut app.state.model,
         &app.simulation_controller,
         &AnalysisDraft::for_kind(AnalysisKind::Ac),

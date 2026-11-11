@@ -7,10 +7,10 @@ pub(crate) mod checkpoint_exchange;
 pub(crate) mod lifecycle;
 mod output_evidence;
 mod page_excitations;
-mod page_kit;
-mod page_models;
+pub(crate) mod page_kit;
+pub(crate) mod page_models;
 mod page_outputs;
-mod page_runset;
+pub(crate) mod page_runset;
 mod page_save;
 mod page_solver;
 mod page_specs;
@@ -18,7 +18,7 @@ mod page_variables;
 mod pages;
 mod participation;
 mod plan_issue_wording;
-mod plan_manager;
+pub(crate) mod plan_manager;
 pub(crate) mod transient_checkpoint_exchange;
 mod variable_import;
 mod workflows;
@@ -2013,7 +2013,7 @@ struct ContractDatasets<'a> {
 /// Takes the two things it needs rather than the whole application: it has no
 /// business reaching the schematic, the workspace or the documents, and saying
 /// so in the signature is what keeps that true.
-fn plan_statement_for(
+pub(crate) fn plan_statement_for(
     model: &mut Model,
     controller: &SimulationController,
     draft: &AnalysisDraft,
@@ -2042,7 +2042,7 @@ const STATEMENT_ROUND_TRIP_TOLERANCE: f64 = 1e-12;
 /// same number keeps the digits as written. Integers below a million stay as
 /// written too: those are counts (`.ac dec 10`, `.mc 1000`) as often as
 /// quantities, and a count respelled `1k` reads as a quantity.
-fn engineering_statement(statement: &str) -> String {
+pub(crate) fn engineering_statement(statement: &str) -> String {
     statement
         .split(' ')
         .map(|token| match token.split_once('=') {
@@ -2457,8 +2457,6 @@ pub(crate) fn show_on_stage(ui: &mut Ui, app: &mut RSpiceApp) {
 #[cfg(test)]
 mod click_tests;
 #[cfg(test)]
-mod frame_cost_tests;
-#[cfg(test)]
 mod geometry_tests;
 #[cfg(test)]
 mod page_navigation_tests;
@@ -2468,8 +2466,6 @@ mod page_raster;
 mod page_runset_parity_tests;
 #[cfg(test)]
 mod page_tests;
-#[cfg(test)]
-mod statement_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

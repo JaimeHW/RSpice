@@ -45,7 +45,7 @@ fn forecast_line(model: &Model, validation: &RunSetValidation, revision: u32) ->
     line
 }
 
-pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, validation: &RunSetValidation) {
+pub(crate) fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, validation: &RunSetValidation) {
     let t = Tokens::get(ui.ctx());
     let addable = cx.model.sim_setup.run_set.addable_kinds();
     let can_undo = !cx.model.sim_setup.run_set.history.is_empty();

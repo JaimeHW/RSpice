@@ -4,7 +4,7 @@
 pub(crate) mod chrome;
 pub(crate) mod commands;
 mod docks;
-mod run_host;
+pub(crate) mod run_host;
 #[cfg(test)]
 pub(crate) mod test_host;
 

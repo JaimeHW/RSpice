@@ -59,7 +59,7 @@ pub(super) struct PlanEntry {
 /// fact the projection collected and no one could see, so it is not a shape
 /// this record is allowed to hold.
 #[derive(Debug, Clone)]
-pub(super) struct PlanCatalogRecord {
+pub(crate) struct PlanCatalogRecord {
     pub(super) id: SimulationPlanId,
     pub(super) name: String,
     pub(super) revision: u64,
@@ -173,7 +173,7 @@ impl PlanCatalogRecord {
 /// identity alone, so it serves the stored payload of any plan, active or not,
 /// and a plan with no payload record contributes zero rather than borrowing a
 /// neighbour's counts.
-pub(super) fn plan_catalog_records(model: &Model) -> Vec<PlanCatalogRecord> {
+pub(crate) fn plan_catalog_records(model: &Model) -> Vec<PlanCatalogRecord> {
     let result_count = |id: SimulationPlanId| {
         model
             .simulation

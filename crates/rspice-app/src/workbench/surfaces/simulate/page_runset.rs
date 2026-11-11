@@ -29,9 +29,7 @@ use super::page_kit::{
     note_line, pressable_note_line, rule_row,
 };
 
-mod toolbar;
-#[cfg(test)]
-mod toolbar_tests;
+pub(crate) mod toolbar;
 
 /// Rows shown before the point table truncates. A composed run space can be
 /// large; a table that listed all of it would be a scrolling wall rather than a
@@ -110,7 +108,7 @@ struct ComposedPoint {
 /// Not a cache: it is built at the page entry, holds no key, and does not
 /// survive the frame. A route cannot serve a reader a space the plan no longer
 /// declares.
-struct RunSetFrame {
+pub(crate) struct RunSetFrame {
     /// The composed space, before any exclusion — the point table's own rows.
     /// `None` where the declaration does not expand exactly, which the table
     /// reports on its own terms.
@@ -118,11 +116,11 @@ struct RunSetFrame {
     /// Which points each enabled analysis visits, against the retained half.
     participation: super::participation::PlanParticipation,
     workload: Result<super::workload::PlanWorkload, String>,
-    validation: RunSetValidation,
+    pub(crate) validation: RunSetValidation,
 }
 
 impl RunSetFrame {
-    fn resolve(model: &Model) -> Self {
+    pub(crate) fn resolve(model: &Model) -> Self {
         let state = &model.sim_setup.run_set;
         // The one expansion. `run_set::retained` subtracts the exclusions from
         // this list rather than composing a second one.
@@ -1851,7 +1849,7 @@ pub(super) fn point_table_note(composed: usize, drawn: usize, refused: usize) ->
 /// [`super::participation::reconcile_selections`]. The pre-edit space is kept
 /// so a refusal restores it exactly: the space and the selections that address
 /// it move together or not at all.
-fn commit(cx: &mut Cx<'_, SimulateFeature>, action: RunSetAction) {
+pub(crate) fn commit(cx: &mut Cx<'_, SimulateFeature>, action: RunSetAction) {
     let previewing = matches!(action, RunSetAction::Preview);
     let before = cx.model.sim_setup.run_set.clone();
     let kinds = enabled_analysis_kinds(cx.model);

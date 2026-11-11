@@ -6,7 +6,13 @@
 //! an action the application ranks above the feature (tuning staging).
 
 mod checkpoint_exchange;
+mod frame_cost;
+mod page_models;
+mod page_runset_toolbar;
+mod plan_exchange;
 mod receipt_log;
+mod run_host;
+mod statement;
 mod transient_checkpoint_exchange;
 mod tuning_staging;
 mod value_size;

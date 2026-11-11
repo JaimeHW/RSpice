@@ -14,10 +14,10 @@
 mod campaign;
 mod compare;
 mod create;
-mod exchange;
+pub(crate) mod exchange;
 mod kit;
 mod lifecycle;
-mod records;
+pub(crate) mod records;
 
 use super::*;
 use kit::{ColumnTrack, SplitColumn, TableColumn, TableRow};

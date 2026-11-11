@@ -37,7 +37,7 @@ pub(super) const TWO_COLUMN_BREAKPOINT: f32 = 780.0;
 /// has to notice puts its mark in front of neutral text, and the mark is the
 /// only colour. There is no success tone: success is the absence of a status.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Tone {
+pub(crate) enum Tone {
     /// The metadata register.
     Neutral,
     /// Secondary text: a label, a caption, prose beside a control. One step

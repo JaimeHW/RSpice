@@ -24,7 +24,7 @@ use crate::workbench::state::WorkbenchSession;
 use rspice_app_runs::workbench::slots::runs::request_run_set;
 
 /// The run tier's host over a simulate command's context.
-pub(in crate::workbench) struct RunView<'v, 'a> {
+pub(crate) struct RunView<'v, 'a> {
     model: &'v mut Model,
     runs: &'v mut RunsState,
     wb: &'v mut WorkbenchSession,
@@ -34,7 +34,7 @@ pub(in crate::workbench) struct RunView<'v, 'a> {
 }
 
 /// The run tier's host over `cx`, and beside it the run controller it drives.
-pub(in crate::workbench) fn run_host<'v, 'a>(
+pub(crate) fn run_host<'v, 'a>(
     cx: &'v mut Cx<'a, SimulateFeature>,
 ) -> (RunView<'v, 'a>, &'v mut SimulationController) {
     let host = RunView {
@@ -155,7 +155,7 @@ impl RunHost for RunView<'_, '_> {
 /// starts: its own copy of the model, of what code and design stated then,
 /// and of the results workspace. What the run tier tells it reaches only
 /// those copies; what it would tell the reader, nobody sees.
-pub(in crate::workbench) struct FrozenRun {
+pub(crate) struct FrozenRun {
     model: Model,
     // RunHost needs the runs; a campaign never reads them.
     runs: RunsState,
@@ -264,69 +264,5 @@ impl RunHost for FrozenRun {
         self.model
             .ensure_design_check(subject, CheckScope::Design, facts)
             .0
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::workbench::RSpiceApp;
-    use crate::workbench::commands::vocabulary::command_registry;
-    use crate::workbench::framework::feature::LowerHandles;
-
-    /// What the run tier's host over simulate's context over `app` freezes,
-    /// lending it the application's parts as the frame does.
-    fn frozen_from(app: &mut RSpiceApp) -> FrozenRun {
-        let handles = LowerHandles {
-            export_io: app.export_workflow_io.as_ref(),
-            run_controller: &mut app.simulation_controller,
-            model_hub: &mut app.model_hub,
-        };
-        let state = &mut app.state;
-        let mut cx = Cx::new(
-            &mut *state.simulate,
-            &mut [],
-            &mut state.model,
-            &mut *state.workbench,
-            &mut state.platform,
-            &mut state.runs,
-            handles,
-            Peers::new(
-                Some(&mut *state.design),
-                Some(&*state.cloud),
-                Some(&*state.hardcopy),
-                Some(&mut *state.results),
-                None,
-                Some(&*state.code),
-                Some(&*state.models),
-            ),
-            command_registry(),
-        );
-        let (host, _) = run_host(&mut cx);
-        host.freeze()
-    }
-
-    #[test]
-    fn a_campaigns_frozen_host_leaves_the_live_results_and_runs_untouched() {
-        let mut app = RSpiceApp::test_instance();
-        let live_source = app.state.results.analysis.fft_state.selected_source.clone();
-        let live_rerun = app.state.runs.manual_run.rerun_queued;
-        let mut frozen = frozen_from(&mut app);
-
-        frozen.apply_run_event(RunEvent::FftSourceChosen {
-            source: "V(out)".to_owned(),
-        });
-        frozen.runs_mut().manual_run.rerun_queued = !live_rerun;
-
-        assert_eq!(
-            frozen.viewer_reading().fft_source.as_deref(),
-            Some("V(out)")
-        );
-        assert_eq!(frozen.runs().manual_run.rerun_queued, !live_rerun);
-        assert_eq!(
-            app.state.results.analysis.fft_state.selected_source,
-            live_source
-        );
-        assert_eq!(app.state.runs.manual_run.rerun_queued, live_rerun);
     }
 }
