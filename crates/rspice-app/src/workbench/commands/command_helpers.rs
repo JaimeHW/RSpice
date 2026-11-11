@@ -540,6 +540,54 @@ pub(in crate::workbench) fn answer_code_request(app: &mut RSpiceApp, request: Co
             editor.net_highlight.clear();
             editor.center_request = position;
         }
+        // Interim: each of the netlist page's transactions commits through a
+        // candidate copy of the whole state, so the shell runs the body the
+        // dialog ran in place over what the dialog stored.
+        CodeRequest::CommitNetlistRename => {
+            let messages = app.state.workbench.messages();
+            match crate::workbench::documents::netlist_document::language::commit_rename(
+                &mut app.state,
+            ) {
+                Ok(count) => app.state.prompt(messages.format(
+                    crate::workbench::MessageId::NetlistRenameSucceeded,
+                    &[("count", &count.to_string())],
+                )),
+                Err(error) => app.state.code.netlist.rename_dialog.error = Some(error),
+            }
+        }
+        CodeRequest::RestoreOwnedNetlistRevision => {
+            let index = app.state.code.netlist.comparison_dialog.selected_history_index;
+            match crate::workbench::documents::netlist_document::restore_owned_revision(
+                &mut app.state,
+                index,
+            ) {
+                Ok(()) => app.state.code.netlist.comparison_dialog.open = false,
+                Err(error) => app.state.prompt(error),
+            }
+        }
+        CodeRequest::ApplyExternalNetlistChange => {
+            match crate::workbench::workflows::netlist_workflow::apply_staged_external_netlist_change(
+                &mut app.state,
+            ) {
+                Ok(()) => {
+                    app.state.record(
+                        LogSeverity::Info,
+                        LogSource::Studio,
+                        "Applied the resolved external change to the SPICE source.",
+                    );
+                }
+                Err(error) => {
+                    if let Some(current) = app.state.code.netlist.external_change.as_mut() {
+                        current.error = Some(error);
+                    }
+                }
+            }
+        }
+        CodeRequest::CommitNetlistImport => {
+            crate::workbench::workflows::netlist_workflow::commit_staged_netlist_import(
+                &mut app.state,
+            );
+        }
     }
 }
 

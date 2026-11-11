@@ -30,6 +30,7 @@ use crate::workbench::design_system::{
 use crate::workbench::documents::netlist_document::{
     ActiveNetlistDocument, ExecutedDeckVerification,
 };
+use crate::workbench::features;
 use crate::workbench::{AppState, MessageId, RSpiceApp};
 
 /// Publish the source editor a page shows as its document, and hand it any
@@ -309,13 +310,15 @@ pub(in crate::workbench) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
         }
     });
     search::find_replace_window(ui.ctx(), app);
-    language::rename_dialog_window(ui.ctx(), app);
-    ownership::ownership_dialog_window(ui.ctx(), app);
-    revision::comparison_dialog_window(ui.ctx(), app);
-    revision::save_source_dialog_window(ui.ctx(), app);
-    transfer::external_change_dialog_window(ui.ctx(), app);
-    transfer::export_generated_dialog_window(ui.ctx(), app);
-    transfer::import_review_dialog_window(ui.ctx(), app);
+    // The rest draw in the code feature's context. What one raises is
+    // answered once the page has drawn.
+    language::rename_dialog_window(ui.ctx(), &mut features::cx(app));
+    ownership::ownership_dialog_window(ui.ctx(), &mut features::cx(app));
+    revision::comparison_dialog_window(ui.ctx(), &mut features::cx(app));
+    revision::save_source_dialog_window(ui.ctx(), &mut features::cx(app));
+    transfer::external_change_dialog_window(ui.ctx(), &mut features::cx(app));
+    transfer::export_generated_dialog_window(ui.ctx(), &mut features::cx(app));
+    transfer::import_review_dialog_window(ui.ctx(), &mut features::cx(app));
 }
 
 #[derive(Clone, Copy)]

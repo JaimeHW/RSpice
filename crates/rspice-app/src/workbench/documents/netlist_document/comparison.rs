@@ -33,12 +33,7 @@ pub(crate) fn open_netlist_comparison(
     true
 }
 
-pub fn compare_generated_revision(state: &mut AppState, index: usize) -> Result<(), String> {
-    compare_generated_revision_in(&mut state.model, &mut state.code.netlist, index)
-}
-
-/// [`compare_generated_revision`], over the model and the netlist editor's state.
-pub(crate) fn compare_generated_revision_in(
+pub(crate) fn compare_generated_revision(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     index: usize,
@@ -77,12 +72,7 @@ pub(crate) fn compare_generated_revision_in(
     Ok(())
 }
 
-pub fn compare_owned_revision(state: &mut AppState, index: usize) -> Result<(), String> {
-    compare_owned_revision_in(&mut state.model, &mut state.code.netlist, index)
-}
-
-/// [`compare_owned_revision`], over the model and the netlist editor's state.
-pub(crate) fn compare_owned_revision_in(
+pub(crate) fn compare_owned_revision(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     index: usize,

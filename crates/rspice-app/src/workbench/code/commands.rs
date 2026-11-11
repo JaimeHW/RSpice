@@ -96,7 +96,9 @@ pub(crate) enum CodeCommand {
 /// rename Rename symbol confirmed; and, from its navigators, the library
 /// section a Netlist outline row chose, picking an include's file again,
 /// a source rail's file action and opening a placed instance of the
-/// Verilog-A cell. Each command, dialog step or navigator that raises one
+/// Verilog-A cell; and, from the netlist page's dialogs, the rename, the
+/// revision restore, the external change and the import each confirmed.
+/// Each command, dialog step, navigator or page dialog that raises one
 /// raises one. Taken straight after the call that raised it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::workbench) enum CodeRequest {
@@ -148,6 +150,15 @@ pub(in crate::workbench) enum CodeRequest {
     /// Open the schematic an instance of the cell is placed in, with the
     /// instance selected and centred.
     OpenCellInstance(rspice_app_state::workbench::app_state::cell_usage::CellInstanceUse),
+    /// Commit the rename the netlist page's Rename dialog holds.
+    CommitNetlistRename,
+    /// Restore the owned revision the netlist page's revision dialog has
+    /// selected.
+    RestoreOwnedNetlistRevision,
+    /// Apply the external change the netlist page's review resolved.
+    ApplyExternalNetlistChange,
+    /// Commit the netlist import the netlist page's review holds.
+    CommitNetlistImport,
 }
 
 impl Request for CodeRequest {

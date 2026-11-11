@@ -781,6 +781,13 @@ const SIMULATE_CONTRIBUTIONS: &[Step] = &[
 /// the command it raised answered once it has drawn.
 const CODE_CONTRIBUTIONS: &[Step] = &[
     (
+        "netlist page",
+        &[
+            "netlist::show_prepared(ui, app)",
+            "automation::show(ui, app) } } } } app.after_contribution();",
+        ],
+    ),
+    (
         "navigator",
         &[
             "Workspace::Netlist => {\

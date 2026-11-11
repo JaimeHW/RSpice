@@ -212,7 +212,9 @@ fn save_as_preserves_unvalidated_work_and_can_convert_legacy_source_to_utf8() {
     };
 
     assert!(save_owned_netlist_source(
-        &mut app.state,
+        &mut app.state.model,
+        &mut app.state.code.netlist,
+        &mut app.state.workbench,
         &io,
         true,
         crate::state::NetlistTextEncoding::Utf8,
@@ -471,8 +473,12 @@ fn owned_netlist_history_compare_and_restore_are_persisted_and_monotonic() {
         .get();
     assert!(modified_revision > baseline_revision);
 
-    crate::workbench::documents::netlist_document::compare_owned_revision(&mut state, 0)
-        .expect("comparison opens");
+    crate::workbench::documents::netlist_document::compare_owned_revision(
+        &mut state.model,
+        &mut state.code.netlist,
+        0,
+    )
+    .expect("comparison opens");
     assert!(
         state
             .model
@@ -692,7 +698,7 @@ fn only_source_authenticated_import_dialects_can_commit_after_acceptance() {
     review.compatibility_accepted = false;
     assert!(review.dialect_qualification().is_ok());
     assert!(review.can_commit());
-    cancel_staged_netlist_import(&mut state);
+    cancel_staged_netlist_import(&mut state.code.netlist, &mut state.platform);
 }
 
 #[test]
@@ -1046,7 +1052,7 @@ fn imperative_ngspice_control_command_cannot_use_declarative_profile() {
     assert!(error.contains("spice3-ngspice/2"));
     assert!(error.contains("wrdata"));
     assert!(!review.can_commit());
-    cancel_staged_netlist_import(&mut state);
+    cancel_staged_netlist_import(&mut state.code.netlist, &mut state.platform);
 }
 
 #[test]
@@ -1072,7 +1078,7 @@ fn semantic_loss_parser_diagnostics_block_import() {
             && issue.message.contains("unknown-option")
     }));
     assert!(!review.can_commit());
-    cancel_staged_netlist_import(&mut state);
+    cancel_staged_netlist_import(&mut state.code.netlist, &mut state.platform);
 }
 
 fn state_with_owned_strategy(
@@ -1844,7 +1850,9 @@ fn ordinary_source_save_refuses_to_overwrite_external_changes() {
     std::fs::write(&path, external).expect("publish external edit");
 
     assert!(!save_owned_netlist_source(
-        &mut app.state,
+        &mut app.state.model,
+        &mut app.state.code.netlist,
+        &mut app.state.workbench,
         &crate::workbench::workflows::export_workflow::NativeExportWorkflowIo,
         false,
         crate::state::NetlistTextEncoding::Utf8,

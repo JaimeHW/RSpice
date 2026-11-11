@@ -132,24 +132,6 @@ pub(crate) fn action_export_netlist_with_io(
 }
 
 pub(crate) fn action_export_generated_netlist_with_options(
-    state: &mut AppState,
-    format: crate::io::NetlistFormat,
-    bundle_dependencies: bool,
-    include_source_map: bool,
-    io: &(impl ExportWorkflowIo + ?Sized),
-) -> bool {
-    action_export_generated_netlist_with_options_in(
-        &mut state.model,
-        &mut state.workbench,
-        format,
-        bundle_dependencies,
-        include_source_map,
-        io,
-    )
-}
-
-/// [`action_export_generated_netlist_with_options`], over the model and the session.
-pub(crate) fn action_export_generated_netlist_with_options_in(
     model: &mut crate::workbench::app_state::Model,
     wb: &mut crate::workbench::state::WorkbenchSession,
     format: crate::io::NetlistFormat,

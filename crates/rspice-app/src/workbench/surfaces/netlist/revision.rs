@@ -6,46 +6,43 @@
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogInitialFocus, DialogSize};
+use crate::workbench::MessageId;
+use crate::workbench::code::CodeFeature;
+use crate::workbench::code::commands::CodeRequest;
 use crate::workbench::design_system::{Problem, problem_line};
 use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
-use crate::workbench::{MessageId, RSpiceApp};
+use crate::workbench::framework::feature::Cx;
 
-pub(super) fn comparison_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) {
-    if !app.state.code.netlist.comparison_dialog.open {
+pub(super) fn comparison_dialog_window(ctx: &egui::Context, cx: &mut Cx<'_, CodeFeature>) {
+    if !cx.state.netlist.comparison_dialog.open {
         return;
     }
-    let owned = app.state.code.netlist.active_document == ActiveNetlistDocument::OwnedSource
-        && app.state.code.netlist.active_dependency_identity.is_none();
+    let owned = cx.state.netlist.active_document == ActiveNetlistDocument::OwnedSource
+        && cx.state.netlist.active_dependency_identity.is_none();
     let history_len = if owned {
-        app.state
-            .model
+        cx.model
             .workspace
             .content
             .netlist_descriptor
             .as_ref()
             .map_or(0, |descriptor| descriptor.revision_history.len())
     } else {
-        app.state.code.netlist.generated_history.len()
+        cx.state.netlist.generated_history.len()
     };
     let current_available = if owned {
-        app.state.code.netlist.owned_document.is_some()
+        cx.state.netlist.owned_document.is_some()
     } else {
-        app.state
-            .model
-            .netlist_artifacts
-            .generated_document
-            .is_some()
+        cx.model.netlist_artifacts.generated_document.is_some()
     };
     if history_len == 0 || !current_available {
-        app.state.code.netlist.comparison_dialog.open = false;
+        cx.state.netlist.comparison_dialog.open = false;
         return;
     }
-    let mut dialog = app.state.code.netlist.comparison_dialog.clone();
-    let messages = app.state.workbench.messages();
+    let mut dialog = cx.state.netlist.comparison_dialog.clone();
+    let messages = cx.wb.messages();
     dialog.selected_history_index = dialog.selected_history_index.min(history_len - 1);
     let selected_label = if owned {
-        let Some(selected) = app
-            .state
+        let Some(selected) = cx
             .model
             .workspace
             .content
@@ -57,7 +54,7 @@ pub(super) fn comparison_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp)
                     .get(dialog.selected_history_index)
             })
         else {
-            app.state.code.netlist.comparison_dialog.open = false;
+            cx.state.netlist.comparison_dialog.open = false;
             return;
         };
         let revision = selected.document_revision.to_string();
@@ -76,7 +73,7 @@ pub(super) fn comparison_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp)
             ],
         )
     } else {
-        let selected = &app.state.code.netlist.generated_history[dialog.selected_history_index];
+        let selected = &cx.state.netlist.generated_history[dialog.selected_history_index];
         let revision = selected.provenance().input().revision().get().to_string();
         let digest = selected
             .content_digest()
@@ -90,8 +87,7 @@ pub(super) fn comparison_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp)
         )
     };
     let restore_enabled = owned
-        && app
-            .state
+        && cx
             .model
             .workspace
             .content
@@ -102,7 +98,7 @@ pub(super) fn comparison_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp)
                     .revision_history
                     .get(dialog.selected_history_index)
             })
-            .zip(app.state.code.netlist.owned_document.as_ref())
+            .zip(cx.state.netlist.owned_document.as_ref())
             .is_some_and(|(snapshot, current)| {
                 snapshot.content_digest != current.content_digest()
                     || snapshot.dependencies != current.dependencies()
@@ -142,13 +138,8 @@ pub(super) fn comparison_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp)
                 .width(ui.available_width().max(1.0))
                 .show_ui(ui, |ui| {
                     if owned {
-                        if let Some(descriptor) = app
-                            .state
-                            .model
-                            .workspace
-                            .content
-                            .netlist_descriptor
-                            .as_ref()
+                        if let Some(descriptor) =
+                            cx.model.workspace.content.netlist_descriptor.as_ref()
                         {
                             for (index, snapshot) in
                                 descriptor.revision_history.iter().enumerate().rev()
@@ -176,14 +167,8 @@ pub(super) fn comparison_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp)
                             }
                         }
                     } else {
-                        for (index, artifact) in app
-                            .state
-                            .code
-                            .netlist
-                            .generated_history
-                            .iter()
-                            .enumerate()
-                            .rev()
+                        for (index, artifact) in
+                            cx.state.netlist.generated_history.iter().enumerate().rev()
                         {
                             let revision =
                                 artifact.provenance().input().revision().get().to_string();
@@ -207,33 +192,29 @@ pub(super) fn comparison_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp)
         DialogChoice::Primary => {
             let result = if owned {
                 crate::workbench::documents::netlist_document::compare_owned_revision(
-                    &mut app.state,
+                    cx.model,
+                    &mut cx.state.netlist,
                     dialog.selected_history_index,
                 )
             } else {
                 crate::workbench::documents::netlist_document::compare_generated_revision(
-                    &mut app.state,
+                    cx.model,
+                    &mut cx.state.netlist,
                     dialog.selected_history_index,
                 )
             };
             match result {
                 Ok(()) => dialog.open = false,
-                Err(error) => app.state.prompt(error),
+                Err(error) => cx.wb.prompt(error),
             }
         }
         DialogChoice::Secondary => {
-            match crate::workbench::documents::netlist_document::restore_owned_revision(
-                &mut app.state,
-                dialog.selected_history_index,
-            ) {
-                Ok(()) => dialog.open = false,
-                Err(error) => app.state.prompt(error),
-            }
+            cx.wb.outbox.push(CodeRequest::RestoreOwnedNetlistRevision);
         }
         DialogChoice::Ghost | DialogChoice::Cancelled => dialog.open = false,
         DialogChoice::None => {}
     }
-    app.state.code.netlist.comparison_dialog = dialog;
+    cx.state.netlist.comparison_dialog = dialog;
 }
 
 pub(super) fn owned_source_save_ready(
@@ -250,28 +231,27 @@ pub(super) fn owned_source_save_ready(
     netlist.externally_saved_content_digest != Some(digest)
 }
 
-pub(super) fn save_source_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) {
-    if !app.state.code.netlist.save_dialog.open {
+pub(super) fn save_source_dialog_window(ctx: &egui::Context, cx: &mut Cx<'_, CodeFeature>) {
+    if !cx.state.netlist.save_dialog.open {
         return;
     }
-    if app.state.code.netlist.active_document != ActiveNetlistDocument::OwnedSource
-        || app.state.code.netlist.active_dependency_identity.is_some()
+    if cx.state.netlist.active_document != ActiveNetlistDocument::OwnedSource
+        || cx.state.netlist.active_dependency_identity.is_some()
     {
-        app.state.code.netlist.save_dialog.open = false;
+        cx.state.netlist.save_dialog.open = false;
         return;
     }
 
-    let mut dialog = app.state.code.netlist.save_dialog.clone();
-    let messages = app.state.workbench.messages();
-    let current_digest =
-        crate::state::content_digest(&app.state.model.simulation.source.netlist_content);
+    let mut dialog = cx.state.netlist.save_dialog.clone();
+    let messages = cx.wb.messages();
+    let current_digest = crate::state::content_digest(&cx.model.simulation.source.netlist_content);
     let browser_copy = cfg!(target_arch = "wasm32");
     let message_valid = browser_copy || {
         let message = dialog.message.trim();
         message.chars().count() <= 240 && !message.chars().any(char::is_control)
     };
-    let needs_save = dialog.save_as
-        || app.state.code.netlist.externally_saved_content_digest != Some(current_digest);
+    let needs_save =
+        dialog.save_as || cx.state.netlist.externally_saved_content_digest != Some(current_digest);
     let primary_enabled = message_valid && needs_save;
     let footer_hint = if needs_save {
         messages.text(MessageId::NetlistSaveStaleNotice)
@@ -306,13 +286,7 @@ pub(super) fn save_source_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp
     .hint(footer_hint)
     .show_with_initial_body_focus(ctx, |ui| {
         let t = Tokens::get(ctx);
-        let descriptor = app
-            .state
-            .model
-            .workspace
-            .content
-            .netlist_descriptor
-            .as_ref();
+        let descriptor = cx.model.workspace.content.netlist_descriptor.as_ref();
         let artifact_name = descriptor.map_or_else(
             || messages.text(MessageId::NetlistOwnedSpiceSource),
             |value| value.artifact_name.clone(),
@@ -341,7 +315,7 @@ pub(super) fn save_source_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp
             .inner_margin(10)
             .show(ui, |ui| {
                 ui.label(messages.text(MessageId::NetlistSaveValidatedNotice));
-                if let Some(document) = app.state.code.netlist.owned_document.as_ref() {
+                if let Some(document) = cx.state.netlist.owned_document.as_ref() {
                     let digest = document
                         .generated_artifact()
                         .map_or_else(
@@ -390,8 +364,10 @@ pub(super) fn save_source_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp
     match choice {
         DialogChoice::Primary => {
             if crate::workbench::workflows::netlist_workflow::save_owned_netlist_source(
-                &mut app.state,
-                app.export_workflow_io.as_ref(),
+                cx.model,
+                &mut cx.state.netlist,
+                cx.wb,
+                cx.handles.export_io,
                 dialog.save_as,
                 dialog.encoding,
                 &dialog.message,
@@ -409,5 +385,5 @@ pub(super) fn save_source_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp
         DialogChoice::Ghost | DialogChoice::Cancelled => dialog.open = false,
         DialogChoice::None | DialogChoice::Secondary => {}
     }
-    app.state.code.netlist.save_dialog = dialog;
+    cx.state.netlist.save_dialog = dialog;
 }

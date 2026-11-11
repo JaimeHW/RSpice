@@ -8,12 +8,14 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
 #![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
 
-use crate::diagnostics::{LogSeverity, LogSource};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{CommandForm, Dialog, DialogChoice, DialogInitialFocus, DialogSize};
+use crate::workbench::code::CodeFeature;
+use crate::workbench::code::commands::CodeRequest;
 use crate::workbench::design_system::{Problem, problem_line};
-use crate::workbench::{MessageCatalog, MessageId, RSpiceApp};
+use crate::workbench::framework::feature::Cx;
+use crate::workbench::{MessageCatalog, MessageId};
 
 fn external_resolution_label(
     messages: MessageCatalog,
@@ -28,13 +30,13 @@ fn external_resolution_label(
     })
 }
 
-pub(super) fn external_change_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) {
+pub(super) fn external_change_dialog_window(ctx: &egui::Context, cx: &mut Cx<'_, CodeFeature>) {
     use crate::workbench::documents::netlist_document::NetlistExternalChangeResolution;
 
-    let Some(mut review) = app.state.code.netlist.external_change.clone() else {
+    let Some(mut review) = cx.state.netlist.external_change.clone() else {
         return;
     };
-    let messages = app.state.workbench.messages();
+    let messages = cx.wb.messages();
     let digest = |bytes: &[u8; 32]| {
         bytes
             .iter()
@@ -150,28 +152,13 @@ pub(super) fn external_change_dialog_window(ctx: &egui::Context, app: &mut RSpic
         Some(resolution.response.id)
     });
 
-    app.state.code.netlist.external_change = Some(review);
+    cx.state.netlist.external_change = Some(review);
     match choice {
         DialogChoice::Primary => {
-            match crate::workbench::workflows::netlist_workflow::apply_staged_external_netlist_change(
-                &mut app.state,
-            ) {
-                Ok(()) => {
-                    app.state.record(
-                        LogSeverity::Info,
-                        LogSource::Studio,
-                        "Applied the resolved external change to the SPICE source.",
-                    );
-                }
-                Err(error) => {
-                    if let Some(current) = app.state.code.netlist.external_change.as_mut() {
-                        current.error = Some(error);
-                    }
-                }
-            }
+            cx.wb.outbox.push(CodeRequest::ApplyExternalNetlistChange);
         }
         DialogChoice::Ghost | DialogChoice::Cancelled => {
-            app.state.code.netlist.external_change = None;
+            cx.state.netlist.external_change = None;
         }
         DialogChoice::None | DialogChoice::Secondary => {}
     }
@@ -192,26 +179,16 @@ fn files_phrase(count: usize) -> String {
     }
 }
 
-pub(super) fn export_generated_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) {
-    if !app.state.code.netlist.export_dialog.open {
+pub(super) fn export_generated_dialog_window(ctx: &egui::Context, cx: &mut Cx<'_, CodeFeature>) {
+    if !cx.state.netlist.export_dialog.open {
         return;
     }
-    let mut dialog = app.state.code.netlist.export_dialog.clone();
-    let current = app.state.model.netlist_artifacts.generation_error.is_none()
-        && app
-            .state
-            .model
-            .netlist_artifacts
-            .generated_document
-            .is_some()
-        && app.state.model.netlist_artifacts.generated_input_digest
-            == app
-                .state
-                .model
-                .netlist_artifacts
-                .current_generation_input_digest;
-    let (dependency_count, dependencies_sealed) = app
-        .state
+    let mut dialog = cx.state.netlist.export_dialog.clone();
+    let current = cx.model.netlist_artifacts.generation_error.is_none()
+        && cx.model.netlist_artifacts.generated_document.is_some()
+        && cx.model.netlist_artifacts.generated_input_digest
+            == cx.model.netlist_artifacts.current_generation_input_digest;
+    let (dependency_count, dependencies_sealed) = cx
         .model
         .netlist_artifacts
         .generated_document
@@ -233,8 +210,8 @@ pub(super) fn export_generated_dialog_window(ctx: &egui::Context, app: &mut RSpi
     if !source_map_supported {
         dialog.include_source_map = false;
     }
-    let messages = app.state.workbench.messages();
-    let netlist = &app.state.model.netlist_artifacts;
+    let messages = cx.wb.messages();
+    let netlist = &cx.model.netlist_artifacts;
     // Each refusal is one line beside Cancel and Export… in the footer.
     let refusal = if netlist.generation_error.is_some() {
         Some("Fix the netlist's problems, then export.".to_owned())
@@ -319,11 +296,12 @@ pub(super) fn export_generated_dialog_window(ctx: &egui::Context, app: &mut RSpi
     match choice {
         DialogChoice::Primary => {
             if crate::workbench::menu_bar::action_export_generated_netlist_with_options(
-                &mut app.state,
+                cx.model,
+                cx.wb,
                 dialog.format,
                 dialog.bundle_dependencies,
                 dialog.include_source_map,
-                app.export_workflow_io.as_ref(),
+                cx.handles.export_io,
             ) {
                 dialog.open = false;
                 dialog.error = None;
@@ -334,7 +312,7 @@ pub(super) fn export_generated_dialog_window(ctx: &egui::Context, app: &mut RSpi
         DialogChoice::Ghost | DialogChoice::Cancelled => dialog.open = false,
         DialogChoice::None | DialogChoice::Secondary => {}
     }
-    app.state.code.netlist.export_dialog = dialog;
+    cx.state.netlist.export_dialog = dialog;
 }
 
 fn import_operation_text(
@@ -359,15 +337,15 @@ fn import_operation_text(
     }
 }
 
-pub(super) fn import_review_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) {
+pub(super) fn import_review_dialog_window(ctx: &egui::Context, cx: &mut Cx<'_, CodeFeature>) {
     use crate::workbench::documents::netlist_document::{
         NetlistImportIssueSeverity, NetlistImportOperation,
     };
 
-    let Some(mut review) = app.state.code.netlist.import_review.clone() else {
+    let Some(mut review) = cx.state.netlist.import_review.clone() else {
         return;
     };
-    let messages = app.state.workbench.messages();
+    let messages = cx.wb.messages();
     let blocking = review.blocking_issue_count();
     let dialect_qualification_error = review.dialect_qualification().err();
     let qualified_execution_profile = dialect_qualification_error
@@ -589,16 +567,15 @@ pub(super) fn import_review_dialog_window(ctx: &egui::Context, app: &mut RSpiceA
 
     // Persist review choices before a commit attempt revalidates the exact
     // lifecycle transaction and candidate snapshot.
-    app.state.code.netlist.import_review = Some(review);
+    cx.state.netlist.import_review = Some(review);
     match choice {
         DialogChoice::Primary => {
-            crate::workbench::workflows::netlist_workflow::commit_staged_netlist_import(
-                &mut app.state,
-            );
+            cx.wb.outbox.push(CodeRequest::CommitNetlistImport);
         }
         DialogChoice::Ghost | DialogChoice::Cancelled => {
             crate::workbench::workflows::netlist_workflow::cancel_staged_netlist_import(
-                &mut app.state,
+                &mut cx.state.netlist,
+                cx.platform,
             );
         }
         DialogChoice::None | DialogChoice::Secondary => {}
@@ -619,7 +596,7 @@ mod tests {
         let ctx = egui::Context::default();
         ctx.enable_accesskit();
         crate::ui::Theme::default().apply(&ctx);
-        let mut app = RSpiceApp::test_instance();
+        let mut app = crate::workbench::RSpiceApp::test_instance();
         app.state.code.netlist.export_dialog.open = true;
         let mut nodes = std::collections::HashMap::new();
         for _ in 0..3 {
@@ -631,7 +608,12 @@ mod tests {
                     )),
                     ..egui::RawInput::default()
                 },
-                |ui| export_generated_dialog_window(ui.ctx(), &mut app),
+                |ui| {
+                    export_generated_dialog_window(
+                        ui.ctx(),
+                        &mut crate::workbench::features::cx(&mut app),
+                    )
+                },
             );
             if let Some(update) = output.platform_output.accesskit_update {
                 nodes.extend(update.nodes);
@@ -669,7 +651,7 @@ mod tests {
             ),
         ];
         for (refusal, generation_error, export_error) in refusals {
-            let mut app = RSpiceApp::test_instance();
+            let mut app = crate::workbench::RSpiceApp::test_instance();
             app.state.code.netlist.export_dialog.open = true;
             app.state.code.netlist.export_dialog.error = export_error.map(str::to_owned);
             app.state.model.netlist_artifacts.generation_error =
@@ -678,7 +660,12 @@ mod tests {
                 egui::vec2(1440.0, 900.0),
                 crate::ui::tokens::Mode::Light,
                 3,
-                |ctx| export_generated_dialog_window(ctx, &mut app),
+                |ctx| {
+                    export_generated_dialog_window(
+                        ctx,
+                        &mut crate::workbench::features::cx(&mut app),
+                    )
+                },
             );
             let line = painted
                 .rect_of("Dialect")

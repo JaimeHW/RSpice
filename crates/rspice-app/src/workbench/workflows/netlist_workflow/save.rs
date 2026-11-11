@@ -16,25 +16,6 @@ use super::*;
 /// imported/native origin when one exists; browser downloads have no durable
 /// path authority and therefore always use the user-agent download workflow.
 pub(crate) fn save_owned_netlist_source(
-    state: &mut AppState,
-    io: &(impl ExportWorkflowIo + ?Sized),
-    save_as: bool,
-    save_as_encoding: crate::state::NetlistTextEncoding,
-    commit_message: &str,
-) -> bool {
-    save_owned_netlist_source_in(
-        &mut state.model,
-        &mut state.code.netlist,
-        &mut state.workbench,
-        io,
-        save_as,
-        save_as_encoding,
-        commit_message,
-    )
-}
-
-/// [`save_owned_netlist_source`], over the model, the netlist editor's state and the session.
-pub(crate) fn save_owned_netlist_source_in(
     model: &mut crate::workbench::app_state::Model,
     netlist: &mut crate::workbench::documents::netlist_document::NetlistDocumentState,
     wb: &mut crate::workbench::state::WorkbenchSession,

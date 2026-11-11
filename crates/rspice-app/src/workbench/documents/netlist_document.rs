@@ -44,14 +44,14 @@ pub(crate) use relink::{
 };
 
 pub use comparison::{
-    close_revision_comparison, compare_generated_revision, compare_owned_revision,
-    compare_run_deck_snapshot, open_executed_deck, open_run_deck_snapshot, restore_owned_revision,
-    reveal_executed_deck,
+    close_revision_comparison, compare_run_deck_snapshot, open_executed_deck,
+    open_run_deck_snapshot, restore_owned_revision, reveal_executed_deck,
 };
 pub(crate) use comparison::{
     close_run_deck_snapshot, open_netlist_comparison, open_run_deck_snapshot_in,
     run_deck_snapshot_artifact_name_in, run_deck_snapshot_run_id, run_deck_snapshot_run_id_in,
 };
+pub(crate) use comparison::{compare_generated_revision, compare_owned_revision};
 pub use diagnostics::{DiagnosticSeverity, control_disposition_summary};
 pub(crate) use editor::editor_id;
 pub use editor::show as show_editor;

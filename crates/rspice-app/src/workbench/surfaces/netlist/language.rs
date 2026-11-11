@@ -2,14 +2,17 @@
 
 use crate::ui::tokens::Tokens;
 use crate::ui::widgets::{Dialog, DialogChoice, DialogInitialFocus, DialogSize};
-use crate::workbench::{MessageId, RSpiceApp};
+use crate::workbench::MessageId;
+use crate::workbench::code::CodeFeature;
+use crate::workbench::code::commands::CodeRequest;
+use crate::workbench::framework::feature::Cx;
 
-pub(super) fn rename_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) {
-    if !app.state.code.netlist.rename_dialog.open {
+pub(super) fn rename_dialog_window(ctx: &egui::Context, cx: &mut Cx<'_, CodeFeature>) {
+    if !cx.state.netlist.rename_dialog.open {
         return;
     }
-    let mut dialog = app.state.code.netlist.rename_dialog.clone();
-    let messages = app.state.workbench.messages();
+    let mut dialog = cx.state.netlist.rename_dialog.clone();
+    let messages = cx.wb.messages();
     let replacement_valid = {
         let value = dialog.replacement.trim();
         !value.is_empty()
@@ -46,20 +49,12 @@ pub(super) fn rename_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) {
     });
     match choice {
         DialogChoice::Primary => {
-            app.state.code.netlist.rename_dialog = dialog;
-            match crate::workbench::documents::netlist_document::language::commit_rename(
-                &mut app.state,
-            ) {
-                Ok(count) => app.state.prompt(messages.format(
-                    MessageId::NetlistRenameSucceeded,
-                    &[("count", &count.to_string())],
-                )),
-                Err(error) => app.state.code.netlist.rename_dialog.error = Some(error),
-            }
+            cx.state.netlist.rename_dialog = dialog;
+            cx.wb.outbox.push(CodeRequest::CommitNetlistRename);
         }
         DialogChoice::Ghost | DialogChoice::Secondary | DialogChoice::Cancelled => {
-            app.state.code.netlist.rename_dialog = Default::default();
+            cx.state.netlist.rename_dialog = Default::default();
         }
-        DialogChoice::None => app.state.code.netlist.rename_dialog = dialog,
+        DialogChoice::None => cx.state.netlist.rename_dialog = dialog,
     }
 }

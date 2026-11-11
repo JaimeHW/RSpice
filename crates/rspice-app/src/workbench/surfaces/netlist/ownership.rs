@@ -11,8 +11,10 @@ use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::NetlistDocumentId;
 use crate::ui::tokens::Tokens;
 use crate::ui::widgets::{Dialog, DialogChoice, DialogInitialFocus, DialogSize};
+use crate::workbench::code::CodeFeature;
 use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
-use crate::workbench::{AppState, MessageCatalog, MessageId, RSpiceApp};
+use crate::workbench::framework::feature::Cx;
+use crate::workbench::{AppState, MessageCatalog, MessageId};
 
 pub(super) fn open_ownership_dialog(
     state: &mut AppState,
@@ -82,23 +84,17 @@ fn owned_strategy_description(
     })
 }
 
-pub(super) fn ownership_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) {
-    if !app.state.code.netlist.ownership_dialog.open {
+pub(super) fn ownership_dialog_window(ctx: &egui::Context, cx: &mut Cx<'_, CodeFeature>) {
+    if !cx.state.netlist.ownership_dialog.open {
         return;
     }
-    let Some(generated) = app
-        .state
-        .model
-        .netlist_artifacts
-        .generated_document
-        .as_ref()
-    else {
-        app.state.code.netlist.ownership_dialog.open = false;
+    let Some(generated) = cx.model.netlist_artifacts.generated_document.as_ref() else {
+        cx.state.netlist.ownership_dialog.open = false;
         return;
     };
     let base_revision = generated.revision().get();
-    let mut dialog = app.state.code.netlist.ownership_dialog.clone();
-    let messages = app.state.workbench.messages();
+    let mut dialog = cx.state.netlist.ownership_dialog.clone();
+    let messages = cx.wb.messages();
     let owned_deck = dialog.strategy == crate::state::OwnedNetlistEditStrategy::OwnedSource;
     let title = if owned_deck {
         messages.text(MessageId::NetlistOwnershipCreateSourceTitle)
@@ -159,8 +155,8 @@ pub(super) fn ownership_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) 
     match choice {
         DialogChoice::Primary => {
             match create_owned_source(
-                &mut app.state.model,
-                &mut app.state.code.netlist,
+                cx.model,
+                &mut cx.state.netlist,
                 &dialog.artifact_name,
                 dialog.strategy,
             ) {
@@ -171,7 +167,7 @@ pub(super) fn ownership_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) 
         DialogChoice::Ghost | DialogChoice::Cancelled => dialog.open = false,
         DialogChoice::None | DialogChoice::Secondary => {}
     }
-    app.state.code.netlist.ownership_dialog = dialog;
+    cx.state.netlist.ownership_dialog = dialog;
 }
 
 pub(super) fn create_owned_source(
