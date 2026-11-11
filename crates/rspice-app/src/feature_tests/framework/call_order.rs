@@ -361,7 +361,7 @@ const DIALOG_STEPS: &[(&str, &str)] = &[
     ),
     ("CodeFeature::render_source_document_dialog", "code"),
     ("CodeFeature::render_source_find_dialog", "code"),
-    ("render_rename_symbol_form", "code"),
+    ("CodeFeature::render_rename_symbol_form", "code"),
     ("render_create_model_bound_symbol_dialog", "design"),
     ("DesignFeature::render_symbol_definition_dialogs", "design"),
     ("ProjectFeature::render_configuration_dialog", "project"),

@@ -474,6 +474,14 @@ pub(in crate::workbench) fn answer_code_request(app: &mut RSpiceApp, request: Co
             }
         }
         CodeRequest::SourceDocument(request) => answer_source_document_request(app, request),
+        CodeRequest::CommitSymbolRename => {
+            if let Err(error) =
+                crate::workbench::documents::code_workspace::commit_language_rename(app)
+                && let Some(open) = app.state.code.code_workspace.language_tools.as_mut()
+            {
+                open.error = Some(error);
+            }
+        }
     }
 }
 

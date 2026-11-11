@@ -91,10 +91,10 @@ pub(crate) enum CodeCommand {
 /// device New Verilog-A device drafted, importing the cells Import
 /// Verilog-A planned, replacing the source Replace source from file
 /// confirmed, saving Build settings, then compiling when the reader asked
-/// for both, replacing every match Find in source found, and the source
-/// document dialogs' choices that write the project's sources. Each command
-/// or dialog step that raises one raises one. Taken straight after the call
-/// that raised it.
+/// for both, replacing every match Find in source found, the source
+/// document dialogs' choices that write the project's sources, and the
+/// rename Rename symbol confirmed. Each command or dialog step that raises
+/// one raises one. Taken straight after the call that raised it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::workbench) enum CodeRequest {
     OpenNetlist,
@@ -121,6 +121,7 @@ pub(in crate::workbench) enum CodeRequest {
     SaveVerilogABuildSettings { compile: bool },
     ReplaceSourceSearchMatches,
     SourceDocument(SourceDocumentRequest),
+    CommitSymbolRename,
 }
 
 impl Request for CodeRequest {

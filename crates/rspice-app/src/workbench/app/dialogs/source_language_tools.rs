@@ -25,8 +25,9 @@ use egui::{Context, Id};
 
 use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine};
 use crate::workbench::app::RSpiceApp;
+use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::code::commands::CodeCommand;
-use crate::workbench::documents::code_workspace;
+use crate::workbench::documents::code_workspace::{self, CodeWorkspaceRuntimeState};
 
 const RENAME_TITLE: &str = "Rename symbol";
 const RENAME_PRIMARY: &str = "Rename";
@@ -210,103 +211,108 @@ fn list_references(
     });
 }
 
-impl RSpiceApp {
-    /// Rename symbol: the name under the caret, the new name, and what the
-    /// rename rewrites. Enter renames; Esc and Cancel close.
-    pub(in crate::workbench) fn render_rename_symbol_form(&mut self, ctx: &Context) {
-        let Some(tools) = self.state.code.code_workspace.language_tools.clone() else {
-            return;
-        };
-        let stale = self
-            .state
-            .model
-            .workspace
-            .content
-            .project_sources
-            .get_bundle(tools.index.bundle_id)
-            .is_none_or(|bundle| {
-                !tools
-                    .index
-                    .is_current(self.state.model.workspace.content.project.id(), bundle)
-            });
-        let blocked = code_workspace::source_file_mutation_block_reason(self, tools.index.language)
-            .map(str::to_owned)
-            .or_else(|| {
-                (!code_workspace::source_bundle_document_is_editable(
-                    self,
-                    tools.index.language,
-                    tools.index.bundle_id,
-                    &tools.active_path,
-                ))
-                .then(|| {
-                    format!(
-                        "{} is read-only, so nothing in it is renamed.",
-                        tools.active_path
-                    )
-                })
-            });
-        let new_name = tools.replacement.trim();
-        let refusal = if let Some(error) = tools.error.clone() {
-            Some(error)
-        } else if stale {
-            Some("The source changed after Rename opened. Close it and rename again.".to_owned())
-        } else if let Some(reason) = blocked {
-            Some(reason)
-        } else if new_name.is_empty() || new_name == tools.query {
-            None
-        } else {
-            tools
+/// Rename symbol: the name under the caret, the new name, and what the
+/// rename rewrites, over the Code workspace's state, the model and the
+/// platform's state. Enter renames; Esc and Cancel close. Returns whether
+/// the reader asked for the rename.
+pub(in crate::workbench) fn render_rename_symbol_form(
+    code: &mut CodeWorkspaceRuntimeState,
+    model: &Model,
+    platform: &PlatformState,
+    ctx: &Context,
+) -> bool {
+    let Some(tools) = code.language_tools.clone() else {
+        return false;
+    };
+    let stale = model
+        .workspace
+        .content
+        .project_sources
+        .get_bundle(tools.index.bundle_id)
+        .is_none_or(|bundle| {
+            !tools
                 .index
-                .rename_preview_at(&tools.active_path, tools.caret, &tools.query, new_name)
-                .err()
-        };
-        let unchanged = new_name.is_empty() || new_name == tools.query;
-        let ready = refusal.is_none() && !unchanged;
-        let (occurrences, files) =
-            tools
-                .index
-                .rename_extent_at(&tools.active_path, tools.caret, &tools.query);
-        let extent = format!(
-            "Renames {}",
-            code_workspace::extent_words(occurrences, files)
-        );
-        let status = match (refusal.as_deref(), unchanged) {
-            (Some(refusal), _) => Err(refusal),
-            (None, true) => Ok(Some("Enter a new name.")),
-            (None, false) => Ok(None),
-        };
+                .is_current(model.workspace.content.project.id(), bundle)
+        });
+    let blocked = code_workspace::source_file_mutation_block_reason_in(
+        model,
+        code,
+        platform,
+        tools.index.language,
+    )
+    .map(str::to_owned)
+    .or_else(|| {
+        (!code_workspace::source_bundle_document_is_editable_in(
+            model,
+            code,
+            platform,
+            tools.index.language,
+            tools.index.bundle_id,
+            &tools.active_path,
+        ))
+        .then(|| {
+            format!(
+                "{} is read-only, so nothing in it is renamed.",
+                tools.active_path
+            )
+        })
+    });
+    let new_name = tools.replacement.trim();
+    let refusal = if let Some(error) = tools.error.clone() {
+        Some(error)
+    } else if stale {
+        Some("The source changed after Rename opened. Close it and rename again.".to_owned())
+    } else if let Some(reason) = blocked {
+        Some(reason)
+    } else if new_name.is_empty() || new_name == tools.query {
+        None
+    } else {
+        tools
+            .index
+            .rename_preview_at(&tools.active_path, tools.caret, &tools.query, new_name)
+            .err()
+    };
+    let unchanged = new_name.is_empty() || new_name == tools.query;
+    let ready = refusal.is_none() && !unchanged;
+    let (occurrences, files) =
+        tools
+            .index
+            .rename_extent_at(&tools.active_path, tools.caret, &tools.query);
+    let extent = format!(
+        "Renames {}",
+        code_workspace::extent_words(occurrences, files)
+    );
+    let status = match (refusal.as_deref(), unchanged) {
+        (Some(refusal), _) => Err(refusal),
+        (None, true) => Ok(Some("Enter a new name.")),
+        (None, false) => Ok(None),
+    };
 
-        let mut replacement = tools.replacement.clone();
-        let mut edited = false;
-        let choice = CommandForm::new(RENAME_TITLE, RENAME_PRIMARY)
-            .primary_enabled(ready)
-            .status(status)
-            .show(ctx, |rows| {
-                let field = Id::new(NEW_NAME_FIELD);
-                rows.value_mono("Symbol", &tools.query);
-                edited = rows.text("New name", field, &mut replacement, "").changed();
-                rows.field_line(Some(field), FieldLine::Derived(&extent));
-                Some(field)
-            });
-        if let Some(open) = self.state.code.code_workspace.language_tools.as_mut() {
-            open.replacement = replacement;
-            if edited {
-                open.error = None;
-            }
+    let mut replacement = tools.replacement.clone();
+    let mut edited = false;
+    let choice = CommandForm::new(RENAME_TITLE, RENAME_PRIMARY)
+        .primary_enabled(ready)
+        .status(status)
+        .show(ctx, |rows| {
+            let field = Id::new(NEW_NAME_FIELD);
+            rows.value_mono("Symbol", &tools.query);
+            edited = rows.text("New name", field, &mut replacement, "").changed();
+            rows.field_line(Some(field), FieldLine::Derived(&extent));
+            Some(field)
+        });
+    if let Some(open) = code.language_tools.as_mut() {
+        open.replacement = replacement;
+        if edited {
+            open.error = None;
         }
-        match choice {
-            DialogChoice::Primary => {
-                if let Err(error) = code_workspace::commit_language_rename(self)
-                    && let Some(open) = self.state.code.code_workspace.language_tools.as_mut()
-                {
-                    open.error = Some(error);
-                }
-            }
-            DialogChoice::Ghost | DialogChoice::Secondary | DialogChoice::Cancelled => {
-                self.state.code.code_workspace.language_tools = None;
-            }
-            DialogChoice::None => {}
+    }
+    match choice {
+        DialogChoice::Primary => true,
+        DialogChoice::Ghost | DialogChoice::Secondary | DialogChoice::Cancelled => {
+            code.language_tools = None;
+            false
         }
+        DialogChoice::None => false,
     }
 }
 
@@ -363,5 +369,170 @@ mod tests {
             !app.command_key_enabled(CodeCommand::CompileVerilogA.key()),
             "a read-only project cannot compile; it was enabled before as {enabled_before}"
         );
+    }
+
+    /// An Automation project whose entry defines `helper` and whose second
+    /// file, `shared.py`, uses it; `shared.py` is the environment lock when
+    /// `locked`, so a rename may change the entry but not it. The Rename
+    /// form is open on `helper` with `assist` typed.
+    fn rename_form_over_two_files(locked: bool) -> RSpiceApp {
+        let mut app = RSpiceApp::test_instance();
+        app.state.code.code_workspace.page =
+            crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation;
+        let language = crate::state::ProjectSourceLanguage::RSpiceAutomation;
+        let owner = crate::state::ProjectSourceOwner::code_workspace(language);
+        let content = &mut app.state.model.workspace.content;
+        let bundle = content
+            .project_sources
+            .bundle_for_owner(&owner)
+            .expect("the fixture project owns an Automation bundle");
+        let (bundle_id, root) = (bundle.id(), bundle.root().logical_path().to_owned());
+        let locks = bundle
+            .paths_for_role(crate::state::ProjectSourceRole::AutomationEnvironmentLock)
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        let entry = "def helper():
+    return 1
+
+helper()
+";
+        content
+            .replace_project_source_bundle_files_transactionally(
+                bundle_id,
+                [(root.clone(), entry.to_owned())],
+            )
+            .expect("the entry is rewritten");
+        content
+            .add_project_source_bundle_file(
+                bundle_id,
+                &root,
+                crate::state::ProjectSourceFile::try_new(
+                    "shared.py",
+                    "value = helper()
+",
+                )
+                .expect("a valid file"),
+            )
+            .expect("the second file joins the bundle");
+        if locked {
+            for lock in &locks {
+                content
+                    .set_project_source_bundle_non_entry_role(bundle_id, lock, None)
+                    .expect("the old lock is released");
+            }
+            content
+                .set_project_source_bundle_non_entry_role(
+                    bundle_id,
+                    "shared.py",
+                    Some(crate::state::ProjectSourceRole::AutomationEnvironmentLock),
+                )
+                .expect("the second file is the lock");
+        }
+        code_workspace::open_language_tools_in_bundle(
+            &mut app,
+            language,
+            bundle_id,
+            &root,
+            "def h".chars().count(),
+        )
+        .expect("the language tools open on helper");
+        let tools = app
+            .state
+            .code
+            .code_workspace
+            .language_tools
+            .as_mut()
+            .expect("the form is open");
+        assert_eq!(tools.query, "helper");
+        tools.replacement = "assist".to_owned();
+        app
+    }
+
+    /// One frame of the frame's dialogs: whether it asked for the next one
+    /// straight away, and every label and value it put on the screen.
+    fn dialog_frame(
+        ctx: &Context,
+        app: &mut RSpiceApp,
+        events: Vec<egui::Event>,
+    ) -> (bool, Vec<String>) {
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1440.0, 900.0),
+                )),
+                events,
+                ..egui::RawInput::default()
+            },
+            |ui| app.render_frame_dialogs(ui.ctx()),
+        );
+        let immediate = output
+            .viewport_output
+            .get(&egui::ViewportId::ROOT)
+            .is_some_and(|viewport| viewport.repaint_delay.is_zero());
+        let text = output
+            .platform_output
+            .accesskit_update
+            .into_iter()
+            .flat_map(|update| update.nodes)
+            .flat_map(|(_, node)| {
+                [node.label(), node.value()]
+                    .into_iter()
+                    .flatten()
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        (immediate, text)
+    }
+
+    /// The rename is carried out after the form has drawn, as the frame's
+    /// dialogs answer what they raised, so its outcome is drawn on the frame
+    /// after the one that confirmed it. That frame must come with no input
+    /// in between: a refused rename states why on the form, and one that
+    /// applies has closed it.
+    #[test]
+    fn a_confirmed_rename_shows_its_outcome_on_the_next_frame_without_input() {
+        let enter = egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: Some(egui::Key::Enter),
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        for locked in [true, false] {
+            let mut app = rename_form_over_two_files(locked);
+            let ctx = Context::default();
+            ctx.enable_accesskit();
+            crate::ui::Theme::default().apply(&ctx);
+            for _ in 0..2 {
+                let (_, text) = dialog_frame(&ctx, &mut app, Vec::new());
+                assert!(
+                    text.iter().any(|text| text == RENAME_TITLE),
+                    "the form is open"
+                );
+            }
+            let (immediate, _) = dialog_frame(&ctx, &mut app, vec![enter.clone()]);
+            assert!(
+                immediate,
+                "the frame that confirmed the rename asks for the next one"
+            );
+            let (_, text) = dialog_frame(&ctx, &mut app, Vec::new());
+            let open = text.iter().any(|text| text == RENAME_TITLE);
+            if locked {
+                assert!(open, "a refused rename leaves the form open");
+                assert!(
+                    text.iter()
+                        .any(|text| text.contains("governed read-only source 'shared.py'")),
+                    "the refusal is on the form: {text:?}"
+                );
+            } else {
+                assert!(!open, "a rename that applied closed the form");
+                assert!(
+                    app.state.code.code_workspace.language_tools.is_none(),
+                    "the transaction is done"
+                );
+            }
+        }
     }
 }

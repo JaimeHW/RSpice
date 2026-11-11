@@ -14,7 +14,9 @@ use crate::workbench::app::dialogs::library::new_veriloga_device::{
     self, new_veriloga_device_available_in, open_new_veriloga_device_form_in,
 };
 use crate::workbench::app::dialogs::library::veriloga_import;
-use crate::workbench::app::dialogs::{source_document, source_find, veriloga_build_settings};
+use crate::workbench::app::dialogs::{
+    source_document, source_find, source_language_tools, veriloga_build_settings,
+};
 use crate::workbench::app::{
     source_document_dialog_is_available, veriloga_build_settings_available,
 };
@@ -438,6 +440,18 @@ impl CodeFeature {
             ctx,
         ) {
             cx.wb.outbox.push(CodeRequest::ReplaceSourceSearchMatches);
+        }
+    }
+
+    /// Rename symbol….
+    pub(in crate::workbench) fn render_rename_symbol_form(cx: &mut Cx<'_, Self>, ctx: &Context) {
+        if source_language_tools::render_rename_symbol_form(
+            &mut cx.state.code_workspace,
+            cx.model,
+            cx.platform,
+            ctx,
+        ) {
+            cx.wb.outbox.push(CodeRequest::CommitSymbolRename);
         }
     }
 }

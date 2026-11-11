@@ -289,7 +289,10 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         key: DialogKey("code.rename_symbol"),
         modality: Modality::Modeless,
         is_open: None,
-        render: |app, ctx| app.render_rename_symbol_form(ctx),
+        render: |app, ctx| {
+            CodeFeature::render_rename_symbol_form(&mut features::cx(app), ctx);
+            app.after_contribution();
+        },
     },
     DialogSpec {
         key: DialogKey("design.create_model_bound_symbol"),
