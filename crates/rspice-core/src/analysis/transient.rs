@@ -92,10 +92,16 @@ pub fn resolve_transient_maximum_step(
 /// Resolve the solver ceiling for a `.TRAN` request in `dialect`.
 ///
 /// The fields are validated as [`resolve_transient_maximum_step`] does, and an
-/// explicit `TMAX` wins in every dialect. Xyce never bounds the step by
-/// `TSTEP`, which only seeds its first step: an omitted `TMAX` is a tenth of
-/// the analysis window (Xyce 7.10 `N_TIA_StepErrorControl.C`
-/// `setFromTIAParams` and `updateMaxTimeStep`).
+/// explicit `TMAX` wins in every dialect. An omitted one is:
+/// - in the ngspice dialect, [`resolve_transient_maximum_step`]'s
+///   `min(TSTEP, (TSTOP - TSTART) / 50)`;
+/// - in the Xyce dialect, a tenth of the analysis window: Xyce never bounds
+///   the step by `TSTEP`, which only seeds its first step (Xyce 7.10
+///   `N_TIA_StepErrorControl.C` `setFromTIAParams` and `updateMaxTimeStep`);
+/// - in the default dialect, QSPICE's and LTspice's `TSTOP / 1024`, whatever
+///   `TSTEP` and `TSTART` are. Both step a `.TRAN 1N 100N` inverter at
+///   97.66 ps, and still do with `TSTEP` 0.01N or `TSTART` 50N; `TSTOP` 200N
+///   doubles it.
 pub fn resolve_dialect_transient_maximum_step(
     dialect: crate::SpiceDialect,
     step: Value,
@@ -104,13 +110,29 @@ pub fn resolve_dialect_transient_maximum_step(
     explicit_maximum_step: Option<Value>,
 ) -> Result<Value, TransientMaximumStepError> {
     let maximum_step = resolve_transient_maximum_step(step, stop, start, explicit_maximum_step)?;
-    if dialect != crate::SpiceDialect::Xyce || explicit_maximum_step.is_some() {
-        return Ok(maximum_step);
+    match dialect {
+        crate::SpiceDialect::Ngspice => Ok(maximum_step),
+        crate::SpiceDialect::Xyce => {
+            if explicit_maximum_step.is_some() {
+                return Ok(maximum_step);
+            }
+            // The validated window keeps a tenth of it finite; it can only
+            // underflow, and then the ngspice default it already exceeds is
+            // the safe answer.
+            let window = stop - start.unwrap_or(0.0);
+            Ok((0.1 * window).max(maximum_step))
+        }
+        crate::SpiceDialect::BestAvailable => {
+            // A zero TMAX is an omitted one here too.
+            if explicit_maximum_step.is_some_and(|maximum| maximum > 0.0) {
+                return Ok(maximum_step);
+            }
+            // TSTOP is finite and positive; a quotient that underflows keeps
+            // the finer ngspice ceiling.
+            let ceiling = stop / 1024.0;
+            Ok(if ceiling > 0.0 { ceiling } else { maximum_step })
+        }
     }
-    // The validated window keeps a tenth of it finite; it can only underflow,
-    // and then the ngspice default it already exceeds is the safe answer.
-    let window = stop - start.unwrap_or(0.0);
-    Ok((0.1 * window).max(maximum_step))
 }
 
 #[cfg(test)]
@@ -198,6 +220,48 @@ mod maximum_step_tests {
             resolve_transient_maximum_step(1.0e-6, 1.0e-3, Some(0.0), Some(0.0)),
             Ok(1.0e-6)
         );
+    }
+
+    /// QSPICE and LTspice 26.1.1 step a `.TRAN 1N 100N` inverter at
+    /// TSTOP/1024 = 97.66 ps, with TSTEP 0.01N, and with TSTART 50N; an
+    /// explicit TMAX wins, and the ngspice dialect keeps min(TSTEP, window/50).
+    #[test]
+    fn default_dialect_maximum_is_tstop_over_1024_whatever_tstep_and_tstart() {
+        let best = crate::SpiceDialect::BestAvailable;
+        let ceiling = 100.0e-9 / 1024.0;
+        for (step, start) in [(1.0e-9, None), (0.01e-9, None), (1.0e-9, Some(50.0e-9))] {
+            assert_eq!(
+                resolve_dialect_transient_maximum_step(best, step, 100.0e-9, start, None),
+                Ok(ceiling)
+            );
+        }
+        // A coarse TSTEP no longer bounds it either.
+        assert_eq!(
+            resolve_dialect_transient_maximum_step(best, 1.0e-6, 10.0e-3, None, None),
+            Ok(10.0e-3 / 1024.0)
+        );
+        assert_eq!(
+            resolve_dialect_transient_maximum_step(best, 1.0e-9, 100.0e-9, None, Some(0.5e-9)),
+            Ok(0.5e-9)
+        );
+        assert_eq!(
+            resolve_dialect_transient_maximum_step(best, 1.0e-9, 100.0e-9, None, Some(0.0)),
+            Ok(ceiling)
+        );
+        assert_eq!(
+            resolve_dialect_transient_maximum_step(
+                crate::SpiceDialect::Ngspice,
+                1.0e-9,
+                100.0e-9,
+                None,
+                None
+            ),
+            Ok(1.0e-9)
+        );
+        assert!(matches!(
+            resolve_dialect_transient_maximum_step(best, 1.0e-9, 100.0e-9, Some(100.0e-9), None),
+            Err(TransientMaximumStepError::InvalidWindow { .. })
+        ));
     }
 
     #[test]

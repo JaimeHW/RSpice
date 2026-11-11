@@ -207,8 +207,9 @@ fn each_fourier_card_is_named_and_parented_by_the_canonical_plan() {
 /// DFT) and 33.2106 % (QSPICE: the Fourier integral of the piecewise-linear
 /// waveform, which on LTspice's own waveform gives LTspice's nine-harmonic
 /// 33.1254 %). Each rule applied to its oracle's own waveform reproduces that
-/// oracle; what is left between RSpice and QSPICE here is RSpice's coarser
-/// steps (69 per period against 514), not the rule.
+/// oracle. The default dialect steps at QSPICE's TSTOP/1024 (514 steps a
+/// period, as QSPICE takes) and reads 33.2148 %; held to 1 ns by an explicit
+/// TMAX it reads the coarse window by the same rule (69 steps a period).
 #[test]
 fn each_dialect_reads_a_coarse_four_window_by_its_own_simulator_s_rule() {
     let directory = test_dir("four_dialects");
@@ -222,12 +223,30 @@ fn each_dialect_reads_a_coarse_four_window_by_its_own_simulator_s_rule() {
          .TRAN 1N 100N\n.PRINT TRAN V(2) V(1)\n.FOUR 20MEG V(2)\n.END\n",
     )
     .expect("write the inverter deck");
-    for (dialect, expected) in [("best", 33.0416), ("ngspice", 32.8118), ("xyce", 33.2192)] {
+    let coarse = directory.join("coarse.cir");
+    std::fs::write(
+        &coarse,
+        std::fs::read_to_string(&deck)
+            .expect("read the inverter deck")
+            .replace(".TRAN 1N 100N", ".TRAN 1N 100N 0 1N"),
+    )
+    .expect("write the coarse inverter deck");
+    for (dialect, deck, expected) in [
+        ("best", &deck, 33.2148),
+        ("best", &coarse, 33.0416),
+        ("ngspice", &deck, 32.8118),
+        ("xyce", &deck, 33.2192),
+    ] {
+        let stem = deck
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .expect("a stem");
+        let dialect_stem = format!("{dialect}-{stem}");
         let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
             .args(["--quiet", "run", "--spice-dialect", dialect])
-            .arg(&deck)
+            .arg(deck)
             .arg("--output")
-            .arg(directory.join(format!("{dialect}.csv")))
+            .arg(directory.join(format!("{dialect_stem}.csv")))
             .args(["--format", "csv"])
             .output()
             .expect("run the inverter deck");
@@ -236,7 +255,7 @@ fn each_dialect_reads_a_coarse_four_window_by_its_own_simulator_s_rule() {
             "{dialect}: {}",
             String::from_utf8_lossy(&output.stderr)
         );
-        let table = std::fs::read_to_string(directory.join(format!("{dialect}.four-001.csv")))
+        let table = std::fs::read_to_string(directory.join(format!("{dialect_stem}.four-001.csv")))
             .expect("the Fourier table");
         let row = table
             .lines()
@@ -249,7 +268,7 @@ fn each_dialect_reads_a_coarse_four_window_by_its_own_simulator_s_rule() {
             .expect("a THD column");
         assert!(
             (thd - expected).abs() < 2e-3,
-            "{dialect}: THD {thd} %, expected {expected} %"
+            "{dialect_stem}: THD {thd} %, expected {expected} %"
         );
     }
 }

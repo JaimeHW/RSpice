@@ -1638,6 +1638,13 @@ fn transient_vcd_carries_every_event_node_at_its_own_time() {
         "every captured event node is one signal: {document:?}"
     );
     let period = document.timescale.femtoseconds();
+    // The nearest femtosecond to the exact time, as the dump rounds it: the
+    // rounded product alone can land on the wrong side of a half.
+    let femtoseconds = |time: f64| {
+        let integral = (time * 1e15).round_ties_even();
+        let correction = time.mul_add(1e15, -integral).round_ties_even();
+        (integral + correction) as u64
+    };
 
     let signal_of = |node: &str| {
         document
@@ -1666,7 +1673,7 @@ fn transient_vcd_carries_every_event_node_at_its_own_time() {
         for (change, point) in signal.changes.iter().zip(&trace.points) {
             assert_eq!(
                 change.tick * period,
-                (point.time * 1e15).round() as u64,
+                femtoseconds(point.time),
                 "an edge moved: tick {} at {period} fs/tick is not {} s",
                 change.tick,
                 point.time
@@ -1693,7 +1700,7 @@ fn transient_vcd_carries_every_event_node_at_its_own_time() {
         assert_eq!(signal.kind, VcdSignalKind::Real);
         assert_eq!(signal.changes.len(), trace.points.len());
         for (change, point) in signal.changes.iter().zip(&trace.points) {
-            assert_eq!(change.tick * period, (point.time * 1e15).round() as u64);
+            assert_eq!(change.tick * period, femtoseconds(point.time));
             assert_eq!(change.value, VcdValue::Real(point.value));
         }
     }

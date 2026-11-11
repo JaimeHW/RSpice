@@ -1303,14 +1303,16 @@ mod tests {
     }
 
     /// The studio steps a card by the ceiling the CLI gives it in the deck's
-    /// dialect: an Xyce deck with no TMAX up to a tenth of its window, as
-    /// Xyce does, rather than the ngspice rule.
+    /// dialect when it has no TMAX: a tenth of its window in Xyce, QSPICE's
+    /// and LTspice's TSTOP/1024 in the default dialect, and min(TSTEP,
+    /// window/50) in ngspice. An explicit TMAX wins in each.
     #[test]
     fn transient_execution_uses_core_default_and_explicit_step_limits() {
         use rspice_simulation_contract::config::AnalysisConfig;
 
         let bridge = EngineBridge::new();
         let default_deck = "transient step limits\nV1 out 0 1\nR1 out 0 1k\n.end\n";
+        let ngspice_deck = "transient step limits\n.options rspice_dialect=ngspice\nV1 out 0 1\nR1 out 0 1k\n.end\n";
         let xyce_deck =
             "transient step limits\n.options rspice_dialect=xyce\nV1 out 0 1\nR1 out 0 1k\n.end\n";
         for (deck, step_time, start_time, max_timestep, ceiling) in [
@@ -1318,10 +1320,14 @@ mod tests {
             (xyce_deck, 0.001, 0.9, Some(0.007), 0.007),
             (xyce_deck, 2.0, 0.0, None, 0.1),
             (xyce_deck, 0.001, 0.0, None, 0.1),
-            (default_deck, 0.01, 0.9, None, 0.002),
+            (default_deck, 0.01, 0.9, None, 1.0 / 1024.0),
             (default_deck, 0.001, 0.9, Some(0.007), 0.007),
-            (default_deck, 2.0, 0.0, None, 0.02),
-            (default_deck, 0.001, 0.0, None, 0.001),
+            (default_deck, 2.0, 0.0, None, 1.0 / 1024.0),
+            (default_deck, 0.001, 0.0, None, 1.0 / 1024.0),
+            (ngspice_deck, 0.01, 0.9, None, 0.002),
+            (ngspice_deck, 0.001, 0.9, Some(0.007), 0.007),
+            (ngspice_deck, 2.0, 0.0, None, 0.02),
+            (ngspice_deck, 0.001, 0.0, None, 0.001),
         ] {
             let config = TransientAnalysisConfig {
                 stop_time: 1.0,

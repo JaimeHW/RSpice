@@ -47,8 +47,14 @@ fn a_transient_assertion_report_is_the_core_runs() {
             RC,
         )
         .expect("the transient runs");
-    let max_step =
-        rspice_core::execution::resolve_transient_maximum_step(10e-9, 2e-6, None, None).unwrap();
+    let max_step = rspice_core::execution::resolve_dialect_transient_maximum_step(
+        rspice_core::SpiceDialect::BestAvailable,
+        10e-9,
+        2e-6,
+        None,
+        None,
+    )
+    .unwrap();
     let core = core_engine(&netlist)
         .run_tran_with_abort(&netlist, 2e-6, max_step, &NoAbort)
         .expect("the core transient runs");
@@ -191,8 +197,14 @@ fn an_hdl_error_keeps_its_file_line_and_time() {
     let collector = std::sync::Arc::new(HdlOutputCollector::new());
     let mut config = rspice_core::SimulationConfig::default();
     config.hdl.output = Some(collector.clone());
-    let max_step =
-        rspice_core::execution::resolve_transient_maximum_step(1e-9, 32e-9, None, None).unwrap();
+    let max_step = rspice_core::execution::resolve_dialect_transient_maximum_step(
+        rspice_core::SpiceDialect::BestAvailable,
+        1e-9,
+        32e-9,
+        None,
+        None,
+    )
+    .unwrap();
     let core = rspice_core::Engine::new(config)
         .resolved_for_netlist(&netlist)
         .run_tran_with_abort(&netlist, 32e-9, max_step, &NoAbort);

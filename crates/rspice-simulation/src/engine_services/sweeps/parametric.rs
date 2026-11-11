@@ -691,15 +691,23 @@ R2 out 0 1k
             },
             ".tran 70u 700u uic",
             ".tran 10u 100u",
-            2e-6,
+            100e-6 / 1024.0,
             false,
         );
     }
 
+    /// With no TMAX the default dialect steps up to TSTOP/1024, whatever
+    /// TSTEP and TSTART are; an explicit TMAX wins.
     #[test]
     fn parametric_transient_uses_selected_window_and_maximum_step() {
         for (step_time, start_time, max_timestep, ceiling, selected) in [
-            (10e-6, 90e-6, None, 0.2e-6, ".tran 10u 100u 90u uic"),
+            (
+                10e-6,
+                90e-6,
+                None,
+                100e-6 / 1024.0,
+                ".tran 10u 100u 90u uic",
+            ),
             (
                 0.1e-6,
                 90e-6,
@@ -707,8 +715,8 @@ R2 out 0 1k
                 0.7e-6,
                 ".tran 0.1u 100u 90u 0.7u uic",
             ),
-            (1e-3, 0.0, None, 2e-6, ".tran 1m 100u uic"),
-            (0.1e-6, 0.0, None, 0.1e-6, ".tran 0.1u 100u uic"),
+            (1e-3, 0.0, None, 100e-6 / 1024.0, ".tran 1m 100u uic"),
+            (0.1e-6, 0.0, None, 100e-6 / 1024.0, ".tran 0.1u 100u uic"),
         ] {
             assert_selected_transient(
                 &CornerBaseMode::TransientWindow {
