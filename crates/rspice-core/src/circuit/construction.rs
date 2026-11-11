@@ -73,6 +73,7 @@ impl CircuitData {
             compact_model_private_nodes: HashSet::new(),
             settled_compact_model_private_nodes: None,
             settled_node_gmin: 0.0,
+            dc_initial_condition_ties: Vec::new(),
             compact_model_dc_driven_nodes: HashSet::new(),
             compact_model_read_nodes: HashSet::new(),
             xyce_memristor_operating_point_mode: false,

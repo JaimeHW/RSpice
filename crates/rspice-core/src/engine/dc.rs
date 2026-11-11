@@ -1336,8 +1336,8 @@ impl Engine {
             startup
         };
         let force_initial_conditions = matches!(startup, DcOpStartup::ForceInitialConditions);
-        let holds_initial_conditions =
-            force_initial_conditions || matches!(startup, DcOpStartup::HoldInitialConditions);
+        let holds_initial_conditions = force_initial_conditions
+            || matches!(startup, DcOpStartup::HoldInitialConditions { .. });
 
         let veriloga_analysis = if force_initial_conditions { 4 } else { 0 };
         if lifecycle
@@ -2399,32 +2399,38 @@ mod tests {
         );
     }
 
-    /// QSPICE, LTspice and Xyce hold each `.IC` node at its value through the
-    /// operating point (Xyce's AugmentLinSys_IC). For the divider QSPICE
-    /// prints V(m) = 0.3000014, LTspice 0.3000028 and Xyce 7.10 0.3. For the
-    /// diode, where it alone would settle at 0.476 V, QSPICE prints V(g) =
-    /// 0.2500000010 and LTspice 0.2500000020; where only a capacitor and a
-    /// current source meet the node, 0.250000001 and 0.250000002. ngspice
-    /// reads `.IC` only for a transient, so its `.op` solves the divider.
+    /// QSPICE, LTspice and Xyce hold each `.IC` node through the operating
+    /// point. Xyce pins it (AugmentLinSys_IC): 7.10 prints V(m) = 0.3 for the
+    /// divider. QSPICE, which the default dialect follows, ties it through
+    /// 1 mOhm to a source at its value: V(m) = 0.3000014 (LTspice's 2 mOhm,
+    /// 0.3000028). For the diode, where it alone would settle at 0.476 V,
+    /// QSPICE prints V(g) = 0.2500000010, the 1 uA feeding it through the tie;
+    /// where only a capacitor and a current source meet the node, 0.250000001.
+    /// ngspice reads `.IC` only for a transient, so its `.op` solves the
+    /// divider.
     #[test]
     fn an_operating_point_holds_its_ic_nodes_unless_the_dialect_is_ngspice() {
         let divider = "ic divider\nV1 a 0 2\nR1 a m 1k\nR2 m 0 1k\n.ic v(m)=0.3\n.op\n.end\n";
-        for (deck, node, held) in [
-            (divider, "m", 0.3),
+        // The divider is 1 V behind 500 Ohm, tied through 1 mOhm to 0.3 V.
+        let tied_divider = (2.0e-3 * 1.0 + 1.0e3 * 0.3) / (2.0e-3 + 1.0e3);
+        for (deck, node, pinned, tied) in [
+            (divider, "m", 0.3, tied_divider),
             (
                 "ic diode\nI1 0 g 1u\nC1 g 0 1p\nD1 g 0 dm\n.model dm d is=1e-14\n\
                  .ic v(g)=0.25\n.op\n.end\n",
                 "g",
                 0.25,
+                0.25 + 1.0e-6 / 1.0e3,
             ),
             (
                 "ic floating\nI1 0 g 1u\nC1 g 0 1p\n.ic v(g)=0.25\n.op\n.end\n",
                 "g",
                 0.25,
+                0.25 + 1.0e-6 / 1.0e3,
             ),
         ] {
             let netlist = Netlist::parse(deck).unwrap();
-            for engine in [Engine::default(), xyce_engine()] {
+            for (engine, held) in [(Engine::default(), tied), (xyce_engine(), pinned)] {
                 let result = engine
                     .run_dc_op(&netlist)
                     .unwrap_or_else(|error| panic!("{deck}: {error}"));
@@ -2438,6 +2444,34 @@ mod tests {
         .run_dc_op(&netlist)
         .unwrap();
         assert_voltage(&result, "m", 1.0);
+    }
+
+    /// QSPICE ties a `.IC` node through 1 mOhm to a source at its value:
+    /// `V1 a 0 1; R1 a b R; .ic v(b)=0` prints V(b) = 1/(1 + 1000 R), 0.5 at
+    /// R = 1 mOhm, 9.99000999e-4 at 1 Ohm, 9.99999e-7 at 1k and
+    /// 9.99999999e-10 at 1 MegOhm, and `.ic v(b)=0.5` at 1 Ohm prints
+    /// 0.5004995005. Pinning it would print 0 and 0.5 at every R.
+    #[test]
+    fn the_default_dialect_ties_an_ic_node_through_qspice_s_one_milliohm() {
+        for (resistance, held, expected) in [
+            ("1m", 0.0, 0.5),
+            ("1", 0.0, 1.0 / 1001.0),
+            ("1k", 0.0, 1.0 / (1.0 + 1.0e6)),
+            ("1meg", 0.0, 1.0 / (1.0 + 1.0e9)),
+            ("1", 0.5, 501.0 / 1001.0),
+        ] {
+            let deck = format!(
+                "ic tie\nV1 a 0 1\nR1 a b {resistance}\nR2 b 0 1e12\n.ic v(b)={held}\n.op\n.end\n"
+            );
+            let result = Engine::default()
+                .run_dc_op(&Netlist::parse(&deck).unwrap())
+                .unwrap_or_else(|error| panic!("{deck}: {error}"));
+            let actual = result.try_voltage_named("b").expect("V(b)");
+            assert!(
+                (actual - expected).abs() <= 1.0e-9 * expected.abs(),
+                "R1 = {resistance}, .ic v(b)={held}: V(b) = {actual:e}, QSPICE {expected:e}"
+            );
+        }
     }
 
     #[test]

@@ -666,6 +666,12 @@ pub struct CircuitData {
     /// [`Self::settled_compact_model_private_nodes`]: the engine's floor
     /// value, `gmin_target` (`Engine::stamp_nodal_gmin`).
     pub(crate) settled_node_gmin: Value,
+    /// The ties a held operating point carries its `.IC` nodes through
+    /// where the dialect's simulator ties rather than pins them (QSPICE):
+    /// each `(row, conductance, voltage)` is a resistor of `1 / conductance`
+    /// from the node to a source at the `.IC` value. Empty outside that solve
+    /// (`Engine::solve_nonlinear_holding_initial_conditions_and_abort`).
+    pub(crate) dc_initial_condition_ties: Vec<(usize, Value, Value)>,
     /// Of [`Self::compact_model_private_nodes`], those whose row some
     /// equation of the owning model can write a Jacobian entry into at DC,
     /// whatever its bias: the model's stamp pattern, not one evaluation.

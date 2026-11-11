@@ -14,14 +14,23 @@ pub(in crate::engine) enum DcOpStartup<'a> {
     /// nodes are held through the solve and a Verilog-A model sees the
     /// `"ic"` analysis.
     ForceInitialConditions,
-    /// An operating point that holds each `.IC` node at its value. Holding
-    /// them is a node constraint, not another analysis: a Verilog-A model
-    /// still sees `"dc"` and `"static"`, and the nodeset phase runs, with
-    /// the `.IC` nodes held through it.
-    HoldInitialConditions,
+    /// An operating point that holds each `.IC` node at its value: exactly,
+    /// or through a tie of `tie_conductance` to a source at the value.
+    /// Holding them is a node constraint, not another analysis: a Verilog-A
+    /// model still sees `"dc"` and `"static"`, and the nodeset phase runs,
+    /// with the `.IC` nodes held through it.
+    HoldInitialConditions {
+        tie_conductance: Option<Value>,
+    },
     PreviousSolution(&'a [Value]),
     Zero,
 }
+
+/// The conductance QSPICE ties a `.IC` node to its value with through an
+/// operating point: `V1 a 0 1; R1 a b R; .ic v(b)=0` prints V(b) =
+/// 1/(1 + 1000 R) at R = 1 mOhm, 1 Ohm, 1k and 1 MegOhm, and `.ic v(b)=0.5`
+/// with R = 1 prints 0.5004995005.
+pub(in crate::engine) const QSPICE_INITIAL_CONDITION_TIE: Value = 1.0e3;
 
 /// One independent startup equation `V(positive) - V(negative) = voltage`.
 /// Node zero is the ground terminal. Collection reduces consistent dependent
@@ -1752,11 +1761,19 @@ impl Engine {
         .map_err(SimulationError::into_exhausted_circuit_error)
     }
 
-    /// Every dialect but ngspice holds each `.IC` node at its value through
-    /// the operating point. QSPICE and LTspice do: a 2 V divider of two 1k
-    /// resistors with `.ic v(m)=0.3` prints V(m) = 0.3000014 in QSPICE and
-    /// 0.3000028 in LTspice, where ngspice, which reads `.IC` only for a
-    /// transient, prints 1.
+    /// Every dialect but ngspice holds each `.IC` node through the operating
+    /// point, the way its simulator does. ngspice reads `.IC` only for a
+    /// transient: a 2 V divider of two 1k resistors with `.ic v(m)=0.3`
+    /// prints V(m) = 1.
+    ///
+    /// QSPICE, which the default dialect follows, ties each `.IC` node through
+    /// 1 mOhm to a source at its value ([`QSPICE_INITIAL_CONDITION_TIE`]): the
+    /// divider prints 0.3000014, and `V1 a 0 1; R1 a b R; .ic v(b)=0` prints
+    /// V(b) = 1/(1 + 1000 R) for R from 1 mOhm (0.5) to 1 MegOhm. On a
+    /// high-gain loop the tie shows: an integrator around a gain of 1e5 holds
+    /// its output at 0.2 V, not 0. (LTspice ties through 2 mOhm: 0.3000028.)
+    /// A `.IC` between two nodes, which neither was measured on, keeps the
+    /// exact hold.
     ///
     /// Xyce holds each `.IC` node at its value through every DC-mode solve:
     /// given `.IC`, its nonlinear solver augments the system with
@@ -1778,13 +1795,17 @@ impl Engine {
         circuit: &crate::CircuitData,
         startup: DcOpStartup<'a>,
     ) -> DcOpStartup<'a> {
-        if self.config.spice_dialect != super::SpiceDialect::Ngspice
-            && matches!(startup, DcOpStartup::Automatic { use_hints: true })
+        let tie_conductance = match self.config.spice_dialect {
+            super::SpiceDialect::Ngspice => return startup,
+            super::SpiceDialect::Xyce => None,
+            super::SpiceDialect::BestAvailable => Some(QSPICE_INITIAL_CONDITION_TIE),
+        };
+        if matches!(startup, DcOpStartup::Automatic { use_hints: true })
             && !self
                 .collect_initial_condition_hints(netlist, circuit)
                 .is_empty()
         {
-            DcOpStartup::HoldInitialConditions
+            DcOpStartup::HoldInitialConditions { tie_conductance }
         } else {
             startup
         }
@@ -1807,7 +1828,7 @@ impl Engine {
         circuit.clear_xspice_evaluation_warning();
         let holds_initial_conditions = matches!(
             startup,
-            DcOpStartup::ForceInitialConditions | DcOpStartup::HoldInitialConditions
+            DcOpStartup::ForceInitialConditions | DcOpStartup::HoldInitialConditions { .. }
         );
         if !holds_initial_conditions {
             self.ensure_dc_paths_to_ground(circuit)?;
@@ -1826,7 +1847,7 @@ impl Engine {
                     circuit, matrix, &seed, &hints, abort,
                 )
             }
-            DcOpStartup::HoldInitialConditions => {
+            DcOpStartup::HoldInitialConditions { tie_conductance } => {
                 let initial_conditions = self.collect_initial_condition_hints(netlist, circuit);
                 let hints = self.collect_node_voltage_hints(netlist, circuit);
                 self.solve_nonlinear_holding_initial_conditions_and_abort(
@@ -1834,6 +1855,7 @@ impl Engine {
                     matrix,
                     &initial_conditions,
                     &hints,
+                    tie_conductance,
                     abort,
                 )
             }

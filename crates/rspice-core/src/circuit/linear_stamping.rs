@@ -34,6 +34,16 @@ impl CircuitData {
         }
     }
 
+    /// Stamp the `.IC` ties of a held operating point
+    /// ([`CircuitData::dc_initial_condition_ties`]) as Norton pairs.
+    #[inline]
+    fn stamp_dc_initial_condition_ties_direct(&self, matrix: &mut StaticMatrix, rhs: &mut [Value]) {
+        for &(row, conductance, voltage) in &self.dc_initial_condition_ties {
+            matrix.add(row, row, conductance);
+            rhs[row] += conductance * voltage;
+        }
+    }
+
     #[inline]
     fn stamp_global_shunt(&self, matrix: &mut TripletMatrix) {
         if self.global_shunt_conductance == 0.0 {
@@ -815,6 +825,7 @@ impl CircuitData {
         self.stamp_tlines_dc_direct(matrix);
         self.stamp_coupled_tlines_dc_direct(matrix);
         self.stamp_xyce_core_hidden_state_identity_direct(matrix, rhs);
+        self.stamp_dc_initial_condition_ties_direct(matrix, rhs);
     }
 
     /// Stamp linear devices for transient Newton iterations.
@@ -1014,6 +1025,7 @@ impl CircuitData {
         self.stamp_tlines_dc_direct(matrix);
         self.stamp_coupled_tlines_dc_direct(matrix);
         self.stamp_xyce_core_hidden_state_identity_direct(matrix, rhs);
+        self.stamp_dc_initial_condition_ties_direct(matrix, rhs);
     }
 
     /// Stamp all linear devices for DC analysis

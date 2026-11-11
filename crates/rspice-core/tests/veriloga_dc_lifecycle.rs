@@ -1564,8 +1564,13 @@ endmodule
         deck_path(&model)
     ))
     .expect("parse held .IC deck");
+    // The default dialect ties V(m) through QSPICE's 1 mOhm to 0.3 V behind
+    // the divider's 500 Ohm; Xyce pins it.
     for (dialect, held) in [
-        (SpiceDialect::BestAvailable, 0.3),
+        (
+            SpiceDialect::BestAvailable,
+            (2.0e-3 * 1.0 + 1.0e3 * 0.3) / (2.0e-3 + 1.0e3),
+        ),
         (SpiceDialect::Xyce, 0.3),
         (SpiceDialect::Ngspice, 1.0),
     ] {

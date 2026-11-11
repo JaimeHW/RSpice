@@ -535,12 +535,18 @@ impl Engine {
     /// for it, with the `.IC` nodes held through it; the operating point then
     /// solves from there with the `.IC` nodes alone held. Both solves start
     /// where the forced `.IC` operating point does, from zero.
+    ///
+    /// With a `tie_conductance` the operating point holds each `.IC` node
+    /// against ground through that conductance to a source at its value, as
+    /// QSPICE does, instead of pinning it; the circuit then solves as one
+    /// with those resistors in it. A `.IC` between two nodes stays pinned.
     pub(in crate::engine) fn solve_nonlinear_holding_initial_conditions_and_abort(
         &self,
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
         initial_conditions: &[StartupVoltageConstraint],
         hints: &StartupVoltageHints,
+        tie_conductance: Option<Value>,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
         let mut seed = vec![0.0; circuit.matrix_size()];
@@ -563,13 +569,35 @@ impl Engine {
                 Err(err) => return Err(err),
             }
         }
-        self.solve_nonlinear_dc_startup_with_constraints_and_abort(
-            circuit,
-            matrix,
-            &seed,
-            initial_conditions,
-            abort,
-        )
+        let Some(conductance) = tie_conductance else {
+            return self.solve_nonlinear_dc_startup_with_constraints_and_abort(
+                circuit,
+                matrix,
+                &seed,
+                initial_conditions,
+                abort,
+            );
+        };
+        let (tied, pinned): (Vec<_>, Vec<_>) = initial_conditions
+            .iter()
+            .copied()
+            .partition(|constraint| constraint.negative == 0);
+        Self::seed_node_voltage_hints(circuit, &mut seed, &tied);
+        let node_count = circuit.num_nodes();
+        circuit.dc_initial_condition_ties = tied
+            .iter()
+            .filter(|constraint| {
+                constraint.voltage.is_finite()
+                    && constraint.positive > 0
+                    && constraint.positive <= node_count
+            })
+            .map(|constraint| (constraint.positive - 1, conductance, constraint.voltage))
+            .collect();
+        let result = self.solve_nonlinear_dc_startup_with_constraints_and_abort(
+            circuit, matrix, &seed, &pinned, abort,
+        );
+        circuit.dc_initial_condition_ties.clear();
+        result
     }
 
     /// The nodeset qualifier belongs to the temporary model/authored nodeset
