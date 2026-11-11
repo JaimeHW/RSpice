@@ -2394,33 +2394,56 @@ impl NetlistDocumentState {
     }
 }
 
-/// Reconcile queued execution and diff state before rendering the document.
-pub fn prepare(state: &mut AppState) {
-    if state.runs.manual_run.rerun_queued
-        && !state.model.simulation.execution.has_active_execution()
-    {
-        state.runs.manual_run.rerun_queued = false;
-        if let Some(reason) = state.manual_deck_run_block_reason() {
-            state.record(
+/// Reconcile queued execution and diff state before rendering the document,
+/// over the model, the netlist editor's state, the runs and the session.
+pub fn prepare(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    runs: &mut RunsState,
+    workbench: &mut crate::workbench::state::WorkbenchSession,
+) {
+    if runs.manual_run.rerun_queued && !model.simulation.execution.has_active_execution() {
+        runs.manual_run.rerun_queued = false;
+        if let Some(reason) = manual_deck_run_block_reason_in(model, netlist, workbench.messages())
+        {
+            model.record(
                 crate::diagnostics::LogSeverity::Warning,
                 crate::diagnostics::LogSource::Run,
                 format!("Queued netlist re-run cancelled: {reason}"),
             );
         } else {
-            state.request_netlist_manual_deck_run();
+            request_netlist_manual_deck_run_in(model, runs, workbench);
         }
     }
 
-    let data_version = state.model.simulation.view.data_version;
-    if state.code.netlist.seen_data_version == data_version {
+    let data_version = model.simulation.view.data_version;
+    if netlist.seen_data_version == data_version {
         return;
     }
-    state.code.netlist.seen_data_version = data_version;
-    if let Some(baseline) = state.runs.manual_run.last_run_buffer.as_deref() {
-        state.runs.manual_run.edited_lines = baseline::changed_lines_against_baseline(
-            &state.model.simulation.source.netlist_content,
+    netlist.seen_data_version = data_version;
+    if let Some(baseline) = runs.manual_run.last_run_buffer.as_deref() {
+        runs.manual_run.edited_lines = baseline::changed_lines_against_baseline(
+            &model.simulation.source.netlist_content,
             baseline,
         );
+    }
+}
+
+/// Run the Netlist workspace's deck: remember the page Run was pressed on,
+/// and start the run, or queue it behind the one going. It writes the model,
+/// the runs and the session.
+pub(crate) fn request_netlist_manual_deck_run_in(
+    model: &mut Model,
+    runs: &mut RunsState,
+    workbench: &mut crate::workbench::state::WorkbenchSession,
+) {
+    workbench.run_press_route = Some(workbench.current_route());
+    runs.run_watch.finished_run = None;
+    model.simulation.execution.run_intent = crate::state::SimulationRunIntent::ManualDeck;
+    if model.simulation.execution.has_active_execution() {
+        runs.manual_run.rerun_queued = true;
+    } else {
+        model.simulation.execution.request_manual_deck_run();
     }
 }
 

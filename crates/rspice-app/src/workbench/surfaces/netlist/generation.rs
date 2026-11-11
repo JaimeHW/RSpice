@@ -14,7 +14,8 @@ use crate::state::{
     GeneratedArtifact, GeneratedProvenance, GeneratedSourceMapEntry, GenerationInput,
     NetlistDocument, NetlistDocumentId,
 };
-use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
+use crate::workbench::app_state::Model;
+use crate::workbench::documents::netlist_document::{ActiveNetlistDocument, NetlistDocumentState};
 use crate::workbench::{AppState, RSpiceApp};
 
 /// Rebuild the immutable generated primary whenever any authoritative project
@@ -137,14 +138,19 @@ fn refresh_generated_artifact(app: &mut RSpiceApp) {
         return;
     }
 
-    let generated = crate::workbench::menu_bar::build_menu_netlist(&app.state);
+    let generated = crate::workbench::menu_bar::build_menu_netlist_in(&app.state.model);
     let failed = |state: &mut AppState, error: String| {
         state.code.netlist.failed_generation_input_digest = Some(input_digest);
         state.model.netlist_artifacts.generation_error = Some(error);
     };
     match generated {
         Ok(generated) => {
-            match publish_generated_document(&app.state, input_digest, generated.source) {
+            match publish_generated_document(
+                &app.state.model,
+                &app.state.code.netlist,
+                input_digest,
+                generated.source,
+            ) {
                 Ok((generated_document, owned_document)) => {
                     if let (Some(previous), Some(current)) = (
                         app.state
@@ -197,8 +203,8 @@ fn refresh_generated_artifact(app: &mut RSpiceApp) {
                     app.state.model.netlist_artifacts.generated_input_digest = Some(input_digest);
                     app.state.model.netlist_artifacts.generation_error = None;
                     app.state.code.netlist.failed_generation_input_digest = None;
-                    crate::workbench::menu_bar::record_netlist_warnings(
-                        &mut app.state,
+                    crate::workbench::menu_bar::record_netlist_warnings_in(
+                        &mut app.state.model,
                         generated.warnings,
                     );
                 }
@@ -217,27 +223,23 @@ fn refresh_generated_artifact(app: &mut RSpiceApp) {
 }
 
 pub(super) fn publish_generated_document(
-    state: &AppState,
+    model: &Model,
+    netlist: &NetlistDocumentState,
     input_digest: crate::product::ContentDigest,
     source: String,
 ) -> Result<(NetlistDocument, Option<NetlistDocument>), String> {
     let provenance = GeneratedProvenance::try_new(
         "rspice-netlist-generator/v1",
-        GenerationInput::new(
-            state.model.workspace.content.project.revision(),
-            input_digest,
-        ),
+        GenerationInput::new(model.workspace.content.project.revision(), input_digest),
     )
     .map_err(|error| error.to_string())?;
-    let source_map = generated_source_map(state, &source)?;
-    let dependencies = generated_project_source_dependencies(state, &source)?;
+    let source_map = generated_source_map(model, &source)?;
+    let dependencies = generated_project_source_dependencies(model, &source)?;
     let artifact =
         GeneratedArtifact::try_from_utf8(provenance, source.into_bytes(), dependencies, source_map)
             .map_err(|error| error.to_string())?;
 
-    let generated_document = if let Some(existing) =
-        &state.model.netlist_artifacts.generated_document
-    {
+    let generated_document = if let Some(existing) = &model.netlist_artifacts.generated_document {
         let mut next = existing.clone();
         let expected_digest = existing
             .generated_artifact()
@@ -255,24 +257,23 @@ pub(super) fn publish_generated_document(
     // created. Current generated revisions live in the primary registry and
     // compare history; silently rebasing owned source would destroy the
     // three-way ownership contract.
-    let owned_document = state.code.netlist.owned_document.clone();
+    let owned_document = netlist.owned_document.clone();
     Ok((generated_document, owned_document))
 }
 
 pub(super) fn generated_project_source_dependencies(
-    state: &AppState,
+    model: &Model,
     source: &str,
 ) -> Result<Vec<crate::state::DependencyMetadata>, String> {
     let include_directives = crate::state::parse_include_directives(source);
     let mut dependencies = Vec::new();
 
-    let projection = state
-        .model
+    let projection = model
         .workspace
         .configuration_execution_projection(
-            &state.model.library_manager,
-            &state.model.workspace.content.active_view,
-            &state.model.schematic,
+            &model.library_manager,
+            &model.workspace.content.active_view,
+            &model.schematic,
         )
         .map_err(|error| error.to_string())?;
     let mut retained_keys = std::collections::HashSet::new();
@@ -283,8 +284,7 @@ pub(super) fn generated_project_source_dependencies(
         if !retained_keys.insert(binding.source_key().to_owned()) {
             continue;
         }
-        let bundle = state
-            .model
+        let bundle = model
             .workspace
             .content
             .project_sources
@@ -441,10 +441,10 @@ fn compiler_dependency_locator(
 }
 
 fn generated_source_map(
-    state: &AppState,
+    model: &Model,
     source: &str,
 ) -> Result<Vec<GeneratedSourceMapEntry>, String> {
-    let top = state.model.workspace.content.active_view.clone();
+    let top = model.workspace.content.active_view.clone();
     let mut current = top.clone();
     let mut entries = Vec::with_capacity(source.lines().count());
 
@@ -456,8 +456,7 @@ fn generated_source_map(
             .is_some_and(|head| head.eq_ignore_ascii_case(".subckt"))
             && let Some(cell) = tokens.get(1)
         {
-            current = state
-                .model
+            current = model
                 .workspace
                 .content
                 .schematic_buffers
@@ -475,7 +474,7 @@ fn generated_source_map(
                 });
         }
 
-        let (instance_identity, component_identity) = source_line_component(state, &current, line)
+        let (instance_identity, component_identity) = source_line_component(model, &current, line)
             .map_or((None, None), |(instance, component)| {
                 (Some(instance), Some(component))
             });
@@ -501,7 +500,7 @@ fn generated_source_map(
 }
 
 fn source_line_component(
-    state: &AppState,
+    model: &Model,
     reference: &crate::state::CellViewRef,
     line: &str,
 ) -> Option<(String, String)> {
@@ -511,8 +510,7 @@ fn source_line_component(
         return None;
     }
     let named = tokens.next();
-    let schematic = state
-        .model
+    let schematic = model
         .workspace
         .content
         .schematic_buffers
@@ -566,7 +564,7 @@ mod tests {
             .insert(view.clone(), design);
 
         let entries = generated_source_map(
-            &state,
+            &state.model,
             "* title\nYMEMRISTOR MR1 a 0 mem_MR1\nR1 a 0 1k\nYMEMRISTOR R1 a 0 m\n",
         )
         .expect("source map");

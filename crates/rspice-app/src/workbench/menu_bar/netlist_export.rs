@@ -337,13 +337,19 @@ pub(crate) struct GeneratedNetlist {
 /// the outcome; the Netlist page states it where the deck would be. The error
 /// is every reason the generator refused, in its order.
 pub(crate) fn build_menu_netlist(state: &AppState) -> Result<GeneratedNetlist, Vec<String>> {
-    let execution_projection = state
-        .model
+    build_menu_netlist_in(&state.model)
+}
+
+/// [`build_menu_netlist`], over the model.
+pub(crate) fn build_menu_netlist_in(
+    model: &crate::workbench::app_state::Model,
+) -> Result<GeneratedNetlist, Vec<String>> {
+    let execution_projection = model
         .workspace
         .configuration_execution_projection(
-            &state.model.library_manager,
-            &state.model.workspace.content.active_view,
-            &state.model.schematic,
+            &model.library_manager,
+            &model.workspace.content.active_view,
+            &model.schematic,
         )
         .map_err(|error| vec![error.to_string()])?;
     let root_reference = execution_projection.root().clone();
@@ -351,11 +357,10 @@ pub(crate) fn build_menu_netlist(state: &AppState) -> Result<GeneratedNetlist, V
         .root_schematic()
         .expect("a successful execution projection has a materialized root");
     let hierarchy = rspice_design::hierarchy::HierarchySource::from_execution_projection(
-        state.model.library_manager.catalog(),
+        model.library_manager.catalog(),
         &execution_projection,
     );
-    let analysis_instances = state
-        .model
+    let analysis_instances = model
         .sim_setup
         .analysis_plan
         .as_ref()
@@ -364,8 +369,7 @@ pub(crate) fn build_menu_netlist(state: &AppState) -> Result<GeneratedNetlist, V
         .filter(|instance| instance.enabled())
         .map(crate::simulation::plan::AnalysisInstance::id)
         .collect::<Vec<_>>();
-    let Some(plan_id) = state
-        .model
+    let Some(plan_id) = model
         .sim_setup
         .analysis_plan
         .as_ref()
@@ -375,7 +379,7 @@ pub(crate) fn build_menu_netlist(state: &AppState) -> Result<GeneratedNetlist, V
             "the design has no active simulation plan to write the deck from".to_owned(),
         ]);
     };
-    let Some(plan_payload) = state.model.workspace.content.plan_data(plan_id) else {
+    let Some(plan_payload) = model.workspace.content.plan_data(plan_id) else {
         return Err(vec![format!(
             "simulation plan {plan_id} has no configuration of its own"
         )]);
@@ -411,12 +415,11 @@ pub(crate) fn build_menu_netlist(state: &AppState) -> Result<GeneratedNetlist, V
         return Err(reasons);
     }
 
-    let spice_netlist = state
-        .model
+    let spice_netlist = model
         .workspace
         .content
         .bind_generated_netlist_provenance(generation.netlist);
-    let spice_netlist = crate::simulation::controller::SimulationController::append_plan_measurements_to_generated_netlist(&state.model, &spice_netlist)
+    let spice_netlist = crate::simulation::controller::SimulationController::append_plan_measurements_to_generated_netlist(model, &spice_netlist)
         .map_err(|error| vec![error.to_string()])?;
     Ok(GeneratedNetlist {
         source: spice_netlist,
@@ -433,8 +436,16 @@ pub(crate) fn netlist_failure_text(action: &str, reasons: &[String]) -> String {
 /// Record a generated deck's warnings, once each, as the Console's account of
 /// what the generator substituted or ignored.
 pub(crate) fn record_netlist_warnings(state: &mut AppState, warnings: Vec<String>) {
+    record_netlist_warnings_in(&mut state.model, warnings);
+}
+
+/// [`record_netlist_warnings`], in the model's Console.
+pub(crate) fn record_netlist_warnings_in(
+    model: &mut crate::workbench::app_state::Model,
+    warnings: Vec<String>,
+) {
     for warning in warnings {
-        state.record(
+        model.record(
             crate::diagnostics::LogSeverity::Warning,
             crate::diagnostics::LogSource::Studio,
             warning,

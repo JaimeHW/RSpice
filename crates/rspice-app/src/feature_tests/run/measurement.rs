@@ -186,7 +186,7 @@ fn authored_plan_measurements_reach_sealed_source_results_and_saved_projects() {
     let snapshot =
         SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
             .unwrap();
-    let generated = crate::workbench::menu_bar::build_menu_netlist(&state)
+    let generated = crate::workbench::menu_bar::build_menu_netlist_in(&state.model)
         .unwrap()
         .source;
     let inspection =

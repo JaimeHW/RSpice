@@ -17,7 +17,7 @@ pub(crate) use bom_export::action_export_bill_of_materials_with_io;
 pub(crate) use file_menu::{FileMenuAction, dispatch_file_menu_action};
 pub(crate) use netlist_export::{
     action_export_generated_netlist_with_options, action_export_netlist_with_io,
-    action_view_netlist, build_menu_netlist, netlist_failure_text, record_netlist_warnings,
+    action_view_netlist, build_menu_netlist_in, netlist_failure_text, record_netlist_warnings_in,
 };
 pub(crate) use tools_menu::{check_cellview, check_design};
 pub(crate) use waveform_export::action_export_result_selection_with_io;

@@ -162,7 +162,12 @@ fn reveal_in_netlist(ui: &Ui, state: &mut AppState, editor_id: egui::Id) {
 
 pub(in crate::workbench) fn prepare_workspace(app: &mut RSpiceApp) {
     generation::reconcile_documents(app);
-    crate::workbench::documents::netlist_document::prepare(&mut app.state);
+    crate::workbench::documents::netlist_document::prepare(
+        &mut app.state.model,
+        &mut app.state.code.netlist,
+        &mut app.state.runs,
+        &mut app.state.workbench,
+    );
 }
 
 pub(in crate::workbench) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -1401,9 +1406,13 @@ mod tests {
     pub(super) fn retain_generated(state: &mut AppState, source: &str) {
         let input_digest = crate::product::ContentDigest::from_bytes([0x41; 32]);
         let source = source.to_owned();
-        let (document, owned) =
-            generation::publish_generated_document(state, input_digest, source.clone())
-                .expect("canonical generated fixture");
+        let (document, owned) = generation::publish_generated_document(
+            &state.model,
+            &state.code.netlist,
+            input_digest,
+            source.clone(),
+        )
+        .expect("canonical generated fixture");
         state.model.netlist_artifacts.generated_source = source;
         state.model.netlist_artifacts.generated_document = Some(document);
         state.code.netlist.owned_document = owned;
@@ -1860,7 +1869,7 @@ mod tests {
         let state = AppState::default();
         let source = "R1 1 0 1k\n.end\n".to_owned();
 
-        let dependencies = generation::generated_project_source_dependencies(&state, &source)
+        let dependencies = generation::generated_project_source_dependencies(&state.model, &source)
             .expect("unreferenced source does not create a dependency");
         assert!(dependencies.is_empty());
     }
@@ -1870,7 +1879,7 @@ mod tests {
         let (state, source_key) = configured_veriloga_state();
         let source = format!("configured deck\n.veriloga \"{source_key}\" sealed_gain\n.end\n");
 
-        let dependencies = generation::generated_project_source_dependencies(&state, &source)
+        let dependencies = generation::generated_project_source_dependencies(&state.model, &source)
             .expect("retain exact project source closure");
 
         assert_eq!(dependencies.len(), 2);

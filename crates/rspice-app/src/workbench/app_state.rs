@@ -427,14 +427,11 @@ impl AppState {
 
     /// Request a Netlist workspace run, queuing one re-run if the engine is busy.
     pub(crate) fn request_netlist_manual_deck_run(&mut self) {
-        self.workbench.run_press_route = Some(self.workbench.current_route());
-        self.runs.run_watch.finished_run = None;
-        self.model.simulation.execution.run_intent = crate::state::SimulationRunIntent::ManualDeck;
-        if self.model.simulation.execution.has_active_execution() {
-            self.runs.manual_run.rerun_queued = true;
-        } else {
-            self.model.simulation.execution.request_manual_deck_run();
-        }
+        crate::workbench::documents::netlist_document::request_netlist_manual_deck_run_in(
+            &mut self.model,
+            &mut self.runs,
+            &mut self.workbench,
+        );
     }
 
     /// [`run_preflight::current_blocking_drc_result`] for the session's model.
