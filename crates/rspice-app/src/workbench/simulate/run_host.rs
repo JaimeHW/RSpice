@@ -141,7 +141,9 @@ impl RunHost for RunView<'_, '_> {
 
     fn ensure_design_check(&mut self, subject: CellViewRef) -> Result<(), String> {
         let facts = self.slot_facts();
-        let (outcome, prompt) = ensure_design_check(self.model, subject, facts);
+        let (outcome, prompt) = self
+            .model
+            .ensure_design_check(subject, CheckScope::Design, facts);
         if let Some(prompt) = prompt {
             self.wb.prompt(prompt);
         }
@@ -259,7 +261,9 @@ impl RunHost for FrozenRun {
 
     fn ensure_design_check(&mut self, subject: CellViewRef) -> Result<(), String> {
         let facts = self.slot_facts();
-        ensure_design_check(&mut self.model, subject, facts).0
+        self.model
+            .ensure_design_check(subject, CheckScope::Design, facts)
+            .0
     }
 }
 
@@ -270,23 +274,6 @@ fn slot_facts(runs: &RunsState, review_markers: SchematicReviewMarkerVisibility)
         preflight_report_retained: runs.preflight.report.is_some(),
         review_markers,
     }
-}
-
-/// Check `subject` as Check Design does, unless a current check of it already
-/// describes it, with what the drawing sync had to say.
-fn ensure_design_check(
-    model: &mut Model,
-    subject: CellViewRef,
-    facts: SlotFacts,
-) -> (Result<(), String>, Option<String>) {
-    if model
-        .current_design_check(&subject, CheckScope::Design, facts)
-        .is_some()
-    {
-        return (Ok(()), None);
-    }
-    let (outcome, prompt) = model.run_synced_design_check(subject, CheckScope::Design, facts);
-    (outcome.map(|_| ()), prompt)
 }
 
 #[cfg(test)]
