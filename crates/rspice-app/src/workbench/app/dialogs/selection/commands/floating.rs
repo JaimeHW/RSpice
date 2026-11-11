@@ -10,8 +10,18 @@ use rspice_design::schematic::clipboard::ClipboardData;
 use rspice_design::schematic::component_edit::{SelectionTransform, transform_clipboard};
 
 use super::{bound_to_active_cell, named_net_connections, object_count};
-use crate::state::{Point, Tool};
-use crate::workbench::app_state::AppState;
+use crate::state::{DuplicateExternalNets, Point, Tool};
+use crate::workbench::app::dialogs::selection::array::{
+    ArraySelectionDialogState, cancel_armed_array_selection_in,
+};
+use crate::workbench::app::dialogs::selection::move_selection::{
+    MoveSelectionDialogState, cancel_armed_move_selection_in,
+};
+use crate::workbench::app::dialogs::selection::stretch::{
+    StretchSelectionDialogState, cancel_armed_stretch_selection_in,
+};
+use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::state::WorkbenchSession;
 
 /// A Paste or Duplicate floating under the pointer until a click places it.
 ///
@@ -65,53 +75,89 @@ pub(crate) enum FloatingPasteOrigin {
     },
 }
 
-impl AppState {
-    /// Float `objects` with their middle at `anchor`. The pointer carries
-    /// the copy from there; a copy asked for with the pointer off the canvas
-    /// jumps to the pointer when it arrives.
-    pub(super) fn float_schematic_objects(
-        &mut self,
-        objects: &ClipboardData,
-        anchor: Point,
-        origin: FloatingPasteOrigin,
-    ) -> Result<(), String> {
-        let objects = bound_to_active_cell(self, objects)?.into_owned();
-        // A copy floating is the command now running; the one before it
-        // stops, as a new command stops the last in every schematic editor.
-        if self.design.move_selection.armed {
-            crate::workbench::app::cancel_armed_move_selection(self);
-        }
-        if self.design.stretch_selection.armed {
-            crate::workbench::app::cancel_armed_stretch_selection(self);
-        }
-        if self.design.array_selection.armed {
-            crate::workbench::app::cancel_armed_array_selection(self);
-        }
-        if self.model.schematic.session.editor.tool != Tool::Select {
-            self.model.schematic.cancel_tool();
-        }
-        let grid = self.model.schematic.document().grid_size;
-        let count = objects.count();
-        self.design.floating_paste = Some(FloatingPaste {
-            objects,
-            start: on_grid(anchor, grid),
-            grab: self
-                .design
-                .canvas_hover
-                .map(|_| on_grid(self.schematic_paste_anchor(), grid)),
-            delta: Point::origin(),
-            view_path: self.model.workspace.content.active_view.display_path(),
-            sheet: active_sheet(self),
-            origin,
-            preview: None,
-        });
-        self.prompt(format!(
-            "Click to place {}. R rotates, M mirrors, Esc cancels.",
-            object_count(count)
-        ));
-        Ok(())
-    }
+/// What a floating Paste or Duplicate reads and writes of the design
+/// feature's state: the copy it holds, the armed commands it stops, where
+/// the pointer is, the clipboard Paste floats and how Duplicate treats the
+/// nets it leaves.
+pub(crate) struct FloatingCopyParts<'a> {
+    pub(crate) floating_paste: &'a mut Option<FloatingPaste>,
+    pub(crate) move_selection: &'a mut MoveSelectionDialogState,
+    pub(crate) stretch_selection: &'a mut StretchSelectionDialogState,
+    pub(crate) array_selection: &'a mut ArraySelectionDialogState,
+    pub(crate) canvas_hover: Option<(f64, f64)>,
+    pub(crate) canvas_view_center: Option<(f64, f64)>,
+    pub(crate) clipboard: &'a ClipboardData,
+    pub(crate) duplicate_external_nets: DuplicateExternalNets,
+}
 
+impl FloatingCopyParts<'_> {
+    /// [`schematic_paste_anchor`] for this pointer.
+    pub(crate) fn paste_anchor(&self, model: &Model) -> Point {
+        schematic_paste_anchor(self.canvas_hover, self.canvas_view_center, model)
+    }
+}
+
+/// Where a paste should land, snapped to the schematic grid: under the
+/// cursor when it hovers the canvas, otherwise the center of the visible
+/// canvas (menu-driven paste), otherwise a sane fixed spot.
+pub(crate) fn schematic_paste_anchor(
+    canvas_hover: Option<(f64, f64)>,
+    canvas_view_center: Option<(f64, f64)>,
+    model: &Model,
+) -> Point {
+    let grid = model.schematic.document().grid_size.max(1);
+    let (x, y) = canvas_hover.or(canvas_view_center).unwrap_or((20.0, 20.0));
+    Point::new((x.round() as i32) * grid, (y.round() as i32) * grid)
+}
+
+/// Float `objects` with their middle at `anchor`. The pointer carries
+/// the copy from there; a copy asked for with the pointer off the canvas
+/// jumps to the pointer when it arrives.
+pub(super) fn float_schematic_objects(
+    design: &mut FloatingCopyParts<'_>,
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
+    objects: &ClipboardData,
+    anchor: Point,
+    origin: FloatingPasteOrigin,
+) -> Result<(), String> {
+    let objects = bound_to_active_cell(model, objects)?.into_owned();
+    // A copy floating is the command now running; the one before it
+    // stops, as a new command stops the last in every schematic editor.
+    if design.move_selection.armed {
+        cancel_armed_move_selection_in(design.move_selection, model);
+    }
+    if design.stretch_selection.armed {
+        cancel_armed_stretch_selection_in(design.stretch_selection, model);
+    }
+    if design.array_selection.armed {
+        cancel_armed_array_selection_in(design.array_selection, model);
+    }
+    if model.schematic.session.editor.tool != Tool::Select {
+        model.schematic.cancel_tool();
+    }
+    let grid = model.schematic.document().grid_size;
+    let count = objects.count();
+    *design.floating_paste = Some(FloatingPaste {
+        objects,
+        start: on_grid(anchor, grid),
+        grab: design
+            .canvas_hover
+            .map(|_| on_grid(design.paste_anchor(model), grid)),
+        delta: Point::origin(),
+        view_path: model.workspace.content.active_view.display_path(),
+        sheet: active_sheet(model),
+        origin,
+        preview: None,
+    });
+    wb.prompt(format!(
+        "Click to place {}. R rotates, M mirrors, Esc cancels.",
+        object_count(count)
+    ));
+    Ok(())
+}
+
+impl AppState {
     /// Land the floating copy where it sits now. Returns whether anything
     /// was placed.
     pub(crate) fn place_floating_paste(&mut self) -> bool {
@@ -251,21 +297,15 @@ fn floating_scope(state: &AppState, floating: &FloatingPaste) -> Result<(), Stri
     if floating.view_path != state.model.workspace.content.active_view.display_path() {
         return Err("another cell view is open".to_owned());
     }
-    if floating.sheet != active_sheet(state) {
+    if floating.sheet != active_sheet(&state.model) {
         return Err("another sheet is open".to_owned());
     }
     Ok(())
 }
 
-fn active_sheet(state: &AppState) -> Option<crate::state::SheetId> {
-    let key = state
-        .model
-        .workspace
-        .content
-        .active_schematic_reference()
-        .key();
-    state
-        .model
+fn active_sheet(model: &Model) -> Option<crate::state::SheetId> {
+    let key = model.workspace.content.active_schematic_reference().key();
+    model
         .workspace
         .content
         .design_management

@@ -60,46 +60,49 @@ fn schematic_for_workspace(state: &mut AppState, reference: &CellViewRef) -> Sch
     schematic
 }
 
+/// Copy the active complete-object selection into `clipboard`, using the
+/// exact rendered terminal geometry of authored and generated symbols.
+///
+/// `SchematicState::copy_selection` remains a state-only fallback for
+/// primitive fixtures. Production UI commands must enter here so a wire
+/// joining two authored cell pins is captured with the selected
+/// instances instead of being silently omitted. The copy goes to the
+/// app's clipboard, which outlives the cell view it came from.
+pub(crate) fn copy_active_schematic_selection(
+    clipboard: &mut rspice_design::schematic::clipboard::ClipboardData,
+    model: &Model,
+) -> bool {
+    let Some(copy) = capture_active_schematic_selection(model) else {
+        return false;
+    };
+    *clipboard = copy;
+    true
+}
+
+/// The active sheet's selection as a clipboard would hold it, or `None`
+/// when nothing is selected. Nothing is stored anywhere.
+pub(crate) fn capture_active_schematic_selection(
+    model: &Model,
+) -> Option<rspice_design::schematic::clipboard::ClipboardData> {
+    if model.schematic.session.editor.selection.is_empty() {
+        return None;
+    }
+    let symbols = model.schematic_symbol_context();
+    let on_sheet =
+        |id| crate::schematic::view::sheet_visibility::object_is_on_active_sheet(model, id);
+    Some(model.schematic.capture_complete_selection_resolved(
+        |component| {
+            symbols
+                .named_terminal_points(component)
+                .into_iter()
+                .map(|(_, point)| point)
+                .collect()
+        },
+        &on_sheet,
+    ))
+}
+
 impl AppState {
-    /// Copy the active complete-object selection using the exact rendered
-    /// terminal geometry of authored and generated symbols.
-    ///
-    /// `SchematicState::copy_selection` remains a state-only fallback for
-    /// primitive fixtures. Production UI commands must enter here so a wire
-    /// joining two authored cell pins is captured with the selected
-    /// instances instead of being silently omitted. The copy goes to the
-    /// app's clipboard, which outlives the cell view it came from.
-    pub(crate) fn copy_active_schematic_selection(&mut self) -> bool {
-        let Some(copy) = self.capture_active_schematic_selection() else {
-            return false;
-        };
-        self.design.schematic_clipboard = copy;
-        true
-    }
-
-    /// The active sheet's selection as a clipboard would hold it, or `None`
-    /// when nothing is selected. Nothing is stored anywhere.
-    pub(crate) fn capture_active_schematic_selection(
-        &self,
-    ) -> Option<rspice_design::schematic::clipboard::ClipboardData> {
-        if self.model.schematic.session.editor.selection.is_empty() {
-            return None;
-        }
-        let symbols = schematic_symbol_context(self);
-        let on_sheet =
-            |id| crate::schematic::view::sheet_visibility::object_is_on_active_sheet(self, id);
-        Some(self.model.schematic.capture_complete_selection_resolved(
-            |component| {
-                symbols
-                    .named_terminal_points(component)
-                    .into_iter()
-                    .map(|(_, point)| point)
-                    .collect()
-            },
-            &on_sheet,
-        ))
-    }
-
     pub(crate) fn rebuild_active_connections_from_symbols(&mut self) {
         let terminals = {
             let symbols = schematic_symbol_context(self);
@@ -182,19 +185,9 @@ impl AppState {
         self.model.schematic_edit_read_only()
     }
 
-    /// Names the owner of the refusal, in the order
-    /// [`Self::active_view_read_only`] consults them.
+    /// [`read_only_master_message`] for the session's model.
     pub(crate) fn read_only_master_message(&self) -> String {
-        if self.model.safe_mode.project_read_only() {
-            return "Safe mode opened this project read-only - restart without safe mode to edit"
-                .to_owned();
-        }
-        if self.model.workspace.content.active_read_only_reference() {
-            return "Read-only hierarchy reference - reopen the view in an editable context to modify it"
-                .to_owned();
-        }
-        let library = &self.model.workspace.content.active_view.library;
-        format!("Read-only - '{library}' masters cannot be edited")
+        read_only_master_message(&self.model)
     }
 
     pub(crate) fn jump_to_log_anchor(&mut self, anchor: LogAnchor) {
@@ -610,33 +603,10 @@ impl AppState {
         self.prompt(format!("Entered {}.", reference.display_path()));
     }
 
-    /// Refuse an edit on a read-only view, with a prompt that names the
-    /// library. Returns true when the edit must be blocked.
+    /// [`deny_read_only_edit`] for the session's model, prompting on its
+    /// status bar.
     pub(crate) fn deny_read_only_edit(&mut self) -> bool {
-        if !self.schematic_edit_read_only() {
-            return false;
-        }
-        let live_lock_holder = self
-            .model
-            .live_write_locks
-            .schematic_views
-            .get(&self.model.workspace.content.active_key())
-            .cloned();
-        let message = if self.model.safe_mode.project_read_only() {
-            "Safe mode is read-only; no design data was changed.".to_owned()
-        } else if self.active_view_read_only() {
-            self.read_only_master_message()
-        } else if let Some(holder) = live_lock_holder {
-            format!("{holder} holds the write lease on this schematic; no design data was changed.")
-        } else if self.model.live_write_locks.mirror {
-            "This is the host's working copy; request the write lease from the live session \
-             to edit."
-                .to_owned()
-        } else {
-            "The active schematic is read-only; no design data was changed.".to_owned()
-        };
-        self.prompt(message);
-        true
+        deny_read_only_edit(&self.model, &mut self.workbench)
     }
 
     /// Ascend one hierarchy level (the U gesture / pathbar action).
@@ -896,6 +866,49 @@ pub(crate) fn hierarchy_master_for_component(
         .and_then(|cell| cell.get_view(&reference.view))
         .map(|view| view.view_type)?;
     (view_type == ViewType::Schematic).then(|| (component.name.clone(), reference))
+}
+
+/// Names the owner of the refusal, in the order
+/// [`Model::active_view_read_only`] consults them.
+pub(crate) fn read_only_master_message(model: &Model) -> String {
+    if model.safe_mode.project_read_only() {
+        return "Safe mode opened this project read-only - restart without safe mode to edit"
+            .to_owned();
+    }
+    if model.workspace.content.active_read_only_reference() {
+        return "Read-only hierarchy reference - reopen the view in an editable context to modify it"
+            .to_owned();
+    }
+    let library = &model.workspace.content.active_view.library;
+    format!("Read-only - '{library}' masters cannot be edited")
+}
+
+/// Refuse an edit on a read-only view, with a prompt that names the
+/// library. Returns true when the edit must be blocked.
+pub(crate) fn deny_read_only_edit(model: &Model, wb: &mut WorkbenchSession) -> bool {
+    if !model.schematic_edit_read_only() {
+        return false;
+    }
+    let live_lock_holder = model
+        .live_write_locks
+        .schematic_views
+        .get(&model.workspace.content.active_key())
+        .cloned();
+    let message = if model.safe_mode.project_read_only() {
+        "Safe mode is read-only; no design data was changed.".to_owned()
+    } else if model.active_view_read_only() {
+        read_only_master_message(model)
+    } else if let Some(holder) = live_lock_holder {
+        format!("{holder} holds the write lease on this schematic; no design data was changed.")
+    } else if model.live_write_locks.mirror {
+        "This is the host's working copy; request the write lease from the live session \
+         to edit."
+            .to_owned()
+    } else {
+        "The active schematic is read-only; no design data was changed.".to_owned()
+    };
+    wb.prompt(message);
+    true
 }
 
 /// Sync the active schematic into the workspace through

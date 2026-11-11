@@ -633,19 +633,6 @@ impl AppState {
         remember_recent_file(&self.model, &mut self.platform, kind, path);
     }
 
-    /// Where a paste should land, snapped to the schematic grid: under the
-    /// cursor when it hovers the canvas, otherwise the center of the visible
-    /// canvas (menu-driven paste), otherwise a sane fixed spot.
-    pub(crate) fn schematic_paste_anchor(&self) -> crate::state::Point {
-        let grid = self.model.schematic.document().grid_size.max(1);
-        let (x, y) = self
-            .design
-            .canvas_hover
-            .or(self.design.canvas_view_center)
-            .unwrap_or((20.0, 20.0));
-        crate::state::Point::new((x.round() as i32) * grid, (y.round() as i32) * grid)
-    }
-
     /// Whether a schematic edit is under way: an undo step still open, as
     /// while a drag is held, or a copy floating under the pointer. History
     /// waits for either to land or be cancelled.

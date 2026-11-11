@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::state::{ComponentType, Point, SchematicState};
-use crate::workbench::state::Workspace;
+use crate::workbench::{app::duplicate_schematic_selection_at, state::Workspace};
 use egui::{Event, Pos2, RawInput, TouchPhase, Vec2};
 use rspice_schematic_editor::view::navigation::ZoomRequest;
 
@@ -581,7 +581,12 @@ fn the_strip_turns_a_floating_duplicate() {
         .editor
         .selection
         .select_component(original);
-    assert!(state.duplicate_schematic_selection_at(Point::new(300, 300)));
+    assert!(duplicate_schematic_selection_at(
+        state.design.floating_copy_parts(),
+        &mut state.model,
+        &mut state.workbench,
+        Point::new(300, 300)
+    ));
     finger.wake();
     finger.press("Rotate clockwise");
     assert!(

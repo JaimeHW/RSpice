@@ -402,9 +402,17 @@ pub(crate) fn armed_array_selection_plan(
 }
 
 pub(crate) fn cancel_armed_array_selection(state: &mut AppState) {
-    state.design.array_selection.close();
-    if state.model.schematic.session.editor.tool == Tool::ArraySelection {
-        state.model.schematic.cancel_tool();
+    cancel_armed_array_selection_in(&mut state.design.array_selection, &mut state.model);
+}
+
+/// [`cancel_armed_array_selection`] over the dialog and the model.
+pub(crate) fn cancel_armed_array_selection_in(
+    dialog: &mut ArraySelectionDialogState,
+    model: &mut Model,
+) {
+    dialog.close();
+    if model.schematic.session.editor.tool == Tool::ArraySelection {
+        model.schematic.cancel_tool();
     }
 }
 

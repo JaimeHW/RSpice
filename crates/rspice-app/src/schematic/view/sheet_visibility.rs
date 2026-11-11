@@ -14,7 +14,9 @@ use std::borrow::Cow;
 
 use egui::{Context, Id};
 
-use crate::state::{ActiveSheetTopology, SchematicState, Selection, SheetCatalog};
+use crate::state::{
+    ActiveSheetTopology, SchematicSelectionFilter, SchematicState, Selection, SheetCatalog,
+};
 use crate::workbench::app_state::{AppState, Model};
 
 use super::{SchematicSymbolContext, SelectionWindow};
@@ -239,64 +241,66 @@ pub(crate) fn retain_selection_on_active_sheet_in(model: &mut Model) {
     model.schematic.session.editor.selection = selection;
 }
 
-/// Every complete object on the active sheet the session's selection filter
-/// admits.
+/// Every complete object on the active sheet `filter`, the session's
+/// selection filter, admits.
 ///
 /// This is what Select all selects. It is written here, beside the other
 /// active-sheet predicates, because "which objects does the reader see" is
 /// this module's question and not the edit command's.
-pub(crate) fn selectable_objects_on_active_sheet(state: &AppState) -> Selection {
-    let filter = state.design.schematic_selection_filter;
+pub(crate) fn selectable_objects_on_active_sheet(
+    filter: SchematicSelectionFilter,
+    model: &Model,
+) -> Selection {
     let mut selection = Selection::default();
     if filter.instances {
-        for object in &state.model.schematic.document().components {
-            if object_is_on_active_sheet(state, object.id) {
+        for object in &model.schematic.document().components {
+            if object_is_on_active_sheet(model, object.id) {
                 selection.select_component(object.id);
             }
         }
     }
     if filter.wires {
-        for object in &state.model.schematic.document().wires {
-            if object_is_on_active_sheet(state, object.id) {
+        for object in &model.schematic.document().wires {
+            if object_is_on_active_sheet(model, object.id) {
                 selection.select_wire(object.id);
             }
         }
-        for object in &state.model.schematic.document().junctions {
-            if object_is_on_active_sheet(state, object.id) {
+        for object in &model.schematic.document().junctions {
+            if object_is_on_active_sheet(model, object.id) {
                 selection.select_junction(object.pos);
             }
         }
-        for object in &state.model.schematic.document().buses {
-            if object_is_on_active_sheet(state, object.id) {
+        for object in &model.schematic.document().buses {
+            if object_is_on_active_sheet(model, object.id) {
                 selection.select_bus(object.id);
             }
         }
-        for object in &state.model.schematic.document().bus_taps {
-            if object_is_on_active_sheet(state, object.id) {
+        for object in &model.schematic.document().bus_taps {
+            if object_is_on_active_sheet(model, object.id) {
                 selection.select_bus_tap(object.id);
             }
         }
     }
     if filter.labels {
-        for object in &state.model.schematic.document().net_labels {
-            if object_is_on_active_sheet(state, object.id) {
+        for object in &model.schematic.document().net_labels {
+            if object_is_on_active_sheet(model, object.id) {
                 selection.select_net_label(object.id);
             }
         }
     }
     if filter.annotations {
-        for object in &state.model.schematic.document().design_notes {
-            if object_is_on_active_sheet(state, object.id) {
+        for object in &model.schematic.document().design_notes {
+            if object_is_on_active_sheet(model, object.id) {
                 selection.select_design_note(object.id);
             }
         }
-        for object in &state.model.schematic.document().documentation_shapes {
-            if object_is_on_active_sheet(state, object.id) {
+        for object in &model.schematic.document().documentation_shapes {
+            if object_is_on_active_sheet(model, object.id) {
                 selection.select_documentation_shape(object.id);
             }
         }
-        for object in &state.model.schematic.document().probes {
-            if object_is_on_active_sheet(state, object.id) {
+        for object in &model.schematic.document().probes {
+            if object_is_on_active_sheet(model, object.id) {
                 selection.select_probe(object.id);
             }
         }
@@ -685,6 +689,7 @@ mod tests {
     use super::*;
     use crate::state::{Component, ComponentType, Point};
     use crate::state::{Junction, Wire};
+    use crate::workbench::app::delete_schematic_selection;
 
     /// The scope is a reading position over the one membership authority: it
     /// narrows what a dock lists and decides nothing else, so `AllSheets` must
@@ -778,7 +783,10 @@ mod tests {
         retain_selection_on_active_sheet(&mut state);
         assert!(state.model.schematic.session.editor.selection.is_empty());
 
-        state.model.schematic.session.editor.selection = selectable_objects_on_active_sheet(&state);
+        state.model.schematic.session.editor.selection = selectable_objects_on_active_sheet(
+            state.design.schematic_selection_filter,
+            &state.model,
+        );
         assert!(
             state
                 .model
@@ -808,7 +816,10 @@ mod tests {
             vec![Wire::segment(11, Point::origin(), Point::new(20, 0))];
         state.design.schematic_selection_filter.instances = false;
 
-        state.model.schematic.session.editor.selection = selectable_objects_on_active_sheet(&state);
+        state.model.schematic.session.editor.selection = selectable_objects_on_active_sheet(
+            state.design.schematic_selection_filter,
+            &state.model,
+        );
 
         assert!(
             !state
@@ -987,7 +998,10 @@ mod tests {
             .select_wire(10);
         state.model.schematic.init_undo_history();
 
-        assert!(state.delete_schematic_selection());
+        assert!(delete_schematic_selection(
+            &mut state.model,
+            &mut state.workbench
+        ));
         assert!(state.model.schematic.document().wires.is_empty());
         assert_eq!(
             state.model.schematic.document().junctions,

@@ -985,7 +985,12 @@ fn duplicate_and_delete_rows_run_the_real_undoable_commands() {
         .selection
         .select_component(41);
 
-    state.duplicate_schematic_selection_at(Point::new(22, 32));
+    duplicate_schematic_selection_at(
+        state.design.floating_copy_parts(),
+        &mut state.model,
+        &mut state.workbench,
+        Point::new(22, 32),
+    );
     assert!(state.place_floating_paste());
     assert_eq!(state.model.schematic.document().components.len(), 2);
     assert!(state.model.schematic.can_undo());
@@ -999,7 +1004,7 @@ fn duplicate_and_delete_rows_run_the_real_undoable_commands() {
         .editor
         .selection
         .select_component(41);
-    state.delete_schematic_selection();
+    delete_schematic_selection(&mut state.model, &mut state.workbench);
     assert!(state.model.schematic.document().components.is_empty());
     assert!(state.model.schematic.undo());
     assert_eq!(state.model.schematic.document().components.len(), 1);
@@ -1020,7 +1025,12 @@ fn duplicate_and_delete_rows_run_the_real_undoable_commands() {
         .selection
         .select_only_net_label(label.id);
 
-    state.duplicate_schematic_selection_at(Point::new(42, 42));
+    duplicate_schematic_selection_at(
+        state.design.floating_copy_parts(),
+        &mut state.model,
+        &mut state.workbench,
+        Point::new(42, 42),
+    );
     assert!(state.place_floating_paste());
     assert_eq!(state.model.schematic.document().net_labels.len(), 2);
     assert!(state.model.schematic.can_undo());
@@ -1037,7 +1047,7 @@ fn duplicate_and_delete_rows_run_the_real_undoable_commands() {
         .editor
         .selection
         .select_only_net_label(label.id);
-    state.delete_schematic_selection();
+    delete_schematic_selection(&mut state.model, &mut state.workbench);
     assert!(state.model.schematic.document().net_labels.is_empty());
     assert!(state.model.schematic.undo());
     assert_eq!(state.model.schematic.document().net_labels, vec![label]);
@@ -1491,7 +1501,12 @@ fn a_paste_joins_wiring_on_its_own_sheet_only() {
         ClipboardData::from_selection(Vec::new(), vec![stub], Vec::new());
 
     assert_eq!(
-        state.paste_schematic_clipboard_at(Point::new(100, 50)),
+        paste_schematic_clipboard_at(
+            state.design.floating_copy_parts(),
+            &mut state.model,
+            &mut state.workbench,
+            Point::new(100, 50)
+        ),
         Ok(true)
     );
     assert_eq!(
@@ -1563,7 +1578,12 @@ fn the_rotate_row_turns_a_floating_duplicate_not_its_original() {
         .editor
         .selection
         .select_only_component(41);
-    assert!(state.duplicate_schematic_selection_at(Point::new(60, 30)));
+    assert!(duplicate_schematic_selection_at(
+        state.design.floating_copy_parts(),
+        &mut state.model,
+        &mut state.workbench,
+        Point::new(60, 30)
+    ));
     let symbol_context = schematic_symbol_context(&state);
 
     assert!(action_availability(ContextAction::Rotate, &state).0);

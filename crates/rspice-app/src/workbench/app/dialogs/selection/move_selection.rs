@@ -13,7 +13,7 @@
 use crate::state::Tool;
 
 use crate::workbench::app::SchematicEditAuthority;
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::{AppState, Model};
 
 /// Authority and interaction state of the armed Move tool. The design
 /// snapshot remains immutable while the tool is armed; pointer and keyboard
@@ -100,9 +100,17 @@ pub(crate) fn armed_move_selection_authority(state: &AppState) -> Result<(), Str
 }
 
 pub(crate) fn cancel_armed_move_selection(state: &mut AppState) {
-    state.design.move_selection.close();
-    if state.model.schematic.session.editor.tool == Tool::MoveSelection {
-        state.model.schematic.cancel_tool();
+    cancel_armed_move_selection_in(&mut state.design.move_selection, &mut state.model);
+}
+
+/// [`cancel_armed_move_selection`] over the dialog and the model.
+pub(crate) fn cancel_armed_move_selection_in(
+    dialog: &mut MoveSelectionDialogState,
+    model: &mut Model,
+) {
+    dialog.close();
+    if model.schematic.session.editor.tool == Tool::MoveSelection {
+        model.schematic.cancel_tool();
     }
 }
 

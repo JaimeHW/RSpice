@@ -16,9 +16,11 @@ use crate::workbench::state::Workspace;
 use crate::workbench::{
     ResultViewer,
     app::{
-        StimulusLinkMode, new_veriloga_device_available, open_new_veriloga_device_form,
-        open_replace_instance_dialog, open_stimulus_definition, open_stimulus_link,
-        replace_instance_available,
+        StimulusLinkMode, copy_active_schematic_selection, cut_schematic_selection,
+        delete_schematic_selection, duplicate_schematic_selection_at,
+        new_veriloga_device_available, open_new_veriloga_device_form, open_replace_instance_dialog,
+        open_stimulus_definition, open_stimulus_link, paste_schematic_clipboard_at,
+        replace_instance_available, schematic_grid_step,
     },
     design::commands::DesignCommand,
     framework::command_registry::ids,
@@ -1573,13 +1575,22 @@ fn execute_context_action(
         | ContextAction::SaveStimulus
         | ContextAction::OpenStimulusDefinition => stimulus::execute(action, state),
         ContextAction::Cut => {
-            state.cut_schematic_selection();
+            cut_schematic_selection(
+                &mut state.design.schematic_clipboard,
+                &mut state.model,
+                &mut state.workbench,
+            );
         }
         ContextAction::Copy => {
-            state.copy_active_schematic_selection();
+            copy_active_schematic_selection(&mut state.design.schematic_clipboard, &state.model);
         }
         ContextAction::Paste => {
-            let refusal = match state.paste_schematic_clipboard_at(click_pos) {
+            let refusal = match paste_schematic_clipboard_at(
+                state.design.floating_copy_parts(),
+                &mut state.model,
+                &mut state.workbench,
+                click_pos,
+            ) {
                 Ok(true) => None,
                 Ok(false) => Some("Nothing was pasted.".to_owned()),
                 Err(reason) => Some(reason),
@@ -1589,11 +1600,16 @@ fn execute_context_action(
             }
         }
         ContextAction::Duplicate => {
-            let step = state.schematic_grid_step();
-            state.duplicate_schematic_selection_at(click_pos + step);
+            let step = schematic_grid_step(&state.model);
+            duplicate_schematic_selection_at(
+                state.design.floating_copy_parts(),
+                &mut state.model,
+                &mut state.workbench,
+                click_pos + step,
+            );
         }
         ContextAction::Delete => {
-            state.delete_schematic_selection();
+            delete_schematic_selection(&mut state.model, &mut state.workbench);
         }
         ContextAction::DescendHierarchy | ContextAction::OpenVerilogAView => {
             state.open_selected_instance_master();

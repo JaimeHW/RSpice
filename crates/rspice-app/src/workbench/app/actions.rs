@@ -25,7 +25,7 @@ use egui::{Context, Popup};
 
 use crate::workbench::commands::vocabulary::{Command as ShortcutCommand, CommandRegistry};
 
-use crate::workbench::app::RSpiceApp;
+use crate::workbench::app::{RSpiceApp, paste_schematic_clipboard_at, schematic_paste_anchor};
 use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::session::shortcuts::{
     ShortcutEnvironment, ShortcutInputSnapshot, ShortcutResolverState,
@@ -408,8 +408,17 @@ impl RSpiceApp {
     }
 
     pub(in crate::workbench) fn action_edit_paste(&mut self) {
-        let anchor = self.state.schematic_paste_anchor();
-        let message = match self.state.paste_schematic_clipboard_at(anchor) {
+        let anchor = schematic_paste_anchor(
+            self.state.design.canvas_hover,
+            self.state.design.canvas_view_center,
+            &self.state.model,
+        );
+        let message = match paste_schematic_clipboard_at(
+            self.state.design.floating_copy_parts(),
+            &mut self.state.model,
+            &mut self.state.workbench,
+            anchor,
+        ) {
             Ok(true) => return,
             Ok(false) => "Nothing to paste.".to_owned(),
             Err(reason) => reason,

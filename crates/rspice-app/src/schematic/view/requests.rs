@@ -1,6 +1,6 @@
 //! Validate editor request targets and route cross-feature effects through app owners.
 
-use crate::workbench::app_state::AppState;
+use crate::workbench::{app::delete_schematic_selection, app_state::AppState};
 use rspice_schematic_editor::requests::{EditorAction, EditorRequest};
 use rspice_schematic_editor::view::keyboard_navigation;
 use rspice_schematic_editor::view::pointer_target::{
@@ -29,7 +29,7 @@ pub(super) fn apply_editor_request(state: &mut AppState, request: EditorRequest)
     match request.action {
         EditorAction::DeleteSelection => {
             if !state.model.schematic.session.read_only && !state.active_view_read_only() {
-                state.delete_schematic_selection();
+                delete_schematic_selection(&mut state.model, &mut state.workbench);
             }
         }
         EditorAction::Focus(object) => {

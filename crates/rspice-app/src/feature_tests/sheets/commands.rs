@@ -4,6 +4,7 @@
 //! the shell's commands.
 
 use crate::state::{SheetDefinition, SheetPortPolicy, SheetTemplate};
+use crate::workbench::app::select_all_schematic_objects;
 use crate::workbench::app_state::AppState;
 use crate::workbench::framework::command_registry::CommandAvailability;
 use crate::workbench::framework::feature::harness::FeatureHarness;
@@ -175,7 +176,11 @@ fn sheet_properties_open_the_inspector_on_the_sheet() {
         "RC Lowpass Filter",
         &mut state.model.schematic,
     );
-    state.select_all_schematic_objects();
+    select_all_schematic_objects(
+        state.design.schematic_selection_filter,
+        &mut state.model,
+        &mut state.workbench,
+    );
     state.workbench.inspector_visible = false;
     let mut sheets = sheets_over(state);
     assert!(

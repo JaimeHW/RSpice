@@ -17,6 +17,7 @@ use crate::state::{
     SymbolDocument, SymbolEditorMetadata, SymbolPin, SymbolResolver, View, ViewType, Wire,
 };
 use crate::workbench::ChoicePreference;
+use crate::workbench::app::copy_active_schematic_selection;
 use crate::workbench::app_state::AppState;
 use crate::workbench::state::Workspace;
 use rspice_design::resolved_symbol::ResolvedSymbolSource;
@@ -246,7 +247,10 @@ fn production_copy_uses_authored_symbol_terminal_geometry() {
         .selection
         .select_component(2);
 
-    assert!(state.copy_active_schematic_selection());
+    assert!(copy_active_schematic_selection(
+        &mut state.design.schematic_clipboard,
+        &state.model
+    ));
     assert_eq!(state.design.schematic_clipboard.components.len(), 2);
     assert_eq!(
         state.design.schematic_clipboard.wires.len(),

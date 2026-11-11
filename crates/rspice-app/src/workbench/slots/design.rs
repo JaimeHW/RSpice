@@ -12,8 +12,8 @@ use crate::workbench::app::dialogs::grid_snap_routing::{self, GridSnapRoutingCom
 use crate::workbench::app::dialogs::visibility_options::{self, SchematicVisibilityRecovery};
 use crate::workbench::app::{
     ConnectivityManagerDialogState, CreateModelBoundSymbolDialogState,
-    DesignReviewCommentsDialogState, SelectionBulkEditDialogState, SymbolImportDialogState,
-    SymbolParameterFormDialogState,
+    DesignReviewCommentsDialogState, FloatingCopyParts, SelectionBulkEditDialogState,
+    SymbolImportDialogState, SymbolParameterFormDialogState,
 };
 use crate::workbench::app_state::Model;
 use crate::workbench::framework::feature::{CanvasGesturePort, DesignPort};
@@ -227,6 +227,20 @@ impl DesignState {
     /// waits for either to land or be cancelled.
     pub(crate) fn schematic_edit_in_progress(&self, model: &Model) -> bool {
         model.schematic.has_pending_operation() || self.floating_paste.is_some()
+    }
+
+    /// What a floating Paste or Duplicate reads and writes of this state.
+    pub(crate) fn floating_copy_parts(&mut self) -> FloatingCopyParts<'_> {
+        FloatingCopyParts {
+            floating_paste: &mut self.floating_paste,
+            move_selection: &mut self.move_selection,
+            stretch_selection: &mut self.stretch_selection,
+            array_selection: &mut self.array_selection,
+            canvas_hover: self.canvas_hover,
+            canvas_view_center: self.canvas_view_center,
+            clipboard: &self.schematic_clipboard,
+            duplicate_external_nets: self.duplicate_external_nets,
+        }
     }
 
     pub(crate) fn set_grid_style(&mut self, style: GridStyle) {

@@ -2,6 +2,7 @@
 //! design's clipboard.
 
 use crate::state::{ComponentType, Point};
+use crate::workbench::app::copy_active_schematic_selection;
 use crate::workbench::app_state::AppState;
 use crate::workbench::lifecycle::project_lifecycle::{ProjectDocumentId, snapshot};
 use rspice_project::registry::{DocumentRegistry, document_fingerprints};
@@ -23,7 +24,10 @@ fn presentation_and_interaction_state_never_marks_engineering_documents_dirty() 
         .editor
         .selection
         .select_component(component);
-    assert!(state.copy_active_schematic_selection());
+    assert!(copy_active_schematic_selection(
+        &mut state.design.schematic_clipboard,
+        &state.model
+    ));
     state.model.schematic.session.editor.pan = (125.0, -40.0);
     state.model.schematic.session.editor.zoom = 2.25;
     state.model.schematic.session.current_file =

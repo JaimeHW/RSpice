@@ -7,7 +7,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::RSpiceApp;
+use super::{
+    RSpiceApp, copy_active_schematic_selection, delete_schematic_selection,
+    paste_schematic_clipboard_at,
+};
 use crate::schematic::view::gesture_commits;
 use crate::schematic::view::schematic_symbol_context;
 use crate::schematic::view::selection_transform::{
@@ -322,7 +325,7 @@ impl Bench {
 
     /// Delete the selection.
     pub(super) fn delete_selection(&mut self) {
-        self.app.state.delete_schematic_selection();
+        delete_schematic_selection(&mut self.app.state.model, &mut self.app.state.workbench);
         self.end_frame();
     }
 
@@ -335,14 +338,25 @@ impl Bench {
 
     /// Copy the selection to the application's clipboard.
     pub(super) fn copy_selection(&mut self) {
-        self.app.state.copy_active_schematic_selection();
+        copy_active_schematic_selection(
+            &mut self.app.state.design.schematic_clipboard,
+            &self.app.state.model,
+        );
     }
 
     /// Paste the clipboard and click it down at `at` without moving the
     /// pointer.
     pub(super) fn paste_at(&mut self, at: Point) {
         let state = &mut self.app.state;
-        if matches!(state.paste_schematic_clipboard_at(at), Ok(true)) {
+        if matches!(
+            paste_schematic_clipboard_at(
+                state.design.floating_copy_parts(),
+                &mut state.model,
+                &mut state.workbench,
+                at
+            ),
+            Ok(true)
+        ) {
             state.place_floating_paste();
         }
         self.end_frame();

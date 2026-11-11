@@ -8,6 +8,7 @@
 use super::*;
 
 use crate::state::{Bus, BusDeclaration, Component, ComponentType, NetLabel, SchematicProbe, Wire};
+use crate::workbench::app::{copy_active_schematic_selection, schematic_paste_anchor};
 
 fn last_prompt(state: &AppState) -> String {
     state
@@ -64,7 +65,10 @@ fn delete_removes_the_selection_immediately_as_one_undo_entry() {
         .selection
         .select_only_component(41);
 
-    assert!(state.delete_schematic_selection());
+    assert!(delete_schematic_selection(
+        &mut state.model,
+        &mut state.workbench
+    ));
 
     assert_eq!(state.model.schematic.document().components.len(), 1);
     assert_eq!(
@@ -110,7 +114,10 @@ fn delete_promotes_a_wire_handle_to_its_whole_conductor() {
         .selection
         .select_only_wire_segment(wire.id, 1);
 
-    assert!(state.delete_schematic_selection());
+    assert!(delete_schematic_selection(
+        &mut state.model,
+        &mut state.workbench
+    ));
 
     assert!(state.model.schematic.document().wires.is_empty());
     assert_eq!(
@@ -149,7 +156,10 @@ fn a_stale_wire_handle_deletes_nothing_and_says_so() {
         .selection
         .select_only_wire_vertex(17, 3);
 
-    assert!(!state.delete_schematic_selection());
+    assert!(!delete_schematic_selection(
+        &mut state.model,
+        &mut state.workbench
+    ));
 
     assert_eq!(state.model.schematic.document().wires.len(), 1);
     assert_eq!(last_prompt(&state), "Select something first.");
@@ -181,7 +191,10 @@ fn delete_names_the_nets_it_took_away() {
         .selection
         .select_only_bus(5);
 
-    assert!(state.delete_schematic_selection());
+    assert!(delete_schematic_selection(
+        &mut state.model,
+        &mut state.workbench
+    ));
 
     assert_eq!(
         last_prompt(&state),
@@ -214,7 +227,10 @@ fn delete_counts_the_records_that_still_reference_what_went() {
         .selection
         .select_only_net_label(70);
 
-    assert!(state.delete_schematic_selection());
+    assert!(delete_schematic_selection(
+        &mut state.model,
+        &mut state.workbench
+    ));
 
     let reported = last_prompt(&state);
     assert!(reported.starts_with("Deleted 1 object."), "{reported}");
@@ -266,7 +282,11 @@ fn cut_copies_the_selection_and_then_removes_it() {
         .selection
         .select_only_component(41);
 
-    assert!(state.cut_schematic_selection());
+    assert!(cut_schematic_selection(
+        &mut state.design.schematic_clipboard,
+        &mut state.model,
+        &mut state.workbench
+    ));
 
     assert_eq!(state.model.schematic.document().components.len(), 1);
     assert_eq!(state.design.schematic_clipboard.components.len(), 1);
@@ -295,9 +315,17 @@ fn a_duplicate_lands_on_the_grid_one_step_off_its_anchor() {
         selection.select_component(id);
     }
     let grid = state.model.schematic.document().grid_size;
-    let anchor = state.schematic_paste_anchor();
+    let anchor = schematic_paste_anchor(
+        state.design.canvas_hover,
+        state.design.canvas_view_center,
+        &state.model,
+    );
 
-    assert!(state.duplicate_schematic_selection());
+    assert!(duplicate_schematic_selection(
+        state.design.floating_copy_parts(),
+        &mut state.model,
+        &mut state.workbench
+    ));
     assert!(state.place_floating_paste());
 
     let copies: Vec<Point> = state
@@ -341,7 +369,10 @@ fn duplicate_leaves_the_clipboard_byte_identical() {
         .editor
         .selection
         .select_only_component(41);
-    assert!(state.copy_active_schematic_selection());
+    assert!(copy_active_schematic_selection(
+        &mut state.design.schematic_clipboard,
+        &state.model
+    ));
     let before = serde_json::to_string(&state.design.schematic_clipboard).expect("clipboard");
 
     state
@@ -351,7 +382,12 @@ fn duplicate_leaves_the_clipboard_byte_identical() {
         .editor
         .selection
         .select_only_component(42);
-    assert!(state.duplicate_schematic_selection_at(Point::new(140, 30)));
+    assert!(duplicate_schematic_selection_at(
+        state.design.floating_copy_parts(),
+        &mut state.model,
+        &mut state.workbench,
+        Point::new(140, 30)
+    ));
     assert!(state.place_floating_paste());
 
     assert_eq!(state.model.schematic.document().components.len(), 3);
@@ -374,7 +410,12 @@ fn duplicate_selects_what_it_made_and_costs_one_undo_entry() {
         .selection
         .select_only_component(41);
 
-    assert!(state.duplicate_schematic_selection_at(Point::new(140, 30)));
+    assert!(duplicate_schematic_selection_at(
+        state.design.floating_copy_parts(),
+        &mut state.model,
+        &mut state.workbench,
+        Point::new(140, 30)
+    ));
     assert!(state.place_floating_paste());
 
     let created = state
@@ -433,7 +474,12 @@ fn duplicate_honours_the_persisted_external_net_preference() {
             .select_only_component(41);
 
         assert!(
-            state.duplicate_schematic_selection_at(Point::new(140, 30)),
+            duplicate_schematic_selection_at(
+                state.design.floating_copy_parts(),
+                &mut state.model,
+                &mut state.workbench,
+                Point::new(140, 30)
+            ),
             "{preference:?} still duplicates"
         );
         assert!(state.place_floating_paste());
@@ -482,7 +528,11 @@ fn select_all_takes_every_class_the_filter_admits_including_annotations() {
     base.sync_active_schematic_to_workspace();
 
     let mut state = base.clone();
-    assert!(state.select_all_schematic_objects());
+    assert!(select_all_schematic_objects(
+        state.design.schematic_selection_filter,
+        &mut state.model,
+        &mut state.workbench
+    ));
     assert!(
         state
             .model
@@ -522,7 +572,14 @@ fn select_all_takes_every_class_the_filter_admits_including_annotations() {
             annotations: class == "annotations",
         };
 
-        assert!(state.select_all_schematic_objects(), "{class}");
+        assert!(
+            select_all_schematic_objects(
+                state.design.schematic_selection_filter,
+                &mut state.model,
+                &mut state.workbench
+            ),
+            "{class}"
+        );
         assert_eq!(
             state.model.schematic.session.editor.selection.count(),
             1,
@@ -575,7 +632,11 @@ fn select_all_says_when_the_filter_admits_nothing() {
     state.model.schematic.document_mut_for_test().wires.clear();
     state.sync_active_schematic_to_workspace();
 
-    assert!(!state.select_all_schematic_objects());
+    assert!(!select_all_schematic_objects(
+        state.design.schematic_selection_filter,
+        &mut state.model,
+        &mut state.workbench
+    ));
     assert_eq!(last_prompt(&state), "Nothing matches the selection filter.");
 }
 
@@ -596,9 +657,22 @@ fn a_read_only_schematic_refuses_every_mutating_command_without_touching_it() {
     // reaching one anyway is answered by nothing at all.
     let logged = state.model.log_buffer.len();
     for command in [
-        AppState::delete_schematic_selection as fn(&mut AppState) -> bool,
-        AppState::cut_schematic_selection,
-        AppState::duplicate_schematic_selection,
+        (|state: &mut AppState| delete_schematic_selection(&mut state.model, &mut state.workbench))
+            as fn(&mut AppState) -> bool,
+        |state: &mut AppState| {
+            cut_schematic_selection(
+                &mut state.design.schematic_clipboard,
+                &mut state.model,
+                &mut state.workbench,
+            )
+        },
+        |state: &mut AppState| {
+            duplicate_schematic_selection(
+                state.design.floating_copy_parts(),
+                &mut state.model,
+                &mut state.workbench,
+            )
+        },
     ] {
         assert!(!command(&mut state));
         assert!(state.workbench.prompt.is_none());
@@ -607,7 +681,11 @@ fn a_read_only_schematic_refuses_every_mutating_command_without_touching_it() {
     assert_eq!(state.model.schematic.document().components.len(), 2);
     assert!(state.design.schematic_clipboard.is_empty());
     assert!(
-        state.select_all_schematic_objects(),
+        select_all_schematic_objects(
+            state.design.schematic_selection_filter,
+            &mut state.model,
+            &mut state.workbench
+        ),
         "reading a read-only schematic is not an edit"
     );
 }
@@ -617,9 +695,22 @@ fn an_empty_selection_refuses_with_one_plain_line() {
     let mut state = state_with_two_resistors();
 
     for command in [
-        AppState::delete_schematic_selection as fn(&mut AppState) -> bool,
-        AppState::cut_schematic_selection,
-        AppState::duplicate_schematic_selection,
+        (|state: &mut AppState| delete_schematic_selection(&mut state.model, &mut state.workbench))
+            as fn(&mut AppState) -> bool,
+        |state: &mut AppState| {
+            cut_schematic_selection(
+                &mut state.design.schematic_clipboard,
+                &mut state.model,
+                &mut state.workbench,
+            )
+        },
+        |state: &mut AppState| {
+            duplicate_schematic_selection(
+                state.design.floating_copy_parts(),
+                &mut state.model,
+                &mut state.workbench,
+            )
+        },
     ] {
         assert!(!command(&mut state));
         assert_eq!(last_prompt(&state), "Select something first.");

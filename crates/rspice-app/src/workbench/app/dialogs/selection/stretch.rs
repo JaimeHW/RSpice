@@ -12,7 +12,7 @@
 use crate::state::{StretchOrthogonalPolicy, Tool};
 
 use crate::workbench::app::SchematicEditAuthority;
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::{AppState, Model};
 use rspice_schematic_editor::session::visibility::SchematicWireRoutingStyle;
 
 /// Authority and interaction state of the armed Stretch tool. The selected
@@ -133,9 +133,17 @@ pub(crate) fn armed_stretch_selection_authority(state: &AppState) -> Result<(), 
 }
 
 pub(crate) fn cancel_armed_stretch_selection(state: &mut AppState) {
-    state.design.stretch_selection.close();
-    if state.model.schematic.session.editor.tool == Tool::StretchSelection {
-        state.model.schematic.cancel_tool();
+    cancel_armed_stretch_selection_in(&mut state.design.stretch_selection, &mut state.model);
+}
+
+/// [`cancel_armed_stretch_selection`] over the dialog and the model.
+pub(crate) fn cancel_armed_stretch_selection_in(
+    dialog: &mut StretchSelectionDialogState,
+    model: &mut Model,
+) {
+    dialog.close();
+    if model.schematic.session.editor.tool == Tool::StretchSelection {
+        model.schematic.cancel_tool();
     }
 }
 
