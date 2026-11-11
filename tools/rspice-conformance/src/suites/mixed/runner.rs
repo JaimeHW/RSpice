@@ -1122,15 +1122,15 @@ pub fn capture(
         .collect())
 }
 
-/// Whether one oracle's captures may run side by side. ngspice (O1, O5-O1)
-/// and Xyce (O4, O5-O4) write their tables and logs into a fresh temporary
-/// directory per run, and what they leave beside the deck is named per run
-/// (ngspice's control deck) or per deck (Xyce's `.NOISE` side file), and every
-/// reference has its own deck. O2 is serial: every reference of one variant
+/// Whether one oracle's captures may run side by side. ngspice (O1, O5-O1),
+/// Xyce (O4, O5-O4) and QSPICE (O8) write their tables and logs into a fresh
+/// temporary directory per run, and what they leave beside the deck is named
+/// per run (ngspice's control deck) or per deck (Xyce's `.NOISE` side file),
+/// and every reference has its own deck. O2 is serial: every reference of one variant
 /// builds the same `oracle/<v>.o2/` Verilog image in place and deletes it
 /// after its run, so two captures of one variant would race on it.
 pub fn captures_in_parallel(oracle_id: &str) -> bool {
-    matches!(oracle_id, "O1" | "O5-O1" | "O4" | "O5-O4")
+    matches!(oracle_id, "O1" | "O5-O1" | "O4" | "O5-O4" | "O8")
 }
 
 fn capture_one(
@@ -1197,6 +1197,22 @@ fn capture_one(
             let sections = oracle::xyce::sections(&analysis, &prn, &deck_source)?;
             (oracle::Producer::Xyce, executable, version, sections, None)
         }
+        "O8" => {
+            let executable = oracle::qspice::discover().map_err(|absent| absent.to_string())?;
+            let run = oracle::qspice::run(&executable, &deck, timeout)?;
+            if let Some(line) = oracle::qspice::refusal(&run.log) {
+                return Err(format!("QSPICE does not take the deck whole: {line}"));
+            }
+            let version = oracle::qspice::version(&run.raw)?;
+            let sections = oracle::qspice::sections(&analysis, &run.raw)?;
+            (
+                oracle::Producer::Qspice,
+                executable,
+                version,
+                sections,
+                None,
+            )
+        }
         "O2" => {
             let tools = oracle::cosim::discover().map_err(|absent| absent.to_string())?;
             let version = oracle::ngspice::version(&tools.ngspice)?;
@@ -1226,6 +1242,7 @@ fn capture_one(
             "{}: {version}",
             match producer {
                 oracle::Producer::Xyce => "xyce",
+                oracle::Producer::Qspice => "qspice",
                 _ => "ngspice",
             }
         ),

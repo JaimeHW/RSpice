@@ -13,6 +13,7 @@
 //! | `ref/<v>.<a>.O4.out` | `oracle/<v>.<a>.xyce.cir` |
 //! | `ref/<v>.<a>.O5-O1.out` | `oracle/<v>.<a>.o5.ngspice.cir` |
 //! | `ref/<v>.<a>.O5-O4.out` | `oracle/<v>.<a>.o5.xyce.cir` |
+//! | `ref/<v>.<a>.O8.out` | `oracle/<v>.<a>.qspice.cir` |
 //! | `ref/<v>.<a>.O2.out` | `oracle/<v>.<a>.o2/deck.cir`, else `oracle/<v>.o2/deck.cir` (each + `build.txt`) |
 //!
 //! Event traces sit beside the table as `ref/<v>.<a>.<oracle>.events.tsv`.
@@ -27,6 +28,7 @@
 pub mod cosim;
 pub mod icarus;
 pub mod ngspice;
+pub mod qspice;
 pub mod xyce;
 
 use std::collections::BTreeMap;
@@ -46,6 +48,7 @@ pub enum Producer {
     Ngspice,
     Xyce,
     Cosim,
+    Qspice,
 }
 
 impl Producer {
@@ -54,11 +57,12 @@ impl Producer {
             Self::Ngspice => "# RSPICE-NGSPICE-ORACLE 2",
             Self::Xyce => "# RSPICE-XYCE-ORACLE 2",
             Self::Cosim => "# RSPICE-COSIM-ORACLE 2",
+            Self::Qspice => "# RSPICE-QSPICE-ORACLE 2",
         }
     }
 
     fn from_header(line: &str) -> Option<Self> {
-        [Self::Ngspice, Self::Xyce, Self::Cosim]
+        [Self::Ngspice, Self::Xyce, Self::Cosim, Self::Qspice]
             .into_iter()
             .find(|producer| producer.header() == line.trim())
     }
@@ -79,6 +83,7 @@ pub fn deck_for_reference(design_dir: &Path, reference_name: &str) -> Result<Pat
         "O4" => oracle_dir.join(format!("{base}.xyce.cir")),
         "O5-O1" => oracle_dir.join(format!("{base}.o5.ngspice.cir")),
         "O5-O4" => oracle_dir.join(format!("{base}.o5.xyce.cir")),
+        "O8" => oracle_dir.join(format!("{base}.qspice.cir")),
         // One O2 deck per (variant, analysis) where the design has one, so a
         // variant's O2 can cover its op as well as its tran; otherwise the
         // variant's deck serves every analysis.
@@ -619,6 +624,8 @@ mod tests {
         );
         assert!(parse(&text.replace("0.1 -0.9", "0.1 NaN")).is_err());
         assert!(parse("# RSPICE-OTHER 2\n").is_err());
+        let text = render(Producer::Qspice, &["qspice: test".into()], &sections);
+        assert_eq!(parse(&text).unwrap().producer, Producer::Qspice);
     }
 
     #[test]
@@ -692,6 +699,14 @@ mod tests {
         assert_eq!(
             deck_for_reference(dir, "xs.tran.O1.out").unwrap(),
             dir.join("oracle/xs.tran.ngspice.cir")
+        );
+        assert_eq!(
+            deck_for_reference(dir, "xs.op.O8.out").unwrap(),
+            dir.join("oracle/xs.op.qspice.cir")
+        );
+        assert_eq!(
+            deck_for_reference(dir, "xs.op-ngspice.O1.out").unwrap(),
+            dir.join("oracle/xs.op-ngspice.ngspice.cir")
         );
         assert_eq!(
             deck_for_reference(dir, "vams.tran.O2.events.tsv").unwrap(),

@@ -401,7 +401,9 @@ pub const MEASURE_KINDS: [&str; 24] = [
 ];
 
 /// The oracle identities a quantity may compare against.
-pub const ORACLES: [&str; 9] = ["O1", "O2", "O3", "O4", "O5", "O5-O1", "O5-O4", "O6", "O7"];
+pub const ORACLES: [&str; 10] = [
+    "O1", "O2", "O3", "O4", "O5", "O5-O1", "O5-O4", "O6", "O7", "O8",
+];
 
 /// One design directory, loaded.
 #[derive(Debug, Clone)]

@@ -4,7 +4,7 @@
 //! rspice-mixed-corpus run [--design C1,C5] [--variant v] [--analysis a] [--record] [--extended]
 //!                         [--producer "<cmd>"] [--expect-route interp|native] [--jobs N]
 //! rspice-mixed-corpus case <design-dir> <variant> <analysis> <out.json> [--budget-s N] [--o5]
-//! rspice-mixed-corpus capture --oracle O1|O4|O2|O5-O1|O5-O4 [--design C1] [--update] [--jobs N]
+//! rspice-mixed-corpus capture --oracle O1|O4|O2|O5-O1|O5-O4|O8 [--design C1] [--update] [--jobs N]
 //! rspice-mixed-corpus probe a|b|c [--record] [--jobs N]
 //! ```
 //!
