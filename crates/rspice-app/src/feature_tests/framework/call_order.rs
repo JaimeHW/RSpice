@@ -12,6 +12,7 @@
 
 const APP: &str = include_str!("../../workbench/app.rs");
 const CLOUD: &str = include_str!("../../../../rspice-app-cloud/src/workbench/cloud.rs");
+const CODE: &str = include_str!("../../workbench/code.rs");
 const FRAME: &str = include_str!("../../workbench/frame.rs");
 const DIALOG_ORDER: &str = include_str!("../../workbench/frame/dialog_order.rs");
 const DISPATCH: &str = include_str!("../../workbench/dispatch.rs");
@@ -88,22 +89,7 @@ const PREPARE_FRAME: &[Step] = &[
     ("5.3", &["ctx.set_zoom_factor(desired_zoom)"]),
     ("5.4", &["self.state.workbench.theme.apply(ctx)"]),
     ("5.5", &["if initializing_frame", "ctx.request_repaint()"]),
-    (
-        "5.6",
-        &["self.terminate_automation_runtime_after_project_change()"],
-    ),
-    ("5.7", &["self.code.automation_runtime.poll_discovery()"]),
-    ("5.8", &["code_workspace::poll_veriloga_import(self)"]),
-    ("5.9", &["code_workspace::poll_veriloga_compile(self)"]),
-    (
-        "5.10",
-        &["code_workspace::consume_veriloga_compile_request(self, ctx)"],
-    ),
-    ("5.11", &["code_workspace::refresh_symbol_standing("]),
-    (
-        "5.12",
-        &["code_workspace::poll_automation_source_import(self)"],
-    ),
+    ("5.6", &["self.poll_code(ctx)"]),
     ("5.13", &["code_workspace::poll_automation_workflow(self)"]),
     (
         "5.14",
@@ -940,6 +926,30 @@ const CLOUD_ACCOUNT_POLL: &[Step] = &[
     ("6.4", &["account.take_browser_request()"]),
 ];
 
+/// `CodeFeature::poll`, step 5.6 of the frame: what the code feature settles
+/// before any surface draws, in the order the frame settled it.
+const CODE_POLL: &[Step] = &[
+    ("5.6.1", &["Self::terminate_after_project_change(cx)"]),
+    ("5.6.2", &["cx.own.automation_runtime.poll_discovery()"]),
+    (
+        "5.6.3",
+        &["poll_veriloga_import(cx.model, &mut cx.state.code_workspace, cx.wb)"],
+    ),
+    (
+        "5.6.4",
+        &["poll_veriloga_compile(cx.model, &mut cx.state.code_workspace, cx.wb)"],
+    ),
+    (
+        "5.6.5",
+        &[
+            "let shown = cx.state.netlist_shown()",
+            "consume_veriloga_compile_request(cx.model, &mut cx.state.code_workspace, shown, ctx)",
+        ],
+    ),
+    ("5.6.6", &["refresh_symbol_standing("]),
+    ("5.6.7", &["poll_automation_source_import("]),
+];
+
 /// `pump_live_session`, step 8 of the frame: the live-session engine's
 /// phases, with the project transactions they ask for between them where the
 /// engine ran them itself.
@@ -999,7 +1009,7 @@ const END_FRAME: &[Step] = &[
     ("16.3", &["self.state.models.capture_authoring_recovery()"]),
     (
         "16.4",
-        &["self.terminate_automation_runtime_after_project_change()"],
+        &["self.terminate_code_runtime_after_project_change()"],
     ),
 ];
 
@@ -1473,6 +1483,31 @@ fn the_cloud_feature_takes_its_account_and_publish_news_where_the_frame_did() {
         &body(CLOUD, "fn poll_account("),
         CLOUD_ACCOUNT_POLL,
     );
+}
+
+#[test]
+fn the_code_feature_settles_its_frame_where_the_frame_did() {
+    for (signature, call) in [
+        (
+            "fn poll_code(",
+            "CodeFeature::poll(&mut features::cx(self), ctx);",
+        ),
+        (
+            "fn terminate_code_runtime_after_project_change(",
+            "CodeFeature::terminate_after_project_change(&mut features::cx(self));",
+        ),
+        (
+            "fn terminate_code_runtime(",
+            "CodeFeature::terminate_runtime(&mut features::cx(self));",
+        ),
+    ] {
+        assert_eq!(
+            without_whitespace(&body(FRAME, signature)),
+            without_whitespace(call),
+            "the frame's `{signature}` step runs in the code feature's context, and only that"
+        );
+    }
+    assert_runs_in_order("CodeFeature::poll", &body(CODE, "fn poll("), CODE_POLL);
 }
 
 #[test]

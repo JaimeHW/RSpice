@@ -27,8 +27,9 @@ use crate::workbench::commands::code_context::{
 };
 use crate::workbench::commands::foreign_import_refusal;
 use crate::workbench::documents::code_workspace::{
-    CodeWorkspacePage, ProblemStep, cancel_veriloga_compile, design_hosts_veriloga,
-    netlist_page_shown,
+    CodeWorkspacePage, ProblemStep, cancel_veriloga_compile, consume_veriloga_compile_request,
+    design_hosts_veriloga, netlist_page_shown, poll_automation_source_import,
+    poll_veriloga_compile, poll_veriloga_import, refresh_symbol_standing,
 };
 use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec, ids};
@@ -398,6 +399,65 @@ fn schematic_in_front(reads: &Reads<'_, CodeFeature>) -> bool {
             reads.model.workspace.content.active_view_type(),
             ViewType::Schematic | ViewType::Testbench
         )
+}
+
+/// What the feature settles each frame before any surface draws, and how
+/// its automation runtime stops.
+impl CodeFeature {
+    /// Settle, in this order: a project the last frame replaced takes its
+    /// automation authority with it, the runtime is discovered, the
+    /// Verilog-A import and compile that finished are taken, the compile a
+    /// request asked for starts, where the open module's symbol stands is
+    /// measured, and the Automation import that finished is taken.
+    pub(crate) fn poll(cx: &mut Cx<'_, Self>, ctx: &Context) {
+        Self::terminate_after_project_change(cx);
+        #[cfg(not(target_arch = "wasm32"))]
+        cx.own.automation_runtime.poll_discovery();
+        // Both source imports record intent and complete from the frame loop.
+        // Neither was driven from anywhere, so a requested import stayed
+        // pending forever and blocked every later one.
+        poll_veriloga_import(cx.model, &mut cx.state.code_workspace, cx.wb);
+        // A Verilog-A compile is published here for the same reason: its
+        // result belongs to the bundle, not to whichever editor host happens
+        // to be on screen when the worker answers.
+        poll_veriloga_compile(cx.model, &mut cx.state.code_workspace, cx.wb);
+        let shown = cx.state.netlist_shown();
+        consume_veriloga_compile_request(cx.model, &mut cx.state.code_workspace, shown, ctx);
+        // Where the open module's symbol stands is measured here, once per
+        // library revision, so neither the editor nor the inspector parses it.
+        refresh_symbol_standing(
+            &mut cx.state.code_workspace.veriloga,
+            &cx.model.library_manager,
+            &cx.model.workspace.content.active_view,
+            cx.model.workspace.content.active_view_type(),
+        );
+        poll_automation_source_import(
+            cx.model,
+            &mut cx.state.code_workspace,
+            cx.wb,
+            cx.platform,
+            cx.own,
+        );
+    }
+
+    /// A project replaced since the last check takes its automation
+    /// authority with it: the runtime serving it stops, the Code &
+    /// Automation page starts over, and the run prepared for it is dropped.
+    pub(crate) fn terminate_after_project_change(cx: &mut Cx<'_, Self>) {
+        let project_id = cx.model.workspace.content.project.id();
+        if project_id == cx.own.automation_runtime_project_id {
+            return;
+        }
+        let _ = cx.own.automation_runtime.terminate();
+        cx.own.automation_runtime_project_id = project_id;
+        cx.state.code_workspace = Default::default();
+        cx.handles.run_controller.clear_prepared_run();
+    }
+
+    /// Stop the automation runtime, as the application shuts down.
+    pub(crate) fn terminate_runtime(cx: &mut Cx<'_, Self>) {
+        let _ = cx.own.automation_runtime.terminate();
+    }
 }
 
 /// The feature's dialog steps, each over the parts of the code slot it

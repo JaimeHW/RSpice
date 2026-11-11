@@ -111,25 +111,21 @@ fn python_automation_requires_managed_worker(app: &RSpiceApp) -> bool {
 /// Invalidate every receipt and live worker session derived from an older
 /// Automation closure while retaining only user-authored editor preferences.
 pub(crate) fn invalidate_automation_evidence(app: &mut RSpiceApp) {
-    let _ = app.code.automation_runtime.terminate();
-    let selected_file = app
-        .state
-        .code
-        .code_workspace
-        .automation
-        .selected_file
-        .clone();
-    let breakpoints = app
-        .state
-        .code
-        .code_workspace
-        .automation
-        .debug
-        .breakpoints
-        .clone();
-    app.state.code.code_workspace.automation = Default::default();
-    app.state.code.code_workspace.automation.selected_file = selected_file;
-    app.state.code.code_workspace.automation.debug.breakpoints = breakpoints;
+    invalidate_automation_evidence_in(&mut app.state.code.code_workspace, &mut app.code);
+}
+
+/// [`invalidate_automation_evidence`], over the Code & Automation page's
+/// state and what the code feature runs.
+pub(crate) fn invalidate_automation_evidence_in(
+    code: &mut super::CodeWorkspaceRuntimeState,
+    handles: &mut CodeHandles,
+) {
+    let _ = handles.automation_runtime.terminate();
+    let selected_file = code.automation.selected_file.clone();
+    let breakpoints = code.automation.debug.breakpoints.clone();
+    code.automation = Default::default();
+    code.automation.selected_file = selected_file;
+    code.automation.debug.breakpoints = breakpoints;
 }
 
 fn start_managed_python_workflow(app: &mut RSpiceApp, mode: AutomationRuntimeLaunchMode) {

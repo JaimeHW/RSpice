@@ -284,17 +284,6 @@ fn configure_platform_input_contract(ctx: &Context) {
 }
 
 impl RSpiceApp {
-    fn terminate_automation_runtime_after_project_change(&mut self) {
-        let project_id = self.state.model.workspace.content.project.id();
-        if project_id == self.code.automation_runtime_project_id {
-            return;
-        }
-        let _ = self.code.automation_runtime.terminate();
-        self.code.automation_runtime_project_id = project_id;
-        self.state.code.code_workspace = Default::default();
-        self.simulation_controller.clear_prepared_run();
-    }
-
     pub(crate) fn automation_runtime_unavailable_reason(&mut self) -> Option<String> {
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -356,7 +345,7 @@ impl RSpiceApp {
         self.state.models.capture_authoring_recovery();
         // A project replacement can commit from a dialog after prepare_frame.
         // Terminate at the same frame boundary so old authority cannot survive.
-        self.terminate_automation_runtime_after_project_change();
+        self.terminate_code_runtime_after_project_change();
     }
 
     pub(crate) fn manual_deck_run_block_reason(&self) -> Option<String> {
@@ -644,27 +633,7 @@ impl RSpiceApp {
             ctx.request_repaint();
         }
 
-        self.terminate_automation_runtime_after_project_change();
-        #[cfg(not(target_arch = "wasm32"))]
-        self.code.automation_runtime.poll_discovery();
-        // Both source imports record intent and complete from the frame loop.
-        // Neither was driven from anywhere, so a requested import stayed
-        // pending forever and blocked every later one.
-        crate::workbench::documents::code_workspace::poll_veriloga_import(self);
-        // A Verilog-A compile is published here for the same reason: its
-        // result belongs to the bundle, not to whichever editor host happens
-        // to be on screen when the worker answers.
-        crate::workbench::documents::code_workspace::poll_veriloga_compile(self);
-        crate::workbench::documents::code_workspace::consume_veriloga_compile_request(self, ctx);
-        // Where the open module's symbol stands is measured here, once per
-        // library revision, so neither the editor nor the inspector parses it.
-        crate::workbench::documents::code_workspace::refresh_symbol_standing(
-            &mut self.state.code.code_workspace.veriloga,
-            &self.state.model.library_manager,
-            &self.state.model.workspace.content.active_view,
-            self.state.model.workspace.content.active_view_type(),
-        );
-        crate::workbench::documents::code_workspace::poll_automation_source_import(self);
+        self.poll_code(ctx);
         crate::workbench::documents::code_workspace::poll_automation_workflow(self);
         crate::workbench::documents::code_workspace::settle_pending_python_execute(self);
         crate::workbench::documents::code_workspace::poll_managed_automation_runtime(self);
@@ -1101,7 +1070,7 @@ impl eframe::App for RSpiceApp {
 
     /// Called by eframe when the application is shutting down.
     fn on_exit(&mut self) {
-        let _ = self.code.automation_runtime.terminate();
+        self.terminate_code_runtime();
         log::info!("eframe on_exit — application shutting down");
         #[cfg(target_arch = "wasm32")]
         if let Err(error) = crate::workbench::browser::navigation::uninstall_popstate_listener() {

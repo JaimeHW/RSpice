@@ -16,11 +16,16 @@ use crate::state::{
 };
 use rspice_app_state::workbench::app_state::model::Model;
 
+use super::super::CodeWorkspaceRuntimeState;
 use super::super::page::{VerilogAImportTarget, VerilogAWorkbenchState};
 use super::super::{
     VerilogAFileSelection, VerilogAImportFormState, VerilogAReplaceReview, VerilogAReplaceTarget,
 };
-use super::{RSpiceApp, invalidate_veriloga_evidence, selected_veriloga_source};
+use super::{
+    RSpiceApp, invalidate_veriloga_evidence, invalidate_veriloga_evidence_in,
+    selected_veriloga_source,
+};
+use rspice_app_workbench::workbench::state::WorkbenchSession;
 
 #[cfg(target_arch = "wasm32")]
 #[derive(Debug)]
@@ -54,18 +59,22 @@ pub(crate) struct PickedSource {
 /// Consume an import request raised by the File menu, the Files rail or the
 /// import form. Native and browser pickers converge on the same exact UTF-8
 /// project-source transaction.
-pub fn poll_veriloga_import(app: &mut RSpiceApp) {
+pub fn poll_veriloga_import(
+    model: &mut Model,
+    code: &mut CodeWorkspaceRuntimeState,
+    wb: &mut WorkbenchSession,
+) {
     #[cfg(target_arch = "wasm32")]
-    poll_browser_import_completion(app);
+    poll_browser_import_completion(model, code, wb);
 
-    if !app.state.code.code_workspace.veriloga.import_requested {
+    if !code.veriloga.import_requested {
         return;
     }
-    app.state.code.code_workspace.veriloga.import_requested = false;
+    code.veriloga.import_requested = false;
 
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let veriloga = &app.state.code.code_workspace.veriloga;
+        let veriloga = &code.veriloga;
         let adding = veriloga.import_target.is_some();
         let replacing = veriloga.replace_target.is_some();
         let locating = veriloga
@@ -92,7 +101,7 @@ pub fn poll_veriloga_import(app: &mut RSpiceApp) {
             dialog.pick_files()
         };
         let Some(paths) = paths.filter(|paths| !paths.is_empty()) else {
-            abandon_pick(&mut app.state.code.code_workspace.veriloga);
+            abandon_pick(&mut code.veriloga);
             return;
         };
         let picked = paths
@@ -100,10 +109,10 @@ pub fn poll_veriloga_import(app: &mut RSpiceApp) {
             .map(|path| read_picked_source(path))
             .collect::<Result<Vec<_>, _>>();
         match picked {
-            Ok(picked) => apply_import(app, picked),
+            Ok(picked) => apply_import(model, code, wb, picked),
             Err(error) => {
-                abandon_pick(&mut app.state.code.code_workspace.veriloga);
-                app.state.record(
+                abandon_pick(&mut code.veriloga);
+                model.record(
                     LogSeverity::Error,
                     LogSource::Studio,
                     format!("Verilog-A/AMS import failed: {error}"),
@@ -119,9 +128,8 @@ pub fn poll_veriloga_import(app: &mut RSpiceApp) {
         ) {
             Ok(token) => token,
             Err(error) => {
-                abandon_pick(&mut app.state.code.code_workspace.veriloga);
-                app.state
-                    .prompt(format!("Verilog-A/AMS import failed: {error}"));
+                abandon_pick(&mut code.veriloga);
+                wb.prompt(format!("Verilog-A/AMS import failed: {error}"));
                 return;
             }
         };
@@ -176,7 +184,11 @@ fn read_picked_source(path: &Path) -> Result<PickedSource, String> {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn poll_browser_import_completion(app: &mut RSpiceApp) {
+fn poll_browser_import_completion(
+    model: &mut Model,
+    code: &mut CodeWorkspaceRuntimeState,
+    wb: &mut WorkbenchSession,
+) {
     let Some(completion) = BROWSER_IMPORT_COMPLETION.with(|slot| slot.borrow_mut().take()) else {
         return;
     };
@@ -185,17 +197,19 @@ fn poll_browser_import_completion(app: &mut RSpiceApp) {
     }
     match completion.result {
         Ok(Some(file)) => apply_import(
-            app,
+            model,
+            code,
+            wb,
             vec![PickedSource {
                 name: file.name,
                 contents: file.contents,
                 folder: None,
             }],
         ),
-        Ok(None) => abandon_pick(&mut app.state.code.code_workspace.veriloga),
+        Ok(None) => abandon_pick(&mut code.veriloga),
         Err(error) => {
-            abandon_pick(&mut app.state.code.code_workspace.veriloga);
-            app.state.record(
+            abandon_pick(&mut code.veriloga);
+            model.record(
                 LogSeverity::Error,
                 LogSource::Studio,
                 format!("Verilog-A/AMS import failed: {error}"),
@@ -206,17 +220,22 @@ fn poll_browser_import_completion(app: &mut RSpiceApp) {
 
 /// Deliver picked files to whatever asked for them: Add files, a
 /// replacement, a Locate on the import form, or else File > Import.
-fn apply_import(app: &mut RSpiceApp, picked: Vec<PickedSource>) {
+fn apply_import(
+    model: &mut Model,
+    code: &mut CodeWorkspaceRuntimeState,
+    wb: &mut WorkbenchSession,
+    picked: Vec<PickedSource>,
+) {
     // This is also the single completion point deterministic tests use.
     // Consume the request here as well as in the polling adapter so no
     // successful, failed, or stale completion can leave the workspace
     // permanently locked in "pending".
-    let veriloga = &mut app.state.code.code_workspace.veriloga;
+    let veriloga = &mut code.veriloga;
     veriloga.import_requested = false;
     if let Some(target) = veriloga.import_target.take() {
         veriloga.replace_target = None;
-        if !import_target_is_current(&app.state.model, &target) {
-            app.state.record(
+        if !import_target_is_current(model, &target) {
+            model.record(
                 LogSeverity::Error,
                 LogSource::Studio,
                 "The files were not added: the source changed while the picker was open.",
@@ -227,7 +246,8 @@ fn apply_import(app: &mut RSpiceApp, picked: Vec<PickedSource>) {
         for file in picked {
             let logical_path = suggested_import_path(&target.importer_path, &file.name);
             match add_bundle_file(
-                app,
+                model,
+                code,
                 target.bundle_id,
                 &target.importer_path,
                 logical_path.clone(),
@@ -236,7 +256,7 @@ fn apply_import(app: &mut RSpiceApp, picked: Vec<PickedSource>) {
                 Ok(true) => added.push(logical_path),
                 Ok(false) => {}
                 Err(error) => {
-                    app.state.record(
+                    model.record(
                         LogSeverity::Error,
                         LogSource::Studio,
                         format!("{} was not added: {error}", file.name),
@@ -245,7 +265,7 @@ fn apply_import(app: &mut RSpiceApp, picked: Vec<PickedSource>) {
             }
         }
         if !added.is_empty() {
-            app.state.record(
+            model.record(
                 LogSeverity::Info,
                 LogSource::Studio,
                 format!("Added {} to the source.", added.join(", ")),
@@ -259,8 +279,8 @@ fn apply_import(app: &mut RSpiceApp, picked: Vec<PickedSource>) {
         let Some(file) = picked.into_iter().next() else {
             return;
         };
-        let Some(bundle) = current_replace_bundle(app, &target) else {
-            app.state.record(
+        let Some(bundle) = current_replace_bundle(model, &target) else {
+            model.record(
                 LogSeverity::Error,
                 LogSource::Studio,
                 format!(
@@ -272,7 +292,7 @@ fn apply_import(app: &mut RSpiceApp, picked: Vec<PickedSource>) {
         };
         let restorable =
             replacement_keeps_previous_text(bundle, &target.logical_path, &file.contents);
-        app.state.code.code_workspace.veriloga.replace_review = Some(VerilogAReplaceReview {
+        code.veriloga.replace_review = Some(VerilogAReplaceReview {
             target,
             file_name: file.name,
             contents: file.contents,
@@ -290,12 +310,8 @@ fn apply_import(app: &mut RSpiceApp, picked: Vec<PickedSource>) {
     }
     // File > Import never touches an open view: the file becomes cell views
     // of its own, and the form says which, and where, before any is made.
-    if let Err(error) = open_veriloga_import_forms(
-        &app.state.model,
-        &mut app.state.code.code_workspace.veriloga,
-        picked,
-    ) {
-        app.state.prompt(error);
+    if let Err(error) = open_veriloga_import_forms(model, &mut code.veriloga, picked) {
+        wb.prompt(error);
     }
 }
 
@@ -374,7 +390,9 @@ pub(crate) fn complete_veriloga_files_pick(
     folder: Option<&Path>,
 ) {
     apply_import(
-        app,
+        &mut app.state.model,
+        &mut app.state.code.code_workspace,
+        &mut app.state.workbench,
         files
             .iter()
             .map(|(name, contents)| PickedSource {
@@ -461,13 +479,12 @@ pub(crate) fn close_veriloga_import_form(veriloga: &mut VerilogAWorkbenchState) 
 /// The bundle a replacement was asked for, while it is exactly the revision
 /// the editor showed and still holds the file.
 fn current_replace_bundle<'a>(
-    app: &'a RSpiceApp,
+    model: &'a Model,
     target: &VerilogAReplaceTarget,
 ) -> Option<&'a ProjectSourceBundle> {
-    (target.project_id == app.state.model.workspace.content.project.id())
+    (target.project_id == model.workspace.content.project.id())
         .then(|| {
-            app.state
-                .model
+            model
                 .workspace
                 .content
                 .project_sources
@@ -551,7 +568,7 @@ pub(crate) fn commit_veriloga_source_replacement(app: &mut RSpiceApp) -> Result<
         .replace_review
         .take()
         .ok_or_else(|| "No source replacement is waiting for confirmation.".to_owned())?;
-    if current_replace_bundle(app, &review.target).is_none() {
+    if current_replace_bundle(&app.state.model, &review.target).is_none() {
         return Err(format!(
             "{} changed after the replacement was chosen; nothing was replaced.",
             review.target.logical_path
@@ -731,7 +748,8 @@ fn suggested_import_path(importer_path: &str, file_name: &str) -> String {
 }
 
 pub(super) fn add_bundle_file(
-    app: &mut RSpiceApp,
+    model: &mut Model,
+    code: &mut CodeWorkspaceRuntimeState,
     bundle_id: ProjectSourceId,
     importer_path: &str,
     logical_path: String,
@@ -739,20 +757,18 @@ pub(super) fn add_bundle_file(
 ) -> Result<bool, String> {
     let file = ProjectSourceFile::try_new(logical_path.clone(), content)
         .map_err(|error| error.to_string())?;
-    let changed = app
-        .state
-        .model
+    let changed = model
         .workspace
         .content
         .project_sources
         .add_bundle_file(bundle_id, importer_path, file)
         .map_err(|error| error.to_string())?;
     if changed {
-        app.state.code.code_workspace.veriloga.selected_file = Some(VerilogAFileSelection {
+        code.veriloga.selected_file = Some(VerilogAFileSelection {
             bundle_id,
             logical_path,
         });
-        invalidate_veriloga_evidence(app, bundle_id);
+        invalidate_veriloga_evidence_in(model, code, bundle_id);
     }
     Ok(changed)
 }

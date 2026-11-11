@@ -111,7 +111,11 @@ pub(super) fn compile_and_publish(app: &mut RSpiceApp) {
         None,
         Default::default(),
     ));
-    code_workspace::poll_veriloga_compile(app);
+    code_workspace::poll_veriloga_compile(
+        &mut app.state.model,
+        &mut app.state.code.code_workspace,
+        &mut app.state.workbench,
+    );
     assert!(
         app.state.code.code_workspace.veriloga.receipt.is_some(),
         "the compile was published"

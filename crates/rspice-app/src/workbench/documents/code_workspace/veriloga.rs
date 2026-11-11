@@ -12,6 +12,7 @@ use rspice_veriloga::{
 use sha2::Digest as _;
 
 use crate::diagnostics::{LogSeverity, LogSource};
+use crate::simulation::NetlistShown;
 use crate::state::{
     ProjectSourceBundle, ProjectSourceFile, ProjectSourceId, ProjectSourceLanguage,
     ProjectSourceOwner, ProjectSourceRole, ViewType,
@@ -254,14 +255,28 @@ pub(crate) fn viewed_veriloga_header(
 /// so publishing the bundle publishes the view and the registry marks it
 /// clean.
 pub(crate) fn invalidate_veriloga_evidence(app: &mut RSpiceApp, bundle_id: ProjectSourceId) {
-    mark_bundle_unsaved(app, bundle_id);
-    app.state.code.code_workspace.veriloga.void_evidence();
+    invalidate_veriloga_evidence_in(
+        &mut app.state.model,
+        &mut app.state.code.code_workspace,
+        bundle_id,
+    );
+}
+
+/// [`invalidate_veriloga_evidence`], over the model and the Code &
+/// Automation page's state.
+pub(crate) fn invalidate_veriloga_evidence_in(
+    model: &mut Model,
+    code: &mut CodeWorkspaceRuntimeState,
+    bundle_id: ProjectSourceId,
+) {
+    mark_bundle_unsaved(model, bundle_id);
+    code.veriloga.void_evidence();
 }
 
 /// The persisted bundle changed: the project has unsaved source, and so does
 /// each cell view the bundle serves, whose tab says so.
-fn mark_bundle_unsaved(app: &mut RSpiceApp, bundle_id: ProjectSourceId) {
-    let content = &mut app.state.model.workspace.content;
+fn mark_bundle_unsaved(model: &mut Model, bundle_id: ProjectSourceId) {
+    let content = &mut model.workspace.content;
     content.project_sources_dirty = true;
     let views = content
         .project_sources
@@ -399,14 +414,16 @@ fn add_build_profile_document(
 /// same sealed bundle to a dedicated module worker so compilation never stalls
 /// egui's event/rendering thread.
 fn start_veriloga_compile(
-    app: &mut RSpiceApp,
+    model: &Model,
+    code: &mut CodeWorkspaceRuntimeState,
+    shown: NetlistShown,
     selected: SelectedVerilogASource,
     repaint: &egui::Context,
 ) {
-    if app.state.code.code_workspace.veriloga.pending.is_some() {
+    if code.veriloga.pending.is_some() {
         return;
     }
-    let token = selected.token(app.state.model.workspace.content.project.id());
+    let token = selected.token(model.workspace.content.project.id());
     // A design may instantiate the SPICE cells of the netlist its project's
     // run would build, and keeps the min:typ:max values it selects: a manual
     // deck's as its run expands it, else the configured design's. While that
@@ -415,20 +432,25 @@ fn start_veriloga_compile(
     // its own. A name nothing in the project defines stays undefined.
     let deck = {
         use crate::simulation::controller::{SimulationController, prepared_run};
-        let state = &app.state;
-        match state.model.simulation.execution.run_intent {
+        match model.simulation.execution.run_intent {
             crate::state::SimulationRunIntent::ManualDeck => {
-                prepared_run::manual_source_inputs(state)
+                prepared_run::manual_source_inputs_in(model, shown)
                     .and_then(|manual| {
                         rspice_simulation::execution::preparation::manual_deck_hdl(
-                            &prepared_run::run_preparation_inputs(state),
+                            &prepared_run::run_preparation_inputs_in(
+                                model,
+                                code.veriloga
+                                    .receipt
+                                    .as_ref()
+                                    .map(|receipt| &receipt.compilation),
+                            ),
                             manual,
                         )
                     })
                     .ok()
             }
             crate::state::SimulationRunIntent::SimulateRunSet => {
-                SimulationController::prepare_design_netlist_for_inspection(&state.model)
+                SimulationController::prepare_design_netlist_for_inspection(model)
                     .ok()
                     .map(|netlist| {
                         use rspice_simulation::project_veriloga::preparation::{
@@ -446,7 +468,7 @@ fn start_veriloga_compile(
     let (sender, receiver) = mpsc::channel();
     let pending = PendingVerilogACompile::new(token, receiver, cells.clone(), delay_select);
     let cancellation = pending.cancellation.clone();
-    let veriloga = &mut app.state.code.code_workspace.veriloga;
+    let veriloga = &mut code.veriloga;
     Arc::make_mut(&mut veriloga.last_failure).clear();
     veriloga.last_failure_token = None;
     veriloga.compile_discarded = false;
@@ -504,16 +526,14 @@ pub(crate) fn compile_time_text(elapsed: Duration, tenths: bool) -> String {
 /// The command took the closure at the click; the frame loop starts it here,
 /// before any surface draws, with the context the worker wakes when it
 /// answers. Its result lands wherever the reader is by then.
-pub fn consume_veriloga_compile_request(app: &mut RSpiceApp, repaint: &egui::Context) {
-    if let Some(selected) = app
-        .state
-        .code
-        .code_workspace
-        .veriloga
-        .compile_request
-        .take()
-    {
-        start_veriloga_compile(app, selected, repaint);
+pub fn consume_veriloga_compile_request(
+    model: &Model,
+    code: &mut CodeWorkspaceRuntimeState,
+    shown: NetlistShown,
+    repaint: &egui::Context,
+) {
+    if let Some(selected) = code.veriloga.compile_request.take() {
+        start_veriloga_compile(model, code, shown, selected, repaint);
     }
 }
 
@@ -522,23 +542,18 @@ pub fn consume_veriloga_compile_request(app: &mut RSpiceApp, repaint: &egui::Con
 ///
 /// The frame loop runs this every frame, so a result is published whether or
 /// not an editor host is on screen when it lands.
-pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
-    if std::mem::take(
-        &mut app
-            .state
-            .code
-            .code_workspace
-            .veriloga
-            .compile_discard_unannounced,
-    ) {
-        let discarded = app
-            .state
-            .workbench
+pub fn poll_veriloga_compile(
+    model: &mut Model,
+    code: &mut CodeWorkspaceRuntimeState,
+    wb: &mut WorkbenchSession,
+) {
+    if std::mem::take(&mut code.veriloga.compile_discard_unannounced) {
+        let discarded = wb
             .messages()
             .text(MessageId::VerilogACompileDiscardedAnnouncement);
-        app.state.workbench.prompt(discarded);
+        wb.prompt(discarded);
     }
-    let Some(pending) = app.state.code.code_workspace.veriloga.pending.clone() else {
+    let Some(pending) = code.veriloga.pending.clone() else {
         return;
     };
     let received = pending
@@ -554,33 +569,24 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
         return;
     };
     let duration = pending.started.elapsed();
-    app.state.code.code_workspace.veriloga.pending = None;
+    code.veriloga.pending = None;
 
-    let is_current = selected_veriloga_source(app).is_ok_and(|selected| {
-        selected.matches_token(
-            app.state.model.workspace.content.project.id(),
-            pending.token,
-        )
+    let is_current = selected_veriloga_source_in(model).is_ok_and(|selected| {
+        selected.matches_token(model.workspace.content.project.id(), pending.token)
     });
     if !is_current {
         // The editor exposes one active compile receipt. Once an in-flight
         // result is rejected because its source/module contract changed, an
         // older receipt must not remain as apparently current evidence.
-        app.state.code.code_workspace.veriloga.receipt = None;
-        app.state
-            .code
-            .code_workspace
-            .veriloga
-            .note_compile_discarded();
+        code.veriloga.receipt = None;
+        code.veriloga.note_compile_discarded();
         return;
     }
-    app.state.code.code_workspace.veriloga.last_compile_duration = Some((pending.token, duration));
+    code.veriloga.last_compile_duration = Some((pending.token, duration));
 
     match received {
         Ok(VerilogACompileOutcome::Success(report)) => {
-            let receipt_bundle = app
-                .state
-                .model
+            let receipt_bundle = model
                 .workspace
                 .content
                 .project_sources
@@ -597,41 +603,36 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                 Err(error) => {
                     let diagnostic = diagnostic_capacity_failure(pending.token, error);
                     let diagnostics = [diagnostic.clone()];
-                    let _ = record_veriloga_qualification(app, pending.token, None, &diagnostics);
-                    app.state.code.code_workspace.veriloga.receipt = None;
-                    app.state.code.code_workspace.veriloga.last_failure = Arc::new(
+                    let _ = record_veriloga_qualification(model, pending.token, None, &diagnostics);
+                    code.veriloga.receipt = None;
+                    code.veriloga.last_failure = Arc::new(
                         CodeDiagnosticCollection::try_new(vec![diagnostic]).unwrap_or_default(),
                     );
-                    app.state.code.code_workspace.veriloga.last_failure_token = Some(pending.token);
-                    app.state.record(
+                    code.veriloga.last_failure_token = Some(pending.token);
+                    model.record(
                         LogSeverity::Error,
                         LogSource::Studio,
                         "Verilog-A compilation produced more diagnostics than can be kept; the source was not validated.",
                     );
-                    announce_compile_failed(
-                        &mut app.state.workbench,
-                        &app.state.code.code_workspace.veriloga.last_failure,
-                    );
+                    announce_compile_failed(wb, &code.veriloga.last_failure);
                     return;
                 }
             };
             if let Err(error) = record_veriloga_qualification(
-                app,
+                model,
                 pending.token,
                 Some(&report),
                 receipt.diagnostics.as_slice(),
             ) {
-                app.state.record(
+                model.record(
                     LogSeverity::Error,
                     LogSource::Studio,
                     format!("The compile succeeded, but its record could not be saved: {error}"),
                 );
-                app.state.code.code_workspace.veriloga.receipt = None;
+                code.veriloga.receipt = None;
                 return;
             }
-            match app
-                .state
-                .model
+            match model
                 .workspace
                 .content
                 .project_sources
@@ -642,7 +643,7 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                     // the module: for a shared source, that module's cell.
                     let selecting = receipt_bundle.as_ref().and_then(|bundle| {
                         super::veriloga_interface::view_selecting_module(
-                            &app.state.model.library_manager,
+                            &model.library_manager,
                             bundle,
                             report.abi.module_name.as_ref(),
                         )
@@ -651,18 +652,18 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                     let receipt = match &selecting {
                         Some(reference) => {
                             let applied = apply_compiled_interface(
-                                &mut app.state.model.library_manager,
-                                &app.state.model.workspace.content.schematic_buffers,
+                                &mut model.library_manager,
+                                &model.workspace.content.schematic_buffers,
                                 reference,
                                 &report.abi,
                             );
                             if applied.wrote {
-                                app.state.model.workspace.content.project_metadata_dirty = true;
+                                model.workspace.content.project_metadata_dirty = true;
                             }
                             if let crate::state::VerilogAInterfaceOutcome::Refused(reason) =
                                 &applied.outcome
                             {
-                                app.state.record(
+                                model.record(
                                     LogSeverity::Warning,
                                     LogSource::Studio,
                                     format!(
@@ -673,7 +674,7 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                             let receipt =
                                 with_interface_outcome(receipt, reference, applied.outcome);
                             super::veriloga_interface::offer_placement(
-                                &mut app.state.code.code_workspace.veriloga,
+                                &mut code.veriloga,
                                 receipt,
                                 reference,
                                 report.abi.formal_ports.len(),
@@ -681,11 +682,11 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                         }
                         None => receipt,
                     };
-                    Arc::make_mut(&mut app.state.code.code_workspace.veriloga.last_failure).clear();
-                    app.state.code.code_workspace.veriloga.last_failure_token = None;
+                    Arc::make_mut(&mut code.veriloga.last_failure).clear();
+                    code.veriloga.last_failure_token = None;
                     let summary = receipt.diagnostics.summary();
-                    app.state.code.code_workspace.veriloga.receipt = Some(receipt);
-                    app.state.record(
+                    code.veriloga.receipt = Some(receipt);
+                    model.record(
                         LogSeverity::Info,
                         LogSource::Studio,
                         format!(
@@ -695,13 +696,13 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                         ),
                     );
                     announce_compiled(
-                        &mut app.state.workbench,
+                        wb,
                         &report.abi,
                         summary.total().saturating_sub(summary.errors),
                     );
                 }
                 Err(error) => {
-                    app.state.record(
+                    model.record(
                         LogSeverity::Error,
                         LogSource::Studio,
                         format!(
@@ -713,9 +714,9 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
         }
         Ok(VerilogACompileOutcome::Failure(diagnostics)) => {
             if let Err(error) =
-                record_veriloga_qualification(app, pending.token, None, &diagnostics)
+                record_veriloga_qualification(model, pending.token, None, &diagnostics)
             {
-                app.state.record(
+                model.record(
                     LogSeverity::Error,
                     LogSource::Studio,
                     format!(
@@ -723,7 +724,7 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                     ),
                 );
             }
-            app.state.code.code_workspace.veriloga.receipt = None;
+            code.veriloga.receipt = None;
             let diagnostics = diagnostics
                 .into_iter()
                 .map(|diagnostic| {
@@ -738,7 +739,7 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                     )
                 })
                 .collect();
-            app.state.code.code_workspace.veriloga.last_failure = Arc::new(
+            code.veriloga.last_failure = Arc::new(
                 CodeDiagnosticCollection::try_new(diagnostics).unwrap_or_else(|error| {
                     CodeDiagnosticCollection::try_new(vec![diagnostic_capacity_failure(
                         pending.token,
@@ -747,20 +748,17 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                     .unwrap_or_default()
                 }),
             );
-            app.state.code.code_workspace.veriloga.last_failure_token = Some(pending.token);
-            app.state.record(
+            code.veriloga.last_failure_token = Some(pending.token);
+            model.record(
                 LogSeverity::Error,
                 LogSource::Studio,
                 "Verilog-A compilation failed. Review the source diagnostics.",
             );
-            announce_compile_failed(
-                &mut app.state.workbench,
-                &app.state.code.code_workspace.veriloga.last_failure,
-            );
+            announce_compile_failed(wb, &code.veriloga.last_failure);
         }
         Err(()) => {
-            app.state.code.code_workspace.veriloga.receipt = None;
-            app.state.code.code_workspace.veriloga.last_failure = Arc::new(
+            code.veriloga.receipt = None;
+            code.veriloga.last_failure = Arc::new(
                 CodeDiagnosticCollection::try_new(vec![
                     CodeEditorDiagnostic::current(
                         "rspice.veriloga.compiler-worker",
@@ -782,14 +780,14 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                 ])
                 .unwrap_or_default(),
             );
-            let worker_diagnostics = app.state.code.code_workspace.veriloga.last_failure.clone();
+            let worker_diagnostics = code.veriloga.last_failure.clone();
             if let Err(error) = record_veriloga_qualification(
-                app,
+                model,
                 pending.token,
                 None,
                 worker_diagnostics.as_slice(),
             ) {
-                app.state.record(
+                model.record(
                     LogSeverity::Error,
                     LogSource::Studio,
                     format!(
@@ -797,16 +795,13 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                     ),
                 );
             }
-            app.state.code.code_workspace.veriloga.last_failure_token = Some(pending.token);
-            app.state.record(
+            code.veriloga.last_failure_token = Some(pending.token);
+            model.record(
                 LogSeverity::Error,
                 LogSource::Studio,
                 "The Verilog-A compiler worker stopped before publishing a report.",
             );
-            announce_compile_failed(
-                &mut app.state.workbench,
-                &app.state.code.code_workspace.veriloga.last_failure,
-            );
+            announce_compile_failed(wb, &code.veriloga.last_failure);
         }
     }
 }
@@ -882,13 +877,13 @@ fn announce_compile_failed(workbench: &mut WorkbenchSession, failure: &CodeDiagn
 }
 
 fn record_veriloga_qualification(
-    app: &mut RSpiceApp,
+    model: &mut Model,
     token: VerilogASourceOperationToken,
     report: Option<&RuntimeCompileReport>,
     diagnostics: &[CodeEditorDiagnostic],
 ) -> Result<u64, String> {
-    let selected = selected_veriloga_source(app)?;
-    if !selected.matches_token(app.state.model.workspace.content.project.id(), token) {
+    let selected = selected_veriloga_source_in(model)?;
+    if !selected.matches_token(model.workspace.content.project.id(), token) {
         return Err("the compile result no longer matches the current source".to_owned());
     }
     let resolved = super::veriloga_profile::resolve_veriloga_build_profile(selected.bundle())?;
@@ -969,9 +964,7 @@ fn record_veriloga_qualification(
         error_count,
         warning_count,
     };
-    let sequence = app
-        .state
-        .model
+    let sequence = model
         .workspace
         .content
         .append_project_source_qualification(token.bundle_id, record)
@@ -1211,14 +1204,14 @@ mod tests {
         .unwrap();
 
         let first = record_veriloga_qualification(
-            &mut app,
+            &mut app.state.model,
             token,
             Some(&report),
             receipt.diagnostics.as_slice(),
         )
         .unwrap();
         let second = record_veriloga_qualification(
-            &mut app,
+            &mut app.state.model,
             token,
             Some(&report),
             receipt.diagnostics.as_slice(),
@@ -1557,7 +1550,8 @@ mod tests {
         let bundle_id = selected.bundle().id();
         let root_path = selected.document().logical_path().to_owned();
         add_bundle_file(
-            &mut app,
+            &mut app.state.model,
+            &mut app.state.code.code_workspace,
             bundle_id,
             &root_path,
             "support/constants.vams".to_owned(),
@@ -1621,7 +1615,11 @@ mod tests {
             Default::default(),
         ));
 
-        poll_veriloga_compile(&mut app);
+        poll_veriloga_compile(
+            &mut app.state.model,
+            &mut app.state.code.code_workspace,
+            &mut app.state.workbench,
+        );
 
         let published = app
             .state
@@ -1729,7 +1727,11 @@ mod tests {
             None,
             Default::default(),
         ));
-        poll_veriloga_compile(&mut app);
+        poll_veriloga_compile(
+            &mut app.state.model,
+            &mut app.state.code.code_workspace,
+            &mut app.state.workbench,
+        );
 
         // Problems lists every diagnostic of the published receipt.
         let published = app
@@ -1786,7 +1788,11 @@ mod tests {
             .workspace
             .open_view(second, ViewType::VerilogA);
 
-        poll_veriloga_compile(&mut app);
+        poll_veriloga_compile(
+            &mut app.state.model,
+            &mut app.state.code.code_workspace,
+            &mut app.state.workbench,
+        );
 
         assert!(app.state.code.code_workspace.veriloga.pending.is_none());
         assert!(app.state.code.code_workspace.veriloga.receipt.is_none());
@@ -1834,7 +1840,11 @@ mod tests {
             .metadata
             .insert("veriloga.module".to_owned(), "different_model".to_owned());
 
-        poll_veriloga_compile(&mut app);
+        poll_veriloga_compile(
+            &mut app.state.model,
+            &mut app.state.code.code_workspace,
+            &mut app.state.workbench,
+        );
 
         assert!(app.state.code.code_workspace.veriloga.pending.is_none());
         assert!(app.state.code.code_workspace.veriloga.receipt.is_none());
@@ -1873,7 +1883,11 @@ mod tests {
             DigitalDelaySelect::Min,
         ));
 
-        poll_veriloga_compile(&mut app);
+        poll_veriloga_compile(
+            &mut app.state.model,
+            &mut app.state.code.code_workspace,
+            &mut app.state.workbench,
+        );
 
         let published = &app
             .state

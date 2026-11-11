@@ -12,11 +12,13 @@ use crate::workbench::RSpiceApp;
 use rspice_app_services::workbench::slots::platform::PlatformState;
 use rspice_app_state::workbench::app_state::model::Model;
 
+use super::CodeHandles;
 use super::CodeSourceImportState;
 use super::CodeWorkspaceRuntimeState;
 use super::{
     CodeSourceFileAction, CodeSourceFileDialogState, CodeSourceHistoryState, VerilogAFileSelection,
 };
+use rspice_app_workbench::workbench::state::WorkbenchSession;
 
 #[cfg(target_arch = "wasm32")]
 #[derive(Debug)]
@@ -812,29 +814,37 @@ pub(crate) fn request_automation_source_import(
 /// browser build can hand the file back asynchronously. A request that is
 /// never polled leaves `source_import` set forever, and every later import is
 /// then refused as already pending — so this must stay wired into the frame.
-pub(crate) fn poll_automation_source_import(app: &mut RSpiceApp) {
+pub(crate) fn poll_automation_source_import(
+    model: &mut Model,
+    code: &mut CodeWorkspaceRuntimeState,
+    wb: &mut WorkbenchSession,
+    platform: &PlatformState,
+    handles: &mut CodeHandles,
+) {
     #[cfg(target_arch = "wasm32")]
-    poll_browser_automation_import_completion(app);
+    poll_browser_automation_import_completion(model, code, platform, handles);
 
-    let Some(request) = app.state.code.code_workspace.source_import.as_mut() else {
+    let Some(request) = code.source_import.as_mut() else {
         return;
     };
     if request.language != ProjectSourceLanguage::RSpiceAutomation || request.picker_started {
         return;
     }
     request.picker_started = true;
-    if let Some(reason) =
-        source_file_mutation_block_reason(app, ProjectSourceLanguage::RSpiceAutomation)
-    {
-        app.state.code.code_workspace.source_import = None;
-        app.state
-            .prompt(format!("Automation source import cancelled: {reason}"));
+    if let Some(reason) = source_file_mutation_block_reason_in(
+        model,
+        code,
+        platform,
+        ProjectSourceLanguage::RSpiceAutomation,
+    ) {
+        code.source_import = None;
+        wb.prompt(format!("Automation source import cancelled: {reason}"));
         return;
     }
 
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let Some(request) = app.state.code.code_workspace.source_import.take() else {
+        let Some(request) = code.source_import.take() else {
             return;
         };
         let Some(path) = rfd::FileDialog::new()
@@ -848,10 +858,12 @@ pub(crate) fn poll_automation_source_import(app: &mut RSpiceApp) {
             return;
         };
         let result = read_imported_text(&path).and_then(|(file_name, contents)| {
-            apply_automation_source_import(app, request, file_name, contents)
+            apply_automation_source_import_in(
+                model, code, platform, handles, request, file_name, contents,
+            )
         });
         if let Err(error) = result {
-            app.state.record(
+            model.record(
                 LogSeverity::Error,
                 LogSource::Studio,
                 format!("Automation source import failed: {error}"),
@@ -866,9 +878,8 @@ pub(crate) fn poll_automation_source_import(app: &mut RSpiceApp) {
         ) {
             Ok(token) => token,
             Err(error) => {
-                app.state.code.code_workspace.source_import = None;
-                app.state
-                    .prompt(format!("Automation source import failed: {error}"));
+                code.source_import = None;
+                wb.prompt(format!("Automation source import failed: {error}"));
                 return;
             }
         };
@@ -916,7 +927,12 @@ fn read_imported_text(path: &std::path::Path) -> Result<(String, String), String
 }
 
 #[cfg(target_arch = "wasm32")]
-fn poll_browser_automation_import_completion(app: &mut RSpiceApp) {
+fn poll_browser_automation_import_completion(
+    model: &mut Model,
+    code: &mut CodeWorkspaceRuntimeState,
+    platform: &PlatformState,
+    handles: &mut CodeHandles,
+) {
     let Some(completion) =
         BROWSER_AUTOMATION_IMPORT_COMPLETION.with(|slot| slot.borrow_mut().take())
     else {
@@ -925,16 +941,24 @@ fn poll_browser_automation_import_completion(app: &mut RSpiceApp) {
     if !crate::workbench::browser::file_import::finish_text_import(completion.token) {
         return;
     }
-    let Some(request) = app.state.code.code_workspace.source_import.take() else {
+    let Some(request) = code.source_import.take() else {
         return;
     };
     let result = match completion.result {
-        Ok(Some(file)) => apply_automation_source_import(app, request, file.name, file.contents),
+        Ok(Some(file)) => apply_automation_source_import_in(
+            model,
+            code,
+            platform,
+            handles,
+            request,
+            file.name,
+            file.contents,
+        ),
         Ok(None) => return,
         Err(error) => Err(error),
     };
     if let Err(error) = result {
-        app.state.record(
+        model.record(
             LogSeverity::Error,
             LogSource::Studio,
             format!("Automation source import failed: {error}"),
@@ -948,17 +972,40 @@ fn apply_automation_source_import(
     file_name: String,
     contents: String,
 ) -> Result<String, String> {
-    if let Some(reason) =
-        source_file_mutation_block_reason(app, ProjectSourceLanguage::RSpiceAutomation)
-    {
+    apply_automation_source_import_in(
+        &mut app.state.model,
+        &mut app.state.code.code_workspace,
+        &app.state.platform,
+        &mut app.code,
+        request,
+        file_name,
+        contents,
+    )
+}
+
+/// [`apply_automation_source_import`], over the model, the Code &
+/// Automation page's state, the platform's and what the code feature runs.
+fn apply_automation_source_import_in(
+    model: &mut Model,
+    code: &mut CodeWorkspaceRuntimeState,
+    platform: &PlatformState,
+    handles: &mut CodeHandles,
+    request: CodeSourceImportState,
+    file_name: String,
+    contents: String,
+) -> Result<String, String> {
+    if let Some(reason) = source_file_mutation_block_reason_in(
+        model,
+        code,
+        platform,
+        ProjectSourceLanguage::RSpiceAutomation,
+    ) {
         return Err(reason.to_owned());
     }
-    if app.state.model.workspace.content.project.id() != request.project_id {
+    if model.workspace.content.project.id() != request.project_id {
         return Err("The active project changed while the source picker was open.".to_owned());
     }
-    let bundle = app
-        .state
-        .model
+    let bundle = model
         .workspace
         .content
         .project_sources
@@ -984,17 +1031,15 @@ fn apply_automation_source_import(
     let logical_path = unique_suggestion(bundle, &request.importer_path, file_name);
     let file =
         ProjectSourceFile::try_new(&logical_path, contents).map_err(|error| error.to_string())?;
-    app.state
-        .model
+    model
         .workspace
         .content
         .add_project_source_bundle_file(request.bundle_id, &request.importer_path, file)
         .map_err(|error| error.to_string())?;
-    app.state.code.code_workspace.automation.selected_file = Some(logical_path.clone());
-    super::automation::invalidate_automation_evidence(app);
+    code.automation.selected_file = Some(logical_path.clone());
+    super::automation::invalidate_automation_evidence_in(code, handles);
     let message = format!("Imported Automation source '{logical_path}'.");
-    app.state
-        .record(LogSeverity::Info, LogSource::Studio, message.clone());
+    model.record(LogSeverity::Info, LogSource::Studio, message.clone());
     Ok(message)
 }
 

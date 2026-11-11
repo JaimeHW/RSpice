@@ -13,6 +13,7 @@ use egui::{CentralPanel, Context, Frame};
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::ui::tokens::Tokens;
 use crate::workbench::cloud::CloudFeature;
+use crate::workbench::code::CodeFeature;
 #[cfg(target_arch = "wasm32")]
 use crate::workbench::models::ModelsFeature;
 use crate::workbench::results::ResultsFeature;
@@ -256,6 +257,24 @@ impl RSpiceApp {
     /// the last frame, in its context.
     pub(in crate::workbench) fn poll_cloud_account(&mut self, ctx: &Context) {
         CloudFeature::poll_account(&mut features::cx(self), ctx);
+    }
+
+    /// Have the code feature settle what its runtime, its imports and its
+    /// compiles finished since the last frame, in its context.
+    pub(in crate::workbench) fn poll_code(&mut self, ctx: &Context) {
+        CodeFeature::poll(&mut features::cx(self), ctx);
+    }
+
+    /// Have the code feature stop the automation runtime a replaced project
+    /// still holds, in its context.
+    pub(in crate::workbench) fn terminate_code_runtime_after_project_change(&mut self) {
+        CodeFeature::terminate_after_project_change(&mut features::cx(self));
+    }
+
+    /// Have the code feature stop its automation runtime as the application
+    /// shuts down, in its context.
+    pub(in crate::workbench) fn terminate_code_runtime(&mut self) {
+        CodeFeature::terminate_runtime(&mut features::cx(self));
     }
 
     /// Have the cloud feature take the publish executor's receipt, in its

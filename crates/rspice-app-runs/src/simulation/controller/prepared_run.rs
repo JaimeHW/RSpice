@@ -73,15 +73,28 @@ type RunPreparationInputs<'a> = crate::simulation::execution::preparation::RunPr
 >;
 
 pub fn run_preparation_inputs(state: &impl RunHost) -> RunPreparationInputs<'_> {
-    run_preparation_inputs_reading(state, &crate::simulation::table_route::SourceFiles)
+    run_preparation_inputs_in(state.model(), state.veriloga_compilation())
 }
 
-/// [`run_preparation_inputs`], with the data files read through `files`.
+/// [`run_preparation_inputs`], read from the model and the receipt of the
+/// project's current Verilog-A compilation.
+pub fn run_preparation_inputs_in<'a>(
+    model: &'a Model,
+    compilation: Option<&'a rspice_simulation::project_veriloga::receipt::ProjectCompileReceipt>,
+) -> RunPreparationInputs<'a> {
+    run_preparation_inputs_reading(
+        model,
+        compilation,
+        &crate::simulation::table_route::SourceFiles,
+    )
+}
+
+/// [`run_preparation_inputs_in`], with the data files read through `files`.
 fn run_preparation_inputs_reading<'a>(
-    state: &'a impl RunHost,
+    model: &'a Model,
+    compilation: Option<&'a rspice_simulation::project_veriloga::receipt::ProjectCompileReceipt>,
     files: &'a dyn rspice_simulation::netlist_gen::NetlistSourceHost,
 ) -> RunPreparationInputs<'a> {
-    let model = state.model();
     let schematic =
         rspice_design::projection::ProjectionSource::projection_source(&model.schematic);
     RunPreparationInputs {
@@ -102,7 +115,7 @@ fn run_preparation_inputs_reading<'a>(
         display_waveform_cache_samples: crate::state::DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES,
         max_parallel_workers: model.preferences.solver_worker_limit(),
         library_folders: model.library_folders(),
-        compilation: state.veriloga_compilation(),
+        compilation,
         design_checks: model.configured_root_design_check_config(),
     }
 }
@@ -1108,7 +1121,7 @@ impl SimulationController {
                 PreparationError::new(PreparationStage::DesignChecks, error.to_string())
             })?;
         crate::simulation::execution::preparation::build_prepared_run_set(
-            &run_preparation_inputs_reading(state, files),
+            &run_preparation_inputs_reading(state.model(), state.veriloga_compilation(), files),
             execution_projection,
         )
     }
@@ -1130,8 +1143,15 @@ impl SimulationController {
 pub fn manual_source_inputs(
     state: &impl RunHost,
 ) -> Result<crate::simulation::execution::preparation::ManualSourceInputs<'_>, PreparationError> {
-    let shown = state.netlist_shown();
-    let model = state.model();
+    manual_source_inputs_in(state.model(), state.netlist_shown())
+}
+
+/// [`manual_source_inputs`], read from the model and which netlist document
+/// the editor shows.
+pub fn manual_source_inputs_in(
+    model: &Model,
+    shown: crate::simulation::NetlistShown,
+) -> Result<crate::simulation::execution::preparation::ManualSourceInputs<'_>, PreparationError> {
     if shown.settled && shown.comparison {
         return Err(PreparationError::new(
             PreparationStage::SourceChecks,
