@@ -798,29 +798,42 @@ fn canonicalize_homogeneous_zero_constraints<T: RemnantScalar>(
         return false;
     }
 
-    // Each coefficient is visited once when building the dependency graph
-    // and once when its unknown is proven zero. XOR retains the identity of
-    // the remaining unknown when an equation becomes a singleton.
+    // Each coefficient is visited once when counting each homogeneous
+    // equation's unknowns, once more when building the dependency graph, and
+    // once when its unknown is proven zero. XOR retains the identity of the
+    // remaining unknown when an equation becomes a singleton. Without a
+    // homogeneous equation of a single unknown nothing can be proven zero,
+    // and every backend-faithful solve asks, so the graph is built only when
+    // one exists.
+    let homogeneous_terms = || {
+        (0..ncols).flat_map(move |col| {
+            let span = csc.col_ptr()[col]..csc.col_ptr()[col + 1];
+            csc.row_idx()[span.clone()]
+                .iter()
+                .zip(&values[span])
+                .filter(|&(_, &value)| value != T::ZERO)
+                .map(move |(&original_row, _)| {
+                    if transposed {
+                        (col, original_row)
+                    } else {
+                        (original_row, col)
+                    }
+                })
+                .filter(move |&(equation, _)| rhs[equation] == T::ZERO)
+        })
+    };
     let mut remaining = vec![0usize; nrows];
     let mut unknown_xor = vec![0usize; nrows];
+    for (equation, unknown) in homogeneous_terms() {
+        remaining[equation] += 1;
+        unknown_xor[equation] ^= unknown;
+    }
+    if !remaining.contains(&1) {
+        return false;
+    }
     let mut dependent_equations = vec![Vec::new(); ncols];
-    for col in 0..ncols {
-        let span = csc.col_ptr()[col]..csc.col_ptr()[col + 1];
-        for (&original_row, &value) in csc.row_idx()[span.clone()].iter().zip(&values[span]) {
-            if value == T::ZERO {
-                continue;
-            }
-            let (equation, unknown) = if transposed {
-                (col, original_row)
-            } else {
-                (original_row, col)
-            };
-            if rhs[equation] == T::ZERO {
-                remaining[equation] += 1;
-                unknown_xor[equation] ^= unknown;
-                dependent_equations[unknown].push(equation);
-            }
-        }
+    for (equation, unknown) in homogeneous_terms() {
+        dependent_equations[unknown].push(equation);
     }
 
     let mut proven_zero = vec![false; ncols];
@@ -3108,6 +3121,16 @@ impl StaticMatrix {
             return if faithful { Err(error) } else { Ok(false) };
         }
         if faithful {
+            for rhs_index in 0..rhs_count {
+                let block = rhs_index * n..(rhs_index + 1) * n;
+                canonicalize_real_homogeneous_zero_constraints(
+                    csc,
+                    values,
+                    &rhs[block.clone()],
+                    &mut solution[block],
+                    operation,
+                );
+            }
             return Ok(true);
         }
         for rhs_index in 0..rhs_count {
@@ -3938,6 +3961,12 @@ impl StaticMatrix {
             };
         }
         if faithful {
+            // The backend's own answer, except that an unknown the system's
+            // homogeneous equations prove zero is returned as exact zero, as
+            // the certified path returns it. The pivots can leave a rounding
+            // unit there, and a large conductance on that unknown's row turns
+            // it into a residual no Newton test passes.
+            canonicalize_real_homogeneous_zero_constraints(csc, values, rhs, solution, operation);
             return Ok(true);
         }
         let mut backward_error = match componentwise_backward_error_with_layout(
@@ -8735,6 +8764,130 @@ mod tests {
             second.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
             reused.iter().map(|v| v.to_bits()).collect::<Vec<_>>()
         );
+    }
+
+    /// The Newton system of a PSP102 transistor biased at Vg = -1 V, as the
+    /// Xyce dialect assembles it. Row 5 is the noise node NOI2 (`V = 0`) and
+    /// row 4 the noise node NOI, whose `V(NOI)/mig` conductance is 1.4e16 S
+    /// beside a 1.1e24 coupling to NOI2. Both right-hand sides are zero, so
+    /// both unknowns are exactly zero. Circuit LU's pivots left one rounding
+    /// unit in V(NOI), 2^-53, which the 1.4e16 S conductance turned into a
+    /// 1.55 A residual the Xyce-dialect test never passes. The pattern is
+    /// the one the circuit stores, zeros included, because Circuit LU orders
+    /// by it: the device stamps every pair of its 16 nodes, and each grounded
+    /// source adds its branch column, row and diagonal.
+    #[test]
+    fn a_backend_faithful_solve_zeroes_the_unknowns_homogeneous_rows_prove_zero() {
+        let values = [
+            (0, 0, 0.0036079408617953287),
+            (2, 0, -1.0000029514121554e-15),
+            (10, 0, -0.0036079408617933286),
+            (16, 0, 1.0),
+            (1, 1, 1.0e-15),
+            (15, 1, 1.0),
+            (17, 1, 1.0),
+            (0, 2, -1.0000135379975993e-15),
+            (2, 2, 0.003554343019984023),
+            (9, 2, -0.0035543430199820227),
+            (18, 2, 1.0),
+            (3, 3, 1.0e-15),
+            (11, 3, 1.0),
+            (19, 3, 1.0),
+            (4, 4, 1.396423761350985e+16),
+            (0, 5, 334085.1885375169),
+            (2, 5, -334085.1885375169),
+            (4, 5, -1.148642452266762e+24),
+            (5, 5, 1.0),
+            (0, 6, 8.791906057398293e-21),
+            (2, 6, -8.791906057398293e-21),
+            (15, 6, -1.0),
+            (0, 7, 1.7946793864159547e-21),
+            (2, 7, -1.7946793864159547e-21),
+            (13, 7, -1.0),
+            (11, 8, -1.0),
+            (12, 8, -1.0),
+            (13, 8, 1.0),
+            (14, 8, 1.0),
+            (2, 9, -0.0035543430199820227),
+            (9, 9, 0.0035543430199820227),
+            (14, 9, -1.0),
+            (0, 10, -0.0036079408617933286),
+            (10, 10, 0.0036079408617933286),
+            (12, 10, 1.0),
+            (3, 11, 1.0),
+            (8, 11, -1.0),
+            (8, 12, -1.0),
+            (10, 12, 1.0),
+            (7, 13, -1.0),
+            (8, 13, 1.0),
+            (8, 14, 1.0),
+            (9, 14, -1.0),
+            (1, 15, 1.0),
+            (6, 15, -1.0),
+            (0, 16, 1.0),
+            (1, 17, 1.0),
+            (2, 18, 1.0),
+            (3, 19, 1.0),
+        ];
+        let mut triplets: Vec<(usize, usize, Value)> = (0..16)
+            .flat_map(|row| (0..16).map(move |col| (row, col, 0.0)))
+            .collect();
+        for terminal in 0..4 {
+            let branch = 16 + terminal;
+            triplets.extend([
+                (terminal, branch, 0.0),
+                (branch, terminal, 0.0),
+                (branch, branch, 0.0),
+            ]);
+        }
+        triplets.extend(values);
+        let rhs = [
+            0.00039369669209258487,
+            0.0,
+            0.00033875547482116377,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            -0.00033875547482116377,
+            -0.00039369669209258487,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.05,
+            -1.0,
+            0.0,
+            -1.0,
+        ];
+        let mut matrix =
+            StaticMatrix::from_triplets_with_options(20, 20, &triplets, amesos_klu_options())
+                .expect("build the PSP102 Newton system");
+        let mut solution = Vec::new();
+        matrix
+            .solve_into(&rhs, &mut solution)
+            .expect("backend-faithful solve");
+        let mut block = Vec::new();
+        matrix
+            .solve_many_into(&[rhs, rhs].concat(), 2, &mut block)
+            .expect("backend-faithful two-column solve");
+        let solves = [
+            ("one column", &solution[..]),
+            ("first of two", &block[..20]),
+            ("second of two", &block[20..]),
+        ];
+        let remnants: Vec<String> = solves
+            .iter()
+            .filter(|(_, x)| x[4].to_bits() != 0 || x[5].to_bits() != 0)
+            .map(|(label, x)| format!("{label}: V(NOI) = {:e}, V(NOI2) = {:e}", x[4], x[5]))
+            .collect();
+        assert!(remnants.is_empty(), "{remnants:?}");
+        for (label, x) in solves {
+            assert!((x[0] - 0.05).abs() <= 1e-15, "{label}: V(D) = {}", x[0]);
+        }
     }
 
     #[test]
