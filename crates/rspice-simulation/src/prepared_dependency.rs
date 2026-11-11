@@ -3,7 +3,7 @@ use crate::execution_options::SpecExecutionOptions;
 use rspice_simulation_contract::analysis_spec::{AnalysisSpec, PssMethod};
 use rspice_simulation_contract::dependency_contract::{
     FourierTransientRequirement, PeriodicStateCapability, TransientCapability,
-    validate_fourier_transient_contract, validate_harmonic_balance_carrier_contract,
+    validate_fourier_transient_coverage, validate_harmonic_balance_carrier_contract,
     validate_periodic_state_contract,
 };
 use rspice_vocabulary::product::{AnalysisInstanceId, ContentDigest};
@@ -271,7 +271,7 @@ pub fn validate_prepared_dependency_contract_with_options(
             "Fourier harmonic count exceeds the supported dependency contract".to_owned(),
         )
     })?;
-    validate_fourier_transient_contract(
+    validate_fourier_transient_coverage(
         FourierTransientRequirement {
             start_time: *start_time,
             stop_time: *stop_time,

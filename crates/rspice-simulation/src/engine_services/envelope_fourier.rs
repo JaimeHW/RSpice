@@ -1288,18 +1288,8 @@ pub(crate) fn run_fourier_from_impulses_with_abort(
             "Fourier artifact window spans {observed_duration:.12e}s, shorter than the requested complete periods ({fundamental_period:.12e}s)"
         )));
     }
-    let mut observed_max_interval = 0.0_f64;
-    for (index, samples) in window_time.windows(2).enumerate() {
-        poll_periodically(abort, index)?;
-        observed_max_interval = observed_max_interval.max(samples[1] - samples[0]);
-    }
-    let maximum_frequency = config.fundamental_freq * (config.num_harmonics as f64 + 1.0);
-    let required_interval = 1.0 / (maximum_frequency * 8.0);
-    if observed_max_interval > required_interval * (1.0 + 16.0 * f64::EPSILON) {
-        return Err(ServiceRunError::Failure(format!(
-            "Fourier artifact sampling interval {observed_max_interval:.12e}s is too coarse for the requested harmonic basis; use {required_interval:.12e}s or less"
-        )));
-    }
+    // A coarse window is read by the method's interpolation rule, as every
+    // simulator reads it; the core analysis warns (`[four.coarse]`).
 
     let mut decomposition = analyze_fourier_with_abort(
         &window_time,
@@ -2249,6 +2239,40 @@ mod tests {
         assert!((normalized.response[1].norm() - 1.0).abs() < 1.0e-9);
         assert!((normalized.response[2].norm() - 0.25 * gain(2.0) / gain(1.0)).abs() < 1.0e-9);
         assert!((normalized.dc_component - 0.125 / gain(1.0)).abs() < 1.0e-9);
+    }
+
+    /// A window sampled four times a period, against the 32 the old guard
+    /// asked of three harmonics, is read rather than refused, and reads
+    /// what the core analysis reads by the same rule: the triangle's
+    /// interpolant is the triangle itself, so H1 is 8/pi^2 and H3 8/(9 pi^2).
+    #[test]
+    fn a_coarse_window_is_read_by_the_rule_not_refused() {
+        let time = (0..=4)
+            .map(|index| index as Value / 4.0)
+            .collect::<Vec<_>>();
+        let signal = [0.0, 1.0, 0.0, -1.0, 0.0];
+        let config = FourierRunConfig {
+            fundamental_freq: 1.0,
+            num_harmonics: 3,
+            num_periods: 1,
+            output_node: "V(out)".to_owned(),
+            output_ref: None,
+            start_time: 0.0,
+            stop_time: 1.0,
+            compute_thd: true,
+            normalize: false,
+            method: rspice_core::analysis::FourierMethod::Interpolant,
+        };
+        let result = run_fourier_from_signal_with_abort(&time, &signal, &config, &NoAbort)
+            .expect("a coarse window is read");
+        let core = rspice_core::analysis::FourierAnalysis::new(
+            rspice_core::analysis::FourierConfig::new(1.0).with_harmonics(3),
+        )
+        .analyze(&time, &signal)
+        .expect("the core analysis reads it too");
+        assert!((result.response[1].norm() - 8.0 / (PI * PI)).abs() < 1.0e-12);
+        assert!((result.response[3].norm() - 8.0 / (9.0 * PI * PI)).abs() < 1.0e-12);
+        assert!((result.thd_percent.expect("THD") - core.thd.expect("core THD")).abs() < 1.0e-9);
     }
 
     #[test]

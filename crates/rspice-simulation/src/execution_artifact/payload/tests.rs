@@ -810,8 +810,10 @@ fn wrong_or_stale_producer_artifacts_are_rejected() {
     ));
 }
 
+/// A run refuses a transient that does not cover the Fourier window, and
+/// reads a coarsely sampled one, as every simulator does.
 #[test]
-fn fourier_contract_rejects_out_of_window_or_undersampled_transients() {
+fn fourier_contract_rejects_an_out_of_window_transient_and_reads_a_coarse_one() {
     let fourier = AnalysisSpec::Fourier {
         fundamental_freq: 2.0,
         num_harmonics: 4,
@@ -837,9 +839,8 @@ fn fourier_contract_rejects_out_of_window_or_undersampled_transients() {
     let outside = validate_prepared_dependency_contract(&fourier, &transient(0.75, 0.005))
         .expect_err("producer must cover the complete Fourier window");
     assert!(outside.to_string().contains("outside"));
-    let undersampled = validate_prepared_dependency_contract(&fourier, &transient(1.0, 0.05))
-        .expect_err("producer sampling must cover the harmonic basis");
-    assert!(undersampled.to_string().contains("too coarse"));
+    validate_prepared_dependency_contract(&fourier, &transient(1.0, 0.05))
+        .expect("a coarse producer covering the window is read");
 }
 
 #[test]

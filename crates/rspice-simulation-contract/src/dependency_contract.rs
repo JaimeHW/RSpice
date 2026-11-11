@@ -124,7 +124,11 @@ impl TransientCapability {
     }
 }
 
-pub fn validate_fourier_transient_contract(
+/// A transient a Fourier analysis can read: a valid one that covers the
+/// whole window. Its sampling is not refused: every simulator reads a coarse
+/// window by its own interpolation rule, and the engine warns
+/// (`[four.coarse]`), as Spectre does.
+pub fn validate_fourier_transient_coverage(
     requirement: FourierTransientRequirement,
     capability: TransientCapability,
 ) -> Result<(), String> {
@@ -148,7 +152,18 @@ pub fn validate_fourier_transient_contract(
             capability.stop_time
         ));
     }
+    Ok(())
+}
 
+/// A transient a planned Fourier analysis binds to: one that covers its window
+/// ([`validate_fourier_transient_coverage`]) and samples it at an eighth of
+/// the highest basis frequency's period or finer, which plan repair sizes the
+/// transients it creates to.
+pub fn validate_fourier_transient_contract(
+    requirement: FourierTransientRequirement,
+    capability: TransientCapability,
+) -> Result<(), String> {
+    validate_fourier_transient_coverage(requirement, capability)?;
     let available_interval = capability
         .max_timestep
         .map_or(capability.step_time, |limit| {
@@ -195,6 +210,11 @@ mod tests {
             ..compatible
         };
         assert!(validate_fourier_transient_contract(requirement, short).is_err());
+
+        // A run reads the coarse transient; only the short one is refused.
+        validate_fourier_transient_coverage(requirement, coarse)
+            .expect("a coarse transient covering the window is read");
+        assert!(validate_fourier_transient_coverage(requirement, short).is_err());
     }
 
     #[test]
