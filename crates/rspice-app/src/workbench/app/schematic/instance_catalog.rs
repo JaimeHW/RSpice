@@ -15,7 +15,8 @@ use crate::state::{
     library_cell_placement_candidates,
 };
 
-use crate::workbench::app_state::AppState;
+use crate::properties::PropertyEditorSchema;
+use crate::workbench::app_state::Model;
 
 #[derive(Debug, Clone)]
 pub(crate) struct InstanceCatalogEntry {
@@ -54,12 +55,12 @@ impl InstanceCatalogEntry {
     /// the commit identity.
     pub(crate) fn target_spec(
         &self,
-        state: &AppState,
+        model: &Model,
     ) -> Result<SchematicReplacementTargetSpec, String> {
         let resolved = self.template.library_cell.as_ref().and_then(|binding| {
             SymbolResolver::new(
-                &state.model.library_manager,
-                &state.model.workspace.content.schematic_buffers,
+                &model.library_manager,
+                &model.workspace.content.schematic_buffers,
             )
             .resolve_binding(binding)
         });
@@ -112,12 +113,15 @@ impl InstanceCatalogEntry {
     }
 }
 
-pub(crate) fn instance_catalog(state: &AppState) -> Vec<InstanceCatalogEntry> {
-    let mut entries = primitive_entries(state);
+pub(crate) fn instance_catalog(
+    registry: &PropertyEditorSchema,
+    model: &Model,
+) -> Vec<InstanceCatalogEntry> {
+    let mut entries = primitive_entries(registry);
     entries.extend(builtin_xspice_entries());
     entries.extend(functional_entries());
     entries.extend(generated_veriloga_entries());
-    entries.extend(library_entries(state));
+    entries.extend(library_entries(model));
     entries.sort_by(|left, right| {
         left.display
             .to_ascii_lowercase()
@@ -283,7 +287,7 @@ pub(crate) fn resolve_instance_catalog_entry<'a>(
     }
 }
 
-fn primitive_entries(state: &AppState) -> Vec<InstanceCatalogEntry> {
+fn primitive_entries(registry: &PropertyEditorSchema) -> Vec<InstanceCatalogEntry> {
     crate::schematic::component_palette()
         .iter()
         .flat_map(|section| section.entries)
@@ -298,9 +302,7 @@ fn primitive_entries(state: &AppState) -> Vec<InstanceCatalogEntry> {
                 .map(|(name, _)| (*name).to_owned())
                 .collect::<Vec<_>>();
             let primary = crate::properties::property_bridge::get_primary_property_name(entry.kind);
-            let parameters = state
-                .design
-                .property_registry
+            let parameters = registry
                 .get(entry.kind)
                 .map(|sheet| {
                     sheet
@@ -346,11 +348,9 @@ fn primitive_entries(state: &AppState) -> Vec<InstanceCatalogEntry> {
         .collect()
 }
 
-fn library_entries(state: &AppState) -> Vec<InstanceCatalogEntry> {
+fn library_entries(model: &Model) -> Vec<InstanceCatalogEntry> {
     let mut entries = Vec::new();
-    for candidate in
-        library_cell_placement_candidates(&state.model.library_manager, &state.model.workspace)
-    {
+    for candidate in library_cell_placement_candidates(&model.library_manager, &model.workspace) {
         if !candidate.ready
             || candidate.parameter_contract_error.is_some()
             || candidate.binding.terminal_order.is_empty()
@@ -548,12 +548,13 @@ fn enum_key(kind: ComponentType) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::app_state::AppState;
 
     #[test]
     fn primitive_catalog_is_deterministic_resolvable_and_excludes_non_instances() {
         let state = AppState::default();
-        let first = instance_catalog(&state);
-        let second = instance_catalog(&state);
+        let first = instance_catalog(&state.design.property_registry, &state.model);
+        let second = instance_catalog(&state.design.property_registry, &state.model);
         assert_eq!(
             first
                 .iter()
@@ -577,7 +578,7 @@ mod tests {
     #[test]
     fn catalog_rejects_empty_unknown_and_ambiguous_queries() {
         let state = AppState::default();
-        let entries = instance_catalog(&state);
+        let entries = instance_catalog(&state.design.property_registry, &state.model);
         assert!(resolve_instance_catalog_entry(&entries, " ").is_err());
         assert!(resolve_instance_catalog_entry(&entries, "not-a-real-master").is_err());
         assert!(resolve_instance_catalog_entry(&entries, "voltage").is_err());

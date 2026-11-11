@@ -11,6 +11,7 @@ use crate::workbench::app::dialogs::engineering_table::EngineeringTable;
 use crate::workbench::app::dialogs::hierarchy::create::CreateHierarchy;
 use crate::workbench::app::dialogs::hierarchy::descend;
 use crate::workbench::app::dialogs::property_dialog::PropertyDialog;
+use crate::workbench::app::dialogs::replace_instance::ReplaceInstance;
 use crate::workbench::app::dialogs::selection::{array, bulk_edit, rename, shared_properties};
 use crate::workbench::app::dialogs::{
     create_model_bound_symbol, find_replace, object_properties, placement, rule_setup,
@@ -308,5 +309,20 @@ impl DesignFeature {
             workbench: cx.wb,
         }
         .render_create_hierarchy_dialog(ctx);
+    }
+
+    /// Replace instance, over its draft, the property sheets its catalog reads,
+    /// the model and the session.
+    pub(in crate::workbench) fn render_replace_instance_dialog(
+        cx: &mut Cx<'_, Self>,
+        ctx: &Context,
+    ) {
+        ReplaceInstance {
+            dialog: &mut cx.state.replace_instance,
+            registry: &cx.state.property_registry,
+            model: cx.model,
+            workbench: cx.wb,
+        }
+        .render_replace_instance_dialog(ctx);
     }
 }

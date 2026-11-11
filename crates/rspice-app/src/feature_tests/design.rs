@@ -566,3 +566,41 @@ fn an_extraction_is_carried_out_in_the_frame_it_is_chosen() {
         CellViewRef::new(&parent.library, &child, "schematic")
     );
 }
+
+/// A voltage source placed and selected alone; its id.
+fn selected_voltage_source(app: &mut RSpiceApp) -> u64 {
+    let schematic = &mut app.state.model.schematic;
+    let id = schematic.add_component(ComponentType::VoltageSource, Point::origin());
+    schematic.session.editor.selection.select_only_component(id);
+    id
+}
+
+#[test]
+fn replace_instance_opens_and_draws_in_the_frame() {
+    let mut app = design_app();
+    selected_voltage_source(&mut app);
+    crate::workbench::app::open_replace_instance_dialog(&mut app.state);
+    assert!(draws_dialog(&mut app, "Replace instance"));
+    assert!(app.state.design.replace_instance.open);
+}
+
+/// Replace swaps the selected instance for the chosen master in the frame it
+/// is pressed, closes the form and says what it kept.
+#[test]
+fn a_replacement_is_carried_out_in_the_frame_it_is_chosen() {
+    let mut replay = Replay::of(RSpiceApp::test_instance());
+    replay.app.state.workbench.activate(Workspace::Design);
+    selected_voltage_source(&mut replay.app);
+    crate::workbench::app::open_replace_instance_dialog(&mut replay.app.state);
+    assert!(replay.app.state.design.replace_instance.open);
+    replay.click("Replace", Role::Button);
+    let state = &replay.app.state;
+    assert!(!state.design.replace_instance.open);
+    assert!(
+        state
+            .prompt_text()
+            .is_some_and(|text| text.starts_with("Replaced ")),
+        "{:?}",
+        state.prompt_text()
+    );
+}

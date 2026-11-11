@@ -207,7 +207,9 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         key: DialogKey("design.replace_instance"),
         modality: Modality::Dialog,
         is_open: Some(|state| state.design.replace_instance.open),
-        render: |app, ctx| app.render_replace_instance_dialog(ctx),
+        render: |app, ctx| {
+            DesignFeature::render_replace_instance_dialog(&mut features::cx(app), ctx)
+        },
     },
     DialogSpec {
         key: DialogKey("design.stimulus_link"),

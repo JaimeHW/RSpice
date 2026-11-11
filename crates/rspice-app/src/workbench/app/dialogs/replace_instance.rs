@@ -14,11 +14,14 @@ use crate::ui::widgets::{CommandForm, DialogChoice, TableColumn};
 use rspice_design::hierarchy::HierarchySource;
 use rspice_simulation::netlist_gen::generate_netlist_hierarchical;
 
+use crate::properties::PropertyEditorSchema;
+use crate::workbench::app::SchematicEditAuthority;
+use crate::workbench::app::actions::workspace::sync_active_schematic;
 use crate::workbench::app::schematic::instance_catalog::{
     InstanceCatalogEntry, instance_catalog, resolve_instance_catalog_entry,
 };
-use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::state::WorkbenchSession;
 
 /// Isolated authority and draft for the Replace instance form. Current is a
 /// resolved fact; the replacement master is the only choice, picked from
@@ -276,7 +279,7 @@ pub(crate) fn replace_instance_available(state: &AppState) -> bool {
     else {
         return false;
     };
-    instance_catalog(state)
+    instance_catalog(&state.design.property_registry, &state.model)
         .into_iter()
         .any(|entry| !entry.is_same_master(source))
 }
@@ -286,15 +289,20 @@ pub(crate) fn open_replace_instance_dialog(state: &mut AppState) {
     if state.schematic_edit_read_only() {
         return;
     }
-    let replacement_authority = match replacement_authority(state) {
-        Ok(authority) => authority,
-        Err(message) => {
-            state.prompt(message);
-            return;
-        }
-    };
-    let ranked = ranked_replacements(state, &replacement_authority);
-    let Some(resolved) = best_replacement(state, &replacement_authority, &ranked) else {
+    let replacement_authority =
+        match replacement_authority(&state.design.property_registry, &state.model) {
+            Ok(authority) => authority,
+            Err(message) => {
+                state.prompt(message);
+                return;
+            }
+        };
+    let ranked = ranked_replacements(
+        &state.design.property_registry,
+        &state.model,
+        &replacement_authority,
+    );
+    let Some(resolved) = best_replacement(&state.model, &replacement_authority, &ranked) else {
         state.prompt("No other ready master keeps every connection of the selected instance.");
         return;
     };
@@ -320,18 +328,27 @@ pub(crate) fn open_replace_instance_dialog(state: &mut AppState) {
     });
 }
 
-impl RSpiceApp {
+/// What Replace instance draws over and changes: its draft, the property
+/// sheets the instance catalog reads, the model and the session.
+pub(in crate::workbench) struct ReplaceInstance<'a> {
+    pub(in crate::workbench) dialog: &'a mut ReplaceInstanceDialogState,
+    pub(in crate::workbench) registry: &'a PropertyEditorSchema,
+    pub(in crate::workbench) model: &'a mut Model,
+    pub(in crate::workbench) workbench: &'a mut WorkbenchSession,
+}
+
+impl ReplaceInstance<'_> {
     pub(in crate::workbench) fn render_replace_instance_dialog(&mut self, ctx: &Context) {
-        if !self.state.design.replace_instance.open {
+        if !self.dialog.open {
             return;
         }
-        let validation = validation_for_repaint(ctx, &self.state);
+        let validation = validation_for_repaint(ctx, self.dialog, self.registry, self.model);
         let evidence = replacement_evidence(&validation);
         let consequence = evidence
             .as_ref()
             .and_then(|evidence| dropped_parameter_consequence(evidence.dropped_parameters));
         let table = evidence.as_ref().map(ReplacementEvidence::table);
-        let dialog = &self.state.design.replace_instance;
+        let dialog = &*self.dialog;
         let mut picked = None;
         let choice = CommandForm::new(TITLE, PRIMARY)
             .wide()
@@ -354,7 +371,7 @@ impl RSpiceApp {
                 Some(replace_with.response.id)
             });
         if let Some(index) = picked {
-            let dialog = &mut self.state.design.replace_instance;
+            let dialog = &mut *self.dialog;
             if let Some(display) = dialog.candidates.get(index).cloned() {
                 dialog.replacement = display;
                 dialog.mark_edited();
@@ -363,36 +380,28 @@ impl RSpiceApp {
         match choice {
             DialogChoice::Primary => self.commit_instance_replacement(),
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.design.replace_instance.close();
+                self.dialog.close();
             }
             DialogChoice::None | DialogChoice::Secondary => {}
         }
     }
 
     fn commit_instance_replacement(&mut self) {
-        let validation = validate_draft(&self.state);
+        let validation = validate_draft(self.dialog, self.registry, self.model);
         let ReplacementValidation::Valid(resolved) = validation else {
             return;
         };
-        let Some(authority) = self
-            .state
-            .design
-            .replace_instance
-            .replacement_authority
-            .clone()
-        else {
+        let Some(authority) = self.dialog.replacement_authority.clone() else {
             return;
         };
         match self
-            .state
             .model
             .schematic
             .replace_selected_instance(&authority, &resolved.target)
         {
             Ok(impact) => {
-                self.state.sync_active_schematic_to_workspace();
+                sync_active_schematic(self.model, self.workbench);
                 let replaced = self
-                    .state
                     .model
                     .schematic
                     .document()
@@ -403,21 +412,24 @@ impl RSpiceApp {
                         || "the instance".to_owned(),
                         |component| component.name.clone(),
                     );
-                self.state.prompt(format!(
+                self.workbench.prompt(format!(
                     "Replaced {replaced} with {}; {} connections and {} parameter values kept.",
                     resolved.identity, impact.preserved_connections, impact.preserved_parameters,
                 ));
-                self.state.design.replace_instance.close();
+                self.dialog.close();
             }
             Err(error) => {
-                self.state.design.replace_instance.preview_error = Some(error.to_string());
+                self.dialog.preview_error = Some(error.to_string());
             }
         }
     }
 }
 
-fn validate_draft(state: &AppState) -> ReplacementValidation {
-    let draft = &state.design.replace_instance;
+fn validate_draft(
+    draft: &ReplaceInstanceDialogState,
+    registry: &PropertyEditorSchema,
+    model: &Model,
+) -> ReplacementValidation {
     if let Some(error) = draft.preview_error.as_ref() {
         return ReplacementValidation::Invalid(error.clone());
     }
@@ -427,7 +439,7 @@ fn validate_draft(state: &AppState) -> ReplacementValidation {
                 .to_owned(),
         );
     };
-    if let Err(error) = edit_authority.validate(state, TITLE) {
+    if let Err(error) = edit_authority.validate(model, TITLE) {
         return ReplacementValidation::Invalid(error);
     }
     let Some(authority) = draft.replacement_authority.as_ref() else {
@@ -442,7 +454,7 @@ fn validate_draft(state: &AppState) -> ReplacementValidation {
                 .to_owned(),
         );
     }
-    let validation = resolve_replacement(state, authority, &draft.replacement);
+    let validation = resolve_replacement(registry, model, authority, &draft.replacement);
     if !draft.dirty
         && let ReplacementValidation::Valid(resolved) = &validation
     {
@@ -461,26 +473,24 @@ fn validate_draft(state: &AppState) -> ReplacementValidation {
     validation
 }
 
-fn validation_for_repaint(ctx: &Context, state: &AppState) -> ReplacementValidation {
-    let draft = &state.design.replace_instance;
+fn validation_for_repaint(
+    ctx: &Context,
+    draft: &ReplaceInstanceDialogState,
+    registry: &PropertyEditorSchema,
+    model: &Model,
+) -> ReplacementValidation {
     let key = ValidationCacheKey {
         source_component_id: draft.source_component_id,
-        selected_component_id: state
-            .model
-            .schematic
-            .session
-            .editor
-            .selection
-            .single_component(),
+        selected_component_id: model.schematic.session.editor.selection.single_component(),
         query: draft.replacement.trim().to_ascii_lowercase(),
         dirty: draft.dirty,
         preview_error: draft.preview_error.clone(),
-        schematic_edit_read_only: state.schematic_edit_read_only(),
-        library_revision: state.model.library_manager.revision(),
-        project_revision: state.model.workspace.content.project.revision().get(),
-        design_execution_epoch: state.model.design_execution_epoch,
-        active_schematic_epoch: state.model.active_schematic_epoch,
-        topology_version: state.model.schematic.topology_version(),
+        schematic_edit_read_only: model.schematic_edit_read_only(),
+        library_revision: model.library_manager.revision(),
+        project_revision: model.workspace.content.project.revision().get(),
+        design_execution_epoch: model.design_execution_epoch,
+        active_schematic_epoch: model.active_schematic_epoch,
+        topology_version: model.schematic.topology_version(),
     };
     let cache_id = egui::Id::new("replace-instance-validation-cache");
     if let Some(cached) = ctx.data(|data| data.get_temp::<CachedReplacementValidation>(cache_id))
@@ -488,7 +498,7 @@ fn validation_for_repaint(ctx: &Context, state: &AppState) -> ReplacementValidat
     {
         return cached.validation;
     }
-    let validation = validate_draft(state);
+    let validation = validate_draft(draft, registry, model);
     ctx.data_mut(|data| {
         data.insert_temp(
             cache_id,
@@ -502,11 +512,12 @@ fn validation_for_repaint(ctx: &Context, state: &AppState) -> ReplacementValidat
 }
 
 fn resolve_replacement(
-    state: &AppState,
+    registry: &PropertyEditorSchema,
+    model: &Model,
     authority: &SchematicReplacementAuthority,
     authored: &str,
 ) -> ReplacementValidation {
-    let catalog = instance_catalog(state);
+    let catalog = instance_catalog(registry, model);
     let entry = match resolve_instance_catalog_entry(&catalog, authored) {
         Ok(entry) => entry,
         Err(error) => return ReplacementValidation::Invalid(error),
@@ -517,19 +528,18 @@ fn resolve_replacement(
                 .to_owned(),
         );
     }
-    let target = match entry.target_spec(state) {
+    let target = match entry.target_spec(model) {
         Ok(target) => target,
         Err(error) => return ReplacementValidation::Invalid(error),
     };
-    let preview = match state
-        .model
+    let preview = match model
         .schematic
         .preview_instance_replacement(authority, &target)
     {
         Ok(preview) => preview,
         Err(error) => return ReplacementValidation::Invalid(error.to_string()),
     };
-    if let Err(error) = validate_downstream(state, authority, &target) {
+    if let Err(error) = validate_downstream(model, authority, &target) {
         return ReplacementValidation::Invalid(error);
     }
     ReplacementValidation::Valid(Box::new(ResolvedReplacement {
@@ -540,17 +550,18 @@ fn resolve_replacement(
     }))
 }
 
-fn replacement_authority(state: &AppState) -> Result<SchematicReplacementAuthority, String> {
-    let component_id = state
-        .model
+fn replacement_authority(
+    registry: &PropertyEditorSchema,
+    model: &Model,
+) -> Result<SchematicReplacementAuthority, String> {
+    let component_id = model
         .schematic
         .session
         .editor
         .selection
         .single_component()
         .ok_or_else(|| "Select exactly one complete component instance to replace.".to_owned())?;
-    let component = state
-        .model
+    let component = model
         .schematic
         .document()
         .components
@@ -560,16 +571,16 @@ fn replacement_authority(state: &AppState) -> Result<SchematicReplacementAuthori
     if matches!(component.kind, ComponentType::Ground | ComponentType::Port) {
         return Err("Ground and interface-port objects are not replaceable instances.".to_owned());
     }
-    let source_spec = authored_source_spec(state, component)?;
-    state
-        .model
+    let source_spec = authored_source_spec(registry, model, component)?;
+    model
         .schematic
         .replacement_authority_with_spec(source_spec)
         .map_err(|error| error.to_string())
 }
 
 fn authored_source_spec(
-    state: &AppState,
+    registry: &PropertyEditorSchema,
+    model: &Model,
     component: &Component,
 ) -> Result<SchematicReplacementSourceSpec, String> {
     let mut template = component.clone();
@@ -579,8 +590,8 @@ fn authored_source_spec(
     template.mirror_v = false;
     let resolved = template.library_cell.as_ref().and_then(|binding| {
         SymbolResolver::new(
-            &state.model.library_manager,
-            &state.model.workspace.content.schematic_buffers,
+            &model.library_manager,
+            &model.workspace.content.schematic_buffers,
         )
         .resolve_binding(binding)
     });
@@ -606,7 +617,7 @@ fn authored_source_spec(
         .map_err(|error| error.to_string())?;
     let mut parameter_keys = spec.parameter_keys().to_vec();
     parameter_keys.extend(
-        instance_catalog(state)
+        instance_catalog(registry, model)
             .into_iter()
             .filter(|entry| entry.is_same_master(component))
             .flat_map(|entry| {
@@ -634,12 +645,12 @@ struct RankedReplacement {
 /// The first of `ranked` whose replacement also passes the downstream
 /// checks: the form's opening choice.
 fn best_replacement(
-    state: &AppState,
+    model: &Model,
     authority: &SchematicReplacementAuthority,
     ranked: &[RankedReplacement],
 ) -> Option<ResolvedReplacement> {
     ranked.iter().find_map(|candidate| {
-        validate_downstream(state, authority, &candidate.target).ok()?;
+        validate_downstream(model, authority, &candidate.target).ok()?;
         Some(ResolvedReplacement {
             identity: candidate.entry.identity.clone(),
             display: candidate.entry.display.clone(),
@@ -653,7 +664,8 @@ fn best_replacement(
 /// likeliest first: same device prefix, same pin count, most pins and then
 /// parameters carried, same library. These are the form's choices.
 fn ranked_replacements(
-    state: &AppState,
+    registry: &PropertyEditorSchema,
+    model: &Model,
     authority: &SchematicReplacementAuthority,
 ) -> Vec<RankedReplacement> {
     let source = authority.source_component();
@@ -661,13 +673,12 @@ fn ranked_replacements(
         .library_cell
         .as_ref()
         .map(|binding| binding.library.to_ascii_lowercase());
-    let mut candidates = instance_catalog(state)
+    let mut candidates = instance_catalog(registry, model)
         .into_iter()
         .filter(|entry| !entry.is_same_master(source))
         .filter_map(|entry| {
-            let target = entry.target_spec(state).ok()?;
-            let preview = state
-                .model
+            let target = entry.target_spec(model).ok()?;
+            let preview = model
                 .schematic
                 .preview_instance_replacement(authority, &target)
                 .ok()?;
@@ -708,23 +719,23 @@ fn ranked_replacements(
 }
 
 fn validate_downstream(
-    state: &AppState,
+    model: &Model,
     authority: &SchematicReplacementAuthority,
     target: &SchematicReplacementTargetSpec,
 ) -> Result<(), String> {
-    let mut candidate = state.model.schematic.clone();
+    let mut candidate = model.schematic.clone();
     candidate
         .replace_selected_instance(authority, target)
         .map_err(|error| error.to_string())?;
 
-    let baseline_hierarchy = state.model.workspace.resolve_hierarchy_with_active(
-        &state.model.library_manager,
-        &state.model.workspace.content.active_view,
-        &state.model.schematic,
+    let baseline_hierarchy = model.workspace.resolve_hierarchy_with_active(
+        &model.library_manager,
+        &model.workspace.content.active_view,
+        &model.schematic,
     );
-    let candidate_hierarchy = state.model.workspace.resolve_hierarchy_with_active(
-        &state.model.library_manager,
-        &state.model.workspace.content.active_view,
+    let candidate_hierarchy = model.workspace.resolve_hierarchy_with_active(
+        &model.library_manager,
+        &model.workspace.content.active_view,
         &candidate,
     );
     let baseline_failures = hierarchy_failures(&baseline_hierarchy);
@@ -739,8 +750,8 @@ fn validate_downstream(
         ));
     }
 
-    let baseline_generation = generate_candidate_netlist(state, &state.model.schematic)?;
-    let candidate_generation = generate_candidate_netlist(state, &candidate)?;
+    let baseline_generation = generate_candidate_netlist(model, &model.schematic)?;
+    let candidate_generation = generate_candidate_netlist(model, &candidate)?;
     let baseline_errors = baseline_generation
         .errors
         .into_iter()
@@ -788,20 +799,19 @@ fn hierarchy_failures(
 /// design projection. A candidate netlisted against the live editor buffers
 /// would be compared for compatibility with a hierarchy the run does not use.
 fn generate_candidate_netlist(
-    state: &AppState,
+    model: &Model,
     schematic: &crate::state::SchematicState,
 ) -> Result<rspice_simulation::netlist_gen::NetlistResult, String> {
-    let projection = state
-        .model
+    let projection = model
         .workspace
         .design_projection(
-            &state.model.library_manager,
-            &state.model.workspace.content.active_view,
-            &state.model.schematic,
+            &model.library_manager,
+            &model.workspace.content.active_view,
+            &model.schematic,
         )
         .map_err(|error| error.to_string())?;
     let hierarchy =
-        HierarchySource::from_design_projection(state.model.library_manager.catalog(), &projection);
+        HierarchySource::from_design_projection(model.library_manager.catalog(), &projection);
     Ok(generate_netlist_hierarchical(
         schematic,
         &[],
@@ -825,6 +835,7 @@ fn current_display(component: &Component) -> String {
 mod tests {
     use super::*;
     use crate::state::{Component, ComponentType};
+    use crate::workbench::app::RSpiceApp;
 
     fn placed_source(params: &str) -> AppState {
         let mut state = AppState::default();
@@ -888,7 +899,15 @@ mod tests {
                         )),
                         ..Default::default()
                     },
-                    |ui| app.render_replace_instance_dialog(ui.ctx()),
+                    |ui| {
+                        ReplaceInstance {
+                            dialog: &mut app.state.design.replace_instance,
+                            registry: &app.state.design.property_registry,
+                            model: &mut app.state.model,
+                            workbench: &mut app.state.workbench,
+                        }
+                        .render_replace_instance_dialog(ui.ctx());
+                    },
                 )
                 .platform_output
                 .accesskit_update
@@ -953,7 +972,14 @@ mod tests {
         assert!(state.design.replace_instance.open);
         assert_eq!(state.design.replace_instance.source_component_id, id);
         assert!(!state.design.replace_instance.replacement.is_empty());
-        assert!(validate_draft(&state).can_commit());
+        assert!(
+            validate_draft(
+                &state.design.replace_instance,
+                &state.design.property_registry,
+                &state.model,
+            )
+            .can_commit()
+        );
     }
 
     #[test]
@@ -976,7 +1002,11 @@ mod tests {
         state.design.replace_instance.replacement = "voltage".to_owned();
         state.design.replace_instance.mark_edited();
 
-        let validation = validate_draft(&state);
+        let validation = validate_draft(
+            &state.design.replace_instance,
+            &state.design.property_registry,
+            &state.model,
+        );
         assert!(replacement_evidence(&validation).is_none());
         assert!(matches!(
             validation,
@@ -999,11 +1029,25 @@ mod tests {
             .selection
             .select_only_component(id);
         open_replace_instance_dialog(&mut state);
-        assert!(validate_draft(&state).can_commit());
+        assert!(
+            validate_draft(
+                &state.design.replace_instance,
+                &state.design.property_registry,
+                &state.model,
+            )
+            .can_commit()
+        );
 
         state.model.library_manager.clear();
 
-        assert!(validate_draft(&state).can_commit());
+        assert!(
+            validate_draft(
+                &state.design.replace_instance,
+                &state.design.property_registry,
+                &state.model,
+            )
+            .can_commit()
+        );
     }
 
     /// The table names what is carried across and what is not. A summary
@@ -1016,7 +1060,11 @@ mod tests {
         open_replace_instance_dialog(&mut state);
         assert!(state.design.replace_instance.open);
 
-        let validation = validate_draft(&state);
+        let validation = validate_draft(
+            &state.design.replace_instance,
+            &state.design.property_registry,
+            &state.model,
+        );
         assert!(
             validation.can_commit(),
             "the fixture resolves a replacement"
@@ -1066,12 +1114,25 @@ mod tests {
             .select_only_component(id);
         open_replace_instance_dialog(&mut state);
         let context = Context::default();
-        assert!(validation_for_repaint(&context, &state).can_commit());
+        assert!(
+            validation_for_repaint(
+                &context,
+                &state.design.replace_instance,
+                &state.design.property_registry,
+                &state.model,
+            )
+            .can_commit()
+        );
 
         state.design.replace_instance.preview_error =
             Some("The validated replacement could not be committed.".to_owned());
         assert!(matches!(
-            validation_for_repaint(&context, &state),
+            validation_for_repaint(
+            &context,
+            &state.design.replace_instance,
+            &state.design.property_registry,
+            &state.model,
+        ),
             ReplacementValidation::Invalid(message)
                 if message == "The validated replacement could not be committed."
         ));
