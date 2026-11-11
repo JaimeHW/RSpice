@@ -12,6 +12,7 @@ use crate::state::{Point, PortDirection, PortDiscipline, PortSignalType};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::ui::tokens::Mode;
 use crate::workbench::app::RSpiceApp;
+use crate::workbench::app_state::AppState;
 
 /// Draw the form as its dialog step does.
 fn render(app: &mut RSpiceApp, ctx: &egui::Context) {
@@ -50,7 +51,7 @@ fn key_event(key: egui::Key) -> egui::Event {
 }
 
 fn open_with(state: &mut AppState, names: &str) {
-    open_create_pins(state);
+    open_create_pins(&mut state.design.pin_port, &state.model);
     state.design.pin_port.fields.names = names.to_owned();
 }
 
@@ -280,7 +281,7 @@ fn reopening_while_armed_offers_the_remaining_names() {
         .expect("armed")
         .advance();
 
-    open_create_pins(&mut app.state);
+    open_create_pins(&mut app.state.design.pin_port, &app.state.model);
     assert!(app.state.design.pin_port.open);
     assert_eq!(app.state.design.pin_port.fields.names, "INN OUT");
     assert_eq!(
@@ -301,7 +302,7 @@ fn the_prefill_is_empty_until_a_batch_has_been_armed() {
     let ctx = Context::default();
     crate::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
-    open_create_pins(&mut app.state);
+    open_create_pins(&mut app.state.design.pin_port, &app.state.model);
     assert_eq!(app.state.design.pin_port.fields.names, "");
 
     app.state.design.pin_port.fields.names = "BIAS".to_owned();
@@ -312,7 +313,7 @@ fn the_prefill_is_empty_until_a_batch_has_been_armed() {
     app.state.model.schematic.cancel_tool();
     place_port(&mut app.state, "BIAS");
 
-    open_create_pins(&mut app.state);
+    open_create_pins(&mut app.state.design.pin_port, &app.state.model);
     assert_eq!(app.state.design.pin_port.fields.names, "BIAS_2");
 }
 
@@ -508,12 +509,12 @@ type PinPortCase = (&'static str, fn(&mut AppState));
 fn worst_cases() -> [PinPortCase; 2] {
     [
         ("valid", |state: &mut AppState| {
-            open_create_pins(state);
+            open_create_pins(&mut state.design.pin_port, &state.model);
             state.design.pin_port.fields.names = two_dozen_names();
         }),
         ("refused", |state: &mut AppState| {
             place_port(state, "VERY_LONG_INTERFACE_NAME_7");
-            open_create_pins(state);
+            open_create_pins(&mut state.design.pin_port, &state.model);
             state.design.pin_port.fields.names = two_dozen_names();
         }),
     ]

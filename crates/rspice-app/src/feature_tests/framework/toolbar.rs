@@ -185,7 +185,7 @@ fn desktop_design_toolbar_matches_the_upgraded_mockup() {
             DesignCommand::PlaceJunction.key(),
             DesignCommand::PlaceLabel.key(),
             DesignCommand::PlaceOffSheetConnector.key(),
-            Command::PlacePin.key(),
+            DesignCommand::PlacePin.key(),
             DesignCommand::PlaceProbe.key(),
             DesignCommand::PlaceText.key(),
         ]
@@ -244,7 +244,7 @@ fn direct_schematic_toolbar_selection_tracks_every_armed_tool() {
     ));
     assert!(design_toolbar_command_selected(
         Tool::Place(ComponentType::Port),
-        Command::PlacePin.key(),
+        DesignCommand::PlacePin.key(),
     ));
     assert!(design_toolbar_command_selected(
         Tool::BusTap,

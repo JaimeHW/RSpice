@@ -15,10 +15,10 @@ use std::sync::LazyLock;
 
 use crate::io::NetlistFormat;
 use crate::schematic::view::sheet_visibility::SchematicObjectKind;
+use crate::state::ModelsPage;
 use crate::state::command_catalog::{
     CommandCatalog, CommandKey, CommandPlatform, ShortcutBinding, ShortcutContext,
 };
-use crate::state::{ComponentType, ModelsPage};
 use crate::state::{SimulationPage, VerificationPage};
 use crate::workbench::cloud::commands::CloudCommand;
 use crate::workbench::code::commands::CodeCommand;
@@ -112,7 +112,6 @@ pub enum Command {
     /// back to the size it had.
     ZoomWindow,
     SelectTool,
-    PlacePin,
     MoveSelection,
     StretchSelection,
     ArraySelection,
@@ -143,7 +142,6 @@ pub enum Command {
     EditSymbolInPlace,
     /// Leave an in-place symbol edit for the parent schematic.
     ExitSymbolInPlace,
-    Place(ComponentType),
     RotateSelection,
     RotateSelectionCounterClockwise,
     MirrorSelectionHorizontal,
@@ -346,7 +344,6 @@ impl Command {
             Self::MinimizeWindow => spec("minimize-window", "Minimize", "Window"),
             Self::ZoomWindow => spec("zoom-window", "Zoom", "Window"),
             Self::SelectTool => spec("select-tool", "Select tool", "Design"),
-            Self::PlacePin => spec("place-pin", "Create pins\u{2026}", "Design"),
             Self::MoveSelection => spec("move-selection", "Move", "Edit"),
             Self::StretchSelection => spec("stretch-selection", "Stretch", "Edit"),
             Self::ArraySelection => spec("array-selection", "Create array\u{2026}", "Edit"),
@@ -397,25 +394,6 @@ impl Command {
                 "Return to parent schematic",
                 "Design",
             ),
-            Self::Place(ComponentType::Resistor) => {
-                spec("place-resistor", "Place resistor", "Design")
-            }
-            Self::Place(ComponentType::Capacitor) => {
-                spec("place-capacitor", "Place capacitor", "Design")
-            }
-            Self::Place(ComponentType::Inductor) => {
-                spec("place-inductor", "Place inductor", "Design")
-            }
-            Self::Place(ComponentType::Diode) => spec("place-diode", "Place diode", "Design"),
-            Self::Place(ComponentType::Ground) => spec("place-ground", "Place ground", "Design"),
-            Self::Place(ComponentType::VoltageSource) => {
-                spec("place-voltage-source", "Place voltage source", "Design")
-            }
-            Self::Place(ComponentType::CurrentSource) => {
-                spec("place-current-source", "Place current source", "Design")
-            }
-            Self::Place(ComponentType::Port) => Self::PlacePin.spec(),
-            Self::Place(_) => spec("place-component", "Place component", "Design"),
             Self::RotateSelection => spec("rotate-selection", "Rotate clockwise", "Design"),
             Self::RotateSelectionCounterClockwise => {
                 spec("rotate-selection-ccw", "Rotate counter-clockwise", "Design")
@@ -622,7 +600,6 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ZoomWindow,
     Command::ResetLayout,
     Command::SelectTool,
-    Command::PlacePin,
     Command::MoveSelection,
     Command::StretchSelection,
     Command::ArraySelection,
@@ -643,13 +620,6 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::SymbolSave,
     Command::EditSymbolInPlace,
     Command::ExitSymbolInPlace,
-    Command::Place(ComponentType::Resistor),
-    Command::Place(ComponentType::Capacitor),
-    Command::Place(ComponentType::Inductor),
-    Command::Place(ComponentType::Diode),
-    Command::Place(ComponentType::Ground),
-    Command::Place(ComponentType::VoltageSource),
-    Command::Place(ComponentType::CurrentSource),
     Command::RotateSelection,
     Command::RotateSelectionCounterClockwise,
     Command::MirrorSelectionHorizontal,
@@ -834,7 +804,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     DesignCommand::PlaceLabel.key(),
     DesignCommand::PlaceOffSheetConnector.key(),
     DesignCommand::PlaceProbe.key(),
-    Command::PlacePin.key(),
+    DesignCommand::PlacePin.key(),
     DesignCommand::PlaceText.key(),
     DesignCommand::PlaceShape.key(),
     Command::MoveSelection.key(),
@@ -872,13 +842,13 @@ static COMMAND_ORDER: &[CommandKey] = &[
     Command::SymbolSave.key(),
     Command::EditSymbolInPlace.key(),
     Command::ExitSymbolInPlace.key(),
-    Command::Place(ComponentType::Resistor).key(),
-    Command::Place(ComponentType::Capacitor).key(),
-    Command::Place(ComponentType::Inductor).key(),
-    Command::Place(ComponentType::Diode).key(),
-    Command::Place(ComponentType::Ground).key(),
-    Command::Place(ComponentType::VoltageSource).key(),
-    Command::Place(ComponentType::CurrentSource).key(),
+    DesignCommand::PlaceResistor.key(),
+    DesignCommand::PlaceCapacitor.key(),
+    DesignCommand::PlaceInductor.key(),
+    DesignCommand::PlaceDiode.key(),
+    DesignCommand::PlaceGround.key(),
+    DesignCommand::PlaceVoltageSource.key(),
+    DesignCommand::PlaceCurrentSource.key(),
     Command::RotateSelection.key(),
     Command::RotateSelectionCounterClockwise.key(),
     Command::MirrorSelectionHorizontal.key(),

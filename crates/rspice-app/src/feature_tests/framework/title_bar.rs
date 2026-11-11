@@ -745,7 +745,7 @@ const DESIGN_PLACEMENT_COMMANDS: [CommandKey; 10] = [
     DesignCommand::PlaceJunction.key(),
     DesignCommand::PlaceLabel.key(),
     DesignCommand::PlaceProbe.key(),
-    Command::PlacePin.key(),
+    DesignCommand::PlacePin.key(),
     DesignCommand::PlaceText.key(),
     DesignCommand::PlaceShape.key(),
 ];
@@ -1318,7 +1318,7 @@ fn menu_icons_mark_only_the_toolbars_twins_with_the_buttons_icon() {
     for (key, icon) in [
         (DesignCommand::PlaceInstance.key(), WorkbenchIcon::Instance),
         (DesignCommand::PlaceJunction.key(), WorkbenchIcon::Junction),
-        (Command::PlacePin.key(), WorkbenchIcon::Pin),
+        (DesignCommand::PlacePin.key(), WorkbenchIcon::Pin),
         (DesignCommand::PlaceText.key(), WorkbenchIcon::Text),
         (Command::Delete.key(), WorkbenchIcon::Trash),
         (Command::AscendHierarchy.key(), WorkbenchIcon::ArrowUp),

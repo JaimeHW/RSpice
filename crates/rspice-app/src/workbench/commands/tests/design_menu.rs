@@ -11,7 +11,6 @@ use crate::workbench::project::commands::ProjectCommand;
 #[test]
 fn design_menu_commands_explain_wrong_context_and_read_only_states() {
     let authoring_commands = [
-        Command::PlacePin,
         Command::MoveSelection,
         Command::StretchSelection,
         Command::ArraySelection,
@@ -24,6 +23,7 @@ fn design_menu_commands_explain_wrong_context_and_read_only_states() {
         DesignCommand::PlaceJunction,
         DesignCommand::PlaceLabel,
         DesignCommand::PlaceProbe,
+        DesignCommand::PlacePin,
         DesignCommand::PlaceText,
         DesignCommand::PlaceShape,
         DesignCommand::ReplaceInstance,

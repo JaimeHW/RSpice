@@ -27,7 +27,7 @@ fn safe_mode_disables_schematic_mutation_commands_but_keeps_canvas_settings_avai
         DesignCommand::PlaceBusTap.key(),
         DesignCommand::PlaceJunction.key(),
         DesignCommand::PlaceLabel.key(),
-        Command::PlacePin.key(),
+        DesignCommand::PlacePin.key(),
         DesignCommand::PlaceText.key(),
     ] {
         assert!(!app.command_key_enabled(key), "{key:?}");
@@ -77,7 +77,7 @@ fn place_pin_opens_the_isolated_mockup_transaction_without_mutating_the_document
     let dirty = app.state.model.schematic.session.is_dirty;
     let tool = app.state.model.schematic.session.editor.tool;
 
-    Command::PlacePin.execute(&mut app);
+    app.execute_command_key(DesignCommand::PlacePin.key());
 
     assert!(app.state.design.pin_port.open);
     // Empty on first use: the form used to open holding a sample name.
@@ -183,7 +183,7 @@ fn every_raw_port_command_route_is_projected_through_the_same_dialog() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;
 
-    Command::Place(ComponentType::Port).execute(&mut app);
+    app.execute_command_key(DesignCommand::PlacePin.key());
 
     assert!(app.state.design.pin_port.open);
     assert_eq!(app.state.model.schematic.session.editor.tool, Tool::Select);
@@ -243,19 +243,19 @@ fn bus_authoring_commands_are_unavailable_on_read_only_schematics() {
     app.state.workbench.workspace = Workspace::Design;
     assert!(app.command_key_enabled(DesignCommand::PlaceBus.key()));
     assert!(app.command_key_enabled(DesignCommand::PlaceBusTap.key()));
-    assert!(Command::PlacePin.is_enabled(&app));
+    assert!(app.command_key_enabled(DesignCommand::PlacePin.key()));
     assert!(app.command_key_enabled(DesignCommand::PlaceText.key()));
     assert!(app.command_key_enabled(DesignCommand::PlaceShape.key()));
 
     app.state.model.schematic.session.read_only = true;
     assert!(!app.command_key_enabled(DesignCommand::PlaceBus.key()));
     assert!(!app.command_key_enabled(DesignCommand::PlaceBusTap.key()));
-    assert!(!Command::PlacePin.is_enabled(&app));
+    assert!(!app.command_key_enabled(DesignCommand::PlacePin.key()));
     assert!(!app.command_key_enabled(DesignCommand::PlaceText.key()));
     assert!(!app.command_key_enabled(DesignCommand::PlaceShape.key()));
     app.state.model.schematic.session.read_only = false;
     app.state.workbench.workspace = Workspace::Results;
-    assert!(!Command::PlacePin.is_enabled(&app));
+    assert!(!app.command_key_enabled(DesignCommand::PlacePin.key()));
     assert!(!app.command_key_enabled(DesignCommand::PlaceText.key()));
     assert!(!app.command_key_enabled(DesignCommand::PlaceShape.key()));
 }

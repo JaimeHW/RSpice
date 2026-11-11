@@ -18,7 +18,6 @@ pub(super) fn palette_icon(command: Command) -> Option<Icon> {
     let icon = match command {
         Command::SelectTool => Icon::Select,
         Command::JoinCollinearWires => Icon::Wire,
-        Command::PlacePin => Icon::Pin,
         Command::MoveSelection | Command::StretchSelection => Icon::Select,
         Command::ArraySelection => Icon::Grid,
         Command::SwapToRSpiceSymbols => Icon::Refresh,
@@ -64,6 +63,7 @@ pub(super) fn feature_palette_icon(key: CommandKey) -> Option<Icon> {
             DesignCommand::PlaceJunction | DesignCommand::PlaceShape => Some(Icon::Grid),
             DesignCommand::PlaceLabel | DesignCommand::PlaceText => Some(Icon::NetLabel),
             DesignCommand::PlaceProbe => Some(Icon::Probe),
+            DesignCommand::PlacePin => Some(Icon::Pin),
             DesignCommand::ReplaceInstance => Some(Icon::Refresh),
             DesignCommand::CreateHierarchy => Some(Icon::Folder),
             _ => None,

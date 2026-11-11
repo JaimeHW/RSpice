@@ -64,7 +64,11 @@ pub(crate) const DESIGN_DIRECT_TOOLBAR_COMMANDS: [(CommandKey, WorkbenchIcon, &s
         WorkbenchIcon::ArrowRight,
         "Off-sheet connector",
     ),
-    (Command::PlacePin.key(), WorkbenchIcon::Pin, "Create pin"),
+    (
+        DesignCommand::PlacePin.key(),
+        WorkbenchIcon::Pin,
+        "Create pin",
+    ),
     (
         DesignCommand::PlaceProbe.key(),
         WorkbenchIcon::Probe,
@@ -278,9 +282,6 @@ pub(crate) fn design_toolbar_command_selected(tool: Tool, key: CommandKey) -> bo
     if key == Command::SelectTool.key() {
         return tool == Tool::Select;
     }
-    if key == Command::PlacePin.key() {
-        return tool == Tool::Place(ComponentType::Port);
-    }
     match DesignCommand::from_key(key) {
         Some(DesignCommand::PlaceInstance) => {
             matches!(tool, Tool::Place(component) if component != ComponentType::Port)
@@ -292,6 +293,7 @@ pub(crate) fn design_toolbar_command_selected(tool: Tool, key: CommandKey) -> bo
         Some(DesignCommand::PlaceLabel) => tool == Tool::Label,
         Some(DesignCommand::PlaceOffSheetConnector) => tool == Tool::OffSheetConnector,
         Some(DesignCommand::PlaceProbe) => tool == Tool::Probe,
+        Some(DesignCommand::PlacePin) => tool == Tool::Place(ComponentType::Port),
         Some(DesignCommand::PlaceText) => tool == Tool::DesignNote,
         _ => false,
     }

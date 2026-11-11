@@ -2,7 +2,6 @@
 //! the shipped bindings, and the cases that edit or audit a profile through
 //! the commands this build ships.
 
-use crate::state::ComponentType;
 use crate::state::command_catalog::CommandPlatform;
 use crate::state::shortcuts::ProtectedShortcutPolicy;
 use crate::state::shortcuts::ShortcutBindingSlot;
@@ -131,7 +130,7 @@ fn default_profile_keeps_place_pin_on_the_mockup_binding() {
 
     for platform in CommandPlatform::ALL {
         let labels = preferences
-            .resolved_bindings(&CommandRegistry, Command::PlacePin.key())
+            .resolved_bindings(&CommandRegistry, DesignCommand::PlacePin.key())
             .into_iter()
             .filter(|binding| binding.supports(platform))
             .map(|binding| {
@@ -332,7 +331,7 @@ fn context_precedence_warns_across_tiers_but_blocks_same_tier_collisions() {
     same_tier
         .set_binding(
             &CommandRegistry,
-            Command::Place(ComponentType::Ground).key(),
+            DesignCommand::PlaceGround.key(),
             ShortcutBindingSlot::Primary,
             CommandPlatform::ALL.to_vec(),
             Some(sequence(Key::W, false)),

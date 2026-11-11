@@ -564,7 +564,7 @@ fn shift_p_resolves_schematic_place_pin_without_breaking_plain_p_contexts() {
 
     assert_eq!(
         resolve(Key::P, shift, design(true)).command,
-        Some(Command::PlacePin.key())
+        Some(DesignCommand::PlacePin.key())
     );
     assert_eq!(
         resolve(Key::P, Modifiers::NONE, design(true)).command,

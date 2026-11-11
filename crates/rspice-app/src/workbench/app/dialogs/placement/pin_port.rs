@@ -18,7 +18,7 @@ use crate::state::{
 use crate::ui::widgets::{CommandForm, DialogChoice};
 
 use crate::workbench::app::schematic_editor_request_source;
-use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::app_state::Model;
 use rspice_schematic_editor::vector_preview::deck_bits;
 
 /// Draft for Create pins.
@@ -69,10 +69,9 @@ const MAX_NAMES: usize = 256;
 /// Reopening while a batch is armed offers the names that batch has left,
 /// under the contract it was armed with, so the reader can correct a typo in
 /// name four without replacing the three already on the sheet.
-pub(crate) fn open_create_pins(state: &mut AppState) {
-    let authority = PlacementAuthority::new(schematic_editor_request_source(state));
-    let armed = state
-        .model
+pub(crate) fn open_create_pins(dialog: &mut PinPortDialogState, model: &Model) {
+    let authority = PlacementAuthority::new(schematic_editor_request_source(model));
+    let armed = model
         .schematic
         .session
         .editor
@@ -89,19 +88,18 @@ pub(crate) fn open_create_pins(state: &mut AppState) {
         // Empty on first use: a suggestion invented before the reader has
         // named anything is sample data, and this form used to open holding
         // one.
-        None => match state.design.pin_port.last_name.as_str() {
+        None => match dialog.last_name.as_str() {
             "" => String::new(),
-            base => state.model.schematic.suggested_port_name(base),
+            base => model.schematic.suggested_port_name(base),
         },
     };
-    let draft = &mut state.design.pin_port;
     if let Some(sequence) = armed {
-        draft.fields.direction = sequence.direction;
-        draft.fields.signal_type = sequence.signal_type;
-        draft.fields.discipline = sequence.discipline;
-        draft.fields.discipline_touched = true;
+        dialog.fields.direction = sequence.direction;
+        dialog.fields.signal_type = sequence.signal_type;
+        dialog.fields.discipline = sequence.discipline;
+        dialog.fields.discipline_touched = true;
     }
-    draft.open(names, authority);
+    dialog.open(names, authority);
 }
 
 /// What the typed draft is, measured against the live document.

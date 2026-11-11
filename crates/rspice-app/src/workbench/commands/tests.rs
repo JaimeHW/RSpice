@@ -24,12 +24,12 @@ mod view_state;
 use super::vocabulary::{CommandSpec, command_catalog};
 use super::*;
 use crate::product::{AnalysisInstanceId, ContentDigest, SimulationPlanId};
-use crate::state::ModelsPage;
 use crate::state::Wire;
 use crate::state::{
     AnalysisResult, AnalysisResultProvenance, AnalysisResultSourceDomain, AnalysisType,
     PreparedRunReceipt, PreparedRunTaskReceipt, PreparedSourceCheckReceipt,
 };
+use crate::state::{ComponentType, ModelsPage};
 use crate::state::{SimulationPage, VerificationPage};
 use crate::workbench::framework::command_registry::CommandAvailability;
 use crate::workbench::project::workspace_state::ProjectPage;

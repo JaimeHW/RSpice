@@ -172,7 +172,7 @@ fn protected_commands_keep_the_exact_mockup_action_ids() {
     );
     assert_eq!(DesignCommand::PlaceBus.key().as_str(), "place-bus");
     assert_eq!(DesignCommand::PlaceBusTap.key().as_str(), "place-bus-tap");
-    assert_eq!(Command::PlacePin.spec().id, "place-pin");
+    assert_eq!(DesignCommand::PlacePin.key().as_str(), "place-pin");
     assert_eq!(DesignCommand::PlaceText.key().as_str(), "place-text");
     assert_eq!(DesignCommand::PlaceShape.key().as_str(), "place-shape");
     assert_eq!(Command::ConfigurationSets.spec().id, "configuration-sets");

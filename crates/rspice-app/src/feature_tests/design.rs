@@ -99,7 +99,7 @@ fn net_label_opens_and_draws_in_the_frame() {
 #[test]
 fn create_pins_opens_and_draws_in_the_frame() {
     let mut app = design_app();
-    Command::PlacePin.execute(&mut app);
+    app.execute_command_key(DesignCommand::PlacePin.key());
     assert!(draws_dialog(&mut app, "Create pins"));
     assert!(app.state.design.pin_port.open);
 }

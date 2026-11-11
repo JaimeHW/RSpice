@@ -2183,7 +2183,7 @@ pub(super) fn cell_candidates(state: &AppState) -> Vec<CellCandidate> {
 
 pub(super) fn arm_primitive(app: &mut RSpiceApp, kind: ComponentType, ctx: &egui::Context) {
     if kind == ComponentType::Port {
-        crate::workbench::commands::vocabulary::Command::PlacePin.execute(app);
+        app.execute_command_key(crate::workbench::design::commands::DesignCommand::PlacePin.key());
         return;
     }
     let state = &mut app.state;

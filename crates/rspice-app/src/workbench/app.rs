@@ -120,7 +120,6 @@ pub(crate) use dialogs::design_review_comments::DesignReviewCommentsDialogState;
 pub(crate) use dialogs::library::new_veriloga_device::{
     new_veriloga_device_available, open_new_veriloga_device_form,
 };
-pub(crate) use dialogs::placement::pin_port::open_create_pins;
 pub(crate) use dialogs::project::{
     TechnologyAttachmentDialogState, new_project::open_new_project_dialog,
 };

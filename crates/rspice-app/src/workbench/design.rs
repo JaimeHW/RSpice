@@ -7,7 +7,7 @@ pub(crate) mod commands;
 
 use egui::Context;
 
-use crate::state::Tool;
+use crate::state::{ComponentType, Tool};
 use crate::workbench::app::actions::stimulus;
 use crate::workbench::app::dialogs::connectivity_manager::{
     ConnectivityManager, open_connectivity_manager,
@@ -25,6 +25,7 @@ use crate::workbench::app::dialogs::hierarchy::create::{
 use crate::workbench::app::dialogs::hierarchy::descend;
 use crate::workbench::app::dialogs::placement::builtin_xspice::BuiltinXspicePlacement;
 use crate::workbench::app::dialogs::placement::bus_tap::open_bus_tap;
+use crate::workbench::app::dialogs::placement::pin_port::open_create_pins;
 use crate::workbench::app::dialogs::property_dialog::PropertyDialog;
 use crate::workbench::app::dialogs::replace_instance::{
     ReplaceInstance, open_replace_instance_dialog, replace_instance_available,
@@ -127,7 +128,15 @@ impl CommandSet for DesignCommand {
             | Self::PlaceOffSheetConnector
             | Self::PlaceProbe
             | Self::PlaceText
-            | Self::PlaceShape => None,
+            | Self::PlaceShape
+            | Self::PlacePin
+            | Self::PlaceResistor
+            | Self::PlaceCapacitor
+            | Self::PlaceInductor
+            | Self::PlaceDiode
+            | Self::PlaceGround
+            | Self::PlaceVoltageSource
+            | Self::PlaceCurrentSource => None,
             _ if reads.wb.workspace != Workspace::Stimulus => Some("open the Stimulus Library"),
             Self::NewStimulusDefinition | Self::ValidateStimulusLibrary => None,
             Self::DuplicateStimulusDefinition | Self::DeleteStimulusDefinition => {
@@ -288,6 +297,17 @@ impl CommandSet for DesignCommand {
                 let expected_shapes = cx.model.schematic.document().documentation_shapes.clone();
                 cx.state.documentation_shape.open(source, expected_shapes);
             }
+            Self::PlacePin => {
+                cx.wb.activate(Workspace::Design);
+                open_create_pins(&mut cx.state.pin_port, cx.model);
+            }
+            Self::PlaceResistor => arm_tool(cx, Tool::Place(ComponentType::Resistor)),
+            Self::PlaceCapacitor => arm_tool(cx, Tool::Place(ComponentType::Capacitor)),
+            Self::PlaceInductor => arm_tool(cx, Tool::Place(ComponentType::Inductor)),
+            Self::PlaceDiode => arm_tool(cx, Tool::Place(ComponentType::Diode)),
+            Self::PlaceGround => arm_tool(cx, Tool::Place(ComponentType::Ground)),
+            Self::PlaceVoltageSource => arm_tool(cx, Tool::Place(ComponentType::VoltageSource)),
+            Self::PlaceCurrentSource => arm_tool(cx, Tool::Place(ComponentType::CurrentSource)),
             Self::ShowAdopterOnSchematic => {
                 stimulus::show_adopter_on_schematic(
                     cx.state.selected_stimulus_definition.as_deref(),

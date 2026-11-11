@@ -67,10 +67,26 @@ pub(crate) enum DesignCommand {
     PlaceOffSheetConnector,
     /// Arm the probe tool.
     PlaceProbe,
+    /// Open Create pins.
+    PlacePin,
     /// Open Place text or note.
     PlaceText,
     /// Open Draw documentation shape.
     PlaceShape,
+    /// Arm the resistor placement.
+    PlaceResistor,
+    /// Arm the capacitor placement.
+    PlaceCapacitor,
+    /// Arm the inductor placement.
+    PlaceInductor,
+    /// Arm the diode placement.
+    PlaceDiode,
+    /// Arm the ground placement.
+    PlaceGround,
+    /// Arm the voltage source placement.
+    PlaceVoltageSource,
+    /// Arm the current source placement.
+    PlaceCurrentSource,
 }
 
 const EVERYWHERE: &[CommandPlatform] = &CommandPlatform::ALL;
@@ -137,10 +153,30 @@ const PLACE_TEXT: &[ShortcutBinding] = &[primary(
     chord(Key::T, false, false, true, "Shift+T"),
     EVERYWHERE,
 )];
+const PLACE_PIN: &[ShortcutBinding] = &[primary(
+    chord(Key::P, false, false, true, "Shift+P"),
+    EVERYWHERE,
+)];
+const PLACE_RESISTOR: &[ShortcutBinding] =
+    &[primary(chord(Key::R, false, false, false, "R"), EVERYWHERE)];
+const PLACE_CAPACITOR: &[ShortcutBinding] =
+    &[primary(chord(Key::C, false, false, false, "C"), EVERYWHERE)];
+const PLACE_INDUCTOR: &[ShortcutBinding] =
+    &[primary(chord(Key::L, false, false, false, "L"), EVERYWHERE)];
+const PLACE_DIODE: &[ShortcutBinding] =
+    &[primary(chord(Key::D, false, false, false, "D"), EVERYWHERE)];
+const PLACE_GROUND: &[ShortcutBinding] = &[primary(
+    chord(Key::G, false, false, true, "Shift+G"),
+    EVERYWHERE,
+)];
+const PLACE_VOLTAGE_SOURCE: &[ShortcutBinding] =
+    &[primary(chord(Key::V, false, false, false, "V"), EVERYWHERE)];
+const PLACE_CURRENT_SOURCE: &[ShortcutBinding] =
+    &[primary(chord(Key::I, false, false, false, "I"), EVERYWHERE)];
 
 impl DesignCommand {
     /// Every command the registry lists, in the feature's own order.
-    pub(crate) const ALL: [Self; 28] = [
+    pub(crate) const ALL: [Self; 36] = [
         Self::NewStimulusDefinition,
         Self::DuplicateStimulusDefinition,
         Self::DeleteStimulusDefinition,
@@ -167,8 +203,16 @@ impl DesignCommand {
         Self::PlaceLabel,
         Self::PlaceOffSheetConnector,
         Self::PlaceProbe,
+        Self::PlacePin,
         Self::PlaceText,
         Self::PlaceShape,
+        Self::PlaceResistor,
+        Self::PlaceCapacitor,
+        Self::PlaceInductor,
+        Self::PlaceDiode,
+        Self::PlaceGround,
+        Self::PlaceVoltageSource,
+        Self::PlaceCurrentSource,
     ];
 
     /// The key a shortcut profile names this command by.
@@ -200,8 +244,16 @@ impl DesignCommand {
             Self::PlaceLabel => CommandKey::new("place-label"),
             Self::PlaceOffSheetConnector => CommandKey::new("place-off-sheet-connector"),
             Self::PlaceProbe => CommandKey::new("place-probe"),
+            Self::PlacePin => CommandKey::new("place-pin"),
             Self::PlaceText => CommandKey::new("place-text"),
             Self::PlaceShape => CommandKey::new("place-shape"),
+            Self::PlaceResistor => CommandKey::new("place-resistor"),
+            Self::PlaceCapacitor => CommandKey::new("place-capacitor"),
+            Self::PlaceInductor => CommandKey::new("place-inductor"),
+            Self::PlaceDiode => CommandKey::new("place-diode"),
+            Self::PlaceGround => CommandKey::new("place-ground"),
+            Self::PlaceVoltageSource => CommandKey::new("place-voltage-source"),
+            Self::PlaceCurrentSource => CommandKey::new("place-current-source"),
         }
     }
 
@@ -217,8 +269,16 @@ impl DesignCommand {
                 | Self::PlaceLabel
                 | Self::PlaceOffSheetConnector
                 | Self::PlaceProbe
+                | Self::PlacePin
                 | Self::PlaceText
                 | Self::PlaceShape
+                | Self::PlaceResistor
+                | Self::PlaceCapacitor
+                | Self::PlaceInductor
+                | Self::PlaceDiode
+                | Self::PlaceGround
+                | Self::PlaceVoltageSource
+                | Self::PlaceCurrentSource
         )
     }
 
@@ -327,6 +387,7 @@ impl DesignCommand {
             // toolbar and the palette are its routes.
             Self::PlaceOffSheetConnector => ("Off-sheet connector", "Design", place, canvas, NONE),
             Self::PlaceProbe => ("Place probe", "Design", palette, canvas, PLACE_PROBE),
+            Self::PlacePin => ("Create pins\u{2026}", "Design", place, canvas, PLACE_PIN),
             Self::PlaceText => (
                 "Place text or note\u{2026}",
                 "Design",
@@ -340,6 +401,25 @@ impl DesignCommand {
                 place,
                 canvas,
                 NONE,
+            ),
+            Self::PlaceResistor => ("Place resistor", "Design", place, canvas, PLACE_RESISTOR),
+            Self::PlaceCapacitor => ("Place capacitor", "Design", place, canvas, PLACE_CAPACITOR),
+            Self::PlaceInductor => ("Place inductor", "Design", place, canvas, PLACE_INDUCTOR),
+            Self::PlaceDiode => ("Place diode", "Design", place, canvas, PLACE_DIODE),
+            Self::PlaceGround => ("Place ground", "Design", place, canvas, PLACE_GROUND),
+            Self::PlaceVoltageSource => (
+                "Place voltage source",
+                "Design",
+                place,
+                canvas,
+                PLACE_VOLTAGE_SOURCE,
+            ),
+            Self::PlaceCurrentSource => (
+                "Place current source",
+                "Design",
+                place,
+                canvas,
+                PLACE_CURRENT_SOURCE,
             ),
         };
         CommandSpec {

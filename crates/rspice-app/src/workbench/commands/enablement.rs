@@ -328,9 +328,6 @@ impl Command {
             | Self::AnnotateOperatingPoint
             | Self::AnnotateTransientVoltages => active_schematic_editor(app),
             Self::SelectTool => active_symbol_editor(app) || active_schematic_editor(app),
-            Self::PlacePin | Self::Place(_) => {
-                active_schematic_editor(app) && !state.schematic_edit_read_only()
-            }
             Self::SymbolPinTool
             | Self::SymbolPolylineTool
             | Self::SymbolRectangleTool

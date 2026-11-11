@@ -3,7 +3,6 @@
 //! is written the same way.
 
 use crate::schematic::view::sheet_visibility::SchematicObjectKind;
-use crate::state::ComponentType;
 use crate::state::ModelsPage;
 use crate::state::SimulationPage;
 use crate::state::VerificationPage;
@@ -462,7 +461,7 @@ const PLACE_MENU: &[MenuEntry] = &[
         "Off-sheet connector",
     )
     .access('O'),
-    command_as(Command::PlacePin, "Pins\u{2026}").access('P'),
+    MenuEntry::command_as(DesignCommand::PlacePin.key(), "Pins\u{2026}").access('P'),
     MenuEntry::command_as(DesignCommand::PlaceJunction.key(), "Junction").access('J'),
     MenuEntry::command_as(DesignCommand::PlaceText.key(), "Text or note\u{2026}").access('N'),
     MenuEntry::command_as(
@@ -471,21 +470,13 @@ const PLACE_MENU: &[MenuEntry] = &[
     )
     .access('S'),
     Separator,
-    command_as(Command::Place(ComponentType::Resistor), "Resistor").access('R'),
-    command_as(Command::Place(ComponentType::Capacitor), "Capacitor").access('A'),
-    command_as(Command::Place(ComponentType::Inductor), "Inductor").access('U'),
-    command_as(Command::Place(ComponentType::Diode), "Diode").access('D'),
-    command_as(
-        Command::Place(ComponentType::VoltageSource),
-        "Voltage source",
-    )
-    .access('V'),
-    command_as(
-        Command::Place(ComponentType::CurrentSource),
-        "Current source",
-    )
-    .access('C'),
-    command_as(Command::Place(ComponentType::Ground), "Ground").access('G'),
+    MenuEntry::command_as(DesignCommand::PlaceResistor.key(), "Resistor").access('R'),
+    MenuEntry::command_as(DesignCommand::PlaceCapacitor.key(), "Capacitor").access('A'),
+    MenuEntry::command_as(DesignCommand::PlaceInductor.key(), "Inductor").access('U'),
+    MenuEntry::command_as(DesignCommand::PlaceDiode.key(), "Diode").access('D'),
+    MenuEntry::command_as(DesignCommand::PlaceVoltageSource.key(), "Voltage source").access('V'),
+    MenuEntry::command_as(DesignCommand::PlaceCurrentSource.key(), "Current source").access('C'),
+    MenuEntry::command_as(DesignCommand::PlaceGround.key(), "Ground").access('G'),
 ];
 
 /// What a symbol view places: its drawing tools, then the edits to one pin.
@@ -890,7 +881,6 @@ pub(in crate::workbench) const SOURCE_EDITOR_MENU: &[MenuEntry] = &[
 pub(in crate::workbench) fn command_icon(command: Command) -> Option<WorkbenchIcon> {
     let icon = match command {
         Command::SelectTool => WorkbenchIcon::Select,
-        Command::PlacePin => WorkbenchIcon::Pin,
         Command::SymbolSave => WorkbenchIcon::Save,
         Command::RotateSelection => WorkbenchIcon::Rotate,
         Command::MirrorSelectionHorizontal => WorkbenchIcon::Mirror,
@@ -934,6 +924,7 @@ pub(in crate::workbench) fn feature_command_icon(key: CommandKey) -> Option<Work
             DesignCommand::PlaceOffSheetConnector => Some(WorkbenchIcon::ArrowRight),
             DesignCommand::PlaceProbe => Some(WorkbenchIcon::Probe),
             DesignCommand::PlaceText => Some(WorkbenchIcon::Text),
+            DesignCommand::PlacePin => Some(WorkbenchIcon::Pin),
             _ => None,
         };
     }

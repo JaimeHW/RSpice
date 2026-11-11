@@ -8,7 +8,7 @@ use crate::schematic::view::schematic_symbol_context;
 use crate::schematic::view::selection_transform::{
     SelectionTransform, transform_selection_on_active_sheet,
 };
-use crate::state::{ComponentType, Tool};
+use crate::state::Tool;
 use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::framework::command_registry::{CommandOwner, ids};
@@ -92,13 +92,11 @@ pub(crate) const fn command_edits_schematic(command: Command) -> bool {
             | Command::Duplicate
             | Command::Delete
             | Command::FindReplace
-            | Command::PlacePin
             | Command::MoveSelection
             | Command::StretchSelection
             | Command::ArraySelection
             | Command::SwapToRSpiceSymbols
             | Command::UpdateInstanceInterface
-            | Command::Place(_)
             | Command::RotateSelection
             | Command::RotateSelectionCounterClockwise
             | Command::MirrorSelectionHorizontal
@@ -138,15 +136,13 @@ impl Command {
     }
 
     /// The placement and editing commands Repeat last command runs again,
-    /// each with what it carries (a placed kind, a rotation's sense). An
+    /// each with what it carries (a rotation's sense). An
     /// undo, a delete or a form is not repeated: Repeat on those would be a
     /// surprise rather than a shortcut.
     pub(crate) const fn repeatable(self) -> bool {
         matches!(
             self,
-            Self::Place(_)
-                | Self::PlacePin
-                | Self::Duplicate
+            Self::Duplicate
                 | Self::Paste
                 | Self::MoveSelection
                 | Self::StretchSelection
@@ -255,8 +251,6 @@ impl Command {
             Self::ConfigurationSets => CommandOwner::Project,
             Self::SelectTool
             | Self::SelectOfKind(_)
-            | Self::PlacePin
-            | Self::Place(_)
             | Self::MoveSelection
             | Self::StretchSelection
             | Self::ArraySelection
@@ -692,10 +686,6 @@ impl Command {
                     );
                 }
             }
-            Self::PlacePin => {
-                activate_workspace(app, Workspace::Design);
-                crate::workbench::app::open_create_pins(&mut app.state);
-            }
             Self::MoveSelection => {
                 crate::workbench::app::arm_move_selection(&mut app.state);
             }
@@ -777,17 +767,6 @@ impl Command {
             Self::ExitSymbolInPlace => app.state.request_symbol_in_place_exit(
                 super::app::actions::workspace::symbol_in_place::SymbolInPlaceExit::Parent,
             ),
-            Self::Place(ComponentType::Port) => Self::PlacePin.execute(app),
-            Self::Place(kind) => {
-                crate::workbench::app::arm_schematic_tool(
-                    &mut app.state.design.move_selection,
-                    &mut app.state.design.stretch_selection,
-                    &mut app.state.design.array_selection,
-                    &mut app.state.model,
-                    &mut app.state.workbench,
-                    Tool::Place(kind),
-                );
-            }
             Self::RotateSelection if active_symbol_editor(app) => {
                 app.transform_selected_symbol_item(SymbolTransform::Rotate);
             }

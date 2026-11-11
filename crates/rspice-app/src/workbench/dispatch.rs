@@ -14,10 +14,7 @@
 //! The dispatcher is handed a command value or a key. A key names a command
 //! when the registry lists it, or when a feature declares it and leaves it
 //! out of the registry for the one container that holds its key; no menu,
-//! shortcut profile or Repeat reaches one of those. Placing a kind the
-//! registry does not list answers the shared id `place-component`, which
-//! names no command, so Repeat after it does nothing. Placing a port answers
-//! the pin command's id and runs that command.
+//! shortcut profile or Repeat reaches one of those.
 
 use crate::state::command_catalog::CommandKey;
 use crate::workbench::app::HardcopyWorkflow;
@@ -563,19 +560,9 @@ impl Command {
 mod tests {
     use std::collections::BTreeSet;
 
-    use crate::state::ComponentType;
-    use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, Command};
-
-    /// The kinds whose placement the registry lists, each under its own id.
-    const REGISTERED_PLACEMENTS: &[ComponentType] = &[
-        ComponentType::Resistor,
-        ComponentType::Capacitor,
-        ComponentType::Inductor,
-        ComponentType::Diode,
-        ComponentType::Ground,
-        ComponentType::VoltageSource,
-        ComponentType::CurrentSource,
-    ];
+    use crate::state::command_catalog::CommandCatalog;
+    use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, Command, CommandRegistry};
+    use crate::workbench::design::commands::DesignCommand;
 
     fn variant(command: Command) -> String {
         let name = format!("{command:?}");
@@ -619,32 +606,27 @@ mod tests {
         );
     }
 
+    /// Create pins and the seven kinds the registry lists are the design
+    /// feature's, each under its own id; the id the legacy table answered for
+    /// a kind it did not list names nothing.
     #[test]
-    fn a_placement_the_registry_leaves_out_names_no_command_or_the_pin_command() {
-        let registered: Vec<ComponentType> = COMMAND_REGISTRY
-            .iter()
-            .filter_map(|command| match command {
-                Command::Place(kind) => Some(*kind),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(registered, REGISTERED_PLACEMENTS);
-
-        for kind in ComponentType::ALL {
-            let place = Command::Place(kind);
-            if REGISTERED_PLACEMENTS.contains(&kind) {
-                assert_eq!(Command::from_stable_id(place.stable_id()), Some(place));
-            } else if kind == ComponentType::Port {
-                assert_eq!(place.stable_id(), Command::PlacePin.stable_id());
-                assert_eq!(
-                    Command::from_stable_id(place.stable_id()),
-                    Some(Command::PlacePin)
-                );
-            } else {
-                assert_eq!(place.stable_id(), "place-component", "{kind:?}");
-            }
+    fn the_listed_placements_are_the_design_features_and_place_component_names_nothing() {
+        for command in [
+            DesignCommand::PlacePin,
+            DesignCommand::PlaceResistor,
+            DesignCommand::PlaceCapacitor,
+            DesignCommand::PlaceInductor,
+            DesignCommand::PlaceDiode,
+            DesignCommand::PlaceGround,
+            DesignCommand::PlaceVoltageSource,
+            DesignCommand::PlaceCurrentSource,
+        ] {
+            let key = command.key();
+            assert_eq!(CommandRegistry.resolve(key.as_str()), Some(key));
+            assert_eq!(DesignCommand::from_key(key), Some(command));
+            assert_eq!(Command::from_stable_id(key.as_str()), None, "{key:?}");
         }
-        assert_eq!(Command::from_stable_id("place-component"), None);
+        assert_eq!(CommandRegistry.resolve("place-component"), None);
     }
 
     /// Run on the Netlist workspace runs the deck the page shows, and only

@@ -170,7 +170,6 @@ const AUTOMATION_WORKSPACE: &[ShortcutBinding] =
 /// the four chords under it — a shortcut every reader has already learned.
 const STIMULUS_WORKSPACE: &[ShortcutBinding] =
     &[primary(chord(Key::Num8, false, true, false, "Alt+8"), ALL)];
-const PLACE_PIN: &[ShortcutBinding] = &[primary(chord(Key::P, false, false, true, "Shift+P"), ALL)];
 const MOVE_SELECTION: &[ShortcutBinding] = &[primary(chord(Key::M, false, false, false, "M"), ALL)];
 // The symbol canvas gives Ctrl+R and Ctrl+M the same meaning for its pins;
 // the two contexts never match the same view.
@@ -207,17 +206,6 @@ const SYMBOL_ROTATE_PIN: &[ShortcutBinding] =
     &[primary(chord(Key::R, true, false, false, "Ctrl+R"), ALL)];
 const SYMBOL_MIRROR_PIN: &[ShortcutBinding] =
     &[primary(chord(Key::M, true, false, false, "Ctrl+M"), ALL)];
-const PLACE_RESISTOR: &[ShortcutBinding] = &[primary(chord(Key::R, false, false, false, "R"), ALL)];
-const PLACE_CAPACITOR: &[ShortcutBinding] =
-    &[primary(chord(Key::C, false, false, false, "C"), ALL)];
-const PLACE_INDUCTOR: &[ShortcutBinding] = &[primary(chord(Key::L, false, false, false, "L"), ALL)];
-const PLACE_DIODE: &[ShortcutBinding] = &[primary(chord(Key::D, false, false, false, "D"), ALL)];
-const PLACE_GROUND: &[ShortcutBinding] =
-    &[primary(chord(Key::G, false, false, true, "Shift+G"), ALL)];
-const PLACE_VOLTAGE_SOURCE: &[ShortcutBinding] =
-    &[primary(chord(Key::V, false, false, false, "V"), ALL)];
-const PLACE_CURRENT_SOURCE: &[ShortcutBinding] =
-    &[primary(chord(Key::I, false, false, false, "I"), ALL)];
 const ASCEND_HIERARCHY: &[ShortcutBinding] =
     &[primary(chord(Key::H, false, false, true, "Shift+H"), ALL)];
 const DESCEND_HIERARCHY: &[ShortcutBinding] =
@@ -328,13 +316,11 @@ impl Command {
             | Self::FindReplace
             | Self::CycleGrid
             | Self::SetGridStyle(_)
-            | Self::PlacePin
             | Self::MoveSelection
             | Self::StretchSelection
             | Self::ArraySelection
             | Self::SwapToRSpiceSymbols
             | Self::UpdateInstanceInterface
-            | Self::Place(_)
             | Self::RotateSelection
             | Self::RotateSelectionCounterClockwise
             | Self::MirrorSelectionHorizontal
@@ -419,7 +405,6 @@ impl Command {
             Self::PreviousPane => PREVIOUS_PANE,
             Self::HelpCenter => HELP_CENTER,
             Self::SelectTool => NONE,
-            Self::PlacePin => PLACE_PIN,
             Self::MoveSelection => MOVE_SELECTION,
             Self::StretchSelection => STRETCH_SELECTION,
             Self::ArraySelection => NONE,
@@ -439,13 +424,6 @@ impl Command {
             Self::SymbolSave => NONE,
             Self::EditSymbolInPlace => NONE,
             Self::ExitSymbolInPlace => EXIT_SYMBOL_IN_PLACE,
-            Self::Place(crate::state::ComponentType::Resistor) => PLACE_RESISTOR,
-            Self::Place(crate::state::ComponentType::Capacitor) => PLACE_CAPACITOR,
-            Self::Place(crate::state::ComponentType::Inductor) => PLACE_INDUCTOR,
-            Self::Place(crate::state::ComponentType::Diode) => PLACE_DIODE,
-            Self::Place(crate::state::ComponentType::Ground) => PLACE_GROUND,
-            Self::Place(crate::state::ComponentType::VoltageSource) => PLACE_VOLTAGE_SOURCE,
-            Self::Place(crate::state::ComponentType::CurrentSource) => PLACE_CURRENT_SOURCE,
             Self::AscendHierarchy => ASCEND_HIERARCHY,
             Self::DescendHierarchy => DESCEND_HIERARCHY,
             Self::DescendHierarchyDirect => DESCEND_HIERARCHY_DIRECT,
@@ -518,12 +496,6 @@ impl Command {
             }
             Self::UpdateInstanceInterface => {
                 "select one instance whose master interface changed after it was placed"
-            }
-            Self::PlacePin | Self::Place(_) if !super::active_schematic_editor(app) => {
-                "open an editable schematic or testbench"
-            }
-            Self::PlacePin | Self::Place(_) if app.state.schematic_edit_read_only() => {
-                "the active schematic is read-only"
             }
             Self::MoveSelection
             | Self::StretchSelection
@@ -819,10 +791,8 @@ mod tests {
 
     #[test]
     fn schematic_place_pin_is_shift_p_without_displacing_probe_or_symbol_pin() {
-        assert_eq!(
-            Command::PlacePin.shortcut_context(),
-            ShortcutContext::EngineeringCanvas
-        );
+        let pin = DesignCommand::PlacePin.declared_spec();
+        assert_eq!(pin.context, ShortcutContext::EngineeringCanvas);
         let probe = DesignCommand::PlaceProbe.declared_spec();
         assert_eq!(probe.context, ShortcutContext::EngineeringCanvas);
         assert_eq!(
@@ -831,15 +801,12 @@ mod tests {
         );
 
         for platform in CommandPlatform::ALL {
-            assert_eq!(
-                Command::PlacePin.default_shortcut_label(platform),
-                "Shift+P"
-            );
+            assert_eq!(label(pin.bindings, platform), "Shift+P");
             assert_eq!(label(probe.bindings, platform), "P");
             assert_eq!(Command::SymbolPinTool.default_shortcut_label(platform), "P");
             assert_eq!(
-                binding_owners(PLACE_PIN[0].chord, platform),
-                vec![Command::PlacePin]
+                ordered_binding_owners(pin.bindings[0].chord, platform),
+                vec![pin.key]
             );
             assert_eq!(
                 ordered_binding_owners(probe.bindings[0].chord, platform),
