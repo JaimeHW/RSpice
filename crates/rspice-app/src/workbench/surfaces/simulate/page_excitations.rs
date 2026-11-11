@@ -469,11 +469,9 @@ impl SourceVerbIntent {
                     occurrence,
                     component_id,
                 );
-                crate::workbench::app::actions::stimulus::readopt_adopter(
-                    state,
-                    component_id,
-                    definition,
-                );
+                match state.model.readopt_stimulus(component_id, definition) {
+                    Ok(line) | Err(line) => state.prompt(line),
+                }
             }
         }
     }

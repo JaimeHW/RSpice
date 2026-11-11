@@ -18,8 +18,8 @@
 // The application's entry points come through the menu's own imports: this
 // group reaches nothing the menu does not already reach.
 use super::{
-    AppState, ContextAction, StimulusLinkMode, clicked_source, commit_readoption,
-    open_stimulus_definition, open_stimulus_link,
+    AppState, ContextAction, StimulusLinkMode, clicked_source, open_stimulus_definition,
+    open_stimulus_link,
 };
 
 /// Whether `action` is one of this group's.
@@ -127,9 +127,10 @@ pub(super) fn execute(action: ContextAction, state: &mut AppState) {
         )
         .map(|()| None),
         ContextAction::ReadoptStimulus => match definition {
-            Some(definition) => {
-                commit_readoption(&mut state.model, component_id, &definition).map(Some)
-            }
+            Some(definition) => state
+                .model
+                .readopt_stimulus(component_id, &definition)
+                .map(Some),
             None => Ok(None),
         },
         ContextAction::OpenStimulusDefinition => {

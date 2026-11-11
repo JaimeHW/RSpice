@@ -475,45 +475,6 @@ pub(crate) fn commit_adoption(
     })
 }
 
-/// Copy the library's current revision of `definition` back onto one instance
-/// that already adopted it.
-///
-/// Narrower than [`commit_adoption`] on purpose, because the model is: an
-/// instance naming some other definition is adopting, not re-adopting, and
-/// `readopt_onto` is where that refusal is written. Every surface that offers
-/// the verb — the Studio's Excitations rows, the component editor's evidence
-/// pane, the schematic's own menu — comes through here, so one re-adoption is
-/// one transaction and one console sentence wherever it is asked for.
-pub(crate) fn commit_readoption(
-    model: &mut Model,
-    component_id: u64,
-    definition: &str,
-) -> Result<String, String> {
-    let held = model
-        .workspace
-        .content
-        .stimulus_library
-        .get(definition)
-        .cloned()
-        .ok_or_else(|| format!("This project defines no '{definition}' to re-adopt."))?;
-    let expected = model
-        .schematic
-        .document()
-        .components
-        .iter()
-        .find(|component| component.id == component_id)
-        .cloned()
-        .ok_or_else(|| "That instance is no longer on this sheet.".to_owned())?;
-    let mut candidate = expected.clone();
-    held.readopt_onto(&mut candidate)?;
-    let reference = candidate.spice_instance_name();
-    model.edit_component_transaction(&expected, candidate, "re-adopt stimulus definition")?;
-    Ok(format!(
-        "{reference} re-adopted {definition} r{}; its card is the library's again.",
-        held.revision()
-    ))
-}
-
 /// Publish the instance's card as a new `r1` definition and point the instance
 /// at it.
 fn commit_extraction(

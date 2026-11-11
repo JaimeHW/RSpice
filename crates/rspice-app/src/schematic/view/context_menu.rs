@@ -16,9 +16,9 @@ use crate::workbench::state::Workspace;
 use crate::workbench::{
     ResultViewer,
     app::{
-        StimulusLinkMode, commit_readoption, new_veriloga_device_available,
-        open_new_veriloga_device_form, open_replace_instance_dialog, open_stimulus_definition,
-        open_stimulus_link, replace_instance_available,
+        StimulusLinkMode, new_veriloga_device_available, open_new_veriloga_device_form,
+        open_replace_instance_dialog, open_stimulus_definition, open_stimulus_link,
+        replace_instance_available,
     },
     framework::command_registry::ids,
     framework::requests::RevealSheetSection,

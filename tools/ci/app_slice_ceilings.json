@@ -4,7 +4,7 @@
     "design->results": 1,
     "project->code": 1,
     "project->design": 9,
-    "simulate->design": 4
+    "simulate->design": 3
   },
   "lower->upper": {},
   "whole-app": {

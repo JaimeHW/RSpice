@@ -14,8 +14,7 @@ use crate::state::{Component, ComponentType, PropertySheet, PropertyValue};
 use crate::workbench::app::actions::workspace::sync_active_schematic;
 use crate::workbench::app::dialogs::design_request::DesignRequest;
 use crate::workbench::app::dialogs::stimulus_link::{
-    StimulusLinkDialogState, StimulusLinkMode, commit_readoption, open_stimulus_link,
-    show_stimulus_definition,
+    StimulusLinkDialogState, StimulusLinkMode, open_stimulus_link, show_stimulus_definition,
 };
 use crate::workbench::app_state::Model;
 use crate::workbench::state::WorkbenchSession;
@@ -239,7 +238,7 @@ impl PropertyDialog<'_> {
                 if let (Some(component_id), Some(definition)) =
                     (self.dialog.component_id, definition)
                 {
-                    match commit_readoption(self.model, component_id, &definition) {
+                    match self.model.readopt_stimulus(component_id, &definition) {
                         Ok(line) => {
                             self.workbench.prompt(line);
                             // Reopened rather than patched in place: the copy is a

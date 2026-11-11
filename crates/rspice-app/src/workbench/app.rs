@@ -188,7 +188,7 @@ pub(crate) use dialogs::replace_instance::{
     open_replace_instance_dialog, replace_instance_available,
 };
 pub(crate) use dialogs::stimulus_link::{
-    StimulusLinkMode, commit_readoption, open_stimulus_definition, open_stimulus_link,
+    StimulusLinkMode, open_stimulus_definition, open_stimulus_link,
 };
 pub(crate) use dialogs::window_session::{WindowSessionPage, WindowWorkflow, open_window_workflow};
 

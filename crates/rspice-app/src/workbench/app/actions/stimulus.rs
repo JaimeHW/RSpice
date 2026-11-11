@@ -398,14 +398,14 @@ pub(crate) fn retained_table(
 /// Copy the library's current revision of `definition` onto one adopter, and
 /// say what happened where the reader is looking.
 ///
-/// The transaction is [`crate::workbench::app::commit_readoption`] — the one
-/// the link dialog, the Studio's Excitations rows and the component editor all
-/// commit through — and this adds only the status-bar sentence it hands back.
+/// The transaction is the model's `readopt_stimulus` — the one the link
+/// dialog, the Studio's Excitations rows and the component editor all commit
+/// through — and this adds only the status-bar sentence it hands back.
 /// The instrument used to own a second re-adoption with its own undo group and
 /// its own wording, so the same verb on two surfaces produced two different
 /// receipts for one edit.
 pub(crate) fn readopt_adopter(state: &mut AppState, component_id: u64, definition: &str) {
-    match crate::workbench::app::commit_readoption(&mut state.model, component_id, definition) {
+    match state.model.readopt_stimulus(component_id, definition) {
         Ok(line) | Err(line) => state.prompt(line),
     }
 }

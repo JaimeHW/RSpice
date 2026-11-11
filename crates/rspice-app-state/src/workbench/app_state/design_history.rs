@@ -26,6 +26,7 @@ mod component_rename;
 mod hierarchy_extraction;
 mod instance_removal;
 mod reference_preparation;
+mod stimulus_readoption;
 mod veriloga_build;
 
 pub use hierarchy_extraction::validate_hierarchy_target_unreferenced;
