@@ -137,13 +137,27 @@ def run(browser, fault, cancel_startup=False):
     # Prepared execution authorization is consumed by the first launch.
     browser.click("Validate source", "button")
     browser.click("Run deck", "button")
-    # A finished run is a DONE row in the Task log.
-    task_log = next(control for control in controls(browser.snapshot())
-                    if control["label"].startswith("Task log"))
-    browser.click(task_log["label"], task_log["role"])
-    wait_for(lambda: any(text.startswith("DONE · Run 2 ")
-                         for control in controls(browser.snapshot())
-                         for text in (control["label"], control["value"])), "the recovered run's results")
+
+    # A finished run is a DONE row in the Task log. The run opens in Results
+    # the frame after it completes, and Results keeps its own dock layout,
+    # closed until opened, so the row may show for a single frame on this
+    # page. Press the tab until the row shows: a press opens the dock on its
+    # page wherever the reader stands and changes nothing on an open one.
+    def completed():
+        shown = controls(browser.snapshot())
+        if any(text.startswith("DONE · Run 2 ")
+               for control in shown for text in (control["label"], control["value"])):
+            return True
+        task_log = next((control for control in shown
+                         if control["label"].startswith("Task log")), None)
+        if task_log:
+            try:
+                browser.click(task_log["label"], task_log["role"])
+            except AssertionError:
+                pass  # The tab's count changed between the two frames.
+        return False
+
+    wait_for(completed, "the recovered run's results")
     browser.capture("completed")
     choose_command(browser, "Open recovery center")
     wait_for(lambda: has_control(browser, "Create checkpoint"), "the recovery workspace")
