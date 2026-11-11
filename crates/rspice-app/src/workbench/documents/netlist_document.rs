@@ -1037,13 +1037,8 @@ pub(crate) fn open_netlist_dependency_from_root_in(
     Ok(())
 }
 
-/// Return from an include document to its exact generated or owned root.
-pub fn close_active_dependency(state: &mut AppState) -> bool {
-    close_active_dependency_in(&mut state.model, &mut state.code.netlist, &mut state.runs)
-}
-
-/// [`close_active_dependency`], over the model, the netlist editor's state
-/// and the runs.
+/// Return from an include document to its exact generated or owned root. It
+/// writes the model, the netlist editor's state and the runs.
 pub(crate) fn close_active_dependency_in(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,

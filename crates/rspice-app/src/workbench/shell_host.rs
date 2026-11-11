@@ -158,7 +158,7 @@ impl Host for RSpiceApp {
                     Workspace::Verify => verify::show(ui, &mut features::cx(app)),
                     Workspace::Models => features::show_surface::<ModelsFeature>(app, ui),
                     Workspace::Netlist => {
-                        netlist::prepare_workspace(app);
+                        netlist::prepare_workspace(&mut features::cx(app));
                         match app.state.code.code_workspace.page {
                             crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist => {
                                 netlist::show_prepared(ui, app)

@@ -435,7 +435,11 @@ fn editing_root_include_cards_preserves_reachable_edges_and_prunes_removed_owner
     let mut state = owned_dependency_state();
     open_netlist_dependency(&mut state, INCLUDE_IDENTITY).unwrap();
     copy_active_dependency_to_project(&mut state).unwrap();
-    assert!(close_active_dependency(&mut state));
+    assert!(close_active_dependency_in(
+        &mut state.model,
+        &mut state.code.netlist,
+        &mut state.runs
+    ));
 
     let without_include = ROOT
         .lines()
@@ -673,7 +677,11 @@ fn ordinary_root_edit_retains_authenticated_dependency_closure() {
     let mut state = owned_dependency_state();
     open_netlist_dependency(&mut state, INCLUDE_IDENTITY).unwrap();
     copy_active_dependency_to_project(&mut state).unwrap();
-    assert!(close_active_dependency(&mut state));
+    assert!(close_active_dependency_in(
+        &mut state.model,
+        &mut state.code.netlist,
+        &mut state.runs
+    ));
     let edited_root = ROOT.replace("V1 out 0 1", "VINPUT out 0 1");
 
     assert!(replace_owned_source(&mut state, edited_root.clone()));
@@ -701,7 +709,11 @@ fn ordinary_root_edit_replaces_include_edge_atomically_and_requires_relink() {
     let mut state = owned_dependency_state();
     open_netlist_dependency(&mut state, INCLUDE_IDENTITY).unwrap();
     copy_active_dependency_to_project(&mut state).unwrap();
-    assert!(close_active_dependency(&mut state));
+    assert!(close_active_dependency_in(
+        &mut state.model,
+        &mut state.code.netlist,
+        &mut state.runs
+    ));
     let changed_include = ROOT.replace(INCLUDE_IDENTITY, "models/other.inc");
 
     assert!(replace_owned_source(&mut state, changed_include.clone()));

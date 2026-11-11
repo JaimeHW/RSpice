@@ -784,7 +784,8 @@ const SIMULATE_CONTRIBUTIONS: &[Step] = &[
     ),
 ];
 
-/// The shell's `contribute`, at the code feature's points. The navigator
+/// The shell's `contribute`, at the code feature's points. The deck's page
+/// prepares in the feature's context before it draws. The navigator
 /// draws in the feature's context on the Netlist workspace and on a
 /// Verilog-A view the Design workspace shows, and on both has what it raised
 /// answered once it has drawn, before the next point draws. The inspector
@@ -796,6 +797,7 @@ const CODE_CONTRIBUTIONS: &[Step] = &[
     (
         "netlist page",
         &[
+            "netlist::prepare_workspace(&mut features::cx(app));",
             "netlist::show_prepared(ui, app)",
             "automation::show(ui, app) } } } } app.after_contribution();",
         ],

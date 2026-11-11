@@ -24,6 +24,7 @@ use egui::Ui;
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+use crate::workbench::code::CodeFeature;
 use crate::workbench::design_system::{
     Problem, WorkbenchIcon, empty_state, empty_state_with_actions, paint_problem_mark,
 };
@@ -31,6 +32,7 @@ use crate::workbench::documents::netlist_document::{
     ActiveNetlistDocument, ExecutedDeckVerification,
 };
 use crate::workbench::features;
+use crate::workbench::framework::feature::Cx;
 use crate::workbench::{AppState, MessageId, RSpiceApp};
 
 /// Publish the source editor a page shows as its document, and hand it any
@@ -160,13 +162,16 @@ fn reveal_in_netlist(ui: &Ui, state: &mut AppState, editor_id: egui::Id) {
     state.code.netlist.requested_line = Some(line);
 }
 
-pub(in crate::workbench) fn prepare_workspace(app: &mut RSpiceApp) {
-    generation::reconcile_documents(app);
+/// Before the page draws, in the code feature's context: rebuild the
+/// generated deck, show the document the page is on, and pick up a re-run
+/// queued behind the last run.
+pub(in crate::workbench) fn prepare_workspace(cx: &mut Cx<'_, CodeFeature>) {
+    generation::reconcile_documents(cx);
     crate::workbench::documents::netlist_document::prepare(
-        &mut app.state.model,
-        &mut app.state.code.netlist,
-        &mut app.state.runs,
-        &mut app.state.workbench,
+        cx.model,
+        &mut cx.state.netlist,
+        cx.runs,
+        cx.wb,
     );
 }
 

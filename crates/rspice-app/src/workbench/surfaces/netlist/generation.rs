@@ -15,33 +15,40 @@ use crate::state::{
     NetlistDocument, NetlistDocumentId,
 };
 use crate::workbench::app_state::Model;
+use crate::workbench::code::CodeFeature;
 use crate::workbench::documents::netlist_document::{ActiveNetlistDocument, NetlistDocumentState};
-use crate::workbench::{AppState, RSpiceApp};
+use crate::workbench::framework::feature::Cx;
 
 /// Rebuild the immutable generated primary whenever any authoritative project
 /// input changes. Generation happens into a temporary string; a failed build
 /// retains the prior valid artifact and marks it stale instead of publishing
 /// partial bytes.
-pub(super) fn reconcile_documents(app: &mut RSpiceApp) {
-    if app.state.code.netlist.owned_document.is_none() {
-        app.state.code.netlist.owned_document =
-            app.state.model.workspace.content.netlist_document.clone();
+pub(super) fn reconcile_documents(cx: &mut Cx<'_, CodeFeature>) {
+    if cx.state.netlist.owned_document.is_none() {
+        cx.state.netlist.owned_document = cx.model.workspace.content.netlist_document.clone();
     }
-    if !app.state.code.netlist.active_document_initialized {
-        app.state.code.netlist.active_document =
-            if app.state.model.workspace.content.netlist_source.is_some() {
-                ActiveNetlistDocument::OwnedSource
-            } else {
-                ActiveNetlistDocument::Generated
-            };
-        app.state.code.netlist.active_document_initialized = true;
+    if !cx.state.netlist.active_document_initialized {
+        cx.state.netlist.active_document = if cx.model.workspace.content.netlist_source.is_some() {
+            ActiveNetlistDocument::OwnedSource
+        } else {
+            ActiveNetlistDocument::Generated
+        };
+        cx.state.netlist.active_document_initialized = true;
     }
 
-    if app.state.code.netlist.active_dependency_identity.is_some()
-        && crate::workbench::documents::netlist_document::active_dependency(&app.state).is_none()
+    if cx.state.netlist.active_dependency_identity.is_some()
+        && crate::workbench::documents::netlist_document::active_dependency_in(
+            cx.model,
+            &cx.state.netlist,
+        )
+        .is_none()
     {
-        crate::workbench::documents::netlist_document::close_active_dependency(&mut app.state);
-        app.state.record(
+        crate::workbench::documents::netlist_document::close_active_dependency_in(
+            cx.model,
+            &mut cx.state.netlist,
+            cx.runs,
+        );
+        cx.model.record(
             LogSeverity::Warning,
             LogSource::Netlist,
             "The open include file is no longer part of the netlist; the top-level deck is shown \
@@ -49,112 +56,102 @@ pub(super) fn reconcile_documents(app: &mut RSpiceApp) {
         );
     }
 
-    refresh_generated_artifact(app);
+    refresh_generated_artifact(cx);
 
-    let projected = crate::workbench::documents::netlist_document::active_dependency(&app.state)
-        .and_then(crate::state::DependencyMetadata::source)
-        .map(str::to_owned)
-        .or_else(|| match app.state.code.netlist.active_document {
-            ActiveNetlistDocument::Generated => {
-                Some(app.state.model.netlist_artifacts.generated_source.clone())
-            }
-            ActiveNetlistDocument::OwnedSource => {
-                app.state.model.workspace.content.netlist_source.clone()
-            }
-            ActiveNetlistDocument::GeneratedDiff => {
-                Some(app.state.code.netlist.generated_diff_source.clone())
-            }
-            ActiveNetlistDocument::RunSnapshot => app.state.runs.manual_run.last_run_buffer.clone(),
-        });
+    let projected = crate::workbench::documents::netlist_document::active_dependency_in(
+        cx.model,
+        &cx.state.netlist,
+    )
+    .and_then(crate::state::DependencyMetadata::source)
+    .map(str::to_owned)
+    .or_else(|| match cx.state.netlist.active_document {
+        ActiveNetlistDocument::Generated => {
+            Some(cx.model.netlist_artifacts.generated_source.clone())
+        }
+        ActiveNetlistDocument::OwnedSource => cx.model.workspace.content.netlist_source.clone(),
+        ActiveNetlistDocument::GeneratedDiff => {
+            Some(cx.state.netlist.generated_diff_source.clone())
+        }
+        ActiveNetlistDocument::RunSnapshot => cx.runs.manual_run.last_run_buffer.clone(),
+    });
     if let Some(projected) = projected
-        && app.state.model.simulation.source.netlist_content != projected
+        && cx.model.simulation.source.netlist_content != projected
     {
-        app.state.model.simulation.source.netlist_content = projected;
-        app.state.code.netlist.revision = app.state.code.netlist.revision.wrapping_add(1);
-        app.state.model.invalidate_source_evidence();
+        cx.model.simulation.source.netlist_content = projected;
+        cx.state.netlist.revision = cx.state.netlist.revision.wrapping_add(1);
+        cx.model.invalidate_source_evidence();
     }
 }
 
-fn refresh_generated_artifact(app: &mut RSpiceApp) {
+fn refresh_generated_artifact(cx: &mut Cx<'_, CodeFeature>) {
     let input_digest =
         match crate::workbench::lifecycle::project_lifecycle::generated_netlist_input_digest(
-            &app.state,
+            &crate::workbench::lifecycle::project_lifecycle::LifecycleView {
+                model: cx.model,
+                platform: cx.platform,
+                workspace: cx.wb.workspace,
+                presentation: cx.peers.results().saved_presentation(),
+            },
         ) {
             Ok(digest) => digest,
             Err(error) => {
-                app.state
-                    .model
-                    .netlist_artifacts
-                    .current_generation_input_digest = None;
-                app.state.model.netlist_artifacts.generation_error = Some(error.to_string());
+                cx.model.netlist_artifacts.current_generation_input_digest = None;
+                cx.model.netlist_artifacts.generation_error = Some(error.to_string());
                 return;
             }
         };
-    let authoritative_input_changed = app
-        .state
+    let authoritative_input_changed = cx
         .model
         .netlist_artifacts
         .current_generation_input_digest
         .is_some_and(|previous| previous != input_digest);
-    app.state
-        .model
-        .netlist_artifacts
-        .current_generation_input_digest = Some(input_digest);
+    cx.model.netlist_artifacts.current_generation_input_digest = Some(input_digest);
     if authoritative_input_changed {
-        app.invalidate_simulation_preflight();
-        app.state.model.invalidate_source_evidence();
-        if let Some(document) = app
-            .state
-            .model
-            .netlist_artifacts
-            .generated_document
-            .as_mut()
-        {
+        rspice_app_runs::workbench::preflight::invalidate(
+            &mut cx.runs.preflight,
+            cx.handles.run_controller,
+        );
+        cx.model.invalidate_source_evidence();
+        if let Some(document) = cx.model.netlist_artifacts.generated_document.as_mut() {
             let _ = document.invalidate_validation(document.content_digest());
         }
-        if let Some(document) = app.state.code.netlist.owned_document.as_mut() {
+        if let Some(document) = cx.state.netlist.owned_document.as_mut() {
             let _ = document.invalidate_validation(document.content_digest());
-            app.state.model.workspace.content.netlist_document = Some(document.clone());
+            cx.model.workspace.content.netlist_document = Some(document.clone());
         }
     }
-    if app.state.model.netlist_artifacts.generated_input_digest == Some(input_digest)
-        && !app
-            .state
-            .model
-            .netlist_artifacts
-            .generated_source
-            .is_empty()
+    if cx.model.netlist_artifacts.generated_input_digest == Some(input_digest)
+        && !cx.model.netlist_artifacts.generated_source.is_empty()
     {
         return;
     }
-    if app.state.model.schematic.document().components.is_empty() {
-        app.state.model.netlist_artifacts.generation_error =
+    if cx.model.schematic.document().components.is_empty() {
+        cx.model.netlist_artifacts.generation_error =
             Some("Add a circuit before generating the primary netlist.".to_owned());
         return;
     }
     // This runs every frame the page is shown. Inputs that already failed
     // fail the same way, and the page still states why.
-    if app.state.code.netlist.failed_generation_input_digest == Some(input_digest) {
+    if cx.state.netlist.failed_generation_input_digest == Some(input_digest) {
         return;
     }
 
-    let generated = crate::workbench::menu_bar::build_menu_netlist_in(&app.state.model);
-    let failed = |state: &mut AppState, error: String| {
-        state.code.netlist.failed_generation_input_digest = Some(input_digest);
-        state.model.netlist_artifacts.generation_error = Some(error);
+    let generated = crate::workbench::menu_bar::build_menu_netlist_in(cx.model);
+    let failed = |model: &mut Model, netlist: &mut NetlistDocumentState, error: String| {
+        netlist.failed_generation_input_digest = Some(input_digest);
+        model.netlist_artifacts.generation_error = Some(error);
     };
     match generated {
         Ok(generated) => {
             match publish_generated_document(
-                &app.state.model,
-                &app.state.code.netlist,
+                cx.model,
+                &cx.state.netlist,
                 input_digest,
                 generated.source,
             ) {
                 Ok((generated_document, owned_document)) => {
                     if let (Some(previous), Some(current)) = (
-                        app.state
-                            .model
+                        cx.model
                             .netlist_artifacts
                             .generated_document
                             .as_ref()
@@ -163,9 +160,8 @@ fn refresh_generated_artifact(app: &mut RSpiceApp) {
                     ) && previous.content_digest() != current.content_digest()
                     {
                         let predecessor = previous.clone();
-                        if app
+                        if cx
                             .state
-                            .code
                             .netlist
                             .generated_history
                             .last()
@@ -173,51 +169,51 @@ fn refresh_generated_artifact(app: &mut RSpiceApp) {
                                 artifact.content_digest() != predecessor.content_digest()
                             })
                         {
-                            app.state.code.netlist.generated_history.push(predecessor);
+                            cx.state.netlist.generated_history.push(predecessor);
                             const RETAINED_GENERATED_REVISIONS: usize = 16;
-                            let excess = app
+                            let excess = cx
                                 .state
-                                .code
                                 .netlist
                                 .generated_history
                                 .len()
                                 .saturating_sub(RETAINED_GENERATED_REVISIONS);
                             if excess > 0 {
-                                app.state.code.netlist.generated_history.drain(..excess);
+                                cx.state.netlist.generated_history.drain(..excess);
                             }
                         }
                     }
                     let Some(generated_artifact) = generated_document.generated_artifact() else {
                         failed(
-                            &mut app.state,
+                            cx.model,
+                            &mut cx.state.netlist,
                             "Generated document publication returned no generated artifact."
                                 .to_owned(),
                         );
                         return;
                     };
-                    app.state.model.netlist_artifacts.generated_source =
+                    cx.model.netlist_artifacts.generated_source =
                         generated_artifact.source().to_owned();
-                    app.state.model.netlist_artifacts.generated_document = Some(generated_document);
-                    app.state.model.workspace.content.netlist_document = owned_document.clone();
-                    app.state.code.netlist.owned_document = owned_document;
-                    app.state.model.netlist_artifacts.generated_input_digest = Some(input_digest);
-                    app.state.model.netlist_artifacts.generation_error = None;
-                    app.state.code.netlist.failed_generation_input_digest = None;
+                    cx.model.netlist_artifacts.generated_document = Some(generated_document);
+                    cx.model.workspace.content.netlist_document = owned_document.clone();
+                    cx.state.netlist.owned_document = owned_document;
+                    cx.model.netlist_artifacts.generated_input_digest = Some(input_digest);
+                    cx.model.netlist_artifacts.generation_error = None;
+                    cx.state.netlist.failed_generation_input_digest = None;
                     crate::workbench::menu_bar::record_netlist_warnings_in(
-                        &mut app.state.model,
+                        cx.model,
                         generated.warnings,
                     );
                 }
-                Err(error) => failed(&mut app.state, error),
+                Err(error) => failed(cx.model, &mut cx.state.netlist, error),
             }
         }
         Err(reasons) => {
-            app.state.record(
+            cx.model.record(
                 LogSeverity::Error,
                 LogSource::Studio,
                 crate::workbench::menu_bar::netlist_failure_text("Netlist generation", &reasons),
             );
-            failed(&mut app.state, reasons.join("; "));
+            failed(cx.model, &mut cx.state.netlist, reasons.join("; "));
         }
     }
 }
@@ -542,6 +538,7 @@ fn source_line_component(
 mod tests {
     use super::*;
     use crate::state::{Component, ComponentType, LibraryCellInstance, Point, SchematicState};
+    use crate::workbench::{AppState, RSpiceApp};
 
     /// The line `YMEMRISTOR MR1 …` is the memristor drawn `MR1`: a
     /// keyword-headed card names its element after the keyword.
@@ -615,7 +612,7 @@ mod tests {
             );
         }
 
-        refresh_generated_artifact(&mut app);
+        refresh_generated_artifact(&mut crate::workbench::features::cx(&mut app));
         let error = app
             .state
             .model
@@ -640,7 +637,7 @@ mod tests {
         let recorded = app.state.model.log_buffer.revision();
 
         for _ in 0..3 {
-            refresh_generated_artifact(&mut app);
+            refresh_generated_artifact(&mut crate::workbench::features::cx(&mut app));
         }
         assert_eq!(
             app.state.model.log_buffer.revision(),
