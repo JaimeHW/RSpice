@@ -109,7 +109,7 @@ pub(crate) struct NonlinearDeviceStateSnapshot {
     jiles_atherton_inductors: Vec<JilesAthertonBinding>,
     xyce_core_groups: Vec<XyceCoreGroupBinding>,
     diodes: Vec<crate::device::semiconductor::DiodeNonlinearState>,
-    bjts: Bjts,
+    bjts: Vec<crate::device::semiconductor::BjtNonlinearState>,
     mosfets: Vec<crate::device::mosfet::MosfetNonlinearState>,
     b3soi: B3SoiDds,
     b3soi_fd: B3SoiFds,
@@ -1035,7 +1035,11 @@ impl CircuitData {
             jiles_atherton_inductors: self.jiles_atherton_inductors.clone(),
             xyce_core_groups: self.xyce_core_groups.clone(),
             diodes: self.diodes.nonlinear_state_snapshot(),
-            bjts: self.bjts.clone(),
+            bjts: {
+                let mut states = Vec::new();
+                self.bjts.nonlinear_state_snapshot_into(&mut states);
+                states
+            },
             mosfets: self.mosfets.nonlinear_state_snapshot(),
             b3soi: self.b3soi.clone(),
             b3soi_fd: self.b3soi_fd.clone(),
@@ -1119,7 +1123,7 @@ impl CircuitData {
         snapshot.xyce_core_groups.clone_from(&self.xyce_core_groups);
         self.diodes
             .nonlinear_state_snapshot_into(&mut snapshot.diodes);
-        snapshot.bjts.clone_from(&self.bjts);
+        self.bjts.nonlinear_state_snapshot_into(&mut snapshot.bjts);
         self.mosfets
             .nonlinear_state_snapshot_into(&mut snapshot.mosfets);
         snapshot.b3soi.clone_from(&self.b3soi);
@@ -1258,7 +1262,7 @@ impl CircuitData {
             }
         }
         self.diodes.restore_nonlinear_state(snapshot.diodes);
-        self.bjts = snapshot.bjts;
+        self.bjts.restore_nonlinear_state(snapshot.bjts);
         self.mosfets.restore_nonlinear_state(snapshot.mosfets);
         self.b3soi = snapshot.b3soi;
         self.b3soi_fd = snapshot.b3soi_fd;

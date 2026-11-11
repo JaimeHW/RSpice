@@ -15,6 +15,7 @@ mod event_regularity;
 mod intrinsic;
 mod mna;
 mod params;
+pub(super) mod rollback;
 mod solve;
 
 /// VBIC 1.3 exponential transition voltages, fixed at instance initialization.

@@ -204,6 +204,31 @@ impl Bjts {
         self.devices.is_empty()
     }
 
+    /// Refresh one rollback image per device, keeping the images' storage.
+    pub(crate) fn nonlinear_state_snapshot_into(
+        &self,
+        states: &mut Vec<crate::device::semiconductor::BjtNonlinearState>,
+    ) {
+        states.resize_with(self.devices.len(), Default::default);
+        for (device, state) in self.devices.iter().zip(states.iter_mut()) {
+            device.nonlinear_state_snapshot_into(state);
+        }
+    }
+
+    pub(crate) fn restore_nonlinear_state(
+        &mut self,
+        states: Vec<crate::device::semiconductor::BjtNonlinearState>,
+    ) {
+        assert_eq!(
+            self.devices.len(),
+            states.len(),
+            "BJT rollback state must match circuit topology"
+        );
+        for (device, state) in self.devices.iter_mut().zip(states) {
+            device.restore_nonlinear_state(state);
+        }
+    }
+
     /// Update all BJTs with current solution
     pub(crate) fn update_all(&mut self, voltages: &[Value]) {
         use crate::device::NonlinearDevice;

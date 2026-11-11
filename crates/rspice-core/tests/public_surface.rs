@@ -684,7 +684,11 @@ const MAX_PUBLIC_ITEMS: usize = 5286;
 // `Mosfet::set_level2_vbin_cutoff` adds one: the builder (`rspice-core`
 // engine/builder.rs) keeps ngspice's level-2 cutoff at VBIN in the ngspice
 // dialect alone. The census is 1,684, with no slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 1684;
+// `BjtNonlinearState`, `Bjt::nonlinear_state_snapshot_into` and
+// `Bjt::restore_nonlinear_state` add three: the rollback image a transient
+// attempt takes of each BJT (`rspice-core` circuit/nonlinear.rs), in place of
+// a clone of the whole device. The census is 1,687, with no slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 1687;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

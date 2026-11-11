@@ -15,6 +15,7 @@ pub use bjt::{
     BJT_ACCEPTED_CHARGE_SNAPSHOT_STATE_VALUE_COUNT, BJT_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT,
     BJT_DYNAMIC_CHARGE_COUNT, BJT_EXTERNAL_STATE_DIM, BJT_INTERNAL_STATE_DIM, BjtChargeBranch,
     BjtChargeSnapshot, BjtCurrentBranch, VBIC_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT,
+    rollback::BjtNonlinearState,
 };
 pub use bjt::{Bjt, BjtType};
 #[doc(hidden)]
