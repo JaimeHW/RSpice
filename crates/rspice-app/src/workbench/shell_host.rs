@@ -185,24 +185,14 @@ impl Host for RSpiceApp {
             }
             // A workspace's navigator, below the heading and the filter field.
             Point::Navigator(workspace) => {
-                use crate::workbench::docks::navigator::netlist::{code_workspace_pages, netlist};
-                use crate::workbench::docks::navigator::{
-                    design, source_bundle, stimulus, symbol, veriloga,
-                };
+                use crate::workbench::docks::navigator::{design, stimulus, symbol};
 
                 match workspace {
-                    // The page tabs, then the page's outline. The outline
-                    // belongs to the page: an automation pipeline and a SPICE
-                    // deck are different objects and read differently, so
-                    // neither borrows the other's tree.
+                    // What the reader asked of the code navigator is
+                    // answered once it has drawn.
                     Workspace::Netlist => {
-                        use crate::workbench::documents::code_workspace::CodeWorkspacePage;
-
-                        code_workspace_pages(ui, app);
-                        match app.state.code.code_workspace.page {
-                            CodeWorkspacePage::Netlist => netlist(ui, app),
-                            CodeWorkspacePage::Automation => source_bundle::automation(ui, app),
-                        }
+                        features::show_navigator::<CodeFeature>(app, ui);
+                        app.after_contribution();
                     }
                     // A symbol cellview is a design document with its own
                     // structure: an ordered pin contract instead of a
@@ -217,7 +207,8 @@ impl Host for RSpiceApp {
                         if app.state.model.workspace.content.active_view_type()
                             == ViewType::VerilogA =>
                     {
-                        veriloga::show(ui, app);
+                        features::show_navigator::<CodeFeature>(app, ui);
+                        app.after_contribution();
                     }
                     // A hand-off the navigator raised into another
                     // workspace is answered once it has drawn.

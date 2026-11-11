@@ -4,6 +4,7 @@
 //! ordinary source.
 
 use super::*;
+use crate::workbench::RSpiceApp;
 
 /// The defect this rail exists for: `selected_file` had no UI writer, so
 /// every file in a bundle except the root was unreachable. Assert the

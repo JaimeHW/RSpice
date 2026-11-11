@@ -93,8 +93,11 @@ pub(crate) enum CodeCommand {
 /// confirmed, saving Build settings, then compiling when the reader asked
 /// for both, replacing every match Find in source found, the source
 /// document dialogs' choices that write the project's sources, and the
-/// rename Rename symbol confirmed. Each command or dialog step that raises
-/// one raises one. Taken straight after the call that raised it.
+/// rename Rename symbol confirmed; and, from its navigators, the library
+/// section a Netlist outline row chose, picking an include's file again,
+/// a source rail's file action and opening a placed instance of the
+/// Verilog-A cell. Each command, dialog step or navigator that raises one
+/// raises one. Taken straight after the call that raised it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::workbench) enum CodeRequest {
     OpenNetlist,
@@ -118,10 +121,33 @@ pub(in crate::workbench) enum CodeRequest {
     CreateVerilogADevice,
     ImportVerilogACells,
     ReplaceVerilogASource,
-    SaveVerilogABuildSettings { compile: bool },
+    SaveVerilogABuildSettings {
+        compile: bool,
+    },
     ReplaceSourceSearchMatches,
     SourceDocument(SourceDocumentRequest),
     CommitSymbolRename,
+    /// Commit the rewrite of a `.lib` card's section from `original` to
+    /// `replacement`, in the include `dependency` names or in the deck itself,
+    /// then report `selected`.
+    UseLibSection {
+        dependency: Option<String>,
+        original: String,
+        replacement: String,
+        selected: String,
+    },
+    /// Pick the file again for the netlist include with this identity.
+    RelinkNetlistDependency(String),
+    /// Open the source lifecycle dialog at `action`'s review for `path`.
+    SourceFileAction {
+        language: ProjectSourceLanguage,
+        bundle_id: crate::state::ProjectSourceId,
+        action: CodeSourceFileAction,
+        path: String,
+    },
+    /// Open the schematic an instance of the cell is placed in, with the
+    /// instance selected and centred.
+    OpenCellInstance(rspice_app_state::workbench::app_state::cell_usage::CellInstanceUse),
 }
 
 impl Request for CodeRequest {

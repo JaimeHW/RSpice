@@ -34,7 +34,8 @@ use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec, ids};
 use crate::workbench::framework::dialogs::DialogKey;
 use crate::workbench::framework::feature::{
-    CommandSet, Cx, Feature, FeatureDialog, FeatureInspector, FeatureRegistry, NoHandles, Reads,
+    CommandSet, Cx, Feature, FeatureDialog, FeatureInspector, FeatureNavigator, FeatureRegistry,
+    NoHandles, Reads,
 };
 use crate::workbench::slots::CodeState;
 use crate::workbench::state::{WorkbenchSession, Workspace};
@@ -54,6 +55,9 @@ impl Feature for CodeFeature {
     fn register(registry: &mut FeatureRegistry<Self>) {
         registry.commands::<CodeCommand>();
         registry.dialogs(DIALOGS);
+        registry.navigator(FeatureNavigator {
+            show: docks::show_navigator,
+        });
         registry.inspector(FeatureInspector {
             show: docks::show_inspector,
             // Nothing the section draws holds an edit for the shell to commit.

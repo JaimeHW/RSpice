@@ -15,11 +15,9 @@
 
 use rspice_core::library::LibSectionSummary;
 
-use crate::workbench::AppState;
 use crate::workbench::documents::code_workspace::CodeWorkspaceRuntimeState;
 use crate::workbench::documents::netlist_document::{
-    NetlistDocumentState, OwnedNetlistReplacement, active_netlist_source_is_editable_in,
-    replace_owned_sources_atomically,
+    NetlistDocumentState, active_netlist_source_is_editable_in,
 };
 use rspice_app_state::workbench::app_state::model::Model;
 
@@ -89,30 +87,20 @@ pub(super) fn selected(card: &str) -> Option<String> {
     rspice_core::netlist::parse_lib_directive(card).and_then(|(_, section)| section)
 }
 
-/// Point the `.lib` card at `line` of the visible source at `section`.
+/// The rewrite pointing the `.lib` card at `line` of the visible source at
+/// `section`, over the model and the netlist editor's state.
 ///
-/// The card is rewritten in the authored source through the same transaction
-/// an editor replacement uses, so the change is undoable, dirties the
-/// document, and revalidates the closure. Only the section token moves: the
-/// locator, its quoting, and anything after it are left exactly as written.
-pub(super) fn use_section(
-    state: &mut AppState,
-    line: usize,
-    section: &str,
-) -> Result<String, String> {
-    let (edit, selected) = section_edit(&state.model, &state.code.netlist, line, section)?;
-    replace_owned_sources_atomically(state, vec![edit])?;
-    Ok(selected)
-}
-
-/// The replacement [`use_section`] commits, over the model and the netlist
-/// editor's state, with what it reports once committed.
+/// The shell commits the card in the authored source through the same
+/// transaction an editor replacement uses, so the change is undoable, dirties
+/// the document, and revalidates the closure. Only the section token moves:
+/// the locator, its quoting, and anything after it are left exactly as
+/// written.
 pub(super) fn section_edit(
     model: &Model,
     netlist: &NetlistDocumentState,
     line: usize,
     section: &str,
-) -> Result<(OwnedNetlistReplacement, String), String> {
+) -> Result<super::LibSectionRewrite, String> {
     if !active_netlist_source_is_editable_in(model, netlist) {
         return Err(
             "This netlist source is read-only; its .lib section cannot be changed.".to_owned(),
@@ -126,15 +114,12 @@ pub(super) fn section_edit(
     }
     let mut replacement = source.clone();
     replacement.replace_range(span, section);
-    let edit = if let Some(identity) = netlist.active_dependency_identity.as_deref() {
-        OwnedNetlistReplacement::dependency(identity, &source, replacement, 1)
-    } else {
-        OwnedNetlistReplacement::root(&source, replacement, 1)
-    };
-    Ok((
-        edit,
-        format!("Selected .lib section {section} on line {line}."),
-    ))
+    Ok(super::LibSectionRewrite {
+        dependency: netlist.active_dependency_identity.clone(),
+        original: source,
+        replacement,
+        selected: format!("Selected .lib section {section} on line {line}."),
+    })
 }
 
 /// The byte range of the section token on a `.lib "file" section` card.
@@ -186,7 +171,27 @@ mod tests {
         DependencyMetadata, GeneratedArtifact, GeneratedProvenance, GenerationInput,
         NetlistDocument, NetlistDocumentId, SourceLocator,
     };
-    use crate::workbench::documents::netlist_document::{ActiveNetlistDocument, undo_netlist_edit};
+    use crate::workbench::AppState;
+    use crate::workbench::documents::netlist_document::{
+        ActiveNetlistDocument, OwnedNetlistReplacement, replace_owned_sources_atomically,
+        undo_netlist_edit,
+    };
+
+    /// Choosing `section` for the card at `line`, as the shell commits it.
+    fn use_section(state: &mut AppState, line: usize, section: &str) -> Result<String, String> {
+        let rewrite = section_edit(&state.model, &state.code.netlist, line, section)?;
+        let edit = match rewrite.dependency.as_deref() {
+            Some(identity) => OwnedNetlistReplacement::dependency(
+                identity,
+                &rewrite.original,
+                rewrite.replacement,
+                1,
+            ),
+            None => OwnedNetlistReplacement::root(&rewrite.original, rewrite.replacement, 1),
+        };
+        replace_owned_sources_atomically(state, vec![edit])?;
+        Ok(rewrite.selected)
+    }
 
     const ROOT: &str =
         "corner deck\n.lib \"corners.lib\" tt\nV1 out 0 1\nR1 out 0 rmodel\n.op\n.end\n";

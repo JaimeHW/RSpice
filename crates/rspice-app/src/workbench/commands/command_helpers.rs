@@ -482,6 +482,64 @@ pub(in crate::workbench) fn answer_code_request(app: &mut RSpiceApp, request: Co
                 open.error = Some(error);
             }
         }
+        CodeRequest::UseLibSection {
+            dependency,
+            original,
+            replacement,
+            selected,
+        } => {
+            use crate::workbench::documents::netlist_document::{
+                OwnedNetlistReplacement, replace_owned_sources_atomically,
+            };
+            let edit = match dependency.as_deref() {
+                Some(identity) => {
+                    OwnedNetlistReplacement::dependency(identity, &original, replacement, 1)
+                }
+                None => OwnedNetlistReplacement::root(&original, replacement, 1),
+            };
+            match replace_owned_sources_atomically(&mut app.state, vec![edit]) {
+                Ok(_) => app.state.prompt(selected),
+                Err(error) => app.state.prompt(error),
+            }
+        }
+        CodeRequest::RelinkNetlistDependency(identity) => {
+            crate::workbench::workflows::netlist_workflow::request_dependency_relink(
+                &mut app.state,
+                &identity,
+            );
+        }
+        CodeRequest::SourceFileAction {
+            language,
+            bundle_id,
+            action,
+            path,
+        } => {
+            let opened =
+                crate::workbench::documents::code_workspace::open_source_file_dialog_in_bundle(
+                    app, language, bundle_id, action, &path, &path,
+                )
+                .and_then(|()| crate::workbench::app::open_source_document_dialog(&mut app.state));
+            if let Err(error) = opened {
+                app.state.code.code_workspace.source_file_dialog = None;
+                app.state.prompt(error);
+            }
+        }
+        CodeRequest::OpenCellInstance(usage) => {
+            app.state.open_workspace_view(usage.schematic.clone());
+            let position = app
+                .state
+                .model
+                .schematic
+                .document()
+                .components
+                .iter()
+                .find(|component| component.id == usage.component_id)
+                .map(|component| component.pos);
+            let editor = &mut app.state.model.schematic.session.editor;
+            editor.selection.select_only_component(usage.component_id);
+            editor.net_highlight.clear();
+            editor.center_request = position;
+        }
     }
 }
 

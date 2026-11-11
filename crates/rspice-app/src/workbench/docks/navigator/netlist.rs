@@ -23,7 +23,7 @@ use crate::state::{OutlineSection, OutlineSectionKind};
 use crate::ui::panels::{WorkbenchIcon, section_header};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::workbench::RSpiceApp;
+use crate::workbench::documents::code_workspace::CodeWorkspacePage;
 use crate::workbench::documents::code_workspace::CodeWorkspaceRuntimeState;
 use crate::workbench::documents::netlist_document::{ActiveNetlistDocument, NetlistDocumentState};
 use crate::workbench::{MessageCatalog, MessageId};
@@ -39,11 +39,17 @@ const NETLIST_OUTLINE_CARET_SIZE: f32 = 9.0;
 /// Indent of a declaration under its group, past the guide line.
 const NETLIST_OUTLINE_CHILD_INDENT: f32 = 12.0;
 
-pub(in crate::workbench) fn code_workspace_pages(ui: &mut Ui, app: &mut RSpiceApp) {
-    use crate::workbench::documents::code_workspace::CodeWorkspacePage;
-
+/// The Code & Automation page tabs over the page in front, whether the
+/// pointer is coarse and the message catalogue. Returns the page the reader
+/// asked for.
+pub(in crate::workbench) fn code_workspace_pages(
+    ui: &mut Ui,
+    current: CodeWorkspacePage,
+    coarse_pointer: bool,
+    messages: MessageCatalog,
+) -> Option<CodeWorkspacePage> {
     let t = Tokens::get(ui.ctx());
-    let touch = app.state.workbench.coarse_pointer;
+    let touch = coarse_pointer;
     let height = if touch { 44.0 } else { 31.0 };
     let width = ui.available_width().max(1.0);
     let (strip, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
@@ -55,7 +61,6 @@ pub(in crate::workbench) fn code_workspace_pages(ui: &mut Ui, app: &mut RSpiceAp
     );
     let content = strip.shrink2(Vec2::new(8.0, 0.0));
     let button_width = content.width() / CodeWorkspacePage::ALL.len() as f32;
-    let messages = app.state.workbench.messages();
     let mut selected = None;
     for (index, page) in CodeWorkspacePage::ALL.into_iter().enumerate() {
         // The tab's identity is its position, not its name. Keying the `Id` on
@@ -79,7 +84,7 @@ pub(in crate::workbench) fn code_workspace_pages(ui: &mut Ui, app: &mut RSpiceAp
             egui::Id::new(("workbench.code.page", index)),
             Sense::click(),
         );
-        let active = app.state.code.code_workspace.page == page;
+        let active = current == page;
         response.widget_info(|| {
             egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), active, &name)
         });
@@ -109,53 +114,83 @@ pub(in crate::workbench) fn code_workspace_pages(ui: &mut Ui, app: &mut RSpiceAp
             selected = Some(page);
         }
     }
-    if let Some(page) = selected {
-        app.state.code.code_workspace.page = page;
-        app.state.code.netlist.completion_open = false;
-    }
+    selected
 }
 
-pub(in crate::workbench) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
-    if app.state.code.netlist.active_document == ActiveNetlistDocument::GeneratedDiff {
-        netlist_diff(ui, app);
-        return;
+/// The Netlist page's outline over what it reads and writes in place, and
+/// what it asks of the whole application.
+/// What the Netlist page's outline reads, and writes in place: the model,
+/// the netlist editor's and the Code & Automation page's state, the outline
+/// groups the reader collapsed, the include tabs the reader opened, the runs,
+/// the navigator's filter, whether the pointer is coarse and the message
+/// catalogue.
+pub(crate) struct NetlistNavigator<'a> {
+    pub(crate) model: &'a mut Model,
+    pub(crate) netlist: &'a mut NetlistDocumentState,
+    pub(crate) code_workspace: &'a mut CodeWorkspaceRuntimeState,
+    pub(crate) outline_collapsed: &'a mut BTreeSet<OutlineSectionKind>,
+    pub(crate) open_documents:
+        &'a mut std::collections::HashSet<crate::workbench::state::WorkspaceDocumentId>,
+    pub(crate) runs: &'a mut RunsState,
+    pub(crate) filter: &'a str,
+    pub(crate) coarse_pointer: bool,
+    pub(crate) messages: MessageCatalog,
+}
+
+/// A `.lib` card pointed at another section: the source the rewrite was
+/// made from, the rewritten source, the include it edits (none for the
+/// deck itself) and the line reporting it once committed.
+#[derive(Debug)]
+pub(crate) struct LibSectionRewrite {
+    pub(crate) dependency: Option<String>,
+    pub(crate) original: String,
+    pub(crate) replacement: String,
+    pub(crate) selected: String,
+}
+
+/// What the outline asked of the whole application once it had drawn.
+#[derive(Debug, Default)]
+pub(crate) struct NetlistNavigatorAsked {
+    /// The last line the outline has to say.
+    pub(crate) prompt: Option<String>,
+    /// The cell view an include row opens in Design.
+    pub(crate) open_in_design: Option<crate::state::CellViewRef>,
+    /// The library section a card was rewritten to.
+    pub(crate) use_section: Option<LibSectionRewrite>,
+    /// The include whose file the reader picks again.
+    pub(crate) relink: Option<String>,
+}
+
+pub(in crate::workbench) fn netlist(
+    ui: &mut Ui,
+    parts: &mut NetlistNavigator<'_>,
+) -> NetlistNavigatorAsked {
+    let mut asked = NetlistNavigatorAsked::default();
+    if parts.netlist.active_document == ActiveNetlistDocument::GeneratedDiff {
+        netlist_diff(ui, parts);
+        return asked;
     }
-    let root_label =
-        active_netlist_artifact_name(&app.state.model, &app.state.code.netlist, &app.state.runs);
-    let messages = app.state.workbench.messages();
+    let root_label = active_netlist_artifact_name(parts.model, parts.netlist, parts.runs);
+    let messages = parts.messages;
     let index = crate::workbench::documents::netlist_document::visible_source_index_in(
-        &app.state.model,
-        &mut app.state.code.netlist,
+        parts.model,
+        parts.netlist,
     );
-    lib_sections::refresh(
-        &app.state.model,
-        &app.state.code.netlist,
-        &mut app.state.code.code_workspace,
-    );
+    lib_sections::refresh(parts.model, parts.netlist, parts.code_workspace);
     let projection = NetlistNavigatorProjection::from_index(
         &index,
-        app.state.workbench.navigator_filter(),
+        parts.filter,
         &root_label,
-        app.state.code.netlist.active_document == ActiveNetlistDocument::Generated,
-        &app.state.code.netlist_outline_collapsed,
-        &retained_include_facts(
-            &app.state.model,
-            &app.state.code.netlist,
-            &app.state.code.code_workspace,
-            messages,
-        ),
+        parts.netlist.active_document == ActiveNetlistDocument::Generated,
+        parts.outline_collapsed,
+        &retained_include_facts(parts.model, parts.netlist, parts.code_workspace, messages),
         messages,
     );
     let project_index = crate::workbench::documents::netlist_document::language::project_index_in(
-        &app.state.model,
-        &mut app.state.code.netlist,
+        parts.model,
+        parts.netlist,
     );
-    let symbol_query = app
-        .state
-        .workbench
-        .navigator_filter()
-        .trim()
-        .to_ascii_lowercase();
+    let symbol_query = parts.filter.trim().to_ascii_lowercase();
     let matching_symbol_indices = project_index.as_ref().map(|index| {
         if symbol_query.is_empty() {
             Vec::new()
@@ -213,8 +248,8 @@ pub(in crate::workbench) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
             })
             .collect::<Vec<_>>()
     });
-    let active_line = app.state.code.netlist.cursor_line.saturating_add(1);
-    let height = outline_row_height(ui, app.state.workbench.coarse_pointer);
+    let active_line = parts.netlist.cursor_line.saturating_add(1);
+    let height = outline_row_height(ui, parts.coarse_pointer);
 
     let mut goto = None;
     let mut goto_project_location = None;
@@ -227,8 +262,8 @@ pub(in crate::workbench) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
     // hiding what the library declares.
     let source_editable =
         crate::workbench::documents::netlist_document::active_netlist_source_is_editable_in(
-            &app.state.model,
-            &app.state.code.netlist,
+            parts.model,
+            parts.netlist,
         );
 
     ScrollArea::vertical()
@@ -304,9 +339,8 @@ pub(in crate::workbench) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
             }
 
             if !projection.include_rows.is_empty() {
-                let dependency_status =
-                    netlist_dependency_status(&app.state.model, &app.state.code.netlist)
-                        .map(|id| messages.text(id));
+                let dependency_status = netlist_dependency_status(parts.model, parts.netlist)
+                    .map(|id| messages.text(id));
                 section_header(
                     ui,
                     &messages.text(MessageId::NetlistNavigatorIncludes),
@@ -318,7 +352,7 @@ pub(in crate::workbench) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
                     // in Design, the one place a module is edited.
                     if let Some(reference) =
                         crate::workbench::documents::code_workspace::veriloga_dependency_view(
-                            &app.state.model.workspace,
+                            &parts.model.workspace,
                             &row.label,
                         )
                     {
@@ -597,7 +631,11 @@ pub(in crate::workbench) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
                     &messages.text(MessageId::NetlistNavigatorSourceMapping),
                     None,
                 );
-                netlist_source_mapping(ui, app, active_line);
+                if let Some(announced) =
+                    netlist_source_mapping(ui, parts.model, parts.messages, active_line)
+                {
+                    asked.prompt = Some(announced);
+                }
             }
 
             if projection.is_empty() {
@@ -608,7 +646,7 @@ pub(in crate::workbench) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
     if let Some(section) = toggled {
         // Collapsing is stored, expanding clears the store, so the default for
         // a category the engineer has never touched stays "disclosed".
-        let collapsed = &mut app.state.code.netlist_outline_collapsed;
+        let collapsed = &mut *parts.outline_collapsed;
         if !collapsed.remove(&section) {
             collapsed.insert(section);
         }
@@ -617,54 +655,47 @@ pub(in crate::workbench) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
         // Keep selection feedback immediate and hand the exact one-based
         // declaration to the editor's caret/scroll transaction for the next
         // document frame.
-        app.state.code.netlist.cursor_line = line.saturating_sub(1);
-        app.state.code.netlist.requested_line = Some(line);
+        parts.netlist.cursor_line = line.saturating_sub(1);
+        parts.netlist.requested_line = Some(line);
     }
     if let Some((line, section)) = use_section {
-        match lib_sections::use_section(&mut app.state, line, &section) {
-            Ok(text) | Err(text) => app.state.prompt(text),
+        match lib_sections::section_edit(parts.model, parts.netlist, line, &section) {
+            Ok(rewrite) => asked.use_section = Some(rewrite),
+            Err(text) => asked.prompt = Some(text),
         }
     }
-    if let Some(reference) = open_in_design {
-        app.state.open_workspace_view(reference);
-        app.state
-            .workbench
-            .activate(crate::workbench::state::Workspace::Design);
-    }
+    asked.open_in_design = open_in_design;
     if let Some(requested) = open_include {
-        let dependency =
-            active_canonical_netlist_document(&app.state.model, &app.state.code.netlist)
-                .and_then(|document| {
-                    document
-                        .dependencies()
-                        .iter()
-                        .find(|dependency| dependency.requested_locator() == requested)
-                })
-                .map(|dependency| {
-                    (
-                        dependency.locator().logical_identity().to_owned(),
-                        dependency.source().is_some(),
-                    )
-                });
+        let dependency = active_canonical_netlist_document(parts.model, parts.netlist)
+            .and_then(|document| {
+                document
+                    .dependencies()
+                    .iter()
+                    .find(|dependency| dependency.requested_locator() == requested)
+            })
+            .map(|dependency| {
+                (
+                    dependency.locator().logical_identity().to_owned(),
+                    dependency.source().is_some(),
+                )
+            });
         match dependency {
             Some((identity, true)) => {
                 if let Err(error) =
-                    crate::workbench::documents::netlist_document::open_netlist_dependency(
-                        &mut app.state,
+                    crate::workbench::documents::netlist_document::open_netlist_dependency_in(
+                        parts.model,
+                        parts.netlist,
+                        parts.open_documents,
+                        parts.runs,
                         &identity,
                     )
                 {
-                    app.state.prompt(error);
+                    asked.prompt = Some(error);
                 }
             }
-            Some((identity, false)) => {
-                crate::workbench::workflows::netlist_workflow::request_dependency_relink(
-                    &mut app.state,
-                    &identity,
-                );
-            }
+            Some((identity, false)) => asked.relink = Some(identity),
             None => {
-                app.state.prompt(format!(
+                asked.prompt = Some(format!(
                     "Include '{requested}' is no longer one of the active netlist's includes."
                 ));
             }
@@ -672,13 +703,17 @@ pub(in crate::workbench) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
     }
     if let Some(location) = goto_project_location
         && let Err(error) =
-            crate::workbench::documents::netlist_document::language::open_project_location(
-                &mut app.state,
+            crate::workbench::documents::netlist_document::language::open_project_location_in(
+                parts.model,
+                parts.netlist,
+                parts.open_documents,
+                parts.runs,
                 &location,
             )
     {
-        app.state.prompt(error);
+        asked.prompt = Some(error);
     }
+    asked
 }
 
 fn outline_row_height(ui: &Ui, coarse_pointer: bool) -> f32 {
@@ -1079,18 +1114,18 @@ impl DiffHunk {
     }
 }
 
-pub(super) fn netlist_diff(ui: &mut Ui, app: &mut RSpiceApp) {
-    let messages = app.state.workbench.messages();
-    let query = NetlistNavigatorQuery::new(app.state.workbench.navigator_filter());
-    let hunks = diff_hunks(&app.state.code.netlist.generated_diff_source, messages);
-    let (additions, removals) = diff_totals(&app.state.code.netlist.generated_diff_source);
+pub(super) fn netlist_diff(ui: &mut Ui, parts: &mut NetlistNavigator<'_>) {
+    let messages = parts.messages;
+    let query = NetlistNavigatorQuery::new(parts.filter);
+    let hunks = diff_hunks(&parts.netlist.generated_diff_source, messages);
+    let (additions, removals) = diff_totals(&parts.netlist.generated_diff_source);
     let matching = hunks
         .iter()
         .filter(|hunk| query.matches_diff_hunk(hunk))
         .cloned()
         .collect::<Vec<_>>();
-    let height = outline_row_height(ui, app.state.workbench.coarse_pointer);
-    let active_line = app.state.code.netlist.cursor_line.saturating_add(1);
+    let height = outline_row_height(ui, parts.coarse_pointer);
+    let active_line = parts.netlist.cursor_line.saturating_add(1);
     let mut goto = None;
 
     ScrollArea::vertical()
@@ -1145,8 +1180,8 @@ pub(super) fn netlist_diff(ui: &mut Ui, app: &mut RSpiceApp) {
         });
 
     if let Some(line) = goto {
-        app.state.code.netlist.cursor_line = line.saturating_sub(1);
-        app.state.code.netlist.requested_line = Some(line);
+        parts.netlist.cursor_line = line.saturating_sub(1);
+        parts.netlist.requested_line = Some(line);
     }
 }
 
@@ -2245,11 +2280,17 @@ pub(super) fn netlist_outline_icon(kind: NetlistNavigatorRowKind) -> WorkbenchIc
     }
 }
 
-pub(super) fn netlist_source_mapping(ui: &mut Ui, app: &mut RSpiceApp, active_line: usize) {
+/// The active line's provenance over the model and the message catalogue.
+/// A cross-probe selects the line's component in place and returns what it
+/// announces.
+pub(super) fn netlist_source_mapping(
+    ui: &mut Ui,
+    model: &mut Model,
+    messages: MessageCatalog,
+    active_line: usize,
+) -> Option<String> {
     let t = Tokens::get(ui.ctx());
-    let mapping = app
-        .state
-        .model
+    let mapping = model
         .netlist_artifacts
         .generated_document
         .as_ref()
@@ -2263,11 +2304,11 @@ pub(super) fn netlist_source_mapping(ui: &mut Ui, app: &mut RSpiceApp, active_li
                 entry.component_id(),
             )
         });
-    let messages = app.state.workbench.messages();
     let Some((cell, view, instance, component_id)) = mapping else {
         muted(ui, &messages.text(MessageId::NetlistNavigatorNoProvenance));
-        return;
+        return None;
     };
+    let mut announced = None;
     egui::Frame::new()
         .inner_margin(egui::Margin {
             left: 10,
@@ -2305,24 +2346,23 @@ pub(super) fn netlist_source_mapping(ui: &mut Ui, app: &mut RSpiceApp, active_li
                     .button(messages.text(MessageId::NetlistNavigatorCrossProbe))
                     .clicked()
             {
-                app.state.model.schematic.session.editor.selection.clear();
-                app.state
-                    .model
+                model.schematic.session.editor.selection.clear();
+                model
                     .schematic
                     .session
                     .editor
                     .selection
                     .select_component(component_id);
-                let announced = messages.format(
+                announced = Some(messages.format(
                     MessageId::NetlistNavigatorCrossProbeSucceeded,
                     &[
                         ("line", &active_line.to_string()),
                         ("component", &component_id.to_string()),
                     ],
-                );
-                app.state.prompt(announced);
+                ));
             }
         });
+    announced
 }
 
 #[cfg(test)]

@@ -22,11 +22,10 @@ use egui::{Response, ScrollArea, Ui, Vec2};
 use crate::ui::panels::{WorkbenchIcon, section_header};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::workbench::RSpiceApp;
 
 use crate::state::{ProjectSourceId, ProjectSourceLanguage, ProjectSourceRole};
 use crate::workbench::app::dialogs::source_document::leaf_name;
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::PlatformState;
 use crate::workbench::app_state::cell_usage::CellInstanceUse;
 use crate::workbench::design_system::{PANEL_SECTION_H, Problem, elide_text, paint_problem_mark};
 use crate::workbench::documents::code_workspace::{
@@ -36,46 +35,81 @@ use crate::workbench::documents::code_workspace::{
 use crate::workbench::{MessageCatalog, MessageId};
 use rspice_app_state::workbench::app_state::model::Model;
 
+/// What a source bundle rail reads, and writes in place: the model, the
+/// Code & Automation page's state, the platform's and the message catalogue.
+pub(crate) struct SourceRail<'a> {
+    pub(crate) model: &'a Model,
+    pub(crate) code_workspace: &'a mut CodeWorkspaceRuntimeState,
+    pub(crate) platform: &'a PlatformState,
+    pub(crate) messages: MessageCatalog,
+}
+
+/// What a rail asked of the whole application once it had drawn.
+#[derive(Debug)]
+pub(crate) enum RailAction {
+    /// Say why the rail's choice could not be carried out.
+    Prompt(String),
+    /// Open the source lifecycle dialog at `action`'s review for `path`.
+    FileAction {
+        language: ProjectSourceLanguage,
+        bundle_id: ProjectSourceId,
+        action: CodeSourceFileAction,
+        path: String,
+    },
+    /// Open the schematic an instance of the cell is placed in.
+    OpenInstance(CellInstanceUse),
+}
+
 /// The rail of a Verilog-A cell view's bundle, with its file operations.
-pub(super) fn veriloga(ui: &mut Ui, app: &mut RSpiceApp) {
+pub(super) fn veriloga(ui: &mut Ui, parts: &mut SourceRail<'_>) -> Option<RailAction> {
     let language = ProjectSourceLanguage::VerilogA;
-    let reference = app.state.model.workspace.content.active_view.clone();
-    let actions = active_bundle(&app.state.model, language).map(|bundle| FileActions {
+    let reference = parts.model.workspace.content.active_view.clone();
+    let actions = active_bundle(parts.model, language).map(|bundle| FileActions {
         bundle_id: bundle.id(),
         root: bundle.root().logical_path().to_owned(),
-        writable: !app.state.active_view_read_only()
-            && code_workspace::source_file_mutation_block_reason(app, language).is_none(),
+        writable: !parts.model.active_view_read_only()
+            && code_workspace::source_file_mutation_block_reason_in(
+                parts.model,
+                parts.code_workspace,
+                parts.platform,
+                language,
+            )
+            .is_none(),
     });
     let rail = Rail {
         id_salt: "workbench.veriloga.navigator",
         // One list: the build profile is a file of the bundle like any
         // other, and its row says what it is.
         files_title: MessageId::CodeNavigatorFiles,
-        files: bundle_rows(&app.state.model, language),
-        active: active_path(&app.state.model, &app.state.code.code_workspace, language),
+        files: bundle_rows(parts.model, language),
+        active: active_path(parts.model, parts.code_workspace, language),
         language,
         actions,
         used_in: Some(
-            app.state
+            parts
                 .model
                 .cell_instances(&reference.library, &reference.cell, None),
         ),
     };
-    show_rail(ui, app, rail);
+    show_rail(ui, parts, rail)
 }
 
-pub(in crate::workbench) fn automation(ui: &mut Ui, app: &mut RSpiceApp) {
+/// The rail of the project's automation bundle.
+pub(in crate::workbench) fn automation(
+    ui: &mut Ui,
+    parts: &mut SourceRail<'_>,
+) -> Option<RailAction> {
     let language = ProjectSourceLanguage::RSpiceAutomation;
     let rail = Rail {
         id_salt: "workbench.automation.navigator",
         files_title: MessageId::CodeNavigatorWorkflowFiles,
-        files: bundle_rows(&app.state.model, language),
-        active: active_path(&app.state.model, &app.state.code.code_workspace, language),
+        files: bundle_rows(parts.model, language),
+        active: active_path(parts.model, parts.code_workspace, language),
         language,
         actions: None,
         used_in: None,
     };
-    show_rail(ui, app, rail);
+    show_rail(ui, parts, rail)
 }
 
 /// Everything one rail lists, gathered before it paints.
@@ -237,24 +271,6 @@ fn row_file_actions(
     requested
 }
 
-/// Open the lifecycle dialog at `action`'s review for `path`.
-fn open_file_action(
-    app: &mut RSpiceApp,
-    language: ProjectSourceLanguage,
-    bundle_id: ProjectSourceId,
-    action: CodeSourceFileAction,
-    path: &str,
-) {
-    let opened = code_workspace::open_source_file_dialog_in_bundle(
-        app, language, bundle_id, action, path, path,
-    )
-    .and_then(|()| crate::workbench::app::open_source_document_dialog(&mut app.state));
-    if let Err(error) = opened {
-        app.state.code.code_workspace.source_file_dialog = None;
-        app.state.prompt(error);
-    }
-}
-
 /// One selectable file in a project-owned source bundle.
 struct BundleRow {
     logical_path: String,
@@ -351,16 +367,16 @@ enum RailRequest {
     OpenInstance(CellInstanceUse),
 }
 
-fn show_rail(ui: &mut Ui, app: &mut RSpiceApp, rail: Rail) {
-    let messages = app.state.workbench.messages();
+fn show_rail(ui: &mut Ui, parts: &mut SourceRail<'_>, rail: Rail) -> Option<RailAction> {
+    let messages = parts.messages;
     let language = rail.language;
-    let bundle = app.state.model.workspace.active_source_bundle(language);
+    let bundle = parts.model.workspace.active_source_bundle(language);
     let bundle_id = bundle.map(crate::state::ProjectSourceBundle::id);
     let navigation = match (rail.active.as_deref(), bundle) {
         (Some(path), Some(bundle)) => document_navigation(
-            app.state.model.workspace.content.project.id(),
+            parts.model.workspace.content.project.id(),
             bundle,
-            &mut app.state.code.code_workspace.source_index_cache,
+            &mut parts.code_workspace.source_index_cache,
             path,
         ),
         _ => SourceNavigation::default(),
@@ -368,11 +384,7 @@ fn show_rail(ui: &mut Ui, app: &mut RSpiceApp, rail: Rail) {
     let header = bundle_id
         .zip(rail.active.as_deref())
         .and_then(|(bundle_id, path)| {
-            code_workspace::viewed_veriloga_header(
-                &app.state.code.code_workspace.veriloga,
-                bundle_id,
-                path,
-            )
+            code_workspace::viewed_veriloga_header(&parts.code_workspace.veriloga, bundle_id, path)
         })
         .map(|(identity, _)| identity);
     let mut request = None;
@@ -407,41 +419,42 @@ fn show_rail(ui: &mut Ui, app: &mut RSpiceApp, rail: Rail) {
 
     match request {
         None => {}
-        Some(RailRequest::Select(path)) => select(
-            &app.state.model,
-            &mut app.state.code.code_workspace,
-            language,
-            &path,
-        ),
+        Some(RailRequest::Select(path)) => {
+            select(parts.model, parts.code_workspace, language, &path);
+        }
         Some(RailRequest::FileAction(action, path)) => {
             if let Some(file_actions) = rail.actions.as_ref() {
-                open_file_action(app, language, file_actions.bundle_id, action, &path);
+                return Some(RailAction::FileAction {
+                    language,
+                    bundle_id: file_actions.bundle_id,
+                    action,
+                    path,
+                });
             }
         }
         Some(RailRequest::AddFiles(path)) => {
             if let Some(file_actions) = rail.actions.as_ref() {
-                let requested =
-                    match code_workspace::source_file_mutation_block_reason(app, language) {
-                        Some(reason) => Err(reason.to_owned()),
-                        None => code_workspace::request_veriloga_add_files(
-                            &app.state.model,
-                            &mut app.state.code.code_workspace.veriloga,
-                            file_actions.bundle_id,
-                            &path,
-                        ),
-                    };
+                let requested = match code_workspace::source_file_mutation_block_reason_in(
+                    parts.model,
+                    parts.code_workspace,
+                    parts.platform,
+                    language,
+                ) {
+                    Some(reason) => Err(reason.to_owned()),
+                    None => code_workspace::request_veriloga_add_files(
+                        parts.model,
+                        &mut parts.code_workspace.veriloga,
+                        file_actions.bundle_id,
+                        &path,
+                    ),
+                };
                 if let Err(error) = requested {
-                    app.state.prompt(error);
+                    return Some(RailAction::Prompt(error));
                 }
             }
         }
         Some(RailRequest::Reveal { path, line }) => {
-            select(
-                &app.state.model,
-                &mut app.state.code.code_workspace,
-                language,
-                &path,
-            );
+            select(parts.model, parts.code_workspace, language, &path);
             if let Some(bundle_id) = bundle_id {
                 // The shared code editor consumes this on its next frame,
                 // which is the frame it shows `path` in.
@@ -454,15 +467,16 @@ fn show_rail(ui: &mut Ui, app: &mut RSpiceApp, rail: Rail) {
         }
         Some(RailRequest::ViewHeader(identity)) => {
             if let (Some(bundle_id), Some(over)) = (bundle_id, rail.active) {
-                app.state.code.code_workspace.veriloga.viewed_header = Some(VerilogAHeaderView {
+                parts.code_workspace.veriloga.viewed_header = Some(VerilogAHeaderView {
                     bundle_id,
                     over,
                     identity,
                 });
             }
         }
-        Some(RailRequest::OpenInstance(usage)) => open_instance(&mut app.state, &usage),
+        Some(RailRequest::OpenInstance(usage)) => return Some(RailAction::OpenInstance(usage)),
     }
+    None
 }
 
 /// The bundle's files, with the file operations in the section's header: the
@@ -754,24 +768,6 @@ fn used_in_section(
             *request = Some(RailRequest::OpenInstance(usage.clone()));
         }
     }
-}
-
-/// Open the schematic `usage` is placed in, with the instance selected and
-/// centred.
-fn open_instance(state: &mut AppState, usage: &CellInstanceUse) {
-    state.open_workspace_view(usage.schematic.clone());
-    let position = state
-        .model
-        .schematic
-        .document()
-        .components
-        .iter()
-        .find(|component| component.id == usage.component_id)
-        .map(|component| component.pos);
-    let editor = &mut state.model.schematic.session.editor;
-    editor.selection.select_only_component(usage.component_id);
-    editor.net_highlight.clear();
-    editor.center_request = position;
 }
 
 fn source_row_icon(role: Option<ProjectSourceRole>) -> WorkbenchIcon {

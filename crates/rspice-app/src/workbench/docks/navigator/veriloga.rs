@@ -8,17 +8,19 @@
 //! different files.
 
 use super::*;
-use crate::workbench::RSpiceApp;
 use egui::Ui;
 
+use super::source_bundle::{RailAction, SourceRail};
 use crate::workbench::documents::code_workspace;
 
-pub(in crate::workbench) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
-    if let Err(error) = code_workspace::selected_veriloga_source(app) {
+/// Draw the rail of the Verilog-A view the model has open, and return what
+/// the reader asked of it.
+pub(in crate::workbench) fn show(ui: &mut Ui, parts: &mut SourceRail<'_>) -> Option<RailAction> {
+    if let Err(error) = code_workspace::selected_veriloga_source_in(parts.model) {
         // The editor states the same refusal; the panel must not list the
         // files of a bundle the view does not own.
         empty_navigator_row(ui, &error);
-        return;
+        return None;
     }
-    super::source_bundle::veriloga(ui, app);
+    super::source_bundle::veriloga(ui, parts)
 }
