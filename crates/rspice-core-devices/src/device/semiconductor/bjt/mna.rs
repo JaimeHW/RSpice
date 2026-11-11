@@ -3197,11 +3197,16 @@ mod tests {
         ],
     ];
 
+    /// A forward-active collector, base and emitter bias.
+    const FORWARD_ACTIVE: [Value; 3] = [1.4, 0.76, 0.02];
+
     /// A promoted instance numbered as the builder numbers a transient's,
-    /// loaded at a forward-active bias until its loads stop limiting. The
-    /// grounded emitter keeps the limiter's projection exact, so the last
-    /// load lands on the bias itself.
-    fn settled_gummel_poon(card: &[(&str, Value)]) -> (Bjt, Vec<Value>) {
+    /// loaded at a collector, base and emitter bias until its loads stop
+    /// limiting.
+    fn settled_gummel_poon(
+        card: &[(&str, Value)],
+        [collector, base, emitter]: [Value; 3],
+    ) -> (Bjt, Vec<Value>) {
         let params = card
             .iter()
             .map(|&(name, value)| (name.to_owned(), value))
@@ -3218,7 +3223,7 @@ mod tests {
             nodes += 1;
         }
         assert!(bjt.mna_promoted());
-        let mut bias = promoted_bias(&bjt, nodes, 1.4, 0.76, 0.0);
+        let mut bias = promoted_bias(&bjt, nodes, collector, base, emitter);
         if bjt.needs_mna_rbi_branch() {
             bias[nodes - 1] = 2e-5;
         }
@@ -3230,6 +3235,26 @@ mod tests {
         (bjt, bias)
     }
 
+    /// A load that junction limiting leaves alone evaluates at the solver's
+    /// own bias, as ngspice's does. At these biases, projecting the unchanged
+    /// junction voltages back onto the nodes used to leave the emitter or
+    /// substrate node a few ulps off (0.02 V came back as
+    /// 0.020000000000000014).
+    #[test]
+    fn an_unlimited_load_evaluates_at_the_solution_itself() {
+        for card in GUMMEL_POON_CARDS {
+            for bias in [FORWARD_ACTIVE, [5.0, 0.7, 0.0], [3.1, 0.81, 0.05]] {
+                let (bjt, solution) = settled_gummel_poon(card, bias);
+                assert!(!bjt.legacy_junction_limited, "{bias:?}");
+                let rbi = Bjt::node_voltage(&solution, bjt.mna_rbi_matrix_node);
+                assert!(
+                    bjt.mna_eval_is_unlimited_at(&bjt.mna_solution_bias(&solution), rbi),
+                    "{bias:?}"
+                );
+            }
+        }
+    }
+
     /// A static probe of the bias the last load evaluated without limiting
     /// keeps that evaluation, and leaves the instance exactly as a probe that
     /// evaluates again does. Another bias, or a GMIN change in between,
@@ -3237,7 +3262,7 @@ mod tests {
     #[test]
     fn a_static_probe_of_an_unlimited_load_keeps_its_evaluation() {
         for card in GUMMEL_POON_CARDS {
-            let (mut bjt, bias) = settled_gummel_poon(card);
+            let (mut bjt, bias) = settled_gummel_poon(card, FORWARD_ACTIVE);
             let rbi = Bjt::node_voltage(&bias, bjt.mna_rbi_matrix_node);
             let candidate = bjt.mna_solution_bias(&bias);
             assert!(
@@ -3264,7 +3289,7 @@ mod tests {
     #[test]
     fn accepted_point_reads_of_the_evaluated_bias_return_that_evaluation() {
         for card in GUMMEL_POON_CARDS {
-            let (bjt, bias) = settled_gummel_poon(card);
+            let (bjt, bias) = settled_gummel_poon(card, FORWARD_ACTIVE);
             assert_accepted_reads_reuse_the_evaluation(&bjt, &bias);
         }
         // A VBIC load expands about the solution's resistor drops, so only a

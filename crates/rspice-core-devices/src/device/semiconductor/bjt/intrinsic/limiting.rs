@@ -622,6 +622,10 @@ impl Bjt {
                 limit_junction(raw_branches.vsub, previous_branches.vsub, sub_vcrit)
             },
         };
+        let branches = |b: LegacyNonlinearBranchVoltages| [b.vbe, b.vbc, b.vsub];
+        if untouched(&branches(limited_branches), &branches(raw_branches)) {
+            return raw;
+        }
 
         let projected =
             self.project_legacy_limited_branches_onto_internal_state(raw, limited_branches);
@@ -748,4 +752,16 @@ impl Bjt {
             BjtChargeModel::Vbic | BjtChargeModel::LegacyGummelPoon => None,
         }
     }
+}
+
+/// Whether junction limiting handed every branch voltage back exactly as it
+/// found it. pnjlim returns an iterate it does not limit untouched, and
+/// ngspice then evaluates the model at the solver's own bias. Projecting the
+/// unchanged branches back onto the nodes would round some of them off by a
+/// few ulps, and the load would no longer be at the solution it was given.
+fn untouched(limited: &[Value], raw: &[Value]) -> bool {
+    limited
+        .iter()
+        .zip(raw)
+        .all(|(limited, raw)| limited.to_bits() == raw.to_bits())
 }
