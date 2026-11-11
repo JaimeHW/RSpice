@@ -5,7 +5,10 @@ use rspice_schematic_editor::xspice_placement;
 
 use crate::state::{builtin_xspice_library_binding_with_vector_widths, engine_only_xspice_devices};
 use crate::ui::widgets::{CommandForm, DialogChoice};
-use crate::workbench::app::{RSpiceApp, schematic_editor_request_source};
+use crate::workbench::app::schematic_editor_request_source;
+use crate::workbench::app_state::Model;
+use crate::workbench::state::WorkbenchSession;
+use rspice_app_state::workbench::app::schematic::placement::arm_cell_instance;
 
 /// Isolated pre-placement contract for a registry-backed XSPICE device with
 /// one or more vector ports. Width edits remain runtime-only until the
@@ -52,26 +55,27 @@ impl BuiltinXspicePlacementDialogState {
 const PRIMARY: &str = "Place";
 const DESCRIPTION: &str = "Choose how many pins each vector port has.";
 
-impl RSpiceApp {
+/// What the built-in XSPICE placement form draws over and changes: its
+/// draft, the model it arms the placement on and the session.
+pub(in crate::workbench) struct BuiltinXspicePlacement<'a> {
+    pub(in crate::workbench) dialog: &'a mut BuiltinXspicePlacementDialogState,
+    pub(in crate::workbench) model: &'a mut Model,
+    pub(in crate::workbench) workbench: &'a mut WorkbenchSession,
+}
+
+impl BuiltinXspicePlacement<'_> {
     pub(in crate::workbench) fn render_builtin_xspice_placement_dialog(&mut self, ctx: &Context) {
-        if !self.state.design.builtin_xspice_placement.open {
+        if !self.dialog.open {
             return;
         }
 
-        let validation_error = validate_draft(self).err();
-        let title = format!(
-            "Configure {}",
-            self.state.design.builtin_xspice_placement.display_name
-        );
-        let refusal = validation_error.clone().or_else(|| {
-            self.state
-                .design
-                .builtin_xspice_placement
-                .validation_error
-                .clone()
-        });
+        let validation_error = validate_draft(self.dialog, self.model).err();
+        let title = format!("Configure {}", self.dialog.display_name);
+        let refusal = validation_error
+            .clone()
+            .or_else(|| self.dialog.validation_error.clone());
 
-        let draft = &mut self.state.design.builtin_xspice_placement;
+        let draft = &mut *self.dialog;
         let mut edited = false;
         let choice = CommandForm::new(&title, PRIMARY)
             .describe(DESCRIPTION)
@@ -88,51 +92,53 @@ impl RSpiceApp {
             });
         if edited {
             // An edit answers the refusal the last attempt recorded.
-            self.state.design.builtin_xspice_placement.validation_error = None;
+            self.dialog.validation_error = None;
         }
         match choice {
-            DialogChoice::Primary => match validate_draft(self) {
+            DialogChoice::Primary => match validate_draft(self.dialog, self.model) {
                 Ok(binding) => {
-                    let label =
-                        crate::workbench::app::arm_library_cell_placement(&mut self.state, binding);
-                    self.state.design.builtin_xspice_placement.close();
-                    self.state.prompt(format!(
+                    let label = arm_cell_instance(self.model, binding);
+                    self.dialog.close();
+                    self.workbench.prompt(format!(
                         "{label} is armed; it will snap to the schematic grid."
                     ));
                     rspice_schematic_editor::view::canvas::request_focus(ctx);
                 }
                 Err(error) => {
-                    self.state.design.builtin_xspice_placement.validation_error = Some(error);
+                    self.dialog.validation_error = Some(error);
                 }
             },
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.design.builtin_xspice_placement.close();
+                self.dialog.close();
             }
             DialogChoice::None | DialogChoice::Secondary => {}
         }
     }
 }
 
-fn validate_draft(app: &RSpiceApp) -> Result<crate::state::LibraryCellInstance, String> {
-    let draft = &app.state.design.builtin_xspice_placement;
-    if app.state.schematic_edit_read_only() {
+fn validate_draft(
+    draft: &BuiltinXspicePlacementDialogState,
+    model: &Model,
+) -> Result<crate::state::LibraryCellInstance, String> {
+    if model.schematic_edit_read_only() {
         return Err("The active schematic is read-only.".to_owned());
     }
     if draft
         .source
         .as_ref()
-        .is_none_or(|source| *source != schematic_editor_request_source(&app.state))
+        .is_none_or(|source| *source != schematic_editor_request_source(model))
     {
         return Err(
             "The active design or cell view changed. Close and reopen the device configuration."
                 .to_owned(),
         );
     }
-    materialize_draft(app)
+    materialize_draft(draft)
 }
 
-fn materialize_draft(app: &RSpiceApp) -> Result<crate::state::LibraryCellInstance, String> {
-    let draft = &app.state.design.builtin_xspice_placement;
+fn materialize_draft(
+    draft: &BuiltinXspicePlacementDialogState,
+) -> Result<crate::state::LibraryCellInstance, String> {
     let descriptor = engine_only_xspice_devices()
         .iter()
         .find(|descriptor| descriptor.stable_id == draft.stable_id)
@@ -149,6 +155,7 @@ fn materialize_draft(app: &RSpiceApp) -> Result<crate::state::LibraryCellInstanc
 mod tests {
     use super::*;
     use crate::state::Tool;
+    use crate::workbench::app::RSpiceApp;
 
     #[test]
     fn materialization_uses_the_exact_selected_width() {
@@ -170,7 +177,8 @@ mod tests {
             .widths
             .insert("in".to_owned(), 6);
 
-        let binding = validate_draft(&app).expect("validated binding");
+        let binding = validate_draft(&app.state.design.builtin_xspice_placement, &app.state.model)
+            .expect("validated binding");
         assert_eq!(binding.terminal_order.len(), 7);
         assert_eq!(binding.builtin_xspice.unwrap().ports[0].vector_width, 6);
     }
@@ -218,7 +226,10 @@ mod tests {
                 ports.clone(),
                 source.clone(),
             );
-            assert!(validate_draft(&app).is_ok());
+            assert!(
+                validate_draft(&app.state.design.builtin_xspice_placement, &app.state.model)
+                    .is_ok()
+            );
             let state = &mut app.state;
             match change {
                 "design" => state.model.design_execution_epoch += 1,
@@ -271,11 +282,12 @@ mod tests {
                 _ => unreachable!(),
             }
             assert!(
-                materialize_draft(&app).is_ok(),
+                materialize_draft(&app.state.design.builtin_xspice_placement).is_ok(),
                 "contract remains valid: {change}"
             );
             assert!(
-                validate_draft(&app).is_err(),
+                validate_draft(&app.state.design.builtin_xspice_placement, &app.state.model)
+                    .is_err(),
                 "stale or read-only: {change}"
             );
             let state = &mut app.state;
@@ -302,7 +314,11 @@ mod tests {
                     ports,
                     schematic_editor_request_source(state),
                 );
-                assert!(validate_draft(&app).is_ok(), "reopened: {change}");
+                assert!(
+                    validate_draft(&app.state.design.builtin_xspice_placement, &app.state.model)
+                        .is_ok(),
+                    "reopened: {change}"
+                );
             }
         }
     }

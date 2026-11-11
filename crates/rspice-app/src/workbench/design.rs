@@ -10,6 +10,7 @@ use crate::workbench::app::dialogs::design_review_comments::ReviewComments;
 use crate::workbench::app::dialogs::engineering_table::EngineeringTable;
 use crate::workbench::app::dialogs::hierarchy::create::CreateHierarchy;
 use crate::workbench::app::dialogs::hierarchy::descend;
+use crate::workbench::app::dialogs::placement::builtin_xspice::BuiltinXspicePlacement;
 use crate::workbench::app::dialogs::property_dialog::PropertyDialog;
 use crate::workbench::app::dialogs::replace_instance::ReplaceInstance;
 use crate::workbench::app::dialogs::selection::{array, bulk_edit, rename, shared_properties};
@@ -324,5 +325,19 @@ impl DesignFeature {
             workbench: cx.wb,
         }
         .render_replace_instance_dialog(ctx);
+    }
+
+    /// The built-in XSPICE placement form, over its draft, the model it arms
+    /// the placement on and the session.
+    pub(in crate::workbench) fn render_builtin_xspice_placement_dialog(
+        cx: &mut Cx<'_, Self>,
+        ctx: &Context,
+    ) {
+        BuiltinXspicePlacement {
+            dialog: &mut cx.state.builtin_xspice_placement,
+            model: cx.model,
+            workbench: cx.wb,
+        }
+        .render_builtin_xspice_placement_dialog(ctx);
     }
 }

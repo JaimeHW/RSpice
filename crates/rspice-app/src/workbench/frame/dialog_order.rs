@@ -115,7 +115,9 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         key: DialogKey("design.builtin_xspice_placement"),
         modality: Modality::Dialog,
         is_open: Some(|state| state.design.builtin_xspice_placement.open),
-        render: |app, ctx| app.render_builtin_xspice_placement_dialog(ctx),
+        render: |app, ctx| {
+            DesignFeature::render_builtin_xspice_placement_dialog(&mut features::cx(app), ctx)
+        },
     },
     DialogSpec {
         key: DialogKey("design.net_label"),

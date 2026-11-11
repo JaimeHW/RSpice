@@ -329,7 +329,10 @@ const DIALOG_STEPS: &[(&str, &str)] = &[
     ("features::render_dialog", "cloud"),
     ("command_palette::render_command_palette", "framework"),
     ("DesignFeature::render_bus_tap_dialog", "design"),
-    ("render_builtin_xspice_placement_dialog", "design"),
+    (
+        "DesignFeature::render_builtin_xspice_placement_dialog",
+        "design",
+    ),
     ("DesignFeature::render_net_label_dialog", "design"),
     ("DesignFeature::render_grid_snap_routing_dialog", "design"),
     ("features::render_dialog", "sheets"),

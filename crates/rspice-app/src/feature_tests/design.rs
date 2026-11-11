@@ -604,3 +604,48 @@ fn a_replacement_is_carried_out_in_the_frame_it_is_chosen() {
         state.prompt_text()
     );
 }
+
+/// The lookup-table XSPICE device's placement form, opened over the open
+/// schematic; the device's display name.
+fn open_lookup_table_placement(app: &mut RSpiceApp) -> &'static str {
+    let descriptor = crate::state::engine_only_xspice_devices()
+        .iter()
+        .find(|descriptor| descriptor.model_type == "d_lut")
+        .expect("the lookup-table device");
+    let ports = crate::state::builtin_xspice_vector_ports(descriptor).expect("its vector ports");
+    let source = crate::workbench::app::schematic_editor_request_source(&app.state);
+    app.state.design.builtin_xspice_placement.open(
+        descriptor.stable_id,
+        descriptor.display_name,
+        ports,
+        source,
+    );
+    descriptor.display_name
+}
+
+#[test]
+fn builtin_xspice_placement_opens_and_draws_in_the_frame() {
+    let mut app = design_app();
+    let name = open_lookup_table_placement(&mut app);
+    assert!(draws_dialog(&mut app, &format!("Configure {name}")));
+    assert!(app.state.design.builtin_xspice_placement.open);
+}
+
+/// Place arms the configured device in the frame it is pressed and closes
+/// the form.
+#[test]
+fn a_configured_device_is_armed_in_the_frame_it_is_placed() {
+    let mut replay = Replay::of(RSpiceApp::test_instance());
+    replay.app.state.workbench.activate(Workspace::Design);
+    open_lookup_table_placement(&mut replay.app);
+    replay.click("Place", Role::Button);
+    let state = &replay.app.state;
+    assert!(!state.design.builtin_xspice_placement.open);
+    assert!(
+        state
+            .prompt_text()
+            .is_some_and(|text| text.ends_with("is armed; it will snap to the schematic grid.")),
+        "{:?}",
+        state.prompt_text()
+    );
+}
