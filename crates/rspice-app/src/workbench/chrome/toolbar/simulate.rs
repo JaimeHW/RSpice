@@ -7,10 +7,10 @@ use egui::{Align, Layout, Vec2};
 use crate::state::command_catalog::CommandKey;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::Model;
 use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::framework::command_registry::ids;
+use crate::workbench::framework::workbench_host::WorkbenchHost;
 use crate::workbench::layout::LayoutSpec;
 use crate::workbench::simulate::commands::SimulateCommand;
 
@@ -21,7 +21,7 @@ use super::{
 
 pub(in crate::workbench) fn simulation_tools(
     ui: &mut egui::Ui,
-    app: &mut RSpiceApp,
+    app: &mut impl WorkbenchHost,
     layout: LayoutSpec,
 ) {
     toolbar_icon_command(
@@ -44,7 +44,7 @@ pub(in crate::workbench) fn simulation_tools(
 
 pub(in crate::workbench) fn verification_tools(
     ui: &mut egui::Ui,
-    app: &mut RSpiceApp,
+    app: &mut impl WorkbenchHost,
     layout: LayoutSpec,
 ) {
     toolbar_icon_command(
