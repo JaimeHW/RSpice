@@ -14,8 +14,10 @@ use crate::state::{
     DesignVariableSweepEligibility,
 };
 use crate::ui::widgets::Button;
-use crate::workbench::RSpiceApp;
 use crate::workbench::app::{PlanRemovalConsequence, PlanRemovalTarget, PlanRemovalTone};
+use crate::workbench::app_state::Model;
+use crate::workbench::framework::feature::Cx;
+use crate::workbench::simulate::SimulateFeature;
 
 use crate::ui::widgets::{mono_input, select};
 
@@ -27,8 +29,8 @@ use super::workflows::{commit_plan_change, unique_copy_name};
 
 const REGISTRY_COLUMNS: [f32; 7] = [0.16, 0.12, 0.17, 0.12, 0.14, 0.14, 0.15];
 
-pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
-    let Some((plan_id, payload)) = plan_payload(app) else {
+pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
+    let Some((plan_id, payload)) = plan_payload(cx.model) else {
         card(
             ui,
             "Variable registry",
@@ -43,35 +45,29 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         );
         return;
     };
-    registry(ui, app, plan_id, &payload);
+    registry(ui, cx, plan_id, &payload);
     card_row(
         ui,
-        app,
-        |ui, app| selected_record(ui, app, &payload),
-        |ui, app| change_impact(ui, app, &payload),
+        cx,
+        |ui, cx| selected_record(ui, cx, &payload),
+        |ui, cx| change_impact(ui, cx.model, &payload),
     );
 }
 
-fn plan_payload(app: &RSpiceApp) -> Option<(SimulationPlanId, SimulationPlanPayload)> {
-    let plan_id = app.state.model.sim_setup.stable_analysis_plan().ok()?.id();
-    let payload = app
-        .state
-        .model
-        .workspace
-        .content
-        .plan_data(plan_id)?
-        .clone();
+fn plan_payload(model: &Model) -> Option<(SimulationPlanId, SimulationPlanPayload)> {
+    let plan_id = model.sim_setup.stable_analysis_plan().ok()?.id();
+    let payload = model.workspace.content.plan_data(plan_id)?.clone();
     Some((plan_id, payload))
 }
 
 fn registry(
     ui: &mut Ui,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, SimulateFeature>,
     plan_id: SimulationPlanId,
     payload: &SimulationPlanPayload,
 ) {
     let variables = &payload.design_variables;
-    let selected = app.state.simulate.selected_design_variable.clone();
+    let selected = cx.state.selected_design_variable.clone();
     let selected_index = selected
         .as_ref()
         .and_then(|name| variables.iter().position(|variable| &variable.name == name));
@@ -92,7 +88,7 @@ fn registry(
     );
     // A spec sheet the picker has finished reading is adopted before the head
     // is drawn, so the rows it adds are in this frame's registry.
-    super::variable_import::poll_pending_import(ui.ctx(), app, plan_id);
+    super::variable_import::poll_pending_import(ui.ctx(), cx, plan_id);
 
     let mut duplicate = false;
     let mut remove = false;
@@ -167,7 +163,7 @@ fn registry(
                 // declared and nothing about which of this plan's analyses
                 // actually read it.
                 let used_by = super::workflows::design_variable_consumers_scoped(
-                    &app.state.model,
+                    cx.model,
                     match &variable.scope {
                         crate::state::DesignVariableScope::SelectedAnalysis { analysis_id } => {
                             Some(Some(*analysis_id))
@@ -210,14 +206,14 @@ fn registry(
     if let Some(name) = pick {
         // A draft belongs to the row it was typed into. Selecting another row
         // must not carry a half-typed expression or bound onto it.
-        if app.state.simulate.selected_design_variable.as_deref() != Some(name.as_str()) {
-            app.state.simulate.design_variable_expression_draft = None;
-            app.state.simulate.design_variable_bounds_draft = None;
+        if cx.state.selected_design_variable.as_deref() != Some(name.as_str()) {
+            cx.state.design_variable_expression_draft = None;
+            cx.state.design_variable_bounds_draft = None;
         }
-        app.state.simulate.selected_design_variable = Some(name);
+        cx.state.selected_design_variable = Some(name);
     }
     if import {
-        super::variable_import::import_from_file(ui.ctx(), &mut app.state);
+        super::variable_import::import_from_file(ui.ctx(), cx);
     }
     // A removal the reader confirmed in the destructive review is applied here,
     // by the page that staged it: this is the registry the row is in, so the
@@ -228,9 +224,8 @@ fn registry(
     // The table above was already drawn from the payload this is about to
     // change, so the frame is asked to run again: the confirming click landed
     // in the modal, and nothing else is coming to repaint the row it removed.
-    let mut removal = app
+    let mut removal = cx
         .state
-        .simulate
         .plan_removal_review
         .take_confirmed_variable(plan_id)
         .inspect(|_| ui.ctx().request_repaint())
@@ -251,32 +246,27 @@ fn registry(
             });
             let detail = format!("Duplicated design variable {name} as {copy}.");
             let committed = copy.clone();
-            if commit_plan_change(
-                &mut crate::workbench::features::cx(app),
-                plan_id,
-                &detail,
-                move |workspace, plan_id| {
-                    workspace
-                        .content
-                        .duplicate_design_variable(plan_id, id, copy)
-                        .map(|_| ())
-                        .map_err(|error| error.to_string())
-                },
-            ) {
+            if commit_plan_change(cx, plan_id, &detail, move |workspace, plan_id| {
+                workspace
+                    .content
+                    .duplicate_design_variable(plan_id, id, copy)
+                    .map(|_| ())
+                    .map_err(|error| error.to_string())
+            }) {
                 // The copy carries the original's whole typed contract, so the
                 // record editor should open on it — that is the field the copy
                 // exists to change.
-                app.state.simulate.design_variable_expression_draft = None;
-                app.state.simulate.design_variable_bounds_draft = None;
-                app.state.simulate.selected_design_variable = Some(committed);
+                cx.state.design_variable_expression_draft = None;
+                cx.state.design_variable_bounds_draft = None;
+                cx.state.selected_design_variable = Some(committed);
             }
         } else if remove {
             // Removing a variable the plan resolves into an analysis is a
             // removal that costs something: the expressions that named it are
             // left naming nothing. Removing one nothing reads costs nothing, so
             // it is not worth a modal.
-            match removal_consequences(app, &variables[index]) {
-                Some(consequences) => app.state.simulate.plan_removal_review.open(
+            match removal_consequences(cx.model, &variables[index]) {
+                Some(consequences) => cx.state.plan_removal_review.open(
                     PlanRemovalTarget::Variable { plan: plan_id, id },
                     name,
                     consequences,
@@ -290,20 +280,15 @@ fn registry(
         // A refused removal leaves the variable in the registry, so the
         // selection has to survive with it — clearing regardless would
         // close the editor on a row that is still there.
-        if commit_plan_change(
-            &mut crate::workbench::features::cx(app),
-            plan_id,
-            &detail,
-            move |workspace, plan_id| {
-                workspace
-                    .content
-                    .remove_design_variable(plan_id, id)
-                    .map(|_| ())
-                    .map_err(|error| error.to_string())
-            },
-        ) && app.state.simulate.selected_design_variable.as_deref() == Some(name.as_str())
+        if commit_plan_change(cx, plan_id, &detail, move |workspace, plan_id| {
+            workspace
+                .content
+                .remove_design_variable(plan_id, id)
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }) && cx.state.selected_design_variable.as_deref() == Some(name.as_str())
         {
-            app.state.simulate.selected_design_variable = None;
+            cx.state.selected_design_variable = None;
         }
     }
 }
@@ -320,11 +305,11 @@ fn registry(
 ///
 /// [`design_variable_consumers_scoped`]: super::workflows::design_variable_consumers_scoped
 fn removal_consequences(
-    app: &RSpiceApp,
+    model: &Model,
     variable: &crate::state::DesignVariable,
 ) -> Option<Vec<PlanRemovalConsequence>> {
     let readers = super::workflows::design_variable_consumers_scoped(
-        &app.state.model,
+        model,
         match &variable.scope {
             DesignVariableScope::SelectedAnalysis { analysis_id } => Some(Some(*analysis_id)),
             _ => None,
@@ -343,18 +328,13 @@ fn removal_consequences(
     ])
 }
 
-fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
-    let selected = app
-        .state
-        .simulate
-        .selected_design_variable
-        .as_ref()
-        .and_then(|name| {
-            payload
-                .design_variables
-                .iter()
-                .find(|variable| &variable.name == name)
-        });
+fn selected_record(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, payload: &SimulationPlanPayload) {
+    let selected = cx.state.selected_design_variable.as_ref().and_then(|name| {
+        payload
+            .design_variables
+            .iter()
+            .find(|variable| &variable.name == name)
+    });
     let Some(variable) = selected else {
         card(
             ui,
@@ -373,9 +353,8 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
     let variable = variable.clone();
     let title = format!("Selected variable · {}", variable.name);
     let variable_id = variable.id;
-    let mut draft = app
+    let mut draft = cx
         .state
-        .simulate
         .design_variable_expression_draft
         .clone()
         .unwrap_or_else(|| variable.expression.clone());
@@ -383,9 +362,8 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
         || (String::new(), String::new()),
         |range| (range.minimum.clone(), range.maximum.clone()),
     );
-    let mut bounds = app
+    let mut bounds = cx
         .state
-        .simulate
         .design_variable_bounds_draft
         .clone()
         .unwrap_or_else(|| stored_bounds.clone());
@@ -401,7 +379,7 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
         .iter()
         .map(|policy| policy.label().to_owned())
         .collect();
-    let scopes = scope_options(app, &variable.scope);
+    let scopes = scope_options(cx.model, &variable.scope);
     let scope_labels: Vec<String> = scopes.iter().map(|(label, _)| label.clone()).collect();
     let current_scope = scope_label(&variable.scope, &scopes);
 
@@ -536,7 +514,7 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
 
     if let Some(edit) = edit.take() {
         let detail = edit.detail(&variable.name, &scopes);
-        replace_variable(app, variable_id, &detail, |target| edit.apply(target));
+        replace_variable(cx, variable_id, &detail, |target| edit.apply(target));
         return;
     }
     if released.get() {
@@ -548,26 +526,26 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
         // trace of what they had written. The field keeps the refused text so
         // the correction is one character rather than one retype.
         let expression_settled = draft.trim() == variable.expression.trim()
-            || commit_expression(app, variable_id, &draft, &variable.name);
+            || commit_expression(cx, variable_id, &draft, &variable.name);
         let bounds_settled =
-            bounds == stored_bounds || commit_bounds(app, variable_id, &bounds, &variable.name);
+            bounds == stored_bounds || commit_bounds(cx, variable_id, &bounds, &variable.name);
         if expression_settled {
-            app.state.simulate.design_variable_expression_draft = None;
+            cx.state.design_variable_expression_draft = None;
         } else {
-            app.state.simulate.design_variable_expression_draft = Some(draft);
+            cx.state.design_variable_expression_draft = Some(draft);
         }
         if bounds_settled {
-            app.state.simulate.design_variable_bounds_draft = None;
+            cx.state.design_variable_bounds_draft = None;
         } else {
-            app.state.simulate.design_variable_bounds_draft = Some(bounds);
+            cx.state.design_variable_bounds_draft = Some(bounds);
         }
         return;
     }
     if draft != variable.expression {
-        app.state.simulate.design_variable_expression_draft = Some(draft);
+        cx.state.design_variable_expression_draft = Some(draft);
     }
     if bounds != stored_bounds {
-        app.state.simulate.design_variable_bounds_draft = Some(bounds);
+        cx.state.design_variable_bounds_draft = Some(bounds);
     }
 }
 
@@ -615,7 +593,7 @@ impl VariableEdit {
 /// analysis the plan owns, and — when it already holds one — the cell scope it
 /// was authored with, so selecting nothing else preserves it.
 fn scope_options(
-    app: &RSpiceApp,
+    model: &Model,
     current: &DesignVariableScope,
 ) -> Vec<(String, DesignVariableScope)> {
     let mut options = vec![
@@ -634,7 +612,7 @@ fn scope_options(
             DesignVariableScope::SelectedCell { cell: cell.clone() },
         ));
     }
-    if let Ok(plan) = app.state.model.sim_setup.stable_analysis_plan() {
+    if let Ok(plan) = model.sim_setup.stable_analysis_plan() {
         options.extend(
             plan.instances()
                 .iter()
@@ -674,13 +652,12 @@ fn scope_label(scope: &DesignVariableScope, options: &[(String, DesignVariableSc
 /// Reports whether the transaction was adopted, so an in-place editor can tell
 /// a refusal from a change and keep the refused text on the field.
 fn replace_variable(
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, SimulateFeature>,
     variable_id: DesignVariableId,
     detail: &str,
     apply: impl FnOnce(&mut crate::state::DesignVariable),
 ) -> bool {
-    let Ok(plan_id) = app
-        .state
+    let Ok(plan_id) = cx
         .model
         .sim_setup
         .stable_analysis_plan()
@@ -688,8 +665,7 @@ fn replace_variable(
     else {
         return false;
     };
-    let Some(mut replacement) = app
-        .state
+    let Some(mut replacement) = cx
         .model
         .workspace
         .content
@@ -705,7 +681,7 @@ fn replace_variable(
         return false;
     };
     apply(&mut replacement);
-    commit_replacement(app, plan_id, variable_id, replacement, detail)
+    commit_replacement(cx, plan_id, variable_id, replacement, detail)
 }
 
 /// Replace one variable's inclusive bounds. Clearing both fields removes the
@@ -713,7 +689,7 @@ fn replace_variable(
 ///
 /// Reports whether the bounds were adopted.
 fn commit_bounds(
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, SimulateFeature>,
     variable_id: DesignVariableId,
     bounds: &(String, String),
     name: &str,
@@ -733,31 +709,26 @@ fn commit_bounds(
             )
         },
     );
-    replace_variable(app, variable_id, &detail, |target| {
+    replace_variable(cx, variable_id, &detail, |target| {
         target.allowed_range = range;
     })
 }
 
 /// Reports whether the replacement was adopted.
 fn commit_replacement(
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, SimulateFeature>,
     plan_id: SimulationPlanId,
     variable_id: DesignVariableId,
     replacement: crate::state::DesignVariable,
     detail: &str,
 ) -> bool {
-    commit_plan_change(
-        &mut crate::workbench::features::cx(app),
-        plan_id,
-        detail,
-        move |workspace, plan_id| {
-            workspace
-                .content
-                .replace_design_variable(plan_id, variable_id, replacement)
-                .map(|_| ())
-                .map_err(|error| error.to_string())
-        },
-    )
+    commit_plan_change(cx, plan_id, detail, move |workspace, plan_id| {
+        workspace
+            .content
+            .replace_design_variable(plan_id, variable_id, replacement)
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    })
 }
 
 /// Replace one variable's expression as a single validated transaction.
@@ -767,13 +738,12 @@ fn commit_replacement(
 /// rule leaves the plan exactly as it was and reports why. Reports whether the
 /// expression was adopted, which is what lets the field keep a refused edit.
 fn commit_expression(
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, SimulateFeature>,
     variable_id: DesignVariableId,
     expression: &str,
     name: &str,
 ) -> bool {
-    let Ok(plan_id) = app
-        .state
+    let Ok(plan_id) = cx
         .model
         .sim_setup
         .stable_analysis_plan()
@@ -783,18 +753,13 @@ fn commit_expression(
     };
     let detail = format!("Updated design variable {name} to {expression}.");
     let expression = expression.to_owned();
-    commit_plan_change(
-        &mut crate::workbench::features::cx(app),
-        plan_id,
-        &detail,
-        move |workspace, plan_id| {
-            workspace
-                .content
-                .update_design_variable_expression(plan_id, variable_id, expression)
-                .map(|_| ())
-                .map_err(|error| error.to_string())
-        },
-    )
+    commit_plan_change(cx, plan_id, &detail, move |workspace, plan_id| {
+        workspace
+            .content
+            .update_design_variable_expression(plan_id, variable_id, expression)
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    })
 }
 
 /// What the Change impact card says about who resolves these values.
@@ -823,26 +788,24 @@ fn enabled_reader_summary(enabled: usize, disabled: usize) -> String {
     }
 }
 
-fn change_impact(ui: &mut Ui, app: &RSpiceApp, payload: &SimulationPlanPayload) {
+fn change_impact(ui: &mut Ui, model: &Model, payload: &SimulationPlanPayload) {
     let variables = &payload.design_variables;
     // Enabled instances only. A disabled analysis resolves nothing: it is not
     // in the run this plan would dispatch, so counting it here said "10
     // analyses resolve these values" over a plan that would resolve them for
     // four -- the same over-count the placed-source list stopped making when
     // it started asking whether a consumer reads.
-    let (analyses, disabled) =
-        app.state
-            .model
-            .sim_setup
-            .stable_analysis_plan()
-            .map_or((0, 0), |plan| {
-                let enabled = plan
-                    .instances()
-                    .iter()
-                    .filter(|instance| instance.enabled())
-                    .count();
-                (enabled, plan.instances().len() - enabled)
-            });
+    let (analyses, disabled) = model
+        .sim_setup
+        .stable_analysis_plan()
+        .map_or((0, 0), |plan| {
+            let enabled = plan
+                .instances()
+                .iter()
+                .filter(|instance| instance.enabled())
+                .count();
+            (enabled, plan.instances().len() - enabled)
+        });
     let referenced: Vec<&crate::state::DesignVariable> = variables
         .iter()
         .filter(|variable| {

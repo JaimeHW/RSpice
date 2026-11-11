@@ -41,13 +41,12 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogSize, select};
 use crate::workbench::app_state::Model;
 use crate::workbench::framework::feature::Cx;
-use crate::workbench::simulate::SimulateFeature;
+use crate::workbench::simulate::{SimulateFeature, record_plan_refusal};
 use crate::workbench::slots::SimulateState;
 use crate::workbench::state::{
     DesignVariableDraft, DesignVariableImportDraft, DesignVariableImportRow,
     SimulationWorkflowDialog, VariableImportRefusal,
 };
-use crate::workbench::{AppState, RSpiceApp};
 
 use super::workflows::{
     commit_plan_change, design_variable_from_draft_categorized, finish_workflow_choice,
@@ -135,10 +134,10 @@ const SCOPE_CHOICES: [(&str, usize); 6] = [
 /// The click only starts the pick — a browser cannot hand back a file
 /// synchronously — so the sheet itself arrives at [`poll_pending_import`],
 /// which opens the guided dialog on it rather than adopting it outright.
-pub(super) fn import_from_file(ctx: &egui::Context, state: &mut AppState) {
+pub(super) fn import_from_file(ctx: &egui::Context, cx: &mut Cx<'_, SimulateFeature>) {
     if let Err(error) = file_exchange::open_file(ctx, exchange_id(), SPEC_SHEET, MAX_IMPORT_BYTES) {
         refuse(
-            state,
+            cx,
             &VariableImportRefusal::Schema {
                 line: 0,
                 detail: error,
@@ -150,25 +149,20 @@ pub(super) fn import_from_file(ctx: &egui::Context, state: &mut AppState) {
 /// Open the guided import on a spec sheet the picker has finished reading.
 pub(super) fn poll_pending_import(
     ctx: &egui::Context,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, SimulateFeature>,
     plan_id: SimulationPlanId,
 ) {
     match file_exchange::take_opened(ctx, exchange_id()) {
         Some(Ok(Some(sheet))) => {
-            let draft = import_draft_for_sheet(
-                &app.state.model,
-                &app.state.simulate,
-                plan_id,
-                &sheet.name,
-                &sheet.text,
-            );
-            app.state.simulate.simulation_workflow =
+            let draft =
+                import_draft_for_sheet(cx.model, cx.state, plan_id, &sheet.name, &sheet.text);
+            cx.state.simulation_workflow =
                 Some(SimulationWorkflowDialog::DesignVariableImport(draft));
         }
         // The picker failed before any of the sheet was read, so there is no
         // line to name and nothing about the table to describe.
         Some(Err(error)) => refuse(
-            &mut app.state,
+            cx,
             &VariableImportRefusal::Schema {
                 line: 0,
                 detail: error,
@@ -183,14 +177,17 @@ pub(super) fn poll_pending_import(
 /// lifecycle status, which is the channel `commit_plan_change` itself writes on
 /// failure.
 ///
-/// This only announces an outcome, so it takes the session aggregate rather
-/// than the whole application — the same reason `lifecycle::record_failure`
+/// This only announces an outcome, so it takes the simulate feature's context
+/// rather than the whole application — the same reason `lifecycle::record_failure`
 /// does. Announcing an outcome is not a licence to mutate every subsystem.
-fn refuse(state: &mut AppState, refusal: &VariableImportRefusal) {
-    state.record_plan_refusal(format!(
-        "Design-variable import refused \u{00b7} {}",
-        refusal.message()
-    ));
+fn refuse(cx: &mut Cx<'_, SimulateFeature>, refusal: &VariableImportRefusal) {
+    record_plan_refusal(
+        cx,
+        format!(
+            "Design-variable import refused \u{00b7} {}",
+            refusal.message()
+        ),
+    );
 }
 
 /// Which import refusal a rejected row amounts to.
@@ -1094,6 +1091,7 @@ fn override_policy_choices() -> Vec<(&'static str, usize)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::RSpiceApp;
 
     const SHEET: &str = "name,quantity,expression,minimum,maximum,scope,sweep role,override policy,description\n\
          RLOAD,Resistance,10 kohm,1 kohm,1 Mohm,project,sweep,override,Output load\n\

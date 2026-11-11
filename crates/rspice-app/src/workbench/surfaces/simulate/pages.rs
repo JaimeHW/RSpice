@@ -39,7 +39,9 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, page: SimulationPage) {
         SimulationPage::Excitations => {
             super::page_excitations::show(ui, &mut app.state, &excitations, &rf_ports);
         }
-        SimulationPage::Variables => super::page_variables::show(ui, app),
+        SimulationPage::Variables => {
+            super::page_variables::show(ui, &mut crate::workbench::features::cx(app));
+        }
         SimulationPage::Outputs => super::page_outputs::show(ui, app),
         SimulationPage::Specifications => super::page_specs::show(ui, app),
         SimulationPage::RunSet => super::page_runset::show(ui, app),
