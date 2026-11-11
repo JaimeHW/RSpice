@@ -29,7 +29,6 @@ use lifecycle::*;
 use plan_issue_wording::*;
 use workflows::*;
 
-use page_excitations::SourceVerbIntent;
 pub(in crate::workbench) use pages::reads_foreign_answers;
 
 use std::collections::HashSet;
@@ -312,14 +311,9 @@ pub(in crate::workbench) fn prepare(cx: &mut Cx<'_, SimulateFeature>) {
     }
 }
 
-/// Draw the surface [`prepare`] readied. Returns the row verb the Excitations
-/// page raised, for the shell to run once the surface has drawn.
-pub(in crate::workbench) fn show(
-    ui: &mut Ui,
-    cx: &mut Cx<'_, SimulateFeature>,
-) -> Option<SourceVerbIntent> {
+/// Draw the surface [`prepare`] readied.
+pub(in crate::workbench) fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
     let t = Tokens::get(ui.ctx());
-    let mut verb = None;
     egui::Frame::new().fill(t.color.bg_app).show(ui, |ui| {
         // The track this surface is laid out in, with the scrollbar's gutter
         // withheld from it whether or not a bar is showing.
@@ -370,12 +364,11 @@ pub(in crate::workbench) fn show(
                         &participation,
                     );
                 } else {
-                    verb = pages::show(ui, cx, page);
+                    pages::show(ui, cx, page);
                 }
             });
         settle_surface_scroll(ui, cx.state, output.state.offset.y);
     });
-    verb
 }
 
 /// Keep the offset the surface's scroll ended on, moved by whatever the

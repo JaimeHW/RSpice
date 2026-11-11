@@ -59,6 +59,8 @@ struct Studio {
     controls: Vec<Control>,
     size: (f32, f32),
     shell: bool,
+    /// Whether the last pass asked for the next one straight away.
+    repaint_now: bool,
 }
 
 impl Studio {
@@ -99,6 +101,7 @@ impl Studio {
             controls: Vec::new(),
             size,
             shell,
+            repaint_now: false,
         };
         // Twice: the first pass builds the font set and the second lays out
         // against it, and a rectangle measured before the fonts exist is not
@@ -146,6 +149,10 @@ impl Studio {
                 }
             },
         );
+        self.repaint_now = output
+            .viewport_output
+            .get(&egui::ViewportId::ROOT)
+            .is_some_and(|viewport| viewport.repaint_delay.is_zero());
         self.controls = output
             .platform_output
             .accesskit_update
@@ -852,5 +859,105 @@ fn a_click_on_an_option_switch_authors_the_override_it_states() {
         authored.as_deref(),
         Some("off"),
         "the switch authored the setting it now shows; the plan's own is on"
+    );
+}
+
+// ------------------------------------------------------------- excitations
+
+/// A source row's re-adoption runs in the frame it is pressed, at the row, so
+/// the rows drawn after it in that frame already read the re-adopted design.
+/// The press asks for the next frame straight away, and that frame's row
+/// offers what the re-adopted instance offers: its definition and its editor,
+/// and no re-adoption, because it holds the library's revision again.
+///
+/// This harness draws the Simulate surface on every pass; in the product the
+/// reveal that comes with the re-adoption takes the reader to the design.
+#[test]
+fn a_readoption_is_drawn_by_the_frame_after_the_press() {
+    use crate::state::stimulus_library::definition::StimulusDefinition;
+    use crate::state::stimulus_library::draft::DefinitionDraft;
+    use crate::state::stimulus_library::now_unix_ms;
+    use crate::state::{ComponentType, Point};
+
+    let mut app = RSpiceApp::test_instance();
+    let model = &mut app.state.model;
+    let mut definition =
+        StimulusDefinition::new("sensor_drive", ComponentType::VoltageSourceSin, now_unix_ms)
+            .expect("a definition");
+    definition.value = "0".to_owned();
+    definition.params = "va=1 freq=1k".to_owned();
+    let id = model
+        .schematic
+        .add_component(ComponentType::VoltageSourceSin, Point::new(400, 400));
+    let source = model
+        .schematic
+        .document_mut_for_test()
+        .components
+        .iter_mut()
+        .find(|component| component.id == id)
+        .expect("the source just placed");
+    source.name = "VSENSE".to_owned();
+    definition.adopt_onto(source).expect("adopt");
+    let library = &mut model.workspace.content.stimulus_library;
+    library.insert(definition).expect("insert");
+    let mut draft = DefinitionDraft::new(library.get("sensor_drive").expect("held").clone());
+    draft.edit(|working| working.params = "va=1 freq=2k".to_owned());
+    library.apply(&mut draft, now_unix_ms);
+
+    let mut studio = Studio::open(app, SimulationPage::Excitations, DESKTOP);
+    // The row and its Actions button both announce the reference; the button
+    // is the narrower of the two, inside the row's last column.
+    let press_actions = |studio: &mut Studio| {
+        let at = studio
+            .controls
+            .iter()
+            .filter(|(label, _)| label == "VSENSE")
+            .map(|(_, rect)| *rect)
+            .min_by(|a, b| a.width().total_cmp(&b.width()))
+            .expect("the source's row and its Actions button")
+            .center();
+        studio.pass(click_events(at));
+        studio.pass(Vec::new());
+    };
+    press_actions(&mut studio);
+    let at = studio
+        .controls
+        .iter()
+        .find(|(label, _)| label == "Re-adopt r2")
+        .map(|(_, rect)| rect.center())
+        .expect("a source behind its definition offers its re-adoption");
+
+    studio.pass(click_events(at));
+
+    assert!(
+        studio.repaint_now,
+        "the press that re-adopted asks for the next frame"
+    );
+    let params = studio
+        .app
+        .state
+        .model
+        .schematic
+        .document()
+        .components
+        .iter()
+        .find(|component| component.id == id)
+        .map(|component| component.params.clone())
+        .expect("the source");
+    assert!(params.contains("freq=2k"), "{params}");
+    assert_eq!(
+        studio.app.state.prompt_text(),
+        Some("VSENSE re-adopted sensor_drive r2; its card is the library's again.")
+    );
+
+    studio.pass(Vec::new());
+    press_actions(&mut studio);
+    assert!(
+        studio.announces(|announced| announced == "Open in Stimulus Library"),
+        "the next frame's row still offers the definition it adopted"
+    );
+    assert!(
+        !studio.announces(|announced| announced.starts_with("Re-adopt")),
+        "the next frame's row holds the library's revision, so it offers no re-adoption"
     );
 }

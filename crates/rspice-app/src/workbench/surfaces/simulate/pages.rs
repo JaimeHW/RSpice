@@ -18,7 +18,6 @@ use crate::workbench::simulate::commands::SimulateCommand;
 use rspice_app_runs::workbench::slots::runs::RunsState;
 
 use super::super::super::design_system::{heading, workspace_title_row};
-use super::page_excitations::SourceVerbIntent;
 use super::page_kit::setup_page;
 
 /// Horizontal padding inside the preflight chip, and the gap it keeps from
@@ -43,14 +42,7 @@ pub(in crate::workbench) fn reads_foreign_answers(model: &Model, page: Simulatio
 
 /// Render the selected setup page. The analyses route is handled by the
 /// surface itself and never reaches here.
-///
-/// Returns the row verb the Excitations page raised, for the caller to run
-/// once the page has drawn.
-pub(super) fn show(
-    ui: &mut Ui,
-    cx: &mut Cx<'_, SimulateFeature>,
-    page: SimulationPage,
-) -> Option<SourceVerbIntent> {
+pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, page: SimulationPage) {
     // Resolving either list walks the design's nets, so only the page that
     // shows them pays for it.
     let (excitations, rf_ports) = if page == SimulationPage::Excitations {
@@ -59,11 +51,10 @@ pub(super) fn show(
         (Vec::new(), Vec::new())
     };
     workspace_title_row(ui, |ui| page_heading(ui, cx, page));
-    let mut verb = None;
     setup_page(ui, |ui| match page {
         SimulationPage::Analyses => {}
         SimulationPage::Excitations => {
-            verb = super::page_excitations::show(ui, cx, &excitations, &rf_ports);
+            super::page_excitations::show(ui, cx, &excitations, &rf_ports);
         }
         SimulationPage::Variables => super::page_variables::show(ui, cx),
         SimulationPage::Outputs => super::page_outputs::show(ui, cx),
@@ -73,7 +64,6 @@ pub(super) fn show(
         SimulationPage::Solver => super::page_solver::show(ui, cx),
         SimulationPage::Save => super::page_save::show(ui, cx),
     });
-    verb
 }
 
 /// What the run is driven by: every excitation the configured design places,

@@ -28,7 +28,7 @@ use crate::simulation::placed_sources::{
 };
 use crate::state::InstancePath;
 use crate::state::stimulus_library::provenance::ProvenanceState;
-use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::app_state::Model;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::framework::requests::{OpenPropertyEditor, OpenStimulusDefinition};
 use crate::workbench::simulate::SimulateFeature;
@@ -89,13 +89,12 @@ pub(super) fn show(
     cx: &mut Cx<'_, SimulateFeature>,
     sources: &[PlacedSource],
     ports: &[PlacedRfPort],
-) -> Option<SourceVerbIntent> {
+) {
     // Readership is run-scoped: a disabled instance is not in the run this plan
     // would dispatch, so a source only it names is one the run drives without
     // reading.
     let unread = sources.iter().filter(|source| !source.is_read()).count();
     let verdict = verdict(sources, ports);
-    let mut taken = None;
 
     card(
         ui,
@@ -123,13 +122,12 @@ pub(super) fn show(
                             SourceVerb::OpenDefinition(definition) => {
                                 cx.wb.outbox.push(OpenStimulusDefinition(definition));
                             }
-                            SourceVerb::Readopt(definition) => {
-                                taken = Some(SourceVerbIntent {
-                                    component_id: source.component_id,
-                                    occurrence: source.occurrence.clone(),
-                                    definition,
-                                });
-                            }
+                            SourceVerb::Readopt(definition) => readopt(
+                                cx,
+                                source.occurrence.as_ref(),
+                                source.component_id,
+                                &definition,
+                            ),
                         }
                     } else if row.clicked() {
                         reveal(cx, source.occurrence.as_ref(), source.component_id);
@@ -161,7 +159,6 @@ pub(super) fn show(
             }
         },
     );
-    taken
 }
 
 /// What the card's chip says this design's excitations amount to.
@@ -443,37 +440,6 @@ fn source_row_verbs(
     verbs.get(taken).cloned()
 }
 
-/// A re-adoption a row raised, for the page's caller to run once the page
-/// has drawn.
-///
-/// It is a transaction against the whole design, so it is handed back rather
-/// than run from inside the table. The row's other verbs open the property
-/// editor or the Stimulus Library, which the shell answers as requests.
-pub(in crate::workbench) struct SourceVerbIntent {
-    component_id: u64,
-    occurrence: Option<InstancePath>,
-    definition: String,
-}
-
-impl SourceVerbIntent {
-    /// Show the instance in the design and re-adopt its definition.
-    pub(in crate::workbench) fn apply(self, state: &mut AppState) {
-        let Self {
-            component_id,
-            occurrence,
-            definition,
-        } = self;
-        crate::workbench::app::actions::reveal::placed_instance(
-            state,
-            occurrence.as_ref(),
-            component_id,
-        );
-        match state.model.readopt_stimulus(component_id, &definition) {
-            Ok(line) | Err(line) => state.prompt(line),
-        }
-    }
-}
-
 /// One RF port's row, in the columns the source rows above it use.
 ///
 /// The unread cell is stated rather than flagged. A port no `.sp` run indexes
@@ -641,6 +607,22 @@ fn reveal(cx: &mut Cx<'_, SimulateFeature>, occurrence: Option<&InstancePath>, c
         occurrence,
         component_id,
     );
+}
+
+/// Show the instance in the design and re-adopt `definition` onto it, as the
+/// model's one re-adoption transaction, with its sentence on the status bar.
+/// The row's other verbs open the property editor or the Stimulus Library,
+/// which the shell answers as requests.
+fn readopt(
+    cx: &mut Cx<'_, SimulateFeature>,
+    occurrence: Option<&InstancePath>,
+    component_id: u64,
+    definition: &str,
+) {
+    reveal(cx, occurrence, component_id);
+    match cx.model.readopt_stimulus(component_id, definition) {
+        Ok(line) | Err(line) => cx.wb.prompt(line),
+    }
 }
 
 #[cfg(test)]
