@@ -17,9 +17,7 @@ use crate::workbench::app_state::Model;
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::framework::ports::{ModelGateFact, QualificationGate};
-use crate::workbench::simulate::{
-    SimulateFeature, invalidate_preflight, record_plan_receipt, record_plan_refusal,
-};
+use crate::workbench::simulate::{SimulateFeature, invalidate_preflight, record_plan_refusal};
 
 use super::page_kit::{
     RowPress, Tone, card, card_body, card_head_row, card_note, card_row, card_with_head, cell_ui,
@@ -527,7 +525,7 @@ fn apply_model_binding_action(cx: &mut Cx<'_, SimulateFeature>, action: ModelBin
         Ok(receipt) => {
             cx.model.sim_setup = candidate;
             invalidate_preflight(cx);
-            record_plan_receipt(cx, receipt.status_line());
+            cx.model.record_plan_receipt(receipt.status_line());
         }
         Err(error) => record_binding_refusal(cx, &error.to_string()),
     }

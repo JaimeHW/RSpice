@@ -30,9 +30,7 @@ use crate::workbench::app_state::run_preflight::simulation_run_block_reason;
 use crate::workbench::app_state::{Model, SlotFacts};
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::framework::ports::ResultsPort;
-use crate::workbench::simulate::{
-    SimulateFeature, invalidate_preflight, record_plan_receipt, run_host,
-};
+use crate::workbench::simulate::{SimulateFeature, invalidate_preflight, run_host};
 use crate::workbench::slots::SimulateState;
 use rspice_app_runs::workbench::slots::runs::request_run_set;
 

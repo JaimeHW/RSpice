@@ -341,10 +341,8 @@ pub(super) fn commit_run_at(
     match result {
         Ok(receipt) => {
             super::lifecycle::refresh_analysis_projections(cx);
-            crate::workbench::simulate::record_plan_receipt(
-                cx,
-                super::lifecycle::receipt_line(&receipt),
-            );
+            cx.model
+                .record_plan_receipt(super::lifecycle::receipt_line(&receipt));
             Ok(())
         }
         Err(error) => {

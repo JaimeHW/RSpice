@@ -390,17 +390,14 @@ pub(super) fn commit_tuning_and_run(cx: &mut Cx<'_, SimulateFeature>) -> Result<
     request_run_set(cx.model, cx.runs);
     sync_tuning_session(cx);
     let candidate_count = variable_change_count + binding_change_count;
-    record_plan_receipt(
-        cx,
-        format!(
-            "Tuning receipt #{} · revision {} to {} · {} candidate{} queued.",
-            receipt.sequence(),
-            receipt.source_revision().get(),
-            receipt.committed_revision().get(),
-            candidate_count,
-            if candidate_count == 1 { "" } else { "s" }
-        ),
-    );
+    cx.model.record_plan_receipt(format!(
+        "Tuning receipt #{} · revision {} to {} · {} candidate{} queued.",
+        receipt.sequence(),
+        receipt.source_revision().get(),
+        receipt.committed_revision().get(),
+        candidate_count,
+        if candidate_count == 1 { "" } else { "s" }
+    ));
     Ok(())
 }
 

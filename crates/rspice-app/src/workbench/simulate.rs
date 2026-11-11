@@ -197,16 +197,6 @@ pub(in crate::workbench) fn invalidate_preflight(cx: &mut Cx<'_, SimulateFeature
     );
 }
 
-/// [`Model::record_plan_receipt`] in the feature's context.
-///
-/// [`Model::record_plan_receipt`]: crate::workbench::app_state::Model::record_plan_receipt
-pub(in crate::workbench) fn record_plan_receipt(
-    cx: &mut Cx<'_, SimulateFeature>,
-    message: impl Into<String>,
-) {
-    cx.model.record_plan_receipt(message);
-}
-
 /// [`Model::record_plan_refusal`] in the feature's context, answering the
 /// gesture on the status bar when the outcome is new.
 ///

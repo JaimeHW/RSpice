@@ -11,7 +11,7 @@ use super::*;
 use crate::simulation::plan::AnalysisPlanError;
 use crate::workbench::app::{PlanRemovalConsequence, PlanRemovalTarget, PlanRemovalTone};
 use crate::workbench::framework::feature::Cx;
-use crate::workbench::simulate::{SimulateFeature, record_plan_receipt, record_plan_refusal};
+use crate::workbench::simulate::{SimulateFeature, record_plan_refusal};
 
 pub(super) fn resolve_active_analysis_instance(
     model: &Model,
@@ -315,10 +315,7 @@ pub(super) fn insert_analysis_instance(
             refresh_analysis_projections(cx);
             cx.state.active_analysis_instance = Some(id);
             match bind_receipt {
-                None => crate::workbench::simulate::record_plan_receipt(
-                    cx,
-                    receipt_line(&insert_receipt),
-                ),
+                None => cx.model.record_plan_receipt(receipt_line(&insert_receipt)),
                 Some(Ok(bind_receipt)) => {
                     let issue = cx
                         .model
@@ -335,16 +332,13 @@ pub(super) fn insert_analysis_instance(
                         || "Dependencies are explicitly bound.".to_owned(),
                         |issue| format!("Preflight remains blocked: {issue}"),
                     );
-                    crate::workbench::simulate::record_plan_receipt(
-                        cx,
-                        format!(
-                            "Receipts #{} and #{} committed for instance {id}. {} {} {readiness}",
-                            insert_receipt.sequence(),
-                            bind_receipt.sequence(),
-                            insert_receipt.detail(),
-                            bind_receipt.detail(),
-                        ),
-                    );
+                    cx.model.record_plan_receipt(format!(
+                        "Receipts #{} and #{} committed for instance {id}. {} {} {readiness}",
+                        insert_receipt.sequence(),
+                        bind_receipt.sequence(),
+                        insert_receipt.detail(),
+                        bind_receipt.detail(),
+                    ));
                 }
                 Some(Err(error)) => {
                     crate::workbench::simulate::record_plan_refusal(
@@ -451,18 +445,15 @@ pub(super) fn apply_analysis_action(
             match result {
                 Ok((repair, receipt)) => {
                     refresh_analysis_projections(cx);
-                    record_plan_receipt(
-                        cx,
-                        format!(
-                            "Receipt #{} committed for instance {id}. Prerequisites repaired: {} added, {} enabled, {} moved earlier, {} bindings updated, and {} invalid bindings removed.",
-                            receipt.sequence(),
-                            repair.inserted().len(),
-                            repair.enabled().len(),
-                            repair.moved().len(),
-                            repair.bound().len(),
-                            repair.removed().len(),
-                        ),
-                    );
+                    cx.model.record_plan_receipt(format!(
+                        "Receipt #{} committed for instance {id}. Prerequisites repaired: {} added, {} enabled, {} moved earlier, {} bindings updated, and {} invalid bindings removed.",
+                        receipt.sequence(),
+                        repair.inserted().len(),
+                        repair.enabled().len(),
+                        repair.moved().len(),
+                        repair.bound().len(),
+                        repair.removed().len(),
+                    ));
                 }
                 Err(error) => record_failure(cx, "Repair prerequisites", &error),
             }
@@ -476,12 +467,9 @@ pub(super) fn apply_analysis_action(
                 .and_then(|plan| prepared_autonomous_pss_id(plan, id));
             if let Some(pss_id) = existing {
                 cx.state.active_analysis_instance = Some(pss_id);
-                record_plan_receipt(
-                    cx,
-                    format!(
-                        "Selected the existing autonomous PSS {pss_id} for phase-noise analysis {id}. Complete its oscillator node and remaining settings, enable it, then run dependency repair to link it without creating a duplicate."
-                    ),
-                );
+                cx.model.record_plan_receipt(format!(
+                    "Selected the existing autonomous PSS {pss_id} for phase-noise analysis {id}. Complete its oscillator node and remaining settings, enable it, then run dependency repair to link it without creating a duplicate."
+                ));
                 return;
             }
             let pss = PssDialogState {
@@ -507,13 +495,10 @@ pub(super) fn apply_analysis_action(
                 Ok((pss_id, receipt)) => {
                     refresh_analysis_projections(cx);
                     cx.state.active_analysis_instance = Some(pss_id);
-                    record_plan_receipt(
-                        cx,
-                        format!(
-                            "Receipt #{} committed. Added autonomous PSS {pss_id} and its own prerequisites ahead of phase-noise analysis {id}. Enter the oscillator node, review the remaining PSS settings, then enable it; dependency repair will reuse it, and runs stay blocked until it is complete.",
-                            receipt.sequence(),
-                        ),
-                    );
+                    cx.model.record_plan_receipt(format!(
+                        "Receipt #{} committed. Added autonomous PSS {pss_id} and its own prerequisites ahead of phase-noise analysis {id}. Enter the oscillator node, review the remaining PSS settings, then enable it; dependency repair will reuse it, and runs stay blocked until it is complete.",
+                        receipt.sequence(),
+                    ));
                 }
                 Err(error) => record_failure(cx, "Configure PSS prerequisite", &error),
             }
@@ -575,12 +560,9 @@ pub(super) fn validate_analysis_instance(cx: &mut Cx<'_, SimulateFeature>, id: A
 
     match result {
         Ok(name) => {
-            record_plan_receipt(
-                cx,
-                format!(
-                    "Validation passed for {name} ({id}). Dependency identity, order, and enabled state are valid for this instance."
-                ),
-            );
+            cx.model.record_plan_receipt(format!(
+                "Validation passed for {name} ({id}). Dependency identity, order, and enabled state are valid for this instance."
+            ));
         }
         Err(error) => record_failure(cx, "Validate", &error),
     }
@@ -822,7 +804,7 @@ pub(super) fn refresh_analysis_projections(cx: &mut Cx<'_, SimulateFeature>) {
 /// take the simulate feature's context rather than the application. A handler
 /// that took the whole app could mutate every subsystem to announce an outcome.
 pub(super) fn record_receipt(cx: &mut Cx<'_, SimulateFeature>, receipt: &AnalysisLifecycleReceipt) {
-    record_plan_receipt(cx, receipt_line(receipt));
+    cx.model.record_plan_receipt(receipt_line(receipt));
 }
 
 pub(super) fn record_failure(cx: &mut Cx<'_, SimulateFeature>, action: &str, error: &str) {

@@ -182,7 +182,8 @@ fn commit_clear_analysis_name(
     super::lifecycle::refresh_analysis_projections(cx);
     cx.state.active_analysis_instance = Some(draft.instance_id);
     let message = receipt.detail().to_owned();
-    crate::workbench::simulate::record_plan_receipt(cx, super::lifecycle::receipt_line(&receipt));
+    cx.model
+        .record_plan_receipt(super::lifecycle::receipt_line(&receipt));
     Ok(message)
 }
 
@@ -204,7 +205,8 @@ fn commit_rename_analysis(
     // change from quietly moving selection to a position instead.
     cx.state.active_analysis_instance = Some(draft.instance_id);
     let message = receipt.detail().to_owned();
-    crate::workbench::simulate::record_plan_receipt(cx, super::lifecycle::receipt_line(&receipt));
+    cx.model
+        .record_plan_receipt(super::lifecycle::receipt_line(&receipt));
     Ok(message)
 }
 
@@ -1020,15 +1022,12 @@ pub(super) fn commit_clone_plan(
     cx.model.workspace = workspace;
     cx.state.active_analysis_instance = first_instance;
     crate::workbench::simulate::invalidate_preflight(cx);
-    crate::workbench::simulate::record_plan_receipt(
-        cx,
-        format!(
-            "Cloned plan {} from {} at revision {}; result manifests were not duplicated.",
-            outcome.cloned_plan_id,
-            outcome.source_plan_id,
-            outcome.source_revision.get()
-        ),
-    );
+    cx.model.record_plan_receipt(format!(
+        "Cloned plan {} from {} at revision {}; result manifests were not duplicated.",
+        outcome.cloned_plan_id,
+        outcome.source_plan_id,
+        outcome.source_revision.get()
+    ));
     Ok(format!(
         "Created and activated '{}' with independent plan identity {}.",
         cx.model.sim_setup.active_plan_name(),
@@ -1197,7 +1196,7 @@ pub(super) fn commit_design_variable(
     cx.model.sim_setup = setup;
     cx.model.workspace = workspace;
     crate::workbench::simulate::invalidate_preflight(cx);
-    crate::workbench::simulate::record_plan_receipt(cx, receipt.status_line());
+    cx.model.record_plan_receipt(receipt.status_line());
     Ok(format!(
         "Created design variable {variable_name} in plan {}.",
         cx.model.sim_setup.active_plan_name()
@@ -1288,7 +1287,7 @@ pub(super) fn commit_saved_output(
     cx.model.sim_setup = setup;
     cx.model.workspace = workspace;
     crate::workbench::simulate::invalidate_preflight(cx);
-    crate::workbench::simulate::record_plan_receipt(cx, receipt.status_line());
+    cx.model.record_plan_receipt(receipt.status_line());
     Ok(format!(
         "Added saved output {output_name} to plan {}.",
         cx.model.sim_setup.active_plan_name()
@@ -1341,7 +1340,7 @@ pub(super) fn commit_plan_change(
             cx.model.workspace = workspace;
             cx.model.sim_setup = setup;
             crate::workbench::simulate::invalidate_preflight(cx);
-            crate::workbench::simulate::record_plan_receipt(cx, receipt.status_line());
+            cx.model.record_plan_receipt(receipt.status_line());
             true
         }
         Err(error) => {

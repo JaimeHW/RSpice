@@ -49,9 +49,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, mono_input, select, select_mono_with_response};
 use crate::workbench::app_state::{Model, SimSetupState};
 use crate::workbench::framework::feature::Cx;
-use crate::workbench::simulate::{
-    SimulateFeature, invalidate_preflight, record_plan_receipt, record_plan_refusal,
-};
+use crate::workbench::simulate::{SimulateFeature, invalidate_preflight, record_plan_refusal};
 
 use super::advanced_options::REVEAL_ACTION;
 use super::page_kit::{
@@ -451,7 +449,7 @@ pub(super) fn commit_options_transaction(
         .map_err(|error| error.to_string())?;
     cx.model.sim_setup = candidate;
     invalidate_preflight(cx);
-    record_plan_receipt(cx, receipt.status_line());
+    cx.model.record_plan_receipt(receipt.status_line());
     Ok(true)
 }
 

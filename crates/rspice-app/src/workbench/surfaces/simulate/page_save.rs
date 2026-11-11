@@ -16,7 +16,7 @@ use crate::state::{
 };
 use crate::workbench::app_state::Model;
 use crate::workbench::framework::feature::Cx;
-use crate::workbench::simulate::{SimulateFeature, record_plan_receipt, record_plan_refusal};
+use crate::workbench::simulate::{SimulateFeature, record_plan_refusal};
 use rspice_simulation::capture_ledger::CaptureLedger;
 use rspice_simulation::capture_ledger::CaptureWorkload;
 pub(super) use rspice_simulation_contract::run_set::format_bytes;
@@ -650,7 +650,7 @@ fn commit_save_policy(
         .commit_active_plan_configuration_change(detail)
     {
         Ok(receipt) => {
-            record_plan_receipt(cx, receipt.status_line());
+            cx.model.record_plan_receipt(receipt.status_line());
             cx.runs.preflight.invalidate();
             true
         }

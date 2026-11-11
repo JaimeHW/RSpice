@@ -17,9 +17,7 @@ use crate::ui::widgets::{Button, IconButton, mono_input, select};
 use crate::workbench::app_state::Model;
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::feature::Cx;
-use crate::workbench::simulate::{
-    SimulateFeature, invalidate_preflight, record_plan_receipt, record_plan_refusal,
-};
+use crate::workbench::simulate::{SimulateFeature, invalidate_preflight, record_plan_refusal};
 use crate::workbench::state::RunSetBudgetDrafts;
 use rspice_simulation_contract::run_set::{
     self, InvalidValuePolicy, RunSetAction, RunSetAdaptivePolicy, RunSetBudgets,
@@ -1896,7 +1894,7 @@ fn commit(cx: &mut Cx<'_, SimulateFeature>, action: RunSetAction) {
             ),
             None => transaction.receipt.status_line(),
         };
-        record_plan_receipt(cx, line);
+        cx.model.record_plan_receipt(line);
         return;
     }
 
@@ -1934,7 +1932,7 @@ fn commit(cx: &mut Cx<'_, SimulateFeature>, action: RunSetAction) {
                     pruned.join("; ")
                 ));
             }
-            record_plan_receipt(cx, line);
+            cx.model.record_plan_receipt(line);
         }
         Err(error) => {
             record_plan_refusal(cx, error.to_string());

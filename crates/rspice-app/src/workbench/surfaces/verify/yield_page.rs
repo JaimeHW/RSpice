@@ -622,7 +622,7 @@ pub(super) fn yield_page(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
                 match applied {
                     Ok(receipt) => {
                         invalidate_plan_bound_preflight(cx);
-                        record_plan_receipt(cx, receipt);
+                        cx.model.record_plan_receipt(receipt);
                         record_action(&mut cx.state.verification, Ok(()));
                         ui.ctx().request_repaint();
                     }
