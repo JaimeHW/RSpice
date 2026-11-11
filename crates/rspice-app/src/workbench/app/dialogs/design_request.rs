@@ -3,6 +3,7 @@
 use crate::workbench::app::dialogs::hierarchy::descend::{
     DescendHierarchy, answer_descend_hierarchy,
 };
+use crate::workbench::app::open_property_editor;
 use crate::workbench::app_state::AppState;
 use crate::workbench::framework::requests::{Drain, Request};
 
@@ -14,6 +15,9 @@ use crate::workbench::framework::requests::{Drain, Request};
 pub(crate) enum DesignRequest {
     /// A checked Descend into hierarchy choice.
     Descend(DescendHierarchy),
+    /// Open the component editor again on one instance, whose card a
+    /// re-adopted stimulus has just replaced.
+    ReopenPropertyEditor(u64),
 }
 
 impl Request for DesignRequest {
@@ -29,5 +33,8 @@ impl Request for DesignRequest {
 pub(crate) fn answer_design_request(state: &mut AppState, request: DesignRequest) {
     match request {
         DesignRequest::Descend(choice) => answer_descend_hierarchy(state, choice),
+        DesignRequest::ReopenPropertyEditor(component_id) => {
+            open_property_editor(state, component_id);
+        }
     }
 }

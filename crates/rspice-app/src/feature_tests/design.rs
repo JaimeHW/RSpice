@@ -13,6 +13,8 @@ use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::state::Workspace;
 
+use super::replay::Replay;
+
 /// A whole application on the Design workspace of an open project.
 fn design_app() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
@@ -404,4 +406,76 @@ fn create_model_bound_symbol_opens_and_draws_in_the_frame() {
     crate::workbench::app::open_create_model_bound_symbol_dialog(&mut app.state);
     assert!(draws_dialog(&mut app, "Create model-bound symbol"));
     assert!(app.state.design.create_model_bound_symbol.open);
+}
+
+#[test]
+fn the_component_editor_opens_and_draws_in_the_frame() {
+    let mut app = design_app();
+    let id = resistor(&mut app, Point::new(0, 0));
+    let name = app
+        .state
+        .model
+        .schematic
+        .document()
+        .components
+        .iter()
+        .find(|component| component.id == id)
+        .expect("the placed resistor")
+        .name
+        .clone();
+    crate::workbench::app::open_property_editor(&mut app.state, id);
+    assert!(draws_dialog(&mut app, &format!("{name} properties")));
+    assert!(app.state.design.tabbed_property_dialog.open);
+}
+
+/// Re-adopting a stimulus from the component editor reopens the editor on
+/// the instance's new card in the frame the reader chose it, and the status
+/// bar says so.
+#[test]
+fn a_readoption_reopens_the_editor_in_the_frame_it_is_chosen() {
+    use crate::state::stimulus_library::definition::StimulusDefinition;
+    use crate::state::stimulus_library::draft::DefinitionDraft;
+    use crate::state::stimulus_library::now_unix_ms;
+
+    let mut replay = Replay::of(RSpiceApp::test_instance());
+    replay.app.state.workbench.activate(Workspace::Design);
+    let model = &mut replay.app.state.model;
+    let mut definition =
+        StimulusDefinition::new("sensor_drive", ComponentType::VoltageSourceSin, now_unix_ms)
+            .expect("a definition");
+    definition.value = "0".to_owned();
+    definition.params = "va=1 freq=1k".to_owned();
+    let mut source = Component::new(7, ComponentType::VoltageSourceSin, Point::origin());
+    source.name = "V1".to_owned();
+    definition.adopt_onto(&mut source).expect("adopt");
+    let library = &mut model.workspace.content.stimulus_library;
+    library.insert(definition).expect("insert");
+    let mut draft = DefinitionDraft::new(library.get("sensor_drive").expect("held").clone());
+    draft.edit(|working| working.params = "va=1 freq=2k".to_owned());
+    library.apply(&mut draft, now_unix_ms);
+    model
+        .schematic
+        .document_mut_for_test()
+        .components
+        .push(source);
+    crate::workbench::app::open_property_editor(&mut replay.app.state, 7);
+
+    replay.click("Re-adopt r2", Role::Button);
+
+    let state = &replay.app.state;
+    let source = state
+        .model
+        .schematic
+        .document()
+        .components
+        .iter()
+        .find(|component| component.id == 7)
+        .expect("the source");
+    assert!(source.params.contains("freq=2k"), "{}", source.params);
+    assert!(state.design.tabbed_property_dialog.open);
+    assert_eq!(state.design.tabbed_property_dialog.component_id, Some(7));
+    assert_eq!(
+        state.prompt_text(),
+        Some("V1 re-adopted sensor_drive r2; its card is the library's again.")
+    );
 }

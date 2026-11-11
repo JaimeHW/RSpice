@@ -6,270 +6,270 @@
 
 use std::collections::HashMap;
 
-use crate::properties::{ComponentPropertyContext, render_tabbed_property_dialog};
-use crate::state::{Component, ComponentType, PropertySheet, PropertyValue};
-use crate::workbench::app::dialogs::stimulus_link::{
-    StimulusLinkMode, commit_readoption, open_stimulus_definition, open_stimulus_link,
+use crate::properties::{
+    ComponentPropertyContext, PropertyEditorSchema, TabbedPropertyDialogState,
+    render_tabbed_property_dialog,
 };
-use crate::workbench::app_state::AppState;
+use crate::state::{Component, ComponentType, PropertySheet, PropertyValue};
+use crate::workbench::app::actions::workspace::sync_active_schematic;
+use crate::workbench::app::dialogs::design_request::DesignRequest;
+use crate::workbench::app::dialogs::stimulus_link::{
+    StimulusLinkDialogState, StimulusLinkMode, commit_readoption, open_stimulus_link,
+    show_stimulus_definition,
+};
+use crate::workbench::app_state::Model;
+use crate::workbench::state::WorkbenchSession;
 use rspice_schematic_editor::component_properties::{
     ComponentEditorContext, ComponentPropertyDialogResult, StimulusEditorContext,
 };
 
-/// Render the floating schematic component editor.
-/// Call this from the main app update loop
-pub fn render_property_dialog(
-    ctx: &egui::Context,
-    state: &mut AppState,
-) -> ComponentPropertyDialogResult {
-    if state.design.tabbed_property_dialog.open {
-        state.design.tabbed_property_dialog.session_error = component_property_session_error(state);
-        refresh_source_contract_advisories(state);
-    }
-    let quantity_policy = state.model.preferences.quantity_presentation_policy();
-    let number_locale = state.workbench.number_locale;
-    state.design.tabbed_property_dialog.draft.standard_series =
-        state.model.workspace.content.standard_value_series;
-    let editor_context = component_editor_context(state);
-    let result = render_tabbed_property_dialog(
-        ctx,
-        &mut state.design.tabbed_property_dialog,
-        &editor_context,
-        &state.design.property_registry,
-        &state.model.model_library_manager,
-        quantity_policy,
-        number_locale,
-    );
+/// What the schematic component editor draws over and changes: its draft,
+/// the property sheets, the stimulus link it hands an instance to, the
+/// definition it shows in the Stimulus Library, the model and the session.
+pub(in crate::workbench) struct PropertyDialog<'a> {
+    pub(in crate::workbench) dialog: &'a mut TabbedPropertyDialogState,
+    pub(in crate::workbench) registry: &'a mut PropertyEditorSchema,
+    pub(in crate::workbench) stimulus_link: &'a mut StimulusLinkDialogState,
+    pub(in crate::workbench) selected_stimulus_definition: &'a mut Option<String>,
+    pub(in crate::workbench) model: &'a mut Model,
+    pub(in crate::workbench) workbench: &'a mut WorkbenchSession,
+}
 
-    // Handle dialog result - apply changes back to component
-    if matches!(
-        result,
-        ComponentPropertyDialogResult::Applied | ComponentPropertyDialogResult::AppliedAndClose
-    ) && let Some(comp_id) = state.design.tabbed_property_dialog.component_id
-    {
-        let close_after_commit = result == ComponentPropertyDialogResult::AppliedAndClose;
-        if let Some(error) = component_property_session_error(state) {
-            state.design.tabbed_property_dialog.open = true;
-            state.design.tabbed_property_dialog.session_error = Some(error);
-            return ComponentPropertyDialogResult::None;
+impl PropertyDialog<'_> {
+    /// Render the floating schematic component editor. A re-adopted stimulus
+    /// asks the shell to reopen the editor on the instance's new card.
+    pub(in crate::workbench) fn render_property_dialog(
+        &mut self,
+        ctx: &egui::Context,
+    ) -> ComponentPropertyDialogResult {
+        if self.dialog.open {
+            self.dialog.session_error = component_property_session_error(self.dialog, self.model);
+            refresh_source_contract_advisories(self.dialog, self.registry, self.model);
         }
-        let committed = state
-            .design
-            .tabbed_property_dialog
-            .draft
-            .take_prepared_commit();
-        let committed_names: Vec<String> = committed.keys().cloned().collect();
-        // The bridge serializes the full component property map. Merge the
-        // validated delta onto the last committed baseline so a rejected
-        // partial field cannot erase an unrelated existing parameter.
-        let mut values = state
-            .design
-            .tabbed_property_dialog
-            .draft
-            .original_values
-            .clone();
-        values.extend(committed);
-        let Some(component) = state
-            .model
-            .schematic
-            .document()
-            .components
-            .iter()
-            .find(|c| c.id == comp_id)
-        else {
-            state.design.tabbed_property_dialog.open = true;
-            state.design.tabbed_property_dialog.session_error = Some(
-                "The selected component no longer exists. Close and reopen Object properties."
-                    .to_owned(),
-            );
-            return ComponentPropertyDialogResult::None;
-        };
-        let mut candidate = component.clone();
-        if let Err(error) = crate::properties::property_bridge::apply_properties_to_component(
-            &mut candidate,
-            &values,
-            &state.design.property_registry,
-        ) {
-            state.design.tabbed_property_dialog.open = true;
-            state.design.tabbed_property_dialog.draft.commit_error = Some(format!(
-                "The component was not changed: {error} Correct its Parameters text in the inspector."
-            ));
-            return ComponentPropertyDialogResult::None;
-        }
-        if let Err(error) = validate_component_identity(state, comp_id, &candidate) {
-            state.design.tabbed_property_dialog.open = true;
-            state
-                .design
-                .tabbed_property_dialog
-                .draft
-                .validation_errors
-                .insert("name".to_owned(), error);
-            state.design.tabbed_property_dialog.draft.commit_error =
-                Some("Correct the instance reference before applying.".to_owned());
-            return ComponentPropertyDialogResult::None;
-        }
-        if let Err(error) = validate_model_binding_authority(state, &candidate, &values) {
-            state.design.tabbed_property_dialog.open = true;
-            state.design.tabbed_property_dialog.draft.commit_error =
-                Some(format!("The model binding was not changed: {error}"));
-            return ComponentPropertyDialogResult::None;
-        }
-        let Some(property_sheet) = state.design.property_registry.get(candidate.kind) else {
-            state.design.tabbed_property_dialog.open = true;
-            state.design.tabbed_property_dialog.draft.commit_error = Some(
-                "The component was not changed because its property schema is unavailable."
-                    .to_owned(),
-            );
-            return ComponentPropertyDialogResult::None;
-        };
-        if let Err(error) = validate_component_contract(&candidate, &values, property_sheet) {
-            state.design.tabbed_property_dialog.open = true;
-            state.design.tabbed_property_dialog.draft.commit_error =
-                Some(format!("The component was not changed: {error}"));
-            return ComponentPropertyDialogResult::None;
-        }
-        if candidate.kind == crate::state::ComponentType::Port
-            && let Err(error) = state
-                .model
-                .schematic
-                .validate_edited_port_contract(comp_id, &candidate)
-        {
-            state.design.tabbed_property_dialog.open = true;
-            state.design.tabbed_property_dialog.draft.commit_error =
-                Some(format!("The interface contract was not changed: {error}."));
-            return ComponentPropertyDialogResult::None;
-        }
-        let changed_port_contract =
-            candidate.kind == crate::state::ComponentType::Port && &candidate != component;
-        let expected = component.clone();
-        if let Err(error) =
-            state
-                .model
-                .edit_component_transaction(&expected, candidate, "edit properties")
-        {
-            state.design.tabbed_property_dialog.open = true;
-            state.design.tabbed_property_dialog.draft.commit_error =
-                Some(format!("The component was not changed: {error}"));
-            return ComponentPropertyDialogResult::None;
-        }
-        if changed_port_contract {
-            state.sync_active_schematic_to_workspace();
-        }
+        let quantity_policy = self.model.preferences.quantity_presentation_policy();
+        let number_locale = self.workbench.number_locale;
+        self.dialog.draft.standard_series = self.model.workspace.content.standard_value_series;
+        let editor_context = component_editor_context(self.dialog, self.model);
+        let result = render_tabbed_property_dialog(
+            ctx,
+            self.dialog,
+            &editor_context,
+            self.registry,
+            &self.model.model_library_manager,
+            quantity_policy,
+            number_locale,
+        );
 
-        // The mockup primary closes after the exact transaction completes.
-        if close_after_commit {
-            state.design.tabbed_property_dialog.close();
-        } else if state.design.tabbed_property_dialog.open {
-            let component = state
+        // Handle dialog result - apply changes back to component
+        if matches!(
+            result,
+            ComponentPropertyDialogResult::Applied | ComponentPropertyDialogResult::AppliedAndClose
+        ) && let Some(comp_id) = self.dialog.component_id
+        {
+            let close_after_commit = result == ComponentPropertyDialogResult::AppliedAndClose;
+            if let Some(error) = component_property_session_error(self.dialog, self.model) {
+                self.dialog.open = true;
+                self.dialog.session_error = Some(error);
+                return ComponentPropertyDialogResult::None;
+            }
+            let committed = self.dialog.draft.take_prepared_commit();
+            let committed_names: Vec<String> = committed.keys().cloned().collect();
+            // The bridge serializes the full component property map. Merge the
+            // validated delta onto the last committed baseline so a rejected
+            // partial field cannot erase an unrelated existing parameter.
+            let mut values = self.dialog.draft.original_values.clone();
+            values.extend(committed);
+            let Some(component) = self
                 .model
                 .schematic
                 .document()
                 .components
                 .iter()
-                .find(|component| component.id == comp_id)
-                .expect("committed component retains its identity");
-            let values = crate::properties::property_bridge::collect_properties_from_component(
-                component,
-                &state.design.property_registry,
-            );
-            state.design.tabbed_property_dialog.component_baseline = Some(component.clone());
-            state.design.tabbed_property_dialog.component_name = Some(component.name.clone());
-            state.design.tabbed_property_dialog.source = Some(
-                crate::workbench::app::schematic_editor_request_source(state),
-            );
-            state
-                .design
-                .tabbed_property_dialog
-                .draft
-                .mark_fields_applied(committed_names);
-            state
-                .design
-                .tabbed_property_dialog
-                .draft
-                .rebase_applied_values(
+                .find(|c| c.id == comp_id)
+            else {
+                self.dialog.open = true;
+                self.dialog.session_error = Some(
+                    "The selected component no longer exists. Close and reopen Object properties."
+                        .to_owned(),
+                );
+                return ComponentPropertyDialogResult::None;
+            };
+            let mut candidate = component.clone();
+            if let Err(error) = crate::properties::property_bridge::apply_properties_to_component(
+                &mut candidate,
+                &values,
+                self.registry,
+            ) {
+                self.dialog.open = true;
+                self.dialog.draft.commit_error = Some(format!(
+                    "The component was not changed: {error} Correct its Parameters text in the inspector."
+                ));
+                return ComponentPropertyDialogResult::None;
+            }
+            if let Err(error) = validate_component_identity(self.model, comp_id, &candidate) {
+                self.dialog.open = true;
+                self.dialog
+                    .draft
+                    .validation_errors
+                    .insert("name".to_owned(), error);
+                self.dialog.draft.commit_error =
+                    Some("Correct the instance reference before applying.".to_owned());
+                return ComponentPropertyDialogResult::None;
+            }
+            if let Err(error) = validate_model_binding_authority(self.model, &candidate, &values) {
+                self.dialog.open = true;
+                self.dialog.draft.commit_error =
+                    Some(format!("The model binding was not changed: {error}"));
+                return ComponentPropertyDialogResult::None;
+            }
+            let Some(property_sheet) = self.registry.get(candidate.kind) else {
+                self.dialog.open = true;
+                self.dialog.draft.commit_error = Some(
+                    "The component was not changed because its property schema is unavailable."
+                        .to_owned(),
+                );
+                return ComponentPropertyDialogResult::None;
+            };
+            if let Err(error) = validate_component_contract(&candidate, &values, property_sheet) {
+                self.dialog.open = true;
+                self.dialog.draft.commit_error =
+                    Some(format!("The component was not changed: {error}"));
+                return ComponentPropertyDialogResult::None;
+            }
+            if candidate.kind == crate::state::ComponentType::Port
+                && let Err(error) = self
+                    .model
+                    .schematic
+                    .validate_edited_port_contract(comp_id, &candidate)
+            {
+                self.dialog.open = true;
+                self.dialog.draft.commit_error =
+                    Some(format!("The interface contract was not changed: {error}."));
+                return ComponentPropertyDialogResult::None;
+            }
+            let changed_port_contract =
+                candidate.kind == crate::state::ComponentType::Port && &candidate != component;
+            let expected = component.clone();
+            if let Err(error) =
+                self.model
+                    .edit_component_transaction(&expected, candidate, "edit properties")
+            {
+                self.dialog.open = true;
+                self.dialog.draft.commit_error =
+                    Some(format!("The component was not changed: {error}"));
+                return ComponentPropertyDialogResult::None;
+            }
+            if changed_port_contract {
+                sync_active_schematic(self.model, self.workbench);
+            }
+
+            // The mockup primary closes after the exact transaction completes.
+            if close_after_commit {
+                self.dialog.close();
+            } else if self.dialog.open {
+                let component = self
+                    .model
+                    .schematic
+                    .document()
+                    .components
+                    .iter()
+                    .find(|component| component.id == comp_id)
+                    .expect("committed component retains its identity");
+                let values = crate::properties::property_bridge::collect_properties_from_component(
+                    component,
+                    self.registry,
+                );
+                self.dialog.component_baseline = Some(component.clone());
+                self.dialog.component_name = Some(component.name.clone());
+                self.dialog.source = Some(crate::workbench::app::schematic_editor_request_source(
+                    &*self.model,
+                ));
+                self.dialog.draft.mark_fields_applied(committed_names);
+                self.dialog.draft.rebase_applied_values(
                     values,
-                    state
-                        .design
-                        .property_registry
-                        .get(component.kind)
-                        .expect("validated schema"),
+                    self.registry.get(component.kind).expect("validated schema"),
                     quantity_policy,
                     number_locale,
                 );
+            }
         }
-    }
 
-    match result {
-        ComponentPropertyDialogResult::AdoptStimulus
-        | ComponentPropertyDialogResult::ExtractStimulus => {
-            // The link transaction is about the instance on the sheet, not
-            // about this editor's draft, so the editor closes first: two modal
-            // surfaces over one component would let a reader apply one edit
-            // through each and see only the second.
-            let mode = if result == ComponentPropertyDialogResult::AdoptStimulus {
-                StimulusLinkMode::Adopt
-            } else {
-                StimulusLinkMode::Extract
-            };
-            if let Some(component_id) = state.design.tabbed_property_dialog.component_id {
-                state.design.tabbed_property_dialog.close();
-                if let Err(refusal) = open_stimulus_link(
-                    &mut state.design.stimulus_link,
-                    &state.model,
-                    component_id,
-                    mode,
-                ) {
-                    state.prompt(refusal);
-                }
-            }
-        }
-        ComponentPropertyDialogResult::OpenStimulusDefinition => {
-            let definition = editor_context
-                .editor
-                .stimulus
-                .as_ref()
-                .and_then(|stimulus| stimulus.definition.clone());
-            state.design.tabbed_property_dialog.close();
-            if let Some(definition) = definition {
-                open_stimulus_definition(state, &definition);
-            }
-        }
-        ComponentPropertyDialogResult::ReadoptStimulus => {
-            let definition = editor_context
-                .editor
-                .stimulus
-                .as_ref()
-                .and_then(|stimulus| stimulus.definition.clone());
-            if let (Some(component_id), Some(definition)) =
-                (state.design.tabbed_property_dialog.component_id, definition)
-            {
-                match commit_readoption(&mut state.model, component_id, &definition) {
-                    Ok(line) => {
-                        state.prompt(line);
-                        // Reopened rather than patched in place: the copy is a
-                        // whole new card, and the draft the reader was typing
-                        // into describes the one it replaced.
-                        state.design.tabbed_property_dialog.close();
-                        crate::workbench::app::open_property_editor(state, component_id);
-                    }
-                    Err(refusal) => {
-                        state.design.tabbed_property_dialog.draft.commit_error = Some(refusal);
+        match result {
+            ComponentPropertyDialogResult::AdoptStimulus
+            | ComponentPropertyDialogResult::ExtractStimulus => {
+                // The link transaction is about the instance on the sheet, not
+                // about this editor's draft, so the editor closes first: two modal
+                // surfaces over one component would let a reader apply one edit
+                // through each and see only the second.
+                let mode = if result == ComponentPropertyDialogResult::AdoptStimulus {
+                    StimulusLinkMode::Adopt
+                } else {
+                    StimulusLinkMode::Extract
+                };
+                if let Some(component_id) = self.dialog.component_id {
+                    self.dialog.close();
+                    if let Err(refusal) =
+                        open_stimulus_link(self.stimulus_link, self.model, component_id, mode)
+                    {
+                        self.workbench.prompt(refusal);
                     }
                 }
             }
+            ComponentPropertyDialogResult::OpenStimulusDefinition => {
+                let definition = editor_context
+                    .editor
+                    .stimulus
+                    .as_ref()
+                    .and_then(|stimulus| stimulus.definition.clone());
+                self.dialog.close();
+                if let Some(definition) = definition {
+                    show_stimulus_definition(
+                        self.selected_stimulus_definition,
+                        self.workbench,
+                        &definition,
+                    );
+                }
+            }
+            ComponentPropertyDialogResult::ReadoptStimulus => {
+                let definition = editor_context
+                    .editor
+                    .stimulus
+                    .as_ref()
+                    .and_then(|stimulus| stimulus.definition.clone());
+                if let (Some(component_id), Some(definition)) =
+                    (self.dialog.component_id, definition)
+                {
+                    match commit_readoption(self.model, component_id, &definition) {
+                        Ok(line) => {
+                            self.workbench.prompt(line);
+                            // Reopened rather than patched in place: the copy is a
+                            // whole new card, and the draft the reader was typing
+                            // into describes the one it replaced.
+                            self.dialog.close();
+                            // The shell reopens it straight after this step draws.
+                            self.workbench
+                                .outbox
+                                .push(DesignRequest::ReopenPropertyEditor(component_id));
+                        }
+                        Err(refusal) => {
+                            self.dialog.draft.commit_error = Some(refusal);
+                        }
+                    }
+                }
+            }
+            _ => {}
         }
-        _ => {}
-    }
 
-    if !state.design.tabbed_property_dialog.open {
-        state.design.property_registry.clear_cell_instance_sheet();
-    }
+        if !self.dialog.open {
+            self.registry.clear_cell_instance_sheet();
+        }
 
-    result
+        result
+    }
 }
 
 fn validate_model_binding_authority(
-    state: &AppState,
+    model: &Model,
     component: &Component,
     values: &HashMap<String, PropertyValue>,
 ) -> Result<(), String> {
@@ -291,8 +291,7 @@ fn validate_model_binding_authority(
         .map(|library| library.trim().to_owned())
         .filter(|library| !library.is_empty());
 
-    let provider_libraries = state
-        .model
+    let provider_libraries = model
         .model_library_manager
         .definition_providers(ModelConsumerScope::PrimitiveModel, &declared)
         .into_iter()
@@ -310,11 +309,10 @@ fn validate_model_binding_authority(
         };
     }
 
-    let effective = state
-        .model
+    let effective = model
         .model_library_manager
         .effective_plan_definition_provider(
-            &state.model.sim_setup.model_bindings,
+            &model.sim_setup.model_bindings,
             ModelConsumerScope::PrimitiveModel,
             &declared,
         )?
@@ -331,7 +329,7 @@ fn validate_model_binding_authority(
 }
 
 fn validate_component_identity(
-    state: &AppState,
+    model: &Model,
     component_id: u64,
     candidate: &Component,
 ) -> Result<(), String> {
@@ -339,8 +337,7 @@ fn validate_component_identity(
         candidate
             .validate_reference_designator(candidate.name.trim())
             .map_err(|error| format!("The instance reference was not changed: {error}"))?;
-        if state
-            .model
+        if model
             .schematic
             .document()
             .components
@@ -445,14 +442,15 @@ fn validate_component_contract(
 /// and that instance's parameter string, re-parsed against its property sheet.
 /// It reaches no other component and no net, and it runs only while a modal
 /// editor is open — which is why it is not keyed on a revision.
-fn refresh_source_contract_advisories(state: &mut AppState) {
-    let advisories = state
-        .design
-        .tabbed_property_dialog
+fn refresh_source_contract_advisories(
+    dialog: &mut TabbedPropertyDialogState,
+    registry: &PropertyEditorSchema,
+    model: &Model,
+) {
+    let advisories = dialog
         .component_id
         .and_then(|component_id| {
-            state
-                .model
+            model
                 .schematic
                 .document()
                 .components
@@ -460,11 +458,11 @@ fn refresh_source_contract_advisories(state: &mut AppState) {
                 .find(|component| component.id == component_id)
         })
         .and_then(|component| {
-            let sheet = state.design.property_registry.get(component.kind)?;
+            let sheet = registry.get(component.kind)?;
             Some(
                 crate::properties::property_bridge::component_source_contract(
                     component,
-                    &state.design.tabbed_property_dialog.draft.values,
+                    &dialog.draft.values,
                     sheet,
                 )
                 .into_iter()
@@ -473,7 +471,7 @@ fn refresh_source_contract_advisories(state: &mut AppState) {
             )
         })
         .unwrap_or_default();
-    state.design.tabbed_property_dialog.source_advisories = advisories;
+    dialog.source_advisories = advisories;
 }
 
 fn property_value_as_number(value: &PropertyValue) -> Option<f64> {
@@ -487,12 +485,14 @@ fn property_value_as_number(value: &PropertyValue) -> Option<f64> {
     })
 }
 
-fn component_editor_context(state: &AppState) -> ComponentPropertyContext {
-    let Some(component_id) = state.design.tabbed_property_dialog.component_id else {
+fn component_editor_context(
+    dialog: &TabbedPropertyDialogState,
+    model: &Model,
+) -> ComponentPropertyContext {
+    let Some(component_id) = dialog.component_id else {
         return ComponentPropertyContext::default();
     };
-    let Some(component) = state
-        .model
+    let Some(component) = model
         .schematic
         .document()
         .components
@@ -522,7 +522,7 @@ fn component_editor_context(state: &AppState) -> ComponentPropertyContext {
         library_cell,
         stimulus: None,
     };
-    let (stimulus, retained_table) = component_stimulus_context(state, component);
+    let (stimulus, retained_table) = component_stimulus_context(model, component);
     editor.stimulus = stimulus;
     ComponentPropertyContext {
         editor,
@@ -537,7 +537,7 @@ fn component_editor_context(state: &AppState) -> ComponentPropertyContext {
 /// copy of a lifecycle word is how a chip comes to disagree with the page that
 /// computed it.
 fn component_stimulus_context(
-    state: &AppState,
+    model: &Model,
     component: &Component,
 ) -> (
     Option<StimulusEditorContext>,
@@ -546,7 +546,7 @@ fn component_stimulus_context(
     if !crate::simulation::stimulus_realize::is_independent_source(component.kind) {
         return (None, None);
     }
-    let library = &state.model.workspace.content.stimulus_library;
+    let library = &model.workspace.content.stimulus_library;
     let definition = component
         .stimulus_provenance
         .as_ref()
@@ -592,9 +592,11 @@ fn model_is_component_value(kind: ComponentType) -> bool {
     )
 }
 
-fn component_property_session_error(state: &AppState) -> Option<String> {
-    let dialog = &state.design.tabbed_property_dialog;
-    if state.schematic_edit_read_only() {
+fn component_property_session_error(
+    dialog: &TabbedPropertyDialogState,
+    model: &Model,
+) -> Option<String> {
+    if model.schematic_edit_read_only() {
         return Some("The active schematic is read-only; no properties can be applied.".to_owned());
     }
     let Some(source) = dialog.source.as_ref() else {
@@ -603,19 +605,19 @@ fn component_property_session_error(state: &AppState) -> Option<String> {
                 .to_owned(),
         );
     };
-    if source.design_epoch != state.model.design_execution_epoch {
+    if source.design_epoch != model.design_execution_epoch {
         return Some(
             "The design document changed while properties were open. Close and reopen the current object."
                 .to_owned(),
         );
     }
-    if source.document_epoch != state.model.active_schematic_epoch {
+    if source.document_epoch != model.active_schematic_epoch {
         return Some(
             "The active schematic buffer changed while properties were open. Close and reopen the current object."
                 .to_owned(),
         );
     }
-    if dialog.view_path != state.model.workspace.content.active_view.display_path() {
+    if dialog.view_path != model.workspace.content.active_view.display_path() {
         return Some(
             "The active cell/view changed while properties were open. Close and reopen the current object."
                 .to_owned(),
@@ -627,8 +629,7 @@ fn component_property_session_error(state: &AppState) -> Option<String> {
                 .to_owned(),
         );
     };
-    let Some(current) = state
-        .model
+    let Some(current) = model
         .schematic
         .document()
         .components
@@ -643,7 +644,7 @@ fn component_property_session_error(state: &AppState) -> Option<String> {
     if current != baseline {
         return Some("The selected component changed while properties were open. Close and reopen the current object.".to_owned());
     }
-    if source != &crate::workbench::app::schematic_editor_request_source(state) {
+    if source != &crate::workbench::app::schematic_editor_request_source(model) {
         return Some(
             "The schematic source or editing scope changed while properties were open. Close and reopen the current object."
                 .to_owned(),
@@ -658,8 +659,31 @@ fn component_property_session_error(state: &AppState) -> Option<String> {
 mod tests {
     use super::*;
     use crate::state::{CellViewRef, Component, ComponentType, Point, PropertyValue};
+    use crate::workbench::app::dialogs::design_request::answer_design_request;
     use crate::workbench::app::open_property_editor;
+    use crate::workbench::app_state::AppState;
     use rspice_design::schematic::document_policy::PropertyCommitPolicy;
+
+    /// Draw the editor as its dialog step does, over the application's parts,
+    /// then answer what it raised as the shell does straight after.
+    fn render_property_dialog(
+        ctx: &egui::Context,
+        state: &mut AppState,
+    ) -> ComponentPropertyDialogResult {
+        let result = PropertyDialog {
+            dialog: &mut state.design.tabbed_property_dialog,
+            registry: &mut state.design.property_registry,
+            stimulus_link: &mut state.design.stimulus_link,
+            selected_stimulus_definition: &mut state.design.selected_stimulus_definition,
+            model: &mut state.model,
+            workbench: &mut state.workbench,
+        }
+        .render_property_dialog(ctx);
+        if let Some(request) = state.workbench.outbox.take::<DesignRequest>() {
+            answer_design_request(state, request);
+        }
+        result
+    }
 
     fn dialog_input(events: Vec<egui::Event>) -> egui::RawInput {
         egui::RawInput {
@@ -789,12 +813,16 @@ mod tests {
             "model_library".to_owned(),
             PropertyValue::String("beta".to_owned()),
         )]);
-        assert!(validate_model_binding_authority(&state, &component, &values).is_ok());
+        assert!(validate_model_binding_authority(&state.model, &component, &values).is_ok());
         let mut component_without_library = component.clone();
         component_without_library.params.clear();
         assert!(
-            validate_model_binding_authority(&state, &component_without_library, &HashMap::new())
-                .is_ok(),
+            validate_model_binding_authority(
+                &state.model,
+                &component_without_library,
+                &HashMap::new()
+            )
+            .is_ok(),
             "the project-global decision is authoritative even without redundant instance metadata"
         );
 
@@ -802,7 +830,7 @@ mod tests {
             "model_library".to_owned(),
             PropertyValue::String("alpha".to_owned()),
         )]);
-        let error = validate_model_binding_authority(&state, &component, &values)
+        let error = validate_model_binding_authority(&state.model, &component, &values)
             .expect_err("instance metadata cannot override the executable provider");
         assert!(error.contains("project-global provider 'beta'"));
     }
@@ -831,19 +859,19 @@ mod tests {
             "model_library".to_owned(),
             PropertyValue::String("kit".to_owned()),
         )]);
-        validate_model_binding_authority(&state, &component, &values)
+        validate_model_binding_authority(&state.model, &component, &values)
             .expect("the kit provides the family it holds the bins of");
 
         let elsewhere = HashMap::from([(
             "model_library".to_owned(),
             PropertyValue::String("other".to_owned()),
         )]);
-        let error = validate_model_binding_authority(&state, &component, &elsewhere)
+        let error = validate_model_binding_authority(&state.model, &component, &elsewhere)
             .expect_err("only the kit provides nch");
         assert!(error.contains("project-global provider 'kit'"), "{error}");
 
         component.value = "pch".to_owned();
-        let error = validate_model_binding_authority(&state, &component, &values)
+        let error = validate_model_binding_authority(&state.model, &component, &values)
             .expect_err("no library provides a family it holds no bin of");
         assert!(
             error.contains("does not provide executable model 'pch'"),
@@ -907,7 +935,13 @@ mod tests {
                     &state
                 ))
             );
-            assert!(component_property_session_error(&state).is_none());
+            assert!(
+                component_property_session_error(
+                    &state.design.tabbed_property_dialog,
+                    &state.model
+                )
+                .is_none()
+            );
             state
                 .design
                 .tabbed_property_dialog
@@ -1001,7 +1035,11 @@ mod tests {
                 _ => unreachable!(),
             }
             assert!(
-                component_property_session_error(&state).is_some(),
+                component_property_session_error(
+                    &state.design.tabbed_property_dialog,
+                    &state.model
+                )
+                .is_some(),
                 "{change}"
             );
             let source = state.design.tabbed_property_dialog.source.clone();
@@ -1306,7 +1344,10 @@ mod tests {
 
         assert_eq!(state.model.workspace.content.active_view, original_view);
         assert_ne!(state.model.active_schematic_epoch, captured_epoch);
-        assert!(component_property_session_error(&state).is_some());
+        assert!(
+            component_property_session_error(&state.design.tabbed_property_dialog, &state.model)
+                .is_some()
+        );
     }
 
     #[test]

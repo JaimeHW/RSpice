@@ -8,6 +8,7 @@ use egui::Context;
 use crate::workbench::app::dialogs::design_review_comments::ReviewComments;
 use crate::workbench::app::dialogs::engineering_table::EngineeringTable;
 use crate::workbench::app::dialogs::hierarchy::descend;
+use crate::workbench::app::dialogs::property_dialog::PropertyDialog;
 use crate::workbench::app::dialogs::selection::{array, bulk_edit, rename, shared_properties};
 use crate::workbench::app::dialogs::{
     create_model_bound_symbol, find_replace, object_properties, placement, rule_setup,
@@ -262,5 +263,20 @@ impl DesignFeature {
             cx.wb,
             ctx,
         );
+    }
+
+    /// The schematic component editor, over its draft, the property sheets
+    /// and the stimulus link it hands an instance to. A re-adopted stimulus
+    /// asks for the editor to reopen on the instance's new card.
+    pub(in crate::workbench) fn render_property_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
+        PropertyDialog {
+            dialog: &mut cx.state.tabbed_property_dialog,
+            registry: &mut cx.state.property_registry,
+            stimulus_link: &mut cx.state.stimulus_link,
+            selected_stimulus_definition: &mut cx.state.selected_stimulus_definition,
+            model: cx.model,
+            workbench: cx.wb,
+        }
+        .render_property_dialog(ctx);
     }
 }

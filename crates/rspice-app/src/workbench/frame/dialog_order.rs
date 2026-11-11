@@ -44,7 +44,8 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         modality: Modality::Application,
         is_open: Some(|state| state.design.tabbed_property_dialog.open),
         render: |app, ctx| {
-            dialogs::property_dialog::render_property_dialog(ctx, &mut app.state);
+            DesignFeature::render_property_dialog(&mut features::cx(app), ctx);
+            app.after_contribution();
         },
     },
     DialogSpec {

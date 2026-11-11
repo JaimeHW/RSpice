@@ -318,7 +318,7 @@ const DIALOG_STEPS: &[(&str, &str)] = &[
         "dialogs::confirmation::render_confirmation_dialog",
         "framework",
     ),
-    ("dialogs::property_dialog::render_property_dialog", "design"),
+    ("DesignFeature::render_property_dialog", "design"),
     ("features::render_dialog", "models"),
     ("features::render_dialog", "settings"),
     ("features::render_dialog", "cloud"),
