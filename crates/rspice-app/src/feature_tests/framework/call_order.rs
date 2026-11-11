@@ -293,7 +293,7 @@ const SHOW: &[Step] = &[
     (
         "11.33",
         &[
-            "show_toasts(ctx, &mut app.state, layout)",
+            "show_toasts(ctx, &mut app.state, layout, document.response.rect)",
             "ResultsFeature::perform_notification_action(&mut features::cx(app), action)",
             "app.after_contribution()",
         ],
