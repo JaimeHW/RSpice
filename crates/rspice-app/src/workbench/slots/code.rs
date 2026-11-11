@@ -59,6 +59,24 @@ impl CodeState {
         }
     }
 
+    /// What the document bar's Netlist tabs read of the feature, beside the
+    /// model, the runs and the message catalogue.
+    pub(crate) fn netlist_tabs<'a>(
+        &'a self,
+        model: &'a rspice_app_state::workbench::app_state::model::Model,
+        runs: &'a rspice_app_runs::workbench::slots::runs::RunsState,
+        messages: crate::workbench::MessageCatalog,
+    ) -> crate::workbench::chrome::document_bar::code::NetlistTabsReads<'a> {
+        crate::workbench::chrome::document_bar::code::NetlistTabsReads {
+            model,
+            netlist: &self.netlist,
+            code_workspace: &self.code_workspace,
+            open_documents: &self.netlist_open_documents,
+            runs,
+            messages,
+        }
+    }
+
     /// The project's netlist source went back to its accepted revision: the
     /// netlist editor's session and the secondary documents it opened belong
     /// to the source that was thrown away.

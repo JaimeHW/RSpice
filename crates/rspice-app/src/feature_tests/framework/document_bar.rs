@@ -159,7 +159,11 @@ fn netlist_roots_and_dependencies_are_independent_stable_tabs() {
     assert_eq!(active_document_id(&state), Some(owned_dependency.clone()));
 
     let generated_dependency = descriptors[1].id.clone();
-    let documents = netlist_workspace_documents(&state);
+    let documents = netlist_workspace_documents(state.code.netlist_tabs(
+        &state.model,
+        &state.runs,
+        state.workbench.messages(),
+    ));
     assert!(close_document(
         &mut state,
         &generated_dependency,

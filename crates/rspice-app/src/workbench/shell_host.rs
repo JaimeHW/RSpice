@@ -528,7 +528,11 @@ impl Host for RSpiceApp {
             Workspace::Results => "Results".to_owned(),
             Workspace::Verify => "Verification".to_owned(),
             Workspace::Models => "Models & PDKs".to_owned(),
-            Workspace::Netlist => code_title_cell(&app.state),
+            Workspace::Netlist => code_title_cell(
+                &app.state.model,
+                &app.state.code.code_workspace,
+                app.state.workbench.messages(),
+            ),
         }
     }
 
@@ -923,7 +927,11 @@ impl DocumentHost for AppState {
             Workspace::Results => result_documents(&state.model),
             Workspace::Verify => verification_documents(),
             Workspace::Models => models_documents(),
-            Workspace::Netlist => netlist_workspace_documents(state),
+            Workspace::Netlist => netlist_workspace_documents(state.code.netlist_tabs(
+                &state.model,
+                &state.runs,
+                state.workbench.messages(),
+            )),
         }
     }
 
@@ -931,7 +939,11 @@ impl DocumentHost for AppState {
         use crate::workbench::chrome::document_bar::code::active_netlist_document_id;
 
         match workspace {
-            Workspace::Netlist => active_netlist_document_id(self),
+            Workspace::Netlist => active_netlist_document_id(
+                &self.model,
+                &self.code.netlist,
+                self.code.code_workspace.page,
+            ),
             _ => None,
         }
     }
@@ -956,17 +968,30 @@ impl DocumentHost for AppState {
                 activate_result_dataset(&mut state.model.simulation, dataset_id)
             }
             WorkspaceDocumentId::NetlistGenerated(document_id) => {
-                activate_generated_netlist(state, document_id)
+                activate_generated_netlist(&mut state.model, &mut state.code.netlist, document_id)
             }
             WorkspaceDocumentId::NetlistOwned(document_id) => {
-                activate_owned_netlist(state, document_id)
+                activate_owned_netlist(&mut state.model, &mut state.code.netlist, document_id)
             }
             WorkspaceDocumentId::NetlistDependency {
                 root,
                 logical_identity,
-            } => activate_netlist_dependency(state, root, logical_identity),
-            WorkspaceDocumentId::NetlistComparison => activate_netlist_comparison(state),
-            WorkspaceDocumentId::NetlistRunSnapshot => activate_netlist_run_snapshot(state),
+            } => activate_netlist_dependency(
+                &mut state.model,
+                &mut state.code.netlist,
+                &mut state.code.netlist_open_documents,
+                &mut state.runs,
+                root,
+                logical_identity,
+            ),
+            WorkspaceDocumentId::NetlistComparison => {
+                activate_netlist_comparison(&mut state.model, &mut state.code.netlist)
+            }
+            WorkspaceDocumentId::NetlistRunSnapshot => activate_netlist_run_snapshot(
+                &mut state.model,
+                &mut state.code.netlist,
+                &state.runs,
+            ),
             WorkspaceDocumentId::Project
             | WorkspaceDocumentId::SimulationPlan
             | WorkspaceDocumentId::Verification
@@ -985,7 +1010,10 @@ impl DocumentHost for AppState {
                     && crate::workbench::workflows::project_workflow::close_active_document(state),
             ),
             WorkspaceDocumentId::NetlistDependency { .. } => {
-                state.code.netlist_open_documents.remove(document);
+                crate::workbench::chrome::document_bar::code::close_netlist_dependency(
+                    &mut state.code.netlist_open_documents,
+                    document,
+                );
                 None
             }
             _ => None,

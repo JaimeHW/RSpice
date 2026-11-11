@@ -8,25 +8,28 @@
 
 // Through the parent rather than `crate::workbench`: the module's edge onto
 // `app_state` is being retired, and a submodule of it does not need its own.
-use super::{ActiveNetlistDocument, AppState};
+use super::{ActiveNetlistDocument, AppState, Model, NetlistDocumentState};
+use rspice_app_runs::workbench::slots::runs::RunsState;
 
 /// Reopen the already-materialized comparison document. Creating a new
 /// comparison remains an explicit revision workflow; a tab switch is only a
 /// presentation transition.
-pub(crate) fn open_netlist_comparison(state: &mut AppState) -> bool {
-    if state.code.netlist.generated_diff_source.is_empty() {
+pub(crate) fn open_netlist_comparison(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+) -> bool {
+    if netlist.generated_diff_source.is_empty() {
         return false;
     }
-    state.code.netlist.active_document = ActiveNetlistDocument::GeneratedDiff;
-    state.code.netlist.active_dependency_identity = None;
-    state.code.netlist.active_dependency_root = None;
-    state.code.netlist.active_document_initialized = true;
-    state.model.simulation.source.netlist_content =
-        state.code.netlist.generated_diff_source.clone();
-    state.code.netlist.completion_open = false;
-    state.code.netlist.completion_dismissed_at = None;
-    state.code.netlist.revision = state.code.netlist.revision.wrapping_add(1);
-    state.model.invalidate_source_evidence();
+    netlist.active_document = ActiveNetlistDocument::GeneratedDiff;
+    netlist.active_dependency_identity = None;
+    netlist.active_dependency_root = None;
+    netlist.active_document_initialized = true;
+    model.simulation.source.netlist_content = netlist.generated_diff_source.clone();
+    netlist.completion_open = false;
+    netlist.completion_dismissed_at = None;
+    netlist.revision = netlist.revision.wrapping_add(1);
+    model.invalidate_source_evidence();
     true
 }
 
@@ -236,10 +239,13 @@ fn short_digest(digest: crate::product::ContentDigest) -> String {
 /// snapshot that cannot show a deck, and text without a run is a deck that
 /// cannot name what executed it.
 pub(crate) fn run_deck_snapshot_run_id(state: &AppState) -> Option<u64> {
-    let run_id = state.runs.manual_run.last_run_id?;
-    state
-        .runs
-        .manual_run
+    run_deck_snapshot_run_id_in(&state.runs)
+}
+
+/// [`run_deck_snapshot_run_id`], over the runs.
+pub(crate) fn run_deck_snapshot_run_id_in(runs: &RunsState) -> Option<u64> {
+    let run_id = runs.manual_run.last_run_id?;
+    runs.manual_run
         .last_run_buffer
         .as_ref()
         .is_some_and(|buffer| !buffer.is_empty())
@@ -261,11 +267,21 @@ pub(crate) fn run_deck_snapshot_artifact_name(state: &AppState) -> String {
 /// The text is the sealed source the dispatch captured, not a re-derivation
 /// from the live editor, so what this shows is what the engine read.
 pub fn open_run_deck_snapshot(state: &mut AppState) -> bool {
-    if run_deck_snapshot_run_id(state).is_none() {
+    open_run_deck_snapshot_in(&mut state.model, &mut state.code.netlist, &state.runs)
+}
+
+/// [`open_run_deck_snapshot`], over the model, the netlist editor's state and
+/// the runs that sealed the deck.
+pub(crate) fn open_run_deck_snapshot_in(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    runs: &RunsState,
+) -> bool {
+    if run_deck_snapshot_run_id_in(runs).is_none() {
         return false;
     }
-    state.code.netlist.executed_deck_view = None;
-    project_run_snapshot(state);
+    netlist.executed_deck_view = None;
+    project_run_snapshot_in(model, netlist, runs);
     true
 }
 
@@ -345,21 +361,31 @@ pub fn reveal_executed_deck(state: &mut AppState, run_id: u64, point: usize) -> 
 
 /// Projects whatever the run-snapshot document is currently bound to.
 fn project_run_snapshot(state: &mut AppState) {
-    if state.code.netlist.active_document != ActiveNetlistDocument::RunSnapshot {
-        state.code.netlist.run_snapshot_return_document = state.code.netlist.active_document;
+    project_run_snapshot_in(&mut state.model, &mut state.code.netlist, &state.runs);
+}
+
+/// [`project_run_snapshot`], over the model, the netlist editor's state and
+/// the runs that sealed the deck.
+fn project_run_snapshot_in(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    runs: &RunsState,
+) {
+    if netlist.active_document != ActiveNetlistDocument::RunSnapshot {
+        netlist.run_snapshot_return_document = netlist.active_document;
     }
-    let source = super::run_snapshot_source(state);
-    state.code.netlist.active_document = ActiveNetlistDocument::RunSnapshot;
-    state.code.netlist.active_dependency_identity = None;
-    state.code.netlist.active_dependency_root = None;
-    state.code.netlist.active_document_initialized = true;
-    state.model.simulation.source.netlist_content = source;
-    state.code.netlist.requested_line = None;
-    state.code.netlist.cursor_line = 0;
-    state.code.netlist.completion_open = false;
-    state.code.netlist.completion_dismissed_at = None;
-    state.code.netlist.revision = state.code.netlist.revision.wrapping_add(1);
-    state.model.invalidate_source_evidence();
+    let source = super::run_snapshot_source_in(model, netlist, runs);
+    netlist.active_document = ActiveNetlistDocument::RunSnapshot;
+    netlist.active_dependency_identity = None;
+    netlist.active_dependency_root = None;
+    netlist.active_document_initialized = true;
+    model.simulation.source.netlist_content = source;
+    netlist.requested_line = None;
+    netlist.cursor_line = 0;
+    netlist.completion_open = false;
+    netlist.completion_dismissed_at = None;
+    netlist.revision = netlist.revision.wrapping_add(1);
+    model.invalidate_source_evidence();
 }
 
 /// Leave the run snapshot for the working deck it was opened from.

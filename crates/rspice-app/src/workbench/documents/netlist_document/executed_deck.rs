@@ -13,7 +13,8 @@
 
 // Through the parent rather than `crate::workbench`: the module's edge onto
 // `app_state` is being retired, and a submodule of it does not need its own.
-use super::AppState;
+use super::{AppState, Model, NetlistDocumentState};
+use rspice_app_runs::workbench::slots::runs::RunsState;
 
 /// The text the run-snapshot document is showing right now.
 ///
@@ -26,16 +27,20 @@ use super::AppState;
 /// than to the manual baseline. Silently substituting a different document
 /// under the same header is the one outcome worse than an empty viewer.
 pub(crate) fn run_snapshot_source(state: &AppState) -> String {
-    let Some(selection) = state.code.netlist.executed_deck_view else {
-        return state
-            .runs
-            .manual_run
-            .last_run_buffer
-            .clone()
-            .unwrap_or_default();
+    run_snapshot_source_in(&state.model, &state.code.netlist, &state.runs)
+}
+
+/// [`run_snapshot_source`], over the model, the netlist editor's state and
+/// the runs that sealed the deck.
+pub(crate) fn run_snapshot_source_in(
+    model: &Model,
+    netlist: &NetlistDocumentState,
+    runs: &RunsState,
+) -> String {
+    let Some(selection) = netlist.executed_deck_view else {
+        return runs.manual_run.last_run_buffer.clone().unwrap_or_default();
     };
-    state
-        .model
+    model
         .simulation
         .retained
         .executed_decks

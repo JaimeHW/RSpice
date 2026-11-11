@@ -13,6 +13,7 @@ use super::{CodeSourceFileAction, CodeWorkspacePage};
 use crate::state::netlist_diagnostics::NetlistDiagnosticCollection;
 use crate::state::same_include_graph;
 use crate::workbench::AppState;
+use rspice_app_runs::workbench::slots::runs::RunsState;
 use rspice_app_state::workbench::app_state::model::{
     Model, prune_owned_include_authority, replace_root_document_preserving_dependencies,
 };
@@ -48,14 +49,14 @@ pub use comparison::{
     reveal_executed_deck,
 };
 pub(crate) use comparison::{
-    close_run_deck_snapshot, open_netlist_comparison, run_deck_snapshot_artifact_name,
-    run_deck_snapshot_run_id,
+    close_run_deck_snapshot, open_netlist_comparison, open_run_deck_snapshot_in,
+    run_deck_snapshot_artifact_name, run_deck_snapshot_run_id, run_deck_snapshot_run_id_in,
 };
 pub use diagnostics::{DiagnosticSeverity, control_disposition_summary};
 pub(crate) use editor::editor_id;
 pub use editor::show as show_editor;
-pub(crate) use executed_deck::run_snapshot_source;
 pub use executed_deck::{ExecutedDeckSelection, ExecutedDeckVerification};
+pub(crate) use executed_deck::{run_snapshot_source, run_snapshot_source_in};
 pub(crate) use source_index::{root_deck_source_index, visible_source_index};
 
 /// Exact, derived state of one project-owned netlist publication.
@@ -844,10 +845,31 @@ pub(crate) fn open_netlist_dependency_from_root(
     root: ActiveNetlistDocument,
     logical_identity: &str,
 ) -> Result<(), String> {
+    open_netlist_dependency_from_root_in(
+        &mut state.model,
+        &mut state.code.netlist,
+        &mut state.code.netlist_open_documents,
+        &mut state.runs,
+        root,
+        logical_identity,
+    )
+}
+
+/// [`open_netlist_dependency_from_root`], over the model, the netlist
+/// editor's state, the include tabs the reader opened and the runs, whose
+/// manual run forgets the lines edited in the deck it leaves.
+pub(crate) fn open_netlist_dependency_from_root_in(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut HashSet<crate::workbench::state::WorkspaceDocumentId>,
+    runs: &mut RunsState,
+    root: ActiveNetlistDocument,
+    logical_identity: &str,
+) -> Result<(), String> {
     if root == ActiveNetlistDocument::GeneratedDiff {
         return Err("Revision comparisons do not own dependency documents.".to_owned());
     }
-    let document = canonical_root_document(state, root).ok_or_else(|| {
+    let document = canonical_root_document_in(model, netlist, root).ok_or_else(|| {
         "The selected dependency root is no longer available in this workspace.".to_owned()
     })?;
     let root_document_id = document.id();
@@ -866,26 +888,26 @@ pub(crate) fn open_netlist_dependency_from_root(
         root: root_document_id,
         logical_identity: logical_identity.to_owned(),
     };
-    if !state.code.netlist_open_documents.contains(&tab)
-        && state.code.netlist_open_documents.len() >= MAX_OPEN_NETLIST_SECONDARY_DOCUMENTS
+    if !open_documents.contains(&tab)
+        && open_documents.len() >= MAX_OPEN_NETLIST_SECONDARY_DOCUMENTS
     {
         return Err(format!(
             "Close an include tab before opening another; the workspace retains at most {MAX_OPEN_NETLIST_SECONDARY_DOCUMENTS} secondary netlist documents."
         ));
     }
-    state.code.netlist.active_document = root;
-    state.code.netlist.active_dependency_root = Some(root);
-    state.code.netlist.active_dependency_identity = Some(logical_identity.to_owned());
-    state.code.netlist_open_documents.insert(tab);
-    state.code.netlist.active_document_initialized = true;
-    state.model.simulation.source.netlist_content = source;
-    state.code.netlist.requested_line = None;
-    state.code.netlist.cursor_line = 0;
-    state.runs.manual_run.edited_lines.clear();
-    state.code.netlist.completion_open = false;
-    state.code.netlist.completion_dismissed_at = None;
-    state.code.netlist.revision = state.code.netlist.revision.wrapping_add(1);
-    state.model.invalidate_source_evidence();
+    netlist.active_document = root;
+    netlist.active_dependency_root = Some(root);
+    netlist.active_dependency_identity = Some(logical_identity.to_owned());
+    open_documents.insert(tab);
+    netlist.active_document_initialized = true;
+    model.simulation.source.netlist_content = source;
+    netlist.requested_line = None;
+    netlist.cursor_line = 0;
+    runs.manual_run.edited_lines.clear();
+    netlist.completion_open = false;
+    netlist.completion_dismissed_at = None;
+    netlist.revision = netlist.revision.wrapping_add(1);
+    model.invalidate_source_evidence();
     Ok(())
 }
 
@@ -1115,31 +1137,33 @@ pub(crate) fn show_generated_deck(state: &mut AppState) {
 }
 
 pub fn open_generated_primary(state: &mut AppState) -> bool {
-    if state.model.netlist_artifacts.generated_document.is_none()
-        || state
-            .model
-            .netlist_artifacts
-            .generated_source
-            .trim()
-            .is_empty()
+    open_generated_primary_in(&mut state.model, &mut state.code.netlist)
+}
+
+/// [`open_generated_primary`], over the model and the netlist editor's state.
+pub(crate) fn open_generated_primary_in(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+) -> bool {
+    if model.netlist_artifacts.generated_document.is_none()
+        || model.netlist_artifacts.generated_source.trim().is_empty()
     {
         return false;
     }
-    if state.code.netlist.active_document == ActiveNetlistDocument::Generated
-        && state.code.netlist.active_dependency_identity.is_none()
+    if netlist.active_document == ActiveNetlistDocument::Generated
+        && netlist.active_dependency_identity.is_none()
     {
         return false;
     }
-    state.code.netlist.active_dependency_identity = None;
-    state.code.netlist.active_dependency_root = None;
-    state.code.netlist.active_document = ActiveNetlistDocument::Generated;
-    state.code.netlist.active_document_initialized = true;
-    state.model.simulation.source.netlist_content =
-        state.model.netlist_artifacts.generated_source.clone();
-    state.code.netlist.completion_open = false;
-    state.code.netlist.completion_dismissed_at = None;
-    state.code.netlist.revision = state.code.netlist.revision.wrapping_add(1);
-    state.model.invalidate_source_evidence();
+    netlist.active_dependency_identity = None;
+    netlist.active_dependency_root = None;
+    netlist.active_document = ActiveNetlistDocument::Generated;
+    netlist.active_document_initialized = true;
+    model.simulation.source.netlist_content = model.netlist_artifacts.generated_source.clone();
+    netlist.completion_open = false;
+    netlist.completion_dismissed_at = None;
+    netlist.revision = netlist.revision.wrapping_add(1);
+    model.invalidate_source_evidence();
     true
 }
 
@@ -1147,8 +1171,12 @@ pub fn open_generated_primary(state: &mut AppState) -> bool {
 /// document. Document tabs use this exact transition so switching tabs never
 /// changes source ownership.
 pub(crate) fn open_owned_primary(state: &mut AppState) -> bool {
-    let Some(document) = state.code.netlist.owned_document.as_ref().or(state
-        .model
+    open_owned_primary_in(&mut state.model, &mut state.code.netlist)
+}
+
+/// [`open_owned_primary`], over the model and the netlist editor's state.
+pub(crate) fn open_owned_primary_in(model: &mut Model, netlist: &mut NetlistDocumentState) -> bool {
+    let Some(document) = netlist.owned_document.as_ref().or(model
         .workspace
         .content
         .netlist_document
@@ -1161,22 +1189,22 @@ pub(crate) fn open_owned_primary(state: &mut AppState) -> bool {
     // advancing the editor revision and discarding the exact validation
     // receipt here also destroys the controller's one-shot authorization and
     // leaves a visibly validated manual deck unable to run.
-    if state.code.netlist.active_document == ActiveNetlistDocument::OwnedSource
-        && state.code.netlist.active_dependency_identity.is_none()
-        && state.model.simulation.source.netlist_content == document.source()
+    if netlist.active_document == ActiveNetlistDocument::OwnedSource
+        && netlist.active_dependency_identity.is_none()
+        && model.simulation.source.netlist_content == document.source()
     {
         return true;
     }
     let source = document.source().to_owned();
-    state.code.netlist.active_document = ActiveNetlistDocument::OwnedSource;
-    state.code.netlist.active_dependency_identity = None;
-    state.code.netlist.active_dependency_root = None;
-    state.code.netlist.active_document_initialized = true;
-    state.model.simulation.source.netlist_content = source;
-    state.code.netlist.completion_open = false;
-    state.code.netlist.completion_dismissed_at = None;
-    state.code.netlist.revision = state.code.netlist.revision.wrapping_add(1);
-    state.model.invalidate_source_evidence();
+    netlist.active_document = ActiveNetlistDocument::OwnedSource;
+    netlist.active_dependency_identity = None;
+    netlist.active_dependency_root = None;
+    netlist.active_document_initialized = true;
+    model.simulation.source.netlist_content = source;
+    netlist.completion_open = false;
+    netlist.completion_dismissed_at = None;
+    netlist.revision = netlist.revision.wrapping_add(1);
+    model.invalidate_source_evidence();
     true
 }
 
