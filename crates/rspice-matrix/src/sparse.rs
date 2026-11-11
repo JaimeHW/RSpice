@@ -3821,6 +3821,15 @@ impl StaticMatrix {
         .is_ok_and(|accepted| accepted)
     }
 
+    /// Above this order a Newton iteration does not hand a system Circuit LU
+    /// found numerically singular to faer. ngspice and Spectre fail such an
+    /// iterate, and the step is cut or the next continuation aid takes over.
+    /// faer's general sparse LU costs a hundred times Circuit LU's on a large
+    /// circuit, 35 s a solve at 47 000 unknowns, for an iterate whose
+    /// Jacobian is singular to working precision. Below the order it costs
+    /// tens of milliseconds and stays as a safety net.
+    const NEWTON_GENERAL_LU_FALLBACK_MAX_ORDER: usize = 1000;
+
     fn try_solve_klu_operation_into(
         &mut self,
         rhs: &[Value],
@@ -3848,6 +3857,19 @@ impl StaticMatrix {
         } = self;
         let n = *nrows;
         let faithful = solver_options.circuit_lu_robustness == CircuitLuRobustness::BackendFaithful;
+        // A large Newton iterate whose system Circuit LU finds numerically
+        // singular fails rather than falling back to faer. A non-finite factor
+        // or solve and a failed growth retry are that same singularity at
+        // working precision, so all three fail it as a singular matrix.
+        let newton_fails_closed = miss == CertificateMiss::ReturnToNewton
+            && n > Self::NEWTON_GENERAL_LU_FALLBACK_MAX_ORDER;
+        let singular_newton_iterate = |error: &SolverError| {
+            newton_fails_closed
+                && matches!(
+                    error,
+                    SolverError::SingularMatrix | SolverError::Overflow | SolverError::PivotGrowth
+                )
+        };
 
         let backend = klu.get_or_insert_with(crate::KluSolver::new);
         if let Err(error) = configure_klu_backend(backend, *solver_options) {
@@ -3888,6 +3910,9 @@ impl StaticMatrix {
             if faithful {
                 return Err(error);
             }
+            if singular_newton_iterate(&error) {
+                return Err(SolverError::SingularMatrix);
+            }
             static FALLBACK_LOGGED: std::sync::Once = std::sync::Once::new();
             FALLBACK_LOGGED.call_once(|| {
                 log::warn!("klu backend could not factor this system; using faer fallback");
@@ -3904,7 +3929,13 @@ impl StaticMatrix {
             RealSolveOp::Transpose => backend.solve_transpose(rhs, solution),
         };
         if let Err(error) = solve_result {
-            return if faithful { Err(error) } else { Ok(false) };
+            return if faithful {
+                Err(error)
+            } else if singular_newton_iterate(&error) {
+                Err(SolverError::SingularMatrix)
+            } else {
+                Ok(false)
+            };
         }
         if faithful {
             return Ok(true);
@@ -3945,13 +3976,21 @@ impl StaticMatrix {
                     backend.solve_transpose(residual_scratch, klu_correction_scratch)
                 }
             };
-            if correction_result.is_err() {
-                return Ok(false);
+            if let Err(error) = correction_result {
+                return if singular_newton_iterate(&error) {
+                    Err(SolverError::SingularMatrix)
+                } else {
+                    Ok(false)
+                };
             }
             for (value, &delta) in solution.iter_mut().zip(klu_correction_scratch.iter()) {
                 let refined = *value + delta;
                 if !delta.is_finite() || !refined.is_finite() {
-                    return Ok(false);
+                    return if newton_fails_closed {
+                        Err(SolverError::SingularMatrix)
+                    } else {
+                        Ok(false)
+                    };
                 }
                 *value = refined;
             }
@@ -8478,6 +8517,50 @@ mod tests {
         assert!(real_backward_error(&matrix, &solution, &rhs).accepted());
         assert_relative_solution(&solution, &[5.0 / 8.0, 1.0 / 8.0]);
         assert_eq!(matrix.newton_certificate_misses().count, 0);
+    }
+
+    /// Identity rows and a trailing block `[[1, 1], [1, 1]]`, whose second
+    /// Circuit LU pivot is exactly zero.
+    fn numerically_singular_matrix(order: usize) -> StaticMatrix {
+        let mut triplets: Vec<(usize, usize, Value)> =
+            (0..order - 2).map(|i| (i, i, 1.0)).collect();
+        let (a, b) = (order - 2, order - 1);
+        triplets.extend([(a, a, 1.0), (b, a, 1.0), (a, b, 1.0), (b, b, 1.0)]);
+        StaticMatrix::from_triplets_with_options(order, order, &triplets, SolverOptions::default())
+            .unwrap()
+    }
+
+    /// A large Newton iterate that Circuit LU finds numerically singular
+    /// fails, as ngspice's and Spectre's do, and the next continuation aid
+    /// takes over; it is not factored again by faer. A linear solve, and a
+    /// Newton solve of a smaller system, still consult faer.
+    #[test]
+    fn a_large_newton_solve_fails_a_numerically_singular_iterate_without_faer() {
+        let limit = StaticMatrix::NEWTON_GENERAL_LU_FALLBACK_MAX_ORDER;
+        for (order, newton, faer_consulted) in [
+            (limit + 1, true, false),
+            (limit + 1, false, true),
+            (limit, true, true),
+        ] {
+            let mut matrix = numerically_singular_matrix(order);
+            let mut rhs = vec![1.0; order];
+            rhs[order - 1] = 2.0;
+            let mut solution = Vec::new();
+            let result = if newton {
+                matrix.solve_newton_into(&rhs, &mut solution)
+            } else {
+                matrix.solve_into(&rhs, &mut solution)
+            };
+            assert!(
+                matches!(result, Err(SolverError::SingularMatrix)),
+                "order {order}, newton {newton}: {result:?}"
+            );
+            assert_eq!(
+                matrix.lu.is_some(),
+                faer_consulted,
+                "order {order}, newton {newton}"
+            );
+        }
     }
 
     fn amesos_klu_options() -> SolverOptions {
