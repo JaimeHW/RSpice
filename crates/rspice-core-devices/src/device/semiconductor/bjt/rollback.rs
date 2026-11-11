@@ -15,6 +15,11 @@ use crate::Value;
 /// reallocates its name and junction parameters; refreshing this image in
 /// place copies only what an attempt can change. Temperature variants are
 /// derived from the junction GMIN in force, so they travel with it.
+///
+/// A promoted device loads, stamps, probes and integrates through its MNA
+/// evaluation and never reads the reduced linearization and charge snapshot
+/// caches of the private solve, so its image leaves those three out (their
+/// validity flags still travel).
 #[derive(Debug, Clone, Default)]
 #[doc(hidden)]
 pub struct BjtNonlinearState {
@@ -128,12 +133,14 @@ impl Bjt {
         image.ie_prev = self.ie_prev;
         image.isub_prev = self.isub_prev;
         image.intrinsic_linearization_prev = self.intrinsic_linearization_prev;
-        image.reduced_linearization_cache = self.reduced_linearization_cache.get();
         image.reduced_linearization_cache_valid = self.reduced_linearization_cache_valid.get();
-        image.previous_reduced_linearization = self.previous_reduced_linearization;
         image.previous_reduced_linearization_valid = self.previous_reduced_linearization_valid;
-        image.charge_snapshot_cache = self.charge_snapshot_cache.get();
         image.charge_snapshot_cache_valid = self.charge_snapshot_cache_valid.get();
+        if !self.mna_promoted {
+            image.reduced_linearization_cache = self.reduced_linearization_cache.get();
+            image.previous_reduced_linearization = self.previous_reduced_linearization;
+            image.charge_snapshot_cache = self.charge_snapshot_cache.get();
+        }
         image.mna_eval = self.mna_eval;
         image.mna_rbi_current = self.mna_rbi_current;
         image.mna_limited_from = self.mna_limited_from.get();
@@ -196,15 +203,17 @@ impl Bjt {
         self.ie_prev = image.ie_prev;
         self.isub_prev = image.isub_prev;
         self.intrinsic_linearization_prev = image.intrinsic_linearization_prev;
-        self.reduced_linearization_cache
-            .set(image.reduced_linearization_cache);
         self.reduced_linearization_cache_valid
             .set(image.reduced_linearization_cache_valid);
-        self.previous_reduced_linearization = image.previous_reduced_linearization;
         self.previous_reduced_linearization_valid = image.previous_reduced_linearization_valid;
-        self.charge_snapshot_cache.set(image.charge_snapshot_cache);
         self.charge_snapshot_cache_valid
             .set(image.charge_snapshot_cache_valid);
+        if !self.mna_promoted {
+            self.reduced_linearization_cache
+                .set(image.reduced_linearization_cache);
+            self.previous_reduced_linearization = image.previous_reduced_linearization;
+            self.charge_snapshot_cache.set(image.charge_snapshot_cache);
+        }
         self.mna_eval = image.mna_eval;
         self.mna_rbi_current = image.mna_rbi_current;
         self.mna_limited_from.set(image.mna_limited_from);
@@ -223,7 +232,7 @@ impl Bjt {
 mod tests {
     use super::*;
     use crate::NodeId;
-    use crate::device::traits::{MatrixStamper, NonlinearDevice};
+    use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
 
     struct Discard;
 
@@ -231,6 +240,20 @@ mod tests {
         fn stamp(&mut self, _row: NodeId, _col: NodeId, _value: Value) {}
 
         fn stamp_rhs(&mut self, _index: NodeId, _value: Value) {}
+    }
+
+    /// Every stamp, bit for bit.
+    #[derive(Default)]
+    struct Record(Vec<u64>);
+
+    impl MatrixStamper for Record {
+        fn stamp(&mut self, row: NodeId, col: NodeId, value: Value) {
+            self.0.extend([row as u64, col as u64, value.to_bits()]);
+        }
+
+        fn stamp_rhs(&mut self, index: NodeId, value: Value) {
+            self.0.extend([index as u64, value.to_bits()]);
+        }
     }
 
     fn with(params: &[(&str, Value)]) -> Bjt {
@@ -321,17 +344,21 @@ mod tests {
         solution
     }
 
+    fn biases(bjt: &Bjt, nodes: usize) -> [Vec<Value>; 3] {
+        [
+            bias(bjt, nodes, [1.4, 0.76, 0.02]),
+            bias(bjt, nodes, [0.9, 0.81, 0.05]),
+            bias(bjt, nodes, [2.0, 0.70, 0.0]),
+        ]
+    }
+
     /// Everything an attempt writes comes back. The state is taken after
     /// every prefix of an attempt, into one reused image; the rest of that
     /// attempt, a whole further one and a load at a third bias follow; the
     /// restored device must print exactly as it did when its state was
     /// taken, every cache and flag included.
     fn assert_rollback_restores(bjt: Bjt, nodes: usize) {
-        let biases = [
-            bias(&bjt, nodes, [1.4, 0.76, 0.02]),
-            bias(&bjt, nodes, [0.9, 0.81, 0.05]),
-            bias(&bjt, nodes, [2.0, 0.70, 0.0]),
-        ];
+        let biases = biases(&bjt, nodes);
         let mut state = BjtNonlinearState::default();
         for split in 0..=ATTEMPT.len() {
             let mut device = bjt.clone();
@@ -350,6 +377,141 @@ mod tests {
         }
     }
 
+    fn poison_reduced(reduced: &mut BjtReducedLinearization) {
+        let nan = Value::NAN;
+        reduced.internal_voltages.fill(nan);
+        reduced.external_voltages.fill(nan);
+        reduced.g_ii.iter_mut().for_each(|row| row.fill(nan));
+        reduced.g_ie.iter_mut().for_each(|row| row.fill(nan));
+        reduced.g_ei.iter_mut().for_each(|row| row.fill(nan));
+        reduced.g_ee.iter_mut().for_each(|row| row.fill(nan));
+        reduced.g_reduced.iter_mut().for_each(|row| row.fill(nan));
+        reduced.z_i_static.fill(nan);
+        reduced.z_e_static.fill(nan);
+        reduced.cached_dynamic_inputs = Some(Default::default());
+    }
+
+    /// Every value in the private solve's reduction and charge caches made NaN.
+    fn poison_legacy_caches(bjt: &mut Bjt) {
+        let nan = Value::NAN;
+        let mut reduced = bjt.reduced_linearization_cache.get();
+        poison_reduced(&mut reduced);
+        bjt.reduced_linearization_cache.set(reduced);
+        poison_reduced(&mut bjt.previous_reduced_linearization);
+        let mut snapshot = bjt.charge_snapshot_cache.get();
+        let reduction = &mut snapshot.reduction;
+        reduction.internal_voltages.fill(nan);
+        reduction.external_voltages.fill(nan);
+        reduction.g_ii.iter_mut().for_each(|row| row.fill(nan));
+        reduction.g_ie.iter_mut().for_each(|row| row.fill(nan));
+        reduction.g_ei.iter_mut().for_each(|row| row.fill(nan));
+        reduction.g_ee.iter_mut().for_each(|row| row.fill(nan));
+        reduction.g_reduced.iter_mut().for_each(|row| row.fill(nan));
+        reduction.z_i_static.fill(nan);
+        reduction.z_e_static.fill(nan);
+        reduction.vbic_d_itzf_d_vrth = nan;
+        for branch in &mut snapshot.branches {
+            branch.charge = nan;
+            branch.d_internal.fill(nan);
+            branch.d_external.fill(nan);
+        }
+        bjt.charge_snapshot_cache.set(snapshot);
+    }
+
+    /// What the engine reads back from a promoted device through an attempt,
+    /// bit for bit: its Newton and correction stamps, charge companions,
+    /// convergence verdict, and the charges and currents an accepted step
+    /// takes at the solution.
+    fn promoted_reads(bjt: &mut Bjt, biases: &[Vec<Value>; 3]) -> Vec<u64> {
+        let mut record = Record::default();
+        for &step in ATTEMPT.iter().chain(&[Step::Load(2)]) {
+            take(bjt, step, biases);
+            let bias = match step {
+                Step::Load(index)
+                | Step::Stamp(index)
+                | Step::Probe(index)
+                | Step::Charge(index) => &biases[index],
+                Step::Gmin(_) | Step::Reopen => &biases[0],
+            };
+            bjt.stamp_nonlinear(bias, &mut record, &mut []);
+            bjt.stamp_mna_correction(&mut record, bias);
+            record.0.push(u64::from(
+                bjt.is_converged(NonlinearConvergenceCriteria::default()),
+            ));
+            let (branches, internal, external) = bjt.mna_charge_state();
+            let (accepted, ..) = bjt.mna_charge_state_at_solution(bias);
+            for branch in branches.iter().chain(&accepted) {
+                let values = std::iter::once(branch.charge)
+                    .chain(branch.d_internal)
+                    .chain(branch.d_external);
+                record.0.extend(values.map(Value::to_bits));
+            }
+            let values = internal
+                .into_iter()
+                .chain(external)
+                .chain(bjt.mna_terminal_currents_at_solution(bias))
+                .chain(bjt.mna_junction_voltages(bias));
+            record.0.extend(values.map(Value::to_bits));
+            if let Some(charge) = bjt.legacy_external_bc_charge(bias) {
+                let values = [charge.voltage, charge.charge, charge.capacitance];
+                record.0.extend(values.map(Value::to_bits));
+            }
+        }
+        record.0
+    }
+
+    /// Copy the private solve's caches from `from`, temperature variants
+    /// (which clone them from their parent) included.
+    fn adopt_legacy_caches(bjt: &mut Bjt, from: &Bjt) {
+        bjt.reduced_linearization_cache
+            .set(from.reduced_linearization_cache.get());
+        bjt.previous_reduced_linearization = from.previous_reduced_linearization;
+        bjt.charge_snapshot_cache
+            .set(from.charge_snapshot_cache.get());
+        let variants = from.thermal_variant_cache.borrow();
+        let own = bjt.thermal_variant_cache.get_mut();
+        assert_eq!(own.len(), variants.len(), "temperature variants differ");
+        for ((_, variant), (_, source)) in own.iter_mut().zip(variants.iter()) {
+            adopt_legacy_caches(variant, source);
+        }
+    }
+
+    /// A promoted device's image leaves out the private solve's caches. Take
+    /// the state after every prefix of an attempt and poison those caches at
+    /// once; through the rest of that attempt, a whole further one and the
+    /// restore, nothing may read them: the restored device must read back
+    /// exactly what the same device restored whole reads back, and match it
+    /// in every other field.
+    fn assert_promoted_rollback_skips_unread_caches(bjt: Bjt, nodes: usize) {
+        assert!(bjt.mna_promoted());
+        let biases = biases(&bjt, nodes);
+        let mut state = BjtNonlinearState::default();
+        for split in 0..=ATTEMPT.len() {
+            let mut device = bjt.clone();
+            for &step in &ATTEMPT[..split] {
+                take(&mut device, step, &biases);
+            }
+            let mut whole = device.clone();
+            device.nonlinear_state_snapshot_into(&mut state);
+            poison_legacy_caches(&mut device);
+            for &step in ATTEMPT[split..].iter().chain(&ATTEMPT) {
+                take(&mut device, step, &biases);
+            }
+            device.restore_nonlinear_state(state.clone());
+            assert_eq!(
+                promoted_reads(&mut device, &biases),
+                promoted_reads(&mut whole, &biases),
+                "reads after a restore at {split} steps"
+            );
+            adopt_legacy_caches(&mut device, &whole);
+            assert_eq!(
+                format!("{device:?}"),
+                format!("{whole:?}"),
+                "state after a restore at {split} steps"
+            );
+        }
+    }
+
     #[test]
     fn a_legacy_gummel_poon_rollback_restores_every_field_an_attempt_writes() {
         let card = [
@@ -365,7 +527,8 @@ mod tests {
         assert_rollback_restores(with(&card), 3);
         let mut bjt = with(&card);
         let nodes = promote(&mut bjt);
-        assert_rollback_restores(bjt, nodes);
+        assert_rollback_restores(bjt.clone(), nodes);
+        assert_promoted_rollback_skips_unread_caches(bjt, nodes);
     }
 
     #[test]
@@ -393,6 +556,7 @@ mod tests {
         let mut bjt = with(&card);
         bjt.node_substrate = 4;
         let nodes = promote(&mut bjt);
-        assert_rollback_restores(bjt, nodes);
+        assert_rollback_restores(bjt.clone(), nodes);
+        assert_promoted_rollback_skips_unread_caches(bjt, nodes);
     }
 }
