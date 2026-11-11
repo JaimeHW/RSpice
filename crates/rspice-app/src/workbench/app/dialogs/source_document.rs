@@ -52,28 +52,42 @@ use crate::ui::widgets::{
 /// Bring the lifecycle dialog up for the page that is showing.
 ///
 pub(crate) fn open_source_document_dialog(state: &mut AppState) -> Result<(), String> {
-    let Some(language) = visible_language(state) else {
-        if !state.platform.project_lifecycle.is_open() {
+    open_source_document_dialog_in(
+        state.workbench.workspace,
+        &state.model,
+        &mut state.code.code_workspace,
+        &state.code.netlist,
+        &state.platform,
+    )
+}
+
+/// [`open_source_document_dialog`], over the workspace in front, the model,
+/// the Code workspace's runtime state, the netlist editor's state and the
+/// platform's state.
+pub(crate) fn open_source_document_dialog_in(
+    workspace: Workspace,
+    model: &Model,
+    code: &mut CodeWorkspaceRuntimeState,
+    netlist: &NetlistDocumentState,
+    platform: &PlatformState,
+) -> Result<(), String> {
+    let Some(language) = visible_language_in(workspace, model, code) else {
+        if !platform.project_lifecycle.is_open() {
             return Err("Open a project before managing its top decks.".to_owned());
         }
-        if let Some(refusal) = generated_deck_refusal(&state.model, &state.code.netlist) {
+        if let Some(refusal) = generated_deck_refusal(model, netlist) {
             return Err(refusal.to_owned());
         }
-        state.code.code_workspace.source_document_dialog = true;
+        code.source_document_dialog = true;
         return Ok(());
     };
-    if state
-        .model
-        .workspace
-        .active_source_bundle(language)
-        .is_none()
-    {
+    if model.workspace.active_source_bundle(language).is_none() {
         return Err(format!(
             "This project owns no {} source workspace yet.",
             language.label()
         ));
     }
-    state.code.code_workspace.source_document_dialog = true;
+    code.source_document_dialog = true;
     Ok(())
 }
 
@@ -82,14 +96,31 @@ pub(crate) fn open_source_document_dialog(state: &mut AppState) -> Result<(), St
 /// a project that owns no deck yet, the one [`generated_deck_refusal`]
 /// sends here.
 pub(crate) fn begin_new_top_deck(state: &mut AppState) -> Result<(), String> {
-    if !state.platform.project_lifecycle.is_open() {
+    begin_new_top_deck_in(
+        &state.model,
+        &mut state.code.code_workspace,
+        &mut state.code.netlist,
+        &state.platform,
+    )
+}
+
+/// [`begin_new_top_deck`], over the model, the Code workspace's runtime
+/// state, the netlist editor's state and the platform's state.
+pub(crate) fn begin_new_top_deck_in(
+    model: &Model,
+    code: &mut CodeWorkspaceRuntimeState,
+    netlist: &mut NetlistDocumentState,
+    platform: &PlatformState,
+) -> Result<(), String> {
+    if !platform.project_lifecycle.is_open() {
         return Err("Open a project before creating its top deck.".to_owned());
     }
-    crate::workbench::documents::netlist_document::begin_netlist_lifecycle_action(
-        state,
+    crate::workbench::documents::netlist_document::begin_netlist_lifecycle_action_in(
+        model,
+        netlist,
         CodeSourceFileAction::New,
     )?;
-    state.code.code_workspace.source_document_dialog = true;
+    code.source_document_dialog = true;
     Ok(())
 }
 
@@ -125,17 +156,8 @@ pub(crate) fn generated_deck_refusal(
 
 /// The source language of the document the dialog manages: a Verilog-A cell
 /// view open in Design, else the Netlist workspace's page, where `None` is the
-/// deck.
-fn visible_language(state: &AppState) -> Option<ProjectSourceLanguage> {
-    visible_language_in(
-        state.workbench.workspace,
-        &state.model,
-        &state.code.code_workspace,
-    )
-}
-
-/// [`visible_language`], over the workspace in front, the model and the Code
-/// workspace's runtime state.
+/// deck. It reads the workspace in front, the model and the Code workspace's
+/// runtime state.
 fn visible_language_in(
     workspace: Workspace,
     model: &Model,

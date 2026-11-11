@@ -1105,40 +1105,44 @@ fn generated_primary_unavailable(state: &AppState) -> bool {
 }
 
 fn generated_primary_ready(state: &AppState) -> bool {
-    state.model.netlist_artifacts.generated_document.is_some()
-        && !state.model.netlist_artifacts.generated_source.is_empty()
+    generated_primary_ready_in(&state.model)
 }
 
-fn active_document_available(state: &AppState) -> bool {
-    if state.code.netlist.active_dependency_identity.is_some() {
-        return crate::workbench::documents::netlist_document::active_dependency(state).is_some();
+/// [`generated_primary_ready`], over the model.
+fn generated_primary_ready_in(model: &crate::workbench::app_state::Model) -> bool {
+    model.netlist_artifacts.generated_document.is_some()
+        && !model.netlist_artifacts.generated_source.is_empty()
+}
+
+fn active_document_available(
+    model: &crate::workbench::app_state::Model,
+    netlist: &crate::workbench::documents::netlist_document::NetlistDocumentState,
+    runs: &rspice_app_runs::workbench::slots::runs::RunsState,
+) -> bool {
+    if netlist.active_dependency_identity.is_some() {
+        return crate::workbench::documents::netlist_document::active_dependency_in(model, netlist)
+            .is_some();
     }
-    match state.code.netlist.active_document {
-        ActiveNetlistDocument::Generated => generated_primary_ready(state),
-        ActiveNetlistDocument::OwnedSource => {
-            state.model.workspace.content.netlist_source.is_some()
-        }
-        ActiveNetlistDocument::GeneratedDiff => {
-            !state.code.netlist.generated_diff_source.is_empty()
-        }
+    match netlist.active_document {
+        ActiveNetlistDocument::Generated => generated_primary_ready_in(model),
+        ActiveNetlistDocument::OwnedSource => model.workspace.content.netlist_source.is_some(),
+        ActiveNetlistDocument::GeneratedDiff => !netlist.generated_diff_source.is_empty(),
         ActiveNetlistDocument::RunSnapshot => {
-            crate::workbench::documents::netlist_document::run_deck_snapshot_run_id(state).is_some()
+            crate::workbench::documents::netlist_document::run_deck_snapshot_run_id_in(runs)
+                .is_some()
         }
     }
 }
 
-fn generation_block_reason(state: &AppState) -> String {
-    state
-        .model
+fn generation_block_reason(
+    model: &crate::workbench::app_state::Model,
+    messages: crate::workbench::MessageCatalog,
+) -> String {
+    model
         .netlist_artifacts
         .generation_error
         .clone()
-        .unwrap_or_else(|| {
-            state
-                .workbench
-                .messages()
-                .text(MessageId::NetlistGenerateBeforeAction)
-        })
+        .unwrap_or_else(|| messages.text(MessageId::NetlistGenerateBeforeAction))
 }
 /// What is wrong with the active document, or `None` when nothing is.
 ///
@@ -1146,24 +1150,24 @@ fn generation_block_reason(state: &AppState) -> String {
 /// are the ordinary cases. The toolbar used to announce each of them in green;
 /// the tab already names the document, so the status now speaks only when the
 /// deck cannot be generated or will not parse.
-fn document_syntax_status(state: &AppState) -> Option<(String, Problem)> {
-    let messages = state.workbench.messages();
+fn document_syntax_status(
+    model: &crate::workbench::app_state::Model,
+    netlist: &crate::workbench::documents::netlist_document::NetlistDocumentState,
+    messages: crate::workbench::MessageCatalog,
+) -> Option<(String, Problem)> {
     if matches!(
-        state.code.netlist.active_document,
+        netlist.active_document,
         ActiveNetlistDocument::GeneratedDiff | ActiveNetlistDocument::RunSnapshot
     ) {
         return None;
     }
-    if state.code.netlist.active_document == ActiveNetlistDocument::Generated
-        && (state.model.netlist_artifacts.generation_error.is_some()
-            || !generated_primary_ready(state)
-            || state.model.netlist_artifacts.generated_input_digest
-                != state
-                    .model
-                    .netlist_artifacts
-                    .current_generation_input_digest)
+    if netlist.active_document == ActiveNetlistDocument::Generated
+        && (model.netlist_artifacts.generation_error.is_some()
+            || !generated_primary_ready_in(model)
+            || model.netlist_artifacts.generated_input_digest
+                != model.netlist_artifacts.current_generation_input_digest)
     {
-        let retained_artifact = generated_primary_ready(state);
+        let retained_artifact = generated_primary_ready_in(model);
         return Some((
             if retained_artifact {
                 messages.text(MessageId::NetlistGenerationStaleBlocked)
@@ -1173,9 +1177,7 @@ fn document_syntax_status(state: &AppState) -> Option<(String, Problem)> {
             Problem::Warning,
         ));
     }
-    let errors = state
-        .code
-        .netlist
+    let errors = netlist
         .diagnostics
         .iter()
         .filter(|diagnostic| {
@@ -1506,7 +1508,11 @@ mod tests {
         assert!(generated_primary_unavailable(&state));
         assert!(!generated_primary_ready(&state));
         assert_eq!(
-            document_syntax_status(&state),
+            document_syntax_status(
+                &state.model,
+                &state.code.netlist,
+                state.workbench.messages()
+            ),
             Some(("generation blocked".to_owned(), Problem::Warning))
         );
     }
@@ -1521,7 +1527,11 @@ mod tests {
         assert!(!generated_primary_unavailable(&state));
         assert!(generated_primary_ready(&state));
         assert_eq!(
-            document_syntax_status(&state),
+            document_syntax_status(
+                &state.model,
+                &state.code.netlist,
+                state.workbench.messages()
+            ),
             Some(("stale · generation blocked".to_owned(), Problem::Warning))
         );
     }
@@ -1537,9 +1547,17 @@ mod tests {
         assert!(state.model.netlist_artifacts.generated_document.is_some());
         assert!(generated_primary_unavailable(&state));
         assert!(!generated_primary_ready(&state));
-        assert!(!active_document_available(&state));
+        assert!(!active_document_available(
+            &state.model,
+            &state.code.netlist,
+            &state.runs
+        ));
         assert_eq!(
-            document_syntax_status(&state),
+            document_syntax_status(
+                &state.model,
+                &state.code.netlist,
+                state.workbench.messages()
+            ),
             Some(("generation blocked".to_owned(), Problem::Warning))
         );
     }

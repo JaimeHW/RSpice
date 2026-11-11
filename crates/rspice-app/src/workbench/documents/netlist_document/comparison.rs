@@ -203,29 +203,34 @@ pub fn restore_owned_revision(state: &mut AppState, index: usize) -> Result<(), 
 /// The working deck is the retained project source, not the document that was
 /// on screen: leaving a viewer must never overwrite an edit the engineer has
 /// not saved yet.
-fn return_to_working_deck(state: &mut AppState, root: ActiveNetlistDocument) {
-    state.code.netlist.active_dependency_identity = None;
-    state.code.netlist.active_dependency_root = None;
-    match (root, state.model.workspace.content.netlist_source.clone()) {
+fn return_to_working_deck(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    root: ActiveNetlistDocument,
+) {
+    netlist.active_dependency_identity = None;
+    netlist.active_dependency_root = None;
+    match (root, model.workspace.content.netlist_source.clone()) {
         (ActiveNetlistDocument::OwnedSource, Some(source)) => {
-            state.code.netlist.active_document = ActiveNetlistDocument::OwnedSource;
-            state.model.simulation.source.netlist_content = source;
+            netlist.active_document = ActiveNetlistDocument::OwnedSource;
+            model.simulation.source.netlist_content = source;
         }
         _ => {
-            state.code.netlist.active_document = ActiveNetlistDocument::Generated;
-            state.model.simulation.source.netlist_content =
-                state.model.netlist_artifacts.generated_source.clone();
+            netlist.active_document = ActiveNetlistDocument::Generated;
+            model.simulation.source.netlist_content =
+                model.netlist_artifacts.generated_source.clone();
         }
     }
-    state.code.netlist.active_document_initialized = true;
-    state.code.netlist.completion_open = false;
-    state.code.netlist.revision = state.code.netlist.revision.wrapping_add(1);
-    state.model.invalidate_source_evidence();
+    netlist.active_document_initialized = true;
+    netlist.completion_open = false;
+    netlist.revision = netlist.revision.wrapping_add(1);
+    model.invalidate_source_evidence();
 }
 
-pub fn close_revision_comparison(state: &mut AppState) -> bool {
-    return_to_working_deck(state, state.code.netlist.comparison_return_document);
-    state.code.netlist.generated_diff_source.clear();
+pub fn close_revision_comparison(model: &mut Model, netlist: &mut NetlistDocumentState) -> bool {
+    let root = netlist.comparison_return_document;
+    return_to_working_deck(model, netlist, root);
+    netlist.generated_diff_source.clear();
     true
 }
 
@@ -237,12 +242,7 @@ fn short_digest(digest: crate::product::ContentDigest) -> String {
 ///
 /// Both halves are required: a run binding without its sealed text is a
 /// snapshot that cannot show a deck, and text without a run is a deck that
-/// cannot name what executed it.
-pub(crate) fn run_deck_snapshot_run_id(state: &AppState) -> Option<u64> {
-    run_deck_snapshot_run_id_in(&state.runs)
-}
-
-/// [`run_deck_snapshot_run_id`], over the runs.
+/// cannot name what executed it. It reads the runs.
 pub(crate) fn run_deck_snapshot_run_id_in(runs: &RunsState) -> Option<u64> {
     let run_id = runs.manual_run.last_run_id?;
     runs.manual_run
@@ -386,12 +386,16 @@ fn project_run_snapshot_in(
 }
 
 /// Leave the run snapshot for the working deck it was opened from.
-pub(crate) fn close_run_deck_snapshot(state: &mut AppState) -> bool {
-    if state.code.netlist.active_document != ActiveNetlistDocument::RunSnapshot {
+pub(crate) fn close_run_deck_snapshot(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+) -> bool {
+    if netlist.active_document != ActiveNetlistDocument::RunSnapshot {
         return false;
     }
-    state.code.netlist.executed_deck_view = None;
-    return_to_working_deck(state, state.code.netlist.run_snapshot_return_document);
+    netlist.executed_deck_view = None;
+    let root = netlist.run_snapshot_return_document;
+    return_to_working_deck(model, netlist, root);
     true
 }
 

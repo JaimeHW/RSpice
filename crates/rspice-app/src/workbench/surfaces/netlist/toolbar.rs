@@ -177,14 +177,15 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) -> CodeToolbarLayou
         crate::workbench::documents::netlist_document::active_dependency(&app.state)
             .map(crate::state::DependencyMetadata::authority);
     let generated_ready = generated_primary_ready(&app.state);
-    let active_available = active_document_available(&app.state);
+    let active_available =
+        active_document_available(&app.state.model, &app.state.code.netlist, &app.state.runs);
     let active_editable =
         crate::workbench::documents::netlist_document::active_netlist_source_is_editable(
             &app.state,
         );
     let quick_fix_available =
         crate::workbench::documents::netlist_document::language::preferred_quick_fix_available(
-            &app.state,
+            &app.state.code.netlist,
         );
     let full_action_width = full_action_extent(
         ui,
@@ -261,7 +262,7 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) -> CodeToolbarLayou
     } else {
         language
     };
-    let status = document_syntax_status(&app.state)
+    let status = document_syntax_status(&app.state.model, &app.state.code.netlist, messages)
         .filter(|(_, problem)| toolbar_status_visible(phone, *problem));
     // Nothing is advised when the count is zero, and "0 advisories" is not
     // news: the label appears only once there is something in it.
@@ -407,8 +408,8 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) -> CodeToolbarLayou
                         let primary_ready = source_exists
                             || generated_ready
                             || app.state.platform.project_lifecycle.is_open();
-                        let primary = ui
-                            .add_enabled_ui(primary_ready, |ui| {
+                        let primary =
+                            ui.add_enabled_ui(primary_ready, |ui| {
                                 ui.add_sized(
                                     [PHONE_PRIMARY_WIDTH, 28.0],
                                     egui::Button::new(&label).truncate(),
@@ -416,7 +417,9 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) -> CodeToolbarLayou
                             })
                             .inner
                             .on_hover_text(full_label)
-                            .on_disabled_hover_text(generation_block_reason(&app.state));
+                            .on_disabled_hover_text(
+                                generation_block_reason(&app.state.model, messages),
+                            );
                         if primary.clicked() {
                             action = Some(candidate);
                         }
@@ -542,7 +545,9 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) -> CodeToolbarLayou
                                 .clicked();
                             })
                             .response
-                            .on_disabled_hover_text(generation_block_reason(&app.state));
+                            .on_disabled_hover_text(
+                                generation_block_reason(&app.state.model, messages),
+                            );
                         }
                         if override_clicked {
                             action = Some(NetlistToolbarAction::OpenOwnershipDialog(
@@ -572,12 +577,14 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) -> CodeToolbarLayou
                         let primary_ready = source_exists
                             || generated_ready
                             || app.state.platform.project_lifecycle.is_open();
-                        let response = ui
-                            .add_enabled(
+                        let response =
+                            ui.add_enabled(
                                 primary_ready,
                                 egui::Button::new(&label).min_size(vec2(0.0, 28.0)),
                             )
-                            .on_disabled_hover_text(generation_block_reason(&app.state));
+                            .on_disabled_hover_text(
+                                generation_block_reason(&app.state.model, messages),
+                            );
                         if response.clicked() {
                             action = Some(candidate);
                         }
@@ -742,11 +749,15 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) -> CodeToolbarLayou
         }
         Some(NetlistToolbarAction::CloseComparison) => {
             crate::workbench::documents::netlist_document::close_revision_comparison(
-                &mut app.state,
+                &mut app.state.model,
+                &mut app.state.code.netlist,
             );
         }
         Some(NetlistToolbarAction::CloseRunSnapshot) => {
-            crate::workbench::documents::netlist_document::close_run_deck_snapshot(&mut app.state);
+            crate::workbench::documents::netlist_document::close_run_deck_snapshot(
+                &mut app.state.model,
+                &mut app.state.code.netlist,
+            );
         }
         Some(NetlistToolbarAction::RunDeck) => {
             app.execute_command_key(crate::workbench::framework::command_registry::ids::RUN_SIMULATION);
@@ -782,7 +793,12 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) -> CodeToolbarLayou
             }
         }
         Some(NetlistToolbarAction::OpenOwnershipDialog(strategy)) => {
-            open_ownership_dialog(&mut app.state, strategy);
+            open_ownership_dialog(
+                &mut app.state.model,
+                &mut app.state.code.netlist,
+                &mut app.state.workbench,
+                strategy,
+            );
         }
         Some(NetlistToolbarAction::Validate) => {
             app.execute_command_key(crate::workbench::code::commands::CodeCommand::ValidateCodeDocument.key());
@@ -806,13 +822,18 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) -> CodeToolbarLayou
         Some(NetlistToolbarAction::GoToDeclaration) => {
             let answer =
                 crate::workbench::documents::netlist_document::language::go_to_declaration_at_cursor(
-                    &mut app.state,
+                    &mut app.state.model,
+                    &mut app.state.code.netlist,
+                    &mut app.state.code.netlist_open_documents,
+                    &mut app.state.runs,
+                    &mut app.state.workbench,
                 );
             app.state.prompt(answer.unwrap_or_else(|refusal| refusal));
         }
         Some(NetlistToolbarAction::SignatureHelp) => {
             match crate::workbench::documents::netlist_document::language::show_signature_help_at_cursor(
-                &mut app.state,
+                &app.state.model,
+                &mut app.state.code.netlist,
             ) {
                 Ok(message) => {
                     ui.ctx().memory_mut(|memory| {
@@ -842,7 +863,9 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) -> CodeToolbarLayou
         Some(NetlistToolbarAction::WorkspaceSymbols) => {
             let answer =
                 crate::workbench::documents::netlist_document::language::open_workspace_symbols(
-                    &mut app.state,
+                    &app.state.model,
+                    &mut app.state.code.netlist,
+                    &mut app.state.workbench,
                 );
             app.state.prompt(answer.unwrap_or_else(|refusal| refusal));
         }

@@ -487,7 +487,10 @@ fn owned_netlist_history_compare_and_restore_are_persisted_and_monotonic() {
             .netlist_content
             .contains("-V1 out 0 1")
     );
-    crate::workbench::documents::netlist_document::close_revision_comparison(&mut state);
+    crate::workbench::documents::netlist_document::close_revision_comparison(
+        &mut state.model,
+        &mut state.code.netlist,
+    );
     assert_eq!(state.model.simulation.source.netlist_content, modified);
 
     crate::workbench::documents::netlist_document::restore_owned_revision(&mut state, 0)

@@ -349,20 +349,12 @@ impl RSpiceApp {
     }
 
     pub(crate) fn manual_deck_run_block_reason(&self) -> Option<String> {
-        if let Some(reason) = self.state.manual_deck_run_block_reason() {
-            return Some(reason);
-        }
-        let receipt = self.state.model.netlist_artifacts.validation.as_ref()?;
-        if !self
-            .simulation_controller
-            .has_retained_manual_authorization(receipt.prepared_snapshot_digest)
-        {
-            return Some(
-                "Validate the current netlist again before running; the earlier validation can no longer be used"
-                    .to_owned(),
-            );
-        }
-        None
+        crate::workbench::documents::netlist_document::manual_deck_run_block_reason_for_run(
+            &self.state.model,
+            &self.state.code.netlist,
+            self.state.workbench.messages(),
+            &self.simulation_controller,
+        )
     }
 
     #[cfg(test)]

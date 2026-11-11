@@ -25,13 +25,9 @@ use rspice_app_runs::workbench::slots::runs::RunsState;
 ///
 /// An executed deck this session no longer holds resolves to nothing rather
 /// than to the manual baseline. Silently substituting a different document
-/// under the same header is the one outcome worse than an empty viewer.
-pub(crate) fn run_snapshot_source(state: &AppState) -> String {
-    run_snapshot_source_in(&state.model, &state.code.netlist, &state.runs)
-}
-
-/// [`run_snapshot_source`], over the model, the netlist editor's state and
-/// the runs that sealed the deck.
+/// under the same header is the one outcome worse than an empty viewer. It
+/// reads the model, the netlist editor's state and the runs that sealed the
+/// deck.
 pub(crate) fn run_snapshot_source_in(
     model: &Model,
     netlist: &NetlistDocumentState,

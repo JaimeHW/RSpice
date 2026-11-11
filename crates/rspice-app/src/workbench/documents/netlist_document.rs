@@ -39,7 +39,7 @@ pub(crate) use import_review::{
     NetlistImportReviewState,
 };
 pub(crate) use navigation::{open_diagnostic_location, open_source_location};
-pub(crate) use owned_source::open_owned_source;
+pub(crate) use owned_source::{open_owned_source, open_owned_source_in};
 pub(crate) use relink::{
     NetlistDependencyRelinkState, begin_dependency_relink, cancel_dependency_relink,
     commit_dependency_relink,
@@ -51,14 +51,14 @@ pub use comparison::{
 };
 pub(crate) use comparison::{
     close_run_deck_snapshot, open_netlist_comparison, open_run_deck_snapshot_in,
-    run_deck_snapshot_artifact_name_in, run_deck_snapshot_run_id, run_deck_snapshot_run_id_in,
+    run_deck_snapshot_artifact_name_in, run_deck_snapshot_run_id_in,
 };
 pub(crate) use comparison::{compare_generated_revision, compare_owned_revision};
 pub use diagnostics::{DiagnosticSeverity, control_disposition_summary};
 pub(crate) use editor::editor_id;
 pub use editor::show as show_editor;
+pub(crate) use executed_deck::run_snapshot_source_in;
 pub use executed_deck::{ExecutedDeckSelection, ExecutedDeckVerification};
-pub(crate) use executed_deck::{run_snapshot_source, run_snapshot_source_in};
 pub(crate) use source_index::{root_deck_source_index, visible_source_index_in};
 
 /// Exact, derived state of one project-owned netlist publication.
@@ -865,6 +865,28 @@ pub(crate) fn working_deck_source_in<'a>(
     }
 }
 
+/// Why Run on the Netlist workspace will not run the deck: what
+/// [`manual_deck_run_block_reason_in`] finds, then a validation whose
+/// authorization the run controller no longer holds.
+pub(crate) fn manual_deck_run_block_reason_for_run(
+    model: &Model,
+    netlist: &NetlistDocumentState,
+    messages: crate::workbench::MessageCatalog,
+    controller: &rspice_app_runs::simulation::SimulationController,
+) -> Option<String> {
+    if let Some(reason) = manual_deck_run_block_reason_in(model, netlist, messages) {
+        return Some(reason);
+    }
+    let receipt = model.netlist_artifacts.validation.as_ref()?;
+    if !controller.has_retained_manual_authorization(receipt.prepared_snapshot_digest) {
+        return Some(
+            "Validate the current netlist again before running; the earlier validation can no longer be used"
+                .to_owned(),
+        );
+    }
+    None
+}
+
 /// User-facing reason the Netlist workspace cannot run the current deck. It
 /// reads the model, the netlist editor's state and the message catalogue.
 pub(crate) fn manual_deck_run_block_reason_in(
@@ -1022,30 +1044,38 @@ pub(crate) fn open_netlist_dependency_from_root_in(
 
 /// Return from an include document to its exact generated or owned root.
 pub fn close_active_dependency(state: &mut AppState) -> bool {
-    let Some(root) = state.code.netlist.active_dependency_root.take() else {
+    close_active_dependency_in(&mut state.model, &mut state.code.netlist, &mut state.runs)
+}
+
+/// [`close_active_dependency`], over the model, the netlist editor's state
+/// and the runs.
+pub(crate) fn close_active_dependency_in(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    runs: &mut RunsState,
+) -> bool {
+    let Some(root) = netlist.active_dependency_root.take() else {
         return false;
     };
-    state.code.netlist.active_dependency_identity = None;
-    state.code.netlist.active_document = root;
-    state.model.simulation.source.netlist_content = match root {
-        ActiveNetlistDocument::Generated => state.model.netlist_artifacts.generated_source.clone(),
-        ActiveNetlistDocument::OwnedSource => state
-            .code
-            .netlist
+    netlist.active_dependency_identity = None;
+    netlist.active_document = root;
+    model.simulation.source.netlist_content = match root {
+        ActiveNetlistDocument::Generated => model.netlist_artifacts.generated_source.clone(),
+        ActiveNetlistDocument::OwnedSource => netlist
             .owned_document
             .as_ref()
             .map(|document| document.source().to_owned())
-            .or_else(|| state.model.workspace.content.netlist_source.clone())
+            .or_else(|| model.workspace.content.netlist_source.clone())
             .unwrap_or_default(),
-        ActiveNetlistDocument::GeneratedDiff => state.code.netlist.generated_diff_source.clone(),
-        ActiveNetlistDocument::RunSnapshot => run_snapshot_source(state),
+        ActiveNetlistDocument::GeneratedDiff => netlist.generated_diff_source.clone(),
+        ActiveNetlistDocument::RunSnapshot => run_snapshot_source_in(model, netlist, runs),
     };
-    state.code.netlist.requested_line = None;
-    state.code.netlist.cursor_line = 0;
-    state.code.netlist.completion_open = false;
-    state.code.netlist.revision = state.code.netlist.revision.wrapping_add(1);
-    state.model.invalidate_source_evidence();
-    refresh_diff_pips_from_baseline(state);
+    netlist.requested_line = None;
+    netlist.cursor_line = 0;
+    netlist.completion_open = false;
+    netlist.revision = netlist.revision.wrapping_add(1);
+    model.invalidate_source_evidence();
+    refresh_diff_pips_from_baseline_in(model, runs);
     true
 }
 
@@ -1611,13 +1641,23 @@ pub(crate) fn begin_netlist_lifecycle_action(
     state: &mut AppState,
     action: CodeSourceFileAction,
 ) -> Result<(), String> {
-    if state.code.netlist.active_dependency_identity.is_some() {
+    begin_netlist_lifecycle_action_in(&state.model, &mut state.code.netlist, action)
+}
+
+/// [`begin_netlist_lifecycle_action`], over the model and the netlist
+/// editor's state.
+pub(crate) fn begin_netlist_lifecycle_action_in(
+    model: &Model,
+    netlist: &mut NetlistDocumentState,
+    action: CodeSourceFileAction,
+) -> Result<(), String> {
+    if netlist.active_dependency_identity.is_some() {
         return Err(
             "Return to the owned root deck before changing a top-level deck lifecycle.".to_owned(),
         );
     }
-    let descriptor = state.model.workspace.content.netlist_descriptor.as_ref();
-    let document = state.model.workspace.content.netlist_document.as_ref();
+    let descriptor = model.workspace.content.netlist_descriptor.as_ref();
+    let document = model.workspace.content.netlist_document.as_ref();
     if descriptor.is_some() != document.is_some() {
         return Err("The active top-deck descriptor and document are inconsistent.".to_owned());
     }
@@ -1626,7 +1666,7 @@ pub(crate) fn begin_netlist_lifecycle_action(
     }
     let existing_artifact_name = descriptor.map(|descriptor| descriptor.artifact_name.clone());
     let proposed_path = match action {
-        CodeSourceFileAction::New => unique_top_deck_path(state, "untitled.cir"),
+        CodeSourceFileAction::New => unique_top_deck_path(model, "untitled.cir"),
         CodeSourceFileAction::Rename | CodeSourceFileAction::Move => existing_artifact_name
             .clone()
             .ok_or_else(|| "The active top-deck descriptor disappeared.".to_owned())?,
@@ -1634,13 +1674,13 @@ pub(crate) fn begin_netlist_lifecycle_action(
             let artifact_name = existing_artifact_name
                 .as_deref()
                 .ok_or_else(|| "The active top-deck descriptor disappeared.".to_owned())?;
-            duplicate_top_deck_path(state, artifact_name)
+            duplicate_top_deck_path(model, artifact_name)
         }
         CodeSourceFileAction::Delete => String::new(),
     };
-    state.code.netlist.lifecycle_dialog.transaction = Some(NetlistLifecycleTransaction {
+    netlist.lifecycle_dialog.transaction = Some(NetlistLifecycleTransaction {
         action,
-        project_id: state.model.workspace.content.project.id(),
+        project_id: model.workspace.content.project.id(),
         deck_id: descriptor.map(|descriptor| descriptor.deck_id),
         document_id: document.map(crate::state::NetlistDocument::id),
         document_revision: document.map(crate::state::NetlistDocument::revision),
@@ -1699,7 +1739,7 @@ pub(crate) fn commit_netlist_lifecycle_action(state: &mut AppState) -> Result<St
     let message = match transaction.action {
         CodeSourceFileAction::New => {
             let path = normalized_top_deck_path(&transaction.proposed_path)?;
-            ensure_top_deck_path_available(&candidate, &path, None)?;
+            ensure_top_deck_path_available(&candidate.model, &path, None)?;
             let source = "* New RSpice top deck\n.end\n".to_owned();
             let next = crate::state::NetlistDocument::from_authored_source(
                 crate::state::NetlistDocumentId::new(),
@@ -1735,7 +1775,7 @@ pub(crate) fn commit_netlist_lifecycle_action(state: &mut AppState) -> Result<St
                         .to_owned(),
                 );
             }
-            ensure_top_deck_path_available(&candidate, &path, transaction.deck_id)?;
+            ensure_top_deck_path_available(&candidate.model, &path, transaction.deck_id)?;
             candidate
                 .model
                 .workspace
@@ -1749,7 +1789,7 @@ pub(crate) fn commit_netlist_lifecycle_action(state: &mut AppState) -> Result<St
         }
         CodeSourceFileAction::Move => {
             let path = normalized_top_deck_path(&transaction.proposed_path)?;
-            ensure_top_deck_path_available(&candidate, &path, transaction.deck_id)?;
+            ensure_top_deck_path_available(&candidate.model, &path, transaction.deck_id)?;
             candidate
                 .model
                 .workspace
@@ -1763,7 +1803,7 @@ pub(crate) fn commit_netlist_lifecycle_action(state: &mut AppState) -> Result<St
         }
         CodeSourceFileAction::Duplicate => {
             let path = normalized_top_deck_path(&transaction.proposed_path)?;
-            ensure_top_deck_path_available(&candidate, &path, None)?;
+            ensure_top_deck_path_available(&candidate.model, &path, None)?;
             let current = candidate
                 .model
                 .workspace
@@ -1990,12 +2030,11 @@ fn top_deck_parent(path: &str) -> &str {
 }
 
 fn ensure_top_deck_path_available(
-    state: &AppState,
+    model: &Model,
     path: &str,
     except: Option<uuid::Uuid>,
 ) -> Result<(), String> {
-    let conflicts_with_active = state
-        .model
+    let conflicts_with_active = model
         .workspace
         .content
         .netlist_descriptor
@@ -2004,24 +2043,24 @@ fn ensure_top_deck_path_available(
             Some(descriptor.deck_id) != except
                 && descriptor.artifact_name.eq_ignore_ascii_case(path)
         });
-    let conflicts_with_retained = state
-        .model
-        .workspace
-        .content
-        .retained_netlist_decks
-        .iter()
-        .any(|deck| {
-            Some(deck.descriptor.deck_id) != except
-                && deck.descriptor.artifact_name.eq_ignore_ascii_case(path)
-        });
+    let conflicts_with_retained =
+        model
+            .workspace
+            .content
+            .retained_netlist_decks
+            .iter()
+            .any(|deck| {
+                Some(deck.descriptor.deck_id) != except
+                    && deck.descriptor.artifact_name.eq_ignore_ascii_case(path)
+            });
     if conflicts_with_active || conflicts_with_retained {
         return Err(format!("A project top deck already owns path {path}."));
     }
     Ok(())
 }
 
-fn unique_top_deck_path(state: &AppState, preferred: &str) -> String {
-    if ensure_top_deck_path_available(state, preferred, None).is_ok() {
+fn unique_top_deck_path(model: &Model, preferred: &str) -> String {
+    if ensure_top_deck_path_available(model, preferred, None).is_ok() {
         return preferred.to_owned();
     }
     let (parent, leaf) = preferred
@@ -2043,7 +2082,7 @@ fn unique_top_deck_path(state: &AppState, preferred: &str) -> String {
         } else {
             format!("{parent}/{leaf}")
         };
-        if ensure_top_deck_path_available(state, &candidate, None).is_ok() {
+        if ensure_top_deck_path_available(model, &candidate, None).is_ok() {
             return candidate;
         }
     }
@@ -2051,10 +2090,10 @@ fn unique_top_deck_path(state: &AppState, preferred: &str) -> String {
 }
 
 pub(crate) fn available_top_deck_path(state: &AppState, preferred: &str) -> String {
-    unique_top_deck_path(state, preferred)
+    unique_top_deck_path(&state.model, preferred)
 }
 
-fn duplicate_top_deck_path(state: &AppState, source: &str) -> String {
+fn duplicate_top_deck_path(model: &Model, source: &str) -> String {
     let (parent, leaf) = source.rsplit_once('/').map_or(("", source), |value| value);
     let path = std::path::Path::new(leaf);
     let stem = path
@@ -2067,7 +2106,7 @@ fn duplicate_top_deck_path(state: &AppState, source: &str) -> String {
         |extension| format!("{stem}_copy.{extension}"),
     );
     unique_top_deck_path(
-        state,
+        model,
         &if parent.is_empty() {
             candidate
         } else {
@@ -2132,8 +2171,17 @@ impl Default for NetlistSaveDialogState {
 }
 
 pub(crate) fn open_netlist_save_dialog(state: &mut AppState, save_as: bool) {
-    let encoding = state
-        .model
+    open_netlist_save_dialog_in(&state.model, &mut state.code.netlist, save_as);
+}
+
+/// [`open_netlist_save_dialog`], over the model and the netlist editor's
+/// state.
+pub(crate) fn open_netlist_save_dialog_in(
+    model: &Model,
+    netlist: &mut NetlistDocumentState,
+    save_as: bool,
+) {
+    let encoding = model
         .workspace
         .content
         .netlist_descriptor
@@ -2141,10 +2189,10 @@ pub(crate) fn open_netlist_save_dialog(state: &mut AppState, save_as: bool) {
         .map_or(crate::state::NetlistTextEncoding::Utf8, |descriptor| {
             descriptor.source_encoding
         });
-    state.code.netlist.save_dialog.open = true;
-    state.code.netlist.save_dialog.save_as = save_as;
-    state.code.netlist.save_dialog.encoding = encoding;
-    state.code.netlist.save_dialog.error = None;
+    netlist.save_dialog.open = true;
+    netlist.save_dialog.save_as = save_as;
+    netlist.save_dialog.encoding = encoding;
+    netlist.save_dialog.error = None;
 }
 
 #[derive(Debug, Clone)]
@@ -2382,11 +2430,16 @@ pub fn prepare(state: &mut AppState) {
 }
 
 pub(super) fn refresh_diff_pips_from_baseline(state: &mut AppState) {
-    let Some(baseline) = state.runs.manual_run.last_run_buffer.as_deref() else {
+    refresh_diff_pips_from_baseline_in(&state.model, &mut state.runs);
+}
+
+/// [`refresh_diff_pips_from_baseline`], over the model and the runs.
+fn refresh_diff_pips_from_baseline_in(model: &Model, runs: &mut RunsState) {
+    let Some(baseline) = runs.manual_run.last_run_buffer.as_deref() else {
         return;
     };
-    state.runs.manual_run.edited_lines = baseline::changed_lines_against_baseline(
-        &state.model.simulation.source.netlist_content,
+    runs.manual_run.edited_lines = baseline::changed_lines_against_baseline(
+        &model.simulation.source.netlist_content,
         baseline,
     );
 }

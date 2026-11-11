@@ -810,21 +810,8 @@ pub(crate) fn symbol_hover(state: &mut AppState, name: &str) -> Option<ProjectSy
     }
 }
 
-pub(crate) fn open_project_location(
-    state: &mut AppState,
-    location: &ProjectSourceLocation,
-) -> Result<(), String> {
-    open_project_location_in(
-        &mut state.model,
-        &mut state.code.netlist,
-        &mut state.code.netlist_open_documents,
-        &mut state.runs,
-        location,
-    )
-}
-
-/// [`open_project_location`], over the model, the netlist editor's state, the
-/// include tabs the reader opened and the runs.
+/// Open `location` in the editor. It reads the model, the netlist editor's
+/// state, the include tabs the reader opened and the runs.
 pub(crate) fn open_project_location_in(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
@@ -871,15 +858,33 @@ pub(crate) fn open_project_location_in(
 }
 
 pub(crate) fn go_to_definition_at_cursor(state: &mut AppState) -> Result<String, String> {
+    go_to_definition_at_cursor_in(
+        &mut state.model,
+        &mut state.code.netlist,
+        &mut state.code.netlist_open_documents,
+        &mut state.runs,
+        &mut state.workbench,
+    )
+}
+
+/// [`go_to_definition_at_cursor`], over the model, the netlist editor's
+/// state, the include tabs the reader opened, the runs and the session.
+pub(crate) fn go_to_definition_at_cursor_in(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut std::collections::HashSet<crate::workbench::state::WorkspaceDocumentId>,
+    runs: &mut RunsState,
+    workbench: &mut rspice_app_workbench::workbench::state::WorkbenchSession,
+) -> Result<String, String> {
     let symbol = symbol_at_cursor(
-        &state.model.simulation.source.netlist_content,
-        state.code.netlist.cursor_char_index,
+        &model.simulation.source.netlist_content,
+        netlist.cursor_char_index,
     )
     .ok_or_else(|| {
         "Place the caret on a model, subcircuit, parameter, or function name.".to_owned()
     })?;
-    let index =
-        project_index(state).ok_or_else(|| "The active source has no project index.".to_owned())?;
+    let index = project_index_in(model, netlist)
+        .ok_or_else(|| "The active source has no project index.".to_owned())?;
     let definitions = index
         .definitions_named(&symbol)
         .into_iter()
@@ -890,12 +895,12 @@ pub(crate) fn go_to_definition_at_cursor(state: &mut AppState) -> Result<String,
             "No definition for '{symbol}' exists in the project's sources."
         )),
         [definition] => {
-            open_project_location(state, definition)?;
+            open_project_location_in(model, netlist, open_documents, runs, definition)?;
             Ok(format!("Opened definition of {symbol}"))
         }
         _ => {
-            state.workbench.navigator_visible = true;
-            state.workbench.set_navigator_filter(symbol.clone());
+            workbench.navigator_visible = true;
+            workbench.set_navigator_filter(symbol.clone());
             Ok(format!(
                 "Found {} definitions of {symbol}; the navigator lists where each one is.",
                 definitions.len()
@@ -904,13 +909,23 @@ pub(crate) fn go_to_definition_at_cursor(state: &mut AppState) -> Result<String,
     }
 }
 
-pub(crate) fn go_to_declaration_at_cursor(state: &mut AppState) -> Result<String, String> {
-    go_to_definition_at_cursor(state).map(|message| message.replace("definition", "declaration"))
+pub(crate) fn go_to_declaration_at_cursor(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut std::collections::HashSet<crate::workbench::state::WorkspaceDocumentId>,
+    runs: &mut RunsState,
+    workbench: &mut rspice_app_workbench::workbench::state::WorkbenchSession,
+) -> Result<String, String> {
+    go_to_definition_at_cursor_in(model, netlist, open_documents, runs, workbench)
+        .map(|message| message.replace("definition", "declaration"))
 }
 
-pub(crate) fn show_signature_help_at_cursor(state: &mut AppState) -> Result<String, String> {
-    let source = state.model.simulation.source.netlist_content.clone();
-    let cursor = state.code.netlist.cursor_char_index;
+pub(crate) fn show_signature_help_at_cursor(
+    model: &Model,
+    netlist: &mut NetlistDocumentState,
+) -> Result<String, String> {
+    let source = model.simulation.source.netlist_content.clone();
+    let cursor = netlist.cursor_char_index;
     let (title, detail) =
         if let Some((title, detail)) = super::completion::directive_signature_at(&source, cursor) {
             (title, detail)
@@ -919,7 +934,7 @@ pub(crate) fn show_signature_help_at_cursor(state: &mut AppState) -> Result<Stri
                 "Place the caret on an analysis, subcircuit, model, parameter, or function name."
                     .to_owned()
             })?;
-            let index = project_index(state)
+            let index = project_index_in(model, netlist)
                 .ok_or_else(|| "The active source has no project index.".to_owned())?;
             let definitions = index.definitions_named(&symbol);
             match definitions.as_slice() {
@@ -945,9 +960,9 @@ pub(crate) fn show_signature_help_at_cursor(state: &mut AppState) -> Result<Stri
                 }
             }
         };
-    state.code.netlist.signature_help = NetlistSignatureHelpState {
+    netlist.signature_help = NetlistSignatureHelpState {
         open: true,
-        revision: state.code.netlist.revision,
+        revision: netlist.revision,
         cursor_char_index: cursor,
         title: title.clone(),
         detail,
@@ -955,21 +970,25 @@ pub(crate) fn show_signature_help_at_cursor(state: &mut AppState) -> Result<Stri
     Ok(format!("Showing signature help for {title}"))
 }
 
-pub(crate) fn open_workspace_symbols(state: &mut AppState) -> Result<String, String> {
-    let index =
-        project_index(state).ok_or_else(|| "The active source has no project index.".to_owned())?;
+pub(crate) fn open_workspace_symbols(
+    model: &Model,
+    netlist: &mut NetlistDocumentState,
+    workbench: &mut rspice_app_workbench::workbench::state::WorkbenchSession,
+) -> Result<String, String> {
+    let index = project_index_in(model, netlist)
+        .ok_or_else(|| "The active source has no project index.".to_owned())?;
     let count = index.symbols().len();
-    state.workbench.navigator_visible = true;
-    state.workbench.clear_navigator_filter();
+    workbench.navigator_visible = true;
+    workbench.clear_navigator_filter();
     Ok(format!("Showing {count} project symbol(s)."))
 }
 
-pub(crate) fn preferred_quick_fix_available(state: &AppState) -> bool {
-    preferred_quick_fix(state).is_some()
+pub(crate) fn preferred_quick_fix_available(netlist: &NetlistDocumentState) -> bool {
+    preferred_quick_fix(netlist).is_some()
 }
 
 pub(crate) fn apply_preferred_quick_fix(state: &mut AppState) -> Result<String, String> {
-    let fix = preferred_quick_fix(state)
+    let fix = preferred_quick_fix(&state.code.netlist)
         .ok_or_else(|| "No preferred quick fix is available at the caret.".to_owned())?;
     apply_quick_fix(state, &fix)
 }
@@ -1058,34 +1077,42 @@ fn apply_quick_fix(state: &mut AppState, bound: &BoundQuickFix) -> Result<String
     Ok(format!("Applied quick fix: {}", fix.label))
 }
 
-fn preferred_quick_fix(state: &AppState) -> Option<BoundQuickFix> {
-    state
-        .code
-        .netlist
+fn preferred_quick_fix(netlist: &NetlistDocumentState) -> Option<BoundQuickFix> {
+    netlist
         .diagnostics
         .iter()
         .filter(|diagnostic| {
-            diagnostic.is_current() && diagnostic.canonical.revision == state.code.netlist.revision
+            diagnostic.is_current() && diagnostic.canonical.revision == netlist.revision
         })
         .filter(|diagnostic| {
-            diagnostic.line.or(diagnostic.source_line) == Some(state.code.netlist.cursor_line)
+            diagnostic.line.or(diagnostic.source_line) == Some(netlist.cursor_line)
         })
         .find_map(BoundQuickFix::of)
 }
 
 pub(crate) fn find_references_at_cursor(state: &mut AppState) -> Result<String, String> {
+    find_references_at_cursor_in(&state.model, &mut state.code.netlist, &mut state.workbench)
+}
+
+/// [`find_references_at_cursor`], over the model, the netlist editor's state
+/// and the session.
+pub(crate) fn find_references_at_cursor_in(
+    model: &Model,
+    netlist: &mut NetlistDocumentState,
+    workbench: &mut rspice_app_workbench::workbench::state::WorkbenchSession,
+) -> Result<String, String> {
     let symbol = symbol_at_cursor(
-        &state.model.simulation.source.netlist_content,
-        state.code.netlist.cursor_char_index,
+        &model.simulation.source.netlist_content,
+        netlist.cursor_char_index,
     )
     .ok_or_else(|| {
         "Place the caret on a model, subcircuit, parameter, or function name.".to_owned()
     })?;
-    let index =
-        project_index(state).ok_or_else(|| "The active source has no project index.".to_owned())?;
+    let index = project_index_in(model, netlist)
+        .ok_or_else(|| "The active source has no project index.".to_owned())?;
     let count = index.references_named(&symbol).len();
-    state.workbench.navigator_visible = true;
-    state.workbench.set_navigator_filter(symbol.clone());
+    workbench.navigator_visible = true;
+    workbench.set_navigator_filter(symbol.clone());
     Ok(if count == 0 {
         format!("No device references to {symbol} were found in the project's sources.")
     } else {
@@ -1094,13 +1121,21 @@ pub(crate) fn find_references_at_cursor(state: &mut AppState) -> Result<String, 
 }
 
 pub(crate) fn begin_rename_at_cursor(state: &mut AppState) -> Result<(), String> {
+    begin_rename_at_cursor_in(&state.model, &mut state.code.netlist)
+}
+
+/// [`begin_rename_at_cursor`], over the model and the netlist editor's state.
+pub(crate) fn begin_rename_at_cursor_in(
+    model: &Model,
+    netlist: &mut NetlistDocumentState,
+) -> Result<(), String> {
     let symbol = symbol_at_cursor(
-        &state.model.simulation.source.netlist_content,
-        state.code.netlist.cursor_char_index,
+        &model.simulation.source.netlist_content,
+        netlist.cursor_char_index,
     )
     .ok_or_else(|| "Place the caret on a model or subcircuit name.".to_owned())?;
-    let index =
-        project_index(state).ok_or_else(|| "The active source has no project index.".to_owned())?;
+    let index = project_index_in(model, netlist)
+        .ok_or_else(|| "The active source has no project index.".to_owned())?;
     let definitions = index.definitions_named(&symbol);
     let definition = match definitions.as_slice() {
         [definition] => *definition,
@@ -1116,15 +1151,15 @@ pub(crate) fn begin_rename_at_cursor(state: &mut AppState) -> Result<(), String>
             ));
         }
     };
-    ensure_location_is_project_owned(state, &definition.definition)?;
+    ensure_location_is_project_owned(model, &definition.definition)?;
     for reference in index
         .references_named(&symbol)
         .into_iter()
         .filter(|reference| reference.kind == definition.kind)
     {
-        ensure_location_is_project_owned(state, &reference.location)?;
+        ensure_location_is_project_owned(model, &reference.location)?;
     }
-    state.code.netlist.rename_dialog = NetlistRenameDialogState {
+    netlist.rename_dialog = NetlistRenameDialogState {
         open: true,
         original: definition.name.clone(),
         replacement: definition.name.clone(),
@@ -1167,7 +1202,7 @@ pub(crate) fn commit_rename(state: &mut AppState) -> Result<usize, String> {
             );
         }
     };
-    ensure_location_is_project_owned(state, &definition.definition)?;
+    ensure_location_is_project_owned(&state.model, &definition.definition)?;
     let kind = definition.kind;
     let mut locations = vec![definition.definition.clone()];
     for reference in index
@@ -1175,7 +1210,7 @@ pub(crate) fn commit_rename(state: &mut AppState) -> Result<usize, String> {
         .into_iter()
         .filter(|reference| reference.kind == kind)
     {
-        ensure_location_is_project_owned(state, &reference.location)?;
+        ensure_location_is_project_owned(&state.model, &reference.location)?;
         locations.push(reference.location.clone());
     }
 
@@ -1231,7 +1266,7 @@ pub(crate) fn commit_rename(state: &mut AppState) -> Result<usize, String> {
 }
 
 fn ensure_location_is_project_owned(
-    state: &AppState,
+    model: &Model,
     location: &ProjectSourceLocation,
 ) -> Result<(), String> {
     if location.root != ActiveNetlistDocument::OwnedSource {
@@ -1241,8 +1276,7 @@ fn ensure_location_is_project_owned(
         );
     }
     if let Some(identity) = location.dependency_identity.as_deref()
-        && state
-            .model
+        && model
             .workspace
             .content
             .netlist_descriptor
@@ -2446,10 +2480,10 @@ M1 d g s b nch W={w} L={l*2}\n\
         let (mut state, _) = validated_fix_state();
         state.code.netlist.cursor_line = 2;
         assert!(
-            preferred_quick_fix_available(&state),
+            preferred_quick_fix_available(&state.code.netlist),
             "precondition: the caret is on the finding's line",
         );
         state.code.netlist.revision += 1;
-        assert!(!preferred_quick_fix_available(&state));
+        assert!(!preferred_quick_fix_available(&state.code.netlist));
     }
 }

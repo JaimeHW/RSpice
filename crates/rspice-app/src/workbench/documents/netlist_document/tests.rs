@@ -1303,7 +1303,10 @@ fn run_deck_snapshot_projects_the_sealed_deck_and_leaves_the_working_deck_alone(
     );
     assert!(state.manual_deck_run_block_reason().is_some());
 
-    assert!(close_run_deck_snapshot(&mut state));
+    assert!(close_run_deck_snapshot(
+        &mut state.model,
+        &mut state.code.netlist
+    ));
     assert_eq!(
         state.code.netlist.active_document,
         ActiveNetlistDocument::OwnedSource
@@ -1336,7 +1339,10 @@ fn run_deck_snapshot_comparison_reports_the_edits_made_since_the_run() {
     assert!(diff.contains("-R1 out 0 1k"), "{diff}");
     assert!(diff.contains("+R1 out 0 2k"), "{diff}");
 
-    assert!(close_revision_comparison(&mut state));
+    assert!(close_revision_comparison(
+        &mut state.model,
+        &mut state.code.netlist
+    ));
     assert_eq!(
         state.code.netlist.active_document,
         ActiveNetlistDocument::OwnedSource
@@ -1347,12 +1353,12 @@ fn run_deck_snapshot_comparison_reports_the_edits_made_since_the_run() {
 fn run_deck_snapshot_needs_both_the_run_and_its_deck() {
     let mut state = owned_dependency_state();
     state.runs.manual_run.last_run_buffer = Some("ran\n.end\n".to_owned());
-    assert!(run_deck_snapshot_run_id(&state).is_none());
+    assert!(run_deck_snapshot_run_id_in(&state.runs).is_none());
     assert!(!open_run_deck_snapshot(&mut state));
 
     state.runs.manual_run.last_run_id = Some(9);
     state.runs.manual_run.last_run_buffer = None;
-    assert!(run_deck_snapshot_run_id(&state).is_none());
+    assert!(run_deck_snapshot_run_id_in(&state.runs).is_none());
     assert!(!open_run_deck_snapshot(&mut state));
 }
 
@@ -1426,7 +1432,10 @@ fn an_executed_deck_opens_read_only_at_the_point_it_was_asked_for() {
         "a run whose deck is not held refuses rather than showing another one"
     );
 
-    assert!(close_run_deck_snapshot(&mut state));
+    assert!(close_run_deck_snapshot(
+        &mut state.model,
+        &mut state.code.netlist
+    ));
     assert!(
         state.code.netlist.executed_deck_view.is_none(),
         "leaving the viewer releases the run it was bound to"

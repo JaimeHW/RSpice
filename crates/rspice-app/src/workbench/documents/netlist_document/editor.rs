@@ -61,8 +61,15 @@ const fn platform_include_access() -> IncludeAccess {
 /// Stable per-document id so cursor, selection, undo, and scroll state do not
 /// leak between an owned root, generated root, include, or comparison tab.
 pub(crate) fn editor_id(state: &AppState) -> egui::Id {
+    editor_id_in(&state.model, &state.code.netlist)
+}
+
+/// [`editor_id`], over the model and the netlist editor's state.
+pub(crate) fn editor_id_in(
+    model: &super::Model,
+    netlist: &super::NetlistDocumentState,
+) -> egui::Id {
     let base = egui::Id::new("rspice.netlist.editor.text");
-    let netlist = &state.code.netlist;
     if netlist.active_document == super::ActiveNetlistDocument::GeneratedDiff {
         return base.with("comparison");
     }
@@ -70,8 +77,7 @@ pub(crate) fn editor_id(state: &AppState) -> egui::Id {
         .active_dependency_root
         .unwrap_or(netlist.active_document);
     let document_id = match root {
-        super::ActiveNetlistDocument::Generated => state
-            .model
+        super::ActiveNetlistDocument::Generated => model
             .netlist_artifacts
             .generated_document
             .as_ref()
@@ -79,7 +85,7 @@ pub(crate) fn editor_id(state: &AppState) -> egui::Id {
         super::ActiveNetlistDocument::OwnedSource => netlist
             .owned_document
             .as_ref()
-            .or(state.model.workspace.content.netlist_document.as_ref())
+            .or(model.workspace.content.netlist_document.as_ref())
             .map(|document| document.id()),
         super::ActiveNetlistDocument::GeneratedDiff | super::ActiveNetlistDocument::RunSnapshot => {
             None

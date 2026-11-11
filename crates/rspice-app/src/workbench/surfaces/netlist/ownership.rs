@@ -11,23 +11,25 @@ use crate::state::NetlistDocumentId;
 use crate::ui::tokens::Tokens;
 use crate::ui::widgets::{Dialog, DialogChoice, DialogInitialFocus, DialogSize};
 use crate::workbench::code::CodeFeature;
-use crate::workbench::documents::netlist_document::{ActiveNetlistDocument, open_owned_source};
+use crate::workbench::documents::netlist_document::{ActiveNetlistDocument, open_owned_source_in};
 use crate::workbench::framework::feature::Cx;
-use crate::workbench::{AppState, MessageCatalog, MessageId};
+use crate::workbench::{MessageCatalog, MessageId};
 
 pub(super) fn open_ownership_dialog(
-    state: &mut AppState,
+    model: &mut crate::workbench::app_state::Model,
+    netlist: &mut crate::workbench::documents::netlist_document::NetlistDocumentState,
+    workbench: &mut crate::workbench::state::WorkbenchSession,
     strategy: crate::state::OwnedNetlistEditStrategy,
 ) {
-    if state.model.workspace.content.netlist_source.is_some() {
-        let _ = open_owned_source(state);
+    if model.workspace.content.netlist_source.is_some() {
+        let _ = open_owned_source_in(model, netlist);
         return;
     }
-    if state.model.netlist_artifacts.generated_document.is_none() {
-        state.prompt("Generate the netlist before making an editable copy.");
+    if model.netlist_artifacts.generated_document.is_none() {
+        workbench.prompt("Generate the netlist before making an editable copy.");
         return;
     }
-    let dialog = &mut state.code.netlist.ownership_dialog;
+    let dialog = &mut netlist.ownership_dialog;
     dialog.open = true;
     dialog.strategy = strategy;
     dialog.artifact_name = default_owned_artifact_name(strategy).to_owned();
