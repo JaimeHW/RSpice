@@ -5,6 +5,8 @@ pub(crate) mod chrome;
 pub(crate) mod commands;
 mod docks;
 mod run_host;
+#[cfg(test)]
+pub(crate) mod test_host;
 
 use crate::state::SimulationPage;
 use crate::state::command_catalog::CommandKey;

@@ -1466,7 +1466,8 @@ mod tests {
         PreparedRunTaskReceipt, PreparedSourceCheckReceipt, SimulationState,
     };
     use crate::workbench::features;
-    use crate::workbench::{AppState, RSpiceApp, SurfaceId};
+    use crate::workbench::simulate::test_host::SimulateTestHost;
+    use crate::workbench::{RSpiceApp, SurfaceId};
 
     fn plan_receipt(plan_id: crate::product::SimulationPlanId, byte: u8) -> PreparedRunReceipt {
         PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
@@ -1563,7 +1564,7 @@ mod tests {
 
     #[test]
     fn stale_selection_reanchors_to_the_active_stable_run() {
-        let mut state = AppState::default();
+        let mut state = SimulateTestHost::default();
         let first = state.model.simulation.start_run().run_id;
         state
             .model
@@ -1593,7 +1594,7 @@ mod tests {
 
     #[test]
     fn history_scope_never_mixes_active_plan_inactive_plan_and_manual_decks() {
-        let mut state = AppState::default();
+        let mut state = SimulateTestHost::default();
         let inactive_plan_id = state.model.sim_setup.stable_analysis_plan().unwrap().id();
         let active_plan_id = state
             .model
@@ -1728,7 +1729,7 @@ mod tests {
         // say it again.
         assert_eq!(jobs_summary_line(&snapshot), "");
 
-        let state = AppState::default();
+        let state = SimulateTestHost::default();
         snapshot = JobsSnapshot::capture(&state.model, None, JobsPlanScope::AllPlans);
         let expected = format!(
             "{} run{} \u{00b7} {}",
@@ -1844,7 +1845,7 @@ mod tests {
     /// which were literals rather than settings, so they must stay deleted.
     #[test]
     fn execution_target_card_lists_only_the_live_runtime() {
-        let mut state = AppState::default();
+        let mut state = SimulateTestHost::default();
         state.model.simulation.start_run();
         let snapshot = JobsSnapshot::capture(&state.model, None, JobsPlanScope::AllPlans);
         let ctx = egui::Context::default();
