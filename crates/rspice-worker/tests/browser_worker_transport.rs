@@ -612,8 +612,16 @@ fn a_transient_assertion_report_crosses_the_worker_exactly() {
         .unwrap_or_else(|| panic!("{metadata}"));
 
     let netlist = rspice_core::Netlist::parse(RC).unwrap();
-    let max_step =
-        rspice_core::execution::resolve_transient_maximum_step(10e-9, 2e-6, None, None).unwrap();
+    // The worker resolves the window by the deck's dialect, so the native
+    // run it is checked against must too.
+    let max_step = rspice_core::execution::resolve_dialect_transient_maximum_step(
+        netlist.parse_dialect(),
+        10e-9,
+        2e-6,
+        None,
+        None,
+    )
+    .unwrap();
     let result = rspice_core::Engine::default()
         .resolved_for_netlist(&netlist)
         .run_tran_with_abort(&netlist, 2e-6, max_step, &rspice_core::NoAbort)
