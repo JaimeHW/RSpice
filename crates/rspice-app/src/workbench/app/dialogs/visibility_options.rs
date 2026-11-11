@@ -17,7 +17,7 @@ use crate::state::{
 };
 use crate::ui::widgets::{CommandForm, DialogChoice, FormRows};
 
-use crate::workbench::app_state::AppState;
+use crate::state::DrawingSheetLayerVisibility;
 
 /// Transient, device-local recovery point for a visibility-policy change.
 #[derive(Debug, Clone)]
@@ -67,19 +67,24 @@ const DESCRIPTION: &str = "Choose what the schematic canvas shows on this device
 
 /// Open Display options. Both the schematic-visibility and the
 /// drawing-sheet-layers commands land here; it is one dialog.
-pub(crate) fn open_display_options(state: &mut AppState) -> bool {
-    if state.design.schematic_visibility_dialog.open {
+pub(crate) fn open_display_options(
+    dialog: &mut SchematicVisibilityDialogState,
+    visibility: SchematicVisibilityPolicy,
+    layers: DrawingSheetLayerVisibility,
+) -> bool {
+    if dialog.open {
         return false;
     }
-    state.design.schematic_visibility_dialog.open(
-        state.design.schematic_visibility,
-        state.design.drawing_sheet_layers,
-    );
+    dialog.open(visibility, layers);
     true
 }
 
-pub(crate) fn open_schematic_visibility_options(state: &mut AppState) -> bool {
-    open_display_options(state)
+pub(crate) fn open_schematic_visibility_options(
+    dialog: &mut SchematicVisibilityDialogState,
+    visibility: SchematicVisibilityPolicy,
+    layers: DrawingSheetLayerVisibility,
+) -> bool {
+    open_display_options(dialog, visibility, layers)
 }
 
 /// Draw Display options over its drafts, offering Undo last change when the
@@ -279,6 +284,7 @@ const fn review_marker_label(value: SchematicReviewMarkerVisibility) -> &'static
 mod tests {
     use super::*;
     use crate::workbench::app::RSpiceApp;
+    use crate::workbench::app_state::AppState;
 
     /// Draw the dialog as its dialog step does.
     fn render(app: &mut RSpiceApp, ctx: &Context) {
@@ -316,9 +322,17 @@ mod tests {
     #[test]
     fn one_display_options_dialog_owns_visibility_and_sheet_layers() {
         let mut app = RSpiceApp::test_instance();
-        assert!(open_display_options(&mut app.state));
+        assert!(open_display_options(
+            &mut app.state.design.schematic_visibility_dialog,
+            app.state.design.schematic_visibility,
+            app.state.design.drawing_sheet_layers
+        ));
         assert!(
-            !open_schematic_visibility_options(&mut app.state),
+            !open_schematic_visibility_options(
+                &mut app.state.design.schematic_visibility_dialog,
+                app.state.design.schematic_visibility,
+                app.state.design.drawing_sheet_layers
+            ),
             "both commands open the same dialog"
         );
 

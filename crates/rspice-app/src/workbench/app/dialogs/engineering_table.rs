@@ -20,7 +20,7 @@ use crate::workbench::workflows::export_workflow::{
 };
 
 use crate::state::engineering_table::EngineeringTableViewStore;
-use crate::workbench::app_state::{AppState, Model, PlatformState};
+use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::state::WorkbenchSession;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -166,20 +166,21 @@ thread_local! {
         const { std::cell::RefCell::new(None) };
 }
 
-pub(crate) fn open_engineering_table_dialog(state: &mut AppState) -> bool {
-    if state.design.engineering_table.open {
+pub(crate) fn open_engineering_table_dialog(
+    dialog: &mut EngineeringTableDialogState,
+    views: &EngineeringTableViewStore,
+    model: &Model,
+) -> bool {
+    if dialog.open {
         return false;
     }
-    let dataset = active_schematic_dataset(&state.model.schematic);
-    let mut view = state
-        .design
-        .engineering_table_views
+    let dataset = active_schematic_dataset(&model.schematic);
+    let mut view = views
         .working
         .get(&dataset.id)
         .cloned()
         .or_else(|| {
-            state
-                .model
+            model
                 .workspace
                 .content
                 .engineering_table_views
@@ -189,9 +190,7 @@ pub(crate) fn open_engineering_table_dialog(state: &mut AppState) -> bool {
                 .map(|saved| saved.definition.clone())
         })
         .or_else(|| {
-            state
-                .design
-                .engineering_table_views
+            views
                 .saved
                 .iter()
                 .find(|saved| saved.definition.grid_id == dataset.id && saved.is_default)
@@ -199,10 +198,7 @@ pub(crate) fn open_engineering_table_dialog(state: &mut AppState) -> bool {
         })
         .unwrap_or_else(|| EngineeringTableView::for_dataset(&dataset));
     view.normalize_for(&dataset);
-    state
-        .design
-        .engineering_table
-        .open(view, dataset.source_revision);
+    dialog.open(view, dataset.source_revision);
     true
 }
 
@@ -1992,6 +1988,7 @@ mod tests {
     use super::*;
     use crate::state::{ComponentType, Point};
     use crate::workbench::app::RSpiceApp;
+    use crate::workbench::app_state::AppState;
 
     /// The engineering table over the application's parts, as its dialog
     /// step lends them.
@@ -2035,7 +2032,11 @@ mod tests {
                 .model
                 .schematic
                 .add_component(ComponentType::Resistor, Point::new(10, 20));
-            assert!(open_engineering_table_dialog(&mut app.state));
+            assert!(open_engineering_table_dialog(
+                &mut app.state.design.engineering_table,
+                &app.state.design.engineering_table_views,
+                &app.state.model
+            ));
             let dataset = active_schematic_dataset(&app.state.model.schematic);
             let dialog = &mut app.state.design.engineering_table;
             dialog.page = page;
@@ -2075,7 +2076,11 @@ mod tests {
             .add_component(ComponentType::Resistor, Point::new(10, 20));
         let revision = state.model.schematic.topology_version();
 
-        assert!(open_engineering_table_dialog(&mut state));
+        assert!(open_engineering_table_dialog(
+            &mut state.design.engineering_table,
+            &state.design.engineering_table_views,
+            &state.model
+        ));
 
         assert!(state.design.engineering_table.open);
         assert_eq!(state.design.engineering_table.source_revision, revision);
@@ -2124,7 +2129,11 @@ mod tests {
             "RC Lowpass Filter",
             &mut app.state.model.schematic,
         );
-        assert!(open_engineering_table_dialog(&mut app.state));
+        assert!(open_engineering_table_dialog(
+            &mut app.state.design.engineering_table,
+            &app.state.design.engineering_table_views,
+            &app.state.model
+        ));
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let mut shapes = Vec::new();

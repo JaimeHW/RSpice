@@ -34,7 +34,7 @@ use crate::workbench::app::actions::workspace::sync_active_schematic;
 use crate::workbench::app::dialogs::design_request::DesignRequest;
 use crate::workbench::app::schematic::conductor_routes::start_canvas_wire;
 use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
-use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::app_state::{AppState, Model, PlatformState};
 use crate::workbench::state::WorkbenchSession;
 
 const TITLE: &str = "Connectivity, buses and global nets";
@@ -255,28 +255,33 @@ enum ConnectivityBodyAction {
     OpenSourceMap,
 }
 
-pub(crate) fn open_connectivity_manager(state: &mut AppState) {
+pub(crate) fn open_connectivity_manager(
+    dialog: &mut ConnectivityManagerDialogState,
+    model: &mut Model,
+    workbench: &mut WorkbenchSession,
+    platform: &PlatformState,
+) {
     // The command is greyed with no project open.
-    if !state.platform.project_lifecycle.is_open() {
+    if !platform.project_lifecycle.is_open() {
         return;
     }
     if !matches!(
-        state.model.workspace.content.active_view_type(),
+        model.workspace.content.active_view_type(),
         crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
     ) {
-        state.prompt("Connectivity and bus manager needs a schematic or testbench view.");
+        workbench.prompt("Connectivity and bus manager needs a schematic or testbench view.");
         return;
     }
-    crate::schematic::view::retain_selection_on_active_sheet(state);
-    state.sync_active_schematic_to_workspace();
-    let contract = (*state.model.workspace.content.connectivity).clone();
-    let (report, error) = match build_report(&state.model, &contract.policy) {
+    crate::schematic::view::retain_selection_on_active_sheet_in(model);
+    crate::workbench::app::actions::workspace::sync_active_schematic(model, workbench);
+    let contract = (*model.workspace.content.connectivity).clone();
+    let (report, error) = match build_report(model, &contract.policy) {
         Ok(report) => (report, None),
         Err(error) => (ConnectivityReport::default(), Some(error)),
     };
-    *state.design.connectivity_manager = ConnectivityManagerDialogState {
+    *dialog = ConnectivityManagerDialogState {
         open: true,
-        authority: Some(SchematicEditAuthority::capture(state)),
+        authority: Some(SchematicEditAuthority::capture(&*model)),
         report,
         contract_at_open: contract.clone(),
         policy: contract.policy,

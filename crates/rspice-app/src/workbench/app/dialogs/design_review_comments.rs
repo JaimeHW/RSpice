@@ -20,7 +20,7 @@ use crate::workbench::design_system::{elide_chars, section_header};
 use crate::workbench::app::SchematicEditAuthority;
 use crate::workbench::app::actions::workspace::sync_active_schematic;
 use crate::workbench::app::dialogs::placement::design_note::DesignNoteDialogState;
-use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::framework::feature::{CloudPort, CloudSessionPort};
 use crate::workbench::state::WorkbenchSession;
 
@@ -148,29 +148,32 @@ enum ReviewAction {
     Reopen,
 }
 
-pub(crate) fn open_design_review_comments(state: &mut AppState) {
+pub(crate) fn open_design_review_comments(
+    dialog: &mut DesignReviewCommentsDialogState,
+    model: &Model,
+    platform: &PlatformState,
+) {
     // The command is greyed without an open project and a schematic editor.
-    if !state.platform.project_lifecycle.is_open()
+    if !platform.project_lifecycle.is_open()
         || !matches!(
-            state.model.workspace.content.active_view_type(),
+            model.workspace.content.active_view_type(),
             crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
         )
     {
         return;
     }
-    let selected_note_id = state
-        .model
+    let selected_note_id = model
         .schematic
         .document()
         .design_notes
         .iter()
         .find(|note| note.kind == DesignNoteKind::ReviewNote)
         .map(|note| note.id);
-    state.design.design_review_comments = DesignReviewCommentsDialogState {
+    *dialog = DesignReviewCommentsDialogState {
         open: true,
         selected_note_id,
-        authority: Some(SchematicEditAuthority::capture(state)),
-        expected_design_notes: state.model.schematic.document().design_notes.clone(),
+        authority: Some(SchematicEditAuthority::capture(model)),
+        expected_design_notes: model.schematic.document().design_notes.clone(),
         ..DesignReviewCommentsDialogState::default()
     };
 }
@@ -1105,7 +1108,11 @@ mod tests {
                 .document_mut_for_test()
                 .design_notes
                 .push(review_note(1));
-            open_design_review_comments(&mut app.state);
+            open_design_review_comments(
+                &mut app.state.design.design_review_comments,
+                &app.state.model,
+                &app.state.platform,
+            );
             app.state.design.design_review_comments.reply = "Check the bias point".to_owned();
             let notes = app.state.model.schematic.document().design_notes.clone();
             let dirty = app.state.model.schematic.session.is_dirty;
@@ -1160,7 +1167,9 @@ mod tests {
             .document_mut_for_test()
             .design_notes
             .push(review_note(1));
-        crate::workbench::commands::vocabulary::Command::ReviewComments.execute(&mut app);
+        app.execute_command_key(
+            crate::workbench::design::commands::DesignCommand::ReviewComments.key(),
+        );
         let notes = app.state.model.schematic.document().design_notes.clone();
         let _ = ctx.run_ui(
             egui::RawInput {
@@ -1195,7 +1204,11 @@ mod tests {
                     .design_notes
                     .push(review_note(1));
             }
-            open_design_review_comments(&mut app.state);
+            open_design_review_comments(
+                &mut app.state.design.design_review_comments,
+                &app.state.model,
+                &app.state.platform,
+            );
             if case == "read-only" {
                 app.state.model.safe_mode.activate(
                     crate::state::write_policy::LocalSafeModeOptions {
@@ -1264,7 +1277,11 @@ mod tests {
         ctx.enable_accesskit();
         ctx.options_mut(|options| options.max_passes = std::num::NonZeroUsize::new(1).unwrap());
         let mut app = RSpiceApp::test_instance();
-        open_design_review_comments(&mut app.state);
+        open_design_review_comments(
+            &mut app.state.design.design_review_comments,
+            &app.state.model,
+            &app.state.platform,
+        );
         let _ = render(&mut app, &ctx, Vec::new());
         let output = render(&mut app, &ctx, Vec::new());
         let tree = output
@@ -1373,7 +1390,11 @@ mod tests {
             .document_mut_for_test()
             .design_notes
             .push(review_note(1));
-        open_design_review_comments(&mut app.state);
+        open_design_review_comments(
+            &mut app.state.design.design_review_comments,
+            &app.state.model,
+            &app.state.platform,
+        );
         app.state.design.design_review_comments.reply = "Bias point checked.".to_owned();
 
         comments(&mut app).handle_design_review_action(ReviewAction::Reply);
@@ -1410,7 +1431,11 @@ mod tests {
         ctx.enable_accesskit();
         crate::ui::Theme::default().apply(&ctx);
         let mut app = RSpiceApp::test_instance();
-        open_design_review_comments(&mut app.state);
+        open_design_review_comments(
+            &mut app.state.design.design_review_comments,
+            &app.state.model,
+            &app.state.platform,
+        );
         // Access updates are incremental: keep the latest of every node.
         let mut nodes = std::collections::HashMap::new();
         for _ in 0..4 {
@@ -1459,7 +1484,11 @@ mod tests {
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let mut app = RSpiceApp::test_instance();
-        open_design_review_comments(&mut app.state);
+        open_design_review_comments(
+            &mut app.state.design.design_review_comments,
+            &app.state.model,
+            &app.state.platform,
+        );
         let mut shapes = Vec::new();
         for _ in 0..3 {
             shapes = ctx

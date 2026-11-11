@@ -9,6 +9,7 @@
 use super::*;
 use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::commands::vocabulary::command_registry;
+use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::models::commands::ModelsCommand;
 use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::simulate::commands::SimulateCommand;
@@ -174,10 +175,13 @@ fn protected_commands_keep_the_exact_mockup_action_ids() {
         "design-management"
     );
     assert_eq!(
-        Command::ConnectivityManager.spec().id,
+        DesignCommand::ConnectivityManager.key().as_str(),
         "design-connectivity-tools"
     );
-    assert_eq!(Command::SelectionBulkEdit.spec().id, "design-bulk-tools");
+    assert_eq!(
+        DesignCommand::SelectionBulkEdit.key().as_str(),
+        "design-bulk-tools"
+    );
     assert_eq!(SheetsCommand::NextSheet.key().as_str(), "next-sheet");
     assert_eq!(
         SheetsCommand::PreviousSheet.key().as_str(),

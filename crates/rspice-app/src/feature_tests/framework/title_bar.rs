@@ -22,6 +22,7 @@ use crate::workbench::chrome::title_bar::*;
 use crate::workbench::cloud::commands::CloudCommand;
 use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::commands::vocabulary::{Command, command_registry};
+use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandFlags, ids};
 use crate::workbench::framework::host::Host;
 use crate::workbench::layout::LayoutSpec;
@@ -230,11 +231,6 @@ fn listed_commands(entries: &[MenuEntry]) -> Vec<CommandKey> {
         }
     }
     commands
-}
-
-/// The keys of `commands`, in order.
-fn keys<const N: usize>(commands: [Command; N]) -> [CommandKey; N] {
-    commands.map(Command::key)
 }
 
 /// `menu` lists `run` as consecutive rows.
@@ -734,7 +730,7 @@ fn the_view_menu_lists_each_viewport_row_exactly_once() {
         );
     }
     assert_eq!(seen.len(), listed.len());
-    assert!(listed.contains(&Command::VisibilityOptions.key()));
+    assert!(listed.contains(&DesignCommand::VisibilityOptions.key()));
 }
 
 const DESIGN_PLACEMENT_COMMANDS: [Command; 10] = [
@@ -749,21 +745,21 @@ const DESIGN_PLACEMENT_COMMANDS: [Command; 10] = [
     Command::PlaceText,
     Command::PlaceShape,
 ];
-const SELECTION_EDIT_COMMANDS: [Command; 6] = [
-    Command::MoveSelection,
-    Command::StretchSelection,
-    Command::ArraySelection,
-    Command::ReplaceInstance,
-    Command::SwapToRSpiceSymbols,
-    Command::SelectionBulkEdit,
+const SELECTION_EDIT_COMMANDS: [CommandKey; 6] = [
+    Command::MoveSelection.key(),
+    Command::StretchSelection.key(),
+    Command::ArraySelection.key(),
+    Command::ReplaceInstance.key(),
+    Command::SwapToRSpiceSymbols.key(),
+    DesignCommand::SelectionBulkEdit.key(),
 ];
 const DESIGN_MANAGEMENT_COMMANDS: [CommandKey; 6] = [
     Command::CreateHierarchy.key(),
     ProjectCommand::DesignManagement.key(),
-    Command::ConnectivityManager.key(),
+    DesignCommand::ConnectivityManager.key(),
     Command::ConfigurationSets.key(),
-    Command::RuleSetup.key(),
-    Command::ReviewComments.key(),
+    DesignCommand::RuleSetup.key(),
+    DesignCommand::ReviewComments.key(),
 ];
 const DESIGN_SHEET_COMMANDS: [SheetsCommand; 4] = [
     SheetsCommand::PreviousSheet,
@@ -868,13 +864,10 @@ fn the_grid_rows_choose_the_drawn_style() {
 /// Delete already are; Design keeps what builds the design.
 #[test]
 fn the_selection_edits_are_in_edit_and_not_in_design() {
-    assert_menu_lists(ApplicationMenu::Edit, &keys(SELECTION_EDIT_COMMANDS));
+    assert_menu_lists(ApplicationMenu::Edit, &SELECTION_EDIT_COMMANDS);
     let design = listed_commands(application_menu_entries(ApplicationMenu::Design));
-    for command in SELECTION_EDIT_COMMANDS {
-        assert!(
-            !design.contains(&command.key()),
-            "Design still lists {command:?}"
-        );
+    for key in SELECTION_EDIT_COMMANDS {
+        assert!(!design.contains(&key), "Design still lists {key:?}");
     }
 }
 
@@ -1104,13 +1097,13 @@ fn design_sheet_menu_reads_navigation_before_authoring() {
 
 #[test]
 fn upgraded_design_menu_commands_remain_palette_discoverable() {
-    for command in DESIGN_PLACEMENT_COMMANDS
+    for command in DESIGN_PLACEMENT_COMMANDS {
+        assert!(command.palette_visible());
+    }
+    for key in DESIGN_MANAGEMENT_COMMANDS
         .into_iter()
         .chain(SELECTION_EDIT_COMMANDS)
     {
-        assert!(command.palette_visible());
-    }
-    for key in DESIGN_MANAGEMENT_COMMANDS {
         assert!(
             command_registry()
                 .spec(key)
@@ -1323,7 +1316,6 @@ fn menu_icons_mark_only_the_toolbars_twins_with_the_buttons_icon() {
         (Command::Delete, WorkbenchIcon::Trash),
         (Command::AscendHierarchy, WorkbenchIcon::ArrowUp),
         (Command::DescendHierarchyDirect, WorkbenchIcon::Layers),
-        (Command::VisibilityOptions, WorkbenchIcon::Visibility),
     ] {
         assert_eq!(
             app.command_icon(command.key()),
@@ -1332,6 +1324,10 @@ fn menu_icons_mark_only_the_toolbars_twins_with_the_buttons_icon() {
             command.spec().id
         );
     }
+    assert_eq!(
+        app.command_icon(DesignCommand::VisibilityOptions.key()),
+        Some(WorkbenchIcon::Visibility)
+    );
     for (command, icon) in [
         (CodeCommand::CompileVerilogA, WorkbenchIcon::Netlist),
         (CodeCommand::AutomationConsole, WorkbenchIcon::Terminal),

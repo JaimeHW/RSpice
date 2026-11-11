@@ -225,7 +225,7 @@ pub(in crate::workbench) fn design_tools(
     toolbar_icon_command_selected_as(
         ui,
         app,
-        Command::VisibilityOptions.key(),
+        DesignCommand::VisibilityOptions.key(),
         WorkbenchIcon::Visibility,
         false,
         "Display options",

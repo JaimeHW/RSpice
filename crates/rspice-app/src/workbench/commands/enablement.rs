@@ -224,12 +224,6 @@ impl Command {
             Self::CreateHierarchy => {
                 active_schematic_editor(app) && state.model.create_hierarchy_available()
             }
-            Self::ConnectivityManager => {
-                active_schematic_editor(app) && state.platform.project_lifecycle.is_open()
-            }
-            Self::SelectionBulkEdit => {
-                active_schematic_editor(app) && state.platform.project_lifecycle.is_open()
-            }
             Self::HighlightNet => {
                 active_schematic_editor(app) && crate::schematic::view::selected_net(state).is_ok()
             }
@@ -242,10 +236,7 @@ impl Command {
                     .and_then(|spec| vocabulary::legacy_command(spec.key))
                     .is_some_and(|command| command.is_enabled(app))
             }
-            Self::ConfigurationSets | Self::RuleSetup => state.platform.project_lifecycle.is_open(),
-            Self::ReviewComments => {
-                active_schematic_editor(app) && state.platform.project_lifecycle.is_open()
-            }
+            Self::ConfigurationSets => state.platform.project_lifecycle.is_open(),
             Self::ObjectProperties => {
                 if active_symbol_editor(app) {
                     let selection = state.design.symbol.editor.effective_selection();
@@ -294,7 +285,6 @@ impl Command {
                             .can_step_back()
                 }
             }
-            Self::EngineeringTableView => active_schematic_editor(app),
             Self::NewApplicationWindow
             | Self::DetachDocument
             | Self::MoveDocumentToWindow
@@ -349,8 +339,6 @@ impl Command {
             Self::SetGridStyle(_)
             | Self::AnnotateOperatingPoint
             | Self::AnnotateTransientVoltages => active_schematic_editor(app),
-            Self::GridSnapRouting => active_schematic_editor(app),
-            Self::VisibilityOptions => active_schematic_editor(app),
             Self::SelectTool => active_symbol_editor(app) || active_schematic_editor(app),
             Self::PlaceWire
             | Self::PlaceBus

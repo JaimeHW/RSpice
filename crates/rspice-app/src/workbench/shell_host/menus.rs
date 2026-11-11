@@ -15,6 +15,7 @@ use crate::workbench::chrome::title_bar::menu_entries::{MenuContext, MenuEntry};
 use crate::workbench::cloud::commands::CloudCommand;
 use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::hardcopy::commands::HardcopyCommand;
 use crate::workbench::models::commands::ModelsCommand;
@@ -72,6 +73,11 @@ const fn simulate(command: SimulateCommand) -> MenuEntry {
 
 /// The code feature's command's row under the label it declares.
 const fn code(command: CodeCommand) -> MenuEntry {
+    MenuEntry::command(command.key())
+}
+
+/// The design feature's command's row under the label it declares.
+const fn design(command: DesignCommand) -> MenuEntry {
     MenuEntry::command(command.key())
 }
 
@@ -276,7 +282,7 @@ const EDIT_MENU: &[MenuEntry] = &[
             command(Command::ArraySelection).access('Y'),
             command(Command::ReplaceInstance).access('S'),
             command(Command::SwapToRSpiceSymbols).access('W'),
-            command(Command::SelectionBulkEdit).access('B'),
+            design(DesignCommand::SelectionBulkEdit).access('B'),
             Separator,
             command(Command::RenameSelection).access('M'),
             command(Command::ObjectProperties).access('O'),
@@ -326,7 +332,7 @@ const VIEW_MENU: &[MenuEntry] = &[
     command(Command::ZoomPrevious).access('V'),
     Separator,
     MenuEntry::submenu("Grid", GRID_MENU).access('G'),
-    command(Command::VisibilityOptions).access('D'),
+    design(DesignCommand::VisibilityOptions).access('D'),
     Separator,
     command_as(Command::ToggleNavigator, "Navigator").access('N'),
     command_as(Command::ToggleInspector, "Inspector").access('E'),
@@ -361,7 +367,11 @@ const GRID_MENU: &[MenuEntry] = &[
     )
     .access('O'),
     Separator,
-    command_as(Command::GridSnapRouting, "Grid, snap and routing\u{2026}").access('G'),
+    MenuEntry::command_as(
+        DesignCommand::GridSnapRouting.key(),
+        "Grid, snap and routing\u{2026}",
+    )
+    .access('G'),
 ];
 
 const FOLDING_MENU: &[MenuEntry] = &[
@@ -409,10 +419,10 @@ const DESIGN_MENU: &[MenuEntry] = &[
     Separator,
     project(ProjectCommand::Variants).access('N'),
     project(ProjectCommand::Annotate).access('O'),
-    command(Command::ConnectivityManager).access('Y'),
+    design(DesignCommand::ConnectivityManager).access('Y'),
     command(Command::HighlightNet).access('T'),
-    command(Command::ReviewComments).access('R'),
-    command(Command::EngineeringTableView).access('J'),
+    design(DesignCommand::ReviewComments).access('R'),
+    design(DesignCommand::EngineeringTableView).access('J'),
     Separator,
     // The design checks, narrowest first: the cellview in front of the
     // reader, the whole design, and the check that gates a save.
@@ -427,7 +437,7 @@ const DESIGN_MENU: &[MenuEntry] = &[
         &[command(Command::SymbolSave).access('V')],
     ),
     MenuEntry::submenu("Violations", VIOLATIONS_MENU).access('I'),
-    command(Command::RuleSetup).access('G'),
+    design(DesignCommand::RuleSetup).access('G'),
     MenuEntry::Only(
         MenuContext::VerilogAView,
         &[
@@ -895,7 +905,6 @@ pub(in crate::workbench) fn command_icon(command: Command) -> Option<WorkbenchIc
         Command::ZoomIn => WorkbenchIcon::ZoomIn,
         Command::ZoomOut => WorkbenchIcon::ZoomOut,
         Command::ZoomFit => WorkbenchIcon::ZoomFit,
-        Command::VisibilityOptions => WorkbenchIcon::Visibility,
         Command::CycleGrid => WorkbenchIcon::Grid,
         _ => return None,
     };
@@ -913,6 +922,9 @@ pub(in crate::workbench) fn feature_command_icon(key: CommandKey) -> Option<Work
             HardcopyCommand::PrintHardcopy => Some(WorkbenchIcon::File),
             _ => None,
         };
+    }
+    if DesignCommand::from_key(key) == Some(DesignCommand::VisibilityOptions) {
+        return Some(WorkbenchIcon::Visibility);
     }
     if let Some(command) = ProjectCommand::from_key(key) {
         return match command {

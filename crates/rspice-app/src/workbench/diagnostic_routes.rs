@@ -26,6 +26,7 @@ use crate::state::{DrawnObject, PreflightRemediation};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::diagnostic_store::DiagnosticRoute;
 use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::models::commands::ModelsCommand;
 use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::project::workspace_state::ProjectPage;
@@ -265,7 +266,7 @@ pub(crate) fn apply_remediation(app: &mut RSpiceApp, remediation: PreflightRemed
                 app.state.prompt(error);
             }
         }
-        PreflightRemediation::RuleSetup => Command::RuleSetup.execute(app),
+        PreflightRemediation::RuleSetup => app.execute_command_key(DesignCommand::RuleSetup.key()),
         // The object an engine refusal named, in the view that draws it. The
         // view opens first so the object is looked up in its own drawing, and
         // one that drawing no longer holds is said rather than selected.

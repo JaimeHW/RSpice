@@ -119,12 +119,6 @@ const ZOOM_ONE_TO_ONE: &[ShortcutBinding] = &[primary(
     chord(Key::Num0, true, false, false, "Ctrl+0"),
     DESKTOP,
 )];
-// The browser reopens a closed tab on Ctrl+Shift+T, so the key is the
-// desktop's only.
-const ENGINEERING_TABLE_VIEW: &[ShortcutBinding] = &[primary(
-    chord(Key::T, true, false, true, "Ctrl+Shift+T"),
-    DESKTOP,
-)];
 const TOGGLE_NAVIGATOR: &[ShortcutBinding] =
     &[primary(chord(Key::B, true, false, false, "Ctrl+B"), ALL)];
 const TOGGLE_INSPECTOR: &[ShortcutBinding] =
@@ -279,12 +273,8 @@ impl Command {
                 | Self::SetStandardValueSeries(_)
                 | Self::FindInDesign
                 | Self::CheckDesign
-                | Self::ConnectivityManager
-                | Self::SelectionBulkEdit
                 | Self::FindReplace
                 | Self::ConfigurationSets
-                | Self::RuleSetup
-                | Self::ReviewComments
                 | Self::CreateHierarchy
                 | Self::DescendHierarchyDirect
         )
@@ -297,12 +287,8 @@ impl Command {
                 | Self::CloseActiveDocument
                 | Self::CloseOtherDocuments
                 | Self::CloseAllDocuments
-                | Self::ConnectivityManager
-                | Self::SelectionBulkEdit
                 | Self::FindReplace
                 | Self::ConfigurationSets
-                | Self::RuleSetup
-                | Self::ReviewComments
                 | Self::CreateHierarchy
         )
     }
@@ -393,17 +379,11 @@ impl Command {
             | Self::DescendHierarchy
             | Self::DescendHierarchyDirect
             | Self::EditSymbolInPlace
-            | Self::GridSnapRouting
             | Self::SetStandardValueSeries(_)
-            | Self::VisibilityOptions
             | Self::CheckCellview
             | Self::CheckDesign
-            | Self::ConnectivityManager
             | Self::HighlightNet
-            | Self::SelectionBulkEdit
-            | Self::ConfigurationSets
-            | Self::RuleSetup
-            | Self::ReviewComments => ShortcutContext::DesignWorkspace,
+            | Self::ConfigurationSets => ShortcutContext::DesignWorkspace,
             Self::NextViolation | Self::PreviousViolation => ShortcutContext::ViolationNavigation,
             Self::SymbolPinTool
             | Self::SymbolPolylineTool
@@ -458,10 +438,7 @@ impl Command {
             Self::MirrorSelectionVertical => MIRROR_SELECTION_VERTICAL,
             Self::CycleGrid => GRID,
             Self::ZoomOneToOne => ZOOM_ONE_TO_ONE,
-            Self::GridSnapRouting => NONE,
-            Self::VisibilityOptions => NONE,
             Self::ToggleFullScreen => FULL_SCREEN,
-            Self::EngineeringTableView => ENGINEERING_TABLE_VIEW,
             Self::ToggleNavigator => TOGGLE_NAVIGATOR,
             Self::ToggleInspector => TOGGLE_INSPECTOR,
             Self::ToggleConsole => TOGGLE_CONSOLE,
@@ -493,11 +470,7 @@ impl Command {
             Self::SwapToRSpiceSymbols => NONE,
             Self::UpdateInstanceInterface => NONE,
             Self::CreateHierarchy => NONE,
-            Self::ConnectivityManager => NONE,
-            Self::SelectionBulkEdit => NONE,
             Self::ConfigurationSets => NONE,
-            Self::RuleSetup => NONE,
-            Self::ReviewComments => NONE,
             Self::SymbolPinTool => SYMBOL_PIN,
             Self::SymbolPolylineTool => SYMBOL_POLYLINE,
             Self::SymbolRectangleTool => SYMBOL_RECTANGLE,
@@ -675,7 +648,6 @@ impl Command {
                 crate::schematic::view::standard_value_snap::snap_block_reason(&app.state)
                     .unwrap_or("select a resistor, capacitor or inductor")
             }
-            Self::ConnectivityManager => "open a schematic or testbench",
             Self::HighlightNet if !super::active_schematic_editor(app) => {
                 "open a schematic or testbench"
             }
@@ -683,9 +655,7 @@ impl Command {
             Self::HighlightNet => crate::schematic::view::selected_net(&app.state)
                 .err()
                 .unwrap_or("command is unavailable in this context"),
-            Self::SelectionBulkEdit => "open a schematic project",
-            Self::ConfigurationSets | Self::RuleSetup => "open a project",
-            Self::ReviewComments => "open a schematic project",
+            Self::ConfigurationSets => "open a project",
             Self::Paste => "clipboard has no compatible content",
             Self::RenameSelection => "select one editable component, net label, or declared bus",
             Self::ObjectProperties => "select one inspectable object",

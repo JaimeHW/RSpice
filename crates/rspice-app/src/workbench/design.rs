@@ -8,9 +8,16 @@ pub(crate) mod commands;
 use egui::Context;
 
 use crate::workbench::app::actions::stimulus;
-use crate::workbench::app::dialogs::connectivity_manager::ConnectivityManager;
-use crate::workbench::app::dialogs::design_review_comments::ReviewComments;
-use crate::workbench::app::dialogs::engineering_table::EngineeringTable;
+use crate::workbench::app::dialogs::connectivity_manager::{
+    ConnectivityManager, open_connectivity_manager,
+};
+use crate::workbench::app::dialogs::design_review_comments::{
+    ReviewComments, open_design_review_comments,
+};
+use crate::workbench::app::dialogs::engineering_table::{
+    EngineeringTable, open_engineering_table_dialog,
+};
+use crate::workbench::app::dialogs::grid_snap_routing::open_grid_snap_routing_dialog;
 use crate::workbench::app::dialogs::hierarchy::create::CreateHierarchy;
 use crate::workbench::app::dialogs::hierarchy::descend;
 use crate::workbench::app::dialogs::placement::builtin_xspice::BuiltinXspicePlacement;
@@ -19,7 +26,7 @@ use crate::workbench::app::dialogs::replace_instance::ReplaceInstance;
 use crate::workbench::app::dialogs::selection::{array, bulk_edit, rename, shared_properties};
 use crate::workbench::app::dialogs::{
     create_model_bound_symbol, find_replace, object_properties, placement, rule_setup,
-    stimulus_link, symbol_definition,
+    stimulus_link, symbol_definition, visibility_options,
 };
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec};
 use crate::workbench::framework::dialogs::DialogKey;
@@ -52,17 +59,28 @@ impl CommandSet for DesignCommand {
         self.declared_spec()
     }
 
+    /// The schematic dialogs need a schematic or testbench in front of the
+    /// reader; Design rule setup needs only the project, which the registry
+    /// already asks for.
+    ///
     /// Every library verb needs the instrument open, because they all act on
     /// the definition it is reading; New and Validate need only that,
     /// because a library with nothing in it is exactly where New belongs.
     /// Placing is an edit of the schematic, so a read-only view is the one
     /// extra thing it needs beyond a definition to place.
     fn availability(self, reads: &Reads<'_, DesignFeature>) -> CommandAvailability {
-        if reads.wb.workspace != Workspace::Stimulus {
-            return CommandAvailability::Disabled("open the Stimulus Library");
-        }
+        let schematic = schematic_editor(reads);
         let selected = reads.state.selected_stimulus_definition.is_some();
         let refusal = match self {
+            Self::GridSnapRouting | Self::VisibilityOptions | Self::EngineeringTableView => {
+                (!schematic).then_some("command is unavailable in this context")
+            }
+            Self::ConnectivityManager => (!schematic).then_some("open a schematic or testbench"),
+            Self::SelectionBulkEdit | Self::ReviewComments => {
+                (!schematic).then_some("open a schematic project")
+            }
+            Self::RuleSetup => None,
+            _ if reads.wb.workspace != Workspace::Stimulus => Some("open the Stimulus Library"),
             Self::NewStimulusDefinition | Self::ValidateStimulusLibrary => None,
             Self::DuplicateStimulusDefinition | Self::DeleteStimulusDefinition => {
                 (!selected).then_some("select a stimulus definition")
@@ -137,6 +155,47 @@ impl CommandSet for DesignCommand {
                     cx.wb,
                 );
             }
+            Self::GridSnapRouting => {
+                open_grid_snap_routing_dialog(
+                    &mut cx.state.grid_snap_routing,
+                    cx.state.grid,
+                    cx.model,
+                    cx.wb,
+                );
+            }
+            Self::VisibilityOptions => {
+                visibility_options::open_schematic_visibility_options(
+                    &mut cx.state.schematic_visibility_dialog,
+                    cx.state.schematic_visibility,
+                    cx.state.drawing_sheet_layers,
+                );
+            }
+            Self::EngineeringTableView => {
+                open_engineering_table_dialog(
+                    &mut cx.state.engineering_table,
+                    &cx.state.engineering_table_views,
+                    cx.model,
+                );
+            }
+            Self::ConnectivityManager => open_connectivity_manager(
+                &mut cx.state.connectivity_manager,
+                cx.model,
+                cx.wb,
+                cx.platform,
+            ),
+            Self::SelectionBulkEdit => bulk_edit::open_selection_bulk_edit_dialog(
+                &mut cx.state.selection_bulk_edit,
+                &cx.state.schematic_bulk_edit_filters,
+                cx.model,
+            ),
+            Self::RuleSetup => {
+                rule_setup::open_rule_setup(&mut cx.state.rule_setup, cx.model, cx.wb, cx.platform)
+            }
+            Self::ReviewComments => open_design_review_comments(
+                &mut cx.state.design_review_comments,
+                cx.model,
+                cx.platform,
+            ),
             Self::ShowAdopterOnSchematic => {
                 stimulus::show_adopter_on_schematic(
                     cx.state.selected_stimulus_definition.as_deref(),
@@ -147,6 +206,16 @@ impl CommandSet for DesignCommand {
             }
         }
     }
+}
+
+/// Whether a schematic or testbench is the document in front of the reader
+/// in the Design workspace.
+fn schematic_editor(reads: &Reads<'_, DesignFeature>) -> bool {
+    reads.wb.workspace == Workspace::Design
+        && matches!(
+            reads.model.workspace.content.active_view_type(),
+            crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
+        )
 }
 
 /// The dialog steps the feature draws, under the keys the shell's dialog

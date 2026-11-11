@@ -798,6 +798,7 @@ const FEATURE_COMMAND_FILES: &[&str] = &[
     "workbench/simulate/commands.rs",
     "workbench/code/commands.rs",
     "workbench/project/commands.rs",
+    "workbench/design/commands.rs",
 ];
 
 /// Registered commands with no route, and why.

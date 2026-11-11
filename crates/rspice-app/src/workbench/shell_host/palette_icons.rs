@@ -5,6 +5,7 @@ use crate::state::command_catalog::CommandKey;
 use crate::ui::icons::Icon;
 use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::hardcopy::commands::HardcopyCommand;
 use crate::workbench::models::commands::ModelsCommand;
 use crate::workbench::project::commands::ProjectCommand;
@@ -32,9 +33,7 @@ pub(super) fn palette_icon(command: Command) -> Option<Icon> {
         Command::ArraySelection => Icon::Grid,
         Command::ReplaceInstance | Command::SwapToRSpiceSymbols => Icon::Refresh,
         Command::CreateHierarchy => Icon::Folder,
-        Command::ConnectivityManager => Icon::Bus,
         Command::ConfigurationSets => Icon::Grid,
-        Command::RuleSetup => Icon::Check,
         Command::CheckCellview | Command::CheckDesign => Icon::Check,
         _ => return None,
     };
@@ -61,6 +60,13 @@ pub(super) fn feature_palette_icon(key: CommandKey) -> Option<Icon> {
             | CodeCommand::ImportVerilogA
             | CodeCommand::ExportNetlist(_)
             | CodeCommand::ExportBillOfMaterials => Some(Icon::File),
+            _ => None,
+        };
+    }
+    if let Some(command) = DesignCommand::from_key(key) {
+        return match command {
+            DesignCommand::ConnectivityManager => Some(Icon::Bus),
+            DesignCommand::RuleSetup => Some(Icon::Check),
             _ => None,
         };
     }

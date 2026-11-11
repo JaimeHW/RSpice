@@ -34,7 +34,7 @@ use crate::workbench::design_system::WorkbenchIcon;
 
 use crate::workbench::app::SchematicEditAuthority;
 use crate::workbench::app::actions::workspace::sync_active_schematic;
-use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::app_state::Model;
 use crate::workbench::state::WorkbenchSession;
 
 const TITLE: &str = "Bulk edit";
@@ -276,20 +276,24 @@ enum SelectionBulkBodyAction {
     DeleteFilter,
 }
 
-pub(crate) fn open_selection_bulk_edit_dialog(state: &mut AppState) {
-    let filter = state.design.schematic_bulk_edit_filters.active.clone();
-    let authority = SelectionBulkEditAuthority::capture(&state.model);
+pub(crate) fn open_selection_bulk_edit_dialog(
+    dialog: &mut SelectionBulkEditDialogState,
+    filters: &SelectionBulkFilterSession,
+    model: &Model,
+) {
+    let filter = filters.active.clone();
+    let authority = SelectionBulkEditAuthority::capture(model);
     let property = SelectionBulkProperty::default();
-    let rows = build_rows(&state.model, &filter, property);
+    let rows = build_rows(model, &filter, property);
     let selected = rows
         .iter()
         .filter(|row| row.editable())
         .map(|row| row.key.clone())
         .collect();
-    let bound_sections = bound_library_sections(&state.model, &rows);
+    let bound_sections = bound_library_sections(model, &rows);
     // Nothing is proposed: the value is the user's to choose, and Apply
     // waits for it.
-    *state.design.selection_bulk_edit = SelectionBulkEditDialogState {
+    *dialog = SelectionBulkEditDialogState {
         open: true,
         filter,
         selected,

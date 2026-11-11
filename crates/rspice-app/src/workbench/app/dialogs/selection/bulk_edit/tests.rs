@@ -7,6 +7,7 @@
 use super::*;
 use crate::state::{LibraryCellInstance, Point};
 use crate::workbench::app::RSpiceApp;
+use crate::workbench::app_state::AppState;
 
 /// Draw the dialog as its dialog step does.
 fn render(app: &mut RSpiceApp, ctx: &Context) {
@@ -126,7 +127,11 @@ fn bulk_edit_opens_with_no_value_and_apply_waits_for_one() {
     let mut state = AppState::default();
     state.model.schematic.document_mut_for_test().components = vec![component(1, "X1", None)];
 
-    open_selection_bulk_edit_dialog(&mut state);
+    open_selection_bulk_edit_dialog(
+        &mut state.design.selection_bulk_edit,
+        &state.design.schematic_bulk_edit_filters,
+        &state.model,
+    );
 
     let dialog = &state.design.selection_bulk_edit;
     assert!(dialog.open);
@@ -141,7 +146,11 @@ fn bulk_edit_offers_the_bound_librarys_sections() {
     let mut state = AppState::default();
     state.model.schematic.document_mut_for_test().components = vec![component(1, "X1", None)];
 
-    open_selection_bulk_edit_dialog(&mut state);
+    open_selection_bulk_edit_dialog(
+        &mut state.design.selection_bulk_edit,
+        &state.design.schematic_bulk_edit_filters,
+        &state.model,
+    );
     assert!(state.design.selection_bulk_edit.bound_sections.is_empty());
     assert_eq!(
         missing_value_reason(&state.design.selection_bulk_edit),
@@ -161,7 +170,11 @@ fn bulk_edit_offers_the_bound_librarys_sections() {
     }
     state.model.model_library_manager.add_library(library);
 
-    open_selection_bulk_edit_dialog(&mut state);
+    open_selection_bulk_edit_dialog(
+        &mut state.design.selection_bulk_edit,
+        &state.design.schematic_bulk_edit_filters,
+        &state.model,
+    );
     let dialog = &state.design.selection_bulk_edit;
     assert_eq!(dialog.bound_sections, ["mc_ss", "TT_PRE"]);
     assert_eq!(
@@ -543,7 +556,11 @@ fn accessibility_tree_exposes_only_the_mockup_bulk_edit_surface_actions() {
     let mut app = RSpiceApp::test_instance();
     app.state.model.schematic.document_mut_for_test().components =
         vec![component(1, "X1", Some("tt"))];
-    open_selection_bulk_edit_dialog(&mut app.state);
+    open_selection_bulk_edit_dialog(
+        &mut app.state.design.selection_bulk_edit,
+        &app.state.design.schematic_bulk_edit_filters,
+        &app.state.model,
+    );
 
     let output = ctx.run_ui(
         egui::RawInput {
@@ -594,7 +611,11 @@ fn the_filter_fields_match_the_selects_and_say_their_names() {
         let mut app = RSpiceApp::test_instance();
         app.state.model.schematic.document_mut_for_test().components =
             vec![component(1, "X1", Some("tt"))];
-        open_selection_bulk_edit_dialog(&mut app.state);
+        open_selection_bulk_edit_dialog(
+            &mut app.state.design.selection_bulk_edit,
+            &app.state.design.schematic_bulk_edit_filters,
+            &app.state.model,
+        );
         let mut nodes = std::collections::HashMap::new();
         for _ in 0..3 {
             let output = ctx.run_ui(
@@ -644,7 +665,11 @@ fn the_body_stays_inside_the_dialog_when_no_section_is_defined() {
     let mut app = RSpiceApp::test_instance();
     app.state.model.schematic.document_mut_for_test().components =
         vec![component(1, "X1", Some("tt"))];
-    open_selection_bulk_edit_dialog(&mut app.state);
+    open_selection_bulk_edit_dialog(
+        &mut app.state.design.selection_bulk_edit,
+        &app.state.design.schematic_bulk_edit_filters,
+        &app.state.model,
+    );
     assert!(
         app.state
             .design

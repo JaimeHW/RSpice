@@ -5,6 +5,7 @@
 //! only the mutating ones explain the refusal and decline.
 
 use super::*;
+use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::project::commands::ProjectCommand;
 
 #[test]
@@ -196,14 +197,14 @@ fn connectivity_manager_supports_read_only_inspection() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;
     app.state.model.schematic.session.read_only = true;
-    assert!(Command::ConnectivityManager.is_enabled(&app));
-    Command::ConnectivityManager.execute(&mut app);
+    assert!(app.command_key_enabled(DesignCommand::ConnectivityManager.key()));
+    app.execute_command_key(DesignCommand::ConnectivityManager.key());
     assert!(app.state.design.connectivity_manager.open);
     assert!(app.state.dialog_modal_open());
 
     app.state.design.connectivity_manager.open = false;
     app.state.close_project_session();
-    assert!(!Command::ConnectivityManager.is_enabled(&app));
+    assert!(!app.command_key_enabled(DesignCommand::ConnectivityManager.key()));
 }
 
 #[test]
@@ -211,12 +212,12 @@ fn selection_bulk_edit_supports_read_only_inspection() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;
     app.state.model.schematic.session.read_only = true;
-    assert!(Command::SelectionBulkEdit.is_enabled(&app));
-    Command::SelectionBulkEdit.execute(&mut app);
+    assert!(app.command_key_enabled(DesignCommand::SelectionBulkEdit.key()));
+    app.execute_command_key(DesignCommand::SelectionBulkEdit.key());
     assert!(app.state.design.selection_bulk_edit.open);
     assert!(app.state.dialog_modal_open());
 
     app.state.design.selection_bulk_edit.open = false;
     app.state.close_project_session();
-    assert!(!Command::SelectionBulkEdit.is_enabled(&app));
+    assert!(!app.command_key_enabled(DesignCommand::SelectionBulkEdit.key()));
 }

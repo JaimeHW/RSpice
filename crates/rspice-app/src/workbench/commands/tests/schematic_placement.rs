@@ -6,6 +6,7 @@
 //! that cancelling or escaping returns to.
 
 use super::*;
+use crate::workbench::design::commands::DesignCommand;
 
 #[test]
 fn safe_mode_disables_schematic_mutation_commands_but_keeps_canvas_settings_available() {
@@ -32,7 +33,7 @@ fn safe_mode_disables_schematic_mutation_commands_but_keeps_canvas_settings_avai
         assert!(!command.is_enabled(&app), "{command:?}");
     }
     assert!(Command::CycleGrid.is_enabled(&app));
-    assert!(Command::GridSnapRouting.is_enabled(&app));
+    assert!(app.command_key_enabled(DesignCommand::GridSnapRouting.key()));
 
     Command::PlaceWire.execute(&mut app);
     assert_eq!(app.state.model.schematic.session.editor.tool, Tool::Select);

@@ -10,7 +10,8 @@ use egui::Context;
 use crate::state::{GridStyle, SchematicWireRoutingStyle, WireRoutingMode};
 use crate::ui::widgets::{CommandForm, DialogChoice, FormRows};
 use crate::workbench::app::SchematicEditAuthority;
-use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::app_state::Model;
+use crate::workbench::state::WorkbenchSession;
 
 /// Governed snap-spacing choices shown by the upgraded schematic toolbar
 /// transaction. `Free` disables snapping without replacing the document's
@@ -110,42 +111,39 @@ const PRIMARY: &str = "Apply canvas settings";
 const DESCRIPTION: &str = "Grid display is what you see; snap pitch and snap targets are what the cursor commits to. They are set separately because a coarse grid with fine snapping is a normal way to work.";
 const GRID_STYLES: [GridStyle; 3] = [GridStyle::Dots, GridStyle::Lines, GridStyle::Off];
 
-pub(crate) fn open_grid_snap_routing_dialog(state: &mut AppState) -> bool {
-    if state.design.grid_snap_routing.open {
+pub(crate) fn open_grid_snap_routing_dialog(
+    dialog: &mut GridSnapRoutingDialogState,
+    grid: GridStyle,
+    model: &Model,
+    workbench: &mut WorkbenchSession,
+) -> bool {
+    if dialog.open {
         return false;
     }
-    if state.model.schematic.canvas_settings_change_blocked() {
-        state.prompt("Finish or cancel the drawing in progress before changing snap or routing.");
+    if model.schematic.canvas_settings_change_blocked() {
+        workbench
+            .prompt("Finish or cancel the drawing in progress before changing snap or routing.");
         return false;
     }
 
-    let spacing = if state.model.schematic.session.editor.snap_engine.enabled {
-        GridSnapSpacingChoice::from_pitch(
-            state.model.schematic.document().document_policy.grid_pitch,
-        )
+    let spacing = if model.schematic.session.editor.snap_engine.enabled {
+        GridSnapSpacingChoice::from_pitch(model.schematic.document().document_policy.grid_pitch)
     } else {
         GridSnapSpacingChoice::Free
     };
     let draft = GridSnapRoutingDraft {
-        grid_style: state.design.grid,
+        grid_style: grid,
         snap_spacing: spacing,
-        snap_engine: state.model.schematic.session.editor.snap_engine.clone(),
+        snap_engine: model.schematic.session.editor.snap_engine.clone(),
         // A session left in angled routing opens on Orthogonal where the
         // document cannot take angled wires, so the draft can be applied.
-        wire_routing: match state
-            .model
-            .schematic
-            .session
-            .editor
-            .wire_drawing
-            .routing_mode
-        {
-            mode if mode.is_orthogonal() || angled_routing_allowed(&state.model) => mode,
+        wire_routing: match model.schematic.session.editor.wire_drawing.routing_mode {
+            mode if mode.is_orthogonal() || angled_routing_allowed(model) => mode,
             _ => WireRoutingMode::HorizontalFirst,
         },
     };
-    let authority = SchematicEditAuthority::capture(state);
-    state.design.grid_snap_routing.open(draft, authority);
+    let authority = SchematicEditAuthority::capture(model);
+    dialog.open(draft, authority);
     true
 }
 
@@ -344,6 +342,7 @@ mod tests {
     use crate::state::write_policy::LocalSafeModeOptions;
     use crate::state::{SchematicGridPitch, SchematicWireRoutingStyle, Tool};
     use crate::workbench::app::RSpiceApp;
+    use crate::workbench::app_state::AppState;
 
     /// Apply, over the slot, the model and the session.
     fn commit_grid_snap_routing(state: &mut AppState) -> Result<(), GridSnapRoutingCommitError> {
@@ -381,7 +380,12 @@ mod tests {
             .wire_drawing
             .routing_mode = WireRoutingMode::VerticalFirst;
 
-        assert!(open_grid_snap_routing_dialog(&mut state));
+        assert!(open_grid_snap_routing_dialog(
+            &mut state.design.grid_snap_routing,
+            state.design.grid,
+            &state.model,
+            &mut state.workbench
+        ));
         let draft = &state.design.grid_snap_routing.draft;
         assert_eq!(draft.grid_style, GridStyle::Lines);
         assert_eq!(draft.snap_spacing, GridSnapSpacingChoice::Free);
@@ -407,7 +411,12 @@ mod tests {
             .document_mut_for_test()
             .document_policy
             .wire_junctions = crate::state::WireJunctionPolicy::AnyAngle;
-        assert!(open_grid_snap_routing_dialog(&mut state));
+        assert!(open_grid_snap_routing_dialog(
+            &mut state.design.grid_snap_routing,
+            state.design.grid,
+            &state.model,
+            &mut state.workbench
+        ));
         let draft = &mut state.design.grid_snap_routing.draft;
         draft.grid_style = GridStyle::Lines;
         draft.snap_spacing = GridSnapSpacingChoice::Mil25;
@@ -520,7 +529,12 @@ mod tests {
     fn angled_routing_needs_the_any_angle_junction_policy() {
         for mode in [WireRoutingMode::FortyFiveDegree, WireRoutingMode::Diagonal] {
             let mut state = AppState::default();
-            assert!(open_grid_snap_routing_dialog(&mut state));
+            assert!(open_grid_snap_routing_dialog(
+                &mut state.design.grid_snap_routing,
+                state.design.grid,
+                &state.model,
+                &mut state.workbench
+            ));
             state.design.grid_snap_routing.draft.wire_routing = mode;
 
             let error = commit_grid_snap_routing(&mut state)
@@ -544,7 +558,12 @@ mod tests {
                 .document_mut_for_test()
                 .document_policy
                 .wire_junctions = crate::state::WireJunctionPolicy::AnyAngle;
-            assert!(open_grid_snap_routing_dialog(&mut state));
+            assert!(open_grid_snap_routing_dialog(
+                &mut state.design.grid_snap_routing,
+                state.design.grid,
+                &state.model,
+                &mut state.workbench
+            ));
             state.design.grid_snap_routing.draft.wire_routing = mode;
             assert!(commit_grid_snap_routing(&mut state).is_ok());
             assert_eq!(
@@ -572,7 +591,12 @@ mod tests {
             .wire_junctions = crate::state::WireJunctionPolicy::AnyAngle;
         let topology = state.model.schematic.topology_version();
         let pitch = state.model.schematic.document().document_policy.grid_pitch;
-        assert!(open_grid_snap_routing_dialog(&mut state));
+        assert!(open_grid_snap_routing_dialog(
+            &mut state.design.grid_snap_routing,
+            state.design.grid,
+            &state.model,
+            &mut state.workbench
+        ));
         state.design.grid_snap_routing.draft.grid_style = GridStyle::Off;
         state.design.grid_snap_routing.draft.snap_spacing = GridSnapSpacingChoice::Free;
         state.design.grid_snap_routing.draft.wire_routing = WireRoutingMode::Diagonal;
@@ -609,7 +633,12 @@ mod tests {
         let mut state = AppState::default();
         state.model.schematic.session.read_only = true;
         let original_snap = state.model.schematic.session.editor.snap_engine.clone();
-        assert!(open_grid_snap_routing_dialog(&mut state));
+        assert!(open_grid_snap_routing_dialog(
+            &mut state.design.grid_snap_routing,
+            state.design.grid,
+            &state.model,
+            &mut state.workbench
+        ));
         state.design.grid_snap_routing.draft.grid_style = GridStyle::Lines;
         state.design.grid_snap_routing.draft.snap_spacing = GridSnapSpacingChoice::Mil25;
         state
@@ -643,7 +672,12 @@ mod tests {
     fn late_safe_mode_activation_rejects_pitch_change_without_partial_apply() {
         let mut state = AppState::default();
         let original_snap = state.model.schematic.session.editor.snap_engine.clone();
-        assert!(open_grid_snap_routing_dialog(&mut state));
+        assert!(open_grid_snap_routing_dialog(
+            &mut state.design.grid_snap_routing,
+            state.design.grid,
+            &state.model,
+            &mut state.workbench
+        ));
         state.design.grid_snap_routing.draft.grid_style = GridStyle::Lines;
         state.design.grid_snap_routing.draft.snap_spacing = GridSnapSpacingChoice::Mil25;
 
@@ -677,7 +711,12 @@ mod tests {
     #[test]
     fn stale_authority_rejects_every_candidate_before_any_owner_changes() {
         let mut state = AppState::default();
-        assert!(open_grid_snap_routing_dialog(&mut state));
+        assert!(open_grid_snap_routing_dialog(
+            &mut state.design.grid_snap_routing,
+            state.design.grid,
+            &state.model,
+            &mut state.workbench
+        ));
         state.design.grid_snap_routing.draft.grid_style = GridStyle::Lines;
         state
             .design
@@ -707,7 +746,12 @@ mod tests {
     fn wire_gesture_started_after_open_rejects_every_candidate_without_cancelling_it() {
         let mut state = AppState::default();
         let original_snap = state.model.schematic.session.editor.snap_engine.clone();
-        assert!(open_grid_snap_routing_dialog(&mut state));
+        assert!(open_grid_snap_routing_dialog(
+            &mut state.design.grid_snap_routing,
+            state.design.grid,
+            &state.model,
+            &mut state.workbench
+        ));
         state.design.grid_snap_routing.draft.grid_style = GridStyle::Lines;
         state.design.grid_snap_routing.draft.snap_spacing = GridSnapSpacingChoice::Mil25;
         state.model.schematic.arm_tool(Tool::Wire);
@@ -741,7 +785,12 @@ mod tests {
             (GridSnapSpacingChoice::Metric, 4, Point::new(8, 8)),
         ] {
             let mut state = AppState::default();
-            assert!(open_grid_snap_routing_dialog(&mut state));
+            assert!(open_grid_snap_routing_dialog(
+                &mut state.design.grid_snap_routing,
+                state.design.grid,
+                &state.model,
+                &mut state.workbench
+            ));
             let draft = &mut state.design.grid_snap_routing.draft;
             draft.snap_spacing = choice;
             draft.snap_engine.snap_to_grid = true;
@@ -774,7 +823,12 @@ mod tests {
     fn enabled_spacing_requires_at_least_one_actionable_snap_target() {
         let mut state = AppState::default();
         let original_snap = state.model.schematic.session.editor.snap_engine.clone();
-        assert!(open_grid_snap_routing_dialog(&mut state));
+        assert!(open_grid_snap_routing_dialog(
+            &mut state.design.grid_snap_routing,
+            state.design.grid,
+            &state.model,
+            &mut state.workbench
+        ));
         let draft = &mut state.design.grid_snap_routing.draft;
         draft.grid_style = GridStyle::Lines;
         draft.snap_spacing = GridSnapSpacingChoice::Mil25;
@@ -810,7 +864,12 @@ mod tests {
         ctx.enable_accesskit();
         crate::ui::Theme::default().apply(&ctx);
         let mut app = RSpiceApp::test_instance();
-        assert!(open_grid_snap_routing_dialog(&mut app.state));
+        assert!(open_grid_snap_routing_dialog(
+            &mut app.state.design.grid_snap_routing,
+            app.state.design.grid,
+            &app.state.model,
+            &mut app.state.workbench
+        ));
         // Access updates are incremental: keep the latest of every node.
         let mut nodes = std::collections::HashMap::new();
         for _ in 0..4 {
@@ -869,7 +928,12 @@ mod tests {
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let mut app = RSpiceApp::test_instance();
-        assert!(open_grid_snap_routing_dialog(&mut app.state));
+        assert!(open_grid_snap_routing_dialog(
+            &mut app.state.design.grid_snap_routing,
+            app.state.design.grid,
+            &app.state.model,
+            &mut app.state.workbench
+        ));
         let mut shapes = Vec::new();
         for _ in 0..4 {
             shapes = ctx

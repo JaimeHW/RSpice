@@ -10,6 +10,7 @@ use super::*;
 use crate::workbench::cloud::commands::CloudCommand;
 use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::commands::vocabulary::command_registry;
+use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::framework::command_registry::CommandFlags;
 use crate::workbench::framework::requests::FocusProjectLauncherSearch;
 use crate::workbench::hardcopy::commands::HardcopyCommand;
@@ -147,13 +148,19 @@ fn new_cell_command_captures_exact_library_catalog_revision() {
 fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
     // This independent expectation list prevents the predicate under test
     // from silently omitting a newly exposed submenu route.
+    assert!(
+        Command::FindInDesign.requires_open_project(),
+        "missing closed-project boundary: FindInDesign"
+    );
     for command in [
-        Command::FindInDesign,
-        Command::SelectionBulkEdit,
-        Command::ConnectivityManager,
+        DesignCommand::SelectionBulkEdit,
+        DesignCommand::ConnectivityManager,
     ] {
         assert!(
-            command.requires_open_project(),
+            command
+                .declared_spec()
+                .flags
+                .contains(CommandFlags::REQUIRES_OPEN_PROJECT),
             "missing closed-project boundary: {command:?}"
         );
     }

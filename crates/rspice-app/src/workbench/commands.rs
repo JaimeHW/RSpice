@@ -295,11 +295,7 @@ impl Command {
             | Self::SwapToRSpiceSymbols
             | Self::UpdateInstanceInterface
             | Self::CreateHierarchy
-            | Self::ConnectivityManager
             | Self::HighlightNet
-            | Self::SelectionBulkEdit
-            | Self::RuleSetup
-            | Self::ReviewComments
             | Self::SymbolPinTool
             | Self::SymbolPolylineTool
             | Self::SymbolRectangleTool
@@ -345,10 +341,7 @@ impl Command {
             | Self::CycleGrid
             | Self::SetGridStyle(_)
             | Self::AnnotateOperatingPoint
-            | Self::AnnotateTransientVoltages
-            | Self::GridSnapRouting
-            | Self::VisibilityOptions
-            | Self::EngineeringTableView => CommandOwner::Design,
+            | Self::AnnotateTransientVoltages => CommandOwner::Design,
         }
     }
 
@@ -590,14 +583,8 @@ impl Command {
                     app.state.workbench.prompt(status);
                 }
             }
-            Self::GridSnapRouting => {
-                crate::workbench::app::open_grid_snap_routing_dialog(&mut app.state);
-            }
             Self::HighlightNet => {
                 crate::schematic::view::highlight_selected_net(&mut app.state);
-            }
-            Self::VisibilityOptions => {
-                crate::workbench::app::open_schematic_visibility_options(&mut app.state);
             }
             Self::ToggleFullScreen => {
                 if app.state.workbench.full_screen_presentation {
@@ -605,9 +592,6 @@ impl Command {
                 } else {
                     app.state.enter_full_screen_presentation();
                 }
-            }
-            Self::EngineeringTableView => {
-                crate::workbench::app::open_engineering_table_dialog(&mut app.state);
             }
             Self::ToggleNavigator => {
                 if app.state.workbench.navigator_visible {
@@ -814,12 +798,6 @@ impl Command {
             Self::CreateHierarchy => {
                 crate::workbench::app::open_create_hierarchy_dialog(&mut app.state);
             }
-            Self::ConnectivityManager => {
-                crate::workbench::app::open_connectivity_manager(&mut app.state);
-            }
-            Self::SelectionBulkEdit => {
-                crate::workbench::app::open_selection_bulk_edit_dialog(&mut app.state);
-            }
             Self::FindReplace => crate::workbench::app::open_find_replace(&mut app.state),
             Self::RepeatLastCommand => match vocabulary::last_repeatable(
                 app.state.workbench.last_repeatable_command.as_deref(),
@@ -837,12 +815,6 @@ impl Command {
                 crate::workbench::app::dialogs::project::configuration_dialogs::show_configuration_page(
                     &mut app.state,
                 );
-            }
-            Self::RuleSetup => {
-                crate::workbench::app::open_rule_setup(&mut app.state);
-            }
-            Self::ReviewComments => {
-                crate::workbench::app::open_design_review_comments(&mut app.state);
             }
             Self::SymbolPinTool => app.activate_symbol_tool(super::SymbolTool::PlacePin),
             Self::SymbolPolylineTool => app.activate_symbol_tool(super::SymbolTool::Line),

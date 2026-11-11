@@ -11,6 +11,7 @@ use crate::state::{
 };
 use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::state::Workspace;
 
 use super::replay::Replay;
@@ -180,7 +181,7 @@ fn shared_properties_open_and_draw_in_the_frame() {
 #[test]
 fn grid_snap_and_routing_opens_and_draws_in_the_frame() {
     let mut app = design_app();
-    Command::GridSnapRouting.execute(&mut app);
+    app.execute_command_key(DesignCommand::GridSnapRouting.key());
     assert!(draws_dialog(&mut app, "Grid, snap and wire routing"));
     assert!(app.state.design.grid_snap_routing.open);
 }
@@ -188,7 +189,7 @@ fn grid_snap_and_routing_opens_and_draws_in_the_frame() {
 #[test]
 fn display_options_open_and_draw_in_the_frame() {
     let mut app = design_app();
-    Command::VisibilityOptions.execute(&mut app);
+    app.execute_command_key(DesignCommand::VisibilityOptions.key());
     assert!(draws_dialog(&mut app, "Display options"));
     assert!(app.state.design.schematic_visibility_dialog.open);
 }
@@ -336,7 +337,7 @@ fn the_component_form_designer_opens_and_draws_in_the_frame() {
 #[test]
 fn design_review_comments_open_and_draw_in_the_frame() {
     let mut app = design_app();
-    Command::ReviewComments.execute(&mut app);
+    app.execute_command_key(DesignCommand::ReviewComments.key());
     assert!(draws_dialog(&mut app, "Design review comments"));
     assert!(app.state.design.design_review_comments.open);
 }
@@ -344,7 +345,7 @@ fn design_review_comments_open_and_draw_in_the_frame() {
 #[test]
 fn design_rule_setup_opens_and_draws_in_the_frame() {
     let mut app = design_app();
-    Command::RuleSetup.execute(&mut app);
+    app.execute_command_key(DesignCommand::RuleSetup.key());
     assert!(draws_dialog(&mut app, "Design rule setup"));
     assert!(app.state.design.rule_setup.open);
 }
@@ -353,7 +354,7 @@ fn design_rule_setup_opens_and_draws_in_the_frame() {
 fn bulk_edit_opens_and_draws_in_the_frame() {
     let mut app = design_app();
     resistor(&mut app, Point::new(100, 100));
-    Command::SelectionBulkEdit.execute(&mut app);
+    app.execute_command_key(DesignCommand::SelectionBulkEdit.key());
     assert!(draws_dialog(&mut app, "Bulk edit"));
     assert!(app.state.design.selection_bulk_edit.open);
 }
@@ -362,7 +363,7 @@ fn bulk_edit_opens_and_draws_in_the_frame() {
 fn engineering_table_view_opens_and_draws_in_the_frame() {
     let mut app = design_app();
     resistor(&mut app, Point::new(100, 100));
-    Command::EngineeringTableView.execute(&mut app);
+    app.execute_command_key(DesignCommand::EngineeringTableView.key());
     assert!(draws_dialog(&mut app, "Engineering table view"));
     assert!(app.state.design.engineering_table.open);
 }
@@ -483,7 +484,12 @@ fn a_readoption_reopens_the_editor_in_the_frame_it_is_chosen() {
 fn the_connectivity_manager_opens_and_draws_in_the_frame() {
     let mut app = design_app();
     resistor(&mut app, Point::new(0, 0));
-    crate::workbench::app::open_connectivity_manager(&mut app.state);
+    crate::workbench::app::open_connectivity_manager(
+        &mut app.state.design.connectivity_manager,
+        &mut app.state.model,
+        &mut app.state.workbench,
+        &app.state.platform,
+    );
     assert!(draws_dialog(
         &mut app,
         "Connectivity, buses and global nets"
@@ -503,7 +509,12 @@ fn a_connectivity_reveal_is_carried_out_in_the_frame_it_is_chosen() {
         .model
         .schematic
         .add_component(ComponentType::Resistor, Point::new(0, 0));
-    crate::workbench::app::open_connectivity_manager(&mut replay.app.state);
+    crate::workbench::app::open_connectivity_manager(
+        &mut replay.app.state.design.connectivity_manager,
+        &mut replay.app.state.model,
+        &mut replay.app.state.workbench,
+        &replay.app.state.platform,
+    );
     let at = replay
         .frames(Vec::new())
         .into_iter()

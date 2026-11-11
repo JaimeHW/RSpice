@@ -19,7 +19,8 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
     Dialog, DialogChoice, DialogSize, DialogTransactionTone, select_with_disabled,
 };
-use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::app_state::{Model, PlatformState};
+use crate::workbench::state::WorkbenchSession;
 
 const TITLE: &str = "Design rule setup";
 const PRIMARY: &str = "Apply";
@@ -45,14 +46,19 @@ pub(crate) struct RuleSetupDialogState {
     refusal: Option<String>,
 }
 
-pub(crate) fn open_rule_setup(state: &mut AppState) {
-    if !state.platform.project_lifecycle.is_open() {
-        state.prompt("Design rule setup requires an open project.");
+pub(crate) fn open_rule_setup(
+    dialog: &mut RuleSetupDialogState,
+    model: &Model,
+    workbench: &mut WorkbenchSession,
+    platform: &PlatformState,
+) {
+    if !platform.project_lifecycle.is_open() {
+        workbench.prompt("Design rule setup requires an open project.");
         return;
     }
-    state.design.rule_setup = RuleSetupDialogState {
+    *dialog = RuleSetupDialogState {
         open: true,
-        draft: (*state.model.workspace.content.design_rules).clone(),
+        draft: (*model.workspace.content.design_rules).clone(),
         refusal: None,
     };
 }
@@ -297,6 +303,7 @@ fn refused_options(rule: DrcViolationType) -> Vec<(usize, &'static str)> {
 mod tests {
     use super::*;
     use crate::workbench::app::RSpiceApp;
+    use crate::workbench::app_state::AppState;
 
     /// Draw the dialog as the frame's step does, over the whole state.
     fn render_rule_setup_dialog(ctx: &Context, state: &mut AppState) -> bool {
@@ -331,7 +338,12 @@ mod tests {
             .design_rules
             .set_severity(DrcViolationType::DanglingWire, DrcSeverity::Error)
             .expect("a dangling wire may be promoted");
-        open_rule_setup(&mut app.state);
+        open_rule_setup(
+            &mut app.state.design.rule_setup,
+            &app.state.model,
+            &mut app.state.workbench,
+            &app.state.platform,
+        );
         assert!(app.state.design.rule_setup.open);
         assert_eq!(
             app.state.design.rule_setup.draft,
@@ -394,7 +406,12 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         app.state.model.workspace.content.design_rules =
             serde_json::from_str(r#"{"schema_version":9}"#).expect("a stored deck always reads");
-        open_rule_setup(&mut app.state);
+        open_rule_setup(
+            &mut app.state.design.rule_setup,
+            &app.state.model,
+            &mut app.state.workbench,
+            &app.state.platform,
+        );
         assert!(matches!(
             unread_issue(&app.state.design.rule_setup.draft),
             Some(DeckIssue::UnsupportedSchema { version: 9 })
@@ -409,7 +426,12 @@ mod tests {
     #[test]
     fn the_rule_table_stays_inside_its_dialog() {
         let mut app = RSpiceApp::test_instance();
-        open_rule_setup(&mut app.state);
+        open_rule_setup(
+            &mut app.state.design.rule_setup,
+            &app.state.model,
+            &mut app.state.workbench,
+            &app.state.platform,
+        );
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let mut shapes = Vec::new();

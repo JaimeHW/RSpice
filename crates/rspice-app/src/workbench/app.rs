@@ -109,19 +109,13 @@ pub(crate) use dialogs::design_management::{
     DesignManagementDialogState, open_design_management_dialog,
 };
 
-pub(crate) use dialogs::rule_setup::open_rule_setup;
+pub(crate) use dialogs::connectivity_manager::ConnectivityManagerDialogState;
+#[cfg(test)]
+pub(crate) use dialogs::connectivity_manager::open_connectivity_manager;
 
-pub(crate) use dialogs::connectivity_manager::{
-    ConnectivityManagerDialogState, open_connectivity_manager,
-};
+pub(crate) use dialogs::selection::bulk_edit::SelectionBulkEditDialogState;
 
-pub(crate) use dialogs::selection::bulk_edit::{
-    SelectionBulkEditDialogState, open_selection_bulk_edit_dialog,
-};
-
-pub(crate) use dialogs::design_review_comments::{
-    DesignReviewCommentsDialogState, open_design_review_comments,
-};
+pub(crate) use dialogs::design_review_comments::DesignReviewCommentsDialogState;
 
 pub(crate) use dialogs::library::new_veriloga_device::{
     new_veriloga_device_available, open_new_veriloga_device_form,
@@ -181,8 +175,6 @@ pub(crate) use schematic::named_net::{
 };
 
 pub(crate) use dialogs::check_and_save::open_check_and_save_dialog;
-pub(crate) use dialogs::engineering_table::open_engineering_table_dialog;
-pub(crate) use dialogs::grid_snap_routing::open_grid_snap_routing_dialog;
 pub(crate) use dialogs::hierarchy::create::open_create_hierarchy_dialog;
 pub(crate) use dialogs::hierarchy::descend::open_descend_hierarchy_dialog;
 pub(crate) use dialogs::replace_instance::{
@@ -223,7 +215,6 @@ pub(crate) use dialogs::symbol_definition::{
     SymbolImportDialogState, SymbolParameterFormDialogState, open_symbol_import_dialog,
     open_symbol_parameter_form_dialog,
 };
-pub(crate) use dialogs::visibility_options::open_schematic_visibility_options;
 
 pub(crate) use dialogs::selection::rename::{
     open_selected_object_rename, rename_selection_available,
