@@ -1635,6 +1635,7 @@ impl BuiltinVerilogAInstance {
     }
 
     /// The module's operating-point outputs, in source declaration order.
+    #[doc(hidden)]
     pub fn output_descriptors(
         &self,
     ) -> &'static [rspice_veriloga_runtime::GeneratedVerilogAOutputDescriptor] {
@@ -1649,6 +1650,7 @@ impl BuiltinVerilogAInstance {
     /// recorded: at a converged point, the load the solver accepted
     /// `solution` from, as a SPICE device reports its operating point. The
     /// load only records; nothing is computed until this asks.
+    #[doc(hidden)]
     pub fn operating_point_outputs(&self, solution: &[Value], num_nodes: usize) -> Vec<Value> {
         let mut outputs = vec![0.0; self.kind.output_descriptors().len()];
         if !outputs.is_empty() {

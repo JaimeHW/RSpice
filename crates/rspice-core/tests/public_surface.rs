@@ -688,7 +688,11 @@ const MAX_PUBLIC_ITEMS: usize = 5286;
 // `Bjt::restore_nonlinear_state` add three: the rollback image a transient
 // attempt takes of each BJT (`rspice-core` circuit/nonlinear.rs), in place of
 // a clone of the whole device. The census is 1,687, with no slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 1687;
+// `BuiltinVerilogAInstance::output_descriptors` and `operating_point_outputs`
+// add two: the operating-point report and `.PRINT N(M1:gm)` (`rspice-core`
+// circuit/introspection.rs) read a generated device's module outputs. The
+// census is 1,689, with no slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 1689;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
