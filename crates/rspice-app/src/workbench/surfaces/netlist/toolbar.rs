@@ -18,12 +18,13 @@ use crate::workbench::design_system::{Problem, WorkbenchIcon, icon_button, paint
 use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
 use crate::workbench::{MessageId, RSpiceApp};
 
-use super::ownership::{open_owned_source, open_ownership_dialog};
+use super::ownership::open_ownership_dialog;
 use super::revision::owned_source_save_ready;
 use super::{
     active_document_available, document_syntax_status, generated_primary_ready,
     generation_block_reason,
 };
+use crate::workbench::documents::netlist_document::open_owned_source;
 
 pub(super) const CODE_TOOLBAR_HEIGHT: f32 = 33.0;
 pub(super) const CODE_TOOLBAR_PADDING_X: f32 = 8.0;

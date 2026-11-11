@@ -97,7 +97,8 @@ pub(crate) enum CodeCommand {
 /// section a Netlist outline row chose, picking an include's file again,
 /// a source rail's file action and opening a placed instance of the
 /// Verilog-A cell; and, from the netlist page's dialogs, the rename, the
-/// revision restore, the external change and the import each confirmed.
+/// revision restore, the external change and the import each confirmed, and
+/// a find window press.
 /// Each command, dialog step, navigator or page dialog that raises one
 /// raises one. Taken straight after the call that raised it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -159,6 +160,9 @@ pub(in crate::workbench) enum CodeRequest {
     ApplyExternalNetlistChange,
     /// Commit the netlist import the netlist page's review holds.
     CommitNetlistImport,
+    /// Carry out the press the netlist page's find window stored: going to a
+    /// match, replacing it, or replacing every match.
+    ApplyNetlistFind,
 }
 
 impl Request for CodeRequest {

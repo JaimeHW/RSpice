@@ -11,10 +11,13 @@ use egui::Ui;
 use std::ops::Range;
 
 use crate::ui::widgets::{Dialog, DialogChoice, DialogHintTone, DialogInitialFocus, DialogSize};
-use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
-use crate::workbench::{MessageCatalog, MessageId, RSpiceApp};
-
-use super::ownership::open_owned_source;
+use crate::workbench::code::CodeFeature;
+use crate::workbench::code::commands::CodeRequest;
+use crate::workbench::documents::netlist_document::{
+    ActiveNetlistDocument, NetlistFindAction, NetlistFindStep, NetlistFindTarget,
+};
+use crate::workbench::framework::feature::Cx;
+use crate::workbench::{MessageCatalog, MessageId};
 
 /// How many matches the surface will hold at once.
 ///
@@ -24,13 +27,6 @@ use super::ownership::open_owned_source;
 /// rows states plainly that it is a first page.
 const NETLIST_FIND_RESULT_LIMIT: usize = 500;
 const NETLIST_REPLACE_ALL_LIMIT: usize = 50_000;
-
-#[derive(Debug, Clone, Copy)]
-enum FindWindowAction {
-    Select(usize),
-    ReplaceNext,
-    ReplaceAll,
-}
 
 /// One searchable document. The source is borrowed from application state:
 /// the closure a project-references search covers is the whole include graph,
@@ -66,19 +62,6 @@ pub(super) struct SearchSources<'a> {
     pub(super) open_documents:
         &'a std::collections::HashSet<crate::workbench::state::WorkspaceDocumentId>,
     pub(super) runs: &'a rspice_app_runs::workbench::slots::runs::RunsState,
-}
-
-/// The match an action names, held independently of the scan it came from.
-struct FindTarget {
-    index: usize,
-    active_document: ActiveNetlistDocument,
-    deck_id: Option<uuid::Uuid>,
-    dependency_identity: Option<String>,
-    editable: bool,
-    /// The document's bytes, present only for a replacement.
-    source: Option<String>,
-    line: usize,
-    byte_range: Range<usize>,
 }
 
 /// Matches for one query across one scope, bounded in count.
@@ -599,16 +582,16 @@ fn source_offset_is_comment(source: &str, offset: usize) -> bool {
     false
 }
 
-pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
-    if !app.state.code.netlist.find.open {
+pub(super) fn find_replace_window(ctx: &egui::Context, cx: &mut Cx<'_, CodeFeature>) {
+    if !cx.state.netlist.find.open {
         return;
     }
 
-    use crate::state::{FindDirection, FindOptions, replace_source_ranges};
+    use crate::state::{FindDirection, FindOptions};
     use crate::workbench::documents::netlist_document::NetlistFindScope;
 
-    let messages = app.state.workbench.messages();
-    let mut find = app.state.code.netlist.find.clone();
+    let messages = cx.wb.messages();
+    let mut find = cx.state.netlist.find.clone();
     let options = FindOptions {
         direction: FindDirection::Forward,
         match_case: find.match_case,
@@ -617,16 +600,16 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
     };
     let documents = netlist_search_documents(
         SearchSources {
-            model: &app.state.model,
-            netlist: &app.state.code.netlist,
-            open_documents: &app.state.code.netlist_open_documents,
-            runs: &app.state.runs,
+            model: cx.model,
+            netlist: &cx.state.netlist,
+            open_documents: &cx.state.netlist_open_documents,
+            runs: cx.runs,
         },
         find.scope,
     );
     let found = scan_documents(&documents, &find.find, options, find.include_comments);
     find.error = if find.scope == NetlistFindScope::Selection
-        && app.state.code.netlist.selected_byte_range.is_none()
+        && cx.state.netlist.selected_byte_range.is_none()
     {
         Some(messages.text(MessageId::NetlistFindSelectionRequired))
     } else {
@@ -792,7 +775,7 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
                         )
                         .clicked()
                     {
-                        action = Some(FindWindowAction::Select(index));
+                        action = Some(NetlistFindAction::Select(index));
                     }
                 }
             });
@@ -821,7 +804,7 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
                 )
                 .clicked()
             {
-                action = Some(FindWindowAction::ReplaceNext);
+                action = Some(NetlistFindAction::ReplaceNext);
             }
             if ui
                 .add_enabled(
@@ -830,19 +813,19 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
                 )
                 .clicked()
             {
-                action = Some(FindWindowAction::ReplaceAll);
+                action = Some(NetlistFindAction::ReplaceAll);
             }
         });
         find_control_id
     });
     match choice {
         DialogChoice::Primary => {
-            action = Some(FindWindowAction::Select(
+            action = Some(NetlistFindAction::Select(
                 (find.selected_match + 1) % matches.len().max(1),
             ));
         }
         DialogChoice::Secondary => {
-            action = Some(FindWindowAction::Select(if find.selected_match == 0 {
+            action = Some(NetlistFindAction::Select(if find.selected_match == 0 {
                 matches.len().saturating_sub(1)
             } else {
                 find.selected_match - 1
@@ -852,7 +835,7 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
         DialogChoice::None => {}
     }
 
-    let scoped_replacements = if matches!(action, Some(FindWindowAction::ReplaceAll)) {
+    let scoped_replacements = if matches!(action, Some(NetlistFindAction::ReplaceAll)) {
         match plan_scoped_replacements(
             &documents,
             &find.find,
@@ -876,11 +859,11 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
     // matches were found in.
     let replacing = matches!(
         action,
-        Some(FindWindowAction::ReplaceNext | FindWindowAction::ReplaceAll)
+        Some(NetlistFindAction::ReplaceNext | NetlistFindAction::ReplaceAll)
     );
     let target = match action {
-        Some(FindWindowAction::Select(index)) => Some(index),
-        Some(FindWindowAction::ReplaceNext | FindWindowAction::ReplaceAll) => {
+        Some(NetlistFindAction::Select(index)) => Some(index),
+        Some(NetlistFindAction::ReplaceNext | NetlistFindAction::ReplaceAll) => {
             Some(find.selected_match)
         }
         None => None,
@@ -888,7 +871,7 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
     .and_then(|index| Some((index, matches.get(index)?)))
     .and_then(|(index, result)| {
         let document = documents.get(result.document)?;
-        Some(FindTarget {
+        Some(NetlistFindTarget {
             index,
             active_document: document.active_document,
             deck_id: document.deck_id,
@@ -901,184 +884,23 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
             byte_range: result.found.byte_range(),
         })
     });
-    if let (Some(FindWindowAction::Select(_)), Some(target)) = (action, target.as_ref()) {
+    if let (Some(NetlistFindAction::Select(_)), Some(target)) = (action, target.as_ref()) {
         find.selected_match = target.index;
     }
     drop(matches);
     drop(documents);
-    app.state.code.netlist.find = find;
-
-    if let Some(replacements) = scoped_replacements {
-        match crate::workbench::documents::netlist_document::replace_owned_sources_atomically(
-            &mut app.state,
-            replacements,
-        ) {
-            Ok(count) if count > 0 => {
-                app.state.code.netlist.find.selected_match = 0;
-                let count_text = count.to_string();
-                app.state.prompt(messages.format(
-                    if count == 1 {
-                        MessageId::NetlistFindReplacedSingular
-                    } else {
-                        MessageId::NetlistFindReplaced
-                    },
-                    &[("count", &count_text)],
-                ));
-            }
-            Ok(_) => {}
-            // The find window states the refusal in place.
-            Err(error) => app.state.code.netlist.find.error = Some(error),
-        }
-        return;
-    }
-
-    let Some(target) = target else {
-        return;
-    };
-    match action {
-        Some(FindWindowAction::Select(_)) => {
-            if let Some(deck_id) = target.deck_id
-                && let Err(error) =
-                    crate::workbench::documents::netlist_document::select_retained_top_deck(
-                        &mut app.state,
-                        deck_id,
-                    )
-            {
-                app.state.prompt(error);
-                return;
-            }
-            match target.active_document {
-                ActiveNetlistDocument::Generated => {
-                    let _ = crate::workbench::documents::netlist_document::open_generated_primary(
-                        &mut app.state,
-                    );
-                }
-                ActiveNetlistDocument::OwnedSource => {
-                    let _ = open_owned_source(&mut app.state);
-                }
-                ActiveNetlistDocument::GeneratedDiff | ActiveNetlistDocument::RunSnapshot => {}
-            }
-            if let Some(identity) = target.dependency_identity.as_deref()
-                && let Err(error) =
-                    crate::workbench::documents::netlist_document::open_netlist_dependency(
-                        &mut app.state,
-                        identity,
-                    )
-            {
-                app.state.prompt(error);
-                return;
-            }
-            app.state.code.netlist.requested_line = Some(target.line);
-        }
-        Some(FindWindowAction::ReplaceNext) => {
-            let Some(source) = target.source.as_deref().filter(|_| target.editable) else {
-                return;
-            };
-            if target.deck_id.is_none()
-                && target.active_document == ActiveNetlistDocument::OwnedSource
-                && app.state.code.netlist.active_document != ActiveNetlistDocument::OwnedSource
-            {
-                let _ = open_owned_source(&mut app.state);
-            }
-            if target.deck_id.is_none()
-                && let Some(identity) = target.dependency_identity.as_deref()
-                && let Err(error) =
-                    crate::workbench::documents::netlist_document::open_netlist_dependency(
-                        &mut app.state,
-                        identity,
-                    )
-            {
-                app.state.prompt(error);
-                return;
-            }
-            match replace_source_ranges(
-                source,
-                &app.state.code.netlist.find.find,
-                &app.state.code.netlist.find.replacement,
-                options,
-                std::slice::from_ref(&target.byte_range),
-                false,
-            ) {
-                Ok(outcome) => {
-                    let count = outcome.replacement_count();
-                    let replacement = outcome.into_source();
-                    let edit = match (target.deck_id, target.dependency_identity.as_deref()) {
-                        (Some(deck_id), Some(identity)) => crate::workbench::documents::netlist_document::OwnedNetlistReplacement::retained_dependency(
-                            deck_id,
-                            identity,
-                            source,
-                            replacement,
-                            count,
-                        ),
-                        (Some(deck_id), None) => crate::workbench::documents::netlist_document::OwnedNetlistReplacement::retained_root(
-                            deck_id,
-                            source,
-                            replacement,
-                            count,
-                        ),
-                        (None, Some(identity)) => crate::workbench::documents::netlist_document::OwnedNetlistReplacement::dependency(
-                            identity,
-                            source,
-                            replacement,
-                            count,
-                        ),
-                        (None, None) => crate::workbench::documents::netlist_document::OwnedNetlistReplacement::root(
-                            source,
-                            replacement,
-                            count,
-                        ),
-                    };
-                    let replaced = if count == 0 {
-                        false
-                    } else {
-                        match crate::workbench::documents::netlist_document::replace_owned_sources_atomically(
-                            &mut app.state,
-                            vec![edit],
-                        ) {
-                            Ok(_) => true,
-                            Err(error) => {
-                                app.state.code.netlist.find.error = Some(error);
-                                false
-                            }
-                        }
-                    };
-                    if replaced {
-                        if let Some(deck_id) = target.deck_id
-                            && let Err(error) = crate::workbench::documents::netlist_document::select_retained_top_deck(
-                                &mut app.state,
-                                deck_id,
-                            )
-                        {
-                            app.state.prompt(error);
-                            return;
-                        }
-                        if let Some(identity) = target.dependency_identity.as_deref()
-                            && let Err(error) = crate::workbench::documents::netlist_document::open_netlist_dependency(
-                                &mut app.state,
-                                identity,
-                            )
-                        {
-                            app.state.prompt(error);
-                            return;
-                        }
-                        app.state.code.netlist.requested_line = Some(target.line);
-                        app.state.code.netlist.find.selected_match = 0;
-                        let count_text = count.to_string();
-                        app.state.prompt(messages.format(
-                            if count == 1 {
-                                MessageId::NetlistFindReplacedSingular
-                            } else {
-                                MessageId::NetlistFindReplaced
-                            },
-                            &[("count", &count_text)],
-                        ));
-                    }
-                }
-                Err(error) => app.state.code.netlist.find.error = Some(error.to_string()),
-            }
-        }
-        Some(FindWindowAction::ReplaceAll) => {}
-        None => {}
+    cx.state.netlist.find = find;
+    // Going to a match opens its document, and a replacement commits through
+    // a candidate copy of the whole state, so the shell carries the press out
+    // once the page has drawn.
+    if scoped_replacements.is_some() || target.is_some() {
+        cx.state.netlist.find.pending = Some(NetlistFindStep {
+            action,
+            options,
+            target,
+            replacements: scoped_replacements,
+        });
+        cx.wb.outbox.push(CodeRequest::ApplyNetlistFind);
     }
 }
 
@@ -1158,6 +980,7 @@ fn find_scope_select(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::RSpiceApp;
 
     #[test]
     fn all_owned_replace_plans_root_and_every_editable_include() {
@@ -1266,7 +1089,7 @@ mod tests {
                     )),
                     ..egui::RawInput::default()
                 },
-                |ui| find_replace_window(ui.ctx(), app),
+                |ui| find_replace_window(ui.ctx(), &mut crate::workbench::features::cx(app)),
             );
             if let Some(update) = output.platform_output.accesskit_update {
                 nodes.extend(update.nodes);
@@ -1347,7 +1170,9 @@ mod tests {
                         )),
                         ..egui::RawInput::default()
                     },
-                    |ui| find_replace_window(ui.ctx(), &mut app),
+                    |ui| {
+                        find_replace_window(ui.ctx(), &mut crate::workbench::features::cx(&mut app))
+                    },
                 );
                 if let Some(update) = output.platform_output.accesskit_update {
                     nodes.extend(update.nodes);
@@ -1392,7 +1217,7 @@ mod tests {
                     )),
                     ..egui::RawInput::default()
                 },
-                |ui| find_replace_window(ui.ctx(), &mut app),
+                |ui| find_replace_window(ui.ctx(), &mut crate::workbench::features::cx(&mut app)),
             );
             if let Some(update) = output.platform_output.accesskit_update {
                 nodes.extend(update.nodes);

@@ -30,6 +30,7 @@ mod highlight;
 mod import_review;
 pub(crate) mod language;
 mod navigation;
+mod owned_source;
 mod param_scan;
 mod relink;
 mod source_index;
@@ -38,6 +39,7 @@ pub(crate) use import_review::{
     NetlistImportReviewState,
 };
 pub(crate) use navigation::{open_diagnostic_location, open_source_location};
+pub(crate) use owned_source::open_owned_source;
 pub(crate) use relink::{
     NetlistDependencyRelinkState, begin_dependency_relink, cancel_dependency_relink,
     commit_dependency_relink,
@@ -1353,6 +1355,9 @@ pub struct NetlistFindState {
     pub scope: NetlistFindScope,
     pub selected_match: usize,
     pub error: Option<String>,
+    /// A press the window made this frame, which the shell carries out once
+    /// the page has drawn. The session does not store it.
+    pub(crate) pending: Option<NetlistFindStep>,
 }
 
 impl Default for NetlistFindState {
@@ -1369,8 +1374,46 @@ impl Default for NetlistFindState {
             scope: NetlistFindScope::CurrentDocument,
             selected_match: 0,
             error: None,
+            pending: None,
         }
     }
+}
+
+/// A press in the find window: going to a match, replacing it, or replacing
+/// every match. Going to a match opens its document and a replacement
+/// commits through a candidate copy of the whole state, so the shell carries
+/// it out once the page has drawn.
+#[derive(Debug, Clone)]
+pub(crate) struct NetlistFindStep {
+    pub(crate) action: Option<NetlistFindAction>,
+    /// The options the matches were found with.
+    pub(crate) options: crate::state::FindOptions,
+    /// The match the press names.
+    pub(crate) target: Option<NetlistFindTarget>,
+    /// What Replace all planned, against the scan the window drew.
+    pub(crate) replacements: Option<Vec<OwnedNetlistReplacement>>,
+}
+
+/// What a press in the find window asks for.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum NetlistFindAction {
+    Select(usize),
+    ReplaceNext,
+    ReplaceAll,
+}
+
+/// The match a find step names, held independently of the scan it came from.
+#[derive(Debug, Clone)]
+pub(crate) struct NetlistFindTarget {
+    pub(crate) index: usize,
+    pub(crate) active_document: ActiveNetlistDocument,
+    pub(crate) deck_id: Option<uuid::Uuid>,
+    pub(crate) dependency_identity: Option<String>,
+    pub(crate) editable: bool,
+    /// The document's bytes, present only for a replacement.
+    pub(crate) source: Option<String>,
+    pub(crate) line: usize,
+    pub(crate) byte_range: std::ops::Range<usize>,
 }
 
 #[derive(Debug, Clone)]

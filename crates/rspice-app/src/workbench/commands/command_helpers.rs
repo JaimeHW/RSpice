@@ -588,6 +588,14 @@ pub(in crate::workbench) fn answer_code_request(app: &mut RSpiceApp, request: Co
                 &mut app.state,
             );
         }
+        CodeRequest::ApplyNetlistFind => {
+            if let Some(step) = app.state.code.netlist.find.pending.take() {
+                crate::workbench::workflows::netlist_workflow::apply_netlist_find_step(
+                    &mut app.state,
+                    step,
+                );
+            }
+        }
     }
 }
 

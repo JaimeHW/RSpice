@@ -309,9 +309,9 @@ pub(in crate::workbench) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
             crate::workbench::chrome::title_bar::source_editor_context_menu(&response, app);
         }
     });
-    search::find_replace_window(ui.ctx(), app);
-    // The rest draw in the code feature's context. What one raises is
+    // The dialogs draw in the code feature's context. What one raises is
     // answered once the page has drawn.
+    search::find_replace_window(ui.ctx(), &mut features::cx(app));
     language::rename_dialog_window(ui.ctx(), &mut features::cx(app));
     ownership::ownership_dialog_window(ui.ctx(), &mut features::cx(app));
     revision::comparison_dialog_window(ui.ctx(), &mut features::cx(app));
@@ -1452,7 +1452,7 @@ mod tests {
         retain_generated(&mut state, "new generated\n.end\n");
         state.model.workspace.content.netlist_source = Some("retained owned\n.end\n".to_owned());
 
-        assert!(ownership::open_owned_source(&mut state));
+        assert!(crate::workbench::documents::netlist_document::open_owned_source(&mut state));
         assert_eq!(
             state.model.simulation.source.netlist_content,
             "retained owned\n.end\n"
