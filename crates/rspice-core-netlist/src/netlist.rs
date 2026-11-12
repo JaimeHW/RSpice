@@ -135,7 +135,7 @@ pub use topology::{
 };
 #[doc(hidden)]
 pub use topology::{
-    SupplyRail, SupplyReachability, analyze_dc_ground_paths_with_ic_modes,
+    ModuleDcConduction, SupplyRail, SupplyReachability, analyze_dc_ground_paths_with_ic_modes,
     analyze_supply_reachability,
 };
 #[doc(hidden)]

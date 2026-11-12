@@ -2419,3 +2419,86 @@ X1 a 0 junction
     }
     let _ = std::fs::remove_file(model);
 }
+
+fn write_hdl(name: &str, source: &str) -> PathBuf {
+    let path = write_model(name, source);
+    let verilog = path.with_extension("v");
+    std::fs::rename(&path, &verilog).expect("name the Verilog source");
+    verilog
+}
+
+const TERAOHM_DIVIDER: &str = "vd ind 0 dc 1\nrd1 ind mid 1e12\nrd2 mid 0 1e12\n";
+
+/// The operating point of `deck` reads the 1e12/1e12 Ohm divider at 0.5 V,
+/// the value ngspice-46 prints for it: the node beside it that has no DC
+/// path takes GMIN alone, and every other node no floor. With the floor on
+/// every node the divider read 0.49975012493753124 V.
+fn assert_divider_carries_no_floor(deck: &str) {
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let op = Engine::default()
+        .run_dc_op(&netlist)
+        .expect("the operating point solves");
+    let mid = node_voltage(&op, "mid");
+    assert!((mid - 0.5).abs() <= 1.0e-12, "op v(mid) = {mid:e}");
+}
+
+/// Only the module's `ddt()` contributions reach `b`, so its DC equations
+/// leave `b` without a DC path; the walk reads that from the compiled
+/// module's stamps, as it reads a capacitor card's.
+#[test]
+fn a_node_only_a_modules_capacitor_reaches_is_held_alone() {
+    let model = write_model(
+        "va_c",
+        "`include \"disciplines.vams\"\nmodule va_c(p, n);\n  inout p, n;\n  electrical p, n;\n  \
+         parameter real c = 1p;\n  analog I(p, n) <+ ddt(c * V(p, n));\nendmodule\n",
+    );
+    assert_divider_carries_no_floor(&format!(
+        "* module capacitors\n.va \"{}\" va_c\nv2 in2 0 dc 1\nr3 in2 a 1k\nxc1 a b va_c\n\
+         xc2 b 0 va_c\n{TERAOHM_DIVIDER}.end\n",
+        deck_path(&model)
+    ));
+    let _ = std::fs::remove_file(model);
+}
+
+/// The module's current into `u` reads `V(a, b)` and not `V(u)`: a
+/// controlled current, open at `u` as a VCCS's output is, so `u` has no DC
+/// path and its row is empty at zero gain.
+#[test]
+fn a_controlled_current_modules_output_is_held_alone() {
+    let model = write_model(
+        "va_g",
+        "`include \"disciplines.vams\"\nmodule va_g(u, a, b);\n  inout u, a, b;\n  \
+         electrical u, a, b;\n  parameter real m = 0;\n  analog I(u) <+ m * V(a, b);\nendmodule\n",
+    );
+    assert_divider_carries_no_floor(&format!(
+        "* module VCCS\n.va \"{}\" va_g\nv1x inx 0 dc 1\nr1x inx 0 1k\nxg u inx 0 va_g\n\
+         {TERAOHM_DIVIDER}.end\n",
+        deck_path(&model)
+    ));
+    let _ = std::fs::remove_file(model);
+}
+
+/// A digital output held at Z drives nothing through its converter, so the
+/// switch control it feeds has no DC path. Its module has no analog
+/// equations, so the walk proves that, and only `o` is held; the divider
+/// beside it keeps no floor.
+#[test]
+fn a_converter_held_at_z_holds_only_its_node() {
+    let module = write_hdl(
+        "level_z",
+        "`timescale 1ns/1ps\nmodule level(o);\n  output o;\n  reg o;\n  initial o = 1'bz;\n\
+         endmodule\n",
+    );
+    let deck = format!(
+        "* Z-held converter beside a divider\n.hdl \"{}\"\nxm o level\ns1 in a o 0 swc\n\
+         c1 a 0 1p\nvin in 0 dc 0.5\n{TERAOHM_DIVIDER}\
+         .model swc sw vt=1.5 vh=0.1 ron=1k roff=1e12\n.end\n",
+        deck_path(&module)
+    );
+    assert_divider_carries_no_floor(&deck);
+    let op = Engine::default()
+        .run_dc_op(&Netlist::parse(&deck).expect("deck parses"))
+        .expect("the operating point solves");
+    assert_eq!(node_voltage(&op, "o"), 0.0);
+    let _ = std::fs::remove_file(module);
+}

@@ -627,6 +627,9 @@ pub struct CircuitData {
     /// Whether only resistors and capacitors have a terminal on each floating
     /// component, so that its charge alone sets its common mode.
     pub(crate) dc_floating_component_is_passive: Vec<bool>,
+    /// Whether a compiled module's terminal is on each floating component: the
+    /// module can carry a current there that no deck element shows.
+    pub(crate) dc_floating_component_has_module_terminal: Vec<bool>,
     pub(crate) bsim3v3: Bsim3v3s,
     pub(crate) bsim4v8: Bsim4v8s,
     /// Recorded matrix offsets of the BSIM4 conductance stamps.

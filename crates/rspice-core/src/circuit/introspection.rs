@@ -245,7 +245,10 @@ impl CircuitData {
                 self.current_sources.dc_values[index],
             );
         }
-        let mut unresolved_current = vec![false; component_count];
+        // A compiled module can carry a current into its terminal's component
+        // that no deck element shows, as a controlled source can.
+        let mut unresolved_current = self.dc_floating_component_has_module_terminal.clone();
+        unresolved_current.resize(component_count, false);
         let controlled_outputs = self
             .vccs
             .node_pos

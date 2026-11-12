@@ -74,6 +74,8 @@ use builtin_models::*;
 use transmission_lines::*;
 use xspice_ports::*;
 #[cfg(feature = "veriloga")]
+mod module_conduction;
+#[cfg(feature = "veriloga")]
 mod veriloga_cache;
 #[cfg(feature = "veriloga")]
 mod veriloga_record;
@@ -6778,12 +6780,26 @@ impl Engine {
             abort,
         )?;
 
+        // A compiled module's instance ties the nodes its DC equations tie,
+        // so the walk can prove a node only its capacitor or its controlled
+        // current reaches has no DC path.
+        #[cfg(feature = "veriloga")]
+        let module_conduction = |element: &crate::netlist::Element| {
+            let ElementKind::Subcircuit { subckt_name, .. } = &element.kind else {
+                return None;
+            };
+            let binding = veriloga_models.get(&normalize_model_key(subckt_name))?;
+            module_conduction::cached_module_dc_conduction(binding.model.as_ref()?, element)
+        };
+        #[cfg(not(feature = "veriloga"))]
+        let module_conduction = |_: &crate::netlist::Element| None;
         let floating_nodes = collect_floating_nodes(
             &flat_elements,
             self.nodal_shunt_conductance() > 0.0,
             capacitor_ic_dc_mode(self.config.spice_dialect),
             self.config.spice_dialect == SpiceDialect::Xyce,
             reference,
+            &module_conduction,
         );
         if !floating_nodes.analysis_complete {
             log::debug!(
@@ -6792,6 +6808,8 @@ impl Engine {
         }
         let dc_floating_components = floating_nodes.floating_components;
         let dc_floating_component_is_certain = floating_nodes.floating_component_is_certain;
+        let dc_floating_component_has_module_terminal =
+            floating_nodes.floating_component_has_module_terminal;
         circuit.no_dc_path_nodes = floating_nodes.no_dc_path_nodes;
 
         // One answer per boundary net for the whole build, consulted by the
@@ -11316,6 +11334,7 @@ impl Engine {
             dc_floating_components,
             dc_floating_component_is_certain,
             dc_floating_component_is_passive,
+            dc_floating_component_has_module_terminal,
         );
         circuit.fatal_no_dc_path_nodes =
             circuit.independent_dc_drive_nodes(self.current_abstol(), self.residual_reltol());

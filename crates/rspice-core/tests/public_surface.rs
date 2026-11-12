@@ -716,9 +716,12 @@ const MAX_PUBLIC_ITEMS: usize = 5292;
 // instance's load repeats. The census is 1,693.
 // `BuiltinVerilogADevices::holds_probe_evaluation` adds one: the transient
 // timepoint probe (`rspice-core` circuit/external_models.rs) skips an
-// evaluation the generated instances already hold. The census is 1,694,
-// with no slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 1694;
+// evaluation the generated instances already hold. The census is 1,694.
+// `ModuleDcConduction` adds one: the builder (`rspice-core`
+// engine/builder/module_conduction.rs and builder/model_policy.rs) tells the
+// netlist crate's DC ground-path walk which nodes a compiled Verilog-A
+// module's DC equations tie. The census is 1,695, with no slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 1695;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

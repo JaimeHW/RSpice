@@ -311,18 +311,42 @@ pub fn analyze_dc_ground_paths(
         CapacitorIcDcMode::EnforcedConstraint,
         false,
         reference,
+        &|_| None,
     )
+}
+
+/// The DC conduction a compiled module's own equations give the nodes of
+/// one instance card, read from the compiled module.
+///
+/// The walk otherwise cannot see inside a module, so every component one of
+/// its terminals reaches stays uncertain. A module whose DC stamps are known
+/// ties only the terminals listed here; every other terminal is open through
+/// it, as a capacitor's or a controlled current's is.
+#[doc(hidden)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ModuleDcConduction {
+    /// Sets of node positions, into the instance card's nodes, that the
+    /// module's DC equations tie together.
+    pub tied: Vec<Vec<usize>>,
+    /// Node positions the module's DC equations tie to ground.
+    pub grounded: Vec<usize>,
 }
 
 /// [`analyze_dc_ground_paths`] under the build's own initial-condition
 /// contract, against the build's reference: `0` and its aliases, and
 /// `reference`, the net a deck that names no node 0 has aliased to it.
 #[doc(hidden)]
+///
+/// `module_conduction` answers, for an instance of a compiled module, which
+/// of its nodes the module's DC equations tie ([`ModuleDcConduction`]), or
+/// `None` when it cannot tell, and the components the instance reaches stay
+/// uncertain.
 pub fn analyze_dc_ground_paths_with_ic_modes<'a>(
     elements: &'a [Element],
     capacitor_ic_mode: CapacitorIcDcMode,
     inductor_ic_enforced: bool,
     reference: Option<&'a str>,
+    module_conduction: &dyn Fn(&Element) -> Option<ModuleDcConduction>,
 ) -> Result<DcGroundPathDiagnostics, ConnectivityAnalysisError> {
     let mut union = TerminalNodes::default();
     // By union index, which is the order the elements first reach each node:
@@ -336,6 +360,7 @@ pub fn analyze_dc_ground_paths_with_ic_modes<'a>(
     let mut authored: Vec<bool> = Vec::new();
     let mut uncertain_nodes: Vec<usize> = Vec::new();
     let mut module_terminal_nodes: Vec<usize> = Vec::new();
+    let mut module_current_nodes: Vec<&str> = Vec::new();
     let mut analysis_complete = true;
     let mut terminals = Vec::new();
 
@@ -370,6 +395,15 @@ pub fn analyze_dc_ground_paths_with_ic_modes<'a>(
             if model_specific_leads {
                 uncertain_nodes.push(index);
             }
+        }
+        if matches!(element.kind, ElementKind::Subcircuit { .. })
+            && let Some(conduction) = module_conduction(element)
+        {
+            // A module's terminal can carry a current the walk cannot see,
+            // so the components it reaches are never refused before solving.
+            module_current_nodes.extend(element.nodes.iter().map(String::as_str));
+            union.join_groups(element, module_lead_groups(element, &conduction));
+            continue;
         }
         match dc_conduction_groups(element, capacitor_ic_mode, inductor_ic_enforced) {
             Ok(groups) => union.join_groups(element, groups),
@@ -413,6 +447,12 @@ pub fn analyze_dc_ground_paths_with_ic_modes<'a>(
             }
         }
     }
+    controlled_current_roots.extend(
+        module_current_nodes
+            .iter()
+            .filter_map(|node| union.index_of(node))
+            .map(|index| union.root_of(index)),
+    );
 
     let uncertain_roots: BTreeSet<usize> = uncertain_nodes
         .iter()
@@ -430,7 +470,10 @@ pub fn analyze_dc_ground_paths_with_ic_modes<'a>(
     };
 
     let floating: Vec<usize> = (0..union.names.len())
-        .filter(|index| authored[*index] && union.root_of(*index) != ground)
+        // A module's ground lead names node 0 without an authored terminal.
+        .filter(|index| {
+            authored.get(*index).copied().unwrap_or(false) && union.root_of(*index) != ground
+        })
         .filter(|index| !is_reference(union.name_at(*index), reference))
         .collect();
     let no_dc_path_nodes: Vec<String> = floating
@@ -499,6 +542,24 @@ fn dc_current_constraint_nodes(element: &Element) -> &[String] {
         | ElementKind::BehavioralCurrent { .. } => &element.nodes,
         _ => &[],
     }
+}
+
+/// The lead groups of a compiled module's instance whose DC conduction is
+/// known: each tied set, and the grounded nodes with ground.
+fn module_lead_groups<'a>(element: &'a Element, conduction: &ModuleDcConduction) -> LeadGroups<'a> {
+    let node = |position: &usize| element.nodes.get(*position).map(String::as_str);
+    let mut groups: Vec<Vec<&'a str>> = conduction
+        .tied
+        .iter()
+        .map(|set| set.iter().filter_map(node).collect())
+        .collect();
+    let grounded: Vec<&'a str> = std::iter::once("0")
+        .chain(conduction.grounded.iter().filter_map(node))
+        .collect();
+    if grounded.len() > 1 {
+        groups.push(grounded);
+    }
+    LeadGroups::Listed(groups)
 }
 
 /// Whether an independent source is provably inactive during the DC solve.
@@ -1944,6 +2005,7 @@ mod tests {
             CapacitorIcDcMode::EnforcedConstraint,
             false,
             None,
+            &|_| None,
         )
         .expect("Xyce capacitor-IC topology is supported");
         assert!(enforced.no_dc_path_nodes.is_empty());
@@ -1953,6 +2015,7 @@ mod tests {
             CapacitorIcDcMode::TransientSeedOnly,
             false,
             None,
+            &|_| None,
         )
         .expect("transient-only capacitor-IC topology is supported");
         assert_eq!(seed_only.no_dc_path_nodes, ["OUT"]);
@@ -1994,6 +2057,7 @@ mod tests {
                 CapacitorIcDcMode::EnforcedConstraint,
                 false,
                 reference,
+                &|_| None,
             )
             .expect("topology is supported")
         };

@@ -2259,6 +2259,9 @@ pub(super) fn collect_floating_nodes(
     capacitor_ic_mode: crate::netlist::CapacitorIcDcMode,
     inductor_ic_enforced: bool,
     reference: Option<&str>,
+    module_conduction: &dyn Fn(
+        &crate::netlist::Element,
+    ) -> Option<crate::netlist::ModuleDcConduction>,
 ) -> crate::netlist::DcGroundPathDiagnostics {
     let report = !topology_already_reported();
     if report && let Ok(diagnostics) = crate::netlist::analyze_xyce_connectivity(flat_elements) {
@@ -2284,6 +2287,7 @@ pub(super) fn collect_floating_nodes(
         capacitor_ic_mode,
         inductor_ic_enforced,
         reference,
+        module_conduction,
     ) else {
         return crate::netlist::DcGroundPathDiagnostics::default();
     };
