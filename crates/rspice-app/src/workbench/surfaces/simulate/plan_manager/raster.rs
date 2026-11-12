@@ -27,11 +27,10 @@
 
 use egui::Vec2;
 
-use crate::ui::raster::Canvas;
 use crate::workbench::state::SimulationPlanManagerMode;
 
 /// Route-major, then viewport-major, matching `EVERY_ROUTE × GATED_VIEWPORTS`.
-const PLAN_MANAGER_FINGERPRINTS: [&str; 24] = [
+pub(crate) const PLAN_MANAGER_FINGERPRINTS: [&str; 24] = [
     "0c9b5df9c7ea43878f19b58222a2962dfb09c49981941d317dd361d5a69dbd5a",
     "54f4db23d37d14f366b06dd9d17774457f3f6613cd1aea4eb4fd10e494bd2b20",
     "2b238132dffaec754d4b79e7578f10ab146d1dda2c2f36722132775998737e2f",
@@ -58,40 +57,12 @@ const PLAN_MANAGER_FINGERPRINTS: [&str; 24] = [
     "cdc9c2e9d733905ea42175693f4aa48a3ce613c315325e4af86c6f2023b01fbe",
 ];
 
-/// Render one route at one gated viewport and rasterize it.
-///
-/// The fixture and the draft are the contract tests' own — a catalog with one
-/// plan of each lifecycle state, and the entry state
-/// [`route_draft`](super::tests::route_draft) documents each route is reachable
-/// in. A render seeded any other way would show an arrangement no reader can
-/// get to, which is worse than no render at all.
-fn raster(mode: SimulationPlanManagerMode, screen: Vec2) -> Canvas {
-    let (mut app, active, available, _) = super::tests::app_with_every_lifecycle_state();
-    let draft = super::tests::route_draft(&app, mode, active, available);
-
-    // The dialog owns the draft for the frame and re-arms it in
-    // `simulation_workflow`; each pass hands it a fresh one so the rasterizer's
-    // three passes render the same state rather than accumulating it.
-    //
-    // The application is captured rather than taken as a parameter on purpose.
-    // `tests/module_layering.rs` counts every whole-application mutable
-    // parameter in the crate, test-only files included, and a render harness is
-    // not a reason for that ceiling to move.
-    crate::ui::raster::render(screen, |ui, _| {
-        super::plan_manager_dialog(
-            ui,
-            &mut crate::workbench::features::cx(&mut app),
-            draft.clone(),
-        );
-    })
-}
-
 /// A route's name in a file name: its variant, lowercased.
 ///
 /// Taken from `Debug` rather than authored beside the enum, so a renamed
 /// variant renames its renders instead of leaving a file named after a mode
 /// that no longer exists.
-fn file_stem(mode: SimulationPlanManagerMode, viewport: &str) -> String {
+pub(crate) fn file_stem(mode: SimulationPlanManagerMode, viewport: &str) -> String {
     format!(
         "plan-manager-{}-{}",
         format!("{mode:?}").to_ascii_lowercase(),
@@ -99,12 +70,8 @@ fn file_stem(mode: SimulationPlanManagerMode, viewport: &str) -> String {
     )
 }
 
-fn regression_height(canvas: &Canvas) -> usize {
-    canvas.content_height().max(1)
-}
-
-fn baseline_cases() -> impl Iterator<Item = (usize, SimulationPlanManagerMode, &'static str, Vec2)>
-{
+pub(crate) fn baseline_cases()
+-> impl Iterator<Item = (usize, SimulationPlanManagerMode, &'static str, Vec2)> {
     super::tests::EVERY_ROUTE
         .into_iter()
         .flat_map(|mode| {
@@ -138,24 +105,5 @@ fn plan_manager_visual_baselines_cover_the_route_viewport_product_and_are_unique
         fingerprints.len(),
         PLAN_MANAGER_FINGERPRINTS.len(),
         "each route/viewport pair must have an independently reviewed fingerprint"
-    );
-}
-
-#[test]
-fn every_plan_manager_route_matches_its_reviewed_gated_viewport_baselines() {
-    // Every changed route at once, so one run names each fingerprint a
-    // reviewed change replaces.
-    let changed = baseline_cases()
-        .filter_map(|(index, mode, viewport, screen)| {
-            let canvas = raster(mode, screen);
-            let actual = canvas.regression_fingerprint(regression_height(&canvas));
-            (actual != PLAN_MANAGER_FINGERPRINTS[index])
-                .then(|| format!("{index} {}: {actual}", file_stem(mode, viewport)))
-        })
-        .collect::<Vec<_>>();
-    assert!(
-        changed.is_empty(),
-        "visual regression; review the renders before accepting the new fingerprints:\n{}",
-        changed.join("\n")
     );
 }

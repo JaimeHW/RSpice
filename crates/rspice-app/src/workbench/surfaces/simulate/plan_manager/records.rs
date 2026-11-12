@@ -60,14 +60,14 @@ pub(super) struct PlanEntry {
 /// this record is allowed to hold.
 #[derive(Debug, Clone)]
 pub(crate) struct PlanCatalogRecord {
-    pub(super) id: SimulationPlanId,
-    pub(super) name: String,
-    pub(super) revision: u64,
+    pub(crate) id: SimulationPlanId,
+    pub(crate) name: String,
+    pub(crate) revision: u64,
     pub(super) active: bool,
-    pub(super) archived: bool,
+    pub(crate) archived: bool,
     /// Total analysis instances, enabled or not.
-    pub(super) analyses: usize,
-    pub(super) enabled: usize,
+    pub(crate) analyses: usize,
+    pub(crate) enabled: usize,
     /// One entry per analysis instance, in declaration order, named by
     /// [`analysis_roster`]'s rule. Its length is [`Self::analyses`].
     pub(super) analysis_roster: Vec<PlanEntry>,
@@ -83,7 +83,7 @@ pub(crate) struct PlanCatalogRecord {
     /// the forecast this survives a declaration that does not validate: an
     /// invalid run space still states which axes it declares.
     pub(super) run_set_roster: Vec<PlanEntry>,
-    pub(super) model_bindings: usize,
+    pub(crate) model_bindings: usize,
     /// The corner and temperature this plan resolves an undeclared axis to.
     /// Never optional: the active setup and every stored plan each carry one,
     /// so a plan whose corner read as unknown was a gap in this projection
@@ -102,12 +102,12 @@ pub(crate) struct PlanCatalogRecord {
     pub(super) regression_baseline: Option<RunId>,
     pub(super) lineage: SimulationPlanLineage,
     /// Runs whose authenticated receipt names this plan.
-    pub(super) results: usize,
+    pub(crate) results: usize,
 }
 
 impl PlanCatalogRecord {
     /// Declared PVT points, or `None` when the run set does not validate.
-    pub(super) const fn point_count(&self) -> Option<usize> {
+    pub(crate) const fn point_count(&self) -> Option<usize> {
         match self.forecast {
             Some(forecast) => Some(forecast.point_count),
             None => None,
@@ -116,7 +116,7 @@ impl PlanCatalogRecord {
 
     /// Authenticated tasks the run set expands to, or `None` when the run set
     /// does not validate.
-    pub(super) const fn task_count(&self) -> Option<usize> {
+    pub(crate) const fn task_count(&self) -> Option<usize> {
         match self.forecast {
             Some(forecast) => Some(forecast.task_count),
             None => None,
@@ -128,12 +128,12 @@ impl PlanCatalogRecord {
     /// One owner, because the manager's filter matches this text and its table
     /// paints it. A run set that does not validate has no count, so the cell
     /// shows a dash; the selected plan's detail list states the problem.
-    pub(super) fn run_set_label(&self) -> String {
+    pub(crate) fn run_set_label(&self) -> String {
         self.point_count()
             .map_or_else(|| "—".to_owned(), |count| format!("{count} PVT"))
     }
 
-    pub(super) const fn lifecycle_label(&self) -> &'static str {
+    pub(crate) const fn lifecycle_label(&self) -> &'static str {
         if self.active {
             "active"
         } else if self.archived {
@@ -151,12 +151,12 @@ impl PlanCatalogRecord {
 /// takes: both delegate to the run set's own formatters, and both return `None`
 /// for a declaration that does not validate rather than a formatted zero.
 impl PlanCatalogRecord {
-    pub(super) fn estimated_duration(&self) -> Option<String> {
+    pub(crate) fn estimated_duration(&self) -> Option<String> {
         self.forecast
             .map(|forecast| format_duration_ms(forecast.cost_ms))
     }
 
-    pub(super) fn estimated_storage(&self) -> Option<String> {
+    pub(crate) fn estimated_storage(&self) -> Option<String> {
         self.forecast
             .map(|forecast| format_bytes(forecast.storage_bytes))
     }

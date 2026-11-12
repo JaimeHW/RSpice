@@ -24,6 +24,8 @@ mod page_runset_toolbar;
 mod pages;
 mod plan_create;
 mod plan_exchange;
+mod plan_manager;
+mod plan_raster;
 mod plan_removal;
 mod press_sweep;
 mod receipt_log;

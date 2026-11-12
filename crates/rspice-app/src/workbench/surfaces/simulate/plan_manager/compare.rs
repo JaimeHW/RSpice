@@ -649,6 +649,8 @@ pub(super) fn compared_plans<'records>(
 mod tests {
     use super::*;
     use crate::simulation::plan::AnalysisKind;
+    use crate::workbench::framework::feature::harness::FeatureHarness;
+    use crate::workbench::simulate::test_host::SimulateTestHost;
     use rspice_simulation_contract::run_set::{RunSetDimension, RunSetDimensionKind};
 
     /// The name a design variable is added under, and the requirement a
@@ -663,32 +665,35 @@ mod tests {
     ///
     /// Returns the app, the active plan and the retained one. The retained plan
     /// is the fixture's original: `create_plan` activates what it creates.
-    fn app_with_two_identical_plans() -> (RSpiceApp, SimulationPlanId, SimulationPlanId) {
-        let mut app = RSpiceApp::test_instance();
-        let retained = app
-            .state
+    fn app_with_two_identical_plans() -> (
+        FeatureHarness<SimulateFeature>,
+        SimulationPlanId,
+        SimulationPlanId,
+    ) {
+        let mut harness = SimulateTestHost::harness();
+        let retained = harness
             .model
             .sim_setup
             .stable_analysis_plan()
             .expect("the fixture has a stable plan")
             .id();
-        let mut setup = app.state.model.sim_setup.clone();
+        let mut setup = harness.model.sim_setup.clone();
         let active = setup
             .create_plan("Corner characterization")
             .expect("a fresh root plan is created");
-        app.state
+        harness
             .model
             .workspace
             .content
             .migrate_active_plan_data(retained);
-        app.state
+        harness
             .model
             .workspace
             .content
             .migrate_inactive_plan_data(active);
-        app.state.model.sim_setup = setup;
+        harness.model.sim_setup = setup;
 
-        let records = plan_catalog_records(&app.state.model);
+        let records = plan_catalog_records(&harness.model);
         let (base, target) = (record_of(&records, retained), record_of(&records, active));
         for domain in compared_domains(base, target) {
             assert!(
@@ -699,7 +704,7 @@ mod tests {
                 named_difference(&domain.difference)
             );
         }
-        (app, active, retained)
+        (harness, active, retained)
     }
 
     fn record_of(records: &[PlanCatalogRecord], id: SimulationPlanId) -> &PlanCatalogRecord {
@@ -722,8 +727,11 @@ mod tests {
     /// Make the active plan differ from the retained one in all four domains,
     /// through each domain's own owner. Returns the axis whose declaration was
     /// changed, whose name is the run set's own rather than one chosen here.
-    fn diverge_the_active_plan(app: &mut RSpiceApp, active: SimulationPlanId) -> String {
-        let mut setup = app.state.model.sim_setup.clone();
+    fn diverge_the_active_plan(
+        harness: &mut FeatureHarness<SimulateFeature>,
+        active: SimulationPlanId,
+    ) -> String {
+        let mut setup = harness.model.sim_setup.clone();
         {
             let plan = setup
                 .stable_analysis_plan_mut()
@@ -761,9 +769,9 @@ mod tests {
             !setup.run_set.dimensions[temperature].enabled;
         let changed_axis = setup.run_set.dimensions[temperature].name.clone();
         setup.run_set.budgets.maximum_tasks = 4_096;
-        app.state.model.sim_setup = setup;
+        harness.model.sim_setup = setup;
 
-        app.state
+        harness
             .model
             .workspace
             .content
@@ -782,8 +790,7 @@ mod tests {
                 .expect("a valid project variable"),
             )
             .expect("the active plan takes a variable");
-        let payload = app
-            .state
+        let payload = harness
             .model
             .workspace
             .content
@@ -808,9 +815,9 @@ mod tests {
     /// was taken from.
     #[test]
     fn every_domain_states_the_difference_its_owner_carries() {
-        let (mut app, active, retained) = app_with_two_identical_plans();
-        let changed_axis = diverge_the_active_plan(&mut app, active);
-        let records = plan_catalog_records(&app.state.model);
+        let (mut harness, active, retained) = app_with_two_identical_plans();
+        let changed_axis = diverge_the_active_plan(&mut harness, active);
+        let records = plan_catalog_records(&harness.model);
         let base = record_of(&records, retained);
         let target = record_of(&records, active);
         let domains = compared_domains(base, target);
@@ -905,14 +912,14 @@ mod tests {
     /// A moved baseline under an unchanged requirement set is its own verdict.
     #[test]
     fn a_moved_baseline_alone_is_named_and_verdicted_as_the_baseline() {
-        let (mut app, active, retained) = app_with_two_identical_plans();
-        app.state
+        let (mut harness, active, retained) = app_with_two_identical_plans();
+        harness
             .model
             .workspace
             .content
             .ensure_active_plan_data(active)
             .regression_baseline_run = Some(crate::product::RunId::new());
-        let records = plan_catalog_records(&app.state.model);
+        let records = plan_catalog_records(&harness.model);
         let domains = compared_domains(record_of(&records, retained), record_of(&records, active));
         let specifications = domain(&domains, "Specifications and baselines");
 
@@ -934,9 +941,9 @@ mod tests {
     /// states most often, and every domain has to say so.
     #[test]
     fn a_plan_compared_with_itself_reports_no_difference_in_any_domain() {
-        let (mut app, active, _) = app_with_two_identical_plans();
-        diverge_the_active_plan(&mut app, active);
-        let records = plan_catalog_records(&app.state.model);
+        let (mut harness, active, _) = app_with_two_identical_plans();
+        diverge_the_active_plan(&mut harness, active);
+        let records = plan_catalog_records(&harness.model);
 
         for record in &records {
             let domains = compared_domains(record, record);
@@ -976,9 +983,9 @@ mod tests {
     /// arithmetic that does not hold.
     #[test]
     fn swapping_the_sides_inverts_added_and_removed() {
-        let (mut app, active, retained) = app_with_two_identical_plans();
-        diverge_the_active_plan(&mut app, active);
-        let records = plan_catalog_records(&app.state.model);
+        let (mut harness, active, retained) = app_with_two_identical_plans();
+        diverge_the_active_plan(&mut harness, active);
+        let records = plan_catalog_records(&harness.model);
         let base = record_of(&records, retained);
         let target = record_of(&records, active);
 
@@ -1026,10 +1033,10 @@ mod tests {
     /// defect this projection exists to prevent.
     #[test]
     fn each_roster_is_the_names_behind_the_count_beside_it() {
-        let (mut app, active, _) = app_with_two_identical_plans();
-        diverge_the_active_plan(&mut app, active);
+        let (mut harness, active, _) = app_with_two_identical_plans();
+        diverge_the_active_plan(&mut harness, active);
 
-        for record in plan_catalog_records(&app.state.model) {
+        for record in plan_catalog_records(&harness.model) {
             assert_eq!(
                 record.analysis_roster.len(),
                 record.analyses,
@@ -1061,15 +1068,15 @@ mod tests {
     /// says so rather than reporting a point count neither plan has.
     #[test]
     fn a_run_set_that_does_not_validate_has_no_workload_to_compare() {
-        let (mut app, active, retained) = app_with_two_identical_plans();
-        let mut setup = app.state.model.sim_setup.clone();
+        let (mut harness, active, retained) = app_with_two_identical_plans();
+        let mut setup = harness.model.sim_setup.clone();
         // A nested composition with a zero maximum depth is a declared
         // run-space error, so the active plan predicts nothing.
         setup.run_set.composition.mode =
             rspice_simulation_contract::run_set::RunSetCompositionMode::Nested;
         setup.run_set.composition.maximum_depth = 0;
-        app.state.model.sim_setup = setup;
-        let records = plan_catalog_records(&app.state.model);
+        harness.model.sim_setup = setup;
+        let records = plan_catalog_records(&harness.model);
         let domains = compared_domains(record_of(&records, retained), record_of(&records, active));
         let run_set = domain(&domains, "Run set and budgets");
 
@@ -1155,9 +1162,9 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn every_fact_the_comparison_states_is_painted_whole_at_every_gated_viewport() {
-        let (mut app, active, retained) = app_with_two_identical_plans();
-        diverge_the_active_plan(&mut app, active);
-        let records = plan_catalog_records(&app.state.model);
+        let (mut harness, active, retained) = app_with_two_identical_plans();
+        diverge_the_active_plan(&mut harness, active);
+        let records = plan_catalog_records(&harness.model);
         let base = record_of(&records, retained);
         let target = record_of(&records, active);
         let domains = compared_domains(base, target);
@@ -1209,8 +1216,8 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn the_execution_domain_is_absent_and_the_surface_does_not_narrate_it() {
-        let (app, active, retained) = app_with_two_identical_plans();
-        let records = plan_catalog_records(&app.state.model);
+        let (harness, active, retained) = app_with_two_identical_plans();
+        let records = plan_catalog_records(&harness.model);
         let mut draft = SimulationPlanManagerDraft::new(active, "Corner characterization");
         draft.mode = SimulationPlanManagerMode::Compare;
         draft.comparison.base_plan_id = Some(retained);
@@ -1255,9 +1262,9 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn a_comparison_leaves_both_plans_exactly_as_they_were() {
-        let (mut app, active, retained) = app_with_two_identical_plans();
-        diverge_the_active_plan(&mut app, active);
-        let before = format!("{:?}", plan_catalog_records(&app.state.model));
+        let (mut harness, active, retained) = app_with_two_identical_plans();
+        diverge_the_active_plan(&mut harness, active);
+        let before = format!("{:?}", plan_catalog_records(&harness.model));
         let mut draft = SimulationPlanManagerDraft::new(active, "Corner characterization");
         draft.mode = SimulationPlanManagerMode::Compare;
         draft.comparison.base_plan_id = Some(retained);
@@ -1272,17 +1279,13 @@ mod tests {
                     ..Default::default()
                 },
                 |ctx| {
-                    plan_manager_dialog(
-                        ctx,
-                        &mut crate::workbench::features::cx(&mut app),
-                        draft.clone(),
-                    );
+                    plan_manager_dialog(ctx, &mut harness.cx(), draft.clone());
                 },
             );
         }
 
         assert_eq!(
-            format!("{:?}", plan_catalog_records(&app.state.model)),
+            format!("{:?}", plan_catalog_records(&harness.model)),
             before,
             "the comparison moved something in the catalog"
         );
@@ -1298,8 +1301,8 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn both_sides_are_pickable_and_a_pick_is_what_the_comparison_diffs() {
-        let (app, active, retained) = app_with_two_identical_plans();
-        let records = plan_catalog_records(&app.state.model);
+        let (harness, active, retained) = app_with_two_identical_plans();
+        let records = plan_catalog_records(&harness.model);
         let mut draft = SimulationPlanManagerDraft::new(active, "Corner characterization");
         draft.mode = SimulationPlanManagerMode::Compare;
 
@@ -1424,8 +1427,8 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn a_compatibility_verdict_is_set_in_words_at_its_rows_size() {
-        let (app, active, _) = app_with_two_identical_plans();
-        let records = plan_catalog_records(&app.state.model);
+        let (harness, active, _) = app_with_two_identical_plans();
+        let records = plan_catalog_records(&harness.model);
         let mut draft = SimulationPlanManagerDraft::new(active, "Corner characterization");
         draft.mode = SimulationPlanManagerMode::Compare;
         let ctx = egui::Context::default();
@@ -1469,8 +1472,8 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn side_by_side_pickers_and_the_word_between_fill_their_row() {
-        let (app, active, retained) = app_with_two_identical_plans();
-        let records = plan_catalog_records(&app.state.model);
+        let (harness, active, retained) = app_with_two_identical_plans();
+        let records = plan_catalog_records(&harness.model);
         let (base, target) = (record_of(&records, retained), record_of(&records, active));
         let mut draft = SimulationPlanManagerDraft::new(active, "Corner characterization");
         let ctx = egui::Context::default();

@@ -15,8 +15,8 @@ mod campaign;
 mod compare;
 mod create;
 pub(crate) mod exchange;
-mod kit;
-mod lifecycle;
+pub(crate) mod kit;
+pub(crate) mod lifecycle;
 pub(crate) mod records;
 
 use super::*;
@@ -48,8 +48,8 @@ use crate::workbench::state::SimulationPlanScope;
 /// that way; what inflates them is a reconstruction without the header, which
 /// measures 57 points that are not there and so reports a fit while the last row
 /// of the aside sits under the footer.
-const PLAN_DIALOG_TITLE: &str = "Simulation plans";
-const PLAN_DIALOG_PRIMARY: &str = "Open selected plan";
+pub(crate) const PLAN_DIALOG_TITLE: &str = "Simulation plans";
+pub(crate) const PLAN_DIALOG_PRIMARY: &str = "Open selected plan";
 
 /// The dialog's accessible description, and nothing painted.
 ///
@@ -58,7 +58,7 @@ const PLAN_DIALOG_PRIMARY: &str = "Open selected plan";
 /// over a table and a toolbar that already say what they are. A reader
 /// arriving by keyboard still needs the dialog named, so the sentence stays
 /// here and the strip is gone.
-const PLAN_DIALOG_DESCRIPTION: &str =
+pub(crate) const PLAN_DIALOG_DESCRIPTION: &str =
     "Create, select, compare, import, export, and retire simulation plans.";
 
 /// The records table, left to right.
@@ -92,7 +92,7 @@ const PLAN_DIALOG_DESCRIPTION: &str =
 /// every width the dialog is ever laid out at. It also costs nothing anywhere
 /// but at the breakpoint itself: this column absorbs the whole of the track's
 /// surplus, so at every width above the floor it is exactly as wide as it was.
-const PLAN_COLUMNS: [TableColumn; 6] = [
+pub(crate) const PLAN_COLUMNS: [TableColumn; 6] = [
     TableColumn {
         heading: "Plan",
         track: ColumnTrack::Elastic(110.0),
@@ -129,7 +129,7 @@ const PLAN_COLUMNS: [TableColumn; 6] = [
 /// It does not repeat the word "Filter": the magnifier mark at the field's
 /// leading edge says that, and the four field names are what the reader cannot
 /// guess.
-const PLAN_FILTER_HINT: &str = "Name, identity, revision, or run set…";
+pub(crate) const PLAN_FILTER_HINT: &str = "Name, identity, revision, or run set…";
 
 /// What that field is called, as against what may be typed into it.
 ///
@@ -169,7 +169,7 @@ const PLAN_SCOPE_WIDTH: f32 = 190.0;
 /// every plan that is not archived, `Archived` is the rest — so every plan is in
 /// exactly one of them and the reader's ordinary view is the one that hides
 /// retired plans without also hiding the plan being worked on.
-const PLAN_SCOPES: [(SimulationPlanScope, &str); 3] = [
+pub(crate) const PLAN_SCOPES: [(SimulationPlanScope, &str); 3] = [
     (SimulationPlanScope::All, "Active project · all plans"),
     (SimulationPlanScope::Working, "Working"),
     (SimulationPlanScope::Archived, "Archived"),
@@ -181,7 +181,7 @@ const PLAN_SCOPES: [(SimulationPlanScope, &str); 3] = [
 /// Not a second "does not validate". The declaration is what fails to validate,
 /// and the cost is simply not forecast as a consequence — two error-toned rows
 /// would read as two independent problems.
-const NO_MODELLED_COST: &str = "no forecast";
+pub(crate) const NO_MODELLED_COST: &str = "no forecast";
 
 /// Why the active plan's Archive action is refused, in the words the catalog
 /// itself refuses it with.
@@ -203,9 +203,9 @@ const CLONE_REFUSED_ON_ARCHIVED: &str =
 /// it. Printing zero points, zero tasks and a zero cost would read as "this
 /// plan declares no work", which is a different claim and a false one — the
 /// plan declares work that cannot be expanded.
-const RUN_SET_DOES_NOT_VALIDATE: &str = "does not validate";
+pub(crate) const RUN_SET_DOES_NOT_VALIDATE: &str = "does not validate";
 
-enum PlanManagerAction {
+pub(crate) enum PlanManagerAction {
     Create,
     Campaign,
     Rename,
@@ -319,7 +319,10 @@ fn browse_dialog(
 ///
 /// `Working` and `Archived` are complementary, so every plan is admitted by
 /// exactly one of them and no plan can be reached only through `All plans`.
-const fn plan_scope_admits(scope: SimulationPlanScope, record: &PlanCatalogRecord) -> bool {
+pub(crate) const fn plan_scope_admits(
+    scope: SimulationPlanScope,
+    record: &PlanCatalogRecord,
+) -> bool {
     match scope {
         SimulationPlanScope::All => true,
         SimulationPlanScope::Working => !record.archived,
@@ -333,7 +336,7 @@ const fn plan_scope_admits(scope: SimulationPlanScope, record: &PlanCatalogRecor
 /// Name and identity alone were not enough to find a plan by anything a reader
 /// can see in the table: a revision and a declared run-set size are both
 /// painted in every row and neither was searchable.
-fn matches_plan_filter(record: &PlanCatalogRecord, query: &str) -> bool {
+pub(crate) fn matches_plan_filter(record: &PlanCatalogRecord, query: &str) -> bool {
     query.is_empty()
         || [
             record.name.clone(),
@@ -352,7 +355,7 @@ fn matches_plan_filter(record: &PlanCatalogRecord, query: &str) -> bool {
 /// authored here, so the records column is never handed a track its columns
 /// would overflow. That is the one defect the authored reference has and
 /// this surface must not: its table is 899 points wide inside a 685-point cell.
-fn plan_manager_body(
+pub(crate) fn plan_manager_body(
     ui: &mut Ui,
     draft: &mut SimulationPlanManagerDraft,
     records: &[PlanCatalogRecord],
@@ -837,7 +840,7 @@ fn plan_detail_rows(
 /// most of — so there it pays the height of half the rows instead of all of
 /// them. One row list feeds both arrangements, so the two cannot come to state
 /// different things.
-fn selected_plan_properties(
+pub(crate) fn selected_plan_properties(
     ui: &mut Ui,
     selected: &PlanCatalogRecord,
     columns: usize,
@@ -871,7 +874,10 @@ fn plan_detail_row(ui: &mut Ui, row: &PlanDetailRow) {
 
 /// The plan's nominal point, corner first, the way the workbench chrome's own
 /// PVT control reads it.
-fn reference_pvt_label(point: ReferencePvtPoint, policy: QuantityPresentationPolicy) -> String {
+pub(crate) fn reference_pvt_label(
+    point: ReferencePvtPoint,
+    policy: QuantityPresentationPolicy,
+) -> String {
     format!(
         "{} · {}",
         point.process.short_name(),
@@ -931,7 +937,7 @@ fn lineage_label(selected: &PlanCatalogRecord) -> String {
 ///   not carry adds it to [`PlanCatalogRecord`], where every surface gets it, and
 ///   paints through [`kit`]. No route-specific parameter is added here, because a
 ///   fourth parameter for one lane is five lanes' signature change.
-fn handle_plan_manager_action(
+pub(crate) fn handle_plan_manager_action(
     ctx: &egui::Context,
     cx: &mut Cx<'_, SimulateFeature>,
     mut draft: SimulationPlanManagerDraft,
@@ -1083,7 +1089,7 @@ fn handle_plan_manager_action(
 }
 
 #[cfg(test)]
-mod raster;
+pub(crate) mod raster;
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

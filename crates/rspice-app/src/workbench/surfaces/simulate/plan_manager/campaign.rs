@@ -502,45 +502,46 @@ pub(super) fn commit_simulation_campaign(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::framework::feature::harness::FeatureHarness;
+    use crate::workbench::simulate::test_host::SimulateTestHost;
     use rspice_simulation_contract::run_set::RunSetCompositionMode;
 
     /// Three root plans in one catalog: the active one the shell projects
     /// first, and two retained beside it. Returns them in projection order.
-    fn app_with_three_plans() -> (RSpiceApp, [SimulationPlanId; 3]) {
-        let mut app = RSpiceApp::test_instance();
-        let root = app
-            .state
+    fn app_with_three_plans() -> (FeatureHarness<SimulateFeature>, [SimulationPlanId; 3]) {
+        let mut harness = SimulateTestHost::harness();
+        let root = harness
             .model
             .sim_setup
             .stable_analysis_plan()
             .expect("the fixture has a stable plan")
             .id();
-        let mut setup = app.state.model.sim_setup.clone();
+        let mut setup = harness.model.sim_setup.clone();
         let second = setup
             .create_plan("Corner characterization")
             .expect("a fresh root plan is created");
         let third = setup
             .create_plan("Startup and recovery")
             .expect("a second fresh root plan is created");
-        app.state
+        harness
             .model
             .workspace
             .content
             .migrate_active_plan_data(root);
-        app.state
+        harness
             .model
             .workspace
             .content
             .migrate_inactive_plan_data(second);
-        app.state
+        harness
             .model
             .workspace
             .content
             .migrate_inactive_plan_data(third);
-        app.state.model.sim_setup = setup;
+        harness.model.sim_setup = setup;
         // `create_plan` activates what it creates, so the last one made leads
         // the projection and the other two are the retained entries.
-        (app, [third, root, second])
+        (harness, [third, root, second])
     }
 
     /// The width this route's own dialog hands its body at one viewport.
@@ -613,58 +614,39 @@ mod tests {
     /// to still carry the number the dialog shows.
     #[test]
     fn the_limits_this_route_prints_are_the_ones_the_controller_enforces() {
-        let (mut app, plans) = app_with_three_plans();
+        let (mut harness, plans) = app_with_three_plans();
 
-        let one = commit_simulation_campaign(
-            &mut crate::workbench::features::cx(&mut app),
-            "Nightly",
-            &plans[..1],
-        )
-        .expect_err("one plan is not a campaign");
+        let one = commit_simulation_campaign(&mut harness.cx(), "Nightly", &plans[..1])
+            .expect_err("one plan is not a campaign");
         assert!(
             one.contains("at least two distinct plans"),
             "below the floor the controller said: {one}"
         );
         // Distinctness, not length: the controller deduplicates before it
         // counts, so the same plan twice is still one member.
-        let repeated = commit_simulation_campaign(
-            &mut crate::workbench::features::cx(&mut app),
-            "Nightly",
-            &[plans[0], plans[0]],
-        )
-        .expect_err("the same plan twice is one distinct member");
+        let repeated =
+            commit_simulation_campaign(&mut harness.cx(), "Nightly", &[plans[0], plans[0]])
+                .expect_err("the same plan twice is one distinct member");
         assert!(repeated.contains("at least two distinct plans"));
 
         let over = (0..=MAX_CAMPAIGN_MEMBERS)
             .map(|_| SimulationPlanId::new())
             .collect::<Vec<_>>();
         assert_eq!(over.len(), MAX_CAMPAIGN_MEMBERS + 1);
-        let too_many = commit_simulation_campaign(
-            &mut crate::workbench::features::cx(&mut app),
-            "Nightly",
-            &over,
-        )
-        .expect_err("one over the cap is refused");
+        let too_many = commit_simulation_campaign(&mut harness.cx(), "Nightly", &over)
+            .expect_err("one over the cap is refused");
         assert!(
             too_many.contains(&MAX_CAMPAIGN_MEMBERS.to_string()),
             "the member cap moved away from {MAX_CAMPAIGN_MEMBERS}: {too_many}"
         );
 
-        let unnamed = commit_simulation_campaign(
-            &mut crate::workbench::features::cx(&mut app),
-            "   ",
-            &plans[..2],
-        )
-        .expect_err("a blank name is refused");
+        let unnamed = commit_simulation_campaign(&mut harness.cx(), "   ", &plans[..2])
+            .expect_err("a blank name is refused");
         assert!(unnamed.contains("must not be empty"), "{unnamed}");
 
         let long = "n".repeat(MAX_CAMPAIGN_NAME_CHARS + 1);
-        let too_long = commit_simulation_campaign(
-            &mut crate::workbench::features::cx(&mut app),
-            &long,
-            &plans[..2],
-        )
-        .expect_err("a name past the cap is refused");
+        let too_long = commit_simulation_campaign(&mut harness.cx(), &long, &plans[..2])
+            .expect_err("a name past the cap is refused");
         assert!(
             too_long.contains(&MAX_CAMPAIGN_NAME_CHARS.to_string()),
             "the name cap moved away from {MAX_CAMPAIGN_NAME_CHARS}: {too_long}"
@@ -679,7 +661,7 @@ mod tests {
     /// enable it into a rejection.
     #[test]
     fn the_painted_refusal_agrees_with_the_transaction() {
-        let (mut app, plans) = app_with_three_plans();
+        let (mut harness, plans) = app_with_three_plans();
 
         assert_eq!(declared_refusal("Nightly", &plans[..2]), None);
         // Name before members, exactly as the controller checks them: a draft
@@ -706,12 +688,8 @@ mod tests {
 
         // And where it says nothing blocks, the transaction gets past every
         // draft-level check: what stops this fixture is the design itself.
-        let error = commit_simulation_campaign(
-            &mut crate::workbench::features::cx(&mut app),
-            "Nightly",
-            &plans[..2],
-        )
-        .expect_err("the fixture's empty design cannot be prepared");
+        let error = commit_simulation_campaign(&mut harness.cx(), "Nightly", &plans[..2])
+            .expect_err("the fixture's empty design cannot be prepared");
         for draft_refusal in [
             "at least two distinct plans",
             "must not be empty",
@@ -732,32 +710,26 @@ mod tests {
     /// sight, so the member it names is the one the table numbered first.
     #[test]
     fn the_commit_walks_the_members_in_the_declared_order() {
-        let (mut app, plans) = app_with_three_plans();
-        let mut setup = app.state.model.sim_setup.clone();
+        let (mut harness, plans) = app_with_three_plans();
+        let mut setup = harness.model.sim_setup.clone();
         setup
             .archive_plan(plans[1])
             .expect("an inactive plan archives");
         setup
             .archive_plan(plans[2])
             .expect("an inactive plan archives");
-        app.state.model.sim_setup = setup;
-        let records = plan_catalog_records(&app.state.model);
+        harness.model.sim_setup = setup;
+        let records = plan_catalog_records(&harness.model);
         let second = record_of(&records, plans[1]).name.clone();
         let third = record_of(&records, plans[2]).name.clone();
         assert_ne!(second, third);
 
-        let forward = commit_simulation_campaign(
-            &mut crate::workbench::features::cx(&mut app),
-            "Nightly",
-            &[plans[1], plans[2]],
-        )
-        .expect_err("an archived member is refused");
-        let reverse = commit_simulation_campaign(
-            &mut crate::workbench::features::cx(&mut app),
-            "Nightly",
-            &[plans[2], plans[1]],
-        )
-        .expect_err("an archived member is refused");
+        let forward =
+            commit_simulation_campaign(&mut harness.cx(), "Nightly", &[plans[1], plans[2]])
+                .expect_err("an archived member is refused");
+        let reverse =
+            commit_simulation_campaign(&mut harness.cx(), "Nightly", &[plans[2], plans[1]])
+                .expect_err("an archived member is refused");
 
         assert!(
             forward.contains(&second) && !forward.contains(&third),
@@ -799,8 +771,8 @@ mod tests {
     /// count.
     #[test]
     fn the_combined_scope_is_the_sum_of_the_per_member_forecasts() {
-        let (app, plans) = app_with_three_plans();
-        let records = plan_catalog_records(&app.state.model);
+        let (harness, plans) = app_with_three_plans();
+        let records = plan_catalog_records(&harness.model);
         let members = [plans[0], plans[2]];
         let expected = members
             .iter()
@@ -828,14 +800,14 @@ mod tests {
     /// scope says so instead of folding a zero into the total.
     #[test]
     fn a_member_that_does_not_validate_is_counted_and_not_summed_as_zero() {
-        let (mut app, plans) = app_with_three_plans();
-        let mut setup = app.state.model.sim_setup.clone();
+        let (mut harness, plans) = app_with_three_plans();
+        let mut setup = harness.model.sim_setup.clone();
         // A nested composition with a zero maximum depth is a declared
         // run-space error, so the active plan forecasts nothing.
         setup.run_set.composition.mode = RunSetCompositionMode::Nested;
         setup.run_set.composition.maximum_depth = 0;
-        app.state.model.sim_setup = setup;
-        let records = plan_catalog_records(&app.state.model);
+        harness.model.sim_setup = setup;
+        let records = plan_catalog_records(&harness.model);
         assert_eq!(record_of(&records, plans[0]).task_count(), None);
 
         let scope = campaign_scope(&plans[..2], &records);
@@ -903,8 +875,8 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn the_scope_is_painted_under_the_members_and_states_their_sum() {
-        let (app, plans) = app_with_three_plans();
-        let records = plan_catalog_records(&app.state.model);
+        let (harness, plans) = app_with_three_plans();
+        let records = plan_catalog_records(&harness.model);
         let mut draft = SimulationPlanManagerDraft::new(plans[0], records[0].name.clone());
         draft.mode = SimulationPlanManagerMode::Campaign;
         draft.campaign.member_ids = vec![plans[0], plans[1]];
@@ -961,8 +933,8 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn every_fact_the_notes_state_is_painted_whole_at_every_gated_viewport() {
-        let (app, plans) = app_with_three_plans();
-        let records = plan_catalog_records(&app.state.model);
+        let (harness, plans) = app_with_three_plans();
+        let records = plan_catalog_records(&harness.model);
         let members = vec![plans[0], plans[1]];
         let scope = campaign_scope(&members, &records);
         let owed = [

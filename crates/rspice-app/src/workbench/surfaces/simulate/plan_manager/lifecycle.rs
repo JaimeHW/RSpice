@@ -217,7 +217,7 @@ pub(super) fn commit_activate_plan(
 /// Both are read back off the committed catalog rather than echoed from the
 /// draft, so the message states what the transaction left behind instead of what
 /// it was asked for.
-pub(super) fn commit_rename_plan(
+pub(crate) fn commit_rename_plan(
     cx: &mut Cx<'_, SimulateFeature>,
     id: SimulationPlanId,
     name: &str,
@@ -253,7 +253,7 @@ pub(super) fn commit_rename_plan(
 /// The refusal on the active plan is the catalog's, taken before it looks for
 /// the plan at all. Nothing here re-checks it, because a second copy of the rule
 /// is a second thing that can be wrong.
-pub(super) fn commit_archive_plan(
+pub(crate) fn commit_archive_plan(
     setup: &mut crate::workbench::app_state::SimSetupState,
     id: SimulationPlanId,
 ) -> Result<String, String> {
@@ -268,7 +268,7 @@ pub(super) fn commit_archive_plan(
     ))
 }
 
-pub(super) fn commit_restore_plan(
+pub(crate) fn commit_restore_plan(
     setup: &mut crate::workbench::app_state::SimSetupState,
     id: SimulationPlanId,
 ) -> Result<String, String> {
