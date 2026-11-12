@@ -38,6 +38,7 @@ mod run_set;
 mod solver_options;
 mod stage;
 mod statement;
+mod status_colour;
 mod studio;
 mod transient_checkpoint_exchange;
 mod tuning_staging;
