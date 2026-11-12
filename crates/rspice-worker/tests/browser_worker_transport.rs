@@ -660,3 +660,289 @@ fn a_transient_assertion_report_crosses_the_worker_exactly() {
         "{start:e}"
     );
 }
+
+// The raw capability exports a JIT-compiled model module imports. The worker
+// binary exports them (`src/main.rs`); this test is a module of its own, so it
+// exports the same four over the same library functions.
+
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn rspice_ui_wasm_jit_eval_op_v1(
+    frame_offset: u32,
+    opcode: i32,
+    aux0: i32,
+    aux1: i32,
+    aux2: i64,
+    operand0: f64,
+    operand1: f64,
+    operand2: f64,
+    operand3: f64,
+    operand4: f64,
+) -> f64 {
+    rspice_worker::rspice_ui_wasm_jit_eval_op_v1(
+        frame_offset,
+        opcode,
+        aux0,
+        aux1,
+        aux2,
+        operand0,
+        operand1,
+        operand2,
+        operand3,
+        operand4,
+    )
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rspice_ui_wasm_jit_eval_op_slice_v1(
+    frame_offset: u32,
+    opcode: i32,
+    aux0: i32,
+    aux1: i32,
+    aux2: i64,
+    operand_count: i32,
+) -> f64 {
+    rspice_worker::rspice_ui_wasm_jit_eval_op_slice_v1(
+        frame_offset,
+        opcode,
+        aux0,
+        aux1,
+        aux2,
+        operand_count,
+    )
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rspice_ui_wasm_jit_math1_v1(opcode: i32, value: f64) -> f64 {
+    rspice_worker::rspice_ui_wasm_jit_math1_v1(opcode, value)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rspice_ui_wasm_jit_math2_v1(opcode: i32, left: f64, right: f64) -> f64 {
+    rspice_worker::rspice_ui_wasm_jit_math2_v1(opcode, left, right)
+}
+
+fn property(object: &JsValue, key: &str) -> JsValue {
+    js_sys::Reflect::get(object, &key.into()).unwrap()
+}
+
+/// Prepare `request` for the browser JIT and install what it needs, as
+/// `simulation-worker.js` does: each model module instantiated against this
+/// module's memory and raw capability exports, and a dispatcher that calls
+/// an installed module's export. Returns the dispatch token to run it with.
+fn install_wasm_jit_models(request: &serde_json::Value) -> u32 {
+    let preparation = rspice_worker::prepare_rspice_ui_wasm_jit_request(
+        js_sys::JSON::parse(&request.to_string()).unwrap(),
+    )
+    .expect("the request prepares for the JIT");
+    let errors = property(&preparation, "errors")
+        .dyn_into::<js_sys::Array>()
+        .unwrap();
+    assert_eq!(errors.length(), 0, "{:?}", errors.to_vec());
+    let exports = wasm_bindgen::exports();
+    let capabilities = js_sys::Object::new();
+    for (import, export) in [
+        ("memory", "memory"),
+        ("eval_op_v1", "rspice_ui_wasm_jit_eval_op_v1"),
+        ("eval_op_slice_v1", "rspice_ui_wasm_jit_eval_op_slice_v1"),
+        ("math1_v1", "rspice_ui_wasm_jit_math1_v1"),
+        ("math2_v1", "rspice_ui_wasm_jit_math2_v1"),
+    ] {
+        let value = property(&exports, export);
+        assert!(!value.is_undefined(), "the test module exports {export}");
+        js_sys::Reflect::set(&capabilities, &import.into(), &value).unwrap();
+    }
+    let imports = js_sys::Object::new();
+    js_sys::Reflect::set(&imports, &"rspice_jit".into(), &capabilities).unwrap();
+    let installed = js_sys::Map::new();
+    let artifacts = property(&preparation, "artifacts")
+        .dyn_into::<js_sys::Array>()
+        .unwrap();
+    assert!(
+        artifacts.length() > 0,
+        "a device runtime has a model module"
+    );
+    for artifact in artifacts.iter() {
+        let bytes = js_sys::Uint8Array::new(&property(&artifact, "moduleBytes"));
+        let module = js_sys::WebAssembly::Module::new(&bytes).expect("the model module compiles");
+        let instance = js_sys::WebAssembly::Instance::new(&module, &imports)
+            .expect("the model module instantiates");
+        installed.set(&property(&artifact, "cacheKey"), &instance.exports());
+    }
+    let dispatcher = Closure::<dyn Fn(String, String, u32) -> i32>::new(
+        move |cache_key: String, export: String, frame_offset: u32| {
+            let entry = property(&installed.get(&cache_key.into()), &export)
+                .dyn_into::<js_sys::Function>()
+                .expect("the dispatched export is installed");
+            let status = entry
+                .call1(&JsValue::UNDEFINED, &frame_offset.into())
+                .expect("the model export returns")
+                .as_f64()
+                .expect("a numeric status");
+            status as i32
+        },
+    );
+    rspice_worker::install_rspice_ui_wasm_jit_dispatcher(
+        dispatcher
+            .as_ref()
+            .unchecked_ref::<js_sys::Function>()
+            .clone(),
+    );
+    dispatcher.forget();
+    property(&preparation, "dispatchToken").as_f64().unwrap() as u32
+}
+
+/// The Verilog-A source of a manual deck's `.hdl` line, sealed as the
+/// prepared manual-deck route seals it (`seal_deck_hdl_sources`): compiled
+/// with the unified runtime options against the deck's cells and selection,
+/// keyed by `deck_source_key`, and named on its line by that key. The
+/// browser has no file system to read the file from, so the test seals the
+/// text it would have read. Returns the deck and the serialized runtime set.
+fn deck_with_sealed_clock() -> (String, serde_json::Value) {
+    const SOURCE: &str = "`timescale 1ns/1ps\nmodule clk(q);\n  output q;\n  reg q;\n  \
+                          initial q = 1'b0;\n  always #5 q = ~q;\nendmodule\n";
+    let digest = rspice_vocabulary::canonical::content_digest("rspice.test/clk", SOURCE.as_bytes());
+    let key =
+        rspice_simulation::netlist_preparation::deck_source_key(digest, "clk", "clk", "clk.v");
+    let deck = format!("Worker HDL clock\n.veriloga \"{key}\" clk\nX1 q clk\nR1 q 0 1k\n.end\n");
+    let netlist = rspice_core::Netlist::parse(&deck).expect("the deck parses");
+    let cells = rspice_core::engine::hdl_external_cells(&netlist);
+    let delay_select =
+        rspice_core::engine::hdl_delay_select(&rspice_core::resolve_simulation_config(
+            &rspice_core::SimulationConfig::default(),
+            Some(&netlist.options),
+            &rspice_core::SimulationConfigOverrides::default(),
+        ));
+    let bundle = rspice_veriloga::VirtualSourceBundle::new(
+        "clk.v".to_owned(),
+        [rspice_veriloga::VirtualSourceFile::new(
+            "clk.v".to_owned(),
+            SOURCE,
+        )],
+    )
+    .unwrap();
+    let compiler = rspice_veriloga::VerilogACompiler::new(rspice_veriloga::CompilerOptions {
+        external_cells: Some(cells.clone()),
+        delay_select,
+        wreal_resolution: rspice_core::engine::hdl_wreal_resolution(&netlist),
+        ..rspice_simulation::compilation::unified_runtime_compiler_options()
+    });
+    let compilation = compiler
+        .prepare_virtual_runtime_source(
+            &bundle,
+            rspice_simulation::project_veriloga::project_virtual_compile_limits(),
+        )
+        .expect("the source prepares")
+        .compile_runtime("clk")
+        .expect("the module compiles");
+    let runtime =
+        rspice_simulation::veriloga::PreparedVerilogARuntime::try_from_virtual_compilation_against(
+            key,
+            digest,
+            "clk".to_owned(),
+            &compilation,
+            Some(&cells),
+            delay_select,
+        )
+        .expect("the runtime seals");
+    let set = rspice_simulation::veriloga::PreparedVerilogARuntimeSet::try_new(vec![runtime])
+        .expect("one runtime is a set");
+    (deck, serde_json::to_value(&set).unwrap())
+}
+
+/// A manual deck's sealed HDL runtime reaches the worker as a project
+/// runtime does, in the request's runtime set, and runs there: the clock's
+/// `always #5` toggles `q` every 5 ns, and the default `d2a` drives the 1 kΩ
+/// load through its 20 Ω `rhi`/`rlo` from 3.3 V or 0 V.
+#[wasm_bindgen_test]
+fn a_manual_decks_sealed_hdl_runs_in_the_worker() {
+    let (deck, runtimes) = deck_with_sealed_clock();
+    let mut request = worker_request_json(
+        11,
+        serde_json::json!({"Transient": {
+            "stop_time": 20e-9, "step_time": 1e-10, "start_time": 0.0,
+            "max_timestep": 1e-10, "uic": false
+        }}),
+        &deck,
+    );
+    request["request"]["request"]["project_veriloga_runtimes"] = runtimes;
+    let dispatch_token = install_wasm_jit_models(&request);
+    let response = rspice_worker::run_prepared_rspice_ui_wasm_jit_request(dispatch_token)
+        .expect("a prepared request is answered");
+    let response = structured_clone(&response);
+    let buffers = js_sys::Reflect::get(&response, &"buffers".into())
+        .unwrap()
+        .dyn_into::<js_sys::Array>()
+        .unwrap();
+    let metadata: serde_json::Value = serde_wasm_bindgen::from_value(
+        js_sys::Reflect::get(&response, &"response".into()).unwrap(),
+    )
+    .unwrap();
+    let transient = &metadata["outcome"]["Success"]["Transient"];
+    assert!(transient.is_object(), "{metadata}");
+
+    let digital = transient["events"]["digital"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{metadata}"));
+    let q = digital
+        .iter()
+        .find(|trace| {
+            trace["node_name"]
+                .as_str()
+                .is_some_and(|name| name.eq_ignore_ascii_case("q"))
+        })
+        .unwrap_or_else(|| panic!("no digital q: {metadata}"));
+    let events: Vec<(f64, u64)> = q["points"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|point| {
+            (
+                point["time_s"].as_f64().unwrap(),
+                point["value_code"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    let expected = [(0.0, 0), (5e-9, 1), (10e-9, 0), (15e-9, 1), (20e-9, 0)];
+    assert!(events.len() >= 4, "{events:?}");
+    for ((time, value), (want_time, want_value)) in events.iter().zip(expected) {
+        assert!((time - want_time).abs() < 1e-15, "{events:?}");
+        assert_eq!(*value, want_value, "{events:?}");
+    }
+
+    let time = transferred_series(&buffers, &transient["time"]).to_vec();
+    let waveforms = transient["waveforms"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{metadata}"));
+    let v_q = waveforms
+        .iter()
+        .find(|trace| {
+            trace["y_unit"] == "V"
+                && trace["name"]
+                    .as_str()
+                    .is_some_and(|name| name.eq_ignore_ascii_case("q"))
+        })
+        .unwrap_or_else(|| panic!("no node voltage q: {metadata}"));
+    let v_q = transferred_series(&buffers, &v_q["y_values"]).to_vec();
+    assert_eq!(v_q.len(), time.len());
+    let at = |t: f64| {
+        let index = time
+            .iter()
+            .position(|sample| *sample >= t)
+            .unwrap_or_else(|| panic!("no sample at {t:e}"));
+        v_q[index]
+    };
+    let high = 3.3 * 1000.0 / 1020.0;
+    for (t, want) in [
+        (2.5e-9, 0.0),
+        (7.5e-9, high),
+        (12.5e-9, 0.0),
+        (17.5e-9, high),
+    ] {
+        let got = at(t);
+        assert!(
+            (got - want).abs() < 1e-6,
+            "V(q) at {t:e}: {got}, want {want}"
+        );
+    }
+}
