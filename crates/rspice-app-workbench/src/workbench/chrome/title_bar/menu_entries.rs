@@ -105,13 +105,18 @@ pub enum MenuContext {
 }
 
 impl MenuContext {
-    fn holds(
+    /// Whether the context holds for `workbench`, `model` and the
+    /// platform's record `platform_state`, on `platform` under `os`.
+    pub fn holds(
         self,
-        app: &impl WorkbenchHost,
+        workbench: &WorkbenchSession,
+        model: &crate::workbench::app_state::Model,
+        platform_state: &crate::workbench::lifecycle::project_lifecycle::PlatformState,
         platform: CommandPlatform,
         os: OperatingSystem,
     ) -> bool {
-        let editor = app.workbench().active_source_editor;
+        let editor = workbench.active_source_editor;
+        let view_is = |view_type| design_view_is(workbench, model, view_type);
         match self {
             Self::SourceEditor => editor.is_some(),
             Self::NavigableSourceEditor => editor.is_some_and(|editor| editor.navigable),
@@ -122,19 +127,23 @@ impl MenuContext {
             }
             Self::MacApplication => application_menus::shows_application_menu(platform, os),
             Self::NoApplicationMenu => !application_menus::shows_application_menu(platform, os),
-            Self::ProjectOpen => app.platform().project_lifecycle.is_open(),
-            Self::NoProject => !app.platform().project_lifecycle.is_open(),
-            Self::SymbolView => design_view_is(app, crate::state::ViewType::Symbol),
-            Self::NotSymbolView => !design_view_is(app, crate::state::ViewType::Symbol),
-            Self::VerilogAView => design_view_is(app, crate::state::ViewType::VerilogA),
+            Self::ProjectOpen => platform_state.project_lifecycle.is_open(),
+            Self::NoProject => !platform_state.project_lifecycle.is_open(),
+            Self::SymbolView => view_is(crate::state::ViewType::Symbol),
+            Self::NotSymbolView => !view_is(crate::state::ViewType::Symbol),
+            Self::VerilogAView => view_is(crate::state::ViewType::VerilogA),
         }
     }
 }
 
 /// Whether the Design workspace is in front showing a view of `view_type`.
-fn design_view_is(app: &impl WorkbenchHost, view_type: crate::state::ViewType) -> bool {
-    app.workbench().workspace == crate::workbench::state::Workspace::Design
-        && app.model().workspace.content.active_view_type() == view_type
+fn design_view_is(
+    workbench: &WorkbenchSession,
+    model: &crate::workbench::app_state::Model,
+    view_type: crate::state::ViewType,
+) -> bool {
+    workbench.workspace == crate::workbench::state::Workspace::Design
+        && model.workspace.content.active_view_type() == view_type
 }
 
 impl MenuEntry {
@@ -294,8 +303,84 @@ pub struct CommandRow {
     pub access: Option<char>,
 }
 
+/// What a menu's rows read from the application: each command's label,
+/// key, availability, check mark and icon, which contexts hold, and the
+/// recently opened files. A host answers all of it; a page that draws a menu
+/// of its own commands answers it from what the page was handed.
+pub trait MenuLookup {
+    /// What a row of the command `key` names reads right now.
+    fn menu_label(&self, key: CommandKey) -> std::borrow::Cow<'static, str>;
+
+    /// The keys the reader's profile binds the command `key` names to on
+    /// `platform`, written as `os` writes them; empty for none.
+    fn shortcut_label(
+        &self,
+        key: CommandKey,
+        platform: CommandPlatform,
+        os: OperatingSystem,
+    ) -> String;
+
+    /// Whether the command `key` names can run here, and why not.
+    fn availability(&self, key: CommandKey) -> CommandAvailability;
+
+    /// Whether the state the command `key` names switches is on; `None` for
+    /// a command that switches none.
+    fn checked(&self, key: CommandKey) -> Option<bool>;
+
+    /// The icon a row of the command `key` names wears.
+    fn command_icon(&self, key: CommandKey) -> Option<WorkbenchIcon>;
+
+    /// Whether the entries shown only in `context` are shown, on `platform`
+    /// under `os`.
+    fn holds(&self, context: MenuContext, platform: CommandPlatform, os: OperatingSystem) -> bool;
+
+    /// The recently opened files, newest first.
+    fn recent_files(&self) -> &[crate::services::recent_files::RecentFile];
+}
+
+impl<H: WorkbenchHost> MenuLookup for H {
+    fn menu_label(&self, key: CommandKey) -> std::borrow::Cow<'static, str> {
+        Host::menu_label(self, key)
+    }
+
+    fn shortcut_label(
+        &self,
+        key: CommandKey,
+        platform: CommandPlatform,
+        os: OperatingSystem,
+    ) -> String {
+        Host::shortcut_label(self, key, platform, os)
+    }
+
+    fn availability(&self, key: CommandKey) -> CommandAvailability {
+        Host::availability(self, key)
+    }
+
+    fn checked(&self, key: CommandKey) -> Option<bool> {
+        Host::checked(self, key)
+    }
+
+    fn command_icon(&self, key: CommandKey) -> Option<WorkbenchIcon> {
+        Host::command_icon(self, key)
+    }
+
+    fn holds(&self, context: MenuContext, platform: CommandPlatform, os: OperatingSystem) -> bool {
+        context.holds(
+            self.workbench(),
+            self.model(),
+            self.platform(),
+            platform,
+            os,
+        )
+    }
+
+    fn recent_files(&self) -> &[crate::services::recent_files::RecentFile] {
+        &self.platform().recent_files
+    }
+}
+
 /// The rows `entries` show in the window `ctx` draws.
-pub fn menu_rows(entries: &[MenuEntry], app: &impl WorkbenchHost, ctx: &Context) -> Vec<MenuRow> {
+pub fn menu_rows(entries: &[MenuEntry], app: &impl MenuLookup, ctx: &Context) -> Vec<MenuRow> {
     resolve_menu_rows(
         entries,
         app,
@@ -308,7 +393,7 @@ pub fn menu_rows(entries: &[MenuEntry], app: &impl WorkbenchHost, ctx: &Context)
 /// a test can see what a menu leaves out.
 pub fn resolve_menu_rows(
     entries: &[MenuEntry],
-    app: &impl WorkbenchHost,
+    app: &impl MenuLookup,
     platform: CommandPlatform,
     os: OperatingSystem,
 ) -> Vec<MenuRow> {
@@ -320,7 +405,7 @@ pub fn resolve_menu_rows(
 fn push_menu_rows(
     rows: &mut Vec<MenuRow>,
     entries: &[MenuEntry],
-    app: &impl WorkbenchHost,
+    app: &impl MenuLookup,
     platform: CommandPlatform,
     os: OperatingSystem,
 ) {
@@ -356,13 +441,13 @@ fn push_menu_rows(
             }),
             MenuEntry::Separator => rows.push(MenuRow::Separator),
             MenuEntry::Only(context, entries) => {
-                if context.holds(app, platform, os) {
+                if app.holds(context, platform, os) {
                     push_menu_rows(rows, entries, app, platform, os);
                 }
             }
             MenuEntry::RecentFiles(command) => {
                 let availability = app.availability(command);
-                rows.extend(app.platform().recent_files.iter().map(|recent| {
+                rows.extend(app.recent_files().iter().map(|recent| {
                     MenuRow::Command(CommandRow {
                         command,
                         label: recent_file_name(recent).into(),
@@ -411,6 +496,12 @@ impl MenuChoice {
             command: row.command,
             action: row.action.clone(),
         }
+    }
+
+    /// The command the chosen row names. The row of a recent file names
+    /// the command that opens it; running the choice opens the file itself.
+    pub fn command(&self) -> CommandKey {
+        self.command
     }
 
     pub(super) fn run(self, app: &mut impl WorkbenchHost) {

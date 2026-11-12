@@ -123,12 +123,27 @@ pub fn source_editor_context_menu(
     response: &Response,
     app: &mut impl WorkbenchHost<Menu = ApplicationMenu, MenuEntry = MenuEntry>,
 ) {
+    let choice = source_editor_context_menu_over(response, |ctx| {
+        menu_rows(app.source_editor_menu(), app, ctx)
+    });
+    if let Some(choice) = choice {
+        choice.run(app);
+    }
+}
+
+/// The source editor's right-click menu over the rows `rows` builds, and the
+/// row the reader chose from it. `rows` is called only while the menu is
+/// open, so a closed menu reads nothing.
+pub fn source_editor_context_menu_over(
+    response: &Response,
+    rows: impl FnOnce(&Context) -> Vec<MenuRow>,
+) -> Option<MenuChoice> {
     let ctx = response.ctx.clone();
     let large_targets = ctx.content_rect().width() <= 820.0
         || Tokens::get(&ctx).metrics.ctl_h >= MENU_TOUCH_ROW_HEIGHT;
     let popup_id = Popup::default_response_id(response);
     let shown = crate::ui::widgets::context_menu_popup(response).show(|ui| {
-        let rows = menu_rows(app.source_editor_menu(), app, ui.ctx());
+        let rows = rows(ui.ctx());
         configure_menu_popup(ui, large_targets, &rows);
         ui.ctx().accesskit_node_builder(popup_id, |node| {
             node.set_role(egui::accesskit::Role::Menu);
@@ -143,13 +158,11 @@ pub fn source_editor_context_menu(
         }
         choice.or(typed)
     });
-    if let Some(choice) = shown.and_then(|shown| shown.inner) {
-        choice.run(app);
-    }
+    shown.and_then(|shown| shown.inner)
 }
 
 pub fn shortcut_for_occurrence(
-    host: &impl Host,
+    host: &impl menu_entries::MenuLookup,
     platform: crate::state::command_catalog::CommandPlatform,
     operating_system: egui::os::OperatingSystem,
     command: crate::state::command_catalog::CommandKey,
