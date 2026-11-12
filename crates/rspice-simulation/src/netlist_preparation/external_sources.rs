@@ -32,7 +32,14 @@ pub fn deferred_external_source_reason(line: &str) -> Option<&'static str> {
     let directive = lower.split_whitespace().next().unwrap_or_default();
     if matches!(
         directive,
-        ".spef_include" | ".veriloga" | ".va" | ".ahdl_include" | ".hdl" | ".verilog" | ".load"
+        ".spef_include"
+            | ".veriloga"
+            | ".va"
+            | ".ahdl_include"
+            | ".hdl"
+            | ".vams"
+            | ".verilog"
+            | ".load"
     ) {
         return Some("external source directive");
     }

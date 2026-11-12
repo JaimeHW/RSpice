@@ -23,6 +23,7 @@ fn every_runtime_external_input_category_fails_closed() {
         ".ahdl_include compact_model.va",
         ".hdl compact_model.va",
         ".verilog compact_model.va",
+        ".vams compact_model.va",
         ".load prior.raw",
         "Vstim in 0 PWL FILE \"wave.csv\"",
         ".measure tran fit ERROR V(out) FILE reference.prn DEPVARCOL 2",
