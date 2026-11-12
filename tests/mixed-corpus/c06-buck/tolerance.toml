@@ -304,64 +304,70 @@ why = "charge balance: the mean inductor current is the load current (922/512)/2
 # 5 mV stands. The O2 reference keeps these windows' rows whole (the oracle
 # deck's `rspice-full-rows`); the 20,001-row decimation had dropped the
 # switching corners from them.
+# The O1 allowances are vdig's: its sampler reads V(fb) at tick 1. The vams
+# controller's analog timer samples at tick 0, one tick earlier, which moves
+# the one-period means by a term the derivation leaves out: its own O2
+# reference (oracle/vams.o2, the same law with the tick-0 sample) sits +4.06,
+# +0.87, −2.07, −1.99 and −1.71 mV from vdig's in the five windows. So vams is
+# gated on that O2 reference, where no term differs, and O1 checks vdig only.
 
 [[q]]
 id = "env500"
 analysis = "tran"
-variants = ["vdig", "vams"]
+variants = ["vdig"]
 kind = "mean"
 signal = "v(vout)"
 window = [5e-4, 5.02e-4]
 oracle = "O1"
-ref = { vdig = "ref/vdig.tran.O1.out", vams = "ref/vdig.tran.O1.out" }
+ref = { vdig = "ref/vdig.tran.O1.out" }
 abs = 0.0045
 why = "the averaged model (O6 averaged, solved by ngspice): its own error here 1.5 mV, plus 3 mV realization (derivation above)"
 
 [[q]]
 id = "env510"
 analysis = "tran"
-variants = ["vdig", "vams"]
+variants = ["vdig"]
 kind = "mean"
 signal = "v(vout)"
 window = [5.1e-4, 5.12e-4]
 oracle = "O1"
-ref = { vdig = "ref/vdig.tran.O1.out", vams = "ref/vdig.tran.O1.out" }
+ref = { vdig = "ref/vdig.tran.O1.out" }
 abs = 0.0065
 why = "the averaged model (O6 averaged, solved by ngspice): its own error here 3.5 mV, plus 3 mV realization (derivation above)"
 
 [[q]]
 id = "env530"
 analysis = "tran"
-variants = ["vdig", "vams"]
+variants = ["vdig"]
 kind = "mean"
 signal = "v(vout)"
 window = [5.3e-4, 5.32e-4]
 oracle = "O1"
-ref = { vdig = "ref/vdig.tran.O1.out", vams = "ref/vdig.tran.O1.out" }
+ref = { vdig = "ref/vdig.tran.O1.out" }
 abs = 0.0181
 why = "the averaged model (O6 averaged, solved by ngspice): its own error here 15.0 mV (sampling alignment on the recovery), plus 3 mV realization (derivation above)"
 
 [[q]]
 id = "env560"
 analysis = "tran"
-variants = ["vdig", "vams"]
+variants = ["vdig"]
 kind = "mean"
 signal = "v(vout)"
 window = [5.6e-4, 5.62e-4]
 oracle = "O1"
-ref = { vdig = "ref/vdig.tran.O1.out", vams = "ref/vdig.tran.O1.out" }
+ref = { vdig = "ref/vdig.tran.O1.out" }
 abs = 0.0073
 why = "the averaged model (O6 averaged, solved by ngspice): its own error here 4.3 mV, plus 3 mV realization (derivation above)"
 
 [[q]]
 id = "env620"
 analysis = "tran"
-variants = ["vdig", "vams"]
+variants = ["vdig"]
 kind = "mean"
 signal = "v(vout)"
 window = [6.2e-4, 6.22e-4]
 oracle = "O1"
-ref = { vdig = "ref/vdig.tran.O1.out", vams = "ref/vdig.tran.O1.out" }
+ref = { vdig = "ref/vdig.tran.O1.out" }
 abs = 0.0091
 why = "the averaged model (O6 averaged, solved by ngspice): its own error here 6.1 mV, plus 3 mV realization (derivation above)"
 
@@ -373,7 +379,7 @@ kind = "mean"
 signal = "v(vout)"
 window = [5e-4, 5.02e-4]
 oracle = "O2"
-ref = { vdig = "ref/vdig.tran.O2.out", vams = "ref/vdig.tran.O2.out" }
+ref = { vdig = "ref/vdig.tran.O2.out", vams = "ref/vams.tran.O2.out" }
 abs = 0.005
 why = "the same switching circuit under the same digital law (d_cosim)"
 
@@ -385,7 +391,7 @@ kind = "mean"
 signal = "v(vout)"
 window = [5.1e-4, 5.12e-4]
 oracle = "O2"
-ref = { vdig = "ref/vdig.tran.O2.out", vams = "ref/vdig.tran.O2.out" }
+ref = { vdig = "ref/vdig.tran.O2.out", vams = "ref/vams.tran.O2.out" }
 abs = 0.005
 why = "the same switching circuit under the same digital law (d_cosim)"
 
@@ -397,7 +403,7 @@ kind = "mean"
 signal = "v(vout)"
 window = [5.3e-4, 5.32e-4]
 oracle = "O2"
-ref = { vdig = "ref/vdig.tran.O2.out", vams = "ref/vdig.tran.O2.out" }
+ref = { vdig = "ref/vdig.tran.O2.out", vams = "ref/vams.tran.O2.out" }
 abs = 0.005
 why = "the same switching circuit under the same digital law (d_cosim)"
 
@@ -409,7 +415,7 @@ kind = "mean"
 signal = "v(vout)"
 window = [5.6e-4, 5.62e-4]
 oracle = "O2"
-ref = { vdig = "ref/vdig.tran.O2.out", vams = "ref/vdig.tran.O2.out" }
+ref = { vdig = "ref/vdig.tran.O2.out", vams = "ref/vams.tran.O2.out" }
 abs = 0.005
 why = "the same switching circuit under the same digital law (d_cosim)"
 
@@ -421,7 +427,7 @@ kind = "mean"
 signal = "v(vout)"
 window = [6.2e-4, 6.22e-4]
 oracle = "O2"
-ref = { vdig = "ref/vdig.tran.O2.out", vams = "ref/vdig.tran.O2.out" }
+ref = { vdig = "ref/vdig.tran.O2.out", vams = "ref/vams.tran.O2.out" }
 abs = 0.005
 why = "the same switching circuit under the same digital law (d_cosim)"
 

@@ -11,8 +11,8 @@ name = "vdig"
 families = ["spice", "vams-digital", "vams-analog"]
 today = "runs"
 
-# The Verilog-AMS sampling ADC: @(timer) and @(absdelta) in the analog block,
-# read by the digital process.
+# The Verilog-AMS sampling ADC: @(timer) in the analog block and @(absdelta)
+# in an always block, read by the digital process.
 [[variant]]
 name = "vams"
 families = ["spice", "vams-digital", "vams-analog"]

@@ -1,8 +1,10 @@
 // C6 vams: the buck controller of buck_ctrl.vams with a Verilog-AMS sampling
 // ADC (RSpice-authored). The analog block samples V(fb) on a 2 us timer at
-// each period start (tick 0) and flags over-voltage on an absdelta event; the
-// digital process reads the sample at tick 1 (race-free) and cuts the duty
-// to one tick while the flag is set. Everything else is buck_ctrl.vams.
+// each period start (tick 0); an always block flags over-voltage on an
+// absdelta event (VAMS-2023 5.10.3.4 allows absdelta only in initial and
+// always blocks). The digital process reads the sample at tick 1 (race-free)
+// and cuts the duty to one tick while the flag is set. Everything else is
+// buck_ctrl.vams.
 `include "disciplines.vams"
 `timescale 1ps/1ps
 module buck_ctrl(fb, hs, ls);
@@ -17,8 +19,8 @@ module buck_ctrl(fb, hs, ls);
   real vs, ov;
   analog begin
     @(timer(0, 2e-6)) vs = V(fb);
-    @(absdelta(V(fb), 0.05)) ov = (V(fb) > 2.2) ? 1.0 : 0.0;
   end
+  always @(absdelta(V(fb), 0.05)) ov = (V(fb) > 2.2) ? 1.0 : 0.0;
   initial begin
     hs = 1'b0;
     ls = 1'b0;
