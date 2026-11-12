@@ -1043,7 +1043,72 @@ fn apply_automation_source_import_in(
     Ok(message)
 }
 
-pub(crate) fn import_dropped_automation_source(
+/// Import the one file dropped on the Automation page as its source, or say
+/// why not: one file at a time, its bytes within the source limit and in
+/// UTF-8. Nothing is imported while an application modal is open.
+pub(crate) fn import_dropped_automation_files(
+    app: &mut RSpiceApp,
+    dropped: Vec<egui::DroppedFile>,
+) {
+    if app.state.application_modal_open() {
+        return;
+    }
+    if dropped.len() != 1 {
+        let message = app
+            .state
+            .workbench
+            .messages()
+            .text(crate::workbench::MessageId::AutomationDropOneSource);
+        app.state.prompt(message);
+        return;
+    }
+    let file = &dropped[0];
+    let name = (!file.name.trim().is_empty())
+        .then(|| file.name.clone())
+        .or_else(|| {
+            file.path
+                .as_deref()
+                .and_then(std::path::Path::file_name)
+                .and_then(std::ffi::OsStr::to_str)
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| "dropped-source.py".to_owned());
+    let bytes = if let Some(bytes) = file.bytes.as_ref() {
+        Ok(bytes.to_vec())
+    } else {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            file.path
+                .as_deref()
+                .ok_or_else(|| "Dropped file has neither bytes nor a native path.".to_owned())
+                .and_then(|path| std::fs::read(path).map_err(|error| error.to_string()))
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            Err("The browser did not provide the dropped file's contents.".to_owned())
+        }
+    };
+    let result = bytes.and_then(|bytes| {
+        if bytes.len() > crate::state::MAX_PROJECT_CODE_SOURCE_BYTES {
+            return Err(format!(
+                "Dropped source exceeds the supported {}-byte limit.",
+                crate::state::MAX_PROJECT_CODE_SOURCE_BYTES
+            ));
+        }
+        let contents = String::from_utf8(bytes)
+            .map_err(|error| format!("Dropped source is not valid UTF-8: {error}"))?;
+        import_dropped_automation_source(app, name, contents).map(|_| ())
+    });
+    if let Err(error) = result {
+        app.state.record(
+            LogSeverity::Error,
+            LogSource::Studio,
+            format!("Automation drop import failed: {error}"),
+        );
+    }
+}
+
+fn import_dropped_automation_source(
     app: &mut RSpiceApp,
     file_name: String,
     contents: String,

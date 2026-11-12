@@ -8,7 +8,7 @@ use crate::workbench::app::dialogs::project::configuration_dialogs::{Leaving, go
 use crate::workbench::app::dialogs::project::new_project::NewProjectDialogState;
 use crate::workbench::app::dialogs::source_document;
 use crate::workbench::code::commands::{
-    CodeCommand, CodeRequest, NetlistEditorRequest, SourceDocumentRequest,
+    AutomationRequest, CodeCommand, CodeRequest, NetlistEditorRequest, SourceDocumentRequest,
 };
 use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::documents::code_workspace::persist_global_veriloga_library;
@@ -586,6 +586,76 @@ pub(in crate::workbench) fn answer_code_request(app: &mut RSpiceApp, request: Co
                 dropped,
             );
         }
+        CodeRequest::Automation(request) => answer_automation_request(app, request),
+    }
+}
+
+/// Carry out what the Automation page asked, as the page did where it drew.
+// Interim, as `answer_code_request`: each answer is the body the page ran,
+// until the code feature carries it out over its own parts.
+fn answer_automation_request(app: &mut RSpiceApp, request: AutomationRequest) {
+    use crate::workbench::documents::code_workspace;
+
+    match request {
+        AutomationRequest::ImportDropped(dropped) => {
+            code_workspace::import_dropped_automation_files(app, dropped);
+        }
+        AutomationRequest::CreateWorkspace => {
+            if let Err(error) = code_workspace::open_source_workspace_dialog(app) {
+                app.state.prompt(error);
+            }
+        }
+        AutomationRequest::Validate => code_workspace::validate_automation_workspace(app),
+        AutomationRequest::DryRun => code_workspace::dry_run_automation_workflow(app),
+        AutomationRequest::Run => code_workspace::start_automation_workflow(app),
+        AutomationRequest::Stop => code_workspace::cancel_automation_workflow(app),
+        AutomationRequest::OpenGeneratedNetlist => {
+            let _ = crate::workbench::documents::netlist_document::open_generated_primary(
+                &mut app.state,
+            );
+            app.state.code.code_workspace.page = code_workspace::CodeWorkspacePage::Netlist;
+        }
+        AutomationRequest::ToggleBreakpoint(line) => {
+            code_workspace::toggle_automation_breakpoint(app, line);
+        }
+        AutomationRequest::FormatDocument { bundle_id, path } => {
+            if let Err(error) = code_workspace::format_language_document(
+                app,
+                crate::state::ProjectSourceLanguage::RSpiceAutomation,
+                bundle_id,
+                &path,
+            ) {
+                app.state.prompt(error);
+            }
+        }
+        AutomationRequest::FindInBundle { path } => {
+            if let Err(error) = code_workspace::open_source_search(
+                app,
+                crate::state::ProjectSourceLanguage::RSpiceAutomation,
+                &path,
+            ) {
+                app.state.prompt(error);
+            }
+        }
+        AutomationRequest::ExportArtifact(kind) => {
+            code_workspace::export_automation_artifact(app, kind);
+        }
+        AutomationRequest::StartDebugger => code_workspace::start_automation_debugger(app),
+        AutomationRequest::ContinueDebugger => code_workspace::continue_automation_debugger(app),
+        AutomationRequest::PauseDebugger => code_workspace::pause_automation_debugger(app),
+        AutomationRequest::StepOver => code_workspace::step_over_automation_debugger(app),
+        AutomationRequest::StepInto => code_workspace::step_into_automation_debugger(app),
+        AutomationRequest::StepOut => code_workspace::step_out_automation_debugger(app),
+        AutomationRequest::RestartDebugger => code_workspace::restart_automation_debugger(app),
+        AutomationRequest::StopDebugger => code_workspace::stop_automation_debugger(app),
+        AutomationRequest::RemoveBreakpoint { document_id, line } => {
+            code_workspace::remove_automation_breakpoint(app, document_id, line);
+        }
+        AutomationRequest::SyncBreakpoints => code_workspace::sync_automation_debugger(app),
+        AutomationRequest::SelectFrame(frame_id) => {
+            code_workspace::select_automation_debug_frame(app, frame_id);
+        }
+        AutomationRequest::RefreshWatches => code_workspace::refresh_automation_debugger(app),
     }
 }
 

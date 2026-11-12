@@ -52,6 +52,9 @@ pub(crate) use language_services::{
     CodeLanguageToolsState, LanguageServiceIndex, commit_language_rename, extent_words,
     format_language_document, open_language_tools_in_bundle,
 };
+// A managed run the frame tests seed, to press its Stop.
+#[cfg(test)]
+pub(crate) use page::PendingAutomationRuntimeExecution;
 pub(crate) use page::VerilogAHeaderView;
 pub use page::{
     AutomationArtifactStore, AutomationBreakpointKind, AutomationDebugPhase,
@@ -65,7 +68,7 @@ pub use page::{
 };
 pub(crate) use source_files::{
     assign_automation_source_role, commit_source_file_dialog, commit_source_history_restore,
-    commit_source_workspace_dialog, import_dropped_automation_source, open_source_file_dialog,
+    commit_source_workspace_dialog, import_dropped_automation_files, open_source_file_dialog,
     open_source_file_dialog_in_bundle, open_source_history, open_source_workspace_dialog,
     poll_automation_source_import, request_automation_source_import,
     source_bundle_contains_document, source_bundle_document_is_editable,

@@ -3,11 +3,11 @@
 use egui::{Align, Layout, ScrollArea, Sense, Stroke, Ui, Vec2};
 
 use crate::automation_workflow::ArtifactKind;
-use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::{ProjectSourceLanguage, ProjectSourceOwner};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
+use crate::workbench::code::commands::{AutomationRequest, CodeRequest};
 use crate::workbench::{MessageCatalog, MessageId, RSpiceApp};
 
 use super::super::design_system::inspector::muted_inspector_copy;
@@ -18,7 +18,7 @@ use super::super::design_system::{
 };
 use crate::state::code_diagnostics::CodeDiagnosticCollection;
 use crate::workbench::documents::code_workspace::{
-    AutomationExecutionState, CodeEditorLanguage, CodeWorkspacePage, EditorFindings,
+    AutomationExecutionState, CodeEditorLanguage, EditorFindings,
     show_code_document_with_debug_versioned,
 };
 
@@ -45,8 +45,16 @@ fn visible_workspace_rect(ui: &Ui) -> egui::Rect {
 }
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
-    handle_automation_file_drop(ui.ctx(), app);
-    crate::workbench::documents::code_workspace::sync_automation_debugger(app);
+    // A file dropped on the page is imported once the page has drawn.
+    let dropped = ui.ctx().input(|input| input.raw.dropped_files.clone());
+    if !dropped.is_empty() {
+        app.state
+            .workbench
+            .outbox
+            .push(CodeRequest::Automation(AutomationRequest::ImportDropped(
+                dropped,
+            )));
+    }
     let t = Tokens::get(ui.ctx());
     let bundle = app
         .state
@@ -90,16 +98,24 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                     if Button::new(&messages.text(MessageId::CodeSourceCreateWorkspace))
                         .show(ui)
                         .clicked()
-                        && let Err(error) =
-                            crate::workbench::documents::code_workspace::open_source_workspace_dialog(app)
                     {
-                        app.state.prompt(error);
+                        app.state
+                            .workbench
+                            .outbox
+                            .push(CodeRequest::Automation(AutomationRequest::CreateWorkspace));
                     }
                 },
             );
             return;
         };
-        let selected_path = match app.state.code.code_workspace.automation.selected_file.clone() {
+        let selected_path = match app
+            .state
+            .code
+            .code_workspace
+            .automation
+            .selected_file
+            .clone()
+        {
             Some(path) if bundle.contains_file(&path) => path,
             Some(_) => {
                 app.state.code.code_workspace.automation.selected_file = None;
@@ -221,72 +237,6 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     });
 }
 
-fn handle_automation_file_drop(ctx: &egui::Context, app: &mut RSpiceApp) {
-    if app.state.application_modal_open() {
-        return;
-    }
-    let dropped = ctx.input(|input| input.raw.dropped_files.clone());
-    if dropped.is_empty() {
-        return;
-    }
-    if dropped.len() != 1 {
-        let message = app
-            .state
-            .workbench
-            .messages()
-            .text(MessageId::AutomationDropOneSource);
-        app.state.prompt(message);
-        return;
-    }
-    let file = &dropped[0];
-    let name = (!file.name.trim().is_empty())
-        .then(|| file.name.clone())
-        .or_else(|| {
-            file.path
-                .as_deref()
-                .and_then(std::path::Path::file_name)
-                .and_then(std::ffi::OsStr::to_str)
-                .map(str::to_owned)
-        })
-        .unwrap_or_else(|| "dropped-source.py".to_owned());
-    let bytes = if let Some(bytes) = file.bytes.as_ref() {
-        Ok(bytes.to_vec())
-    } else {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            file.path
-                .as_deref()
-                .ok_or_else(|| "Dropped file has neither bytes nor a native path.".to_owned())
-                .and_then(|path| std::fs::read(path).map_err(|error| error.to_string()))
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            Err("The browser did not provide the dropped file's contents.".to_owned())
-        }
-    };
-    let result = bytes.and_then(|bytes| {
-        if bytes.len() > crate::state::MAX_PROJECT_CODE_SOURCE_BYTES {
-            return Err(format!(
-                "Dropped source exceeds the supported {}-byte limit.",
-                crate::state::MAX_PROJECT_CODE_SOURCE_BYTES
-            ));
-        }
-        let contents = String::from_utf8(bytes)
-            .map_err(|error| format!("Dropped source is not valid UTF-8: {error}"))?;
-        crate::workbench::documents::code_workspace::import_dropped_automation_source(
-            app, name, contents,
-        )
-        .map(|_| ())
-    });
-    if let Err(error) = result {
-        app.state.record(
-            LogSeverity::Error,
-            LogSource::Studio,
-            format!("Automation drop import failed: {error}"),
-        );
-    }
-}
-
 fn title_row(ui: &mut Ui, app: &mut RSpiceApp) {
     let messages = app.state.workbench.messages();
     let title = messages.text(MessageId::AutomationHeadingTitle);
@@ -353,7 +303,10 @@ fn validate_button(ui: &mut Ui, app: &mut RSpiceApp, width: f32) {
         response.on_disabled_hover_text(unavailable)
     };
     if response.clicked() {
-        crate::workbench::documents::code_workspace::validate_automation_workspace(app);
+        app.state
+            .workbench
+            .outbox
+            .push(CodeRequest::Automation(AutomationRequest::Validate));
     }
 }
 
@@ -374,7 +327,10 @@ fn dry_run_button(ui: &mut Ui, app: &mut RSpiceApp, width: f32) {
         response.on_disabled_hover_text(unavailable)
     };
     if response.clicked() {
-        crate::workbench::documents::code_workspace::dry_run_automation_workflow(app);
+        app.state
+            .workbench
+            .outbox
+            .push(CodeRequest::Automation(AutomationRequest::DryRun));
     }
 }
 
@@ -389,9 +345,9 @@ fn generated_netlist_button(ui: &mut Ui, app: &mut RSpiceApp, width: f32) {
         button = button.min_width(width).max_width(width);
     }
     if button.show(ui).clicked() {
-        let _ =
-            crate::workbench::documents::netlist_document::open_generated_primary(&mut app.state);
-        app.state.code.code_workspace.page = CodeWorkspacePage::Netlist;
+        app.state.workbench.outbox.push(CodeRequest::Automation(
+            AutomationRequest::OpenGeneratedNetlist,
+        ));
     }
 }
 
@@ -430,11 +386,15 @@ fn run_button(ui: &mut Ui, app: &mut RSpiceApp, width: f32) {
         response.on_disabled_hover_text(unavailable)
     };
     if response.clicked() {
-        if active {
-            crate::workbench::documents::code_workspace::cancel_automation_workflow(app);
+        let request = if active {
+            AutomationRequest::Stop
         } else {
-            crate::workbench::documents::code_workspace::start_automation_workflow(app);
-        }
+            AutomationRequest::Run
+        };
+        app.state
+            .workbench
+            .outbox
+            .push(CodeRequest::Automation(request));
     }
 }
 
@@ -790,7 +750,10 @@ fn code_pane(
             )
         };
         if let Some(line) = interaction.breakpoint_toggled {
-            crate::workbench::documents::code_workspace::toggle_automation_breakpoint(app, line);
+            app.state
+                .workbench
+                .outbox
+                .push(CodeRequest::Automation(AutomationRequest::ToggleBreakpoint(line)));
         }
         if interaction.changed {
             match app.state.model.workspace.content.replace_project_source_bundle_file(
@@ -859,24 +822,29 @@ fn code_pane(
     }
     if crate::workbench::documents::text_editor_commands::take_format_document_request(
         ui, editor_id,
-    ) && let Err(error) = crate::workbench::documents::code_workspace::format_language_document(
-        app,
-        ProjectSourceLanguage::RSpiceAutomation,
-        bundle.id(),
-        selected_path,
     ) {
-        app.state.prompt(error);
+        // Formatting is carried out once the page has drawn. A format the
+        // palette, a menu or a shortcut asked for is taken a frame after it
+        // was asked, in a frame no input began, so this frame asks for the
+        // next at once to draw what formatting wrote.
+        ui.ctx().request_repaint();
+        app.state.workbench.outbox.push(CodeRequest::Automation(
+            AutomationRequest::FormatDocument {
+                bundle_id: bundle.id(),
+                path: selected_path.to_owned(),
+            },
+        ));
     }
     drop(preceding_input);
     if let Some(input) = search_input {
-        // Bind the search to source revisions and selection after preceding edits.
-        if let Err(error) = crate::workbench::documents::code_workspace::open_source_search(
-            app,
-            ProjectSourceLanguage::RSpiceAutomation,
-            selected_path,
-        ) {
-            app.state.prompt(error);
-        }
+        // The search binds to the source revisions and the selection once
+        // the page has drawn, after preceding edits.
+        app.state
+            .workbench
+            .outbox
+            .push(CodeRequest::Automation(AutomationRequest::FindInBundle {
+                path: selected_path.to_owned(),
+            }));
         input.route(
             ui.ctx(),
             crate::workbench::documents::code_workspace::source_search_query_id(),
@@ -1149,7 +1117,10 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                 );
                 let start = messages.text(MessageId::AutomationDebugStart);
                 if Button::new(&start).enabled(can_start).show(ui).clicked() {
-                    crate::workbench::documents::code_workspace::start_automation_debugger(app);
+                    app.state
+                        .workbench
+                        .outbox
+                        .push(CodeRequest::Automation(AutomationRequest::StartDebugger));
                 }
                 let continue_label = messages.text(MessageId::AutomationDebugContinue);
                 if Button::new(&continue_label)
@@ -1157,7 +1128,10 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                     .show(ui)
                     .clicked()
                 {
-                    crate::workbench::documents::code_workspace::continue_automation_debugger(app);
+                    app.state
+                        .workbench
+                        .outbox
+                        .push(CodeRequest::Automation(AutomationRequest::ContinueDebugger));
                 }
                 let pause = messages.text(
                     if app
@@ -1178,7 +1152,10 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                     .show(ui)
                     .clicked()
                 {
-                    crate::workbench::documents::code_workspace::pause_automation_debugger(app);
+                    app.state
+                        .workbench
+                        .outbox
+                        .push(CodeRequest::Automation(AutomationRequest::PauseDebugger));
                 }
                 let step_over = messages.text(MessageId::AutomationDebugStepOver);
                 if Button::new(&step_over)
@@ -1186,7 +1163,10 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                     .show(ui)
                     .clicked()
                 {
-                    crate::workbench::documents::code_workspace::step_over_automation_debugger(app);
+                    app.state
+                        .workbench
+                        .outbox
+                        .push(CodeRequest::Automation(AutomationRequest::StepOver));
                 }
                 let step_into = messages.text(MessageId::AutomationDebugStepInto);
                 if Button::new(&step_into)
@@ -1194,7 +1174,10 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                     .show(ui)
                     .clicked()
                 {
-                    crate::workbench::documents::code_workspace::step_into_automation_debugger(app);
+                    app.state
+                        .workbench
+                        .outbox
+                        .push(CodeRequest::Automation(AutomationRequest::StepInto));
                 }
                 let step_out = messages.text(MessageId::AutomationDebugStepOut);
                 if Button::new(&step_out)
@@ -1213,7 +1196,10 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                     .show(ui)
                     .clicked()
                 {
-                    crate::workbench::documents::code_workspace::step_out_automation_debugger(app);
+                    app.state
+                        .workbench
+                        .outbox
+                        .push(CodeRequest::Automation(AutomationRequest::StepOut));
                 }
                 let restart = messages.text(MessageId::AutomationDebugRestart);
                 if Button::new(&restart)
@@ -1221,7 +1207,10 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                     .show(ui)
                     .clicked()
                 {
-                    crate::workbench::documents::code_workspace::restart_automation_debugger(app);
+                    app.state
+                        .workbench
+                        .outbox
+                        .push(CodeRequest::Automation(AutomationRequest::RestartDebugger));
                 }
                 let stop = messages.text(MessageId::AutomationDebugStop);
                 if Button::new(&stop)
@@ -1232,7 +1221,10 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                     .show(ui)
                     .clicked()
                 {
-                    crate::workbench::documents::code_workspace::stop_automation_debugger(app);
+                    app.state
+                        .workbench
+                        .outbox
+                        .push(CodeRequest::Automation(AutomationRequest::StopDebugger));
                 }
             });
             section_block_gap(ui);
@@ -1492,13 +1484,14 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                 }
             }
             if let Some((document_id, line)) = remove_breakpoint {
-                crate::workbench::documents::code_workspace::remove_automation_breakpoint(
-                    app,
-                    document_id,
-                    line,
-                );
+                app.state.workbench.outbox.push(CodeRequest::Automation(
+                    AutomationRequest::RemoveBreakpoint { document_id, line },
+                ));
             } else if breakpoints_changed {
-                crate::workbench::documents::code_workspace::sync_automation_debugger(app);
+                app.state
+                    .workbench
+                    .outbox
+                    .push(CodeRequest::Automation(AutomationRequest::SyncBreakpoints));
             }
 
             let frames = app
@@ -1526,10 +1519,9 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                         )
                         .clicked()
                     {
-                        crate::workbench::documents::code_workspace::select_automation_debug_frame(
-                            app,
-                            frame.frame_id,
-                        );
+                        app.state.workbench.outbox.push(CodeRequest::Automation(
+                            AutomationRequest::SelectFrame(frame.frame_id),
+                        ));
                     }
                 }
             }
@@ -1631,9 +1623,10 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                             .debug
                             .watch_input
                             .clear();
-                        crate::workbench::documents::code_workspace::refresh_automation_debugger(
-                            app,
-                        );
+                        app.state
+                            .workbench
+                            .outbox
+                            .push(CodeRequest::Automation(AutomationRequest::RefreshWatches));
                     }
                 }
             });
@@ -1832,7 +1825,9 @@ fn artifact_row(ui: &mut Ui, app: &mut RSpiceApp, kind: ArtifactKind, meta: &str
                 || input.consume_key(egui::Modifiers::NONE, egui::Key::Space)
         });
     if (response.clicked() || keyboard_activate) && available {
-        crate::workbench::documents::code_workspace::export_automation_artifact(app, kind);
+        app.state.workbench.outbox.push(CodeRequest::Automation(
+            AutomationRequest::ExportArtifact(kind),
+        ));
     }
 }
 

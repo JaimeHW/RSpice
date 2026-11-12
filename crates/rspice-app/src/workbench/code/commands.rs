@@ -100,7 +100,8 @@ pub(crate) enum CodeCommand {
 /// revision restore, the external change and the import each confirmed, and
 /// a find window press; and, from the netlist page itself, copying an
 /// include into the project, picking its file again, validating the deck,
-/// the quick fix, the profile review, formatting and a dropped file.
+/// the quick fix, the profile review, formatting and a dropped file; and
+/// what the Automation page leaves to the application.
 /// Each command, dialog step, navigator, page dialog or page that raises one
 /// raises one. Taken straight after the call that raised it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -176,6 +177,8 @@ pub(in crate::workbench) enum CodeRequest {
     FormatNetlistDocument,
     /// Stage the files dropped on the netlist page as an import.
     ImportDroppedNetlist(Vec<egui::DroppedFile>),
+    /// What the Automation page asked of the application.
+    Automation(AutomationRequest),
 }
 
 impl Request for CodeRequest {
@@ -202,6 +205,62 @@ pub(in crate::workbench) enum NetlistEditorRequest {
 
 impl Request for NetlistEditorRequest {
     const DRAIN: Drain = Drain::AfterContribution;
+}
+
+/// What the Automation page leaves to the application, which the shell
+/// carries out once the page has drawn: each reaches the automation runtime,
+/// the runs or the project's sources past what the page draws. Raised by
+/// the press, the drop or the editor request that asks for it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::workbench) enum AutomationRequest {
+    /// Import the files dropped on the page as its source.
+    ImportDropped(Vec<egui::DroppedFile>),
+    /// Open the source workspace dialog, as the empty page offers.
+    CreateWorkspace,
+    /// Validate the workspace's closure.
+    Validate,
+    /// Run the workflow's preflight without running it.
+    DryRun,
+    /// Run the workflow.
+    Run,
+    /// Stop the workflow running.
+    Stop,
+    /// Open the generated netlist on the Netlist page.
+    OpenGeneratedNetlist,
+    /// Set or clear the breakpoint on this line of the file the editor
+    /// shows.
+    ToggleBreakpoint(usize),
+    /// Format the file at `path` in the bundle.
+    FormatDocument {
+        bundle_id: crate::state::ProjectSourceId,
+        path: String,
+    },
+    /// Open the bundle search from the file at `path`.
+    FindInBundle {
+        path: String,
+    },
+    /// Export the workflow's artifact of this kind.
+    ExportArtifact(crate::automation_workflow::ArtifactKind),
+    /// The debugger's controls.
+    StartDebugger,
+    ContinueDebugger,
+    PauseDebugger,
+    StepOver,
+    StepInto,
+    StepOut,
+    RestartDebugger,
+    StopDebugger,
+    /// Remove the breakpoint on `line` of the document.
+    RemoveBreakpoint {
+        document_id: uuid::Uuid,
+        line: usize,
+    },
+    /// Send the breakpoints the inspector edited to the runtime.
+    SyncBreakpoints,
+    /// Select this call-stack frame.
+    SelectFrame(u64),
+    /// Evaluate the watches again, after one was added.
+    RefreshWatches,
 }
 
 /// What a choice in the source document dialogs still needs of the whole

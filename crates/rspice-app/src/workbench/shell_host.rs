@@ -80,6 +80,7 @@ impl Host for RSpiceApp {
             // The stage: a route that opens a surface of its own takes it
             // from the workspace's page.
             Point::Surface(workspace) => {
+                use crate::workbench::documents::code_workspace::sync_automation_debugger;
                 use crate::workbench::surfaces::{
                     automation, design, library_cellview_manager, netlist, project, simulate,
                     stimulus, verify,
@@ -177,7 +178,10 @@ impl Host for RSpiceApp {
                                 );
                             }
                             crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation => {
-                                automation::show(ui, app)
+                                // The breakpoints reach the debugger before the
+                                // page draws.
+                                sync_automation_debugger(app);
+                                automation::show(ui, app);
                             }
                         }
                     }
