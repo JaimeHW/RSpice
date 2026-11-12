@@ -2329,6 +2329,10 @@ pub fn empty_state(ui: &mut Ui, icon: WorkbenchIcon, title: &str, description: &
 /// Empty document state with a compact, caller-owned recovery action row.
 /// Actions are part of the state rather than permanent workspace chrome and
 /// disappear as soon as the missing source authority is created or imported.
+///
+/// The row is centred by the width it drew at last. A row whose width is new
+/// asks egui to lay the pass out again, so the frame shows it centred and the
+/// actions are drawn, and published to assistive technology, once.
 pub fn empty_state_with_actions(
     ui: &mut Ui,
     icon: WorkbenchIcon,
@@ -2353,31 +2357,30 @@ pub fn empty_state_with_actions(
                 .color(t.color.text_dim),
         );
         ui.add_space(12.0);
-        let measure_origin = ui.next_widget_position();
-        let mut measure_ui = ui.new_child(
-            egui::UiBuilder::new()
-                .id_salt("empty-state-recovery-action-measure")
-                .max_rect(Rect::from_min_size(
-                    measure_origin,
-                    Vec2::new(ui.available_width(), ui.spacing().interact_size.y),
-                ))
-                .layout(egui::Layout::left_to_right(egui::Align::Center))
-                .sizing_pass()
-                .invisible(),
-        );
-        measure_ui.spacing_mut().item_spacing.x = 6.0;
-        actions(&mut measure_ui);
-        let action_width = measure_ui.min_rect().width();
-        ui.horizontal(|ui| {
-            let leading_space = ((ui.available_width() - action_width) * 0.5).max(0.0);
-            if leading_space > 0.0 {
-                ui.add_space(leading_space);
-            }
-            ui.scope(|ui| {
-                ui.spacing_mut().item_spacing.x = 6.0;
-                actions(ui);
-            });
-        });
+        let width_id = ui.id().with("empty-state-recovery-action-width");
+        let last_width = ui.ctx().data(|data| data.get_temp::<f32>(width_id));
+        let drawn_width = ui
+            .horizontal(|ui| {
+                let leading_space =
+                    last_width.map_or(0.0, |width| ((ui.available_width() - width) * 0.5).max(0.0));
+                if leading_space > 0.0 {
+                    ui.add_space(leading_space);
+                }
+                ui.scope(|ui| {
+                    ui.spacing_mut().item_spacing.x = 6.0;
+                    actions(ui);
+                })
+                .response
+                .rect
+                .width()
+            })
+            .inner;
+        if last_width.is_none_or(|width| (width - drawn_width).abs() > 0.5) {
+            ui.ctx()
+                .data_mut(|data| data.insert_temp(width_id, drawn_width));
+            ui.ctx()
+                .request_discard("the empty state's recovery actions changed width");
+        }
     });
 }
 

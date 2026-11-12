@@ -434,9 +434,13 @@ fn empty_state_recovery_actions_are_exposed_as_named_buttons() {
         .nodes;
 
     for label in ["Create source workspace…", "Import root source…"] {
-        assert!(nodes.iter().any(|(_, node)| {
-            node.role() == egui::accesskit::Role::Button && node.label() == Some(label)
-        }));
+        let buttons = nodes
+            .iter()
+            .filter(|(_, node)| {
+                node.role() == egui::accesskit::Role::Button && node.label() == Some(label)
+            })
+            .count();
+        assert_eq!(buttons, 1, "{label} is published {buttons} times");
     }
 }
 
