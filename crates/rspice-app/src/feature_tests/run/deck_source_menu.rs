@@ -298,6 +298,145 @@ fn shift_f10_draws_the_menu_in_the_frame_of_the_key() {
     holds_the_menus_answers(&mut replay);
 }
 
+/// `key` pressed and released in one frame.
+fn press(replay: &mut Replay, key: Key) {
+    let event = |pressed| egui::Event::Key {
+        key,
+        physical_key: Some(key),
+        pressed,
+        repeat: false,
+        modifiers: Modifiers::NONE,
+    };
+    replay.frame(vec![event(true), event(false)]);
+}
+
+/// The menu row the keyboard is on in the tree `output` published.
+fn focused_row(output: &egui::FullOutput) -> Option<String> {
+    let tree = output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .expect("a frame with AccessKit on publishes its tree");
+    tree.nodes
+        .iter()
+        .find(|(id, node)| *id == tree.focus && node.role() == Role::MenuItem)
+        .and_then(|(_, node)| node.label().map(str::to_owned))
+}
+
+/// Whether the deck editor has the keyboard.
+fn editor_has_the_keyboard(replay: &Replay) -> bool {
+    let state = &replay.app.state;
+    let editor = editor_id_in(&state.model, &state.code.netlist);
+    replay.ctx().memory(|memory| memory.has_focus(editor))
+}
+
+/// The right-click on a name leaves the completion list up behind the menu.
+/// While the menu is open the arrows step its rows, and move neither the
+/// list nor the caret; Escape closes the menu and gives the editor the
+/// keyboard back, and no key reaches the deck.
+#[test]
+fn the_arrows_step_the_open_menus_rows_and_escape_closes_it() {
+    let mut replay = deck_page();
+    open_menu_on_the_call(&mut replay);
+    let netlist = &replay.app.state.code.netlist;
+    assert!(
+        netlist.completion_open,
+        "the right-click leaves the completion list up behind the menu"
+    );
+    let (caret, listed) = (netlist.cursor_char_index, netlist.completion_index);
+    let mut stepped = Vec::new();
+    for key in [Key::ArrowDown, Key::ArrowDown, Key::ArrowUp] {
+        press(&mut replay, key);
+        let output = replay.frame(Vec::new());
+        assert!(draws_the_menu(&output), "{key:?} keeps the menu open");
+        stepped.push(focused_row(&output));
+    }
+    assert_eq!(
+        stepped,
+        ["Go to definition", "Find references", "Go to definition"].map(|row| Some(row.to_owned())),
+        "the arrows step the menu's rows"
+    );
+    let netlist = &replay.app.state.code.netlist;
+    assert_eq!(
+        (netlist.cursor_char_index, netlist.completion_index),
+        (caret, listed),
+        "neither the caret nor the completion list moves"
+    );
+    press(&mut replay, Key::Escape);
+    assert!(
+        !draws_the_menu(&replay.frame(Vec::new())),
+        "Escape closes the menu"
+    );
+    assert!(
+        editor_has_the_keyboard(&replay),
+        "the editor has the keyboard back"
+    );
+    assert_eq!(
+        replay.app.state.model.simulation.source.netlist_content, DECK,
+        "no key reached the deck"
+    );
+}
+
+/// Enter on the row the arrows stepped to chooses it: Go to definition
+/// puts the caret on the subcircuit's definition by the next frame.
+#[test]
+fn enter_chooses_the_row_the_arrows_stepped_to() {
+    let mut replay = deck_page();
+    open_menu_on_the_call(&mut replay);
+    press(&mut replay, Key::ArrowDown);
+    assert_eq!(
+        focused_row(&replay.frame(Vec::new())).as_deref(),
+        Some("Go to definition"),
+        "the arrow steps to the first row"
+    );
+    press(&mut replay, Key::Enter);
+    assert!(
+        !draws_the_menu(&replay.frame(Vec::new())),
+        "the choice closes the menu"
+    );
+    assert_eq!(
+        caret_line(&replay),
+        1,
+        "the caret is on the subcircuit's definition"
+    );
+}
+
+/// Once the menu has closed, the completion list still up takes its keys
+/// again: an arrow leaves the caret on the call instead of moving it to the
+/// next line, and Escape closes the list while the editor keeps the
+/// keyboard.
+#[test]
+fn the_completion_list_takes_its_keys_once_the_menu_has_closed() {
+    let mut replay = deck_page();
+    open_menu_on_the_call(&mut replay);
+    press(&mut replay, Key::Escape);
+    assert!(
+        !draws_the_menu(&replay.frame(Vec::new())),
+        "Escape closes the menu"
+    );
+    assert!(
+        replay.app.state.code.netlist.completion_open,
+        "the completion list is still up"
+    );
+    let caret = replay.app.state.code.netlist.cursor_char_index;
+    press(&mut replay, Key::ArrowDown);
+    replay.frame(Vec::new());
+    assert_eq!(
+        replay.app.state.code.netlist.cursor_char_index, caret,
+        "the list takes the arrow, and the caret stays on the call"
+    );
+    press(&mut replay, Key::Escape);
+    replay.frame(Vec::new());
+    assert!(
+        !replay.app.state.code.netlist.completion_open,
+        "the list takes Escape and closes"
+    );
+    assert!(
+        editor_has_the_keyboard(&replay),
+        "the editor keeps the keyboard"
+    );
+}
+
 /// Whether the frame that put out `output` drew the rename dialog.
 fn draws_the_rename_dialog(output: &egui::FullOutput) -> bool {
     let tree = output

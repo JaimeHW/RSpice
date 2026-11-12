@@ -14,8 +14,8 @@ pub(crate) use accessibility::bounded_accessible_text;
 #[cfg(any(test, target_arch = "wasm32"))]
 pub(crate) use accessibility::speak_caret_lines;
 use accessibility::{consume_accesskit_text_selection, update_accesskit_text_state};
-pub(crate) use context_menu::context_menu_may_show;
 use context_menu::{context_menu_id, take_menu_keys};
+pub(crate) use context_menu::{context_menu_may_show, context_menu_open};
 use keymap::{KeyAction, Motion, Reach};
 
 use std::ops::Range;
@@ -378,7 +378,7 @@ pub(crate) fn show_virtual_text_editor(
     let mut menu_raised = false;
     // While the context menu is open the keys are the menu's: an arrow steps
     // its rows, a letter picks one, and neither reaches the text behind it.
-    let menu_open = egui::Popup::is_id_open(ui.ctx(), context_menu_id(editor_id));
+    let menu_open = context_menu_open(ui.ctx(), editor_id);
     if ui.memory(|memory| memory.has_focus(editor_id)) && !menu_open {
         take_zoom_keys(ui.ctx());
         menu_raised = take_menu_keys(ui.ctx(), editor_id);

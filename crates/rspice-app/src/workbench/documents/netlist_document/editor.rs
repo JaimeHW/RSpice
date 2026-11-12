@@ -124,9 +124,14 @@ pub fn show(
     refresh_diagnostics(ui, model, netlist, include_resolutions);
 
     // Popover keys (⇥, ↑↓, Esc) must be consumed before the editor so
-    // an open popover owns them.
+    // an open popover owns them, unless the editor's right-click menu is
+    // open: then they are the menu's, Escape to close it and the arrows to
+    // step its rows, and neither the popover nor the signature hint takes
+    // them.
+    let menu_open =
+        crate::workbench::documents::virtual_text_editor::context_menu_open(ui.ctx(), editor_id);
     let completion_keys = if editable {
-        completion::consume_keys(ui, netlist)
+        completion::consume_keys(ui, netlist, menu_open)
     } else {
         // Generated output owns no editor state. Close a popover that may have
         // survived a transition away from an owned source document.
@@ -136,6 +141,7 @@ pub fn show(
     // An open signature hint answers Escape too, before the editor would
     // take the key to let go of focus.
     if netlist.signature_help.open
+        && !menu_open
         && ui
             .ctx()
             .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))

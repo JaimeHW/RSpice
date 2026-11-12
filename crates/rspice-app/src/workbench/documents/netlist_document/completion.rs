@@ -161,10 +161,11 @@ pub(crate) fn directive_signature_at(
 }
 
 /// Pre-consume the popover's keys. Must run *before* the `TextEdit` so
-/// ⇥ and ↑↓ never reach the buffer while the popover is open. Returns
-/// (move_delta, accept, dismiss).
-pub fn consume_keys(ui: &Ui, state: &NetlistDocumentState) -> (i32, bool, bool) {
-    if !state.completion_open {
+/// ⇥ and ↑↓ never reach the buffer while the popover is open. While the
+/// editor's right-click menu is open (`menu_open`) the keys are the menu's,
+/// and the popover takes none. Returns (move_delta, accept, dismiss).
+pub fn consume_keys(ui: &Ui, state: &NetlistDocumentState, menu_open: bool) -> (i32, bool, bool) {
+    if !state.completion_open || menu_open {
         return (0, false, false);
     }
     ui.ctx().input_mut(|input| {

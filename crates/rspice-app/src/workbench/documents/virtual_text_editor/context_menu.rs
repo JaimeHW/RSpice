@@ -10,6 +10,13 @@ pub(super) fn context_menu_id(editor_id: Id) -> Id {
     editor_id.with("popup")
 }
 
+/// Whether the context menu over the editor `editor_id` is open from an
+/// earlier frame. While it is, the keys are the menu's: Escape closes it and
+/// the arrows step its rows, so nothing drawn before it may take them.
+pub(crate) fn context_menu_open(ctx: &Context, editor_id: Id) -> bool {
+    Popup::is_id_open(ctx, context_menu_id(editor_id))
+}
+
 /// Whether the context menu over the editor `editor_id` may show in this
 /// frame, read before the editor draws: it is open from an earlier frame, or
 /// this frame carries what opens it (a secondary click, a touch held past a
@@ -17,7 +24,7 @@ pub(super) fn context_menu_id(editor_id: Id) -> Id {
 /// frame the menu does not open; it never answers no in one it does.
 pub(crate) fn context_menu_may_show(ctx: &Context, editor_id: Id) -> bool {
     let longest_click = ctx.options(|options| options.input_options.max_click_duration);
-    Popup::is_id_open(ctx, context_menu_id(editor_id))
+    context_menu_open(ctx, editor_id)
         || menu_key_down(ctx)
         || ctx.input(|input| {
             let pointer = &input.pointer;
