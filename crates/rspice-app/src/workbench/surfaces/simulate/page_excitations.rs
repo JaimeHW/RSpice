@@ -596,12 +596,12 @@ fn row_tooltip(
 /// Select the instance and centre the drawing on it, then show the drawing.
 ///
 /// The transaction itself is
-/// [`crate::workbench::app::actions::reveal::placed_instance_in`], which every
+/// [`rspice_app_workbench::workbench::app::reveal::placed_instance_in`], which every
 /// list that names an instance elsewhere comes through; the tooltip on this
 /// page is what says which occurrence to descend to when the row's instance is
 /// not in the buffer on screen.
 fn reveal(cx: &mut Cx<'_, SimulateFeature>, occurrence: Option<&InstancePath>, component_id: u64) {
-    crate::workbench::app::actions::reveal::placed_instance_in(
+    rspice_app_workbench::workbench::app::reveal::placed_instance_in(
         cx.model,
         cx.wb,
         occurrence,

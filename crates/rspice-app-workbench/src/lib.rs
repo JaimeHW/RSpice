@@ -52,6 +52,7 @@ pub mod workbench {
 
     pub mod app {
         pub mod command_palette;
+        pub mod reveal;
         pub mod dialogs {
             pub mod confirmation;
             pub mod confirmation_state;
