@@ -1041,6 +1041,10 @@ impl<'a> Flattener<'a> {
                 _ => {}
             }
         }
+        // Nothing reserved, nothing to collide with.
+        if reservations.is_empty() {
+            return ensure_parse_not_aborted(abort);
+        }
 
         for (element_index, element) in elements.iter().enumerate() {
             poll_parse_abort(abort, elements.len().saturating_add(element_index))?;

@@ -1027,7 +1027,8 @@ impl std::hash::Hash for NodeName<'_> {
 /// and joined by index.
 #[derive(Default)]
 struct TerminalNodes<'a> {
-    index_by_name: HashMap<NodeName<'a>, usize>,
+    /// Fx-hashed: a walk keys every terminal of every element here.
+    index_by_name: rustc_hash::FxHashMap<NodeName<'a>, usize>,
     names: Vec<NodeName<'a>>,
     parents: Vec<usize>,
     ranks: Vec<u8>,

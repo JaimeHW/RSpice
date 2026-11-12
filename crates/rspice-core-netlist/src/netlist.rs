@@ -971,13 +971,16 @@ impl GroundPolicy {
     /// Return the canonical execution node name for this dialect policy.
     /// Non-ground names retain their authored spelling.
     pub fn canonical_node(self, node: &str) -> &str {
-        let canonical = node.trim().to_ascii_uppercase();
+        // Compared in place: every node of every element is asked this.
+        let trimmed = node.trim();
         let aliases_ground = match self {
             Self::OnlyZero => false,
-            Self::NgspiceGnd => canonical == "GND",
-            Self::XyceReplace => matches!(canonical.as_str(), "GND" | "GND!" | "GROUND"),
+            Self::NgspiceGnd => trimmed.eq_ignore_ascii_case("GND"),
+            Self::XyceReplace => ["GND", "GND!", "GROUND"]
+                .iter()
+                .any(|alias| trimmed.eq_ignore_ascii_case(alias)),
         };
-        if canonical == "0" || aliases_ground {
+        if trimmed == "0" || aliases_ground {
             "0"
         } else {
             node

@@ -10,7 +10,8 @@ struct ElementNameOrigin {
 
 #[derive(Debug, Clone, Default)]
 pub(super) struct ElementNameRegistry {
-    origins: HashMap<String, ElementNameOrigin>,
+    /// Fx-hashed: every element of the deck is keyed here once.
+    origins: rustc_hash::FxHashMap<String, ElementNameOrigin>,
 }
 
 impl ElementNameRegistry {
@@ -26,23 +27,24 @@ impl ElementNameRegistry {
             let spelling = authored_name
                 .filter(|name| index == 0 && name.eq_ignore_ascii_case(&element.name))
                 .unwrap_or(&element.name);
-            if let Some(first) = self.origins.get(&canonical_name) {
-                return Err(ParseError::DuplicateName {
-                    canonical_name,
-                    first_name: first.spelling.clone(),
-                    duplicate_name: spelling.to_string(),
-                    scope: scope.to_string(),
-                    first_line: first.line,
-                    duplicate_line: line,
-                });
+            match self.origins.entry(canonical_name) {
+                std::collections::hash_map::Entry::Occupied(first) => {
+                    return Err(ParseError::DuplicateName {
+                        canonical_name: first.key().clone(),
+                        first_name: first.get().spelling.clone(),
+                        duplicate_name: spelling.to_string(),
+                        scope: scope.to_string(),
+                        first_line: first.get().line,
+                        duplicate_line: line,
+                    });
+                }
+                std::collections::hash_map::Entry::Vacant(slot) => {
+                    slot.insert(ElementNameOrigin {
+                        spelling: spelling.to_string(),
+                        line,
+                    });
+                }
             }
-            self.origins.insert(
-                canonical_name,
-                ElementNameOrigin {
-                    spelling: spelling.to_string(),
-                    line,
-                },
-            );
         }
         Ok(())
     }

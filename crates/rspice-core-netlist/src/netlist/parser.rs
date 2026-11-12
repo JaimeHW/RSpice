@@ -359,13 +359,15 @@ struct DataTableBuilder {
 #[derive(Debug)]
 struct SourceEventSchedule {
     origins: Vec<NetlistSourceLocation>,
-    events: HashMap<usize, Vec<ExpandedSourceItem>>,
+    /// Ordered, not hashed: every physical line asks for its events, and
+    /// only the few source boundaries have any.
+    events: std::collections::BTreeMap<usize, Vec<ExpandedSourceItem>>,
 }
 
 impl SourceEventSchedule {
     fn from_expanded(expanded: &ExpandedSource) -> Self {
         let mut origins = Vec::new();
-        let mut events = HashMap::<usize, Vec<ExpandedSourceItem>>::new();
+        let mut events = std::collections::BTreeMap::<usize, Vec<ExpandedSourceItem>>::new();
         for item in &expanded.items {
             match item {
                 ExpandedSourceItem::Line { origin, .. } => origins.push(origin.clone()),
@@ -3486,10 +3488,18 @@ fn resolve_top_level_deferred_chebyshev_with_abort(
     names: &mut ElementNameRegistry,
     abort: &dyn AbortSignal,
 ) -> Result<(), ParseWithAbortError> {
-    let source = std::mem::take(elements);
-    let mut resolved = Vec::with_capacity(source.len());
+    // The cards before the first CHEBYSHEV source stay where they are.
+    let Some(first) = elements
+        .iter()
+        .position(|element| matches!(element.kind, ElementKind::PspiceChebyshev { .. }))
+    else {
+        return ensure_parse_not_aborted(abort);
+    };
+    let source = elements.split_off(first);
+    let mut resolved = std::mem::take(elements);
+    resolved.reserve(source.len());
     for (index, element) in source.into_iter().enumerate() {
-        poll_parse_abort(abort, index)?;
+        poll_parse_abort(abort, first + index)?;
         let ElementKind::PspiceChebyshev {
             source_line,
             input_expression,
