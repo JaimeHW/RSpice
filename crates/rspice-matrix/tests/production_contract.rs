@@ -351,3 +351,85 @@ fn klu_matching_and_refactor_survive_random_row_permutations() {
         }
     }
 }
+
+#[test]
+fn a_milliohm_cluster_keeps_the_leg_conductance_its_diagonal_sum_rounds_away() {
+    // Node y links to dp and dn through 1 mOhm; 1 TOhm legs tie dp to the
+    // 11.5 mV source node dd and dn to ground. The legs alone set the
+    // cluster's common mode, so every cluster node sits at exactly half the
+    // source. Summing a leg's 1e-12 S into its node's 1000 S diagonal rounds
+    // it to 1000 + 9 ulp: the stored system's own exact solution is 2.3% low.
+    const Y: usize = 0;
+    const DP: usize = 1;
+    const DN: usize = 2;
+    const DD: usize = 3;
+    const SOURCE: usize = 4;
+    let link = 1.0 / 1e-3;
+    let leg = 1.0 / 1e12;
+    let vdd = 0.0115;
+    let pattern = [
+        (Y, Y),
+        (Y, DP),
+        (Y, DN),
+        (DP, Y),
+        (DP, DP),
+        (DP, DD),
+        (DN, Y),
+        (DN, DN),
+        (DD, DP),
+        (DD, DD),
+        (DD, SOURCE),
+        (SOURCE, DD),
+    ]
+    .map(|(row, col)| (row, col, 0.0));
+    let conductance = |matrix: &mut StaticMatrix, p: usize, n: Option<usize>, g: Value| {
+        matrix.add(p, p, g);
+        if let Some(n) = n {
+            matrix.add(n, n, g);
+            matrix.add(p, n, -g);
+            matrix.add(n, p, -g);
+        }
+    };
+    let mut rhs = [0.0; 5];
+    rhs[SOURCE] = vdd;
+    // The backend-faithful profile returns Xyce's own backend answer and is
+    // left out: it does not refine.
+    let profiles = [
+        ("default", SolverOptions::default()),
+        ("circuit LU", options(RealSolverBackend::Klu)),
+    ];
+    for (profile, solver_options) in profiles {
+        for newton in [false, true] {
+            let mut matrix =
+                StaticMatrix::from_triplets_with_options(5, 5, &pattern, solver_options).unwrap();
+            matrix.clear_values();
+            conductance(&mut matrix, Y, Some(DP), link);
+            conductance(&mut matrix, Y, Some(DN), link);
+            conductance(&mut matrix, DP, Some(DD), leg);
+            conductance(&mut matrix, DN, None, leg);
+            matrix.add(DD, SOURCE, 1.0);
+            matrix.add(SOURCE, DD, 1.0);
+            let mut solution = Vec::new();
+            if newton {
+                matrix.solve_newton_into(&rhs, &mut solution).unwrap();
+            } else {
+                matrix.solve_into(&rhs, &mut solution).unwrap();
+            }
+            for node in [Y, DP, DN] {
+                assert!(
+                    (solution[node] - 0.5 * vdd).abs() <= 1e-12 * vdd,
+                    "{profile} (newton: {newton}): node {node} at {:.12e} V, expected {:.12e} V",
+                    solution[node],
+                    0.5 * vdd
+                );
+            }
+            let source_current = -0.5 * vdd * leg;
+            assert!(
+                (solution[SOURCE] - source_current).abs() <= 1e-9 * source_current.abs(),
+                "{profile} (newton: {newton}): source current {:.12e} A, expected {:.12e} A",
+                solution[SOURCE],
+                source_current
+            );
+        }
+    }
+}

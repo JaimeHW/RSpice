@@ -65,6 +65,13 @@ const PIVOT_TOL: Value = 1e-3;
 /// [`KluSolver::refactor_keeping_nonzero_pivots`].
 const REFACTOR_PIVOT_TOL: Value = 1e-8;
 
+/// A pivot below this fraction of its column's largest scaled entry has lost
+/// all but about four of its digits to cancellation. Rounding in the stamped
+/// sums can then move the solution by more than `eps / 1e-12`, about 2e-4
+/// relative, a fifth of SPICE's default RELTOL: a cluster of 10 mOhm links
+/// held by picosiemens otherwise settles 0.7% off.
+const CANCELLED_PIVOT_RATIO: Value = 1e-12;
+
 /// Reciprocal pivot growth below `sqrt(eps)` marks a pivot sequence that
 /// threshold pivoting chose to the factors' numerical damage.
 #[inline]
@@ -301,6 +308,10 @@ pub struct KluSolver {
     /// Retained row-major workspace for multi-right-hand-side solves.
     batch_work: Vec<Value>,
     diagnostics: KluDiagnostics,
+    /// Whether a pivot of the current factors lost its digits to
+    /// cancellation: measured by each numeric factorization as it scatters
+    /// its columns, and on demand for factors restored from a checkpoint.
+    lost_digits: Option<bool>,
     /// Successful full numeric factorizations performed by this solver.
     #[cfg(test)]
     full_factorization_count: u64,
@@ -376,6 +387,7 @@ impl KluSolver {
         self.a_entry_scale = entry_scale;
         self.work = work;
         self.diagnostics = checkpoint.diagnostics;
+        self.lost_digits = None;
         self.factored = true;
         self.pivots_reused = false;
         Ok(())
@@ -496,6 +508,7 @@ impl KluSolver {
         self.work.clear();
         self.batch_work.clear();
         self.diagnostics = KluDiagnostics::default();
+        self.lost_digits = None;
         self.use_diag_recip = false;
         self.factored = false;
     }
@@ -540,14 +553,7 @@ impl KluSolver {
         }
         let mut reciprocal_pivot_growth = Value::INFINITY;
         for (j, &a_col) in self.col_perm.iter().enumerate() {
-            let a_col = a_col as usize;
-            let (a_begin, a_end) = (self.a_col_ptr[a_col], self.a_col_ptr[a_col + 1]);
-            let input_col_max = values[a_begin..a_end]
-                .iter()
-                .zip(&self.a_entry_scale[a_begin..a_end])
-                .fold(0.0_f64, |max, (&value, &scale)| {
-                    max.max((value * scale).abs())
-                });
+            let input_col_max = self.scaled_input_column_max(values, a_col as usize);
             let u_col_max = self.u_vals[self.u_col_ptr[j]..self.u_col_ptr[j + 1]]
                 .iter()
                 .fold(0.0_f64, |max, value| max.max(value.abs()));
@@ -556,6 +562,47 @@ impl KluSolver {
             }
         }
         damaging_growth(reciprocal_pivot_growth)
+    }
+
+    /// Whether a pivot of the factors for `values` lost its digits to
+    /// cancellation: it fell below [`CANCELLED_PIVOT_RATIO`] times the largest
+    /// scaled input entry of its column.
+    ///
+    /// Elimination reaches such a pivot by subtracting entries far larger than
+    /// itself, as a cluster of milliohm links reaches the picosiemens that
+    /// alone tie it to the rest of the circuit. The solve can then be wrong
+    /// by percent along that pivot's direction while its residual stays at
+    /// the rounding level of the large entries, which the backward-error
+    /// certificate accepts. Each numeric factorization measures it as it
+    /// scatters its columns; factors restored from a checkpoint are measured
+    /// once, on demand, with the same column scan as
+    /// [`Self::reused_pivots_show_damaging_growth`].
+    pub(crate) fn pivots_lost_digits(&mut self, values: &[Value]) -> bool {
+        if !self.factored || values.len() != self.a_rows.len() {
+            return false;
+        }
+        if let Some(lost) = self.lost_digits {
+            return lost;
+        }
+        let lost = self.col_perm.iter().enumerate().any(|(j, &a_col)| {
+            let (u_begin, u_end) = (self.u_col_ptr[j], self.u_col_ptr[j + 1]);
+            u_end > u_begin
+                && self.u_vals[u_end - 1].abs()
+                    < CANCELLED_PIVOT_RATIO * self.scaled_input_column_max(values, a_col as usize)
+        });
+        self.lost_digits = Some(lost);
+        lost
+    }
+
+    /// Largest row-scaled magnitude in one original input column.
+    fn scaled_input_column_max(&self, values: &[Value], a_col: usize) -> Value {
+        let (a_begin, a_end) = (self.a_col_ptr[a_col], self.a_col_ptr[a_col + 1]);
+        values[a_begin..a_end]
+            .iter()
+            .zip(&self.a_entry_scale[a_begin..a_end])
+            .fold(0.0_f64, |max, (&value, &scale)| {
+                max.max((value * scale).abs())
+            })
     }
 
     #[cfg(test)]
@@ -855,6 +902,7 @@ impl KluSolver {
         } = ws;
 
         let direct_factorization_division = self.direct_factorization_division;
+        let mut lost_digits = false;
         for j in 0..n {
             let a_col = self.col_perm[j] as usize;
             let stamp = j + 1;
@@ -961,6 +1009,7 @@ impl KluSolver {
             }
             min_abs_pivot = min_abs_pivot.min(pivot_abs);
             max_abs_pivot = max_abs_pivot.max(pivot_abs);
+            lost_digits |= pivot_abs < CANCELLED_PIVOT_RATIO * input_col_max;
             let pivot_recip = 1.0 / pivot_val;
             use_diag_recip &= pivot_recip.is_finite();
             u_diag_recip.push(pivot_recip);
@@ -1037,6 +1086,7 @@ impl KluSolver {
         std::mem::swap(&mut self.u_vals, u_vals);
         std::mem::swap(&mut self.u_diag_recip, u_diag_recip);
         self.use_diag_recip = use_diag_recip;
+        self.lost_digits = Some(lost_digits);
         self.diagnostics = KluDiagnostics {
             reciprocal_pivot_growth: if reciprocal_pivot_growth.is_finite() {
                 reciprocal_pivot_growth
@@ -1181,6 +1231,7 @@ impl KluSolver {
         let mut min_abs_pivot = Value::INFINITY;
         let mut max_abs_pivot: Value = 0.0;
         let direct_factorization_division = self.direct_factorization_division;
+        let mut lost_digits = false;
 
         for j in 0..n {
             let a_col = self.col_perm[j] as usize;
@@ -1188,6 +1239,7 @@ impl KluSolver {
             // targets — one u32 load + one store per nonzero, no
             // row-index load, no permutation lookup.
             let (a_begin, a_end) = (col_ptr[a_col], col_ptr[a_col + 1]);
+            let mut input_max = 0.0_f64;
             for ((&slot, &scale), &v) in self.a_scatter[a_begin..a_end]
                 .iter()
                 .zip(&self.a_entry_scale[a_begin..a_end])
@@ -1203,6 +1255,11 @@ impl KluSolver {
                     return Err(SolverError::PivotGrowth);
                 }
                 x[slot as usize] = scaled;
+                // `scaled` is finite here, so a plain compare does what
+                // `f64::max` does without its NaN handling.
+                if scaled.abs() > input_max {
+                    input_max = scaled.abs();
+                }
             }
 
             let u_begin = self.u_col_ptr[j];
@@ -1276,6 +1333,7 @@ impl KluSolver {
             }
             min_abs_pivot = min_abs_pivot.min(pivot_abs);
             max_abs_pivot = max_abs_pivot.max(pivot_abs);
+            lost_digits |= pivot_abs < CANCELLED_PIVOT_RATIO * input_max;
             self.u_vals[u_end - 1] = pivot;
             // Cache the pivot reciprocal for the optimized factor/solve path.
             let pivot_recip = 1.0 / pivot;
@@ -1296,6 +1354,7 @@ impl KluSolver {
             }
         }
         self.use_diag_recip = use_diag_recip;
+        self.lost_digits = Some(lost_digits);
         self.diagnostics = KluDiagnostics {
             reciprocal_pivot_growth,
             diagonal_rcond: if max_abs_pivot > 0.0 {

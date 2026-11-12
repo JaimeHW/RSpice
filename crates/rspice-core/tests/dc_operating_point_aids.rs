@@ -171,3 +171,73 @@ fn xyce_continuation_modes_reach_the_operating_point_through_the_aid_they_name()
         );
     }
 }
+
+/// 1 mOhm links from `y` to `dp` and `dn`, and 1 TOhm legs from `dp` to an
+/// 11.5 mV supply and from `dn` to ground: the legs alone set the cluster,
+/// at half the supply. Summed into its node's 1000 S diagonal, each leg's
+/// 1e-12 S rounds to 1.023e-12 S, and the rounded system's own solution is
+/// 2.3% low.
+const MILLIOHM_DIVIDER: &str = "1 mOhm links between two 1 TOhm divider legs\n\
+    vdd dd 0 dc 0.0115\n\
+    r1 y dp 1m\n\
+    r2 y dn 1m\n\
+    r3 dp dd 1e12\n\
+    r4 dn 0 1e12\n\
+    .op\n\
+    .end\n";
+
+/// One BSIM3 inverter at an 11.5 mV supply, 1 mOhm in series with every
+/// drain and source, its input held 19.2 mV above its output. The channels
+/// carry about 1e-28 A, so the drain junctions' GMIN sets the output cluster
+/// at half the supply. LTspice 26.1.1 reaches it by direct Newton
+/// (5.750000000000068 mV), as do Xyce 7.10 (5.749985 mV) and QSPICE's 80-bit
+/// build (5.749973 mV); QSPICE's double build and ngspice-46 settle 4% low.
+const MILLIOHM_INVERTER: &str = "inverter with 1 mOhm drain and source resistors\n\
+    .model nch nmos level=49\n\
+    .model pch pmos level=49\n\
+    vdd dd 0 dc 0.0115\n\
+    vin in out dc 0.0192\n\
+    rdp out dp 1m\n\
+    rsp dd sp 1m\n\
+    mp dp in sp dd pch w=10u l=0.15u\n\
+    rdn out dn 1m\n\
+    rsn 0 sn 1m\n\
+    mn dn in sn 0 nch w=4u l=0.15u\n\
+    .op\n\
+    .end\n";
+
+#[test]
+fn a_milliohm_cluster_holds_the_picosiemens_that_set_it_by_direct_newton() {
+    use rspice_core::engine::SpiceDialect;
+
+    let half_supply = 0.5 * 0.0115;
+    // The Xyce dialect returns its backend's own answer, as Xyce does, and
+    // keeps a nodal GMIN floor at the operating point that Xyce does not:
+    // 1e-15 S on each cluster node moves these clusters by 0.15%.
+    for dialect in [SpiceDialect::BestAvailable, SpiceDialect::Ngspice] {
+        let mut direct_only = SimulationConfig::default().with_spice_dialect(dialect);
+        let aids = &mut direct_only.convergence_config;
+        aids.gmin_stepping = false;
+        aids.source_stepping = false;
+        aids.pseudo_transient = false;
+        aids.arc_length = false;
+        for (deck, nodes) in [
+            (MILLIOHM_DIVIDER, ["y", "dp", "dn"]),
+            (MILLIOHM_INVERTER, ["out", "dp", "dn"]),
+        ] {
+            let netlist = Netlist::parse(deck).expect("the deck parses");
+            let result = Engine::new(direct_only.clone())
+                .run_dc_op_with_abort(&netlist, &NoAbort)
+                .unwrap_or_else(|error| panic!("{dialect:?}, {deck}: {error}"));
+            for node in nodes {
+                let voltage = result
+                    .try_voltage_named(node)
+                    .unwrap_or_else(|| panic!("missing V({node})"));
+                assert!(
+                    (voltage - half_supply).abs() <= 1e-12 * half_supply,
+                    "{dialect:?}, {deck}: V({node}) = {voltage:.12e}, expected {half_supply:.12e}"
+                );
+            }
+        }
+    }
+}

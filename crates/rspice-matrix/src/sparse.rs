@@ -350,6 +350,15 @@ pub struct StaticMatrix {
     residual_layout: Arc<ResidualLayout>,
     /// CSC values (mutable - updated each iteration)
     values: Vec<Value>,
+    /// Rounding remainder of each stamped sum: `values[i] + values_lo[i]` is
+    /// the exact sum of the values stamped there through [`Self::add`],
+    /// [`Self::try_add`] and [`Self::stamp_direct`]. A milliohm link's 1000 S
+    /// diagonal rounds away the picosiemens beside it; refinement reads them
+    /// back from here. Raw value access zeroes it, and it stays all zero
+    /// while `remainders` is [`RemainderTracking::Off`].
+    values_lo: Vec<Value>,
+    /// Whether stamping keeps `values_lo`.
+    remainders: RemainderTracking,
     /// Identity shared by matrices cloned from this exact sparsity pattern.
     /// Precomputed stamp tokens carry the same identity, preventing a valid
     /// offset from one topology from silently corrupting another topology.
@@ -374,6 +383,7 @@ pub struct StaticMatrix {
     /// Scratch values + RHS retained between residual probes (see
     /// [`StaticMatrix::with_probe_values`]).
     probe_values: Option<Vec<Value>>,
+    probe_values_lo: Option<Vec<Value>>,
     probe_rhs: Option<Vec<Value>>,
     /// Scratch for the A*x product inside residual norms.
     residual_scratch: Vec<Value>,
@@ -425,9 +435,37 @@ enum CertificateMiss {
     ReturnToNewton,
 }
 
+/// When a [`StaticMatrix`] keeps its stamps' rounding remainders. Keeping
+/// them costs every stamp a few operations, so only the matrices whose solves
+/// need them keep them past the first assembly.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RemainderTracking {
+    /// Until the first solve, so a system solved once, a linear operating
+    /// point among them, is refined from its stamps' exact sums.
+    FirstAssembly,
+    /// No solve has needed them since the first assembly.
+    Off,
+    /// A solve found pivots that lost digits to cancellation, or missed its
+    /// backward-error certificate: kept from then on, so the next assembly
+    /// is refined from its stamps' exact sums.
+    Latched,
+}
+
+/// End the first assembly's remainder tracking after a solve that did not
+/// need it, returning the remainders to zero.
+fn end_first_assembly_remainders(remainders: &mut RemainderTracking, values_lo: &mut [Value]) {
+    if *remainders == RemainderTracking::FirstAssembly {
+        *remainders = RemainderTracking::Off;
+        values_lo.fill(0.0);
+    }
+}
+
 struct ProbeValuesGuard<'a> {
     matrix: &'a mut StaticMatrix,
     saved_values: Option<Vec<Value>>,
+    saved_values_lo: Option<Vec<Value>>,
+    /// Whether the matrix kept remainders when the probe began.
+    tracked_remainders: bool,
     rhs: Option<Vec<Value>>,
 }
 
@@ -438,6 +476,15 @@ impl Drop for ProbeValuesGuard<'_> {
         };
         std::mem::swap(&mut self.matrix.values, &mut saved_values);
         self.matrix.probe_values = Some(saved_values);
+        if let Some(mut saved_values_lo) = self.saved_values_lo.take() {
+            std::mem::swap(&mut self.matrix.values_lo, &mut saved_values_lo);
+            self.matrix.probe_values_lo = Some(saved_values_lo);
+            // A probe solve that ended the first assembly's tracking zeroed
+            // only the probe's remainders.
+            if self.tracked_remainders && !self.matrix.tracks_remainders() {
+                self.matrix.values_lo.fill(0.0);
+            }
+        }
         self.matrix.probe_rhs = self.rhs.take();
     }
 }
@@ -1203,6 +1250,129 @@ fn componentwise_backward_error_impl(
     )
 }
 
+/// `b - (A + A_lo)*x`, where `A_lo` holds the rounding remainders of the
+/// stamped sums: the residual of the system as it was stamped, not as its
+/// values were rounded. Each product is split exactly by a fused
+/// multiply-add and the sums are compensated, as in Ogita, Rump and Oishi's
+/// Dot2, so the residual is as accurate as if formed in twice the working
+/// precision. Returns false when a residual is not finite.
+#[allow(clippy::too_many_arguments)]
+fn stamped_system_residual(
+    csc: &SymbolicSparseColMat<usize>,
+    residual_layout: &ResidualLayout,
+    values: &[Value],
+    values_lo: &[Value],
+    solution: &[Value],
+    rhs: &[Value],
+    residual: &mut Vec<Value>,
+    operation: RealSolveOp,
+) -> bool {
+    #[inline]
+    fn subtract_term(sum: &mut Value, tail: &mut Value, value: Value, lo: Value, x: Value) {
+        let product = -(value * x);
+        let product_error = (-value).mul_add(x, -product) - lo * x;
+        let total = *sum + product;
+        let virtual_addend = total - *sum;
+        *tail += (*sum - (total - virtual_addend)) + (product - virtual_addend) + product_error;
+        *sum = total;
+    }
+
+    residual.clear();
+    residual.extend_from_slice(rhs);
+    match operation {
+        RealSolveOp::Normal => {
+            for (row, residual) in residual.iter_mut().enumerate() {
+                let (mut sum, mut tail) = (*residual, 0.0);
+                for position in residual_layout.row_ptr[row]..residual_layout.row_ptr[row + 1] {
+                    let index = residual_layout.csc_idx[position];
+                    let x = solution[residual_layout.col_idx[position]];
+                    subtract_term(&mut sum, &mut tail, values[index], values_lo[index], x);
+                }
+                *residual = sum + tail;
+            }
+        }
+        RealSolveOp::Transpose => {
+            let (col_ptr, row_idx) = (csc.col_ptr(), csc.row_idx());
+            for (col, residual) in residual.iter_mut().enumerate() {
+                let (mut sum, mut tail) = (*residual, 0.0);
+                for index in col_ptr[col]..col_ptr[col + 1] {
+                    let x = solution[row_idx[index]];
+                    subtract_term(&mut sum, &mut tail, values[index], values_lo[index], x);
+                }
+                *residual = sum + tail;
+            }
+        }
+    }
+    residual.iter().all(|value| value.is_finite())
+}
+
+/// Iteratively refine a Circuit-LU solution whose factors lost digits to
+/// cancellation (see [`crate::KluSolver::pivots_lost_digits`]).
+///
+/// Each step solves the same factors against [`stamped_system_residual`].
+/// Refinement stops once the largest componentwise correction reaches the
+/// rounding unit or fails to halve; a step that makes it grow is undone.
+/// Returns the steps kept and the last componentwise correction.
+#[allow(clippy::too_many_arguments)]
+fn refine_cancelled_solution(
+    backend: &mut crate::KluSolver,
+    backend_operation: RealSolveOp,
+    csc: &SymbolicSparseColMat<usize>,
+    residual_layout: &ResidualLayout,
+    values: &[Value],
+    values_lo: &[Value],
+    rhs: &[Value],
+    solution: &mut [Value],
+    residual: &mut Vec<Value>,
+    correction: &mut Vec<Value>,
+    previous: &mut Vec<Value>,
+    operation: RealSolveOp,
+) -> (usize, Value) {
+    const MAX_STEPS: usize = 30;
+    const MIN_IMPROVEMENT_FACTOR: Value = 0.5;
+    let mut last = Value::INFINITY;
+    for step in 0..MAX_STEPS {
+        if !stamped_system_residual(
+            csc,
+            residual_layout,
+            values,
+            values_lo,
+            solution,
+            rhs,
+            residual,
+            operation,
+        ) {
+            return (step, last);
+        }
+        let solved = match backend_operation {
+            RealSolveOp::Normal => backend.solve(residual, correction),
+            RealSolveOp::Transpose => backend.solve_transpose(residual, correction),
+        };
+        if solved.is_err() || !correction.iter().all(|value| value.is_finite()) {
+            return (step, last);
+        }
+        previous.clear();
+        previous.extend_from_slice(solution);
+        let mut relative: Value = 0.0;
+        for (value, &delta) in solution.iter_mut().zip(correction.iter()) {
+            *value += delta;
+            if delta != 0.0 && *value != 0.0 {
+                relative = relative.max((delta / *value).abs());
+            }
+        }
+        if !relative.is_finite() || relative >= last {
+            solution.copy_from_slice(previous);
+            return (step, last);
+        }
+        let improved = relative < MIN_IMPROVEMENT_FACTOR * last;
+        last = relative;
+        if relative <= Value::EPSILON || !improved {
+            return (step + 1, last);
+        }
+    }
+    (MAX_STEPS, last)
+}
+
 /// Fast, rigorously bounded first-pass residual. The ordinary accumulation is
 /// accepted only when its rounding-error upper bound still fits inside the
 /// shared backward-error tolerance; borderline systems fall through to the
@@ -1586,6 +1756,8 @@ impl StaticMatrix {
             csc: self.csc.clone(),
             residual_layout: self.residual_layout.clone(),
             values: vec![0.0; self.values.len()],
+            values_lo: vec![0.0; self.values.len()],
+            remainders: RemainderTracking::FirstAssembly,
             pattern_id: self.pattern_id,
             lu: None,
             klu: None,
@@ -1593,6 +1765,7 @@ impl StaticMatrix {
             klu_oriented_values: Vec::new(),
             solver_options: self.solver_options,
             probe_values: None,
+            probe_values_lo: None,
             probe_rhs: None,
             residual_scratch: Vec::new(),
             residual_gross_scratch: Vec::new(),
@@ -1619,14 +1792,23 @@ impl StaticMatrix {
         let mut scratch = self.probe_values.take().unwrap_or_default();
         scratch.resize(self.values.len(), 0.0);
         scratch.fill(0.0);
+        let mut scratch_lo = self.probe_values_lo.take().unwrap_or_default();
+        scratch_lo.resize(self.values.len(), 0.0);
+        let tracked_remainders = self.tracks_remainders();
+        if tracked_remainders {
+            scratch_lo.fill(0.0);
+        }
         let mut rhs = self.probe_rhs.take().unwrap_or_default();
         rhs.resize(self.nrows, 0.0);
         rhs.fill(0.0);
 
         std::mem::swap(&mut self.values, &mut scratch);
+        std::mem::swap(&mut self.values_lo, &mut scratch_lo);
         let mut guard = ProbeValuesGuard {
             matrix: self,
             saved_values: Some(scratch),
+            saved_values_lo: Some(scratch_lo),
+            tracked_remainders,
             rhs: Some(rhs),
         };
         let rhs = guard
@@ -1750,6 +1932,8 @@ impl StaticMatrix {
             ncols,
             csc,
             residual_layout,
+            values_lo: vec![0.0; values.len()],
+            remainders: RemainderTracking::FirstAssembly,
             values,
             pattern_id: next_pattern_id()?,
             lu: None,
@@ -1758,6 +1942,7 @@ impl StaticMatrix {
             klu_oriented_values: Vec::new(),
             solver_options,
             probe_values: None,
+            probe_values_lo: None,
             probe_rhs: None,
             residual_scratch: Vec::new(),
             residual_gross_scratch: Vec::new(),
@@ -1889,6 +2074,9 @@ impl StaticMatrix {
     #[inline]
     pub fn clear_values(&mut self) {
         self.values.fill(0.0);
+        if self.tracks_remainders() {
+            self.values_lo.fill(0.0);
+        }
     }
 
     /// Add a value at `(row, col)` using a cache-local search of that column.
@@ -1901,7 +2089,7 @@ impl StaticMatrix {
                 return;
             }
         };
-        self.values[idx] += value;
+        self.accumulate(idx, value);
     }
 
     /// Checked add for callers that want an immediate structural error.
@@ -1920,8 +2108,45 @@ impl StaticMatrix {
         if !value.is_finite() || !combined.is_finite() {
             return Err(SolverError::Overflow);
         }
-        self.values[idx] = combined;
+        self.accumulate(idx, value);
         Ok(())
+    }
+
+    /// Whether stamping keeps the stamps' rounding remainders.
+    #[inline]
+    fn tracks_remainders(&self) -> bool {
+        self.remainders != RemainderTracking::Off
+    }
+
+    /// Add one stamp, keeping the sum's rounding remainder while the matrix
+    /// tracks remainders.
+    #[inline]
+    fn accumulate(&mut self, idx: usize, value: Value) {
+        if self.tracks_remainders() {
+            self.accumulate_with_remainder(idx, value);
+        } else {
+            self.values[idx] += value;
+        }
+    }
+
+    /// Add one stamp and its sum's rounding remainder (Knuth's TwoSum). Kept
+    /// out of line so that every inlined stamp site stays as small as a
+    /// plain add.
+    #[inline(never)]
+    fn accumulate_with_remainder(&mut self, idx: usize, value: Value) {
+        let previous = self.values[idx];
+        let sum = previous + value;
+        let virtual_addend = sum - previous;
+        self.values_lo[idx] += (previous - (sum - virtual_addend)) + (value - virtual_addend);
+        self.values[idx] = sum;
+    }
+
+    /// Drop the stamps' rounding remainders before raw value access.
+    #[inline]
+    fn drop_remainders(&mut self) {
+        if self.tracks_remainders() {
+            self.values_lo.fill(0.0);
+        }
     }
 
     #[inline]
@@ -2099,7 +2324,11 @@ impl StaticMatrix {
     /// matrix fails closed.
     #[inline]
     pub fn values_mut_for_pattern(&mut self, token: CscPatternToken) -> Option<&mut [Value]> {
-        (token.0 == self.pattern_id).then_some(self.values.as_mut_slice())
+        if token.0 != self.pattern_id {
+            return None;
+        }
+        self.drop_remainders();
+        Some(self.values.as_mut_slice())
     }
 
     /// Direct write to values array using pre-computed index
@@ -2115,7 +2344,7 @@ impl StaticMatrix {
                 });
             return;
         }
-        self.values[idx.0] += value;
+        self.accumulate(idx.0, value);
     }
 
     /// Whether `row` holds a stored position in any column at or after
@@ -2169,6 +2398,7 @@ impl StaticMatrix {
                 diagonal_index = Some(index);
             }
             self.values[index] = 0.0;
+            self.values_lo[index] = 0.0;
         }
 
         let Some(diagonal_index) = diagonal_index else {
@@ -2189,8 +2419,12 @@ impl StaticMatrix {
     }
 
     /// Get mutable access to values slice (for advanced use)
+    ///
+    /// The caller may overwrite any value, so the stamps' rounding remainders
+    /// are dropped.
     #[inline]
     pub fn values_mut(&mut self) -> &mut [Value] {
+        self.drop_remainders();
         &mut self.values
     }
 
@@ -3034,6 +3268,7 @@ impl StaticMatrix {
             solution.clear();
             return Ok(());
         }
+        end_first_assembly_remainders(&mut self.remainders, &mut self.values_lo);
 
         if self.solver_options.real_backend != RealSolverBackend::Faer {
             match self.try_solve_many_klu_operation_into(
@@ -3569,6 +3804,7 @@ impl StaticMatrix {
                 "Real row denominator floors are supported only for A*x=b solves".to_string(),
             ));
         }
+        end_first_assembly_remainders(&mut self.remainders, &mut self.values_lo);
         self.ensure_lu_workspace()?;
 
         let par = get_global_parallelism();
@@ -3869,6 +4105,8 @@ impl StaticMatrix {
             csc,
             residual_layout,
             values,
+            values_lo,
+            remainders,
             klu,
             klu_factored_values,
             klu_oriented_values,
@@ -3963,6 +4201,32 @@ impl StaticMatrix {
                 Ok(false)
             };
         }
+        // A pivot that lost its digits leaves an error no residual test sees,
+        // and Newton cycles on it or settles on an operating point the stamps
+        // do not describe. The backend-faithful profile returns the backend's
+        // own answer, as Xyce does, and Newton follows Xyce's path with it.
+        if !faithful && backend.pivots_lost_digits(factor_values) {
+            *remainders = RemainderTracking::Latched;
+            let (steps, correction) = refine_cancelled_solution(
+                backend,
+                backend_operation,
+                csc,
+                residual_layout,
+                values,
+                values_lo,
+                rhs,
+                solution,
+                residual_scratch,
+                klu_correction_scratch,
+                residual_gross_scratch,
+                operation,
+            );
+            log::debug!(
+                "Circuit LU refined a solve of {n} unknowns whose pivots lost digits to cancellation: {steps} steps, last componentwise correction {correction:.3e}"
+            );
+        } else {
+            end_first_assembly_remainders(remainders, values_lo);
+        }
         if faithful {
             // The backend's own answer, except that an unknown the system's
             // homogeneous equations prove zero is returned as exact zero, as
@@ -3990,6 +4254,7 @@ impl StaticMatrix {
         if backward_error.accepted() {
             return Ok(true);
         }
+        *remainders = RemainderTracking::Latched;
         let mut candidate_error = backward_error;
 
         // KLU's unscaled factors are substantially faster on the ordinary
