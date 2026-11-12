@@ -8,7 +8,7 @@ use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibilit
 use crate::state::{DesignNoteKind, DesignReviewState, GridStyle, SchematicVisibilityPolicy};
 use crate::ui::widgets::DialogChoice;
 use crate::workbench::app::actions::workspace::{
-    DesignHistoryParts, SchematicRestoreParts, sync_active_schematic,
+    DesignHistoryParts, NavigationParts, SchematicRestoreParts, sync_active_schematic,
 };
 use crate::workbench::app::dialogs::grid_snap_routing::{self, GridSnapRoutingCommitError};
 use crate::workbench::app::dialogs::visibility_options::{self, SchematicVisibilityRecovery};
@@ -20,6 +20,7 @@ use crate::workbench::app::{
 use crate::workbench::app_state::Model;
 use crate::workbench::framework::feature::{CanvasGesturePort, DesignPort};
 use crate::workbench::state::WorkbenchSession;
+use rspice_app_runs::workbench::slots::runs::RunsState;
 use serde::{Deserialize, Serialize};
 
 /// The two Design navigator tabs specified by the workbench mockup.
@@ -279,6 +280,31 @@ impl DesignState {
             routing_mode: &mut self.schematic_routing_mode,
             visibility: &mut self.schematic_visibility,
             symbol: &mut self.symbol,
+        }
+    }
+
+    /// What moving the canvas to another cell view or occurrence reads and
+    /// writes of this state, beside `model`, `wb` and `runs`.
+    pub(crate) fn navigation_parts<'a>(
+        &'a mut self,
+        model: &'a mut Model,
+        wb: &'a mut WorkbenchSession,
+        runs: &'a RunsState,
+    ) -> NavigationParts<'a> {
+        NavigationParts {
+            restore: SchematicRestoreParts {
+                drag: &mut self.interaction.drag,
+                snap: &mut self.schematic_snap,
+                routing_mode: &mut self.schematic_routing_mode,
+                visibility: &mut self.schematic_visibility,
+                symbol: &mut self.symbol,
+            },
+            canvas_hover: &mut self.canvas_hover,
+            canvas_view_center: &mut self.canvas_view_center,
+            occurrence_net_highlights: &mut self.occurrence_net_highlights,
+            model,
+            wb,
+            runs,
         }
     }
 

@@ -7,11 +7,11 @@
 
 mod design_checks;
 mod history;
+mod navigation;
 pub(in crate::workbench) mod symbol_document;
 pub(in crate::workbench) mod symbol_in_place;
 mod waivers;
 
-use super::hierarchy_net_highlight::NetCarry;
 use crate::diagnostics::LogAnchor;
 use crate::state::{
     CellViewRef, ComponentType, Point, RetainedSimulationState, SchematicState, ViewType,
@@ -19,13 +19,15 @@ use crate::state::{
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::interaction_state::DragState;
 use crate::workbench::app_state::{AppState, Model};
-use crate::workbench::state::{WorkbenchSession, WorkspaceDocumentId};
+use crate::workbench::state::WorkbenchSession;
 use rspice_app_runs::workbench::slots::runs::RunsState;
 use symbol_document::{SymbolUiState, project_active_symbol_session};
 
 pub(crate) use history::{
-    DesignHistoryParts, HistoryDirection, HistoryStepParts, take_history_step,
+    DesignHistoryParts, HistoryDirection, HistoryStepParts, commit_pending_inspector_edit,
+    take_history_step,
 };
+pub(crate) use navigation::NavigationParts;
 
 /// What restoring the active schematic from the workspace reads and writes
 /// of the design feature's state: the canvas drag it lets go, the snap and
@@ -483,93 +485,25 @@ impl AppState {
         );
     }
 
+    /// [`NavigationParts::open_workspace_view`] for the session.
     pub(crate) fn open_workspace_view(&mut self, reference: CellViewRef) {
-        if self.model.workspace.content.active_view != reference {
-            if !self.commit_pending_inspector_edit() {
-                return;
-            }
-            self.cancel_schematic_drag();
-        }
-        self.sync_active_schematic_to_workspace();
-        if self.model.workspace.content.active_view == reference {
-            self.workbench
-                .documents
-                .activate(WorkspaceDocumentId::CellView(reference));
-            return;
-        }
-        self.design.canvas_hover = None;
-        self.design.canvas_view_center = None;
-        let view_type = self.model.cell_view_type(&reference);
-        self.model
-            .workspace
-            .activate_view(reference.clone(), view_type);
-        self.workbench
-            .documents
-            .activate(WorkspaceDocumentId::CellView(reference.clone()));
-        self.model.library_manager.select_view(
-            &reference.library,
-            &reference.cell,
-            &reference.view,
-        );
-        let schematic_reference = self.model.workspace.content.active_schematic_reference();
-        self.model.schematic = schematic_for_workspace(
-            &mut self.design.schematic_restore_parts(),
-            &self.model,
-            &schematic_reference,
-        );
-        self.bump_active_schematic_epoch();
-        self.refresh_active_design_check_projection();
-        self.prompt(format!("Opened {}.", reference.display_path()));
+        self.navigation().open_workspace_view(reference);
     }
 
-    /// Descend into a hierarchical instance: open its master and record the
-    /// instance name on the active document's occurrence. Without an instance
-    /// there is no occurrence step to record, so the master opens as its own
-    /// design root rather than inheriting a name it was not reached by.
+    /// [`NavigationParts::descend_into_instance`] for the session.
     pub(crate) fn descend_into_instance(
         &mut self,
         instance: Option<String>,
         reference: CellViewRef,
     ) {
-        if !self.commit_pending_inspector_edit() {
-            return;
-        }
-        self.cancel_schematic_drag();
-        self.sync_active_schematic_to_workspace();
-        let carried = self.leave_occurrence_net_highlight(match &instance {
-            Some(name) => NetCarry::Descend(name.clone()),
-            None => NetCarry::Nothing,
-        });
-        let view_type = self.model.cell_view_type(&reference);
-        match instance {
-            Some(name) => self
-                .model
-                .workspace
-                .descend_into(name, reference.clone(), view_type),
-            None => self
-                .model
-                .workspace
-                .open_as_root(reference.clone(), view_type),
-        }
-        self.model
-            .workspace
-            .content
-            .set_active_read_only_reference(false);
-        self.model.library_manager.select_view(
-            &reference.library,
-            &reference.cell,
-            &reference.view,
-        );
-        let schematic_reference = self.model.workspace.content.active_schematic_reference();
-        self.model.schematic = schematic_for_workspace(
-            &mut self.design.schematic_restore_parts(),
-            &self.model,
-            &schematic_reference,
-        );
-        self.bump_active_schematic_epoch();
-        self.refresh_active_design_check_projection();
-        self.enter_occurrence_net_highlight(carried);
-        self.prompt(format!("Entered {}.", reference.display_path()));
+        self.navigation().descend_into_instance(instance, reference);
+    }
+
+    /// What moving the canvas to another cell view or occurrence reads and
+    /// writes of the session.
+    pub(crate) fn navigation(&mut self) -> NavigationParts<'_> {
+        self.design
+            .navigation_parts(&mut self.model, &mut self.workbench, &self.runs)
     }
 
     /// [`deny_read_only_edit`] for the session's model, prompting on its
@@ -578,44 +512,14 @@ impl AppState {
         deny_read_only_edit(&self.model, &mut self.workbench)
     }
 
-    /// Ascend one hierarchy level (the U gesture / pathbar action).
+    /// [`NavigationParts::ascend_workspace_level`] for the session.
     pub(crate) fn ascend_workspace_level(&mut self) {
-        let depth = self.model.workspace.content.occurrence_depth();
-        if depth >= 2 {
-            self.focus_workspace_breadcrumb(depth - 2);
-        }
+        self.navigation().ascend_workspace_level();
     }
 
+    /// [`NavigationParts::focus_workspace_breadcrumb`] for the session.
     pub(crate) fn focus_workspace_breadcrumb(&mut self, index: usize) {
-        if !self.commit_pending_inspector_edit() {
-            return;
-        }
-        self.cancel_schematic_drag();
-        self.sync_active_schematic_to_workspace();
-        // One level up carries the highlight out through the port; a longer
-        // jump restores what the level held.
-        let carried = self.leave_occurrence_net_highlight(
-            if index + 2 == self.model.workspace.content.occurrence_depth() {
-                NetCarry::Ascend
-            } else {
-                NetCarry::Nothing
-            },
-        );
-        if let Some(reference) = self.model.workspace.focus_breadcrumb(index) {
-            self.model.library_manager.select_view(
-                &reference.library,
-                &reference.cell,
-                &reference.view,
-            );
-            self.model.schematic = schematic_for_workspace(
-                &mut self.design.schematic_restore_parts(),
-                &self.model,
-                &reference,
-            );
-            self.bump_active_schematic_epoch();
-            self.refresh_active_design_check_projection();
-            self.enter_occurrence_net_highlight(carried);
-        }
+        self.navigation().focus_workspace_breadcrumb(index);
     }
 
     /// [`bump_active_schematic_epoch`] for the session.
@@ -631,49 +535,16 @@ impl AppState {
         hierarchy_master_for_component(&self.model, component_id)
     }
 
-    /// Return the exact project-owned Verilog-A source view bound to one
-    /// schematic instance. Merely spelling a view `veriloga` is insufficient:
-    /// the library view, cell-view-owned source bundle, and selected module
-    /// contract must all resolve before navigation is offered.
+    /// [`veriloga_source_for_component`] for the session's model.
     pub(crate) fn veriloga_source_for_component(&self, component_id: u64) -> Option<CellViewRef> {
-        let component = self
-            .model
-            .schematic
-            .document()
-            .components
-            .iter()
-            .find(|component| component.id == component_id)?;
-        if component.kind != ComponentType::CellInstance {
-            return None;
-        }
-        let binding = component.library_cell.as_ref()?;
-        let reference = CellViewRef::new(
-            binding.library.clone(),
-            binding.cell.clone(),
-            binding.view.clone(),
-        );
-        crate::state::workspace::project_veriloga_binding_for_view(
-            &self.model.workspace,
-            &self.model.library_manager,
-            &reference,
-        )
-        .ok()?;
-        Some(reference)
+        veriloga_source_for_component(&self.model, component_id)
     }
 
-    /// Open the exact Verilog-A source owned by a bound schematic instance.
-    /// Resolution happens before any workspace mutation, so stale or partial
-    /// bindings fail closed and leave the active document untouched.
+    /// [`NavigationParts::open_veriloga_source_for_component`] for the
+    /// session.
     pub(crate) fn open_veriloga_source_for_component(&mut self, component_id: u64) -> bool {
-        let Some(reference) = self.veriloga_source_for_component(component_id) else {
-            return false;
-        };
-        // The module is a view of the cell, so it opens as a Design document
-        // beside the schematic it was reached from.
-        self.open_workspace_view(reference);
-        self.workbench
-            .activate(crate::workbench::state::Workspace::Design);
-        true
+        self.navigation()
+            .open_veriloga_source_for_component(component_id)
     }
 
     /// [`selected_hierarchy_master`] for the session's model.
@@ -724,36 +595,12 @@ impl AppState {
     }
 
     pub(crate) fn hierarchical_edit_in_place_enabled(&self) -> bool {
-        self.model
-            .preferences
-            .toggle(crate::workbench::TogglePreference::HierarchicalEditInPlace)
+        hierarchical_edit_in_place_enabled(&self.model)
     }
 
-    /// Open what the one selected instance is an instance of: descend into
-    /// its schematic master, or, for a Verilog-A instance, open its module's
-    /// cell view. A module has no occurrences below it, so that is not a
-    /// descent and records no occurrence step.
+    /// [`NavigationParts::open_selected_instance_master`] for the session.
     pub(crate) fn open_selected_instance_master(&mut self) {
-        if let Some(component_id) = self
-            .model
-            .schematic
-            .session
-            .editor
-            .selection
-            .single_component()
-            && self.open_veriloga_source_for_component(component_id)
-        {
-            return;
-        }
-        let Some((instance_name, reference)) = self.selected_hierarchy_master() else {
-            self.prompt("Select one instance with a resolved schematic master first.");
-            return;
-        };
-        if self.hierarchical_edit_in_place_enabled() {
-            self.descend_into_instance(Some(instance_name), reference);
-        } else {
-            self.open_workspace_view(reference);
-        }
+        self.navigation().open_selected_instance_master();
     }
 
     /// Why the selected instance cannot be shown in the generated deck, or
@@ -795,6 +642,46 @@ impl AppState {
         );
         self.prompt(announced);
     }
+}
+
+/// Whether descending into an instance edits it in place under its parent
+/// rather than opening its master on its own.
+pub(crate) fn hierarchical_edit_in_place_enabled(model: &Model) -> bool {
+    model
+        .preferences
+        .toggle(crate::workbench::TogglePreference::HierarchicalEditInPlace)
+}
+
+/// Return the exact project-owned Verilog-A source view bound to one
+/// schematic instance. Merely spelling a view `veriloga` is insufficient:
+/// the library view, cell-view-owned source bundle, and selected module
+/// contract must all resolve before navigation is offered.
+pub(crate) fn veriloga_source_for_component(
+    model: &Model,
+    component_id: u64,
+) -> Option<CellViewRef> {
+    let component = model
+        .schematic
+        .document()
+        .components
+        .iter()
+        .find(|component| component.id == component_id)?;
+    if component.kind != ComponentType::CellInstance {
+        return None;
+    }
+    let binding = component.library_cell.as_ref()?;
+    let reference = CellViewRef::new(
+        binding.library.clone(),
+        binding.cell.clone(),
+        binding.view.clone(),
+    );
+    crate::state::workspace::project_veriloga_binding_for_view(
+        &model.workspace,
+        &model.library_manager,
+        &reference,
+    )
+    .ok()?;
+    Some(reference)
 }
 
 /// The selected instance's name and the schematic master it descends into.

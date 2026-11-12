@@ -17,7 +17,8 @@ use std::sync::Arc;
 use rspice_design::connectivity::summary::{DesignNet, projection_nets};
 
 use crate::state::SchematicNetHighlighting;
-use crate::workbench::app_state::AppState;
+use crate::workbench::app::actions::workspace::NavigationParts;
+use crate::workbench::app_state::{AppState, Model};
 
 /// What a step between occurrences carries.
 pub(crate) enum NetCarry {
@@ -30,52 +31,17 @@ pub(crate) enum NetCarry {
 }
 
 impl AppState {
-    fn carries_net_highlight(&self) -> bool {
-        self.design.schematic_visibility.net_highlighting
-            == SchematicNetHighlighting::SelectedNetAcrossHierarchy
-    }
-
-    /// The key the active occurrence's highlight is held under.
-    fn occurrence_highlight_key(&self) -> String {
-        let content = &self.model.workspace.content;
-        format!(
-            "{}{}",
-            content.active_occurrence_or_root().root.key(),
-            content.occurrence_path()
-        )
-    }
-
-    /// The nets of `cell_view_key` as the design projection resolves them.
-    fn projected_nets(&self, cell_view_key: &str) -> Arc<Vec<DesignNet>> {
-        match self.model.workspace.design_projection(
-            &self.model.library_manager,
-            &self.model.workspace.content.active_view,
-            &self.model.schematic,
-        ) {
-            Ok(projection) => projection_nets(
-                self.model.library_manager.catalog(),
-                &projection,
-                cell_view_key,
-            ),
-            Err(_) => Arc::new(Vec::new()),
-        }
-    }
-
-    /// Light the active cell view's net named `name`. Returns whether one
-    /// was found.
+    /// [`light_net_named`] for the session's model.
+    #[cfg(test)]
     pub(crate) fn light_net_named(&mut self, name: &str) -> bool {
-        let nets = self.projected_nets(&self.model.workspace.content.active_view.key());
-        let Some(net) = nets.iter().find(|net| net.name.eq_ignore_ascii_case(name)) else {
-            return false;
-        };
-        let wires: HashSet<u64> = net.wire_ids.iter().copied().collect();
-        self.model
-            .schematic
-            .session
-            .editor
-            .net_highlight
-            .highlight_named_wires(net.name.clone(), wires);
-        true
+        light_net_named(&mut self.model, name)
+    }
+}
+
+impl NavigationParts<'_> {
+    fn carries_net_highlight(&self) -> bool {
+        self.restore.visibility.net_highlighting
+            == SchematicNetHighlighting::SelectedNetAcrossHierarchy
     }
 
     /// Before the active occurrence is left: record what it lights, and
@@ -84,23 +50,20 @@ impl AppState {
         if !self.carries_net_highlight() {
             return None;
         }
-        let key = self.occurrence_highlight_key();
+        let key = occurrence_highlight_key(self.model);
         let highlight = &self.model.schematic.session.editor.net_highlight;
         let lit = highlight
             .active
             .then(|| highlight.selected_net_name.clone())
             .flatten();
         match &lit {
-            Some(name) => self
-                .design
-                .occurrence_net_highlights
-                .insert(key, name.clone()),
-            None => self.design.occurrence_net_highlights.remove(&key),
+            Some(name) => self.occurrence_net_highlights.insert(key, name.clone()),
+            None => self.occurrence_net_highlights.remove(&key),
         };
         let lit = lit?;
         match carry {
-            NetCarry::Descend(instance) => self.child_port_net(&lit, &instance),
-            NetCarry::Ascend => self.parent_net(&lit),
+            NetCarry::Descend(instance) => child_port_net(self.model, &lit, &instance),
+            NetCarry::Ascend => parent_net(self.model, &lit),
             NetCarry::Nothing => None,
         }
     }
@@ -112,53 +75,93 @@ impl AppState {
             return;
         }
         self.model.schematic.session.editor.net_highlight.clear();
-        let key = self.occurrence_highlight_key();
-        let Some(name) =
-            carried.or_else(|| self.design.occurrence_net_highlights.get(&key).cloned())
+        let key = occurrence_highlight_key(self.model);
+        let Some(name) = carried.or_else(|| self.occurrence_net_highlights.get(&key).cloned())
         else {
             return;
         };
-        if self.light_net_named(&name) {
-            self.design.occurrence_net_highlights.insert(key, name);
+        if light_net_named(self.model, &name) {
+            self.occurrence_net_highlights.insert(key, name);
         }
     }
+}
 
-    /// The child's port net that `net` drives through `instance`'s terminal.
-    fn child_port_net(&self, net: &str, instance: &str) -> Option<String> {
-        let document = self.model.schematic.document();
-        let component = document
-            .components
-            .iter()
-            .find(|component| component.name.eq_ignore_ascii_case(instance))?;
-        let nets = self.projected_nets(&self.model.workspace.content.active_view.key());
-        nets.iter()
-            .find(|candidate| candidate.name.eq_ignore_ascii_case(net))?
-            .terminals
-            .iter()
-            .find(|terminal| terminal.component_id == component.id)
-            .map(|terminal| terminal.pin.clone())
+/// The key the active occurrence's highlight is held under.
+fn occurrence_highlight_key(model: &Model) -> String {
+    let content = &model.workspace.content;
+    format!(
+        "{}{}",
+        content.active_occurrence_or_root().root.key(),
+        content.occurrence_path()
+    )
+}
+
+/// The nets of `cell_view_key` as the design projection resolves them.
+fn projected_nets(model: &Model, cell_view_key: &str) -> Arc<Vec<DesignNet>> {
+    match model.workspace.design_projection(
+        &model.library_manager,
+        &model.workspace.content.active_view,
+        &model.schematic,
+    ) {
+        Ok(projection) => {
+            projection_nets(model.library_manager.catalog(), &projection, cell_view_key)
+        }
+        Err(_) => Arc::new(Vec::new()),
     }
+}
 
-    /// The parent net the active cell view's port `net` reaches through the
-    /// instance terminal the occurrence entered by.
-    fn parent_net(&self, net: &str) -> Option<String> {
-        let child = self.projected_nets(&self.model.workspace.content.active_view.key());
-        let port = child
-            .iter()
-            .find(|candidate| candidate.name.eq_ignore_ascii_case(net) && candidate.is_port())?;
-        let occurrence = self.model.workspace.content.active_occurrence_or_root();
-        let (last, above) = occurrence.steps.split_last()?;
-        let parent = above.last().map_or(&occurrence.root, |step| &step.master);
-        self.projected_nets(&parent.key())
-            .iter()
-            .find(|candidate| {
-                candidate.terminals.iter().any(|terminal| {
-                    terminal.reference.eq_ignore_ascii_case(&last.instance_name)
-                        && terminal.pin.eq_ignore_ascii_case(&port.name)
-                })
+/// Light the active cell view's net named `name`. Returns whether one was
+/// found.
+pub(crate) fn light_net_named(model: &mut Model, name: &str) -> bool {
+    let nets = projected_nets(model, &model.workspace.content.active_view.key());
+    let Some(net) = nets.iter().find(|net| net.name.eq_ignore_ascii_case(name)) else {
+        return false;
+    };
+    let wires: HashSet<u64> = net.wire_ids.iter().copied().collect();
+    model
+        .schematic
+        .session
+        .editor
+        .net_highlight
+        .highlight_named_wires(net.name.clone(), wires);
+    true
+}
+
+/// The child's port net that `net` drives through `instance`'s terminal.
+fn child_port_net(model: &Model, net: &str, instance: &str) -> Option<String> {
+    let document = model.schematic.document();
+    let component = document
+        .components
+        .iter()
+        .find(|component| component.name.eq_ignore_ascii_case(instance))?;
+    let nets = projected_nets(model, &model.workspace.content.active_view.key());
+    nets.iter()
+        .find(|candidate| candidate.name.eq_ignore_ascii_case(net))?
+        .terminals
+        .iter()
+        .find(|terminal| terminal.component_id == component.id)
+        .map(|terminal| terminal.pin.clone())
+}
+
+/// The parent net the active cell view's port `net` reaches through the
+/// instance terminal the occurrence entered by.
+fn parent_net(model: &Model, net: &str) -> Option<String> {
+    let child = projected_nets(model, &model.workspace.content.active_view.key());
+    let port = child
+        .iter()
+        .find(|candidate| candidate.name.eq_ignore_ascii_case(net) && candidate.is_port())?;
+    let occurrence = model.workspace.content.active_occurrence_or_root();
+    let (last, above) = occurrence.steps.split_last()?;
+    let parent = above.last().map_or(&occurrence.root, |step| &step.master);
+    projected_nets(model, &parent.key())
+        .iter()
+        .find(|candidate| {
+            candidate.terminals.iter().any(|terminal| {
+                terminal.reference.eq_ignore_ascii_case(&last.instance_name)
+                    && terminal.pin.eq_ignore_ascii_case(&port.name)
             })
-            .map(|candidate| candidate.name.clone())
-    }
+        })
+        .map(|candidate| candidate.name.clone())
 }
 
 #[cfg(test)]

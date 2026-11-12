@@ -197,6 +197,7 @@ impl AppState {
     }
 
     // Application half of a model operation; it becomes a request.
+    #[cfg(test)]
     pub(crate) fn refresh_active_design_check_projection(&mut self) {
         let facts = self.slot_facts();
         self.model.refresh_active_design_check_projection(facts);
