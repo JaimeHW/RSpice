@@ -5,7 +5,9 @@
 //! they run here, in release.
 
 use rspice_core::NoAbort;
-use rspice_core::engine::{ContinuationAid, Engine, SimulationConfig, resolve_simulation_config};
+use rspice_core::engine::{
+    ContinuationAid, Engine, SimulationConfig, SpiceDialect, resolve_simulation_config,
+};
 use rspice_core::netlist::Netlist;
 use rspice_core::notice::{EngineNotice, NoticeCollector};
 use std::path::Path;
@@ -32,6 +34,49 @@ const QSPICE_CHIP2_VOLTAGES: [(&str, f64); 4] = [
 /// stepping on this deck the same way and finds the operating point with
 /// true GMIN stepping (`new_gmin`), which steps the device GMIN over the
 /// nodal floor. QSPICE's GMIN stepping finds the same operating point.
+/// CircuitSim90 MOS3 gm17 needs GMIN stepping. ngspice-46's dynamic GMIN
+/// stepping, which holds the device GMIN, resolves its latch to 0 V and 5 V;
+/// stepping the junction GMIN with the nodes leaves it at its 2.4543 V
+/// metastable point, as LTspice does. QSPICE resolves it as ngspice does, but
+/// the default dialect keeps the junction stepping that finds chip2's and
+/// gstep2's operating points.
+///
+/// The deck's `.IC` line is left out. ngspice-46 finds the same operating
+/// point in the same 50 iterations with it and without it: its `.IC` seeds
+/// the node vector (CKTic), which every MOSFET's MODEINITJCT load ignores.
+/// RSpice's ngspice dialect starts the direct Newton from the seed, which
+/// converges there with the latch in the `.IC`'s state.
+#[test]
+fn the_ngspice_dialect_resolves_the_gm17_latch_as_ngspice_does() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/xyce/Netlists/CircuitSim90/MOS3/gm17.cir");
+    let deck: String = std::fs::read_to_string(&path)
+        .expect("gm17 reads")
+        .lines()
+        .filter(|line| !line.trim_start().to_ascii_lowercase().starts_with(".ic"))
+        .map(|line| format!("{line}\n"))
+        .collect();
+    let netlist = Netlist::parse(&deck).expect("gm17 parses");
+    let engine = Engine::new(resolve_simulation_config(
+        &SimulationConfig::default().with_spice_dialect(SpiceDialect::Ngspice),
+        Some(&netlist.options),
+        &Default::default(),
+    ));
+    let result = engine
+        .run_dc_op_with_abort(&netlist, &NoAbort)
+        .expect("gm17 has an operating point");
+    // ngspice-46's operating point.
+    for (node, ngspice) in [("4", 0.0), ("5", 5.0), ("16", 5.0), ("17", 0.0)] {
+        let actual = result
+            .try_voltage_named(node)
+            .unwrap_or_else(|| panic!("missing voltage for {node}"));
+        assert!(
+            (actual - ngspice).abs() <= 1.0e-3,
+            "V({node}) = {actual}, ngspice-46 {ngspice}"
+        );
+    }
+}
+
 #[test]
 fn chip2_operating_point_comes_from_true_gmin_stepping() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))

@@ -34,9 +34,15 @@ fn recorded_aid(
 /// What a GMIN walk steps down (ngspice `cktop.c`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum GminWalk {
-    /// `dynamic_gmin`: a conductance from every node to ground steps down to
-    /// the device GMIN, and one solve then closes on the nodal floor.
+    /// RSpice's nodal walk: a conductance from every node to ground and the
+    /// device junction GMIN step down together to the device GMIN, and one
+    /// solve then closes on the nodal floor.
     Nodal,
+    /// `dynamic_gmin`, which the ngspice dialect runs: the conductance from
+    /// every node to ground (`CKTdiagGmin`) steps down to the device GMIN
+    /// while the device GMIN (`CKTgmin`) holds where the deck sets it, and
+    /// one solve then closes on the nodal floor.
+    Dynamic,
     /// `new_gmin`, ngspice's "true gmin stepping": the device GMIN itself
     /// steps down while the nodal diagonal stays on its floor, so the walk's
     /// last stage is the circuit's own system.
@@ -54,12 +60,13 @@ fn min_gmin_step_decades() -> Value {
 
 impl GminWalk {
     /// The stage after `accepted` on the way down to `walk_end`, and the
-    /// stride that reaches it. `new_gmin` lands on its target with the
-    /// factor that reaches it (`factor = CKTgmin / gtarget`), so a landing
-    /// that fails retries part of the way down.
+    /// stride that reaches it. `new_gmin` and `dynamic_gmin` land on their
+    /// target with the factor that reaches it (`factor = CKTgmin / gtarget`),
+    /// so a landing that fails retries part of the way down.
     fn next_stage(self, accepted: Value, walk_end: Value, stride: Value) -> (Value, Value) {
         let target = Engine::next_descending_gmin(accepted, walk_end, stride);
-        if self == Self::Device && walk_end > 0.0 && target == walk_end && target < accepted {
+        let lands_with_its_factor = matches!(self, Self::Device | Self::Dynamic);
+        if lands_with_its_factor && walk_end > 0.0 && target == walk_end && target < accepted {
             (target, (accepted / walk_end).log10())
         } else {
             (target, stride)
@@ -78,7 +85,7 @@ impl GminWalk {
         }
         if used > 3 * itl2 / 4 {
             let least = match self {
-                Self::Nodal => min_gmin_step_decades(),
+                Self::Nodal | Self::Dynamic => min_gmin_step_decades(),
                 Self::Device => 3.0_f64.log10(),
             };
             stride = (stride * 0.5).max(least);
@@ -1144,9 +1151,22 @@ impl Engine {
                 matrix,
                 initial_guess,
                 abort,
-                GminWalk::Nodal,
+                self.nodal_gmin_walk(),
             ),
         )
+    }
+
+    /// The nodal walk the operating-point ladder runs first: ngspice's own
+    /// `dynamic_gmin` in the ngspice dialect, RSpice's nodal walk elsewhere.
+    /// Holding the device GMIN through the walk cost the default dialect two
+    /// operating points QSPICE finds: CircuitSim90 chip2, whose walk crept
+    /// between 3e-12 and 1.5e-12 S for 55 s, and Xyce's gstep2.
+    fn nodal_gmin_walk(&self) -> GminWalk {
+        if self.config.spice_dialect == crate::engine::SpiceDialect::Ngspice {
+            GminWalk::Dynamic
+        } else {
+            GminWalk::Nodal
+        }
     }
 
     /// ngspice's true GMIN stepping (`new_gmin`, cktop.c), the GMIN stage its
@@ -1208,19 +1228,10 @@ impl Engine {
         // device GMIN and closes on the floor in one solve. `new_gmin` steps
         // CKTgmin down to the device GMIN itself, over the floor.
         let walk_end = match walk {
-            GminWalk::Nodal => device_gmin.max(final_gmin),
+            GminWalk::Nodal | GminWalk::Dynamic => device_gmin.max(final_gmin),
             GminWalk::Device => device_gmin,
         };
-        let stage_at = |gmin: Value| match walk {
-            GminWalk::Nodal => GminStage {
-                nodal: gmin,
-                junction: self.gmin_stage_junction_gmin(gmin),
-            },
-            GminWalk::Device => GminStage {
-                nodal: final_gmin,
-                junction: self.effective_device_junction_gmin(gmin),
-            },
-        };
+        let stage_at = |gmin: Value| self.gmin_walk_stage(walk, gmin, final_gmin);
 
         let size = circuit.matrix_size();
 
@@ -1318,7 +1329,7 @@ impl Engine {
             );
         }
 
-        if walk == GminWalk::Nodal && walk_end > final_gmin {
+        if walk != GminWalk::Device && walk_end > final_gmin {
             // The closing solve takes the direct solve's ITL1 budget, as
             // `NIiter(ckt, iterlim)` does after the walk.
             let (candidate, converged, used_iterations) = self.solve_gmin_nonlinear_corrector(
@@ -1369,13 +1380,33 @@ impl Engine {
         }
     }
 
-    /// Device junction GMIN for a GMIN-stepping stage at nodal `gmin`, in DC
-    /// and in the transient step rescue alike.
+    /// The conductances of a stage of `walk` at `gmin`, over the nodal
+    /// `floor`.
+    fn gmin_walk_stage(&self, walk: GminWalk, gmin: Value, floor: Value) -> GminStage {
+        match walk {
+            GminWalk::Nodal => GminStage {
+                nodal: gmin,
+                junction: self.gmin_stage_junction_gmin(gmin),
+            },
+            // The junctions hold the GMIN the direct solve gives them.
+            GminWalk::Dynamic => GminStage {
+                nodal: gmin,
+                junction: self.gmin_stage_junction_gmin(0.0),
+            },
+            GminWalk::Device => GminStage {
+                nodal: floor,
+                junction: self.effective_device_junction_gmin(gmin),
+            },
+        }
+    }
+
+    /// Device junction GMIN for a stage at nodal `gmin` that steps the
+    /// junctions with the nodes: RSpice's nodal walk in DC and the transient
+    /// step rescue. ngspice's `dynamic_gmin` holds `CKTgmin` instead.
     ///
-    /// Above the floor the junctions carry the stage's gmin, as ngspice's
-    /// stepping moves `CKTgmin` itself. They never go below the value the
-    /// direct solve uses, so the last stage is the circuit's own system even
-    /// where the nodal floor is zero.
+    /// Above the floor the junctions carry the stage's gmin. They never go
+    /// below the value the direct solve uses, so the last stage is the
+    /// circuit's own system even where the nodal floor is zero.
     pub(in crate::engine) fn gmin_stage_junction_gmin(&self, gmin: Value) -> Value {
         self.effective_device_junction_gmin(gmin.max(self.config.convergence_config.gmin_target))
     }
@@ -1548,7 +1579,49 @@ mod source_continuation_policy_tests {
 
 #[cfg(test)]
 mod gmin_walk_schedule_tests {
-    use super::{GminWalk, MAX_GMIN_STEP_DECADES};
+    use super::{Engine, GminStage, GminWalk, MAX_GMIN_STEP_DECADES};
+    use crate::config::SimulationConfig;
+    use crate::engine::SpiceDialect;
+
+    /// The ngspice dialect runs ngspice's `dynamic_gmin`, which steps the
+    /// conductance from every node to ground and holds the device GMIN where
+    /// the deck sets it (cktop.c). The other dialects step the junctions with
+    /// the nodes. `new_gmin` holds the nodes on their floor and steps the
+    /// device GMIN.
+    #[test]
+    fn the_ngspice_dialect_holds_the_device_gmin_through_dynamic_gmin_stepping() {
+        for dialect in [
+            SpiceDialect::BestAvailable,
+            SpiceDialect::Ngspice,
+            SpiceDialect::Xyce,
+        ] {
+            let engine = Engine::new(SimulationConfig::default().with_spice_dialect(dialect));
+            let device = engine.config.convergence_config.junction_gmin_target;
+            assert!(device > 0.0 && device < 1.0e-6);
+            let (walk, junction) = if dialect == SpiceDialect::Ngspice {
+                (GminWalk::Dynamic, device)
+            } else {
+                (GminWalk::Nodal, 1.0e-6)
+            };
+            assert_eq!(engine.nodal_gmin_walk(), walk, "{dialect:?}");
+            assert_eq!(
+                engine.gmin_walk_stage(walk, 1.0e-6, 1.0e-15),
+                GminStage {
+                    nodal: 1.0e-6,
+                    junction,
+                },
+                "{dialect:?}"
+            );
+            assert_eq!(
+                engine.gmin_walk_stage(GminWalk::Device, 1.0e-6, 1.0e-15),
+                GminStage {
+                    nodal: 1.0e-15,
+                    junction: 1.0e-6,
+                },
+                "{dialect:?}"
+            );
+        }
+    }
 
     /// ngspice's `new_gmin` adapts its factor as `dynamic_gmin` does, except
     /// that a slow stage keeps it at 3 or more and a landing on the target
@@ -1571,15 +1644,18 @@ mod gmin_walk_schedule_tests {
         assert_eq!(GminWalk::Device.stride_after_success(1.0, 76, itl2), 0.5);
         assert_eq!(GminWalk::Device.stride_after_success(0.5, 76, itl2), three);
         assert_eq!(GminWalk::Nodal.stride_after_success(0.5, 76, itl2), 0.25);
+        assert_eq!(GminWalk::Dynamic.stride_after_success(0.5, 76, itl2), 0.25);
         // A failure retries with the fourth root until the factor is below
         // 1.00005.
         assert_eq!(GminWalk::stride_after_failure(1.0), Some(0.25));
         assert_eq!(GminWalk::stride_after_failure(1.0e-5), None);
-        // `new_gmin` lands on its target with the factor that reaches it, so
-        // a failed landing retries part of the way down.
-        let (target, stride) = GminWalk::Device.next_stage(3.0e-12, 1.0e-12, 1.0);
-        assert_eq!(target, 1.0e-12);
-        assert!((stride - three).abs() < 1.0e-12, "{stride}");
+        // `new_gmin` and `dynamic_gmin` land on their target with the factor
+        // that reaches it, so a failed landing retries part of the way down.
+        for walk in [GminWalk::Device, GminWalk::Dynamic] {
+            let (target, stride) = walk.next_stage(3.0e-12, 1.0e-12, 1.0);
+            assert_eq!(target, 1.0e-12);
+            assert!((stride - three).abs() < 1.0e-12, "{walk:?} {stride}");
+        }
         assert_eq!(
             GminWalk::Nodal.next_stage(3.0e-12, 1.0e-12, 1.0),
             (1.0e-12, 1.0)
