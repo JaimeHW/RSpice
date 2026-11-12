@@ -791,6 +791,86 @@ fn a_step_point_task_solves_the_transient_of_its_point() {
     }
 }
 
+/// A trial whose design calls `$finish` returns its transient up to the
+/// finish, with the finish named in its checks, as a plain transient does.
+#[test]
+fn a_trial_that_ends_in_finish_returns_its_transient_up_to_the_finish() {
+    use crate::execution_options::TransientMember;
+    use rspice_core::{ModelFinishPoint, ModelFinishTask};
+    use rspice_simulation_contract::mc_draft::McVariationSource;
+    let directory = std::env::temp_dir().join(format!(
+        "rspice-headless-trial-finish-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&directory).unwrap();
+    std::fs::write(
+        directory.join("ender.va"),
+        "`timescale 1ns/1ns\nmodule ender(p, n);\n  inout p, n;\n  electrical p, n;\n  \
+         initial begin\n    #5 $finish;\n  end\n  analog I(p, n) <+ V(p, n) / 1000.0;\nendmodule\n",
+    )
+    .unwrap();
+    let path = directory.join("trial.cir");
+    let source = "Trial finish\n.param r={agauss(1k,100,1)}\nV1 a 0 1\nR1 a p {r}\nx1 p 0 ender\n\
+                  .va \"ender.va\" ender\n.end\n";
+    let sealed = crate::netlist_preparation::seal_deck_hdl_sources(
+        source,
+        Some(&path),
+        &crate::netlist_preparation::IncludeSearchChain::default(),
+    )
+    .unwrap();
+    let mut trial = task(
+        AnalysisSpec::Transient {
+            stop_time: 20e-9,
+            step_time: 1e-9,
+            start_time: 0.0,
+            max_timestep: None,
+            uic: false,
+        },
+        ".tran 1n 20n\n.mc 2 seed 3".into(),
+    );
+    trial.analysis.spec_options.member = Some(TransientMember::MonteCarloTrial {
+        index: 1,
+        variation_source: McVariationSource::DeckStatistics,
+    });
+    let mut input = HeadlessRunInput::new(&sealed.source, &path, vec![trial]);
+    input.veriloga_runtimes = sealed.runtimes;
+    let results = execute(prepare_headless_run(input, &NoAbort).unwrap());
+    let _ = std::fs::remove_dir_all(&directory);
+    let SimulationResult::Transient {
+        time,
+        waveforms,
+        checks,
+        ..
+    } = &results[0]
+    else {
+        panic!("a trial is solved as a transient, got {:?}", results[0])
+    };
+    let finish = checks
+        .finish
+        .as_ref()
+        .expect("the trial's checks name the task that ended it");
+    assert_eq!(finish.task, ModelFinishTask::Finish);
+    assert_eq!(finish.instance, "x1");
+    let ModelFinishPoint::Transient { time: at } = finish.point else {
+        panic!("a transient finish: {finish:?}")
+    };
+    assert!((at - 5e-9).abs() < 1e-18, "finished at {at:e}");
+    // The waveform runs to the finish and stops there.
+    let last = *time.last().unwrap();
+    assert!(time.len() > 2, "{} points", time.len());
+    assert!((last - at).abs() < 1e-15, "the waveform ends at {last:e}");
+    let p = &waveforms
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("p"))
+        .unwrap()
+        .1
+        .y_values;
+    assert_eq!(p.len(), time.len());
+    // The trial drew its own resistance: the divider is off its nominal half.
+    let end = *p.last().unwrap();
+    assert!((end - 0.5).abs() > 1e-6, "V(p) {end}");
+}
+
 #[test]
 fn a_member_outside_its_study_or_sweep_is_refused_by_name() {
     use crate::execution_options::TransientMember;
