@@ -5203,6 +5203,71 @@ impl VerilogADevice {
             .collect()
     }
 
+    /// Every analog operator with state the analog body uses, and whether it
+    /// reads `$abstime`, by the name the module writes: `"ddt"`, `"idt"`,
+    /// `"idtmod"`, `"transition"`, `"slew"`, `"absdelay"`, `"laplace_*"`,
+    /// `"zi_*"`, `"cross"`, `"last_crossing"`, `"above"`, `"timer"` and
+    /// `"$abstime"`, each once, in that order.
+    ///
+    /// A periodic analysis decides from this which operators it can carry.
+    /// Like [`Self::non_rational_analog_operators`], the answer is read off the
+    /// bytecode and is identical on every route.
+    pub fn analog_operator_inventory(&self) -> Vec<&'static str> {
+        use crate::canonical_ir::state::CanonicalStateOperator as Operator;
+
+        const NAMES: [&str; 13] = [
+            "ddt",
+            "idt",
+            "idtmod",
+            "transition",
+            "slew",
+            "absdelay",
+            "laplace_*",
+            "zi_*",
+            "cross",
+            "last_crossing",
+            "above",
+            "timer",
+            "$abstime",
+        ];
+        const OPERATORS: [(Operator, usize); 11] = [
+            (Operator::Ddt, 0),
+            (Operator::Idt, 1),
+            (Operator::IdtMod, 2),
+            (Operator::Transition, 3),
+            (Operator::Slew, 4),
+            (Operator::Absdelay, 5),
+            (Operator::Laplace, 6),
+            (Operator::Zi, 7),
+            (Operator::Cross, 8),
+            (Operator::Above, 10),
+            (Operator::Timer, 11),
+        ];
+
+        let mut seen = [false; NAMES.len()];
+        Self::for_each_bytecode_program(&self.model, false, &mut |program| {
+            for instruction in &program.instructions {
+                match instruction {
+                    Instruction::LastCrossingState(_) => seen[9] = true,
+                    Instruction::PushTime => seen[12] = true,
+                    _ => {
+                        for (operator, index) in OPERATORS {
+                            if operator.bytecode_slot(instruction).is_some() {
+                                seen[index] = true;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        NAMES
+            .into_iter()
+            .zip(seen)
+            .filter(|(_, present)| *present)
+            .map(|(name, _)| name)
+            .collect()
+    }
+
     /// Which of `operators` the analog body's bytecode uses.
     fn analog_operators_present<const N: usize>(
         &self,
