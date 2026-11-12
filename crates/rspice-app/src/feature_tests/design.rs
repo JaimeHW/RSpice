@@ -165,6 +165,19 @@ fn find_and_replace_opens_and_draws_in_the_frame() {
     assert!(app.state.design.find_replace.open);
 }
 
+/// Find and replace waits for a dialog that holds the workbench: with About
+/// open the command leaves the form shut, and once About closes it opens.
+#[test]
+fn find_and_replace_waits_for_an_open_dialog() {
+    let mut app = design_app();
+    app.state.shell.about = true;
+    app.execute_command_key(Command::FindReplace.key());
+    assert!(!app.state.design.find_replace.open);
+    app.state.shell.about = false;
+    app.execute_command_key(Command::FindReplace.key());
+    assert!(app.state.design.find_replace.open);
+}
+
 #[test]
 fn shared_properties_open_and_draw_in_the_frame() {
     let mut app = design_app();

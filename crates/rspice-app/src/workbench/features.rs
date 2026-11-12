@@ -119,6 +119,13 @@ pub(crate) fn cx_with_menu_answers<F: Registered>(
     F::cx(app).with_foreign_availability(answers)
 }
 
+/// The context `F`'s command runs in, as [`cx`] lends it, holding whether
+/// anything the dialog gate counts is open, taken as the run starts.
+fn command_cx<F: Registered>(app: &mut RSpiceApp) -> Cx<'_, F> {
+    let dialog_modal = app.state.dialog_modal_open();
+    F::cx(app).with_dialog_modal(dialog_modal)
+}
+
 /// Carry out `routed` where `F` takes it here, and say whether it did. Its
 /// context holds whether an application-modal dialog is open, taken once
 /// `F` has taken the command, as the shell's own arm asked it at that point.
@@ -427,7 +434,7 @@ macro_rules! features {
         pub(super) fn execute(app: &mut RSpiceApp, key: CommandKey) {
             $(
                 if let Some(command) = <$feature as Registered>::registry().command(key) {
-                    command.execute(&mut cx::<$feature>(app));
+                    command.execute(&mut command_cx::<$feature>(app));
                 }
             )else+
         }
@@ -745,6 +752,20 @@ mod tests {
             assert_eq!(app.state.application_modal_open(), open);
             assert!(route_part(&mut app, &PROBE));
             assert_eq!(SEEN.get(), Some(open), "Preferences open: {open}");
+        }
+    }
+
+    /// A feature command's context reads whether anything the dialog gate
+    /// counts is open as the shell lends it for the run: open while About
+    /// is, and closed once it is not.
+    #[test]
+    fn a_feature_command_reads_whether_a_dialog_is_open() {
+        let mut app = RSpiceApp::test_instance();
+        for open in [true, false] {
+            app.state.shell.about = open;
+            assert_eq!(app.state.dialog_modal_open(), open);
+            let cx = command_cx::<DesignFeature>(&mut app);
+            assert_eq!(cx.dialog_modal_open(), open, "About open: {open}");
         }
     }
 

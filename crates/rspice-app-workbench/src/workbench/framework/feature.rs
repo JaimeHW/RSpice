@@ -457,6 +457,9 @@ pub struct Cx<'a, F: Feature> {
     /// Whether an application-modal dialog was open, where the shell lent
     /// the context for a routed command's run.
     application_modal: Option<bool>,
+    /// Whether anything the dialog gate counts was open, where the shell
+    /// lent the context for a feature command's run.
+    dialog_modal: Option<bool>,
 }
 
 impl<'a, F: Feature> Cx<'a, F> {
@@ -494,6 +497,7 @@ impl<'a, F: Feature> Cx<'a, F> {
             commands,
             foreign: None,
             application_modal: None,
+            dialog_modal: None,
         }
     }
 
@@ -510,6 +514,14 @@ impl<'a, F: Feature> Cx<'a, F> {
     #[must_use]
     pub fn with_application_modal(mut self, open: bool) -> Self {
         self.application_modal = Some(open);
+        self
+    }
+
+    /// The context holding `open`, whether anything the dialog gate counts
+    /// was open when the shell lent it for a feature command's run.
+    #[must_use]
+    pub fn with_dialog_modal(mut self, open: bool) -> Self {
+        self.dialog_modal = Some(open);
         self
     }
 
@@ -573,6 +585,20 @@ impl<'a, F: Feature> Cx<'a, F> {
             "the shell lent this context without the application-modal state"
         );
         self.application_modal.unwrap_or(true)
+    }
+
+    /// Whether anything the dialog gate counts was open when the shell lent
+    /// this context, which keeps a form opened through it shut. The shell
+    /// lends a feature command's run the context with it: reading it from a
+    /// context lent without it is a fault in the call that reads it, not a
+    /// no, and a release build answers that one is open, the answer that
+    /// keeps the form shut.
+    pub fn dialog_modal_open(&self) -> bool {
+        debug_assert!(
+            self.dialog_modal.is_some(),
+            "the shell lent this context without the dialog-modal state"
+        );
+        self.dialog_modal.unwrap_or(true)
     }
 }
 
