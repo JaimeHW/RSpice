@@ -80,6 +80,7 @@
 //! No `egui::Context` and no application outlive the pass that made them, and
 //! every press still starts from a fixture nothing else has touched.
 
+use super::workflow_dialogs;
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
 
@@ -87,7 +88,7 @@ use egui::accesskit::{Action, ActionRequest, Node, NodeId, Role, TreeId};
 use egui::{Rect, vec2};
 
 use super::accessibility::{studio_overlays, studio_route, studio_routes};
-use crate::workbench::surfaces::simulate::{show_on_stage, workflow_dialog_tests};
+use crate::workbench::surfaces::simulate::show_on_stage;
 use crate::workbench::{AppState, RSpiceApp};
 
 /// The surface size every sweep lays out at.
@@ -230,7 +231,7 @@ impl Sweep {
                 // the frame, not by the surface. A sweep that ran only the
                 // surface would watch every control that opens one of them
                 // produce nothing at all.
-                workflow_dialog_tests::show_workflow_dialogs_on_stage(ctx, app);
+                workflow_dialogs::show_workflow_dialogs_on_stage(ctx, app);
             },
         );
         let platform = &output.platform_output;

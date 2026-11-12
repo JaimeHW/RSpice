@@ -10,11 +10,16 @@
 use crate::simulation::plan::{AnalysisDraft, AnalysisInstance, AnalysisKind};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
+use crate::workbench::surfaces::simulate::page_save::capture_workload;
+use crate::workbench::surfaces::simulate::participation::PlanParticipation;
+use crate::workbench::surfaces::simulate::workload::{PlanWorkload, instance_task_rate};
 use rspice_design::drc::DrcResult;
 use rspice_simulation_contract::analysis_run_at::AnalysisRunAt;
 use rspice_simulation_contract::run_set::{NETLIST_SUPPLY_SOURCE_PREFIX, RunSetDimensionKind};
 
-use super::page_runset::{exact_plan_task_count, worst_point_task_cost};
+use crate::workbench::surfaces::simulate::page_runset::{
+    exact_plan_task_count, worst_point_task_cost,
+};
 
 /// An app whose design is checked, whose technology is attached, and whose
 /// plan holds exactly the requested analyses.
@@ -164,9 +169,8 @@ fn the_per_point_task_cells_price_participation_and_rate() {
     // other point costs one.
     scope_to_the_nominal_point(&mut app.state, AnalysisKind::Pss);
 
-    let participation = super::participation::PlanParticipation::resolve(&app.state.model);
-    let workload =
-        super::workload::PlanWorkload::resolve(&app.state.model).expect("the plan prices");
+    let participation = PlanParticipation::resolve(&app.state.model);
+    let workload = PlanWorkload::resolve(&app.state.model).expect("the plan prices");
     let nominal = participation
         .nominal_key
         .clone()
@@ -253,7 +257,7 @@ fn the_save_page_engine_ceiling_counts_the_queue_preparation_mints() {
     let points = enable_only_the_temperature_axis(&mut app.state);
     assert!(points > 1, "the fixture space must actually multiply");
 
-    let (workload, notice) = super::page_save::capture_workload(&app.state.model);
+    let (workload, notice) = capture_workload(&app.state.model);
     assert!(
         notice.is_none(),
         "this plan's workload resolves exactly: {notice:?}"
@@ -585,8 +589,8 @@ fn the_worst_point_is_priced_at_a_point_the_plan_actually_has() {
     scope_to_points(&mut app.state, AnalysisKind::OperatingPoint, &[0]);
     scope_to_points(&mut app.state, AnalysisKind::Pss, &[1, 2]);
 
-    let participation = super::participation::PlanParticipation::resolve(&app.state.model);
-    let workload = super::workload::PlanWorkload::resolve_with(&app.state.model, &participation)
+    let participation = PlanParticipation::resolve(&app.state.model);
+    let workload = PlanWorkload::resolve_with(&app.state.model, &participation)
         .expect("the split plan prices");
     let per_point: Vec<usize> = participation
         .point_keys
@@ -601,7 +605,7 @@ fn the_worst_point_is_priced_at_a_point_the_plan_actually_has() {
 
     let mut rate_sum = 0usize;
     for instance in app.state.model.sim_setup.enabled_analysis_instances() {
-        rate_sum += super::workload::instance_task_rate(&app.state.model, instance.draft())
+        rate_sum += instance_task_rate(&app.state.model, instance.draft())
             .expect("every enabled instance has a rate");
     }
     assert!(

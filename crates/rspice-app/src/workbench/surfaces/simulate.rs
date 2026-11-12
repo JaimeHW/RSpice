@@ -22,7 +22,7 @@ pub(crate) mod plan_manager;
 pub(crate) mod transient_checkpoint_exchange;
 pub(crate) mod variable_import;
 pub(crate) mod workflows;
-mod workload;
+pub(crate) mod workload;
 
 use catalog::*;
 use lifecycle::*;
@@ -404,10 +404,7 @@ impl SimulateFeature {
     /// took every keyboard shortcut in the application with it and left no
     /// painted modal to press Escape on. A host that runs once a frame wherever
     /// the reader is standing cannot arm an overlay that no pass draws.
-    pub(in crate::workbench) fn render_workflow_dialogs(
-        cx: &mut Cx<'_, Self>,
-        ctx: &egui::Context,
-    ) {
+    pub(crate) fn render_workflow_dialogs(cx: &mut Cx<'_, Self>, ctx: &egui::Context) {
         checkpoint_exchange::poll(ctx, cx);
         transient_checkpoint_exchange::poll(ctx, cx);
         simulation_workflow_dialog(ctx, cx);
@@ -2457,12 +2454,6 @@ pub(crate) fn show_on_stage(ui: &mut Ui, app: &mut RSpiceApp) {
 #[cfg(test)]
 pub(crate) mod page_raster;
 #[cfg(test)]
-mod page_runset_parity_tests;
-#[cfg(test)]
 pub(crate) mod page_tests;
 #[cfg(test)]
 mod tests;
-#[cfg(test)]
-pub(crate) mod workflow_dialog_tests;
-#[cfg(test)]
-mod workload_coherence_tests;

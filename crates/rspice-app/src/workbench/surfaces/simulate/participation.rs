@@ -30,7 +30,7 @@ use rspice_simulation_contract::analysis_run_at::AnalysisRunAt;
 use rspice_simulation_contract::run_set::{self, RunSetPoint};
 
 /// One enabled analysis instance and the points it visits.
-pub(super) struct InstanceParticipation {
+pub(crate) struct InstanceParticipation {
     pub(super) id: AnalysisInstanceId,
     /// What the plan calls this instance. Carried rather than derived from the
     /// kind, because two analyses of one kind narrowed to different points are
@@ -59,19 +59,19 @@ impl InstanceParticipation {
 }
 
 /// The whole plan's participation against the working run set.
-pub(super) struct PlanParticipation {
+pub(crate) struct PlanParticipation {
     /// Every point the run set resolves, in declared order. Empty when the
     /// declaration does not expand exactly, which is a refusal the Run Set page
     /// already reports on its own terms.
-    pub(super) point_keys: Vec<String>,
+    pub(crate) point_keys: Vec<String>,
     /// The reference point's identity, when the declared space contains one.
-    pub(super) nominal_key: Option<String>,
+    pub(crate) nominal_key: Option<String>,
     /// Each point paired with the process corner it solves, so a scope written
     /// in corner names can be resolved to identities. A space with no process
     /// axis puts every point on the run's reference corner, which is what it
     /// actually solves.
     pub(super) corner_keys: Vec<(String, String)>,
-    pub(super) instances: Vec<InstanceParticipation>,
+    pub(crate) instances: Vec<InstanceParticipation>,
     /// Whether the run set declares any axis at all. With none, every analysis
     /// runs once and participation is not a question the page can ask.
     pub(super) has_axes: bool,
@@ -83,7 +83,7 @@ impl PlanParticipation {
     /// Takes the application state rather than the application: nothing here
     /// reads a frame, a controller or a document, and a resolver that took the
     /// whole app could not be called from a place holding only the state.
-    pub(super) fn resolve(model: &Model) -> Self {
+    pub(crate) fn resolve(model: &Model) -> Self {
         let points: Vec<RunSetPoint<'_>> =
             run_set::resolve(&model.sim_setup.run_set).unwrap_or_default();
         Self::from_points(model, &points)
@@ -174,7 +174,7 @@ impl PlanParticipation {
     ///
     /// A run set with no axes runs everything once, so its single point holds
     /// every instance.
-    pub(super) fn instance_visits(&self, id: AnalysisInstanceId, key: &str) -> bool {
+    pub(crate) fn instance_visits(&self, id: AnalysisInstanceId, key: &str) -> bool {
         if !self.has_axes {
             return true;
         }
@@ -195,7 +195,7 @@ impl PlanParticipation {
     /// Named rather than only counted: a row that says one analysis was refused
     /// without saying which tells the reader there is a problem and not where —
     /// the same rule [`Self::analyses_absent_at`] follows.
-    pub(super) fn refused(&self) -> Vec<&str> {
+    pub(crate) fn refused(&self) -> Vec<&str> {
         self.instances
             .iter()
             .filter(|entry| entry.refusal.is_some())
@@ -208,7 +208,7 @@ impl PlanParticipation {
     /// Used by the point table, where the count is the cell and the names are
     /// the hover: a row that says "4/6" without naming the two that are absent
     /// tells the reader there is a problem and not where.
-    pub(super) fn analyses_at(&self, key: &str) -> usize {
+    pub(crate) fn analyses_at(&self, key: &str) -> usize {
         self.instances
             .iter()
             .filter(|entry| entry.refusal.is_none() && entry.keys.iter().any(|held| held == key))
@@ -784,7 +784,7 @@ pub(super) fn participation_row(
 // ------------------------------------------- reconciling a run-set edit
 
 /// One instance's selection, narrowed to the points an edited run set kept.
-pub(super) struct PendingPrune {
+pub(crate) struct PendingPrune {
     pub(super) id: AnalysisInstanceId,
     /// What the selection becomes.
     pub(super) kept: AnalysisRunAt,
@@ -839,7 +839,7 @@ fn dropped_point_names(state: &run_set::RunSetState, keys: &[String]) -> String 
     }
 }
 
-pub(super) fn reconcile_selections(model: &Model) -> Result<Vec<PendingPrune>, String> {
+pub(crate) fn reconcile_selections(model: &Model) -> Result<Vec<PendingPrune>, String> {
     let Some(points) = run_set::resolve(&model.sim_setup.run_set) else {
         // A space that does not expand exactly names no points, so there is
         // nothing to judge a selection against. The Run Set page already
@@ -954,54 +954,5 @@ mod tests {
         let note = point_selection_note(4, 15, None);
         assert!(note.starts_with("4 of 15 points selected."), "{note}");
         assert!(!note.contains("task"), "{note}");
-    }
-
-    /// A refusal names the dropped points the way the point table names them.
-    ///
-    /// It used to print their keys — `dimension-cload-value-001+…` — which is
-    /// the studio's internal identity for a row the operator is looking at on
-    /// the same page under a different name. A refusal has to name the object
-    /// it is about in the spelling the reader can find.
-    #[test]
-    fn a_refusal_names_dropped_points_the_way_the_table_does() {
-        use crate::simulation::plan::AnalysisKind;
-        use rspice_simulation_contract::run_set::RunSetDimensionKind;
-
-        use super::super::page_runset_parity_tests::{app_with, scope_to_points};
-        use super::{reconcile_selections, run_set};
-
-        let mut app = app_with(&[AnalysisKind::OperatingPoint]);
-        for dimension in &mut app.state.model.sim_setup.run_set.dimensions {
-            dimension.enabled = matches!(
-                dimension.kind,
-                RunSetDimensionKind::Temperature | RunSetDimensionKind::ProcessSection
-            );
-        }
-        let keys = scope_to_points(&mut app.state, AnalysisKind::OperatingPoint, &[0]);
-        let key = keys.first().expect("one point is selected").clone();
-        let label = run_set::point_key_label(&app.state.model.sim_setup.run_set, &key);
-        assert_ne!(label, key, "the fixture's point has a name of its own");
-
-        // Switch one axis off. Every key the selection holds names a point of
-        // the two-axis space and none of them survives, while every value it
-        // was built from is still declared — which is exactly the edit whose
-        // refusal was unreadable.
-        for dimension in &mut app.state.model.sim_setup.run_set.dimensions {
-            if dimension.kind == RunSetDimensionKind::ProcessSection {
-                dimension.enabled = false;
-            }
-        }
-
-        let Err(refusal) = reconcile_selections(&app.state.model) else {
-            panic!("dropping every point an instance is scoped to is a refusal");
-        };
-        assert!(
-            refusal.contains(&label),
-            "the refusal names the point as {label:?}; it said {refusal:?}"
-        );
-        assert!(
-            !refusal.contains(&key),
-            "the refusal must not print the point key {key:?}: {refusal:?}"
-        );
     }
 }

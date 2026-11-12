@@ -2,9 +2,9 @@
 //! nothing outside the dialog surface, and every refused row is inside the
 //! dialog that refuses it.
 
+use super::workflow_dialogs;
 use crate::workbench::RSpiceApp;
 use crate::workbench::surfaces::simulate::variable_import::tests::{open, plan};
-use crate::workbench::surfaces::simulate::workflow_dialog_tests;
 
 /// A refusal sentence is bounded by the pane it is printed in.
 ///
@@ -57,7 +57,7 @@ fn the_import_table_prints_nothing_outside_the_dialog_surface() {
                     )),
                     ..Default::default()
                 },
-                |ctx| workflow_dialog_tests::show_workflow_dialogs_on_stage(ctx, &mut app),
+                |ctx| workflow_dialogs::show_workflow_dialogs_on_stage(ctx, &mut app),
             )
         };
         // A content-height surface lays out against the height and width
@@ -148,7 +148,7 @@ fn every_refused_row_is_inside_the_dialog_that_refuses_it() {
                     )),
                     ..Default::default()
                 },
-                |ctx| workflow_dialog_tests::show_workflow_dialogs_on_stage(ctx, &mut app),
+                |ctx| workflow_dialogs::show_workflow_dialogs_on_stage(ctx, &mut app),
             )
         };
         let _ = run();

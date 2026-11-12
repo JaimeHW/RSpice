@@ -16,14 +16,19 @@
 
 use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
 use crate::workbench::RSpiceApp;
+use crate::workbench::surfaces::simulate::participation::PlanParticipation;
 use rspice_simulation_contract::analysis_run_at::AnalysisRunAt;
 use rspice_simulation_contract::run_set;
 
-use super::page_runset::{exact_plan_task_count, plan_run_set_validation};
-use super::page_runset_parity_tests::{
+use super::page_runset_parity::{
     app_with, drive_pss_from_the_fixture_supply, enable_only_the_temperature_axis, instance_of,
 };
-use super::workload::{PlanWorkload, modelled_duration};
+use crate::workbench::surfaces::simulate::page_runset::{
+    exact_plan_task_count, plan_run_set_validation, point_table_note,
+};
+use crate::workbench::surfaces::simulate::workload::{
+    PlanWorkload, composition_refusals, modelled_duration,
+};
 
 #[test]
 fn the_task_rate_rows_add_up_to_the_number_the_budget_is_checked_against() {
@@ -215,9 +220,7 @@ fn a_refused_composition_is_not_priced_at_all() {
     );
 
     assert!(
-        super::workload::composition_refusals(&validation)
-            .next()
-            .is_some(),
+        composition_refusals(&validation).next().is_some(),
         "the task-rate card reads that refusal and states it instead of a total"
     );
 }
@@ -424,7 +427,7 @@ fn a_refused_instance_is_stated_as_refused_rather_than_counted_two_ways() {
         .set_run_at(op, AnalysisRunAt::NominalPoint)
         .expect("the plan stores the participation it cannot yet resolve");
 
-    let participation = super::participation::PlanParticipation::resolve(&app.state.model);
+    let participation = PlanParticipation::resolve(&app.state.model);
     let workload =
         PlanWorkload::resolve_with(&app.state.model, &participation).expect("the fixture prices");
     let refused = participation.refused();
@@ -473,7 +476,7 @@ fn a_refused_instance_is_stated_as_refused_rather_than_counted_two_ways() {
     assert_eq!(op_row.points, points);
 
     // The note under the table is where the two are reconciled.
-    let note = super::page_runset::point_table_note(points, points, refused.len())
+    let note = point_table_note(points, points, refused.len())
         .expect("a refused participation is the one thing the rows cannot show");
     assert!(
         note.contains("refused") && note.contains("whole matrix"),

@@ -5,12 +5,13 @@
 //! laid out by two separate measurements have to agree about the space
 //! between them, and only their coordinates answer that.
 
+use super::workflow_dialogs;
 use crate::workbench::surfaces::simulate::catalog::ANALYSIS_CATALOG_COLUMN_MIN_WIDTH;
 use crate::workbench::surfaces::simulate::lifecycle::{
     analysis_catalog_group, insert_analysis_instance,
 };
 use crate::workbench::surfaces::simulate::{
-    ANALYSIS_CATEGORY_ORDER, analysis_split_widths, show_on_stage, workflow_dialog_tests,
+    ANALYSIS_CATEGORY_ORDER, analysis_split_widths, show_on_stage,
 };
 use egui::{Rect, vec2};
 
@@ -373,7 +374,7 @@ fn analysis_catalogue_code_rows(viewport_width: f32) -> Vec<Vec<PaintedLine>> {
                 )),
                 ..egui::RawInput::default()
             },
-            |ctx| workflow_dialog_tests::show_workflow_dialogs_on_stage(ctx, &mut app),
+            |ctx| workflow_dialogs::show_workflow_dialogs_on_stage(ctx, &mut app),
         )
     };
     // A content-height surface lays out against its previous measurement.

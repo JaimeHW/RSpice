@@ -18,8 +18,9 @@
 //! *and* a receipt recording it, because the two together are what
 //! `apply_analysis_action` is for.
 
+use super::workflow_dialogs;
 use crate::workbench::surfaces::simulate::catalog::ANALYSIS_CATALOG_SEARCH_LABEL;
-use crate::workbench::surfaces::simulate::{show_on_stage, workflow_dialog_tests};
+use crate::workbench::surfaces::simulate::show_on_stage;
 use egui::vec2;
 
 use crate::state::SimulationPage;
@@ -147,7 +148,7 @@ impl Studio {
                     // actually drawn. A harness that ran only the surface could
                     // press the control that opens one and see nothing appear,
                     // which is the defect these cases exist to hold shut.
-                    workflow_dialog_tests::show_workflow_dialogs_on_stage(ctx, app);
+                    workflow_dialogs::show_workflow_dialogs_on_stage(ctx, app);
                 }
             },
         );

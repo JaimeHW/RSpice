@@ -1811,7 +1811,7 @@ fn point_row(ui: &mut Ui, row: PointRow<'_>, action: &mut Option<RunSetAction>) 
 /// the plan total is still priced at the whole matrix, so the two numbers do
 /// not add up on purpose — and a table whose arithmetic does not close without
 /// saying why is a table a reader has to distrust.
-pub(super) fn point_table_note(composed: usize, drawn: usize, refused: usize) -> Option<String> {
+pub(crate) fn point_table_note(composed: usize, drawn: usize, refused: usize) -> Option<String> {
     let mut note = String::new();
     if composed > drawn {
         note.push_str(&format!(
@@ -1953,7 +1953,7 @@ fn enabled_analysis_kinds(model: &Model) -> Vec<AnalysisKind> {
 /// same sum read at two altitudes rather than two derivations of one queue: a
 /// table whose rows did not add up to the number the budget is checked against
 /// would be the more convincing of the two and the wrong one.
-pub(super) fn exact_plan_task_count(model: &Model) -> Result<Option<usize>, String> {
+pub(crate) fn exact_plan_task_count(model: &Model) -> Result<Option<usize>, String> {
     super::workload::PlanWorkload::resolve(model)?
         .total_tasks()
         .map(Some)
@@ -1980,7 +1980,7 @@ pub(super) fn exact_plan_task_count(model: &Model) -> Result<Option<usize>, Stri
 /// the two resolutions done for a caller that is not drawing a frame. Not a
 /// second answer — a second way of asking for the one below.
 #[cfg(test)]
-pub(super) fn worst_point_task_cost(model: &Model) -> Option<usize> {
+pub(crate) fn worst_point_task_cost(model: &Model) -> Option<usize> {
     let participation = super::participation::PlanParticipation::resolve(model);
     let workload = super::workload::PlanWorkload::resolve_with(model, &participation).ok()?;
     worst_point_task_cost_of(&participation, &workload)
@@ -2005,7 +2005,7 @@ fn worst_point_task_cost_of(
 /// prices the workload once at its entry and hands it to
 /// [`plan_run_set_validation_from`], which is the one that runs on a frame.
 #[cfg(test)]
-pub(super) fn plan_run_set_validation(model: &Model) -> RunSetValidation {
+pub(crate) fn plan_run_set_validation(model: &Model) -> RunSetValidation {
     plan_run_set_validation_from(model, &super::workload::PlanWorkload::resolve(model))
 }
 

@@ -4,7 +4,12 @@
 //! these pin is when that control is live: an edit the plan would refuse, or
 //! one that would change nothing, must not be offered as if it would.
 
-use super::*;
+use crate::workbench::RSpiceApp;
+use crate::workbench::simulate::SimulateFeature;
+use crate::workbench::state::SimulationWorkflowDialog;
+use crate::workbench::surfaces::simulate::catalog::ANALYSIS_CATALOG_SEARCH_LABEL;
+use egui::Rect;
+use egui::vec2;
 
 /// The simulation plan workflows as the frame's dialog walk draws them, with
 /// what they raised answered straight after.

@@ -15,15 +15,14 @@
 //! sweep opens a form for every kind the catalogue offers rather than the nine
 //! the fixture starts with.
 
+use super::workflow_dialogs;
 use egui::{Rect, vec2};
 
 use super::page_contracts::RENDER_VIEWPORT_HEIGHT;
 use crate::state::SimulationPage;
 use crate::workbench::RSpiceApp;
 use crate::workbench::surfaces::simulate::catalog::ANALYSIS_CATALOG_SEARCH_LABEL;
-use crate::workbench::surfaces::simulate::{
-    participation, show_on_stage, variable_import, workflow_dialog_tests,
-};
+use crate::workbench::surfaces::simulate::{participation, show_on_stage, variable_import};
 
 /// A studio fixture that reaches every analysis form and every participation
 /// state the routes have a cell for.
@@ -231,7 +230,7 @@ pub(super) fn studio_route_nodes(
                 // The dialogs are drawn outside the surface, so a sweep that
                 // ran only the surface reached none of their controls — which
                 // is where two nameless text fields were living.
-                workflow_dialog_tests::show_workflow_dialogs_on_stage(ctx, &mut app);
+                workflow_dialogs::show_workflow_dialogs_on_stage(ctx, &mut app);
             },
         );
         nodes = output
@@ -270,7 +269,7 @@ fn studio_route_passes(
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE)
                     .show(ctx, |ui| show_on_stage(ui, &mut app));
-                workflow_dialog_tests::show_workflow_dialogs_on_stage(ctx, &mut app);
+                workflow_dialogs::show_workflow_dialogs_on_stage(ctx, &mut app);
             },
         );
         let mut controls: Vec<(egui::accesskit::NodeId, egui::accesskit::Rect)> = output
@@ -323,7 +322,7 @@ fn workflow_host_nodes(
                 )),
                 ..Default::default()
             },
-            |ctx| workflow_dialog_tests::show_workflow_dialogs_on_stage(ctx, &mut app),
+            |ctx| workflow_dialogs::show_workflow_dialogs_on_stage(ctx, &mut app),
         );
         nodes = output
             .platform_output
