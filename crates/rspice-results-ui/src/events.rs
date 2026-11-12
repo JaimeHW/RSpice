@@ -578,6 +578,8 @@ pub fn selection_absent(ui: &mut Ui, absence: SelectionAbsence) {
         },
     );
 }
+/// The selected event's details. Returns `true` when the reader asked for
+/// the event's signal on the waveform plot, at the event's instant.
 pub fn right_panel(
     ui: &mut Ui,
     event: &EventRow<'_>,
@@ -585,7 +587,7 @@ pub fn right_panel(
     buses: &[BusTimeline],
     radix: BusRadix,
     origin: EventOrigin<'_>,
-) {
+) -> bool {
     // An exact timestamp is the normal case; a reconstructed one qualifies
     // the time printed under it, so only that one says so.
     section_header(
@@ -636,6 +638,7 @@ pub fn right_panel(
     if let Some(reason) = bus_fallback {
         panel_note(ui, &format!("Not shown in {}: {reason}.", radix.label()));
     }
+    ui.button("Plot in waveforms").clicked()
 }
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support {

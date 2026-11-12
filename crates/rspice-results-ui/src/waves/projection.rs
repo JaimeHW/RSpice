@@ -1,12 +1,14 @@
 //! Exact active/overlay source projection into unit-aware waveform strips.
 
+use super::logic::EventLanes;
 use super::{
-    AnalysisPresentationKey, FamilyTraceStyle, FamilyTraceVisibilityKey, SharedWaveformValues,
-    StripModel, StripTrace, SweepShape, TraceKind, XScale, analysis_default_unit, run_mixed_key,
-    stable_hash,
+    AnalysisPresentationKey, FamilyTraceStyle, FamilyTraceVisibilityKey, LaneTrace, LaneTraceKind,
+    SharedWaveformValues, StripModel, StripTrace, SweepShape, TraceKind, XScale,
+    analysis_default_unit, run_mixed_key, stable_hash,
 };
 use crate::derived::DerivedSeries;
 use crate::waveform::waveform_color;
+use rspice_results::analysis_payload::AnalysisResultPayload;
 use rspice_results::analysis_result::AnalysisResult;
 use rspice_results::analysis_type::AnalysisType;
 use rspice_results::display_preferences::ComplexNumberDisplay;
@@ -471,6 +473,8 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
         }
 
         let mut traces = Vec::new();
+        let event_lanes = event_lanes_of(derived, analysis_key, analysis);
+        let mut lane_traces = Vec::new();
         let selection_key = sample_selection
             .map(SourceSampleSelection::fingerprint)
             .unwrap_or_default()
@@ -494,6 +498,13 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
                 continue;
             }
             let color = waveform_color(waveform, waveform_index, tokens);
+            if let Some(lane) = event_lanes
+                .as_deref()
+                .and_then(|lanes| lane_trace(lanes, waveform, waveform_index, color))
+            {
+                lane_traces.push(lane);
+                continue;
+            }
             let is_phase = waveform.name.starts_with("phase(");
             let is_mag = waveform.name.starts_with('|');
             let is_time_complex_phase = analysis.analysis_type.is_time_domain()
@@ -786,6 +797,10 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
             }
         }
 
+        if let Some(lanes) = event_lanes.as_deref() {
+            history_lane_traces(lanes, analysis, tokens, &mut lane_traces);
+        }
+
         let mut subtitle = analysis.label.clone();
         if overlaid_run_count > 0 {
             subtitle = format!(
@@ -817,11 +832,118 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
             traces,
             grid_ascending: false,
             x_range: None,
+            event_lanes,
+            lane_traces,
         };
         model.grid_ascending = super::grid_is_ascending(&model);
         models.push(model);
     }
     models
+}
+
+/// The committed event history of a transient analysis, as lanes, built once
+/// per retained data version.
+fn event_lanes_of(
+    derived: &mut DerivedSeries,
+    analysis_key: AnalysisPresentationKey,
+    analysis: &AnalysisResult<RetainedTrace>,
+) -> Option<Arc<EventLanes>> {
+    let Some(AnalysisResultPayload::TransientEvents {
+        digital_traces,
+        real_traces,
+        digital_buses,
+        ..
+    }) = analysis.result_payload.as_ref()
+    else {
+        return None;
+    };
+    if digital_traces.is_empty() && real_traces.is_empty() {
+        return None;
+    }
+    Some(derived.event_lanes_or(stable_hash(&analysis_key), || {
+        EventLanes::from_evidence(digital_traces, real_traces, digital_buses)
+    }))
+}
+
+/// A `D(net)` or `E(net)` column whose net the event history records, as the
+/// lane that draws it from that history.
+fn lane_trace(
+    lanes: &EventLanes,
+    waveform: &RetainedTrace,
+    waveform_index: usize,
+    color: egui::Color32,
+) -> Option<LaneTrace> {
+    let inner = |prefix: &str| {
+        waveform
+            .name
+            .strip_prefix(prefix)
+            .and_then(|rest| rest.strip_suffix(')'))
+    };
+    let (net, kind) = if let Some(net) = inner("D(").filter(|net| lanes.logic(net).is_some()) {
+        (net, LaneTraceKind::Logic)
+    } else {
+        let net = inner("E(").filter(|net| lanes.real(net).is_some())?;
+        (net, LaneTraceKind::Real)
+    };
+    Some(LaneTrace {
+        waveform_index: Some(waveform_index),
+        source_waveform_name: waveform.name.clone(),
+        net: net.to_owned(),
+        kind,
+        unit: waveform.unit.clone(),
+        color,
+        x: Arc::clone(&waveform.x),
+        visible: waveform.visible,
+    })
+}
+
+/// A lane for each net the run keeps only as event history.
+///
+/// A native mixed run retains its digital and real nets as their exact
+/// histories and no `D()` or `E()` column, so a lane cannot be one of the
+/// analysis' columns. It still answers to that column's name, the name an
+/// imported rawfile's column has, so plotting, the layout and the cursor
+/// table treat both alike. It stays off the plot until the reader plots it.
+fn history_lane_traces(
+    lanes: &EventLanes,
+    analysis: &AnalysisResult<RetainedTrace>,
+    tokens: &Tokens,
+    lane_traces: &mut Vec<LaneTrace>,
+) {
+    let Some(grid) = analysis.waveforms.first().map(|waveform| &waveform.x) else {
+        return;
+    };
+    let nets = lanes
+        .logic
+        .iter()
+        .map(|lane| (lane.name(), LaneTraceKind::Logic, "D"))
+        .chain(
+            lanes
+                .real
+                .iter()
+                .map(|lane| (lane.name(), LaneTraceKind::Real, "E")),
+        );
+    let palette = &tokens.color.traces;
+    for (net, kind, prefix) in nets {
+        let name = format!("{prefix}({net})");
+        if lane_traces
+            .iter()
+            .any(|lane| lane.source_waveform_name == name)
+        {
+            continue;
+        }
+        let color = palette[(analysis.waveforms.len() + lane_traces.len()) % palette.len()];
+        lane_traces.push(LaneTrace {
+            waveform_index: None,
+            source_waveform_name: name,
+            net: net.to_owned(),
+            kind,
+            unit: None,
+            color,
+            x: Arc::clone(grid),
+            visible: false,
+        });
+    }
 }
 
 fn displayed_phase_series(

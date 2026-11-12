@@ -308,12 +308,25 @@ pub fn toggle_visibility(
     let Some(waveform) = analysis.waveforms.get(waveform_index) else {
         return;
     };
-    let name = waveform.name.clone();
     let dataset_default = waveform.visible;
+    let name = waveform.name.clone();
     let key = SourceWaveformPresentationKey::new(
         AnalysisPresentationKey::new(run.dataset_id, analysis),
         name.clone(),
     );
+    toggle_source_visibility(state, key, name, dataset_default);
+}
+
+/// Flip the quick-view visibility of the source `name` that `key` names,
+/// whose visibility before the reader touched it is `dataset_default`. The name
+/// need not be a column of the analysis: an event net the run keeps only as
+/// history is plotted under its column's name all the same.
+pub(crate) fn toggle_source_visibility(
+    state: &mut crate::workbench::documents::result_document::ResultsParts<'_>,
+    key: SourceWaveformPresentationKey,
+    name: String,
+    dataset_default: bool,
+) {
     if let Some(context) = state
         .results
         .session

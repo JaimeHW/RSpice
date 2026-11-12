@@ -56,6 +56,7 @@ pub fn cursor_readout_table(
     cursors: CursorPair,
     presentation: ReadoutPolicy,
     quantity_policy: QuantityPresentationPolicy,
+    lane_rows: Vec<ReadoutRow>,
 ) {
     let rect = ui.available_rect_before_wrap();
     let t = Tokens::get(ui.ctx());
@@ -139,8 +140,10 @@ pub fn cursor_readout_table(
         None,
     );
 
-    // Per-trace values at A and B, their difference, and their own slope.
-    let rows = readout_rows(model, cursors, presentation, quantity_policy);
+    // Per-trace values at A and B, their difference, and their own slope;
+    // then what each event lane reads at A and B.
+    let mut rows = readout_rows(model, cursors, presentation, quantity_policy);
+    rows.extend(lane_rows);
     for (index, row) in rows.iter().enumerate() {
         draw_row(
             index + 2,

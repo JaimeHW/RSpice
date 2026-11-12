@@ -27,6 +27,12 @@ use super::results_actions::{
 use rspice_app_workbench::workbench::docks::navigator::grouped_count;
 use rspice_app_workbench::workbench::docks::navigator::muted;
 
+/// The identity a declared bus's row carries, before its `name[msb:lsb]`
+/// label: one per bus, so ticking one plots that bus alone.
+pub(super) const BUS_ROW_PREFIX: &str = "payload/transient-events/bus/";
+/// The identity of the row of an event net the run keeps only as history,
+/// before the `D(net)` or `E(net)` name its lane answers to.
+pub(super) const EVENT_NET_ROW_PREFIX: &str = "payload/transient-events/net/";
 pub const EXPRESSION_HEADER_HEIGHT: f32 = 28.0;
 pub const SIGNAL_ROW_HEIGHT: f32 = 30.0;
 // The results browser's two-register quantity row and its group head, from
@@ -429,13 +435,43 @@ pub fn retained_result_artifacts(
                 // already listed beside it, so the row states the range and
                 // the width rather than repeating them.
                 for bus in digital_buses {
+                    let label = format!("{}[{}:{}]", bus.name, bus.msb, bus.lsb);
                     push(
-                        "payload/transient-events/bus",
-                        format!("Digital bus {}[{}:{}]", bus.name, bus.msb, bus.lsb),
+                        &format!("{BUS_ROW_PREFIX}{label}"),
+                        format!("Digital bus {label}"),
                         ResultArtifactKind::EventStream,
                         bus.members.len(),
                         "",
                         Some(bus.members.join(" ")),
+                        ResultViewer::Events,
+                    );
+                }
+                // A net with no column of its own is plotted from its row
+                // here, as a column is from its row among the signals.
+                let nets = digital_traces
+                    .iter()
+                    .map(|trace| ("D", "Digital net", &trace.node_name, trace.points.len()))
+                    .chain(
+                        real_traces
+                            .iter()
+                            .map(|trace| ("E", "Real net", &trace.node_name, trace.points.len())),
+                    );
+                for (prefix, noun, net, points) in nets {
+                    let column = format!("{prefix}({net})");
+                    if analysis
+                        .waveforms
+                        .iter()
+                        .any(|waveform| waveform.name == column)
+                    {
+                        continue;
+                    }
+                    push(
+                        &format!("{EVENT_NET_ROW_PREFIX}{column}"),
+                        format!("{noun} {net}"),
+                        ResultArtifactKind::EventStream,
+                        points,
+                        "",
+                        None,
                         ResultViewer::Events,
                     );
                 }

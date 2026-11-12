@@ -13,7 +13,7 @@ use egui::Ui;
 use rspice_results::result_presentation::{
     AnalysisPresentationKey, MarkerKind, WaveformPresentationKey,
 };
-use rspice_ui_kit::plot::{fmt_si_significant, sample::sample_at_with_shape};
+use rspice_ui_kit::plot::{CursorPair, fmt_si_significant, sample::sample_at_with_shape};
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
@@ -67,7 +67,22 @@ pub fn readout_row_count(state: &mut ResultViewerState, source: ReadoutInput<'_>
         .find(|model| model.analysis_index == index)
         .map_or(0, |model| {
             readout_rows(model, cursors, presentation, quantity_policy).len()
+                + strip_lane_rows(state, model, cursors, presentation).len()
         })
+}
+
+/// The cursor table's rows for the strip's logic, bus and `E()` lanes, read
+/// from their exact event histories.
+fn strip_lane_rows(
+    state: &mut ResultViewerState,
+    model: &StripModel,
+    cursors: CursorPair,
+    presentation: ReadoutPolicy,
+) -> Vec<super::readout::ReadoutRow> {
+    let digits = usize::from(presentation.displayed_significant_digits().get());
+    let specs = super::lanes::lane_specs(model, state.event_lanes.get(&model.analysis_key));
+    let user = super::lanes::user_bus_lanes(&mut state.derived, model, &specs);
+    super::lanes::lane_readout_rows(model, &specs, &user, cursors, digits)
 }
 
 /// Height of one marker row.
@@ -397,8 +412,15 @@ fn cursor_readout_table(ui: &mut Ui, state: &mut ResultViewerState, source: Read
         return;
     };
     let cursors = state.cursors;
-
-    super::readout::cursor_readout_table(ui, model, cursors, presentation, quantity_policy);
+    let lane_rows = strip_lane_rows(state, model, cursors, presentation);
+    super::readout::cursor_readout_table(
+        ui,
+        model,
+        cursors,
+        presentation,
+        quantity_policy,
+        lane_rows,
+    );
 }
 
 /// The marker half of the strip: one editable row per marker.

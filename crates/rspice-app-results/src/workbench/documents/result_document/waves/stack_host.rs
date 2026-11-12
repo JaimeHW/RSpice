@@ -72,6 +72,25 @@ impl StackHost for WaveStackHost<'_, '_> {
         frame_work::note_samples(FrameSampleRead::StripOverview, overview);
         frame_work::note_samples(FrameSampleRead::TraceExtremes, extrema);
     }
+    fn event_lane_height(&self, model: &StripModel) -> f32 {
+        super::lanes::lane_height(self.0, model)
+    }
+    fn show_event_lanes(
+        &mut self,
+        ui: &mut Ui,
+        model: &StripModel,
+        frame: rspice_results_ui::waves::stack::EventLaneFrame,
+    ) {
+        super::lanes::show_lanes(ui, self.0, model, frame);
+    }
+    fn real_step_traces(
+        &mut self,
+        model: &StripModel,
+        pane: &UnitPane,
+        _tokens: &Tokens,
+    ) -> Vec<ResolvedExpr> {
+        rspice_results_ui::waves::lanes::real_step_traces(model, pane)
+    }
 }
 
 fn show_unit_pane_header(

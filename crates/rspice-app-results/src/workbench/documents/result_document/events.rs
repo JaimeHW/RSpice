@@ -282,7 +282,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         return;
     };
 
-    viewer::right_panel(
+    let plot = viewer::right_panel(
         ui,
         &event,
         &selection,
@@ -290,6 +290,31 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         radix,
         active_event_origin(state.results_reads()),
     );
+    if !plot {
+        return;
+    }
+    // The columns that draw the event's signal: a bus's members, a digital
+    // net's `D()`, a real net's `E()`.
+    let columns: Vec<String> = match event.value() {
+        rspice_results::events::projection::EventValue::Bus(_) => buses
+            .iter()
+            .find(|bus| bus.name() == selection.trace_name)
+            .map(|bus| {
+                bus.members()
+                    .iter()
+                    .map(|net| format!("D({net})"))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        rspice_results::events::projection::EventValue::Digital { .. } => {
+            vec![format!("D({})", event.signal_name())]
+        }
+        rspice_results::events::projection::EventValue::Real(_) => {
+            vec![format!("E({})", event.signal_name())]
+        }
+    };
+    let time = event.time_s();
+    super::waves::plot_event_lanes(state, selection.analysis, &columns, time);
 }
 #[cfg(test)]
 mod tests {

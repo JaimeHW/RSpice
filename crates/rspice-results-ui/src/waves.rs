@@ -18,6 +18,7 @@ pub mod dock;
 pub mod expression_editor;
 pub mod extent;
 pub mod header;
+pub mod lanes;
 pub mod logic;
 pub mod marker_dialog;
 pub mod navigation;
@@ -133,6 +134,38 @@ pub struct StripTrace {
     pub family_visibility_key: Option<FamilyTraceVisibilityKey>,
 }
 
+/// What an event lane of a strip draws.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LaneTraceKind {
+    /// A scalar digital net, `D()`: a logic lane above the panes.
+    Logic,
+    /// A real net, `E()`: a step trace in the pane of its unit.
+    Real,
+}
+
+/// A digital or real net of a strip's analysis with an exact event history,
+/// named as its `D()` or `E()` column is, whether or not the analysis has
+/// that column. It is drawn from the history, as a logic lane or a step
+/// trace, and never as a column resampled onto the analog grid, so it is
+/// kept out of the strip's value traces.
+#[derive(Debug, Clone)]
+pub struct LaneTrace {
+    /// The analysis column the lane answers to; none for a net the run keeps
+    /// only as event history.
+    pub waveform_index: Option<usize>,
+    /// The column's name, `D(net)` or `E(net)`: the lane's identity.
+    pub source_waveform_name: String,
+    /// The net as the event history names it.
+    pub net: String,
+    pub kind: LaneTraceKind,
+    /// The unit the column states, for a real lane's pane.
+    pub unit: Option<String>,
+    pub color: egui::Color32,
+    /// The column's sample grid, so the strip's extent covers the lane.
+    pub x: SharedWaveformValues,
+    pub visible: bool,
+}
+
 /// One strip (== one analysis of the active run).
 pub struct StripModel {
     pub analysis_index: usize,
@@ -170,6 +203,10 @@ pub struct StripModel {
     /// the host's X-range resolution once the reader's visibility overrides have
     /// been applied — which traces are visible is not known until then.
     pub x_range: Option<(f64, f64)>,
+    /// The analysis' committed event history, as lanes, when it has one.
+    pub event_lanes: Option<Arc<logic::EventLanes>>,
+    /// The analysis' `D()` and `E()` columns drawn from that history.
+    pub lane_traces: Vec<LaneTrace>,
 }
 
 impl StripModel {
@@ -338,6 +375,16 @@ impl StripModel {
         matching.next().is_none().then_some(index)
     }
 
+    /// The unit a real lane reads in: its column's, as a value trace's is.
+    pub fn lane_unit<'a>(&'a self, lane: &'a LaneTrace) -> &'a str {
+        signal_unit(
+            &lane.source_waveform_name,
+            TraceKind::Value,
+            lane.unit.as_deref(),
+            self.y_unit,
+        )
+    }
+
     /// The unit one trace is measured in.
     pub fn trace_unit<'a>(&'a self, trace: &'a StripTrace) -> &'a str {
         signal_unit(
@@ -371,6 +418,21 @@ impl StripModel {
                     unit,
                     traces: trace.visible.then_some(index).into_iter().collect(),
                 }),
+            }
+        }
+        // A real lane is drawn in the pane of its unit, which it opens when
+        // no value trace does.
+        for lane in self
+            .lane_traces
+            .iter()
+            .filter(|lane| lane.visible && lane.kind == LaneTraceKind::Real)
+        {
+            let unit = self.lane_unit(lane);
+            if !panes.iter().any(|pane| pane.unit == unit) {
+                panes.push(UnitPane {
+                    unit,
+                    traces: Vec::new(),
+                });
             }
         }
         let (quantity, phase): (Vec<_>, Vec<_>) = panes

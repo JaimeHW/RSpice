@@ -178,5 +178,17 @@ pub fn apply_waveform_visibility<A: AsRef<AnalysisResult<RetainedTrace>>>(
                     .family_visibility_key
                     .is_none_or(|key| !hidden_family_traces.contains(&key));
         }
+        for lane in &mut model.lane_traces {
+            let key = SourceWaveformPresentationKey::new(
+                model.analysis_key,
+                lane.source_waveform_name.clone(),
+            );
+            // A net with no column is off the plot until the reader plots it.
+            let dataset_default = lane
+                .waveform_index
+                .and_then(|index| analysis.waveforms.get(index))
+                .is_some_and(|waveform| waveform.visible);
+            lane.visible = overrides.get(&key).copied().unwrap_or(dataset_default);
+        }
     }
 }

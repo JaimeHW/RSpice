@@ -33,6 +33,9 @@ pub use rspice_results_ui::waves::{
 mod expression_evaluation;
 mod expressions;
 use rspice_results_ui::waves::extent::{self, FamilyEnvelopePlan};
+mod lanes;
+pub(super) use lanes::plot_event_lanes;
+pub use lanes::{event_net_plotted, set_event_net_plotted};
 pub(super) mod marker_dialog;
 mod model_cache;
 pub(super) use model_cache::cached_models;

@@ -53,6 +53,18 @@ fn tick_result_range(
 /// there is no second record of it that the legend or the Inspector could
 /// disagree with.
 fn result_quantity_ticked(state: &ResultsParts<'_>, key: &ResultBrowserSelectionKey) -> bool {
+    if let ResultBrowserSelectionKey::Artifact(artifact) = key
+        && let Some(nets) = event_row_nets(state, artifact)
+    {
+        return !nets.is_empty()
+            && nets.iter().all(|net| {
+                crate::workbench::documents::result_document::event_net_plotted(
+                    state,
+                    artifact.analysis(),
+                    net,
+                )
+            });
+    }
     match key {
         ResultBrowserSelectionKey::Waveform(key) => result_signal_ticked(state, key),
         ResultBrowserSelectionKey::Artifact(_) => state
@@ -68,6 +80,24 @@ pub fn set_result_quantity_ticked(
     key: &ResultBrowserSelectionKey,
     ticked: bool,
 ) {
+    // An event net's row plots its lane; a bus row plots the bus, its
+    // members, which the strip then draws as one bus lane.
+    if let ResultBrowserSelectionKey::Artifact(artifact) = key
+        && let Some(nets) = event_row_nets(state, artifact)
+    {
+        for net in &nets {
+            crate::workbench::documents::result_document::set_event_net_plotted(
+                state,
+                artifact.analysis(),
+                net,
+                ticked,
+            );
+        }
+        if ticked && !nets.is_empty() {
+            reveal_strip(state, artifact.analysis());
+        }
+        return;
+    }
     match key {
         ResultBrowserSelectionKey::Waveform(key) => set_result_signal_plotted(state, key, ticked),
         ResultBrowserSelectionKey::Artifact(_) => {
@@ -79,6 +109,30 @@ pub fn set_result_quantity_ticked(
             }
         }
     }
+}
+
+/// The event nets a row plots, by their `D()` or `E()` column names: an
+/// event net's own, or a declared bus's members MSB first. `None` for a row
+/// that names neither.
+fn event_row_nets(
+    state: &ResultsParts<'_>,
+    artifact: &ResultArtifactPresentationKey,
+) -> Option<Vec<String>> {
+    let name = artifact.canonical_name();
+    if let Some(net) = name.strip_prefix(super::results_rows::EVENT_NET_ROW_PREFIX) {
+        return Some(vec![net.to_owned()]);
+    }
+    let label = name.strip_prefix(super::results_rows::BUS_ROW_PREFIX)?;
+    let (_, _, analysis) = artifact.resolve(&state.model.simulation.retained.runs)?;
+    let Some(crate::state::AnalysisResultPayload::TransientEvents { digital_buses, .. }) =
+        analysis.result_payload.as_ref()
+    else {
+        return None;
+    };
+    let bus = digital_buses
+        .iter()
+        .find(|bus| format!("{}[{}:{}]", bus.name, bus.msb, bus.lsb) == label)?;
+    Some(bus.members.iter().map(|net| format!("D({net})")).collect())
 }
 
 /// The active run's analysis and waveform that a signal of another run

@@ -332,6 +332,11 @@ pub struct ResultViewerState {
     /// run, and a declaration that is not in the active analysis contributes
     /// no rows either way.
     pub expanded_event_buses: std::collections::BTreeSet<String>,
+    /// The logic and bus lanes each waveform strip shows above its panes:
+    /// their order, each bus's radix and expansion, the reader's buses and
+    /// the selected rows. Which lanes exist follows the plotted `D()`
+    /// columns; this holds what the run cannot say.
+    pub event_lanes: HashMap<AnalysisPresentationKey, crate::waves::lanes::EventLaneLayout>,
     /// User-placed markers across every waveform strip.
     pub markers: Vec<ResultMarker>,
     /// Signals starred in the results data browser. A deliberate,

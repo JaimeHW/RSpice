@@ -13,6 +13,7 @@ mod expression_scope;
 mod extent;
 mod honest_axes;
 mod interaction;
+mod lanes;
 mod measurements;
 mod source_cache;
 

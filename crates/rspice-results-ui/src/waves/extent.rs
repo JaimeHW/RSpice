@@ -40,11 +40,21 @@ fn x_range(model: &StripModel) -> Option<(f64, f64)> {
     note_extent(0);
     let mut x0 = f64::INFINITY;
     let mut x1 = f64::NEG_INFINITY;
+    // An event lane is drawn over its column's grid, so a strip showing only
+    // lanes still has the extent of its run.
     for x in model
         .traces
         .iter()
         .filter(|trace| trace.visible)
-        .flat_map(|trace| trace.x.iter().copied())
+        .map(|trace| &trace.x)
+        .chain(
+            model
+                .lane_traces
+                .iter()
+                .filter(|lane| lane.visible)
+                .map(|lane| &lane.x),
+        )
+        .flat_map(|x| x.iter().copied())
         .filter(|value| value.is_finite())
     {
         if model.x_scale == XScale::Log10 && x <= 0.0 {

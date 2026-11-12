@@ -33,6 +33,13 @@ pub struct DerivedSeries {
     /// every frame. It is held here rather than on the trace because only the
     /// cache knows when the data behind it changed.
     shapes: std::collections::HashMap<u64, std::sync::Arc<rspice_results::sampling::SweepShape>>,
+    /// An analysis' committed event history as lanes, per analysis key.
+    /// Reading every point is a pass over the history, so it is done once per
+    /// data version rather than each time the strips are rebuilt.
+    event_lanes: std::collections::HashMap<u64, std::sync::Arc<crate::waves::logic::EventLanes>>,
+    /// A bus word reassembled from its members, per bus identity, so a
+    /// reader's grouping is not reassembled on every frame it is drawn.
+    bus_lanes: std::collections::HashMap<u64, std::sync::Arc<crate::waves::logic::BusLane>>,
 }
 
 impl DerivedSeries {
@@ -50,6 +57,8 @@ impl DerivedSeries {
             self.overview_indices.clear();
             self.stats.clear();
             self.shapes.clear();
+            self.event_lanes.clear();
+            self.bus_lanes.clear();
             self.version = version;
         }
     }
@@ -78,6 +87,32 @@ impl DerivedSeries {
         let shape = std::sync::Arc::new(build());
         self.shapes.insert(key, std::sync::Arc::clone(&shape));
         shape
+    }
+
+    /// Fetch or read an analysis' event history as lanes.
+    pub fn event_lanes_or(
+        &mut self,
+        key: u64,
+        build: impl FnOnce() -> crate::waves::logic::EventLanes,
+    ) -> std::sync::Arc<crate::waves::logic::EventLanes> {
+        std::sync::Arc::clone(
+            self.event_lanes
+                .entry(key)
+                .or_insert_with(|| std::sync::Arc::new(build())),
+        )
+    }
+
+    /// Fetch or reassemble one bus word.
+    pub fn bus_lane_or(
+        &mut self,
+        key: u64,
+        build: impl FnOnce() -> crate::waves::logic::BusLane,
+    ) -> std::sync::Arc<crate::waves::logic::BusLane> {
+        std::sync::Arc::clone(
+            self.bus_lanes
+                .entry(key)
+                .or_insert_with(|| std::sync::Arc::new(build())),
+        )
     }
 
     /// Fetch or compute the cached finite (min, max) of a series.
