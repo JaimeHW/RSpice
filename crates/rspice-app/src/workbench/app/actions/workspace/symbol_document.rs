@@ -793,14 +793,6 @@ fn push_symbol_undo_snapshot(
     symbol.history.record_edit(key, snapshot, max_len);
 }
 
-impl AppState {
-    /// [`run_active_symbol_pin_checks`] for the session.
-    pub(crate) fn run_active_symbol_pin_checks(&mut self) {
-        let facts = self.slot_facts();
-        run_active_symbol_pin_checks(&mut self.model, facts);
-    }
-}
-
 /// How many pin findings stand against the active symbol view, or `None`
 /// where the checks have not run against it.
 ///

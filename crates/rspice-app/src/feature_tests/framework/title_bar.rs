@@ -1359,8 +1359,6 @@ fn menu_icons_mark_only_the_toolbars_twins_with_the_buttons_icon() {
         Command::Exit,
         Command::SelectAll,
         Command::KeyboardShortcuts,
-        Command::CheckCellview,
-        Command::CheckDesign,
     ] {
         assert_eq!(
             app.command_icon(command.key()),
@@ -1372,6 +1370,8 @@ fn menu_icons_mark_only_the_toolbars_twins_with_the_buttons_icon() {
     for key in [
         DesignCommand::DescendHierarchy.key(),
         DesignCommand::RenameSelection.key(),
+        DesignCommand::CheckCellview.key(),
+        DesignCommand::CheckDesign.key(),
         CodeCommand::ValidateCodeDocument.key(),
         SimulateCommand::Preflight.key(),
         ModelsCommand::ModelValidate.key(),

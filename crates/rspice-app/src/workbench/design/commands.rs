@@ -2,8 +2,8 @@
 //! so far the Stimulus Library's verbs, the dialogs the Design, Edit and
 //! View menus open over the schematic, the schematic's placements, the
 //! canvas's select tool, grid and Fit content, the moves up and down the
-//! hierarchy, the check results' tour and clear, and the schematic's
-//! annotations.
+//! hierarchy, the design checks with their results' tour and clear, and
+//! the schematic's annotations.
 //!
 //! What each command does is the feature's own; what it declares here is all
 //! the shell's order, menus, palette and shortcut profile read of it.
@@ -124,6 +124,13 @@ pub(crate) enum DesignCommand {
     /// Show or hide the transient's voltages at results cursor A on the
     /// schematic.
     AnnotateTransientVoltages,
+    /// The open cellview's own findings: what an author runs while drawing.
+    /// A symbol view checks its pins against the cell's interface.
+    CheckCellview,
+    /// The whole design, walked from the simulation root under its
+    /// configuration, with every cellview of the project's own libraries the
+    /// walk never reaches.
+    CheckDesign,
 }
 
 const EVERYWHERE: &[CommandPlatform] = &CommandPlatform::ALL;
@@ -253,10 +260,14 @@ const PREVIOUS_VIOLATION: &[ShortcutBinding] = &[
     ),
     alternate(chord(Key::F8, false, false, true, "Shift+F8"), EVERYWHERE),
 ];
+const CHECK_CELLVIEW: &[ShortcutBinding] = &[primary(
+    chord(Key::E, true, false, false, "Ctrl+E"),
+    EVERYWHERE,
+)];
 
 impl DesignCommand {
     /// Every command the registry lists, in the feature's own order.
-    pub(crate) const ALL: [Self; 51] = [
+    pub(crate) const ALL: [Self; 53] = [
         Self::NewStimulusDefinition,
         Self::DuplicateStimulusDefinition,
         Self::DeleteStimulusDefinition,
@@ -308,6 +319,8 @@ impl DesignCommand {
         Self::PreviousViolation,
         Self::AnnotateOperatingPoint,
         Self::AnnotateTransientVoltages,
+        Self::CheckCellview,
+        Self::CheckDesign,
     ];
 
     /// The key a shortcut profile names this command by.
@@ -364,6 +377,8 @@ impl DesignCommand {
             Self::PreviousViolation => CommandKey::new("previous-violation"),
             Self::AnnotateOperatingPoint => CommandKey::new("annotate-operating-point"),
             Self::AnnotateTransientVoltages => CommandKey::new("annotate-transient-voltages"),
+            Self::CheckCellview => CommandKey::new("check-cellview"),
+            Self::CheckDesign => CommandKey::new("check-design"),
         }
     }
 
@@ -414,7 +429,9 @@ impl DesignCommand {
     /// and is a chord of the design workspace; the direct descent needs an
     /// open project and stays out of the palette. The finding tour keeps
     /// the violation-navigation context, and clearing the checks and the
-    /// annotation switches the global one.
+    /// annotation switches the global one. Both design checks commit the
+    /// inspector's pending edit and are chords of the design workspace;
+    /// checking the whole design also needs an open project.
     pub(crate) const fn declared_spec(self) -> CommandSpec {
         let palette = CommandFlags::PALETTE_VISIBLE;
         let open = palette.with(CommandFlags::REQUIRES_OPEN_PROJECT, true);
@@ -435,6 +452,7 @@ impl DesignCommand {
             .with(CommandFlags::REQUIRES_OPEN_PROJECT, true)
             .with(CommandFlags::COMMITS_INSPECTOR_EDIT, true);
         let violations = ShortcutContext::ViolationNavigation;
+        let checks_project = open.with(CommandFlags::COMMITS_INSPECTOR_EDIT, true);
         let (label, group, flags, context, bindings) = match self {
             Self::NewStimulusDefinition => {
                 ("New stimulus definition", STIMULUS, open, global, NONE)
@@ -613,6 +631,11 @@ impl DesignCommand {
                 global,
                 NONE,
             ),
+            Self::CheckCellview => ("Check cellview", "Design", commits, design, CHECK_CELLVIEW),
+            // Ctrl+Alt+E is AltGr+E, the euro sign, on most European
+            // layouts, and every other chord of the check family is taken;
+            // the Design menu, the toolbar and the palette are its routes.
+            Self::CheckDesign => ("Check design", "Design", checks_project, design, NONE),
         };
         CommandSpec {
             key: self.key(),

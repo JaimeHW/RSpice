@@ -12,9 +12,7 @@ use crate::workbench::app::actions::workspace::HistoryDirection;
 use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::framework::command_registry::{CommandOwner, ids};
-use crate::workbench::menu_bar::{
-    FileMenuAction, check_cellview, check_design, dispatch_file_menu_action,
-};
+use crate::workbench::menu_bar::{FileMenuAction, dispatch_file_menu_action};
 use crate::workbench::state::pane_focus::PaneStep;
 use crate::workbench::{AppState, RSpiceApp};
 use rspice_schematic_editor::symbol_editor::commands::SymbolTransform;
@@ -170,8 +168,6 @@ impl Command {
                     | Self::NextDocument
                     | Self::CloseOtherDocuments
                     | Self::CloseAllDocuments
-                    | Self::CheckCellview
-                    | Self::CheckDesign
                     | Self::ToggleInspector
                     | Self::ToggleFocusMode
                     | Self::ResetLayout
@@ -278,8 +274,6 @@ impl Command {
             | Self::SetStandardValueSeries(_)
             | Self::JoinCollinearWires
             | Self::Cancel
-            | Self::CheckCellview
-            | Self::CheckDesign
             | Self::ObjectProperties => CommandOwner::Design,
         }
     }
@@ -695,11 +689,6 @@ impl Command {
                     app.state.model.schematic.cancel_interaction_step();
                 }
             }
-            Self::CheckCellview if active_symbol_editor(app) => {
-                app.state.run_active_symbol_pin_checks();
-            }
-            Self::CheckCellview => check_cellview(&mut app.state),
-            Self::CheckDesign => check_design(&mut app.state),
             Self::CommandPalette => open_command_palette(&mut app.state),
             Self::KeyboardShortcuts => app.state.shell.shortcuts_help = true,
             Self::HelpCenter => {

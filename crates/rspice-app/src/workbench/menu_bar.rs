@@ -19,7 +19,7 @@ pub(crate) use netlist_export::{
     action_export_generated_netlist_with_options, action_export_netlist_with_io,
     action_view_netlist, build_menu_netlist_in, netlist_failure_text, record_netlist_warnings_in,
 };
-pub(crate) use tools_menu::{check_cellview, check_design};
+pub(crate) use tools_menu::check_design;
 pub(crate) use waveform_export::action_export_result_selection_with_io;
 #[cfg(test)]
 pub(crate) use waveform_export::{DatasetExportPicker, action_export_csv_with_io};

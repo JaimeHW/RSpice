@@ -154,13 +154,6 @@ pub enum Command {
     /// overlapping, as one wire each.
     JoinCollinearWires,
     Cancel,
-    /// The open cellview's own findings: what an author runs while drawing.
-    /// A symbol view checks its pins against the cell's interface.
-    CheckCellview,
-    /// The whole design, walked from the simulation root under its
-    /// configuration, with every cellview of the project's own libraries the
-    /// walk never reaches.
-    CheckDesign,
     CommandPalette,
     KeyboardShortcuts,
     HelpCenter,
@@ -423,8 +416,6 @@ impl Command {
                 spec("join-collinear-wires", "Join collinear wires", "Design")
             }
             Self::Cancel => spec("cancel-active-command", "Cancel active command", "Design"),
-            Self::CheckCellview => spec("check-cellview", "Check cellview", "Design"),
-            Self::CheckDesign => spec("check-design", "Check design", "Design"),
             Self::CommandPalette => spec("command-palette", "Command palette", "Navigate"),
             Self::KeyboardShortcuts => spec("command-reference", "Keyboard shortcuts", "Help"),
             Self::HelpCenter => spec("help-center", "RSpice Help", "Help"),
@@ -578,8 +569,6 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E96),
     Command::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E192),
     Command::JoinCollinearWires,
-    Command::CheckCellview,
-    Command::CheckDesign,
     Command::CommandPalette,
     Command::KeyboardShortcuts,
     Command::HelpCenter,
@@ -805,8 +794,8 @@ static COMMAND_ORDER: &[CommandKey] = &[
     DesignCommand::DescendHierarchy.key(),
     DesignCommand::DescendHierarchyDirect.key(),
     CodeCommand::ShowInNetlist.key(),
-    Command::CheckCellview.key(),
-    Command::CheckDesign.key(),
+    DesignCommand::CheckCellview.key(),
+    DesignCommand::CheckDesign.key(),
     ProjectCommand::CheckAndSave.key(),
     DesignCommand::ClearChecks.key(),
     DesignCommand::NextViolation.key(),
@@ -952,7 +941,7 @@ const LEGACY_ALIASES: &[(&str, CommandKey)] = &[
     ),
     // The one check command became two; a shortcut bound to it keeps
     // checking the cellview in front of the reader.
-    ("run-checks", Command::CheckCellview.key()),
+    ("run-checks", DesignCommand::CheckCellview.key()),
 ];
 
 /// The registry of every command in [`COMMAND_ORDER`]: the shell's own in

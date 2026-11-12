@@ -21,7 +21,6 @@ pub(super) fn palette_icon(command: Command) -> Option<Icon> {
         Command::ArraySelection => Icon::Grid,
         Command::SwapToRSpiceSymbols => Icon::Refresh,
         Command::ConfigurationSets => Icon::Grid,
-        Command::CheckCellview | Command::CheckDesign => Icon::Check,
         _ => return None,
     };
     Some(icon)
@@ -66,6 +65,7 @@ pub(super) fn feature_palette_icon(key: CommandKey) -> Option<Icon> {
             DesignCommand::PlacePin => Some(Icon::Pin),
             DesignCommand::ReplaceInstance => Some(Icon::Refresh),
             DesignCommand::CreateHierarchy => Some(Icon::Folder),
+            DesignCommand::CheckCellview | DesignCommand::CheckDesign => Some(Icon::Check),
             _ => None,
         };
     }

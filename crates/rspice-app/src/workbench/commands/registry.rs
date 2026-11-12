@@ -198,8 +198,6 @@ const SYMBOL_ROTATE_PIN: &[ShortcutBinding] =
     &[primary(chord(Key::R, true, false, false, "Ctrl+R"), ALL)];
 const SYMBOL_MIRROR_PIN: &[ShortcutBinding] =
     &[primary(chord(Key::M, true, false, false, "Ctrl+M"), ALL)];
-const CHECK_CELLVIEW: &[ShortcutBinding] =
-    &[primary(chord(Key::E, true, false, false, "Ctrl+E"), ALL)];
 const CANCEL: &[ShortcutBinding] = &[primary(
     chord(Key::Escape, false, false, false, "Escape"),
     ALL,
@@ -223,7 +221,6 @@ impl Command {
                 | Self::CloseAllDocuments
                 | Self::SetStandardValueSeries(_)
                 | Self::FindInDesign
-                | Self::CheckDesign
                 | Self::ConfigurationSets
         )
     }
@@ -302,8 +299,6 @@ impl Command {
             Self::Cancel => ShortcutContext::ApplicationChrome,
             Self::EditSymbolInPlace
             | Self::SetStandardValueSeries(_)
-            | Self::CheckCellview
-            | Self::CheckDesign
             | Self::HighlightNet
             | Self::ConfigurationSets => ShortcutContext::DesignWorkspace,
             Self::SymbolPinTool
@@ -385,11 +380,6 @@ impl Command {
             Self::SymbolSave => NONE,
             Self::EditSymbolInPlace => NONE,
             Self::ExitSymbolInPlace => EXIT_SYMBOL_IN_PLACE,
-            Self::CheckCellview => CHECK_CELLVIEW,
-            // Ctrl+Alt+E is AltGr+E, the euro sign, on most European
-            // layouts, and every other chord of the check family is taken;
-            // the Design menu, the toolbar and the palette are its routes.
-            Self::CheckDesign => NONE,
             Self::CommandPalette => COMMAND_PALETTE,
             Self::Cancel => CANCEL,
             _ => NONE,

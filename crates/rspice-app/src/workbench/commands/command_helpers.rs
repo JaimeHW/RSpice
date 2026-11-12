@@ -11,6 +11,7 @@ use crate::workbench::app::dialogs::source_document;
 use crate::workbench::code::commands::{
     CodeCommand, CodeRequest, NetlistEditorRequest, SourceDocumentRequest,
 };
+use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::documents::code_workspace::persist_global_veriloga_library;
 use crate::workbench::framework::feature::ModelsPort;
 use crate::workbench::framework::requests::{ProjectFileAction, StandardCommand};
@@ -687,8 +688,9 @@ pub(in crate::workbench) fn answer_project_request(app: &mut RSpiceApp, request:
         ProjectRequest::OpenRootAndCheck(root) => {
             app.state.open_workspace_view(root);
             Command::OpenWorkspace(Workspace::Design).execute(app);
-            if Command::CheckDesign.is_enabled(app) {
-                Command::CheckDesign.execute(app);
+            let check = DesignCommand::CheckDesign.key();
+            if app.command_key_enabled(check) {
+                app.execute_command_key(check);
             }
         }
         ProjectRequest::CatalogChanged {

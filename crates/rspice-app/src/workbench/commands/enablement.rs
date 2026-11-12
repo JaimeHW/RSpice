@@ -272,12 +272,6 @@ impl Command {
             Self::ExitSymbolInPlace => {
                 active_symbol_editor(app) && state.symbol_in_place().is_some()
             }
-            // A symbol cellview checks its pin contract. The editor's own
-            // keyboard route always did this; the command must agree, or the
-            // toolbar shows a dead control beside a working shortcut.
-            Self::CheckCellview => active_schematic_editor(app) || active_symbol_editor(app),
-            // The design is the configured one, whichever view is open.
-            Self::CheckDesign => true,
             // A run's log is a record; only the session's log is cleared.
             Self::ClearConsole => match state.workbench.console_page {
                 ConsolePage::Console => {

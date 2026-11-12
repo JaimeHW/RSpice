@@ -413,8 +413,8 @@ const DESIGN_MENU: &[MenuEntry] = &[
     Separator,
     // The design checks, narrowest first: the cellview in front of the
     // reader, the whole design, and the check that gates a save.
-    command(Command::CheckCellview).access('L'),
-    command(Command::CheckDesign).access('K'),
+    design(DesignCommand::CheckCellview).access('L'),
+    design(DesignCommand::CheckDesign).access('K'),
     MenuEntry::Only(
         MenuContext::NotSymbolView,
         &[project(ProjectCommand::CheckAndSave).access('C')],

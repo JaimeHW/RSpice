@@ -755,7 +755,8 @@ fn symbol_pin_checks_publish_records_routed_to_the_failing_pin() {
     let mut state = state_with_amp_symbol_pin("IN", None);
     state.open_project_session();
 
-    state.run_active_symbol_pin_checks();
+    let facts = state.slot_facts();
+    super::symbol_document::run_active_symbol_pin_checks(&mut state.model, facts);
 
     let subject = CellViewRef::new("work", "amp", "symbol");
     let batch = state
@@ -1071,7 +1072,8 @@ fn symbol_log_anchor_opens_symbol_view_and_selects_pin() {
 #[test]
 fn symbol_violation_cycle_opens_symbol_view_and_selects_pin() {
     let mut state = state_with_amp_symbol_pin("IN", None);
-    state.run_active_symbol_pin_checks();
+    let facts = state.slot_facts();
+    super::symbol_document::run_active_symbol_pin_checks(&mut state.model, facts);
     state.design.symbol.editor.clear_selection();
 
     state.navigation().cycle_violation(1);

@@ -45,7 +45,8 @@ impl AppState {
             self.edit_active_symbol_waivers(edit)?;
             // The pin checks read the symbol document, waivers and all,
             // so they are asked again rather than left stale.
-            self.run_active_symbol_pin_checks();
+            let facts = self.slot_facts();
+            run_active_symbol_pin_checks(&mut self.model, facts);
         }
         self.runs.preflight.invalidate();
         self.restate_design_checks();

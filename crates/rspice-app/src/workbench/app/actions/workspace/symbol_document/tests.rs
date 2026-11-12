@@ -480,7 +480,8 @@ fn state_with_unplaced_amp_symbol_pins(count: usize) -> AppState {
 fn symbol_pin_checks_keep_every_finding_and_log_one_line() {
     let mut state = state_with_unplaced_amp_symbol_pins(55);
 
-    state.run_active_symbol_pin_checks();
+    let facts = state.slot_facts();
+    run_active_symbol_pin_checks(&mut state.model, facts);
 
     assert_eq!(
         active_symbol_pin_finding_count(&state.model),
@@ -530,7 +531,8 @@ fn pin_findings_digest_nothing_while_idle_and_stale_on_either_input() {
         state.diagnostic_batch_standing(batch).is_current()
     };
     let mut state = state_with_unplaced_amp_symbol_pins(1);
-    state.run_active_symbol_pin_checks();
+    let facts = state.slot_facts();
+    run_active_symbol_pin_checks(&mut state.model, facts);
     assert!(current(&state));
 
     reset_computed_digests();
@@ -556,7 +558,8 @@ fn pin_findings_digest_nothing_while_idle_and_stale_on_either_input() {
         "an edit to the artwork stales the findings"
     );
 
-    state.run_active_symbol_pin_checks();
+    let facts = state.slot_facts();
+    run_active_symbol_pin_checks(&mut state.model, facts);
     assert!(current(&state));
     state.model.workspace.insert_schematic_editor(
         CellViewRef::new("work", "amp", "schematic").key(),

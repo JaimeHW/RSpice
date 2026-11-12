@@ -13,8 +13,9 @@ use rspice_schematic_editor::symbol_editor::session::SymbolTool;
 use crate::schematic::view::transient_annotation_status;
 use crate::state::{ComponentType, GridStyle, SchematicAnnotationVisibility, Tool};
 use crate::workbench::app::actions::stimulus;
+use crate::workbench::app::actions::workspace::design_checks;
 use crate::workbench::app::actions::workspace::symbol_document::{
-    active_symbol_pin_finding_count, clear_active_symbol_pin_checks,
+    active_symbol_pin_finding_count, clear_active_symbol_pin_checks, run_active_symbol_pin_checks,
 };
 use crate::workbench::app::actions::workspace::{
     NavigationParts, selected_hierarchy_master, selected_instance_veriloga_source,
@@ -46,6 +47,7 @@ use crate::workbench::app::dialogs::{
     stimulus_link, symbol_definition, visibility_options,
 };
 use crate::workbench::app::{arm_schematic_tool, schematic_editor_request_source};
+use crate::workbench::app_state::SlotFacts;
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec};
 use crate::workbench::framework::dialogs::DialogKey;
 use crate::workbench::framework::feature::{
@@ -80,8 +82,8 @@ impl CommandSet for DesignCommand {
     }
 
     /// The schematic dialogs need a schematic or testbench in front of the
-    /// reader; Design rule setup needs only the project, which the registry
-    /// already asks for. Rename names what it can act on; Replace instance and
+    /// reader; Design rule setup and Check design need only the project,
+    /// which the registry already asks for. Rename names what it can act on; Replace instance and
     /// Create hierarchy name the first thing missing: the schematic, an
     /// editable one, then something in it to act on. Find and replace needs
     /// an editable schematic or testbench in front of the reader and names
@@ -94,8 +96,9 @@ impl CommandSet for DesignCommand {
     /// Placing is an edit of the schematic, so a read-only view is the one
     /// extra thing it needs beyond a definition to place.
     ///
-    /// The select tool and the grid cycle act on a schematic or a symbol in
-    /// front; the grid styles and Fit content on a schematic alone.
+    /// The select tool, the grid cycle and Check cellview act on a schematic
+    /// or a symbol in front, where a symbol checks its pin contract; the grid
+    /// styles and Fit content on a schematic alone.
     ///
     /// Moving up the hierarchy needs a schematic in front below its root;
     /// a descent needs a schematic in front, then something to descend
@@ -111,7 +114,7 @@ impl CommandSet for DesignCommand {
             | Self::FitSchematicContent => {
                 (!schematic).then_some("command is unavailable in this context")
             }
-            Self::SelectTool | Self::CycleGrid => {
+            Self::SelectTool | Self::CycleGrid | Self::CheckCellview => {
                 let symbol = routed::symbol_editor(reads.wb.workspace, reads.model);
                 (!schematic && !symbol).then_some("command is unavailable in this context")
             }
@@ -122,7 +125,7 @@ impl CommandSet for DesignCommand {
             Self::SelectionBulkEdit | Self::ReviewComments => {
                 (!schematic).then_some("open a schematic project")
             }
-            Self::RuleSetup => None,
+            Self::RuleSetup | Self::CheckDesign => None,
             Self::RenameSelection
                 if schematic && rename::rename_selection_available(reads.model) =>
             {
@@ -437,13 +440,24 @@ impl CommandSet for DesignCommand {
                 if routed::symbol_editor(cx.wb.workspace, cx.model) {
                     clear_active_symbol_pin_checks(cx.model);
                 } else {
-                    let facts = cx
-                        .runs
-                        .slot_facts(cx.state.schematic_visibility.review_markers);
+                    let facts = check_facts(cx);
                     cx.model.clear_active_design_check(facts);
                 }
                 cx.model.design_checks.drc_results = None;
                 cx.model.design_checks.drc_checked_version = 0;
+            }
+            // A symbol in front has its pins checked against its schematic.
+            Self::CheckCellview if routed::symbol_editor(cx.wb.workspace, cx.model) => {
+                let facts = check_facts(cx);
+                run_active_symbol_pin_checks(cx.model, facts);
+            }
+            Self::CheckCellview => {
+                let facts = check_facts(cx);
+                design_checks::check_cellview(cx.model, cx.wb, facts);
+            }
+            Self::CheckDesign => {
+                let facts = check_facts(cx);
+                design_checks::check_design(cx.model, cx.wb, facts);
             }
             Self::NextViolation => navigation(cx).cycle_violation(1),
             Self::PreviousViolation => navigation(cx).cycle_violation(-1),
@@ -477,6 +491,13 @@ impl CommandSet for DesignCommand {
 /// lent from the feature's context.
 fn navigation<'a>(cx: &'a mut Cx<'_, DesignFeature>) -> NavigationParts<'a> {
     cx.state.navigation_parts(cx.model, cx.wb, cx.runs)
+}
+
+/// The slots' facts a check reads and publishes against: the runs' with the
+/// schematic's review markers, as the session's own are.
+fn check_facts(cx: &Cx<'_, DesignFeature>) -> SlotFacts {
+    cx.runs
+        .slot_facts(cx.state.schematic_visibility.review_markers)
 }
 
 /// Whether a check's results stand against the view in front: the symbol's

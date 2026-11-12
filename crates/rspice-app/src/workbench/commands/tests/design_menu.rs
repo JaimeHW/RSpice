@@ -92,36 +92,36 @@ fn design_menu_commands_explain_wrong_context_and_read_only_states() {
 /// old one keeps checking the cellview in front of the reader.
 #[test]
 fn the_check_commands_name_their_reach_and_keep_the_check_family_keys() {
-    assert_eq!(Command::CheckCellview.stable_id(), "check-cellview");
-    assert_eq!(Command::CheckCellview.spec().label, "Check cellview");
-    assert_eq!(Command::CheckDesign.stable_id(), "check-design");
-    assert_eq!(Command::CheckDesign.spec().label, "Check design");
-    assert_eq!(
-        Command::from_stable_id("run-checks"),
-        Some(Command::CheckCellview)
-    );
-    for command in [Command::CheckCellview, Command::CheckDesign] {
-        assert_eq!(command.spec().group, "Design");
-        assert!(command.palette_visible(), "{command:?}");
+    let cellview = DesignCommand::CheckCellview.declared_spec();
+    let design = DesignCommand::CheckDesign.declared_spec();
+    assert_eq!(cellview.key.as_str(), "check-cellview");
+    assert_eq!(cellview.label, "Check cellview");
+    assert_eq!(design.key.as_str(), "check-design");
+    assert_eq!(design.label, "Check design");
+    let registry = vocabulary::command_registry();
+    assert_eq!(registry.resolve("run-checks"), Some(cellview.key));
+    for spec in [&cellview, &design] {
+        assert_eq!(spec.group, "Design");
         assert!(
-            vocabulary::COMMAND_REGISTRY.contains(&command),
-            "{command:?}"
+            spec.flags.contains(
+                crate::workbench::framework::command_registry::CommandFlags::PALETTE_VISIBLE
+            ),
+            "{}",
+            spec.label
         );
+        assert!(registry.order().contains(&spec.key), "{}", spec.label);
     }
     // The cellview check keeps the key the one check had, beside Check and
     // Save's; the design check takes no chord the family has left, because
     // Ctrl+Alt+E is AltGr+E on most European layouts.
-    assert_eq!(
-        Command::CheckCellview.shortcut_bindings()[0].chord.label,
-        "Ctrl+E"
-    );
+    assert_eq!(cellview.bindings[0].chord.label, "Ctrl+E");
     assert_eq!(
         ProjectCommand::CheckAndSave.declared_spec().bindings[0]
             .chord
             .label,
         "Ctrl+Shift+E"
     );
-    assert!(Command::CheckDesign.shortcut_bindings().is_empty());
+    assert!(design.bindings.is_empty());
 }
 
 /// Check Design checks the configured design whichever view is open; Check
@@ -129,16 +129,18 @@ fn the_check_commands_name_their_reach_and_keep_the_check_family_keys() {
 #[test]
 fn check_design_is_offered_wherever_a_project_is_open() {
     let mut app = RSpiceApp::test_instance();
+    let check_design = DesignCommand::CheckDesign.key();
+    let check_cellview = DesignCommand::CheckCellview.key();
     app.state.open_project_session();
     app.state.workbench.activate(Workspace::Results);
-    assert!(Command::CheckDesign.is_enabled(&app));
-    assert!(!Command::CheckCellview.is_enabled(&app));
+    assert!(app.command_key_enabled(check_design));
+    assert!(!app.command_key_enabled(check_cellview));
 
     app.state.workbench.activate(Workspace::Design);
-    assert!(Command::CheckCellview.is_enabled(&app));
+    assert!(app.command_key_enabled(check_cellview));
 
     app.state.close_project_session();
-    assert!(!Command::CheckDesign.is_enabled(&app));
+    assert!(!app.command_key_enabled(check_design));
 }
 
 #[test]

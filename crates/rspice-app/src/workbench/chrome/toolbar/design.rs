@@ -263,7 +263,7 @@ pub(in crate::workbench) fn design_tools(
     toolbar_text_command(
         ui,
         app,
-        Command::CheckCellview.key(),
+        DesignCommand::CheckCellview.key(),
         WorkbenchIcon::Check,
         "Check cellview",
         layout,
@@ -271,7 +271,7 @@ pub(in crate::workbench) fn design_tools(
     toolbar_text_command(
         ui,
         app,
-        Command::CheckDesign.key(),
+        DesignCommand::CheckDesign.key(),
         WorkbenchIcon::Check,
         "Check design",
         layout,

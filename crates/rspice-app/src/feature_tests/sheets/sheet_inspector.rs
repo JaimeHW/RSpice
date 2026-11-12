@@ -11,7 +11,7 @@ use crate::state::{
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::drawing_sheet_edit::DrawingSheetEdit;
 use crate::workbench::app_state::AppState;
-use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::docks::inspector::design::sheet::*;
 use crate::workbench::docks::inspector::design::tests::{accesskit_nodes, painted_panel};
 
@@ -770,7 +770,7 @@ fn checks_appear_only_for_findings_on_this_sheet() {
         "RC Lowpass Filter",
         &mut app.state.model.schematic,
     );
-    Command::CheckCellview.execute(&mut app);
+    app.execute_command_key(DesignCommand::CheckCellview.key());
     let clean = painted_panel(|ui| sheet_panel(ui, &mut app.state));
     assert!(!clean.contains("Checks"), "{clean}");
 
@@ -780,7 +780,7 @@ fn checks_appear_only_for_findings_on_this_sheet() {
         .document_mut_for_test()
         .wires
         .pop();
-    Command::CheckCellview.execute(&mut app);
+    app.execute_command_key(DesignCommand::CheckCellview.key());
     let painted = painted_panel(|ui| sheet_panel(ui, &mut app.state));
     assert!(painted.contains("Checks\n"), "{painted}");
     assert!(painted.contains("Connectivity\n"), "{painted}");
