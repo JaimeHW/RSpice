@@ -4635,10 +4635,10 @@ impl Instance {
 
     pub const STAMP_PATTERN: rspice_veriloga_runtime::GeneratedVerilogAStampPattern = rspice_veriloga_runtime::GeneratedVerilogAStampPattern { resistive: &[(0, 0), (0, 4), (1, 1), (1, 6), (2, 2), (2, 5), (3, 3), (3, 4), (3, 5), (3, 6), (3, 7), (3, 8), (3, 9), (4, 0), (4, 4), (4, 5), (4, 6), (4, 7), (4, 8), (4, 10), (5, 2), (5, 4), (5, 5), (5, 6), (5, 7), (5, 9), (5, 10), (6, 1), (6, 4), (6, 5), (6, 6), (6, 7), (7, 3), (7, 4), (7, 5), (7, 6), (7, 7), (7, 8), (7, 9), (8, 3), (8, 4), (8, 7), (8, 8), (9, 3), (9, 5), (9, 7), (9, 9), (10, 10)], dynamic: &[(6, 10)], reactive: &[(4, 4), (4, 5), (4, 6), (4, 7), (4, 8), (5, 4), (5, 5), (5, 6), (5, 7), (5, 9), (6, 4), (6, 5), (6, 6), (6, 7), (6, 10), (7, 4), (7, 5), (7, 6), (7, 7), (8, 4), (8, 8), (9, 5), (9, 9)], rhs_rows: &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10] };
 
-    pub const SWITCH_SHORTS: [rspice_veriloga_runtime::GeneratedSwitchShort; 0] = [];
+    pub const PRIVATE_SWITCHES: [rspice_veriloga_runtime::GeneratedPrivateSwitch; 0] = [];
 
-    /// Bit `i` is set while `SWITCH_SHORTS[i]` is in its potential arm.
-    pub fn switch_branch_shorts(&mut self, ctx: &GeneratedEvalContext<'_>) -> u64 {
+    /// Bit `i` is set while `PRIVATE_SWITCHES[i]` is in its potential arm.
+    pub fn private_switch_kinds(&mut self, ctx: &GeneratedEvalContext<'_>) -> u64 {
         let _ = ctx;
         0
     }

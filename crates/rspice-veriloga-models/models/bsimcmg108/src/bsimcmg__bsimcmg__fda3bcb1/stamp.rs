@@ -3231,12 +3231,12 @@ impl Instance {
 		let HXE=staged[382];
 		let HYK=staged[541]!=0.0;
 		let HYM=0f64;
-		let HYP=node_potentials[9];
-		let HYR=staged[542];
-		let HZA=node_potentials[10];
-		let HZC=staged[543];
-		let HZL=node_potentials[11];
-		let HZN=staged[544];
+		let HYP=staged[542];
+		let HYR=node_potentials[9];
+		let HZE=staged[543];
+		let HZG=node_potentials[10];
+		let HZT=staged[544];
+		let HZV=node_potentials[11];
 		let mut oEVQ=0.0;
 		let mut oEVR=L5([0.0;5]);
 		let mut oEVS=L5([0.0;5]);
@@ -11714,312 +11714,357 @@ impl Instance {
 		HYN=EZ;
 		HYO=HYM;
 		}
-		let HYQ=EZ+ HYP;
-		let HYW;
-		let HYX;
-		if HYR!=0.0{
-		let HYS=EPV- AQC;
-		let HYT=L2([EPX,0.0])- L2([0.0,AQE]);
-		let HYU=L3([HYT[0],HYT[1],0.0]);
-		HYW=HYS;
-		HYX=HYU;
+		let HYT;
+		let HYU;
+		if HYP!=0.0{
+		let HYQ=L6([0.0,0.0,0.0,0.0,0.0,1f64]);
+		HYT=HYR;
+		HYU=HYQ;
 		}else{
-		let HYV=L3([0.0,0.0,1f64]);
-		HYW=HYP;
-		HYX=HYV;
+		let HYS=L6([HSZ[0],HSZ[1],HSZ[2],HSZ[3],HSZ[4],0.0]);
+		HYT=HSX;
+		HYU=HYS;
 		}
-		let HYY=L6([HYX[0],HYX[1],0.0,0.0,0.0,HYX[2]])- L6([HSZ[0],HSZ[1],HSZ[2],HSZ[3],HSZ[4],0.0]);
-		let HYZ=EZ+ (HYW- HSX);
-		let HZB=EZ+ HZA;
-		let HZH;
+		let HYV=EZ+ HYT;
+		let HZA;
+		let HZB;
+		if HYP!=0.0{
+		let HYW=EPV- AQC;
+		let HYX=L2([EPX,0.0])- L2([0.0,AQE]);
+		let HYY=L3([HYX[0],HYX[1],0.0]);
+		HZA=HYW;
+		HZB=HYY;
+		}else{
+		let HYZ=L3([0.0,0.0,1f64]);
+		HZA=HYR;
+		HZB=HYZ;
+		}
+		let HZC=L6([HZB[0],HZB[1],0.0,0.0,0.0,HZB[2]])- L6([HSZ[0],HSZ[1],HSZ[2],HSZ[3],HSZ[4],0.0]);
+		let HZD=EZ+ (HZA- HSX);
 		let HZI;
-		if HZC!=0.0{
-		let HZD=HSQ- APU;
-		let HZE=L2([1f64,0.0])- L2([0.0,APX]);
-		let HZF=L3([HZE[0],HZE[1],0.0]);
-		HZH=HZD;
-		HZI=HZF;
-		}else{
-		let HZG=L3([0.0,0.0,1f64]);
-		HZH=HZA;
+		let HZJ;
+		if HZE!=0.0{
+		let HZF=L3([0.0,0.0,1f64]);
 		HZI=HZG;
-		}
-		let HZJ=HZI- L3([HUS[0],HUS[1],0.0]);
-		let HZK=EZ+ (HZH- HUR);
-		let HZM=EZ+ HZL;
-		let HZS;
-		let HZT;
-		if HZN!=0.0{
-		let HZO=EOP- APV;
-		let HZP=L2([EOR,0.0])- L2([0.0,APY]);
-		let HZQ=L3([HZP[0],HZP[1],0.0]);
-		HZS=HZO;
-		HZT=HZQ;
+		HZJ=HZF;
 		}else{
-		let HZR=L3([0.0,0.0,1f64]);
-		HZS=HZL;
-		HZT=HZR;
+		let HZH=L3([HUS[0],HUS[1],0.0]);
+		HZI=HUR;
+		HZJ=HZH;
 		}
-		let HZU=L6([HZT[0],0.0,HZT[1],0.0,0.0,HZT[2]])- L6([HTA[0],HTA[1],HTA[2],HTA[3],HTA[4],0.0]);
-		let HZV=EZ+ (HZS- HSY);
-		let HZW=HLB[0];
-		let HZX=HLB[1];
-		let HZY=HLB[2];
-		let HZZ=HLB[3];
-		let IAA=HLB[4];
-		let IAB=HLC[0];
-		let IAC=HLC[1];
-		let IAD=HLC[2];
-		let IAE=HLC[3];
-		let IAF=HLC[4];
-		let IAG=HLF[0];
-		let IAH=HLF[1];
-		let IAI=HLF[2];
-		let IAJ=HLF[3];
-		let IAK=HLF[4];
-		let IAL=HLM[0];
-		let IAM=HLM[1];
-		let IAN=HLM[2];
-		let IAO=HLM[3];
-		let IAP=HLM[4];
-		let IAQ=HMS[0];
-		let IAR=HMS[1];
-		let IAS=HMS[2];
-		let IAT=HMT[0];
-		let IAU=HMT[1];
-		let IAV=HMT[2];
-		let IAW=HMT[3];
-		let IAX=HMT[4];
-		let IAY=HMU[0];
-		let IAZ=HMU[1];
-		let IBA=HMU[2];
-		let IBB=HMU[3];
-		let IBC=HMU[4];
-		let IBD=HMV[0];
-		let IBE=HMV[1];
-		let IBF=HMV[2];
-		let IBG=HMV[3];
-		let IBH=HMV[4];
-		let IBI=HMW[0];
-		let IBJ=HMW[1];
-		let IBK=HMW[2];
-		let IBL=HMW[3];
-		let IBM=HMW[4];
-		let IBN=HMX[0];
-		let IBO=HMX[1];
-		let IBP=HMX[2];
-		let IBQ=HMX[3];
-		let IBR=HMX[4];
-		let IBS=HMY[0];
-		let IBT=HMY[1];
-		let IBU=HMY[2];
-		let IBV=HMY[3];
-		let IBW=HMY[4];
-		let IBX=HMZ[0];
-		let IBY=HMZ[1];
-		let IBZ=HMZ[2];
-		let ICA=HMZ[3];
-		let ICB=HMZ[4];
-		let ICC=HNA[0];
-		let ICD=HNA[1];
-		let ICE=HNA[2];
-		let ICF=HNB[0];
-		let ICG=HNB[1];
-		let ICH=HNB[2];
-		let ICI=HNB[3];
-		let ICJ=HNB[4];
-		let ICK=HNC[0];
-		let ICL=HNC[1];
-		let ICM=HNC[2];
-		let ICN=HNC[3];
-		let ICO=HNC[4];
-		let ICP=HND[0];
-		let ICQ=HND[1];
-		let ICR=HND[2];
-		let ICS=HND[3];
-		let ICT=HND[4];
-		let ICU=HNE[0];
-		let ICV=HNE[1];
-		let ICW=HNE[2];
-		let ICX=HNE[3];
-		let ICY=HNE[4];
-		let ICZ=HNF[0];
-		let IDA=HNF[1];
-		let IDB=HNF[2];
-		let IDC=HNF[3];
-		let IDD=HNF[4];
-		let IDE=HNG[0];
-		let IDF=HNG[1];
-		let IDG=HNG[2];
-		let IDH=HNG[3];
-		let IDI=HNG[4];
-		let IDJ=HNH[0];
-		let IDK=HNH[1];
-		let IDL=HNH[2];
-		let IDM=HNH[3];
-		let IDN=HNH[4];
-		let IDO=HPC[0];
-		let IDP=HPC[1];
-		let IDQ=HPC[2];
-		let IDR=HPC[3];
-		let IDS=HPC[4];
-		let IDT=HPD[0];
-		let IDU=HPD[1];
-		let IDV=HPD[2];
-		let IDW=HPD[3];
-		let IDX=HPD[4];
-		let IDY=HPK[0];
-		let IDZ=HPK[1];
-		let IEA=HPK[2];
-		let IEB=HPL[0];
-		let IEC=HPL[1];
-		let IED=HPL[2];
-		let IEE=HPO[0];
-		let IEF=HPO[1];
-		let IEG=HPO[2];
-		let IEH=HPU[0];
-		let IEI=HPU[1];
-		let IEJ=HPU[2];
-		let IEK=HQA[0];
-		let IEL=HQA[1];
-		let IEM=HQA[2];
-		let IEN=HQF[0];
-		let IEO=HQF[1];
-		let IEP=HQF[2];
-		let IEQ=HQF[3];
-		let IER=HQF[4];
-		let IES=HQI[0];
-		let IET=HQI[1];
-		let IEU=HQI[2];
-		let IEV=HQI[3];
-		let IEW=HQI[4];
-		let IEX=HQL[0];
-		let IEY=HQL[1];
-		let IEZ=HRA[0];
-		let IFA=HRA[1];
-		let IFB=HRA[2];
-		let IFC=HRB[0];
-		let IFD=HRB[1];
-		let IFE=HRB[2];
-		let IFF=HRU[0];
-		let IFG=HRU[1];
-		let IFH=HRU[2];
-		let IFI=HRV[0];
-		let IFJ=HRV[1];
-		let IFK=HRV[2];
-		let IFL=HWA[0];
-		let IFM=HWA[1];
-		let IFN=HWA[2];
-		let IFO=HWA[3];
-		let IFP=HWA[4];
-		let IFQ=HWA[5];
-		let IFR=HWB[0];
-		let IFS=HWB[1];
-		let IFT=HWB[2];
-		let IFU=HWB[3];
-		let IFV=HWB[4];
-		let IFW=HWB[5];
-		let IFX=HWC[0];
-		let IFY=HWC[1];
-		let IFZ=HWC[2];
-		let IGA=HWC[3];
-		let IGB=HWC[4];
-		let IGC=HWC[5];
-		let IGD=HWD[0];
-		let IGE=HWD[1];
-		let IGF=HWD[2];
-		let IGG=HWD[3];
-		let IGH=HWD[4];
-		let IGI=HWD[5];
-		let IGJ=HWZ[0];
-		let IGK=HWZ[1];
-		let IGL=HWZ[2];
-		let IGM=HWZ[3];
-		let IGN=HWZ[4];
-		let IGO=HWZ[5];
-		let IGP=HWZ[6];
-		let IGQ=HXA[0];
-		let IGR=HXA[1];
-		let IGS=HXA[2];
-		let IGT=HXA[3];
-		let IGU=HXA[4];
-		let IGV=HXC;
-		let IGW=HXI;
-		let IGX=HYO;
-		let IGY=1f64;
-		let IGZ=HYY[0];
-		let IHA=HYY[1];
-		let IHB=HYY[2];
-		let IHC=HYY[3];
-		let IHD=HYY[4];
-		let IHE=HYY[5];
-		let IHF=1f64;
-		let IHG=HZJ[0];
-		let IHH=HZJ[1];
-		let IHI=HZJ[2];
-		let IHJ=1f64;
-		let IHK=HZU[0];
-		let IHL=HZU[1];
-		let IHM=HZU[2];
-		let IHN=HZU[3];
-		let IHO=HZU[4];
-		let IHP=HZU[5];
-		let IHQ=HLI[0];
-		let IHR=HLI[1];
-		let IHS=HLI[2];
-		let IHT=HLI[3];
-		let IHU=HLI[4];
-		let IHV=HLO[0];
-		let IHW=HLO[1];
-		let IHX=HLO[2];
-		let IHY=HLO[3];
-		let IHZ=HLO[4];
-		let IIA=HPQ[0];
-		let IIB=HPQ[1];
-		let IIC=HPQ[2];
-		let IID=HPW[0];
-		let IIE=HPW[1];
-		let IIF=HPW[2];
-		let IIG=HQC[0];
-		let IIH=HQC[1];
-		let III=HQC[2];
-		let IIJ=FGA[0];
-		let IIK=FGA[1];
-		let IIL=FGA[2];
-		let IIM=FGA[3];
-		let IIN=FGA[4];
-		let IIO=FGB[0];
-		let IIP=FGB[1];
-		let IIQ=FGB[2];
-		let IIR=FGB[3];
-		let IIS=FGB[4];
-		let IIT=FGG[0];
-		let IIU=FGG[1];
-		let IIV=HRC[0];
-		let IIW=HRC[1];
-		let IIX=HRC[2];
-		let IIY=HRD[0];
-		let IIZ=HRD[1];
-		let IJA=HRD[2];
-		let IJB=HRW[0];
-		let IJC=HRW[1];
-		let IJD=HRW[2];
-		let IJE=HRX[0];
-		let IJF=HRX[1];
-		let IJG=HRX[2];
-		let IJH=HWE[0];
-		let IJI=HWE[1];
-		let IJJ=HWE[2];
-		let IJK=HWE[3];
-		let IJL=HWE[4];
-		let IJM=HWE[5];
-		let IJN=HWF[0];
-		let IJO=HWF[1];
-		let IJP=HWF[2];
-		let IJQ=HWF[3];
-		let IJR=HWF[4];
-		let IJS=HWF[5];
-		let IJT=HXG;
+		let HZK=EZ+ HZI;
+		let HZP;
+		let HZQ;
+		if HZE!=0.0{
+		let HZL=HSQ- APU;
+		let HZM=L2([1f64,0.0])- L2([0.0,APX]);
+		let HZN=L3([HZM[0],HZM[1],0.0]);
+		HZP=HZL;
+		HZQ=HZN;
+		}else{
+		let HZO=L3([0.0,0.0,1f64]);
+		HZP=HZG;
+		HZQ=HZO;
+		}
+		let HZR=HZQ- L3([HUS[0],HUS[1],0.0]);
+		let HZS=EZ+ (HZP- HUR);
+		let HZX;
+		let HZY;
+		if HZT!=0.0{
+		let HZU=L6([0.0,0.0,0.0,0.0,0.0,1f64]);
+		HZX=HZV;
+		HZY=HZU;
+		}else{
+		let HZW=L6([HTA[0],HTA[1],HTA[2],HTA[3],HTA[4],0.0]);
+		HZX=HSY;
+		HZY=HZW;
+		}
+		let HZZ=EZ+ HZX;
+		let IAE;
+		let IAF;
+		if HZT!=0.0{
+		let IAA=EOP- APV;
+		let IAB=L2([EOR,0.0])- L2([0.0,APY]);
+		let IAC=L3([IAB[0],IAB[1],0.0]);
+		IAE=IAA;
+		IAF=IAC;
+		}else{
+		let IAD=L3([0.0,0.0,1f64]);
+		IAE=HZV;
+		IAF=IAD;
+		}
+		let IAG=L6([IAF[0],0.0,IAF[1],0.0,0.0,IAF[2]])- L6([HTA[0],HTA[1],HTA[2],HTA[3],HTA[4],0.0]);
+		let IAH=EZ+ (IAE- HSY);
+		let IAI=HLB[0];
+		let IAJ=HLB[1];
+		let IAK=HLB[2];
+		let IAL=HLB[3];
+		let IAM=HLB[4];
+		let IAN=HLC[0];
+		let IAO=HLC[1];
+		let IAP=HLC[2];
+		let IAQ=HLC[3];
+		let IAR=HLC[4];
+		let IAS=HLF[0];
+		let IAT=HLF[1];
+		let IAU=HLF[2];
+		let IAV=HLF[3];
+		let IAW=HLF[4];
+		let IAX=HLM[0];
+		let IAY=HLM[1];
+		let IAZ=HLM[2];
+		let IBA=HLM[3];
+		let IBB=HLM[4];
+		let IBC=HMS[0];
+		let IBD=HMS[1];
+		let IBE=HMS[2];
+		let IBF=HMT[0];
+		let IBG=HMT[1];
+		let IBH=HMT[2];
+		let IBI=HMT[3];
+		let IBJ=HMT[4];
+		let IBK=HMU[0];
+		let IBL=HMU[1];
+		let IBM=HMU[2];
+		let IBN=HMU[3];
+		let IBO=HMU[4];
+		let IBP=HMV[0];
+		let IBQ=HMV[1];
+		let IBR=HMV[2];
+		let IBS=HMV[3];
+		let IBT=HMV[4];
+		let IBU=HMW[0];
+		let IBV=HMW[1];
+		let IBW=HMW[2];
+		let IBX=HMW[3];
+		let IBY=HMW[4];
+		let IBZ=HMX[0];
+		let ICA=HMX[1];
+		let ICB=HMX[2];
+		let ICC=HMX[3];
+		let ICD=HMX[4];
+		let ICE=HMY[0];
+		let ICF=HMY[1];
+		let ICG=HMY[2];
+		let ICH=HMY[3];
+		let ICI=HMY[4];
+		let ICJ=HMZ[0];
+		let ICK=HMZ[1];
+		let ICL=HMZ[2];
+		let ICM=HMZ[3];
+		let ICN=HMZ[4];
+		let ICO=HNA[0];
+		let ICP=HNA[1];
+		let ICQ=HNA[2];
+		let ICR=HNB[0];
+		let ICS=HNB[1];
+		let ICT=HNB[2];
+		let ICU=HNB[3];
+		let ICV=HNB[4];
+		let ICW=HNC[0];
+		let ICX=HNC[1];
+		let ICY=HNC[2];
+		let ICZ=HNC[3];
+		let IDA=HNC[4];
+		let IDB=HND[0];
+		let IDC=HND[1];
+		let IDD=HND[2];
+		let IDE=HND[3];
+		let IDF=HND[4];
+		let IDG=HNE[0];
+		let IDH=HNE[1];
+		let IDI=HNE[2];
+		let IDJ=HNE[3];
+		let IDK=HNE[4];
+		let IDL=HNF[0];
+		let IDM=HNF[1];
+		let IDN=HNF[2];
+		let IDO=HNF[3];
+		let IDP=HNF[4];
+		let IDQ=HNG[0];
+		let IDR=HNG[1];
+		let IDS=HNG[2];
+		let IDT=HNG[3];
+		let IDU=HNG[4];
+		let IDV=HNH[0];
+		let IDW=HNH[1];
+		let IDX=HNH[2];
+		let IDY=HNH[3];
+		let IDZ=HNH[4];
+		let IEA=HPC[0];
+		let IEB=HPC[1];
+		let IEC=HPC[2];
+		let IED=HPC[3];
+		let IEE=HPC[4];
+		let IEF=HPD[0];
+		let IEG=HPD[1];
+		let IEH=HPD[2];
+		let IEI=HPD[3];
+		let IEJ=HPD[4];
+		let IEK=HPK[0];
+		let IEL=HPK[1];
+		let IEM=HPK[2];
+		let IEN=HPL[0];
+		let IEO=HPL[1];
+		let IEP=HPL[2];
+		let IEQ=HPO[0];
+		let IER=HPO[1];
+		let IES=HPO[2];
+		let IET=HPU[0];
+		let IEU=HPU[1];
+		let IEV=HPU[2];
+		let IEW=HQA[0];
+		let IEX=HQA[1];
+		let IEY=HQA[2];
+		let IEZ=HQF[0];
+		let IFA=HQF[1];
+		let IFB=HQF[2];
+		let IFC=HQF[3];
+		let IFD=HQF[4];
+		let IFE=HQI[0];
+		let IFF=HQI[1];
+		let IFG=HQI[2];
+		let IFH=HQI[3];
+		let IFI=HQI[4];
+		let IFJ=HQL[0];
+		let IFK=HQL[1];
+		let IFL=HRA[0];
+		let IFM=HRA[1];
+		let IFN=HRA[2];
+		let IFO=HRB[0];
+		let IFP=HRB[1];
+		let IFQ=HRB[2];
+		let IFR=HRU[0];
+		let IFS=HRU[1];
+		let IFT=HRU[2];
+		let IFU=HRV[0];
+		let IFV=HRV[1];
+		let IFW=HRV[2];
+		let IFX=HWA[0];
+		let IFY=HWA[1];
+		let IFZ=HWA[2];
+		let IGA=HWA[3];
+		let IGB=HWA[4];
+		let IGC=HWA[5];
+		let IGD=HWB[0];
+		let IGE=HWB[1];
+		let IGF=HWB[2];
+		let IGG=HWB[3];
+		let IGH=HWB[4];
+		let IGI=HWB[5];
+		let IGJ=HWC[0];
+		let IGK=HWC[1];
+		let IGL=HWC[2];
+		let IGM=HWC[3];
+		let IGN=HWC[4];
+		let IGO=HWC[5];
+		let IGP=HWD[0];
+		let IGQ=HWD[1];
+		let IGR=HWD[2];
+		let IGS=HWD[3];
+		let IGT=HWD[4];
+		let IGU=HWD[5];
+		let IGV=HWZ[0];
+		let IGW=HWZ[1];
+		let IGX=HWZ[2];
+		let IGY=HWZ[3];
+		let IGZ=HWZ[4];
+		let IHA=HWZ[5];
+		let IHB=HWZ[6];
+		let IHC=HXA[0];
+		let IHD=HXA[1];
+		let IHE=HXA[2];
+		let IHF=HXA[3];
+		let IHG=HXA[4];
+		let IHH=HXC;
+		let IHI=HXI;
+		let IHJ=HYO;
+		let IHK=HYU[0];
+		let IHL=HYU[1];
+		let IHM=HYU[2];
+		let IHN=HYU[3];
+		let IHO=HYU[4];
+		let IHP=HYU[5];
+		let IHQ=HZC[0];
+		let IHR=HZC[1];
+		let IHS=HZC[2];
+		let IHT=HZC[3];
+		let IHU=HZC[4];
+		let IHV=HZC[5];
+		let IHW=HZJ[0];
+		let IHX=HZJ[1];
+		let IHY=HZJ[2];
+		let IHZ=HZR[0];
+		let IIA=HZR[1];
+		let IIB=HZR[2];
+		let IIC=HZY[0];
+		let IID=HZY[1];
+		let IIE=HZY[2];
+		let IIF=HZY[3];
+		let IIG=HZY[4];
+		let IIH=HZY[5];
+		let III=IAG[0];
+		let IIJ=IAG[1];
+		let IIK=IAG[2];
+		let IIL=IAG[3];
+		let IIM=IAG[4];
+		let IIN=IAG[5];
+		let IIO=HLI[0];
+		let IIP=HLI[1];
+		let IIQ=HLI[2];
+		let IIR=HLI[3];
+		let IIS=HLI[4];
+		let IIT=HLO[0];
+		let IIU=HLO[1];
+		let IIV=HLO[2];
+		let IIW=HLO[3];
+		let IIX=HLO[4];
+		let IIY=HPQ[0];
+		let IIZ=HPQ[1];
+		let IJA=HPQ[2];
+		let IJB=HPW[0];
+		let IJC=HPW[1];
+		let IJD=HPW[2];
+		let IJE=HQC[0];
+		let IJF=HQC[1];
+		let IJG=HQC[2];
+		let IJH=FGA[0];
+		let IJI=FGA[1];
+		let IJJ=FGA[2];
+		let IJK=FGA[3];
+		let IJL=FGA[4];
+		let IJM=FGB[0];
+		let IJN=FGB[1];
+		let IJO=FGB[2];
+		let IJP=FGB[3];
+		let IJQ=FGB[4];
+		let IJR=FGG[0];
+		let IJS=FGG[1];
+		let IJT=HRC[0];
+		let IJU=HRC[1];
+		let IJV=HRC[2];
+		let IJW=HRD[0];
+		let IJX=HRD[1];
+		let IJY=HRD[2];
+		let IJZ=HRW[0];
+		let IKA=HRW[1];
+		let IKB=HRW[2];
+		let IKC=HRX[0];
+		let IKD=HRX[1];
+		let IKE=HRX[2];
+		let IKF=HWE[0];
+		let IKG=HWE[1];
+		let IKH=HWE[2];
+		let IKI=HWE[3];
+		let IKJ=HWE[4];
+		let IKK=HWE[5];
+		let IKL=HWF[0];
+		let IKM=HWF[1];
+		let IKN=HWF[2];
+		let IKO=HWF[3];
+		let IKP=HWF[4];
+		let IKQ=HWF[5];
+		let IKR=HXG;
         {
             let record = &mut *self.canonical_output_record;
             record[0] = R;
@@ -12151,7 +12196,7 @@ impl Instance {
             Some(5),
             multiplicity * (HKZ),
             [3, 4, 5, 6, 7],
-            [HZW, HZX, HZY, HZZ, IAA],
+            [IAI, IAJ, IAK, IAL, IAM],
             [],
             [],
             multiplicity,
@@ -12161,7 +12206,7 @@ impl Instance {
             Some(4),
             multiplicity * (HLA),
             [3, 4, 5, 6, 7],
-            [IAB, IAC, IAD, IAE, IAF],
+            [IAN, IAO, IAP, IAQ, IAR],
             [],
             [],
             multiplicity,
@@ -12171,7 +12216,7 @@ impl Instance {
             Some(5),
             multiplicity * (HLJ),
             [3, 4, 5, 6, 7],
-            [IAG, IAH, IAI, IAJ, IAK],
+            [IAS, IAT, IAU, IAV, IAW],
             [],
             [],
             multiplicity,
@@ -12181,7 +12226,7 @@ impl Instance {
             Some(5),
             multiplicity * (HLP),
             [3, 4, 5, 6, 7],
-            [IAL, IAM, IAN, IAO, IAP],
+            [IAX, IAY, IAZ, IBA, IBB],
             [],
             [],
             multiplicity,
@@ -12191,7 +12236,7 @@ impl Instance {
             Some(5),
             multiplicity * (HMC),
             [4, 5, 7],
-            [IAQ, IAR, IAS],
+            [IBC, IBD, IBE],
             [],
             [],
             multiplicity,
@@ -12201,7 +12246,7 @@ impl Instance {
             Some(5),
             multiplicity * (HMD),
             [3, 4, 5, 6, 7],
-            [IAT, IAU, IAV, IAW, IAX],
+            [IBF, IBG, IBH, IBI, IBJ],
             [],
             [],
             multiplicity,
@@ -12211,7 +12256,7 @@ impl Instance {
             Some(4),
             multiplicity * (HME),
             [3, 4, 5, 6, 7],
-            [IAY, IAZ, IBA, IBB, IBC],
+            [IBK, IBL, IBM, IBN, IBO],
             [],
             [],
             multiplicity,
@@ -12221,7 +12266,7 @@ impl Instance {
             Some(3),
             multiplicity * (HMF),
             [3, 4, 5, 6, 7],
-            [IBD, IBE, IBF, IBG, IBH],
+            [IBP, IBQ, IBR, IBS, IBT],
             [],
             [],
             multiplicity,
@@ -12231,7 +12276,7 @@ impl Instance {
             Some(3),
             multiplicity * (HMG),
             [3, 4, 5, 6, 7],
-            [IBI, IBJ, IBK, IBL, IBM],
+            [IBU, IBV, IBW, IBX, IBY],
             [],
             [],
             multiplicity,
@@ -12241,7 +12286,7 @@ impl Instance {
             Some(3),
             multiplicity * (HMH),
             [3, 4, 5, 6, 7],
-            [IBN, IBO, IBP, IBQ, IBR],
+            [IBZ, ICA, ICB, ICC, ICD],
             [],
             [],
             multiplicity,
@@ -12251,7 +12296,7 @@ impl Instance {
             Some(5),
             multiplicity * (HMI),
             [3, 4, 5, 6, 7],
-            [IBS, IBT, IBU, IBV, IBW],
+            [ICE, ICF, ICG, ICH, ICI],
             [],
             [],
             multiplicity,
@@ -12261,7 +12306,7 @@ impl Instance {
             Some(4),
             multiplicity * (HMJ),
             [3, 4, 5, 6, 7],
-            [IBX, IBY, IBZ, ICA, ICB],
+            [ICJ, ICK, ICL, ICM, ICN],
             [],
             [],
             multiplicity,
@@ -12271,7 +12316,7 @@ impl Instance {
             Some(4),
             multiplicity * (HMK),
             [4, 5, 7],
-            [ICC, ICD, ICE],
+            [ICO, ICP, ICQ],
             [],
             [],
             multiplicity,
@@ -12281,7 +12326,7 @@ impl Instance {
             Some(4),
             multiplicity * (HML),
             [3, 4, 5, 6, 7],
-            [ICF, ICG, ICH, ICI, ICJ],
+            [ICR, ICS, ICT, ICU, ICV],
             [],
             [],
             multiplicity,
@@ -12291,7 +12336,7 @@ impl Instance {
             Some(5),
             multiplicity * (HMM),
             [3, 4, 5, 6, 7],
-            [ICK, ICL, ICM, ICN, ICO],
+            [ICW, ICX, ICY, ICZ, IDA],
             [],
             [],
             multiplicity,
@@ -12301,7 +12346,7 @@ impl Instance {
             Some(3),
             multiplicity * (HMN),
             [3, 4, 5, 6, 7],
-            [ICP, ICQ, ICR, ICS, ICT],
+            [IDB, IDC, IDD, IDE, IDF],
             [],
             [],
             multiplicity,
@@ -12311,7 +12356,7 @@ impl Instance {
             Some(3),
             multiplicity * (HMO),
             [3, 4, 5, 6, 7],
-            [ICU, ICV, ICW, ICX, ICY],
+            [IDG, IDH, IDI, IDJ, IDK],
             [],
             [],
             multiplicity,
@@ -12321,7 +12366,7 @@ impl Instance {
             Some(3),
             multiplicity * (HMP),
             [3, 4, 5, 6, 7],
-            [ICZ, IDA, IDB, IDC, IDD],
+            [IDL, IDM, IDN, IDO, IDP],
             [],
             [],
             multiplicity,
@@ -12331,7 +12376,7 @@ impl Instance {
             Some(4),
             multiplicity * (HMQ),
             [3, 4, 5, 6, 7],
-            [IDE, IDF, IDG, IDH, IDI],
+            [IDQ, IDR, IDS, IDT, IDU],
             [],
             [],
             multiplicity,
@@ -12341,7 +12386,7 @@ impl Instance {
             Some(5),
             multiplicity * (HMR),
             [3, 4, 5, 6, 7],
-            [IDJ, IDK, IDL, IDM, IDN],
+            [IDV, IDW, IDX, IDY, IDZ],
             [],
             [],
             multiplicity,
@@ -12351,7 +12396,7 @@ impl Instance {
             Some(5),
             multiplicity * (HPA),
             [3, 4, 5, 6, 7],
-            [IDO, IDP, IDQ, IDR, IDS],
+            [IEA, IEB, IEC, IED, IEE],
             [],
             [],
             multiplicity,
@@ -12361,7 +12406,7 @@ impl Instance {
             Some(4),
             multiplicity * (HPB),
             [3, 4, 5, 6, 7],
-            [IDT, IDU, IDV, IDW, IDX],
+            [IEF, IEG, IEH, IEI, IEJ],
             [],
             [],
             multiplicity,
@@ -12371,7 +12416,7 @@ impl Instance {
             Some(5),
             multiplicity * (HPI),
             [3, 5, 7],
-            [IDY, IDZ, IEA],
+            [IEK, IEL, IEM],
             [],
             [],
             multiplicity,
@@ -12381,7 +12426,7 @@ impl Instance {
             Some(4),
             multiplicity * (HPJ),
             [3, 4, 7],
-            [IEB, IEC, IED],
+            [IEN, IEO, IEP],
             [],
             [],
             multiplicity,
@@ -12391,7 +12436,7 @@ impl Instance {
             Some(5),
             multiplicity * (HPR),
             [3, 5, 7],
-            [IEE, IEF, IEG],
+            [IEQ, IER, IES],
             [],
             [],
             multiplicity,
@@ -12401,7 +12446,7 @@ impl Instance {
             Some(4),
             multiplicity * (HPX),
             [3, 4, 7],
-            [IEH, IEI, IEJ],
+            [IET, IEU, IEV],
             [],
             [],
             multiplicity,
@@ -12411,7 +12456,7 @@ impl Instance {
             Some(6),
             multiplicity * (HQD),
             [3, 6, 7],
-            [IEK, IEL, IEM],
+            [IEW, IEX, IEY],
             [],
             [],
             multiplicity,
@@ -12421,7 +12466,7 @@ impl Instance {
             Some(5),
             multiplicity * (HQG),
             [3, 4, 5, 6, 7],
-            [IEN, IEO, IEP, IEQ, IER],
+            [IEZ, IFA, IFB, IFC, IFD],
             [],
             [],
             multiplicity,
@@ -12431,7 +12476,7 @@ impl Instance {
             Some(4),
             multiplicity * (HQJ),
             [3, 4, 5, 6, 7],
-            [IES, IET, IEU, IEV, IEW],
+            [IFE, IFF, IFG, IFH, IFI],
             [],
             [],
             multiplicity,
@@ -12441,7 +12486,7 @@ impl Instance {
             Some(2),
             multiplicity * (HQM),
             [0, 2],
-            [IEX, IEY],
+            [IFJ, IFK],
             [],
             [],
             multiplicity,
@@ -12451,7 +12496,7 @@ impl Instance {
             Some(2),
             multiplicity * (HQW),
             [2, 5, 6],
-            [IEZ, IFA, IFB],
+            [IFL, IFM, IFN],
             [],
             [],
             multiplicity,
@@ -12461,7 +12506,7 @@ impl Instance {
             Some(0),
             multiplicity * (HQX),
             [0, 4, 6],
-            [IFC, IFD, IFE],
+            [IFO, IFP, IFQ],
             [],
             [],
             multiplicity,
@@ -12471,7 +12516,7 @@ impl Instance {
             Some(5),
             multiplicity * (HRQ),
             [3, 6, 7],
-            [IFF, IFG, IFH],
+            [IFR, IFS, IFT],
             [],
             [],
             multiplicity,
@@ -12481,7 +12526,7 @@ impl Instance {
             Some(5),
             multiplicity * (HRR),
             [3, 6, 7],
-            [IFI, IFJ, IFK],
+            [IFU, IFV, IFW],
             [],
             [],
             multiplicity,
@@ -12521,7 +12566,7 @@ impl Instance {
             None,
             multiplicity * (HVU),
             [3, 4, 5, 6, 7, 8],
-            [IFL, IFM, IFN, IFO, IFP, IFQ],
+            [IFX, IFY, IFZ, IGA, IGB, IGC],
             [],
             [],
             multiplicity,
@@ -12541,7 +12586,7 @@ impl Instance {
             Some(5),
             multiplicity * (HVV),
             [3, 4, 5, 6, 7, 8],
-            [IFR, IFS, IFT, IFU, IFV, IFW],
+            [IGD, IGE, IGF, IGG, IGH, IGI],
             [],
             [],
             multiplicity,
@@ -12551,7 +12596,7 @@ impl Instance {
             Some(5),
             multiplicity * (HVW),
             [3, 4, 5, 6, 7, 8],
-            [IFX, IFY, IFZ, IGA, IGB, IGC],
+            [IGJ, IGK, IGL, IGM, IGN, IGO],
             [],
             [],
             multiplicity,
@@ -12561,7 +12606,7 @@ impl Instance {
             Some(4),
             multiplicity * (HVX),
             [3, 4, 5, 6, 7, 8],
-            [IGD, IGE, IGF, IGG, IGH, IGI],
+            [IGP, IGQ, IGR, IGS, IGT, IGU],
             [],
             [],
             multiplicity,
@@ -12641,7 +12686,7 @@ impl Instance {
             None,
             multiplicity * (HWX),
             [0, 2, 3, 4, 5, 6, 7],
-            [IGJ, IGK, IGL, IGM, IGN, IGO, IGP],
+            [IGV, IGW, IGX, IGY, IGZ, IHA, IHB],
             [],
             [],
             multiplicity,
@@ -12651,7 +12696,7 @@ impl Instance {
             None,
             multiplicity * (HWY),
             [3, 4, 5, 6, 7],
-            [IGQ, IGR, IGS, IGT, IGU],
+            [IHC, IHD, IHE, IHF, IHG],
             [],
             [],
             multiplicity,
@@ -12661,7 +12706,7 @@ impl Instance {
             None,
             multiplicity * (HXD),
             [7],
-            [IGV],
+            [IHH],
             [],
             [],
             multiplicity,
@@ -12671,7 +12716,7 @@ impl Instance {
             None,
             multiplicity * (HXJ),
             [7],
-            [IGW],
+            [IHI],
             [],
             [],
             multiplicity,
@@ -12681,17 +12726,17 @@ impl Instance {
             None,
             multiplicity * (HYN),
             [8],
-            [IGX],
+            [IHJ],
             [],
             [],
             multiplicity,
         );
-        stamper.stamp_current_sparse_local::<1, 0>(
+        stamper.stamp_current_sparse_local::<6, 0>(
             Some(0),
             Some(4),
-            multiplicity * (HYQ),
-            [9],
-            [IGY],
+            multiplicity * (HYV),
+            [0, 4, 5, 6, 7, 9],
+            [IHK, IHL, IHM, IHN, IHO, IHP],
             [],
             [],
             multiplicity,
@@ -12699,19 +12744,19 @@ impl Instance {
         stamper.stamp_current_sparse_local::<6, 0>(
             Some(9),
             None,
-            multiplicity * (HYZ),
+            multiplicity * (HZD),
             [0, 4, 5, 6, 7, 9],
-            [IGZ, IHA, IHB, IHC, IHD, IHE],
+            [IHQ, IHR, IHS, IHT, IHU, IHV],
             [],
             [],
             multiplicity,
         );
-        stamper.stamp_current_sparse_local::<1, 0>(
+        stamper.stamp_current_sparse_local::<3, 0>(
             Some(1),
             Some(6),
-            multiplicity * (HZB),
-            [10],
-            [IHF],
+            multiplicity * (HZK),
+            [1, 6, 10],
+            [IHW, IHX, IHY],
             [],
             [],
             multiplicity,
@@ -12719,19 +12764,19 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(10),
             None,
-            multiplicity * (HZK),
+            multiplicity * (HZS),
             [1, 6, 10],
-            [IHG, IHH, IHI],
+            [IHZ, IIA, IIB],
             [],
             [],
             multiplicity,
         );
-        stamper.stamp_current_sparse_local::<1, 0>(
+        stamper.stamp_current_sparse_local::<6, 0>(
             Some(2),
             Some(5),
-            multiplicity * (HZM),
-            [11],
-            [IHJ],
+            multiplicity * (HZZ),
+            [2, 4, 5, 6, 7, 11],
+            [IIC, IID, IIE, IIF, IIG, IIH],
             [],
             [],
             multiplicity,
@@ -12739,9 +12784,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<6, 0>(
             Some(11),
             None,
-            multiplicity * (HZV),
+            multiplicity * (IAH),
             [2, 4, 5, 6, 7, 11],
-            [IHK, IHL, IHM, IHN, IHO, IHP],
+            [III, IIJ, IIK, IIL, IIM, IIN],
             [],
             [],
             multiplicity,
@@ -12749,17 +12794,17 @@ impl Instance {
         self.canonical_reactive[0] = HKZ;
         self.canonical_reactive[1] = HLA;
         self.canonical_reactive[2] = HLH;
-        self.canonical_reactive[3] = IHQ;
-        self.canonical_reactive[4] = IHR;
-        self.canonical_reactive[5] = IHS;
-        self.canonical_reactive[6] = IHT;
-        self.canonical_reactive[7] = IHU;
+        self.canonical_reactive[3] = IIO;
+        self.canonical_reactive[4] = IIP;
+        self.canonical_reactive[5] = IIQ;
+        self.canonical_reactive[6] = IIR;
+        self.canonical_reactive[7] = IIS;
         self.canonical_reactive[8] = HLN;
-        self.canonical_reactive[9] = IHV;
-        self.canonical_reactive[10] = IHW;
-        self.canonical_reactive[11] = IHX;
-        self.canonical_reactive[12] = IHY;
-        self.canonical_reactive[13] = IHZ;
+        self.canonical_reactive[9] = IIT;
+        self.canonical_reactive[10] = IIU;
+        self.canonical_reactive[11] = IIV;
+        self.canonical_reactive[12] = IIW;
+        self.canonical_reactive[13] = IIX;
         self.canonical_reactive[14] = HMC;
         self.canonical_reactive[15] = HMD;
         self.canonical_reactive[16] = HME;
@@ -12781,48 +12826,48 @@ impl Instance {
         self.canonical_reactive[32] = HPI;
         self.canonical_reactive[33] = HPJ;
         self.canonical_reactive[34] = HPP;
-        self.canonical_reactive[35] = IIA;
-        self.canonical_reactive[36] = IIB;
-        self.canonical_reactive[37] = IIC;
+        self.canonical_reactive[35] = IIY;
+        self.canonical_reactive[36] = IIZ;
+        self.canonical_reactive[37] = IJA;
         self.canonical_reactive[38] = HPV;
-        self.canonical_reactive[39] = IID;
-        self.canonical_reactive[40] = IIE;
-        self.canonical_reactive[41] = IIF;
+        self.canonical_reactive[39] = IJB;
+        self.canonical_reactive[40] = IJC;
+        self.canonical_reactive[41] = IJD;
         self.canonical_reactive[42] = HQB;
-        self.canonical_reactive[43] = IIG;
-        self.canonical_reactive[44] = IIH;
-        self.canonical_reactive[45] = III;
+        self.canonical_reactive[43] = IJE;
+        self.canonical_reactive[44] = IJF;
+        self.canonical_reactive[45] = IJG;
         self.canonical_reactive[46] = FFW;
-        self.canonical_reactive[47] = IIJ;
-        self.canonical_reactive[48] = IIK;
-        self.canonical_reactive[49] = IIL;
-        self.canonical_reactive[50] = IIM;
-        self.canonical_reactive[51] = IIN;
+        self.canonical_reactive[47] = IJH;
+        self.canonical_reactive[48] = IJI;
+        self.canonical_reactive[49] = IJJ;
+        self.canonical_reactive[50] = IJK;
+        self.canonical_reactive[51] = IJL;
         self.canonical_reactive[52] = FFX;
-        self.canonical_reactive[53] = IIO;
-        self.canonical_reactive[54] = IIP;
-        self.canonical_reactive[55] = IIQ;
-        self.canonical_reactive[56] = IIR;
-        self.canonical_reactive[57] = IIS;
+        self.canonical_reactive[53] = IJM;
+        self.canonical_reactive[54] = IJN;
+        self.canonical_reactive[55] = IJO;
+        self.canonical_reactive[56] = IJP;
+        self.canonical_reactive[57] = IJQ;
         self.canonical_reactive[58] = FGF;
-        self.canonical_reactive[59] = IIT;
-        self.canonical_reactive[60] = IIU;
+        self.canonical_reactive[59] = IJR;
+        self.canonical_reactive[60] = IJS;
         self.canonical_reactive[61] = HQY;
-        self.canonical_reactive[62] = IIV;
-        self.canonical_reactive[63] = IIW;
-        self.canonical_reactive[64] = IIX;
+        self.canonical_reactive[62] = IJT;
+        self.canonical_reactive[63] = IJU;
+        self.canonical_reactive[64] = IJV;
         self.canonical_reactive[65] = HQZ;
-        self.canonical_reactive[66] = IIY;
-        self.canonical_reactive[67] = IIZ;
-        self.canonical_reactive[68] = IJA;
+        self.canonical_reactive[66] = IJW;
+        self.canonical_reactive[67] = IJX;
+        self.canonical_reactive[68] = IJY;
         self.canonical_reactive[69] = HRS;
-        self.canonical_reactive[70] = IJB;
-        self.canonical_reactive[71] = IJC;
-        self.canonical_reactive[72] = IJD;
+        self.canonical_reactive[70] = IJZ;
+        self.canonical_reactive[71] = IKA;
+        self.canonical_reactive[72] = IKB;
         self.canonical_reactive[73] = HRT;
-        self.canonical_reactive[74] = IJE;
-        self.canonical_reactive[75] = IJF;
-        self.canonical_reactive[76] = IJG;
+        self.canonical_reactive[74] = IKC;
+        self.canonical_reactive[75] = IKD;
+        self.canonical_reactive[76] = IKE;
         self.canonical_reactive[77] = staged[545];
         self.canonical_reactive[78] = staged[546];
         self.canonical_reactive[79] = staged[547];
@@ -12830,19 +12875,19 @@ impl Instance {
         self.canonical_reactive[81] = staged[548];
         self.canonical_reactive[82] = HVV;
         self.canonical_reactive[83] = HVY;
-        self.canonical_reactive[84] = IJH;
-        self.canonical_reactive[85] = IJI;
-        self.canonical_reactive[86] = IJJ;
-        self.canonical_reactive[87] = IJK;
-        self.canonical_reactive[88] = IJL;
-        self.canonical_reactive[89] = IJM;
+        self.canonical_reactive[84] = IKF;
+        self.canonical_reactive[85] = IKG;
+        self.canonical_reactive[86] = IKH;
+        self.canonical_reactive[87] = IKI;
+        self.canonical_reactive[88] = IKJ;
+        self.canonical_reactive[89] = IKK;
         self.canonical_reactive[90] = HVZ;
-        self.canonical_reactive[91] = IJN;
-        self.canonical_reactive[92] = IJO;
-        self.canonical_reactive[93] = IJP;
-        self.canonical_reactive[94] = IJQ;
-        self.canonical_reactive[95] = IJR;
-        self.canonical_reactive[96] = IJS;
+        self.canonical_reactive[91] = IKL;
+        self.canonical_reactive[92] = IKM;
+        self.canonical_reactive[93] = IKN;
+        self.canonical_reactive[94] = IKO;
+        self.canonical_reactive[95] = IKP;
+        self.canonical_reactive[96] = IKQ;
         self.canonical_reactive[97] = HWG;
         self.canonical_reactive[98] = HWH;
         self.canonical_reactive[99] = HWI;
@@ -12854,14 +12899,14 @@ impl Instance {
         self.canonical_reactive[105] = HWY;
         self.canonical_reactive[106] = HXD;
         self.canonical_reactive[107] = HXF;
-        self.canonical_reactive[108] = IJT;
+        self.canonical_reactive[108] = IKR;
         self.canonical_reactive[109] = HYN;
-        self.canonical_reactive[110] = HYQ;
-        self.canonical_reactive[111] = HYZ;
-        self.canonical_reactive[112] = HZB;
-        self.canonical_reactive[113] = HZK;
-        self.canonical_reactive[114] = HZM;
-        self.canonical_reactive[115] = HZV;
+        self.canonical_reactive[110] = HYV;
+        self.canonical_reactive[111] = HZD;
+        self.canonical_reactive[112] = HZK;
+        self.canonical_reactive[113] = HZS;
+        self.canonical_reactive[114] = HZZ;
+        self.canonical_reactive[115] = IAH;
     }
 
     #[cold]
@@ -13518,15 +13563,15 @@ impl Instance {
     }
 
 
-    pub const STAMP_PATTERN: rspice_veriloga_runtime::GeneratedVerilogAStampPattern = rspice_veriloga_runtime::GeneratedVerilogAStampPattern { resistive: &[(0, 9), (1, 10), (2, 11), (3, 3), (3, 4), (3, 5), (3, 6), (3, 7), (4, 3), (4, 4), (4, 5), (4, 6), (4, 7), (4, 8), (4, 9), (5, 3), (5, 4), (5, 5), (5, 6), (5, 7), (5, 8), (5, 11), (6, 3), (6, 4), (6, 5), (6, 6), (6, 7), (6, 10), (7, 0), (7, 2), (7, 3), (7, 4), (7, 5), (7, 6), (7, 7), (8, 3), (8, 4), (8, 5), (8, 6), (8, 7), (8, 8), (9, 0), (9, 4), (9, 5), (9, 6), (9, 7), (9, 9), (10, 1), (10, 6), (10, 10), (11, 2), (11, 4), (11, 5), (11, 6), (11, 7), (11, 11)], dynamic: &[(0, 0), (0, 2), (0, 4), (0, 6), (2, 0), (2, 2), (2, 5), (2, 6), (6, 0), (6, 2), (6, 8)], reactive: &[(0, 0), (0, 2), (0, 4), (0, 6), (2, 0), (2, 2), (2, 5), (2, 6), (3, 3), (3, 4), (3, 5), (3, 6), (3, 7), (4, 3), (4, 4), (4, 5), (4, 6), (4, 7), (4, 8), (5, 3), (5, 4), (5, 5), (5, 6), (5, 7), (5, 8), (6, 0), (6, 2), (6, 3), (6, 4), (6, 5), (6, 6), (6, 7), (6, 8), (7, 7)], rhs_rows: &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] };
+    pub const STAMP_PATTERN: rspice_veriloga_runtime::GeneratedVerilogAStampPattern = rspice_veriloga_runtime::GeneratedVerilogAStampPattern { resistive: &[(0, 0), (0, 4), (0, 5), (0, 6), (0, 7), (0, 9), (1, 1), (1, 6), (1, 10), (2, 2), (2, 4), (2, 5), (2, 6), (2, 7), (2, 11), (3, 3), (3, 4), (3, 5), (3, 6), (3, 7), (4, 0), (4, 3), (4, 4), (4, 5), (4, 6), (4, 7), (4, 8), (4, 9), (5, 2), (5, 3), (5, 4), (5, 5), (5, 6), (5, 7), (5, 8), (5, 11), (6, 1), (6, 3), (6, 4), (6, 5), (6, 6), (6, 7), (6, 10), (7, 0), (7, 2), (7, 3), (7, 4), (7, 5), (7, 6), (7, 7), (8, 3), (8, 4), (8, 5), (8, 6), (8, 7), (8, 8), (9, 0), (9, 4), (9, 5), (9, 6), (9, 7), (9, 9), (10, 1), (10, 6), (10, 10), (11, 2), (11, 4), (11, 5), (11, 6), (11, 7), (11, 11)], dynamic: &[(0, 2), (2, 0), (6, 0), (6, 2), (6, 8)], reactive: &[(0, 0), (0, 2), (0, 4), (0, 6), (2, 0), (2, 2), (2, 5), (2, 6), (3, 3), (3, 4), (3, 5), (3, 6), (3, 7), (4, 3), (4, 4), (4, 5), (4, 6), (4, 7), (4, 8), (5, 3), (5, 4), (5, 5), (5, 6), (5, 7), (5, 8), (6, 0), (6, 2), (6, 3), (6, 4), (6, 5), (6, 6), (6, 7), (6, 8), (7, 7)], rhs_rows: &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] };
 
-    pub const SWITCH_SHORTS: [rspice_veriloga_runtime::GeneratedSwitchShort; 3] = [rspice_veriloga_runtime::GeneratedSwitchShort { state: 9, pos: Some(0), neg: Some(4) }, rspice_veriloga_runtime::GeneratedSwitchShort { state: 10, pos: Some(1), neg: Some(6) }, rspice_veriloga_runtime::GeneratedSwitchShort { state: 11, pos: Some(2), neg: Some(5) }];
+    pub const PRIVATE_SWITCHES: [rspice_veriloga_runtime::GeneratedPrivateSwitch; 3] = [rspice_veriloga_runtime::GeneratedPrivateSwitch { state: 9, pos: Some(0), neg: Some(4), shorts: true }, rspice_veriloga_runtime::GeneratedPrivateSwitch { state: 10, pos: Some(1), neg: Some(6), shorts: true }, rspice_veriloga_runtime::GeneratedPrivateSwitch { state: 11, pos: Some(2), neg: Some(5), shorts: true }];
 
-    /// Bit `i` is set while `SWITCH_SHORTS[i]` is in its potential arm.
-    pub fn switch_branch_shorts(&mut self, ctx: &GeneratedEvalContext<'_>) -> u64 {
+    /// Bit `i` is set while `PRIVATE_SWITCHES[i]` is in its potential arm.
+    pub fn private_switch_kinds(&mut self, ctx: &GeneratedEvalContext<'_>) -> u64 {
         self.canonical_model_stage(ctx);
         if ctx.evaluation_failed() { return 0; }
         let staged = &*self.canonical_staged;
-        (u64::from(staged[542] != 0.0) << 0) | (u64::from(staged[543] != 0.0) << 1) | (u64::from(staged[544] != 0.0) << 2)
+        u64::from(staged[542] != 0.0) | (u64::from(staged[543] != 0.0) << 1) | (u64::from(staged[544] != 0.0) << 2)
     }
 }

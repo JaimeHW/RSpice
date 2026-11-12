@@ -14620,20 +14620,20 @@ impl Instance {
 		let HGR=node_potentials[4];
 		let HHB=staged[683];
 		let HHS=node_potentials[12];
-		let HHX=node_potentials[13];
-		let HHZ=staged[1612];
-		let HII=node_potentials[14];
-		let HIK=staged[1613];
-		let HIT=node_potentials[15];
-		let HIV=staged[1614];
-		let HJE=node_potentials[16];
-		let HJG=staged[1615];
-		let HJP=node_potentials[17];
-		let HJR=staged[1616];
-		let HKA=node_potentials[18];
-		let HKC=staged[1617];
-		let HKL=node_potentials[19];
-		let HKN=staged[1618];
+		let HHX=staged[1612];
+		let HHZ=node_potentials[13];
+		let HIM=staged[1613];
+		let HIO=node_potentials[14];
+		let HJB=staged[1614];
+		let HJD=node_potentials[15];
+		let HJQ=staged[1615];
+		let HJS=node_potentials[16];
+		let HKF=staged[1616];
+		let HKH=node_potentials[17];
+		let HKU=staged[1617];
+		let HKW=node_potentials[18];
+		let HLJ=staged[1618];
+		let HLL=node_potentials[19];
 		let mut oYW=0.0;
 		let mut oBRB=0.0;
 		let mut oBVG=0.0;
@@ -22756,292 +22756,383 @@ impl Instance {
 		let HHU=L5([HHT[0],HHT[1],HHT[2],HHT[3],0.0])+ L5([0.0,0.0,0.0,0.0,(1f64* HHR)]);
 		let HHV=BN+ (HHR* HHS);
 		let HHW=BN+ HHS;
-		let HHY=BN+ HHX;
-		let HIE;
-		let HIF;
-		if HHZ!=0.0{
-		let HIA=GZP- GXS;
-		let HIB=L2([1f64,0.0])- L2([0.0,GXT]);
-		let HIC=L3([HIB[0],HIB[1],0.0]);
-		HIE=HIA;
-		HIF=HIC;
+		let HIB;
+		let HIC;
+		if HHX!=0.0{
+		let HHY=L3([0.0,0.0,1f64]);
+		HIB=HHZ;
+		HIC=HHY;
 		}else{
-		let HID=L3([0.0,0.0,1f64]);
-		HIE=HHX;
-		HIF=HID;
+		let HIA=L3([GZB[0],GZB[1],0.0]);
+		HIB=GZA;
+		HIC=HIA;
 		}
-		let HIG=HIF- L3([GZB[0],GZB[1],0.0]);
-		let HIH=BN+ (HIE- GZA);
-		let HIJ=BN+ HII;
-		let HIP;
+		let HID=BN+ HIB;
+		let HII;
+		let HIJ;
+		if HHX!=0.0{
+		let HIE=GZP- GXS;
+		let HIF=L2([1f64,0.0])- L2([0.0,GXT]);
+		let HIG=L3([HIF[0],HIF[1],0.0]);
+		HII=HIE;
+		HIJ=HIG;
+		}else{
+		let HIH=L3([0.0,0.0,1f64]);
+		HII=HHZ;
+		HIJ=HIH;
+		}
+		let HIK=HIJ- L3([GZB[0],GZB[1],0.0]);
+		let HIL=BN+ (HII- GZA);
 		let HIQ;
-		if HIK!=0.0{
-		let HIL=AF- GXS;
-		let HIM=L2([0.0,1f64])- L2([GXT,0.0]);
-		let HIN=L3([HIM[0],HIM[1],0.0]);
-		HIP=HIL;
-		HIQ=HIN;
-		}else{
-		let HIO=L3([0.0,0.0,1f64]);
-		HIP=HII;
+		let HIR;
+		if HIM!=0.0{
+		let HIN=L3([0.0,0.0,1f64]);
 		HIQ=HIO;
-		}
-		let HIR=HIQ- L3([GYP[0],GYP[1],0.0]);
-		let HIS=BN+ (HIP- GYO);
-		let HIU=BN+ HIT;
-		let HJA;
-		let HJB;
-		if HIV!=0.0{
-		let HIW=GXS- Y;
-		let HIX=L2([0.0,GXT])- L2([1f64,0.0]);
-		let HIY=L3([HIX[0],HIX[1],0.0]);
-		HJA=HIW;
-		HJB=HIY;
+		HIR=HIN;
 		}else{
-		let HIZ=L3([0.0,0.0,1f64]);
-		HJA=HIT;
-		HJB=HIZ;
+		let HIP=L3([GYP[0],GYP[1],0.0]);
+		HIQ=GYO;
+		HIR=HIP;
 		}
-		let HJC=HJB- L3([GXR[0],GXR[1],0.0]);
-		let HJD=BN+ (HJA- GXQ);
-		let HJF=BN+ HJE;
-		let HJL;
+		let HIS=BN+ HIQ;
+		let HIX;
+		let HIY;
+		if HIM!=0.0{
+		let HIT=AF- GXS;
+		let HIU=L2([0.0,1f64])- L2([GXT,0.0]);
+		let HIV=L3([HIU[0],HIU[1],0.0]);
+		HIX=HIT;
+		HIY=HIV;
+		}else{
+		let HIW=L3([0.0,0.0,1f64]);
+		HIX=HIO;
+		HIY=HIW;
+		}
+		let HIZ=HIY- L3([GYP[0],GYP[1],0.0]);
+		let HJA=BN+ (HIX- GYO);
+		let HJF;
+		let HJG;
+		if HJB!=0.0{
+		let HJC=L3([0.0,0.0,1f64]);
+		HJF=HJD;
+		HJG=HJC;
+		}else{
+		let HJE=L3([GXR[0],GXR[1],0.0]);
+		HJF=GXQ;
+		HJG=HJE;
+		}
+		let HJH=BN+ HJF;
 		let HJM;
-		if HJG!=0.0{
-		let HJH=GXS- AB;
-		let HJI=L2([GXT,0.0])- L2([0.0,1f64]);
-		let HJJ=L3([HJI[0],HJI[1],0.0]);
-		HJL=HJH;
-		HJM=HJJ;
+		let HJN;
+		if HJB!=0.0{
+		let HJI=GXS- Y;
+		let HJJ=L2([0.0,GXT])- L2([1f64,0.0]);
+		let HJK=L3([HJJ[0],HJJ[1],0.0]);
+		HJM=HJI;
+		HJN=HJK;
 		}else{
-		let HJK=L3([0.0,0.0,1f64]);
-		HJL=HJE;
-		HJM=HJK;
+		let HJL=L3([0.0,0.0,1f64]);
+		HJM=HJD;
+		HJN=HJL;
 		}
-		let HJN=HJM- L3([GYE[0],GYE[1],0.0]);
-		let HJO=BN+ (HJL- GYD);
-		let HJQ=BN+ HJP;
-		let HJW;
-		let HJX;
-		if HJR!=0.0{
-		let HJS=GXF- U;
-		let HJT=L2([1f64,0.0])- L2([0.0,W]);
-		let HJU=L3([HJT[0],HJT[1],0.0]);
-		HJW=HJS;
-		HJX=HJU;
+		let HJO=HJN- L3([GXR[0],GXR[1],0.0]);
+		let HJP=BN+ (HJM- GXQ);
+		let HJU;
+		let HJV;
+		if HJQ!=0.0{
+		let HJR=L3([0.0,0.0,1f64]);
+		HJU=HJS;
+		HJV=HJR;
 		}else{
-		let HJV=L3([0.0,0.0,1f64]);
-		HJW=HJP;
-		HJX=HJV;
+		let HJT=L3([GYE[0],GYE[1],0.0]);
+		HJU=GYD;
+		HJV=HJT;
 		}
-		let HJY=HJX- L3([GXE[0],GXE[1],0.0]);
-		let HJZ=BN+ (HJW- GXD);
-		let HKB=BN+ HKA;
-		let HKH;
-		let HKI;
-		if HKC!=0.0{
-		let HKD=GWF- P;
-		let HKE=L2([1f64,0.0])- L2([0.0,1f64]);
-		let HKF=L3([HKE[0],HKE[1],0.0]);
-		HKH=HKD;
-		HKI=HKF;
+		let HJW=BN+ HJU;
+		let HKB;
+		let HKC;
+		if HJQ!=0.0{
+		let HJX=GXS- AB;
+		let HJY=L2([GXT,0.0])- L2([0.0,1f64]);
+		let HJZ=L3([HJY[0],HJY[1],0.0]);
+		HKB=HJX;
+		HKC=HJZ;
 		}else{
+		let HKA=L3([0.0,0.0,1f64]);
+		HKB=HJS;
+		HKC=HKA;
+		}
+		let HKD=HKC- L3([GYE[0],GYE[1],0.0]);
+		let HKE=BN+ (HKB- GYD);
+		let HKJ;
+		let HKK;
+		if HKF!=0.0{
 		let HKG=L3([0.0,0.0,1f64]);
-		HKH=HKA;
-		HKI=HKG;
-		}
-		let HKJ=HKI- L3([GWE[0],GWE[1],0.0]);
-		let HKK=BN+ (HKH- GWD);
-		let HKM=BN+ HKL;
-		let HKS;
-		let HKT;
-		if HKN!=0.0{
-		let HKO=GWS- Q;
-		let HKP=L2([1f64,0.0])- L2([0.0,S]);
-		let HKQ=L3([HKP[0],HKP[1],0.0]);
-		HKS=HKO;
-		HKT=HKQ;
+		HKJ=HKH;
+		HKK=HKG;
 		}else{
-		let HKR=L3([0.0,0.0,1f64]);
-		HKS=HKL;
-		HKT=HKR;
+		let HKI=L3([GXE[0],GXE[1],0.0]);
+		HKJ=GXD;
+		HKK=HKI;
 		}
-		let HKU=HKT- L3([GWR[0],GWR[1],0.0]);
-		let HKV=BN+ (HKS- GWQ);
-		let HKW=GVG[0];
-		let HKX=GVG[1];
-		let HKY=GVG[2];
-		let HKZ=GVG[3];
-		let HLA=GVH[0];
-		let HLB=GVH[1];
-		let HLC=GVH[2];
-		let HLD=GVH[3];
-		let HLE=GVI[0];
-		let HLF=GVI[1];
-		let HLG=GVI[2];
-		let HLH=GVI[3];
-		let HLI=GVJ[0];
-		let HLJ=GVJ[1];
-		let HLK=GVJ[2];
-		let HLL=GVJ[3];
-		let HLM=GVK[0];
-		let HLN=GVK[1];
-		let HLO=GVK[2];
-		let HLP=GVK[3];
-		let HLQ=GVL[0];
-		let HLR=GVL[1];
-		let HLS=GVL[2];
-		let HLT=GVL[3];
-		let HLU=GVM[0];
-		let HLV=GVM[1];
-		let HLW=GVM[2];
-		let HLX=GVM[3];
-		let HLY=GVN[0];
-		let HLZ=GVN[1];
-		let HMA=GVN[2];
-		let HMB=GVN[3];
-		let HMC=GVP[0];
-		let HMD=GVP[1];
-		let HME=GVP[2];
-		let HMF=GVP[3];
-		let HMG=GVR[0];
-		let HMH=GVR[1];
-		let HMI=GVT[0];
-		let HMJ=GVT[1];
-		let HMK=GVT[2];
-		let HML=GVV[0];
-		let HMM=GVV[1];
-		let HMN=GVV[2];
-		let HMO=GVX[0];
-		let HMP=GVX[1];
-		let HMQ=GVX[2];
-		let HMR=GVX[3];
-		let HMS=GVZ[0];
-		let HMT=GVZ[1];
-		let HMU=GWB[0];
-		let HMV=GWB[1];
-		let HMW=GWB[2];
-		let HMX=GWB[3];
-		let HMY=GZC[0];
-		let HMZ=GZC[1];
-		let HNA=HAF[0];
-		let HNB=HAF[1];
-		let HNC=HAF[2];
-		let HND=HAF[3];
-		let HNE=HAK[0];
-		let HNF=HAK[1];
-		let HNG=HAK[2];
-		let HNH=HAK[3];
-		let HNI=HAP[0];
-		let HNJ=HAP[1];
-		let HNK=HAP[2];
-		let HNL=HAP[3];
-		let HNM=HAU[0];
-		let HNN=HAU[1];
-		let HNO=HAZ[0];
-		let HNP=HAZ[1];
-		let HNQ=HAZ[2];
-		let HNR=HBE[0];
-		let HNS=HBE[1];
-		let HNT=HBE[2];
-		let HNU=HBE[3];
-		let HNV=HBJ[0];
-		let HNW=HBJ[1];
-		let HNX=HBO[0];
-		let HNY=HBO[1];
-		let HNZ=HBO[2];
-		let HOA=HBO[3];
-		let HOB=HGT[0];
-		let HOC=HGT[1];
-		let HOD=HGT[2];
-		let HOE=HGT[3];
-		let HOF=HGT[4];
-		let HOG=HGZ[0];
-		let HOH=HGZ[1];
-		let HOI=HGZ[2];
-		let HOJ=HGZ[3];
-		let HOK=HGZ[4];
-		let HOL=HHI[0];
-		let HOM=HHI[1];
-		let HON=HHI[2];
-		let HOO=HHI[3];
-		let HOP=HHI[4];
-		let HOQ=HHO[0];
-		let HOR=HHO[1];
-		let HOS=HHO[2];
-		let HOT=HHO[3];
-		let HOU=HHO[4];
-		let HOV=HHU[0];
-		let HOW=HHU[1];
-		let HOX=HHU[2];
-		let HOY=HHU[3];
-		let HOZ=HHU[4];
-		let HPA=1f64;
-		let HPB=1f64;
-		let HPC=HIG[0];
-		let HPD=HIG[1];
-		let HPE=HIG[2];
-		let HPF=1f64;
-		let HPG=HIR[0];
-		let HPH=HIR[1];
-		let HPI=HIR[2];
-		let HPJ=1f64;
-		let HPK=HJC[0];
-		let HPL=HJC[1];
-		let HPM=HJC[2];
-		let HPN=1f64;
-		let HPO=HJN[0];
-		let HPP=HJN[1];
-		let HPQ=HJN[2];
-		let HPR=1f64;
-		let HPS=HJY[0];
-		let HPT=HJY[1];
-		let HPU=HJY[2];
-		let HPV=1f64;
-		let HPW=HKJ[0];
-		let HPX=HKJ[1];
-		let HPY=HKJ[2];
-		let HPZ=1f64;
-		let HQA=HKU[0];
-		let HQB=HKU[1];
-		let HQC=HKU[2];
-		let HQD=HAD[0];
-		let HQE=HAD[1];
-		let HQF=HAD[2];
-		let HQG=HAD[3];
-		let HQH=HAI[0];
-		let HQI=HAI[1];
-		let HQJ=HAI[2];
-		let HQK=HAI[3];
-		let HQL=HAN[0];
-		let HQM=HAN[1];
-		let HQN=HAN[2];
-		let HQO=HAN[3];
-		let HQP=HAS[0];
-		let HQQ=HAS[1];
-		let HQR=HAX[0];
-		let HQS=HAX[1];
-		let HQT=HAX[2];
-		let HQU=HBC[0];
-		let HQV=HBC[1];
-		let HQW=HBC[2];
-		let HQX=HBC[3];
-		let HQY=HBH[0];
-		let HQZ=HBH[1];
-		let HRA=HBM[0];
-		let HRB=HBM[1];
-		let HRC=HBM[2];
-		let HRD=HBM[3];
-		let HRE=HGX[0];
-		let HRF=HGX[1];
-		let HRG=HGX[2];
-		let HRH=HGX[3];
-		let HRI=HGX[4];
-		let HRJ=HHK[0];
-		let HRK=HHK[1];
-		let HRL=HHK[2];
-		let HRM=HHK[3];
-		let HRN=HHK[4];
+		let HKL=BN+ HKJ;
+		let HKQ;
+		let HKR;
+		if HKF!=0.0{
+		let HKM=GXF- U;
+		let HKN=L2([1f64,0.0])- L2([0.0,W]);
+		let HKO=L3([HKN[0],HKN[1],0.0]);
+		HKQ=HKM;
+		HKR=HKO;
+		}else{
+		let HKP=L3([0.0,0.0,1f64]);
+		HKQ=HKH;
+		HKR=HKP;
+		}
+		let HKS=HKR- L3([GXE[0],GXE[1],0.0]);
+		let HKT=BN+ (HKQ- GXD);
+		let HKY;
+		let HKZ;
+		if HKU!=0.0{
+		let HKV=L3([0.0,0.0,1f64]);
+		HKY=HKW;
+		HKZ=HKV;
+		}else{
+		let HKX=L3([GWE[0],GWE[1],0.0]);
+		HKY=GWD;
+		HKZ=HKX;
+		}
+		let HLA=BN+ HKY;
+		let HLF;
+		let HLG;
+		if HKU!=0.0{
+		let HLB=GWF- P;
+		let HLC=L2([1f64,0.0])- L2([0.0,1f64]);
+		let HLD=L3([HLC[0],HLC[1],0.0]);
+		HLF=HLB;
+		HLG=HLD;
+		}else{
+		let HLE=L3([0.0,0.0,1f64]);
+		HLF=HKW;
+		HLG=HLE;
+		}
+		let HLH=HLG- L3([GWE[0],GWE[1],0.0]);
+		let HLI=BN+ (HLF- GWD);
+		let HLN;
+		let HLO;
+		if HLJ!=0.0{
+		let HLK=L3([0.0,0.0,1f64]);
+		HLN=HLL;
+		HLO=HLK;
+		}else{
+		let HLM=L3([GWR[0],GWR[1],0.0]);
+		HLN=GWQ;
+		HLO=HLM;
+		}
+		let HLP=BN+ HLN;
+		let HLU;
+		let HLV;
+		if HLJ!=0.0{
+		let HLQ=GWS- Q;
+		let HLR=L2([1f64,0.0])- L2([0.0,S]);
+		let HLS=L3([HLR[0],HLR[1],0.0]);
+		HLU=HLQ;
+		HLV=HLS;
+		}else{
+		let HLT=L3([0.0,0.0,1f64]);
+		HLU=HLL;
+		HLV=HLT;
+		}
+		let HLW=HLV- L3([GWR[0],GWR[1],0.0]);
+		let HLX=BN+ (HLU- GWQ);
+		let HLY=GVG[0];
+		let HLZ=GVG[1];
+		let HMA=GVG[2];
+		let HMB=GVG[3];
+		let HMC=GVH[0];
+		let HMD=GVH[1];
+		let HME=GVH[2];
+		let HMF=GVH[3];
+		let HMG=GVI[0];
+		let HMH=GVI[1];
+		let HMI=GVI[2];
+		let HMJ=GVI[3];
+		let HMK=GVJ[0];
+		let HML=GVJ[1];
+		let HMM=GVJ[2];
+		let HMN=GVJ[3];
+		let HMO=GVK[0];
+		let HMP=GVK[1];
+		let HMQ=GVK[2];
+		let HMR=GVK[3];
+		let HMS=GVL[0];
+		let HMT=GVL[1];
+		let HMU=GVL[2];
+		let HMV=GVL[3];
+		let HMW=GVM[0];
+		let HMX=GVM[1];
+		let HMY=GVM[2];
+		let HMZ=GVM[3];
+		let HNA=GVN[0];
+		let HNB=GVN[1];
+		let HNC=GVN[2];
+		let HND=GVN[3];
+		let HNE=GVP[0];
+		let HNF=GVP[1];
+		let HNG=GVP[2];
+		let HNH=GVP[3];
+		let HNI=GVR[0];
+		let HNJ=GVR[1];
+		let HNK=GVT[0];
+		let HNL=GVT[1];
+		let HNM=GVT[2];
+		let HNN=GVV[0];
+		let HNO=GVV[1];
+		let HNP=GVV[2];
+		let HNQ=GVX[0];
+		let HNR=GVX[1];
+		let HNS=GVX[2];
+		let HNT=GVX[3];
+		let HNU=GVZ[0];
+		let HNV=GVZ[1];
+		let HNW=GWB[0];
+		let HNX=GWB[1];
+		let HNY=GWB[2];
+		let HNZ=GWB[3];
+		let HOA=GZC[0];
+		let HOB=GZC[1];
+		let HOC=HAF[0];
+		let HOD=HAF[1];
+		let HOE=HAF[2];
+		let HOF=HAF[3];
+		let HOG=HAK[0];
+		let HOH=HAK[1];
+		let HOI=HAK[2];
+		let HOJ=HAK[3];
+		let HOK=HAP[0];
+		let HOL=HAP[1];
+		let HOM=HAP[2];
+		let HON=HAP[3];
+		let HOO=HAU[0];
+		let HOP=HAU[1];
+		let HOQ=HAZ[0];
+		let HOR=HAZ[1];
+		let HOS=HAZ[2];
+		let HOT=HBE[0];
+		let HOU=HBE[1];
+		let HOV=HBE[2];
+		let HOW=HBE[3];
+		let HOX=HBJ[0];
+		let HOY=HBJ[1];
+		let HOZ=HBO[0];
+		let HPA=HBO[1];
+		let HPB=HBO[2];
+		let HPC=HBO[3];
+		let HPD=HGT[0];
+		let HPE=HGT[1];
+		let HPF=HGT[2];
+		let HPG=HGT[3];
+		let HPH=HGT[4];
+		let HPI=HGZ[0];
+		let HPJ=HGZ[1];
+		let HPK=HGZ[2];
+		let HPL=HGZ[3];
+		let HPM=HGZ[4];
+		let HPN=HHI[0];
+		let HPO=HHI[1];
+		let HPP=HHI[2];
+		let HPQ=HHI[3];
+		let HPR=HHI[4];
+		let HPS=HHO[0];
+		let HPT=HHO[1];
+		let HPU=HHO[2];
+		let HPV=HHO[3];
+		let HPW=HHO[4];
+		let HPX=HHU[0];
+		let HPY=HHU[1];
+		let HPZ=HHU[2];
+		let HQA=HHU[3];
+		let HQB=HHU[4];
+		let HQC=1f64;
+		let HQD=HIC[0];
+		let HQE=HIC[1];
+		let HQF=HIC[2];
+		let HQG=HIK[0];
+		let HQH=HIK[1];
+		let HQI=HIK[2];
+		let HQJ=HIR[0];
+		let HQK=HIR[1];
+		let HQL=HIR[2];
+		let HQM=HIZ[0];
+		let HQN=HIZ[1];
+		let HQO=HIZ[2];
+		let HQP=HJG[0];
+		let HQQ=HJG[1];
+		let HQR=HJG[2];
+		let HQS=HJO[0];
+		let HQT=HJO[1];
+		let HQU=HJO[2];
+		let HQV=HJV[0];
+		let HQW=HJV[1];
+		let HQX=HJV[2];
+		let HQY=HKD[0];
+		let HQZ=HKD[1];
+		let HRA=HKD[2];
+		let HRB=HKK[0];
+		let HRC=HKK[1];
+		let HRD=HKK[2];
+		let HRE=HKS[0];
+		let HRF=HKS[1];
+		let HRG=HKS[2];
+		let HRH=HKZ[0];
+		let HRI=HKZ[1];
+		let HRJ=HKZ[2];
+		let HRK=HLH[0];
+		let HRL=HLH[1];
+		let HRM=HLH[2];
+		let HRN=HLO[0];
+		let HRO=HLO[1];
+		let HRP=HLO[2];
+		let HRQ=HLW[0];
+		let HRR=HLW[1];
+		let HRS=HLW[2];
+		let HRT=HAD[0];
+		let HRU=HAD[1];
+		let HRV=HAD[2];
+		let HRW=HAD[3];
+		let HRX=HAI[0];
+		let HRY=HAI[1];
+		let HRZ=HAI[2];
+		let HSA=HAI[3];
+		let HSB=HAN[0];
+		let HSC=HAN[1];
+		let HSD=HAN[2];
+		let HSE=HAN[3];
+		let HSF=HAS[0];
+		let HSG=HAS[1];
+		let HSH=HAX[0];
+		let HSI=HAX[1];
+		let HSJ=HAX[2];
+		let HSK=HBC[0];
+		let HSL=HBC[1];
+		let HSM=HBC[2];
+		let HSN=HBC[3];
+		let HSO=HBH[0];
+		let HSP=HBH[1];
+		let HSQ=HBM[0];
+		let HSR=HBM[1];
+		let HSS=HBM[2];
+		let HST=HBM[3];
+		let HSU=HGX[0];
+		let HSV=HGX[1];
+		let HSW=HGX[2];
+		let HSX=HGX[3];
+		let HSY=HGX[4];
+		let HSZ=HHK[0];
+		let HTA=HHK[1];
+		let HTB=HHK[2];
+		let HTC=HHK[3];
+		let HTD=HHK[4];
         {
             let record = &mut *self.canonical_output_record;
             record[0] = BT;
@@ -23216,7 +23307,7 @@ impl Instance {
             Some(8),
             multiplicity * (GUY),
             [5, 6, 7, 8],
-            [HKW, HKX, HKY, HKZ],
+            [HLY, HLZ, HMA, HMB],
             [],
             [],
             multiplicity,
@@ -23226,7 +23317,7 @@ impl Instance {
             Some(6),
             multiplicity * (GUZ),
             [5, 6, 7, 8],
-            [HLA, HLB, HLC, HLD],
+            [HMC, HMD, HME, HMF],
             [],
             [],
             multiplicity,
@@ -23236,7 +23327,7 @@ impl Instance {
             Some(6),
             multiplicity * (GVA),
             [5, 6, 7, 8],
-            [HLE, HLF, HLG, HLH],
+            [HMG, HMH, HMI, HMJ],
             [],
             [],
             multiplicity,
@@ -23246,7 +23337,7 @@ impl Instance {
             Some(7),
             multiplicity * (GVB),
             [5, 6, 7, 8],
-            [HLI, HLJ, HLK, HLL],
+            [HMK, HML, HMM, HMN],
             [],
             [],
             multiplicity,
@@ -23256,7 +23347,7 @@ impl Instance {
             Some(8),
             multiplicity * (GVC),
             [5, 6, 7, 8],
-            [HLM, HLN, HLO, HLP],
+            [HMO, HMP, HMQ, HMR],
             [],
             [],
             multiplicity,
@@ -23266,7 +23357,7 @@ impl Instance {
             Some(7),
             multiplicity * (GVD),
             [5, 6, 7, 8],
-            [HLQ, HLR, HLS, HLT],
+            [HMS, HMT, HMU, HMV],
             [],
             [],
             multiplicity,
@@ -23276,7 +23367,7 @@ impl Instance {
             Some(7),
             multiplicity * (GVE),
             [5, 6, 7, 8],
-            [HLU, HLV, HLW, HLX],
+            [HMW, HMX, HMY, HMZ],
             [],
             [],
             multiplicity,
@@ -23286,7 +23377,7 @@ impl Instance {
             Some(6),
             multiplicity * (GVF),
             [5, 6, 7, 8],
-            [HLY, HLZ, HMA, HMB],
+            [HNA, HNB, HNC, HND],
             [],
             [],
             multiplicity,
@@ -23296,7 +23387,7 @@ impl Instance {
             Some(8),
             multiplicity * (GVQ),
             [5, 6, 7, 8],
-            [HMC, HMD, HME, HMF],
+            [HNE, HNF, HNG, HNH],
             [],
             [],
             multiplicity,
@@ -23306,7 +23397,7 @@ impl Instance {
             Some(6),
             multiplicity * (GVS),
             [5, 6],
-            [HMG, HMH],
+            [HNI, HNJ],
             [],
             [],
             multiplicity,
@@ -23316,7 +23407,7 @@ impl Instance {
             Some(7),
             multiplicity * (GVU),
             [5, 6, 7],
-            [HMI, HMJ, HMK],
+            [HNK, HNL, HNM],
             [],
             [],
             multiplicity,
@@ -23326,7 +23417,7 @@ impl Instance {
             Some(8),
             multiplicity * (GVW),
             [5, 6, 8],
-            [HML, HMM, HMN],
+            [HNN, HNO, HNP],
             [],
             [],
             multiplicity,
@@ -23336,7 +23427,7 @@ impl Instance {
             Some(8),
             multiplicity * (GVY),
             [5, 6, 7, 8],
-            [HMO, HMP, HMQ, HMR],
+            [HNQ, HNR, HNS, HNT],
             [],
             [],
             multiplicity,
@@ -23346,7 +23437,7 @@ impl Instance {
             Some(6),
             multiplicity * (GWA),
             [6, 10],
-            [HMS, HMT],
+            [HNU, HNV],
             [],
             [],
             multiplicity,
@@ -23356,7 +23447,7 @@ impl Instance {
             Some(7),
             multiplicity * (GWC),
             [6, 7, 10, 11],
-            [HMU, HMV, HMW, HMX],
+            [HNW, HNX, HNY, HNZ],
             [],
             [],
             multiplicity,
@@ -23366,7 +23457,7 @@ impl Instance {
             Some(6),
             multiplicity * (GZD),
             [6, 7],
-            [HMY, HMZ],
+            [HOA, HOB],
             [],
             [],
             multiplicity,
@@ -23376,7 +23467,7 @@ impl Instance {
             Some(6),
             multiplicity * (HAG),
             [5, 6, 7, 8],
-            [HNA, HNB, HNC, HND],
+            [HOC, HOD, HOE, HOF],
             [],
             [],
             multiplicity,
@@ -23386,7 +23477,7 @@ impl Instance {
             Some(6),
             multiplicity * (HAL),
             [5, 6, 7, 8],
-            [HNE, HNF, HNG, HNH],
+            [HOG, HOH, HOI, HOJ],
             [],
             [],
             multiplicity,
@@ -23396,7 +23487,7 @@ impl Instance {
             Some(6),
             multiplicity * (HAQ),
             [5, 6, 7, 8],
-            [HNI, HNJ, HNK, HNL],
+            [HOK, HOL, HOM, HON],
             [],
             [],
             multiplicity,
@@ -23406,7 +23497,7 @@ impl Instance {
             Some(6),
             multiplicity * (HAV),
             [5, 6],
-            [HNM, HNN],
+            [HOO, HOP],
             [],
             [],
             multiplicity,
@@ -23416,7 +23507,7 @@ impl Instance {
             Some(7),
             multiplicity * (HBA),
             [5, 6, 7],
-            [HNO, HNP, HNQ],
+            [HOQ, HOR, HOS],
             [],
             [],
             multiplicity,
@@ -23426,7 +23517,7 @@ impl Instance {
             Some(8),
             multiplicity * (HBF),
             [5, 6, 7, 8],
-            [HNR, HNS, HNT, HNU],
+            [HOT, HOU, HOV, HOW],
             [],
             [],
             multiplicity,
@@ -23436,7 +23527,7 @@ impl Instance {
             Some(6),
             multiplicity * (HBK),
             [6, 10],
-            [HNV, HNW],
+            [HOX, HOY],
             [],
             [],
             multiplicity,
@@ -23446,7 +23537,7 @@ impl Instance {
             Some(7),
             multiplicity * (HBP),
             [6, 7, 10, 11],
-            [HNX, HNY, HNZ, HOA],
+            [HOZ, HPA, HPB, HPC],
             [],
             [],
             multiplicity,
@@ -23466,7 +23557,7 @@ impl Instance {
             None,
             multiplicity * (HGU),
             [4, 5, 6, 7, 8],
-            [HOB, HOC, HOD, HOE, HOF],
+            [HPD, HPE, HPF, HPG, HPH],
             [],
             [],
             multiplicity,
@@ -23476,7 +23567,7 @@ impl Instance {
             None,
             multiplicity * (HHA),
             [4, 5, 6, 7, 8],
-            [HOG, HOH, HOI, HOJ, HOK],
+            [HPI, HPJ, HPK, HPL, HPM],
             [],
             [],
             multiplicity,
@@ -23486,7 +23577,7 @@ impl Instance {
             Some(6),
             multiplicity * (HHL),
             [4, 5, 6, 7, 8],
-            [HOL, HOM, HON, HOO, HOP],
+            [HPN, HPO, HPP, HPQ, HPR],
             [],
             [],
             multiplicity,
@@ -23496,7 +23587,7 @@ impl Instance {
             Some(7),
             multiplicity * (HHP),
             [4, 5, 6, 7, 8],
-            [HOQ, HOR, HOS, HOT, HOU],
+            [HPS, HPT, HPU, HPV, HPW],
             [],
             [],
             multiplicity,
@@ -23506,7 +23597,7 @@ impl Instance {
             Some(6),
             multiplicity * (HHV),
             [5, 6, 7, 8, 12],
-            [HOV, HOW, HOX, HOY, HOZ],
+            [HPX, HPY, HPZ, HQA, HQB],
             [],
             [],
             multiplicity,
@@ -23596,7 +23687,7 @@ impl Instance {
             None,
             multiplicity * (HHW),
             [12],
-            [HPA],
+            [HQC],
             [],
             [],
             multiplicity,
@@ -23606,17 +23697,17 @@ impl Instance {
             None,
             multiplicity * (HHW),
             [12],
-            [HPA],
+            [HQC],
             [],
             [],
             multiplicity,
         );
-        stamper.stamp_current_sparse_local::<1, 0>(
+        stamper.stamp_current_sparse_local::<3, 0>(
             Some(3),
             Some(9),
-            multiplicity * (HHY),
-            [13],
-            [HPB],
+            multiplicity * (HID),
+            [3, 9, 13],
+            [HQD, HQE, HQF],
             [],
             [],
             multiplicity,
@@ -23624,19 +23715,19 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(13),
             None,
-            multiplicity * (HIH),
+            multiplicity * (HIL),
             [3, 9, 13],
-            [HPC, HPD, HPE],
+            [HQG, HQH, HQI],
             [],
             [],
             multiplicity,
         );
-        stamper.stamp_current_sparse_local::<1, 0>(
+        stamper.stamp_current_sparse_local::<3, 0>(
             Some(11),
             Some(9),
-            multiplicity * (HIJ),
-            [14],
-            [HPF],
+            multiplicity * (HIS),
+            [9, 11, 14],
+            [HQJ, HQK, HQL],
             [],
             [],
             multiplicity,
@@ -23644,19 +23735,19 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(14),
             None,
-            multiplicity * (HIS),
+            multiplicity * (HJA),
             [9, 11, 14],
-            [HPG, HPH, HPI],
+            [HQM, HQN, HQO],
             [],
             [],
             multiplicity,
         );
-        stamper.stamp_current_sparse_local::<1, 0>(
+        stamper.stamp_current_sparse_local::<3, 0>(
             Some(9),
             Some(8),
-            multiplicity * (HIU),
-            [15],
-            [HPJ],
+            multiplicity * (HJH),
+            [8, 9, 15],
+            [HQP, HQQ, HQR],
             [],
             [],
             multiplicity,
@@ -23664,19 +23755,19 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(15),
             None,
-            multiplicity * (HJD),
+            multiplicity * (HJP),
             [8, 9, 15],
-            [HPK, HPL, HPM],
+            [HQS, HQT, HQU],
             [],
             [],
             multiplicity,
         );
-        stamper.stamp_current_sparse_local::<1, 0>(
+        stamper.stamp_current_sparse_local::<3, 0>(
             Some(9),
             Some(10),
-            multiplicity * (HJF),
-            [16],
-            [HPN],
+            multiplicity * (HJW),
+            [9, 10, 16],
+            [HQV, HQW, HQX],
             [],
             [],
             multiplicity,
@@ -23684,19 +23775,19 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(16),
             None,
-            multiplicity * (HJO),
+            multiplicity * (HKE),
             [9, 10, 16],
-            [HPO, HPP, HPQ],
+            [HQY, HQZ, HRA],
             [],
             [],
             multiplicity,
         );
-        stamper.stamp_current_sparse_local::<1, 0>(
+        stamper.stamp_current_sparse_local::<3, 0>(
             Some(0),
             Some(7),
-            multiplicity * (HJQ),
-            [17],
-            [HPR],
+            multiplicity * (HKL),
+            [0, 7, 17],
+            [HRB, HRC, HRD],
             [],
             [],
             multiplicity,
@@ -23704,19 +23795,19 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(17),
             None,
-            multiplicity * (HJZ),
+            multiplicity * (HKT),
             [0, 7, 17],
-            [HPS, HPT, HPU],
+            [HRE, HRF, HRG],
             [],
             [],
             multiplicity,
         );
-        stamper.stamp_current_sparse_local::<1, 0>(
+        stamper.stamp_current_sparse_local::<3, 0>(
             Some(1),
             Some(5),
-            multiplicity * (HKB),
-            [18],
-            [HPV],
+            multiplicity * (HLA),
+            [1, 5, 18],
+            [HRH, HRI, HRJ],
             [],
             [],
             multiplicity,
@@ -23724,19 +23815,19 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(18),
             None,
-            multiplicity * (HKK),
+            multiplicity * (HLI),
             [1, 5, 18],
-            [HPW, HPX, HPY],
+            [HRK, HRL, HRM],
             [],
             [],
             multiplicity,
         );
-        stamper.stamp_current_sparse_local::<1, 0>(
+        stamper.stamp_current_sparse_local::<3, 0>(
             Some(2),
             Some(6),
-            multiplicity * (HKM),
-            [19],
-            [HPZ],
+            multiplicity * (HLP),
+            [2, 6, 19],
+            [HRN, HRO, HRP],
             [],
             [],
             multiplicity,
@@ -23744,9 +23835,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(19),
             None,
-            multiplicity * (HKV),
+            multiplicity * (HLX),
             [2, 6, 19],
-            [HQA, HQB, HQC],
+            [HRQ, HRR, HRS],
             [],
             [],
             multiplicity,
@@ -23768,60 +23859,60 @@ impl Instance {
         self.canonical_reactive[14] = GWC;
         self.canonical_reactive[15] = GZD;
         self.canonical_reactive[16] = HAC;
-        self.canonical_reactive[17] = HQD;
-        self.canonical_reactive[18] = HQE;
-        self.canonical_reactive[19] = HQF;
-        self.canonical_reactive[20] = HQG;
+        self.canonical_reactive[17] = HRT;
+        self.canonical_reactive[18] = HRU;
+        self.canonical_reactive[19] = HRV;
+        self.canonical_reactive[20] = HRW;
         self.canonical_reactive[21] = HAH;
-        self.canonical_reactive[22] = HQH;
-        self.canonical_reactive[23] = HQI;
-        self.canonical_reactive[24] = HQJ;
-        self.canonical_reactive[25] = HQK;
+        self.canonical_reactive[22] = HRX;
+        self.canonical_reactive[23] = HRY;
+        self.canonical_reactive[24] = HRZ;
+        self.canonical_reactive[25] = HSA;
         self.canonical_reactive[26] = HAM;
-        self.canonical_reactive[27] = HQL;
-        self.canonical_reactive[28] = HQM;
-        self.canonical_reactive[29] = HQN;
-        self.canonical_reactive[30] = HQO;
+        self.canonical_reactive[27] = HSB;
+        self.canonical_reactive[28] = HSC;
+        self.canonical_reactive[29] = HSD;
+        self.canonical_reactive[30] = HSE;
         self.canonical_reactive[31] = HAR;
-        self.canonical_reactive[32] = HQP;
-        self.canonical_reactive[33] = HQQ;
+        self.canonical_reactive[32] = HSF;
+        self.canonical_reactive[33] = HSG;
         self.canonical_reactive[34] = HAW;
-        self.canonical_reactive[35] = HQR;
-        self.canonical_reactive[36] = HQS;
-        self.canonical_reactive[37] = HQT;
+        self.canonical_reactive[35] = HSH;
+        self.canonical_reactive[36] = HSI;
+        self.canonical_reactive[37] = HSJ;
         self.canonical_reactive[38] = HBB;
-        self.canonical_reactive[39] = HQU;
-        self.canonical_reactive[40] = HQV;
-        self.canonical_reactive[41] = HQW;
-        self.canonical_reactive[42] = HQX;
+        self.canonical_reactive[39] = HSK;
+        self.canonical_reactive[40] = HSL;
+        self.canonical_reactive[41] = HSM;
+        self.canonical_reactive[42] = HSN;
         self.canonical_reactive[43] = HBG;
-        self.canonical_reactive[44] = HQY;
-        self.canonical_reactive[45] = HQZ;
+        self.canonical_reactive[44] = HSO;
+        self.canonical_reactive[45] = HSP;
         self.canonical_reactive[46] = HBL;
-        self.canonical_reactive[47] = HRA;
-        self.canonical_reactive[48] = HRB;
-        self.canonical_reactive[49] = HRC;
-        self.canonical_reactive[50] = HRD;
+        self.canonical_reactive[47] = HSQ;
+        self.canonical_reactive[48] = HSR;
+        self.canonical_reactive[49] = HSS;
+        self.canonical_reactive[50] = HST;
         self.canonical_reactive[51] = staged[1619];
         self.canonical_reactive[52] = HGU;
         self.canonical_reactive[53] = HGV;
-        self.canonical_reactive[54] = HRE;
-        self.canonical_reactive[55] = HRF;
-        self.canonical_reactive[56] = HRG;
-        self.canonical_reactive[57] = HRH;
-        self.canonical_reactive[58] = HRI;
+        self.canonical_reactive[54] = HSU;
+        self.canonical_reactive[55] = HSV;
+        self.canonical_reactive[56] = HSW;
+        self.canonical_reactive[57] = HSX;
+        self.canonical_reactive[58] = HSY;
         self.canonical_reactive[59] = HHJ;
-        self.canonical_reactive[60] = HRJ;
-        self.canonical_reactive[61] = HRK;
-        self.canonical_reactive[62] = HRL;
-        self.canonical_reactive[63] = HRM;
-        self.canonical_reactive[64] = HRN;
+        self.canonical_reactive[60] = HSZ;
+        self.canonical_reactive[61] = HTA;
+        self.canonical_reactive[62] = HTB;
+        self.canonical_reactive[63] = HTC;
+        self.canonical_reactive[64] = HTD;
         self.canonical_reactive[65] = HHJ;
-        self.canonical_reactive[66] = HRJ;
-        self.canonical_reactive[67] = HRK;
-        self.canonical_reactive[68] = HRL;
-        self.canonical_reactive[69] = HRM;
-        self.canonical_reactive[70] = HRN;
+        self.canonical_reactive[66] = HSZ;
+        self.canonical_reactive[67] = HTA;
+        self.canonical_reactive[68] = HTB;
+        self.canonical_reactive[69] = HTC;
+        self.canonical_reactive[70] = HTD;
         self.canonical_reactive[71] = HHV;
         self.canonical_reactive[72] = staged[1620];
         self.canonical_reactive[73] = staged[1621];
@@ -23833,20 +23924,20 @@ impl Instance {
         self.canonical_reactive[79] = staged[1627];
         self.canonical_reactive[80] = HHW;
         self.canonical_reactive[81] = HHW;
-        self.canonical_reactive[82] = HHY;
-        self.canonical_reactive[83] = HIH;
-        self.canonical_reactive[84] = HIJ;
-        self.canonical_reactive[85] = HIS;
-        self.canonical_reactive[86] = HIU;
-        self.canonical_reactive[87] = HJD;
-        self.canonical_reactive[88] = HJF;
-        self.canonical_reactive[89] = HJO;
-        self.canonical_reactive[90] = HJQ;
-        self.canonical_reactive[91] = HJZ;
-        self.canonical_reactive[92] = HKB;
-        self.canonical_reactive[93] = HKK;
-        self.canonical_reactive[94] = HKM;
-        self.canonical_reactive[95] = HKV;
+        self.canonical_reactive[82] = HID;
+        self.canonical_reactive[83] = HIL;
+        self.canonical_reactive[84] = HIS;
+        self.canonical_reactive[85] = HJA;
+        self.canonical_reactive[86] = HJH;
+        self.canonical_reactive[87] = HJP;
+        self.canonical_reactive[88] = HJW;
+        self.canonical_reactive[89] = HKE;
+        self.canonical_reactive[90] = HKL;
+        self.canonical_reactive[91] = HKT;
+        self.canonical_reactive[92] = HLA;
+        self.canonical_reactive[93] = HLI;
+        self.canonical_reactive[94] = HLP;
+        self.canonical_reactive[95] = HLX;
     }
 
     #[cold]
@@ -25401,17 +25492,17 @@ impl Instance {
     }
 
 
-    pub const STAMP_PATTERN: rspice_veriloga_runtime::GeneratedVerilogAStampPattern = rspice_veriloga_runtime::GeneratedVerilogAStampPattern { resistive: &[(0, 17), (1, 18), (2, 19), (3, 13), (4, 4), (4, 5), (4, 6), (4, 7), (4, 8), (4, 12), (5, 4), (5, 5), (5, 6), (5, 7), (5, 8), (5, 18), (6, 4), (6, 5), (6, 6), (6, 7), (6, 8), (6, 10), (6, 12), (6, 19), (7, 4), (7, 5), (7, 6), (7, 7), (7, 8), (7, 10), (7, 11), (7, 12), (7, 17), (8, 5), (8, 6), (8, 7), (8, 8), (8, 15), (9, 13), (9, 14), (9, 15), (9, 16), (10, 6), (10, 10), (10, 16), (11, 6), (11, 7), (11, 10), (11, 11), (11, 14), (12, 12), (13, 3), (13, 9), (13, 13), (14, 9), (14, 11), (14, 14), (15, 8), (15, 9), (15, 15), (16, 9), (16, 10), (16, 16), (17, 0), (17, 7), (17, 17), (18, 1), (18, 5), (18, 18), (19, 2), (19, 6), (19, 19)], dynamic: &[], reactive: &[(4, 4), (4, 5), (4, 6), (4, 7), (4, 8), (5, 4), (5, 5), (5, 6), (5, 7), (5, 8), (6, 4), (6, 5), (6, 6), (6, 7), (6, 8), (6, 10), (7, 4), (7, 5), (7, 6), (7, 7), (7, 8), (7, 10), (7, 11), (8, 5), (8, 6), (8, 7), (8, 8), (10, 6), (10, 10), (11, 6), (11, 7), (11, 10), (11, 11)], rhs_rows: &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19] };
+    pub const STAMP_PATTERN: rspice_veriloga_runtime::GeneratedVerilogAStampPattern = rspice_veriloga_runtime::GeneratedVerilogAStampPattern { resistive: &[(0, 0), (0, 7), (0, 17), (1, 1), (1, 5), (1, 18), (2, 2), (2, 6), (2, 19), (3, 3), (3, 9), (3, 13), (4, 4), (4, 5), (4, 6), (4, 7), (4, 8), (4, 12), (5, 1), (5, 4), (5, 5), (5, 6), (5, 7), (5, 8), (5, 18), (6, 2), (6, 4), (6, 5), (6, 6), (6, 7), (6, 8), (6, 10), (6, 12), (6, 19), (7, 0), (7, 4), (7, 5), (7, 6), (7, 7), (7, 8), (7, 10), (7, 11), (7, 12), (7, 17), (8, 5), (8, 6), (8, 7), (8, 8), (8, 9), (8, 15), (9, 3), (9, 8), (9, 9), (9, 10), (9, 11), (9, 13), (9, 14), (9, 15), (9, 16), (10, 6), (10, 9), (10, 10), (10, 16), (11, 6), (11, 7), (11, 9), (11, 10), (11, 11), (11, 14), (12, 12), (13, 3), (13, 9), (13, 13), (14, 9), (14, 11), (14, 14), (15, 8), (15, 9), (15, 15), (16, 9), (16, 10), (16, 16), (17, 0), (17, 7), (17, 17), (18, 1), (18, 5), (18, 18), (19, 2), (19, 6), (19, 19)], dynamic: &[], reactive: &[(4, 4), (4, 5), (4, 6), (4, 7), (4, 8), (5, 4), (5, 5), (5, 6), (5, 7), (5, 8), (6, 4), (6, 5), (6, 6), (6, 7), (6, 8), (6, 10), (7, 4), (7, 5), (7, 6), (7, 7), (7, 8), (7, 10), (7, 11), (8, 5), (8, 6), (8, 7), (8, 8), (10, 6), (10, 10), (11, 6), (11, 7), (11, 10), (11, 11)], rhs_rows: &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19] };
 
-    pub const SWITCH_SHORTS: [rspice_veriloga_runtime::GeneratedSwitchShort; 7] = [rspice_veriloga_runtime::GeneratedSwitchShort { state: 13, pos: Some(3), neg: Some(9) }, rspice_veriloga_runtime::GeneratedSwitchShort { state: 14, pos: Some(11), neg: Some(9) }, rspice_veriloga_runtime::GeneratedSwitchShort { state: 15, pos: Some(9), neg: Some(8) }, rspice_veriloga_runtime::GeneratedSwitchShort { state: 16, pos: Some(9), neg: Some(10) }, rspice_veriloga_runtime::GeneratedSwitchShort { state: 17, pos: Some(0), neg: Some(7) }, rspice_veriloga_runtime::GeneratedSwitchShort { state: 18, pos: Some(1), neg: Some(5) }, rspice_veriloga_runtime::GeneratedSwitchShort { state: 19, pos: Some(2), neg: Some(6) }];
+    pub const PRIVATE_SWITCHES: [rspice_veriloga_runtime::GeneratedPrivateSwitch; 7] = [rspice_veriloga_runtime::GeneratedPrivateSwitch { state: 13, pos: Some(3), neg: Some(9), shorts: true }, rspice_veriloga_runtime::GeneratedPrivateSwitch { state: 14, pos: Some(11), neg: Some(9), shorts: true }, rspice_veriloga_runtime::GeneratedPrivateSwitch { state: 15, pos: Some(9), neg: Some(8), shorts: true }, rspice_veriloga_runtime::GeneratedPrivateSwitch { state: 16, pos: Some(9), neg: Some(10), shorts: true }, rspice_veriloga_runtime::GeneratedPrivateSwitch { state: 17, pos: Some(0), neg: Some(7), shorts: true }, rspice_veriloga_runtime::GeneratedPrivateSwitch { state: 18, pos: Some(1), neg: Some(5), shorts: true }, rspice_veriloga_runtime::GeneratedPrivateSwitch { state: 19, pos: Some(2), neg: Some(6), shorts: true }];
 
-    /// Bit `i` is set while `SWITCH_SHORTS[i]` is in its potential arm.
-    pub fn switch_branch_shorts(&mut self, ctx: &GeneratedEvalContext<'_>) -> u64 {
+    /// Bit `i` is set while `PRIVATE_SWITCHES[i]` is in its potential arm.
+    pub fn private_switch_kinds(&mut self, ctx: &GeneratedEvalContext<'_>) -> u64 {
         self.canonical_model_stage(ctx);
         if ctx.evaluation_failed() { return 0; }
         self.canonical_instance_stage(ctx);
         if ctx.evaluation_failed() { return 0; }
         let staged = &*self.canonical_staged;
-        (u64::from(staged[1612] != 0.0) << 0) | (u64::from(staged[1613] != 0.0) << 1) | (u64::from(staged[1614] != 0.0) << 2) | (u64::from(staged[1615] != 0.0) << 3) | (u64::from(staged[1616] != 0.0) << 4) | (u64::from(staged[1617] != 0.0) << 5) | (u64::from(staged[1618] != 0.0) << 6)
+        u64::from(staged[1612] != 0.0) | (u64::from(staged[1613] != 0.0) << 1) | (u64::from(staged[1614] != 0.0) << 2) | (u64::from(staged[1615] != 0.0) << 3) | (u64::from(staged[1616] != 0.0) << 4) | (u64::from(staged[1617] != 0.0) << 5) | (u64::from(staged[1618] != 0.0) << 6)
     }
 }

@@ -1138,8 +1138,16 @@ endmodule
         let processes = device
             .try_noise_processes_at_frequency(&[0.0, 0.0, 0.0], 1.0e3)
             .expect("mixed RHS process evaluates");
-        assert_eq!(processes[0].injections.len(), 1);
-        assert_eq!(processes[0].injections[0].gain.re, -1.0);
+        // The flow arm's injection into the branch's nodes stays listed, at
+        // zero gain while the potential arm holds; only the potential's
+        // equation carries the process.
+        let live: Vec<_> = processes[0]
+            .injections
+            .iter()
+            .filter(|injection| injection.gain.re != 0.0 || injection.gain.im != 0.0)
+            .collect();
+        assert_eq!(live.len(), 1, "{:?}", processes[0].injections);
+        assert_eq!(live[0].gain.re, -1.0);
     }
 
     #[test]

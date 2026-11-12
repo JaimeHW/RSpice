@@ -344,7 +344,7 @@ pub struct Instance {
 	pub(crate) ddt_coefficients: GeneratedDdtCoefficients,
 	pub(crate) event_state_accepted: Box<[f64; 4]>,
 	pub(crate) event_state_candidate: Box<[f64; 4]>,
-	pub(crate) canonical_reactive: Box<[f64; 36]>,
+	pub(crate) canonical_reactive: Box<[f64; 38]>,
 }
 
 impl Clone for Instance {

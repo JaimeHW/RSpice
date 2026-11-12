@@ -190,10 +190,12 @@ pub struct BuiltinVerilogAInstance {
     /// for. Every copy of the instance shares the set, so a run warns once per
     /// process however many frequencies and copies evaluate it.
     negative_noise_reports: Arc<std::sync::Mutex<std::collections::BTreeSet<&'static str>>>,
-    /// The model's switch shorts this instance merged, as bits of
-    /// `kind.switch_shorts()`: each one's nodes share a net and its private
-    /// current sits on ground. Every evaluation checks they still hold.
-    merged_switch_shorts: u64,
+    /// The model's private switches whose arm this instance fixed at setup,
+    /// as bits of `kind.private_switches()`, and the arms it fixed them in
+    /// (bit set: potential). Each one's current sits on ground, and a short
+    /// held on also shares its nodes' net. Every evaluation checks the arms.
+    fixed_switches: u64,
+    fixed_switch_kinds: u64,
     /// Internal nodes that share a terminal's net, as `(internal, terminal)`
     /// local indices. What a contribution sends into the internal node enters
     /// the device through the terminal, as the merged short's current did.
@@ -1415,7 +1417,8 @@ impl BuiltinVerilogAInstance {
             dynamic_charge_third_back: vec![0.0; ddt_state_count],
             dynamic_idt_state_count: idt_state_count,
             negative_noise_reports: Arc::default(),
-            merged_switch_shorts: 0,
+            fixed_switches: 0,
+            fixed_switch_kinds: 0,
             merged_terminal_currents: Box::default(),
             local_currents: Vec::new(),
             kind,
@@ -2214,22 +2217,21 @@ impl BuiltinVerilogAInstance {
             }
             non_finite
         };
-        // A merged short has no unknown to fall back on: once its arm moves,
+        // A fixed switch has no unknown to fall back on: once its arm moves,
         // the circuit this instance was built into is no longer the model's.
         // The arms are read through the model's own stages, which report
         // nothing once an evaluation has failed: that failure, at a trial
         // iterate the solver recovers from, stays the model's to report.
-        let left_short = self.merged_switch_shorts != 0 && !ctx.evaluation_failed() && {
-            let held = self.kind.switch_branch_shorts(&ctx);
-            !ctx.evaluation_failed()
-                && held & self.merged_switch_shorts != self.merged_switch_shorts
+        let arm_moved = self.fixed_switches != 0 && !ctx.evaluation_failed() && {
+            let kinds = self.kind.private_switch_kinds(&ctx);
+            !ctx.evaluation_failed() && (kinds ^ self.fixed_switch_kinds) & self.fixed_switches != 0
         };
         let evaluation_error = ctx.take_evaluation_error();
         if let Some(state) = static_dae_state.as_ref() {
             self.kind.restore_rollback_state(state);
         }
-        if left_short {
-            return Err(GeneratedEvaluationError::ShortedSwitchBranch);
+        if arm_moved {
+            return Err(GeneratedEvaluationError::FixedSwitchArmMoved);
         }
         match evaluation_error {
             Some(error) => Err(error),
@@ -2646,19 +2648,22 @@ pub fn unconnected_terminal_net(instance_name: &str, terminal: &str, index: usiz
     }
 }
 
-/// The net each local node of a generated instance takes once the switch
-/// shorts set in `shorted` merge, and which of them merged.
+/// The net each local node of a generated instance takes once its private
+/// switches are fixed in the arms `kinds` reads (bit set: potential), and
+/// which of them were.
 ///
 /// Nodes are device-local, terminals first, and `bound` marks the ones already
 /// on a net: every terminal and each internal node the card binds. Entry `i`
 /// is `None` for ground, and otherwise the node whose net `i` shares (itself
-/// when it keeps its own). A short whose two sides already reach a bound net
-/// or ground would join two of the circuit's own nets, so it keeps its private
-/// current instead. A merged short's current sits on ground.
+/// when it keeps its own). A switch in its flow arm only grounds its current.
+/// A short held on also merges its two sides, unless both already reach a
+/// bound net or ground: that would join two of the circuit's own nets, so the
+/// switch keeps its current instead. A potential arm that is not a short keeps
+/// its current too.
 #[cfg(feature = "veriloga-builtins-base")]
-fn merge_switch_shorts(
-    shorts: &[rspice_veriloga_runtime::GeneratedSwitchShort],
-    shorted: u64,
+fn fix_private_switches(
+    switches: &[rspice_veriloga_runtime::GeneratedPrivateSwitch],
+    kinds: u64,
     bound: &[bool],
 ) -> (Vec<Option<usize>>, u64) {
     fn root(parent: &mut [usize], mut node: usize) -> usize {
@@ -2672,30 +2677,33 @@ fn merge_switch_shorts(
     let anchored = |node: usize| node == ground || bound[node];
     let mut parent: Vec<usize> = (0..=ground).collect();
     let mut grounded = vec![false; ground];
-    let mut merged = 0;
-    for (bit, short) in shorts.iter().enumerate().take(64) {
-        let pos = short.pos.unwrap_or(ground);
-        let neg = short.neg.unwrap_or(ground);
-        if shorted & (1 << bit) == 0
+    let mut fixed = 0;
+    for (bit, switch) in switches.iter().enumerate().take(64) {
+        let pos = switch.pos.unwrap_or(ground);
+        let neg = switch.neg.unwrap_or(ground);
+        let potential = kinds & (1 << bit) != 0;
+        if (potential && !switch.shorts)
             || pos > ground
             || neg > ground
-            || short.state >= ground
-            || bound[short.state]
+            || switch.state >= ground
+            || bound[switch.state]
         {
             continue;
         }
-        let (pos, neg) = (root(&mut parent, pos), root(&mut parent, neg));
-        if pos != neg {
-            let (keep, join) = match (anchored(pos), anchored(neg)) {
-                (true, true) => continue,
-                (true, false) => (pos, neg),
-                (false, true) => (neg, pos),
-                (false, false) => (pos.min(neg), pos.max(neg)),
-            };
-            parent[join] = keep;
+        if potential {
+            let (pos, neg) = (root(&mut parent, pos), root(&mut parent, neg));
+            if pos != neg {
+                let (keep, join) = match (anchored(pos), anchored(neg)) {
+                    (true, true) => continue,
+                    (true, false) => (pos, neg),
+                    (false, true) => (neg, pos),
+                    (false, false) => (pos.min(neg), pos.max(neg)),
+                };
+                parent[join] = keep;
+            }
         }
-        grounded[short.state] = true;
-        merged |= 1 << bit;
+        grounded[switch.state] = true;
+        fixed |= 1 << bit;
     }
     let nets = (0..ground)
         .map(|node| {
@@ -2703,7 +2711,7 @@ fn merge_switch_shorts(
             (!grounded[node] && net != ground).then_some(net)
         })
         .collect();
-    (nets, merged)
+    (nets, fixed)
 }
 
 /// Build a generated instance on `node_names`: every external terminal, then
@@ -2874,21 +2882,22 @@ pub fn instantiate_builtin_scoped(
         return Ok(None);
     };
 
-    // A switch short the parameters hold on merges its two nodes and grounds
-    // its private current, as a SPICE model collapses a zero resistance.
-    // Reading the arms runs the model and instance stages, which read the
-    // parameters and connected terminals alone.
-    let shorts = kind.switch_shorts();
-    let shorted = if shorts.is_empty() || bound.iter().all(|&bound| bound) {
+    // A private switch the parameters hold in one arm needs no current
+    // unknown: in the flow arm it injects its current itself, and a short
+    // held on merges its two nodes, as a SPICE model collapses a zero
+    // resistance. Reading the arms runs the model and instance stages, which
+    // read the parameters and connected terminals alone.
+    let switches = kind.private_switches();
+    let kinds = if switches.is_empty() || bound.iter().all(|&bound| bound) {
         0
     } else {
-        kind.switch_branch_shorts(&GeneratedEvalContext::new(
+        kind.private_switch_kinds(&GeneratedEvalContext::new(
             &[],
             crate::constants::TEMP_REFERENCE,
             0,
         ))
     };
-    let (nets, merged_switch_shorts) = merge_switch_shorts(shorts, shorted, &bound);
+    let (nets, fixed_switches) = fix_private_switches(switches, kinds, &bound);
     let mut allocated = vec![None; total_nodes];
     let mut merged_terminal_currents = Vec::new();
     for (local, &net) in nets.iter().enumerate().skip(expected_nodes) {
@@ -2964,7 +2973,8 @@ pub fn instantiate_builtin_scoped(
         dynamic_charge_third_back: vec![0.0; ddt_state_count],
         dynamic_idt_state_count: idt_state_count,
         negative_noise_reports: Arc::default(),
-        merged_switch_shorts,
+        fixed_switches,
+        fixed_switch_kinds: kinds & fixed_switches,
         merged_terminal_currents: merged_terminal_currents.into_boxed_slice(),
         local_currents,
         kind,
@@ -4251,14 +4261,14 @@ mod tests {
         );
     }
 
-    /// The arm guard of a merged short reads the arms through the model's
+    /// The arm guard of a fixed switch reads the arms through the model's
     /// stages, which come back empty once an evaluation has failed. A trial
     /// iterate the model cannot evaluate must fail with the model's own
     /// error, which the solver recovers from by cutting the step, and never
     /// with the guard's refusal, which ends the analysis.
     #[cfg(feature = "veriloga-model-diode-cmc")]
     #[test]
-    fn a_failed_evaluation_keeps_its_own_error_past_the_switch_short_guard() {
+    fn a_failed_evaluation_keeps_its_own_error_past_the_fixed_switch_guard() {
         let mut circuit = TestTopology::default();
         let mut instance = instantiate_builtin(
             "DIODE_CMC",
@@ -4271,8 +4281,8 @@ mod tests {
         .expect("generated diode_cmc instantiates")
         .expect("diode_cmc is registered");
         assert_ne!(
-            instance.merged_switch_shorts, 0,
-            "the default card holds a series-resistance short on"
+            instance.fixed_switches, 0,
+            "the default card fixes its series-resistance switches"
         );
         let size = circuit.matrix_size();
         let num_nodes = circuit.num_nodes();
@@ -4296,7 +4306,7 @@ mod tests {
             .stamp_with_mode(&mut matrix, &mut rhs, &non_finite, num_nodes, request)
             .expect_err("a non-finite iterate fails in the model");
         assert!(
-            !matches!(error, GeneratedEvaluationError::ShortedSwitchBranch),
+            !matches!(error, GeneratedEvaluationError::FixedSwitchArmMoved),
             "the guard replaced the model's failure: {error}"
         );
         // The failure leaves the arms where the parameters put them.
@@ -4307,38 +4317,42 @@ mod tests {
 
     #[cfg(feature = "veriloga-builtins-base")]
     #[test]
-    fn a_switch_short_merges_free_nodes_and_never_joins_two_bound_nets() {
-        let short =
-            |state, pos, neg| rspice_veriloga_runtime::GeneratedSwitchShort { state, pos, neg };
+    fn a_fixed_switch_drops_its_current_and_never_joins_two_bound_nets() {
+        let switch = |state, pos, neg, shorts| rspice_veriloga_runtime::GeneratedPrivateSwitch {
+            state,
+            pos,
+            neg,
+            shorts,
+        };
         // Terminals 0 and 1, free internals 2 and 3, card-bound internal 4,
-        // private currents 5 to 9.
-        let mut bound = [false; 10];
+        // private currents 5 to 10.
+        let mut bound = [false; 11];
         bound[..2].fill(true);
         bound[4] = true;
-        let shorts = [
-            short(5, Some(0), Some(2)),
-            short(6, Some(2), Some(3)),
+        let switches = [
+            switch(5, Some(0), Some(2), true),
+            switch(6, Some(2), Some(3), true),
             // These would join the two terminals, and a bound net to ground.
-            short(7, Some(3), Some(1)),
-            short(8, Some(4), None),
+            switch(7, Some(3), Some(1), true),
+            switch(8, Some(4), None, true),
+            // A potential arm that is not a short keeps its current.
+            switch(9, Some(2), Some(4), false),
         ];
-        let (nets, merged) = super::merge_switch_shorts(&shorts, 0b1111, &bound);
-        assert_eq!(merged, 0b0011);
+        let (nets, fixed) = super::fix_private_switches(&switches, 0b11111, &bound);
+        assert_eq!(fixed, 0b00011);
         assert_eq!(nets[..5], [Some(0), Some(1), Some(0), Some(0), Some(4)]);
-        assert_eq!(nets[5..], [None, None, Some(7), Some(8), Some(9)]);
+        assert_eq!(nets[5..], [None, None, Some(7), Some(8), Some(9), Some(10)]);
 
-        // An arm the parameters hold off merges nothing.
-        let (nets, merged) = super::merge_switch_shorts(&shorts, 0b0010, &bound);
-        assert_eq!(merged, 0b0010);
-        assert_eq!(
-            &nets[..7],
-            [Some(0), Some(1), Some(2), Some(2), Some(4), Some(5), None]
-        );
+        // In the flow arm every switch drops its current and merges nothing.
+        let (nets, fixed) = super::fix_private_switches(&switches, 0, &bound);
+        assert_eq!(fixed, 0b11111);
+        assert_eq!(nets[..5], [Some(0), Some(1), Some(2), Some(3), Some(4)]);
+        assert_eq!(nets[5..10], [None; 5]);
 
         // A free node shorted to ground is ground.
-        let to_ground = [short(9, None, Some(3))];
-        let (nets, merged) = super::merge_switch_shorts(&to_ground, 1, &bound);
-        assert_eq!(merged, 1);
-        assert_eq!((nets[2], nets[3], nets[9]), (Some(2), None, None));
+        let to_ground = [switch(10, None, Some(3), true)];
+        let (nets, fixed) = super::fix_private_switches(&to_ground, 1, &bound);
+        assert_eq!(fixed, 1);
+        assert_eq!((nets[2], nets[3], nets[10]), (Some(2), None, None));
     }
 }

@@ -3409,7 +3409,7 @@ fn write_registry(
         out.push_str("    }\n\n");
     }
     out.push_str(
-        "    /// The model's setup-fixed switch shorts; see `switch_branch_shorts`.\n    pub fn switch_shorts(&self) -> &'static [super::GeneratedSwitchShort] {\n",
+        "    /// The model's setup-fixed private switches; see `private_switch_kinds`.\n    pub fn private_switches(&self) -> &'static [super::GeneratedPrivateSwitch] {\n",
     );
     if devices.is_empty() {
         out.push_str("        let _ = self;\n        &[]\n");
@@ -3418,7 +3418,7 @@ fn write_registry(
         for (index, (device, feature)) in devices.iter().zip(&feature_names).enumerate() {
             writeln!(
                 out,
-                "            #[cfg(feature = {feature:?})]\n            Self::Device{index}(_) => &{}::Instance::SWITCH_SHORTS,",
+                "            #[cfg(feature = {feature:?})]\n            Self::Device{index}(_) => &{}::Instance::PRIVATE_SWITCHES,",
                 device.folder_name,
             )?;
         }
@@ -3426,7 +3426,7 @@ fn write_registry(
     }
     out.push_str("    }\n\n");
     out.push_str(
-        "    /// Bit `i` is set while `switch_shorts()[i]` is in its potential arm.\n    pub fn switch_branch_shorts(&mut self, ctx: &super::GeneratedEvalContext<'_>) -> u64 {\n",
+        "    /// Bit `i` is set while `private_switches()[i]` is in its potential arm.\n    pub fn private_switch_kinds(&mut self, ctx: &super::GeneratedEvalContext<'_>) -> u64 {\n",
     );
     if devices.is_empty() {
         out.push_str("        let _ = (self, ctx);\n        0\n");
@@ -3435,7 +3435,7 @@ fn write_registry(
         for (index, feature) in feature_names.iter().enumerate() {
             writeln!(
                 out,
-                "            #[cfg(feature = {feature:?})]\n            Self::Device{index}(device) => device.switch_branch_shorts(ctx),"
+                "            #[cfg(feature = {feature:?})]\n            Self::Device{index}(device) => device.private_switch_kinds(ctx),"
             )?;
         }
         out.push_str("            Self::__NonExhaustive(value) => match *value {},\n        }\n");

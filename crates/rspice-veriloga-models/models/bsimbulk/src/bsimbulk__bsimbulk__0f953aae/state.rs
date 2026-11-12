@@ -1303,7 +1303,7 @@ pub struct Instance {
 	pub(crate) ddt_coefficients: GeneratedDdtCoefficients,
 	pub(crate) event_state_accepted: Box<[f64; 14]>,
 	pub(crate) event_state_candidate: Box<[f64; 14]>,
-	pub(crate) canonical_reactive: Box<[f64; 147]>,
+	pub(crate) canonical_reactive: Box<[f64; 148]>,
 	pub(crate) canonical_output_record: Box<[f64; 139]>,
 	pub(crate) canonical_model_values: Option<std::sync::Arc<CanonicalModelValues>>,
 	pub(crate) canonical_staged: Box<[f64; 865]>,

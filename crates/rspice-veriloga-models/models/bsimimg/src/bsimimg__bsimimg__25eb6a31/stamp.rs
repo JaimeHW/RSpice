@@ -1442,14 +1442,14 @@ impl Instance {
 		let DBN=L7([0f64;7]);
 		let DCY=staged[240];
 		let DDB=staged[241];
-		let DDL=node_potentials[9];
-		let DDN=staged[319];
-		let DDW=node_potentials[10];
-		let DDY=staged[320];
-		let DEH=node_potentials[11];
-		let DEJ=staged[321];
-		let DES=node_potentials[12];
-		let DEU=staged[322];
+		let DDL=staged[319];
+		let DDN=node_potentials[9];
+		let DEA=staged[320];
+		let DEC=node_potentials[10];
+		let DEP=staged[321];
+		let DER=node_potentials[11];
+		let DFE=staged[322];
+		let DFG=node_potentials[12];
 		if A{
 		analog_finish(68, time, B);
 		}
@@ -4763,221 +4763,283 @@ impl Instance {
 		let DDI=CTV[4];
 		let DDJ=CTV[3];
 		let DDK=CTV[0];
-		let DDM=B+ DDL;
-		let DDS;
-		let DDT;
-		if DDN!=0.0{
-		let DDO=CZD- JN;
-		let DDP=L2([1f64,0.0])- L2([0.0,JP]);
-		let DDQ=L3([DDP[0],DDP[1],0.0]);
-		DDS=DDO;
-		DDT=DDQ;
+		let DDP;
+		let DDQ;
+		if DDL!=0.0{
+		let DDM=L6([0.0,0.0,0.0,0.0,0.0,1f64]);
+		DDP=DDN;
+		DDQ=DDM;
 		}else{
-		let DDR=L3([0.0,0.0,1f64]);
-		DDS=DDL;
-		DDT=DDR;
+		let DDO=L6([CYX[0],CYX[1],CYX[2],CYX[3],CYX[4],0.0]);
+		DDP=CYV;
+		DDQ=DDO;
 		}
-		let DDU=L6([DDT[0],0.0,0.0,DDT[1],0.0,DDT[2]])- L6([CYX[0],CYX[1],CYX[2],CYX[3],CYX[4],0.0]);
-		let DDV=B+ (DDS- CYV);
-		let DDX=B+ DDW;
-		let DED;
+		let DDR=B+ DDP;
+		let DDW;
+		let DDX;
+		if DDL!=0.0{
+		let DDS=CZD- JN;
+		let DDT=L2([1f64,0.0])- L2([0.0,JP]);
+		let DDU=L3([DDT[0],DDT[1],0.0]);
+		DDW=DDS;
+		DDX=DDU;
+		}else{
+		let DDV=L3([0.0,0.0,1f64]);
+		DDW=DDN;
+		DDX=DDV;
+		}
+		let DDY=L6([DDX[0],0.0,0.0,DDX[1],0.0,DDX[2]])- L6([CYX[0],CYX[1],CYX[2],CYX[3],CYX[4],0.0]);
+		let DDZ=B+ (DDW- CYV);
 		let DEE;
-		if DDY!=0.0{
-		let DDZ=DAN- LB;
-		let DEA=L2([1f64,0.0])- L2([0.0,LD]);
-		let DEB=L3([DEA[0],DEA[1],0.0]);
-		DED=DDZ;
-		DEE=DEB;
-		}else{
-		let DEC=L3([0.0,0.0,1f64]);
-		DED=DDW;
+		let DEF;
+		if DEA!=0.0{
+		let DEB=L3([0.0,0.0,1f64]);
 		DEE=DEC;
-		}
-		let DEF=DEE- L3([DAK[0],DAK[1],0.0]);
-		let DEG=B+ (DED- DAJ);
-		let DEI=B+ DEH;
-		let DEO;
-		let DEP;
-		if DEJ!=0.0{
-		let DEK=LB- JH;
-		let DEL=L2([LD,0.0])- L2([0.0,JJ]);
-		let DEM=L3([DEL[0],DEL[1],0.0]);
-		DEO=DEK;
-		DEP=DEM;
+		DEF=DEB;
 		}else{
-		let DEN=L3([0.0,0.0,1f64]);
-		DEO=DEH;
-		DEP=DEN;
+		let DED=L3([DAK[0],DAK[1],0.0]);
+		DEE=DAJ;
+		DEF=DED;
 		}
-		let DEQ=L7([0.0,0.0,0.0,0.0,DEP[0],DEP[1],DEP[2]])- L7([DAA[0],DAA[1],DAA[2],DAA[3],DAA[4],DAA[5],0.0]);
-		let DER=B+ (DEO- CZZ);
-		let DET=B+ DES;
-		let DEZ;
+		let DEG=B+ DEE;
+		let DEL;
+		let DEM;
+		if DEA!=0.0{
+		let DEH=DAN- LB;
+		let DEI=L2([1f64,0.0])- L2([0.0,LD]);
+		let DEJ=L3([DEI[0],DEI[1],0.0]);
+		DEL=DEH;
+		DEM=DEJ;
+		}else{
+		let DEK=L3([0.0,0.0,1f64]);
+		DEL=DEC;
+		DEM=DEK;
+		}
+		let DEN=DEM- L3([DAK[0],DAK[1],0.0]);
+		let DEO=B+ (DEL- DAJ);
+		let DET;
+		let DEU;
+		if DEP!=0.0{
+		let DEQ=L7([0.0,0.0,0.0,0.0,0.0,0.0,1f64]);
+		DET=DER;
+		DEU=DEQ;
+		}else{
+		let DES=L7([DAA[0],DAA[1],DAA[2],DAA[3],DAA[4],DAA[5],0.0]);
+		DET=CZZ;
+		DEU=DES;
+		}
+		let DEV=B+ DET;
 		let DFA;
-		if DEU!=0.0{
-		let DEV=CZJ- JI;
-		let DEW=L2([1f64,0.0])- L2([0.0,JK]);
-		let DEX=L3([DEW[0],DEW[1],0.0]);
-		DEZ=DEV;
-		DFA=DEX;
+		let DFB;
+		if DEP!=0.0{
+		let DEW=LB- JH;
+		let DEX=L2([LD,0.0])- L2([0.0,JJ]);
+		let DEY=L3([DEX[0],DEX[1],0.0]);
+		DFA=DEW;
+		DFB=DEY;
 		}else{
-		let DEY=L3([0.0,0.0,1f64]);
-		DEZ=DES;
-		DFA=DEY;
+		let DEZ=L3([0.0,0.0,1f64]);
+		DFA=DER;
+		DFB=DEZ;
 		}
-		let DFB=L6([DFA[0],0.0,0.0,DFA[1],0.0,DFA[2]])- L6([CYY[0],CYY[1],CYY[2],CYY[3],CYY[4],0.0]);
-		let DFC=B+ (DEZ- CYW);
-		let DFD=CVT[0];
-		let DFE=CVT[1];
-		let DFF=CVT[2];
-		let DFG=CVT[3];
-		let DFH=CVT[4];
-		let DFI=CVU[0];
-		let DFJ=CVU[1];
-		let DFK=CVU[2];
-		let DFL=CVU[3];
-		let DFM=CVU[4];
-		let DFN=CVV[0];
-		let DFO=CVV[1];
-		let DFP=CVV[2];
-		let DFQ=CVV[3];
-		let DFR=CVV[4];
-		let DFS=CVW[0];
-		let DFT=CVW[1];
-		let DFU=CVW[2];
-		let DFV=CVW[3];
-		let DFW=CVW[4];
-		let DFX=CVX[0];
-		let DFY=CVX[1];
-		let DFZ=CVX[2];
-		let DGA=CVX[3];
-		let DGB=CVX[4];
-		let DGC=CVY[0];
-		let DGD=CVY[1];
-		let DGE=CVY[2];
-		let DGF=CVY[3];
-		let DGG=CVY[4];
-		let DGH=CVZ[0];
-		let DGI=CVZ[1];
-		let DGJ=CVZ[2];
-		let DGK=CVZ[3];
-		let DGL=CVZ[4];
-		let DGM=CWA[0];
-		let DGN=CWA[1];
-		let DGO=CWA[2];
-		let DGP=CWA[3];
-		let DGQ=CWA[4];
-		let DGR=CWB[0];
-		let DGS=CWB[1];
-		let DGT=CWB[2];
-		let DGU=CWB[3];
-		let DGV=CWB[4];
-		let DGW=CWC[0];
-		let DGX=CWC[1];
-		let DGY=CWC[2];
-		let DGZ=CWC[3];
-		let DHA=CWC[4];
-		let DHB=CWD[0];
-		let DHC=CWD[1];
-		let DHD=CWD[2];
-		let DHE=CWD[3];
-		let DHF=CWD[4];
-		let DHG=CWF[0];
-		let DHH=CWF[1];
-		let DHI=CWF[2];
-		let DHJ=CWF[3];
-		let DHK=CWF[4];
-		let DHL=CWJ[0];
-		let DHM=CWJ[1];
-		let DHN=CWJ[2];
-		let DHO=CWJ[3];
-		let DHP=CWJ[4];
-		let DHQ=CWP[0];
-		let DHR=CWP[1];
-		let DHS=CWP[2];
-		let DHT=CWP[3];
-		let DHU=CWP[4];
-		let DHV=CWT[0];
-		let DHW=CWT[1];
-		let DHX=CWT[2];
-		let DHY=CWT[3];
-		let DHZ=CWT[4];
-		let DIA=CWY[0];
-		let DIB=CWY[1];
-		let DIC=CWY[2];
-		let DID=CWY[3];
-		let DIE=CXB[0];
-		let DIF=CXB[1];
-		let DIG=CXB[2];
-		let DIH=CXB[3];
-		let DII=CXF[0];
-		let DIJ=CXF[1];
-		let DIK=CXL[0];
-		let DIL=CXL[1];
-		let DIM=DBT[0];
-		let DIN=DBT[1];
-		let DIO=DBT[2];
-		let DIP=DBT[3];
-		let DIQ=DBT[4];
-		let DIR=DBT[5];
-		let DIS=DBT[6];
-		let DIT=DBU[0];
-		let DIU=DBU[1];
-		let DIV=DBU[2];
-		let DIW=DBU[3];
-		let DIX=DBU[4];
-		let DIY=DBV;
-		let DIZ=DBW;
-		let DJA=1f64;
-		let DJB=DDU[0];
-		let DJC=DDU[1];
-		let DJD=DDU[2];
-		let DJE=DDU[3];
-		let DJF=DDU[4];
-		let DJG=DDU[5];
-		let DJH=1f64;
-		let DJI=DEF[0];
-		let DJJ=DEF[1];
-		let DJK=DEF[2];
-		let DJL=1f64;
-		let DJM=DEQ[0];
-		let DJN=DEQ[1];
-		let DJO=DEQ[2];
-		let DJP=DEQ[3];
-		let DJQ=DEQ[4];
-		let DJR=DEQ[5];
-		let DJS=DEQ[6];
-		let DJT=1f64;
-		let DJU=DFB[0];
-		let DJV=DFB[1];
-		let DJW=DFB[2];
-		let DJX=DFB[3];
-		let DJY=DFB[4];
-		let DJZ=DFB[5];
-		let DKA=CWM[0];
-		let DKB=CWM[1];
-		let DKC=CWM[2];
-		let DKD=CWM[3];
-		let DKE=CWM[4];
-		let DKF=CTV[1];
-		let DKG=CWV[0];
-		let DKH=CWV[1];
-		let DKI=CWV[2];
-		let DKJ=CWV[3];
-		let DKK=CWV[4];
-		let DKL=CUG[0];
-		let DKM=CUG[1];
-		let DKN=CUG[2];
-		let DKO=CUG[3];
-		let DKP=CUI[0];
-		let DKQ=CUI[1];
-		let DKR=CUI[2];
-		let DKS=CUI[3];
-		let DKT=CXH[0];
-		let DKU=CXH[1];
-		let DKV=CXN[0];
-		let DKW=CXN[1];
-		let DKX=DBX;
+		let DFC=L7([0.0,0.0,0.0,0.0,DFB[0],DFB[1],DFB[2]])- L7([DAA[0],DAA[1],DAA[2],DAA[3],DAA[4],DAA[5],0.0]);
+		let DFD=B+ (DFA- CZZ);
+		let DFI;
+		let DFJ;
+		if DFE!=0.0{
+		let DFF=L6([0.0,0.0,0.0,0.0,0.0,1f64]);
+		DFI=DFG;
+		DFJ=DFF;
+		}else{
+		let DFH=L6([CYY[0],CYY[1],CYY[2],CYY[3],CYY[4],0.0]);
+		DFI=CYW;
+		DFJ=DFH;
+		}
+		let DFK=B+ DFI;
+		let DFP;
+		let DFQ;
+		if DFE!=0.0{
+		let DFL=CZJ- JI;
+		let DFM=L2([1f64,0.0])- L2([0.0,JK]);
+		let DFN=L3([DFM[0],DFM[1],0.0]);
+		DFP=DFL;
+		DFQ=DFN;
+		}else{
+		let DFO=L3([0.0,0.0,1f64]);
+		DFP=DFG;
+		DFQ=DFO;
+		}
+		let DFR=L6([DFQ[0],0.0,0.0,DFQ[1],0.0,DFQ[2]])- L6([CYY[0],CYY[1],CYY[2],CYY[3],CYY[4],0.0]);
+		let DFS=B+ (DFP- CYW);
+		let DFT=CVT[0];
+		let DFU=CVT[1];
+		let DFV=CVT[2];
+		let DFW=CVT[3];
+		let DFX=CVT[4];
+		let DFY=CVU[0];
+		let DFZ=CVU[1];
+		let DGA=CVU[2];
+		let DGB=CVU[3];
+		let DGC=CVU[4];
+		let DGD=CVV[0];
+		let DGE=CVV[1];
+		let DGF=CVV[2];
+		let DGG=CVV[3];
+		let DGH=CVV[4];
+		let DGI=CVW[0];
+		let DGJ=CVW[1];
+		let DGK=CVW[2];
+		let DGL=CVW[3];
+		let DGM=CVW[4];
+		let DGN=CVX[0];
+		let DGO=CVX[1];
+		let DGP=CVX[2];
+		let DGQ=CVX[3];
+		let DGR=CVX[4];
+		let DGS=CVY[0];
+		let DGT=CVY[1];
+		let DGU=CVY[2];
+		let DGV=CVY[3];
+		let DGW=CVY[4];
+		let DGX=CVZ[0];
+		let DGY=CVZ[1];
+		let DGZ=CVZ[2];
+		let DHA=CVZ[3];
+		let DHB=CVZ[4];
+		let DHC=CWA[0];
+		let DHD=CWA[1];
+		let DHE=CWA[2];
+		let DHF=CWA[3];
+		let DHG=CWA[4];
+		let DHH=CWB[0];
+		let DHI=CWB[1];
+		let DHJ=CWB[2];
+		let DHK=CWB[3];
+		let DHL=CWB[4];
+		let DHM=CWC[0];
+		let DHN=CWC[1];
+		let DHO=CWC[2];
+		let DHP=CWC[3];
+		let DHQ=CWC[4];
+		let DHR=CWD[0];
+		let DHS=CWD[1];
+		let DHT=CWD[2];
+		let DHU=CWD[3];
+		let DHV=CWD[4];
+		let DHW=CWF[0];
+		let DHX=CWF[1];
+		let DHY=CWF[2];
+		let DHZ=CWF[3];
+		let DIA=CWF[4];
+		let DIB=CWJ[0];
+		let DIC=CWJ[1];
+		let DID=CWJ[2];
+		let DIE=CWJ[3];
+		let DIF=CWJ[4];
+		let DIG=CWP[0];
+		let DIH=CWP[1];
+		let DII=CWP[2];
+		let DIJ=CWP[3];
+		let DIK=CWP[4];
+		let DIL=CWT[0];
+		let DIM=CWT[1];
+		let DIN=CWT[2];
+		let DIO=CWT[3];
+		let DIP=CWT[4];
+		let DIQ=CWY[0];
+		let DIR=CWY[1];
+		let DIS=CWY[2];
+		let DIT=CWY[3];
+		let DIU=CXB[0];
+		let DIV=CXB[1];
+		let DIW=CXB[2];
+		let DIX=CXB[3];
+		let DIY=CXF[0];
+		let DIZ=CXF[1];
+		let DJA=CXL[0];
+		let DJB=CXL[1];
+		let DJC=DBT[0];
+		let DJD=DBT[1];
+		let DJE=DBT[2];
+		let DJF=DBT[3];
+		let DJG=DBT[4];
+		let DJH=DBT[5];
+		let DJI=DBT[6];
+		let DJJ=DBU[0];
+		let DJK=DBU[1];
+		let DJL=DBU[2];
+		let DJM=DBU[3];
+		let DJN=DBU[4];
+		let DJO=DBV;
+		let DJP=DBW;
+		let DJQ=DDQ[0];
+		let DJR=DDQ[1];
+		let DJS=DDQ[2];
+		let DJT=DDQ[3];
+		let DJU=DDQ[4];
+		let DJV=DDQ[5];
+		let DJW=DDY[0];
+		let DJX=DDY[1];
+		let DJY=DDY[2];
+		let DJZ=DDY[3];
+		let DKA=DDY[4];
+		let DKB=DDY[5];
+		let DKC=DEF[0];
+		let DKD=DEF[1];
+		let DKE=DEF[2];
+		let DKF=DEN[0];
+		let DKG=DEN[1];
+		let DKH=DEN[2];
+		let DKI=DEU[0];
+		let DKJ=DEU[1];
+		let DKK=DEU[2];
+		let DKL=DEU[3];
+		let DKM=DEU[4];
+		let DKN=DEU[5];
+		let DKO=DEU[6];
+		let DKP=DFC[0];
+		let DKQ=DFC[1];
+		let DKR=DFC[2];
+		let DKS=DFC[3];
+		let DKT=DFC[4];
+		let DKU=DFC[5];
+		let DKV=DFC[6];
+		let DKW=DFJ[0];
+		let DKX=DFJ[1];
+		let DKY=DFJ[2];
+		let DKZ=DFJ[3];
+		let DLA=DFJ[4];
+		let DLB=DFJ[5];
+		let DLC=DFR[0];
+		let DLD=DFR[1];
+		let DLE=DFR[2];
+		let DLF=DFR[3];
+		let DLG=DFR[4];
+		let DLH=DFR[5];
+		let DLI=CWM[0];
+		let DLJ=CWM[1];
+		let DLK=CWM[2];
+		let DLL=CWM[3];
+		let DLM=CWM[4];
+		let DLN=CTV[1];
+		let DLO=CWV[0];
+		let DLP=CWV[1];
+		let DLQ=CWV[2];
+		let DLR=CWV[3];
+		let DLS=CWV[4];
+		let DLT=CUG[0];
+		let DLU=CUG[1];
+		let DLV=CUG[2];
+		let DLW=CUG[3];
+		let DLX=CUI[0];
+		let DLY=CUI[1];
+		let DLZ=CUI[2];
+		let DMA=CUI[3];
+		let DMB=CXH[0];
+		let DMC=CXH[1];
+		let DMD=CXN[0];
+		let DME=CXN[1];
+		let DMF=DBX;
         {
             let record = &mut *self.canonical_output_record;
             record[0] = AD;
@@ -5079,7 +5141,7 @@ impl Instance {
             Some(6),
             multiplicity * (CVJ),
             [3, 4, 5, 6, 8],
-            [DFD, DFE, DFF, DFG, DFH],
+            [DFT, DFU, DFV, DFW, DFX],
             [],
             [],
             multiplicity,
@@ -5089,7 +5151,7 @@ impl Instance {
             Some(6),
             multiplicity * (CVK),
             [3, 4, 5, 6, 8],
-            [DFI, DFJ, DFK, DFL, DFM],
+            [DFY, DFZ, DGA, DGB, DGC],
             [],
             [],
             multiplicity,
@@ -5099,7 +5161,7 @@ impl Instance {
             Some(5),
             multiplicity * (CVL),
             [3, 4, 5, 6, 8],
-            [DFN, DFO, DFP, DFQ, DFR],
+            [DGD, DGE, DGF, DGG, DGH],
             [],
             [],
             multiplicity,
@@ -5109,7 +5171,7 @@ impl Instance {
             Some(6),
             multiplicity * (CVM),
             [3, 4, 5, 6, 8],
-            [DFS, DFT, DFU, DFV, DFW],
+            [DGI, DGJ, DGK, DGL, DGM],
             [],
             [],
             multiplicity,
@@ -5119,7 +5181,7 @@ impl Instance {
             Some(5),
             multiplicity * (CVN),
             [3, 4, 5, 6, 8],
-            [DFX, DFY, DFZ, DGA, DGB],
+            [DGN, DGO, DGP, DGQ, DGR],
             [],
             [],
             multiplicity,
@@ -5129,7 +5191,7 @@ impl Instance {
             Some(5),
             multiplicity * (CVO),
             [3, 4, 5, 6, 8],
-            [DGC, DGD, DGE, DGF, DGG],
+            [DGS, DGT, DGU, DGV, DGW],
             [],
             [],
             multiplicity,
@@ -5139,7 +5201,7 @@ impl Instance {
             Some(5),
             multiplicity * (CVP),
             [3, 4, 5, 6, 8],
-            [DGH, DGI, DGJ, DGK, DGL],
+            [DGX, DGY, DGZ, DHA, DHB],
             [],
             [],
             multiplicity,
@@ -5149,7 +5211,7 @@ impl Instance {
             Some(6),
             multiplicity * (CVQ),
             [3, 4, 5, 6, 8],
-            [DGM, DGN, DGO, DGP, DGQ],
+            [DHC, DHD, DHE, DHF, DHG],
             [],
             [],
             multiplicity,
@@ -5159,7 +5221,7 @@ impl Instance {
             Some(5),
             multiplicity * (CVR),
             [3, 4, 5, 6, 8],
-            [DGR, DGS, DGT, DGU, DGV],
+            [DHH, DHI, DHJ, DHK, DHL],
             [],
             [],
             multiplicity,
@@ -5169,7 +5231,7 @@ impl Instance {
             Some(6),
             multiplicity * (CVS),
             [3, 4, 5, 6, 8],
-            [DGW, DGX, DGY, DGZ, DHA],
+            [DHM, DHN, DHO, DHP, DHQ],
             [],
             [],
             multiplicity,
@@ -5179,7 +5241,7 @@ impl Instance {
             Some(6),
             multiplicity * (CWE),
             [3, 4, 5, 6, 8],
-            [DHB, DHC, DHD, DHE, DHF],
+            [DHR, DHS, DHT, DHU, DHV],
             [],
             [],
             multiplicity,
@@ -5189,7 +5251,7 @@ impl Instance {
             Some(5),
             multiplicity * (CWG),
             [3, 4, 5, 6, 8],
-            [DHG, DHH, DHI, DHJ, DHK],
+            [DHW, DHX, DHY, DHZ, DIA],
             [],
             [],
             multiplicity,
@@ -5199,7 +5261,7 @@ impl Instance {
             Some(6),
             multiplicity * (CWN),
             [3, 4, 5, 6, 8],
-            [DHL, DHM, DHN, DHO, DHP],
+            [DIB, DIC, DID, DIE, DIF],
             [],
             [],
             multiplicity,
@@ -5209,7 +5271,7 @@ impl Instance {
             Some(6),
             multiplicity * (CWQ),
             [3, 4, 5, 6, 8],
-            [DHQ, DHR, DHS, DHT, DHU],
+            [DIG, DIH, DII, DIJ, DIK],
             [],
             [],
             multiplicity,
@@ -5219,7 +5281,7 @@ impl Instance {
             Some(6),
             multiplicity * (CWW),
             [3, 4, 5, 6, 8],
-            [DHV, DHW, DHX, DHY, DHZ],
+            [DIL, DIM, DIN, DIO, DIP],
             [],
             [],
             multiplicity,
@@ -5229,7 +5291,7 @@ impl Instance {
             Some(6),
             multiplicity * (CWZ),
             [3, 4, 6, 7],
-            [DIA, DIB, DIC, DID],
+            [DIQ, DIR, DIS, DIT],
             [],
             [],
             multiplicity,
@@ -5239,7 +5301,7 @@ impl Instance {
             Some(5),
             multiplicity * (CXC),
             [3, 4, 5, 7],
-            [DIE, DIF, DIG, DIH],
+            [DIU, DIV, DIW, DIX],
             [],
             [],
             multiplicity,
@@ -5249,7 +5311,7 @@ impl Instance {
             Some(3),
             multiplicity * (CXI),
             [3, 6],
-            [DII, DIJ],
+            [DIY, DIZ],
             [],
             [],
             multiplicity,
@@ -5259,7 +5321,7 @@ impl Instance {
             Some(3),
             multiplicity * (CXO),
             [3, 5],
-            [DIK, DIL],
+            [DJA, DJB],
             [],
             [],
             multiplicity,
@@ -5349,7 +5411,7 @@ impl Instance {
             None,
             multiplicity * (DBO),
             [0, 2, 3, 4, 5, 6, 8],
-            [DIM, DIN, DIO, DIP, DIQ, DIR, DIS],
+            [DJC, DJD, DJE, DJF, DJG, DJH, DJI],
             [],
             [],
             multiplicity,
@@ -5359,7 +5421,7 @@ impl Instance {
             None,
             multiplicity * (DBP),
             [3, 4, 5, 6, 8],
-            [DIT, DIU, DIV, DIW, DIX],
+            [DJJ, DJK, DJL, DJM, DJN],
             [],
             [],
             multiplicity,
@@ -5369,7 +5431,7 @@ impl Instance {
             None,
             multiplicity * (DBQ),
             [4],
-            [DIY],
+            [DJO],
             [],
             [],
             multiplicity,
@@ -5379,7 +5441,7 @@ impl Instance {
             None,
             multiplicity * (DBR),
             [4],
-            [DIZ],
+            [DJP],
             [],
             [],
             multiplicity,
@@ -5394,12 +5456,12 @@ impl Instance {
             [],
         );
         }
-        stamper.stamp_current_sparse_local::<1, 0>(
+        stamper.stamp_current_sparse_local::<6, 0>(
             Some(0),
             Some(5),
-            multiplicity * (DDM),
-            [9],
-            [DJA],
+            multiplicity * (DDR),
+            [0, 3, 4, 5, 8, 9],
+            [DJQ, DJR, DJS, DJT, DJU, DJV],
             [],
             [],
             multiplicity,
@@ -5407,19 +5469,19 @@ impl Instance {
         stamper.stamp_current_sparse_local::<6, 0>(
             Some(9),
             None,
-            multiplicity * (DDV),
+            multiplicity * (DDZ),
             [0, 3, 4, 5, 8, 9],
-            [DJB, DJC, DJD, DJE, DJF, DJG],
+            [DJW, DJX, DJY, DJZ, DKA, DKB],
             [],
             [],
             multiplicity,
         );
-        stamper.stamp_current_sparse_local::<1, 0>(
+        stamper.stamp_current_sparse_local::<3, 0>(
             Some(1),
             Some(7),
-            multiplicity * (DDX),
-            [10],
-            [DJH],
+            multiplicity * (DEG),
+            [1, 7, 10],
+            [DKC, DKD, DKE],
             [],
             [],
             multiplicity,
@@ -5427,19 +5489,19 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(10),
             None,
-            multiplicity * (DEG),
+            multiplicity * (DEO),
             [1, 7, 10],
-            [DJI, DJJ, DJK],
+            [DKF, DKG, DKH],
             [],
             [],
             multiplicity,
         );
-        stamper.stamp_current_sparse_local::<1, 0>(
+        stamper.stamp_current_sparse_local::<7, 0>(
             Some(7),
             Some(8),
-            multiplicity * (DEI),
-            [11],
-            [DJL],
+            multiplicity * (DEV),
+            [3, 4, 5, 6, 7, 8, 11],
+            [DKI, DKJ, DKK, DKL, DKM, DKN, DKO],
             [],
             [],
             multiplicity,
@@ -5447,19 +5509,19 @@ impl Instance {
         stamper.stamp_current_sparse_local::<7, 0>(
             Some(11),
             None,
-            multiplicity * (DER),
+            multiplicity * (DFD),
             [3, 4, 5, 6, 7, 8, 11],
-            [DJM, DJN, DJO, DJP, DJQ, DJR, DJS],
+            [DKP, DKQ, DKR, DKS, DKT, DKU, DKV],
             [],
             [],
             multiplicity,
         );
-        stamper.stamp_current_sparse_local::<1, 0>(
+        stamper.stamp_current_sparse_local::<6, 0>(
             Some(2),
             Some(6),
-            multiplicity * (DET),
-            [12],
-            [DJT],
+            multiplicity * (DFK),
+            [2, 3, 4, 6, 8, 12],
+            [DKW, DKX, DKY, DKZ, DLA, DLB],
             [],
             [],
             multiplicity,
@@ -5467,9 +5529,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<6, 0>(
             Some(12),
             None,
-            multiplicity * (DFC),
+            multiplicity * (DFS),
             [2, 3, 4, 6, 8, 12],
-            [DJU, DJV, DJW, DJX, DJY, DJZ],
+            [DLC, DLD, DLE, DLF, DLG, DLH],
             [],
             [],
             multiplicity,
@@ -5487,39 +5549,39 @@ impl Instance {
         self.canonical_reactive[10] = CWE;
         self.canonical_reactive[11] = CWG;
         self.canonical_reactive[12] = CWL;
-        self.canonical_reactive[13] = DKA;
-        self.canonical_reactive[14] = DKB;
-        self.canonical_reactive[15] = DKC;
-        self.canonical_reactive[16] = DKD;
-        self.canonical_reactive[17] = DKE;
+        self.canonical_reactive[13] = DLI;
+        self.canonical_reactive[14] = DLJ;
+        self.canonical_reactive[15] = DLK;
+        self.canonical_reactive[16] = DLL;
+        self.canonical_reactive[17] = DLM;
         self.canonical_reactive[18] = CTU;
         self.canonical_reactive[19] = DDK;
-        self.canonical_reactive[20] = DKF;
+        self.canonical_reactive[20] = DLN;
         self.canonical_reactive[21] = DDH;
         self.canonical_reactive[22] = DDJ;
         self.canonical_reactive[23] = DDI;
         self.canonical_reactive[24] = CWU;
-        self.canonical_reactive[25] = DKG;
-        self.canonical_reactive[26] = DKH;
-        self.canonical_reactive[27] = DKI;
-        self.canonical_reactive[28] = DKJ;
-        self.canonical_reactive[29] = DKK;
+        self.canonical_reactive[25] = DLO;
+        self.canonical_reactive[26] = DLP;
+        self.canonical_reactive[27] = DLQ;
+        self.canonical_reactive[28] = DLR;
+        self.canonical_reactive[29] = DLS;
         self.canonical_reactive[30] = CUF;
-        self.canonical_reactive[31] = DKL;
-        self.canonical_reactive[32] = DKM;
-        self.canonical_reactive[33] = DKN;
-        self.canonical_reactive[34] = DKO;
+        self.canonical_reactive[31] = DLT;
+        self.canonical_reactive[32] = DLU;
+        self.canonical_reactive[33] = DLV;
+        self.canonical_reactive[34] = DLW;
         self.canonical_reactive[35] = CUH;
-        self.canonical_reactive[36] = DKP;
-        self.canonical_reactive[37] = DKQ;
-        self.canonical_reactive[38] = DKR;
-        self.canonical_reactive[39] = DKS;
+        self.canonical_reactive[36] = DLX;
+        self.canonical_reactive[37] = DLY;
+        self.canonical_reactive[38] = DLZ;
+        self.canonical_reactive[39] = DMA;
         self.canonical_reactive[40] = CXG;
-        self.canonical_reactive[41] = DKT;
-        self.canonical_reactive[42] = DKU;
+        self.canonical_reactive[41] = DMB;
+        self.canonical_reactive[42] = DMC;
         self.canonical_reactive[43] = CXM;
-        self.canonical_reactive[44] = DKV;
-        self.canonical_reactive[45] = DKW;
+        self.canonical_reactive[44] = DMD;
+        self.canonical_reactive[45] = DME;
         self.canonical_reactive[46] = staged[323];
         self.canonical_reactive[47] = staged[324];
         self.canonical_reactive[48] = DAW;
@@ -5532,16 +5594,16 @@ impl Instance {
         self.canonical_reactive[55] = DBP;
         self.canonical_reactive[56] = DBQ;
         self.canonical_reactive[57] = DBS;
-        self.canonical_reactive[58] = DKX;
+        self.canonical_reactive[58] = DMF;
         self.canonical_reactive[59] = staged[327];
-        self.canonical_reactive[60] = DDM;
-        self.canonical_reactive[61] = DDV;
-        self.canonical_reactive[62] = DDX;
-        self.canonical_reactive[63] = DEG;
-        self.canonical_reactive[64] = DEI;
-        self.canonical_reactive[65] = DER;
-        self.canonical_reactive[66] = DET;
-        self.canonical_reactive[67] = DFC;
+        self.canonical_reactive[60] = DDR;
+        self.canonical_reactive[61] = DDZ;
+        self.canonical_reactive[62] = DEG;
+        self.canonical_reactive[63] = DEO;
+        self.canonical_reactive[64] = DEV;
+        self.canonical_reactive[65] = DFD;
+        self.canonical_reactive[66] = DFK;
+        self.canonical_reactive[67] = DFS;
         if ctx.analog_tasks_enabled() && !ctx.evaluation_failed() { self.analog_effects.as_mut().expect("task evaluation began").complete_evaluation(); }
     }
 
@@ -5922,17 +5984,17 @@ impl Instance {
     }
 
 
-    pub const STAMP_PATTERN: rspice_veriloga_runtime::GeneratedVerilogAStampPattern = rspice_veriloga_runtime::GeneratedVerilogAStampPattern { resistive: &[(0, 9), (1, 10), (2, 12), (3, 3), (3, 4), (3, 5), (3, 6), (3, 8), (4, 0), (4, 2), (4, 3), (4, 4), (4, 5), (4, 6), (4, 8), (4, 13), (5, 3), (5, 4), (5, 5), (5, 6), (5, 8), (5, 9), (6, 3), (6, 4), (6, 5), (6, 6), (6, 8), (6, 12), (7, 10), (7, 11), (8, 3), (8, 4), (8, 5), (8, 6), (8, 8), (8, 11), (9, 0), (9, 3), (9, 4), (9, 5), (9, 8), (9, 9), (10, 1), (10, 7), (10, 10), (11, 3), (11, 4), (11, 5), (11, 6), (11, 7), (11, 8), (11, 11), (12, 2), (12, 3), (12, 4), (12, 6), (12, 8), (12, 12), (13, 4), (13, 13)], dynamic: &[(5, 7), (6, 7), (7, 3), (7, 4), (7, 5), (7, 6), (7, 7)], reactive: &[(3, 3), (3, 4), (3, 5), (3, 6), (3, 8), (4, 4), (5, 3), (5, 4), (5, 5), (5, 6), (5, 7), (5, 8), (6, 3), (6, 4), (6, 5), (6, 6), (6, 7), (6, 8), (7, 3), (7, 4), (7, 5), (7, 6), (7, 7), (8, 3), (8, 4), (8, 5), (8, 6), (8, 8)], rhs_rows: &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13] };
+    pub const STAMP_PATTERN: rspice_veriloga_runtime::GeneratedVerilogAStampPattern = rspice_veriloga_runtime::GeneratedVerilogAStampPattern { resistive: &[(0, 0), (0, 3), (0, 4), (0, 5), (0, 8), (0, 9), (1, 1), (1, 7), (1, 10), (2, 2), (2, 3), (2, 4), (2, 6), (2, 8), (2, 12), (3, 3), (3, 4), (3, 5), (3, 6), (3, 8), (4, 0), (4, 2), (4, 3), (4, 4), (4, 5), (4, 6), (4, 8), (4, 13), (5, 0), (5, 3), (5, 4), (5, 5), (5, 6), (5, 8), (5, 9), (6, 2), (6, 3), (6, 4), (6, 5), (6, 6), (6, 8), (6, 12), (7, 1), (7, 3), (7, 4), (7, 5), (7, 6), (7, 7), (7, 8), (7, 10), (7, 11), (8, 3), (8, 4), (8, 5), (8, 6), (8, 7), (8, 8), (8, 11), (9, 0), (9, 3), (9, 4), (9, 5), (9, 8), (9, 9), (10, 1), (10, 7), (10, 10), (11, 3), (11, 4), (11, 5), (11, 6), (11, 7), (11, 8), (11, 11), (12, 2), (12, 3), (12, 4), (12, 6), (12, 8), (12, 12), (13, 4), (13, 13)], dynamic: &[(5, 7), (6, 7)], reactive: &[(3, 3), (3, 4), (3, 5), (3, 6), (3, 8), (4, 4), (5, 3), (5, 4), (5, 5), (5, 6), (5, 7), (5, 8), (6, 3), (6, 4), (6, 5), (6, 6), (6, 7), (6, 8), (7, 3), (7, 4), (7, 5), (7, 6), (7, 7), (8, 3), (8, 4), (8, 5), (8, 6), (8, 8)], rhs_rows: &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13] };
 
-    pub const SWITCH_SHORTS: [rspice_veriloga_runtime::GeneratedSwitchShort; 4] = [rspice_veriloga_runtime::GeneratedSwitchShort { state: 9, pos: Some(0), neg: Some(5) }, rspice_veriloga_runtime::GeneratedSwitchShort { state: 10, pos: Some(1), neg: Some(7) }, rspice_veriloga_runtime::GeneratedSwitchShort { state: 11, pos: Some(7), neg: Some(8) }, rspice_veriloga_runtime::GeneratedSwitchShort { state: 12, pos: Some(2), neg: Some(6) }];
+    pub const PRIVATE_SWITCHES: [rspice_veriloga_runtime::GeneratedPrivateSwitch; 4] = [rspice_veriloga_runtime::GeneratedPrivateSwitch { state: 9, pos: Some(0), neg: Some(5), shorts: true }, rspice_veriloga_runtime::GeneratedPrivateSwitch { state: 10, pos: Some(1), neg: Some(7), shorts: true }, rspice_veriloga_runtime::GeneratedPrivateSwitch { state: 11, pos: Some(7), neg: Some(8), shorts: true }, rspice_veriloga_runtime::GeneratedPrivateSwitch { state: 12, pos: Some(2), neg: Some(6), shorts: true }];
 
-    /// Bit `i` is set while `SWITCH_SHORTS[i]` is in its potential arm.
-    pub fn switch_branch_shorts(&mut self, ctx: &GeneratedEvalContext<'_>) -> u64 {
+    /// Bit `i` is set while `PRIVATE_SWITCHES[i]` is in its potential arm.
+    pub fn private_switch_kinds(&mut self, ctx: &GeneratedEvalContext<'_>) -> u64 {
         self.canonical_model_stage(ctx);
         if ctx.evaluation_failed() { return 0; }
         self.canonical_instance_stage(ctx);
         if ctx.evaluation_failed() { return 0; }
         let staged = &*self.canonical_staged;
-        (u64::from(staged[319] != 0.0) << 0) | (u64::from(staged[320] != 0.0) << 1) | (u64::from(staged[321] != 0.0) << 2) | (u64::from(staged[322] != 0.0) << 3)
+        u64::from(staged[319] != 0.0) | (u64::from(staged[320] != 0.0) << 1) | (u64::from(staged[321] != 0.0) << 2) | (u64::from(staged[322] != 0.0) << 3)
     }
 }

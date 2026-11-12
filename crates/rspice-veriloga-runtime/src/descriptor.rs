@@ -265,20 +265,24 @@ pub struct GeneratedVerilogAStampPattern {
 }
 
 /// A switch branch whose arm the model and instance parameters choose and
-/// whose potential arm writes zero.
+/// whose current nothing but its own equation reads.
 ///
 /// Nodes are device-local, as in [`GeneratedVerilogAStampPattern`]; `None` is
-/// ground. While the potential arm is on, the branch holds `pos` and `neg` at
-/// one potential through the private current on node `state`. A host that
-/// reads the arm before it builds the matrix may bind both nodes to one net
-/// and `state` to ground: the current's injections then cancel and its
-/// equation reads `0 = 0`. The arm can only change with a parameter, and the
-/// host must refuse an evaluation whose arm moved off a short it merged.
+/// ground. The private current on node `state` is an unknown only while the
+/// potential arm is on. In the flow arm the branch injects its current into
+/// `pos` and `neg` itself, and `state`'s equation reads nothing else, so a
+/// host that reads the arm before it builds the matrix may bind `state` to
+/// ground. When `shorts` is set the potential arm writes zero, and a host may
+/// instead bind `pos` and `neg` to one net and `state` to ground: the
+/// current's injections then cancel. The arm can only change with a
+/// parameter, and the host must refuse an evaluation whose arm moved off one
+/// it fixed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct GeneratedSwitchShort {
+pub struct GeneratedPrivateSwitch {
     pub state: usize,
     pub pos: Option<usize>,
     pub neg: Option<usize>,
+    pub shorts: bool,
 }
 
 impl GeneratedVerilogAStampPattern {

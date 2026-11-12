@@ -1200,7 +1200,7 @@ impl SemanticAnalyzer {
             variables: Vec::new(),
             event_state_variables: Vec::new(),
             switch_branch_variables: Vec::new(),
-            switch_shorts: Vec::new(),
+            private_switches: Vec::new(),
             branches: Vec::new(),
             contributions: Vec::new(),
             statements: Vec::new(),

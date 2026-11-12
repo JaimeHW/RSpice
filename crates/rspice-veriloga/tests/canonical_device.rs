@@ -489,9 +489,11 @@ impl runtime::GeneratedNoiseProcessVisitor for Capture {
     fn visit_process(&mut self,_:usize,process:runtime::GeneratedNoiseProcessEvaluationRef<'_>)->bool {
         assert!(process.active);
         assert_eq!(process.psd,1.0);
-        assert_eq!(process.injections.len(),1);
-        assert_eq!(process.injections[0].gain.re,-7.0);
-        assert_eq!(process.injections[0].gain.im,0.0);
+        // The discarded flow arm's injection stays listed at zero gain.
+        let live:Vec<_>=process.injections.iter().filter(|i|i.gain.re!=0.0||i.gain.im!=0.0).collect();
+        assert_eq!(live.len(),1);
+        assert_eq!(live[0].gain.re,-7.0);
+        assert_eq!(live[0].gain.im,0.0);
         self.0+=1;
         true
     }
@@ -6391,7 +6393,7 @@ assert!(!ctx.evaluation_failed());
 }
 
 #[test]
-fn a_switch_short_the_parameters_hold_is_published_for_the_host_to_merge() {
+fn a_switch_arm_the_parameters_fix_is_published_for_the_host_to_drop() {
     let (state, stamp, noise) = generated_parts(
         r#"
 module shorts(a, c);
@@ -6423,23 +6425,32 @@ endmodule
         &noise,
         r#"
 use device::state::Instance;
-// Only `ra`'s arm is fixed by a parameter and writes zero: the bias picks the
-// second switch's arm, and the third holds its nodes 0.1 V apart.
-assert_eq!(Instance::SWITCH_SHORTS.len(), 1, "{:?}", Instance::SWITCH_SHORTS);
-let short = Instance::SWITCH_SHORTS[0];
+// The parameters fix the arms of `ra`'s switch, which shorts its nodes, and
+// of `rc`'s, which holds them 0.1 V apart. The bias picks the other's arm.
+let switches = Instance::PRIVATE_SWITCHES;
+assert_eq!(switches.len(), 2, "{switches:?}");
 let local = |name: &str| 2 + Instance::INTERNAL_NODE_NAMES.iter().position(|n| *n == name).unwrap();
-assert_eq!((short.pos, short.neg), (Some(0), Some(local("ai"))));
-assert!(Instance::INTERNAL_STATE_NODES.contains(&(short.state - 2)));
+let at = |pos, neg| switches.iter().position(|s| (s.pos, s.neg) == (pos, neg)).unwrap();
+let (a, c) = (at(Some(0), Some(local("ai"))), at(Some(local("ci")), Some(local("cj"))));
+assert!(switches[a].shorts && !switches[c].shorts, "{switches:?}");
+for switch in switches {
+    assert!(Instance::INTERNAL_STATE_NODES.contains(&(switch.state - 2)));
+}
 let nodes = (0..Instance::NODE_COUNT).collect::<Vec<_>>();
 let bias = vec![0.0; Instance::NODE_COUNT + Instance::BRANCH_COUNT];
 let ctx = runtime::GeneratedEvalContext { voltages: &bias, temperature: 300.15 };
-let mut shorted = Instance::new(&nodes);
-shorted.finalize_parameters().unwrap();
-assert_eq!(shorted.switch_branch_shorts(&ctx), 1);
-let mut resistive = Instance::new(&nodes);
-resistive.set_parameter("ra", 10.0).unwrap();
-resistive.finalize_parameters().unwrap();
-assert_eq!(resistive.switch_branch_shorts(&ctx), 0);
+let mut potential = Instance::new(&nodes);
+potential.finalize_parameters().unwrap();
+assert_eq!(potential.private_switch_kinds(&ctx), (1 << a) | (1 << c));
+let mut flow = Instance::new(&nodes);
+flow.set_parameter("ra", 10.0).unwrap();
+flow.finalize_parameters().unwrap();
+assert_eq!(flow.private_switch_kinds(&ctx), 1 << c);
+let mut both = Instance::new(&nodes);
+both.set_parameter("ra", 10.0).unwrap();
+both.set_parameter("rc", 5.0).unwrap();
+both.finalize_parameters().unwrap();
+assert_eq!(both.private_switch_kinds(&ctx), 0);
 assert!(!ctx.evaluation_failed());
 "#,
     )

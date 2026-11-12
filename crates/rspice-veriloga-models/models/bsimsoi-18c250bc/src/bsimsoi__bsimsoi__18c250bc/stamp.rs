@@ -4483,28 +4483,32 @@ impl Instance {
 		let GJQ=staged[740];
 		let GJR=staged[741];
 		let GJS=staged[744]!=0.0;
-		let GJW=node_potentials[14];
-		let GJY=staged[745];
-		let GKH=node_potentials[15];
-		let GKJ=staged[746];
-		let GKS=node_potentials[16];
-		let GKU=staged[747];
-		let GLD=node_potentials[17];
-		let GLF=staged[748];
-		let GLO=node_potentials[18];
-		let GLQ=staged[749];
-		let GLX=node_potentials[19];
-		let GLZ=staged[750];
-		let GMI=node_potentials[20];
-		let GMK=staged[751];
-		let GMS=node_potentials[21];
-		let GMU=staged[752];
-		let GND=node_potentials[22];
-		let GNF=staged[753];
-		let GNO=node_potentials[23];
-		let GNQ=staged[754];
-		let GNZ=node_potentials[24];
-		let GOB=staged[755];
+		let GJW=staged[745];
+		let GJY=node_potentials[14];
+		let GJZ=L8([0f64;8]);
+		let GKO=staged[746];
+		let GKQ=node_potentials[15];
+		let GKR=L8([0f64;8]);
+		let GLG=staged[747];
+		let GLI=node_potentials[16];
+		let GLJ=L8([0f64;8]);
+		let GLY=staged[748];
+		let GMA=node_potentials[17];
+		let GMN=staged[749];
+		let GMP=node_potentials[18];
+		let GNA=staged[750];
+		let GNC=node_potentials[19];
+		let GNP=staged[751];
+		let GNR=node_potentials[20];
+		let GNS=L10([0f64;10]);
+		let GOG=staged[752];
+		let GOI=node_potentials[21];
+		let GOV=staged[753];
+		let GOX=node_potentials[22];
+		let GPK=staged[754];
+		let GPM=node_potentials[23];
+		let GPZ=staged[755];
+		let GQB=node_potentials[24];
 		let mut oEIZ=0.0;
 		let mut oEJA=L7([0.0;7]);
 		let mut oEZJ=0.0;
@@ -12334,495 +12338,727 @@ impl Instance {
 		GJU=R;
 		GJV=FLA;
 		}
-		let GJX=R+ GJW;
 		let GKC;
 		let GKD;
-		if GJY!=0.0{
-		let GJZ=-AI;
-		let GKA=L2([(AG* EM),0.0]);
-		GKC=GJZ;
+		let GKE;
+		if GJW!=0.0{
+		let GJX=L8([0.0,0.0,0.0,0.0,0.0,0.0,0.0,1f64]);
+		GKC=GJY;
+		GKD=GJX;
+		GKE=GJZ;
+		}else{
+		let GKA=L8([GFQ[0],GFQ[1],GFQ[2],GFQ[3],GFQ[4],GFQ[5],GFQ[6],0.0]);
+		let GKB=L8([GFT[0],GFT[1],GFT[2],GFT[3],GFT[4],GFT[5],GFT[6],0.0]);
+		GKC=GFN;
 		GKD=GKA;
-		}else{
-		let GKB=L2([0.0,1f64]);
-		GKC=GJW;
-		GKD=GKB;
+		GKE=GKB;
 		}
-		let GKE=L8([0.0,0.0,GKD[0],0.0,0.0,0.0,0.0,GKD[1]])- L8([GFQ[0],GFQ[1],GFQ[2],GFQ[3],GFQ[4],GFQ[5],GFQ[6],0.0]);
-		let GKF=L8([0f64;8])- L8([GFT[0],GFT[1],GFT[2],GFT[3],GFT[4],GFT[5],GFT[6],0.0]);
-		let GKG=R+ (GKC- GFN);
-		let GKI=R+ GKH;
-		let GKN;
-		let GKO;
-		if GKJ!=0.0{
-		let GKK=-AM;
-		let GKL=L2([(1f64* EM),0.0]);
-		GKN=GKK;
-		GKO=GKL;
+		let GKF=R+ GKC;
+		let GKJ;
+		let GKK;
+		if GJW!=0.0{
+		let GKG=-AI;
+		let GKH=L2([(AG* EM),0.0]);
+		GKJ=GKG;
+		GKK=GKH;
 		}else{
-		let GKM=L2([0.0,1f64]);
-		GKN=GKH;
-		GKO=GKM;
+		let GKI=L2([0.0,1f64]);
+		GKJ=GJY;
+		GKK=GKI;
 		}
-		let GKP=L8([0.0,GKO[0],0.0,0.0,0.0,0.0,0.0,GKO[1]])- L8([GFR[0],GFR[1],GFR[2],GFR[3],GFR[4],GFR[5],GFR[6],0.0]);
-		let GKQ=L8([0f64;8])- L8([GFU[0],GFU[1],GFU[2],GFU[3],GFU[4],GFU[5],GFU[6],0.0]);
-		let GKR=R+ (GKN- GFO);
-		let GKT=R+ GKS;
-		let GKY;
-		let GKZ;
-		if GKU!=0.0{
-		let GKV=-AD;
-		let GKW=L2([(1f64* EM),0.0]);
-		GKY=GKV;
-		GKZ=GKW;
+		let GKL=L8([0.0,0.0,GKK[0],0.0,0.0,0.0,0.0,GKK[1]])- L8([GFQ[0],GFQ[1],GFQ[2],GFQ[3],GFQ[4],GFQ[5],GFQ[6],0.0]);
+		let GKM=GJZ- L8([GFT[0],GFT[1],GFT[2],GFT[3],GFT[4],GFT[5],GFT[6],0.0]);
+		let GKN=R+ (GKJ- GFN);
+		let GKU;
+		let GKV;
+		let GKW;
+		if GKO!=0.0{
+		let GKP=L8([0.0,0.0,0.0,0.0,0.0,0.0,0.0,1f64]);
+		GKU=GKQ;
+		GKV=GKP;
+		GKW=GKR;
 		}else{
-		let GKX=L2([0.0,1f64]);
-		GKY=GKS;
-		GKZ=GKX;
+		let GKS=L8([GFR[0],GFR[1],GFR[2],GFR[3],GFR[4],GFR[5],GFR[6],0.0]);
+		let GKT=L8([GFU[0],GFU[1],GFU[2],GFU[3],GFU[4],GFU[5],GFU[6],0.0]);
+		GKU=GFO;
+		GKV=GKS;
+		GKW=GKT;
 		}
-		let GLA=L8([0.0,0.0,0.0,GKZ[0],0.0,0.0,0.0,GKZ[1]])- L8([GFS[0],GFS[1],GFS[2],GFS[3],GFS[4],GFS[5],GFS[6],0.0]);
-		let GLB=L8([0f64;8])- L8([GFV[0],GFV[1],GFV[2],GFV[3],GFV[4],GFV[5],GFV[6],0.0]);
-		let GLC=R+ (GKY- GFP);
-		let GLE=R+ GLD;
-		let GLK;
-		let GLL;
-		if GLF!=0.0{
-		let GLG=AI- VY;
-		let GLH=L2([AG,0.0])- L2([0.0,1f64]);
-		let GLI=L3([GLH[0],GLH[1],0.0]);
-		GLK=GLG;
-		GLL=GLI;
+		let GKX=R+ GKU;
+		let GLB;
+		let GLC;
+		if GKO!=0.0{
+		let GKY=-AM;
+		let GKZ=L2([(1f64* EM),0.0]);
+		GLB=GKY;
+		GLC=GKZ;
 		}else{
-		let GLJ=L3([0.0,0.0,1f64]);
-		GLK=GLD;
-		GLL=GLJ;
+		let GLA=L2([0.0,1f64]);
+		GLB=GKQ;
+		GLC=GLA;
 		}
-		let GLM=GLL- L3([GEI[0],GEI[1],0.0]);
-		let GLN=R+ (GLK- GEG);
-		let GLP=R+ GLO;
+		let GLD=L8([0.0,GLC[0],0.0,0.0,0.0,0.0,0.0,GLC[1]])- L8([GFR[0],GFR[1],GFR[2],GFR[3],GFR[4],GFR[5],GFR[6],0.0]);
+		let GLE=GKR- L8([GFU[0],GFU[1],GFU[2],GFU[3],GFU[4],GFU[5],GFU[6],0.0]);
+		let GLF=R+ (GLB- GFO);
+		let GLM;
+		let GLN;
+		let GLO;
+		if GLG!=0.0{
+		let GLH=L8([0.0,0.0,0.0,0.0,0.0,0.0,0.0,1f64]);
+		GLM=GLI;
+		GLN=GLH;
+		GLO=GLJ;
+		}else{
+		let GLK=L8([GFS[0],GFS[1],GFS[2],GFS[3],GFS[4],GFS[5],GFS[6],0.0]);
+		let GLL=L8([GFV[0],GFV[1],GFV[2],GFV[3],GFV[4],GFV[5],GFV[6],0.0]);
+		GLM=GFP;
+		GLN=GLK;
+		GLO=GLL;
+		}
+		let GLP=R+ GLM;
 		let GLT;
 		let GLU;
-		if GLQ!=0.0{
-		let GLR=L3([VQ[0],VQ[1],0.0]);
-		GLT=VP;
+		if GLG!=0.0{
+		let GLQ=-AD;
+		let GLR=L2([(1f64* EM),0.0]);
+		GLT=GLQ;
 		GLU=GLR;
 		}else{
-		let GLS=L3([0.0,0.0,1f64]);
-		GLT=GLO;
+		let GLS=L2([0.0,1f64]);
+		GLT=GLI;
 		GLU=GLS;
 		}
-		let GLV=GLU- L3([FYI[0],FYI[1],0.0]);
-		let GLW=R+ (GLT- FYH);
-		let GLY=R+ GLX;
-		let GME;
-		let GMF;
-		if GLZ!=0.0{
-		let GMA=AI- VV;
-		let GMB=L2([AG,0.0])- L2([0.0,1f64]);
-		let GMC=L3([GMB[0],GMB[1],0.0]);
-		GME=GMA;
-		GMF=GMC;
+		let GLV=L8([0.0,0.0,0.0,GLU[0],0.0,0.0,0.0,GLU[1]])- L8([GFS[0],GFS[1],GFS[2],GFS[3],GFS[4],GFS[5],GFS[6],0.0]);
+		let GLW=GLJ- L8([GFV[0],GFV[1],GFV[2],GFV[3],GFV[4],GFV[5],GFV[6],0.0]);
+		let GLX=R+ (GLT- GFP);
+		let GMC;
+		let GMD;
+		if GLY!=0.0{
+		let GLZ=L3([0.0,0.0,1f64]);
+		GMC=GMA;
+		GMD=GLZ;
 		}else{
-		let GMD=L3([0.0,0.0,1f64]);
-		GME=GLX;
-		GMF=GMD;
+		let GMB=L3([GEI[0],GEI[1],0.0]);
+		GMC=GEG;
+		GMD=GMB;
 		}
-		let GMG=GMF- L3([GEJ[0],GEJ[1],0.0]);
-		let GMH=R+ (GME- GEH);
-		let GMJ=R+ GMI;
-		let GMN;
-		let GMO;
-		if GMK!=0.0{
-		let GML=L3([VD[0],VD[1],0.0]);
-		GMN=VC;
-		GMO=GML;
+		let GME=R+ GMC;
+		let GMJ;
+		let GMK;
+		if GLY!=0.0{
+		let GMF=AI- VY;
+		let GMG=L2([AG,0.0])- L2([0.0,1f64]);
+		let GMH=L3([GMG[0],GMG[1],0.0]);
+		GMJ=GMF;
+		GMK=GMH;
 		}else{
-		let GMM=L3([0.0,0.0,1f64]);
-		GMN=GMI;
-		GMO=GMM;
+		let GMI=L3([0.0,0.0,1f64]);
+		GMJ=GMA;
+		GMK=GMI;
 		}
-		let GMP=L10([0.0,0.0,GMO[0],0.0,0.0,GMO[1],0.0,0.0,0.0,GMO[2]])- L10([GFG[0],GFG[1],GFG[2],GFG[3],GFG[4],GFG[5],GFG[6],GFG[7],GFG[8],0.0]);
-		let GMQ=L10([0f64;10])- L10([GFH[0],GFH[1],GFH[2],GFH[3],GFH[4],GFH[5],GFH[6],GFH[7],GFH[8],0.0]);
-		let GMR=R+ (GMN- GFF);
-		let GMT=R+ GMS;
-		let GMZ;
-		let GNA;
-		if GMU!=0.0{
-		let GMV=FRJ- US;
-		let GMW=L2([1f64,0.0])- L2([0.0,UV]);
-		let GMX=L3([GMW[0],GMW[1],0.0]);
-		GMZ=GMV;
-		GNA=GMX;
+		let GML=GMK- L3([GEI[0],GEI[1],0.0]);
+		let GMM=R+ (GMJ- GEG);
+		let GMR;
+		let GMS;
+		if GMN!=0.0{
+		let GMO=L3([0.0,0.0,1f64]);
+		GMR=GMP;
+		GMS=GMO;
 		}else{
-		let GMY=L3([0.0,0.0,1f64]);
-		GMZ=GMS;
-		GNA=GMY;
+		let GMQ=L3([FYI[0],FYI[1],0.0]);
+		GMR=FYH;
+		GMS=GMQ;
 		}
-		let GNB=L9([GNA[0],0.0,0.0,0.0,0.0,GNA[1],0.0,0.0,GNA[2]])- L9([FRH[0],FRH[1],FRH[2],FRH[3],FRH[4],FRH[5],FRH[6],FRH[7],0.0]);
-		let GNC=R+ (GMZ- FRG);
-		let GNE=R+ GND;
-		let GNK;
+		let GMT=R+ GMR;
+		let GMW;
+		let GMX;
+		if GMN!=0.0{
+		let GMU=L3([VQ[0],VQ[1],0.0]);
+		GMW=VP;
+		GMX=GMU;
+		}else{
+		let GMV=L3([0.0,0.0,1f64]);
+		GMW=GMP;
+		GMX=GMV;
+		}
+		let GMY=GMX- L3([FYI[0],FYI[1],0.0]);
+		let GMZ=R+ (GMW- FYH);
+		let GNE;
+		let GNF;
+		if GNA!=0.0{
+		let GNB=L3([0.0,0.0,1f64]);
+		GNE=GNC;
+		GNF=GNB;
+		}else{
+		let GND=L3([GEJ[0],GEJ[1],0.0]);
+		GNE=GEH;
+		GNF=GND;
+		}
+		let GNG=R+ GNE;
 		let GNL;
-		if GNF!=0.0{
-		let GNG=GDI- WB;
-		let GNH=L2([1f64,0.0])- L2([0.0,WC]);
-		let GNI=L3([GNH[0],GNH[1],0.0]);
-		GNK=GNG;
-		GNL=GNI;
+		let GNM;
+		if GNA!=0.0{
+		let GNH=AI- VV;
+		let GNI=L2([AG,0.0])- L2([0.0,1f64]);
+		let GNJ=L3([GNI[0],GNI[1],0.0]);
+		GNL=GNH;
+		GNM=GNJ;
 		}else{
-		let GNJ=L3([0.0,0.0,1f64]);
-		GNK=GND;
-		GNL=GNJ;
+		let GNK=L3([0.0,0.0,1f64]);
+		GNL=GNC;
+		GNM=GNK;
 		}
-		let GNM=GNL- L3([GDE[0],GDE[1],0.0]);
-		let GNN=R+ (GNK- GDD);
-		let GNP=R+ GNO;
+		let GNN=GNM- L3([GEJ[0],GEJ[1],0.0]);
+		let GNO=R+ (GNL- GEH);
 		let GNV;
 		let GNW;
-		if GNQ!=0.0{
-		let GNR=VG- WB;
-		let GNS=L2([VI,0.0])- L2([0.0,WC]);
-		let GNT=L3([GNS[0],GNS[1],0.0]);
+		let GNX;
+		if GNP!=0.0{
+		let GNQ=L10([0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1f64]);
 		GNV=GNR;
+		GNW=GNQ;
+		GNX=GNS;
+		}else{
+		let GNT=L10([GFG[0],GFG[1],GFG[2],GFG[3],GFG[4],GFG[5],GFG[6],GFG[7],GFG[8],0.0]);
+		let GNU=L10([GFH[0],GFH[1],GFH[2],GFH[3],GFH[4],GFH[5],GFH[6],GFH[7],GFH[8],0.0]);
+		GNV=GFF;
 		GNW=GNT;
-		}else{
-		let GNU=L3([0.0,0.0,1f64]);
-		GNV=GNO;
-		GNW=GNU;
+		GNX=GNU;
 		}
-		let GNX=L9([0.0,0.0,0.0,0.0,0.0,0.0,GNW[0],GNW[1],GNW[2]])- L9([GDR[0],GDR[1],GDR[2],GDR[3],GDR[4],GDR[5],GDR[6],GDR[7],0.0]);
-		let GNY=R+ (GNV- GDQ);
-		let GOA=R+ GNZ;
-		let GOG;
-		let GOH;
-		if GOB!=0.0{
-		let GOC=FRX- UT;
-		let GOD=L2([1f64,0.0])- L2([0.0,UX]);
-		let GOE=L3([GOD[0],GOD[1],0.0]);
-		GOG=GOC;
-		GOH=GOE;
+		let GNY=R+ GNV;
+		let GOB;
+		let GOC;
+		if GNP!=0.0{
+		let GNZ=L3([VD[0],VD[1],0.0]);
+		GOB=VC;
+		GOC=GNZ;
 		}else{
-		let GOF=L3([0.0,0.0,1f64]);
-		GOG=GNZ;
-		GOH=GOF;
+		let GOA=L3([0.0,0.0,1f64]);
+		GOB=GNR;
+		GOC=GOA;
 		}
-		let GOI=L8([GOH[0],0.0,0.0,0.0,0.0,GOH[1],0.0,GOH[2]])- L8([FRW[0],FRW[1],FRW[2],FRW[3],FRW[4],FRW[5],FRW[6],0.0]);
-		let GOJ=R+ (GOG- FRV);
-		let GOK=FLH[0];
-		let GOL=FLH[1];
-		let GOM=FLH[2];
-		let GON=FLH[3];
-		let GOO=FLH[4];
-		let GOP=FLH[5];
-		let GOQ=FLH[6];
-		let GOR=FLH[7];
-		let GOS=FLI[0];
-		let GOT=FLI[1];
-		let GOU=FLI[2];
-		let GOV=FLI[3];
-		let GOW=FLI[4];
-		let GOX=FLI[5];
-		let GOY=FLI[6];
-		let GOZ=FLI[7];
-		let GPA=FLJ;
-		let GPB=FLL;
-		let GPC=FLK;
-		let GPD=FLM;
-		let GPE=FRE;
-		let GPF=FTI[0];
-		let GPG=FTI[1];
-		let GPH=FTI[2];
-		let GPI=FTI[3];
-		let GPJ=FTI[4];
-		let GPK=FTI[5];
-		let GPL=FTI[6];
-		let GPM=FTI[7];
-		let GPN=FTI[8];
-		let GPO=FTJ[0];
-		let GPP=FTJ[1];
-		let GPQ=FTJ[2];
-		let GPR=FTJ[3];
-		let GPS=FTJ[4];
-		let GPT=FTJ[5];
-		let GPU=FTJ[6];
-		let GPV=FTJ[7];
-		let GPW=FTJ[8];
-		let GPX=FTK[0];
-		let GPY=FTK[1];
-		let GPZ=FTK[2];
-		let GQA=FTK[3];
-		let GQB=FTK[4];
-		let GQC=FTK[5];
-		let GQD=FTK[6];
-		let GQE=FTK[7];
-		let GQF=FTK[8];
-		let GQG=FWV[0];
-		let GQH=FWV[1];
-		let GQI=FWV[2];
-		let GQJ=FWV[3];
-		let GQK=FWV[4];
-		let GQL=FWV[5];
-		let GQM=FWV[6];
-		let GQN=FXG[0];
-		let GQO=FXG[1];
-		let GQP=FXG[2];
-		let GQQ=FXG[3];
-		let GQR=FXG[4];
-		let GQS=FXJ[0];
-		let GQT=FXJ[1];
-		let GQU=FXJ[2];
-		let GQV=FXJ[3];
-		let GQW=FXJ[4];
-		let GQX=FXR[0];
-		let GQY=FXR[1];
-		let GQZ=FXR[2];
-		let GRA=FXR[3];
-		let GRB=FXR[4];
-		let GRC=FXR[5];
-		let GRD=FXR[6];
-		let GRE=FXZ[0];
-		let GRF=FXZ[1];
-		let GRG=FXZ[2];
-		let GRH=FXZ[3];
-		let GRI=FXZ[4];
-		let GRJ=FXZ[5];
-		let GRK=FXZ[6];
-		let GRL=FYC[0];
-		let GRM=FYC[1];
-		let GRN=FYC[2];
-		let GRO=FYC[3];
-		let GRP=FYC[4];
-		let GRQ=FYC[5];
-		let GRR=FYC[6];
-		let GRS=FYE[0];
-		let GRT=FYE[1];
-		let GRU=FYE[2];
-		let GRV=FYE[3];
-		let GRW=FYN[0];
-		let GRX=FYO[0];
-		let GRY=FYN[1];
-		let GRZ=FYO[1];
-		let GSA=FYN[2];
-		let GSB=FYO[2];
-		let GSC=FYN[3];
-		let GSD=FYO[3];
-		let GSE=FYN[4];
-		let GSF=FYO[4];
-		let GSG=FYN[5];
-		let GSH=FYO[5];
-		let GSI=FYN[6];
-		let GSJ=FYO[6];
-		let GSK=FZO[0];
-		let GSL=FZP[0];
-		let GSM=FZO[1];
-		let GSN=FZP[1];
-		let GSO=FZO[2];
-		let GSP=FZP[2];
-		let GSQ=FZO[3];
-		let GSR=FZP[3];
-		let GSS=FZO[4];
-		let GST=FZP[4];
-		let GSU=FZO[5];
-		let GSV=FZP[5];
-		let GSW=FZO[6];
-		let GSX=FZP[6];
-		let GSY=FZU[0];
-		let GSZ=FZV[0];
-		let GTA=FZU[1];
-		let GTB=FZV[1];
-		let GTC=FZU[2];
-		let GTD=FZV[2];
-		let GTE=FZU[3];
-		let GTF=FZV[3];
-		let GTG=FZU[4];
-		let GTH=FZV[4];
-		let GTI=FZU[5];
-		let GTJ=FZV[5];
-		let GTK=FZU[6];
-		let GTL=FZV[6];
-		let GTM=GAA[0];
-		let GTN=GAB[0];
-		let GTO=GAA[1];
-		let GTP=GAB[1];
-		let GTQ=GAA[2];
-		let GTR=GAB[2];
-		let GTS=GAA[3];
-		let GTT=GAB[3];
-		let GTU=GAA[4];
-		let GTV=GAB[4];
-		let GTW=GAG[0];
-		let GTX=GAH[0];
-		let GTY=GAG[1];
-		let GTZ=GAH[1];
-		let GUA=GAG[2];
-		let GUB=GAH[2];
-		let GUC=GAG[3];
-		let GUD=GAH[3];
-		let GUE=GAG[4];
-		let GUF=GAH[4];
-		let GUG=GCG[0];
-		let GUH=GCM[0];
-		let GUI=GCG[1];
-		let GUJ=GCM[1];
-		let GUK=GCG[2];
-		let GUL=GCM[2];
-		let GUM=GCG[3];
-		let GUN=GCM[3];
-		let GUO=GCH[0];
-		let GUP=GCN[0];
-		let GUQ=GCH[1];
-		let GUR=GCN[1];
-		let GUS=GCH[2];
-		let GUT=GCN[2];
-		let GUU=GCI[0];
-		let GUV=GCO[0];
-		let GUW=GCI[1];
-		let GUX=GCO[1];
-		let GUY=GCJ[0];
-		let GUZ=GCP[0];
-		let GVA=GCJ[1];
-		let GVB=GCP[1];
-		let GVC=GCJ[2];
-		let GVD=GCP[2];
-		let GVE=GCJ[3];
-		let GVF=GCP[3];
-		let GVG=GCK[0];
-		let GVH=GCQ[0];
-		let GVI=GCK[1];
-		let GVJ=GCQ[1];
-		let GVK=GCK[2];
-		let GVL=GCQ[2];
-		let GVM=GCL[0];
-		let GVN=GCR[0];
-		let GVO=GCL[1];
-		let GVP=GCR[1];
-		let GVQ=GCU[0];
-		let GVR=GCV[0];
-		let GVS=GCU[1];
-		let GVT=GCV[1];
-		let GVU=GCU[2];
-		let GVV=GCV[2];
-		let GVW=GCZ[0];
-		let GVX=GDA[0];
-		let GVY=GCZ[1];
-		let GVZ=GDA[1];
-		let GWA=GJV;
-		let GWB=1f64;
-		let GWC=GKE[0];
-		let GWD=GKF[0];
-		let GWE=GKE[1];
-		let GWF=GKF[1];
-		let GWG=GKE[2];
-		let GWH=GKF[2];
-		let GWI=GKE[3];
-		let GWJ=GKF[3];
-		let GWK=GKE[4];
-		let GWL=GKF[4];
-		let GWM=GKE[5];
-		let GWN=GKF[5];
-		let GWO=GKE[6];
-		let GWP=GKF[6];
-		let GWQ=GKE[7];
-		let GWR=GKF[7];
-		let GWS=1f64;
-		let GWT=GKP[0];
-		let GWU=GKQ[0];
-		let GWV=GKP[1];
-		let GWW=GKQ[1];
-		let GWX=GKP[2];
-		let GWY=GKQ[2];
-		let GWZ=GKP[3];
-		let GXA=GKQ[3];
-		let GXB=GKP[4];
-		let GXC=GKQ[4];
-		let GXD=GKP[5];
-		let GXE=GKQ[5];
-		let GXF=GKP[6];
-		let GXG=GKQ[6];
-		let GXH=GKP[7];
-		let GXI=GKQ[7];
-		let GXJ=1f64;
-		let GXK=GLA[0];
-		let GXL=GLB[0];
-		let GXM=GLA[1];
-		let GXN=GLB[1];
-		let GXO=GLA[2];
-		let GXP=GLB[2];
-		let GXQ=GLA[3];
-		let GXR=GLB[3];
-		let GXS=GLA[4];
-		let GXT=GLB[4];
-		let GXU=GLA[5];
-		let GXV=GLB[5];
-		let GXW=GLA[6];
-		let GXX=GLB[6];
-		let GXY=GLA[7];
-		let GXZ=GLB[7];
-		let GYA=1f64;
-		let GYB=GLM[0];
-		let GYC=GLM[1];
-		let GYD=GLM[2];
-		let GYE=1f64;
-		let GYF=GLV[0];
-		let GYG=GLV[1];
-		let GYH=GLV[2];
-		let GYI=1f64;
-		let GYJ=GMG[0];
-		let GYK=GMG[1];
-		let GYL=GMG[2];
-		let GYM=1f64;
-		let GYN=GMP[0];
-		let GYO=GMQ[0];
-		let GYP=GMP[1];
-		let GYQ=GMQ[1];
-		let GYR=GMP[2];
-		let GYS=GMQ[2];
-		let GYT=GMP[3];
-		let GYU=GMQ[3];
-		let GYV=GMP[4];
-		let GYW=GMQ[4];
-		let GYX=GMP[5];
-		let GYY=GMQ[5];
-		let GYZ=GMP[6];
-		let GZA=GMQ[6];
-		let GZB=GMP[7];
-		let GZC=GMQ[7];
-		let GZD=GMP[8];
-		let GZE=GMQ[8];
-		let GZF=GMP[9];
-		let GZG=GMQ[9];
-		let GZH=1f64;
-		let GZI=GNB[0];
-		let GZJ=GNB[1];
-		let GZK=GNB[2];
-		let GZL=GNB[3];
-		let GZM=GNB[4];
-		let GZN=GNB[5];
-		let GZO=GNB[6];
-		let GZP=GNB[7];
-		let GZQ=GNB[8];
-		let GZR=1f64;
-		let GZS=GNM[0];
-		let GZT=GNM[1];
-		let GZU=GNM[2];
-		let GZV=1f64;
-		let GZW=GNX[0];
-		let GZX=GNX[1];
-		let GZY=GNX[2];
-		let GZZ=GNX[3];
-		let HAA=GNX[4];
-		let HAB=GNX[5];
-		let HAC=GNX[6];
-		let HAD=GNX[7];
-		let HAE=GNX[8];
-		let HAF=1f64;
-		let HAG=GOI[0];
-		let HAH=GOI[1];
-		let HAI=GOI[2];
-		let HAJ=GOI[3];
-		let HAK=GOI[4];
-		let HAL=GOI[5];
-		let HAM=GOI[6];
-		let HAN=GOI[7];
+		let GOD=L10([0.0,0.0,GOC[0],0.0,0.0,GOC[1],0.0,0.0,0.0,GOC[2]])- L10([GFG[0],GFG[1],GFG[2],GFG[3],GFG[4],GFG[5],GFG[6],GFG[7],GFG[8],0.0]);
+		let GOE=GNS- L10([GFH[0],GFH[1],GFH[2],GFH[3],GFH[4],GFH[5],GFH[6],GFH[7],GFH[8],0.0]);
+		let GOF=R+ (GOB- GFF);
+		let GOK;
+		let GOL;
+		if GOG!=0.0{
+		let GOH=L9([0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1f64]);
+		GOK=GOI;
+		GOL=GOH;
+		}else{
+		let GOJ=L9([FRH[0],FRH[1],FRH[2],FRH[3],FRH[4],FRH[5],FRH[6],FRH[7],0.0]);
+		GOK=FRG;
+		GOL=GOJ;
+		}
+		let GOM=R+ GOK;
+		let GOR;
+		let GOS;
+		if GOG!=0.0{
+		let GON=FRJ- US;
+		let GOO=L2([1f64,0.0])- L2([0.0,UV]);
+		let GOP=L3([GOO[0],GOO[1],0.0]);
+		GOR=GON;
+		GOS=GOP;
+		}else{
+		let GOQ=L3([0.0,0.0,1f64]);
+		GOR=GOI;
+		GOS=GOQ;
+		}
+		let GOT=L9([GOS[0],0.0,0.0,0.0,0.0,GOS[1],0.0,0.0,GOS[2]])- L9([FRH[0],FRH[1],FRH[2],FRH[3],FRH[4],FRH[5],FRH[6],FRH[7],0.0]);
+		let GOU=R+ (GOR- FRG);
+		let GOZ;
+		let GPA;
+		if GOV!=0.0{
+		let GOW=L3([0.0,0.0,1f64]);
+		GOZ=GOX;
+		GPA=GOW;
+		}else{
+		let GOY=L3([GDE[0],GDE[1],0.0]);
+		GOZ=GDD;
+		GPA=GOY;
+		}
+		let GPB=R+ GOZ;
+		let GPG;
+		let GPH;
+		if GOV!=0.0{
+		let GPC=GDI- WB;
+		let GPD=L2([1f64,0.0])- L2([0.0,WC]);
+		let GPE=L3([GPD[0],GPD[1],0.0]);
+		GPG=GPC;
+		GPH=GPE;
+		}else{
+		let GPF=L3([0.0,0.0,1f64]);
+		GPG=GOX;
+		GPH=GPF;
+		}
+		let GPI=GPH- L3([GDE[0],GDE[1],0.0]);
+		let GPJ=R+ (GPG- GDD);
+		let GPO;
+		let GPP;
+		if GPK!=0.0{
+		let GPL=L9([0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1f64]);
+		GPO=GPM;
+		GPP=GPL;
+		}else{
+		let GPN=L9([GDR[0],GDR[1],GDR[2],GDR[3],GDR[4],GDR[5],GDR[6],GDR[7],0.0]);
+		GPO=GDQ;
+		GPP=GPN;
+		}
+		let GPQ=R+ GPO;
+		let GPV;
+		let GPW;
+		if GPK!=0.0{
+		let GPR=VG- WB;
+		let GPS=L2([VI,0.0])- L2([0.0,WC]);
+		let GPT=L3([GPS[0],GPS[1],0.0]);
+		GPV=GPR;
+		GPW=GPT;
+		}else{
+		let GPU=L3([0.0,0.0,1f64]);
+		GPV=GPM;
+		GPW=GPU;
+		}
+		let GPX=L9([0.0,0.0,0.0,0.0,0.0,0.0,GPW[0],GPW[1],GPW[2]])- L9([GDR[0],GDR[1],GDR[2],GDR[3],GDR[4],GDR[5],GDR[6],GDR[7],0.0]);
+		let GPY=R+ (GPV- GDQ);
+		let GQD;
+		let GQE;
+		if GPZ!=0.0{
+		let GQA=L8([0.0,0.0,0.0,0.0,0.0,0.0,0.0,1f64]);
+		GQD=GQB;
+		GQE=GQA;
+		}else{
+		let GQC=L8([FRW[0],FRW[1],FRW[2],FRW[3],FRW[4],FRW[5],FRW[6],0.0]);
+		GQD=FRV;
+		GQE=GQC;
+		}
+		let GQF=R+ GQD;
+		let GQK;
+		let GQL;
+		if GPZ!=0.0{
+		let GQG=FRX- UT;
+		let GQH=L2([1f64,0.0])- L2([0.0,UX]);
+		let GQI=L3([GQH[0],GQH[1],0.0]);
+		GQK=GQG;
+		GQL=GQI;
+		}else{
+		let GQJ=L3([0.0,0.0,1f64]);
+		GQK=GQB;
+		GQL=GQJ;
+		}
+		let GQM=L8([GQL[0],0.0,0.0,0.0,0.0,GQL[1],0.0,GQL[2]])- L8([FRW[0],FRW[1],FRW[2],FRW[3],FRW[4],FRW[5],FRW[6],0.0]);
+		let GQN=R+ (GQK- FRV);
+		let GQO=FLH[0];
+		let GQP=FLH[1];
+		let GQQ=FLH[2];
+		let GQR=FLH[3];
+		let GQS=FLH[4];
+		let GQT=FLH[5];
+		let GQU=FLH[6];
+		let GQV=FLH[7];
+		let GQW=FLI[0];
+		let GQX=FLI[1];
+		let GQY=FLI[2];
+		let GQZ=FLI[3];
+		let GRA=FLI[4];
+		let GRB=FLI[5];
+		let GRC=FLI[6];
+		let GRD=FLI[7];
+		let GRE=FLJ;
+		let GRF=FLL;
+		let GRG=FLK;
+		let GRH=FLM;
+		let GRI=FRE;
+		let GRJ=FTI[0];
+		let GRK=FTI[1];
+		let GRL=FTI[2];
+		let GRM=FTI[3];
+		let GRN=FTI[4];
+		let GRO=FTI[5];
+		let GRP=FTI[6];
+		let GRQ=FTI[7];
+		let GRR=FTI[8];
+		let GRS=FTJ[0];
+		let GRT=FTJ[1];
+		let GRU=FTJ[2];
+		let GRV=FTJ[3];
+		let GRW=FTJ[4];
+		let GRX=FTJ[5];
+		let GRY=FTJ[6];
+		let GRZ=FTJ[7];
+		let GSA=FTJ[8];
+		let GSB=FTK[0];
+		let GSC=FTK[1];
+		let GSD=FTK[2];
+		let GSE=FTK[3];
+		let GSF=FTK[4];
+		let GSG=FTK[5];
+		let GSH=FTK[6];
+		let GSI=FTK[7];
+		let GSJ=FTK[8];
+		let GSK=FWV[0];
+		let GSL=FWV[1];
+		let GSM=FWV[2];
+		let GSN=FWV[3];
+		let GSO=FWV[4];
+		let GSP=FWV[5];
+		let GSQ=FWV[6];
+		let GSR=FXG[0];
+		let GSS=FXG[1];
+		let GST=FXG[2];
+		let GSU=FXG[3];
+		let GSV=FXG[4];
+		let GSW=FXJ[0];
+		let GSX=FXJ[1];
+		let GSY=FXJ[2];
+		let GSZ=FXJ[3];
+		let GTA=FXJ[4];
+		let GTB=FXR[0];
+		let GTC=FXR[1];
+		let GTD=FXR[2];
+		let GTE=FXR[3];
+		let GTF=FXR[4];
+		let GTG=FXR[5];
+		let GTH=FXR[6];
+		let GTI=FXZ[0];
+		let GTJ=FXZ[1];
+		let GTK=FXZ[2];
+		let GTL=FXZ[3];
+		let GTM=FXZ[4];
+		let GTN=FXZ[5];
+		let GTO=FXZ[6];
+		let GTP=FYC[0];
+		let GTQ=FYC[1];
+		let GTR=FYC[2];
+		let GTS=FYC[3];
+		let GTT=FYC[4];
+		let GTU=FYC[5];
+		let GTV=FYC[6];
+		let GTW=FYE[0];
+		let GTX=FYE[1];
+		let GTY=FYE[2];
+		let GTZ=FYE[3];
+		let GUA=FYN[0];
+		let GUB=FYO[0];
+		let GUC=FYN[1];
+		let GUD=FYO[1];
+		let GUE=FYN[2];
+		let GUF=FYO[2];
+		let GUG=FYN[3];
+		let GUH=FYO[3];
+		let GUI=FYN[4];
+		let GUJ=FYO[4];
+		let GUK=FYN[5];
+		let GUL=FYO[5];
+		let GUM=FYN[6];
+		let GUN=FYO[6];
+		let GUO=FZO[0];
+		let GUP=FZP[0];
+		let GUQ=FZO[1];
+		let GUR=FZP[1];
+		let GUS=FZO[2];
+		let GUT=FZP[2];
+		let GUU=FZO[3];
+		let GUV=FZP[3];
+		let GUW=FZO[4];
+		let GUX=FZP[4];
+		let GUY=FZO[5];
+		let GUZ=FZP[5];
+		let GVA=FZO[6];
+		let GVB=FZP[6];
+		let GVC=FZU[0];
+		let GVD=FZV[0];
+		let GVE=FZU[1];
+		let GVF=FZV[1];
+		let GVG=FZU[2];
+		let GVH=FZV[2];
+		let GVI=FZU[3];
+		let GVJ=FZV[3];
+		let GVK=FZU[4];
+		let GVL=FZV[4];
+		let GVM=FZU[5];
+		let GVN=FZV[5];
+		let GVO=FZU[6];
+		let GVP=FZV[6];
+		let GVQ=GAA[0];
+		let GVR=GAB[0];
+		let GVS=GAA[1];
+		let GVT=GAB[1];
+		let GVU=GAA[2];
+		let GVV=GAB[2];
+		let GVW=GAA[3];
+		let GVX=GAB[3];
+		let GVY=GAA[4];
+		let GVZ=GAB[4];
+		let GWA=GAG[0];
+		let GWB=GAH[0];
+		let GWC=GAG[1];
+		let GWD=GAH[1];
+		let GWE=GAG[2];
+		let GWF=GAH[2];
+		let GWG=GAG[3];
+		let GWH=GAH[3];
+		let GWI=GAG[4];
+		let GWJ=GAH[4];
+		let GWK=GCG[0];
+		let GWL=GCM[0];
+		let GWM=GCG[1];
+		let GWN=GCM[1];
+		let GWO=GCG[2];
+		let GWP=GCM[2];
+		let GWQ=GCG[3];
+		let GWR=GCM[3];
+		let GWS=GCH[0];
+		let GWT=GCN[0];
+		let GWU=GCH[1];
+		let GWV=GCN[1];
+		let GWW=GCH[2];
+		let GWX=GCN[2];
+		let GWY=GCI[0];
+		let GWZ=GCO[0];
+		let GXA=GCI[1];
+		let GXB=GCO[1];
+		let GXC=GCJ[0];
+		let GXD=GCP[0];
+		let GXE=GCJ[1];
+		let GXF=GCP[1];
+		let GXG=GCJ[2];
+		let GXH=GCP[2];
+		let GXI=GCJ[3];
+		let GXJ=GCP[3];
+		let GXK=GCK[0];
+		let GXL=GCQ[0];
+		let GXM=GCK[1];
+		let GXN=GCQ[1];
+		let GXO=GCK[2];
+		let GXP=GCQ[2];
+		let GXQ=GCL[0];
+		let GXR=GCR[0];
+		let GXS=GCL[1];
+		let GXT=GCR[1];
+		let GXU=GCU[0];
+		let GXV=GCV[0];
+		let GXW=GCU[1];
+		let GXX=GCV[1];
+		let GXY=GCU[2];
+		let GXZ=GCV[2];
+		let GYA=GCZ[0];
+		let GYB=GDA[0];
+		let GYC=GCZ[1];
+		let GYD=GDA[1];
+		let GYE=GJV;
+		let GYF=GKD[0];
+		let GYG=GKE[0];
+		let GYH=GKD[1];
+		let GYI=GKE[1];
+		let GYJ=GKD[2];
+		let GYK=GKE[2];
+		let GYL=GKD[3];
+		let GYM=GKE[3];
+		let GYN=GKD[4];
+		let GYO=GKE[4];
+		let GYP=GKD[5];
+		let GYQ=GKE[5];
+		let GYR=GKD[6];
+		let GYS=GKE[6];
+		let GYT=GKD[7];
+		let GYU=GKE[7];
+		let GYV=GKL[0];
+		let GYW=GKM[0];
+		let GYX=GKL[1];
+		let GYY=GKM[1];
+		let GYZ=GKL[2];
+		let GZA=GKM[2];
+		let GZB=GKL[3];
+		let GZC=GKM[3];
+		let GZD=GKL[4];
+		let GZE=GKM[4];
+		let GZF=GKL[5];
+		let GZG=GKM[5];
+		let GZH=GKL[6];
+		let GZI=GKM[6];
+		let GZJ=GKL[7];
+		let GZK=GKM[7];
+		let GZL=GKV[0];
+		let GZM=GKW[0];
+		let GZN=GKV[1];
+		let GZO=GKW[1];
+		let GZP=GKV[2];
+		let GZQ=GKW[2];
+		let GZR=GKV[3];
+		let GZS=GKW[3];
+		let GZT=GKV[4];
+		let GZU=GKW[4];
+		let GZV=GKV[5];
+		let GZW=GKW[5];
+		let GZX=GKV[6];
+		let GZY=GKW[6];
+		let GZZ=GKV[7];
+		let HAA=GKW[7];
+		let HAB=GLD[0];
+		let HAC=GLE[0];
+		let HAD=GLD[1];
+		let HAE=GLE[1];
+		let HAF=GLD[2];
+		let HAG=GLE[2];
+		let HAH=GLD[3];
+		let HAI=GLE[3];
+		let HAJ=GLD[4];
+		let HAK=GLE[4];
+		let HAL=GLD[5];
+		let HAM=GLE[5];
+		let HAN=GLD[6];
+		let HAO=GLE[6];
+		let HAP=GLD[7];
+		let HAQ=GLE[7];
+		let HAR=GLN[0];
+		let HAS=GLO[0];
+		let HAT=GLN[1];
+		let HAU=GLO[1];
+		let HAV=GLN[2];
+		let HAW=GLO[2];
+		let HAX=GLN[3];
+		let HAY=GLO[3];
+		let HAZ=GLN[4];
+		let HBA=GLO[4];
+		let HBB=GLN[5];
+		let HBC=GLO[5];
+		let HBD=GLN[6];
+		let HBE=GLO[6];
+		let HBF=GLN[7];
+		let HBG=GLO[7];
+		let HBH=GLV[0];
+		let HBI=GLW[0];
+		let HBJ=GLV[1];
+		let HBK=GLW[1];
+		let HBL=GLV[2];
+		let HBM=GLW[2];
+		let HBN=GLV[3];
+		let HBO=GLW[3];
+		let HBP=GLV[4];
+		let HBQ=GLW[4];
+		let HBR=GLV[5];
+		let HBS=GLW[5];
+		let HBT=GLV[6];
+		let HBU=GLW[6];
+		let HBV=GLV[7];
+		let HBW=GLW[7];
+		let HBX=GMD[0];
+		let HBY=GMD[1];
+		let HBZ=GMD[2];
+		let HCA=GML[0];
+		let HCB=GML[1];
+		let HCC=GML[2];
+		let HCD=GMS[0];
+		let HCE=GMS[1];
+		let HCF=GMS[2];
+		let HCG=GMY[0];
+		let HCH=GMY[1];
+		let HCI=GMY[2];
+		let HCJ=GNF[0];
+		let HCK=GNF[1];
+		let HCL=GNF[2];
+		let HCM=GNN[0];
+		let HCN=GNN[1];
+		let HCO=GNN[2];
+		let HCP=GNW[0];
+		let HCQ=GNX[0];
+		let HCR=GNW[1];
+		let HCS=GNX[1];
+		let HCT=GNW[2];
+		let HCU=GNX[2];
+		let HCV=GNW[3];
+		let HCW=GNX[3];
+		let HCX=GNW[4];
+		let HCY=GNX[4];
+		let HCZ=GNW[5];
+		let HDA=GNX[5];
+		let HDB=GNW[6];
+		let HDC=GNX[6];
+		let HDD=GNW[7];
+		let HDE=GNX[7];
+		let HDF=GNW[8];
+		let HDG=GNX[8];
+		let HDH=GNW[9];
+		let HDI=GNX[9];
+		let HDJ=GOD[0];
+		let HDK=GOE[0];
+		let HDL=GOD[1];
+		let HDM=GOE[1];
+		let HDN=GOD[2];
+		let HDO=GOE[2];
+		let HDP=GOD[3];
+		let HDQ=GOE[3];
+		let HDR=GOD[4];
+		let HDS=GOE[4];
+		let HDT=GOD[5];
+		let HDU=GOE[5];
+		let HDV=GOD[6];
+		let HDW=GOE[6];
+		let HDX=GOD[7];
+		let HDY=GOE[7];
+		let HDZ=GOD[8];
+		let HEA=GOE[8];
+		let HEB=GOD[9];
+		let HEC=GOE[9];
+		let HED=GOL[0];
+		let HEE=GOL[1];
+		let HEF=GOL[2];
+		let HEG=GOL[3];
+		let HEH=GOL[4];
+		let HEI=GOL[5];
+		let HEJ=GOL[6];
+		let HEK=GOL[7];
+		let HEL=GOL[8];
+		let HEM=GOT[0];
+		let HEN=GOT[1];
+		let HEO=GOT[2];
+		let HEP=GOT[3];
+		let HEQ=GOT[4];
+		let HER=GOT[5];
+		let HES=GOT[6];
+		let HET=GOT[7];
+		let HEU=GOT[8];
+		let HEV=GPA[0];
+		let HEW=GPA[1];
+		let HEX=GPA[2];
+		let HEY=GPI[0];
+		let HEZ=GPI[1];
+		let HFA=GPI[2];
+		let HFB=GPP[0];
+		let HFC=GPP[1];
+		let HFD=GPP[2];
+		let HFE=GPP[3];
+		let HFF=GPP[4];
+		let HFG=GPP[5];
+		let HFH=GPP[6];
+		let HFI=GPP[7];
+		let HFJ=GPP[8];
+		let HFK=GPX[0];
+		let HFL=GPX[1];
+		let HFM=GPX[2];
+		let HFN=GPX[3];
+		let HFO=GPX[4];
+		let HFP=GPX[5];
+		let HFQ=GPX[6];
+		let HFR=GPX[7];
+		let HFS=GPX[8];
+		let HFT=GQE[0];
+		let HFU=GQE[1];
+		let HFV=GQE[2];
+		let HFW=GQE[3];
+		let HFX=GQE[4];
+		let HFY=GQE[5];
+		let HFZ=GQE[6];
+		let HGA=GQE[7];
+		let HGB=GQM[0];
+		let HGC=GQM[1];
+		let HGD=GQM[2];
+		let HGE=GQM[3];
+		let HGF=GQM[4];
+		let HGG=GQM[5];
+		let HGH=GQM[6];
+		let HGI=GQM[7];
         {
             let record = &mut *self.canonical_output_record;
             record[0] = V;
@@ -12958,7 +13194,7 @@ impl Instance {
             None,
             multiplicity * (FLD),
             [3, 4, 5, 6, 7, 8, 9, 13],
-            [GOK, GOL, GOM, GON, GOO, GOP, GOQ, GOR],
+            [GQO, GQP, GQQ, GQR, GQS, GQT, GQU, GQV],
             [],
             [],
             multiplicity,
@@ -12978,7 +13214,7 @@ impl Instance {
             Some(8),
             multiplicity * (FLE),
             [3, 4, 5, 6, 7, 8, 9, 13],
-            [GOS, GOT, GOU, GOV, GOW, GOX, GOY, GOZ],
+            [GQW, GQX, GQY, GQZ, GRA, GRB, GRC, GRD],
             [],
             [],
             multiplicity,
@@ -12988,7 +13224,7 @@ impl Instance {
             Some(8),
             multiplicity * (FLF),
             [13],
-            [GPA],
+            [GRE],
             [],
             [],
             multiplicity,
@@ -12998,7 +13234,7 @@ impl Instance {
             Some(7),
             multiplicity * (FLG),
             [13],
-            [GPC],
+            [GRG],
             [],
             [],
             multiplicity,
@@ -13008,7 +13244,7 @@ impl Instance {
             None,
             multiplicity * (FRD),
             [13],
-            [GPE],
+            [GRI],
             [],
             [],
             multiplicity,
@@ -13028,7 +13264,7 @@ impl Instance {
             Some(8),
             multiplicity * (FSY),
             [3, 4, 5, 6, 7, 8, 9, 11, 12],
-            [GPF, GPG, GPH, GPI, GPJ, GPK, GPL, GPM, GPN],
+            [GRJ, GRK, GRL, GRM, GRN, GRO, GRP, GRQ, GRR],
             [],
             [],
             multiplicity,
@@ -13038,7 +13274,7 @@ impl Instance {
             Some(5),
             multiplicity * (FSZ),
             [3, 4, 5, 6, 7, 8, 9, 11, 12],
-            [GPO, GPP, GPQ, GPR, GPS, GPT, GPU, GPV, GPW],
+            [GRS, GRT, GRU, GRV, GRW, GRX, GRY, GRZ, GSA],
             [],
             [],
             multiplicity,
@@ -13048,7 +13284,7 @@ impl Instance {
             Some(7),
             multiplicity * (FTA),
             [3, 4, 5, 6, 7, 8, 9, 11, 12],
-            [GPX, GPY, GPZ, GQA, GQB, GQC, GQD, GQE, GQF],
+            [GSB, GSC, GSD, GSE, GSF, GSG, GSH, GSI, GSJ],
             [],
             [],
             multiplicity,
@@ -13058,7 +13294,7 @@ impl Instance {
             Some(5),
             multiplicity * (FWW),
             [3, 4, 5, 6, 7, 8, 9],
-            [GQG, GQH, GQI, GQJ, GQK, GQL, GQM],
+            [GSK, GSL, GSM, GSN, GSO, GSP, GSQ],
             [],
             [],
             multiplicity,
@@ -13068,7 +13304,7 @@ impl Instance {
             Some(7),
             multiplicity * (FXH),
             [4, 5, 6, 7, 12],
-            [GQN, GQO, GQP, GQQ, GQR],
+            [GSR, GSS, GST, GSU, GSV],
             [],
             [],
             multiplicity,
@@ -13078,7 +13314,7 @@ impl Instance {
             Some(8),
             multiplicity * (FXK),
             [4, 5, 6, 8, 11],
-            [GQS, GQT, GQU, GQV, GQW],
+            [GSW, GSX, GSY, GSZ, GTA],
             [],
             [],
             multiplicity,
@@ -13088,7 +13324,7 @@ impl Instance {
             Some(7),
             multiplicity * (FXS),
             [3, 4, 5, 6, 7, 8, 9],
-            [GQX, GQY, GQZ, GRA, GRB, GRC, GRD],
+            [GTB, GTC, GTD, GTE, GTF, GTG, GTH],
             [],
             [],
             multiplicity,
@@ -13098,7 +13334,7 @@ impl Instance {
             Some(8),
             multiplicity * (FYA),
             [3, 4, 5, 6, 7, 8, 9],
-            [GRE, GRF, GRG, GRH, GRI, GRJ, GRK],
+            [GTI, GTJ, GTK, GTL, GTM, GTN, GTO],
             [],
             [],
             multiplicity,
@@ -13108,7 +13344,7 @@ impl Instance {
             Some(5),
             multiplicity * (FYD),
             [3, 4, 5, 6, 7, 8, 9],
-            [GRL, GRM, GRN, GRO, GRP, GRQ, GRR],
+            [GTP, GTQ, GTR, GTS, GTT, GTU, GTV],
             [],
             [],
             multiplicity,
@@ -13118,7 +13354,7 @@ impl Instance {
             Some(4),
             multiplicity * (FYF),
             [4, 5, 6, 9],
-            [GRS, GRT, GRU, GRV],
+            [GTW, GTX, GTY, GTZ],
             [],
             [],
             multiplicity,
@@ -13178,7 +13414,7 @@ impl Instance {
             Some(5),
             multiplicity * (FYP),
             [3, 4, 5, 6, 7, 8, 9],
-            [GRW, GRY, GSA, GSC, GSE, GSG, GSI],
+            [GUA, GUC, GUE, GUG, GUI, GUK, GUM],
             [],
             [],
             multiplicity,
@@ -13188,7 +13424,7 @@ impl Instance {
             Some(5),
             multiplicity * (FZQ),
             [3, 4, 5, 6, 7, 8, 9],
-            [GSK, GSM, GSO, GSQ, GSS, GSU, GSW],
+            [GUO, GUQ, GUS, GUU, GUW, GUY, GVA],
             [],
             [],
             multiplicity,
@@ -13198,7 +13434,7 @@ impl Instance {
             Some(5),
             multiplicity * (FZW),
             [3, 4, 5, 6, 7, 8, 9],
-            [GSY, GTA, GTC, GTE, GTG, GTI, GTK],
+            [GVC, GVE, GVG, GVI, GVK, GVM, GVO],
             [],
             [],
             multiplicity,
@@ -13208,7 +13444,7 @@ impl Instance {
             Some(7),
             multiplicity * (GAC),
             [4, 5, 6, 7, 12],
-            [GTM, GTO, GTQ, GTS, GTU],
+            [GVQ, GVS, GVU, GVW, GVY],
             [],
             [],
             multiplicity,
@@ -13218,7 +13454,7 @@ impl Instance {
             Some(8),
             multiplicity * (GAI),
             [4, 5, 6, 8, 11],
-            [GTW, GTY, GUA, GUC, GUE],
+            [GWA, GWC, GWE, GWG, GWI],
             [],
             [],
             multiplicity,
@@ -13228,7 +13464,7 @@ impl Instance {
             Some(7),
             multiplicity * (GCA),
             [7, 8, 9, 10],
-            [GUG, GUI, GUK, GUM],
+            [GWK, GWM, GWO, GWQ],
             [],
             [],
             multiplicity,
@@ -13238,7 +13474,7 @@ impl Instance {
             Some(8),
             multiplicity * (GCB),
             [8, 9, 10],
-            [GUO, GUQ, GUS],
+            [GWS, GWU, GWW],
             [],
             [],
             multiplicity,
@@ -13248,7 +13484,7 @@ impl Instance {
             Some(3),
             multiplicity * (GCC),
             [3, 10],
-            [GUU, GUW],
+            [GWY, GXA],
             [],
             [],
             multiplicity,
@@ -13258,7 +13494,7 @@ impl Instance {
             Some(7),
             multiplicity * (GCD),
             [7, 8, 9, 10],
-            [GUY, GVA, GVC, GVE],
+            [GXC, GXE, GXG, GXI],
             [],
             [],
             multiplicity,
@@ -13268,7 +13504,7 @@ impl Instance {
             Some(8),
             multiplicity * (GCE),
             [8, 9, 10],
-            [GVG, GVI, GVK],
+            [GXK, GXM, GXO],
             [],
             [],
             multiplicity,
@@ -13278,7 +13514,7 @@ impl Instance {
             Some(3),
             multiplicity * (GCF),
             [3, 9],
-            [GVM, GVO],
+            [GXQ, GXS],
             [],
             [],
             multiplicity,
@@ -13288,7 +13524,7 @@ impl Instance {
             Some(3),
             multiplicity * (GCW),
             [3, 7, 8],
-            [GVQ, GVS, GVU],
+            [GXU, GXW, GXY],
             [],
             [],
             multiplicity,
@@ -13298,7 +13534,7 @@ impl Instance {
             Some(3),
             multiplicity * (GDB),
             [3, 8],
-            [GVW, GVY],
+            [GYA, GYC],
             [],
             [],
             multiplicity,
@@ -13308,17 +13544,17 @@ impl Instance {
             None,
             multiplicity * (GJU),
             [13],
-            [GWA],
+            [GYE],
             [],
             [],
             multiplicity,
         );
-        stamper.stamp_current_sparse_local::<1, 0>(
+        stamper.stamp_current_sparse_local::<8, 0>(
             None,
             Some(5),
-            multiplicity * (GJX),
-            [14],
-            [GWB],
+            multiplicity * (GKF),
+            [3, 4, 5, 6, 7, 8, 9, 14],
+            [GYF, GYH, GYJ, GYL, GYN, GYP, GYR, GYT],
             [],
             [],
             multiplicity,
@@ -13326,19 +13562,19 @@ impl Instance {
         stamper.stamp_current_sparse_local::<8, 0>(
             Some(14),
             None,
-            multiplicity * (GKG),
+            multiplicity * (GKN),
             [3, 4, 5, 6, 7, 8, 9, 14],
-            [GWC, GWE, GWG, GWI, GWK, GWM, GWO, GWQ],
+            [GYV, GYX, GYZ, GZB, GZD, GZF, GZH, GZJ],
             [],
             [],
             multiplicity,
         );
-        stamper.stamp_current_sparse_local::<1, 0>(
+        stamper.stamp_current_sparse_local::<8, 0>(
             None,
             Some(4),
-            multiplicity * (GKI),
-            [15],
-            [GWS],
+            multiplicity * (GKX),
+            [3, 4, 5, 6, 7, 8, 9, 15],
+            [GZL, GZN, GZP, GZR, GZT, GZV, GZX, GZZ],
             [],
             [],
             multiplicity,
@@ -13346,19 +13582,19 @@ impl Instance {
         stamper.stamp_current_sparse_local::<8, 0>(
             Some(15),
             None,
-            multiplicity * (GKR),
+            multiplicity * (GLF),
             [3, 4, 5, 6, 7, 8, 9, 15],
-            [GWT, GWV, GWX, GWZ, GXB, GXD, GXF, GXH],
+            [HAB, HAD, HAF, HAH, HAJ, HAL, HAN, HAP],
             [],
             [],
             multiplicity,
         );
-        stamper.stamp_current_sparse_local::<1, 0>(
+        stamper.stamp_current_sparse_local::<8, 0>(
             None,
             Some(6),
-            multiplicity * (GKT),
-            [16],
-            [GXJ],
+            multiplicity * (GLP),
+            [3, 4, 5, 6, 7, 8, 9, 16],
+            [HAR, HAT, HAV, HAX, HAZ, HBB, HBD, HBF],
             [],
             [],
             multiplicity,
@@ -13366,19 +13602,19 @@ impl Instance {
         stamper.stamp_current_sparse_local::<8, 0>(
             Some(16),
             None,
-            multiplicity * (GLC),
+            multiplicity * (GLX),
             [3, 4, 5, 6, 7, 8, 9, 16],
-            [GXK, GXM, GXO, GXQ, GXS, GXU, GXW, GXY],
+            [HBH, HBJ, HBL, HBN, HBP, HBR, HBT, HBV],
             [],
             [],
             multiplicity,
         );
-        stamper.stamp_current_sparse_local::<1, 0>(
+        stamper.stamp_current_sparse_local::<3, 0>(
             Some(5),
             Some(12),
-            multiplicity * (GLE),
-            [17],
-            [GYA],
+            multiplicity * (GME),
+            [5, 12, 17],
+            [HBX, HBY, HBZ],
             [],
             [],
             multiplicity,
@@ -13386,19 +13622,19 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(17),
             None,
-            multiplicity * (GLN),
+            multiplicity * (GMM),
             [5, 12, 17],
-            [GYB, GYC, GYD],
+            [HCA, HCB, HCC],
             [],
             [],
             multiplicity,
         );
-        stamper.stamp_current_sparse_local::<1, 0>(
+        stamper.stamp_current_sparse_local::<3, 0>(
             Some(5),
             Some(4),
-            multiplicity * (GLP),
-            [18],
-            [GYE],
+            multiplicity * (GMT),
+            [4, 5, 18],
+            [HCD, HCE, HCF],
             [],
             [],
             multiplicity,
@@ -13406,19 +13642,19 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(18),
             None,
-            multiplicity * (GLW),
+            multiplicity * (GMZ),
             [4, 5, 18],
-            [GYF, GYG, GYH],
+            [HCG, HCH, HCI],
             [],
             [],
             multiplicity,
         );
-        stamper.stamp_current_sparse_local::<1, 0>(
+        stamper.stamp_current_sparse_local::<3, 0>(
             Some(5),
             Some(11),
-            multiplicity * (GLY),
-            [19],
-            [GYI],
+            multiplicity * (GNG),
+            [5, 11, 19],
+            [HCJ, HCK, HCL],
             [],
             [],
             multiplicity,
@@ -13426,19 +13662,19 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(19),
             None,
-            multiplicity * (GMH),
+            multiplicity * (GNO),
             [5, 11, 19],
-            [GYJ, GYK, GYL],
+            [HCM, HCN, HCO],
             [],
             [],
             multiplicity,
         );
-        stamper.stamp_current_sparse_local::<1, 0>(
+        stamper.stamp_current_sparse_local::<10, 0>(
             Some(5),
             Some(8),
-            multiplicity * (GMJ),
-            [20],
-            [GYM],
+            multiplicity * (GNY),
+            [3, 4, 5, 6, 7, 8, 9, 11, 12, 20],
+            [HCP, HCR, HCT, HCV, HCX, HCZ, HDB, HDD, HDF, HDH],
             [],
             [],
             multiplicity,
@@ -13446,19 +13682,19 @@ impl Instance {
         stamper.stamp_current_sparse_local::<10, 0>(
             Some(20),
             None,
-            multiplicity * (GMR),
+            multiplicity * (GOF),
             [3, 4, 5, 6, 7, 8, 9, 11, 12, 20],
-            [GYN, GYP, GYR, GYT, GYV, GYX, GYZ, GZB, GZD, GZF],
+            [HDJ, HDL, HDN, HDP, HDR, HDT, HDV, HDX, HDZ, HEB],
             [],
             [],
             multiplicity,
         );
-        stamper.stamp_current_sparse_local::<1, 0>(
+        stamper.stamp_current_sparse_local::<9, 0>(
             Some(0),
             Some(7),
-            multiplicity * (GMT),
-            [21],
-            [GZH],
+            multiplicity * (GOM),
+            [0, 3, 4, 5, 6, 7, 8, 9, 21],
+            [HED, HEE, HEF, HEG, HEH, HEI, HEJ, HEK, HEL],
             [],
             [],
             multiplicity,
@@ -13466,19 +13702,19 @@ impl Instance {
         stamper.stamp_current_sparse_local::<9, 0>(
             Some(21),
             None,
-            multiplicity * (GNC),
+            multiplicity * (GOU),
             [0, 3, 4, 5, 6, 7, 8, 9, 21],
-            [GZI, GZJ, GZK, GZL, GZM, GZN, GZO, GZP, GZQ],
+            [HEM, HEN, HEO, HEP, HEQ, HER, HES, HET, HEU],
             [],
             [],
             multiplicity,
         );
-        stamper.stamp_current_sparse_local::<1, 0>(
+        stamper.stamp_current_sparse_local::<3, 0>(
             Some(1),
             Some(10),
-            multiplicity * (GNE),
-            [22],
-            [GZR],
+            multiplicity * (GPB),
+            [1, 10, 22],
+            [HEV, HEW, HEX],
             [],
             [],
             multiplicity,
@@ -13486,19 +13722,19 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(22),
             None,
-            multiplicity * (GNN),
+            multiplicity * (GPJ),
             [1, 10, 22],
-            [GZS, GZT, GZU],
+            [HEY, HEZ, HFA],
             [],
             [],
             multiplicity,
         );
-        stamper.stamp_current_sparse_local::<1, 0>(
+        stamper.stamp_current_sparse_local::<9, 0>(
             Some(9),
             Some(10),
-            multiplicity * (GNP),
-            [23],
-            [GZV],
+            multiplicity * (GPQ),
+            [3, 4, 5, 6, 7, 8, 9, 10, 23],
+            [HFB, HFC, HFD, HFE, HFF, HFG, HFH, HFI, HFJ],
             [],
             [],
             multiplicity,
@@ -13506,19 +13742,19 @@ impl Instance {
         stamper.stamp_current_sparse_local::<9, 0>(
             Some(23),
             None,
-            multiplicity * (GNY),
+            multiplicity * (GPY),
             [3, 4, 5, 6, 7, 8, 9, 10, 23],
-            [GZW, GZX, GZY, GZZ, HAA, HAB, HAC, HAD, HAE],
+            [HFK, HFL, HFM, HFN, HFO, HFP, HFQ, HFR, HFS],
             [],
             [],
             multiplicity,
         );
-        stamper.stamp_current_sparse_local::<1, 0>(
+        stamper.stamp_current_sparse_local::<8, 0>(
             Some(2),
             Some(8),
-            multiplicity * (GOA),
-            [24],
-            [HAF],
+            multiplicity * (GQF),
+            [2, 3, 4, 5, 6, 8, 9, 24],
+            [HFT, HFU, HFV, HFW, HFX, HFY, HFZ, HGA],
             [],
             [],
             multiplicity,
@@ -13526,103 +13762,137 @@ impl Instance {
         stamper.stamp_current_sparse_local::<8, 0>(
             Some(24),
             None,
-            multiplicity * (GOJ),
+            multiplicity * (GQN),
             [2, 3, 4, 5, 6, 8, 9, 24],
-            [HAG, HAH, HAI, HAJ, HAK, HAL, HAM, HAN],
+            [HGB, HGC, HGD, HGE, HGF, HGG, HGH, HGI],
             [],
             [],
             multiplicity,
         );
-        self.canonical_reactive[0] = GPB;
-        self.canonical_reactive[1] = GPD;
-        self.canonical_reactive[2] = GRX;
-        self.canonical_reactive[3] = GRZ;
-        self.canonical_reactive[4] = GSB;
-        self.canonical_reactive[5] = GSD;
-        self.canonical_reactive[6] = GSF;
-        self.canonical_reactive[7] = GSH;
-        self.canonical_reactive[8] = GSJ;
-        self.canonical_reactive[9] = GSL;
-        self.canonical_reactive[10] = GSN;
-        self.canonical_reactive[11] = GSP;
-        self.canonical_reactive[12] = GSR;
-        self.canonical_reactive[13] = GST;
-        self.canonical_reactive[14] = GSV;
-        self.canonical_reactive[15] = GSX;
-        self.canonical_reactive[16] = GSZ;
-        self.canonical_reactive[17] = GTB;
-        self.canonical_reactive[18] = GTD;
-        self.canonical_reactive[19] = GTF;
-        self.canonical_reactive[20] = GTH;
-        self.canonical_reactive[21] = GTJ;
-        self.canonical_reactive[22] = GTL;
-        self.canonical_reactive[23] = GTN;
-        self.canonical_reactive[24] = GTP;
-        self.canonical_reactive[25] = GTR;
-        self.canonical_reactive[26] = GTT;
-        self.canonical_reactive[27] = GTV;
-        self.canonical_reactive[28] = GTX;
-        self.canonical_reactive[29] = GTZ;
-        self.canonical_reactive[30] = GUB;
-        self.canonical_reactive[31] = GUD;
-        self.canonical_reactive[32] = GUF;
-        self.canonical_reactive[33] = GUH;
-        self.canonical_reactive[34] = GUJ;
-        self.canonical_reactive[35] = GUL;
-        self.canonical_reactive[36] = GUN;
-        self.canonical_reactive[37] = GUP;
-        self.canonical_reactive[38] = GUR;
-        self.canonical_reactive[39] = GUT;
-        self.canonical_reactive[40] = GUV;
-        self.canonical_reactive[41] = GUX;
-        self.canonical_reactive[42] = GUZ;
-        self.canonical_reactive[43] = GVB;
-        self.canonical_reactive[44] = GVD;
-        self.canonical_reactive[45] = GVF;
-        self.canonical_reactive[46] = GVH;
-        self.canonical_reactive[47] = GVJ;
-        self.canonical_reactive[48] = GVL;
-        self.canonical_reactive[49] = GVN;
-        self.canonical_reactive[50] = GVP;
-        self.canonical_reactive[51] = GVR;
-        self.canonical_reactive[52] = GVT;
-        self.canonical_reactive[53] = GVV;
-        self.canonical_reactive[54] = GVX;
-        self.canonical_reactive[55] = GVZ;
-        self.canonical_reactive[56] = GWD;
-        self.canonical_reactive[57] = GWF;
-        self.canonical_reactive[58] = GWH;
-        self.canonical_reactive[59] = GWJ;
-        self.canonical_reactive[60] = GWL;
-        self.canonical_reactive[61] = GWN;
-        self.canonical_reactive[62] = GWP;
-        self.canonical_reactive[63] = GWR;
-        self.canonical_reactive[64] = GWU;
-        self.canonical_reactive[65] = GWW;
-        self.canonical_reactive[66] = GWY;
-        self.canonical_reactive[67] = GXA;
-        self.canonical_reactive[68] = GXC;
-        self.canonical_reactive[69] = GXE;
-        self.canonical_reactive[70] = GXG;
-        self.canonical_reactive[71] = GXI;
-        self.canonical_reactive[72] = GXL;
-        self.canonical_reactive[73] = GXN;
-        self.canonical_reactive[74] = GXP;
-        self.canonical_reactive[75] = GXR;
-        self.canonical_reactive[76] = GXT;
-        self.canonical_reactive[77] = GXV;
-        self.canonical_reactive[78] = GXX;
-        self.canonical_reactive[79] = GXZ;
-        self.canonical_reactive[80] = GYO;
-        self.canonical_reactive[81] = GYQ;
-        self.canonical_reactive[82] = GYS;
-        self.canonical_reactive[83] = GYU;
-        self.canonical_reactive[84] = GYW;
-        self.canonical_reactive[85] = GYY;
-        self.canonical_reactive[86] = GZA;
-        self.canonical_reactive[87] = GZC;
-        self.canonical_reactive[88] = GZE;
-        self.canonical_reactive[89] = GZG;
+        self.canonical_reactive[0] = GRF;
+        self.canonical_reactive[1] = GRH;
+        self.canonical_reactive[2] = GUB;
+        self.canonical_reactive[3] = GUD;
+        self.canonical_reactive[4] = GUF;
+        self.canonical_reactive[5] = GUH;
+        self.canonical_reactive[6] = GUJ;
+        self.canonical_reactive[7] = GUL;
+        self.canonical_reactive[8] = GUN;
+        self.canonical_reactive[9] = GUP;
+        self.canonical_reactive[10] = GUR;
+        self.canonical_reactive[11] = GUT;
+        self.canonical_reactive[12] = GUV;
+        self.canonical_reactive[13] = GUX;
+        self.canonical_reactive[14] = GUZ;
+        self.canonical_reactive[15] = GVB;
+        self.canonical_reactive[16] = GVD;
+        self.canonical_reactive[17] = GVF;
+        self.canonical_reactive[18] = GVH;
+        self.canonical_reactive[19] = GVJ;
+        self.canonical_reactive[20] = GVL;
+        self.canonical_reactive[21] = GVN;
+        self.canonical_reactive[22] = GVP;
+        self.canonical_reactive[23] = GVR;
+        self.canonical_reactive[24] = GVT;
+        self.canonical_reactive[25] = GVV;
+        self.canonical_reactive[26] = GVX;
+        self.canonical_reactive[27] = GVZ;
+        self.canonical_reactive[28] = GWB;
+        self.canonical_reactive[29] = GWD;
+        self.canonical_reactive[30] = GWF;
+        self.canonical_reactive[31] = GWH;
+        self.canonical_reactive[32] = GWJ;
+        self.canonical_reactive[33] = GWL;
+        self.canonical_reactive[34] = GWN;
+        self.canonical_reactive[35] = GWP;
+        self.canonical_reactive[36] = GWR;
+        self.canonical_reactive[37] = GWT;
+        self.canonical_reactive[38] = GWV;
+        self.canonical_reactive[39] = GWX;
+        self.canonical_reactive[40] = GWZ;
+        self.canonical_reactive[41] = GXB;
+        self.canonical_reactive[42] = GXD;
+        self.canonical_reactive[43] = GXF;
+        self.canonical_reactive[44] = GXH;
+        self.canonical_reactive[45] = GXJ;
+        self.canonical_reactive[46] = GXL;
+        self.canonical_reactive[47] = GXN;
+        self.canonical_reactive[48] = GXP;
+        self.canonical_reactive[49] = GXR;
+        self.canonical_reactive[50] = GXT;
+        self.canonical_reactive[51] = GXV;
+        self.canonical_reactive[52] = GXX;
+        self.canonical_reactive[53] = GXZ;
+        self.canonical_reactive[54] = GYB;
+        self.canonical_reactive[55] = GYD;
+        self.canonical_reactive[56] = GYG;
+        self.canonical_reactive[57] = GYI;
+        self.canonical_reactive[58] = GYK;
+        self.canonical_reactive[59] = GYM;
+        self.canonical_reactive[60] = GYO;
+        self.canonical_reactive[61] = GYQ;
+        self.canonical_reactive[62] = GYS;
+        self.canonical_reactive[63] = GYU;
+        self.canonical_reactive[64] = GYW;
+        self.canonical_reactive[65] = GYY;
+        self.canonical_reactive[66] = GZA;
+        self.canonical_reactive[67] = GZC;
+        self.canonical_reactive[68] = GZE;
+        self.canonical_reactive[69] = GZG;
+        self.canonical_reactive[70] = GZI;
+        self.canonical_reactive[71] = GZK;
+        self.canonical_reactive[72] = GZM;
+        self.canonical_reactive[73] = GZO;
+        self.canonical_reactive[74] = GZQ;
+        self.canonical_reactive[75] = GZS;
+        self.canonical_reactive[76] = GZU;
+        self.canonical_reactive[77] = GZW;
+        self.canonical_reactive[78] = GZY;
+        self.canonical_reactive[79] = HAA;
+        self.canonical_reactive[80] = HAC;
+        self.canonical_reactive[81] = HAE;
+        self.canonical_reactive[82] = HAG;
+        self.canonical_reactive[83] = HAI;
+        self.canonical_reactive[84] = HAK;
+        self.canonical_reactive[85] = HAM;
+        self.canonical_reactive[86] = HAO;
+        self.canonical_reactive[87] = HAQ;
+        self.canonical_reactive[88] = HAS;
+        self.canonical_reactive[89] = HAU;
+        self.canonical_reactive[90] = HAW;
+        self.canonical_reactive[91] = HAY;
+        self.canonical_reactive[92] = HBA;
+        self.canonical_reactive[93] = HBC;
+        self.canonical_reactive[94] = HBE;
+        self.canonical_reactive[95] = HBG;
+        self.canonical_reactive[96] = HBI;
+        self.canonical_reactive[97] = HBK;
+        self.canonical_reactive[98] = HBM;
+        self.canonical_reactive[99] = HBO;
+        self.canonical_reactive[100] = HBQ;
+        self.canonical_reactive[101] = HBS;
+        self.canonical_reactive[102] = HBU;
+        self.canonical_reactive[103] = HBW;
+        self.canonical_reactive[104] = HCQ;
+        self.canonical_reactive[105] = HCS;
+        self.canonical_reactive[106] = HCU;
+        self.canonical_reactive[107] = HCW;
+        self.canonical_reactive[108] = HCY;
+        self.canonical_reactive[109] = HDA;
+        self.canonical_reactive[110] = HDC;
+        self.canonical_reactive[111] = HDE;
+        self.canonical_reactive[112] = HDG;
+        self.canonical_reactive[113] = HDI;
+        self.canonical_reactive[114] = HDK;
+        self.canonical_reactive[115] = HDM;
+        self.canonical_reactive[116] = HDO;
+        self.canonical_reactive[117] = HDQ;
+        self.canonical_reactive[118] = HDS;
+        self.canonical_reactive[119] = HDU;
+        self.canonical_reactive[120] = HDW;
+        self.canonical_reactive[121] = HDY;
+        self.canonical_reactive[122] = HEA;
+        self.canonical_reactive[123] = HEC;
     }
 
     #[cold]
@@ -13980,121 +14250,223 @@ impl Instance {
             stamper.stamp_current_frequency_local::<false>(Some(8), Some(3), GeneratedDerivative::node(8, value));
         }
         if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[56], multiplicity, 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(14), None, GeneratedDerivative::node(3, value));
+            stamper.stamp_current_frequency_local::<false>(None, Some(5), GeneratedDerivative::node(3, value));
         }
         if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[57], multiplicity, 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(14), None, GeneratedDerivative::node(4, value));
+            stamper.stamp_current_frequency_local::<false>(None, Some(5), GeneratedDerivative::node(4, value));
         }
         if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[58], multiplicity, 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(14), None, GeneratedDerivative::node(5, value));
+            stamper.stamp_current_frequency_local::<false>(None, Some(5), GeneratedDerivative::node(5, value));
         }
         if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[59], multiplicity, 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(14), None, GeneratedDerivative::node(6, value));
+            stamper.stamp_current_frequency_local::<false>(None, Some(5), GeneratedDerivative::node(6, value));
         }
         if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[60], multiplicity, 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(14), None, GeneratedDerivative::node(7, value));
+            stamper.stamp_current_frequency_local::<false>(None, Some(5), GeneratedDerivative::node(7, value));
         }
         if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[61], multiplicity, 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(14), None, GeneratedDerivative::node(8, value));
+            stamper.stamp_current_frequency_local::<false>(None, Some(5), GeneratedDerivative::node(8, value));
         }
         if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[62], multiplicity, 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(14), None, GeneratedDerivative::node(9, value));
+            stamper.stamp_current_frequency_local::<false>(None, Some(5), GeneratedDerivative::node(9, value));
         }
         if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[63], multiplicity, 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(14), None, GeneratedDerivative::node(14, value));
+            stamper.stamp_current_frequency_local::<false>(None, Some(5), GeneratedDerivative::node(14, value));
         }
         if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[64], multiplicity, 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(15), None, GeneratedDerivative::node(3, value));
+            stamper.stamp_current_frequency_local::<false>(Some(14), None, GeneratedDerivative::node(3, value));
         }
         if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[65], multiplicity, 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(15), None, GeneratedDerivative::node(4, value));
+            stamper.stamp_current_frequency_local::<false>(Some(14), None, GeneratedDerivative::node(4, value));
         }
         if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[66], multiplicity, 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(15), None, GeneratedDerivative::node(5, value));
+            stamper.stamp_current_frequency_local::<false>(Some(14), None, GeneratedDerivative::node(5, value));
         }
         if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[67], multiplicity, 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(15), None, GeneratedDerivative::node(6, value));
+            stamper.stamp_current_frequency_local::<false>(Some(14), None, GeneratedDerivative::node(6, value));
         }
         if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[68], multiplicity, 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(15), None, GeneratedDerivative::node(7, value));
+            stamper.stamp_current_frequency_local::<false>(Some(14), None, GeneratedDerivative::node(7, value));
         }
         if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[69], multiplicity, 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(15), None, GeneratedDerivative::node(8, value));
+            stamper.stamp_current_frequency_local::<false>(Some(14), None, GeneratedDerivative::node(8, value));
         }
         if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[70], multiplicity, 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(15), None, GeneratedDerivative::node(9, value));
+            stamper.stamp_current_frequency_local::<false>(Some(14), None, GeneratedDerivative::node(9, value));
         }
         if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[71], multiplicity, 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(15), None, GeneratedDerivative::node(15, value));
+            stamper.stamp_current_frequency_local::<false>(Some(14), None, GeneratedDerivative::node(14, value));
         }
         if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[72], multiplicity, 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(16), None, GeneratedDerivative::node(3, value));
+            stamper.stamp_current_frequency_local::<false>(None, Some(4), GeneratedDerivative::node(3, value));
         }
         if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[73], multiplicity, 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(16), None, GeneratedDerivative::node(4, value));
+            stamper.stamp_current_frequency_local::<false>(None, Some(4), GeneratedDerivative::node(4, value));
         }
         if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[74], multiplicity, 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(16), None, GeneratedDerivative::node(5, value));
+            stamper.stamp_current_frequency_local::<false>(None, Some(4), GeneratedDerivative::node(5, value));
         }
         if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[75], multiplicity, 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(16), None, GeneratedDerivative::node(6, value));
+            stamper.stamp_current_frequency_local::<false>(None, Some(4), GeneratedDerivative::node(6, value));
         }
         if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[76], multiplicity, 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(16), None, GeneratedDerivative::node(7, value));
+            stamper.stamp_current_frequency_local::<false>(None, Some(4), GeneratedDerivative::node(7, value));
         }
         if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[77], multiplicity, 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(16), None, GeneratedDerivative::node(8, value));
+            stamper.stamp_current_frequency_local::<false>(None, Some(4), GeneratedDerivative::node(8, value));
         }
         if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[78], multiplicity, 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(16), None, GeneratedDerivative::node(9, value));
+            stamper.stamp_current_frequency_local::<false>(None, Some(4), GeneratedDerivative::node(9, value));
         }
         if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[79], multiplicity, 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(16), None, GeneratedDerivative::node(16, value));
+            stamper.stamp_current_frequency_local::<false>(None, Some(4), GeneratedDerivative::node(15, value));
         }
         if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[80], multiplicity, 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(20), None, GeneratedDerivative::node(3, value));
+            stamper.stamp_current_frequency_local::<false>(Some(15), None, GeneratedDerivative::node(3, value));
         }
         if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[81], multiplicity, 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(20), None, GeneratedDerivative::node(4, value));
+            stamper.stamp_current_frequency_local::<false>(Some(15), None, GeneratedDerivative::node(4, value));
         }
         if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[82], multiplicity, 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(20), None, GeneratedDerivative::node(5, value));
+            stamper.stamp_current_frequency_local::<false>(Some(15), None, GeneratedDerivative::node(5, value));
         }
         if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[83], multiplicity, 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(20), None, GeneratedDerivative::node(6, value));
+            stamper.stamp_current_frequency_local::<false>(Some(15), None, GeneratedDerivative::node(6, value));
         }
         if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[84], multiplicity, 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(20), None, GeneratedDerivative::node(7, value));
+            stamper.stamp_current_frequency_local::<false>(Some(15), None, GeneratedDerivative::node(7, value));
         }
         if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[85], multiplicity, 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(20), None, GeneratedDerivative::node(8, value));
+            stamper.stamp_current_frequency_local::<false>(Some(15), None, GeneratedDerivative::node(8, value));
         }
         if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[86], multiplicity, 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(20), None, GeneratedDerivative::node(9, value));
+            stamper.stamp_current_frequency_local::<false>(Some(15), None, GeneratedDerivative::node(9, value));
         }
         if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[87], multiplicity, 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(20), None, GeneratedDerivative::node(11, value));
+            stamper.stamp_current_frequency_local::<false>(Some(15), None, GeneratedDerivative::node(15, value));
         }
         if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[88], multiplicity, 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(20), None, GeneratedDerivative::node(12, value));
+            stamper.stamp_current_frequency_local::<false>(None, Some(6), GeneratedDerivative::node(3, value));
         }
         if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[89], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(None, Some(6), GeneratedDerivative::node(4, value));
+        }
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[90], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(None, Some(6), GeneratedDerivative::node(5, value));
+        }
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[91], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(None, Some(6), GeneratedDerivative::node(6, value));
+        }
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[92], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(None, Some(6), GeneratedDerivative::node(7, value));
+        }
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[93], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(None, Some(6), GeneratedDerivative::node(8, value));
+        }
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[94], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(None, Some(6), GeneratedDerivative::node(9, value));
+        }
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[95], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(None, Some(6), GeneratedDerivative::node(16, value));
+        }
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[96], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(16), None, GeneratedDerivative::node(3, value));
+        }
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[97], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(16), None, GeneratedDerivative::node(4, value));
+        }
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[98], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(16), None, GeneratedDerivative::node(5, value));
+        }
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[99], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(16), None, GeneratedDerivative::node(6, value));
+        }
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[100], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(16), None, GeneratedDerivative::node(7, value));
+        }
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[101], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(16), None, GeneratedDerivative::node(8, value));
+        }
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[102], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(16), None, GeneratedDerivative::node(9, value));
+        }
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[103], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(16), None, GeneratedDerivative::node(16, value));
+        }
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[104], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(5), Some(8), GeneratedDerivative::node(3, value));
+        }
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[105], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(5), Some(8), GeneratedDerivative::node(4, value));
+        }
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[106], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(5), Some(8), GeneratedDerivative::node(5, value));
+        }
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[107], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(5), Some(8), GeneratedDerivative::node(6, value));
+        }
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[108], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(5), Some(8), GeneratedDerivative::node(7, value));
+        }
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[109], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(5), Some(8), GeneratedDerivative::node(8, value));
+        }
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[110], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(5), Some(8), GeneratedDerivative::node(9, value));
+        }
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[111], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(5), Some(8), GeneratedDerivative::node(11, value));
+        }
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[112], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(5), Some(8), GeneratedDerivative::node(12, value));
+        }
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[113], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(5), Some(8), GeneratedDerivative::node(20, value));
+        }
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[114], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(20), None, GeneratedDerivative::node(3, value));
+        }
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[115], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(20), None, GeneratedDerivative::node(4, value));
+        }
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[116], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(20), None, GeneratedDerivative::node(5, value));
+        }
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[117], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(20), None, GeneratedDerivative::node(6, value));
+        }
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[118], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(20), None, GeneratedDerivative::node(7, value));
+        }
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[119], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(20), None, GeneratedDerivative::node(8, value));
+        }
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[120], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(20), None, GeneratedDerivative::node(9, value));
+        }
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[121], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(20), None, GeneratedDerivative::node(11, value));
+        }
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[122], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(20), None, GeneratedDerivative::node(12, value));
+        }
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[123], multiplicity, 1, 0) {
             stamper.stamp_current_frequency_local::<false>(Some(20), None, GeneratedDerivative::node(20, value));
         }
     }
 
 
-    pub const STAMP_PATTERN: rspice_veriloga_runtime::GeneratedVerilogAStampPattern = rspice_veriloga_runtime::GeneratedVerilogAStampPattern { resistive: &[(0, 21), (1, 22), (2, 24), (3, 3), (3, 4), (3, 5), (3, 6), (3, 7), (3, 8), (3, 9), (4, 4), (4, 5), (4, 6), (4, 9), (4, 15), (4, 18), (5, 3), (5, 4), (5, 5), (5, 6), (5, 7), (5, 8), (5, 9), (5, 11), (5, 12), (5, 14), (5, 17), (5, 18), (5, 19), (5, 20), (6, 16), (7, 3), (7, 4), (7, 5), (7, 6), (7, 7), (7, 8), (7, 9), (7, 10), (7, 11), (7, 12), (7, 13), (7, 21), (8, 3), (8, 4), (8, 5), (8, 6), (8, 7), (8, 8), (8, 9), (8, 10), (8, 11), (8, 12), (8, 13), (8, 20), (8, 24), (9, 3), (9, 4), (9, 5), (9, 6), (9, 7), (9, 8), (9, 9), (9, 10), (9, 23), (10, 7), (10, 8), (10, 9), (10, 10), (10, 22), (10, 23), (11, 4), (11, 5), (11, 6), (11, 8), (11, 11), (11, 19), (12, 4), (12, 5), (12, 6), (12, 7), (12, 12), (12, 17), (13, 3), (13, 4), (13, 5), (13, 6), (13, 7), (13, 8), (13, 9), (13, 13), (14, 3), (14, 4), (14, 5), (14, 6), (14, 7), (14, 8), (14, 9), (14, 14), (15, 3), (15, 4), (15, 5), (15, 6), (15, 7), (15, 8), (15, 9), (15, 15), (16, 3), (16, 4), (16, 5), (16, 6), (16, 7), (16, 8), (16, 9), (16, 16), (17, 5), (17, 12), (17, 17), (18, 4), (18, 5), (18, 18), (19, 5), (19, 11), (19, 19), (20, 3), (20, 4), (20, 5), (20, 6), (20, 7), (20, 8), (20, 9), (20, 11), (20, 12), (20, 20), (21, 0), (21, 3), (21, 4), (21, 5), (21, 6), (21, 7), (21, 8), (21, 9), (21, 21), (22, 1), (22, 10), (22, 22), (23, 3), (23, 4), (23, 5), (23, 6), (23, 7), (23, 8), (23, 9), (23, 10), (23, 23), (24, 2), (24, 3), (24, 4), (24, 5), (24, 6), (24, 8), (24, 9), (24, 24)], dynamic: &[(3, 10), (9, 13), (10, 3)], reactive: &[(3, 3), (3, 4), (3, 5), (3, 6), (3, 7), (3, 8), (3, 9), (3, 10), (5, 3), (5, 4), (5, 5), (5, 6), (5, 7), (5, 8), (5, 9), (7, 3), (7, 4), (7, 5), (7, 6), (7, 7), (7, 8), (7, 9), (7, 10), (7, 12), (7, 13), (8, 3), (8, 4), (8, 5), (8, 6), (8, 8), (8, 9), (8, 10), (8, 11), (8, 13), (9, 3), (9, 4), (9, 5), (9, 6), (9, 7), (9, 8), (9, 9), (9, 10), (9, 13), (10, 3), (10, 7), (10, 8), (10, 9), (10, 10), (11, 4), (11, 5), (11, 6), (11, 8), (11, 11), (12, 4), (12, 5), (12, 6), (12, 7), (12, 12), (14, 3), (14, 4), (14, 5), (14, 6), (14, 7), (14, 8), (14, 9), (14, 14), (15, 3), (15, 4), (15, 5), (15, 6), (15, 7), (15, 8), (15, 9), (15, 15), (16, 3), (16, 4), (16, 5), (16, 6), (16, 7), (16, 8), (16, 9), (16, 16), (20, 3), (20, 4), (20, 5), (20, 6), (20, 7), (20, 8), (20, 9), (20, 11), (20, 12), (20, 20)], rhs_rows: &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24] };
+    pub const STAMP_PATTERN: rspice_veriloga_runtime::GeneratedVerilogAStampPattern = rspice_veriloga_runtime::GeneratedVerilogAStampPattern { resistive: &[(0, 0), (0, 3), (0, 4), (0, 5), (0, 6), (0, 7), (0, 8), (0, 9), (0, 21), (1, 1), (1, 10), (1, 22), (2, 2), (2, 3), (2, 4), (2, 5), (2, 6), (2, 8), (2, 9), (2, 24), (3, 3), (3, 4), (3, 5), (3, 6), (3, 7), (3, 8), (3, 9), (4, 3), (4, 4), (4, 5), (4, 6), (4, 7), (4, 8), (4, 9), (4, 15), (4, 18), (5, 3), (5, 4), (5, 5), (5, 6), (5, 7), (5, 8), (5, 9), (5, 11), (5, 12), (5, 14), (5, 17), (5, 18), (5, 19), (5, 20), (6, 3), (6, 4), (6, 5), (6, 6), (6, 7), (6, 8), (6, 9), (6, 16), (7, 0), (7, 3), (7, 4), (7, 5), (7, 6), (7, 7), (7, 8), (7, 9), (7, 10), (7, 11), (7, 12), (7, 13), (7, 21), (8, 2), (8, 3), (8, 4), (8, 5), (8, 6), (8, 7), (8, 8), (8, 9), (8, 10), (8, 11), (8, 12), (8, 13), (8, 20), (8, 24), (9, 3), (9, 4), (9, 5), (9, 6), (9, 7), (9, 8), (9, 9), (9, 10), (9, 23), (10, 1), (10, 3), (10, 4), (10, 5), (10, 6), (10, 7), (10, 8), (10, 9), (10, 10), (10, 22), (10, 23), (11, 4), (11, 5), (11, 6), (11, 8), (11, 11), (11, 19), (12, 4), (12, 5), (12, 6), (12, 7), (12, 12), (12, 17), (13, 3), (13, 4), (13, 5), (13, 6), (13, 7), (13, 8), (13, 9), (13, 13), (14, 3), (14, 4), (14, 5), (14, 6), (14, 7), (14, 8), (14, 9), (14, 14), (15, 3), (15, 4), (15, 5), (15, 6), (15, 7), (15, 8), (15, 9), (15, 15), (16, 3), (16, 4), (16, 5), (16, 6), (16, 7), (16, 8), (16, 9), (16, 16), (17, 5), (17, 12), (17, 17), (18, 4), (18, 5), (18, 18), (19, 5), (19, 11), (19, 19), (20, 3), (20, 4), (20, 5), (20, 6), (20, 7), (20, 8), (20, 9), (20, 11), (20, 12), (20, 20), (21, 0), (21, 3), (21, 4), (21, 5), (21, 6), (21, 7), (21, 8), (21, 9), (21, 21), (22, 1), (22, 10), (22, 22), (23, 3), (23, 4), (23, 5), (23, 6), (23, 7), (23, 8), (23, 9), (23, 10), (23, 23), (24, 2), (24, 3), (24, 4), (24, 5), (24, 6), (24, 8), (24, 9), (24, 24)], dynamic: &[(3, 10), (9, 13)], reactive: &[(3, 3), (3, 4), (3, 5), (3, 6), (3, 7), (3, 8), (3, 9), (3, 10), (4, 3), (4, 4), (4, 5), (4, 6), (4, 7), (4, 8), (4, 9), (4, 15), (5, 3), (5, 4), (5, 5), (5, 6), (5, 7), (5, 8), (5, 9), (5, 11), (5, 12), (5, 14), (5, 20), (6, 3), (6, 4), (6, 5), (6, 6), (6, 7), (6, 8), (6, 9), (6, 16), (7, 3), (7, 4), (7, 5), (7, 6), (7, 7), (7, 8), (7, 9), (7, 10), (7, 12), (7, 13), (8, 3), (8, 4), (8, 5), (8, 6), (8, 7), (8, 8), (8, 9), (8, 10), (8, 11), (8, 12), (8, 13), (8, 20), (9, 3), (9, 4), (9, 5), (9, 6), (9, 7), (9, 8), (9, 9), (9, 10), (9, 13), (10, 3), (10, 7), (10, 8), (10, 9), (10, 10), (11, 4), (11, 5), (11, 6), (11, 8), (11, 11), (12, 4), (12, 5), (12, 6), (12, 7), (12, 12), (14, 3), (14, 4), (14, 5), (14, 6), (14, 7), (14, 8), (14, 9), (14, 14), (15, 3), (15, 4), (15, 5), (15, 6), (15, 7), (15, 8), (15, 9), (15, 15), (16, 3), (16, 4), (16, 5), (16, 6), (16, 7), (16, 8), (16, 9), (16, 16), (20, 3), (20, 4), (20, 5), (20, 6), (20, 7), (20, 8), (20, 9), (20, 11), (20, 12), (20, 20)], rhs_rows: &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24] };
 
-    pub const SWITCH_SHORTS: [rspice_veriloga_runtime::GeneratedSwitchShort; 11] = [rspice_veriloga_runtime::GeneratedSwitchShort { state: 14, pos: None, neg: Some(5) }, rspice_veriloga_runtime::GeneratedSwitchShort { state: 15, pos: None, neg: Some(4) }, rspice_veriloga_runtime::GeneratedSwitchShort { state: 16, pos: None, neg: Some(6) }, rspice_veriloga_runtime::GeneratedSwitchShort { state: 17, pos: Some(5), neg: Some(12) }, rspice_veriloga_runtime::GeneratedSwitchShort { state: 18, pos: Some(5), neg: Some(4) }, rspice_veriloga_runtime::GeneratedSwitchShort { state: 19, pos: Some(5), neg: Some(11) }, rspice_veriloga_runtime::GeneratedSwitchShort { state: 20, pos: Some(5), neg: Some(8) }, rspice_veriloga_runtime::GeneratedSwitchShort { state: 21, pos: Some(0), neg: Some(7) }, rspice_veriloga_runtime::GeneratedSwitchShort { state: 22, pos: Some(1), neg: Some(10) }, rspice_veriloga_runtime::GeneratedSwitchShort { state: 23, pos: Some(9), neg: Some(10) }, rspice_veriloga_runtime::GeneratedSwitchShort { state: 24, pos: Some(2), neg: Some(8) }];
+    pub const PRIVATE_SWITCHES: [rspice_veriloga_runtime::GeneratedPrivateSwitch; 11] = [rspice_veriloga_runtime::GeneratedPrivateSwitch { state: 14, pos: None, neg: Some(5), shorts: true }, rspice_veriloga_runtime::GeneratedPrivateSwitch { state: 15, pos: None, neg: Some(4), shorts: true }, rspice_veriloga_runtime::GeneratedPrivateSwitch { state: 16, pos: None, neg: Some(6), shorts: true }, rspice_veriloga_runtime::GeneratedPrivateSwitch { state: 17, pos: Some(5), neg: Some(12), shorts: true }, rspice_veriloga_runtime::GeneratedPrivateSwitch { state: 18, pos: Some(5), neg: Some(4), shorts: true }, rspice_veriloga_runtime::GeneratedPrivateSwitch { state: 19, pos: Some(5), neg: Some(11), shorts: true }, rspice_veriloga_runtime::GeneratedPrivateSwitch { state: 20, pos: Some(5), neg: Some(8), shorts: true }, rspice_veriloga_runtime::GeneratedPrivateSwitch { state: 21, pos: Some(0), neg: Some(7), shorts: true }, rspice_veriloga_runtime::GeneratedPrivateSwitch { state: 22, pos: Some(1), neg: Some(10), shorts: true }, rspice_veriloga_runtime::GeneratedPrivateSwitch { state: 23, pos: Some(9), neg: Some(10), shorts: true }, rspice_veriloga_runtime::GeneratedPrivateSwitch { state: 24, pos: Some(2), neg: Some(8), shorts: true }];
 
-    /// Bit `i` is set while `SWITCH_SHORTS[i]` is in its potential arm.
-    pub fn switch_branch_shorts(&mut self, ctx: &GeneratedEvalContext<'_>) -> u64 {
+    /// Bit `i` is set while `PRIVATE_SWITCHES[i]` is in its potential arm.
+    pub fn private_switch_kinds(&mut self, ctx: &GeneratedEvalContext<'_>) -> u64 {
         self.canonical_model_stage(ctx);
         if ctx.evaluation_failed() { return 0; }
         self.canonical_instance_stage(ctx);
         if ctx.evaluation_failed() { return 0; }
         let staged = &*self.canonical_staged;
-        (u64::from(staged[745] != 0.0) << 0) | (u64::from(staged[746] != 0.0) << 1) | (u64::from(staged[747] != 0.0) << 2) | (u64::from(staged[748] != 0.0) << 3) | (u64::from(staged[749] != 0.0) << 4) | (u64::from(staged[750] != 0.0) << 5) | (u64::from(staged[751] != 0.0) << 6) | (u64::from(staged[752] != 0.0) << 7) | (u64::from(staged[753] != 0.0) << 8) | (u64::from(staged[754] != 0.0) << 9) | (u64::from(staged[755] != 0.0) << 10)
+        u64::from(staged[745] != 0.0) | (u64::from(staged[746] != 0.0) << 1) | (u64::from(staged[747] != 0.0) << 2) | (u64::from(staged[748] != 0.0) << 3) | (u64::from(staged[749] != 0.0) << 4) | (u64::from(staged[750] != 0.0) << 5) | (u64::from(staged[751] != 0.0) << 6) | (u64::from(staged[752] != 0.0) << 7) | (u64::from(staged[753] != 0.0) << 8) | (u64::from(staged[754] != 0.0) << 9) | (u64::from(staged[755] != 0.0) << 10)
     }
 }

@@ -455,14 +455,15 @@ pub(crate) fn lower<'a>(
         .into_iter()
         .filter_map(|(key, kinds)| (kinds == 3).then_some(key))
         .collect();
-    // In potential mode a switch whose every potential write is zero shorts
-    // its nodes. Its current is private when nothing probes the branch or a
-    // port flow it carries.
-    let mut shorts: BTreeSet<_> = switches
+    // A switch's current is private when nothing probes the branch or a port
+    // flow it carries. Its potential arm shorts the nodes when every
+    // potential write is zero.
+    let private: BTreeSet<_> = switches
         .iter()
         .filter(|key| !branches.contains_key(*key) && incident[*key].pos != incident[*key].neg)
         .cloned()
         .collect();
+    let mut shorts = private.clone();
     for contribution in &module.contributions {
         if !contribution.is_current && !contribution.indirect && !writes_zero(contribution) {
             shorts.remove(&resolver.contribution(contribution).0);
@@ -541,12 +542,13 @@ pub(crate) fn lower<'a>(
         if switches.contains(key) {
             let switch =
                 super::switch_branches::SwitchState::allocate(target, &branch.state, branch.span);
-            if shorts.contains(key) {
-                target.switch_shorts.push(SwitchShort {
+            if private.contains(key) {
+                target.private_switches.push(PrivateSwitch {
                     kind: switch.kind_slot(),
                     state: branch.state.clone(),
                     pos: branch.pos.clone(),
                     neg: branch.neg.clone(),
+                    shorts: shorts.contains(key),
                 });
             }
             branch.switch = Some(switch);
@@ -642,15 +644,21 @@ pub(crate) fn lower<'a>(
     super::switch_branches::lower(target, &switch_sites)?;
     for (key, branch) in &branches {
         let state = potential(&branch.state, "0", branch.span);
-        let balance = if let Some(switch) = &branch.switch {
-            switch.balance(
+        let (injection, balance) = if let Some(switch) = &branch.switch {
+            (
+                switch.injection(state.clone()),
+                switch.balance(
+                    state.clone(),
+                    potential(&branch.pos, &branch.neg, branch.span),
+                ),
+            )
+        } else if branch.source {
+            (state.clone(), state.clone())
+        } else {
+            (
                 state.clone(),
                 potential(&branch.pos, &branch.neg, branch.span),
             )
-        } else if branch.source {
-            state.clone()
-        } else {
-            potential(&branch.pos, &branch.neg, branch.span)
         };
         for (index, (label, declared_branch, expression)) in [
             (
@@ -659,7 +667,7 @@ pub(crate) fn lower<'a>(
                     BranchKey::Named(name) => Some(name.clone()),
                     BranchKey::Nodes(..) => None,
                 },
-                state,
+                injection,
             ),
             (branch.state.clone(), None, balance),
         ]

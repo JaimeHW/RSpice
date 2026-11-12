@@ -12551,16 +12551,16 @@ impl Instance {
 		let SAU=node_potentials[5];
 		let SBA=node_potentials[4];
 		let SBQ=staged[562];
-		let SCD=node_potentials[20];
-		let SCF=staged[1389];
-		let SCM=node_potentials[21];
-		let SCO=staged[1390];
-		let SCV=node_potentials[22];
-		let SCX=staged[1391];
-		let SDG=node_potentials[23];
-		let SDI=staged[1392];
-		let SDR=node_potentials[24];
-		let SDT=staged[1393];
+		let SCD=staged[1389];
+		let SCF=node_potentials[20];
+		let SCQ=staged[1390];
+		let SCS=node_potentials[21];
+		let SDD=staged[1391];
+		let SDF=node_potentials[22];
+		let SDS=staged[1392];
+		let SDU=node_potentials[23];
+		let SEH=staged[1393];
+		let SEJ=node_potentials[24];
 		let mut oXB=0.0;
 		let mut oAUW=false;
 		let mut oAVA=false;
@@ -30740,553 +30740,618 @@ impl Instance {
 		let SCA=L5(std::array::from_fn(|i| ddt_derivative(10,SBZ,(SBU)[i])));
 		let SCB=SBU* (ctx.checked_derivative_value(SBZ, 1f64));
 		let SCC=BW+ SBZ;
-		let SCE=BW+ SCD;
+		let SCH;
 		let SCI;
-		let SCJ;
-		if SCF!=0.0{
-		let SCG=L3([AA[0],AA[1],0.0]);
-		SCI=Z;
-		SCJ=SCG;
+		if SCD!=0.0{
+		let SCE=L3([0.0,0.0,1f64]);
+		SCH=SCF;
+		SCI=SCE;
 		}else{
-		let SCH=L3([0.0,0.0,1f64]);
-		SCI=SCD;
-		SCJ=SCH;
+		let SCG=L3([HIO[0],HIO[1],0.0]);
+		SCH=HIN;
+		SCI=SCG;
 		}
-		let SCK=SCJ- L3([HIO[0],HIO[1],0.0]);
-		let SCL=BW+ (SCI- HIN);
-		let SCN=BW+ SCM;
-		let SCR;
-		let SCS;
-		if SCO!=0.0{
-		let SCP=L3([T[0],T[1],0.0]);
-		SCR=S;
-		SCS=SCP;
+		let SCJ=BW+ SCH;
+		let SCM;
+		let SCN;
+		if SCD!=0.0{
+		let SCK=L3([AA[0],AA[1],0.0]);
+		SCM=Z;
+		SCN=SCK;
 		}else{
-		let SCQ=L3([0.0,0.0,1f64]);
-		SCR=SCM;
-		SCS=SCQ;
+		let SCL=L3([0.0,0.0,1f64]);
+		SCM=SCF;
+		SCN=SCL;
 		}
-		let SCT=SCS- L3([HIC[0],HIC[1],0.0]);
-		let SCU=BW+ (SCR- HIB);
-		let SCW=BW+ SCV;
-		let SDC;
-		let SDD;
-		if SCX!=0.0{
-		let SCY=M- U;
-		let SCZ=X- W;
-		let SDA=L3([SCZ[0],SCZ[1],0.0]);
-		SDC=SCY;
-		SDD=SDA;
+		let SCO=SCN- L3([HIO[0],HIO[1],0.0]);
+		let SCP=BW+ (SCM- HIN);
+		let SCU;
+		let SCV;
+		if SCQ!=0.0{
+		let SCR=L3([0.0,0.0,1f64]);
+		SCU=SCS;
+		SCV=SCR;
 		}else{
-		let SDB=L3([0.0,0.0,1f64]);
-		SDC=SCV;
-		SDD=SDB;
+		let SCT=L3([HIC[0],HIC[1],0.0]);
+		SCU=HIB;
+		SCV=SCT;
 		}
-		let SDE=SDD- L3([HHG[0],HHG[1],0.0]);
-		let SDF=BW+ (SDC- HHF);
-		let SDH=BW+ SDG;
-		let SDN;
+		let SCW=BW+ SCU;
+		let SCZ;
+		let SDA;
+		if SCQ!=0.0{
+		let SCX=L3([T[0],T[1],0.0]);
+		SCZ=S;
+		SDA=SCX;
+		}else{
+		let SCY=L3([0.0,0.0,1f64]);
+		SCZ=SCS;
+		SDA=SCY;
+		}
+		let SDB=SDA- L3([HIC[0],HIC[1],0.0]);
+		let SDC=BW+ (SCZ- HIB);
+		let SDH;
+		let SDI;
+		if SDD!=0.0{
+		let SDE=L3([0.0,0.0,1f64]);
+		SDH=SDF;
+		SDI=SDE;
+		}else{
+		let SDG=L3([HHG[0],HHG[1],0.0]);
+		SDH=HHF;
+		SDI=SDG;
+		}
+		let SDJ=BW+ SDH;
 		let SDO;
-		if SDI!=0.0{
-		let SDJ=M- L;
-		let SDK=P- O;
-		let SDL=L3([SDK[0],SDK[1],0.0]);
-		SDN=SDJ;
-		SDO=SDL;
+		let SDP;
+		if SDD!=0.0{
+		let SDK=M- U;
+		let SDL=X- W;
+		let SDM=L3([SDL[0],SDL[1],0.0]);
+		SDO=SDK;
+		SDP=SDM;
 		}else{
-		let SDM=L3([0.0,0.0,1f64]);
-		SDN=SDG;
-		SDO=SDM;
+		let SDN=L3([0.0,0.0,1f64]);
+		SDO=SDF;
+		SDP=SDN;
 		}
-		let SDP=SDO- L3([HHR[0],HHR[1],0.0]);
-		let SDQ=BW+ (SDN- HHQ);
-		let SDS=BW+ SDR;
+		let SDQ=SDP- L3([HHG[0],HHG[1],0.0]);
+		let SDR=BW+ (SDO- HHF);
 		let SDW;
 		let SDX;
-		if SDT!=0.0{
-		let SDU=L3([K[0],K[1],0.0]);
-		SDW=J;
-		SDX=SDU;
+		if SDS!=0.0{
+		let SDT=L3([0.0,0.0,1f64]);
+		SDW=SDU;
+		SDX=SDT;
 		}else{
-		let SDV=L3([0.0,0.0,1f64]);
-		SDW=SDR;
+		let SDV=L3([HHR[0],HHR[1],0.0]);
+		SDW=HHQ;
 		SDX=SDV;
 		}
-		let SDY=SDX- L3([HGU[0],HGU[1],0.0]);
-		let SDZ=BW+ (SDW- HGT);
-		let SEA=HFW[0];
-		let SEB=HFW[1];
-		let SEC=HFW[2];
-		let SED=HFW[3];
-		let SEE=HFX[0];
-		let SEF=HFX[1];
-		let SEG=HFX[2];
-		let SEH=HFX[3];
-		let SEI=HFY[0];
-		let SEJ=HFY[1];
-		let SEK=HFY[2];
-		let SEL=HFY[3];
-		let SEM=HFZ[0];
-		let SEN=HFZ[1];
-		let SEO=HFZ[2];
-		let SEP=HFZ[3];
-		let SEQ=HGA[0];
-		let SER=HGA[1];
-		let SES=HGA[2];
-		let SET=HGA[3];
-		let SEU=HGB[0];
-		let SEV=HGB[1];
-		let SEW=HGB[2];
-		let SEX=HGB[3];
-		let SEY=HGC[0];
-		let SEZ=HGC[1];
-		let SFA=HGC[2];
-		let SFB=HGC[3];
-		let SFC=HGD[0];
-		let SFD=HGD[1];
-		let SFE=HGD[2];
-		let SFF=HGD[3];
-		let SFG=HGF[0];
-		let SFH=HGF[1];
-		let SFI=HGF[2];
-		let SFJ=HGF[3];
-		let SFK=HGH[0];
-		let SFL=HGH[1];
-		let SFM=HGJ[0];
-		let SFN=HGJ[1];
-		let SFO=HGJ[2];
-		let SFP=HGL[0];
-		let SFQ=HGL[1];
-		let SFR=HGL[2];
-		let SFS=HGN[0];
-		let SFT=HGN[1];
-		let SFU=HGN[2];
-		let SFV=HGN[3];
-		let SFW=HGP[0];
-		let SFX=HGP[1];
-		let SFY=HGR[0];
-		let SFZ=HGR[1];
-		let SGA=HGR[2];
-		let SGB=HGR[3];
-		let SGC=HIP[0];
-		let SGD=HIP[1];
-		let SGE=MCW;
-		let SGF=MDE[0];
-		let SGG=MDF[0];
-		let SGH=MDE[1];
-		let SGI=MDF[1];
-		let SGJ=MDE[2];
-		let SGK=MDF[2];
-		let SGL=MDE[3];
-		let SGM=MDF[3];
-		let SGN=MDE[4];
-		let SGO=MDF[4];
-		let SGP=MDE[5];
-		let SGQ=MDF[5];
-		let SGR=MDE[6];
-		let SGS=MDF[6];
-		let SGT=MDE[7];
-		let SGU=MDF[7];
-		let SGV=MDE[8];
-		let SGW=MDF[8];
-		let SGX=MDE[9];
-		let SGY=MDF[9];
-		let SGZ=MDE[10];
-		let SHA=MDF[10];
-		let SHB=MDE[11];
-		let SHC=MDF[11];
-		let SHD=MDE[12];
-		let SHE=MDF[12];
-		let SHF=MDH;
-		let SHG=MDN[0];
-		let SHH=MDO[0];
-		let SHI=MDN[1];
-		let SHJ=MDO[1];
-		let SHK=MDN[2];
-		let SHL=MDO[2];
-		let SHM=MDN[3];
-		let SHN=MDO[3];
-		let SHO=MDN[4];
-		let SHP=MDO[4];
-		let SHQ=MDN[5];
-		let SHR=MDO[5];
-		let SHS=MDN[6];
-		let SHT=MDO[6];
-		let SHU=MDN[7];
-		let SHV=MDO[7];
-		let SHW=MDN[8];
-		let SHX=MDO[8];
-		let SHY=MDN[9];
-		let SHZ=MDO[9];
-		let SIA=MDN[10];
-		let SIB=MDO[10];
-		let SIC=MDN[11];
-		let SID=MDO[11];
-		let SIE=MDN[12];
-		let SIF=MDO[12];
-		let SIG=MDQ;
-		let SIH=MDW[0];
-		let SII=MDX[0];
-		let SIJ=MDW[1];
-		let SIK=MDX[1];
-		let SIL=MDW[2];
-		let SIM=MDX[2];
-		let SIN=MDW[3];
-		let SIO=MDX[3];
-		let SIP=MDW[4];
-		let SIQ=MDX[4];
-		let SIR=MDW[5];
-		let SIS=MDX[5];
-		let SIT=MDW[6];
-		let SIU=MDX[6];
-		let SIV=MDW[7];
-		let SIW=MDX[7];
-		let SIX=MDW[8];
-		let SIY=MDX[8];
-		let SIZ=MDW[9];
-		let SJA=MDX[9];
-		let SJB=MDW[10];
-		let SJC=MDX[10];
-		let SJD=MDW[11];
-		let SJE=MDX[11];
-		let SJF=MDW[12];
-		let SJG=MDX[12];
-		let SJH=MDZ;
-		let SJI=MEF[0];
-		let SJJ=MEG[0];
-		let SJK=MEF[1];
-		let SJL=MEG[1];
-		let SJM=MEF[2];
-		let SJN=MEG[2];
-		let SJO=MEF[3];
-		let SJP=MEG[3];
-		let SJQ=MEF[4];
-		let SJR=MEG[4];
-		let SJS=MEF[5];
-		let SJT=MEG[5];
-		let SJU=MEF[6];
-		let SJV=MEG[6];
-		let SJW=MEF[7];
-		let SJX=MEG[7];
-		let SJY=MEF[8];
-		let SJZ=MEG[8];
-		let SKA=MEF[9];
-		let SKB=MEG[9];
-		let SKC=MEF[10];
-		let SKD=MEG[10];
-		let SKE=MEF[11];
-		let SKF=MEG[11];
-		let SKG=MEF[12];
-		let SKH=MEG[12];
-		let SKI=MEI;
-		let SKJ=MEO[0];
-		let SKK=MEP[0];
-		let SKL=MEO[1];
-		let SKM=MEP[1];
-		let SKN=MEO[2];
-		let SKO=MEP[2];
-		let SKP=MEO[3];
-		let SKQ=MEP[3];
-		let SKR=MEO[4];
-		let SKS=MEP[4];
-		let SKT=MEO[5];
-		let SKU=MEP[5];
-		let SKV=MEO[6];
-		let SKW=MEP[6];
-		let SKX=MEO[7];
-		let SKY=MEP[7];
-		let SKZ=MEO[8];
-		let SLA=MEP[8];
-		let SLB=MEO[9];
-		let SLC=MEP[9];
-		let SLD=MEO[10];
-		let SLE=MEP[10];
-		let SLF=MEO[11];
-		let SLG=MEP[11];
-		let SLH=MEO[12];
-		let SLI=MEP[12];
-		let SLJ=MER;
-		let SLK=MEX[0];
-		let SLL=MEY[0];
-		let SLM=MEX[1];
-		let SLN=MEY[1];
-		let SLO=MEX[2];
-		let SLP=MEY[2];
-		let SLQ=MEX[3];
-		let SLR=MEY[3];
-		let SLS=MEX[4];
-		let SLT=MEY[4];
-		let SLU=MEX[5];
-		let SLV=MEY[5];
-		let SLW=MEX[6];
-		let SLX=MEY[6];
-		let SLY=MEX[7];
-		let SLZ=MEY[7];
-		let SMA=MEX[8];
-		let SMB=MEY[8];
-		let SMC=MEX[9];
-		let SMD=MEY[9];
-		let SME=MEX[10];
-		let SMF=MEY[10];
-		let SMG=MEX[11];
-		let SMH=MEY[11];
-		let SMI=MEX[12];
-		let SMJ=MEY[12];
-		let SMK=MFA;
-		let SML=MFG[0];
-		let SMM=MFH[0];
-		let SMN=MFG[1];
-		let SMO=MFH[1];
-		let SMP=MFG[2];
-		let SMQ=MFH[2];
-		let SMR=MFG[3];
-		let SMS=MFH[3];
-		let SMT=MFG[4];
-		let SMU=MFH[4];
-		let SMV=MFG[5];
-		let SMW=MFH[5];
-		let SMX=MFG[6];
-		let SMY=MFH[6];
-		let SMZ=MFG[7];
-		let SNA=MFH[7];
-		let SNB=MFG[8];
-		let SNC=MFH[8];
-		let SND=MFG[9];
-		let SNE=MFH[9];
-		let SNF=MFG[10];
-		let SNG=MFH[10];
-		let SNH=MFG[11];
-		let SNI=MFH[11];
-		let SNJ=MFG[12];
-		let SNK=MFH[12];
-		let SNL=MFJ;
-		let SNM=MFP[0];
-		let SNN=MFQ[0];
-		let SNO=MFP[1];
-		let SNP=MFQ[1];
-		let SNQ=MFP[2];
-		let SNR=MFQ[2];
-		let SNS=MFP[3];
-		let SNT=MFQ[3];
-		let SNU=MFP[4];
-		let SNV=MFQ[4];
-		let SNW=MFP[5];
-		let SNX=MFQ[5];
-		let SNY=MFP[6];
-		let SNZ=MFQ[6];
-		let SOA=MFP[7];
-		let SOB=MFQ[7];
-		let SOC=MFP[8];
-		let SOD=MFQ[8];
-		let SOE=MFP[9];
-		let SOF=MFQ[9];
-		let SOG=MFP[10];
-		let SOH=MFQ[10];
-		let SOI=MFP[11];
-		let SOJ=MFQ[11];
-		let SOK=MFP[12];
-		let SOL=MFQ[12];
-		let SOM=MFS;
-		let SON=MFY[0];
-		let SOO=MFZ[0];
-		let SOP=MFY[1];
-		let SOQ=MFZ[1];
-		let SOR=MFY[2];
-		let SOS=MFZ[2];
-		let SOT=MFY[3];
-		let SOU=MFZ[3];
-		let SOV=MFY[4];
-		let SOW=MFZ[4];
-		let SOX=MFY[5];
-		let SOY=MFZ[5];
-		let SOZ=MFY[6];
-		let SPA=MFZ[6];
-		let SPB=MFY[7];
-		let SPC=MFZ[7];
-		let SPD=MFY[8];
-		let SPE=MFZ[8];
-		let SPF=MFY[9];
-		let SPG=MFZ[9];
-		let SPH=MFY[10];
-		let SPI=MFZ[10];
-		let SPJ=MFY[11];
-		let SPK=MFZ[11];
-		let SPL=MFY[12];
-		let SPM=MFZ[12];
-		let SPN=RUN[0];
-		let SPO=RUO[0];
-		let SPP=RUN[1];
-		let SPQ=RUO[1];
-		let SPR=RUN[2];
-		let SPS=RUO[2];
-		let SPT=RUN[3];
-		let SPU=RUO[3];
-		let SPV=RUN[4];
-		let SPW=RUO[4];
-		let SPX=RUN[5];
-		let SPY=RUO[5];
-		let SPZ=RUN[6];
-		let SQA=RUO[6];
-		let SQB=RUN[7];
-		let SQC=RUO[7];
-		let SQD=RUN[8];
-		let SQE=RUO[8];
-		let SQF=RUN[9];
-		let SQG=RUO[9];
-		let SQH=RUN[10];
-		let SQI=RUO[10];
-		let SQJ=RUN[11];
-		let SQK=RUO[11];
-		let SQL=RUN[12];
-		let SQM=RUO[12];
-		let SQN=RUS[0];
-		let SQO=RUT[0];
-		let SQP=RUS[1];
-		let SQQ=RUT[1];
-		let SQR=RUS[2];
-		let SQS=RUT[2];
-		let SQT=RUS[3];
-		let SQU=RUT[3];
-		let SQV=RUS[4];
-		let SQW=RUT[4];
-		let SQX=RUS[5];
-		let SQY=RUT[5];
-		let SQZ=RUS[6];
-		let SRA=RUT[6];
-		let SRB=RUS[7];
-		let SRC=RUT[7];
-		let SRD=RUS[8];
-		let SRE=RUT[8];
-		let SRF=RUS[9];
-		let SRG=RUT[9];
-		let SRH=RUS[10];
-		let SRI=RUT[10];
-		let SRJ=RUS[11];
-		let SRK=RUT[11];
-		let SRL=RUS[12];
-		let SRM=RUT[12];
-		let SRN=RUX[0];
-		let SRO=RUY[0];
-		let SRP=RUX[1];
-		let SRQ=RUY[1];
-		let SRR=RUX[2];
-		let SRS=RUY[2];
-		let SRT=RUX[3];
-		let SRU=RUY[3];
-		let SRV=RUX[4];
-		let SRW=RUY[4];
-		let SRX=RUX[5];
-		let SRY=RUY[5];
-		let SRZ=RUX[6];
-		let SSA=RUY[6];
-		let SSB=RUX[7];
-		let SSC=RUY[7];
-		let SSD=RUX[8];
-		let SSE=RUY[8];
-		let SSF=RUX[9];
-		let SSG=RUY[9];
-		let SSH=RUX[10];
-		let SSI=RUY[10];
-		let SSJ=RUX[11];
-		let SSK=RUY[11];
-		let SSL=RUX[12];
-		let SSM=RUY[12];
-		let SSN=RVC[0];
-		let SSO=RVD[0];
-		let SSP=RVC[1];
-		let SSQ=RVD[1];
-		let SSR=RVH[0];
-		let SSS=RVI[0];
-		let SST=RVH[1];
-		let SSU=RVI[1];
-		let SSV=RVH[2];
-		let SSW=RVI[2];
-		let SSX=RVM[0];
-		let SSY=RVN[0];
-		let SSZ=RVM[1];
-		let STA=RVN[1];
-		let STB=RVM[2];
-		let STC=RVN[2];
-		let STD=RVM[3];
-		let STE=RVN[3];
-		let STF=RVR[0];
-		let STG=RVS[0];
-		let STH=RVR[1];
-		let STI=RVS[1];
-		let STJ=RVW[0];
-		let STK=RVX[0];
-		let STL=RVW[1];
-		let STM=RVX[1];
-		let STN=RVW[2];
-		let STO=RVX[2];
-		let STP=RVW[3];
-		let STQ=RVX[3];
-		let STR=1f64;
-		let STS=SAY[0];
-		let STT=SAY[1];
-		let STU=SAY[2];
-		let STV=SAY[3];
-		let STW=SAY[4];
-		let STX=SBC[0];
-		let STY=SBC[1];
-		let STZ=SBC[2];
-		let SUA=SBC[3];
-		let SUB=SBC[4];
-		let SUC=SBH[0];
-		let SUD=SBI[0];
-		let SUE=SBH[1];
-		let SUF=SBI[1];
-		let SUG=SBH[2];
-		let SUH=SBI[2];
-		let SUI=SBH[3];
-		let SUJ=SBI[3];
-		let SUK=SBH[4];
-		let SUL=SBI[4];
-		let SUM=SBO[0];
-		let SUN=SBO[1];
-		let SUO=SBO[2];
-		let SUP=SBO[3];
-		let SUQ=SBO[4];
-		let SUR=SBW[0];
-		let SUS=SBX[0];
-		let SUT=SBW[1];
-		let SUU=SBX[1];
-		let SUV=SBW[2];
-		let SUW=SBX[2];
-		let SUX=SBW[3];
-		let SUY=SBX[3];
-		let SUZ=SBW[4];
-		let SVA=SBX[4];
-		let SVB=SCA[0];
-		let SVC=SCB[0];
-		let SVD=SCA[1];
-		let SVE=SCB[1];
-		let SVF=SCA[2];
-		let SVG=SCB[2];
-		let SVH=SCA[3];
-		let SVI=SCB[3];
-		let SVJ=SCA[4];
-		let SVK=SCB[4];
-		let SVL=1f64;
-		let SVM=SCK[0];
-		let SVN=SCK[1];
-		let SVO=SCK[2];
-		let SVP=1f64;
-		let SVQ=SCT[0];
-		let SVR=SCT[1];
-		let SVS=SCT[2];
-		let SVT=1f64;
-		let SVU=SDE[0];
-		let SVV=SDE[1];
-		let SVW=SDE[2];
-		let SVX=1f64;
-		let SVY=SDP[0];
-		let SVZ=SDP[1];
-		let SWA=SDP[2];
-		let SWB=1f64;
-		let SWC=SDY[0];
-		let SWD=SDY[1];
-		let SWE=SDY[2];
+		let SDY=BW+ SDW;
+		let SED;
+		let SEE;
+		if SDS!=0.0{
+		let SDZ=M- L;
+		let SEA=P- O;
+		let SEB=L3([SEA[0],SEA[1],0.0]);
+		SED=SDZ;
+		SEE=SEB;
+		}else{
+		let SEC=L3([0.0,0.0,1f64]);
+		SED=SDU;
+		SEE=SEC;
+		}
+		let SEF=SEE- L3([HHR[0],HHR[1],0.0]);
+		let SEG=BW+ (SED- HHQ);
+		let SEL;
+		let SEM;
+		if SEH!=0.0{
+		let SEI=L3([0.0,0.0,1f64]);
+		SEL=SEJ;
+		SEM=SEI;
+		}else{
+		let SEK=L3([HGU[0],HGU[1],0.0]);
+		SEL=HGT;
+		SEM=SEK;
+		}
+		let SEN=BW+ SEL;
+		let SEQ;
+		let SER;
+		if SEH!=0.0{
+		let SEO=L3([K[0],K[1],0.0]);
+		SEQ=J;
+		SER=SEO;
+		}else{
+		let SEP=L3([0.0,0.0,1f64]);
+		SEQ=SEJ;
+		SER=SEP;
+		}
+		let SES=SER- L3([HGU[0],HGU[1],0.0]);
+		let SET=BW+ (SEQ- HGT);
+		let SEU=HFW[0];
+		let SEV=HFW[1];
+		let SEW=HFW[2];
+		let SEX=HFW[3];
+		let SEY=HFX[0];
+		let SEZ=HFX[1];
+		let SFA=HFX[2];
+		let SFB=HFX[3];
+		let SFC=HFY[0];
+		let SFD=HFY[1];
+		let SFE=HFY[2];
+		let SFF=HFY[3];
+		let SFG=HFZ[0];
+		let SFH=HFZ[1];
+		let SFI=HFZ[2];
+		let SFJ=HFZ[3];
+		let SFK=HGA[0];
+		let SFL=HGA[1];
+		let SFM=HGA[2];
+		let SFN=HGA[3];
+		let SFO=HGB[0];
+		let SFP=HGB[1];
+		let SFQ=HGB[2];
+		let SFR=HGB[3];
+		let SFS=HGC[0];
+		let SFT=HGC[1];
+		let SFU=HGC[2];
+		let SFV=HGC[3];
+		let SFW=HGD[0];
+		let SFX=HGD[1];
+		let SFY=HGD[2];
+		let SFZ=HGD[3];
+		let SGA=HGF[0];
+		let SGB=HGF[1];
+		let SGC=HGF[2];
+		let SGD=HGF[3];
+		let SGE=HGH[0];
+		let SGF=HGH[1];
+		let SGG=HGJ[0];
+		let SGH=HGJ[1];
+		let SGI=HGJ[2];
+		let SGJ=HGL[0];
+		let SGK=HGL[1];
+		let SGL=HGL[2];
+		let SGM=HGN[0];
+		let SGN=HGN[1];
+		let SGO=HGN[2];
+		let SGP=HGN[3];
+		let SGQ=HGP[0];
+		let SGR=HGP[1];
+		let SGS=HGR[0];
+		let SGT=HGR[1];
+		let SGU=HGR[2];
+		let SGV=HGR[3];
+		let SGW=HIP[0];
+		let SGX=HIP[1];
+		let SGY=MCW;
+		let SGZ=MDE[0];
+		let SHA=MDF[0];
+		let SHB=MDE[1];
+		let SHC=MDF[1];
+		let SHD=MDE[2];
+		let SHE=MDF[2];
+		let SHF=MDE[3];
+		let SHG=MDF[3];
+		let SHH=MDE[4];
+		let SHI=MDF[4];
+		let SHJ=MDE[5];
+		let SHK=MDF[5];
+		let SHL=MDE[6];
+		let SHM=MDF[6];
+		let SHN=MDE[7];
+		let SHO=MDF[7];
+		let SHP=MDE[8];
+		let SHQ=MDF[8];
+		let SHR=MDE[9];
+		let SHS=MDF[9];
+		let SHT=MDE[10];
+		let SHU=MDF[10];
+		let SHV=MDE[11];
+		let SHW=MDF[11];
+		let SHX=MDE[12];
+		let SHY=MDF[12];
+		let SHZ=MDH;
+		let SIA=MDN[0];
+		let SIB=MDO[0];
+		let SIC=MDN[1];
+		let SID=MDO[1];
+		let SIE=MDN[2];
+		let SIF=MDO[2];
+		let SIG=MDN[3];
+		let SIH=MDO[3];
+		let SII=MDN[4];
+		let SIJ=MDO[4];
+		let SIK=MDN[5];
+		let SIL=MDO[5];
+		let SIM=MDN[6];
+		let SIN=MDO[6];
+		let SIO=MDN[7];
+		let SIP=MDO[7];
+		let SIQ=MDN[8];
+		let SIR=MDO[8];
+		let SIS=MDN[9];
+		let SIT=MDO[9];
+		let SIU=MDN[10];
+		let SIV=MDO[10];
+		let SIW=MDN[11];
+		let SIX=MDO[11];
+		let SIY=MDN[12];
+		let SIZ=MDO[12];
+		let SJA=MDQ;
+		let SJB=MDW[0];
+		let SJC=MDX[0];
+		let SJD=MDW[1];
+		let SJE=MDX[1];
+		let SJF=MDW[2];
+		let SJG=MDX[2];
+		let SJH=MDW[3];
+		let SJI=MDX[3];
+		let SJJ=MDW[4];
+		let SJK=MDX[4];
+		let SJL=MDW[5];
+		let SJM=MDX[5];
+		let SJN=MDW[6];
+		let SJO=MDX[6];
+		let SJP=MDW[7];
+		let SJQ=MDX[7];
+		let SJR=MDW[8];
+		let SJS=MDX[8];
+		let SJT=MDW[9];
+		let SJU=MDX[9];
+		let SJV=MDW[10];
+		let SJW=MDX[10];
+		let SJX=MDW[11];
+		let SJY=MDX[11];
+		let SJZ=MDW[12];
+		let SKA=MDX[12];
+		let SKB=MDZ;
+		let SKC=MEF[0];
+		let SKD=MEG[0];
+		let SKE=MEF[1];
+		let SKF=MEG[1];
+		let SKG=MEF[2];
+		let SKH=MEG[2];
+		let SKI=MEF[3];
+		let SKJ=MEG[3];
+		let SKK=MEF[4];
+		let SKL=MEG[4];
+		let SKM=MEF[5];
+		let SKN=MEG[5];
+		let SKO=MEF[6];
+		let SKP=MEG[6];
+		let SKQ=MEF[7];
+		let SKR=MEG[7];
+		let SKS=MEF[8];
+		let SKT=MEG[8];
+		let SKU=MEF[9];
+		let SKV=MEG[9];
+		let SKW=MEF[10];
+		let SKX=MEG[10];
+		let SKY=MEF[11];
+		let SKZ=MEG[11];
+		let SLA=MEF[12];
+		let SLB=MEG[12];
+		let SLC=MEI;
+		let SLD=MEO[0];
+		let SLE=MEP[0];
+		let SLF=MEO[1];
+		let SLG=MEP[1];
+		let SLH=MEO[2];
+		let SLI=MEP[2];
+		let SLJ=MEO[3];
+		let SLK=MEP[3];
+		let SLL=MEO[4];
+		let SLM=MEP[4];
+		let SLN=MEO[5];
+		let SLO=MEP[5];
+		let SLP=MEO[6];
+		let SLQ=MEP[6];
+		let SLR=MEO[7];
+		let SLS=MEP[7];
+		let SLT=MEO[8];
+		let SLU=MEP[8];
+		let SLV=MEO[9];
+		let SLW=MEP[9];
+		let SLX=MEO[10];
+		let SLY=MEP[10];
+		let SLZ=MEO[11];
+		let SMA=MEP[11];
+		let SMB=MEO[12];
+		let SMC=MEP[12];
+		let SMD=MER;
+		let SME=MEX[0];
+		let SMF=MEY[0];
+		let SMG=MEX[1];
+		let SMH=MEY[1];
+		let SMI=MEX[2];
+		let SMJ=MEY[2];
+		let SMK=MEX[3];
+		let SML=MEY[3];
+		let SMM=MEX[4];
+		let SMN=MEY[4];
+		let SMO=MEX[5];
+		let SMP=MEY[5];
+		let SMQ=MEX[6];
+		let SMR=MEY[6];
+		let SMS=MEX[7];
+		let SMT=MEY[7];
+		let SMU=MEX[8];
+		let SMV=MEY[8];
+		let SMW=MEX[9];
+		let SMX=MEY[9];
+		let SMY=MEX[10];
+		let SMZ=MEY[10];
+		let SNA=MEX[11];
+		let SNB=MEY[11];
+		let SNC=MEX[12];
+		let SND=MEY[12];
+		let SNE=MFA;
+		let SNF=MFG[0];
+		let SNG=MFH[0];
+		let SNH=MFG[1];
+		let SNI=MFH[1];
+		let SNJ=MFG[2];
+		let SNK=MFH[2];
+		let SNL=MFG[3];
+		let SNM=MFH[3];
+		let SNN=MFG[4];
+		let SNO=MFH[4];
+		let SNP=MFG[5];
+		let SNQ=MFH[5];
+		let SNR=MFG[6];
+		let SNS=MFH[6];
+		let SNT=MFG[7];
+		let SNU=MFH[7];
+		let SNV=MFG[8];
+		let SNW=MFH[8];
+		let SNX=MFG[9];
+		let SNY=MFH[9];
+		let SNZ=MFG[10];
+		let SOA=MFH[10];
+		let SOB=MFG[11];
+		let SOC=MFH[11];
+		let SOD=MFG[12];
+		let SOE=MFH[12];
+		let SOF=MFJ;
+		let SOG=MFP[0];
+		let SOH=MFQ[0];
+		let SOI=MFP[1];
+		let SOJ=MFQ[1];
+		let SOK=MFP[2];
+		let SOL=MFQ[2];
+		let SOM=MFP[3];
+		let SON=MFQ[3];
+		let SOO=MFP[4];
+		let SOP=MFQ[4];
+		let SOQ=MFP[5];
+		let SOR=MFQ[5];
+		let SOS=MFP[6];
+		let SOT=MFQ[6];
+		let SOU=MFP[7];
+		let SOV=MFQ[7];
+		let SOW=MFP[8];
+		let SOX=MFQ[8];
+		let SOY=MFP[9];
+		let SOZ=MFQ[9];
+		let SPA=MFP[10];
+		let SPB=MFQ[10];
+		let SPC=MFP[11];
+		let SPD=MFQ[11];
+		let SPE=MFP[12];
+		let SPF=MFQ[12];
+		let SPG=MFS;
+		let SPH=MFY[0];
+		let SPI=MFZ[0];
+		let SPJ=MFY[1];
+		let SPK=MFZ[1];
+		let SPL=MFY[2];
+		let SPM=MFZ[2];
+		let SPN=MFY[3];
+		let SPO=MFZ[3];
+		let SPP=MFY[4];
+		let SPQ=MFZ[4];
+		let SPR=MFY[5];
+		let SPS=MFZ[5];
+		let SPT=MFY[6];
+		let SPU=MFZ[6];
+		let SPV=MFY[7];
+		let SPW=MFZ[7];
+		let SPX=MFY[8];
+		let SPY=MFZ[8];
+		let SPZ=MFY[9];
+		let SQA=MFZ[9];
+		let SQB=MFY[10];
+		let SQC=MFZ[10];
+		let SQD=MFY[11];
+		let SQE=MFZ[11];
+		let SQF=MFY[12];
+		let SQG=MFZ[12];
+		let SQH=RUN[0];
+		let SQI=RUO[0];
+		let SQJ=RUN[1];
+		let SQK=RUO[1];
+		let SQL=RUN[2];
+		let SQM=RUO[2];
+		let SQN=RUN[3];
+		let SQO=RUO[3];
+		let SQP=RUN[4];
+		let SQQ=RUO[4];
+		let SQR=RUN[5];
+		let SQS=RUO[5];
+		let SQT=RUN[6];
+		let SQU=RUO[6];
+		let SQV=RUN[7];
+		let SQW=RUO[7];
+		let SQX=RUN[8];
+		let SQY=RUO[8];
+		let SQZ=RUN[9];
+		let SRA=RUO[9];
+		let SRB=RUN[10];
+		let SRC=RUO[10];
+		let SRD=RUN[11];
+		let SRE=RUO[11];
+		let SRF=RUN[12];
+		let SRG=RUO[12];
+		let SRH=RUS[0];
+		let SRI=RUT[0];
+		let SRJ=RUS[1];
+		let SRK=RUT[1];
+		let SRL=RUS[2];
+		let SRM=RUT[2];
+		let SRN=RUS[3];
+		let SRO=RUT[3];
+		let SRP=RUS[4];
+		let SRQ=RUT[4];
+		let SRR=RUS[5];
+		let SRS=RUT[5];
+		let SRT=RUS[6];
+		let SRU=RUT[6];
+		let SRV=RUS[7];
+		let SRW=RUT[7];
+		let SRX=RUS[8];
+		let SRY=RUT[8];
+		let SRZ=RUS[9];
+		let SSA=RUT[9];
+		let SSB=RUS[10];
+		let SSC=RUT[10];
+		let SSD=RUS[11];
+		let SSE=RUT[11];
+		let SSF=RUS[12];
+		let SSG=RUT[12];
+		let SSH=RUX[0];
+		let SSI=RUY[0];
+		let SSJ=RUX[1];
+		let SSK=RUY[1];
+		let SSL=RUX[2];
+		let SSM=RUY[2];
+		let SSN=RUX[3];
+		let SSO=RUY[3];
+		let SSP=RUX[4];
+		let SSQ=RUY[4];
+		let SSR=RUX[5];
+		let SSS=RUY[5];
+		let SST=RUX[6];
+		let SSU=RUY[6];
+		let SSV=RUX[7];
+		let SSW=RUY[7];
+		let SSX=RUX[8];
+		let SSY=RUY[8];
+		let SSZ=RUX[9];
+		let STA=RUY[9];
+		let STB=RUX[10];
+		let STC=RUY[10];
+		let STD=RUX[11];
+		let STE=RUY[11];
+		let STF=RUX[12];
+		let STG=RUY[12];
+		let STH=RVC[0];
+		let STI=RVD[0];
+		let STJ=RVC[1];
+		let STK=RVD[1];
+		let STL=RVH[0];
+		let STM=RVI[0];
+		let STN=RVH[1];
+		let STO=RVI[1];
+		let STP=RVH[2];
+		let STQ=RVI[2];
+		let STR=RVM[0];
+		let STS=RVN[0];
+		let STT=RVM[1];
+		let STU=RVN[1];
+		let STV=RVM[2];
+		let STW=RVN[2];
+		let STX=RVM[3];
+		let STY=RVN[3];
+		let STZ=RVR[0];
+		let SUA=RVS[0];
+		let SUB=RVR[1];
+		let SUC=RVS[1];
+		let SUD=RVW[0];
+		let SUE=RVX[0];
+		let SUF=RVW[1];
+		let SUG=RVX[1];
+		let SUH=RVW[2];
+		let SUI=RVX[2];
+		let SUJ=RVW[3];
+		let SUK=RVX[3];
+		let SUL=1f64;
+		let SUM=SAY[0];
+		let SUN=SAY[1];
+		let SUO=SAY[2];
+		let SUP=SAY[3];
+		let SUQ=SAY[4];
+		let SUR=SBC[0];
+		let SUS=SBC[1];
+		let SUT=SBC[2];
+		let SUU=SBC[3];
+		let SUV=SBC[4];
+		let SUW=SBH[0];
+		let SUX=SBI[0];
+		let SUY=SBH[1];
+		let SUZ=SBI[1];
+		let SVA=SBH[2];
+		let SVB=SBI[2];
+		let SVC=SBH[3];
+		let SVD=SBI[3];
+		let SVE=SBH[4];
+		let SVF=SBI[4];
+		let SVG=SBO[0];
+		let SVH=SBO[1];
+		let SVI=SBO[2];
+		let SVJ=SBO[3];
+		let SVK=SBO[4];
+		let SVL=SBW[0];
+		let SVM=SBX[0];
+		let SVN=SBW[1];
+		let SVO=SBX[1];
+		let SVP=SBW[2];
+		let SVQ=SBX[2];
+		let SVR=SBW[3];
+		let SVS=SBX[3];
+		let SVT=SBW[4];
+		let SVU=SBX[4];
+		let SVV=SCA[0];
+		let SVW=SCB[0];
+		let SVX=SCA[1];
+		let SVY=SCB[1];
+		let SVZ=SCA[2];
+		let SWA=SCB[2];
+		let SWB=SCA[3];
+		let SWC=SCB[3];
+		let SWD=SCA[4];
+		let SWE=SCB[4];
+		let SWF=SCI[0];
+		let SWG=SCI[1];
+		let SWH=SCI[2];
+		let SWI=SCO[0];
+		let SWJ=SCO[1];
+		let SWK=SCO[2];
+		let SWL=SCV[0];
+		let SWM=SCV[1];
+		let SWN=SCV[2];
+		let SWO=SDB[0];
+		let SWP=SDB[1];
+		let SWQ=SDB[2];
+		let SWR=SDI[0];
+		let SWS=SDI[1];
+		let SWT=SDI[2];
+		let SWU=SDQ[0];
+		let SWV=SDQ[1];
+		let SWW=SDQ[2];
+		let SWX=SDX[0];
+		let SWY=SDX[1];
+		let SWZ=SDX[2];
+		let SXA=SEF[0];
+		let SXB=SEF[1];
+		let SXC=SEF[2];
+		let SXD=SEM[0];
+		let SXE=SEM[1];
+		let SXF=SEM[2];
+		let SXG=SES[0];
+		let SXH=SES[1];
+		let SXI=SES[2];
         {
             let record = &mut *self.canonical_output_record;
             record[0] = CC;
@@ -31582,7 +31647,7 @@ impl Instance {
             Some(7),
             multiplicity * (HFO),
             [0, 2, 6, 7],
-            [SEA, SEB, SEC, SED],
+            [SEU, SEV, SEW, SEX],
             [],
             [],
             multiplicity,
@@ -31592,7 +31657,7 @@ impl Instance {
             Some(2),
             multiplicity * (HFP),
             [0, 2, 6, 7],
-            [SEE, SEF, SEG, SEH],
+            [SEY, SEZ, SFA, SFB],
             [],
             [],
             multiplicity,
@@ -31602,7 +31667,7 @@ impl Instance {
             Some(2),
             multiplicity * (HFQ),
             [0, 2, 6, 7],
-            [SEI, SEJ, SEK, SEL],
+            [SFC, SFD, SFE, SFF],
             [],
             [],
             multiplicity,
@@ -31612,7 +31677,7 @@ impl Instance {
             Some(0),
             multiplicity * (HFR),
             [0, 2, 6, 7],
-            [SEM, SEN, SEO, SEP],
+            [SFG, SFH, SFI, SFJ],
             [],
             [],
             multiplicity,
@@ -31622,7 +31687,7 @@ impl Instance {
             Some(7),
             multiplicity * (HFS),
             [0, 2, 6, 7],
-            [SEQ, SER, SES, SET],
+            [SFK, SFL, SFM, SFN],
             [],
             [],
             multiplicity,
@@ -31632,7 +31697,7 @@ impl Instance {
             Some(0),
             multiplicity * (HFT),
             [0, 2, 6, 7],
-            [SEU, SEV, SEW, SEX],
+            [SFO, SFP, SFQ, SFR],
             [],
             [],
             multiplicity,
@@ -31642,7 +31707,7 @@ impl Instance {
             Some(0),
             multiplicity * (HFU),
             [0, 2, 6, 7],
-            [SEY, SEZ, SFA, SFB],
+            [SFS, SFT, SFU, SFV],
             [],
             [],
             multiplicity,
@@ -31652,7 +31717,7 @@ impl Instance {
             Some(2),
             multiplicity * (HFV),
             [0, 2, 6, 7],
-            [SFC, SFD, SFE, SFF],
+            [SFW, SFX, SFY, SFZ],
             [],
             [],
             multiplicity,
@@ -31662,7 +31727,7 @@ impl Instance {
             Some(7),
             multiplicity * (HGG),
             [0, 2, 6, 7],
-            [SFG, SFH, SFI, SFJ],
+            [SGA, SGB, SGC, SGD],
             [],
             [],
             multiplicity,
@@ -31672,7 +31737,7 @@ impl Instance {
             Some(2),
             multiplicity * (HGI),
             [2, 6],
-            [SFK, SFL],
+            [SGE, SGF],
             [],
             [],
             multiplicity,
@@ -31682,7 +31747,7 @@ impl Instance {
             Some(0),
             multiplicity * (HGK),
             [0, 2, 6],
-            [SFM, SFN, SFO],
+            [SGG, SGH, SGI],
             [],
             [],
             multiplicity,
@@ -31692,7 +31757,7 @@ impl Instance {
             Some(7),
             multiplicity * (HGM),
             [2, 6, 7],
-            [SFP, SFQ, SFR],
+            [SGJ, SGK, SGL],
             [],
             [],
             multiplicity,
@@ -31702,7 +31767,7 @@ impl Instance {
             Some(7),
             multiplicity * (HGO),
             [0, 2, 6, 7],
-            [SFS, SFT, SFU, SFV],
+            [SGM, SGN, SGO, SGP],
             [],
             [],
             multiplicity,
@@ -31712,7 +31777,7 @@ impl Instance {
             Some(2),
             multiplicity * (HGQ),
             [2, 9],
-            [SFW, SFX],
+            [SGQ, SGR],
             [],
             [],
             multiplicity,
@@ -31722,7 +31787,7 @@ impl Instance {
             Some(0),
             multiplicity * (HGS),
             [0, 2, 9, 10],
-            [SFY, SFZ, SGA, SGB],
+            [SGS, SGT, SGU, SGV],
             [],
             [],
             multiplicity,
@@ -31732,7 +31797,7 @@ impl Instance {
             Some(2),
             multiplicity * (HIQ),
             [0, 2],
-            [SGC, SGD],
+            [SGW, SGX],
             [],
             [],
             multiplicity,
@@ -31744,7 +31809,7 @@ impl Instance {
             [],
             [],
             [0],
-            [SGE],
+            [SGY],
         );
         }
         if CB != 0.0 {
@@ -31752,7 +31817,7 @@ impl Instance {
             1,
             MDG,
             [0, 2, 6, 7, 11, 12, 13, 14, 15, 16, 17, 18, 19],
-            [SGF, SGH, SGJ, SGL, SGN, SGP, SGR, SGT, SGV, SGX, SGZ, SHB, SHD],
+            [SGZ, SHB, SHD, SHF, SHH, SHJ, SHL, SHN, SHP, SHR, SHT, SHV, SHX],
             [],
             [],
         );
@@ -31764,7 +31829,7 @@ impl Instance {
             [],
             [],
             [2],
-            [SHF],
+            [SHZ],
         );
         }
         if CB != 0.0 {
@@ -31772,7 +31837,7 @@ impl Instance {
             3,
             MDP,
             [0, 2, 6, 7, 11, 12, 13, 14, 15, 16, 17, 18, 19],
-            [SHG, SHI, SHK, SHM, SHO, SHQ, SHS, SHU, SHW, SHY, SIA, SIC, SIE],
+            [SIA, SIC, SIE, SIG, SII, SIK, SIM, SIO, SIQ, SIS, SIU, SIW, SIY],
             [],
             [],
         );
@@ -31784,7 +31849,7 @@ impl Instance {
             [],
             [],
             [4],
-            [SIG],
+            [SJA],
         );
         }
         if CB != 0.0 {
@@ -31792,7 +31857,7 @@ impl Instance {
             5,
             MDY,
             [0, 2, 6, 7, 11, 12, 13, 14, 15, 16, 17, 18, 19],
-            [SIH, SIJ, SIL, SIN, SIP, SIR, SIT, SIV, SIX, SIZ, SJB, SJD, SJF],
+            [SJB, SJD, SJF, SJH, SJJ, SJL, SJN, SJP, SJR, SJT, SJV, SJX, SJZ],
             [],
             [],
         );
@@ -31804,7 +31869,7 @@ impl Instance {
             [],
             [],
             [6],
-            [SJH],
+            [SKB],
         );
         }
         if CB != 0.0 {
@@ -31812,7 +31877,7 @@ impl Instance {
             7,
             MEH,
             [0, 2, 6, 7, 11, 12, 13, 14, 15, 16, 17, 18, 19],
-            [SJI, SJK, SJM, SJO, SJQ, SJS, SJU, SJW, SJY, SKA, SKC, SKE, SKG],
+            [SKC, SKE, SKG, SKI, SKK, SKM, SKO, SKQ, SKS, SKU, SKW, SKY, SLA],
             [],
             [],
         );
@@ -31824,7 +31889,7 @@ impl Instance {
             [],
             [],
             [8],
-            [SKI],
+            [SLC],
         );
         }
         if CB != 0.0 {
@@ -31832,7 +31897,7 @@ impl Instance {
             9,
             MEQ,
             [0, 2, 6, 7, 11, 12, 13, 14, 15, 16, 17, 18, 19],
-            [SKJ, SKL, SKN, SKP, SKR, SKT, SKV, SKX, SKZ, SLB, SLD, SLF, SLH],
+            [SLD, SLF, SLH, SLJ, SLL, SLN, SLP, SLR, SLT, SLV, SLX, SLZ, SMB],
             [],
             [],
         );
@@ -31844,7 +31909,7 @@ impl Instance {
             [],
             [],
             [10],
-            [SLJ],
+            [SMD],
         );
         }
         if CB != 0.0 {
@@ -31852,7 +31917,7 @@ impl Instance {
             11,
             MEZ,
             [0, 2, 6, 7, 11, 12, 13, 14, 15, 16, 17, 18, 19],
-            [SLK, SLM, SLO, SLQ, SLS, SLU, SLW, SLY, SMA, SMC, SME, SMG, SMI],
+            [SME, SMG, SMI, SMK, SMM, SMO, SMQ, SMS, SMU, SMW, SMY, SNA, SNC],
             [],
             [],
         );
@@ -31864,7 +31929,7 @@ impl Instance {
             [],
             [],
             [12],
-            [SMK],
+            [SNE],
         );
         }
         if CB != 0.0 {
@@ -31872,7 +31937,7 @@ impl Instance {
             13,
             MFI,
             [0, 2, 6, 7, 11, 12, 13, 14, 15, 16, 17, 18, 19],
-            [SML, SMN, SMP, SMR, SMT, SMV, SMX, SMZ, SNB, SND, SNF, SNH, SNJ],
+            [SNF, SNH, SNJ, SNL, SNN, SNP, SNR, SNT, SNV, SNX, SNZ, SOB, SOD],
             [],
             [],
         );
@@ -31884,7 +31949,7 @@ impl Instance {
             [],
             [],
             [14],
-            [SNL],
+            [SOF],
         );
         }
         if CB != 0.0 {
@@ -31892,7 +31957,7 @@ impl Instance {
             15,
             MFR,
             [0, 2, 6, 7, 11, 12, 13, 14, 15, 16, 17, 18, 19],
-            [SNM, SNO, SNQ, SNS, SNU, SNW, SNY, SOA, SOC, SOE, SOG, SOI, SOK],
+            [SOG, SOI, SOK, SOM, SOO, SOQ, SOS, SOU, SOW, SOY, SPA, SPC, SPE],
             [],
             [],
         );
@@ -31904,7 +31969,7 @@ impl Instance {
             [],
             [],
             [16],
-            [SOM],
+            [SPG],
         );
         }
         if CB != 0.0 {
@@ -31912,7 +31977,7 @@ impl Instance {
             17,
             MGA,
             [0, 2, 6, 7, 11, 12, 13, 14, 15, 16, 17, 18, 19],
-            [SON, SOP, SOR, SOT, SOV, SOX, SOZ, SPB, SPD, SPF, SPH, SPJ, SPL],
+            [SPH, SPJ, SPL, SPN, SPP, SPR, SPT, SPV, SPX, SPZ, SQB, SQD, SQF],
             [],
             [],
         );
@@ -31922,7 +31987,7 @@ impl Instance {
             Some(2),
             multiplicity * (RUP),
             [0, 2, 6, 7, 11, 12, 13, 14, 15, 16, 17, 18, 19],
-            [SPN, SPP, SPR, SPT, SPV, SPX, SPZ, SQB, SQD, SQF, SQH, SQJ, SQL],
+            [SQH, SQJ, SQL, SQN, SQP, SQR, SQT, SQV, SQX, SQZ, SRB, SRD, SRF],
             [],
             [],
             multiplicity,
@@ -31932,7 +31997,7 @@ impl Instance {
             Some(2),
             multiplicity * (RUU),
             [0, 2, 6, 7, 11, 12, 13, 14, 15, 16, 17, 18, 19],
-            [SQN, SQP, SQR, SQT, SQV, SQX, SQZ, SRB, SRD, SRF, SRH, SRJ, SRL],
+            [SRH, SRJ, SRL, SRN, SRP, SRR, SRT, SRV, SRX, SRZ, SSB, SSD, SSF],
             [],
             [],
             multiplicity,
@@ -31942,7 +32007,7 @@ impl Instance {
             Some(2),
             multiplicity * (RUZ),
             [0, 2, 6, 7, 11, 12, 13, 14, 15, 16, 17, 18, 19],
-            [SRN, SRP, SRR, SRT, SRV, SRX, SRZ, SSB, SSD, SSF, SSH, SSJ, SSL],
+            [SSH, SSJ, SSL, SSN, SSP, SSR, SST, SSV, SSX, SSZ, STB, STD, STF],
             [],
             [],
             multiplicity,
@@ -31952,7 +32017,7 @@ impl Instance {
             Some(2),
             multiplicity * (RVE),
             [2, 6],
-            [SSN, SSP],
+            [STH, STJ],
             [],
             [],
             multiplicity,
@@ -31962,7 +32027,7 @@ impl Instance {
             Some(0),
             multiplicity * (RVJ),
             [0, 2, 6],
-            [SSR, SST, SSV],
+            [STL, STN, STP],
             [],
             [],
             multiplicity,
@@ -31972,7 +32037,7 @@ impl Instance {
             Some(7),
             multiplicity * (RVO),
             [0, 2, 6, 7],
-            [SSX, SSZ, STB, STD],
+            [STR, STT, STV, STX],
             [],
             [],
             multiplicity,
@@ -31982,7 +32047,7 @@ impl Instance {
             Some(2),
             multiplicity * (RVT),
             [2, 9],
-            [STF, STH],
+            [STZ, SUB],
             [],
             [],
             multiplicity,
@@ -31992,7 +32057,7 @@ impl Instance {
             Some(0),
             multiplicity * (RVY),
             [0, 2, 9, 10],
-            [STJ, STL, STN, STP],
+            [SUD, SUF, SUH, SUJ],
             [],
             [],
             multiplicity,
@@ -32002,7 +32067,7 @@ impl Instance {
             None,
             multiplicity * (SAV),
             [5],
-            [STR],
+            [SUL],
             [],
             [],
             multiplicity,
@@ -32022,7 +32087,7 @@ impl Instance {
             None,
             multiplicity * (SAZ),
             [0, 2, 5, 6, 7],
-            [STS, STT, STU, STV, STW],
+            [SUM, SUN, SUO, SUP, SUQ],
             [],
             [],
             multiplicity,
@@ -32032,7 +32097,7 @@ impl Instance {
             None,
             multiplicity * (SBD),
             [0, 2, 4, 6, 7],
-            [STX, STY, STZ, SUA, SUB],
+            [SUR, SUS, SUT, SUU, SUV],
             [],
             [],
             multiplicity,
@@ -32042,7 +32107,7 @@ impl Instance {
             None,
             multiplicity * (SBJ),
             [0, 2, 4, 6, 7],
-            [SUC, SUE, SUG, SUI, SUK],
+            [SUW, SUY, SVA, SVC, SVE],
             [],
             [],
             multiplicity,
@@ -32072,7 +32137,7 @@ impl Instance {
             Some(2),
             multiplicity * (SBP),
             [0, 2, 5, 6, 7],
-            [SUM, SUN, SUO, SUP, SUQ],
+            [SVG, SVH, SVI, SVJ, SVK],
             [],
             [],
             multiplicity,
@@ -32082,7 +32147,7 @@ impl Instance {
             Some(2),
             multiplicity * (SBY),
             [0, 2, 4, 6, 7],
-            [SUR, SUT, SUV, SUX, SUZ],
+            [SVL, SVN, SVP, SVR, SVT],
             [],
             [],
             multiplicity,
@@ -32092,7 +32157,7 @@ impl Instance {
             Some(0),
             multiplicity * (SCC),
             [0, 2, 4, 6, 7],
-            [SVB, SVD, SVF, SVH, SVJ],
+            [SVV, SVX, SVZ, SWB, SWD],
             [],
             [],
             multiplicity,
@@ -32137,12 +32202,12 @@ impl Instance {
             [],
             multiplicity,
         );
-        stamper.stamp_current_sparse_local::<1, 0>(
+        stamper.stamp_current_sparse_local::<3, 0>(
             Some(3),
             Some(8),
-            multiplicity * (SCE),
-            [20],
-            [SVL],
+            multiplicity * (SCJ),
+            [3, 8, 20],
+            [SWF, SWG, SWH],
             [],
             [],
             multiplicity,
@@ -32150,19 +32215,19 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(20),
             None,
-            multiplicity * (SCL),
+            multiplicity * (SCP),
             [3, 8, 20],
-            [SVM, SVN, SVO],
+            [SWI, SWJ, SWK],
             [],
             [],
             multiplicity,
         );
-        stamper.stamp_current_sparse_local::<1, 0>(
+        stamper.stamp_current_sparse_local::<3, 0>(
             Some(10),
             Some(8),
-            multiplicity * (SCN),
-            [21],
-            [SVP],
+            multiplicity * (SCW),
+            [8, 10, 21],
+            [SWL, SWM, SWN],
             [],
             [],
             multiplicity,
@@ -32170,19 +32235,19 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(21),
             None,
-            multiplicity * (SCU),
+            multiplicity * (SDC),
             [8, 10, 21],
-            [SVQ, SVR, SVS],
+            [SWO, SWP, SWQ],
             [],
             [],
             multiplicity,
         );
-        stamper.stamp_current_sparse_local::<1, 0>(
+        stamper.stamp_current_sparse_local::<3, 0>(
             Some(8),
             Some(7),
-            multiplicity * (SCW),
-            [22],
-            [SVT],
+            multiplicity * (SDJ),
+            [7, 8, 22],
+            [SWR, SWS, SWT],
             [],
             [],
             multiplicity,
@@ -32190,19 +32255,19 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(22),
             None,
-            multiplicity * (SDF),
+            multiplicity * (SDR),
             [7, 8, 22],
-            [SVU, SVV, SVW],
+            [SWU, SWV, SWW],
             [],
             [],
             multiplicity,
         );
-        stamper.stamp_current_sparse_local::<1, 0>(
+        stamper.stamp_current_sparse_local::<3, 0>(
             Some(8),
             Some(9),
-            multiplicity * (SDH),
-            [23],
-            [SVX],
+            multiplicity * (SDY),
+            [8, 9, 23],
+            [SWX, SWY, SWZ],
             [],
             [],
             multiplicity,
@@ -32210,19 +32275,19 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(23),
             None,
-            multiplicity * (SDQ),
+            multiplicity * (SEG),
             [8, 9, 23],
-            [SVY, SVZ, SWA],
+            [SXA, SXB, SXC],
             [],
             [],
             multiplicity,
         );
-        stamper.stamp_current_sparse_local::<1, 0>(
+        stamper.stamp_current_sparse_local::<3, 0>(
             Some(1),
             Some(6),
-            multiplicity * (SDS),
-            [24],
-            [SWB],
+            multiplicity * (SEN),
+            [1, 6, 24],
+            [SXD, SXE, SXF],
             [],
             [],
             multiplicity,
@@ -32230,199 +32295,199 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(24),
             None,
-            multiplicity * (SDZ),
+            multiplicity * (SET),
             [1, 6, 24],
-            [SWC, SWD, SWE],
+            [SXG, SXH, SXI],
             [],
             [],
             multiplicity,
         );
-        self.canonical_reactive[0] = SGG;
-        self.canonical_reactive[1] = SGI;
-        self.canonical_reactive[2] = SGK;
-        self.canonical_reactive[3] = SGM;
-        self.canonical_reactive[4] = SGO;
-        self.canonical_reactive[5] = SGQ;
-        self.canonical_reactive[6] = SGS;
-        self.canonical_reactive[7] = SGU;
-        self.canonical_reactive[8] = SGW;
-        self.canonical_reactive[9] = SGY;
-        self.canonical_reactive[10] = SHA;
-        self.canonical_reactive[11] = SHC;
-        self.canonical_reactive[12] = SHE;
-        self.canonical_reactive[13] = SHH;
-        self.canonical_reactive[14] = SHJ;
-        self.canonical_reactive[15] = SHL;
-        self.canonical_reactive[16] = SHN;
-        self.canonical_reactive[17] = SHP;
-        self.canonical_reactive[18] = SHR;
-        self.canonical_reactive[19] = SHT;
-        self.canonical_reactive[20] = SHV;
-        self.canonical_reactive[21] = SHX;
-        self.canonical_reactive[22] = SHZ;
-        self.canonical_reactive[23] = SIB;
-        self.canonical_reactive[24] = SID;
-        self.canonical_reactive[25] = SIF;
-        self.canonical_reactive[26] = SII;
-        self.canonical_reactive[27] = SIK;
-        self.canonical_reactive[28] = SIM;
-        self.canonical_reactive[29] = SIO;
-        self.canonical_reactive[30] = SIQ;
-        self.canonical_reactive[31] = SIS;
-        self.canonical_reactive[32] = SIU;
-        self.canonical_reactive[33] = SIW;
-        self.canonical_reactive[34] = SIY;
-        self.canonical_reactive[35] = SJA;
-        self.canonical_reactive[36] = SJC;
-        self.canonical_reactive[37] = SJE;
-        self.canonical_reactive[38] = SJG;
-        self.canonical_reactive[39] = SJJ;
-        self.canonical_reactive[40] = SJL;
-        self.canonical_reactive[41] = SJN;
-        self.canonical_reactive[42] = SJP;
-        self.canonical_reactive[43] = SJR;
-        self.canonical_reactive[44] = SJT;
-        self.canonical_reactive[45] = SJV;
-        self.canonical_reactive[46] = SJX;
-        self.canonical_reactive[47] = SJZ;
-        self.canonical_reactive[48] = SKB;
-        self.canonical_reactive[49] = SKD;
-        self.canonical_reactive[50] = SKF;
-        self.canonical_reactive[51] = SKH;
-        self.canonical_reactive[52] = SKK;
-        self.canonical_reactive[53] = SKM;
-        self.canonical_reactive[54] = SKO;
-        self.canonical_reactive[55] = SKQ;
-        self.canonical_reactive[56] = SKS;
-        self.canonical_reactive[57] = SKU;
-        self.canonical_reactive[58] = SKW;
-        self.canonical_reactive[59] = SKY;
-        self.canonical_reactive[60] = SLA;
-        self.canonical_reactive[61] = SLC;
-        self.canonical_reactive[62] = SLE;
-        self.canonical_reactive[63] = SLG;
-        self.canonical_reactive[64] = SLI;
-        self.canonical_reactive[65] = SLL;
-        self.canonical_reactive[66] = SLN;
-        self.canonical_reactive[67] = SLP;
-        self.canonical_reactive[68] = SLR;
-        self.canonical_reactive[69] = SLT;
-        self.canonical_reactive[70] = SLV;
-        self.canonical_reactive[71] = SLX;
-        self.canonical_reactive[72] = SLZ;
-        self.canonical_reactive[73] = SMB;
-        self.canonical_reactive[74] = SMD;
-        self.canonical_reactive[75] = SMF;
-        self.canonical_reactive[76] = SMH;
-        self.canonical_reactive[77] = SMJ;
-        self.canonical_reactive[78] = SMM;
-        self.canonical_reactive[79] = SMO;
-        self.canonical_reactive[80] = SMQ;
-        self.canonical_reactive[81] = SMS;
-        self.canonical_reactive[82] = SMU;
-        self.canonical_reactive[83] = SMW;
-        self.canonical_reactive[84] = SMY;
-        self.canonical_reactive[85] = SNA;
-        self.canonical_reactive[86] = SNC;
-        self.canonical_reactive[87] = SNE;
-        self.canonical_reactive[88] = SNG;
-        self.canonical_reactive[89] = SNI;
-        self.canonical_reactive[90] = SNK;
-        self.canonical_reactive[91] = SNN;
-        self.canonical_reactive[92] = SNP;
-        self.canonical_reactive[93] = SNR;
-        self.canonical_reactive[94] = SNT;
-        self.canonical_reactive[95] = SNV;
-        self.canonical_reactive[96] = SNX;
-        self.canonical_reactive[97] = SNZ;
-        self.canonical_reactive[98] = SOB;
-        self.canonical_reactive[99] = SOD;
-        self.canonical_reactive[100] = SOF;
-        self.canonical_reactive[101] = SOH;
-        self.canonical_reactive[102] = SOJ;
-        self.canonical_reactive[103] = SOL;
-        self.canonical_reactive[104] = SOO;
-        self.canonical_reactive[105] = SOQ;
-        self.canonical_reactive[106] = SOS;
-        self.canonical_reactive[107] = SOU;
-        self.canonical_reactive[108] = SOW;
-        self.canonical_reactive[109] = SOY;
-        self.canonical_reactive[110] = SPA;
-        self.canonical_reactive[111] = SPC;
-        self.canonical_reactive[112] = SPE;
-        self.canonical_reactive[113] = SPG;
-        self.canonical_reactive[114] = SPI;
-        self.canonical_reactive[115] = SPK;
-        self.canonical_reactive[116] = SPM;
-        self.canonical_reactive[117] = SPO;
-        self.canonical_reactive[118] = SPQ;
-        self.canonical_reactive[119] = SPS;
-        self.canonical_reactive[120] = SPU;
-        self.canonical_reactive[121] = SPW;
-        self.canonical_reactive[122] = SPY;
-        self.canonical_reactive[123] = SQA;
-        self.canonical_reactive[124] = SQC;
-        self.canonical_reactive[125] = SQE;
-        self.canonical_reactive[126] = SQG;
-        self.canonical_reactive[127] = SQI;
-        self.canonical_reactive[128] = SQK;
-        self.canonical_reactive[129] = SQM;
-        self.canonical_reactive[130] = SQO;
-        self.canonical_reactive[131] = SQQ;
-        self.canonical_reactive[132] = SQS;
-        self.canonical_reactive[133] = SQU;
-        self.canonical_reactive[134] = SQW;
-        self.canonical_reactive[135] = SQY;
-        self.canonical_reactive[136] = SRA;
-        self.canonical_reactive[137] = SRC;
-        self.canonical_reactive[138] = SRE;
-        self.canonical_reactive[139] = SRG;
-        self.canonical_reactive[140] = SRI;
-        self.canonical_reactive[141] = SRK;
-        self.canonical_reactive[142] = SRM;
-        self.canonical_reactive[143] = SRO;
-        self.canonical_reactive[144] = SRQ;
-        self.canonical_reactive[145] = SRS;
-        self.canonical_reactive[146] = SRU;
-        self.canonical_reactive[147] = SRW;
-        self.canonical_reactive[148] = SRY;
-        self.canonical_reactive[149] = SSA;
-        self.canonical_reactive[150] = SSC;
-        self.canonical_reactive[151] = SSE;
-        self.canonical_reactive[152] = SSG;
-        self.canonical_reactive[153] = SSI;
-        self.canonical_reactive[154] = SSK;
-        self.canonical_reactive[155] = SSM;
-        self.canonical_reactive[156] = SSO;
-        self.canonical_reactive[157] = SSQ;
-        self.canonical_reactive[158] = SSS;
-        self.canonical_reactive[159] = SSU;
-        self.canonical_reactive[160] = SSW;
-        self.canonical_reactive[161] = SSY;
-        self.canonical_reactive[162] = STA;
-        self.canonical_reactive[163] = STC;
-        self.canonical_reactive[164] = STE;
-        self.canonical_reactive[165] = STG;
-        self.canonical_reactive[166] = STI;
-        self.canonical_reactive[167] = STK;
-        self.canonical_reactive[168] = STM;
-        self.canonical_reactive[169] = STO;
-        self.canonical_reactive[170] = STQ;
-        self.canonical_reactive[171] = SUD;
-        self.canonical_reactive[172] = SUF;
-        self.canonical_reactive[173] = SUH;
-        self.canonical_reactive[174] = SUJ;
-        self.canonical_reactive[175] = SUL;
-        self.canonical_reactive[176] = SUS;
-        self.canonical_reactive[177] = SUU;
-        self.canonical_reactive[178] = SUW;
-        self.canonical_reactive[179] = SUY;
-        self.canonical_reactive[180] = SVA;
-        self.canonical_reactive[181] = SVC;
-        self.canonical_reactive[182] = SVE;
-        self.canonical_reactive[183] = SVG;
-        self.canonical_reactive[184] = SVI;
-        self.canonical_reactive[185] = SVK;
+        self.canonical_reactive[0] = SHA;
+        self.canonical_reactive[1] = SHC;
+        self.canonical_reactive[2] = SHE;
+        self.canonical_reactive[3] = SHG;
+        self.canonical_reactive[4] = SHI;
+        self.canonical_reactive[5] = SHK;
+        self.canonical_reactive[6] = SHM;
+        self.canonical_reactive[7] = SHO;
+        self.canonical_reactive[8] = SHQ;
+        self.canonical_reactive[9] = SHS;
+        self.canonical_reactive[10] = SHU;
+        self.canonical_reactive[11] = SHW;
+        self.canonical_reactive[12] = SHY;
+        self.canonical_reactive[13] = SIB;
+        self.canonical_reactive[14] = SID;
+        self.canonical_reactive[15] = SIF;
+        self.canonical_reactive[16] = SIH;
+        self.canonical_reactive[17] = SIJ;
+        self.canonical_reactive[18] = SIL;
+        self.canonical_reactive[19] = SIN;
+        self.canonical_reactive[20] = SIP;
+        self.canonical_reactive[21] = SIR;
+        self.canonical_reactive[22] = SIT;
+        self.canonical_reactive[23] = SIV;
+        self.canonical_reactive[24] = SIX;
+        self.canonical_reactive[25] = SIZ;
+        self.canonical_reactive[26] = SJC;
+        self.canonical_reactive[27] = SJE;
+        self.canonical_reactive[28] = SJG;
+        self.canonical_reactive[29] = SJI;
+        self.canonical_reactive[30] = SJK;
+        self.canonical_reactive[31] = SJM;
+        self.canonical_reactive[32] = SJO;
+        self.canonical_reactive[33] = SJQ;
+        self.canonical_reactive[34] = SJS;
+        self.canonical_reactive[35] = SJU;
+        self.canonical_reactive[36] = SJW;
+        self.canonical_reactive[37] = SJY;
+        self.canonical_reactive[38] = SKA;
+        self.canonical_reactive[39] = SKD;
+        self.canonical_reactive[40] = SKF;
+        self.canonical_reactive[41] = SKH;
+        self.canonical_reactive[42] = SKJ;
+        self.canonical_reactive[43] = SKL;
+        self.canonical_reactive[44] = SKN;
+        self.canonical_reactive[45] = SKP;
+        self.canonical_reactive[46] = SKR;
+        self.canonical_reactive[47] = SKT;
+        self.canonical_reactive[48] = SKV;
+        self.canonical_reactive[49] = SKX;
+        self.canonical_reactive[50] = SKZ;
+        self.canonical_reactive[51] = SLB;
+        self.canonical_reactive[52] = SLE;
+        self.canonical_reactive[53] = SLG;
+        self.canonical_reactive[54] = SLI;
+        self.canonical_reactive[55] = SLK;
+        self.canonical_reactive[56] = SLM;
+        self.canonical_reactive[57] = SLO;
+        self.canonical_reactive[58] = SLQ;
+        self.canonical_reactive[59] = SLS;
+        self.canonical_reactive[60] = SLU;
+        self.canonical_reactive[61] = SLW;
+        self.canonical_reactive[62] = SLY;
+        self.canonical_reactive[63] = SMA;
+        self.canonical_reactive[64] = SMC;
+        self.canonical_reactive[65] = SMF;
+        self.canonical_reactive[66] = SMH;
+        self.canonical_reactive[67] = SMJ;
+        self.canonical_reactive[68] = SML;
+        self.canonical_reactive[69] = SMN;
+        self.canonical_reactive[70] = SMP;
+        self.canonical_reactive[71] = SMR;
+        self.canonical_reactive[72] = SMT;
+        self.canonical_reactive[73] = SMV;
+        self.canonical_reactive[74] = SMX;
+        self.canonical_reactive[75] = SMZ;
+        self.canonical_reactive[76] = SNB;
+        self.canonical_reactive[77] = SND;
+        self.canonical_reactive[78] = SNG;
+        self.canonical_reactive[79] = SNI;
+        self.canonical_reactive[80] = SNK;
+        self.canonical_reactive[81] = SNM;
+        self.canonical_reactive[82] = SNO;
+        self.canonical_reactive[83] = SNQ;
+        self.canonical_reactive[84] = SNS;
+        self.canonical_reactive[85] = SNU;
+        self.canonical_reactive[86] = SNW;
+        self.canonical_reactive[87] = SNY;
+        self.canonical_reactive[88] = SOA;
+        self.canonical_reactive[89] = SOC;
+        self.canonical_reactive[90] = SOE;
+        self.canonical_reactive[91] = SOH;
+        self.canonical_reactive[92] = SOJ;
+        self.canonical_reactive[93] = SOL;
+        self.canonical_reactive[94] = SON;
+        self.canonical_reactive[95] = SOP;
+        self.canonical_reactive[96] = SOR;
+        self.canonical_reactive[97] = SOT;
+        self.canonical_reactive[98] = SOV;
+        self.canonical_reactive[99] = SOX;
+        self.canonical_reactive[100] = SOZ;
+        self.canonical_reactive[101] = SPB;
+        self.canonical_reactive[102] = SPD;
+        self.canonical_reactive[103] = SPF;
+        self.canonical_reactive[104] = SPI;
+        self.canonical_reactive[105] = SPK;
+        self.canonical_reactive[106] = SPM;
+        self.canonical_reactive[107] = SPO;
+        self.canonical_reactive[108] = SPQ;
+        self.canonical_reactive[109] = SPS;
+        self.canonical_reactive[110] = SPU;
+        self.canonical_reactive[111] = SPW;
+        self.canonical_reactive[112] = SPY;
+        self.canonical_reactive[113] = SQA;
+        self.canonical_reactive[114] = SQC;
+        self.canonical_reactive[115] = SQE;
+        self.canonical_reactive[116] = SQG;
+        self.canonical_reactive[117] = SQI;
+        self.canonical_reactive[118] = SQK;
+        self.canonical_reactive[119] = SQM;
+        self.canonical_reactive[120] = SQO;
+        self.canonical_reactive[121] = SQQ;
+        self.canonical_reactive[122] = SQS;
+        self.canonical_reactive[123] = SQU;
+        self.canonical_reactive[124] = SQW;
+        self.canonical_reactive[125] = SQY;
+        self.canonical_reactive[126] = SRA;
+        self.canonical_reactive[127] = SRC;
+        self.canonical_reactive[128] = SRE;
+        self.canonical_reactive[129] = SRG;
+        self.canonical_reactive[130] = SRI;
+        self.canonical_reactive[131] = SRK;
+        self.canonical_reactive[132] = SRM;
+        self.canonical_reactive[133] = SRO;
+        self.canonical_reactive[134] = SRQ;
+        self.canonical_reactive[135] = SRS;
+        self.canonical_reactive[136] = SRU;
+        self.canonical_reactive[137] = SRW;
+        self.canonical_reactive[138] = SRY;
+        self.canonical_reactive[139] = SSA;
+        self.canonical_reactive[140] = SSC;
+        self.canonical_reactive[141] = SSE;
+        self.canonical_reactive[142] = SSG;
+        self.canonical_reactive[143] = SSI;
+        self.canonical_reactive[144] = SSK;
+        self.canonical_reactive[145] = SSM;
+        self.canonical_reactive[146] = SSO;
+        self.canonical_reactive[147] = SSQ;
+        self.canonical_reactive[148] = SSS;
+        self.canonical_reactive[149] = SSU;
+        self.canonical_reactive[150] = SSW;
+        self.canonical_reactive[151] = SSY;
+        self.canonical_reactive[152] = STA;
+        self.canonical_reactive[153] = STC;
+        self.canonical_reactive[154] = STE;
+        self.canonical_reactive[155] = STG;
+        self.canonical_reactive[156] = STI;
+        self.canonical_reactive[157] = STK;
+        self.canonical_reactive[158] = STM;
+        self.canonical_reactive[159] = STO;
+        self.canonical_reactive[160] = STQ;
+        self.canonical_reactive[161] = STS;
+        self.canonical_reactive[162] = STU;
+        self.canonical_reactive[163] = STW;
+        self.canonical_reactive[164] = STY;
+        self.canonical_reactive[165] = SUA;
+        self.canonical_reactive[166] = SUC;
+        self.canonical_reactive[167] = SUE;
+        self.canonical_reactive[168] = SUG;
+        self.canonical_reactive[169] = SUI;
+        self.canonical_reactive[170] = SUK;
+        self.canonical_reactive[171] = SUX;
+        self.canonical_reactive[172] = SUZ;
+        self.canonical_reactive[173] = SVB;
+        self.canonical_reactive[174] = SVD;
+        self.canonical_reactive[175] = SVF;
+        self.canonical_reactive[176] = SVM;
+        self.canonical_reactive[177] = SVO;
+        self.canonical_reactive[178] = SVQ;
+        self.canonical_reactive[179] = SVS;
+        self.canonical_reactive[180] = SVU;
+        self.canonical_reactive[181] = SVW;
+        self.canonical_reactive[182] = SVY;
+        self.canonical_reactive[183] = SWA;
+        self.canonical_reactive[184] = SWC;
+        self.canonical_reactive[185] = SWE;
     }
 
     #[cold]
@@ -34124,15 +34189,15 @@ impl Instance {
     }
 
 
-    pub const STAMP_PATTERN: rspice_veriloga_runtime::GeneratedVerilogAStampPattern = rspice_veriloga_runtime::GeneratedVerilogAStampPattern { resistive: &[(0, 0), (0, 2), (0, 5), (0, 6), (0, 7), (0, 9), (0, 10), (1, 24), (2, 0), (2, 2), (2, 5), (2, 6), (2, 7), (2, 9), (3, 20), (4, 0), (4, 2), (4, 4), (4, 5), (4, 6), (4, 7), (5, 5), (6, 0), (6, 2), (6, 6), (6, 7), (6, 24), (7, 0), (7, 2), (7, 6), (7, 7), (7, 22), (8, 20), (8, 21), (8, 22), (8, 23), (9, 2), (9, 9), (9, 23), (10, 0), (10, 2), (10, 9), (10, 10), (10, 21), (11, 25), (11, 26), (12, 27), (12, 28), (13, 29), (13, 30), (14, 31), (14, 32), (15, 33), (15, 34), (16, 35), (16, 36), (17, 37), (17, 38), (18, 39), (18, 40), (19, 41), (19, 42), (20, 3), (20, 8), (20, 20), (21, 8), (21, 10), (21, 21), (22, 7), (22, 8), (22, 22), (23, 8), (23, 9), (23, 23), (24, 1), (24, 6), (24, 24), (25, 11), (25, 25), (26, 0), (26, 2), (26, 6), (26, 7), (26, 11), (26, 12), (26, 13), (26, 14), (26, 15), (26, 16), (26, 17), (26, 18), (26, 19), (26, 26), (27, 12), (27, 27), (28, 0), (28, 2), (28, 6), (28, 7), (28, 11), (28, 12), (28, 13), (28, 14), (28, 15), (28, 16), (28, 17), (28, 18), (28, 19), (28, 28), (29, 13), (29, 29), (30, 0), (30, 2), (30, 6), (30, 7), (30, 11), (30, 12), (30, 13), (30, 14), (30, 15), (30, 16), (30, 17), (30, 18), (30, 19), (30, 30), (31, 14), (31, 31), (32, 0), (32, 2), (32, 6), (32, 7), (32, 11), (32, 12), (32, 13), (32, 14), (32, 15), (32, 16), (32, 17), (32, 18), (32, 19), (32, 32), (33, 15), (33, 33), (34, 0), (34, 2), (34, 6), (34, 7), (34, 11), (34, 12), (34, 13), (34, 14), (34, 15), (34, 16), (34, 17), (34, 18), (34, 19), (34, 34), (35, 16), (35, 35), (36, 0), (36, 2), (36, 6), (36, 7), (36, 11), (36, 12), (36, 13), (36, 14), (36, 15), (36, 16), (36, 17), (36, 18), (36, 19), (36, 36), (37, 17), (37, 37), (38, 0), (38, 2), (38, 6), (38, 7), (38, 11), (38, 12), (38, 13), (38, 14), (38, 15), (38, 16), (38, 17), (38, 18), (38, 19), (38, 38), (39, 18), (39, 39), (40, 0), (40, 2), (40, 6), (40, 7), (40, 11), (40, 12), (40, 13), (40, 14), (40, 15), (40, 16), (40, 17), (40, 18), (40, 19), (40, 40), (41, 19), (41, 41), (42, 0), (42, 2), (42, 6), (42, 7), (42, 11), (42, 12), (42, 13), (42, 14), (42, 15), (42, 16), (42, 17), (42, 18), (42, 19), (42, 42)], dynamic: &[(0, 4), (0, 11), (0, 12), (0, 13), (0, 14), (0, 15), (0, 16), (0, 17), (0, 18), (0, 19), (2, 4), (2, 11), (2, 12), (2, 13), (2, 14), (2, 15), (2, 16), (2, 17), (2, 18), (2, 19), (6, 4), (6, 11), (6, 12), (6, 13), (6, 14), (6, 15), (6, 16), (6, 17), (6, 18), (6, 19), (7, 11), (7, 12), (7, 13), (7, 14), (7, 15), (7, 16), (7, 17), (7, 18), (7, 19)], reactive: &[(0, 0), (0, 2), (0, 4), (0, 6), (0, 7), (0, 9), (0, 10), (0, 11), (0, 12), (0, 13), (0, 14), (0, 15), (0, 16), (0, 17), (0, 18), (0, 19), (2, 0), (2, 2), (2, 4), (2, 6), (2, 7), (2, 9), (2, 11), (2, 12), (2, 13), (2, 14), (2, 15), (2, 16), (2, 17), (2, 18), (2, 19), (4, 0), (4, 2), (4, 4), (4, 6), (4, 7), (6, 0), (6, 2), (6, 4), (6, 6), (6, 7), (6, 11), (6, 12), (6, 13), (6, 14), (6, 15), (6, 16), (6, 17), (6, 18), (6, 19), (7, 0), (7, 2), (7, 6), (7, 7), (7, 11), (7, 12), (7, 13), (7, 14), (7, 15), (7, 16), (7, 17), (7, 18), (7, 19), (9, 2), (9, 9), (10, 0), (10, 2), (10, 9), (10, 10), (26, 0), (26, 2), (26, 6), (26, 7), (26, 11), (26, 12), (26, 13), (26, 14), (26, 15), (26, 16), (26, 17), (26, 18), (26, 19), (28, 0), (28, 2), (28, 6), (28, 7), (28, 11), (28, 12), (28, 13), (28, 14), (28, 15), (28, 16), (28, 17), (28, 18), (28, 19), (30, 0), (30, 2), (30, 6), (30, 7), (30, 11), (30, 12), (30, 13), (30, 14), (30, 15), (30, 16), (30, 17), (30, 18), (30, 19), (32, 0), (32, 2), (32, 6), (32, 7), (32, 11), (32, 12), (32, 13), (32, 14), (32, 15), (32, 16), (32, 17), (32, 18), (32, 19), (34, 0), (34, 2), (34, 6), (34, 7), (34, 11), (34, 12), (34, 13), (34, 14), (34, 15), (34, 16), (34, 17), (34, 18), (34, 19), (36, 0), (36, 2), (36, 6), (36, 7), (36, 11), (36, 12), (36, 13), (36, 14), (36, 15), (36, 16), (36, 17), (36, 18), (36, 19), (38, 0), (38, 2), (38, 6), (38, 7), (38, 11), (38, 12), (38, 13), (38, 14), (38, 15), (38, 16), (38, 17), (38, 18), (38, 19), (40, 0), (40, 2), (40, 6), (40, 7), (40, 11), (40, 12), (40, 13), (40, 14), (40, 15), (40, 16), (40, 17), (40, 18), (40, 19), (42, 0), (42, 2), (42, 6), (42, 7), (42, 11), (42, 12), (42, 13), (42, 14), (42, 15), (42, 16), (42, 17), (42, 18), (42, 19)], rhs_rows: &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42] };
+    pub const STAMP_PATTERN: rspice_veriloga_runtime::GeneratedVerilogAStampPattern = rspice_veriloga_runtime::GeneratedVerilogAStampPattern { resistive: &[(0, 0), (0, 2), (0, 5), (0, 6), (0, 7), (0, 9), (0, 10), (1, 1), (1, 6), (1, 24), (2, 0), (2, 2), (2, 5), (2, 6), (2, 7), (2, 9), (3, 3), (3, 8), (3, 20), (4, 0), (4, 2), (4, 4), (4, 5), (4, 6), (4, 7), (5, 5), (6, 0), (6, 1), (6, 2), (6, 6), (6, 7), (6, 24), (7, 0), (7, 2), (7, 6), (7, 7), (7, 8), (7, 22), (8, 3), (8, 7), (8, 8), (8, 9), (8, 10), (8, 20), (8, 21), (8, 22), (8, 23), (9, 2), (9, 8), (9, 9), (9, 23), (10, 0), (10, 2), (10, 8), (10, 9), (10, 10), (10, 21), (11, 25), (11, 26), (12, 27), (12, 28), (13, 29), (13, 30), (14, 31), (14, 32), (15, 33), (15, 34), (16, 35), (16, 36), (17, 37), (17, 38), (18, 39), (18, 40), (19, 41), (19, 42), (20, 3), (20, 8), (20, 20), (21, 8), (21, 10), (21, 21), (22, 7), (22, 8), (22, 22), (23, 8), (23, 9), (23, 23), (24, 1), (24, 6), (24, 24), (25, 11), (25, 25), (26, 0), (26, 2), (26, 6), (26, 7), (26, 11), (26, 12), (26, 13), (26, 14), (26, 15), (26, 16), (26, 17), (26, 18), (26, 19), (26, 26), (27, 12), (27, 27), (28, 0), (28, 2), (28, 6), (28, 7), (28, 11), (28, 12), (28, 13), (28, 14), (28, 15), (28, 16), (28, 17), (28, 18), (28, 19), (28, 28), (29, 13), (29, 29), (30, 0), (30, 2), (30, 6), (30, 7), (30, 11), (30, 12), (30, 13), (30, 14), (30, 15), (30, 16), (30, 17), (30, 18), (30, 19), (30, 30), (31, 14), (31, 31), (32, 0), (32, 2), (32, 6), (32, 7), (32, 11), (32, 12), (32, 13), (32, 14), (32, 15), (32, 16), (32, 17), (32, 18), (32, 19), (32, 32), (33, 15), (33, 33), (34, 0), (34, 2), (34, 6), (34, 7), (34, 11), (34, 12), (34, 13), (34, 14), (34, 15), (34, 16), (34, 17), (34, 18), (34, 19), (34, 34), (35, 16), (35, 35), (36, 0), (36, 2), (36, 6), (36, 7), (36, 11), (36, 12), (36, 13), (36, 14), (36, 15), (36, 16), (36, 17), (36, 18), (36, 19), (36, 36), (37, 17), (37, 37), (38, 0), (38, 2), (38, 6), (38, 7), (38, 11), (38, 12), (38, 13), (38, 14), (38, 15), (38, 16), (38, 17), (38, 18), (38, 19), (38, 38), (39, 18), (39, 39), (40, 0), (40, 2), (40, 6), (40, 7), (40, 11), (40, 12), (40, 13), (40, 14), (40, 15), (40, 16), (40, 17), (40, 18), (40, 19), (40, 40), (41, 19), (41, 41), (42, 0), (42, 2), (42, 6), (42, 7), (42, 11), (42, 12), (42, 13), (42, 14), (42, 15), (42, 16), (42, 17), (42, 18), (42, 19), (42, 42)], dynamic: &[(0, 4), (0, 11), (0, 12), (0, 13), (0, 14), (0, 15), (0, 16), (0, 17), (0, 18), (0, 19), (2, 4), (2, 11), (2, 12), (2, 13), (2, 14), (2, 15), (2, 16), (2, 17), (2, 18), (2, 19), (6, 4), (6, 11), (6, 12), (6, 13), (6, 14), (6, 15), (6, 16), (6, 17), (6, 18), (6, 19), (7, 11), (7, 12), (7, 13), (7, 14), (7, 15), (7, 16), (7, 17), (7, 18), (7, 19)], reactive: &[(0, 0), (0, 2), (0, 4), (0, 6), (0, 7), (0, 9), (0, 10), (0, 11), (0, 12), (0, 13), (0, 14), (0, 15), (0, 16), (0, 17), (0, 18), (0, 19), (2, 0), (2, 2), (2, 4), (2, 6), (2, 7), (2, 9), (2, 11), (2, 12), (2, 13), (2, 14), (2, 15), (2, 16), (2, 17), (2, 18), (2, 19), (4, 0), (4, 2), (4, 4), (4, 6), (4, 7), (6, 0), (6, 2), (6, 4), (6, 6), (6, 7), (6, 11), (6, 12), (6, 13), (6, 14), (6, 15), (6, 16), (6, 17), (6, 18), (6, 19), (7, 0), (7, 2), (7, 6), (7, 7), (7, 11), (7, 12), (7, 13), (7, 14), (7, 15), (7, 16), (7, 17), (7, 18), (7, 19), (9, 2), (9, 9), (10, 0), (10, 2), (10, 9), (10, 10), (26, 0), (26, 2), (26, 6), (26, 7), (26, 11), (26, 12), (26, 13), (26, 14), (26, 15), (26, 16), (26, 17), (26, 18), (26, 19), (28, 0), (28, 2), (28, 6), (28, 7), (28, 11), (28, 12), (28, 13), (28, 14), (28, 15), (28, 16), (28, 17), (28, 18), (28, 19), (30, 0), (30, 2), (30, 6), (30, 7), (30, 11), (30, 12), (30, 13), (30, 14), (30, 15), (30, 16), (30, 17), (30, 18), (30, 19), (32, 0), (32, 2), (32, 6), (32, 7), (32, 11), (32, 12), (32, 13), (32, 14), (32, 15), (32, 16), (32, 17), (32, 18), (32, 19), (34, 0), (34, 2), (34, 6), (34, 7), (34, 11), (34, 12), (34, 13), (34, 14), (34, 15), (34, 16), (34, 17), (34, 18), (34, 19), (36, 0), (36, 2), (36, 6), (36, 7), (36, 11), (36, 12), (36, 13), (36, 14), (36, 15), (36, 16), (36, 17), (36, 18), (36, 19), (38, 0), (38, 2), (38, 6), (38, 7), (38, 11), (38, 12), (38, 13), (38, 14), (38, 15), (38, 16), (38, 17), (38, 18), (38, 19), (40, 0), (40, 2), (40, 6), (40, 7), (40, 11), (40, 12), (40, 13), (40, 14), (40, 15), (40, 16), (40, 17), (40, 18), (40, 19), (42, 0), (42, 2), (42, 6), (42, 7), (42, 11), (42, 12), (42, 13), (42, 14), (42, 15), (42, 16), (42, 17), (42, 18), (42, 19)], rhs_rows: &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42] };
 
-    pub const SWITCH_SHORTS: [rspice_veriloga_runtime::GeneratedSwitchShort; 5] = [rspice_veriloga_runtime::GeneratedSwitchShort { state: 20, pos: Some(3), neg: Some(8) }, rspice_veriloga_runtime::GeneratedSwitchShort { state: 21, pos: Some(10), neg: Some(8) }, rspice_veriloga_runtime::GeneratedSwitchShort { state: 22, pos: Some(8), neg: Some(7) }, rspice_veriloga_runtime::GeneratedSwitchShort { state: 23, pos: Some(8), neg: Some(9) }, rspice_veriloga_runtime::GeneratedSwitchShort { state: 24, pos: Some(1), neg: Some(6) }];
+    pub const PRIVATE_SWITCHES: [rspice_veriloga_runtime::GeneratedPrivateSwitch; 5] = [rspice_veriloga_runtime::GeneratedPrivateSwitch { state: 20, pos: Some(3), neg: Some(8), shorts: true }, rspice_veriloga_runtime::GeneratedPrivateSwitch { state: 21, pos: Some(10), neg: Some(8), shorts: true }, rspice_veriloga_runtime::GeneratedPrivateSwitch { state: 22, pos: Some(8), neg: Some(7), shorts: true }, rspice_veriloga_runtime::GeneratedPrivateSwitch { state: 23, pos: Some(8), neg: Some(9), shorts: true }, rspice_veriloga_runtime::GeneratedPrivateSwitch { state: 24, pos: Some(1), neg: Some(6), shorts: true }];
 
-    /// Bit `i` is set while `SWITCH_SHORTS[i]` is in its potential arm.
-    pub fn switch_branch_shorts(&mut self, ctx: &GeneratedEvalContext<'_>) -> u64 {
+    /// Bit `i` is set while `PRIVATE_SWITCHES[i]` is in its potential arm.
+    pub fn private_switch_kinds(&mut self, ctx: &GeneratedEvalContext<'_>) -> u64 {
         self.canonical_model_stage(ctx);
         if ctx.evaluation_failed() { return 0; }
         let staged = &*self.canonical_staged;
-        (u64::from(staged[1389] != 0.0) << 0) | (u64::from(staged[1390] != 0.0) << 1) | (u64::from(staged[1391] != 0.0) << 2) | (u64::from(staged[1392] != 0.0) << 3) | (u64::from(staged[1393] != 0.0) << 4)
+        u64::from(staged[1389] != 0.0) | (u64::from(staged[1390] != 0.0) << 1) | (u64::from(staged[1391] != 0.0) << 2) | (u64::from(staged[1392] != 0.0) << 3) | (u64::from(staged[1393] != 0.0) << 4)
     }
 }

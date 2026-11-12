@@ -1060,14 +1060,16 @@ pub struct HirDiscreteRead {
     pub origin: super::digital::DigitalSourceLine,
 }
 
-/// Carried from [`crate::semantic::SwitchShort`]: a switch branch that shorts
-/// `pos` to `neg` through the private current `state` in potential mode.
+/// Carried from [`crate::semantic::PrivateSwitch`]: a switch branch whose
+/// current `state` only its own equation reads.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HirSwitchShort {
+pub struct HirPrivateSwitch {
     pub kind: VariableId,
     pub state: SmolStr,
     pub pos: SmolStr,
     pub neg: SmolStr,
+    /// The potential arm writes zero, so it shorts `pos` to `neg`.
+    pub shorts: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1123,7 +1125,7 @@ pub struct HirModel {
     /// Sorted state variables holding switch-branch source kinds.
     pub switch_branch_variables: Vec<VariableId>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub switch_shorts: Vec<HirSwitchShort>,
+    pub private_switches: Vec<HirPrivateSwitch>,
     pub arrays: Vec<HirArray>,
     pub branches: Vec<HirBranch>,
     pub contributions: Vec<HirContribution>,
@@ -1473,14 +1475,15 @@ impl HirModel {
                 .copied()
                 .map(VariableId::from)
                 .collect(),
-            switch_shorts: module
-                .switch_shorts
+            private_switches: module
+                .private_switches
                 .iter()
-                .map(|short| HirSwitchShort {
-                    kind: VariableId::from(short.kind),
-                    state: short.state.clone(),
-                    pos: short.pos.clone(),
-                    neg: short.neg.clone(),
+                .map(|switch| HirPrivateSwitch {
+                    kind: VariableId::from(switch.kind),
+                    state: switch.state.clone(),
+                    pos: switch.pos.clone(),
+                    neg: switch.neg.clone(),
+                    shorts: switch.shorts,
                 })
                 .collect(),
             variables: module
@@ -1731,19 +1734,19 @@ impl HirModel {
                 "switch-branch variables must be sorted, unique real event-state slots",
             ));
         }
-        if self.switch_shorts.iter().any(|short| {
+        if self.private_switches.iter().any(|switch| {
             self.switch_branch_variables
-                .binary_search(&short.kind)
+                .binary_search(&switch.kind)
                 .is_err()
-                || short.pos == short.neg
+                || switch.pos == switch.neg
                 || !self
                     .internal_nodes
                     .iter()
-                    .any(|node| node.is_state && node.name == short.state)
+                    .any(|node| node.is_state && node.name == switch.state)
         }) {
             diagnostics.push(IrDiagnostic::global_error(
                 CompilerPhase::HirValidation,
-                "a switch short must name a switch-branch kind, a private current and two distinct nodes",
+                "a private switch must name a switch-branch kind, a private current and two distinct nodes",
             ));
         }
         let mut input_slots = std::collections::HashSet::new();

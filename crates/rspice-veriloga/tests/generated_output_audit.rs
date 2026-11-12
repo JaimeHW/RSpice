@@ -533,8 +533,13 @@ fn generated_veriloga_sources_stay_compact() {
     /// operating-point outputs record what the load computed for them,
     /// compute them when the host asks and list them in an `OUTPUTS` table,
     /// 2.04 MB, taking the corpus to 52.17 MB.
-    const MAX_TOTAL_MODEL_RUST_BYTES: usize = 52_500_000;
-    const MAX_SINGLE_MODEL_RUST_BYTES: usize = 3_700_000;
+    /// Both raised 2026-11-11, from 52.5 MB and 3.70 MB: a switch branch held
+    /// in its flow arm injects its retained current onto its two nodes, where
+    /// it went through a private current unknown, so each stamp of that
+    /// current now lands on both nodes. 0.41 MB across 48 models, taking the
+    /// corpus to 52.63 MB and the HiSIM-HV leaf to 3.70 MB.
+    const MAX_TOTAL_MODEL_RUST_BYTES: usize = 52_800_000;
+    const MAX_SINGLE_MODEL_RUST_BYTES: usize = 3_750_000;
     const MAX_EMPTY_ELSE_ARMS: usize = 32;
 
     let models_root = generated_veriloga_root().join("models");

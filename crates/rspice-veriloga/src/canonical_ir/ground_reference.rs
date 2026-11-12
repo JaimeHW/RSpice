@@ -211,11 +211,13 @@ impl<'a> Walk<'a> {
         self.states.iter().copied().find(|state| *state == branch)
     }
 
-    /// The state whose current an expression injects, when it is exactly that
+    /// The state whose current an expression injects, when it is that
     /// state's potential: the compiler's physical source for a lowered branch.
+    /// A switch branch selects it in its potential arm and injects its
+    /// retained current in its flow arm.
     fn injected_state(&self, id: ExprId) -> Option<&'a str> {
         let hir = self.hir;
-        match &hir.expressions.get(usize::from(id))?.kind {
+        let potential = |id: ExprId| match &hir.expressions.get(usize::from(id))?.kind {
             HirExprKind::BranchAccess {
                 kind: crate::ast::AccessKind::Potential,
                 pos,
@@ -223,6 +225,10 @@ impl<'a> Walk<'a> {
                 ..
             } if neg.as_str() == "0" => self.state(pos),
             _ => None,
+        };
+        match &hir.expressions.get(usize::from(id))?.kind {
+            HirExprKind::Conditional { then_expr, .. } => potential(*then_expr),
+            _ => potential(id),
         }
     }
 
@@ -250,7 +256,8 @@ impl<'a> Walk<'a> {
     /// authored source, under its own conditions, becomes a contribution to
     /// the state or an assignment to the switch's retained value and kind,
     /// and an unconditional injection and balance at the end of the block tie
-    /// the branch's nets through the state. The branch exists when one of its
+    /// the branch's nets through the state, or, in a switch's flow arm, carry
+    /// its retained current onto them. The branch exists when one of its
     /// authored sources runs, so the plumbing joins under the disjunction of
     /// their guards. A state with no authored source is a probe of a branch
     /// that has none, an ideal short, and its plumbing joins as written.

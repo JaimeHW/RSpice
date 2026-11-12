@@ -1058,7 +1058,7 @@ pub struct Instance {
 	pub(crate) ddt_coefficients: GeneratedDdtCoefficients,
 	pub(crate) event_state_accepted: Box<[f64; 12]>,
 	pub(crate) event_state_candidate: Box<[f64; 12]>,
-	pub(crate) canonical_reactive: Box<[f64; 173]>,
+	pub(crate) canonical_reactive: Box<[f64; 179]>,
 	pub(crate) canonical_output_record: Box<[f64; 174]>,
 }
 

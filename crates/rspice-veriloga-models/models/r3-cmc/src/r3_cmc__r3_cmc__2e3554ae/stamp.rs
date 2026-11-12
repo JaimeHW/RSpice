@@ -833,8 +833,8 @@ impl Instance {
 		let ASM=staged[62];
 		let ASY=0f64;
 		let ATB=0f64;
-		let ATH=staged[98];
-		let ATP=staged[99];
+		let ATG=staged[98];
+		let ATR=staged[99];
 		let A=ctx.has_simparam("gmin");
 		let D=if A{
 		let B=ctx.simparam_required("gmin");
@@ -2497,75 +2497,101 @@ impl Instance {
 		}
 		let ATE=AEH[3];
 		let ATF=AEH[1];
-		let ATG=C+ AAT;
-		let ATK;
-		let ATL;
-		if ATH!=0.0{
-		let ATI=L3([AAS[0],AAS[1],0.0]);
-		ATK=AAR;
-		ATL=ATI;
+		let ATI;
+		let ATJ;
+		if ATG!=0.0{
+		let ATH=L4([0.0,0.0,0.0,1f64]);
+		ATI=AAT;
+		ATJ=ATH;
 		}else{
-		let ATJ=L3([0.0,0.0,1f64]);
-		ATK=AAT;
-		ATL=ATJ;
+		ATI=ARN;
+		ATJ=ARO;
 		}
-		let ATM=L4([ATL[0],0.0,ATL[1],ATL[2]])- ARO;
-		let ATN=C+ (ATK- ARN);
-		let ATO=C+ AAZ;
-		let ATS;
+		let ATK=C+ ATI;
+		let ATN;
+		let ATO;
+		if ATG!=0.0{
+		let ATL=L3([AAS[0],AAS[1],0.0]);
+		ATN=AAR;
+		ATO=ATL;
+		}else{
+		let ATM=L3([0.0,0.0,1f64]);
+		ATN=AAT;
+		ATO=ATM;
+		}
+		let ATP=L4([ATO[0],0.0,ATO[1],ATO[2]])- ARO;
+		let ATQ=C+ (ATN- ARN);
 		let ATT;
-		if ATP!=0.0{
-		let ATQ=L3([AAY[0],AAY[1],0.0]);
-		ATS=AAX;
-		ATT=ATQ;
+		let ATU;
+		if ATR!=0.0{
+		let ATS=L4([0.0,0.0,0.0,1f64]);
+		ATT=AAZ;
+		ATU=ATS;
 		}else{
-		let ATR=L3([0.0,0.0,1f64]);
-		ATS=AAZ;
-		ATT=ATR;
+		ATT=ASA;
+		ATU=ASB;
 		}
-		let ATU=L4([ATT[0],0.0,ATT[1],ATT[2]])- ASB;
-		let ATV=C+ (ATS- ASA);
-		let ATW=AEH[0];
-		let ATX=AEH[2];
-		let ATY=AEK[0];
-		let ATZ=AEK[1];
-		let AUA=AEK[2];
-		let AUB=AEN[0];
-		let AUC=AEN[1];
-		let AUD=AEN[2];
-		let AUE=AED;
-		let AUF=AEE[0];
-		let AUG=AEE[1];
-		let AUH=AEE[2];
-		let AUI=AEE[3];
-		let AUJ=AEE[4];
-		let AUK=AEE[5];
-		let AUL=AEE[6];
-		let AUM=AEE[7];
-		let AUN=ASD[0];
-		let AUO=ASD[1];
-		let AUP=ASD[2];
-		let AUQ=ASG[0];
-		let AUR=ASG[1];
-		let AUS=ASG[2];
-		let AUT=ASJ;
-		let AUU=1f64;
-		let AUV=ATM[0];
-		let AUW=ATM[1];
-		let AUX=ATM[2];
-		let AUY=ATM[3];
-		let AUZ=1f64;
-		let AVA=ATU[0];
-		let AVB=ATU[1];
-		let AVC=ATU[2];
-		let AVD=ATU[3];
-		let AVE=ALL[0];
-		let AVF=ALL[1];
-		let AVG=ALL[2];
-		let AVH=ALO[0];
-		let AVI=ALO[1];
-		let AVJ=ALO[2];
-		let AVK=ALR;
+		let ATV=C+ ATT;
+		let ATY;
+		let ATZ;
+		if ATR!=0.0{
+		let ATW=L3([AAY[0],AAY[1],0.0]);
+		ATY=AAX;
+		ATZ=ATW;
+		}else{
+		let ATX=L3([0.0,0.0,1f64]);
+		ATY=AAZ;
+		ATZ=ATX;
+		}
+		let AUA=L4([ATZ[0],0.0,ATZ[1],ATZ[2]])- ASB;
+		let AUB=C+ (ATY- ASA);
+		let AUC=AEH[0];
+		let AUD=AEH[2];
+		let AUE=AEK[0];
+		let AUF=AEK[1];
+		let AUG=AEK[2];
+		let AUH=AEN[0];
+		let AUI=AEN[1];
+		let AUJ=AEN[2];
+		let AUK=AED;
+		let AUL=AEE[0];
+		let AUM=AEE[1];
+		let AUN=AEE[2];
+		let AUO=AEE[3];
+		let AUP=AEE[4];
+		let AUQ=AEE[5];
+		let AUR=AEE[6];
+		let AUS=AEE[7];
+		let AUT=ASD[0];
+		let AUU=ASD[1];
+		let AUV=ASD[2];
+		let AUW=ASG[0];
+		let AUX=ASG[1];
+		let AUY=ASG[2];
+		let AUZ=ASJ;
+		let AVA=ATJ[0];
+		let AVB=ATJ[1];
+		let AVC=ATJ[2];
+		let AVD=ATJ[3];
+		let AVE=ATP[0];
+		let AVF=ATP[1];
+		let AVG=ATP[2];
+		let AVH=ATP[3];
+		let AVI=ATU[0];
+		let AVJ=ATU[1];
+		let AVK=ATU[2];
+		let AVL=ATU[3];
+		let AVM=AUA[0];
+		let AVN=AUA[1];
+		let AVO=AUA[2];
+		let AVP=AUA[3];
+		let AVQ=ALL[0];
+		let AVR=ALL[1];
+		let AVS=ALL[2];
+		let AVT=ALO[0];
+		let AVU=ALO[1];
+		let AVV=ALO[2];
+		let AVW=ALR;
         {
             let record = &mut *self.canonical_output_record;
             record[0] = H;
@@ -2583,7 +2609,7 @@ impl Instance {
             Some(4),
             multiplicity * (ALS),
             [1, 3, 4, 5],
-            [ATW, ATF, ATX, ATE],
+            [AUC, ATF, AUD, ATE],
             [],
             [],
             multiplicity,
@@ -2593,7 +2619,7 @@ impl Instance {
             Some(4),
             multiplicity * (ALT),
             [1, 3, 4],
-            [ATY, ATZ, AUA],
+            [AUE, AUF, AUG],
             [],
             [],
             multiplicity,
@@ -2603,7 +2629,7 @@ impl Instance {
             Some(5),
             multiplicity * (ALU),
             [1, 3, 5],
-            [AUB, AUC, AUD],
+            [AUH, AUI, AUJ],
             [],
             [],
             multiplicity,
@@ -2613,7 +2639,7 @@ impl Instance {
             None,
             multiplicity * (ALV),
             [3],
-            [AUE],
+            [AUK],
             [],
             [],
             multiplicity,
@@ -2623,7 +2649,7 @@ impl Instance {
             None,
             multiplicity * (ALW),
             [0, 1, 2, 3, 4, 5, 6, 7],
-            [AUF, AUG, AUH, AUI, AUJ, AUK, AUL, AUM],
+            [AUL, AUM, AUN, AUO, AUP, AUQ, AUR, AUS],
             [],
             [],
             multiplicity,
@@ -2633,7 +2659,7 @@ impl Instance {
             Some(4),
             multiplicity * (ASE),
             [1, 3, 4],
-            [AUN, AUO, AUP],
+            [AUT, AUU, AUV],
             [],
             [],
             multiplicity,
@@ -2643,7 +2669,7 @@ impl Instance {
             Some(5),
             multiplicity * (ASH),
             [1, 3, 5],
-            [AUQ, AUR, AUS],
+            [AUW, AUX, AUY],
             [],
             [],
             multiplicity,
@@ -2653,7 +2679,7 @@ impl Instance {
             None,
             multiplicity * (ASK),
             [3],
-            [AUT],
+            [AUZ],
             [],
             [],
             multiplicity,
@@ -2718,12 +2744,12 @@ impl Instance {
             [],
             multiplicity,
         );
-        stamper.stamp_current_sparse_local::<1, 0>(
+        stamper.stamp_current_sparse_local::<4, 0>(
             Some(0),
             Some(4),
-            multiplicity * (ATG),
-            [6],
-            [AUU],
+            multiplicity * (ATK),
+            [0, 3, 4, 6],
+            [AVA, AVB, AVC, AVD],
             [],
             [],
             multiplicity,
@@ -2731,19 +2757,19 @@ impl Instance {
         stamper.stamp_current_sparse_local::<4, 0>(
             Some(6),
             None,
-            multiplicity * (ATN),
+            multiplicity * (ATQ),
             [0, 3, 4, 6],
-            [AUV, AUW, AUX, AUY],
+            [AVE, AVF, AVG, AVH],
             [],
             [],
             multiplicity,
         );
-        stamper.stamp_current_sparse_local::<1, 0>(
+        stamper.stamp_current_sparse_local::<4, 0>(
             Some(2),
             Some(5),
-            multiplicity * (ATO),
-            [7],
-            [AUZ],
+            multiplicity * (ATV),
+            [2, 3, 5, 7],
+            [AVI, AVJ, AVK, AVL],
             [],
             [],
             multiplicity,
@@ -2751,9 +2777,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<4, 0>(
             Some(7),
             None,
-            multiplicity * (ATV),
+            multiplicity * (AUB),
             [2, 3, 5, 7],
-            [AVA, AVB, AVC, AVD],
+            [AVM, AVN, AVO, AVP],
             [],
             [],
             multiplicity,
@@ -2764,25 +2790,25 @@ impl Instance {
         self.canonical_reactive[3] = ALV;
         self.canonical_reactive[4] = ALW;
         self.canonical_reactive[5] = ALK;
-        self.canonical_reactive[6] = AVE;
-        self.canonical_reactive[7] = AVF;
-        self.canonical_reactive[8] = AVG;
+        self.canonical_reactive[6] = AVQ;
+        self.canonical_reactive[7] = AVR;
+        self.canonical_reactive[8] = AVS;
         self.canonical_reactive[9] = ALN;
-        self.canonical_reactive[10] = AVH;
-        self.canonical_reactive[11] = AVI;
-        self.canonical_reactive[12] = AVJ;
+        self.canonical_reactive[10] = AVT;
+        self.canonical_reactive[11] = AVU;
+        self.canonical_reactive[12] = AVV;
         self.canonical_reactive[13] = ALQ;
-        self.canonical_reactive[14] = AVK;
+        self.canonical_reactive[14] = AVW;
         self.canonical_reactive[15] = staged[100];
         self.canonical_reactive[16] = staged[101];
         self.canonical_reactive[17] = staged[102];
         self.canonical_reactive[18] = staged[103];
         self.canonical_reactive[19] = ASW;
         self.canonical_reactive[20] = ASX;
-        self.canonical_reactive[21] = ATG;
-        self.canonical_reactive[22] = ATN;
-        self.canonical_reactive[23] = ATO;
-        self.canonical_reactive[24] = ATV;
+        self.canonical_reactive[21] = ATK;
+        self.canonical_reactive[22] = ATQ;
+        self.canonical_reactive[23] = ATV;
+        self.canonical_reactive[24] = AUB;
     }
 
     #[cold]
@@ -2874,12 +2900,12 @@ impl Instance {
     }
 
 
-    pub const STAMP_PATTERN: rspice_veriloga_runtime::GeneratedVerilogAStampPattern = rspice_veriloga_runtime::GeneratedVerilogAStampPattern { resistive: &[(0, 6), (1, 1), (1, 3), (1, 4), (1, 5), (2, 7), (3, 0), (3, 1), (3, 2), (3, 3), (3, 4), (3, 5), (3, 6), (3, 7), (4, 1), (4, 3), (4, 4), (4, 5), (4, 6), (5, 1), (5, 3), (5, 4), (5, 5), (5, 7), (6, 0), (6, 3), (6, 4), (6, 6), (7, 2), (7, 3), (7, 5), (7, 7)], dynamic: &[], reactive: &[(1, 1), (1, 3), (1, 4), (1, 5), (3, 3), (4, 1), (4, 3), (4, 4), (5, 1), (5, 3), (5, 5)], rhs_rows: &[0, 1, 2, 3, 4, 5, 6, 7] };
+    pub const STAMP_PATTERN: rspice_veriloga_runtime::GeneratedVerilogAStampPattern = rspice_veriloga_runtime::GeneratedVerilogAStampPattern { resistive: &[(0, 0), (0, 3), (0, 4), (0, 6), (1, 1), (1, 3), (1, 4), (1, 5), (2, 2), (2, 3), (2, 5), (2, 7), (3, 0), (3, 1), (3, 2), (3, 3), (3, 4), (3, 5), (3, 6), (3, 7), (4, 0), (4, 1), (4, 3), (4, 4), (4, 5), (4, 6), (5, 1), (5, 2), (5, 3), (5, 4), (5, 5), (5, 7), (6, 0), (6, 3), (6, 4), (6, 6), (7, 2), (7, 3), (7, 5), (7, 7)], dynamic: &[], reactive: &[(1, 1), (1, 3), (1, 4), (1, 5), (3, 3), (4, 1), (4, 3), (4, 4), (5, 1), (5, 3), (5, 5)], rhs_rows: &[0, 1, 2, 3, 4, 5, 6, 7] };
 
-    pub const SWITCH_SHORTS: [rspice_veriloga_runtime::GeneratedSwitchShort; 0] = [];
+    pub const PRIVATE_SWITCHES: [rspice_veriloga_runtime::GeneratedPrivateSwitch; 0] = [];
 
-    /// Bit `i` is set while `SWITCH_SHORTS[i]` is in its potential arm.
-    pub fn switch_branch_shorts(&mut self, ctx: &GeneratedEvalContext<'_>) -> u64 {
+    /// Bit `i` is set while `PRIVATE_SWITCHES[i]` is in its potential arm.
+    pub fn private_switch_kinds(&mut self, ctx: &GeneratedEvalContext<'_>) -> u64 {
         let _ = ctx;
         0
     }

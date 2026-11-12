@@ -3,6 +3,9 @@
 //! Keep one mathematical current unknown. Its constraint is V - retained_V
 //! in potential mode and I - retained_I in flow mode. Each authored RHS still
 //! executes at its own site; changing source kind resets the retained value.
+//! In potential mode the branch injects the unknown; in flow mode it injects
+//! the retained current itself, so there the unknown's equation reads
+//! nothing else and solves to the same current.
 
 use super::*;
 use std::collections::BTreeMap;
@@ -54,6 +57,17 @@ impl SwitchState {
     /// The event-state slot holding the branch's source kind.
     pub(super) fn kind_slot(&self) -> usize {
         self.kind.1
+    }
+
+    /// The current the branch injects into its nodes: the unknown while a
+    /// potential holds them, the retained current while a flow drives them.
+    pub(super) fn injection(&self, current: Expression) -> Expression {
+        select(
+            read(&self.kind, self.span),
+            current,
+            read(&self.value, self.span),
+            self.span,
+        )
     }
 
     pub(super) fn balance(&self, current: Expression, voltage: Expression) -> Expression {

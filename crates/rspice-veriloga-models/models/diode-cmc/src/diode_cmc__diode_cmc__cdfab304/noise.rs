@@ -1255,9 +1255,10 @@ pub static GROUPED_NOISE_PROCESSES: [GeneratedNoiseProcessDescriptor; 3] = [
 	GeneratedNoiseProcessDescriptor { process_id: 1, mechanism: "FLICKER_A_AIK_FLICKER", label: Some("flicker"), kind: GeneratedNoiseKind::Flicker, table_len: 0, table_log_interp: false },
 	GeneratedNoiseProcessDescriptor { process_id: 2, mechanism: "WHITE_AIK_K_THERMAL", label: Some("thermal"), kind: GeneratedNoiseKind::White, table_len: 0, table_log_interp: false },
 ];
-pub static GROUPED_NOISE_INJECTIONS: [GeneratedNoiseInjectionDescriptor; 3] = [
+pub static GROUPED_NOISE_INJECTIONS: [GeneratedNoiseInjectionDescriptor; 4] = [
 	GeneratedNoiseInjectionDescriptor { process_id: 0, equation: 0, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(0), name: "a", is_internal: false }, neg: GeneratedNoiseEndpoint { local_node: Some(2), name: "aik", is_internal: true } },
 	GeneratedNoiseInjectionDescriptor { process_id: 1, equation: 1, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(0), name: "a", is_internal: false }, neg: GeneratedNoiseEndpoint { local_node: Some(2), name: "aik", is_internal: true } },
+	GeneratedNoiseInjectionDescriptor { process_id: 2, equation: 12, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(2), name: "aik", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(1), name: "k", is_internal: false } },
 	GeneratedNoiseInjectionDescriptor { process_id: 2, equation: 13, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(9), name: "__flow_state3", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: None, name: "0", is_internal: false } },
 ];
 
@@ -1400,13 +1401,13 @@ impl Instance {
 		let EOV=0f64;
 		let EOW=0f64;
 		let EPE=0f64;
-		let EPL=node_potentials[6];
-		let EPS=node_potentials[7];
-		let EPZ=node_potentials[8];
-		let EQG=node_potentials[9];
-		let EQM=1f64;
-		let EQQ=0f64;
-		let EQU=0f64;
+		let EPM=node_potentials[6];
+		let EPU=node_potentials[7];
+		let EQC=node_potentials[8];
+		let EQK=node_potentials[9];
+		let EQQ=1f64;
+		let EQV=0f64;
+		let ERA=0f64;
 		let E=C> D;
 		let F=if E{
 		C
@@ -8726,122 +8727,147 @@ impl Instance {
 		A
 		};
 		let EOB=A+ (EOA* DLS);
-		let EQI;
-		let EQK;
-		let EQN;
+		let EQJ;
+		let EQL;
+		let EQR;
 		if ENS{
 		let EOD;
-		let EQO;
+		let EQS;
 		if EOC{
 		EOD=ENW;
-		EQO=EQM;
+		EQS=EQQ;
 		}else{
 		EOD=A;
-		EQO=EQQ;
+		EQS=EQV;
 		}
 		let EOE=(ctx.checked_derivative_value(ENW, EOD))+ (EJY/ ENR);
-		EQI=A;
-		EQK=EOE;
-		EQN=EQO;
+		EQJ=A;
+		EQL=EOE;
+		EQR=EQS;
 		}else{
 		let EOG;
-		let EQP;
+		let EQT;
 		if EOF{
 		EOG=ENW;
-		EQP=EQM;
+		EQT=EQQ;
 		}else{
 		EOG=A;
-		EQP=EQQ;
+		EQT=EQV;
 		}
 		let EOH=(ctx.checked_derivative_value(ENW, EOG))+ A;
-		EQI=FO;
-		EQK=EOH;
-		EQN=EQP;
+		EQJ=FO;
+		EQL=EOH;
+		EQR=EQT;
 		}
 		let EOI=EJZ&& (ELU> A);
+		let EPL;
 		let EPN;
-		let EPQ;
-		let EPU;
-		let EPX;
+		let EPT;
+		let EPV;
 		if EOI{
-		let EON=ctx.checked_derivative_value(EOL, EQU);
+		let EON=ctx.checked_derivative_value(EOL, ERA);
 		let EOO=0f64+ (-(L* (EOJ+ EON)));
-		let EOT=ctx.checked_derivative_value(EOR, EQU);
+		let EOT=ctx.checked_derivative_value(EOR, ERA);
 		let EOU=0f64+ (-(L* (EOP+ EOT)));
-		EPN=A;
-		EPQ=EOO;
-		EPU=A;
-		EPX=EOU;
+		EPL=A;
+		EPN=EOO;
+		EPT=A;
+		EPV=EOU;
 		}else{
-		EPN=FO;
-		EPQ=EOV;
-		EPU=FO;
-		EPX=EOW;
+		EPL=FO;
+		EPN=EOV;
+		EPT=FO;
+		EPV=EOW;
 		}
 		let EOX=EJZ&& (EMX> A);
 		let EQB;
-		let EQE;
+		let EQD;
 		if EOX{
-		let EPC=ctx.checked_derivative_value(EPA, EQU);
+		let EPC=ctx.checked_derivative_value(EPA, ERA);
 		let EPD=0f64+ (-(1e-13f64* (EOY+ EPC)));
 		EQB=A;
-		EQE=EPD;
+		EQD=EPD;
 		}else{
 		EQB=FO;
-		EQE=EPE;
+		EQD=EPE;
 		}
-		let EPG=ctx.checked_derivative_value(EPF, EQU);
+		let EPG=ctx.checked_derivative_value(EPF, ERA);
 		let EPH=A+ EPG;
-		let EPJ=ctx.checked_derivative_value((EPI* ENK), EQU);
+		let EPJ=ctx.checked_derivative_value((EPI* ENK), ERA);
 		let EPK=A+ EPJ;
-		let EPM=A+ EPL;
-		let EPP=if EPN!=0.0{
-		let EPO=-ELX;
-		EPO
+		let EPO=if EPL!=0.0{
+		EPM
 		}else{
-		EPL
+		EPN
 		};
-		let EPR=A+ (EPP- EPQ);
-		let EPT=A+ EPS;
-		let EPW=if EPU!=0.0{
-		let EPV=-EMM;
+		let EPP=A+ EPO;
+		let EPR=if EPL!=0.0{
+		let EPQ=-ELX;
+		EPQ
+		}else{
+		EPM
+		};
+		let EPS=A+ (EPR- EPN);
+		let EPW=if EPT!=0.0{
+		EPU
+		}else{
 		EPV
-		}else{
-		EPS
 		};
-		let EPY=A+ (EPW- EPX);
-		let EQA=A+ EPZ;
-		let EQD=if EQB!=0.0{
-		let EQC=-ENA;
+		let EPX=A+ EPW;
+		let EPZ=if EPT!=0.0{
+		let EPY=-EMM;
+		EPY
+		}else{
+		EPU
+		};
+		let EQA=A+ (EPZ- EPV);
+		let EQE=if EQB!=0.0{
 		EQC
 		}else{
-		EPZ
+		EQD
 		};
-		let EQF=A+ (EQD- EQE);
-		let EQH=A+ EQG;
-		let EQJ=if EQI!=0.0{
+		let EQF=A+ EQE;
+		let EQH=if EQB!=0.0{
+		let EQG=-ENA;
+		EQG
+		}else{
+		EQC
+		};
+		let EQI=A+ (EQH- EQD);
+		let EQM;
+		let EQU;
+		if EQJ!=0.0{
+		EQM=EQK;
+		EQU=EQV;
+		}else{
+		EQM=EQL;
+		EQU=EQR;
+		}
+		let EQN=A+ EQM;
+		let EQO=if EQJ!=0.0{
 		EJY
 		}else{
-		EQG
+		EQK
 		};
-		let EQL=A+ (EQJ- EQK);
-		let EQR=1f64;
-		let EQS=1f64;
-		let EQT=(EQN* -1f64);
+		let EQP=A+ (EQO- EQL);
+		let EQW=1f64;
+		let EQX=1f64;
+		let EQY=EQU;
+		let EQZ=(EQR* -1f64);
 		ctx.checked_derivative_value(ENN, 0.0);
 		ctx.checked_derivative_value(ENQ, 0.0);
 		ctx.checked_derivative_value(ENX, 0.0);
 		ctx.checked_derivative_value(EOB, 0.0);
 		ctx.checked_derivative_value(EPH, 0.0);
 		ctx.checked_derivative_value(EPK, 0.0);
-		ctx.checked_derivative_value(EPM, 0.0);
-		ctx.checked_derivative_value(EPR, 0.0);
-		ctx.checked_derivative_value(EPT, 0.0);
-		ctx.checked_derivative_value(EPY, 0.0);
+		ctx.checked_derivative_value(EPP, 0.0);
+		ctx.checked_derivative_value(EPS, 0.0);
+		ctx.checked_derivative_value(EPX, 0.0);
 		ctx.checked_derivative_value(EQA, 0.0);
 		ctx.checked_derivative_value(EQF, 0.0);
-		ctx.checked_derivative_value(EQH, 0.0);
-		ctx.checked_derivative_value(EQL, 0.0);
+		ctx.checked_derivative_value(EQI, 0.0);
+		ctx.checked_derivative_value(EQN, 0.0);
+		ctx.checked_derivative_value(EQP, 0.0);
 		ctx.check_noise_evaluation()?;
 		let process_0_active = FO != 0.0;
 		let process_0_psd = (ENL).abs();
@@ -8849,7 +8875,7 @@ impl Instance {
 		let process_0_exponent: Option<f64> = None;
 		if let Some(value) = process_0_exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 0, quantity: "exponent", value }); } }
 		let process_0_table = [];
-		let process_0_gain_0 = GeneratedNoiseComplex::scaled_transfer(EQR, 0.0, frequency_hz, -1.0 * self.multiplicity.sqrt());
+		let process_0_gain_0 = GeneratedNoiseComplex::scaled_transfer(EQW, 0.0, frequency_hz, -1.0 * self.multiplicity.sqrt());
 		if !process_0_gain_0.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 0, injection: 0, re: process_0_gain_0.re, im: process_0_gain_0.im }); }
 		let process_0_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 0, gain: process_0_gain_0 }];
 		if !visitor.visit_process(0, GeneratedNoiseProcessEvaluationRef { active: process_0_active, psd: process_0_psd, exponent: process_0_exponent, table_operands: &process_0_table, injections: &process_0_injections }) { return Ok(()); }
@@ -8859,7 +8885,7 @@ impl Instance {
 		let process_1_exponent: Option<f64> = Some(FO);
 		if let Some(value) = process_1_exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 1, quantity: "exponent", value }); } }
 		let process_1_table = [];
-		let process_1_gain_0 = GeneratedNoiseComplex::scaled_transfer(EQS, 0.0, frequency_hz, -1.0 * self.multiplicity.sqrt());
+		let process_1_gain_0 = GeneratedNoiseComplex::scaled_transfer(EQX, 0.0, frequency_hz, -1.0 * self.multiplicity.sqrt());
 		if !process_1_gain_0.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 1, injection: 0, re: process_1_gain_0.re, im: process_1_gain_0.im }); }
 		let process_1_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 1, gain: process_1_gain_0 }];
 		if !visitor.visit_process(1, GeneratedNoiseProcessEvaluationRef { active: process_1_active, psd: process_1_psd, exponent: process_1_exponent, table_operands: &process_1_table, injections: &process_1_injections }) { return Ok(()); }
@@ -8869,9 +8895,11 @@ impl Instance {
 		let process_2_exponent: Option<f64> = None;
 		if let Some(value) = process_2_exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 2, quantity: "exponent", value }); } }
 		let process_2_table = [];
-		let process_2_gain_0 = GeneratedNoiseComplex::scaled_transfer(EQT, 0.0, frequency_hz, -1.0 * self.multiplicity.sqrt());
+		let process_2_gain_0 = GeneratedNoiseComplex::scaled_transfer(EQY, 0.0, frequency_hz, -1.0 * self.multiplicity.sqrt());
 		if !process_2_gain_0.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 2, injection: 0, re: process_2_gain_0.re, im: process_2_gain_0.im }); }
-		let process_2_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 2, gain: process_2_gain_0 }];
+		let process_2_gain_1 = GeneratedNoiseComplex::scaled_transfer(EQZ, 0.0, frequency_hz, -1.0 * self.multiplicity.sqrt());
+		if !process_2_gain_1.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 2, injection: 1, re: process_2_gain_1.re, im: process_2_gain_1.im }); }
+		let process_2_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 2, gain: process_2_gain_0 }, GeneratedNoiseInjectionEvaluation { descriptor: 3, gain: process_2_gain_1 }];
 		if !visitor.visit_process(2, GeneratedNoiseProcessEvaluationRef { active: process_2_active, psd: process_2_psd, exponent: process_2_exponent, table_operands: &process_2_table, injections: &process_2_injections }) { return Ok(()); }
 		Ok(())
 	}

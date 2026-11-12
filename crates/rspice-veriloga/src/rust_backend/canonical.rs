@@ -2708,20 +2708,20 @@ impl ModelPlan {
         self.emit_stamp(artifact, control, &mut out)?;
         self.emit_stamp_reactive(&mut out)?;
         self.emit_stamp_pattern(artifact, options, &mut out);
-        self.emit_switch_shorts(artifact, options, &mut out);
+        self.emit_private_switches(artifact, options, &mut out);
 
         out.push_str("}\n");
         Ok(out)
     }
 
-    /// The switch shorts whose arm a setup stage fixes, and the method a host
-    /// reads those arms with before it builds the matrix.
+    /// The private switches whose arm a setup stage fixes, and the method a
+    /// host reads those arms with before it builds the matrix.
     ///
     /// A kind the model or instance stage computes is a function of the
     /// parameters alone, so it holds until one changes. A kind a later stage
     /// or the Newton pass computes can move with temperature or bias, and its
     /// branch keeps its private current.
-    fn emit_switch_shorts(
+    fn emit_private_switches(
         &self,
         artifact: &CanonicalIrArtifact,
         options: &RustTranspileOptions,
@@ -2738,63 +2738,62 @@ impl ModelPlan {
                 .find(|node| node.name.as_str() == name)
                 .map(|node| Some(usize::from(node.id)))
         };
-        let newton = self
+        let mut switches = Vec::new();
+        if let Some(newton) = self
             .stages
             .iter()
-            .find(|stage| stage.class == InvalidationClass::Newton);
-        let mut shorts = Vec::new();
-        for short in &artifact.hir.switch_shorts {
-            let Some(newton) = newton else {
-                break;
-            };
-            let Some(position) = artifact
-                .hir
-                .variables
-                .iter()
-                .filter(|variable| variable.is_state)
-                .position(|variable| variable.id == short.kind)
-                .and_then(|slot| self.event_state_candidate_positions.get(slot).copied())
-            else {
-                continue;
-            };
-            if newton.outputs.get(position).copied().flatten().is_some() {
-                continue;
-            }
-            let Some((class, slot)) = self.stages.iter().find_map(|stage| {
-                let held = stage.outputs.get(position).copied().flatten()?;
-                Some((stage.class, stage.slot_of(held)?))
-            }) else {
-                continue;
-            };
-            if class > InvalidationClass::Instance {
-                continue;
-            }
-            let (Some(Some(state)), Some(pos), Some(neg)) =
-                (node(&short.state), node(&short.pos), node(&short.neg))
-            else {
-                continue;
-            };
-            shorts.push((state, pos, neg, slot));
-            if shorts.len() == 64 {
-                break;
+            .find(|stage| stage.class == InvalidationClass::Newton)
+        {
+            for switch in &artifact.hir.private_switches {
+                let Some(position) = artifact
+                    .hir
+                    .variables
+                    .iter()
+                    .filter(|variable| variable.is_state)
+                    .position(|variable| variable.id == switch.kind)
+                    .and_then(|slot| self.event_state_candidate_positions.get(slot).copied())
+                else {
+                    continue;
+                };
+                if newton.outputs.get(position).copied().flatten().is_some() {
+                    continue;
+                }
+                let Some((class, slot)) = self.stages.iter().find_map(|stage| {
+                    let held = stage.outputs.get(position).copied().flatten()?;
+                    Some((stage.class, stage.slot_of(held)?))
+                }) else {
+                    continue;
+                };
+                if class > InvalidationClass::Instance {
+                    continue;
+                }
+                let (Some(Some(state)), Some(pos), Some(neg)) =
+                    (node(&switch.state), node(&switch.pos), node(&switch.neg))
+                else {
+                    continue;
+                };
+                switches.push((state, pos, neg, switch.shorts, slot));
+                if switches.len() == 64 {
+                    break;
+                }
             }
         }
         let runtime = &options.runtime_path;
-        let entries = shorts
+        let entries = switches
             .iter()
-            .map(|(state, pos, neg, _)| {
+            .map(|(state, pos, neg, shorts, _)| {
                 format!(
-                    "{runtime}::GeneratedSwitchShort {{ state: {state}, pos: {pos:?}, neg: {neg:?} }}"
+                    "{runtime}::GeneratedPrivateSwitch {{ state: {state}, pos: {pos:?}, neg: {neg:?}, shorts: {shorts} }}"
                 )
             })
             .collect::<Vec<_>>()
             .join(", ");
         let _ = writeln!(
             out,
-            "\n    pub const SWITCH_SHORTS: [{runtime}::GeneratedSwitchShort; {}] = [{entries}];\n\n    /// Bit `i` is set while `SWITCH_SHORTS[i]` is in its potential arm.\n    pub fn switch_branch_shorts(&mut self, ctx: &GeneratedEvalContext<'_>) -> u64 {{",
-            shorts.len()
+            "\n    pub const PRIVATE_SWITCHES: [{runtime}::GeneratedPrivateSwitch; {}] = [{entries}];\n\n    /// Bit `i` is set while `PRIVATE_SWITCHES[i]` is in its potential arm.\n    pub fn private_switch_kinds(&mut self, ctx: &GeneratedEvalContext<'_>) -> u64 {{",
+            switches.len()
         );
-        if shorts.is_empty() {
+        if switches.is_empty() {
             out.push_str("        let _ = ctx;\n        0\n    }\n");
             return;
         }
@@ -2810,10 +2809,13 @@ impl ModelPlan {
                 stage_fn_name(stage.class)
             );
         }
-        let arms = shorts
+        let arms = switches
             .iter()
             .enumerate()
-            .map(|(bit, (.., slot))| format!("(u64::from(staged[{slot}] != 0.0) << {bit})"))
+            .map(|(bit, (.., slot))| match bit {
+                0 => format!("u64::from(staged[{slot}] != 0.0)"),
+                _ => format!("(u64::from(staged[{slot}] != 0.0) << {bit})"),
+            })
             .collect::<Vec<_>>()
             .join(" | ");
         let _ = writeln!(

@@ -116,9 +116,9 @@ pub struct AnalyzedModule {
     /// Sorted event-state slots holding the retained kind of each switch branch.
     /// A change from the accepted kind implies an order-zero discontinuity.
     pub switch_branch_variables: Vec<usize>,
-    /// The switch branches that short their nodes in potential mode, in the
-    /// order their private currents were allocated.
-    pub switch_shorts: Vec<SwitchShort>,
+    /// The switch branches whose current only their own equation reads, in
+    /// the order their private currents were allocated.
+    pub private_switches: Vec<PrivateSwitch>,
     pub branches: Vec<AnalyzedBranch>,
     pub contributions: Vec<AnalyzedContribution>,
     /// Ordered evaluation statements (assignments and runtime loops),
@@ -509,20 +509,24 @@ pub struct AnalyzedInternalNode {
     pub index: usize, // Index within internal nodes array
 }
 
-/// A switch branch whose every potential write is zero and whose current no
-/// expression reads.
+/// A switch branch whose current no expression reads.
 ///
-/// In potential mode it holds `pos` and `neg` at one potential through the
-/// private current `state`. A host that knows the mode before it builds the
-/// matrix may merge the two nodes instead and drop `state`: the current's
-/// injections cancel on the merged node and its equation becomes `0 = 0`.
+/// Its private current `state` is an unknown only in potential mode, where
+/// it carries the current that holds `pos` and `neg` apart by the written
+/// potential. In flow mode the branch injects its retained current directly
+/// and `state`'s equation reads nothing else, so a host that knows the mode
+/// before it builds the matrix may drop `state`. When every potential write
+/// is zero (`shorts`), the potential arm is a short, and the host may merge
+/// the two nodes instead: the current's injections cancel on the merged node.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SwitchShort {
+pub struct PrivateSwitch {
     /// The event-state slot holding the branch's source kind.
     pub kind: usize,
     pub state: SmolStr,
     pub pos: SmolStr,
     pub neg: SmolStr,
+    /// Every potential the source writes on the branch is the literal zero.
+    pub shorts: bool,
 }
 
 /// Analyzed branch

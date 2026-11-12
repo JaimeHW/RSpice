@@ -1172,7 +1172,7 @@ pub struct Instance {
 	pub(crate) event_state_accepted: Box<[f64; 9]>,
 	pub(crate) event_state_candidate: Box<[f64; 9]>,
 	pub(crate) analog_effects: Option<Box<rspice_veriloga_runtime::AnalogEffectJournal>>,
-	pub(crate) canonical_reactive: Box<[f64; 63]>,
+	pub(crate) canonical_reactive: Box<[f64; 79]>,
 	pub(crate) canonical_output_record: Box<[f64; 67]>,
 	pub(crate) canonical_model_values: Option<std::sync::Arc<CanonicalModelValues>>,
 	pub(crate) canonical_staged: Box<[f64; 759]>,

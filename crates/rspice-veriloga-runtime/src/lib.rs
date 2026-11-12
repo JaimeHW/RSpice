@@ -375,9 +375,9 @@ pub enum GeneratedEvaluationError {
         target: &'static str,
     },
     DiscontinuityDegree,
-    /// A switch branch the host merged at setup, because its parameters held
-    /// it in its potential arm, is no longer in that arm.
-    ShortedSwitchBranch,
+    /// A switch branch whose arm the host fixed at setup, from the parameters
+    /// that chose it, is no longer in that arm.
+    FixedSwitchArmMoved,
     SmallSignal {
         reason: &'static str,
     },
@@ -439,8 +439,8 @@ impl std::fmt::Display for GeneratedEvaluationError {
             Self::DiscontinuityDegree => {
                 f.write_str("$discontinuity degree must have a finite integer value >= -1")
             }
-            Self::ShortedSwitchBranch => f.write_str(
-                "a switch branch merged as a short at setup left its potential arm; its nodes can no longer be one net",
+            Self::FixedSwitchArmMoved => f.write_str(
+                "a switch branch left the arm its parameters chose at setup, which the circuit was built for",
             ),
             Self::SmallSignal { reason } => write!(
                 f,
