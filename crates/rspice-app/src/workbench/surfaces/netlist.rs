@@ -288,12 +288,7 @@ pub(in crate::workbench) fn show_prepared(ui: &mut Ui, cx: &mut Cx<'_, CodeFeatu
             // they asked for. The dispatcher opens Results once the page has
             // drawn.
             if cx.model.simulation.select_run_by_sequence(run_id) {
-                cx.execute(
-                    crate::workbench::commands::vocabulary::Command::OpenWorkspace(
-                        crate::workbench::state::Workspace::Results,
-                    )
-                    .key(),
-                );
+                cx.execute(crate::workbench::framework::command_registry::ids::RESULTS_WORKSPACE);
             } else {
                 cx.wb.prompt(format!(
                     "Run {run_id} is no longer kept in this session, so Results was not opened \

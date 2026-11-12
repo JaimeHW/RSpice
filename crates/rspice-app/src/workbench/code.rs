@@ -28,7 +28,6 @@ use crate::workbench::commands::code_context::{
     resolve_veriloga_compile, veriloga_compile_refusal,
 };
 use crate::workbench::commands::foreign_import_refusal;
-use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::documents::code_workspace::{
     CodeWorkspacePage, ProblemStep, cancel_veriloga_compile, consume_veriloga_compile_request,
     design_hosts_veriloga, netlist_page_shown, poll_automation_source_import,
@@ -63,9 +62,9 @@ pub(in crate::workbench) const SOURCE_EDITOR_MENU: &[MenuEntry] = &[
             Separator,
         ],
     ),
-    MenuEntry::command(Command::Cut.key()).access('T'),
-    MenuEntry::command(Command::Copy.key()).access('C'),
-    MenuEntry::command(Command::Paste.key()).access('P'),
+    MenuEntry::command(ids::CUT).access('T'),
+    MenuEntry::command(ids::COPY).access('C'),
+    MenuEntry::command(ids::PASTE).access('P'),
     Separator,
     MenuEntry::command(CodeCommand::ToggleLineComment.key()).access('M'),
     MenuEntry::command(CodeCommand::FormatDocument.key()).access('O'),
@@ -86,9 +85,9 @@ impl Feature for CodeFeature {
         CodeCommand::GoToDefinition.key(),
         CodeCommand::FindReferences.key(),
         CodeCommand::RenameSymbol.key(),
-        Command::Cut.key(),
-        Command::Copy.key(),
-        Command::Paste.key(),
+        ids::CUT,
+        ids::COPY,
+        ids::PASTE,
         CodeCommand::ToggleLineComment.key(),
         CodeCommand::FormatDocument.key(),
     ];
