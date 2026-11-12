@@ -622,6 +622,13 @@ pub struct DigitalHost {
     /// Start processes, and wake a change's waiters, in reverse declaration
     /// order: the racy-test classifier's schedule (design P2 section 2.4).
     reverse_active: bool,
+    /// Start time zero in Icarus Verilog's three steps; see
+    /// [`Self::prepare_start`]. Set for a discrete testbench.
+    staged_start: bool,
+    /// The processes waiting for the continuous assignments to settle before
+    /// they start; see [`Self::prepare_start`]. Empty outside the first
+    /// settle.
+    deferred_start: Vec<usize>,
 }
 
 /// The interpreter's view of a running host: the signal store, plus the
@@ -792,7 +799,20 @@ impl DigitalHost {
             scratch: DigitalEvalScratch::new(),
             effects: HdlEffects::new(&plan),
             reverse_active: false,
+            staged_start: false,
+            deferred_start: Vec::new(),
             plan,
+        }
+    }
+
+    /// Start time zero in Icarus Verilog's three steps (see
+    /// [`Self::prepare_start`]) rather than every process in the first delta.
+    /// A staged start also gives a driven net an unknown value until its
+    /// first driver runs ([`DigitalSignalStore::start_driven_nets_unknown`]).
+    pub(crate) fn set_staged_start(&mut self, staged: bool) {
+        self.staged_start = staged;
+        if staged {
+            self.store.start_driven_nets_unknown();
         }
     }
 
@@ -1029,8 +1049,8 @@ impl DigitalHost {
     /// at the beginning of simulation, and section 6.1 makes a continuous
     /// assignment a driver that is active from then too — which is why the
     /// lowering puts a `ContinuousAssign`'s evaluation in its entry block and
-    /// the suspension after it. All three kinds therefore start the same way,
-    /// and the host does not consult the kind to decide.
+    /// the suspension after it. See [`Self::prepare_start`] for the order
+    /// the three kinds start in.
     pub(crate) fn start(&mut self) -> Result<(), DigitalRunError> {
         self.require_standalone_execution()?;
         self.prepare_start()?;
@@ -1050,9 +1070,54 @@ impl DigitalHost {
         } else {
             (0..self.slots.len()).collect()
         };
-        for index in order {
-            self.queue(index, 0)?;
+        // Time zero starts in three steps, as Icarus Verilog starts it (IEEE
+        // 1364-2005 section 11.4 leaves the order open, and this is the order
+        // the oracle's gold files record). Every `always` that opens with a
+        // level-sensitive event control — `@*`, `@(a or b)`, combinational
+        // logic — starts first and parks there. The continuous assignments
+        // start next, and their first values wake the processes parked on
+        // them. Every other process — the `initial` blocks, an edge-triggered
+        // `always` and one that opens with a statement — starts in
+        // declaration order once that has settled, so a net that a constant
+        // or another net drives already holds its value when such a block
+        // first reads it, and a register whose reset an `initial` block raises
+        // at time zero has seen no edge.
+        // Only a discrete testbench starts in three steps. A mixed module
+        // starts every process in the first delta: its coordinator drives the
+        // first settle through the analog trial, and its time-zero analog
+        // sample barrier is built on a single start.
+        if !self.staged_start {
+            for index in order {
+                self.queue(index, 0)?;
+            }
+            return Ok(());
         }
+        let parks = |host: &Self, index: usize| {
+            let process = &host.plan.processes[host.slots[index].process];
+            process.kind == DigitalProcessKind::Always
+                && process
+                    .static_sensitivity
+                    .as_ref()
+                    .is_some_and(|list| list.terms.iter().all(|term| term.edge.is_none()))
+        };
+        let assigns = |host: &Self, index: usize| {
+            host.plan.processes[host.slots[index].process].kind
+                == DigitalProcessKind::ContinuousAssign
+        };
+        for &index in &order {
+            if parks(self, index) {
+                self.queue(index, 0)?;
+            }
+        }
+        for &index in &order {
+            if assigns(self, index) {
+                self.queue(index, 0)?;
+            }
+        }
+        self.deferred_start = order
+            .into_iter()
+            .filter(|&index| !parks(self, index) && !assigns(self, index))
+            .collect();
         Ok(())
     }
 
@@ -1381,7 +1446,13 @@ impl DigitalHost {
                     .is_some_and(|next| next <= bound),
             };
             if fired.is_empty() && !more && !active {
-                if !self.analog_waiters.is_empty() {
+                if !self.deferred_start.is_empty() {
+                    // The continuous assignments have settled: the
+                    // remaining processes start now.
+                    for index in std::mem::take(&mut self.deferred_start) {
+                        self.queue(index, tick)?;
+                    }
+                } else if !self.analog_waiters.is_empty() {
                     participant.sample_analog(&mut DigitalActiveExchange {
                         host: self,
                         tick,

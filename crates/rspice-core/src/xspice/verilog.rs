@@ -1028,6 +1028,7 @@ pub fn run_digital_testbench(
         host.drop_timing_checks();
     }
     host.set_reverse_active(options.schedule == HdlSchedule::ReverseActive);
+    host.set_staged_start(true);
     host.start()?;
     let ceiling = options
         .tick_ceiling

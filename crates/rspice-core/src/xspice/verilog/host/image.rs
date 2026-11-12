@@ -53,6 +53,8 @@ impl Clone for DigitalHost {
             scratch,
             effects,
             reverse_active,
+            staged_start,
+            deferred_start,
         } = self;
         Self {
             checkpoint_failed: *checkpoint_failed,
@@ -92,6 +94,8 @@ impl Clone for DigitalHost {
             scratch: scratch.clone(),
             effects: effects.clone(),
             reverse_active: *reverse_active,
+            staged_start: *staged_start,
+            deferred_start: deferred_start.clone(),
         }
     }
 
@@ -143,6 +147,8 @@ impl Clone for DigitalHost {
             scratch: _,
             effects,
             reverse_active,
+            staged_start,
+            deferred_start,
         } = self;
         let Self {
             checkpoint_failed: source_checkpoint_failed,
@@ -182,6 +188,8 @@ impl Clone for DigitalHost {
             scratch: _,
             effects: source_effects,
             reverse_active: source_reverse_active,
+            staged_start: source_staged_start,
+            deferred_start: source_deferred_start,
         } = source;
         *checkpoint_failed = *source_checkpoint_failed;
         plan.clone_from(source_plan);
@@ -219,5 +227,7 @@ impl Clone for DigitalHost {
         drained.clone_from(source_drained);
         effects.clone_from(source_effects);
         *reverse_active = *source_reverse_active;
+        *staged_start = *source_staged_start;
+        deferred_start.clone_from(source_deferred_start);
     }
 }

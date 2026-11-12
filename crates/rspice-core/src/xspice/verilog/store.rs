@@ -102,9 +102,10 @@ pub(crate) mod strength;
 use strength::{NetResolution, StrengthBit};
 
 use rspice_veriloga::canonical_ir::VectorBounds;
+use rspice_veriloga::canonical_ir::cfg::CfgValueKind;
 use rspice_veriloga::canonical_ir::digital::{
-    CanonicalDigitalPlan, DigitalDriverId, DigitalRealResolution, DigitalSchedulingRegion,
-    DigitalSignal, DigitalSignalKind,
+    CanonicalDigitalPlan, DigitalDriver, DigitalDriverId, DigitalProcessKind,
+    DigitalRealResolution, DigitalSchedulingRegion, DigitalSignal, DigitalSignalKind,
 };
 use rspice_veriloga::canonical_ir::digital_eval::{
     DigitalClock, DigitalDeferredUpdate, DigitalDrive, DigitalEnvironment, DigitalEvalError,
@@ -698,6 +699,36 @@ impl DigitalSignalStore {
 
     pub(crate) fn set_activation_clock(&mut self, clock: DigitalClock) {
         self.activation_clock = Some(clock);
+    }
+
+    /// Give every net with drivers, still high impedance, an unknown value
+    /// until its first driver has run.
+    ///
+    /// A net with drivers takes their output value (IEEE 1364-2005 section
+    /// 4.2.1), which is unknown before any has run, so a driver's first `x`
+    /// is no change: an `always @(w)` on a net an unknown variable drives does
+    /// not wake at time zero, as in Icarus Verilog. A net its type drives
+    /// (`tri0`, `supply1`) or a `trireg` keeps the value it already has.
+    ///
+    /// A net whose only drivers assign a constant `z` (`assign v = 1'bz;`)
+    /// stays `z`: such a driver adds nothing to the resolution (section 7.10)
+    /// and Icarus elaborates it away, so the net never changes and an
+    /// `always @(v)` does not wake.
+    pub(crate) fn start_driven_nets_unknown(&mut self) {
+        let plan = Arc::clone(&self.plan);
+        for (index, span) in self.spans.iter().enumerate() {
+            let width = self.widths[index];
+            if span.count > 0
+                && !self.variables[index]
+                && !self.kinds[index].is_real()
+                && self.values[index] == FourStateValue::splat(width, FourStateBit::HighImpedance)
+                && !plan
+                    .drivers_of(DigitalSignalId::from(index))
+                    .all(|driver| assigns_constant_high_impedance(&plan, driver))
+            {
+                self.values[index] = FourStateValue::splat(width, FourStateBit::Unknown);
+            }
+        }
     }
 
     /// Build a store for one plan.
@@ -1613,6 +1644,44 @@ impl DigitalSignalStore {
         }
         self.settle(signal, 0);
     }
+}
+
+/// Whether `driver` is a continuous assignment of a constant that is `z` on
+/// every bit, which reads nothing and so never drives anything else.
+fn assigns_constant_high_impedance(plan: &CanonicalDigitalPlan, driver: &DigitalDriver) -> bool {
+    let Some(process) = plan.process(driver.process) else {
+        return false;
+    };
+    if process.kind != DigitalProcessKind::ContinuousAssign || process.static_sensitivity.is_some()
+    {
+        return false;
+    }
+    let function = &process.function;
+    let mut writes = function
+        .values
+        .iter()
+        .filter_map(|value| match &value.kind {
+            CfgValueKind::DigitalDriverWrite {
+                driver: written,
+                value,
+                enable,
+                ..
+            } if *written == driver.id => Some((*value, *enable)),
+            _ => None,
+        })
+        .peekable();
+    writes.peek().is_some()
+        && writes.all(|(value, enable)| {
+            enable.is_none()
+                && matches!(
+                    &function.value(value).kind,
+                    CfgValueKind::FourStateConstant(constant)
+                        if constant == &FourStateValue::splat(
+                            constant.width(),
+                            FourStateBit::HighImpedance,
+                        )
+                )
+        })
 }
 
 /// The plan's name for a signal, or a positional stand-in.

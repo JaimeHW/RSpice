@@ -266,6 +266,7 @@ impl DigitalHost {
             );
         }
         if !self.inactive.is_empty()
+            || !self.deferred_start.is_empty()
             || !self.analog_waiters.is_empty()
             || self.analog_ready.is_some()
             || self.analog_activation_seconds.is_some()
