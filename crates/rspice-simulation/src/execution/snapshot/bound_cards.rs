@@ -202,6 +202,7 @@ fn shared_transient_stop(
     (transient.bound_observation_cards.is_empty()
         && transient.task.spec_options.tran_checkpoint.is_none()
         && transient.task.spec_options.member.is_none()
+        && transient.task.spec_options.resume_at.is_none()
         && transient.task.numeric_override == card.task.numeric_override
         && transient.execution_environment == card.execution_environment
         && time_s.is_finite()

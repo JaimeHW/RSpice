@@ -109,6 +109,8 @@ pub struct SimulationRunner {
 
     monte_carlo_checkpoint: CheckpointQueue,
     transient_checkpoint: crate::transient_checkpoint::CheckpointQueue,
+    /// Every checkpoint image the current task published, in order.
+    transient_checkpoint_log: crate::transient_checkpoint::CheckpointLog,
 
     /// States a transient task captured for the state cards bound to it,
     /// which their tasks take when this runner starts them. Kept across
@@ -143,6 +145,7 @@ impl SimulationRunner {
             engine_log: Arc::new(Mutex::new(EngineLogQueue::default())),
             monte_carlo_checkpoint: Arc::new(Mutex::new(None)),
             transient_checkpoint: Arc::new(Mutex::new(None)),
+            transient_checkpoint_log: Arc::new(Mutex::new(Vec::new())),
             #[cfg(not(target_arch = "wasm32"))]
             transient_states: Arc::default(),
             thread_handle: None,
@@ -271,6 +274,19 @@ impl SimulationRunner {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .take()
+    }
+
+    /// Every checkpoint image the last task published, in publication order:
+    /// for a transient with a checkpoint schedule, one per scheduled time it
+    /// reached. A resume bound to that transient is captured from these
+    /// ([`crate::execution_artifact::PreparedArtifactProducer::capture_with_transient_checkpoints`]).
+    pub fn take_task_transient_checkpoints(&self) -> Vec<Arc<[u8]>> {
+        std::mem::take(
+            &mut *self
+                .transient_checkpoint_log
+                .lock()
+                .unwrap_or_else(|p| p.into_inner()),
+        )
     }
 
     /// Most recent complete transient state, retained even when a run is cancelled.
@@ -418,7 +434,8 @@ impl SimulationRunner {
         let request = match task.config {
             Some(config)
                 if task.spec_options.tran_checkpoint.is_none()
-                    && task.spec_options.member.is_none() =>
+                    && task.spec_options.member.is_none()
+                    && task.spec_options.resume_at.is_none() =>
             {
                 SimulationRequest::Config(Box::new(config))
             }
@@ -490,6 +507,7 @@ impl SimulationRunner {
         // Reset state
         self.take_monte_carlo_checkpoint();
         self.take_transient_checkpoint();
+        self.take_task_transient_checkpoints();
         self.abort_flag.store(false, Ordering::SeqCst);
         match self.transient_samples.lock() {
             Ok(mut samples) => samples.clear(),
@@ -516,6 +534,7 @@ impl SimulationRunner {
             let streams = RunStreams {
                 monte_carlo_checkpoint: Some(Arc::clone(&self.monte_carlo_checkpoint)),
                 transient_checkpoint: Some(Arc::clone(&self.transient_checkpoint)),
+                transient_checkpoint_log: Some(Arc::clone(&self.transient_checkpoint_log)),
                 transient_samples,
                 engine_log: Some(RunLogSink::queued(
                     Arc::clone(&self.engine_log),
@@ -551,6 +570,7 @@ impl SimulationRunner {
                     engine_log: Arc::clone(&self.engine_log),
                     checkpoint: Arc::clone(&self.monte_carlo_checkpoint),
                     transient_checkpoint: Arc::clone(&self.transient_checkpoint),
+                    transient_checkpoint_log: Arc::clone(&self.transient_checkpoint_log),
                 },
             )?;
         }
@@ -607,6 +627,8 @@ pub(in crate::runner) struct RunStreams {
     pub(in crate::runner) checkpoint_observer: Option<CheckpointObserver>,
     pub(in crate::runner) transient_checkpoint:
         Option<crate::transient_checkpoint::CheckpointQueue>,
+    pub(in crate::runner) transient_checkpoint_log:
+        Option<crate::transient_checkpoint::CheckpointLog>,
     pub(in crate::runner) transient_checkpoint_observer:
         Option<crate::transient_checkpoint::CheckpointObserver>,
     pub(in crate::runner) transient_states: Option<crate::engine_services::TransientStateHandoff>,
@@ -968,6 +990,7 @@ pub(in crate::runner) fn run_simulation_thread_with_progress_observer(
         monte_carlo_checkpoint,
         checkpoint_observer,
         transient_checkpoint,
+        transient_checkpoint_log,
         transient_checkpoint_observer,
         transient_states,
     } = streams;
@@ -1077,8 +1100,14 @@ pub(in crate::runner) fn run_simulation_thread_with_progress_observer(
     let checkpoint_observer = (monte_carlo_checkpoint.is_some() || checkpoint_observer.is_some())
         .then_some(&publish_checkpoint as &(dyn Fn(&[u8]) -> Result<(), SimulationError> + Sync));
     let publish_transient_checkpoint = |bytes: &[u8]| {
-        if let Some(queue) = &transient_checkpoint {
-            crate::transient_checkpoint::replace_checkpoint(queue, Arc::from(bytes));
+        match (&transient_checkpoint, &transient_checkpoint_log) {
+            (Some(queue), Some(log)) => {
+                crate::transient_checkpoint::publish_checkpoint(queue, log, Arc::from(bytes));
+            }
+            (Some(queue), None) => {
+                crate::transient_checkpoint::replace_checkpoint(queue, Arc::from(bytes));
+            }
+            (None, _) => {}
         }
         if let Some(observer) = &transient_checkpoint_observer {
             observer(bytes)?;

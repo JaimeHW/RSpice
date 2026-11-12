@@ -424,6 +424,7 @@ pub(crate) fn bind_prepared_task_dependencies(
                 ExecutionArtifactKind::HbState => *hb,
                 ExecutionArtifactKind::QpssState => *qpss,
                 ExecutionArtifactKind::DcOperatingPointSeed => *op,
+                ExecutionArtifactKind::TransientCheckpoint => *transient,
             }) else {
                 continue;
             };
@@ -448,6 +449,13 @@ pub(crate) fn bind_prepared_task_dependencies(
                 }
                 ExecutionArtifactKind::DcOperatingPointSeed => {
                     PreparedDependencyBinding::dc_operating_point_seed(
+                        *dependency,
+                        *revision,
+                        *config_digest,
+                    )
+                }
+                ExecutionArtifactKind::TransientCheckpoint => {
+                    PreparedDependencyBinding::transient_checkpoint(
                         *dependency,
                         *revision,
                         *config_digest,
@@ -680,6 +688,13 @@ pub(crate) fn prepare_manual_tasks(
                     ExecutionArtifactKind::TransientTrajectory => (
                         &transient_producers,
                         PreparedDependencyBinding::transient_trajectory,
+                    ),
+                    // A manual deck never resumes; a resume is bound to its
+                    // producer by an explicit graph, so this only names the
+                    // binding such a producer takes.
+                    ExecutionArtifactKind::TransientCheckpoint => (
+                        &transient_producers,
+                        PreparedDependencyBinding::transient_checkpoint,
                     ),
                     ExecutionArtifactKind::PeriodicState => (
                         &periodic_producers,

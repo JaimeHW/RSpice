@@ -90,7 +90,11 @@ mod browser {
         /// own memory — posts its lines back across the contract one at a time.
         active_engine_log: Option<Arc<Mutex<EngineLogQueue>>>,
         active_checkpoint: Option<CheckpointQueue>,
-        active_transient_checkpoint: Option<(CheckpointQueue, rspice_core::ResourceLimits)>,
+        active_transient_checkpoint: Option<(
+            CheckpointQueue,
+            crate::transient_checkpoint::CheckpointLog,
+            rspice_core::ResourceLimits,
+        )>,
         pending_result: Option<Result<SimulationResult, SimulationError>>,
     }
 
@@ -333,6 +337,7 @@ mod browser {
         pub(crate) engine_log: Arc<Mutex<EngineLogQueue>>,
         pub(crate) checkpoint: CheckpointQueue,
         pub(crate) transient_checkpoint: CheckpointQueue,
+        pub(crate) transient_checkpoint_log: crate::transient_checkpoint::CheckpointLog,
     }
 
     pub(crate) fn start_worker_request(
@@ -348,6 +353,7 @@ mod browser {
             engine_log,
             checkpoint,
             transient_checkpoint,
+            transient_checkpoint_log,
         } = channels;
         if handle.is_running() || handle.has_unpolled_result() {
             return Err(SimulationError::AlreadyRunning);
@@ -366,8 +372,11 @@ mod browser {
             state.active_transient_samples = transient_samples;
             state.active_engine_log = Some(engine_log);
             state.active_checkpoint = Some(checkpoint);
-            state.active_transient_checkpoint =
-                Some((transient_checkpoint, input.execution_limits));
+            state.active_transient_checkpoint = Some((
+                transient_checkpoint,
+                transient_checkpoint_log,
+                input.execution_limits,
+            ));
             state.pending_result = None;
         }
 
@@ -561,15 +570,18 @@ mod browser {
                 return;
             }
             if transient {
-                state.active_transient_checkpoint.clone()
+                state
+                    .active_transient_checkpoint
+                    .clone()
+                    .map(|(queue, log, limits)| (queue, Some(log), limits))
             } else {
                 state
                     .active_checkpoint
                     .clone()
-                    .map(|q| (q, rspice_core::ResourceLimits::default()))
+                    .map(|q| (q, None, rspice_core::ResourceLimits::default()))
             }
         };
-        let Some((queue, limits)) = queue else {
+        let Some((queue, log, limits)) = queue else {
             return;
         };
         let decoded = (|| -> Result<Vec<u8>, String> {
@@ -595,7 +607,12 @@ mod browser {
             Ok(bytes)
         })();
         match decoded {
-            Ok(bytes) => replace_checkpoint(&queue, Arc::from(bytes)),
+            Ok(bytes) => match &log {
+                Some(log) => {
+                    crate::transient_checkpoint::publish_checkpoint(&queue, log, Arc::from(bytes))
+                }
+                None => replace_checkpoint(&queue, Arc::from(bytes)),
+            },
             Err(error) => fail_worker(state, worker, format!("Invalid checkpoint stream: {error}")),
         }
     }

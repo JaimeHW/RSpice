@@ -190,11 +190,21 @@ impl TransientCheckpointRequest {
 }
 
 pub type CheckpointQueue = Arc<Mutex<Option<Arc<[u8]>>>>;
+/// Every image one task published, in publication order.
+pub type CheckpointLog = Arc<Mutex<Vec<Arc<[u8]>>>>;
 pub type CheckpointObserver = Arc<dyn Fn(&[u8]) -> Result<(), SimulationError> + Send + Sync>;
 pub(crate) type BorrowedObserver<'a> = dyn Fn(&[u8]) -> Result<(), SimulationError> + Sync + 'a;
 pub(crate) struct CheckpointExecution<'a> {
     pub request: &'a TransientCheckpointRequest,
     pub observer: &'a BorrowedObserver<'a>,
+}
+
+/// Keep `bytes` as the latest image and append it to the task's log.
+pub(crate) fn publish_checkpoint(queue: &CheckpointQueue, log: &CheckpointLog, bytes: Arc<[u8]>) {
+    log.lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .push(Arc::clone(&bytes));
+    replace_checkpoint(queue, bytes);
 }
 
 pub fn replace_checkpoint(queue: &CheckpointQueue, bytes: Arc<[u8]>) {

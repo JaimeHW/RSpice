@@ -458,7 +458,8 @@ fn headless_tasks(
         let kinds = required_artifact_kinds(&task.analysis.spec, &task.analysis.spec_options);
         let chosen = kinds.iter().find_map(|kind| {
             let candidates = match kind {
-                ExecutionArtifactKind::TransientTrajectory => &transient,
+                ExecutionArtifactKind::TransientTrajectory
+                | ExecutionArtifactKind::TransientCheckpoint => &transient,
                 ExecutionArtifactKind::PeriodicState => &periodic,
                 ExecutionArtifactKind::HbState => &harmonic,
                 ExecutionArtifactKind::QpssState => &qpss,

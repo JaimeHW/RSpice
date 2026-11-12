@@ -186,14 +186,57 @@ pub(super) fn run_spec_request_in_context(
     if options.member.is_some()
         && (!matches!(spec, AnalysisSpec::Transient { .. })
             || options.tran_checkpoint.is_some()
-            || options.mc_checkpoint.is_some())
+            || options.mc_checkpoint.is_some()
+            || options.resume_at.is_some())
     {
         return Err(SimulationError::InvalidConfig(
             "A Monte Carlo trial or .STEP point is solved as an ordinary transient, with no checkpoint request".into(),
         ));
     }
+    if options.resume_at.is_some()
+        && (!matches!(spec, AnalysisSpec::Transient { .. })
+            || options.tran_checkpoint.is_some()
+            || options.mc_checkpoint.is_some())
+    {
+        return Err(SimulationError::InvalidConfig(
+            "A resume from another task's checkpoint is an ordinary transient with no checkpoint request of its own".into(),
+        ));
+    }
 
     if let Some(config) = config::analysis_config_from_spec(&spec) {
+        if let Some(time) = options.resume_at {
+            let image = dependencies
+                .transient_checkpoints()
+                .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?
+                .image_at(time)
+                .ok_or_else(|| {
+                    SimulationError::InvalidConfig(format!(
+                        "the transient this resume depends on captured no checkpoint at {time:e} s"
+                    ))
+                })?;
+            let request = crate::transient_checkpoint::TransientCheckpointRequest {
+                times: Vec::new(),
+                resume: Some(
+                    crate::transient_checkpoint::TransientCheckpointInput::from_bytes_with_limits(
+                        image.to_vec(),
+                        bridge.resource_limits(),
+                        abort_flag,
+                    )?,
+                ),
+            };
+            let no_publication = |_bytes: &[u8]| Ok(());
+            return bridge.run_with_transient_checkpoint(
+                &config,
+                netlist,
+                source_path,
+                environment,
+                crate::transient_checkpoint::CheckpointExecution {
+                    request: &request,
+                    observer: &no_publication,
+                },
+                abort_flag,
+            );
+        }
         if let Some(member) = options.member {
             return bridge.run_transient_member(
                 &config,

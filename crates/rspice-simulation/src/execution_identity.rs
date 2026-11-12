@@ -781,6 +781,10 @@ fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOpti
             }
         }
     }
+    if let Some(time) = options.resume_at {
+        writer.domain("transient-resume-at/v1");
+        writer.f64(time);
+    }
     writer.domain("spec-execution-options");
     writer.option(options.temp.as_ref(), |writer, config| {
         encode_f64_slice(writer, &config.temperatures_c);

@@ -19,6 +19,11 @@ pub struct SpecExecutionOptions {
     /// The one member of the deck's own `.MC` study or `.STEP` sweep this
     /// transient solves. `None` solves the deck as it stands.
     pub member: Option<TransientMember>,
+    /// Resume this transient from the checkpoint the transient it depends on
+    /// captured at this scheduled time, rather than solving from the start.
+    /// That transient is the same request on the same circuit with this time
+    /// in its checkpoint schedule; the image is the one it captured there.
+    pub resume_at: Option<f64>,
 }
 
 /// One member of a statistical study or a parameter sweep, solved as an

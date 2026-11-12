@@ -159,6 +159,25 @@ impl ResolvedExecutionDependencies {
         })
     }
 
+    /// The images the transient this resume depends on captured.
+    pub fn transient_checkpoints(
+        &self,
+    ) -> Result<&TransientCheckpointArtifact, ExecutionArtifactError> {
+        if self.artifacts.len() != 1
+            || self.bindings.len() != 1
+            || self.bindings[0].kind != ExecutionArtifactKind::TransientCheckpoint
+        {
+            return Err(ExecutionArtifactError::ContractMismatch(
+                "exactly one transient checkpoint artifact is required".to_owned(),
+            ));
+        }
+        self.artifacts[0].transient_checkpoints().ok_or_else(|| {
+            ExecutionArtifactError::ContractMismatch(
+                "resolved checkpoint dependency has no checkpoint images".to_owned(),
+            )
+        })
+    }
+
     pub fn periodic_state(&self) -> Result<&PeriodicStateArtifact, ExecutionArtifactError> {
         if self.artifacts.len() != 1
             || self.bindings.len() != 1
@@ -400,6 +419,13 @@ impl ResolvedExecutionDependencies {
                     ExecutionArtifactPayload::QpssState(state) => {
                         ExecutionArtifactPayloadTransferMetadata::QpssState(Box::new(
                             state.encode_transfer(&mut buffers),
+                        ))
+                    }
+                    // The images travel as their own bytes, which no numeric
+                    // buffer can hold.
+                    ExecutionArtifactPayload::TransientCheckpoint(artifact) => {
+                        ExecutionArtifactPayloadTransferMetadata::TransientCheckpoint(Box::new(
+                            artifact.as_ref().clone(),
                         ))
                     }
                     ExecutionArtifactPayload::HbState(state) => {
@@ -761,6 +787,10 @@ impl ResolvedExecutionDependencies {
                     }
                     ExecutionArtifactPayloadTransferMetadata::QpssState(metadata) => {
                         ExecutionArtifactPayload::QpssState(Arc::new(metadata.decode(&mut buffers)?))
+                    }
+                    ExecutionArtifactPayloadTransferMetadata::TransientCheckpoint(artifact) => {
+                        artifact.validate()?;
+                        ExecutionArtifactPayload::TransientCheckpoint(Arc::from(artifact))
                     }
                     ExecutionArtifactPayloadTransferMetadata::HbState(metadata) => {
                         let mut node_names = Vec::with_capacity(metadata.spectra.len());

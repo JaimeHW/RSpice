@@ -97,6 +97,19 @@ impl PreparedDependencyBinding {
         }
     }
 
+    pub const fn transient_checkpoint(
+        producer_instance_id: AnalysisInstanceId,
+        producer_source_revision: ObjectRevision,
+        producer_config_digest: ContentDigest,
+    ) -> Self {
+        Self {
+            kind: ExecutionArtifactKind::TransientCheckpoint,
+            producer_instance_id,
+            producer_source_revision,
+            producer_config_digest,
+        }
+    }
+
     pub const fn kind(&self) -> ExecutionArtifactKind {
         self.kind
     }
@@ -131,6 +144,7 @@ impl PreparedDependencyBinding {
             ExecutionArtifactKind::DcOperatingPointSeed => 2,
             ExecutionArtifactKind::HbState => 3,
             ExecutionArtifactKind::QpssState => 4,
+            ExecutionArtifactKind::TransientCheckpoint => 5,
         });
         writer.uuid(self.producer_instance_id.as_uuid());
         writer.u64(self.producer_source_revision.get());

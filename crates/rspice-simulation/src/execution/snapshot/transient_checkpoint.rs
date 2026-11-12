@@ -33,6 +33,52 @@ pub(super) fn digest_with_resumes(
     writer.finish()
 }
 
+/// Refuse, before anything is solved, a resume whose producer cannot supply
+/// its image: the producer must run the same deck and schedule a checkpoint at
+/// exactly the time the resume names. The producer's schedule itself is
+/// checked against the circuit with every other schedule, so a circuit whose
+/// state cannot be checkpointed is refused before either task runs.
+pub(super) fn validate_resume_producer(
+    consumer: &PreparedTask,
+    producer: &PreparedTask,
+) -> Result<(), PreparationError> {
+    let Some(time) = consumer.task.spec_options.resume_at else {
+        return Err(invalid("A checkpoint binding needs a resume time"));
+    };
+    if consumer.task.spec_options.tran_checkpoint.is_some()
+        || consumer.task.spec_options.member.is_some()
+        || !consumer.transient_resumes.is_empty()
+    {
+        return Err(invalid(format!(
+            "{}: a resume from another task's checkpoint takes its image from that task alone; it states no checkpoint schedule, selected image or study member of its own",
+            consumer.label
+        )));
+    }
+    let scheduled = producer
+        .task
+        .spec_options
+        .tran_checkpoint
+        .as_ref()
+        .is_some_and(|request| request.resume.is_none() && request.times.contains(&time));
+    if !scheduled {
+        return Err(invalid(format!(
+            "{}: resumes at {time:e} s, and {} schedules no checkpoint at that time",
+            consumer.label, producer.label
+        )));
+    }
+    if producer.task.spec_options.member.is_some()
+        || consumer.executable_netlist_override != producer.executable_netlist_override
+        || consumer.execution_environment != producer.execution_environment
+        || consumer.task.numeric_override != producer.task.numeric_override
+    {
+        return Err(invalid(format!(
+            "{}: a resume continues the circuit and settings of {}, which differ",
+            consumer.label, producer.label
+        )));
+    }
+    Ok(())
+}
+
 fn invalid(message: impl Into<String>) -> PreparationError {
     PreparationError::new(PreparationStage::AnalysisPlan, message)
 }

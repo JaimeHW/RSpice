@@ -1417,6 +1417,9 @@ impl PreparedRunSnapshot {
                         producer.task.spec,
                         AnalysisSpec::LegacyDcOp | AnalysisSpec::DcOp { .. }
                     ),
+                    ExecutionArtifactKind::TransientCheckpoint => {
+                        matches!(producer.task.spec, AnalysisSpec::Transient { .. })
+                    }
                 };
                 if !expected_artifact_kinds.contains(&binding.kind())
                     || !producer_kind_matches
@@ -1445,6 +1448,9 @@ impl PreparedRunSnapshot {
                             ),
                         )
                     })?;
+                if binding.kind() == ExecutionArtifactKind::TransientCheckpoint {
+                    transient_checkpoint::validate_resume_producer(task, producer)?;
+                }
             }
         }
 

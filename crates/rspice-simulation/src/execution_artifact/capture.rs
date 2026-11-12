@@ -24,6 +24,8 @@ pub struct PreparedArtifactProducer {
     source_basis: ContentDigest,
     source: Arc<str>,
     environment: Option<PeriodicOperatingEnvironment>,
+    /// The times this transient schedules checkpoints at, in order.
+    checkpoint_times: Vec<f64>,
 }
 
 impl PreparedArtifactProducer {
@@ -54,6 +56,13 @@ impl PreparedArtifactProducer {
             source_basis: task.source_basis_digest(),
             source: Arc::clone(task.executable_netlist()),
             environment,
+            checkpoint_times: task
+                .spec_options()
+                .tran_checkpoint
+                .as_ref()
+                .filter(|request| request.resume.is_none())
+                .map(|request| request.times.clone())
+                .unwrap_or_default(),
         })
     }
 
@@ -65,7 +74,22 @@ impl PreparedArtifactProducer {
         result: &SimulationResult,
         consumers: impl IntoIterator<Item = &'a AuthorizedTaskDispatch>,
     ) -> Result<Option<ExecutionArtifactEnvelope>, ExecutionArtifactError> {
+        self.capture_with_transient_checkpoints(result, &[], consumers)
+    }
+
+    /// [`Self::capture`], with the checkpoint images this transient published
+    /// as it ran, in publication order
+    /// ([`SimulationRunner::take_task_transient_checkpoints`](crate::runner::SimulationRunner::take_task_transient_checkpoints)).
+    /// A resume bound to this transient takes the image captured at the time
+    /// it names; one the run never reached is refused by that time.
+    pub fn capture_with_transient_checkpoints<'a>(
+        &self,
+        result: &SimulationResult,
+        checkpoints: &[Arc<[u8]>],
+        consumers: impl IntoIterator<Item = &'a AuthorizedTaskDispatch>,
+    ) -> Result<Option<ExecutionArtifactEnvelope>, ExecutionArtifactError> {
         let mut kind = None;
+        let mut resume_times = Vec::new();
         let mut waveforms = Vec::new();
         let mut carry_spectra = false;
         for consumer in consumers {
@@ -112,6 +136,11 @@ impl PreparedArtifactProducer {
                         }
                     }
                     AnalysisSpec::Fft { .. } => carry_spectra = true,
+                    AnalysisSpec::Transient { .. } => {
+                        if let Some(time) = consumer.spec_options().resume_at {
+                            resume_times.push(time);
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -185,6 +214,35 @@ impl PreparedArtifactProducer {
                     config,
                     result,
                 )
+            }
+            (ExecutionArtifactKind::TransientCheckpoint, AnalysisSpec::Transient { .. }) => {
+                let mut images = Vec::with_capacity(resume_times.len());
+                resume_times.sort_by(f64::total_cmp);
+                resume_times.dedup_by(|a, b| a.to_bits() == b.to_bits());
+                for time in resume_times {
+                    let position = self
+                        .checkpoint_times
+                        .iter()
+                        .position(|scheduled| scheduled.to_bits() == time.to_bits())
+                        .ok_or_else(|| {
+                            invalid(format!(
+                                "a resume at {time:e} s names no checkpoint this transient schedules"
+                            ))
+                        })?;
+                    let image = checkpoints.get(position).ok_or_else(|| {
+                        invalid(format!(
+                            "this transient published no checkpoint at {time:e} s for the resume bound to it: it ended before that time, or its images were not retained"
+                        ))
+                    })?;
+                    images.push((time, Arc::clone(image)));
+                }
+                Ok(Some(ExecutionArtifactEnvelope::from_transient_checkpoints(
+                    self.snapshot,
+                    self.instance,
+                    self.revision,
+                    self.config_digest,
+                    super::TransientCheckpointArtifact::new(images)?,
+                )))
             }
             _ => Err(invalid(
                 "Prepared producer cannot supply the requested artifact kind",

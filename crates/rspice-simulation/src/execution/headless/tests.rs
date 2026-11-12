@@ -65,7 +65,11 @@ fn execute(snapshot: PreparedRunSnapshot) -> Vec<SimulationResult> {
             );
             std::thread::sleep(Duration::from_millis(1));
         };
-        if let Some(artifact) = producer.capture(&result, &pending).unwrap() {
+        let checkpoints = runner.take_task_transient_checkpoints();
+        if let Some(artifact) = producer
+            .capture_with_transient_checkpoints(&result, &checkpoints, &pending)
+            .unwrap()
+        {
             artifacts.insert(identity, artifact);
         }
         results.push(result);
@@ -837,4 +841,107 @@ fn a_member_outside_its_study_or_sweep_is_refused_by_name() {
         };
         assert!(error.to_string().contains(message), "{error}");
     }
+}
+
+fn checkpoint_transient(resume_at: Option<f64>) -> HeadlessTaskRequest {
+    let mut request = task(
+        AnalysisSpec::Transient {
+            stop_time: 1e-5,
+            step_time: 1e-7,
+            start_time: 0.0,
+            max_timestep: None,
+            uic: false,
+        },
+        ".tran 0.1u 10u".into(),
+    );
+    match resume_at {
+        None => {
+            request.label = "uninterrupted".into();
+            request.analysis.spec_options.tran_checkpoint =
+                Some(crate::transient_checkpoint::TransientCheckpointRequest {
+                    times: vec![4e-6],
+                    resume: None,
+                });
+        }
+        Some(time) => {
+            request.label = format!("resumed@{time:e}");
+            request.analysis.spec_options.resume_at = Some(time);
+        }
+    }
+    request
+}
+
+const RC_PULSE: &str =
+    "Checkpointed RC\nV1 in 0 PULSE(0 1 1u 0.2u 0.2u 2u 5u)\nR1 in out 1k\nC1 out 0 1n\n.end\n";
+
+#[test]
+fn a_resume_continues_the_transient_of_the_same_run_from_the_checkpoint_it_captured() {
+    let path = origin();
+    let producer = checkpoint_transient(None);
+    let mut resume = checkpoint_transient(Some(4e-6));
+    resume.dependencies.push(producer.instance_id);
+    let snapshot = prepare_headless_run(
+        HeadlessRunInput::new(RC_PULSE, &path, vec![producer, resume]),
+        &NoAbort,
+    )
+    .unwrap();
+    let results = execute(snapshot);
+    let trace = |result: &SimulationResult| {
+        let SimulationResult::Transient {
+            time, waveforms, ..
+        } = result
+        else {
+            panic!("a transient, got {result:?}")
+        };
+        let (_, output) = waveforms
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("out"))
+            .unwrap();
+        (time.clone(), output.y_values.clone())
+    };
+    let (full_time, full) = trace(&results[0]);
+    let (resumed_time, resumed) = trace(&results[1]);
+    assert!(
+        resumed_time[0] >= 4e-6 * (1.0 - 1e-12),
+        "{}",
+        resumed_time[0]
+    );
+    assert_eq!(resumed_time.last(), full_time.last());
+    let mut shared = 0;
+    for (time, value) in resumed_time.iter().zip(&resumed) {
+        if let Some(index) = full_time.iter().position(|t| t.to_bits() == time.to_bits()) {
+            shared += 1;
+            assert!(
+                (full[index] - value).abs() <= 1e-12,
+                "at {time:e}: {} uninterrupted, {value} resumed",
+                full[index]
+            );
+        }
+    }
+    // The continuation is the uninterrupted run's own: it lands on the same
+    // accepted times after the checkpoint.
+    assert!(
+        shared * 10 >= resumed_time.len() * 9,
+        "{shared} of {}",
+        resumed_time.len()
+    );
+}
+
+#[test]
+fn a_resume_whose_producer_schedules_no_checkpoint_there_is_refused_before_solving() {
+    let path = origin();
+    let producer = checkpoint_transient(None);
+    let mut resume = checkpoint_transient(Some(5e-6));
+    resume.dependencies.push(producer.instance_id);
+    let error = prepare_headless_run(
+        HeadlessRunInput::new(RC_PULSE, &path, vec![producer, resume]),
+        &NoAbort,
+    )
+    .expect_err("an unscheduled resume time is refused at preparation");
+    assert!(
+        error
+            .to_string()
+            .contains("schedules no checkpoint at that time"),
+        "{error}"
+    );
 }

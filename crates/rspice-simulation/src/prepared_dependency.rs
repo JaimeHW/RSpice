@@ -16,6 +16,9 @@ pub enum ExecutionArtifactKind {
     HbState,
     QpssState,
     DcOperatingPointSeed,
+    /// The checkpoint images a transient captured on its own schedule, which
+    /// a transient of the same circuit resumes from.
+    TransientCheckpoint,
 }
 
 impl ExecutionArtifactKind {
@@ -27,6 +30,7 @@ impl ExecutionArtifactKind {
             Self::HbState => "Harmonic Balance",
             Self::QpssState => "QPSS",
             Self::DcOperatingPointSeed => "operating point",
+            Self::TransientCheckpoint => "checkpointed transient",
         }
     }
 }
@@ -57,6 +61,7 @@ pub fn required_artifact_kinds(
     const HB: &[ExecutionArtifactKind] = &[ExecutionArtifactKind::HbState];
     const QPSS: &[ExecutionArtifactKind] = &[ExecutionArtifactKind::QpssState];
     const DC_SEED: &[ExecutionArtifactKind] = &[ExecutionArtifactKind::DcOperatingPointSeed];
+    const CHECKPOINT: &[ExecutionArtifactKind] = &[ExecutionArtifactKind::TransientCheckpoint];
     const EITHER_PERIODIC: &[ExecutionArtifactKind] = &[
         ExecutionArtifactKind::PeriodicState,
         ExecutionArtifactKind::HbState,
@@ -73,6 +78,9 @@ pub fn required_artifact_kinds(
     }
 
     match spec {
+        // A transient that resumes from another transient's checkpoint reads
+        // the image that transient captured.
+        AnalysisSpec::Transient { .. } if options.resume_at.is_some() => CHECKPOINT,
         // A recorded FFT reads the spectrum its transient already solved, so
         // it binds the same trajectory a Fourier analysis does.
         AnalysisSpec::Fourier { .. } | AnalysisSpec::Fft { .. } => TRANSIENT,
@@ -104,6 +112,18 @@ pub fn validate_prepared_dependency_contract_with_options(
     consumer_options: &SpecExecutionOptions,
     producer: &AnalysisSpec,
 ) -> Result<(), ExecutionArtifactError> {
+    if consumer_options.resume_at.is_some() {
+        // A resume continues the very transient that captured the image: the
+        // same window, step and startup, so the continuation is that run's.
+        return if matches!(consumer, AnalysisSpec::Transient { .. }) && consumer == producer {
+            Ok(())
+        } else {
+            Err(ExecutionArtifactError::ContractMismatch(format!(
+                "a resume continues the transient that captured its checkpoint, and {} is not that transient",
+                producer.run_type().display_name()
+            )))
+        };
+    }
     if matches!(
         consumer,
         AnalysisSpec::Qpac { .. } | AnalysisSpec::Qpnoise { .. } | AnalysisSpec::Qpxf { .. }

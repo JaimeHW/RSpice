@@ -1457,3 +1457,45 @@ fn singular_histories_are_authenticated_and_preserved_in_fourier_dependencies() 
         ));
     }
 }
+
+#[test]
+fn checkpoint_images_cross_the_worker_transfer_and_resolve_by_their_scheduled_time() {
+    let producer = AnalysisInstanceId::new();
+    let images: Vec<(f64, Arc<[u8]>)> = vec![
+        (2e-6, Arc::from(vec![1_u8, 2, 3])),
+        (4e-6, Arc::from(vec![4_u8, 5])),
+    ];
+    let artifact = ExecutionArtifactEnvelope::from_transient_checkpoints(
+        digest(1),
+        producer,
+        ObjectRevision::new(3).unwrap(),
+        digest(2),
+        TransientCheckpointArtifact::new(images).unwrap(),
+    );
+    let binding = PreparedDependencyBinding::transient_checkpoint(
+        producer,
+        ObjectRevision::new(3).unwrap(),
+        digest(2),
+    );
+    let artifacts = HashMap::from([(producer, artifact)]);
+    let resolved =
+        ResolvedExecutionDependencies::resolve(digest(1), vec![binding], &artifacts).unwrap();
+    let (metadata, buffers) = resolved.encode_transfer().unwrap();
+    let restored = ResolvedExecutionDependencies::decode_transfer(&metadata, buffers).unwrap();
+    assert_eq!(restored, resolved);
+    let checkpoints = restored.transient_checkpoints().unwrap();
+    assert_eq!(
+        checkpoints.image_at(4e-6).map(|image| &image[..]),
+        Some(&[4_u8, 5][..])
+    );
+    assert!(checkpoints.image_at(3e-6).is_none());
+    // Images out of time order, or an empty one, are not an artifact.
+    assert!(
+        TransientCheckpointArtifact::new(vec![
+            (4e-6, Arc::from(vec![1_u8])),
+            (2e-6, Arc::from(vec![2_u8]))
+        ])
+        .is_err()
+    );
+    assert!(TransientCheckpointArtifact::new(vec![(4e-6, Arc::from(Vec::new()))]).is_err());
+}

@@ -1344,6 +1344,54 @@ impl HbStateArtifact {
     }
 }
 
+/// The checkpoint images a transient captured on its own schedule, each with
+/// its scheduled time, for the resumes bound to that transient.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TransientCheckpointArtifact {
+    images: Vec<(f64, Arc<[u8]>)>,
+}
+
+impl TransientCheckpointArtifact {
+    pub(crate) fn new(images: Vec<(f64, Arc<[u8]>)>) -> Result<Self, ExecutionArtifactError> {
+        let artifact = Self { images };
+        artifact.validate()?;
+        Ok(artifact)
+    }
+
+    /// The image captured at `time`, the scheduled time a resume names.
+    pub fn image_at(&self, time: f64) -> Option<&Arc<[u8]>> {
+        self.images
+            .iter()
+            .find(|(scheduled, _)| scheduled.to_bits() == time.to_bits())
+            .map(|(_, image)| image)
+    }
+
+    fn validate(&self) -> Result<(), ExecutionArtifactError> {
+        if self.images.is_empty()
+            || self
+                .images
+                .iter()
+                .any(|(time, image)| !time.is_finite() || image.is_empty())
+            || self.images.windows(2).any(|pair| pair[1].0 <= pair[0].0)
+        {
+            return Err(ExecutionArtifactError::InvalidPayload(
+                "a transient checkpoint artifact carries one nonempty image per scheduled time, in time order".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn digest(&self) -> ContentDigest {
+        let mut writer = CanonicalWriter::new("rspice.transient-checkpoint-artifact/v1");
+        writer.sequence(self.images.len());
+        for (time, image) in &self.images {
+            writer.f64(*time);
+            writer.bytes(image);
+        }
+        writer.finish()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 enum ExecutionArtifactPayload {
     TransientTrajectory(Arc<TransientTrajectoryArtifact>),
@@ -1351,6 +1399,7 @@ enum ExecutionArtifactPayload {
     HbState(Arc<HbStateArtifact>),
     QpssState(Arc<QpssStateArtifact>),
     DcOperatingPointSeed(Arc<DcOperatingPointSeedArtifact>),
+    TransientCheckpoint(Arc<TransientCheckpointArtifact>),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1595,13 +1644,41 @@ impl ExecutionArtifactEnvelope {
         }))
     }
 
+    /// The images `producer` captured on its schedule, for the resumes bound
+    /// to it.
+    pub(crate) fn from_transient_checkpoints(
+        snapshot_digest: ContentDigest,
+        producer_instance_id: AnalysisInstanceId,
+        producer_source_revision: ObjectRevision,
+        producer_config_digest: ContentDigest,
+        artifact: TransientCheckpointArtifact,
+    ) -> Self {
+        Self {
+            snapshot_digest,
+            producer_instance_id,
+            producer_source_revision,
+            producer_config_digest,
+            kind: ExecutionArtifactKind::TransientCheckpoint,
+            payload_digest: artifact.digest(),
+            payload: ExecutionArtifactPayload::TransientCheckpoint(Arc::new(artifact)),
+        }
+    }
+
+    pub fn transient_checkpoints(&self) -> Option<&TransientCheckpointArtifact> {
+        match &self.payload {
+            ExecutionArtifactPayload::TransientCheckpoint(artifact) => Some(artifact),
+            _ => None,
+        }
+    }
+
     pub fn trajectory(&self) -> Option<&TransientTrajectoryArtifact> {
         match &self.payload {
             ExecutionArtifactPayload::TransientTrajectory(trajectory) => Some(trajectory),
             ExecutionArtifactPayload::QpssState(_)
             | ExecutionArtifactPayload::PeriodicState(_)
             | ExecutionArtifactPayload::HbState(_)
-            | ExecutionArtifactPayload::DcOperatingPointSeed(_) => None,
+            | ExecutionArtifactPayload::DcOperatingPointSeed(_)
+            | ExecutionArtifactPayload::TransientCheckpoint(_) => None,
         }
     }
 
@@ -1611,7 +1688,8 @@ impl ExecutionArtifactEnvelope {
             ExecutionArtifactPayload::QpssState(_)
             | ExecutionArtifactPayload::TransientTrajectory(_)
             | ExecutionArtifactPayload::HbState(_)
-            | ExecutionArtifactPayload::DcOperatingPointSeed(_) => None,
+            | ExecutionArtifactPayload::DcOperatingPointSeed(_)
+            | ExecutionArtifactPayload::TransientCheckpoint(_) => None,
         }
     }
 
@@ -1621,7 +1699,8 @@ impl ExecutionArtifactEnvelope {
             ExecutionArtifactPayload::QpssState(_)
             | ExecutionArtifactPayload::TransientTrajectory(_)
             | ExecutionArtifactPayload::PeriodicState(_)
-            | ExecutionArtifactPayload::DcOperatingPointSeed(_) => None,
+            | ExecutionArtifactPayload::DcOperatingPointSeed(_)
+            | ExecutionArtifactPayload::TransientCheckpoint(_) => None,
         }
     }
 
@@ -1631,7 +1710,8 @@ impl ExecutionArtifactEnvelope {
             ExecutionArtifactPayload::QpssState(_)
             | ExecutionArtifactPayload::TransientTrajectory(_)
             | ExecutionArtifactPayload::PeriodicState(_)
-            | ExecutionArtifactPayload::HbState(_) => None,
+            | ExecutionArtifactPayload::HbState(_)
+            | ExecutionArtifactPayload::TransientCheckpoint(_) => None,
         }
     }
 
@@ -1703,6 +1783,16 @@ impl ExecutionArtifactEnvelope {
                 };
                 seed.validate()?;
                 seed.digest()
+            }
+            ExecutionArtifactKind::TransientCheckpoint => {
+                let ExecutionArtifactPayload::TransientCheckpoint(artifact) = &self.payload else {
+                    return Err(ExecutionArtifactError::InvalidPayload(
+                        "transient checkpoint artifact carries the wrong payload variant"
+                            .to_owned(),
+                    ));
+                };
+                artifact.validate()?;
+                artifact.digest()
             }
         };
         if actual_digest != self.payload_digest {
@@ -1886,6 +1976,7 @@ enum ExecutionArtifactPayloadTransferMetadata {
     HbState(Box<HbStateTransferMetadata>),
     QpssState(Box<qpss::QpssStateTransferMetadata>),
     DcOperatingPointSeed(DcOperatingPointSeedTransferMetadata),
+    TransientCheckpoint(Box<TransientCheckpointArtifact>),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
