@@ -456,8 +456,11 @@ use rspice_core::analysis::harmonic_balance::{
 // Xyce `.SENS` study at every `.DC` point and its `.PRINT SENS` columns, bring
 // it to 5,283. `FourierMethod`, its `for_dialect` and `FourierConfig::with_method`,
 // the rule each dialect's simulator reads a `.FOUR` window by, bring it to
-// 5,286.
-const MAX_PUBLIC_ITEMS: usize = 5286;
+// 5,286. `ModelFinishTask` and its `name`, `ModelFinishSource` and
+// `ModelFinish::failed`, which name the `$finish`, `$stop` or `$fatal` that
+// ended a run, its source line and whether it failed the run for the
+// simulation crate's run checks, bring it to 5,290.
+const MAX_PUBLIC_ITEMS: usize = 5290;
 
 /// The `#[doc(hidden)] pub` items of the family, counted apart from
 /// `MAX_PUBLIC_ITEMS`. A hidden item is plumbing that one crate of the engine
@@ -691,8 +694,12 @@ const MAX_PUBLIC_ITEMS: usize = 5286;
 // `BuiltinVerilogAInstance::output_descriptors` and `operating_point_outputs`
 // add two: the operating-point report and `.PRINT N(M1:gm)` (`rspice-core`
 // circuit/introspection.rs) read a generated device's module outputs. The
-// census is 1,689, with no slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 1689;
+// census is 1,689, with no slack. `CoordinatorFinish::analog_task_event`
+// adds one: the circuit's candidate inspection (`rspice-core`
+// circuit/mixed_signal.rs) hands a design's `$finish`, `$stop` or `$fatal`
+// to the analog finish path under its own task name. The census is 1,690,
+// with no slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 1690;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

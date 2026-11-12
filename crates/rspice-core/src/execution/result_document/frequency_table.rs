@@ -41,6 +41,58 @@ mod finish_wire {
         #[serde(with = "Location")]
         point: crate::ModelFinishPoint,
         diagnostic_level: u8,
+        /// Absent before document version 22, when only `$finish` could end
+        /// a frequency analysis's run.
+        #[serde(with = "Task", default = "finish_task")]
+        task: crate::ModelFinishTask,
+        #[serde(with = "Source", default, skip_serializing_if = "Option::is_none")]
+        source: Option<crate::ModelFinishSource>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
+    }
+
+    fn finish_task() -> crate::ModelFinishTask {
+        crate::ModelFinishTask::Finish
+    }
+
+    #[derive(Serialize, Deserialize)]
+    #[serde(remote = "crate::ModelFinishTask", rename_all = "snake_case")]
+    enum Task {
+        Finish,
+        Stop,
+        Fatal,
+    }
+
+    #[derive(Serialize, Deserialize)]
+    #[serde(
+        remote = "crate::ModelFinishSource",
+        rename_all = "camelCase",
+        deny_unknown_fields
+    )]
+    struct SourceLine {
+        file: String,
+        line: u32,
+    }
+
+    struct Source;
+
+    impl Source {
+        fn serialize<S: serde::Serializer>(
+            value: &Option<crate::ModelFinishSource>,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error> {
+            #[derive(Serialize)]
+            struct Borrowed<'a>(#[serde(with = "SourceLine")] &'a crate::ModelFinishSource);
+            value.as_ref().map(Borrowed).serialize(serializer)
+        }
+
+        fn deserialize<'de, D: serde::Deserializer<'de>>(
+            deserializer: D,
+        ) -> Result<Option<crate::ModelFinishSource>, D::Error> {
+            #[derive(Deserialize)]
+            struct Owned(#[serde(with = "SourceLine")] crate::ModelFinishSource);
+            Option::<Owned>::deserialize(deserializer).map(|value| value.map(|value| value.0))
+        }
     }
 
     #[derive(Serialize)]
@@ -193,6 +245,26 @@ pub(super) fn validate(
         return Err(malformed("table coordinates require an AC or noise result"));
     }
     require_name("frequency table name", &table.table_name)?;
+    if let Some(finish) = &table.finish {
+        if document.schema_version < 22
+            && (finish.task != crate::ModelFinishTask::Finish
+                || finish.source.is_some()
+                || finish.message.is_some())
+        {
+            return Err(malformed(
+                "a finish's task, source line and message require document version 22",
+            ));
+        }
+        if finish.message.is_some() != (finish.task == crate::ModelFinishTask::Fatal) {
+            return Err(malformed("only a $fatal finish carries a message"));
+        }
+        if let Some(source) = &finish.source {
+            require_name("finish source file", &source.file)?;
+            if source.line == 0 {
+                return Err(malformed("finish source lines start at 1"));
+            }
+        }
+    }
     validate_completion(
         table.requested_rows,
         document.point_count,

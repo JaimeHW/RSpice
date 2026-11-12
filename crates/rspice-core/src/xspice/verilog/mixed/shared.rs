@@ -296,7 +296,42 @@ pub struct CoordinatorFinish<'a> {
     pub instance: &'a str,
     /// That instance's module.
     pub module: &'a str,
+    /// The file and line of the call, when the compile placed it.
+    pub source: Option<rspice_veriloga_runtime::AnalogTaskSource<'a>>,
     pub finish: &'a super::super::effects::HdlFinishRequest,
+}
+
+impl<'a> CoordinatorFinish<'a> {
+    /// The request as the event an analog finish makes, under its own task
+    /// name, with the `$fatal` message after the level.
+    #[doc(hidden)]
+    pub fn analog_task_event(&self, time: f64) -> rspice_veriloga_runtime::AnalogTaskEvent<'a> {
+        use super::super::effects::HdlFinishKind;
+        use rspice_veriloga_runtime::{AnalogTaskArgument, AnalogTaskKind};
+        let level = AnalogTaskArgument::Integer(i64::from(self.finish.level));
+        let (kind, arguments): (_, Box<[AnalogTaskArgument]>) = match self.finish.kind {
+            HdlFinishKind::Finish => (AnalogTaskKind::Finish, Box::new([level])),
+            HdlFinishKind::Stop => (AnalogTaskKind::Stop, Box::new([level])),
+            HdlFinishKind::Fatal => (
+                AnalogTaskKind::Fatal,
+                Box::new([
+                    level,
+                    AnalogTaskArgument::String(self.finish.message.clone().unwrap_or_default()),
+                ]),
+            ),
+        };
+        rspice_veriloga_runtime::AnalogTaskEvent {
+            instance: self.instance,
+            model: self.module,
+            call: rspice_veriloga_runtime::AnalogTaskInvocation {
+                kind,
+                site: self.finish.site,
+                time,
+                arguments,
+            },
+            source: self.source,
+        }
+    }
 }
 
 /// The coordinator's half of a held-equilibrium image; see
@@ -740,6 +775,13 @@ impl MixedDigitalCoordinator {
         Some(CoordinatorFinish {
             instance,
             module: scope.map_or("", |scope| scope.module.as_str()),
+            source: site
+                .origin
+                .as_ref()
+                .map(|origin| rspice_veriloga_runtime::AnalogTaskSource {
+                    file: &origin.file,
+                    line: origin.line,
+                }),
             finish,
         })
     }

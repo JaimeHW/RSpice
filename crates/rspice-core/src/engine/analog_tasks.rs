@@ -2,7 +2,10 @@
 
 use super::{Engine, SimulationError};
 use crate::abort_signal::ModelRunSignal;
-use crate::{AbortSignal, CircuitData, ModelFinish, ModelFinishPoint, SimulationOutcome};
+use crate::{
+    AbortSignal, CircuitData, ModelFinish, ModelFinishPoint, ModelFinishSource, ModelFinishTask,
+    SimulationOutcome,
+};
 use rspice_veriloga_runtime::{AnalogTaskArgument, AnalogTaskEvent, AnalogTaskKind};
 
 pub(super) struct TransientModelCandidate {
@@ -31,13 +34,56 @@ pub(super) struct FrequencyModelState<'a> {
 }
 
 fn finish_level(event: &AnalogTaskEvent<'_>) -> Result<u8, &'static str> {
-    let [AnalogTaskArgument::Integer(level)] = event.call.arguments.as_ref() else {
-        return Err("analog finish call has an invalid argument snapshot");
+    let level = match (event.call.kind, event.call.arguments.as_ref()) {
+        (AnalogTaskKind::Finish | AnalogTaskKind::Stop, [AnalogTaskArgument::Integer(level)])
+        | (
+            AnalogTaskKind::Fatal,
+            [
+                AnalogTaskArgument::Integer(level),
+                AnalogTaskArgument::String(_),
+            ],
+        ) => *level,
+        (AnalogTaskKind::Finish | AnalogTaskKind::Stop | AnalogTaskKind::Fatal, _) => {
+            return Err("analog finish call has an invalid argument snapshot");
+        }
+        _ => return Err("analog task has no implemented host control handler"),
     };
-    if event.call.kind != AnalogTaskKind::Finish || !(0..=2).contains(level) {
+    if !(0..=2).contains(&level) {
         return Err("analog task has no implemented host control handler");
     }
-    Ok(*level as u8)
+    Ok(level as u8)
+}
+
+/// The run-ending request one accepted `$finish`, `$stop` or `$fatal` event
+/// makes. Only a design's digital half executes `$stop` and `$fatal`: its
+/// event carries the `$fatal` message after the level.
+fn model_finish(
+    event: &AnalogTaskEvent<'_>,
+    point: ModelFinishPoint,
+) -> Result<ModelFinish, &'static str> {
+    let diagnostic_level = finish_level(event)?;
+    let task = match event.call.kind {
+        AnalogTaskKind::Stop => ModelFinishTask::Stop,
+        AnalogTaskKind::Fatal => ModelFinishTask::Fatal,
+        _ => ModelFinishTask::Finish,
+    };
+    let message = match event.call.arguments.as_ref() {
+        [_, AnalogTaskArgument::String(message)] => Some(message.clone()),
+        _ => None,
+    };
+    Ok(ModelFinish {
+        instance: event.instance.into(),
+        model: event.model.into(),
+        site: event.call.site,
+        point,
+        diagnostic_level,
+        task,
+        source: event.source.map(|source| ModelFinishSource {
+            file: source.file.into(),
+            line: source.line,
+        }),
+        message,
+    })
 }
 
 /// One accepted analog output call as the run's HDL output record (a call
@@ -121,7 +167,10 @@ fn analog_finish_record(
         point,
         tick: 0,
         seconds,
-        stream: HdlStream::Finish { stop: false, level },
+        stream: HdlStream::Finish {
+            stop: event.call.kind == AnalogTaskKind::Stop,
+            level,
+        },
         text: String::new(),
         origin: HdlOrigin {
             scope: event.instance.into(),
@@ -391,21 +440,16 @@ impl Engine {
                 }
                 return;
             }
-            let level = match finish_level(&event) {
-                Ok(level) => level,
+            let finish = match model_finish(&event, point) {
+                Ok(finish) => finish,
                 Err(error) => {
                     invalid = Some(error);
                     return;
                 }
             };
+            let level = finish.diagnostic_level;
             if !control.is_finished() {
-                control.request_finish(ModelFinish {
-                    instance: event.instance.into(),
-                    model: event.model.into(),
-                    site: event.call.site,
-                    point,
-                    diagnostic_level: level,
-                });
+                control.request_finish(finish);
             }
             // The accepted finish, whichever path requested it, tells the
             // run's console who ended the run, where and when, once.
@@ -439,15 +483,7 @@ impl Engine {
                 circuit
                     .validate_nonmixed_model_acceptance()
                     .map_err(SimulationError::Circuit)?;
-                let diagnostic_level =
-                    finish_level(&event).map_err(|error| SimulationError::Circuit(error.into()))?;
-                Ok(ModelFinish {
-                    instance: event.instance.into(),
-                    model: event.model.into(),
-                    site: event.call.site,
-                    point,
-                    diagnostic_level,
-                })
+                model_finish(&event, point).map_err(|error| SimulationError::Circuit(error.into()))
             })
             .transpose()
     }
@@ -470,15 +506,9 @@ impl Engine {
             .map_err(SimulationError::Circuit)?;
         let mut candidate = None;
         let mut invalid = None;
-        let mut consume = |event: AnalogTaskEvent<'_>| match finish_level(&event) {
-            Ok(level) if candidate.is_none() => {
-                candidate = Some(ModelFinish {
-                    instance: event.instance.into(),
-                    model: event.model.into(),
-                    site: event.call.site,
-                    point,
-                    diagnostic_level: level,
-                });
+        let mut consume = |event: AnalogTaskEvent<'_>| match model_finish(&event, point) {
+            Ok(finish) if candidate.is_none() => {
+                candidate = Some(finish);
             }
             Err(error) => invalid = Some(error),
             _ => {}

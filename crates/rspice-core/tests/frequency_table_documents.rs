@@ -291,6 +291,9 @@ fn model_finish_prefixes_keep_requested_rows_and_strict_finish_metadata() {
             site: 2,
             point,
             diagnostic_level: 1,
+            task: rspice_core::ModelFinishTask::Finish,
+            source: None,
+            message: None,
         });
         let document = AnalysisResultDocument::from_ac_table(identity(AnalysisKind::Ac), &ac)
             .unwrap()

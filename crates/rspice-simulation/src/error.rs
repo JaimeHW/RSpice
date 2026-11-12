@@ -931,6 +931,9 @@ mod tests {
             site: 7,
             point: rspice_core::ModelFinishPoint::Initialization,
             diagnostic_level: 1,
+            task: rspice_core::ModelFinishTask::Finish,
+            source: None,
+            message: None,
         };
         let detail = finish.to_string();
         let translated = SimulationError::from(rspice_core::SimulationError::ModelFinished(

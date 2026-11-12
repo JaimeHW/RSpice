@@ -42,7 +42,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 mod model_control;
 #[doc(hidden)]
 pub use model_control::ModelRunSignal;
-pub use model_control::{ModelFinish, ModelFinishPoint, ModelRunControl, SimulationOutcome};
+pub use model_control::{
+    ModelFinish, ModelFinishPoint, ModelFinishSource, ModelFinishTask, ModelRunControl,
+    SimulationOutcome,
+};
 
 //=============================================================================
 // TransientSample - the observation payload

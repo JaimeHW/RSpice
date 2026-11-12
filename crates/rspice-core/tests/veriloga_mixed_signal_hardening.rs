@@ -1647,6 +1647,44 @@ fn a_design_that_ends_its_run_completes_checkpointed_and_resumed_runs() {
     }
 }
 
+/// The finish names the task that ended the run, the line it was written
+/// on, and a `$fatal`'s message, never `$finish` for all three.
+#[test]
+fn a_design_finish_names_its_task_line_and_message() {
+    use rspice_core::ModelFinishTask;
+    for (task, expected, message) in [
+        ("$finish", ModelFinishTask::Finish, None),
+        ("$stop(2)", ModelFinishTask::Stop, None),
+        (
+            "$fatal(1, \"gave up after %0d edges\", 13)",
+            ModelFinishTask::Fatal,
+            Some("gave up after 13 edges"),
+        ),
+    ] {
+        let (model, netlist) = ending_divider(task);
+        let (outcome, _) =
+            recorded(|engine, abort| engine.run_tran_with_abort(&netlist, 200e-9, 1e-9, abort));
+        let (_, finish) = finished(outcome);
+        assert_eq!(finish.task, expected, "{task}");
+        assert_eq!(finish.message.as_deref(), message, "{task}");
+        let source = finish.source.clone().expect("the call's line");
+        let written = std::fs::read_to_string(&source.file)
+            .unwrap_or_else(|error| panic!("{task}: {source:?}: {error}"));
+        let line = written.lines().nth(source.line as usize - 1).unwrap_or("");
+        assert!(
+            line.contains(task.split('(').next().unwrap()),
+            "{task}: {line:?}"
+        );
+        let _ = model;
+        let shown = finish.to_string();
+        assert!(shown.contains(expected.name()), "{shown}");
+        assert!(
+            shown.contains(&format!("{}:{}", source.file, source.line)),
+            "{shown}"
+        );
+    }
+}
+
 fn a_design_end_completes_checkpointed_and_resumed_runs(
     task: &str,
     last: &rspice_core::config::HdlStream,

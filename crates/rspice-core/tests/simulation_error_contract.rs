@@ -434,6 +434,9 @@ fn one_of_every_variant() -> Vec<SimulationError> {
             site: 0,
             point: rspice_core::ModelFinishPoint::Initialization,
             diagnostic_level: 1,
+            task: rspice_core::ModelFinishTask::Finish,
+            source: None,
+            message: None,
         })),
         SimulationError::Configuration(SimulationConfigError::InvalidCount {
             field: "max_iterations",

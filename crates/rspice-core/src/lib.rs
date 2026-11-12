@@ -143,8 +143,8 @@ pub use rspice_core_base::resource;
 
 // Re-export primary types for convenience
 pub use abort_signal::{
-    AbortReason, AbortSignal, AtomicAbort, ModelFinish, ModelFinishPoint, NoAbort,
-    SimulationOutcome,
+    AbortReason, AbortSignal, AtomicAbort, ModelFinish, ModelFinishPoint, ModelFinishSource,
+    ModelFinishTask, NoAbort, SimulationOutcome,
 };
 pub use analysis::{DcAnalysis, MeasureEngine, MeasureResult};
 pub use circuit::CircuitData;

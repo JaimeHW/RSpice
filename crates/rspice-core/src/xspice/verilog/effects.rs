@@ -84,6 +84,8 @@ pub struct HdlFinishRequest {
     pub site: u32,
     pub tick: u64,
     pub seconds: f64,
+    /// `$fatal`'s formatted message; `None` for `$finish` and `$stop`.
+    pub message: Option<String>,
 }
 
 /// One entry of the monitor region's queue.
@@ -683,6 +685,7 @@ impl HdlEffects {
                         HdlFinishKind::Finish
                     },
                     level,
+                    None,
                 );
                 self.record(
                     plan,
@@ -713,9 +716,17 @@ impl HdlEffects {
                     }
                 };
                 let text = self.format(plan, site, args, 0, (DigitalRadix::Decimal, store))?;
+                let message = (site.kind == DigitalSystemCallKind::Fatal)
+                    .then(|| text.trim_end_matches(['\r', '\n']).to_owned());
                 self.record(plan, site, clock, HdlStream::Diagnostic { severity }, text);
-                if site.kind == DigitalSystemCallKind::Fatal {
-                    self.halt(site, clock, HdlFinishKind::Fatal, site.level.unwrap_or(1));
+                if let Some(message) = message {
+                    self.halt(
+                        site,
+                        clock,
+                        HdlFinishKind::Fatal,
+                        site.level.unwrap_or(1),
+                        Some(message),
+                    );
                     outcome.control = DigitalTaskControl::Halt;
                 }
             }
@@ -768,6 +779,7 @@ impl HdlEffects {
         clock: Option<DigitalClock>,
         kind: HdlFinishKind,
         level: u8,
+        message: Option<String>,
     ) {
         if self.finish.is_none() {
             let (tick, seconds) =
@@ -778,6 +790,7 @@ impl HdlEffects {
                 site: site.id.0,
                 tick,
                 seconds,
+                message,
             });
         }
     }

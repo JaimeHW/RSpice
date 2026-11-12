@@ -15,7 +15,36 @@ pub enum ModelFinishPoint {
     Frequency { frequency: f64 },
 }
 
-/// The first accepted `$finish` request in one simulation run.
+/// The system task that ended a run: `$finish` or `$stop` (IEEE 1364-2005
+/// section 17.4.1), or `$fatal` (IEEE 1800-2017 section 20.10). A batch run
+/// treats `$stop` as `$finish`, as `vvp -n` does; `$fatal` ends it failed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum ModelFinishTask {
+    Finish,
+    Stop,
+    Fatal,
+}
+
+impl ModelFinishTask {
+    /// The task as its call is written.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Finish => "$finish",
+            Self::Stop => "$stop",
+            Self::Fatal => "$fatal",
+        }
+    }
+}
+
+/// The file and one-based line a finishing call was written on.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ModelFinishSource {
+    pub file: String,
+    pub line: u32,
+}
+
+/// The first accepted `$finish`, `$stop` or `$fatal` request in one
+/// simulation run.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ModelFinish {
     pub instance: String,
@@ -24,23 +53,47 @@ pub struct ModelFinish {
     pub site: u32,
     pub point: ModelFinishPoint,
     pub diagnostic_level: u8,
+    /// The task that ended the run.
+    pub task: ModelFinishTask,
+    /// Where the call was written, when the model knows.
+    pub source: Option<ModelFinishSource>,
+    /// `$fatal`'s formatted message; `None` for `$finish` and `$stop`.
+    pub message: Option<String>,
+}
+
+impl ModelFinish {
+    /// Whether the task that ended the run failed it: a `$fatal`.
+    pub fn failed(&self) -> bool {
+        self.task == ModelFinishTask::Fatal
+    }
 }
 
 impl std::fmt::Display for ModelFinish {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             formatter,
-            "model '{}' instance '{}' requested $finish at site {} during ",
-            self.model, self.instance, self.site
+            "model '{}' instance '{}' requested {} ",
+            self.model,
+            self.instance,
+            self.task.name()
         )?;
+        match &self.source {
+            Some(source) => write!(formatter, "at {}:{}", source.file, source.line)?,
+            None => write!(formatter, "at site {}", self.site)?,
+        }
+        formatter.write_str(" during ")?;
         match self.point {
-            ModelFinishPoint::Initialization => formatter.write_str("initialization"),
-            ModelFinishPoint::OperatingPoint => formatter.write_str("the operating point"),
-            ModelFinishPoint::Transient { time } => write!(formatter, "transient time {time}"),
-            ModelFinishPoint::DcSweep { value } => write!(formatter, "DC sweep value {value}"),
+            ModelFinishPoint::Initialization => formatter.write_str("initialization")?,
+            ModelFinishPoint::OperatingPoint => formatter.write_str("the operating point")?,
+            ModelFinishPoint::Transient { time } => write!(formatter, "transient time {time}")?,
+            ModelFinishPoint::DcSweep { value } => write!(formatter, "DC sweep value {value}")?,
             ModelFinishPoint::Frequency { frequency } => {
-                write!(formatter, "frequency {frequency} Hz")
+                write!(formatter, "frequency {frequency} Hz")?
             }
+        }
+        match &self.message {
+            Some(message) => write!(formatter, ": {message}"),
+            None => Ok(()),
         }
     }
 }
@@ -159,6 +212,9 @@ mod tests {
             site: 7,
             point: ModelFinishPoint::Initialization,
             diagnostic_level: 0,
+            task: ModelFinishTask::Finish,
+            source: None,
+            message: None,
         };
         control.request_finish(finish.clone());
         assert!(control.is_finished());
@@ -182,6 +238,9 @@ mod tests {
             site: 1,
             point: ModelFinishPoint::OperatingPoint,
             diagnostic_level: 1,
+            task: ModelFinishTask::Finish,
+            source: None,
+            message: None,
         };
         first.control.request_finish(request.clone());
         first.control.request_finish(ModelFinish {

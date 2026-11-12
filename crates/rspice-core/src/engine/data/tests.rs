@@ -22,6 +22,9 @@ fn finish() -> ModelFinish {
         site: 1,
         point: ModelFinishPoint::Frequency { frequency: 2.0 },
         diagnostic_level: 0,
+        task: crate::ModelFinishTask::Finish,
+        source: None,
+        message: None,
     }
 }
 
