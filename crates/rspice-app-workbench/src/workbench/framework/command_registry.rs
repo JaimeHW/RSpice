@@ -329,12 +329,16 @@ pub mod ids {
         COMMAND_PALETTE = "command-palette";
         COMPILE_VERILOG_A = "veriloga";
         COPY = "copy-selection";
+        CUT = "cut-selection";
         CYCLE_GRID = "cycle-grid";
+        DELETE = "delete-selection";
         DESIGN_WORKSPACE = "design";
+        DUPLICATE = "duplicate-selection";
         EDIT_SPECIFICATIONS = "specifications";
         EXPORT_RESULTS = "export-results";
         EXPRESSION_DIAGNOSTICS = "expression-diagnostics";
         FAMILY_SLICING = "family-slicing";
+        FIND_IN_DESIGN = "find-design";
         HELP_CENTER = "help-center";
         LEGAL_PRIVACY = "legal-privacy-center";
         MEASUREMENT_LIBRARY = "measurement-library";
@@ -349,6 +353,7 @@ pub mod ids {
         OPEN_NETLIST = "open-netlist";
         OPEN_NOTIFICATIONS = "open-notifications";
         OPEN_RUN_IN_RESULTS = "open-run-in-results";
+        PASTE = "paste-selection";
         PDK_SETTINGS = "pdk-settings";
         PREFERENCES = "preferences";
         PRINT_HARDCOPY = "print-hardcopy";
@@ -362,6 +367,7 @@ pub mod ids {
         RESULT_WAVEFORMS = "waveforms";
         RUN_SIMULATION = "start-run";
         SAVE = "save-project";
+        SELECT_ALL = "select-all";
         SHEET_PROPERTIES = "page-setup";
         SHOW_IN_NETLIST = "show-in-netlist";
         SIMULATION_ANALYSES = "simulation-analyses";

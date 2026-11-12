@@ -63,57 +63,13 @@ impl Command {
                         && state.model.can_redo_active_schematic()
                 }
             }
-            Self::Cut => {
-                if active_symbol_editor(app) {
-                    !state.active_view_read_only()
-                        && !state.design.symbol.editor.effective_selection().is_empty()
-                } else {
-                    active_schematic_editor(app)
-                        && !state.schematic_edit_read_only()
-                        && schematic_selection_has_live_object(&state.model.schematic)
-                }
-            }
-            Self::Delete => {
-                if active_symbol_editor(app) {
-                    !state.active_view_read_only()
-                        && !state.design.symbol.editor.effective_selection().is_empty()
-                } else {
-                    active_schematic_editor(app)
-                        && !state.schematic_edit_read_only()
-                        && schematic_selection_has_deletable_object(&state.model.schematic)
-                }
-            }
-            Self::Duplicate => {
-                if active_symbol_editor(app) {
-                    !state.active_view_read_only()
-                        && !state.design.symbol.editor.effective_selection().is_empty()
-                } else {
-                    active_schematic_editor(app)
-                        && !state.schematic_edit_read_only()
-                        && schematic_selection_has_duplicable_object(&state.model.schematic)
-                }
-            }
-            Self::Copy => {
-                if let Some(enabled) = app.routed_command_key_enabled(ids::COPY) {
-                    enabled
-                } else if active_symbol_editor(app) {
-                    !state.design.symbol.editor.effective_selection().is_empty()
-                } else {
-                    active_schematic_editor(app)
-                        && schematic_selection_has_live_object(&state.model.schematic)
-                }
-            }
-            Self::Paste => {
-                if active_symbol_editor(app) {
-                    !state.active_view_read_only()
-                        && !state.design.symbol.editor.clipboard.is_empty()
-                } else {
-                    active_schematic_editor(app)
-                        && !state.schematic_edit_read_only()
-                        && !state.design.schematic_clipboard.is_empty()
-                }
-            }
-            Self::SelectAll => active_symbol_editor(app) || active_schematic_editor(app),
+            // Whether the part that takes an edit command here can carry it out.
+            Self::Cut
+            | Self::Copy
+            | Self::Paste
+            | Self::Duplicate
+            | Self::Delete
+            | Self::SelectAll => app.routed_command_key_enabled(self.key()) == Some(true),
             Self::DeselectAll => {
                 if active_symbol_editor(app) {
                     !state.design.symbol.editor.effective_selection().is_empty()

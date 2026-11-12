@@ -1055,10 +1055,14 @@ mod tests {
             (ids::CLEAR_CONSOLE, Command::ClearConsole),
             (ids::COMMAND_PALETTE, Command::CommandPalette),
             (ids::COPY, Command::Copy),
+            (ids::CUT, Command::Cut),
+            (ids::DELETE, Command::Delete),
             (
                 ids::DESIGN_WORKSPACE,
                 Command::OpenWorkspace(Workspace::Design),
             ),
+            (ids::DUPLICATE, Command::Duplicate),
+            (ids::FIND_IN_DESIGN, Command::FindInDesign),
             (ids::HELP_CENTER, Command::HelpCenter),
             (ids::LEGAL_PRIVACY, Command::LegalPrivacy),
             (
@@ -1071,6 +1075,7 @@ mod tests {
             ),
             (ids::OPEN_CONSOLE, Command::OpenConsole),
             (ids::OPEN_NOTIFICATIONS, Command::OpenNotifications),
+            (ids::PASTE, Command::Paste),
             (
                 ids::PROJECT_WORKSPACE,
                 Command::OpenWorkspace(Workspace::Project),
@@ -1080,6 +1085,7 @@ mod tests {
                 ids::RESULTS_WORKSPACE,
                 Command::OpenWorkspace(Workspace::Results),
             ),
+            (ids::SELECT_ALL, Command::SelectAll),
             (
                 ids::SIMULATE_WORKSPACE,
                 Command::OpenWorkspace(Workspace::Simulate),

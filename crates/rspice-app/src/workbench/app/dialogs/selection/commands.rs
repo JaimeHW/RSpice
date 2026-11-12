@@ -247,6 +247,22 @@ pub(crate) fn paste_schematic_clipboard_at(
     Ok(true)
 }
 
+/// Float the app's clipboard at the pointer, or at the middle of the view,
+/// and say on the prompt line why nothing floats when nothing does.
+pub(crate) fn paste_schematic_clipboard(
+    design: FloatingCopyParts<'_>,
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
+) {
+    let anchor = design.paste_anchor(model);
+    let message = match paste_schematic_clipboard_at(design, model, wb, anchor) {
+        Ok(true) => return,
+        Ok(false) => "Nothing to paste.".to_owned(),
+        Err(reason) => reason,
+    };
+    wb.prompt(message);
+}
+
 /// Select every object on the active sheet that `filter` admits.
 pub(crate) fn select_all_schematic_objects(
     filter: SchematicSelectionFilter,
@@ -525,6 +541,87 @@ pub(in crate::workbench) fn schematic_selection_has_live_object(
             .probes
             .iter()
             .any(|probe| selection.has_probe(probe.id))
+}
+
+/// Return whether Delete can resolve at least one selected identity to a live
+/// complete object. Segment and vertex handles are edit subobjects rather than
+/// independently persisted conductors, so the destructive review promotes a
+/// live handle to its owning wire before commit.
+pub(in crate::workbench) fn schematic_selection_has_deletable_object(
+    schematic: &SchematicState,
+) -> bool {
+    schematic_selection_has_live_object(schematic)
+        || schematic.document().wires.iter().any(|wire| {
+            schematic
+                .session
+                .editor
+                .selection
+                .wire_segments
+                .iter()
+                .any(|selected| {
+                    selected.wire_id == wire.id && selected.segment_index < wire.segment_count()
+                })
+                || schematic
+                    .session
+                    .editor
+                    .selection
+                    .wire_vertices
+                    .iter()
+                    .any(|selected| {
+                        selected.wire_id == wire.id && selected.vertex_index < wire.vertex_count()
+                    })
+        })
+}
+
+/// Whether Duplicate has something to copy: no wire segment or vertex
+/// handle is selected, and the selection holds at least one complete
+/// object the open schematic still has.
+pub(in crate::workbench) fn schematic_selection_has_duplicable_object(
+    schematic: &SchematicState,
+) -> bool {
+    let selection = &schematic.session.editor.selection;
+    selection.wire_segments.is_empty()
+        && selection.wire_vertices.is_empty()
+        && (schematic
+            .document()
+            .components
+            .iter()
+            .any(|component| selection.has_component(component.id))
+            || schematic
+                .document()
+                .wires
+                .iter()
+                .any(|wire| selection.has_wire(wire.id))
+            || schematic
+                .document()
+                .net_labels
+                .iter()
+                .any(|label| selection.has_net_label(label.id))
+            || schematic
+                .document()
+                .buses
+                .iter()
+                .any(|bus| selection.has_bus(bus.id))
+            || schematic
+                .document()
+                .bus_taps
+                .iter()
+                .any(|tap| selection.has_bus_tap(tap.id))
+            || schematic
+                .document()
+                .design_notes
+                .iter()
+                .any(|note| selection.has_design_note(note.id))
+            || schematic
+                .document()
+                .documentation_shapes
+                .iter()
+                .any(|shape| selection.has_documentation_shape(shape.id))
+            || schematic
+                .document()
+                .probes
+                .iter()
+                .any(|probe| selection.has_probe(probe.id)))
 }
 
 fn complete_selection_count(schematic: &SchematicState, selection: &Selection) -> usize {

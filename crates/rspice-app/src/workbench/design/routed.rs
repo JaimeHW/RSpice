@@ -1,21 +1,40 @@
-//! The workbench commands the design feature takes a part in: the view
-//! commands move the open schematic's or symbol's viewport. Results takes
-//! them first where it is in front; the design feature takes them in a
+//! The workbench commands the design feature takes a part in.
+//!
+//! The view commands move the open schematic's or symbol's viewport. Results
+//! takes them first where it is in front; the design feature takes them in a
 //! schematic or symbol editor, and nowhere else is there a view to move.
 //! Each acts on the innermost view: a symbol edited in place, then the
 //! symbol editor, then the schematic.
+//!
+//! The edit commands (Cut, Copy, Paste, Duplicate, Delete and Select all)
+//! act on the selection in a schematic or symbol editor; Results takes Copy
+//! first where it is in front. Find in design opens the Navigator's search
+//! from anywhere but a Verilog-A cell view.
 
 use rspice_schematic_editor::view::navigation::ZoomRequest;
 
+use crate::schematic::view::sheet_visibility::retain_selection_on_active_sheet_in;
 use crate::state::ViewType;
 use crate::workbench::app::actions::workspace::symbol_in_place::{
     in_place_bounds, in_place_session, in_place_session_mut,
 };
-use crate::workbench::app::dialogs::selection::commands::schematic_selection_has_live_object;
+use crate::workbench::app::actions::{
+    copy_selected_symbol_shape, delete_selected_symbol_item, duplicate_selected_symbol_shape,
+    paste_symbol_shape, select_all_symbol_items,
+};
+use crate::workbench::app::dialogs::selection::commands::{
+    schematic_selection_has_deletable_object, schematic_selection_has_duplicable_object,
+    schematic_selection_has_live_object,
+};
+use crate::workbench::app::{
+    copy_active_schematic_selection, cut_schematic_selection, delete_schematic_selection,
+    duplicate_schematic_selection, paste_schematic_clipboard, select_all_schematic_objects,
+};
 use crate::workbench::app_state::Model;
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::feature::{Cx, Reads, RoutedCommand};
-use crate::workbench::state::Workspace;
+use crate::workbench::framework::requests::FocusNavigatorSearch;
+use crate::workbench::state::{DesignPanel, Drawer, Workspace};
 
 use super::DesignFeature;
 
@@ -67,6 +86,48 @@ pub(super) const ROUTED: &[RoutedCommand<DesignFeature>] = &[
         takes: in_editor,
         enabled: can_step_back,
         execute: zoom_previous,
+    },
+    RoutedCommand {
+        key: ids::CUT,
+        takes: in_editor,
+        enabled: can_cut,
+        execute: cut_selection,
+    },
+    RoutedCommand {
+        key: ids::COPY,
+        takes: in_editor,
+        enabled: can_copy,
+        execute: copy_selection,
+    },
+    RoutedCommand {
+        key: ids::PASTE,
+        takes: in_editor,
+        enabled: can_paste,
+        execute: paste_clipboard,
+    },
+    RoutedCommand {
+        key: ids::DUPLICATE,
+        takes: in_editor,
+        enabled: can_duplicate,
+        execute: duplicate_selection,
+    },
+    RoutedCommand {
+        key: ids::DELETE,
+        takes: in_editor,
+        enabled: can_delete,
+        execute: delete_selection,
+    },
+    RoutedCommand {
+        key: ids::SELECT_ALL,
+        takes: in_editor,
+        enabled: |_| true,
+        execute: select_all,
+    },
+    RoutedCommand {
+        key: ids::FIND_IN_DESIGN,
+        takes: finds_in_design,
+        enabled: |_| true,
+        execute: find_in_design,
     },
 ];
 
@@ -194,4 +255,142 @@ fn zoom_previous(cx: &mut Cx<'_, DesignFeature>) {
             (editor.zoom, editor.pan) = view;
         }
     }
+}
+
+/// Whether the symbol editor's selection can be cut, duplicated or deleted:
+/// the symbol can change and something is selected.
+fn symbol_selection_editable(reads: &Reads<'_, DesignFeature>) -> bool {
+    !reads.model.active_view_read_only()
+        && !reads.state.symbol.editor.effective_selection().is_empty()
+}
+
+fn can_cut(reads: &Reads<'_, DesignFeature>) -> bool {
+    if symbol_editor(reads.wb.workspace, reads.model) {
+        symbol_selection_editable(reads)
+    } else {
+        !reads.model.schematic_edit_read_only()
+            && schematic_selection_has_live_object(&reads.model.schematic)
+    }
+}
+
+fn can_copy(reads: &Reads<'_, DesignFeature>) -> bool {
+    if symbol_editor(reads.wb.workspace, reads.model) {
+        !reads.state.symbol.editor.effective_selection().is_empty()
+    } else {
+        schematic_selection_has_live_object(&reads.model.schematic)
+    }
+}
+
+fn can_paste(reads: &Reads<'_, DesignFeature>) -> bool {
+    if symbol_editor(reads.wb.workspace, reads.model) {
+        !reads.model.active_view_read_only() && !reads.state.symbol.editor.clipboard.is_empty()
+    } else {
+        !reads.model.schematic_edit_read_only() && !reads.state.schematic_clipboard.is_empty()
+    }
+}
+
+fn can_duplicate(reads: &Reads<'_, DesignFeature>) -> bool {
+    if symbol_editor(reads.wb.workspace, reads.model) {
+        symbol_selection_editable(reads)
+    } else {
+        !reads.model.schematic_edit_read_only()
+            && schematic_selection_has_duplicable_object(&reads.model.schematic)
+    }
+}
+
+fn can_delete(reads: &Reads<'_, DesignFeature>) -> bool {
+    if symbol_editor(reads.wb.workspace, reads.model) {
+        symbol_selection_editable(reads)
+    } else {
+        !reads.model.schematic_edit_read_only()
+            && schematic_selection_has_deletable_object(&reads.model.schematic)
+    }
+}
+
+fn cut_selection(cx: &mut Cx<'_, DesignFeature>) {
+    if symbol_editor(cx.wb.workspace, cx.model) {
+        let modal_open = cx.application_modal_open();
+        delete_selected_symbol_item(&mut cx.state.symbol, cx.model, cx.wb, modal_open, true);
+    } else {
+        cut_schematic_selection(&mut cx.state.schematic_clipboard, cx.model, cx.wb);
+    }
+}
+
+/// Copy keeps only what the active sheet shows of the schematic's
+/// selection, then copies it.
+fn copy_selection(cx: &mut Cx<'_, DesignFeature>) {
+    if symbol_editor(cx.wb.workspace, cx.model) {
+        copy_selected_symbol_shape(&mut cx.state.symbol, cx.model, cx.wb);
+    } else {
+        retain_selection_on_active_sheet_in(cx.model);
+        copy_active_schematic_selection(&mut cx.state.schematic_clipboard, cx.model);
+    }
+}
+
+fn paste_clipboard(cx: &mut Cx<'_, DesignFeature>) {
+    if symbol_editor(cx.wb.workspace, cx.model) {
+        let modal_open = cx.application_modal_open();
+        paste_symbol_shape(
+            &mut cx.state.symbol,
+            cx.model,
+            cx.wb,
+            cx.state.canvas_hover,
+            cx.state.canvas_view_center,
+            modal_open,
+        );
+    } else {
+        paste_schematic_clipboard(cx.state.floating_copy_parts(), cx.model, cx.wb);
+    }
+}
+
+fn duplicate_selection(cx: &mut Cx<'_, DesignFeature>) {
+    if symbol_editor(cx.wb.workspace, cx.model) {
+        let modal_open = cx.application_modal_open();
+        duplicate_selected_symbol_shape(
+            &mut cx.state.symbol,
+            cx.model,
+            cx.wb,
+            cx.state.canvas_hover,
+            cx.state.canvas_view_center,
+            modal_open,
+        );
+    } else {
+        duplicate_schematic_selection(cx.state.floating_copy_parts(), cx.model, cx.wb);
+    }
+}
+
+fn delete_selection(cx: &mut Cx<'_, DesignFeature>) {
+    if symbol_editor(cx.wb.workspace, cx.model) {
+        let modal_open = cx.application_modal_open();
+        delete_selected_symbol_item(&mut cx.state.symbol, cx.model, cx.wb, modal_open, false);
+    } else {
+        delete_schematic_selection(cx.model, cx.wb);
+    }
+}
+
+fn select_all(cx: &mut Cx<'_, DesignFeature>) {
+    if symbol_editor(cx.wb.workspace, cx.model) {
+        select_all_symbol_items(&mut cx.state.symbol, cx.model, cx.wb);
+    } else {
+        select_all_schematic_objects(cx.state.schematic_selection_filter, cx.model, cx.wb);
+    }
+}
+
+/// Whether Find searches the design: anywhere but a Verilog-A cell view in
+/// the Design workspace, which has no instances or nets to find. The shell
+/// gives the netlist page's find to code before it routes the command.
+fn finds_in_design(reads: &Reads<'_, DesignFeature>) -> bool {
+    reads.wb.workspace != Workspace::Design
+        || reads.model.workspace.content.active_view_type() != ViewType::VerilogA
+}
+
+/// Bring the Navigator forward on the Design workspace and focus its search
+/// box. The box is the Navigator tab's; the Component shelf that Place
+/// instance brings forward has none.
+fn find_in_design(cx: &mut Cx<'_, DesignFeature>) {
+    cx.wb.activate(Workspace::Design);
+    cx.wb.navigator_visible = true;
+    cx.wb.drawer = Some(Drawer::Navigator);
+    cx.state.design_panel = DesignPanel::Navigator;
+    cx.wb.outbox.push(FocusNavigatorSearch);
 }

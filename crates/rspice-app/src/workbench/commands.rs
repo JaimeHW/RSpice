@@ -8,18 +8,9 @@ use crate::schematic::view::schematic_symbol_context;
 use crate::schematic::view::selection_transform::{
     SelectionTransform, transform_selection_on_active_sheet,
 };
-use crate::workbench::app::actions::{
-    copy_selected_symbol_shape, delete_selected_symbol_item, duplicate_selected_symbol_shape,
-    paste_symbol_shape, select_all_symbol_items,
-};
-use crate::workbench::app::{
-    copy_active_schematic_selection, cut_schematic_selection, delete_schematic_selection,
-    duplicate_schematic_selection, select_all_schematic_objects,
-};
 use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::framework::command_registry::{CommandOwner, ids};
-use crate::workbench::framework::requests::FocusNavigatorSearch;
 use crate::workbench::menu_bar::{
     FileMenuAction, check_cellview, check_design, dispatch_file_menu_action,
 };
@@ -325,105 +316,18 @@ impl Command {
             Self::Exit => file_action(app, FileMenuAction::Exit),
             Self::Undo => app.action_edit_undo(),
             Self::Redo => app.action_edit_redo(),
-            Self::Cut => {
-                if active_symbol_editor(app) {
-                    let modal_open = app.state.application_modal_open();
-                    delete_selected_symbol_item(
-                        &mut app.state.design.symbol,
-                        &mut app.state.model,
-                        &mut app.state.workbench,
-                        modal_open,
-                        true,
-                    );
-                } else {
-                    cut_schematic_selection(
-                        &mut app.state.design.schematic_clipboard,
-                        &mut app.state.model,
-                        &mut app.state.workbench,
-                    );
-                }
-            }
-            Self::Copy => {
-                if app.route_command_key(ids::COPY) {
-                    // The workspace in front copied what it has selected.
-                } else if active_symbol_editor(app) {
-                    copy_selected_symbol_shape(
-                        &mut app.state.design.symbol,
-                        &app.state.model,
-                        &mut app.state.workbench,
-                    );
-                } else {
-                    crate::schematic::view::sheet_visibility::retain_selection_on_active_sheet(
-                        &mut app.state,
-                    );
-                    copy_active_schematic_selection(
-                        &mut app.state.design.schematic_clipboard,
-                        &app.state.model,
-                    );
-                }
-            }
-            Self::Paste => {
-                if active_symbol_editor(app) {
-                    let modal_open = app.state.application_modal_open();
-                    paste_symbol_shape(
-                        &mut app.state.design.symbol,
-                        &mut app.state.model,
-                        &mut app.state.workbench,
-                        app.state.design.canvas_hover,
-                        app.state.design.canvas_view_center,
-                        modal_open,
-                    );
-                } else {
-                    app.action_edit_paste();
-                }
-            }
-            Self::Duplicate => {
-                if active_symbol_editor(app) {
-                    let modal_open = app.state.application_modal_open();
-                    duplicate_selected_symbol_shape(
-                        &mut app.state.design.symbol,
-                        &mut app.state.model,
-                        &mut app.state.workbench,
-                        app.state.design.canvas_hover,
-                        app.state.design.canvas_view_center,
-                        modal_open,
-                    );
-                } else {
-                    duplicate_schematic_selection(
-                        app.state.design.floating_copy_parts(),
-                        &mut app.state.model,
-                        &mut app.state.workbench,
-                    );
-                }
-            }
-            Self::Delete => {
-                if active_symbol_editor(app) {
-                    let modal_open = app.state.application_modal_open();
-                    delete_selected_symbol_item(
-                        &mut app.state.design.symbol,
-                        &mut app.state.model,
-                        &mut app.state.workbench,
-                        modal_open,
-                        false,
-                    );
-                } else {
-                    delete_schematic_selection(&mut app.state.model, &mut app.state.workbench);
-                }
-            }
-            Self::SelectAll => {
-                if active_symbol_editor(app) {
-                    select_all_symbol_items(
-                        &mut app.state.design.symbol,
-                        &app.state.model,
-                        &mut app.state.workbench,
-                    );
-                } else {
-                    select_all_schematic_objects(
-                        app.state.design.schematic_selection_filter,
-                        &mut app.state.model,
-                        &mut app.state.workbench,
-                    );
-                }
+            // An edit command acts on the selection in the editor the reader
+            // is working in, and the part that takes it there carries it out:
+            // Results copies what it has selected where it is in front, the
+            // design feature edits in a schematic or symbol editor. Anywhere
+            // else there is nothing to edit, so nothing happens.
+            Self::Cut
+            | Self::Copy
+            | Self::Paste
+            | Self::Duplicate
+            | Self::Delete
+            | Self::SelectAll => {
+                app.route_command_key(self.key());
             }
             Self::DeselectAll => deselect_all(app),
             Self::SelectOfKind(kind) => {
@@ -443,24 +347,15 @@ impl Command {
                     crate::workbench::app::open_selected_object_properties(&mut app.state);
                 }
             }
+            // The netlist page's find is code's. Elsewhere the design feature
+            // opens the Navigator's search, except in a Verilog-A cell view,
+            // which has no instances or nets to find: Find searches its
+            // source bundle instead.
             Self::FindInDesign => {
                 if netlist_page_is_visible(&app.state) {
                     app.state.code.netlist.find.open = true;
-                } else if crate::workbench::documents::code_workspace::design_hosts_veriloga(
-                    app.state.workbench.workspace,
-                    &app.state.model.workspace,
-                ) {
-                    // A Verilog-A cell view has no instances or nets to find;
-                    // Find searches its source bundle instead.
+                } else if !app.route_command_key(ids::FIND_IN_DESIGN) {
                     app.execute_command_key(CodeCommand::FindCodeDocument.key());
-                } else {
-                    activate_workspace(app, Workspace::Design);
-                    app.state.workbench.navigator_visible = true;
-                    app.state.workbench.drawer = Some(super::state::Drawer::Navigator);
-                    // The search box is the Navigator tab's; the Component
-                    // shelf that Place instance brings forward has none.
-                    app.state.design.design_panel = super::state::DesignPanel::Navigator;
-                    app.state.workbench.outbox.push(FocusNavigatorSearch);
                 }
             }
             // A view command moves the view the reader is working in, and the

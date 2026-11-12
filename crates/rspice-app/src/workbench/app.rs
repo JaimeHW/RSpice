@@ -199,13 +199,12 @@ pub(crate) use dialogs::selection::array::{
     cancel_armed_array_selection, open_array_selection_dialog,
 };
 pub(crate) use dialogs::selection::commands::floating::{
-    FloatingCopyParts, cancel_floating_paste, floating_paste_scope, on_grid,
-    schematic_paste_anchor, turn_floating_paste,
+    FloatingCopyParts, cancel_floating_paste, floating_paste_scope, on_grid, turn_floating_paste,
 };
 pub(crate) use dialogs::selection::commands::{
     cut_schematic_selection, delete_schematic_selection, duplicate_schematic_selection,
-    duplicate_schematic_selection_at, paste_schematic_clipboard_at, schematic_grid_step,
-    select_all_schematic_objects,
+    duplicate_schematic_selection_at, paste_schematic_clipboard, paste_schematic_clipboard_at,
+    schematic_grid_step, select_all_schematic_objects,
 };
 pub(crate) use dialogs::selection::move_selection::{
     arm_move_selection, armed_move_selection_authority, cancel_armed_move_selection,

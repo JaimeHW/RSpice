@@ -7,8 +7,9 @@
 
 use super::*;
 
+use super::floating::schematic_paste_anchor;
 use crate::state::{Bus, BusDeclaration, Component, ComponentType, NetLabel, SchematicProbe, Wire};
-use crate::workbench::app::{copy_active_schematic_selection, schematic_paste_anchor};
+use crate::workbench::app::copy_active_schematic_selection;
 
 fn last_prompt(state: &AppState) -> String {
     state
