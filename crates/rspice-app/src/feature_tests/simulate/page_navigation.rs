@@ -7,7 +7,8 @@
 //! it is disabled with its own reason when the object is not there, and that
 //! the resolution behind it names the exact retained record.
 
-use crate::workbench::surfaces::simulate::{page_outputs, page_runset, show_on_stage};
+use super::stage::show_on_stage;
+use crate::workbench::surfaces::simulate::{page_outputs, page_runset};
 use egui::{Rect, vec2};
 
 use crate::product::ContentDigest;

@@ -4,6 +4,7 @@
 //! that orphans nothing opens no modal, and an analysis something is bound to
 //! is refused rather than reviewed.
 
+use super::stage::show_on_stage;
 use crate::product::SimulationPlanId;
 use crate::state::SimulationPage;
 use crate::state::{
@@ -15,7 +16,6 @@ use crate::state::{
 use crate::workbench::surfaces::simulate::AnalysisAction;
 use crate::workbench::surfaces::simulate::lifecycle;
 use crate::workbench::surfaces::simulate::page_tests::plan_id;
-use crate::workbench::surfaces::simulate::show_on_stage;
 use crate::workbench::{AppState, RSpiceApp};
 use egui::vec2;
 

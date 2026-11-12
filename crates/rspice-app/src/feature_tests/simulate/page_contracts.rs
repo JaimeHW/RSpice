@@ -4,10 +4,10 @@
 //! handoffs paint what the plan holds. The other page sweeps draw through the
 //! render helpers here.
 
+use super::stage::show_on_stage;
 use crate::state::SimulationPage;
 use crate::workbench::surfaces::simulate::page_outputs;
 use crate::workbench::surfaces::simulate::page_tests::plan_id;
-use crate::workbench::surfaces::simulate::show_on_stage;
 use crate::workbench::{AppState, RSpiceApp};
 use egui::{Rect, vec2};
 

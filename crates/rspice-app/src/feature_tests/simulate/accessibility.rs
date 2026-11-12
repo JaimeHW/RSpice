@@ -19,10 +19,11 @@ use super::workflow_dialogs;
 use egui::{Rect, vec2};
 
 use super::page_contracts::RENDER_VIEWPORT_HEIGHT;
+use super::stage::show_on_stage;
 use crate::state::SimulationPage;
 use crate::workbench::RSpiceApp;
 use crate::workbench::surfaces::simulate::catalog::ANALYSIS_CATALOG_SEARCH_LABEL;
-use crate::workbench::surfaces::simulate::{participation, show_on_stage, variable_import};
+use crate::workbench::surfaces::simulate::{participation, variable_import};
 
 /// A studio fixture that reaches every analysis form and every participation
 /// state the routes have a cell for.

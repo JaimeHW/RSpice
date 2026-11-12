@@ -5,10 +5,10 @@
 //! widget on a real surface. The fields are found by the name they announce,
 //! which is the same name the accessibility sweep next door asserts they have.
 
+use super::stage::show_on_stage;
 use crate::simulation::plan::{AnalysisDraft, AnalysisInstance, AnalysisKind};
 use crate::state::SimulationPage;
 use crate::workbench::RSpiceApp;
-use crate::workbench::surfaces::simulate::show_on_stage;
 use egui::{Pos2, Rect, pos2, vec2};
 
 const SURFACE: (f32, f32) = (1280.0, 1400.0);

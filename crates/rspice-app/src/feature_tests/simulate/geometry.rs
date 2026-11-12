@@ -5,14 +5,13 @@
 //! laid out by two separate measurements have to agree about the space
 //! between them, and only their coordinates answer that.
 
+use super::stage::show_on_stage;
 use super::workflow_dialogs;
 use crate::workbench::surfaces::simulate::catalog::ANALYSIS_CATALOG_COLUMN_MIN_WIDTH;
 use crate::workbench::surfaces::simulate::lifecycle::{
     analysis_catalog_group, insert_analysis_instance,
 };
-use crate::workbench::surfaces::simulate::{
-    ANALYSIS_CATEGORY_ORDER, analysis_split_widths, show_on_stage,
-};
+use crate::workbench::surfaces::simulate::{ANALYSIS_CATEGORY_ORDER, analysis_split_widths};
 use egui::{Rect, vec2};
 
 use crate::simulation::plan::AnalysisKind;

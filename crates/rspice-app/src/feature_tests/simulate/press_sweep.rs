@@ -88,7 +88,7 @@ use egui::accesskit::{Action, ActionRequest, Node, NodeId, Role, TreeId};
 use egui::{Rect, vec2};
 
 use super::accessibility::{studio_overlays, studio_route, studio_routes};
-use crate::workbench::surfaces::simulate::show_on_stage;
+use super::stage::show_on_stage;
 use crate::workbench::{AppState, RSpiceApp};
 
 /// The surface size every sweep lays out at.

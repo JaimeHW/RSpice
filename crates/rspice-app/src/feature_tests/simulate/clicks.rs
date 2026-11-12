@@ -18,9 +18,9 @@
 //! *and* a receipt recording it, because the two together are what
 //! `apply_analysis_action` is for.
 
+use super::stage::show_on_stage;
 use super::workflow_dialogs;
 use crate::workbench::surfaces::simulate::catalog::ANALYSIS_CATALOG_SEARCH_LABEL;
-use crate::workbench::surfaces::simulate::show_on_stage;
 use egui::vec2;
 
 use crate::state::SimulationPage;

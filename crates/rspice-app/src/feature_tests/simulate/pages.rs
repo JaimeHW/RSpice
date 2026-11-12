@@ -3,6 +3,7 @@
 //! expired one offers, and the dispatch contract only an authorized current
 //! report carries.
 
+use super::stage::show_on_stage;
 use crate::state::SimulationPage;
 use crate::state::{
     PreflightIssue, PreflightRemediation, PreflightReport, PreparedPreflightContract,
@@ -10,7 +11,6 @@ use crate::state::{
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::run_preflight::PreflightCurrency;
 use crate::workbench::surfaces::simulate::pages::preflight_currency;
-use crate::workbench::surfaces::simulate::show_on_stage;
 
 fn current_report(
     state: &crate::workbench::AppState,

@@ -50,8 +50,6 @@ use crate::ui::widgets::{
     Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, Problem, mono_input,
     paint_problem_mark, select,
 };
-#[cfg(test)]
-use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::{Model, SimSetupState};
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::feature::{CommandSet, Cx};
@@ -2442,13 +2440,6 @@ pub(crate) fn measurement_in_output_dataset_for_test(
     spec: &crate::state::SpecEntry,
 ) -> Option<f64> {
     output_evidence::measurement_in_output_dataset(run, spec).map(|evidence| evidence.value)
-}
-
-/// The Simulate workspace as the shell draws it on the stage.
-#[cfg(test)]
-pub(crate) fn show_on_stage(ui: &mut Ui, app: &mut RSpiceApp) {
-    use crate::workbench::framework::host::{Host, Point};
-    app.contribute(Point::Surface(Workspace::Simulate), ui);
 }
 
 #[cfg(test)]

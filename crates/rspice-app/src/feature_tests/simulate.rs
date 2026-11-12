@@ -36,6 +36,7 @@ mod run_config_chip;
 mod run_host;
 mod run_set;
 mod solver_options;
+mod stage;
 mod statement;
 mod studio;
 mod transient_checkpoint_exchange;

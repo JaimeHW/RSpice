@@ -15,11 +15,11 @@
 use egui::{Pos2, Rect, pos2, vec2};
 
 use super::page_contracts::render_with;
+use super::stage::show_on_stage;
 use crate::state::SimulationPage;
 use crate::workbench::RSpiceApp;
 use crate::workbench::surfaces::simulate::page_specs;
 use crate::workbench::surfaces::simulate::page_tests::plan_id;
-use crate::workbench::surfaces::simulate::show_on_stage;
 
 /// The routes that resolve a plan payload before drawing a registry, each with
 /// a phrase from its own refusal card and column headings that exist only when

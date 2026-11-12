@@ -45,7 +45,7 @@ fn paint(
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE)
                     .show(ctx, |ui| {
-                        crate::workbench::surfaces::simulate::show_on_stage(ui, &mut app);
+                        super::stage::show_on_stage(ui, &mut app);
                     });
             },
         );

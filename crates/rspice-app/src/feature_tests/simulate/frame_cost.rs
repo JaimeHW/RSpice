@@ -11,8 +11,8 @@
 //! and each route asserts its own count. A shipped build has no counter and no
 //! branch.
 
+use super::stage::show_on_stage;
 use crate::workbench::RSpiceApp;
-use crate::workbench::surfaces::simulate::show_on_stage;
 
 /// The Analyses route expands the declared space once a frame.
 ///

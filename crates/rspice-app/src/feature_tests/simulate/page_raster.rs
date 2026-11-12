@@ -11,11 +11,11 @@
 //!
 //! The tests compare reviewed fingerprints and never write files.
 
+use super::stage::show_on_stage;
 use crate::state::SimulationPage;
 use crate::ui::raster::Canvas;
 use crate::workbench::RSpiceApp;
 use crate::workbench::surfaces::simulate::page_raster::STUDIO_BASELINES;
-use crate::workbench::surfaces::simulate::show_on_stage;
 use egui::vec2;
 
 const APPROVED_PAGE_WIDTH: f32 = 1100.0;
