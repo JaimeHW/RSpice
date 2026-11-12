@@ -723,8 +723,11 @@ const MAX_PUBLIC_ITEMS: usize = 5292;
 // module's DC equations tie. The census is 1,695.
 // `Diode::set_voltage_limiting_enabled` adds one: the builder turns off a
 // diode's junction limiting under `.options device voltlim=0`, as Xyce does.
-// The census is 1,696, with no slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 1696;
+// The census is 1,696.
+// `Jfet::set_voltage_limiting_enabled` adds one: the builder turns off a
+// JFET's or MESFET's junction limiting under `.options device voltlim=0`, as
+// Xyce does. The census is 1,697, with no slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 1697;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

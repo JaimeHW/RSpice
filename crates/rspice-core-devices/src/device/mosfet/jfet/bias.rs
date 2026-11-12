@@ -621,6 +621,16 @@ impl Jfet {
         self.initial_off
     }
 
+    /// Apply Xyce's global `DEVICE VOLTLIM` policy: `voltageLimiterFlag` gates
+    /// the initJct seed and the gate-junction limiting of the JFET
+    /// (N_DEV_JFET.C:1031, 1077) and the MESFET (N_DEV_MESFET.C:1010, 1056).
+    /// An `OFF` instance still opens at zero bias, as every other family's
+    /// does.
+    #[doc(hidden)]
+    pub fn set_voltage_limiting_enabled(&mut self, enabled: bool) {
+        self.voltage_limiting = enabled;
+    }
+
     /// The instance `IC=VDS,VGS` components, as far as the deck gave them.
     ///
     /// `jfetload.c:106-111` (and `mesload.c`, `hfetload.c`, `mesaload.c`

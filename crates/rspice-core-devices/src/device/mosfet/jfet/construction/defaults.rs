@@ -25,6 +25,7 @@ impl Jfet {
             instance_ts: None,
             instance_td: None,
             initial_off: false,
+            voltage_limiting: true,
             initial_condition_vds: None,
             initial_condition_vgs: None,
             // Leave branch-state uninitialized until the first Newton update so
@@ -87,6 +88,7 @@ impl Jfet {
             instance_ts: None,
             instance_td: None,
             initial_off: false,
+            voltage_limiting: true,
             initial_condition_vds: None,
             initial_condition_vgs: None,
             // Leave branch-state uninitialized until the first Newton update so

@@ -7,7 +7,7 @@
 #[path = "common/waveform.rs"]
 mod waveform;
 
-use rspice_core::engine::{Engine, SimulationConfig};
+use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect};
 use rspice_core::netlist::Netlist;
 use waveform::interpolate;
 
@@ -724,5 +724,55 @@ fn level1_jfet_follows_ngspice_sydney_channel_and_temperature_laws() {
                 );
             }
         }
+    }
+}
+
+/// Xyce's `DEVICE VOLTLIM=0` drops the JFET and MESFET initJct seed and
+/// gate-junction limiting (N_DEV_JFET.C:1031, 1077; N_DEV_MESFET.C:1010,
+/// 1056). That changes the Newton path and nothing else: a self-biased stage
+/// of each solves to the operating point the limited solve reaches.
+#[test]
+fn jfet_and_mesfet_solve_with_voltage_limiting_disabled() {
+    for (dialect, device, model) in [
+        (
+            SpiceDialect::BestAvailable,
+            "J1 d g s jm",
+            "jm NJF(vto=-2 beta=1e-3 lambda=0.01 is=1e-14)",
+        ),
+        (
+            SpiceDialect::Xyce,
+            "J1 d g s jm",
+            "jm NJF(level=2 vto=-2 beta=1e-3 lambda=0.01)",
+        ),
+        (
+            SpiceDialect::Xyce,
+            "Z1 d g s jm",
+            "jm NMF(level=1 vto=-2 beta=1e-3 lambda=0.01)",
+        ),
+    ] {
+        let deck = format!(
+            "FET stage with and without voltage limiting\n\
+             vdd vdd 0 15\nrd vdd d 2k\nrs s 0 500\nrg g 0 1meg\n{device}\n\
+             .model {model}\n.op\n.end\n"
+        );
+        let netlist = Netlist::parse(&deck).expect("FET deck parses");
+        let output = |device_voltage_limiting: bool| {
+            Engine::new(SimulationConfig {
+                device_voltage_limiting,
+                spice_dialect: dialect,
+                ..SimulationConfig::default()
+            })
+            .run_dc_op(&netlist)
+            .unwrap_or_else(|err| {
+                panic!("{model} with VOLTLIM={device_voltage_limiting} should run: {err}")
+            })
+            .try_voltage_named("d")
+            .expect("V(d)")
+        };
+        let (limited, unlimited) = (output(true), output(false));
+        assert!(
+            (limited - unlimited).abs() <= 1.0e-6,
+            "{model}: V(d) {limited} limited, {unlimited} unlimited"
+        );
     }
 }

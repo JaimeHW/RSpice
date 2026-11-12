@@ -6427,18 +6427,6 @@ impl Engine {
         #[cfg(feature = "veriloga")]
         let authored_net_names: std::cell::OnceCell<std::collections::HashSet<String>> =
             std::cell::OnceCell::new();
-        if !self.config.device_voltage_limiting {
-            for element in &flat_elements {
-                let family = match &element.kind {
-                    ElementKind::Jfet { .. } => Some("JFET"),
-                    ElementKind::Mesfet { .. } => Some("MESFET"),
-                    _ => None,
-                };
-                if let Some(family) = family {
-                    return Err(voltage_limiting_cannot_be_disabled(&element.name, family));
-                }
-            }
-        }
         let mut known_device_names = terminal_probes::KnownDeviceNames::default();
         if netlist.options.topology_supernode.unwrap_or(false) {
             // The reduction removes devices a behavioral source may still name.
@@ -11450,6 +11438,7 @@ impl Engine {
         }
         for jfet in &mut circuit.jfets {
             jfet.set_junction_gmin(junction_gmin);
+            jfet.set_voltage_limiting_enabled(self.config.device_voltage_limiting);
         }
         for dev in &mut circuit.bsim3v3.devices {
             dev.set_eval_gmin(junction_gmin);

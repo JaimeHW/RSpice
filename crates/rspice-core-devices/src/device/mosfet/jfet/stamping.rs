@@ -481,7 +481,13 @@ impl NonlinearDevice for Jfet {
         let mut vgd = vgd_raw;
         let mut limiter_applied = false;
 
-        if matches!(self.params.channel_model, JfetChannelModel::Hfet1) {
+        if !self.voltage_limiting {
+            if self.initial_off && (!self.vgs.is_finite() || !self.vds.is_finite()) {
+                limiter_applied = vgs != 0.0 || vgd != 0.0;
+                vgs = 0.0;
+                vgd = 0.0;
+            }
+        } else if matches!(self.params.channel_model, JfetChannelModel::Hfet1) {
             if matches!(self.params.hfet_level, 2..=4)
                 && vgs_prev.is_finite()
                 && vgd_prev.is_finite()

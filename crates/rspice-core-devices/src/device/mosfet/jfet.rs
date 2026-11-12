@@ -768,6 +768,10 @@ pub struct Jfet {
     /// The deck marked this instance `OFF`, so the MODEINITJCT startup seed is
     /// the zero-junction state instead of the ordinary -1 V reverse bias.
     initial_off: bool,
+    /// Xyce's global `DEVICE VOLTLIM`: the first operating-point load takes
+    /// the initJct seed and every iterate runs the gate-junction limiters.
+    /// Cleared, each load reads the solution as it stands.
+    voltage_limiting: bool,
     /// Instance `IC=VDS,VGS` components, each given independently
     /// (`jfet/jfetpar.c` keeps `JFETicVDSGiven`/`JFETicVGSGiven` apart and
     /// `JFETgetic` fills whichever the deck omitted from the node solution).
