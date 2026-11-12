@@ -96,13 +96,21 @@ fn is_pspice_reserved_node_name(after_dollar: &str) -> bool {
 
 /// Every directive spelling that compiles a Verilog-A source into a deck.
 ///
-/// `.va` and `.veriloga` are RSpice's own; `.hdl`, `.vams` and `.verilog` are
-/// what decks written for other tools call the same card. All five take the
+/// `.va` and `.veriloga` are RSpice's own; `.hdl`, `.vams`, `.verilog` and
+/// `.ahdl_include` (the SPICE-deck spelling of Spectre's `ahdl_include`) are
+/// what decks written for other tools call the same card. All six take the
 /// same fields, produce the same directive and resolve through the same chain,
 /// so a deck can be read without being rewritten. The set is closed: a near
 /// miss like `.vams2` stays an unknown card rather than silently importing a
 /// model.
-const VERILOGA_SOURCE_COMMANDS: [&str; 5] = [".va", ".veriloga", ".hdl", ".vams", ".verilog"];
+const VERILOGA_SOURCE_COMMANDS: [&str; 6] = [
+    ".va",
+    ".veriloga",
+    ".hdl",
+    ".vams",
+    ".verilog",
+    ".ahdl_include",
+];
 
 /// Whether a directive head names a Verilog-A source, in any letter case.
 pub(super) fn is_veriloga_source_command(command: &str) -> bool {
@@ -1216,10 +1224,17 @@ mod tests {
         }
     }
 
-    /// Five spellings, one directive; nothing outside the five.
+    /// Six spellings, one directive; nothing outside the six.
     #[test]
     fn every_veriloga_source_spelling_parses_and_no_other_does() {
-        for spelling in [".va", ".veriloga", ".hdl", ".vams", ".verilog"] {
+        for spelling in [
+            ".va",
+            ".veriloga",
+            ".hdl",
+            ".vams",
+            ".verilog",
+            ".ahdl_include",
+        ] {
             for cased in [
                 spelling.to_ascii_lowercase(),
                 spelling.to_ascii_uppercase(),
@@ -1242,6 +1257,8 @@ mod tests {
             ".verilogams",
             ".vaa",
             ".verilogaa",
+            ".ahdl",
+            ".ahdl_includes",
         ] {
             assert!(
                 crate::netlist::parse_veriloga_source_directive(&format!("{spelling} model.va"))
@@ -1249,6 +1266,30 @@ mod tests {
                 "{spelling} must not name a Verilog-A source"
             );
         }
+    }
+
+    /// A SPICE deck's `.ahdl_include` loads its Verilog-A file as `.hdl`
+    /// does. It used to fall through as an unknown dot-command, ignored with
+    /// a warning, so the only thing the line asked for never happened.
+    #[test]
+    fn a_deck_ahdl_include_names_its_source_instead_of_being_ignored() {
+        let netlist = crate::Netlist::parse(
+            "* ahdl_include\n.ahdl_include \"models/amp.va\" Amp define=GAIN=2\nX1 in out Amp\n.end\n",
+        )
+        .expect("the deck parses");
+        let [include] = netlist.veriloga_includes.as_slice() else {
+            panic!("one source, saw {:?}", netlist.veriloga_includes);
+        };
+        assert_eq!(include.file_path, std::path::PathBuf::from("models/amp.va"));
+        assert_eq!(include.model_name.as_deref(), Some("Amp"));
+        assert!(
+            netlist
+                .diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.code != "unsupported-dot-command"),
+            "{:?}",
+            netlist.diagnostics
+        );
     }
 
     fn capitalize(word: &str) -> String {

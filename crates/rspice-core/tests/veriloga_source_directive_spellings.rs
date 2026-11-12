@@ -1,9 +1,10 @@
 //! The spellings that name a Verilog-A source.
 //!
 //! `.va` and `.veriloga` were the only two the parser recognized. Decks
-//! written for other tools spell the same directive `.hdl`, `.vams` or
-//! `.verilog`; all five name one directive, reach one resolver and one
-//! compiled model. Nothing outside that set is a source directive.
+//! written for other tools spell the same directive `.hdl`, `.vams`,
+//! `.verilog` or `.ahdl_include`; all six name one directive, reach one
+//! resolver and one compiled model. Nothing outside that set is a source
+//! directive.
 
 #![cfg(feature = "veriloga")]
 
@@ -15,7 +16,14 @@ use rspice_core::netlist::parse_veriloga_source_directive;
 use rspice_core::{Engine, Netlist};
 
 /// Every spelling the parser accepts, in the canonical lower case decks use.
-const ACCEPTED: [&str; 5] = [".va", ".veriloga", ".hdl", ".vams", ".verilog"];
+const ACCEPTED: [&str; 6] = [
+    ".va",
+    ".veriloga",
+    ".hdl",
+    ".vams",
+    ".verilog",
+    ".ahdl_include",
+];
 
 #[test]
 fn every_accepted_spelling_names_the_same_deck_relative_source() {
@@ -50,7 +58,14 @@ fn every_accepted_spelling_names_the_same_deck_relative_source() {
 
 #[test]
 fn every_accepted_spelling_is_case_insensitive_like_every_other_directive() {
-    for spelling in [".VA", ".VerilogA", ".HDL", ".Vams", ".VERILOG"] {
+    for spelling in [
+        ".VA",
+        ".VerilogA",
+        ".HDL",
+        ".Vams",
+        ".VERILOG",
+        ".AHDL_Include",
+    ] {
         assert!(
             parse_veriloga_source_directive(&format!("{spelling} \"d.va\" dres")).is_some(),
             "{spelling} must name a Verilog-A source"

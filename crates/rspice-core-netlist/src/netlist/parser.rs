@@ -225,7 +225,8 @@ use values::*;
 
 /// Parse one Verilog-A source directive without mutating parser state.
 ///
-/// `.va`, `.veriloga`, `.hdl`, `.vams` and `.verilog` all name this directive.
+/// `.va`, `.veriloga`, `.hdl`, `.vams`, `.verilog` and `.ahdl_include` all name
+/// this directive.
 /// Library acquisition uses the same tokenizer as executable-netlist parsing
 /// so authenticated AHDL dependency edges cannot disagree with execution.
 pub fn parse_veriloga_source_directive(line: &str) -> Option<VerilogAInclude> {

@@ -546,8 +546,8 @@ const CONVENTIONAL_LIBRARY_DIRECTORIES: [&str; 4] = ["lib", "models", "../lib", 
 /// The directive family a failed resolution names.
 ///
 /// `.include`/`.inc`/`.lib` and the Verilog-A source directives — `.va`,
-/// `.veriloga`, `.hdl`, `.vams`, `.verilog`, and the Spectre `ahdl_include`
-/// that lowers to them — walk one chain. Only the noun in a refusal differs,
+/// `.veriloga`, `.hdl`, `.vams`, `.verilog`, `.ahdl_include`, and the Spectre
+/// `ahdl_include` that lowers to them — walk one chain. Only the noun in a refusal differs,
 /// so a deck can never disagree with itself about what a relative path means.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SourceDirectiveKind {
@@ -1174,8 +1174,8 @@ impl IncludeProcessor {
 
     /// Resolve a Verilog-A source directive through the chain `.include` walks.
     ///
-    /// `.va`, `.veriloga`, `.hdl`, `.vams` and `.verilog` — and the Spectre
-    /// `ahdl_include` that lowers to `.veriloga` — all arrive here, so a model
+    /// `.va`, `.veriloga`, `.hdl`, `.vams`, `.verilog` and `.ahdl_include` —
+    /// and the Spectre `ahdl_include` that lowers to `.veriloga` — all arrive here, so a model
     /// file named beside its deck is found from any working directory and an
     /// included file names its models beside itself. The resolved path is what
     /// the builder keys its compiled-module cache on, so two decks that each
