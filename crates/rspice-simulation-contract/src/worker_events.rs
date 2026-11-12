@@ -2,7 +2,9 @@
 
 use crate::worker_result_values::{WorkerDigitalEventTrace, WorkerRealEventTrace};
 use rspice_results::current_impulses::CurrentImpulseHistoryEvidence;
-use rspice_results::events::{DigitalBusEvidence, DigitalBusSourceEvidence, TransientEventHistory};
+use rspice_results::events::{
+    DigitalBusEvidence, DigitalBusSourceEvidence, HdlSourceEvidence, TransientEventHistory,
+};
 use serde::{Deserialize, Serialize};
 
 /// One digital bus declared over the digital traces beside it, on the wire.
@@ -37,6 +39,10 @@ pub struct WorkerEventHistory {
     /// response, which could not have declared one, reads as declaring none.
     #[serde(default)]
     pub buses: Vec<WorkerDigitalBus>,
+    /// Where each traced HDL signal was declared and which processes drive
+    /// it. Defaulted so a response that carries none reads as an empty map.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hdl_sources: Vec<HdlSourceEvidence>,
 }
 
 impl From<TransientEventHistory> for WorkerEventHistory {
@@ -57,6 +63,7 @@ impl From<TransientEventHistory> for WorkerEventHistory {
                     source: bus.source,
                 })
                 .collect(),
+            hdl_sources: value.hdl_sources,
         }
     }
 }
@@ -79,6 +86,7 @@ impl From<WorkerEventHistory> for TransientEventHistory {
                     source: bus.source,
                 })
                 .collect(),
+            hdl_sources: value.hdl_sources,
         }
     }
 }

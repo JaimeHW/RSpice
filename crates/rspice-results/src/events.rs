@@ -247,6 +247,97 @@ pub struct TransientEventHistory {
     /// A declaration only, carried beside the member histories it names — the
     /// engine states which conductors are one word, never what the word is.
     pub digital_buses: Vec<DigitalBusEvidence>,
+    /// Where each traced HDL net or variable was declared and which
+    /// processes drive it, by the trace or bus it was published under. Empty
+    /// without an HDL instance. Like a bus, a claim about traces beside it:
+    /// it makes no history non-empty on its own.
+    pub hdl_sources: Vec<HdlSourceEvidence>,
+}
+
+/// Where one traced HDL net or variable was declared and which processes
+/// drive it: the engine's `HdlTraceSource`, kept as this crate's own type so
+/// a retained or transported encoding is owned here.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HdlSourceEvidence {
+    /// The trace or bus the run published the signal under.
+    pub trace: String,
+    /// The deck instance whose design declares it (`xtb`).
+    pub instance: String,
+    /// Its name in that design (`ok`; `u1.q` inside a child instance).
+    pub identifier: String,
+    /// The file and line that declared it, when the compile placed it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub declaration: Option<HdlSourceLineEvidence>,
+    /// Every process that writes the signal, in the design's process order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub drivers: Vec<HdlDriverEvidence>,
+}
+
+/// A file and a one-based line in it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HdlSourceLineEvidence {
+    pub file: String,
+    pub line: u32,
+}
+
+/// One process that drives a traced HDL signal.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HdlDriverEvidence {
+    /// The scope it is written in (`xtb`, or `xtb.u1` inside a child).
+    pub scope: String,
+    pub kind: HdlDriverKindEvidence,
+    /// The line it was written on, when the compile placed it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<HdlSourceLineEvidence>,
+}
+
+/// What kind of process drives a signal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HdlDriverKindEvidence {
+    /// An `initial` block (IEEE 1364-2005 section 9.9.1).
+    Initial,
+    /// An `always` block (section 9.9.2).
+    Always,
+    /// A continuous assignment, a gate or a port connection (section 6.1).
+    Assign,
+}
+
+impl From<&rspice_core::engine::HdlSourceLine> for HdlSourceLineEvidence {
+    fn from(value: &rspice_core::engine::HdlSourceLine) -> Self {
+        Self {
+            file: value.file.clone(),
+            line: value.line,
+        }
+    }
+}
+
+impl From<&rspice_core::engine::HdlTraceSource> for HdlSourceEvidence {
+    fn from(value: &rspice_core::engine::HdlTraceSource) -> Self {
+        use rspice_core::engine::HdlDriverKind;
+        Self {
+            trace: value.trace.clone(),
+            instance: value.instance.clone(),
+            identifier: value.identifier.clone(),
+            declaration: value.declaration.as_ref().map(Into::into),
+            drivers: value
+                .drivers
+                .iter()
+                .map(|driver| HdlDriverEvidence {
+                    scope: driver.scope.clone(),
+                    kind: match driver.kind {
+                        HdlDriverKind::Initial => HdlDriverKindEvidence::Initial,
+                        HdlDriverKind::Always => HdlDriverKindEvidence::Always,
+                        HdlDriverKind::Assign => HdlDriverKindEvidence::Assign,
+                    },
+                    source: driver.source.as_ref().map(Into::into),
+                })
+                .collect(),
+        }
+    }
 }
 
 impl TransientEventHistory {

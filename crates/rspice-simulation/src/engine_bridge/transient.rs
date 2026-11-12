@@ -965,6 +965,13 @@ fn collect_event_history(
         digital,
         real,
         digital_buses,
+        // Declarations are not samples: the window keeps every one, as it
+        // keeps every trace they name.
+        hdl_sources: tran_result
+            .hdl_sources
+            .iter()
+            .map(rspice_results::events::HdlSourceEvidence::from)
+            .collect(),
     })
 }
 

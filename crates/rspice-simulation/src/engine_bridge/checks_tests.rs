@@ -334,3 +334,55 @@ fn a_run_that_reaches_its_end_names_no_finish() {
         rspice_results::analysis_result::CheckVerdict::Passed
     );
 }
+
+/// The source map of a run's traced HDL signals reaches the headless result
+/// beside the histories it names, entry for entry the core run's.
+#[test]
+fn a_transient_carries_the_source_map_of_its_hdl_traces() {
+    let directory = std::env::temp_dir().join(format!(
+        "rspice_simulation_hdl_sources_{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&directory).expect("create the model directory");
+    let path = directory.join("gen.v");
+    std::fs::write(
+        &path,
+        "`timescale 1ns/1ns\n\
+         module gen(q);\n  output q;\n  reg q;\n\
+         \x20 initial begin q = 0; #3 q = 1; #4 q = 0; end\nendmodule\n",
+    )
+    .expect("write the module");
+    let deck = format!(
+        "* hdl sources\n.hdl \"{}\"\nx1 q gen\nrq q 0 1k\n.tran 1n 20n\n.end\n",
+        path.display().to_string().replace('\\', "/")
+    );
+    let netlist = parse(&deck);
+    let result = EngineBridge::new().run(
+        &AnalysisConfig::Transient(TransientAnalysisConfig {
+            stop_time: 20e-9,
+            step_time: 1e-9,
+            ..TransientAnalysisConfig::default()
+        }),
+        &deck,
+    );
+    let core = core_engine(&netlist).run_tran(&netlist, 20e-9, 1e-9);
+    let _ = std::fs::remove_dir_all(&directory);
+    let SimulationResult::Transient { events, .. } = result.expect("the transient runs") else {
+        panic!("a transient result");
+    };
+    let core = core.expect("the core transient runs");
+    let expected = core
+        .hdl_sources
+        .iter()
+        .map(rspice_results::events::HdlSourceEvidence::from)
+        .collect::<Vec<_>>();
+    assert!(
+        expected.iter().any(|source| source.trace == "Q"
+            && source
+                .declaration
+                .as_ref()
+                .is_some_and(|line| line.line > 0)),
+        "{expected:?}"
+    );
+    assert_eq!(events.hdl_sources, expected);
+}

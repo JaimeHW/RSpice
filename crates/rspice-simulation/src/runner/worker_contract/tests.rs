@@ -1425,6 +1425,7 @@ fn transient_worker_result_round_trips_through_json() {
                 }],
             }],
             buses: Vec::new(),
+            hdl_sources: Vec::new(),
         },
     };
 
@@ -1652,6 +1653,23 @@ fn event_histories_survive_the_worker_edge_in_both_directions() {
             }],
             real: Vec::new(),
             digital_buses: Vec::new(),
+            hdl_sources: vec![rspice_results::events::HdlSourceEvidence {
+                trace: "clk".to_owned(),
+                instance: "xtb".to_owned(),
+                identifier: "clk".to_owned(),
+                declaration: Some(rspice_results::events::HdlSourceLineEvidence {
+                    file: "tb.v".to_owned(),
+                    line: 4,
+                }),
+                drivers: vec![rspice_results::events::HdlDriverEvidence {
+                    scope: "xtb".to_owned(),
+                    kind: rspice_results::events::HdlDriverKindEvidence::Always,
+                    source: Some(rspice_results::events::HdlSourceLineEvidence {
+                        file: "tb.v".to_owned(),
+                        line: 9,
+                    }),
+                }],
+            }],
         },
     };
     let wire = WorkerSimulationResult::try_from(source.clone()).expect("transient converts");
