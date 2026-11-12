@@ -183,7 +183,7 @@ fn completion_reaches_a_document_that_has_content_in_it() {
     for frame in 0..3 {
         let _ = context.clone().run_ui(input.clone(), |ui| {
             if frame == 0 {
-                let editor_id = editor_id(&state);
+                let editor_id = editor_id_in(&state.model, &state.code.netlist);
                 ui.ctx()
                     .memory_mut(|memory| memory.request_focus(editor_id));
                 crate::workbench::documents::text_editor_commands::queue_caret_char_index(
@@ -1273,7 +1273,7 @@ fn the_netlist_editor_keeps_its_keys_and_its_caret_in_view() {
     state.model.simulation.source.netlist_content = deck;
     state.code.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
     state.code.netlist.active_document_initialized = true;
-    let editor_id = editor_id(&state);
+    let editor_id = editor_id_in(&state.model, &state.code.netlist);
 
     let context = egui::Context::default();
     crate::ui::Theme::default().apply(&context);

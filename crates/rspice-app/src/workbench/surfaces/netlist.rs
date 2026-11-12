@@ -24,6 +24,7 @@ use egui::Ui;
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+use crate::workbench::MessageId;
 use crate::workbench::code::CodeFeature;
 use crate::workbench::code::commands::CodeRequest;
 use crate::workbench::design_system::{
@@ -32,9 +33,7 @@ use crate::workbench::design_system::{
 use crate::workbench::documents::netlist_document::{
     ActiveNetlistDocument, ExecutedDeckVerification,
 };
-use crate::workbench::features;
 use crate::workbench::framework::feature::Cx;
-use crate::workbench::{MessageId, RSpiceApp};
 
 /// Publish the source editor a page shows as its document, and hand it any
 /// request the menus, palette or shortcuts made for it. Called before the
@@ -174,8 +173,15 @@ fn reveal_in_netlist(
 
 /// Before the page draws, in the code feature's context: rebuild the
 /// generated deck, show the document the page is on, and pick up a re-run
-/// queued behind the last run.
+/// queued behind the last run. The deck page's editor is put in front here,
+/// before the shell takes the dispatcher's answers the page's context holds,
+/// so they are the answers the editor gets; the page publishes it again as
+/// it draws it.
 pub(in crate::workbench) fn prepare_workspace(cx: &mut Cx<'_, CodeFeature>) {
+    use crate::workbench::documents::netlist_document::{
+        active_netlist_source_is_editable_in, editor_id_in,
+    };
+
     generation::reconcile_documents(cx);
     crate::workbench::documents::netlist_document::prepare(
         cx.model,
@@ -183,38 +189,67 @@ pub(in crate::workbench) fn prepare_workspace(cx: &mut Cx<'_, CodeFeature>) {
         cx.runs,
         cx.wb,
     );
+    if cx.state.code_workspace.page
+        == crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist
+        && !generated_primary_unavailable(cx.model, &cx.state.netlist)
+    {
+        cx.wb.active_source_editor = Some(
+            crate::workbench::documents::text_editor_commands::ActiveSourceEditor {
+                id: editor_id_in(cx.model, &cx.state.netlist),
+                editable: active_netlist_source_is_editable_in(cx.model, &cx.state.netlist),
+                navigable: true,
+            },
+        );
+    }
 }
 
-pub(in crate::workbench) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
+/// Whether the deck editor's right-click menu is open, or may open on what
+/// this frame carries. The page's context holds the menu's answers only
+/// then, so the shell reads this before it lends the context.
+pub(in crate::workbench) fn source_menu_open(
+    ctx: &egui::Context,
+    model: &crate::workbench::app_state::Model,
+    netlist: &crate::workbench::documents::netlist_document::NetlistDocumentState,
+) -> bool {
+    crate::workbench::documents::virtual_text_editor::context_menu_may_show(
+        ctx,
+        crate::workbench::documents::netlist_document::editor_id_in(model, netlist),
+    )
+}
+
+/// Draw the deck page in the code feature's context, once it has
+/// prepared. The context holds the dispatcher's answers for the commands
+/// the feature reads, and its menu's while [`source_menu_open`] says the
+/// source editor's menu is open or opening.
+pub(in crate::workbench) fn show_prepared(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
     // A file dropped on the page is staged as an import once the page has
     // drawn.
     let dropped = ui.ctx().input(|input| input.raw.dropped_files.clone());
     if !dropped.is_empty() {
-        app.state
-            .workbench
+        cx.wb
             .outbox
             .push(CodeRequest::ImportDroppedNetlist(dropped));
     }
-    let toolbar = toolbar::code_toolbar(ui, &mut features::cx_with_foreign_answers(app, |_| true));
+    let toolbar = toolbar::code_toolbar(ui, cx);
     // The strip aligns to the toolbar's own content rect, so the two rows keep
     // one padding and one edge rather than each deriving a width. The strip
     // states the run and reports what was clicked; routing that click is this
     // surface's transaction, not the painter's.
     match run_strip(
         ui,
-        &app.state.model,
-        &app.state.code.netlist,
-        &app.state.runs,
-        app.state.workbench.messages(),
+        cx.model,
+        &cx.state.netlist,
+        cx.runs,
+        cx.wb.messages(),
         toolbar.content,
     ) {
         Some(RunStripAction::OpenDeckSnapshot) => {
             if !crate::workbench::documents::netlist_document::open_run_deck_snapshot_in(
-                &mut app.state.model,
-                &mut app.state.code.netlist,
-                &app.state.runs,
+                cx.model,
+                &mut cx.state.netlist,
+                cx.runs,
             ) {
-                app.state.prompt(format!(
+                cx.wb.prompt(format!(
                     "The deck this run used cannot be opened: {}.",
                     crate::state::absent_deck_reason()
                 ));
@@ -223,23 +258,23 @@ pub(in crate::workbench) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
         Some(RunStripAction::Compare) => {
             if let Err(error) =
                 crate::workbench::documents::netlist_document::compare_run_deck_snapshot_in(
-                    &mut app.state.model,
-                    &mut app.state.code.netlist,
-                    &app.state.runs,
+                    cx.model,
+                    &mut cx.state.netlist,
+                    cx.runs,
                 )
             {
-                app.state.prompt(error);
+                cx.wb.prompt(error);
             }
         }
         Some(RunStripAction::OpenTaskDeck { run_id, point }) => {
             if !crate::workbench::documents::netlist_document::open_executed_deck_in(
-                &mut app.state.model,
-                &mut app.state.code.netlist,
-                &app.state.runs,
+                cx.model,
+                &mut cx.state.netlist,
+                cx.runs,
                 run_id,
                 point,
             ) {
-                app.state.prompt(format!(
+                cx.wb.prompt(format!(
                     "The source Run {run_id} executed cannot be opened: {}.",
                     crate::state::absent_deck_reason()
                 ));
@@ -250,14 +285,17 @@ pub(in crate::workbench) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
             // is shown. A run the history no longer holds refuses the
             // selection, and opening Results anyway landed the reader on
             // whichever dataset happened to be active as if it were the one
-            // they asked for.
-            if app.state.model.simulation.select_run_by_sequence(run_id) {
-                crate::workbench::commands::vocabulary::Command::OpenWorkspace(
-                    crate::workbench::state::Workspace::Results,
-                )
-                .execute(app);
+            // they asked for. The dispatcher opens Results once the page has
+            // drawn.
+            if cx.model.simulation.select_run_by_sequence(run_id) {
+                cx.execute(
+                    crate::workbench::commands::vocabulary::Command::OpenWorkspace(
+                        crate::workbench::state::Workspace::Results,
+                    )
+                    .key(),
+                );
             } else {
-                app.state.prompt(format!(
+                cx.wb.prompt(format!(
                     "Run {run_id} is no longer kept in this session, so Results was not opened \
                      on it."
                 ));
@@ -265,39 +303,28 @@ pub(in crate::workbench) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
         }
         None => {}
     }
-    if execution_profile_review_banner(ui, &app.state.model, app.state.workbench.messages()) {
-        app.state
-            .workbench
-            .outbox
-            .push(CodeRequest::BeginNetlistProfileReview);
+    if execution_profile_review_banner(ui, cx.model, cx.wb.messages()) {
+        cx.wb.outbox.push(CodeRequest::BeginNetlistProfileReview);
     }
-    control_disposition_band(ui, &app.state.code.netlist, app.state.workbench.messages());
+    control_disposition_band(ui, &cx.state.netlist, cx.wb.messages());
     if crate::workbench::documents::text_editor_commands::take_format_document_request(
         ui,
-        crate::workbench::documents::netlist_document::editor_id(&app.state),
+        crate::workbench::documents::netlist_document::editor_id_in(cx.model, &cx.state.netlist),
     ) {
         // Formatting is carried out once the page has drawn. A format the
         // palette, a menu or a shortcut asked for is taken a frame after it
         // was asked, in a frame no input began, so this frame asks for the
         // next at once to draw what formatting wrote.
         ui.ctx().request_repaint();
-        app.state
-            .workbench
-            .outbox
-            .push(CodeRequest::FormatNetlistDocument);
+        cx.wb.outbox.push(CodeRequest::FormatNetlistDocument);
     }
     let t = Tokens::get(ui.ctx());
     egui::Frame::new().fill(t.color.bg_inset).show(ui, |ui| {
         ui.set_min_size(ui.available_size());
-        if generated_primary_unavailable(&app.state.model, &app.state.code.netlist) {
-            let messages = app.state.workbench.messages();
-            if app.state.model.workspace.content.netlist_source.is_none()
-                && app
-                    .state
-                    .model
-                    .netlist_artifacts
-                    .generated_document
-                    .is_none()
+        if generated_primary_unavailable(cx.model, &cx.state.netlist) {
+            let messages = cx.wb.messages();
+            if cx.model.workspace.content.netlist_source.is_none()
+                && cx.model.netlist_artifacts.generated_document.is_none()
             {
                 let mut action = None;
                 empty_state_with_actions(
@@ -322,14 +349,19 @@ pub(in crate::workbench) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
                 );
                 match action {
                     Some(EmptyNetlistAction::NewTopDeck) => {
-                        if let Err(error) =
-                            crate::workbench::app::begin_new_top_deck(&mut app.state)
-                        {
-                            app.state.prompt(error);
+                        if let Err(error) = crate::workbench::app::begin_new_top_deck_in(
+                            cx.model,
+                            &mut cx.state.code_workspace,
+                            &mut cx.state.netlist,
+                            cx.platform,
+                        ) {
+                            cx.wb.prompt(error);
                         }
                     }
                     Some(EmptyNetlistAction::ImportDeck) => {
-                        app.execute_command_key(
+                        // The dispatcher carries the import out once the
+                        // page has drawn.
+                        cx.execute(
                             crate::workbench::code::commands::CodeCommand::ImportNetlist.key(),
                         );
                     }
@@ -343,8 +375,7 @@ pub(in crate::workbench) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
                     ui,
                     WorkbenchIcon::Netlist,
                     &title,
-                    app.state
-                        .model
+                    cx.model
                         .netlist_artifacts
                         .generation_error
                         .as_deref()
@@ -352,66 +383,57 @@ pub(in crate::workbench) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
                 );
             }
         } else {
-            let editor_id = crate::workbench::documents::netlist_document::editor_id(&app.state);
+            let editor_id = crate::workbench::documents::netlist_document::editor_id_in(
+                cx.model,
+                &cx.state.netlist,
+            );
             let editable =
-                crate::workbench::documents::netlist_document::active_netlist_source_is_editable(
-                    &app.state,
+                crate::workbench::documents::netlist_document::active_netlist_source_is_editable_in(
+                    cx.model,
+                    &cx.state.netlist,
                 );
             publish_source_editor(
                 ui.ctx(),
-                &mut app.state.workbench,
+                cx.wb,
                 crate::workbench::documents::text_editor_commands::ActiveSourceEditor {
                     id: editor_id,
                     editable,
                     navigable: true,
                 },
             );
-            step_netlist_problem(
-                ui.ctx(),
-                &app.state.model,
-                &app.state.code.netlist,
-                &mut app.state.workbench,
-                editor_id,
-            );
-            reveal_in_netlist(ui, &app.state.model, &mut app.state.code.netlist, editor_id);
-            let state = &mut app.state;
+            step_netlist_problem(ui.ctx(), cx.model, &cx.state.netlist, cx.wb, editor_id);
+            reveal_in_netlist(ui, cx.model, &mut cx.state.netlist, editor_id);
             let response = crate::workbench::documents::netlist_document::show_editor(
                 ui,
-                &mut state.model,
-                &mut state.code.netlist,
-                &state.code.code_workspace.include_resolutions,
-                &state.runs,
-                &mut state.workbench,
+                cx.model,
+                &mut cx.state.netlist,
+                &cx.state.code_workspace.include_resolutions,
+                cx.runs,
+                cx.wb,
             );
-            // The right-click menu's rows read the code feature's context,
-            // lent with its menus' answers only while the menu is open; the
+            // The right-click menu's rows read the page's context, which
+            // holds the menu's answers while the menu is open or opening; the
             // row chosen runs once the page has drawn.
             let entries = crate::workbench::code::SOURCE_EDITOR_MENU;
             let choice = crate::workbench::chrome::title_bar::source_editor_context_menu_over(
                 &response,
-                |ctx| {
-                    source_menu::rows(
-                        entries,
-                        &features::cx_with_menu_answers::<CodeFeature>(app),
-                        ctx,
-                    )
-                },
+                |ctx| source_menu::rows(entries, cx, ctx),
             );
             if let Some(choice) = choice {
-                features::cx::<CodeFeature>(app).execute(choice.command());
+                cx.execute(choice.command());
             }
         }
     });
     // The dialogs draw in the code feature's context. What one raises is
     // answered once the page has drawn.
-    search::find_replace_window(ui.ctx(), &mut features::cx(app));
-    language::rename_dialog_window(ui.ctx(), &mut features::cx(app));
-    ownership::ownership_dialog_window(ui.ctx(), &mut features::cx(app));
-    revision::comparison_dialog_window(ui.ctx(), &mut features::cx(app));
-    revision::save_source_dialog_window(ui.ctx(), &mut features::cx(app));
-    transfer::external_change_dialog_window(ui.ctx(), &mut features::cx(app));
-    transfer::export_generated_dialog_window(ui.ctx(), &mut features::cx(app));
-    transfer::import_review_dialog_window(ui.ctx(), &mut features::cx(app));
+    search::find_replace_window(ui.ctx(), cx);
+    language::rename_dialog_window(ui.ctx(), cx);
+    ownership::ownership_dialog_window(ui.ctx(), cx);
+    revision::comparison_dialog_window(ui.ctx(), cx);
+    revision::save_source_dialog_window(ui.ctx(), cx);
+    transfer::external_change_dialog_window(ui.ctx(), cx);
+    transfer::export_generated_dialog_window(ui.ctx(), cx);
+    transfer::import_review_dialog_window(ui.ctx(), cx);
 }
 
 #[derive(Clone, Copy)]
@@ -1124,7 +1146,7 @@ mod tests {
     use egui::vec2;
 
     use super::*;
-    use crate::workbench::AppState;
+    use crate::workbench::{AppState, RSpiceApp, features};
 
     /// F8 in the netlist editor goes to the deck's next finding, on its
     /// column, and Shift+F8 back; each says which finding it reached. A
@@ -1165,7 +1187,7 @@ mod tests {
             )),
             ..Default::default()
         };
-        let editor = netlist_document::editor_id(&app.state);
+        let editor = netlist_document::editor_id_in(&app.state.model, &app.state.code.netlist);
         // The page's order: the step, the reveal it queued, then the editor.
         let press = |app: &mut RSpiceApp, step: ProblemStep| {
             for frame in 0..3 {
@@ -1497,7 +1519,12 @@ mod tests {
 
     /// Seal one manual-deck run into history the way a dispatch does, so the
     /// strip has a real receipt to read its digest and revision back off.
-    fn seal_manual_run(state: &mut AppState, run_number: u64, deck_digest: u8, revision: u64) {
+    pub(super) fn seal_manual_run(
+        state: &mut AppState,
+        run_number: u64,
+        deck_digest: u8,
+        revision: u64,
+    ) {
         let project_revision =
             crate::product::ObjectRevision::new(revision).expect("non-zero revision");
         let task = crate::state::PreparedRunTaskReceipt::new(
@@ -1781,7 +1808,9 @@ mod tests {
         let canvas = crate::ui::raster::render(vec2(width, 520.0), |ui, background| {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE.fill(background))
-                .show(ui, |ui| show_prepared(ui, &mut app));
+                .show(ui, |ui| {
+                    show_prepared(ui, &mut features::cx_with_menu_answers(&mut app, |_| false));
+                });
         });
         let band = egui::Rect::from_min_max(
             egui::pos2(0.0, toolbar::CODE_TOOLBAR_HEIGHT + 1.0),

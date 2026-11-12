@@ -98,17 +98,24 @@ pub(crate) fn cx_with_foreign_answers<F: Registered>(
     F::cx(app).with_foreign_availability(answers)
 }
 
-/// The context `F`'s menu runs in, as [`cx`] lends it, holding the
-/// dispatcher's answers for the commands `F` reads and, after them, for
-/// those its menus read. Lend it only while one of `F`'s menus is open: no
-/// other lend takes the menus' answers, so a frame without an open menu
-/// asks the dispatcher nothing more.
-pub(crate) fn cx_with_menu_answers<F: Registered>(app: &mut RSpiceApp) -> Cx<'_, F> {
-    let answers = ForeignAvailability::take_with_menus(
-        F::FOREIGN_AVAILABILITY,
-        F::MENU_AVAILABILITY,
-        |key| app.command_availability(key),
-    );
+/// The context a page of `F` with a menu draws in, as [`cx`] lends it,
+/// holding the dispatcher's answers for the commands `F` reads and, when
+/// `menu_open(app)` says one of `F`'s menus is open or opening this frame,
+/// for those its menus read after them. No other lend takes the menus'
+/// answers, so a frame without an open menu asks the dispatcher nothing
+/// more.
+pub(crate) fn cx_with_menu_answers<F: Registered>(
+    app: &mut RSpiceApp,
+    menu_open: impl FnOnce(&RSpiceApp) -> bool,
+) -> Cx<'_, F> {
+    let menus = if menu_open(app) {
+        F::MENU_AVAILABILITY
+    } else {
+        &[]
+    };
+    let answers = ForeignAvailability::take_with_menus(F::FOREIGN_AVAILABILITY, menus, |key| {
+        app.command_availability(key)
+    });
     F::cx(app).with_foreign_availability(answers)
 }
 
@@ -607,10 +614,11 @@ mod tests {
         }
     }
 
-    /// A lend for anything but an open menu asks the dispatcher for the code
-    /// feature's three answers, the toolbar's every frame among them; the
-    /// lend while its menu is open asks for its menu's eight after them, and
-    /// holds each as the dispatcher gives it.
+    /// A lend for anything but an open menu, the deck page's while its menu
+    /// is closed among them, asks the dispatcher for the code feature's three
+    /// answers, the toolbar's every frame among them; the page's lend while
+    /// its menu is open asks for its menu's eight after them, and holds each
+    /// as the dispatcher gives it.
     #[test]
     fn a_plain_lend_takes_three_answers_and_a_menu_lend_eleven() {
         use crate::workbench::code::CodeFeature;
@@ -624,7 +632,11 @@ mod tests {
             cx_with_foreign_answers::<CodeFeature>(&mut app, |_| true).foreign_answers_taken(),
             3
         );
-        let cx = cx_with_menu_answers::<CodeFeature>(&mut app);
+        assert_eq!(
+            cx_with_menu_answers::<CodeFeature>(&mut app, |_| false).foreign_answers_taken(),
+            3
+        );
+        let cx = cx_with_menu_answers::<CodeFeature>(&mut app, |_| true);
         assert_eq!(cx.foreign_answers_taken(), 11);
         for (key, answer) in menu_answers {
             assert_eq!(cx.foreign_availability(key), answer, "{key:?}");

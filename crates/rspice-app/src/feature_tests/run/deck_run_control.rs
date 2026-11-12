@@ -1,8 +1,9 @@
-//! The deck page's Validate source, Run and Stop, pressed and released in
-//! whole frames of the application.
+//! The deck page's Validate source, Run and Stop, its run strip's Open in
+//! Results and its Import deck, pressed and released in whole frames of the
+//! application.
 //!
-//! The toolbar raises all three for the dispatcher, which carries them out
-//! once the page has drawn. A press must still take effect in the frame of its
+//! The page raises each for the dispatcher, which carries it out once the
+//! page has drawn. A press must still take effect in the frame of its
 //! release, and that frame must ask for the next at once, so what the press
 //! changed is drawn without waiting for the reader to move the pointer.
 
@@ -185,5 +186,76 @@ fn stop_stops_the_run_in_the_frame_it_is_released_and_repaints() {
     assert!(
         repaints_at_once(&output),
         "the frame Stop asked the run to stop in asks for the next at once"
+    );
+}
+
+/// Open in Results on the run strip selects the run and opens Results in the
+/// frame of its release: the page selects the run, and the dispatcher opens
+/// Results once the page has drawn.
+#[test]
+fn open_in_results_opens_the_run_in_the_frame_it_is_released() {
+    use crate::workbench::commands::tests::{RunOrigin, app_with_prepared_run};
+
+    const DECK: &str = "* strip check\nV1 in 0 1\nR1 in 0 1k\n.op\n.end\n";
+    let mut app = app_with_prepared_run(RunOrigin::ManualDeck);
+    let run = app.state.model.simulation.retained.runs[0].id;
+    app.state.model.workspace.content.netlist_source = Some(DECK.to_owned());
+    app.state.model.simulation.source.netlist_content = DECK.to_owned();
+    app.state.code.netlist.active_document =
+        crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource;
+    app.state.code.netlist.active_document_initialized = true;
+    app.state.runs.manual_run.last_run_buffer = Some(DECK.to_owned());
+    app.state.runs.manual_run.last_run_id = Some(run);
+    app.state.model.simulation.view.active_run_idx = None;
+    app.state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
+    let mut replay = Replay::of(app);
+    let open = only(&replay.frames(Vec::new()), "Open in Results", Role::Button).center;
+    press_and_release(&mut replay, open);
+    assert_eq!(
+        replay.app.state.model.simulation.view.active_run_idx,
+        Some(0),
+        "the release selects the run"
+    );
+    assert_eq!(
+        replay.app.state.workbench.workspace,
+        crate::workbench::state::Workspace::Results,
+        "the frame of the release ends on Results"
+    );
+}
+
+/// Import deck on the empty deck page is answered in the frame of its
+/// release: on a project open read-only, that frame says why it cannot
+/// import, though the dispatcher carries it out once the page has drawn.
+#[test]
+fn import_deck_is_answered_in_the_frame_it_is_released() {
+    let mut replay = Replay::new();
+    replay.app.state.model.safe_mode.activate(
+        crate::state::write_policy::LocalSafeModeOptions {
+            open_project_read_only: true,
+            ..Default::default()
+        },
+        String::new(),
+    );
+    assert!(replay.app.state.model.safe_mode.project_read_only());
+    replay.app.state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
+    // The empty page measures its actions in an invisible pass before it
+    // draws them, and the measured copies are in the tree too: the drawn
+    // button is the last.
+    let import = replay
+        .frames(Vec::new())
+        .into_iter()
+        .rfind(|control| control.role == Role::Button && control.label == "Import deck\u{2026}")
+        .expect("the empty page offers Import deck")
+        .center;
+    assert_eq!(
+        replay.app.state.prompt_text(),
+        None,
+        "nothing is said before the press"
+    );
+    press_and_release(&mut replay, import);
+    let said = replay.app.state.prompt_text().unwrap_or_default();
+    assert!(
+        said.contains("read-only"),
+        "the frame of the release says why it cannot import: {said:?}"
     );
 }

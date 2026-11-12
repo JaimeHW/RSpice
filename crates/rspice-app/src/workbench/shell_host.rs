@@ -161,7 +161,20 @@ impl Host for RSpiceApp {
                         netlist::prepare_workspace(&mut features::cx(app));
                         match app.state.code.code_workspace.page {
                             crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist => {
-                                netlist::show_prepared(ui, app)
+                                // The page's context holds its menu's answers
+                                // only while the source editor's menu is open
+                                // or opening.
+                                let ctx = ui.ctx().clone();
+                                netlist::show_prepared(
+                                    ui,
+                                    &mut features::cx_with_menu_answers(app, |app| {
+                                        netlist::source_menu_open(
+                                            &ctx,
+                                            &app.state.model,
+                                            &app.state.code.netlist,
+                                        )
+                                    }),
+                                );
                             }
                             crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation => {
                                 automation::show(ui, app)

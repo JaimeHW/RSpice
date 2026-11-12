@@ -6,6 +6,7 @@
 //! callers retain application-level document identity and persistence.
 
 mod accessibility;
+mod context_menu;
 mod keymap;
 mod touch;
 
@@ -13,6 +14,8 @@ pub(crate) use accessibility::bounded_accessible_text;
 #[cfg(any(test, target_arch = "wasm32"))]
 pub(crate) use accessibility::speak_caret_lines;
 use accessibility::{consume_accesskit_text_selection, update_accesskit_text_state};
+pub(crate) use context_menu::context_menu_may_show;
+use context_menu::{context_menu_id, take_menu_keys};
 use keymap::{KeyAction, Motion, Reach};
 
 use std::ops::Range;
@@ -236,31 +239,6 @@ fn take_zoom_keys(ctx: &egui::Context) {
     }
 }
 
-/// Shift+F10 and the Menu key open the context menu at the caret.
-fn take_menu_keys(ctx: &egui::Context, editor_id: egui::Id) -> bool {
-    let shift_f10 = ctx.input_mut(|input| input.consume_key(Modifiers::SHIFT, Key::F10));
-    shift_f10 | menu_key_went_down(ctx, editor_id)
-}
-
-/// egui has no name for the Menu key, so the keyboard's own state is read. A
-/// press wakes the frame this runs in like any other key does.
-#[cfg(windows)]
-fn menu_key_went_down(ctx: &egui::Context, editor_id: egui::Id) -> bool {
-    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_APPS};
-    // SAFETY: takes a virtual-key code and returns a value; nothing is borrowed.
-    let down = unsafe { GetAsyncKeyState(i32::from(VK_APPS)) } < 0;
-    press_begins(
-        ctx,
-        editor_id.with("menu key"),
-        down && ctx.input(|input| input.focused),
-    )
-}
-
-#[cfg(not(windows))]
-const fn menu_key_went_down(_ctx: &egui::Context, _editor_id: egui::Id) -> bool {
-    false
-}
-
 /// Whether a key read as `down` has gone down since it was last read.
 #[cfg(windows)]
 pub(crate) fn press_begins(ctx: &egui::Context, id: egui::Id, down: bool) -> bool {
@@ -400,7 +378,7 @@ pub(crate) fn show_virtual_text_editor(
     let mut menu_raised = false;
     // While the context menu is open the keys are the menu's: an arrow steps
     // its rows, a letter picks one, and neither reaches the text behind it.
-    let menu_open = egui::Popup::is_id_open(ui.ctx(), editor_id.with("popup"));
+    let menu_open = egui::Popup::is_id_open(ui.ctx(), context_menu_id(editor_id));
     if ui.memory(|memory| memory.has_focus(editor_id)) && !menu_open {
         take_zoom_keys(ui.ctx());
         menu_raised = take_menu_keys(ui.ctx(), editor_id);
@@ -961,6 +939,11 @@ pub(crate) fn show_virtual_text_editor(
         tab_moves_focus,
         style,
         &mut line_diagnostic_context,
+    );
+    // A page reads whether the menu may show by this id before it draws.
+    debug_assert_eq!(
+        egui::Popup::default_response_id(&response),
+        context_menu_id(editor_id)
     );
     if menu_raised {
         crate::ui::widgets::raise_context_menu(

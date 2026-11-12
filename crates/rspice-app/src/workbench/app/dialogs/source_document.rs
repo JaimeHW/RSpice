@@ -94,18 +94,8 @@ pub(crate) fn open_source_document_dialog_in(
 /// The netlist page's New source document and New top deck: the dialog on
 /// its review of a new top deck. Unlike Manage source document it opens on
 /// a project that owns no deck yet, the one [`generated_deck_refusal`]
-/// sends here.
-pub(crate) fn begin_new_top_deck(state: &mut AppState) -> Result<(), String> {
-    begin_new_top_deck_in(
-        &state.model,
-        &mut state.code.code_workspace,
-        &mut state.code.netlist,
-        &state.platform,
-    )
-}
-
-/// [`begin_new_top_deck`], over the model, the Code workspace's runtime
-/// state, the netlist editor's state and the platform's state.
+/// sends here. It reads the model and the platform's state, and writes the
+/// Code workspace's runtime state and the netlist editor's state.
 pub(crate) fn begin_new_top_deck_in(
     model: &Model,
     code: &mut CodeWorkspaceRuntimeState,

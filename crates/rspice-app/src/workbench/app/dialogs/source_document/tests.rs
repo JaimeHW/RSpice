@@ -305,7 +305,13 @@ fn new_source_document_opens_on_a_project_that_owns_no_deck() {
     app.state.code.code_workspace.page = CodeWorkspacePage::Netlist;
     assert!(open_source_document_dialog(&mut app.state).is_err());
 
-    begin_new_top_deck(&mut app.state).unwrap();
+    begin_new_top_deck_in(
+        &app.state.model,
+        &mut app.state.code.code_workspace,
+        &mut app.state.code.netlist,
+        &app.state.platform,
+    )
+    .unwrap();
     assert!(app.state.code.code_workspace.source_document_dialog);
     let transaction = app
         .state
@@ -475,7 +481,13 @@ fn node_left(nodes: &[egui::accesskit::Node], label: &str) -> f64 {
 fn new_source_document_on_a_deckless_project_is_a_creation_form() {
     let mut app = RSpiceApp::test_instance();
     app.state.code.code_workspace.page = CodeWorkspacePage::Netlist;
-    begin_new_top_deck(&mut app.state).unwrap();
+    begin_new_top_deck_in(
+        &app.state.model,
+        &mut app.state.code.code_workspace,
+        &mut app.state.code.netlist,
+        &app.state.platform,
+    )
+    .unwrap();
     let nodes = dialog_nodes(&mut app);
     let says = |text: &str| {
         nodes.iter().any(|node| {

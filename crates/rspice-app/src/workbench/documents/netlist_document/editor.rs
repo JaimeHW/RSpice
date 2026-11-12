@@ -63,12 +63,8 @@ const fn platform_include_access() -> IncludeAccess {
 }
 
 /// Stable per-document id so cursor, selection, undo, and scroll state do not
-/// leak between an owned root, generated root, include, or comparison tab.
-pub(crate) fn editor_id(state: &AppState) -> egui::Id {
-    editor_id_in(&state.model, &state.code.netlist)
-}
-
-/// [`editor_id`], over the model and the netlist editor's state.
+/// leak between an owned root, generated root, include, or comparison tab,
+/// over the model and the netlist editor's state.
 pub(crate) fn editor_id_in(
     model: &super::Model,
     netlist: &super::NetlistDocumentState,
