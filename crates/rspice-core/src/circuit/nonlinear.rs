@@ -977,6 +977,9 @@ impl CircuitData {
         for diode in &mut self.diodes.devices {
             diode.set_junction_gmin(gmin);
         }
+        for vdmos in &mut self.vdmoses.devices {
+            vdmos.set_junction_gmin(gmin);
+        }
         // BSIM3 consumes CKTgmin inside its diode equations (b3ld.c forms
         // `gbs = ... + gmin` directly); there is no separate shunt path.
         for dev in &mut self.bsim3v3.devices {

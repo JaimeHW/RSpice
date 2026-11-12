@@ -11432,6 +11432,9 @@ impl Engine {
         for mos in &mut circuit.mosfets.devices {
             mos.set_junction_gmin(junction_gmin);
         }
+        for vdmos in &mut circuit.vdmoses.devices {
+            vdmos.set_junction_gmin(junction_gmin);
+        }
         for jfet in &mut circuit.jfets {
             jfet.set_junction_gmin(junction_gmin);
             jfet.set_voltage_limiting_enabled(self.config.device_voltage_limiting);

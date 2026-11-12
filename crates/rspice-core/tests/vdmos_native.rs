@@ -1,6 +1,6 @@
 //! Native VDMOS / Xyce MOS LEVEL=18 integration tests.
 
-use rspice_core::engine::{DcSweepRange, Engine, SimulationConfig};
+use rspice_core::engine::{DcSweepRange, Engine, SimulationConfig, SpiceDialect};
 use rspice_core::netlist::{AnalysisCommand, Netlist};
 
 fn run_report(deck: &str) -> rspice_core::circuit::DeviceOpReport {
@@ -2789,6 +2789,51 @@ fn a_drain_source_shunt_conducts_with_the_device_off() {
         .expect("shunted card runs");
     let drain = result.branch_current_named("VD").expect("drain source");
     assert!((drain + 1.0e-2).abs() < 1e-9, "shunt current {drain}");
+}
+
+/// A card with its channel off, one terminal at 1 V and the other two held at
+/// 0 V, at .options gmin=1e-9: the current into each held terminal, in GMIN,
+/// is the GMIN conductance between them. QSPICE: 2 from drain to source, 3
+/// with the default body diode, and 0.02 from the gate to each of the drain
+/// and the source. ngspice-46: 1 from drain to source, diode or none, and none
+/// at the gate. Xyce loads none.
+#[test]
+fn a_vdmos_card_loads_the_gmin_its_dialects_simulator_loads() {
+    let gmin = 1.0e-9;
+    let held = |dialect: SpiceDialect, model: &str, drive: &str| {
+        let (vg, vd) = if drive == "gate" { (1, 0) } else { (0, 1) };
+        let deck = format!(
+            "vdmos gmin\nVG g 0 {vg}\nVD d 0 {vd}\nVS s 0 0\nM1 d g s n\n\
+             .model n vdmos(vto=10 kp=1e-30 {model})\n.options gmin=1e-9\n.op\n.end\n"
+        );
+        let result = Engine::new(SimulationConfig::default().with_spice_dialect(dialect))
+            .run_dc_op(&Netlist::parse(&deck).expect("probe deck parses"))
+            .expect("probe deck runs");
+        let current = |source: &str| {
+            result
+                .branch_current_named(source)
+                .unwrap_or_else(|| panic!("{source} current"))
+                .abs()
+                / gmin
+        };
+        let other = if drive == "gate" { "VD" } else { "VG" };
+        (current(other), current("VS"))
+    };
+    for (dialect, model, drive, expected) in [
+        (SpiceDialect::BestAvailable, "is=0", "drain", (0.02, 2.0)),
+        (SpiceDialect::BestAvailable, "", "drain", (0.02, 3.0)),
+        (SpiceDialect::BestAvailable, "", "gate", (0.02, 0.02)),
+        (SpiceDialect::Ngspice, "is=0", "drain", (0.0, 1.0)),
+        (SpiceDialect::Ngspice, "", "gate", (0.0, 0.0)),
+        (SpiceDialect::Xyce, "is=0", "drain", (0.0, 0.0)),
+        (SpiceDialect::Xyce, "", "gate", (0.0, 0.0)),
+    ] {
+        let (other, source) = held(dialect, model, drive);
+        assert!(
+            (other - expected.0).abs() < 1.0e-4 && (source - expected.1).abs() < 1.0e-4,
+            "{dialect:?} {model:?} {drive}: {other} and {source} GMIN, expected {expected:?}"
+        );
+    }
 }
 
 /// QSPICE batch: `subthres` spells `Ksubthres`, which softens the square

@@ -729,8 +729,12 @@ const MAX_PUBLIC_ITEMS: usize = 5292;
 // Xyce does. The census is 1,697.
 // `Vdmos::set_voltage_limiting_enabled` adds one: the builder turns off a
 // VDMOS's voltage limiting under `.options device voltlim=0`, as Xyce does.
-// The census is 1,698, with no slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 1698;
+// The census is 1,698.
+// `Vdmos::set_junction_gmin` adds one: the junction GMIN reaches a VDMOS
+// through `CircuitData::set_semiconductor_junction_gmin` (`rspice-core`
+// circuit/nonlinear.rs), as it reaches every other junction. The census is
+// 1,699, with no slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 1699;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

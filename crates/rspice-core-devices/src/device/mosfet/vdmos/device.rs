@@ -39,6 +39,20 @@ pub struct VdmosNoiseOperatingPoint {
     pub drain_current: Value,
 }
 
+/// The GMIN conductances a `.model VDMOS` card loads beside its own law, by
+/// the simulator its dialect follows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum VdmosGminLoading {
+    /// Xyce, and the Xyce LEVEL=18 card: none.
+    None,
+    /// ngspice: GMIN across the body diode (vdmosload.c:834,
+    /// `gd = gdb + CKTgmin`), whatever its saturation current.
+    Ngspice,
+    /// QSPICE: 2·GMIN from drain to source, GMIN across a body diode that
+    /// conducts, and GMIN/50 from the gate to the drain and to the source.
+    Qspice,
+}
+
 #[derive(Debug, Clone, Copy)]
 struct VdmosLinearization {
     id: Value,
@@ -112,6 +126,10 @@ pub struct Vdmos {
     drain_source_shunt: Value,
     /// Current through the `RDS` shunt at the last accepted update.
     shunt_current: Value,
+    /// The junction GMIN, `.options gmin` as GMIN stepping leaves it.
+    junction_gmin: Value,
+    /// The GMIN conductances the card loads at `junction_gmin`.
+    gmin_loading: VdmosGminLoading,
     /// Nominal-temperature threshold retained for repeatable temperature updates.
     nominal_vth: Value,
     /// Nominal-temperature transconductance retained for repeatable temperature updates.
@@ -399,6 +417,8 @@ impl Vdmos {
             ngspice_ksubthres: 0.1,
             drain_source_shunt: 0.0,
             shunt_current: 0.0,
+            junction_gmin: 0.0,
+            gmin_loading: VdmosGminLoading::None,
             nominal_vth: 2.0,
             nominal_kp: 2.0,
             nominal_rd: 0.1,
@@ -542,6 +562,34 @@ impl Vdmos {
         self.initial_off
     }
 
+    /// Set the junction GMIN, `.options gmin` as GMIN stepping leaves it,
+    /// that the card's GMIN conductances carry.
+    #[doc(hidden)]
+    pub fn set_junction_gmin(&mut self, gmin: Value) {
+        self.junction_gmin = if gmin.is_finite() && gmin > 0.0 {
+            gmin
+        } else {
+            0.0
+        };
+    }
+
+    /// The GMIN conductances the card loads: across the body diode, from
+    /// drain to source, and from the gate to each of the drain and the
+    /// source.
+    fn gmin_conductances(&self) -> (Value, Value, Value) {
+        let gmin = self.junction_gmin;
+        match self.gmin_loading {
+            VdmosGminLoading::None => (0.0, 0.0, 0.0),
+            VdmosGminLoading::Ngspice => (gmin, 0.0, 0.0),
+            VdmosGminLoading::Qspice => {
+                let diode_conducts =
+                    self.d1_current_enabled && (self.d1_is > 0.0 || self.d1_isr > 0.0);
+                let diode = if diode_conducts { gmin } else { 0.0 };
+                (diode, 2.0 * gmin, gmin / 50.0)
+            }
+        }
+    }
+
     /// Apply Xyce's global `DEVICE VOLTLIM` policy: `voltageLimiterFlag` gates
     /// the VDMOS fetlim/limvds/pnjlim pinning (N_DEV_VDMOS.C:2836) and its
     /// initJct seed (:2765). An `OFF` instance opens at zero bias either way.
@@ -622,6 +670,17 @@ impl Vdmos {
             self.d1_eg = 1.11;
             self.d1_xti = 3.0;
             self.d1_current_enabled = true;
+            // A VDMOS with its channel off shows QSPICE 2.0·GMIN from drain
+            // to source, 3.0·GMIN with its default body diode, and GMIN/50
+            // from the gate to each of the drain and the source; ngspice-46
+            // 1.0·GMIN from drain to source, diode or none; at .options gmin
+            // 1e-12 and 1e-9 alike. LTspice 26.1.1 shows 2.0·GMIN from drain
+            // to source and none at the gate.
+            self.gmin_loading = match dialect {
+                crate::config::SpiceDialect::BestAvailable => VdmosGminLoading::Qspice,
+                crate::config::SpiceDialect::Ngspice => VdmosGminLoading::Ngspice,
+                crate::config::SpiceDialect::Xyce => VdmosGminLoading::None,
+            };
 
             if dialect == crate::config::SpiceDialect::BestAvailable {
                 self.vth = 0.0;
@@ -3326,6 +3385,20 @@ impl NonlinearDevice for Vdmos {
             matrix.stamp(s, d, -shunt);
             matrix.stamp(s, s, shunt);
         }
+        if self.gmin_loading != VdmosGminLoading::None {
+            let (diode, drain_source, gate) = self.gmin_conductances();
+            for (pos, neg, conductance) in [
+                (d, self.d1_prime_node(), diode),
+                (d, s, drain_source),
+                (g, d, gate),
+                (g, s, gate),
+            ] {
+                matrix.stamp(pos, pos, conductance);
+                matrix.stamp(pos, neg, -conductance);
+                matrix.stamp(neg, pos, -conductance);
+                matrix.stamp(neg, neg, conductance);
+            }
+        }
 
         if self.rs > 1e-12 && si != s {
             let _vs = if s > 0 { voltages[s - 1] } else { 0.0 };
@@ -3850,6 +3923,42 @@ mod tests {
         assert!(!vdmos.limiter_applied);
         vdmos.update(&[-2.0, 0.0, 0.0]);
         assert_eq!(vdmos.d1_vd, vdmos.d1_vd_raw);
+    }
+
+    /// QSPICE loads 2·GMIN from drain to source, GMIN across a body diode
+    /// that conducts and GMIN/50 from the gate to the drain and to the
+    /// source; ngspice GMIN across its body diode alone; the Xyce dialect and
+    /// the Xyce LEVEL=18 card none.
+    #[test]
+    fn each_dialect_loads_its_simulators_gmin_conductances() {
+        let conductances = |dialect, params: &[(&str, Value)]| {
+            let params = params
+                .iter()
+                .map(|&(name, value)| (name.to_string(), value))
+                .collect::<HashMap<_, _>>();
+            let mut vdmos =
+                Vdmos::new_nvdmos("m1".to_string(), 1, 2, 3).with_params(&params, dialect);
+            vdmos.set_junction_gmin(1.0e-9);
+            vdmos.gmin_conductances()
+        };
+        let gate = 1.0e-9 / 50.0;
+        assert_eq!(
+            conductances(SpiceDialect::BestAvailable, &[]),
+            (1.0e-9, 2.0e-9, gate)
+        );
+        assert_eq!(
+            conductances(SpiceDialect::BestAvailable, &[("IS", 0.0)]),
+            (0.0, 2.0e-9, gate)
+        );
+        assert_eq!(
+            conductances(SpiceDialect::Ngspice, &[("IS", 0.0)]),
+            (1.0e-9, 0.0, 0.0)
+        );
+        assert_eq!(conductances(SpiceDialect::Xyce, &[]), (0.0, 0.0, 0.0));
+        assert_eq!(
+            conductances(SpiceDialect::BestAvailable, &[("LEVEL", 18.0)]),
+            (0.0, 0.0, 0.0)
+        );
     }
 
     #[test]
