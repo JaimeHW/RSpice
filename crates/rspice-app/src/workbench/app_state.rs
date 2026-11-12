@@ -135,13 +135,6 @@ impl AppState {
         );
     }
 
-    /// [`Model::include_search_chain`].
-    pub(crate) fn include_search_chain(
-        &self,
-    ) -> rspice_simulation::netlist_preparation::IncludeSearchChain {
-        self.model.include_search_chain()
-    }
-
     /// The parts opening a model in the editor writes.
     #[cfg(test)]
     pub(crate) fn model_editor_parts(
@@ -165,11 +158,6 @@ impl AppState {
             &mut self.runs.preflight,
             crate::workbench::commands::vocabulary::command_registry(),
         )
-    }
-
-    /// [`Model::library_folders`].
-    pub(crate) fn library_folders(&self) -> &[std::path::PathBuf] {
-        self.model.library_folders()
     }
 
     /// What the authored plan needs a project technology for, computed before

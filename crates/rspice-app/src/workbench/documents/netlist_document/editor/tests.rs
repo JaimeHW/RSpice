@@ -4,6 +4,18 @@
 
 use super::*;
 
+/// The editor drawn over the parts of `state` it reads.
+fn show_state(ui: &mut Ui, state: &mut AppState) -> egui::Response {
+    show(
+        ui,
+        &mut state.model,
+        &mut state.code.netlist,
+        &state.code.code_workspace.include_resolutions,
+        &state.runs,
+        &mut state.workbench,
+    )
+}
+
 /// The editor's layout at the size it opens at.
 const FONT_SIZE: f32 = 11.0;
 const GUTTER_W: f32 = 47.0;
@@ -61,7 +73,7 @@ fn hover_rasters(
                         .x
                 });
                 geometry.set((ui.cursor().min, advance));
-                show(ui, &mut state);
+                show_state(ui, &mut state);
             });
     });
 
@@ -74,7 +86,7 @@ fn hover_rasters(
     let hovered = crate::ui::raster::render_with_pointer(size, pointer, |ui, background| {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(background))
-            .show(ui, |ui| show(ui, &mut state));
+            .show(ui, |ui| show_state(ui, &mut state));
     });
     let resolved = state
         .code
@@ -180,7 +192,7 @@ fn completion_reaches_a_document_that_has_content_in_it() {
                     source.chars().count(),
                 );
             }
-            show(ui, &mut state);
+            show_state(ui, &mut state);
         });
     }
 
@@ -579,7 +591,12 @@ fn hover_on(
 ) -> Option<super::super::language::NetlistValueHover> {
     let byte = deck.find(needle).expect("deck contains the token") + offset;
     let index = deck[..byte].chars().count();
-    super::super::language::value_hover_at(state, deck, index)
+    super::super::language::value_hover_at_in(
+        &mut state.code.netlist,
+        state.workbench.messages(),
+        deck,
+        index,
+    )
 }
 
 /// The parser reads only the branch it takes, so the hover binds that
@@ -1226,7 +1243,7 @@ fn the_netlist_editor_draws_at_the_preferred_text_size() {
                 ..Default::default()
             },
             |ui| {
-                show(ui, &mut state);
+                show_state(ui, &mut state);
             },
         ));
     }
@@ -1275,7 +1292,7 @@ fn the_netlist_editor_keeps_its_keys_and_its_caret_in_view() {
         };
         context.run_ui(input, |ui| {
             let _ = ui.button("Before");
-            show(ui, state);
+            show_state(ui, state);
         })
     };
     let _ = frame(&mut state, Vec::new());

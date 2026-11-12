@@ -57,7 +57,12 @@ fn the_editor_resolves_an_include_only_a_library_folder_holds() {
     state.code.netlist.last_edit_time = f64::NEG_INFINITY;
     let ctx = egui::Context::default();
     let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
-        refresh_diagnostics(ui, &mut state);
+        refresh_diagnostics(
+            ui,
+            &state.model,
+            &mut state.code.netlist,
+            &state.code.code_workspace.include_resolutions,
+        );
     });
     assert_eq!(errors(&state), Vec::<String>::new());
 

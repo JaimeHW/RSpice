@@ -374,8 +374,15 @@ pub(in crate::workbench) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
                 editor_id,
             );
             reveal_in_netlist(ui, &app.state.model, &mut app.state.code.netlist, editor_id);
-            let response =
-                crate::workbench::documents::netlist_document::show_editor(ui, &mut app.state);
+            let state = &mut app.state;
+            let response = crate::workbench::documents::netlist_document::show_editor(
+                ui,
+                &mut state.model,
+                &mut state.code.netlist,
+                &state.code.code_workspace.include_resolutions,
+                &state.runs,
+                &mut state.workbench,
+            );
             // The right-click menu's rows read the code feature's context,
             // lent with its menus' answers only while the menu is open; the
             // row chosen runs once the page has drawn.
@@ -1175,7 +1182,15 @@ mod tests {
                         editor,
                     );
                     reveal_in_netlist(ui, &app.state.model, &mut app.state.code.netlist, editor);
-                    netlist_document::show_editor(ui, &mut app.state);
+                    let state = &mut app.state;
+                    netlist_document::show_editor(
+                        ui,
+                        &mut state.model,
+                        &mut state.code.netlist,
+                        &state.code.code_workspace.include_resolutions,
+                        &state.runs,
+                        &mut state.workbench,
+                    );
                 });
             }
             let caret = app.state.code.netlist.cursor_char_index;

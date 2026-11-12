@@ -747,18 +747,18 @@ fn format_hover_value(value: f64) -> String {
 /// `buffer` is the visible source, which is also what a generated document or
 /// a read-only run snapshot projects; a unified comparison is not a deck and
 /// answers nothing.
-pub(crate) fn value_hover_at(
-    state: &mut AppState,
+pub(crate) fn value_hover_at_in(
+    netlist: &mut NetlistDocumentState,
+    messages: MessageCatalog,
     buffer: &str,
     char_index: usize,
 ) -> Option<NetlistValueHover> {
-    if state.code.netlist.active_document == ActiveNetlistDocument::GeneratedDiff {
+    if netlist.active_document == ActiveNetlistDocument::GeneratedDiff {
         return None;
     }
-    let revision = state.code.netlist.revision;
-    let messages = state.workbench.messages();
-    let unread = state.code.netlist.unread_source_at(revision);
-    let index = match &mut state.code.netlist.value_index {
+    let revision = netlist.revision;
+    let unread = netlist.unread_source_at(revision);
+    let index = match &mut netlist.value_index {
         Some(index) if index.revision == revision && index.read_by_parse == unread.is_some() => {
             index
         }
@@ -774,8 +774,12 @@ pub(crate) fn value_hover_at(
     hover
 }
 
-pub(crate) fn symbol_hover(state: &mut AppState, name: &str) -> Option<ProjectSymbolHover> {
-    let index = project_index(state)?;
+pub(crate) fn symbol_hover(
+    model: &Model,
+    netlist: &mut NetlistDocumentState,
+    name: &str,
+) -> Option<ProjectSymbolHover> {
+    let index = project_index_in(model, netlist)?;
     let definitions = index.definitions_named(name);
     let references = index.references_named(name);
     match definitions.as_slice() {
@@ -2032,6 +2036,12 @@ M1 d g s b nch W={w} L={l*2}\n\
         let mut state = AppState::default();
         state.model.simulation.source.netlist_content = HOVER_DECK.to_owned();
         state
+    }
+
+    /// [`value_hover_at_in`] over the parts of `state` it reads.
+    fn value_hover_at(state: &mut AppState, deck: &str, at: usize) -> Option<NetlistValueHover> {
+        let netlist = &mut state.code.netlist;
+        value_hover_at_in(netlist, state.workbench.messages(), deck, at)
     }
 
     fn hover_at(state: &mut AppState, needle: &str, offset: usize) -> Option<NetlistValueHover> {

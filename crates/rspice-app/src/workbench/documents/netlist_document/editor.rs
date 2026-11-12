@@ -15,17 +15,21 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
 #![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use egui::Ui;
+use rspice_app_runs::workbench::slots::runs::RunsState;
 use rspice_core::abort_signal::{AbortSignal, NoAbort};
+use rspice_core::netlist::IncludeResolution;
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::Tokens;
 use crate::ui::widgets::Problem;
 use crate::workbench::code::commands::NetlistEditorRequest;
 use crate::workbench::documents::text_editor_commands::{EditorSyntax, show_go_to_line};
+use crate::workbench::state::WorkbenchSession;
 use crate::workbench::{AppState, MessageId};
 
 use super::{
@@ -104,34 +108,43 @@ pub(crate) fn editor_id_in(
     }
 }
 
-/// Render the editor and diagnostics strip. Returns the source well, for its
-/// right-click menu.
-pub fn show(ui: &mut Ui, state: &mut AppState) -> egui::Response {
+/// Render the editor and diagnostics strip over the model, the netlist
+/// editor's state, where the page's includes resolved, the runs (for the
+/// lines a run edited) and the workbench session. Returns the source well,
+/// for its right-click menu.
+pub fn show(
+    ui: &mut Ui,
+    model: &mut super::Model,
+    netlist: &mut super::NetlistDocumentState,
+    include_resolutions: &BTreeMap<String, IncludeResolution>,
+    runs: &RunsState,
+    workbench: &mut WorkbenchSession,
+) -> egui::Response {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
-    let editable = super::active_netlist_source_is_editable(state);
-    let editor_id = editor_id(state);
+    let editable = super::active_netlist_source_is_editable_in(model, netlist);
+    let editor_id = editor_id_in(model, netlist);
 
-    refresh_diagnostics(ui, state);
+    refresh_diagnostics(ui, model, netlist, include_resolutions);
 
     // Popover keys (⇥, ↑↓, Esc) must be consumed before the editor so
     // an open popover owns them.
     let completion_keys = if editable {
-        completion::consume_keys(ui, &state.code.netlist)
+        completion::consume_keys(ui, netlist)
     } else {
         // Generated output owns no editor state. Close a popover that may have
         // survived a transition away from an owned source document.
-        state.code.netlist.completion_open = false;
+        netlist.completion_open = false;
         (0, false, false)
     };
     // An open signature hint answers Escape too, before the editor would
     // take the key to let go of focus.
-    if state.code.netlist.signature_help.open
+    if netlist.signature_help.open
         && ui
             .ctx()
             .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
     {
-        state.code.netlist.signature_help.open = false;
+        netlist.signature_help.open = false;
     }
 
     // Document well backdrop.
@@ -140,26 +153,22 @@ pub fn show(ui: &mut Ui, state: &mut AppState) -> egui::Response {
 
     let text_size = editor_font::text_size(ui.ctx());
     let font = theme::mono(text_size, FontWeight::Regular);
-    let diagnostics = Arc::clone(&state.code.netlist.diagnostics);
-    let edited_lines = state.runs.manual_run.edited_lines.clone();
-    let cross_probe_line = (state.code.netlist.active_document
-        == super::ActiveNetlistDocument::Generated)
-        .then_some(state.code.netlist.cross_probe_line)
+    let diagnostics = Arc::clone(&netlist.diagnostics);
+    let edited_lines = runs.manual_run.edited_lines.clone();
+    let cross_probe_line = (netlist.active_document == super::ActiveNetlistDocument::Generated)
+        .then_some(netlist.cross_probe_line)
         .flatten()
         .map(|line| line.saturating_sub(1));
 
     // Take the buffer out so the layouter and the post-edit bookkeeping
-    // don't fight over `state`.
-    let mut buffer = std::mem::take(&mut state.model.simulation.source.netlist_content);
-    let requested_line = state
-        .code
-        .netlist
+    // don't fight over `model`.
+    let mut buffer = std::mem::take(&mut model.simulation.source.netlist_content);
+    let requested_line = netlist
         .requested_line
         .take()
         .or_else(|| show_go_to_line(ui, editor_id, &buffer));
 
-    let diff_document =
-        state.code.netlist.active_document == super::ActiveNetlistDocument::GeneratedDiff;
+    let diff_document = netlist.active_document == super::ActiveNetlistDocument::GeneratedDiff;
 
     let mut completion_changed = false;
     let changed;
@@ -172,11 +181,11 @@ pub fn show(ui: &mut Ui, state: &mut AppState) -> egui::Response {
     let unanswered_history;
 
     {
-        let messages = state.workbench.messages();
+        let messages = workbench.messages();
         let accessible_label = messages.text(if editable {
             MessageId::EditorProjectSpiceNetlistEditor
         } else {
-            match state.code.netlist.active_document {
+            match netlist.active_document {
                 super::ActiveNetlistDocument::Generated => {
                     MessageId::EditorGeneratedSpiceNetlistViewer
                 }
@@ -219,7 +228,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) -> egui::Response {
             marks: &[],
             marks_outdated: false,
         };
-        let revision = state.code.netlist.revision;
+        let revision = netlist.revision;
         let output = crate::workbench::documents::virtual_text_editor::show_virtual_text_editor(
             ui,
             editor_id,
@@ -280,9 +289,9 @@ pub fn show(ui: &mut Ui, state: &mut AppState) -> egui::Response {
     }
 
     let now = ui.input(|input| input.time);
-    state.code.netlist.cursor_line = cursor_line;
-    state.code.netlist.cursor_char_index = cursor_char_index;
-    state.code.netlist.selected_byte_range = selected_char_range.and_then(|(start, end)| {
+    netlist.cursor_line = cursor_line;
+    netlist.cursor_char_index = cursor_char_index;
+    netlist.selected_byte_range = selected_char_range.and_then(|(start, end)| {
         let (start, end) = (start.min(end), start.max(end));
         (start < end).then(|| {
             let byte_at = |char_index: usize| {
@@ -297,30 +306,26 @@ pub fn show(ui: &mut Ui, state: &mut AppState) -> egui::Response {
 
     // Completion is an edit and therefore exists only for project-owned source.
     if editable
-        && let Some((start, end, text, caret)) = completion::show(
-            ui,
-            &mut state.code.netlist,
-            anchor,
-            &buffer,
-            completion_keys,
-        )
+        && let Some((start, end, text, caret)) =
+            completion::show(ui, netlist, anchor, &buffer, completion_keys)
     {
         completion_changed = true;
         buffer.replace_range(start..end, &text);
         completion::place_caret(ui, editor_id, caret);
     }
-    show_signature_help(ui, &mut state.code.netlist, editor_id, anchor);
+    show_signature_help(ui, netlist, editor_id, anchor);
     let hover_symbol =
         hover_char_index.and_then(|index| super::language::symbol_name_at(&buffer, index));
-    let hover_value =
-        hover_char_index.and_then(|index| super::language::value_hover_at(state, &buffer, index));
+    let hover_value = hover_char_index.and_then(|index| {
+        super::language::value_hover_at_in(netlist, workbench.messages(), &buffer, index)
+    });
 
     // All editor writes pass through the ownership guard, which the shell
     // runs once the page has drawn, before anything else the frame raised.
     // Even if a future UI path reports a change for read-only content, it
     // cannot implicitly create `workspace.netlist_source`.
     if changed || completion_changed {
-        state.workbench.outbox.push(NetlistEditorRequest::Commit {
+        workbench.outbox.push(NetlistEditorRequest::Commit {
             buffer: buffer.clone(),
             cursor_line,
             now,
@@ -328,13 +333,12 @@ pub fn show(ui: &mut Ui, state: &mut AppState) -> egui::Response {
     }
     // The buffer was taken at the beginning of the frame. What the guard
     // refuses is shown until the next frame draws the project's deck again.
-    state.model.simulation.source.netlist_content = buffer;
+    model.simulation.source.netlist_content = buffer;
     // The editor's history starts again whenever the document is replaced
     // underneath it, so once it is spent the next older step is the
     // netlist's own: a replace-all or a rename.
     if let Some(step) = unanswered_history {
-        state
-            .workbench
+        workbench
             .outbox
             .push(NetlistEditorRequest::StepHistory(step));
     }
@@ -348,7 +352,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) -> egui::Response {
     {
         show_value_hover(&editor_response, hover);
     } else if let Some(symbol) = hover_symbol
-        && let Some(hover) = super::language::symbol_hover(state, &symbol)
+        && let Some(hover) = super::language::symbol_hover(model, netlist, &symbol)
     {
         editor_response.clone().on_hover_ui_at_pointer(|ui| {
             ui.set_max_width(360.0);
@@ -554,44 +558,65 @@ fn diagnostic_problem(severity: DiagnosticSeverity) -> Option<Problem> {
 
 /// Debounced re-parse: the squiggles, pips, and strip all derive from
 /// this one result.
-fn refresh_diagnostics(ui: &Ui, state: &mut AppState) {
-    let revision = state.code.netlist.revision;
-    if state.code.netlist.diag_revision == Some(revision)
-        && state.code.netlist.diag_library_folders == state.library_folders()
+fn refresh_diagnostics(
+    ui: &Ui,
+    model: &super::Model,
+    netlist: &mut super::NetlistDocumentState,
+    include_resolutions: &BTreeMap<String, IncludeResolution>,
+) {
+    let revision = netlist.revision;
+    if netlist.diag_revision == Some(revision)
+        && netlist.diag_library_folders == model.library_folders()
     {
         return;
     }
     let now = ui.input(|input| input.time);
-    let settled = now - state.code.netlist.last_edit_time >= PARSE_DEBOUNCE;
-    if !settled && state.code.netlist.diag_revision.is_some() {
+    let settled = now - netlist.last_edit_time >= PARSE_DEBOUNCE;
+    if !settled && netlist.diag_revision.is_some() {
         // Retain the prior records for Problems/history, but never decorate
         // newer bytes with stale source ranges.
-        Arc::make_mut(&mut state.code.netlist.diagnostics).mark_all_stale();
+        Arc::make_mut(&mut netlist.diagnostics).mark_all_stale();
         ui.ctx()
             .request_repaint_after(std::time::Duration::from_millis(120));
         return;
     }
-    validate_visible_source(state, revision);
+    validate_visible_source_in(model, netlist, include_resolutions, revision);
+}
+
+/// [`validate_visible_source_in`] over the whole state.
+#[cfg(test)]
+fn validate_visible_source(state: &mut AppState, revision: u64) {
+    validate_visible_source_in(
+        &state.model,
+        &mut state.code.netlist,
+        &state.code.code_workspace.include_resolutions,
+        revision,
+    );
 }
 
 /// Validate the visible source as it stands and publish the result, bound to
-/// `revision`.
-fn validate_visible_source(state: &mut AppState, revision: u64) {
-    state.code.netlist.diag_library_folders = state.library_folders().to_vec();
-    if state.code.netlist.active_document == super::ActiveNetlistDocument::GeneratedDiff {
-        Arc::make_mut(&mut state.code.netlist.diagnostics).clear();
-        state.code.netlist.diag_revision = Some(revision);
+/// `revision`, over the model, the netlist editor's state and where the
+/// page's includes resolved.
+fn validate_visible_source_in(
+    model: &super::Model,
+    netlist: &mut super::NetlistDocumentState,
+    include_resolutions: &BTreeMap<String, IncludeResolution>,
+    revision: u64,
+) {
+    netlist.diag_library_folders = model.library_folders().to_vec();
+    if netlist.active_document == super::ActiveNetlistDocument::GeneratedDiff {
+        Arc::make_mut(&mut netlist.diagnostics).clear();
+        netlist.diag_revision = Some(revision);
         return;
     }
 
-    let buffer = state.model.simulation.source.netlist_content.clone();
-    let materialized = if state.code.netlist.active_dependency_identity.is_some() {
+    let buffer = model.simulation.source.netlist_content.clone();
+    let materialized = if netlist.active_dependency_identity.is_some() {
         Ok(buffer.clone())
-    } else if state.code.netlist.active_document == super::ActiveNetlistDocument::OwnedSource {
+    } else if netlist.active_document == super::ActiveNetlistDocument::OwnedSource {
         rspice_simulation::netlist_preparation::owned_source::compose_owned_netlist_execution_source(
-            state.model.workspace.content.netlist_descriptor.as_ref(),
-            state
-                .model
+            model.workspace.content.netlist_descriptor.as_ref(),
+            model
                 .workspace
                 .content
                 .netlist_document
@@ -602,15 +627,15 @@ fn validate_visible_source(state: &mut AppState, revision: u64) {
     } else {
         Ok(buffer.clone())
     };
-    let source_path = if let Some(dependency) = super::active_dependency(state) {
+    let source_path = if let Some(dependency) = super::active_dependency_in(model, netlist) {
         dependency.locator().native_origin().map(Path::new)
     } else {
-        match state.code.netlist.active_document {
+        match netlist.active_document {
             super::ActiveNetlistDocument::OwnedSource => {
-                state.model.workspace.content.netlist_source_path.as_deref()
+                model.workspace.content.netlist_source_path.as_deref()
             }
             super::ActiveNetlistDocument::Generated => {
-                state.model.schematic.session.current_file.as_deref()
+                model.schematic.session.current_file.as_deref()
             }
             super::ActiveNetlistDocument::GeneratedDiff
             | super::ActiveNetlistDocument::RunSnapshot => None,
@@ -636,10 +661,9 @@ fn validate_visible_source(state: &mut AppState, revision: u64) {
     let sealed_sources = if platform_include_access() == IncludeAccess::AuthenticatedBundleOnly
         && materialized_external_line.is_some()
     {
-        match state.model.model_library_manager.seal_execution_sources() {
+        match model.model_library_manager.seal_execution_sources() {
             Ok(sources) => Some(sources),
             Err(error) => {
-                let netlist = &mut state.code.netlist;
                 let mut diagnostics = in_buffer(vec![
                     Diagnostic::error(format!(
                         "The imported browser source bundle is invalid: {error}"
@@ -663,13 +687,12 @@ fn validate_visible_source(state: &mut AppState, revision: u64) {
     } else {
         None
     };
-    let include_search = state.include_search_chain();
+    let include_search = model.include_search_chain();
     // Only a parse of the buffer itself, as its own root, says which of its
     // lines a run reads. A composed override's parse reads the lines of the
     // composed deck, and a dependency's sections are selected, and its
     // conditions decided, by the deck that includes it.
-    let reads_buffer_as_root =
-        composed.is_none() && state.code.netlist.active_dependency_identity.is_none();
+    let reads_buffer_as_root = composed.is_none() && netlist.active_dependency_identity.is_none();
     let (mut diagnostics, symbols, unread) = if buffer.trim().is_empty() {
         (Vec::new(), Some(Vec::new()), Some(Vec::new()))
     } else {
@@ -692,15 +715,14 @@ fn validate_visible_source(state: &mut AppState, revision: u64) {
             Err(error) => (vec![Diagnostic::error(error.clone())], None, None),
         }
     };
-    diagnostics.extend(shadowed_include_diagnostics(state, &buffer));
+    diagnostics.extend(shadowed_include_diagnostics(include_resolutions, &buffer));
     let validation_id = crate::state::content_digest(&buffer).to_string();
     for diagnostic in &mut diagnostics {
         diagnostic.bind_validation(revision, &validation_id);
     }
-    let project_symbols = super::language::project_index(state)
+    let project_symbols = super::language::project_index_in(model, netlist)
         .map(|index| index.completion_symbols())
         .unwrap_or_default();
-    let netlist = &mut state.code.netlist;
     netlist.diagnostics = Arc::new(bounded_netlist_diagnostics(
         diagnostics,
         &buffer,
@@ -902,8 +924,11 @@ fn editor_parse_source(source_path: Option<&Path>) -> Result<PathBuf, String> {
 /// The chain was walked by the engine when the closure was resolved; nothing
 /// here re-walks it, so the Problems row, the navigator row and the deck that
 /// actually ran cannot disagree about which file won.
-fn shadowed_include_diagnostics(state: &AppState, buffer: &str) -> Vec<Diagnostic> {
-    if state.code.code_workspace.include_resolutions.is_empty() {
+fn shadowed_include_diagnostics(
+    include_resolutions: &BTreeMap<String, IncludeResolution>,
+    buffer: &str,
+) -> Vec<Diagnostic> {
+    if include_resolutions.is_empty() {
         return Vec::new();
     }
     buffer
@@ -914,11 +939,7 @@ fn shadowed_include_diagnostics(state: &AppState, buffer: &str) -> Vec<Diagnosti
                 rspice_core::netlist::parse_lib_directive(raw)
                     .and_then(|(path, section)| section.is_some().then_some(path))
             })?;
-            let resolution = state
-                .code
-                .code_workspace
-                .include_resolutions
-                .get(&requested)?;
+            let resolution = include_resolutions.get(&requested)?;
             let shadowed = resolution.shadowed().next()?;
             Some(
                 Diagnostic::current(
@@ -1224,8 +1245,10 @@ mod include_shadow_tests {
     #[test]
     fn a_shadowed_include_becomes_one_warning_bound_to_its_own_card() {
         let (root, state) = shadowed_fixture("warned");
-        let diagnostics =
-            shadowed_include_diagnostics(&state, "shadow deck\n.include models.lib\n.end\n");
+        let diagnostics = shadowed_include_diagnostics(
+            &state.code.code_workspace.include_resolutions,
+            "shadow deck\n.include models.lib\n.end\n",
+        );
 
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].severity, DiagnosticSeverity::Warning);
@@ -1267,8 +1290,11 @@ mod include_shadow_tests {
         }
 
         assert!(
-            shadowed_include_diagnostics(&state, "shadow deck\n.include models.lib\n.end\n")
-                .is_empty()
+            shadowed_include_diagnostics(
+                &state.code.code_workspace.include_resolutions,
+                "shadow deck\n.include models.lib\n.end\n",
+            )
+            .is_empty()
         );
         std::fs::remove_dir_all(&root).ok();
     }
