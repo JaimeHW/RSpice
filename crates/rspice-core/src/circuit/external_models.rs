@@ -3883,22 +3883,22 @@ impl CircuitData {
         solution: &[Value],
     ) -> Result<(), String> {
         let num_nodes = self.num_nodes;
-        let simparams = self.generated_simulation_parameters;
+        let request = crate::device::veriloga_builtins::GeneratedEvaluationRequest {
+            analysis: crate::device::veriloga_builtins::GeneratedAnalysisKind::Tran,
+            simparams: self.generated_simulation_parameters,
+            evaluation_mode: crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
+        };
+        // The Newton load that converged at this solution, with nothing
+        // changing the instances since, already left what this probe would.
+        if self
+            .generated_veriloga_devices
+            .holds_probe_evaluation(solution, num_nodes, request, true)
+        {
+            return Ok(());
+        }
         matrix.with_probe_values(|probe, rhs| {
             self.generated_veriloga_devices
-                .stamp_all_with_task_recording(
-                    probe,
-                    rhs,
-                    solution,
-                    num_nodes,
-                    crate::device::veriloga_builtins::GeneratedEvaluationRequest {
-                        analysis: crate::device::veriloga_builtins::GeneratedAnalysisKind::Tran,
-                        simparams,
-                        evaluation_mode:
-                            crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
-                    },
-                    true,
-                )
+                .stamp_all_with_task_recording(probe, rhs, solution, num_nodes, request, true)
                 .map_err(|error| error.to_string())
         })
     }

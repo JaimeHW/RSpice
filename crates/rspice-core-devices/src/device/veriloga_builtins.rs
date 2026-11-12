@@ -367,14 +367,87 @@ impl std::fmt::Debug for BuiltinVerilogAInstance {
     }
 }
 
+/// What a collection-wide evaluation read: the request, the solution, and
+/// the timepoint its instances were prepared for. Two evaluations with equal
+/// keys of instances nothing changed in between leave the same state.
+#[cfg(feature = "veriloga-builtins-base")]
+#[derive(Debug, Clone, Default, PartialEq)]
+struct GeneratedEvaluationKey {
+    /// `None` for an evaluation that leaves what a probe leaves: a probe, or
+    /// a Newton load whose loads repeat. Otherwise the evaluation's own mode.
+    distinct_mode: Option<GeneratedEvaluationMode>,
+    analysis: u8,
+    simparams: GeneratedSimulationParameters,
+    record_tasks: bool,
+    /// Time, timestep and `ddt` coefficients, as bits.
+    timepoint: Option<[u64; 7]>,
+    num_nodes: usize,
+    solution: Vec<u64>,
+}
+
+/// The generated instances, and the evaluation their state is, if nothing has
+/// changed it since.
+///
+/// The fields are private to this module, and `InstanceStore::get_mut` is
+/// the only mutable path to an instance. It forgets the evaluation first, so
+/// no method that changes an instance can leave the store claiming it.
+#[cfg(feature = "veriloga-builtins-base")]
+mod instance_store {
+    use super::{BuiltinVerilogAInstance, GeneratedEvaluationKey};
+
+    #[derive(Debug, Clone, Default)]
+    pub(super) struct InstanceStore {
+        devices: Vec<BuiltinVerilogAInstance>,
+        evaluated: GeneratedEvaluationKey,
+        holds_evaluation: bool,
+    }
+
+    impl InstanceStore {
+        #[inline]
+        pub(super) fn get(&self) -> &[BuiltinVerilogAInstance] {
+            &self.devices
+        }
+
+        #[inline]
+        pub(super) fn get_mut(&mut self) -> &mut Vec<BuiltinVerilogAInstance> {
+            self.holds_evaluation = false;
+            &mut self.devices
+        }
+
+        /// Whether the instances hold the evaluation `key` describes.
+        #[inline]
+        pub(super) fn holds(&self, key: &GeneratedEvaluationKey) -> bool {
+            self.holds_evaluation && self.evaluated == *key
+        }
+
+        /// Record that the instances now hold the evaluation `key` describes.
+        #[inline]
+        pub(super) fn remember(&mut self, key: GeneratedEvaluationKey) {
+            self.evaluated = key;
+            self.holds_evaluation = true;
+        }
+
+        /// The key buffer, to refill without allocating. Taking it forgets
+        /// the evaluation.
+        #[inline]
+        pub(super) fn take_key(&mut self) -> GeneratedEvaluationKey {
+            self.holds_evaluation = false;
+            std::mem::take(&mut self.evaluated)
+        }
+    }
+}
+
 #[cfg(feature = "veriloga-builtins-base")]
 #[derive(Debug, Clone, Default)]
 #[doc(hidden)]
 pub struct BuiltinVerilogADevices {
-    devices: Vec<BuiltinVerilogAInstance>,
+    devices: instance_store::InstanceStore,
     /// Physical analysis visible to generated models while the numerical DC
     /// operating-point solver assembles their equilibrium equations.
     operating_point_analysis_override: Option<GeneratedAnalysisKind>,
+    /// Time, timestep and `ddt` coefficients the instances were last
+    /// prepared for, as bits.
+    timepoint: Option<[u64; 7]>,
 }
 
 #[cfg(feature = "veriloga-builtins-base")]
@@ -390,28 +463,25 @@ impl BuiltinVerilogADevices {
     #[inline]
     #[doc(hidden)]
     pub fn new() -> Self {
-        Self {
-            devices: Vec::new(),
-            operating_point_analysis_override: None,
-        }
+        Self::default()
     }
 
     #[inline]
     #[doc(hidden)]
     pub fn add(&mut self, device: BuiltinVerilogAInstance) {
-        self.devices.push(device);
+        self.devices.get_mut().push(device);
     }
 
     #[inline]
     #[doc(hidden)]
     pub fn is_empty(&self) -> bool {
-        self.devices.is_empty()
+        self.devices.get().is_empty()
     }
 
     #[inline]
     #[doc(hidden)]
     pub fn len(&self) -> usize {
-        self.devices.len()
+        self.devices.get().len()
     }
 
     /// Whether every instantiated generated model admits Xyce OneStep's
@@ -420,6 +490,7 @@ impl BuiltinVerilogADevices {
     #[doc(hidden)]
     pub fn all_one_step_dae_split_safe(&self) -> bool {
         self.devices
+            .get()
             .iter()
             .all(|device| device.kind.one_step_dae_split_safe())
     }
@@ -427,6 +498,7 @@ impl BuiltinVerilogADevices {
     #[doc(hidden)]
     pub fn requires_nodeset_phase(&self) -> bool {
         self.devices
+            .get()
             .iter()
             .any(|device| device.kind.requires_nodeset_phase())
     }
@@ -435,6 +507,7 @@ impl BuiltinVerilogADevices {
     #[doc(hidden)]
     pub fn discontinuity_rising(&self) -> bool {
         self.devices
+            .get()
             .iter()
             .any(|device| device.kind.discontinuity_rising())
     }
@@ -443,7 +516,7 @@ impl BuiltinVerilogADevices {
     #[doc(hidden)]
     pub fn transient_step_bound(&self) -> Result<Option<Value>, String> {
         let mut tightest: Option<Value> = None;
-        for device in &self.devices {
+        for device in self.devices.get() {
             if let Some(bound) = device.kind.transient_step_bound().map_err(|error| {
                 format!(
                     "generated Verilog-A instance '{}' ({}) timestep bound failed: {error}",
@@ -462,6 +535,7 @@ impl BuiltinVerilogADevices {
     #[doc(hidden)]
     pub fn transient_event_refinement_time(&self) -> Option<Value> {
         self.devices
+            .get()
             .iter()
             .filter_map(|device| device.kind.transient_event_refinement_time())
             .reduce(Value::min)
@@ -477,7 +551,7 @@ impl BuiltinVerilogADevices {
     #[doc(hidden)]
     pub fn transient_timer_event_time(&self) -> Result<Option<Value>, String> {
         let mut earliest: Option<Value> = None;
-        for device in &self.devices {
+        for device in self.devices.get() {
             let Some(target) = device.kind.transient_timer_event_time() else {
                 continue;
             };
@@ -502,7 +576,7 @@ impl BuiltinVerilogADevices {
     #[doc(hidden)]
     pub fn scheduled_timer_activation(&self) -> Option<(&str, Value)> {
         let mut owner: Option<(&str, Value)> = None;
-        for device in &self.devices {
+        for device in self.devices.get() {
             let Some(target) = device.kind.transient_timer_event_time() else {
                 continue;
             };
@@ -519,7 +593,7 @@ impl BuiltinVerilogADevices {
     #[inline]
     #[doc(hidden)]
     pub fn iter(&self) -> impl Iterator<Item = &BuiltinVerilogAInstance> {
-        self.devices.iter()
+        self.devices.get().iter()
     }
 
     /// Whether a second Newton load of every instance at the same candidate
@@ -530,13 +604,14 @@ impl BuiltinVerilogADevices {
     #[doc(hidden)]
     pub fn newton_loads_repeat(&self) -> bool {
         self.devices
+            .get()
             .iter()
             .all(|device| !device.limits_newton_steps() && !device.initial_off)
     }
 
     #[doc(hidden)]
     pub fn visit_accepted_analog_tasks(&mut self, consume: &mut dyn FnMut(AnalogTaskEvent<'_>)) {
-        for device in &mut self.devices {
+        for device in self.devices.get_mut() {
             device.kind.drain_analog_tasks(&mut |call| {
                 consume(AnalogTaskEvent {
                     instance: &device.instance_name,
@@ -553,7 +628,7 @@ impl BuiltinVerilogADevices {
         &self,
         kind: AnalogTaskKind,
     ) -> Result<Option<AnalogTaskEvent<'_>>, String> {
-        for device in &self.devices {
+        for device in self.devices.get() {
             if let Some(call) = device
                 .kind
                 .candidate_analog_tasks()?
@@ -581,7 +656,7 @@ impl BuiltinVerilogADevices {
     #[inline]
     #[doc(hidden)]
     pub fn primary_terminal_current(&self, index: usize) -> Option<Value> {
-        let device = self.devices.get(index)?;
+        let device = self.devices.get().get(index)?;
         if device.external_terminals.len() != 2 {
             return None;
         }
@@ -594,13 +669,14 @@ impl BuiltinVerilogADevices {
     #[inline]
     #[doc(hidden)]
     pub fn two_terminal_instance_name(&self, index: usize) -> Option<&str> {
-        let device = self.devices.get(index)?;
+        let device = self.devices.get().get(index)?;
         (device.external_terminals.len() == 2).then_some(device.instance_name.as_str())
     }
 
     #[doc(hidden)]
     pub fn checkpoint_states(&self) -> Vec<GeneratedVerilogAInstanceCheckpoint> {
         self.devices
+            .get()
             .iter()
             .map(BuiltinVerilogAInstance::checkpoint_state)
             .collect()
@@ -610,7 +686,7 @@ impl BuiltinVerilogADevices {
     pub fn accepted_checkpoint_states(
         &self,
     ) -> Result<Vec<GeneratedVerilogAInstanceCheckpoint>, String> {
-        for device in &self.devices {
+        for device in self.devices.get() {
             device.validate_checkpoint_boundary()?;
         }
         Ok(self.checkpoint_states())
@@ -621,14 +697,14 @@ impl BuiltinVerilogADevices {
         &self,
         states: &[GeneratedVerilogAInstanceCheckpoint],
     ) -> Result<(), String> {
-        if states.len() != self.devices.len() {
+        if states.len() != self.devices.get().len() {
             return Err(format!(
                 "generated Verilog-A checkpoint instance count mismatch: captured {}, circuit has {}",
                 states.len(),
-                self.devices.len()
+                self.devices.get().len()
             ));
         }
-        for (index, (device, state)) in self.devices.iter().zip(states).enumerate() {
+        for (index, (device, state)) in self.devices.get().iter().zip(states).enumerate() {
             device.validate_checkpoint_state(state).map_err(|error| {
                 format!("generated Verilog-A checkpoint instance {index}: {error}")
             })?;
@@ -664,7 +740,7 @@ impl BuiltinVerilogADevices {
     ) -> Result<(), String> {
         self.validate_checkpoint_states(states)?;
         let rollback = self.capture_rollback_state();
-        for (index, (device, state)) in self.devices.iter_mut().zip(states).enumerate() {
+        for (index, (device, state)) in self.devices.get_mut().iter_mut().zip(states).enumerate() {
             if let Err(error) = device.restore_checkpoint_state(state, continuation) {
                 self.restore_rollback_state(rollback);
                 return Err(format!(
@@ -681,11 +757,13 @@ impl BuiltinVerilogADevices {
         BuiltinVerilogADevicesRollback {
             states: self
                 .devices
+                .get()
                 .iter()
                 .map(|device| device.kind.capture_rollback_state())
                 .collect(),
             terminal_currents: self
                 .devices
+                .get()
                 .iter()
                 .flat_map(|device| device.terminal_currents.iter().copied())
                 .collect(),
@@ -703,24 +781,25 @@ impl BuiltinVerilogADevices {
     pub fn capture_rollback_state_into(&self, rollback: &mut BuiltinVerilogADevicesRollback) {
         let expected_terminal_currents = self
             .devices
+            .get()
             .iter()
             .map(|device| device.terminal_currents.len())
             .sum::<usize>();
-        if rollback.states.len() != self.devices.len()
+        if rollback.states.len() != self.devices.get().len()
             || rollback.terminal_currents.len() != expected_terminal_currents
         {
             *rollback = self.capture_rollback_state();
             return;
         }
 
-        for (state, device) in rollback.states.iter_mut().zip(&self.devices) {
+        for (state, device) in rollback.states.iter_mut().zip(self.devices.get()) {
             let captured = device.kind.capture_rollback_state();
             state.values.clone_from(&captured.values);
             state.flags.clone_from(&captured.flags);
             state.analog_effects.clone_from(&captured.analog_effects);
         }
         let mut offset = 0;
-        for device in &self.devices {
+        for device in self.devices.get() {
             let end = offset + device.terminal_currents.len();
             rollback.terminal_currents[offset..end].copy_from_slice(&device.terminal_currents);
             offset = end;
@@ -731,15 +810,16 @@ impl BuiltinVerilogADevices {
     #[inline]
     #[doc(hidden)]
     pub fn restore_rollback_state(&mut self, rollback: BuiltinVerilogADevicesRollback) {
-        debug_assert_eq!(self.devices.len(), rollback.states.len());
+        debug_assert_eq!(self.devices.get().len(), rollback.states.len());
         let expected_terminal_currents: usize = self
             .devices
+            .get()
             .iter()
             .map(|device| device.terminal_currents.len())
             .sum();
         debug_assert_eq!(expected_terminal_currents, rollback.terminal_currents.len());
         let mut terminal_currents = rollback.terminal_currents.as_slice();
-        for (device, state) in self.devices.iter_mut().zip(&rollback.states) {
+        for (device, state) in self.devices.get_mut().iter_mut().zip(&rollback.states) {
             device.kind.restore_rollback_state(state);
             let (restored, remaining) = terminal_currents.split_at(device.terminal_currents.len());
             device.terminal_currents.copy_from_slice(restored);
@@ -750,7 +830,7 @@ impl BuiltinVerilogADevices {
 
     #[doc(hidden)]
     pub fn link_static_stamps(&mut self, matrix: &StaticMatrix, num_nodes: usize) {
-        for device in &mut self.devices {
+        for device in self.devices.get_mut() {
             device.link_static_stamps(matrix, num_nodes);
         }
     }
@@ -771,6 +851,7 @@ impl BuiltinVerilogADevices {
     #[doc(hidden)]
     pub fn has_point_analog_tasks(&self) -> bool {
         self.devices
+            .get()
             .iter()
             .any(|device| device.kind.has_point_analog_tasks())
     }
@@ -791,7 +872,9 @@ impl BuiltinVerilogADevices {
                 .unwrap_or(request.analysis),
             ..request
         };
-        for device in &mut self.devices {
+        let mut key = self.devices.take_key();
+        self.fill_evaluation_key(&mut key, voltages, num_nodes, request, record_tasks);
+        for device in self.devices.get_mut() {
             device
                 .stamp_with_task_recording(matrix, rhs, voltages, num_nodes, request, record_tasks)
                 .map_err(|source| GeneratedVerilogAEvaluationError {
@@ -800,13 +883,75 @@ impl BuiltinVerilogADevices {
                     source,
                 })?;
         }
+        if request.evaluation_mode != GeneratedEvaluationMode::StaticDaeProbe {
+            self.devices.remember(key);
+        }
         Ok(())
+    }
+
+    /// Whether the instances already hold what a probe evaluation of
+    /// `request` at `voltages` would leave them with, recording tasks or not
+    /// as `record_tasks` says: nothing has changed them since an evaluation
+    /// of the same analysis, `$simparam` environment, timepoint and solution
+    /// that was itself a probe, or a Newton load whose loads repeat (see
+    /// [`Self::newton_loads_repeat`]).
+    ///
+    /// A caller that only wants that state, with no matrix to stamp, can
+    /// then skip the evaluation.
+    #[doc(hidden)]
+    pub fn holds_probe_evaluation(
+        &self,
+        voltages: &[Value],
+        num_nodes: usize,
+        request: GeneratedEvaluationRequest,
+        record_tasks: bool,
+    ) -> bool {
+        if request.evaluation_mode != GeneratedEvaluationMode::StaticProbe {
+            return false;
+        }
+        let request = GeneratedEvaluationRequest {
+            analysis: self
+                .operating_point_analysis_override
+                .unwrap_or(request.analysis),
+            ..request
+        };
+        let mut key = GeneratedEvaluationKey::default();
+        self.fill_evaluation_key(&mut key, voltages, num_nodes, request, record_tasks);
+        self.devices.holds(&key)
+    }
+
+    fn fill_evaluation_key(
+        &self,
+        key: &mut GeneratedEvaluationKey,
+        voltages: &[Value],
+        num_nodes: usize,
+        request: GeneratedEvaluationRequest,
+        record_tasks: bool,
+    ) {
+        // The mode reaches a generated model only through whether `$limit`
+        // limits, and the adapter reads it only to seed an `OFF` state. A
+        // Newton load whose instances do neither is a probe's evaluation.
+        let leaves_a_probe = match request.evaluation_mode {
+            GeneratedEvaluationMode::StaticProbe => true,
+            GeneratedEvaluationMode::NewtonLimited => self.newton_loads_repeat(),
+            _ => false,
+        };
+        key.distinct_mode = (!leaves_a_probe).then_some(request.evaluation_mode);
+        key.analysis = request.analysis.code();
+        key.simparams = request.simparams;
+        key.record_tasks = record_tasks;
+        key.timepoint = self.timepoint;
+        key.num_nodes = num_nodes;
+        key.solution.clear();
+        key.solution
+            .extend(voltages.iter().map(|value| value.to_bits()));
     }
 
     #[inline]
     #[doc(hidden)]
     pub fn all_converged(&self) -> bool {
         self.devices
+            .get()
             .iter()
             .all(BuiltinVerilogAInstance::is_converged)
     }
@@ -819,7 +964,16 @@ impl BuiltinVerilogADevices {
         timestep: Value,
         ddt_coefficients: GeneratedDdtCoefficients,
     ) {
-        for device in &mut self.devices {
+        self.timepoint = Some([
+            time.to_bits(),
+            timestep.to_bits(),
+            u64::from(ddt_coefficients.active),
+            ddt_coefficients.derivative_scale.to_bits(),
+            ddt_coefficients.previous_value_scale.to_bits(),
+            ddt_coefficients.older_value_scale.to_bits(),
+            ddt_coefficients.previous_derivative_scale.to_bits(),
+        ]);
+        for device in self.devices.get_mut() {
             device.set_timepoint(time, timestep, ddt_coefficients);
         }
     }
@@ -827,14 +981,14 @@ impl BuiltinVerilogADevices {
     #[inline]
     #[doc(hidden)]
     pub fn set_analysis_step(&mut self, initial: bool, final_step: bool) {
-        for device in &mut self.devices {
+        for device in self.devices.get_mut() {
             device.set_analysis_step(initial, final_step);
         }
     }
 
     #[doc(hidden)]
     pub fn set_analysis_phase(&mut self, phase: rspice_veriloga_runtime::AnalogAnalysisPhase) {
-        for device in &mut self.devices {
+        for device in self.devices.get_mut() {
             device.analysis_phase = phase;
         }
     }
@@ -848,7 +1002,7 @@ impl BuiltinVerilogADevices {
         simparams: GeneratedSimulationParameters,
         num_nodes: usize,
     ) -> Result<(), GeneratedVerilogAEvaluationError> {
-        for device in &mut self.devices {
+        for device in self.devices.get_mut() {
             device
                 .begin_analysis(analysis, simparams, num_nodes)
                 .map_err(|source| GeneratedVerilogAEvaluationError {
@@ -898,7 +1052,7 @@ impl BuiltinVerilogADevices {
     /// allowed to mutate any runtime or generated Verilog-A state.
     #[doc(hidden)]
     pub fn validate_state_acceptance(&self) -> Result<(), String> {
-        for device in &self.devices {
+        for device in self.devices.get() {
             device.validate_advance_state().map_err(|source| {
                 format!(
                     "generated Verilog-A instance '{}' ({}) cannot accept state: {source}",
@@ -913,7 +1067,7 @@ impl BuiltinVerilogADevices {
     /// instance in the circuit has passed validation.
     #[doc(hidden)]
     pub fn apply_validated_state_acceptance(&mut self) {
-        for device in &mut self.devices {
+        for device in self.devices.get_mut() {
             device.apply_validated_advance_state();
         }
     }
@@ -927,7 +1081,7 @@ impl BuiltinVerilogADevices {
         analysis: GeneratedAnalysisKind,
         simparams: GeneratedSimulationParameters,
     ) -> Result<(), GeneratedVerilogAEvaluationError> {
-        for device in &mut self.devices {
+        for device in self.devices.get_mut() {
             device
                 .stamp_small_signal_real(matrix, voltages, num_nodes, analysis, simparams)
                 .map_err(|source| GeneratedVerilogAEvaluationError {
@@ -949,7 +1103,7 @@ impl BuiltinVerilogADevices {
         analysis: GeneratedAnalysisKind,
         simparams: GeneratedSimulationParameters,
     ) -> Result<(), GeneratedVerilogAEvaluationError> {
-        for device in &mut self.devices {
+        for device in self.devices.get_mut() {
             device
                 .stamp_small_signal_reactive(
                     matrix, voltages, num_nodes, omega, analysis, simparams,
@@ -3103,6 +3257,152 @@ mod tests {
         devices
     }
 
+    /// The collection remembers the evaluation its instances hold, so a probe
+    /// of the same request at the same timepoint and solution need not run
+    /// again. Every public `&mut` path to the instances forgets it first, so
+    /// a probe after any of them evaluates, and leaves what the first
+    /// evaluation did.
+    #[cfg(feature = "veriloga-model-diode-cmc")]
+    #[test]
+    fn a_probe_repeats_only_an_evaluation_nothing_has_changed_since() {
+        let mut circuit = TestTopology::default();
+        let mut devices = BuiltinVerilogADevices::new();
+        for (name, node) in [("d1", "n1"), ("d2", "n2")] {
+            devices.add(
+                instantiate_builtin(
+                    "DIODE_CMC",
+                    name,
+                    &[node.to_string(), "0".to_string()],
+                    &[],
+                    &crate::netlist::ParamContext::new(),
+                    &mut circuit,
+                )
+                .expect("generated diode instantiates")
+                .expect("DIODE_CMC is registered"),
+            );
+        }
+        let size = circuit.matrix_size();
+        let num_nodes = circuit.num_nodes();
+        let triplets = (0..size)
+            .flat_map(|row| (0..size).map(move |column| (row, column, 0.0)))
+            .collect::<Vec<_>>();
+        let mut matrix = super::StaticMatrix::from_triplets(size, size, &triplets)
+            .expect("dense generated-device test matrix");
+        let pattern = super::StaticMatrix::from_triplets(size, size, &triplets)
+            .expect("dense generated-device test matrix");
+        let mut rhs = vec![0.0; size];
+        let bias = (0..size)
+            .map(|unknown| 0.55 + 0.01 * unknown as f64)
+            .collect::<Vec<_>>();
+        let moved = bias.iter().map(|value| value + 1.0e-3).collect::<Vec<_>>();
+        let simparams = GeneratedSimulationParameters::default();
+        let request = |evaluation_mode| GeneratedEvaluationRequest {
+            analysis: GeneratedAnalysisKind::Tran,
+            simparams,
+            evaluation_mode,
+        };
+        let probe = request(GeneratedEvaluationMode::StaticProbe);
+        let holds = |devices: &BuiltinVerilogADevices| {
+            devices.holds_probe_evaluation(&bias, num_nodes, probe, true)
+        };
+        let mut evaluate = |devices: &mut BuiltinVerilogADevices, mode| {
+            devices
+                .stamp_all_with_task_recording(
+                    &mut matrix,
+                    &mut rhs,
+                    &bias,
+                    num_nodes,
+                    request(mode),
+                    true,
+                )
+                .expect("generated diodes evaluate");
+        };
+
+        devices
+            .begin_analysis(GeneratedAnalysisKind::Tran, simparams, num_nodes)
+            .expect("generated diodes begin a transient");
+        let timepoint = super::GeneratedDdtCoefficients::inactive();
+        devices.set_timepoint(1.0e-9, 1.0e-9, timepoint);
+        let checkpoint = devices.checkpoint_states();
+        let fresh = devices.capture_rollback_state();
+        assert!(!holds(&devices));
+
+        // A Newton load of instances that neither limit nor start `OFF`
+        // leaves what a probe at its solution leaves, and answers only that
+        // probe.
+        evaluate(&mut devices, GeneratedEvaluationMode::NewtonLimited);
+        let evaluated = devices.capture_rollback_state();
+        assert_ne!(evaluated, fresh, "the evaluation leaves state to hold");
+        assert!(holds(&devices));
+        assert!(!devices.holds_probe_evaluation(&bias, num_nodes, probe, false));
+        assert!(!devices.holds_probe_evaluation(&moved, num_nodes, probe, true));
+        assert!(!devices.holds_probe_evaluation(&bias, num_nodes + 1, probe, true));
+        let dc_probe = GeneratedEvaluationRequest {
+            analysis: GeneratedAnalysisKind::Dc,
+            ..probe
+        };
+        assert!(!devices.holds_probe_evaluation(&bias, num_nodes, dc_probe, true));
+        let newton = request(GeneratedEvaluationMode::NewtonLimited);
+        assert!(!devices.holds_probe_evaluation(&bias, num_nodes, newton, true));
+        devices.set_operating_point_analysis_override(Some(GeneratedAnalysisKind::Dc));
+        assert!(!holds(&devices));
+        devices.set_operating_point_analysis_override(None);
+        assert!(holds(&devices));
+
+        // A static DAE probe restores what it disturbs, but holds nothing; a
+        // probe after it leaves exactly what the Newton load did.
+        evaluate(&mut devices, GeneratedEvaluationMode::StaticDaeProbe);
+        assert!(!holds(&devices));
+        evaluate(&mut devices, GeneratedEvaluationMode::StaticProbe);
+        assert!(holds(&devices));
+        assert_eq!(devices.capture_rollback_state(), evaluated);
+
+        // Restoring the state from before the evaluation forgets it, so the
+        // caller's probe runs and leaves the evaluated state again.
+        devices.restore_rollback_state(fresh);
+        assert!(!holds(&devices));
+        evaluate(&mut devices, GeneratedEvaluationMode::StaticProbe);
+        assert_eq!(devices.capture_rollback_state(), evaluated);
+
+        // Every other public `&mut` path forgets it too, even one that
+        // leaves the state as it was.
+        let mut forgets = |path: &str, forget: &dyn Fn(&mut BuiltinVerilogADevices)| {
+            evaluate(&mut devices, GeneratedEvaluationMode::StaticProbe);
+            assert!(holds(&devices), "{path}: the probe is held before");
+            forget(&mut devices);
+            assert!(!holds(&devices), "{path} left the evaluation remembered");
+        };
+        forgets("set_timepoint", &|devices| {
+            devices.set_timepoint(1.0e-9, 1.0e-9, timepoint);
+        });
+        forgets("set_analysis_step", &|devices| {
+            devices.set_analysis_step(false, false);
+        });
+        forgets("set_analysis_phase", &|devices| {
+            devices.set_analysis_phase(rspice_veriloga_runtime::AnalogAnalysisPhase::Point);
+        });
+        forgets("link_static_stamps", &|devices| {
+            devices.link_static_stamps(&pattern, num_nodes);
+        });
+        forgets("visit_accepted_analog_tasks", &|devices| {
+            devices.visit_accepted_analog_tasks(&mut |_| {});
+        });
+        forgets("restore_rollback_state", &|devices| {
+            devices.restore_rollback_state(evaluated.clone());
+        });
+        forgets("restore_checkpoint_states", &|devices| {
+            devices
+                .restore_checkpoint_states(&checkpoint)
+                .expect("the analysis-start checkpoint restores");
+        });
+        forgets("apply_validated_state_acceptance", &|devices| {
+            devices
+                .validate_state_acceptance()
+                .expect("the probed state validates");
+            devices.apply_validated_state_acceptance();
+        });
+    }
+
     /// A generated diode has no `$limit`, so its Newton load repeats at a
     /// candidate, until the deck marks it `OFF` and its first loads are its
     /// cut-off state's instead.
@@ -3111,7 +3411,7 @@ mod tests {
     fn a_generated_diode_load_repeats_until_the_deck_marks_it_off() {
         let mut devices = checkpoint_test_devices();
         assert!(devices.newton_loads_repeat());
-        devices.devices[1].set_initially_off(true);
+        devices.devices.get_mut()[1].set_initially_off(true);
         assert!(!devices.newton_loads_repeat());
     }
 
@@ -3119,10 +3419,10 @@ mod tests {
     #[test]
     fn two_terminal_primary_current_projection_is_exact_and_index_aligned() {
         let mut devices = checkpoint_test_devices();
-        devices.devices[0]
+        devices.devices.get_mut()[0]
             .terminal_currents
             .copy_from_slice(&[1.25, -1.25]);
-        devices.devices[1]
+        devices.devices.get_mut()[1]
             .terminal_currents
             .copy_from_slice(&[-0.5, 0.5]);
 
@@ -3167,8 +3467,8 @@ mod tests {
         ];
 
         let mut devices = checkpoint_test_devices();
-        devices.devices[0].external_terminals = &MULTI_TERMINALS;
-        devices.devices[0].terminal_currents = vec![1.0, 2.0, -3.0];
+        devices.devices.get_mut()[0].external_terminals = &MULTI_TERMINALS;
+        devices.devices.get_mut()[0].terminal_currents = vec![1.0, 2.0, -3.0];
 
         assert_eq!(devices.two_terminal_instance_name(0), None);
         assert_eq!(devices.primary_terminal_current(0), None);
@@ -3186,7 +3486,7 @@ mod tests {
     fn analysis_start_resets_generated_history_and_adapter_state() {
         let mut devices = checkpoint_test_devices();
         let fresh = devices.capture_rollback_state();
-        for device in &mut devices.devices {
+        for device in devices.devices.get_mut() {
             let mut state = device.kind.capture_persistent_state();
             state.ddt_previous.fill(3.0);
             state.ddt_older.fill(2.0);
@@ -3212,7 +3512,7 @@ mod tests {
             .unwrap();
         assert_eq!(devices.capture_rollback_state(), fresh);
         assert!(devices.operating_point_analysis_override.is_none());
-        for device in &devices.devices {
+        for device in devices.devices.get() {
             assert!(
                 device
                     .dynamic_charge_third_back
@@ -3230,10 +3530,10 @@ mod tests {
     #[test]
     fn generated_checkpoint_restore_is_atomic_and_validates_provenance() {
         let mut devices = checkpoint_test_devices();
-        devices.devices[0]
+        devices.devices.get_mut()[0]
             .terminal_currents
             .copy_from_slice(&[1.25, -1.25]);
-        devices.devices[1]
+        devices.devices.get_mut()[1]
             .terminal_currents
             .copy_from_slice(&[-0.5, 0.5]);
         let mut accepted = devices.checkpoint_states();
@@ -3336,7 +3636,7 @@ mod tests {
             );
         }
         let mut reused = devices.capture_rollback_state();
-        for device in &mut devices.devices {
+        for device in devices.devices.get_mut() {
             let mut state = device.kind.capture_rollback_state();
             let journal = state.analog_effects.get_or_insert_with(Default::default);
             journal.record_finish(1, 2.0, 0.0).unwrap();
@@ -3355,7 +3655,7 @@ mod tests {
             devices.capture_rollback_state(),
             "inspection must not advance or drain the candidate"
         );
-        let valid = devices.devices[1].kind.capture_rollback_state();
+        let valid = devices.devices.get()[1].kind.capture_rollback_state();
         let mut invalid = valid.clone();
         invalid
             .analog_effects
@@ -3363,11 +3663,15 @@ mod tests {
             .unwrap()
             .record_finish(1, 2.0, f64::NAN)
             .unwrap_err();
-        devices.devices[1].kind.restore_rollback_state(&invalid);
+        devices.devices.get_mut()[1]
+            .kind
+            .restore_rollback_state(&invalid);
         let before = devices.capture_rollback_state();
         assert!(devices.advance_state().is_err());
         assert_eq!(before, devices.capture_rollback_state());
-        devices.devices[1].kind.restore_rollback_state(&valid);
+        devices.devices.get_mut()[1]
+            .kind
+            .restore_rollback_state(&valid);
         devices.advance_state().unwrap();
         assert!(
             devices
@@ -3386,7 +3690,7 @@ mod tests {
         devices.accepted_checkpoint_states().unwrap();
         devices.restore_rollback_state(reused);
         assert!(devices.accepted_checkpoint_states().is_err());
-        for device in &mut devices.devices {
+        for device in devices.devices.get_mut() {
             device.kind.reset_analog_tasks();
         }
         devices.accepted_checkpoint_states().unwrap();
@@ -3396,19 +3700,23 @@ mod tests {
     #[test]
     fn generated_state_acceptance_validates_every_instance_before_applying_any() {
         let mut devices = checkpoint_test_devices();
-        let first_ddt_count = devices.devices[0].dynamic_charge_third_back.len();
+        let first_ddt_count = devices.devices.get()[0].dynamic_charge_third_back.len();
         assert!(first_ddt_count > 0, "DIODE_CMC must exercise ddt state");
 
-        let mut first = devices.devices[0].kind.capture_rollback_state();
+        let mut first = devices.devices.get()[0].kind.capture_rollback_state();
         first.values[0] = 9.0;
         first.values[first_ddt_count * 3] = 2.0;
         first.flags[first_ddt_count] = true;
-        devices.devices[0].kind.restore_rollback_state(&first);
+        devices.devices.get_mut()[0]
+            .kind
+            .restore_rollback_state(&first);
 
-        let second_ddt_count = devices.devices[1].dynamic_charge_third_back.len();
-        let mut second = devices.devices[1].kind.capture_rollback_state();
+        let second_ddt_count = devices.devices.get()[1].dynamic_charge_third_back.len();
+        let mut second = devices.devices.get()[1].kind.capture_rollback_state();
         second.values[second_ddt_count] = f64::INFINITY;
-        devices.devices[1].kind.restore_rollback_state(&second);
+        devices.devices.get_mut()[1]
+            .kind
+            .restore_rollback_state(&second);
 
         let before = devices.capture_rollback_state();
         let error = devices
@@ -3433,19 +3741,23 @@ mod tests {
             .accepted_checkpoint_states()
             .expect("fresh devices are at an accepted boundary");
 
-        let ddt_count = devices.devices[0].dynamic_charge_third_back.len();
-        let idt_count = devices.devices[0].dynamic_idt_state_count;
+        let ddt_count = devices.devices.get()[0].dynamic_charge_third_back.len();
+        let idt_count = devices.devices.get()[0].dynamic_idt_state_count;
         assert!(ddt_count > 0, "DIODE_CMC must exercise ddt state");
-        let mut speculative = devices.devices[0].kind.capture_rollback_state();
+        let mut speculative = devices.devices.get()[0].kind.capture_rollback_state();
         speculative.flags[ddt_count + idt_count] = true;
-        devices.devices[0].kind.restore_rollback_state(&speculative);
+        devices.devices.get_mut()[0]
+            .kind
+            .restore_rollback_state(&speculative);
 
         let error = devices
             .accepted_checkpoint_states()
             .expect_err("an in-flight generated candidate is not an accepted boundary");
         assert!(error.contains("in-flight DDT/IDT candidate"), "{error}");
 
-        devices.devices[0].kind.begin_stateful_evaluation();
+        devices.devices.get_mut()[0]
+            .kind
+            .begin_stateful_evaluation();
         devices
             .accepted_checkpoint_states()
             .expect("beginning a fresh evaluation clears stale candidate validity");
@@ -3607,10 +3919,10 @@ mod tests {
     #[test]
     fn generated_rollback_refresh_reuses_the_instance_vector() {
         let mut devices = checkpoint_test_devices();
-        devices.devices[0]
+        devices.devices.get_mut()[0]
             .terminal_currents
             .copy_from_slice(&[1.25, -1.25]);
-        devices.devices[1]
+        devices.devices.get_mut()[1]
             .terminal_currents
             .copy_from_slice(&[-0.5, 0.5]);
         let expected = devices.capture_rollback_state();
@@ -3634,11 +3946,11 @@ mod tests {
             original_current_storage
         );
 
-        devices.devices[0].terminal_currents.fill(0.0);
-        devices.devices[1].terminal_currents.fill(0.0);
+        devices.devices.get_mut()[0].terminal_currents.fill(0.0);
+        devices.devices.get_mut()[1].terminal_currents.fill(0.0);
         devices.restore_rollback_state(expected);
-        assert_eq!(devices.devices[0].terminal_currents, [1.25, -1.25]);
-        assert_eq!(devices.devices[1].terminal_currents, [-0.5, 0.5]);
+        assert_eq!(devices.devices.get()[0].terminal_currents, [1.25, -1.25]);
+        assert_eq!(devices.devices.get()[1].terminal_currents, [-0.5, 0.5]);
     }
 
     fn noise_descriptor(

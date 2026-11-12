@@ -713,8 +713,12 @@ const MAX_PUBLIC_ITEMS: usize = 5292;
 // is 1,692. `BuiltinVerilogADevices::newton_loads_repeat` adds one: the
 // transient (`rspice-core` circuit/nonlinear.rs) lets a damped status load of
 // generated Verilog-A devices stand for the next Newton load only while every
-// instance's load repeats. The census is 1,693, with no slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 1693;
+// instance's load repeats. The census is 1,693.
+// `BuiltinVerilogADevices::holds_probe_evaluation` adds one: the transient
+// timepoint probe (`rspice-core` circuit/external_models.rs) skips an
+// evaluation the generated instances already hold. The census is 1,694,
+// with no slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 1694;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
