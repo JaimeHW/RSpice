@@ -90,7 +90,7 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
         action: ContextAction::Properties,
         icon: ContextIcon::Sliders,
         label: "Object properties…",
-        shortcut_command: Some(Command::ObjectProperties.key()),
+        shortcut_command: Some(DesignCommand::ObjectProperties.key()),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::Rotate,
@@ -220,7 +220,7 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
         action: ContextAction::UpdateInstanceInterface,
         icon: ContextIcon::Hierarchy,
         label: "Update instance interface",
-        shortcut_command: Some(Command::UpdateInstanceInterface.key()),
+        shortcut_command: Some(DesignCommand::UpdateInstanceInterface.key()),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::ReplaceInstance,

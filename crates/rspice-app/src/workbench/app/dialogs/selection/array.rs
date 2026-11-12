@@ -19,7 +19,14 @@ use crate::state::{
 use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine, FormRows};
 
 use crate::workbench::app::SchematicEditAuthority;
+use crate::workbench::app::dialogs::selection::move_selection::{
+    MoveSelectionDialogState, cancel_armed_move_selection_in,
+};
+use crate::workbench::app::dialogs::selection::stretch::{
+    StretchSelectionDialogState, cancel_armed_stretch_selection_in,
+};
 use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::state::WorkbenchSession;
 
 /// Isolated authority, typed draft, and canvas interaction state for the
 /// mockup-owned Create object array transaction. The complete replica set is
@@ -217,35 +224,53 @@ impl DraftValidation {
     }
 }
 
+/// [`open_array_selection_dialog_in`] over the whole state, the shape the
+/// canvas tests open it through.
+#[cfg(test)]
 pub(crate) fn open_array_selection_dialog(state: &mut AppState) {
+    let design = &mut state.design;
+    open_array_selection_dialog_in(
+        &mut design.array_selection,
+        &mut design.move_selection,
+        &mut design.stretch_selection,
+        &mut state.model,
+        &mut state.workbench,
+    );
+}
+
+/// Open Create array over the three canvas tools' drafts, the model and the
+/// session: opening it stops an armed Move or Stretch.
+pub(crate) fn open_array_selection_dialog_in(
+    dialog: &mut ArraySelectionDialogState,
+    move_draft: &mut MoveSelectionDialogState,
+    stretch: &mut StretchSelectionDialogState,
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
+) {
     // Create array is greyed on a read-only schematic and on a selection it
     // cannot repeat, so those two return without a word.
-    if state.schematic_edit_read_only()
-        || state
-            .model
-            .schematic
-            .validate_array_source_selection()
-            .is_err()
+    if model.schematic_edit_read_only()
+        || model.schematic.validate_array_source_selection().is_err()
     {
         return;
     }
     let count = SchematicArrayCount::parse(DEFAULT_COUNT)
         .expect("the mockup-owned default array count is valid");
-    let naming = match state.model.schematic.default_array_naming(count) {
+    let naming = match model.schematic.default_array_naming(count) {
         Ok(naming) => naming.to_string(),
         Err(error) => {
-            state.prompt(format!("Create array could not find unused names: {error}"));
+            wb.prompt(format!("Create array could not find unused names: {error}"));
             return;
         }
     };
-    if state.design.move_selection.armed {
-        crate::workbench::app::cancel_armed_move_selection(state);
+    if move_draft.armed {
+        cancel_armed_move_selection_in(move_draft, model);
     }
-    if state.design.stretch_selection.armed {
-        crate::workbench::app::cancel_armed_stretch_selection(state);
+    if stretch.armed {
+        cancel_armed_stretch_selection_in(stretch, model);
     }
-    state.design.array_selection.open(
-        SchematicEditAuthority::capture(state),
+    dialog.open(
+        SchematicEditAuthority::capture(&*model),
         count.to_string(),
         naming,
     );

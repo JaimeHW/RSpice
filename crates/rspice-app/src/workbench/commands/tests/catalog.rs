@@ -159,9 +159,18 @@ fn protected_commands_keep_the_exact_mockup_action_ids() {
     );
     assert_eq!(Command::ClearConsole.spec().id, "console-clear");
     // A shortcut profile names its commands by these ids.
-    assert_eq!(Command::MoveSelection.spec().id, "move-selection");
-    assert_eq!(Command::StretchSelection.spec().id, "stretch-selection");
-    assert_eq!(Command::ArraySelection.spec().id, "array-selection");
+    assert_eq!(
+        DesignCommand::MoveSelection.key().as_str(),
+        "move-selection"
+    );
+    assert_eq!(
+        DesignCommand::StretchSelection.key().as_str(),
+        "stretch-selection"
+    );
+    assert_eq!(
+        DesignCommand::ArraySelection.key().as_str(),
+        "array-selection"
+    );
     assert_eq!(
         DesignCommand::ReplaceInstance.key().as_str(),
         "replace-instance"

@@ -544,7 +544,9 @@ mod shortcut_ownership_tests {
             .selection
             .select_only_bus(87);
 
-        app.execute_shortcut_command(ShortcutCommand::ObjectProperties);
+        app.execute_command_key(
+            crate::workbench::design::commands::DesignCommand::ObjectProperties.key(),
+        );
         assert!(matches!(
             app.state.design.object_properties.draft,
             Some(rspice_schematic_editor::object_properties::ObjectPropertiesDraft::Bus(_))

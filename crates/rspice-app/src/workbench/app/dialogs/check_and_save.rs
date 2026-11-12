@@ -17,7 +17,8 @@ use crate::workbench::app::dialogs::check_and_save_validation::{
     CheckAndSaveValidationReport, ValidationReads, run_design_checks, run_design_checks_in,
 };
 use crate::workbench::app_state::{AppState, Model, PlatformState, SlotFacts};
-use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::commands::vocabulary::command_registry;
+use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::feature::{CodePort, DesignPort};
 use crate::workbench::lifecycle::project_lifecycle::ResultPresentationSource;
 use crate::workbench::project::commands::ProjectRequest;
@@ -281,11 +282,15 @@ impl CheckAndSaveParts<'_> {
                 } else {
                     rows.value("Checks", &checks);
                 }
-                if let Some(instance) = repair_instance.as_deref() {
+                // The repair is the design feature's command, named by the
+                // label it declares.
+                if let Some(instance) = repair_instance.as_deref()
+                    && let Some(repair) = command_registry().spec(ids::UPDATE_INSTANCE_INTERFACE)
+                {
                     repair_requested = rows.value_action(
                         "Instance",
                         &format!("{instance} is out of date"),
-                        Command::UpdateInstanceInterface.spec().label,
+                        repair.label,
                     );
                 }
                 rows.value("Documents", report.document_scope_label());

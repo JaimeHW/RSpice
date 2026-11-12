@@ -89,7 +89,7 @@ fn select_by_kind_selects_exactly_that_kind() {
     app.state.design.schematic_selection_filter.instances = false;
     app.execute(Command::SelectAll.key());
     for (kind, selection) in expected {
-        let key = Command::SelectOfKind(kind).key();
+        let key = DesignCommand::SelectOfKind(kind).key();
         assert_eq!(
             app.availability(key),
             CommandAvailability::Available,
@@ -111,9 +111,9 @@ fn select_by_kind_is_grey_for_a_kind_the_sheet_lacks() {
         .model
         .schematic
         .add_component(ComponentType::Resistor, Point::new(0, 0));
-    assert!(app.is_enabled(Command::SelectOfKind(SchematicObjectKind::Instances).key()));
+    assert!(app.is_enabled(DesignCommand::SelectOfKind(SchematicObjectKind::Instances).key()));
     assert_eq!(
-        app.availability(Command::SelectOfKind(SchematicObjectKind::Pins).key()),
+        app.availability(DesignCommand::SelectOfKind(SchematicObjectKind::Pins).key()),
         CommandAvailability::Disabled("the sheet has no pins")
     );
 }
@@ -285,13 +285,13 @@ fn highlight_net_lights_the_net_the_selection_is_on() {
         "RC Lowpass Filter",
         &mut app.state.model.schematic,
     );
-    let key = Command::HighlightNet.key();
+    let key = DesignCommand::HighlightNet.key();
     assert_eq!(
         app.availability(key),
         CommandAvailability::Disabled("select a wire, a net label or a pin")
     );
 
-    app.execute(Command::SelectOfKind(SchematicObjectKind::Wires).key());
+    app.execute(DesignCommand::SelectOfKind(SchematicObjectKind::Wires).key());
     assert_eq!(
         app.availability(key),
         CommandAvailability::Disabled("the selection is on more than one net")
@@ -312,9 +312,12 @@ fn highlight_net_lights_the_net_the_selection_is_on() {
     assert!(highlight.highlighted_wires.contains(&wire));
     assert_eq!(
         highlight.selected_net_name.as_deref(),
-        crate::schematic::view::selected_net(&app.state)
-            .ok()
-            .as_deref()
+        crate::schematic::view::selected_net(
+            &app.state.model,
+            app.state.design.schematic_visibility.net_highlighting,
+        )
+        .ok()
+        .as_deref()
     );
 }
 

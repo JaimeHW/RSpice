@@ -17,9 +17,13 @@ use crate::schematic::view::selection_layout::{
 use crate::schematic::view::selection_transform::{
     SelectionTransform, transform_selection_on_active_sheet,
 };
+use crate::schematic::view::sheet_visibility::objects_of_kind_on_active_sheet;
 use crate::schematic::view::standard_value_snap::{run_snap_to_standard_value, snap_block_reason};
-use crate::schematic::view::transient_annotation_status;
+use crate::schematic::view::{highlight_selected_net, selected_net, transient_annotation_status};
 use crate::state::{ComponentType, GridStyle, SchematicAnnotationVisibility, Tool};
+use crate::workbench::app::actions::property_edit::{
+    open_selected_object_properties_in, selected_object_properties_available_in,
+};
 use crate::workbench::app::actions::workspace::design_checks;
 use crate::workbench::app::actions::workspace::symbol_document::{
     active_symbol_pin_finding_count, clear_active_symbol_pin_checks, run_active_symbol_pin_checks,
@@ -49,8 +53,12 @@ use crate::workbench::app::dialogs::property_dialog::PropertyDialog;
 use crate::workbench::app::dialogs::replace_instance::{
     ReplaceInstance, open_replace_instance_dialog, replace_instance_available,
 };
-use crate::workbench::app::dialogs::selection::commands::schematic_selection_has_live_object;
-use crate::workbench::app::dialogs::selection::{array, bulk_edit, rename, shared_properties};
+use crate::workbench::app::dialogs::selection::commands::{
+    schematic_selection_has_live_object, select_schematic_objects_of_kind,
+};
+use crate::workbench::app::dialogs::selection::{
+    array, bulk_edit, move_selection, rename, shared_properties, stretch,
+};
 use crate::workbench::app::dialogs::{
     create_model_bound_symbol, find_replace, object_properties, placement, rule_setup,
     stimulus_link, symbol_definition, visibility_options,
@@ -124,6 +132,14 @@ impl CommandSet for DesignCommand {
     /// pointer, and Snap selection to grid something selected. Snapping to a
     /// standard value names what blocks it. A layout needs a schematic whose
     /// selection it can lay out, and choosing the series only the project.
+    ///
+    /// Selecting by kind needs a schematic with an object of the kind on its
+    /// active sheet. Move, Stretch, Create array, the symbol swap and the
+    /// interface update need an editable schematic or testbench, then a
+    /// selection each can act on; the swap and the update name what they
+    /// lack. Highlight net needs a schematic, then names what keeps it from
+    /// one net. Properties needs one inspectable object: a symbol's one pin
+    /// or shape, or a schematic object or instances its forms can open.
     fn availability(self, reads: &Reads<'_, DesignFeature>) -> CommandAvailability {
         let schematic = schematic_editor(reads);
         let selected = reads.state.selected_stimulus_definition.is_some();
@@ -256,6 +272,75 @@ impl CommandSet for DesignCommand {
                         selection_layout_availability(reads.model, markers, command).is_ok()
                     });
                 (!lays_out).then_some("command is unavailable in this context")
+            }
+            Self::SelectOfKind(_) if !schematic => Some("open a schematic or testbench"),
+            Self::SelectOfKind(kind) => objects_of_kind_on_active_sheet(reads.model, kind)
+                .is_empty()
+                .then_some(kind.absent()),
+            Self::MoveSelection
+            | Self::StretchSelection
+            | Self::ArraySelection
+            | Self::SwapToRSpiceSymbols
+            | Self::UpdateInstanceInterface
+                if !schematic =>
+            {
+                Some("open an editable schematic or testbench")
+            }
+            Self::MoveSelection
+            | Self::StretchSelection
+            | Self::ArraySelection
+            | Self::SwapToRSpiceSymbols
+            | Self::UpdateInstanceInterface
+                if reads.model.schematic_edit_read_only() =>
+            {
+                Some("the active schematic is read-only")
+            }
+            Self::MoveSelection => (!reads.model.schematic.has_live_movable_selection())
+                .then_some("select an editable object"),
+            Self::StretchSelection => reads
+                .model
+                .schematic
+                .default_stretch_target()
+                .is_none()
+                .then_some("select an editable object"),
+            Self::ArraySelection => reads
+                .model
+                .schematic
+                .validate_array_source_selection()
+                .is_err()
+                .then_some("select an editable object"),
+            Self::SwapToRSpiceSymbols => (!reads.model.schematic.can_swap_to_rspice_symbols())
+                .then_some("no part here draws an imported symbol"),
+            // The repair is offered exactly where the deck refuses: the
+            // schematic itself answers whether the selected instance still
+            // presents its master's interface, so a live row and a netlist
+            // defect can never disagree. Its refusal names that condition
+            // rather than the one the editing family reports.
+            Self::UpdateInstanceInterface => {
+                (!reads.model.schematic.selected_instance_interface_is_stale(
+                    &reads.model.library_manager,
+                    &reads.model.workspace.content.schematic_buffers,
+                ))
+                .then_some("select one instance whose master interface changed after it was placed")
+            }
+            Self::HighlightNet if !schematic => Some("open a schematic or testbench"),
+            // What the command would refuse with is the reason.
+            Self::HighlightNet => selected_net(
+                reads.model,
+                reads.state.schematic_visibility.net_highlighting,
+            )
+            .err(),
+            Self::ObjectProperties if routed::symbol_editor(reads.wb.workspace, reads.model) => {
+                let selection = reads.state.symbol.editor.effective_selection();
+                (selection.pins.len() + selection.shapes.len() != 1)
+                    .then_some("select one inspectable object")
+            }
+            Self::ObjectProperties => {
+                let registry = &reads.state.property_registry;
+                let inspectable = schematic
+                    && (selected_object_properties_available_in(registry, reads.model)
+                        || shared_properties::shared_properties_available(registry, reads.model));
+                (!inspectable).then_some("select one inspectable object")
             }
             _ if self.places() && !schematic => Some("open an editable schematic or testbench"),
             _ if self.places() && reads.model.schematic_edit_read_only() => {
@@ -624,6 +709,80 @@ impl CommandSet for DesignCommand {
                 if let Some(command) = layout_command(self) {
                     lay_out_selection(cx, command);
                 }
+            }
+            Self::SelectOfKind(kind) => {
+                select_schematic_objects_of_kind(cx.model, cx.wb, kind);
+            }
+            // A symbol in front shows its one selected pin or shape in the
+            // Inspector.
+            Self::ObjectProperties if routed::symbol_editor(cx.wb.workspace, cx.model) => {
+                cx.wb.inspector_visible = true;
+                cx.wb.drawer = Some(Drawer::Inspector);
+            }
+            // Several instances: one form for what they share.
+            Self::ObjectProperties
+                if shared_properties::shared_properties_available(
+                    &cx.state.property_registry,
+                    cx.model,
+                ) =>
+            {
+                let modal_open = cx.dialog_modal_open();
+                shared_properties::open_shared_properties(
+                    &mut cx.state.shared_properties,
+                    &cx.state.property_registry,
+                    modal_open,
+                    cx.model,
+                    cx.wb,
+                );
+            }
+            Self::ObjectProperties => {
+                open_selected_object_properties_in(
+                    &mut cx.state.property_form_parts(),
+                    cx.model,
+                    cx.wb,
+                );
+            }
+            Self::MoveSelection => move_selection::arm_move_selection_in(
+                &mut cx.state.move_selection,
+                &mut cx.state.stretch_selection,
+                &mut cx.state.array_selection,
+                cx.model,
+            ),
+            Self::StretchSelection => stretch::arm_stretch_selection_in(
+                &mut cx.state.stretch_selection,
+                &mut cx.state.move_selection,
+                &mut cx.state.array_selection,
+                cx.state.schematic_visibility.wire_routing,
+                cx.model,
+                cx.wb,
+            ),
+            Self::ArraySelection => array::open_array_selection_dialog_in(
+                &mut cx.state.array_selection,
+                &mut cx.state.move_selection,
+                &mut cx.state.stretch_selection,
+                cx.model,
+                cx.wb,
+            ),
+            Self::SwapToRSpiceSymbols => {
+                cx.model.schematic.swap_to_rspice_symbols();
+            }
+            // The operation reports its own outcome, including the name of any
+            // terminal the master dropped, so no route composes a second
+            // account of what happened.
+            Self::UpdateInstanceInterface => {
+                let outcome = cx.model.schematic.update_selected_instance_interface(
+                    &cx.model.library_manager,
+                    &cx.model.workspace.content.schematic_buffers,
+                );
+                cx.wb.prompt(match outcome {
+                    Ok(summary) => summary,
+                    Err(error) => error.to_string(),
+                });
+            }
+            Self::HighlightNet => {
+                let highlighting = cx.state.schematic_visibility.net_highlighting;
+                let outcome = highlight_selected_net(cx.model, highlighting);
+                cx.wb.prompt(outcome);
             }
         }
     }

@@ -701,7 +701,7 @@ fn move_selection_requires_one_live_object_in_an_editable_active_schematic() {
 
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;
-    assert!(!Command::MoveSelection.is_enabled(&app));
+    assert!(!app.command_key_enabled(DesignCommand::MoveSelection.key()));
 
     app.state
         .model
@@ -711,7 +711,7 @@ fn move_selection_requires_one_live_object_in_an_editable_active_schematic() {
         .selection
         .select_component(404);
     assert!(
-        !Command::MoveSelection.is_enabled(&app),
+        !app.command_key_enabled(DesignCommand::MoveSelection.key()),
         "a stale selection identity is not a movable object"
     );
 
@@ -725,22 +725,22 @@ fn move_selection_requires_one_live_object_in_an_editable_active_schematic() {
             ComponentType::Resistor,
             Point::origin(),
         ));
-    assert!(Command::MoveSelection.is_enabled(&app));
+    assert!(app.command_key_enabled(DesignCommand::MoveSelection.key()));
     assert_eq!(
-        Command::MoveSelection.availability(&app),
+        app.command_availability(DesignCommand::MoveSelection.key()),
         CommandAvailability::Available
     );
 
     app.state.model.schematic.session.read_only = true;
-    assert!(!Command::MoveSelection.is_enabled(&app));
+    assert!(!app.command_key_enabled(DesignCommand::MoveSelection.key()));
     assert_eq!(
-        Command::MoveSelection.availability(&app),
+        app.command_availability(DesignCommand::MoveSelection.key()),
         CommandAvailability::Disabled("the active schematic is read-only")
     );
 
     app.state.model.schematic.session.read_only = false;
     app.state.workbench.workspace = Workspace::Results;
-    assert!(!Command::MoveSelection.is_enabled(&app));
+    assert!(!app.command_key_enabled(DesignCommand::MoveSelection.key()));
 }
 
 #[test]
@@ -757,7 +757,7 @@ fn stretch_selection_requires_one_live_eligible_geometry_target() {
         .selection
         .select_wire_segment(17, 0);
     assert!(
-        !Command::StretchSelection.is_enabled(&app),
+        !app.command_key_enabled(DesignCommand::StretchSelection.key()),
         "a stale segment identity cannot open the workflow"
     );
 
@@ -767,22 +767,22 @@ fn stretch_selection_requires_one_live_eligible_geometry_target() {
         .document_mut_for_test()
         .wires
         .push(Wire::new(17, vec![Point::new(0, 0), Point::new(40, 0)]));
-    assert!(Command::StretchSelection.is_enabled(&app));
+    assert!(app.command_key_enabled(DesignCommand::StretchSelection.key()));
     assert_eq!(
-        Command::StretchSelection.availability(&app),
+        app.command_availability(DesignCommand::StretchSelection.key()),
         CommandAvailability::Available
     );
 
     app.state.model.schematic.session.read_only = true;
-    assert!(!Command::StretchSelection.is_enabled(&app));
+    assert!(!app.command_key_enabled(DesignCommand::StretchSelection.key()));
     assert_eq!(
-        Command::StretchSelection.availability(&app),
+        app.command_availability(DesignCommand::StretchSelection.key()),
         CommandAvailability::Disabled("the active schematic is read-only")
     );
 
     app.state.model.schematic.session.read_only = false;
     app.state.workbench.workspace = Workspace::Results;
-    assert!(!Command::StretchSelection.is_enabled(&app));
+    assert!(!app.command_key_enabled(DesignCommand::StretchSelection.key()));
 }
 
 #[test]
@@ -799,7 +799,7 @@ fn array_selection_requires_a_live_eligible_editable_selection() {
         .selection
         .select_component(404);
     assert!(
-        !Command::ArraySelection.is_enabled(&app),
+        !app.command_key_enabled(DesignCommand::ArraySelection.key()),
         "a stale selection identity cannot open the workflow"
     );
 
@@ -813,22 +813,22 @@ fn array_selection_requires_a_live_eligible_editable_selection() {
             ComponentType::Resistor,
             Point::origin(),
         ));
-    assert!(Command::ArraySelection.is_enabled(&app));
+    assert!(app.command_key_enabled(DesignCommand::ArraySelection.key()));
     assert_eq!(
-        Command::ArraySelection.availability(&app),
+        app.command_availability(DesignCommand::ArraySelection.key()),
         CommandAvailability::Available
     );
 
     app.state.model.schematic.session.read_only = true;
-    assert!(!Command::ArraySelection.is_enabled(&app));
+    assert!(!app.command_key_enabled(DesignCommand::ArraySelection.key()));
     assert_eq!(
-        Command::ArraySelection.availability(&app),
+        app.command_availability(DesignCommand::ArraySelection.key()),
         CommandAvailability::Disabled("the active schematic is read-only")
     );
 
     app.state.model.schematic.session.read_only = false;
     app.state.workbench.workspace = Workspace::Results;
-    assert!(!Command::ArraySelection.is_enabled(&app));
+    assert!(!app.command_key_enabled(DesignCommand::ArraySelection.key()));
 }
 
 #[test]
@@ -913,8 +913,8 @@ fn object_properties_dispatches_selected_buses_and_taps_and_refuses_read_only() 
         .editor
         .selection
         .select_only_bus(80);
-    assert!(Command::ObjectProperties.is_enabled(&app));
-    Command::ObjectProperties.execute(&mut app);
+    assert!(app.command_key_enabled(DesignCommand::ObjectProperties.key()));
+    app.execute_command_key(DesignCommand::ObjectProperties.key());
     assert!(matches!(
         app.state.design.object_properties.draft,
         Some(rspice_schematic_editor::object_properties::ObjectPropertiesDraft::Bus(_))
@@ -928,7 +928,7 @@ fn object_properties_dispatches_selected_buses_and_taps_and_refuses_read_only() 
         .editor
         .selection
         .select_only_bus_tap(81);
-    Command::ObjectProperties.execute(&mut app);
+    app.execute_command_key(DesignCommand::ObjectProperties.key());
     assert!(matches!(
         app.state.design.object_properties.draft,
         Some(rspice_schematic_editor::object_properties::ObjectPropertiesDraft::BusTap(_))
@@ -936,8 +936,8 @@ fn object_properties_dispatches_selected_buses_and_taps_and_refuses_read_only() 
     app.state.design.object_properties.close();
 
     app.state.model.schematic.session.read_only = true;
-    assert!(!Command::ObjectProperties.is_enabled(&app));
-    Command::ObjectProperties.execute(&mut app);
+    assert!(!app.command_key_enabled(DesignCommand::ObjectProperties.key()));
+    app.execute_command_key(DesignCommand::ObjectProperties.key());
     assert!(!app.state.design.object_properties.open);
 }
 
@@ -960,8 +960,8 @@ fn object_properties_availability_includes_one_selected_net_label() {
         .selection
         .select_only_net_label(id);
 
-    assert!(Command::ObjectProperties.is_enabled(&app));
-    Command::ObjectProperties.execute(&mut app);
+    assert!(app.command_key_enabled(DesignCommand::ObjectProperties.key()));
+    app.execute_command_key(DesignCommand::ObjectProperties.key());
     assert!(matches!(
         app.state.design.object_properties.draft,
         Some(rspice_schematic_editor::object_properties::ObjectPropertiesDraft::NetLabel(ref draft))
@@ -969,7 +969,7 @@ fn object_properties_availability_includes_one_selected_net_label() {
     ));
     app.state.design.object_properties.close();
     app.state.model.schematic.session.read_only = true;
-    assert!(!Command::ObjectProperties.is_enabled(&app));
+    assert!(!app.command_key_enabled(DesignCommand::ObjectProperties.key()));
     app.state.model.schematic.session.read_only = false;
     app.state
         .model
@@ -987,7 +987,7 @@ fn object_properties_availability_includes_one_selected_net_label() {
             .single_net_label()
             .is_some()
     );
-    assert!(!Command::ObjectProperties.is_enabled(&app));
+    assert!(!app.command_key_enabled(DesignCommand::ObjectProperties.key()));
 }
 
 /// Reconciling a symbol against its interface needs an interface. Offering
@@ -1190,8 +1190,7 @@ fn updating_an_instance_interface_is_offered_only_for_a_stale_placement() {
     let (mut app, master_key) = app_with_a_placed_cell_instance();
 
     assert!(
-        !Command::UpdateInstanceInterface
-            .availability(&app)
+        !app.command_availability(DesignCommand::UpdateInstanceInterface.key())
             .is_available(),
         "a placement that still matches its master is not stale"
     );
@@ -1209,16 +1208,14 @@ fn updating_an_instance_interface_is_offered_only_for_a_stale_placement() {
     );
 
     assert!(
-        Command::UpdateInstanceInterface
-            .availability(&app)
+        app.command_availability(DesignCommand::UpdateInstanceInterface.key())
             .is_available()
     );
-    Command::UpdateInstanceInterface.execute(&mut app);
+    app.execute_command_key(DesignCommand::UpdateInstanceInterface.key());
 
     assert_eq!(placed_interface(&app), ["ain", "b"]);
     assert!(
-        !Command::UpdateInstanceInterface
-            .availability(&app)
+        !app.command_availability(DesignCommand::UpdateInstanceInterface.key())
             .is_available(),
         "the repaired placement is no longer stale"
     );
@@ -1277,7 +1274,7 @@ fn repairing_a_stale_instance_restores_its_x_line() {
         stale.netlist
     );
 
-    Command::UpdateInstanceInterface.execute(&mut app);
+    app.execute_command_key(DesignCommand::UpdateInstanceInterface.key());
 
     let repaired = {
         let hierarchy =

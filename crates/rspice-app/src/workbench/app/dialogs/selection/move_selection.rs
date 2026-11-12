@@ -13,6 +13,12 @@
 use crate::state::Tool;
 
 use crate::workbench::app::SchematicEditAuthority;
+use crate::workbench::app::dialogs::selection::array::{
+    ArraySelectionDialogState, cancel_armed_array_selection_in,
+};
+use crate::workbench::app::dialogs::selection::stretch::{
+    StretchSelectionDialogState, cancel_armed_stretch_selection_in,
+};
 use crate::workbench::app_state::{AppState, Model};
 
 /// Authority and interaction state of the armed Move tool. The design
@@ -53,26 +59,42 @@ impl MoveSelectionDialogState {
 
 const COMMAND: &str = "Move";
 
-/// Arm Move against an immutable document and selection baseline. Commands
-/// call this single boundary so palette, menu and shortcut activation cannot
-/// drift.
+/// [`arm_move_selection_in`] over the whole state, the shape the canvas
+/// tests arm through.
+#[cfg(test)]
 pub(crate) fn arm_move_selection(state: &mut AppState) {
+    let design = &mut state.design;
+    arm_move_selection_in(
+        &mut design.move_selection,
+        &mut design.stretch_selection,
+        &mut design.array_selection,
+        &mut state.model,
+    );
+}
+
+/// Arm Move against an immutable document and selection baseline, over the
+/// three canvas tools' drafts and the model. The design feature's command
+/// calls this single boundary so palette, menu and shortcut activation
+/// cannot drift; arming Move stops an armed Stretch or Create array.
+pub(crate) fn arm_move_selection_in(
+    draft: &mut MoveSelectionDialogState,
+    stretch: &mut StretchSelectionDialogState,
+    array: &mut ArraySelectionDialogState,
+    model: &mut Model,
+) {
     // Move is greyed on a read-only schematic and with nothing movable
     // selected, so neither is answered.
-    if state.schematic_edit_read_only() || !state.model.schematic.has_live_movable_selection() {
+    if model.schematic_edit_read_only() || !model.schematic.has_live_movable_selection() {
         return;
     }
-    if state.design.stretch_selection.armed {
-        crate::workbench::app::cancel_armed_stretch_selection(state);
+    if stretch.armed {
+        cancel_armed_stretch_selection_in(stretch, model);
     }
-    if state.design.array_selection.armed {
-        crate::workbench::app::cancel_armed_array_selection(state);
+    if array.armed {
+        cancel_armed_array_selection_in(array, model);
     }
-    state
-        .design
-        .move_selection
-        .arm(SchematicEditAuthority::capture(state));
-    state.model.schematic.arm_tool(Tool::MoveSelection);
+    draft.arm(SchematicEditAuthority::capture(&*model));
+    model.schematic.arm_tool(Tool::MoveSelection);
 }
 
 fn validate_draft(state: &AppState) -> Result<(), String> {

@@ -80,6 +80,11 @@ const fn design(command: DesignCommand) -> MenuEntry {
     MenuEntry::command(command.key())
 }
 
+/// The design feature's command's row under a label of the menu's own.
+const fn design_as(command: DesignCommand, label: &'static str) -> MenuEntry {
+    MenuEntry::command_as(command.key(), label)
+}
+
 /// The project feature's command's row under the label it declares.
 const fn project(command: ProjectCommand) -> MenuEntry {
     MenuEntry::command(command.key())
@@ -276,15 +281,15 @@ const EDIT_MENU: &[MenuEntry] = &[
     MenuEntry::Only(
         MenuContext::Drawing,
         &[
-            command(Command::MoveSelection).access('V'),
-            command(Command::StretchSelection).access('H'),
-            command(Command::ArraySelection).access('Y'),
+            design(DesignCommand::MoveSelection).access('V'),
+            design(DesignCommand::StretchSelection).access('H'),
+            design(DesignCommand::ArraySelection).access('Y'),
             design(DesignCommand::ReplaceInstance).access('S'),
-            command(Command::SwapToRSpiceSymbols).access('W'),
+            design(DesignCommand::SwapToRSpiceSymbols).access('W'),
             design(DesignCommand::SelectionBulkEdit).access('B'),
             Separator,
             design(DesignCommand::RenameSelection).access('M'),
-            command(Command::ObjectProperties).access('O'),
+            design(DesignCommand::ObjectProperties).access('O'),
             Separator,
             command(Command::FindInDesign).access('F'),
             design(DesignCommand::FindReplace).access('I'),
@@ -302,20 +307,36 @@ const EDIT_MENU: &[MenuEntry] = &[
 
 /// Every object of one kind on the active sheet, in place of the selection.
 const SELECT_MENU: &[MenuEntry] = &[
-    command_as(
-        Command::SelectOfKind(SchematicObjectKind::Instances),
+    design_as(
+        DesignCommand::SelectOfKind(SchematicObjectKind::Instances),
         "Instances",
     )
     .access('I'),
-    command_as(Command::SelectOfKind(SchematicObjectKind::Wires), "Wires").access('W'),
-    command_as(
-        Command::SelectOfKind(SchematicObjectKind::NetLabels),
+    design_as(
+        DesignCommand::SelectOfKind(SchematicObjectKind::Wires),
+        "Wires",
+    )
+    .access('W'),
+    design_as(
+        DesignCommand::SelectOfKind(SchematicObjectKind::NetLabels),
         "Net labels",
     )
     .access('N'),
-    command_as(Command::SelectOfKind(SchematicObjectKind::Pins), "Pins").access('P'),
-    command_as(Command::SelectOfKind(SchematicObjectKind::Text), "Text").access('T'),
-    command_as(Command::SelectOfKind(SchematicObjectKind::Shapes), "Shapes").access('S'),
+    design_as(
+        DesignCommand::SelectOfKind(SchematicObjectKind::Pins),
+        "Pins",
+    )
+    .access('P'),
+    design_as(
+        DesignCommand::SelectOfKind(SchematicObjectKind::Text),
+        "Text",
+    )
+    .access('T'),
+    design_as(
+        DesignCommand::SelectOfKind(SchematicObjectKind::Shapes),
+        "Shapes",
+    )
+    .access('S'),
 ];
 
 /// View: how near, what is drawn over the drawing, which panels stand
@@ -407,7 +428,7 @@ const DESIGN_MENU: &[MenuEntry] = &[
     project(ProjectCommand::Variants).access('N'),
     project(ProjectCommand::Annotate).access('O'),
     design(DesignCommand::ConnectivityManager).access('Y'),
-    command(Command::HighlightNet).access('T'),
+    design(DesignCommand::HighlightNet).access('T'),
     design(DesignCommand::ReviewComments).access('R'),
     design(DesignCommand::EngineeringTableView).access('J'),
     Separator,

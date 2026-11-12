@@ -48,27 +48,6 @@ pub(super) fn open_help_center(state: &mut AppState, page: crate::workbench::app
 
 /// Whether the netlist document — not merely the workspace that hosts it — is
 /// the thing on screen.
-/// Clear the drawing's selection: the symbol's in a symbol editor, the
-/// active sheet's otherwise, in the session and in the sheet's buffer, as
-/// Select all writes both.
-pub(super) fn deselect_all(app: &mut RSpiceApp) {
-    if active_symbol_editor(app) {
-        app.state.design.symbol.editor.clear_selection();
-        return;
-    }
-    let state = &mut app.state;
-    state.model.schematic.session.editor.selection.clear();
-    let active_key = state
-        .model
-        .workspace
-        .content
-        .active_schematic_reference()
-        .key();
-    if let Some(mut buffer) = state.model.workspace.schematic_editor_mut(&active_key) {
-        buffer.editor.session.editor.selection.clear();
-    }
-}
-
 /// The label a menu row shows for `command` right now: Undo and Redo name
 /// the step they take where the drawing's history names it, Repeat names
 /// the command it repeats, and every other row reads the vocabulary's label.

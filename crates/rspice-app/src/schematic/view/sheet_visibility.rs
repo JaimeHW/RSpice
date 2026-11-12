@@ -370,11 +370,11 @@ impl SchematicObjectKind {
 /// Every object of `kind` on the active sheet, whatever the selection filter
 /// admits.
 pub(crate) fn objects_of_kind_on_active_sheet(
-    state: &AppState,
+    model: &Model,
     kind: SchematicObjectKind,
 ) -> Selection {
-    let document = state.model.schematic.document();
-    let on_sheet = |id: u64| object_is_on_active_sheet(state, id);
+    let document = model.schematic.document();
+    let on_sheet = |id: u64| object_is_on_active_sheet(model, id);
     let mut selection = Selection::default();
     match kind {
         SchematicObjectKind::Instances | SchematicObjectKind::Pins => {

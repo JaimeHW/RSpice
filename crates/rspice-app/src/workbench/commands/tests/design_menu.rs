@@ -10,12 +10,10 @@ use crate::workbench::project::commands::ProjectCommand;
 
 #[test]
 fn design_menu_commands_explain_wrong_context_and_read_only_states() {
-    let authoring_commands = [
-        Command::MoveSelection,
-        Command::StretchSelection,
-        Command::ArraySelection,
-    ];
     let design_authoring = [
+        DesignCommand::MoveSelection,
+        DesignCommand::StretchSelection,
+        DesignCommand::ArraySelection,
         DesignCommand::PlaceInstance,
         DesignCommand::PlaceWire,
         DesignCommand::PlaceBus,
@@ -33,13 +31,6 @@ fn design_menu_commands_explain_wrong_context_and_read_only_states() {
     app.state.open_project_session();
     app.state.workbench.activate(Workspace::Results);
 
-    for command in authoring_commands {
-        assert_eq!(
-            command.availability(&app),
-            CommandAvailability::Disabled("open an editable schematic or testbench"),
-            "{command:?}"
-        );
-    }
     for command in design_authoring {
         assert_eq!(
             app.command_availability(command.key()),
@@ -62,13 +53,6 @@ fn design_menu_commands_explain_wrong_context_and_read_only_states() {
 
     app.state.workbench.activate(Workspace::Design);
     app.state.model.schematic.session.read_only = true;
-    for command in authoring_commands {
-        assert_eq!(
-            command.availability(&app),
-            CommandAvailability::Disabled("the active schematic is read-only"),
-            "{command:?}"
-        );
-    }
     for command in design_authoring {
         assert_eq!(
             app.command_availability(command.key()),

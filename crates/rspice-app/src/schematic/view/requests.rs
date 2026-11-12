@@ -51,7 +51,9 @@ pub(super) fn apply_editor_request(state: &mut AppState, request: EditorRequest)
                 additive,
                 alt_held,
             ) {
-                super::interaction::highlight_canvas_net(state, |net| net.wire_ids.contains(&id));
+                super::interaction::highlight_canvas_net(&mut state.model, |net| {
+                    net.wire_ids.contains(&id)
+                });
             }
             if let Some(kept) = kept {
                 state.model.schematic.session.editor.net_highlight = kept;

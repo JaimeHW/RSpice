@@ -77,8 +77,6 @@ const DELETE: &[ShortcutBinding] = &[primary(
     ALL,
 )];
 const SELECT_ALL: &[ShortcutBinding] = &[primary(chord(Key::A, true, false, false, "Ctrl+A"), ALL)];
-const OBJECT_PROPERTIES: &[ShortcutBinding] =
-    &[primary(chord(Key::Q, false, false, false, "Q"), ALL)];
 const FIND_DESIGN: &[ShortcutBinding] =
     &[primary(chord(Key::F, true, false, false, "Ctrl+F"), ALL)];
 // Virtuoso and ADS both repeat the last command on a bare key; `.` was
@@ -162,15 +160,12 @@ const AUTOMATION_WORKSPACE: &[ShortcutBinding] =
 /// the four chords under it — a shortcut every reader has already learned.
 const STIMULUS_WORKSPACE: &[ShortcutBinding] =
     &[primary(chord(Key::Num8, false, true, false, "Alt+8"), ALL)];
-const MOVE_SELECTION: &[ShortcutBinding] = &[primary(chord(Key::M, false, false, false, "M"), ALL)];
 /// Virtuoso's `z`.
 const ZOOM_BOX: &[ShortcutBinding] = &[primary(chord(Key::Z, false, false, false, "Z"), ALL)];
 /// W alone draws a wire; Shift+W is taken by no other command and by no
 /// browser.
 const ZOOM_PREVIOUS: &[ShortcutBinding] =
     &[primary(chord(Key::W, false, false, true, "Shift+W"), ALL)];
-const STRETCH_SELECTION: &[ShortcutBinding] =
-    &[primary(chord(Key::S, false, false, false, "S"), ALL)];
 const SYMBOL_PIN: &[ShortcutBinding] = &[primary(chord(Key::P, false, false, false, "P"), ALL)];
 const SYMBOL_POLYLINE: &[ShortcutBinding] =
     &[primary(chord(Key::L, false, false, false, "L"), ALL)];
@@ -259,26 +254,17 @@ impl Command {
             | Self::Delete
             | Self::SelectAll
             | Self::DeselectAll
-            | Self::SelectOfKind(_)
-            | Self::ObjectProperties
             | Self::ZoomIn
             | Self::ZoomOut
             | Self::ZoomFit
             | Self::ZoomOneToOne
             | Self::ZoomPrevious => ShortcutContext::EditContext,
             Self::FindInDesign
-            | Self::MoveSelection
-            | Self::StretchSelection
-            | Self::ArraySelection
-            | Self::SwapToRSpiceSymbols
-            | Self::UpdateInstanceInterface
             | Self::RepeatLastCommand
             | Self::ZoomToSelection
             | Self::ZoomBox => ShortcutContext::EngineeringCanvas,
             Self::Cancel => ShortcutContext::ApplicationChrome,
-            Self::EditSymbolInPlace | Self::HighlightNet | Self::ConfigurationSets => {
-                ShortcutContext::DesignWorkspace
-            }
+            Self::EditSymbolInPlace | Self::ConfigurationSets => ShortcutContext::DesignWorkspace,
             Self::SymbolPinTool
             | Self::SymbolPolylineTool
             | Self::SymbolRectangleTool
@@ -315,7 +301,6 @@ impl Command {
             Self::Duplicate => DUPLICATE,
             Self::Delete => DELETE,
             Self::SelectAll => SELECT_ALL,
-            Self::ObjectProperties => OBJECT_PROPERTIES,
             Self::FindInDesign => FIND_DESIGN,
             Self::RepeatLastCommand => REPEAT_LAST_COMMAND,
             Self::ZoomIn => ZOOM_IN,
@@ -335,11 +320,6 @@ impl Command {
             Self::NextPane => NEXT_PANE,
             Self::PreviousPane => PREVIOUS_PANE,
             Self::HelpCenter => HELP_CENTER,
-            Self::MoveSelection => MOVE_SELECTION,
-            Self::StretchSelection => STRETCH_SELECTION,
-            Self::ArraySelection => NONE,
-            Self::SwapToRSpiceSymbols => NONE,
-            Self::UpdateInstanceInterface => NONE,
             Self::ConfigurationSets => NONE,
             Self::SymbolPinTool => SYMBOL_PIN,
             Self::SymbolPolylineTool => SYMBOL_POLYLINE,
@@ -405,52 +385,9 @@ impl Command {
             }
             Self::Undo => "nothing to undo",
             Self::Redo => "nothing to redo",
-            // The repair exists only for an instance the deck already refuses
-            // to emit, so its refusal names that condition rather than the
-            // generic "select an editable object" the editing family reports.
-            Self::UpdateInstanceInterface if !super::active_schematic_editor(app) => {
-                "open an editable schematic or testbench"
-            }
-            Self::UpdateInstanceInterface if app.state.schematic_edit_read_only() => {
-                "the active schematic is read-only"
-            }
-            Self::UpdateInstanceInterface => {
-                "select one instance whose master interface changed after it was placed"
-            }
-            Self::MoveSelection
-            | Self::StretchSelection
-            | Self::ArraySelection
-            | Self::SwapToRSpiceSymbols
-                if !super::active_schematic_editor(app) =>
-            {
-                "open an editable schematic or testbench"
-            }
-            Self::MoveSelection
-            | Self::StretchSelection
-            | Self::ArraySelection
-            | Self::SwapToRSpiceSymbols
-                if app.state.schematic_edit_read_only() =>
-            {
-                "the active schematic is read-only"
-            }
-            Self::Cut
-            | Self::Copy
-            | Self::Duplicate
-            | Self::Delete
-            | Self::MoveSelection
-            | Self::StretchSelection
-            | Self::ArraySelection => "select an editable object",
-            Self::SwapToRSpiceSymbols => "no part here draws an imported symbol",
-            Self::HighlightNet if !super::active_schematic_editor(app) => {
-                "open a schematic or testbench"
-            }
-            // What the command would have refused with is the reason.
-            Self::HighlightNet => crate::schematic::view::selected_net(&app.state)
-                .err()
-                .unwrap_or("command is unavailable in this context"),
+            Self::Cut | Self::Copy | Self::Duplicate | Self::Delete => "select an editable object",
             Self::ConfigurationSets => "open a project",
             Self::Paste => "clipboard has no compatible content",
-            Self::ObjectProperties => "select one inspectable object",
             Self::EditSymbolInPlace => app
                 .state
                 .selected_symbol_in_place_target()
@@ -469,10 +406,6 @@ impl Command {
                 "open a schematic or symbol"
             }
             Self::ZoomPrevious => "the view has not changed yet",
-            Self::SelectOfKind(_) if !super::active_schematic_editor(app) => {
-                "open a schematic or testbench"
-            }
-            Self::SelectOfKind(kind) => kind.absent(),
             Self::CloseOtherDocuments => "no other closable document is open",
             Self::CloseAllDocuments => "no closable document is open",
             Self::PreviousDocument | Self::NextDocument => "only one document is open",
@@ -723,25 +656,21 @@ mod tests {
 
     #[test]
     fn move_selection_is_unmodified_m_in_the_engineering_canvas() {
-        assert_eq!(
-            Command::MoveSelection.shortcut_context(),
-            ShortcutContext::EngineeringCanvas
-        );
+        let spec = DesignCommand::MoveSelection.declared_spec();
+        assert_eq!(spec.context, ShortcutContext::EngineeringCanvas);
         for platform in CommandPlatform::ALL {
-            assert_eq!(Command::MoveSelection.default_shortcut_label(platform), "M");
+            assert_eq!(label(spec.bindings, platform), "M");
             assert_eq!(
-                binding_owners(MOVE_SELECTION[0].chord, platform),
-                vec![Command::MoveSelection]
+                ordered_binding_owners(spec.bindings[0].chord, platform),
+                vec![spec.key]
             );
         }
     }
 
     #[test]
     fn stretch_selection_solely_owns_unmodified_s_in_the_engineering_canvas() {
-        assert_eq!(
-            Command::StretchSelection.shortcut_context(),
-            ShortcutContext::EngineeringCanvas
-        );
+        let spec = DesignCommand::StretchSelection.declared_spec();
+        assert_eq!(spec.context, ShortcutContext::EngineeringCanvas);
         assert!(
             DesignCommand::SelectTool
                 .declared_spec()
@@ -749,13 +678,10 @@ mod tests {
                 .is_empty()
         );
         for platform in CommandPlatform::ALL {
+            assert_eq!(label(spec.bindings, platform), "S");
             assert_eq!(
-                Command::StretchSelection.default_shortcut_label(platform),
-                "S"
-            );
-            assert_eq!(
-                binding_owners(STRETCH_SELECTION[0].chord, platform),
-                vec![Command::StretchSelection]
+                ordered_binding_owners(spec.bindings[0].chord, platform),
+                vec![spec.key]
             );
         }
     }
@@ -788,13 +714,11 @@ mod tests {
 
     #[test]
     fn create_array_is_canvas_scoped_and_has_no_factory_shortcut() {
-        assert_eq!(
-            Command::ArraySelection.shortcut_context(),
-            ShortcutContext::EngineeringCanvas
-        );
-        assert!(Command::ArraySelection.shortcut_bindings().is_empty());
+        let spec = DesignCommand::ArraySelection.declared_spec();
+        assert_eq!(spec.context, ShortcutContext::EngineeringCanvas);
+        assert!(spec.bindings.is_empty());
         for platform in CommandPlatform::ALL {
-            assert_eq!(Command::ArraySelection.default_shortcut_label(platform), "");
+            assert_eq!(label(spec.bindings, platform), "");
         }
     }
 

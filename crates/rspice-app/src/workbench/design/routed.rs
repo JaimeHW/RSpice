@@ -6,10 +6,10 @@
 //! Each acts on the innermost view: a symbol edited in place, then the
 //! symbol editor, then the schematic.
 //!
-//! The edit commands (Cut, Copy, Paste, Duplicate, Delete and Select all)
-//! act on the selection in a schematic or symbol editor; Results takes Copy
-//! first where it is in front. Find in design opens the Navigator's search
-//! from anywhere but a Verilog-A cell view.
+//! The edit commands (Cut, Copy, Paste, Duplicate, Delete, Select all and
+//! Deselect all) act on the selection in a schematic or symbol editor;
+//! Results takes Copy first where it is in front. Find in design opens the
+//! Navigator's search from anywhere but a Verilog-A cell view.
 //!
 //! Undo and Redo step the design's histories everywhere the shell lets the
 //! key through: the shell steps the netlist page's own history first.
@@ -128,6 +128,12 @@ pub(super) const ROUTED: &[RoutedCommand<DesignFeature>] = &[
         takes: in_editor,
         enabled: |_| true,
         execute: select_all,
+    },
+    RoutedCommand {
+        key: ids::DESELECT_ALL,
+        takes: in_editor,
+        enabled: has_selection,
+        execute: deselect_all,
     },
     RoutedCommand {
         key: ids::FIND_IN_DESIGN,
@@ -391,6 +397,32 @@ fn select_all(cx: &mut Cx<'_, DesignFeature>) {
         select_all_symbol_items(&mut cx.state.symbol, cx.model, cx.wb);
     } else {
         select_all_schematic_objects(cx.state.schematic_selection_filter, cx.model, cx.wb);
+    }
+}
+
+/// Whether the drawing in front has anything selected: the symbol's pins and
+/// shapes, or the schematic's objects.
+fn has_selection(reads: &Reads<'_, DesignFeature>) -> bool {
+    if symbol_editor(reads.wb.workspace, reads.model) {
+        !reads.state.symbol.editor.effective_selection().is_empty()
+    } else {
+        !reads.model.schematic.session.editor.selection.is_empty()
+    }
+}
+
+/// Clear the drawing's selection: the symbol's in a symbol editor, the
+/// active sheet's otherwise, in the session and in the sheet's buffer, as
+/// Select all writes both.
+fn deselect_all(cx: &mut Cx<'_, DesignFeature>) {
+    if symbol_editor(cx.wb.workspace, cx.model) {
+        cx.state.symbol.editor.clear_selection();
+        return;
+    }
+    let model = &mut *cx.model;
+    model.schematic.session.editor.selection.clear();
+    let active_key = model.workspace.content.active_schematic_reference().key();
+    if let Some(mut buffer) = model.workspace.schematic_editor_mut(&active_key) {
+        buffer.editor.session.editor.selection.clear();
     }
 }
 

@@ -750,11 +750,11 @@ const DESIGN_PLACEMENT_COMMANDS: [CommandKey; 10] = [
     DesignCommand::PlaceShape.key(),
 ];
 const SELECTION_EDIT_COMMANDS: [CommandKey; 6] = [
-    Command::MoveSelection.key(),
-    Command::StretchSelection.key(),
-    Command::ArraySelection.key(),
+    DesignCommand::MoveSelection.key(),
+    DesignCommand::StretchSelection.key(),
+    DesignCommand::ArraySelection.key(),
     DesignCommand::ReplaceInstance.key(),
-    Command::SwapToRSpiceSymbols.key(),
+    DesignCommand::SwapToRSpiceSymbols.key(),
     DesignCommand::SelectionBulkEdit.key(),
 ];
 const DESIGN_MANAGEMENT_COMMANDS: [CommandKey; 6] = [

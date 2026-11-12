@@ -183,8 +183,8 @@ pub(crate) use dialogs::stimulus_link::{
 pub(crate) use dialogs::window_session::{WindowSessionPage, WindowWorkflow, open_window_workflow};
 
 pub(crate) use actions::property_edit::{
-    authoritative_component_property_sheet, open_property_editor, open_selected_object_properties,
-    selected_object_properties_available,
+    PropertyFormParts, authoritative_component_property_sheet, open_property_editor,
+    open_selected_object_properties, selected_object_properties_available,
 };
 pub(crate) use actions::stimulus_placement::arm_placement_from_definition;
 
@@ -193,9 +193,11 @@ pub(crate) use dialogs::find_replace::find_replace_matches;
 pub(crate) use dialogs::placement::net_label::{
     open_net_label_placement, place_sequenced_net_label,
 };
+#[cfg(test)]
+pub(crate) use dialogs::selection::array::open_array_selection_dialog;
 pub(crate) use dialogs::selection::array::{
     ArraySelectionPreviewCache, armed_array_selection_authority, armed_array_selection_plan,
-    cancel_armed_array_selection, open_array_selection_dialog,
+    cancel_armed_array_selection,
 };
 pub(crate) use dialogs::selection::commands::floating::{
     FloatingCopyParts, cancel_floating_paste, floating_paste_scope, on_grid, turn_floating_paste,
@@ -206,14 +208,15 @@ pub(crate) use dialogs::selection::commands::{
     paste_schematic_clipboard, paste_schematic_clipboard_at, schematic_grid_step,
     select_all_schematic_objects,
 };
+#[cfg(test)]
+pub(crate) use dialogs::selection::move_selection::arm_move_selection;
 pub(crate) use dialogs::selection::move_selection::{
-    arm_move_selection, armed_move_selection_authority, cancel_armed_move_selection,
+    armed_move_selection_authority, cancel_armed_move_selection,
 };
-pub(crate) use dialogs::selection::shared_properties::{
-    open_shared_properties, shared_properties_available,
-};
+#[cfg(test)]
+pub(crate) use dialogs::selection::stretch::arm_stretch_selection;
 pub(crate) use dialogs::selection::stretch::{
-    arm_stretch_selection, armed_stretch_selection_authority, cancel_armed_stretch_selection,
+    armed_stretch_selection_authority, cancel_armed_stretch_selection,
 };
 pub(crate) use dialogs::symbol_definition::{
     SymbolImportDialogState, SymbolParameterFormDialogState, open_symbol_import_dialog,

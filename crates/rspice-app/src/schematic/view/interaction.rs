@@ -9,10 +9,10 @@ use egui::{Response, Ui};
 
 use crate::state::{
     ComponentType, OccurrenceProbeSpelling, Point, SavedOutput, SavedOutputCompatibility,
-    SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming, SchematicProbe,
-    Tool, ViewType,
+    SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,
+    SchematicNetHighlighting, SchematicProbe, Tool, ViewType,
 };
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::{AppState, Model};
 use rspice_design::connectivity::summary::{DesignNet, projection_nets};
 use rspice_schematic_editor::view::documentation_shape_input::{
     self, ShapeInputAction, ShapeInputRequest, ShapeInputTransition, ShapeInputView,
@@ -1553,16 +1553,16 @@ fn retain_probe_flag(
 /// receipt, and a name taken from a hierarchy the design does not have is
 /// wrong rather than approximate. The reason is logged so the gesture that
 /// found no name is explicable.
-fn live_design_nets(state: &AppState) -> std::sync::Arc<Vec<DesignNet>> {
-    match state.model.workspace.design_projection(
-        &state.model.library_manager,
-        &state.model.workspace.content.active_view,
-        &state.model.schematic,
+fn live_design_nets(model: &Model) -> std::sync::Arc<Vec<DesignNet>> {
+    match model.workspace.design_projection(
+        &model.library_manager,
+        &model.workspace.content.active_view,
+        &model.schematic,
     ) {
         Ok(projection) => projection_nets(
-            state.model.library_manager.catalog(),
+            model.library_manager.catalog(),
             &projection,
-            &state.model.workspace.content.active_view.key(),
+            &model.workspace.content.active_view.key(),
         ),
         Err(error) => {
             log::warn!("Probe naming has no design projection: {error}");
@@ -1578,8 +1578,8 @@ fn live_design_nets(state: &AppState) -> std::sync::Arc<Vec<DesignNet>> {
 /// together and carry the node name a probe would emit. A gesture the design
 /// resolves no net for lights nothing rather than falling back to whichever
 /// group the pointer happened to land on.
-pub(super) fn highlight_canvas_net(state: &mut AppState, select: impl Fn(&DesignNet) -> bool) {
-    let lit = live_design_nets(state)
+pub(super) fn highlight_canvas_net(model: &mut Model, select: impl Fn(&DesignNet) -> bool) {
+    let lit = live_design_nets(model)
         .iter()
         .find(|net| select(net))
         .map(|net| {
@@ -1589,15 +1589,14 @@ pub(super) fn highlight_canvas_net(state: &mut AppState, select: impl Fn(&Design
     match lit {
         Some((name, wire_ids)) => {
             log::info!("Highlighted net '{name}' with {} wires", wire_ids.len());
-            state
-                .model
+            model
                 .schematic
                 .session
                 .editor
                 .net_highlight
                 .highlight_named_wires(name, wire_ids);
         }
-        None => state.model.schematic.session.editor.net_highlight.clear(),
+        None => model.schematic.session.editor.net_highlight.clear(),
     }
 }
 
@@ -1605,16 +1604,14 @@ pub(super) fn highlight_canvas_net(state: &mut AppState, select: impl Fn(&Design
 /// selected wire's (whole, a segment or a corner), the net a selected label
 /// names, or the net a selected part's terminals are on. `Err` says why
 /// there is none to light.
-pub(crate) fn selected_net(state: &AppState) -> Result<String, &'static str> {
-    if !state
-        .design
-        .schematic_visibility
-        .net_highlighting
-        .lights_selected_net()
-    {
+pub(crate) fn selected_net(
+    model: &Model,
+    net_highlighting: SchematicNetHighlighting,
+) -> Result<String, &'static str> {
+    if !net_highlighting.lights_selected_net() {
         return Err("Display options light no selected net");
     }
-    let selection = &state.model.schematic.session.editor.selection;
+    let selection = &model.schematic.session.editor.selection;
     let wires = selection
         .wires
         .iter()
@@ -1627,8 +1624,7 @@ pub(crate) fn selected_net(state: &AppState) -> Result<String, &'static str> {
         )
         .chain(selection.wire_vertices.iter().map(|vertex| vertex.wire_id))
         .collect::<std::collections::HashSet<_>>();
-    let labels = state
-        .model
+    let labels = model
         .schematic
         .document()
         .net_labels
@@ -1639,7 +1635,7 @@ pub(crate) fn selected_net(state: &AppState) -> Result<String, &'static str> {
     if wires.is_empty() && labels.is_empty() && selection.components.is_empty() {
         return Err("select a wire, a net label or a pin");
     }
-    let nets = live_design_nets(state);
+    let nets = live_design_nets(model);
     let mut on = nets.iter().filter(|net| {
         net.wire_ids.iter().any(|id| wires.contains(id))
             || labels
@@ -1657,18 +1653,17 @@ pub(crate) fn selected_net(state: &AppState) -> Result<String, &'static str> {
     Ok(net.name.clone())
 }
 
-/// Light the net the selection is on. Returns whether one was lit.
-pub(crate) fn highlight_selected_net(state: &mut AppState) -> bool {
-    match selected_net(state) {
+/// Light the net the selection is on, and say which, or why none was lit.
+pub(crate) fn highlight_selected_net(
+    model: &mut Model,
+    net_highlighting: SchematicNetHighlighting,
+) -> String {
+    match selected_net(model, net_highlighting) {
         Ok(name) => {
-            highlight_canvas_net(state, |net| net.name == name);
-            state.prompt(format!("Highlighted net {name}."));
-            true
+            highlight_canvas_net(model, |net| net.name == name);
+            format!("Highlighted net {name}.")
         }
-        Err(reason) => {
-            state.prompt(format!("No net highlighted: {reason}."));
-            false
-        }
+        Err(reason) => format!("No net highlighted: {reason}."),
     }
 }
 
@@ -1682,7 +1677,7 @@ fn exactly_one_net_name<'a>(mut matches: impl Iterator<Item = &'a DesignNet>) ->
 /// compatibility fallback when the live netlist projection cannot resolve a
 /// source identity.
 fn live_wire_probe_net_name(state: &AppState, wire_id: u64) -> Option<String> {
-    let nets = live_design_nets(state);
+    let nets = live_design_nets(&state.model);
     exactly_one_net_name(nets.iter().filter(|net| net.wire_ids.contains(&wire_id)))
 }
 
@@ -1692,7 +1687,7 @@ fn live_terminal_probe_net_name(
     pin: &str,
     position: Point,
 ) -> Option<String> {
-    let nets = live_design_nets(state);
+    let nets = live_design_nets(&state.model);
     exactly_one_net_name(nets.iter().filter(|net| {
         net.terminals
             .iter()
@@ -1836,7 +1831,9 @@ fn handle_probe_click(
                     .preferences
                     .toggle(crate::workbench::TogglePreference::CrossProbeBehavior)
             {
-                highlight_canvas_net(state, |net| net.name.eq_ignore_ascii_case(&net_name));
+                highlight_canvas_net(&mut state.model, |net| {
+                    net.name.eq_ignore_ascii_case(&net_name)
+                });
             }
         } else {
             log::info!(

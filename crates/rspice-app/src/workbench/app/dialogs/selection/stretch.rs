@@ -12,7 +12,14 @@
 use crate::state::{StretchOrthogonalPolicy, Tool};
 
 use crate::workbench::app::SchematicEditAuthority;
+use crate::workbench::app::dialogs::selection::array::{
+    ArraySelectionDialogState, cancel_armed_array_selection_in,
+};
+use crate::workbench::app::dialogs::selection::move_selection::{
+    MoveSelectionDialogState, cancel_armed_move_selection_in,
+};
 use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::state::WorkbenchSession;
 use rspice_schematic_editor::session::visibility::SchematicWireRoutingStyle;
 
 /// Authority and interaction state of the armed Stretch tool. The selected
@@ -60,8 +67,8 @@ const COMMAND: &str = "Stretch";
 /// What the sheet's own routing style says about diagonals. A stretch that
 /// defaulted to orthogonal on a 45-degree sheet would refuse the first drag
 /// the reader tried.
-fn policy_for_sheet(state: &AppState) -> StretchOrthogonalPolicy {
-    match state.design.schematic_visibility.wire_routing {
+fn policy_for_sheet(wire_routing: SchematicWireRoutingStyle) -> StretchOrthogonalPolicy {
+    match wire_routing {
         SchematicWireRoutingStyle::Orthogonal => StretchOrthogonalPolicy::PreserveOrthogonal,
         SchematicWireRoutingStyle::FortyFiveDegree | SchematicWireRoutingStyle::FreeAngle => {
             StretchOrthogonalPolicy::AllowDiagonal
@@ -69,39 +76,53 @@ fn policy_for_sheet(state: &AppState) -> StretchOrthogonalPolicy {
     }
 }
 
+/// [`arm_stretch_selection_in`] over the whole state, the shape the canvas
+/// tests arm through.
+#[cfg(test)]
 pub(crate) fn arm_stretch_selection(state: &mut AppState) {
+    let design = &mut state.design;
+    arm_stretch_selection_in(
+        &mut design.stretch_selection,
+        &mut design.move_selection,
+        &mut design.array_selection,
+        design.schematic_visibility.wire_routing,
+        &mut state.model,
+        &mut state.workbench,
+    );
+}
+
+/// Arm Stretch over the three canvas tools' drafts, the sheet's wire
+/// routing, the model and the session: arming Stretch stops an armed Move
+/// or Create array.
+pub(crate) fn arm_stretch_selection_in(
+    draft: &mut StretchSelectionDialogState,
+    move_draft: &mut MoveSelectionDialogState,
+    array: &mut ArraySelectionDialogState,
+    wire_routing: SchematicWireRoutingStyle,
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
+) {
     // Stretch is greyed on a read-only schematic and with nothing to stretch,
     // so those two return without a word.
-    if state.schematic_edit_read_only() {
+    if model.schematic_edit_read_only() {
         return;
     }
-    if !state
-        .model
-        .schematic
-        .session
-        .editor
-        .selection
-        .probes
-        .is_empty()
-    {
-        state.prompt("A probe marker cannot be stretched. Move it instead.");
+    if !model.schematic.session.editor.selection.probes.is_empty() {
+        wb.prompt("A probe marker cannot be stretched. Move it instead.");
         return;
     }
-    let Some(target) = state.model.schematic.default_stretch_target() else {
+    let Some(target) = model.schematic.default_stretch_target() else {
         return;
     };
-    if state.design.move_selection.armed {
-        crate::workbench::app::cancel_armed_move_selection(state);
+    if move_draft.armed {
+        cancel_armed_move_selection_in(move_draft, model);
     }
-    if state.design.array_selection.armed {
-        crate::workbench::app::cancel_armed_array_selection(state);
+    if array.armed {
+        cancel_armed_array_selection_in(array, model);
     }
-    let policy = policy_for_sheet(state);
-    state
-        .design
-        .stretch_selection
-        .arm(SchematicEditAuthority::capture(state), target, policy);
-    state.model.schematic.arm_tool(Tool::StretchSelection);
+    let policy = policy_for_sheet(wire_routing);
+    draft.arm(SchematicEditAuthority::capture(&*model), target, policy);
+    model.schematic.arm_tool(Tool::StretchSelection);
 }
 
 fn validate_draft(state: &AppState) -> Result<(), String> {

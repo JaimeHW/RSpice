@@ -2161,7 +2161,7 @@ fn canvas_net_corpus() -> Vec<(&'static str, AppState)> {
 
 /// The conductors one alt-click lights, and the name it lit them under.
 fn lit_net(state: &mut AppState, wire_id: u64) -> (Option<String>, HashSet<u64>) {
-    highlight_canvas_net(state, |net| net.wire_ids.contains(&wire_id));
+    highlight_canvas_net(&mut state.model, |net| net.wire_ids.contains(&wire_id));
     let highlight = &state.model.schematic.session.editor.net_highlight;
     (
         highlight.selected_net_name.clone(),

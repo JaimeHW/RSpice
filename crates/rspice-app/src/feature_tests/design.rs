@@ -10,7 +10,6 @@ use crate::state::{
     ModelBoundSymbolDefinition, Point, SymbolDefinitionImport, View, ViewType,
 };
 use crate::workbench::RSpiceApp;
-use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::state::Workspace;
 
@@ -126,7 +125,7 @@ fn create_array_opens_and_draws_in_the_frame() {
     let id = resistor(&mut app, Point::new(0, 0));
     let selection = &mut app.state.model.schematic.session.editor.selection;
     selection.select_only_component(id);
-    Command::ArraySelection.execute(&mut app);
+    app.execute_command_key(DesignCommand::ArraySelection.key());
     assert!(draws_dialog(&mut app, "Create array"));
     assert!(app.state.design.array_selection.open);
 }
@@ -141,7 +140,7 @@ fn net_label_properties_open_and_draw_in_the_frame() {
         .add_net_label(Point::new(0, 0), "sense".to_owned());
     let selection = &mut app.state.model.schematic.session.editor.selection;
     selection.select_only_net_label(label);
-    Command::ObjectProperties.execute(&mut app);
+    app.execute_command_key(DesignCommand::ObjectProperties.key());
     assert!(draws_dialog(&mut app, "Net label properties"));
     assert!(app.state.design.object_properties.open);
 }
@@ -186,7 +185,7 @@ fn shared_properties_open_and_draw_in_the_frame() {
     let selection = &mut app.state.model.schematic.session.editor.selection;
     selection.select_component(first);
     selection.select_component(second);
-    Command::ObjectProperties.execute(&mut app);
+    app.execute_command_key(DesignCommand::ObjectProperties.key());
     assert!(draws_dialog(&mut app, "Properties"));
     assert!(app.state.design.shared_properties.open);
 }

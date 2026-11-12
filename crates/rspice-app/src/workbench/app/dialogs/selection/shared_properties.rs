@@ -18,8 +18,8 @@ use crate::properties::property_bridge::{
 };
 use crate::state::{Component, ComponentType, PropertyValue};
 use crate::ui::widgets::{CommandForm, DialogChoice};
-use crate::workbench::app::actions::workspace::sync_active_schematic;
-use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::app::actions::workspace::{deny_read_only_edit, sync_active_schematic};
+use crate::workbench::app_state::Model;
 use crate::workbench::state::WorkbenchSession;
 
 const TITLE: &str = "Properties";
@@ -63,42 +63,50 @@ pub(crate) struct SharedPropertiesDialogState {
 /// The selected instances, when there are several the form can edit: every
 /// selected object an instance, and every one of a kind with a property
 /// schema.
-fn selected_instances(state: &AppState) -> Option<Vec<u64>> {
-    let selection = &state.model.schematic.session.editor.selection;
-    let ids: Vec<u64> = state
-        .model
+fn selected_instances(registry: &PropertyEditorSchema, model: &Model) -> Option<Vec<u64>> {
+    let selection = &model.schematic.session.editor.selection;
+    let ids: Vec<u64> = model
         .schematic
         .document()
         .components
         .iter()
         .filter(|component| selection.has_component(component.id))
         .filter(|component| {
-            component.kind != ComponentType::CellInstance
-                && state.design.property_registry.get(component.kind).is_some()
+            component.kind != ComponentType::CellInstance && registry.get(component.kind).is_some()
         })
         .map(|component| component.id)
         .collect();
     (ids.len() >= 2 && ids.len() == selection.components.len()).then_some(ids)
 }
 
-pub(crate) fn shared_properties_available(state: &AppState) -> bool {
-    !state.schematic_edit_read_only() && selected_instances(state).is_some()
+/// Whether the form can open: the schematic is editable and the selection
+/// is several instances it can edit, read through the property schema.
+pub(crate) fn shared_properties_available(registry: &PropertyEditorSchema, model: &Model) -> bool {
+    !model.schematic_edit_read_only() && selected_instances(registry, model).is_some()
 }
 
-/// Open the form on the selection. Returns whether it opened.
-pub(crate) fn open_shared_properties(state: &mut AppState) -> bool {
-    if state.dialog_modal_open() || state.deny_read_only_edit() {
+/// Open the form on the selection, unless a dialog holds the workbench
+/// (`modal_open`) or the schematic refuses the edit. Returns whether it
+/// opened.
+pub(crate) fn open_shared_properties(
+    dialog: &mut SharedPropertiesDialogState,
+    registry: &PropertyEditorSchema,
+    modal_open: bool,
+    model: &Model,
+    wb: &mut WorkbenchSession,
+) -> bool {
+    if modal_open || deny_read_only_edit(model, wb) {
         return false;
     }
-    let Some(ids) = selected_instances(state) else {
+    let Some(ids) = selected_instances(registry, model) else {
         return false;
     };
-    let fields = shared_fields(state, &ids);
-    state.design.shared_properties = SharedPropertiesDialogState {
+    let fields = shared_fields(registry, model, &ids);
+    *dialog = SharedPropertiesDialogState {
         open: true,
         ids,
         fields,
-        content_version: state.model.schematic.content_version(),
+        content_version: model.schematic.content_version(),
         error: None,
     };
     true
@@ -118,9 +126,8 @@ fn instances<'a>(model: &'a Model, ids: &[u64]) -> Vec<&'a Component> {
 
 /// The properties every instance in `ids` owns, in the first one's sheet
 /// order, each with the value they agree on if they do.
-fn shared_fields(state: &AppState, ids: &[u64]) -> Vec<SharedField> {
-    let components = instances(&state.model, ids);
-    let registry = &state.design.property_registry;
+fn shared_fields(registry: &PropertyEditorSchema, model: &Model, ids: &[u64]) -> Vec<SharedField> {
+    let components = instances(model, ids);
     let Some(sheet) = components
         .first()
         .and_then(|first| registry.get(first.kind))
@@ -313,6 +320,25 @@ pub(in crate::workbench) fn render_shared_properties_dialog(
 mod tests {
     use super::*;
     use crate::state::Point;
+    use crate::workbench::app_state::AppState;
+
+    /// Whether the form can open, over the parts it reads.
+    fn shared_properties_available(state: &AppState) -> bool {
+        super::shared_properties_available(&state.design.property_registry, &state.model)
+    }
+
+    /// Open the form, over the parts it reads and edits.
+    fn open_shared_properties(state: &mut AppState) -> bool {
+        let modal_open = state.dialog_modal_open();
+        let design = &mut state.design;
+        super::open_shared_properties(
+            &mut design.shared_properties,
+            &design.property_registry,
+            modal_open,
+            &state.model,
+            &mut state.workbench,
+        )
+    }
 
     /// The apply, over the parts it reads and edits.
     fn apply_shared_properties(state: &mut AppState) -> Result<usize, String> {

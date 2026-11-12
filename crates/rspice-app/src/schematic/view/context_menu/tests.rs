@@ -217,7 +217,10 @@ fn catalog_of(entries: &[ContextEntry]) -> Vec<(&'static str, Option<CommandKey>
 #[test]
 fn each_target_gets_the_catalog_its_instance_master_slot_calls_for() {
     let head = [
-        ("Object properties…", Some(Command::ObjectProperties.key())),
+        (
+            "Object properties…",
+            Some(DesignCommand::ObjectProperties.key()),
+        ),
         ("Rotate 90°", Some(DesignCommand::RotateSelection.key())),
         (
             "Mirror",
@@ -269,7 +272,7 @@ fn each_target_gets_the_catalog_its_instance_master_slot_calls_for() {
         ),
         (
             "Update instance interface",
-            Some(Command::UpdateInstanceInterface.key()),
+            Some(DesignCommand::UpdateInstanceInterface.key()),
         ),
         (
             "Replace instance…",

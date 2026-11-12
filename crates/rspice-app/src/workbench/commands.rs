@@ -63,11 +63,6 @@ pub(crate) const fn command_edits_schematic(command: Command) -> bool {
             | Command::Paste
             | Command::Duplicate
             | Command::Delete
-            | Command::MoveSelection
-            | Command::StretchSelection
-            | Command::ArraySelection
-            | Command::SwapToRSpiceSymbols
-            | Command::UpdateInstanceInterface
     )
 }
 
@@ -96,10 +91,7 @@ impl Command {
     /// undo, a delete or a form is not repeated: Repeat on those would be a
     /// surprise rather than a shortcut.
     pub(crate) const fn repeatable(self) -> bool {
-        matches!(
-            self,
-            Self::Duplicate | Self::Paste | Self::MoveSelection | Self::StretchSelection
-        )
+        matches!(self, Self::Duplicate | Self::Paste)
     }
 
     /// Shared by menu/palette dispatch and the keyboard dispatcher.
@@ -182,14 +174,7 @@ impl Command {
             | Self::ZoomWindow
             | Self::CommandPalette => CommandOwner::Framework,
             Self::ConfigurationSets => CommandOwner::Project,
-            Self::SelectOfKind(_)
-            | Self::MoveSelection
-            | Self::StretchSelection
-            | Self::ArraySelection
-            | Self::SwapToRSpiceSymbols
-            | Self::UpdateInstanceInterface
-            | Self::HighlightNet
-            | Self::SymbolPinTool
+            Self::SymbolPinTool
             | Self::SymbolPolylineTool
             | Self::SymbolRectangleTool
             | Self::SymbolCircleTool
@@ -202,8 +187,7 @@ impl Command {
             | Self::SymbolSave
             | Self::EditSymbolInPlace
             | Self::ExitSymbolInPlace
-            | Self::Cancel
-            | Self::ObjectProperties => CommandOwner::Design,
+            | Self::Cancel => CommandOwner::Design,
         }
     }
 
@@ -239,26 +223,9 @@ impl Command {
             | Self::Paste
             | Self::Duplicate
             | Self::Delete
-            | Self::SelectAll => {
+            | Self::SelectAll
+            | Self::DeselectAll => {
                 app.route_command_key(self.key());
-            }
-            Self::DeselectAll => deselect_all(app),
-            Self::SelectOfKind(kind) => {
-                crate::workbench::app::dialogs::selection::commands::select_schematic_objects_of_kind(
-                    &mut app.state,
-                    kind,
-                );
-            }
-            Self::ObjectProperties => {
-                if active_symbol_editor(app) {
-                    app.state.workbench.inspector_visible = true;
-                    app.state.workbench.drawer = Some(super::state::Drawer::Inspector);
-                } else if crate::workbench::app::shared_properties_available(&app.state) {
-                    // Several instances: one form for what they share.
-                    crate::workbench::app::open_shared_properties(&mut app.state);
-                } else {
-                    crate::workbench::app::open_selected_object_properties(&mut app.state);
-                }
             }
             // The netlist page's find is code's. Elsewhere the design feature
             // opens the Navigator's search, except in a Verilog-A cell view,
@@ -283,9 +250,6 @@ impl Command {
             | Self::ZoomBox
             | Self::ZoomPrevious => {
                 app.route_command_key(self.key());
-            }
-            Self::HighlightNet => {
-                crate::schematic::view::highlight_selected_net(&mut app.state);
             }
             Self::ToggleFullScreen => {
                 if app.state.workbench.full_screen_presentation {
@@ -416,35 +380,6 @@ impl Command {
                 .workbench
                 .outbox
                 .push(crate::workbench::framework::requests::WindowFrame::Zoom),
-            Self::MoveSelection => {
-                crate::workbench::app::arm_move_selection(&mut app.state);
-            }
-            Self::StretchSelection => {
-                crate::workbench::app::arm_stretch_selection(&mut app.state);
-            }
-            Self::ArraySelection => {
-                crate::workbench::app::open_array_selection_dialog(&mut app.state);
-            }
-            Self::SwapToRSpiceSymbols => {
-                app.state.model.schematic.swap_to_rspice_symbols();
-            }
-            // The operation reports its own outcome, including the name of any
-            // terminal the master dropped, so no route composes a second
-            // account of what happened.
-            Self::UpdateInstanceInterface => {
-                let outcome = app
-                    .state
-                    .model
-                    .schematic
-                    .update_selected_instance_interface(
-                        &app.state.model.library_manager,
-                        &app.state.model.workspace.content.schematic_buffers,
-                    );
-                app.state.prompt(match outcome {
-                    Ok(summary) => summary,
-                    Err(error) => error.to_string(),
-                });
-            }
             Self::RepeatLastCommand => match vocabulary::last_repeatable(
                 app.state.workbench.last_repeatable_command.as_deref(),
             ) {

@@ -4,7 +4,9 @@
 //! canvas's select tool, grid and Fit content, the moves up and down the
 //! hierarchy, the design checks with their results' tour and clear, the
 //! schematic's annotations, the selection's turns, flips, layouts and snaps,
-//! the collinear join, and the project's standard-value series.
+//! the collinear join, the project's standard-value series, selecting by
+//! kind, Move, Stretch and Create array, the symbol swap and the interface
+//! update, Highlight net and Properties.
 //!
 //! What each command does is the feature's own; what it declares here is all
 //! the shell's order, menus, palette and shortcut profile read of it.
@@ -12,6 +14,7 @@
 use egui::Key;
 use rspice_vocabulary::quantity::ESeries;
 
+use crate::schematic::view::sheet_visibility::SchematicObjectKind;
 use crate::state::command_catalog::{
     CommandKey, CommandPlatform, ShortcutBinding, ShortcutChord, ShortcutContext, ShortcutKind,
 };
@@ -168,6 +171,28 @@ pub(crate) enum DesignCommand {
     /// Lay the active sheet's wires that run on one line, end to end or
     /// overlapping, as one wire each.
     JoinCollinearWires,
+    /// Select every object of one kind on the active sheet in place of the
+    /// selection.
+    SelectOfKind(SchematicObjectKind),
+    /// Open the properties of what is selected: the one object's form, one
+    /// form over several instances, or the symbol's Inspector.
+    ObjectProperties,
+    /// Arm Move on the selection.
+    MoveSelection,
+    /// Arm Stretch on the selected segment or control point.
+    StretchSelection,
+    /// Open Create array over the selection.
+    ArraySelection,
+    /// Draw the selected parts, or the whole sheet, with RSpice's own symbols
+    /// instead of the artwork their drawing brought.
+    SwapToRSpiceSymbols,
+    /// Re-place a stale instance on its own master: same cell, the interface
+    /// the master presents now. It is a degenerate replacement, which is why
+    /// it sits beside [`Self::ReplaceInstance`] rather than in a repair
+    /// vocabulary of its own.
+    UpdateInstanceInterface,
+    /// Light the net the selection is on.
+    HighlightNet,
 }
 
 const EVERYWHERE: &[CommandPlatform] = &CommandPlatform::ALL;
@@ -319,10 +344,16 @@ const MIRROR_SELECTION_VERTICAL: &[ShortcutBinding] = &[primary(
     chord(Key::M, true, false, true, "Ctrl+Shift+M"),
     EVERYWHERE,
 )];
+const OBJECT_PROPERTIES: &[ShortcutBinding] =
+    &[primary(chord(Key::Q, false, false, false, "Q"), EVERYWHERE)];
+const MOVE_SELECTION: &[ShortcutBinding] =
+    &[primary(chord(Key::M, false, false, false, "M"), EVERYWHERE)];
+const STRETCH_SELECTION: &[ShortcutBinding] =
+    &[primary(chord(Key::S, false, false, false, "S"), EVERYWHERE)];
 
 impl DesignCommand {
     /// Every command the registry lists, in the feature's own order.
-    pub(crate) const ALL: [Self; 74] = [
+    pub(crate) const ALL: [Self; 87] = [
         Self::NewStimulusDefinition,
         Self::DuplicateStimulusDefinition,
         Self::DeleteStimulusDefinition,
@@ -397,6 +428,19 @@ impl DesignCommand {
         Self::SetStandardValueSeries(ESeries::E96),
         Self::SetStandardValueSeries(ESeries::E192),
         Self::JoinCollinearWires,
+        Self::SelectOfKind(SchematicObjectKind::Instances),
+        Self::SelectOfKind(SchematicObjectKind::Wires),
+        Self::SelectOfKind(SchematicObjectKind::NetLabels),
+        Self::SelectOfKind(SchematicObjectKind::Pins),
+        Self::SelectOfKind(SchematicObjectKind::Text),
+        Self::SelectOfKind(SchematicObjectKind::Shapes),
+        Self::ObjectProperties,
+        Self::MoveSelection,
+        Self::StretchSelection,
+        Self::ArraySelection,
+        Self::SwapToRSpiceSymbols,
+        Self::UpdateInstanceInterface,
+        Self::HighlightNet,
     ];
 
     /// The key a shortcut profile names this command by.
@@ -478,6 +522,23 @@ impl DesignCommand {
             Self::SetStandardValueSeries(ESeries::E96) => CommandKey::new("standard-values-e96"),
             Self::SetStandardValueSeries(ESeries::E192) => CommandKey::new("standard-values-e192"),
             Self::JoinCollinearWires => CommandKey::new("join-collinear-wires"),
+            Self::SelectOfKind(SchematicObjectKind::Instances) => {
+                CommandKey::new("select-instances")
+            }
+            Self::SelectOfKind(SchematicObjectKind::Wires) => CommandKey::new("select-wires"),
+            Self::SelectOfKind(SchematicObjectKind::NetLabels) => {
+                CommandKey::new("select-net-labels")
+            }
+            Self::SelectOfKind(SchematicObjectKind::Pins) => CommandKey::new("select-pins"),
+            Self::SelectOfKind(SchematicObjectKind::Text) => CommandKey::new("select-text"),
+            Self::SelectOfKind(SchematicObjectKind::Shapes) => CommandKey::new("select-shapes"),
+            Self::ObjectProperties => CommandKey::new("object-properties"),
+            Self::MoveSelection => CommandKey::new("move-selection"),
+            Self::StretchSelection => CommandKey::new("stretch-selection"),
+            Self::ArraySelection => CommandKey::new("array-selection"),
+            Self::SwapToRSpiceSymbols => CommandKey::new("swap-to-rspice-symbols"),
+            Self::UpdateInstanceInterface => CommandKey::new("update-instance-interface"),
+            Self::HighlightNet => CommandKey::new("highlight-net"),
         }
     }
 
@@ -536,6 +597,11 @@ impl DesignCommand {
     /// flips have chords, and they and the snaps are chords of the canvas.
     /// Choosing the standard-value series needs an open project and is a
     /// chord of the design workspace.
+    /// Selecting by kind and Properties are chords of the edit context, and
+    /// Highlight net of the design workspace. Move, Stretch, Create array,
+    /// the symbol swap and the interface update edit the drawing and are
+    /// chords of the canvas; Move and Stretch have chords and are ones Repeat
+    /// last command runs again.
     pub(crate) const fn declared_spec(self) -> CommandSpec {
         let palette = CommandFlags::PALETTE_VISIBLE;
         let open = palette.with(CommandFlags::REQUIRES_OPEN_PROJECT, true);
@@ -803,6 +869,32 @@ impl DesignCommand {
                 (label, "Design", open, design, NONE)
             }
             Self::JoinCollinearWires => ("Join collinear wires", "Design", arrange, global, NONE),
+            Self::SelectOfKind(kind) => {
+                let label = match kind {
+                    SchematicObjectKind::Instances => "Select instances",
+                    SchematicObjectKind::Wires => "Select wires",
+                    SchematicObjectKind::NetLabels => "Select net labels",
+                    SchematicObjectKind::Pins => "Select pins",
+                    SchematicObjectKind::Text => "Select text",
+                    SchematicObjectKind::Shapes => "Select shapes",
+                };
+                (label, "Edit", palette, edit, NONE)
+            }
+            Self::ObjectProperties => (
+                "Properties\u{2026}",
+                "Edit",
+                palette,
+                edit,
+                OBJECT_PROPERTIES,
+            ),
+            Self::MoveSelection => ("Move", "Edit", place, canvas, MOVE_SELECTION),
+            Self::StretchSelection => ("Stretch", "Edit", place, canvas, STRETCH_SELECTION),
+            Self::ArraySelection => ("Create array\u{2026}", "Edit", edits, canvas, NONE),
+            Self::SwapToRSpiceSymbols => ("Swap to RSpice symbols", "Edit", edits, canvas, NONE),
+            Self::UpdateInstanceInterface => {
+                ("Update instance interface", "Design", edits, canvas, NONE)
+            }
+            Self::HighlightNet => ("Highlight net", "Design", palette, design, NONE),
         };
         CommandSpec {
             key: self.key(),

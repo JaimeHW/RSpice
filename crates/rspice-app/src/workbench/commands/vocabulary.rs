@@ -54,9 +54,6 @@ pub enum Command {
     SelectAll,
     /// Clear the drawing's selection.
     DeselectAll,
-    /// Select every object of one kind on the active sheet.
-    SelectOfKind(SchematicObjectKind),
-    ObjectProperties,
     FindInDesign,
     /// Run the last placement or editing command again, as it last ran.
     RepeatLastCommand,
@@ -101,19 +98,6 @@ pub enum Command {
     /// The macOS Window menu's Zoom: the window fills the screen, or goes
     /// back to the size it had.
     ZoomWindow,
-    MoveSelection,
-    StretchSelection,
-    ArraySelection,
-    /// Draw the selected parts, or the whole sheet, with RSpice's own symbols
-    /// instead of the artwork their drawing brought.
-    SwapToRSpiceSymbols,
-    /// Re-place a stale instance on its own master: same cell, the interface
-    /// the master presents now. It is a degenerate replacement, which is why
-    /// it sits beside [`DesignCommand::ReplaceInstance`] rather than in a repair
-    /// vocabulary of its own.
-    UpdateInstanceInterface,
-    /// Light the net the selection is on.
-    HighlightNet,
     ConfigurationSets,
     SymbolPinTool,
     SymbolPolylineTool,
@@ -209,25 +193,6 @@ impl Command {
             Self::Delete => spec("delete-selection", "Delete", "Edit"),
             Self::SelectAll => spec("select-all", "Select all", "Edit"),
             Self::DeselectAll => spec("deselect-all", "Deselect all", "Edit"),
-            Self::SelectOfKind(SchematicObjectKind::Instances) => {
-                spec("select-instances", "Select instances", "Edit")
-            }
-            Self::SelectOfKind(SchematicObjectKind::Wires) => {
-                spec("select-wires", "Select wires", "Edit")
-            }
-            Self::SelectOfKind(SchematicObjectKind::NetLabels) => {
-                spec("select-net-labels", "Select net labels", "Edit")
-            }
-            Self::SelectOfKind(SchematicObjectKind::Pins) => {
-                spec("select-pins", "Select pins", "Edit")
-            }
-            Self::SelectOfKind(SchematicObjectKind::Text) => {
-                spec("select-text", "Select text", "Edit")
-            }
-            Self::SelectOfKind(SchematicObjectKind::Shapes) => {
-                spec("select-shapes", "Select shapes", "Edit")
-            }
-            Self::ObjectProperties => spec("object-properties", "Properties…", "Edit"),
             Self::FindInDesign => spec("find-design", "Find…", "Edit"),
             Self::RepeatLastCommand => spec("repeat-last-command", "Repeat last command", "Edit"),
             Self::ZoomIn => spec("zoom-in", "Zoom in", "View"),
@@ -285,18 +250,6 @@ impl Command {
             ),
             Self::MinimizeWindow => spec("minimize-window", "Minimize", "Window"),
             Self::ZoomWindow => spec("zoom-window", "Zoom", "Window"),
-            Self::MoveSelection => spec("move-selection", "Move", "Edit"),
-            Self::StretchSelection => spec("stretch-selection", "Stretch", "Edit"),
-            Self::ArraySelection => spec("array-selection", "Create array\u{2026}", "Edit"),
-            Self::SwapToRSpiceSymbols => {
-                spec("swap-to-rspice-symbols", "Swap to RSpice symbols", "Edit")
-            }
-            Self::UpdateInstanceInterface => spec(
-                "update-instance-interface",
-                "Update instance interface",
-                "Design",
-            ),
-            Self::HighlightNet => spec("highlight-net", "Highlight net", "Design"),
             Self::ConfigurationSets => spec(
                 "configuration-sets",
                 "Configuration sets\u{2026}",
@@ -398,13 +351,6 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::Delete,
     Command::SelectAll,
     Command::DeselectAll,
-    Command::SelectOfKind(SchematicObjectKind::Instances),
-    Command::SelectOfKind(SchematicObjectKind::Wires),
-    Command::SelectOfKind(SchematicObjectKind::NetLabels),
-    Command::SelectOfKind(SchematicObjectKind::Pins),
-    Command::SelectOfKind(SchematicObjectKind::Text),
-    Command::SelectOfKind(SchematicObjectKind::Shapes),
-    Command::ObjectProperties,
     Command::FindInDesign,
     Command::RepeatLastCommand,
     Command::OpenWorkspace(Workspace::Project),
@@ -448,12 +394,6 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::MinimizeWindow,
     Command::ZoomWindow,
     Command::ResetLayout,
-    Command::MoveSelection,
-    Command::StretchSelection,
-    Command::ArraySelection,
-    Command::SwapToRSpiceSymbols,
-    Command::UpdateInstanceInterface,
-    Command::HighlightNet,
     Command::ConfigurationSets,
     Command::SymbolPinTool,
     Command::SymbolPolylineTool,
@@ -524,14 +464,14 @@ static COMMAND_ORDER: &[CommandKey] = &[
     Command::Delete.key(),
     Command::SelectAll.key(),
     Command::DeselectAll.key(),
-    Command::SelectOfKind(SchematicObjectKind::Instances).key(),
-    Command::SelectOfKind(SchematicObjectKind::Wires).key(),
-    Command::SelectOfKind(SchematicObjectKind::NetLabels).key(),
-    Command::SelectOfKind(SchematicObjectKind::Pins).key(),
-    Command::SelectOfKind(SchematicObjectKind::Text).key(),
-    Command::SelectOfKind(SchematicObjectKind::Shapes).key(),
+    DesignCommand::SelectOfKind(SchematicObjectKind::Instances).key(),
+    DesignCommand::SelectOfKind(SchematicObjectKind::Wires).key(),
+    DesignCommand::SelectOfKind(SchematicObjectKind::NetLabels).key(),
+    DesignCommand::SelectOfKind(SchematicObjectKind::Pins).key(),
+    DesignCommand::SelectOfKind(SchematicObjectKind::Text).key(),
+    DesignCommand::SelectOfKind(SchematicObjectKind::Shapes).key(),
     DesignCommand::RenameSelection.key(),
-    Command::ObjectProperties.key(),
+    DesignCommand::ObjectProperties.key(),
     Command::FindInDesign.key(),
     DesignCommand::FindReplace.key(),
     Command::RepeatLastCommand.key(),
@@ -626,12 +566,12 @@ static COMMAND_ORDER: &[CommandKey] = &[
     DesignCommand::PlacePin.key(),
     DesignCommand::PlaceText.key(),
     DesignCommand::PlaceShape.key(),
-    Command::MoveSelection.key(),
-    Command::StretchSelection.key(),
-    Command::ArraySelection.key(),
+    DesignCommand::MoveSelection.key(),
+    DesignCommand::StretchSelection.key(),
+    DesignCommand::ArraySelection.key(),
     DesignCommand::ReplaceInstance.key(),
-    Command::SwapToRSpiceSymbols.key(),
-    Command::UpdateInstanceInterface.key(),
+    DesignCommand::SwapToRSpiceSymbols.key(),
+    DesignCommand::UpdateInstanceInterface.key(),
     DesignCommand::CreateHierarchy.key(),
     ProjectCommand::CreateSymbol.key(),
     ProjectCommand::DesignManagement.key(),
@@ -639,7 +579,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     ProjectCommand::Annotate.key(),
     DesignCommand::SelectionBulkEdit.key(),
     DesignCommand::ConnectivityManager.key(),
-    Command::HighlightNet.key(),
+    DesignCommand::HighlightNet.key(),
     Command::ConfigurationSets.key(),
     DesignCommand::RuleSetup.key(),
     DesignCommand::ReviewComments.key(),

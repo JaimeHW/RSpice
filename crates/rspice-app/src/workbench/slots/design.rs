@@ -14,8 +14,8 @@ use crate::workbench::app::dialogs::grid_snap_routing::{self, GridSnapRoutingCom
 use crate::workbench::app::dialogs::visibility_options::{self, SchematicVisibilityRecovery};
 use crate::workbench::app::{
     ConnectivityManagerDialogState, CreateModelBoundSymbolDialogState,
-    DesignReviewCommentsDialogState, FloatingCopyParts, SelectionBulkEditDialogState,
-    SymbolImportDialogState, SymbolParameterFormDialogState,
+    DesignReviewCommentsDialogState, FloatingCopyParts, PropertyFormParts,
+    SelectionBulkEditDialogState, SymbolImportDialogState, SymbolParameterFormDialogState,
 };
 use crate::workbench::app_state::Model;
 use crate::workbench::framework::feature::{CanvasGesturePort, DesignPort};
@@ -268,6 +268,16 @@ impl DesignState {
             canvas_view_center: self.canvas_view_center,
             clipboard: &self.schematic_clipboard,
             duplicate_external_nets: self.duplicate_external_nets,
+        }
+    }
+
+    /// What opening a properties form reads and writes of this state.
+    pub(crate) fn property_form_parts(&mut self) -> PropertyFormParts<'_> {
+        PropertyFormParts {
+            tabbed_property_dialog: &mut self.tabbed_property_dialog,
+            object_properties: &mut self.object_properties,
+            rename_open: self.rename_selection.open,
+            property_registry: &mut self.property_registry,
         }
     }
 

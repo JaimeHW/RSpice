@@ -1,16 +1,22 @@
 //! Opening the property editor for a schematic component.
 
+use crate::properties::{PropertyEditorSchema, TabbedPropertyDialogState};
 use crate::simulation::plan::AnalysisDraft;
 use crate::simulation::stimulus_realize::PreviewTiming;
 use crate::state::{
     Component, ComponentType, MODEL_BOUND_SYMBOL_METADATA_KEY, ModelBoundSymbolDefinition,
     PropertyDefinition, PropertySheet, PropertyType, PropertyValue, SymbolSourceContract,
 };
+use crate::workbench::app::actions::workspace::{
+    commit_pending_inspector_edit, deny_read_only_edit,
+};
+use crate::workbench::app::dialogs::object_properties::ObjectPropertiesDialogState;
 use crate::workbench::app_state::model::{
     binds_model_card, cell_instance_identity_sheet, compiled_parameter_sheet,
     instance_multiplicity_definition, states_compiled_parameters,
 };
 use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::state::WorkbenchSession;
 use rspice_core::xspice::{CodeModelRegistry, ParamSpec, ParamType};
 
 /// Resolve the exact persistent parameter contract owned by a placed cell's
@@ -526,35 +532,28 @@ fn format_complex_vector(values: &[rspice_core::Complex64]) -> String {
 /// Single authority for the schematic Object properties command. Availability
 /// requires a live target that the matching editor can actually open.
 pub(crate) fn selected_object_properties_available(state: &AppState) -> bool {
-    if let Some(id) = state
-        .model
-        .schematic
-        .session
-        .editor
-        .selection
-        .single_probe()
-    {
-        return state
-            .model
+    selected_object_properties_available_in(&state.design.property_registry, &state.model)
+}
+
+/// [`selected_object_properties_available`] over the property schema and the
+/// model.
+pub(crate) fn selected_object_properties_available_in(
+    registry: &PropertyEditorSchema,
+    model: &Model,
+) -> bool {
+    if let Some(id) = model.schematic.session.editor.selection.single_probe() {
+        return model
             .schematic
             .document()
             .probes
             .iter()
             .any(|probe| probe.id == id);
     }
-    if state.schematic_edit_read_only() {
+    if model.schematic_edit_read_only() {
         return false;
     }
-    if let Some(id) = state
-        .model
-        .schematic
-        .session
-        .editor
-        .selection
-        .single_component()
-    {
-        return state
-            .model
+    if let Some(id) = model.schematic.session.editor.selection.single_component() {
+        return model
             .schematic
             .document()
             .components
@@ -562,116 +561,116 @@ pub(crate) fn selected_object_properties_available(state: &AppState) -> bool {
             .find(|component| component.id == id)
             .is_some_and(|component| {
                 if component.kind == ComponentType::CellInstance {
-                    authoritative_cell_instance_sheet(&state.model, component).is_ok()
+                    authoritative_cell_instance_sheet(model, component).is_ok()
                 } else {
-                    state.design.property_registry.get(component.kind).is_some()
+                    registry.get(component.kind).is_some()
                 }
             });
     }
-    if let Some(id) = state
-        .model
-        .schematic
-        .session
-        .editor
-        .selection
-        .single_net_label()
-    {
-        return state
-            .model
+    if let Some(id) = model.schematic.session.editor.selection.single_net_label() {
+        return model
             .schematic
             .document()
             .net_labels
             .iter()
             .any(|label| label.id == id);
     }
-    if let Some(id) = state
-        .model
+    if let Some(id) = model
         .schematic
         .session
         .editor
         .selection
         .single_design_note()
     {
-        return state
-            .model
+        return model
             .schematic
             .document()
             .design_notes
             .iter()
             .any(|note| note.id == id);
     }
-    if let Some(id) = state
-        .model
+    if let Some(id) = model
         .schematic
         .session
         .editor
         .selection
         .single_documentation_shape()
     {
-        return state
-            .model
+        return model
             .schematic
             .document()
             .documentation_shapes
             .iter()
             .any(|shape| shape.id == id);
     }
-    if let Some(id) = state
-        .model
-        .schematic
-        .session
-        .editor
-        .selection
-        .single_bus_tap()
-    {
-        return state
-            .model
+    if let Some(id) = model.schematic.session.editor.selection.single_bus_tap() {
+        return model
             .schematic
             .document()
             .bus_taps
             .iter()
             .any(|tap| tap.id == id);
     }
-    if let Some(id) = state.model.schematic.session.editor.selection.single_bus() {
-        return state
-            .model
+    if let Some(id) = model.schematic.session.editor.selection.single_bus() {
+        return model
             .schematic
             .document()
             .buses
             .iter()
             .any(|bus| bus.id == id);
     }
-    if state
-        .model
+    if model
         .schematic
         .session
         .editor
         .selection
         .has_any_wire_selection()
     {
-        return crate::workbench::app::selected_named_net_target(&state.model).is_some();
+        return crate::workbench::app::selected_named_net_target(model).is_some();
     }
     false
+}
+
+/// What opening a properties form reads and writes of the design feature's
+/// state: the component editor, the generic form, the schema they draw
+/// from, and whether the rename form holds the selection.
+pub(crate) struct PropertyFormParts<'a> {
+    pub(crate) tabbed_property_dialog: &'a mut TabbedPropertyDialogState,
+    pub(crate) object_properties: &'a mut ObjectPropertiesDialogState,
+    pub(crate) rename_open: bool,
+    pub(crate) property_registry: &'a mut PropertyEditorSchema,
 }
 
 /// Open the schematic component editor for `component_id`, populated from the
 /// component's registry sheet and current values. Refused on read-only
 /// views — the editor is an edit path.
 pub(crate) fn open_property_editor(state: &mut AppState, component_id: u64) {
-    if state.design.tabbed_property_dialog.open
-        || state.design.object_properties.open
-        || state.design.rename_selection.open
-    {
+    let mut parts = state.design.property_form_parts();
+    open_property_editor_in(
+        &mut parts,
+        &mut state.model,
+        &mut state.workbench,
+        component_id,
+    );
+}
+
+/// [`open_property_editor`] over the forms, the model and the session.
+pub(crate) fn open_property_editor_in(
+    parts: &mut PropertyFormParts<'_>,
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
+    component_id: u64,
+) {
+    if parts.tabbed_property_dialog.open || parts.object_properties.open || parts.rename_open {
         return;
     }
-    if !state.commit_pending_inspector_edit() {
+    if !commit_pending_inspector_edit(model, wb) {
         return;
     }
-    if state.deny_read_only_edit() {
+    if deny_read_only_edit(model, wb) {
         return;
     }
-    let Some(component) = state
-        .model
+    let Some(component) = model
         .schematic
         .document()
         .components
@@ -683,45 +682,40 @@ pub(crate) fn open_property_editor(state: &mut AppState, component_id: u64) {
     };
     let component_type = component.kind;
     if component_type == ComponentType::CellInstance {
-        match authoritative_cell_instance_sheet(&state.model, &component) {
+        match authoritative_cell_instance_sheet(model, &component) {
             Ok(Some(sheet)) => {
-                if let Err(error) = state
-                    .design
-                    .property_registry
-                    .install_cell_instance_sheet(sheet)
-                {
-                    state.design.property_registry.clear_cell_instance_sheet();
+                if let Err(error) = parts.property_registry.install_cell_instance_sheet(sheet) {
+                    parts.property_registry.clear_cell_instance_sheet();
                     log::warn!("Cannot open model-bound instance properties: {error}");
                     return;
                 }
             }
             Ok(None) => {
-                if let Err(error) = state
-                    .design
+                if let Err(error) = parts
                     .property_registry
                     .install_cell_instance_sheet(cell_instance_identity_sheet())
                 {
-                    state.design.property_registry.clear_cell_instance_sheet();
+                    parts.property_registry.clear_cell_instance_sheet();
                     log::warn!("Cannot open cell-instance identity properties: {error}");
                     return;
                 }
             }
             Err(error) => {
-                state.design.property_registry.clear_cell_instance_sheet();
+                parts.property_registry.clear_cell_instance_sheet();
                 log::warn!("Cannot load model-bound instance properties: {error}");
                 return;
             }
         }
     } else {
-        state.design.property_registry.clear_cell_instance_sheet();
+        parts.property_registry.clear_cell_instance_sheet();
     }
     let properties = crate::properties::property_bridge::collect_properties_from_component(
         &component,
-        &state.design.property_registry,
+        parts.property_registry,
     );
     let component_name = component.name.clone();
-    if let Some(sheet) = state.design.property_registry.get(component_type) {
-        state.design.tabbed_property_dialog.open_for_component(
+    if let Some(sheet) = parts.property_registry.get(component_type) {
+        parts.tabbed_property_dialog.open_for_component(
             component_id,
             component_name,
             component_type,
@@ -729,19 +723,18 @@ pub(crate) fn open_property_editor(state: &mut AppState, component_id: u64) {
             properties,
             crate::properties::ComponentPropertySession::new(
                 component,
-                crate::workbench::app::schematic_editor_request_source(state),
-                state.model.workspace.content.active_view.display_path(),
+                crate::workbench::app::schematic_editor_request_source(&*model),
+                model.workspace.content.active_view.display_path(),
             )
             .with_data_root(
-                state
-                    .model
+                model
                     .workspace
                     .content
                     .project
                     .data_root()
                     .map(std::path::Path::to_path_buf),
             )
-            .with_preview_timing(stimulus_preview_timing(&state.model)),
+            .with_preview_timing(stimulus_preview_timing(model)),
         );
     } else {
         log::warn!("No property sheet found for {:?}", component_type);
@@ -785,22 +778,22 @@ pub(in crate::workbench) fn stimulus_preview_timing(model: &Model) -> PreviewTim
 /// buses, taps, and wire-resolved named nets use the topology-aware generic
 /// transaction specified by the workbench mockup.
 pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
-    if state.design.tabbed_property_dialog.open
-        || state.design.object_properties.open
-        || state.design.rename_selection.open
-    {
+    let mut parts = state.design.property_form_parts();
+    open_selected_object_properties_in(&mut parts, &mut state.model, &mut state.workbench)
+}
+
+/// [`open_selected_object_properties`] over the forms, the model and the
+/// session.
+pub(crate) fn open_selected_object_properties_in(
+    parts: &mut PropertyFormParts<'_>,
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
+) -> bool {
+    if parts.tabbed_property_dialog.open || parts.object_properties.open || parts.rename_open {
         return false;
     }
-    if let Some(id) = state
-        .model
-        .schematic
-        .session
-        .editor
-        .selection
-        .single_probe()
-    {
-        if state
-            .model
+    if let Some(id) = model.schematic.session.editor.selection.single_probe() {
+        if model
             .schematic
             .document()
             .probes
@@ -809,142 +802,117 @@ pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
         {
             return false;
         }
-        state.workbench.inspector_visible = true;
-        state.workbench.drawer = Some(crate::workbench::state::Drawer::Inspector);
+        wb.inspector_visible = true;
+        wb.drawer = Some(crate::workbench::state::Drawer::Inspector);
         return true;
     }
-    if state.deny_read_only_edit() || !selected_object_properties_available(state) {
+    if deny_read_only_edit(model, wb)
+        || !selected_object_properties_available_in(parts.property_registry, model)
+    {
         return false;
     }
-    if let Some(component_id) = state
-        .model
-        .schematic
-        .session
-        .editor
-        .selection
-        .single_component()
-    {
-        open_property_editor(state, component_id);
-        return state.design.tabbed_property_dialog.open;
+    if let Some(component_id) = model.schematic.session.editor.selection.single_component() {
+        open_property_editor_in(parts, model, wb, component_id);
+        return parts.tabbed_property_dialog.open;
     }
-    let source = crate::workbench::app::schematic_editor_request_source(state);
-    if let Some(label_id) = state
-        .model
-        .schematic
-        .session
-        .editor
-        .selection
-        .single_net_label()
-        && let Some(label) = state
-            .model
+    let source = crate::workbench::app::schematic_editor_request_source(&*model);
+    if let Some(label_id) = model.schematic.session.editor.selection.single_net_label()
+        && let Some(label) = model
             .schematic
             .document()
             .net_labels
             .iter()
             .find(|label| label.id == label_id)
     {
-        state.design.object_properties.open_net_label(
+        parts.object_properties.open_net_label(
             label,
             source,
-            state.model.workspace.content.active_view.display_path(),
+            model.workspace.content.active_view.display_path(),
         );
         return true;
     }
-    if state
-        .model
+    if model
         .schematic
         .session
         .editor
         .selection
         .has_any_wire_selection()
-        && let Some(target) = crate::workbench::app::selected_named_net_target(&state.model)
+        && let Some(target) = crate::workbench::app::selected_named_net_target(model)
     {
-        state.design.object_properties.open_named_net(
+        parts.object_properties.open_named_net(
             target,
             source,
-            state.model.workspace.content.active_view.display_path(),
+            model.workspace.content.active_view.display_path(),
         );
         return true;
     }
-    if let Some(note_id) = state
-        .model
+    if let Some(note_id) = model
         .schematic
         .session
         .editor
         .selection
         .single_design_note()
-        && let Some(note) = state
-            .model
+        && let Some(note) = model
             .schematic
             .document()
             .design_notes
             .iter()
             .find(|note| note.id == note_id)
     {
-        state.design.object_properties.open_design_note(
+        parts.object_properties.open_design_note(
             note,
             source,
-            state.model.workspace.content.active_view.display_path(),
+            model.workspace.content.active_view.display_path(),
         );
         return true;
     }
-    if let Some(shape_id) = state
-        .model
+    if let Some(shape_id) = model
         .schematic
         .session
         .editor
         .selection
         .single_documentation_shape()
-        && let Some(shape) = state
-            .model
+        && let Some(shape) = model
             .schematic
             .document()
             .documentation_shapes
             .iter()
             .find(|shape| shape.id == shape_id)
     {
-        state.design.object_properties.open_documentation_shape(
+        parts.object_properties.open_documentation_shape(
             shape,
             source,
-            state.model.workspace.content.active_view.display_path(),
+            model.workspace.content.active_view.display_path(),
         );
         return true;
     }
-    if let Some(tap_id) = state
-        .model
-        .schematic
-        .session
-        .editor
-        .selection
-        .single_bus_tap()
-        && let Some(tap) = state
-            .model
+    if let Some(tap_id) = model.schematic.session.editor.selection.single_bus_tap()
+        && let Some(tap) = model
             .schematic
             .document()
             .bus_taps
             .iter()
             .find(|tap| tap.id == tap_id)
     {
-        state.design.object_properties.open_bus_tap(
+        parts.object_properties.open_bus_tap(
             tap,
             source,
-            state.model.workspace.content.active_view.display_path(),
+            model.workspace.content.active_view.display_path(),
         );
         return true;
     }
-    if let Some(bus_id) = state.model.schematic.session.editor.selection.single_bus()
-        && let Some(bus) = state
-            .model
+    if let Some(bus_id) = model.schematic.session.editor.selection.single_bus()
+        && let Some(bus) = model
             .schematic
             .document()
             .buses
             .iter()
             .find(|bus| bus.id == bus_id)
     {
-        state.design.object_properties.open_bus(
+        parts.object_properties.open_bus(
             bus,
             source,
-            state.model.workspace.content.active_view.display_path(),
+            model.workspace.content.active_view.display_path(),
         );
         return true;
     }

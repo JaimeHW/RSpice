@@ -881,10 +881,9 @@ fn an_instance_placed_before_a_port_change_is_repaired_and_the_run_proceeds() {
         .editor
         .selection
         .select_only_component(placed);
-    assert!(
-        crate::workbench::commands::vocabulary::Command::UpdateInstanceInterface.is_enabled(&app)
-    );
-    crate::workbench::commands::vocabulary::Command::UpdateInstanceInterface.execute(&mut app);
+    let update = crate::workbench::design::commands::DesignCommand::UpdateInstanceInterface.key();
+    assert!(app.command_key_enabled(update));
+    app.execute_command_key(update);
 
     let deck = configured_deck(&app);
     assert!(deck.is_ok(), "{deck:?}");

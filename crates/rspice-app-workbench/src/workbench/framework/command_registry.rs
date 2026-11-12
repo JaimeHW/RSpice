@@ -332,6 +332,7 @@ pub mod ids {
         CUT = "cut-selection";
         CYCLE_GRID = "cycle-grid";
         DELETE = "delete-selection";
+        DESELECT_ALL = "deselect-all";
         DESIGN_WORKSPACE = "design";
         DUPLICATE = "duplicate-selection";
         EDIT_SPECIFICATIONS = "specifications";
@@ -382,6 +383,7 @@ pub mod ids {
         TOGGLE_SPLIT_VIEW = "toggle-split-view";
         TUNING = "tuning";
         UNDO = "undo";
+        UPDATE_INSTANCE_INTERFACE = "update-instance-interface";
         VERIFY_WORKSPACE = "verify";
         VISIBILITY_OPTIONS = "visibility-options";
         WORKSPACE_LAYOUTS = "workspace-layouts";

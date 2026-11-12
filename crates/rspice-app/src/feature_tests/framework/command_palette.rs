@@ -280,7 +280,7 @@ fn bus_commands_use_the_mockup_palette_glyphs() {
 #[test]
 fn stretch_selection_uses_the_exact_pointer_glyph() {
     assert_eq!(
-        row_icon(&palette_entry(Command::StretchSelection)),
+        row_icon(&palette_entry_for(DesignCommand::StretchSelection.key())),
         Icon::Select
     );
 }
@@ -288,7 +288,7 @@ fn stretch_selection_uses_the_exact_pointer_glyph() {
 #[test]
 fn create_array_uses_the_exact_grid_glyph() {
     assert_eq!(
-        row_icon(&palette_entry(Command::ArraySelection)),
+        row_icon(&palette_entry_for(DesignCommand::ArraySelection.key())),
         Icon::Grid
     );
 }

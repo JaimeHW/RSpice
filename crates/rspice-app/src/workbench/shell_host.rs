@@ -1089,6 +1089,7 @@ mod tests {
             (ids::COPY, Command::Copy),
             (ids::CUT, Command::Cut),
             (ids::DELETE, Command::Delete),
+            (ids::DESELECT_ALL, Command::DeselectAll),
             (
                 ids::DESIGN_WORKSPACE,
                 Command::OpenWorkspace(Workspace::Design),

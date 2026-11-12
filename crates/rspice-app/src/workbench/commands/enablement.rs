@@ -50,61 +50,8 @@ impl Command {
             | Self::Paste
             | Self::Duplicate
             | Self::Delete
-            | Self::SelectAll => app.routed_command_key_enabled(self.key()) == Some(true),
-            Self::DeselectAll => {
-                if active_symbol_editor(app) {
-                    !state.design.symbol.editor.effective_selection().is_empty()
-                } else {
-                    active_schematic_editor(app)
-                        && !state.model.schematic.session.editor.selection.is_empty()
-                }
-            }
-            Self::SelectOfKind(kind) => {
-                active_schematic_editor(app)
-                    && !crate::schematic::view::sheet_visibility::objects_of_kind_on_active_sheet(
-                        state, kind,
-                    )
-                    .is_empty()
-            }
-            Self::MoveSelection => {
-                active_schematic_editor(app)
-                    && !state.schematic_edit_read_only()
-                    && state.model.schematic.has_live_movable_selection()
-            }
-            Self::StretchSelection => {
-                active_schematic_editor(app)
-                    && !state.schematic_edit_read_only()
-                    && state.model.schematic.default_stretch_target().is_some()
-            }
-            Self::ArraySelection => {
-                active_schematic_editor(app)
-                    && !state.schematic_edit_read_only()
-                    && state
-                        .model
-                        .schematic
-                        .validate_array_source_selection()
-                        .is_ok()
-            }
-            Self::SwapToRSpiceSymbols => {
-                active_schematic_editor(app)
-                    && !state.schematic_edit_read_only()
-                    && state.model.schematic.can_swap_to_rspice_symbols()
-            }
-            // The repair is offered exactly where the deck refuses: the
-            // schematic itself answers whether the selected instance still
-            // presents its master's interface, so a live row and a netlist
-            // defect can never disagree.
-            Self::UpdateInstanceInterface => {
-                active_schematic_editor(app)
-                    && !state.schematic_edit_read_only()
-                    && state.model.schematic.selected_instance_interface_is_stale(
-                        &state.model.library_manager,
-                        &state.model.workspace.content.schematic_buffers,
-                    )
-            }
-            Self::HighlightNet => {
-                active_schematic_editor(app) && crate::schematic::view::selected_net(state).is_ok()
-            }
+            | Self::SelectAll
+            | Self::DeselectAll => app.routed_command_key_enabled(self.key()) == Some(true),
             Self::RepeatLastCommand => {
                 active_schematic_editor(app)
                     && vocabulary::last_repeatable(
@@ -113,16 +60,6 @@ impl Command {
                     .is_some_and(|spec| app.command_key_enabled(spec.key))
             }
             Self::ConfigurationSets => state.platform.project_lifecycle.is_open(),
-            Self::ObjectProperties => {
-                if active_symbol_editor(app) {
-                    let selection = state.design.symbol.editor.effective_selection();
-                    selection.pins.len() + selection.shapes.len() == 1
-                } else {
-                    active_schematic_editor(app)
-                        && (crate::workbench::app::selected_object_properties_available(state)
-                            || crate::workbench::app::shared_properties_available(state))
-                }
-            }
             // A view command is the answer of the part that takes it where the
             // reader is working: Results where it is in front, the design
             // feature in a schematic or symbol editor.

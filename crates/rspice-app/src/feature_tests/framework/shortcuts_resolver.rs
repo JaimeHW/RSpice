@@ -519,7 +519,7 @@ fn plain_s_resolves_stretch_only_in_the_engineering_canvas() {
     let profile = ShortcutPreferences::default();
     assert!(
         profile
-            .effective_bindings(&CommandRegistry, Command::ArraySelection.key())
+            .effective_bindings(&CommandRegistry, DesignCommand::ArraySelection.key())
             .is_empty(),
         "Create array has no factory shortcut to route through the resolver"
     );
@@ -537,7 +537,7 @@ fn plain_s_resolves_stretch_only_in_the_engineering_canvas() {
 
     assert_eq!(
         resolve(design(true)).command,
-        Some(Command::StretchSelection.key())
+        Some(DesignCommand::StretchSelection.key())
     );
     assert_eq!(resolve(models_symbol(true)).command, None);
 }

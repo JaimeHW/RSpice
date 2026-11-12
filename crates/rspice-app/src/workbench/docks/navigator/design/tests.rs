@@ -17,6 +17,7 @@ use super::hierarchy_tree::{DesignTreeRow, OccurrenceState};
 use super::shelf::*;
 use super::*;
 use crate::state::{CellViewRef, ComponentType, InstancePath, SchematicState};
+use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::state::{NavigatorTreeNode, NavigatorTreeState, Workspace};
 
 #[cfg(not(target_arch = "wasm32"))]

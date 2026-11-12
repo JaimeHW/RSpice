@@ -29,7 +29,6 @@ use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::requests::FocusNavigatorSearch;
 use rspice_design::connectivity::summary::DesignNet;
 
-use super::super::super::commands::vocabulary::Command;
 use super::super::super::design_system::{
     PANEL_SECTION_H, PANEL_TABS_H, WorkbenchIcon, elide_text,
 };
@@ -1894,8 +1893,10 @@ fn navigator_object_context_menu(
                 {
                     app.state.open_selected_instance_master();
                 }
-                NavigatorObject::Component { .. } if Command::ObjectProperties.is_enabled(app) => {
-                    Command::ObjectProperties.execute(app);
+                NavigatorObject::Component { .. }
+                    if app.command_key_enabled(DesignCommand::ObjectProperties.key()) =>
+                {
+                    app.execute_command_key(DesignCommand::ObjectProperties.key());
                 }
                 NavigatorObject::Net { .. }
                 | NavigatorObject::SavedOutput { .. }
@@ -1904,11 +1905,11 @@ fn navigator_object_context_menu(
             ui.close();
         }
         let properties = ui.add_enabled(
-            Command::ObjectProperties.is_enabled(app),
+            app.command_key_enabled(DesignCommand::ObjectProperties.key()),
             egui::Button::new("Properties…"),
         );
         if properties.clicked() {
-            Command::ObjectProperties.execute(app);
+            app.execute_command_key(DesignCommand::ObjectProperties.key());
             ui.close();
         }
         let rename = ui.add_enabled(

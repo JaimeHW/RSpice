@@ -110,13 +110,13 @@ fn default_profile_is_valid_with_complete_symbol_tool_registry() {
         "Select tool intentionally has no factory key; Escape remains the universal return path"
     );
     assert_eq!(
-        preferences.resolved_bindings(&CommandRegistry, Command::StretchSelection.key())[0]
+        preferences.resolved_bindings(&CommandRegistry, DesignCommand::StretchSelection.key())[0]
             .display_label(),
         "S"
     );
     assert!(
         preferences
-            .resolved_bindings(&CommandRegistry, Command::ArraySelection.key())
+            .resolved_bindings(&CommandRegistry, DesignCommand::ArraySelection.key())
             .is_empty(),
         "Create array intentionally has no factory shortcut"
     );
