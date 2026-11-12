@@ -344,6 +344,10 @@ pub struct Vdmos {
     initial_off_seed_pending: bool,
     /// How many evaluations the `OFF` startup state has already served.
     initial_off_seed_evaluations: u8,
+    /// Xyce's global `DEVICE VOLTLIM`: every iterate runs fetlim and limvds
+    /// on the channel and pnjlim on the body diode. Cleared, each load reads
+    /// the solution as it stands.
+    voltage_limiting: bool,
 
     /// Pre-computed stamp indices
     indices: VdmosIndices,
@@ -521,6 +525,7 @@ impl Vdmos {
             initial_off: false,
             initial_off_seed_pending: true,
             initial_off_seed_evaluations: 0,
+            voltage_limiting: true,
 
             indices: VdmosIndices::default(),
         }
@@ -535,6 +540,14 @@ impl Vdmos {
     /// True when the deck marked this instance `OFF`.
     pub fn is_initially_off(&self) -> bool {
         self.initial_off
+    }
+
+    /// Apply Xyce's global `DEVICE VOLTLIM` policy: `voltageLimiterFlag` gates
+    /// the VDMOS fetlim/limvds/pnjlim pinning (N_DEV_VDMOS.C:2836) and its
+    /// initJct seed (:2765). An `OFF` instance opens at zero bias either way.
+    #[doc(hidden)]
+    pub fn set_voltage_limiting_enabled(&mut self, enabled: bool) {
+        self.voltage_limiting = enabled;
     }
 
     /// Set model parameters from a parameter map. The dialect picks the
@@ -1326,7 +1339,8 @@ impl Vdmos {
         // DEVfetlim on vgs (vgd in reverse mode) and DEVlimvds on vds, against
         // the previous iterate. Only Xyce LEVEL=18 has a bulk junction here;
         // an ngspice card's body diode is D1, limited on its own.
-        if !self.has_branch_history
+        if !self.voltage_limiting
+            || !self.has_branch_history
             || !self.eval_vgs_prev.is_finite()
             || !self.eval_vds_prev.is_finite()
             || !self.eval_vbs_prev.is_finite()
@@ -2403,7 +2417,11 @@ impl Vdmos {
     /// the first iterate the junction sits at vcrit, where MODEINITJCT seeds
     /// it. Xyce LEVEL=18 limits its bulk junction with the channel instead.
     fn limited_d1_junction_voltage(&self, vd: Value) -> (Value, bool) {
-        if self.xyce_level18 || !self.d1_current_enabled || !vd.is_finite() {
+        if !self.voltage_limiting
+            || self.xyce_level18
+            || !self.d1_current_enabled
+            || !vd.is_finite()
+        {
             return (vd, false);
         }
         let vt = self.d1_thermal_voltage();
@@ -3815,6 +3833,23 @@ mod tests {
             "the next iteration advances: {}",
             vdmos.eval_vgs
         );
+    }
+
+    /// `DEVICE VOLTLIM=0` (Xyce `voltageLimiterFlag`, N_DEV_VDMOS.C:2836)
+    /// takes the gate step DEVfetlim holds at `vto + 0.5` and the body-diode
+    /// step DEVpnjlim holds near vcrit.
+    #[test]
+    fn voltlim_off_takes_the_channel_and_body_diode_unlimited() {
+        let params = HashMap::from([("VTO".to_string(), 3.0), ("IS".to_string(), 1.0e-14)]);
+        let mut vdmos = Vdmos::new_nvdmos("m1".to_string(), 1, 2, 3)
+            .with_params(&params, SpiceDialect::Ngspice);
+        vdmos.set_voltage_limiting_enabled(false);
+        vdmos.update(&[0.0; 3]);
+        vdmos.update(&[1.0, 10.0, 0.0]);
+        assert_eq!((vdmos.eval_vgs, vdmos.eval_vds), (10.0, 1.0));
+        assert!(!vdmos.limiter_applied);
+        vdmos.update(&[-2.0, 0.0, 0.0]);
+        assert_eq!(vdmos.d1_vd, vdmos.d1_vd_raw);
     }
 
     #[test]

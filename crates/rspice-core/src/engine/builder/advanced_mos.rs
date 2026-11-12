@@ -877,6 +877,7 @@ impl Engine {
         circuit_temperature_kelvin: f64,
         default_tnom_kelvin: f64,
         spice_dialect: crate::config::SpiceDialect,
+        voltage_limiting: bool,
     ) -> Result<(), SimulationError> {
         if element.nodes.len() < 4 {
             return Err(SimulationError::Circuit(format!(
@@ -954,6 +955,7 @@ impl Engine {
         if d1_prime != source {
             vdmos.set_d1_prime_node(d1_prime);
         }
+        vdmos.set_voltage_limiting_enabled(voltage_limiting);
 
         circuit.vdmoses.add(vdmos);
         Ok(())

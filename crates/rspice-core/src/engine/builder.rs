@@ -8750,11 +8750,6 @@ impl Engine {
                     // Xyce MOS LEVEL=18 (`.model ... NMOS/PMOS level=18`)
                     // and ngspice VDMOS (`.model ... VDMOS nchan/pchan`).
                     if is_vdmos_compatible && let Some(params_map) = params_map.as_ref() {
-                        require_voltage_limiting(
-                            self.config.device_voltage_limiting,
-                            &element.name,
-                            "VDMOS",
-                        )?;
                         let model_key = native_model_key.clone();
                         reject_deferred_native_mos_model_params(
                             &element.name,
@@ -8779,6 +8774,7 @@ impl Engine {
                                 netlist.options.tnom.unwrap_or(27.0),
                             ),
                             self.config.spice_dialect,
+                            self.config.device_voltage_limiting,
                         )?;
                         model_safety::native_mos(
                             &mut circuit,

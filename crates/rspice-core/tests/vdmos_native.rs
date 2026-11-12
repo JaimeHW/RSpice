@@ -2809,3 +2809,44 @@ fn subthres_spells_the_subthreshold_slope() {
     assert!((current("Ksubthres") + 0.002402265).abs() < 1e-8);
     assert_eq!(current("subthres"), current("Ksubthres"));
 }
+
+/// Xyce's `DEVICE VOLTLIM=0` drops the VDMOS fetlim/limvds/pnjlim pinning
+/// (N_DEV_VDMOS.C:2836). That changes the Newton path and nothing else: a
+/// switched-on power stage, Xyce LEVEL=18 or ngspice VDMOS card, solves to
+/// the operating point the limited solve reaches.
+#[test]
+fn vdmos_solves_with_voltage_limiting_disabled() {
+    for model in [
+        "nmos level=18 vto=3.5 kp=2 rd=0 rs=0.005 lambda=0",
+        "vdmos nchan vto=3.5 kp=2 rd=0 rs=0.005 lambda=0 is=1e-14",
+    ] {
+        let deck = format!(
+            "VDMOS stage with and without voltage limiting\n\
+             m1 d g 0 0 pwr\n\
+             rd vdd d 10\n\
+             vdd vdd 0 24\n\
+             vg g 0 5\n\
+             .model pwr {model}\n\
+             .op\n\
+             .end\n"
+        );
+        let netlist = Netlist::parse(&deck).expect("VDMOS deck parses");
+        let output = |device_voltage_limiting: bool| {
+            Engine::new(SimulationConfig {
+                device_voltage_limiting,
+                ..SimulationConfig::default()
+            })
+            .run_dc_op(&netlist)
+            .unwrap_or_else(|err| {
+                panic!("{model} with VOLTLIM={device_voltage_limiting} should run: {err}")
+            })
+            .try_voltage_named("d")
+            .expect("V(d)")
+        };
+        let (limited, unlimited) = (output(true), output(false));
+        assert!(
+            (limited - unlimited).abs() <= 1.0e-6,
+            "{model}: V(d) {limited} limited, {unlimited} unlimited"
+        );
+    }
+}

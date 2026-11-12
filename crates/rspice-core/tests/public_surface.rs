@@ -726,8 +726,11 @@ const MAX_PUBLIC_ITEMS: usize = 5292;
 // The census is 1,696.
 // `Jfet::set_voltage_limiting_enabled` adds one: the builder turns off a
 // JFET's or MESFET's junction limiting under `.options device voltlim=0`, as
-// Xyce does. The census is 1,697, with no slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 1697;
+// Xyce does. The census is 1,697.
+// `Vdmos::set_voltage_limiting_enabled` adds one: the builder turns off a
+// VDMOS's voltage limiting under `.options device voltlim=0`, as Xyce does.
+// The census is 1,698, with no slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 1698;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
