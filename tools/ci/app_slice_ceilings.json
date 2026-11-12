@@ -9,7 +9,7 @@
   "whole-app": {
     "&RSpiceApp params outside shell": 62,
     "&mut RSpiceApp params outside shell": 171,
-    "impl AppState methods outside session": 81,
-    "impl RSpiceApp methods outside shell": 12
+    "impl AppState methods outside session": 80,
+    "impl RSpiceApp methods outside shell": 11
   }
 }

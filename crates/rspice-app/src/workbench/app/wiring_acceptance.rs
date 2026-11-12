@@ -220,7 +220,12 @@ impl Bench {
     pub(super) fn turn_selection(&mut self, transform: SelectionTransform) {
         let state = &mut self.app.state;
         let symbols = schematic_symbol_context(state);
-        transform_selection_on_active_sheet(state, &symbols, transform);
+        transform_selection_on_active_sheet(
+            &mut state.model,
+            &mut state.workbench,
+            &symbols,
+            transform,
+        );
         self.end_frame();
     }
 

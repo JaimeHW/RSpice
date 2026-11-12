@@ -216,7 +216,10 @@ pub(super) fn something_floats(state: &AppState) -> bool {
 /// floats, since a tablet has no R or M key. Returns whether anything did.
 pub(super) fn turn_what_floats(state: &mut AppState, transform: PlacementTransform) -> bool {
     if state.design.floating_paste.is_some() {
-        crate::workbench::app::turn_floating_paste(state, selection_transform(transform))
+        crate::workbench::app::turn_floating_paste(
+            &mut state.design.floating_paste,
+            selection_transform(transform),
+        )
     } else if state.design.move_selection.armed {
         turn_the_move(state, transform);
         true
@@ -279,7 +282,12 @@ pub(crate) fn handle_pre_render_placement_transform(
 fn turn_the_move(state: &mut AppState, transform: PlacementTransform) {
     let transform = selection_transform(transform);
     let symbol_context = super::schematic_symbol_context(state);
-    if transform_selection_on_active_sheet(state, &symbol_context, transform) {
+    if transform_selection_on_active_sheet(
+        &mut state.model,
+        &mut state.workbench,
+        &symbol_context,
+        transform,
+    ) {
         // The move was armed against the drawing as it stood; it now
         // carries the turned selection.
         state.design.move_selection.authority = Some(

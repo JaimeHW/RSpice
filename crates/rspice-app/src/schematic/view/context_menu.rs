@@ -96,19 +96,19 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
         action: ContextAction::Rotate,
         icon: ContextIcon::Rotate,
         label: "Rotate 90°",
-        shortcut_command: Some(Command::RotateSelection.key()),
+        shortcut_command: Some(DesignCommand::RotateSelection.key()),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::Mirror,
         icon: ContextIcon::Mirror,
         label: "Mirror",
-        shortcut_command: Some(Command::MirrorSelectionHorizontal.key()),
+        shortcut_command: Some(DesignCommand::MirrorSelectionHorizontal.key()),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::MirrorVertical,
         icon: ContextIcon::MirrorVertical,
         label: "Mirror vertically",
-        shortcut_command: Some(Command::MirrorSelectionVertical.key()),
+        shortcut_command: Some(DesignCommand::MirrorSelectionVertical.key()),
     }),
     // The Design menu's Arrange submenu, as a page of this menu: a phone
     // shows no menu bar, and Align and Distribute have no key.
@@ -365,27 +365,27 @@ const fn arrange(action: ArrangeAction, icon: ContextIcon) -> ContextEntry {
     ContextEntry::Command(ContextCommand {
         action: ContextAction::ArrangeCommand(action),
         icon,
-        label: command.spec().label,
+        label: command.declared_spec().label,
         shortcut_command: Some(command.key()),
     })
 }
 
 /// The product command an Arrange row stands for.
-const fn arrange_command(action: ArrangeAction) -> Command {
+const fn arrange_command(action: ArrangeAction) -> DesignCommand {
     match action {
-        ArrangeAction::RotateClockwise => Command::RotateSelection,
-        ArrangeAction::RotateCounterClockwise => Command::RotateSelectionCounterClockwise,
-        ArrangeAction::MirrorHorizontal => Command::MirrorSelectionHorizontal,
-        ArrangeAction::MirrorVertical => Command::MirrorSelectionVertical,
-        ArrangeAction::AlignLeft => Command::AlignSelectionLeft,
-        ArrangeAction::AlignCenter => Command::AlignSelectionCenter,
-        ArrangeAction::AlignRight => Command::AlignSelectionRight,
-        ArrangeAction::AlignTop => Command::AlignSelectionTop,
-        ArrangeAction::AlignMiddle => Command::AlignSelectionMiddle,
-        ArrangeAction::AlignBottom => Command::AlignSelectionBottom,
-        ArrangeAction::DistributeHorizontal => Command::DistributeSelectionHorizontal,
-        ArrangeAction::DistributeVertical => Command::DistributeSelectionVertical,
-        ArrangeAction::SnapToGrid => Command::SnapSelectionToGrid,
+        ArrangeAction::RotateClockwise => DesignCommand::RotateSelection,
+        ArrangeAction::RotateCounterClockwise => DesignCommand::RotateSelectionCounterClockwise,
+        ArrangeAction::MirrorHorizontal => DesignCommand::MirrorSelectionHorizontal,
+        ArrangeAction::MirrorVertical => DesignCommand::MirrorSelectionVertical,
+        ArrangeAction::AlignLeft => DesignCommand::AlignSelectionLeft,
+        ArrangeAction::AlignCenter => DesignCommand::AlignSelectionCenter,
+        ArrangeAction::AlignRight => DesignCommand::AlignSelectionRight,
+        ArrangeAction::AlignTop => DesignCommand::AlignSelectionTop,
+        ArrangeAction::AlignMiddle => DesignCommand::AlignSelectionMiddle,
+        ArrangeAction::AlignBottom => DesignCommand::AlignSelectionBottom,
+        ArrangeAction::DistributeHorizontal => DesignCommand::DistributeSelectionHorizontal,
+        ArrangeAction::DistributeVertical => DesignCommand::DistributeSelectionVertical,
+        ArrangeAction::SnapToGrid => DesignCommand::SnapSelectionToGrid,
     }
 }
 
@@ -439,7 +439,12 @@ fn turn(state: &mut AppState, symbol_context: &SchematicSymbolContext, action: A
         return;
     };
     if !turn_what_floats(state, floating) {
-        transform_selection_on_active_sheet(state, symbol_context, selection);
+        transform_selection_on_active_sheet(
+            &mut state.model,
+            &mut state.workbench,
+            symbol_context,
+            selection,
+        );
     }
 }
 
@@ -1375,7 +1380,11 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
             "Select at least one editable object",
         ),
         ContextAction::ArrangeCommand(arrangement) => match arrange_layout(arrangement) {
-            Some(layout) => match selection_layout_availability(state, layout) {
+            Some(layout) => match selection_layout_availability(
+                &state.model,
+                state.design.schematic_visibility.review_markers,
+                layout,
+            ) {
                 Ok(()) => (true, ""),
                 Err(_) => (
                     false,
@@ -1501,7 +1510,7 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
             "The active schematic view is read-only; reopen it in an editable context to place a probe",
         ),
         ContextAction::SnapToStandardValue => {
-            let blocked = super::standard_value_snap::snap_block_reason(state);
+            let blocked = super::standard_value_snap::snap_block_reason(&state.model);
             (blocked.is_none(), blocked.unwrap_or_default())
         }
         ContextAction::OperatingPoint => (
@@ -1537,10 +1546,20 @@ fn execute_context_action(
         // A page turn, which the menu takes itself.
         ContextAction::Arrange => {}
         ContextAction::ArrangeCommand(ArrangeAction::SnapToGrid) => {
-            super::grid_snap_selection::run_snap_selection_to_grid(state, symbol_context);
+            super::grid_snap_selection::run_snap_selection_to_grid(
+                &mut state.model,
+                &mut state.workbench,
+                symbol_context,
+            );
         }
         ContextAction::ArrangeCommand(arrangement) => match arrange_layout(arrangement) {
-            Some(layout) => match apply_selection_layout(state, symbol_context, layout) {
+            Some(layout) => match apply_selection_layout(
+                &mut state.model,
+                &mut state.workbench,
+                state.design.schematic_visibility.review_markers,
+                symbol_context,
+                layout,
+            ) {
                 Ok(true) => {}
                 Ok(false) => {
                     state.prompt(format!("{} produced no geometry change.", layout.label()));
@@ -1655,7 +1674,10 @@ fn execute_context_action(
         ContextAction::Probe => state.model.schematic.arm_tool(Tool::Probe),
         ContextAction::OperatingPoint => open_operating_point(state),
         ContextAction::SnapToStandardValue => {
-            super::standard_value_snap::run_snap_to_standard_value(state);
+            super::standard_value_snap::run_snap_to_standard_value(
+                &mut state.model,
+                &mut state.workbench,
+            );
         }
         ContextAction::Choose(_) => {}
     }

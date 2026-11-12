@@ -1411,7 +1411,7 @@ fn design_follows_the_view_in_front() {
     );
 
     let mut app = symbol_view_app();
-    let rotate_ccw = Command::RotateSelectionCounterClockwise.key();
+    let rotate_ccw = DesignCommand::RotateSelectionCounterClockwise.key();
     assert!(!app.is_enabled(rotate_ccw), "nothing is selected yet");
     app.execute(Command::SelectAll.key());
     assert!(

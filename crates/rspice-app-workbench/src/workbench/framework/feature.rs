@@ -455,7 +455,7 @@ pub struct Cx<'a, F: Feature> {
     /// the shell lent the context for a call that reads them.
     foreign: Option<ForeignAvailability>,
     /// Whether an application-modal dialog was open, where the shell lent
-    /// the context for a routed command's run.
+    /// the context for a routed or feature command's run.
     application_modal: Option<bool>,
     /// Whether anything the dialog gate counts was open, where the shell
     /// lent the context for a feature command's run.
@@ -510,7 +510,7 @@ impl<'a, F: Feature> Cx<'a, F> {
     }
 
     /// The context holding `open`, whether an application-modal dialog was
-    /// open when the shell lent it for a routed command's run.
+    /// open when the shell lent it for a routed or feature command's run.
     #[must_use]
     pub fn with_application_modal(mut self, open: bool) -> Self {
         self.application_modal = Some(open);
@@ -576,9 +576,10 @@ impl<'a, F: Feature> Cx<'a, F> {
 
     /// Whether an application-modal dialog was open when the shell lent this
     /// context, which refuses an edit made through it. The shell lends a
-    /// routed command's run the context with it: reading it from a context
-    /// lent without it is a fault in the call that reads it, not a no, and a
-    /// release build answers that one is open, the answer that refuses.
+    /// routed or feature command's run the context with it: reading it from
+    /// a context lent without it is a fault in the call that reads it, not a
+    /// no, and a release build answers that one is open, the answer that
+    /// refuses.
     pub fn application_modal_open(&self) -> bool {
         debug_assert!(
             self.application_modal.is_some(),

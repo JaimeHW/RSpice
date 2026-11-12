@@ -163,20 +163,6 @@ const AUTOMATION_WORKSPACE: &[ShortcutBinding] =
 const STIMULUS_WORKSPACE: &[ShortcutBinding] =
     &[primary(chord(Key::Num8, false, true, false, "Alt+8"), ALL)];
 const MOVE_SELECTION: &[ShortcutBinding] = &[primary(chord(Key::M, false, false, false, "M"), ALL)];
-// The symbol canvas gives Ctrl+R and Ctrl+M the same meaning for its pins;
-// the two contexts never match the same view.
-const ROTATE_SELECTION: &[ShortcutBinding] =
-    &[primary(chord(Key::R, true, false, false, "Ctrl+R"), ALL)];
-const ROTATE_SELECTION_CCW: &[ShortcutBinding] = &[primary(
-    chord(Key::R, true, false, true, "Ctrl+Shift+R"),
-    ALL,
-)];
-const MIRROR_SELECTION_HORIZONTAL: &[ShortcutBinding] =
-    &[primary(chord(Key::M, true, false, false, "Ctrl+M"), ALL)];
-const MIRROR_SELECTION_VERTICAL: &[ShortcutBinding] = &[primary(
-    chord(Key::M, true, false, true, "Ctrl+Shift+M"),
-    ALL,
-)];
 /// Virtuoso's `z`.
 const ZOOM_BOX: &[ShortcutBinding] = &[primary(chord(Key::Z, false, false, false, "Z"), ALL)];
 /// W alone draws a wire; Shift+W is taken by no other command and by no
@@ -219,7 +205,6 @@ impl Command {
                 | Self::CloseActiveDocument
                 | Self::CloseOtherDocuments
                 | Self::CloseAllDocuments
-                | Self::SetStandardValueSeries(_)
                 | Self::FindInDesign
                 | Self::ConfigurationSets
         )
@@ -287,20 +272,13 @@ impl Command {
             | Self::ArraySelection
             | Self::SwapToRSpiceSymbols
             | Self::UpdateInstanceInterface
-            | Self::RotateSelection
-            | Self::RotateSelectionCounterClockwise
-            | Self::MirrorSelectionHorizontal
-            | Self::MirrorSelectionVertical
-            | Self::SnapSelectionToGrid
-            | Self::SnapToStandardValue
             | Self::RepeatLastCommand
             | Self::ZoomToSelection
             | Self::ZoomBox => ShortcutContext::EngineeringCanvas,
             Self::Cancel => ShortcutContext::ApplicationChrome,
-            Self::EditSymbolInPlace
-            | Self::SetStandardValueSeries(_)
-            | Self::HighlightNet
-            | Self::ConfigurationSets => ShortcutContext::DesignWorkspace,
+            Self::EditSymbolInPlace | Self::HighlightNet | Self::ConfigurationSets => {
+                ShortcutContext::DesignWorkspace
+            }
             Self::SymbolPinTool
             | Self::SymbolPolylineTool
             | Self::SymbolRectangleTool
@@ -345,10 +323,6 @@ impl Command {
             Self::ZoomFit => ZOOM_FIT,
             Self::ZoomBox => ZOOM_BOX,
             Self::ZoomPrevious => ZOOM_PREVIOUS,
-            Self::RotateSelection => ROTATE_SELECTION,
-            Self::RotateSelectionCounterClockwise => ROTATE_SELECTION_CCW,
-            Self::MirrorSelectionHorizontal => MIRROR_SELECTION_HORIZONTAL,
-            Self::MirrorSelectionVertical => MIRROR_SELECTION_VERTICAL,
             Self::ZoomOneToOne => ZOOM_ONE_TO_ONE,
             Self::ToggleFullScreen => FULL_SCREEN,
             Self::ToggleNavigator => TOGGLE_NAVIGATOR,
@@ -447,13 +421,6 @@ impl Command {
             | Self::StretchSelection
             | Self::ArraySelection
             | Self::SwapToRSpiceSymbols
-            | Self::RotateSelection
-            | Self::RotateSelectionCounterClockwise
-            | Self::MirrorSelectionHorizontal
-            | Self::MirrorSelectionVertical
-            | Self::SnapSelectionToGrid
-            | Self::SnapToStandardValue
-            | Self::JoinCollinearWires
                 if !super::active_schematic_editor(app) =>
             {
                 "open an editable schematic or testbench"
@@ -462,12 +429,6 @@ impl Command {
             | Self::StretchSelection
             | Self::ArraySelection
             | Self::SwapToRSpiceSymbols
-            | Self::RotateSelection
-            | Self::RotateSelectionCounterClockwise
-            | Self::MirrorSelectionHorizontal
-            | Self::MirrorSelectionVertical
-            | Self::SnapSelectionToGrid
-            | Self::JoinCollinearWires
                 if app.state.schematic_edit_read_only() =>
             {
                 "the active schematic is read-only"
@@ -478,17 +439,8 @@ impl Command {
             | Self::Delete
             | Self::MoveSelection
             | Self::StretchSelection
-            | Self::ArraySelection
-            | Self::RotateSelection
-            | Self::RotateSelectionCounterClockwise
-            | Self::MirrorSelectionHorizontal
-            | Self::MirrorSelectionVertical
-            | Self::SnapSelectionToGrid => "select an editable object",
+            | Self::ArraySelection => "select an editable object",
             Self::SwapToRSpiceSymbols => "no part here draws an imported symbol",
-            Self::SnapToStandardValue => {
-                crate::schematic::view::standard_value_snap::snap_block_reason(&app.state)
-                    .unwrap_or("select a resistor, capacitor or inductor")
-            }
             Self::HighlightNet if !super::active_schematic_editor(app) => {
                 "open a schematic or testbench"
             }

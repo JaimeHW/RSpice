@@ -507,57 +507,57 @@ const VIOLATIONS_MENU: &[MenuEntry] = &[
 /// The Design menu's Arrange submenu, group by group: turn and flip, line
 /// up, space out, put back on the grid.
 const ARRANGE_MENU: &[MenuEntry] = &[
-    command(Command::RotateSelection).access('R'),
-    command(Command::RotateSelectionCounterClockwise).access('C'),
-    command(Command::MirrorSelectionHorizontal).access('V'),
-    command(Command::MirrorSelectionVertical).access('M'),
+    design(DesignCommand::RotateSelection).access('R'),
+    design(DesignCommand::RotateSelectionCounterClockwise).access('C'),
+    design(DesignCommand::MirrorSelectionHorizontal).access('V'),
+    design(DesignCommand::MirrorSelectionVertical).access('M'),
     Separator,
-    command(Command::AlignSelectionLeft).access('L'),
-    command(Command::AlignSelectionCenter).access('H'),
-    command(Command::AlignSelectionRight).access('A'),
-    command(Command::AlignSelectionTop).access('T'),
-    command(Command::AlignSelectionMiddle).access('G'),
-    command(Command::AlignSelectionBottom).access('B'),
+    design(DesignCommand::AlignSelectionLeft).access('L'),
+    design(DesignCommand::AlignSelectionCenter).access('H'),
+    design(DesignCommand::AlignSelectionRight).access('A'),
+    design(DesignCommand::AlignSelectionTop).access('T'),
+    design(DesignCommand::AlignSelectionMiddle).access('G'),
+    design(DesignCommand::AlignSelectionBottom).access('B'),
     Separator,
-    command(Command::DistributeSelectionHorizontal).access('D'),
-    command(Command::DistributeSelectionVertical).access('E'),
+    design(DesignCommand::DistributeSelectionHorizontal).access('D'),
+    design(DesignCommand::DistributeSelectionVertical).access('E'),
     Separator,
-    command(Command::SnapSelectionToGrid).access('S'),
-    command(Command::JoinCollinearWires).access('J'),
+    design(DesignCommand::SnapSelectionToGrid).access('S'),
+    design(DesignCommand::JoinCollinearWires).access('J'),
 ];
 
 /// Snap the selected values to the project's preferred-number series, and
 /// choose the series; the value fields' arrow keys step along the same one.
 const STANDARD_VALUES_MENU: &[MenuEntry] = &[
-    command(Command::SnapToStandardValue).access('S'),
+    design(DesignCommand::SnapToStandardValue).access('S'),
     Separator,
     MenuEntry::radio(
-        Command::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E6).key(),
+        DesignCommand::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E6).key(),
         "E6",
     )
     .access('6'),
     MenuEntry::radio(
-        Command::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E12).key(),
+        DesignCommand::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E12).key(),
         "E12",
     )
     .access('1'),
     MenuEntry::radio(
-        Command::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E24).key(),
+        DesignCommand::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E24).key(),
         "E24",
     )
     .access('4'),
     MenuEntry::radio(
-        Command::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E48).key(),
+        DesignCommand::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E48).key(),
         "E48",
     )
     .access('8'),
     MenuEntry::radio(
-        Command::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E96).key(),
+        DesignCommand::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E96).key(),
         "E96",
     )
     .access('9'),
     MenuEntry::radio(
-        Command::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E192).key(),
+        DesignCommand::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E192).key(),
         "E192",
     )
     .access('2'),
@@ -847,9 +847,6 @@ const fn compact_submenu(menu: ApplicationMenu) -> MenuEntry {
 pub(in crate::workbench) fn command_icon(command: Command) -> Option<WorkbenchIcon> {
     let icon = match command {
         Command::SymbolSave => WorkbenchIcon::Save,
-        Command::RotateSelection => WorkbenchIcon::Rotate,
-        Command::MirrorSelectionHorizontal => WorkbenchIcon::Mirror,
-        Command::MirrorSelectionVertical => WorkbenchIcon::MirrorVertical,
         Command::Duplicate => WorkbenchIcon::Copy,
         Command::Delete => WorkbenchIcon::Trash,
         Command::Undo => WorkbenchIcon::Undo,
@@ -892,6 +889,9 @@ pub(in crate::workbench) fn feature_command_icon(key: CommandKey) -> Option<Work
             DesignCommand::PlacePin => Some(WorkbenchIcon::Pin),
             DesignCommand::DescendHierarchyDirect => Some(WorkbenchIcon::Layers),
             DesignCommand::AscendHierarchy => Some(WorkbenchIcon::ArrowUp),
+            DesignCommand::RotateSelection => Some(WorkbenchIcon::Rotate),
+            DesignCommand::MirrorSelectionHorizontal => Some(WorkbenchIcon::Mirror),
+            DesignCommand::MirrorSelectionVertical => Some(WorkbenchIcon::MirrorVertical),
             _ => None,
         };
     }

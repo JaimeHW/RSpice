@@ -1,9 +1,12 @@
 //! Validate editor layout requests and apply one connected-movement undo unit.
 
-use super::sheet_visibility::with_active_wire_topology;
-use super::{SchematicSymbolContext, requests::editor_request_source, schematic_symbol_context};
+use super::sheet_visibility::with_active_wire_topology_in;
+use super::{
+    Model, SchematicSymbolContext, WorkbenchSession, model_design_view,
+    requests::editor_request_source, sync_active_schematic,
+};
 use crate::state::Point;
-use crate::workbench::app_state::AppState;
+use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility;
 use rspice_schematic_editor::view::selection_layout::{
     self, SelectionLayoutObject, SelectionLayoutRequest, SelectionLayoutView,
 };
@@ -11,43 +14,56 @@ pub(crate) use rspice_schematic_editor::view::selection_layout::{
     SelectionLayoutCommand, SelectionLayoutError,
 };
 
-fn view<'a>(state: &'a AppState, symbols: &'a SchematicSymbolContext) -> SelectionLayoutView<'a> {
+fn view<'a>(
+    model: &'a Model,
+    review_markers: SchematicReviewMarkerVisibility,
+    symbols: &'a SchematicSymbolContext,
+) -> SelectionLayoutView<'a> {
     SelectionLayoutView {
-        design: super::schematic_design_view(state),
-        selection: &state.model.schematic.session.editor.selection,
+        design: model_design_view(model, review_markers),
+        selection: &model.schematic.session.editor.selection,
         symbols,
-        can_edit: !state.schematic_edit_read_only(),
+        can_edit: !model.schematic_edit_read_only(),
     }
 }
 
+/// Whether `command` can lay out the selection of the drawing the model
+/// holds, which shows `review_markers`, and why not.
 pub(crate) fn selection_layout_availability(
-    state: &AppState,
+    model: &Model,
+    review_markers: SchematicReviewMarkerVisibility,
     command: SelectionLayoutCommand,
 ) -> Result<(), SelectionLayoutError> {
-    let symbols = schematic_symbol_context(state);
-    selection_layout::availability(&view(state, &symbols), command)
+    let symbols = model.schematic_symbol_context();
+    selection_layout::availability(&view(model, review_markers, &symbols), command)
 }
 
 pub(crate) fn apply_selection_layout(
-    state: &mut AppState,
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
+    review_markers: SchematicReviewMarkerVisibility,
     symbols: &SchematicSymbolContext,
     command: SelectionLayoutCommand,
 ) -> Result<bool, SelectionLayoutError> {
-    let request =
-        selection_layout::prepare(&view(state, symbols), editor_request_source(state), command)?;
-    apply_request(state, symbols, request)
+    let request = selection_layout::prepare(
+        &view(model, review_markers, symbols),
+        editor_request_source(model),
+        command,
+    )?;
+    apply_request(model, wb, symbols, request)
 }
 
 fn apply_request(
-    state: &mut AppState,
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
     symbol_context: &SchematicSymbolContext,
     request: SelectionLayoutRequest,
 ) -> Result<bool, SelectionLayoutError> {
-    if state.schematic_edit_read_only() {
+    if model.schematic_edit_read_only() {
         return Err(SelectionLayoutError::ReadOnly);
     }
-    if request.source != editor_request_source(state)
-        || request.selection != state.model.schematic.session.editor.selection
+    if request.source != editor_request_source(model)
+        || request.selection != model.schematic.session.editor.selection
     {
         return Err(SelectionLayoutError::StaleSelection);
     }
@@ -57,41 +73,62 @@ fn apply_request(
         return Ok(false);
     }
 
-    state.model.schematic.begin_operation(command.label());
+    model.schematic.begin_operation(command.label());
     // A wire end on another sheet can share a moved pin's coordinates; the
     // parts carry only their own sheet's wires.
-    with_active_wire_topology(state, |schematic, scope| {
-        for edit in deltas {
-            let delta = edit.delta;
-            match edit.object {
-                SelectionLayoutObject::Component(id) => schematic
-                    .move_component_with_wires_resolved(
-                        id,
-                        delta,
-                        |component| symbol_context.terminal_points(component),
-                        scope,
-                    ),
-                SelectionLayoutObject::DesignNote(id) => {
-                    schematic.translate_layout_design_note(id, delta)
+    with_active_wire_topology_in(
+        &model.workspace,
+        &mut model.schematic,
+        |schematic, scope| {
+            for edit in deltas {
+                let delta = edit.delta;
+                match edit.object {
+                    SelectionLayoutObject::Component(id) => schematic
+                        .move_component_with_wires_resolved(
+                            id,
+                            delta,
+                            |component| symbol_context.terminal_points(component),
+                            scope,
+                        ),
+                    SelectionLayoutObject::DesignNote(id) => {
+                        schematic.translate_layout_design_note(id, delta)
+                    }
+                    SelectionLayoutObject::DocumentationShape(id) => {
+                        schematic.translate_layout_documentation_shape(id, delta)
+                    }
+                    SelectionLayoutObject::Probe(id) => schematic.translate_layout_probe(id, delta),
                 }
-                SelectionLayoutObject::DocumentationShape(id) => {
-                    schematic.translate_layout_documentation_shape(id, delta)
-                }
-                SelectionLayoutObject::Probe(id) => schematic.translate_layout_probe(id, delta),
             }
-        }
-    });
-    state.model.schematic.session.is_dirty = true;
-    let recorded = state.model.schematic.end_operation();
+        },
+    );
+    model.schematic.session.is_dirty = true;
+    let recorded = model.schematic.end_operation();
     if recorded {
-        state.sync_active_schematic_to_workspace();
+        sync_active_schematic(model, wb);
     }
     Ok(recorded)
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::{AppState, schematic_symbol_context};
     use super::*;
+
+    /// [`apply_selection_layout`] over the session's parts.
+    fn apply(
+        state: &mut AppState,
+        symbols: &SchematicSymbolContext,
+        command: SelectionLayoutCommand,
+    ) -> Result<bool, SelectionLayoutError> {
+        let markers = state.design.schematic_visibility.review_markers;
+        apply_selection_layout(
+            &mut state.model,
+            &mut state.workbench,
+            markers,
+            symbols,
+            command,
+        )
+    }
     use crate::state::{
         Component, ComponentType, SchematicProbe, SheetDefinition, SheetPortPolicy, SheetTemplate,
     };
@@ -152,7 +189,7 @@ mod tests {
                 .push(original_wire.clone());
             state.model.schematic.init_undo_history();
 
-            assert!(apply_selection_layout(&mut state, &context, command).unwrap());
+            assert!(apply(&mut state, &context, command).unwrap());
             let aligned: Vec<_> = state
                 .model
                 .schematic
@@ -212,7 +249,7 @@ mod tests {
             let context = schematic_symbol_context(&state);
 
             assert!(
-                apply_selection_layout(
+                apply(
                     &mut state,
                     &context,
                     if horizontal {
@@ -304,10 +341,7 @@ mod tests {
             let grid = state.model.schematic.document().grid_size;
             let context = schematic_symbol_context(&state);
 
-            assert!(
-                apply_selection_layout(&mut state, &context, command).unwrap(),
-                "{command:?}"
-            );
+            assert!(apply(&mut state, &context, command).unwrap(), "{command:?}");
 
             let components = &state.model.schematic.document().components;
             for component in components {
@@ -378,7 +412,11 @@ mod tests {
                 .unwrap();
             let symbols = schematic_symbol_context(&state);
             let request = selection_layout::prepare(
-                &view(&state, &symbols),
+                &view(
+                    &state.model,
+                    state.design.schematic_visibility.review_markers,
+                    &symbols,
+                ),
                 editor_request_source(&state),
                 SelectionLayoutCommand::AlignLeft,
             )
@@ -421,7 +459,7 @@ mod tests {
                 _ => unreachable!(),
             }
             let before = state.model.schematic.document().components.clone();
-            let outcome = apply_request(&mut state, &symbols, request);
+            let outcome = apply_request(&mut state.model, &mut state.workbench, &symbols, request);
             if change == "none" {
                 assert_eq!(outcome, Ok(true));
                 assert_eq!(state.model.schematic.document().components[1].pos.x, 0);
@@ -459,7 +497,7 @@ mod tests {
             .select_wire(9);
         let context = schematic_symbol_context(&state);
         assert_eq!(
-            apply_selection_layout(&mut state, &context, SelectionLayoutCommand::AlignLeft),
+            apply(&mut state, &context, SelectionLayoutCommand::AlignLeft),
             Err(SelectionLayoutError::IncompatibleSelection)
         );
         assert!(!state.model.schematic.can_undo());
@@ -467,7 +505,7 @@ mod tests {
         state.model.schematic.session.editor.selection.wires.clear();
         state.model.schematic.session.read_only = true;
         assert_eq!(
-            apply_selection_layout(&mut state, &context, SelectionLayoutCommand::AlignLeft),
+            apply(&mut state, &context, SelectionLayoutCommand::AlignLeft),
             Err(SelectionLayoutError::ReadOnly)
         );
         assert!(!state.model.schematic.can_undo());
@@ -499,10 +537,7 @@ mod tests {
         let topology = state.model.schematic.topology_version();
         let context = schematic_symbol_context(&state);
 
-        assert!(
-            apply_selection_layout(&mut state, &context, SelectionLayoutCommand::AlignLeft)
-                .unwrap()
-        );
+        assert!(apply(&mut state, &context, SelectionLayoutCommand::AlignLeft).unwrap());
         assert_eq!(state.model.schematic.document().probes[0].position.x, 10);
         assert_eq!(state.model.schematic.document().probes[1].position.x, 10);
         assert_eq!(state.model.schematic.topology_version(), topology);
@@ -545,10 +580,7 @@ mod tests {
             .push(hidden.clone());
         state.model.schematic.init_undo_history();
 
-        assert!(
-            apply_selection_layout(&mut state, &context, SelectionLayoutCommand::AlignLeft)
-                .unwrap()
-        );
+        assert!(apply(&mut state, &context, SelectionLayoutCommand::AlignLeft).unwrap());
 
         assert_ne!(
             context.terminal_points(&state.model.schematic.document().components[1])[0],
@@ -600,7 +632,7 @@ mod tests {
         let before = state.model.schematic.document().components.clone();
 
         assert_eq!(
-            apply_selection_layout(&mut state, &context, SelectionLayoutCommand::AlignLeft),
+            apply(&mut state, &context, SelectionLayoutCommand::AlignLeft),
             Err(SelectionLayoutError::OffActiveSheet)
         );
         assert_eq!(state.model.schematic.document().components, before);

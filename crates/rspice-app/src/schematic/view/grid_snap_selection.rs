@@ -7,8 +7,8 @@
 //! command is one undo step, and the cell view's other sheets are out of
 //! reach while the wiring is carried and tidied.
 
-use super::sheet_visibility::{retain_selection_on_active_sheet, with_active_wire_topology};
-use super::{AppState, SchematicSymbolContext};
+use super::sheet_visibility::{retain_selection_on_active_sheet_in, with_active_wire_topology_in};
+use super::{Model, SchematicSymbolContext, WorkbenchSession, sync_active_schematic};
 use crate::state::{MoveSelectionMode, Point, Selection};
 use crate::workbench::app::on_grid;
 
@@ -24,87 +24,95 @@ enum Snap {
 
 /// Snap Selection to Grid as a command runs it, and say what it did: one
 /// path for the Design menu, the palette and the canvas menu's Arrange page.
-pub(crate) fn run_snap_selection_to_grid(state: &mut AppState, symbols: &SchematicSymbolContext) {
-    match snap_selection_to_grid(state, symbols) {
-        Ok(0) => state.prompt("The selection is on the grid already."),
-        Ok(moved) => state.prompt(format!(
+pub(crate) fn run_snap_selection_to_grid(
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
+    symbols: &SchematicSymbolContext,
+) {
+    match snap_selection_to_grid(model, wb, symbols) {
+        Ok(0) => wb.prompt("The selection is on the grid already."),
+        Ok(moved) => wb.prompt(format!(
             "Snapped {moved} {} to the grid.",
             if moved == 1 { "object" } else { "objects" }
         )),
-        Err(error) => state.prompt(error),
+        Err(error) => wb.prompt(error),
     }
 }
 
 /// Snap what is selected on the active sheet. Returns how many objects
 /// moved; nothing selected off the grid moves nothing and records nothing.
 pub(crate) fn snap_selection_to_grid(
-    state: &mut AppState,
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
     symbols: &SchematicSymbolContext,
 ) -> Result<usize, String> {
-    if state.schematic_edit_read_only() {
+    if model.schematic_edit_read_only() {
         return Err("The active schematic is read-only.".to_owned());
     }
-    retain_selection_on_active_sheet(state);
-    let snaps = snaps(state, symbols);
+    retain_selection_on_active_sheet_in(model);
+    let snaps = snaps(model, symbols);
     if snaps.is_empty() {
         return Ok(0);
     }
-    let selection = state.model.schematic.session.editor.selection.clone();
+    let selection = model.schematic.session.editor.selection.clone();
     // The undo step opens with every sheet present; the other sheets step
     // out of reach only while the wiring is carried and tidied.
-    state
-        .model
-        .schematic
-        .begin_operation("snap selection to grid");
-    let moved = with_active_wire_topology(state, |schematic, scope| {
-        let terminal_points =
-            |component: &crate::state::Component| symbols.terminal_points(component);
-        // Each object moves alone, and the wires attached to it are
-        // re-routed square rather than stretched on a slant.
-        let carry =
-            |schematic: &mut crate::state::SchematicState, only: Selection, delta: Point| {
-                schematic.session.editor.selection = only;
-                schematic.move_selection_with_mode_resolved(
-                    delta,
-                    MoveSelectionMode::Shove,
-                    terminal_points,
-                    scope,
-                )
-            };
-        for snap in &snaps {
-            let mut only = Selection::default();
-            match *snap {
-                Snap::Component(id, delta) => {
-                    only.select_component(id);
-                    carry(schematic, only, delta)?;
+    model.schematic.begin_operation("snap selection to grid");
+    let moved = with_active_wire_topology_in(
+        &model.workspace,
+        &mut model.schematic,
+        |schematic, scope| {
+            let terminal_points =
+                |component: &crate::state::Component| symbols.terminal_points(component);
+            // Each object moves alone, and the wires attached to it are
+            // re-routed square rather than stretched on a slant.
+            let carry =
+                |schematic: &mut crate::state::SchematicState, only: Selection, delta: Point| {
+                    schematic.session.editor.selection = only;
+                    schematic.move_selection_with_mode_resolved(
+                        delta,
+                        MoveSelectionMode::Shove,
+                        terminal_points,
+                        scope,
+                    )
+                };
+            for snap in &snaps {
+                let mut only = Selection::default();
+                match *snap {
+                    Snap::Component(id, delta) => {
+                        only.select_component(id);
+                        carry(schematic, only, delta)?;
+                    }
+                    Snap::NetLabel(id, delta) => {
+                        only.select_net_label(id);
+                        carry(schematic, only, delta)?;
+                    }
+                    Snap::Wire(id, delta) => {
+                        only.select_wire(id);
+                        carry(schematic, only, delta)?;
+                    }
+                    Snap::DesignNote(id, delta) => {
+                        schematic.translate_layout_design_note(id, delta)
+                    }
+                    Snap::Probe(id, delta) => schematic.translate_layout_probe(id, delta),
                 }
-                Snap::NetLabel(id, delta) => {
-                    only.select_net_label(id);
-                    carry(schematic, only, delta)?;
-                }
-                Snap::Wire(id, delta) => {
-                    only.select_wire(id);
-                    carry(schematic, only, delta)?;
-                }
-                Snap::DesignNote(id, delta) => schematic.translate_layout_design_note(id, delta),
-                Snap::Probe(id, delta) => schematic.translate_layout_probe(id, delta),
             }
-        }
-        let automatic_junctions = schematic.session.editor.automatic_junctions;
-        schematic.cleanup_wire_topology_with_junction_policy(automatic_junctions, scope);
-        Ok::<usize, rspice_design::schematic::movement::MoveSelectionError>(snaps.len())
-    });
-    state.model.schematic.session.editor.selection = selection;
+            let automatic_junctions = schematic.session.editor.automatic_junctions;
+            schematic.cleanup_wire_topology_with_junction_policy(automatic_junctions, scope);
+            Ok::<usize, rspice_design::schematic::movement::MoveSelectionError>(snaps.len())
+        },
+    );
+    model.schematic.session.editor.selection = selection;
     match moved {
         Ok(moved) => {
-            state.model.schematic.session.is_dirty = true;
-            if state.model.schematic.end_operation() {
-                state.sync_active_schematic_to_workspace();
+            model.schematic.session.is_dirty = true;
+            if model.schematic.end_operation() {
+                sync_active_schematic(model, wb);
             }
             Ok(moved)
         }
         Err(error) => {
-            state.model.schematic.cancel_operation();
+            model.schematic.cancel_operation();
             Err(format!("Snap to grid was not applied: {error}."))
         }
     }
@@ -112,10 +120,10 @@ pub(crate) fn snap_selection_to_grid(
 
 /// The step each selected object's anchor needs, parts first so the wires
 /// they carry are settled before a free wire is looked at.
-fn snaps(state: &AppState, symbols: &SchematicSymbolContext) -> Vec<Snap> {
-    let document = state.model.schematic.document();
+fn snaps(model: &Model, symbols: &SchematicSymbolContext) -> Vec<Snap> {
+    let document = model.schematic.document();
     let grid = document.grid_size;
-    let selection = &state.model.schematic.session.editor.selection;
+    let selection = &model.schematic.session.editor.selection;
     let step = |anchor: Point| {
         let delta = on_grid(anchor, grid) - anchor;
         (delta != Point::origin()).then_some(delta)
@@ -172,6 +180,7 @@ fn snaps(state: &AppState, symbols: &SchematicSymbolContext) -> Vec<Snap> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::AppState;
     use super::*;
     use crate::state::{Component, ComponentType, Wire};
 
@@ -199,7 +208,10 @@ mod tests {
             .selection
             .select_component(1);
 
-        assert_eq!(snap_selection_to_grid(&mut state, &symbols), Ok(1));
+        assert_eq!(
+            snap_selection_to_grid(&mut state.model, &mut state.workbench, &symbols),
+            Ok(1)
+        );
 
         let document = state.model.schematic.document();
         let pos = document.components[0].pos;
@@ -232,9 +244,12 @@ mod tests {
             .editor
             .selection
             .select_component(1);
-        assert_eq!(snap_selection_to_grid(&mut state, &symbols), Ok(1));
         assert_eq!(
-            snap_selection_to_grid(&mut state, &symbols),
+            snap_selection_to_grid(&mut state.model, &mut state.workbench, &symbols),
+            Ok(1)
+        );
+        assert_eq!(
+            snap_selection_to_grid(&mut state.model, &mut state.workbench, &symbols),
             Ok(0),
             "on the grid already"
         );
@@ -262,7 +277,10 @@ mod tests {
             .selection
             .select_component(1);
 
-        assert_eq!(snap_selection_to_grid(&mut state, &symbols), Ok(1));
+        assert_eq!(
+            snap_selection_to_grid(&mut state.model, &mut state.workbench, &symbols),
+            Ok(1)
+        );
         assert_eq!(state.model.schematic.document().wires, vec![there]);
     }
 }

@@ -218,11 +218,14 @@ fn catalog_of(entries: &[ContextEntry]) -> Vec<(&'static str, Option<CommandKey>
 fn each_target_gets_the_catalog_its_instance_master_slot_calls_for() {
     let head = [
         ("Object properties…", Some(Command::ObjectProperties.key())),
-        ("Rotate 90°", Some(Command::RotateSelection.key())),
-        ("Mirror", Some(Command::MirrorSelectionHorizontal.key())),
+        ("Rotate 90°", Some(DesignCommand::RotateSelection.key())),
+        (
+            "Mirror",
+            Some(DesignCommand::MirrorSelectionHorizontal.key()),
+        ),
         (
             "Mirror vertically",
-            Some(Command::MirrorSelectionVertical.key()),
+            Some(DesignCommand::MirrorSelectionVertical.key()),
         ),
         // G-12: the Arrange page, which a phone reaches only from here.
         ("Arrange", None),
@@ -1746,14 +1749,17 @@ fn the_arrange_page_snaps_the_selection_to_the_grid() {
         .iter()
         .find_map(|entry| match entry {
             ContextEntry::Command(command)
-                if command.shortcut_command == Some(Command::SnapSelectionToGrid.key()) =>
+                if command.shortcut_command == Some(DesignCommand::SnapSelectionToGrid.key()) =>
             {
                 Some(command)
             }
             _ => None,
         })
         .expect("the Arrange page offers Snap Selection to Grid");
-    assert_eq!(snap.label, Command::SnapSelectionToGrid.spec().label);
+    assert_eq!(
+        snap.label,
+        DesignCommand::SnapSelectionToGrid.declared_spec().label
+    );
     assert!(
         !action_availability(snap.action, &state).0,
         "nothing is selected to snap"

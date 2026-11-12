@@ -178,21 +178,21 @@ pub(in crate::workbench) fn design_tools(
     toolbar_icon_command(
         ui,
         app,
-        Command::RotateSelection.key(),
+        DesignCommand::RotateSelection.key(),
         WorkbenchIcon::Rotate,
         layout,
     );
     toolbar_icon_command(
         ui,
         app,
-        Command::MirrorSelectionHorizontal.key(),
+        DesignCommand::MirrorSelectionHorizontal.key(),
         WorkbenchIcon::Mirror,
         layout,
     );
     toolbar_icon_command(
         ui,
         app,
-        Command::MirrorSelectionVertical.key(),
+        DesignCommand::MirrorSelectionVertical.key(),
         WorkbenchIcon::MirrorVertical,
         layout,
     );

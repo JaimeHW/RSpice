@@ -4,10 +4,6 @@
 //! command is omitted from a menu when its behavior is not implemented; the
 //! UI does not advertise speculative or placeholder capability.
 
-use crate::schematic::view::schematic_symbol_context;
-use crate::schematic::view::selection_transform::{
-    SelectionTransform, transform_selection_on_active_sheet,
-};
 use crate::workbench::app::actions::workspace::HistoryDirection;
 use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::commands::vocabulary::Command;
@@ -15,7 +11,6 @@ use crate::workbench::framework::command_registry::{CommandOwner, ids};
 use crate::workbench::menu_bar::{FileMenuAction, dispatch_file_menu_action};
 use crate::workbench::state::pane_focus::PaneStep;
 use crate::workbench::{AppState, RSpiceApp};
-use rspice_schematic_editor::symbol_editor::commands::SymbolTransform;
 
 use super::state::{ConsoleChannel, ConsolePage, Workspace};
 
@@ -56,23 +51,6 @@ pub(crate) mod dispatch_probe {
     }
 }
 
-fn selection_layout_command(
-    command: Command,
-) -> Option<crate::schematic::view::selection_layout::SelectionLayoutCommand> {
-    use crate::schematic::view::selection_layout::SelectionLayoutCommand as Layout;
-    Some(match command {
-        Command::AlignSelectionLeft => Layout::AlignLeft,
-        Command::AlignSelectionCenter => Layout::AlignCenter,
-        Command::AlignSelectionRight => Layout::AlignRight,
-        Command::AlignSelectionTop => Layout::AlignTop,
-        Command::AlignSelectionMiddle => Layout::AlignMiddle,
-        Command::AlignSelectionBottom => Layout::AlignBottom,
-        Command::DistributeSelectionHorizontal => Layout::DistributeHorizontal,
-        Command::DistributeSelectionVertical => Layout::DistributeVertical,
-        _ => return None,
-    })
-}
-
 /// Commands whose design-workspace execution can mutate the active schematic
 /// or a project-owned schematic contract. Presentation and inspection
 /// commands deliberately remain available in read-only contexts.
@@ -90,21 +68,6 @@ pub(crate) const fn command_edits_schematic(command: Command) -> bool {
             | Command::ArraySelection
             | Command::SwapToRSpiceSymbols
             | Command::UpdateInstanceInterface
-            | Command::RotateSelection
-            | Command::RotateSelectionCounterClockwise
-            | Command::MirrorSelectionHorizontal
-            | Command::MirrorSelectionVertical
-            | Command::AlignSelectionLeft
-            | Command::AlignSelectionCenter
-            | Command::AlignSelectionRight
-            | Command::AlignSelectionTop
-            | Command::AlignSelectionMiddle
-            | Command::AlignSelectionBottom
-            | Command::DistributeSelectionHorizontal
-            | Command::DistributeSelectionVertical
-            | Command::SnapSelectionToGrid
-            | Command::SnapToStandardValue
-            | Command::JoinCollinearWires
     )
 }
 
@@ -135,25 +98,7 @@ impl Command {
     pub(crate) const fn repeatable(self) -> bool {
         matches!(
             self,
-            Self::Duplicate
-                | Self::Paste
-                | Self::MoveSelection
-                | Self::StretchSelection
-                | Self::RotateSelection
-                | Self::RotateSelectionCounterClockwise
-                | Self::MirrorSelectionHorizontal
-                | Self::MirrorSelectionVertical
-                | Self::AlignSelectionLeft
-                | Self::AlignSelectionCenter
-                | Self::AlignSelectionRight
-                | Self::AlignSelectionTop
-                | Self::AlignSelectionMiddle
-                | Self::AlignSelectionBottom
-                | Self::DistributeSelectionHorizontal
-                | Self::DistributeSelectionVertical
-                | Self::SnapSelectionToGrid
-                | Self::SnapToStandardValue
-                | Self::JoinCollinearWires
+            Self::Duplicate | Self::Paste | Self::MoveSelection | Self::StretchSelection
         )
     }
 
@@ -257,22 +202,6 @@ impl Command {
             | Self::SymbolSave
             | Self::EditSymbolInPlace
             | Self::ExitSymbolInPlace
-            | Self::RotateSelection
-            | Self::RotateSelectionCounterClockwise
-            | Self::MirrorSelectionHorizontal
-            | Self::MirrorSelectionVertical
-            | Self::AlignSelectionLeft
-            | Self::AlignSelectionCenter
-            | Self::AlignSelectionRight
-            | Self::AlignSelectionTop
-            | Self::AlignSelectionMiddle
-            | Self::AlignSelectionBottom
-            | Self::DistributeSelectionHorizontal
-            | Self::DistributeSelectionVertical
-            | Self::SnapSelectionToGrid
-            | Self::SnapToStandardValue
-            | Self::SetStandardValueSeries(_)
-            | Self::JoinCollinearWires
             | Self::Cancel
             | Self::ObjectProperties => CommandOwner::Design,
         }
@@ -567,84 +496,6 @@ impl Command {
             Self::ExitSymbolInPlace => app.state.request_symbol_in_place_exit(
                 super::app::actions::workspace::symbol_in_place::SymbolInPlaceExit::Parent,
             ),
-            Self::RotateSelection if active_symbol_editor(app) => {
-                app.transform_selected_symbol_item(SymbolTransform::Rotate);
-            }
-            Self::RotateSelectionCounterClockwise if active_symbol_editor(app) => {
-                app.transform_selected_symbol_item(SymbolTransform::RotateCounterClockwise);
-            }
-            Self::MirrorSelectionHorizontal if active_symbol_editor(app) => {
-                app.transform_selected_symbol_item(SymbolTransform::MirrorHorizontal);
-            }
-            Self::MirrorSelectionVertical if active_symbol_editor(app) => {
-                app.transform_selected_symbol_item(SymbolTransform::MirrorVertical);
-            }
-            Self::RotateSelection
-            | Self::RotateSelectionCounterClockwise
-            | Self::MirrorSelectionHorizontal
-            | Self::MirrorSelectionVertical => {
-                let transform = match self {
-                    Self::RotateSelectionCounterClockwise => {
-                        SelectionTransform::RotateCounterClockwise
-                    }
-                    Self::MirrorSelectionHorizontal => SelectionTransform::MirrorHorizontal,
-                    Self::MirrorSelectionVertical => SelectionTransform::MirrorVertical,
-                    _ => SelectionTransform::RotateClockwise,
-                };
-                // A copy floating under the pointer is what these act on.
-                if !crate::workbench::app::turn_floating_paste(&mut app.state, transform) {
-                    let symbol_context = schematic_symbol_context(&app.state);
-                    transform_selection_on_active_sheet(&mut app.state, &symbol_context, transform);
-                }
-            }
-            Self::JoinCollinearWires => {
-                app.state.join_collinear_wires_on_active_sheet();
-            }
-            Self::SnapSelectionToGrid => {
-                let symbol_context = schematic_symbol_context(&app.state);
-                crate::schematic::view::grid_snap_selection::run_snap_selection_to_grid(
-                    &mut app.state,
-                    &symbol_context,
-                );
-            }
-            Self::SnapToStandardValue => {
-                crate::schematic::view::standard_value_snap::run_snap_to_standard_value(
-                    &mut app.state,
-                );
-            }
-            Self::SetStandardValueSeries(series) => {
-                let workspace = &mut app.state.model.workspace.content;
-                if workspace.standard_value_series != series {
-                    workspace.standard_value_series = series;
-                    workspace.project_metadata_dirty = true;
-                }
-            }
-            Self::AlignSelectionLeft
-            | Self::AlignSelectionCenter
-            | Self::AlignSelectionRight
-            | Self::AlignSelectionTop
-            | Self::AlignSelectionMiddle
-            | Self::AlignSelectionBottom
-            | Self::DistributeSelectionHorizontal
-            | Self::DistributeSelectionVertical => {
-                let command =
-                    selection_layout_command(self).expect("selection layout command is mapped");
-                let symbol_context = schematic_symbol_context(&app.state);
-                match crate::schematic::view::selection_layout::apply_selection_layout(
-                    &mut app.state,
-                    &symbol_context,
-                    command,
-                ) {
-                    // The moved selection is the answer to a completed layout.
-                    Ok(true) => {}
-                    Ok(false) => app
-                        .state
-                        .prompt(format!("{} produced no geometry change.", command.label())),
-                    Err(error) => app
-                        .state
-                        .prompt(format!("{} was not applied: {error}.", command.label())),
-                }
-            }
             Self::Cancel => {
                 if active_symbol_editor(app) && app.state.symbol_in_place_canvas_idle() {
                     // Nothing on the canvas to cancel: Escape leaves the

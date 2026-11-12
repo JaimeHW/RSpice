@@ -131,28 +131,6 @@ pub enum Command {
     EditSymbolInPlace,
     /// Leave an in-place symbol edit for the parent schematic.
     ExitSymbolInPlace,
-    RotateSelection,
-    RotateSelectionCounterClockwise,
-    MirrorSelectionHorizontal,
-    MirrorSelectionVertical,
-    AlignSelectionLeft,
-    AlignSelectionCenter,
-    AlignSelectionRight,
-    AlignSelectionTop,
-    AlignSelectionMiddle,
-    AlignSelectionBottom,
-    DistributeSelectionHorizontal,
-    DistributeSelectionVertical,
-    /// Move every selected object's anchor to the nearest grid point.
-    SnapSelectionToGrid,
-    /// Snap each selected resistor, capacitor and inductor to the nearest
-    /// value of the project's preferred-number series.
-    SnapToStandardValue,
-    /// Choose the preferred-number series the project's values step along.
-    SetStandardValueSeries(rspice_vocabulary::quantity::ESeries),
-    /// Lay the active sheet's wires that run on one line, end to end or
-    /// overlapping, as one wire each.
-    JoinCollinearWires,
     Cancel,
     CommandPalette,
     KeyboardShortcuts,
@@ -357,64 +335,6 @@ impl Command {
                 "Return to parent schematic",
                 "Design",
             ),
-            Self::RotateSelection => spec("rotate-selection", "Rotate clockwise", "Design"),
-            Self::RotateSelectionCounterClockwise => {
-                spec("rotate-selection-ccw", "Rotate counter-clockwise", "Design")
-            }
-            Self::MirrorSelectionHorizontal => spec(
-                "mirror-selection-horizontal",
-                "Mirror about vertical axis",
-                "Design",
-            ),
-            Self::MirrorSelectionVertical => spec(
-                "mirror-selection-vertical",
-                "Mirror about horizontal axis",
-                "Design",
-            ),
-            Self::AlignSelectionLeft => spec("align-selection-left", "Align left", "Design"),
-            Self::AlignSelectionCenter => spec(
-                "align-selection-horizontal-centers",
-                "Align horizontal centers",
-                "Design",
-            ),
-            Self::AlignSelectionRight => spec("align-selection-right", "Align right", "Design"),
-            Self::AlignSelectionTop => spec("align-selection-top", "Align top", "Design"),
-            Self::AlignSelectionMiddle => spec(
-                "align-selection-vertical-centers",
-                "Align vertical centers",
-                "Design",
-            ),
-            Self::AlignSelectionBottom => spec("align-selection-bottom", "Align bottom", "Design"),
-            Self::DistributeSelectionHorizontal => spec(
-                "distribute-selection-horizontal",
-                "Distribute horizontally",
-                "Design",
-            ),
-            Self::DistributeSelectionVertical => spec(
-                "distribute-selection-vertical",
-                "Distribute vertically",
-                "Design",
-            ),
-            Self::SnapSelectionToGrid => {
-                spec("snap-selection-to-grid", "Snap selection to grid", "Design")
-            }
-            Self::SnapToStandardValue => {
-                spec("snap-to-standard-value", "Snap to standard value", "Design")
-            }
-            Self::SetStandardValueSeries(series) => {
-                use rspice_vocabulary::quantity::ESeries;
-                match series {
-                    ESeries::E6 => spec("standard-values-e6", "E6 standard values", "Design"),
-                    ESeries::E12 => spec("standard-values-e12", "E12 standard values", "Design"),
-                    ESeries::E24 => spec("standard-values-e24", "E24 standard values", "Design"),
-                    ESeries::E48 => spec("standard-values-e48", "E48 standard values", "Design"),
-                    ESeries::E96 => spec("standard-values-e96", "E96 standard values", "Design"),
-                    ESeries::E192 => spec("standard-values-e192", "E192 standard values", "Design"),
-                }
-            }
-            Self::JoinCollinearWires => {
-                spec("join-collinear-wires", "Join collinear wires", "Design")
-            }
             Self::Cancel => spec("cancel-active-command", "Cancel active command", "Design"),
             Self::CommandPalette => spec("command-palette", "Command palette", "Navigate"),
             Self::KeyboardShortcuts => spec("command-reference", "Keyboard shortcuts", "Help"),
@@ -548,27 +468,6 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::SymbolSave,
     Command::EditSymbolInPlace,
     Command::ExitSymbolInPlace,
-    Command::RotateSelection,
-    Command::RotateSelectionCounterClockwise,
-    Command::MirrorSelectionHorizontal,
-    Command::MirrorSelectionVertical,
-    Command::AlignSelectionLeft,
-    Command::AlignSelectionCenter,
-    Command::AlignSelectionRight,
-    Command::AlignSelectionTop,
-    Command::AlignSelectionMiddle,
-    Command::AlignSelectionBottom,
-    Command::DistributeSelectionHorizontal,
-    Command::DistributeSelectionVertical,
-    Command::SnapSelectionToGrid,
-    Command::SnapToStandardValue,
-    Command::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E6),
-    Command::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E12),
-    Command::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E24),
-    Command::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E48),
-    Command::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E96),
-    Command::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E192),
-    Command::JoinCollinearWires,
     Command::CommandPalette,
     Command::KeyboardShortcuts,
     Command::HelpCenter,
@@ -769,27 +668,27 @@ static COMMAND_ORDER: &[CommandKey] = &[
     DesignCommand::PlaceGround.key(),
     DesignCommand::PlaceVoltageSource.key(),
     DesignCommand::PlaceCurrentSource.key(),
-    Command::RotateSelection.key(),
-    Command::RotateSelectionCounterClockwise.key(),
-    Command::MirrorSelectionHorizontal.key(),
-    Command::MirrorSelectionVertical.key(),
-    Command::AlignSelectionLeft.key(),
-    Command::AlignSelectionCenter.key(),
-    Command::AlignSelectionRight.key(),
-    Command::AlignSelectionTop.key(),
-    Command::AlignSelectionMiddle.key(),
-    Command::AlignSelectionBottom.key(),
-    Command::DistributeSelectionHorizontal.key(),
-    Command::DistributeSelectionVertical.key(),
-    Command::SnapSelectionToGrid.key(),
-    Command::SnapToStandardValue.key(),
-    Command::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E6).key(),
-    Command::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E12).key(),
-    Command::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E24).key(),
-    Command::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E48).key(),
-    Command::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E96).key(),
-    Command::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E192).key(),
-    Command::JoinCollinearWires.key(),
+    DesignCommand::RotateSelection.key(),
+    DesignCommand::RotateSelectionCounterClockwise.key(),
+    DesignCommand::MirrorSelectionHorizontal.key(),
+    DesignCommand::MirrorSelectionVertical.key(),
+    DesignCommand::AlignSelectionLeft.key(),
+    DesignCommand::AlignSelectionCenter.key(),
+    DesignCommand::AlignSelectionRight.key(),
+    DesignCommand::AlignSelectionTop.key(),
+    DesignCommand::AlignSelectionMiddle.key(),
+    DesignCommand::AlignSelectionBottom.key(),
+    DesignCommand::DistributeSelectionHorizontal.key(),
+    DesignCommand::DistributeSelectionVertical.key(),
+    DesignCommand::SnapSelectionToGrid.key(),
+    DesignCommand::SnapToStandardValue.key(),
+    DesignCommand::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E6).key(),
+    DesignCommand::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E12).key(),
+    DesignCommand::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E24).key(),
+    DesignCommand::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E48).key(),
+    DesignCommand::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E96).key(),
+    DesignCommand::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E192).key(),
+    DesignCommand::JoinCollinearWires.key(),
     DesignCommand::AscendHierarchy.key(),
     DesignCommand::DescendHierarchy.key(),
     DesignCommand::DescendHierarchyDirect.key(),

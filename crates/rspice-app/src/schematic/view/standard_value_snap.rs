@@ -5,8 +5,8 @@
 //! parameter has no nearest member and is left alone, and the whole command
 //! is one undo step.
 
-use super::AppState;
-use super::sheet_visibility::retain_selection_on_active_sheet;
+use super::sheet_visibility::retain_selection_on_active_sheet_in;
+use super::{Model, WorkbenchSession, sync_active_schematic};
 use crate::state::{Component, ComponentType};
 
 /// Whether a part's value is drawn from a preferred-number series.
@@ -18,11 +18,10 @@ pub(crate) const fn takes_standard_value(kind: ComponentType) -> bool {
 }
 
 /// The selected parts the command would change, each beside its snapped copy.
-fn snaps(state: &AppState) -> Vec<(Component, Component)> {
-    let series = state.model.workspace.content.standard_value_series;
-    let selection = &state.model.schematic.session.editor.selection;
-    state
-        .model
+fn snaps(model: &Model) -> Vec<(Component, Component)> {
+    let series = model.workspace.content.standard_value_series;
+    let selection = &model.schematic.session.editor.selection;
+    model
         .schematic
         .document()
         .components
@@ -40,10 +39,10 @@ fn snaps(state: &AppState) -> Vec<(Component, Component)> {
 }
 
 /// Why Snap to standard value cannot run now, or `None` when it can.
-pub(crate) fn snap_block_reason(state: &AppState) -> Option<&'static str> {
-    if state.schematic_edit_read_only() {
+pub(crate) fn snap_block_reason(model: &Model) -> Option<&'static str> {
+    if model.schematic_edit_read_only() {
         Some("the active schematic is read-only")
-    } else if snaps(state).is_empty() {
+    } else if snaps(model).is_empty() {
         Some("select a resistor, capacitor or inductor whose value is off the series")
     } else {
         None
@@ -52,37 +51,38 @@ pub(crate) fn snap_block_reason(state: &AppState) -> Option<&'static str> {
 
 /// Snap to standard value as a command runs it, and say what it did: one path
 /// for the Design menu, the palette and the canvas menu.
-pub(crate) fn run_snap_to_standard_value(state: &mut AppState) {
-    if state.schematic_edit_read_only() {
-        state.prompt("The active schematic is read-only.");
+pub(crate) fn run_snap_to_standard_value(model: &mut Model, wb: &mut WorkbenchSession) {
+    if model.schematic_edit_read_only() {
+        wb.prompt("The active schematic is read-only.");
         return;
     }
-    retain_selection_on_active_sheet(state);
-    let edits = snaps(state);
+    retain_selection_on_active_sheet_in(model);
+    let edits = snaps(model);
     if edits.is_empty() {
-        state.prompt("The selected values are standard values already.");
+        wb.prompt("The selected values are standard values already.");
         return;
     }
-    let series = state.model.workspace.content.standard_value_series;
+    let series = model.workspace.content.standard_value_series;
     match crate::state::bulk_edit::replace_components(
-        &mut state.model.schematic,
+        &mut model.schematic,
         edits,
         "snap to standard value",
     ) {
         Ok(changed) => {
-            state.sync_active_schematic_to_workspace();
-            state.prompt(format!(
+            sync_active_schematic(model, wb);
+            wb.prompt(format!(
                 "Snapped {changed} {} to the {} series.",
                 if changed == 1 { "value" } else { "values" },
                 series.label()
             ));
         }
-        Err(error) => state.prompt(error),
+        Err(error) => wb.prompt(error),
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::AppState;
     use super::*;
     use crate::state::Point;
     use rspice_vocabulary::quantity::ESeries;
@@ -108,9 +108,9 @@ mod tests {
         for id in [1, 2, 3] {
             selection.select_component(id);
         }
-        assert_eq!(snap_block_reason(&state), None);
+        assert_eq!(snap_block_reason(&state.model), None);
 
-        run_snap_to_standard_value(&mut state);
+        run_snap_to_standard_value(&mut state.model, &mut state.workbench);
 
         let values = state
             .model
@@ -121,7 +121,10 @@ mod tests {
             .map(|part| part.value.as_str())
             .collect::<Vec<_>>();
         assert_eq!(values, ["4.7kΩ", "100n", "{rload}", "4.6k"]);
-        assert!(snap_block_reason(&state).is_some(), "nothing left to snap");
+        assert!(
+            snap_block_reason(&state.model).is_some(),
+            "nothing left to snap"
+        );
 
         state.model.schematic.undo();
         assert_eq!(

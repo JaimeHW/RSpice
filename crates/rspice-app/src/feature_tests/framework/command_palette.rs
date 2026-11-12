@@ -228,7 +228,7 @@ fn command_scopes_and_metadata_search_only_return_registered_commands() {
         design,
         vec![
             DesignCommand::PlaceWire.key(),
-            Command::JoinCollinearWires.key()
+            DesignCommand::JoinCollinearWires.key()
         ]
     );
 

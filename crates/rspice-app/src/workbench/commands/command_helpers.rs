@@ -6,7 +6,6 @@ use crate::state::ViewType;
 use crate::workbench::app::actions::workspace::{HistoryStepParts, take_history_step};
 use crate::workbench::app::dialogs::project::configuration_dialogs::{Leaving, go_on_leaving};
 use crate::workbench::app::dialogs::project::new_project::NewProjectDialogState;
-pub(super) use crate::workbench::app::dialogs::selection::commands::schematic_selection_has_live_object;
 use crate::workbench::app::dialogs::source_document;
 use crate::workbench::code::commands::{
     CodeCommand, CodeRequest, NetlistEditorRequest, SourceDocumentRequest,

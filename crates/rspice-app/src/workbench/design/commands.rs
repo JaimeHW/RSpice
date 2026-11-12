@@ -2,13 +2,15 @@
 //! so far the Stimulus Library's verbs, the dialogs the Design, Edit and
 //! View menus open over the schematic, the schematic's placements, the
 //! canvas's select tool, grid and Fit content, the moves up and down the
-//! hierarchy, the design checks with their results' tour and clear, and
-//! the schematic's annotations.
+//! hierarchy, the design checks with their results' tour and clear, the
+//! schematic's annotations, the selection's turns, flips, layouts and snaps,
+//! the collinear join, and the project's standard-value series.
 //!
 //! What each command does is the feature's own; what it declares here is all
 //! the shell's order, menus, palette and shortcut profile read of it.
 
 use egui::Key;
+use rspice_vocabulary::quantity::ESeries;
 
 use crate::state::command_catalog::{
     CommandKey, CommandPlatform, ShortcutBinding, ShortcutChord, ShortcutContext, ShortcutKind,
@@ -131,6 +133,41 @@ pub(crate) enum DesignCommand {
     /// configuration, with every cellview of the project's own libraries the
     /// walk never reaches.
     CheckDesign,
+    /// Turn the selection a quarter clockwise: what floats under the
+    /// pointer, the schematic's selection, or a symbol's pins and shapes.
+    RotateSelection,
+    /// Turn the selection a quarter counter-clockwise.
+    RotateSelectionCounterClockwise,
+    /// Mirror the selection about a vertical axis.
+    MirrorSelectionHorizontal,
+    /// Mirror the selection about a horizontal axis.
+    MirrorSelectionVertical,
+    /// Line the selection up on its left edges.
+    AlignSelectionLeft,
+    /// Line the selection up on its horizontal centers.
+    AlignSelectionCenter,
+    /// Line the selection up on its right edges.
+    AlignSelectionRight,
+    /// Line the selection up on its top edges.
+    AlignSelectionTop,
+    /// Line the selection up on its vertical centers.
+    AlignSelectionMiddle,
+    /// Line the selection up on its bottom edges.
+    AlignSelectionBottom,
+    /// Space the selection evenly from left to right.
+    DistributeSelectionHorizontal,
+    /// Space the selection evenly from top to bottom.
+    DistributeSelectionVertical,
+    /// Move every selected object's anchor to the nearest grid point.
+    SnapSelectionToGrid,
+    /// Snap each selected resistor, capacitor and inductor to the nearest
+    /// value of the project's preferred-number series.
+    SnapToStandardValue,
+    /// Choose the preferred-number series the project's values step along.
+    SetStandardValueSeries(ESeries),
+    /// Lay the active sheet's wires that run on one line, end to end or
+    /// overlapping, as one wire each.
+    JoinCollinearWires,
 }
 
 const EVERYWHERE: &[CommandPlatform] = &CommandPlatform::ALL;
@@ -264,10 +301,28 @@ const CHECK_CELLVIEW: &[ShortcutBinding] = &[primary(
     chord(Key::E, true, false, false, "Ctrl+E"),
     EVERYWHERE,
 )];
+// The symbol canvas gives Ctrl+R and Ctrl+M the same meaning for its pins;
+// the two contexts never match the same view.
+const ROTATE_SELECTION: &[ShortcutBinding] = &[primary(
+    chord(Key::R, true, false, false, "Ctrl+R"),
+    EVERYWHERE,
+)];
+const ROTATE_SELECTION_CCW: &[ShortcutBinding] = &[primary(
+    chord(Key::R, true, false, true, "Ctrl+Shift+R"),
+    EVERYWHERE,
+)];
+const MIRROR_SELECTION_HORIZONTAL: &[ShortcutBinding] = &[primary(
+    chord(Key::M, true, false, false, "Ctrl+M"),
+    EVERYWHERE,
+)];
+const MIRROR_SELECTION_VERTICAL: &[ShortcutBinding] = &[primary(
+    chord(Key::M, true, false, true, "Ctrl+Shift+M"),
+    EVERYWHERE,
+)];
 
 impl DesignCommand {
     /// Every command the registry lists, in the feature's own order.
-    pub(crate) const ALL: [Self; 53] = [
+    pub(crate) const ALL: [Self; 74] = [
         Self::NewStimulusDefinition,
         Self::DuplicateStimulusDefinition,
         Self::DeleteStimulusDefinition,
@@ -321,6 +376,27 @@ impl DesignCommand {
         Self::AnnotateTransientVoltages,
         Self::CheckCellview,
         Self::CheckDesign,
+        Self::RotateSelection,
+        Self::RotateSelectionCounterClockwise,
+        Self::MirrorSelectionHorizontal,
+        Self::MirrorSelectionVertical,
+        Self::AlignSelectionLeft,
+        Self::AlignSelectionCenter,
+        Self::AlignSelectionRight,
+        Self::AlignSelectionTop,
+        Self::AlignSelectionMiddle,
+        Self::AlignSelectionBottom,
+        Self::DistributeSelectionHorizontal,
+        Self::DistributeSelectionVertical,
+        Self::SnapSelectionToGrid,
+        Self::SnapToStandardValue,
+        Self::SetStandardValueSeries(ESeries::E6),
+        Self::SetStandardValueSeries(ESeries::E12),
+        Self::SetStandardValueSeries(ESeries::E24),
+        Self::SetStandardValueSeries(ESeries::E48),
+        Self::SetStandardValueSeries(ESeries::E96),
+        Self::SetStandardValueSeries(ESeries::E192),
+        Self::JoinCollinearWires,
     ];
 
     /// The key a shortcut profile names this command by.
@@ -379,6 +455,29 @@ impl DesignCommand {
             Self::AnnotateTransientVoltages => CommandKey::new("annotate-transient-voltages"),
             Self::CheckCellview => CommandKey::new("check-cellview"),
             Self::CheckDesign => CommandKey::new("check-design"),
+            Self::RotateSelection => CommandKey::new("rotate-selection"),
+            Self::RotateSelectionCounterClockwise => CommandKey::new("rotate-selection-ccw"),
+            Self::MirrorSelectionHorizontal => CommandKey::new("mirror-selection-horizontal"),
+            Self::MirrorSelectionVertical => CommandKey::new("mirror-selection-vertical"),
+            Self::AlignSelectionLeft => CommandKey::new("align-selection-left"),
+            Self::AlignSelectionCenter => CommandKey::new("align-selection-horizontal-centers"),
+            Self::AlignSelectionRight => CommandKey::new("align-selection-right"),
+            Self::AlignSelectionTop => CommandKey::new("align-selection-top"),
+            Self::AlignSelectionMiddle => CommandKey::new("align-selection-vertical-centers"),
+            Self::AlignSelectionBottom => CommandKey::new("align-selection-bottom"),
+            Self::DistributeSelectionHorizontal => {
+                CommandKey::new("distribute-selection-horizontal")
+            }
+            Self::DistributeSelectionVertical => CommandKey::new("distribute-selection-vertical"),
+            Self::SnapSelectionToGrid => CommandKey::new("snap-selection-to-grid"),
+            Self::SnapToStandardValue => CommandKey::new("snap-to-standard-value"),
+            Self::SetStandardValueSeries(ESeries::E6) => CommandKey::new("standard-values-e6"),
+            Self::SetStandardValueSeries(ESeries::E12) => CommandKey::new("standard-values-e12"),
+            Self::SetStandardValueSeries(ESeries::E24) => CommandKey::new("standard-values-e24"),
+            Self::SetStandardValueSeries(ESeries::E48) => CommandKey::new("standard-values-e48"),
+            Self::SetStandardValueSeries(ESeries::E96) => CommandKey::new("standard-values-e96"),
+            Self::SetStandardValueSeries(ESeries::E192) => CommandKey::new("standard-values-e192"),
+            Self::JoinCollinearWires => CommandKey::new("join-collinear-wires"),
         }
     }
 
@@ -432,6 +531,11 @@ impl DesignCommand {
     /// annotation switches the global one. Both design checks commit the
     /// inspector's pending edit and are chords of the design workspace;
     /// checking the whole design also needs an open project.
+    /// Every turn, flip, layout and snap, and the collinear join, edits the
+    /// drawing and is one Repeat last command runs again; the turns and
+    /// flips have chords, and they and the snaps are chords of the canvas.
+    /// Choosing the standard-value series needs an open project and is a
+    /// chord of the design workspace.
     pub(crate) const fn declared_spec(self) -> CommandSpec {
         let palette = CommandFlags::PALETTE_VISIBLE;
         let open = palette.with(CommandFlags::REQUIRES_OPEN_PROJECT, true);
@@ -453,6 +557,7 @@ impl DesignCommand {
             .with(CommandFlags::COMMITS_INSPECTOR_EDIT, true);
         let violations = ShortcutContext::ViolationNavigation;
         let checks_project = open.with(CommandFlags::COMMITS_INSPECTOR_EDIT, true);
+        let arrange = edits.with(CommandFlags::REPEATABLE, true);
         let (label, group, flags, context, bindings) = match self {
             Self::NewStimulusDefinition => {
                 ("New stimulus definition", STIMULUS, open, global, NONE)
@@ -636,6 +741,68 @@ impl DesignCommand {
             // layouts, and every other chord of the check family is taken;
             // the Design menu, the toolbar and the palette are its routes.
             Self::CheckDesign => ("Check design", "Design", checks_project, design, NONE),
+            Self::RotateSelection => (
+                "Rotate clockwise",
+                "Design",
+                arrange,
+                canvas,
+                ROTATE_SELECTION,
+            ),
+            Self::RotateSelectionCounterClockwise => (
+                "Rotate counter-clockwise",
+                "Design",
+                arrange,
+                canvas,
+                ROTATE_SELECTION_CCW,
+            ),
+            Self::MirrorSelectionHorizontal => (
+                "Mirror about vertical axis",
+                "Design",
+                arrange,
+                canvas,
+                MIRROR_SELECTION_HORIZONTAL,
+            ),
+            Self::MirrorSelectionVertical => (
+                "Mirror about horizontal axis",
+                "Design",
+                arrange,
+                canvas,
+                MIRROR_SELECTION_VERTICAL,
+            ),
+            Self::AlignSelectionLeft => ("Align left", "Design", arrange, global, NONE),
+            Self::AlignSelectionCenter => {
+                ("Align horizontal centers", "Design", arrange, global, NONE)
+            }
+            Self::AlignSelectionRight => ("Align right", "Design", arrange, global, NONE),
+            Self::AlignSelectionTop => ("Align top", "Design", arrange, global, NONE),
+            Self::AlignSelectionMiddle => {
+                ("Align vertical centers", "Design", arrange, global, NONE)
+            }
+            Self::AlignSelectionBottom => ("Align bottom", "Design", arrange, global, NONE),
+            Self::DistributeSelectionHorizontal => {
+                ("Distribute horizontally", "Design", arrange, global, NONE)
+            }
+            Self::DistributeSelectionVertical => {
+                ("Distribute vertically", "Design", arrange, global, NONE)
+            }
+            Self::SnapSelectionToGrid => {
+                ("Snap selection to grid", "Design", arrange, canvas, NONE)
+            }
+            Self::SnapToStandardValue => {
+                ("Snap to standard value", "Design", arrange, canvas, NONE)
+            }
+            Self::SetStandardValueSeries(series) => {
+                let label = match series {
+                    ESeries::E6 => "E6 standard values",
+                    ESeries::E12 => "E12 standard values",
+                    ESeries::E24 => "E24 standard values",
+                    ESeries::E48 => "E48 standard values",
+                    ESeries::E96 => "E96 standard values",
+                    ESeries::E192 => "E192 standard values",
+                };
+                (label, "Design", open, design, NONE)
+            }
+            Self::JoinCollinearWires => ("Join collinear wires", "Design", arrange, global, NONE),
         };
         CommandSpec {
             key: self.key(),

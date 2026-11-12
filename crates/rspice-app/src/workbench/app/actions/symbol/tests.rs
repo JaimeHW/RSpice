@@ -163,7 +163,15 @@ fn symbol_transforms_keep_geometry_and_metadata_in_one_undo_entry() {
     selection.shapes.insert(0);
     selection.attributes.insert(SymbolAttributeKind::Reference);
     app.state.design.symbol.editor.set_selection(selection);
-    app.transform_selected_symbol_item(SymbolTransform::Rotate);
+    let modal_open = app.state.application_modal_open();
+    let state = &mut app.state;
+    transform_selected_symbol_item(
+        &mut state.design.symbol,
+        &mut state.model,
+        &mut state.workbench,
+        modal_open,
+        SymbolTransform::Rotate,
+    );
     let after = app.state.model.load_active_symbol_document().unwrap();
     assert_eq!(after.pin("IN").unwrap().position, Some(Point::new(20, -30)));
     assert_eq!(

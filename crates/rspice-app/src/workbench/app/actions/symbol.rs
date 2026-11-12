@@ -31,25 +31,6 @@ impl RSpiceApp {
         );
     }
 
-    pub(in crate::workbench) fn transform_selected_symbol_item(
-        &mut self,
-        transform: SymbolTransform,
-    ) {
-        if self
-            .state
-            .design
-            .symbol
-            .editor
-            .effective_selection()
-            .is_empty()
-            || self.state.deny_read_only_edit()
-        {
-            return;
-        }
-        let request = edit_request(&self.state, SymbolEditAction::Transform(transform));
-        apply_edit_request(&mut self.state, request);
-    }
-
     pub(crate) fn transform_selected_symbol_pin(&mut self, transform: SymbolPinTransform) {
         if self
             .state
@@ -82,6 +63,23 @@ impl RSpiceApp {
         let request = edit_request(&self.state, SymbolEditAction::FinishPolyline { points });
         apply_edit_request(&mut self.state, request);
     }
+}
+
+/// Turn or flip the selected pins and shapes as one edit. `modal_open` is
+/// whether anything holding the application modal is open, which refuses
+/// the edit.
+pub(crate) fn transform_selected_symbol_item(
+    symbol: &mut SymbolUiState,
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
+    modal_open: bool,
+    transform: SymbolTransform,
+) {
+    if symbol.editor.effective_selection().is_empty() || deny_read_only_edit(model, wb) {
+        return;
+    }
+    let request = symbol_edit_request(symbol, model, wb, SymbolEditAction::Transform(transform));
+    apply_symbol_edit_request(symbol, model, wb, modal_open, request);
 }
 
 pub(crate) fn select_all_symbol_items(

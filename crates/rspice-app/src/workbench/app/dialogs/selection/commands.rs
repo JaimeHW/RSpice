@@ -318,36 +318,43 @@ impl AppState {
         }
         pasted
     }
+}
 
-    /// Join Collinear Wires on the active sheet, as one undo step: every pair
-    /// of wires that runs on one line, end to end or overlapping, becomes one
-    /// wire, and the junction policy tidies what is left. Returns whether
-    /// anything was joined.
-    pub(crate) fn join_collinear_wires_on_active_sheet(&mut self) -> bool {
-        if refuse_read_only(&self.model) {
-            return false;
-        }
-        let automatic_junctions = self.model.schematic.session.editor.automatic_junctions;
-        // The undo step opens with every sheet present; the cell view's
-        // other sheets, which share these coordinates, step out of reach
-        // only while this one's wires are joined.
-        self.model.schematic.begin_operation("join collinear wires");
-        with_active_wire_topology(self, |schematic, scope| {
+/// Join Collinear Wires on the active sheet, as one undo step: every pair of
+/// wires that runs on one line, end to end or overlapping, becomes one wire,
+/// and the junction policy tidies what is left. Returns whether anything was
+/// joined.
+pub(crate) fn join_collinear_wires_on_active_sheet(
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
+) -> bool {
+    if refuse_read_only(model) {
+        return false;
+    }
+    let automatic_junctions = model.schematic.session.editor.automatic_junctions;
+    // The undo step opens with every sheet present; the cell view's other
+    // sheets, which share these coordinates, step out of reach only while
+    // this one's wires are joined.
+    model.schematic.begin_operation("join collinear wires");
+    with_active_wire_topology_in(
+        &model.workspace,
+        &mut model.schematic,
+        |schematic, scope| {
             if schematic.join_collinear_wires(scope) {
                 schematic.cleanup_wire_topology_with_junction_policy(automatic_junctions, scope);
             }
-        });
-        let joined = self.model.schematic.end_operation();
-        if joined {
-            self.sync_active_schematic_to_workspace();
-        }
-        self.prompt(if joined {
-            "Joined collinear wires."
-        } else {
-            "No collinear wires to join on this sheet."
-        });
-        joined
+        },
+    );
+    let joined = model.schematic.end_operation();
+    if joined {
+        sync_active_schematic(model, wb);
     }
+    wb.prompt(if joined {
+        "Joined collinear wires."
+    } else {
+        "No collinear wires to join on this sheet."
+    });
+    joined
 }
 
 /// Whether the schematic refuses edits. Silent: every place these commands are

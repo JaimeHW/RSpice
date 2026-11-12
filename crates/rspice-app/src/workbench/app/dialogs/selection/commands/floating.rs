@@ -272,8 +272,11 @@ pub(crate) fn cancel_floating_paste(state: &mut AppState) -> bool {
 
 /// Turn or flip the floating copy about its middle. Returns whether a copy
 /// was floating.
-pub(crate) fn turn_floating_paste(state: &mut AppState, transform: SelectionTransform) -> bool {
-    let Some(floating) = state.design.floating_paste.as_mut() else {
+pub(crate) fn turn_floating_paste(
+    floating: &mut Option<FloatingPaste>,
+    transform: SelectionTransform,
+) -> bool {
+    let Some(floating) = floating.as_mut() else {
         return false;
     };
     transform_clipboard(&mut floating.objects, transform);

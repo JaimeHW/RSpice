@@ -188,7 +188,7 @@ pub(crate) use actions::property_edit::{
 };
 pub(crate) use actions::stimulus_placement::arm_placement_from_definition;
 
-pub(crate) use actions::workspace::copy_active_schematic_selection;
+pub(crate) use actions::workspace::{copy_active_schematic_selection, sync_active_schematic};
 pub(crate) use dialogs::find_replace::find_replace_matches;
 pub(crate) use dialogs::placement::net_label::{
     open_net_label_placement, place_sequenced_net_label,
@@ -202,8 +202,9 @@ pub(crate) use dialogs::selection::commands::floating::{
 };
 pub(crate) use dialogs::selection::commands::{
     cut_schematic_selection, delete_schematic_selection, duplicate_schematic_selection,
-    duplicate_schematic_selection_at, paste_schematic_clipboard, paste_schematic_clipboard_at,
-    schematic_grid_step, select_all_schematic_objects,
+    duplicate_schematic_selection_at, join_collinear_wires_on_active_sheet,
+    paste_schematic_clipboard, paste_schematic_clipboard_at, schematic_grid_step,
+    select_all_schematic_objects,
 };
 pub(crate) use dialogs::selection::move_selection::{
     arm_move_selection, armed_move_selection_authority, cancel_armed_move_selection,

@@ -120,10 +120,14 @@ pub(crate) fn cx_with_menu_answers<F: Registered>(
 }
 
 /// The context `F`'s command runs in, as [`cx`] lends it, holding whether
-/// anything the dialog gate counts is open, taken as the run starts.
+/// anything the dialog gate counts is open and whether anything holding the
+/// application modal is, both taken as the run starts.
 fn command_cx<F: Registered>(app: &mut RSpiceApp) -> Cx<'_, F> {
     let dialog_modal = app.state.dialog_modal_open();
-    F::cx(app).with_dialog_modal(dialog_modal)
+    let application_modal = app.state.application_modal_open();
+    F::cx(app)
+        .with_dialog_modal(dialog_modal)
+        .with_application_modal(application_modal)
 }
 
 /// Carry out `routed` where `F` takes it here, and say whether it did. Its

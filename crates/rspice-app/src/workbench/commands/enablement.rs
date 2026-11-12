@@ -66,54 +66,6 @@ impl Command {
                     )
                     .is_empty()
             }
-            Self::RotateSelection
-            | Self::RotateSelectionCounterClockwise
-            | Self::MirrorSelectionHorizontal
-            | Self::MirrorSelectionVertical
-                if active_symbol_editor(app) =>
-            {
-                !state.active_view_read_only()
-                    && !state.design.symbol.editor.effective_selection().is_empty()
-            }
-            Self::RotateSelection
-            | Self::RotateSelectionCounterClockwise
-            | Self::MirrorSelectionHorizontal
-            | Self::MirrorSelectionVertical => {
-                active_schematic_editor(app)
-                    && !state.schematic_edit_read_only()
-                    && (schematic_selection_has_live_object(&state.model.schematic)
-                        || state.design.floating_paste.is_some())
-            }
-            Self::AlignSelectionLeft
-            | Self::AlignSelectionCenter
-            | Self::AlignSelectionRight
-            | Self::AlignSelectionTop
-            | Self::AlignSelectionMiddle
-            | Self::AlignSelectionBottom
-            | Self::DistributeSelectionHorizontal
-            | Self::DistributeSelectionVertical => {
-                active_schematic_editor(app)
-                    && selection_layout_command(self).is_some_and(|command| {
-                        crate::schematic::view::selection_layout::selection_layout_availability(
-                            state, command,
-                        )
-                        .is_ok()
-                    })
-            }
-            Self::JoinCollinearWires => {
-                active_schematic_editor(app) && !state.schematic_edit_read_only()
-            }
-            Self::SnapSelectionToGrid => {
-                active_schematic_editor(app)
-                    && !state.schematic_edit_read_only()
-                    && !state.model.schematic.session.editor.selection.is_empty()
-            }
-            Self::SnapToStandardValue => {
-                active_schematic_editor(app)
-                    && crate::schematic::view::standard_value_snap::snap_block_reason(state)
-                        .is_none()
-            }
-            Self::SetStandardValueSeries(_) => true,
             Self::MoveSelection => {
                 active_schematic_editor(app)
                     && !state.schematic_edit_read_only()
@@ -301,9 +253,6 @@ impl Command {
             Self::ToggleConsole => Some(workbench.console_visible && !workbench.focus_mode),
             Self::ToggleFocusMode => Some(workbench.focus_mode),
             Self::ToggleFullScreen => Some(workbench.full_screen_presentation),
-            Self::SetStandardValueSeries(series) => {
-                Some(app.state.model.workspace.content.standard_value_series == series)
-            }
             _ => None,
         }
     }

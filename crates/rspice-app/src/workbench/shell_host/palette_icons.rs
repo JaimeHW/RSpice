@@ -16,7 +16,6 @@ use crate::workbench::simulate::commands::SimulateCommand;
 /// scope's.
 pub(super) fn palette_icon(command: Command) -> Option<Icon> {
     let icon = match command {
-        Command::JoinCollinearWires => Icon::Wire,
         Command::MoveSelection | Command::StretchSelection => Icon::Select,
         Command::ArraySelection => Icon::Grid,
         Command::SwapToRSpiceSymbols => Icon::Refresh,
@@ -66,6 +65,7 @@ pub(super) fn feature_palette_icon(key: CommandKey) -> Option<Icon> {
             DesignCommand::ReplaceInstance => Some(Icon::Refresh),
             DesignCommand::CreateHierarchy => Some(Icon::Folder),
             DesignCommand::CheckCellview | DesignCommand::CheckDesign => Some(Icon::Check),
+            DesignCommand::JoinCollinearWires => Some(Icon::Wire),
             _ => None,
         };
     }

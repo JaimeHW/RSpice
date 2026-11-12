@@ -4,10 +4,9 @@
 //! keys during a move share this one route, so the pivot, the sheet scope and
 //! the undo step cannot differ by how the edit was asked for.
 
-use super::SchematicSymbolContext;
-use super::sheet_visibility::{retain_selection_on_active_sheet, with_active_wire_topology};
+use super::sheet_visibility::{retain_selection_on_active_sheet_in, with_active_wire_topology_in};
+use super::{Model, SchematicSymbolContext, WorkbenchSession, sync_active_schematic};
 use crate::state::Point;
-use crate::workbench::app_state::AppState;
 pub(crate) use rspice_design::schematic::component_edit::SelectionTransform;
 
 /// The middle of `bounds`, snapped to the nearest point of a `grid` pitch.
@@ -26,38 +25,40 @@ fn snapped_middle((min_x, min_y, max_x, max_y): (i32, i32, i32, i32), grid: i32)
 /// the grid-snapped middle of its bounds, in one undo step. Returns whether
 /// anything moved.
 pub(crate) fn transform_selection_on_active_sheet(
-    state: &mut AppState,
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
     symbol_context: &SchematicSymbolContext,
     transform: SelectionTransform,
 ) -> bool {
-    if state.schematic_edit_read_only() {
+    if model.schematic_edit_read_only() {
         return false;
     }
-    retain_selection_on_active_sheet(state);
+    retain_selection_on_active_sheet_in(model);
     let Some(bounds) = symbol_context.selection_bounds(
-        state.model.schematic.document(),
-        &state.model.schematic.session.editor.selection,
+        model.schematic.document(),
+        &model.schematic.session.editor.selection,
     ) else {
         return false;
     };
-    let pivot = snapped_middle(bounds, state.model.schematic.document().grid_size);
+    let pivot = snapped_middle(bounds, model.schematic.document().grid_size);
     // The undo step opens with every sheet present; the other sheets step
     // out of reach only while the wires are rerouted and tidied.
-    state
-        .model
-        .schematic
-        .begin_operation(transform.description());
-    with_active_wire_topology(state, |schematic, scope| {
-        schematic.transform_selection(
-            transform,
-            pivot,
-            |component| symbol_context.terminal_points(component),
-            scope,
-        )
-    });
-    let recorded = state.model.schematic.end_operation();
+    model.schematic.begin_operation(transform.description());
+    with_active_wire_topology_in(
+        &model.workspace,
+        &mut model.schematic,
+        |schematic, scope| {
+            schematic.transform_selection(
+                transform,
+                pivot,
+                |component| symbol_context.terminal_points(component),
+                scope,
+            )
+        },
+    );
+    let recorded = model.schematic.end_operation();
     if recorded {
-        state.sync_active_schematic_to_workspace();
+        sync_active_schematic(model, wb);
     }
     recorded
 }
@@ -100,7 +101,8 @@ mod tests {
 
         let symbols = super::super::schematic_symbol_context(&state);
         assert!(transform_selection_on_active_sheet(
-            &mut state,
+            &mut state.model,
+            &mut state.workbench,
             &symbols,
             SelectionTransform::RotateClockwise,
         ));

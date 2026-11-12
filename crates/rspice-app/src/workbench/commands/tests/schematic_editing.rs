@@ -100,20 +100,25 @@ fn transform_commands_keep_wires_attached_to_authored_symbol_pins() {
     // origin (audit E-2), so the pin's new place is read back from the
     // resolved symbol rather than written down.
     let cases = [
-        (Command::RotateSelection, Rotation::R90, false, false),
+        (DesignCommand::RotateSelection, Rotation::R90, false, false),
         (
-            Command::MirrorSelectionHorizontal,
+            DesignCommand::MirrorSelectionHorizontal,
             Rotation::R0,
             true,
             false,
         ),
-        (Command::MirrorSelectionVertical, Rotation::R0, false, true),
+        (
+            DesignCommand::MirrorSelectionVertical,
+            Rotation::R0,
+            false,
+            true,
+        ),
     ];
 
     for (command, rotation, mirror_h, mirror_v) in cases {
         let mut app = app_with_selected_authored_symbol();
 
-        command.execute(&mut app);
+        app.execute_command_key(command.key());
 
         let document = app.state.model.schematic.document();
         let part = &document.components[0];
@@ -176,7 +181,7 @@ fn rotate_turns_the_whole_selection_as_one_body() {
     let (mut app, _) = app_with_selected_resistor_pair();
     let before = app.state.model.schematic.document().clone();
 
-    Command::RotateSelection.execute(&mut app);
+    app.execute_command_key(DesignCommand::RotateSelection.key());
 
     let after = app.state.model.schematic.document();
     let pos = |document: &rspice_design::schematic::document::SchematicDocument, id: u64| {
@@ -224,11 +229,11 @@ fn rotate_and_mirror_are_offered_for_any_selected_object() {
         .selection
         .select_net_label(5);
     for command in [
-        Command::RotateSelection,
-        Command::MirrorSelectionHorizontal,
-        Command::MirrorSelectionVertical,
+        DesignCommand::RotateSelection,
+        DesignCommand::MirrorSelectionHorizontal,
+        DesignCommand::MirrorSelectionVertical,
     ] {
-        assert!(command.is_enabled(&app), "{command:?}");
+        assert!(app.command_key_enabled(command.key()), "{command:?}");
     }
 }
 
@@ -237,7 +242,7 @@ fn rotate_and_mirror_are_offered_for_any_selected_object() {
 #[test]
 fn a_wire_attached_to_a_turned_part_keeps_square_corners() {
     let (mut app, stub) = app_with_selected_resistor_pair();
-    Command::RotateSelection.execute(&mut app);
+    app.execute_command_key(DesignCommand::RotateSelection.key());
     let after = app.state.model.schematic.document();
     let wire = after
         .wires
@@ -294,7 +299,7 @@ fn turning_a_part_off_a_pin_it_touched_wires_the_two_pins() {
         .select_only_component(2);
     app.state.model.schematic.init_undo_history();
 
-    Command::RotateSelection.execute(&mut app);
+    app.execute_command_key(DesignCommand::RotateSelection.key());
 
     let symbols = crate::schematic::view::schematic_symbol_context(&app.state);
     let document = app.state.model.schematic.document();
@@ -324,25 +329,24 @@ fn turning_a_part_off_a_pin_it_touched_wires_the_two_pins() {
 /// a placed selection before, and there was no counter-clockwise turn.
 #[test]
 fn rotate_and_mirror_have_their_keys_on_the_canvas() {
-    use crate::state::command_catalog::{CommandPlatform, ShortcutContext};
+    use crate::state::command_catalog::{CommandKey, CommandPlatform, ShortcutContext};
 
-    let counter_clockwise =
-        Command::from_stable_id("rotate-selection-ccw").expect("a counter-clockwise rotate");
+    let counter_clockwise = DesignCommand::from_key(CommandKey::new("rotate-selection-ccw"))
+        .expect("a counter-clockwise rotate");
     for (command, key) in [
-        (Command::RotateSelection, "Ctrl+R"),
+        (DesignCommand::RotateSelection, "Ctrl+R"),
         (counter_clockwise, "Ctrl+Shift+R"),
-        (Command::MirrorSelectionHorizontal, "Ctrl+M"),
-        (Command::MirrorSelectionVertical, "Ctrl+Shift+M"),
+        (DesignCommand::MirrorSelectionHorizontal, "Ctrl+M"),
+        (DesignCommand::MirrorSelectionVertical, "Ctrl+Shift+M"),
     ] {
-        assert_eq!(
-            command.default_shortcut_label(CommandPlatform::Desktop),
-            key,
-            "{command:?}"
-        );
-        assert_eq!(
-            command.shortcut_context(),
-            ShortcutContext::EngineeringCanvas
-        );
+        let spec = command.declared_spec();
+        let label = spec
+            .bindings
+            .iter()
+            .find(|binding| binding.supports(CommandPlatform::Desktop))
+            .map_or("", |binding| binding.chord.label);
+        assert_eq!(label, key, "{command:?}");
+        assert_eq!(spec.context, ShortcutContext::EngineeringCanvas);
     }
 }
 
@@ -388,7 +392,9 @@ fn plain_r_turns_the_selection_while_move_carries_it() {
 #[test]
 fn horizontal_coordinate_reflection_is_labeled_by_its_vertical_mirror_axis() {
     assert_eq!(
-        Command::MirrorSelectionHorizontal.spec().label,
+        DesignCommand::MirrorSelectionHorizontal
+            .declared_spec()
+            .label,
         "Mirror about vertical axis"
     );
 }
@@ -1625,9 +1631,9 @@ fn join_collinear_wires_lays_a_straight_run_as_one_wire_in_one_undo_step() {
     document.junctions.clear();
     document.wires = vec![first.clone(), second.clone()];
     app.state.model.schematic.init_undo_history();
-    assert!(Command::JoinCollinearWires.is_enabled(&app));
+    assert!(app.command_key_enabled(DesignCommand::JoinCollinearWires.key()));
 
-    Command::JoinCollinearWires.execute(&mut app);
+    app.execute_command_key(DesignCommand::JoinCollinearWires.key());
 
     let wires = &app.state.model.schematic.document().wires;
     assert_eq!(wires.len(), 1, "{wires:?}");
@@ -1687,7 +1693,7 @@ fn repeat_runs_the_last_edit_again_on_the_canvas_key() {
     };
     let before = offset(&app);
 
-    Command::RotateSelection.execute(&mut app);
+    app.execute_command_key(DesignCommand::RotateSelection.key());
     assert!(repeat.is_enabled(&app));
     repeat.execute(&mut app);
 
@@ -1700,7 +1706,7 @@ fn repeat_runs_the_last_edit_again_on_the_canvas_key() {
     assert_eq!(
         vocabulary::last_repeatable(app.state.workbench.last_repeatable_command.as_deref())
             .map(|spec| spec.key),
-        Some(Command::RotateSelection.key()),
+        Some(DesignCommand::RotateSelection.key()),
         "an undo is not what Repeat repeats"
     );
 }

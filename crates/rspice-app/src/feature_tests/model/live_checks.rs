@@ -273,7 +273,8 @@ fn a_finding_a_live_pass_restated_is_marked_once_where_it_now_is() {
     let symbols = crate::schematic::view::schematic_symbol_context(&state);
     assert!(
         crate::schematic::view::selection_transform::transform_selection_on_active_sheet(
-            &mut state,
+            &mut state.model,
+            &mut state.workbench,
             &symbols,
             crate::schematic::view::selection_transform::SelectionTransform::RotateClockwise,
         )

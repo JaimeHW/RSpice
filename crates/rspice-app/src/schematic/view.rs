@@ -7,8 +7,9 @@ use std::sync::Arc;
 
 use egui::Ui;
 
-use crate::workbench::app::symbol_context_revision;
-use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::app::{symbol_context_revision, sync_active_schematic};
+use crate::workbench::app_state::{AppState, Model, model_design_view};
+use crate::workbench::state::WorkbenchSession;
 
 use super::symbols::SymbolLibrary;
 
@@ -91,7 +92,7 @@ pub(crate) fn shelf_drag_over_schematic_canvas(ctx: &egui::Context) -> bool {
 pub(super) fn schematic_design_view(
     state: &AppState,
 ) -> rspice_schematic_editor::view::design_view::DesignView<'_> {
-    crate::workbench::app_state::model_design_view(
+    model_design_view(
         &state.model,
         state.design.schematic_visibility.review_markers,
     )

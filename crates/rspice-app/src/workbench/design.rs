@@ -7,12 +7,19 @@ pub(crate) mod commands;
 mod routed;
 
 use egui::Context;
-use rspice_schematic_editor::symbol_editor::commands::activate_tool;
+use rspice_schematic_editor::symbol_editor::commands::{SymbolTransform, activate_tool};
 use rspice_schematic_editor::symbol_editor::session::SymbolTool;
 
+use crate::schematic::view::grid_snap_selection::run_snap_selection_to_grid;
+use crate::schematic::view::selection_layout::{
+    SelectionLayoutCommand, apply_selection_layout, selection_layout_availability,
+};
+use crate::schematic::view::selection_transform::{
+    SelectionTransform, transform_selection_on_active_sheet,
+};
+use crate::schematic::view::standard_value_snap::{run_snap_to_standard_value, snap_block_reason};
 use crate::schematic::view::transient_annotation_status;
 use crate::state::{ComponentType, GridStyle, SchematicAnnotationVisibility, Tool};
-use crate::workbench::app::actions::stimulus;
 use crate::workbench::app::actions::workspace::design_checks;
 use crate::workbench::app::actions::workspace::symbol_document::{
     active_symbol_pin_finding_count, clear_active_symbol_pin_checks, run_active_symbol_pin_checks,
@@ -20,6 +27,7 @@ use crate::workbench::app::actions::workspace::symbol_document::{
 use crate::workbench::app::actions::workspace::{
     NavigationParts, selected_hierarchy_master, selected_instance_veriloga_source,
 };
+use crate::workbench::app::actions::{stimulus, transform_selected_symbol_item};
 use crate::workbench::app::dialogs::connectivity_manager::{
     ConnectivityManager, open_connectivity_manager,
 };
@@ -41,12 +49,16 @@ use crate::workbench::app::dialogs::property_dialog::PropertyDialog;
 use crate::workbench::app::dialogs::replace_instance::{
     ReplaceInstance, open_replace_instance_dialog, replace_instance_available,
 };
+use crate::workbench::app::dialogs::selection::commands::schematic_selection_has_live_object;
 use crate::workbench::app::dialogs::selection::{array, bulk_edit, rename, shared_properties};
 use crate::workbench::app::dialogs::{
     create_model_bound_symbol, find_replace, object_properties, placement, rule_setup,
     stimulus_link, symbol_definition, visibility_options,
 };
-use crate::workbench::app::{arm_schematic_tool, schematic_editor_request_source};
+use crate::workbench::app::{
+    arm_schematic_tool, join_collinear_wires_on_active_sheet, schematic_editor_request_source,
+    turn_floating_paste,
+};
 use crate::workbench::app_state::SlotFacts;
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec};
 use crate::workbench::framework::dialogs::DialogKey;
@@ -104,6 +116,14 @@ impl CommandSet for DesignCommand {
     /// a descent needs a schematic in front, then something to descend
     /// into. Clearing needs a check to have run against the view in front,
     /// and the tour a finding to visit; an annotation needs a schematic.
+    ///
+    /// A turn or flip with a symbol in front acts on its selection, which
+    /// must be editable and hold something; otherwise it, the snaps and the
+    /// collinear join need an editable schematic or testbench, and a turn
+    /// then needs a live object selected or a copy floating under the
+    /// pointer, and Snap selection to grid something selected. Snapping to a
+    /// standard value names what blocks it. A layout needs a schematic whose
+    /// selection it can lay out, and choosing the series only the project.
     fn availability(self, reads: &Reads<'_, DesignFeature>) -> CommandAvailability {
         let schematic = schematic_editor(reads);
         let selected = reads.state.selected_stimulus_definition.is_some();
@@ -173,6 +193,70 @@ impl CommandSet for DesignCommand {
             Self::AnnotateOperatingPoint | Self::AnnotateTransientVoltages => {
                 (!schematic).then_some("open a schematic or testbench")
             }
+            Self::RotateSelection
+            | Self::RotateSelectionCounterClockwise
+            | Self::MirrorSelectionHorizontal
+            | Self::MirrorSelectionVertical
+                if routed::symbol_editor(reads.wb.workspace, reads.model) =>
+            {
+                (reads.model.active_view_read_only()
+                    || reads.state.symbol.editor.effective_selection().is_empty())
+                .then_some("open an editable schematic or testbench")
+            }
+            Self::RotateSelection
+            | Self::RotateSelectionCounterClockwise
+            | Self::MirrorSelectionHorizontal
+            | Self::MirrorSelectionVertical
+            | Self::SnapSelectionToGrid
+            | Self::SnapToStandardValue
+            | Self::JoinCollinearWires
+                if !schematic =>
+            {
+                Some("open an editable schematic or testbench")
+            }
+            Self::RotateSelection
+            | Self::RotateSelectionCounterClockwise
+            | Self::MirrorSelectionHorizontal
+            | Self::MirrorSelectionVertical
+            | Self::SnapSelectionToGrid
+            | Self::JoinCollinearWires
+                if reads.model.schematic_edit_read_only() =>
+            {
+                Some("the active schematic is read-only")
+            }
+            Self::RotateSelection
+            | Self::RotateSelectionCounterClockwise
+            | Self::MirrorSelectionHorizontal
+            | Self::MirrorSelectionVertical => {
+                (!schematic_selection_has_live_object(&reads.model.schematic)
+                    && reads.state.floating_paste.is_none())
+                .then_some("select an editable object")
+            }
+            Self::SnapSelectionToGrid => reads
+                .model
+                .schematic
+                .session
+                .editor
+                .selection
+                .is_empty()
+                .then_some("select an editable object"),
+            Self::JoinCollinearWires | Self::SetStandardValueSeries(_) => None,
+            Self::SnapToStandardValue => snap_block_reason(reads.model),
+            Self::AlignSelectionLeft
+            | Self::AlignSelectionCenter
+            | Self::AlignSelectionRight
+            | Self::AlignSelectionTop
+            | Self::AlignSelectionMiddle
+            | Self::AlignSelectionBottom
+            | Self::DistributeSelectionHorizontal
+            | Self::DistributeSelectionVertical => {
+                let markers = reads.state.schematic_visibility.review_markers;
+                let lays_out = schematic
+                    && layout_command(self).is_some_and(|command| {
+                        selection_layout_availability(reads.model, markers, command).is_ok()
+                    });
+                (!lays_out).then_some("command is unavailable in this context")
+            }
             _ if self.places() && !schematic => Some("open an editable schematic or testbench"),
             _ if self.places() && reads.model.schematic_edit_read_only() => {
                 Some("the active schematic is read-only")
@@ -227,7 +311,8 @@ impl CommandSet for DesignCommand {
     }
 
     /// The grid styles are one choice: the style the schematic draws is the
-    /// one checked. Each annotation is checked while the schematic shows it.
+    /// one checked. Each annotation is checked while the schematic shows it,
+    /// and the standard-value series while the project steps along it.
     fn checked(self, reads: &Reads<'_, DesignFeature>) -> Option<bool> {
         let annotations = reads.state.schematic_visibility.annotations;
         let style = match self {
@@ -239,6 +324,9 @@ impl CommandSet for DesignCommand {
             }
             Self::AnnotateTransientVoltages => {
                 return Some(annotations == SchematicAnnotationVisibility::TransientVoltages);
+            }
+            Self::SetStandardValueSeries(series) => {
+                return Some(reads.model.workspace.content.standard_value_series == series);
             }
             _ => return None,
         };
@@ -483,6 +571,60 @@ impl CommandSet for DesignCommand {
                     cx.wb.prompt(status);
                 }
             }
+            // A symbol in front turns its own selected pins and shapes.
+            Self::RotateSelection
+            | Self::RotateSelectionCounterClockwise
+            | Self::MirrorSelectionHorizontal
+            | Self::MirrorSelectionVertical
+                if routed::symbol_editor(cx.wb.workspace, cx.model) =>
+            {
+                let modal_open = cx.application_modal_open();
+                transform_selected_symbol_item(
+                    &mut cx.state.symbol,
+                    cx.model,
+                    cx.wb,
+                    modal_open,
+                    symbol_transform(self),
+                );
+            }
+            // A copy floating under the pointer is what these act on.
+            Self::RotateSelection
+            | Self::RotateSelectionCounterClockwise
+            | Self::MirrorSelectionHorizontal
+            | Self::MirrorSelectionVertical => {
+                let transform = selection_transform(self);
+                if !turn_floating_paste(&mut cx.state.floating_paste, transform) {
+                    let symbols = cx.model.schematic_symbol_context();
+                    transform_selection_on_active_sheet(cx.model, cx.wb, &symbols, transform);
+                }
+            }
+            Self::JoinCollinearWires => {
+                join_collinear_wires_on_active_sheet(cx.model, cx.wb);
+            }
+            Self::SnapSelectionToGrid => {
+                let symbols = cx.model.schematic_symbol_context();
+                run_snap_selection_to_grid(cx.model, cx.wb, &symbols);
+            }
+            Self::SnapToStandardValue => run_snap_to_standard_value(cx.model, cx.wb),
+            Self::SetStandardValueSeries(series) => {
+                let workspace = &mut cx.model.workspace.content;
+                if workspace.standard_value_series != series {
+                    workspace.standard_value_series = series;
+                    workspace.project_metadata_dirty = true;
+                }
+            }
+            Self::AlignSelectionLeft
+            | Self::AlignSelectionCenter
+            | Self::AlignSelectionRight
+            | Self::AlignSelectionTop
+            | Self::AlignSelectionMiddle
+            | Self::AlignSelectionBottom
+            | Self::DistributeSelectionHorizontal
+            | Self::DistributeSelectionVertical => {
+                if let Some(command) = layout_command(self) {
+                    lay_out_selection(cx, command);
+                }
+            }
         }
     }
 }
@@ -554,6 +696,61 @@ fn schematic_editor(reads: &Reads<'_, DesignFeature>) -> bool {
             reads.model.workspace.content.active_view_type(),
             crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
         )
+}
+
+/// What a turn or flip does to the schematic's selection.
+fn selection_transform(command: DesignCommand) -> SelectionTransform {
+    match command {
+        DesignCommand::RotateSelectionCounterClockwise => {
+            SelectionTransform::RotateCounterClockwise
+        }
+        DesignCommand::MirrorSelectionHorizontal => SelectionTransform::MirrorHorizontal,
+        DesignCommand::MirrorSelectionVertical => SelectionTransform::MirrorVertical,
+        _ => SelectionTransform::RotateClockwise,
+    }
+}
+
+/// What a turn or flip does to a symbol's selected pins and shapes.
+fn symbol_transform(command: DesignCommand) -> SymbolTransform {
+    match command {
+        DesignCommand::RotateSelectionCounterClockwise => SymbolTransform::RotateCounterClockwise,
+        DesignCommand::MirrorSelectionHorizontal => SymbolTransform::MirrorHorizontal,
+        DesignCommand::MirrorSelectionVertical => SymbolTransform::MirrorVertical,
+        _ => SymbolTransform::Rotate,
+    }
+}
+
+/// The selection layout an alignment or a distribution asks for.
+fn layout_command(command: DesignCommand) -> Option<SelectionLayoutCommand> {
+    use SelectionLayoutCommand as Layout;
+    Some(match command {
+        DesignCommand::AlignSelectionLeft => Layout::AlignLeft,
+        DesignCommand::AlignSelectionCenter => Layout::AlignCenter,
+        DesignCommand::AlignSelectionRight => Layout::AlignRight,
+        DesignCommand::AlignSelectionTop => Layout::AlignTop,
+        DesignCommand::AlignSelectionMiddle => Layout::AlignMiddle,
+        DesignCommand::AlignSelectionBottom => Layout::AlignBottom,
+        DesignCommand::DistributeSelectionHorizontal => Layout::DistributeHorizontal,
+        DesignCommand::DistributeSelectionVertical => Layout::DistributeVertical,
+        _ => return None,
+    })
+}
+
+/// Lay the selection out by `command`, saying so where it moved nothing or
+/// could not be applied.
+fn lay_out_selection(cx: &mut Cx<'_, DesignFeature>, command: SelectionLayoutCommand) {
+    let symbols = cx.model.schematic_symbol_context();
+    let markers = cx.state.schematic_visibility.review_markers;
+    match apply_selection_layout(cx.model, cx.wb, markers, &symbols, command) {
+        // The moved selection is the answer to a completed layout.
+        Ok(true) => {}
+        Ok(false) => cx
+            .wb
+            .prompt(format!("{} produced no geometry change.", command.label())),
+        Err(error) => cx
+            .wb
+            .prompt(format!("{} was not applied: {error}.", command.label())),
+    }
 }
 
 /// The dialog steps the feature draws, under the keys the shell's dialog

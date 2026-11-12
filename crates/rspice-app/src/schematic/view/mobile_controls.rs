@@ -1,13 +1,14 @@
 //! App availability and command dispatch for the touch strip.
 //!
 //! The strip shows whenever the canvas is driven by touch, at any width
-//! (audit G-12). Every command button runs the same `Command` the menus and
+//! (audit G-12). Every command button runs the same command the menus and
 //! keys run; the two latches change what a one-finger gesture does.
 
 use crate::state::Tool;
+use crate::state::command_catalog::CommandKey;
 use crate::workbench::RSpiceApp;
 use crate::workbench::SurfaceId;
-use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::{commands::vocabulary::Command, design::commands::DesignCommand};
 use egui::{Context, Rect};
 use rspice_schematic_editor::view::mobile_controls::{
     self, MobileCanvasAction, MobileCanvasCapabilities, MobileCanvasRequest,
@@ -34,15 +35,15 @@ pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp, content_rect: Rect) {
     }
 }
 
-const fn product_command(action: MobileCanvasAction) -> Option<Command> {
+const fn product_command(action: MobileCanvasAction) -> Option<CommandKey> {
     match action {
         MobileCanvasAction::SelectBox | MobileCanvasAction::SelectAdd => None,
-        MobileCanvasAction::Rotate => Some(Command::RotateSelection),
-        MobileCanvasAction::Mirror => Some(Command::MirrorSelectionHorizontal),
-        MobileCanvasAction::Cancel => Some(Command::Cancel),
-        MobileCanvasAction::Undo => Some(Command::Undo),
-        MobileCanvasAction::Redo => Some(Command::Redo),
-        MobileCanvasAction::Fit => Some(Command::ZoomFit),
+        MobileCanvasAction::Rotate => Some(DesignCommand::RotateSelection.key()),
+        MobileCanvasAction::Mirror => Some(DesignCommand::MirrorSelectionHorizontal.key()),
+        MobileCanvasAction::Cancel => Some(Command::Cancel.key()),
+        MobileCanvasAction::Undo => Some(Command::Undo.key()),
+        MobileCanvasAction::Redo => Some(Command::Redo.key()),
+        MobileCanvasAction::Fit => Some(Command::ZoomFit.key()),
     }
 }
 
@@ -69,7 +70,7 @@ fn action_enabled(app: &RSpiceApp, action: MobileCanvasAction) -> bool {
         {
             true
         }
-        _ => product_command(action).is_some_and(|command| command.is_enabled(app)),
+        _ => product_command(action).is_some_and(|key| app.command_key_enabled(key)),
     }
 }
 
@@ -112,8 +113,8 @@ fn execute_action(ctx: &Context, app: &mut RSpiceApp, request: MobileCanvasReque
             let floated = floating_transform(action).is_some_and(|transform| {
                 super::shelf_drag::turn_what_floats(&mut app.state, transform)
             });
-            if !floated && let Some(command) = product_command(action) {
-                command.execute(app);
+            if !floated && let Some(key) = product_command(action) {
+                app.execute_command_key(key);
             }
         }
     }
