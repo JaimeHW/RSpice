@@ -1573,9 +1573,9 @@ pub fn evaluate_tran_equation_measurements(
         EquationMeasurementEvaluationError::Aborted => {
             "current measurement evaluation aborted".to_string()
         }
-        EquationMeasurementEvaluationError::Detail(error) => {
-            event_only_signal_miss(&error, result).unwrap_or(error)
-        }
+        EquationMeasurementEvaluationError::Detail(error) => private_endpoint_miss(&error, result)
+            .or_else(|| event_only_signal_miss(&error, result))
+            .unwrap_or(error),
     })?;
     for statement in measurements_for_analysis(netlist, "TRAN") {
         if matches!(statement.measure_type, MeasureType::Equation { .. })
@@ -6924,7 +6924,9 @@ pub fn evaluate_tran_measurements_with_abort(
     )?;
     for measurement in &mut measurements {
         let refusal = measurement.error.as_deref().and_then(|error| {
-            event_only_signal_miss(error, result).or_else(|| private_endpoint_miss(error, result))
+            // An unrecorded private endpoint is event-only too; the refusal
+            // that names its deck net is the one that says what to measure.
+            private_endpoint_miss(error, result).or_else(|| event_only_signal_miss(error, result))
         });
         if let Some(refusal) = refusal {
             measurement.error = Some(refusal);
@@ -8037,6 +8039,7 @@ mod tests {
             digital_buses: Vec::new(),
             real_traces: Vec::new(),
             hdl_sources: Vec::new(),
+            event_only_nodes: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
             fft_results: Vec::new(),
@@ -8061,6 +8064,7 @@ mod tests {
             digital_buses: Vec::new(),
             real_traces: Vec::new(),
             hdl_sources: Vec::new(),
+            event_only_nodes: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
             fft_results: Vec::new(),
@@ -8246,6 +8250,7 @@ mod tests {
             digital_buses: Vec::new(),
             real_traces: Vec::new(),
             hdl_sources: Vec::new(),
+            event_only_nodes: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
             fft_results: Vec::new(),
@@ -8822,6 +8827,7 @@ mod tests {
             digital_buses: Vec::new(),
             real_traces: Vec::new(),
             hdl_sources: Vec::new(),
+            event_only_nodes: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
             fft_results: Vec::new(),
@@ -8880,6 +8886,7 @@ mod tests {
             digital_buses: Vec::new(),
             real_traces: Vec::new(),
             hdl_sources: Vec::new(),
+            event_only_nodes: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
             fft_results: Vec::new(),
@@ -8929,6 +8936,7 @@ mod tests {
             digital_buses: Vec::new(),
             real_traces: Vec::new(),
             hdl_sources: Vec::new(),
+            event_only_nodes: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
             fft_results: Vec::new(),
@@ -8967,6 +8975,7 @@ mod tests {
             digital_buses: Vec::new(),
             real_traces: Vec::new(),
             hdl_sources: Vec::new(),
+            event_only_nodes: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
             fft_results: Vec::new(),
@@ -9015,6 +9024,7 @@ mod tests {
             digital_buses: Vec::new(),
             real_traces: Vec::new(),
             hdl_sources: Vec::new(),
+            event_only_nodes: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
             fft_results: Vec::new(),
@@ -9213,6 +9223,7 @@ mod tests {
             digital_buses: Vec::new(),
             real_traces: Vec::new(),
             hdl_sources: Vec::new(),
+            event_only_nodes: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
             fft_results: Vec::new(),
@@ -9319,6 +9330,7 @@ mod tests {
             digital_buses: Vec::new(),
             real_traces: Vec::new(),
             hdl_sources: Vec::new(),
+            event_only_nodes: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
             fft_results: Vec::new(),
@@ -9685,6 +9697,7 @@ mod tests {
             digital_buses: Vec::new(),
             real_traces: Vec::new(),
             hdl_sources: Vec::new(),
+            event_only_nodes: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
             fft_results: Vec::new(),
@@ -9787,6 +9800,7 @@ mod tests {
             digital_buses: Vec::new(),
             real_traces: Vec::new(),
             hdl_sources: Vec::new(),
+            event_only_nodes: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
             fft_results: Vec::new(),
@@ -9902,6 +9916,7 @@ mod tests {
             digital_buses: Vec::new(),
             real_traces: Vec::new(),
             hdl_sources: Vec::new(),
+            event_only_nodes: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
             fft_results: Vec::new(),
@@ -9996,6 +10011,7 @@ mod tests {
             digital_buses: Vec::new(),
             real_traces: Vec::new(),
             hdl_sources: Vec::new(),
+            event_only_nodes: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
             fft_results: Vec::new(),
@@ -10066,6 +10082,7 @@ mod tests {
             digital_buses: Vec::new(),
             real_traces: Vec::new(),
             hdl_sources: Vec::new(),
+            event_only_nodes: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
             fft_results: Vec::new(),
@@ -10137,6 +10154,7 @@ mod tests {
             digital_buses: Vec::new(),
             real_traces: Vec::new(),
             hdl_sources: Vec::new(),
+            event_only_nodes: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
             fft_results: Vec::new(),
@@ -10558,6 +10576,7 @@ mod tests {
             digital_buses: Vec::new(),
             real_traces: Vec::new(),
             hdl_sources: Vec::new(),
+            event_only_nodes: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
             fft_results: Vec::new(),
@@ -10647,6 +10666,7 @@ mod tests {
             digital_buses: Vec::new(),
             real_traces: Vec::new(),
             hdl_sources: Vec::new(),
+            event_only_nodes: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
             fft_results: Vec::new(),
@@ -11301,6 +11321,7 @@ mod tests {
             digital_buses: Vec::new(),
             real_traces: Vec::new(),
             hdl_sources: Vec::new(),
+            event_only_nodes: Vec::new(),
             device_op_traces: vec![
                 TransientDeviceOpTrace {
                     device_name: "Q1".to_string(),

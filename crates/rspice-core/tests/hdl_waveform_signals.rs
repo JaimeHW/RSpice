@@ -301,3 +301,82 @@ fn the_source_map_places_declarations_and_drivers() {
     assert!(after.disk_hits > before.disk_hits, "{before:?} {after:?}");
     assert_eq!(replayed.hdl_sources, result.hdl_sources);
 }
+
+/// A Verilog output's private event endpoint (`X1.Q__EVENT_0`) is published
+/// as an event signal or not at all, never as a voltage: its net has no
+/// voltage, so a `V()` column for it could only ever be empty. Both the
+/// converted output, whose endpoint the deck net `q` records under the
+/// author's name, and an unconverted one whose net only HDL ports touch
+/// carry no voltage descriptor in the result document.
+#[test]
+fn an_event_only_endpoint_is_never_published_as_a_voltage() {
+    use rspice_core::execution::{AnalysisInstanceId, AnalysisKind, AnalysisResultDocument};
+    let directory =
+        std::env::temp_dir().join(format!("rspice_event_only_endpoint_{}", std::process::id()));
+    std::fs::create_dir_all(&directory).expect("the directory");
+    let path = directory.join("gen.v");
+    std::fs::write(
+        &path,
+        "`timescale 1ns/1ns\n\
+         module gen(q);\n  output q;\n  reg q;\n\
+         \x20 initial begin q = 0; #3 q = 1; #4 q = 0; end\nendmodule\n\
+         module sink(d);\n  input d;\n  always @(d) $display(\"d=%b\", d);\nendmodule\n",
+    )
+    .expect("the module writes");
+    let path = path.display().to_string().replace('\\', "/");
+    for (case, deck, event_only) in [
+        (
+            "converted",
+            format!("* converted\n.hdl \"{path}\"\nx1 q gen\nrq q 0 1k\n.tran 1n 20n\n.end\n"),
+            "X1.Q__EVENT_0",
+        ),
+        (
+            "unconverted",
+            format!(
+                "* unconverted\n.hdl \"{path}\"\nx1 q gen\nx2 q sink\nr1 n 0 1k\nv1 n 0 1\n\
+                 .tran 1n 20n\n.end\n"
+            ),
+            "Q",
+        ),
+    ] {
+        let netlist = Netlist::parse(&deck).unwrap_or_else(|error| panic!("{case}: {error}"));
+        let result = Engine::default()
+            .run_tran(&netlist, 20e-9, 1e-9)
+            .unwrap_or_else(|error| panic!("{case}: {error}"));
+        assert_eq!(
+            result.event_only_node_kind(event_only),
+            Some(rspice_core::analysis::transient::EventOnlyNetKind::Digital),
+            "{case}: {event_only} is an event-only net"
+        );
+        let document = AnalysisResultDocument::from_transient(
+            AnalysisInstanceId::new(AnalysisKind::Tran, 0),
+            &result,
+            None,
+            Vec::new(),
+        )
+        .and_then(|builder| builder.build())
+        .unwrap_or_else(|error| panic!("{case}: {error}"));
+        let names = document
+            .signals()
+            .iter()
+            .map(|signal| signal.descriptor().display_name().to_owned())
+            .collect::<Vec<_>>();
+        assert!(
+            names.iter().all(|name| !name.contains("__EVENT_")),
+            "{case}: {names:?}"
+        );
+        assert!(
+            !names.contains(&format!("V({event_only})")),
+            "{case}: {names:?}"
+        );
+        if case == "converted" {
+            assert!(names.contains(&"V(Q)".to_owned()), "{case}: {names:?}");
+            assert!(result.digital_trace_named("Q").is_some(), "{case}");
+            assert!(
+                result.digital_trace_named(event_only).is_none(),
+                "{case}: the endpoint's bit is the deck net's own trace"
+            );
+        }
+    }
+    let _ = std::fs::remove_dir_all(&directory);
+}

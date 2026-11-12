@@ -721,6 +721,7 @@ mod tests {
             digital_buses: vec![],
             real_traces: vec![],
             hdl_sources: vec![],
+            event_only_nodes: Vec::new(),
             store_traces: vec![],
             fft_results: vec![],
             voltage_impulses: None,

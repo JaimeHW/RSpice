@@ -276,6 +276,7 @@ mod tests {
             digital_buses: vec![],
             real_traces: vec![],
             hdl_sources: vec![],
+            event_only_nodes: Vec::new(),
             device_op_traces: vec![lead("iout", 1.0e-3), lead("ia", 2.0e-3)],
             store_traces: vec![],
             fft_results: vec![],

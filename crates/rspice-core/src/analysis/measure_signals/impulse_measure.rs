@@ -425,6 +425,7 @@ mod tests {
             digital_buses: vec![],
             real_traces: vec![],
             hdl_sources: vec![],
+            event_only_nodes: Vec::new(),
             device_op_traces: vec![TransientDeviceOpTrace {
                 device_name: "Q1".into(),
                 parameter: "ic".into(),

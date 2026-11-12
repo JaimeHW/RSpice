@@ -831,6 +831,11 @@ pub struct TransientResultCompressed {
     /// end, or `None`, is in volts.
     pub potential_units: Vec<Option<String>>,
 
+    /// The event domain that owns each node channel outright, in node-channel
+    /// order; a node past the end is classified by its trace. See
+    /// [`crate::analysis::TransientResult::event_only_nodes`].
+    pub event_only_nodes: Vec<Option<super::EventOnlyNetKind>>,
+
     /// XSPICE digital event traces, carried exactly. Event traces keep every
     /// sample: interpolation is undefined for them, so they are never
     /// decimated.
@@ -1569,6 +1574,7 @@ mod tests {
             channels,
             instance_unknowns: Vec::new(),
             potential_units: Vec::new(),
+            event_only_nodes: Vec::new(),
             digital_traces: Vec::new(),
             digital_buses: Vec::new(),
             real_traces: Vec::new(),

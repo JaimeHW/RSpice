@@ -1250,6 +1250,7 @@ mod tests {
             digital_buses: Vec::new(),
             real_traces: Vec::new(),
             hdl_sources: Vec::new(),
+            event_only_nodes: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
             fft_results: Vec::new(),

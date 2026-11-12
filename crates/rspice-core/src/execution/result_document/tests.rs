@@ -130,6 +130,7 @@ fn transient_result() -> TransientResult {
         digital_buses: Vec::new(),
         real_traces: Vec::new(),
         hdl_sources: Vec::new(),
+        event_only_nodes: Vec::new(),
         device_op_traces: vec![TransientDeviceOpTrace {
             device_name: "M1".to_owned(),
             parameter: "gm".to_owned(),

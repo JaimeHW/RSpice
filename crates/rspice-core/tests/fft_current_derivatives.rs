@@ -80,6 +80,7 @@ fn fixture(
         digital_buses: vec![],
         real_traces: vec![],
         hdl_sources: vec![],
+        event_only_nodes: Vec::new(),
         device_op_traces: vec![],
         store_traces: vec![],
         fft_results: vec![],

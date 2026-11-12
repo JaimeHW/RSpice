@@ -1376,6 +1376,13 @@ pub struct TransientResult {
     /// a voltage (`K` on a thermal net), aligned with `node_names`; a node
     /// past the end, or `None`, is in volts.
     pub potential_units: Vec<Option<String>>,
+    /// The event domain that owns each of `node_names` outright, aligned
+    /// with `node_names`. Such a node has no voltage, and its column is empty
+    /// whether or not the run kept its event trace: `esave` keeps only the
+    /// nets it names, and a converter's private endpoint (`X1.Q__EVENT_0`)
+    /// is left out unless named. A node past the end is classified by its
+    /// trace, as [`Self::event_only_node_kind`] describes.
+    pub event_only_nodes: Vec<Option<EventOnlyNetKind>>,
     /// Newly accepted current impulses, in coulombs. `None` means unavailable
     /// or unrecorded. Coverage belongs to each trace: only an empty complete
     /// trace proves no impulses for that owner in this run segment.
@@ -1688,14 +1695,21 @@ impl TransientResult {
     /// analog system as one whose only endpoint is a digital port, so the
     /// typed document, the measurement signal table and the bindings have to
     /// treat the two alike; only the carrier they name differs.
+    ///
+    /// The trace rule cannot see an event-only net whose trace the run left
+    /// out (an `esave` list that does not name it, or a converter's private
+    /// endpoint), so a run that classified its nodes states it in
+    /// [`Self::event_only_nodes`], which answers first.
     pub fn event_only_node_kind(&self, name: &str) -> Option<EventOnlyNetKind> {
+        let node = self.node_index_named(name).filter(|node| *node > 0)?;
         let empty = self
-            .node_index_named(name)
-            .filter(|node| *node > 0)
-            .and_then(|node| self.try_voltage_waveform(node))
+            .try_voltage_waveform(node)
             .is_some_and(|waveform| waveform.is_empty());
         if !empty {
             return None;
+        }
+        if let Some(kind) = self.event_only_nodes.get(node - 1) {
+            return *kind;
         }
         if self.digital_trace_named(name).is_some() {
             Some(EventOnlyNetKind::Digital)
@@ -1712,7 +1726,10 @@ impl TransientResult {
     /// The document and channel builders walk the whole namespace, so they ask
     /// this once instead of resolving a name per node.
     pub(crate) fn event_only_node_mask(&self) -> Vec<bool> {
-        if self.digital_traces.is_empty() && self.real_traces.is_empty() {
+        if self.digital_traces.is_empty()
+            && self.real_traces.is_empty()
+            && self.event_only_nodes.iter().all(Option::is_none)
+        {
             return vec![false; self.node_names.len()];
         }
         let traced: HashSet<String> = self
@@ -1728,8 +1745,13 @@ impl TransientResult {
         self.node_names
             .iter()
             .zip(&self.voltages)
-            .map(|(name, waveform)| {
-                waveform.is_empty() && traced.contains(&name.to_ascii_lowercase())
+            .enumerate()
+            .map(|(index, (name, waveform))| {
+                waveform.is_empty()
+                    && match self.event_only_nodes.get(index) {
+                        Some(kind) => kind.is_some(),
+                        None => traced.contains(&name.to_ascii_lowercase()),
+                    }
             })
             .collect()
     }
@@ -2097,6 +2119,7 @@ impl TransientResultCompressed {
             digital_buses: self.digital_buses,
             real_traces: self.real_traces,
             hdl_sources: self.hdl_sources,
+            event_only_nodes: self.event_only_nodes,
             device_op_traces,
             store_traces,
             fft_results: self.post_results.fft.clone(),
@@ -2134,6 +2157,7 @@ mod tests {
             digital_buses: Vec::new(),
             real_traces: Vec::new(),
             hdl_sources: Vec::new(),
+            event_only_nodes: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
             fft_results: Vec::new(),
@@ -2618,6 +2642,7 @@ mod bus_tests {
             digital_buses: Vec::new(),
             real_traces: Vec::new(),
             hdl_sources: Vec::new(),
+            event_only_nodes: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
             fft_results: Vec::new(),
