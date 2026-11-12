@@ -64,6 +64,8 @@ pub(crate) struct WorkerSpecExecutionOptions {
     pub pxf: Option<WorkerPxfRunConfig>,
     pub pnoise: Option<WorkerPnoiseRunConfig>,
     pub pstb: Option<WorkerPstbRunConfig>,
+    #[serde(default)]
+    pub member: Option<crate::execution_options::TransientMember>,
 }
 
 impl From<&SpecExecutionOptions> for WorkerSpecExecutionOptions {
@@ -84,6 +86,7 @@ impl From<&SpecExecutionOptions> for WorkerSpecExecutionOptions {
             pxf: value.pxf.as_ref().map(WorkerPxfRunConfig::from),
             pnoise: value.pnoise.as_ref().map(WorkerPnoiseRunConfig::from),
             pstb: value.pstb.as_ref().map(WorkerPstbRunConfig::from),
+            member: value.member,
         }
     }
 }
@@ -105,6 +108,7 @@ impl From<WorkerSpecExecutionOptions> for SpecExecutionOptions {
             pxf: value.pxf.map(crate::periodic::PxfRunConfig::from),
             pnoise: value.pnoise.map(crate::periodic::PnoiseRunConfig::from),
             pstb: value.pstb.map(crate::periodic::PstbRunConfig::from),
+            member: value.member,
         }
     }
 }

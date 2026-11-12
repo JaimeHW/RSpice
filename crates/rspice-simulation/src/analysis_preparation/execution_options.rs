@@ -71,6 +71,7 @@ pub fn analysis_spec_execution_options(
                 pxf: None,
                 pnoise: None,
                 pstb: None,
+                member: None,
             })
         }
         AnalysisSpec::Corner => {
@@ -103,6 +104,7 @@ pub fn analysis_spec_execution_options(
                 pxf: None,
                 pnoise: None,
                 pstb: None,
+                member: None,
             })
         }
         AnalysisSpec::Pac => {
@@ -172,6 +174,7 @@ pub fn analysis_spec_execution_options(
             pxf: None,
             pnoise: None,
             pstb: None,
+            member: None,
         }),
     }
 }

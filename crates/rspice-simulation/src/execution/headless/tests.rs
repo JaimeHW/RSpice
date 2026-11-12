@@ -660,3 +660,181 @@ fn shared_artifact_capture_rejects_foreign_consumers_and_invalid_results() {
             .is_none()
     );
 }
+
+/// A transient task that solves one member of the deck's own study or sweep.
+fn member_task(
+    cards: &str,
+    member: crate::execution_options::TransientMember,
+) -> HeadlessTaskRequest {
+    let mut request = task(
+        AnalysisSpec::Transient {
+            stop_time: 1e-5,
+            step_time: 1e-6,
+            start_time: 0.0,
+            max_timestep: None,
+            uic: false,
+        },
+        format!(".tran 1u 10u\n{cards}"),
+    );
+    request.label = member.label();
+    request.analysis.spec_options.member = Some(member);
+    request
+}
+
+/// The final `V(out)` of a member's transient, which must be a whole one.
+fn final_output(result: &SimulationResult) -> f64 {
+    let SimulationResult::Transient {
+        time, waveforms, ..
+    } = result
+    else {
+        panic!("a member is solved as a transient, got {result:?}")
+    };
+    let output = &waveforms
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("out"))
+        .unwrap_or_else(|| panic!("V(out) among {:?}", waveforms.keys().collect::<Vec<_>>()))
+        .1
+        .y_values;
+    assert_eq!(output.len(), time.len(), "a full waveform per member");
+    assert!(time.len() > 2, "a full waveform per member");
+    *output.last().unwrap()
+}
+
+#[test]
+fn a_monte_carlo_trial_task_solves_the_transient_of_the_trial_the_whole_study_draws() {
+    use crate::execution_options::TransientMember;
+    use rspice_simulation_contract::mc_draft::McVariationSource;
+    let path = origin();
+    let source =
+        "Trial divider\n.param r={agauss(1k,100,1)}\nV1 in 0 1\nR1 in out {r}\nR2 out 0 1k\n.end\n";
+    let card = ".mc 4 seed 9";
+    // The engine's own Monte Carlo transient over the whole study: the `r`
+    // each trial draws.
+    let deck = format!(
+        "{}\n.tran 1u 10u\n{card}\n.end\n",
+        source.trim_end_matches(".end\n")
+    );
+    let netlist = rspice_core::Netlist::parse(&deck).unwrap();
+    let mut study = rspice_core::engine::MonteCarloStudyConfig::new(4, 9, vec!["r".into()]);
+    study.variation_source = rspice_core::engine::MonteCarloVariationSource::DeckStatistics;
+    let drawn = std::sync::Mutex::new(std::collections::BTreeMap::new());
+    rspice_core::Engine::new(Default::default())
+        .run_monte_carlo_measurements_with_abort(
+            &netlist,
+            &study,
+            &NoAbort,
+            |_, trial, index, _| {
+                let (_, r) = trial
+                    .params
+                    .all_params()
+                    .into_iter()
+                    .find(|(name, _)| name.eq_ignore_ascii_case("r"))
+                    .unwrap();
+                drawn.lock().unwrap().insert(index, r);
+                Ok(vec![r])
+            },
+        )
+        .unwrap();
+    let drawn = drawn.into_inner().unwrap();
+    assert_eq!(drawn.len(), 4);
+    let trials: Vec<_> = (0..4)
+        .map(|index| {
+            member_task(
+                card,
+                TransientMember::MonteCarloTrial {
+                    index,
+                    variation_source: McVariationSource::DeckStatistics,
+                },
+            )
+        })
+        .collect();
+    let snapshot =
+        prepare_headless_run(HeadlessRunInput::new(source, &path, trials), &NoAbort).unwrap();
+    let results = execute(snapshot);
+    assert_eq!(results.len(), 4);
+    for (index, result) in results.iter().enumerate() {
+        let r = drawn[&index];
+        let expected = 1e3 / (r + 1e3);
+        let actual = final_output(result);
+        assert!(
+            (actual - expected).abs() <= 1e-9,
+            "trial {index}: V(out) {actual} against {expected} for r = {r}"
+        );
+    }
+    // The trials vary: no two drew the same resistance.
+    let values: Vec<f64> = results.iter().map(final_output).collect();
+    for (index, value) in values.iter().enumerate() {
+        assert!(values[index + 1..].iter().all(|other| other != value));
+    }
+}
+
+#[test]
+fn a_step_point_task_solves_the_transient_of_its_point() {
+    use crate::execution_options::TransientMember;
+    let path = origin();
+    let source = "Point divider\n.param r=1k\nV1 in 0 1\nR1 in out {r}\nR2 out 0 1k\n.end\n";
+    let card = ".step param r list 1k 2k 3k";
+    let points: Vec<_> = (0..3)
+        .map(|index| member_task(card, TransientMember::StepPoint { index }))
+        .collect();
+    let snapshot =
+        prepare_headless_run(HeadlessRunInput::new(source, &path, points), &NoAbort).unwrap();
+    let results = execute(snapshot);
+    for (result, r) in results.iter().zip([1e3, 2e3, 3e3]) {
+        let expected = 1e3 / (r + 1e3);
+        let actual = final_output(result);
+        assert!((actual - expected).abs() <= 1e-9, "r = {r}: {actual}");
+    }
+}
+
+#[test]
+fn a_member_outside_its_study_or_sweep_is_refused_by_name() {
+    use crate::execution_options::TransientMember;
+    use rspice_simulation_contract::mc_draft::McVariationSource;
+    let path = origin();
+    let source = "Member divider\n.param r=1k\nV1 in 0 1\nR1 in out {r}\nR2 out 0 1k\n.end\n";
+    for (cards, member, message) in [
+        (
+            ".mc 2 seed 1",
+            TransientMember::MonteCarloTrial {
+                index: 2,
+                variation_source: McVariationSource::ParameterTolerance,
+            },
+            "trial 2 is outside the deck's .MC study, whose trials are 0 to 1",
+        ),
+        (
+            ".step param r list 1k 2k",
+            TransientMember::StepPoint { index: 2 },
+            "point 2 is outside the deck's .STEP sweep of 2 points",
+        ),
+        (
+            "",
+            TransientMember::StepPoint { index: 0 },
+            "point 0 names the deck's .STEP sweep, and the deck has no .STEP card",
+        ),
+    ] {
+        let snapshot = prepare_headless_run(
+            HeadlessRunInput::new(source, &path, vec![member_task(cards, member)]),
+            &NoAbort,
+        )
+        .unwrap();
+        let dispatch = PreparedRunAuthorization::default()
+            .authorize_campaign_member(snapshot)
+            .unwrap();
+        let task = dispatch.into_tasks().pop_front().unwrap();
+        let mut runner = SimulationRunner::new();
+        runner
+            .start_prepared(
+                task.resolve_dependency_artifacts(&HashMap::new()).unwrap(),
+                false,
+            )
+            .unwrap();
+        let error = loop {
+            if let Some(result) = runner.poll_result() {
+                break result.expect_err("a member outside its family is refused");
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        };
+        assert!(error.to_string().contains(message), "{error}");
+    }
+}

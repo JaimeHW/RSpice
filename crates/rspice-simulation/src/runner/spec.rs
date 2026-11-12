@@ -183,8 +183,27 @@ pub(super) fn run_spec_request_in_context(
     dependencies
         .validate_for_spec(&spec, &options)
         .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
+    if options.member.is_some()
+        && (!matches!(spec, AnalysisSpec::Transient { .. })
+            || options.tran_checkpoint.is_some()
+            || options.mc_checkpoint.is_some())
+    {
+        return Err(SimulationError::InvalidConfig(
+            "A Monte Carlo trial or .STEP point is solved as an ordinary transient, with no checkpoint request".into(),
+        ));
+    }
 
     if let Some(config) = config::analysis_config_from_spec(&spec) {
+        if let Some(member) = options.member {
+            return bridge.run_transient_member(
+                &config,
+                netlist,
+                source_path,
+                environment,
+                member,
+                abort_flag,
+            );
+        }
         if let Some(request) = state_checkpoint {
             let checkpoint = request.resume.as_ref().ok_or_else(|| {
                 SimulationError::InvalidConfig(

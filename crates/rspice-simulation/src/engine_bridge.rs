@@ -21,6 +21,7 @@ mod checks;
 mod checks_tests;
 mod dc;
 mod error;
+mod family_member;
 #[cfg(test)]
 pub(crate) mod nested_dc_tests;
 #[cfg(test)]
