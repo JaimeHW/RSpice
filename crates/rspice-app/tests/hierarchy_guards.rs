@@ -1174,11 +1174,11 @@ fn every_command_has_a_user_route() {
     let registry_code = registry_code.expect("vocabulary.rs is in the shipped source");
     let routing_code = routing_code.expect("registry.rs is in the shipped source");
     let registered = registered_commands(&registry_code);
+    // The registry shrinks as the features take its commands, so no count
+    // stands for a parse that worked.
     assert!(
-        registered.len() > 100,
-        "COMMAND_REGISTRY parsed as only {} variants — the parse broke, not \
-         the registry",
-        registered.len()
+        !registered.is_empty(),
+        "COMMAND_REGISTRY parsed as empty — the parse broke, not the registry"
     );
     let excluded = palette_excluded(&routing_code);
     for variant in shortcut_bound(&routing_code) {

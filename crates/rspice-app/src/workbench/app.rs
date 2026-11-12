@@ -174,7 +174,6 @@ pub(crate) use schematic::named_net::{
 
 pub(crate) use dialogs::check_and_save::open_check_and_save_dialog;
 pub(crate) use dialogs::hierarchy::create::open_create_hierarchy_dialog;
-pub(crate) use dialogs::hierarchy::descend::open_descend_hierarchy_dialog;
 pub(crate) use dialogs::replace_instance::{
     open_replace_instance_dialog, replace_instance_available,
 };

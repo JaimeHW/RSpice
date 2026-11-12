@@ -1,7 +1,9 @@
 //! The commands the design feature declares, as the registry lists them:
 //! so far the Stimulus Library's verbs, the dialogs the Design, Edit and
-//! View menus open over the schematic, the schematic's placements, and the
-//! canvas's select tool, grid and Fit content.
+//! View menus open over the schematic, the schematic's placements, the
+//! canvas's select tool, grid and Fit content, the moves up and down the
+//! hierarchy, the check results' tour and clear, and the schematic's
+//! annotations.
 //!
 //! What each command does is the feature's own; what it declares here is all
 //! the shell's order, menus, palette and shortcut profile read of it.
@@ -104,6 +106,24 @@ pub(crate) enum DesignCommand {
     GridLines,
     /// Draw no schematic grid.
     GridOff,
+    /// Return to the parent of the occurrence in front.
+    AscendHierarchy,
+    /// Open Descend with options on the selected instance.
+    DescendHierarchy,
+    /// Direct edit-in-place hierarchy gesture used by the toolbar and
+    /// Shift+E. Descend with options above owns the explicit transaction.
+    DescendHierarchyDirect,
+    /// Withdraw the last check's results.
+    ClearChecks,
+    /// Step the finding tour forward.
+    NextViolation,
+    /// Step the finding tour back.
+    PreviousViolation,
+    /// Show or hide the DC operating point on the schematic.
+    AnnotateOperatingPoint,
+    /// Show or hide the transient's voltages at results cursor A on the
+    /// schematic.
+    AnnotateTransientVoltages,
 }
 
 const EVERYWHERE: &[CommandPlatform] = &CommandPlatform::ALL;
@@ -115,6 +135,14 @@ const fn primary(chord: ShortcutChord, platforms: &'static [CommandPlatform]) ->
         chord,
         platforms,
         kind: ShortcutKind::Primary,
+    }
+}
+
+const fn alternate(chord: ShortcutChord, platforms: &'static [CommandPlatform]) -> ShortcutBinding {
+    ShortcutBinding {
+        chord,
+        platforms,
+        kind: ShortcutKind::Alternate,
     }
 }
 
@@ -201,10 +229,34 @@ const FIT_SCHEMATIC_CONTENT: &[ShortcutBinding] = &[primary(
 )];
 const CYCLE_GRID: &[ShortcutBinding] =
     &[primary(chord(Key::G, false, false, false, "G"), EVERYWHERE)];
+const ASCEND_HIERARCHY: &[ShortcutBinding] = &[primary(
+    chord(Key::H, false, false, true, "Shift+H"),
+    EVERYWHERE,
+)];
+const DESCEND_HIERARCHY: &[ShortcutBinding] =
+    &[primary(chord(Key::H, false, false, false, "H"), EVERYWHERE)];
+const DESCEND_HIERARCHY_DIRECT: &[ShortcutBinding] = &[primary(
+    chord(Key::E, false, false, true, "Shift+E"),
+    EVERYWHERE,
+)];
+const NEXT_VIOLATION: &[ShortcutBinding] = &[
+    primary(
+        chord(Key::CloseBracket, false, false, false, "]"),
+        EVERYWHERE,
+    ),
+    alternate(chord(Key::F8, false, false, false, "F8"), EVERYWHERE),
+];
+const PREVIOUS_VIOLATION: &[ShortcutBinding] = &[
+    primary(
+        chord(Key::OpenBracket, false, false, false, "["),
+        EVERYWHERE,
+    ),
+    alternate(chord(Key::F8, false, false, true, "Shift+F8"), EVERYWHERE),
+];
 
 impl DesignCommand {
     /// Every command the registry lists, in the feature's own order.
-    pub(crate) const ALL: [Self; 43] = [
+    pub(crate) const ALL: [Self; 51] = [
         Self::NewStimulusDefinition,
         Self::DuplicateStimulusDefinition,
         Self::DeleteStimulusDefinition,
@@ -248,6 +300,14 @@ impl DesignCommand {
         Self::GridDots,
         Self::GridLines,
         Self::GridOff,
+        Self::AscendHierarchy,
+        Self::DescendHierarchy,
+        Self::DescendHierarchyDirect,
+        Self::ClearChecks,
+        Self::NextViolation,
+        Self::PreviousViolation,
+        Self::AnnotateOperatingPoint,
+        Self::AnnotateTransientVoltages,
     ];
 
     /// The key a shortcut profile names this command by.
@@ -296,6 +356,14 @@ impl DesignCommand {
             Self::GridDots => CommandKey::new("grid-dots"),
             Self::GridLines => CommandKey::new("grid-lines"),
             Self::GridOff => CommandKey::new("grid-off"),
+            Self::AscendHierarchy => CommandKey::new("ascend-hierarchy"),
+            Self::DescendHierarchy => CommandKey::new("descend-hierarchy"),
+            Self::DescendHierarchyDirect => CommandKey::new("descend-selected-instance"),
+            Self::ClearChecks => CommandKey::new("clear-checks"),
+            Self::NextViolation => CommandKey::new("next-violation"),
+            Self::PreviousViolation => CommandKey::new("previous-violation"),
+            Self::AnnotateOperatingPoint => CommandKey::new("annotate-operating-point"),
+            Self::AnnotateTransientVoltages => CommandKey::new("annotate-transient-voltages"),
         }
     }
 
@@ -342,6 +410,11 @@ impl DesignCommand {
     /// Every placement but the probe edits the drawing and is one Repeat
     /// last command runs again. The select tool, the grid and Fit content
     /// change only what the canvas shows, so none needs a project.
+    /// Moving up or down the hierarchy commits the inspector's pending edit
+    /// and is a chord of the design workspace; the direct descent needs an
+    /// open project and stays out of the palette. The finding tour keeps
+    /// the violation-navigation context, and clearing the checks and the
+    /// annotation switches the global one.
     pub(crate) const fn declared_spec(self) -> CommandSpec {
         let palette = CommandFlags::PALETTE_VISIBLE;
         let open = palette.with(CommandFlags::REQUIRES_OPEN_PROJECT, true);
@@ -357,6 +430,11 @@ impl DesignCommand {
         let edit = ShortcutContext::EditContext;
         let canvas = ShortcutContext::EngineeringCanvas;
         let place = edits.with(CommandFlags::REPEATABLE, true);
+        let commits = palette.with(CommandFlags::COMMITS_INSPECTOR_EDIT, true);
+        let direct = CommandFlags::NONE
+            .with(CommandFlags::REQUIRES_OPEN_PROJECT, true)
+            .with(CommandFlags::COMMITS_INSPECTOR_EDIT, true);
+        let violations = ShortcutContext::ViolationNavigation;
         let (label, group, flags, context, bindings) = match self {
             Self::NewStimulusDefinition => {
                 ("New stimulus definition", STIMULUS, open, global, NONE)
@@ -481,6 +559,60 @@ impl DesignCommand {
             Self::GridDots => ("Dot grid", "View", palette, canvas, NONE),
             Self::GridLines => ("Line grid", "View", palette, canvas, NONE),
             Self::GridOff => ("No grid", "View", palette, canvas, NONE),
+            Self::AscendHierarchy => (
+                "Return to parent",
+                "Design",
+                commits,
+                design,
+                ASCEND_HIERARCHY,
+            ),
+            // Two gestures, two rows: this one opens the descend dialog, and
+            // the direct gesture below goes straight to the master. Sharing one
+            // title made them indistinguishable everywhere the palette, the
+            // shortcut editor and the command reference list them side by side.
+            Self::DescendHierarchy => (
+                "Descend with options\u{2026}",
+                "Design",
+                commits,
+                design,
+                DESCEND_HIERARCHY,
+            ),
+            Self::DescendHierarchyDirect => (
+                "Descend",
+                "Design",
+                direct,
+                design,
+                DESCEND_HIERARCHY_DIRECT,
+            ),
+            Self::ClearChecks => ("Clear check results", "Design", palette, global, NONE),
+            Self::NextViolation => (
+                "Next violation",
+                "Design",
+                palette,
+                violations,
+                NEXT_VIOLATION,
+            ),
+            Self::PreviousViolation => (
+                "Previous violation",
+                "Design",
+                palette,
+                violations,
+                PREVIOUS_VIOLATION,
+            ),
+            Self::AnnotateOperatingPoint => (
+                "Annotate DC operating point",
+                "Simulate",
+                palette,
+                global,
+                NONE,
+            ),
+            Self::AnnotateTransientVoltages => (
+                "Annotate transient voltages",
+                "Simulate",
+                palette,
+                global,
+                NONE,
+            ),
         };
         CommandSpec {
             key: self.key(),

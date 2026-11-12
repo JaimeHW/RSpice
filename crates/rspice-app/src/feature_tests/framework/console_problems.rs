@@ -1235,7 +1235,7 @@ fn following_a_row_with_a_click_leaves_the_shortcuts_working() {
     use crate::workbench::app_state::session::shortcuts::{
         ShortcutEnvironment, ShortcutInputSnapshot, runtime_command_platform,
     };
-    use crate::workbench::commands::vocabulary::Command;
+    use crate::workbench::design::commands::DesignCommand;
 
     let mut state = state_with_design_findings();
     let harness = Harness::new();
@@ -1282,7 +1282,7 @@ fn following_a_row_with_a_click_leaves_the_shortcuts_working() {
     };
     assert_eq!(
         next_finding(&harness, &mut state),
-        Some(Command::NextViolation.key()),
+        Some(DesignCommand::NextViolation.key()),
         "the next-finding shortcut works straight after the click",
     );
 

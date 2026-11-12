@@ -968,9 +968,9 @@ fn next_marker_primary_and_alternate_resolve_in_verify_then_design() {
             CommandPlatform::Desktop,
             environment,
             Duration::from_millis(time),
-            |command| command == Command::NextViolation.key(),
+            |command| command == DesignCommand::NextViolation.key(),
         );
-        assert_eq!(resolved.command, Some(Command::NextViolation.key()));
+        assert_eq!(resolved.command, Some(DesignCommand::NextViolation.key()));
     }
 }
 
@@ -991,10 +991,16 @@ fn previous_marker_and_redo_answer_their_conventional_keys() {
             Key::OpenBracket,
             Modifiers::NONE,
             verification(),
-            Command::PreviousViolation,
+            DesignCommand::PreviousViolation.key(),
         ),
-        (1, Key::F8, shift, design(false), Command::PreviousViolation),
-        (2, Key::Y, primary(), design(true), Command::Redo),
+        (
+            1,
+            Key::F8,
+            shift,
+            design(false),
+            DesignCommand::PreviousViolation.key(),
+        ),
+        (2, Key::Y, primary(), design(true), Command::Redo.key()),
     ] {
         let resolved = state.resolve(
             &snapshot(&[event(key, modifiers, false)], false),
@@ -1003,13 +1009,9 @@ fn previous_marker_and_redo_answer_their_conventional_keys() {
             CommandPlatform::Desktop,
             environment,
             Duration::from_millis(time),
-            |candidate| candidate == command.key(),
+            |candidate| candidate == command,
         );
-        assert_eq!(
-            resolved.command,
-            Some(command.key()),
-            "{key:?} {modifiers:?}"
-        );
+        assert_eq!(resolved.command, Some(command), "{key:?} {modifiers:?}");
     }
 }
 

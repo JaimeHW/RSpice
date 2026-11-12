@@ -48,11 +48,11 @@ fn design_menu_commands_explain_wrong_context_and_read_only_states() {
         );
     }
     assert_eq!(
-        Command::AscendHierarchy.availability(&app),
+        app.command_availability(DesignCommand::AscendHierarchy.key()),
         CommandAvailability::Disabled("open a schematic or testbench")
     );
     assert_eq!(
-        Command::DescendHierarchy.availability(&app),
+        app.command_availability(DesignCommand::DescendHierarchy.key()),
         CommandAvailability::Disabled("open a schematic or testbench")
     );
     assert_eq!(

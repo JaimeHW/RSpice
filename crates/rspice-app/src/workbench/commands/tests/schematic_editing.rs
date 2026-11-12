@@ -29,7 +29,8 @@ fn descend_requires_a_resolved_schematic_master() {
         .selection
         .select_only_component(1);
     assert!(
-        !Command::DescendHierarchy.availability(&app).is_available(),
+        !app.command_availability(DesignCommand::DescendHierarchy.key())
+            .is_available(),
         "a primitive is not hierarchy"
     );
 
@@ -63,11 +64,12 @@ fn descend_requires_a_resolved_schematic_master() {
         .selection
         .select_only_component(2);
     assert!(
-        Command::DescendHierarchy.availability(&app).is_available(),
+        app.command_availability(DesignCommand::DescendHierarchy.key())
+            .is_available(),
         "a resolved schematic master is descendable"
     );
     let parent = app.state.model.workspace.content.active_view.clone();
-    Command::DescendHierarchy.execute(&mut app);
+    app.execute_command_key(DesignCommand::DescendHierarchy.key());
     assert!(
         app.state.design.descend_hierarchy.open,
         "the menu/palette command owns the explicit edit-context transaction"
@@ -84,7 +86,8 @@ fn descend_requires_a_resolved_schematic_master() {
         .expect("binding")
         .view = "symbol".to_owned();
     assert!(
-        !Command::DescendHierarchy.availability(&app).is_available(),
+        !app.command_availability(DesignCommand::DescendHierarchy.key())
+            .is_available(),
         "a symbol binding is not a descendable schematic master"
     );
 }

@@ -275,11 +275,11 @@ fn each_target_gets_the_catalog_its_instance_master_slot_calls_for() {
     ];
     let descend = (
         "Descend into selected instance",
-        Some(Command::DescendHierarchyDirect.key()),
+        Some(DesignCommand::DescendHierarchyDirect.key()),
     );
     let open_veriloga = (
         "Open Verilog-A view",
-        Some(Command::DescendHierarchyDirect.key()),
+        Some(DesignCommand::DescendHierarchyDirect.key()),
     );
 
     // The bare canvas offers what can be started on a sheet and none of the
@@ -409,13 +409,13 @@ fn the_descend_shortcut_opens_a_veriloga_instances_view_as_its_row_does() {
     app.state.open_project_session();
     app.state.workbench.activate(Workspace::Design);
     let (_, reference) = select_a_veriloga_instance(&mut app.state);
-    assert!(Command::DescendHierarchyDirect.is_enabled(&app));
+    assert!(app.command_key_enabled(DesignCommand::DescendHierarchyDirect.key()));
     assert!(
-        !Command::DescendHierarchy.is_enabled(&app),
+        !app.command_key_enabled(DesignCommand::DescendHierarchy.key()),
         "the descent dialog lists schematic masters only"
     );
 
-    Command::DescendHierarchyDirect.execute(&mut app);
+    app.execute_command_key(DesignCommand::DescendHierarchyDirect.key());
 
     assert_eq!(app.state.model.workspace.content.active_view, reference);
     assert_eq!(app.state.workbench.workspace, Workspace::Design);

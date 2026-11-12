@@ -372,9 +372,9 @@ const FOLDING_MENU: &[MenuEntry] = &[
 /// manage the design, then check it. A symbol view places its own shapes,
 /// and a Verilog-A view compiles.
 const DESIGN_MENU: &[MenuEntry] = &[
-    command(Command::DescendHierarchyDirect).access('D'),
-    command(Command::DescendHierarchy).access('W'),
-    command(Command::AscendHierarchy).access('U'),
+    design(DesignCommand::DescendHierarchyDirect).access('D'),
+    design(DesignCommand::DescendHierarchy).access('W'),
+    design(DesignCommand::AscendHierarchy).access('U'),
     // Inside a symbol edited in place, the way back out stands where the
     // way in did, on the same letter.
     MenuEntry::Only(
@@ -498,10 +498,10 @@ const SHEET_MENU: &[MenuEntry] = &[
 
 /// The findings the checks left: step through them, or clear them.
 const VIOLATIONS_MENU: &[MenuEntry] = &[
-    command(Command::NextViolation).access('N'),
-    command(Command::PreviousViolation).access('P'),
+    design(DesignCommand::NextViolation).access('N'),
+    design(DesignCommand::PreviousViolation).access('P'),
     Separator,
-    command(Command::ClearChecks).access('C'),
+    design(DesignCommand::ClearChecks).access('C'),
 ];
 
 /// The Design menu's Arrange submenu, group by group: turn and flip, line
@@ -582,8 +582,8 @@ const SIMULATE_MENU: &[MenuEntry] = &[
     simulate(SimulateCommand::JobsManager).access('H'),
     Separator,
     MenuEntry::command_as(DesignCommand::PlaceProbe.key(), "Probe").access('P'),
-    command(Command::AnnotateOperatingPoint).access('D'),
-    command(Command::AnnotateTransientVoltages).access('T'),
+    design(DesignCommand::AnnotateOperatingPoint).access('D'),
+    design(DesignCommand::AnnotateTransientVoltages).access('T'),
     MenuEntry::command_as(
         ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Op).key(),
         "Operating-point table",
@@ -854,8 +854,7 @@ pub(in crate::workbench) fn command_icon(command: Command) -> Option<WorkbenchIc
         Command::Delete => WorkbenchIcon::Trash,
         Command::Undo => WorkbenchIcon::Undo,
         Command::Redo => WorkbenchIcon::Redo,
-        Command::DescendHierarchyDirect => WorkbenchIcon::Layers,
-        Command::AscendHierarchy | Command::ExitSymbolInPlace => WorkbenchIcon::ArrowUp,
+        Command::ExitSymbolInPlace => WorkbenchIcon::ArrowUp,
         Command::ZoomIn => WorkbenchIcon::ZoomIn,
         Command::ZoomOut => WorkbenchIcon::ZoomOut,
         Command::ZoomFit => WorkbenchIcon::ZoomFit,
@@ -891,6 +890,8 @@ pub(in crate::workbench) fn feature_command_icon(key: CommandKey) -> Option<Work
             DesignCommand::PlaceProbe => Some(WorkbenchIcon::Probe),
             DesignCommand::PlaceText => Some(WorkbenchIcon::Text),
             DesignCommand::PlacePin => Some(WorkbenchIcon::Pin),
+            DesignCommand::DescendHierarchyDirect => Some(WorkbenchIcon::Layers),
+            DesignCommand::AscendHierarchy => Some(WorkbenchIcon::ArrowUp),
             _ => None,
         };
     }

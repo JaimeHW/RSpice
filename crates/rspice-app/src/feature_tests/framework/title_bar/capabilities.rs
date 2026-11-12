@@ -402,17 +402,17 @@ fn copy_as_image_draws_the_selection_or_else_the_view() {
 #[test]
 fn annotate_transient_voltages_takes_the_operating_points_place() {
     let mut app = title_test_app();
-    let transient = Command::AnnotateTransientVoltages;
-    let dc = Command::AnnotateOperatingPoint;
-    assert!(app.is_enabled(transient.key()));
+    let transient = DesignCommand::AnnotateTransientVoltages.key();
+    let dc = DesignCommand::AnnotateOperatingPoint.key();
+    assert!(app.is_enabled(transient));
     assert_eq!(
-        (transient.checked(&app), dc.checked(&app)),
+        (app.checked(transient), app.checked(dc)),
         (Some(false), Some(true))
     );
 
-    app.execute(transient.key());
+    app.execute(transient);
     assert_eq!(
-        (transient.checked(&app), dc.checked(&app)),
+        (app.checked(transient), app.checked(dc)),
         (Some(true), Some(false))
     );
     assert_eq!(
@@ -424,9 +424,9 @@ fn annotate_transient_voltages_takes_the_operating_points_place() {
         Some("No transient result is selected: run a transient analysis to annotate its voltages.")
     );
 
-    app.execute(transient.key());
+    app.execute(transient);
     assert_eq!(
-        (transient.checked(&app), dc.checked(&app)),
+        (app.checked(transient), app.checked(dc)),
         (Some(false), Some(false))
     );
 }

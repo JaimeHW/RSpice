@@ -483,7 +483,7 @@ fn symbol_pin_checks_keep_every_finding_and_log_one_line() {
     state.run_active_symbol_pin_checks();
 
     assert_eq!(
-        state.active_symbol_pin_finding_count(),
+        active_symbol_pin_finding_count(&state.model),
         Some(55),
         "every finding is a record, not a receipt the page has to be told about",
     );

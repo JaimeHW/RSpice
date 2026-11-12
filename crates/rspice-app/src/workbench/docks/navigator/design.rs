@@ -477,7 +477,7 @@ fn navigator(ui: &mut Ui, app: &mut RSpiceApp) {
         sheet_visibility::set_sheet_scope(ui.ctx(), chosen);
     }
     if ascend {
-        Command::AscendHierarchy.execute(app);
+        app.execute_command_key(DesignCommand::AscendHierarchy.key());
     }
 
     rail::open(ui.ctx());

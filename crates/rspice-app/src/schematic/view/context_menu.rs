@@ -196,13 +196,13 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
         action: ContextAction::DescendHierarchy,
         icon: ContextIcon::Hierarchy,
         label: "Descend into selected instance",
-        shortcut_command: Some(Command::DescendHierarchyDirect.key()),
+        shortcut_command: Some(DesignCommand::DescendHierarchyDirect.key()),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::OpenVerilogAView,
         icon: ContextIcon::VerilogA,
         label: "Open Verilog-A view",
-        shortcut_command: Some(Command::DescendHierarchyDirect.key()),
+        shortcut_command: Some(DesignCommand::DescendHierarchyDirect.key()),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::EditSymbolInPlace,

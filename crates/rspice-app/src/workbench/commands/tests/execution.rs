@@ -7,6 +7,7 @@
 //! keeps advancing rather than restarting once a jump has changed workspace.
 
 use super::*;
+use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::simulate::commands::SimulateCommand;
 
 #[test]
@@ -140,7 +141,7 @@ fn repeated_violation_navigation_keeps_advancing_after_jump_to_design() {
     let identities = app.state.model.design_rule_finding_identities(&subject);
     assert_eq!(identities.len(), 2, "both findings were published");
     for expected in identities {
-        Command::NextViolation.execute(&mut app);
+        app.execute_command_key(DesignCommand::NextViolation.key());
         assert_eq!(app.state.workbench.workspace, Workspace::Design);
         assert_eq!(
             app.state.model.diagnostics.current_finding(),

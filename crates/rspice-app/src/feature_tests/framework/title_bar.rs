@@ -600,7 +600,7 @@ fn occurrence_specific_shortcuts_can_be_suppressed_or_overridden() {
         "Ctrl+Alt+R"
     );
     assert_eq!(
-        Command::DescendHierarchy.spec().label,
+        DesignCommand::DescendHierarchy.declared_spec().label,
         "Descend with options…"
     );
 }
@@ -1315,8 +1315,11 @@ fn menu_icons_mark_only_the_toolbars_twins_with_the_buttons_icon() {
         (DesignCommand::PlacePin.key(), WorkbenchIcon::Pin),
         (DesignCommand::PlaceText.key(), WorkbenchIcon::Text),
         (Command::Delete.key(), WorkbenchIcon::Trash),
-        (Command::AscendHierarchy.key(), WorkbenchIcon::ArrowUp),
-        (Command::DescendHierarchyDirect.key(), WorkbenchIcon::Layers),
+        (DesignCommand::AscendHierarchy.key(), WorkbenchIcon::ArrowUp),
+        (
+            DesignCommand::DescendHierarchyDirect.key(),
+            WorkbenchIcon::Layers,
+        ),
     ] {
         assert_eq!(app.command_icon(key), Some(icon), "{key:?}");
     }
@@ -1355,7 +1358,6 @@ fn menu_icons_mark_only_the_toolbars_twins_with_the_buttons_icon() {
         Command::HelpCenter,
         Command::Exit,
         Command::SelectAll,
-        Command::DescendHierarchy,
         Command::KeyboardShortcuts,
         Command::CheckCellview,
         Command::CheckDesign,
@@ -1368,6 +1370,7 @@ fn menu_icons_mark_only_the_toolbars_twins_with_the_buttons_icon() {
         );
     }
     for key in [
+        DesignCommand::DescendHierarchy.key(),
         DesignCommand::RenameSelection.key(),
         CodeCommand::ValidateCodeDocument.key(),
         SimulateCommand::Preflight.key(),
@@ -1439,7 +1442,7 @@ fn annotate_dc_operating_point_switches_the_schematic_annotation() {
     use crate::state::SchematicAnnotationVisibility;
     let mut app = title_test_app();
     app.state.workbench.activate(Workspace::Design);
-    let key = Command::AnnotateOperatingPoint.key();
+    let key = DesignCommand::AnnotateOperatingPoint.key();
     assert!(app.is_enabled(key));
     assert_eq!(app.checked(key), Some(true));
     app.execute(key);

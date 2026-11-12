@@ -794,16 +794,6 @@ fn push_symbol_undo_snapshot(
 }
 
 impl AppState {
-    /// How many pin findings stand against the active symbol view, or `None`
-    /// where the checks have not run against it.
-    ///
-    /// The distinction is the point: `Some(0)` says the checks ran and the
-    /// pins match, which is a different claim from nobody having looked, and
-    /// a control that offered to clear nothing would be a dead control.
-    pub(in crate::workbench) fn active_symbol_pin_finding_count(&self) -> Option<usize> {
-        active_symbol_pin_finding_count(&self.model)
-    }
-
     /// [`run_active_symbol_pin_checks`] for the session.
     pub(crate) fn run_active_symbol_pin_checks(&mut self) {
         let facts = self.slot_facts();
@@ -813,6 +803,10 @@ impl AppState {
 
 /// How many pin findings stand against the active symbol view, or `None`
 /// where the checks have not run against it.
+///
+/// The distinction is the point: `Some(0)` says the checks ran and the
+/// pins match, which is a different claim from nobody having looked, and
+/// a control that offered to clear nothing would be a dead control.
 pub(in crate::workbench) fn active_symbol_pin_finding_count(model: &Model) -> Option<usize> {
     active_symbol_pin_records(model).map(|records| records.len())
 }

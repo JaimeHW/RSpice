@@ -10,8 +10,15 @@ use egui::Context;
 use rspice_schematic_editor::symbol_editor::commands::activate_tool;
 use rspice_schematic_editor::symbol_editor::session::SymbolTool;
 
-use crate::state::{ComponentType, GridStyle, Tool};
+use crate::schematic::view::transient_annotation_status;
+use crate::state::{ComponentType, GridStyle, SchematicAnnotationVisibility, Tool};
 use crate::workbench::app::actions::stimulus;
+use crate::workbench::app::actions::workspace::symbol_document::{
+    active_symbol_pin_finding_count, clear_active_symbol_pin_checks,
+};
+use crate::workbench::app::actions::workspace::{
+    NavigationParts, selected_hierarchy_master, selected_instance_veriloga_source,
+};
 use crate::workbench::app::dialogs::connectivity_manager::{
     ConnectivityManager, open_connectivity_manager,
 };
@@ -89,6 +96,11 @@ impl CommandSet for DesignCommand {
     ///
     /// The select tool and the grid cycle act on a schematic or a symbol in
     /// front; the grid styles and Fit content on a schematic alone.
+    ///
+    /// Moving up the hierarchy needs a schematic in front below its root;
+    /// a descent needs a schematic in front, then something to descend
+    /// into. Clearing needs a check to have run against the view in front,
+    /// and the tour a finding to visit; an annotation needs a schematic.
     fn availability(self, reads: &Reads<'_, DesignFeature>) -> CommandAvailability {
         let schematic = schematic_editor(reads);
         let selected = reads.state.selected_stimulus_definition.is_some();
@@ -136,6 +148,28 @@ impl CommandSet for DesignCommand {
             Self::ReplaceInstance | Self::CreateHierarchy => Some("select an editable object"),
             Self::FindReplace => (!schematic || reads.model.schematic_edit_read_only())
                 .then_some("command is unavailable in this context"),
+            Self::AscendHierarchy if !schematic => Some("open a schematic or testbench"),
+            Self::AscendHierarchy => (reads.model.workspace.content.hierarchy_stack.len() <= 1)
+                .then_some("already at top hierarchy"),
+            Self::DescendHierarchy | Self::DescendHierarchyDirect if !schematic => {
+                Some("open a schematic or testbench")
+            }
+            Self::DescendHierarchy => selected_hierarchy_master(reads.model)
+                .is_none()
+                .then_some("select one hierarchical instance"),
+            // The direct route opens what the instance is an instance of, as
+            // its context-menu row does: a Verilog-A instance's module opens
+            // as its cell view.
+            Self::DescendHierarchyDirect => (selected_hierarchy_master(reads.model).is_none()
+                && selected_instance_veriloga_source(reads.model).is_none())
+            .then_some("select one hierarchical or Verilog-A instance"),
+            Self::ClearChecks => (!check_results_stand(reads)).then_some("no check has run"),
+            Self::NextViolation | Self::PreviousViolation => {
+                (!findings_to_visit(reads)).then_some("the last check found no violations")
+            }
+            Self::AnnotateOperatingPoint | Self::AnnotateTransientVoltages => {
+                (!schematic).then_some("open a schematic or testbench")
+            }
             _ if self.places() && !schematic => Some("open an editable schematic or testbench"),
             _ if self.places() && reads.model.schematic_edit_read_only() => {
                 Some("the active schematic is read-only")
@@ -190,12 +224,19 @@ impl CommandSet for DesignCommand {
     }
 
     /// The grid styles are one choice: the style the schematic draws is the
-    /// one checked.
+    /// one checked. Each annotation is checked while the schematic shows it.
     fn checked(self, reads: &Reads<'_, DesignFeature>) -> Option<bool> {
+        let annotations = reads.state.schematic_visibility.annotations;
         let style = match self {
             Self::GridDots => GridStyle::Dots,
             Self::GridLines => GridStyle::Lines,
             Self::GridOff => GridStyle::Off,
+            Self::AnnotateOperatingPoint => {
+                return Some(annotations == SchematicAnnotationVisibility::OperatingPoint);
+            }
+            Self::AnnotateTransientVoltages => {
+                return Some(annotations == SchematicAnnotationVisibility::TransientVoltages);
+            }
             _ => return None,
         };
         Some(reads.state.grid == style)
@@ -383,8 +424,93 @@ impl CommandSet for DesignCommand {
                 );
                 cx.wb.activate(Workspace::Design);
             }
+            Self::AscendHierarchy => navigation(cx).ascend_workspace_level(),
+            Self::DescendHierarchy => {
+                descend::open_descend_hierarchy_dialog(
+                    &mut cx.state.descend_hierarchy,
+                    cx.model,
+                    cx.wb,
+                );
+            }
+            Self::DescendHierarchyDirect => navigation(cx).open_selected_instance_master(),
+            Self::ClearChecks => {
+                if routed::symbol_editor(cx.wb.workspace, cx.model) {
+                    clear_active_symbol_pin_checks(cx.model);
+                } else {
+                    let facts = cx
+                        .runs
+                        .slot_facts(cx.state.schematic_visibility.review_markers);
+                    cx.model.clear_active_design_check(facts);
+                }
+                cx.model.design_checks.drc_results = None;
+                cx.model.design_checks.drc_checked_version = 0;
+            }
+            Self::NextViolation => navigation(cx).cycle_violation(1),
+            Self::PreviousViolation => navigation(cx).cycle_violation(-1),
+            // Off leaves the violations on the drawing: hiding them as well
+            // is the visibility dialog's choice.
+            Self::AnnotateOperatingPoint => {
+                let annotations = &mut cx.state.schematic_visibility.annotations;
+                *annotations = if *annotations == SchematicAnnotationVisibility::OperatingPoint {
+                    SchematicAnnotationVisibility::ViolationsOnly
+                } else {
+                    SchematicAnnotationVisibility::OperatingPoint
+                };
+            }
+            // On, the status bar says which instant the badges read.
+            Self::AnnotateTransientVoltages => {
+                let annotations = &mut cx.state.schematic_visibility.annotations;
+                if *annotations == SchematicAnnotationVisibility::TransientVoltages {
+                    *annotations = SchematicAnnotationVisibility::ViolationsOnly;
+                } else {
+                    *annotations = SchematicAnnotationVisibility::TransientVoltages;
+                    let status =
+                        transient_annotation_status(cx.model, cx.peers.results().cursors().a);
+                    cx.wb.prompt(status);
+                }
+            }
         }
     }
+}
+
+/// What moving the canvas to another view or occurrence reads and writes,
+/// lent from the feature's context.
+fn navigation<'a>(cx: &'a mut Cx<'_, DesignFeature>) -> NavigationParts<'a> {
+    cx.state.navigation_parts(cx.model, cx.wb, cx.runs)
+}
+
+/// Whether a check's results stand against the view in front: the symbol's
+/// pin findings, or the schematic's rule results or check receipt.
+fn check_results_stand(reads: &Reads<'_, DesignFeature>) -> bool {
+    if routed::symbol_editor(reads.wb.workspace, reads.model) {
+        return active_symbol_pin_finding_count(reads.model).is_some();
+    }
+    reads.model.design_checks.drc_results.is_some() || {
+        let facts = reads
+            .runs
+            .slot_facts(reads.state.schematic_visibility.review_markers);
+        reads
+            .model
+            .active_design_check_status(facts)
+            .last_receipt()
+            .is_some()
+    }
+}
+
+/// Whether the finding tour has somewhere to go: a pin finding against the
+/// symbol in front, or a violation in the schematic's current receipt.
+fn findings_to_visit(reads: &Reads<'_, DesignFeature>) -> bool {
+    if routed::symbol_editor(reads.wb.workspace, reads.model) {
+        return active_symbol_pin_finding_count(reads.model).is_some_and(|findings| findings > 0);
+    }
+    let facts = reads
+        .runs
+        .slot_facts(reads.state.schematic_visibility.review_markers);
+    reads
+        .model
+        .active_design_check_status(facts)
+        .current_receipt()
+        .is_some_and(|receipt| !receipt.result.violations().is_empty())
 }
 
 /// Arm `tool` on the schematic, as every placement that is a tool does.

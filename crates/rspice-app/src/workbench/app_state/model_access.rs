@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use rspice_design::drc::{DrcLocation, DrcResult, DrcSeverity};
 
+#[cfg(test)]
 use super::design_checks::DesignCheckStatus;
 use super::diagnostic_store::listing::{ListingInputs, ListingSource};
 #[cfg(test)]
@@ -142,6 +143,7 @@ impl AppState {
         self.model.design_check_status(subject, self.slot_facts())
     }
 
+    #[cfg(test)]
     pub(crate) fn active_design_check_status(&self) -> DesignCheckStatus<'_> {
         self.model.active_design_check_status(self.slot_facts())
     }
@@ -185,6 +187,7 @@ impl AppState {
     }
 
     // Application half of a model operation; it becomes a request.
+    #[cfg(test)]
     pub(crate) fn clear_active_design_check(&mut self) {
         let facts = self.slot_facts();
         self.model.clear_active_design_check(facts);

@@ -613,10 +613,12 @@ mod tests {
     #[test]
     fn the_registry_lists_every_command_the_enum_declares() {
         let declared = declared_variants();
+        // The enum shrinks as the features take its commands, so no count
+        // stands for a parse that worked; the comparison below names any
+        // variant a broken parse lost.
         assert!(
-            declared.len() > 100,
-            "`enum Command` parsed as only {} variants: the parse broke, not the enum",
-            declared.len()
+            !declared.is_empty(),
+            "`enum Command` parsed as no variants: the parse broke, not the enum"
         );
         let registered: BTreeSet<String> = COMMAND_REGISTRY
             .iter()

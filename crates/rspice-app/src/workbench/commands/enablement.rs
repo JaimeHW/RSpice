@@ -231,9 +231,6 @@ impl Command {
                     .iter()
                     .any(|document| document.open && document.closable)
             }
-            Self::AnnotateOperatingPoint | Self::AnnotateTransientVoltages => {
-                active_schematic_editor(app)
-            }
             Self::SymbolPinTool
             | Self::SymbolPolylineTool
             | Self::SymbolRectangleTool
@@ -275,41 +272,12 @@ impl Command {
             Self::ExitSymbolInPlace => {
                 active_symbol_editor(app) && state.symbol_in_place().is_some()
             }
-            Self::AscendHierarchy => {
-                active_schematic_editor(app)
-                    && state.model.workspace.content.hierarchy_stack.len() > 1
-            }
-            Self::DescendHierarchy => {
-                active_schematic_editor(app) && state.selected_hierarchy_master().is_some()
-            }
-            // The direct route opens what the instance is an instance of, as
-            // its context-menu row does: a Verilog-A instance's module opens
-            // as its cell view.
-            Self::DescendHierarchyDirect => {
-                active_schematic_editor(app)
-                    && (state.selected_hierarchy_master().is_some()
-                        || state.selected_veriloga_source().is_some())
-            }
             // A symbol cellview checks its pin contract. The editor's own
             // keyboard route always did this; the command must agree, or the
             // toolbar shows a dead control beside a working shortcut.
             Self::CheckCellview => active_schematic_editor(app) || active_symbol_editor(app),
             // The design is the configured one, whichever view is open.
             Self::CheckDesign => true,
-            Self::ClearChecks if active_symbol_editor(app) => {
-                state.active_symbol_pin_finding_count().is_some()
-            }
-            Self::ClearChecks => {
-                state.model.design_checks.drc_results.is_some()
-                    || state.active_design_check_status().last_receipt().is_some()
-            }
-            Self::NextViolation | Self::PreviousViolation if active_symbol_editor(app) => state
-                .active_symbol_pin_finding_count()
-                .is_some_and(|findings| findings > 0),
-            Self::NextViolation | Self::PreviousViolation => state
-                .active_design_check_status()
-                .current_receipt()
-                .is_some_and(|receipt| !receipt.result.violations().is_empty()),
             // A run's log is a record; only the session's log is cleared.
             Self::ClearConsole => match state.workbench.console_page {
                 ConsolePage::Console => {
@@ -342,14 +310,6 @@ impl Command {
             Self::SetStandardValueSeries(series) => {
                 Some(app.state.model.workspace.content.standard_value_series == series)
             }
-            Self::AnnotateOperatingPoint => Some(
-                app.state.design.schematic_visibility.annotations
-                    == crate::state::SchematicAnnotationVisibility::OperatingPoint,
-            ),
-            Self::AnnotateTransientVoltages => Some(
-                app.state.design.schematic_visibility.annotations
-                    == crate::state::SchematicAnnotationVisibility::TransientVoltages,
-            ),
             _ => None,
         }
     }

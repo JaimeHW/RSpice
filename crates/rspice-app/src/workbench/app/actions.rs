@@ -606,7 +606,8 @@ mod shortcut_ownership_tests {
         let identities = app.state.model.design_rule_finding_identities(&subject);
         assert_eq!(identities.len(), 2, "both findings were published");
 
-        app.execute_shortcut_command(ShortcutCommand::NextViolation);
+        let next = crate::workbench::design::commands::DesignCommand::NextViolation.key();
+        app.execute_command_key(next);
         assert_eq!(
             app.state.workbench.workspace,
             crate::workbench::state::Workspace::Design
@@ -644,10 +645,7 @@ mod shortcut_ownership_tests {
             |command| app.command_key_available(command),
         );
         app.state.shortcut_resolver = resolver;
-        assert_eq!(
-            resolution.command,
-            Some(ShortcutCommand::NextViolation.key())
-        );
+        assert_eq!(resolution.command, Some(next));
 
         app.execute_command_key(resolution.command.unwrap());
         assert_eq!(

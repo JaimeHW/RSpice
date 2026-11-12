@@ -170,9 +170,6 @@ impl Command {
                     | Self::NextDocument
                     | Self::CloseOtherDocuments
                     | Self::CloseAllDocuments
-                    | Self::AscendHierarchy
-                    | Self::DescendHierarchy
-                    | Self::DescendHierarchyDirect
                     | Self::CheckCellview
                     | Self::CheckDesign
                     | Self::ToggleInspector
@@ -281,17 +278,9 @@ impl Command {
             | Self::SetStandardValueSeries(_)
             | Self::JoinCollinearWires
             | Self::Cancel
-            | Self::AscendHierarchy
-            | Self::DescendHierarchy
-            | Self::DescendHierarchyDirect
             | Self::CheckCellview
             | Self::CheckDesign
-            | Self::ClearChecks
-            | Self::NextViolation
-            | Self::PreviousViolation
-            | Self::ObjectProperties
-            | Self::AnnotateOperatingPoint
-            | Self::AnnotateTransientVoltages => CommandOwner::Design,
+            | Self::ObjectProperties => CommandOwner::Design,
         }
     }
 
@@ -371,32 +360,6 @@ impl Command {
             | Self::ZoomBox
             | Self::ZoomPrevious => {
                 app.route_command_key(self.key());
-            }
-            // Off leaves the violations on the drawing: hiding them as well
-            // is the visibility dialog's choice.
-            Self::AnnotateOperatingPoint => {
-                use crate::state::SchematicAnnotationVisibility;
-                let annotations = &mut app.state.design.schematic_visibility.annotations;
-                *annotations = if *annotations == SchematicAnnotationVisibility::OperatingPoint {
-                    SchematicAnnotationVisibility::ViolationsOnly
-                } else {
-                    SchematicAnnotationVisibility::OperatingPoint
-                };
-            }
-            // On, the status bar says which instant the badges read.
-            Self::AnnotateTransientVoltages => {
-                use crate::state::SchematicAnnotationVisibility;
-                let annotations = &mut app.state.design.schematic_visibility.annotations;
-                if *annotations == SchematicAnnotationVisibility::TransientVoltages {
-                    *annotations = SchematicAnnotationVisibility::ViolationsOnly;
-                } else {
-                    *annotations = SchematicAnnotationVisibility::TransientVoltages;
-                    let status = crate::schematic::view::transient_annotation_status(
-                        &app.state.model,
-                        app.state.results.results.session.cursors.a,
-                    );
-                    app.state.workbench.prompt(status);
-                }
             }
             Self::HighlightNet => {
                 crate::schematic::view::highlight_selected_net(&mut app.state);
@@ -732,41 +695,11 @@ impl Command {
                     app.state.model.schematic.cancel_interaction_step();
                 }
             }
-            Self::AscendHierarchy => {
-                app.state.ascend_workspace_level();
-            }
-            Self::DescendHierarchy => {
-                crate::workbench::app::open_descend_hierarchy_dialog(
-                    &mut app.state.design.descend_hierarchy,
-                    &app.state.model,
-                    &mut app.state.workbench,
-                );
-            }
-            Self::DescendHierarchyDirect => {
-                app.state.open_selected_instance_master();
-            }
             Self::CheckCellview if active_symbol_editor(app) => {
                 app.state.run_active_symbol_pin_checks();
             }
             Self::CheckCellview => check_cellview(&mut app.state),
             Self::CheckDesign => check_design(&mut app.state),
-            Self::ClearChecks => {
-                if active_symbol_editor(app) {
-                    crate::workbench::app::actions::workspace::symbol_document::clear_active_symbol_pin_checks(
-                        &mut app.state.model,
-                    );
-                } else {
-                    app.state.clear_active_design_check();
-                }
-                app.state.model.design_checks.drc_results = None;
-                app.state.model.design_checks.drc_checked_version = 0;
-            }
-            Self::NextViolation => {
-                app.state.navigation().cycle_violation(1);
-            }
-            Self::PreviousViolation => {
-                app.state.navigation().cycle_violation(-1);
-            }
             Self::CommandPalette => open_command_palette(&mut app.state),
             Self::KeyboardShortcuts => app.state.shell.shortcuts_help = true,
             Self::HelpCenter => {

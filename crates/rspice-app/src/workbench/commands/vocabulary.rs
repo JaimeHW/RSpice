@@ -68,11 +68,6 @@ pub enum Command {
     ZoomBox,
     /// Go back to the view the canvas showed before this one.
     ZoomPrevious,
-    /// Show or hide the DC operating point on the schematic.
-    AnnotateOperatingPoint,
-    /// Show or hide the transient's voltages at results cursor A on the
-    /// schematic.
-    AnnotateTransientVoltages,
     ToggleFullScreen,
     ToggleNavigator,
     ToggleInspector,
@@ -159,11 +154,6 @@ pub enum Command {
     /// overlapping, as one wire each.
     JoinCollinearWires,
     Cancel,
-    AscendHierarchy,
-    DescendHierarchy,
-    /// Direct edit-in-place hierarchy gesture used by the toolbar and
-    /// Shift+E. The Design-menu command above owns the explicit transaction.
-    DescendHierarchyDirect,
     /// The open cellview's own findings: what an author runs while drawing.
     /// A symbol view checks its pins against the cell's interface.
     CheckCellview,
@@ -171,9 +161,6 @@ pub enum Command {
     /// configuration, with every cellview of the project's own libraries the
     /// walk never reaches.
     CheckDesign,
-    ClearChecks,
-    NextViolation,
-    PreviousViolation,
     CommandPalette,
     KeyboardShortcuts,
     HelpCenter,
@@ -436,32 +423,8 @@ impl Command {
                 spec("join-collinear-wires", "Join collinear wires", "Design")
             }
             Self::Cancel => spec("cancel-active-command", "Cancel active command", "Design"),
-            Self::AscendHierarchy => spec("ascend-hierarchy", "Return to parent", "Design"),
-            // Two gestures, two rows: this one opens the descend dialog, and
-            // the direct gesture below goes straight to the master. Sharing one
-            // title made them indistinguishable everywhere the palette, the
-            // shortcut editor and the command reference list them side by side.
-            Self::DescendHierarchy => spec(
-                "descend-hierarchy",
-                "Descend with options\u{2026}",
-                "Design",
-            ),
-            Self::DescendHierarchyDirect => spec("descend-selected-instance", "Descend", "Design"),
             Self::CheckCellview => spec("check-cellview", "Check cellview", "Design"),
             Self::CheckDesign => spec("check-design", "Check design", "Design"),
-            Self::ClearChecks => spec("clear-checks", "Clear check results", "Design"),
-            Self::NextViolation => spec("next-violation", "Next violation", "Design"),
-            Self::PreviousViolation => spec("previous-violation", "Previous violation", "Design"),
-            Self::AnnotateOperatingPoint => spec(
-                "annotate-operating-point",
-                "Annotate DC operating point",
-                "Simulate",
-            ),
-            Self::AnnotateTransientVoltages => spec(
-                "annotate-transient-voltages",
-                "Annotate transient voltages",
-                "Simulate",
-            ),
             Self::CommandPalette => spec("command-palette", "Command palette", "Navigate"),
             Self::KeyboardShortcuts => spec("command-reference", "Keyboard shortcuts", "Help"),
             Self::HelpCenter => spec("help-center", "RSpice Help", "Help"),
@@ -548,8 +511,6 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ZoomToSelection,
     Command::ZoomBox,
     Command::ZoomPrevious,
-    Command::AnnotateOperatingPoint,
-    Command::AnnotateTransientVoltages,
     Command::ToggleFullScreen,
     Command::ToggleNavigator,
     Command::ToggleInspector,
@@ -617,14 +578,8 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E96),
     Command::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E192),
     Command::JoinCollinearWires,
-    Command::AscendHierarchy,
-    Command::DescendHierarchy,
-    Command::DescendHierarchyDirect,
     Command::CheckCellview,
     Command::CheckDesign,
-    Command::ClearChecks,
-    Command::NextViolation,
-    Command::PreviousViolation,
     Command::CommandPalette,
     Command::KeyboardShortcuts,
     Command::HelpCenter,
@@ -737,8 +692,8 @@ static COMMAND_ORDER: &[CommandKey] = &[
     DesignCommand::GridDots.key(),
     DesignCommand::GridLines.key(),
     DesignCommand::GridOff.key(),
-    Command::AnnotateOperatingPoint.key(),
-    Command::AnnotateTransientVoltages.key(),
+    DesignCommand::AnnotateOperatingPoint.key(),
+    DesignCommand::AnnotateTransientVoltages.key(),
     DesignCommand::GridSnapRouting.key(),
     SheetsCommand::DrawingSheetLayers.key(),
     DesignCommand::VisibilityOptions.key(),
@@ -846,16 +801,16 @@ static COMMAND_ORDER: &[CommandKey] = &[
     Command::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E96).key(),
     Command::SetStandardValueSeries(rspice_vocabulary::quantity::ESeries::E192).key(),
     Command::JoinCollinearWires.key(),
-    Command::AscendHierarchy.key(),
-    Command::DescendHierarchy.key(),
-    Command::DescendHierarchyDirect.key(),
+    DesignCommand::AscendHierarchy.key(),
+    DesignCommand::DescendHierarchy.key(),
+    DesignCommand::DescendHierarchyDirect.key(),
     CodeCommand::ShowInNetlist.key(),
     Command::CheckCellview.key(),
     Command::CheckDesign.key(),
     ProjectCommand::CheckAndSave.key(),
-    Command::ClearChecks.key(),
-    Command::NextViolation.key(),
-    Command::PreviousViolation.key(),
+    DesignCommand::ClearChecks.key(),
+    DesignCommand::NextViolation.key(),
+    DesignCommand::PreviousViolation.key(),
     SimulateCommand::Run.key(),
     SimulateCommand::Stop.key(),
     SimulateCommand::JobsManager.key(),

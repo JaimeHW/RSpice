@@ -198,22 +198,8 @@ const SYMBOL_ROTATE_PIN: &[ShortcutBinding] =
     &[primary(chord(Key::R, true, false, false, "Ctrl+R"), ALL)];
 const SYMBOL_MIRROR_PIN: &[ShortcutBinding] =
     &[primary(chord(Key::M, true, false, false, "Ctrl+M"), ALL)];
-const ASCEND_HIERARCHY: &[ShortcutBinding] =
-    &[primary(chord(Key::H, false, false, true, "Shift+H"), ALL)];
-const DESCEND_HIERARCHY: &[ShortcutBinding] =
-    &[primary(chord(Key::H, false, false, false, "H"), ALL)];
-const DESCEND_HIERARCHY_DIRECT: &[ShortcutBinding] =
-    &[primary(chord(Key::E, false, false, true, "Shift+E"), ALL)];
 const CHECK_CELLVIEW: &[ShortcutBinding] =
     &[primary(chord(Key::E, true, false, false, "Ctrl+E"), ALL)];
-const NEXT_VIOLATION: &[ShortcutBinding] = &[
-    primary(chord(Key::CloseBracket, false, false, false, "]"), ALL),
-    alternate(chord(Key::F8, false, false, false, "F8"), ALL),
-];
-const PREVIOUS_VIOLATION: &[ShortcutBinding] = &[
-    primary(chord(Key::OpenBracket, false, false, false, "["), ALL),
-    alternate(chord(Key::F8, false, false, true, "Shift+F8"), ALL),
-];
 const CANCEL: &[ShortcutBinding] = &[primary(
     chord(Key::Escape, false, false, false, "Escape"),
     ALL,
@@ -239,7 +225,6 @@ impl Command {
                 | Self::FindInDesign
                 | Self::CheckDesign
                 | Self::ConfigurationSets
-                | Self::DescendHierarchyDirect
         )
     }
 
@@ -273,7 +258,6 @@ impl Command {
                 | Self::Cancel
                 | Self::ToggleConsoleMaximized
                 | Self::ClearConsole
-                | Self::DescendHierarchyDirect
                 // The macOS Window menu's: a browser page has no window to
                 // minimize or zoom, and Windows and Linux do it from the
                 // title bar.
@@ -316,16 +300,12 @@ impl Command {
             | Self::ZoomToSelection
             | Self::ZoomBox => ShortcutContext::EngineeringCanvas,
             Self::Cancel => ShortcutContext::ApplicationChrome,
-            Self::AscendHierarchy
-            | Self::DescendHierarchy
-            | Self::DescendHierarchyDirect
-            | Self::EditSymbolInPlace
+            Self::EditSymbolInPlace
             | Self::SetStandardValueSeries(_)
             | Self::CheckCellview
             | Self::CheckDesign
             | Self::HighlightNet
             | Self::ConfigurationSets => ShortcutContext::DesignWorkspace,
-            Self::NextViolation | Self::PreviousViolation => ShortcutContext::ViolationNavigation,
             Self::SymbolPinTool
             | Self::SymbolPolylineTool
             | Self::SymbolRectangleTool
@@ -405,16 +385,11 @@ impl Command {
             Self::SymbolSave => NONE,
             Self::EditSymbolInPlace => NONE,
             Self::ExitSymbolInPlace => EXIT_SYMBOL_IN_PLACE,
-            Self::AscendHierarchy => ASCEND_HIERARCHY,
-            Self::DescendHierarchy => DESCEND_HIERARCHY,
-            Self::DescendHierarchyDirect => DESCEND_HIERARCHY_DIRECT,
             Self::CheckCellview => CHECK_CELLVIEW,
             // Ctrl+Alt+E is AltGr+E, the euro sign, on most European
             // layouts, and every other chord of the check family is taken;
             // the Design menu, the toolbar and the palette are its routes.
             Self::CheckDesign => NONE,
-            Self::NextViolation => NEXT_VIOLATION,
-            Self::PreviousViolation => PREVIOUS_VIOLATION,
             Self::CommandPalette => COMMAND_PALETTE,
             Self::Cancel => CANCEL,
             _ => NONE,
@@ -534,17 +509,6 @@ impl Command {
             Self::ConfigurationSets => "open a project",
             Self::Paste => "clipboard has no compatible content",
             Self::ObjectProperties => "select one inspectable object",
-            Self::AscendHierarchy if !super::active_schematic_editor(app) => {
-                "open a schematic or testbench"
-            }
-            Self::AscendHierarchy => "already at top hierarchy",
-            Self::DescendHierarchy | Self::DescendHierarchyDirect
-                if !super::active_schematic_editor(app) =>
-            {
-                "open a schematic or testbench"
-            }
-            Self::DescendHierarchy => "select one hierarchical instance",
-            Self::DescendHierarchyDirect => "select one hierarchical or Verilog-A instance",
             Self::EditSymbolInPlace => app
                 .state
                 .selected_symbol_in_place_target()
@@ -567,11 +531,6 @@ impl Command {
                 "open a schematic or testbench"
             }
             Self::SelectOfKind(kind) => kind.absent(),
-            Self::NextViolation | Self::PreviousViolation => "the last check found no violations",
-            Self::ClearChecks => "no check has run",
-            Self::AnnotateOperatingPoint | Self::AnnotateTransientVoltages => {
-                "open a schematic or testbench"
-            }
             Self::CloseOtherDocuments => "no other closable document is open",
             Self::CloseAllDocuments => "no closable document is open",
             Self::PreviousDocument | Self::NextDocument => "only one document is open",

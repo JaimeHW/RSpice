@@ -213,14 +213,14 @@ pub(in crate::workbench) fn design_tools(
     toolbar_icon_command(
         ui,
         app,
-        Command::DescendHierarchyDirect.key(),
+        DesignCommand::DescendHierarchyDirect.key(),
         WorkbenchIcon::Layers,
         layout,
     );
     toolbar_icon_command_selected_as(
         ui,
         app,
-        Command::AscendHierarchy.key(),
+        DesignCommand::AscendHierarchy.key(),
         WorkbenchIcon::ArrowUp,
         false,
         "Ascend to parent sheet · double-click the sheet background also ascends",

@@ -230,7 +230,7 @@ fn selected_hierarchy_instance(app: &mut RSpiceApp) -> CellViewRef {
 fn descend_into_hierarchy_opens_and_draws_in_the_frame() {
     let mut app = design_app();
     selected_hierarchy_instance(&mut app);
-    Command::DescendHierarchy.execute(&mut app);
+    app.execute_command_key(DesignCommand::DescendHierarchy.key());
     assert!(draws_dialog(&mut app, "Descend into hierarchy"));
     assert!(app.state.design.descend_hierarchy.open);
 }
@@ -259,7 +259,7 @@ fn the_descend_step_has_its_choice_answered_straight_after_it_draws() {
 fn a_descent_is_carried_out_in_the_frame_it_is_chosen() {
     let mut app = design_app();
     let child = selected_hierarchy_instance(&mut app);
-    Command::DescendHierarchy.execute(&mut app);
+    app.execute_command_key(DesignCommand::DescendHierarchy.key());
     let ctx = Context::default();
     crate::ui::Theme::default().apply(&ctx);
     let mut frame = eframe::Frame::_new_kittest();
