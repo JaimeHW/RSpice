@@ -7,13 +7,13 @@
 //! enum, or a derived default replacing the written one, changes what every
 //! new session shows.
 
+use super::DesignPanel;
 use super::*;
 use crate::state::{SimulationPage, VerificationPage};
 use crate::workbench::project::workspace_state::{
     LibraryCellviewPage, ProjectLauncherFilter, ProjectLauncherPage, ProjectLauncherSort,
     ProjectPage,
 };
-use crate::workbench::state::DesignPanel;
 
 #[test]
 fn moved_workbench_fields_keep_the_defaults_the_workbench_gave_them() {

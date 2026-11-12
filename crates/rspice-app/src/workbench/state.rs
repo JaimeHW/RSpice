@@ -47,13 +47,5 @@ use super::{
     BrowserHistoryEffect, RouteTransitionSource, SurfaceId, SurfaceRoute, WorkspacePreset,
 };
 
-/// The two Design navigator tabs specified by the workbench mockup.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub enum DesignPanel {
-    #[default]
-    Navigator,
-    ComponentShelf,
-}
-
 #[cfg(test)]
 mod tests;

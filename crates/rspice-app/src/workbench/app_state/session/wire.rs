@@ -31,12 +31,12 @@ use crate::workbench::models::workspace_state::ModelsWorkbenchViewState;
 use crate::workbench::preferences::UserPreferences;
 use crate::workbench::project::workspace_state::{LibraryCellviewPage, ProjectPage};
 use crate::workbench::slots::{
-    CodeState, DesignState, HardcopyState, ModelsState, PlatformState, ProjectState, ResultsState,
-    SettingsState, SimulateState,
+    CodeState, DesignPanel, DesignState, HardcopyState, ModelsState, PlatformState, ProjectState,
+    ResultsState, SettingsState, SimulateState,
 };
 use crate::workbench::state::{
-    ConsolePage, DesignPanel, VerificationSessionState, WorkbenchSession, Workspace,
-    WorkspaceDocumentId, WorkspaceDocumentRegistry, WorkspaceLayoutState, default_analysis_index,
+    ConsolePage, VerificationSessionState, WorkbenchSession, Workspace, WorkspaceDocumentId,
+    WorkspaceDocumentRegistry, WorkspaceLayoutState, default_analysis_index,
     default_console_height, default_inspector_width, default_navigator_width,
 };
 use crate::workbench::{SurfaceNavigation, WorkspacePreset};

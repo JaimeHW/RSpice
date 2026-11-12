@@ -40,7 +40,7 @@ use crate::workbench::app_state::Model;
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::feature::{Cx, Reads, RoutedCommand};
 use crate::workbench::framework::requests::FocusNavigatorSearch;
-use crate::workbench::state::{DesignPanel, Drawer, Workspace};
+use crate::workbench::state::{Drawer, Workspace};
 
 use super::DesignFeature;
 
@@ -409,7 +409,7 @@ fn find_in_design(cx: &mut Cx<'_, DesignFeature>) {
     cx.wb.activate(Workspace::Design);
     cx.wb.navigator_visible = true;
     cx.wb.drawer = Some(Drawer::Navigator);
-    cx.state.design_panel = DesignPanel::Navigator;
+    cx.state.show_navigator();
     cx.wb.outbox.push(FocusNavigatorSearch);
 }
 

@@ -46,7 +46,7 @@ use crate::workbench::framework::feature::{
 };
 use crate::workbench::framework::requests::FocusPlacementSearch;
 use crate::workbench::slots::DesignState;
-use crate::workbench::state::{DesignPanel, Drawer, WorkbenchSession, Workspace};
+use crate::workbench::state::{Drawer, WorkbenchSession, Workspace};
 use commands::DesignCommand;
 
 /// The design feature.
@@ -302,7 +302,7 @@ impl CommandSet for DesignCommand {
                 cx.wb.activate(Workspace::Design);
                 cx.wb.navigator_visible = true;
                 cx.wb.drawer = Some(Drawer::Navigator);
-                cx.state.design_panel = DesignPanel::ComponentShelf;
+                cx.state.show_component_shelf();
                 cx.wb.outbox.push(FocusPlacementSearch);
             }
             Self::PlaceWire => arm_tool(cx, Tool::Wire),

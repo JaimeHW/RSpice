@@ -20,6 +20,15 @@ use crate::workbench::app::{
 use crate::workbench::app_state::Model;
 use crate::workbench::framework::feature::{CanvasGesturePort, DesignPort};
 use crate::workbench::state::WorkbenchSession;
+use serde::{Deserialize, Serialize};
+
+/// The two Design navigator tabs specified by the workbench mockup.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub(crate) enum DesignPanel {
+    #[default]
+    Navigator,
+    ComponentShelf,
+}
 
 /// What the design feature keeps open between frames.
 #[derive(Debug, Clone, Default)]
@@ -190,7 +199,7 @@ pub(crate) struct DesignState {
     /// Runtime state for the Schematic-family symbol editor surface.
     pub symbol: crate::workbench::app::actions::workspace::symbol_document::SymbolUiState,
 
-    pub design_panel: crate::workbench::state::DesignPanel,
+    pub design_panel: DesignPanel,
     /// Which stimulus definition the library workspace is reading, by exact
     /// name. Runtime-only: a definition can be renamed or deleted by another
     /// session of the same project, and restoring a name that no longer
@@ -227,17 +236,17 @@ impl DesignState {
     /// Whether the Design side panel shows the component shelf rather than
     /// the Navigator.
     pub(crate) fn component_shelf_shown(&self) -> bool {
-        self.design_panel == crate::workbench::state::DesignPanel::ComponentShelf
+        self.design_panel == DesignPanel::ComponentShelf
     }
 
     /// Bring the Navigator forward in the Design side panel.
     pub(crate) fn show_navigator(&mut self) {
-        self.design_panel = crate::workbench::state::DesignPanel::Navigator;
+        self.design_panel = DesignPanel::Navigator;
     }
 
     /// Bring the component shelf forward in the Design side panel.
     pub(crate) fn show_component_shelf(&mut self) {
-        self.design_panel = crate::workbench::state::DesignPanel::ComponentShelf;
+        self.design_panel = DesignPanel::ComponentShelf;
     }
 
     /// Whether a schematic edit is under way: an undo step still open, as
