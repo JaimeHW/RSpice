@@ -13,6 +13,7 @@ mod field_editing;
 mod frame_cost;
 mod geometry;
 mod inspector;
+mod navigator;
 mod page_models;
 mod page_navigation;
 mod page_raster;
