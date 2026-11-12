@@ -350,7 +350,7 @@ fn the_open_right_click_menu_takes_its_keys_and_the_list_takes_them_once_it_has_
     user.key(Key::F10, Modifiers::SHIFT);
     user.settle();
     assert!(menu_shown(&user), "Shift+F10 raises the menu");
-    assert!(!rows(&user).is_empty(), "the list is up behind the menu");
+    assert!(rows(&user).is_empty(), "the menu closes the list");
     let mut stepped = Vec::new();
     for key in [Key::ArrowDown, Key::ArrowDown, Key::ArrowUp] {
         user.key(key, NONE);
@@ -372,8 +372,8 @@ fn the_open_right_click_menu_takes_its_keys_and_the_list_takes_them_once_it_has_
         "the editor has the keyboard back"
     );
 
-    // The list shows only while the editor has the keyboard, so the menu's
-    // rows took it away; typing brings it up again.
+    // The menu closed the list until the next edit; typing brings it up
+    // again.
     user.key(Key::Backspace, NONE);
     type_text(&mut user, "$");
     let chosen = description(&user);
@@ -390,4 +390,34 @@ fn the_open_right_click_menu_takes_its_keys_and_the_list_takes_them_once_it_has_
         Some(EDITOR),
         "the editor keeps the keyboard"
     );
+}
+
+/// Raising the right-click menu closes the list and the parameter card, so
+/// no two popups overlap, and the list stays closed once the menu has gone,
+/// until the next edit.
+#[test]
+fn raising_the_right_click_menu_closes_the_list_and_the_parameter_card() {
+    let mut user = op_amp();
+    on_a_new_line(&mut user);
+    type_text(&mut user, "$");
+    assert!(!rows(&user).is_empty(), "the list is up");
+    user.key(Key::F10, Modifiers::SHIFT);
+    user.settle();
+    assert!(menu_shown(&user), "Shift+F10 raises the menu");
+    assert!(rows(&user).is_empty(), "the menu closes the list");
+    user.key(Key::Escape, NONE);
+    user.settle();
+    assert!(!menu_shown(&user), "Escape closes the menu");
+    assert!(
+        rows(&user).is_empty(),
+        "the list stays closed once the menu has gone"
+    );
+
+    user.key(Key::Backspace, NONE);
+    type_text(&mut user, "tau = ddt(");
+    assert!(user.find("expr").is_some(), "the parameter card is up");
+    user.key(Key::F10, Modifiers::SHIFT);
+    user.settle();
+    assert!(menu_shown(&user), "Shift+F10 raises the menu");
+    assert!(user.find("expr").is_none(), "the menu closes the card");
 }

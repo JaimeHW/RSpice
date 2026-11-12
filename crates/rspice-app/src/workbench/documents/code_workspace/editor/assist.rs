@@ -239,6 +239,18 @@ pub(super) fn show(
         state.signature_open = false;
         state.card = None;
     }
+    // The right-click menu, open over the editor or opening in this frame,
+    // closes the list and the cards, so no two popups overlap; the list
+    // stays closed until the next edit, as Escape leaves it.
+    if crate::workbench::documents::virtual_text_editor::context_menu_open(&context, editor_id)
+        || output.response.secondary_clicked()
+    {
+        if state.popup.take().is_some() {
+            state.dismissed_at = Some(state.serial);
+        }
+        state.signature_open = false;
+        state.card = None;
+    }
     if frame.editable && focused {
         run_completion(
             ui,

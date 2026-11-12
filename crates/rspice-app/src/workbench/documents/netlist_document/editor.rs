@@ -306,6 +306,18 @@ pub fn show(
         })
     });
 
+    // The right-click menu, open over the editor or opening in this frame,
+    // closes the completion list and the signature hint, so no two popups
+    // overlap; the list stays closed until the next edit, as Escape leaves
+    // it.
+    if crate::workbench::documents::virtual_text_editor::context_menu_open(ui.ctx(), editor_id)
+        || editor_response.secondary_clicked()
+    {
+        netlist.completion_open = false;
+        netlist.completion_dismissed_at = Some(netlist.revision);
+        netlist.signature_help.open = false;
+    }
+
     // Completion is an edit and therefore exists only for project-owned source.
     if editable
         && let Some((start, end, text, caret)) =

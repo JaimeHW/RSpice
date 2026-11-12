@@ -12,6 +12,7 @@ use egui::{Key, Modifiers, PointerButton, Pos2};
 use super::engine_recovery_path::author_deck;
 use crate::feature_tests::replay::{Replay, controls, only};
 use crate::workbench::code::CodeFeature;
+use crate::workbench::documents::netlist_document::language::show_signature_help_at_cursor;
 use crate::workbench::documents::netlist_document::{
     OwnedNetlistReplacement, editor_id_in, replace_owned_sources_atomically,
 };
@@ -330,18 +331,17 @@ fn editor_has_the_keyboard(replay: &Replay) -> bool {
     replay.ctx().memory(|memory| memory.has_focus(editor))
 }
 
-/// The right-click on a name leaves the completion list up behind the menu.
 /// While the menu is open the arrows step its rows, and move neither the
-/// list nor the caret; Escape closes the menu and gives the editor the
-/// keyboard back, and no key reaches the deck.
+/// completion list's choice nor the caret; Escape closes the menu and gives
+/// the editor the keyboard back, and no key reaches the deck.
 #[test]
 fn the_arrows_step_the_open_menus_rows_and_escape_closes_it() {
     let mut replay = deck_page();
     open_menu_on_the_call(&mut replay);
     let netlist = &replay.app.state.code.netlist;
     assert!(
-        netlist.completion_open,
-        "the right-click leaves the completion list up behind the menu"
+        !netlist.completion_open,
+        "the right-click closes the completion list"
     );
     let (caret, listed) = (netlist.cursor_char_index, netlist.completion_index);
     let mut stepped = Vec::new();
@@ -401,10 +401,9 @@ fn enter_chooses_the_row_the_arrows_stepped_to() {
     );
 }
 
-/// Once the menu has closed, the completion list still up takes its keys
-/// again: an arrow leaves the caret on the call instead of moving it to the
-/// next line, and Escape closes the list while the editor keeps the
-/// keyboard.
+/// Once the menu has closed, a completion list typed up takes its keys
+/// again: an arrow moves the list's choice and leaves the caret where it
+/// is, and Escape closes the list while the editor keeps the keyboard.
 #[test]
 fn the_completion_list_takes_its_keys_once_the_menu_has_closed() {
     let mut replay = deck_page();
@@ -414,16 +413,22 @@ fn the_completion_list_takes_its_keys_once_the_menu_has_closed() {
         !draws_the_menu(&replay.frame(Vec::new())),
         "Escape closes the menu"
     );
-    assert!(
-        replay.app.state.code.netlist.completion_open,
-        "the completion list is still up"
-    );
-    let caret = replay.app.state.code.netlist.cursor_char_index;
+    // A new line under the call, begun with a dot: the directives' list.
+    press(&mut replay, Key::End);
+    replay.type_text("\n.");
+    let netlist = &replay.app.state.code.netlist;
+    assert!(netlist.completion_open, "the dot brings the list up");
+    let (caret, listed) = (netlist.cursor_char_index, netlist.completion_index);
     press(&mut replay, Key::ArrowDown);
     replay.frame(Vec::new());
+    let netlist = &replay.app.state.code.netlist;
     assert_eq!(
-        replay.app.state.code.netlist.cursor_char_index, caret,
-        "the list takes the arrow, and the caret stays on the call"
+        netlist.cursor_char_index, caret,
+        "the list takes the arrow, and the caret stays"
+    );
+    assert_ne!(
+        netlist.completion_index, listed,
+        "the arrow moves the list's choice"
     );
     press(&mut replay, Key::Escape);
     replay.frame(Vec::new());
@@ -434,6 +439,83 @@ fn the_completion_list_takes_its_keys_once_the_menu_has_closed() {
     assert!(
         editor_has_the_keyboard(&replay),
         "the editor keeps the keyboard"
+    );
+}
+
+/// Whether the frame that put out `output` drew the completion list.
+fn draws_the_completion_list(output: &egui::FullOutput) -> bool {
+    let tree = output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .expect("a frame with AccessKit on publishes its tree");
+    tree.nodes.iter().any(|(_, node)| {
+        node.role() == Role::ListBoxOption
+            && node
+                .label()
+                .is_some_and(|label| label.contains(" completion: "))
+    })
+}
+
+/// A right-click on a name draws only the menu: the completion list that
+/// putting the caret in the name would bring up is closed from the frame
+/// the menu opens in, and stays closed once the menu has gone, until the
+/// next edit.
+#[test]
+fn a_right_click_on_a_name_draws_only_the_menu() {
+    let mut replay = deck_page();
+    let opened = right_click_the_call(&mut replay);
+    assert!(
+        draws_the_menu(&opened) && !draws_the_completion_list(&opened),
+        "the frame of the right-click draws the menu alone"
+    );
+    let next = replay.frame(Vec::new());
+    assert!(
+        draws_the_menu(&next) && !draws_the_completion_list(&next),
+        "so does the next"
+    );
+    press(&mut replay, Key::Escape);
+    let closed = replay.frame(Vec::new());
+    assert!(
+        !draws_the_menu(&closed) && !draws_the_completion_list(&closed),
+        "the list stays closed once the menu has gone"
+    );
+}
+
+/// Opening the menu over the name the signature hint is open for closes the
+/// hint. Shift+F10 opens it, so the caret stays where the hint was opened
+/// and nothing else would close the hint.
+#[test]
+fn opening_the_menu_closes_the_signature_hint() {
+    let mut replay = deck_page();
+    click_the_call(&mut replay);
+    // The keyboard is put on the editor as a screen reader puts it there.
+    let editor = editor_id_in(&replay.app.state.model, &replay.app.state.code.netlist);
+    replay
+        .ctx()
+        .memory_mut(|memory| memory.request_focus(editor));
+    replay.frame(Vec::new());
+    let state = &mut replay.app.state;
+    show_signature_help_at_cursor(&state.model, &mut state.code.netlist)
+        .expect("the call has a signature");
+    replay.frame(Vec::new());
+    assert!(
+        replay.app.state.code.netlist.signature_help.open,
+        "the hint is open on the call"
+    );
+    let key = |pressed| egui::Event::Key {
+        key: Key::F10,
+        physical_key: Some(Key::F10),
+        pressed,
+        repeat: false,
+        modifiers: Modifiers::SHIFT,
+    };
+    let opened = replay.frame(vec![key(true)]);
+    replay.frame(vec![key(false)]);
+    assert!(draws_the_menu(&opened), "Shift+F10 opens the menu");
+    assert!(
+        !replay.app.state.code.netlist.signature_help.open,
+        "and closes the hint"
     );
 }
 
