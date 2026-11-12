@@ -522,6 +522,18 @@ impl BuiltinVerilogADevices {
         self.devices.iter()
     }
 
+    /// Whether a second Newton load of every instance at the same candidate
+    /// assembles exactly the first: no instance limits its iterates through
+    /// an active `$limit`, which anchors each load at the one before, and
+    /// none is marked `OFF`, whose startup state the first loads consume.
+    #[inline]
+    #[doc(hidden)]
+    pub fn newton_loads_repeat(&self) -> bool {
+        self.devices
+            .iter()
+            .all(|device| !device.limits_newton_steps() && !device.initial_off)
+    }
+
     #[doc(hidden)]
     pub fn visit_accepted_analog_tasks(&mut self, consume: &mut dyn FnMut(AnalogTaskEvent<'_>)) {
         for device in &mut self.devices {
@@ -2805,7 +2817,8 @@ mod tests {
     // of those tests out.
     #[cfg(any(
         feature = "veriloga-model-diode-cmc",
-        feature = "veriloga-model-r2-cmc"
+        feature = "veriloga-model-r2-cmc",
+        feature = "veriloga-model-vbic13",
     ))]
     use super::BuiltinVerilogADevices;
     #[cfg(feature = "veriloga-model-diode-cmc")]
@@ -3088,6 +3101,18 @@ mod tests {
             devices.add(instance);
         }
         devices
+    }
+
+    /// A generated diode has no `$limit`, so its Newton load repeats at a
+    /// candidate, until the deck marks it `OFF` and its first loads are its
+    /// cut-off state's instead.
+    #[cfg(feature = "veriloga-model-diode-cmc")]
+    #[test]
+    fn a_generated_diode_load_repeats_until_the_deck_marks_it_off() {
+        let mut devices = checkpoint_test_devices();
+        assert!(devices.newton_loads_repeat());
+        devices.devices[1].set_initially_off(true);
+        assert!(!devices.newton_loads_repeat());
     }
 
     #[cfg(feature = "veriloga-model-diode-cmc")]
@@ -3424,6 +3449,28 @@ mod tests {
         devices
             .accepted_checkpoint_states()
             .expect("beginning a fresh evaluation clears stale candidate validity");
+    }
+
+    /// VBIC13 limits its junction iterates through `$limit`, so its Newton
+    /// load depends on the load before it and does not repeat at a candidate.
+    #[cfg(feature = "veriloga-model-vbic13")]
+    #[test]
+    fn a_limiting_generated_instance_keeps_newton_loads_from_repeating() {
+        let mut circuit = TestTopology::default();
+        let mut devices = BuiltinVerilogADevices::new();
+        devices.add(
+            instantiate_builtin(
+                "VBIC13",
+                "q1",
+                &["c".to_string(), "b".to_string(), "0".to_string()],
+                &[],
+                &crate::netlist::ParamContext::new(),
+                &mut circuit,
+            )
+            .expect("generated VBIC13 instantiates")
+            .expect("VBIC13 is registered"),
+        );
+        assert!(!devices.newton_loads_repeat());
     }
 
     #[cfg(feature = "veriloga-model-vbic13")]

@@ -710,8 +710,11 @@ const MAX_PUBLIC_ITEMS: usize = 5292;
 // 1,691. `Mosfet::set_channel_gmin_enabled` adds one: the builder
 // (`rspice-core` engine/builder.rs) shunts a classic level 1-3 channel with
 // GMIN, drain to source, outside the ngspice and Xyce dialects. The census
-// is 1,692, with no slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 1692;
+// is 1,692. `BuiltinVerilogADevices::newton_loads_repeat` adds one: the
+// transient (`rspice-core` circuit/nonlinear.rs) lets a damped status load of
+// generated Verilog-A devices stand for the next Newton load only while every
+// instance's load repeats. The census is 1,693, with no slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 1693;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

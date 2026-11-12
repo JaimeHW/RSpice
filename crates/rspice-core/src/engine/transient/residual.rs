@@ -2892,6 +2892,10 @@ pub(super) static NEWTON_STAMPS_REUSED: std::sync::atomic::AtomicUsize =
 #[cfg(test)]
 pub(super) static RESTAMP_AFTER_FAILED_PROOF: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
+/// Rebuilds the stamp after a damped status load, for comparing the two paths.
+#[cfg(test)]
+pub(super) static RESTAMP_AFTER_STATUS_LOAD: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 #[cfg(test)]
 mod core_state_tests;
@@ -2988,6 +2992,53 @@ mod tests {
         assert!(reused > 0, "no failed proof lent its stamp");
         assert_eq!(lent.time, rebuilt.time);
         assert_eq!(lent.voltages, rebuilt.voltages);
+    }
+
+    /// Xyce's DampedNewton loads each candidate once and solves its next
+    /// direction from that load. A generated diode's Newton load repeats at a
+    /// candidate, so the status load of a corrected candidate serves as the
+    /// next iteration's Newton load, and every waveform keeps its bits.
+    #[test]
+    #[cfg(feature = "veriloga-model-diode-cmc")]
+    fn a_damped_status_load_of_generated_devices_serves_the_next_newton_iteration() {
+        let netlist = Netlist::parse_with_options(
+            "Diode clipper with generated DIODE_CMC diodes\n\
+             VCC 1 0 10V\n\
+             VIN 3 0 SIN(0V 10V 1kHz)\n\
+             D1 2 1 D1mod\n\
+             D2 0 2 D1mod\n\
+             R1 2 3 1K\n\
+             R2 1 2 3.3K\n\
+             R3 2 0 3.3K\n\
+             R4 4 0 5.6K\n\
+             C1 2 4 0.47u\n\
+             .MODEL D1mod D(level=2002)\n\
+             .END\n",
+            crate::netlist::NetlistParseOptions {
+                expression_dialect: crate::config::ExpressionDialect::Xyce,
+                ..crate::netlist::NetlistParseOptions::default()
+            },
+        )
+        .expect("clipper deck parses");
+        use std::sync::atomic::Ordering::Relaxed;
+        let run = |restamp: bool| {
+            RESTAMP_AFTER_STATUS_LOAD.store(restamp, Relaxed);
+            NEWTON_STAMPS_REUSED.store(0, Relaxed);
+            let mut engine = Engine::default();
+            engine.config.spice_dialect = SpiceDialect::Xyce;
+            let circuit = engine.build_circuit(&netlist).expect("clipper builds");
+            assert!(circuit.has_repeatable_generated_veriloga_transient_load());
+            let result = engine
+                .run_tran(&netlist, 0.3e-3, 2e-6)
+                .expect("clipper runs");
+            (result, NEWTON_STAMPS_REUSED.load(Relaxed))
+        };
+        let (restamped, _) = run(true);
+        let (served, reused) = run(false);
+        RESTAMP_AFTER_STATUS_LOAD.store(false, Relaxed);
+        assert!(reused > 0, "no status load served a Newton iteration");
+        assert_eq!(served.time, restamped.time);
+        assert_eq!(served.voltages, restamped.voltages);
     }
 
     fn xyce_core_residual_fixture() -> (Engine, crate::circuit::CircuitData, usize) {

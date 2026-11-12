@@ -523,6 +523,56 @@ impl CircuitData {
             && !has_dynamic_veriloga
     }
 
+    /// Whether the transient's nonlinear devices are all generated Verilog-A
+    /// instances whose Newton load repeats at a candidate, over the same
+    /// ordinary RC network as [`Self::has_cacheable_diode_transient_base`].
+    /// A second Newton load at a candidate then assembles exactly the first.
+    ///
+    /// Like that capability, this fails closed around every other nonlinear,
+    /// behavioral, event-driven, or stateful linear family.
+    pub(crate) fn has_repeatable_generated_veriloga_transient_load(&self) -> bool {
+        #[cfg(feature = "veriloga-builtins-base")]
+        let generated_loads_repeat = self.has_generated_veriloga_devices()
+            && self.generated_veriloga_devices.newton_loads_repeat();
+        #[cfg(not(feature = "veriloga-builtins-base"))]
+        let generated_loads_repeat = false;
+        #[cfg(feature = "veriloga")]
+        let has_dynamic_veriloga = self.has_veriloga_devices() || self.has_mixed_signal_hosts();
+        #[cfg(not(feature = "veriloga"))]
+        let has_dynamic_veriloga = false;
+
+        generated_loads_repeat
+            && !self.capacitors.has_solution_dependent_values()
+            && self.diodes.is_empty()
+            && self.mosfets.is_empty()
+            && self.bjts.is_empty()
+            && self.b3soi.is_empty()
+            && self.b3soi_fd.is_empty()
+            && self.b3soi_pd.is_empty()
+            && self.bsim3v3.is_empty()
+            && self.bsim4v8.is_empty()
+            && self.ekv26s.is_empty()
+            && self.ekv3s.is_empty()
+            && self.vdmoses.is_empty()
+            && self.jfets.is_empty()
+            && self.xyce_memristors.is_empty()
+            && self.vswitches.is_empty()
+            && self.iswitches.is_empty()
+            && self.generic_switches.is_empty()
+            && self.jiles_atherton_inductors.is_empty()
+            && self.xyce_core_groups.is_empty()
+            && self.behavioral_sources.is_empty()
+            && self.resistors.thermal.iter().all(Option::is_none)
+            && self.inductors.is_empty()
+            && self.tlines.is_empty()
+            && self.coupled_tlines.is_empty()
+            && self.couplings.is_empty()
+            && self.coupled_inductor_pairs.is_empty()
+            && self.multi_winding_transformers.is_empty()
+            && !self.has_xspice_devices()
+            && !has_dynamic_veriloga
+    }
+
     fn has_non_xspice_nonlinear_devices(&self) -> bool {
         self.capacitors.has_solution_dependent_values()
             || !self.diodes.is_empty()
