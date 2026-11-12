@@ -544,6 +544,8 @@ mod tests {
         PreparedSourceCheckReceipt, SimulationRun,
     };
     use crate::workbench::app_state::SimulationSavePolicy;
+    use crate::workbench::framework::feature::harness::FeatureHarness;
+    use crate::workbench::simulate::test_host::SimulateTestHost;
 
     /// A reference point no default produces, so a plan carrying it carries it
     /// because this route committed it.
@@ -554,9 +556,9 @@ mod tests {
 
     /// An active plan whose four configuration domains are all distinguishable
     /// from the defaults `create_plan` mints, so inheriting one is observable.
-    fn app_with_a_distinctive_active_plan() -> RSpiceApp {
-        let mut app = RSpiceApp::test_instance();
-        let mut setup = app.state.model.sim_setup.clone();
+    fn app_with_a_distinctive_active_plan() -> FeatureHarness<SimulateFeature> {
+        let mut harness = SimulateTestHost::harness();
+        let mut setup = harness.model.sim_setup.clone();
         setup
             .set_reference_pvt(ProcessCorner::FF, 85.0)
             .expect("a physical reference corner");
@@ -567,19 +569,19 @@ mod tests {
             source_digest: ContentDigest::from_bytes([3; 32]),
             selected_corner: Some("TT".to_owned()),
         });
-        app.state.model.sim_setup = setup;
+        harness.model.sim_setup = setup;
         assert_ne!(
-            app.state.model.sim_setup.options.reltol,
+            harness.model.sim_setup.options.reltol,
             SimulationOptions::default().reltol,
             "the fixture's options must differ from the default, or inheriting \
              them proves nothing"
         );
         assert_ne!(
-            app.state.model.sim_setup.save_policy.retained_dataset_limit,
+            harness.model.sim_setup.save_policy.retained_dataset_limit,
             SimulationSavePolicy::default().retained_dataset_limit,
             "the fixture's policy must differ from the default"
         );
-        app
+        harness
     }
 
     /// One prepared run whose authenticated receipt names `id`.
@@ -630,8 +632,11 @@ mod tests {
         }
     }
 
-    fn record_for(app: &RSpiceApp, id: SimulationPlanId) -> PlanCatalogRecord {
-        plan_catalog_records(&app.state.model)
+    fn record_for(
+        harness: &FeatureHarness<SimulateFeature>,
+        id: SimulationPlanId,
+    ) -> PlanCatalogRecord {
+        plan_catalog_records(&harness.model)
             .into_iter()
             .find(|record| record.id == id)
             .unwrap_or_else(|| panic!("plan {id} is projected"))
@@ -647,9 +652,8 @@ mod tests {
     /// `SimulationPlan::empty` does not.
     #[test]
     fn creating_a_plan_mints_a_fresh_identity_at_the_initial_revision() {
-        let mut app = app_with_a_distinctive_active_plan();
-        let retired = app
-            .state
+        let mut harness = app_with_a_distinctive_active_plan();
+        let retired = harness
             .model
             .sim_setup
             .stable_analysis_plan()
@@ -657,14 +661,14 @@ mod tests {
             .id();
 
         let (created, _) = commit_create_plan(
-            &mut crate::workbench::features::cx(&mut app),
+            &mut harness.cx(),
             "Skew characterization",
             &draft_with(false, false, false),
         )
         .expect("the create transaction commits");
 
         assert_ne!(created, retired, "the new plan reused the retired identity");
-        let record = record_for(&app, created);
+        let record = record_for(&harness, created);
         assert!(
             record.active,
             "the created plan is the active editable plan"
@@ -691,7 +695,7 @@ mod tests {
             "the reference-only run set the transaction installs must validate"
         );
         // The retired plan is still in the catalog, unchanged and not archived.
-        let retained = record_for(&app, retired);
+        let retained = record_for(&harness, retired);
         assert!(!retained.active && !retained.archived);
         assert_eq!(retained.revision, 1);
     }
@@ -706,26 +710,25 @@ mod tests {
     /// record other than this one.
     #[test]
     fn each_of_the_four_inputs_reaches_the_stored_plan() {
-        let mut app = app_with_a_distinctive_active_plan();
-        let inherited_options = app.state.model.sim_setup.options.clone();
-        let inherited_policy = app.state.model.sim_setup.save_policy;
-        let inherited_bindings = app.state.model.sim_setup.model_bindings.clone();
+        let mut harness = app_with_a_distinctive_active_plan();
+        let inherited_options = harness.model.sim_setup.options.clone();
+        let inherited_policy = harness.model.sim_setup.save_policy;
+        let inherited_bindings = harness.model.sim_setup.model_bindings.clone();
 
         let (created, _) = commit_create_plan(
-            &mut crate::workbench::features::cx(&mut app),
+            &mut harness.cx(),
             "Stored characterization",
             &draft_with(true, true, true),
         )
         .expect("the create transaction commits");
         commit_create_plan(
-            &mut crate::workbench::features::cx(&mut app),
+            &mut harness.cx(),
             "Successor plan",
             &NewSimulationPlanDraft::default(),
         )
         .expect("a second create retires the first plan into the catalog");
 
-        let stored = app
-            .state
+        let stored = harness
             .model
             .sim_setup
             .export_plan(created)
@@ -771,15 +774,15 @@ mod tests {
             (false, true, false),
             (false, false, true),
         ] {
-            let mut app = app_with_a_distinctive_active_plan();
-            let source = app.state.model.sim_setup.clone();
+            let mut harness = app_with_a_distinctive_active_plan();
+            let source = harness.model.sim_setup.clone();
             commit_create_plan(
-                &mut crate::workbench::features::cx(&mut app),
+                &mut harness.cx(),
                 "Selective plan",
                 &draft_with(model, options, policy),
             )
             .expect("the create transaction commits");
-            let setup = &app.state.model.sim_setup;
+            let setup = &harness.model.sim_setup;
 
             if model {
                 assert_eq!(
@@ -826,19 +829,19 @@ mod tests {
     /// user's default solver preset, the same one a new project starts from.
     #[test]
     fn a_new_plan_starts_from_the_default_solver_preset() {
-        let mut app = app_with_a_distinctive_active_plan();
-        app.state
+        let mut harness = app_with_a_distinctive_active_plan();
+        harness
             .model
             .preferences
             .set_choice(crate::workbench::ChoicePreference::DefaultSolverPreset, 2)
             .expect("accurate is a solver preset");
         commit_create_plan(
-            &mut crate::workbench::features::cx(&mut app),
+            &mut harness.cx(),
             "Accurate plan",
             &draft_with(false, false, false),
         )
         .expect("the create transaction commits");
-        let setup = &app.state.model.sim_setup;
+        let setup = &harness.model.sim_setup;
         assert_eq!(setup.options.reltol, SimulationOptions::accurate().reltol);
         assert_ne!(setup.options.reltol, SimulationOptions::default().reltol);
         assert_eq!(setup.options.temp, CHOSEN_POINT.temperature_celsius);
@@ -851,28 +854,27 @@ mod tests {
     /// declared run-set axes — which are the other two rows of the group.
     #[test]
     fn creating_a_plan_copies_no_result_reference_or_plan_owned_record() {
-        let mut app = app_with_a_distinctive_active_plan();
-        let retired = app
-            .state
+        let mut harness = app_with_a_distinctive_active_plan();
+        let retired = harness
             .model
             .sim_setup
             .stable_analysis_plan()
             .expect("the fixture has a stable plan")
             .id();
-        app.state
+        harness
             .model
             .workspace
             .content
             .ensure_active_plan_data(retired)
             .saved_outputs
             .push(retained_output());
-        app.state
+        harness
             .model
             .simulation
             .retained
             .runs
             .push(run_referencing(retired));
-        let before = record_for(&app, retired);
+        let before = record_for(&harness, retired);
         assert_eq!(
             (before.results, before.saved_outputs),
             (1, 1),
@@ -880,13 +882,13 @@ mod tests {
         );
 
         let (created, _) = commit_create_plan(
-            &mut crate::workbench::features::cx(&mut app),
+            &mut harness.cx(),
             "Uncontaminated plan",
             &draft_with(true, true, true),
         )
         .expect("the create transaction commits");
 
-        let created = record_for(&app, created);
+        let created = record_for(&harness, created);
         assert_eq!(
             created.results, 0,
             "a created plan must reference no result: nothing in this \
@@ -913,7 +915,7 @@ mod tests {
              the plan it replaced"
         );
 
-        let after = record_for(&app, retired);
+        let after = record_for(&harness, retired);
         assert_eq!(
             (after.results, after.saved_outputs),
             (before.results, before.saved_outputs),
@@ -981,7 +983,7 @@ mod tests {
     /// The temperature control cannot produce a value the transaction refuses.
     #[test]
     fn the_coldest_offered_temperature_is_one_the_catalog_accepts() {
-        let mut setup = RSpiceApp::test_instance().state.model.sim_setup.clone();
+        let mut setup = SimulateTestHost::default().model.sim_setup.clone();
         assert!(
             setup
                 .set_reference_pvt(ProcessCorner::TT, COLDEST_REFERENCE_CELSIUS)
@@ -992,84 +994,5 @@ mod tests {
             setup.set_reference_pvt(ProcessCorner::TT, -273.15).is_err(),
             "absolute zero must still be refused, or this floor guards nothing"
         );
-    }
-
-    /// Every fact this route paints lands on screen *whole* at every gated
-    /// viewport.
-    ///
-    /// The shell's route fit gate proves nothing is clipped. It cannot see a
-    /// truncated value: a label elided to `Corner char…` sits entirely inside its
-    /// clip rect and passes. Elision is how a property row keeps its geometry, so
-    /// nothing here may be long enough to need it — which makes the absence of an
-    /// ellipsis in the paint the exact statement of that.
-    ///
-    /// Every string this checks is this route's own: its title,
-    /// description and button labels, its setting rows, its controls and its two
-    /// statement groups. There is no list of expected labels, deliberately —
-    /// rewording a row is covered without editing this test.
-    #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    fn every_stated_fact_paints_whole_at_every_gated_viewport() {
-        for (name, screen) in [
-            ("desktop", egui::Vec2::new(1024.0, 640.0)),
-            ("edge-to-edge", egui::Vec2::new(820.0, 640.0)),
-            ("portrait", egui::Vec2::new(560.0, 900.0)),
-        ] {
-            let elided = elided_text_at(screen);
-            assert!(
-                elided.is_empty(),
-                "at {name} the create route painted elided values: {elided:?}"
-            );
-        }
-    }
-
-    /// Every string the real dialog painted at one viewport that had to be
-    /// shortened to fit the box it was painted in.
-    #[cfg(not(target_arch = "wasm32"))]
-    fn elided_text_at(screen: egui::Vec2) -> Vec<String> {
-        let mut app = RSpiceApp::test_instance();
-        let active = app
-            .state
-            .model
-            .sim_setup
-            .stable_analysis_plan()
-            .expect("the fixture has a stable plan")
-            .id();
-        let name = app.state.model.sim_setup.active_plan_name().to_string();
-        let mut draft = SimulationPlanManagerDraft::new(active, name);
-        draft.mode = SimulationPlanManagerMode::Create;
-        draft.name = "New simulation plan".to_owned();
-        let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        // The dialog owns the draft for a frame and the shell re-arms it, so each
-        // pass is handed its own copy and the three passes render one state
-        // rather than accumulating it.
-        let mut pass = || {
-            ctx.run_ui(
-                egui::RawInput {
-                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, screen)),
-                    ..Default::default()
-                },
-                |ctx| {
-                    plan_manager_dialog(
-                        ctx,
-                        &mut crate::workbench::features::cx(&mut app),
-                        draft.clone(),
-                    )
-                },
-            )
-        };
-        let _ = pass();
-        let _ = pass();
-        let output = pass();
-        output
-            .shapes
-            .iter()
-            .filter_map(|shape| match &shape.shape {
-                egui::epaint::Shape::Text(text) => Some(text.galley.job.text.clone()),
-                _ => None,
-            })
-            .filter(|painted| painted.contains('\u{2026}'))
-            .collect()
     }
 }

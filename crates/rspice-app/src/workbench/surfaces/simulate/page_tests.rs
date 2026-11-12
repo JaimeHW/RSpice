@@ -8,7 +8,6 @@
 mod capture_groups;
 mod field_editing;
 mod plan_removal;
-mod run_set;
 mod settings_switch;
 mod solver_options;
 
@@ -21,7 +20,7 @@ use crate::state::SimulationPage;
 use crate::workbench::{AppState, RSpiceApp};
 
 /// Render one page and collect the text it painted.
-fn render(page: SimulationPage, width: f32) -> String {
+pub(crate) fn render(page: SimulationPage, width: f32) -> String {
     render_with(page, width, |_| {})
 }
 

@@ -1089,18 +1089,20 @@ fn override_policy_choices() -> Vec<(&'static str, usize)> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
-    use crate::workbench::RSpiceApp;
+    use crate::workbench::app_state::Model;
+    use crate::workbench::framework::feature::harness::FeatureHarness;
+    use crate::workbench::simulate::test_host::SimulateTestHost;
+    use crate::workbench::slots::SimulateState;
 
     const SHEET: &str = "name,quantity,expression,minimum,maximum,scope,sweep role,override policy,description\n\
          RLOAD,Resistance,10 kohm,1 kohm,1 Mohm,project,sweep,override,Output load\n\
          CFILT,Capacitance,4.7 nF,1 nF,10 nF,testbench,fixed,inherit,Filter cap\n\
          VBIAS,Voltage,1.8 V,,,,,,\n";
 
-    fn plan(app: &RSpiceApp) -> SimulationPlanId {
-        app.state
-            .model
+    pub(crate) fn plan(model: &Model) -> SimulationPlanId {
+        model
             .sim_setup
             .stable_analysis_plan()
             .expect("the test instance owns a stable plan")
@@ -1108,28 +1110,25 @@ mod tests {
     }
 
     /// Drive the real entry point and hand back the draft it opened on.
-    fn open(
-        app: &mut RSpiceApp,
+    pub(crate) fn open(
+        model: &Model,
+        simulate: &mut SimulateState,
         plan_id: SimulationPlanId,
         sheet: &str,
     ) -> DesignVariableImportDraft {
-        let draft = import_draft_for_sheet(
-            &app.state.model,
-            &app.state.simulate,
-            plan_id,
-            "spec.csv",
-            sheet,
-        );
-        app.state.simulate.simulation_workflow =
-            Some(SimulationWorkflowDialog::DesignVariableImport(draft));
-        match app.state.simulate.simulation_workflow.clone() {
+        let draft = import_draft_for_sheet(model, simulate, plan_id, "spec.csv", sheet);
+        simulate.simulation_workflow = Some(SimulationWorkflowDialog::DesignVariableImport(draft));
+        match simulate.simulation_workflow.clone() {
             Some(SimulationWorkflowDialog::DesignVariableImport(draft)) => draft,
             other => panic!("the import dialog must open, got {other:?}"),
         }
     }
 
-    fn registry(app: &RSpiceApp, plan_id: SimulationPlanId) -> Vec<String> {
-        app.state
+    fn registry(
+        harness: &FeatureHarness<SimulateFeature>,
+        plan_id: SimulationPlanId,
+    ) -> Vec<String> {
+        harness
             .model
             .workspace
             .content
@@ -1144,8 +1143,8 @@ mod tests {
             .unwrap_or_default()
     }
 
-    fn revision(app: &RSpiceApp) -> u64 {
-        app.state
+    fn revision(harness: &FeatureHarness<SimulateFeature>) -> u64 {
+        harness
             .model
             .sim_setup
             .stable_analysis_plan()
@@ -1165,11 +1164,11 @@ mod tests {
 
     #[test]
     fn a_well_formed_sheet_previews_every_row_and_lands_as_one_transaction() {
-        let mut app = RSpiceApp::test_instance();
-        let plan_id = plan(&app);
-        let before = revision(&app);
+        let mut harness = SimulateTestHost::harness();
+        let plan_id = plan(&harness.model);
+        let before = revision(&harness);
 
-        let draft = open(&mut app, plan_id, SHEET);
+        let draft = open(&harness.model, &mut harness.state, plan_id, SHEET);
 
         // Everything the sheet holds is previewed, and every row is offered.
         assert_eq!(row_ids(&draft), [None, None, None]);
@@ -1187,14 +1186,12 @@ mod tests {
             "the file's own line, not the row index"
         );
 
-        commit_selected_rows(&mut crate::workbench::features::cx(&mut app), &draft)
-            .expect("a clean sheet adopts");
+        commit_selected_rows(&mut harness.cx(), &draft).expect("a clean sheet adopts");
 
-        assert_eq!(registry(&app, plan_id), ["RLOAD", "CFILT", "VBIAS"]);
+        assert_eq!(registry(&harness, plan_id), ["RLOAD", "CFILT", "VBIAS"]);
         // One transaction, so one revision.
-        assert_eq!(revision(&app), before + 1);
-        let imported = &app
-            .state
+        assert_eq!(revision(&harness), before + 1);
+        let imported = &harness
             .model
             .workspace
             .content
@@ -1217,7 +1214,7 @@ mod tests {
         );
         // The unbounded row is a real choice, not a missing value.
         assert!(
-            app.state
+            harness
                 .model
                 .workspace
                 .content
@@ -1239,19 +1236,20 @@ mod tests {
     /// about whichever row came first.
     #[test]
     fn every_import_refusal_identity_is_reachable_from_a_sheet() {
-        let mut app = RSpiceApp::test_instance();
-        let plan_id = plan(&app);
+        let mut harness = SimulateTestHost::harness();
+        let plan_id = plan(&harness.model);
         let seed = open(
-            &mut app,
+            &harness.model,
+            &mut harness.state,
             plan_id,
             "name,quantity,expression\nRLOAD,Resistance,10 kohm\n",
         );
-        commit_selected_rows(&mut crate::workbench::features::cx(&mut app), &seed)
-            .expect("the plan owns RLOAD");
+        commit_selected_rows(&mut harness.cx(), &seed).expect("the plan owns RLOAD");
 
         // A sheet that fails four ways at once reports all four, in place.
         let draft = open(
-            &mut app,
+            &harness.model,
+            &mut harness.state,
             plan_id,
             "name,quantity,expression,minimum,maximum\n\
              1BAD NAME,Resistance,50 ohm,,\n\
@@ -1288,7 +1286,12 @@ mod tests {
         );
 
         // The fifth identity is about the table rather than about any row.
-        let schema_refused = open(&mut app, plan_id, "name,quantity\nRTERM,Resistance\n");
+        let schema_refused = open(
+            &harness.model,
+            &mut harness.state,
+            plan_id,
+            "name,quantity\nRTERM,Resistance\n",
+        );
         assert_eq!(
             schema_refused
                 .sheet_refusal
@@ -1303,10 +1306,11 @@ mod tests {
     /// whole import rather than being quietly dropped from it.
     #[test]
     fn a_ticked_row_that_cannot_be_adopted_blocks_the_whole_import() {
-        let mut app = RSpiceApp::test_instance();
-        let plan_id = plan(&app);
+        let mut harness = SimulateTestHost::harness();
+        let plan_id = plan(&harness.model);
         let mut draft = open(
-            &mut app,
+            &harness.model,
+            &mut harness.state,
             plan_id,
             "name,quantity,expression\n\
              RGOOD,Resistance,50 ohm\n\
@@ -1320,13 +1324,10 @@ mod tests {
         let refusal = import_refusal(&draft).expect("a ticked refused row blocks the import");
         assert!(refusal.contains("VARIMP-DIMENSION"), "{refusal}");
 
-        let before =
-            serde_json::to_value(&app.state.model.workspace).expect("workspace serializes");
-        assert!(
-            commit_selected_rows(&mut crate::workbench::features::cx(&mut app), &draft).is_err()
-        );
+        let before = serde_json::to_value(&harness.model.workspace).expect("workspace serializes");
+        assert!(commit_selected_rows(&mut harness.cx(), &draft).is_err());
         assert_eq!(
-            serde_json::to_value(&app.state.model.workspace).expect("workspace still serializes"),
+            serde_json::to_value(&harness.model.workspace).expect("workspace still serializes"),
             before,
             "a refused import must not move the workspace"
         );
@@ -1336,10 +1337,11 @@ mod tests {
     /// may share a name as long as only one of them is being adopted.
     #[test]
     fn unticking_one_of_two_rows_sharing_a_name_clears_the_collision() {
-        let mut app = RSpiceApp::test_instance();
-        let plan_id = plan(&app);
+        let mut harness = SimulateTestHost::harness();
+        let plan_id = plan(&harness.model);
         let mut draft = open(
-            &mut app,
+            &harness.model,
+            &mut harness.state,
             plan_id,
             "name,quantity,expression\n\
              RLOAD,Resistance,10 kohm\n\
@@ -1351,13 +1353,12 @@ mod tests {
         // never a fact about the sheet; it was a fact about taking both.
         draft.rows[0].accepted = false;
         draft.rows[1].accepted = true;
-        mark_collisions(&app.state.model, plan_id, &mut draft);
+        mark_collisions(&harness.model, plan_id, &mut draft);
 
         assert_eq!(row_ids(&draft), [None, None]);
         assert_eq!(draft.accepted_count(), 1);
-        commit_selected_rows(&mut crate::workbench::features::cx(&mut app), &draft)
-            .expect("one of the two adopts");
-        assert_eq!(registry(&app, plan_id), ["RLOAD"]);
+        commit_selected_rows(&mut harness.cx(), &draft).expect("one of the two adopts");
+        assert_eq!(registry(&harness, plan_id), ["RLOAD"]);
     }
 
     /// A column the import does not recognize no longer refuses the sheet,
@@ -1366,10 +1367,11 @@ mod tests {
     /// would otherwise import unbounded variables with nothing saying so.
     #[test]
     fn a_column_nothing_reads_is_named_rather_than_dropped() {
-        let mut app = RSpiceApp::test_instance();
-        let plan_id = plan(&app);
+        let mut harness = SimulateTestHost::harness();
+        let plan_id = plan(&harness.model);
         let draft = open(
-            &mut app,
+            &harness.model,
+            &mut harness.state,
             plan_id,
             "name,quantity,expression,min\nRLOAD,Resistance,10 kohm,1 kohm\n",
         );
@@ -1384,10 +1386,11 @@ mod tests {
     /// which is the whole point of the mapping being editable.
     #[test]
     fn rebinding_a_column_re_resolves_every_row() {
-        let mut app = RSpiceApp::test_instance();
-        let plan_id = plan(&app);
+        let mut harness = SimulateTestHost::harness();
+        let plan_id = plan(&harness.model);
         let mut draft = open(
-            &mut app,
+            &harness.model,
+            &mut harness.state,
             plan_id,
             "name,quantity,expression,min,maximum\nRLOAD,Resistance,10 kohm,1 kohm,1 Mohm\n",
         );
@@ -1396,7 +1399,7 @@ mod tests {
         assert_eq!(row_ids(&draft), [Some("VARIMP-BOUNDS")]);
 
         draft.binding[MINIMUM] = Some(3);
-        resolve_rows(&app.state.model, &app.state.simulate, plan_id, &mut draft);
+        resolve_rows(&harness.model, &harness.state, plan_id, &mut draft);
 
         assert_eq!(row_ids(&draft), [None]);
         assert_eq!(draft.rows[0].draft.allowed_range, "1 kohm \u{2026} 1 Mohm");
@@ -1407,10 +1410,11 @@ mod tests {
     /// file.
     #[test]
     fn a_required_field_with_no_column_refuses_the_sheet_until_it_is_bound() {
-        let mut app = RSpiceApp::test_instance();
-        let plan_id = plan(&app);
+        let mut harness = SimulateTestHost::harness();
+        let plan_id = plan(&harness.model);
         let mut draft = open(
-            &mut app,
+            &harness.model,
+            &mut harness.state,
             plan_id,
             "name,quantity,value\nRLOAD,Resistance,10 kohm\n",
         );
@@ -1427,7 +1431,7 @@ mod tests {
         );
 
         draft.binding[EXPRESSION] = Some(2);
-        resolve_rows(&app.state.model, &app.state.simulate, plan_id, &mut draft);
+        resolve_rows(&harness.model, &harness.state, plan_id, &mut draft);
 
         assert!(draft.sheet_refusal.is_none());
         assert_eq!(row_ids(&draft), [None]);
@@ -1438,10 +1442,11 @@ mod tests {
     /// rather than being ignored where the sheet declares one.
     #[test]
     fn adopting_at_one_scope_overrides_the_scope_column() {
-        let mut app = RSpiceApp::test_instance();
-        let plan_id = plan(&app);
+        let mut harness = SimulateTestHost::harness();
+        let plan_id = plan(&harness.model);
         let mut draft = open(
-            &mut app,
+            &harness.model,
+            &mut harness.state,
             plan_id,
             "name,quantity,expression,scope\n\
              RLOAD,Resistance,10 kohm,testbench\n\
@@ -1451,13 +1456,13 @@ mod tests {
 
         draft.scope = 1;
         draft.override_scope = true;
-        resolve_rows(&app.state.model, &app.state.simulate, plan_id, &mut draft);
+        resolve_rows(&harness.model, &harness.state, plan_id, &mut draft);
 
         assert!(draft.rows.iter().all(|row| row.draft.scope == 1));
-        commit_selected_rows(&mut crate::workbench::features::cx(&mut app), &draft)
+        commit_selected_rows(&mut harness.cx(), &draft)
             .expect("the sheet adopts at the chosen scope");
         assert!(
-            app.state
+            harness
                 .model
                 .workspace
                 .content
@@ -1471,16 +1476,18 @@ mod tests {
 
     #[test]
     fn column_order_is_not_load_bearing() {
-        let mut app = RSpiceApp::test_instance();
-        let plan_id = plan(&app);
+        let mut harness = SimulateTestHost::harness();
+        let plan_id = plan(&harness.model);
         let ordered = open(
-            &mut app,
+            &harness.model,
+            &mut harness.state,
             plan_id,
             "name,quantity,expression,minimum,maximum,description\n\
              RLOAD,Resistance,10 kohm,1 kohm,1 Mohm,Output load\n",
         );
         let shuffled = open(
-            &mut app,
+            &harness.model,
+            &mut harness.state,
             plan_id,
             "Description,MAXIMUM,expression,Quantity,minimum,Name\n\
              Output load,1 Mohm,10 kohm,Resistance,1 kohm,RLOAD\n",
@@ -1506,9 +1513,14 @@ mod tests {
 
     #[test]
     fn a_sheet_with_only_a_header_row_imports_nothing() {
-        let mut app = RSpiceApp::test_instance();
-        let plan_id = plan(&app);
-        let draft = open(&mut app, plan_id, "name,quantity,expression\n");
+        let mut harness = SimulateTestHost::harness();
+        let plan_id = plan(&harness.model);
+        let draft = open(
+            &harness.model,
+            &mut harness.state,
+            plan_id,
+            "name,quantity,expression\n",
+        );
         let refusal = draft
             .sheet_refusal
             .as_ref()
@@ -1549,12 +1561,12 @@ mod tests {
     fn scope_spellings_match_the_scopes_they_name() {
         use crate::state::DesignVariableScope;
 
-        let app = RSpiceApp::test_instance();
+        let harness = SimulateTestHost::harness();
         let scopes = [
             DesignVariableScope::Testbench,
             DesignVariableScope::Project,
             DesignVariableScope::SelectedCell {
-                cell: app.state.model.workspace.content.active_view.clone(),
+                cell: harness.model.workspace.content.active_view.clone(),
             },
             DesignVariableScope::SelectedAnalysis {
                 analysis_id: crate::product::AnalysisInstanceId::new(),
@@ -1570,226 +1582,6 @@ mod tests {
             );
             // The adopt-at control offers the same four, in the same order.
             assert_eq!(SCOPE_LABELS[index], scope.label());
-        }
-    }
-    /// A refusal sentence is bounded by the pane it is printed in.
-    ///
-    /// An egui row extends its items rather than wrapping them, so a refusal
-    /// detail laid out at its natural width carried its row past the split
-    /// pane -- and a row that overruns a `Ui` widens that `Ui`'s own bounds, so
-    /// the note beneath the table then wrapped at a width the pane never had,
-    /// and the dialog's border was painted two hundred points outside the
-    /// header and footer it belongs to.
-    ///
-    /// Checked against the painted text rather than through AccessKit: a label
-    /// is not a control, and it was the labels that escaped.
-    #[test]
-    fn the_import_table_prints_nothing_outside_the_dialog_surface() {
-        // One refusing row, whose detail is a full sentence: the longest thing
-        // the table ever has to place in its last cell.
-        const REFUSED: &str = "name,quantity,expression,minimum,maximum,scope,description\n\
-             RFB,Resistance,47k,,,testbench,feedback resistor\n";
-
-        fn text_spans(shape: &egui::epaint::Shape, out: &mut Vec<(String, f32, f32)>) {
-            match shape {
-                egui::epaint::Shape::Text(text) => out.push((
-                    text.galley.job.text.clone(),
-                    text.pos.x,
-                    text.pos.x + text.galley.size().x,
-                )),
-                egui::epaint::Shape::Vec(shapes) => {
-                    for shape in shapes {
-                        text_spans(shape, out);
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        for width in [1000.0f32, 1600.0] {
-            let ctx = egui::Context::default();
-            crate::ui::Theme::default().apply(&ctx);
-            ctx.enable_accesskit();
-            let mut app = RSpiceApp::test_instance();
-            let plan_id = plan(&app);
-            let _ = open(&mut app, plan_id, REFUSED);
-
-            let mut run = || {
-                ctx.run_ui(
-                    egui::RawInput {
-                        screen_rect: Some(egui::Rect::from_min_size(
-                            egui::Pos2::ZERO,
-                            egui::vec2(width, 1_000.0),
-                        )),
-                        ..Default::default()
-                    },
-                    |ctx| {
-                        super::super::workflow_dialog_tests::show_workflow_dialogs_on_stage(
-                            ctx, &mut app,
-                        )
-                    },
-                )
-            };
-            // A content-height surface lays out against the height and width
-            // its previous pass measured.
-            let _ = run();
-            let _ = run();
-            let output = run();
-
-            let nodes = output
-                .platform_output
-                .accesskit_update
-                .as_ref()
-                .expect("AccessKit tree update")
-                .nodes
-                .clone();
-            let surface = nodes
-                .iter()
-                .find(|(_, node)| node.role() == egui::accesskit::Role::Dialog)
-                .and_then(|(_, node)| node.bounds())
-                .expect("the dialog publishes its bounds");
-
-            let mut spans = Vec::new();
-            for shape in &output.shapes {
-                text_spans(&shape.shape, &mut spans);
-            }
-            let escaped: Vec<String> = spans
-                .iter()
-                .filter(|(_, left, right)| {
-                    f64::from(*right) > surface.x1 + 0.5 || f64::from(*left) < surface.x0 - 0.5
-                })
-                .map(|(text, left, right)| format!("{left:.0}..{right:.0} {text:?}"))
-                .collect();
-            assert!(
-                escaped.is_empty(),
-                "on a {width:.0}-point viewport the surface spans {:.0}..{:.0} and these are \
-                 printed outside it:\n{}",
-                surface.x0,
-                surface.x1,
-                escaped.join("\n")
-            );
-        }
-    }
-
-    /// Every refused row is reachable inside the dialog it is refused in.
-    ///
-    /// The table's scroll viewport was a hard 220 points regardless of the room
-    /// the split gave it, so a five-row sheet showed two rows over three hundred
-    /// points of blank dialog. The rows below the fold were the refusals, which
-    /// is what the import is being refused for — an operator was shown a
-    /// refusal count and none of the refusals.
-    ///
-    /// Measured through the tick box each row publishes: it is the control the
-    /// row is reached by, and the one that has to be inside the surface.
-    #[test]
-    fn every_refused_row_is_inside_the_dialog_that_refuses_it() {
-        const SHEET: &str = "name,quantity,expression,minimum,maximum,scope,description\n\
-             RFB,resistance,47k,10k,100k,testbench,feedback resistor\n\
-             CFB,capacitance,2.2p,,,testbench,feedback capacitor\n\
-             RLOAD,resistance,1k,,,project,collides with the plan\n\
-             IBIAS,current,banana,,,testbench,not a current\n\
-             VREF,voltage,2.5V,3V,2V,testbench,inverted bounds\n";
-
-        // The 1000-point gate as well as the two widths the panes sit side by
-        // side at. Below the split the dialog stacks, the table follows the
-        // column mapping down the body, and the body's own scroll is what
-        // reaches it — a different layout, with its own way of leaving a
-        // refusal below the fold, and the one this was not measuring.
-        for width in [1000.0f32, 1600.0, 2560.0] {
-            let ctx = egui::Context::default();
-            crate::ui::Theme::default().apply(&ctx);
-            ctx.enable_accesskit();
-            let mut app = RSpiceApp::test_instance();
-            let plan_id = plan(&app);
-            let rows = open(&mut app, plan_id, SHEET).rows.len();
-            assert!(
-                rows >= 5,
-                "the fixture sheet must actually produce a table worth scrolling"
-            );
-
-            let mut run = || {
-                ctx.run_ui(
-                    egui::RawInput {
-                        screen_rect: Some(egui::Rect::from_min_size(
-                            egui::Pos2::ZERO,
-                            egui::vec2(width, 1_000.0),
-                        )),
-                        ..Default::default()
-                    },
-                    |ctx| {
-                        super::super::workflow_dialog_tests::show_workflow_dialogs_on_stage(
-                            ctx, &mut app,
-                        )
-                    },
-                )
-            };
-            let _ = run();
-            let _ = run();
-            let output = run();
-
-            // Measured against what is painted, not against what the tree
-            // publishes: a row scrolled out of the table's viewport still has
-            // AccessKit bounds, and it is exactly the row nobody can read.
-            fn painted(
-                shape: &egui::epaint::Shape,
-                clip: egui::Rect,
-                out: &mut Vec<(String, egui::Rect)>,
-            ) {
-                match shape {
-                    egui::epaint::Shape::Text(text) => {
-                        let rect = egui::Rect::from_min_size(text.pos, text.galley.size());
-                        if clip.contains_rect(rect) {
-                            out.push((text.galley.job.text.clone(), rect));
-                        }
-                    }
-                    egui::epaint::Shape::Vec(shapes) => {
-                        for shape in shapes {
-                            painted(shape, clip, out);
-                        }
-                    }
-                    _ => {}
-                }
-            }
-
-            let mut spans = Vec::new();
-            for shape in &output.shapes {
-                painted(&shape.shape, shape.clip_rect, &mut spans);
-            }
-            let missing: Vec<&str> = ["RFB", "CFB", "RLOAD", "IBIAS", "VREF"]
-                .into_iter()
-                .filter(|name| !spans.iter().any(|(text, _)| text == name))
-                .collect();
-            assert!(
-                missing.is_empty(),
-                "on a {width:.0}-point viewport the dialog refuses {rows} rows and paints none \
-                 of {missing:?}"
-            );
-
-            // And what it paints is inside the surface it is painted on.
-            let surface = output
-                .platform_output
-                .accesskit_update
-                .as_ref()
-                .expect("AccessKit tree update")
-                .nodes
-                .iter()
-                .find(|(_, node)| node.role() == egui::accesskit::Role::Dialog)
-                .and_then(|(_, node)| node.bounds())
-                .expect("the dialog publishes its bounds");
-            for (text, rect) in &spans {
-                if !["RFB", "CFB", "RLOAD", "IBIAS", "VREF"].contains(&text.as_str()) {
-                    continue;
-                }
-                assert!(
-                    f64::from(rect.bottom()) <= surface.y1 + 0.5
-                        && f64::from(rect.top()) >= surface.y0 - 0.5,
-                    "{text} is painted at {:.0}..{:.0}, outside a surface spanning {:.0}..{:.0}",
-                    rect.top(),
-                    rect.bottom(),
-                    surface.y0,
-                    surface.y1
-                );
-            }
         }
     }
 }

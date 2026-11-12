@@ -246,7 +246,7 @@ pub(super) use exchange::{commit_import_simulation_plan, export_simulation_plan_
 /// [`handle_plan_manager_action`] is the single place that touches the
 /// application. That is what lets five lanes redesign five routes in parallel
 /// without any of them opening this file.
-pub(super) fn plan_manager_dialog(
+pub(crate) fn plan_manager_dialog(
     ctx: &egui::Context,
     cx: &mut Cx<'_, SimulateFeature>,
     mut draft: SimulationPlanManagerDraft,
