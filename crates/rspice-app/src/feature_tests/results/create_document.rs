@@ -499,7 +499,9 @@ impl ResultsWindow {
         commit(&mut self.app.state.results_parts())
     }
 
-    /// Save the whole project to a fresh file, as Save all does.
+    /// Save the whole project to a fresh file, as Save all does. Each save
+    /// takes a folder of its own: tests that start together can read the
+    /// same clock, and two saves into one folder find each other's lease.
     fn save(&mut self) {
         use crate::workbench::lifecycle::project_lifecycle::{
             DestinationAuthority, SaveScope, save_native,
@@ -507,10 +509,7 @@ impl ResultsWindow {
         let folder = std::env::temp_dir().join(format!(
             "rspice-result-document-marks-{}-{}",
             std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("system time after epoch")
-                .as_nanos()
+            uuid::Uuid::new_v4()
         ));
         std::fs::create_dir_all(&folder).expect("create the test folder");
         save_native(
