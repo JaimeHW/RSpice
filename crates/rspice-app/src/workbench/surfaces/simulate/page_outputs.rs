@@ -134,7 +134,7 @@ fn unresolved_plan(ui: &mut Ui, reason: &str) {
 /// Keyed by identity rather than by position because the effective set is not
 /// the authored one: schematic probes are appended to it, and an `Automatic`
 /// plan synthesizes it outright.
-pub(super) fn projected_output_bytes_for(
+pub(crate) fn projected_output_bytes_for(
     model: &Model,
     controller: &SimulationController,
     payload: &SimulationPlanPayload,
@@ -632,7 +632,7 @@ pub(super) fn empty_registry_text(
 /// selection mode: a plan with no authored output and one enabled probe saves
 /// that probe, which is neither the bounded automatic set nor the whole dataset
 /// — and those two were the only things this row could say.
-pub(super) fn empty_registry_outcome(
+pub(crate) fn empty_registry_outcome(
     mode: crate::state::OutputSelectionMode,
     schematic_probes: usize,
 ) -> String {
@@ -1237,14 +1237,14 @@ pub(crate) fn open_materialized_traces(
 /// growing its own copy, so the calculator, the scalar-measurement author and
 /// the diagnostics window keep one owner apiece.
 #[derive(Clone, Copy)]
-pub(super) enum EditorHandoff {
+pub(crate) enum EditorHandoff {
     Calculator,
     ScalarMeasurement,
     UnitDiagnostics,
 }
 
 impl EditorHandoff {
-    pub(super) const ALL: [Self; 3] = [
+    pub(crate) const ALL: [Self; 3] = [
         Self::Calculator,
         Self::ScalarMeasurement,
         Self::UnitDiagnostics,
@@ -1257,7 +1257,7 @@ impl EditorHandoff {
     pub(super) const DATASET_RULE: &'static str =
         "No run has been retained, so there is nothing to measure or diagnose against.";
 
-    pub(super) const fn label(self) -> &'static str {
+    pub(crate) const fn label(self) -> &'static str {
         match self {
             Self::Calculator => "Open calculator…",
             // Named for what the command opens. It is an author for one
@@ -1292,7 +1292,7 @@ impl EditorHandoff {
     /// which from here is never true and which the dispatch below answers by
     /// navigating there instead. Asking the command directly would disable
     /// both hand-offs permanently and name the route as the reason.
-    pub(super) const fn needs_dataset(self) -> bool {
+    pub(crate) const fn needs_dataset(self) -> bool {
         matches!(self, Self::ScalarMeasurement | Self::UnitDiagnostics)
     }
 
@@ -1304,7 +1304,7 @@ impl EditorHandoff {
         }
     }
 
-    pub(super) fn dispatch(self, cx: &mut Cx<'_, SimulateFeature>) {
+    pub(crate) fn dispatch(self, cx: &mut Cx<'_, SimulateFeature>) {
         // Add measurement draws over the result viewer. Activating Results
         // first is what makes the hand-off land somewhere the reader can see,
         // rather than opening a form behind this page. The calculator and the

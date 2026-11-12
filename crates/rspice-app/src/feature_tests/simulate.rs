@@ -6,6 +6,7 @@
 //! an action the application ranks above the feature (tuning staging).
 
 mod accessibility;
+mod capture_groups;
 mod checkpoint_exchange;
 mod clicks;
 mod excitations;
@@ -15,6 +16,7 @@ mod geometry;
 mod inspector;
 mod jobs_manager;
 mod navigator;
+mod page_contracts;
 mod page_models;
 mod page_navigation;
 mod page_raster;
@@ -22,6 +24,7 @@ mod page_runset_toolbar;
 mod pages;
 mod plan_create;
 mod plan_exchange;
+mod plan_removal;
 mod press_sweep;
 mod receipt_log;
 mod registry_honesty;

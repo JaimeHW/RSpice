@@ -5,17 +5,19 @@
 //! to, and the receipt an edit writes are all the same answer. The helpers they
 //! need — rendering a page, naming the active plan — come from the parent.
 
-use super::{RSpiceApp, SimulationPage, plan_id, render_with};
+use super::plan_id;
+use crate::workbench::app_state::Model;
+use crate::workbench::simulate::test_host::SimulateTestHost;
 
 /// Seed one plan with two outputs in different scopes and a group over the
 /// first, and hand back the group's identity.
-fn seed_capture_group(app: &mut RSpiceApp) -> crate::product::CaptureGroupId {
+pub(crate) fn seed_capture_group(model: &mut Model) -> crate::product::CaptureGroupId {
     use crate::state::{
         CaptureGroup, CaptureGroupRule, InstancePath, SavedOutput, SavedOutputCompatibility,
         SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,
     };
 
-    let id = plan_id(app);
+    let id = plan_id(model);
     for (name, expression) in [("core_n", "V(x1.n)"), ("edge_n", "V(x2.n)")] {
         let output = SavedOutput::new(
             SavedOutputKind::RawVoltageOrCurrent,
@@ -27,8 +29,7 @@ fn seed_capture_group(app: &mut RSpiceApp) -> crate::product::CaptureGroupId {
             SavedOutputStreaming::StoreOnly,
         )
         .expect("valid saved output");
-        app.state
-            .model
+        model
             .workspace
             .content
             .add_saved_output(id, output)
@@ -39,256 +40,11 @@ fn seed_capture_group(app: &mut RSpiceApp) -> crate::product::CaptureGroupId {
         InstancePath::parse_legacy("/x1").expect("scope"),
     ));
     group.points = Some(SavedOutputPolicy::EveryAcceptedPoint);
-    app.state
-        .model
+    model
         .workspace
         .content
         .add_capture_group(id, group)
         .expect("the plan accepts the group")
-}
-
-/// The group as the plan currently stores it.
-fn stored_group(app: &RSpiceApp, id: crate::product::CaptureGroupId) -> crate::state::CaptureGroup {
-    app.state
-        .model
-        .workspace
-        .content
-        .plan_data(plan_id(app))
-        .expect("payload")
-        .capture_groups
-        .iter()
-        .find(|group| group.id == id)
-        .cloned()
-        .expect("the group is still in the plan")
-}
-
-/// The editor commits every rule it showed, and shows every rule the group has.
-///
-/// A group's rules are a disjunction read in authored order. The dialog used to
-/// bind only `rules[0]`: it opened on the first rule and rebuilt the group by
-/// re-appending `rules[1..]` untouched. Editing the second rule of a group was
-/// therefore impossible, and clearing the first deleted it while leaving the
-/// rest in force — a membership change nothing on screen described, on the one
-/// surface whose whole job is to say what each group holds.
-#[test]
-fn the_group_editor_edits_every_rule_of_a_disjunction() {
-    use super::super::workflows::{commit_capture_group, group_draft};
-    use crate::state::{CaptureGroupRule, SavedOutputKind};
-
-    let mut app = RSpiceApp::test_instance();
-    let id = seed_capture_group(&mut app);
-    let member = app
-        .state
-        .model
-        .workspace
-        .content
-        .plan_data(plan_id(&app))
-        .expect("payload")
-        .saved_outputs[1]
-        .id;
-    {
-        let mut group = stored_group(&app, id);
-        group.rules.push(CaptureGroupRule::for_kind(
-            SavedOutputKind::NoiseContributor,
-        ));
-        // A directly named output is a decision made elsewhere; the editor must
-        // carry it through untouched however the rules change.
-        group.members.push(member);
-        app.state
-            .model
-            .workspace
-            .content
-            .replace_capture_group(plan_id(&app), id, group)
-            .expect("the plan accepts a second rule");
-    }
-
-    let mut draft = group_draft(&stored_group(&app, id));
-    assert_eq!(draft.rules.len(), 2, "{draft:?}");
-    let scope = draft.rules[0].scope.clone();
-    assert!(!scope.is_empty(), "the first rule's scope reaches the form");
-    let contributor = SavedOutputKind::ALL
-        .iter()
-        .position(|kind| *kind == SavedOutputKind::NoiseContributor)
-        .expect("NoiseContributor occupies a kind slot");
-    assert_eq!(draft.rules[1].kind, Some(contributor), "{draft:?}");
-
-    // Edit the *second* rule, which the old editor could not reach at all, and
-    // append a third.
-    let expression = SavedOutputKind::ALL
-        .iter()
-        .position(|kind| *kind == SavedOutputKind::DerivedExpression)
-        .expect("DerivedExpression occupies a kind slot");
-    draft.rules[1].kind = Some(expression);
-    draft
-        .rules
-        .push(crate::workbench::state::CaptureGroupRuleDraft {
-            scope: "/x2".to_owned(),
-            kind: None,
-        });
-    commit_capture_group(&mut crate::workbench::features::cx(&mut app), &draft)
-        .expect("the edited group commits");
-
-    let committed = stored_group(&app, id);
-    assert_eq!(committed.rules.len(), 3, "{committed:?}");
-    assert_eq!(
-        committed.rules[0].scope.as_ref().map(ToString::to_string),
-        Some(scope)
-    );
-    assert_eq!(
-        committed.rules[1].kind,
-        Some(SavedOutputKind::DerivedExpression)
-    );
-    assert!(committed.rules[2].scope.is_some(), "{committed:?}");
-    assert_eq!(
-        committed.members,
-        vec![member],
-        "a directly named output is not a rule and survives every rule edit"
-    );
-
-    // Reordering is a policy edit — the group's rules are read in this order —
-    // and removing one removes exactly one.
-    let mut draft = group_draft(&committed);
-    draft.rules.swap(0, 1);
-    draft.rules.remove(2);
-    commit_capture_group(&mut crate::workbench::features::cx(&mut app), &draft)
-        .expect("the reordered group commits");
-
-    let reordered = stored_group(&app, id);
-    assert_eq!(reordered.rules.len(), 2, "{reordered:?}");
-    assert_eq!(
-        reordered.rules[0].kind,
-        Some(SavedOutputKind::DerivedExpression)
-    );
-    assert_eq!(
-        reordered.rules[1].scope.as_ref().map(ToString::to_string),
-        committed.rules[0].scope.as_ref().map(ToString::to_string)
-    );
-}
-
-/// The Save page's own ledger, built exactly the way the page builds it.
-fn page_capture_ledger(app: &RSpiceApp) -> rspice_simulation::capture_ledger::CaptureLedger {
-    let payload = app
-        .state
-        .model
-        .workspace
-        .content
-        .plan_data(plan_id(app))
-        .cloned()
-        .expect("payload");
-    let (outputs, reports, _, membership) = app
-        .simulation_controller
-        .effective_saved_outputs_preflight(
-            &app.state.model,
-            &payload.saved_outputs,
-            &payload.capture_groups,
-        )
-        .expect("the test design resolves an output set");
-    rspice_simulation::capture_ledger::CaptureLedger::resolve(
-        &payload.capture_groups,
-        &outputs,
-        &reports,
-        &membership,
-        app.state.model.sim_setup.save_policy.output_selection_mode,
-        &super::super::page_save::capture_workload(&app.state.model).0,
-    )
-}
-
-/// The forecast the Save page shows is the forecast preparation refuses on, so
-/// it has exactly one owner: every group row, plus the plan-level allowances,
-/// adds up to the total and nothing else contributes to it.
-///
-/// The second half is what the one-owner rule buys: the outputs counted across
-/// the rows are the outputs there are, so no group's subtotal can include an
-/// output another group is also charging for.
-#[test]
-fn the_capture_ledger_total_is_the_sum_of_its_rows_and_counts_each_output_once() {
-    let mut app = RSpiceApp::test_instance();
-    seed_capture_group(&mut app);
-    let payload = app
-        .state
-        .model
-        .workspace
-        .content
-        .plan_data(plan_id(&app))
-        .cloned()
-        .expect("payload");
-
-    let ledger = page_capture_ledger(&app);
-
-    let rows: u64 = ledger.rows().iter().map(|row| row.bytes).sum();
-    assert_eq!(
-        ledger.total_bytes(),
-        rows + ledger.shared_source_bytes() + ledger.engine_ceiling_bytes().unwrap_or(0),
-        "the total is a projection of the printed lines"
-    );
-    assert_eq!(
-        ledger.rows().iter().map(|row| row.outputs).sum::<usize>(),
-        payload.saved_outputs.len(),
-        "every authored output is counted in exactly one group"
-    );
-    let core = ledger
-        .rows()
-        .iter()
-        .find(|row| row.name == "Core rails")
-        .expect("the authored group has a row");
-    assert_eq!(core.outputs, 1, "only the /x1 output is inside the rule");
-    assert_eq!(
-        ledger
-            .rows()
-            .last()
-            .expect("the fallback row is always drawn")
-            .name,
-        crate::state::UNGROUPED_NAME,
-        "the fallback group is listed last, after every group that can claim first"
-    );
-}
-
-/// A group's override is what the run will execute, not a label on a table.
-///
-/// The projection runs on the route preparation uses, so asserting it here is
-/// asserting what the dispatched contracts carry.
-#[test]
-fn a_capture_group_override_reaches_the_effective_output_the_run_will_use() {
-    use crate::state::SavedOutputPolicy;
-
-    let mut app = RSpiceApp::test_instance();
-    seed_capture_group(&mut app);
-    let payload = app
-        .state
-        .model
-        .workspace
-        .content
-        .plan_data(plan_id(&app))
-        .cloned()
-        .expect("payload");
-
-    let (outputs, _, _, _) = app
-        .simulation_controller
-        .effective_saved_outputs_preflight(
-            &app.state.model,
-            &payload.saved_outputs,
-            &payload.capture_groups,
-        )
-        .expect("the test design resolves an output set");
-
-    let core = outputs
-        .iter()
-        .find(|output| output.name == "core_n")
-        .expect("the grouped output survives selection");
-    let edge = outputs
-        .iter()
-        .find(|output| output.name == "edge_n")
-        .expect("the ungrouped output survives selection");
-    assert_eq!(
-        core.save_policy,
-        SavedOutputPolicy::EveryAcceptedPoint,
-        "the owning group's override is what the run receives"
-    );
-    assert_eq!(
-        edge.save_policy,
-        SavedOutputPolicy::SelectedAndFinalPoints,
-        "and an output no group claims keeps its own contract"
-    );
 }
 
 /// Membership is a function of the registry, so a registry edit can move
@@ -302,9 +58,9 @@ fn adding_an_output_inside_a_rule_receipts_the_group_it_joined() {
         SavedOutputPrecision, SavedOutputStreaming,
     };
 
-    let mut app = RSpiceApp::test_instance();
-    seed_capture_group(&mut app);
-    let id = plan_id(&app);
+    let mut harness = SimulateTestHost::harness();
+    seed_capture_group(&mut harness.model);
+    let id = plan_id(&harness.model);
     let arriving = SavedOutput::new(
         SavedOutputKind::RawVoltageOrCurrent,
         "core_m",
@@ -318,7 +74,7 @@ fn adding_an_output_inside_a_rule_receipts_the_group_it_joined() {
 
     assert!(
         super::super::workflows::commit_plan_change(
-            &mut crate::workbench::features::cx(&mut app),
+            &mut harness.cx(),
             id,
             "Added saved output core_m.",
             move |workspace, plan_id| {
@@ -331,8 +87,7 @@ fn adding_an_output_inside_a_rule_receipts_the_group_it_joined() {
         "the registry edit commits"
     );
 
-    let detail = app
-        .state
+    let detail = harness
         .model
         .sim_setup
         .stable_analysis_plan()
@@ -356,13 +111,13 @@ fn adding_an_output_inside_a_rule_receipts_the_group_it_joined() {
 /// membership sentence, or every receipt reads as a policy change.
 #[test]
 fn an_edit_that_moves_nothing_receipts_only_what_it_changed() {
-    let mut app = RSpiceApp::test_instance();
-    let group = seed_capture_group(&mut app);
-    let id = plan_id(&app);
+    let mut harness = SimulateTestHost::harness();
+    let group = seed_capture_group(&mut harness.model);
+    let id = plan_id(&harness.model);
 
     assert!(
         super::super::workflows::commit_plan_change(
-            &mut crate::workbench::features::cx(&mut app),
+            &mut harness.cx(),
             id,
             "Moved capture group Core rails later in resolution order.",
             move |workspace, plan_id| {
@@ -375,8 +130,7 @@ fn an_edit_that_moves_nothing_receipts_only_what_it_changed() {
         "the reorder commits"
     );
 
-    let detail = app
-        .state
+    let detail = harness
         .model
         .sim_setup
         .stable_analysis_plan()
@@ -392,73 +146,24 @@ fn an_edit_that_moves_nothing_receipts_only_what_it_changed() {
     );
 }
 
-/// The Save page draws the groups it prices, including the one nobody authored.
-#[test]
-fn the_save_page_lists_every_capture_group_and_the_fallback() {
-    let rendered = render_with(SimulationPage::Save, 1400.0, |app| {
-        seed_capture_group(app);
-    });
-
-    assert!(
-        rendered.contains("Capture groups"),
-        "the card is on the page: {rendered}"
-    );
-    assert!(
-        rendered.contains("Core rails"),
-        "the authored group has a row: {rendered}"
-    );
-    assert!(
-        rendered.contains(crate::state::UNGROUPED_NAME),
-        "and so does the group holding everything unclaimed: {rendered}"
-    );
-    assert!(
-        rendered.contains("Add group"),
-        "the card can author one: {rendered}"
-    );
-}
-
-/// Naming an output into a group is reachable from the page that owns the
-/// output, and the control says which group holds it and how.
-///
-/// "By rule · X" and "X" are different answers to different questions: the
-/// first says moving a rule would move this output, the second says nothing
-/// but releasing it will.
-#[test]
-fn the_outputs_page_states_which_capture_group_holds_the_selected_output() {
-    let rendered = render_with(SimulationPage::Outputs, 1400.0, |app| {
-        seed_capture_group(app);
-        app.state.simulate.selected_saved_output = Some("core_n".to_owned());
-    });
-
-    assert!(
-        rendered.contains("Capture group"),
-        "the record editor offers the membership control: {rendered}"
-    );
-    assert!(
-        rendered.contains("By rule · Core rails"),
-        "and states that a rule is what put this output there: {rendered}"
-    );
-}
-
 /// Naming an output through the page's transaction beats the rule that would
 /// otherwise have claimed it, and the receipt says where it went.
 #[test]
 fn naming_an_output_into_a_group_outranks_the_rule_that_had_it() {
     use crate::state::CaptureGroup;
 
-    let mut app = RSpiceApp::test_instance();
-    seed_capture_group(&mut app);
-    let id = plan_id(&app);
+    let mut harness = SimulateTestHost::harness();
+    seed_capture_group(&mut harness.model);
+    let id = plan_id(&harness.model);
     let watchlist = CaptureGroup::new("Watchlist").expect("group");
     let watchlist_id = watchlist.id;
-    app.state
+    harness
         .model
         .workspace
         .content
         .add_capture_group(id, watchlist)
         .expect("second group");
-    let output_id = app
-        .state
+    let output_id = harness
         .model
         .workspace
         .content
@@ -469,7 +174,7 @@ fn naming_an_output_into_a_group_outranks_the_rule_that_had_it() {
 
     assert!(
         super::super::workflows::commit_plan_change(
-            &mut crate::workbench::features::cx(&mut app),
+            &mut harness.cx(),
             id,
             "Named saved output core_n into capture group Watchlist.",
             move |workspace, plan_id| {
@@ -482,8 +187,7 @@ fn naming_an_output_into_a_group_outranks_the_rule_that_had_it() {
         "the naming commits"
     );
 
-    let payload = app
-        .state
+    let payload = harness
         .model
         .workspace
         .content
@@ -498,8 +202,7 @@ fn naming_an_output_into_a_group_outranks_the_rule_that_had_it() {
         watchlist_id,
         "the named group takes the output off the rule group that matched it"
     );
-    let detail = app
-        .state
+    let detail = harness
         .model
         .sim_setup
         .stable_analysis_plan()
@@ -521,9 +224,9 @@ fn naming_an_output_into_a_group_outranks_the_rule_that_had_it() {
 fn editing_a_group_keeps_the_rules_and_members_the_form_never_showed() {
     use crate::state::{CaptureGroup, CaptureGroupRule, InstancePath, SavedOutputKind};
 
-    let mut app = RSpiceApp::test_instance();
-    seed_capture_group(&mut app);
-    let id = plan_id(&app);
+    let mut harness = SimulateTestHost::harness();
+    seed_capture_group(&mut harness.model);
+    let id = plan_id(&harness.model);
     let mut group = CaptureGroup::new("Two rules").expect("group");
     group.rules.push(CaptureGroupRule::for_scope(
         InstancePath::parse_legacy("/x3").expect("scope"),
@@ -531,15 +234,13 @@ fn editing_a_group_keeps_the_rules_and_members_the_form_never_showed() {
     group.rules.push(CaptureGroupRule::for_kind(
         SavedOutputKind::NoiseContributor,
     ));
-    let group_id = app
-        .state
+    let group_id = harness
         .model
         .workspace
         .content
         .add_capture_group(id, group.clone())
         .expect("the plan accepts a two-rule group");
-    let output_id = app
-        .state
+    let output_id = harness
         .model
         .workspace
         .content
@@ -547,7 +248,7 @@ fn editing_a_group_keeps_the_rules_and_members_the_form_never_showed() {
         .expect("payload")
         .saved_outputs[1]
         .id;
-    app.state
+    harness
         .model
         .workspace
         .content
@@ -556,14 +257,10 @@ fn editing_a_group_keeps_the_rules_and_members_the_form_never_showed() {
 
     let mut draft = super::super::workflows::group_draft(&group);
     draft.name = "Renamed".to_owned();
-    super::super::workflows::commit_capture_group(
-        &mut crate::workbench::features::cx(&mut app),
-        &draft,
-    )
-    .expect("the edit commits");
+    super::super::workflows::commit_capture_group(&mut harness.cx(), &draft)
+        .expect("the edit commits");
 
-    let stored = app
-        .state
+    let stored = harness
         .model
         .workspace
         .content
@@ -589,121 +286,4 @@ fn editing_a_group_keeps_the_rules_and_members_the_form_never_showed() {
         vec![output_id],
         "and the outputs it named directly survive too"
     );
-}
-
-/// The Outputs registry's `Est. size` cell and the Save ledger's row are one
-/// number.
-///
-/// They were two. The registry multiplied the *authored* record's estimate by
-/// the declared point count; the ledger priced the *group-projected* output at
-/// each producing analysis's own participation. So a plan whose group overrode
-/// a member's precision, or whose analysis ran nominal-only, read one size on
-/// the page that lists its outputs and another on the page that totals them —
-/// under a comment on the first claiming "nothing here is a second forecast".
-///
-/// Both halves are exercised: the group in this fixture rewrites its member's
-/// point policy, and the run set narrows one analysis to the nominal point.
-#[test]
-fn the_registry_size_and_the_ledger_row_price_one_output_once() {
-    use crate::simulation::plan::{AnalysisInstance, AnalysisKind};
-    use rspice_simulation_contract::analysis_run_at::AnalysisRunAt;
-    use rspice_simulation_contract::run_set::RunSetDimensionKind;
-
-    let mut app = RSpiceApp::test_instance();
-    seed_capture_group(&mut app);
-
-    // A declared space with more than one point, and one analysis narrowed to
-    // the nominal one — the case a scalar point count prices wrongly.
-    for dimension in &mut app.state.model.sim_setup.run_set.dimensions {
-        dimension.enabled = dimension.kind == RunSetDimensionKind::Temperature;
-    }
-    let nominal_only = app
-        .state
-        .model
-        .sim_setup
-        .stable_analysis_plan()
-        .ok()
-        .and_then(|plan| {
-            plan.instances()
-                .iter()
-                .find(|instance| instance.kind() == AnalysisKind::Transient)
-                .map(AnalysisInstance::id)
-        })
-        .expect("the test plan runs a transient");
-    if let Some(plan) = app.state.model.sim_setup.analysis_plan.as_mut() {
-        let _ = plan.set_run_at(nominal_only, AnalysisRunAt::NominalPoint);
-    }
-    assert!(
-        app.state.model.sim_setup.run_set.point_count() > 1,
-        "the space has to multiply, or the two arithmetics cannot disagree"
-    );
-
-    let payload = app
-        .state
-        .model
-        .workspace
-        .content
-        .plan_data(plan_id(&app))
-        .cloned()
-        .expect("payload");
-    let ledger = page_capture_ledger(&app);
-    let registry = super::super::page_outputs::projected_output_bytes_for(
-        &app.state.model,
-        &app.simulation_controller,
-        &payload,
-        &super::super::page_save::capture_workload(&app.state.model).0,
-    );
-    assert!(
-        !registry.is_empty(),
-        "the registry has to be pricing something for this to mean anything"
-    );
-
-    // The two arithmetics have to actually differ here, or this pins nothing:
-    // the old cell was the authored record's own estimate times the declared
-    // point count, and at least one output must not price that way.
-    let matrix =
-        u64::try_from(app.state.model.sim_setup.run_set.point_count().max(1)).unwrap_or(u64::MAX);
-    let flat: Vec<u64> = app
-        .simulation_controller
-        .saved_outputs_preflight(&app.state.model, &payload.saved_outputs)
-        .iter()
-        .filter_map(|report| match report.storage_estimate() {
-            rspice_simulation::output_contract::SavedOutputStorageEstimate::ExactBytes(bytes) => {
-                Some(bytes.saturating_mul(matrix))
-            }
-            rspice_simulation::output_contract::SavedOutputStorageEstimate::Indeterminate {
-                ..
-            } => None,
-        })
-        .collect();
-    let projected: Vec<u64> = payload
-        .saved_outputs
-        .iter()
-        .filter_map(|output| registry.get(&output.id).copied().flatten())
-        .collect();
-    assert_ne!(
-        flat, projected,
-        "the fixture must be one the old per-record arithmetic gets wrong"
-    );
-
-    // Every group row is the sum of the registry cells of the outputs it owns,
-    // so no output is priced twice and none is priced two ways.
-    let membership = crate::state::CaptureGroupMembership::resolve(
-        &payload.capture_groups,
-        &payload.saved_outputs,
-    );
-    for row in ledger.rows() {
-        let from_registry: u64 = payload
-            .saved_outputs
-            .iter()
-            .enumerate()
-            .filter(|(index, _)| membership.owner(*index) == row.group)
-            .filter_map(|(_, output)| registry.get(&output.id).copied().flatten())
-            .sum();
-        assert_eq!(
-            row.bytes, from_registry,
-            "the group '{}' totals {} bytes while its rows' cells add to {from_registry}",
-            row.name, row.bytes
-        );
-    }
 }

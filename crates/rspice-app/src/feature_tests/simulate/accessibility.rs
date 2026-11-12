@@ -17,10 +17,10 @@
 
 use egui::{Rect, vec2};
 
+use super::page_contracts::RENDER_VIEWPORT_HEIGHT;
 use crate::state::SimulationPage;
 use crate::workbench::RSpiceApp;
 use crate::workbench::surfaces::simulate::catalog::ANALYSIS_CATALOG_SEARCH_LABEL;
-use crate::workbench::surfaces::simulate::page_tests::RENDER_VIEWPORT_HEIGHT;
 use crate::workbench::surfaces::simulate::{
     participation, show_on_stage, variable_import, workflow_dialog_tests,
 };

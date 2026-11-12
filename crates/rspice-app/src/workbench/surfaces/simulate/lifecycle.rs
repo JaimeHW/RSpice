@@ -640,7 +640,7 @@ fn analysis_display_name(model: &Model, id: AnalysisInstanceId) -> String {
 ///
 /// Anything else is removed at once, because a confirmation with nothing behind
 /// it only teaches the reader to click through the ones that matter.
-pub(super) fn remove_analysis_instance(cx: &mut Cx<'_, SimulateFeature>, id: AnalysisInstanceId) {
+pub(crate) fn remove_analysis_instance(cx: &mut Cx<'_, SimulateFeature>, id: AnalysisInstanceId) {
     let dependents = analyses_depending_on(cx.model, id);
     if !dependents.is_empty() {
         let label = analysis_display_name(cx.model, id);
@@ -677,7 +677,7 @@ pub(super) fn remove_analysis_instance(cx: &mut Cx<'_, SimulateFeature>, id: Ana
 ///
 /// Called once per frame from the surface, so the modal records an answer
 /// rather than reaching into the plan itself.
-pub(super) fn apply_confirmed_analysis_removal(cx: &mut Cx<'_, SimulateFeature>) {
+pub(crate) fn apply_confirmed_analysis_removal(cx: &mut Cx<'_, SimulateFeature>) {
     if let Some(id) = cx.state.plan_removal_review.take_confirmed_analysis() {
         commit_analysis_removal(cx, id);
     }
@@ -692,7 +692,7 @@ pub(super) fn apply_confirmed_analysis_removal(cx: &mut Cx<'_, SimulateFeature>)
 /// Takes the state rather than the application. Answering a notice moves what
 /// is on screen and touches nothing else, and a handler holding the whole
 /// application could mutate every subsystem to do it.
-pub(super) fn apply_requested_blocker_reveal(state: &mut SimulateState) {
+pub(crate) fn apply_requested_blocker_reveal(state: &mut SimulateState) {
     if let Some(blocker) = state.plan_removal_refusal.take_reveal_target() {
         super::advanced_options::reveal_in_analyses(state, blocker);
     }

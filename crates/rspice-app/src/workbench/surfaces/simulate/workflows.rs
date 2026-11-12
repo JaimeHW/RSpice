@@ -518,7 +518,7 @@ const INHERIT_CHOICE: &str = "Per output";
 /// Lives here rather than on the draft because the draft is deliberately
 /// ignorant of the capture-group types: it holds indices and text, and this is
 /// the one place that knows what those index into.
-pub(super) fn group_draft(group: &crate::state::CaptureGroup) -> CaptureGroupDraft {
+pub(crate) fn group_draft(group: &crate::state::CaptureGroup) -> CaptureGroupDraft {
     // Every rule, in authored order, because that order is the group's own
     // precedence and resolution reads all of them. A ruleless group opens on
     // one empty row so the form has somewhere to type the first rule; an empty
@@ -892,7 +892,7 @@ fn claim_preview_sentence(matched: usize, rules: usize) -> String {
     )
 }
 
-pub(super) fn commit_capture_group(
+pub(crate) fn commit_capture_group(
     cx: &mut Cx<'_, SimulateFeature>,
     draft: &CaptureGroupDraft,
 ) -> Result<String, String> {

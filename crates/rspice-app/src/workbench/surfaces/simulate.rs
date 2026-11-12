@@ -11,7 +11,7 @@ pub(crate) mod page_kit;
 pub(crate) mod page_models;
 pub(crate) mod page_outputs;
 pub(crate) mod page_runset;
-mod page_save;
+pub(crate) mod page_save;
 mod page_solver;
 pub(crate) mod page_specs;
 mod page_variables;
@@ -21,7 +21,7 @@ mod plan_issue_wording;
 pub(crate) mod plan_manager;
 pub(crate) mod transient_checkpoint_exchange;
 pub(crate) mod variable_import;
-mod workflows;
+pub(crate) mod workflows;
 mod workload;
 
 use catalog::*;

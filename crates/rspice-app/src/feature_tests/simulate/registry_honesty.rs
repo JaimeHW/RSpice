@@ -14,10 +14,11 @@
 
 use egui::{Pos2, Rect, pos2, vec2};
 
+use super::page_contracts::render_with;
 use crate::state::SimulationPage;
 use crate::workbench::RSpiceApp;
 use crate::workbench::surfaces::simulate::page_specs;
-use crate::workbench::surfaces::simulate::page_tests::{plan_id, render_with};
+use crate::workbench::surfaces::simulate::page_tests::plan_id;
 use crate::workbench::surfaces::simulate::show_on_stage;
 
 /// The routes that resolve a plan payload before drawing a registry, each with
@@ -110,7 +111,7 @@ fn a_specification_commit_lands_in_the_plan_log_without_a_receipts_card() {
 
     let mut last_receipt = None;
     let rendered = render_with(SimulationPage::Specifications, 1200.0, |app| {
-        let id = plan_id(app);
+        let id = plan_id(&app.state.model);
         app.state.model.workspace.content.replace_active_specs(
             id,
             vec![SpecEntry {
@@ -311,7 +312,7 @@ fn bounded_variable() -> crate::state::DesignVariable {
 /// An app whose plan owns one bounded variable, with that variable selected.
 fn app_with_bounded_variable() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
-    let id = plan_id(&app);
+    let id = plan_id(&app.state.model);
     app.state
         .model
         .workspace
@@ -336,7 +337,7 @@ fn a_refused_variable_expression_stays_on_the_field_that_was_typed_into() {
     registry.retype("Expression", "100kohm");
 
     let stored = |registry: &Registry| {
-        let id = plan_id(&registry.app);
+        let id = plan_id(&registry.app.state.model);
         registry
             .app
             .state
@@ -400,7 +401,7 @@ fn an_accepted_variable_expression_clears_the_draft_it_committed() {
 
     registry.retype("Expression", "4700ohm");
 
-    let id = plan_id(&registry.app);
+    let id = plan_id(&registry.app.state.model);
     assert_eq!(
         registry
             .app
@@ -439,7 +440,7 @@ fn a_refused_saved_output_edit_stays_on_the_fields_that_were_typed_into() {
     };
 
     let mut app = RSpiceApp::test_instance();
-    let id = plan_id(&app);
+    let id = plan_id(&app.state.model);
     for name in ["vout", "vin"] {
         let output = SavedOutput::new(
             SavedOutputKind::RawVoltageOrCurrent,
@@ -466,7 +467,7 @@ fn a_refused_saved_output_edit_stays_on_the_fields_that_were_typed_into() {
     // field rather than re-derive from a cleared one.
     registry.retype("Name", "VIN");
 
-    let id = plan_id(&registry.app);
+    let id = plan_id(&registry.app.state.model);
     let stored: Vec<String> = registry
         .app
         .state
