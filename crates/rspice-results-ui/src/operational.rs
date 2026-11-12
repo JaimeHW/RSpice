@@ -566,29 +566,21 @@ impl OperationalCard<'_> {
 
     /// Centre the card in the document well it has taken over.
     ///
-    /// The card is measured at its final width first, so it lands on the
-    /// well's own centre. What this replaces was a guessed 172 pt height
-    /// halved against the well's left edge, which put the card somewhere
-    /// different for every state and in the middle for none of them.
+    /// The card is placed by the height it drew at last, at its final width,
+    /// so it lands on the well's own centre. A card whose height is new asks
+    /// egui to lay the pass out again, so the frame shows it centred and the
+    /// card is drawn, and announced to assistive technology, once. What this
+    /// replaces was a guessed 172 pt height halved against the well's left
+    /// edge, which put the card somewhere different for every state and in the
+    /// middle for none of them.
     fn show_centered(&self, ui: &mut Ui, actions: &mut OperationalResponse) -> egui::Response {
         let well = ui.available_rect_before_wrap();
         let width =
             (well.width() - 2.0 * OPERATIONAL_CARD_GUTTER).clamp(1.0, OPERATIONAL_CARD_MAX_WIDTH);
 
-        let mut probe = ui.new_child(
-            egui::UiBuilder::new()
-                .id_salt("result-operational-state-measure")
-                .max_rect(egui::Rect::from_min_size(
-                    well.min,
-                    egui::vec2(width, well.height().max(OPERATIONAL_CARD_MAX_WIDTH)),
-                ))
-                .layout(egui::Layout::top_down(egui::Align::Min))
-                .sizing_pass()
-                .invisible(),
-        );
-        // The measuring pass presses nothing; what it reports is thrown away.
-        self.show(&mut probe, &mut OperationalResponse::default());
-        let height = probe.min_rect().height();
+        let height_id = ui.id().with("result-operational-state-height");
+        let last_height = ui.ctx().data(|data| data.get_temp::<f32>(height_id));
+        let height = last_height.unwrap_or(0.0);
 
         let top = (well.center().y - height * 0.5).max(well.top() + OPERATIONAL_CARD_GUTTER);
         let mut card = ui.new_child(
@@ -599,7 +591,15 @@ impl OperationalCard<'_> {
                 ))
                 .layout(egui::Layout::top_down(egui::Align::Min)),
         );
-        self.show(&mut card, actions)
+        let response = self.show(&mut card, actions);
+        let drawn_height = card.min_rect().height();
+        if last_height.is_none_or(|height| (height - drawn_height).abs() > 0.5) {
+            ui.ctx()
+                .data_mut(|data| data.insert_temp(height_id, drawn_height));
+            ui.ctx()
+                .request_discard("the operational card changed height");
+        }
+        response
     }
 }
 

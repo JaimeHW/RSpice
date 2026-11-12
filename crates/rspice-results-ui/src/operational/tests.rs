@@ -232,3 +232,43 @@ fn only_a_warning_or_error_state_colours_its_glyph() {
         );
     }
 }
+
+/// A blocking card is drawn once. It used to be laid out twice, once
+/// invisibly to measure its height, and egui publishes the widgets of an
+/// invisible pass too, so a screen reader met the card's title, message and
+/// controls twice. The state itself is announced once, on the card shown.
+#[test]
+fn a_blocking_card_is_published_once() {
+    let ctx = egui::Context::default();
+    rspice_ui_kit::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let status = ResultOperationalStatus::canonical(ResultOperationalState::Corrupted, true);
+    assert!(status.blocks_visuals);
+    let mut update = None;
+    for _ in 0..3 {
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, WELL)),
+            ..Default::default()
+        };
+        update = ctx
+            .run_ui(input, |ui| {
+                let _ = show(ui, &status, || None);
+            })
+            .platform_output
+            .accesskit_update;
+    }
+    let nodes = update.expect("AccessKit operational-card tree").nodes;
+    let titles = nodes
+        .iter()
+        .filter(|(_, node)| {
+            node.role() == egui::accesskit::Role::Label
+                && node.value() == Some(status.state.label())
+        })
+        .count();
+    let alerts = nodes
+        .iter()
+        .filter(|(_, node)| node.role() == egui::accesskit::Role::Alert)
+        .count();
+    assert_eq!(titles, 1, "the card's title is published {titles} times");
+    assert_eq!(alerts, 1, "the corrupted state is announced {alerts} times");
+}
