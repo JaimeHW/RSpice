@@ -1219,22 +1219,17 @@ fn workbench_edge_counts() -> BTreeMap<(String, String), usize> {
         // `super::` is the same edge written the short way, and 310
         // references took that form — about 15% of the shell's interior —
         // while this test read only `crate::workbench::`. Resolve it against
-        // the file's own parent module so grouping files into a directory
-        // cannot hide the edges between them: in `workbench/lifecycle/x.rs`,
+        // the file's own module so grouping files into a directory cannot
+        // hide the edges between them: in `workbench/lifecycle/x.rs`,
         // `super::y` is `crate::workbench::lifecycle::y`.
         if let Some(relative) = workbench_relative(&file) {
-            let mut parent: Vec<&str> = relative
+            let module: Vec<&str> = relative
                 .to_str()
                 .unwrap_or_default()
+                .trim_end_matches(".rs")
                 .split(['\\', '/'])
                 .collect();
-            parent.pop(); // the file itself
-            let mut resolved = PREFIX.to_owned();
-            for segment in parent {
-                resolved.push_str(segment);
-                resolved.push_str("::");
-            }
-            code = code.replace("super::", &resolved);
+            code = resolve_super_chains(&code, &module);
         }
 
         let mut rest = code.as_str();
@@ -1283,6 +1278,119 @@ fn workbench_edge_counts() -> BTreeMap<(String, String), usize> {
         }
     }
     edges
+}
+
+/// Rewrite every `super::` chain in `code` as the `crate::workbench::` path it
+/// names, in a file whose module under `workbench` is `module`.
+///
+/// A chain climbs one module per `super`: in `workbench/a/b/c.rs`,
+/// `super::super::d` is `crate::workbench::a::d`. Rewriting each `super::` as
+/// the file's parent, as this once did, glued the two parents of such a chain
+/// into one path that named the file's own module, so about a hundred
+/// references between workbench modules went unseen. Inside an inline
+/// `mod tests { .. }` the chain starts from that block, one module deeper than
+/// the file. A chain that climbs out of `workbench` names no workbench module,
+/// and is written from `crate::` so the scan passes over it.
+fn resolve_super_chains(code: &str, module: &[&str]) -> String {
+    const SUPER: &str = "super::";
+    let mut resolved = String::with_capacity(code.len());
+    let mut inline: Vec<(&str, i64)> = Vec::new();
+    let mut depth: i64 = 0;
+    for line in code.lines() {
+        if let Some(name) = inline_module_name(line) {
+            inline.push((name, depth));
+        }
+        let mut rest = line;
+        while let Some(index) = rest.find(SUPER) {
+            resolved.push_str(&rest[..index]);
+            let starts_a_path = rest[..index]
+                .chars()
+                .next_back()
+                .is_none_or(|previous| !previous.is_alphanumeric() && previous != '_');
+            let mut tail = &rest[index..];
+            if !starts_a_path {
+                resolved.push_str(SUPER);
+                rest = &tail[SUPER.len()..];
+                continue;
+            }
+            let mut climb = 0;
+            while let Some(after) = tail.strip_prefix(SUPER) {
+                climb += 1;
+                tail = after;
+            }
+            let mut here: Vec<&str> = module.to_vec();
+            here.extend(inline.iter().map(|(name, _)| *name));
+            if climb <= here.len() {
+                here.truncate(here.len() - climb);
+                resolved.push_str("crate::workbench::");
+                for segment in here {
+                    resolved.push_str(segment);
+                    resolved.push_str("::");
+                }
+            } else {
+                resolved.push_str("crate::");
+            }
+            rest = tail;
+        }
+        resolved.push_str(rest);
+        resolved.push('\n');
+        depth += line.matches('{').count() as i64 - line.matches('}').count() as i64;
+        while inline
+            .last()
+            .is_some_and(|(_, opened_at)| depth <= *opened_at)
+        {
+            inline.pop();
+        }
+    }
+    resolved
+}
+
+/// The name of the inline module `line` opens, as in `mod tests {` or
+/// `#[cfg(test)] pub(crate) mod helpers {`, and `None` for any other line,
+/// including a `mod name;` that declares a file.
+fn inline_module_name(line: &str) -> Option<&str> {
+    let mut rest = line.trim_start();
+    while rest.starts_with("#[") {
+        rest = rest[rest.find(']')? + 1..].trim_start();
+    }
+    if let Some(after) = rest.strip_prefix("pub") {
+        rest = after.trim_start();
+        if rest.starts_with('(') {
+            rest = rest[rest.find(')')? + 1..].trim_start();
+        }
+    }
+    let rest = rest.strip_prefix("mod ")?.trim_start();
+    let end = rest.find(|c: char| !c.is_alphanumeric() && c != '_')?;
+    let (name, after) = rest.split_at(end);
+    (!name.is_empty() && after.trim_start().starts_with('{')).then_some(name)
+}
+
+/// A `super::` chain names the module it climbs to: one module per `super`,
+/// counted from inside any inline module, and from `crate::` once it leaves
+/// `workbench`. A word that merely ends in `super` is not a chain.
+#[test]
+fn super_chains_resolve_to_the_module_they_name() {
+    let file = ["a", "b", "c"];
+    assert_eq!(
+        resolve_super_chains("use super::d::X;", &file),
+        "use crate::workbench::a::b::d::X;\n"
+    );
+    assert_eq!(
+        resolve_super_chains("use super::super::d::X;", &file),
+        "use crate::workbench::a::d::X;\n"
+    );
+    assert_eq!(
+        resolve_super_chains(
+            "#[cfg(test)]\nmod tests {\n    use super::super::d;\n}\nuse super::e;",
+            &file
+        ),
+        "#[cfg(test)]\nmod tests {\n    use crate::workbench::a::b::d;\n}\nuse crate::workbench::a::b::e;\n"
+    );
+    assert_eq!(
+        resolve_super_chains("use super::super::super::super::f;", &file),
+        "use crate::f;\n"
+    );
+    assert_eq!(resolve_super_chains("my_super::g", &file), "my_super::g\n");
 }
 
 /// Whether `file` is the module file of a directory beside it that does
