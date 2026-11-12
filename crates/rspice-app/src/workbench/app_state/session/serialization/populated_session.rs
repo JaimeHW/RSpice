@@ -15,7 +15,7 @@ use super::*;
 use crate::state::ModelsPage;
 use crate::state::{SimulationPage, VerificationPage};
 use crate::workbench::project::workspace_state::{LibraryCellviewPage, ProjectPage};
-use crate::workbench::state::{ConsolePage, DesignPanel, Workspace, WorkspaceDocumentId};
+use crate::workbench::state::{ConsolePage, Workspace, WorkspaceDocumentId};
 
 /// A session in mid-work with every persisted field moved off its default:
 /// a closed project that left its documents, a run and an unsaved model edit
@@ -287,7 +287,7 @@ fn populate_workbench(state: &mut AppState, operating_point: crate::product::Ana
     workbench.inspector_width_custom = true;
     workbench.console_height = 244.0;
     workbench.console_page = ConsolePage::Problems;
-    state.design.design_panel = DesignPanel::ComponentShelf;
+    state.design.show_component_shelf();
     workbench
         .documents
         .activate(WorkspaceDocumentId::SimulationPlan);

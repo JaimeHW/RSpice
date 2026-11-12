@@ -224,6 +224,22 @@ pub(crate) struct DesignState {
 }
 
 impl DesignState {
+    /// Whether the Design side panel shows the component shelf rather than
+    /// the Navigator.
+    pub(crate) fn component_shelf_shown(&self) -> bool {
+        self.design_panel == crate::workbench::state::DesignPanel::ComponentShelf
+    }
+
+    /// Bring the Navigator forward in the Design side panel.
+    pub(crate) fn show_navigator(&mut self) {
+        self.design_panel = crate::workbench::state::DesignPanel::Navigator;
+    }
+
+    /// Bring the component shelf forward in the Design side panel.
+    pub(crate) fn show_component_shelf(&mut self) {
+        self.design_panel = crate::workbench::state::DesignPanel::ComponentShelf;
+    }
+
     /// Whether a schematic edit is under way: an undo step still open, as
     /// while a drag is held, or a copy floating under the pointer. History
     /// waits for either to land or be cancelled.

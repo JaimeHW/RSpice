@@ -1558,7 +1558,7 @@ fn execute_context_action(
         ContextAction::PlaceInstance => {
             state.workbench.navigator_visible = true;
             state.workbench.drawer = Some(crate::workbench::state::Drawer::Navigator);
-            state.design.design_panel = crate::workbench::state::DesignPanel::ComponentShelf;
+            state.design.show_component_shelf();
             state
                 .workbench
                 .outbox

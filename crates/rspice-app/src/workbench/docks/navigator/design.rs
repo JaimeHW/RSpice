@@ -33,7 +33,7 @@ use super::super::super::commands::vocabulary::Command;
 use super::super::super::design_system::{
     PANEL_SECTION_H, PANEL_TABS_H, WorkbenchIcon, elide_text,
 };
-use super::super::super::state::{DesignPanel, Workspace};
+use super::super::super::state::Workspace;
 use super::rail::{self, RailDisclosure, RailFold};
 use super::{
     SCHEMATIC_NAV_LABEL_SIZE, SCHEMATIC_NAV_META_SIZE, SCHEMATIC_NAV_ROW_HEIGHT,
@@ -283,9 +283,10 @@ fn panel_tabs_content_rect(rect: egui::Rect) -> egui::Rect {
 
 pub(in crate::workbench) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     tabs(ui, &mut app.state);
-    match app.state.design.design_panel {
-        DesignPanel::Navigator => navigator(ui, app),
-        DesignPanel::ComponentShelf => shelf::component_shelf(ui, app),
+    if app.state.design.component_shelf_shown() {
+        shelf::component_shelf(ui, app);
+    } else {
+        navigator(ui, app);
     }
 }
 
@@ -306,10 +307,8 @@ fn tabs(ui: &mut Ui, state: &mut AppState) {
         rect.bottom(),
         egui::Stroke::new(1.0, t.color.border),
     );
-    let entries = [
-        (DesignPanel::Navigator, "Navigator"),
-        (DesignPanel::ComponentShelf, "Component shelf"),
-    ];
+    // Each tab, with whether it is the component shelf's.
+    let entries = [(false, "Navigator"), (true, "Component shelf")];
     let tab_ids = [
         ui.id().with(("design-panel-tab", 0)),
         ui.id().with(("design-panel-tab", 1)),
@@ -325,7 +324,7 @@ fn tabs(ui: &mut Ui, state: &mut AppState) {
     });
     let tab_widths = flexible_tab_widths(content_rect.width(), desired_widths);
     let mut tab_left = content_rect.left();
-    for (index, (panel, label)) in entries.iter().copied().enumerate() {
+    for (index, (shelf, label)) in entries.iter().copied().enumerate() {
         let tab_width = tab_widths[index];
         let tab_rect = egui::Rect::from_min_max(
             egui::pos2(tab_left, content_rect.top()),
@@ -333,7 +332,7 @@ fn tabs(ui: &mut Ui, state: &mut AppState) {
         );
         tab_left += tab_width;
         let response = ui.interact(tab_rect, tab_ids[index], egui::Sense::click());
-        let selected = state.design.design_panel == panel;
+        let selected = state.design.component_shelf_shown() == shelf;
         response.widget_info(|| {
             egui::WidgetInfo::selected(
                 egui::WidgetType::SelectableLabel,
@@ -372,9 +371,8 @@ fn tabs(ui: &mut Ui, state: &mut AppState) {
             );
         }
         theme::paint_focus_ring(ui, &response, tab_rect);
-        if response.clicked() {
-            state.design.design_panel = panel;
-        }
+        // The tab this frame brings forward, as whether it is the shelf's.
+        let mut bring_forward = response.clicked().then_some(shelf);
         if response.has_focus() {
             let target = ui.input_mut(|input| {
                 if input.consume_key(Modifiers::NONE, Key::ArrowLeft)
@@ -390,9 +388,14 @@ fn tabs(ui: &mut Ui, state: &mut AppState) {
                 }
             });
             if let Some(target) = target {
-                state.design.design_panel = entries[target].0;
+                bring_forward = Some(entries[target].0);
                 ui.memory_mut(|memory| memory.request_focus(tab_ids[target]));
             }
+        }
+        match bring_forward {
+            Some(true) => state.design.show_component_shelf(),
+            Some(false) => state.design.show_navigator(),
+            None => {}
         }
     }
 }
@@ -1951,7 +1954,7 @@ fn find_navigator_object_references(state: &mut AppState, object: &NavigatorObje
         .navigator_trees
         .filter_mut(Workspace::Design) = name;
     state.workbench.navigator_visible = true;
-    state.design.design_panel = DesignPanel::Navigator;
+    state.design.show_navigator();
     state.workbench.outbox.push(FocusNavigatorSearch);
 }
 

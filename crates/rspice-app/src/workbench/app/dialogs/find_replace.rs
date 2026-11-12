@@ -92,7 +92,7 @@ pub(crate) fn open_find_replace(state: &mut AppState) {
     state.design.find_replace.open = true;
     // The matches are listed in the Navigator, so it comes forward.
     state.workbench.navigator_visible = true;
-    state.design.design_panel = crate::workbench::state::DesignPanel::Navigator;
+    state.design.show_navigator();
 }
 
 /// Every text the form's query changes, cell view by cell view, the active
