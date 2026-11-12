@@ -4,6 +4,8 @@
 .include ../net/mod1-ct.cir
 Xmod inp inm dclk dv dvb mod1
 vin inp inm dc 0 sin(0 'inampl' 'infreq' 0 0)
-.tran 0.1u 2m
+* Step capped at 1 ns: at the default step and at 20 ns the window codes move with
+* the step; at 5 ns and 1 ns all 19 agree.
+.tran 0.1u 2m 0 1n
 .save v(adaclout) v(inp) v(inm)
 .end

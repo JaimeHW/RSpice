@@ -12,6 +12,8 @@ aq [dcmp dclk] [dv dvb] sdq
 abridgef [dv dvb] [adffq adffqb] dac_pm1
 .model dac_pm1 dac_bridge(out_low = -1 out_high = 1 out_undef = 0 input_load = 5.0e-12)
 vin inp inm dc 0 sin(0 'inampl' 'infreq' 0 0)
-.tran 0.1u 2m
+* Step capped at 1 ns: at the default step and at 20 ns the window codes move with
+* the step; at 5 ns and 1 ns all 19 agree.
+.tran 0.1u 2m 0 1n
 .save v(adaclout)
 .end
