@@ -2443,3 +2443,57 @@ fn mos6_and_bsim2_default_their_diffusion_squares_as_ltspice_and_ngspice() {
         );
     }
 }
+
+/// QSPICE and LTspice shunt a level 1, 2 or 3 channel with `.options gmin`,
+/// drain to source, beside the junction GMIN; ngspice and Xyce do not. Fed
+/// 5 V through 1e12 ohm at gmin = 1e-9, an off NMOS prints QSPICE V(m) =
+/// 2.4736e-3 with its gate, source and bulk grounded and 2.4489e-3 with its
+/// source on the drain: 1.0005e-9 S across the channel (LTspice 1e-9 S).
+/// LTspice carries no channel shunt at level 6, and QSPICE has no level 6.
+#[test]
+fn a_classic_channel_carries_gmin_outside_the_ngspice_and_xyce_dialects() {
+    use rspice_core::engine::SpiceDialect;
+    const GMIN: f64 = 1.0e-9;
+    const FEED: f64 = 1.0e12;
+    for (level, card) in [
+        (1, "level=1 vto=0.7 kp=1e-4"),
+        (2, "level=2 vto=0.7 kp=1e-4 tox=2.4e-8"),
+        (3, "level=3 vto=0.7 kp=1e-4 tox=2.4e-8"),
+        (6, "level=6 vto=0.7"),
+    ] {
+        for dialect in [
+            SpiceDialect::BestAvailable,
+            SpiceDialect::Ngspice,
+            SpiceDialect::Xyce,
+        ] {
+            // The conductance from m to ground, fed through FEED.
+            let conductance = |element: &str| {
+                let deck = format!(
+                    "channel gmin\nV1 5 0 5\nR1 5 m {FEED:e}\n{element}\n\
+                     .model n nmos {card}\n.options gmin={GMIN:e}\n.op\n.end\n"
+                );
+                let netlist = Netlist::parse(&deck).expect("channel GMIN deck parses");
+                let v = Engine::new(SimulationConfig::default().with_spice_dialect(dialect))
+                    .run_dc_op(&netlist)
+                    .unwrap_or_else(|err| panic!("LEVEL={level} {dialect:?} {element}: {err}"))
+                    .try_voltage_named("m")
+                    .expect("V(m)");
+                (5.0 - v) / (FEED * v)
+            };
+            let open = conductance("C1 m 0 1p");
+            let channel_and_junction = conductance("M1 m 0 0 0 n w=10u l=1u") - open;
+            let two_junctions = conductance("M1 m 0 m 0 n w=10u l=1u") - open;
+            let channel = channel_and_junction - two_junctions / 2.0;
+            let expected = if level <= 3 && dialect == SpiceDialect::BestAvailable {
+                GMIN
+            } else {
+                0.0
+            };
+            assert!(
+                (channel - expected).abs() <= 1.0e-2 * GMIN,
+                "LEVEL={level} {dialect:?}: drain-source conductance {channel:e}, \
+                 expected {expected:e}"
+            );
+        }
+    }
+}

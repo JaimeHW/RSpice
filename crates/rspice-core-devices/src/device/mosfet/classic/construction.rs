@@ -197,6 +197,7 @@ impl Mosfet {
             xyce_initial_fix: false,
             voltage_limiting: true,
             level2_vbin_cutoff: true,
+            channel_gmin: false,
             indices: MosfetIndices::default(),
         }
     }
@@ -505,7 +506,32 @@ impl Mosfet {
         vds: Value,
         vbs: Value,
     ) -> (Value, MosRegion, Value, Value, Value, Value, Value) {
-        let (id, region, gm, gds, gmb, gss) = if self.legacy_bsim_model.is_some() {
+        let channel = self.channel_operating_point(vgs, vds, vbs);
+        self.with_equivalent_current(vgs, vds, vbs, channel)
+    }
+
+    /// [`Self::linearized_operating_point`] without the channel GMIN. The
+    /// periodic and harmonic-balance equations linearize the device law
+    /// without solver conductance, the channel as well as the junctions.
+    #[inline]
+    pub(in crate::device::mosfet::classic) fn physical_linearized_operating_point(
+        &self,
+        vgs: Value,
+        vds: Value,
+        vbs: Value,
+    ) -> (Value, MosRegion, Value, Value, Value, Value, Value) {
+        let channel = self.channel_operating_point(vgs, vds, vbs);
+        self.with_shunted_equivalent_current(vgs, vds, vbs, channel, 0.0)
+    }
+
+    #[inline]
+    fn channel_operating_point(
+        &self,
+        vgs: Value,
+        vds: Value,
+        vbs: Value,
+    ) -> (Value, MosRegion, Value, Value, Value, Value) {
+        if self.legacy_bsim_model.is_some() {
             self.legacy_bsim_linearized_operating_point(vgs, vds, vbs)
         } else if self.level == 6 {
             self.level6_operating_point(vgs, vds, vbs)
@@ -526,20 +552,56 @@ impl Mosfet {
             let (id, region) = self.calculate_id(vgs, vds, vbs);
             let (gm, gds, gmb) = self.small_signal(vgs, vds, vbs);
             (id, region, gm, gds, gmb, gm + gds + gmb)
-        };
-        self.with_equivalent_current(vgs, vds, vbs, (id, region, gm, gds, gmb, gss))
+        }
+    }
+
+    /// The drain-to-source conductance of [`Self::set_channel_gmin_enabled`].
+    #[inline]
+    fn channel_gmin_conductance(&self) -> Value {
+        if self.channel_gmin && self.legacy_bsim_model.is_none() && matches!(self.level, 1..=3) {
+            self.junction_gmin
+        } else {
+            0.0
+        }
     }
 
     /// Append the Newton equivalent drain current to a channel operating
-    /// point linearized at the given bias.
+    /// point linearized at the given bias, with the channel GMIN.
     #[inline]
     pub(in crate::device::mosfet::classic) fn with_equivalent_current(
         &self,
         vgs: Value,
         vds: Value,
         vbs: Value,
-        (id, region, gm, gds, gmb, gss): (Value, MosRegion, Value, Value, Value, Value),
+        channel: (Value, MosRegion, Value, Value, Value, Value),
     ) -> (Value, MosRegion, Value, Value, Value, Value, Value) {
+        self.with_shunted_equivalent_current(
+            vgs,
+            vds,
+            vbs,
+            channel,
+            self.channel_gmin_conductance(),
+        )
+    }
+
+    /// [`Self::with_equivalent_current`] with `g` across the channel.
+    #[inline]
+    fn with_shunted_equivalent_current(
+        &self,
+        vgs: Value,
+        vds: Value,
+        vbs: Value,
+        (id, region, gm, gds, gmb, gss): (Value, MosRegion, Value, Value, Value, Value),
+        g: Value,
+    ) -> (Value, MosRegion, Value, Value, Value, Value, Value) {
+        // The channel GMIN carries `g * vds` with slope `g` from the drain and
+        // to the source in either mode, so the equivalent current is the
+        // channel's own.
+        let (id, gds, gss) = if g > 0.0 {
+            (id + g * vds, gds + g, gss + g)
+        } else {
+            (id, gds, gss)
+        };
         let id_eq = if self.polarity() * vds < 0.0 {
             id - gm * (vgs - vds) - gss * vds - gmb * (vbs - vds)
         } else {

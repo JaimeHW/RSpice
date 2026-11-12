@@ -8863,6 +8863,12 @@ impl Engine {
                         mosfet.nrd = 0.0;
                         mosfet.nrs = 0.0;
                     }
+                    // QSPICE and LTspice shunt a level 1-3 channel with GMIN;
+                    // ngspice and Xyce load GMIN on the junctions alone.
+                    mosfet.set_channel_gmin_enabled(!matches!(
+                        self.config.spice_dialect,
+                        SpiceDialect::Ngspice | SpiceDialect::Xyce
+                    ));
 
                     // Device temperature: instance TEMP is absolute (C),
                     // DTEMP offsets the circuit temperature; model TNOM

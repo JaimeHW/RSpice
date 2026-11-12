@@ -1171,8 +1171,9 @@ mod tests {
     }
 
     /// `stacks` copies of a 1 mA source into twenty diode-connected level-1
-    /// NMOS in series, whose direct Newton fails from cut-off devices and
-    /// whose GMIN walk finds the operating point (`dc_operating_point_aids`).
+    /// NMOS in series, whose direct Newton fails from cut-off devices in the
+    /// ngspice dialect and whose GMIN walk finds the operating point
+    /// (`dc_operating_point_aids`).
     fn nmos_stacks(stacks: usize) -> Netlist {
         let mut deck = String::from(
             "NMOS stacks\n.model nch nmos level=1 vto=0.7 kp=110u lambda=0.04 gamma=0.4 phi=0.7\n",
@@ -1202,7 +1203,8 @@ mod tests {
     fn a_failing_transient_startup_runs_the_direct_dc_newton_once() {
         for (stacks, standalone) in [(60, 0), (1, 1)] {
             STANDALONE_DIRECT_DC_SOLVES.with(|solves| solves.set(0));
-            let result = Engine::default()
+            let ngspice = SimulationConfig::default().with_spice_dialect(SpiceDialect::Ngspice);
+            let result = Engine::new(ngspice)
                 .run_tran(&nmos_stacks(stacks), 1e-9, 1e-9)
                 .expect("the startup aids find the operating point");
             let top = result.voltage_at(result.node_index_named("s0n0").expect("s0n0"), 0);

@@ -2,14 +2,16 @@
 //! fails, dynamic GMIN stepping goes first and source stepping only after it.
 
 use rspice_core::NoAbort;
-use rspice_core::engine::{ContinuationAid, Engine, SimulationConfig};
+use rspice_core::engine::{ContinuationAid, Engine, SimulationConfig, SpiceDialect};
 use rspice_core::netlist::Netlist;
 use rspice_core::notice::{EngineNotice, NoticeCollector};
 
 /// A 1 mA source into twenty diode-connected level-1 NMOS in series, every
 /// bulk on ground. Started from cut-off devices, the direct Newton reaches a
 /// singular system; ngspice-46 also fails its direct Newton here and finds
-/// the operating point by dynamic GMIN stepping.
+/// the operating point by dynamic GMIN stepping. QSPICE and LTspice shunt
+/// each channel with GMIN and solve it by the direct Newton, as the default
+/// dialect does, so the deck runs in the ngspice dialect.
 fn stack_deck() -> String {
     let mut deck = String::from(
         "twenty diode-connected NMOS fed by a current source\n\
@@ -58,7 +60,8 @@ const NGSPICE_STACK_VOLTAGES: [f64; 20] = [
 fn the_direct_newton_fails_and_gmin_stepping_finds_the_operating_point_before_source_stepping() {
     let netlist = Netlist::parse(&stack_deck()).expect("the deck parses");
 
-    let mut direct_only = SimulationConfig::default();
+    let ngspice = || SimulationConfig::default().with_spice_dialect(SpiceDialect::Ngspice);
+    let mut direct_only = ngspice();
     let aids = &mut direct_only.convergence_config;
     aids.gmin_stepping = false;
     aids.source_stepping = false;
@@ -73,7 +76,7 @@ fn the_direct_newton_fails_and_gmin_stepping_finds_the_operating_point_before_so
 
     let collector = NoticeCollector::new();
     let _installed = collector.install();
-    let result = Engine::new(SimulationConfig::default())
+    let result = Engine::new(ngspice())
         .run_dc_op_with_abort(&netlist, &NoAbort)
         .expect("the convergence aids find the operating point");
     for (node, &expected) in NGSPICE_STACK_VOLTAGES.iter().enumerate() {

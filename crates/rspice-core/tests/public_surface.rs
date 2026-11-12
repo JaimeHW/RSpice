@@ -707,8 +707,11 @@ const MAX_PUBLIC_ITEMS: usize = 5292;
 // with no slack. `Bjt::stamp_mna_with_correction` adds one: the transient
 // residual (`rspice-core` engine/transient/state.rs) stamps a promoted BJT's
 // Newton load and its direct correction from one evaluation. The census is
-// 1,691, with no slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 1691;
+// 1,691. `Mosfet::set_channel_gmin_enabled` adds one: the builder
+// (`rspice-core` engine/builder.rs) shunts a classic level 1-3 channel with
+// GMIN, drain to source, outside the ngspice and Xyce dialects. The census
+// is 1,692, with no slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 1692;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

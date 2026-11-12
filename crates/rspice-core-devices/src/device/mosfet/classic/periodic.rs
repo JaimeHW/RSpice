@@ -79,7 +79,8 @@ impl Mosfet {
     ) -> Result<(), String> {
         let rates = self.periodic_gate_rates(solution, rate_nodes)?;
         let (vgs, vds, vbs) = self.unlimited_branch_voltages_at(solution);
-        let (id, _, gm, gds, gmb, gss, ieq) = self.linearized_operating_point(vgs, vds, vbs);
+        let (id, _, gm, gds, gmb, gss, ieq) =
+            self.physical_linearized_operating_point(vgs, vds, vbs);
         let (gm, gds, gmb, gss, _) =
             Self::channel_stamp_terms(self.periodic_coupling_nodes(), gm, gds, gmb, gss, ieq);
         branch(
@@ -185,7 +186,7 @@ impl Mosfet {
     ) -> Result<([Value; 4], [Value; 4]), String> {
         let rates = self.periodic_gate_rates(solution, rate_nodes)?;
         let (vgs, vds, vbs) = self.unlimited_branch_voltages_at(solution);
-        let (id, _, _, _, _, _, _) = self.linearized_operating_point(vgs, vds, vbs);
+        let (id, _, _, _, _, _, _) = self.physical_linearized_operating_point(vgs, vds, vbs);
         let (ibs, _) = self.body_source_junction_physical_current_and_conductance(vbs);
         let (ibd, _) = self.body_drain_junction_physical_current_and_conductance(vds, vbs);
         let (qbs, _) = self.body_source_junction_charge_and_capacitance_at(vbs);

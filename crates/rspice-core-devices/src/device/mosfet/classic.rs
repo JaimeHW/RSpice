@@ -537,6 +537,9 @@ pub struct Mosfet {
     /// the MODEINITJCT seed and every iterate runs fetlim, limvds and
     /// pnjlim. Cleared, each load reads the solution as it stands.
     voltage_limiting: bool,
+    /// QSPICE's and LTspice's channel GMIN: the junction GMIN also shunts a
+    /// level 1, 2 or 3 channel, drain to source.
+    channel_gmin: bool,
 
     /// Pre-computed matrix indices for O(1) stamping
     pub(crate) indices: MosfetIndices,
@@ -804,6 +807,21 @@ impl Mosfet {
     #[doc(hidden)]
     pub fn set_voltage_limiting_enabled(&mut self, enabled: bool) {
         self.voltage_limiting = enabled;
+    }
+
+    /// Shunt the channel of a level 1, 2 or 3 instance with the junction
+    /// GMIN, drain to source, as QSPICE and LTspice load those levels. Over
+    /// its junction conductance an off NMOS shows `.options gmin` between
+    /// drain and source in both: QSPICE 9.96e-16, 9.999e-13 and 1.000e-9 S,
+    /// LTspice 9.96e-16, 1e-12 and 1e-9 S, at gmin 1e-15, 1e-12 and 1e-9.
+    /// QSPICE has no level 6 or 9 and LTspice shunts neither. ngspice
+    /// (mos1load.c) and Xyce load GMIN on the junctions alone.
+    #[doc(hidden)]
+    pub fn set_channel_gmin_enabled(&mut self, enabled: bool) {
+        if enabled != self.channel_gmin {
+            self.channel_gmin = enabled;
+            self.linearization_cache_valid = false;
+        }
     }
 
     /// Begin one operating-point load of a classic MOS population. Under
