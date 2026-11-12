@@ -1597,6 +1597,27 @@ fn bench(source: &str, plusargs: &[&str]) -> HdlTestbenchReport {
     )
 }
 
+/// What one testbench prints under the source start order, after checking
+/// that the reverse start order prints the same.
+fn both_orders(source: &str) -> String {
+    let run = |schedule| {
+        stdout(&testbench(
+            &[("tb.v", source)],
+            &HdlTestbenchOptions {
+                schedule,
+                ..HdlTestbenchOptions::default()
+            },
+        ))
+    };
+    let source_order = run(HdlSchedule::Source);
+    assert_eq!(
+        run(HdlSchedule::ReverseActive),
+        source_order,
+        "the reverse start order printed something else"
+    );
+    source_order
+}
+
 fn stdout(report: &HdlTestbenchReport) -> String {
     report
         .records

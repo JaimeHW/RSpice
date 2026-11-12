@@ -633,3 +633,61 @@ endmodule
     );
     assert!(!text.contains("rspice_reference"), "{text}");
 }
+
+#[test]
+fn a_shared_loop_index_does_not_wake_the_other_implicit_event_control() {
+    // ivtest br1000. IEEE 1364-2005 section 9.7.5 puts `i` in both lists, so
+    // each process would wake the other forever; Icarus leaves a loop index
+    // out of `@*` (its default `-gshared-loop-index`) and prints this.
+    let printed = both_orders(
+        "module loop;
+           reg [3:0] a, b, c, d;
+           integer i;
+           always @* begin
+             for (i = 0; i < 4; i = i + 1) begin
+               b[i] = a[i];
+               $display(\"process 1 : %0d %b\", i, b);
+             end
+           end
+           always @* begin
+             for (i = 0; i < 4; i = i + 1) begin
+               d[i] = c[i];
+               $display(\"process 2 : %0d %b\", i, d);
+             end
+           end
+           initial begin
+             #0 a = 5;
+             #0 c = 6;
+           end
+         endmodule\n",
+    );
+    assert_eq!(
+        printed,
+        "process 1 : 0 xxx1\nprocess 1 : 1 xx01\nprocess 1 : 2 x101\nprocess 1 : 3 0101\n\
+         process 2 : 0 xxx0\nprocess 2 : 1 xx10\nprocess 2 : 2 x110\nprocess 2 : 3 0110\n"
+    );
+}
+
+#[test]
+fn a_loop_index_read_outside_its_loop_stays_in_the_implicit_list() {
+    // Icarus leaves the index out only of the loop's own reads: `y = i`
+    // after the loop still wakes the block when `i` changes. The first write
+    // waits a tick, so the result does not hang on the time-zero start order.
+    // Icarus: `y=3 y=9`.
+    let printed = both_orders(
+        "module t;
+           integer i, j, y;
+           always @* begin
+             for (j = 0; j < 1; j = j + 1) y = i;
+             y = i;
+           end
+           initial begin
+             #1 i = 3;
+             #1 $write(\"y=%0d \", y);
+             i = 9;
+             #1 $display(\"y=%0d\", y);
+           end
+         endmodule\n",
+    );
+    assert_eq!(printed, "y=3 y=9\n");
+}

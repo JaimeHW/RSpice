@@ -333,10 +333,8 @@ impl ProcessLowerer<'_> {
                 children.extend(case.default.as_deref());
             }
             DigitalStatement::For(statement) => {
-                self.assignment_event_reads(&statement.init, &mut names);
-                self.assignment_event_reads(&statement.update, &mut names);
-                self.event_expression_reads(&statement.condition, &mut names);
-                children.push(statement.body.as_ref());
+                self.loop_reads(statement, locals, module);
+                return;
             }
             DigitalStatement::While(statement) => {
                 self.event_expression_reads(&statement.condition, &mut names);
@@ -388,6 +386,48 @@ impl ProcessLowerer<'_> {
         for child in children {
             self.scoped_reads(child, locals, module);
         }
+    }
+
+    /// A `for` loop's reads, less its control variable.
+    ///
+    /// IEEE 1364-2005 section 9.7.5 lists every read, the loop index among
+    /// them. Icarus Verilog leaves the index out of an implicit event control
+    /// (its default `-gshared-loop-index`), and only the reads the loop
+    /// statement itself makes: a read of the index elsewhere in the guarded
+    /// statement still counts. Without that, two `always @*` processes that
+    /// share one integer `i` as a loop index wake each other forever.
+    fn loop_reads(
+        &mut self,
+        statement: &crate::ast::DigitalFor,
+        locals: &mut BTreeSet<DigitalLocalId>,
+        module: &mut BTreeSet<String>,
+    ) {
+        let mut names = BTreeSet::new();
+        self.assignment_event_reads(&statement.init, &mut names);
+        self.assignment_event_reads(&statement.update, &mut names);
+        self.event_expression_reads(&statement.condition, &mut names);
+        let mut loop_locals = BTreeSet::new();
+        let mut loop_module = BTreeSet::new();
+        for name in names {
+            if let Some(local) = self.lookup_local(&name) {
+                loop_locals.insert(local);
+            } else {
+                loop_module.insert(name);
+            }
+        }
+        self.scoped_reads(&statement.body, &mut loop_locals, &mut loop_module);
+        if let DigitalLValue::Identifier { name, .. } = &statement.init.target {
+            match self.lookup_local(name) {
+                Some(local) => {
+                    loop_locals.remove(&local);
+                }
+                None => {
+                    loop_module.remove(name.as_str());
+                }
+            }
+        }
+        locals.extend(loop_locals);
+        module.extend(loop_module);
     }
 
     pub(super) fn scoped_read_dependencies(
