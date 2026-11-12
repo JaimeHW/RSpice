@@ -719,6 +719,10 @@ impl DigitalElaborator<'_> {
                 || instance.module.clone(),
                 |binding| binding.display.clone(),
             ),
+            cell: child_source
+                .binding
+                .as_ref()
+                .map_or_else(|| instance.module.clone(), |binding| binding.cell.clone()),
             signals,
             processes: child.digital.processes.clone(),
             routines: child.digital.routines.clone(),

@@ -896,12 +896,18 @@ fn lower_with_analog_variables(
         ..PlanCalls::default()
     };
     // A library binding's root is known by its `library.cell` (`%l`).
-    let root_definition = digital
-        .definition
-        .clone()
-        .unwrap_or_else(|| root_name.into());
-    let root_scope =
-        calls.add_module_scope(None, root_name.into(), root_definition, digital.time_scale);
+    let (root_definition, root_cell) = digital.definition.as_ref().map_or_else(
+        || (root_name.into(), root_name.into()),
+        |binding| (binding.display.clone(), binding.cell.clone()),
+    );
+    let root_scope = calls.add_module_scope(
+        None,
+        root_name.into(),
+        root_definition,
+        root_cell,
+        root_name.into(),
+        digital.time_scale,
+    );
     let frame_scope_frames: Vec<ScopeFrame> = digital
         .instances
         .iter()
@@ -910,7 +916,18 @@ fn lower_with_analog_variables(
             let parent = path
                 .rsplit_once('.')
                 .and_then(|(parent, _)| calls.module_scopes.get(parent).copied());
-            calls.add_module_scope(parent, path, instance.module.clone(), instance.time_scale)
+            let name = instance
+                .path
+                .rsplit_once('.')
+                .map_or(instance.path.clone(), |(_, name)| name.into());
+            calls.add_module_scope(
+                parent,
+                path,
+                instance.module.clone(),
+                instance.cell.clone(),
+                name,
+                instance.time_scale,
+            )
         })
         .collect();
     // Tasks and functions, numbered per scope before any body is lowered so

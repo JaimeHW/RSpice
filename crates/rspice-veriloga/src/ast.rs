@@ -96,6 +96,8 @@ pub struct ConfigDecl {
 pub(crate) struct ModuleBinding {
     /// `library.cell`, which `%l` prints (section 13.6).
     pub display: SmolStr,
+    /// The cell, the name the source declared the module by.
+    pub cell: SmolStr,
     /// A module a configuration's binding added, rather than one a source
     /// declared under this name.
     pub copy: bool,

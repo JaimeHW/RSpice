@@ -734,6 +734,7 @@ impl Binder {
                     if library != WORK_LIBRARY {
                         module.binding = Some(ModuleBinding {
                             display: format!("{library}.{}", module.name).into(),
+                            cell: module.name.clone(),
                             copy: false,
                         });
                     }
@@ -760,6 +761,7 @@ impl Binder {
             module.name = name;
             module.binding = Some(ModuleBinding {
                 display: format!("{}.{}", node.cell.0, node.cell.1).into(),
+                cell: node.cell.1.clone(),
                 copy: true,
             });
             Ok(module)

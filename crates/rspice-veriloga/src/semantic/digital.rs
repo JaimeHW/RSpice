@@ -34,10 +34,10 @@ use std::collections::HashMap;
 /// to report the unsupported construct.
 #[derive(Debug, Clone, Default)]
 pub struct AnalyzedDigital {
-    /// The library binding's `library.cell` this module stands for, which
-    /// `%l` prints at the root (IEEE 1364-2005 section 13.6); `None` outside
-    /// a library binding.
-    pub(crate) definition: Option<SmolStr>,
+    /// The library binding this module stands for: its `library.cell` is
+    /// what `%l` prints at the root (IEEE 1364-2005 section 13.6); `None`
+    /// outside a library binding.
+    pub(crate) definition: Option<crate::ast::ModuleBinding>,
     pub analog_events: Vec<super::AnalogEventBinding>,
     pub event_assigned_variables: Vec<SmolStr>,
     pub immutable_analog_variables: Vec<SmolStr>,
@@ -622,6 +622,9 @@ pub struct ElaboratedDigitalInstance {
     pub path: SmolStr,
     /// The instantiated module's name, for diagnostics.
     pub module: SmolStr,
+    /// The name the source declared the instantiated module by: a library
+    /// binding's cell, otherwise [`Self::module`].
+    pub cell: SmolStr,
     /// The instance's own nets and variables, in declaration order.
     pub signals: Vec<ElaboratedDigitalSignal>,
     /// The instance's processes, in declaration order.
@@ -941,10 +944,7 @@ impl SemanticAnalyzer {
             // module it selects.
             instances: Vec::new(),
             constants: self.digital_selector_constants.clone(),
-            definition: module
-                .binding
-                .as_ref()
-                .map(|binding| binding.display.clone()),
+            definition: module.binding.clone(),
         };
         let ranges = module
             .digital_nets

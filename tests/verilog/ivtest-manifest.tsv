@@ -241,7 +241,7 @@ br_gh25a	vlg	ce	L3	pass	language error: Parse error: Unexpected token: 'function
 br_gh25b	vlg	ce	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
 br_gh26	vlg	ce	L1	pass	language error: Semantic error: Port 'b' has no direction declaration; IEEE 1364-2005 section 12.3.3 declares each port as input, output or inout
 br_gh277a	vlg	passed	L4	pass	PASSED
-br_gh28	vlg	passed	L1	refused:module-item	Parse error: Unsupported module item: \test_str="hello"
+br_gh28	vlg	passed	L1	pass	PASSED
 br_gh283a	vlg	passed	L1	pass	PASSED
 br_gh283b	vlg	passed	L1	pass	PASSED
 br_gh283c	vlg	passed	L1	pass	PASSED

@@ -831,10 +831,19 @@ fn declared_modules(
             .map_err(|error| DigitalRunError::Compile {
                 detail: error.to_string(),
             })?;
+    // An escaped name is the name without its backslash (IEEE 1364-2005
+    // section 3.7.1), which is how the compiler declares the module.
+    let name = |token: &rspice_veriloga::lexer::Token| -> Option<String> {
+        let text = token.text.as_deref()?;
+        Some(match token.kind {
+            TokenKind::EscapedIdentifier => text.strip_prefix('\\').unwrap_or(text).to_owned(),
+            _ => text.to_owned(),
+        })
+    };
     let declared: Vec<String> = tokens
         .windows(2)
         .filter(|pair| matches!(pair[0].kind, TokenKind::Module | TokenKind::Macromodule))
-        .filter_map(|pair| pair[1].text.clone())
+        .filter_map(|pair| name(&pair[1]))
         .collect();
     // An instantiation is a declared module's name followed by an instance
     // name or a parameter override, anywhere but after `module` itself. The
@@ -845,12 +854,14 @@ fn declared_modules(
         .windows(3)
         .filter(|triple| {
             !matches!(triple[0].kind, TokenKind::Module | TokenKind::Macromodule)
-                && triple[1].kind == TokenKind::Identifier
+                && matches!(
+                    triple[1].kind,
+                    TokenKind::Identifier | TokenKind::EscapedIdentifier
+                )
                 && matches!(triple[2].kind, TokenKind::Identifier | TokenKind::Hash)
         })
-        .filter_map(|triple| triple[1].text.as_deref())
-        .filter(|name| named.contains(name))
-        .map(str::to_owned)
+        .filter_map(|triple| name(&triple[1]))
+        .filter(|name| named.contains(name.as_str()))
         .collect();
     Ok((declared, instantiated))
 }

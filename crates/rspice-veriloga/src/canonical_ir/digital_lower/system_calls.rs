@@ -28,6 +28,11 @@ pub(super) struct ScopeFrame {
     pub id: DigitalScopeId,
     pub path: SmolStr,
     pub module: SmolStr,
+    /// The name the source declares the module by: a library binding's
+    /// `library.cell` without its library, otherwise the module's own name.
+    pub cell: SmolStr,
+    /// The scope's own name: the root module's, an instance's or a block's.
+    pub name: SmolStr,
     pub time_scale: crate::time_scale::ModuleTimeScale,
 }
 
@@ -81,6 +86,8 @@ impl PlanCalls {
         parent: Option<DigitalScopeId>,
         path: SmolStr,
         module: SmolStr,
+        cell: SmolStr,
+        name: SmolStr,
         time_scale: crate::time_scale::ModuleTimeScale,
     ) -> ScopeFrame {
         let id = DigitalScopeId(self.scopes.len() as u32);
@@ -97,6 +104,8 @@ impl PlanCalls {
             id,
             path,
             module,
+            cell,
+            name,
             time_scale,
         }
     }
@@ -187,6 +196,8 @@ impl ProcessLowerer<'_> {
             id,
             path,
             module: parent.module,
+            cell: parent.cell,
+            name: name.clone(),
             time_scale: parent.time_scale,
         });
         Some(id)
@@ -419,15 +430,12 @@ impl ProcessLowerer<'_> {
             .first()
             .cloned()
             .unwrap_or_else(|| scope.clone());
-        // A library binding's module is known by `library.cell`; its source
-        // names the cell.
-        let cell = module
-            .module
-            .rsplit_once('.')
-            .map_or(module.module.as_str(), |(_, cell)| cell);
+        // A library binding's module is known by `library.cell`, and its
+        // source names the cell. Only a binding's name drops a prefix: a
+        // module declared `\a.u ` is named `a.u`, and its child `u` is not it.
         let found = if name == module.module.as_str()
-            || name == cell
-            || module.path.rsplit('.').next() == Some(name)
+            || name == module.cell.as_str()
+            || name == module.name.as_str()
         {
             // The module's own name (`$printtimescale(top)` inside `top`).
             Some(module.id)

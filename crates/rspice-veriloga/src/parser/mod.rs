@@ -1157,7 +1157,9 @@ impl<'a> Parser<'a> {
                 }
                 module.digital_variables.push(variable);
             }
-            TokenKind::Identifier => {
+            // An escaped name starts an instance of a module declared with
+            // one (`\a.u  m();`, IEEE 1364-2005 section 3.7.1).
+            TokenKind::Identifier | TokenKind::EscapedIdentifier => {
                 self.parse_identifier_module_item(module)?;
             }
             TokenKind::Ground => {

@@ -82,3 +82,31 @@ endmodule
          4 w=41\n"
     );
 }
+
+#[test]
+fn a_scope_named_through_an_escaped_module_name_is_the_child() {
+    // `\a.u ` is named `a.u`; inside it, `u` is the child instance, not the
+    // module with the prefix taken off. Icarus prints the child's time scale.
+    let printed = both_orders(
+        "`timescale 1us/1ns
+         module top;
+           \\a.u  m();
+         endmodule
+         `timescale 10us/1ns
+         module \\a.u ;
+           child u();
+           initial begin
+             $printtimescale(u);
+             $printtimescale;
+           end
+         endmodule
+         `timescale 1ns/1ps
+         module child;
+           reg x;
+         endmodule\n",
+    );
+    assert_eq!(
+        printed,
+        "Time scale of (top.m.u) is 1ns / 1ps\nTime scale of (top.m) is 10us / 1ns\n"
+    );
+}

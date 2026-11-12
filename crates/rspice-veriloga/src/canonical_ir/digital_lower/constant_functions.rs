@@ -244,6 +244,8 @@ pub(super) fn lower(
         id: DigitalScopeId(0),
         path: SmolStr::default(),
         module: SmolStr::default(),
+        cell: SmolStr::default(),
+        name: SmolStr::default(),
         time_scale,
     };
     let mut routines = Vec::with_capacity(analyzed.len());
