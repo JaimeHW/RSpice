@@ -76,7 +76,9 @@ impl CommandSet for DesignCommand {
     /// reader; Design rule setup needs only the project, which the registry
     /// already asks for. Rename names what it can act on; Replace instance and
     /// Create hierarchy name the first thing missing: the schematic, an
-    /// editable one, then something in it to act on. A placement needs an
+    /// editable one, then something in it to act on. Find and replace needs
+    /// an editable schematic or testbench in front of the reader and names
+    /// neither. A placement needs an
     /// editable schematic or testbench in front of the reader.
     ///
     /// Every library verb needs the instrument open, because they all act on
@@ -132,6 +134,8 @@ impl CommandSet for DesignCommand {
                 Some("the active schematic is read-only")
             }
             Self::ReplaceInstance | Self::CreateHierarchy => Some("select an editable object"),
+            Self::FindReplace => (!schematic || reads.model.schematic_edit_read_only())
+                .then_some("command is unavailable in this context"),
             _ if self.places() && !schematic => Some("open an editable schematic or testbench"),
             _ if self.places() && reads.model.schematic_edit_read_only() => {
                 Some("the active schematic is read-only")
@@ -297,6 +301,15 @@ impl CommandSet for DesignCommand {
             ),
             Self::CreateHierarchy => {
                 open_create_hierarchy_dialog(&mut cx.state.create_hierarchy, cx.model, cx.wb);
+            }
+            // A dialog that holds the workbench keeps the form shut. The
+            // matches are listed in the Navigator, so it comes forward.
+            Self::FindReplace => {
+                if !cx.dialog_modal_open() {
+                    cx.state.find_replace.open = true;
+                    cx.wb.navigator_visible = true;
+                    cx.state.show_navigator();
+                }
             }
             Self::PlaceInstance => {
                 cx.wb.activate(Workspace::Design);

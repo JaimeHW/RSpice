@@ -19,7 +19,7 @@ use crate::schematic::view::sheet_visibility::object_is_on_active_sheet;
 use crate::state::CellViewRef;
 use crate::ui::widgets::{CommandForm, DialogChoice};
 use crate::workbench::app::actions::workspace::sync_active_schematic;
-use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::app_state::Model;
 use crate::workbench::state::WorkbenchSession;
 
 const TITLE: &str = "Find and replace";
@@ -83,16 +83,6 @@ pub(crate) struct DocumentMatches {
     pub(crate) key: String,
     pub(crate) path: String,
     pub(crate) matches: Vec<FindMatch>,
-}
-
-pub(crate) fn open_find_replace(state: &mut AppState) {
-    if state.dialog_modal_open() {
-        return;
-    }
-    state.design.find_replace.open = true;
-    // The matches are listed in the Navigator, so it comes forward.
-    state.workbench.navigator_visible = true;
-    state.design.show_navigator();
 }
 
 /// Every text the form's query changes, cell view by cell view, the active
@@ -342,6 +332,7 @@ mod tests {
         Component, ComponentType, LibraryCellInstance, NetLabel, Point, SchematicState,
     };
     use crate::workbench::app::RSpiceApp;
+    use crate::workbench::app_state::AppState;
     use crate::workbench::commands::vocabulary::Command;
 
     /// The matches, over what the form reads.
@@ -378,7 +369,7 @@ mod tests {
         ctx.enable_accesskit();
         let mut app = RSpiceApp::test_instance();
         app.state.open_project_session();
-        open_find_replace(&mut app.state);
+        app.state.design.find_replace.open = true;
         let mut render = || {
             ctx.run_ui(
                 egui::RawInput {
@@ -469,7 +460,7 @@ mod tests {
     #[test]
     fn a_pristine_form_states_a_reason_not_a_refusal() {
         let mut state = AppState::default();
-        open_find_replace(&mut state);
+        state.design.find_replace.open = true;
         let found = find_replace_matches(&state);
         assert!(found.is_err(), "the query itself refuses an empty find");
         assert_eq!(

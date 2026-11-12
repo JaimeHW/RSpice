@@ -287,7 +287,7 @@ const EDIT_MENU: &[MenuEntry] = &[
             command(Command::ObjectProperties).access('O'),
             Separator,
             command(Command::FindInDesign).access('F'),
-            command(Command::FindReplace).access('I'),
+            design(DesignCommand::FindReplace).access('I'),
         ],
     ),
     // On macOS, Settings is the RSpice menu's.

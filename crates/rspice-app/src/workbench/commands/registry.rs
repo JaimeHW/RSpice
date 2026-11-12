@@ -81,11 +81,6 @@ const OBJECT_PROPERTIES: &[ShortcutBinding] =
     &[primary(chord(Key::Q, false, false, false, "Q"), ALL)];
 const FIND_DESIGN: &[ShortcutBinding] =
     &[primary(chord(Key::F, true, false, false, "Ctrl+F"), ALL)];
-// A browser keeps Ctrl+H for its history, so there the menu reaches it.
-const FIND_REPLACE: &[ShortcutBinding] = &[primary(
-    chord(Key::H, true, false, false, "Ctrl+H"),
-    DESKTOP,
-)];
 // Virtuoso and ADS both repeat the last command on a bare key; `.` was
 // bound nowhere.
 const REPEAT_LAST_COMMAND: &[ShortcutBinding] =
@@ -243,7 +238,6 @@ impl Command {
                 | Self::SetStandardValueSeries(_)
                 | Self::FindInDesign
                 | Self::CheckDesign
-                | Self::FindReplace
                 | Self::ConfigurationSets
                 | Self::DescendHierarchyDirect
         )
@@ -256,7 +250,6 @@ impl Command {
                 | Self::CloseActiveDocument
                 | Self::CloseOtherDocuments
                 | Self::CloseAllDocuments
-                | Self::FindReplace
                 | Self::ConfigurationSets
         )
     }
@@ -308,7 +301,6 @@ impl Command {
             | Self::ZoomOneToOne
             | Self::ZoomPrevious => ShortcutContext::EditContext,
             Self::FindInDesign
-            | Self::FindReplace
             | Self::MoveSelection
             | Self::StretchSelection
             | Self::ArraySelection
@@ -372,7 +364,6 @@ impl Command {
             Self::SelectAll => SELECT_ALL,
             Self::ObjectProperties => OBJECT_PROPERTIES,
             Self::FindInDesign => FIND_DESIGN,
-            Self::FindReplace => FIND_REPLACE,
             Self::RepeatLastCommand => REPEAT_LAST_COMMAND,
             Self::ZoomIn => ZOOM_IN,
             Self::ZoomOut => ZOOM_OUT,

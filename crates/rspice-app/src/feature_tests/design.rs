@@ -160,7 +160,7 @@ fn rename_opens_and_draws_in_the_frame() {
 #[test]
 fn find_and_replace_opens_and_draws_in_the_frame() {
     let mut app = design_app();
-    Command::FindReplace.execute(&mut app);
+    app.execute_command_key(DesignCommand::FindReplace.key());
     assert!(draws_dialog(&mut app, "Find and replace"));
     assert!(app.state.design.find_replace.open);
 }
@@ -171,10 +171,10 @@ fn find_and_replace_opens_and_draws_in_the_frame() {
 fn find_and_replace_waits_for_an_open_dialog() {
     let mut app = design_app();
     app.state.shell.about = true;
-    app.execute_command_key(Command::FindReplace.key());
+    app.execute_command_key(DesignCommand::FindReplace.key());
     assert!(!app.state.design.find_replace.open);
     app.state.shell.about = false;
-    app.execute_command_key(Command::FindReplace.key());
+    app.execute_command_key(DesignCommand::FindReplace.key());
     assert!(app.state.design.find_replace.open);
 }
 

@@ -190,7 +190,7 @@ pub(crate) use actions::property_edit::{
 pub(crate) use actions::stimulus_placement::arm_placement_from_definition;
 
 pub(crate) use actions::workspace::copy_active_schematic_selection;
-pub(crate) use dialogs::find_replace::{find_replace_matches, open_find_replace};
+pub(crate) use dialogs::find_replace::find_replace_matches;
 pub(crate) use dialogs::placement::net_label::{
     open_net_label_placement, place_sequenced_net_label,
 };

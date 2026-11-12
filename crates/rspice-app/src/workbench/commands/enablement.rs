@@ -153,7 +153,6 @@ impl Command {
             Self::HighlightNet => {
                 active_schematic_editor(app) && crate::schematic::view::selected_net(state).is_ok()
             }
-            Self::FindReplace => active_schematic_editor(app) && !state.schematic_edit_read_only(),
             Self::RepeatLastCommand => {
                 active_schematic_editor(app)
                     && vocabulary::last_repeatable(

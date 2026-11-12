@@ -58,7 +58,6 @@ pub enum Command {
     SelectOfKind(SchematicObjectKind),
     ObjectProperties,
     FindInDesign,
-    FindReplace,
     /// Run the last placement or editing command again, as it last ran.
     RepeatLastCommand,
     ZoomIn,
@@ -272,7 +271,6 @@ impl Command {
             }
             Self::ObjectProperties => spec("object-properties", "Properties…", "Edit"),
             Self::FindInDesign => spec("find-design", "Find…", "Edit"),
-            Self::FindReplace => spec("find-replace", "Find and replace…", "Edit"),
             Self::RepeatLastCommand => spec("repeat-last-command", "Repeat last command", "Edit"),
             Self::ZoomIn => spec("zoom-in", "Zoom in", "View"),
             Self::ZoomOut => spec("zoom-out", "Zoom out", "View"),
@@ -534,7 +532,6 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::SelectOfKind(SchematicObjectKind::Shapes),
     Command::ObjectProperties,
     Command::FindInDesign,
-    Command::FindReplace,
     Command::RepeatLastCommand,
     Command::OpenWorkspace(Workspace::Project),
     Command::OpenWorkspace(Workspace::Design),
@@ -693,7 +690,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     DesignCommand::RenameSelection.key(),
     Command::ObjectProperties.key(),
     Command::FindInDesign.key(),
-    Command::FindReplace.key(),
+    DesignCommand::FindReplace.key(),
     Command::RepeatLastCommand.key(),
     SettingsCommand::Preferences.key(),
     Command::OpenWorkspace(Workspace::Project).key(),

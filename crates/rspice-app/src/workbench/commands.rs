@@ -87,7 +87,6 @@ pub(crate) const fn command_edits_schematic(command: Command) -> bool {
             | Command::Paste
             | Command::Duplicate
             | Command::Delete
-            | Command::FindReplace
             | Command::MoveSelection
             | Command::StretchSelection
             | Command::ArraySelection
@@ -291,7 +290,6 @@ impl Command {
             | Self::NextViolation
             | Self::PreviousViolation
             | Self::ObjectProperties
-            | Self::FindReplace
             | Self::AnnotateOperatingPoint
             | Self::AnnotateTransientVoltages => CommandOwner::Design,
         }
@@ -558,7 +556,6 @@ impl Command {
                     Err(error) => error.to_string(),
                 });
             }
-            Self::FindReplace => crate::workbench::app::open_find_replace(&mut app.state),
             Self::RepeatLastCommand => match vocabulary::last_repeatable(
                 app.state.workbench.last_repeatable_command.as_deref(),
             ) {

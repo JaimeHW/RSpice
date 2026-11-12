@@ -52,6 +52,8 @@ pub(crate) enum DesignCommand {
     ReplaceInstance,
     /// Open Create hierarchy over the selection.
     CreateHierarchy,
+    /// Open Find and replace over the schematic.
+    FindReplace,
     /// Pick an instance from the component shelf.
     PlaceInstance,
     /// Arm the wire tool.
@@ -148,6 +150,11 @@ const RENAME_SELECTION: &[ShortcutBinding] = &[primary(
     chord(Key::F2, false, false, false, "F2"),
     DESKTOP_BROWSER,
 )];
+// A browser keeps Ctrl+H for its history, so there the menu reaches it.
+const FIND_REPLACE: &[ShortcutBinding] = &[primary(
+    chord(Key::H, true, false, false, "Ctrl+H"),
+    DESKTOP,
+)];
 const PLACE_INSTANCE: &[ShortcutBinding] = &[primary(
     chord(Key::I, false, false, true, "Shift+I"),
     EVERYWHERE,
@@ -197,7 +204,7 @@ const CYCLE_GRID: &[ShortcutBinding] =
 
 impl DesignCommand {
     /// Every command the registry lists, in the feature's own order.
-    pub(crate) const ALL: [Self; 42] = [
+    pub(crate) const ALL: [Self; 43] = [
         Self::NewStimulusDefinition,
         Self::DuplicateStimulusDefinition,
         Self::DeleteStimulusDefinition,
@@ -216,6 +223,7 @@ impl DesignCommand {
         Self::RenameSelection,
         Self::ReplaceInstance,
         Self::CreateHierarchy,
+        Self::FindReplace,
         Self::PlaceInstance,
         Self::PlaceWire,
         Self::PlaceBus,
@@ -263,6 +271,7 @@ impl DesignCommand {
             Self::RenameSelection => CommandKey::new("rename-selection"),
             Self::ReplaceInstance => CommandKey::new("replace-instance"),
             Self::CreateHierarchy => CommandKey::new("create-hierarchy"),
+            Self::FindReplace => CommandKey::new("find-replace"),
             Self::PlaceInstance => CommandKey::new("place-instance"),
             Self::PlaceWire => CommandKey::new("place-wire"),
             Self::PlaceBus => CommandKey::new("place-bus"),
@@ -325,9 +334,11 @@ impl DesignCommand {
     /// needs an open project and keeps the global shortcut context; only
     /// Apply has a chord of its own. The project dialogs also wait for a
     /// project operation, and every schematic dialog but the object table is
-    /// a chord of the design workspace. Rename, Replace instance and Create
-    /// hierarchy edit the drawing, so each commits the inspector's pending
-    /// edit and is refused on a read-only schematic; only Rename has a chord.
+    /// a chord of the design workspace. Rename, Replace instance, Create
+    /// hierarchy and Find and replace edit the drawing, so each commits the
+    /// inspector's pending edit and is refused on a read-only schematic;
+    /// Rename and Find and replace have chords. Find and replace also needs
+    /// an open project and waits for a project operation.
     /// Every placement but the probe edits the drawing and is one Repeat
     /// last command runs again. The select tool, the grid and Fit content
     /// change only what the canvas shows, so none needs a project.
@@ -410,6 +421,13 @@ impl DesignCommand {
                 project_edits,
                 canvas,
                 NONE,
+            ),
+            Self::FindReplace => (
+                "Find and replace\u{2026}",
+                "Edit",
+                project_edits,
+                canvas,
+                FIND_REPLACE,
             ),
             Self::PlaceInstance => ("Place instance…", "Design", place, canvas, PLACE_INSTANCE),
             Self::PlaceWire => ("Draw wire", "Design", place, canvas, PLACE_WIRE),
