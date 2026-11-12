@@ -4846,6 +4846,12 @@ impl SemanticAnalyzer {
                 enable,
                 span,
             } => {
+                // `@(absdelta(...))` parses as a bare event expression here.
+                if let Expression::Call(call) = signal
+                    && call.name == "absdelta"
+                {
+                    return Err(absdelta_outside_digital_event(call.span, true));
+                }
                 let signal = self.lower_expression_with_side_effects(signal, module, sink)?;
                 let direction = direction
                     .as_deref()
@@ -8005,6 +8011,10 @@ impl SemanticAnalyzer {
                     }
                     self.inline_function(&call.name, &call.args, call.span)?
                 } else {
+                    if call.name == "absdelta" && !self.digital_function_names.contains(&call.name)
+                    {
+                        return Err(absdelta_outside_digital_event(call.span, false));
+                    }
                     if !crate::expr_converter::LOWERED_CALL_NAMES.contains(&call.name.as_str())
                         && !self.digital_function_names.contains(&call.name)
                     {
@@ -11865,6 +11875,32 @@ fn connect_rules_span(source: &SourceFile) -> Span {
 
 fn is_global_ground_name(name: &str) -> bool {
     name == "0"
+}
+
+/// `absdelta` outside the event control of a digital process.
+///
+/// VAMS-2023 5.10.3.4 allows the function only in an `initial` or `always`
+/// block: it observes its expression without forcing analog timesteps and
+/// dates an event by interpolating between two solutions, where an analog
+/// block, which runs only at solutions, has no statement to execute. The
+/// grammar of A.6.5 lists it among the analog event functions, so the parse
+/// succeeds and the rule is enforced here, by name, rather than reported as an
+/// unknown function.
+fn absdelta_outside_digital_event(span: Span, event: bool) -> CompileError {
+    let site = if event {
+        "an analog block's event control"
+    } else {
+        "an analog expression"
+    };
+    CompileError::Semantic(SemanticError::new(
+        SemanticErrorKind::InvalidAnalogOperator(format!(
+            "absdelta in {site}: VAMS-2023 5.10.3.4 allows absdelta only as the event of an \
+             initial or always block, because it dates events between analog solutions \
+             without forcing a timestep; move the event into an always block, or use cross, \
+             above or timer in the analog block"
+        )),
+        span,
+    ))
 }
 
 fn is_zi_operator_name(name: &str) -> bool {

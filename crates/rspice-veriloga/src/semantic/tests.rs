@@ -403,6 +403,52 @@ fn event_operators_remain_legal_in_event_expressions_but_not_in_event_bodies() {
 }
 
 #[test]
+fn absdelta_outside_a_digital_event_control_is_refused_by_its_rule() {
+    for (body, site) in [
+        (
+            "@(absdelta(V(p, n), 0.05)) y = 1.0;",
+            "absdelta in an analog block's event control",
+        ),
+        (
+            "@(cross(V(p, n), 1) or absdelta(V(p, n), 0.05, 1n, 1m, 1)) y = 1.0;",
+            "absdelta in an analog block's event control",
+        ),
+        (
+            "y = absdelta(V(p, n), 0.05);",
+            "absdelta in an analog expression",
+        ),
+    ] {
+        let source = module_src(&format!(
+            "real y;\nanalog begin\n{body}\nI(p, n) <+ y;\nend"
+        ));
+        let Err(CompileError::Semantic(error)) = analyze(&source) else {
+            panic!("{body}: absdelta in an analog block passed semantic analysis");
+        };
+        assert_eq!(
+            error.kind.code(),
+            "VA-SEM-INVALID-ANALOG-OPERATOR",
+            "{body}"
+        );
+        let message = error.to_string();
+        assert!(message.contains(site), "{body}: {message}");
+        assert!(
+            message.contains(
+                "VAMS-2023 5.10.3.4 allows absdelta only as the event of an initial or always block"
+            ),
+            "{body}: {message}"
+        );
+        let at = source.find("absdelta").expect("source names absdelta");
+        assert_eq!(error.span.start as usize, at, "{body}: {message}");
+    }
+
+    // The legal form, a digital process's event, still analyzes.
+    analyze(&module_src(
+        "real s;\nalways @(absdelta(V(p, n), 0.05)) s = V(p, n);\nanalog I(p, n) <+ 0;",
+    ))
+    .expect("absdelta is the event of an always block");
+}
+
+#[test]
 fn event_control_records_only_body_writes_and_covers_dynamic_arrays() {
     let module = analyze_one(&module_src(
         r#"
