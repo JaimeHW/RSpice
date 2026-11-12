@@ -714,9 +714,10 @@ pub(super) fn parse_line(
     context: ParseLineContext<'_>,
 ) -> Result<(), ParseWithAbortError> {
     if context.parameter_direction.is_none()
-        && let Some(resistor) = parse_literal_resistor(line, params)
+        && let Some(element) =
+            parse_literal_resistor(line, params).or_else(|| parse_literal_diode(line))
     {
-        elements.push(resistor);
+        elements.push(element);
         return Ok(());
     }
     let cancellation = NumericParseAbort::new(context.abort);

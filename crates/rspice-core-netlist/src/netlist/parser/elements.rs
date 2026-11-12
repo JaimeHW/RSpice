@@ -64,6 +64,60 @@ pub(super) fn parse_literal_resistor(line: &str, params: &ParamContext) -> Optio
     })
 }
 
+/// Reads `Dname node node model` straight from its fields when nothing
+/// follows the model, the form every diode of a generated deck takes. Any
+/// other spelling returns `None` for [`parse_diode`] to read through the
+/// token stream.
+pub(super) fn parse_literal_diode(line: &str) -> Option<Element> {
+    use crate::netlist::lexer::{is_xyce_device_name, single_token};
+
+    if !line.starts_with(['D', 'd']) {
+        return None;
+    }
+    let mut fields = line.split([' ', '\t']).filter(|field| !field.is_empty());
+    let (name, anode, cathode, model) = (
+        fields.next()?,
+        fields.next()?,
+        fields.next()?,
+        fields.next()?,
+    );
+    let is_plain = |field: &str| {
+        field
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+    };
+    if fields.next().is_some() || ![name, anode, cathode, model].into_iter().all(is_plain) {
+        return None;
+    }
+    let TokenKind::Ident(name) = single_token(name)? else {
+        return None;
+    };
+    if !is_xyce_device_name(&name) {
+        return None;
+    }
+    let node = |field: &str| match single_token(field)? {
+        TokenKind::Ident(node) => Some(node),
+        TokenKind::Number(_) if field.bytes().all(|byte| byte.is_ascii_digit()) => {
+            Some(field.to_string())
+        }
+        _ => None,
+    };
+    let nodes = vec![node(anode)?, node(cathode)?];
+    let TokenKind::Ident(model) = single_token(model)? else {
+        return None;
+    };
+    Some(Element {
+        name,
+        kind: ElementKind::Diode {
+            model,
+            instance_params: Vec::new(),
+            deferred_params: Vec::new(),
+        },
+        nodes,
+        provenance: crate::netlist::ElementProvenance::Authored,
+    })
+}
+
 pub(super) fn parse_resistor(
     stream: &mut TokenStream,
     line_num: usize,
@@ -10843,6 +10897,42 @@ mod literal_resistor_tests {
             "R1 a b (1k)",
         ] {
             assert!(parse_literal_resistor(card, &params).is_none(), "{card}");
+        }
+    }
+
+    #[test]
+    fn a_plain_diode_card_reads_as_the_token_parser_reads_it() {
+        let params = ParamContext::default();
+        for card in [
+            "D1 a b dmod",
+            "d_2 0 12 DX",
+            "DX N1 007 d1n4148",
+            "D3\ta  b dmod",
+            "D4 2b c m_1",
+            "D5 a b 1k",
+        ] {
+            let read = parse_literal_diode(card).expect("plain card");
+            let mut stream = TokenStream::new(tokenize(card).expect("card tokenizes"));
+            let mut elements = Vec::new();
+            parse_diode(&mut stream, 1, &mut elements, &params, false).expect("card parses");
+            let parsed = elements.pop().expect("one diode");
+            assert_eq!(format!("{read:?}"), format!("{parsed:?}"), "{card}");
+        }
+    }
+
+    #[test]
+    fn any_other_diode_card_is_left_to_the_token_parser() {
+        for card in [
+            "D1 a b",
+            "D1 a b dmod 2",
+            "D1 a b dmod area=2",
+            "D1 a b dmod off",
+            "D1 a b dmod;note",
+            "D1 a b {m}",
+            "R1 a b dmod",
+            " D1 a b dmod",
+        ] {
+            assert!(parse_literal_diode(card).is_none(), "{card}");
         }
     }
 }
