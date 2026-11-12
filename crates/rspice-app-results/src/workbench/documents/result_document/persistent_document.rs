@@ -949,7 +949,8 @@ pub fn project_pane_presentation(
         .active_analysis()
         .ok_or_else(|| "The pane's retained analysis is not active.".to_owned())?;
     let analysis_key = super::AnalysisPresentationKey::new(run.dataset_id, analysis);
-    let visibility = analysis
+    let lanes = lanes::EventNames::of(analysis);
+    let mut visibility = analysis
         .waveforms
         .iter()
         .filter_map(|waveform| {
@@ -959,6 +960,30 @@ pub fn project_pane_presentation(
                 .map(|trace| (waveform.name.clone(), waveform.visible, trace.visible))
         })
         .collect::<Vec<_>>();
+    // A net the run keeps only as history is plotted while the document
+    // lists it, and off until the reader plots it. A pane that lists no lanes
+    // yet keeps the reader's choice, so a view saved from the strip keeps the
+    // nets on it.
+    if let Some(names) = lanes.as_ref() {
+        let listed = state
+            .model
+            .workspace
+            .content
+            .visualization_document(pane.document_id)
+            .and_then(|document| lanes::plotted_history_nets(document, pane.id, names));
+        for name in names.history_only() {
+            let visible = listed.as_ref().map_or_else(
+                || {
+                    state.results.session.waveform_visibility(
+                        &super::SourceWaveformPresentationKey::new(analysis_key, name.clone()),
+                        false,
+                    )
+                },
+                |listed| listed.contains(name),
+            );
+            visibility.push((name.clone(), false, visible));
+        }
+    }
     state
         .results
         .session
@@ -966,6 +991,24 @@ pub fn project_pane_presentation(
     state
         .results
         .project_waveform_visibility(analysis_key, visibility);
+    if let Some(names) = lanes
+        && let Some(document) = state
+            .model
+            .workspace
+            .content
+            .visualization_document(pane.document_id)
+    {
+        let session = &mut state.results.session;
+        let layout = lanes::projected_layout(
+            document,
+            pane.id,
+            &names,
+            session.event_lanes.get(&analysis_key),
+        );
+        if session.event_lanes.get(&analysis_key) != Some(&layout) {
+            session.event_lanes.insert(analysis_key, layout);
+        }
+    }
 
     let axis_range = |orientation| {
         pane.axes
@@ -1130,6 +1173,37 @@ pub fn capture_pane_presentation(
     {
         edits.extend(cursor_edits);
     }
+    // The lanes as drawn this frame, kept as the document's.
+    if let Some(run) = state.model.simulation.active_run()
+        && let Some(analysis) = state.model.simulation.active_analysis()
+        && let Some(names) = lanes::EventNames::of(analysis)
+        && let Some(layout) =
+            state
+                .results
+                .session
+                .event_lanes
+                .get(&super::AnalysisPresentationKey::new(
+                    run.dataset_id,
+                    analysis,
+                ))
+    {
+        let analysis_key = super::AnalysisPresentationKey::new(run.dataset_id, analysis);
+        let session = &state.results.session;
+        let plotted: Vec<&str> = names
+            .history_only()
+            .iter()
+            .filter(|name| {
+                session.waveform_visibility(
+                    &super::SourceWaveformPresentationKey::new(analysis_key, (*name).clone()),
+                    false,
+                )
+            })
+            .map(String::as_str)
+            .collect();
+        edits.extend(lanes::lane_edits(
+            document, pane.id, &names, layout, &plotted,
+        ));
+    }
     if edits.is_empty() {
         return;
     }
@@ -1277,6 +1351,8 @@ pub(super) fn renderer_supports_analysis(id: &str, analysis: &AnalysisResult) ->
         _ => false,
     }
 }
+
+mod lanes;
 
 #[cfg(test)]
 pub(crate) mod tests;

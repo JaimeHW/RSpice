@@ -10,7 +10,7 @@ use crate::state::{AnalysisResultPayload, SimulationRun};
 use egui::epaint::ClippedShape;
 use rspice_app_runs::simulation::controller::test_execution::run_manual_batch;
 use rspice_results::events::projection::bus_word;
-use rspice_results::visualization_document::BusRadix;
+use rspice_results::visualization_document::{BusRadix, VisualizationDocument};
 use rspice_results_ui::waves::lanes::{BusView, EventLaneLayout, LaneKey, UserLaneBus, lane_specs};
 use rspice_results_ui::waves::logic::LOGIC_ROW_HEIGHT;
 use std::sync::OnceLock;
@@ -421,6 +421,112 @@ fn the_edge_step_lands_on_the_next_edge_exactly() {
         state.results.results.session.cursors.a,
         Some(next),
         "the step lands on SAMP's next committed edge"
+    );
+}
+
+/// One frame of the active project result document.
+fn document_frame(state: &mut ResultsTestHost, document: crate::product::ResultDocumentId) {
+    let ctx = theme_context();
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, FRAME)),
+        ..Default::default()
+    };
+    let mut controller = crate::simulation::SimulationController::new();
+    let _ = ctx.run_ui(input, |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            super::super::super::persistent_document::show(
+                ui,
+                &mut state.results_parts(),
+                &mut controller,
+                None,
+                document,
+            );
+        });
+    });
+}
+
+/// A saved view keeps its lanes: which nets are lanes, their order, the
+/// reader's bus and that bus's radix and expansion survive writing the
+/// document out and reading it back into a fresh session.
+#[test]
+fn radix_and_expansion_survive_save_and_reopen() {
+    let (mut state, key) = sar_strip(BusRadix::Unsigned, true);
+    let document_id = {
+        let mut parts = state.results_parts();
+        super::super::super::create_document::open(&mut parts);
+        parts.create_result_document.layout_id =
+            rspice_results::document_creation::ResultDocumentLayout::SinglePane
+                .id()
+                .to_owned();
+        super::super::super::create_document::commit(&mut parts).expect("the view is saved")
+    };
+    // The reader's lanes reach the document over the frames that draw them:
+    // the nets' traces, then their kinds, buses and order, then nothing.
+    let document = |state: &ResultsTestHost| {
+        state
+            .model
+            .workspace
+            .content
+            .visualization_document(document_id)
+            .expect("the project keeps the document")
+            .clone()
+    };
+    for _ in 0..3 {
+        document_frame(&mut state, document_id);
+    }
+    let settled = document(&state).revision();
+    document_frame(&mut state, document_id);
+    assert_eq!(
+        document(&state).revision(),
+        settled,
+        "an idle frame writes nothing"
+    );
+    let saved = document(&state);
+    assert!(
+        saved.user_buses().iter().any(|bus| bus.name == "code"
+            && bus.radix == BusRadix::Unsigned
+            && bus.expanded
+            && bus.nets.len() == BITS.len()),
+        "the document holds the reader's bus: {:?}",
+        saved.user_buses()
+    );
+
+    let json = serde_json::to_string(&saved).expect("the document writes out");
+    let reopened: VisualizationDocument = serde_json::from_str(&json).expect("it reads back");
+    let mut fresh = host(sar_run(), &ANALOG);
+    let reopened_id = fresh
+        .model
+        .workspace
+        .content
+        .insert_visualization_document(reopened)
+        .expect("the project takes the document back");
+    document_frame(&mut fresh, reopened_id);
+    document_frame(&mut fresh, reopened_id);
+    let layout = fresh
+        .results
+        .results
+        .session
+        .event_lanes
+        .get(&key)
+        .cloned()
+        .expect("the reopened pane has its lanes");
+    assert_eq!(
+        layout.bus_view("code"),
+        BusView {
+            radix: BusRadix::Unsigned,
+            expanded: true
+        }
+    );
+    let models = strip(&mut fresh);
+    let model = &models[0];
+    let labels: Vec<_> = lane_specs(model, Some(&layout))
+        .iter()
+        .map(|spec| spec.label().to_owned())
+        .collect();
+    assert_eq!(
+        labels,
+        ["SAMP", "EOC", "code"],
+        "the lanes come back in order"
     );
 }
 
