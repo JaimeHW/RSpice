@@ -596,6 +596,36 @@ mod tests {
         cx.foreign_available(CommandKey::new("unread"));
     }
 
+    /// A context reads whether an application-modal dialog was open as the
+    /// shell lent it.
+    #[test]
+    fn a_context_reads_the_application_modal_the_shell_lent_it_with() {
+        let mut harness = reader();
+        assert!(
+            harness
+                .cx()
+                .with_application_modal(true)
+                .application_modal_open()
+        );
+        assert!(
+            !harness
+                .cx()
+                .with_application_modal(false)
+                .application_modal_open()
+        );
+    }
+
+    /// Reading whether an application-modal dialog is open from a context
+    /// the shell lent without it is a fault in the call that reads it, never
+    /// a silent answer.
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "the shell lent this context without the application-modal state")]
+    fn a_context_lent_without_the_application_modal_refuses_to_read_it() {
+        let mut harness = reader();
+        harness.cx().application_modal_open();
+    }
+
     /// A feature's own test reads no clock: the null hardcopy port stamps a
     /// publication with the epoch, the stamp the hardcopy feature falls back
     /// to when the clock is out of range.

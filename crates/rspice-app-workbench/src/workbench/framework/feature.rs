@@ -441,6 +441,9 @@ pub struct Cx<'a, F: Feature> {
     /// The dispatcher's answers for [`Feature::FOREIGN_AVAILABILITY`], where
     /// the shell lent the context for a call that reads them.
     foreign: Option<ForeignAvailability>,
+    /// Whether an application-modal dialog was open, where the shell lent
+    /// the context for a routed command's run.
+    application_modal: Option<bool>,
 }
 
 impl<'a, F: Feature> Cx<'a, F> {
@@ -466,6 +469,7 @@ impl<'a, F: Feature> Cx<'a, F> {
             peers,
             commands,
             foreign: None,
+            application_modal: None,
         }
     }
 
@@ -474,6 +478,14 @@ impl<'a, F: Feature> Cx<'a, F> {
     #[must_use]
     pub fn with_foreign_availability(mut self, foreign: ForeignAvailability) -> Self {
         self.foreign = Some(foreign);
+        self
+    }
+
+    /// The context holding `open`, whether an application-modal dialog was
+    /// open when the shell lent it for a routed command's run.
+    #[must_use]
+    pub fn with_application_modal(mut self, open: bool) -> Self {
+        self.application_modal = Some(open);
         self
     }
 
@@ -513,6 +525,19 @@ impl<'a, F: Feature> Cx<'a, F> {
     /// available.
     pub fn foreign_available(&self, key: CommandKey) -> bool {
         self.foreign_availability(key).is_available()
+    }
+
+    /// Whether an application-modal dialog was open when the shell lent this
+    /// context, which refuses an edit made through it. The shell lends a
+    /// routed command's run the context with it: reading it from a context
+    /// lent without it is a fault in the call that reads it, not a no, and a
+    /// release build answers that one is open, the answer that refuses.
+    pub fn application_modal_open(&self) -> bool {
+        debug_assert!(
+            self.application_modal.is_some(),
+            "the shell lent this context without the application-modal state"
+        );
+        self.application_modal.unwrap_or(true)
     }
 }
 

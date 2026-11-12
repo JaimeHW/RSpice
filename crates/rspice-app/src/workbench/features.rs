@@ -23,7 +23,8 @@ use crate::workbench::design::DesignFeature;
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec};
 use crate::workbench::framework::dialogs::DialogKey;
 use crate::workbench::framework::feature::{
-    Cx, Feature, FeatureRegistry, ForeignAvailability, LowerHandles, Peers, Reads, ToolbarTool,
+    Cx, Feature, FeatureRegistry, ForeignAvailability, LowerHandles, Peers, Reads, RoutedCommand,
+    ToolbarTool,
 };
 use crate::workbench::hardcopy::HardcopyFeature;
 use crate::workbench::models::ModelsFeature;
@@ -95,6 +96,18 @@ pub(crate) fn cx_with_foreign_answers<F: Registered>(
     let answers =
         ForeignAvailability::take(F::FOREIGN_AVAILABILITY, |key| app.command_availability(key));
     F::cx(app).with_foreign_availability(answers)
+}
+
+/// Carry out `routed` where `F` takes it here, and say whether it did. Its
+/// context holds whether an application-modal dialog is open, taken once
+/// `F` has taken the command, as the shell's own arm asked it at that point.
+fn route_part<F: Registered>(app: &mut RSpiceApp, routed: &RoutedCommand<F>) -> bool {
+    if !(routed.takes)(&F::reads(app)) {
+        return false;
+    }
+    let modal_open = app.state.application_modal_open();
+    (routed.execute)(&mut F::cx(app).with_application_modal(modal_open));
+    true
 }
 
 /// The results peer a context over `state` holds for the feature whose slot
@@ -319,9 +332,8 @@ macro_rules! features {
         pub(super) fn route(app: &mut RSpiceApp, key: CommandKey) -> bool {
             $(
                 if let Some(routed) = <$feature as Registered>::registry().routed_command(key)
-                    && (routed.takes)(&<$feature as Registered>::reads(app))
+                    && route_part::<$feature>(app, routed)
                 {
-                    (routed.execute)(&mut cx::<$feature>(app));
                     return true;
                 }
             )+
@@ -648,6 +660,31 @@ mod tests {
         for key in keys.chain(design.iter().map(|part| part.key)) {
             assert!(registry.order().contains(&key), "{key:?}");
             assert!(spec(key).is_none(), "{key:?}");
+        }
+    }
+
+    /// A routed command's part reads whether an application-modal dialog is
+    /// open as the shell lends its context: open while Preferences is, and
+    /// closed once it is not.
+    #[test]
+    fn a_routed_part_reads_whether_an_application_modal_dialog_is_open() {
+        use std::cell::Cell;
+
+        thread_local! {
+            static SEEN: Cell<Option<bool>> = const { Cell::new(None) };
+        }
+        const PROBE: RoutedCommand<DesignFeature> = RoutedCommand {
+            key: CommandKey::new("probe"),
+            takes: |_| true,
+            enabled: |_| true,
+            execute: |cx| SEEN.set(Some(cx.application_modal_open())),
+        };
+        let mut app = RSpiceApp::test_instance();
+        for open in [true, false] {
+            app.state.settings.preferences_open = open;
+            assert_eq!(app.state.application_modal_open(), open);
+            assert!(route_part(&mut app, &PROBE));
+            assert_eq!(SEEN.get(), Some(open), "Preferences open: {open}");
         }
     }
 
