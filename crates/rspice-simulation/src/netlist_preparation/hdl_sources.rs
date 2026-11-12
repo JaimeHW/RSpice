@@ -12,8 +12,9 @@
 //! sealed project runtime takes. Every other line is left as written, so the
 //! deck's line numbers hold.
 //!
-//! The prepared manual deck the application and the browser worker run, the
-//! headless route and the mixed-signal conformance runner all seal here.
+//! The prepared manual deck the application runs seals here, and so does the
+//! mixed-signal conformance runner before it hands a deck and its runtimes
+//! to the headless route.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};

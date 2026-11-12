@@ -13,14 +13,15 @@
 //! [`rspice_simulation::runner::SimulationRunner`] with dependency artifacts
 //! threaded as `rspice study run` threads them.
 //!
-//! HDL sources (`.hdl`/`.va`/`.vams`/`.verilog` directives) are compiled with
-//! the unified runtime compiler options and sealed as
-//! [`PreparedVerilogARuntime`]s under project-scoped virtual keys, and the
-//! directive is rewritten to the `.veriloga "<key>" <alias>` form the
-//! application emits for project Verilog-A. The headless preparation refuses
-//! file-backed HDL directives as unsealed external dependencies, so this is the
-//! only way a mixed design reaches that path, and it is the way the app's
-//! model-library and project sources reach it.
+//! The deck's HDL sources (its `.hdl`/`.va`/`.vams`/`.verilog`/`.ahdl_include`
+//! lines) are sealed by
+//! [`rspice_simulation::netlist_preparation::seal_deck_hdl_sources`], the step
+//! the application's prepared manual deck runs: each file is compiled with the
+//! unified runtime compiler options, sealed as a prepared runtime under a
+//! content key, and its line rewritten to the `.veriloga "<key>" <alias>` form
+//! a sealed project runtime takes. The headless preparation refuses
+//! file-backed HDL directives as unsealed external dependencies, so the sealed
+//! runtimes travel beside the deck in the run input.
 //!
 //! # The engine fallback (amendment A1)
 //!
@@ -39,11 +40,12 @@ use rspice_simulation::execution::{
     PreparedRunAuthorization, prepare_headless_run,
 };
 use rspice_simulation::manual_deck::ManualDeckError;
+use rspice_simulation::netlist_preparation::{
+    DeckHdlRefusal, IncludeSearchChain, seal_deck_hdl_sources,
+};
 use rspice_simulation::preparation::QueuedAnalysis;
 use rspice_simulation::results::SimulationResult;
-use rspice_simulation::veriloga::{
-    PreparedVerilogAConnectionLibrary, PreparedVerilogARuntime, PreparedVerilogARuntimeSet,
-};
+use rspice_simulation::veriloga::PreparedVerilogARuntimeSet;
 use rspice_simulation_contract::analysis_spec::AnalysisSpec;
 use rspice_vocabulary::product::AnalysisInstanceId;
 
@@ -235,284 +237,29 @@ pub fn strip_cards(source: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// HDL sealing
+// Headless dispatch
 // ---------------------------------------------------------------------------
 
-const HDL_DIRECTIVES: [&str; 5] = [".hdl", ".va", ".veriloga", ".vams", ".verilog"];
-
-/// One HDL directive of a deck.
-#[derive(Debug, Clone, PartialEq)]
-pub struct HdlDirective {
-    pub line: usize,
-    pub path: String,
-    pub alias: Option<String>,
-    pub module: Option<String>,
-}
-
-pub fn hdl_directives(source: &str) -> Vec<HdlDirective> {
-    let mut directives = Vec::new();
-    for (index, line) in source.lines().enumerate() {
-        let trimmed = line.trim();
-        let Some(word) = trimmed.split_whitespace().next() else {
-            continue;
-        };
-        if !HDL_DIRECTIVES.contains(&word.to_ascii_lowercase().as_str()) {
-            continue;
-        }
-        let rest = trimmed[word.len()..].trim();
-        let (path, rest) = if let Some(quoted) = rest.strip_prefix('"') {
-            let end = quoted.find('"').unwrap_or(quoted.len());
-            (
-                quoted[..end].to_owned(),
-                quoted.get(end + 1..).unwrap_or_default(),
-            )
-        } else {
-            let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
-            (rest[..end].to_owned(), &rest[end..])
-        };
-        let mut alias = None;
-        let mut module = None;
-        for token in rest.split_whitespace() {
-            if let Some(name) = token
-                .strip_prefix("module=")
-                .or_else(|| token.strip_prefix("MODULE="))
-            {
-                module = Some(name.to_owned());
-            } else if alias.is_none() {
-                alias = Some(token.to_owned());
-            }
-        }
-        directives.push(HdlDirective {
-            line: index,
-            path,
-            alias,
-            module,
-        });
-    }
-    directives
-}
-
-/// Compile every HDL source the circuit names and rewrite its directive to the
-/// sealed project form.
-fn seal_hdl(
-    circuit: &str,
-    origin: &Path,
-    design_slug: &str,
-) -> Result<(String, PreparedVerilogARuntimeSet), CaseError> {
-    let directives = hdl_directives(circuit);
-    if directives.is_empty() {
-        return Ok((circuit.to_owned(), PreparedVerilogARuntimeSet::default()));
-    }
-    let directory = origin.parent().unwrap_or(Path::new("."));
-    // A design may instantiate the deck's own cells as SPICE leaves, so the
-    // compile sees the deck's table, and keeps the min:typ:max values the
-    // deck selects, as the engine's own compile does. A deck that does not
-    // parse here is refused, by the same parser, when it is prepared.
-    let netlist = rspice_core::netlist::IncludeProcessor::new(directory)
-        .expand_content(circuit, origin)
-        .ok()
-        .and_then(|expanded| rspice_core::Netlist::parse(&expanded).ok());
-    let external_cells = netlist
-        .as_ref()
-        .map(rspice_core::engine::hdl_external_cells);
-    let delay_select = netlist
-        .as_ref()
-        .map(|netlist| {
-            rspice_core::engine::hdl_delay_select(&rspice_core::resolve_simulation_config(
-                &rspice_core::SimulationConfig::default(),
-                Some(&netlist.options),
-                &rspice_core::SimulationConfigOverrides::default(),
-            ))
-        })
-        .unwrap_or_default();
-    let compiler = rspice_veriloga::VerilogACompiler::new(rspice_veriloga::CompilerOptions {
-        external_cells: external_cells.clone(),
-        delay_select,
-        ..rspice_simulation::compilation::unified_runtime_compiler_options()
-    });
-    let mut lines: Vec<String> = circuit.lines().map(str::to_owned).collect();
-    let mut runtimes = Vec::new();
-    let mut connections = Vec::new();
-    for directive in directives {
-        let path = directory.join(&directive.path);
-        let file_name = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("source.va")
-            .to_owned();
-        let source = std::fs::read_to_string(&path).map_err(|error| ErrorRecord {
-            category: "elaboration".into(),
-            token: Some("missing_source".into()),
-            module: Some(file_name.clone()),
-            location: Some(path.display().to_string()),
-            stage: Some("compile".into()),
-            detail: error.to_string(),
-            display: format!("{}: {error}", path.display()),
-            ..Default::default()
-        })?;
-        let bundle = rspice_veriloga::VirtualSourceBundle::new(
-            file_name.clone(),
-            [rspice_veriloga::VirtualSourceFile::new(
-                file_name.clone(),
-                source.clone(),
-            )],
-        )
-        .map_err(|error| compile_refusal(&file_name, &path, error.to_string()))?;
-        let limits = rspice_simulation::project_veriloga::project_virtual_compile_limits();
-        let prepared = compiler
-            .prepare_virtual_runtime_source(&bundle, limits)
-            .map_err(|failure| compile_refusal(&file_name, &path, failure.to_string()))?;
-        let module_names: Vec<String> = prepared.module_names().map(str::to_owned).collect();
-        let digest = rspice_vocabulary::product::ContentDigest::from_bytes(
-            <sha2::Sha256 as sha2::Digest>::digest(source.as_bytes()).into(),
-        );
-        // A source of connect rules and connect modules alone contributes
-        // rules, not instances, as the engine reads it; one with neither
-        // modules nor rules is refused.
-        if module_names.is_empty() && directive.module.is_none() {
-            let artifact = prepared.connection_artifact().ok_or_else(|| {
-                compile_refusal(
-                    &file_name,
-                    &path,
-                    format!("{file_name} declares neither modules nor connection rules"),
-                )
-            })?;
-            let alias = directive
-                .alias
-                .clone()
-                .unwrap_or_else(|| connection_alias(&file_name));
-            let source_key = sealed_source_key(design_slug, "connections", &file_name);
-            connections.push(
-                PreparedVerilogAConnectionLibrary::try_new(
-                    source_key.clone(),
-                    digest,
-                    alias.clone(),
-                    artifact,
-                )
-                .map_err(|error| compile_refusal(&file_name, &path, error))?,
-            );
-            lines[directive.line] = format!(".veriloga \"{source_key}\" {alias}");
-            continue;
-        }
-        let module = match (&directive.module, &directive.alias) {
-            (Some(module), _) => module.clone(),
-            (None, Some(alias))
-                if module_names
-                    .iter()
-                    .any(|name| name.eq_ignore_ascii_case(alias)) =>
-            {
-                module_names
-                    .iter()
-                    .find(|name| name.eq_ignore_ascii_case(alias))
-                    .cloned()
-                    .unwrap_or_default()
-            }
-            _ => match module_names.as_slice() {
-                [only] => only.clone(),
-                many => {
-                    return Err(compile_refusal(
-                        &file_name,
-                        &path,
-                        format!(
-                            "{} declares {} modules; name one with module=",
-                            file_name,
-                            many.len()
-                        ),
-                    )
-                    .into());
-                }
-            },
-        };
-        let compilation = compiler
-            .compile_virtual_runtime(&bundle, &module, limits)
-            .map_err(|error| compile_refusal(&module, &path, error.to_string()))?;
-        let alias = directive.alias.clone().unwrap_or_else(|| module.clone());
-        let source_key = sealed_source_key(design_slug, &module, &file_name);
-        // Sealed with the deck's table it was compiled against, which a
-        // design with a leaf carries in its identity and install key, and
-        // with the selection it was compiled under, which every design does.
-        let runtime = PreparedVerilogARuntime::try_from_virtual_compilation_against(
-            source_key.clone(),
-            digest,
-            alias.clone(),
-            &compilation,
-            external_cells.as_deref(),
-            delay_select,
-        )
-        .map_err(|error| compile_refusal(&module, &path, error.to_string()))?;
-        runtimes.push(runtime);
-        lines[directive.line] = format!(".veriloga \"{source_key}\" {alias}");
-    }
-    let set = PreparedVerilogARuntimeSet::try_with_connections(runtimes, connections)
-        .map_err(harness_error)?;
-    Ok((lines.join("\n") + "\n", set))
-}
-
-/// The import alias of a connection library its directive names no alias for:
-/// the file's stem as a SPICE name.
-fn connection_alias(file_name: &str) -> String {
-    let stem = Path::new(file_name)
-        .file_stem()
-        .and_then(|stem| stem.to_str())
-        .unwrap_or(file_name);
-    let mut alias: String = stem
-        .chars()
-        .map(|character| {
-            if character.is_ascii_alphanumeric() {
-                character
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    if !alias.starts_with(|first: char| first.is_ascii_alphabetic()) {
-        alias.insert(0, '_');
-    }
-    alias
-}
-
-/// The virtual key a sealed runtime is installed under. The engine keys an
-/// HDL source by its file *and* the module selected from it
-/// (`VerilogASourceKey { source_path, selected_module }`), and the
-/// application's project keys carry the selected module too, so one file
-/// named by two directives (`module=tb_sar`, `module=sar8`) is two runtimes
-/// with two keys; keyed by the file alone the second would collide with the
-/// first.
-pub fn sealed_source_key(design_slug: &str, module: &str, file_name: &str) -> String {
-    format!("__rspice_project__/mixed-corpus/{design_slug}/{module}/{file_name}")
-}
-
-fn compile_refusal(module: &str, path: &Path, message: String) -> ErrorRecord {
-    let location = first_location(&message).unwrap_or_else(|| path.display().to_string());
+/// A Verilog-A source the deck names that could not be sealed, recorded as
+/// the engine's elaboration refusal of the same kind.
+fn hdl_refusal(refusal: &DeckHdlRefusal) -> ErrorRecord {
     ErrorRecord {
         category: "elaboration".into(),
-        token: Some("compile_refusal".into()),
+        token: Some(refusal.kind.as_str().into()),
         token_form: Some("structured".into()),
-        module: Some(module.to_owned()),
-        location: Some(location),
-        stage: Some("compile".into()),
-        detail: message.clone(),
-        display: format!(
-            "{}: the Verilog-A compiler refused this source: {message}",
-            path.display()
+        module: Some(
+            refusal
+                .module
+                .clone()
+                .unwrap_or_else(|| refusal.file_name()),
         ),
+        location: Some(refusal.location()),
+        stage: Some("compile".into()),
+        detail: refusal.detail.clone(),
+        display: refusal.to_string(),
         ..Default::default()
     }
 }
-
-/// `file:line[:col]` at the start of a compiler message, if it leads with one.
-fn first_location(message: &str) -> Option<String> {
-    let head = message.split_whitespace().next()?;
-    let head = head.trim_end_matches(':');
-    let mut parts = head.rsplitn(3, ':');
-    let last = parts.next()?;
-    last.parse::<usize>().ok()?;
-    Some(head.to_owned())
-}
-
-// ---------------------------------------------------------------------------
-// Headless dispatch
-// ---------------------------------------------------------------------------
 
 fn headless_case(request: &CaseRequest<'_>, origin: &Path, source: &str) -> CaseResult {
     let route = Route::compiled();
@@ -522,10 +269,11 @@ fn headless_case(request: &CaseRequest<'_>, origin: &Path, source: &str) -> Case
         .map(|(_, card)| card)
         .collect();
     let circuit = strip_cards(source);
-    let (circuit, runtimes) = match seal_hdl(&circuit, origin, &request.design.slug) {
-        Ok(sealed) => sealed,
-        Err(error) => return result.failed(*error),
-    };
+    let (circuit, runtimes) =
+        match seal_deck_hdl_sources(&circuit, Some(origin), &IncludeSearchChain::default()) {
+            Ok(sealed) => (sealed.source, sealed.runtimes),
+            Err(refusal) => return result.failed(hdl_refusal(&refusal)),
+        };
     let tasks = match headless_tasks(&circuit, origin, &cards, &runtimes) {
         Ok(tasks) => tasks,
         Err(error) => return result.failed(*error),
@@ -1716,17 +1464,6 @@ mod tests {
     }
 
     #[test]
-    fn hdl_directives_parse_paths_aliases_and_modules() {
-        let deck = "t\n.hdl \"../net/sdq.vams\"\n.va ../net/x.va xalias module=Top\nX1 a b sdq\n";
-        let directives = hdl_directives(deck);
-        assert_eq!(directives.len(), 2);
-        assert_eq!(directives[0].path, "../net/sdq.vams");
-        assert_eq!(directives[0].alias, None);
-        assert_eq!(directives[1].alias.as_deref(), Some("xalias"));
-        assert_eq!(directives[1].module.as_deref(), Some("Top"));
-    }
-
-    #[test]
     fn monte_carlo_statistics_are_found_in_included_files() {
         let dir = tempfile::tempdir().unwrap();
         let origin = dir.path().join("deck.cir");
@@ -1751,37 +1488,6 @@ mod tests {
             Ok(false)
         );
         assert!(deck_states_statistics(&deck("missing.cir"), &origin).is_err());
-    }
-
-    #[test]
-    fn one_file_named_by_two_directives_seals_two_runtimes() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(
-            dir.path().join("pair.v"),
-            "module tb(c);\n  output c;\n  reg c;\n  initial c = 1'b0;\nendmodule\n\
-             module dut(c, q);\n  input c;\n  output q;\n  reg q;\n  initial q = 1'b0;\n  always @(posedge c) q <= ~q;\nendmodule\n",
-        )
-        .unwrap();
-        let circuit = "t\n.hdl \"pair.v\" module=tb\n.hdl \"pair.v\" module=dut\nxtb c tb\nxdut c q dut\n.end\n";
-        let (rewritten, runtimes) =
-            seal_hdl(circuit, &dir.path().join("deck.cir"), "cxx").expect("two runtimes seal");
-        let keys: Vec<&str> = runtimes
-            .device_runtimes()
-            .map(|runtime| runtime.source_key())
-            .collect();
-        assert_eq!(
-            keys,
-            [
-                "__rspice_project__/mixed-corpus/cxx/dut/pair.v",
-                "__rspice_project__/mixed-corpus/cxx/tb/pair.v"
-            ]
-        );
-        assert!(
-            rewritten.contains(".veriloga \"__rspice_project__/mixed-corpus/cxx/tb/pair.v\" tb\n")
-                && rewritten
-                    .contains(".veriloga \"__rspice_project__/mixed-corpus/cxx/dut/pair.v\" dut\n"),
-            "{rewritten}"
-        );
     }
 
     /// A file of connect rules and connect modules alone is a connection
@@ -1845,9 +1551,11 @@ mod tests {
                 "{rule}: the rule's d2a drives q to {supply} V, saw {last}"
             );
         }
-        let empty = seal_hdl("t\n.hdl \"../empty.vams\"\n.end\n", &origin, "cxx")
-            .expect_err("a source with neither modules nor rules is refused");
-        assert_eq!(empty.token.as_deref(), Some("compile_refusal"), "{empty:?}");
+        let empty = headless_case(&request, &origin, "t\n.hdl \"../empty.vams\"\n.op\n.end\n");
+        assert_eq!(empty.outcome, "error", "{:?}", empty.error);
+        let error = empty.error.expect("a refusal carries its error");
+        assert_eq!(error.token.as_deref(), Some("unknown_module"), "{error:?}");
+        assert_eq!(error.module.as_deref(), Some("empty.vams"), "{error:?}");
     }
 
     #[test]
@@ -1858,11 +1566,6 @@ mod tests {
         assert_eq!(analysis.as_deref(), Some("0d6c-uuid"));
         assert_eq!(detail, "AC analysis cannot run with 'xq'");
         assert!(prose_capability("Circuit error: singular matrix").is_none());
-        assert_eq!(
-            first_location("sdq.vams:12:5: unsupported").as_deref(),
-            Some("sdq.vams:12:5")
-        );
-        assert_eq!(first_location("no location here"), None);
     }
 
     #[test]
