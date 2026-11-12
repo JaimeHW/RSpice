@@ -26,7 +26,8 @@ use crate::workbench::commands::dispatch_probe;
 use crate::workbench::commands::vocabulary::{Command, legacy_command};
 use crate::workbench::commands::{
     active_schematic_editor, answer_code_request, answer_netlist_editor_request,
-    answer_project_request, command_edits_schematic, file_action, run_project_file_action,
+    answer_project_request, answer_void_veriloga_evidence, command_edits_schematic, file_action,
+    run_project_file_action,
 };
 use crate::workbench::features;
 use crate::workbench::framework::command_registry::{
@@ -34,12 +35,13 @@ use crate::workbench::framework::command_registry::{
 };
 use crate::workbench::framework::feature::{Execute, held_back};
 use crate::workbench::framework::requests::{
-    self, ApplyWaveformDefaults, ArmPartPlacement, BindComponentModel, CloseForLiveMirror,
-    ConfirmPackAttach, ExportDataset, FollowSchematicGrid, MarkFailureSites, OpenInDesign,
-    OpenPropertyEditor, OpenStimulusDefinition, OpenSymbolAuthoring, PrintActiveView,
+    self, ApplyWaveformDefaults, ArmPartPlacement, BindComponentModel, ClearSelectedModel,
+    CloseForLiveMirror, ConfirmPackAttach, ExportDataset, FollowSchematicGrid, MarkFailureSites,
+    OpenInDesign, OpenPropertyEditor, OpenStimulusDefinition, OpenSymbolAuthoring, PrintActiveView,
     ProjectFileAction, PromptAfterCommands, RevealExecutedDeck, RevealModel,
     SelectAnalysisInstance, SetFamilyFilter, ShowProjectModels, ShowSchematicAnnotations,
     ShowWaveforms, SourceEditorRequest, StageComponentTuning, SubcircuitSymbolSource,
+    VoidVerilogAEvidence,
 };
 use crate::workbench::hardcopy;
 use crate::workbench::menu_bar::FileMenuAction;
@@ -193,9 +195,11 @@ impl RSpiceApp {
     /// opens its viewer or form on, the annotations a result viewer shows on
     /// the schematic it locates something on, and the failure sites the
     /// results failure banner marks there, the close that makes room for a
-    /// live session's mirror, what a code command still needs of the whole
-    /// application, the descent Descend into hierarchy checked, and last what
-    /// the project feature hands over and the project's file commands.
+    /// live session's mirror, the selected model and the Verilog-A compile
+    /// evidence a history step left standing on nothing, what a code command
+    /// still needs of the whole application, the descent Descend into
+    /// hierarchy checked, and last what the project feature hands over and
+    /// the project's file commands.
     pub(crate) fn after_contribution(&mut self) {
         requests::drain(
             self,
@@ -460,6 +464,16 @@ impl RSpiceApp {
                     model,
                 );
             },
+        );
+        requests::drain(
+            self,
+            |app| &mut app.state.workbench.outbox,
+            |app, ClearSelectedModel| app.state.models.clear_selected_model(),
+        );
+        requests::drain(
+            self,
+            |app| &mut app.state.workbench.outbox,
+            |app, VoidVerilogAEvidence| answer_void_veriloga_evidence(app),
         );
         requests::drain(
             self,

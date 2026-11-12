@@ -3,53 +3,50 @@
 //!
 //! The model decides whether a step can be taken and applies its record. The
 //! workbench brings the document the step restores to the front first, and
-//! does what applying the record asked of it before the model finishes the
-//! step, so each happens where it did when the step was one operation.
+//! takes up the schematic the record put back before the model finishes the
+//! step, so each happens where it did when the step was one operation. What
+//! the record asks of the models and code features, a selected model whose
+//! library is gone and a Verilog-A compile of a source no longer there, it
+//! raises as requests, answered as the command that took the step returns.
 
 use crate::state::CellViewRef;
 use crate::workbench::app_state::design_history::{HistoryEffects, StagedProjectStep};
 use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::framework::feature::ModelsPort;
+use crate::workbench::framework::requests::{ClearSelectedModel, VoidVerilogAEvidence};
 use crate::workbench::state::{InlineEditAuthority, WorkbenchSession};
+use rspice_app_runs::workbench::slots::runs::RunsState;
 
-use super::bump_active_schematic_epoch;
 use super::symbol_document::SymbolUiState;
+use super::{
+    SchematicRestoreParts, bump_active_schematic_epoch, restore_active_schematic_from_workspace,
+};
 
 impl AppState {
-    // Application half of a model operation; it becomes a request.
+    /// [`undo_project_design`] for the session.
     pub(crate) fn undo_project_design(&mut self) -> Result<Option<String>, String> {
-        let Some(staged) = self.model.stage_project_undo()? else {
-            return Ok(None);
-        };
-        self.take_project_step(staged, "Undo").map(Some)
+        undo_project_design(
+            self.design.schematic_restore_parts(),
+            &mut self.model,
+            &mut self.workbench,
+            &self.runs,
+            ModelsPort::selected_model(&*self.models),
+        )
     }
 
-    // Application half of a model operation; it becomes a request.
+    /// [`redo_project_design`] for the session.
     pub(crate) fn redo_project_design(&mut self) -> Result<Option<String>, String> {
-        let Some(staged) = self.model.stage_project_redo()? else {
-            return Ok(None);
-        };
-        self.take_project_step(staged, "Redo").map(Some)
-    }
-
-    fn take_project_step(
-        &mut self,
-        staged: StagedProjectStep,
-        operation: &str,
-    ) -> Result<String, String> {
-        if let Some(destination) = staged.destination().cloned() {
-            self.activate_history_document(&destination, operation);
-        }
-        let selected_model = self.models.selected_model.clone();
-        let mut effects = HistoryEffects::default();
-        let applied =
-            self.model
-                .apply_project_step(staged, selected_model.as_deref(), &mut effects);
-        self.apply_history_effects(effects);
-        let applied = applied?;
-        self.model.finish_project_step(applied)
+        redo_project_design(
+            self.design.schematic_restore_parts(),
+            &mut self.model,
+            &mut self.workbench,
+            &self.runs,
+            ModelsPort::selected_model(&*self.models),
+        )
     }
 
     /// [`activate_history_document`] for the session.
+    #[cfg(test)]
     pub(crate) fn activate_history_document(&mut self, reference: &CellViewRef, operation: &str) {
         activate_history_document(
             &mut self.design.symbol,
@@ -58,24 +55,6 @@ impl AppState {
             reference,
             operation,
         );
-    }
-
-    /// Do what applying a history step's record asked of the workbench.
-    fn apply_history_effects(&mut self, effects: HistoryEffects) {
-        let HistoryEffects {
-            clear_selected_model,
-            void_veriloga_evidence,
-            restore_active_schematic,
-        } = effects;
-        if clear_selected_model {
-            self.models.selected_model = None;
-        }
-        if void_veriloga_evidence {
-            self.code.code_workspace.veriloga.void_evidence();
-        }
-        if restore_active_schematic {
-            self.restore_active_schematic_from_workspace();
-        }
     }
 
     pub(crate) fn inline_edit_authority(&self) -> InlineEditAuthority {
@@ -129,6 +108,73 @@ impl AppState {
             }
         }
     }
+}
+
+/// Undo the newest project design step, if one can be taken; `None` when
+/// there is none to take.
+// Application half of a model operation; it becomes a request.
+pub(crate) fn undo_project_design(
+    design: SchematicRestoreParts<'_>,
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
+    runs: &RunsState,
+    selected_model: Option<&str>,
+) -> Result<Option<String>, String> {
+    let Some(staged) = model.stage_project_undo()? else {
+        return Ok(None);
+    };
+    take_project_step(design, model, wb, runs, selected_model, staged, "Undo").map(Some)
+}
+
+/// Redo the newest project design step undone, if one can be taken; `None`
+/// when there is none to take.
+// Application half of a model operation; it becomes a request.
+pub(crate) fn redo_project_design(
+    design: SchematicRestoreParts<'_>,
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
+    runs: &RunsState,
+    selected_model: Option<&str>,
+) -> Result<Option<String>, String> {
+    let Some(staged) = model.stage_project_redo()? else {
+        return Ok(None);
+    };
+    take_project_step(design, model, wb, runs, selected_model, staged, "Redo").map(Some)
+}
+
+/// Take the staged step: its document to the front, its record applied, the
+/// schematic it put back taken up and the requests it raises raised, even
+/// when applying it failed part way, and then the model finishes it.
+fn take_project_step(
+    design: SchematicRestoreParts<'_>,
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
+    runs: &RunsState,
+    selected_model: Option<&str>,
+    staged: StagedProjectStep,
+    operation: &str,
+) -> Result<String, String> {
+    if let Some(destination) = staged.destination().cloned() {
+        activate_history_document(&mut *design.symbol, model, wb, &destination, operation);
+    }
+    let mut effects = HistoryEffects::default();
+    let applied = model.apply_project_step(staged, selected_model, &mut effects);
+    let HistoryEffects {
+        clear_selected_model,
+        void_veriloga_evidence,
+        restore_active_schematic,
+    } = effects;
+    if clear_selected_model {
+        wb.outbox.push(ClearSelectedModel);
+    }
+    if void_veriloga_evidence {
+        wb.outbox.push(VoidVerilogAEvidence);
+    }
+    if restore_active_schematic {
+        restore_active_schematic_from_workspace(design, model, wb, runs);
+    }
+    let applied = applied?;
+    model.finish_project_step(applied)
 }
 
 /// Bring the document a history step restores to the front: the editor

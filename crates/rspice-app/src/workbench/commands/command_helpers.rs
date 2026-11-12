@@ -520,6 +520,14 @@ pub(in crate::workbench) fn answer_code_request(app: &mut RSpiceApp, request: Co
     }
 }
 
+/// Drop what the last Verilog-A compile proved, and stop a compile still
+/// running, as a history step that put back another source asks.
+// Interim, as `answer_code_request`: until the code feature answers it over
+// its own parts.
+pub(in crate::workbench) fn answer_void_veriloga_evidence(app: &mut RSpiceApp) {
+    app.state.code.code_workspace.veriloga.void_evidence();
+}
+
 /// Carry out what a source document dialog handed over: create the
 /// Automation workspace its draft describes or the top deck its creation
 /// form drafted, or a lifecycle choice on the document it manages, then the

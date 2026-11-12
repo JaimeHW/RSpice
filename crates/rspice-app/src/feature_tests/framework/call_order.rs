@@ -598,6 +598,14 @@ const AFTER_CONTRIBUTION: &[Step] = &[
         ],
     ),
     (
+        "20.01",
+        &["|app, ClearSelectedModel| app.state.models.clear_selected_model()"],
+    ),
+    (
+        "20.02",
+        &["|app, VoidVerilogAEvidence| answer_void_veriloga_evidence(app)"],
+    ),
+    (
         "20.1",
         &["|app, request: CodeRequest| answer_code_request(app, request)"],
     ),
@@ -1470,8 +1478,8 @@ fn a_feature_command_has_what_it_raised_answered_in_the_same_dispatch() {
     assert_runs_in_order("RSpiceApp::after_contribution", &after, AFTER_CONTRIBUTION);
     assert_eq!(
         after.matches("requests::drain(").count(),
-        28,
-        "`after_contribution` answers exactly the twenty-eight requests it lists"
+        30,
+        "`after_contribution` answers exactly the thirty requests it lists"
     );
 }
 

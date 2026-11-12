@@ -314,8 +314,17 @@ impl Command {
             Self::RevertActiveDocument => file_action(app, FileMenuAction::RevertActiveDocument),
             Self::CloseActiveDocument => file_action(app, FileMenuAction::CloseActiveDocument),
             Self::Exit => file_action(app, FileMenuAction::Exit),
-            Self::Undo => app.action_edit_undo(),
-            Self::Redo => app.action_edit_redo(),
+            // A history step raises what it asks of other features as
+            // requests; they are answered as the step returns, as a feature's
+            // command has what it raised answered.
+            Self::Undo => {
+                app.action_edit_undo();
+                app.after_contribution();
+            }
+            Self::Redo => {
+                app.action_edit_redo();
+                app.after_contribution();
+            }
             // An edit command acts on the selection in the editor the reader
             // is working in, and the part that takes it there carries it out:
             // Results copies what it has selected where it is in front, the
@@ -790,7 +799,8 @@ pub(crate) use command_helpers::menu_label;
 use command_helpers::*;
 pub(in crate::workbench) use command_helpers::{
     active_schematic_editor, answer_code_request, answer_netlist_editor_request,
-    answer_project_request, file_action, foreign_import_refusal, run_project_file_action,
+    answer_project_request, answer_void_veriloga_evidence, file_action, foreign_import_refusal,
+    run_project_file_action,
 };
 
 #[cfg(test)]

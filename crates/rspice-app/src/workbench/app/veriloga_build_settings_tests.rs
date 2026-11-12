@@ -9,6 +9,7 @@ use super::veriloga_design_tests::{
     DESKTOP, add_veriloga_cell, frame_with, open_in_design, open_project_app, themed_context,
     wait_for_compile,
 };
+use super::veriloga_interface_tests::compile_and_publish;
 use super::*;
 use crate::state::ProjectSourceRole;
 use crate::workbench::code::commands::CodeCommand;
@@ -244,6 +245,67 @@ fn one_undo_takes_back_the_entry_module_in_the_profile_and_the_binding() {
     assert_eq!(
         redone.bundle().closure_digest(),
         saved.bundle().closure_digest()
+    );
+}
+
+/// Ctrl+Z that puts back the source from before the save drops what the
+/// compile of the saved source proved by the end of the frame the key
+/// arrived in: the step raises the request, and it is answered as Undo
+/// returns. The key is pressed on the project's schematic, as a source view
+/// keeps Ctrl+Z for its own editor; Undo brings the cell view it restores
+/// to the front.
+#[test]
+fn undoing_build_settings_voids_the_compile_evidence_in_its_frame() {
+    let mut app = open_project_app();
+    let schematic = app.state.model.workspace.content.active_view.clone();
+    let (reference, _) = add_veriloga_cell(&mut app.state, "gain", "model.va", "gain");
+    open_in_design(&mut app.state, &reference);
+    let selected = code_workspace::selected_veriloga_source(&app).unwrap();
+    code_workspace::replace_selected_veriloga_file(
+        &mut app,
+        &selected,
+        "model.va",
+        TWO_MODULES.to_owned(),
+    )
+    .unwrap();
+    app.execute_command_key(CodeCommand::VerilogABuildSettings.key());
+    draft(&mut app).entry_module = "gain_fast".to_owned();
+    assert!(save_veriloga_build_settings(&mut app).unwrap());
+    compile_and_publish(&mut app);
+    open_in_design(&mut app.state, &schematic);
+    assert_eq!(
+        app.state.model.workspace.content.active_view_type(),
+        crate::state::ViewType::Schematic
+    );
+    assert!(app.state.code.code_workspace.veriloga.receipt.is_some());
+
+    let z = |pressed| egui::Event::Key {
+        key: egui::Key::Z,
+        physical_key: Some(egui::Key::Z),
+        pressed,
+        repeat: false,
+        modifiers: egui::Modifiers {
+            ctrl: true,
+            command: true,
+            ..egui::Modifiers::NONE
+        },
+    };
+    let _ = themed_context().run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, DESKTOP)),
+            events: vec![z(true), z(false)],
+            ..Default::default()
+        },
+        |ui| eframe::App::ui(&mut app, ui, &mut eframe::Frame::_new_kittest()),
+    );
+
+    assert!(
+        !app.state.model.can_undo_project_design() && app.state.model.can_redo_project_design(),
+        "Ctrl+Z took the save back"
+    );
+    assert!(
+        app.state.code.code_workspace.veriloga.receipt.is_none(),
+        "the compile of the saved source no longer stands"
     );
 }
 

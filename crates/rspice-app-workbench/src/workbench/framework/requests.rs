@@ -578,6 +578,28 @@ impl Request for RevealModel {
     const DRAIN: Drain = Drain::AfterContribution;
 }
 
+/// Leave no model selected in the Models workspace's catalog: a project
+/// design history step took away, or put back without it, the library the
+/// selected model was in. Raised by the step, and taken straight after the
+/// call that took it.
+#[derive(Clone, Debug)]
+pub struct ClearSelectedModel;
+
+impl Request for ClearSelectedModel {
+    const DRAIN: Drain = Drain::AfterContribution;
+}
+
+/// Drop what the last Verilog-A compile proved, and stop a compile still
+/// running: a project design history step put back a source that compile
+/// was not of. Raised by the step, and taken straight after the call that
+/// took it.
+#[derive(Clone, Debug)]
+pub struct VoidVerilogAEvidence;
+
+impl Request for VoidVerilogAEvidence {
+    const DRAIN: Drain = Drain::AfterContribution;
+}
+
 /// Focus the navigator's filter field the next time a navigator draws it.
 #[derive(Clone, Debug)]
 pub struct FocusNavigatorSearch;

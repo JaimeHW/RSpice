@@ -225,6 +225,10 @@ impl ModelsPort for NullPorts {
         false
     }
 
+    fn selected_model(&self) -> Option<&str> {
+        None
+    }
+
     fn model_gate_facts(&self, _model: &Model) -> Vec<ModelGateFact> {
         Vec::new()
     }

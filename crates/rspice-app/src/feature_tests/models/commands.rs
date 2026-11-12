@@ -136,6 +136,68 @@ fn editable_project_copy_command_publishes_opens_and_records_undo_history() {
     );
 }
 
+/// Ctrl+Z that takes away the library the selected model is in leaves no
+/// model selected by the end of the frame the key arrived in: the step
+/// raises the request, and the models feature answers it as Undo returns.
+#[test]
+fn undoing_the_selected_models_project_copy_clears_the_selection_in_its_frame() {
+    use crate::feature_tests::replay::{PRIMARY, Replay};
+    use crate::state::model_library::{DeviceModel, ModelLibrary, ModelType};
+
+    let mut replay = Replay::new();
+    let app = &mut replay.app;
+    let mut built_in = ModelLibrary::new("command copy built-in");
+    built_in.pdk_name = "Example PDK".to_owned();
+    built_in.technology_node = "45nm".to_owned();
+    let mut model = DeviceModel::new("copy_nch", ModelType::Nmos);
+    model.spice_type = Some("NMOS".to_owned());
+    model.spice_level = Some(1);
+    model.parameters.insert("vth0".to_owned(), 0.46);
+    built_in.add_model(model);
+    app.state.model.model_library_manager.add_library(built_in);
+    app.state
+        .model
+        .model_library_manager
+        .select_library("command copy built-in")
+        .expect("the fixture library is loaded");
+    app.state.models.selected_model = Some("copy_nch".to_owned());
+    app.execute_command_key(ModelsCommand::ModelCreateProjectCopy.key());
+    assert_eq!(
+        app.state
+            .model
+            .model_library_manager
+            .selected_library
+            .as_deref(),
+        Some("copy_nch project")
+    );
+    assert_eq!(app.state.models.selected_model.as_deref(), Some("copy_nch"));
+    app.state.workbench.activate(Workspace::Design);
+
+    let z = |pressed| egui::Event::Key {
+        key: egui::Key::Z,
+        physical_key: Some(egui::Key::Z),
+        pressed,
+        repeat: false,
+        modifiers: PRIMARY,
+    };
+    replay.frame(vec![z(true), z(false)]);
+
+    assert!(
+        replay
+            .app
+            .state
+            .model
+            .model_library_manager
+            .get_library("copy_nch project")
+            .is_none(),
+        "Ctrl+Z took the copy back"
+    );
+    assert_eq!(
+        replay.app.state.models.selected_model, None,
+        "no model is left selected in a library that is gone"
+    );
+}
+
 #[test]
 fn model_editor_command_requires_an_open_project_even_with_a_retained_selection() {
     use std::collections::BTreeMap;

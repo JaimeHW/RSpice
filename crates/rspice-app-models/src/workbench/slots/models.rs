@@ -115,6 +115,12 @@ impl ModelsState {
         self.model_editor_has_unsaved_changes()
     }
 
+    /// Leave no model selected, as a history step that took away the
+    /// selected model's library asks.
+    pub fn clear_selected_model(&mut self) {
+        self.selected_model = None;
+    }
+
     pub fn clear_project_model_editor(&mut self) {
         self.model_editor = crate::workbench::documents::model_editor::ModelEditorState::default();
         self.model_editor_recovery = None;
@@ -127,8 +133,8 @@ impl ModelsState {
     }
 }
 
-/// What another part reads of the models feature: its unsaved authoring and
-/// each model's release gate.
+/// What another part reads of the models feature: its unsaved authoring, its
+/// selected model and each model's release gate.
 impl crate::workbench::framework::feature::ModelsPort for ModelsState {
     fn has_unsaved_authoring_changes(&self) -> bool {
         ModelsState::has_unsaved_authoring_changes(self)
@@ -136,6 +142,10 @@ impl crate::workbench::framework::feature::ModelsPort for ModelsState {
 
     fn model_editor_has_unsaved_changes(&self) -> bool {
         ModelsState::model_editor_has_unsaved_changes(self)
+    }
+
+    fn selected_model(&self) -> Option<&str> {
+        self.selected_model.as_deref()
     }
 
     fn model_gate_facts(
