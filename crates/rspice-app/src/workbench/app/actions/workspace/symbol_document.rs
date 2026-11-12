@@ -23,7 +23,7 @@ use crate::state::{
     SYMBOL_DOCUMENT_METADATA_KEY, SymbolDocument, SymbolEditorMetadata,
 };
 use crate::ui::accessibility::counted;
-use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::app_state::{AppState, Model, SlotFacts};
 use crate::workbench::state::WorkbenchSession;
 
 use super::read_only_master_message;
@@ -62,83 +62,6 @@ impl AppState {
         symbol_editor_request_source(&self.model, &self.workbench)
     }
 
-    /// Project one retained view session into the active editor slot. Navigation
-    /// advances request authority; it does not turn passive rendering into an edit.
-    pub(crate) fn project_active_symbol_session(&mut self) {
-        use rspice_schematic_editor::symbol_editor::interaction::{
-            bind_canvas_source, resume_canvas_source,
-        };
-
-        // Leaving the symbol by any route but the session's own exit ends an
-        // in-place edit; what it changed stays, as any symbol edit does.
-        if self
-            .design
-            .symbol
-            .in_place
-            .as_ref()
-            .is_some_and(|session| session.symbol != self.model.workspace.content.active_view)
-        {
-            self.design.symbol.in_place = None;
-        }
-        let source = self.symbol_editor_request_source();
-        let is_symbol =
-            self.model.workspace.content.active_view_type() == crate::state::ViewType::Symbol;
-        let open_views = &self.model.workspace.content.open_views;
-        let retained = &mut self.model.workspace.session.symbol_sessions;
-        let still_open = |previous: &SymbolRequestSource| {
-            previous.project == source.project
-                && previous.design_epoch == source.design_epoch
-                && open_views
-                    .iter()
-                    .any(|open| open.reference == previous.document)
-        };
-        retained.retain(|_, session| session.canvas_source.as_ref().is_some_and(still_open));
-        let same_document = self
-            .design
-            .symbol
-            .editor
-            .canvas_source
-            .as_ref()
-            .is_some_and(|previous| {
-                previous.project == source.project
-                    && previous.design_epoch == source.design_epoch
-                    && previous.document == source.document
-            });
-        if !is_symbol || !same_document {
-            if self
-                .design
-                .symbol
-                .editor
-                .canvas_source
-                .as_ref()
-                .is_some_and(|previous| previous.window == source.window)
-            {
-                // User navigation ends active input. Projecting a different
-                // window keeps it with the window that still owns it.
-                self.design.symbol.editor.clear_drag_state();
-                self.design.symbol.editor.marquee_start = None;
-                self.design.symbol.editor.marquee_current = None;
-                self.design.symbol.editor.inspector.end_field_edit();
-            }
-            // Clipboard contents travel across views; every other field is view-local.
-            let clipboard = std::mem::take(&mut self.design.symbol.editor.clipboard);
-            let previous = std::mem::take(&mut self.design.symbol.editor);
-            if let Some(previous_source) = &previous.canvas_source
-                && still_open(previous_source)
-            {
-                retained.insert(previous_source.document.key(), previous);
-            }
-            if is_symbol && let Some(mut session) = retained.remove(&source.document.key()) {
-                resume_canvas_source(&mut session, source.clone());
-                self.design.symbol.editor = session;
-            }
-            self.design.symbol.editor.clipboard = clipboard;
-        }
-        if is_symbol {
-            bind_canvas_source(&mut self.design.symbol.editor, source);
-        }
-    }
-
     pub(crate) fn active_symbol_ports(&self) -> Vec<PortSpec> {
         self.model
             .symbol_ports(&self.model.workspace.content.active_view)
@@ -150,43 +73,6 @@ impl AppState {
         document: &SymbolDocument,
     ) -> Result<SymbolEditorMetadata, String> {
         load_active_symbol_editor_metadata(&self.model, document)
-    }
-
-    fn active_symbol_metadata_snapshot(&self, fallback: &SymbolDocument) -> SymbolDocumentSnapshot {
-        let reference = &self.model.workspace.content.active_view;
-        self.model
-            .library_manager
-            .get_library(&reference.library)
-            .and_then(|library| library.get_cell(&reference.cell))
-            .and_then(|cell| cell.get_view(&reference.view))
-            .map(|view| symbol_metadata_snapshot_from_view(view, fallback))
-            .unwrap_or_else(|| SymbolDocumentSnapshot::from_document(fallback))
-    }
-
-    fn restore_active_symbol_snapshot(
-        &mut self,
-        snapshot: &SymbolDocumentSnapshot,
-    ) -> Result<(), String> {
-        let reference = self.model.workspace.content.active_view.clone();
-        if self.active_view_read_only() {
-            return Err(self.read_only_master_message());
-        }
-        with_symbol_parent_edit(&mut self.design.symbol, &mut self.model, |symbol, model| {
-            let Some(()) = model
-                .library_manager
-                .edit_library(&reference.library)
-                .and_then(|mut library| {
-                    library.restore_symbol_snapshot(&reference.cell, &reference.view, snapshot)
-                })
-            else {
-                return Err(format!("View '{}' not found", reference.display_path()));
-            };
-            apply_symbol_parent_edit(symbol, model, &snapshot.document, &snapshot.renames);
-            apply_symbol_pin_renames(model, &reference, &snapshot.renames);
-            Ok(())
-        })?;
-        self.model.workspace.content.set_active_dirty(true);
-        Ok(())
     }
 
     /// [`store_active_symbol_document`] for the session.
@@ -407,7 +293,7 @@ impl AppState {
     pub(super) fn record_symbol_metadata_edit(&mut self, before: &SymbolDocument) {
         const MAX_SYMBOL_UNDO: usize = 128;
         let key = self.model.workspace.content.active_key();
-        let snapshot = self.active_symbol_metadata_snapshot(before);
+        let snapshot = active_symbol_metadata_snapshot(&self.model, before);
         push_symbol_undo_snapshot(&mut self.design.symbol, key, snapshot, MAX_SYMBOL_UNDO);
     }
 
@@ -425,42 +311,14 @@ impl AppState {
             .can_redo(&self.model.workspace.content.active_key())
     }
 
+    /// [`undo_active_symbol_document`] for the session.
     pub(crate) fn undo_active_symbol_document(&mut self) -> Result<bool, String> {
-        if self.active_view_read_only() {
-            return Err(self.read_only_master_message());
-        }
-        let key = self.model.workspace.content.active_key();
-        let Some(previous) = self.design.symbol.history.pop_undo(&key) else {
-            return Ok(false);
-        };
-        let current = self.model.load_active_symbol_document()?;
-        let mut current_snapshot = self.active_symbol_metadata_snapshot(&current);
-        current_snapshot.renames = previous.inverted_renames();
-        self.design
-            .symbol
-            .history
-            .finish_undo(key, current_snapshot);
-        self.restore_active_symbol_snapshot(&previous)?;
-        Ok(true)
+        undo_active_symbol_document(&mut self.design.symbol, &mut self.model)
     }
 
+    /// [`redo_active_symbol_document`] for the session.
     pub(crate) fn redo_active_symbol_document(&mut self) -> Result<bool, String> {
-        if self.active_view_read_only() {
-            return Err(self.read_only_master_message());
-        }
-        let key = self.model.workspace.content.active_key();
-        let Some(next) = self.design.symbol.history.pop_redo(&key) else {
-            return Ok(false);
-        };
-        let current = self.model.load_active_symbol_document()?;
-        let mut current_snapshot = self.active_symbol_metadata_snapshot(&current);
-        current_snapshot.renames = next.inverted_renames();
-        self.design
-            .symbol
-            .history
-            .finish_redo(key, current_snapshot);
-        self.restore_active_symbol_snapshot(&next)?;
-        Ok(true)
+        redo_active_symbol_document(&mut self.design.symbol, &mut self.model)
     }
 }
 
@@ -477,6 +335,163 @@ pub(crate) fn symbol_editor_request_source(
         library_revision: model.library_manager.revision(),
         window: wb.window_session.current().value(),
     }
+}
+
+/// Project one retained view session into the active editor slot. Navigation
+/// advances request authority; it does not turn passive rendering into an edit.
+pub(crate) fn project_active_symbol_session(
+    symbol: &mut SymbolUiState,
+    model: &mut Model,
+    wb: &WorkbenchSession,
+) {
+    use rspice_schematic_editor::symbol_editor::interaction::{
+        bind_canvas_source, resume_canvas_source,
+    };
+
+    // Leaving the symbol by any route but the session's own exit ends an
+    // in-place edit; what it changed stays, as any symbol edit does.
+    if symbol
+        .in_place
+        .as_ref()
+        .is_some_and(|session| session.symbol != model.workspace.content.active_view)
+    {
+        symbol.in_place = None;
+    }
+    let source = symbol_editor_request_source(model, wb);
+    let is_symbol = model.workspace.content.active_view_type() == crate::state::ViewType::Symbol;
+    let open_views = &model.workspace.content.open_views;
+    let retained = &mut model.workspace.session.symbol_sessions;
+    let still_open = |previous: &SymbolRequestSource| {
+        previous.project == source.project
+            && previous.design_epoch == source.design_epoch
+            && open_views
+                .iter()
+                .any(|open| open.reference == previous.document)
+    };
+    retained.retain(|_, session| session.canvas_source.as_ref().is_some_and(still_open));
+    let same_document = symbol
+        .editor
+        .canvas_source
+        .as_ref()
+        .is_some_and(|previous| {
+            previous.project == source.project
+                && previous.design_epoch == source.design_epoch
+                && previous.document == source.document
+        });
+    if !is_symbol || !same_document {
+        if symbol
+            .editor
+            .canvas_source
+            .as_ref()
+            .is_some_and(|previous| previous.window == source.window)
+        {
+            // User navigation ends active input. Projecting a different
+            // window keeps it with the window that still owns it.
+            symbol.editor.clear_drag_state();
+            symbol.editor.marquee_start = None;
+            symbol.editor.marquee_current = None;
+            symbol.editor.inspector.end_field_edit();
+        }
+        // Clipboard contents travel across views; every other field is view-local.
+        let clipboard = std::mem::take(&mut symbol.editor.clipboard);
+        let previous = std::mem::take(&mut symbol.editor);
+        if let Some(previous_source) = &previous.canvas_source
+            && still_open(previous_source)
+        {
+            retained.insert(previous_source.document.key(), previous);
+        }
+        if is_symbol && let Some(mut session) = retained.remove(&source.document.key()) {
+            resume_canvas_source(&mut session, source.clone());
+            symbol.editor = session;
+        }
+        symbol.editor.clipboard = clipboard;
+    }
+    if is_symbol {
+        bind_canvas_source(&mut symbol.editor, source);
+    }
+}
+
+fn active_symbol_metadata_snapshot(
+    model: &Model,
+    fallback: &SymbolDocument,
+) -> SymbolDocumentSnapshot {
+    let reference = &model.workspace.content.active_view;
+    model
+        .library_manager
+        .get_library(&reference.library)
+        .and_then(|library| library.get_cell(&reference.cell))
+        .and_then(|cell| cell.get_view(&reference.view))
+        .map(|view| symbol_metadata_snapshot_from_view(view, fallback))
+        .unwrap_or_else(|| SymbolDocumentSnapshot::from_document(fallback))
+}
+
+fn restore_active_symbol_snapshot(
+    symbol: &mut SymbolUiState,
+    model: &mut Model,
+    snapshot: &SymbolDocumentSnapshot,
+) -> Result<(), String> {
+    let reference = model.workspace.content.active_view.clone();
+    if model.active_view_read_only() {
+        return Err(read_only_master_message(model));
+    }
+    with_symbol_parent_edit(symbol, model, |symbol, model| {
+        let Some(()) = model
+            .library_manager
+            .edit_library(&reference.library)
+            .and_then(|mut library| {
+                library.restore_symbol_snapshot(&reference.cell, &reference.view, snapshot)
+            })
+        else {
+            return Err(format!("View '{}' not found", reference.display_path()));
+        };
+        apply_symbol_parent_edit(symbol, model, &snapshot.document, &snapshot.renames);
+        apply_symbol_pin_renames(model, &reference, &snapshot.renames);
+        Ok(())
+    })?;
+    model.workspace.content.set_active_dirty(true);
+    Ok(())
+}
+
+/// Step the active symbol's history back; `Ok(false)` when it holds
+/// no step to take.
+pub(crate) fn undo_active_symbol_document(
+    symbol: &mut SymbolUiState,
+    model: &mut Model,
+) -> Result<bool, String> {
+    if model.active_view_read_only() {
+        return Err(read_only_master_message(model));
+    }
+    let key = model.workspace.content.active_key();
+    let Some(previous) = symbol.history.pop_undo(&key) else {
+        return Ok(false);
+    };
+    let current = model.load_active_symbol_document()?;
+    let mut current_snapshot = active_symbol_metadata_snapshot(model, &current);
+    current_snapshot.renames = previous.inverted_renames();
+    symbol.history.finish_undo(key, current_snapshot);
+    restore_active_symbol_snapshot(symbol, model, &previous)?;
+    Ok(true)
+}
+
+/// Step the active symbol's history forward; `Ok(false)` when it holds
+/// no step to take.
+pub(crate) fn redo_active_symbol_document(
+    symbol: &mut SymbolUiState,
+    model: &mut Model,
+) -> Result<bool, String> {
+    if model.active_view_read_only() {
+        return Err(read_only_master_message(model));
+    }
+    let key = model.workspace.content.active_key();
+    let Some(next) = symbol.history.pop_redo(&key) else {
+        return Ok(false);
+    };
+    let current = model.load_active_symbol_document()?;
+    let mut current_snapshot = active_symbol_metadata_snapshot(model, &current);
+    current_snapshot.renames = next.inverted_renames();
+    symbol.history.finish_redo(key, current_snapshot);
+    restore_active_symbol_snapshot(symbol, model, &next)?;
+    Ok(true)
 }
 
 pub(crate) fn load_active_symbol_editor_metadata(
@@ -785,37 +800,6 @@ fn push_symbol_undo_snapshot(
 }
 
 impl AppState {
-    /// Publish what the symbol pin checks found, as canonical records.
-    ///
-    /// Its own entry point with its own guard rather than a loosened
-    /// [`Self::publish_active_design_check_result`]: that guard is right to
-    /// refuse a symbol, because schematic design-check evidence is keyed to a
-    /// cell view that has a schematic and carries a receipt the symbol checks
-    /// have no part in.
-    pub(crate) fn publish_active_symbol_pin_check_result(
-        &mut self,
-        result: &rspice_design::drc::DrcResult,
-    ) -> Result<(), String> {
-        if self.model.workspace.content.active_view_type() != crate::state::ViewType::Symbol {
-            return Err("symbol pin findings can only be published from a symbol view".to_owned());
-        }
-        let subject = self.model.workspace.content.active_view.clone();
-        // Derived before the batch is inserted, because resolving a route
-        // reads the state the insertion takes mutably.
-        let mut records = symbol_pin_records(self, &subject, result);
-        // The symbol's own waivers that do not do what they say are stated
-        // with the pass that found that out.
-        if let Ok(document) = self.model.load_symbol_document(&subject) {
-            records.extend(crate::workbench::app_state::waivers::stored_waiver_records(
-                &self.model,
-                &subject,
-                &document.waivers,
-                result,
-            ));
-        }
-        self.publish_diagnostics(DiagnosticInputs::SymbolPins { subject }, records)
-    }
-
     /// How many pin findings stand against the active symbol view, or `None`
     /// where the checks have not run against it.
     ///
@@ -901,46 +885,86 @@ impl AppState {
         true
     }
 
+    /// [`run_active_symbol_pin_checks`] for the session.
     pub(crate) fn run_active_symbol_pin_checks(&mut self) {
-        let reference = self.model.workspace.content.active_view.clone();
-        let inputs = match self.model.symbol_pin_check_inputs(&reference) {
-            Ok(inputs) => inputs,
-            Err(error) => {
-                self.record(
-                    LogSeverity::Error,
-                    LogSource::Studio,
-                    format!("Symbol pin checks could not run: {error}"),
-                );
-                return;
-            }
-        };
-        let mut result = check_symbol_pins(&inputs.document, &inputs.ports, &reference);
-        // The symbol's own waivers, stored in the document the checks read.
-        rspice_design::drc::CheckWaivers::for_subject(&inputs.document.waivers).apply(&mut result);
-        let found = result.total_count();
-        if let Err(error) = self.publish_active_symbol_pin_check_result(&result) {
-            self.record(
+        let facts = self.slot_facts();
+        run_active_symbol_pin_checks(&mut self.model, facts);
+    }
+}
+
+/// Check the active symbol's pins against its schematic and publish what
+/// the check finds, with one Console line saying it ran.
+pub(crate) fn run_active_symbol_pin_checks(model: &mut Model, facts: SlotFacts) {
+    let reference = model.workspace.content.active_view.clone();
+    let inputs = match model.symbol_pin_check_inputs(&reference) {
+        Ok(inputs) => inputs,
+        Err(error) => {
+            model.record(
                 LogSeverity::Error,
                 LogSource::Studio,
-                format!("Symbol pin check findings could not be published: {error}"),
+                format!("Symbol pin checks could not run: {error}"),
             );
             return;
         }
-        // One Console line records that the check ran, at the severity of an
-        // event rather than of a finding: an error line here would stand on
-        // the Problems page as a problem of its own, beside the findings it
-        // counts. The findings themselves are what the page, the counts and
-        // the canvas tour all read.
-        let summary = if found == 0 {
-            "Symbol pin check: pins match the schematic.".to_owned()
-        } else {
-            format!(
-                "Symbol pin check: {}. See Problems.",
-                counted(found, "finding", "findings")
-            )
-        };
-        self.record(LogSeverity::Info, LogSource::Studio, summary);
+    };
+    let mut result = check_symbol_pins(&inputs.document, &inputs.ports, &reference);
+    // The symbol's own waivers, stored in the document the checks read.
+    rspice_design::drc::CheckWaivers::for_subject(&inputs.document.waivers).apply(&mut result);
+    let found = result.total_count();
+    if let Err(error) = publish_active_symbol_pin_check_result(model, facts, &result) {
+        model.record(
+            LogSeverity::Error,
+            LogSource::Studio,
+            format!("Symbol pin check findings could not be published: {error}"),
+        );
+        return;
     }
+    // One Console line records that the check ran, at the severity of an
+    // event rather than of a finding: an error line here would stand on
+    // the Problems page as a problem of its own, beside the findings it
+    // counts. The findings themselves are what the page, the counts and
+    // the canvas tour all read.
+    let summary = if found == 0 {
+        "Symbol pin check: pins match the schematic.".to_owned()
+    } else {
+        format!(
+            "Symbol pin check: {}. See Problems.",
+            counted(found, "finding", "findings")
+        )
+    };
+    model.record(LogSeverity::Info, LogSource::Studio, summary);
+}
+
+/// Publish what the symbol pin checks found, as canonical records.
+///
+/// Its own entry point with its own guard rather than a loosened
+/// [`Model::publish_active_design_check_result`]: that guard is right to
+/// refuse a symbol, because schematic design-check evidence is keyed to a
+/// cell view that has a schematic and carries a receipt the symbol checks
+/// have no part in.
+fn publish_active_symbol_pin_check_result(
+    model: &mut Model,
+    facts: SlotFacts,
+    result: &rspice_design::drc::DrcResult,
+) -> Result<(), String> {
+    if model.workspace.content.active_view_type() != crate::state::ViewType::Symbol {
+        return Err("symbol pin findings can only be published from a symbol view".to_owned());
+    }
+    let subject = model.workspace.content.active_view.clone();
+    // Derived before the batch is inserted, because resolving a route
+    // reads the state the insertion takes mutably.
+    let mut records = symbol_pin_records(model, facts, &subject, result);
+    // The symbol's own waivers that do not do what they say are stated
+    // with the pass that found that out.
+    if let Ok(document) = model.load_symbol_document(&subject) {
+        records.extend(crate::workbench::app_state::waivers::stored_waiver_records(
+            model,
+            &subject,
+            &document.waivers,
+            result,
+        ));
+    }
+    model.publish_diagnostics(DiagnosticInputs::SymbolPins { subject }, records, facts)
 }
 
 /// One pin finding the tour can visit: how bad it is, what the store calls
@@ -962,12 +986,13 @@ struct VisitablePinFinding {
 /// in, so it resolves without asking whichever drawing is in front of the
 /// reader where its object is.
 fn symbol_pin_records(
-    state: &AppState,
+    model: &Model,
+    facts: SlotFacts,
     subject: &CellViewRef,
     result: &rspice_design::drc::DrcResult,
 ) -> Vec<DiagnosticRecord> {
-    let project = state.model.workspace.content.project.id();
-    let revision = state.model.workspace.content.project.revision().get();
+    let project = model.workspace.content.project.id();
+    let revision = model.workspace.content.project.revision().get();
     let document_id = subject.key();
     // Keyed by the pin each finding is about, through the one key the design
     // rules use, and minted by the one function every store record is minted
@@ -993,9 +1018,12 @@ fn symbol_pin_records(
         .map(|((violation, key), mut canonical)| {
             use crate::workbench::app_state::waivers;
 
-            let route =
-                crate::schematic::view::violations::location_anchor(state, &violation.location)
-                    .map(DiagnosticRoute::Anchor);
+            let route = crate::schematic::view::violations::location_anchor(
+                model,
+                facts.review_markers,
+                &violation.location,
+            )
+            .map(DiagnosticRoute::Anchor);
             canonical.suppression = violation.waiver.as_ref().map(waivers::suppression_of);
             DiagnosticRecord::new(
                 canonical,

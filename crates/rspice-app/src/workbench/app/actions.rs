@@ -343,7 +343,11 @@ impl RSpiceApp {
         // so Ctrl+Z means "take back what I just typed" rather than reaching
         // past the instrument into the design.
         if self.state.workbench.workspace == crate::workbench::state::Workspace::Stimulus
-            && stimulus::undo_draft(&mut self.state)
+            && stimulus::undo_draft(
+                self.state.design.selected_stimulus_definition.as_deref(),
+                &mut self.state.design.stimulus_editor,
+                &self.state.model,
+            )
         {
             return;
         }
@@ -377,7 +381,11 @@ impl RSpiceApp {
 
     fn step_redo(&mut self) {
         if self.state.workbench.workspace == crate::workbench::state::Workspace::Stimulus
-            && stimulus::redo_draft(&mut self.state)
+            && stimulus::redo_draft(
+                self.state.design.selected_stimulus_definition.as_deref(),
+                &mut self.state.design.stimulus_editor,
+                &self.state.model,
+            )
         {
             return;
         }

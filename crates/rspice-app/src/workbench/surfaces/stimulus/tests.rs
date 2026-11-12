@@ -329,7 +329,9 @@ fn a_family_switch_resets_the_shape_parameters_and_undo_restores_them() {
     assert_eq!(draft.working().params, "");
 
     assert!(crate::workbench::app::actions::stimulus::undo_draft(
-        &mut app.state
+        app.state.design.selected_stimulus_definition.as_deref(),
+        &mut app.state.design.stimulus_editor,
+        &app.state.model,
     ));
     let draft = app
         .state

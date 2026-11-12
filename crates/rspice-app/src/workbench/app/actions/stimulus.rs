@@ -244,26 +244,24 @@ pub(crate) fn revert_draft(
 }
 
 /// Step the selected definition's draft back, if it has one.
-pub(crate) fn undo_draft(state: &mut AppState) -> bool {
+pub(crate) fn undo_draft(
+    selection: Option<&str>,
+    editor: &mut StimulusEditorState,
+    model: &Model,
+) -> bool {
     let mut stepped = false;
-    with_draft(
-        state.design.selected_stimulus_definition.as_deref(),
-        &mut state.design.stimulus_editor,
-        &state.model,
-        |draft| stepped = draft.undo(),
-    );
+    with_draft(selection, editor, model, |draft| stepped = draft.undo());
     stepped
 }
 
 /// Step the selected definition's draft forward, if it has one.
-pub(crate) fn redo_draft(state: &mut AppState) -> bool {
+pub(crate) fn redo_draft(
+    selection: Option<&str>,
+    editor: &mut StimulusEditorState,
+    model: &Model,
+) -> bool {
     let mut stepped = false;
-    with_draft(
-        state.design.selected_stimulus_definition.as_deref(),
-        &mut state.design.stimulus_editor,
-        &state.model,
-        |draft| stepped = draft.redo(),
-    );
+    with_draft(selection, editor, model, |draft| stepped = draft.redo());
     stepped
 }
 

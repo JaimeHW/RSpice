@@ -7,9 +7,12 @@
 //! step, so each happens where it did when the step was one operation.
 
 use crate::state::CellViewRef;
-use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::design_history::{HistoryEffects, StagedProjectStep};
-use crate::workbench::state::InlineEditAuthority;
+use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::state::{InlineEditAuthority, WorkbenchSession};
+
+use super::bump_active_schematic_epoch;
+use super::symbol_document::SymbolUiState;
 
 impl AppState {
     // Application half of a model operation; it becomes a request.
@@ -46,16 +49,15 @@ impl AppState {
         self.model.finish_project_step(applied)
     }
 
-    /// Bring the document a history step restores to the front: the editor
-    /// takes up the drawing the model swapped in, and the console says so.
+    /// [`activate_history_document`] for the session.
     pub(crate) fn activate_history_document(&mut self, reference: &CellViewRef, operation: &str) {
-        if self.model.activate_history_document(reference) {
-            self.bump_active_schematic_epoch();
-            self.prompt(format!(
-                "{operation} switched to {} to restore it.",
-                reference.display_path()
-            ));
-        }
+        activate_history_document(
+            &mut self.design.symbol,
+            &mut self.model,
+            &mut self.workbench,
+            reference,
+            operation,
+        );
     }
 
     /// Do what applying a history step's record asked of the workbench.
@@ -126,5 +128,23 @@ impl AppState {
                 false
             }
         }
+    }
+}
+
+/// Bring the document a history step restores to the front: the editor
+/// takes up the drawing the model swapped in, and the console says so.
+pub(crate) fn activate_history_document(
+    symbol: &mut SymbolUiState,
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
+    reference: &CellViewRef,
+    operation: &str,
+) {
+    if model.activate_history_document(reference) {
+        bump_active_schematic_epoch(symbol, model, wb);
+        wb.prompt(format!(
+            "{operation} switched to {} to restore it.",
+            reference.display_path()
+        ));
     }
 }

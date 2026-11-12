@@ -13,47 +13,61 @@ mod waivers;
 
 use super::hierarchy_net_highlight::NetCarry;
 use crate::diagnostics::LogAnchor;
-use crate::schematic::view::schematic_symbol_context;
 use crate::state::{
     CellViewRef, ComponentType, Point, RetainedSimulationState, SchematicState, ViewType,
 };
 use crate::workbench::app::RSpiceApp;
+use crate::workbench::app_state::interaction_state::DragState;
 use crate::workbench::app_state::{AppState, Model};
 use crate::workbench::state::{WorkbenchSession, WorkspaceDocumentId};
+use rspice_app_runs::workbench::slots::runs::RunsState;
+use symbol_document::{SymbolUiState, project_active_symbol_session};
 
-fn schematic_for_workspace(state: &mut AppState, reference: &CellViewRef) -> SchematicState {
-    let existing = state
-        .model
-        .workspace
-        .clone_schematic_editor(&reference.key());
+/// What restoring the active schematic from the workspace reads and writes
+/// of the design feature's state: the canvas drag it lets go, the snap and
+/// routing the new buffer takes up, the visibility whose wire routing follows
+/// a new schematic, and the symbol editor projected onto the view in front.
+pub(crate) struct SchematicRestoreParts<'a> {
+    pub(crate) drag: &'a mut DragState,
+    pub(crate) snap: &'a mut crate::state::SnapEngine,
+    pub(crate) routing_mode: &'a mut crate::state::WireRoutingMode,
+    pub(crate) visibility: &'a mut crate::state::SchematicVisibilityPolicy,
+    pub(crate) symbol: &'a mut SymbolUiState,
+}
+
+fn schematic_for_workspace(
+    design: &mut SchematicRestoreParts<'_>,
+    model: &Model,
+    reference: &CellViewRef,
+) -> SchematicState {
+    let existing = model.workspace.clone_schematic_editor(&reference.key());
     let created = existing.is_none();
-    let mut schematic = existing.unwrap_or_else(|| state.new_schematic_document());
+    let mut schematic = existing
+        .unwrap_or_else(|| new_schematic_document(model, design.snap, *design.routing_mode));
     // Workspace buffers round-trip through serde, which skips the runtime
     // ID counter and name counters: without recalculation a freshly placed
     // component reuses an existing ID and selection matches both.
     schematic.recalculate_runtime_state();
-    schematic.session.editor.snap_engine = state.design.schematic_snap.clone();
+    schematic.session.editor.snap_engine = design.snap.clone();
     schematic.reconcile_grid_pitch_runtime();
-    state.design.schematic_snap.grid_size = schematic.document().grid_size;
-    schematic.session.editor.automatic_junctions =
-        state.model.preferences.automatic_junction_dots();
-    schematic.session.editor.selection_crossing = state.model.preferences.selection_crossing();
+    design.snap.grid_size = schematic.document().grid_size;
+    schematic.session.editor.automatic_junctions = model.preferences.automatic_junction_dots();
+    schematic.session.editor.selection_crossing = model.preferences.selection_crossing();
     if created {
         // A new schematic starts from the routing preference, and the
         // session's routing control follows it.
         let routing_mode = schematic.session.editor.wire_drawing.routing_mode;
-        state.design.schematic_routing_mode = routing_mode;
-        state.design.schematic_visibility.wire_routing =
+        *design.routing_mode = routing_mode;
+        design.visibility.wire_routing =
             crate::workbench::app::dialogs::grid_snap_routing::routing_style(routing_mode);
     } else {
-        schematic.session.editor.wire_drawing.routing_mode = state.design.schematic_routing_mode;
-        schematic.session.editor.bus_drawing.routing_mode = state.design.schematic_routing_mode;
+        schematic.session.editor.wire_drawing.routing_mode = *design.routing_mode;
+        schematic.session.editor.bus_drawing.routing_mode = *design.routing_mode;
     }
     // Views from read-only libraries open for inspection, never for edit —
     // the docbar banner explains and every edit path checks this flag.
-    schematic.session.read_only = state.model.safe_mode.project_read_only()
-        || state
-            .model
+    schematic.session.read_only = model.safe_mode.project_read_only()
+        || model
             .library_manager
             .get_library(&reference.library)
             .is_some_and(|library| library.read_only);
@@ -103,72 +117,13 @@ pub(crate) fn capture_active_schematic_selection(
 }
 
 impl AppState {
-    pub(crate) fn rebuild_active_connections_from_symbols(&mut self) {
-        let terminals = {
-            let symbols = schematic_symbol_context(self);
-            self.model
-                .schematic
-                .document()
-                .components
-                .iter()
-                .flat_map(|component| {
-                    symbols
-                        .named_terminal_points(component)
-                        .into_iter()
-                        .map(move |(name, point)| (component.id, name, point))
-                })
-                .collect::<Vec<_>>()
-        };
-        self.model
-            .schematic
-            .rebuild_connections_from_terminals(&terminals);
-    }
-
-    /// Resolve the user defaults into one explicit, project-portable document
-    /// policy. This is the only constructor production UI paths use for a new
-    /// schematic/testbench document. Existing buffers are never rewritten.
+    /// [`new_schematic_document`] for the session.
     pub(crate) fn new_schematic_document(&self) -> SchematicState {
-        use crate::state::{SchematicGridPitch, WireJunctionPolicy};
-        use crate::workbench::ChoicePreference;
-
-        let mut document = rspice_design::schematic::document::SchematicDocument::default();
-        // Snap targets and radius are device-local session preferences. A new
-        // document inherits those exact choices, while its pitch is resolved
-        // below into project-portable policy and then projected back into the
-        // runtime engine.
-        let preferences = &self.model.preferences;
-        document.document_policy.grid_pitch = SchematicGridPitch::ALL
-            .get(preferences.choice(ChoicePreference::SchematicGrid))
-            .copied()
-            .expect("schematic grid preference is normalized before use");
-        // Whether the schematic may route at an angle is the document's; the
-        // junction dots and drag selection the editor applies come from
-        // Preferences live, so the document's copies of those are left alone.
-        document.document_policy.wire_junctions = if preferences.any_angle_wire_routing() {
-            WireJunctionPolicy::AnyAngle
-        } else if preferences.automatic_junction_dots() {
-            WireJunctionPolicy::OrthogonalAutomatic
-        } else {
-            WireJunctionPolicy::OrthogonalManual
-        };
-        document.document_policy.net_naming = preferences.new_schematic_net_naming();
-
-        let mut schematic = SchematicState::from_document(document);
-        schematic.session.editor.snap_engine = self.design.schematic_snap.clone();
-        schematic.reconcile_grid_pitch_runtime();
-        schematic.session.editor.automatic_junctions = preferences.automatic_junction_dots();
-        schematic.session.editor.selection_crossing = preferences.selection_crossing();
-        // Routing comes from the preference, not from whatever the session
-        // last drew with.
-        let routing_mode =
-            preferences.new_schematic_routing_mode(self.design.schematic_routing_mode);
-        schematic
-            .session
-            .editor
-            .wire_drawing
-            .set_routing_mode(routing_mode);
-        schematic.session.editor.bus_drawing.routing_mode = routing_mode;
-        schematic
+        new_schematic_document(
+            &self.model,
+            &self.design.schematic_snap,
+            self.design.schematic_routing_mode,
+        )
     }
 }
 
@@ -501,24 +456,13 @@ impl AppState {
         sync_active_schematic(&mut self.model, &mut self.workbench);
     }
 
+    /// [`restore_active_schematic_from_workspace`] for the session.
     pub(crate) fn restore_active_schematic_from_workspace(&mut self) {
-        self.cancel_schematic_drag();
-        self.model
-            .workspace
-            .ensure_library_model(&mut self.model.library_manager);
-        let reference = self.model.workspace.content.active_view.clone();
-        let schematic_reference = self.model.workspace.content.active_schematic_reference();
-        self.model.schematic = schematic_for_workspace(self, &schematic_reference);
-        self.bump_active_schematic_epoch();
-        // Project persistence stores topology, not the derived rubber-band
-        // connection cache. Rebuild against the same authored/generated
-        // symbol geometry that is rendered and netlisted.
-        self.rebuild_active_connections_from_symbols();
-        self.refresh_active_design_check_projection();
-        self.model.library_manager.select_view(
-            &reference.library,
-            &reference.cell,
-            &reference.view,
+        restore_active_schematic_from_workspace(
+            self.design.schematic_restore_parts(),
+            &mut self.model,
+            &self.workbench,
+            &self.runs,
         );
     }
 
@@ -551,7 +495,11 @@ impl AppState {
             &reference.view,
         );
         let schematic_reference = self.model.workspace.content.active_schematic_reference();
-        self.model.schematic = schematic_for_workspace(self, &schematic_reference);
+        self.model.schematic = schematic_for_workspace(
+            &mut self.design.schematic_restore_parts(),
+            &self.model,
+            &schematic_reference,
+        );
         self.bump_active_schematic_epoch();
         self.refresh_active_design_check_projection();
         self.prompt(format!("Opened {}.", reference.display_path()));
@@ -596,7 +544,11 @@ impl AppState {
             &reference.view,
         );
         let schematic_reference = self.model.workspace.content.active_schematic_reference();
-        self.model.schematic = schematic_for_workspace(self, &schematic_reference);
+        self.model.schematic = schematic_for_workspace(
+            &mut self.design.schematic_restore_parts(),
+            &self.model,
+            &schematic_reference,
+        );
         self.bump_active_schematic_epoch();
         self.refresh_active_design_check_projection();
         self.enter_occurrence_net_highlight(carried);
@@ -638,16 +590,20 @@ impl AppState {
                 &reference.cell,
                 &reference.view,
             );
-            self.model.schematic = schematic_for_workspace(self, &reference);
+            self.model.schematic = schematic_for_workspace(
+                &mut self.design.schematic_restore_parts(),
+                &self.model,
+                &reference,
+            );
             self.bump_active_schematic_epoch();
             self.refresh_active_design_check_projection();
             self.enter_occurrence_net_highlight(carried);
         }
     }
 
+    /// [`bump_active_schematic_epoch`] for the session.
     pub(crate) fn bump_active_schematic_epoch(&mut self) {
-        self.model.active_schematic_epoch = self.model.active_schematic_epoch.wrapping_add(1);
-        self.project_active_symbol_session();
+        bump_active_schematic_epoch(&mut self.design.symbol, &mut self.model, &self.workbench);
     }
 
     /// [`hierarchy_master_for_component`] for the session's model.
@@ -920,6 +876,116 @@ pub(crate) fn sync_active_schematic(model: &mut Model, workbench: &mut Workbench
     if let Some(prompt) = model.sync_active_schematic_to_workspace() {
         workbench.prompt(prompt);
     }
+}
+
+/// Resolve the user defaults into one explicit, project-portable document
+/// policy. This is the only constructor production UI paths use for a new
+/// schematic/testbench document. Existing buffers are never rewritten.
+pub(crate) fn new_schematic_document(
+    model: &Model,
+    snap: &crate::state::SnapEngine,
+    routing_mode: crate::state::WireRoutingMode,
+) -> SchematicState {
+    use crate::state::{SchematicGridPitch, WireJunctionPolicy};
+    use crate::workbench::ChoicePreference;
+
+    let mut document = rspice_design::schematic::document::SchematicDocument::default();
+    // Snap targets and radius are device-local session preferences. A new
+    // document inherits those exact choices, while its pitch is resolved
+    // below into project-portable policy and then projected back into the
+    // runtime engine.
+    let preferences = &model.preferences;
+    document.document_policy.grid_pitch = SchematicGridPitch::ALL
+        .get(preferences.choice(ChoicePreference::SchematicGrid))
+        .copied()
+        .expect("schematic grid preference is normalized before use");
+    // Whether the schematic may route at an angle is the document's; the
+    // junction dots and drag selection the editor applies come from
+    // Preferences live, so the document's copies of those are left alone.
+    document.document_policy.wire_junctions = if preferences.any_angle_wire_routing() {
+        WireJunctionPolicy::AnyAngle
+    } else if preferences.automatic_junction_dots() {
+        WireJunctionPolicy::OrthogonalAutomatic
+    } else {
+        WireJunctionPolicy::OrthogonalManual
+    };
+    document.document_policy.net_naming = preferences.new_schematic_net_naming();
+
+    let mut schematic = SchematicState::from_document(document);
+    schematic.session.editor.snap_engine = snap.clone();
+    schematic.reconcile_grid_pitch_runtime();
+    schematic.session.editor.automatic_junctions = preferences.automatic_junction_dots();
+    schematic.session.editor.selection_crossing = preferences.selection_crossing();
+    // Routing comes from the preference, not from whatever the session
+    // last drew with.
+    let routing_mode = preferences.new_schematic_routing_mode(routing_mode);
+    schematic
+        .session
+        .editor
+        .wire_drawing
+        .set_routing_mode(routing_mode);
+    schematic.session.editor.bus_drawing.routing_mode = routing_mode;
+    schematic
+}
+
+/// Rebuild the active schematic's rubber-band connections against the
+/// symbol geometry that is rendered and netlisted.
+pub(crate) fn rebuild_active_connections_from_symbols(model: &mut Model) {
+    let terminals = {
+        let symbols = model.schematic_symbol_context();
+        model
+            .schematic
+            .document()
+            .components
+            .iter()
+            .flat_map(|component| {
+                symbols
+                    .named_terminal_points(component)
+                    .into_iter()
+                    .map(move |(name, point)| (component.id, name, point))
+            })
+            .collect::<Vec<_>>()
+    };
+    model
+        .schematic
+        .rebuild_connections_from_terminals(&terminals);
+}
+
+/// Take up the active view's schematic from the workspace's working copy,
+/// as a history step or a reload left it.
+pub(crate) fn restore_active_schematic_from_workspace(
+    mut design: SchematicRestoreParts<'_>,
+    model: &mut Model,
+    wb: &WorkbenchSession,
+    runs: &RunsState,
+) {
+    design.drag.cancel_schematic_drag(model);
+    model
+        .workspace
+        .ensure_library_model(&mut model.library_manager);
+    let reference = model.workspace.content.active_view.clone();
+    let schematic_reference = model.workspace.content.active_schematic_reference();
+    model.schematic = schematic_for_workspace(&mut design, model, &schematic_reference);
+    bump_active_schematic_epoch(design.symbol, model, wb);
+    // Project persistence stores topology, not the derived rubber-band
+    // connection cache. Rebuild against the same authored/generated
+    // symbol geometry that is rendered and netlisted.
+    rebuild_active_connections_from_symbols(model);
+    model.refresh_active_design_check_projection(runs.slot_facts(design.visibility.review_markers));
+    model
+        .library_manager
+        .select_view(&reference.library, &reference.cell, &reference.view);
+}
+
+/// Mark the active schematic as a new document for the edits that read it,
+/// and project the symbol editor's session onto the view now in front.
+pub(crate) fn bump_active_schematic_epoch(
+    symbol: &mut SymbolUiState,
+    model: &mut Model,
+    wb: &WorkbenchSession,
+) {
+    model.active_schematic_epoch = model.active_schematic_epoch.wrapping_add(1);
+    project_active_symbol_session(symbol, model, wb);
 }
 
 impl RSpiceApp {

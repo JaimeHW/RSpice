@@ -7,7 +7,7 @@ use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibilit
 
 use crate::state::{DesignNoteKind, DesignReviewState, GridStyle, SchematicVisibilityPolicy};
 use crate::ui::widgets::DialogChoice;
-use crate::workbench::app::actions::workspace::sync_active_schematic;
+use crate::workbench::app::actions::workspace::{SchematicRestoreParts, sync_active_schematic};
 use crate::workbench::app::dialogs::grid_snap_routing::{self, GridSnapRoutingCommitError};
 use crate::workbench::app::dialogs::visibility_options::{self, SchematicVisibilityRecovery};
 use crate::workbench::app::{
@@ -240,6 +240,18 @@ impl DesignState {
             canvas_view_center: self.canvas_view_center,
             clipboard: &self.schematic_clipboard,
             duplicate_external_nets: self.duplicate_external_nets,
+        }
+    }
+
+    /// What restoring the active schematic from the workspace reads and
+    /// writes of this state.
+    pub(crate) fn schematic_restore_parts(&mut self) -> SchematicRestoreParts<'_> {
+        SchematicRestoreParts {
+            drag: &mut self.interaction.drag,
+            snap: &mut self.schematic_snap,
+            routing_mode: &mut self.schematic_routing_mode,
+            visibility: &mut self.schematic_visibility,
+            symbol: &mut self.symbol,
         }
     }
 

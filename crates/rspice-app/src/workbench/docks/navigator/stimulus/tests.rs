@@ -578,7 +578,11 @@ fn editing_the_purpose_goes_through_the_draft_and_is_undoable() {
             .map(|draft| draft.working().purpose.as_str()),
         Some("differential sensor drive")
     );
-    assert!(stimulus_verbs::undo_draft(&mut app.state));
+    assert!(stimulus_verbs::undo_draft(
+        app.state.design.selected_stimulus_definition.as_deref(),
+        &mut app.state.design.stimulus_editor,
+        &app.state.model,
+    ));
     assert_eq!(
         app.state
             .design

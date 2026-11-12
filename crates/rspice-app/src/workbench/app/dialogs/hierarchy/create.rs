@@ -18,6 +18,7 @@ use rspice_design::drc::{DrcConfig, DrcViolation, run_check_with_hierarchy};
 use rspice_design::hierarchy::HierarchySource;
 
 use crate::workbench::app::SchematicEditAuthority;
+use crate::workbench::app::actions::workspace::rebuild_active_connections_from_symbols;
 use crate::workbench::app::dialogs::design_request::DesignRequest;
 use crate::workbench::app::schematic::hierarchy_reference_impact::validate_hierarchy_reference_impact;
 use crate::workbench::app_state::design_history::{
@@ -494,7 +495,7 @@ pub(in crate::workbench) fn commit_create_hierarchy(state: &mut AppState) -> Res
     state.model.library_manager = next_libraries;
     state.model.workspace = next_workspace;
     state.model.schematic = candidate.child.clone();
-    state.rebuild_active_connections_from_symbols();
+    rebuild_active_connections_from_symbols(&mut state.model);
     state.bump_active_schematic_epoch();
     state.model.library_manager.select_view(
         &library_name,

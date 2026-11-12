@@ -8,8 +8,9 @@
 
 use egui::Painter;
 
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::{AppState, Model, model_location_anchor};
 use rspice_design::drc::{DrcLocation, DrcSeverity, DrcViolation};
+use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility;
 
 use super::viewport::Viewport;
 use rspice_schematic_editor::view::violations as markers;
@@ -124,7 +125,11 @@ pub(crate) fn finding_anchor(
     state: &AppState,
     violation: &DrcViolation,
 ) -> Option<crate::diagnostics::LogAnchor> {
-    location_anchor(state, &violation.location)
+    location_anchor(
+        &state.model,
+        state.design.schematic_visibility.review_markers,
+        &violation.location,
+    )
 }
 
 /// Where one finding location in the drawing in front of the reader points,
@@ -137,12 +142,14 @@ pub(crate) fn finding_anchor(
 /// resolver keeps them from sending the author to three different places for
 /// one location.
 pub(crate) fn location_anchor(
-    state: &AppState,
+    model: &Model,
+    review_markers: SchematicReviewMarkerVisibility,
     location: &DrcLocation,
 ) -> Option<crate::diagnostics::LogAnchor> {
-    location_anchor_in(
-        state,
-        &state.model.workspace.content.active_schematic_reference(),
+    model_location_anchor(
+        model,
+        review_markers,
+        &model.workspace.content.active_schematic_reference(),
         location,
     )
 }
@@ -159,7 +166,7 @@ pub(crate) fn location_anchor_in(
     cell_view: &crate::state::CellViewRef,
     location: &DrcLocation,
 ) -> Option<crate::diagnostics::LogAnchor> {
-    crate::workbench::app_state::model_location_anchor(
+    model_location_anchor(
         &state.model,
         state.design.schematic_visibility.review_markers,
         cell_view,

@@ -14,6 +14,7 @@ use super::design_checks::DesignCheckStatus;
 use super::diagnostic_store::listing::{ListingInputs, ListingSource};
 #[cfg(test)]
 use super::diagnostic_store::{BatchStanding, DiagnosticBatch};
+#[cfg(test)]
 use super::diagnostic_store::{DiagnosticInputs, DiagnosticRecord};
 use super::{AppState, Model, SlotFacts};
 use crate::state::CellViewRef;
@@ -40,6 +41,7 @@ impl AppState {
     }
 
     // Application half of a model operation; it becomes a request.
+    #[cfg(test)]
     pub(crate) fn publish_diagnostics(
         &mut self,
         inputs: DiagnosticInputs,
