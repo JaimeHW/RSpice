@@ -901,15 +901,6 @@ pub trait CodeModel: Send + Sync {
         self.analog_threshold_input(ctx, port, element, input)
     }
 
-    /// Whether this model decides its declared thresholds by a crossing the
-    /// coupled run's root located on them, where one is handed to it
-    /// (`CmContext::located_crossing`). A model that does not is
-    /// decided by its sample alone, so its root goes on refining a landing
-    /// whose sample reads a rounding short of the threshold.
-    fn decides_by_located_crossing(&self) -> bool {
-        false
-    }
-
     /// Initialize instance state
     ///
     /// Called once when the instance is created.

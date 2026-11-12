@@ -101,10 +101,6 @@ impl CodeModel for MetadataOverlayModel {
             .analog_threshold_input_at(ctx, port, element, threshold, input)
     }
 
-    fn decides_by_located_crossing(&self) -> bool {
-        self.inner.decides_by_located_crossing()
-    }
-
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
         self.inner.init(ctx)
     }

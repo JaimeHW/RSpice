@@ -145,31 +145,6 @@ impl AnalogThresholdBehavior {
     }
 }
 
-/// A threshold crossing that a coupled run's root located on one converter
-/// input, carried to the candidate that lands past it.
-///
-/// The root lands one representable instant past the crossing, where the
-/// input can still read a rounding short of the threshold. A converter that
-/// decided by that sample would hold, and the run would chase the same
-/// crossing one solver floor later. So once a crossing is located, the side
-/// of it a candidate lies on decides: past it, the converter takes `state`; on
-/// it exactly, the converter applies its own law to `threshold`, which is how
-/// ngspice reads a sample that falls on a threshold. The event is dated at
-/// `time`, not at the candidate. The root hands one over only where the landed
-/// sample reads the crossing to within the root's window; a sample further
-/// short is a curved signal the root goes on refining.
-#[cfg(feature = "veriloga")]
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct LocatedCrossing {
-    /// The crossing instant, in seconds.
-    pub(crate) time: Value,
-    /// The decision on the far side of the crossing.
-    pub(crate) state: DigitalState,
-    /// The threshold crossed, in the units of the crossing function the
-    /// converter compares.
-    pub(crate) threshold: Value,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

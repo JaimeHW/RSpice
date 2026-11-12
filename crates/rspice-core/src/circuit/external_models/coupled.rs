@@ -510,28 +510,6 @@ impl DigitalActiveParticipant for XspiceDigitalParticipant<'_> {
             .analog_threshold_sample(port, element, threshold)
     }
 
-    fn locate_analog_crossing(
-        &mut self,
-        instance: usize,
-        port: &str,
-        element: usize,
-        threshold: usize,
-        crossing: Option<(f64, crate::xspice::DigitalState, f64)>,
-    ) {
-        let crossing = crossing.map(|(time, state, threshold)| crate::xspice::LocatedCrossing {
-            time,
-            state,
-            threshold,
-        });
-        if let Some(converter) = self.circuit.xspice_instances.get_mut(instance)
-            && converter.located_crossing_differs(port, element, threshold, crossing)
-        {
-            converter
-                .make_mut()
-                .set_located_crossing(port, element, threshold, crossing);
-        }
-    }
-
     fn analog_boundaries_ready(&mut self) -> bool {
         if self.analog_boundaries_ready {
             return false;

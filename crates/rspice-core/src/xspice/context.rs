@@ -614,11 +614,6 @@ pub struct CmContext {
     /// [`Self::input_hdl_drive`].
     #[cfg(feature = "veriloga")]
     hdl_drives: CopyOnWrite<HdlDrives>,
-    /// Crossings a coupled run's root located on this model's analog inputs,
-    /// handed in before every evaluation of the candidate that lands past
-    /// them; see [`Self::located_crossing`]. Empty everywhere else.
-    #[cfg(feature = "veriloga")]
-    located_crossings: Vec<LocatedInputCrossing>,
     /// Last event time for scalar digital input ports.
     input_event_times: CopyOnWrite<HashMap<String, Value>>,
     /// Last event time for vector digital input ports, per element.
@@ -689,16 +684,6 @@ pub struct CmContext {
     static_stamps: Vec<(usize, usize, Value)>,
     /// Static-only RHS contributions retained for Xyce OneStep history.
     static_rhs: Vec<(usize, Value)>,
-}
-
-/// One entry of [`CmContext::located_crossing`]'s table.
-#[cfg(feature = "veriloga")]
-#[derive(Debug, Clone)]
-struct LocatedInputCrossing {
-    port: Box<str>,
-    element: usize,
-    threshold: usize,
-    crossing: crate::xspice::LocatedCrossing,
 }
 
 /// What a context is configured with before it first evaluates: its port
@@ -806,8 +791,6 @@ impl CmContext {
             other_digital_drivers: CopyOnWrite::default(),
             #[cfg(feature = "veriloga")]
             hdl_drives: CopyOnWrite::default(),
-            #[cfg(feature = "veriloga")]
-            located_crossings: Vec::new(),
             input_event_times: CopyOnWrite::default(),
             input_vector_event_times: CopyOnWrite::default(),
             port_total_loads: CopyOnWrite::default(),
@@ -1435,57 +1418,6 @@ impl CmContext {
         index: usize,
     ) -> Option<crate::xspice::verilog::store::BitDrive> {
         self.hdl_drives.get(name)?.get(index).copied().flatten()
-    }
-
-    /// Set or clear the crossing located on the `threshold`-th threshold of
-    /// the analog input `port[element]`; see [`Self::located_crossing`].
-    #[cfg(feature = "veriloga")]
-    pub(crate) fn set_located_crossing(
-        &mut self,
-        port: &str,
-        element: usize,
-        threshold: usize,
-        crossing: Option<crate::xspice::LocatedCrossing>,
-    ) {
-        let position = self.located_crossings.iter().position(|located| {
-            located.element == element && located.threshold == threshold && *located.port == *port
-        });
-        match (position, crossing) {
-            (Some(position), Some(crossing)) => {
-                self.located_crossings[position].crossing = crossing
-            }
-            (Some(position), None) => {
-                self.located_crossings.swap_remove(position);
-            }
-            (None, Some(crossing)) => self.located_crossings.push(LocatedInputCrossing {
-                port: port.into(),
-                element,
-                threshold,
-                crossing,
-            }),
-            (None, None) => {}
-        }
-    }
-
-    /// The crossing a coupled run's root located on the `threshold`-th
-    /// threshold of the analog input `port[element]`, when the candidate being
-    /// evaluated lands on or past it. A converter decides by it there rather
-    /// than by the sample; see [`crate::xspice::LocatedCrossing`].
-    #[cfg(feature = "veriloga")]
-    pub(crate) fn located_crossing(
-        &self,
-        port: &str,
-        element: usize,
-        threshold: usize,
-    ) -> Option<crate::xspice::LocatedCrossing> {
-        self.located_crossings
-            .iter()
-            .find(|located| {
-                located.element == element
-                    && located.threshold == threshold
-                    && *located.port == *port
-            })
-            .map(|located| located.crossing)
     }
 
     /// Resolved drive from all other contributors on an inout port. Unlike the

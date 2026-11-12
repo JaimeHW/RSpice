@@ -935,17 +935,6 @@ fn settle_lanes(
             named(host, sampled)?;
             let settled = host.settle_analog_bridges(solution);
             moved |= named(host, settled)?;
-            if let Some(participant) = participant.as_deref_mut() {
-                host.hand_located_crossings(|instance, port, element, threshold, crossing| {
-                    participant.locate_analog_crossing(
-                        instance,
-                        port,
-                        element,
-                        threshold,
-                        crossing.map(|located| (located.time, located.state, located.threshold)),
-                    );
-                });
-            }
         }
         // Root detection must precede converter publication: otherwise an
         // immediate HDL response could misclassify its own initiating crossing

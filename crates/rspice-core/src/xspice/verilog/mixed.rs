@@ -503,15 +503,6 @@ struct BoundaryHistories {
 /// damping attempt's repeated identical samples cannot erase earlier switching.
 /// Acceptance and checkpoints exclude them.
 ///
-/// # The located crossings
-///
-/// A converter root found inside a candidate's interval rolls that candidate
-/// back and lands one representable instant past the crossing, where the
-/// converter's input can still read a rounding short of its threshold. The
-/// crossing is the candidate's fact, not the landed sample's, so it is kept
-/// here across the rollback and decides at the landing; see
-/// [`crate::xspice::LocatedCrossing`].
-///
 /// # Who owns one
 ///
 /// The circuit's scheduler, which parks one per enrolled instance between
@@ -538,9 +529,6 @@ pub struct CandidateLedger {
     /// conversion is a shared converter is the module's side of that boundary,
     /// so a loop closed through the converter is observed here.
     ports: Vec<BoundaryNetHistory>,
-    /// The crossing each converter root last located inside a candidate's
-    /// interval. Parallel to `bridges.adc`, and grown on first use.
-    located: Vec<Option<HeldCrossing>>,
     /// The whole boundary state each rejected solve of the operating point
     /// (the candidate at t = 0) settled to, oldest first: one two-bit code per
     /// net in [`operating_point_state_nets`] order, a new
@@ -556,44 +544,7 @@ pub struct CandidateLedger {
 impl CandidateLedger {
     #[doc(hidden)]
     pub fn has_pending_candidate(&self) -> bool {
-        self.carried_time.is_some()
-            || self.probe_time.is_some()
-            || self.located.iter().any(Option::is_some)
-    }
-
-    /// Keep the crossing converter root `bridge` located on this candidate.
-    fn locate(&mut self, bridge: usize, crossing: HeldCrossing) {
-        if self.located.len() <= bridge {
-            self.located.resize(bridge + 1, None);
-        }
-        self.located[bridge] = Some(crossing);
-    }
-
-    /// The crossing converter root `bridge` located, when candidate `time`
-    /// lies between it and the root's landing.
-    fn located_at(&self, bridge: usize, time: f64) -> Option<HeldCrossing> {
-        self.located
-            .get(bridge)
-            .copied()
-            .flatten()
-            .filter(|crossing| crossing.time <= time && time <= crossing.landing)
-    }
-
-    /// Record whether the crossing converter root `bridge` located decided
-    /// candidate `time`, for the converter it is handed to.
-    fn mark_decided(&mut self, bridge: usize, time: Option<f64>) {
-        if let Some(Some(crossing)) = self.located.get_mut(bridge) {
-            crossing.decided_at = time;
-        }
-    }
-
-    /// The crossing that decided converter root `bridge` at candidate `time`.
-    fn decided(&self, bridge: usize, time: f64) -> Option<HeldCrossing> {
-        self.located
-            .get(bridge)
-            .copied()
-            .flatten()
-            .filter(|crossing| crossing.decided_at == Some(time))
+        self.carried_time.is_some() || self.probe_time.is_some()
     }
 
     /// Whether a crossing found on candidate `time` was carried by the write
@@ -627,7 +578,6 @@ impl CandidateLedger {
     fn clear(&mut self) {
         self.carried_time = None;
         self.probe_time = None;
-        self.located.clear();
         self.states.clear();
     }
 
@@ -645,64 +595,6 @@ impl CandidateLedger {
     #[cfg(test)]
     pub(crate) fn carries_at(&self, time: f64, bridge: usize) -> bool {
         self.carries(time, bridge)
-    }
-}
-
-/// A crossing a converter root located inside a candidate's interval; see
-/// [`CandidateLedger`]'s "located crossings".
-#[derive(Debug, Clone, Copy)]
-struct HeldCrossing {
-    /// The interpolated crossing instant.
-    time: f64,
-    /// The decision on its far side.
-    bit: FourStateBit,
-    /// The threshold crossed.
-    threshold: f64,
-    /// The latest candidate that is the root's landing: where
-    /// [`MixedSignalHost::boundary_refinement_time`] puts it.
-    landing: f64,
-    /// The candidate this crossing last decided, if any.
-    decided_at: Option<f64>,
-}
-
-impl HeldCrossing {
-    /// Whether this crossing decides candidate `time`, whose sample is
-    /// `sample`, in the interval from the accepted point `start` and its
-    /// sample `start_sample`.
-    ///
-    /// On the crossing exactly it does: the law reads the threshold. Past it,
-    /// it does when the sample is on or beyond the threshold, or short of it
-    /// by no more than `window` in time along the chord from the accepted
-    /// sample: that is the rounding of a sample taken on the crossing. A
-    /// sample further short is a curved signal the chord overshot, and the
-    /// root refines it as it always has.
-    fn decides(self, time: f64, start: f64, start_sample: f64, sample: f64, window: f64) -> bool {
-        if time == self.time {
-            return true;
-        }
-        let toward = self.threshold - start_sample;
-        if toward == 0.0 {
-            return false;
-        }
-        let short = (self.threshold - sample) * toward.signum();
-        if short <= 0.0 {
-            return true;
-        }
-        let progress = (sample - start_sample) * toward.signum();
-        progress > 0.0 && short / progress * (time - start) <= window
-    }
-
-    fn located(self) -> crate::xspice::LocatedCrossing {
-        use crate::xspice::DigitalState;
-        crate::xspice::LocatedCrossing {
-            time: self.time,
-            state: match self.bit {
-                FourStateBit::Zero => DigitalState::Zero,
-                FourStateBit::One => DigitalState::One,
-                _ => DigitalState::Unknown,
-            },
-            threshold: self.threshold,
-        }
     }
 }
 
@@ -1041,9 +933,6 @@ struct AdcBridge {
     /// this root detects, counted in declaration order; zero for the first
     /// and for every bridge that is not a root detector.
     converter_threshold: usize,
-    /// Whether the converter decides by the crossing this root located,
-    /// so the root may too; see [`CandidateLedger`]'s "located crossings".
-    decides_by_located: bool,
 }
 
 impl AdcBridge {
@@ -3509,7 +3398,6 @@ impl MixedSignalHost {
             threshold_behavior: crate::xspice::AnalogThresholdBehavior::Hysteresis,
             converter_input: None,
             converter_threshold: 0,
-            decides_by_located: false,
         });
         self.state.accepted_adc_voltages.push(0.0);
         self.state.accepted_adc_decisions.push(None);
@@ -3526,7 +3414,6 @@ impl MixedSignalHost {
         instance: usize,
         instance_name: &str,
         threshold: &crate::xspice::AnalogInputThreshold,
-        decides_by_located: bool,
     ) -> Result<(), MixedSignalError> {
         self.require_idle("add a converter root")?;
         if !threshold.low.is_finite()
@@ -3567,45 +3454,12 @@ impl MixedSignalHost {
             threshold_behavior: threshold.behavior,
             converter_input: Some(input),
             converter_threshold: ordinal,
-            decides_by_located,
         });
         self.state.accepted_adc_voltages.push(0.0);
         self.state.accepted_adc_decisions.push(None);
         self.state.accepted_adc_transition_times.push(None);
         self.state.adc_history.push(BoundaryNetHistory::default());
         Ok(())
-    }
-
-    /// Hand every converter whose root's located crossing decided this
-    /// candidate that crossing, and take it back from every other, before
-    /// the converters are evaluated here; see
-    /// [`crate::xspice::LocatedCrossing`].
-    pub(crate) fn hand_located_crossings(
-        &self,
-        mut hand: impl FnMut(usize, &str, usize, usize, Option<crate::xspice::LocatedCrossing>),
-    ) {
-        let Some(trial) = self.trial.as_ref() else {
-            return;
-        };
-        for (index, bridge) in self.state.bridges.adc.iter().enumerate() {
-            if !bridge.decides_by_located {
-                continue;
-            }
-            if let Some((instance, port, element)) = &bridge.converter_input {
-                let located = self
-                    .scratch
-                    .ledger
-                    .decided(index, trial.time_seconds)
-                    .map(HeldCrossing::located);
-                hand(
-                    *instance,
-                    port,
-                    *element,
-                    bridge.converter_threshold,
-                    located,
-                );
-            }
-        }
     }
 
     /// Copy current converter inputs after Active input refresh, before any
@@ -4488,7 +4342,10 @@ impl MixedSignalHost {
         let time = trial.time_seconds;
         let start = self.state.accepted_time;
         let tolerance = endpoint_root_window(time, start, minimum_timestep);
-        let first_allowed = first_landing_after(start, minimum_timestep);
+        let mut first_allowed = (start + minimum_timestep).max(start.next_up());
+        if first_allowed - start < minimum_timestep {
+            first_allowed = first_allowed.next_up();
+        }
         let mut earliest = trial.observation_refinement.and_then(|event| {
             let target = event.max(first_allowed);
             (target < time && time - target > tolerance).then_some(target)
@@ -4703,49 +4560,13 @@ impl MixedSignalHost {
                     .read(bridge.driven_signal())
                     .map(|value| value.bit(bridge.bit))
             };
-            let previous = self
-                .state
-                .started
-                .then_some(self.state.accepted_adc_voltages[index]);
-            // On or past a crossing this candidate's root located, the
-            // crossing decides rather than the sample, which can read a
-            // rounding short of the threshold at the landing. On it exactly,
-            // the law reads the threshold itself. See
-            // `crate::xspice::LocatedCrossing`.
-            if bridge.decides_by_located
-                && let Some(located) = scratch.ledger.located_at(index, time_seconds)
-            {
-                let start = self.state.accepted_time;
-                let decides = located.decides(
-                    time_seconds,
-                    start,
-                    self.state.accepted_adc_voltages[index],
-                    voltage,
-                    endpoint_root_window(time_seconds, start, self.analog_step_floor),
-                );
-                scratch
-                    .ledger
-                    .mark_decided(index, decides.then_some(time_seconds));
-                if decides {
-                    let bit = if time_seconds > located.time {
-                        Some(located.bit)
-                    } else {
-                        bridge
-                            .decision(located.threshold, previous, held)
-                            .map(|(bit, _)| bit)
-                    };
-                    if let Some(bit) = bit
-                        && held != Some(bit)
-                        && let Some(trial) = self.trial.as_mut()
-                    {
-                        trial.vectors.adc_decisions[index] = Some(bit);
-                        trial.vectors.transition_times[index] = Some(located.time);
-                        trial.vectors.adc_moved[index] = true;
-                    }
-                    continue;
-                }
-            }
-            let Some((bit, threshold)) = bridge.decision(voltage, previous, held) else {
+            let Some((bit, threshold)) = bridge.decision(
+                voltage,
+                self.state
+                    .started
+                    .then_some(self.state.accepted_adc_voltages[index]),
+                held,
+            ) else {
                 continue;
             };
             // Compared as a bit rather than by building the value the bridge
@@ -4793,39 +4614,6 @@ impl MixedSignalHost {
                 )
             };
             if bridge.root_only {
-                // Kept across the rollback that lands the root, for the
-                // landing to decide by; see `CandidateLedger`. Only a
-                // crossing the root will land on is kept: one inside the
-                // interval by more than the root's window. What it decides is
-                // the state just past the threshold crossed, which is not
-                // `bit` where one step crossed both edges of a band.
-                let start = self.state.accepted_time;
-                let past = if voltage > self.state.accepted_adc_voltages[index] {
-                    threshold.next_up()
-                } else {
-                    threshold.next_down()
-                };
-                if bridge.decides_by_located
-                    && !carried
-                    && time_seconds - crossing
-                        > endpoint_root_window(time_seconds, start, self.analog_step_floor)
-                    && let Some((past, _)) = bridge.decision(past, previous, held)
-                    && held != Some(past)
-                {
-                    scratch.ledger.locate(
-                        index,
-                        HeldCrossing {
-                            time: crossing,
-                            bit: past,
-                            threshold,
-                            landing: crossing
-                                .max(start)
-                                .next_up()
-                                .max(first_landing_after(start, self.analog_step_floor)),
-                            decided_at: None,
-                        },
-                    );
-                }
                 if let Some(trial) = self.trial.as_mut() {
                     trial.vectors.adc_decisions[index] = Some(bit);
                     trial.vectors.transition_times[index] = Some(crossing);
@@ -6489,16 +6277,6 @@ impl MixedSignalHost {
 /// disagree about whether a landing had been reached.
 fn endpoint_root_window(time: f64, start: f64, floor: f64) -> f64 {
     (64.0 * f64::EPSILON * time.abs().max(start.abs())).max(floor)
-}
-
-/// The earliest instant a root may land after the accepted point `start`:
-/// one minimum step past it, and never on it.
-fn first_landing_after(start: f64, minimum_timestep: f64) -> f64 {
-    let mut first = (start + minimum_timestep).max(start.next_up());
-    if first - start < minimum_timestep {
-        first = first.next_up();
-    }
-    first
 }
 
 /// Whether both samples of a crossing lie within floating-point resolution of
@@ -8517,57 +8295,6 @@ endmodule
     /// interval's own solution never passed through the threshold. Asking for
     /// one is the refinement storm — the solver rejects the step, halves it,
     /// lands on the same event again, and repeats until it reaches its floor.
-    /// A converter root's crossing is the candidate's fact: the ledger holds
-    /// it across the rollback that lands the root, it decides the landing
-    /// when the landed sample reads it to within the root's window, and an
-    /// acceptance forgets it.
-    #[test]
-    fn a_located_crossing_is_held_across_the_rejected_step_and_decides_its_landing() {
-        let (start, floor): (f64, f64) = (1.0e-4, 1.953_125e-17);
-        let crossing = start + 1.0e-9;
-        let landing = crossing.next_up();
-        let held = HeldCrossing {
-            time: crossing,
-            bit: FourStateBit::One,
-            threshold: 0.5,
-            landing,
-            decided_at: None,
-        };
-        let mut ledger = CandidateLedger::default();
-        ledger.locate(3, held);
-        assert!(ledger.has_pending_candidate(), "a held crossing pends");
-        assert!(ledger.located_at(3, crossing.next_down()).is_none());
-        assert!(ledger.located_at(3, landing.next_up()).is_none());
-        assert!(ledger.located_at(2, landing).is_none());
-        let located = ledger.located_at(3, landing).expect("held at its landing");
-        let window = endpoint_root_window(landing, start, floor);
-        for (sample, decides, why) in [
-            (0.5 - 6.8e-14, true, "a rounding short"),
-            (0.5 + 1.0e-12, true, "on the far side"),
-            (0.5 - 1.0e-3, false, "a curved signal the chord overshot"),
-            (-0.1, false, "a signal moving away"),
-        ] {
-            assert_eq!(
-                located.decides(landing, start, 0.0, sample, window),
-                decides,
-                "{why}"
-            );
-        }
-        assert!(
-            located.decides(crossing, start, 0.0, 0.0, window),
-            "on the crossing the law reads the threshold"
-        );
-        ledger.mark_decided(3, Some(landing));
-        assert!(ledger.decided(3, landing).is_some());
-        assert!(
-            ledger.decided(3, landing.next_up()).is_none(),
-            "decided for one candidate only"
-        );
-        ledger.clear();
-        assert!(ledger.located_at(3, landing).is_none());
-        assert!(!ledger.has_pending_candidate(), "an acceptance forgets it");
-    }
-
     #[test]
     fn a_step_a_boundary_moved_in_has_no_interior_root() {
         let mut host = host();
