@@ -103,13 +103,6 @@ pub(crate) fn cx_with_foreign_answers<F: Registered>(
 /// those its menus read. Lend it only while one of `F`'s menus is open: no
 /// other lend takes the menus' answers, so a frame without an open menu
 /// asks the dispatcher nothing more.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the source editor's menu on the netlist page is the first to lend it"
-    )
-)]
 pub(crate) fn cx_with_menu_answers<F: Registered>(app: &mut RSpiceApp) -> Cx<'_, F> {
     let answers = ForeignAvailability::take_with_menus(
         F::FOREIGN_AVAILABILITY,

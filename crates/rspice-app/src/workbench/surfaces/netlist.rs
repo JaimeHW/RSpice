@@ -16,6 +16,7 @@ mod language;
 mod ownership;
 mod revision;
 mod search;
+mod source_menu;
 mod toolbar;
 mod transfer;
 
@@ -375,7 +376,23 @@ pub(in crate::workbench) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
             reveal_in_netlist(ui, &app.state.model, &mut app.state.code.netlist, editor_id);
             let response =
                 crate::workbench::documents::netlist_document::show_editor(ui, &mut app.state);
-            crate::workbench::chrome::title_bar::source_editor_context_menu(&response, app);
+            // The right-click menu's rows read the code feature's context,
+            // lent with its menus' answers only while the menu is open; the
+            // row chosen runs once the page has drawn.
+            let entries = crate::workbench::framework::host::Host::source_editor_menu(&*app);
+            let choice = crate::workbench::chrome::title_bar::source_editor_context_menu_over(
+                &response,
+                |ctx| {
+                    source_menu::rows(
+                        entries,
+                        &features::cx_with_menu_answers::<CodeFeature>(app),
+                        ctx,
+                    )
+                },
+            );
+            if let Some(choice) = choice {
+                features::cx::<CodeFeature>(app).execute(choice.command());
+            }
         }
     });
     // The dialogs draw in the code feature's context. What one raises is

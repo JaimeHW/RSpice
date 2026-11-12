@@ -36,7 +36,7 @@ pub(super) struct Control {
 
 /// Every control with bounds, its centre carried through the transforms of
 /// the nodes above it, in the order `controls` walks them.
-fn controls(tree: &TreeUpdate) -> Vec<Control> {
+pub(super) fn controls(tree: &TreeUpdate) -> Vec<Control> {
     let nodes: HashMap<NodeId, &egui::accesskit::Node> =
         tree.nodes.iter().map(|(id, node)| (*id, node)).collect();
     let root = tree
