@@ -1330,3 +1330,37 @@ fn an_idealized_card_clamps_at_its_forward_and_reverse_knees() {
         assert_close("clamped node", voltage, clamped, 1e-6, 1e-9);
     }
 }
+
+/// Xyce's `DEVICE VOLTLIM=0` drops the diode's initJct tVcrit seed and
+/// pnjlim (N_DEV_Diode.C:1149-1176, 1198). That changes the Newton path and
+/// nothing else: a diode driven forward, and reverse into breakdown, solves
+/// to the operating point the limited solve reaches.
+#[test]
+fn a_diode_solves_with_voltage_limiting_disabled() {
+    for model in ["is=1e-14", "is=1e-14 bv=5 ibv=1e-3"] {
+        for source in ["V1 in 0 10", "V1 0 in 10"] {
+            let deck = format!(
+                "diode with and without voltage limiting\n{source}\nR1 in a 1k\nD1 a 0 dmod\n\
+                 .model dmod D({model})\n.op\n.end\n"
+            );
+            let netlist = Netlist::parse(&deck).expect("diode deck parses");
+            let output = |device_voltage_limiting: bool| {
+                Engine::new(SimulationConfig {
+                    device_voltage_limiting,
+                    ..SimulationConfig::default()
+                })
+                .run_dc_op(&netlist)
+                .unwrap_or_else(|err| {
+                    panic!("{model} {source} with VOLTLIM={device_voltage_limiting}: {err}")
+                })
+                .try_voltage_named("a")
+                .expect("V(a)")
+            };
+            let (limited, unlimited) = (output(true), output(false));
+            assert!(
+                (limited - unlimited).abs() <= 1.0e-6,
+                "{model} {source}: V(a) {limited} limited, {unlimited} unlimited"
+            );
+        }
+    }
+}

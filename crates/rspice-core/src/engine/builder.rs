@@ -6430,7 +6430,6 @@ impl Engine {
         if !self.config.device_voltage_limiting {
             for element in &flat_elements {
                 let family = match &element.kind {
-                    ElementKind::Diode { .. } => Some("diode"),
                     ElementKind::Jfet { .. } => Some("JFET"),
                     ElementKind::Mesfet { .. } => Some("MESFET"),
                     _ => None,
@@ -7565,6 +7564,12 @@ impl Engine {
                             temperature: self.config.temperature,
                         },
                     )? {
+                        if !self.config.device_voltage_limiting {
+                            return Err(voltage_limiting_cannot_be_disabled(
+                                &element.name,
+                                "generated diode",
+                            ));
+                        }
                         continue;
                     }
 
@@ -7784,6 +7789,7 @@ impl Engine {
                     diode.set_initially_off(
                         instance_param(instance_params, &["OFF"]).is_some_and(|off| off != 0.0),
                     );
+                    diode.set_voltage_limiting_enabled(self.config.device_voltage_limiting);
                     // `IC=` is the junction drop the UIC transient operating
                     // point opens at (dioload.c:153-157). The D-line tail has
                     // always parsed it; until now nothing asked for it.
@@ -12279,16 +12285,6 @@ mod tests {
             panic!("expected one native BJT");
         };
         assert!(!device.uses_legacy_junction_limiting());
-
-        let diode = Netlist::parse(
-            "unsupported diode limiting\nV1 in 0 1\nD1 in 0 DMOD\n.model DMOD D\n.end\n",
-        )
-        .expect("diode fixture parses");
-        let error = Engine::new(config.clone())
-            .build_circuit(&diode)
-            .expect_err("VOLTLIM=0 must fail closed for diode limiting");
-        assert!(error.to_string().contains("DEVICE.VOLTLIM=0"));
-        assert!(error.to_string().contains("diode"));
 
         let vbic = Netlist::parse(
             "unsupported VBIC limiting\nV1 c 0 1\nQ1 c c 0 QMOD\n.model QMOD NPN LEVEL=11\n.end\n",

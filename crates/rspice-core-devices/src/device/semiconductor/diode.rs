@@ -467,6 +467,10 @@ pub struct Diode {
     junction_gmin: Value,
     /// The deck marked this instance `OFF`.
     initial_off: bool,
+    /// Xyce's global `DEVICE VOLTLIM`: the first operating-point load opens
+    /// at tVcrit and every iterate runs pnjlim. Cleared, each load reads the
+    /// solution as it stands.
+    voltage_limiting: bool,
     /// Instance `IC=` junction voltage.  The diode is the one family whose
     /// `IC` is a scalar in both references: `dio/dio.c:16` declares
     /// `IOPAU("ic", DIO_IC, IF_REAL, "Initial device voltage")` and
@@ -735,6 +739,7 @@ impl Diode {
             candidate_eval_valid: false,
             junction_gmin: 0.0,
             initial_off: false,
+            voltage_limiting: true,
             initial_condition: None,
             junction_history_valid: std::cell::Cell::new(false),
             last_limited_vd: std::cell::Cell::new(0.0),
@@ -810,6 +815,15 @@ impl Diode {
     /// True when the deck marked this instance `OFF`.
     pub fn is_initially_off(&self) -> bool {
         self.initial_off
+    }
+
+    /// Apply Xyce's global `DEVICE VOLTLIM` policy: `voltageLimiterFlag` gates
+    /// the initJct tVcrit seed and pnjlim (N_DEV_Diode.C:1149-1176, 1198).
+    /// An `OFF` instance still opens at zero bias, as every other family's
+    /// does; Xyce's diode would drop that too (:1154).
+    #[doc(hidden)]
+    pub fn set_voltage_limiting_enabled(&mut self, enabled: bool) {
+        self.voltage_limiting = enabled;
     }
 
     /// The instance `IC=` junction voltage the deck authored.
@@ -892,7 +906,7 @@ impl Diode {
         if tied
             || (!idealized
                 && !self.junction_history_valid.get()
-                && (self.initial_off || vcrit.is_finite()))
+                && (self.initial_off || (self.voltage_limiting && vcrit.is_finite())))
         {
             self.junction_history_valid.set(true);
             self.limited.set(false);
@@ -918,7 +932,7 @@ impl Diode {
         // ngspice (`here->DIOtBrkdwnV`) and the evaluator above use. Limiting
         // around the raw card value instead would fold the junction about a
         // different point than the branch it is protecting.
-        let (vd, limited) = if idealized {
+        let (vd, limited) = if idealized || !self.voltage_limiting {
             (vd_raw, false)
         } else if let Some(bv) = self.active_breakdown_voltage() {
             let vtebrk = self.breakdown_emission_coefficient.max(EPSMIN) * self.vt;
