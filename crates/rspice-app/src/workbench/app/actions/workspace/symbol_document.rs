@@ -26,8 +26,8 @@ use crate::ui::accessibility::counted;
 use crate::workbench::app_state::{AppState, Model, SlotFacts};
 use crate::workbench::state::WorkbenchSession;
 
-use super::read_only_master_message;
 use super::symbol_in_place::in_place_session;
+use super::{NavigationParts, read_only_master_message};
 use crate::workbench::app_state::design_checks::location_key;
 use crate::workbench::app_state::diagnostic_store::{
     DiagnosticInputs, DiagnosticLevel, DiagnosticRecord, DiagnosticRoute, DiagnosticSubject,
@@ -801,82 +801,7 @@ impl AppState {
     /// pins match, which is a different claim from nobody having looked, and
     /// a control that offered to clear nothing would be a dead control.
     pub(in crate::workbench) fn active_symbol_pin_finding_count(&self) -> Option<usize> {
-        self.active_symbol_pin_records()
-            .map(|records| records.len())
-    }
-
-    /// Withdraw the active symbol view's pin findings.
-    pub(in crate::workbench) fn clear_active_symbol_pin_checks(&mut self) {
-        let subject = self.model.workspace.content.active_view.clone();
-        self.model
-            .withdraw_diagnostics(&DiagnosticInputs::SymbolPins { subject });
-    }
-
-    fn active_symbol_pin_records(&self) -> Option<&[DiagnosticRecord]> {
-        let published = DiagnosticInputs::SymbolPins {
-            subject: self.model.workspace.content.active_view.clone(),
-        };
-        self.model
-            .diagnostics
-            .batch(&published)
-            .map(|batch| batch.records.as_slice())
-    }
-
-    /// Step the finding tour through the active symbol's pin findings, worst
-    /// first, and land on the pin the finding it stops at is about.
-    ///
-    /// Returns `false` where there is nothing to visit. The findings come from
-    /// the store rather than from a projection beside it, which is what lets
-    /// the finding this stops at be *the* current finding — the same selection
-    /// the Problems grid draws its current row from.
-    pub(crate) fn cycle_active_symbol_pin_finding(&mut self, step: isize) -> bool {
-        let mut visitable: Vec<VisitablePinFinding> = self
-            .active_symbol_pin_records()
-            .unwrap_or_default()
-            .iter()
-            .filter_map(|record| match &record.route {
-                Some(DiagnosticRoute::Anchor(anchor)) => Some(VisitablePinFinding {
-                    level: record.level,
-                    identity: record.canonical.diagnostic_id,
-                    anchor: anchor.clone(),
-                    message: record.message.clone(),
-                }),
-                Some(DiagnosticRoute::NetlistDiagnostic(_) | DiagnosticRoute::Repair(_))
-                | Some(DiagnosticRoute::CodeDocument { .. } | DiagnosticRoute::RunLogLine { .. })
-                | None => None,
-            })
-            .collect();
-        if visitable.is_empty() {
-            return false;
-        }
-        // Worst first; stable within a severity.
-        visitable.sort_by(|left, right| right.level.cmp(&left.level));
-
-        let len = visitable.len() as isize;
-        let standing = self
-            .model
-            .diagnostics
-            .current_finding()
-            .and_then(|current| visitable.iter().position(|found| found.identity == current));
-        let index = match standing {
-            // First jump lands on the worst finding, not the second one.
-            None if step >= 0 => 0,
-            None => (len - 1) as usize,
-            Some(current) => ((current as isize + step).rem_euclid(len)) as usize,
-        };
-        let found = visitable.swap_remove(index);
-        self.model
-            .diagnostics
-            .set_current_finding(Some(found.identity));
-        self.jump_to_log_anchor(found.anchor);
-        self.prompt(format!(
-            "Finding {}/{} — {} · {}",
-            index + 1,
-            len,
-            found.level.display_name(),
-            found.message,
-        ));
-        true
+        active_symbol_pin_finding_count(&self.model)
     }
 
     /// [`run_active_symbol_pin_checks`] for the session.
@@ -884,6 +809,84 @@ impl AppState {
         let facts = self.slot_facts();
         run_active_symbol_pin_checks(&mut self.model, facts);
     }
+}
+
+/// How many pin findings stand against the active symbol view, or `None`
+/// where the checks have not run against it.
+pub(in crate::workbench) fn active_symbol_pin_finding_count(model: &Model) -> Option<usize> {
+    active_symbol_pin_records(model).map(|records| records.len())
+}
+
+/// Withdraw the active symbol view's pin findings.
+pub(in crate::workbench) fn clear_active_symbol_pin_checks(model: &mut Model) {
+    let subject = model.workspace.content.active_view.clone();
+    model.withdraw_diagnostics(&DiagnosticInputs::SymbolPins { subject });
+}
+
+fn active_symbol_pin_records(model: &Model) -> Option<&[DiagnosticRecord]> {
+    let published = DiagnosticInputs::SymbolPins {
+        subject: model.workspace.content.active_view.clone(),
+    };
+    model
+        .diagnostics
+        .batch(&published)
+        .map(|batch| batch.records.as_slice())
+}
+
+/// Step the finding tour through the active symbol's pin findings, worst
+/// first, and land on the pin the finding it stops at is about.
+///
+/// Returns `false` where there is nothing to visit. The findings come from
+/// the store rather than from a projection beside it, which is what lets
+/// the finding this stops at be *the* current finding — the same selection
+/// the Problems grid draws its current row from.
+pub(crate) fn cycle_active_symbol_pin_finding(nav: &mut NavigationParts<'_>, step: isize) -> bool {
+    let mut visitable: Vec<VisitablePinFinding> = active_symbol_pin_records(nav.model)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|record| match &record.route {
+            Some(DiagnosticRoute::Anchor(anchor)) => Some(VisitablePinFinding {
+                level: record.level,
+                identity: record.canonical.diagnostic_id,
+                anchor: anchor.clone(),
+                message: record.message.clone(),
+            }),
+            Some(DiagnosticRoute::NetlistDiagnostic(_) | DiagnosticRoute::Repair(_))
+            | Some(DiagnosticRoute::CodeDocument { .. } | DiagnosticRoute::RunLogLine { .. })
+            | None => None,
+        })
+        .collect();
+    if visitable.is_empty() {
+        return false;
+    }
+    // Worst first; stable within a severity.
+    visitable.sort_by(|left, right| right.level.cmp(&left.level));
+
+    let len = visitable.len() as isize;
+    let standing = nav
+        .model
+        .diagnostics
+        .current_finding()
+        .and_then(|current| visitable.iter().position(|found| found.identity == current));
+    let index = match standing {
+        // First jump lands on the worst finding, not the second one.
+        None if step >= 0 => 0,
+        None => (len - 1) as usize,
+        Some(current) => ((current as isize + step).rem_euclid(len)) as usize,
+    };
+    let found = visitable.swap_remove(index);
+    nav.model
+        .diagnostics
+        .set_current_finding(Some(found.identity));
+    nav.navigate_to_log_anchor(found.anchor);
+    nav.wb.prompt(format!(
+        "Finding {}/{} — {} · {}",
+        index + 1,
+        len,
+        found.level.display_name(),
+        found.message,
+    ));
+    true
 }
 
 /// Check the active symbol's pins against its schematic and publish what

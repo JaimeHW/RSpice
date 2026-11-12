@@ -13,7 +13,7 @@ use crate::state::{
     CrossProbeIndex, Point, SchematicAnnotationVisibility, SchematicBackAnnotationContent,
     SchematicNetHighlighting, SheetCatalog, Tool,
 };
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::{AppState, Model};
 use egui::{Painter, Rect};
 use rspice_design::connectivity::{open_terminals, summary::projection_nets};
 use rspice_schematic_editor::view::{
@@ -550,19 +550,17 @@ fn annotated_operating_point(
 /// The selected run's transient: the selected analysis when it is one, else
 /// the run's first. A stepped transient has a value per step at any instant,
 /// which one badge cannot hold, so it has none.
-fn annotated_transient(state: &AppState) -> Option<&crate::state::AnalysisResult> {
+fn annotated_transient(model: &Model) -> Option<&crate::state::AnalysisResult> {
     let is_transient = |analysis: &&crate::state::AnalysisResult| {
         analysis.analysis_type == crate::state::AnalysisType::Transient
             && analysis.family_metadata.is_none()
     };
-    state
-        .model
+    model
         .simulation
         .active_analysis()
         .filter(is_transient)
         .or_else(|| {
-            state
-                .model
+            model
                 .simulation
                 .active_run()?
                 .analyses
@@ -592,7 +590,7 @@ fn transient_annotation_time(
 /// current and power it retained, linearly interpolated between the time
 /// points either side; with the instant.
 fn transient_operating_point(state: &AppState) -> Option<(crate::state::DcOpResult, f64)> {
-    let analysis = annotated_transient(state)?;
+    let analysis = annotated_transient(&state.model)?;
     let (time, _) = transient_annotation_time(analysis, state.results.results.session.cursors.a)?;
     let mut dc_op = crate::state::DcOpResult::default();
     for trace in &analysis.waveforms {
@@ -615,15 +613,14 @@ fn transient_operating_point(state: &AppState) -> Option<(crate::state::DcOpResu
 }
 
 /// What the status bar says as transient voltages are turned on: the instant
-/// the canvas reads, or why it shows none.
-pub(crate) fn transient_annotation_status(state: &AppState) -> String {
-    let Some(analysis) = annotated_transient(state) else {
+/// the canvas reads, results cursor A where it lies on the run, or why it
+/// shows none.
+pub(crate) fn transient_annotation_status(model: &Model, cursor_a: Option<f64>) -> String {
+    let Some(analysis) = annotated_transient(model) else {
         return "No transient result is selected: run a transient analysis to annotate its voltages."
             .to_owned();
     };
-    let Some((time, at_cursor)) =
-        transient_annotation_time(analysis, state.results.results.session.cursors.a)
-    else {
+    let Some((time, at_cursor)) = transient_annotation_time(analysis, cursor_a) else {
         return "The selected transient retained no waveforms to annotate.".to_owned();
     };
     let time = badge_quantity(time, "s");
@@ -1836,14 +1833,14 @@ mod tests {
 
         assert_eq!(read(&state), ["out 3 V", "I(vbias) = -3 mA"]);
         assert_eq!(
-            transient_annotation_status(&state),
+            transient_annotation_status(&state.model, state.results.results.session.cursors.a),
             "Transient voltages at 2 ms, the end of the run. Place cursor A to choose another instant."
         );
 
         state.results.results.session.cursors.a = Some(1.5e-3);
         assert_eq!(read(&state), ["out 2 V", "I(vbias) = -2 mA"]);
         assert_eq!(
-            transient_annotation_status(&state),
+            transient_annotation_status(&state.model, state.results.results.session.cursors.a),
             "Transient voltages at 1.5 ms, cursor A."
         );
 
@@ -1853,7 +1850,7 @@ mod tests {
         state.model.simulation.retained.runs[0].analyses.truncate(1);
         assert!(read(&state).is_empty());
         assert_eq!(
-            transient_annotation_status(&state),
+            transient_annotation_status(&state.model, state.results.results.session.cursors.a),
             "No transient result is selected: run a transient analysis to annotate its voltages."
         );
     }

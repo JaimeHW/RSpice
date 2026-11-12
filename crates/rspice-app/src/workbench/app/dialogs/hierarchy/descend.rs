@@ -9,8 +9,10 @@ use egui::Context;
 use crate::ui::widgets::{CommandForm, DialogChoice, FormRows};
 
 use crate::workbench::app::SchematicEditAuthority;
-use crate::workbench::app::actions::workspace::selected_hierarchy_master;
 use crate::workbench::app::actions::workspace::symbol_in_place::selected_symbol_in_place_target;
+use crate::workbench::app::actions::workspace::{
+    hierarchical_edit_in_place_enabled, selected_hierarchy_master,
+};
 use crate::workbench::app::dialogs::design_request::DesignRequest;
 use crate::workbench::app_state::{AppState, Model};
 use crate::workbench::state::WorkbenchSession;
@@ -72,22 +74,26 @@ const PRIMARY: &str = "Open edit context";
 const DESCRIPTION: &str =
     "Review the operation, its inputs, impact, validation state, and available actions.";
 
-pub(crate) fn open_descend_hierarchy_dialog(state: &mut AppState) -> bool {
-    if state.design.descend_hierarchy.open {
+pub(crate) fn open_descend_hierarchy_dialog(
+    dialog: &mut DescendHierarchyDialogState,
+    model: &Model,
+    workbench: &mut WorkbenchSession,
+) -> bool {
+    if dialog.open {
         return false;
     }
-    let Some((instance_name, reference)) = state.selected_hierarchy_master() else {
-        state.prompt("Select one instance with a resolved schematic master first.");
+    let Some((instance_name, reference)) = selected_hierarchy_master(model) else {
+        workbench.prompt("Select one instance with a resolved schematic master first.");
         return false;
     };
-    let authority = SchematicEditAuthority::capture(state);
-    let parent_dirty = state.model.schematic.session.is_dirty;
-    let preferred_edit_mode = if state.hierarchical_edit_in_place_enabled() {
+    let authority = SchematicEditAuthority::capture(model);
+    let parent_dirty = model.schematic.session.is_dirty;
+    let preferred_edit_mode = if hierarchical_edit_in_place_enabled(model) {
         HierarchyDescendEditMode::EditInPlace
     } else {
         HierarchyDescendEditMode::OpenIsolated
     };
-    state.design.descend_hierarchy.open(
+    dialog.open(
         instance_name,
         reference,
         authority,
@@ -362,7 +368,11 @@ mod tests {
     #[test]
     fn the_form_has_one_label_style_and_values_in_the_kit_face() {
         let (mut state, _, _) = hierarchy_state();
-        assert!(open_descend_hierarchy_dialog(&mut state));
+        assert!(open_descend_hierarchy_dialog(
+            &mut state.design.descend_hierarchy,
+            &state.model,
+            &mut state.workbench,
+        ));
         state.design.descend_hierarchy.parent_dirty = true;
         let mut app = RSpiceApp::test_instance();
         app.state = state;
@@ -471,7 +481,11 @@ mod tests {
     #[test]
     fn menu_transaction_opens_without_navigating_and_rejects_selection_drift() {
         let (mut state, parent, _) = hierarchy_state();
-        assert!(open_descend_hierarchy_dialog(&mut state));
+        assert!(open_descend_hierarchy_dialog(
+            &mut state.design.descend_hierarchy,
+            &state.model,
+            &mut state.workbench,
+        ));
         assert!(state.design.descend_hierarchy.open);
         assert_eq!(state.model.workspace.content.active_view, parent);
 
@@ -526,7 +540,11 @@ mod tests {
             .model
             .preferences
             .set_toggle(TogglePreference::HierarchicalEditInPlace, false);
-        assert!(open_descend_hierarchy_dialog(&mut state));
+        assert!(open_descend_hierarchy_dialog(
+            &mut state.design.descend_hierarchy,
+            &state.model,
+            &mut state.workbench,
+        ));
         assert_eq!(
             state.design.descend_hierarchy.edit_mode,
             HierarchyDescendEditMode::OpenIsolated
@@ -551,7 +569,11 @@ mod tests {
     #[test]
     fn the_symbol_mode_edits_the_instance_symbol_on_this_sheet() {
         let (mut state, parent, _) = hierarchy_state();
-        assert!(open_descend_hierarchy_dialog(&mut state));
+        assert!(open_descend_hierarchy_dialog(
+            &mut state.design.descend_hierarchy,
+            &state.model,
+            &mut state.workbench,
+        ));
         state.design.descend_hierarchy.edit_mode = HierarchyDescendEditMode::EditSymbolInPlace;
         let error = commit_descend_context(&mut state).expect_err("afe_core has no symbol view");
         assert!(error.contains("the cell has no symbol view"), "{error}");
@@ -581,7 +603,11 @@ mod tests {
     #[test]
     fn read_only_reference_belongs_to_its_document_and_never_mutates_library_ownership() {
         let (mut state, parent, child) = hierarchy_state();
-        assert!(open_descend_hierarchy_dialog(&mut state));
+        assert!(open_descend_hierarchy_dialog(
+            &mut state.design.descend_hierarchy,
+            &state.model,
+            &mut state.workbench,
+        ));
         state.design.descend_hierarchy.edit_mode = HierarchyDescendEditMode::ReadOnlyReference;
         commit_descend_context(&mut state).expect("valid reference context");
 

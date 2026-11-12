@@ -391,7 +391,10 @@ impl Command {
                     *annotations = SchematicAnnotationVisibility::ViolationsOnly;
                 } else {
                     *annotations = SchematicAnnotationVisibility::TransientVoltages;
-                    let status = crate::schematic::view::transient_annotation_status(&app.state);
+                    let status = crate::schematic::view::transient_annotation_status(
+                        &app.state.model,
+                        app.state.results.results.session.cursors.a,
+                    );
                     app.state.workbench.prompt(status);
                 }
             }
@@ -733,7 +736,11 @@ impl Command {
                 app.state.ascend_workspace_level();
             }
             Self::DescendHierarchy => {
-                crate::workbench::app::open_descend_hierarchy_dialog(&mut app.state);
+                crate::workbench::app::open_descend_hierarchy_dialog(
+                    &mut app.state.design.descend_hierarchy,
+                    &app.state.model,
+                    &mut app.state.workbench,
+                );
             }
             Self::DescendHierarchyDirect => {
                 app.state.open_selected_instance_master();
@@ -745,7 +752,9 @@ impl Command {
             Self::CheckDesign => check_design(&mut app.state),
             Self::ClearChecks => {
                 if active_symbol_editor(app) {
-                    app.state.clear_active_symbol_pin_checks();
+                    crate::workbench::app::actions::workspace::symbol_document::clear_active_symbol_pin_checks(
+                        &mut app.state.model,
+                    );
                 } else {
                     app.state.clear_active_design_check();
                 }
@@ -753,10 +762,10 @@ impl Command {
                 app.state.model.design_checks.drc_checked_version = 0;
             }
             Self::NextViolation => {
-                crate::schematic::view::violations::cycle_violation(&mut app.state, 1);
+                app.state.navigation().cycle_violation(1);
             }
             Self::PreviousViolation => {
-                crate::schematic::view::violations::cycle_violation(&mut app.state, -1);
+                app.state.navigation().cycle_violation(-1);
             }
             Self::CommandPalette => open_command_palette(&mut app.state),
             Self::KeyboardShortcuts => app.state.shell.shortcuts_help = true,

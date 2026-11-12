@@ -10,16 +10,20 @@
 
 use std::collections::BTreeMap;
 
-use crate::state::CellViewRef;
+use crate::diagnostics::LogAnchor;
+use crate::schematic::view::violations::location_anchor;
+use crate::state::{CellViewRef, Point, RetainedSimulationState};
 use crate::workbench::app::actions::hierarchy_net_highlight::NetCarry;
 use crate::workbench::app_state::Model;
-use crate::workbench::state::{WorkbenchSession, WorkspaceDocumentId};
+use crate::workbench::state::{WorkbenchSession, Workspace, WorkspaceDocumentId};
 use rspice_app_runs::workbench::slots::runs::RunsState;
+use rspice_design::drc::DrcSeverity;
 
+use super::symbol_document::cycle_active_symbol_pin_finding;
 use super::{
     SchematicRestoreParts, bump_active_schematic_epoch, commit_pending_inspector_edit,
-    hierarchical_edit_in_place_enabled, schematic_for_workspace, selected_hierarchy_master,
-    sync_active_schematic, veriloga_source_for_component,
+    hierarchical_edit_in_place_enabled, highlight_failed_run_sites, schematic_for_workspace,
+    selected_hierarchy_master, sync_active_schematic, veriloga_source_for_component,
 };
 
 /// What moving the canvas to another cell view or occurrence reads and
@@ -201,6 +205,207 @@ impl NavigationParts<'_> {
         }
     }
 
+    /// Follow `anchor` to what it points at: the object or pin in its
+    /// drawing, the objects a failed run named, or the run a row names.
+    pub(crate) fn navigate_to_log_anchor(&mut self, anchor: LogAnchor) {
+        match anchor {
+            LogAnchor::Schematic {
+                cell_view,
+                x,
+                y,
+                component,
+                wire,
+                sheet,
+            } => {
+                // The point and the object are the drawing's own, so the
+                // drawing opens first. A view that will not open — an edit
+                // in the inspector that cannot commit — leaves the reader
+                // where they were rather than selecting in the wrong view.
+                if !cell_view.key().eq_ignore_ascii_case(
+                    &self
+                        .model
+                        .workspace
+                        .content
+                        .active_schematic_reference()
+                        .key(),
+                ) {
+                    self.open_workspace_view(cell_view.clone());
+                    if !cell_view.key().eq_ignore_ascii_case(
+                        &self
+                            .model
+                            .workspace
+                            .content
+                            .active_schematic_reference()
+                            .key(),
+                    ) {
+                        self.wb.prompt(format!(
+                            "{} could not be opened, so the finding was not followed.",
+                            cell_view.display_path()
+                        ));
+                        return;
+                    }
+                }
+                // An object on another sheet is drawn nowhere until its sheet
+                // is in view, and selecting it there would select something
+                // the reader cannot see. A sheet that will not come forward
+                // has said why, and the reader stays where they were.
+                if let Some(sheet) = sheet
+                    && self.model.active_sheet_id() != Some(sheet)
+                {
+                    let outcome = self.model.activate_sheet(sheet, self.restore.drag.let_go());
+                    if self.wb.report(outcome).is_err() {
+                        return;
+                    }
+                }
+                self.wb.activate(Workspace::Design);
+                self.model.schematic.session.editor.center_request = Some(Point::new(x, y));
+                self.model.schematic.session.editor.net_highlight.clear();
+                self.model.schematic.session.editor.selection.clear();
+                if let Some(id) = component {
+                    self.model
+                        .schematic
+                        .session
+                        .editor
+                        .selection
+                        .select_component(id);
+                }
+                if let Some(id) = wire {
+                    self.model
+                        .schematic
+                        .session
+                        .editor
+                        .selection
+                        .select_wire(id);
+                }
+            }
+            LogAnchor::Symbol {
+                reference,
+                pin_name,
+                point,
+            } => {
+                self.open_workspace_view(reference);
+                self.wb.activate(Workspace::Design);
+                self.restore.symbol.editor.select_pin(pin_name);
+                if let Some(point) = point {
+                    let zoom = self.restore.symbol.editor.zoom.max(1.0);
+                    self.restore.symbol.editor.pan =
+                        (-(point.x as f32) * zoom, -(point.y as f32) * zoom);
+                }
+                self.restore.symbol.editor.needs_fit = false;
+            }
+            LogAnchor::Simulation { nets, devices } => {
+                highlight_failed_run_sites(self.model, self.wb, &nets, &devices);
+            }
+            LogAnchor::ResultRun { run_sequence } => {
+                // Select first, activate second: landing in Results on
+                // whichever run happened to be selected would be a different
+                // dataset than the row named.
+                if self.model.simulation.select_run_by_sequence(run_sequence) {
+                    self.wb.activate(Workspace::Results);
+                } else {
+                    self.wb
+                        .prompt(RetainedSimulationState::retired_run_message(run_sequence));
+                }
+            }
+        }
+    }
+
+    /// Jump the view to the next (`step` = 1) or previous (−1) finding,
+    /// ordered worst severity first. Selects the offending object where one
+    /// exists and centers the canvas on the anchor; node/global findings have
+    /// no spot and stay in the console and pill.
+    ///
+    /// The finding it lands on becomes *the* current finding — the same selection
+    /// the Problems grid draws its current row from, held by canonical identity in
+    /// the diagnostic store. It used to be an index into the list this function
+    /// sorts for itself, which no other surface could read and which a
+    /// republished batch silently repointed.
+    pub(crate) fn cycle_violation(&mut self, step: isize) {
+        // A symbol view's findings are the pin checks', which address a pin on a
+        // symbol rather than a spot in a drawing — and they are published as
+        // records, so the tour reads them from the store and names each one by
+        // the identity the grid names it by.
+        //
+        // With no findings, or none current, the command is disabled, so a press
+        // that reaches here anyway says nothing.
+        if self.model.workspace.content.active_view_type() == crate::state::ViewType::Symbol {
+            cycle_active_symbol_pin_finding(self, step);
+            return;
+        }
+        let Some(result) = &self.model.design_checks.drc_results else {
+            return;
+        };
+        if self.model.design_checks.drc_checked_version != self.model.schematic.topology_version() {
+            return;
+        }
+
+        // What the published findings are called, in the order the result holds
+        // them. Read rather than derived here: the store is where a finding's
+        // identity is minted, and a second derivation of it is a second identity.
+        let identities = self.model.canvas_finding_identities();
+        // Owned snapshot of the anchored findings so the borrows drop before
+        // the selection/viewport mutations below.
+        let mut anchored: Vec<AnchoredFinding> = result
+            .violations()
+            .iter()
+            .enumerate()
+            .filter_map(|(ordinal, violation)| {
+                location_anchor(
+                    self.model,
+                    self.restore.visibility.review_markers,
+                    &violation.location,
+                )
+                .map(|anchor| AnchoredFinding {
+                    severity: violation.severity,
+                    identity: identities.get(ordinal).copied(),
+                    anchor,
+                    message: violation.message.clone(),
+                })
+            })
+            .collect();
+        if anchored.is_empty() {
+            self.wb
+                .prompt("No finding has a place on the canvas; Problems lists them.");
+            return;
+        }
+        // Worst first; stable within a severity.
+        anchored.sort_by(|a, b| b.severity.cmp(&a.severity));
+
+        let len = anchored.len() as isize;
+        // Where the tour stands is wherever the current finding sits in it. A
+        // selection made on the grid — or on a finding this tour cannot visit,
+        // such as a netlist error — therefore does not strand the tour: it starts
+        // from the worst finding, which is where it starts from a cold session.
+        let standing = self
+            .model
+            .diagnostics
+            .current_finding()
+            .and_then(|current| {
+                anchored
+                    .iter()
+                    .position(|found| found.identity == Some(current))
+            });
+        let index = match standing {
+            // First jump lands on the worst finding, not the second one.
+            None if step >= 0 => 0,
+            None => (len - 1) as usize,
+            Some(current) => ((current as isize + step).rem_euclid(len)) as usize,
+        };
+
+        let found = anchored.swap_remove(index);
+        // A finding with no published record leaves nothing current rather than
+        // leaving the previous finding standing, which the tour has just left.
+        self.model.diagnostics.set_current_finding(found.identity);
+        self.navigate_to_log_anchor(found.anchor);
+        self.wb.prompt(format!(
+            "Finding {}/{} — {} · {}",
+            index + 1,
+            len,
+            found.severity.display_name(),
+            found.message,
+        ));
+    }
+
     /// [`bump_active_schematic_epoch`] over these parts.
     fn bump_active_schematic_epoch(&mut self) {
         bump_active_schematic_epoch(self.restore.symbol, self.model, self.wb);
@@ -212,4 +417,14 @@ impl NavigationParts<'_> {
         let facts = self.runs.slot_facts(self.restore.visibility.review_markers);
         self.model.refresh_active_design_check_projection(facts);
     }
+}
+
+/// One finding the tour can visit: what it is called, how bad it is, where it
+/// is, and what it says.
+struct AnchoredFinding {
+    severity: DrcSeverity,
+    /// What the store calls it, where the checks published a record for it.
+    identity: Option<uuid::Uuid>,
+    anchor: crate::diagnostics::LogAnchor,
+    message: String,
 }

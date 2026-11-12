@@ -13,9 +13,7 @@ pub(in crate::workbench) mod symbol_in_place;
 mod waivers;
 
 use crate::diagnostics::LogAnchor;
-use crate::state::{
-    CellViewRef, ComponentType, Point, RetainedSimulationState, SchematicState, ViewType,
-};
+use crate::state::{CellViewRef, ComponentType, RetainedSimulationState, SchematicState, ViewType};
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::interaction_state::DragState;
 use crate::workbench::app_state::{AppState, Model};
@@ -164,8 +162,9 @@ impl AppState {
         read_only_master_message(&self.model)
     }
 
+    /// [`NavigationParts::navigate_to_log_anchor`] for the session.
     pub(crate) fn jump_to_log_anchor(&mut self, anchor: LogAnchor) {
-        self.navigate_to_log_anchor(anchor);
+        self.navigation().navigate_to_log_anchor(anchor);
     }
 
     /// Why a row carrying `anchor` cannot jump, or `None` if it can.
@@ -208,116 +207,9 @@ impl AppState {
         }
     }
 
-    fn navigate_to_log_anchor(&mut self, anchor: LogAnchor) {
-        match anchor {
-            LogAnchor::Schematic {
-                cell_view,
-                x,
-                y,
-                component,
-                wire,
-                sheet,
-            } => {
-                // The point and the object are the drawing's own, so the
-                // drawing opens first. A view that will not open — an edit
-                // in the inspector that cannot commit — leaves the reader
-                // where they were rather than selecting in the wrong view.
-                if !cell_view.key().eq_ignore_ascii_case(
-                    &self
-                        .model
-                        .workspace
-                        .content
-                        .active_schematic_reference()
-                        .key(),
-                ) {
-                    self.open_workspace_view(cell_view.clone());
-                    if !cell_view.key().eq_ignore_ascii_case(
-                        &self
-                            .model
-                            .workspace
-                            .content
-                            .active_schematic_reference()
-                            .key(),
-                    ) {
-                        self.prompt(format!(
-                            "{} could not be opened, so the finding was not followed.",
-                            cell_view.display_path()
-                        ));
-                        return;
-                    }
-                }
-                // An object on another sheet is drawn nowhere until its sheet
-                // is in view, and selecting it there would select something
-                // the reader cannot see. A sheet that will not come forward
-                // has said why, and the reader stays where they were.
-                if let Some(sheet) = sheet
-                    && self.model.active_sheet_id() != Some(sheet)
-                {
-                    let outcome = self
-                        .model
-                        .activate_sheet(sheet, self.design.interaction.drag.let_go());
-                    if self.workbench.report(outcome).is_err() {
-                        return;
-                    }
-                }
-                self.workbench
-                    .activate(crate::workbench::state::Workspace::Design);
-                self.model.schematic.session.editor.center_request = Some(Point::new(x, y));
-                self.model.schematic.session.editor.net_highlight.clear();
-                self.model.schematic.session.editor.selection.clear();
-                if let Some(id) = component {
-                    self.model
-                        .schematic
-                        .session
-                        .editor
-                        .selection
-                        .select_component(id);
-                }
-                if let Some(id) = wire {
-                    self.model
-                        .schematic
-                        .session
-                        .editor
-                        .selection
-                        .select_wire(id);
-                }
-            }
-            LogAnchor::Symbol {
-                reference,
-                pin_name,
-                point,
-            } => {
-                self.open_workspace_view(reference);
-                self.workbench
-                    .activate(crate::workbench::state::Workspace::Design);
-                self.design.symbol.editor.select_pin(pin_name);
-                if let Some(point) = point {
-                    let zoom = self.design.symbol.editor.zoom.max(1.0);
-                    self.design.symbol.editor.pan =
-                        (-(point.x as f32) * zoom, -(point.y as f32) * zoom);
-                }
-                self.design.symbol.editor.needs_fit = false;
-            }
-            LogAnchor::Simulation { nets, devices } => {
-                self.highlight_failed_run_sites(&nets, &devices);
-            }
-            LogAnchor::ResultRun { run_sequence } => {
-                // Select first, activate second: landing in Results on
-                // whichever run happened to be selected would be a different
-                // dataset than the row named.
-                if self.model.simulation.select_run_by_sequence(run_sequence) {
-                    self.workbench
-                        .activate(crate::workbench::state::Workspace::Results);
-                } else {
-                    self.prompt(RetainedSimulationState::retired_run_message(run_sequence));
-                }
-            }
-        }
-    }
-
     /// Mark the objects the analysis on display was attributed to.
     ///
-    /// The command form of [`Self::highlight_failed_run_sites`], taking its
+    /// The command form of [`highlight_failed_run_sites`], taking its
     /// subject from the selected result so any surface can offer it without
     /// re-deriving which run is being looked at.
     pub(crate) fn highlight_active_failure_sites(&mut self) -> bool {
@@ -331,53 +223,7 @@ impl AppState {
         };
         let nets: Vec<String> = attribution.nets().map(str::to_owned).collect();
         let devices: Vec<String> = attribution.devices().map(str::to_owned).collect();
-        self.highlight_failed_run_sites(&nets, &devices)
-    }
-
-    /// Mark the design objects a failed run named, or say why it cannot.
-    ///
-    /// The refusal is the same sentence the operating-point inspector uses
-    /// for the same condition, and for the same reason: the map that would
-    /// find these conductors describes a drawing that has since changed, so
-    /// pointing anywhere would be pointing at where a wire used to be. The
-    /// answer is a prompt, because it answers the gesture that asked.
-    pub(crate) fn highlight_failed_run_sites(
-        &mut self,
-        nets: &[String],
-        devices: &[String],
-    ) -> bool {
-        match crate::schematic::view::select_failure_sites(self, nets, devices) {
-            Ok(selection) if selection.is_empty() => {
-                self.prompt(format!(
-                    "This sheet draws none of the objects that run named ({}).",
-                    selection.unlocated.join(", ")
-                ));
-                false
-            }
-            Ok(selection) => {
-                self.workbench
-                    .activate(crate::workbench::state::Workspace::Design);
-                if !selection.unlocated.is_empty() {
-                    self.prompt(format!(
-                        "Marked {} of {} objects; this sheet does not draw {}.",
-                        selection.nets.len() + selection.devices.len(),
-                        nets.len() + devices.len(),
-                        selection.unlocated.join(", ")
-                    ));
-                }
-                true
-            }
-            Err(error) => {
-                let named = nets
-                    .iter()
-                    .chain(devices.iter())
-                    .map(String::as_str)
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                self.prompt(error.message(&named));
-                false
-            }
-        }
+        highlight_failed_run_sites(&mut self.model, &mut self.workbench, &nets, &devices)
     }
 
     pub(crate) fn generate_active_symbol_document(&mut self) -> Result<(), String> {
@@ -583,19 +429,9 @@ impl AppState {
         .then_some(reference)
     }
 
-    /// The openable Verilog-A view of the one selected instance.
+    /// [`selected_instance_veriloga_source`] for the session's model.
     pub(crate) fn selected_veriloga_source(&self) -> Option<CellViewRef> {
-        self.model
-            .schematic
-            .session
-            .editor
-            .selection
-            .single_component()
-            .and_then(|component_id| self.veriloga_source_for_component(component_id))
-    }
-
-    pub(crate) fn hierarchical_edit_in_place_enabled(&self) -> bool {
-        hierarchical_edit_in_place_enabled(&self.model)
+        selected_instance_veriloga_source(&self.model)
     }
 
     /// [`NavigationParts::open_selected_instance_master`] for the session.
@@ -642,6 +478,63 @@ impl AppState {
         );
         self.prompt(announced);
     }
+}
+
+/// Mark the design objects a failed run named, or say why it cannot.
+///
+/// The refusal is the same sentence the operating-point inspector uses
+/// for the same condition, and for the same reason: the map that would
+/// find these conductors describes a drawing that has since changed, so
+/// pointing anywhere would be pointing at where a wire used to be. The
+/// answer is a prompt, because it answers the gesture that asked.
+pub(crate) fn highlight_failed_run_sites(
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
+    nets: &[String],
+    devices: &[String],
+) -> bool {
+    match crate::schematic::view::select_failure_sites(model, nets, devices) {
+        Ok(selection) if selection.is_empty() => {
+            wb.prompt(format!(
+                "This sheet draws none of the objects that run named ({}).",
+                selection.unlocated.join(", ")
+            ));
+            false
+        }
+        Ok(selection) => {
+            wb.activate(crate::workbench::state::Workspace::Design);
+            if !selection.unlocated.is_empty() {
+                wb.prompt(format!(
+                    "Marked {} of {} objects; this sheet does not draw {}.",
+                    selection.nets.len() + selection.devices.len(),
+                    nets.len() + devices.len(),
+                    selection.unlocated.join(", ")
+                ));
+            }
+            true
+        }
+        Err(error) => {
+            let named = nets
+                .iter()
+                .chain(devices.iter())
+                .map(String::as_str)
+                .collect::<Vec<_>>()
+                .join(", ");
+            wb.prompt(error.message(&named));
+            false
+        }
+    }
+}
+
+/// The openable Verilog-A view of the one selected instance.
+pub(crate) fn selected_instance_veriloga_source(model: &Model) -> Option<CellViewRef> {
+    model
+        .schematic
+        .session
+        .editor
+        .selection
+        .single_component()
+        .and_then(|component_id| veriloga_source_for_component(model, component_id))
 }
 
 /// Whether descending into an instance edits it in place under its parent

@@ -8,7 +8,7 @@ use std::sync::Arc;
 use egui::Ui;
 
 use crate::workbench::app::symbol_context_revision;
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::{AppState, Model};
 
 use super::symbols::SymbolLibrary;
 
@@ -194,32 +194,25 @@ pub(crate) fn drawn_failure_site_count(
 
 /// Mark a failed run's objects while retaining app ownership of map freshness.
 pub(crate) fn select_failure_sites(
-    state: &mut AppState,
+    model: &mut Model,
     nets: &[String],
     devices: &[String],
 ) -> Result<FailureSiteSelection, LocateSignalError> {
-    let current = state.model.result_mapping_is_current();
-    let occurrence = state.model.workspace.content.occurrence_path();
-    let sheet = sheet_visibility::active_sheet_id(state);
-    let key = state
-        .model
-        .workspace
-        .content
-        .active_schematic_reference()
-        .key();
-    let (document, editor) = state.model.schematic.document_and_editor();
+    let current = model.result_mapping_is_current();
+    let occurrence = model.workspace.content.occurrence_path();
+    let sheet = model.active_sheet_id();
+    let key = model.workspace.content.active_schematic_reference().key();
+    let (document, editor) = model.schematic.document_and_editor();
     let view = cross_probe::CrossProbeView {
         document,
-        sheet_catalog: state
-            .model
+        sheet_catalog: model
             .workspace
             .content
             .design_management
             .sheet_catalog(&key),
         occurrence: &occurrence,
         net_to_points: current.then_some(
-            &state
-                .model
+            &model
                 .simulation
                 .source
                 .cross_probe

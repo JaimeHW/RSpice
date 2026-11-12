@@ -1160,7 +1160,7 @@ fn a_copied_row_keeps_tabs_and_line_breaks_inside_their_cell() {
 #[test]
 fn the_canvas_tour_and_the_grid_stand_on_one_finding() {
     let mut state = state_with_design_findings();
-    crate::schematic::view::violations::cycle_violation(&mut state, 1);
+    state.navigation().cycle_violation(1);
     let standing = state
         .model
         .diagnostics

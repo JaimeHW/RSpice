@@ -1074,7 +1074,7 @@ fn symbol_violation_cycle_opens_symbol_view_and_selects_pin() {
     state.run_active_symbol_pin_checks();
     state.design.symbol.editor.clear_selection();
 
-    crate::schematic::view::violations::cycle_violation(&mut state, 1);
+    state.navigation().cycle_violation(1);
 
     assert_eq!(
         state.model.workspace.content.active_view,
