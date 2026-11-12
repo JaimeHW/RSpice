@@ -487,12 +487,58 @@ where
         }
         // Optional, tagged extension: a result without checks keeps its
         // sealed identity.
-        if version >= ResultDigestEncoding::V16 && !self.checks.is_empty() {
+        if version >= ResultDigestEncoding::V16
+            && !(self.checks.hdl.is_empty() && self.checks.assertions.is_empty())
+        {
             writer.string("run-checks/v1");
             encode_run_checks(&mut writer, self.checks);
         }
+        // The same for the task that ended the run: a result a run reached
+        // the end of keeps its identity.
+        if version >= ResultDigestEncoding::V16
+            && let Some(finish) = &self.checks.finish
+        {
+            writer.string("run-finish/v1");
+            encode_model_finish(&mut writer, finish);
+        }
         writer
     }
+}
+
+fn encode_model_finish(writer: &mut ResultDigestWriter, finish: &rspice_core::ModelFinish) {
+    use rspice_core::{ModelFinishPoint, ModelFinishTask};
+    writer.u8(match finish.task {
+        ModelFinishTask::Finish => 0,
+        ModelFinishTask::Stop => 1,
+        ModelFinishTask::Fatal => 2,
+    });
+    writer.string(&finish.instance);
+    writer.string(&finish.model);
+    writer.u64(u64::from(finish.site));
+    match finish.point {
+        ModelFinishPoint::Initialization => writer.u8(0),
+        ModelFinishPoint::OperatingPoint => writer.u8(1),
+        ModelFinishPoint::Transient { time } => {
+            writer.u8(2);
+            writer.f64(time);
+        }
+        ModelFinishPoint::DcSweep { value } => {
+            writer.u8(3);
+            writer.f64(value);
+        }
+        ModelFinishPoint::Frequency { frequency } => {
+            writer.u8(4);
+            writer.f64(frequency);
+        }
+    }
+    writer.u8(finish.diagnostic_level);
+    writer.option(finish.source.as_ref(), |writer, source| {
+        writer.string(&source.file);
+        writer.u64(u64::from(source.line));
+    });
+    writer.option(finish.message.as_deref(), |writer, message| {
+        writer.string(message);
+    });
 }
 
 fn encode_run_checks(writer: &mut ResultDigestWriter, checks: &crate::analysis_result::RunChecks) {

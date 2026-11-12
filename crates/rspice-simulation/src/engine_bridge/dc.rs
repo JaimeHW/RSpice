@@ -158,27 +158,35 @@ impl EngineBridge {
         } else {
             None
         };
-        let run = match (config.initial_guess, config.node_initialization) {
-            (_, OpNodeInitialization::ForceIcValues) => {
-                engine.run_dc_op_forced_ic_with_report_and_abort(&execution_netlist, abort)
-            }
-            (OpInitialGuess::PreviousConverged | OpInitialGuess::PreviousCompatible, _) => {
-                match previous_solution.as_deref() {
-                    Some(previous) => engine.run_dc_op_with_previous_solution_and_report_and_abort(
-                        &execution_netlist,
-                        previous,
-                        abort,
-                    ),
-                    None => Err(rspice_core::SimulationError::Circuit(
-                        "previous operating-point state was not bound to this request".to_owned(),
-                    )),
+        // A design's `$finish`, `$stop` or `$fatal` during the operating
+        // point ends the run there; the result's checks name it.
+        let model_scope = super::checks::ModelFinishScope::new(abort);
+        let run = {
+            let abort = model_scope.signal();
+            match (config.initial_guess, config.node_initialization) {
+                (_, OpNodeInitialization::ForceIcValues) => {
+                    engine.run_dc_op_forced_ic_with_report_and_abort(&execution_netlist, abort)
                 }
-            }
-            (OpInitialGuess::ZeroState, _) => {
-                engine.run_dc_op_from_zero_with_report_and_abort(&execution_netlist, abort)
-            }
-            (OpInitialGuess::Automatic | OpInitialGuess::UserNodeVoltages, _) => {
-                engine.run_dc_op_with_report_and_abort(&execution_netlist, abort)
+                (OpInitialGuess::PreviousConverged | OpInitialGuess::PreviousCompatible, _) => {
+                    match previous_solution.as_deref() {
+                        Some(previous) => engine
+                            .run_dc_op_with_previous_solution_and_report_and_abort(
+                                &execution_netlist,
+                                previous,
+                                abort,
+                            ),
+                        None => Err(rspice_core::SimulationError::Circuit(
+                            "previous operating-point state was not bound to this request"
+                                .to_owned(),
+                        )),
+                    }
+                }
+                (OpInitialGuess::ZeroState, _) => {
+                    engine.run_dc_op_from_zero_with_report_and_abort(&execution_netlist, abort)
+                }
+                (OpInitialGuess::Automatic | OpInitialGuess::UserNodeVoltages, _) => {
+                    engine.run_dc_op_with_report_and_abort(&execution_netlist, abort)
+                }
             }
         };
         let (core_result, device_report) = run.map_err(|e| self.translate_error(e))?;
@@ -196,7 +204,8 @@ impl EngineBridge {
                 &core_result,
                 &device_report,
             ),
-        );
+        )
+        .finished_by(model_scope.finish());
         let device_report = filter_device_report(device_report, config);
         if !device_report.is_empty() {
             result.device_report = Some(device_report);
@@ -213,6 +222,9 @@ impl EngineBridge {
     ) -> Result<SimulationResult, SimulationError> {
         ensure_not_aborted(abort)?;
         let (engine, hdl_output) = self.capturing_hdl_output(&self.engine_for_netlist(netlist))?;
+        // A design's `$finish`, `$stop` or `$fatal` ends the sweep at its
+        // point; the result's checks name it.
+        let model_scope = super::checks::ModelFinishScope::new(abort);
         let nested_cfg = nested_dc_sweep_config(config);
         ensure_not_aborted(abort)?;
         let nested_cfg = nested_cfg?;
@@ -254,7 +266,7 @@ impl EngineBridge {
                     &config.source,
                     &config.primary_spec(),
                     Some(&second),
-                    abort,
+                    model_scope.signal(),
                 )
                 .map_err(|error| self.translate_error(error))?;
             if points_per_member.checked_mul(sweep2_values.len()) != Some(points.len()) {
@@ -384,7 +396,7 @@ impl EngineBridge {
                     &config.source,
                     &spec,
                     None,
-                    abort,
+                    model_scope.signal(),
                 )
                 .map_err(|e| self.translate_error(e))?;
             let sweep_results = point_results
@@ -492,7 +504,7 @@ impl EngineBridge {
                     &config.source,
                     &config.primary_spec(),
                     None,
-                    abort,
+                    model_scope.signal(),
                 )
                 .map_err(|e| self.translate_error(e))?
                 .into_iter()
@@ -587,7 +599,8 @@ impl EngineBridge {
             sweep_values,
             waveforms,
             measurements,
-            checks: crate::results::SimulationChecks::new(&hdl_output.collector.take(), assertions),
+            checks: crate::results::SimulationChecks::new(&hdl_output.collector.take(), assertions)
+                .finished_by(model_scope.finish()),
         })
     }
 }

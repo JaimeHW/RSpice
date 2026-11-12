@@ -38,11 +38,63 @@ pub struct RunChecks {
     pub hdl: Vec<HdlDiagnostic>,
     /// The deck's `.ASSERT` reports, one per assertion and checked instance.
     pub assertions: Vec<rspice_core::analysis::AssertionReport>,
+    /// The `$finish`, `$stop` or `$fatal` that ended the run before its stop
+    /// point: the task, its source line, its time and a `$fatal`'s message.
+    /// `None` for a run that reached its end.
+    pub finish: Option<rspice_core::ModelFinish>,
+}
+
+/// What a run's checks say of it, worst first in [`RunChecks::verdict`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum CheckVerdict {
+    /// Nothing failed and nothing warned.
+    Passed,
+    /// Nothing failed, and a `$warning` or a warning-level `.ASSERT`
+    /// violation was reported.
+    Warned,
+    /// A `$error` or `$fatal` was reported, a `$fatal` ended the run, an
+    /// error-level `.ASSERT` was violated, or an assertion could not be
+    /// evaluated. A failed check is never a clean pass.
+    Failed,
 }
 
 impl RunChecks {
     pub fn is_empty(&self) -> bool {
-        self.hdl.is_empty() && self.assertions.is_empty()
+        self.hdl.is_empty() && self.assertions.is_empty() && self.finish.is_none()
+    }
+
+    /// The worst thing the checks reported. A `$finish` or `$stop` ends a
+    /// run without failing it, as `vvp -n` does; an `$info` and a
+    /// notice-level `.ASSERT` are information only.
+    pub fn verdict(&self) -> CheckVerdict {
+        use rspice_core::config::HdlSeverity;
+        use rspice_core::netlist::AssertLevel;
+        let hdl = self.hdl.iter().map(|record| match record.severity {
+            HdlSeverity::Info => CheckVerdict::Passed,
+            HdlSeverity::Warning => CheckVerdict::Warned,
+            HdlSeverity::Error | HdlSeverity::Fatal => CheckVerdict::Failed,
+        });
+        let assertions = self.assertions.iter().map(|report| {
+            if report.error.is_some() {
+                return CheckVerdict::Failed;
+            }
+            match (report.level, report.violations.is_empty()) {
+                (_, true) | (AssertLevel::Notice, false) => CheckVerdict::Passed,
+                (AssertLevel::Warning, false) => CheckVerdict::Warned,
+                (AssertLevel::Error, false) => CheckVerdict::Failed,
+            }
+        });
+        let finish = self.finish.iter().map(|finish| {
+            if finish.failed() {
+                CheckVerdict::Failed
+            } else {
+                CheckVerdict::Passed
+            }
+        });
+        hdl.chain(assertions)
+            .chain(finish)
+            .max()
+            .unwrap_or(CheckVerdict::Passed)
     }
 }
 
@@ -475,6 +527,116 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
             monte_carlo_checkpoint: self.monte_carlo_checkpoint.as_ref(),
             transient_checkpoint: self.transient_checkpoint.as_ref(),
             native_scalar_units: self.native_scalar_units.as_ref(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod verdict_tests {
+    use super::{CheckVerdict, HdlDiagnostic, RunChecks};
+    use rspice_core::analysis::{AssertViolation, AssertionReport};
+    use rspice_core::config::{HdlOrigin, HdlPoint, HdlSeverity};
+    use rspice_core::netlist::{AssertAnalysis, AssertLevel, NetlistSourceLocation};
+
+    fn record(severity: HdlSeverity) -> HdlDiagnostic {
+        HdlDiagnostic {
+            severity,
+            text: "note".into(),
+            point: HdlPoint::Transient { time: 1e-9 },
+            origin: HdlOrigin {
+                scope: "xtb".into(),
+                file: "tb.v".into(),
+                line: 3,
+            },
+        }
+    }
+
+    fn report(level: AssertLevel, violated: bool) -> AssertionReport {
+        AssertionReport {
+            name: "a".into(),
+            analysis: AssertAnalysis::Tran,
+            target: "V(out)".into(),
+            instance: None,
+            level,
+            message: None,
+            origin: NetlistSourceLocation::in_memory(4),
+            violations: if violated {
+                vec![AssertViolation {
+                    start: Some(1e-9),
+                    end: None,
+                    extreme: Some(1.0),
+                    at: Some(2e-9),
+                }]
+            } else {
+                Vec::new()
+            },
+            unknown_stretches: 0,
+            error: None,
+        }
+    }
+
+    fn finish(task: rspice_core::ModelFinishTask) -> rspice_core::ModelFinish {
+        rspice_core::ModelFinish {
+            instance: "xtb".into(),
+            model: "tb".into(),
+            site: 1,
+            point: rspice_core::ModelFinishPoint::Transient { time: 5e-9 },
+            diagnostic_level: 1,
+            task,
+            source: None,
+            message: (task == rspice_core::ModelFinishTask::Fatal).then(|| "boom".into()),
+        }
+    }
+
+    #[test]
+    fn a_failing_check_is_never_a_clean_pass() {
+        use rspice_core::ModelFinishTask;
+        let verdict = |checks: RunChecks| checks.verdict();
+        assert_eq!(verdict(RunChecks::default()), CheckVerdict::Passed);
+        for (severity, expected) in [
+            (HdlSeverity::Info, CheckVerdict::Passed),
+            (HdlSeverity::Warning, CheckVerdict::Warned),
+            (HdlSeverity::Error, CheckVerdict::Failed),
+            (HdlSeverity::Fatal, CheckVerdict::Failed),
+        ] {
+            let checks = RunChecks {
+                hdl: vec![record(HdlSeverity::Info), record(severity)],
+                ..RunChecks::default()
+            };
+            assert_eq!(verdict(checks), expected, "{severity:?}");
+        }
+        for (level, violated, expected) in [
+            (AssertLevel::Error, false, CheckVerdict::Passed),
+            (AssertLevel::Notice, true, CheckVerdict::Passed),
+            (AssertLevel::Warning, true, CheckVerdict::Warned),
+            (AssertLevel::Error, true, CheckVerdict::Failed),
+        ] {
+            let checks = RunChecks {
+                assertions: vec![report(level, violated)],
+                ..RunChecks::default()
+            };
+            assert_eq!(verdict(checks), expected, "{level:?} {violated}");
+        }
+        let unevaluated = RunChecks {
+            assertions: vec![AssertionReport {
+                error: Some("V(nope) is not in the result".into()),
+                ..report(AssertLevel::Notice, false)
+            }],
+            ..RunChecks::default()
+        };
+        assert_eq!(verdict(unevaluated), CheckVerdict::Failed);
+        for (task, expected) in [
+            (ModelFinishTask::Finish, CheckVerdict::Passed),
+            (ModelFinishTask::Stop, CheckVerdict::Passed),
+            (ModelFinishTask::Fatal, CheckVerdict::Failed),
+        ] {
+            let checks = RunChecks {
+                hdl: vec![record(HdlSeverity::Warning)],
+                finish: Some(finish(task)),
+                ..RunChecks::default()
+            };
+            let expected = expected.max(CheckVerdict::Warned);
+            assert_eq!(verdict(checks), expected, "{task:?}");
         }
     }
 }

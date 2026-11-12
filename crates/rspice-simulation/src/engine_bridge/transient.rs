@@ -82,6 +82,9 @@ impl EngineBridge {
         let netlist = prepared_netlist.as_ref();
         // Collect what the deck's HDL designs print for the result.
         let (engine, hdl_output) = self.capturing_hdl_output(&self.engine_for_netlist(netlist))?;
+        // A design's `$finish`, `$stop` or `$fatal` ends the run at its
+        // accepted point; the result's checks name it.
+        let model_scope = super::checks::ModelFinishScope::new(abort);
         let tran_result = if let Some(execution) = checkpoint {
             use rspice_core::engine::{
                 TransientCheckpointEncoding, TransientCheckpointStart, TransientCheckpointStream,
@@ -131,7 +134,7 @@ impl EngineBridge {
                     times: &execution.request.times,
                     observer: &publish,
                 },
-                abort,
+                model_scope.signal(),
             );
             if let Some(error) = failure.into_inner().unwrap_or_else(|p| p.into_inner()) {
                 return Err(error);
@@ -145,7 +148,7 @@ impl EngineBridge {
                 crate::engine_services::state_capture_times(netlist, config.stop_time);
             if capture_times.is_empty() {
                 engine
-                    .run_tran_with_abort(netlist, config.stop_time, max_step, abort)
+                    .run_tran_with_abort(netlist, config.stop_time, max_step, model_scope.signal())
                     .map_err(|error| self.translate_error(error))?
             } else {
                 let (result, states) = engine
@@ -155,7 +158,7 @@ impl EngineBridge {
                         max_step,
                         rspice_core::engine::TransientStartupMode::from_uic(config.uic),
                         &capture_times,
-                        abort,
+                        model_scope.signal(),
                     )
                     .map_err(|error| self.translate_error(error))?;
                 crate::engine_services::publish_transient_states(&capture_times, states);
@@ -186,7 +189,8 @@ impl EngineBridge {
         {
             *slot = Some(std::sync::Arc::new(convergence));
             *records = hdl_output.collector.take();
-            *checks = crate::results::SimulationChecks::new(records, assertions);
+            *checks = crate::results::SimulationChecks::new(records, assertions)
+                .finished_by(model_scope.finish());
         }
         Ok(converted)
     }

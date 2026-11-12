@@ -41,3 +41,35 @@ impl EngineBridge {
         Ok((engine, capture))
     }
 }
+
+/// The model scope of one result's run: the engine calls made through
+/// [`Self::signal`] report a model's `$finish`, `$stop` or `$fatal` where
+/// [`Self::finish`] reads it. A caller that already runs a scope keeps its
+/// own, and the result reads the request from there.
+pub(super) struct ModelFinishScope<'a> {
+    parent: &'a dyn rspice_core::abort_signal::AbortSignal,
+    scope: Option<rspice_core::abort_signal::ModelRunSignal<'a>>,
+}
+
+impl<'a> ModelFinishScope<'a> {
+    pub(super) fn new(parent: &'a dyn rspice_core::abort_signal::AbortSignal) -> Self {
+        Self {
+            parent,
+            scope: rspice_core::abort_signal::ModelRunSignal::if_needed(parent),
+        }
+    }
+
+    pub(super) fn signal(&self) -> &dyn rspice_core::abort_signal::AbortSignal {
+        match &self.scope {
+            Some(scope) => scope,
+            None => self.parent,
+        }
+    }
+
+    /// The request that ended the run, if a model made one.
+    pub(super) fn finish(&self) -> Option<rspice_core::ModelFinish> {
+        self.signal()
+            .model_control()
+            .and_then(rspice_core::abort_signal::ModelRunControl::finish)
+    }
+}

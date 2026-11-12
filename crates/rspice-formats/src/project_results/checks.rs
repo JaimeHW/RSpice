@@ -1,6 +1,7 @@
 //! Persisted run checks, introduced in result schema v45: the HDL's
 //! severity-task records and the deck's `.ASSERT` reports, saved with the
-//! analysis they were reported after.
+//! analysis they were reported after, and the `$finish`, `$stop` or
+//! `$fatal` that ended the run.
 
 use super::*;
 use rspice_core::analysis::{AssertViolation, AssertionReport};
@@ -14,6 +15,10 @@ pub struct ProjectRunChecks {
     pub hdl: Vec<HdlDiagnostic>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub assertions: Vec<ProjectAssertionReport>,
+    /// The `$finish`, `$stop` or `$fatal` that ended the run before its stop
+    /// point; absent for a run that reached its end.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finish: Option<rspice_core::ModelFinish>,
 }
 
 /// One `.ASSERT` report for one checked instance.
@@ -70,6 +75,7 @@ impl From<&RunChecks> for ProjectRunChecks {
                 .iter()
                 .map(ProjectAssertionReport::from)
                 .collect(),
+            finish: checks.finish.clone(),
         }
     }
 }
@@ -114,11 +120,12 @@ impl ProjectRunChecks {
                 .into_iter()
                 .map(ProjectAssertionReport::into_report)
                 .collect::<Result<_, _>>()?,
+            finish: self.finish,
         })
     }
 
     pub(super) fn validate(&self, prefix: &str) -> Result<(), String> {
-        if self.hdl.is_empty() && self.assertions.is_empty() {
+        if self.hdl.is_empty() && self.assertions.is_empty() && self.finish.is_none() {
             return Err(format!(
                 "{prefix} is empty; a result without checks omits the field"
             ));
@@ -134,6 +141,21 @@ impl ProjectRunChecks {
                 }
                 rspice_core::config::HdlPoint::Initialization
                 | rspice_core::config::HdlPoint::OperatingPoint => {}
+            }
+        }
+        if let Some(finish) = &self.finish {
+            let at = format!("{prefix}.finish");
+            match finish.point {
+                rspice_core::ModelFinishPoint::Transient { time: value }
+                | rspice_core::ModelFinishPoint::DcSweep { value }
+                | rspice_core::ModelFinishPoint::Frequency { frequency: value } => {
+                    require_finite(value, &format!("{at}.point"))?;
+                }
+                rspice_core::ModelFinishPoint::Initialization
+                | rspice_core::ModelFinishPoint::OperatingPoint => {}
+            }
+            if finish.message.is_some() != finish.failed() {
+                return Err(format!("{at}: only a $fatal finish carries a message"));
             }
         }
         for (index, report) in self.assertions.iter().enumerate() {

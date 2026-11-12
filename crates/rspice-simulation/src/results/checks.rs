@@ -1,5 +1,6 @@
 //! What a run's checks reported beside its result.
 
+use rspice_core::ModelFinish;
 use rspice_core::analysis::AssertionReport;
 use rspice_core::config::{HdlOutputRecord, HdlStream};
 use rspice_results::analysis_result::{HdlDiagnostic, RunChecks};
@@ -15,6 +16,10 @@ pub struct SimulationChecks {
     /// The deck's `.ASSERT` reports for this analysis, one per assertion and
     /// checked instance, as the evaluator published them.
     pub assertions: Vec<AssertionReport>,
+    /// The `$finish`, `$stop` or `$fatal` that ended the run before its
+    /// stop point, with its source line, its time and a `$fatal`'s message.
+    /// `None` for a run that reached its end.
+    pub finish: Option<ModelFinish>,
 }
 
 impl SimulationChecks {
@@ -28,11 +33,19 @@ impl SimulationChecks {
                 .cloned()
                 .collect(),
             assertions,
+            finish: None,
         }
     }
 
+    /// These checks, with the request that ended the run, if one did.
+    #[must_use]
+    pub fn finished_by(mut self, finish: Option<ModelFinish>) -> Self {
+        self.finish = finish;
+        self
+    }
+
     pub fn is_empty(&self) -> bool {
-        self.hdl.is_empty() && self.assertions.is_empty()
+        self.hdl.is_empty() && self.assertions.is_empty() && self.finish.is_none()
     }
 
     /// The checks as a retained analysis result keeps them.
@@ -52,6 +65,7 @@ impl SimulationChecks {
                 })
                 .collect(),
             assertions: self.assertions,
+            finish: self.finish,
         }
     }
 }

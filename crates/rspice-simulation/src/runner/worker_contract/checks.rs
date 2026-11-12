@@ -17,6 +17,8 @@ pub(crate) struct WorkerChecks {
     hdl: Vec<HdlOutputRecord>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     assertions: Vec<WorkerAssertionReport>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    finish: Option<rspice_core::ModelFinish>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -69,7 +71,7 @@ struct WorkerAssertViolation {
 
 impl WorkerChecks {
     pub(crate) fn is_empty(&self) -> bool {
-        self.hdl.is_empty() && self.assertions.is_empty()
+        self.hdl.is_empty() && self.assertions.is_empty() && self.finish.is_none()
     }
 
     /// Refuse checks the JSON envelope cannot carry exactly: a non-finite
@@ -86,6 +88,18 @@ impl WorkerChecks {
             }
             if !record.seconds.is_finite() || !point.is_finite() {
                 return Err(format!("worker HDL check {index} has a non-finite time"));
+            }
+        }
+        if let Some(finish) = &self.finish {
+            let point = match finish.point {
+                rspice_core::ModelFinishPoint::Transient { time: value }
+                | rspice_core::ModelFinishPoint::DcSweep { value }
+                | rspice_core::ModelFinishPoint::Frequency { frequency: value } => value,
+                rspice_core::ModelFinishPoint::Initialization
+                | rspice_core::ModelFinishPoint::OperatingPoint => 0.0,
+            };
+            if !point.is_finite() {
+                return Err("worker run finish has a non-finite point".into());
             }
         }
         for (index, report) in self.assertions.iter().enumerate() {
@@ -122,6 +136,7 @@ impl From<SimulationChecks> for WorkerChecks {
                 .into_iter()
                 .map(WorkerAssertionReport::from)
                 .collect(),
+            finish: checks.finish,
         }
     }
 }
@@ -135,6 +150,7 @@ impl From<WorkerChecks> for SimulationChecks {
                 .into_iter()
                 .map(AssertionReport::from)
                 .collect(),
+            finish: checks.finish,
         }
     }
 }

@@ -296,6 +296,19 @@ fn checks_cross_the_worker_field_for_field() {
                 error: Some("mp publishes no vds".to_owned()),
             },
         ],
+        finish: Some(rspice_core::ModelFinish {
+            instance: "xtb".to_owned(),
+            model: "tb_ldo".to_owned(),
+            site: 4,
+            point: rspice_core::ModelFinishPoint::Transient { time: 4e-4 },
+            diagnostic_level: 1,
+            task: rspice_core::ModelFinishTask::Fatal,
+            source: Some(rspice_core::ModelFinishSource {
+                file: "tb_ldo.vams".to_owned(),
+                line: 41,
+            }),
+            message: Some("giving up".to_owned()),
+        }),
     };
 
     let expected = checks(AssertAnalysis::Op, HdlPoint::OperatingPoint);

@@ -57,6 +57,7 @@ fn checks() -> RunChecks {
                 error: Some("@mp[vds] is not in the result".into()),
             },
         ],
+        finish: None,
     }
 }
 
@@ -157,4 +158,88 @@ fn an_unknown_assertion_level_or_a_non_finite_violation_is_refused() {
         ..Default::default()
     });
     assert!(project.validate().is_err());
+}
+
+fn fatal() -> rspice_core::ModelFinish {
+    rspice_core::ModelFinish {
+        instance: "xtb".into(),
+        model: "tb_ldo_fail".into(),
+        site: 6,
+        point: rspice_core::ModelFinishPoint::Transient { time: 4e-4 },
+        diagnostic_level: 1,
+        task: rspice_core::ModelFinishTask::Fatal,
+        source: Some(rspice_core::ModelFinishSource {
+            file: "tb_ldo_fail.vams".into(),
+            line: 41,
+        }),
+        message: Some("regulator never settled".into()),
+    }
+}
+
+/// The task that ended a run is saved with its checks: which task, where,
+/// when, and a `$fatal`'s message, and it is part of the result's identity.
+#[test]
+fn the_task_that_ended_the_run_survives_the_project_file() {
+    let finished = persisted(RunChecks {
+        finish: Some(fatal()),
+        ..RunChecks::default()
+    });
+    let without = persisted(RunChecks::default());
+    assert_ne!(
+        finished.analyses[0].result_data_digest, without.analyses[0].result_data_digest,
+        "the finish is part of the result's identity"
+    );
+    let stopped = persisted(RunChecks {
+        finish: Some(rspice_core::ModelFinish {
+            task: rspice_core::ModelFinishTask::Stop,
+            message: None,
+            ..fatal()
+        }),
+        ..RunChecks::default()
+    });
+    assert_ne!(
+        finished.analyses[0].result_data_digest, stopped.analyses[0].result_data_digest,
+        "the task is part of the result's identity"
+    );
+    let current = ProjectSimulationResults::from(ProjectSimulationResultsData {
+        runs: vec![finished],
+        next_run_id: 1,
+        ..Default::default()
+    });
+    current.validate().unwrap();
+    let json = serde_json::to_string(&current).unwrap();
+    assert!(json.contains("\"finish\":"), "{json}");
+    let restored: ProjectSimulationResults = serde_json::from_str(&json).unwrap();
+    restored.validate().unwrap();
+    let analysis = restored.runs[0].analyses[0]
+        .clone()
+        .into_analysis()
+        .unwrap();
+    assert_eq!(analysis.checks.finish, Some(fatal()));
+    assert_eq!(
+        analysis.checks.verdict(),
+        rspice_results::analysis_result::CheckVerdict::Failed,
+        "a run a $fatal ended is never a clean pass"
+    );
+
+    // A `$stop` carries no message.
+    let mut run = persisted(RunChecks {
+        finish: Some(fatal()),
+        ..RunChecks::default()
+    });
+    if let Some(checks) = run.analyses[0].checks.as_mut()
+        && let Some(finish) = checks.finish.as_mut()
+    {
+        finish.task = rspice_core::ModelFinishTask::Stop;
+    }
+    let project = ProjectSimulationResults::from(ProjectSimulationResultsData {
+        runs: vec![run],
+        next_run_id: 1,
+        ..Default::default()
+    });
+    let error = project.validate().unwrap_err();
+    assert!(
+        error.contains("only a $fatal finish carries a message"),
+        "{error}"
+    );
 }

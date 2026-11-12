@@ -234,3 +234,103 @@ fn an_hdl_error_keeps_its_file_line_and_time() {
     assert_eq!(diagnostic.point, record.point);
     assert_eq!(diagnostic.text, record.text);
 }
+
+/// A design's `$finish`, `$stop` and `$fatal` each end the run under their own
+/// name: the checks carry the task, its file and line, the time and the
+/// `$fatal` message, and only the `$fatal` fails the run.
+#[test]
+fn the_task_that_ended_a_run_is_named_in_its_checks() {
+    use rspice_core::{ModelFinishPoint, ModelFinishTask};
+    use rspice_results::analysis_result::CheckVerdict;
+    let directory = std::env::temp_dir().join(format!(
+        "rspice_simulation_hdl_finish_{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&directory).expect("create the model directory");
+    for (call, task, message, verdict) in [
+        (
+            "$finish;",
+            ModelFinishTask::Finish,
+            None,
+            CheckVerdict::Passed,
+        ),
+        ("$stop;", ModelFinishTask::Stop, None, CheckVerdict::Passed),
+        (
+            "$fatal(1, \"code %0d\", 7);",
+            ModelFinishTask::Fatal,
+            Some("code 7"),
+            CheckVerdict::Failed,
+        ),
+    ] {
+        let model = directory.join(format!("ender_{}.va", task.name().trim_start_matches('$')));
+        std::fs::write(
+            &model,
+            format!(
+                "`timescale 1ns/1ns\n\
+                 module ender(p, n);\n\
+                 \x20 inout p, n;\n\
+                 \x20 electrical p, n;\n\
+                 \x20 initial begin\n\
+                 \x20   #5 {call}\n\
+                 \x20 end\n\
+                 \x20 analog I(p, n) <+ V(p, n) / 1000.0;\n\
+                 endmodule\n"
+            ),
+        )
+        .expect("write the model");
+        let deck = format!(
+            "* hdl finish\nV1 a 0 1\nR1 a p 1k\nx1 p 0 ender\n.va \"{}\" ender\n.tran 1n 20n\n.end\n",
+            model.display().to_string().replace('\\', "/")
+        );
+        let result = EngineBridge::new()
+            .run(
+                &AnalysisConfig::Transient(TransientAnalysisConfig {
+                    stop_time: 20e-9,
+                    step_time: 1e-9,
+                    ..TransientAnalysisConfig::default()
+                }),
+                &deck,
+            )
+            .unwrap_or_else(|error| panic!("{call}: the transient runs: {error}"));
+        let finish = checks(&result)
+            .finish
+            .clone()
+            .unwrap_or_else(|| panic!("{call}: the checks name the task that ended the run"));
+        assert_eq!(finish.task, task, "{call}");
+        assert_eq!(finish.instance, "x1", "{call}");
+        assert_eq!(finish.model, "ender", "{call}");
+        let source = finish.source.clone().expect("the call's line");
+        assert!(source.file.ends_with(".va"), "{call}: {source:?}");
+        assert_eq!(source.line, 6, "{call}");
+        let ModelFinishPoint::Transient { time } = finish.point else {
+            panic!("{call}: a transient finish: {finish:?}");
+        };
+        assert!((time - 5e-9).abs() < 1e-18, "{call}: {time:e}");
+        assert_eq!(finish.message.as_deref(), message, "{call}");
+        assert!(finish.to_string().contains(task.name()), "{call}: {finish}");
+        let retained = retained(result, AnalysisType::Transient);
+        assert_eq!(retained.finish, Some(finish), "{call}");
+        assert_eq!(retained.verdict(), verdict, "{call}");
+    }
+    let _ = std::fs::remove_dir_all(&directory);
+}
+
+/// A run that reaches its stop time names no finish, and a clean run passes.
+#[test]
+fn a_run_that_reaches_its_end_names_no_finish() {
+    let result = EngineBridge::new()
+        .run(
+            &AnalysisConfig::Transient(TransientAnalysisConfig {
+                stop_time: 2e-6,
+                step_time: 10e-9,
+                ..TransientAnalysisConfig::default()
+            }),
+            "* rc\nV1 in 0 PWL(0 0 1p 1)\nR1 in out 1k\nC1 out 0 1n\n.tran 10n 2u\n.end\n",
+        )
+        .expect("the transient runs");
+    assert_eq!(checks(&result).finish, None);
+    assert_eq!(
+        retained(result, AnalysisType::Transient).verdict(),
+        rspice_results::analysis_result::CheckVerdict::Passed
+    );
+}
