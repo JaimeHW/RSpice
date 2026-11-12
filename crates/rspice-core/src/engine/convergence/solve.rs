@@ -308,15 +308,19 @@ impl Engine {
             Ok(())
         };
         if self.tries_zero_dc_nodal_floor(circuit) {
-            assemble(circuit, matrix, &mut rhs, 0.0)?;
-            let direct_result = matrix.solve(&rhs);
-            if abort.is_aborted() {
-                return Err(SimulationError::Aborted);
-            }
-            match direct_result {
-                Ok(solution) => return Ok(solution),
-                Err(error) => {
-                    self.retain_dc_nodal_floor(circuit, matrix, &SimulationError::Solver(error))
+            loop {
+                assemble(circuit, matrix, &mut rhs, 0.0)?;
+                let direct_result = matrix.solve(&rhs);
+                if abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
+                let error = match direct_result {
+                    Ok(solution) => return Ok(solution),
+                    Err(error) => SimulationError::Solver(error),
+                };
+                if !self.hold_nodes_without_dc_path(circuit, matrix, &error) {
+                    self.retain_dc_nodal_floor(circuit, matrix, &error);
+                    break;
                 }
             }
         }
@@ -1150,26 +1154,92 @@ impl Engine {
         initial_guess: Option<&[Value]>,
         abort: &dyn AbortSignal,
     ) -> Result<Option<Vec<Value>>, SimulationError> {
-        let entry_state = circuit.nonlinear_state_snapshot();
         let entry_private_nodes = circuit.compact_model_private_nodes.clone();
         let entry_settled_nodes = circuit.settled_compact_model_private_nodes.clone();
-        circuit.zero_dc_nodal_floor = true;
-        let attempt =
-            self.solve_nonlinear_with_guess_unchecked(circuit, matrix, initial_guess, abort);
-        circuit.zero_dc_nodal_floor = false;
-        let error = match attempt {
-            Ok(solution) => return Ok(Some(solution)),
-            Err(SimulationError::Aborted) => return Err(SimulationError::Aborted),
-            Err(_) if abort.is_aborted() => return Err(SimulationError::Aborted),
-            Err(error) => error,
-        };
-        circuit.restore_nonlinear_state(entry_state);
-        // The floor's own first assembly decides again which private nodes
-        // settle and which it refuses by name.
-        circuit.compact_model_private_nodes = entry_private_nodes;
-        circuit.settled_compact_model_private_nodes = entry_settled_nodes;
-        self.retain_dc_nodal_floor(circuit, matrix, &error);
-        Ok(None)
+        loop {
+            let entry_state = circuit.nonlinear_state_snapshot();
+            circuit.zero_dc_nodal_floor = true;
+            let attempt =
+                self.solve_nonlinear_with_guess_unchecked(circuit, matrix, initial_guess, abort);
+            circuit.zero_dc_nodal_floor = false;
+            let error = match attempt {
+                Ok(solution) => return Ok(Some(solution)),
+                Err(SimulationError::Aborted) => return Err(SimulationError::Aborted),
+                Err(_) if abort.is_aborted() => return Err(SimulationError::Aborted),
+                Err(error) => error,
+            };
+            circuit.restore_nonlinear_state(entry_state);
+            // The next attempt's own first assembly decides again which
+            // private nodes settle and which it refuses by name.
+            circuit
+                .compact_model_private_nodes
+                .clone_from(&entry_private_nodes);
+            circuit
+                .settled_compact_model_private_nodes
+                .clone_from(&entry_settled_nodes);
+            if !self.hold_nodes_without_dc_path(circuit, matrix, &error) {
+                self.retain_dc_nodal_floor(circuit, matrix, &error);
+                return Ok(None);
+            }
+        }
+    }
+
+    /// Hold through GMIN, alone, each node a singular floor-free system
+    /// leaves without a DC path; `false` when there is none to hold, and the
+    /// solve goes back to the floor on every node.
+    ///
+    /// Such a node is one the deck's DC ground-path walk proves floating
+    /// (`CircuitData::dc_floating_component_for_matrix_row`) whose row the
+    /// system leaves empty (only capacitors reach it) or whose column it
+    /// leaves empty (what reaches it is a controlled current its own voltage
+    /// does not set). Nothing fixes its voltage, so the system is singular. A
+    /// node with a path whose conductances cancel is not one: its system has
+    /// no solution, and holding it would answer for another circuit.
+    /// Spectre installs GMIN on a node with no DC path alone
+    /// ("Gmin installed to provide path"); ngspice's GMIN stepping warns
+    /// "singular matrix" and leaves the node where its last stage put it.
+    /// Holding it alone leaves every node that has a path without the floor,
+    /// where the floor on every node pulls each one only leakage holds. The
+    /// node keeps GMIN from then on, in every assembly that stamps no floor.
+    fn hold_nodes_without_dc_path(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &StaticMatrix,
+        error: &SimulationError,
+    ) -> bool {
+        if !matches!(error, SimulationError::Solver(SolverError::SingularMatrix))
+            || circuit.settled_node_gmin == 0.0
+        {
+            return false;
+        }
+        let settled = circuit
+            .settled_compact_model_private_nodes
+            .as_deref()
+            .unwrap_or_default();
+        let unconstrained: Vec<usize> = (0..circuit.num_nodes().min(circuit.matrix_size()))
+            .filter(|&row| {
+                circuit.receives_nodal_gmin(row)
+                    && circuit.dc_floating_component_for_matrix_row(row).is_some()
+                    && circuit.event_only_net_kind(row + 1).is_none()
+                    && !settled.contains(&(row + 1))
+                    && !circuit.dc_floor_held_nodes.contains(&row)
+                    && (matrix.row_is_deficient(row) || matrix.column_is_deficient(row))
+            })
+            .collect();
+        if unconstrained.is_empty() {
+            return false;
+        }
+        // The ground-path walk has already warned that each has no DC path.
+        let node_names = circuit.node_names_sorted();
+        for &row in &unconstrained {
+            let name = node_names.get(row).map_or("?", String::as_str);
+            log::info!(
+                "Node {name} has no DC path; holding it alone through GMIN = {:e} S.",
+                circuit.settled_node_gmin
+            );
+        }
+        circuit.dc_floor_held_nodes.extend(unconstrained);
+        true
     }
 
     /// Keep the nodal floor on a circuit whose solve without it failed.
@@ -1180,6 +1250,8 @@ impl Engine {
         error: &SimulationError,
     ) {
         circuit.dc_nodal_floor_retained = true;
+        // Every node takes the floor now, the held ones with the rest.
+        circuit.dc_floor_held_nodes.clear();
         let floor = self.dc_nodal_gmin_floor(circuit);
         if matches!(error, SimulationError::Solver(SolverError::SingularMatrix)) {
             let node_names = circuit.node_names_sorted();

@@ -377,6 +377,53 @@ fn an_event_net_does_not_send_the_operating_point_back_to_the_nodal_floor() {
     assert_eq!(voltage(&result, "out"), 0.0);
 }
 
+/// Only capacitors reach `b`, so the system without the nodal floor is
+/// singular there. It used to go back to the 1e-15 S floor on every node
+/// ("singular matrix: check node B"), which pulled the 1e12/1e12 Ohm divider
+/// beside it to 0.49975012493753124 V. Spectre installs GMIN on the node
+/// with no DC path alone; the rest of the circuit keeps no floor, and the
+/// divider reads the 0.5 V that ngspice-46 prints for it alone (with `b` in
+/// the deck, ngspice-46's GMIN stepping fails at "singular matrix: check node
+/// b"). `b` then takes its charge-neutral 0.5 V. Every point of a sweep
+/// keeps the node held and the divider without the floor.
+#[test]
+fn a_node_without_a_dc_path_alone_takes_the_floor() {
+    let netlist = parse(
+        "Capacitor-only node beside a leakage-held divider\nV1 in 0 1\nR1 in mid 1e12\n\
+         R2 mid 0 1e12\nV2 in2 0 1\nR3 in2 a 1k\nC1 a b 1p\nC2 b 0 1p\n.op\n.end\n",
+    );
+    let (result, warnings) = warnings_of(|| engine().run_dc_op(&netlist));
+    let result = result.expect("the node without a DC path is held");
+    let mid = voltage(&result, "mid");
+    assert!(
+        (mid - 0.5).abs() <= 1.0e-12,
+        "v(mid) = {mid:e}, ngspice-46 0.5 for the divider alone"
+    );
+    let b = voltage(&result, "b");
+    assert!((b - 0.5).abs() <= 1.0e-12, "v(b) = {b:e}");
+    assert!(
+        warnings
+            .iter()
+            .any(|line| line == "Voltage Node (B) does not have a DC path to ground"),
+        "{warnings:?}"
+    );
+    assert!(
+        !warnings.iter().any(|line| line.contains("singular matrix")),
+        "{warnings:?}"
+    );
+    let sweep = engine()
+        .run_dc_sweep(&netlist, "v1", 0.5, 1.5, 0.5)
+        .expect("the sweep solves");
+    assert_eq!(sweep.len(), 3);
+    for (v, point) in &sweep {
+        let mid = voltage(point, "mid");
+        assert!(
+            (mid - v / 2.0).abs() <= 1.0e-12,
+            "V1 = {v}: v(mid) = {mid:e}"
+        );
+    }
+}
+
 /// `p`'s own conductances cancel, so the circuit's system is singular and
 /// the solve goes back to the 1e-15 S GMIN floor, which `n`'s conductance
 /// cancels exactly; every GMIN stage above the floor solves. GMIN stepping

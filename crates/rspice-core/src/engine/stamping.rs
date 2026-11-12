@@ -76,6 +76,7 @@ impl Engine {
                 }
             }
             Self::stamp_settled_node_gmin(circuit, matrix);
+            Self::stamp_held_node_gmin(circuit, matrix);
             return;
         }
         for index in 0..circuit.num_nodes() {
@@ -106,6 +107,20 @@ impl Engine {
         }
         for &node in settled {
             matrix.add(node - 1, node - 1, circuit.settled_node_gmin);
+        }
+    }
+
+    /// Install GMIN on each node the floor-free operating point found with
+    /// no DC path ([`CircuitData::dc_floor_held_nodes`]), alone, in an
+    /// assembly that stamps no nodal floor: the conductance Spectre installs
+    /// "to provide path" on such a node, which leaves every other node
+    /// without a floor.
+    fn stamp_held_node_gmin(circuit: &CircuitData, matrix: &mut StaticMatrix) {
+        if circuit.settled_node_gmin == 0.0 {
+            return;
+        }
+        for &row in &circuit.dc_floor_held_nodes {
+            matrix.add(row, row, circuit.settled_node_gmin);
         }
     }
 

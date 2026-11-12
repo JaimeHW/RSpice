@@ -689,6 +689,11 @@ pub struct CircuitData {
     /// The solve without the nodal floor failed once on this circuit,
     /// so its later operating points keep the floor.
     pub(crate) dc_nodal_floor_retained: bool,
+    /// Zero-based rows of the nodes the operating point solved without the
+    /// nodal floor found with no DC path: each takes GMIN alone
+    /// ([`Self::settled_node_gmin`]) in every assembly that stamps no nodal
+    /// floor, so the rest of the circuit keeps none.
+    pub(crate) dc_floor_held_nodes: Vec<usize>,
 
     // Controlled sources
     pub(crate) vcvs: Vcvs,

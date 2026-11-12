@@ -79,6 +79,7 @@ impl CircuitData {
             xyce_memristor_operating_point_mode: false,
             zero_dc_nodal_floor: false,
             dc_nodal_floor_retained: false,
+            dc_floor_held_nodes: Vec::new(),
             vcvs: Vcvs::new(),
             vccs: Vccs::new(),
             cccs: Cccs::new(),
