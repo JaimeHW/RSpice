@@ -123,6 +123,7 @@ fn reviewed_lanes(document: &mut VisualizationDocument, pane: PaneId, traces: [T
                     pane_id: pane,
                     name: "pair".to_owned(),
                     members: vec![bit1, bit0],
+                    nets: Vec::new(),
                     radix: BusRadix::Hex,
                     expanded: true,
                 }),
@@ -159,6 +160,7 @@ fn lane_kinds_radix_and_user_buses_survive_a_save_and_reload() {
             pane_id: pane,
             name: "pair".to_owned(),
             members: vec![traces[0], traces[1]],
+            nets: Vec::new(),
             radix: BusRadix::Hex,
             expanded: true,
         }]
@@ -214,7 +216,10 @@ fn a_schema_eight_document_loads_unchanged_and_round_trips() {
     );
 
     let migrated: VisualizationDocument = serde_json::from_value(legacy.clone()).unwrap();
-    assert_eq!(migrated.schema_version, 9);
+    assert_eq!(
+        migrated.schema_version,
+        VisualizationDocument::SCHEMA_VERSION
+    );
     assert_eq!(migrated, document);
     assert!(migrated.traces().iter().all(|trace| trace.lane.is_value()));
     assert!(migrated.user_buses().is_empty());
@@ -250,6 +255,7 @@ fn a_user_bus_groups_distinct_logic_lanes_of_its_own_pane() {
             pane_id: pane,
             name: "bad".to_owned(),
             members,
+            nets: Vec::new(),
             radix: BusRadix::Binary,
             expanded: false,
         })
@@ -284,6 +290,7 @@ fn a_user_bus_groups_distinct_logic_lanes_of_its_own_pane() {
                 pane_id: pane,
                 name: "pair".to_owned(),
                 members: vec![bit0, bit1],
+                nets: Vec::new(),
                 radix: BusRadix::Unsigned,
                 expanded: false,
             })],
@@ -322,4 +329,169 @@ fn removing_a_member_lane_narrows_its_bus_and_the_last_member_ends_it() {
         )
         .unwrap();
     assert!(document.user_buses().is_empty());
+}
+
+fn order(pane: PaneId, lanes: Vec<EventLaneRef>) -> DocumentEdit {
+    DocumentEdit::SetEventLaneOrder(EventLaneOrder {
+        pane_id: pane,
+        lanes,
+    })
+}
+
+/// The order the reader put a pane's lanes in, a declared bus among them,
+/// survives a save and reload in schema 10.
+#[test]
+fn an_event_lane_order_survives_a_save_and_reload() {
+    let (mut document, pane, [bit1, bit0, real]) = lane_document();
+    reviewed_lanes(&mut document, pane, [bit1, bit0, real]);
+    let lanes = vec![
+        EventLaneRef::Bus {
+            name: "x1.step[3:0]".to_owned(),
+        },
+        EventLaneRef::Trace { trace_id: bit0 },
+        EventLaneRef::Bus {
+            name: "pair".to_owned(),
+        },
+        EventLaneRef::Trace { trace_id: bit1 },
+    ];
+    document
+        .transact(document.revision(), vec![order(pane, lanes.clone())])
+        .unwrap();
+    let saved = serde_json::to_value(&document).unwrap();
+    assert_eq!(saved["schema_version"], serde_json::json!(10));
+    assert_eq!(
+        saved["event_lane_orders"][0]["lanes"][0],
+        serde_json::json!({"kind": "bus", "name": "x1.step[3:0]"})
+    );
+    let reloaded: VisualizationDocument = serde_json::from_value(saved).unwrap();
+    assert_eq!(reloaded.event_lane_order(pane), lanes.as_slice());
+
+    // A schema-9 document never had an order to carry.
+    let mut legacy = serde_json::to_value(&document).unwrap();
+    legacy["schema_version"] = serde_json::json!(9);
+    let error = serde_json::from_value::<VisualizationDocument>(legacy)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("schema 10"), "{error}");
+}
+
+/// An order names each lane once, and only logic traces of its own pane;
+/// removing a lane, ungrouping a bus or emptying the order forgets the row.
+#[test]
+fn an_event_lane_order_names_its_own_logic_lanes_once() {
+    let (mut document, pane, [bit1, bit0, real]) = lane_document();
+    reviewed_lanes(&mut document, pane, [bit1, bit0, real]);
+    let before = document.clone();
+    for lanes in [
+        vec![
+            EventLaneRef::Trace { trace_id: bit1 },
+            EventLaneRef::Trace { trace_id: bit1 },
+        ],
+        vec![EventLaneRef::Trace { trace_id: real }],
+    ] {
+        assert!(
+            document
+                .transact(document.revision(), vec![order(pane, lanes.clone())])
+                .is_err(),
+            "{lanes:?} is not an order"
+        );
+    }
+    assert_eq!(document, before);
+
+    let pair = EventLaneRef::Bus {
+        name: "pair".to_owned(),
+    };
+    document
+        .transact(
+            document.revision(),
+            vec![order(
+                pane,
+                vec![
+                    EventLaneRef::Trace { trace_id: bit0 },
+                    pair.clone(),
+                    EventLaneRef::Trace { trace_id: bit1 },
+                ],
+            )],
+        )
+        .unwrap();
+    document
+        .transact(
+            document.revision(),
+            vec![
+                DocumentEdit::RemoveUserBus {
+                    pane_id: pane,
+                    name: "pair".to_owned(),
+                },
+                DocumentEdit::Remove(EntityRef::Trace(bit1)),
+            ],
+        )
+        .unwrap();
+    assert_eq!(
+        document.event_lane_order(pane),
+        [EventLaneRef::Trace { trace_id: bit0 }]
+    );
+    document
+        .transact(document.revision(), vec![order(pane, Vec::new())])
+        .unwrap();
+    assert!(document.event_lane_order(pane).is_empty());
+    let saved = serde_json::to_value(&document).unwrap();
+    assert!(saved.get("event_lane_orders").is_none());
+}
+
+/// A native mixed run keeps its nets only as event history, so the source
+/// has no trace for them. The pane lists such a net by its `D()` name while
+/// it is plotted, and a bus over such nets names them the same way; both
+/// survive a save and reload, and a bus never mixes the two kinds.
+#[test]
+fn history_only_nets_are_held_by_name() {
+    let (mut document, pane, [bit1, _, _]) = lane_document();
+    let nets: Vec<String> = ["D(B1)", "D(B0)"].map(str::to_owned).to_vec();
+    let bus = |members: Vec<TraceId>, nets: Vec<String>| UserBus {
+        pane_id: pane,
+        name: "code".to_owned(),
+        members,
+        nets,
+        radix: BusRadix::Unsigned,
+        expanded: true,
+    };
+    let lanes = vec![
+        EventLaneRef::Net {
+            name: "D(SAMP)".to_owned(),
+        },
+        EventLaneRef::Bus {
+            name: "code".to_owned(),
+        },
+    ];
+    document
+        .transact(
+            document.revision(),
+            vec![
+                DocumentEdit::DefineUserBus(bus(Vec::new(), nets.clone())),
+                order(pane, lanes.clone()),
+            ],
+        )
+        .unwrap();
+    let saved = serde_json::to_value(&document).unwrap();
+    assert_eq!(
+        saved["event_lane_orders"][0]["lanes"][0],
+        serde_json::json!({"kind": "net", "name": "D(SAMP)"})
+    );
+    let reloaded: VisualizationDocument = serde_json::from_value(saved).unwrap();
+    assert_eq!(reloaded.event_lane_order(pane), lanes.as_slice());
+    assert_eq!(reloaded.user_buses(), [bus(Vec::new(), nets.clone())]);
+
+    for refused in [
+        bus(vec![bit1], nets.clone()),
+        bus(Vec::new(), vec![nets[0].clone(), nets[0].clone()]),
+    ] {
+        assert!(
+            document
+                .transact(
+                    document.revision(),
+                    vec![DocumentEdit::DefineUserBus(refused.clone())]
+                )
+                .is_err(),
+            "{refused:?} is not a bus"
+        );
+    }
 }

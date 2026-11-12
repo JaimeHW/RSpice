@@ -212,6 +212,9 @@ pub enum DocumentEdit {
         #[serde(deserialize_with = "deserialize_label_string")]
         name: String,
     },
+    /// Replace the order one pane draws its event lanes in. An empty order
+    /// forgets the pane's recorded order.
+    SetEventLaneOrder(EventLaneOrder),
     MoveCursor {
         cursor_id: CursorId,
         position: TypedValue,

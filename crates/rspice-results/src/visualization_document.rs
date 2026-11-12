@@ -76,6 +76,10 @@ pub const MAX_VISUALIZATION_USER_BUSES: usize = 1_024;
 pub const MAX_USER_BUS_MEMBERS: usize = 256;
 /// Maximum member references retained across all user buses in one document.
 pub const MAX_VISUALIZATION_USER_BUS_MEMBERS_TOTAL: usize = 16_384;
+/// Maximum rows one pane's event-lane order names.
+pub const MAX_PANE_EVENT_LANES: usize = 4_096;
+/// Maximum event-lane rows ordered across all panes of one document.
+pub const MAX_VISUALIZATION_EVENT_LANES_TOTAL: usize = 16_384;
 /// Maximum members carried by one measurement or link group.
 pub const MAX_ENTITY_REFERENCES: usize = 4_096;
 /// Maximum signal records carried by one comparison receipt.
@@ -1491,17 +1495,26 @@ impl TraceLane {
 
 /// Logic lanes the reader grouped into one word, drawn as a bus lane.
 ///
-/// Members are logic traces of the bus's own pane, declared MSB first. A
-/// user bus is presentation only: the word at each instant is read from the
-/// members' exact event histories, as a declared bus is.
+/// Members are logic traces of the bus's own pane, declared MSB first, or,
+/// when the source keeps them only as event history, those nets by their
+/// `D()` names; a bus groups one kind or the other. A user bus is
+/// presentation only: the word at each instant is read from the members'
+/// exact event histories, as a declared bus is.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UserBus {
     pub pane_id: PaneId,
     /// The bus's name, unique within its pane.
     #[serde(deserialize_with = "deserialize_label_string")]
     pub name: String,
-    #[serde(deserialize_with = "deserialize_user_bus_members")]
+    #[serde(default, deserialize_with = "deserialize_user_bus_members")]
     pub members: Vec<TraceId>,
+    /// Members the source has no column for, by their `D()` names, MSB first.
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "deserialize_user_bus_nets"
+    )]
+    pub nets: Vec<String>,
     #[serde(default)]
     pub radix: BusRadix,
     #[serde(default)]
@@ -1510,7 +1523,7 @@ pub struct UserBus {
 
 impl NestedResourceCount for UserBus {
     fn nested_resource_count(&self) -> usize {
-        self.members.len()
+        self.members.len() + self.nets.len()
     }
 }
 
@@ -1519,6 +1532,60 @@ where
     D: Deserializer<'de>,
 {
     deserialize_bounded_vec::<_, _, MAX_USER_BUS_MEMBERS>(deserializer)
+}
+
+fn deserialize_user_bus_nets<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_bounded_vec::<_, _, MAX_USER_BUS_MEMBERS>(deserializer)
+}
+
+/// One row of a pane's event-lane stack.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum EventLaneRef {
+    /// A logic trace of the pane.
+    Trace { trace_id: TraceId },
+    /// A bus by name: one of the pane's user buses, or a bus the run
+    /// declared, which the document cannot name any other way because a
+    /// declared bus is no column of its source.
+    Bus {
+        #[serde(deserialize_with = "deserialize_label_string")]
+        name: String,
+    },
+    /// A net the source keeps only as event history, by the name its `D()`
+    /// or `E()` column would have. The document has no trace to hold it by,
+    /// so the net is on the pane while it is listed here.
+    Net {
+        #[serde(deserialize_with = "deserialize_label_string")]
+        name: String,
+    },
+}
+
+/// The order a pane draws its event lanes in, top to bottom.
+///
+/// Rows the reader added since the order was recorded join at the bottom; a
+/// row that names something the pane no longer shows is skipped. So the
+/// order is a presentation of the lanes, never what decides which exist.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EventLaneOrder {
+    pub pane_id: PaneId,
+    #[serde(deserialize_with = "deserialize_event_lanes")]
+    pub lanes: Vec<EventLaneRef>,
+}
+
+impl NestedResourceCount for EventLaneOrder {
+    fn nested_resource_count(&self) -> usize {
+        self.lanes.len()
+    }
+}
+
+fn deserialize_event_lanes<'de, D>(deserializer: D) -> Result<Vec<EventLaneRef>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_bounded_vec::<_, _, MAX_PANE_EVENT_LANES>(deserializer)
 }
 
 impl Trace {
@@ -1942,6 +2009,8 @@ pub struct VisualizationDocument {
     comparisons: Vec<ComparisonReceipt>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     user_buses: Vec<UserBus>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    event_lane_orders: Vec<EventLaneOrder>,
 }
 
 #[derive(Deserialize)]
@@ -1989,6 +2058,14 @@ struct VisualizationDocumentWire {
             MAX_VISUALIZATION_USER_BUS_MEMBERS_TOTAL,
         >,
     >,
+    #[serde(default)]
+    event_lane_orders: Option<
+        AggregateBoundedVec<
+            EventLaneOrder,
+            MAX_VISUALIZATION_PANES,
+            MAX_VISUALIZATION_EVENT_LANES_TOTAL,
+        >,
+    >,
 }
 
 const fn legacy_visualization_schema_version() -> u16 {
@@ -2024,7 +2101,22 @@ impl<'de> Deserialize<'de> for VisualizationDocument {
             user_buses: wire
                 .user_buses
                 .map_or_else(Vec::new, AggregateBoundedVec::into_inner),
+            event_lane_orders: wire
+                .event_lane_orders
+                .map_or_else(Vec::new, AggregateBoundedVec::into_inner),
         };
+        if document.schema_version < 10 && !document.event_lane_orders.is_empty() {
+            return Err(serde::de::Error::custom(
+                "an event-lane order requires visualization schema 10",
+            ));
+        }
+        if document.schema_version < 10
+            && document.user_buses.iter().any(|bus| !bus.nets.is_empty())
+        {
+            return Err(serde::de::Error::custom(
+                "a user bus over history-only nets requires visualization schema 10",
+            ));
+        }
         if document.schema_version < 9
             && (!document.user_buses.is_empty()
                 || document.traces.iter().any(|trace| !trace.lane.is_value()))
@@ -2077,7 +2169,7 @@ impl<'de> Deserialize<'de> for VisualizationDocument {
                 document.migrate_v6_to_v7();
             }
             6 => document.migrate_v6_to_v7(),
-            7 | 8 => document.schema_version = Self::SCHEMA_VERSION,
+            7..=9 => document.schema_version = Self::SCHEMA_VERSION,
             Self::SCHEMA_VERSION => {}
             version => {
                 return Err(serde::de::Error::custom(format!(
@@ -2091,6 +2183,10 @@ impl<'de> Deserialize<'de> for VisualizationDocument {
 }
 
 impl VisualizationDocument {
+    /// Schema 10 records the order each pane draws its event lanes in. A
+    /// schema-9 document reads as one that recorded no order, so its lanes
+    /// keep the order they are shown in.
+    ///
     /// Schema 9 records each trace's lane (logic, bus or real event lanes,
     /// a bus's radix and whether it is expanded) and the reader's user buses.
     /// A schema-8 document reads as one whose traces are all value lanes and
@@ -2105,7 +2201,7 @@ impl VisualizationDocument {
     /// Unknown extension fields remain ignored for schema-v7 forward
     /// compatibility; introducing required semantics still requires a schema
     /// revision.
-    pub const SCHEMA_VERSION: u16 = 9;
+    pub const SCHEMA_VERSION: u16 = 10;
 
     pub fn new(
         title: impl Into<String>,
@@ -2159,6 +2255,7 @@ impl VisualizationDocument {
             tombstones: Vec::new(),
             comparisons: Vec::new(),
             user_buses: Vec::new(),
+            event_lane_orders: Vec::new(),
         };
         document.validate()?;
         Ok(document)
@@ -2283,6 +2380,16 @@ impl VisualizationDocument {
     #[must_use]
     pub fn user_buses(&self) -> &[UserBus] {
         &self.user_buses
+    }
+
+    /// The order one pane draws its event lanes in; empty when it recorded
+    /// none.
+    #[must_use]
+    pub fn event_lane_order(&self, pane_id: PaneId) -> &[EventLaneRef] {
+        self.event_lane_orders
+            .iter()
+            .find(|order| order.pane_id == pane_id)
+            .map_or(&[], |order| order.lanes.as_slice())
     }
 
     #[must_use]

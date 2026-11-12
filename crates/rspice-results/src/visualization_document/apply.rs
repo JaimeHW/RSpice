@@ -961,6 +961,19 @@ impl VisualizationDocument {
                         message: format!("pane {} groups no bus named {name:?}", pane_id.get()),
                     });
                 }
+                let ungrouped = EventLaneRef::Bus { name };
+                self.retain_event_lanes(|order, lane| {
+                    order.pane_id != pane_id || *lane != ungrouped
+                });
+                Ok(())
+            }
+            DocumentEdit::SetEventLaneOrder(order) => {
+                self.validate_event_lane_order(&order)?;
+                self.event_lane_orders
+                    .retain(|held| held.pane_id != order.pane_id);
+                if !order.lanes.is_empty() {
+                    self.event_lane_orders.push(order);
+                }
                 Ok(())
             }
             DocumentEdit::MoveCursor {
@@ -1519,6 +1532,8 @@ impl VisualizationDocument {
                     bus.members.retain(|member| *member != id);
                 }
                 self.user_buses.retain(|bus| !bus.members.is_empty());
+                let removed = EventLaneRef::Trace { trace_id: id };
+                self.retain_event_lanes(|_, lane| *lane != removed);
             }
             EntityRef::Cursor(id) => {
                 self.require_entity(entity)?;
@@ -1583,6 +1598,8 @@ impl VisualizationDocument {
         self.annotations
             .retain(|annotation| annotation.pane_id != pane_id);
         self.user_buses.retain(|bus| bus.pane_id != pane_id);
+        self.event_lane_orders
+            .retain(|order| order.pane_id != pane_id);
         let page_id = self
             .panes
             .iter()
@@ -1888,6 +1905,29 @@ impl VisualizationDocument {
             &self.user_buses,
             MAX_VISUALIZATION_USER_BUS_MEMBERS_TOTAL,
         )?;
+        ensure_maximum_len(
+            "visualization-document.event-lane-orders",
+            self.event_lane_orders.len(),
+            MAX_VISUALIZATION_PANES,
+        )?;
+        validate_aggregate_nested_resources(
+            "visualization-document.event-lanes",
+            &self.event_lane_orders,
+            MAX_VISUALIZATION_EVENT_LANES_TOTAL,
+        )?;
+        let mut ordered_panes = HashSet::new();
+        for order in &self.event_lane_orders {
+            self.validate_event_lane_order(order)?;
+            if order.lanes.is_empty() || !ordered_panes.insert(order.pane_id) {
+                return Err(VisualizationError::InvalidValue {
+                    field: "visualization-document.event-lane-orders",
+                    message: format!(
+                        "pane {} holds an empty or second event-lane order",
+                        order.pane_id.get()
+                    ),
+                });
+            }
+        }
         let mut bus_names = HashSet::new();
         for bus in &self.user_buses {
             self.validate_user_bus(bus)?;
@@ -1905,16 +1945,88 @@ impl VisualizationDocument {
         Ok(())
     }
 
+    /// Drop the event-lane rows `keep` rejects, and any order left empty.
+    fn retain_event_lanes(&mut self, keep: impl Fn(&EventLaneOrder, &EventLaneRef) -> bool) {
+        for order in &mut self.event_lane_orders {
+            let held = std::mem::take(&mut order.lanes);
+            order.lanes = held.into_iter().filter(|lane| keep(order, lane)).collect();
+        }
+        self.event_lane_orders
+            .retain(|order| !order.lanes.is_empty());
+    }
+
+    /// One pane's event-lane order on its own: duplicate-free rows, each a
+    /// logic trace of that pane or a named bus. A bus the run declared is no
+    /// entity of the document, so a bus row is held to a valid name only.
+    fn validate_event_lane_order(&self, order: &EventLaneOrder) -> Result<(), VisualizationError> {
+        self.require_pane(order.pane_id)?;
+        ensure_maximum_len(
+            "event-lane-order.lanes",
+            order.lanes.len(),
+            MAX_PANE_EVENT_LANES,
+        )?;
+        let mut seen = HashSet::new();
+        for lane in &order.lanes {
+            match lane {
+                EventLaneRef::Trace { trace_id } => {
+                    let trace = self
+                        .traces
+                        .iter()
+                        .find(|trace| trace.id == *trace_id)
+                        .ok_or(VisualizationError::EntityNotFound(EntityRef::Trace(
+                            *trace_id,
+                        )))?;
+                    if trace.pane_id != order.pane_id || trace.lane.kind != TraceLaneKind::Logic {
+                        return Err(VisualizationError::InvalidValue {
+                            field: "event-lane-order.lanes",
+                            message: format!(
+                                "trace {} is not a logic lane of pane {}",
+                                trace_id.get(),
+                                order.pane_id.get()
+                            ),
+                        });
+                    }
+                }
+                EventLaneRef::Bus { name } => validate_label("event-lane-order.bus", name)?,
+                EventLaneRef::Net { name } => validate_label("event-lane-order.net", name)?,
+            }
+            if !seen.insert(lane) {
+                return Err(VisualizationError::InvalidValue {
+                    field: "event-lane-order.lanes",
+                    message: format!("pane {} orders one lane twice", order.pane_id.get()),
+                });
+            }
+        }
+        Ok(())
+    }
+
     /// One user bus on its own: a named, non-empty, duplicate-free word of
     /// logic lanes that all sit in the bus's pane.
     fn validate_user_bus(&self, bus: &UserBus) -> Result<(), VisualizationError> {
         validate_label("user-bus.name", &bus.name)?;
         self.require_pane(bus.pane_id)?;
-        if bus.members.is_empty() || bus.members.len() > MAX_USER_BUS_MEMBERS {
+        let count = bus.members.len() + bus.nets.len();
+        if count == 0
+            || count > MAX_USER_BUS_MEMBERS
+            || (!bus.members.is_empty() && !bus.nets.is_empty())
+        {
             return Err(VisualizationError::InvalidValue {
                 field: "user-bus.members",
-                message: format!("a user bus groups 1 to {MAX_USER_BUS_MEMBERS} logic lanes"),
+                message: format!(
+                    "a user bus groups 1 to {MAX_USER_BUS_MEMBERS} logic lanes, all traces or all \
+                     history-only nets"
+                ),
             });
+        }
+        let mut nets = HashSet::new();
+        for net in &bus.nets {
+            validate_label("user-bus.nets", net)?;
+            if !nets.insert(net) {
+                return Err(VisualizationError::InvalidValue {
+                    field: "user-bus.nets",
+                    message: format!("bus {:?} groups the net {net:?} twice", bus.name),
+                });
+            }
         }
         let mut seen = HashSet::new();
         for member in &bus.members {
