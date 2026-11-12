@@ -17,7 +17,7 @@ mod platform;
 mod save;
 mod staging;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 pub(crate) use external_change::apply_staged_external_netlist_change;
 pub(crate) use find::apply_netlist_find_step;

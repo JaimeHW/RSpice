@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 const CORPUS: &str = include_str!("testdata/vendor_profile_corpus_v1.tsv");
 
-fn cases() -> Vec<(&'static str, bool, &'static str, NetlistExecutionProfile)> {
+pub(crate) fn cases() -> Vec<(&'static str, bool, &'static str, NetlistExecutionProfile)> {
     let mut seen = BTreeSet::new();
     let cases = CORPUS
         .lines()
@@ -50,7 +50,7 @@ fn cases() -> Vec<(&'static str, bool, &'static str, NetlistExecutionProfile)> {
     cases
 }
 
-fn source(path: &str) -> (String, PathBuf) {
+pub(crate) fn source(path: &str) -> (String, PathBuf) {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../tests/xyce/Netlists/XDM")
         .join(path);
@@ -72,55 +72,6 @@ fn vendor_profile_corpus_preserves_reviewed_admission_boundaries() {
                 "{relative}: expected import acceptance={expected}, got {accepted}: {issues:?}"
             ));
         }
-    }
-    assert!(failures.is_empty(), "{}", failures.join("\n"));
-}
-
-#[test]
-fn vendor_admitted_decks_have_explicit_preparation_outcomes() {
-    let mut failures = Vec::new();
-    for (relative, accepted, expected, profile) in cases() {
-        if !accepted {
-            continue;
-        }
-        let (source, path) = source(relative);
-        let mut app = RSpiceApp::test_instance();
-        assert!(apply_imported_netlist(
-            &mut app.state,
-            source.clone(),
-            Some(path),
-            relative
-        ));
-        let descriptor = app
-            .state
-            .model
-            .workspace
-            .content
-            .netlist_descriptor
-            .as_mut()
-            .unwrap();
-        descriptor.imported_dialect = Some(profile.source_dialect());
-        descriptor.execution_profile = Some(profile);
-        descriptor.compatibility_reviewed = true;
-        let ready = validate_visible_netlist_source(&mut app);
-        let error = app
-            .state
-            .model
-            .netlist_artifacts
-            .validation_error
-            .as_deref()
-            .unwrap_or_default();
-        if (expected == "ready" && !ready)
-            || (expected != "ready" && (ready || !error.contains(expected)))
-        {
-            failures.push(format!(
-                "{relative}: expected preparation {expected:?}, got ready={ready}, {error}"
-            ));
-        }
-        assert_eq!(
-            app.state.model.workspace.content.netlist_source.as_deref(),
-            Some(source.as_str())
-        );
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
