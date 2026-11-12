@@ -1453,8 +1453,17 @@ impl Engine {
         // A loop through the mixed boundary with no consistent value is a
         // property of the deck, which no aid could have solved.
         #[cfg(feature = "veriloga")]
-        let solution =
-            solution.map_err(|error| circuit.refuse_coupled_loop_without_fixed_point(error));
+        let solution = solution.map_err(|error| {
+            circuit.refuse_coupled_loop_without_fixed_point(
+                error,
+                if lifecycle.is_some() {
+                    crate::identity::AnalysisKind::Dc
+                } else {
+                    crate::identity::AnalysisKind::Op
+                },
+                &matrix,
+            )
+        });
         let solution = solution?;
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
@@ -2195,8 +2204,13 @@ impl Engine {
 
         sweep_source.restore(&mut circuit);
         #[cfg(feature = "veriloga")]
-        let sweep_result =
-            sweep_result.map_err(|error| circuit.refuse_coupled_loop_without_fixed_point(error));
+        let sweep_result = sweep_result.map_err(|error| {
+            circuit.refuse_coupled_loop_without_fixed_point(
+                error,
+                crate::identity::AnalysisKind::Dc,
+                &matrix,
+            )
+        });
 
         // The sweep solves its own points rather than going through the
         // operating-point funnel, so it carries the same boundary.

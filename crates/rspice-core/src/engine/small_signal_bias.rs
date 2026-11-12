@@ -148,7 +148,15 @@ impl Engine {
             );
             vec![0.0; circuit.matrix_size()]
         } else {
-            self.solve_dc_operating_point_with_abort(netlist, &mut circuit, &mut matrix, abort)?
+            let bias =
+                self.solve_dc_operating_point_with_abort(netlist, &mut circuit, &mut matrix, abort);
+            // The bias of every small-signal analysis is the coupled t = 0
+            // fixed point, and an astable mixed loop has none.
+            #[cfg(feature = "veriloga")]
+            let bias = bias.map_err(|error| {
+                circuit.refuse_coupled_loop_without_fixed_point(error, analysis.kind(), &matrix)
+            });
+            bias?
         };
         if has_nonlinear && !bias.is_empty() {
             self.try_observe_dc_operating_point(&mut circuit, &mut matrix, &bias)?;

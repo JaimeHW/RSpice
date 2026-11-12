@@ -274,11 +274,21 @@ pub enum BoundaryBitSource {
 /// negative costs the extra timepoints it takes to reach the ceiling.
 const MAX_CONSECUTIVE_BOUNDARY_FLIPS: u32 = 128;
 
-/// How many times a read net and a driven net must each have switched in a
-/// failed operating point's rejected solves before the failure is called a
-/// loop with no fixed point: the repeated switching a failure on its own
-/// takes as evidence, on both sides of the module.
-const MIN_BOUNDARY_LOOP_SWITCHES: u32 = 3;
+/// How many of the boundary states a failed operating point's rejected solves
+/// settled to are kept, most recent last, each one differing from the one
+/// before it.
+///
+/// Enough to hold several turns of a loop through a handful of nets, which is
+/// what a cycle is recognised by; the oldest are dropped first, because the
+/// question asked of them is where the iteration *ended up*.
+const OPERATING_POINT_STATE_HISTORY: usize = 64;
+
+/// How many times the failed operating point's solves must have come back to
+/// the boundary state they ended in, after leaving it, before the failure is
+/// called a cycle: three, the repeated switching a failure on its own takes
+/// as evidence elsewhere (a net named in a convergence failure's context),
+/// so one excursion of a damped Newton step and back is never enough.
+const MIN_OPERATING_POINT_REVISITS: usize = 3;
 
 /// How many of a boundary net's most recent values a diagnostic carries.
 ///
@@ -370,6 +380,71 @@ impl BoundaryNetHistory {
     }
 }
 
+/// One net of the joint boundary state an operating point's rejected solves
+/// are recorded by, as an index into the table it comes from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StateNet {
+    /// `bridges.adc`: the module's own A/D bridge.
+    Adc(usize),
+    /// `bridges.dac`: the module's own D/A bridge.
+    Dac(usize),
+    /// `event_ports`: a logic port on the shared event domain, converted by a
+    /// deck converter or driven and read there directly by code models and
+    /// other modules.
+    Port(usize),
+}
+
+/// Every net of the joint boundary state, in record order, with the signal
+/// and bit it is read from: the module's own A/D bridges that publish a bit,
+/// its D/A bridges, then every logic event port, converted or not. A real
+/// port is left out: its value is a sample of a continuous one, so it names
+/// no discrete state to come back to.
+fn operating_point_state_nets<'a>(
+    bridges: &'a Bridges,
+    ports: &'a [EventPort],
+) -> impl Iterator<Item = (StateNet, DigitalSignalId, u32)> + 'a {
+    let adc = bridges
+        .adc
+        .iter()
+        .enumerate()
+        .filter_map(|(index, bridge)| Some((StateNet::Adc(index), bridge.signal?, bridge.bit)));
+    let dac = bridges
+        .dac
+        .iter()
+        .enumerate()
+        .map(|(index, bridge)| (StateNet::Dac(index), bridge.signal, bridge.bit));
+    let ports = ports
+        .iter()
+        .enumerate()
+        .filter_map(|(index, port)| Some((StateNet::Port(index), port.signal, port.bit?)));
+    adc.chain(dac).chain(ports)
+}
+
+/// One net's value in a recorded joint state.
+fn state_code(bit: FourStateBit) -> u8 {
+    BoundaryNetHistory::code(bit) as u8
+}
+
+/// The turn of the cycle a sequence of joint boundary states ended in: where
+/// its earliest retained visit to the last state is, and how many times the
+/// sequence came back to that state after leaving it. Consecutive states
+/// differ, so every earlier visit is a return. `None` unless there were at
+/// least [`MIN_OPERATING_POINT_REVISITS`].
+fn operating_point_cycle_span(
+    states: &std::collections::VecDeque<Box<[u8]>>,
+) -> Option<(usize, usize)> {
+    let last = states.back()?;
+    let mut first = None;
+    let mut returns = 0;
+    for (index, state) in states.iter().enumerate().take(states.len() - 1) {
+        if state == last {
+            first.get_or_insert(index);
+            returns += 1;
+        }
+    }
+    (returns >= MIN_OPERATING_POINT_REVISITS).then(|| (first.unwrap_or(0), returns))
+}
+
 /// One instance's accepted boundary histories, as an acceptance would leave
 /// them: parallel to `bridges.adc`, `bridges.dac` and `event_ports`.
 struct BoundaryHistories {
@@ -454,6 +529,16 @@ pub struct CandidateLedger {
     /// conversion is a shared converter is the module's side of that boundary,
     /// so a loop closed through the converter is observed here.
     ports: Vec<BoundaryNetHistory>,
+    /// The whole boundary state each rejected solve of the operating point
+    /// (the candidate at t = 0) settled to, oldest first: one two-bit code per
+    /// net in [`operating_point_state_nets`] order, a new
+    /// entry only when it differs from the last, at most
+    /// [`OPERATING_POINT_STATE_HISTORY`]. The per-net histories above say how
+    /// often each net moved; only the joint state says the iteration came
+    /// back to where it had been.
+    states: std::collections::VecDeque<Box<[u8]>>,
+    /// The state being recorded, reused between solves.
+    state_scratch: Vec<u8>,
 }
 
 impl CandidateLedger {
@@ -493,6 +578,7 @@ impl CandidateLedger {
     fn clear(&mut self) {
         self.carried_time = None;
         self.probe_time = None;
+        self.states.clear();
     }
 
     /// The candidate the causal latch is armed for, or `None`.
@@ -539,6 +625,11 @@ struct BoundaryNetActivity {
     converter: Option<std::sync::Arc<str>>,
     /// For a net the module reads, every process a change of it wakes.
     wakes: Vec<String>,
+    /// Who sets the net, where a diagnostic names it: for a net the module
+    /// reads, the code models and other instances that drive its event net;
+    /// for one it drives, the module's processes on the loop that write it.
+    /// Empty where the diagnostic does not ask.
+    drivers: Vec<String>,
     /// How many times the net moved: consecutive accepted timepoints for an
     /// accepted-flip run, settle passes within one trial for a pass limit, or
     /// transitions in the retained rejected-probe samples.
@@ -565,6 +656,14 @@ impl fmt::Display for BoundaryNetActivity {
         f.write_str(side)?;
         if let Some(converter) = &self.converter {
             write!(f, " through converter {converter}")?;
+        }
+        if !self.drivers.is_empty() {
+            let verb = if self.read_by_module {
+                "driven by"
+            } else {
+                "written by"
+            };
+            write!(f, ", {verb} {}", self.drivers.join(", "))?;
         }
         if !self.wakes.is_empty() {
             write!(f, ", waking {}", self.wakes.join(", "))?;
@@ -5184,6 +5283,33 @@ impl MixedSignalHost {
             history.adc.fill(BoundaryNetHistory::default());
             history.dac.fill(BoundaryNetHistory::default());
             history.ports.fill(BoundaryNetHistory::default());
+            history.states.clear();
+        }
+        if time == 0.0 {
+            // The operating point's candidate: the joint state as well, which
+            // is what a cycle is recognised by.
+            let digital = &self.state.digital;
+            let scratch = &mut history.state_scratch;
+            scratch.clear();
+            scratch.extend(operating_point_state_nets(bridges, &self.event_ports).map(
+                |(_, signal, bit)| {
+                    state_code(
+                        digital
+                            .read(signal)
+                            .map_or(FourStateBit::HighImpedance, |value| value.bit(bit)),
+                    )
+                },
+            ));
+            if history
+                .states
+                .back()
+                .is_none_or(|last| **last != scratch[..])
+            {
+                if history.states.len() == OPERATING_POINT_STATE_HISTORY {
+                    history.states.pop_front();
+                }
+                history.states.push_back(scratch[..].into());
+            }
         }
         let record = |signal, bit, entry: &mut BoundaryNetHistory| {
             let bit = self
@@ -5274,44 +5400,227 @@ impl MixedSignalHost {
         ))
     }
 
-    /// The loop a failed operating point's rejected solves show through this
-    /// module: a net it reads and a net it drives switched together, solve
-    /// after solve, at least [`MIN_BOUNDARY_LOOP_SWITCHES`] times at t = 0.
-    /// What the module drives reaches what it reads through the analog
-    /// circuit, and each value it read made it drive one that reversed the
-    /// read, so no boundary value is consistent there. A drive that switched
-    /// in more solves than any read did was moved by something other than
-    /// what the module reads, which is not that loop. `None` when the probes
-    /// show no such loop.
+    /// The cycle a failed operating point's rejected solves went round through
+    /// this module's boundary, when they went round one.
+    ///
+    /// An operating point on a mixed design is the coupled t = 0 fixed point:
+    /// a discrete state whose analog solution decides that same state again.
+    /// Every solve settles the boundary at its iterate, so the sequence of
+    /// joint boundary states the solves settled to is the iteration's
+    /// discrete trajectory. One that ends by returning, again and again, to a
+    /// state it had left ([`MIN_OPERATING_POINT_REVISITS`] times at least) has
+    /// gone round a loop: each state it visits makes the analog solution
+    /// decide another one. When a net the module reads and a net it drives
+    /// both toggle in that turn, a change of the read reaches the drive
+    /// through the module's processes, and the drive reaches the read back
+    /// through the circuit, the loop runs through the module and the analog
+    /// circuit, and no discrete state on it is consistent. Without the path
+    /// back, the read toggled because the analog solve around it wandered,
+    /// and the module only followed it.
+    ///
+    /// Read only once the solver has spent every aid, so nothing here decides
+    /// whether a solve converges: a design whose boundary settles after a few
+    /// toggles converges exactly as it would without this.
+    ///
+    /// `event_drivers` names who drives an event net from outside the module
+    /// — the code models and other instances on it — for the nets the module
+    /// reads directly rather than through a converter. `joined` says whether
+    /// two circuit nodes (analog nodes or event nets) reach one another
+    /// through the circuit outside this module's processes.
     #[doc(hidden)]
-    pub fn coupled_loop_at_start(&self, ledger: &CandidateLedger) -> Option<String> {
-        let (nets, elided) = self.rejected_probe_nets(ledger, 0.0, MIN_BOUNDARY_LOOP_SWITCHES)?;
-        // Either side may have moved first, so the runs differ by one at most.
-        let in_loop = |net: &BoundaryNetActivity| {
-            nets.iter().any(|other| {
-                other.read_by_module != net.read_by_module && other.moves.abs_diff(net.moves) <= 1
-            })
-        };
-        let nets: Vec<&BoundaryNetActivity> = nets.iter().filter(|net| in_loop(net)).collect();
-        if nets.is_empty() {
+    pub fn operating_point_cycle(
+        &self,
+        ledger: &CandidateLedger,
+        event_drivers: &dyn Fn(usize) -> Vec<String>,
+        joined: &dyn Fn(usize, usize) -> bool,
+    ) -> Option<String> {
+        if ledger.probe_time != Some(0.0) {
             return None;
         }
-        let omitted = if elided == 0 {
-            String::new()
-        } else {
-            format!("; {elided} additional switching nets omitted")
+        let (start, returns) = operating_point_cycle_span(&ledger.states)?;
+        let turn: Vec<&[u8]> = ledger.states.range(start..).map(|state| &**state).collect();
+        let nets: Vec<_> =
+            operating_point_state_nets(&self.state.bridges, &self.event_ports).collect();
+        // States recorded under another wiring say nothing about this one.
+        if turn.iter().any(|state| state.len() != nets.len()) {
+            return None;
+        }
+        let toggling: Vec<_> = nets
+            .iter()
+            .enumerate()
+            .filter_map(|(index, &(net, signal, bit))| {
+                let values: Vec<u8> = turn.iter().map(|state| state[index]).collect();
+                let moves = values.windows(2).filter(|pair| pair[0] != pair[1]).count();
+                (moves > 0).then_some((net, signal, bit, values, moves))
+            })
+            .collect();
+        let direction = |net: StateNet| match net {
+            StateNet::Adc(_) => (true, false),
+            StateNet::Dac(_) => (false, true),
+            StateNet::Port(index) => {
+                use rspice_veriloga::canonical_ir::digital_link::DigitalLinkDirection as D;
+                match self.event_ports[index].direction {
+                    D::Input => (true, false),
+                    D::Output => (false, true),
+                    D::Inout => (true, true),
+                }
+            }
         };
-        let nets: Vec<String> = nets.iter().map(|net| net.to_string()).collect();
+        let reads: std::collections::BTreeSet<DigitalSignalId> = toggling
+            .iter()
+            .filter(|(net, ..)| direction(*net).0)
+            .map(|(_, signal, ..)| *signal)
+            .collect();
+        // The processes on the loop: those a change of a toggling read wakes,
+        // directly or through the nets the woken ones write. A drive is in
+        // the loop when one of them writes it.
+        let processes = &self.state.digital.plan().processes;
+        let woken = self.woken_from(&reads);
+        let loop_writers = |signal: DigitalSignalId| -> Vec<String> {
+            processes
+                .iter()
+                .zip(&woken)
+                .filter(|(process, on_loop)| {
+                    **on_loop && super::host::process_writes(process).contains(&signal)
+                })
+                .map(|(process, _)| self.process_name(process))
+                .collect()
+        };
+        // The loop closes when some toggling read reaches, through the
+        // module's processes, a toggling drive on another net that reaches it
+        // back through the circuit.
+        let nodes = |net: StateNet| -> [usize; 2] {
+            match net {
+                StateNet::Adc(index) => {
+                    let bridge = &self.state.bridges.adc[index];
+                    [bridge.positive, bridge.negative]
+                }
+                StateNet::Dac(index) => {
+                    let bridge = &self.state.bridges.dac[index];
+                    [bridge.positive, bridge.negative]
+                }
+                StateNet::Port(index) => [self.event_ports[index].node, 0],
+            }
+        };
+        let closes = toggling.iter().filter(|(net, ..)| direction(*net).0).any(
+            |&(read, read_signal, ..)| {
+                let woken = self.woken_from(&std::iter::once(read_signal).collect());
+                toggling.iter().any(|&(drive, drive_signal, ..)| {
+                    direction(drive).1
+                        && drive_signal != read_signal
+                        && processes.iter().zip(&woken).any(|(process, on_loop)| {
+                            *on_loop && super::host::process_writes(process).contains(&drive_signal)
+                        })
+                        && nodes(drive)
+                            .iter()
+                            .any(|&from| nodes(read).iter().any(|&to| joined(from, to)))
+                })
+            },
+        );
+        if !closes {
+            return None;
+        }
+        let rendered: Vec<String> = toggling
+            .iter()
+            .filter_map(|(net, signal, bit, values, moves)| {
+                let moves = u32::try_from(*moves).unwrap_or(u32::MAX);
+                let mut activity = match *net {
+                    StateNet::Adc(index) => {
+                        let bridge = &self.state.bridges.adc[index];
+                        self.adc_activity(bridge, bridge.reported_node()?, moves)
+                    }
+                    StateNet::Dac(index) => {
+                        self.dac_activity(&self.state.bridges.dac[index], moves)
+                    }
+                    StateNet::Port(index) => {
+                        let port = &self.event_ports[index];
+                        match port.converted_bit() {
+                            Some((bit, node)) => self.port_activity(port, bit, node, moves),
+                            None => self.direct_port_activity(port, *bit, moves, event_drivers),
+                        }
+                    }
+                };
+                if !activity.read_by_module {
+                    activity.drivers = loop_writers(*signal);
+                }
+                // The pattern is the evidence, and the last few values show it.
+                let shown = values.len().saturating_sub(BOUNDARY_VALUE_HISTORY as usize);
+                activity.recent = values[shown..]
+                    .iter()
+                    .map(|code| BoundaryNetHistory::spelling(u16::from(*code)).to_owned())
+                    .collect();
+                Some(activity.to_string())
+            })
+            .collect();
         Some(format!(
-            "mixed Verilog-AMS instance '{}' drives what it reads through the analog circuit, \
-             and the operating point's rejected solves switched both sides together, solve \
-             after solve: {}{omitted}. Each value the module read made it drive one that \
-             reversed the read, so no boundary value is consistent at the operating point; \
-             break the loop with a delay, a `connectrules` transition time, or analog \
-             hysteresis",
+            "mixed Verilog-AMS instance '{}': the operating point's solves went round a cycle of \
+             discrete states and never settled (of the last {} boundary states they settled to, \
+             {returns} were returns to the one they ended in): {}. The discrete state has no \
+             consistent value at the operating point; the circuit is astable",
             self.instance,
-            nets.join("; "),
+            turn.len(),
+            rendered.join("; "),
         ))
+    }
+
+    /// Which of this module's processes a change of any of `reads` wakes,
+    /// directly or through the nets the woken ones write, parallel to the
+    /// plan's processes: the static path a loop through the module takes. A
+    /// process that waits on none of those nets, such as an `initial` block
+    /// that sets a start value, is not on it.
+    fn woken_from(&self, reads: &std::collections::BTreeSet<DigitalSignalId>) -> Vec<bool> {
+        let processes = &self.state.digital.plan().processes;
+        let mut woken = vec![false; processes.len()];
+        let mut reached = reads.clone();
+        let mut frontier: Vec<DigitalSignalId> = reads.iter().copied().collect();
+        while let Some(signal) = frontier.pop() {
+            for (index, process) in processes.iter().enumerate() {
+                if woken[index] || !super::host::process_reads(process).contains(&signal) {
+                    continue;
+                }
+                woken[index] = true;
+                for written in super::host::process_writes(process) {
+                    if reached.insert(written) {
+                        frontier.push(written);
+                    }
+                }
+            }
+        }
+        woken
+    }
+
+    /// A logic port on the shared event domain with no converter of its own,
+    /// as a boundary diagnostic names it: its event net, who drives that net
+    /// from outside the module, and for an input the processes it wakes.
+    fn direct_port_activity(
+        &self,
+        port: &EventPort,
+        bit: u32,
+        moves: u32,
+        event_drivers: &dyn Fn(usize) -> Vec<String>,
+    ) -> BoundaryNetActivity {
+        let read_by_module = port.direction
+            != rspice_veriloga::canonical_ir::digital_link::DigitalLinkDirection::Output;
+        let signal = self.event_port_net_name(port, bit);
+        BoundaryNetActivity {
+            deck: self.deck_net_name(port.node, &signal),
+            signal,
+            node: Some(port.node),
+            read_by_module,
+            converter: None,
+            wakes: if read_by_module {
+                self.waking(Some(port.signal))
+            } else {
+                Vec::new()
+            },
+            drivers: if read_by_module {
+                event_drivers(port.node)
+            } else {
+                Vec::new()
+            },
+            moves,
+            recent: Vec::new(),
+        }
     }
 
     /// Every boundary net that switched `minimum_run` times in the rejected
@@ -5373,6 +5682,7 @@ impl MixedSignalHost {
             read_by_module: true,
             converter: None,
             wakes: self.waking(bridge.signal),
+            drivers: Vec::new(),
             moves,
             recent: Vec::new(),
         }
@@ -5387,6 +5697,7 @@ impl MixedSignalHost {
             read_by_module: false,
             converter: None,
             wakes: Vec::new(),
+            drivers: Vec::new(),
             moves,
             recent: Vec::new(),
         }
@@ -5423,6 +5734,7 @@ impl MixedSignalHost {
             } else {
                 Vec::new()
             },
+            drivers: Vec::new(),
             moves,
             recent: Vec::new(),
         }
@@ -6455,6 +6767,38 @@ module mixed_runtime(p, n, adc, clk, q, dac);
   analog I(p, n) <+ V(p, n) / 1000.0;
 endmodule
 "#;
+
+    /// A cycle is the last state returned to three times after it was left;
+    /// a sequence that settles, or returns fewer times, or ends somewhere new,
+    /// is none.
+    #[test]
+    fn an_operating_point_cycle_is_three_returns_to_the_last_state() {
+        let states = |codes: &[u8]| -> std::collections::VecDeque<Box<[u8]>> {
+            codes.iter().map(|code| vec![*code].into()).collect()
+        };
+        assert_eq!(
+            operating_point_cycle_span(&states(&[0, 1, 0, 1, 0, 1, 0])),
+            Some((0, 3)),
+            "an alternation"
+        );
+        assert_eq!(
+            operating_point_cycle_span(&states(&[2, 0, 1, 3, 0, 1, 0, 1, 0])),
+            Some((1, 3)),
+            "the turn starts at the earliest retained visit to the last state"
+        );
+        assert_eq!(
+            operating_point_cycle_span(&states(&[0, 1, 0, 1, 0])),
+            None,
+            "two returns are a damped step and back, twice"
+        );
+        assert_eq!(
+            operating_point_cycle_span(&states(&[0, 1, 0, 1, 0, 1, 2])),
+            None,
+            "the iteration ended somewhere it had not been"
+        );
+        assert_eq!(operating_point_cycle_span(&states(&[0, 1])), None);
+        assert_eq!(operating_point_cycle_span(&states(&[])), None);
+    }
 
     /// Circuit nodes: `1` is the module's `p` terminal, `3` the A/D sense node,
     /// `4` the D/A output node. Both bridges are referred to ground, which is

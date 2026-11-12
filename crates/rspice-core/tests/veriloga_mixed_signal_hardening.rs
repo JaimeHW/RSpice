@@ -2316,9 +2316,10 @@ module inverting_loop(p, n, c, y);
 endmodule
 "#;
 
-/// A zero-delay A/D-to-D/A loop has no consistent startup solution. Report
-/// its actual boundary transitions during rejected solver probes; no accepted
-/// timepoint exists from which an accepted-history diagnostic could be built.
+/// A zero-delay A/D-to-D/A loop has no consistent startup solution. The
+/// transient's start is refused as an astable, naming the boundary
+/// transitions the startup's solves went round; no accepted timepoint exists
+/// from which an accepted-history diagnostic could be built.
 #[test]
 fn a_cross_domain_zero_delay_loop_is_refused_by_naming_its_participants() {
     let model = ModelFile::new("inverting_loop", INVERTING_LOOP);
@@ -2335,7 +2336,15 @@ fn a_cross_domain_zero_delay_loop_is_refused_by_naming_its_participants() {
          .end\n",
         model.deck_path()
     );
-    let error = error_for(&deck, 20.0e-9, 0.1e-9);
+    let error = Engine::new(SimulationConfig::default())
+        .run_tran(
+            &Netlist::parse(&deck).expect("the deck parses"),
+            20.0e-9,
+            0.1e-9,
+        )
+        .map(drop)
+        .expect_err("a loop with no startup solution is refused");
+    let error = astable_refusal(&error, rspice_core::identity::AnalysisKind::Tran);
     let lowered = error.to_lowercase();
     assert!(
         lowered.contains("mixed verilog-ams instance 'x1'"),
@@ -2355,8 +2364,10 @@ fn a_cross_domain_zero_delay_loop_is_refused_by_naming_its_participants() {
          is measuring feedback rather than a fast signal: {error}"
     );
     assert!(
-        lowered.contains("rejected solver probes") && lowered.contains("t=0e0s"),
-        "the diagnostic must identify the rejected startup observations: {error}"
+        lowered.contains("the operating point's solves went round a cycle of discrete states")
+            && lowered
+                .contains("start this transient with uic instead, or give its start with .ic"),
+        "the diagnostic must identify the startup's solves and say how to start: {error}"
     );
 }
 
@@ -2455,13 +2466,19 @@ fn shorted_deck(model: &ModelFile, module: &str, analysis: &str) -> String {
 }
 
 /// **No operating point exists for an inverting loop through converters.**
-/// The operating point is refused as a loop rather than reported as a GMIN
-/// failure, naming both converters, the deck net and the process between
-/// them; a DC sweep's point is refused the same way.
+/// The operating point is refused as an astable loop rather than reported as
+/// a GMIN failure, naming both converters, the deck net and the process
+/// between them; a DC sweep's point is refused the same way.
 #[test]
 fn an_inverting_loop_through_converters_is_refused_at_the_operating_point() {
     let model = ModelFile::hdl("shorted_inverter", SHORTED_INVERTER);
-    for analysis in [".op", "v1 s 0 0\nr1 s 0 1k\n.dc v1 0 1 0.5"] {
+    for (analysis, kind) in [
+        (".op", rspice_core::identity::AnalysisKind::Op),
+        (
+            "v1 s 0 0\nr1 s 0 1k\n.dc v1 0 1 0.5",
+            rspice_core::identity::AnalysisKind::Dc,
+        ),
+    ] {
         let netlist = Netlist::parse(&shorted_deck(&model, "inv", analysis)).expect("parses");
         let engine = Engine::new(SimulationConfig::default());
         let error = if analysis == ".op" {
@@ -2470,23 +2487,20 @@ fn an_inverting_loop_through_converters_is_refused_at_the_operating_point() {
             engine.run_dc_sweep(&netlist, "v1", 0.0, 1.0, 0.5).map(drop)
         }
         .expect_err("no operating point exists");
-        assert!(
-            matches!(error, SimulationError::Circuit(_)),
-            "a loop with no fixed point is a refusal, not a convergence failure: {error:?}"
-        );
-        let error = error.to_string();
+        let error = astable_refusal(&error, kind);
         let lowered = error.to_lowercase();
         let file = model.file_name().to_lowercase();
         for expected in [
-            "no coupled t = 0 fixed point exists: mixed verilog-ams instance 'xi'".to_owned(),
+            "mixed verilog-ams instance 'xi': the operating point's solves went round a cycle"
+                .to_owned(),
             "net `a` on circuit node".to_owned(),
             "(deck net `n`; read by the module through converter __rspice_auto_adc_".to_owned(),
             format!(" (a2d), waking xi.assign#0 (continuous assign, {file}:6))"),
             "net `y` on circuit node".to_owned(),
             "(deck net `n`; driven by the module through converter __rspice_auto_dac_".to_owned(),
-            " (d2a))".to_owned(),
+            format!(" (d2a), written by xi.assign#0 (continuous assign, {file}:6))"),
             "1 0 1 0".to_owned(),
-            "break the loop with a delay".to_owned(),
+            "the circuit is astable".to_owned(),
         ] {
             assert!(
                 lowered.contains(&expected),
@@ -2508,6 +2522,203 @@ fn a_buffer_loop_through_converters_solves_at_the_operating_point() {
     Engine::new(SimulationConfig::default())
         .run_dc_op(&netlist)
         .expect("a buffer loop has an operating point");
+}
+
+/// C3's 555 timer as the corpus runs it: the comparators are XSPICE
+/// `adc_bridge` code models on event nets the Verilog flip-flop reads, and the
+/// flip-flop's outputs drive the discharge transistor through built-in D/A
+/// converters. `card` replaces the corpus deck's analysis card and `reset`,
+/// where given, the source that pulses the reset input.
+fn timer_555(card: &str, reset: Option<&str>) -> Netlist {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/mixed-corpus/c03-dcosim/net");
+    let mut shared =
+        std::fs::read_to_string(dir.join("555.shared")).expect("the corpus 555 netlist");
+    if let Some(reset) = reset {
+        let pulsed = "Vpulse reset 0 PULSE {vcc} 0.2 0 1u 1u 2u 51m";
+        assert!(shared.contains(pulsed), "the corpus 555 pulses its reset");
+        shared = shared.replace(pulsed, reset);
+    }
+    let verilog = dir.join("555.v").display().to_string().replace('\\', "/");
+    Netlist::parse(&format!(
+        "* C3 555 timer\n.verilog \"{verilog}\" vl555\n{shared}\n{card}\n.end\n"
+    ))
+    .expect("the 555 deck parses")
+}
+
+/// The refusal an astable mixed loop gets, checked for its typed identity;
+/// returns the message a person reads.
+fn astable_refusal(error: &SimulationError, kind: rspice_core::identity::AnalysisKind) -> String {
+    let SimulationError::UnsupportedCapability(refusal) = error else {
+        panic!(
+            "a loop with no fixed point is a typed refusal, not a convergence failure: {error:?}"
+        );
+    };
+    assert_eq!(
+        refusal.capability, "analysis.mixed_signal.astable",
+        "{error}"
+    );
+    assert_eq!(refusal.analysis_kind, Some(kind), "{error}");
+    error.to_string()
+}
+
+/// **An astable mixed loop has no operating point, and says so.** The 555
+/// timer's comparators, flip-flop and discharge switch form a loop with no
+/// consistent discrete state at t = 0: discharge off charges the timing node
+/// past the upper threshold, which resets the flip-flop and turns discharge
+/// on, which pulls the node below the lower threshold, which sets it again.
+///
+/// The operating point's solves show exactly that: 29,419 rejected solves
+/// changed the joint boundary state 27,523 times among eight states and ended
+/// alternating between (Trigger 0, Threshold 1, Q 0) and (Trigger 1,
+/// Threshold 0, Q 1). It used to report the solver's last aid failing
+/// ("Newton-Raphson iteration limit exceeded" on the corpus route); it is now
+/// refused by name, with the nets that toggle, who drives each, and the
+/// analysis that works.
+#[test]
+fn the_555_timer_operating_point_is_refused_as_an_astable_loop() {
+    let error = Engine::new(SimulationConfig::default())
+        .run_dc_op(&timer_555(".op", None))
+        .map(drop)
+        .expect_err("an astable has no operating point");
+    let message = astable_refusal(&error, rspice_core::identity::AnalysisKind::Op);
+    let SimulationError::UnsupportedCapability(refusal) = &error else {
+        unreachable!()
+    };
+    assert!(
+        refusal
+            .instance
+            .as_deref()
+            .is_some_and(|instance| instance.eq_ignore_ascii_case("x555.xverilog")),
+        "the refusal is placed on the flip-flop's instance: {error:?}"
+    );
+    let lowered = message.to_lowercase();
+    for expected in [
+        "unsupported capability [analysis.mixed_signal.astable] in op for 'x555.xverilog': \
+         mixed verilog-ams instance 'x555.xverilog': the operating point's solves went round a \
+         cycle of discrete states and never settled",
+        // The comparators' event nets, read directly, with the code models
+        // that drive them and the assigns they wake.
+        "net `trigger` on circuit node",
+        "(deck net `x555.under_trigger`; read by the module, driven by \
+         x555.atrigger_comparator (adc_bridge), waking x555.xverilog.assign#3 (continuous \
+         assign, 555.v:16), x555.xverilog.assign#4 (continuous assign, 555.v:17))",
+        "net `threshold` on circuit node",
+        "(deck net `x555.over_threshold`; read by the module, driven by \
+         x555.athresh_comparator (adc_bridge), waking x555.xverilog.assign#4 (continuous \
+         assign, 555.v:17))",
+        // The flip-flop's outputs, through their D/A converters, with the
+        // processes on the loop that write them.
+        "net `q` on circuit node",
+        "(deck net `output`; driven by the module through converter __rspice_auto_dac_",
+        " (d2a), written by x555.xverilog.always#1 (always, 555.v:23))",
+        "net `qbar` on circuit node",
+        "(deck net `x555.qbar`; driven by the module through converter __rspice_auto_dac_",
+        " (d2a), written by x555.xverilog.assign#2 (continuous assign, 555.v:12))",
+        "0 1 0 1 0 1 0",
+        "the discrete state has no consistent value at the operating point; the circuit is \
+         astable. a transient needs no operating point: run one with uic, or give its start \
+         with .ic",
+    ] {
+        assert!(
+            lowered.contains(expected),
+            "missing `{expected}`: {message}"
+        );
+    }
+    assert!(
+        !lowered.contains("net `reset`"),
+        "the reset input holds still and is not part of the loop: {message}"
+    );
+    assert!(
+        !lowered.contains("initial#"),
+        "the initial block sets Q once and is not on the loop: {message}"
+    );
+}
+
+/// **A settling mixed operating point converges as it did.** The same 555
+/// with its reset held asserted has an operating point: Q is held low, so
+/// discharge is on and the timing node sits below the lower threshold. Its
+/// solves toggle the comparators once (Trigger 0 to 1, Threshold 1 to 0) on
+/// the way there, and nothing about the refusal touches a solve that ends.
+#[test]
+fn a_mixed_operating_point_that_settles_after_toggling_still_converges() {
+    let result = Engine::new(SimulationConfig::default())
+        .run_dc_op(&timer_555(".op", Some("Vpulse reset 0 0.2")))
+        .expect("a 555 held in reset has an operating point");
+    let voltage = |name: &str| {
+        let index = result
+            .node_names
+            .iter()
+            .position(|node| node.eq_ignore_ascii_case(name))
+            .unwrap_or_else(|| panic!("node {name} in {:?}", result.node_names));
+        result.node_voltages[index]
+    };
+    assert!(
+        voltage("output").abs() < 1e-3,
+        "Q held low drives the output to ground, saw {}",
+        voltage("output")
+    );
+    assert!(
+        voltage("trigger_threshold") < 4.0,
+        "discharge on holds the timing node below the trigger reference, saw {}",
+        voltage("trigger_threshold")
+    );
+}
+
+/// **An analog failure beside a mixed module keeps its own error.** The node
+/// a buffer reads has no real operating point, so every aid fails, and as the
+/// iterate wanders across the converter's threshold the buffer's input and
+/// output toggle together, 62 times each in a strict alternation over the
+/// last solves. That is a cycle of discrete states, but not a loop: what the
+/// buffer drives never reaches what it reads, except through ground. The
+/// failure stays the convergence failure it was rather than being called an
+/// astable.
+#[test]
+fn an_analog_convergence_failure_beside_a_mixed_module_is_not_called_a_loop() {
+    let model = ModelFile::hdl(
+        "settled_buffer",
+        "`include \"disciplines.vams\"\nmodule buf1(a, y);\n  input a;\n  output y;\n  assign y = a;\nendmodule\n",
+    );
+    let netlist = Netlist::parse(&format!(
+        "* no real operating point, v^2 - 3v + 5 = 0, read by a buffer\n\
+         .hdl \"{}\" module=buf1\n\
+         .param vcc=3.3\n\
+         b1 a 0 i={{(v(a)-2)*(v(a)-2)+1}}\nr1 a 0 1\n\
+         xb a y buf1\nrload y 0 1k\n\
+         .op\n.end\n",
+        model.deck_path()
+    ))
+    .expect("parses");
+    let error = Engine::new(SimulationConfig::default())
+        .run_dc_op(&netlist)
+        .map(drop)
+        .expect_err("v^2 - 3v + 5 = 0 has no real root");
+    assert!(
+        matches!(
+            error,
+            SimulationError::ConvergenceFailed(_)
+                | SimulationError::ContinuationFailed(_)
+                | SimulationError::MixedConvergenceFailed { .. }
+        ),
+        "an analog failure keeps its convergence error: {error:?}"
+    );
+}
+
+/// **A transient that starts from its operating point is refused the same
+/// way**, and told to start from a state instead.
+#[test]
+fn the_555_timer_transient_without_uic_is_refused_at_its_start() {
+    let error = Engine::new(SimulationConfig::default())
+        .run_tran(&timer_555(".tran 10u 1m", None), 1e-3, 10e-6)
+        .map(drop)
+        .expect_err("an astable has no operating point to start from");
+    let message = astable_refusal(&error, rspice_core::identity::AnalysisKind::Tran);
+    assert!(
+        message
+            .to_lowercase()
+            .contains("start this transient with uic instead, or give its start with .ic"),
+        "{message}"
+    );
 }
 
 /// **Cross-domain feedback, vacuity guard.** A boundary a resolved waveform

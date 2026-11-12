@@ -49,6 +49,9 @@ oracles = ["O2", "O6"]
 timeout_s = 150
 phase = "P2"
 
+# 555 op is an expected refusal, analysis.mixed_signal.astable: the astable
+# has no coupled t = 0 fixed point, so it declares no quantity and reads no
+# O2 reference (tolerance.toml).
 [[analysis]]
 id = "op"
 variants = ["555", "adc", "adc_nd", "delay", "delay_v2005", "pwm"]

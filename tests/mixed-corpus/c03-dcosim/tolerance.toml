@@ -189,7 +189,10 @@ why = "identical PWM edges on the 1 us tick and the same RC; only integration er
 # --- op: the D-A t=0 state of each initial block --------------------------
 # 555 is astable: its coupled t=0 fixed point does not exist (Q=0 discharges
 # the timing capacitor, which triggers Q=1, which charges it past threshold),
-# so no operating-point value is comparable and the cell carries no quantity.
+# so no operating-point value exists to compare, in RSpice or in any oracle.
+# The cell carries no quantity and is refused by name
+# (analysis.mixed_signal.astable); d_cosim's O2 "operating point" is an
+# artifact of its event loop and is not a reference.
 
 [[q]]
 id = "op"

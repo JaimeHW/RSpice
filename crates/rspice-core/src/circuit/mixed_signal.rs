@@ -121,6 +121,11 @@ pub(crate) struct MixedEquilibriumImage {
     hosts: Vec<crate::xspice::verilog::HostEquilibriumImage>,
 }
 
+/// The capability token of an analysis whose coupled t = 0 fixed point does
+/// not exist: the discrete state of a mixed loop has no consistent value at
+/// the operating point.
+pub(crate) const MIXED_ASTABLE_CAPABILITY: &str = "analysis.mixed_signal.astable";
+
 /// Refuse how an HDL instance's ports meet the deck's nets.
 fn port_discipline_refusal(instance: &str, detail: impl Into<String>) -> SimulationError {
     crate::ElaborationError::new(crate::ElaborationErrorKind::PortDiscipline, detail)
@@ -214,28 +219,241 @@ impl CircuitData {
     }
 
     /// A failed operating point's convergence failure, refused instead when
-    /// a mixed instance's rejected solves show a loop through the boundary
-    /// that has no consistent value at t = 0 (see
-    /// `MixedSignalHost::coupled_loop_at_start`). Any other error, and a
-    /// failure the probes do not explain, is unchanged.
+    /// a mixed instance's rejected solves went round a cycle of discrete
+    /// states through the boundary and the circuit, so that the coupled t = 0
+    /// fixed point `kind` needs does not exist (see
+    /// `MixedSignalHost::operating_point_cycle`). Any other error, and a
+    /// failure the solves do not explain, is unchanged: a module whose inputs
+    /// toggled only because the analog solve around them wandered, with no
+    /// path back from what it drives, is no loop.
+    ///
+    /// `matrix` is the solve's matrix, whose frozen pattern says which nets
+    /// the circuit couples. The refusal is typed, on the instance the loop
+    /// runs through, and says what does work: a transient, which starts from a
+    /// state rather than solving for one.
     pub(crate) fn refuse_coupled_loop_without_fixed_point(
         &self,
         error: SimulationError,
+        kind: crate::identity::AnalysisKind,
+        matrix: &crate::solver::StaticMatrix,
     ) -> SimulationError {
-        if !error.is_convergence_failure() {
+        if !error.is_convergence_failure() || self.mixed_signal_hosts.is_empty() {
             return error;
         }
-        match self
+        let drivers = |node| self.event_net_drivers(node);
+        let components = self.outside_components(matrix);
+        let joined = |a: usize, b: usize| {
+            a != 0
+                && b != 0
+                && components
+                    .get(a)
+                    .zip(components.get(b))
+                    .is_some_and(|(a, b)| a == b)
+        };
+        let Some((instance, detail)) = self
             .mixed_signal_hosts
             .iter()
             .zip(&self.scheduler.ledgers)
-            .find_map(|(host, ledger)| host.coupled_loop_at_start(ledger))
-        {
-            Some(detail) => {
-                SimulationError::Circuit(format!("no coupled t = 0 fixed point exists: {detail}"))
+            .find_map(|(host, ledger)| {
+                host.operating_point_cycle(ledger, &drivers, &joined)
+                    .map(|detail| (host.instance_name(), detail))
+            })
+        else {
+            return error;
+        };
+        let remedy = if kind == crate::identity::AnalysisKind::Tran {
+            "Start this transient with UIC instead, or give its start with .IC"
+        } else {
+            "A transient needs no operating point: run one with UIC, or give its start with .IC"
+        };
+        crate::UnsupportedCapabilityError::new(
+            MIXED_ASTABLE_CAPABILITY,
+            format!("{detail}. {remedy}"),
+        )
+        .for_analysis_kind(kind)
+        .for_instance(instance)
+        .into()
+    }
+
+    /// Which nets reach one another through the circuit, as one component
+    /// label per 1-based matrix index (nodes, then branches, then private
+    /// state; ground, `0`, joins nothing). Two nets share a label when the
+    /// frozen matrix pattern couples them, directly or through other unknowns,
+    /// or when an XSPICE instance connects them, which is how a path crosses
+    /// between analog nodes and event nets. A node an independent voltage
+    /// source holds against ground joins nothing either: it is fixed, so it
+    /// carries no change from one side to the other.
+    ///
+    /// A mixed module's processes are not in it, so a path between two of its
+    /// ports is a path around the module. Its analog equations are, but the
+    /// matrix reserves one conservative dense block over every terminal of a
+    /// mixed module and the nodes its D/A bridges drive, whether its
+    /// equations couple them or not; a pattern entry between two such nodes
+    /// joins them only when the last assembled Jacobian holds a value there,
+    /// so a digital module's unused terminals do not short its input to its
+    /// output.
+    fn outside_components(&self, matrix: &crate::solver::StaticMatrix) -> Vec<usize> {
+        fn root(parent: &mut [usize], mut key: usize) -> usize {
+            while parent[key] != key {
+                parent[key] = parent[parent[key]];
+                key = parent[key];
             }
-            None => error,
+            key
         }
+        let size = self.matrix_size() + 1;
+        let mut held = vec![false; size];
+        held[0] = true;
+        for (&pos, &neg) in self
+            .voltage_sources
+            .node_pos
+            .iter()
+            .zip(&self.voltage_sources.node_neg)
+        {
+            if let (node, 0) | (0, node) = (pos, neg)
+                && let Some(slot) = held.get_mut(node)
+            {
+                *slot = true;
+            }
+        }
+        let mut reserved = vec![false; size];
+        for node in self.mixed_signal_coupled_nodes().flatten() {
+            if let Some(slot) = reserved.get_mut(node) {
+                *slot = true;
+            }
+        }
+        let mut parent: Vec<usize> = (0..size).collect();
+        let mut join = |a: usize, b: usize| {
+            if a >= size || b >= size || held[a] || held[b] {
+                return;
+            }
+            let (a, b) = (root(&mut parent, a), root(&mut parent, b));
+            parent[a.max(b)] = a.min(b);
+        };
+        for (row, col, value) in matrix.stored_entries() {
+            let (a, b) = (row + 1, col + 1);
+            let in_reserved_block = reserved.get(a).copied().unwrap_or(false)
+                && reserved.get(b).copied().unwrap_or(false);
+            if !in_reserved_block || value != 0.0 {
+                join(a, b);
+            }
+        }
+        let mut keys = Vec::new();
+        for instance in &self.xspice_instances {
+            keys.clear();
+            for connection in instance.connections() {
+                self.connection_keys(connection, &mut keys);
+            }
+            for pair in keys.windows(2) {
+                join(pair[0], pair[1]);
+            }
+        }
+        (0..size).map(|key| root(&mut parent, key)).collect()
+    }
+
+    /// Every 1-based matrix index an XSPICE connection touches: its nodes,
+    /// and the branch of a branch current it reads or imposes.
+    fn connection_keys(&self, connection: &crate::xspice::PortConnection, keys: &mut Vec<usize>) {
+        use crate::xspice::{AnalogInputConnection as Input, PortConnection as Port};
+        let branch = |ordinal: usize| self.get_branch_matrix_index(ordinal);
+        match connection {
+            Port::Analog(node)
+            | Port::Digital(node)
+            | Port::DigitalInverted(node)
+            | Port::Real(node) => keys.push(*node),
+            Port::Differential(pos, neg)
+            | Port::CurrentOutput { pos, neg }
+            | Port::VoltageOutput { pos, neg } => keys.extend([*pos, *neg]),
+            Port::CurrentProbe {
+                pos,
+                neg,
+                branch_ordinal,
+            }
+            | Port::Hybrid {
+                pos,
+                neg,
+                branch_ordinal,
+            } => keys.extend([*pos, *neg, branch(*branch_ordinal)]),
+            Port::AnalogVector(nodes) | Port::DigitalVector(nodes) | Port::RealVector(nodes) => {
+                keys.extend(nodes);
+            }
+            Port::DigitalVectorMapped(nodes) => keys.extend(nodes.iter().map(|net| net.node)),
+            Port::TypedAnalogVector(inputs) => {
+                for input in inputs {
+                    match input {
+                        Input::Node(node) => keys.push(*node),
+                        Input::Differential(pos, neg)
+                        | Input::CurrentOutput { pos, neg }
+                        | Input::VoltageOutput { pos, neg } => keys.extend([*pos, *neg]),
+                        Input::CurrentProbe {
+                            pos,
+                            neg,
+                            branch_ordinal,
+                        }
+                        | Input::Hybrid {
+                            pos,
+                            neg,
+                            branch_ordinal,
+                        } => keys.extend([*pos, *neg, branch(*branch_ordinal)]),
+                        Input::BranchCurrent { branch_ordinal }
+                        | Input::NamedBranchCurrent {
+                            branch_ordinal: Some(branch_ordinal),
+                            ..
+                        } => keys.push(branch(*branch_ordinal)),
+                        Input::NamedBranchCurrent {
+                            branch_ordinal: None,
+                            ..
+                        }
+                        | Input::NamedCurrentSource { .. } => {}
+                    }
+                }
+            }
+            Port::BranchCurrent { branch_ordinal }
+            | Port::NamedBranchCurrent {
+                branch_ordinal: Some(branch_ordinal),
+                ..
+            } => keys.push(branch(*branch_ordinal)),
+            Port::NamedBranchCurrent {
+                branch_ordinal: None,
+                ..
+            }
+            | Port::NamedCurrentSource { .. }
+            | Port::Null => {}
+        }
+    }
+
+    /// Who drives event net `node` from outside a mixed module, as a boundary
+    /// diagnostic names them: each code model with an output on it, as
+    /// `instance (model)`, the model being the converter module the build's
+    /// insertion record gives an inserted one.
+    fn event_net_drivers(&self, node: usize) -> Vec<String> {
+        use crate::xspice::{PortConnection, PortDirection};
+        self.xspice_instances
+            .iter()
+            .filter(|instance| {
+                instance
+                    .ports()
+                    .iter()
+                    .zip(instance.connections())
+                    .any(|(port, connection)| {
+                        port.direction != PortDirection::In
+                            && match connection {
+                                PortConnection::Digital(net)
+                                | PortConnection::DigitalInverted(net) => *net == node,
+                                PortConnection::DigitalVector(nets) => nets.contains(&node),
+                                PortConnection::DigitalVectorMapped(nets) => {
+                                    nets.iter().any(|net| net.node == node)
+                                }
+                                _ => false,
+                            }
+                    })
+            })
+            .map(|instance| {
+                let model = self
+                    .converter_record(&instance.name)
+                    .map_or_else(|| instance.model_name(), |record| &record.module);
+                format!("{} ({model})", instance.name)
+            })
+            .collect()
     }
 
     /// Name what every mixed instance's boundary crosses, for the boundary

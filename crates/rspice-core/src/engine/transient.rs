@@ -5185,9 +5185,18 @@ impl Engine {
                     &mut matrix,
                     abort,
                 );
+                // A startup with no coupled t = 0 fixed point is refused as
+                // the operating point is; any other failure keeps the context
+                // the boundary adds to it.
                 #[cfg(feature = "veriloga")]
-                let initial = initial
-                    .map_err(|error| circuit.annotate_mixed_convergence_failure(error, 0.0, false));
+                let initial = initial.map_err(|error| {
+                    let error = circuit.refuse_coupled_loop_without_fixed_point(
+                        error,
+                        crate::identity::AnalysisKind::Tran,
+                        &matrix,
+                    );
+                    circuit.annotate_mixed_convergence_failure(error, 0.0, false)
+                });
                 let (mut solution, mode, contract) = initial?;
                 let held_rows = Self::initial_condition_rows(
                     &self.collect_initial_condition_hints(netlist, &circuit),

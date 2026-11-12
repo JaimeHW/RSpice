@@ -11,8 +11,8 @@ delay_v2005	tran	interp	pass	johnson (O6) net d0 edge at 9.600000e-5: 1.355e-20 
 delay_v2005	tran	native	pass	johnson (O6) net d0 edge at 9.600000e-5: 1.355e-20 off the lattice, allowed 1.000e-12
 pwm	tran	interp	pass	pwmsine (O2) [49] |a−e|=6.305e-6 allowed 1.000e-4 (a=6.314651e-1, e=6.314588e-1)
 pwm	tran	native	pass	pwmsine (O2) [49] |a−e|=6.305e-6 allowed 1.000e-4 (a=6.314651e-1, e=6.314588e-1)
-555	op	interp	fail	convergence: convergence: Convergence failed after 1500 iterations: Newton-Raphson iteration limit exceeded
-555	op	native	fail	convergence: convergence: Convergence failed after 1500 iterations: Newton-Raphson iteration limit exceeded
+555	op	interp	refused	analysis.mixed_signal.astable; label="op"; instance=X555.xverilog form=structured; token-form=structured; analysis-form=structured
+555	op	native	refused	analysis.mixed_signal.astable; label="op"; instance=X555.xverilog form=structured; token-form=structured; analysis-form=structured
 adc	op	interp	pass	op (O6) [0] |a−e|=0.000e0 allowed 1.000e-3 (a=3.300000e0, e=3.300000e0)
 adc	op	native	pass	op (O6) [0] |a−e|=0.000e0 allowed 1.000e-3 (a=3.300000e0, e=3.300000e0)
 adc_nd	op	interp	pass	op (O6) [0] |a−e|=0.000e0 allowed 1.000e-3 (a=3.300000e0, e=3.300000e0)
