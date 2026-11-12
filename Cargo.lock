@@ -5691,6 +5691,7 @@ dependencies = [
  "log",
  "num-complex",
  "rspice-core",
+ "rspice-design",
  "rspice-results",
  "rspice-simulation",
  "rspice-simulation-contract",

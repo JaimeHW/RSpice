@@ -1434,6 +1434,9 @@ fn checkpoint(
 }
 
 #[cfg(test)]
+mod prepared_route;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
