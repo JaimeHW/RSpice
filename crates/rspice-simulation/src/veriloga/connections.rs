@@ -71,7 +71,7 @@ impl PreparedVerilogAConnectionLibrary {
         Ok(())
     }
 
-    pub(super) fn binding(&self) -> PreparedVerilogASourceBinding<'_> {
+    pub(crate) fn binding(&self) -> PreparedVerilogASourceBinding<'_> {
         PreparedVerilogASourceBinding {
             source_key: &self.source_key,
             netlist_alias: &self.netlist_alias,

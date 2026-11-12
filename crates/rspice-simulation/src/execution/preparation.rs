@@ -620,6 +620,10 @@ struct ExpandedManualDeck {
     model_execution_plan: Option<rspice_model_library::ModelExecutionPlan>,
     model_cards: Vec<String>,
     external_veriloga_runtimes: crate::veriloga::PreparedVerilogARuntimeSet,
+    /// The runtimes sealed from the Verilog-A sources the deck's own lines
+    /// name, and those sources as they were read.
+    deck_hdl_runtimes: crate::veriloga::PreparedVerilogARuntimeSet,
+    deck_hdl_dependencies: Vec<rspice_core::netlist::ResolvedIncludeDependency>,
     has_project_technology: bool,
 }
 
@@ -637,7 +641,7 @@ pub fn manual_deck_hdl<R, A>(
     ),
     PreparationError,
 > {
-    expand_manual_deck(inputs, &manual).map(|deck| {
+    expand_manual_deck(inputs, &manual, false).map(|deck| {
         (
             deck_external_cells(&deck.expanded),
             deck_delay_select(&deck.expanded),
@@ -645,9 +649,14 @@ pub fn manual_deck_hdl<R, A>(
     })
 }
 
+/// Compose and expand the manual deck `manual` as its run executes it. With
+/// `seal_hdl`, the Verilog-A sources its own lines name are read and sealed
+/// first, and their lines name the sealed runtimes; without, they are left
+/// as written, for a caller that only reads the deck's cells.
 fn expand_manual_deck<R, A>(
     inputs: &RunPreparationInputs<'_, R, A>,
     manual: &ManualSourceInputs<'_>,
+    seal_hdl: bool,
 ) -> Result<ExpandedManualDeck, PreparationError> {
     let source = manual.source;
     let owned_active = manual.owned;
@@ -721,6 +730,22 @@ fn expand_manual_deck<R, A>(
             "Relative .include/.inc/.lib sources require an imported deck origin before they can be sealed",
         ));
     }
+    let crate::netlist_preparation::SealedDeckHdl {
+        source: composed,
+        runtimes: deck_hdl_runtimes,
+        dependencies: deck_hdl_dependencies,
+    } = if seal_hdl {
+        crate::netlist_preparation::seal_deck_hdl_sources(
+            &composed,
+            origin,
+            &inputs.include_search(),
+        )?
+    } else {
+        crate::netlist_preparation::SealedDeckHdl {
+            source: composed,
+            ..Default::default()
+        }
+    };
     let (expanded, canonical_origin, sealed_source_dependencies) =
         expand_manual_dependencies(&composed, origin, &inputs.include_search(), &sealed_models)?;
     let expanded = owned_source::bind_execution_profile(
@@ -741,6 +766,8 @@ fn expand_manual_deck<R, A>(
         model_execution_plan,
         model_cards,
         external_veriloga_runtimes,
+        deck_hdl_runtimes,
+        deck_hdl_dependencies,
         has_project_technology,
     })
 }
@@ -754,13 +781,18 @@ pub fn build_prepared_manual_deck<R, A>(
     let ExpandedManualDeck {
         expanded,
         canonical_origin,
-        sealed_source_dependencies,
+        mut sealed_source_dependencies,
         sealed_models,
         model_execution_plan,
         model_cards,
         external_veriloga_runtimes,
+        deck_hdl_runtimes,
+        deck_hdl_dependencies,
         has_project_technology,
-    } = expand_manual_deck(inputs, &manual)?;
+    } = expand_manual_deck(inputs, &manual, true)?;
+    // A sealed Verilog-A source is a dependency like an include: the run
+    // refuses to dispatch once the host no longer gives the bytes it sealed.
+    sealed_source_dependencies.extend(deck_hdl_dependencies);
     // One parse serves the model check and the deck's own warnings (a dropped
     // control command, a shadowed definition), which the run advises as a
     // headless run of the same deck does. It is the parse the deck's queue is
@@ -790,6 +822,7 @@ pub fn build_prepared_manual_deck<R, A>(
         &expanded,
     )?
     .try_merge(external_veriloga_runtimes)
+    .and_then(|runtimes| runtimes.try_merge(deck_hdl_runtimes))
     .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
     let definitions = inputs
         .analysis
@@ -806,6 +839,12 @@ pub fn build_prepared_manual_deck<R, A>(
             definitions,
         )
         .map_err(|error| PreparationError::new(PreparationStage::SourceChecks, error))?;
+    if let Some(refusal) = crate::netlist_preparation::included_hdl_source_refusal(
+        &expanded,
+        &sealed_source_dependencies,
+    ) {
+        return Err(refusal);
+    }
     reject_deferred_external_sources_with_project_runtimes(
         &expanded,
         &project_veriloga_runtimes,
@@ -1120,5 +1159,142 @@ mod tests {
             execution_limits_for(None),
             rspice_core::ResourceLimits::default()
         );
+    }
+
+    /// Everything a manual deck's preparation borrows, empty: no project, no
+    /// technology, no libraries, as a deck opened on its own has.
+    #[derive(Default)]
+    struct ManualDeckFixture {
+        sim_setup: rspice_simulation_contract::setup_state::SimulationSetup,
+        schematic: rspice_design::schematic::document::SchematicDocument,
+        selected: std::collections::HashSet<u64>,
+        project: rspice_project_contract::ProjectDescriptor,
+        models: rspice_model_library::ModelCatalog,
+        resolutions: rspice_model_library::ModelResolutionRecords,
+        registry: crate::pdk::PdkTechnologyRegistry,
+        layouts: std::collections::BTreeMap<
+            String,
+            rspice_design::physical_layout::PhysicalLayoutDocument,
+        >,
+        libraries: rspice_design::library::LibraryCatalog,
+        project_sources: rspice_design::project_sources::ProjectSourceRegistry,
+        design_management: rspice_design_model::design_management::DesignManagementCatalog,
+        configuration_sets: rspice_design::configuration_set::ConfigurationSetCatalog,
+        monte_carlo: rspice_results::monte_carlo_checkpoint::MonteCarloCheckpointLibrary,
+        transient: rspice_results::transient_checkpoint::TransientCheckpointLibrary,
+    }
+
+    impl ManualDeckFixture {
+        fn inputs(&self) -> RunPreparationInputs<'_, (), ()> {
+            RunPreparationInputs {
+                analysis: AnalysisInputs {
+                    sim_setup: &self.sim_setup,
+                    schematic: &self.schematic,
+                    selected_components: &self.selected,
+                    selection_occurrence: None,
+                    runs: &[],
+                    active_run: None,
+                    project_revision: self.project.revision(),
+                    plan_payloads: &[],
+                },
+                technology: ProjectTechnologyInputs {
+                    project: &self.project,
+                    sim_setup: &self.sim_setup,
+                    models: &self.models,
+                    resolutions: &self.resolutions,
+                    registry: &self.registry,
+                    layouts: &self.layouts,
+                },
+                libraries: &self.libraries,
+                project_sources: &self.project_sources,
+                design_management: &self.design_management,
+                configuration_sets: &self.configuration_sets,
+                source_data: NetlistSourceData::new(&crate::netlist_gen::FixtureSourceFiles),
+                schematic_file: None,
+                schematic_topology_revision: 0,
+                imported_checkpoints: &self.monte_carlo,
+                imported_transient_checkpoints: &self.transient,
+                display_waveform_cache_samples: 0,
+                max_parallel_workers: None,
+                library_folders: &[],
+                compilation: None,
+                design_checks: rspice_design::drc::DrcConfig::default(),
+            }
+        }
+    }
+
+    fn manual<'a>(source: &'a str, origin: &'a Path) -> ManualSourceInputs<'a> {
+        ManualSourceInputs {
+            source,
+            descriptor: None,
+            generated_artifact: None,
+            owned: false,
+            origin: Some(origin),
+        }
+    }
+
+    /// A manual deck's `.hdl` line used to be refused on the prepared route
+    /// as an unsealed external source. Its file is now read from beside the
+    /// deck, sealed, and named by key in the deck the run executes; the read
+    /// is a dependency of the run, and a file that cannot be read is refused
+    /// with its line before anything is solved.
+    #[test]
+    fn a_manual_decks_verilog_a_source_is_sealed_on_the_prepared_route() {
+        let dir = std::env::temp_dir().join(format!("rspice-manual-hdl-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create the deck directory");
+        std::fs::write(
+            dir.join("vres.va"),
+            "`include \"disciplines.vams\"\nmodule vres(p, n);\n  inout p, n;\n  electrical p, n;\n  \
+             parameter real r = 1k;\n  analog I(p, n) <+ V(p, n) / r;\nendmodule\n",
+        )
+        .expect("write the model");
+        let deck_path = dir.join("divider.cir");
+        let deck =
+            "divider\n.hdl \"vres.va\" vres\nV1 in 0 1\nR1 in out 1k\nX1 out 0 vres\n.op\n.end\n";
+        let fixture = ManualDeckFixture::default();
+        let inputs = fixture.inputs();
+
+        let snapshot = build_prepared_manual_deck(&inputs, manual(deck, &deck_path))
+            .unwrap_or_else(|error| panic!("the deck prepares: {error}"));
+        let executable = snapshot.executable_netlist();
+        assert!(
+            executable.contains(".veriloga \"__rspice_project__/deck/")
+                && executable.contains("/vres/vres/vres.va\" vres"),
+            "{executable}"
+        );
+        assert!(!executable.contains(".hdl"), "{executable}");
+        let [dependency] = snapshot.sealed_source_dependencies() else {
+            panic!(
+                "one dependency, saw {:?}",
+                snapshot.sealed_source_dependencies()
+            );
+        };
+        assert_eq!(dependency.requested_path(), "vres.va");
+        assert_eq!(dependency.directive_line(), 2);
+
+        let missing = deck.replace("vres.va", "gone.va");
+        let error = build_prepared_manual_deck(&inputs, manual(&missing, &deck_path))
+            .expect_err("a file that cannot be read is refused");
+        assert_eq!(error.line(), Some(2), "{error}");
+        assert!(error.to_string().contains("gone.va"), "{error}");
+
+        // A source line an included file holds is not the deck's own, and is
+        // refused by that file and its own line, not a line of the expanded
+        // text.
+        std::fs::write(dir.join("sub.inc"), "* models\n.hdl \"vres.va\" vres\n")
+            .expect("write the include");
+        let included =
+            "divider\n.include \"sub.inc\"\nV1 in 0 1\nR1 in out 1k\nX1 out 0 vres\n.op\n.end\n";
+        let error = build_prepared_manual_deck(&inputs, manual(included, &deck_path))
+            .expect_err("an included source line is not sealed");
+        let text = error.to_string();
+        assert!(
+            text.contains("line 2 of '")
+                && text.contains("sub.inc': the Verilog-A source 'vres.va' is named inside"),
+            "{text}"
+        );
+        assert_eq!(error.line(), None, "{text}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
