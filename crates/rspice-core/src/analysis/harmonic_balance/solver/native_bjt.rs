@@ -4,7 +4,7 @@ use super::*;
 use crate::device::MatrixStamper;
 use std::collections::BTreeMap;
 
-struct NativeStamp {
+pub(super) struct NativeStamp {
     residual: Vec<Value>,
     residual_scale: Vec<Value>,
     contributions: Vec<(usize, Value)>,
@@ -121,6 +121,17 @@ impl HbSolver {
             || !self.native_mos.is_empty()
             || !self.behavioral_sources.is_empty()
             || !self.periodic_capacitors.is_empty()
+            || self.has_veriloga_devices()
+    }
+
+    #[cfg(feature = "veriloga")]
+    fn has_veriloga_devices(&self) -> bool {
+        !self.veriloga_nonlinear_devices.is_empty()
+    }
+
+    #[cfg(not(feature = "veriloga"))]
+    fn has_veriloga_devices(&self) -> bool {
+        false
     }
 
     pub(crate) fn set_periodic_behavioral_sources(
@@ -615,6 +626,19 @@ impl HbSolver {
             }
         }
         let integral_start = self.num_nodes + self.physical_branch_count();
+        #[cfg(feature = "veriloga")]
+        for device in &mut self.veriloga_nonlinear_devices {
+            if selected.is_some_and(|rows| !device.rows().iter().any(|&row| rows[row])) {
+                continue;
+            }
+            device.stamp_periodic_fq(solution, f, q)?;
+            if f.invalid || q.invalid {
+                return Err(HbError::InvalidCircuit(format!(
+                    "Verilog-A device '{}' produced invalid physical F/Q entries",
+                    device.name()
+                )));
+            }
+        }
         let prescribed = if let Some(prescribed) = &self.quasi_prescribed_integrals {
             prescribed.sample(
                 &behavioral_inputs[solution.len()..],

@@ -190,7 +190,9 @@ impl Engine {
 
         #[cfg(feature = "veriloga")]
         for device in circuit.veriloga_devices().iter() {
-            solver.add_veriloga_device(device.clone());
+            solver
+                .try_add_veriloga_device(device.clone())
+                .map_err(|error| SimulationError::Circuit(error.to_string()))?;
         }
         Ok(())
     }

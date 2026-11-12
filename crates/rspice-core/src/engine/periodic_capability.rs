@@ -349,6 +349,13 @@ const RESISTOR_CYCLOSTATIONARY_FLICKER: &str = "thermal noise and AF=2 signed-cu
 const RUNTIME_VERILOGA_RATIONAL_DESCRIPTOR: &str = "an analog body without `absdelay`, `zi_*` or `idtmod`: `absdelay` is a transport delay \
      with no rational transfer function, and a `zi_*` filter or an `idtmod` modulus is \
      discrete or wrapping state with no finite `G + sC` realization";
+/// The condition behind a runtime Verilog-A module's harmonic-balance
+/// residual: the static and companion stamps sample `F` and `Q` exactly only
+/// when every `ddt` is the derivative of a contributed charge and no other
+/// operator keeps state.
+const RUNTIME_VERILOGA_HB_RESIDUAL: &str = "an analog body of memoryless equations and `ddt` of the charges it contributes, \
+     F(x) + dQ(x)/dt, with no other operator that keeps state and no variable kept between \
+     time points";
 /// One reason covers all six contracts for a mixed Verilog-AMS module, so it
 /// is stated once instead of six near-identical times.
 const MIXED_SIGNAL_INTERLEAVE: &str = "periodic steady state with running discrete state (P7): a mixed Verilog-AMS module's \
@@ -667,9 +674,9 @@ pub(crate) const fn periodic_capability_descriptor(
             envelope: Absent(ENVELOPE_LINEAR_SUBSET),
         },
         F::RuntimeVerilogA => PeriodicCapabilityDescriptor {
-            residual_jacobian: Absent(
-                "runtime Verilog-A devices without exact HB charge/noise capability metadata",
-            ),
+            // The analysis capability gate decides the condition per instance
+            // from the module's operator inventory before the solver is built.
+            residual_jacobian: Restricted(RUNTIME_VERILOGA_HB_RESIDUAL),
             dynamic_state: Restricted(RUNTIME_VERILOGA_RATIONAL_DESCRIPTOR),
             small_signal: Inapplicable,
             noise: Absent("periodic Verilog-A noise sources are not declared"),

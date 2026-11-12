@@ -1,5 +1,6 @@
 #![cfg(feature = "veriloga")]
 
+use num_complex::Complex64;
 use rspice_core::analysis::PssConfig;
 use rspice_core::analysis::harmonic_balance::HbConfig;
 use rspice_core::engine::{Engine, SimulationConfig};
@@ -14,49 +15,317 @@ fn write_model(name: &str, source: &str) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 
+const F0: f64 = 1.0e6;
+
+fn run_hb(deck: &str, harmonics: usize) -> rspice_core::engine::HbAnalysisResult {
+    let netlist = Netlist::parse(deck).expect("parse");
+    Engine::new(SimulationConfig::default())
+        .run_hb(&netlist, HbConfig::new(F0).with_harmonics(harmonics))
+        .unwrap_or_else(|error| panic!("HB must run: {error}\n{deck}"))
+}
+
+fn node(result: &rspice_core::engine::HbAnalysisResult, name: &str) -> Vec<Complex64> {
+    result
+        .result
+        .spectral_voltages
+        .iter()
+        .find(|voltage| voltage.node_name.eq_ignore_ascii_case(name))
+        .unwrap_or_else(|| panic!("node {name} present"))
+        .coefficients
+        .clone()
+}
+
+const RESISTOR: (&str, &str) = (
+    "va_hb_resistor",
+    "parameter real r = 1.0e3;\n    analog I(p, n) <+ V(p, n) / r;",
+);
+const CAPACITOR: (&str, &str) = (
+    "va_hb_capacitor",
+    "parameter real c = 1.0e-12;\n    analog I(p, n) <+ ddt(c * V(p, n));",
+);
+const DIODE: (&str, &str) = (
+    "va_hb_diode",
+    "parameter real is = 1.0e-14;\n    analog I(p, n) <+ is * (exp(V(p, n) / $vt) - 1.0);",
+);
+
+/// One two-terminal module in a file of the calling test's own, and the
+/// `.va` card that loads it.
+fn two_terminal(test: &str, (module, body): (&str, &str)) -> (String, String) {
+    let path = write_model(
+        &format!("{test}_{module}"),
+        &format!(
+            "`include \"disciplines.vams\"\n\
+             module {module}(p, n);\n\
+             inout p, n;\n\
+             electrical p, n;\n\
+             {body}\n\
+             endmodule\n"
+        ),
+    );
+    let card = format!(".va \"{path}\" {module}");
+    (path, card)
+}
+
+/// The same driven diode clipper with each native device swapped, in turn,
+/// for its Verilog-A twin gives the native harmonics at every node.
+///
+/// The native harmonic-balance path is the reference, to its own Newton
+/// tolerance: every coefficient agrees within 1e-6 of the largest one, which
+/// is well inside the solver's convergence tolerances and far outside its
+/// roundoff.
 #[test]
-fn dynamic_and_noisy_veriloga_fails_closed_until_hb_metadata_is_exact() {
+fn veriloga_twins_of_native_devices_give_the_native_harmonics() {
+    let models = [RESISTOR, CAPACITOR, DIODE].map(|model| two_terminal("twins", model));
+    let cards = models
+        .iter()
+        .map(|(_, card)| card.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let deck = |resistor: &str, capacitor: &str, diode: &str| {
+        format!(
+            "* driven diode clipper\n\
+             V1 in 0 DC 0.3 SIN(0.3 0.4 1meg)\n\
+             R1 in a 1k\n\
+             {resistor}\n\
+             {capacitor}\n\
+             {diode}\n\
+             .model dmod D IS=1e-14 N=1\n\
+             {cards}\n\
+             .end\n"
+        )
+    };
+    let native = ("R2 a 0 10k", "C1 a 0 100p", "D1 a 0 dmod");
+    let reference = run_hb(&deck(native.0, native.1, native.2), 12);
+    assert!(reference.converged);
+    let scale = node(&reference, "a")
+        .iter()
+        .chain(&node(&reference, "in"))
+        .map(|value| value.norm())
+        .fold(0.0, f64::max);
+    for (twin, deck) in [
+        (
+            "resistor",
+            deck("XR2 a 0 va_hb_resistor r=10k", native.1, native.2),
+        ),
+        (
+            "capacitor",
+            deck(native.0, "XC1 a 0 va_hb_capacitor c=100p", native.2),
+        ),
+        (
+            "diode",
+            deck(native.0, native.1, "XD1 a 0 va_hb_diode is=1e-14"),
+        ),
+    ] {
+        let result = run_hb(&deck, 12);
+        assert!(result.converged, "{twin}");
+        for name in ["in", "a"] {
+            for (k, (twin_value, native_value)) in node(&result, name)
+                .iter()
+                .zip(node(&reference, name))
+                .enumerate()
+            {
+                assert!(
+                    (twin_value - native_value).norm() <= 1.0e-6 * scale,
+                    "{twin} twin, V({name}) harmonic {k}: {twin_value} against native {native_value}"
+                );
+            }
+        }
+    }
+    for (path, _) in models {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+/// A Verilog-A capacitor behind a resistor is a first-order low-pass whose
+/// fundamental is H(jω) = 1/(1 + jωRC) of the drive, to 1e-9.
+#[test]
+fn a_veriloga_rc_low_pass_matches_its_transfer_function() {
+    let (model, card) = two_terminal("low_pass", CAPACITOR);
+    let deck = format!(
+        "* Verilog-A RC low-pass\n\
+         V1 in 0 DC 0 SIN(0 1 1meg)\n\
+         R1 in out 1k\n\
+         XC1 out 0 va_hb_capacitor c=100p\n\
+         {card}\n\
+         .end\n"
+    );
+    let result = run_hb(&deck, 3);
+    let _ = std::fs::remove_file(model);
+    assert!(result.converged);
+    let omega = std::f64::consts::TAU * F0;
+    let drive = Complex64::new(0.0, -1.0);
+    let expected = drive / Complex64::new(1.0, omega * 1.0e3 * 100.0e-12);
+    let out = node(&result, "out");
+    assert!(
+        (out[1] - expected).norm() <= 1.0e-9 * expected.norm(),
+        "V(out) fundamental {} against H(jω)·V(in) = {expected}",
+        out[1]
+    );
+    for (k, harmonic) in out.iter().enumerate().skip(2) {
+        assert!(
+            harmonic.norm() <= 1.0e-12,
+            "a linear filter has no harmonic {k}: {harmonic}"
+        );
+    }
+}
+
+/// A charge Q = C0·v + C1·v² driven by v = A·sin(ωt) draws
+/// i = C0·A·ω·cos(ωt) + C1·A²·ω·sin(2ωt): the fundamental is C0·A·ω and the
+/// second harmonic -j·C1·A²·ω, to 1e-9. The source carries the current the
+/// other way.
+#[test]
+fn a_veriloga_varactor_draws_its_closed_form_harmonics() {
     let model = write_model(
-        "dynamic_noise",
+        "varactor",
         r#"
 `include "disciplines.vams"
 
-module va_hb_dynamic_noise(p, n);
+module va_hb_varactor(p, n);
     inout p, n;
     electrical p, n;
-    parameter real g = 1.0e-3;
-    parameter real c = 1.0e-12;
-    analog I(p, n) <+ g * V(p, n) + ddt(c * V(p, n))
-        + white_noise(1.0e-18, "thermal");
+    parameter real c0 = 1.0e-12;
+    parameter real c1 = 0.5e-12;
+    analog I(p, n) <+ ddt(c0 * V(p, n) + c1 * V(p, n) * V(p, n));
 endmodule
 "#,
     );
-
     let deck = format!(
-        "* veriloga HB exact-capability diagnostic\n\
-         V1 in 0 DC 1 SIN(1 0 1meg)\n\
-         R1 in 0 1k\n\
-         XVA in 0 va_hb_dynamic_noise\n\
-         .va \"{model}\" va_hb_dynamic_noise\n\
+        "* Verilog-A varactor on an ideal source\n\
+         V1 in 0 DC 0 SIN(0 0.5 1meg)\n\
+         XC1 in 0 va_hb_varactor\n\
+         .va \"{model}\" va_hb_varactor\n\
          .end\n"
     );
-
-    let netlist = Netlist::parse(&deck).expect("parse");
-    let result = std::panic::catch_unwind(|| {
-        Engine::new(SimulationConfig::default())
-            .run_hb(&netlist, HbConfig::new(1.0e6).with_harmonics(3))
-    });
-
+    let result = run_hb(&deck, 4);
     let _ = std::fs::remove_file(model);
+    assert!(result.converged);
+    let (c0, c1, amplitude) = (1.0e-12, 0.5e-12, 0.5);
+    let omega = std::f64::consts::TAU * F0;
+    let source = &result
+        .result
+        .mna_branch_currents
+        .iter()
+        .find(|branch| branch.device_name.eq_ignore_ascii_case("V1"))
+        .expect("V1 branch current")
+        .coefficients;
+    let expected = [
+        Complex64::new(0.0, 0.0),
+        Complex64::new(c0 * amplitude * omega, 0.0),
+        Complex64::new(0.0, -c1 * amplitude * amplitude * omega),
+        Complex64::new(0.0, 0.0),
+    ];
+    let scale = expected[1].norm();
+    for (k, expected) in expected.iter().enumerate() {
+        assert!(
+            (source[k] + expected).norm() <= 1.0e-9 * scale,
+            "I(V1) harmonic {k}: {} against -{expected}",
+            source[k]
+        );
+    }
+}
 
-    let result = result.expect("unsupported Verilog-A HB capability must not panic");
-    let err = result.expect_err("HB must not omit Verilog-A charge or noise contributions");
-    let text = err.to_string();
-    assert!(
-        text.contains("runtime Verilog-A")
-            && text.contains("exact HB charge/noise capability metadata"),
-        "diagnostic should identify the unavailable exact Verilog-A HB capability, got: {text}"
-    );
+/// Every operator harmonic balance cannot carry is refused before solving,
+/// by its own name, with the instance and module.
+#[test]
+fn harmonic_balance_refuses_each_operator_family_by_name() {
+    for (operator, body) in [
+        (
+            "transition",
+            "I(out) <+ 1.0e-3 * transition(V(in) > 0.5 ? 1.0 : 0.0, 0, 1n);",
+        ),
+        ("slew", "I(out) <+ 1.0e-3 * slew(V(in), 1.0e9);"),
+        (
+            "cross",
+            "I(out) <+ V(out) / 1.0e3; @(cross(V(in) - 0.5, 1)) $discontinuity(0);",
+        ),
+        (
+            "above",
+            "I(out) <+ V(out) / 1.0e3; @(above(V(in) - 0.5)) $discontinuity(0);",
+        ),
+        (
+            "timer",
+            "I(out) <+ V(out) / 1.0e3; @(timer(0, 1u)) $discontinuity(0);",
+        ),
+        (
+            "last_crossing",
+            "I(out) <+ 1.0e3 * last_crossing(V(in) - 0.5, 1);",
+        ),
+        ("idtmod", "I(out) <+ 1.0e-3 * idtmod(V(in), 0, 1.0);"),
+        (
+            "zi_*",
+            "I(out) <+ 1.0e-3 * zi_nd(V(in), '{1.0}, '{1.0, -0.5}, 1u);",
+        ),
+        ("idt", "I(out) <+ 1.0e-3 * idt(V(in), 0);"),
+        (
+            "laplace_*",
+            "I(out) <+ 1.0e-3 * laplace_nd(V(in), '{1.0}, '{1.0, 1.0e-6});",
+        ),
+        ("absdelay", "I(out) <+ 1.0e-3 * absdelay(V(in), 1n);"),
+        (
+            "$abstime",
+            "I(out) <+ 1.0e-3 * sin(6.283185307e6 * $abstime);",
+        ),
+        ("ddt", "I(out) <+ 1.0e-21 * ddt(ddt(V(in)));"),
+    ] {
+        let module = "va_hb_refused";
+        let model = write_model(
+            &format!(
+                "refused_{}",
+                operator.trim_matches(|c: char| !c.is_alphanumeric())
+            ),
+            &format!(
+                "`include \"disciplines.vams\"\n\
+                 module {module}(in, out);\n\
+                 inout in, out;\n\
+                 electrical in, out;\n\
+                 analog begin\n\
+                 {body}\n\
+                 end\n\
+                 endmodule\n"
+            ),
+        );
+        let deck = format!(
+            "* harmonic balance refuses {operator}\n\
+             V1 in 0 DC 0 SIN(0 1 1meg)\n\
+             R1 out 0 1k\n\
+             XVA in out {module}\n\
+             .va \"{model}\" {module}\n\
+             .end\n"
+        );
+        let netlist = Netlist::parse(&deck).expect("parse");
+        let error = Engine::new(SimulationConfig::default())
+            .run_hb(&netlist, HbConfig::new(F0).with_harmonics(2))
+            .map(drop)
+            .expect_err("HB must refuse the operator");
+        let _ = std::fs::remove_file(model);
+        let SimulationError::UnsupportedCapability(refusal) = &error else {
+            panic!("{operator}: expected a capability refusal, got {error}");
+        };
+        let UnsupportedCapabilityError {
+            capability,
+            analysis_kind,
+            instance,
+            module: refused_module,
+            detail,
+            ..
+        } = refusal.as_ref();
+        assert_eq!(
+            *capability, "analysis.hb.veriloga_operator",
+            "{operator}: {error}"
+        );
+        assert_eq!(
+            *analysis_kind,
+            Some(AnalysisKind::HarmonicBalance),
+            "{error}"
+        );
+        assert_eq!(instance.as_deref(), Some("XVA"), "{error}");
+        assert_eq!(refused_module.as_deref(), Some(module), "{error}");
+        assert!(
+            detail.contains("harmonic-balance analysis")
+                && detail.contains(&format!("`{operator}`")),
+            "{operator}: the refusal must name the analysis and the operator: {detail}"
+        );
+    }
 }
 
 /// A variable read before it is assigned keeps its value from the last
@@ -115,7 +384,7 @@ fn periodic_analyses_refuse_retained_variables_by_name_before_solving() {
         );
         let netlist = Netlist::parse(&deck).expect("parse");
         let engine = Engine::new(SimulationConfig::default());
-        for (error, kind, label) in [
+        for (error, kind, label, token) in [
             (
                 engine
                     .run_pss(&netlist, PssConfig::new(1.0e6).with_harmonics(2))
@@ -123,6 +392,7 @@ fn periodic_analyses_refuse_retained_variables_by_name_before_solving() {
                     .expect_err("PSS must refuse a retained variable"),
                 AnalysisKind::Pss,
                 "PSS analysis",
+                "analysis.periodic.veriloga",
             ),
             (
                 engine
@@ -131,6 +401,7 @@ fn periodic_analyses_refuse_retained_variables_by_name_before_solving() {
                     .expect_err("HB must refuse a retained variable"),
                 AnalysisKind::HarmonicBalance,
                 "harmonic-balance analysis",
+                "analysis.hb.veriloga_operator",
             ),
         ] {
             let SimulationError::UnsupportedCapability(refusal) = &error else {
@@ -144,7 +415,7 @@ fn periodic_analyses_refuse_retained_variables_by_name_before_solving() {
                 detail,
                 ..
             } = refusal.as_ref();
-            assert_eq!(*capability, "analysis.periodic.veriloga", "{error}");
+            assert_eq!(*capability, token, "{error}");
             assert_eq!(*analysis_kind, Some(kind), "{error}");
             assert_eq!(instance.as_deref(), Some("XVA"), "{error}");
             assert_eq!(refused_module.as_deref(), Some(module), "{error}");

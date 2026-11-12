@@ -483,27 +483,6 @@ impl HbSolver {
             }
         }
 
-        // Verilog-A devices participate in the DC seed too; skipping them
-        // here let the seed "converge" on a circuit without their currents.
-        #[cfg(feature = "veriloga")]
-        if !self.veriloga_nonlinear_devices.is_empty() {
-            for device in &mut self.veriloga_nonlinear_devices {
-                device.device.update_all_voltages(&v_dc);
-                let values = device.try_evaluate("DC residual evaluation")?;
-                for (program_idx, value) in values.iter().enumerate() {
-                    let Some(rows) = device.rhs_rows.get(program_idx) else {
-                        continue;
-                    };
-                    for &(row, sign) in rows {
-                        if row < n && row < state.residual.len() {
-                            state.residual[row][0] += Complex64::new(sign * *value, 0.0);
-                            state.residual_scale[row][0] += value.abs();
-                        }
-                    }
-                }
-            }
-        }
-
         // Exact DC KVL: ideal sources retain their authored DC voltage while
         // inductors enforce a literal zero voltage drop, never a conductance
         // surrogate. These are voltage rows with their own convergence scale.
@@ -649,28 +628,6 @@ impl HbSolver {
                 if row < n && col < n {
                     // Subtract device conductance stamp to get correct dI_into/dV
                     jacobian[row][col] -= value;
-                }
-            }
-        }
-
-        #[cfg(feature = "veriloga")]
-        if !self.veriloga_nonlinear_devices.is_empty() {
-            for device in &mut self.veriloga_nonlinear_devices {
-                device.device.update_all_voltages(&v_dc);
-                let jac_entries = device.try_compute_jacobian("DC Jacobian evaluation")?;
-                for entry in jac_entries {
-                    let Some(prog_locs) = device.jacobian_locs.get(entry.program_idx) else {
-                        continue;
-                    };
-                    let Some(&(row, col)) = prog_locs.get(entry.jacobian_idx) else {
-                        continue;
-                    };
-                    if let (Some(i), Some(j)) = (row, col)
-                        && i < n
-                        && j < n
-                    {
-                        jacobian[i][j] -= entry.value;
-                    }
                 }
             }
         }

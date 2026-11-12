@@ -8,8 +8,6 @@ use super::fft::HbFft;
 use super::result::{HbResult, SpectralBranchCurrent, SpectralVoltage};
 use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};
-#[cfg(feature = "veriloga")]
-use crate::device::veriloga::VerilogADevice;
 use num_complex::Complex64;
 
 mod capacitors;
@@ -27,6 +25,11 @@ mod nonlinear_api;
 mod periodic_ac;
 mod quasi_periodic;
 mod result_builder;
+#[cfg(feature = "veriloga")]
+mod veriloga;
+
+#[cfg(feature = "veriloga")]
+use veriloga::HbVerilogADevice;
 
 pub(crate) use devices::ScaledNonnegative;
 pub(crate) use periodic_ac::{
@@ -1049,7 +1052,7 @@ pub struct HbSolver {
     /// `nonlinear_devices`. Absolute TEMP values are retained directly so an
     /// extreme analysis temperature cannot destroy them through subtraction.
     nonlinear_noise_temperatures: Vec<NonlinearNoiseTemperature>,
-    /// Registered Verilog-A devices for Newton iteration.
+    /// Verilog-A instances in the F/Q sampler, each with its primed charge probe.
     #[cfg(feature = "veriloga")]
     veriloga_nonlinear_devices: Vec<HbVerilogADevice>,
 }
@@ -1068,49 +1071,6 @@ impl NonlinearNoiseTemperature {
             Self::Offset(offset) => ambient + offset,
             Self::Absolute(temperature) => temperature,
         }
-    }
-}
-
-#[cfg(feature = "veriloga")]
-#[derive(Debug, Clone)]
-struct HbVerilogADevice {
-    device: VerilogADevice,
-    rhs_rows: Vec<Vec<(usize, Value)>>,
-    jacobian_locs: Vec<Vec<(Option<usize>, Option<usize>)>>,
-}
-
-#[cfg(feature = "veriloga")]
-impl HbVerilogADevice {
-    fn new(device: VerilogADevice) -> Self {
-        let rhs_rows = device.mapped_rhs_rows();
-        let jacobian_locs = device.mapped_jacobian_locations();
-        Self {
-            device,
-            rhs_rows,
-            jacobian_locs,
-        }
-    }
-
-    fn runtime_error(&self, phase: &str, err: impl std::fmt::Display) -> HbError {
-        HbError::InvalidCircuit(format!(
-            "Verilog-A device '{}' HB {phase} failed: {err}",
-            self.device.name
-        ))
-    }
-
-    fn try_evaluate(&mut self, phase: &str) -> Result<Vec<Value>, HbError> {
-        self.device
-            .try_evaluate()
-            .map_err(|err| self.runtime_error(phase, err))
-    }
-
-    fn try_compute_jacobian(
-        &mut self,
-        phase: &str,
-    ) -> Result<Vec<rspice_veriloga::device::JacobianEntry>, HbError> {
-        self.device
-            .try_compute_jacobian()
-            .map_err(|err| self.runtime_error(phase, err))
     }
 }
 

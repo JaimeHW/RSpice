@@ -1772,10 +1772,7 @@ impl HbSolver {
 
     /// Add nonlinear device contributions to residual
     fn add_nonlinear_residual(&mut self, state: &mut HbSolverState) -> Result<(), HbError> {
-        let native_only = self.nonlinear_devices.is_empty();
-        #[cfg(feature = "veriloga")]
-        let native_only = native_only && self.veriloga_nonlinear_devices.is_empty();
-        if native_only {
+        if self.nonlinear_devices.is_empty() {
             self.add_native_periodic_residual(state)?;
             state.compute_residual_norm();
             return Ok(());
@@ -1800,30 +1797,6 @@ impl HbSolver {
                     for (node, current) in device.evaluate(&node_voltages) {
                         if node < i_time.len() {
                             i_time[node][t] += current;
-                        }
-                    }
-                }
-            }
-        }
-
-        #[cfg(feature = "veriloga")]
-        if !self.veriloga_nonlinear_devices.is_empty() {
-            let mut circuit_voltages = vec![0.0; self.num_nodes];
-            for t in 0..n_time {
-                for node in 0..self.num_nodes {
-                    circuit_voltages[node] = v_time[node][t];
-                }
-                for device in &mut self.veriloga_nonlinear_devices {
-                    device.device.update_all_voltages(&circuit_voltages);
-                    let values = device.try_evaluate("time-domain residual evaluation")?;
-                    for (program_idx, value) in values.iter().enumerate() {
-                        let Some(rows) = device.rhs_rows.get(program_idx) else {
-                            continue;
-                        };
-                        for &(row, sign) in rows {
-                            if row < self.num_nodes {
-                                i_time[row][t] += sign * *value;
-                            }
                         }
                     }
                 }

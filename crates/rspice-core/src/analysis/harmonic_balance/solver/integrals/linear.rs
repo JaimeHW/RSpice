@@ -189,7 +189,7 @@ impl HbSolver {
         }
         #[cfg(feature = "veriloga")]
         for device in &self.veriloga_nonlinear_devices {
-            for &(row, _) in device.rhs_rows.iter().flatten() {
+            for &row in device.rows() {
                 linear[row] = false;
             }
         }

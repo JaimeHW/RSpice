@@ -105,25 +105,36 @@ impl HbSolver {
         self.add_nonlinear_device(NonlinearDeviceInstance::voltage_switch(nodes, model));
     }
 
-    /// Add a Verilog-A nonlinear device for Newton iteration.
+    /// Add a Verilog-A instance to the F/Q sampler. Its residual must be
+    /// `F(x) + dQ(x)/dt`, which the harmonic-balance capability gate decides
+    /// before the solver is built.
     #[cfg(feature = "veriloga")]
-    pub fn add_veriloga_device(&mut self, device: VerilogADevice) {
-        self.veriloga_nonlinear_devices
-            .push(HbVerilogADevice::new(device));
+    pub(crate) fn try_add_veriloga_device(
+        &mut self,
+        device: crate::device::veriloga::VerilogADevice,
+    ) -> Result<(), HbError> {
+        // Branch currents and mathematical states are unknowns, not node
+        // voltages: no shunt conductance may enter their equations.
+        for node in device.non_electrical_node_indices() {
+            if node > self.num_nodes {
+                return Err(HbError::InvalidCircuit(format!(
+                    "Verilog-A device '{}' has unregistered periodic unknowns",
+                    device.name
+                )));
+            }
+            if let Err(index) = self.non_electrical_nodes.binary_search(&(node - 1)) {
+                self.non_electrical_nodes.insert(index, node - 1);
+            }
+        }
+        let unknowns = self.num_nodes + self.exact_mna_branches().len();
+        let device = HbVerilogADevice::try_new(device, self.config.fundamental_freq, unknowns)?;
+        self.veriloga_nonlinear_devices.push(device);
+        Ok(())
     }
 
     /// Check if circuit has nonlinear devices
     pub fn has_nonlinear_devices(&self) -> bool {
-        if !self.nonlinear_devices.is_empty() || self.has_native_periodic_devices() {
-            return true;
-        }
-        #[cfg(feature = "veriloga")]
-        {
-            if !self.veriloga_nonlinear_devices.is_empty() {
-                return true;
-            }
-        }
-        false
+        !self.nonlinear_devices.is_empty() || self.has_native_periodic_devices()
     }
 
     // =========================================================================

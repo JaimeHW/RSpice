@@ -248,6 +248,9 @@ pub enum InstanceGate {
     /// The native device checks every small-signal analysis runs during its
     /// bias preparation (unimplemented charge models, CPL lines, memristors).
     NativeDeviceChecks,
+    /// Every Verilog-A module's operator inventory admits a harmonic-balance
+    /// residual `F(x) + dQ(x)/dt`.
+    HbAdmissibleVerilogA,
 }
 
 impl InstanceGate {
@@ -258,6 +261,7 @@ impl InstanceGate {
             Self::RationalDescriptor => "rational-descriptor",
             Self::TransientNoiseRenderable => "transient-noise-renderable",
             Self::NativeDeviceChecks => "native-device-checks",
+            Self::HbAdmissibleVerilogA => "hb-admissible-veriloga",
         }
     }
 }
@@ -367,6 +371,27 @@ const fn rational_descriptor(evidence: &'static [&'static str]) -> CellSupport {
     }
 }
 
+/// The token of [`hb_veriloga_operator_refusal`].
+const HB_VERILOGA_OPERATOR: &str = "analysis.hb.veriloga_operator";
+
+const HB_VERILOGA_EVIDENCE: &[&str] = &[
+    "tests/veriloga_hb.rs::veriloga_twins_of_native_devices_give_the_native_harmonics",
+    "tests/veriloga_hb.rs::a_veriloga_rc_low_pass_matches_its_transfer_function",
+    "tests/veriloga_hb.rs::a_veriloga_varactor_draws_its_closed_form_harmonics",
+    "tests/veriloga_hb.rs::harmonic_balance_refuses_each_operator_family_by_name",
+];
+
+/// Harmonic balance takes a runtime Verilog-A instance whose residual is
+/// memoryless equations plus the derivative of a charge it contributes.
+const fn hb_admissible_veriloga() -> CellSupport {
+    CellSupport::Restricted {
+        gate: InstanceGate::HbAdmissibleVerilogA,
+        token: HB_VERILOGA_OPERATOR,
+        condition: "every Verilog-A module whose analog body is memoryless equations and `ddt` of the charges it contributes, F(x) + dQ(x)/dt, with no transition, slew, cross, above, timer, last_crossing, idtmod, zi_*, idt, laplace_*, absdelay, $abstime or variable kept between time points",
+        evidence: HB_VERILOGA_EVIDENCE,
+    }
+}
+
 const fn renderable(condition: &'static str, evidence: &'static [&'static str]) -> CellSupport {
     CellSupport::Restricted {
         gate: InstanceGate::TransientNoiseRenderable,
@@ -462,6 +487,7 @@ pub const fn capability_cell(
                 reason: DISCRETE_STATE_REASON,
                 plan: "P7.2",
             },
+            F::VerilogARuntime if matches!(analysis, A::Hb) => hb_admissible_veriloga(),
             F::VerilogARuntime => CellSupport::Refused {
                 token: PERIODIC_VERILOGA,
                 reason: periodic_veriloga_reason(analysis, false),
@@ -676,6 +702,96 @@ fn rational_descriptor_refusal(
     None
 }
 
+/// Why harmonic balance cannot carry an operator, or `None` when it can.
+#[cfg(feature = "veriloga")]
+fn hb_operator_reason(operator: &str) -> Option<&'static str> {
+    Some(match operator {
+        "ddt" => return None,
+        "transition" | "slew" | "cross" | "last_crossing" | "above" | "timer" => {
+            "which schedules events in time that a harmonic-balance spectrum does not carry; \
+             transient analysis runs it"
+        }
+        "idtmod" => {
+            "whose integral wraps at its modulus, which is state outside the waveform's spectrum"
+        }
+        "zi_*" => "a sampled-data filter whose discrete state the spectrum does not carry",
+        "$abstime" => {
+            "and its time-varying equations cannot be certified periodic over the analysis period"
+        }
+        _ => {
+            "whose state lies outside the F(x) + dQ(x)/dt residual harmonic balance evaluates \
+             at its collocation samples"
+        }
+    })
+}
+
+/// Harmonic balance refuses a runtime Verilog-A instance it cannot evaluate
+/// as `F(x) + dQ(x)/dt`, naming the first operator in the way.
+///
+/// The residual is sampled through the module's own static and companion
+/// stamps, so it needs every `ddt` to be the derivative of a charge the
+/// module contributes — the compiler's proof of the weighted F/Q split — and
+/// no other operator with state. A variable kept between time points is
+/// history no spectrum carries.
+fn hb_veriloga_operator_refusal(
+    circuit: &CircuitData,
+    analysis: CapabilityAnalysis,
+) -> Option<UnsupportedCapabilityError> {
+    #[cfg(feature = "veriloga")]
+    for device in circuit.veriloga_devices().iter() {
+        let retained = device.retained_variables();
+        let inventory = device.analog_operator_inventory();
+        let reason = if let Some((last, rest)) = retained.split_last() {
+            if rest.is_empty() {
+                format!(
+                    "`{last}` is read before it is assigned, so it keeps its value from the \
+                     last accepted time point, which no harmonic-balance spectrum carries"
+                )
+            } else {
+                let rest = rest
+                    .iter()
+                    .map(|name| format!("`{name}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(
+                    "{rest} and `{last}` are read before they are assigned, so they keep their \
+                     values from the last accepted time point, which no harmonic-balance \
+                     spectrum carries"
+                )
+            }
+        } else if let Some((operator, why)) = inventory
+            .iter()
+            .find_map(|&operator| hb_operator_reason(operator).map(|why| (operator, why)))
+        {
+            format!("it uses `{operator}`, {why}")
+        } else if inventory.contains(&"ddt") && !device.one_step_dae_split_safe() {
+            "it uses `ddt` on something other than a charge it contributes (a nested \
+             derivative, or one scaled by a varying quantity), so its residual is not \
+             F(x) + dQ(x)/dt"
+                .to_owned()
+        } else {
+            continue;
+        };
+        let instance = device.name.to_string();
+        let module = device.model_name().to_owned();
+        return Some(
+            UnsupportedCapabilityError::new(
+                HB_VERILOGA_OPERATOR,
+                format!(
+                    "{} does not support Verilog-A instance '{instance}' (module '{module}'): \
+                     {reason}",
+                    analysis.label()
+                ),
+            )
+            .for_analysis_kind(analysis.kind())
+            .for_instance(instance)
+            .for_module(module),
+        );
+    }
+    let _ = (circuit, analysis);
+    None
+}
+
 /// Whether the analysis solves for a periodic steady state, whose unknowns
 /// are the circuit's waveforms over one period and nothing else.
 #[cfg(feature = "veriloga")]
@@ -703,7 +819,8 @@ fn retained_state_refusal(
 ) -> Option<UnsupportedCapabilityError> {
     #[cfg(feature = "veriloga")]
     {
-        if !solves_a_periodic_steady_state(analysis) {
+        // Harmonic balance names them through its operator gate.
+        if !solves_a_periodic_steady_state(analysis) || matches!(analysis, CapabilityAnalysis::Hb) {
             return None;
         }
         for device in circuit.veriloga_devices().iter() {
@@ -837,6 +954,11 @@ impl Engine {
                     | InstanceGate::TransientNoiseRenderable => {}
                     InstanceGate::RationalDescriptor => {
                         if let Some(refusal) = rational_descriptor_refusal(circuit, analysis) {
+                            return Err(refusal.into());
+                        }
+                    }
+                    InstanceGate::HbAdmissibleVerilogA => {
+                        if let Some(refusal) = hb_veriloga_operator_refusal(circuit, analysis) {
                             return Err(refusal.into());
                         }
                     }
