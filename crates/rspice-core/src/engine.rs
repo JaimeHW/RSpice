@@ -129,7 +129,7 @@ pub use crate::resource::{ResourceKind, ResourceLimitError, ResourceLimits};
 pub use builder::{
     HeldVerilogASources, ProjectVerilogAConnectionLibraryRegistration,
     ProjectVerilogARuntimeRegistration, ProjectVerilogASourceRegistration, VerilogACacheTelemetry,
-    hdl_spice_leaves::{hdl_delay_select, hdl_external_cells},
+    hdl_spice_leaves::{hdl_delay_select, hdl_external_cells, hdl_wreal_resolution},
     hold_project_veriloga_sources_for_session, register_precompiled_veriloga_model,
     register_precompiled_veriloga_model_with_dependencies,
     register_precompiled_veriloga_runtime_with_dependencies, veriloga_cache_telemetry,

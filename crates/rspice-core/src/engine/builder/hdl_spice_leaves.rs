@@ -115,6 +115,19 @@ pub fn hdl_delay_select(
     crate::xspice::verilog::compiler_delay_select(config.hdl.delay_select)
 }
 
+/// The resolution a plain `wreal` takes in the HDL of `netlist`, its
+/// `.options wreal_resolution`, as the compiler spells it.
+///
+/// The builder compiles every HDL source of the deck under this resolution. A
+/// caller that compiles a deck's HDL ahead of the build, as a sealed runtime
+/// is, compiles it under the same one
+/// (`rspice_veriloga::CompilerOptions::wreal_resolution`).
+pub fn hdl_wreal_resolution(
+    netlist: &Netlist,
+) -> rspice_veriloga::canonical_ir::digital::DigitalRealResolution {
+    super::veriloga_sources::wreal_resolution(netlist.options.wreal_resolution)
+}
+
 /// The node name a leaf port or a hoisted port of `element`'s design lands on.
 pub(super) fn node_name(
     element: &Element,

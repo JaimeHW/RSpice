@@ -460,7 +460,13 @@ use rspice_core::analysis::harmonic_balance::{
 // `ModelFinish::failed`, which name the `$finish`, `$stop` or `$fatal` that
 // ended a run, its source line and whether it failed the run for the
 // simulation crate's run checks, bring it to 5,290.
-const MAX_PUBLIC_ITEMS: usize = 5290;
+// `IncludeProcessor::read_verilog_source_with_abort`, which reads the file a
+// deck's Verilog-A source line names through the `.include` chain and records
+// it as a dependency, and `engine::hdl_wreal_resolution`, the `wreal`
+// resolution the builder compiles a deck's HDL under, bring it to 5,292: the
+// prepared manual-deck route (`rspice-simulation` netlist_preparation/
+// hdl_sources.rs) seals a deck's Verilog-A sources by content with both.
+const MAX_PUBLIC_ITEMS: usize = 5292;
 
 /// The `#[doc(hidden)] pub` items of the family, counted apart from
 /// `MAX_PUBLIC_ITEMS`. A hidden item is plumbing that one crate of the engine

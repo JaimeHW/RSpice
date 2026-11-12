@@ -1194,6 +1194,44 @@ impl IncludeProcessor {
         )
     }
 
+    /// Read the Verilog-A source a directive on line `directive_line` of
+    /// `owner_path` names: resolved through the chain `.include` walks from
+    /// that file, and read and decoded as an include is, under the same
+    /// dependency budget.
+    ///
+    /// The edge is recorded among [`Self::resolved_dependencies`] beside the
+    /// includes, so a caller that seals a deck's Verilog-A sources by content
+    /// holds the exact bytes it sealed and can ask later whether the host
+    /// still gives them.
+    pub fn read_verilog_source_with_abort(
+        &mut self,
+        owner_path: &Path,
+        directive_line: usize,
+        filename: &str,
+        abort: &dyn AbortSignal,
+    ) -> Result<ResolvedIncludeDependency, ParseWithAbortError> {
+        let resolution =
+            self.resolve_verilog_source_from_with_abort(owner_path, filename, abort)?;
+        let path = resolution.resolved().to_path_buf();
+        let canonical = if self.sealed_sources.is_some() {
+            path.clone()
+        } else {
+            path.canonicalize().unwrap_or_else(|_| path.clone())
+        };
+        let source = self.read_source_with_abort(&canonical, filename, abort)?;
+        let dependency = ResolvedIncludeDependency {
+            owner_path: owner_path.to_path_buf(),
+            directive_line,
+            requested_path: filename.to_owned(),
+            resolved_path: canonical,
+            selected_section: None,
+            source,
+            resolution,
+        };
+        self.resolved_dependencies.push(dependency.clone());
+        Ok(dependency)
+    }
+
     /// Whether this processor resolves only from an authenticated bundle.
     pub(crate) const fn is_sealed(&self) -> bool {
         self.sealed_sources.is_some()
@@ -3326,5 +3364,35 @@ R1 1 0 {selected}
                 expected.display()
             );
         }
+    }
+
+    /// Reading a Verilog-A source walks the same chain, returns the bytes the
+    /// winner holds, and records the edge beside the includes, so the caller
+    /// that seals it can check the host later.
+    #[test]
+    fn a_read_verilog_a_source_is_recorded_as_a_dependency_of_its_deck() {
+        let (_root, deck_path, first, _second) = search_path_fixture("va-read");
+        std::fs::write(first.join("only.va"), "module only; endmodule\n").expect("write the model");
+
+        let mut processor = IncludeProcessor::new(&deck_path);
+        processor.add_lib_path(first.clone());
+        let dependency = processor
+            .read_verilog_source_with_abort(&deck_path, 3, "only.va", &NoAbort)
+            .expect("the search path holds the file");
+
+        assert_eq!(dependency.source(), "module only; endmodule\n");
+        assert_eq!(dependency.directive_line(), 3);
+        assert_eq!(dependency.requested_path(), "only.va");
+        assert_eq!(
+            dependency.resolution().stage(),
+            IncludeSearchStage::LibraryPath(0)
+        );
+        assert_eq!(processor.resolved_dependencies(), [dependency]);
+        assert!(
+            processor
+                .read_verilog_source_with_abort(&deck_path, 4, "absent.va", &NoAbort)
+                .is_err()
+        );
+        assert_eq!(processor.resolved_dependencies().len(), 1);
     }
 }
