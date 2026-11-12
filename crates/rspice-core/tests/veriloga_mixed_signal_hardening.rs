@@ -6022,3 +6022,83 @@ fn a_sub_minimum_toggling_clock_is_bounded_by_its_schedule_and_not_by_the_flip_c
         "the boundary is not the subject: a clock is not a zero-delay loop: {error}"
     );
 }
+
+/// Three activations 1 fs apart: `q` goes 1 at 1 us, 0 a femtosecond later
+/// and 1 again a femtosecond after that.
+const FEMTOSECOND_GLITCH: &str = "`timescale 1ns/1fs\n\
+module glitch(q);\n\
+  output q;\n\
+  reg q;\n\
+  initial begin\n\
+    q = 1'b0;\n\
+    #1000 q = 1'b1;\n\
+    #0.000001 q = 1'b0;\n\
+    #0.000001 q = 1'b1;\n\
+  end\n\
+endmodule\n";
+
+/// A step to an activation closer than the solver's floor integrates only the
+/// clock's advance.
+///
+/// A 1 ms maximum step puts the floor at 10 fs. The edges 1 fs and 2 fs after
+/// the one at 1 us lie inside it; the step to each was raised to the floor and
+/// then snapped back onto the activation's own time, 1 fs after the point
+/// before it. Three such landings advanced the clock 12 fs over 30 fs of
+/// integration, so the response to the edge led its labels by 19 fs out to
+/// about 60 ps and the 1 fs glitch was swallowed. The closed form is the
+/// oracle: ngspice-46 stops on this deck with "timestep too small". Each step
+/// now ends on the activation it reaches, and the response is held to within
+/// one floor of the closed form, glitch included.
+#[test]
+fn a_step_to_an_activation_inside_the_floor_integrates_only_the_clocks_advance() {
+    // The built-in D/A drives 1.8 V behind 20 Ohm into 1 kOhm and 1 pF.
+    const TAU: f64 = 1020.0e-12;
+    const SUPPLY: f64 = 1.8;
+    const EDGE: f64 = 1.0e-6;
+    const FLOOR: f64 = 1.0e-14;
+    let step = |since: f64| {
+        if since <= 0.0 {
+            0.0
+        } else {
+            1.0 - (-since / TAU).exp()
+        }
+    };
+    let model = ModelFile::with_extension("femtosecond_glitch", FEMTOSECOND_GLITCH, "v");
+    let deck = format!(
+        "* three activations inside the floor\n\
+         .hdl \"{}\"\n\
+         .param vcc=1.8\n\
+         xb q glitch\n\
+         r1 q out 1k\n\
+         c1 out 0 1p\n\
+         .end\n",
+        model.deck_path()
+    );
+    let result = run(&deck, 3.0e-6, 1.0e-3);
+    let out = result
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("out"))
+        .map(|index| &result.voltages[index])
+        .expect("out is recorded");
+    let mut checked = 0;
+    for (&time, &value) in result.time.iter().zip(out) {
+        let since = time - EDGE;
+        if !(since > 0.0 && since < 10.0e-12) {
+            continue;
+        }
+        let exact = SUPPLY * (step(since) - step(since - 1.0e-15) + step(since - 2.0e-15));
+        let slope = SUPPLY / TAU * (-since / TAU).exp();
+        let shift = (exact - value) / slope;
+        assert!(
+            shift.abs() <= FLOOR,
+            "v(out) at {since:e}s after the edge is {value:e} V against {exact:e} V, \
+             {shift:e}s off its label: it must stay within one floor ({FLOOR:e}s) of the closed form"
+        );
+        checked += 1;
+    }
+    assert!(
+        checked >= 3,
+        "only {checked} points in the 10 ps after the edge"
+    );
+}

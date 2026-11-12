@@ -8433,6 +8433,32 @@ impl Engine {
                     .is_some_and(|target| *target == deadline);
                 expected_source_delta = Self::max_expected_source_delta(&circuit, t, deadline);
             }
+            // A step raised to the floor can pass a breakpoint closer than the
+            // floor, and acceptance would then snap the clock back onto it: the
+            // point is labelled with the breakpoint's time but integrated over
+            // the whole step. Three activations of a module 1 fs apart under a
+            // 10 fs floor advanced the clock 1, 1 and 10 fs over 30 fs of
+            // integration, and the response led its labels by 19 fs. The step
+            // is cut to the breakpoint instead, so the interval integrated is
+            // the clock's advance. A gap within rounding of the accepted time,
+            // or below the generated `ddt` floor, is not an interval: that step
+            // keeps the floor and is snapped as before.
+            if locked_grid.is_none()
+                && exact_device_event_time.is_none()
+                && !has_exact_transient_history
+            {
+                let candidate = canonical_transient_step_time(t, dt, tstop);
+                let clock = breakpoints.snap_to_breakpoint(candidate);
+                let roundoff = 64.0 * Value::EPSILON * candidate.abs().max(clock.abs());
+                if clock < candidate - roundoff
+                    && clock - t > roundoff.max(model_min_dt)
+                    && clock < tstop
+                {
+                    dt = clock - t;
+                    at_breakpoint = true;
+                    expected_source_delta = Self::max_expected_source_delta(&circuit, t, clock);
+                }
+            }
             if fixed_method.is_none() {
                 trapgear.set_at_breakpoint(at_breakpoint);
             } else if let Some(method) = fixed_method {
