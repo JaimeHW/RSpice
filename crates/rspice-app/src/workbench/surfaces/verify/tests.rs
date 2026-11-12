@@ -5,13 +5,14 @@
 //! whose tolerance digest does not match its contract is rejected.
 
 use super::raster::sealed_run;
-use super::tuning::{revert_tuning_session, tuning_commit_block_reason, tuning_is_dirty};
+use super::tuning::{revert_tuning_session, tuning_is_dirty};
 use super::*;
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
 use crate::state::{AnalysisResult, AnalysisType, RetainedTrace, SimulationRun};
-use crate::workbench::RSpiceApp;
+use crate::workbench::framework::feature::harness::FeatureHarness;
+use crate::workbench::simulate::test_host::SimulateTestHost;
 
-mod yield_histogram;
+pub(crate) mod yield_histogram;
 
 fn attributed(analysis: AnalysisResult) -> AnalysisResult {
     attributed_with_id(analysis, AnalysisInstanceId::new())
@@ -52,9 +53,8 @@ fn golden_regression_authority_is_scoped_to_the_active_plan() {
 
 #[test]
 fn selecting_a_golden_regression_baseline_pins_its_dataset_atomically() {
-    let mut app = RSpiceApp::test_instance();
-    let plan_id = app
-        .state
+    let mut harness = SimulateTestHost::harness();
+    let plan_id = harness
         .model
         .sim_setup
         .stable_analysis_plan()
@@ -78,14 +78,13 @@ fn selecting_a_golden_regression_baseline_pins_its_dataset_atomically() {
         AnalysisResult::new(1, AnalysisType::Ac, "candidate")
             .with_measurements(vec![rspice_core::MeasureResult::success("gain", 1.0)]),
     );
-    app.state.model.simulation.retained.runs = vec![candidate, baseline].into();
-    assert!(app.state.model.simulation.select_run(0));
+    harness.model.simulation.retained.runs = vec![candidate, baseline].into();
+    assert!(harness.model.simulation.select_run(0));
 
-    commit_regression_baseline(&mut crate::workbench::features::cx(&mut app), baseline_id)
-        .expect("baseline commits");
+    commit_regression_baseline(&mut harness.cx(), baseline_id).expect("baseline commits");
 
     assert!(
-        app.state
+        harness
             .model
             .simulation
             .retained
@@ -95,7 +94,7 @@ fn selecting_a_golden_regression_baseline_pins_its_dataset_atomically() {
             .is_pinned()
     );
     assert_eq!(
-        app.state
+        harness
             .model
             .workspace
             .content
@@ -105,10 +104,8 @@ fn selecting_a_golden_regression_baseline_pins_its_dataset_atomically() {
     );
 }
 
-fn add_tuning_variable(app: &mut RSpiceApp) -> crate::product::DesignVariableId {
-    let plan_id = app
-        .state
-        .model
+pub(crate) fn add_tuning_variable(model: &mut Model) -> crate::product::DesignVariableId {
+    let plan_id = model
         .sim_setup
         .stable_analysis_plan()
         .expect("default plan")
@@ -128,8 +125,7 @@ fn add_tuning_variable(app: &mut RSpiceApp) -> crate::product::DesignVariableId 
     )
     .expect("valid tuning variable");
     let id = variable.id;
-    app.state
-        .model
+    model
         .workspace
         .content
         .add_design_variable(plan_id, variable)
@@ -137,14 +133,13 @@ fn add_tuning_variable(app: &mut RSpiceApp) -> crate::product::DesignVariableId 
     id
 }
 
-fn stage_literal_tuning_binding(
-    app: &mut RSpiceApp,
+pub(crate) fn stage_literal_tuning_binding(
+    cx: &mut Cx<'_, SimulateFeature>,
     component_id: u64,
     variable_name: &str,
 ) -> crate::product::DesignVariableId {
-    sync_tuning_session(&mut crate::workbench::features::cx(app));
-    let component = app
-        .state
+    sync_tuning_session(cx);
+    let component = cx
         .model
         .schematic
         .document()
@@ -153,12 +148,7 @@ fn stage_literal_tuning_binding(
         .find(|component| component.id == component_id)
         .cloned()
         .expect("component exists");
-    let source_view = app
-        .state
-        .model
-        .workspace
-        .content
-        .active_schematic_reference();
+    let source_view = cx.model.workspace.content.active_schematic_reference();
     let typed_expression = format!("{} ohm", component.value.trim());
     let variable = crate::state::DesignVariable::new(
         variable_name,
@@ -172,21 +162,22 @@ fn stage_literal_tuning_binding(
     )
     .expect("test literal is a valid resistance");
     let variable_id = variable.id;
-    app.state.simulate.verification.tuning_variables.push(
-        crate::workbench::state::TuningVariableDraft {
+    cx.state
+        .verification
+        .tuning_variables
+        .push(crate::workbench::state::TuningVariableDraft {
             variable_id,
             baseline_expression: typed_expression.clone(),
             candidate_expression: typed_expression,
             validation_error: None,
             proposed: true,
-        },
-    );
-    app.state.simulate.verification.tuning_instance_binding =
+        });
+    cx.state.verification.tuning_instance_binding =
         Some(crate::workbench::state::TuningInstanceBindingDraft {
             component_id,
             component_name: component.name,
             source_view,
-            source_topology_version: app.state.model.schematic.topology_version(),
+            source_topology_version: cx.model.schematic.topology_version(),
             source_value: component.value,
             binding_expression: format!("{{{variable_name}}}"),
             variable,
@@ -195,19 +186,18 @@ fn stage_literal_tuning_binding(
     variable_id
 }
 
-fn retain_preflight_report(app: &mut RSpiceApp) {
-    let (plan_id, plan_revision) = app
-        .state
+fn retain_preflight_report(harness: &mut FeatureHarness<SimulateFeature>) {
+    let (plan_id, plan_revision) = harness
         .model
         .sim_setup
         .stable_analysis_plan()
         .map(|plan| (plan.id(), plan.revision()))
         .expect("default plan");
     let (topology_root, topology_revision, topology_closure) =
-        app.state.model.configured_topology_revision();
-    app.state.runs.preflight = crate::workbench::app_state::run_preflight::PreflightDialogState {
+        harness.model.configured_topology_revision();
+    harness.runs.preflight = crate::workbench::app_state::run_preflight::PreflightDialogState {
         report: Some(crate::state::PreflightReport {
-            project_revision: app.state.model.workspace.content.project.revision().get(),
+            project_revision: harness.model.workspace.content.project.revision().get(),
             topology_root,
             topology_revision,
             topology_closure,
@@ -223,10 +213,9 @@ fn retain_preflight_report(app: &mut RSpiceApp) {
 
 #[test]
 fn verify_plan_insertion_invalidates_retained_preflight_evidence() {
-    let mut app = RSpiceApp::test_instance();
-    retain_preflight_report(&mut app);
-    let source_revision = app
-        .state
+    let mut harness = SimulateTestHost::harness();
+    retain_preflight_report(&mut harness);
+    let source_revision = harness
         .model
         .sim_setup
         .stable_analysis_plan()
@@ -234,13 +223,13 @@ fn verify_plan_insertion_invalidates_retained_preflight_evidence() {
         .revision();
 
     open_analysis_configuration(
-        &mut crate::workbench::features::cx(&mut app),
+        &mut harness.cx(),
         crate::simulation::plan::AnalysisKind::Noise,
     )
     .expect("missing analysis inserts and opens");
 
     assert_eq!(
-        app.state
+        harness
             .model
             .sim_setup
             .stable_analysis_plan()
@@ -248,33 +237,27 @@ fn verify_plan_insertion_invalidates_retained_preflight_evidence() {
             .revision(),
         source_revision.next().expect("revision advances")
     );
-    assert!(app.state.runs.preflight.report.is_none());
+    assert!(harness.runs.preflight.report.is_none());
 }
 
 #[test]
 fn tuning_session_discovers_real_variables_and_revert_is_non_destructive() {
-    let mut app = RSpiceApp::test_instance();
-    let variable_id = add_tuning_variable(&mut app);
-    let plan_id = app
-        .state
-        .model
-        .sim_setup
-        .stable_analysis_plan()
-        .unwrap()
-        .id();
-    sync_tuning_session(&mut crate::workbench::features::cx(&mut app));
+    let mut harness = SimulateTestHost::harness();
+    let variable_id = add_tuning_variable(&mut harness.model);
+    let plan_id = harness.model.sim_setup.stable_analysis_plan().unwrap().id();
+    sync_tuning_session(&mut harness.cx());
 
-    assert_eq!(app.state.simulate.verification.tuning_variables.len(), 1);
-    let draft = &mut app.state.simulate.verification.tuning_variables[0];
+    assert_eq!(harness.state.verification.tuning_variables.len(), 1);
+    let draft = &mut harness.state.verification.tuning_variables[0];
     assert_eq!(draft.variable_id, variable_id);
     draft.candidate_expression = "620 ohm".to_owned();
-    assert!(tuning_is_dirty(&app.state.simulate));
+    assert!(tuning_is_dirty(&harness.state));
 
-    revert_tuning_session(&mut crate::workbench::features::cx(&mut app));
+    revert_tuning_session(&mut harness.cx());
 
-    assert!(!tuning_is_dirty(&app.state.simulate));
+    assert!(!tuning_is_dirty(&harness.state));
     assert_eq!(
-        app.state
+        harness
             .model
             .workspace
             .content
@@ -288,38 +271,30 @@ fn tuning_session_discovers_real_variables_and_revert_is_non_destructive() {
 
 #[test]
 fn tuning_commit_is_one_plan_revision_and_queues_the_required_run() {
-    let mut app = RSpiceApp::test_instance();
-    app.state.provision_test_project_technology_contract();
-    app.state.model.workspace.content.project_sources = Default::default();
+    let mut harness = SimulateTestHost::harness();
+    harness.model.provision_test_project_technology_contract();
+    harness.model.workspace.content.project_sources = Default::default();
     rspice_app_state::workbench::examples::load_example(
         "Voltage Divider",
-        &mut app.state.model.schematic,
+        &mut harness.model.schematic,
     );
-    let variable_id = add_tuning_variable(&mut app);
-    let plan_id = app
-        .state
-        .model
-        .sim_setup
-        .stable_analysis_plan()
-        .unwrap()
-        .id();
-    let source_plan_revision = app
-        .state
+    let variable_id = add_tuning_variable(&mut harness.model);
+    let plan_id = harness.model.sim_setup.stable_analysis_plan().unwrap().id();
+    let source_plan_revision = harness
         .model
         .sim_setup
         .stable_analysis_plan()
         .unwrap()
         .revision();
-    sync_tuning_session(&mut crate::workbench::features::cx(&mut app));
-    app.state.simulate.verification.tuning_variables[0].candidate_expression = "620 ohm".to_owned();
+    sync_tuning_session(&mut harness.cx());
+    harness.state.verification.tuning_variables[0].candidate_expression = "620 ohm".to_owned();
 
-    tuning::commit_tuning_and_run(&mut crate::workbench::features::cx(&mut app))
+    tuning::commit_tuning_and_run(&mut harness.cx())
         .expect("valid candidate commits and dispatches");
 
-    let plan = app.state.model.sim_setup.stable_analysis_plan().unwrap();
+    let plan = harness.model.sim_setup.stable_analysis_plan().unwrap();
     assert_eq!(plan.revision(), source_plan_revision.next().unwrap());
-    let variable = app
-        .state
+    let variable = harness
         .model
         .workspace
         .content
@@ -331,107 +306,48 @@ fn tuning_commit_is_one_plan_revision_and_queues_the_required_run() {
         .unwrap();
     assert_eq!(variable.expression, "620 ohm");
     assert_eq!(variable.revision, ObjectRevision::INITIAL.next().unwrap());
-    assert!(app.state.model.simulation.execution.trigger_simulation);
-    assert!(!tuning_is_dirty(&app.state.simulate));
-}
-
-/// A tuning commit prepares the run it requires in its own frame and queues
-/// it. An edit to the design before the frame that dispatches it refuses the
-/// run there, as it refuses a run a Run press prepared: nothing is prepared
-/// again, and nothing runs.
-#[test]
-fn an_edit_after_a_tuning_commit_refuses_its_run() {
-    use crate::simulation::controller::prepared_run::thread_preparations;
-
-    let mut app = RSpiceApp::test_instance();
-    app.state.provision_test_project_technology_contract();
-    app.state.model.workspace.content.project_sources = Default::default();
-    rspice_app_state::workbench::examples::load_example(
-        "Voltage Divider",
-        &mut app.state.model.schematic,
-    );
-    add_tuning_variable(&mut app);
-    sync_tuning_session(&mut crate::workbench::features::cx(&mut app));
-    app.state.simulate.verification.tuning_variables[0].candidate_expression = "620 ohm".to_owned();
-    tuning::commit_tuning_and_run(&mut crate::workbench::features::cx(&mut app))
-        .expect("valid candidate commits and dispatches");
-    assert!(app.state.model.simulation.execution.trigger_simulation);
-    thread_preparations::take();
-
-    app.state
-        .model
-        .schematic
-        .document_mut_for_test()
-        .components
-        .iter_mut()
-        .find(|component| component.name == "R2")
-        .expect("the divider draws R2")
-        .value = "22k".to_owned();
-    app.simulation_controller
-        .update(&mut app.state, &*app.export_workflow_io);
-
-    assert!(
-        thread_preparations::take().is_empty(),
-        "the dispatch frame prepares nothing"
-    );
-    assert!(!app.state.model.simulation.execution.has_active_execution());
-    assert!(app.state.model.simulation.retained.runs.is_empty());
-    assert_eq!(
-        app.state.model.simulation.execution.status,
-        "The design changed after it was checked; run again"
-    );
+    assert!(harness.model.simulation.execution.trigger_simulation);
+    assert!(!tuning_is_dirty(&harness.state));
 }
 
 #[test]
 fn reverting_a_literal_value_proposal_discards_variable_and_binding_only() {
-    let mut app = RSpiceApp::test_instance();
-    let component_id = app.state.model.schematic.add_component(
+    let mut harness = SimulateTestHost::harness();
+    let component_id = harness.model.schematic.add_component(
         crate::state::ComponentType::Resistor,
         crate::state::Point::origin(),
     );
-    app.state.model.schematic.document_mut_for_test().components[0].value = "10k".to_owned();
-    let plan_id = app
-        .state
-        .model
-        .sim_setup
-        .stable_analysis_plan()
-        .unwrap()
-        .id();
-    let workspace_before = serde_json::to_vec(&app.state.model.workspace).unwrap();
-    let value_before = app.state.model.schematic.document().components[0]
+    harness.model.schematic.document_mut_for_test().components[0].value = "10k".to_owned();
+    let plan_id = harness.model.sim_setup.stable_analysis_plan().unwrap().id();
+    let workspace_before = serde_json::to_vec(&harness.model.workspace).unwrap();
+    let value_before = harness.model.schematic.document().components[0]
         .value
         .clone();
-    stage_literal_tuning_binding(&mut app, component_id, "R1_VALUE");
+    stage_literal_tuning_binding(&mut harness.cx(), component_id, "R1_VALUE");
 
-    assert!(tuning_is_dirty(&app.state.simulate));
-    revert_tuning_session(&mut crate::workbench::features::cx(&mut app));
+    assert!(tuning_is_dirty(&harness.state));
+    revert_tuning_session(&mut harness.cx());
 
-    assert!(!tuning_is_dirty(&app.state.simulate));
+    assert!(!tuning_is_dirty(&harness.state));
+    assert!(harness.state.verification.tuning_instance_binding.is_none());
     assert!(
-        app.state
-            .simulate
-            .verification
-            .tuning_instance_binding
-            .is_none()
-    );
-    assert!(
-        app.state
-            .simulate
+        harness
+            .state
             .verification
             .tuning_variables
             .iter()
             .all(|draft| !draft.proposed)
     );
     assert_eq!(
-        app.state.model.schematic.document().components[0].value,
+        harness.model.schematic.document().components[0].value,
         value_before
     );
     assert_eq!(
-        serde_json::to_vec(&app.state.model.workspace).unwrap(),
+        serde_json::to_vec(&harness.model.workspace).unwrap(),
         workspace_before
     );
     assert!(
-        app.state
+        harness
             .model
             .workspace
             .content
@@ -444,15 +360,14 @@ fn reverting_a_literal_value_proposal_discards_variable_and_binding_only() {
 
 #[test]
 fn literal_value_commit_adds_variable_binds_once_and_dispatches_prepared_run() {
-    let mut app = RSpiceApp::test_instance();
-    app.state.provision_test_project_technology_contract();
-    app.state.model.workspace.content.project_sources = Default::default();
+    let mut harness = SimulateTestHost::harness();
+    harness.model.provision_test_project_technology_contract();
+    harness.model.workspace.content.project_sources = Default::default();
     rspice_app_state::workbench::examples::load_example(
         "Voltage Divider",
-        &mut app.state.model.schematic,
+        &mut harness.model.schematic,
     );
-    let component_id = app
-        .state
+    let component_id = harness
         .model
         .schematic
         .document()
@@ -461,8 +376,7 @@ fn literal_value_commit_adds_variable_binds_once_and_dispatches_prepared_run() {
         .find(|component| component.kind == crate::state::ComponentType::Resistor)
         .map(|component| component.id)
         .expect("voltage divider resistor");
-    let component_index = app
-        .state
+    let component_index = harness
         .model
         .schematic
         .document()
@@ -470,32 +384,24 @@ fn literal_value_commit_adds_variable_binds_once_and_dispatches_prepared_run() {
         .iter()
         .position(|component| component.id == component_id)
         .unwrap();
-    app.state.model.schematic.document_mut_for_test().components[component_index].name =
+    harness.model.schematic.document_mut_for_test().components[component_index].name =
         "RLOAD".to_owned();
-    app.state.model.schematic.document_mut_for_test().components[component_index].value =
+    harness.model.schematic.document_mut_for_test().components[component_index].value =
         "10k".to_owned();
-    app.state.model.schematic.bump_topology_version();
-    let plan_id = app
-        .state
-        .model
-        .sim_setup
-        .stable_analysis_plan()
-        .unwrap()
-        .id();
-    let source_plan_revision = app
-        .state
+    harness.model.schematic.bump_topology_version();
+    let plan_id = harness.model.sim_setup.stable_analysis_plan().unwrap().id();
+    let source_plan_revision = harness
         .model
         .sim_setup
         .stable_analysis_plan()
         .unwrap()
         .revision();
-    let variable_id = stage_literal_tuning_binding(&mut app, component_id, "RLOAD_VALUE");
+    let variable_id = stage_literal_tuning_binding(&mut harness.cx(), component_id, "RLOAD_VALUE");
 
-    tuning::commit_tuning_and_run(&mut crate::workbench::features::cx(&mut app))
+    tuning::commit_tuning_and_run(&mut harness.cx())
         .expect("the exact prepared candidate commits and dispatches");
 
-    let variable = app
-        .state
+    let variable = harness
         .model
         .workspace
         .content
@@ -508,7 +414,7 @@ fn literal_value_commit_adds_variable_binds_once_and_dispatches_prepared_run() {
     assert_eq!(variable.name, "RLOAD_VALUE");
     assert_eq!(variable.expression, "10k ohm");
     assert_eq!(
-        app.state
+        harness
             .model
             .schematic
             .document()
@@ -520,7 +426,7 @@ fn literal_value_commit_adds_variable_binds_once_and_dispatches_prepared_run() {
         "{RLOAD_VALUE}"
     );
     assert_eq!(
-        app.state
+        harness
             .model
             .sim_setup
             .stable_analysis_plan()
@@ -528,153 +434,44 @@ fn literal_value_commit_adds_variable_binds_once_and_dispatches_prepared_run() {
             .revision(),
         source_plan_revision.next().unwrap()
     );
-    assert!(app.state.model.schematic.can_undo());
+    assert!(harness.model.schematic.can_undo());
     assert_eq!(
-        app.state.model.schematic.undo_description(),
+        harness.model.schematic.undo_description(),
         Some("bind RLOAD to RLOAD_VALUE")
     );
-    assert!(app.state.model.simulation.execution.trigger_simulation);
-    assert!(
-        app.state
-            .simulate
-            .verification
-            .tuning_instance_binding
-            .is_none()
-    );
-}
-
-#[test]
-fn tuning_commit_rechecks_live_schematic_authority_after_staging() {
-    let mut app = RSpiceApp::test_instance();
-    app.state.model.workspace.content.project_sources = Default::default();
-    rspice_app_state::workbench::examples::load_example(
-        "Voltage Divider",
-        &mut app.state.model.schematic,
-    );
-    let component_id = app
-        .state
-        .model
-        .schematic
-        .document()
-        .components
-        .iter()
-        .find(|component| component.kind == crate::state::ComponentType::Resistor)
-        .map(|component| component.id)
-        .expect("voltage divider resistor");
-    let component_index = app
-        .state
-        .model
-        .schematic
-        .document()
-        .components
-        .iter()
-        .position(|component| component.id == component_id)
-        .unwrap();
-    app.state.model.schematic.document_mut_for_test().components[component_index].name =
-        "RLOCKED".to_owned();
-    app.state.model.schematic.document_mut_for_test().components[component_index].value =
-        "10k".to_owned();
-    app.state.model.schematic.bump_topology_version();
-    stage_literal_tuning_binding(&mut app, component_id, "RLOCKED_VALUE");
-
-    let workspace_before = serde_json::to_vec(&app.state.model.workspace).unwrap();
-    let plan_revision_before = app
-        .state
-        .model
-        .sim_setup
-        .stable_analysis_plan()
-        .unwrap()
-        .revision();
-    let topology_before = app.state.model.schematic.topology_version();
-    let value_before = app.state.model.schematic.document().components[component_index]
-        .value
-        .clone();
-    let can_undo_before = app.state.model.schematic.can_undo();
-
-    app.state.model.safe_mode.activate(
-        crate::state::write_policy::LocalSafeModeOptions {
-            open_project_read_only: true,
-            ..Default::default()
-        },
-        String::new(),
-    );
-    assert!(app.state.schematic_edit_read_only());
-
-    let reason = tuning_commit_block_reason(
-        &app.state.model,
-        &app.state.simulate,
-        app.state.slot_facts(),
-    );
-    assert_eq!(
-        reason,
-        "The staged instance Value binding cannot be committed because the active schematic is read-only."
-    );
-    let error = tuning::commit_tuning_and_run(&mut crate::workbench::features::cx(&mut app))
-        .expect_err("authority revoked after staging must prevent every authoritative write");
-
-    assert_eq!(error, reason);
-    assert_eq!(
-        serde_json::to_vec(&app.state.model.workspace).unwrap(),
-        workspace_before
-    );
-    assert_eq!(
-        app.state
-            .model
-            .sim_setup
-            .stable_analysis_plan()
-            .unwrap()
-            .revision(),
-        plan_revision_before
-    );
-    assert_eq!(
-        app.state.model.schematic.topology_version(),
-        topology_before
-    );
-    assert_eq!(
-        app.state.model.schematic.document().components[component_index].value,
-        value_before
-    );
-    assert_eq!(app.state.model.schematic.can_undo(), can_undo_before);
-    assert!(tuning_is_dirty(&app.state.simulate));
-    assert!(!app.state.model.simulation.execution.trigger_simulation);
+    assert!(harness.model.simulation.execution.trigger_simulation);
+    assert!(harness.state.verification.tuning_instance_binding.is_none());
 }
 
 #[test]
 fn failed_literal_value_run_preparation_rolls_back_plan_and_schematic() {
-    let mut app = RSpiceApp::test_instance();
-    app.state.provision_test_project_technology_contract();
-    let component_id = app.state.model.schematic.add_component(
+    let mut harness = SimulateTestHost::harness();
+    harness.model.provision_test_project_technology_contract();
+    let component_id = harness.model.schematic.add_component(
         crate::state::ComponentType::Resistor,
         crate::state::Point::origin(),
     );
-    app.state.model.schematic.document_mut_for_test().components[0].name = "RFAIL".to_owned();
-    app.state.model.schematic.document_mut_for_test().components[0].value = "10k".to_owned();
-    let plan_id = app
-        .state
-        .model
-        .sim_setup
-        .stable_analysis_plan()
-        .unwrap()
-        .id();
-    let source_plan_revision = app
-        .state
+    harness.model.schematic.document_mut_for_test().components[0].name = "RFAIL".to_owned();
+    harness.model.schematic.document_mut_for_test().components[0].value = "10k".to_owned();
+    let plan_id = harness.model.sim_setup.stable_analysis_plan().unwrap().id();
+    let source_plan_revision = harness
         .model
         .sim_setup
         .stable_analysis_plan()
         .unwrap()
         .revision();
-    let source_topology = app.state.model.schematic.topology_version();
-    let source_can_undo = app.state.model.schematic.can_undo();
-    let workspace_before = serde_json::to_vec(&app.state.model.workspace).unwrap();
-    retain_preflight_report(&mut app);
-    stage_literal_tuning_binding(&mut app, component_id, "RFAIL_VALUE");
+    let source_topology = harness.model.schematic.topology_version();
+    let source_can_undo = harness.model.schematic.can_undo();
+    let workspace_before = serde_json::to_vec(&harness.model.workspace).unwrap();
+    retain_preflight_report(&mut harness);
+    stage_literal_tuning_binding(&mut harness.cx(), component_id, "RFAIL_VALUE");
 
-    let error = tuning::commit_tuning_and_run(&mut crate::workbench::features::cx(&mut app))
+    let error = tuning::commit_tuning_and_run(&mut harness.cx())
         .expect_err("missing ground and open pins fail exact run preparation");
 
     assert!(error.contains("the run could not be prepared"), "{error}");
     assert_eq!(
-        app.state
+        harness
             .model
             .sim_setup
             .stable_analysis_plan()
@@ -682,21 +479,18 @@ fn failed_literal_value_run_preparation_rolls_back_plan_and_schematic() {
             .revision(),
         source_plan_revision
     );
+    assert_eq!(harness.model.schematic.topology_version(), source_topology);
     assert_eq!(
-        app.state.model.schematic.topology_version(),
-        source_topology
-    );
-    assert_eq!(
-        app.state.model.schematic.document().components[0].value,
+        harness.model.schematic.document().components[0].value,
         "10k"
     );
-    assert_eq!(app.state.model.schematic.can_undo(), source_can_undo);
+    assert_eq!(harness.model.schematic.can_undo(), source_can_undo);
     assert_eq!(
-        serde_json::to_vec(&app.state.model.workspace).unwrap(),
+        serde_json::to_vec(&harness.model.workspace).unwrap(),
         workspace_before
     );
     assert!(
-        app.state
+        harness
             .model
             .workspace
             .content
@@ -705,28 +499,21 @@ fn failed_literal_value_run_preparation_rolls_back_plan_and_schematic() {
             .design_variables
             .is_empty()
     );
-    assert!(app.state.runs.preflight.report.is_some());
-    assert!(tuning_is_dirty(&app.state.simulate));
-    assert!(!app.state.model.simulation.execution.trigger_simulation);
+    assert!(harness.runs.preflight.report.is_some());
+    assert!(tuning_is_dirty(&harness.state));
+    assert!(!harness.model.simulation.execution.trigger_simulation);
 }
 
 #[test]
 fn invalid_tuning_candidate_never_mutates_authoritative_plan_data() {
-    let mut app = RSpiceApp::test_instance();
-    add_tuning_variable(&mut app);
-    let plan_id = app
-        .state
-        .model
-        .sim_setup
-        .stable_analysis_plan()
-        .unwrap()
-        .id();
-    let before = serde_json::to_vec(&app.state.model.workspace).unwrap();
-    sync_tuning_session(&mut crate::workbench::features::cx(&mut app));
-    let draft = &mut app.state.simulate.verification.tuning_variables[0];
+    let mut harness = SimulateTestHost::harness();
+    add_tuning_variable(&mut harness.model);
+    let plan_id = harness.model.sim_setup.stable_analysis_plan().unwrap().id();
+    let before = serde_json::to_vec(&harness.model.workspace).unwrap();
+    sync_tuning_session(&mut harness.cx());
+    let draft = &mut harness.state.verification.tuning_variables[0];
     draft.candidate_expression = "2 kohm".to_owned();
-    let mut candidate = app
-        .state
+    let mut candidate = harness
         .model
         .workspace
         .content
@@ -737,44 +524,37 @@ fn invalid_tuning_candidate_never_mutates_authoritative_plan_data() {
     candidate.expression.clone_from(&draft.candidate_expression);
     draft.validation_error = candidate.validate().err();
 
-    assert!(tuning::commit_tuning_and_run(&mut crate::workbench::features::cx(&mut app)).is_err());
+    assert!(tuning::commit_tuning_and_run(&mut harness.cx()).is_err());
     assert_eq!(
-        serde_json::to_vec(&app.state.model.workspace).unwrap(),
+        serde_json::to_vec(&harness.model.workspace).unwrap(),
         before
     );
-    assert!(!app.state.model.simulation.execution.trigger_simulation);
+    assert!(!harness.model.simulation.execution.trigger_simulation);
 }
 
 #[test]
 fn blocked_tuning_run_rolls_back_plan_workspace_and_preflight_state() {
-    let mut app = RSpiceApp::test_instance();
-    add_tuning_variable(&mut app);
-    let plan_id = app
-        .state
-        .model
-        .sim_setup
-        .stable_analysis_plan()
-        .unwrap()
-        .id();
-    let source_plan_revision = app
-        .state
+    let mut harness = SimulateTestHost::harness();
+    add_tuning_variable(&mut harness.model);
+    let plan_id = harness.model.sim_setup.stable_analysis_plan().unwrap().id();
+    let source_plan_revision = harness
         .model
         .sim_setup
         .stable_analysis_plan()
         .unwrap()
         .revision();
-    app.state.runs.preflight.report = Some(crate::state::PreflightReport::retained_for_test(
-        app.state.model.workspace.content.project.revision().get(),
+    harness.runs.preflight.report = Some(crate::state::PreflightReport::retained_for_test(
+        harness.model.workspace.content.project.revision().get(),
     ));
-    sync_tuning_session(&mut crate::workbench::features::cx(&mut app));
-    app.state.simulate.verification.tuning_variables[0].candidate_expression = "620 ohm".to_owned();
+    sync_tuning_session(&mut harness.cx());
+    harness.state.verification.tuning_variables[0].candidate_expression = "620 ohm".to_owned();
 
-    let error = tuning::commit_tuning_and_run(&mut crate::workbench::features::cx(&mut app))
+    let error = tuning::commit_tuning_and_run(&mut harness.cx())
         .expect_err("an empty schematic must block the required run");
 
     assert!(error.contains("required run is blocked"));
     assert_eq!(
-        app.state
+        harness
             .model
             .sim_setup
             .stable_analysis_plan()
@@ -783,7 +563,7 @@ fn blocked_tuning_run_rolls_back_plan_workspace_and_preflight_state() {
         source_plan_revision
     );
     assert_eq!(
-        app.state
+        harness
             .model
             .workspace
             .content
@@ -794,17 +574,17 @@ fn blocked_tuning_run_rolls_back_plan_workspace_and_preflight_state() {
         "499 ohm"
     );
     assert!(
-        app.state.runs.preflight.report.is_some(),
+        harness.runs.preflight.report.is_some(),
         "a blocked tuning run rolls back without dropping retained preflight evidence",
     );
-    assert!(tuning_is_dirty(&app.state.simulate));
-    assert!(!app.state.model.simulation.execution.trigger_simulation);
+    assert!(tuning_is_dirty(&harness.state));
+    assert!(!harness.model.simulation.execution.trigger_simulation);
 }
 
 #[test]
 fn soa_cross_probe_selects_the_exact_schematic_device() {
-    let mut app = RSpiceApp::test_instance();
-    app.state
+    let mut harness = SimulateTestHost::harness();
+    harness
         .model
         .schematic
         .document_mut_for_test()
@@ -818,11 +598,11 @@ fn soa_cross_probe_selects_the_exact_schematic_device() {
             .with_name_value("M1", "NMOS"),
         );
 
-    cross_probe_soa_device(&mut crate::workbench::features::cx(&mut app), "m1")
+    cross_probe_soa_device(&mut harness.cx(), "m1")
         .expect("device identity cross-probes case-insensitively");
 
     assert!(
-        app.state
+        harness
             .model
             .schematic
             .session
@@ -831,10 +611,10 @@ fn soa_cross_probe_selects_the_exact_schematic_device() {
             .has_component(42)
     );
     assert_eq!(
-        app.state.workbench.workspace,
+        harness.wb.workspace,
         super::super::super::state::Workspace::Design
     );
-    assert!(cross_probe_soa_device(&mut crate::workbench::features::cx(&mut app), "M404").is_err());
+    assert!(cross_probe_soa_device(&mut harness.cx(), "M404").is_err());
 }
 
 #[test]
@@ -919,17 +699,17 @@ fn joint_headline_can_be_lower_than_every_individual_spec_yield() {
 
 #[test]
 fn verification_requires_an_explicit_active_run_selection() {
-    let mut app = RSpiceApp::test_instance();
-    app.state
+    let mut harness = SimulateTestHost::harness();
+    harness
         .model
         .simulation
         .retained
         .runs
         .push(SimulationRun::new(1));
-    app.state.model.simulation.view.active_run_idx = None;
+    harness.model.simulation.view.active_run_idx = None;
 
-    assert_eq!(verification_run_index(&app.state.model), None);
-    assert!(verification_run(&app.state.model).is_none());
+    assert_eq!(verification_run_index(&harness.model), None);
+    assert!(verification_run(&harness.model).is_none());
 }
 
 #[test]
@@ -1774,54 +1554,47 @@ fn verify_refuses_the_datasets_the_studio_refuses_and_names_why() {
         );
     }
 
-    let mut app = super::raster::corner_app();
+    let mut harness = super::raster::corner_app();
     assert_eq!(
-        verification_evidence_domain(&app.state.model),
+        verification_evidence_domain(&harness.model),
         EvidenceDomain::Legacy,
         "the corner fixture's run predates receipts, which Verify reads"
     );
     assert!(
-        !verification_specs(&app.state.model).is_empty(),
+        !verification_specs(&harness.model).is_empty(),
         "and its four limits are this plan's"
     );
 
     // The same run, now owned by a plan that is not the one being read.
-    let plan_id = app
-        .state
+    let plan_id = harness
         .model
         .sim_setup
         .stable_analysis_plan()
         .expect("default plan")
         .id();
     let other = crate::product::SimulationPlanId::new();
-    let analysis = app.state.model.simulation.retained.runs[0].analyses[0].clone();
+    let analysis = harness.model.simulation.retained.runs[0].analyses[0].clone();
     let source = analysis
         .provenance()
         .expect("the fixture attributes its analysis")
         .source_instance_id();
-    app.state.model.simulation.retained.runs =
+    harness.model.simulation.retained.runs =
         vec![super::raster::sealed_run(3, other, source, 19, analysis)].into();
-    app.state.model.simulation.view.active_run_idx = Some(0);
+    harness.model.simulation.view.active_run_idx = Some(0);
 
     assert_ne!(other, plan_id);
     assert_eq!(
-        verification_evidence_domain(&app.state.model),
+        verification_evidence_domain(&harness.model),
         EvidenceDomain::AnotherPlan
     );
     assert!(
-        verification_specs(&app.state.model).is_empty(),
+        verification_specs(&harness.model).is_empty(),
         "another plan's dataset answers none of this plan's limits"
     );
-    let run = verification_run(&app.state.model).expect("the run is still the one Verify reads");
-    let family = latest_analysis(&app.state.model, AnalysisType::Corner)
+    let run = verification_run(&harness.model).expect("the run is still the one Verify reads");
+    let family = latest_analysis(&harness.model, AnalysisType::Corner)
         .expect("and still holds its corner run");
-    let matrix = corner_matrix(
-        run,
-        family,
-        None,
-        &verification_specs(&app.state.model),
-        None,
-    );
+    let matrix = corner_matrix(run, family, None, &verification_specs(&harness.model), None);
     assert!(
         !matrix.rows.is_empty(),
         "the values the run did measure stay on the page"
@@ -1835,192 +1608,6 @@ fn verify_refuses_the_datasets_the_studio_refuses_and_names_why() {
 // ---------------------------------------------------------------------------
 // The SOA evidence gate
 // ---------------------------------------------------------------------------
-
-/// Retained samples in the fixture SOA stress histories. Large enough that a
-/// per-frame revalidation is real work, small enough to build in a test.
-const EVIDENCE_SAMPLES: usize = 512;
-/// Evaluated rules, and so retained stress waveforms, in the fixture.
-const EVIDENCE_RULES: usize = 8;
-/// Frames measured after the first, matching the Results idle-frame gate: ten
-/// is enough that a per-frame walk cannot hide behind an alternating schedule.
-const EVIDENCE_IDLE_FRAMES: usize = 10;
-
-/// An SOA analysis whose retained evidence validates, built in the shape the
-/// validator accepts: one exact worst-point event per warned rule.
-fn soa_evidence_analysis() -> AnalysisResult {
-    use crate::state::{
-        SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence, SoaViolationEvidence,
-        SoaViolationSeverityEvidence,
-    };
-
-    let time: Vec<f64> = (0..EVIDENCE_SAMPLES)
-        .map(|index| index as f64 * 1.0e-9)
-        .collect();
-    let mut waveforms = Vec::with_capacity(EVIDENCE_RULES);
-    let mut evaluations = Vec::with_capacity(EVIDENCE_RULES);
-    let mut violations = Vec::with_capacity(EVIDENCE_RULES);
-    for rule in 0..EVIDENCE_RULES {
-        let device_id = format!("M{rule:03}");
-        let y: Vec<f64> = (0..EVIDENCE_SAMPLES)
-            .map(|index| 3.0 * (index as f64 + 1.0) / EVIDENCE_SAMPLES as f64)
-            .collect();
-        let worst_actual_value = y[EVIDENCE_SAMPLES - 1];
-        let worst_time_s = time[EVIDENCE_SAMPLES - 1];
-        waveforms.push(RetainedTrace::new(
-            crate::results::safety::soa_stress_waveform_name(
-                &device_id,
-                crate::results::safety::SoAParameter::Vds,
-            ),
-            time.clone(),
-            y,
-            "#00aaff",
-        ));
-        evaluations.push(SoaEvaluationEvidence {
-            duration: None,
-            thresholds: Default::default(),
-            envelope: None,
-            derating: None,
-            device_id: device_id.clone(),
-            parameter: SoaParameterEvidence::DrainSourceVoltage,
-            limit_value: 3.3,
-            worst_actual_value,
-            worst_time_s,
-            sample_count: EVIDENCE_SAMPLES as u64,
-            unit: "V".to_owned(),
-            description: "Maximum drain-source voltage".to_owned(),
-            verdict: SoaRuleVerdictEvidence::Warning,
-        });
-        violations.push(SoaViolationEvidence {
-            device_id,
-            parameter: SoaParameterEvidence::DrainSourceVoltage,
-            limit_value: 3.3,
-            actual_value: worst_actual_value,
-            time_s: worst_time_s,
-            severity: SoaViolationSeverityEvidence::Warning,
-        });
-    }
-    AnalysisResult::new(1, AnalysisType::Soa, "SOA")
-        .with_family_metadata(crate::state::AnalysisResultFamilyMetadata::Soa { time })
-        .with_waveforms(waveforms)
-        .with_result_payload(crate::state::AnalysisResultPayload::Soa {
-            source_history: None,
-            evaluations,
-            violations,
-        })
-}
-
-fn app_retaining_soa_evidence() -> RSpiceApp {
-    let mut app = RSpiceApp::test_instance();
-    let plan_id = app
-        .state
-        .model
-        .sim_setup
-        .stable_analysis_plan()
-        .expect("default plan")
-        .id();
-    let run = sealed_run(
-        1,
-        plan_id,
-        AnalysisInstanceId::new(),
-        9,
-        soa_evidence_analysis(),
-    );
-    app.state.model.simulation.retained.runs = vec![run].into();
-    assert!(app.state.model.simulation.select_run(0));
-    app
-}
-
-#[test]
-fn the_soa_pane_validate_retained_evidence_once_per_dataset_generation() {
-    use crate::workbench::documents::result_document::frame_work::{DatasetWalk, WorkCounts};
-
-    let mut app = app_retaining_soa_evidence();
-    let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
-    // One frame of the SOA tab against unchanged state and identical
-    // input, drawn through the pane's own entry point.
-    let mut frame = || {
-        let _ = ctx.run_ui(
-            egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    egui::vec2(1_680.0, 1_020.0),
-                )),
-                ..Default::default()
-            },
-            |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
-                    device_safety(ui, &mut crate::workbench::features::cx(&mut app))
-                });
-            },
-        );
-    };
-
-    // The first frame is allowed to build the memo the rest read — but it must
-    // build it through the counted owner. A pane that validates on its own is
-    // uncounted, so this half of the gate is what keeps the other half from
-    // passing by measuring nothing.
-    let opening = WorkCounts::reset();
-    frame();
-    assert_eq!(
-        opening.since().get(DatasetWalk::EvidenceValidation),
-        1,
-        "the SOA gate must ask the memoized owner once on the \
-         opening frame; a gate that walks the dataset itself is not counted here \
-         and would leave the idle-frame assertion below measuring nothing"
-    );
-
-    let baseline = WorkCounts::reset();
-    for _ in 0..EVIDENCE_IDLE_FRAMES {
-        frame();
-    }
-    let work = baseline.since();
-
-    assert_eq!(
-        work.get(DatasetWalk::EvidenceValidation),
-        0,
-        "the SOA pane revalidated the retained dataset on an idle frame; counted work was {:?}",
-        work.nonzero()
-    );
-}
-
-#[test]
-fn the_soa_evidence_gate_rejects_source_edits_before_a_version_bump() {
-    let mut app = app_retaining_soa_evidence();
-    let version = app.state.model.simulation.view.data_version;
-    assert!(
-        latest_validated_analysis(&app.state.model, &*app.state.results, AnalysisType::Soa)
-            .is_some(),
-        "the fixture retains validated SOA evidence"
-    );
-
-    // A retained waveform with more coordinates than values is exactly what
-    // `validate_retained_evidence` exists to refuse.
-    let analysis = app.state.model.simulation.retained.runs[0]
-        .analyses
-        .iter_mut()
-        .find(|analysis| analysis.analysis_type == AnalysisType::Soa)
-        .expect("the fixture retains an SOA analysis");
-    let mut shortened = analysis.waveforms[0].y.as_ref().clone();
-    shortened.pop();
-    analysis.waveforms[0].y = std::sync::Arc::new(shortened);
-
-    assert!(
-        latest_validated_analysis(&app.state.model, &*app.state.results, AnalysisType::Soa)
-            .is_none(),
-        "the gate kept a valid verdict after its retained source was corrupted"
-    );
-    assert_eq!(app.state.model.simulation.view.data_version, version);
-
-    app.state.model.simulation.view.data_version =
-        app.state.model.simulation.view.data_version.wrapping_add(1);
-
-    assert!(
-        latest_validated_analysis(&app.state.model, &*app.state.results, AnalysisType::Soa)
-            .is_none(),
-        "the gate served a verdict from the previous dataset generation"
-    );
-}
 
 // ---------------------------------------------------------------------------
 // The page grammar: corners, SOA, optimization
@@ -2047,15 +1634,15 @@ fn corner_labels_read_back_into_their_point() {
 }
 
 fn fixture_corner_matrix() -> CornerMatrix {
-    let app = super::raster::corner_app();
-    let run = verification_run(&app.state.model).expect("the fixture selects its run");
-    let family = latest_analysis(&app.state.model, AnalysisType::Corner)
+    let harness = super::raster::corner_app();
+    let run = verification_run(&harness.model).expect("the fixture selects its run");
+    let family = latest_analysis(&harness.model, AnalysisType::Corner)
         .expect("the fixture holds a corner run");
     corner_matrix(
         run,
         family,
         None,
-        &verification_specs(&app.state.model),
+        &verification_specs(&harness.model),
         Some(&ReferenceCorner {
             process: "TT".to_owned(),
             temperature: 27.0,
@@ -2121,14 +1708,14 @@ fn the_corner_matrix_reads_every_output_at_every_corner_from_the_run() {
 
 #[test]
 fn a_corner_run_without_its_reference_point_has_no_nominal_column() {
-    let app = super::raster::corner_app();
-    let run = verification_run(&app.state.model).expect("run");
-    let family = latest_analysis(&app.state.model, AnalysisType::Corner).expect("corner run");
+    let harness = super::raster::corner_app();
+    let run = verification_run(&harness.model).expect("run");
+    let family = latest_analysis(&harness.model, AnalysisType::Corner).expect("corner run");
     let matrix = corner_matrix(
         run,
         family,
         None,
-        &verification_specs(&app.state.model),
+        &verification_specs(&harness.model),
         Some(&ReferenceCorner {
             process: "TT".to_owned(),
             temperature: 85.0,
@@ -2139,43 +1726,10 @@ fn a_corner_run_without_its_reference_point_has_no_nominal_column() {
 }
 
 #[test]
-fn soa_rows_put_violations_first_and_the_summary_counts_devices() {
-    let app = super::raster::soa_app();
-    let analysis =
-        latest_validated_analysis(&app.state.model, &*app.state.results, AnalysisType::Soa)
-            .expect("the SOA fixture's evidence validates");
-    let Some(crate::state::AnalysisResultPayload::Soa { evaluations, .. }) =
-        &analysis.result_payload
-    else {
-        panic!("the fixture holds an SOA payload");
-    };
-    let rows = soa_rows(evaluations);
-    assert_eq!(
-        rows.iter()
-            .map(|row| (row.device.as_str(), row.verdict))
-            .collect::<Vec<_>>(),
-        [
-            ("M3", Verdict::Fail),
-            ("M1", Verdict::Fail),
-            ("M2", Verdict::Near),
-            ("M1", Verdict::Pass),
-            ("M4", Verdict::Pass),
-        ]
-    );
-    assert_eq!(
-        soa_summary(&rows),
-        Some(super::toolbar::Summary::failing(
-            "2 violations on 2 devices"
-        ))
-    );
-    assert_eq!(soa_summary(&rows[3..]), None, "a clean run says nothing");
-}
-
-#[test]
 fn optimization_iterations_put_the_cost_first_and_name_the_best() {
-    let app = super::raster::optimization_app();
+    let harness = super::raster::optimization_app();
     let result =
-        latest_analysis(&app.state.model, AnalysisType::Optimization).expect("optimization run");
+        latest_analysis(&harness.model, AnalysisType::Optimization).expect("optimization run");
     let table = IterationTable::from_result(result).expect("iterations");
     assert_eq!(
         table
@@ -2192,66 +1746,12 @@ fn optimization_iterations_put_the_cost_first_and_name_the_best() {
     );
 }
 
-/// Every seeded page opens with a 36 px toolbar whose title starts on the
-/// panel inset, then a table of 24 px head and rows directly under it, with
-/// every right-aligned column ending on one edge and nothing past the insets.
-#[test]
-fn seeded_verify_pages_follow_the_table_grammar() {
-    use super::raster::{
-        PAGE_WIDTH, corner_app, monte_carlo_app, optimization_app, page_geometry, soa_app,
-    };
-
-    for (page, app) in [
-        (VerificationPage::Yield, monte_carlo_app()),
-        (VerificationPage::Corners, corner_app()),
-        (VerificationPage::DeviceSafety, soa_app()),
-        (VerificationPage::Optimization, optimization_app()),
-    ] {
-        let geometry = page_geometry(app, page);
-        let toolbar = geometry.one("toolbar").expect("toolbar");
-        assert_eq!(toolbar.height(), super::toolbar::TOOLBAR_H, "{page:?}");
-        assert_eq!(toolbar.left(), 0.0, "{page:?}");
-        assert_eq!(
-            geometry.one("toolbar.title").expect("title").left(),
-            10.0,
-            "{page:?}"
-        );
-        let head = geometry.one("table.head").expect("table head");
-        assert_eq!(head.height(), 24.0, "{page:?}");
-        assert_eq!(
-            head.top(),
-            toolbar.bottom(),
-            "{page:?}: nothing between toolbar and table"
-        );
-        let rows = geometry.all("table.row");
-        assert!(!rows.is_empty(), "{page:?}");
-        assert!(rows.iter().all(|row| row.height() == 24.0), "{page:?}");
-        assert_eq!(rows[0].top(), head.bottom(), "{page:?}");
-        for (column, edges) in geometry.right_edges() {
-            assert_eq!(
-                edges.len(),
-                1,
-                "{page:?} {column}: numbers end on one edge, {edges:?}"
-            );
-        }
-        assert_eq!(
-            geometry.outside_insets(PAGE_WIDTH),
-            Vec::<String>::new(),
-            "{page:?}"
-        );
-        assert!(
-            geometry.one("toolbar.summary").is_some(),
-            "{page:?} states a summary"
-        );
-    }
-}
-
 /// A page with nothing to show is its toolbar and one line saying what
 /// produces data: no table, no tiles.
 #[test]
 fn empty_verify_pages_are_one_line_under_the_toolbar() {
     for page in VerificationPage::NAVIGATION {
-        let geometry = super::raster::page_geometry(RSpiceApp::test_instance(), page);
+        let geometry = super::raster::page_geometry(SimulateTestHost::harness(), page);
         let toolbar = geometry.one("toolbar").expect("toolbar");
         let empty = geometry.one("empty").expect("empty line");
         assert_eq!(empty.top(), toolbar.bottom(), "{page:?}");

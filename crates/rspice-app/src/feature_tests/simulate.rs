@@ -40,3 +40,6 @@ mod transient_checkpoint_exchange;
 mod tuning_staging;
 mod value_size;
 mod variable_import;
+mod verify;
+mod verify_fixtures;
+mod verify_yield;

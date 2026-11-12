@@ -18,7 +18,7 @@ const TUNING_PANE_MAX_H: f32 = 380.0;
 /// The row over the response plot: its waveform's name and the legend.
 const PLOT_HEADER_H: f32 = 20.0;
 
-pub(super) fn sync_tuning_session(cx: &mut Cx<'_, SimulateFeature>) {
+pub(crate) fn sync_tuning_session(cx: &mut Cx<'_, SimulateFeature>) {
     let active_plan_run = verification_run(cx.model).and_then(|run| {
         run.prepared_receipt()
             .filter(|receipt| {
@@ -81,7 +81,7 @@ pub(super) fn sync_tuning_session(cx: &mut Cx<'_, SimulateFeature>) {
         .collect();
 }
 
-pub(super) fn tuning_is_dirty(simulate: &SimulateState) -> bool {
+pub(crate) fn tuning_is_dirty(simulate: &SimulateState) -> bool {
     let session = &simulate.verification;
     session
         .tuning_variables
@@ -122,7 +122,7 @@ fn tuning_schematic_edit_block_reason(model: &Model, simulate: &SimulateState) -
         })
 }
 
-pub(super) fn tuning_commit_block_reason(
+pub(crate) fn tuning_commit_block_reason(
     model: &Model,
     simulate: &SimulateState,
     facts: SlotFacts,
@@ -216,7 +216,7 @@ fn tuning_candidate_run<'m>(
     })
 }
 
-pub(super) fn commit_tuning_and_run(cx: &mut Cx<'_, SimulateFeature>) -> Result<(), String> {
+pub(crate) fn commit_tuning_and_run(cx: &mut Cx<'_, SimulateFeature>) -> Result<(), String> {
     if !tuning_is_dirty(cx.state) {
         return Err("the tuning sandbox contains no provisional changes".to_owned());
     }

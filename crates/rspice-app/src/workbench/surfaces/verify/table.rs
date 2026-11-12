@@ -125,7 +125,7 @@ pub(super) fn column_widths(columns: &[Column], available: f32) -> Vec<f32> {
 /// A failure is painted in the error tone and a value near its limit in the
 /// warning tone. A pass is neutral: success is the absence of a problem.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Verdict {
+pub(crate) enum Verdict {
     Pass,
     Near,
     Fail,

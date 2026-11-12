@@ -12,10 +12,10 @@ mod histogram;
 mod optimization;
 mod regression_contract;
 mod regression_panel;
-mod safety;
-mod table;
-mod toolbar;
-mod tuning;
+pub(crate) mod safety;
+pub(crate) mod table;
+pub(crate) mod toolbar;
+pub(crate) mod tuning;
 mod yield_page;
 
 use egui::{ScrollArea, Ui};
@@ -482,7 +482,7 @@ fn verified_analysis(analysis: &crate::state::AnalysisResult) -> bool {
 /// until the datasets do. The Results workspace owns the memoized answer,
 /// keyed by data version and analysis; this asks that owner rather than
 /// keeping a second verdict of its own.
-fn latest_validated_analysis<'m>(
+pub(crate) fn latest_validated_analysis<'m>(
     model: &'m Model,
     results: &dyn ResultsPort,
     analysis_type: crate::state::AnalysisType,
@@ -645,6 +645,6 @@ impl SimulateFeature {
 }
 
 #[cfg(test)]
-mod raster;
+pub(crate) mod raster;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

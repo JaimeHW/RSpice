@@ -18,12 +18,15 @@ use crate::state::{
     FamilyMemberId, FamilyMemberMeasurements, RetainedTrace, SimulationRun, SimulationRunLifecycle,
     SpecEntry, SpecPointScope,
 };
-use crate::workbench::RSpiceApp;
+use crate::workbench::app_state::Model;
+use crate::workbench::framework::feature::harness::FeatureHarness;
+use crate::workbench::simulate::SimulateFeature;
+use crate::workbench::simulate::test_host::SimulateTestHost;
 use crate::workbench::state::Workspace;
 use rspice_results::family_metadata::MonteCarloVariableMetadata;
 use rspice_simulation_contract::analysis_kind::AnalysisKind;
 
-pub(super) const PAGE_WIDTH: f32 = 1100.0;
+pub(crate) const PAGE_WIDTH: f32 = 1100.0;
 pub(super) const PAGE_HEIGHT: f32 = 720.0;
 
 /// Rects the Verify widgets published this pass, by what they are.
@@ -53,12 +56,12 @@ fn take_probes(ctx: &egui::Context) -> Vec<(String, Rect)> {
 
 /// Where one page's elements landed on its last pass.
 #[derive(Debug, Clone, Default)]
-pub(super) struct PageGeometry {
+pub(crate) struct PageGeometry {
     probes: Vec<(String, Rect)>,
 }
 
 impl PageGeometry {
-    pub(super) fn all(&self, key: &str) -> Vec<Rect> {
+    pub(crate) fn all(&self, key: &str) -> Vec<Rect> {
         self.probes
             .iter()
             .filter(|(name, _)| name == key)
@@ -66,12 +69,12 @@ impl PageGeometry {
             .collect()
     }
 
-    pub(super) fn one(&self, key: &str) -> Option<Rect> {
+    pub(crate) fn one(&self, key: &str) -> Option<Rect> {
         self.all(key).into_iter().next()
     }
 
     /// Every right-aligned table column's distinct right edges, by column.
-    pub(super) fn right_edges(&self) -> Vec<(String, Vec<f32>)> {
+    pub(crate) fn right_edges(&self) -> Vec<(String, Vec<f32>)> {
         let mut columns: Vec<(String, Vec<f32>)> = Vec::new();
         for (name, rect) in &self.probes {
             if !name.starts_with("table.right.") {
@@ -89,7 +92,7 @@ impl PageGeometry {
 
     /// Every element whose words start left of the panel inset or end past
     /// the page's right inset.
-    pub(super) fn outside_insets(&self, width: f32) -> Vec<String> {
+    pub(crate) fn outside_insets(&self, width: f32) -> Vec<String> {
         self.probes
             .iter()
             .filter(|(name, _)| {
@@ -104,7 +107,7 @@ impl PageGeometry {
 }
 
 /// The review-size screen, with `events` arriving on it.
-pub(super) fn page_input(events: Vec<egui::Event>) -> egui::RawInput {
+pub(crate) fn page_input(events: Vec<egui::Event>) -> egui::RawInput {
     egui::RawInput {
         screen_rect: Some(Rect::from_min_size(
             egui::Pos2::ZERO,
@@ -117,7 +120,7 @@ pub(super) fn page_input(events: Vec<egui::Event>) -> egui::RawInput {
 
 /// One pass of `page` over `input` in an unframed central panel, and where
 /// its widgets put things on it.
-pub(super) fn page_pass(
+pub(crate) fn page_pass(
     ctx: &egui::Context,
     input: egui::RawInput,
     mut page: impl FnMut(&mut egui::Ui),
@@ -132,19 +135,36 @@ pub(super) fn page_pass(
     (output, PageGeometry { probes })
 }
 
+/// What a Verify page is drawn over: the host opens the Verify workspace on
+/// a page and draws the surface. The drivers below measure; a stage only
+/// adapts the two steps to its host.
+pub(crate) trait VerifyStage {
+    /// Open the Verify workspace on `page`.
+    fn open(&mut self, page: VerificationPage);
+    /// Draw the Verify surface into `ui`.
+    fn draw(&mut self, ui: &mut egui::Ui);
+}
+
+impl VerifyStage for FeatureHarness<SimulateFeature> {
+    fn open(&mut self, page: VerificationPage) {
+        self.wb.activate(Workspace::Verify);
+        self.state.verification_page = page;
+    }
+
+    fn draw(&mut self, ui: &mut egui::Ui) {
+        super::show(ui, &mut self.cx());
+    }
+}
+
 /// Lay one page out at the review size and read back where it put things,
 /// without rasterizing it.
-pub(super) fn page_geometry(mut app: RSpiceApp, page: VerificationPage) -> PageGeometry {
-    app.state.workbench.activate(Workspace::Verify);
-    app.state.simulate.verification_page = page;
+pub(crate) fn page_geometry(mut stage: impl VerifyStage, page: VerificationPage) -> PageGeometry {
+    stage.open(page);
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     let mut geometry = PageGeometry::default();
     for _ in 0..3 {
-        geometry = page_pass(&ctx, page_input(Vec::new()), |ui| {
-            super::show(ui, &mut crate::workbench::features::cx(&mut app))
-        })
-        .1;
+        geometry = page_pass(&ctx, page_input(Vec::new()), |ui| stage.draw(ui)).1;
     }
     geometry
 }
@@ -153,11 +173,10 @@ pub(super) fn page_geometry(mut app: RSpiceApp, page: VerificationPage) -> PageG
 /// things on the rasterized pass. The canvas is in device pixels, the
 /// geometry in points.
 pub(super) fn page_render(
-    mut app: RSpiceApp,
+    mut stage: impl VerifyStage,
     page: VerificationPage,
 ) -> (rspice_ui_kit::raster::Canvas, PageGeometry) {
-    app.state.workbench.activate(Workspace::Verify);
-    app.state.simulate.verification_page = page;
+    stage.open(page);
     let ctx = egui::Context::default();
     ctx.set_os(egui::os::OperatingSystem::Nix);
     rspice_ui_kit::Theme::default().apply(&ctx);
@@ -167,7 +186,7 @@ pub(super) fn page_render(
         last = Some(page_pass(
             &ctx,
             rspice_ui_kit::raster::display_input(size, 2.0),
-            |ui| super::show(ui, &mut crate::workbench::features::cx(&mut app)),
+            |ui| stage.draw(ui),
         ));
     }
     let (output, geometry) = last.expect("three passes ran");
@@ -199,7 +218,7 @@ fn attributed_to(
 
 /// A run of `plan_id`, sealed by a prepared receipt whose one task produced
 /// `analysis`.
-pub(super) fn sealed_run(
+pub(crate) fn sealed_run(
     run_number: u64,
     plan_id: crate::product::SimulationPlanId,
     source_instance_id: AnalysisInstanceId,
@@ -298,15 +317,14 @@ fn step_analysis(damping: f64, natural_rad_s: f64, measurements: &[(&str, f64)])
 /// A plan with one tuned resistor and two limits, and two runs of it: Run 3,
 /// the baseline the tuning session opened on, whose overshoot fails, and
 /// Run 4, the committed candidate, whose settling time is near its limit.
-pub(super) fn tuning_app() -> RSpiceApp {
+pub(super) fn tuning_app() -> FeatureHarness<SimulateFeature> {
     use crate::state::{
         DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity, DesignVariableRange,
         DesignVariableScope, DesignVariableSweepEligibility,
     };
 
-    let mut app = RSpiceApp::test_instance();
-    let plan_id = app
-        .state
+    let mut harness = SimulateTestHost::harness();
+    let plan_id = harness
         .model
         .sim_setup
         .stable_analysis_plan()
@@ -326,14 +344,14 @@ pub(super) fn tuning_app() -> RSpiceApp {
         DesignVariableOverridePolicy::ExplicitTestLocalOverride,
     )
     .expect("valid tuning variable");
-    app.state
+    harness
         .model
         .workspace
         .content
         .add_design_variable(plan_id, variable)
         .expect("the variable enters the active plan");
     set_limits(
-        &mut app,
+        &mut harness.model,
         vec![
             limit("tsettle", None, Some(2.0e-6), "s"),
             limit("overshoot", None, Some(10.0), "%"),
@@ -354,25 +372,24 @@ pub(super) fn tuning_app() -> RSpiceApp {
         TRANSIENT_TASK_TAG,
         step_analysis(0.65, 3.22e6, &[("tsettle", 1.91e-6), ("overshoot", 6.8)]),
     );
-    app.state.model.simulation.retained.runs = vec![baseline, candidate].into();
-    app.state.model.simulation.view.active_run_idx = Some(0);
-    super::tuning::sync_tuning_session(&mut crate::workbench::features::cx(&mut app));
-    app.state.model.simulation.view.active_run_idx = Some(1);
-    app
+    harness.model.simulation.retained.runs = vec![baseline, candidate].into();
+    harness.model.simulation.view.active_run_idx = Some(0);
+    super::tuning::sync_tuning_session(&mut harness.cx());
+    harness.model.simulation.view.active_run_idx = Some(1);
+    harness
 }
 
 /// Run 4 of the active plan against its baseline, Run 3: four measurements and
 /// the output waveform. Bandwidth breaks its 2 % rule, overshoot has no rule,
 /// and the waveform is selected, so its comparison opens under the table.
-pub(super) fn regression_app() -> RSpiceApp {
+pub(super) fn regression_app() -> FeatureHarness<SimulateFeature> {
     use crate::state::{
         RegressionComparisonMethod, RegressionComparisonWindow, RegressionSpecificationPolicy,
         RegressionTargetSelector, RegressionToleranceRule,
     };
 
-    let mut app = RSpiceApp::test_instance();
-    let plan_id = app
-        .state
+    let mut harness = SimulateTestHost::harness();
+    let plan_id = harness
         .model
         .sim_setup
         .stable_analysis_plan()
@@ -428,20 +445,19 @@ pub(super) fn regression_app() -> RSpiceApp {
         .map(|pair| pair.target.clone())
         .expect("both runs hold V(out)");
     rules.push(rule(waveform.clone(), 0.02, 0.02));
-    let payload = app
-        .state
+    let payload = harness
         .model
         .workspace
         .content
         .ensure_active_plan_data(plan_id);
     payload.regression_tolerances = rules;
     payload.specification_policy.regression = RegressionSpecificationPolicy::LimitAndWaveform;
-    app.state.model.simulation.retained.runs = vec![baseline, candidate].into();
-    assert!(app.state.model.simulation.select_run(1));
-    super::commit_regression_baseline(&mut crate::workbench::features::cx(&mut app), baseline_id)
+    harness.model.simulation.retained.runs = vec![baseline, candidate].into();
+    assert!(harness.model.simulation.select_run(1));
+    super::commit_regression_baseline(&mut harness.cx(), baseline_id)
         .expect("the baseline commits");
-    app.state.simulate.verification.regression_selected_target = Some(waveform);
-    app
+    harness.state.verification.regression_selected_target = Some(waveform);
+    harness
 }
 
 fn limit(measurement: &str, min: Option<f64>, max: Option<f64>, unit: &str) -> SpecEntry {
@@ -455,16 +471,14 @@ fn limit(measurement: &str, min: Option<f64>, max: Option<f64>, unit: &str) -> S
     }
 }
 
-/// An app whose one run, Run 3, holds `analysis` and is the run Verify reads.
-fn app_with_run(analysis: AnalysisResult) -> RSpiceApp {
-    let mut app = RSpiceApp::test_instance();
+/// Make Run 3, holding `analysis`, the model's one run and the run Verify reads.
+fn seed_run(model: &mut Model, analysis: AnalysisResult) {
     let mut run = SimulationRun::new(3);
     run.restore_lifecycle(SimulationRunLifecycle::Completed, 12.4)
         .expect("a finite elapsed time");
     run.add_analysis(attributed(analysis));
-    app.state.model.simulation.retained.runs = vec![run].into();
-    app.state.model.simulation.view.active_run_idx = Some(0);
-    app
+    model.simulation.retained.runs = vec![run].into();
+    model.simulation.view.active_run_idx = Some(0);
 }
 
 /// The seed the Monte Carlo fixture's campaign ran from.
@@ -525,11 +539,16 @@ fn gain_campaign(samples: Vec<f64>) -> AnalysisResult {
 
 /// Forty trials of the plan's Monte Carlo analysis, judged against its 40 dB
 /// gain floor as the frame judges them: three are under it.
-pub(super) fn monte_carlo_app() -> RSpiceApp {
-    let mut app = RSpiceApp::test_instance();
-    let plan = app
-        .state
-        .model
+pub(super) fn monte_carlo_app() -> FeatureHarness<SimulateFeature> {
+    let mut harness = SimulateTestHost::harness();
+    seed_monte_carlo(&mut harness.model);
+    harness
+}
+
+/// The Monte Carlo fixture's seeding: forty trials of the plan's Monte Carlo
+/// analysis and its 40 dB gain floor, judged as the frame judges them.
+pub(crate) fn seed_monte_carlo(model: &mut Model) {
+    let plan = model
         .sim_setup
         .stable_analysis_plan_mut()
         .expect("default plan");
@@ -537,10 +556,7 @@ pub(super) fn monte_carlo_app() -> RSpiceApp {
         .insert(AnalysisKind::MonteCarlo)
         .expect("the plan takes a Monte Carlo analysis");
     let (plan_id, revision) = (plan.id(), plan.revision());
-    app.state
-        .model
-        .sim_setup
-        .refresh_legacy_analysis_projections();
+    model.sim_setup.refresh_legacy_analysis_projections();
     let samples = (0..40)
         .map(|index| match index {
             7 => 39.2,
@@ -558,14 +574,12 @@ pub(super) fn monte_carlo_app() -> RSpiceApp {
     );
     run.restore_lifecycle(SimulationRunLifecycle::Completed, 12.4)
         .expect("a finite elapsed time");
-    app.state.model.simulation.retained.runs = vec![run].into();
-    assert!(app.state.model.simulation.select_run(0));
-    set_limits(&mut app, vec![limit("gain", Some(40.0), None, "dB")]);
-    let model = &mut app.state.model;
+    model.simulation.retained.runs = vec![run].into();
+    assert!(model.simulation.select_run(0));
+    set_limits(model, vec![limit("gain", Some(40.0), None, "dB")]);
     model
         .simulation
         .refresh_yield_evidence(&model.sim_setup, &model.workspace.content);
-    app
 }
 
 /// The corners of the corner fixture: process, supply, temperature.
@@ -582,7 +596,15 @@ pub(super) const FIXTURE_CORNERS: [(&str, f64, f64); 7] = [
 /// A seven-corner run of four limited outputs and two node voltages: gain
 /// fails at SS 125 °C, and phase margin and supply current sit near their
 /// limits at FF 125 °C.
-pub(super) fn corner_app() -> RSpiceApp {
+pub(super) fn corner_app() -> FeatureHarness<SimulateFeature> {
+    let mut harness = SimulateTestHost::harness();
+    seed_corner(&mut harness.model);
+    harness
+}
+
+/// The corner fixture's seeding: its run is the model's one run, and the
+/// limits its outputs are judged by.
+pub(crate) fn seed_corner(model: &mut Model) {
     let outputs: [(&str, [f64; 7]); 4] = [
         ("gain", [42.3, 39.4, 42.6, 43.0, 44.2, 42.4, 42.9]),
         (
@@ -650,9 +672,9 @@ pub(super) fn corner_app() -> RSpiceApp {
                 "#d0a03c",
             ),
         ]);
-    let mut app = app_with_run(analysis);
+    seed_run(model, analysis);
     set_limits(
-        &mut app,
+        model,
         vec![
             limit("gain", Some(40.0), None, "dB"),
             limit("bw", Some(10.0e6), None, "Hz"),
@@ -660,32 +682,24 @@ pub(super) fn corner_app() -> RSpiceApp {
             limit("idd", None, Some(1.2e-3), "A"),
         ],
     );
-    app
 }
 
 /// Make `specs` the limits the active plan judges its outputs by.
-fn set_limits(app: &mut RSpiceApp, specs: Vec<SpecEntry>) {
-    match app
-        .state
-        .model
+fn set_limits(model: &mut Model, specs: Vec<SpecEntry>) {
+    match model
         .sim_setup
         .stable_analysis_plan()
         .ok()
         .map(|plan| plan.id())
     {
-        Some(plan_id) => app
-            .state
-            .model
-            .workspace
-            .content
-            .replace_active_specs(plan_id, specs),
-        None => app.state.model.workspace.content.specs = specs,
+        Some(plan_id) => model.workspace.content.replace_active_specs(plan_id, specs),
+        None => model.workspace.content.specs = specs,
     }
 }
 
 /// An SOA run of five checks on four devices: two violations, one check near
-/// its limit, two clean.
-pub(super) fn soa_app() -> RSpiceApp {
+/// its limit, two clean. The run is the model's one run.
+pub(crate) fn seed_soa(model: &mut Model) {
     use crate::state::{
         SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence, SoaViolationEvidence,
         SoaViolationSeverityEvidence,
@@ -792,7 +806,8 @@ pub(super) fn soa_app() -> RSpiceApp {
             });
         }
     }
-    app_with_run(
+    seed_run(
+        model,
         AnalysisResult::new(1, AnalysisType::Soa, "SOA")
             .with_family_metadata(AnalysisResultFamilyMetadata::Soa { time })
             .with_waveforms(waveforms)
@@ -801,11 +816,18 @@ pub(super) fn soa_app() -> RSpiceApp {
                 evaluations,
                 violations,
             }),
-    )
+    );
 }
 
 /// Twenty-four optimizer iterations over two variables, converged.
-pub(super) fn optimization_app() -> RSpiceApp {
+pub(super) fn optimization_app() -> FeatureHarness<SimulateFeature> {
+    let mut harness = SimulateTestHost::harness();
+    seed_optimization(&mut harness.model);
+    harness
+}
+
+/// The optimization fixture's seeding: its run is the model's one run.
+pub(crate) fn seed_optimization(model: &mut Model) {
     let iterations = (0..24).map(f64::from).collect::<Vec<_>>();
     let cost = iterations
         .iter()
@@ -820,7 +842,8 @@ pub(super) fn optimization_app() -> RSpiceApp {
         .map(|step| 40.0e-6 - 12.0e-6 * (1.0 - (-step / 4.0).exp()))
         .collect::<Vec<_>>();
     let best_cost = cost.iter().copied().fold(f64::INFINITY, f64::min);
-    app_with_run(
+    seed_run(
+        model,
         AnalysisResult::new(1, AnalysisType::Optimization, "Optimization")
             .with_waveforms(vec![
                 RetainedTrace::new("OPT_COST", iterations.clone(), cost, "#4c9be8"),
@@ -837,5 +860,5 @@ pub(super) fn optimization_app() -> RSpiceApp {
                 best_constraints: Vec::new(),
                 converged: true,
             }),
-    )
+    );
 }

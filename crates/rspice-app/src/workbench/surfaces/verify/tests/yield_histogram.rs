@@ -2,12 +2,13 @@
 //! the values beside them, statistics from the retained samples, the yield the
 //! judge counted, and the histogram drawn under the table.
 
-use super::super::super::super::app_state::AppState;
 use super::super::super::super::state::{YieldLimitBound, YieldLimitDraft};
 use super::*;
 
-fn fixture_yield_results(app: &RSpiceApp) -> Vec<rspice_results::yield_analysis::YieldResult> {
-    verification_yield_results(&app.state.model).to_vec()
+pub(crate) fn fixture_yield_results(
+    model: &Model,
+) -> Vec<rspice_results::yield_analysis::YieldResult> {
+    verification_yield_results(model).to_vec()
 }
 
 /// A Spec cell and an axis tick state a quantity the way the measured values
@@ -52,10 +53,9 @@ fn a_limit_and_a_tick_are_spelled_like_the_values_beside_them() {
 /// retained samples, and its yield is the population the judge counted.
 #[test]
 fn yield_rows_compute_their_statistics_from_the_samples() {
-    let app = super::raster::monte_carlo_app();
-    let results = fixture_yield_results(&app);
-    let analysis = app
-        .state
+    let harness = super::raster::monte_carlo_app();
+    let results = fixture_yield_results(&harness.model);
+    let analysis = harness
         .model
         .simulation
         .yield_analysis()
@@ -63,7 +63,7 @@ fn yield_rows_compute_their_statistics_from_the_samples() {
     let rows = yield_rows_of(
         &analysis.data,
         &results,
-        &verification_specs(&app.state.model),
+        &verification_specs(&harness.model),
     );
     assert_eq!(rows.len(), 1);
     let row = &rows[0];
@@ -130,10 +130,10 @@ fn the_shown_histogram_is_the_readers_pick_or_the_lowest_yield() {
 /// A lower limit above the upper one is refused with the plan unchanged.
 #[test]
 fn a_limit_set_in_the_plan_rejudges_the_retained_trials() {
-    let mut app = super::raster::monte_carlo_app();
-    let plan_id = verification_plan_id(&app.state.model).expect("default plan");
-    let definitions = |app: &RSpiceApp| {
-        app.state
+    let mut harness = super::raster::monte_carlo_app();
+    let plan_id = verification_plan_id(&harness.model).expect("default plan");
+    let definitions = |harness: &FeatureHarness<SimulateFeature>| {
+        harness
             .model
             .workspace
             .content
@@ -143,7 +143,7 @@ fn a_limit_set_in_the_plan_rejudges_the_retained_trials() {
     };
 
     let receipt = set_limit(
-        &mut app.state.model.workspace.content,
+        &mut harness.model.workspace.content,
         plan_id,
         "gain",
         YieldLimitBound::Lower,
@@ -154,21 +154,21 @@ fn a_limit_set_in_the_plan_rejudges_the_retained_trials() {
         receipt.as_deref(),
         Ok("Set the lower limit of gain to 41 dB.")
     );
-    let model = &mut app.state.model;
+    let model = &mut harness.model;
     model
         .simulation
         .refresh_yield_evidence(&model.sim_setup, &model.workspace.content);
-    let results = fixture_yield_results(&app);
+    let results = fixture_yield_results(&harness.model);
     assert_eq!(
         (results[0].pass_count, results[0].total_runs),
         (28, 40),
         "the twelve trials under 41 dB fail"
     );
 
-    let before = definitions(&app);
+    let before = definitions(&harness);
     assert_eq!(
         set_limit(
-            &mut app.state.model.workspace.content,
+            &mut harness.model.workspace.content,
             plan_id,
             "gain",
             YieldLimitBound::Upper,
@@ -177,7 +177,11 @@ fn a_limit_set_in_the_plan_rejudges_the_retained_trials() {
         ),
         Err("specification minimum exceeds its maximum".to_owned())
     );
-    assert_eq!(definitions(&app), before, "a refused limit changes nothing");
+    assert_eq!(
+        definitions(&harness),
+        before,
+        "a refused limit changes nothing"
+    );
 }
 
 /// What a cell reads: `10 MHz`, `900m` and `40 dB` the way every field does,
@@ -204,12 +208,11 @@ fn a_limit_cell_reads_quantities_the_way_every_field_does() {
 /// `text`, then press Enter in it.
 fn type_limit(
     ctx: &egui::Context,
-    mut app: RSpiceApp,
+    mut harness: FeatureHarness<SimulateFeature>,
     bound: YieldLimitBound,
     text: &str,
-) -> RSpiceApp {
-    let seed = app
-        .state
+) -> FeatureHarness<SimulateFeature> {
+    let seed = harness
         .model
         .workspace
         .content
@@ -222,7 +225,7 @@ fn type_limit(
         })
         .map(|value| format!("{value} dB"))
         .unwrap_or_default();
-    app.state.simulate.verification.yield_limit_draft = Some(YieldLimitDraft {
+    harness.state.verification.yield_limit_draft = Some(YieldLimitDraft {
         output: "gain".to_owned(),
         bound,
         text: text.to_owned(),
@@ -239,10 +242,10 @@ fn type_limit(
     };
     for events in [Vec::new(), vec![enter]] {
         let _ = super::raster::page_pass(ctx, super::raster::page_input(events), |ui| {
-            super::super::show(ui, &mut crate::workbench::features::cx(&mut app));
+            super::super::show(ui, &mut harness.cx());
         });
     }
-    app
+    harness
 }
 
 /// Enter applies a typed limit to the plan with a receipt, closes the cell,
@@ -251,13 +254,13 @@ fn type_limit(
 /// on what was typed.
 #[test]
 fn a_limit_typed_into_its_cell_is_the_plans_on_enter() {
-    let mut app = super::raster::monte_carlo_app();
-    app.state.simulate.verification_page = VerificationPage::Yield;
-    let plan_id = verification_plan_id(&app.state.model).expect("default plan");
+    let mut harness = super::raster::monte_carlo_app();
+    harness.state.verification_page = VerificationPage::Yield;
+    let plan_id = verification_plan_id(&harness.model).expect("default plan");
     let ctx = egui::Context::default();
     rspice_ui_kit::Theme::default().apply(&ctx);
-    let gain = |app: &RSpiceApp| {
-        app.state
+    let gain = |harness: &FeatureHarness<SimulateFeature>| {
+        harness
             .model
             .workspace
             .content
@@ -267,39 +270,37 @@ fn a_limit_typed_into_its_cell_is_the_plans_on_enter() {
             .map(|spec| (spec.min, spec.max))
     };
 
-    app = type_limit(&ctx, app, YieldLimitBound::Lower, "41 dB");
-    assert_eq!(gain(&app), Some((Some(41.0), None)));
-    assert_eq!(app.state.simulate.verification.yield_limit_draft, None);
-    assert_eq!(app.state.simulate.verification.action_problem, None);
+    harness = type_limit(&ctx, harness, YieldLimitBound::Lower, "41 dB");
+    assert_eq!(gain(&harness), Some((Some(41.0), None)));
+    assert_eq!(harness.state.verification.yield_limit_draft, None);
+    assert_eq!(harness.state.verification.action_problem, None);
     assert!(
-        app.state.model.log_buffer.entries().any(|entry| entry
+        harness.model.log_buffer.entries().any(|entry| entry
             .message
             .contains("Set the lower limit of gain to 41 dB.")),
         "the plan's receipt states the edit"
     );
-    let model = &mut app.state.model;
+    let model = &mut harness.model;
     model
         .simulation
         .refresh_yield_evidence(&model.sim_setup, &model.workspace.content);
-    assert_eq!(fixture_yield_results(&app)[0].pass_count, 28);
+    assert_eq!(fixture_yield_results(&harness.model)[0].pass_count, 28);
 
     for (bound, text) in [
         (YieldLimitBound::Lower, "forty"),
         (YieldLimitBound::Upper, "40.5 dB"),
     ] {
-        app = type_limit(&ctx, app, bound, text);
-        assert_eq!(gain(&app), Some((Some(41.0), None)), "{text}");
-        let problem = app
+        harness = type_limit(&ctx, harness, bound, text);
+        assert_eq!(gain(&harness), Some((Some(41.0), None)), "{text}");
+        let problem = harness
             .state
-            .simulate
             .verification
             .action_problem
             .clone()
             .expect("the refusal is stated");
         assert!(problem.contains("limit of gain was not set"), "{problem}");
-        let draft = app
+        let draft = harness
             .state
-            .simulate
             .verification
             .yield_limit_draft
             .clone()
@@ -308,155 +309,12 @@ fn a_limit_typed_into_its_cell_is_the_plans_on_enter() {
     }
 }
 
-/// Edit specifications pressed while a limit is being typed: the press takes
-/// the cell's focus, so the typed limit is the plan's in that frame, and the
-/// specification editor the press opens holds it rather than the limit the
-/// plan had before.
-#[test]
-fn edit_specifications_pressed_mid_edit_opens_on_the_committed_limit() {
-    let mut app = super::raster::monte_carlo_app();
-    app.state.simulate.verification_page = VerificationPage::Yield;
-    let ctx = egui::Context::default();
-    rspice_ui_kit::Theme::default().apply(&ctx);
-    app.state.simulate.verification.yield_limit_draft = Some(YieldLimitDraft {
-        output: "gain".to_owned(),
-        bound: YieldLimitBound::Lower,
-        text: "41 dB".to_owned(),
-        seed: String::new(),
-        focus: true,
-    });
-    let frame = |app: &mut RSpiceApp, events: Vec<egui::Event>| {
-        let (_, geometry) =
-            super::raster::page_pass(&ctx, super::raster::page_input(events), |ui| {
-                super::super::show(ui, &mut crate::workbench::features::cx(app));
-            });
-        app.after_contribution();
-        geometry
-    };
-    // The cell opens and takes the keyboard.
-    let button = frame(&mut app, Vec::new()).all("toolbar.action")[0].center();
-    let pointer = |pressed| egui::Event::PointerButton {
-        pos: button,
-        button: egui::PointerButton::Primary,
-        pressed,
-        modifiers: egui::Modifiers::NONE,
-    };
-    frame(
-        &mut app,
-        vec![egui::Event::PointerMoved(button), pointer(true)],
-    );
-    assert!(
-        app.state.simulate.verification.yield_limit_draft.is_some(),
-        "the cell is still open while the button is held"
-    );
-    assert!(app.state.results.results.session.spec_drafts.is_none());
-    frame(&mut app, vec![pointer(false)]);
-
-    assert_eq!(app.state.simulate.verification.yield_limit_draft, None);
-    let drafts = app
-        .state
-        .results
-        .results
-        .session
-        .spec_drafts
-        .clone()
-        .expect("the press opened the specification editor");
-    let gain = drafts
-        .iter()
-        .find(|draft| draft.measurement == "gain")
-        .expect("the editor holds the gain specification");
-    assert!(
-        gain.primary_limit.trim().starts_with("41"),
-        "the editor opens on the committed limit, not {:?}",
-        gain.primary_limit
-    );
-}
-
-/// Yield is derived, never stored: the session eframe restores, the same
-/// session read strictly, and the project saved and reopened each judge the
-/// retained trials against the limits they carried, and state the same yield.
-#[test]
-fn a_restored_session_and_a_reopened_project_state_the_same_yield() {
-    struct Stored(String);
-
-    impl eframe::Storage for Stored {
-        fn get_string(&self, key: &str) -> Option<String> {
-            (key == eframe::APP_KEY).then(|| self.0.clone())
-        }
-
-        fn set_string(&mut self, _: &str, _: String) {}
-
-        fn remove_string(&mut self, _: &str) {}
-
-        fn flush(&mut self) {}
-    }
-
-    let app = super::raster::monte_carlo_app();
-    let results = fixture_yield_results(&app);
-    assert_eq!((results[0].pass_count, results[0].total_runs), (37, 40));
-    let judged = serde_json::to_value(&results).expect("the yield serializes");
-
-    let session = serde_json::to_string(&app.state).expect("the session serializes");
-    let restored =
-        AppState::restore_eframe_session(&Stored(session.clone())).expect("a stored session");
-    let strict =
-        serde_json::from_str::<Box<AppState>>(&session).expect("the session reads strictly");
-    for (route, mut state) in [("eframe", Box::new(restored)), ("strict", strict)] {
-        let model = &mut state.model;
-        assert!(
-            model
-                .simulation
-                .yield_results_for_active_dataset()
-                .is_none(),
-            "{route}: the yield is not stored"
-        );
-        model
-            .simulation
-            .refresh_yield_evidence(&model.sim_setup, &model.workspace.content);
-        let results = model
-            .simulation
-            .yield_results_for_active_dataset()
-            .expect("the restored run is judged");
-        assert_eq!(
-            serde_json::to_value(results).expect("the yield serializes"),
-            judged,
-            "{route}"
-        );
-    }
-
-    let project =
-        rspice_app_services::workbench::lifecycle::project_lifecycle::snapshot(&app.state)
-            .expect("the project captures");
-    let text = rspice_app_services::io::project_io::serialize_project_file(&project)
-        .expect("the project serializes");
-    let file = rspice_app_services::io::project_io::load_project_text(&text, None)
-        .expect("the project reopens")
-        .file;
-    let (setup, _, _) = rspice_app_services::io::restore_execution_context(
-        file.execution_context.expect("the project saves its plan"),
-        file.workspace.project.id(),
-    )
-    .expect("the plan restores");
-    let mut simulation =
-        rspice_app_services::io::simulation_state_from_results(file.simulation_results)
-            .expect("the runs restore");
-    simulation.refresh_yield_evidence(&setup, &file.workspace);
-    let results = simulation
-        .yield_results_for_active_dataset()
-        .expect("the reopened run is judged");
-    assert_eq!(
-        serde_json::to_value(results).expect("the yield serializes"),
-        judged,
-        "project file"
-    );
-}
-
 /// The bins are laid so the limit is a bin edge: every sample in a failing
 /// bar breaks the limit and every sample in a neutral bar meets it.
 #[test]
 fn histogram_bins_put_the_limit_on_an_edge_and_keep_every_sample() {
-    let app = super::raster::monte_carlo_app();
-    let results = fixture_yield_results(&app);
+    let harness = super::raster::monte_carlo_app();
+    let results = fixture_yield_results(&harness.model);
     let model = super::histogram::histogram_model(&results[0].samples, Some(40.0), None)
         .expect("forty samples bin");
     assert_eq!(model.counts.iter().sum::<usize>(), 40);
@@ -487,8 +345,8 @@ fn histogram_bins_put_the_limit_on_an_edge_and_keep_every_sample() {
 /// histogram is painted in the accent.
 #[test]
 fn histogram_bars_are_neutral_and_failing_bars_muted_error() {
-    let app = super::raster::monte_carlo_app();
-    let results = fixture_yield_results(&app);
+    let harness = super::raster::monte_carlo_app();
+    let results = fixture_yield_results(&harness.model);
     let model = super::histogram::histogram_model(&results[0].samples, Some(40.0), None)
         .expect("forty samples bin");
     let ctx = egui::Context::default();
@@ -556,15 +414,15 @@ fn the_yield_page_draws_the_selected_histogram_under_the_table() {
 #[ignore = "writes a PNG for review"]
 fn the_yield_page_renders_with_a_limit_cell_open() {
     const SCALE: f32 = 2.0;
-    let mut app = super::raster::monte_carlo_app();
-    app.state.simulate.verification.yield_limit_draft = Some(YieldLimitDraft {
+    let mut harness = super::raster::monte_carlo_app();
+    harness.state.verification.yield_limit_draft = Some(YieldLimitDraft {
         output: "gain".to_owned(),
         bound: YieldLimitBound::Lower,
         text: "40 dB".to_owned(),
         seed: "40 dB".to_owned(),
         focus: true,
     });
-    let (canvas, geometry) = super::raster::page_render(app, VerificationPage::Yield);
+    let (canvas, geometry) = super::raster::page_render(harness, VerificationPage::Yield);
     let path = std::env::var_os("RSPICE_REVIEW_PNG").map_or_else(
         || std::env::temp_dir().join("rspice-verify-yield.png"),
         std::path::PathBuf::from,

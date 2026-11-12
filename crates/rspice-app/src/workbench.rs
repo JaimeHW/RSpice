@@ -229,7 +229,7 @@ pub(crate) mod surfaces {
     pub(super) mod project;
     pub(crate) mod simulate;
     pub(super) mod stimulus;
-    pub(super) mod verify;
+    pub(crate) mod verify;
     mod veriloga;
 }
 pub(crate) mod tools;
