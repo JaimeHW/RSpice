@@ -31,6 +31,69 @@ fn recorded_aid(
     solved
 }
 
+/// What a GMIN walk steps down (ngspice `cktop.c`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GminWalk {
+    /// `dynamic_gmin`: a conductance from every node to ground steps down to
+    /// the device GMIN, and one solve then closes on the nodal floor.
+    Nodal,
+    /// `new_gmin`, ngspice's "true gmin stepping": the device GMIN itself
+    /// steps down while the nodal diagonal stays on its floor, so the walk's
+    /// last stage is the circuit's own system.
+    Device,
+}
+
+/// A walk's stride is in decades: ngspice's `factor` is `10^stride`, and it
+/// starts at `gminfactor` = 10, one decade.
+const MAX_GMIN_STEP_DECADES: Value = 1.0;
+
+/// A failure that finds the factor below 1.00005 gives up.
+fn min_gmin_step_decades() -> Value {
+    1.00005_f64.log10()
+}
+
+impl GminWalk {
+    /// The stage after `accepted` on the way down to `walk_end`, and the
+    /// stride that reaches it. `new_gmin` lands on its target with the
+    /// factor that reaches it (`factor = CKTgmin / gtarget`), so a landing
+    /// that fails retries part of the way down.
+    fn next_stage(self, accepted: Value, walk_end: Value, stride: Value) -> (Value, Value) {
+        let target = Engine::next_descending_gmin(accepted, walk_end, stride);
+        if self == Self::Device && walk_end > 0.0 && target == walk_end && target < accepted {
+            (target, (accepted / walk_end).log10())
+        } else {
+            (target, stride)
+        }
+    }
+
+    /// The stride after a stage that solved in `used` of ITL2's `itl2`
+    /// iterations. A fast stage (at most a quarter of ITL2) raises the factor
+    /// to its 1.5th power, up to `gminfactor`; a slow one (over three
+    /// quarters) takes its square root, which `new_gmin` keeps at 3 or more
+    /// and `dynamic_gmin` at 1.00005 or more.
+    fn stride_after_success(self, stride: Value, used: usize, itl2: usize) -> Value {
+        let mut stride = stride;
+        if used <= itl2 / 4 {
+            stride = (stride * 1.5).min(MAX_GMIN_STEP_DECADES);
+        }
+        if used > 3 * itl2 / 4 {
+            let least = match self {
+                Self::Nodal => min_gmin_step_decades(),
+                Self::Device => 3.0_f64.log10(),
+            };
+            stride = (stride * 0.5).max(least);
+        }
+        stride
+    }
+
+    /// The stride a failed stage retries with: the fourth root of the factor,
+    /// or none once the factor is below 1.00005 and the walk has stalled
+    /// against a fold.
+    fn stride_after_failure(stride: Value) -> Option<Value> {
+        (stride >= min_gmin_step_decades()).then_some(stride * 0.25)
+    }
+}
+
 /// Controls the predictor step used by monotonic source continuation.
 ///
 /// Keeping this policy separate from the corrector makes explicit LOCA runs
@@ -1076,7 +1139,42 @@ impl Engine {
     ) -> Result<Vec<Value>, SimulationError> {
         recorded_aid(
             ContinuationAid::GminStepping,
-            self.walk_gmin_stepping_nonlinear(circuit, matrix, initial_guess, abort),
+            self.walk_gmin_stepping_nonlinear(
+                circuit,
+                matrix,
+                initial_guess,
+                abort,
+                GminWalk::Nodal,
+            ),
+        )
+    }
+
+    /// ngspice's true GMIN stepping (`new_gmin`, cktop.c), the GMIN stage its
+    /// operating-point ladder runs when dynamic GMIN stepping fails: the
+    /// device GMIN steps down from 1e-3 to its own value while the nodal
+    /// diagonal stays on its floor.
+    ///
+    /// A node held only by device GMIN, between off devices, keeps its
+    /// divider of junction and channel conductances on every stage. Dynamic
+    /// GMIN stepping adds a pull to ground there, comparable to the device
+    /// GMIN at its last stage, and its closing solve has to remove that pull
+    /// from every such node at once.
+    pub(crate) fn true_gmin_stepping_nonlinear_with_abort(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        initial_guess: &[Value],
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Value>, SimulationError> {
+        recorded_aid(
+            ContinuationAid::GminStepping,
+            self.walk_gmin_stepping_nonlinear(
+                circuit,
+                matrix,
+                initial_guess,
+                abort,
+                GminWalk::Device,
+            ),
         )
     }
 
@@ -1086,13 +1184,10 @@ impl Engine {
         matrix: &mut StaticMatrix,
         initial_guess: &[Value],
         abort: &dyn AbortSignal,
+        walk: GminWalk,
     ) -> Result<Vec<Value>, SimulationError> {
-        // ngspice's dynamic GMIN stepping (`cktop.c`, `dynamic_gmin`), in
-        // decades: a step is log10 of its `factor`, which starts at
-        // `gminfactor` = 10, one decade.
-        const MAX_GMIN_STEP_DECADES: Value = 1.0;
-        // A failure that finds the factor below 1.00005 gives up.
-        let min_gmin_step_decades: Value = 1.00005_f64.log10();
+        // ngspice's `dynamic_gmin` and `new_gmin` (`cktop.c`), in decades: a
+        // step is log10 of its `factor`.
         const MAX_GMIN_ATTEMPTS: usize = 2048;
         let stopped = |reached: Option<Value>, unsolved: Value, iterations: usize| {
             SimulationError::from(ContinuationFailure {
@@ -1107,14 +1202,25 @@ impl Engine {
         let gmin_scales = self.gmin_nonlinear_schedule_for_circuit(circuit);
         let start_gmin = gmin_scales.first().copied().unwrap_or(1.0e-3).max(0.0);
         let final_gmin = self.dc_nodal_gmin_floor(circuit);
-        // ngspice steps CKTdiagGmin down to gtarget = MAX(CKTgmin, CKTgshunt)
-        // and then solves once at CKTgshunt (`dynamic_gmin`, cktop.c): the
-        // walk stops at the device GMIN and closes on the floor in one solve.
-        let walk_end = self
-            .config
-            .convergence_config
-            .junction_gmin_target
-            .max(final_gmin);
+        let device_gmin = self.config.convergence_config.junction_gmin_target.max(0.0);
+        // `dynamic_gmin` steps CKTdiagGmin down to gtarget = MAX(CKTgmin,
+        // CKTgshunt) and then solves once at CKTgshunt: the walk stops at the
+        // device GMIN and closes on the floor in one solve. `new_gmin` steps
+        // CKTgmin down to the device GMIN itself, over the floor.
+        let walk_end = match walk {
+            GminWalk::Nodal => device_gmin.max(final_gmin),
+            GminWalk::Device => device_gmin,
+        };
+        let stage_at = |gmin: Value| match walk {
+            GminWalk::Nodal => GminStage {
+                nodal: gmin,
+                junction: self.gmin_stage_junction_gmin(gmin),
+            },
+            GminWalk::Device => GminStage {
+                nodal: final_gmin,
+                junction: self.effective_device_junction_gmin(gmin),
+            },
+        };
 
         let size = circuit.matrix_size();
 
@@ -1147,7 +1253,8 @@ impl Engine {
         let mut attempts = 0usize;
 
         while accepted_gmin > walk_end {
-            let target_gmin = Self::next_descending_gmin(accepted_gmin, walk_end, step_decades);
+            let (target_gmin, stride) = walk.next_stage(accepted_gmin, walk_end, step_decades);
+            step_decades = stride;
             if attempts >= MAX_GMIN_ATTEMPTS || target_gmin >= accepted_gmin {
                 return Err(stopped(
                     reached,
@@ -1170,7 +1277,7 @@ impl Engine {
             let (candidate, converged, used_iterations) = self.solve_gmin_nonlinear_corrector(
                 circuit,
                 matrix,
-                target_gmin,
+                stage_at(target_gmin),
                 CorrectorRun {
                     initial_solution: &solution,
                     damping_state: &mut trial_damping_state,
@@ -1189,24 +1296,14 @@ impl Engine {
                 accepted_gmin = target_gmin;
                 reached = Some(target_gmin);
                 damping_state = trial_damping_state;
-                // A fast stage (at most a quarter of ITL2) raises the factor
-                // to its 1.5th power, up to `gminfactor`; a slow one (over
-                // three quarters) takes its square root.
-                if used_iterations <= itl2 / 4 {
-                    step_decades = (step_decades * 1.5).min(MAX_GMIN_STEP_DECADES);
-                }
-                if used_iterations > 3 * itl2 / 4 {
-                    step_decades = (step_decades * 0.5).max(min_gmin_step_decades);
-                }
+                step_decades = walk.stride_after_success(step_decades, used_iterations, itl2);
             } else {
                 circuit.restore_nonlinear_state(accepted_state);
-                // A failure retries from the accepted stage with the fourth
-                // root of the factor, and gives up once the factor is below
-                // 1.00005: the walk has stalled against a fold.
-                if step_decades < min_gmin_step_decades {
-                    return Err(stopped(reached, target_gmin, total_iterations));
+                // A failure retries from the accepted stage.
+                match GminWalk::stride_after_failure(step_decades) {
+                    Some(stride) => step_decades = stride,
+                    None => return Err(stopped(reached, target_gmin, total_iterations)),
                 }
-                step_decades *= 0.25;
             }
 
             attempts += 1;
@@ -1221,13 +1318,13 @@ impl Engine {
             );
         }
 
-        if walk_end > final_gmin {
+        if walk == GminWalk::Nodal && walk_end > final_gmin {
             // The closing solve takes the direct solve's ITL1 budget, as
             // `NIiter(ckt, iterlim)` does after the walk.
             let (candidate, converged, used_iterations) = self.solve_gmin_nonlinear_corrector(
                 circuit,
                 matrix,
-                final_gmin,
+                stage_at(final_gmin),
                 CorrectorRun {
                     initial_solution: &solution,
                     damping_state: &mut damping_state,
@@ -1287,7 +1384,7 @@ impl Engine {
         &self,
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
-        gmin: Value,
+        stage: GminStage,
         run: CorrectorRun<'_>,
         abort: &dyn AbortSignal,
     ) -> Result<(Vec<Value>, bool, usize), SimulationError> {
@@ -1297,7 +1394,7 @@ impl Engine {
             max_iterations,
         } = run;
         let mut solution = initial_solution.to_vec();
-        let junction_gmin = self.gmin_stage_junction_gmin(gmin);
+        let junction_gmin = stage.junction;
         let floor = self.dc_nodal_gmin_floor(circuit);
         self.update_device_states_for_dc_with_junction_gmin(circuit, &solution, junction_gmin);
         let mut used_iterations = 0usize;
@@ -1315,7 +1412,7 @@ impl Engine {
             rhs.fill(0.0);
             matrix.clear_values();
 
-            Self::stamp_nodal_gmin_stage(circuit, matrix, gmin, floor);
+            Self::stamp_nodal_gmin_stage(circuit, matrix, stage.nodal, floor);
             let node_count = circuit.num_nodes().min(solution.len());
 
             circuit.stamp_dc_direct(matrix, &mut rhs);
@@ -1340,7 +1437,7 @@ impl Engine {
                 }
                 return Ok((solution, false, used_iterations));
             }
-            if gmin <= floor {
+            if stage.nodal <= floor {
                 Self::settle_compact_model_private_nodes(circuit, matrix, &rhs, floor)?;
             }
             let solve_result = if uses_vbic_correction {
@@ -1371,7 +1468,7 @@ impl Engine {
                 },
                 Self::junction_limiting_owns_newton_steps(circuit)
                     || self.b3soi_limiter_owns_global_damping(circuit),
-                |trial| self.nonlinear_merit_with_gmin(circuit, matrix, trial, gmin),
+                |trial| self.nonlinear_merit_at_gmin_stage(circuit, matrix, trial, stage),
             );
             circuit.enforce_dc_ideal_voltage_constraints(&mut new_solution)?;
             Self::reset_nonfinite_values(&mut new_solution);
@@ -1389,11 +1486,11 @@ impl Engine {
             // corrector's own stamp above does.
             let nonlinear_residual_converged = voltage_converged
                 && device_converged
-                && match self.try_nonlinear_residual_converged_with_gmin(
+                && match self.try_nonlinear_residual_converged_at_gmin_stage(
                     circuit,
                     matrix,
                     &new_solution,
-                    gmin,
+                    stage,
                 ) {
                     Ok(converged) => converged,
                     Err(error) if error.nonfinite_trial_detail().is_some() => {
@@ -1446,6 +1543,50 @@ mod source_continuation_policy_tests {
         assert_eq!(policy.step_after_failure(0.2), Some(0.1));
         assert_eq!(policy.step_after_failure(2.0e-4), Some(1.0e-4));
         assert_eq!(policy.step_after_failure(1.0e-4), None);
+    }
+}
+
+#[cfg(test)]
+mod gmin_walk_schedule_tests {
+    use super::{GminWalk, MAX_GMIN_STEP_DECADES};
+
+    /// ngspice's `new_gmin` adapts its factor as `dynamic_gmin` does, except
+    /// that a slow stage keeps it at 3 or more and a landing on the target
+    /// takes the factor that reaches it (cktop.c). Strides are in decades.
+    #[test]
+    fn true_gmin_stepping_follows_new_gmin_s_factor_schedule() {
+        let itl2 = 100;
+        let three = 3.0_f64.log10();
+        // A stage in at most a quarter of ITL2 raises the factor to its 1.5th
+        // power, up to `gminfactor` = 10.
+        assert_eq!(GminWalk::Device.stride_after_success(0.5, 25, itl2), 0.75);
+        assert_eq!(
+            GminWalk::Device.stride_after_success(0.8, 25, itl2),
+            MAX_GMIN_STEP_DECADES
+        );
+        // One between a quarter and three quarters keeps it.
+        assert_eq!(GminWalk::Device.stride_after_success(0.5, 75, itl2), 0.5);
+        // A slower one takes its square root, which `new_gmin` keeps at 3 or
+        // more and `dynamic_gmin` at 1.00005 or more.
+        assert_eq!(GminWalk::Device.stride_after_success(1.0, 76, itl2), 0.5);
+        assert_eq!(GminWalk::Device.stride_after_success(0.5, 76, itl2), three);
+        assert_eq!(GminWalk::Nodal.stride_after_success(0.5, 76, itl2), 0.25);
+        // A failure retries with the fourth root until the factor is below
+        // 1.00005.
+        assert_eq!(GminWalk::stride_after_failure(1.0), Some(0.25));
+        assert_eq!(GminWalk::stride_after_failure(1.0e-5), None);
+        // `new_gmin` lands on its target with the factor that reaches it, so
+        // a failed landing retries part of the way down.
+        let (target, stride) = GminWalk::Device.next_stage(3.0e-12, 1.0e-12, 1.0);
+        assert_eq!(target, 1.0e-12);
+        assert!((stride - three).abs() < 1.0e-12, "{stride}");
+        assert_eq!(
+            GminWalk::Nodal.next_stage(3.0e-12, 1.0e-12, 1.0),
+            (1.0e-12, 1.0)
+        );
+        let (target, stride) = GminWalk::Device.next_stage(1.0e-3, 1.0e-12, 1.0);
+        assert!((target / 1.0e-4 - 1.0).abs() < 1.0e-12, "{target}");
+        assert_eq!(stride, 1.0);
     }
 }
 

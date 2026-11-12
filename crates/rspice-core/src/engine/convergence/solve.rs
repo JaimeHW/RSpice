@@ -1856,13 +1856,41 @@ impl Engine {
         let gate_generation_aid = circuit.has_jfet_gate_generation_branches();
 
         // The aids run in ngspice's order (cktop.c, CKTop): dynamic GMIN
-        // stepping, then source stepping, then the continuation methods.
+        // stepping, true GMIN stepping when it fails, then source stepping,
+        // then the continuation methods. The Xyce dialect has no true GMIN
+        // stage: Xyce's GMIN continuation is the nodal homotopy alone.
         if allow_gmin {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
             let gmin_state = circuit.nonlinear_state_snapshot();
-            match self.gmin_stepping_nonlinear_with_abort(circuit, matrix, &fallback_seed, abort) {
+            let walked = match self.gmin_stepping_nonlinear_with_abort(
+                circuit,
+                matrix,
+                &fallback_seed,
+                abort,
+            ) {
+                Err(dynamic)
+                    if self.config.spice_dialect != SpiceDialect::Xyce && !abort.is_aborted() =>
+                {
+                    circuit.restore_nonlinear_state(gmin_state.clone());
+                    log::info!(
+                        "Dynamic GMIN stepping failed with {dynamic}. Trying true GMIN stepping."
+                    );
+                    self.true_gmin_stepping_nonlinear_with_abort(
+                        circuit,
+                        matrix,
+                        &fallback_seed,
+                        abort,
+                    )
+                    .map_err(|true_failure| {
+                        log::info!("True GMIN stepping failed with {true_failure}.");
+                        dynamic
+                    })
+                }
+                walked => walked,
+            };
+            match walked {
                 Ok(gmin_solution) => {
                     if let Some(candidate) = self.evaluate_fallback_candidate(
                         circuit,

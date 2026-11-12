@@ -179,7 +179,7 @@ jobs:
       - name: Oracle-free corpora (routine tier)
         run: >-
           cargo test --locked -p rspice-conformance --release
-          --test execution_corpora -- --test-threads 1
+          --test execution_corpora --test operating_point_aids -- --test-threads 1
 
   test-linux-veriloga:
     name: Test Verilog-A & mixed-signal suites (Linux)

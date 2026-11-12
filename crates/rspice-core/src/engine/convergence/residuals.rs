@@ -987,22 +987,21 @@ impl Engine {
         )
     }
 
-    pub(in crate::engine::convergence) fn try_nonlinear_residual_converged_with_gmin(
+    pub(in crate::engine::convergence) fn try_nonlinear_residual_converged_at_gmin_stage(
         &self,
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
         solution: &[Value],
-        gmin: Value,
+        stage: GminStage,
     ) -> Result<bool, SimulationError> {
-        let junction_gmin = self.gmin_stage_junction_gmin(gmin);
         let floor = self.dc_nodal_gmin_floor(circuit);
         self.try_nonlinear_residual_converged_with_linear_stamp_and_junction_gmin(
             circuit,
             matrix,
             solution,
-            junction_gmin,
+            stage.junction,
             |circuit, matrix, rhs| {
-                Self::stamp_nodal_gmin_stage(circuit, matrix, gmin, floor);
+                Self::stamp_nodal_gmin_stage(circuit, matrix, stage.nodal, floor);
                 circuit.stamp_dc_direct(matrix, rhs);
             },
         )
@@ -1223,22 +1222,21 @@ impl Engine {
         })
     }
 
-    pub(in crate::engine::convergence) fn nonlinear_merit_with_gmin(
+    pub(in crate::engine::convergence) fn nonlinear_merit_at_gmin_stage(
         &self,
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
         solution: &[Value],
-        gmin: Value,
+        stage: GminStage,
     ) -> Option<Value> {
-        let junction_gmin = self.gmin_stage_junction_gmin(gmin);
         let floor = self.dc_nodal_gmin_floor(circuit);
         self.nonlinear_merit_with_linear_stamp_and_junction_gmin(
             circuit,
             matrix,
             solution,
-            junction_gmin,
+            stage.junction,
             |circuit, matrix, rhs| {
-                Self::stamp_nodal_gmin_stage(circuit, matrix, gmin, floor);
+                Self::stamp_nodal_gmin_stage(circuit, matrix, stage.nodal, floor);
                 circuit.stamp_dc_direct(matrix, rhs);
             },
         )

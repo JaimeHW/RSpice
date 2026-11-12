@@ -31,6 +31,14 @@ pub(in crate::engine::convergence) struct OperatingPointProbe<'a> {
     pub junction_gmin: Value,
 }
 
+/// One GMIN-stepping stage: the conductance from every node to ground and the
+/// device junction GMIN, ngspice's `CKTdiagGmin` and `CKTgmin`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(in crate::engine::convergence) struct GminStage {
+    pub nodal: Value,
+    pub junction: Value,
+}
+
 /// One corrector run: where it starts, the damping state it carries across
 /// its Newton steps, and the iteration ceiling it must finish inside.
 pub(in crate::engine::convergence) struct CorrectorRun<'a> {
