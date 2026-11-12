@@ -807,6 +807,24 @@ const FEATURE_COMMAND_FILES: &[&str] = &[
 /// can invoke. There is no such thing: the fix is a route, or deletion.
 const UNROUTED_COMMANDS: &[(&str, &str)] = &[];
 
+/// The variants `enum Command` declares.
+///
+/// Read the way the dispatcher's unit test reads them, and that test binds
+/// the figure to the legacy commands `COMMAND_REGISTRY` lists at run time.
+fn declared_commands(code: &str) -> BTreeSet<String> {
+    let body = code
+        .split_once("pub enum Command {")
+        .and_then(|(_, rest)| rest.split_once("\n}"))
+        .map(|(body, _)| body)
+        .expect("vocabulary.rs declares `pub enum Command`");
+    body.lines()
+        .filter_map(|line| line.strip_prefix("    "))
+        .filter(|line| line.starts_with(|c: char| c.is_ascii_uppercase()))
+        .filter_map(|line| line.split(|c: char| !c.is_ascii_alphanumeric()).next())
+        .map(str::to_owned)
+        .collect()
+}
+
 /// The `Command` variants `COMMAND_REGISTRY` lists.
 ///
 /// Payloads are dropped: a menu that routes `Command::OpenWorkspace(workspace)`
@@ -1174,11 +1192,24 @@ fn every_command_has_a_user_route() {
     let registry_code = registry_code.expect("vocabulary.rs is in the shipped source");
     let routing_code = routing_code.expect("registry.rs is in the shipped source");
     let registered = registered_commands(&registry_code);
-    // The registry shrinks as the features take its commands, so no count
-    // stands for a parse that worked.
+    // The figure is the variants the enum declares, which the dispatcher's
+    // unit test binds to the registry at run time: the parse finds exactly
+    // that many, so it stays exact as the features take the enum's commands.
+    let declared = declared_commands(&registry_code);
     assert!(
-        !registered.is_empty(),
-        "COMMAND_REGISTRY parsed as empty — the parse broke, not the registry"
+        !declared.is_empty(),
+        "`enum Command` declares no variant: it goes, and this check with it"
+    );
+    assert_eq!(
+        registered.len(),
+        declared.len(),
+        "COMMAND_REGISTRY parsed as {} variants; `enum Command` declares {}",
+        registered.len(),
+        declared.len()
+    );
+    assert_eq!(
+        registered, declared,
+        "COMMAND_REGISTRY and `enum Command` name the same variants"
     );
     let excluded = palette_excluded(&routing_code);
     for variant in shortcut_bound(&routing_code) {

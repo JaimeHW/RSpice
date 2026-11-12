@@ -613,17 +613,25 @@ mod tests {
     #[test]
     fn the_registry_lists_every_command_the_enum_declares() {
         let declared = declared_variants();
-        // The enum shrinks as the features take its commands, so no count
-        // stands for a parse that worked; the comparison below names any
-        // variant a broken parse lost.
-        assert!(
-            !declared.is_empty(),
-            "`enum Command` parsed as no variants: the parse broke, not the enum"
-        );
+        // The figure is the legacy commands COMMAND_REGISTRY lists at run
+        // time. The parse finds exactly that many, so it stays exact as the
+        // features take the enum's commands, and a parse that broke cannot
+        // pass for an enum that shrank.
         let registered: BTreeSet<String> = COMMAND_REGISTRY
             .iter()
             .map(|command| variant(*command))
             .collect();
+        assert!(
+            !registered.is_empty(),
+            "COMMAND_REGISTRY lists no legacy command: `enum Command` goes, and this test with it"
+        );
+        assert_eq!(
+            declared.len(),
+            registered.len(),
+            "`enum Command` parsed as {} variants; COMMAND_REGISTRY lists {} at run time",
+            declared.len(),
+            registered.len()
+        );
         assert_eq!(
             registered, declared,
             "a new command goes in COMMAND_REGISTRY"
