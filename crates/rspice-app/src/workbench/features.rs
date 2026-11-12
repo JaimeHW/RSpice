@@ -98,6 +98,27 @@ pub(crate) fn cx_with_foreign_answers<F: Registered>(
     F::cx(app).with_foreign_availability(answers)
 }
 
+/// The context `F`'s menu runs in, as [`cx`] lends it, holding the
+/// dispatcher's answers for the commands `F` reads and, after them, for
+/// those its menus read. Lend it only while one of `F`'s menus is open: no
+/// other lend takes the menus' answers, so a frame without an open menu
+/// asks the dispatcher nothing more.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the source editor's menu on the netlist page is the first to lend it"
+    )
+)]
+pub(crate) fn cx_with_menu_answers<F: Registered>(app: &mut RSpiceApp) -> Cx<'_, F> {
+    let answers = ForeignAvailability::take_with_menus(
+        F::FOREIGN_AVAILABILITY,
+        F::MENU_AVAILABILITY,
+        |key| app.command_availability(key),
+    );
+    F::cx(app).with_foreign_availability(answers)
+}
+
 /// Carry out `routed` where `F` takes it here, and say whether it did. Its
 /// context holds whether an application-modal dialog is open, taken once
 /// `F` has taken the command, as the shell's own arm asked it at that point.
@@ -383,6 +404,13 @@ macro_rules! features {
             vec![$((stringify!($slot), <$feature as Feature>::FOREIGN_AVAILABILITY)),+]
         }
 
+        /// The commands each registered feature's menus read the
+        /// dispatcher's answer for, with the slot of the feature.
+        #[cfg(test)]
+        fn menu_availability() -> Vec<(&'static str, &'static [CommandKey])> {
+            vec![$((stringify!($slot), <$feature as Feature>::MENU_AVAILABILITY)),+]
+        }
+
         /// Draw the feature dialog step `key` names for this frame, then
         /// answer what it raised for straight after.
         pub(super) fn render_dialog(app: &mut RSpiceApp, ctx: &egui::Context, key: DialogKey) {
@@ -564,14 +592,17 @@ mod tests {
         );
     }
 
-    /// Every command a feature reads the dispatcher's answer for is one the
-    /// dispatcher answers to, read once, and no feature reads more answers
-    /// than a context holds.
+    /// Every command a feature or its menus read the dispatcher's answer
+    /// for is one the dispatcher answers to, read once, and no feature reads
+    /// more answers than a context holds.
     #[test]
     fn every_command_a_feature_reads_is_one_the_dispatcher_answers() {
         use crate::workbench::commands::vocabulary::legacy_command;
 
-        for (slot, keys) in foreign_availability() {
+        for ((slot, foreign), (_, menus)) in
+            foreign_availability().into_iter().zip(menu_availability())
+        {
+            let keys = [foreign, menus].concat();
             assert!(keys.len() <= ForeignAvailability::CAPACITY, "{slot}");
             for (index, key) in keys.iter().enumerate() {
                 assert!(
@@ -580,6 +611,30 @@ mod tests {
                 );
                 assert!(!keys[..index].contains(key), "{slot} reads {key:?} twice");
             }
+        }
+    }
+
+    /// A lend for anything but an open menu asks the dispatcher for the code
+    /// feature's three answers, the toolbar's every frame among them; the
+    /// lend while its menu is open asks for its menu's eight after them, and
+    /// holds each as the dispatcher gives it.
+    #[test]
+    fn a_plain_lend_takes_three_answers_and_a_menu_lend_eleven() {
+        use crate::workbench::code::CodeFeature;
+
+        let mut app = RSpiceApp::test_instance();
+        let menu_answers: Vec<_> = CodeFeature::MENU_AVAILABILITY
+            .iter()
+            .map(|key| (*key, app.command_availability(*key)))
+            .collect();
+        assert_eq!(
+            cx_with_foreign_answers::<CodeFeature>(&mut app, |_| true).foreign_answers_taken(),
+            3
+        );
+        let cx = cx_with_menu_answers::<CodeFeature>(&mut app);
+        assert_eq!(cx.foreign_answers_taken(), 11);
+        for (key, answer) in menu_answers {
+            assert_eq!(cx.foreign_availability(key), answer, "{key:?}");
         }
     }
 

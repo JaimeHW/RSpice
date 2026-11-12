@@ -526,8 +526,11 @@ mod tests {
     const FIRST: CommandKey = CommandKey::new("first");
     const SECOND: CommandKey = CommandKey::new("second");
     const THIRD: CommandKey = CommandKey::new("third");
+    const MENU_FIRST: CommandKey = CommandKey::new("menu-first");
+    const MENU_SECOND: CommandKey = CommandKey::new("menu-second");
 
-    /// A feature that reads three commands' dispatcher answers.
+    /// A feature that reads three commands' dispatcher answers, and two more
+    /// while one of its menus is open.
     struct Reader;
 
     impl Feature for Reader {
@@ -535,6 +538,7 @@ mod tests {
         type Session = WorkbenchSession;
         type Handles = NoHandles;
         const FOREIGN_AVAILABILITY: &'static [CommandKey] = &[FIRST, SECOND, THIRD];
+        const MENU_AVAILABILITY: &'static [CommandKey] = &[MENU_FIRST, MENU_SECOND];
 
         fn register(_registry: &mut FeatureRegistry<Self>) {}
     }
@@ -570,6 +574,66 @@ mod tests {
             cx.foreign_availability(THIRD),
             CommandAvailability::Available
         );
+    }
+
+    /// A context lent while a menu is open holds the menus' answers after
+    /// the others, each asked of the dispatcher once; a context lent for
+    /// anything else asks for the others alone.
+    #[test]
+    fn a_context_lent_for_a_menu_reads_the_menus_answers_too() {
+        let mut harness = reader();
+        let mut asked = Vec::new();
+        let plain = ForeignAvailability::take(Reader::FOREIGN_AVAILABILITY, |key| {
+            asked.push(key);
+            CommandAvailability::Available
+        });
+        assert_eq!(asked, [FIRST, SECOND, THIRD]);
+        assert_eq!(
+            harness
+                .cx()
+                .with_foreign_availability(plain)
+                .foreign_answers_taken(),
+            3
+        );
+
+        asked.clear();
+        let menu = ForeignAvailability::take_with_menus(
+            Reader::FOREIGN_AVAILABILITY,
+            Reader::MENU_AVAILABILITY,
+            |key| {
+                asked.push(key);
+                if key == MENU_SECOND {
+                    CommandAvailability::Disabled("the menu's second is refused")
+                } else {
+                    CommandAvailability::Available
+                }
+            },
+        );
+        assert_eq!(asked, [FIRST, SECOND, THIRD, MENU_FIRST, MENU_SECOND]);
+        let cx = harness.cx().with_foreign_availability(menu);
+        assert_eq!(cx.foreign_answers_taken(), 5);
+        assert!(cx.foreign_available(FIRST));
+        assert!(cx.foreign_available(MENU_FIRST));
+        assert_eq!(
+            cx.foreign_availability(MENU_SECOND),
+            CommandAvailability::Disabled("the menu's second is refused")
+        );
+        assert_eq!(harness.cx().foreign_answers_taken(), 0);
+    }
+
+    /// Reading a menu's answer from a context the shell lent without the
+    /// menus' answers is the same fault as reading any answer from one lent
+    /// without them.
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "the shell lent this context without the dispatcher's answers")]
+    fn a_context_lent_without_the_menus_answers_refuses_to_read_one() {
+        let mut harness = reader();
+        let answers = ForeignAvailability::take(Reader::FOREIGN_AVAILABILITY, |_| {
+            CommandAvailability::Available
+        });
+        let cx = harness.cx().with_foreign_availability(answers);
+        cx.foreign_available(MENU_FIRST);
     }
 
     /// Reading an answer from a context the shell lent without them is a

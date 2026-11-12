@@ -26,6 +26,7 @@ use crate::workbench::commands::code_context::{
     resolve_veriloga_compile, veriloga_compile_refusal,
 };
 use crate::workbench::commands::foreign_import_refusal;
+use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::documents::code_workspace::{
     CodeWorkspacePage, ProblemStep, cancel_veriloga_compile, consume_veriloga_compile_request,
     design_hosts_veriloga, netlist_page_shown, poll_automation_source_import,
@@ -54,6 +55,18 @@ impl Feature for CodeFeature {
     /// the dispatcher would run or stop, stating Stop's refusal in its words.
     const FOREIGN_AVAILABILITY: &'static [CommandKey] =
         &[ids::TUNING, ids::RUN_SIMULATION, ids::STOP_SIMULATION];
+    /// The source editor's right-click menu offers these, each greyed while
+    /// the dispatcher would not run it.
+    const MENU_AVAILABILITY: &'static [CommandKey] = &[
+        CodeCommand::GoToDefinition.key(),
+        CodeCommand::FindReferences.key(),
+        CodeCommand::RenameSymbol.key(),
+        Command::Cut.key(),
+        Command::Copy.key(),
+        Command::Paste.key(),
+        CodeCommand::ToggleLineComment.key(),
+        CodeCommand::FormatDocument.key(),
+    ];
 
     fn register(registry: &mut FeatureRegistry<Self>) {
         registry.commands::<CodeCommand>();

@@ -64,6 +64,16 @@ pub trait Feature: Sized + 'static {
     /// them, and [`Cx::foreign_availability`] reads them.
     const FOREIGN_AVAILABILITY: &'static [CommandKey] = &[];
 
+    /// The commands whose dispatcher answer only the feature's menus read,
+    /// as their rows show it. The shell takes these answers only for a
+    /// context it lends while one of the feature's menus is open, so a frame
+    /// without an open menu asks the dispatcher nothing more, and
+    /// [`Cx::foreign_availability`] reads them as it reads the others. No
+    /// command is on both lists, and the two hold at most
+    /// [`ForeignAvailability::CAPACITY`] between them: a feature that
+    /// declares otherwise does not build.
+    const MENU_AVAILABILITY: &'static [CommandKey] = &[];
+
     /// Hand the registry everything the feature declares.
     fn register(registry: &mut FeatureRegistry<Self>);
 }
@@ -458,6 +468,17 @@ impl<'a, F: Feature> Cx<'a, F> {
         peers: Peers<'a>,
         commands: &'static Registry,
     ) -> Self {
+        const {
+            assert!(
+                F::FOREIGN_AVAILABILITY.len() + F::MENU_AVAILABILITY.len()
+                    <= ForeignAvailability::CAPACITY,
+                "a feature reads at most ForeignAvailability::CAPACITY commands' answers"
+            );
+            assert!(
+                keys_are_disjoint(F::FOREIGN_AVAILABILITY, F::MENU_AVAILABILITY),
+                "a command a feature's menus read is not also one it reads elsewhere"
+            );
+        }
         Self {
             state,
             own,
@@ -498,26 +519,37 @@ impl<'a, F: Feature> Cx<'a, F> {
     /// Whether the command `key` names would run if raised now, and why
     /// not, as the dispatcher answered when the shell lent this context.
     /// `key` is one the feature declares in
-    /// [`Feature::FOREIGN_AVAILABILITY`], and the shell lent the context with
-    /// the answers: reading one from a context lent without them is a fault
-    /// in the call that reads it, not a no.
+    /// [`Feature::FOREIGN_AVAILABILITY`] or [`Feature::MENU_AVAILABILITY`],
+    /// and the shell lent the context with its answer: reading one from a
+    /// context lent without the answers, or a menu's from one lent without
+    /// the menus' answers, is a fault in the call that reads it, not a no.
     pub fn foreign_availability(&self, key: CommandKey) -> CommandAvailability {
         let index = F::FOREIGN_AVAILABILITY
             .iter()
+            .chain(F::MENU_AVAILABILITY)
             .position(|declared| *declared == key);
         debug_assert!(
             index.is_some(),
             "{key:?} is not a command the feature declares it reads"
         );
+        let answer = index
+            .zip(self.foreign.as_ref())
+            .and_then(|(index, foreign)| foreign.answer(index));
         debug_assert!(
-            self.foreign.is_some(),
+            index.is_none() || answer.is_some(),
             "the shell lent this context without the dispatcher's answers"
         );
-        index
-            .zip(self.foreign.as_ref())
-            .map_or(CommandAvailability::Hidden, |(index, foreign)| {
-                foreign.0[index]
-            })
+        answer.unwrap_or(CommandAvailability::Hidden)
+    }
+
+    /// How many commands' dispatcher answers the shell took for this
+    /// context: none, the feature's foreign commands', or those and its
+    /// menus' after them.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn foreign_answers_taken(&self) -> usize {
+        self.foreign
+            .as_ref()
+            .map_or(0, ForeignAvailability::answered)
     }
 
     /// Whether the command `key` names would run if raised now: the
@@ -542,33 +574,97 @@ impl<'a, F: Feature> Cx<'a, F> {
 }
 
 /// The dispatcher's answers for the commands a feature declares in
-/// [`Feature::FOREIGN_AVAILABILITY`], taken as the shell lends it a context:
-/// whether each would run if raised then, and why not, in the order it
-/// declares them.
+/// [`Feature::FOREIGN_AVAILABILITY`], and for a context lent while one of
+/// its menus is open those in [`Feature::MENU_AVAILABILITY`] after them,
+/// taken as the shell lends it a context: whether each would run if raised
+/// then, and why not, in the order it declares them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ForeignAvailability([CommandAvailability; Self::CAPACITY]);
+pub struct ForeignAvailability {
+    answers: [CommandAvailability; Self::CAPACITY],
+    /// How many of `answers`, from the first, the shell took.
+    taken: usize,
+}
 
 impl ForeignAvailability {
-    /// The most commands a feature may declare it reads. Each answer is held
-    /// whole, reason and all, in the context the shell lends.
+    /// The most commands a feature may declare it reads, its menus'
+    /// included. Each answer is held whole, reason and all, in the context
+    /// the shell lends.
     pub const CAPACITY: usize = 12;
 
     /// The answers `availability` gives for `keys`, in order.
     pub fn take(
         keys: &[CommandKey],
+        availability: impl FnMut(CommandKey) -> CommandAvailability,
+    ) -> Self {
+        Self::take_with_menus(keys, &[], availability)
+    }
+
+    /// The answers `availability` gives for `keys` and then `menu_keys`, in
+    /// order: what a context lent while one of the feature's menus is open
+    /// holds.
+    pub fn take_with_menus(
+        keys: &[CommandKey],
+        menu_keys: &[CommandKey],
         mut availability: impl FnMut(CommandKey) -> CommandAvailability,
     ) -> Self {
         debug_assert!(
-            keys.len() <= Self::CAPACITY,
+            keys.len() + menu_keys.len() <= Self::CAPACITY,
             "a feature reads at most {} commands' answers",
             Self::CAPACITY
         );
         let mut answers = [CommandAvailability::Hidden; Self::CAPACITY];
-        for (answer, key) in answers.iter_mut().zip(keys) {
+        let mut taken = 0;
+        for (answer, key) in answers.iter_mut().zip(keys.iter().chain(menu_keys)) {
             *answer = availability(*key);
+            taken += 1;
         }
-        Self(answers)
+        Self { answers, taken }
     }
+
+    /// How many commands' answers it holds.
+    pub fn answered(&self) -> usize {
+        self.taken
+    }
+
+    /// The answer at `index` in the order the feature declares its
+    /// commands, its menus' after the rest; `None` where none was taken.
+    fn answer(&self, index: usize) -> Option<CommandAvailability> {
+        (index < self.taken).then(|| self.answers[index])
+    }
+}
+
+/// Whether no command is on both `first` and `second`, answered where a
+/// constant is checked.
+const fn keys_are_disjoint(first: &[CommandKey], second: &[CommandKey]) -> bool {
+    let mut i = 0;
+    while i < first.len() {
+        let mut j = 0;
+        while j < second.len() {
+            if same_text(first[i].as_str(), second[j].as_str()) {
+                return false;
+            }
+            j += 1;
+        }
+        i += 1;
+    }
+    true
+}
+
+/// Whether `a` and `b` are the same text, answered where a constant is
+/// checked.
+const fn same_text(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < a.len() {
+        if a[i] != b[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
 }
 
 /// What a feature reads to answer whether one of its commands can run.
