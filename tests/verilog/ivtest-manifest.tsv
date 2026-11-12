@@ -119,7 +119,7 @@ attrib07_func_call	vlg	passed	L3	pass	PASSED
 attrib08_mod_inst	vlg	passed	L1	pass	PASSED
 attrib09_case	vlg	passed	L1	pass	PASSED
 attrib_expr	vlg	passed	L4	fail	compile error: Parse error: Expected '*', found '+'
-automatic_error1	vlg	ce	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: scope `auto_task` is not declared in this module or its generated ancestors or enclosing instances
+automatic_error1	vlg	ce	L4	pass	language error: Semantic error: Invalid expression: hierarchical reference: `auto_task.local` names an item of automatic task `auto_task`; IEEE 1364-2005 sections 10.2.3 and 10...
 automatic_error10	vlg	ce	L4	pass	language error: Semantic error: Invalid expression: a `force` or `release` cannot use `local`, a variable of the automatic task `auto_task` (IEEE 1364-2005 section 10.2.1)
 automatic_error2	vlg	ce	L3	pass	language error: Semantic error: Invalid expression: a nonblocking assignment cannot write `local`, a variable of the automatic task `auto_task` (IEEE 1364-2005 section 10.2.1)
 automatic_error3	vlg	ce	L4	refused:feature	Semantic error: Unsupported feature: event expressions reading process-local storage require shared local event bindings
@@ -137,7 +137,7 @@ automatic_task3	vlg	gold	L3	refused:fork	Semantic error: Unsupported feature: `f
 bitwidth	vlg	passed	L1	pass	PASSED
 bitwidth2	vlg	passed	L1	pass	PASSED
 blankport	vlg	passed	L1	pass	testbench gap: no root selection (-s main); PASSED
-block_only_with_var_def	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: generated scope `b` with index None is missing or not source-visible
+block_only_with_var_def	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `a.b.x` reaches into named block `b` of module `a`, and a reference into a named block's scope is n...
 bnot	vlg	passed	L1	pass	PASSED
 br1000	vlg	passed	L1	pass	PASSED
 br1001	vlg	passed	L7	refused:feature	Semantic error: Unsupported feature: analog port 'a' of instance 'topmod.m1' connects discrete net 'x' without a connect module; this compiler inserts connect m...
@@ -450,7 +450,7 @@ drive_strength2	vlg	gold	L1	pass	matches the gold file
 drive_strength3	vlg	passed	-	excluded:systemverilog:bit	
 dummy7	vlg	gold	L1	racy	passes in source order only; differs from the gold file at line 1 (6 lines against 6)
 dump_memword	vlg	gold	L5	fail	compile error: Semantic error: Invalid expression: argument 2 of `$dumpvars` names a module instance, block or signal, not an expression
-dumpvars	vlg	passed	L5	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `.u1` is not a continuous net, branch, parameter or analog function
+dumpvars	vlg	passed	L5	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `.u1` names a module instance, and a hierarchical scope argument is not supported yet
 eeq	vlg	passed	L1	pass	PASSED
 else1	vlg	passed	L1	pass	PASSED
 else2	vlg	passed	L1	pass	PASSED
@@ -538,7 +538,7 @@ generate_specparam	vlg	ce	-	excluded:flag-g2005-sv
 genloop	vlg	passed	L1	refused:for	Parse error: Unsupported module item: for
 genvar_scopes	vlg	passed	L1	refused:for	Parse error: Unsupported module item: for
 hello1	vlg	passed	L1	pass	PASSED
-hier_ref_error	vlg	ce	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: scope `my_task` is not declared in this module or its generated ancestors or enclosing instances
+hier_ref_error	vlg	ce	L4	pass	language error: Semantic error: Invalid expression: hierarchical reference: `missing` is not declared in task `my_task`
 hierspace	vlg	passed	L4	pass	PASSED
 idiv1	vlg	passed	L1	pass	PASSED
 idiv2	vlg	passed	L3	pass	PASSED
@@ -569,9 +569,9 @@ land2	vlg	passed	L1	pass	PASSED
 land3	vlg	passed	L1	pass	PASSED
 land4	vlg	gold	L1	pass	matches the gold file
 landor1	vlg	passed	L1	pass	PASSED
-ldelay1	vlg	passed	L6	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: scope `ok` is not declared in this module or its generated ancestors or enclosing instances
+ldelay1	vlg	passed	L6	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `ok.error` reads or writes an item of task `ok`, and a reference into a task's own scope is not sup...
 ldelay2	vlg	passed	L6	pass	PASSED
-ldelay3	vlg	passed	L6	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: scope `ok` is not declared in this module or its generated ancestors or enclosing instances
+ldelay3	vlg	passed	L6	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `ok.error` reads or writes an item of task `ok`, and a reference into a task's own scope is not sup...
 ldelay4	vlg	passed	L7	pass	PASSED
 ldelay5	vlg	passed	L7	pass	PASSED
 lh_catadd	vlg	passed	L1	pass	PASSED
@@ -842,12 +842,12 @@ pr1697250	vlg	passed	L1	pass	PASSED
 pr1697732	vlg	passed	L1	pass	PASSED
 pr1698499	vlg	gold	-	excluded:nonstandard-systf:$D_IN	
 pr1698658	vlg	gold	L1	pass	matches the gold file
-pr1698659	vlg	gold	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: scope `othertop` is not declared in this module or its generated ancestors or enclosing instances
+pr1698659	vlg	gold	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `othertop.othertopvar` names module `othertop`, which is not instantiated here; a reference that st...
 pr1698820	vlg	gold	-	excluded:systemverilog:var	
 pr1699444	vlg	gold	L1	pass	matches the gold file
 pr1699519	vlg	gold	L1	pass	matches the gold file
-pr1701855	vlg	gold	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `dut.dut` is not a continuous net, branch, parameter or analog function
-pr1701855b	vlg	gold	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: scope `dummy` is not declared in this module or its generated ancestors or enclosing instances
+pr1701855	vlg	gold	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `dut.dut` names a module instance, and a hierarchical scope argument is not supported yet
+pr1701855b	vlg	gold	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `dummy.ipval` names module `dummy`, which is not instantiated here; a reference that starts at anot...
 pr1701889	vlg	gold	L3	pass	matches the gold file
 pr1701921	vlg	passed	L1	pass	PASSED
 pr1702593	vlg	gold	L1	pass	matches the gold file
@@ -856,7 +856,7 @@ pr1703346	vlg	passed	L7	pass	PASSED
 pr1703959	vlg	passed	L7	pass	PASSED
 pr1704013	vlg	ce	L1	pass	language error: Semantic error: Port 'a' is declared without a range and redeclared with range [1:0]; IEEE 1364-2005 section 12.3.3 makes the ranges of a port's two declaration...
 pr1704726a	vlg	ce	L6	refused:generate-scope	Parse error: Unsupported generate scope: block name 'task_blk' conflicts with another declaration in this scope (VAMS-2023 6.6.2, 6.8)
-pr1704726b	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `name_func` is not declared in the selected scope
+pr1704726b	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `name_func` is a function of generate block `name_fi`, and calling a task or function a generate bl...
 pr1704726c	vlg	ce	L3	refused:generate-scope	Parse error: Unsupported generate scope: block name 'name_gl' conflicts with another declaration in this scope (VAMS-2023 6.6.2, 6.8)
 pr1704726d	vlg	ce	L3	refused:generate-scope	Parse error: Unsupported generate scope: block name 'name6_sgl' conflicts with another declaration in this scope (VAMS-2023 6.6.2, 6.8)
 pr1705027	vlg	co	L4	refused:feature	Semantic error: Unsupported feature: analog port 'r' of instance 'test.ua' must connect to a net identifier or ground
@@ -900,7 +900,7 @@ pr1795005b	vlg	gold	L3	pass	matches the gold file
 pr1799904	vlg	gold	L1	pass	matches the gold file
 pr1804877	vlg	gold	L1	pass	matches the gold file
 pr1805837	vlg	gold	L1	pass	matches the gold file
-pr1812297	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: scope `ttop` is not declared in this module or its generated ancestors or enclosing instances
+pr1812297	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `ttop.fpass` names module `ttop`, which is not instantiated here; a reference that starts at anothe...
 pr1819452	vlg	gold	L5	pass	matches the gold file
 pr1820472	vlg	gold	L1	pass	matches the gold file
 pr1822658	vlg	passed	L1	pass	PASSED
@@ -997,8 +997,8 @@ pr1978358d	vlg	passed	-	excluded:systemverilog:var
 pr1983762	vlg	passed	L1	pass	PASSED
 pr1985582	vlg	gold	L3	pass	matches the gold file
 pr1988302	vlg	passed	L1	pass	PASSED
-pr1988302b	vlg	ce	L1	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: generated scope `V` with index None is missing or not source-visible
-pr1988310	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: generated scope `foo_task` with index None is missing or not source-visible
+pr1988302b	vlg	ce	L1	pass	language error: Semantic error: Invalid expression: hierarchical reference: `a` is not declared in named block `V` of generate block `U[0]` (IEEE 1364-2005 section 12.5)
+pr1988310	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `gen.foo_task.x` reaches into task `foo_task` of generate block `gen`, and a reference into a task'...
 pr1990029	vlg	passed	L5	pass	testbench gap: no defines (__ICARUS__); PASSED
 pr1990164	vlg	passed	L1	pass	PASSED
 pr1990269	vlg	passed	L1	pass	testbench gap: no defines (__ICARUS__); PASSED
@@ -1092,9 +1092,9 @@ pr2305307	vlg	passed	L4	pass	PASSED
 pr2305307b	vlg	passed	-	excluded:systemverilog:rand	
 pr2305307c	vlg	passed	L1	pass	PASSED
 pr2306259	vlg	passed	L1	pass	PASSED
-pr2350934	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `f` is not declared in the selected scope
-pr2350934b	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `f` is not declared in the selected scope
-pr2350988	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `f` is not declared in the selected scope
+pr2350934	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `f` is a function of generate block `block`, and calling a task or function a generate block declar...
+pr2350934b	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `f` is a function of generate block `block`, and calling a task or function a generate block declar...
+pr2350988	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `f` is a function of generate block `block`, and calling a task or function a generate block declar...
 pr2352834	vlg	passed	L1	pass	PASSED
 pr2355304	vlg	passed	L1	pass	PASSED
 pr2355304b	vlg	passed	L1	pass	PASSED
@@ -1154,7 +1154,7 @@ pr2781595	vlg	passed	L6	pass	PASSED
 pr2785294	vlg	gold	L1	pass	matches the gold file
 pr2788686	vlg	passed	L3	pass	PASSED
 pr2790236	vlg	passed	L1	pass	PASSED
-pr2792883	vlg	ce	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: a parameter declaration cannot reference outside its module (VAMS-2023 6.7.1)
+pr2792883	vlg	ce	L4	pass	language error: Semantic error: Invalid expression: hierarchical reference: a parameter declaration cannot reference outside its module (IEEE 1364-2005 section 5.2, VAMS-2023 6...
 pr2792897	vlg	passed	L5	pass	PASSED
 pr2794144	vlg	ce	L1	pass	language error: Parse error: Expected a primary as the operand of a unary operator (IEEE 1364-2005 A.8.3); parenthesize the reduction, found '|'
 pr2800985a	vlg	passed	-	excluded:nonstandard-systf:$fputc	
@@ -1249,7 +1249,7 @@ pr3064511	vlg	passed	L1	pass	PASSED
 pr307	vlg	passed	L1	pass	PASSED
 pr3077640	vlg	passed	L1	pass	PASSED
 pr3078759	vlg	co	L6	pass	compiled
-pr307a	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: scope `r` is not declared in this module or its generated ancestors or enclosing instances
+pr307a	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `r.errors` reads or writes an item of task `r`, and a reference into a task's own scope is not supp...
 pr3098439	vlg	passed	L5	pass	PASSED
 pr3098439a	vlg	passed	L5	pass	PASSED
 pr3098439b	vlg	passed	L5	pass	PASSED
@@ -1490,7 +1490,7 @@ schedule	vlg	passed	L3	pass	PASSED
 scope1	vlg	passed	L4	pass	PASSED
 scope2	vlg	passed	L1	pass	PASSED
 scope2b	vlg	ce	-	excluded:flag-g1	
-scope4	vlg	passed	L5	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `test2.test3` is not a continuous net, branch, parameter or analog function
+scope4	vlg	passed	L5	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `test2.test3` names a module instance, and a hierarchical scope argument is not supported yet
 scope5	vlg	passed	-	excluded:systemverilog:bit	
 scoped_events	vlg	gold	L4	refused:parameter	Parse error: Verilog-AMS digital construct not yet supported: `parameter`
 sdf1	vlg	gold	-	excluded:sdf-annotate	
@@ -1923,7 +1923,7 @@ constfunc4_ams	vvp	passed	-	excluded:flag-gverilog-ams
 constfunc6_ams	vvp	passed	-	excluded:nonstandard-systf:$abs	
 constfunccall1	vvp	passed	L3	pass	PASSED
 constfunccall2	vvp	passed	-	excluded:flag-g2009	
-constfunccall3	vvp	ce	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: scope `m1` is not declared in this module or its generated ancestors or enclosing instances
+constfunccall3	vvp	ce	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `m1.f1` names module `m1`, which is not instantiated here; a reference that starts at another top-l...
 decl_before_use1	vvp	ce	L1	pass	language error: Semantic error: Invalid expression: `v` is used before its declaration; IEEE 1364-2005 section 4.5 declares a name implicitly only as a net, and only where no d...
 decl_before_use2	vvp	ce	L1	pass	language error: Semantic error: Invalid expression: `w` is used before its declaration; IEEE 1364-2005 section 4.5 declares a name implicitly only as a net, and only where no d...
 decl_before_use3	vvp	ce	L3	pass	language error: Semantic error: Invalid expression: the named event `e` is used before its declaration (IEEE 1364-2005 section 4.5 declares only nets implicitly)

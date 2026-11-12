@@ -24,6 +24,16 @@ fn error(message: impl Into<String>, span: Span) -> CompileError {
     .into()
 }
 
+/// A hierarchical reference the language itself rules out: a source error,
+/// not a refusal.
+fn invalid(message: impl Into<String>, span: Span) -> CompileError {
+    SemanticError::new(
+        SemanticErrorKind::InvalidExpression(format!("hierarchical reference: {}", message.into())),
+        span,
+    )
+    .into()
+}
+
 fn has_references(module: &Module) -> bool {
     !module.hierarchical_names.is_empty() || !module.pending_hierarchical_references.is_empty()
 }
@@ -61,8 +71,11 @@ fn validate_parameter_references(source: &Module) -> CompileResult<()> {
                 });
             }
             if forbidden {
-                return Err(error(
-                    "a parameter declaration cannot reference outside its module (VAMS-2023 6.7.1)",
+                // A parameter's value is a constant expression, which names
+                // no hierarchical reference (IEEE 1364-2005 section 5.2).
+                return Err(invalid(
+                    "a parameter declaration cannot reference outside its module (IEEE \
+                     1364-2005 section 5.2, VAMS-2023 6.7.1)",
                     reference.source.span,
                 ));
             }
@@ -500,12 +513,7 @@ impl Resolver {
         let name = self.frames[frame]
             .member(&scope, terminal)
             .or_else(|| routine.then(|| terminal.clone()))
-            .ok_or_else(|| {
-                error(
-                    format!("`{terminal}` is not declared in the selected scope"),
-                    span,
-                )
-            })?;
+            .ok_or_else(|| self.undeclared_terminal(frame, &scope, terminal, span))?;
         Ok((frame, name))
     }
 
@@ -516,7 +524,7 @@ impl Resolver {
     ) -> CompileResult<(usize, Vec<HierarchicalScopeKey>)> {
         let span = reference.source.span;
         let (mut frame, mut scope, consumed) = self.start_scope(owner, reference)?;
-        for key in &reference.scopes[consumed..] {
+        for (position, key) in reference.scopes.iter().enumerate().skip(consumed) {
             if let Some(member) = self.frames[frame].member(&scope, &key.name) {
                 let instance = self.frames[frame]
                     .instances
@@ -547,13 +555,9 @@ impl Resolver {
                             || (frame == owner && reference.origin.starts_with(&scope))
                     });
                 if !allowed {
-                    return Err(error(
-                        format!(
-                            "generated scope `{}` with index {:?} is missing or not source-visible",
-                            key.name, key.index
-                        ),
-                        span,
-                    ));
+                    let last = position + 1 == reference.scopes.len();
+                    let parent = &scope[..scope.len() - 1];
+                    return Err(self.unentered_scope(frame, parent, key, last, reference));
                 }
             }
         }

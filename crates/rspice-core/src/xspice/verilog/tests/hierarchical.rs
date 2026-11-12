@@ -110,3 +110,43 @@ fn a_scope_named_through_an_escaped_module_name_is_the_child() {
         "Time scale of (top.m.u) is 1ns / 1ps\nTime scale of (top.m) is 10us / 1ns\n"
     );
 }
+
+#[test]
+fn a_reference_into_a_named_block_names_the_block() {
+    // Icarus rejects the name the block does not declare (`Could not find
+    // variable ``m.b.y'' in ``m''`) and runs the one it does (`x=1`), which
+    // RSpice refuses by name.
+    let run = |source: &str| {
+        super::run_digital_testbench(
+            &[("tb.v".into(), source.into())],
+            &super::HdlTestbenchOptions::default(),
+        )
+        .expect_err("a reference into a named block does not run")
+        .to_string()
+    };
+    let undeclared = run("module m;
+  initial begin : b
+    reg x;
+    x = 0;
+  end
+  initial #1 m.b.y = 1;
+endmodule
+");
+    assert!(
+        undeclared.contains("`y` is not declared in named block `b` of module `m`"),
+        "{undeclared}"
+    );
+    assert!(!undeclared.contains("Unsupported"), "{undeclared}");
+    let declared = run("module m;
+  initial begin : b
+    reg x;
+    x = 0;
+  end
+  initial #1 begin m.b.x = 1; $display(\"x=%b\", m.b.x); end
+endmodule
+");
+    assert!(
+        declared.contains("reaches into named block `b` of module `m`"),
+        "{declared}"
+    );
+}

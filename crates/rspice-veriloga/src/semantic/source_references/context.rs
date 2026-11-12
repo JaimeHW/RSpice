@@ -1,5 +1,6 @@
 //! Select and bind concrete source occurrences before either domain checks bodies.
 use super::*;
+use crate::ast::{DigitalBlock, DigitalStatement, GenerateBlock, GenerateConstruct};
 
 impl Resolver {
     fn new(sources: Sources, mut root: Module, selected: bool) -> CompileResult<Self> {
@@ -106,13 +107,395 @@ impl Resolver {
             origin = &current.parent_scope;
             frame = parent;
         }
-        Err(error(
+        Err(self.unresolved_scope(owner, reference))
+    }
+
+    /// Why the first scope of `reference` names nothing the resolver can
+    /// enter: a source error where the language rules the reference out, a
+    /// refusal naming the construct where RSpice does not follow it yet.
+    fn unresolved_scope(
+        &self,
+        owner: usize,
+        reference: &ScopedHierarchicalReference,
+    ) -> CompileError {
+        let span = reference.source.span;
+        let first = &reference.scopes[0];
+        let terminal = reference
+            .source
+            .segments
+            .get(reference.scopes.len())
+            .map_or("", |segment| segment.name.as_str());
+        // A task or function of this module or an enclosing one, searched the
+        // way IEEE 1364-2005 section 12.6 searches upward.
+        let mut frame = Some(owner);
+        while let Some(index) = frame {
+            let current = &self.frames[index];
+            if let Some(routine) = current
+                .source
+                .digital_routines
+                .iter()
+                .find(|routine| routine.name == first.name)
+            {
+                let kind = if routine.is_function() {
+                    "function"
+                } else {
+                    "task"
+                };
+                if routine.automatic {
+                    // Section 10.2.3 (tasks) and 10.4.1 (functions).
+                    return invalid(
+                        format!(
+                            "`{}.{terminal}` names an item of automatic {kind} `{}`; IEEE \
+                             1364-2005 sections 10.2.3 and 10.4.1 forbid a hierarchical \
+                             reference to an automatic {kind}'s items",
+                            first.name, first.name
+                        ),
+                        span,
+                    );
+                }
+                let declared = routine
+                    .arguments
+                    .iter()
+                    .any(|argument| argument.name == terminal)
+                    || routine
+                        .variables
+                        .iter()
+                        .flat_map(|declaration| &declaration.items)
+                        .any(|item| item.name == terminal)
+                    || routine
+                        .digital_variables
+                        .iter()
+                        .flat_map(|declaration| &declaration.items)
+                        .any(|item| item.name == terminal)
+                    || (routine.is_function() && terminal == routine.name.as_str());
+                if reference.scopes.len() == 1 && !declared {
+                    return invalid(
+                        format!("`{terminal}` is not declared in {kind} `{}`", first.name),
+                        span,
+                    );
+                }
+                return error(
+                    format!(
+                        "`{}.{terminal}` reads or writes an item of {kind} `{}`, and a reference \
+                         into a {kind}'s own scope is not supported yet",
+                        first.name, first.name
+                    ),
+                    span,
+                );
+            }
+            frame = current.parent.filter(|_| self.selected);
+        }
+        if self.sources.modules.contains_key(&first.name) {
+            return error(
+                format!(
+                    "`{}` names module `{}`, which is not instantiated here; a reference that \
+                     starts at another top-level module is not supported yet",
+                    reference
+                        .source
+                        .segments
+                        .iter()
+                        .map(|segment| segment.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join("."),
+                    first.name
+                ),
+                span,
+            );
+        }
+        invalid(
             format!(
-                "scope `{}` is not declared in this module or its generated ancestors or enclosing instances",
+                "scope `{}` is not declared in this module or its generated ancestors or \
+                 enclosing instances",
                 first.name
             ),
             span,
-        ))
+        )
+    }
+}
+
+impl Resolver {
+    /// Why `key`, below `scope` in `frame`, is not a scope the resolver can
+    /// enter: a refusal naming the construct `key` is, or a source error when
+    /// `key` is a named block and the reference ends at a name the block does
+    /// not declare (IEEE 1364-2005 section 12.5).
+    pub(super) fn unentered_scope(
+        &self,
+        frame: usize,
+        scope: &[HierarchicalScopeKey],
+        key: &HierarchicalScopeKey,
+        last: bool,
+        reference: &ScopedHierarchicalReference,
+    ) -> CompileError {
+        let span = reference.source.span;
+        let source = &self.frames[frame].source;
+        let path = reference
+            .source
+            .segments
+            .iter()
+            .map(|segment| segment.name.as_str())
+            .collect::<Vec<_>>()
+            .join(".");
+        let place = scope_place(source, scope);
+        let full = [scope, std::slice::from_ref(key)].concat();
+        if source.hierarchical_scopes.contains_key(&full) {
+            return error(
+                format!(
+                    "`{path}` passes through `{}`, the name {place} gives an unnamed generate \
+                     block, and a reference from outside that block through it is not \
+                     supported yet",
+                    key.name
+                ),
+                span,
+            );
+        }
+        if !generate_items(source, &full).is_empty() {
+            return error(
+                format!(
+                    "`{path}` names `{}`, a generate block of {place} this elaboration does not \
+                     create",
+                    scope_place(source, &full)
+                        .trim_start_matches("generate block ")
+                        .trim_matches('`')
+                ),
+                span,
+            );
+        }
+        let items = generate_items(source, scope);
+        if let Some(routine) = items
+            .iter()
+            .flat_map(|items| &items.digital_routines)
+            .find(|routine| routine.name == key.name)
+        {
+            let kind = if routine.is_function() {
+                "function"
+            } else {
+                "task"
+            };
+            return error(
+                format!(
+                    "`{path}` reaches into {kind} `{}` of {place}, and a reference into a \
+                     {kind}'s own scope is not supported yet",
+                    key.name
+                ),
+                span,
+            );
+        }
+        let mut blocks = Vec::new();
+        if scope.is_empty() {
+            for process in source
+                .digital_processes
+                .iter()
+                .filter(|process| process.generate_scope.is_none())
+            {
+                outer_named_blocks(&process.body, &mut blocks);
+            }
+        } else {
+            for process in items.iter().flat_map(|items| &items.digital_processes) {
+                outer_named_blocks(&process.body, &mut blocks);
+            }
+        }
+        let named: Vec<_> = blocks
+            .into_iter()
+            .filter(|block| block.name.as_ref() == Some(&key.name))
+            .collect();
+        if named.is_empty() {
+            return error(
+                format!(
+                    "`{}` is not a module instance, generate block, task, function or named \
+                     block of {place}",
+                    key.name
+                ),
+                span,
+            );
+        }
+        let terminal = reference
+            .source
+            .segments
+            .get(reference.scopes.len())
+            .map_or("", |segment| segment.name.as_str());
+        let declares = |block: &DigitalBlock| {
+            block
+                .variables
+                .iter()
+                .flat_map(|declaration| &declaration.items)
+                .any(|item| item.name == terminal)
+                || block
+                    .digital_variables
+                    .iter()
+                    .flat_map(|declaration| &declaration.items)
+                    .any(|item| item.name == terminal)
+        };
+        if last && !named.iter().any(|block| declares(block)) {
+            return invalid(
+                format!(
+                    "`{terminal}` is not declared in named block `{}` of {place} (IEEE \
+                     1364-2005 section 12.5)",
+                    key.name
+                ),
+                span,
+            );
+        }
+        error(
+            format!(
+                "`{path}` reaches into named block `{}` of {place}, and a reference into a \
+                 named block's scope is not supported yet",
+                key.name
+            ),
+            span,
+        )
+    }
+
+    /// Why `terminal` names nothing in `scope`: a task or function a generate
+    /// block declares is named as one, anything else as undeclared.
+    pub(super) fn undeclared_terminal(
+        &self,
+        frame: usize,
+        scope: &[HierarchicalScopeKey],
+        terminal: &str,
+        span: Span,
+    ) -> CompileError {
+        let source = &self.frames[frame].source;
+        let place = scope_place(source, scope);
+        if !scope.is_empty() {
+            if let Some(routine) = generate_items(source, scope)
+                .iter()
+                .flat_map(|items| &items.digital_routines)
+                .find(|routine| routine.name == terminal)
+            {
+                let kind = if routine.is_function() {
+                    "function"
+                } else {
+                    "task"
+                };
+                return error(
+                    format!(
+                        "`{terminal}` is a {kind} of {place}, and calling a task or function a \
+                         generate block declares is not supported yet"
+                    ),
+                    span,
+                );
+            }
+        }
+        error(format!("`{terminal}` is not declared in {place}"), span)
+    }
+}
+
+/// Where `scope` is, for a message: the module, or a generate block below it.
+fn scope_place(source: &Module, scope: &[HierarchicalScopeKey]) -> String {
+    if scope.is_empty() {
+        return format!("module `{}`", source.name);
+    }
+    let path = scope
+        .iter()
+        .map(|key| match key.index {
+            Some(index) => format!("{}[{index}]", key.name),
+            None => key.name.to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join(".");
+    format!("generate block `{path}`")
+}
+
+/// The items of every generate block, as written, that `scope` names: one per
+/// branch that declares a block of that name. The module itself for its own
+/// scope.
+fn generate_items<'a>(source: &'a Module, scope: &[HierarchicalScopeKey]) -> Vec<&'a Module> {
+    if scope.is_empty() {
+        return vec![source];
+    }
+    let mut constructs: Vec<&GenerateConstruct> = source
+        .generate_template
+        .as_ref()
+        .map_or(&source.generates, |template| &template.module.generates)
+        .iter()
+        .collect();
+    let mut found = Vec::new();
+    for key in scope {
+        let mut candidates = Vec::new();
+        let mut pending: Vec<&GenerateBlock> = constructs
+            .iter()
+            .copied()
+            .flat_map(construct_blocks)
+            .collect();
+        while let Some(block) = pending.pop() {
+            if block.name.as_ref() == Some(&key.name) {
+                candidates.push(block);
+            } else if block.directly_nested || block.name.is_none() {
+                // A directly nested conditional, or a block with no name of its
+                // own, adds no scope: its blocks sit in the enclosing one.
+                pending.extend(block.nested.iter().flat_map(construct_blocks));
+            }
+        }
+        constructs = candidates
+            .iter()
+            .flat_map(|block| block.nested.iter())
+            .collect();
+        found = candidates;
+    }
+    found
+        .into_iter()
+        .map(|block| block.items.as_ref())
+        .collect()
+}
+
+fn construct_blocks(construct: &GenerateConstruct) -> Vec<&GenerateBlock> {
+    match construct {
+        GenerateConstruct::Loop(value) => vec![&value.body],
+        GenerateConstruct::Block(value) => vec![value],
+        GenerateConstruct::Conditional(value) => std::iter::once(&value.then_block)
+            .chain(value.else_block.iter())
+            .collect(),
+        GenerateConstruct::Case(value) => value
+            .items
+            .iter()
+            .map(|item| &item.block)
+            .chain(value.default.iter())
+            .collect(),
+    }
+}
+
+/// The named blocks a body opens directly, through unnamed blocks and control
+/// statements but not into another named block, which is a scope of its own.
+fn outer_named_blocks<'a>(statement: &'a DigitalStatement, blocks: &mut Vec<&'a DigitalBlock>) {
+    match statement {
+        DigitalStatement::Block(block) | DigitalStatement::Fork(block) => {
+            if block.name.is_some() {
+                blocks.push(block);
+            } else {
+                for statement in &block.statements {
+                    outer_named_blocks(statement, blocks);
+                }
+            }
+        }
+        DigitalStatement::Conditional(conditional) => {
+            outer_named_blocks(&conditional.then_branch, blocks);
+            if let Some(branch) = &conditional.else_branch {
+                outer_named_blocks(branch, blocks);
+            }
+        }
+        DigitalStatement::Case(case) => {
+            for item in &case.items {
+                outer_named_blocks(&item.statement, blocks);
+            }
+            if let Some(default) = &case.default {
+                outer_named_blocks(default, blocks);
+            }
+        }
+        DigitalStatement::For(statement) => outer_named_blocks(&statement.body, blocks),
+        DigitalStatement::While(statement) => outer_named_blocks(&statement.body, blocks),
+        DigitalStatement::Repeat(statement) => outer_named_blocks(&statement.body, blocks),
+        DigitalStatement::Forever(statement) => outer_named_blocks(&statement.body, blocks),
+        DigitalStatement::Timing(timing) => {
+            if let Some(statement) = &timing.statement {
+                outer_named_blocks(statement, blocks);
+            }
+        }
+        DigitalStatement::Wait(wait) => {
+            if let Some(statement) = &wait.statement {
+                outer_named_blocks(statement, blocks);
+            }
+        }
+        _ => {}
     }
 }
 

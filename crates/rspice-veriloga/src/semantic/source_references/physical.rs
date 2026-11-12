@@ -115,6 +115,21 @@ impl Resolver {
                         .is_some_and(|d| d.domain == Domain::Continuous)
                 })
             {
+                if source
+                    .instances
+                    .iter()
+                    .any(|instance| instance.name == *name)
+                {
+                    // `$dumpvars(1, top.u1)`, `$printtimescale(dut.dut)`.
+                    return Err(error(
+                        format!(
+                            "`{}.{name}` names a module instance, and a hierarchical scope \
+                             argument is not supported yet",
+                            self.frames[target].path
+                        ),
+                        span,
+                    ));
+                }
                 return Err(error(
                     format!(
                         "`{}.{name}` is not a continuous net, branch, parameter or analog function",
