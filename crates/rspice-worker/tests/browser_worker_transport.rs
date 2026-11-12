@@ -946,3 +946,62 @@ fn a_manual_decks_sealed_hdl_runs_in_the_worker() {
         );
     }
 }
+
+#[wasm_bindgen_test]
+fn a_monte_carlo_trials_transient_runs_in_the_worker() {
+    // Trial 2 of the deck's own study: the worker draws the resistance that
+    // trial draws and returns the trial's whole transient.
+    let deck = "MC trial transient\n.param r={aunif(1000,200)}\nV1 in 0 PULSE(0 1 1u 0.1u 0.1u 5u 10u)\nR1 in out {r}\nC1 out 0 1n\n.tran 0.1u 10u\n.mc 4 seed 9\n.end\n";
+    let trial = |index: u64| {
+        let mut request = worker_request_json(
+            12 + index,
+            serde_json::json!({"Transient": {
+                "stop_time": 10e-6, "step_time": 1e-7, "start_time": 0.0,
+                "max_timestep": null, "uic": false
+            }}),
+            deck,
+        );
+        request["request"]["request"]["request"]["Spec"]["options"]["member"] = serde_json::json!({
+            "member": "monte_carlo_trial", "index": index, "variation_source": "deck_statistics"
+        });
+        let response = rspice_worker::run_rspice_ui_worker_request(
+            js_sys::JSON::parse(&request.to_string()).unwrap(),
+        )
+        .expect("a Monte Carlo trial's transient is answered");
+        let response = structured_clone(&response);
+        let buffers = js_sys::Reflect::get(&response, &"buffers".into())
+            .unwrap()
+            .dyn_into::<js_sys::Array>()
+            .unwrap();
+        let metadata: serde_json::Value = serde_wasm_bindgen::from_value(
+            js_sys::Reflect::get(&response, &"response".into()).unwrap(),
+        )
+        .unwrap();
+        let transient = &metadata["outcome"]["Success"]["Transient"];
+        assert!(transient.is_object(), "{metadata}");
+        let time = transferred_series(&buffers, &transient["time"]).to_vec();
+        let out = transient["waveforms"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{metadata}"))
+            .iter()
+            .find(|trace| {
+                trace["name"]
+                    .as_str()
+                    .is_some_and(|name| name.eq_ignore_ascii_case("out"))
+            })
+            .unwrap_or_else(|| panic!("no node voltage out: {metadata}"));
+        let out = transferred_series(&buffers, &out["y_values"]).to_vec();
+        assert_eq!(out.len(), time.len());
+        assert!(time.len() > 20, "a whole waveform: {} points", time.len());
+        (time, out)
+    };
+    let (time, two) = trial(2);
+    let (_, again) = trial(2);
+    let (_, three) = trial(3);
+    // The same trial draws the same resistance; another trial draws another,
+    // so its RC charges along another curve.
+    assert_eq!(two, again);
+    let during_rise = time.iter().position(|t| *t >= 2e-6).unwrap();
+    assert_ne!(two[during_rise], three[during_rise]);
+    assert!(two[during_rise] > 0.0 && two[during_rise] < 1.0);
+}
