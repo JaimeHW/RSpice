@@ -27,8 +27,8 @@ use rspice_simulation::project_veriloga::build_profile as veriloga_profile;
 
 pub use super::{CodeSourceFileAction, CodeWorkspacePage};
 
-pub(crate) use automation::CodeHandles;
 pub(crate) use automation::automation_task_count;
+pub(crate) use automation::{AutomationParts, CodeHandles};
 pub(crate) use automation::{
     automation_runtime_unavailable_reason, invalidate_automation_evidence_in,
 };

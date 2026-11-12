@@ -15,70 +15,58 @@ use super::*;
 /// the first enabled breakpoint. The adapter exposes only values produced by
 /// the versioned RSpice API; secret-bearing environment values are never
 /// materialized in the debugger model.
-pub fn start_automation_debugger(app: &mut RSpiceApp) {
-    if app
-        .state
-        .code
-        .code_workspace
-        .automation
-        .execution
-        .is_active()
-    {
+pub fn start_automation_debugger(parts: &mut AutomationParts<'_>) {
+    if parts.code.automation.execution.is_active() {
         return;
     }
-    if !python_automation_requires_managed_worker(app) {
+    if !python_automation_requires_managed_worker(parts) {
         debug_fail(
-            app,
+            parts,
             "Automation debugging is available for governed Python workspaces.",
         );
         return;
     }
-    start_managed_python_workflow(app, AutomationRuntimeLaunchMode::Debug);
+    start_managed_python_workflow(parts, AutomationRuntimeLaunchMode::Debug);
 }
 
-pub fn continue_automation_debugger(app: &mut RSpiceApp) {
-    send_debug_control(app, rspice_automation_protocol::DebugControl::Continue);
+pub fn continue_automation_debugger(parts: &mut AutomationParts<'_>) {
+    send_debug_control(parts, rspice_automation_protocol::DebugControl::Continue);
 }
 
-pub fn step_over_automation_debugger(app: &mut RSpiceApp) {
-    send_debug_control(app, rspice_automation_protocol::DebugControl::StepOver);
+pub fn step_over_automation_debugger(parts: &mut AutomationParts<'_>) {
+    send_debug_control(parts, rspice_automation_protocol::DebugControl::StepOver);
 }
 
-pub fn step_into_automation_debugger(app: &mut RSpiceApp) {
-    send_debug_control(app, rspice_automation_protocol::DebugControl::StepIn);
+pub fn step_into_automation_debugger(parts: &mut AutomationParts<'_>) {
+    send_debug_control(parts, rspice_automation_protocol::DebugControl::StepIn);
 }
 
-pub fn step_out_automation_debugger(app: &mut RSpiceApp) {
-    send_debug_control(app, rspice_automation_protocol::DebugControl::StepOut);
+pub fn step_out_automation_debugger(parts: &mut AutomationParts<'_>) {
+    send_debug_control(parts, rspice_automation_protocol::DebugControl::StepOut);
 }
 
-pub fn restart_automation_debugger(app: &mut RSpiceApp) {
-    if active_debug_session(app).is_some() {
-        send_debug_control(app, rspice_automation_protocol::DebugControl::Restart);
+pub fn restart_automation_debugger(parts: &mut AutomationParts<'_>) {
+    if active_debug_session(parts).is_some() {
+        send_debug_control(parts, rspice_automation_protocol::DebugControl::Restart);
     } else {
-        start_automation_debugger(app);
+        start_automation_debugger(parts);
     }
 }
 
 /// Request a debugger pause. Governed simulation dispatch is an atomic host
 /// call, so the pause is honored at its next safe completion boundary.
-pub fn pause_automation_debugger(app: &mut RSpiceApp) {
-    if send_debug_control(app, rspice_automation_protocol::DebugControl::Pause) {
-        app.state
-            .code
-            .code_workspace
-            .automation
-            .debug
-            .pause_requested = true;
+pub fn pause_automation_debugger(parts: &mut AutomationParts<'_>) {
+    if send_debug_control(parts, rspice_automation_protocol::DebugControl::Pause) {
+        parts.code.automation.debug.pause_requested = true;
     }
 }
 
-pub fn stop_automation_debugger(app: &mut RSpiceApp) {
-    if active_debug_session(app).is_some() {
-        let _ = send_debug_control(app, rspice_automation_protocol::DebugControl::Stop);
+pub fn stop_automation_debugger(parts: &mut AutomationParts<'_>) {
+    if active_debug_session(parts).is_some() {
+        let _ = send_debug_control(parts, rspice_automation_protocol::DebugControl::Stop);
         return;
     }
-    let debug = &mut app.state.code.code_workspace.automation.debug;
+    let debug = &mut parts.code.automation.debug;
     debug.phase = AutomationDebugPhase::Stopped;
     debug.current_line = None;
     debug.call_stack.clear();
@@ -91,15 +79,15 @@ pub fn stop_automation_debugger(app: &mut RSpiceApp) {
     );
 }
 
-pub fn toggle_automation_breakpoint(app: &mut RSpiceApp, line: usize) {
-    let Some((document_id, source_path)) = active_automation_python_document(app) else {
+pub fn toggle_automation_breakpoint(parts: &mut AutomationParts<'_>, line: usize) {
+    let Some((document_id, source_path)) = active_automation_python_document(parts) else {
         debug_fail(
-            app,
+            parts,
             "A breakpoint requires an active project-owned Python source document.",
         );
         return;
     };
-    let breakpoints = &mut app.state.code.code_workspace.automation.debug.breakpoints;
+    let breakpoints = &mut parts.code.automation.debug.breakpoints;
     if let Some(index) = breakpoints
         .iter()
         .position(|breakpoint| breakpoint.document_id == document_id && breakpoint.line == line)
@@ -113,28 +101,29 @@ pub fn toggle_automation_breakpoint(app: &mut RSpiceApp, line: usize) {
                 .then(left.line.cmp(&right.line))
         });
     }
-    synchronize_runtime_breakpoints(app);
+    synchronize_runtime_breakpoints(parts);
 }
 
-pub fn remove_automation_breakpoint(app: &mut RSpiceApp, document_id: uuid::Uuid, line: usize) {
-    app.state
+pub fn remove_automation_breakpoint(
+    parts: &mut AutomationParts<'_>,
+    document_id: uuid::Uuid,
+    line: usize,
+) {
+    parts
         .code
-        .code_workspace
         .automation
         .debug
         .breakpoints
         .retain(|breakpoint| breakpoint.document_id != document_id || breakpoint.line != line);
-    synchronize_runtime_breakpoints(app);
+    synchronize_runtime_breakpoints(parts);
 }
 
-pub fn select_automation_debug_frame(app: &mut RSpiceApp, frame_id: u64) {
-    if app.state.code.code_workspace.automation.debug.phase != AutomationDebugPhase::Paused {
+pub fn select_automation_debug_frame(parts: &mut AutomationParts<'_>, frame_id: u64) {
+    if parts.code.automation.debug.phase != AutomationDebugPhase::Paused {
         return;
     }
-    let frame = app
-        .state
+    let frame = parts
         .code
-        .code_workspace
         .automation
         .debug
         .call_stack
@@ -145,47 +134,38 @@ pub fn select_automation_debug_frame(app: &mut RSpiceApp, frame_id: u64) {
         return;
     };
     {
-        let debug = &mut app.state.code.code_workspace.automation.debug;
+        let debug = &mut parts.code.automation.debug;
         debug.selected_frame_id = Some(frame.frame_id);
         debug.current_line = Some(frame.line);
         debug.locals.clear();
         debug.globals.clear();
     }
     request_debug_variables(
-        app,
+        parts,
         frame.locals_reference,
         AutomationDebugVariableScope::Locals,
     );
     request_debug_variables(
-        app,
+        parts,
         frame.globals_reference,
         AutomationDebugVariableScope::Globals,
     );
-    refresh_automation_debugger(app);
+    refresh_automation_debugger(parts);
 }
 
-pub fn refresh_automation_debugger(app: &mut RSpiceApp) {
-    if app.state.code.code_workspace.automation.debug.phase != AutomationDebugPhase::Paused {
+pub fn refresh_automation_debugger(parts: &mut AutomationParts<'_>) {
+    if parts.code.automation.debug.phase != AutomationDebugPhase::Paused {
         return;
     }
-    let Some((session_id, _)) = active_debug_session(app) else {
-        debug_fail(app, "Cannot evaluate watches without a debug session.");
+    let Some((session_id, _)) = active_debug_session(parts) else {
+        debug_fail(parts, "Cannot evaluate watches without a debug session.");
         return;
     };
-    let Some(frame_id) = app
-        .state
-        .code
-        .code_workspace
-        .automation
-        .debug
-        .selected_frame_id
-    else {
+    let Some(frame_id) = parts.code.automation.debug.selected_frame_id else {
         return;
     };
-    let expressions = app
-        .state
+    let expressions = parts
         .code
-        .code_workspace
         .automation
         .debug
         .watches
@@ -193,7 +173,7 @@ pub fn refresh_automation_debugger(app: &mut RSpiceApp) {
         .map(|watch| watch.expression.clone())
         .collect::<Vec<_>>();
     for expression in expressions {
-        match app.code.automation_runtime.send_request(
+        match parts.handles.automation_runtime.send_request(
             rspice_automation_protocol::RuntimeRequest::Evaluate {
                 session_id,
                 frame_id,
@@ -201,9 +181,8 @@ pub fn refresh_automation_debugger(app: &mut RSpiceApp) {
             },
         ) {
             Ok(request_id) => {
-                app.state
+                parts
                     .code
-                    .code_workspace
                     .automation
                     .debug
                     .pending_evaluation_requests
@@ -211,7 +190,7 @@ pub fn refresh_automation_debugger(app: &mut RSpiceApp) {
             }
             Err(error) => {
                 debug_fail(
-                    app,
+                    parts,
                     &format!("Could not evaluate Automation watch: {error}"),
                 );
                 return;
@@ -220,14 +199,13 @@ pub fn refresh_automation_debugger(app: &mut RSpiceApp) {
     }
 }
 
-pub fn sync_automation_debugger(app: &mut RSpiceApp) {
-    synchronize_runtime_breakpoints(app);
+pub fn sync_automation_debugger(parts: &mut AutomationParts<'_>) {
+    synchronize_runtime_breakpoints(parts);
 }
 
-pub(super) fn active_debug_session(app: &RSpiceApp) -> Option<(uuid::Uuid, u64)> {
-    app.state
+pub(super) fn active_debug_session(parts: &AutomationParts<'_>) -> Option<(uuid::Uuid, u64)> {
+    parts
         .code
-        .code_workspace
         .automation
         .runtime_execution
         .as_ref()
@@ -240,12 +218,12 @@ pub(super) fn active_debug_session(app: &RSpiceApp) -> Option<(uuid::Uuid, u64)>
 }
 
 pub(super) fn send_debug_control(
-    app: &mut RSpiceApp,
+    parts: &mut AutomationParts<'_>,
     control: rspice_automation_protocol::DebugControl,
 ) -> bool {
-    let Some((session_id, _)) = active_debug_session(app) else {
+    let Some((session_id, _)) = active_debug_session(parts) else {
         debug_fail(
-            app,
+            parts,
             "No RSpice-managed Python debugger session is connected.",
         );
         return false;
@@ -259,14 +237,14 @@ pub(super) fn send_debug_control(
         rspice_automation_protocol::DebugControl::Restart => "Restart",
         rspice_automation_protocol::DebugControl::Stop => "Stop",
     };
-    match app.code.automation_runtime.send_request(
+    match parts.handles.automation_runtime.send_request(
         rspice_automation_protocol::RuntimeRequest::DebugControl {
             session_id,
             control,
         },
     ) {
         Ok(_) => {
-            let debug = &mut app.state.code.code_workspace.automation.debug;
+            let debug = &mut parts.code.automation.debug;
             if !matches!(control, rspice_automation_protocol::DebugControl::Pause) {
                 debug.phase = AutomationDebugPhase::Running;
                 debug.pause_requested = false;
@@ -283,7 +261,7 @@ pub(super) fn send_debug_control(
         }
         Err(error) => {
             debug_fail(
-                app,
+                parts,
                 &format!("Could not send debugger control {label}: {error}"),
             );
             false
@@ -291,9 +269,10 @@ pub(super) fn send_debug_control(
     }
 }
 
-pub(super) fn active_automation_python_document(app: &RSpiceApp) -> Option<(uuid::Uuid, String)> {
-    let bundle = app
-        .state
+pub(super) fn active_automation_python_document(
+    parts: &AutomationParts<'_>,
+) -> Option<(uuid::Uuid, String)> {
+    let bundle = parts
         .model
         .workspace
         .content
@@ -301,10 +280,8 @@ pub(super) fn active_automation_python_document(app: &RSpiceApp) -> Option<(uuid
         .bundle_for_owner(&ProjectSourceOwner::code_workspace(
             ProjectSourceLanguage::RSpiceAutomation,
         ))?;
-    let path = app
-        .state
+    let path = parts
         .code
-        .code_workspace
         .automation
         .selected_file
         .as_deref()
@@ -317,14 +294,13 @@ pub(super) fn active_automation_python_document(app: &RSpiceApp) -> Option<(uuid
 }
 
 pub(super) fn runtime_breakpoints(
-    app: &RSpiceApp,
+    parts: &AutomationParts<'_>,
     snapshot: &rspice_automation_protocol::SourceSnapshot,
 ) -> Vec<rspice_automation_protocol::Breakpoint> {
     use rspice_automation_protocol::{Breakpoint, BreakpointKind};
 
-    app.state
+    parts
         .code
-        .code_workspace
         .automation
         .debug
         .breakpoints
@@ -365,16 +341,9 @@ pub(super) fn runtime_breakpoints(
 }
 
 pub(super) fn runtime_exception_policy(
-    app: &RSpiceApp,
+    parts: &AutomationParts<'_>,
 ) -> rspice_automation_protocol::ExceptionPolicy {
-    match app
-        .state
-        .code
-        .code_workspace
-        .automation
-        .debug
-        .exception_policy
-    {
+    match parts.code.automation.debug.exception_policy {
         AutomationExceptionPolicy::All => rspice_automation_protocol::ExceptionPolicy::All,
         AutomationExceptionPolicy::Uncaught => {
             rspice_automation_protocol::ExceptionPolicy::Uncaught
@@ -383,37 +352,33 @@ pub(super) fn runtime_exception_policy(
     }
 }
 
-pub(super) fn synchronize_runtime_breakpoints(app: &mut RSpiceApp) {
-    let Some((session_id, _)) = active_debug_session(app) else {
+pub(super) fn synchronize_runtime_breakpoints(parts: &mut AutomationParts<'_>) {
+    let Some((session_id, _)) = active_debug_session(parts) else {
         return;
     };
-    let Some(snapshot) = app
-        .state
-        .code
-        .code_workspace
-        .automation
-        .runtime_snapshot
-        .clone()
-    else {
-        debug_fail(app, "The debugger source snapshot is no longer available.");
+    let Some(snapshot) = parts.code.automation.runtime_snapshot.clone() else {
+        debug_fail(
+            parts,
+            "The debugger source snapshot is no longer available.",
+        );
         return;
     };
-    let breakpoints = runtime_breakpoints(app, &snapshot);
-    if let Err(error) = app.code.automation_runtime.send_request(
+    let breakpoints = runtime_breakpoints(parts, &snapshot);
+    if let Err(error) = parts.handles.automation_runtime.send_request(
         rspice_automation_protocol::RuntimeRequest::SetBreakpoints {
             session_id,
             breakpoints,
         },
     ) {
         debug_fail(
-            app,
+            parts,
             &format!("Could not update debugger breakpoints: {error}"),
         );
     }
 }
 
-pub(super) fn request_debug_stack(app: &mut RSpiceApp, session_id: uuid::Uuid) {
-    match app.code.automation_runtime.send_request(
+pub(super) fn request_debug_stack(parts: &mut AutomationParts<'_>, session_id: uuid::Uuid) {
+    match parts.handles.automation_runtime.send_request(
         rspice_automation_protocol::RuntimeRequest::StackTrace {
             session_id,
             start: 0,
@@ -421,42 +386,27 @@ pub(super) fn request_debug_stack(app: &mut RSpiceApp, session_id: uuid::Uuid) {
         },
     ) {
         Ok(request_id) => {
-            app.state
-                .code
-                .code_workspace
-                .automation
-                .debug
-                .pending_stack_request_id = Some(request_id);
+            parts.code.automation.debug.pending_stack_request_id = Some(request_id);
         }
-        Err(error) => debug_fail(app, &format!("Could not request debugger stack: {error}")),
+        Err(error) => debug_fail(parts, &format!("Could not request debugger stack: {error}")),
     }
 }
 
 pub(super) fn apply_debug_stack(
-    app: &mut RSpiceApp,
+    parts: &mut AutomationParts<'_>,
     request_id: Option<u64>,
     frames: Vec<rspice_automation_protocol::StackFrame>,
 ) {
     let Some(request_id) = request_id else {
-        runtime_protocol_failure(app, "Debugger stack response has no request identity.");
+        runtime_protocol_failure(parts, "Debugger stack response has no request identity.");
         return;
     };
-    if app
-        .state
-        .code
-        .code_workspace
-        .automation
-        .debug
-        .pending_stack_request_id
-        != Some(request_id)
-    {
-        runtime_protocol_failure(app, "Debugger stack response does not match its request.");
+    if parts.code.automation.debug.pending_stack_request_id != Some(request_id) {
+        runtime_protocol_failure(parts, "Debugger stack response does not match its request.");
         return;
     }
-    let paths = app
-        .state
+    let paths = parts
         .code
-        .code_workspace
         .automation
         .runtime_snapshot
         .as_ref()
@@ -482,10 +432,8 @@ pub(super) fn apply_debug_stack(
             })
         })
         .collect::<Vec<_>>();
-    let selected = app
-        .state
+    let selected = parts
         .code
-        .code_workspace
         .automation
         .debug
         .selected_frame_id
@@ -493,7 +441,7 @@ pub(super) fn apply_debug_stack(
         .or_else(|| mapped.first())
         .cloned();
     {
-        let debug = &mut app.state.code.code_workspace.automation.debug;
+        let debug = &mut parts.code.automation.debug;
         debug.pending_stack_request_id = None;
         debug.call_stack = mapped;
         debug.selected_frame_id = selected.as_ref().map(|frame| frame.frame_id);
@@ -501,28 +449,28 @@ pub(super) fn apply_debug_stack(
     }
     if let Some(frame) = selected {
         request_debug_variables(
-            app,
+            parts,
             frame.locals_reference,
             AutomationDebugVariableScope::Locals,
         );
         request_debug_variables(
-            app,
+            parts,
             frame.globals_reference,
             AutomationDebugVariableScope::Globals,
         );
-        refresh_automation_debugger(app);
+        refresh_automation_debugger(parts);
     }
 }
 
 pub(super) fn request_debug_variables(
-    app: &mut RSpiceApp,
+    parts: &mut AutomationParts<'_>,
     reference: u64,
     scope: AutomationDebugVariableScope,
 ) {
-    let Some((session_id, _)) = active_debug_session(app) else {
+    let Some((session_id, _)) = active_debug_session(parts) else {
         return;
     };
-    match app.code.automation_runtime.send_request(
+    match parts.handles.automation_runtime.send_request(
         rspice_automation_protocol::RuntimeRequest::Variables {
             session_id,
             reference,
@@ -531,41 +479,38 @@ pub(super) fn request_debug_variables(
         },
     ) {
         Ok(request_id) => {
-            app.state
+            parts
                 .code
-                .code_workspace
                 .automation
                 .debug
                 .pending_variable_requests
                 .insert(request_id, scope);
         }
         Err(error) => debug_fail(
-            app,
+            parts,
             &format!("Could not request debugger variables: {error}"),
         ),
     }
 }
 
 pub(super) fn apply_debug_variables(
-    app: &mut RSpiceApp,
+    parts: &mut AutomationParts<'_>,
     request_id: Option<u64>,
     values: Vec<rspice_automation_protocol::Variable>,
 ) {
     let Some(request_id) = request_id else {
-        runtime_protocol_failure(app, "Debugger variable response has no request identity.");
+        runtime_protocol_failure(parts, "Debugger variable response has no request identity.");
         return;
     };
-    let Some(scope) = app
-        .state
+    let Some(scope) = parts
         .code
-        .code_workspace
         .automation
         .debug
         .pending_variable_requests
         .remove(&request_id)
     else {
         runtime_protocol_failure(
-            app,
+            parts,
             "Debugger variable response does not match its request.",
         );
         return;
@@ -580,7 +525,7 @@ pub(super) fn apply_debug_variables(
             variables_reference: value.variables_reference,
         })
         .collect();
-    let debug = &mut app.state.code.code_workspace.automation.debug;
+    let debug = &mut parts.code.automation.debug;
     match scope {
         AutomationDebugVariableScope::Locals => debug.locals = mapped,
         AutomationDebugVariableScope::Globals => debug.globals = mapped,
@@ -588,34 +533,33 @@ pub(super) fn apply_debug_variables(
 }
 
 pub(super) fn apply_debug_evaluation(
-    app: &mut RSpiceApp,
+    parts: &mut AutomationParts<'_>,
     request_id: Option<u64>,
     expression: &str,
     result: rspice_automation_protocol::Variable,
 ) {
     let Some(request_id) = request_id else {
-        runtime_protocol_failure(app, "Debugger evaluation response has no request identity.");
+        runtime_protocol_failure(
+            parts,
+            "Debugger evaluation response has no request identity.",
+        );
         return;
     };
-    let expected = app
-        .state
+    let expected = parts
         .code
-        .code_workspace
         .automation
         .debug
         .pending_evaluation_requests
         .remove(&request_id);
     if expected.as_deref() != Some(expression) {
         runtime_protocol_failure(
-            app,
+            parts,
             "Debugger evaluation response does not match its request.",
         );
         return;
     }
-    if let Some(watch) = app
-        .state
+    if let Some(watch) = parts
         .code
-        .code_workspace
         .automation
         .debug
         .watches
@@ -636,12 +580,13 @@ pub(super) fn apply_debug_evaluation(
     }
 }
 
-pub(super) fn debug_fail(app: &mut RSpiceApp, message: &str) {
-    let debug = &mut app.state.code.code_workspace.automation.debug;
+pub(super) fn debug_fail(parts: &mut AutomationParts<'_>, message: &str) {
+    let debug = &mut parts.code.automation.debug;
     debug.phase = AutomationDebugPhase::Failed;
     debug.last_error = Some(message.to_owned());
     let _ = push_debug_output(debug, "error", "adapter-failed", message);
-    app.state
+    parts
+        .model
         .record(LogSeverity::Error, LogSource::Studio, message);
 }
 

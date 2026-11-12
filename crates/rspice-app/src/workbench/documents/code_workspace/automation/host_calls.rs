@@ -30,21 +30,21 @@ pub(super) fn handle_runtime_host_call(
         .filter(|pending| pending.request_id == request_id)
     else {
         runtime_protocol_failure(
-            app,
+            &mut app.automation_parts(),
             "A managed Python host call has no owning request ledger.",
         );
         return;
     };
     if pending.session_id != Some(session_id) {
         runtime_protocol_failure(
-            app,
+            &mut app.automation_parts(),
             "A managed Python host call has the wrong session identity.",
         );
         return;
     }
     if call.call_id != pending.last_call_id.saturating_add(1) {
         runtime_protocol_failure(
-            app,
+            &mut app.automation_parts(),
             "Managed Python host-call identities are not a strict monotonic sequence.",
         );
         return;
@@ -60,9 +60,10 @@ pub(super) fn handle_runtime_host_call(
             ProjectSourceLanguage::RSpiceAutomation,
         ))
         .is_some_and(|bundle| bundle.id() == pending.bundle_id);
-    if !exact_bundle_is_current || !source_token_is_current(app, pending.token) {
+    if !exact_bundle_is_current || !source_token_is_current(&app.automation_parts(), pending.token)
+    {
         reject_runtime_host_call(
-            app,
+            &mut app.automation_parts(),
             session_id,
             call.call_id,
             "STALE-SOURCE",
@@ -80,7 +81,10 @@ pub(super) fn handle_runtime_host_call(
         .clone()
         .filter(|snapshot| runtime_snapshot_matches_token(snapshot, pending.token))
     else {
-        runtime_protocol_failure(app, "The validated Python source is no longer available.");
+        runtime_protocol_failure(
+            &mut app.automation_parts(),
+            "The validated Python source is no longer available.",
+        );
         return;
     };
     let Some(grant) = snapshot
@@ -89,7 +93,7 @@ pub(super) fn handle_runtime_host_call(
         .find(|grant| grant.capability == call.capability && grant.token == call.capability_token)
     else {
         reject_runtime_host_call(
-            app,
+            &mut app.automation_parts(),
             session_id,
             call.call_id,
             "CAPABILITY-DENIED",
@@ -124,7 +128,7 @@ pub(super) fn handle_runtime_host_call(
     };
     if !scope_allowed {
         reject_runtime_host_call(
-            app,
+            &mut app.automation_parts(),
             session_id,
             call.call_id,
             "CAPABILITY-SCOPE-DENIED",
@@ -176,9 +180,9 @@ pub(super) fn handle_runtime_host_call(
             fail_closed,
         } => {
             let Some(manifest) = manifest.as_ref() else {
-                retain_runtime_execution(app, pending);
+                retain_runtime_execution(&mut app.automation_parts(), pending);
                 send_runtime_host_response(
-                    app,
+                    &mut app.automation_parts(),
                     session_id,
                     call.call_id,
                     host_failure(
@@ -301,7 +305,9 @@ pub(super) fn handle_runtime_host_call(
                     "REQUIREMENT-PROFILE-MISMATCH",
                     "The requested requirement profile differs from the selected run plan.",
                 ));
-            } else if !pending.mode.is_dry_run() && !completed_run_matches_pending(app, &pending) {
+            } else if !pending.mode.is_dry_run()
+                && !completed_run_matches_pending(&app.automation_parts(), &pending)
+            {
                 response = Some(host_failure(
                     "RUN-NOT-COMPLETE",
                     "Requirement results are unavailable until this workflow's simulation completes.",
@@ -335,7 +341,9 @@ pub(super) fn handle_runtime_host_call(
                     "BASELINE-MISMATCH",
                     "The requested comparison differs from the baseline policy sealed into the run plan.",
                 ));
-            } else if !pending.mode.is_dry_run() && !completed_run_matches_pending(app, &pending) {
+            } else if !pending.mode.is_dry_run()
+                && !completed_run_matches_pending(&app.automation_parts(), &pending)
+            {
                 response = Some(host_failure(
                     "RUN-NOT-COMPLETE",
                     "Comparison results are unavailable until this workflow's simulation completes.",
@@ -378,7 +386,9 @@ pub(super) fn handle_runtime_host_call(
                     "ARTIFACT-POLICY-MISMATCH",
                     "One or more requested artifact formats are not authorized by the selected run plan.",
                 ));
-            } else if !pending.mode.is_dry_run() && !completed_run_matches_pending(app, &pending) {
+            } else if !pending.mode.is_dry_run()
+                && !completed_run_matches_pending(&app.automation_parts(), &pending)
+            {
                 response = Some(host_failure(
                     "RUN-NOT-COMPLETE",
                     "Artifacts cannot be published until this workflow's simulation completes.",
@@ -430,26 +440,29 @@ pub(super) fn handle_runtime_host_call(
             }
         }
     }
-    retain_runtime_execution(app, pending);
+    retain_runtime_execution(&mut app.automation_parts(), pending);
     if let Some(response) = response {
-        send_runtime_host_response(app, session_id, call.call_id, response);
+        send_runtime_host_response(
+            &mut app.automation_parts(),
+            session_id,
+            call.call_id,
+            response,
+        );
     }
 }
 
 pub(super) fn retain_runtime_execution(
-    app: &mut RSpiceApp,
+    parts: &mut AutomationParts<'_>,
     pending: page::PendingAutomationRuntimeExecution,
 ) {
-    if app
-        .state
+    if parts
         .code
-        .code_workspace
         .automation
         .runtime_execution
         .as_ref()
         .is_some_and(|current| current.request_id == pending.request_id)
     {
-        app.state.code.code_workspace.automation.runtime_execution = Some(pending);
+        parts.code.automation.runtime_execution = Some(pending);
     }
 }
 
@@ -489,25 +502,18 @@ pub(super) fn host_failure(
 }
 
 pub(super) fn reject_runtime_host_call(
-    app: &mut RSpiceApp,
+    parts: &mut AutomationParts<'_>,
     session_id: uuid::Uuid,
     call_id: u64,
     code: &str,
     message: &str,
     permission_denied: bool,
 ) {
-    if let Some(pending) = app
-        .state
-        .code
-        .code_workspace
-        .automation
-        .runtime_execution
-        .as_mut()
-    {
+    if let Some(pending) = parts.code.automation.runtime_execution.as_mut() {
         pending.last_call_id = call_id;
     }
     send_runtime_host_response(
-        app,
+        parts,
         session_id,
         call_id,
         rspice_automation_protocol::HostResponse::Failure {
@@ -519,12 +525,12 @@ pub(super) fn reject_runtime_host_call(
 }
 
 pub(super) fn send_runtime_host_response(
-    app: &mut RSpiceApp,
+    parts: &mut AutomationParts<'_>,
     session_id: uuid::Uuid,
     call_id: u64,
     response: rspice_automation_protocol::HostResponse,
 ) {
-    if let Err(error) = app.code.automation_runtime.send_request(
+    if let Err(error) = parts.handles.automation_runtime.send_request(
         rspice_automation_protocol::RuntimeRequest::HostResponse {
             session_id,
             call_id,
@@ -532,39 +538,37 @@ pub(super) fn send_runtime_host_response(
         },
     ) {
         runtime_protocol_failure(
-            app,
+            parts,
             &format!("Could not return a simulator host-call result to managed Python: {error}"),
         );
     }
 }
 
-pub(super) fn runtime_protocol_failure(app: &mut RSpiceApp, message: &str) {
-    let debugging = app
-        .state
+pub(super) fn runtime_protocol_failure(parts: &mut AutomationParts<'_>, message: &str) {
+    let debugging = parts
         .code
-        .code_workspace
         .automation
         .runtime_execution
         .as_ref()
         .is_some_and(|pending| pending.mode.is_debug());
-    let _ = app.code.automation_runtime.terminate();
-    let runtime = &mut app.state.code.code_workspace.automation;
+    let _ = parts.handles.automation_runtime.terminate();
+    let runtime = &mut parts.code.automation;
     runtime.pending_runtime_validation = None;
     runtime.deferred_runtime_launch = None;
     runtime.runtime_execution = None;
     if debugging {
-        debug_fail(app, message);
+        debug_fail(parts, message);
     } else {
-        fail(app, message);
+        fail(parts, message);
     }
 }
 
 pub(super) fn completed_run_matches_pending(
-    app: &RSpiceApp,
+    parts: &AutomationParts<'_>,
     pending: &page::PendingAutomationRuntimeExecution,
 ) -> bool {
     matches!(
-        app.state.code.code_workspace.automation.execution,
+        parts.code.automation.execution,
         AutomationExecutionState::Complete { run_id, .. }
             if pending.simulation_run_id == Some(run_id)
     )
@@ -580,16 +584,10 @@ pub(super) fn automation_api_artifact_kind(value: &str) -> Option<ArtifactKind> 
 }
 
 pub(super) fn runtime_editor_diagnostic(
-    app: &RSpiceApp,
+    parts: &AutomationParts<'_>,
     diagnostic: &rspice_automation_protocol::RuntimeDiagnostic,
 ) -> CodeEditorDiagnostic {
-    let snapshot = app
-        .state
-        .code
-        .code_workspace
-        .automation
-        .runtime_snapshot
-        .as_ref();
+    let snapshot = parts.code.automation.runtime_snapshot.as_ref();
     let document = diagnostic.document_id.and_then(|document_id| {
         snapshot?
             .documents

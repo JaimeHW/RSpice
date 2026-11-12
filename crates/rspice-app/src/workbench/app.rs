@@ -298,6 +298,22 @@ impl RSpiceApp {
         )
     }
 
+    /// The parts of the application the Automation workflow reads and
+    /// changes, lent for the one call.
+    pub(crate) fn automation_parts(
+        &mut self,
+    ) -> crate::workbench::documents::code_workspace::AutomationParts<'_> {
+        crate::workbench::documents::code_workspace::AutomationParts {
+            code: &mut self.state.code.code_workspace,
+            handles: &mut self.code,
+            model: &mut self.state.model,
+            wb: &mut self.state.workbench,
+            runs: &mut self.state.runs,
+            run_controller: &mut self.simulation_controller,
+            export_io: self.export_workflow_io.as_ref(),
+        }
+    }
+
     /// Drop every authorization and presentation artifact derived from a
     /// mutable simulation input. Call this at the same commit boundary as
     /// plan, PVT, solver-option, model, variable, output, or topology edits.
@@ -607,7 +623,9 @@ impl RSpiceApp {
 
         self.poll_code(ctx);
         crate::workbench::documents::code_workspace::poll_automation_workflow(self);
-        crate::workbench::documents::code_workspace::settle_pending_python_execute(self);
+        crate::workbench::documents::code_workspace::settle_pending_python_execute(
+            &mut self.automation_parts(),
+        );
         crate::workbench::documents::code_workspace::poll_managed_automation_runtime(self);
         let automation = &self.state.code.code_workspace.automation;
         if automation.pending_runtime_validation.is_some()

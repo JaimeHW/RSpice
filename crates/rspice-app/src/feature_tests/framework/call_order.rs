@@ -93,7 +93,7 @@ const PREPARE_FRAME: &[Step] = &[
     ("5.13", &["code_workspace::poll_automation_workflow(self)"]),
     (
         "5.14",
-        &["code_workspace::settle_pending_python_execute(self)"],
+        &["code_workspace::settle_pending_python_execute(&mut self.automation_parts(),)"],
     ),
     (
         "5.15",
@@ -822,7 +822,7 @@ const CODE_CONTRIBUTIONS: &[Step] = &[
              netlist::source_menu_open(&ctx, &app.state.model, &app.state.code.netlist,)\
              }),\
              );",
-            "sync_automation_debugger(app);\
+            "sync_automation_debugger(&mut app.automation_parts());\
              automation::prepare(&mut features::cx(app));\
              let ctx = ui.ctx().clone();\
              automation::show(\

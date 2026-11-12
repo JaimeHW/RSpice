@@ -146,7 +146,7 @@ fn environment_authority_is_one_exact_multi_name_scope() {
         .expect("valid workspace");
     manifest.environment = vec!["RSPICE_ALPHA".to_owned(), "RSPICE_BETA".to_owned()];
 
-    let grants = automation_capabilities(&app, &manifest).expect("capability scope");
+    let grants = automation_capabilities(&app.state.model, &manifest).expect("capability scope");
     let environment = grants
         .iter()
         .filter(|grant| {
@@ -248,7 +248,7 @@ fn unscoped_network_and_process_permissions_fail_closed() {
         .expect("valid baseline workspace");
     manifest.network = "allow".to_owned();
     manifest.process_spawn = "allow".to_owned();
-    let grants = automation_capabilities(&app, &manifest).expect("capability scope");
+    let grants = automation_capabilities(&app.state.model, &manifest).expect("capability scope");
     assert!(grants.iter().all(|grant| {
         !matches!(
             grant.capability,
@@ -295,7 +295,7 @@ fn ambient_external_write_and_clipboard_authorities_are_never_granted() {
     ];
     let (_, manifest) = compile_automation_documents("characterize.py", &documents, &roles)
         .expect("valid governed workspace");
-    let grants = automation_capabilities(&app, &manifest).expect("capability scope");
+    let grants = automation_capabilities(&app.state.model, &manifest).expect("capability scope");
 
     assert!(grants.iter().all(|grant| {
         !matches!(

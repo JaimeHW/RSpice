@@ -45,6 +45,7 @@ use crate::state::{
 };
 use crate::workbench::RSpiceApp;
 use crate::workbench::workflows::export_workflow::SaveDialogConfig;
+use rspice_app_state::workbench::app_state::model::Model;
 
 use super::page;
 use super::page::{
@@ -73,14 +74,33 @@ pub(crate) struct CodeHandles {
     pub(crate) automation_runtime_project_id: crate::product::ProjectId,
 }
 
+/// What the Automation workflow reads and changes, lent for the one call: the
+/// Code & Automation page's state, the runtime the code feature runs, the
+/// model, the session, and the run tier with its controller and the export
+/// IO. Each is one the code feature's context lends as well; until the
+/// shell's arms take a context, the application lends them.
+pub(crate) struct AutomationParts<'a> {
+    pub(crate) code: &'a mut super::CodeWorkspaceRuntimeState,
+    pub(crate) handles: &'a mut CodeHandles,
+    pub(crate) model: &'a mut Model,
+    pub(crate) wb: &'a mut rspice_app_workbench::workbench::state::WorkbenchSession,
+    pub(crate) runs: &'a mut rspice_app_runs::workbench::slots::runs::RunsState,
+    pub(crate) run_controller: &'a mut rspice_app_runs::simulation::SimulationController,
+    pub(crate) export_io:
+        &'a dyn rspice_app_services::workbench::workflows::export_workflow::ExportWorkflowIo,
+}
+
 pub(crate) const MAX_AUTOMATION_TASKS: usize = 10_000_000;
 
 /// Validate, bind, and dispatch the exact current workflow against the active
 /// project plan. Every prerequisite is checked before the ordinary prepared
 /// simulation controller receives a run request.
 pub fn start_automation_workflow(app: &mut RSpiceApp) {
-    if python_automation_requires_managed_worker(app) {
-        start_managed_python_workflow(app, AutomationRuntimeLaunchMode::Run);
+    if python_automation_requires_managed_worker(&app.automation_parts()) {
+        start_managed_python_workflow(
+            &mut app.automation_parts(),
+            AutomationRuntimeLaunchMode::Run,
+        );
         return;
     }
     prepare_automation_workflow(app, true);
@@ -89,15 +109,18 @@ pub fn start_automation_workflow(app: &mut RSpiceApp) {
 /// Exercise the complete governed preflight without creating a simulation
 /// request or consuming execution capacity.
 pub fn dry_run_automation_workflow(app: &mut RSpiceApp) {
-    if python_automation_requires_managed_worker(app) {
-        start_managed_python_workflow(app, AutomationRuntimeLaunchMode::DryRun);
+    if python_automation_requires_managed_worker(&app.automation_parts()) {
+        start_managed_python_workflow(
+            &mut app.automation_parts(),
+            AutomationRuntimeLaunchMode::DryRun,
+        );
         return;
     }
     prepare_automation_workflow(app, false);
 }
 
-fn python_automation_requires_managed_worker(app: &RSpiceApp) -> bool {
-    app.state
+fn python_automation_requires_managed_worker(parts: &AutomationParts<'_>) -> bool {
+    parts
         .model
         .workspace
         .content
@@ -145,8 +168,11 @@ pub(crate) fn automation_runtime_unavailable_reason(handles: &mut CodeHandles) -
     }
 }
 
-fn start_managed_python_workflow(app: &mut RSpiceApp, mode: AutomationRuntimeLaunchMode) {
-    let runtime = &app.state.code.code_workspace.automation;
+fn start_managed_python_workflow(
+    parts: &mut AutomationParts<'_>,
+    mode: AutomationRuntimeLaunchMode,
+) {
+    let runtime = &parts.code.automation;
     if runtime.runtime_execution.is_some()
         || runtime.pending_runtime_validation.is_some()
         || runtime.execution.is_active()
@@ -154,8 +180,7 @@ fn start_managed_python_workflow(app: &mut RSpiceApp, mode: AutomationRuntimeLau
         return;
     }
     let owner = ProjectSourceOwner::code_workspace(ProjectSourceLanguage::RSpiceAutomation);
-    let Some(bundle) = app
-        .state
+    let Some(bundle) = parts
         .model
         .workspace
         .content
@@ -163,78 +188,63 @@ fn start_managed_python_workflow(app: &mut RSpiceApp, mode: AutomationRuntimeLau
         .bundle_for_owner(&owner)
         .cloned()
     else {
-        fail(app, "This project has no Automation source workspace.");
+        fail(parts, "This project has no Automation source workspace.");
         return;
     };
     let token = SourceOperationToken {
-        project_id: app.state.model.workspace.content.project.id(),
+        project_id: parts.model.workspace.content.project.id(),
         revision: bundle.revision().get(),
         content_digest: bundle.closure_digest(),
     };
-    let validated = app
-        .state
+    let validated = parts
         .code
-        .code_workspace
         .automation
         .receipt
         .as_ref()
         .is_some_and(|receipt| receipt.token == token)
-        && app
-            .state
+        && parts
             .code
-            .code_workspace
             .automation
             .runtime_snapshot
             .as_ref()
             .is_some_and(|snapshot| runtime_snapshot_matches_token(snapshot, token));
     if !validated {
-        app.state
-            .code
-            .code_workspace
-            .automation
-            .deferred_runtime_launch = Some(mode);
-        validate_automation_workspace(app);
+        parts.code.automation.deferred_runtime_launch = Some(mode);
+        validate_automation_workspace(parts);
         return;
     }
-    begin_managed_python_execution(app, bundle.id(), token, mode);
+    begin_managed_python_execution(parts, bundle.id(), token, mode);
 }
 
 /// Cancel the exact Automation dispatch owned by this workspace. A queued
 /// request is withdrawn before controller pickup; an active simulation uses
 /// its identity-bound abort contract.
-pub fn cancel_automation_workflow(app: &mut RSpiceApp) {
-    if let Some(pending) = app
-        .state
-        .code
-        .code_workspace
-        .automation
-        .runtime_execution
-        .clone()
-    {
-        if app.state.model.simulation.execution.has_active_execution()
-            || app.state.model.simulation.execution.trigger_simulation
+pub fn cancel_automation_workflow(parts: &mut AutomationParts<'_>) {
+    if let Some(pending) = parts.code.automation.runtime_execution.clone() {
+        if parts.model.simulation.execution.has_active_execution()
+            || parts.model.simulation.execution.trigger_simulation
         {
             if let Some(session_id) = pending.session_id
-                && let Err(error) = app
-                    .code
+                && let Err(error) = parts
+                    .handles
                     .automation_runtime
                     .send_request(rspice_automation_protocol::RuntimeRequest::Cancel { session_id })
             {
                 runtime_protocol_failure(
-                    app,
+                    parts,
                     &format!("Could not cancel the managed Python session: {error}"),
                 );
                 return;
             }
         } else {
-            let _ = app.code.automation_runtime.terminate();
-            let runtime = &mut app.state.code.code_workspace.automation;
+            let _ = parts.handles.automation_runtime.terminate();
+            let runtime = &mut parts.code.automation;
             runtime.runtime_execution = None;
             runtime.execution = AutomationExecutionState::Cancelled;
             runtime.cancel_requested = false;
             runtime.artifacts.clear();
             runtime.last_error = None;
-            app.state.record(
+            parts.model.record(
                 LogSeverity::Info,
                 LogSource::Studio,
                 "Managed Python execution was cancelled and its worker was stopped.",
@@ -242,19 +252,22 @@ pub fn cancel_automation_workflow(app: &mut RSpiceApp) {
             return;
         }
     }
-    match app.state.code.code_workspace.automation.execution.clone() {
+    match parts.code.automation.execution.clone() {
         AutomationExecutionState::AwaitingDispatch { .. }
-            if app.state.model.simulation.execution.trigger_simulation
-                && !app.state.model.simulation.execution.has_active_execution() =>
+            if parts.model.simulation.execution.trigger_simulation
+                && !parts.model.simulation.execution.has_active_execution() =>
         {
-            app.state.model.simulation.execution.trigger_simulation = false;
-            app.invalidate_simulation_preflight();
-            let runtime = &mut app.state.code.code_workspace.automation;
+            parts.model.simulation.execution.trigger_simulation = false;
+            rspice_app_runs::workbench::preflight::invalidate(
+                &mut parts.runs.preflight,
+                parts.run_controller,
+            );
+            let runtime = &mut parts.code.automation;
             runtime.execution = AutomationExecutionState::Cancelled;
             runtime.cancel_requested = false;
             runtime.artifacts.clear();
             runtime.last_error = None;
-            app.state.record(
+            parts.model.record(
                 LogSeverity::Info,
                 LogSource::Studio,
                 "Automation dispatch was cancelled before execution started.",
@@ -262,13 +275,13 @@ pub fn cancel_automation_workflow(app: &mut RSpiceApp) {
         }
         AutomationExecutionState::AwaitingDispatch { .. }
         | AutomationExecutionState::Running { .. } => {
-            match app.state.model.simulation.request_abort_active_run() {
+            match parts.model.simulation.request_abort_active_run() {
                 Ok(_) => {
-                    app.state.code.code_workspace.automation.cancel_requested = true;
-                    app.state.prompt("Cancelling the active Automation run.");
+                    parts.code.automation.cancel_requested = true;
+                    parts.wb.prompt("Cancelling the active Automation run.");
                 }
                 Err(error) => fail(
-                    app,
+                    parts,
                     &format!("Could not cancel the Automation run: {error}"),
                 ),
             }
@@ -280,20 +293,12 @@ pub fn cancel_automation_workflow(app: &mut RSpiceApp) {
 /// Validate the exact configured Automation closure. This is intentionally
 /// independent of simulation readiness so authors can resolve source,
 /// environment, and permission diagnostics before a design plan is configured.
-pub fn validate_automation_workspace(app: &mut RSpiceApp) {
-    if app
-        .state
-        .code
-        .code_workspace
-        .automation
-        .execution
-        .is_active()
-    {
+pub fn validate_automation_workspace(parts: &mut AutomationParts<'_>) {
+    if parts.code.automation.execution.is_active() {
         return;
     }
     let owner = ProjectSourceOwner::code_workspace(ProjectSourceLanguage::RSpiceAutomation);
-    let Some(bundle) = app
-        .state
+    let Some(bundle) = parts
         .model
         .workspace
         .content
@@ -301,11 +306,11 @@ pub fn validate_automation_workspace(app: &mut RSpiceApp) {
         .bundle_for_owner(&owner)
         .cloned()
     else {
-        fail(app, "This project has no Automation source workspace.");
+        fail(parts, "This project has no Automation source workspace.");
         return;
     };
     let token = SourceOperationToken {
-        project_id: app.state.model.workspace.content.project.id(),
+        project_id: parts.model.workspace.content.project.id(),
         revision: bundle.revision().get(),
         content_digest: bundle.closure_digest(),
     };
@@ -313,18 +318,18 @@ pub fn validate_automation_workspace(app: &mut RSpiceApp) {
         Ok((_plan, manifest)) => {
             let runtime_snapshot = match manifest.as_ref() {
                 Some(manifest) => {
-                    let capabilities = match automation_capabilities(app, manifest) {
+                    let capabilities = match automation_capabilities(parts.model, manifest) {
                         Ok(capabilities) => capabilities,
                         Err(error) => {
                             fail(
-                                app,
+                                parts,
                                 &format!("Could not seal the Automation capability scope: {error}"),
                             );
                             return;
                         }
                     };
                     match crate::automation_workflow::build_automation_runtime_snapshot(
-                        app.state.model.workspace.content.project.id(),
+                        parts.model.workspace.content.project.id(),
                         &bundle,
                         manifest,
                         capabilities,
@@ -332,7 +337,7 @@ pub fn validate_automation_workspace(app: &mut RSpiceApp) {
                         Ok(snapshot) => Some(snapshot),
                         Err(error) => {
                             fail(
-                                app,
+                                parts,
                                 &format!("Could not seal the Automation worker snapshot: {error}"),
                             );
                             return;
@@ -341,7 +346,7 @@ pub fn validate_automation_workspace(app: &mut RSpiceApp) {
                 }
                 None => None,
             };
-            let runtime = &mut app.state.code.code_workspace.automation;
+            let runtime = &mut parts.code.automation;
             runtime.receipt = None;
             runtime.manifest = manifest;
             runtime.runtime_snapshot = runtime_snapshot;
@@ -351,13 +356,13 @@ pub fn validate_automation_workspace(app: &mut RSpiceApp) {
             runtime.last_error = None;
             runtime.execution = AutomationExecutionState::Idle;
 
-            if app.state.code.code_workspace.automation.manifest.is_some() {
-                begin_managed_python_validation(app, bundle.id(), token);
+            if parts.code.automation.manifest.is_some() {
+                begin_managed_python_validation(parts, bundle.id(), token);
             } else {
-                complete_automation_validation(app, bundle.id(), token);
+                complete_automation_validation(parts, bundle.id(), token);
             }
         }
-        Err(diagnostics) => publish_compile_failure(app, token, diagnostics),
+        Err(diagnostics) => publish_compile_failure(parts, token, diagnostics),
     }
 }
 
@@ -370,7 +375,7 @@ pub fn poll_managed_automation_runtime(app: &mut RSpiceApp) {
             Ok(event) => event,
             Err(error) => {
                 runtime_protocol_failure(
-                    app,
+                    &mut app.automation_parts(),
                     &format!("Could not connect to the managed Python worker: {error}"),
                 );
                 continue;
@@ -413,7 +418,7 @@ pub fn poll_managed_automation_runtime(app: &mut RSpiceApp) {
                 .and_then(|pending| pending.session_id);
             if current.is_some_and(|current| current != session_id) {
                 runtime_protocol_failure(
-                    app,
+                    &mut app.automation_parts(),
                     "Managed Python worker changed session identity during one execution request.",
                 );
                 continue;
@@ -464,19 +469,23 @@ pub fn poll_managed_automation_runtime(app: &mut RSpiceApp) {
                     {
                         let _ = app.code.automation_runtime.terminate();
                     }
-                    complete_automation_validation(app, pending.bundle_id, pending.token)
+                    complete_automation_validation(
+                        &mut app.automation_parts(),
+                        pending.bundle_id,
+                        pending.token,
+                    )
                 }
                 (RuntimeState::Completed, _, Some(pending)) => {
                     if pending.pending_execute_call_id.is_some() {
                         runtime_protocol_failure(
-                            app,
+                            &mut app.automation_parts(),
                             "Managed Python finished while a simulator call was still waiting for its result.",
                         );
                         continue;
                     }
-                    if !source_token_is_current(app, pending.token) {
+                    if !source_token_is_current(&app.automation_parts(), pending.token) {
                         runtime_protocol_failure(
-                            app,
+                            &mut app.automation_parts(),
                             "Managed Python completed for a stale Automation source revision.",
                         );
                         continue;
@@ -548,15 +557,24 @@ pub fn poll_managed_automation_runtime(app: &mut RSpiceApp) {
                         .code_workspace
                         .automation
                         .pending_runtime_validation = None;
-                    fail(app, &format!("Managed Python validation failed: {detail}"));
+                    fail(
+                        &mut app.automation_parts(),
+                        &format!("Managed Python validation failed: {detail}"),
+                    );
                 }
                 (RuntimeState::Failed | RuntimeState::Terminated, _, Some(pending)) => {
                     let _ = app.code.automation_runtime.terminate();
                     app.state.code.code_workspace.automation.runtime_execution = None;
                     if pending.mode.is_debug() {
-                        debug_fail(app, &format!("Managed Python debugger failed: {detail}"));
+                        debug_fail(
+                            &mut app.automation_parts(),
+                            &format!("Managed Python debugger failed: {detail}"),
+                        );
                     } else {
-                        fail(app, &format!("Managed Python execution failed: {detail}"));
+                        fail(
+                            &mut app.automation_parts(),
+                            &format!("Managed Python execution failed: {detail}"),
+                        );
                     }
                 }
                 (RuntimeState::Running, _, Some(pending)) if pending.mode.is_debug() => {
@@ -571,7 +589,8 @@ pub fn poll_managed_automation_runtime(app: &mut RSpiceApp) {
                 _ => {}
             },
             RuntimeEvent::Diagnostic { diagnostic } => {
-                let editor_diagnostic = runtime_editor_diagnostic(app, &diagnostic);
+                let editor_diagnostic =
+                    runtime_editor_diagnostic(&app.automation_parts(), &diagnostic);
                 let capacity_error =
                     Arc::make_mut(&mut app.state.code.code_workspace.automation.diagnostics)
                         .try_push(editor_diagnostic)
@@ -584,7 +603,7 @@ pub fn poll_managed_automation_runtime(app: &mut RSpiceApp) {
                         .code_workspace
                         .automation
                         .pending_runtime_validation = None;
-                    fail(app, &error);
+                    fail(&mut app.automation_parts(), &error);
                 }
             }
             RuntimeEvent::Output {
@@ -598,7 +617,7 @@ pub fn poll_managed_automation_runtime(app: &mut RSpiceApp) {
                 };
                 if let Some(error) = capacity_error {
                     let _ = app.code.automation_runtime.terminate();
-                    runtime_protocol_failure(app, &error);
+                    runtime_protocol_failure(&mut app.automation_parts(), &error);
                 }
             }
             RuntimeEvent::WorkerFailed {
@@ -623,9 +642,9 @@ pub fn poll_managed_automation_runtime(app: &mut RSpiceApp) {
                     .as_ref()
                     .is_some_and(|pending| pending.mode.is_debug())
                 {
-                    debug_fail(app, &rendered);
+                    debug_fail(&mut app.automation_parts(), &rendered);
                 } else {
-                    fail(app, &rendered);
+                    fail(&mut app.automation_parts(), &rendered);
                 }
             }
             RuntimeEvent::HostCall { call } => {
@@ -633,7 +652,7 @@ pub fn poll_managed_automation_runtime(app: &mut RSpiceApp) {
                     (request_id, session_id, execution)
                 else {
                     runtime_protocol_failure(
-                        app,
+                        &mut app.automation_parts(),
                         "Managed Python made a simulator call outside an active run.",
                     );
                     continue;
@@ -647,7 +666,7 @@ pub fn poll_managed_automation_runtime(app: &mut RSpiceApp) {
             } => {
                 let Some(pending) = execution.filter(|pending| pending.mode.is_debug()) else {
                     runtime_protocol_failure(
-                        app,
+                        &mut app.automation_parts(),
                         "Managed Python stopped for the debugger outside a debug session.",
                     );
                     continue;
@@ -675,21 +694,26 @@ pub fn poll_managed_automation_runtime(app: &mut RSpiceApp) {
                 );
                 let Some(debug_session_id) = pending.session_id else {
                     runtime_protocol_failure(
-                        app,
+                        &mut app.automation_parts(),
                         "Managed Python paused without a debugger session.",
                     );
                     continue;
                 };
-                request_debug_stack(app, debug_session_id);
+                request_debug_stack(&mut app.automation_parts(), debug_session_id);
             }
             RuntimeEvent::Stack { frames, total: _ } => {
-                apply_debug_stack(app, request_id, frames);
+                apply_debug_stack(&mut app.automation_parts(), request_id, frames);
             }
             RuntimeEvent::Variables { values, total: _ } => {
-                apply_debug_variables(app, request_id, values);
+                apply_debug_variables(&mut app.automation_parts(), request_id, values);
             }
             RuntimeEvent::Evaluated { expression, result } => {
-                apply_debug_evaluation(app, request_id, &expression, result);
+                apply_debug_evaluation(
+                    &mut app.automation_parts(),
+                    request_id,
+                    &expression,
+                    result,
+                );
             }
             RuntimeEvent::Terminated { reason, .. }
                 if validation.is_some() || execution.is_some() =>
@@ -698,7 +722,7 @@ pub fn poll_managed_automation_runtime(app: &mut RSpiceApp) {
                 runtime.pending_runtime_validation = None;
                 runtime.runtime_execution = None;
                 fail(
-                    app,
+                    &mut app.automation_parts(),
                     &format!("Managed Python worker terminated during an operation: {reason}"),
                 );
             }
@@ -708,80 +732,71 @@ pub fn poll_managed_automation_runtime(app: &mut RSpiceApp) {
 }
 
 fn complete_automation_validation(
-    app: &mut RSpiceApp,
+    parts: &mut AutomationParts<'_>,
     bundle_id: crate::state::ProjectSourceId,
     token: SourceOperationToken,
 ) {
-    if !source_token_is_current(app, token) {
+    if !source_token_is_current(parts, token) {
         fail(
-            app,
+            parts,
             "Automation validation completed for a stale source revision; validate the current files again.",
         );
         return;
     }
-    if let Err(error) = app
-        .state
+    if let Err(error) = parts
         .model
         .workspace
         .content
         .mark_project_source_bundle_validated(bundle_id)
     {
         fail(
-            app,
+            parts,
             &format!("Could not retain the workflow validation receipt: {error}"),
         );
         return;
     }
-    let runtime = &mut app.state.code.code_workspace.automation;
+    let runtime = &mut parts.code.automation;
     runtime.receipt = Some(AutomationValidationReceipt { token });
     runtime.pending_runtime_validation = None;
     runtime.diagnostic_token = None;
     runtime.last_error = None;
     runtime.execution = AutomationExecutionState::Idle;
-    app.state.record(
+    parts.model.record(
         LogSeverity::Info,
         LogSource::Studio,
         "Automation workspace validation passed.",
     );
-    let deferred = app
-        .state
-        .code
-        .code_workspace
-        .automation
-        .deferred_runtime_launch
-        .take();
+    let deferred = parts.code.automation.deferred_runtime_launch.take();
     if let Some(mode) = deferred {
-        begin_managed_python_execution(app, bundle_id, token, mode);
+        begin_managed_python_execution(parts, bundle_id, token, mode);
     }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 fn begin_managed_python_execution(
-    app: &mut RSpiceApp,
+    parts: &mut AutomationParts<'_>,
     bundle_id: crate::state::ProjectSourceId,
     token: SourceOperationToken,
     mode: AutomationRuntimeLaunchMode,
 ) {
     use rspice_automation_protocol::{ExceptionPolicy, LaunchMode, ResourceLimits, RuntimeRequest};
 
-    if !source_token_is_current(app, token) {
+    if !source_token_is_current(parts, token) {
         fail(
-            app,
+            parts,
             "The Automation source changed before managed Python could start; validate the current files again.",
         );
         return;
     }
-    let Some(snapshot) = app
-        .state
+    let Some(snapshot) = parts
         .code
-        .code_workspace
         .automation
         .runtime_snapshot
         .clone()
         .filter(|snapshot| runtime_snapshot_matches_token(snapshot, token))
     else {
         fail(
-            app,
+            parts,
             "Managed Python execution has no validated snapshot of the current source.",
         );
         return;
@@ -794,15 +809,15 @@ fn begin_managed_python_execution(
             .join(snapshot.workspace_id.to_string()),
         None => {
             fail(
-                app,
+                parts,
                 "The operating system did not provide an application cache directory for the managed Python worker.",
             );
             return;
         }
     };
-    if let Err(error) = app.code.automation_runtime.ensure_worker(scratch) {
+    if let Err(error) = parts.handles.automation_runtime.ensure_worker(scratch) {
         fail(
-            app,
+            parts,
             &format!(
                 "Could not start the RSpice-managed Python worker: {error}. RSpice will not use a system Python fallback."
             ),
@@ -810,12 +825,12 @@ fn begin_managed_python_execution(
         return;
     }
     let breakpoints = if mode.is_debug() {
-        runtime_breakpoints(app, &snapshot)
+        runtime_breakpoints(parts, &snapshot)
     } else {
         Vec::new()
     };
     let exception_policy = if mode.is_debug() {
-        runtime_exception_policy(app)
+        runtime_exception_policy(parts)
     } else {
         ExceptionPolicy::Uncaught
     };
@@ -838,9 +853,9 @@ fn begin_managed_python_execution(
         breakpoints,
         exception_policy,
     };
-    match app.code.automation_runtime.send_request(request) {
+    match parts.handles.automation_runtime.send_request(request) {
         Ok(request_id) => {
-            let runtime = &mut app.state.code.code_workspace.automation;
+            let runtime = &mut parts.code.automation;
             runtime.runtime_execution = Some(super::page::PendingAutomationRuntimeExecution {
                 request_id,
                 bundle_id,
@@ -863,7 +878,7 @@ fn begin_managed_python_execution(
             runtime.artifacts.clear();
             runtime.last_error = None;
             if mode.is_debug() {
-                let debug = &mut app.state.code.code_workspace.automation.debug;
+                let debug = &mut parts.code.automation.debug;
                 debug.phase = AutomationDebugPhase::Running;
                 debug.pause_requested = false;
                 debug.current_line = None;
@@ -876,7 +891,7 @@ fn begin_managed_python_execution(
                 debug.pending_evaluation_requests.clear();
                 debug.last_error = None;
             }
-            app.state.record(
+            parts.model.record(
                 LogSeverity::Info,
                 LogSource::Studio,
                 if mode.is_debug() {
@@ -889,7 +904,7 @@ fn begin_managed_python_execution(
             );
         }
         Err(error) => fail(
-            app,
+            parts,
             &format!("Could not submit managed Python execution: {error}"),
         ),
     }
@@ -897,38 +912,36 @@ fn begin_managed_python_execution(
 
 #[cfg(target_arch = "wasm32")]
 fn begin_managed_python_execution(
-    app: &mut RSpiceApp,
+    parts: &mut AutomationParts<'_>,
     bundle_id: crate::state::ProjectSourceId,
     token: SourceOperationToken,
     mode: AutomationRuntimeLaunchMode,
 ) {
     use rspice_automation_protocol::{ExceptionPolicy, LaunchMode, ResourceLimits, RuntimeRequest};
 
-    if !source_token_is_current(app, token) {
+    if !source_token_is_current(parts, token) {
         fail(
-            app,
+            parts,
             "The Automation source changed before managed Python could start; validate the current files again.",
         );
         return;
     }
-    let Some(snapshot) = app
-        .state
+    let Some(snapshot) = parts
         .code
-        .code_workspace
         .automation
         .runtime_snapshot
         .clone()
         .filter(|snapshot| runtime_snapshot_matches_token(snapshot, token))
     else {
         fail(
-            app,
+            parts,
             "Managed Python execution has no validated snapshot of the current source.",
         );
         return;
     };
-    if let Err(error) = app.code.automation_runtime.ensure_worker() {
+    if let Err(error) = parts.handles.automation_runtime.ensure_worker() {
         fail(
-            app,
+            parts,
             &format!(
                 "Could not start the pinned RSpice Python/WASM worker: {error}. RSpice will not use a browser CDN or system Python fallback."
             ),
@@ -936,12 +949,12 @@ fn begin_managed_python_execution(
         return;
     }
     let breakpoints = if mode.is_debug() {
-        runtime_breakpoints(app, &snapshot)
+        runtime_breakpoints(parts, &snapshot)
     } else {
         Vec::new()
     };
     let exception_policy = if mode.is_debug() {
-        runtime_exception_policy(app)
+        runtime_exception_policy(parts)
     } else {
         ExceptionPolicy::Uncaught
     };
@@ -964,9 +977,9 @@ fn begin_managed_python_execution(
         breakpoints,
         exception_policy,
     };
-    match app.code.automation_runtime.send_request(request) {
+    match parts.handles.automation_runtime.send_request(request) {
         Ok(request_id) => {
-            let runtime = &mut app.state.code.code_workspace.automation;
+            let runtime = &mut parts.code.automation;
             runtime.runtime_execution = Some(super::page::PendingAutomationRuntimeExecution {
                 request_id,
                 bundle_id,
@@ -989,7 +1002,7 @@ fn begin_managed_python_execution(
             runtime.artifacts.clear();
             runtime.last_error = None;
             if mode.is_debug() {
-                let debug = &mut app.state.code.code_workspace.automation.debug;
+                let debug = &mut parts.code.automation.debug;
                 debug.phase = AutomationDebugPhase::Running;
                 debug.pause_requested = false;
                 debug.current_line = None;
@@ -1002,7 +1015,7 @@ fn begin_managed_python_execution(
                 debug.pending_evaluation_requests.clear();
                 debug.last_error = None;
             }
-            app.state.record(
+            parts.model.record(
                 LogSeverity::Info,
                 LogSource::Studio,
                 if mode.is_debug() {
@@ -1015,7 +1028,7 @@ fn begin_managed_python_execution(
             );
         }
         Err(error) => fail(
-            app,
+            parts,
             &format!("Could not submit managed Python/WASM execution: {error}"),
         ),
     }
@@ -1023,22 +1036,15 @@ fn begin_managed_python_execution(
 
 #[cfg(not(target_arch = "wasm32"))]
 fn begin_managed_python_validation(
-    app: &mut RSpiceApp,
+    parts: &mut AutomationParts<'_>,
     bundle_id: crate::state::ProjectSourceId,
     token: SourceOperationToken,
 ) {
     use rspice_automation_protocol::{ExceptionPolicy, LaunchMode, ResourceLimits, RuntimeRequest};
 
-    let Some(snapshot) = app
-        .state
-        .code
-        .code_workspace
-        .automation
-        .runtime_snapshot
-        .clone()
-    else {
+    let Some(snapshot) = parts.code.automation.runtime_snapshot.clone() else {
         fail(
-            app,
+            parts,
             "Automation worker validation has no sealed source snapshot.",
         );
         return;
@@ -1051,15 +1057,15 @@ fn begin_managed_python_validation(
             .join(snapshot.workspace_id.to_string()),
         None => {
             fail(
-                app,
+                parts,
                 "The operating system did not provide an application cache directory for the managed Python worker.",
             );
             return;
         }
     };
-    if let Err(error) = app.code.automation_runtime.ensure_worker(scratch) {
+    if let Err(error) = parts.handles.automation_runtime.ensure_worker(scratch) {
         fail(
-            app,
+            parts,
             &format!("Could not start authoritative managed Python validation: {error}"),
         );
         return;
@@ -1079,23 +1085,20 @@ fn begin_managed_python_validation(
         breakpoints: Vec::new(),
         exception_policy: ExceptionPolicy::Uncaught,
     };
-    match app.code.automation_runtime.send_request(request) {
+    match parts.handles.automation_runtime.send_request(request) {
         Ok(request_id) => {
-            app.state
-                .code
-                .code_workspace
-                .automation
-                .pending_runtime_validation =
+            parts.code.automation.pending_runtime_validation =
                 Some(super::page::PendingAutomationRuntimeValidation {
                     request_id,
                     bundle_id,
                     token,
                 });
-            app.state
+            parts
+                .wb
                 .prompt("Validating the Automation sources in managed CPython.");
         }
         Err(error) => fail(
-            app,
+            parts,
             &format!("Could not submit managed Python validation: {error}"),
         ),
     }
@@ -1103,29 +1106,22 @@ fn begin_managed_python_validation(
 
 #[cfg(target_arch = "wasm32")]
 fn begin_managed_python_validation(
-    app: &mut RSpiceApp,
+    parts: &mut AutomationParts<'_>,
     bundle_id: crate::state::ProjectSourceId,
     token: SourceOperationToken,
 ) {
     use rspice_automation_protocol::{ExceptionPolicy, LaunchMode, ResourceLimits, RuntimeRequest};
 
-    let Some(snapshot) = app
-        .state
-        .code
-        .code_workspace
-        .automation
-        .runtime_snapshot
-        .clone()
-    else {
+    let Some(snapshot) = parts.code.automation.runtime_snapshot.clone() else {
         fail(
-            app,
+            parts,
             "Automation worker validation has no sealed source snapshot.",
         );
         return;
     };
-    if let Err(error) = app.code.automation_runtime.ensure_worker() {
+    if let Err(error) = parts.handles.automation_runtime.ensure_worker() {
         fail(
-            app,
+            parts,
             &format!("Could not start authoritative managed Python/WASM validation: {error}"),
         );
         return;
@@ -1145,23 +1141,20 @@ fn begin_managed_python_validation(
         breakpoints: Vec::new(),
         exception_policy: ExceptionPolicy::Uncaught,
     };
-    match app.code.automation_runtime.send_request(request) {
+    match parts.handles.automation_runtime.send_request(request) {
         Ok(request_id) => {
-            app.state
-                .code
-                .code_workspace
-                .automation
-                .pending_runtime_validation =
+            parts.code.automation.pending_runtime_validation =
                 Some(super::page::PendingAutomationRuntimeValidation {
                     request_id,
                     bundle_id,
                     token,
                 });
-            app.state
+            parts
+                .wb
                 .prompt("Validating the Automation sources in managed Python/WASM.");
         }
         Err(error) => fail(
-            app,
+            parts,
             &format!("Could not submit managed Python/WASM validation: {error}"),
         ),
     }
@@ -1198,7 +1191,10 @@ fn prepare_automation_workflow(app: &mut RSpiceApp, dispatch: bool) {
         ))
         .cloned()
     else {
-        fail(app, "This project has no Automation source workspace.");
+        fail(
+            &mut app.automation_parts(),
+            "This project has no Automation source workspace.",
+        );
         return;
     };
     let token = SourceOperationToken {
@@ -1209,12 +1205,12 @@ fn prepare_automation_workflow(app: &mut RSpiceApp, dispatch: bool) {
     let (plan, manifest) = match compile_automation_bundle(&bundle) {
         Ok(compiled) => compiled,
         Err(diagnostics) => {
-            publish_compile_failure(app, token, diagnostics);
+            publish_compile_failure(&mut app.automation_parts(), token, diagnostics);
             return;
         }
     };
     if let Err(error) = automation_task_count(&app.state.model) {
-        fail(app, &error);
+        fail(&mut app.automation_parts(), &error);
         return;
     }
     let runtime_snapshot = match manifest.as_ref() {
@@ -1229,11 +1225,11 @@ fn prepare_automation_workflow(app: &mut RSpiceApp, dispatch: bool) {
         {
             Some(snapshot) => Some(snapshot),
             None => {
-                let capabilities = match automation_capabilities(app, manifest) {
+                let capabilities = match automation_capabilities(&app.state.model, manifest) {
                     Ok(capabilities) => capabilities,
                     Err(error) => {
                         fail(
-                            app,
+                            &mut app.automation_parts(),
                             &format!("Could not seal the Automation capability scope: {error}"),
                         );
                         return;
@@ -1248,7 +1244,7 @@ fn prepare_automation_workflow(app: &mut RSpiceApp, dispatch: bool) {
                     Ok(snapshot) => Some(snapshot),
                     Err(error) => {
                         fail(
-                            app,
+                            &mut app.automation_parts(),
                             &format!("Could not seal the Automation worker snapshot: {error}"),
                         );
                         return;
@@ -1271,10 +1267,10 @@ fn prepare_automation_workflow(app: &mut RSpiceApp, dispatch: bool) {
         .active_plan_name()
         .as_str()
         .to_owned();
-    let plan_id = match active_plan_id(app) {
+    let plan_id = match active_plan_id(&app.automation_parts()) {
         Ok(plan_id) => plan_id,
         Err(error) => {
-            fail(app, &error);
+            fail(&mut app.automation_parts(), &error);
             return;
         }
     };
@@ -1287,15 +1283,15 @@ fn prepare_automation_workflow(app: &mut RSpiceApp, dispatch: bool) {
         .cloned()
     else {
         fail(
-            app,
+            &mut app.automation_parts(),
             "The active simulation plan has no governed configuration payload.",
         );
         return;
     };
     if let Some(manifest) = manifest_for_preflight.as_ref()
-        && let Err(error) = validate_requested_analyses(app, &manifest.analyses)
+        && let Err(error) = validate_requested_analyses(&app.automation_parts(), &manifest.analyses)
     {
-        fail(app, &error);
+        fail(&mut app.automation_parts(), &error);
         return;
     }
     let requirements_enabled = manifest_for_preflight
@@ -1303,13 +1299,16 @@ fn prepare_automation_workflow(app: &mut RSpiceApp, dispatch: bool) {
         .is_none_or(|manifest| !manifest.requirements.eq_ignore_ascii_case("none"));
     if requirements_enabled && plan_payload.specs.is_empty() {
         fail(
-            app,
+            &mut app.automation_parts(),
             "The workflow requires release specifications, but the active plan has none configured.",
         );
         return;
     }
     if let Err(error) = validate_regression_policy(&plan_payload.regression_tolerances) {
-        fail(app, &format!("The regression policy is invalid: {error}"));
+        fail(
+            &mut app.automation_parts(),
+            &format!("The regression policy is invalid: {error}"),
+        );
         return;
     }
     let corners_enabled = manifest_for_preflight.as_ref().is_none_or(|manifest| {
@@ -1318,20 +1317,20 @@ fn prepare_automation_workflow(app: &mut RSpiceApp, dispatch: bool) {
             "none" | "nominal"
         )
     });
-    if corners_enabled && let Err(error) = require_corner_matrix(app) {
-        fail(app, &error);
+    if corners_enabled && let Err(error) = require_corner_matrix(&app.automation_parts()) {
+        fail(&mut app.automation_parts(), &error);
         return;
     }
-    let baseline_run = match baseline_run(app, plan_id) {
+    let baseline_run = match baseline_run(&app.automation_parts(), plan_id) {
         Ok(run) => run,
         Err(error) => {
-            fail(app, &error);
+            fail(&mut app.automation_parts(), &error);
             return;
         }
     };
     if let Some(reason) = app.state.simulation_run_block_reason() {
         fail(
-            app,
+            &mut app.automation_parts(),
             &format!("Run preflight rejected the workflow: {reason}"),
         );
         return;
@@ -1344,7 +1343,7 @@ fn prepare_automation_workflow(app: &mut RSpiceApp, dispatch: bool) {
         .mark_project_source_bundle_validated(bundle.id())
     {
         fail(
-            app,
+            &mut app.automation_parts(),
             &format!("Could not retain the workflow validation receipt: {error}"),
         );
         return;
@@ -1359,7 +1358,7 @@ fn prepare_automation_workflow(app: &mut RSpiceApp, dispatch: bool) {
         .map(crate::simulation::plan::SimulationPlan::revision)
     else {
         fail(
-            app,
+            &mut app.automation_parts(),
             "The active simulation plan disappeared before Automation could seal its dispatch revision.",
         );
         return;
@@ -1368,7 +1367,7 @@ fn prepare_automation_workflow(app: &mut RSpiceApp, dispatch: bool) {
         Ok(digest) => digest,
         Err(error) => {
             fail(
-                app,
+                &mut app.automation_parts(),
                 &format!("Could not seal the governed baseline snapshot: {error}"),
             );
             return;
@@ -1409,7 +1408,7 @@ fn prepare_automation_workflow(app: &mut RSpiceApp, dispatch: bool) {
         Ok(prepared) => prepared,
         Err(error) => {
             fail(
-                app,
+                &mut app.automation_parts(),
                 &format!("Could not authorize the Automation run snapshot: {error}"),
             );
             return;
@@ -1493,13 +1492,13 @@ pub(crate) fn automation_task_count(
 }
 
 fn automation_capabilities(
-    app: &RSpiceApp,
+    model: &Model,
     manifest: &AutomationWorkspaceManifest,
 ) -> Result<Vec<rspice_automation_protocol::CapabilityGrant>, String> {
     use rspice_automation_protocol::{CapabilityGrant, CapabilityKind};
     use uuid::Uuid;
 
-    let project_scope = app.state.model.workspace.content.project.id().to_string();
+    let project_scope = model.workspace.content.project.id().to_string();
     let mut grants = Vec::new();
     if manifest.project_files.eq_ignore_ascii_case("read") {
         grants.push(CapabilityGrant {
@@ -1656,7 +1655,7 @@ fn fail_closed_permission_diagnostics(
 }
 
 fn publish_compile_failure(
-    app: &mut RSpiceApp,
+    parts: &mut AutomationParts<'_>,
     token: SourceOperationToken,
     diagnostics: Vec<CodeEditorDiagnostic>,
 ) {
@@ -1715,16 +1714,12 @@ fn publish_compile_failure(
         ])
         .unwrap_or_default()
     });
-    app.state.code.code_workspace.automation.manifest = None;
-    app.state.code.code_workspace.automation.runtime_snapshot = None;
-    app.state
-        .code
-        .code_workspace
-        .automation
-        .pending_runtime_validation = None;
-    app.state.code.code_workspace.automation.diagnostics = Arc::new(diagnostics);
-    app.state.code.code_workspace.automation.diagnostic_token = Some(token);
-    fail(app, &summary);
+    parts.code.automation.manifest = None;
+    parts.code.automation.runtime_snapshot = None;
+    parts.code.automation.pending_runtime_validation = None;
+    parts.code.automation.diagnostics = Arc::new(diagnostics);
+    parts.code.automation.diagnostic_token = Some(token);
+    fail(parts, &summary);
 }
 
 /// Follow the exact run created by the prepared controller and publish
@@ -1740,7 +1735,7 @@ pub fn poll_automation_workflow(app: &mut RSpiceApp) {
             snapshot,
         } => {
             if let Err(error) = dispatch_snapshot_is_current(app, &snapshot) {
-                fail(app, &error);
+                fail(&mut app.automation_parts(), &error);
                 return;
             }
             let matching_run_ids = app
@@ -1757,7 +1752,7 @@ pub fn poll_automation_workflow(app: &mut RSpiceApp) {
                 .collect::<Vec<_>>();
             if matching_run_ids.len() > 1 {
                 fail(
-                    app,
+                    &mut app.automation_parts(),
                     "The simulation produced more than one run matching this Automation request, so RSpice cannot tell which run belongs to it.",
                 );
                 return;
@@ -1778,7 +1773,7 @@ pub fn poll_automation_workflow(app: &mut RSpiceApp) {
                 && !app.state.model.simulation.execution.has_active_execution()
             {
                 fail(
-                    app,
+                    &mut app.automation_parts(),
                     "The simulation preflight finished without starting a run for this Automation request.",
                 );
             }
@@ -1817,11 +1812,9 @@ pub fn poll_automation_workflow(app: &mut RSpiceApp) {
 /// Complete the one host call that is intentionally held while the ordinary
 /// simulator controller owns an authenticated run. Python receives a run
 /// handle only after exact run correlation and evidence publication succeed.
-pub fn settle_pending_python_execute(app: &mut RSpiceApp) {
-    let Some(pending) = app
-        .state
+pub fn settle_pending_python_execute(parts: &mut AutomationParts<'_>) {
+    let Some(pending) = parts
         .code
-        .code_workspace
         .automation
         .runtime_execution
         .clone()
@@ -1835,55 +1828,33 @@ pub fn settle_pending_python_execute(app: &mut RSpiceApp) {
         pending.run_handle,
     ) else {
         runtime_protocol_failure(
-            app,
+            parts,
             "The pending simulator host call lost its session, call, or run-handle identity.",
         );
         return;
     };
-    let response = match app.state.code.code_workspace.automation.execution {
+    let response = match parts.code.automation.execution {
         AutomationExecutionState::Complete { run_id, .. } => {
-            if let Some(current) = app
-                .state
-                .code
-                .code_workspace
-                .automation
-                .runtime_execution
-                .as_mut()
-            {
+            if let Some(current) = parts.code.automation.runtime_execution.as_mut() {
                 current.pending_execute_call_id = None;
                 current.simulation_run_id = Some(run_id);
             }
             host_success(Some(run_handle), "simulation and checks completed")
         }
         AutomationExecutionState::Cancelled => {
-            if let Some(current) = app
-                .state
-                .code
-                .code_workspace
-                .automation
-                .runtime_execution
-                .as_mut()
-            {
+            if let Some(current) = parts.code.automation.runtime_execution.as_mut() {
                 current.pending_execute_call_id = None;
             }
             host_failure("RUN-CANCELLED", "The simulation was cancelled.")
         }
         AutomationExecutionState::Failed => {
-            if let Some(current) = app
-                .state
-                .code
-                .code_workspace
-                .automation
-                .runtime_execution
-                .as_mut()
-            {
+            if let Some(current) = parts.code.automation.runtime_execution.as_mut() {
                 current.pending_execute_call_id = None;
             }
             host_failure(
                 "RUN-FAILED",
-                app.state
+                parts
                     .code
-                    .code_workspace
                     .automation
                     .last_error
                     .clone()
@@ -1892,23 +1863,15 @@ pub fn settle_pending_python_execute(app: &mut RSpiceApp) {
         }
         _ => return,
     };
-    send_runtime_host_response(app, session_id, call_id, response);
+    send_runtime_host_response(parts, session_id, call_id, response);
 }
 
 /// Save one completed artifact through the same native/browser publication
 /// contract used by the rest of the application.
-pub fn export_automation_artifact(app: &mut RSpiceApp, kind: ArtifactKind) {
-    let Some(artifact) = app
-        .state
-        .code
-        .code_workspace
-        .automation
-        .artifacts
-        .get(kind)
-        .cloned()
-    else {
+pub fn export_automation_artifact(parts: &mut AutomationParts<'_>, kind: ArtifactKind) {
+    let Some(artifact) = parts.code.automation.artifacts.get(kind).cloned() else {
         fail(
-            app,
+            parts,
             "That workflow artifact is not available for the completed run.",
         );
         return;
@@ -1919,8 +1882,8 @@ pub fn export_automation_artifact(app: &mut RSpiceApp, kind: ArtifactKind) {
         ArtifactKind::VerificationPdf => ("PDF", &["pdf"]),
     };
     let result = (|| {
-        let path = app
-            .export_workflow_io
+        let path = parts
+            .export_io
             .show_save_dialog(SaveDialogConfig {
                 title: "Export automation artifact",
                 default_name: artifact.file_name(),
@@ -1928,8 +1891,8 @@ pub fn export_automation_artifact(app: &mut RSpiceApp, kind: ArtifactKind) {
                 filter_extensions: extension,
             })?
             .ok_or_else(|| "export cancelled".to_owned())?;
-        let destination = app.export_workflow_io.observe_destination(&path)?;
-        app.export_workflow_io.write_bytes_file_observed(
+        let destination = parts.export_io.observe_destination(&path)?;
+        parts.export_io.write_bytes_file_observed(
             &destination,
             artifact.bytes(),
             artifact.media_type(),
@@ -1938,14 +1901,17 @@ pub fn export_automation_artifact(app: &mut RSpiceApp, kind: ArtifactKind) {
     })();
     match result {
         Ok(path) => {
-            app.state.record(
+            parts.model.record(
                 LogSeverity::Info,
                 LogSource::Studio,
                 format!("Exported workflow artifact to {}.", path.display()),
             );
         }
         Err(error) if error == "export cancelled" => {}
-        Err(error) => fail(app, &format!("Could not export workflow artifact: {error}")),
+        Err(error) => fail(
+            parts,
+            &format!("Could not export workflow artifact: {error}"),
+        ),
     }
 }
 
@@ -1956,15 +1922,15 @@ fn finish_run(
     run_id: RunId,
     snapshot: &AutomationDispatchSnapshot,
 ) {
-    if !source_token_is_current(app, token) {
+    if !source_token_is_current(&app.automation_parts(), token) {
         fail(
-            app,
+            &mut app.automation_parts(),
             "The Automation source changed while the workflow was running; its results were not published.",
         );
         return;
     }
     if let Err(error) = dispatch_snapshot_is_current(app, snapshot) {
-        fail(app, &error);
+        fail(&mut app.automation_parts(), &error);
         return;
     }
     let Some(candidate) = app
@@ -1976,27 +1942,30 @@ fn finish_run(
         .cloned()
     else {
         fail(
-            app,
+            &mut app.automation_parts(),
             "The workflow run is no longer retained in project history.",
         );
         return;
     };
     if !run_matches_dispatch(&candidate, snapshot) {
         fail(
-            app,
+            &mut app.automation_parts(),
             "The selected run no longer matches the Automation request that started it.",
         );
         return;
     }
     if let Err(error) = validate_candidate_run(&candidate, snapshot) {
         fail(
-            app,
+            &mut app.automation_parts(),
             &format!("Workflow run results are incomplete: {error}"),
         );
         return;
     }
     if let Err(error) = validate_baseline_run(&snapshot.baseline_run, snapshot.plan_id) {
-        fail(app, &format!("The baseline run cannot be used: {error}"));
+        fail(
+            &mut app.automation_parts(),
+            &format!("The baseline run cannot be used: {error}"),
+        );
         return;
     }
 
@@ -2004,7 +1973,7 @@ fn finish_run(
         Ok(checks) => checks,
         Err(error) => {
             fail(
-                app,
+                &mut app.automation_parts(),
                 &format!("Could not evaluate the specifications: {error}"),
             );
             return;
@@ -2018,7 +1987,7 @@ fn finish_run(
     ) {
         Ok(comparison) => comparison,
         Err(error) => {
-            fail(app, &error);
+            fail(&mut app.automation_parts(), &error);
             return;
         }
     };
@@ -2031,7 +2000,10 @@ fn finish_run(
     ) {
         Ok(evidence) => evidence,
         Err(error) => {
-            fail(app, &format!("Could not build workflow results: {error}"));
+            fail(
+                &mut app.automation_parts(),
+                &format!("Could not build workflow results: {error}"),
+            );
             return;
         }
     };
@@ -2040,7 +2012,7 @@ fn finish_run(
         Ok(artifacts) => artifacts,
         Err(error) => {
             fail(
-                app,
+                &mut app.automation_parts(),
                 &format!("Could not render workflow artifacts: {error}"),
             );
             return;
@@ -2050,7 +2022,7 @@ fn finish_run(
         match AutomationArtifactStore::try_new(artifacts) {
             Ok(artifacts) => artifacts,
             Err(error) => {
-                fail(app, &error);
+                fail(&mut app.automation_parts(), &error);
                 return;
             }
         };
@@ -2071,8 +2043,8 @@ fn finish_run(
     app.state.record(severity, LogSource::Studio, message);
 }
 
-fn active_plan_id(app: &RSpiceApp) -> Result<SimulationPlanId, String> {
-    app.state
+fn active_plan_id(parts: &AutomationParts<'_>) -> Result<SimulationPlanId, String> {
+    parts
         .model
         .sim_setup
         .analysis_plan
@@ -2081,8 +2053,11 @@ fn active_plan_id(app: &RSpiceApp) -> Result<SimulationPlanId, String> {
         .ok_or_else(|| "The active simulation plan has not been migrated.".to_owned())
 }
 
-fn validate_requested_analyses(app: &RSpiceApp, requested: &[String]) -> Result<(), String> {
-    let stable = app.state.model.sim_setup.stable_analysis_plan()?;
+fn validate_requested_analyses(
+    parts: &AutomationParts<'_>,
+    requested: &[String],
+) -> Result<(), String> {
+    let stable = parts.model.sim_setup.stable_analysis_plan()?;
     let enabled = stable
         .instances()
         .iter()
@@ -2104,9 +2079,9 @@ fn validate_requested_analyses(app: &RSpiceApp, requested: &[String]) -> Result<
     }
 }
 
-fn require_corner_matrix(app: &RSpiceApp) -> Result<(), String> {
+fn require_corner_matrix(parts: &AutomationParts<'_>) -> Result<(), String> {
     use crate::simulation::plan::AnalysisKind;
-    let stable = app.state.model.sim_setup.stable_analysis_plan()?;
+    let stable = parts.model.sim_setup.stable_analysis_plan()?;
     if !stable
         .instances()
         .iter()
@@ -2117,21 +2092,23 @@ fn require_corner_matrix(app: &RSpiceApp) -> Result<(), String> {
                 .to_owned(),
         );
     }
-    app.state
+    parts
         .model
         .sim_setup
         .corner
         .to_config(
-            &app.state.model.sim_setup.run_set,
-            app.state.model.sim_setup.reference_pvt,
+            &parts.model.sim_setup.run_set,
+            parts.model.sim_setup.reference_pvt,
         )
         .map(|_| ())
         .map_err(|error| format!("The configured PVT matrix is invalid: {error}"))
 }
 
-fn baseline_run(app: &RSpiceApp, plan_id: SimulationPlanId) -> Result<SimulationRun, String> {
-    let run_id = app
-        .state
+fn baseline_run(
+    parts: &AutomationParts<'_>,
+    plan_id: SimulationPlanId,
+) -> Result<SimulationRun, String> {
+    let run_id = parts
         .model
         .workspace
         .content
@@ -2141,8 +2118,7 @@ fn baseline_run(app: &RSpiceApp, plan_id: SimulationPlanId) -> Result<Simulation
             "baseline=\"main\" requires a retained governed baseline for the active plan."
                 .to_owned()
         })?;
-    let run = app
-        .state
+    let run = parts
         .model
         .simulation
         .retained
@@ -2322,8 +2298,8 @@ fn validate_regression_policy(
     Ok(())
 }
 
-fn source_token_is_current(app: &RSpiceApp, token: SourceOperationToken) -> bool {
-    app.state
+fn source_token_is_current(parts: &AutomationParts<'_>, token: SourceOperationToken) -> bool {
+    parts
         .model
         .workspace
         .content
@@ -2332,7 +2308,7 @@ fn source_token_is_current(app: &RSpiceApp, token: SourceOperationToken) -> bool
             ProjectSourceLanguage::RSpiceAutomation,
         ))
         .is_some_and(|bundle| {
-            app.state.model.workspace.content.project.id() == token.project_id
+            parts.model.workspace.content.project.id() == token.project_id
                 && bundle.revision().get() == token.revision
                 && bundle.closure_digest() == token.content_digest
         })
@@ -2368,11 +2344,12 @@ fn editor_diagnostics(diagnostics: &DiagnosticSet) -> Vec<CodeEditorDiagnostic> 
         .collect()
 }
 
-fn fail(app: &mut RSpiceApp, message: &str) {
-    app.state.code.code_workspace.automation.execution = AutomationExecutionState::Failed;
-    app.state.code.code_workspace.automation.cancel_requested = false;
-    app.state.code.code_workspace.automation.artifacts.clear();
-    app.state.code.code_workspace.automation.last_error = Some(message.to_owned());
-    app.state
+fn fail(parts: &mut AutomationParts<'_>, message: &str) {
+    parts.code.automation.execution = AutomationExecutionState::Failed;
+    parts.code.automation.cancel_requested = false;
+    parts.code.automation.artifacts.clear();
+    parts.code.automation.last_error = Some(message.to_owned());
+    parts
+        .model
         .record(LogSeverity::Error, LogSource::Studio, message);
 }
