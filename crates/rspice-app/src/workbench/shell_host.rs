@@ -30,7 +30,7 @@ use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::chrome::title_bar::application_menus::{self, ApplicationMenu};
 use crate::workbench::chrome::title_bar::menu_entries::{MenuEntry, menu_keys};
 use crate::workbench::cloud::CloudFeature;
-use crate::workbench::code::CodeFeature;
+use crate::workbench::code::{CodeFeature, SOURCE_EDITOR_MENU};
 use crate::workbench::commands::vocabulary::{
     Command, CommandRegistry, command_registry, legacy_command,
 };
@@ -56,7 +56,7 @@ use crate::workbench::simulate::SimulateFeature;
 use crate::workbench::state::workbench_session::WorkspaceDocument;
 use crate::workbench::state::{WorkbenchSession, Workspace, WorkspaceDocumentId};
 use crate::workbench::{AppState, MessageId, RSpiceApp};
-use menus::{APPLICATION_MENU, COMPACT_MENU, SOURCE_EDITOR_MENU, application_menu_entries};
+use menus::{APPLICATION_MENU, COMPACT_MENU, application_menu_entries};
 
 /// A route whose surface brings its own toolbar, in place of its
 /// workspace's.

@@ -22,6 +22,8 @@ use crate::workbench::app::dialogs::{
 use crate::workbench::app::{
     source_document_dialog_is_available, veriloga_build_settings_available,
 };
+use crate::workbench::chrome::title_bar::menu_entries::MenuEntry::Separator;
+use crate::workbench::chrome::title_bar::menu_entries::{MenuContext, MenuEntry};
 use crate::workbench::commands::code_context::{
     resolve_veriloga_compile, veriloga_compile_refusal,
 };
@@ -45,6 +47,29 @@ use commands::{CodeCommand, CodeRequest};
 
 /// The code feature.
 pub(crate) struct CodeFeature;
+
+/// The source editor's right-click menu: the language group, shown only
+/// where the document's language service can answer it, then the
+/// clipboard, then the line edits. Mutating rows are greyed on a read-only
+/// source. Every page that draws a source editor is the code feature's:
+/// the deck, Automation and a Verilog-A view.
+pub(in crate::workbench) const SOURCE_EDITOR_MENU: &[MenuEntry] = &[
+    MenuEntry::Only(
+        MenuContext::NavigableSourceEditor,
+        &[
+            MenuEntry::command(CodeCommand::GoToDefinition.key()).access('G'),
+            MenuEntry::command(CodeCommand::FindReferences.key()).access('F'),
+            MenuEntry::command(CodeCommand::RenameSymbol.key()).access('R'),
+            Separator,
+        ],
+    ),
+    MenuEntry::command(Command::Cut.key()).access('T'),
+    MenuEntry::command(Command::Copy.key()).access('C'),
+    MenuEntry::command(Command::Paste.key()).access('P'),
+    Separator,
+    MenuEntry::command(CodeCommand::ToggleLineComment.key()).access('M'),
+    MenuEntry::command(CodeCommand::FormatDocument.key()).access('O'),
+];
 
 impl Feature for CodeFeature {
     type State = CodeState;

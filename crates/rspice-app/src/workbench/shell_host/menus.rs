@@ -1,6 +1,6 @@
 //! What each application menu holds, written down as entries the menu
 //! renderer draws and a test can read. The source editor's right-click menu
-//! is written the same way.
+//! is the code feature's (`code::SOURCE_EDITOR_MENU`).
 
 use crate::schematic::view::sheet_visibility::SchematicObjectKind;
 use crate::state::ModelsPage;
@@ -837,28 +837,6 @@ pub(in crate::workbench) const COMPACT_MENU: &[MenuEntry] = &[
 const fn compact_submenu(menu: ApplicationMenu) -> MenuEntry {
     MenuEntry::submenu(menu.label(), application_menu_entries(menu)).access(menu.access_key())
 }
-
-/// The source editor's right-click menu: the language group, shown only
-/// where the document's language service can answer it, then the
-/// clipboard, then the line edits. Mutating rows are greyed on a read-only
-/// source.
-pub(in crate::workbench) const SOURCE_EDITOR_MENU: &[MenuEntry] = &[
-    MenuEntry::Only(
-        MenuContext::NavigableSourceEditor,
-        &[
-            code(CodeCommand::GoToDefinition).access('G'),
-            code(CodeCommand::FindReferences).access('F'),
-            code(CodeCommand::RenameSymbol).access('R'),
-            Separator,
-        ],
-    ),
-    command(Command::Cut).access('T'),
-    command(Command::Copy).access('C'),
-    command(Command::Paste).access('P'),
-    Separator,
-    code(CodeCommand::ToggleLineComment).access('M'),
-    code(CodeCommand::FormatDocument).access('O'),
-];
 
 /// The icon a menu row shows: the one the command's toolbar button wears
 /// (`chrome/toolbar.rs`), for a command that has a button. A command with

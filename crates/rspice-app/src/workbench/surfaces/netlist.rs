@@ -379,7 +379,7 @@ pub(in crate::workbench) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
             // The right-click menu's rows read the code feature's context,
             // lent with its menus' answers only while the menu is open; the
             // row chosen runs once the page has drawn.
-            let entries = crate::workbench::framework::host::Host::source_editor_menu(&*app);
+            let entries = crate::workbench::code::SOURCE_EDITOR_MENU;
             let choice = crate::workbench::chrome::title_bar::source_editor_context_menu_over(
                 &response,
                 |ctx| {
