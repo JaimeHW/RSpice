@@ -186,257 +186,6 @@ impl RSpiceApp {
     pub(in crate::workbench) fn execute_shortcut_command(&mut self, command: ShortcutCommand) {
         self.execute_command_key(command.key());
     }
-
-    fn try_project_design_undo(&mut self) -> bool {
-        match self.state.undo_project_design() {
-            Ok(Some(_)) => self.invalidate_simulation_preflight(),
-            Ok(None) if self.state.model.project_undo_sequence().is_some() => {
-                self.state.prompt(
-                    "Undo is unavailable because the latest project edit's document or references changed.",
-                );
-            }
-            Ok(None) => return false,
-            Err(error) => self.state.prompt(error),
-        }
-        true
-    }
-
-    fn try_project_design_redo(&mut self) -> bool {
-        match self.state.redo_project_design() {
-            Ok(Some(_)) => self.invalidate_simulation_preflight(),
-            Ok(None) if self.state.model.project_redo_sequence().is_some() => {
-                self.state.prompt(
-                    "Redo is unavailable because the latest project edit's document or references changed.",
-                );
-            }
-            Ok(None) => return false,
-            Err(error) => self.state.prompt(error),
-        }
-        true
-    }
-
-    /// Where the active document's next undo step sits in the global order.
-    ///
-    /// Symbol documents keep their history as plain snapshot stacks that no
-    /// commit boundary stamps, so they carry no position in that order and
-    /// answer `None` rather than a position that would sort as the oldest
-    /// record in the session.
-    fn active_document_undo_sequence(&self) -> Option<crate::state::UndoSequence> {
-        if self.state.model.workspace.content.active_view_type() == crate::state::ViewType::Symbol {
-            return None;
-        }
-        self.state.model.schematic.history().undo_sequence()
-    }
-
-    /// Where the active document's next redo step sits in the global order.
-    fn active_document_redo_sequence(&self) -> Option<crate::state::UndoSequence> {
-        if self.state.model.workspace.content.active_view_type() == crate::state::ViewType::Symbol {
-            return None;
-        }
-        self.state.model.schematic.history().redo_sequence()
-    }
-
-    fn try_active_document_undo(&mut self) -> bool {
-        if self.state.model.workspace.content.active_view_type() == crate::state::ViewType::Symbol {
-            return match self.state.undo_active_symbol_document() {
-                Ok(stepped) => stepped,
-                Err(error) => {
-                    self.state.prompt(error);
-                    true
-                }
-            };
-        }
-        if !self.state.model.schematic.can_undo() {
-            return false;
-        }
-        if self.state.model.schematic.undo() {
-            self.state.design.schematic_snap = self
-                .state
-                .model
-                .schematic
-                .session
-                .editor
-                .snap_engine
-                .clone();
-            self.state.sync_active_schematic_to_workspace();
-            return true;
-        }
-        false
-    }
-
-    fn try_active_document_redo(&mut self) -> bool {
-        if self.state.model.workspace.content.active_view_type() == crate::state::ViewType::Symbol {
-            return match self.state.redo_active_symbol_document() {
-                Ok(stepped) => stepped,
-                Err(error) => {
-                    self.state.prompt(error);
-                    true
-                }
-            };
-        }
-        if !self.state.model.can_redo_active_schematic() {
-            return false;
-        }
-        if self.state.model.schematic.redo() {
-            self.state.design.schematic_snap = self
-                .state
-                .model
-                .schematic
-                .session
-                .editor
-                .snap_engine
-                .clone();
-            self.state.sync_active_schematic_to_workspace();
-            return true;
-        }
-        false
-    }
-
-    /// Whether the schematic is in the middle of an edit (a drag still held,
-    /// a move still floating). A history step taken then would be folded
-    /// into that edit's undo record when it lands, so it is refused, with a
-    /// line saying why.
-    fn history_waits_for_the_edit_in_progress(&mut self, step: &str) -> bool {
-        if !self.state.schematic_edit_in_progress() {
-            return false;
-        }
-        self.state.prompt(format!(
-            "Finish or cancel the edit in progress before {step}."
-        ));
-        true
-    }
-
-    pub(crate) fn action_edit_undo(&mut self) {
-        if self.history_waits_for_the_edit_in_progress("undoing") {
-            return;
-        }
-        let waivers = self.state.model.stored_waivers();
-        self.step_undo();
-        self.after_history_step(&waivers);
-    }
-
-    pub(crate) fn action_edit_redo(&mut self) {
-        if self.history_waits_for_the_edit_in_progress("redoing") {
-            return;
-        }
-        let waivers = self.state.model.stored_waivers();
-        self.step_redo();
-        self.after_history_step(&waivers);
-    }
-
-    /// What an undo or redo that recorded or took away a waiver changes
-    /// beyond the document: the published findings are stated again, and a
-    /// run prepared or checked under the old waivers is dropped, as a waiver
-    /// recorded from the Problems page drops it.
-    fn after_history_step(
-        &mut self,
-        waivers: &crate::workbench::app_state::waivers::StoredWaivers,
-    ) {
-        if self.state.restate_waived_findings(waivers) {
-            self.invalidate_simulation_preflight();
-        }
-    }
-
-    fn step_undo(&mut self) {
-        // A stimulus draft is the workspace's own edit history, like the
-        // symbol document's. It is stepped first while that workspace is open
-        // so Ctrl+Z means "take back what I just typed" rather than reaching
-        // past the instrument into the design.
-        if self.state.workbench.workspace == crate::workbench::state::Workspace::Stimulus
-            && stimulus::undo_draft(
-                self.state.design.selected_stimulus_definition.as_deref(),
-                &mut self.state.design.stimulus_editor,
-                &self.state.model,
-            )
-        {
-            return;
-        }
-        if self.state.workbench.workspace == crate::workbench::state::Workspace::Netlist
-            && self.state.code.code_workspace.page
-                == crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist
-        {
-            match crate::workbench::documents::netlist_document::undo_netlist_edit(&mut self.state)
-            {
-                Ok(Some(_)) => return,
-                Err(error) => {
-                    self.state.prompt(error);
-                    return;
-                }
-                Ok(None) => {}
-            }
-        }
-        // The history holding the newer step takes it. With nothing to undo
-        // the command is silent: the Edit menu already shows it disabled.
-        let project_first = project_step_is_newer(
-            self.state.model.project_undo_sequence(),
-            self.active_document_undo_sequence(),
-        );
-        if project_first && self.try_project_design_undo() {
-            return;
-        }
-        if !self.try_active_document_undo() && !project_first {
-            self.try_project_design_undo();
-        }
-    }
-
-    fn step_redo(&mut self) {
-        if self.state.workbench.workspace == crate::workbench::state::Workspace::Stimulus
-            && stimulus::redo_draft(
-                self.state.design.selected_stimulus_definition.as_deref(),
-                &mut self.state.design.stimulus_editor,
-                &self.state.model,
-            )
-        {
-            return;
-        }
-        if self.state.workbench.workspace == crate::workbench::state::Workspace::Netlist
-            && self.state.code.code_workspace.page
-                == crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist
-        {
-            match crate::workbench::documents::netlist_document::redo_netlist_edit(&mut self.state)
-            {
-                Ok(Some(_)) => return,
-                Err(error) => {
-                    self.state.prompt(error);
-                    return;
-                }
-                Ok(None) => {}
-            }
-        }
-        // A step committed in either history since an undo replaces what
-        // the other can redo, so only the steps no newer edit replaced are
-        // left to arbitrate.
-        self.state.model.retire_replaced_redo_steps();
-        let project_first = project_step_is_newer(
-            self.state.model.project_redo_sequence(),
-            self.active_document_redo_sequence(),
-        );
-        if project_first && self.try_project_design_redo() {
-            return;
-        }
-        if !self.try_active_document_redo() && !project_first {
-            self.try_project_design_redo();
-        }
-    }
-}
-
-/// Which stack Undo and Redo act on.
-///
-/// The project history and the active document's history are one timeline as
-/// far as the operator is concerned, so the step that moved most recently
-/// wins — that is what the global sequence records. A document history with
-/// no position in that order cannot be compared, so a stamped project step
-/// takes precedence over it and nothing takes precedence over a document
-/// history when the project has no step at all.
-fn project_step_is_newer(
-    project: Option<crate::state::UndoSequence>,
-    document: Option<crate::state::UndoSequence>,
-) -> bool {
-    match (project, document) {
-        (Some(project), Some(document)) => project > document,
-        (Some(_), None) => true,
-        (None, _) => false,
-    }
 }
 
 #[cfg(test)]
@@ -492,10 +241,10 @@ mod shortcut_ownership_tests {
             app.state.model.schematic.session.editor.snap_engine.clone();
         assert_grid_pitch_contract(&app, SchematicGridPitch::Mil25);
 
-        app.action_edit_undo();
+        app.execute_shortcut_command(ShortcutCommand::Undo);
         assert_grid_pitch_contract(&app, SchematicGridPitch::Mil50);
 
-        app.action_edit_redo();
+        app.execute_shortcut_command(ShortcutCommand::Redo);
         assert_grid_pitch_contract(&app, SchematicGridPitch::Mil25);
     }
 
@@ -563,7 +312,7 @@ mod shortcut_ownership_tests {
         let drawn = app.state.model.schematic.document().components.len();
         let owner = publish_sheet_assignment(&mut app.state);
 
-        app.action_edit_undo();
+        app.execute_shortcut_command(ShortcutCommand::Undo);
         assert_eq!(
             app.state.model.schematic.document().components.len(),
             drawn,
@@ -580,7 +329,7 @@ mod shortcut_ownership_tests {
             "the ascent's own transaction is the step that reverts"
         );
 
-        app.action_edit_redo();
+        app.execute_shortcut_command(ShortcutCommand::Redo);
         assert!(
             app.state
                 .model
@@ -617,7 +366,7 @@ mod shortcut_ownership_tests {
         );
         assert_eq!(app.state.model.schematic.document().components.len(), 2);
 
-        app.action_edit_undo();
+        app.execute_shortcut_command(ShortcutCommand::Undo);
         assert_eq!(
             app.state.model.schematic.document().components.len(),
             1,
@@ -633,7 +382,7 @@ mod shortcut_ownership_tests {
                 .is_some()
         );
 
-        app.action_edit_undo();
+        app.execute_shortcut_command(ShortcutCommand::Undo);
         assert!(
             app.state
                 .model
@@ -646,7 +395,7 @@ mod shortcut_ownership_tests {
         );
         assert_eq!(app.state.model.schematic.document().components.len(), 1);
 
-        app.action_edit_undo();
+        app.execute_shortcut_command(ShortcutCommand::Undo);
         assert!(app.state.model.schematic.document().components.is_empty());
     }
 

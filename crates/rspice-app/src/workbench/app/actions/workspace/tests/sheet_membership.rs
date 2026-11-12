@@ -12,6 +12,7 @@ use crate::state::{
 };
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
+use crate::workbench::commands::vocabulary::Command;
 
 /// A governed two-sheet cell whose one cross-sheet contract is anchored to a
 /// terminal of the component that sits on the second sheet, plus a spare part
@@ -200,7 +201,7 @@ fn deleting_a_port_anchor_then_undo_restores_the_connection() {
         "a contract whose anchor is gone cannot survive reconciliation"
     );
 
-    app.action_edit_undo();
+    app.execute_command_key(Command::Undo.key());
 
     let restored = cross_sheet_port_definitions(&app.state, &crossing.owner);
     assert_eq!(
@@ -274,7 +275,7 @@ fn undoing_a_delete_returns_an_object_to_its_recorded_sheet() {
         "deleting a part no contract names retires no contract"
     );
 
-    app.action_edit_undo();
+    app.execute_command_key(Command::Undo.key());
 
     assert_eq!(
         sheet_of(&app.state, &crossing.owner, crossing.spare),

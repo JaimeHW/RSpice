@@ -7,7 +7,9 @@ use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibilit
 
 use crate::state::{DesignNoteKind, DesignReviewState, GridStyle, SchematicVisibilityPolicy};
 use crate::ui::widgets::DialogChoice;
-use crate::workbench::app::actions::workspace::{SchematicRestoreParts, sync_active_schematic};
+use crate::workbench::app::actions::workspace::{
+    DesignHistoryParts, SchematicRestoreParts, sync_active_schematic,
+};
 use crate::workbench::app::dialogs::grid_snap_routing::{self, GridSnapRoutingCommitError};
 use crate::workbench::app::dialogs::visibility_options::{self, SchematicVisibilityRecovery};
 use crate::workbench::app::{
@@ -252,6 +254,22 @@ impl DesignState {
             routing_mode: &mut self.schematic_routing_mode,
             visibility: &mut self.schematic_visibility,
             symbol: &mut self.symbol,
+        }
+    }
+
+    /// What a history step reads and writes of this state.
+    pub(crate) fn history_parts(&mut self, model: &Model) -> DesignHistoryParts<'_> {
+        DesignHistoryParts {
+            schematic_edit_in_progress: self.schematic_edit_in_progress(model),
+            selected_stimulus_definition: self.selected_stimulus_definition.as_deref(),
+            stimulus_editor: &mut self.stimulus_editor,
+            restore: SchematicRestoreParts {
+                drag: &mut self.interaction.drag,
+                snap: &mut self.schematic_snap,
+                routing_mode: &mut self.schematic_routing_mode,
+                visibility: &mut self.schematic_visibility,
+                symbol: &mut self.symbol,
+            },
         }
     }
 

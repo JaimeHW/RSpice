@@ -23,6 +23,10 @@ use crate::workbench::state::{WorkbenchSession, WorkspaceDocumentId};
 use rspice_app_runs::workbench::slots::runs::RunsState;
 use symbol_document::{SymbolUiState, project_active_symbol_session};
 
+pub(crate) use history::{
+    DesignHistoryParts, HistoryDirection, HistoryStepParts, take_history_step,
+};
+
 /// What restoring the active schematic from the workspace reads and writes
 /// of the design feature's state: the canvas drag it lets go, the snap and
 /// routing the new buffer takes up, the visibility whose wire routing follows
@@ -33,6 +37,19 @@ pub(crate) struct SchematicRestoreParts<'a> {
     pub(crate) routing_mode: &'a mut crate::state::WireRoutingMode,
     pub(crate) visibility: &'a mut crate::state::SchematicVisibilityPolicy,
     pub(crate) symbol: &'a mut SymbolUiState,
+}
+
+impl SchematicRestoreParts<'_> {
+    /// The same parts, lent again for a shorter while.
+    pub(crate) fn reborrow(&mut self) -> SchematicRestoreParts<'_> {
+        SchematicRestoreParts {
+            drag: &mut *self.drag,
+            snap: &mut *self.snap,
+            routing_mode: &mut *self.routing_mode,
+            visibility: &mut *self.visibility,
+            symbol: &mut *self.symbol,
+        }
+    }
 }
 
 fn schematic_for_workspace(

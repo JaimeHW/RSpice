@@ -9,6 +9,7 @@ use crate::state::{
     SchematicSnapshot, SchematicState, UnresolvedBindingPolicy,
 };
 use crate::workbench::app::RSpiceApp;
+use crate::workbench::commands::vocabulary::Command;
 
 fn fixture() -> (RSpiceApp, Component, ConfigurationSetId, SimulationPlanId) {
     let mut app = RSpiceApp::test_instance();
@@ -156,11 +157,11 @@ fn rename_undo_redo_carries_live_bindings_and_advances_revisions() {
             .components
             .contains(&expected.id)
     );
-    app.action_edit_undo();
+    app.execute_command_key(Command::Undo.key());
     assert_reference(&app, configuration, plan, "V1");
     assert!(!app.state.model.schematic.can_undo());
     assert!(app.state.model.project_undo_sequence().is_none());
-    app.action_edit_redo();
+    app.execute_command_key(Command::Redo.key());
     assert_reference(&app, configuration, plan, "V9");
     assert_eq!(
         app.state
@@ -314,7 +315,7 @@ fn undo_preserves_unrelated_outputs_and_current_output_metadata() {
     unrelated.name = "unrelated".to_owned();
     unrelated.source_expression = "V(out)".to_owned();
     payload.saved_outputs.push(unrelated.clone());
-    app.action_edit_undo();
+    app.execute_command_key(Command::Undo.key());
     assert_reference(&app, configuration, plan, "V1");
     let payload = app.state.model.workspace.content.plan_data(plan).unwrap();
     assert_eq!(payload.saved_outputs[0].name, "reviewed current");
@@ -361,7 +362,7 @@ fn history_refusal_keeps_the_transaction_available_for_retry() {
         .unwrap()
         .saved_outputs[0]
         .revision = revision;
-    app.action_edit_undo();
+    app.execute_command_key(Command::Undo.key());
     assert_reference(&app, configuration, plan, "V1");
 }
 
@@ -390,7 +391,7 @@ fn undo_does_not_cross_a_blocked_rename_into_older_local_history() {
         .source_expression = "I(V_other)".to_owned();
     let snapshot = SchematicSnapshot::capture(app.state.model.schematic.document());
     let sequence = app.state.model.project_undo_sequence();
-    app.action_edit_undo();
+    app.execute_command_key(Command::Undo.key());
     assert!(snapshot.is_equal_document(app.state.model.schematic.document()));
     assert_eq!(sequence, app.state.model.project_undo_sequence());
     assert!(
@@ -412,17 +413,17 @@ fn local_edit_and_project_rename_follow_one_global_history_order() {
         .with_undo("change value", |schematic| {
             schematic.document_mut_for_test().components[0].value = "2".to_owned();
         });
-    app.action_edit_undo();
+    app.execute_command_key(Command::Undo.key());
     assert_reference(&app, configuration, plan, "V9");
     assert_eq!(
         app.state.model.schematic.document().components[0].value,
         expected.value
     );
-    app.action_edit_undo();
+    app.execute_command_key(Command::Undo.key());
     assert_reference(&app, configuration, plan, "V1");
-    app.action_edit_redo();
+    app.execute_command_key(Command::Redo.key());
     assert_reference(&app, configuration, plan, "V9");
-    app.action_edit_redo();
+    app.execute_command_key(Command::Redo.key());
     assert_eq!(
         app.state.model.schematic.document().components[0].value,
         "2"
@@ -439,14 +440,14 @@ fn rename_starts_a_new_history_branch_without_stale_local_redo() {
         .with_undo("change value", |schematic| {
             schematic.document_mut_for_test().components[0].value = "2".to_owned();
         });
-    app.action_edit_undo();
+    app.execute_command_key(Command::Undo.key());
     assert!(app.state.model.schematic.can_redo());
     app.state
         .model
         .rename_component_transaction(&expected, "V9".to_owned())
         .unwrap();
     assert!(!app.state.model.schematic.can_redo());
-    app.action_edit_redo();
+    app.execute_command_key(Command::Redo.key());
     assert_reference(&app, configuration, plan, "V9");
     assert_eq!(
         app.state.model.schematic.document().components[0].value,
@@ -478,7 +479,7 @@ fn switching_documents_does_not_redirect_rename_history() {
         .schematic
         .add_component(ComponentType::Resistor, Point::new(50, 50));
     let other_snapshot = SchematicSnapshot::capture(app.state.model.schematic.document());
-    app.action_edit_undo();
+    app.execute_command_key(Command::Undo.key());
     assert_eq!(
         app.state
             .model
@@ -491,7 +492,7 @@ fn switching_documents_does_not_redirect_rename_history() {
     assert!(other_snapshot.is_equal_document(
         app.state.model.workspace.content.schematic_buffers[&other.key()].document()
     ));
-    app.action_edit_redo();
+    app.execute_command_key(Command::Redo.key());
     assert_reference(&app, configuration, plan, "V9");
     assert!(other_snapshot.is_equal_document(
         app.state.model.workspace.content.schematic_buffers[&other.key()].document()
@@ -580,9 +581,9 @@ fn active_and_inactive_plan_references_survive_native_save_and_reopen() {
             );
         }
         if name == "V9" {
-            app.action_edit_undo();
+            app.execute_command_key(Command::Undo.key());
         } else {
-            app.action_edit_redo();
+            app.execute_command_key(Command::Redo.key());
         }
     }
     let _ = std::fs::remove_file(&path);
@@ -638,7 +639,7 @@ fn a_same_spelled_instance_in_another_configuration_root_is_unchanged() {
             .find(id),
         Some(&original)
     );
-    app.action_edit_undo();
+    app.execute_command_key(Command::Undo.key());
     assert_eq!(
         app.state
             .model
@@ -685,7 +686,7 @@ fn imported_primitive_current_probes_follow_the_emitted_card_identity() {
         app.state.model.schematic.document().probes[0].reference,
         "I(V9)"
     );
-    app.action_edit_undo();
+    app.execute_command_key(Command::Undo.key());
     assert_eq!(
         app.state
             .model

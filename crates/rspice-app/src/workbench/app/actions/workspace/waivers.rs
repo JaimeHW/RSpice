@@ -11,6 +11,7 @@ use super::symbol_document::run_active_symbol_pin_checks;
 
 impl AppState {
     /// [`restate_waived_findings`] for the session.
+    #[cfg(test)]
     pub(crate) fn restate_waived_findings(&mut self, before: &StoredWaivers) -> bool {
         let facts = self.slot_facts();
         restate_waived_findings(&mut self.model, facts, before)

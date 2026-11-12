@@ -297,18 +297,12 @@ impl AppState {
         push_symbol_undo_snapshot(&mut self.design.symbol, key, snapshot, MAX_SYMBOL_UNDO);
     }
 
+    #[cfg(test)]
     pub(crate) fn can_undo_active_symbol_document(&self) -> bool {
         self.design
             .symbol
             .history
             .can_undo(&self.model.workspace.content.active_key())
-    }
-
-    pub(crate) fn can_redo_active_symbol_document(&self) -> bool {
-        self.design
-            .symbol
-            .history
-            .can_redo(&self.model.workspace.content.active_key())
     }
 
     /// [`undo_active_symbol_document`] for the session.

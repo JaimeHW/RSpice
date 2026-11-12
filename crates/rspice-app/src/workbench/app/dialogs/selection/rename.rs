@@ -561,6 +561,7 @@ mod tests {
     use crate::state::{Bus, ComponentType, NetLabel, Point, Wire};
     use crate::workbench::app::RSpiceApp;
     use crate::workbench::app_state::AppState;
+    use crate::workbench::commands::vocabulary::Command;
 
     /// Draw the dialog as its dialog step does.
     fn render(app: &mut RSpiceApp, ctx: &Context) {
@@ -810,7 +811,7 @@ mod tests {
             app.state.model.schematic.document().components[0].name,
             "R_GAIN"
         );
-        app.action_edit_undo();
+        app.execute_command_key(Command::Undo.key());
         assert_eq!(app.state.model.schematic.document().components[0].id, id);
         assert_eq!(
             app.state.model.schematic.document().components[0].name,
@@ -821,7 +822,7 @@ mod tests {
                 && !app.state.model.schematic.can_undo(),
             "rename created more than one undo step"
         );
-        app.action_edit_redo();
+        app.execute_command_key(Command::Redo.key());
         assert_eq!(
             app.state.model.schematic.document().components[0].name,
             "R_GAIN"
@@ -1107,7 +1108,7 @@ mod tests {
             "the configuration DUT path follows the renamed instance"
         );
         assert!(app.state.model.workspace.content.project_metadata_dirty);
-        app.action_edit_undo();
+        app.execute_command_key(Command::Undo.key());
         assert_eq!(
             app.state.model.schematic.document().components[0].name,
             "R1"
@@ -1136,7 +1137,7 @@ mod tests {
             "I(R1)",
             "Undo must restore the executable saved output"
         );
-        app.action_edit_redo();
+        app.execute_command_key(Command::Redo.key());
         assert_eq!(
             app.state.model.schematic.document().components[0].name,
             "RLOAD"

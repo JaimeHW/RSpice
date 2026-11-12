@@ -23,6 +23,7 @@ use crate::state::{
     SheetTemplate, View, ViewType,
 };
 use crate::workbench::app_state::AppState;
+use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::state::Workspace;
 use rspice_design::projection::ProjectionSource;
 use rspice_design::schematic::document::SchematicDocument;
@@ -391,13 +392,13 @@ impl Bench {
 
     /// Edit > Undo.
     pub(super) fn undo(&mut self) {
-        self.app.action_edit_undo();
+        self.app.execute_command_key(Command::Undo.key());
         self.end_frame();
     }
 
     /// Edit > Redo.
     pub(super) fn redo(&mut self) {
-        self.app.action_edit_redo();
+        self.app.execute_command_key(Command::Redo.key());
         self.end_frame();
     }
 

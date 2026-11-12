@@ -343,7 +343,7 @@ fn switching_fields_in_either_render_order_commits_each_edit_once() {
             editor.app.state.model.schematic.document().components[0].value,
             "12"
         );
-        editor.app.action_edit_undo();
+        editor.app.execute_command_key(Command::Undo.key());
         if order[1].0 == "Value" {
             assert_eq!(
                 editor.app.state.model.schematic.document().components[0].name,
@@ -363,15 +363,15 @@ fn switching_fields_in_either_render_order_commits_each_edit_once() {
                 "12"
             );
         }
-        editor.app.action_edit_undo();
+        editor.app.execute_command_key(Command::Undo.key());
         assert_eq!(
             editor.app.state.model.schematic.document().components[0],
             before
         );
         assert!(!editor.app.state.model.schematic.can_undo());
         assert!(editor.app.state.model.project_undo_sequence().is_none());
-        editor.app.action_edit_redo();
-        editor.app.action_edit_redo();
+        editor.app.execute_command_key(Command::Redo.key());
+        editor.app.execute_command_key(Command::Redo.key());
         assert_eq!(
             editor.app.state.model.schematic.document().components[0].name,
             "V9"
@@ -478,7 +478,7 @@ fn opening_another_document_commits_to_the_original_component_and_preserves_refu
                     .name,
                 "V9"
             );
-            editor.app.action_edit_undo();
+            editor.app.execute_command_key(Command::Undo.key());
             assert_eq!(
                 editor
                     .app
@@ -640,7 +640,7 @@ fn rendered_instance_name_is_a_draft_until_one_reference_transaction_commits() {
             .source_expression,
         "I(V9)"
     );
-    editor.app.action_edit_undo();
+    editor.app.execute_command_key(Command::Undo.key());
     assert_eq!(
         editor.app.state.model.schematic.document().components[0].name,
         "V1"
@@ -660,7 +660,7 @@ fn rendered_instance_name_is_a_draft_until_one_reference_transaction_commits() {
     );
     assert!(editor.app.state.model.project_undo_sequence().is_none());
     assert!(!editor.app.state.model.schematic.can_undo());
-    editor.app.action_edit_redo();
+    editor.app.execute_command_key(Command::Redo.key());
     assert_eq!(
         editor.app.state.model.schematic.document().components[0].name,
         "V9"

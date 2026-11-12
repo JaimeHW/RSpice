@@ -31,37 +31,18 @@ impl Command {
             Self::CloseActiveDocument => {
                 crate::workbench::lifecycle::project_lifecycle::can_close_active_document(state)
             }
-            Self::Undo => {
-                if state.model.safe_mode.project_read_only() || state.schematic_edit_in_progress() {
-                    false
-                } else if (netlist_page_is_visible(state)
-                    && crate::workbench::documents::netlist_document::can_undo_netlist_edit(state))
-                    || state.model.can_undo_project_design()
-                {
-                    true
-                } else if active_symbol_editor(app) {
-                    state.can_undo_active_symbol_document()
+            // The netlist page's own history is the shell's to step; the
+            // design feature's part answers for every other.
+            Self::Undo | Self::Redo => {
+                let direction = if self == Self::Undo {
+                    HistoryDirection::Undo
                 } else {
-                    active_schematic_editor(app)
-                        && !state.schematic_edit_read_only()
-                        && state.model.schematic.can_undo()
-                }
-            }
-            Self::Redo => {
-                if state.model.safe_mode.project_read_only() || state.schematic_edit_in_progress() {
-                    false
-                } else if (netlist_page_is_visible(state)
-                    && crate::workbench::documents::netlist_document::can_redo_netlist_edit(state))
-                    || state.model.can_redo_project_design()
-                {
-                    true
-                } else if active_symbol_editor(app) {
-                    state.can_redo_active_symbol_document()
-                } else {
-                    active_schematic_editor(app)
-                        && !state.schematic_edit_read_only()
-                        && state.model.can_redo_active_schematic()
-                }
+                    HistoryDirection::Redo
+                };
+                (netlist_history_steps(state, direction)
+                    && !state.model.safe_mode.project_read_only()
+                    && !state.schematic_edit_in_progress())
+                    || app.routed_command_key_enabled(self.key()) == Some(true)
             }
             // Whether the part that takes an edit command here can carry it out.
             Self::Cut

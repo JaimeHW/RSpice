@@ -342,6 +342,7 @@ mod tests {
         Component, ComponentType, LibraryCellInstance, NetLabel, Point, SchematicState,
     };
     use crate::workbench::app::RSpiceApp;
+    use crate::workbench::commands::vocabulary::Command;
 
     /// The matches, over what the form reads.
     fn find_replace_matches(state: &AppState) -> Result<Vec<DocumentMatches>, String> {
@@ -623,7 +624,7 @@ mod tests {
         );
         assert_eq!(outcome(&by_form, form_plan), renamed, "the Rename form");
         assert_eq!(outcome(&by_replace, replace_plan), renamed, "Replace all");
-        by_replace.action_edit_undo();
+        by_replace.execute_command_key(Command::Undo.key());
         assert_eq!(
             outcome(&by_replace, replace_plan),
             (

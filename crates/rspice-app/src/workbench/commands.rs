@@ -8,6 +8,7 @@ use crate::schematic::view::schematic_symbol_context;
 use crate::schematic::view::selection_transform::{
     SelectionTransform, transform_selection_on_active_sheet,
 };
+use crate::workbench::app::actions::workspace::HistoryDirection;
 use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::framework::command_registry::{CommandOwner, ids};
@@ -314,17 +315,10 @@ impl Command {
             Self::RevertActiveDocument => file_action(app, FileMenuAction::RevertActiveDocument),
             Self::CloseActiveDocument => file_action(app, FileMenuAction::CloseActiveDocument),
             Self::Exit => file_action(app, FileMenuAction::Exit),
-            // A history step raises what it asks of other features as
-            // requests; they are answered as the step returns, as a feature's
-            // command has what it raised answered.
-            Self::Undo => {
-                app.action_edit_undo();
-                app.after_contribution();
-            }
-            Self::Redo => {
-                app.action_edit_redo();
-                app.after_contribution();
-            }
+            // The netlist page's own history is the shell's to step; the
+            // design feature takes the step everywhere else.
+            Self::Undo => history_command(app, HistoryDirection::Undo),
+            Self::Redo => history_command(app, HistoryDirection::Redo),
             // An edit command acts on the selection in the editor the reader
             // is working in, and the part that takes it there carries it out:
             // Results copies what it has selected where it is in front, the

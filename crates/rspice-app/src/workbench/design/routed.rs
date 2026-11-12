@@ -10,6 +10,9 @@
 //! act on the selection in a schematic or symbol editor; Results takes Copy
 //! first where it is in front. Find in design opens the Navigator's search
 //! from anywhere but a Verilog-A cell view.
+//!
+//! Undo and Redo step the design's histories everywhere the shell lets the
+//! key through: the shell steps the netlist page's own history first.
 
 use rspice_schematic_editor::view::navigation::ZoomRequest;
 
@@ -17,6 +20,9 @@ use crate::schematic::view::sheet_visibility::retain_selection_on_active_sheet_i
 use crate::state::ViewType;
 use crate::workbench::app::actions::workspace::symbol_in_place::{
     in_place_bounds, in_place_session, in_place_session_mut,
+};
+use crate::workbench::app::actions::workspace::{
+    HistoryDirection, HistoryStepParts, take_history_step,
 };
 use crate::workbench::app::actions::{
     copy_selected_symbol_shape, delete_selected_symbol_item, duplicate_selected_symbol_shape,
@@ -128,6 +134,18 @@ pub(super) const ROUTED: &[RoutedCommand<DesignFeature>] = &[
         takes: finds_in_design,
         enabled: |_| true,
         execute: find_in_design,
+    },
+    RoutedCommand {
+        key: ids::UNDO,
+        takes: |_| true,
+        enabled: can_undo,
+        execute: undo,
+    },
+    RoutedCommand {
+        key: ids::REDO,
+        takes: |_| true,
+        enabled: can_redo,
+        execute: redo,
     },
 ];
 
@@ -393,4 +411,64 @@ fn find_in_design(cx: &mut Cx<'_, DesignFeature>) {
     cx.wb.drawer = Some(Drawer::Navigator);
     cx.state.design_panel = DesignPanel::Navigator;
     cx.wb.outbox.push(FocusNavigatorSearch);
+}
+
+/// Whether Undo would take a step: never while the project is read-only or
+/// a schematic edit is under way; otherwise where the project's history,
+/// the symbol editor's or an editable schematic's holds one.
+fn can_undo(reads: &Reads<'_, DesignFeature>) -> bool {
+    let model = reads.model;
+    if model.safe_mode.project_read_only() || reads.state.schematic_edit_in_progress(model) {
+        false
+    } else if model.can_undo_project_design() {
+        true
+    } else if symbol_editor(reads.wb.workspace, model) {
+        reads
+            .state
+            .symbol
+            .history
+            .can_undo(&model.workspace.content.active_key())
+    } else {
+        in_schematic(reads) && !model.schematic_edit_read_only() && model.schematic.can_undo()
+    }
+}
+
+/// Whether Redo would take a step, as [`can_undo`] answers for Undo.
+fn can_redo(reads: &Reads<'_, DesignFeature>) -> bool {
+    let model = reads.model;
+    if model.safe_mode.project_read_only() || reads.state.schematic_edit_in_progress(model) {
+        false
+    } else if model.can_redo_project_design() {
+        true
+    } else if symbol_editor(reads.wb.workspace, model) {
+        reads
+            .state
+            .symbol
+            .history
+            .can_redo(&model.workspace.content.active_key())
+    } else {
+        in_schematic(reads)
+            && !model.schematic_edit_read_only()
+            && model.can_redo_active_schematic()
+    }
+}
+
+fn undo(cx: &mut Cx<'_, DesignFeature>) {
+    take_history_step(cx, history_parts, None, HistoryDirection::Undo);
+}
+
+fn redo(cx: &mut Cx<'_, DesignFeature>) {
+    take_history_step(cx, history_parts, None, HistoryDirection::Redo);
+}
+
+/// What a history step reads and writes of the design feature's context.
+fn history_parts<'a>(cx: &'a mut Cx<'_, DesignFeature>) -> HistoryStepParts<'a> {
+    HistoryStepParts {
+        design: cx.state.history_parts(cx.model),
+        model: &mut *cx.model,
+        wb: &mut *cx.wb,
+        runs: &mut *cx.runs,
+        run_controller: &mut *cx.handles.run_controller,
+        selected_model: cx.peers.models().selected_model(),
+    }
 }

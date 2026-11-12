@@ -360,6 +360,7 @@ pub mod ids {
         PROJECT_LAUNCHER = "project-launcher";
         PROJECT_RECOVERY = "project-recovery";
         PROJECT_WORKSPACE = "project";
+        REDO = "redo";
         RESET_LAYOUT = "reset-workspace-layout";
         RESULTS_WORKSPACE = "results";
         RESULT_OPERATING_POINT = "result-operating-point";
@@ -380,6 +381,7 @@ pub mod ids {
         TOGGLE_FOCUS_MODE = "toggle-focus-mode";
         TOGGLE_SPLIT_VIEW = "toggle-split-view";
         TUNING = "tuning";
+        UNDO = "undo";
         VERIFY_WORKSPACE = "verify";
         VISIBILITY_OPTIONS = "visibility-options";
         WORKSPACE_LAYOUTS = "workspace-layouts";

@@ -3,6 +3,7 @@
 use super::*;
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::ViewType;
+use crate::workbench::app::actions::workspace::{HistoryStepParts, take_history_step};
 use crate::workbench::app::dialogs::project::configuration_dialogs::{Leaving, go_on_leaving};
 use crate::workbench::app::dialogs::project::new_project::NewProjectDialogState;
 pub(super) use crate::workbench::app::dialogs::selection::commands::schematic_selection_has_live_object;
@@ -11,6 +12,7 @@ use crate::workbench::code::commands::{
     CodeCommand, CodeRequest, NetlistEditorRequest, SourceDocumentRequest,
 };
 use crate::workbench::documents::code_workspace::persist_global_veriloga_library;
+use crate::workbench::framework::feature::ModelsPort;
 use crate::workbench::framework::requests::{ProjectFileAction, StandardCommand};
 use crate::workbench::project::commands::{ProjectRequest, ReservedLibraryRevision};
 use crate::workbench::project::workspace_state::ProjectPage;
@@ -161,6 +163,73 @@ pub(in crate::workbench) fn active_schematic_editor(app: &RSpiceApp) -> bool {
             app.state.model.workspace.content.active_view_type(),
             crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
         )
+}
+
+/// Take a history step `direction`: the netlist page's own, over the whole
+/// application, where that page is in front with a step to take that way;
+/// otherwise the design feature's, routed. What either raised is answered
+/// as the step returns, as a feature's command has what it raised answered.
+// Interim: until code takes a part in Undo and Redo.
+pub(super) fn history_command(app: &mut RSpiceApp, direction: HistoryDirection) {
+    if netlist_history_steps(&app.state, direction) {
+        take_history_step(
+            app,
+            app_history_parts,
+            Some(netlist_history_step),
+            direction,
+        );
+    } else {
+        app.route_command_key(match direction {
+            HistoryDirection::Undo => ids::UNDO,
+            HistoryDirection::Redo => ids::REDO,
+        });
+    }
+    app.after_contribution();
+}
+
+/// Whether the netlist page is in front with a step of its own history to
+/// take `direction`: the history the shell steps itself.
+pub(super) fn netlist_history_steps(
+    state: &crate::workbench::AppState,
+    direction: HistoryDirection,
+) -> bool {
+    netlist_page_is_visible(state)
+        && match direction {
+            HistoryDirection::Undo => {
+                crate::workbench::documents::netlist_document::can_undo_netlist_edit(state)
+            }
+            HistoryDirection::Redo => {
+                crate::workbench::documents::netlist_document::can_redo_netlist_edit(state)
+            }
+        }
+}
+
+/// What a history step the shell takes reads and writes of the application.
+fn app_history_parts(app: &mut RSpiceApp) -> HistoryStepParts<'_> {
+    HistoryStepParts {
+        design: app.state.design.history_parts(&app.state.model),
+        model: &mut app.state.model,
+        wb: &mut app.state.workbench,
+        runs: &mut app.state.runs,
+        run_controller: &mut app.simulation_controller,
+        selected_model: ModelsPort::selected_model(&*app.state.models),
+    }
+}
+
+/// The netlist page's own history step `direction`, over the whole
+/// application.
+fn netlist_history_step(
+    app: &mut RSpiceApp,
+    direction: HistoryDirection,
+) -> Result<Option<String>, String> {
+    match direction {
+        HistoryDirection::Undo => {
+            crate::workbench::documents::netlist_document::undo_netlist_edit(&mut app.state)
+        }
+        HistoryDirection::Redo => {
+            crate::workbench::documents::netlist_document::redo_netlist_edit(&mut app.state)
+        }
+    }
 }
 
 pub(in crate::workbench) fn file_action(app: &mut RSpiceApp, action: FileMenuAction) {
