@@ -1,6 +1,6 @@
-//! The deck editor's right-click menu's rows: the source editor's, read from
-//! the code feature's context lent with its menus' answers while the menu
-//! is open.
+//! The source editor's right-click menu's rows on the deck and Automation
+//! pages, read from the code feature's context lent with its menus'
+//! answers while the menu is open.
 
 use egui::os::OperatingSystem;
 
@@ -61,7 +61,7 @@ impl MenuLookup for SourceMenuLookup<'_, '_> {
 
 /// The rows `entries` show in the window `ctx` draws, read from `cx`, the
 /// code feature's context lent with its menus' answers.
-pub(super) fn rows(
+pub(in crate::workbench::surfaces) fn rows(
     entries: &[MenuEntry],
     cx: &Cx<'_, CodeFeature>,
     ctx: &egui::Context,
@@ -216,6 +216,95 @@ mod tests {
                     let host = format!("{:?}", resolve_menu_rows(entries, &app, platform, os));
                     assert_eq!(code, host, "{case}, {platform:?} {os:?}");
                 }
+            }
+        }
+    }
+
+    /// The application on the Automation page, showing the file at `path`
+    /// of the workspace, or its entry script; in a project opened read-only
+    /// when `read_only`.
+    fn automation_page(path: Option<&str>, read_only: bool) -> RSpiceApp {
+        let mut app = RSpiceApp::test_instance();
+        app.state.open_project_session();
+        app.state.workbench.workspace = Workspace::Netlist;
+        app.state.code.code_workspace.page = CodeWorkspacePage::Automation;
+        app.state.code.code_workspace.automation.selected_file = path.map(str::to_owned);
+        if read_only {
+            app.state.model.safe_mode.activate(
+                crate::state::write_policy::LocalSafeModeOptions {
+                    open_project_read_only: true,
+                    ..crate::state::write_policy::LocalSafeModeOptions::default()
+                },
+                String::new(),
+            );
+        }
+        app
+    }
+
+    /// One frame of the Automation page, in the context the shell lends it
+    /// while its menu is closed.
+    fn draw_automation(app: &mut RSpiceApp) {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                crate::workbench::surfaces::automation::show(
+                    ui,
+                    &mut features::cx_with_menu_answers(app, |_| false),
+                );
+            });
+        });
+    }
+
+    /// The Automation page's context, lent with its menu's answers once the
+    /// page has prepared, reads the rows the host's menu reads once the page
+    /// has drawn: on the entry script, on the run plan, which the editor
+    /// writes but does not navigate, and in a project opened read-only, on
+    /// each platform. Preparing puts in front the editor the page then
+    /// draws, and leaves the toolbar's answers as they were without it.
+    #[test]
+    fn the_automation_pages_context_reads_the_rows_the_host_reads_once_the_page_has_drawn() {
+        let entries = crate::workbench::code::SOURCE_EDITOR_MENU;
+        let places = [
+            (CommandPlatform::Desktop, OperatingSystem::Windows),
+            (CommandPlatform::Desktop, OperatingSystem::Mac),
+            (CommandPlatform::Browser, OperatingSystem::Nix),
+            (CommandPlatform::Phone, OperatingSystem::Android),
+        ];
+        for (path, read_only, editor) in [
+            (None, false, (true, true)),
+            (Some("runplan.rspice.yaml"), false, (true, false)),
+            (None, true, (false, true)),
+        ] {
+            let case = format!("{path:?}, read only {read_only}");
+            let mut app = automation_page(path, read_only);
+            // The surfaces leave no editor in front before the page.
+            app.state.workbench.active_source_editor = None;
+            let toolbar = toolbar_answers(&app);
+            crate::workbench::surfaces::automation::prepare(&mut features::cx(&mut app));
+            let prepared = app.state.workbench.active_source_editor;
+            assert_eq!(
+                prepared.map(|editor| (editor.editable, editor.navigable)),
+                Some(editor),
+                "{case}"
+            );
+            assert_eq!(toolbar_answers(&app), toolbar, "the toolbar's, {case}");
+            let lent: Vec<String> = places
+                .iter()
+                .map(|&(platform, os)| {
+                    let cx = features::cx_with_menu_answers::<CodeFeature>(&mut app, |_| true);
+                    let rows = resolve_menu_rows(entries, &SourceMenuLookup(&cx), platform, os);
+                    format!("{rows:?}")
+                })
+                .collect();
+            draw_automation(&mut app);
+            assert_eq!(
+                app.state.workbench.active_source_editor, prepared,
+                "the page publishes the editor preparing put in front, {case}"
+            );
+            for (&(platform, os), code) in places.iter().zip(lent) {
+                let host = format!("{:?}", resolve_menu_rows(entries, &app, platform, os));
+                assert_eq!(code, host, "{case}, {platform:?} {os:?}");
             }
         }
     }

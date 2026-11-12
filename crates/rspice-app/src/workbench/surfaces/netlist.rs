@@ -16,7 +16,7 @@ mod language;
 mod ownership;
 mod revision;
 mod search;
-mod source_menu;
+pub(super) mod source_menu;
 mod toolbar;
 mod transfer;
 

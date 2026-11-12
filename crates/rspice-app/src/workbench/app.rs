@@ -276,21 +276,6 @@ fn configure_platform_input_contract(ctx: &Context) {
 }
 
 impl RSpiceApp {
-    pub(crate) fn automation_runtime_unavailable_reason(&mut self) -> Option<String> {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            self.code.automation_runtime.poll_discovery();
-            self.code
-                .automation_runtime
-                .availability_reason()
-                .map(str::to_owned)
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            self.code.automation_runtime.availability_reason()
-        }
-    }
-
     /// Save the model editor's open candidate as one guarded project
     /// revision, as the file actions do before they go on: a revision that
     /// changes the model's definition drops the run's preflight and the run

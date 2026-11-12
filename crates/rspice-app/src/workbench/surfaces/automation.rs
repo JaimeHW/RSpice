@@ -7,8 +7,11 @@ use crate::state::{ProjectSourceLanguage, ProjectSourceOwner};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
+use crate::workbench::app_state::{Model, PlatformState};
+use crate::workbench::code::CodeFeature;
 use crate::workbench::code::commands::{AutomationRequest, CodeRequest};
-use crate::workbench::{MessageCatalog, MessageId, RSpiceApp};
+use crate::workbench::framework::feature::Cx;
+use crate::workbench::{MessageCatalog, MessageId};
 
 use super::super::design_system::inspector::muted_inspector_copy;
 use super::super::design_system::{
@@ -18,7 +21,7 @@ use super::super::design_system::{
 };
 use crate::state::code_diagnostics::CodeDiagnosticCollection;
 use crate::workbench::documents::code_workspace::{
-    AutomationExecutionState, CodeEditorLanguage, EditorFindings,
+    AutomationExecutionState, CodeEditorLanguage, CodeWorkspaceRuntimeState, EditorFindings,
     show_code_document_with_debug_versioned,
 };
 
@@ -44,20 +47,136 @@ fn visible_workspace_rect(ui: &Ui) -> egui::Rect {
         .intersect(ui.max_rect())
 }
 
-pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
+/// The Automation workspace's source bundle, when the project has one.
+fn automation_bundle(model: &Model) -> Option<&crate::state::ProjectSourceBundle> {
+    model
+        .workspace
+        .content
+        .project_sources
+        .bundle_for_owner(&ProjectSourceOwner::code_workspace(
+            ProjectSourceLanguage::RSpiceAutomation,
+        ))
+}
+
+/// The file the page shows from `bundle`: the one selected while the bundle
+/// still holds it, else its root.
+fn shown_path(
+    bundle: &crate::state::ProjectSourceBundle,
+    code: &CodeWorkspaceRuntimeState,
+) -> String {
+    match code.automation.selected_file.as_deref() {
+        Some(path) if bundle.contains_file(path) => path.to_owned(),
+        _ => bundle.root().logical_path().to_owned(),
+    }
+}
+
+/// The editor the page shows the file at `selected_path` in: it writes the
+/// file only while the runtime is idle, never the environment lock the
+/// manifest names, and only where the project lets the source be written.
+fn page_editor(
+    model: &Model,
+    code: &CodeWorkspaceRuntimeState,
+    platform: &PlatformState,
+    selected_path: &str,
+) -> crate::workbench::documents::text_editor_commands::ActiveSourceEditor {
+    let language = automation_editor_language(selected_path);
+    let editable = !automation_busy(code)
+        && code.automation.manifest.as_ref().is_none_or(|manifest| {
+            !manifest
+                .environment_lock_path
+                .eq_ignore_ascii_case(selected_path)
+        })
+        && crate::workbench::documents::code_workspace::source_document_is_editable(
+            model,
+            code,
+            platform,
+            ProjectSourceLanguage::RSpiceAutomation,
+            selected_path,
+        );
+    crate::workbench::documents::text_editor_commands::ActiveSourceEditor {
+        id: egui::Id::new(("workbench.automation.source", selected_path)),
+        editable,
+        // The project index navigates Python and the Automation script;
+        // run plans and manifests are data.
+        navigable: matches!(
+            language,
+            CodeEditorLanguage::Python | CodeEditorLanguage::Automation
+        ),
+    }
+}
+
+/// Before the page draws, in the code feature's context: drop the runtime's
+/// evidence once it no longer matches the workspace's closure, and put the
+/// page's editor in front, before the shell takes the dispatcher's answers
+/// the page's context holds, so they are the answers the editor gets; the
+/// page publishes it again as it draws it.
+pub(in crate::workbench) fn prepare(cx: &mut Cx<'_, CodeFeature>) {
+    let bundle = automation_bundle(cx.model);
+    let runtime_stale = cx
+        .state
+        .code_workspace
+        .automation
+        .receipt
+        .as_ref()
+        .is_some_and(|receipt| {
+            bundle.as_ref().is_none_or(|bundle| {
+                receipt.token.project_id != cx.model.workspace.content.project.id()
+                    || receipt.token.revision != bundle.revision().get()
+                    || receipt.token.content_digest != bundle.closure_digest()
+            })
+        });
+    if runtime_stale {
+        cx.state.code_workspace.automation = Default::default();
+    }
+    let Some(bundle) = bundle else {
+        return;
+    };
+    let selected_path = shown_path(bundle, &cx.state.code_workspace);
+    if bundle.file_content(&selected_path).is_some() {
+        cx.wb.active_source_editor = Some(page_editor(
+            cx.model,
+            &cx.state.code_workspace,
+            cx.platform,
+            &selected_path,
+        ));
+    }
+}
+
+/// Whether the page's editor's right-click menu is open, or may open on
+/// what this frame carries. The page's context holds the menu's answers
+/// only then, so the shell reads this before it lends the context.
+pub(in crate::workbench) fn source_menu_open(
+    ctx: &egui::Context,
+    model: &Model,
+    code: &CodeWorkspaceRuntimeState,
+) -> bool {
+    automation_bundle(model).is_some_and(|bundle| {
+        crate::workbench::documents::virtual_text_editor::context_menu_may_show(
+            ctx,
+            crate::workbench::documents::code_workspace::source_editor_id(
+                ProjectSourceLanguage::RSpiceAutomation,
+                bundle.id(),
+                &shown_path(bundle, code),
+            ),
+        )
+    })
+}
+
+/// Draw the Automation page in the code feature's context, once it has
+/// prepared. The context holds its menu's answers while
+/// [`source_menu_open`] says the menu is open or opening.
+pub(in crate::workbench) fn show(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
     // A file dropped on the page is imported once the page has drawn.
     let dropped = ui.ctx().input(|input| input.raw.dropped_files.clone());
     if !dropped.is_empty() {
-        app.state
-            .workbench
+        cx.wb
             .outbox
             .push(CodeRequest::Automation(AutomationRequest::ImportDropped(
                 dropped,
             )));
     }
     let t = Tokens::get(ui.ctx());
-    let bundle = app
-        .state
+    let bundle = cx
         .model
         .workspace
         .content
@@ -66,29 +185,12 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             ProjectSourceLanguage::RSpiceAutomation,
         ))
         .cloned();
-    let runtime_stale = app
-        .state
-        .code
-        .code_workspace
-        .automation
-        .receipt
-        .as_ref()
-        .is_some_and(|receipt| {
-            bundle.as_ref().is_none_or(|bundle| {
-                receipt.token.project_id != app.state.model.workspace.content.project.id()
-                    || receipt.token.revision != bundle.revision().get()
-                    || receipt.token.content_digest != bundle.closure_digest()
-            })
-        });
-    if runtime_stale {
-        app.state.code.code_workspace.automation = Default::default();
-    }
     egui::Frame::new().fill(t.color.bg_app).show(ui, |ui| {
         ui.set_min_size(ui.available_size());
         ui.spacing_mut().item_spacing = Vec2::ZERO;
-        title_row(ui, app);
+        title_row(ui, cx);
         let Some(bundle) = bundle else {
-            let messages = app.state.workbench.messages();
+            let messages = cx.wb.messages();
             super::super::design_system::empty_state_with_actions(
                 ui,
                 WorkbenchIcon::Terminal,
@@ -99,8 +201,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                         .show(ui)
                         .clicked()
                     {
-                        app.state
-                            .workbench
+                        cx.wb
                             .outbox
                             .push(CodeRequest::Automation(AutomationRequest::CreateWorkspace));
                     }
@@ -108,23 +209,16 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             );
             return;
         };
-        let selected_path = match app
-            .state
-            .code
-            .code_workspace
-            .automation
-            .selected_file
-            .clone()
-        {
+        let selected_path = match cx.state.code_workspace.automation.selected_file.clone() {
             Some(path) if bundle.contains_file(&path) => path,
             Some(_) => {
-                app.state.code.code_workspace.automation.selected_file = None;
+                cx.state.code_workspace.automation.selected_file = None;
                 bundle.root().logical_path().to_owned()
             }
             None => bundle.root().logical_path().to_owned(),
         };
         let Some(mut source) = bundle.file_content(&selected_path).map(str::to_owned) else {
-            let messages = app.state.workbench.messages();
+            let messages = cx.wb.messages();
             super::super::design_system::empty_state(
                 ui,
                 WorkbenchIcon::File,
@@ -133,11 +227,11 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             );
             return;
         };
-        let runtime = &app.state.code.code_workspace.automation;
+        let runtime = &cx.state.code_workspace.automation;
         let diagnostics = runtime
             .diagnostic_token
             .filter(|token| {
-                token.project_id == app.state.model.workspace.content.project.id()
+                token.project_id == cx.model.workspace.content.project.id()
                     && token.revision == bundle.revision().get()
                     && token.content_digest == bundle.closure_digest()
             })
@@ -172,7 +266,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                                 ui.allocate_ui(Vec2::new(pane_size.x, editor_height), |ui| {
                                     code_pane(
                                         ui,
-                                        app,
+                                        cx,
                                         &bundle,
                                         &selected_path,
                                         &mut source,
@@ -186,7 +280,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                             );
                             egui::Frame::new().fill(t.color.bg_panel).show(ui, |ui| {
                                 ui.set_width(ui.available_width());
-                                inspector(ui, app);
+                                inspector(ui, cx);
                             });
                         });
                 },
@@ -212,7 +306,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             );
             code_pane(
                 &mut editor_ui,
-                app,
+                cx,
                 &bundle,
                 &selected_path,
                 &mut source,
@@ -231,14 +325,14 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             ScrollArea::vertical()
                 .id_salt("workbench.automation.inspector")
                 .auto_shrink([false, false])
-                .show(&mut inspector_ui, |ui| inspector(ui, app));
+                .show(&mut inspector_ui, |ui| inspector(ui, cx));
             ui.allocate_rect(available, Sense::hover());
         }
     });
 }
 
-fn title_row(ui: &mut Ui, app: &mut RSpiceApp) {
-    let messages = app.state.workbench.messages();
+fn title_row(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
+    let messages = cx.wb.messages();
     let title = messages.text(MessageId::AutomationHeadingTitle);
     let generated_netlist = messages.text(MessageId::CodeGeneratedNetlist);
     let validate = messages.text(MessageId::AutomationValidate);
@@ -251,13 +345,13 @@ fn title_row(ui: &mut Ui, app: &mut RSpiceApp) {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
                 let width = ((ui.available_width() - 18.0) * 0.25).max(1.0);
-                generated_netlist_button(ui, app, width);
-                validate_button(ui, app, width);
-                dry_run_button(ui, app, width);
-                run_button(ui, app, width);
+                generated_netlist_button(ui, cx, width);
+                validate_button(ui, cx, width);
+                dry_run_button(ui, cx, width);
+                run_button(ui, cx, width);
             });
         } else {
-            let run_label = run_button_label(app);
+            let run_label = run_button_label(&cx.state.code_workspace, cx.wb.messages());
             let actions_width = title_button_width(ui, &generated_netlist, false)
                 + 6.0
                 + title_button_width(ui, &validate, false)
@@ -277,19 +371,19 @@ fn title_row(ui: &mut Ui, app: &mut RSpiceApp) {
                     },
                 );
                 ui.add_space(6.0);
-                generated_netlist_button(ui, app, 0.0);
-                validate_button(ui, app, 0.0);
-                dry_run_button(ui, app, 0.0);
-                run_button(ui, app, 0.0);
+                generated_netlist_button(ui, cx, 0.0);
+                validate_button(ui, cx, 0.0);
+                dry_run_button(ui, cx, 0.0);
+                run_button(ui, cx, 0.0);
             });
         }
     });
 }
 
-fn validate_button(ui: &mut Ui, app: &mut RSpiceApp, width: f32) {
-    let busy = automation_busy(app);
-    let workspace_available = automation_workspace_available(app);
-    let messages = app.state.workbench.messages();
+fn validate_button(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>, width: f32) {
+    let busy = automation_busy(&cx.state.code_workspace);
+    let workspace_available = automation_workspace_available(cx.model);
+    let messages = cx.wb.messages();
     let label = messages.text(MessageId::AutomationValidate);
     let unavailable = messages.text(MessageId::AutomationWorkspaceRequired);
     let mut button = Button::new(&label).enabled(!busy && workspace_available);
@@ -303,17 +397,16 @@ fn validate_button(ui: &mut Ui, app: &mut RSpiceApp, width: f32) {
         response.on_disabled_hover_text(unavailable)
     };
     if response.clicked() {
-        app.state
-            .workbench
+        cx.wb
             .outbox
             .push(CodeRequest::Automation(AutomationRequest::Validate));
     }
 }
 
-fn dry_run_button(ui: &mut Ui, app: &mut RSpiceApp, width: f32) {
-    let busy = automation_busy(app);
-    let workspace_available = automation_workspace_available(app);
-    let messages = app.state.workbench.messages();
+fn dry_run_button(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>, width: f32) {
+    let busy = automation_busy(&cx.state.code_workspace);
+    let workspace_available = automation_workspace_available(cx.model);
+    let messages = cx.wb.messages();
     let label = messages.text(MessageId::AutomationDryRun);
     let unavailable = messages.text(MessageId::AutomationWorkspaceRequired);
     let mut button = Button::new(&label).enabled(!busy && workspace_available);
@@ -327,50 +420,37 @@ fn dry_run_button(ui: &mut Ui, app: &mut RSpiceApp, width: f32) {
         response.on_disabled_hover_text(unavailable)
     };
     if response.clicked() {
-        app.state
-            .workbench
+        cx.wb
             .outbox
             .push(CodeRequest::Automation(AutomationRequest::DryRun));
     }
 }
 
-fn generated_netlist_button(ui: &mut Ui, app: &mut RSpiceApp, width: f32) {
-    let label = app
-        .state
-        .workbench
-        .messages()
-        .text(MessageId::CodeGeneratedNetlist);
+fn generated_netlist_button(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>, width: f32) {
+    let label = cx.wb.messages().text(MessageId::CodeGeneratedNetlist);
     let mut button = Button::new(&label);
     if width > 0.0 {
         button = button.min_width(width).max_width(width);
     }
     if button.show(ui).clicked() {
-        app.state.workbench.outbox.push(CodeRequest::Automation(
+        cx.wb.outbox.push(CodeRequest::Automation(
             AutomationRequest::OpenGeneratedNetlist,
         ));
     }
 }
 
-fn run_button(ui: &mut Ui, app: &mut RSpiceApp, width: f32) {
-    let active = app
+fn run_button(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>, width: f32) {
+    let active = cx.state.code_workspace.automation.execution.is_active();
+    let validating = cx
         .state
-        .code
-        .code_workspace
-        .automation
-        .execution
-        .is_active();
-    let validating = app
-        .state
-        .code
         .code_workspace
         .automation
         .pending_runtime_validation
         .is_some();
-    let label = run_button_label(app);
-    let workspace_available = automation_workspace_available(app);
-    let unavailable = app
-        .state
-        .workbench
+    let label = run_button_label(&cx.state.code_workspace, cx.wb.messages());
+    let workspace_available = automation_workspace_available(cx.model);
+    let unavailable = cx
+        .wb
         .messages()
         .text(MessageId::AutomationWorkspaceRequired);
     let mut button = Button::new(&label)
@@ -391,33 +471,15 @@ fn run_button(ui: &mut Ui, app: &mut RSpiceApp, width: f32) {
         } else {
             AutomationRequest::Run
         };
-        app.state
-            .workbench
-            .outbox
-            .push(CodeRequest::Automation(request));
+        cx.wb.outbox.push(CodeRequest::Automation(request));
     }
 }
 
-fn run_button_label(app: &RSpiceApp) -> String {
-    let messages = app.state.workbench.messages();
-    if app
-        .state
-        .code
-        .code_workspace
-        .automation
-        .pending_runtime_validation
-        .is_some()
-    {
+fn run_button_label(code: &CodeWorkspaceRuntimeState, messages: MessageCatalog) -> String {
+    if code.automation.pending_runtime_validation.is_some() {
         messages.text(MessageId::AutomationValidating)
-    } else if app
-        .state
-        .code
-        .code_workspace
-        .automation
-        .execution
-        .is_active()
-    {
-        if app.state.code.code_workspace.automation.cancel_requested {
+    } else if code.automation.execution.is_active() {
+        if code.automation.cancel_requested {
             messages.text(MessageId::AutomationStopping)
         } else {
             messages.text(MessageId::AutomationStopWorkflow)
@@ -427,16 +489,15 @@ fn run_button_label(app: &RSpiceApp) -> String {
     }
 }
 
-fn automation_busy(app: &RSpiceApp) -> bool {
-    let runtime = &app.state.code.code_workspace.automation;
+fn automation_busy(code: &CodeWorkspaceRuntimeState) -> bool {
+    let runtime = &code.automation;
     runtime.execution.is_active()
         || runtime.pending_runtime_validation.is_some()
         || runtime.runtime_execution.is_some()
 }
 
-fn automation_workspace_available(app: &RSpiceApp) -> bool {
-    app.state
-        .model
+fn automation_workspace_available(model: &Model) -> bool {
+    model
         .workspace
         .content
         .project_sources
@@ -552,7 +613,7 @@ fn automation_editor_language(path: &str) -> CodeEditorLanguage {
 
 fn code_pane(
     ui: &mut Ui,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, CodeFeature>,
     bundle: &crate::state::ProjectSourceBundle,
     selected_path: &str,
     source: &mut String,
@@ -561,25 +622,14 @@ fn code_pane(
     let t = Tokens::get(ui.ctx());
     let legacy = bundle.root().logical_path().ends_with(".rspice");
     let language = automation_editor_language(selected_path);
-    let editable = !automation_busy(app)
-        && app
-            .state
-            .code
-            .code_workspace
-            .automation
-            .manifest
-            .as_ref()
-            .is_none_or(|manifest| {
-                !manifest
-                    .environment_lock_path
-                    .eq_ignore_ascii_case(selected_path)
-            })
-        && crate::workbench::documents::code_workspace::source_document_is_editable(
-            app,
-            ProjectSourceLanguage::RSpiceAutomation,
-            selected_path,
-        );
-    let editor_id = egui::Id::new(("workbench.automation.source", selected_path));
+    let editor = page_editor(
+        cx.model,
+        &cx.state.code_workspace,
+        cx.platform,
+        selected_path,
+    );
+    let editable = editor.editable;
+    let editor_id = editor.id;
     let (toolbar, _) = ui.allocate_exact_size(
         Vec2::new(ui.available_width(), EDITOR_TOOLBAR_HEIGHT),
         Sense::hover(),
@@ -594,13 +644,13 @@ fn code_pane(
         egui::pos2(toolbar.left() + 8.0, toolbar.top()),
         egui::pos2(toolbar.right() - 8.0, toolbar.bottom()),
     );
-    let runtime = &app.state.code.code_workspace.automation;
+    let runtime = &cx.state.code_workspace.automation;
     let validated = runtime.receipt.as_ref().is_some_and(|receipt| {
-        receipt.token.project_id == app.state.model.workspace.content.project.id()
+        receipt.token.project_id == cx.model.workspace.content.project.id()
             && receipt.token.revision == bundle.revision().get()
             && receipt.token.content_digest == bundle.closure_digest()
     });
-    let messages = app.state.workbench.messages();
+    let messages = cx.wb.messages();
     // One live dot while the runtime is working, one mark when a workflow
     // came back failed, and the words themselves the rest of the time. A
     // validated script is the ordinary case and says nothing.
@@ -671,28 +721,12 @@ fn code_pane(
     let preceding_input = search_input
         .as_ref()
         .map(|input| input.preceding_scope(ui.ctx()));
-    super::netlist::publish_source_editor(
-        ui.ctx(),
-        &mut app.state.workbench,
-        crate::workbench::documents::text_editor_commands::ActiveSourceEditor {
-            id: editor_id,
-            editable,
-            // The project index navigates Python and the Automation script;
-            // run plans and manifests are data.
-            navigable: matches!(
-                language,
-                CodeEditorLanguage::Python | CodeEditorLanguage::Automation
-            ),
-        },
-    );
+    super::netlist::publish_source_editor(ui.ctx(), cx.wb, editor);
     let interaction = egui::Frame::new().fill(t.color.bg_inset).show(ui, |ui| {
         let debuggable = language == CodeEditorLanguage::Python;
         let interaction = if debuggable && !legacy {
             let selected_document_id = bundle.document_id(selected_path).map(|id| id.as_uuid());
-            let breakpoints = app
-                .state
-                .code
-                .code_workspace
+            let breakpoints = cx.state.code_workspace
                 .automation
                 .debug
                 .breakpoints
@@ -702,17 +736,12 @@ fn code_pane(
                 })
                 .map(|breakpoint| breakpoint.line)
                 .collect::<Vec<_>>();
-            let current_line = app
-                .state
-                .code
-                .code_workspace
+            let current_line = cx.state.code_workspace
                 .automation
                 .debug
                 .selected_frame_id
                 .and_then(|frame_id| {
-                    app.state
-                        .code
-                        .code_workspace
+                    cx.state.code_workspace
                         .automation
                         .debug
                         .call_stack
@@ -750,26 +779,25 @@ fn code_pane(
             )
         };
         if let Some(line) = interaction.breakpoint_toggled {
-            app.state
-                .workbench
+            cx.wb
                 .outbox
                 .push(CodeRequest::Automation(AutomationRequest::ToggleBreakpoint(line)));
         }
         if interaction.changed {
-            match app.state.model.workspace.content.replace_project_source_bundle_file(
+            match cx.model.workspace.content.replace_project_source_bundle_file(
                 bundle.id(),
                 selected_path,
                 source.clone(),
             ) {
                 Ok(true) => {
-                    crate::workbench::documents::code_workspace::invalidate_automation_evidence(
-                        app,
+                    crate::workbench::documents::code_workspace::invalidate_automation_evidence_in(
+                        &mut cx.state.code_workspace,
+                        cx.own,
                     );
                 }
                 Ok(false) => {}
                 Err(error) => {
-                    app.state
-                        .prompt(format!("Could not update {selected_path}: {error}"));
+                    cx.wb.prompt(format!("Could not update {selected_path}: {error}"));
                     // The editor goes back to the source as it is stored.
                     crate::workbench::documents::virtual_text_editor::resynchronize(
                         ui.ctx(),
@@ -785,39 +813,50 @@ fn code_pane(
         interaction
     }).inner;
     if let Some(announcement) = interaction.announcement.clone() {
-        app.state.prompt(announcement);
+        cx.wb.prompt(announcement);
     }
-    app.state.code.code_workspace.source_carets.insert(
+    cx.state.code_workspace.source_carets.insert(
         (bundle.id(), selected_path.to_owned()),
         interaction.cursor_char_index,
     );
     let selection_key = (bundle.id(), selected_path.to_owned());
     if let Some(range) = interaction.selected_char_range {
-        app.state
-            .code
+        cx.state
             .code_workspace
             .source_selections
             .insert(selection_key, range);
     } else {
-        app.state
-            .code
+        cx.state
             .code_workspace
             .source_selections
             .remove(&selection_key);
     }
-    crate::workbench::chrome::title_bar::source_editor_context_menu(&interaction.response, app);
+    // The right-click menu's rows read the page's context, which holds the
+    // menu's answers while the menu is open or opening; the row chosen runs
+    // once the page has drawn.
+    let choice = crate::workbench::chrome::title_bar::source_editor_context_menu_over(
+        &interaction.response,
+        |ctx| {
+            super::netlist::source_menu::rows(crate::workbench::code::SOURCE_EDITOR_MENU, cx, ctx)
+        },
+    );
+    if let Some(choice) = choice {
+        cx.execute(choice.command());
+    }
     if let Some(step) = interaction.unanswered_history {
-        let workbench = &mut app.state;
-        match workbench.code.code_workspace.source_edit_history.step(
-            &mut workbench.model.workspace.content,
+        match cx.state.code_workspace.source_edit_history.step(
+            &mut cx.model.workspace.content,
             bundle.id(),
             step,
         ) {
             Ok(true) => {
-                crate::workbench::documents::code_workspace::invalidate_automation_evidence(app);
+                crate::workbench::documents::code_workspace::invalidate_automation_evidence_in(
+                    &mut cx.state.code_workspace,
+                    cx.own,
+                );
             }
             Ok(false) => {}
-            Err(error) => app.state.prompt(error),
+            Err(error) => cx.wb.prompt(error),
         }
     }
     if crate::workbench::documents::text_editor_commands::take_format_document_request(
@@ -828,19 +867,18 @@ fn code_pane(
         // was asked, in a frame no input began, so this frame asks for the
         // next at once to draw what formatting wrote.
         ui.ctx().request_repaint();
-        app.state.workbench.outbox.push(CodeRequest::Automation(
-            AutomationRequest::FormatDocument {
+        cx.wb
+            .outbox
+            .push(CodeRequest::Automation(AutomationRequest::FormatDocument {
                 bundle_id: bundle.id(),
                 path: selected_path.to_owned(),
-            },
-        ));
+            }));
     }
     drop(preceding_input);
     if let Some(input) = search_input {
         // The search binds to the source revisions and the selection once
         // the page has drawn, after preceding edits.
-        app.state
-            .workbench
+        cx.wb
             .outbox
             .push(CodeRequest::Automation(AutomationRequest::FindInBundle {
                 path: selected_path.to_owned(),
@@ -852,18 +890,18 @@ fn code_pane(
     }
 }
 
-fn inspector(ui: &mut Ui, app: &mut RSpiceApp) {
+fn inspector(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
     ui.set_width(ui.available_width());
-    panel_body(ui, |ui| inspector_sections(ui, app));
+    panel_body(ui, |ui| inspector_sections(ui, cx));
 }
 
-fn inspector_sections(ui: &mut Ui, app: &mut RSpiceApp) {
-    let messages = app.state.workbench.messages();
-    let manifest = app.state.code.code_workspace.automation.manifest.clone();
-    let preview = execution_preview(app);
-    let runtime_status = app
-        .automation_runtime_unavailable_reason()
-        .unwrap_or_else(|| messages.text(MessageId::AutomationManagedRuntimeVerified));
+fn inspector_sections(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
+    let messages = cx.wb.messages();
+    let manifest = cx.state.code_workspace.automation.manifest.clone();
+    let preview = execution_preview(cx.model);
+    let runtime_status =
+        crate::workbench::documents::code_workspace::automation_runtime_unavailable_reason(cx.own)
+            .unwrap_or_else(|| messages.text(MessageId::AutomationManagedRuntimeVerified));
     let task_count = preview.task_points.to_string();
     // What the preview would run is a count. Whether that plan would also
     // qualify as a release is a disclaimer, and the Release checks row below
@@ -969,7 +1007,7 @@ fn inspector_sections(ui: &mut Ui, app: &mut RSpiceApp) {
         },
     );
 
-    let diagnostic_count = app.state.code.code_workspace.automation.diagnostics.len();
+    let diagnostic_count = cx.state.code_workspace.automation.diagnostics.len();
     code_inspector_section(
         ui,
         &messages.text(MessageId::AutomationDiagnostics),
@@ -984,13 +1022,12 @@ fn inspector_sections(ui: &mut Ui, app: &mut RSpiceApp) {
                 &messages.text(MessageId::AutomationCurrentFindings),
                 &diagnostic_count.to_string(),
             );
-            let validation_status = messages.text(
-                if app.state.code.code_workspace.automation.receipt.is_some() {
+            let validation_status =
+                messages.text(if cx.state.code_workspace.automation.receipt.is_some() {
                     MessageId::AutomationExactRevisionRetained
                 } else {
                     MessageId::AutomationRequired
-                },
-            );
+                });
             property_row(
                 ui,
                 &messages.text(MessageId::AutomationValidation),
@@ -1007,8 +1044,7 @@ fn inspector_sections(ui: &mut Ui, app: &mut RSpiceApp) {
             property_row(
                 ui,
                 &messages.text(MessageId::AutomationProjectRevision),
-                &app.state
-                    .model
+                &cx.model
                     .workspace
                     .content
                     .project
@@ -1039,7 +1075,7 @@ fn inspector_sections(ui: &mut Ui, app: &mut RSpiceApp) {
         },
     );
 
-    debugger(ui, app);
+    debugger(ui, cx);
 
     code_inspector_section(
         ui,
@@ -1049,19 +1085,19 @@ fn inspector_sections(ui: &mut Ui, app: &mut RSpiceApp) {
         |ui| {
             artifact_row(
                 ui,
-                app,
+                cx,
                 ArtifactKind::JunitXml,
                 &messages.text(MessageId::AutomationArtifactCi),
             );
             artifact_row(
                 ui,
-                app,
+                cx,
                 ArtifactKind::SummaryJson,
                 &messages.text(MessageId::AutomationArtifactMachine),
             );
             artifact_row(
                 ui,
-                app,
+                cx,
                 ArtifactKind::VerificationPdf,
                 &messages.text(MessageId::AutomationArtifactReport),
             );
@@ -1082,15 +1118,15 @@ fn inspector_sections(ui: &mut Ui, app: &mut RSpiceApp) {
     );
 }
 
-fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
+fn debugger(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>) {
     use crate::workbench::documents::code_workspace::{
         AutomationBreakpointKind, AutomationDebugPhase, AutomationExceptionPolicy, AutomationWatch,
     };
 
     let t = Tokens::get(ui.ctx());
-    let messages = app.state.workbench.messages();
+    let messages = cx.wb.messages();
     let redacted = messages.text(MessageId::AutomationRedacted);
-    let phase = app.state.code.code_workspace.automation.debug.phase;
+    let phase = cx.state.code_workspace.automation.debug.phase;
     // Paused, running and stopped are where the session is, not something
     // wrong with it; only a failed session is marked.
     let problem = match phase {
@@ -1117,8 +1153,7 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                 );
                 let start = messages.text(MessageId::AutomationDebugStart);
                 if Button::new(&start).enabled(can_start).show(ui).clicked() {
-                    app.state
-                        .workbench
+                    cx.wb
                         .outbox
                         .push(CodeRequest::Automation(AutomationRequest::StartDebugger));
                 }
@@ -1128,20 +1163,12 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                     .show(ui)
                     .clicked()
                 {
-                    app.state
-                        .workbench
+                    cx.wb
                         .outbox
                         .push(CodeRequest::Automation(AutomationRequest::ContinueDebugger));
                 }
                 let pause = messages.text(
-                    if app
-                        .state
-                        .code
-                        .code_workspace
-                        .automation
-                        .debug
-                        .pause_requested
-                    {
+                    if cx.state.code_workspace.automation.debug.pause_requested {
                         MessageId::AutomationDebugPausePending
                     } else {
                         MessageId::AutomationDebugPause
@@ -1152,8 +1179,7 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                     .show(ui)
                     .clicked()
                 {
-                    app.state
-                        .workbench
+                    cx.wb
                         .outbox
                         .push(CodeRequest::Automation(AutomationRequest::PauseDebugger));
                 }
@@ -1163,8 +1189,7 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                     .show(ui)
                     .clicked()
                 {
-                    app.state
-                        .workbench
+                    cx.wb
                         .outbox
                         .push(CodeRequest::Automation(AutomationRequest::StepOver));
                 }
@@ -1174,8 +1199,7 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                     .show(ui)
                     .clicked()
                 {
-                    app.state
-                        .workbench
+                    cx.wb
                         .outbox
                         .push(CodeRequest::Automation(AutomationRequest::StepInto));
                 }
@@ -1183,21 +1207,12 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                 if Button::new(&step_out)
                     .enabled(
                         phase == AutomationDebugPhase::Paused
-                            && app
-                                .state
-                                .code
-                                .code_workspace
-                                .automation
-                                .debug
-                                .call_stack
-                                .len()
-                                > 1,
+                            && cx.state.code_workspace.automation.debug.call_stack.len() > 1,
                     )
                     .show(ui)
                     .clicked()
                 {
-                    app.state
-                        .workbench
+                    cx.wb
                         .outbox
                         .push(CodeRequest::Automation(AutomationRequest::StepOut));
                 }
@@ -1207,8 +1222,7 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                     .show(ui)
                     .clicked()
                 {
-                    app.state
-                        .workbench
+                    cx.wb
                         .outbox
                         .push(CodeRequest::Automation(AutomationRequest::RestartDebugger));
                 }
@@ -1221,8 +1235,7 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                     .show(ui)
                     .clicked()
                 {
-                    app.state
-                        .workbench
+                    cx.wb
                         .outbox
                         .push(CodeRequest::Automation(AutomationRequest::StopDebugger));
                 }
@@ -1231,8 +1244,7 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
             property_row(
                 ui,
                 &messages.text(MessageId::AutomationDebugCurrentLine),
-                &app.state
-                    .code
+                &cx.state
                     .code_workspace
                     .automation
                     .debug
@@ -1243,23 +1255,12 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                 ui,
                 &messages.text(MessageId::AutomationDebugExceptionPolicy),
                 &automation_exception_policy_label(
-                    app.state
-                        .code
-                        .code_workspace
-                        .automation
-                        .debug
-                        .exception_policy,
+                    cx.state.code_workspace.automation.debug.exception_policy,
                     messages,
                 ),
             );
 
-            let mut policy = app
-                .state
-                .code
-                .code_workspace
-                .automation
-                .debug
-                .exception_policy;
+            let mut policy = cx.state.code_workspace.automation.debug.exception_policy;
             crate::ui::widgets::Combo::from_id_salt("automation.debug.exceptions")
                 .selected_text(automation_exception_policy_label(policy, messages))
                 .width(ui.available_width().max(1.0))
@@ -1280,21 +1281,9 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                         messages.text(MessageId::AutomationDebugNever),
                     );
                 });
-            app.state
-                .code
-                .code_workspace
-                .automation
-                .debug
-                .exception_policy = policy;
+            cx.state.code_workspace.automation.debug.exception_policy = policy;
 
-            let breakpoints = app
-                .state
-                .code
-                .code_workspace
-                .automation
-                .debug
-                .breakpoints
-                .clone();
+            let breakpoints = cx.state.code_workspace.automation.debug.breakpoints.clone();
             // A group header titles its rows; with no breakpoints set it
             // would title nothing.
             if !breakpoints.is_empty() {
@@ -1306,9 +1295,8 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                 ui.horizontal(|ui| {
                     let mut enabled = breakpoint.enabled;
                     if ui.checkbox(&mut enabled, "").changed()
-                        && let Some(current) = app
+                        && let Some(current) = cx
                             .state
-                            .code
                             .code_workspace
                             .automation
                             .debug
@@ -1380,9 +1368,8 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                             );
                         });
                         if kind != breakpoint.kind
-                            && let Some(current) = app
+                            && let Some(current) = cx
                                 .state
-                                .code
                                 .code_workspace
                                 .automation
                                 .debug
@@ -1402,9 +1389,8 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                         }
                     });
                 });
-                let active = app
+                let active = cx
                     .state
-                    .code
                     .code_workspace
                     .automation
                     .debug
@@ -1432,9 +1418,8 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                                     .desired_width(ui.available_width()),
                             )
                             .changed()
-                            && let Some(current) = app
+                            && let Some(current) = cx
                                 .state
-                                .code
                                 .code_workspace
                                 .automation
                                 .debug
@@ -1456,9 +1441,8 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                             if ui
                                 .add(egui::DragValue::new(&mut hit_count).range(1..=u64::MAX))
                                 .changed()
-                                && let Some(current) = app
+                                && let Some(current) = cx
                                     .state
-                                    .code
                                     .code_workspace
                                     .automation
                                     .debug
@@ -1484,33 +1468,19 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                 }
             }
             if let Some((document_id, line)) = remove_breakpoint {
-                app.state.workbench.outbox.push(CodeRequest::Automation(
+                cx.wb.outbox.push(CodeRequest::Automation(
                     AutomationRequest::RemoveBreakpoint { document_id, line },
                 ));
             } else if breakpoints_changed {
-                app.state
-                    .workbench
+                cx.wb
                     .outbox
                     .push(CodeRequest::Automation(AutomationRequest::SyncBreakpoints));
             }
 
-            let frames = app
-                .state
-                .code
-                .code_workspace
-                .automation
-                .debug
-                .call_stack
-                .clone();
+            let frames = cx.state.code_workspace.automation.debug.call_stack.clone();
             if !frames.is_empty() {
                 subsection_header(ui, &messages.text(MessageId::AutomationCallStack));
-                let selected = app
-                    .state
-                    .code
-                    .code_workspace
-                    .automation
-                    .debug
-                    .selected_frame_id;
+                let selected = cx.state.code_workspace.automation.debug.selected_frame_id;
                 for frame in frames {
                     if ui
                         .selectable_label(
@@ -1519,21 +1489,16 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                         )
                         .clicked()
                     {
-                        app.state.workbench.outbox.push(CodeRequest::Automation(
-                            AutomationRequest::SelectFrame(frame.frame_id),
-                        ));
+                        cx.wb
+                            .outbox
+                            .push(CodeRequest::Automation(AutomationRequest::SelectFrame(
+                                frame.frame_id,
+                            )));
                     }
                 }
             }
 
-            let values = app
-                .state
-                .code
-                .code_workspace
-                .automation
-                .debug
-                .locals
-                .clone();
+            let values = cx.state.code_workspace.automation.debug.locals.clone();
             if !values.is_empty() {
                 subsection_header(ui, &messages.text(MessageId::AutomationLocals));
                 for value in values {
@@ -1549,14 +1514,7 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                 }
             }
 
-            let globals = app
-                .state
-                .code
-                .code_workspace
-                .automation
-                .debug
-                .globals
-                .clone();
+            let globals = cx.state.code_workspace.automation.debug.globals.clone();
             if !globals.is_empty() {
                 subsection_header(ui, &messages.text(MessageId::AutomationGlobals));
                 for value in globals {
@@ -1579,7 +1537,7 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                 ui.spacing_mut().item_spacing.x = WATCH_ROW_GAP;
                 let response = ui.add(
                     egui::TextEdit::singleline(
-                        &mut app.state.code.code_workspace.automation.debug.watch_input,
+                        &mut cx.state.code_workspace.automation.debug.watch_input,
                     )
                     .hint_text(messages.text(MessageId::AutomationExpression))
                     .desired_width((ui.available_width() - WATCH_ADD_W - WATCH_ROW_GAP).max(60.0)),
@@ -1589,9 +1547,8 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                     || (response.lost_focus()
                         && ui.input(|input| input.key_pressed(egui::Key::Enter)));
                 if submit {
-                    let expression = app
+                    let expression = cx
                         .state
-                        .code
                         .code_workspace
                         .automation
                         .debug
@@ -1599,9 +1556,8 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                         .trim()
                         .to_owned();
                     let valid = valid_automation_watch_expression(&expression);
-                    let duplicate = app
+                    let duplicate = cx
                         .state
-                        .code
                         .code_workspace
                         .automation
                         .debug
@@ -1609,36 +1565,24 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                         .iter()
                         .any(|watch| watch.expression == expression);
                     if valid && !duplicate {
-                        app.state.code.code_workspace.automation.debug.watches.push(
-                            AutomationWatch {
-                                expression,
-                                value: String::new(),
-                                error: None,
-                            },
-                        );
-                        app.state
-                            .code
+                        cx.state
                             .code_workspace
                             .automation
                             .debug
-                            .watch_input
-                            .clear();
-                        app.state
-                            .workbench
+                            .watches
+                            .push(AutomationWatch {
+                                expression,
+                                value: String::new(),
+                                error: None,
+                            });
+                        cx.state.code_workspace.automation.debug.watch_input.clear();
+                        cx.wb
                             .outbox
                             .push(CodeRequest::Automation(AutomationRequest::RefreshWatches));
                     }
                 }
             });
-            for watch in app
-                .state
-                .code
-                .code_workspace
-                .automation
-                .debug
-                .watches
-                .clone()
-            {
+            for watch in cx.state.code_workspace.automation.debug.watches.clone() {
                 property_row(
                     ui,
                     &watch.expression,
@@ -1646,9 +1590,8 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                 );
             }
 
-            let output = app
+            let output = cx
                 .state
-                .code
                 .code_workspace
                 .automation
                 .debug
@@ -1687,11 +1630,9 @@ struct ExecutionPreview {
     slots: usize,
 }
 
-fn execution_preview(app: &RSpiceApp) -> ExecutionPreview {
+fn execution_preview(model: &Model) -> ExecutionPreview {
     use crate::simulation::plan::AnalysisKind;
-    let (enabled, corner_enabled) = app
-        .state
-        .model
+    let (enabled, corner_enabled) = model
         .sim_setup
         .stable_analysis_plan()
         .map(|plan| {
@@ -1708,41 +1649,28 @@ fn execution_preview(app: &RSpiceApp) -> ExecutionPreview {
         })
         .unwrap_or_default();
     let pvt_points = if corner_enabled {
-        app.state
-            .model
+        model
             .sim_setup
             .corner
-            .to_config(
-                &app.state.model.sim_setup.run_set,
-                app.state.model.sim_setup.reference_pvt,
-            )
+            .to_config(&model.sim_setup.run_set, model.sim_setup.reference_pvt)
             .map_or(0, |config| config.num_corners())
     } else {
         0
     };
-    let release_checks = app
-        .state
-        .model
+    let release_checks = model
         .sim_setup
         .analysis_plan
         .as_ref()
         .map(crate::simulation::plan::SimulationPlan::id)
         .map_or(0, |plan_id| {
-            app.state
-                .model
-                .workspace
-                .content
-                .active_specs(plan_id)
-                .len()
+            model.workspace.content.active_specs(plan_id).len()
         });
     ExecutionPreview {
-        task_points: crate::workbench::documents::code_workspace::automation_task_count(app)
+        task_points: crate::workbench::documents::code_workspace::automation_task_count(model)
             .unwrap_or_else(|_| enabled.saturating_mul(pvt_points.max(1))),
         pvt_points,
         release_checks,
-        slots: app
-            .state
-            .model
+        slots: model
             .preferences
             .solver_worker_limit()
             .unwrap_or_else(|| rspice_core::ResourceLimits::default().max_parallel_workers)
@@ -1759,11 +1687,10 @@ use crate::ui::widgets::PROBLEM_MARK_SIDE as TOOLBAR_MARK_SIDE;
 const ARTIFACT_ICON_W: f32 = 14.0;
 const ARTIFACT_ICON_GAP: f32 = 6.0;
 
-fn artifact_row(ui: &mut Ui, app: &mut RSpiceApp, kind: ArtifactKind, meta: &str) {
+fn artifact_row(ui: &mut Ui, cx: &mut Cx<'_, CodeFeature>, kind: ArtifactKind, meta: &str) {
     let t = Tokens::get(ui.ctx());
-    let available = app
+    let available = cx
         .state
-        .code
         .code_workspace
         .automation
         .artifacts
@@ -1825,9 +1752,11 @@ fn artifact_row(ui: &mut Ui, app: &mut RSpiceApp, kind: ArtifactKind, meta: &str
                 || input.consume_key(egui::Modifiers::NONE, egui::Key::Space)
         });
     if (response.clicked() || keyboard_activate) && available {
-        app.state.workbench.outbox.push(CodeRequest::Automation(
-            AutomationRequest::ExportArtifact(kind),
-        ));
+        cx.wb
+            .outbox
+            .push(CodeRequest::Automation(AutomationRequest::ExportArtifact(
+                kind,
+            )));
     }
 }
 

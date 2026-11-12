@@ -128,6 +128,23 @@ pub(crate) fn invalidate_automation_evidence_in(
     code.automation.debug.breakpoints = breakpoints;
 }
 
+/// Why the managed Python runtime cannot run, or `None` once it can. On the
+/// desktop the runtime is looked for again first.
+pub(crate) fn automation_runtime_unavailable_reason(handles: &mut CodeHandles) -> Option<String> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        handles.automation_runtime.poll_discovery();
+        handles
+            .automation_runtime
+            .availability_reason()
+            .map(str::to_owned)
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        handles.automation_runtime.availability_reason()
+    }
+}
+
 fn start_managed_python_workflow(app: &mut RSpiceApp, mode: AutomationRuntimeLaunchMode) {
     let runtime = &app.state.code.code_workspace.automation;
     if runtime.runtime_execution.is_some()
@@ -1196,7 +1213,7 @@ fn prepare_automation_workflow(app: &mut RSpiceApp, dispatch: bool) {
             return;
         }
     };
-    if let Err(error) = automation_task_count(app) {
+    if let Err(error) = automation_task_count(&app.state.model) {
         fail(app, &error);
         return;
     }
@@ -1440,10 +1457,12 @@ fn prepare_automation_workflow(app: &mut RSpiceApp, dispatch: bool) {
     );
 }
 
-pub(crate) fn automation_task_count(app: &RSpiceApp) -> Result<usize, String> {
+pub(crate) fn automation_task_count(
+    model: &rspice_app_state::workbench::app_state::model::Model,
+) -> Result<usize, String> {
     use crate::simulation::plan::AnalysisKind;
 
-    let plan = app.state.model.sim_setup.stable_analysis_plan()?;
+    let plan = model.sim_setup.stable_analysis_plan()?;
     let enabled = plan
         .instances()
         .iter()
@@ -1454,14 +1473,10 @@ pub(crate) fn automation_task_count(app: &RSpiceApp) -> Result<usize, String> {
         .iter()
         .any(|instance| instance.enabled() && instance.kind() == AnalysisKind::Corner);
     let pvt_points = if corner_enabled {
-        app.state
-            .model
+        model
             .sim_setup
             .corner
-            .to_config(
-                &app.state.model.sim_setup.run_set,
-                app.state.model.sim_setup.reference_pvt,
-            )
+            .to_config(&model.sim_setup.run_set, model.sim_setup.reference_pvt)
             .map_or(0, |config| config.num_corners())
     } else {
         1

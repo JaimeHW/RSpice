@@ -181,7 +181,22 @@ impl Host for RSpiceApp {
                                 // The breakpoints reach the debugger before the
                                 // page draws.
                                 sync_automation_debugger(app);
-                                automation::show(ui, app);
+                                // The page prepares, putting its editor in
+                                // front, before its context takes the menu's
+                                // answers, which it holds only while the
+                                // source editor's menu is open or opening.
+                                automation::prepare(&mut features::cx(app));
+                                let ctx = ui.ctx().clone();
+                                automation::show(
+                                    ui,
+                                    &mut features::cx_with_menu_answers(app, |app| {
+                                        automation::source_menu_open(
+                                            &ctx,
+                                            &app.state.model,
+                                            &app.state.code.code_workspace,
+                                        )
+                                    }),
+                                );
                             }
                         }
                     }

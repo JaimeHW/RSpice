@@ -360,20 +360,20 @@ pub(crate) fn assign_automation_source_role(
 /// Resolve edit authority from persisted document ownership and semantic
 /// roles. File extensions and demonstration filenames are never authority.
 pub(crate) fn source_document_is_editable(
-    app: &RSpiceApp,
+    model: &Model,
+    code: &CodeWorkspaceRuntimeState,
+    platform: &PlatformState,
     language: ProjectSourceLanguage,
     logical_path: &str,
 ) -> bool {
-    let Some(bundle_id) = app
-        .state
-        .model
+    let Some(bundle_id) = model
         .workspace
         .active_source_bundle(language)
         .map(ProjectSourceBundle::id)
     else {
         return false;
     };
-    source_bundle_document_is_editable(app, language, bundle_id, logical_path)
+    source_bundle_document_is_editable_in(model, code, platform, language, bundle_id, logical_path)
 }
 
 /// Resolve edit authority for an exact source bundle. A Verilog-A bundle
@@ -1569,27 +1569,37 @@ mod tests {
             .to_owned();
 
         assert!(source_document_is_editable(
-            &app,
+            &app.state.model,
+            &app.state.code.code_workspace,
+            &app.state.platform,
             ProjectSourceLanguage::VerilogA,
             &verilog_root
         ));
         assert!(source_document_is_editable(
-            &app,
+            &app.state.model,
+            &app.state.code.code_workspace,
+            &app.state.platform,
             ProjectSourceLanguage::RSpiceAutomation,
             &automation_root
         ));
         assert!(!source_document_is_editable(
-            &app,
+            &app.state.model,
+            &app.state.code.code_workspace,
+            &app.state.platform,
             ProjectSourceLanguage::RSpiceAutomation,
             &lock
         ));
         assert!(!source_document_is_editable(
-            &app,
+            &app.state.model,
+            &app.state.code.code_workspace,
+            &app.state.platform,
             ProjectSourceLanguage::VerilogA,
             "missing/model.va"
         ));
         assert!(!source_document_is_editable(
-            &app,
+            &app.state.model,
+            &app.state.code.code_workspace,
+            &app.state.platform,
             ProjectSourceLanguage::RSpiceAutomation,
             "missing/automation.py"
         ));
@@ -1609,7 +1619,9 @@ mod tests {
                 },
             });
         assert!(!source_document_is_editable(
-            &app,
+            &app.state.model,
+            &app.state.code.code_workspace,
+            &app.state.platform,
             ProjectSourceLanguage::RSpiceAutomation,
             &automation_root
         ));
@@ -1621,12 +1633,16 @@ mod tests {
 
         app.state.close_project_session();
         assert!(!source_document_is_editable(
-            &app,
+            &app.state.model,
+            &app.state.code.code_workspace,
+            &app.state.platform,
             ProjectSourceLanguage::VerilogA,
             &verilog_root
         ));
         assert!(!source_document_is_editable(
-            &app,
+            &app.state.model,
+            &app.state.code.code_workspace,
+            &app.state.platform,
             ProjectSourceLanguage::RSpiceAutomation,
             &automation_root
         ));
@@ -1640,12 +1656,16 @@ mod tests {
             String::new(),
         );
         assert!(!source_document_is_editable(
-            &app,
+            &app.state.model,
+            &app.state.code.code_workspace,
+            &app.state.platform,
             ProjectSourceLanguage::VerilogA,
             &verilog_root
         ));
         assert!(!source_document_is_editable(
-            &app,
+            &app.state.model,
+            &app.state.code.code_workspace,
+            &app.state.platform,
             ProjectSourceLanguage::RSpiceAutomation,
             &automation_root
         ));
@@ -2180,7 +2200,9 @@ mod tests {
             )
             .unwrap();
         assert!(!source_document_is_editable(
-            &app,
+            &app.state.model,
+            &app.state.code.code_workspace,
+            &app.state.platform,
             ProjectSourceLanguage::RSpiceAutomation,
             "environment/runtime-policy.toml",
         ));
@@ -2207,7 +2229,9 @@ mod tests {
             )
             .unwrap();
         assert!(source_document_is_editable(
-            &app,
+            &app.state.model,
+            &app.state.code.code_workspace,
+            &app.state.platform,
             ProjectSourceLanguage::RSpiceAutomation,
             "data/user-owned.lock",
         ));
@@ -2341,12 +2365,16 @@ mod tests {
             Some(ProjectSourceRole::AutomationEnvironmentLock)
         );
         assert!(source_document_is_editable(
-            &app,
+            &app.state.model,
+            &app.state.code.code_workspace,
+            &app.state.platform,
             ProjectSourceLanguage::RSpiceAutomation,
             &old_lock,
         ));
         assert!(!source_document_is_editable(
-            &app,
+            &app.state.model,
+            &app.state.code.code_workspace,
+            &app.state.platform,
             ProjectSourceLanguage::RSpiceAutomation,
             "environment/next-runtime.data",
         ));
