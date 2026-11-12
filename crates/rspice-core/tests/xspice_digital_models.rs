@@ -5,12 +5,13 @@ use rspice_core::analysis::transient::{EventOnlyNetKind, EventTraceSurface};
 use rspice_core::engine::{Engine, TransientResult};
 use rspice_core::netlist::Netlist;
 use rspice_core::xspice::{
-    CodeModelRegistry, ParamType, PortConnection, XspiceInstance, clear_registered_data_files,
-    register_data_file,
+    CmResult, CodeModelRegistry, DigitalProcessRuntime, DigitalProcessRuntimeFactory,
+    DigitalProcessSpec, ParamType, PortConnection, XspiceInstance, clear_registered_data_files,
+    register_data_file, set_digital_process_runtime_factory,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 static DATA_FILE_REGISTRY_LOCK: Mutex<()> = Mutex::new(());
 
@@ -5270,6 +5271,155 @@ fn a_transient_operating_point_leaves_no_output_transition_pending() {
         assert!(
             (q - 0.073_167_162_6).abs() < 1e-6 && (qbar - 2.926_686_50).abs() < 1e-6,
             "t = {time:e}: V(Q_OUT) = {q}, V(QBAR_OUT) = {qbar}"
+        );
+    }
+}
+
+/// Every exchange a `d_process` peer saw: the signed time and the packed
+/// input bytes.
+type ProcessExchangeLog = Arc<Mutex<Vec<(f64, Vec<u8>)>>>;
+
+/// The toggle peer of the ngspice process protocol, in process: it answers
+/// every clocked exchange with a bit that flips on each call, as the C peer
+/// ngspice-46 ran against does, and logs the exchange.
+struct TogglePeer {
+    q: u8,
+    exchanges: ProcessExchangeLog,
+}
+
+impl DigitalProcessRuntime for TogglePeer {
+    fn exchange(
+        &mut self,
+        signed_time: f64,
+        input_bytes: &[u8],
+        output_bytes: &mut [u8],
+    ) -> CmResult<()> {
+        self.exchanges
+            .lock()
+            .expect("lock the exchange log")
+            .push((signed_time, input_bytes.to_vec()));
+        self.q ^= 1;
+        output_bytes.fill(0);
+        output_bytes[0] = self.q;
+        Ok(())
+    }
+}
+
+struct TogglePeerFactory {
+    exchanges: ProcessExchangeLog,
+}
+
+impl DigitalProcessRuntimeFactory for TogglePeerFactory {
+    fn start(&self, spec: &DigitalProcessSpec) -> CmResult<Box<dyn DigitalProcessRuntime>> {
+        assert_eq!((spec.input_count, spec.output_count), (1, 1));
+        Ok(Box::new(TogglePeer {
+            q: 0,
+            exchanges: Arc::clone(&self.exchanges),
+        }))
+    }
+}
+
+/// Puts back the process provider a test replaced.
+struct ProcessFactoryGuard(Option<Arc<dyn DigitalProcessRuntimeFactory>>);
+
+impl Drop for ProcessFactoryGuard {
+    fn drop(&mut self) {
+        set_digital_process_runtime_factory(self.0.take());
+    }
+}
+
+/// A clocked `d_process` through a transient, against ngspice-46 running the
+/// same deck with the C toggle peer: `d` matches at every event, though the
+/// stepper rejects steps around the clock edges, and the peer sees exactly
+/// one exchange per rising edge, so no rejected or rolled-back step replays
+/// one. The transient used to stop at the first edge with "I/O scratch is not
+/// initialized or is not uniquely owned".
+#[test]
+fn d_process_toggle_peer_matches_ngspice_across_rejected_steps() {
+    // ngspice-46 `eprint d`: unknown at the operating point, then a toggle
+    // one clk_delay after each rising edge of the 1 MHz clock.
+    const NGSPICE_D: [(f64, &str); 21] = [
+        (0.0, "Uz"),
+        (5.01e-7, "1s"),
+        (1.501e-6, "0s"),
+        (2.501e-6, "1s"),
+        (3.501e-6, "0s"),
+        (4.501e-6, "1s"),
+        (5.501e-6, "0s"),
+        (6.501e-6, "1s"),
+        (7.501e-6, "0s"),
+        (8.501e-6, "1s"),
+        (9.501e-6, "0s"),
+        (1.0501e-5, "1s"),
+        (1.1501e-5, "0s"),
+        (1.2501e-5, "1s"),
+        (1.3501e-5, "0s"),
+        (1.4501e-5, "1s"),
+        (1.5501e-5, "0s"),
+        (1.6501e-5, "1s"),
+        (1.7501e-5, "0s"),
+        (1.8501e-5, "1s"),
+        (1.9501e-5, "0s"),
+    ];
+
+    let exchanges = ProcessExchangeLog::default();
+    let _factory = ProcessFactoryGuard(set_digital_process_runtime_factory(Some(Arc::new(
+        TogglePeerFactory {
+            exchanges: Arc::clone(&exchanges),
+        },
+    ))));
+    let netlist = Netlist::parse(
+        "d_process toggle peer\n\
+         vc cntl 0 0.5\n\
+         aosc cntl dosc osc1\n\
+         .model osc1 d_osc(cntl_array=[0 1] freq_array=[1e6 1e6] duty_cycle=0.5 init_phase=0 \
+         rise_delay=1e-10 fall_delay=1e-10)\n\
+         aproc [dosc] dosc null [d] proc1\n\
+         .model proc1 d_process(process_file=\"toggle\" clk_delay=1e-9 reset_delay=1e-9)\n\
+         abr [d] [dd] dac1\n\
+         .model dac1 dac_bridge(out_low=0 out_high=1 t_rise=1n t_fall=1n)\n\
+         r1 dd out 1k\n\
+         c1 out 0 1p\n\
+         .tran 1n 20u 0 400n\n\
+         .end\n",
+    )
+    .expect("d_process deck parses");
+    let engine = Engine::default();
+    let result = engine
+        .run_tran(&netlist, 20.0e-6, 400.0e-9)
+        .expect("d_process transient runs to its stop time");
+
+    let quality = engine.convergence_quality();
+    assert!(
+        quality.timestep_reductions > 0,
+        "the deck must exercise a rejected step: {quality:?}"
+    );
+
+    let d = digital_tokens(&result, "d");
+    assert_eq!(
+        d.len(),
+        NGSPICE_D.len(),
+        "d events against ngspice-46: {d:?}"
+    );
+    for ((time, token), (ngspice_time, ngspice_token)) in d.iter().zip(NGSPICE_D) {
+        assert!(
+            (time - ngspice_time).abs() <= 1.0e-15 && token == ngspice_token,
+            "d = {token} at {time:e}, ngspice-46 has {ngspice_token} at {ngspice_time:e}: {d:?}"
+        );
+    }
+
+    let exchanges = exchanges.lock().expect("lock the exchange log");
+    assert_eq!(
+        exchanges.len(),
+        20,
+        "one exchange per rising edge: {exchanges:?}"
+    );
+    for (edge, (signed_time, input_bytes)) in exchanges.iter().enumerate() {
+        let edge_time = (edge as f64 + 0.5) * 1.0e-6;
+        assert!(
+            (signed_time - edge_time).abs() <= 1.0e-15 && input_bytes == &[1],
+            "exchange {edge} at {signed_time:e} with {input_bytes:?}, expected the clock high at \
+             {edge_time:e}"
         );
     }
 }

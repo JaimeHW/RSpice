@@ -11,11 +11,9 @@ use std::sync::{Arc, Mutex};
 #[derive(Debug, Default)]
 pub struct DigitalProcess;
 
-type DigitalProcessRuntimeResource = Mutex<Box<dyn DigitalProcessRuntime>>;
-type DigitalProcessIoScratchResource = DigitalProcessIoScratch;
+type DigitalProcessChannelResource = Mutex<DigitalProcessChannel>;
 
-const RESOURCE_RUNTIME: &str = "d_process.runtime";
-const RESOURCE_IO_SCRATCH: &str = "d_process.io_scratch";
+const RESOURCE_CHANNEL: &str = "d_process.channel";
 const STATE_PREV_CLK: usize = 0;
 const STATE_PREV_RESET: usize = 1;
 const STATE_RNG: usize = 2;
@@ -41,36 +39,30 @@ fn d_process_delay(ctx: &CmContext, name: &str, default: f64) -> CmResult<f64> {
     Ok(value)
 }
 
-#[derive(Default)]
-struct DigitalProcessIoScratch {
+/// One instance's connection to its external process: the runtime and the
+/// packet buffers its exchanges reuse.
+///
+/// The buffers sit behind the runtime's lock, not in the model context as a
+/// resource of their own. The engine keeps a copy of every context it may
+/// have to undo, in the acceptance rollback image or taken just before the
+/// model call, and every copy shares the context's resources; a buffer kept
+/// there is never uniquely owned while a transient runs and cannot be
+/// borrowed mutably. The lock already serializes the exchanges, and nothing
+/// in the buffers survives from one exchange to the next, so the copies that
+/// share this connection need no buffers of their own.
+struct DigitalProcessChannel {
+    runtime: Box<dyn DigitalProcessRuntime>,
     input_bytes: Vec<u8>,
     output_bytes: Vec<u8>,
 }
 
-fn with_io_scratch<R>(
-    ctx: &mut CmContext,
-    f: impl FnOnce(&mut CmContext, &mut DigitalProcessIoScratch) -> CmResult<R>,
-) -> CmResult<R> {
-    let mut scratch = {
-        let scratch = ctx
-            .resource_mut::<DigitalProcessIoScratchResource>(RESOURCE_IO_SCRATCH)
-            .ok_or_else(|| {
-                d_process_error("I/O scratch is not initialized or is not uniquely owned")
-            })?;
-        std::mem::take(scratch)
-    };
-    let result = f(ctx, &mut scratch);
-    let restore = ctx
-        .resource_mut::<DigitalProcessIoScratchResource>(RESOURCE_IO_SCRATCH)
-        .ok_or_else(|| d_process_error("I/O scratch is not initialized or is not uniquely owned"))
-        .map(|slot| {
-            *slot = scratch;
-        });
-
-    match (result, restore) {
-        (Ok(value), Ok(())) => Ok(value),
-        (Err(err), Ok(())) => Err(err),
-        (_, Err(err)) => Err(err),
+impl DigitalProcessChannel {
+    fn new(runtime: Box<dyn DigitalProcessRuntime>) -> Self {
+        Self {
+            runtime,
+            input_bytes: Vec::new(),
+            output_bytes: Vec::new(),
+        }
     }
 }
 
@@ -262,12 +254,9 @@ impl CodeModel for DigitalProcess {
             output_count: output_width,
         };
         let runtime = start_digital_process_runtime(&spec)?;
-        let runtime: Arc<DigitalProcessRuntimeResource> = Arc::new(Mutex::new(runtime));
-        ctx.set_resource(RESOURCE_RUNTIME, runtime);
-        ctx.set_resource(
-            RESOURCE_IO_SCRATCH,
-            Arc::new(DigitalProcessIoScratch::default()),
-        );
+        let channel: Arc<DigitalProcessChannelResource> =
+            Arc::new(Mutex::new(DigitalProcessChannel::new(runtime)));
+        ctx.set_resource(RESOURCE_CHANNEL, channel);
         set_unknown_outputs(ctx, output_width)?;
         Ok(())
     }
@@ -305,49 +294,43 @@ impl CodeModel for DigitalProcess {
         let prev_clk_code = ctx.int_state(STATE_PREV_CLK);
 
         if prev_clk_code != STATE_ONE && clk_code == STATE_ONE {
-            with_io_scratch(ctx, |ctx, scratch| {
-                pack_input_bits(ctx, input_width, &mut scratch.input_bytes)?;
-                resize_zeroed(&mut scratch.output_bytes, packed_byte_len(output_width))?;
-                let signed_time = if reset_code == STATE_ONE {
-                    -ctx.time
-                } else {
-                    ctx.time
-                };
+            let channel = ctx
+                .resource::<DigitalProcessChannelResource>(RESOURCE_CHANNEL)
+                .ok_or_else(|| d_process_error("runtime is not initialized"))?;
+            let mut channel = channel
+                .lock()
+                .map_err(|_| d_process_error("runtime lock is poisoned"))?;
+            let DigitalProcessChannel {
+                runtime,
+                input_bytes,
+                output_bytes,
+            } = &mut *channel;
+            pack_input_bits(ctx, input_width, input_bytes)?;
+            resize_zeroed(output_bytes, packed_byte_len(output_width))?;
+            let signed_time = if reset_code == STATE_ONE {
+                -ctx.time
+            } else {
+                ctx.time
+            };
+            if let Err(err) = runtime.exchange(signed_time, input_bytes, output_bytes) {
+                log::warn!(
+                    "d_process external exchange failed at {signed_time:.16e}; applying the returned output buffer like ngspice: {err}"
+                );
+            }
 
-                {
-                    let runtime = ctx
-                        .resource::<DigitalProcessRuntimeResource>(RESOURCE_RUNTIME)
-                        .ok_or_else(|| d_process_error("runtime is not initialized"))?;
-                    let mut runtime = runtime
-                        .lock()
-                        .map_err(|_| d_process_error("runtime lock is poisoned"))?;
-                    let DigitalProcessIoScratch {
-                        input_bytes,
-                        output_bytes,
-                    } = scratch;
-                    if let Err(err) = runtime.exchange(signed_time, input_bytes, output_bytes) {
-                        log::warn!(
-                            "d_process external exchange failed at {signed_time:.16e}; applying the returned output buffer like ngspice: {err}"
-                        );
-                    }
+            let clk_delay = d_process_delay(ctx, "clk_delay", 1.0e-9)?;
+            for index in 0..output_width {
+                let new_code = output_code(output_bytes, index);
+                if new_code != ctx.int_state(STATE_DOUT_START + index) {
+                    ctx.set_output_digital_vector_element(
+                        "out",
+                        index,
+                        output_value_from_code(new_code),
+                        clk_delay,
+                    );
+                    ctx.set_int_state(STATE_DOUT_START + index, new_code);
                 }
-
-                let clk_delay = d_process_delay(ctx, "clk_delay", 1.0e-9)?;
-                for index in 0..output_width {
-                    let new_code = output_code(&scratch.output_bytes, index);
-                    if new_code != ctx.int_state(STATE_DOUT_START + index) {
-                        ctx.set_output_digital_vector_element(
-                            "out",
-                            index,
-                            output_value_from_code(new_code),
-                            clk_delay,
-                        );
-                        ctx.set_int_state(STATE_DOUT_START + index, new_code);
-                    }
-                }
-
-                Ok(())
-            })?;
+            }
         }
 
         ctx.set_int_state(STATE_PREV_CLK, clk_code);
@@ -390,6 +373,57 @@ mod tests {
                 "synthetic process error".to_string(),
             ))
         }
+    }
+
+    fn install_channel(ctx: &mut CmContext, runtime: Box<dyn DigitalProcessRuntime>) {
+        let channel: Arc<DigitalProcessChannelResource> =
+            Arc::new(Mutex::new(DigitalProcessChannel::new(runtime)));
+        ctx.set_resource(RESOURCE_CHANNEL, channel);
+    }
+
+    /// A clocked context one edge away from an exchange, as the transient
+    /// holds it at an accepted point.
+    fn rising_edge_context(runtime: Box<dyn DigitalProcessRuntime>) -> CmContext {
+        let mut ctx = CmContext::new();
+        ctx.analysis = AnalysisType::Transient;
+        ctx.time = 1.0e-9;
+        ctx.set_evaluation_phase(EvaluationPhase::AcceptedStep);
+        ctx.set_port_width("in", 0);
+        ctx.set_port_width("out", 1);
+        ctx.allocate_int_states(STATE_DOUT_START + 1);
+        ctx.set_int_state(STATE_PREV_CLK, STATE_ZERO);
+        ctx.set_int_state(STATE_PREV_RESET, STATE_ZERO);
+        ctx.set_int_state(STATE_RNG, D_PROCESS_RNG_SEED);
+        ctx.set_int_state(STATE_DOUT_START, STATE_UNKNOWN);
+        ctx.set_input_digital("clk", DigitalValue::one());
+        ctx.set_input_digital("reset", DigitalValue::zero());
+        install_channel(&mut ctx, runtime);
+        ctx
+    }
+
+    /// The engine keeps a copy of every context it may have to undo, and
+    /// every copy shares the context's resources. An exchange must go through
+    /// while such a copy is alive; it used to stop the transient with "I/O
+    /// scratch is not initialized or is not uniquely owned".
+    #[test]
+    fn d_process_exchanges_while_a_rollback_image_shares_its_context() {
+        let mut ctx = rising_edge_context(Box::new(StaticProcessRuntime));
+        let rollback_image = ctx.clone();
+
+        DigitalProcess
+            .evaluate(&mut ctx)
+            .expect("d_process exchanges while a copy of its context is alive");
+
+        assert_eq!(ctx.int_state(STATE_DOUT_START), STATE_ONE);
+        let events = ctx.take_pending_events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].values, vec![DigitalValue::one()]);
+        assert_eq!(events[0].delay, 1.0e-9);
+        assert_eq!(
+            rollback_image.int_state(STATE_DOUT_START),
+            STATE_UNKNOWN,
+            "the rollback image keeps the state from before the edge"
+        );
     }
 
     #[test]
@@ -459,13 +493,7 @@ mod tests {
         ctx.set_param("clk_delay", f64::NAN);
         ctx.set_input_digital("clk", DigitalValue::one());
         ctx.set_input_digital("reset", DigitalValue::zero());
-        let runtime: Arc<DigitalProcessRuntimeResource> =
-            Arc::new(Mutex::new(Box::new(StaticProcessRuntime)));
-        ctx.set_resource(RESOURCE_RUNTIME, runtime);
-        ctx.set_resource(
-            RESOURCE_IO_SCRATCH,
-            Arc::new(DigitalProcessIoScratch::default()),
-        );
+        install_channel(&mut ctx, Box::new(StaticProcessRuntime));
 
         let err = DigitalProcess
             .evaluate(&mut ctx)
@@ -603,13 +631,7 @@ mod tests {
         ctx.set_int_state(STATE_DOUT_START, STATE_UNKNOWN);
         ctx.set_input_digital("clk", DigitalValue::one());
         ctx.set_input_digital("reset", DigitalValue::zero());
-        let runtime: Arc<DigitalProcessRuntimeResource> =
-            Arc::new(Mutex::new(Box::new(FailingProcessRuntime)));
-        ctx.set_resource(RESOURCE_RUNTIME, runtime);
-        ctx.set_resource(
-            RESOURCE_IO_SCRATCH,
-            Arc::new(DigitalProcessIoScratch::default()),
-        );
+        install_channel(&mut ctx, Box::new(FailingProcessRuntime));
 
         DigitalProcess
             .evaluate(&mut ctx)
