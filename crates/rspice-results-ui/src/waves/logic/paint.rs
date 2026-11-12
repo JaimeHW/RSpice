@@ -2,10 +2,11 @@
 //!
 //! High and low are two levels inside the lane's row with vertical edges at
 //! the exact instants. An unknown (`x`) stretch is a band filled between the
-//! levels in the kit's warning token, and high impedance (`z`) a dashed line
-//! at mid level. A bus word is a hexagonal segment labelled in the lane's
-//! radix, and a word with any unknown or high-impedance bit takes the
-//! unknown band's fill. Activity blocks are filled between the levels in the
+//! levels in the kit's error token, red as the reference viewers draw it,
+//! and high impedance (`z`) a dashed line at mid level in the warning token,
+//! a colour of its own. A bus word is a hexagonal segment labelled in the
+//! lane's radix, elided when the label is wider than the segment, and a word
+//! with any unknown or high-impedance bit takes the unknown band's fill. Activity blocks are filled between the levels in the
 //! lane's own colour. No colour is introduced here: the lane colour is the
 //! host's trace colour, and everything else is a kit token.
 
@@ -36,8 +37,10 @@ const Z_GAP: f32 = 2.0;
 pub struct LaneStyle {
     /// The lane's trace colour.
     pub color: Color32,
-    /// Unknown (`x`) stretches and unresolved bus words: the warning token.
+    /// Unknown (`x`) stretches and unresolved bus words: the error token.
     pub unknown: Color32,
+    /// High-impedance (`z`) stretches: the warning token.
+    pub high_impedance: Color32,
     /// Bus word labels.
     pub text: Color32,
     pub font: FontId,
@@ -48,7 +51,8 @@ impl LaneStyle {
     pub fn new(tokens: &Tokens, color: Color32) -> Self {
         Self {
             color,
-            unknown: tokens.color.warn,
+            unknown: tokens.color.err,
+            high_impedance: tokens.color.warn,
             text: tokens.color.text,
             font: theme::mono(tokens::FS_MICRO, FontWeight::Regular),
             width: 1.0,
@@ -114,7 +118,7 @@ fn level_run(
         LogicLevel::HighImpedance => {
             painter.extend(Shape::dashed_line(
                 &[pos2(x0, levels.mid()), pos2(x1, levels.mid())],
-                stroke,
+                Stroke::new(style.width, style.high_impedance),
                 Z_DASH,
                 Z_GAP,
             ));
@@ -168,10 +172,33 @@ fn segment_outline(x0: f32, x1: f32, levels: LaneLevels, map: &TimeMapping) -> V
     ]
 }
 
+/// A word too wide for its segment, cut to the characters that fit before
+/// an ellipsis; `None` when not even one does. The label font is monospaced,
+/// so one glyph's advance is the whole word's over its length.
+fn elided_word(
+    painter: &Painter,
+    word: &str,
+    full_width: f32,
+    width: f32,
+    style: &LaneStyle,
+) -> Option<std::sync::Arc<egui::Galley>> {
+    let chars = word.chars().count().max(1);
+    let advance = (full_width / chars as f32).max(1.0);
+    let fit = (width / advance).floor() as usize;
+    (fit >= 2).then(|| {
+        painter.layout_no_wrap(
+            crate::waves::header::elide(word, fit),
+            style.font.clone(),
+            style.text,
+        )
+    })
+}
+
 /// Paint a bus lane into `rect`, its words spelled in `radix`.
 ///
-/// A label is drawn only where it fits whole between its segment's pointed
-/// ends; a narrower segment shows its outline alone.
+/// A label is drawn whole where it fits between its segment's pointed ends,
+/// elided where only part of it does; a narrower segment shows its outline
+/// alone.
 pub fn paint_bus_lane(
     painter: &Painter,
     rect: Rect,
@@ -212,7 +239,12 @@ pub fn paint_bus_lane(
                         style.font.clone(),
                         style.text,
                     );
-                    if galley.size().x <= width {
+                    let galley = if galley.size().x <= width {
+                        Some(galley)
+                    } else {
+                        elided_word(painter, word.text(), galley.size().x, width, style)
+                    };
+                    if let Some(galley) = galley {
                         let centre = pos2((x0 + x1) * 0.5, levels.mid());
                         painter.galley(centre - galley.size() * 0.5, galley, style.text);
                     }

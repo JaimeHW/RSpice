@@ -114,12 +114,19 @@ pub struct LaneStackInput<'a> {
     /// Row indices the reader selected. The first is the lane the cursor
     /// steps along.
     pub selected: &'a [usize],
-    /// The strip's time cursor, shared with its panes.
+    /// The strip's time cursor A, shared with its panes. Each row's gutter
+    /// reads its value here.
     pub cursor: Option<f64>,
+    /// The strip's cursor B. The cursor placed last is the one an edge step
+    /// moves: B once it is placed, A before.
+    pub cursor_b: Option<f64>,
     /// Significant digits a real value is read out to.
     pub significant_digits: usize,
     /// Assertion violations, each shaded on its operand's lane.
     pub violations: &'a [AssertionSpan],
+    /// Whether the host can open a lane's HDL declaration and drivers. When
+    /// it cannot, those probes are not offered at all.
+    pub source_probes: bool,
 }
 
 /// What the reader asked of the lane stack this frame.
@@ -127,8 +134,9 @@ pub struct LaneStackInput<'a> {
 pub struct LaneStackResponse {
     /// Select a row; `true` adds it to the selection instead.
     pub select: Option<(usize, bool)>,
-    /// Move the time cursor to this exact event instant: the selected lane's
-    /// previous or next edge (Left and Right while the lanes have focus).
+    /// Move the stepping cursor (B once placed, A before) to this exact
+    /// event instant: the selected lane's previous or next edge (Left and
+    /// Right while the lanes have focus).
     pub cursor_to: Option<f64>,
     /// Expand or collapse a bus row.
     pub toggle_expanded: Option<usize>,
@@ -138,6 +146,8 @@ pub struct LaneStackResponse {
     pub group: Option<Vec<usize>>,
     /// Ungroup a user bus row.
     pub ungroup: Option<usize>,
+    /// Move a row one place down (`true`) or up (`false`).
+    pub move_row: Option<(usize, bool)>,
     /// A cross-probe for the host to route.
     pub probe: Option<LaneProbe>,
 }
@@ -380,14 +390,16 @@ pub fn show_lanes(ui: &mut Ui, input: &LaneStackInput<'_>) -> LaneStackResponse 
         }
         top += row.height();
     }
-    if let Some(t) = input.cursor
-        && (input.x_range.0..=input.x_range.1).contains(&t)
-    {
-        lane_painter.vline(
-            map.x(t),
-            rect.y_range(),
-            egui::Stroke::new(1.0, tokens.color.accent),
-        );
+    // The cursors run through the lanes in the colours the panes draw them.
+    for (cursor, color) in [
+        (input.cursor, tokens.color.accent),
+        (input.cursor_b, tokens.color.traces[4]),
+    ] {
+        if let Some(t) = cursor
+            && (input.x_range.0..=input.x_range.1).contains(&t)
+        {
+            lane_painter.vline(map.x(t), rect.y_range(), egui::Stroke::new(1.0, color));
+        }
     }
 
     let pointer_row = response
@@ -420,6 +432,7 @@ pub fn show_lanes(ui: &mut Ui, input: &LaneStackInput<'_>) -> LaneStackResponse 
     // A double click on a lane, at a transition or between them, asks who
     // drives it.
     if response.double_clicked()
+        && input.source_probes
         && let Some((pointer, (index, member))) = pointer_row
         && pointer.x >= map.left
     {
@@ -452,7 +465,7 @@ pub fn show_lanes(ui: &mut Ui, input: &LaneStackInput<'_>) -> LaneStackResponse 
                 .and_then(|index| input.rows.get(*index))
                 .map(LaneRow::event_lane)
         {
-            let from = input.cursor.unwrap_or(match step {
+            let from = input.cursor_b.or(input.cursor).unwrap_or(match step {
                 EdgeStep::Previous => input.x_range.1,
                 EdgeStep::Next => input.x_range.0,
             });
@@ -501,7 +514,7 @@ fn lane_menu(
         return;
     };
     if let Some(signal) = lane_signal(row, member) {
-        let probes = [
+        let source = [
             (
                 "Go to declaration",
                 LaneProbe::GoToDeclaration {
@@ -514,8 +527,11 @@ fn lane_menu(
                     signal: signal.clone(),
                 },
             ),
-            ("Select net", LaneProbe::SelectNet { signal }),
         ];
+        let probes = source
+            .into_iter()
+            .filter(|_| input.source_probes)
+            .chain([("Select net", LaneProbe::SelectNet { signal })]);
         for (label, probe) in probes {
             if ui.button(label).clicked() {
                 output.probe = Some(probe);
@@ -550,11 +566,27 @@ fn lane_menu(
         .copied()
         .filter(|selected| matches!(input.rows.get(*selected), Some(LaneRow::Logic { .. })))
         .collect();
-    if logic.len() >= 2 && logic.contains(&index) {
+    let groups = logic.len() >= 2 && logic.contains(&index);
+    if groups {
         let mut ordered = logic;
         ordered.sort_unstable();
         if ui.button("Group as bus").clicked() {
             output.group = Some(ordered);
+            ui.close();
+        }
+    }
+    // The probes end in a separator; a bus's radixes or a grouping take one
+    // of their own before the moves.
+    if groups || matches!(row, LaneRow::Bus { .. }) {
+        ui.separator();
+    }
+    let last = input.rows.len().saturating_sub(1);
+    for (label, down, enabled) in [
+        ("Move up", false, index > 0),
+        ("Move down", true, index < last),
+    ] {
+        if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
+            output.move_row = Some((index, down));
             ui.close();
         }
     }

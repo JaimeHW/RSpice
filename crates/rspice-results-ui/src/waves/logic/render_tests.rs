@@ -27,6 +27,7 @@ struct Render {
     lane_color: Color32,
     step_color: Color32,
     unknown: Color32,
+    high_impedance: Color32,
     error: Color32,
     real: RealLane,
 }
@@ -132,8 +133,10 @@ fn render() -> Render {
             right_margin: RIGHT,
             selected: &[],
             cursor: Some(55.0 * NS),
+            cursor_b: None,
             significant_digits: 4,
             violations: &violations,
+            source_probes: true,
         };
         show_marker_strip(
             ui,
@@ -173,10 +176,10 @@ fn render() -> Render {
             response.axes,
             lane_color,
             step_color,
-            (tokens.color.warn, tokens.color.err),
+            (tokens.color.err, tokens.color.warn, tokens.color.err),
         ));
     });
-    let (lanes_top, map, plot_rect, axes, lane_color, step_color, (unknown, error)) =
+    let (lanes_top, map, plot_rect, axes, lane_color, step_color, (unknown, high_impedance, error)) =
         measured.expect("the pass ran");
     Render {
         canvas,
@@ -187,6 +190,7 @@ fn render() -> Render {
         lane_color,
         step_color,
         unknown,
+        high_impedance,
         error,
         real: w,
     }
@@ -303,7 +307,7 @@ fn lanes_and_the_value_pane_render_on_one_measured_time_axis() {
     }
 
     // r is unknown over [5 ns, 8 ns): the band fills between the levels in
-    // the warning token, and the same fill marks the bus's unknown word.
+    // the error token, and the same fill marks the bus's unknown word.
     let band = over(render.unknown.gamma_multiply(0.4), canvas.background());
     let r_levels = lane_levels(&render, 1);
     let band_x = map.x(6.5 * NS) as usize;
@@ -328,12 +332,12 @@ fn lanes_and_the_value_pane_render_on_one_measured_time_axis() {
     let clear = pixel(canvas, clear_x, bus_levels.mid() as usize);
     assert!(distance(clear, channels(canvas.background())) <= 2.0);
 
-    // z is high impedance until 50 ns: a dashed line at mid level, with
-    // nothing at either level.
+    // z is high impedance until 50 ns: a dashed line at mid level in the
+    // warning token, not the lane's colour, with nothing at either level.
     let z_levels = lane_levels(&render, 2);
     let (from, to) = (map.x(5.0 * NS) as usize, map.x(45.0 * NS) as usize);
     let dashes: Vec<f32> = (from..to)
-        .map(|x| line_ink(canvas, x, z_levels.mid(), render.lane_color))
+        .map(|x| line_ink(canvas, x, z_levels.mid(), render.high_impedance))
         .collect();
     assert!(dashes.iter().any(|ink| *ink > 0.6), "the z line has dashes");
     assert!(dashes.iter().any(|ink| *ink < 0.2), "the z line has gaps");

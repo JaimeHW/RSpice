@@ -354,8 +354,10 @@ fn lane_frame(
                 right_margin: 14.0,
                 selected: &[0],
                 cursor,
+                cursor_b: None,
                 significant_digits: 4,
                 violations: &[],
+                source_probes: true,
             },
         ));
     });
