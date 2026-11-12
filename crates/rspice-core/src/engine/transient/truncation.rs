@@ -3302,6 +3302,80 @@ impl Engine {
             && !circuit.has_any_veriloga_devices()
     }
 
+    /// Whether some code model instance reads the analog solution and drives
+    /// it, so that state the model integrates itself could sit between the
+    /// two where no device truncation sees it.
+    ///
+    /// ngspice bounds a code model's own integration in `MIFtrunc`, which
+    /// walks the states `cm_analog_integrate` registered; every model that
+    /// integrates (`int`, `s_xfer`, `d_dt`, `delay`, the inductor, capacitor,
+    /// `lcouple` and memristor) reads an analog input and drives an analog
+    /// output. The built-in models integrate in their own state vectors
+    /// instead, which no truncation walk reads, so a deck that has one is
+    /// held to the generic node-voltage estimator. A model on only one side
+    /// of the analog solution has no such path: a D/A bridge or a file
+    /// source drives an analog node from event values and time, with a
+    /// breakpoint at every corner of its output, and an A/D bridge or an
+    /// oscillator reads one into event state. Holding a deck to the generic
+    /// estimator for those cost a `dac_bridge` driving 1 kOhm and 1 pF four
+    /// times the steps of the same ramp from a PULSE source, where ngspice
+    /// takes 1.17 times.
+    pub(super) fn xspice_state_escapes_device_truncation(
+        circuit: &crate::circuit::CircuitData,
+    ) -> bool {
+        use crate::xspice::PortDirection;
+        circuit.xspice_instances.iter().any(|instance| {
+            let mut reads = false;
+            let mut drives = false;
+            for (index, port) in instance.ports().iter().enumerate() {
+                if instance
+                    .connection_at(index)
+                    .is_none_or(|connection| connection.is_event_or_null_connection())
+                {
+                    continue;
+                }
+                match port.direction {
+                    PortDirection::In => reads = true,
+                    PortDirection::Out => drives = true,
+                    PortDirection::InOut => {
+                        reads = true;
+                        drives = true;
+                    }
+                }
+            }
+            reads && drives
+        })
+    }
+
+    /// Whether a mixed module keeps a deck with code models on the generic
+    /// node-voltage estimator.
+    ///
+    /// Any code model held its deck there before one-sided models were left
+    /// to the device truncation, and a deck that also has a mixed module stays
+    /// there: the module's A/D crossings are dated by a root chase on the
+    /// voltage of the node it reads, which the device truncation does not
+    /// bound. C4's comparator drives that node as `vdd/2 * (1 + tanh(50 *
+    /// V(o1)))` of an integrating node, so nothing bounded a step across the
+    /// threshold. Left to the device truncation, C4's chase took 65 roots
+    /// converging on its crossing from one side and ran out of refinements,
+    /// and C6's PWM edges moved its output 5.13 mV from the ngspice run of the
+    /// same switching circuit, past the 5 mV the corpus allows. A code model
+    /// dates no crossing: it samples the analog solution at accepted points,
+    /// as in ngspice. A mixed module without code models is untouched.
+    pub(super) fn mixed_crossings_hold_node_voltage_estimator(
+        circuit: &crate::circuit::CircuitData,
+    ) -> bool {
+        #[cfg(feature = "veriloga")]
+        {
+            circuit.has_xspice_devices() && circuit.has_mixed_signal_hosts()
+        }
+        #[cfg(not(feature = "veriloga"))]
+        {
+            let _ = circuit;
+            false
+        }
+    }
+
     #[inline]
     #[allow(clippy::too_many_arguments)]
     pub(super) fn ngspice_device_truncation_covers_transient_lte(
@@ -3317,8 +3391,13 @@ impl Engine {
     ) -> bool {
         // Magnetically coupled and nonlinear inductors have no `L*i` flux walk
         // (see `inductor_ngspice_truncation_limit`), so those decks stay on
-        // the generic estimator.
-        if circuit.has_xspice_devices()
+        // the generic estimator. So does a code model that can carry the
+        // analog solution through state of its own (see
+        // `xspice_state_escapes_device_truncation`), and a mixed module that
+        // dates its crossings (see
+        // `mixed_crossings_hold_node_voltage_estimator`).
+        if Self::xspice_state_escapes_device_truncation(circuit)
+            || Self::mixed_crossings_hold_node_voltage_estimator(circuit)
             || !circuit.coupled_inductor_pairs.is_empty()
             || !circuit.multi_winding_transformers.is_empty()
             || !circuit.jiles_atherton_inductors.is_empty()

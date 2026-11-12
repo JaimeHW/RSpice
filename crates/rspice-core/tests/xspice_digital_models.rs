@@ -5423,3 +5423,104 @@ fn d_process_toggle_peer_matches_ngspice_across_rejected_steps() {
         );
     }
 }
+
+/// v(out) of 1 kOhm into 1 pF driven through a 1 ns ramp from the most recent
+/// 500 ns edge, rising on odd edges. Each edge starts from rest: 500 ns is
+/// five hundred time constants.
+fn rc_after_ramp_edges(time: f64) -> f64 {
+    const TAU: f64 = 1.0e-9;
+    const RAMP: f64 = 1.0e-9;
+    const HALF_PERIOD: f64 = 500.0e-9;
+    let edge = (time / HALF_PERIOD).floor();
+    if edge < 1.0 {
+        return 0.0;
+    }
+    let since = time - edge * HALF_PERIOD;
+    let rise = if since <= RAMP {
+        (since - TAU * (1.0 - (-since / TAU).exp())) / RAMP
+    } else {
+        1.0 - TAU / RAMP * ((RAMP / TAU).exp() - 1.0) * (-since / TAU).exp()
+    };
+    if edge as u64 % 2 == 1 {
+        rise
+    } else {
+        1.0 - rise
+    }
+}
+
+/// Accepted points, and the worst departure of v(out) from
+/// [`rc_after_ramp_edges`], of a 20 us run of `drive` into 1 kOhm and 1 pF.
+fn ramp_edges_into_rc(prefix: &str, stimulus: &str, drive: &str) -> (usize, f64) {
+    let result = run_temp_deck(
+        prefix,
+        stimulus,
+        &format!("* {prefix}\n{drive}r1 dd out 1k\nc1 out 0 1p\n.end\n"),
+        20.0e-6,
+        // ngspice's default maximum step, a fiftieth of the span.
+        0.4e-6,
+    );
+    let out = transient_node_series(&result, "out");
+    let worst = result
+        .time
+        .iter()
+        .zip(out)
+        .map(|(&time, &value)| (value - rc_after_ramp_edges(time)).abs())
+        .fold(0.0, f64::max);
+    (result.time.len(), worst)
+}
+
+/// A code model's D/A edge into a capacitor is stepped like the same edge
+/// from a PULSE source.
+///
+/// Any code model used to hold the whole deck to the generic node-voltage
+/// estimator, which the charge truncation of the capacitor makes redundant
+/// here: an edge out of `dac_bridge` restarted at a few picoseconds and
+/// regrew about 1.1 times a step for ten time constants. Over 2 ms the
+/// `d_osc` and `d_source` decks took 389,896 and 375,896 points where the
+/// PULSE twin takes 89,992; ngspice-46 takes 1.17 times its own twin
+/// (102,120 and 102,388 against 87,192). A bridge drives the node from event
+/// values and time alone, so the capacitor's truncation is the bound, as in
+/// ngspice, and the decks now take 105,992 and 89,992.
+#[test]
+fn a_code_model_edge_into_a_capacitor_takes_the_steps_of_the_same_pulse_edge() {
+    let (twin_points, twin_worst) = ramp_edges_into_rc(
+        "rspice-ramp-edge-twin",
+        "",
+        "vd dd 0 pulse(0 1 500n 1n 1n 499n 1u)\n",
+    );
+    let stimulus: String = (0..=40)
+        .map(|edge| format!("{:e} {}s\n", edge as f64 * 500.0e-9, edge % 2))
+        .collect();
+    let bridge = "abr [d] [dd] dac1\n\
+                  .model dac1 dac_bridge(out_low=0 out_high=1 t_rise=1n t_fall=1n)\n";
+    for (name, stimulus, driver) in [
+        (
+            "d_source",
+            stimulus.as_str(),
+            "asrc [d] src1\n.model src1 d_source(input_file=\"stim.stim\")\n",
+        ),
+        (
+            "d_osc",
+            "",
+            "vc cntl 0 0.5\naosc cntl d osc1\n\
+             .model osc1 d_osc(cntl_array=[0 1] freq_array=[1e6 1e6] duty_cycle=0.5 \
+             init_phase=0 rise_delay=1e-10 fall_delay=1e-10)\n",
+        ),
+    ] {
+        let (points, worst) = ramp_edges_into_rc(
+            &format!("rspice-ramp-edge-{name}"),
+            stimulus,
+            &format!("{driver}{bridge}"),
+        );
+        assert!(
+            points as f64 <= 1.2 * twin_points as f64,
+            "{name} into 1 pF took {points} points, more than 1.2 times the {twin_points} \
+             of the same edges from a PULSE source"
+        );
+        assert!(
+            worst <= twin_worst + 1.0e-3,
+            "{name} into 1 pF departs from the closed form by {worst:e} V, the PULSE twin by \
+             {twin_worst:e} V"
+        );
+    }
+}
