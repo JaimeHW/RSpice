@@ -22,11 +22,9 @@ pub struct CaseResult {
     pub schema: String,
     pub route: String,
     pub rspice_rev: String,
-    /// `simulation` (headless preparation + runner), `engine` (the A1
-    /// fallback), or `none` when the case could not be dispatched at all.
+    /// `simulation` (headless preparation + runner), or `none` when the case
+    /// could not be dispatched at all.
     pub dispatch: String,
-    #[serde(default)]
-    pub dispatch_reason: Option<String>,
     /// `completed` or `error`. A crash leaves no file.
     pub outcome: String,
     #[serde(default)]
@@ -45,7 +43,6 @@ impl CaseResult {
             route: route.to_owned(),
             rspice_rev: rspice_rev(),
             dispatch: dispatch.to_owned(),
-            dispatch_reason: None,
             outcome: "completed".to_owned(),
             error: None,
             results: Vec::new(),

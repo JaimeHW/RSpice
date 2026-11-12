@@ -116,8 +116,8 @@ fn design_ripple(l: f64) -> f64 {
     rise_rate * ticks * TICK + 0.5 * VIN * TICK / l
 }
 
-/// The run's inductance: a Monte Carlo trial's drawn `lv` (recorded by the
-/// engine fallback as `param:lv`), else the decks' nominal 22 µH.
+/// The run's inductance: a Monte Carlo trial's drawn `lv` (recorded with the
+/// trial as `param:lv`), else the decks' nominal 22 µH.
 fn inductance(context: &Context<'_>) -> f64 {
     context
         .rspice

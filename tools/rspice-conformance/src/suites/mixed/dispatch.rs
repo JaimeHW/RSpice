@@ -23,11 +23,14 @@
 //! file-backed HDL directives as unsealed external dependencies, so the sealed
 //! runtimes travel beside the deck in the run input.
 //!
-//! # The engine fallback (amendment A1)
+//! # Families of transients
 //!
-//! Three analysis kinds the headless contract cannot express run through the
-//! `rspice_core::Engine` entries directly, and the case records
-//! `dispatch = "engine"` with the reason ([`ENGINE_FALLBACKS`]).
+//! A Monte Carlo transient, a `.STEP` transient and a checkpoint resume run on
+//! the same route as one task per member: a transient per trial or point,
+//! each naming its member of the deck's own `.MC` or `.STEP` card, and an
+//! uninterrupted transient with a checkpoint schedule plus one resume per
+//! checkpoint, each bound to the checkpoint that transient captured. The
+//! members' results are gathered into the case's one family observation.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
@@ -57,22 +60,6 @@ use super::design::{Design, analysis_kind, at_transient_state, deck_cards};
 use super::measure::parse_expression;
 use crate::suites::deadline::DeadlineAbort;
 
-/// Analysis kinds that run through the engine entry, and why.
-pub const ENGINE_FALLBACKS: [(&str, &str); 3] = [
-    (
-        "mc-tran",
-        "a transient per Monte Carlo trial: the headless MonteCarlo task runs a DC operating point per trial (or a study base reduced to named .meas scalars), so per-trial waveforms and events are not expressible",
-    ),
-    (
-        "step-tran",
-        "a transient per .step point: the headless Parametric task reduces each point to one terminal value per signal, so per-point waveforms and events are not expressible",
-    ),
-    (
-        "ckpt",
-        "an uninterrupted transient and a resume from a checkpoint captured inside it, in one case: the headless graph has no task that resumes from a checkpoint another task of the same run produced",
-    ),
-];
-
 /// One case request.
 pub struct CaseRequest<'a> {
     pub design: &'a Design,
@@ -91,18 +78,7 @@ pub fn run_case(request: &CaseRequest<'_>) -> CaseResult {
     let kind = analysis_kind(request.analysis).unwrap_or("unknown");
     let mut result = match compose(request) {
         Err(error) => CaseResult::new(route.token(), "none").failed(harness_error(error)),
-        Ok((origin, source)) => {
-            if let Some((_, reason)) = ENGINE_FALLBACKS
-                .iter()
-                .find(|(fallback, _)| *fallback == kind)
-            {
-                let mut result = engine_case(request, kind, &origin, &source);
-                result.dispatch_reason = Some((*reason).to_owned());
-                result
-            } else {
-                headless_case(request, &origin, &source)
-            }
-        }
+        Ok((origin, source)) => headless_case(request, kind, &origin, &source),
     };
     let (signals, nets) = retained_outputs(request.design, request.variant, request.analysis);
     for observation in &mut result.results {
@@ -261,7 +237,7 @@ fn hdl_refusal(refusal: &DeckHdlRefusal) -> ErrorRecord {
     }
 }
 
-fn headless_case(request: &CaseRequest<'_>, origin: &Path, source: &str) -> CaseResult {
+fn headless_case(request: &CaseRequest<'_>, kind: &str, origin: &Path, source: &str) -> CaseResult {
     let route = Route::compiled();
     let mut result = CaseResult::new(route.token(), "simulation");
     let cards: Vec<String> = deck_cards(source)
@@ -274,8 +250,15 @@ fn headless_case(request: &CaseRequest<'_>, origin: &Path, source: &str) -> Case
             Ok(sealed) => (sealed.source, sealed.runtimes),
             Err(refusal) => return result.failed(hdl_refusal(&refusal)),
         };
-    let tasks = match headless_tasks(&circuit, origin, &cards, &runtimes) {
-        Ok(tasks) => tasks,
+    let lowered = match kind {
+        "mc-tran" | "step-tran" | "ckpt" => {
+            family_tasks(request, kind, &circuit, origin, source, &cards, &runtimes)
+        }
+        _ => headless_tasks(&circuit, origin, &cards, &runtimes)
+            .map(|tasks| (tasks, Family::default())),
+    };
+    let (tasks, family) = match lowered {
+        Ok(lowered) => lowered,
         Err(error) => return result.failed(*error),
     };
     let labels: HashMap<AnalysisInstanceId, String> = tasks
@@ -299,60 +282,130 @@ fn headless_case(request: &CaseRequest<'_>, origin: &Path, source: &str) -> Case
         Ok(dispatch) => dispatch,
         Err(error) => return result.failed(harness_error(error)),
     };
+    // A family's members are independent tasks and run side by side, as
+    // the engine's own Monte Carlo runs its trials; a dependent task starts
+    // once every producer it binds has finished. Results keep task order.
+    let concurrency = if family.kind.is_empty() {
+        1
+    } else {
+        std::thread::available_parallelism().map_or(1, usize::from)
+    };
     let mut pending = dispatch.into_tasks();
+    let order: HashMap<AnalysisInstanceId, usize> = pending
+        .iter()
+        .enumerate()
+        .map(|(index, task)| (task.instance_id(), index))
+        .collect();
+    let mut observations: Vec<Option<Observation>> = vec![None; order.len()];
+    let mut finished: std::collections::HashSet<AnalysisInstanceId> =
+        std::collections::HashSet::new();
     let mut artifacts = HashMap::new();
-    let mut runner = rspice_simulation::runner::SimulationRunner::new();
-    while let Some(task) = pending.pop_front() {
-        let instance = task.instance_id();
-        let label = labels.get(&instance).cloned().unwrap_or_default();
-        let resolved = match task.resolve_dependency_artifacts(&artifacts) {
-            Ok(resolved) => resolved,
-            Err(error) => return result.failed(harness_error(error.to_string())),
-        };
-        let producer = match resolved.artifact_producer() {
-            Ok(producer) => producer,
-            Err(error) => return result.failed(harness_error(error.to_string())),
-        };
-        if let Err(error) = runner.start_prepared(resolved, false) {
-            return result.failed(simulation_error(&error));
+    let mut active: Vec<ActiveTask> = Vec::new();
+    let fail = |active: &mut Vec<ActiveTask>, result: CaseResult, error: ErrorRecord| {
+        for task in active.iter_mut() {
+            task.runner.abort();
         }
-        let outcome = loop {
-            if abort.is_aborted() {
-                runner.abort();
+        result.failed(error)
+    };
+    loop {
+        while active.len() < concurrency {
+            let Some(position) = pending.iter().position(|task| {
+                task.dependency_bindings()
+                    .iter()
+                    .all(|binding| finished.contains(&binding.producer_instance_id()))
+            }) else {
+                break;
+            };
+            let task = pending.remove(position).expect("a ready task");
+            let instance = task.instance_id();
+            let label = labels.get(&instance).cloned().unwrap_or_default();
+            let resolved = match task.resolve_dependency_artifacts(&artifacts) {
+                Ok(resolved) => resolved,
+                Err(error) => {
+                    return fail(&mut active, result, harness_error(error.to_string()));
+                }
+            };
+            let producer = match resolved.artifact_producer() {
+                Ok(producer) => producer,
+                Err(error) => {
+                    return fail(&mut active, result, harness_error(error.to_string()));
+                }
+            };
+            let mut runner = rspice_simulation::runner::SimulationRunner::new();
+            if let Err(error) = runner.start_prepared(resolved, false) {
+                return fail(&mut active, result, simulation_error(&error));
             }
-            if let Some(outcome) = runner.poll_result() {
-                break outcome;
+            active.push(ActiveTask {
+                runner,
+                instance,
+                label,
+                producer,
+            });
+        }
+        if active.is_empty() {
+            break;
+        }
+        if abort.is_aborted() {
+            for task in &mut active {
+                task.runner.abort();
             }
-            for line in runner.drain_engine_log() {
-                if result.warnings.len() < 64 {
-                    result.warnings.push(line.message);
+        }
+        let mut index = 0;
+        while index < active.len() {
+            let Some(outcome) = active[index].runner.poll_result() else {
+                for line in active[index].runner.drain_engine_log() {
+                    if result.warnings.len() < 64 {
+                        result.warnings.push(line.message);
+                    }
+                }
+                index += 1;
+                continue;
+            };
+            let done = active.swap_remove(index);
+            let simulated = match outcome {
+                Ok(simulated) => simulated,
+                Err(rspice_simulation::error::SimulationError::Aborted) if abort.is_aborted() => {
+                    let error = ErrorRecord {
+                        category: "timeout".into(),
+                        detail: format!("budget of {} s spent", request.budget.as_secs()),
+                        display: "case budget spent".into(),
+                        stage: Some("execution".into()),
+                        ..Default::default()
+                    };
+                    return fail(&mut active, result, error);
+                }
+                Err(error) => return fail(&mut active, result, simulation_error(&error)),
+            };
+            let checkpoints = done.runner.take_task_transient_checkpoints();
+            match done.producer.capture_with_transient_checkpoints(
+                &simulated,
+                &checkpoints,
+                &pending,
+            ) {
+                Ok(Some(artifact)) => {
+                    artifacts.insert(done.instance, artifact);
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    return fail(&mut active, result, harness_error(error.to_string()));
                 }
             }
-            std::thread::sleep(Duration::from_millis(5));
-        };
-        let simulated = match outcome {
-            Ok(simulated) => simulated,
-            Err(rspice_simulation::error::SimulationError::Aborted) if abort.is_aborted() => {
-                return result.failed(ErrorRecord {
-                    category: "timeout".into(),
-                    detail: format!("budget of {} s spent", request.budget.as_secs()),
-                    display: "case budget spent".into(),
-                    stage: Some("execution".into()),
-                    ..Default::default()
-                });
-            }
-            Err(error) => return result.failed(simulation_error(&error)),
-        };
-        match producer.capture(&simulated, &pending) {
-            Ok(Some(artifact)) => {
-                artifacts.insert(instance, artifact);
-            }
-            Ok(None) => {}
-            Err(error) => return result.failed(harness_error(error.to_string())),
+            observations[order[&done.instance]] = Some(observation(&simulated, &done.label));
+            finished.insert(done.instance);
         }
-        result.results.push(observation(&simulated, &label));
+        std::thread::sleep(Duration::from_millis(5));
     }
+    result.results = observations.into_iter().flatten().collect();
+    family.gather(&mut result.results);
     result
+}
+
+/// A dispatched task and what it needs when it finishes.
+struct ActiveTask {
+    runner: rspice_simulation::runner::SimulationRunner,
+    instance: AnalysisInstanceId,
+    label: String,
+    producer: rspice_simulation::execution_artifact::PreparedArtifactProducer,
 }
 
 /// Lower the deck's cards into the explicit task graph a study would carry.
@@ -922,166 +975,9 @@ fn preparation_error(error: HeadlessPreparationError) -> ErrorRecord {
     }
 }
 
-fn core_error(error: &rspice_core::SimulationError) -> ErrorRecord {
-    let display = error.to_string();
-    match error {
-        rspice_core::SimulationError::UnsupportedCapability(refusal) => ErrorRecord {
-            category: "capability".into(),
-            token: Some(refusal.capability.to_owned()),
-            token_form: Some("structured".into()),
-            analysis: refusal.analysis.map(|analysis| analysis.to_string()),
-            analysis_kind: error
-                .descriptor()
-                .analysis_kind
-                .map(|kind| kind.tag().to_owned()),
-            instance: refusal.instance.clone(),
-            module: refusal.module.clone(),
-            location: refusal.location.as_ref().map(ToString::to_string),
-            stage: Some("execution".into()),
-            detail: refusal.detail.clone(),
-            display,
-            ..Default::default()
-        },
-        rspice_core::SimulationError::Elaboration(elaboration) => ErrorRecord {
-            category: "elaboration".into(),
-            token: Some(elaboration.kind.as_str().to_owned()),
-            token_form: Some("structured".into()),
-            instance: elaboration.instance.clone(),
-            module: elaboration.module.clone(),
-            location: elaboration.span.as_ref().map(ToString::to_string),
-            stage: Some("execution".into()),
-            detail: display.clone(),
-            display,
-            ..Default::default()
-        },
-        rspice_core::SimulationError::Aborted | rspice_core::SimulationError::TimeLimitExceeded => {
-            ErrorRecord {
-                category: "timeout".into(),
-                stage: Some("execution".into()),
-                detail: display.clone(),
-                display,
-                ..Default::default()
-            }
-        }
-        other => {
-            let category = match other.descriptor().category {
-                rspice_core::SimulationErrorCategory::Convergence => "convergence",
-                rspice_core::SimulationErrorCategory::Solver => "solver",
-                rspice_core::SimulationErrorCategory::Netlist => "parse",
-                rspice_core::SimulationErrorCategory::ResourceLimit => "resource",
-                _ => "simulation",
-            };
-            ErrorRecord {
-                category: category.into(),
-                code: Some(format!("{:?}", other.descriptor().code)),
-                stage: Some("execution".into()),
-                detail: display.clone(),
-                display,
-                ..Default::default()
-            }
-        }
-    }
-}
-
 // ---------------------------------------------------------------------------
-// Engine fallback
+// Families of transients
 // ---------------------------------------------------------------------------
-
-fn engine_case(request: &CaseRequest<'_>, kind: &str, origin: &Path, source: &str) -> CaseResult {
-    let route = Route::compiled();
-    let result = CaseResult::new(route.token(), "engine");
-    let netlist = match rspice_core::Netlist::parse_with_path(source, origin) {
-        Ok(netlist) => netlist,
-        Err(error) => {
-            let display = error.to_string();
-            return result.failed(match &error {
-                rspice_core::netlist::ParseError::UnsupportedCapability {
-                    capability,
-                    origin,
-                    detail,
-                } => ErrorRecord {
-                    category: "parse".into(),
-                    token: Some((*capability).to_owned()),
-                    token_form: Some("structured".into()),
-                    location: Some(origin.to_string()),
-                    stage: Some("preparation".into()),
-                    detail: detail.clone(),
-                    display,
-                    ..Default::default()
-                },
-                _ => ErrorRecord {
-                    category: "parse".into(),
-                    stage: Some("preparation".into()),
-                    detail: display.clone(),
-                    display,
-                    ..Default::default()
-                },
-            });
-        }
-    };
-    let mut config = rspice_core::engine::SimulationConfig::default();
-    if let Some(dialect) = dialect(&request.design.file.dialect) {
-        config.spice_dialect = dialect;
-    }
-    let engine = rspice_core::Engine::new(config);
-    let abort = DeadlineAbort::new(Instant::now(), request.budget.as_millis());
-    let Some((step, stop, start, max_step, uic)) =
-        netlist.analyses.iter().find_map(|analysis| match analysis {
-            rspice_core::netlist::AnalysisCommand::Tran {
-                step,
-                stop,
-                start,
-                max_step,
-                uic,
-            } => Some((*step, *stop, *start, *max_step, *uic)),
-            _ => None,
-        })
-    else {
-        return result.failed(harness_error("deck has no .tran card"));
-    };
-    let internal_max = match rspice_core::execution::resolve_dialect_transient_maximum_step(
-        engine.config().spice_dialect,
-        step,
-        stop,
-        start,
-        max_step,
-    ) {
-        Ok(value) => value,
-        Err(error) => return result.failed(harness_error(error.to_string())),
-    };
-    let startup = rspice_core::engine::TransientStartupMode::from_uic(uic);
-    let outcome = match kind {
-        "mc-tran" => monte_carlo(
-            &engine,
-            &netlist,
-            source,
-            origin,
-            stop,
-            internal_max,
-            startup,
-            &abort,
-        ),
-        "step-tran" => step_points(&engine, &netlist, stop, internal_max, startup, &abort),
-        "ckpt" => checkpoint(
-            &engine,
-            &netlist,
-            request,
-            stop,
-            internal_max,
-            startup,
-            &abort,
-        ),
-        other => Err(harness_error(format!("no engine dispatch for {other}")).into()),
-    };
-    match outcome {
-        Ok(observation) => {
-            let mut result = result;
-            result.results.push(observation);
-            result
-        }
-        Err(error) => result.failed(*error),
-    }
-}
 
 fn dialect(name: &str) -> Option<rspice_core::config::SpiceDialect> {
     use rspice_core::config::SpiceDialect;
@@ -1091,25 +987,6 @@ fn dialect(name: &str) -> Option<rspice_core::config::SpiceDialect> {
         "xyce" => Some(SpiceDialect::Xyce),
         _ => None,
     }
-}
-
-fn run_transient(
-    engine: &rspice_core::Engine,
-    netlist: &rspice_core::Netlist,
-    stop: f64,
-    max_step: f64,
-    startup: rspice_core::engine::TransientStartupMode,
-    abort: &dyn AbortSignal,
-) -> Result<Observation, rspice_core::SimulationError> {
-    let result =
-        engine.run_tran_with_startup_mode_and_abort(netlist, stop, max_step, startup, abort)?;
-    let mut observation = transient_observation(&result);
-    let measurements =
-        rspice_core::analysis::measure_signals::evaluate_tran_measurements(netlist, &result);
-    record_measures(&measurements, &mut observation);
-    let assertions = rspice_core::analysis::evaluate_tran_assertions(netlist, &result, abort)?;
-    record_assertions(&assertions, &mut observation);
-    Ok(observation)
 }
 
 /// Record the HDL's severity-task records on `observation`, each site by its
@@ -1189,54 +1066,6 @@ fn record_measures(measurements: &[rspice_core::MeasureResult], observation: &mu
     }
 }
 
-/// A core transient result as an observation (the fallback's result shape).
-pub fn transient_observation(result: &rspice_core::engine::TransientResult) -> Observation {
-    let mut observation = Observation {
-        kind: "tran".into(),
-        axis: result.time.clone(),
-        ..Default::default()
-    };
-    for (name, series) in result.node_names.iter().zip(&result.voltages) {
-        if !series.is_empty() {
-            observation
-                .real
-                .insert(canonical_signal(name), series.clone());
-        }
-    }
-    for (name, series) in result.branch_names.iter().zip(&result.branch_currents) {
-        if !series.is_empty() {
-            observation.real.insert(branch_name(name), series.clone());
-        }
-    }
-    for trace in &result.digital_traces {
-        let points: Vec<(f64, String)> = trace
-            .points
-            .iter()
-            .map(|point| {
-                (
-                    point.time,
-                    super::events::digital_value_letter(point.value).to_owned(),
-                )
-            })
-            .collect();
-        observation.events.insert(
-            trace.node_name.to_ascii_lowercase(),
-            super::events::collapse(&points),
-        );
-    }
-    for trace in &result.real_traces {
-        observation.events.insert(
-            trace.node_name.to_ascii_lowercase(),
-            trace
-                .points
-                .iter()
-                .map(|point| (point.time, format!("{:e}", point.value)))
-                .collect(),
-        );
-    }
-    observation
-}
-
 /// Record every top-level `.param` value the trial netlist resolved.
 fn record_parameters(netlist: &rspice_core::Netlist, observation: &mut Observation) {
     for (name, value) in netlist.params.all_params() {
@@ -1270,27 +1099,222 @@ pub fn deck_states_statistics(source: &str, origin: &Path) -> Result<bool, Strin
     }))
 }
 
+/// The seed a `.MC` card that states none runs with on the prepared route.
+const DEFAULT_MONTE_CARLO_SEED: u64 = 0x5EED_5EED;
+
+/// How a family's member observations gather into the case's one family
+/// observation: the trials of a Monte Carlo transient, the points of a
+/// `.STEP` transient, or an uninterrupted transient and its resumes.
+#[derive(Default)]
+struct Family {
+    /// `mc`, `step` or `ckpt`; empty for a case that is not a family.
+    kind: &'static str,
+    /// Each member task's label, in member order.
+    members: Vec<String>,
+    /// Each trial's or point's resolved top-level `.param` values, as
+    /// `param:` scalars, by label: the draw the trial makes or the coordinate
+    /// the point takes, materialized without solving. The member the run
+    /// solved must agree with them.
+    parameters: HashMap<String, BTreeMap<String, f64>>,
+}
+
+impl Family {
+    fn gather(mut self, results: &mut Vec<Observation>) {
+        if self.kind.is_empty() {
+            return;
+        }
+        let mut by_label: HashMap<String, Observation> = std::mem::take(results)
+            .into_iter()
+            .map(|observation| (observation.label.clone(), observation))
+            .collect();
+        let mut members: Vec<Observation> = self
+            .members
+            .iter()
+            .filter_map(|label| by_label.remove(label))
+            .collect();
+        for member in &mut members {
+            if let Some(parameters) = self.parameters.remove(&member.label) {
+                member.scalars.extend(parameters);
+            }
+        }
+        if self.kind == "ckpt" {
+            let mut members = members.into_iter();
+            if let Some(mut uninterrupted) = members.next() {
+                uninterrupted.kind = "ckpt".into();
+                uninterrupted.trials = members.collect();
+                results.push(uninterrupted);
+            }
+            return;
+        }
+        let noun = if self.kind == "mc" {
+            "trials"
+        } else {
+            "points"
+        };
+        results.push(Observation {
+            kind: self.kind.into(),
+            label: format!("{} {noun}", members.len()),
+            trials: members,
+            ..Default::default()
+        });
+    }
+}
+
+/// Lower a Monte Carlo transient, a `.STEP` transient or a checkpoint resume
+/// into one prepared task per member.
+///
+/// The deck's `.TRAN` card lowers as every other card does. A trial or point
+/// task carries it and the deck's own `.MC` or `.STEP` card, and names its
+/// member; the member count and each member's parameter values are read off
+/// the deck by the engine's own sampler and sweep materializer, without
+/// solving. A checkpoint case is the transient with the design's checkpoint
+/// schedule and one resume per scheduled time, each bound to it.
 #[allow(clippy::too_many_arguments)]
-fn monte_carlo(
+fn family_tasks(
+    request: &CaseRequest<'_>,
+    kind: &str,
+    circuit: &str,
+    origin: &Path,
+    source: &str,
+    cards: &[String],
+    runtimes: &PreparedVerilogARuntimeSet,
+) -> Result<(Vec<HeadlessTaskRequest>, Family), CaseError> {
+    use rspice_simulation::execution_options::TransientMember;
+    let family_word = match kind {
+        "mc-tran" => Some(".mc"),
+        "step-tran" => Some(".step"),
+        _ => None,
+    };
+    let is_family_card = |card: &str| {
+        family_word.is_some_and(|word| {
+            card.split_whitespace()
+                .next()
+                .is_some_and(|first| first.eq_ignore_ascii_case(word))
+        })
+    };
+    let family_card = cards.iter().find(|card| is_family_card(card)).cloned();
+    let rest: Vec<String> = cards
+        .iter()
+        .filter(|card| !is_family_card(card))
+        .cloned()
+        .collect();
+    let base = match <[HeadlessTaskRequest; 1]>::try_from(headless_tasks(
+        circuit, origin, &rest, runtimes,
+    )?) {
+        Ok([base]) if matches!(base.analysis.spec, AnalysisSpec::Transient { .. }) => base,
+        _ => {
+            return Err(harness_error(format!(
+                "a {kind} deck carries one .tran card besides its family card"
+            ))
+            .into());
+        }
+    };
+    let member_task = |label: String| {
+        let mut task = base.clone();
+        task.instance_id = AnalysisInstanceId::new();
+        task.label = label;
+        task
+    };
+    if kind == "ckpt" {
+        let times = request
+            .design
+            .analysis(request.analysis)
+            .map(|analysis| analysis.checkpoint_at.clone())
+            .unwrap_or_default();
+        let mut producer = member_task("uninterrupted".into());
+        producer.analysis.spec_options.tran_checkpoint = Some(
+            rspice_simulation::transient_checkpoint::TransientCheckpointRequest {
+                times: times.clone(),
+                resume: None,
+            },
+        );
+        let mut family = Family {
+            kind: "ckpt",
+            members: vec![producer.label.clone()],
+            ..Default::default()
+        };
+        let mut tasks = Vec::with_capacity(times.len() + 1);
+        for time in times {
+            let mut resume = member_task(format!("resumed@{time:e}"));
+            resume.analysis.spec_options.resume_at = Some(time);
+            resume.dependencies = vec![producer.instance_id];
+            family.members.push(resume.label.clone());
+            tasks.push(resume);
+        }
+        tasks.insert(0, producer);
+        return Ok((tasks, family));
+    }
+    let Some(family_card) = family_card else {
+        return Err(harness_error(format!("a {kind} deck carries its family card")).into());
+    };
+    let netlist = rspice_core::Netlist::parse_with_path(source, origin)
+        .map_err(|error| harness_error(format!("the deck could not be read: {error}")))?;
+    let mut config = rspice_core::engine::SimulationConfig::default();
+    if let Some(dialect) = dialect(&request.design.file.dialect) {
+        config.spice_dialect = dialect;
+    }
+    let engine = rspice_core::Engine::new(config);
+    let abort = rspice_core::NoAbort;
+    let mut parameters = HashMap::new();
+    let members: Vec<TransientMember> = if kind == "mc-tran" {
+        monte_carlo_members(&engine, &netlist, source, origin, &mut parameters)?
+    } else {
+        let limits = engine.config().resource_limits;
+        let plan = rspice_core::execution::DeckPlan::from_netlist(&netlist, &limits)
+            .map_err(|error| harness_error(format!("the .step plan: {error}")))?;
+        let materializer = engine
+            .prepare_deck_plan_materializer_with_abort(&netlist, &plan, &abort)
+            .map_err(|error| harness_error(format!("the .step plan: {error}")))?;
+        let mut members = Vec::with_capacity(materializer.len());
+        for index in 0..materializer.len() {
+            let run = materializer
+                .materialize_run_with_abort(index, &abort)
+                .map_err(|error| harness_error(format!("materialize point {index}: {error}")))?;
+            let (_, point, _, _) = run.into_parts();
+            let member = TransientMember::StepPoint { index };
+            let mut scratch = Observation::default();
+            record_parameters(&point, &mut scratch);
+            parameters.insert(member.label(), scratch.scalars);
+            members.push(member);
+        }
+        members
+    };
+    let mut family = Family {
+        kind: if kind == "mc-tran" { "mc" } else { "step" },
+        members: Vec::with_capacity(members.len()),
+        parameters,
+    };
+    let tasks = members
+        .into_iter()
+        .map(|member| {
+            let mut task = member_task(member.label());
+            task.analysis.analysis_line = format!("{}\n{family_card}", base.analysis.analysis_line);
+            task.analysis.spec_options.member = Some(member);
+            family.members.push(task.label.clone());
+            task
+        })
+        .collect();
+    Ok((tasks, family))
+}
+
+/// The trials of the deck's `.MC` study, varied as the engine's Monte Carlo
+/// transient varies them, with each trial's drawn `.param` values.
+fn monte_carlo_members(
     engine: &rspice_core::Engine,
     netlist: &rspice_core::Netlist,
     source: &str,
     origin: &Path,
-    stop: f64,
-    max_step: f64,
-    startup: rspice_core::engine::TransientStartupMode,
-    abort: &dyn AbortSignal,
-) -> Result<Observation, CaseError> {
+    parameters: &mut HashMap<String, BTreeMap<String, f64>>,
+) -> Result<Vec<rspice_simulation::execution_options::TransientMember>, CaseError> {
     use rspice_core::engine::{MonteCarloStudyConfig, MonteCarloVariationSource};
+    use rspice_simulation::execution_options::TransientMember;
+    use rspice_simulation_contract::mc_draft::McVariationSource;
     let Some(card) = netlist.analyses.iter().find_map(|analysis| match analysis {
         rspice_core::netlist::AnalysisCommand::MonteCarlo(card) => Some(card.clone()),
         _ => None,
     }) else {
         return Err(harness_error("deck has no .mc card").into());
     };
-    let mut study =
-        MonteCarloStudyConfig::new(card.runs, card.seed.unwrap_or(1), vec!["trial".into()]);
-    study.first_trial = card.first_trial;
     // The corpus decks state their variation as agauss/aunif expressions,
     // in the deck or in a file it includes. A deck that states none and whose
     // card names no parameter would have every `.param` perturbed by the
@@ -1301,137 +1325,74 @@ fn monte_carlo(
             "the deck's includes could not be resolved to find its statistics: {error}"
         ))
     })?;
-    if statistical {
-        study.variation_source = MonteCarloVariationSource::DeckStatistics;
+    let variation_source = if statistical {
+        McVariationSource::DeckStatistics
     } else if card.params.is_empty() {
         return Err(harness_error(
             "the .mc card names no parameter and neither the deck nor any file it includes states a statistical function (agauss, aunif, gauss, unif, limit); refusing to perturb every .param",
         )
         .into());
     } else {
-        study.distribution = match card.distribution {
-            rspice_core::netlist::MonteCarloDistribution::Gaussian => {
-                rspice_core::analysis::Distribution::Gaussian {
-                    sigma: card.relative_spread,
-                }
-            }
-            rspice_core::netlist::MonteCarloDistribution::Uniform => {
-                rspice_core::analysis::Distribution::Uniform {
-                    tolerance: card.relative_spread,
-                }
-            }
-            rspice_core::netlist::MonteCarloDistribution::WorstCase => {
-                rspice_core::analysis::Distribution::WorstCase {
-                    tolerance: card.relative_spread,
-                }
-            }
-        };
-        study.parameter_filter = card.params.clone();
-    }
-    let trials: Mutex<BTreeMap<usize, Result<Observation, ErrorRecord>>> =
-        Mutex::new(BTreeMap::new());
-    let outcome = engine.run_monte_carlo_measurements_with_abort(
-        netlist,
-        &study,
-        abort,
-        |engine, trial, index, abort| {
-            let outcome = run_transient(engine, trial, stop, max_step, startup, abort);
-            let recorded = match &outcome {
-                Ok(observation) => {
-                    let mut observation = observation.clone();
-                    observation.label = format!("trial {index}");
-                    record_parameters(trial, &mut observation);
-                    Ok(observation)
-                }
-                Err(error) => Err(core_error(error)),
-            };
-            trials.lock().expect("trial map").insert(index, recorded);
-            outcome.map(|_| vec![0.0])
-        },
+        McVariationSource::ParameterTolerance
+    };
+    let mut study = MonteCarloStudyConfig::new(
+        card.runs,
+        card.seed.unwrap_or(DEFAULT_MONTE_CARLO_SEED),
+        vec!["trial".into()],
     );
-    if let Err(error) = outcome {
-        return Err(core_error(&error).into());
-    }
-    let trials = trials.into_inner().expect("trial map");
-    let mut observation = Observation {
-        kind: "mc".into(),
-        label: format!("{} trials", trials.len()),
-        ..Default::default()
-    };
-    for (_, trial) in trials {
-        match trial {
-            Ok(trial) => observation.trials.push(trial),
-            // A trial that failed is a failed case: the corpus asserts every trial.
-            Err(error) => return Err(error.into()),
+    study.first_trial = card.first_trial;
+    study.distribution = match card.distribution {
+        rspice_core::netlist::MonteCarloDistribution::Gaussian => {
+            rspice_core::analysis::Distribution::Gaussian {
+                sigma: card.relative_spread,
+            }
         }
-    }
-    Ok(observation)
-}
-
-fn step_points(
-    engine: &rspice_core::Engine,
-    netlist: &rspice_core::Netlist,
-    stop: f64,
-    max_step: f64,
-    startup: rspice_core::engine::TransientStartupMode,
-    abort: &dyn AbortSignal,
-) -> Result<Observation, CaseError> {
-    let limits = engine.config().resource_limits;
-    let plan = rspice_core::execution::DeckPlan::from_netlist(netlist, &limits)
-        .map_err(|error| harness_error(format!("deck plan: {error}")))?;
-    let materializer = engine
-        .prepare_deck_plan_materializer_with_abort(netlist, &plan, abort)
-        .map_err(|error| harness_error(format!("materializer: {error}")))?;
-    let mut observation = Observation {
-        kind: "step".into(),
-        label: format!("{} points", materializer.len()),
-        ..Default::default()
+        rspice_core::netlist::MonteCarloDistribution::Uniform => {
+            rspice_core::analysis::Distribution::Uniform {
+                tolerance: card.relative_spread,
+            }
+        }
+        rspice_core::netlist::MonteCarloDistribution::WorstCase => {
+            rspice_core::analysis::Distribution::WorstCase {
+                tolerance: card.relative_spread,
+            }
+        }
     };
-    for index in 0..materializer.len() {
-        let run = materializer
-            .materialize_run_with_abort(index, abort)
-            .map_err(|error| harness_error(format!("materialize point {index}: {error}")))?;
-        let (_, point_netlist, _, _) = run.into_parts();
-        let mut point = run_transient(engine, &point_netlist, stop, max_step, startup, abort)
-            .map_err(|error| core_error(&error))?;
-        point.label = format!("point {index}");
-        record_parameters(&point_netlist, &mut point);
-        observation.trials.push(point);
-    }
-    Ok(observation)
-}
-
-fn checkpoint(
-    engine: &rspice_core::Engine,
-    netlist: &rspice_core::Netlist,
-    request: &CaseRequest<'_>,
-    stop: f64,
-    max_step: f64,
-    startup: rspice_core::engine::TransientStartupMode,
-    abort: &dyn AbortSignal,
-) -> Result<Observation, CaseError> {
-    let times = request
-        .design
-        .analysis(request.analysis)
-        .map(|analysis| analysis.checkpoint_at.clone())
-        .unwrap_or_default();
-    let (uninterrupted, checkpoints) = engine
-        .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
-            netlist, stop, max_step, startup, &times, abort,
+    study.variation_source = match variation_source {
+        McVariationSource::DeckStatistics => MonteCarloVariationSource::DeckStatistics,
+        McVariationSource::ParameterTolerance => MonteCarloVariationSource::ParameterTolerance,
+    };
+    study.parameter_filter = card.params.clone();
+    let drawn: Mutex<BTreeMap<usize, BTreeMap<String, f64>>> = Mutex::new(BTreeMap::new());
+    engine
+        .run_monte_carlo_measurements_with_abort(
+            netlist,
+            &study,
+            &rspice_core::NoAbort,
+            |_, trial, index, _| {
+                let mut scratch = Observation::default();
+                record_parameters(trial, &mut scratch);
+                drawn
+                    .lock()
+                    .expect("trial parameters")
+                    .insert(index, scratch.scalars);
+                Ok(vec![0.0])
+            },
         )
-        .map_err(|error| core_error(&error))?;
-    let mut observation = transient_observation(&uninterrupted);
-    observation.kind = "ckpt".into();
-    observation.label = "uninterrupted".into();
-    for scheduled in checkpoints {
-        let (resumed, _) = engine
-            .run_tran_resume_with_abort(netlist, &scheduled.checkpoint, stop, max_step, abort)
-            .map_err(|error| core_error(&error))?;
-        let mut resumed = transient_observation(&resumed);
-        resumed.label = format!("resumed@{:e}", scheduled.nominal_time);
-        observation.trials.push(resumed);
+        .map_err(|error| harness_error(format!("the .mc study's draws: {error}")))?;
+    let drawn = drawn.into_inner().expect("trial parameters");
+    let mut members = Vec::with_capacity(card.runs);
+    for index in card.first_trial..card.first_trial + card.runs {
+        let member = TransientMember::MonteCarloTrial {
+            index,
+            variation_source,
+        };
+        if let Some(values) = drawn.get(&index) {
+            parameters.insert(member.label(), values.clone());
+        }
+        members.push(member);
     }
-    Ok(observation)
+    Ok(members)
 }
 
 #[cfg(test)]
@@ -1544,7 +1505,7 @@ mod tests {
             )
         };
         for (rule, supply) in [("Low", 1.0), ("High", 5.0)] {
-            let result = headless_case(&request, &origin, &deck(rule));
+            let result = headless_case(&request, "tran", &origin, &deck(rule));
             assert_eq!(result.outcome, "completed", "{rule}: {:?}", result.error);
             let q = result.results[0].real.get("v(q)").unwrap_or_else(|| {
                 panic!("{rule}: no v(q) in {:?}", result.results[0].real.keys())
@@ -1555,7 +1516,12 @@ mod tests {
                 "{rule}: the rule's d2a drives q to {supply} V, saw {last}"
             );
         }
-        let empty = headless_case(&request, &origin, "t\n.hdl \"../empty.vams\"\n.op\n.end\n");
+        let empty = headless_case(
+            &request,
+            "op",
+            &origin,
+            "t\n.hdl \"../empty.vams\"\n.op\n.end\n",
+        );
         assert_eq!(empty.outcome, "error", "{:?}", empty.error);
         let error = empty.error.expect("a refusal carries its error");
         assert_eq!(error.token.as_deref(), Some("unknown_module"), "{error:?}");

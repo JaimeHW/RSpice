@@ -16,10 +16,10 @@
 //! deck's analysis card becomes the task graph; the rest of the deck is the
 //! circuit. HDL sources a deck names are compiled and sealed exactly as the
 //! application seals project Verilog-A, so they reach the engine as prepared
-//! runtimes rather than ambient files. Only an analysis kind the headless
-//! contract cannot express falls back to the [`rspice_core::Engine`] entry
-//! (`case-result.json` then records `dispatch = "engine"`); [`dispatch`] lists
-//! which and why.
+//! runtimes rather than ambient files. A Monte Carlo or `.STEP` transient runs
+//! as one transient task per trial or point, and a checkpoint case as the
+//! scheduled transient plus one resume task per checkpoint, each bound to it;
+//! [`dispatch`] lowers them.
 //!
 //! The route is the build: the default features are the interpreter route,
 //! `--features veriloga-native` the native JIT route. There is no runtime

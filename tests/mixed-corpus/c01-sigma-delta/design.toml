@@ -3,7 +3,7 @@ id = "C1"
 title = "Sigma-delta modulator"
 exit_phases = ["P0", "P1"]
 # The headless path runs the product's default engine configuration; decks
-# state any options they need. The fallback entries use the same default.
+# state any options they need.
 dialect = "best-available"
 features = []
 
