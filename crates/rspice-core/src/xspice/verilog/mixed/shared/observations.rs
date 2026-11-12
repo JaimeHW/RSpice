@@ -185,7 +185,7 @@ impl MixedDigitalCoordinator {
                 AbsDeltaControls {
                     delta: values[1],
                     time_tolerance: values[2],
-                    expression_tolerance: values[3],
+                    expression_tolerance: self.absdelta_expression_tolerance(values[3]),
                     enable: values[4],
                 },
                 precision,

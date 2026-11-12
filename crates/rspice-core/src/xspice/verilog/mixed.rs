@@ -1689,6 +1689,10 @@ pub struct MixedSignalHost {
     /// Smallest interval the analog solver is allowed to advance by, or zero
     /// when nothing has declared one. See [`Self::set_analog_step_floor`].
     analog_step_floor: f64,
+    /// The default `absdelta` expression tolerance, which the module's own
+    /// wheel takes when it starts; see
+    /// [`MixedDigitalCoordinator::set_absdelta_expression_tolerance`].
+    absdelta_expression_tolerance: f64,
 }
 
 #[derive(Clone)]
@@ -2152,6 +2156,7 @@ impl MixedSignalHost {
             max_circuit_node,
             max_bridge_iterations,
             analog_step_floor: 0.0,
+            absdelta_expression_tolerance: 0.0,
         };
         host.watch_own_digital_edges();
         Ok(host)
@@ -2332,11 +2337,12 @@ impl MixedSignalHost {
         }
         if !self.digital_started {
             if !self.state.digital.is_view() && !self.state.digital.plan().absdelta.is_empty() {
-                let coordinator = shared::MixedDigitalCoordinator::enroll(
+                let mut coordinator = shared::MixedDigitalCoordinator::enroll(
                     std::slice::from_mut(self),
                     &Default::default(),
                     &rspice_veriloga::NoPipelineControl,
                 )?;
+                coordinator.set_absdelta_expression_tolerance(self.absdelta_expression_tolerance);
                 self.standalone = Some(Box::new(StandaloneExecution::new(coordinator)));
             }
             if !self.analog_probes.is_empty() {
@@ -3633,6 +3639,16 @@ impl MixedSignalHost {
             final_step,
             true,
         )
+    }
+
+    /// Declare the default `absdelta` expression tolerance (see
+    /// [`MixedDigitalCoordinator::set_absdelta_expression_tolerance`]) for the
+    /// wheel this module runs on its own.
+    pub(crate) fn set_absdelta_expression_tolerance(&mut self, tolerance: f64) {
+        self.absdelta_expression_tolerance = tolerance;
+        if let Some(standalone) = self.standalone.as_mut() {
+            standalone.set_absdelta_expression_tolerance(tolerance);
+        }
     }
 
     /// Declare the smallest interval the analog solver may advance by.

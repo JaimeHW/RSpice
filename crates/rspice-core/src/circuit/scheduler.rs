@@ -501,6 +501,23 @@ impl super::CircuitData {
         }
     }
 
+    /// Hand every HDL wheel the solver's absolute voltage tolerance, which an
+    /// `absdelta` that omits `expr_tol` locates its events to (see
+    /// `MixedDigitalCoordinator::set_absdelta_expression_tolerance`).
+    pub(crate) fn set_absdelta_expression_tolerance(&mut self, voltage_abstol: Value) {
+        #[cfg(feature = "veriloga")]
+        {
+            if let Some(coordinator) = self.scheduler.mixed_digital_coordinator.as_mut() {
+                coordinator.set_absdelta_expression_tolerance(voltage_abstol);
+            }
+            for host in &mut self.mixed_signal_hosts {
+                host.set_absdelta_expression_tolerance(voltage_abstol);
+            }
+        }
+        #[cfg(not(feature = "veriloga"))]
+        let _ = voltage_abstol;
+    }
+
     /// Lend the parked candidate ledgers to `hosts` for the length of `act`.
     ///
     /// An enrolled instance's ledger lives on the scheduler between trials —

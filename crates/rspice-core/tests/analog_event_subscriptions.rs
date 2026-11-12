@@ -990,6 +990,47 @@ endmodule
 }
 
 #[test]
+fn absdelta_without_expr_tol_ignores_a_wiggle_below_the_voltage_tolerance() {
+    // A 10 nV ripple on 1 V reverses direction twenty times in 1 us. With
+    // `expr_tol` omitted the event is located to the solver's absolute
+    // voltage tolerance (vntol, 1 uV by default), so only the initial event
+    // fires; the same observer with an explicit 100 pV tolerance sees the
+    // reversals, which shows the ripple is there to see.
+    let source = Source::new(
+        r#"
+`timescale 1ps/1ps
+module observer(a,r,f);
+ input a; electrical a;
+ output r,f; wreal r,f;
+ real coarse=0,fine=0;
+ assign r=coarse;
+ assign f=fine;
+ always @(absdelta(V(a),0.25)) coarse=coarse+1;
+ always @(absdelta(V(a),0.25,,0.1n)) fine=fine+1;
+endmodule
+"#,
+    );
+    let deck = Netlist::parse(&format!(
+        "* ripple\nV1 a 0 SIN(1 10n 10MEG)\nX1 a r f observer\n.va \"{}\" observer module=observer\n.end\n",
+        source.path()
+    ))
+    .unwrap();
+    let result = Engine::default()
+        .run_tran_with_abort(&deck, 1e-6, 5e-9, &AcceptedEvents::default())
+        .unwrap();
+    let last = |name: &str| {
+        result
+            .real_trace_named(name)
+            .unwrap()
+            .last()
+            .map(|point| point.value)
+            .unwrap()
+    };
+    assert_eq!(last("r"), 1.0, "{:?}", result.real_trace_named("r"));
+    assert!(last("f") > 10.0, "{:?}", result.real_trace_named("f"));
+}
+
+#[test]
 fn absdelta_xspice_delays_interleave_and_physical_fanout_refines() {
     let source = Source::new(
         r#"

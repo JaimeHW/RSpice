@@ -279,6 +279,10 @@ pub struct MixedDigitalCoordinator {
     /// See [`Self::set_analog_step_floor`]: this is what separates an
     /// activation the stepper skipped from one it could not have landed on.
     analog_step_floor: f64,
+    /// The expression tolerance of an `absdelta` that omits `expr_tol`, or
+    /// zero when no solver has declared one; see
+    /// [`Self::set_absdelta_expression_tolerance`].
+    absdelta_expression_tolerance: f64,
     probes: Vec<Option<f64>>,
     drives: Vec<(DigitalSignalId, FourStateValue)>,
     /// Every A/D bit one settle pass moved, across every enrolled instance,
@@ -712,6 +716,7 @@ impl MixedDigitalCoordinator {
             trial_open: false,
             accepted_time: None,
             analog_step_floor: 0.0,
+            absdelta_expression_tolerance: 0.0,
             probes,
             drives: Vec::new(),
             publications: Vec::new(),
@@ -805,6 +810,7 @@ impl MixedDigitalCoordinator {
             trial_open: false,
             accepted_time: None,
             analog_step_floor: self.analog_step_floor,
+            absdelta_expression_tolerance: self.absdelta_expression_tolerance,
             probes: vec![None; self.probes.len()],
             drives: Vec::new(),
             publications: Vec::new(),
@@ -1132,6 +1138,33 @@ impl MixedDigitalCoordinator {
             .and_then(|owner| self.maps.get(owner))
             .map(|map| map.name.as_str());
         Ok(Some((owner, seconds)))
+    }
+
+    /// Declare the expression tolerance an `absdelta` event that omits
+    /// `expr_tol` locates its crossings to.
+    ///
+    /// VAMS-2.4 section 5.10.3.4 leaves that default to the simulator. RSpice
+    /// takes the analog solver's absolute voltage tolerance (`vntol`), as
+    /// Spectre takes `vabstol`: an expression that moves by less than the
+    /// solver resolves is a wiggle of the solution, not a change of direction.
+    /// Zero — the default for a host no transient stepper drives — falls back
+    /// to a few units in the last place of the expression's magnitude.
+    pub(crate) fn set_absdelta_expression_tolerance(&mut self, tolerance: f64) {
+        self.absdelta_expression_tolerance = if tolerance.is_finite() && tolerance > 0.0 {
+            tolerance
+        } else {
+            0.0
+        };
+    }
+
+    /// The `expr_tol` an observer runs with: its own when it gave a positive
+    /// one, otherwise the declared default.
+    pub(super) fn absdelta_expression_tolerance(&self, given: f64) -> f64 {
+        if given > 0.0 {
+            given
+        } else {
+            self.absdelta_expression_tolerance
+        }
     }
 
     /// Declare the smallest interval the analog solver may advance by.

@@ -41,6 +41,11 @@ impl DigitalActiveParticipant for StandaloneInputs {
 }
 
 impl StandaloneExecution {
+    pub(super) fn set_absdelta_expression_tolerance(&mut self, tolerance: f64) {
+        self.coordinator
+            .set_absdelta_expression_tolerance(tolerance);
+    }
+
     pub(super) fn new(coordinator: shared::MixedDigitalCoordinator) -> Self {
         Self {
             coordinator,
