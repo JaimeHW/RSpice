@@ -330,3 +330,64 @@ fn find_references_is_a_list_the_keyboard_walks_and_enter_opens_at_the_column() 
     assert!(user.find("References").is_none());
     assert_eq!(user.app.state.workbench.console_page, ConsolePage::Console);
 }
+
+/// Whether the last frame drew the editor's right-click menu, by its Copy
+/// row.
+fn menu_shown(user: &User) -> bool {
+    user.find("Copy").is_some()
+}
+
+/// The right-click menu, raised at the caret by Shift+F10 while the list is
+/// up, takes its own keys: the arrows step its rows, leaving the caret where
+/// it is, and Escape closes it, giving the editor the keyboard back. With
+/// the menu closed, the list typed up again takes the arrows and Escape.
+#[test]
+fn the_open_right_click_menu_takes_its_keys_and_the_list_takes_them_once_it_has_closed() {
+    let mut user = op_amp();
+    on_a_new_line(&mut user);
+    let line = user.caret().0;
+    type_text(&mut user, "$");
+    user.key(Key::F10, Modifiers::SHIFT);
+    user.settle();
+    assert!(menu_shown(&user), "Shift+F10 raises the menu");
+    assert!(!rows(&user).is_empty(), "the list is up behind the menu");
+    let mut stepped = Vec::new();
+    for key in [Key::ArrowDown, Key::ArrowDown, Key::ArrowUp] {
+        user.key(key, NONE);
+        user.settle();
+        stepped.push(user.focused.clone());
+    }
+    assert_eq!(
+        stepped,
+        ["Go to definition", "Find references", "Go to definition"].map(|row| Some(row.to_owned())),
+        "the arrows step the menu's rows"
+    );
+    assert_eq!(user.caret().0, line, "the caret stays");
+    user.key(Key::Escape, NONE);
+    user.settle();
+    assert!(!menu_shown(&user), "Escape closes the menu");
+    assert_eq!(
+        user.focused.as_deref(),
+        Some(EDITOR),
+        "the editor has the keyboard back"
+    );
+
+    // The list shows only while the editor has the keyboard, so the menu's
+    // rows took it away; typing brings it up again.
+    user.key(Key::Backspace, NONE);
+    type_text(&mut user, "$");
+    let chosen = description(&user);
+    assert!(!rows(&user).is_empty(), "the list is up");
+    user.key(Key::ArrowDown, NONE);
+    user.settle();
+    assert_ne!(description(&user), chosen, "the list takes the arrow");
+    assert_eq!(user.caret().0, line, "and the caret stays");
+    user.key(Key::Escape, NONE);
+    user.settle();
+    assert!(rows(&user).is_empty(), "the list takes Escape");
+    assert_eq!(
+        user.focused.as_deref(),
+        Some(EDITOR),
+        "the editor keeps the keyboard"
+    );
+}

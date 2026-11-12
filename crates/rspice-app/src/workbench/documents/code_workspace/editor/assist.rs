@@ -96,8 +96,13 @@ fn state_id(editor_id: egui::Id) -> egui::Id {
 }
 
 /// Take the keys the list and the cards own, before the editor would.
+/// While the editor's right-click menu is open the keys are the menu's,
+/// Escape to close it and the arrows to step its rows, and neither the list
+/// nor a card takes any.
 pub(super) fn consume_keys(ui: &Ui, editor_id: egui::Id, editable: bool) -> AssistKeys {
-    if !ui.memory(|memory| memory.has_focus(editor_id)) {
+    if !ui.memory(|memory| memory.has_focus(editor_id))
+        || crate::workbench::documents::virtual_text_editor::context_menu_open(ui.ctx(), editor_id)
+    {
         return AssistKeys::default();
     }
     let state = ui
