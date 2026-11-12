@@ -16,6 +16,7 @@ use super::state::{ConsoleChannel, ConsolePage, Workspace};
 
 pub(crate) mod code_context;
 mod enablement;
+pub(crate) mod netlist_validation;
 mod registry;
 pub(crate) use rspice_app_results::workbench::commands::result_navigation;
 pub(crate) mod vocabulary;

@@ -5,11 +5,11 @@
 
 use crate::workbench::FolderListPreference;
 use crate::workbench::RSpiceApp;
+use crate::workbench::commands::netlist_validation::validate_visible_netlist_source;
 use crate::workbench::workflows::netlist_workflow::tests::state_with_owned_strategy;
 use crate::workbench::workflows::netlist_workflow::tests::vendor_profiles::{cases, source};
 use crate::workbench::workflows::netlist_workflow::{
     apply_imported_netlist, apply_staged_external_netlist_change, save_owned_netlist_source,
-    validate_visible_netlist_source,
 };
 
 #[test]

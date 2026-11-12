@@ -1,11 +1,12 @@
 //! Netlist workspace workflows.
 //!
-//! Validating the visible deck and composing the source a run executes.
-//! Validation is pinned to an exact content digest and project revision, so
-//! an edit after validation invalidates it rather than being carried along.
+//! The parts of validating the visible deck, and composing the source a run
+//! executes. Validation is pinned to an exact content digest and project
+//! revision, so an edit after validation invalidates it rather than being
+//! carried along. The shell's `commands::netlist_validation` runs the
+//! validation and the format over these parts.
 
 use crate::diagnostics::{LogSeverity, LogSource};
-use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
 
@@ -38,198 +39,7 @@ pub(crate) fn poll_browser_netlist_workflow(state: &mut AppState) {
     platform::poll_browser_dependency_relink(state);
 }
 
-/// Validate and retain the exact visible manual-deck snapshot, including its
-/// sealed dependency closure and execution-target contract. A later Run must
-/// match this one-shot authorized snapshot byte for byte.
-pub(crate) fn validate_visible_netlist_source(app: &mut RSpiceApp) -> bool {
-    use crate::state::NetlistValidationReceipt;
-    use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
-
-    if app.state.code.netlist.active_document == ActiveNetlistDocument::GeneratedDiff {
-        app.state
-            .prompt("A revision comparison is read-only and cannot be validated.");
-        return false;
-    }
-    if app.state.code.netlist.active_dependency_identity.is_some() {
-        let message = app
-            .state
-            .workbench
-            .messages()
-            .text(crate::workbench::MessageId::NetlistRootValidationRequired);
-        app.state.prompt(message);
-        return false;
-    }
-    if app.state.code.netlist.active_document == ActiveNetlistDocument::Generated
-        && (app.state.model.netlist_artifacts.generation_error.is_some()
-            || app.state.model.netlist_artifacts.generated_input_digest
-                != app
-                    .state
-                    .model
-                    .netlist_artifacts
-                    .current_generation_input_digest)
-    {
-        let error = app
-            .state
-            .model
-            .netlist_artifacts
-            .generation_error
-            .clone()
-            .unwrap_or_else(|| "Generated netlist is stale.".to_owned());
-        app.state.model.netlist_artifacts.validation = None;
-        record_validation_failure(&mut app.state, &error);
-        app.state.model.netlist_artifacts.validation_error = Some(error);
-        return false;
-    }
-
-    let visible_digest =
-        crate::state::content_digest(&app.state.model.simulation.source.netlist_content);
-    match app
-        .simulation_controller
-        .validate_manual_deck_document(&app.state)
-    {
-        Ok(metadata) => {
-            if let Err(error) = acknowledge_canonical_dependencies(
-                &mut app.state,
-                &metadata.sealed_source_dependencies,
-            ) {
-                app.invalidate_simulation_preflight();
-                app.state.model.netlist_artifacts.validation = None;
-                record_validation_failure(&mut app.state, &error);
-                app.state.model.netlist_artifacts.validation_error = Some(error);
-                return false;
-            }
-            if let Err(error) = acknowledge_canonical_validation(&mut app.state) {
-                app.invalidate_simulation_preflight();
-                app.state.model.netlist_artifacts.validation = None;
-                record_validation_failure(&mut app.state, &error);
-                app.state.model.netlist_artifacts.validation_error = Some(error);
-                return false;
-            }
-            app.state.model.netlist_artifacts.validation = Some(NetlistValidationReceipt {
-                visible_content_digest: visible_digest,
-                executable_source_digest: metadata.source_digest,
-                prepared_snapshot_digest: metadata.snapshot_digest,
-                project_revision: metadata.project_revision,
-                task_count: metadata.task_count,
-                advisory_count: metadata.advisories.len(),
-            });
-            app.state.model.netlist_artifacts.validation_error = None;
-            app.state.record(
-                LogSeverity::Info,
-                LogSource::Netlist,
-                format!(
-                    "Validated the netlist: {} task{}.",
-                    metadata.task_count,
-                    if metadata.task_count == 1 { "" } else { "s" },
-                ),
-            );
-            true
-        }
-        Err(error) => {
-            let message = error.to_string();
-            invalidate_canonical_validation(&mut app.state);
-            app.state.model.netlist_artifacts.validation = None;
-            record_validation_failure(&mut app.state, &message);
-            app.state.model.netlist_artifacts.validation_error = Some(message);
-            false
-        }
-    }
-}
-
-/// Format the deck or the include the netlist editor shows, when it is
-/// editable: trailing blanks come off every card but the title, and the
-/// text ends with a line end. An include is formatted only when it parses
-/// without errors, and the deck only when it validates, after validating
-/// it when its validation is not current.
-pub(crate) fn format_owned_netlist(app: &mut RSpiceApp) {
-    if !crate::workbench::documents::netlist_document::active_netlist_source_is_editable(&app.state)
-    {
-        return;
-    }
-    let source = app.state.model.simulation.source.netlist_content.clone();
-    let dependency_document = app.state.code.netlist.active_dependency_identity.is_some();
-    if dependency_document {
-        let has_errors = app.state.code.netlist.diagnostics.iter().any(|diagnostic| {
-            diagnostic.is_current()
-                && diagnostic.severity
-                    == crate::workbench::documents::netlist_document::DiagnosticSeverity::Error
-        });
-        if has_errors {
-            app.state
-                .prompt("Fix the include file's syntax errors before formatting it.");
-            return;
-        }
-        let formatted = normalize_owned_netlist_whitespace(&source);
-        if formatted == source {
-            app.state.prompt("The include file is already formatted.");
-        } else if crate::workbench::documents::netlist_document::replace_owned_dependency_source(
-            &mut app.state,
-            formatted,
-        ) {
-            app.state
-                .prompt("Formatted the include file; the top-level deck needs validating again.");
-        }
-        return;
-    }
-    let digest = crate::state::content_digest(&source);
-    let validation_current = app
-        .state
-        .model
-        .netlist_artifacts
-        .validation
-        .as_ref()
-        .is_some_and(|receipt| {
-            receipt.visible_content_digest == digest
-                && receipt.project_revision
-                    == app.state.model.workspace.content.project.revision().get()
-        });
-    if !validation_current {
-        validate_visible_netlist_source(app);
-    }
-    let validation_current = app
-        .state
-        .model
-        .netlist_artifacts
-        .validation
-        .as_ref()
-        .is_some_and(|receipt| {
-            receipt.visible_content_digest == digest
-                && receipt.project_revision
-                    == app.state.model.workspace.content.project.revision().get()
-        });
-    if !validation_current {
-        let message = app
-            .state
-            .model
-            .netlist_artifacts
-            .validation_error
-            .clone()
-            .unwrap_or_else(|| "the netlist does not validate".to_owned());
-        // Validation has already recorded why it failed; this answers the
-        // format gesture.
-        app.state
-            .prompt(format!("The netlist was not formatted: {message}"));
-        return;
-    }
-
-    let formatted = normalize_owned_netlist_whitespace(&source);
-    if formatted == source {
-        app.state.prompt("The netlist is already formatted.");
-        return;
-    }
-    if crate::workbench::documents::netlist_document::replace_owned_source(
-        &mut app.state,
-        formatted,
-    ) {
-        app.state
-            .prompt("Formatted the netlist; it needs validating again.");
-    } else {
-        app.state
-            .prompt("The netlist changed before formatting finished. Review it and try again.");
-    }
-}
-
-fn normalize_owned_netlist_whitespace(source: &str) -> String {
+pub(crate) fn normalize_owned_netlist_whitespace(source: &str) -> String {
     if source.is_empty() {
         return String::new();
     }
@@ -263,7 +73,7 @@ fn normalize_owned_netlist_whitespace(source: &str) -> String {
     formatted
 }
 
-fn record_validation_failure(state: &mut AppState, error: &str) {
+pub(crate) fn record_validation_failure(state: &mut AppState, error: &str) {
     state.record(
         LogSeverity::Error,
         LogSource::Netlist,
@@ -288,7 +98,7 @@ fn record_include_resolutions(
     }
 }
 
-fn acknowledge_canonical_dependencies(
+pub(crate) fn acknowledge_canonical_dependencies(
     state: &mut AppState,
     sealed: &[rspice_core::netlist::ResolvedIncludeDependency],
 ) -> Result<(), String> {
@@ -608,7 +418,7 @@ fn dependency_source_authority(
     }
 }
 
-fn acknowledge_canonical_validation(state: &mut AppState) -> Result<(), String> {
+pub(crate) fn acknowledge_canonical_validation(state: &mut AppState) -> Result<(), String> {
     let owned = state.code.netlist.active_document
         == crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource;
     let narrow_owned = owned
@@ -677,7 +487,7 @@ fn acknowledge_canonical_validation(state: &mut AppState) -> Result<(), String> 
     Ok(())
 }
 
-fn invalidate_canonical_validation(state: &mut AppState) {
+pub(crate) fn invalidate_canonical_validation(state: &mut AppState) {
     let document = match state.code.netlist.active_document {
         crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated => {
             state.model.netlist_artifacts.generated_document.as_mut()

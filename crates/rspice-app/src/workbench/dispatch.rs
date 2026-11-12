@@ -669,11 +669,10 @@ mod tests {
     fn run_on_the_netlist_workspace_runs_the_deck_and_not_the_plan() {
         use crate::state::SimulationRunIntent;
         use crate::workbench::RSpiceApp;
+        use crate::workbench::commands::netlist_validation::validate_visible_netlist_source;
         use crate::workbench::framework::command_registry::{CommandAvailability, ids};
         use crate::workbench::state::Workspace;
-        use crate::workbench::workflows::netlist_workflow::{
-            apply_imported_netlist, validate_visible_netlist_source,
-        };
+        use crate::workbench::workflows::netlist_workflow::apply_imported_netlist;
 
         let mut app = RSpiceApp::test_instance();
         app.state

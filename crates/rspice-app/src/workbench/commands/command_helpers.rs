@@ -316,7 +316,7 @@ pub(in crate::workbench) fn answer_code_request(app: &mut RSpiceApp, request: Co
             }
         }
         CodeRequest::ValidateCodeDocument => {
-            crate::workbench::workflows::netlist_workflow::validate_visible_netlist_source(app);
+            super::netlist_validation::validate_visible_netlist_source(app);
         }
         CodeRequest::ManageSourceDocument => {
             if let Err(error) = crate::workbench::app::open_source_document_dialog(&mut app.state) {
@@ -557,7 +557,7 @@ pub(in crate::workbench) fn answer_code_request(app: &mut RSpiceApp, request: Co
             );
         }
         CodeRequest::FormatNetlistDocument => {
-            crate::workbench::workflows::netlist_workflow::format_owned_netlist(app);
+            super::netlist_validation::format_owned_netlist(app);
         }
         CodeRequest::ImportDroppedNetlist(dropped) => {
             crate::workbench::workflows::netlist_workflow::import_dropped_netlist(

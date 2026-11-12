@@ -2316,9 +2316,8 @@ mod tests {
     #[test]
     fn the_run_history_primary_runs_the_netlist_deck_on_the_netlist_workspace() {
         use crate::state::SimulationRunIntent;
-        use crate::workbench::workflows::netlist_workflow::{
-            apply_imported_netlist, validate_visible_netlist_source,
-        };
+        use crate::workbench::commands::netlist_validation::validate_visible_netlist_source;
+        use crate::workbench::workflows::netlist_workflow::apply_imported_netlist;
 
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
