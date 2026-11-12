@@ -878,3 +878,153 @@ fn unloaded_connect_rules_survive_a_verilog_include_wrapper() {
          direct {direct_q}, wrapped {wrapped_q}"
     );
 }
+
+//=============================================================================
+// A converter the coupled run roots, dated at its crossings
+//=============================================================================
+
+/// A register that follows each rising edge of its clock by two ticks.
+const EDGE_FOLLOWER: &str = "`timescale 1ns/1ps\n\
+module follower(clk, q); input clk; wire clk; output q; reg q;\n\
+initial q = 1'b0;\n\
+always @(posedge clk) q <= #2 ~q;\n\
+endmodule\n";
+
+/// The sigma-delta modulator's clock path: a 2 ns ramp through a
+/// single-threshold `adc_bridge` whose output a module reads. The coupled run
+/// roots the converter and lands one representable instant past each
+/// crossing, where the input can read a rounding short of the threshold; the
+/// root's crossing decides there, so every edge the converter publishes is
+/// its crossing plus its 1 ns delay, landed in one point, and the module's
+/// `#2` after each rising edge falls on the tick image.
+#[test]
+fn a_converter_read_by_a_module_dates_every_edge_at_its_crossing() {
+    let follower = ModelFile::new(EDGE_FOLLOWER);
+    let periods = 100;
+    let result = run(
+        &format!(
+            "* converter edges dated at their crossings\n\
+             vclk aclk 0 dc 0 pulse(0 1 0.1u 2n 2n 98n 200n)\n\
+             abridge [aclk] [dclk] adc_buff\n\
+             .model adc_buff adc_bridge(in_low=0.5 in_high=0.5)\n\
+             Xf dclk q follower\n\
+             .va \"{}\" follower\n\
+             .end\n",
+            follower.path()
+        ),
+        0.1e-6 + periods as f64 * 200e-9,
+        0.1e-6,
+    );
+    let ns = 1e-9;
+    let mut previous = None;
+    let mut edges = Vec::new();
+    for (time, state) in trace_points(&result, "dclk") {
+        if time > 0.0 && previous.is_some_and(|previous| previous != state) {
+            edges.push((time, state));
+        }
+        previous = Some(state);
+    }
+    assert_eq!(edges.len(), 2 * periods, "{edges:?}");
+    let mut late = Vec::new();
+    for (index, &(time, state)) in edges.iter().enumerate() {
+        let period = (index / 2) as f64 * 200.0;
+        // The ramp crosses 0.5 V 1 ns into each 2 ns edge; the bridge adds 1 ns.
+        let exact = match state {
+            DigitalState::One => (100.0 + period + 2.0) * ns,
+            _ => (100.0 + period + 102.0) * ns,
+        };
+        if (time - exact).abs() > 64.0 * f64::EPSILON * exact {
+            late.push((time, time - exact));
+        }
+        assert!(
+            result.time.binary_search_by(|t| t.total_cmp(&time)).is_ok(),
+            "the edge at {time:.17e} s is an accepted point"
+        );
+    }
+    assert!(
+        late.is_empty(),
+        "{} of {} converter edges are not at their crossing plus 1 ns: {late:?}",
+        late.len(),
+        edges.len()
+    );
+    let followed = rising_edges(&result, "q")
+        .into_iter()
+        .chain(
+            trace_points(&result, "q")
+                .windows(2)
+                .filter(|pair| pair[0].1 == DigitalState::One && pair[1].1 == DigitalState::Zero)
+                .map(|pair| pair[1].0),
+        )
+        .collect::<Vec<_>>();
+    assert_eq!(followed.len(), periods, "{followed:?}");
+    for time in followed {
+        let picoseconds = (time * 1e12).round();
+        assert_eq!(
+            time,
+            picoseconds / 1e12,
+            "the register moves on a tick image, 2 ns after a rising clock edge"
+        );
+        assert_eq!(
+            (picoseconds as u64 - 104_000) % 200_000,
+            0,
+            "the register moves 2 ns after a rising clock edge: {time:.17e} s"
+        );
+    }
+}
+
+/// The same clock through a converter with an unknown band, 0.4 V to 0.6 V,
+/// on steps long enough to cross both edges at once. The root locates the
+/// first edge crossed and the converter takes the state just past it there,
+/// so every clock edge publishes X at its first edge and the new level at its
+/// second, each at its crossing plus 1 ns, as ngspice's `adc_bridge` does.
+#[test]
+fn a_converter_crossing_its_unknown_band_publishes_x_at_the_first_edge() {
+    let follower = ModelFile::new(EDGE_FOLLOWER);
+    let periods = 20;
+    let result = run(
+        &format!(
+            "* converter band edges dated at their crossings\n\
+             vclk aclk 0 dc 0 pulse(0 1 0.1u 2n 2n 98n 200n)\n\
+             abridge [aclk] [dclk] adc_band\n\
+             .model adc_band adc_bridge(in_low=0.4 in_high=0.6)\n\
+             Xf dclk q follower\n\
+             .va \"{}\" follower\n\
+             .end\n",
+            follower.path()
+        ),
+        0.1e-6 + periods as f64 * 200e-9,
+        0.1e-6,
+    );
+    let ns = 1e-9;
+    let mut previous = None;
+    let mut edges = Vec::new();
+    for (time, state) in trace_points(&result, "dclk") {
+        if time > 0.0 && previous.is_some_and(|previous| previous != state) {
+            edges.push((time, state));
+        }
+        previous = Some(state);
+    }
+    let expected: Vec<(f64, DigitalState)> = (0..periods)
+        .flat_map(|period| {
+            let start = 100.0 + 200.0 * period as f64;
+            [
+                (start + 1.8, DigitalState::Unknown),
+                (start + 2.2, DigitalState::One),
+                (start + 101.8, DigitalState::Unknown),
+                (start + 102.2, DigitalState::Zero),
+            ]
+        })
+        .collect();
+    assert_eq!(
+        edges.iter().map(|edge| edge.1).collect::<Vec<_>>(),
+        expected.iter().map(|edge| edge.1).collect::<Vec<_>>(),
+        "every clock edge passes through X: {edges:?}"
+    );
+    for (&(time, _), &(at, _)) in edges.iter().zip(&expected) {
+        let exact = at * ns;
+        assert!(
+            (time - exact).abs() <= 64.0 * f64::EPSILON * exact,
+            "a converter edge at {time:.17e} s is not at its crossing plus 1 ns, {exact:.17e} s"
+        );
+    }
+}
