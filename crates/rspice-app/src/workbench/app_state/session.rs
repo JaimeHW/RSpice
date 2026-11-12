@@ -11,4 +11,4 @@ pub(in crate::workbench) mod session_store;
 pub(crate) use rspice_app_settings::workbench::app_state::session::shortcut_library;
 pub(crate) use rspice_app_workbench::workbench::app_state::session::shortcuts;
 pub(in crate::workbench) mod state_init;
-pub(in crate::workbench) mod wire;
+pub(crate) mod wire;

@@ -266,7 +266,7 @@ impl UiSessionWire {
 /// [`Self::default`] holds.
 #[derive(Deserialize)]
 #[serde(rename = "WorkbenchState")]
-pub(in crate::workbench) struct WorkbenchWire {
+pub(crate) struct WorkbenchWire {
     #[serde(default)]
     workspace: Workspace,
     #[serde(default)]
@@ -371,7 +371,7 @@ pub(in crate::workbench) struct WorkbenchWire {
 /// that `Option::is_none` takes it as it is.
 #[derive(Serialize)]
 #[serde(rename = "WorkbenchState")]
-pub(in crate::workbench) struct WorkbenchWireRef<'a> {
+pub(crate) struct WorkbenchWireRef<'a> {
     #[serde(default)]
     workspace: &'a Workspace,
     #[serde(default)]
@@ -466,7 +466,7 @@ pub(in crate::workbench) struct WorkbenchWireRef<'a> {
 
 impl<'a> WorkbenchWireRef<'a> {
     /// Borrow what a session keeps of `state`.
-    pub(in crate::workbench) fn capture(state: &'a AppState) -> Self {
+    pub(crate) fn capture(state: &'a AppState) -> Self {
         Self::capture_parts(
             &state.workbench,
             &state.design,
@@ -722,7 +722,7 @@ impl WorkbenchWire {
     /// Runtime-only fields keep what `state` holds. A restored session
     /// scatters onto the defaults, whose runtime-only fields hold their
     /// types' defaults.
-    pub(in crate::workbench) fn scatter(self, state: &mut AppState) {
+    pub(crate) fn scatter(self, state: &mut AppState) {
         // No `..`: a field added to `WorkbenchSession` does not compile until it
         // is either restored here or named as runtime-only.
         let WorkbenchSession {

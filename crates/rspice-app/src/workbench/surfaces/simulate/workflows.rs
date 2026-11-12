@@ -971,7 +971,7 @@ pub(super) fn validate_clone_plan_draft(
     Ok(())
 }
 
-pub(super) fn commit_clone_plan(
+pub(crate) fn commit_clone_plan(
     cx: &mut Cx<'_, SimulateFeature>,
     draft: &ClonePlanDraft,
 ) -> Result<String, String> {
@@ -1641,7 +1641,7 @@ pub(super) fn saved_output_storage_summary(
     }
 }
 
-pub(super) fn finish_workflow_choice<D>(
+pub(crate) fn finish_workflow_choice<D>(
     cx: &mut Cx<'_, SimulateFeature>,
     choice: DialogChoice,
     mut draft: D,
@@ -1669,7 +1669,7 @@ pub(super) fn finish_workflow_choice<D>(
     }
 }
 
-pub(super) trait WorkflowDraft {
+pub(crate) trait WorkflowDraft {
     fn set_error(&mut self, error: String);
 }
 

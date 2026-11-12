@@ -11,6 +11,7 @@ use super::output_evidence::{
 use super::*;
 use crate::product::{ContentDigest, ObjectRevision};
 use crate::state::{AnalysisResult, AnalysisType, SimulationRun, SimulationState};
+use crate::workbench::simulate::test_host::SimulateTestHost;
 
 /// Name the driven tone of one PSS instance.
 ///
@@ -52,17 +53,14 @@ fn named_saved_output_draft() -> SavedOutputDraft {
 
 #[test]
 fn run_set_workload_counts_analysis_owned_temperature_points_and_assembly() {
-    let mut app = RSpiceApp::test_instance();
-    let before = page_runset::exact_plan_task_count(&app.state.model)
+    let mut harness = SimulateTestHost::harness();
+    let before = page_runset::exact_plan_task_count(&harness.model)
         .unwrap()
         .expect("baseline workload");
-    insert_analysis_instance(
-        &mut crate::workbench::features::cx(&mut app),
-        AnalysisKind::Temperature,
-    )
-    .expect("a temperature controller inserts");
+    insert_analysis_instance(&mut harness.cx(), AnalysisKind::Temperature)
+        .expect("a temperature controller inserts");
 
-    let tasks = page_runset::exact_plan_task_count(&app.state.model)
+    let tasks = page_runset::exact_plan_task_count(&harness.model)
         .expect("workload is valid")
         .expect("reference-only Run Set has an exact workload");
 
@@ -73,24 +71,20 @@ fn run_set_workload_counts_analysis_owned_temperature_points_and_assembly() {
 
 #[test]
 fn run_set_workload_counts_generated_pss_spectrum_task() {
-    let mut app = RSpiceApp::test_instance();
-    let before = page_runset::exact_plan_task_count(&app.state.model)
+    let mut harness = SimulateTestHost::harness();
+    let before = page_runset::exact_plan_task_count(&harness.model)
         .unwrap()
         .expect("baseline workload");
-    insert_analysis_instance(
-        &mut crate::workbench::features::cx(&mut app),
-        AnalysisKind::Pss,
-    )
-    .expect("a PSS instance inserts");
+    insert_analysis_instance(&mut harness.cx(), AnalysisKind::Pss).expect("a PSS instance inserts");
     name_every_pss_tone(
-        app.state
+        harness
             .model
             .sim_setup
             .stable_analysis_plan_mut()
             .expect("stable plan"),
     );
 
-    let tasks = page_runset::exact_plan_task_count(&app.state.model)
+    let tasks = page_runset::exact_plan_task_count(&harness.model)
         .expect("workload is valid")
         .expect("reference-only Run Set has an exact workload");
 
@@ -140,16 +134,16 @@ fn envelope_source_catalog_rejects_unknown_and_dc_only_selections() {
 
 #[test]
 fn dependency_source_catalog_uses_the_configured_design_not_the_open_netlist_document() {
-    let mut app = RSpiceApp::test_instance();
-    app.state.provision_test_project_technology_contract();
+    let mut harness = SimulateTestHost::harness();
+    harness.model.provision_test_project_technology_contract();
     rspice_app_state::workbench::examples::load_example(
         "CMOS Inverter",
-        &mut app.state.model.schematic,
+        &mut harness.model.schematic,
     );
-    app.state.model.simulation.source.netlist_content =
+    harness.model.simulation.source.netlist_content =
         "stale document\nVSTALE stale 0 PULSE(0 1 0 1n 1n 1u 2u)\n.end\n".to_owned();
 
-    let catalog = build_envelope_source_catalog(&app.state.model);
+    let catalog = build_envelope_source_catalog(&harness.model);
 
     assert_eq!(catalog.diagnostic, None);
     assert!(catalog.names.iter().any(|name| name == "VIN"));
@@ -158,25 +152,25 @@ fn dependency_source_catalog_uses_the_configured_design_not_the_open_netlist_doc
 
 #[test]
 fn dependency_source_cache_ignores_document_switches_and_tracks_design_commits() {
-    let mut app = RSpiceApp::test_instance();
-    let original = envelope_source_catalog_input_digest(&app.state.model);
-    app.state.model.simulation.source.netlist_content = "unrelated editor document".to_owned();
+    let mut harness = SimulateTestHost::harness();
+    let original = envelope_source_catalog_input_digest(&harness.model);
+    harness.model.simulation.source.netlist_content = "unrelated editor document".to_owned();
     assert_eq!(
-        envelope_source_catalog_input_digest(&app.state.model),
+        envelope_source_catalog_input_digest(&harness.model),
         original
     );
 
-    app.state.model.design_execution_epoch = app.state.model.design_execution_epoch.wrapping_add(1);
+    harness.model.design_execution_epoch = harness.model.design_execution_epoch.wrapping_add(1);
     assert_ne!(
-        envelope_source_catalog_input_digest(&app.state.model),
+        envelope_source_catalog_input_digest(&harness.model),
         original
     );
 
-    let mut app = RSpiceApp::test_instance();
-    let original = envelope_source_catalog_input_digest(&app.state.model);
-    app.state.model.sim_setup.options.reltol *= 0.5;
+    let mut harness = SimulateTestHost::harness();
+    let original = envelope_source_catalog_input_digest(&harness.model);
+    harness.model.sim_setup.options.reltol *= 0.5;
     assert_ne!(
-        envelope_source_catalog_input_digest(&app.state.model),
+        envelope_source_catalog_input_digest(&harness.model),
         original,
         "prepared-source option changes invalidate the catalog"
     );
@@ -677,26 +671,26 @@ fn validating_a_dependent_checks_every_transitive_prerequisite_draft() {
     })
     .expect("invalid editable PSS draft is retained");
 
-    let mut app = RSpiceApp::test_instance();
-    app.state.model.sim_setup.analysis_plan = Some(plan);
-    validate_analysis_instance(&mut crate::workbench::features::cx(&mut app), pac);
+    let mut harness = SimulateTestHost::harness();
+    harness.model.sim_setup.analysis_plan = Some(plan);
+    validate_analysis_instance(&mut harness.cx(), pac);
 
     assert!(
-        app.state
+        harness
             .model
             .analysis_lifecycle_status
             .message()
             .contains(&pss.to_string())
     );
     assert!(
-        app.state
+        harness
             .model
             .analysis_lifecycle_status
             .message()
             .starts_with("Validate rejected fail-closed")
     );
     assert!(
-        app.state.model.analysis_lifecycle_status.is_refusal(),
+        harness.model.analysis_lifecycle_status.is_refusal(),
         "a rejected validation is a refusal, not a receipt"
     );
 }
@@ -714,16 +708,16 @@ fn selected_analysis_exposes_every_compatible_earlier_prerequisite() {
     plan.bind_dependency(ac, AnalysisKind::OperatingPoint, first_op)
         .expect("exact first OP binding succeeds");
 
-    let mut app = RSpiceApp::test_instance();
-    app.state.model.sim_setup.analysis_plan = Some(plan);
-    app.state.simulate.active_analysis_instance = Some(ac);
+    let mut harness = SimulateTestHost::harness();
+    harness.model.sim_setup.analysis_plan = Some(plan);
+    harness.state.active_analysis_instance = Some(ac);
     let dependency_sources = EnvelopeSourceCatalog {
         source_digest: ContentDigest::from_bytes([7; 32]),
         names: vec!["VIN_DIFF".to_owned()],
         netlist_source: None,
         diagnostic: None,
     };
-    let selected = selected_analysis(&app.state.model, &app.state.simulate, &dependency_sources)
+    let selected = selected_analysis(&harness.model, &harness.state, &dependency_sources)
         .expect("selection resolves")
         .expect("analysis is selected");
     let candidates = selected
@@ -737,8 +731,7 @@ fn selected_analysis_exposes_every_compatible_earlier_prerequisite() {
     assert_eq!(candidates[0].id, first_op);
     assert_eq!(candidates[1].id, second_op);
     // A bound prerequisite is named by what it is called, never its id.
-    let first_name = app
-        .state
+    let first_name = harness
         .model
         .sim_setup
         .stable_analysis_plan()
@@ -764,9 +757,9 @@ fn selected_dependent_reports_contextual_pss_mismatch_and_only_offers_executable
     plan.bind_dependency(pac, AnalysisKind::Pss, pss)
         .expect("PAC binds PSS");
 
-    let mut app = RSpiceApp::test_instance();
-    app.state.model.sim_setup.analysis_plan = Some(plan);
-    app.state.simulate.active_analysis_instance = Some(pac);
+    let mut harness = SimulateTestHost::harness();
+    harness.model.sim_setup.analysis_plan = Some(plan);
+    harness.state.active_analysis_instance = Some(pac);
 
     let exact_sources = EnvelopeSourceCatalog {
             source_digest: ContentDigest::from_bytes([8; 32]),
@@ -777,7 +770,7 @@ fn selected_dependent_reports_contextual_pss_mismatch_and_only_offers_executable
             ),
             diagnostic: None,
         };
-    let selected = selected_analysis(&app.state.model, &app.state.simulate, &exact_sources)
+    let selected = selected_analysis(&harness.model, &harness.state, &exact_sources)
         .expect("selection resolves")
         .expect("PAC remains selected");
     assert!(
@@ -797,7 +790,7 @@ fn selected_dependent_reports_contextual_pss_mismatch_and_only_offers_executable
         netlist_source: None,
         diagnostic: Some("netlist elaboration failed".to_owned()),
     };
-    let selected = selected_analysis(&app.state.model, &app.state.simulate, &unavailable_sources)
+    let selected = selected_analysis(&harness.model, &harness.state, &unavailable_sources)
         .expect("selection resolves fail-closed")
         .expect("PAC remains selected");
     assert!(selected.contextual_dependency_error.is_some());
@@ -812,12 +805,12 @@ fn disabled_dependents_can_prepare_required_prerequisites_in_one_action() {
     let mut plan = crate::simulation::plan::SimulationPlan::empty();
     let (ac, _) = plan.insert(AnalysisKind::Ac).expect("AC inserts");
     plan.set_enabled(ac, false).expect("AC disables");
-    let mut app = RSpiceApp::test_instance();
-    app.state.model.sim_setup.analysis_plan = Some(plan);
-    app.state.simulate.active_analysis_instance = Some(ac);
-    let sources = build_envelope_source_catalog(&app.state.model);
+    let mut harness = SimulateTestHost::harness();
+    harness.model.sim_setup.analysis_plan = Some(plan);
+    harness.state.active_analysis_instance = Some(ac);
+    let sources = build_envelope_source_catalog(&harness.model);
 
-    let selected = selected_analysis(&app.state.model, &app.state.simulate, &sources)
+    let selected = selected_analysis(&harness.model, &harness.state, &sources)
         .expect("selection resolves")
         .expect("AC remains selected");
     assert!(!selected.enabled);
@@ -826,18 +819,14 @@ fn disabled_dependents_can_prepare_required_prerequisites_in_one_action() {
         Some("Add Operating point")
     );
 
-    apply_analysis_action(
-        &mut crate::workbench::features::cx(&mut app),
-        ac,
-        AnalysisAction::RepairDependencies,
-    );
-    let plan = app.state.model.sim_setup.stable_analysis_plan().unwrap();
+    apply_analysis_action(&mut harness.cx(), ac, AnalysisAction::RepairDependencies);
+    let plan = harness.model.sim_setup.stable_analysis_plan().unwrap();
     let dependency = plan.instance(ac).unwrap().dependencies()[0];
     let op = plan.instance(dependency.target()).unwrap();
     assert_eq!(op.kind(), AnalysisKind::OperatingPoint);
     assert!(op.enabled());
     assert!(
-        app.state
+        harness
             .model
             .analysis_lifecycle_status
             .message()
@@ -856,12 +845,12 @@ fn phase_noise_guides_autonomous_pss_authoring_when_it_cannot_be_inferred() {
         pnoise.noise_ref_idx = 2;
     })
     .expect("phase-noise selection commits");
-    let mut app = RSpiceApp::test_instance();
-    app.state.model.sim_setup.analysis_plan = Some(plan);
-    app.state.simulate.active_analysis_instance = Some(pnoise);
-    let sources = build_envelope_source_catalog(&app.state.model);
+    let mut harness = SimulateTestHost::harness();
+    harness.model.sim_setup.analysis_plan = Some(plan);
+    harness.state.active_analysis_instance = Some(pnoise);
+    let sources = build_envelope_source_catalog(&harness.model);
 
-    let selected = selected_analysis(&app.state.model, &app.state.simulate, &sources)
+    let selected = selected_analysis(&harness.model, &harness.state, &sources)
         .expect("selection resolves")
         .expect("PNOISE remains selected");
     assert_eq!(selected.repair_label, None);
@@ -871,16 +860,15 @@ fn phase_noise_guides_autonomous_pss_authoring_when_it_cannot_be_inferred() {
     );
 
     apply_analysis_action(
-        &mut crate::workbench::features::cx(&mut app),
+        &mut harness.cx(),
         pnoise,
         AnalysisAction::PrepareAutonomousPss,
     );
-    let prepared = app
+    let prepared = harness
         .state
-        .simulate
         .active_analysis_instance
         .expect("prepared PSS becomes selected");
-    let plan = app.state.model.sim_setup.stable_analysis_plan().unwrap();
+    let plan = harness.model.sim_setup.stable_analysis_plan().unwrap();
     let prerequisite = plan.instance(prepared).expect("prepared PSS is retained");
     assert_eq!(prerequisite.kind(), AnalysisKind::Pss);
     assert!(!prerequisite.enabled());
@@ -891,23 +879,22 @@ fn phase_noise_guides_autonomous_pss_authoring_when_it_cannot_be_inferred() {
     assert!(pss.osc_node.is_empty());
     assert!(plan.instance(pnoise).unwrap().dependencies().is_empty());
     assert!(
-        app.state
+        harness
             .model
             .analysis_lifecycle_status
             .message()
             .contains("Enter the oscillator node")
     );
 
-    app.state.simulate.active_analysis_instance = Some(pnoise);
-    let selected = selected_analysis(&app.state.model, &app.state.simulate, &sources)
+    harness.state.active_analysis_instance = Some(pnoise);
+    let selected = selected_analysis(&harness.model, &harness.state, &sources)
         .expect("selection resolves after prerequisite preparation")
         .expect("PNOISE becomes selected again");
     assert_eq!(
         selected.configure_pss_label.as_deref(),
         Some("Configure existing autonomous PSS")
     );
-    let before_count = app
-        .state
+    let before_count = harness
         .model
         .sim_setup
         .stable_analysis_plan()
@@ -915,15 +902,15 @@ fn phase_noise_guides_autonomous_pss_authoring_when_it_cannot_be_inferred() {
         .instances()
         .len();
     apply_analysis_action(
-        &mut crate::workbench::features::cx(&mut app),
+        &mut harness.cx(),
         pnoise,
         AnalysisAction::PrepareAutonomousPss,
     );
-    let plan = app.state.model.sim_setup.stable_analysis_plan().unwrap();
+    let plan = harness.model.sim_setup.stable_analysis_plan().unwrap();
     assert_eq!(plan.instances().len(), before_count);
-    assert_eq!(app.state.simulate.active_analysis_instance, Some(prepared));
+    assert_eq!(harness.state.active_analysis_instance, Some(prepared));
     assert!(
-        app.state
+        harness
             .model
             .analysis_lifecycle_status
             .message()
@@ -1073,37 +1060,30 @@ fn analysis_catalog_search_preserves_canonical_group_order() {
 
 #[test]
 fn design_variable_workflow_commits_to_the_active_plan_atomically() {
-    let mut app = RSpiceApp::test_instance();
-    let plan_id = app
-        .state
+    let mut harness = SimulateTestHost::harness();
+    let plan_id = harness
         .model
         .sim_setup
         .stable_analysis_plan()
         .expect("stable plan")
         .id();
-    let revision_before = app
-        .state
+    let revision_before = harness
         .model
         .sim_setup
         .stable_analysis_plan()
         .expect("stable plan")
         .revision();
-    let count_before = app
-        .state
+    let count_before = harness
         .model
         .workspace
         .content
         .plan_data(plan_id)
         .map_or(0, |payload| payload.design_variables.len());
 
-    commit_design_variable(
-        &mut crate::workbench::features::cx(&mut app),
-        &DesignVariableDraft::default(),
-    )
-    .expect("valid variable commits");
+    commit_design_variable(&mut harness.cx(), &DesignVariableDraft::default())
+        .expect("valid variable commits");
 
-    let payload = app
-        .state
+    let payload = harness
         .model
         .workspace
         .content
@@ -1118,7 +1098,7 @@ fn design_variable_workflow_commits_to_the_active_plan_atomically() {
         Some("RLOAD_TEST")
     );
     assert!(
-        app.state
+        harness
             .model
             .sim_setup
             .stable_analysis_plan()
@@ -1131,23 +1111,20 @@ fn design_variable_workflow_commits_to_the_active_plan_atomically() {
 
 #[test]
 fn invalid_design_variable_workflow_leaves_authoritative_state_unchanged() {
-    let mut app = RSpiceApp::test_instance();
-    let plan_id = app
-        .state
+    let mut harness = SimulateTestHost::harness();
+    let plan_id = harness
         .model
         .sim_setup
         .stable_analysis_plan()
         .expect("stable plan")
         .id();
-    let revision_before = app
-        .state
+    let revision_before = harness
         .model
         .sim_setup
         .stable_analysis_plan()
         .expect("stable plan")
         .revision();
-    let count_before = app
-        .state
+    let count_before = harness
         .model
         .workspace
         .content
@@ -1156,9 +1133,9 @@ fn invalid_design_variable_workflow_leaves_authoritative_state_unchanged() {
     let mut draft = DesignVariableDraft::default();
     draft.allowed_range = "20 kohm … 30 kohm".to_owned();
 
-    assert!(commit_design_variable(&mut crate::workbench::features::cx(&mut app), &draft).is_err());
+    assert!(commit_design_variable(&mut harness.cx(), &draft).is_err());
     assert_eq!(
-        app.state
+        harness
             .model
             .workspace
             .content
@@ -1167,7 +1144,7 @@ fn invalid_design_variable_workflow_leaves_authoritative_state_unchanged() {
         count_before
     );
     assert_eq!(
-        app.state
+        harness
             .model
             .sim_setup
             .stable_analysis_plan()
@@ -1179,31 +1156,25 @@ fn invalid_design_variable_workflow_leaves_authoritative_state_unchanged() {
 
 #[test]
 fn saved_output_workflow_commits_a_typed_plan_contract() {
-    let mut app = RSpiceApp::test_instance();
-    app.state.provision_test_project_technology_contract();
-    let plan_id = app
-        .state
+    let mut harness = SimulateTestHost::harness();
+    harness.model.provision_test_project_technology_contract();
+    let plan_id = harness
         .model
         .sim_setup
         .stable_analysis_plan()
         .expect("stable plan")
         .id();
-    let count_before = app
-        .state
+    let count_before = harness
         .model
         .workspace
         .content
         .plan_data(plan_id)
         .map_or(0, |payload| payload.saved_outputs.len());
 
-    commit_saved_output(
-        &mut crate::workbench::features::cx(&mut app),
-        &named_saved_output_draft(),
-    )
-    .expect("valid output commits");
+    commit_saved_output(&mut harness.cx(), &named_saved_output_draft())
+        .expect("valid output commits");
 
-    let output = app
-        .state
+    let output = harness
         .model
         .workspace
         .content
@@ -1214,7 +1185,7 @@ fn saved_output_workflow_commits_a_typed_plan_contract() {
         .expect("saved output");
     assert_eq!(
         count_before + 1,
-        app.state
+        harness
             .model
             .workspace
             .content
@@ -1229,35 +1200,25 @@ fn saved_output_workflow_commits_a_typed_plan_contract() {
 
 #[test]
 fn clone_workflow_creates_fresh_plan_and_payload_identities_without_results() {
-    let mut app = RSpiceApp::test_instance();
-    app.state.provision_test_project_technology_contract();
-    commit_design_variable(
-        &mut crate::workbench::features::cx(&mut app),
-        &DesignVariableDraft::default(),
-    )
-    .expect("source variable");
-    commit_saved_output(
-        &mut crate::workbench::features::cx(&mut app),
-        &named_saved_output_draft(),
-    )
-    .expect("source output");
-    let source_id = app
-        .state
+    let mut harness = SimulateTestHost::harness();
+    harness.model.provision_test_project_technology_contract();
+    commit_design_variable(&mut harness.cx(), &DesignVariableDraft::default())
+        .expect("source variable");
+    commit_saved_output(&mut harness.cx(), &named_saved_output_draft()).expect("source output");
+    let source_id = harness
         .model
         .sim_setup
         .stable_analysis_plan()
         .expect("stable source plan")
         .id();
-    let source_payload = app
-        .state
+    let source_payload = harness
         .model
         .workspace
         .content
         .plan_data(source_id)
         .expect("source payload")
         .clone();
-    let retained_runs_before = app
-        .state
+    let retained_runs_before = harness
         .model
         .simulation
         .retained
@@ -1266,20 +1227,14 @@ fn clone_workflow_creates_fresh_plan_and_payload_identities_without_results() {
         .map(|run| (run.run_id, run.dataset_id, run.id))
         .collect::<Vec<_>>();
     let mut draft = ClonePlanDraft::for_source(
-        app.state
-            .model
-            .sim_setup
-            .stable_analysis_plan()
-            .unwrap()
-            .id(),
-        app.state.model.sim_setup.active_plan_name().as_str(),
+        harness.model.sim_setup.stable_analysis_plan().unwrap().id(),
+        harness.model.sim_setup.active_plan_name().as_str(),
     );
     draft.name = "Independent characterization".to_owned();
 
-    commit_clone_plan(&mut crate::workbench::features::cx(&mut app), &draft).expect("valid clone");
+    commit_clone_plan(&mut harness.cx(), &draft).expect("valid clone");
 
-    let clone_id = app
-        .state
+    let clone_id = harness
         .model
         .sim_setup
         .stable_analysis_plan()
@@ -1287,11 +1242,10 @@ fn clone_workflow_creates_fresh_plan_and_payload_identities_without_results() {
         .id();
     assert_ne!(clone_id, source_id);
     assert_eq!(
-        app.state.model.sim_setup.active_plan_name().as_str(),
+        harness.model.sim_setup.active_plan_name().as_str(),
         draft.name
     );
-    let clone_payload = app
-        .state
+    let clone_payload = harness
         .model
         .workspace
         .content
@@ -1308,7 +1262,7 @@ fn clone_workflow_creates_fresh_plan_and_payload_identities_without_results() {
         source_payload.saved_outputs[0].id
     );
     assert_eq!(
-        app.state
+        harness
             .model
             .simulation
             .retained
@@ -1322,20 +1276,12 @@ fn clone_workflow_creates_fresh_plan_and_payload_identities_without_results() {
 
 #[test]
 fn plan_manager_export_import_remaps_all_local_identities() {
-    let mut app = RSpiceApp::test_instance();
-    app.state.provision_test_project_technology_contract();
-    commit_design_variable(
-        &mut crate::workbench::features::cx(&mut app),
-        &DesignVariableDraft::default(),
-    )
-    .expect("source variable");
-    commit_saved_output(
-        &mut crate::workbench::features::cx(&mut app),
-        &named_saved_output_draft(),
-    )
-    .expect("source output");
-    let source_plan = app
-        .state
+    let mut harness = SimulateTestHost::harness();
+    harness.model.provision_test_project_technology_contract();
+    commit_design_variable(&mut harness.cx(), &DesignVariableDraft::default())
+        .expect("source variable");
+    commit_saved_output(&mut harness.cx(), &named_saved_output_draft()).expect("source output");
+    let source_plan = harness
         .model
         .sim_setup
         .stable_analysis_plan()
@@ -1346,19 +1292,18 @@ fn plan_manager_export_import_remaps_all_local_identities() {
         .iter()
         .map(|instance| instance.id())
         .collect::<Vec<_>>();
-    let source_payload = app
-        .state
+    let source_payload = harness
         .model
         .workspace
         .content
         .plan_data(source_id)
         .expect("source payload")
         .clone();
-    let json = super::plan_manager::export_simulation_plan_package(&app.state.model, source_id)
+    let json = super::plan_manager::export_simulation_plan_package(&harness.model, source_id)
         .expect("portable export");
 
     let (imported_id, _) = super::plan_manager::commit_import_simulation_plan(
-        &mut crate::workbench::features::cx(&mut app),
+        &mut harness.cx(),
         &json,
         "Imported independent characterization",
     )
@@ -1366,18 +1311,17 @@ fn plan_manager_export_import_remaps_all_local_identities() {
 
     assert_ne!(imported_id, source_id);
     assert_eq!(
-        app.state.model.sim_setup.active_plan_name().as_str(),
+        harness.model.sim_setup.active_plan_name().as_str(),
         "Imported independent characterization"
     );
-    let imported_plan = app.state.model.sim_setup.stable_analysis_plan().unwrap();
+    let imported_plan = harness.model.sim_setup.stable_analysis_plan().unwrap();
     assert!(
         imported_plan
             .instances()
             .iter()
             .all(|instance| !source_analysis_ids.contains(&instance.id()))
     );
-    let imported_payload = app
-        .state
+    let imported_payload = harness
         .model
         .workspace
         .content
@@ -1398,38 +1342,31 @@ fn plan_manager_export_import_remaps_all_local_identities() {
 
 #[test]
 fn cancelling_a_simulation_workflow_never_invokes_its_commit() {
-    let mut app = RSpiceApp::test_instance();
-    let source_id = app
-        .state
+    let mut harness = SimulateTestHost::harness();
+    let source_id = harness
         .model
         .sim_setup
         .stable_analysis_plan()
         .expect("stable source plan")
         .id();
-    let inactive_before = app.state.model.sim_setup.inactive_plans().len();
+    let inactive_before = harness.model.sim_setup.inactive_plans().len();
     let mut draft = ClonePlanDraft::for_source(
-        app.state
-            .model
-            .sim_setup
-            .stable_analysis_plan()
-            .unwrap()
-            .id(),
-        app.state.model.sim_setup.active_plan_name().as_str(),
+        harness.model.sim_setup.stable_analysis_plan().unwrap().id(),
+        harness.model.sim_setup.active_plan_name().as_str(),
     );
     draft.name = "Cancelled clone".to_owned();
-    app.state.simulate.simulation_workflow =
-        Some(SimulationWorkflowDialog::ClonePlan(draft.clone()));
+    harness.state.simulation_workflow = Some(SimulationWorkflowDialog::ClonePlan(draft.clone()));
 
     finish_workflow_choice(
-        &mut crate::workbench::features::cx(&mut app),
+        &mut harness.cx(),
         DialogChoice::Cancelled,
         draft,
         commit_clone_plan,
     );
 
-    assert!(app.state.simulate.simulation_workflow.is_none());
+    assert!(harness.state.simulation_workflow.is_none());
     assert_eq!(
-        app.state
+        harness
             .model
             .sim_setup
             .stable_analysis_plan()
@@ -1438,38 +1375,9 @@ fn cancelling_a_simulation_workflow_never_invokes_its_commit() {
         source_id
     );
     assert_eq!(
-        app.state.model.sim_setup.inactive_plans().len(),
+        harness.model.sim_setup.inactive_plans().len(),
         inactive_before
     );
-}
-
-/// A committed plan edit is answered on the status bar: the reader made the
-/// gesture and is looking at its result, so nothing is toasted.
-#[test]
-fn a_committed_simulation_workflow_answers_on_the_status_bar() {
-    let mut app = RSpiceApp::test_instance();
-    let mut draft = ClonePlanDraft::for_source(
-        app.state
-            .model
-            .sim_setup
-            .stable_analysis_plan()
-            .unwrap()
-            .id(),
-        app.state.model.sim_setup.active_plan_name().as_str(),
-    );
-    draft.name = "Committed clone".to_owned();
-
-    finish_workflow_choice(
-        &mut crate::workbench::features::cx(&mut app),
-        DialogChoice::Primary,
-        draft,
-        commit_clone_plan,
-    );
-    app.state.drain_notices(&egui::Context::default());
-
-    assert!(app.state.simulate.simulation_workflow.is_none());
-    assert!(app.state.prompt_text().is_some());
-    assert!(app.state.workbench.toasts.activity().is_empty());
 }
 
 #[test]
@@ -1961,97 +1869,6 @@ fn an_unattributed_measurement_never_answers_a_narrowed_specification() {
 }
 
 // ------------------------------------------------- refused-command reporting
-
-/// Run one frame: the studio on `page`, or the overlay host alone when there
-/// is no page because the reader is not on this workspace at all.
-fn simulate_frame(app: &mut RSpiceApp, page: Option<crate::state::SimulationPage>) {
-    let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
-    if let Some(page) = page {
-        app.state.simulate.simulation_page = page;
-    }
-    let _ = ctx.run_ui(
-        egui::RawInput {
-            screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1_280.0, 900.0))),
-            ..egui::RawInput::default()
-        },
-        |ctx| {
-            if page.is_some() {
-                egui::CentralPanel::default()
-                    .frame(egui::Frame::NONE)
-                    .show(ctx, |ui| super::show_on_stage(ui, app));
-            }
-            super::workflow_dialog_tests::show_workflow_dialogs_on_stage(ctx, app);
-        },
-    );
-}
-
-/// The session wire does not keep the field, so a restore starts from its
-/// `Default`.
-///
-/// A restore must not carry a receipt from the session that wrote it — a
-/// lifecycle outcome is an event, and a restored one would announce a change
-/// nobody just made.
-#[test]
-fn a_restored_session_starts_from_the_default_lifecycle_outcome() {
-    use crate::workbench::AppState;
-    use crate::workbench::app_state::model::AnalysisLifecycleOutcome;
-    use crate::workbench::app_state::session::wire::{WorkbenchWire, WorkbenchWireRef};
-
-    assert!(!AnalysisLifecycleOutcome::default().message().is_empty());
-
-    let mut app = RSpiceApp::test_instance();
-    app.state
-        .model
-        .analysis_lifecycle_status
-        .record_receipt("Receipt #9 · Insert committed for instance 5.");
-    let saved = serde_json::to_value(WorkbenchWireRef::capture(&app.state))
-        .expect("the workbench serializes");
-    let mut restored = AppState::default();
-    serde_json::from_value::<WorkbenchWire>(saved)
-        .expect("the workbench restores")
-        .scatter(&mut restored);
-
-    assert_eq!(
-        restored.model.analysis_lifecycle_status,
-        AnalysisLifecycleOutcome::default(),
-        "the outcome is runtime-only, so a restore starts from the default line"
-    );
-}
-
-/// Three announcing sites sit on the render path rather than in a click
-/// handler: the surface resolves the active instance, the editor resolves the
-/// selection, and the editor re-serializes the draft, each of them every frame.
-/// A plan that stays unavailable therefore restates the same refusal forever,
-/// and that must stay one event.
-#[test]
-fn a_render_path_refusal_restated_every_frame_is_one_event() {
-    use crate::state::SimulationPage;
-
-    let mut app = RSpiceApp::test_instance();
-    app.state.model.sim_setup.analysis_plan = None;
-    for _ in 0..4 {
-        simulate_frame(&mut app, Some(SimulationPage::Analyses));
-    }
-    app.state.drain_notices(&egui::Context::default());
-
-    let outcome = &app.state.model.analysis_lifecycle_status;
-    assert!(outcome.is_refusal(), "{}", outcome.message());
-    assert!(
-        app.state.workbench.toasts.activity().is_empty(),
-        "a refusal raises no notice"
-    );
-    assert_eq!(
-        app.state
-            .model
-            .log_buffer
-            .entries()
-            .filter(|entry| entry.source == crate::diagnostics::LogSource::Plan)
-            .count(),
-        1,
-        "and one Console record, not one per frame"
-    );
-}
 
 /// An authored PVT run set whose transient analysis
 /// measures the divider output. The supply axis is what makes the corners

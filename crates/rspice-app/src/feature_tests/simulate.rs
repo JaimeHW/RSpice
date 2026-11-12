@@ -35,6 +35,7 @@ mod run_host;
 mod run_set;
 mod solver_options;
 mod statement;
+mod studio;
 mod transient_checkpoint_exchange;
 mod tuning_staging;
 mod value_size;
