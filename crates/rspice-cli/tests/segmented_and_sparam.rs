@@ -490,7 +490,10 @@ fn xyce_restart_pack_selects_distinct_encodings_and_file_auto_detects_both() {
 #[test]
 fn a_checkpointed_testbench_that_ends_its_run_saves_no_checkpoint() {
     let dir = test_dir("ckpt-finish");
-    for (task, code) in [("$finish", Some(0)), ("$fatal(1, \"gave up\")", Some(3))] {
+    for (task, name, code) in [
+        ("$finish", "$finish", Some(0)),
+        ("$fatal(1, \"gave up\")", "$fatal", Some(3)),
+    ] {
         let model = dir.join("bench.vams");
         std::fs::write(
             &model,
@@ -521,8 +524,11 @@ fn a_checkpointed_testbench_that_ends_its_run_saves_no_checkpoint() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert_eq!(output.status.code(), code, "{task}: {stdout}\n{stderr}");
         assert!(!state.exists(), "{task}: no checkpoint follows the end");
+        // The note names the task that ended the run and the line that called it.
         assert!(
-            stdout.contains("No checkpoint saved to") && stdout.contains("$finish at site"),
+            stdout.contains("No checkpoint saved to")
+                && stdout.contains(&format!("requested {name} at "))
+                && stdout.contains("bench.vams:3 during transient time"),
             "{task}: {stdout}"
         );
         if code == Some(3) {
