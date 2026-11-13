@@ -231,6 +231,7 @@ pub fn show_header(
     // The right-hand controls are laid out first and take the width they
     // need, so the legend is measured against what is left of the row and no
     // chip of it runs under them.
+    let actions_width_id = egui::Id::new(("pane-actions-width", model.analysis_key));
     let action_width = if plotted {
         let space = header_regions(rect, unit_width, f32::INFINITY).actions;
         let drawn = ui.scope_builder(
@@ -260,9 +261,17 @@ pub fn show_header(
                 }
             },
         );
-        space.right() - drawn.response.rect.left()
+        let width = space.right() - drawn.response.rect.left();
+        ui.ctx()
+            .data_mut(|data| data.insert_temp(actions_width_id, width));
+        width
     } else {
-        0.0
+        // A pane with nothing plotted draws no buttons but keeps their
+        // width, so its hidden control stands in one column with those of
+        // the panes above and below it.
+        ui.ctx()
+            .data(|data| data.get_temp::<f32>(actions_width_id))
+            .unwrap_or(0.0)
     };
     let PaneHeaderRegions {
         unit: unit_rect,
