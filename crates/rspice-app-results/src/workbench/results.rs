@@ -685,3 +685,6 @@ impl CommandSet for ResultsCommand {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
