@@ -335,7 +335,7 @@ pub(crate) fn process_autosave_restore_dialog(
             state.record(LogSeverity::Info, LogSource::Studio, note);
         }
         AutosaveRestore::SavedFile { path, note } => {
-            file_workflow::load_schematic_bypassing_autosave(state, &path, io);
+            state.load_schematic_bypassing_autosave(&path, io);
             if let Some(note) = note {
                 state.record(LogSeverity::Info, LogSource::Studio, note);
             }

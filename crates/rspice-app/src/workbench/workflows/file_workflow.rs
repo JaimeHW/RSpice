@@ -9,7 +9,7 @@ use crate::diagnostics::{LogSeverity, LogSource};
 use crate::io::FileWorkflowIo;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::io::SchematicIoError;
-use crate::state::{SchematicState, ViewType};
+use crate::state::SchematicState;
 use crate::workbench::app_state::{AppState, Model, PlatformState};
 use rspice_app_services::workbench::slots::platform::remember_recent_file;
 
@@ -21,7 +21,7 @@ pub(crate) enum SchematicLoadOrigin<'a> {
 }
 
 impl<'a> SchematicLoadOrigin<'a> {
-    fn display_label(self) -> String {
+    pub(crate) fn display_label(self) -> String {
         match self {
             Self::PersistentPath(path) => path.display().to_string(),
             #[cfg(any(test, target_arch = "wasm32"))]
@@ -30,7 +30,7 @@ impl<'a> SchematicLoadOrigin<'a> {
     }
 
     /// The file's name without its extension.
-    fn file_stem(self) -> &'a str {
+    pub(crate) fn file_stem(self) -> &'a str {
         match self {
             Self::PersistentPath(path) => path
                 .file_stem()
@@ -61,84 +61,6 @@ impl<'a> SchematicLoadOrigin<'a> {
     }
 }
 
-/// Open a schematic, first offering any checkpoint that is eligible under its
-/// exact saved-source binding (native only; the web build has no checkpoint
-/// files).
-pub(crate) fn load_schematic_from_path_with_io(
-    state: &mut AppState,
-    path: &Path,
-    io: &(impl FileWorkflowIo + ?Sized),
-) -> bool {
-    // A bound checkpoint from an interrupted session is reviewed before the
-    // saved source. Legacy or changed-source checkpoints only interrupt this
-    // open when they are strictly newer; stale evidence remains in Recovery.
-    #[cfg(not(target_arch = "wasm32"))]
-    match crate::workbench::lifecycle::recovery_checkpoint::autosave_restore_candidate(path) {
-        Ok(Some(candidate)) => {
-            state.platform.pending_autosave_restore = Some(candidate);
-            return true;
-        }
-        Ok(None) => {}
-        Err(error) => {
-            state.record(LogSeverity::Warning, LogSource::Studio, error);
-        }
-    }
-    load_schematic_bypassing_autosave(state, path, io)
-}
-
-/// The actual load, with no checkpoint interception — the restore
-/// dialog's own paths must not re-trigger it.
-pub(crate) fn load_schematic_bypassing_autosave(
-    state: &mut AppState,
-    path: &Path,
-    io: &(impl FileWorkflowIo + ?Sized),
-) -> bool {
-    match io.load_schematic(path) {
-        Ok(schematic) => {
-            state.apply_loaded_schematic(schematic, SchematicLoadOrigin::PersistentPath(path))
-        }
-        Err(e) => {
-            state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!("Schematic open failed: {e}"),
-            );
-            false
-        }
-    }
-}
-
-/// Add a schematic read from `origin` to the open project as a new cell
-/// view, recording how it went. Returns whether it was added.
-pub(crate) fn import_loaded_schematic(
-    state: &mut AppState,
-    schematic: SchematicState,
-    origin: SchematicLoadOrigin<'_>,
-) -> bool {
-    match import_loaded_schematic_as_cell_view(state, schematic, origin) {
-        Ok(reference) => {
-            state.record(
-                LogSeverity::Info,
-                LogSource::Studio,
-                format!(
-                    "Imported {} as {}.",
-                    origin.display_label(),
-                    reference.display_path()
-                ),
-            );
-            true
-        }
-        Err(error) => {
-            state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!("Schematic import failed: {error}"),
-            );
-            false
-        }
-    }
-}
-
 /// Remember the file a schematic replacing the drawing in front came from,
 /// and record that it was opened.
 pub(crate) fn settle_loaded_schematic(
@@ -161,61 +83,9 @@ pub(crate) fn settle_loaded_schematic(
     );
 }
 
-/// Add a loaded schematic to the open project as a new cell, and open it.
-///
-/// The cell is named after the file (its stem, with anything but letters,
-/// digits and underscores replaced), made unique in the library of the
-/// active view, and given one schematic view holding the file's drawing.
-/// The active cell view is not touched. The drawing now belongs to the
-/// project, so it keeps no file binding and is unsaved until the project is.
-pub(crate) fn import_loaded_schematic_as_cell_view(
-    state: &mut AppState,
-    mut schematic: SchematicState,
-    origin: SchematicLoadOrigin<'_>,
-) -> Result<crate::state::CellViewRef, String> {
-    use crate::state::{Cell, CellViewRef, ProjectLibraryMutation, View};
-
-    let library = state.model.workspace.content.active_view.library.clone();
-    let Some(existing) = state.model.library_manager.get_library(&library) else {
-        return Err(format!("library `{library}` is not in this project"));
-    };
-    if existing.read_only {
-        return Err(format!("library `{library}` is read only"));
-    }
-    let name = unique_cell_name(existing, &cell_name_from_file(origin.file_stem()));
-    let mut cell = Cell::new(&name);
-    cell.add_view(View::new("schematic", ViewType::Schematic));
-    let mut candidate_libraries = state.model.library_manager.clone();
-    let Some(mut candidate_library) = candidate_libraries.edit_library(&library) else {
-        return Err(format!("library `{library}` is not in this project"));
-    };
-    candidate_library.add_cell(cell);
-    let mutation =
-        state
-            .model
-            .preflight_project_library_mutation(ProjectLibraryMutation::CreateCell {
-                library: library.clone(),
-                cell: name.clone(),
-            })?;
-
-    schematic.session.current_file = None;
-    schematic.session.is_dirty = true;
-    schematic.session.editor.snap_engine = state.design.schematic_snap.clone();
-    schematic.reconcile_grid_pitch_runtime();
-    state.model.library_manager = candidate_libraries;
-    let reference = CellViewRef::new(&library, &name, "schematic");
-    state
-        .model
-        .workspace
-        .insert_schematic_editor(reference.key(), schematic);
-    state.model.publish_project_library_mutation(mutation);
-    state.open_workspace_view(reference.clone());
-    Ok(reference)
-}
-
 /// A cell name from a file stem: letters, digits and underscores kept, every
 /// other run of characters one underscore, never empty.
-fn cell_name_from_file(stem: &str) -> String {
+pub(crate) fn cell_name_from_file(stem: &str) -> String {
     let mut name = String::new();
     for character in stem.chars() {
         if character.is_alphanumeric() || character == '_' {
@@ -234,7 +104,7 @@ fn cell_name_from_file(stem: &str) -> String {
 
 /// `base`, or `base_2`, `base_3`, … : the first the library does not hold,
 /// compared as cell identities are (ignoring letter case).
-fn unique_cell_name(library: &crate::state::Library, base: &str) -> String {
+pub(crate) fn unique_cell_name(library: &crate::state::Library, base: &str) -> String {
     let taken = |candidate: &str| {
         let identity = crate::state::canonical_cell_view_owner_key(&library.name, candidate, "");
         library.cells.values().any(|cell| {
@@ -269,44 +139,6 @@ pub(crate) fn prepare_loaded_schematic(
             schematic.session.current_file = None;
             platform.browser_schematic_save_name = Some(name.to_string());
             schematic
-        }
-    }
-}
-
-pub(crate) fn open_schematic_from_dialog_with_io(
-    state: &mut AppState,
-    io: &(impl FileWorkflowIo + ?Sized),
-) {
-    #[cfg(target_arch = "wasm32")]
-    {
-        let _ = io;
-        match start_browser_schematic_import() {
-            Ok(()) => state.prompt("Choose an RSpice schematic file to open."),
-            Err(error) => {
-                state.record(
-                    LogSeverity::Error,
-                    LogSource::Studio,
-                    format!("Schematic open failed: {error}"),
-                );
-            }
-        }
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    match io.show_open_dialog() {
-        Ok(path) => {
-            let _ = load_schematic_from_path_with_io(state, &path, io);
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        Err(SchematicIoError::Cancelled) => {
-            // User cancelled - no message needed
-        }
-        Err(e) => {
-            state.record(
-                LogSeverity::Error,
-                LogSource::Studio,
-                format!("Schematic open failed: {e}"),
-            );
         }
     }
 }
@@ -350,7 +182,7 @@ thread_local! {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn start_browser_schematic_import() -> Result<(), String> {
+pub(crate) fn start_browser_schematic_import() -> Result<(), String> {
     let token = crate::workbench::browser::file_import::try_begin_text_import(
         crate::workbench::browser::file_import::BrowserTextImportKind::Schematic,
     )?;

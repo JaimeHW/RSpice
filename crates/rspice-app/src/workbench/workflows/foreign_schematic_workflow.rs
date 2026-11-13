@@ -37,9 +37,7 @@ use crate::state::model_library::SimulationPlanModelBinding;
 use crate::state::{Cell, CellViewRef, SchematicState, View, ViewType};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::{AppState, Model, PlatformState};
-use crate::workbench::workflows::file_workflow::{
-    SchematicLoadOrigin, import_loaded_schematic_as_cell_view,
-};
+use crate::workbench::workflows::file_workflow::SchematicLoadOrigin;
 
 use plan::{ForeignPlan, plan_from_cards};
 use sheet::{OwnSheet, place_on_sheet};
@@ -154,8 +152,7 @@ pub(crate) fn import_foreign_schematic_file(
 
     let mut own_sheets = add_symbol_cells(&mut app.state, &library, &mut tree.cells)?;
     let top_sheet = place_on_sheet(&app.state.model, &mut tree.document);
-    let reference = import_loaded_schematic_as_cell_view(
-        &mut app.state,
+    let reference = app.state.import_loaded_schematic_as_cell_view(
         SchematicState::from_document(std::mem::take(&mut tree.document)),
         SchematicLoadOrigin::PersistentPath(path),
     )?;

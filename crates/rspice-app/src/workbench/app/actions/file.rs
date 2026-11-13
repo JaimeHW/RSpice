@@ -394,9 +394,7 @@ impl RSpiceApp {
             }
             RecentKind::Schematic => {
                 let (state, io) = (&mut self.state, self.file_workflow_io.as_ref());
-                crate::workbench::workflows::file_workflow::load_schematic_from_path_with_io(
-                    state, &path, io,
-                )
+                state.load_schematic_from_path_with_io(&path, io)
             }
         };
 

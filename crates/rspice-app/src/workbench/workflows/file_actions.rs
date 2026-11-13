@@ -8,7 +8,7 @@ pub(in crate::workbench) fn action_file_open_with_io(
     state: &mut AppState,
     io: &(impl FileWorkflowIo + ?Sized),
 ) {
-    crate::workbench::workflows::file_workflow::open_schematic_from_dialog_with_io(state, io);
+    state.open_schematic_from_dialog_with_io(io);
 }
 
 pub(in crate::workbench) fn action_file_save_with_io(
