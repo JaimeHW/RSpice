@@ -263,7 +263,11 @@ pub(in crate::workbench) fn answer_netlist_editor_request(
             cursor_line,
             now,
         } => crate::workbench::documents::netlist_document::commit_editor_edit(
-            state,
+            &mut state.model,
+            &mut state.code.netlist,
+            &mut state.code.netlist_open_documents,
+            &mut state.workbench,
+            &mut state.runs,
             &buffer,
             cursor_line,
             now,
@@ -507,7 +511,9 @@ pub(in crate::workbench) fn answer_code_request(app: &mut RSpiceApp, request: Co
         CodeRequest::CommitNetlistRename => {
             let messages = app.state.workbench.messages();
             match crate::workbench::documents::netlist_document::language::commit_rename(
-                &mut app.state,
+                &mut app.state.model,
+                &mut app.state.code.netlist,
+                &mut app.state.code.netlist_open_documents,
             ) {
                 Ok(count) => app.state.prompt(messages.format(
                     crate::workbench::MessageId::NetlistRenameSucceeded,
@@ -519,7 +525,9 @@ pub(in crate::workbench) fn answer_code_request(app: &mut RSpiceApp, request: Co
         CodeRequest::RestoreOwnedNetlistRevision => {
             let index = app.state.code.netlist.comparison_dialog.selected_history_index;
             match crate::workbench::documents::netlist_document::restore_owned_revision(
-                &mut app.state,
+                &mut app.state.model,
+                &mut app.state.code.netlist,
+                &mut app.state.code.netlist_open_documents,
                 index,
             ) {
                 Ok(()) => app.state.code.netlist.comparison_dialog.open = false,
@@ -580,7 +588,9 @@ pub(in crate::workbench) fn answer_code_request(app: &mut RSpiceApp, request: Co
         CodeRequest::ApplyNetlistQuickFix => {
             let answer =
                 crate::workbench::documents::netlist_document::language::apply_preferred_quick_fix(
-                    &mut app.state,
+                    &mut app.state.model,
+                    &mut app.state.code.netlist,
+                    &mut app.state.code.netlist_open_documents,
                 );
             app.state.prompt(answer.unwrap_or_else(|refusal| refusal));
         }

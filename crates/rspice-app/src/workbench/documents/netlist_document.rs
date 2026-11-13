@@ -12,6 +12,7 @@ use std::collections::{HashMap, HashSet};
 use super::{CodeSourceFileAction, CodeWorkspacePage};
 use crate::state::netlist_diagnostics::NetlistDiagnosticCollection;
 use crate::state::same_include_graph;
+#[cfg(test)]
 use crate::workbench::AppState;
 use rspice_app_runs::workbench::slots::runs::RunsState;
 use rspice_app_state::workbench::app_state::model::{

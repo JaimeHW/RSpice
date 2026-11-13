@@ -521,7 +521,14 @@ impl RSpiceApp {
 /// it; a second caller spelling a second refusal for the same missing deck is
 /// how one absence acquires two names.
 pub(crate) fn open_task_deck(state: &mut crate::workbench::AppState, sequence: u64) -> bool {
-    if crate::workbench::documents::netlist_document::reveal_executed_deck(state, sequence, 0) {
+    if crate::workbench::documents::netlist_document::reveal_executed_deck(
+        &mut state.model,
+        &mut state.code.netlist,
+        &state.runs,
+        &mut state.workbench,
+        sequence,
+        0,
+    ) {
         return true;
     }
     state.prompt(format!(

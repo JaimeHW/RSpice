@@ -768,7 +768,10 @@ impl Host for RSpiceApp {
 impl ProblemsHost for AppState {
     fn apply_quick_fix(&mut self, finding: uuid::Uuid) -> Result<String, String> {
         crate::workbench::documents::netlist_document::language::apply_quick_fix_for_finding(
-            self, finding,
+            &mut self.model,
+            &mut self.code.netlist,
+            &mut self.code.netlist_open_documents,
+            finding,
         )
     }
 }

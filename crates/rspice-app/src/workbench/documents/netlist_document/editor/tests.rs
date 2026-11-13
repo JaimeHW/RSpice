@@ -1186,10 +1186,14 @@ fn editor_commit_rejects_generated_artifact_mutation() {
     state.code.netlist.revision = 4;
 
     assert!(!commit_owned_source_edit(
-        &mut state,
+        &mut state.model,
+        &mut state.code.netlist,
+        &mut state.code.netlist_open_documents,
+        &mut state.workbench,
+        &mut state.runs,
         "silently edited\n.end\n",
         1,
-        2.5,
+        2.5
     ));
     assert!(state.model.workspace.content.netlist_source.is_none());
     assert_eq!(
@@ -1212,10 +1216,14 @@ fn editor_commit_updates_only_an_existing_owned_source() {
     state.code.netlist.revision = 9;
 
     assert!(commit_owned_source_edit(
-        &mut state,
+        &mut state.model,
+        &mut state.code.netlist,
+        &mut state.code.netlist_open_documents,
+        &mut state.workbench,
+        &mut state.runs,
         "owned\n.tran 1n 1u\n.end\n",
         1,
-        7.25,
+        7.25
     ));
     assert_eq!(
         state.model.workspace.content.netlist_source.as_deref(),

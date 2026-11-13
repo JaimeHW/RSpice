@@ -369,7 +369,16 @@ fn canonical_diagnostic_navigation_opens_the_exact_include_and_line() {
     state.code.netlist.diagnostics =
         std::sync::Arc::new(NetlistDiagnosticCollection::try_new(vec![diagnostic], ROOT).unwrap());
 
-    open_diagnostic_location(&mut state, diagnostic_id).unwrap();
+    open_diagnostic_location(
+        &mut state.model,
+        &mut state.code.netlist,
+        &mut state.code.netlist_open_documents,
+        &mut state.runs,
+        &mut state.workbench,
+        &mut state.code.code_workspace.page,
+        diagnostic_id,
+    )
+    .unwrap();
 
     assert_eq!(
         state.code.netlist.active_dependency_identity.as_deref(),
@@ -1066,7 +1075,13 @@ fn revision_restore_restores_include_bytes_and_ownership_as_one_snapshot() {
         EDITED_INCLUDE.to_owned()
     ));
 
-    restore_owned_revision(&mut state, 0).unwrap();
+    restore_owned_revision(
+        &mut state.model,
+        &mut state.code.netlist,
+        &mut state.code.netlist_open_documents,
+        0,
+    )
+    .unwrap();
 
     assert!(
         state
@@ -1185,9 +1200,12 @@ fn project_validation_rejects_owned_include_digest_drift() {
 #[test]
 fn relink_reacquires_origin_and_replaces_exact_retained_bytes() {
     let mut state = owned_dependency_state();
-    begin_dependency_relink(&mut state, INCLUDE_IDENTITY).unwrap();
+    begin_dependency_relink(&state.model, &mut state.code.netlist, INCLUDE_IDENTITY).unwrap();
     commit_dependency_relink(
-        &mut state,
+        &mut state.model,
+        &mut state.code.netlist,
+        &mut state.code.netlist_open_documents,
+        &mut state.runs,
         EDITED_INCLUDE.to_owned(),
         "resistor-qualified.lib".to_owned(),
         Some("C:/qualified/models/resistor-qualified.lib".to_owned()),
@@ -1221,7 +1239,7 @@ fn relink_reacquires_origin_and_replaces_exact_retained_bytes() {
 #[test]
 fn relink_rejects_late_picker_completion_after_document_revision_changes() {
     let mut state = owned_dependency_state();
-    begin_dependency_relink(&mut state, INCLUDE_IDENTITY).unwrap();
+    begin_dependency_relink(&state.model, &mut state.code.netlist, INCLUDE_IDENTITY).unwrap();
     let document = state.code.netlist.owned_document.as_mut().unwrap();
     document
         .replace_editable_source(
@@ -1231,7 +1249,10 @@ fn relink_rejects_late_picker_completion_after_document_revision_changes() {
         .unwrap();
 
     let error = commit_dependency_relink(
-        &mut state,
+        &mut state.model,
+        &mut state.code.netlist,
+        &mut state.code.netlist_open_documents,
+        &mut state.runs,
         EDITED_INCLUDE.to_owned(),
         "late.lib".to_owned(),
         None,
@@ -1257,9 +1278,12 @@ fn relink_rejects_late_picker_completion_after_document_revision_changes() {
 fn generated_dependency_relink_updates_only_the_generated_artifact() {
     let mut state = owned_dependency_state();
     open_generated_primary_in(&mut state.model, &mut state.code.netlist);
-    begin_dependency_relink(&mut state, INCLUDE_IDENTITY).unwrap();
+    begin_dependency_relink(&state.model, &mut state.code.netlist, INCLUDE_IDENTITY).unwrap();
     commit_dependency_relink(
-        &mut state,
+        &mut state.model,
+        &mut state.code.netlist,
+        &mut state.code.netlist_open_documents,
+        &mut state.runs,
         EDITED_INCLUDE.to_owned(),
         "browser-picked.inc".to_owned(),
         None,
@@ -1841,7 +1865,14 @@ fn an_executed_deck_opens_read_only_at_the_point_it_was_asked_for() {
             points: vec![point("TT 27C", NOMINAL), point("TT 125C", HOT)],
         });
 
-    assert!(reveal_executed_deck(&mut state, 4, 1));
+    assert!(reveal_executed_deck(
+        &mut state.model,
+        &mut state.code.netlist,
+        &state.runs,
+        &mut state.workbench,
+        4,
+        1
+    ));
     assert_eq!(
         state.code.netlist.active_document,
         ActiveNetlistDocument::RunSnapshot
@@ -1870,11 +1901,25 @@ fn an_executed_deck_opens_read_only_at_the_point_it_was_asked_for() {
 
     // A point past the end resolves to one the run actually has rather than
     // to an empty document under a header naming the run.
-    assert!(reveal_executed_deck(&mut state, 4, 40));
+    assert!(reveal_executed_deck(
+        &mut state.model,
+        &mut state.code.netlist,
+        &state.runs,
+        &mut state.workbench,
+        4,
+        40
+    ));
     assert_eq!(state.model.simulation.source.netlist_content, HOT);
 
     assert!(
-        !reveal_executed_deck(&mut state, 5, 0),
+        !reveal_executed_deck(
+            &mut state.model,
+            &mut state.code.netlist,
+            &state.runs,
+            &mut state.workbench,
+            5,
+            0
+        ),
         "a run whose deck is not held refuses rather than showing another one"
     );
 
@@ -1974,7 +2019,14 @@ fn an_executed_deck_claims_verification_only_when_it_reproduces_the_sealed_diges
         "a corner's materialized source is unsealed, which is not the same as wrong"
     );
     assert!(
-        reveal_executed_deck(&mut state, sequence, 0),
+        reveal_executed_deck(
+            &mut state.model,
+            &mut state.code.netlist,
+            &state.runs,
+            &mut state.workbench,
+            sequence,
+            0
+        ),
         "the deck opens at the point asked for"
     );
     assert_eq!(

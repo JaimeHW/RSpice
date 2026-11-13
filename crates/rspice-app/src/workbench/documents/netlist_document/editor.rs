@@ -15,7 +15,7 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
 #![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -27,10 +27,12 @@ use rspice_core::netlist::IncludeResolution;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::Tokens;
 use crate::ui::widgets::Problem;
+#[cfg(test)]
+use crate::workbench::AppState;
+use crate::workbench::MessageId;
 use crate::workbench::code::commands::NetlistEditorRequest;
 use crate::workbench::documents::text_editor_commands::{EditorSyntax, show_go_to_line};
-use crate::workbench::state::WorkbenchSession;
-use crate::workbench::{AppState, MessageId};
+use crate::workbench::state::{WorkbenchSession, WorkspaceDocumentId};
 
 use super::{
     DiagnosticSeverity, completion,
@@ -443,45 +445,54 @@ fn show_signature_help(
 /// Commit the text the editor showed at the end of its frame, typed on
 /// `cursor_line` at input time `now`, and mark the lines it changed against
 /// the run's baseline when the deck itself is in front.
-pub(crate) fn commit_edit(state: &mut AppState, buffer: &str, cursor_line: usize, now: f64) {
-    if commit_owned_source_edit(state, buffer, cursor_line, now)
-        && state.code.netlist.active_dependency_identity.is_none()
+pub(crate) fn commit_edit(
+    model: &mut super::Model,
+    netlist: &mut super::NetlistDocumentState,
+    open_documents: &mut HashSet<WorkspaceDocumentId>,
+    workbench: &mut WorkbenchSession,
+    runs: &mut RunsState,
+    buffer: &str,
+    cursor_line: usize,
+    now: f64,
+) {
+    if commit_owned_source_edit(
+        model,
+        netlist,
+        open_documents,
+        workbench,
+        runs,
+        buffer,
+        cursor_line,
+        now,
+    ) && netlist.active_dependency_identity.is_none()
     {
-        super::refresh_diff_pips_from_baseline_in(&state.model, &mut state.runs);
+        super::refresh_diff_pips_from_baseline_in(model, runs);
     }
 }
 
 /// Commit a text/completion edit without promoting generated output to owned
 /// source. Returns whether an existing owned source actually changed.
 fn commit_owned_source_edit(
-    state: &mut AppState,
+    model: &mut super::Model,
+    netlist: &mut super::NetlistDocumentState,
+    open_documents: &mut HashSet<WorkspaceDocumentId>,
+    workbench: &mut WorkbenchSession,
+    runs: &mut RunsState,
     buffer: &str,
     cursor_line: usize,
     now: f64,
 ) -> bool {
-    let committed = if state.code.netlist.active_dependency_identity.is_some() {
-        super::replace_owned_dependency_source(
-            &mut state.model,
-            &mut state.code.netlist,
-            &mut state.code.netlist_open_documents,
-            buffer.to_owned(),
-        )
+    let committed = if netlist.active_dependency_identity.is_some() {
+        super::replace_owned_dependency_source(model, netlist, open_documents, buffer.to_owned())
     } else {
-        super::replace_owned_source(
-            &mut state.model,
-            &mut state.code.netlist,
-            &mut state.code.netlist_open_documents,
-            &mut state.workbench,
-            buffer.to_owned(),
-        )
+        super::replace_owned_source(model, netlist, open_documents, workbench, buffer.to_owned())
     };
     if !committed {
         return false;
     }
-    let netlist = &mut state.code.netlist;
     netlist.last_edit_time = now;
     if netlist.active_dependency_identity.is_none() {
-        state.runs.manual_run.edited_lines.insert(cursor_line);
+        runs.manual_run.edited_lines.insert(cursor_line);
     }
     true
 }

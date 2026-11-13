@@ -3,6 +3,7 @@
 //! that moved on.
 
 use super::*;
+use crate::workbench::state::WorkspaceDocumentId;
 
 /// Revision-bound authority for one native or browser dependency relink
 /// picker. It is transient UI state; exact relinked bytes and locator evidence
@@ -16,18 +17,17 @@ pub(crate) struct NetlistDependencyRelinkState {
 }
 
 pub(crate) fn begin_dependency_relink(
-    state: &mut AppState,
+    model: &Model,
+    netlist: &mut NetlistDocumentState,
     logical_identity: &str,
 ) -> Result<(), String> {
-    if state.code.netlist.dependency_relink.is_some() {
+    if netlist.dependency_relink.is_some() {
         return Err("A dependency relink is already in progress.".to_owned());
     }
-    let root = state
-        .code
-        .netlist
+    let root = netlist
         .active_dependency_root
-        .unwrap_or(state.code.netlist.active_document);
-    let document = canonical_root_document_in(&state.model, &state.code.netlist, root)
+        .unwrap_or(netlist.active_document);
+    let document = canonical_root_document_in(model, netlist, root)
         .ok_or_else(|| "The selected source has no dependency list.".to_owned())?;
     if !document
         .dependencies()
@@ -36,7 +36,7 @@ pub(crate) fn begin_dependency_relink(
     {
         return Err("The dependency is no longer among the source's dependencies.".to_owned());
     }
-    state.code.netlist.dependency_relink = Some(NetlistDependencyRelinkState {
+    netlist.dependency_relink = Some(NetlistDependencyRelinkState {
         root,
         logical_identity: logical_identity.to_owned(),
         expected_document_id: document.id(),
@@ -45,23 +45,24 @@ pub(crate) fn begin_dependency_relink(
     Ok(())
 }
 
-pub(crate) fn cancel_dependency_relink(state: &mut AppState) {
-    state.code.netlist.dependency_relink = None;
+pub(crate) fn cancel_dependency_relink(netlist: &mut NetlistDocumentState) {
+    netlist.dependency_relink = None;
 }
 
 pub(crate) fn commit_dependency_relink(
-    state: &mut AppState,
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut HashSet<WorkspaceDocumentId>,
+    runs: &mut RunsState,
     source: String,
     display_name: String,
     native_origin: Option<String>,
 ) -> Result<(), String> {
-    let transaction = state
-        .code
-        .netlist
+    let transaction = netlist
         .dependency_relink
         .clone()
         .ok_or_else(|| "No dependency relink transaction is active.".to_owned())?;
-    let current = canonical_root_document_in(&state.model, &state.code.netlist, transaction.root)
+    let current = canonical_root_document_in(model, netlist, transaction.root)
         .cloned()
         .ok_or_else(|| "The relink root document is no longer available.".to_owned())?;
     if current.id() != transaction.expected_document_id
@@ -91,7 +92,7 @@ pub(crate) fn commit_dependency_relink(
     )
     .map_err(|error| error.to_string())?;
 
-    let mut candidate = state.clone();
+    let mut candidate = DeckTransaction::begin(model, netlist, open_documents);
     match transaction.root {
         ActiveNetlistDocument::Generated => {
             candidate.model.netlist_artifacts.generated_document = Some(next.clone());
@@ -119,7 +120,7 @@ pub(crate) fn commit_dependency_relink(
             }
             candidate.model.workspace.content.netlist_document = Some(next.clone());
             candidate.model.workspace.content.netlist_source_dirty = true;
-            candidate.code.netlist.owned_document = Some(next);
+            candidate.netlist.owned_document = Some(next);
             candidate
                 .model
                 .workspace
@@ -131,15 +132,15 @@ pub(crate) fn commit_dependency_relink(
             return Err("Read-only revision documents cannot own a relink transaction.".to_owned());
         }
     }
-    candidate.code.netlist.dependency_relink = None;
-    candidate.code.netlist.active_document = transaction.root;
-    candidate.code.netlist.active_dependency_root = Some(transaction.root);
-    candidate.code.netlist.active_dependency_identity = Some(transaction.logical_identity.clone());
+    candidate.netlist.dependency_relink = None;
+    candidate.netlist.active_document = transaction.root;
+    candidate.netlist.active_dependency_root = Some(transaction.root);
+    candidate.netlist.active_dependency_identity = Some(transaction.logical_identity.clone());
     candidate.model.simulation.source.netlist_content = source;
-    candidate.code.netlist.revision = candidate.code.netlist.revision.wrapping_add(1);
-    candidate.code.netlist.completion_open = false;
-    candidate.runs.manual_run.edited_lines.clear();
+    candidate.netlist.revision = candidate.netlist.revision.wrapping_add(1);
+    candidate.netlist.completion_open = false;
     candidate.model.invalidate_source_evidence();
-    state.commit_candidate(candidate);
+    candidate.commit_deck(model, netlist, open_documents);
+    runs.manual_run.edited_lines.clear();
     Ok(())
 }

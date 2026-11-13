@@ -497,8 +497,13 @@ fn owned_netlist_history_compare_and_restore_are_persisted_and_monotonic() {
     );
     assert_eq!(state.model.simulation.source.netlist_content, modified);
 
-    crate::workbench::documents::netlist_document::restore_owned_revision(&mut state, 0)
-        .expect("history restore commits");
+    crate::workbench::documents::netlist_document::restore_owned_revision(
+        &mut state.model,
+        &mut state.code.netlist,
+        &mut state.code.netlist_open_documents,
+        0,
+    )
+    .expect("history restore commits");
     assert_eq!(
         state.model.workspace.content.netlist_source.as_deref(),
         Some(original)

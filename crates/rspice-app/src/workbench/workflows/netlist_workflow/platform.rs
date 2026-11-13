@@ -91,7 +91,8 @@ pub(super) fn show_open_netlist_dialog(
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn request_dependency_relink(state: &mut AppState, logical_identity: &str) -> bool {
     if let Err(error) = crate::workbench::documents::netlist_document::begin_dependency_relink(
-        state,
+        &state.model,
+        &mut state.code.netlist,
         logical_identity,
     ) {
         state.prompt(error);
@@ -104,7 +105,9 @@ pub(crate) fn request_dependency_relink(state: &mut AppState, logical_identity: 
         .set_title("Relink SPICE Dependency")
         .pick_file();
     let Some(path) = picked else {
-        crate::workbench::documents::netlist_document::cancel_dependency_relink(state);
+        crate::workbench::documents::netlist_document::cancel_dependency_relink(
+            &mut state.code.netlist,
+        );
         return false;
     };
     let bytes = match std::fs::metadata(&path)
@@ -121,7 +124,9 @@ pub(crate) fn request_dependency_relink(state: &mut AppState, logical_identity: 
         }) {
         Ok(bytes) => bytes,
         Err(error) => {
-            crate::workbench::documents::netlist_document::cancel_dependency_relink(state);
+            crate::workbench::documents::netlist_document::cancel_dependency_relink(
+                &mut state.code.netlist,
+            );
             record_relink_failure(state, &error);
             return false;
         }
@@ -129,7 +134,9 @@ pub(crate) fn request_dependency_relink(state: &mut AppState, logical_identity: 
     let source = match rspice_core::netlist::decode_source_bytes(&bytes) {
         Ok(source) => source,
         Err(error) => {
-            crate::workbench::documents::netlist_document::cancel_dependency_relink(state);
+            crate::workbench::documents::netlist_document::cancel_dependency_relink(
+                &mut state.code.netlist,
+            );
             record_relink_failure(
                 state,
                 &format!("the selected file could not be decoded: {error}"),
@@ -142,7 +149,10 @@ pub(crate) fn request_dependency_relink(state: &mut AppState, logical_identity: 
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.display().to_string());
     match crate::workbench::documents::netlist_document::commit_dependency_relink(
-        state,
+        &mut state.model,
+        &mut state.code.netlist,
+        &mut state.code.netlist_open_documents,
+        &mut state.runs,
         source,
         display_name,
         Some(path.display().to_string()),
@@ -152,7 +162,9 @@ pub(crate) fn request_dependency_relink(state: &mut AppState, logical_identity: 
             true
         }
         Err(error) => {
-            crate::workbench::documents::netlist_document::cancel_dependency_relink(state);
+            crate::workbench::documents::netlist_document::cancel_dependency_relink(
+                &mut state.code.netlist,
+            );
             record_relink_failure(state, &error);
             false
         }
@@ -258,7 +270,8 @@ thread_local! {
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn request_dependency_relink(state: &mut AppState, logical_identity: &str) -> bool {
     if let Err(error) = crate::workbench::documents::netlist_document::begin_dependency_relink(
-        state,
+        &state.model,
+        &mut state.code.netlist,
         logical_identity,
     ) {
         state.prompt(error);
@@ -269,7 +282,9 @@ pub(crate) fn request_dependency_relink(state: &mut AppState, logical_identity: 
     ) {
         Ok(token) => token,
         Err(error) => {
-            crate::workbench::documents::netlist_document::cancel_dependency_relink(state);
+            crate::workbench::documents::netlist_document::cancel_dependency_relink(
+                &mut state.code.netlist,
+            );
             state.prompt(error);
             return false;
         }
@@ -306,7 +321,9 @@ pub(crate) fn poll_browser_dependency_relink(state: &mut AppState) -> bool {
                 .original_bytes
                 .unwrap_or_else(|| file.contents.into_bytes());
             if bytes.starts_with(b"PK\x03\x04") {
-                crate::workbench::documents::netlist_document::cancel_dependency_relink(state);
+                crate::workbench::documents::netlist_document::cancel_dependency_relink(
+                    &mut state.code.netlist,
+                );
                 state.prompt(
                     "A bundle cannot relink one dependency. Select the SPICE source file itself.",
                 );
@@ -315,7 +332,9 @@ pub(crate) fn poll_browser_dependency_relink(state: &mut AppState) -> bool {
             let source = match rspice_core::netlist::decode_source_bytes(&bytes) {
                 Ok(source) => source,
                 Err(error) => {
-                    crate::workbench::documents::netlist_document::cancel_dependency_relink(state);
+                    crate::workbench::documents::netlist_document::cancel_dependency_relink(
+                        &mut state.code.netlist,
+                    );
                     record_relink_failure(
                         state,
                         &format!("the selected file could not be decoded: {error}"),
@@ -324,26 +343,38 @@ pub(crate) fn poll_browser_dependency_relink(state: &mut AppState) -> bool {
                 }
             };
             match crate::workbench::documents::netlist_document::commit_dependency_relink(
-                state, source, file.name, None,
+                &mut state.model,
+                &mut state.code.netlist,
+                &mut state.code.netlist_open_documents,
+                &mut state.runs,
+                source,
+                file.name,
+                None,
             ) {
                 Ok(()) => {
                     record_relink_success(state);
                     true
                 }
                 Err(error) => {
-                    crate::workbench::documents::netlist_document::cancel_dependency_relink(state);
+                    crate::workbench::documents::netlist_document::cancel_dependency_relink(
+                        &mut state.code.netlist,
+                    );
                     record_relink_failure(state, &error);
                     false
                 }
             }
         }
         BrowserDependencyRelinkResult::Failed(error) => {
-            crate::workbench::documents::netlist_document::cancel_dependency_relink(state);
+            crate::workbench::documents::netlist_document::cancel_dependency_relink(
+                &mut state.code.netlist,
+            );
             record_relink_failure(state, &error);
             false
         }
         BrowserDependencyRelinkResult::Cancelled => {
-            crate::workbench::documents::netlist_document::cancel_dependency_relink(state);
+            crate::workbench::documents::netlist_document::cancel_dependency_relink(
+                &mut state.code.netlist,
+            );
             false
         }
     }

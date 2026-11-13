@@ -50,7 +50,12 @@ pub(crate) fn apply_pending(ctx: &Context, app: &mut RSpiceApp) {
         DiagnosticRoute::NetlistDiagnostic(diagnostic_id) => {
             if let Err(error) =
                 crate::workbench::documents::netlist_document::open_diagnostic_location(
-                    &mut app.state,
+                    &mut app.state.model,
+                    &mut app.state.code.netlist,
+                    &mut app.state.code.netlist_open_documents,
+                    &mut app.state.runs,
+                    &mut app.state.workbench,
+                    &mut app.state.code.code_workspace.page,
                     diagnostic_id,
                 )
             {
@@ -264,8 +269,16 @@ pub(crate) fn apply_remediation(app: &mut RSpiceApp, remediation: PreflightRemed
             // rather than passed through. A finding with no line opens the
             // deck and leaves the cursor alone.
             let cursor = line.and_then(|line| line.checked_sub(1));
-            if let Err(error) = netlist_document::open_source_location(&mut app.state, None, cursor)
-            {
+            if let Err(error) = netlist_document::open_source_location(
+                &mut app.state.model,
+                &mut app.state.code.netlist,
+                &mut app.state.code.netlist_open_documents,
+                &mut app.state.runs,
+                &mut app.state.workbench,
+                &mut app.state.code.code_workspace.page,
+                None,
+                cursor,
+            ) {
                 app.state.prompt(error);
             }
         }

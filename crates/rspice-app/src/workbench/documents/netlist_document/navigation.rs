@@ -6,24 +6,30 @@
 //! module so the routing is one readable unit rather than two functions
 //! buried between the document projections.
 
-// `AppState` comes through the parent rather than from `crate::workbench`:
-// `app_state` is being retired, and a submodule of it does not need its own
-// edge to it — the same route `comparison` takes.
+use std::collections::HashSet;
+
+use rspice_app_runs::workbench::slots::runs::RunsState;
+
 use super::{
-    AppState, CodeWorkspacePage, canonical_root_document_in, open_netlist_dependency_from_root_in,
+    CodeWorkspacePage, Model, NetlistDocumentState, canonical_root_document_in,
+    open_netlist_dependency_from_root_in,
 };
+use crate::workbench::state::{WorkbenchSession, WorkspaceDocumentId};
 
 /// Open the exact source location owned by a canonical diagnostic. Problems,
 /// inspector actions, and future validation reports all route through this
 /// function so included-source diagnostics cannot be misrepresented as root
 /// buffer lines.
 pub(crate) fn open_diagnostic_location(
-    state: &mut AppState,
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut HashSet<WorkspaceDocumentId>,
+    runs: &mut RunsState,
+    workbench: &mut WorkbenchSession,
+    page: &mut CodeWorkspacePage,
     diagnostic_id: uuid::Uuid,
 ) -> Result<(), String> {
-    let diagnostic = state
-        .code
-        .netlist
+    let diagnostic = netlist
         .diagnostics
         .iter()
         .find(|diagnostic| diagnostic.canonical.diagnostic_id == diagnostic_id)
@@ -42,7 +48,12 @@ pub(crate) fn open_diagnostic_location(
         .then_some(diagnostic.source_path.as_deref())
         .flatten();
     open_source_location(
-        state,
+        model,
+        netlist,
+        open_documents,
+        runs,
+        workbench,
+        page,
         included_source,
         diagnostic.line.or(diagnostic.source_line),
     )
@@ -59,52 +70,52 @@ pub(crate) fn open_diagnostic_location(
 /// the point: a location has to mean the same thing wherever it was reported
 /// from, and the preflight report used to have no route to the netlist at all.
 pub(crate) fn open_source_location(
-    state: &mut AppState,
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut HashSet<WorkspaceDocumentId>,
+    runs: &mut RunsState,
+    workbench: &mut WorkbenchSession,
+    page: &mut CodeWorkspacePage,
     included_source: Option<&std::path::Path>,
     line: Option<usize>,
 ) -> Result<(), String> {
-    let root = state
-        .code
-        .netlist
+    let root = netlist
         .active_dependency_root
-        .unwrap_or(state.code.netlist.active_document);
+        .unwrap_or(netlist.active_document);
     if let Some(source_path) = included_source {
-        let dependency_identity =
-            canonical_root_document_in(&state.model, &state.code.netlist, root)
-                .and_then(|document| {
-                    document.dependencies().iter().find(|dependency| {
-                        let locator = dependency.locator();
-                        locator
-                            .native_origin()
-                            .is_some_and(|origin| std::path::Path::new(origin) == source_path)
-                            || std::path::Path::new(locator.logical_identity()) == source_path
-                            || std::path::Path::new(locator.locator()) == source_path
-                    })
+        let dependency_identity = canonical_root_document_in(model, netlist, root)
+            .and_then(|document| {
+                document.dependencies().iter().find(|dependency| {
+                    let locator = dependency.locator();
+                    locator
+                        .native_origin()
+                        .is_some_and(|origin| std::path::Path::new(origin) == source_path)
+                        || std::path::Path::new(locator.logical_identity()) == source_path
+                        || std::path::Path::new(locator.locator()) == source_path
                 })
-                .map(|dependency| dependency.locator().logical_identity().to_owned())
-                .ok_or_else(|| {
-                    format!(
-                        "Diagnostic source {} is no longer among the deck's included files.",
-                        source_path.display()
-                    )
-                })?;
+            })
+            .map(|dependency| dependency.locator().logical_identity().to_owned())
+            .ok_or_else(|| {
+                format!(
+                    "Diagnostic source {} is no longer among the deck's included files.",
+                    source_path.display()
+                )
+            })?;
         open_netlist_dependency_from_root_in(
-            &mut state.model,
-            &mut state.code.netlist,
-            &mut state.code.netlist_open_documents,
-            &mut state.runs,
+            model,
+            netlist,
+            open_documents,
+            runs,
             root,
             &dependency_identity,
         )?;
     }
 
-    state.code.code_workspace.page = CodeWorkspacePage::Netlist;
-    state
-        .workbench
-        .activate(crate::workbench::state::Workspace::Netlist);
+    *page = CodeWorkspacePage::Netlist;
+    workbench.activate(crate::workbench::state::Workspace::Netlist);
     if let Some(line) = line {
-        state.code.netlist.cursor_line = line;
-        state.code.netlist.requested_line = Some(line.saturating_add(1));
+        netlist.cursor_line = line;
+        netlist.requested_line = Some(line.saturating_add(1));
     }
     Ok(())
 }

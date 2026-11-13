@@ -533,7 +533,15 @@ fn semantic_rename_updates_owned_definition_and_cross_file_reference_atomically(
 
     begin_rename_at_cursor_in(&state.model, &mut state.code.netlist).unwrap();
     state.code.netlist.rename_dialog.replacement = "amplifier".to_owned();
-    assert_eq!(commit_rename(&mut state).unwrap(), 3);
+    assert_eq!(
+        commit_rename(
+            &mut state.model,
+            &mut state.code.netlist,
+            &mut state.code.netlist_open_documents
+        )
+        .unwrap(),
+        3
+    );
 
     let document = state
         .model
@@ -586,7 +594,15 @@ fn semantic_rename_updates_owned_definition_and_cross_file_reference_atomically(
     state.code.netlist.cursor_char_index = root.find(".param gain").unwrap() + 9;
     begin_rename_at_cursor_in(&state.model, &mut state.code.netlist).unwrap();
     state.code.netlist.rename_dialog.replacement = "drive".to_owned();
-    assert_eq!(commit_rename(&mut state).unwrap(), 4);
+    assert_eq!(
+        commit_rename(
+            &mut state.model,
+            &mut state.code.netlist,
+            &mut state.code.netlist_open_documents
+        )
+        .unwrap(),
+        4
+    );
     let renamed = state
         .model
         .workspace
@@ -608,7 +624,15 @@ fn semantic_rename_updates_owned_definition_and_cross_file_reference_atomically(
     state.code.netlist.cursor_char_index = root.find("shape(x)").unwrap() + 2;
     begin_rename_at_cursor_in(&state.model, &mut state.code.netlist).unwrap();
     state.code.netlist.rename_dialog.replacement = "curve".to_owned();
-    assert_eq!(commit_rename(&mut state).unwrap(), 2);
+    assert_eq!(
+        commit_rename(
+            &mut state.model,
+            &mut state.code.netlist,
+            &mut state.code.netlist_open_documents
+        )
+        .unwrap(),
+        2
+    );
     let renamed = state
         .model
         .workspace
@@ -703,7 +727,13 @@ fn validated_fix_state() -> (AppState, uuid::Uuid) {
 fn a_quick_fix_pressed_twice_applies_once() {
     let (mut state, finding) = validated_fix_state();
 
-    apply_quick_fix_for_finding(&mut state, finding).expect("the fix applies to its own bytes");
+    apply_quick_fix_for_finding(
+        &mut state.model,
+        &mut state.code.netlist,
+        &mut state.code.netlist_open_documents,
+        finding,
+    )
+    .expect("the fix applies to its own bytes");
     let fixed = FIX_DECK.replace("1kk", "1k");
     assert_eq!(state.model.simulation.source.netlist_content, fixed);
     assert!(
@@ -716,8 +746,13 @@ fn a_quick_fix_pressed_twice_applies_once() {
         "precondition: nothing marked the finding stale between the presses",
     );
 
-    let refused = apply_quick_fix_for_finding(&mut state, finding)
-        .expect_err("a second press has no bytes of its own left to fix");
+    let refused = apply_quick_fix_for_finding(
+        &mut state.model,
+        &mut state.code.netlist,
+        &mut state.code.netlist_open_documents,
+        finding,
+    )
+    .expect_err("a second press has no bytes of its own left to fix");
     assert!(refused.contains("has changed"), "{refused}");
     assert_eq!(
         state.model.simulation.source.netlist_content, fixed,
@@ -733,13 +768,27 @@ fn a_quick_fix_is_refused_after_an_intervening_edit() {
     let edited = format!("* note\n{FIX_DECK}");
     state.model.simulation.source.netlist_content = edited.clone();
     state.code.netlist.revision += 1;
-    assert!(apply_quick_fix_for_finding(&mut state, finding).is_err());
+    assert!(
+        apply_quick_fix_for_finding(
+            &mut state.model,
+            &mut state.code.netlist,
+            &mut state.code.netlist_open_documents,
+            finding
+        )
+        .is_err()
+    );
     assert_eq!(state.model.simulation.source.netlist_content, edited);
 
     let (mut state, finding) = validated_fix_state();
     state.model.simulation.source.netlist_content = edited.clone();
     assert!(
-        apply_quick_fix_for_finding(&mut state, finding).is_err(),
+        apply_quick_fix_for_finding(
+            &mut state.model,
+            &mut state.code.netlist,
+            &mut state.code.netlist_open_documents,
+            finding
+        )
+        .is_err(),
         "the digest refuses bytes a writer replaced without moving the revision",
     );
     assert_eq!(state.model.simulation.source.netlist_content, edited);
@@ -752,8 +801,13 @@ fn a_quick_fix_is_refused_after_an_intervening_edit() {
 fn a_quick_fix_is_refused_when_only_the_revision_moved() {
     let (mut state, finding) = validated_fix_state();
     state.code.netlist.revision += 1;
-    let refused = apply_quick_fix_for_finding(&mut state, finding)
-        .expect_err("the finding was validated at an earlier revision");
+    let refused = apply_quick_fix_for_finding(
+        &mut state.model,
+        &mut state.code.netlist,
+        &mut state.code.netlist_open_documents,
+        finding,
+    )
+    .expect_err("the finding was validated at an earlier revision");
     assert!(refused.contains("has changed"), "{refused}");
     assert_eq!(state.model.simulation.source.netlist_content, FIX_DECK);
 }

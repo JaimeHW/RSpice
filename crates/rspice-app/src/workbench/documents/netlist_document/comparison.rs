@@ -8,7 +8,10 @@
 
 // Through the parent rather than `crate::workbench`: the module's edge onto
 // `app_state` is being retired, and a submodule of it does not need its own.
-use super::{ActiveNetlistDocument, AppState, Model, NetlistDocumentState};
+use std::collections::HashSet;
+
+use super::{ActiveNetlistDocument, DeckTransaction, Model, NetlistDocumentState};
+use crate::workbench::state::{WorkbenchSession, WorkspaceDocumentId};
 use rspice_app_runs::workbench::slots::runs::RunsState;
 
 /// Reopen the already-materialized comparison document. Creating a new
@@ -120,9 +123,13 @@ pub(crate) fn compare_owned_revision(
     Ok(())
 }
 
-pub fn restore_owned_revision(state: &mut AppState, index: usize) -> Result<(), String> {
-    let snapshot = state
-        .model
+pub fn restore_owned_revision(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut HashSet<WorkspaceDocumentId>,
+    index: usize,
+) -> Result<(), String> {
+    let snapshot = model
         .workspace
         .content
         .netlist_descriptor
@@ -130,9 +137,7 @@ pub fn restore_owned_revision(state: &mut AppState, index: usize) -> Result<(), 
         .and_then(|descriptor| descriptor.revision_history.get(index))
         .cloned()
         .ok_or_else(|| "The selected owned-source revision is no longer retained.".to_owned())?;
-    let current = state
-        .code
-        .netlist
+    let current = netlist
         .owned_document
         .as_ref()
         .cloned()
@@ -157,8 +162,7 @@ pub fn restore_owned_revision(state: &mut AppState, index: usize) -> Result<(), 
         )
         .map_err(|error| error.to_string())?;
 
-    let mut descriptor = state
-        .model
+    let mut descriptor = model
         .workspace
         .content
         .netlist_descriptor
@@ -174,19 +178,19 @@ pub fn restore_owned_revision(state: &mut AppState, index: usize) -> Result<(), 
         format!("Restored revision {}", snapshot.document_revision),
     )?;
 
-    let mut candidate = state.clone();
+    let mut candidate = DeckTransaction::begin(model, netlist, open_documents);
     candidate.model.workspace.content.netlist_source = Some(snapshot.source.clone());
     candidate.model.workspace.content.netlist_source_dirty = true;
     candidate.model.workspace.content.netlist_document = Some(next_document.clone());
     candidate.model.workspace.content.netlist_descriptor = Some(descriptor);
-    candidate.code.netlist.owned_document = Some(next_document);
-    candidate.code.netlist.active_document = ActiveNetlistDocument::OwnedSource;
-    candidate.code.netlist.active_dependency_identity = None;
-    candidate.code.netlist.active_dependency_root = None;
-    candidate.code.netlist.active_document_initialized = true;
+    candidate.netlist.owned_document = Some(next_document);
+    candidate.netlist.active_document = ActiveNetlistDocument::OwnedSource;
+    candidate.netlist.active_dependency_identity = None;
+    candidate.netlist.active_dependency_root = None;
+    candidate.netlist.active_document_initialized = true;
     candidate.model.simulation.source.netlist_content = snapshot.source;
-    candidate.code.netlist.generated_diff_source.clear();
-    candidate.code.netlist.revision = candidate.code.netlist.revision.wrapping_add(1);
+    candidate.netlist.generated_diff_source.clear();
+    candidate.netlist.revision = candidate.netlist.revision.wrapping_add(1);
     candidate.model.invalidate_source_evidence();
     candidate
         .model
@@ -194,7 +198,7 @@ pub fn restore_owned_revision(state: &mut AppState, index: usize) -> Result<(), 
         .content
         .validate_simulation_configuration()
         .map_err(|error| error.to_string())?;
-    state.commit_candidate(candidate);
+    candidate.commit_deck(model, netlist, open_documents);
     Ok(())
 }
 
@@ -349,19 +353,18 @@ pub(crate) fn open_executed_deck_in(
 ///
 /// This returns `false` in exactly that case, so a caller that offers the
 /// route unconditionally still cannot open a deck that is not held.
-pub fn reveal_executed_deck(state: &mut AppState, run_id: u64, point: usize) -> bool {
-    if !open_executed_deck_in(
-        &mut state.model,
-        &mut state.code.netlist,
-        &state.runs,
-        run_id,
-        point,
-    ) {
+pub fn reveal_executed_deck(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    runs: &RunsState,
+    workbench: &mut WorkbenchSession,
+    run_id: u64,
+    point: usize,
+) -> bool {
+    if !open_executed_deck_in(model, netlist, runs, run_id, point) {
         return false;
     }
-    state
-        .workbench
-        .activate(crate::workbench::state::Workspace::Netlist);
+    workbench.activate(crate::workbench::state::Workspace::Netlist);
     true
 }
 

@@ -4,15 +4,17 @@
 //! It never reads an ambient filesystem path, so native and browser builds
 //! answer completion and navigation from the same exact source set.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use rspice_core::netlist::{
     NetlistSourceMap, NetlistValueKind, NetlistValueSpan, UnreadSourceReason, UnreadSourceRegion,
 };
 
-use super::{
-    ActiveNetlistDocument, AppState, Model, NetlistDocumentState, canonical_root_document_in,
-};
+#[cfg(test)]
+use super::AppState;
+use super::{ActiveNetlistDocument, Model, NetlistDocumentState, canonical_root_document_in};
+use crate::workbench::state::WorkspaceDocumentId;
 use crate::workbench::{MessageCatalog, MessageId};
 use rspice_app_runs::workbench::slots::runs::RunsState;
 
@@ -817,7 +819,7 @@ pub(crate) fn symbol_hover(
 pub(crate) fn open_project_location_in(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
-    open_documents: &mut std::collections::HashSet<crate::workbench::state::WorkspaceDocumentId>,
+    open_documents: &mut HashSet<WorkspaceDocumentId>,
     runs: &mut RunsState,
     location: &ProjectSourceLocation,
 ) -> Result<(), String> {
@@ -865,7 +867,7 @@ pub(crate) fn open_project_location_in(
 pub(crate) fn go_to_definition_at_cursor_in(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
-    open_documents: &mut std::collections::HashSet<crate::workbench::state::WorkspaceDocumentId>,
+    open_documents: &mut HashSet<WorkspaceDocumentId>,
     runs: &mut RunsState,
     workbench: &mut rspice_app_workbench::workbench::state::WorkbenchSession,
 ) -> Result<String, String> {
@@ -905,7 +907,7 @@ pub(crate) fn go_to_definition_at_cursor_in(
 pub(crate) fn go_to_declaration_at_cursor(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
-    open_documents: &mut std::collections::HashSet<crate::workbench::state::WorkspaceDocumentId>,
+    open_documents: &mut HashSet<WorkspaceDocumentId>,
     runs: &mut RunsState,
     workbench: &mut rspice_app_workbench::workbench::state::WorkbenchSession,
 ) -> Result<String, String> {
@@ -980,10 +982,14 @@ pub(crate) fn preferred_quick_fix_available(netlist: &NetlistDocumentState) -> b
     preferred_quick_fix(netlist).is_some()
 }
 
-pub(crate) fn apply_preferred_quick_fix(state: &mut AppState) -> Result<String, String> {
-    let fix = preferred_quick_fix(&state.code.netlist)
+pub(crate) fn apply_preferred_quick_fix(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut HashSet<WorkspaceDocumentId>,
+) -> Result<String, String> {
+    let fix = preferred_quick_fix(netlist)
         .ok_or_else(|| "No preferred quick fix is available at the caret.".to_owned())?;
-    apply_quick_fix(state, &fix)
+    apply_quick_fix(model, netlist, open_documents, &fix)
 }
 
 /// Apply the fix one named finding offered.
@@ -994,12 +1000,12 @@ pub(crate) fn apply_preferred_quick_fix(state: &mut AppState) -> Result<String, 
 /// netlist editor was last left on, which is not the finding the reader
 /// selected.
 pub(crate) fn apply_quick_fix_for_finding(
-    state: &mut AppState,
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut HashSet<WorkspaceDocumentId>,
     finding: uuid::Uuid,
 ) -> Result<String, String> {
-    let fix = state
-        .code
-        .netlist
+    let fix = netlist
         .diagnostics
         .iter()
         .find(|diagnostic| diagnostic.canonical.diagnostic_id == finding && diagnostic.is_current())
@@ -1007,7 +1013,7 @@ pub(crate) fn apply_quick_fix_for_finding(
         .ok_or_else(|| {
             "That finding no longer offers a fix; validate the document again.".to_owned()
         })?;
-    apply_quick_fix(state, &fix)
+    apply_quick_fix(model, netlist, open_documents, &fix)
 }
 
 /// A fix, and the exact source it was computed against.
@@ -1036,14 +1042,19 @@ impl BoundQuickFix {
     }
 }
 
-fn apply_quick_fix(state: &mut AppState, bound: &BoundQuickFix) -> Result<String, String> {
-    if !super::active_netlist_source_is_editable_in(&state.model, &state.code.netlist) {
+fn apply_quick_fix(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut HashSet<WorkspaceDocumentId>,
+    bound: &BoundQuickFix,
+) -> Result<String, String> {
+    if !super::active_netlist_source_is_editable_in(model, netlist) {
         return Err("Quick fixes cannot edit this read-only source.".to_owned());
     }
-    let source = state.model.simulation.source.netlist_content.clone();
+    let source = model.simulation.source.netlist_content.clone();
     // The revision is the binding every editor path moves; the digest is what
     // still holds against a writer that replaces the bytes without moving it.
-    if state.code.netlist.revision != bound.revision
+    if netlist.revision != bound.revision
         || crate::state::content_digest(&source).to_string() != *bound.validation_id
     {
         return Err(
@@ -1061,17 +1072,12 @@ fn apply_quick_fix(state: &mut AppState, bound: &BoundQuickFix) -> Result<String
     }
     let mut replacement = source.clone();
     replacement.replace_range(fix.span.clone(), &fix.replacement);
-    let edit = if let Some(identity) = state.code.netlist.active_dependency_identity.as_deref() {
+    let edit = if let Some(identity) = netlist.active_dependency_identity.as_deref() {
         super::OwnedNetlistReplacement::dependency(identity, &source, replacement, 1)
     } else {
         super::OwnedNetlistReplacement::root(&source, replacement, 1)
     };
-    super::replace_owned_sources_atomically(
-        &mut state.model,
-        &mut state.code.netlist,
-        &mut state.code.netlist_open_documents,
-        vec![edit],
-    )?;
+    super::replace_owned_sources_atomically(model, netlist, open_documents, vec![edit])?;
     Ok(format!("Applied quick fix: {}", fix.label))
 }
 
@@ -1159,15 +1165,13 @@ pub(crate) fn begin_rename_at_cursor_in(
     Ok(())
 }
 
-pub(crate) fn commit_rename(state: &mut AppState) -> Result<usize, String> {
-    let original = state.code.netlist.rename_dialog.original.trim().to_owned();
-    let replacement = state
-        .code
-        .netlist
-        .rename_dialog
-        .replacement
-        .trim()
-        .to_owned();
+pub(crate) fn commit_rename(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut HashSet<WorkspaceDocumentId>,
+) -> Result<usize, String> {
+    let original = netlist.rename_dialog.original.trim().to_owned();
+    let replacement = netlist.rename_dialog.replacement.trim().to_owned();
     if !valid_symbol_name(&replacement) {
         return Err(
             "Enter a non-empty SPICE identifier containing only letters, digits, _, or $."
@@ -1177,7 +1181,7 @@ pub(crate) fn commit_rename(state: &mut AppState) -> Result<usize, String> {
     if original.eq_ignore_ascii_case(&replacement) {
         return Err("Enter a different model or subcircuit name.".to_owned());
     }
-    let index = project_index_in(&state.model, &mut state.code.netlist)
+    let index = project_index_in(model, netlist)
         .ok_or_else(|| "The active source has no project index.".to_owned())?;
     if !index.definitions_named(&replacement).is_empty() {
         return Err(format!(
@@ -1193,7 +1197,7 @@ pub(crate) fn commit_rename(state: &mut AppState) -> Result<usize, String> {
             );
         }
     };
-    ensure_location_is_project_owned(&state.model, &definition.definition)?;
+    ensure_location_is_project_owned(model, &definition.definition)?;
     let kind = definition.kind;
     let mut locations = vec![definition.definition.clone()];
     for reference in index
@@ -1201,16 +1205,14 @@ pub(crate) fn commit_rename(state: &mut AppState) -> Result<usize, String> {
         .into_iter()
         .filter(|reference| reference.kind == kind)
     {
-        ensure_location_is_project_owned(&state.model, &reference.location)?;
+        ensure_location_is_project_owned(model, &reference.location)?;
         locations.push(reference.location.clone());
     }
 
-    let document = state
-        .code
-        .netlist
+    let document = netlist
         .owned_document
         .as_ref()
-        .or(state.model.workspace.content.netlist_document.as_ref())
+        .or(model.workspace.content.netlist_document.as_ref())
         .ok_or_else(|| "The project-owned source closure is unavailable.".to_owned())?;
     let mut replacements = Vec::new();
     let root_locations = locations
@@ -1251,13 +1253,9 @@ pub(crate) fn commit_rename(state: &mut AppState) -> Result<usize, String> {
             include_locations.len(),
         ));
     }
-    let count = super::replace_owned_sources_atomically(
-        &mut state.model,
-        &mut state.code.netlist,
-        &mut state.code.netlist_open_documents,
-        replacements,
-    )?;
-    state.code.netlist.rename_dialog = NetlistRenameDialogState::default();
+    let count =
+        super::replace_owned_sources_atomically(model, netlist, open_documents, replacements)?;
+    netlist.rename_dialog = NetlistRenameDialogState::default();
     Ok(count)
 }
 
