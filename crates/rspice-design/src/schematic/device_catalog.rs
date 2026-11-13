@@ -9,7 +9,7 @@
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
-use rspice_core_xspice::xspice::{
+use rspice_core::xspice::{
     CodeModelRegistry, ParamSpec as CoreParamSpec, PortDirection as CorePortDirection,
     PortSpec as CorePortSpec, PortType as CorePortType,
 };
@@ -1066,7 +1066,7 @@ const fn legacy_xspice_aliases(kind: ComponentType) -> &'static [&'static str] {
 mod tests {
     use std::collections::{HashMap, HashSet};
 
-    use rspice_core_xspice::xspice::CodeModelRegistry;
+    use rspice_core::xspice::CodeModelRegistry;
 
     use super::*;
     use crate::schematic::device_descriptor::DeviceImplementation;

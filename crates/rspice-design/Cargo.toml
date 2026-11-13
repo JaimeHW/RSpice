@@ -13,7 +13,7 @@ workspace = true
 symbol-artwork = ["dep:usvg"]
 generated-veriloga-catalog = [
     "rspice-core-devices/veriloga-builtins",
-    "rspice-core-xspice/veriloga-builtins",
+    "rspice-core/veriloga-builtins",
 ]
 # Enabled by the app dev-dependency to retain parser/cache regression coverage.
 symbol-test-observation = []
@@ -27,13 +27,12 @@ log.workspace = true
 regex.workspace = true
 rspice-vocabulary.workspace = true
 # Authored source contracts reuse the engine's canonical lexer, AST and dialect
-# rules, and its code-model and generated Verilog-A catalogs. Each is named for
-# the family crate that holds it. The XSPICE code models are rspice-core under
-# the name of the crate that will hold them once rspice-core no longer does.
+# rules, and its code-model and generated Verilog-A catalogs, each from the
+# family crate that holds it.
 rspice-core-base.workspace = true
 rspice-core-netlist.workspace = true
 rspice-core-devices.workspace = true
-rspice-core-xspice = { package = "rspice-core", path = "../rspice-core", version = "0.1.0", default-features = false }
+rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false }
 rspice-design-model.workspace = true
 rspice-model-library.workspace = true
 serde.workspace = true
