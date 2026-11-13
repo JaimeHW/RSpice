@@ -102,8 +102,10 @@ pub struct EventLaneFrame {
     pub right_margin: f32,
 }
 
-/// The name column's width until the reader drags it.
-pub const LANE_NAME_WIDTH: f32 = 96.0;
+/// The shares of the strip the name column keeps between until the reader
+/// drags it: it fits the longest name, but never takes more than a quarter
+/// of the strip from the time axis, nor less than a twelfth.
+const LANE_NAME_SHARE: (f32, f32) = (1.0 / 12.0, 0.25);
 const LANE_NAME_MIN: f32 = 28.0;
 const LANE_NAME_MAX: f32 = 420.0;
 /// The value column's floor: the panes' Y tick labels sit in it too.
@@ -155,8 +157,15 @@ fn strip_gutter(ui: &Ui, host: &impl StackHost, model: &StripModel) -> Gutter {
         .size()
         .x;
     let chars = super::lanes::value_column_chars(&specs).min(16);
+    let fit = || {
+        let strip = ui.available_width();
+        super::logic::name_column_fit(ui, &specs).clamp(
+            strip * LANE_NAME_SHARE.0,
+            (strip * LANE_NAME_SHARE.1).max(strip * LANE_NAME_SHARE.0),
+        )
+    };
     Gutter {
-        name: clamp_name_width(host.session().lane_name_width.unwrap_or(LANE_NAME_WIDTH)),
+        name: clamp_name_width(host.session().lane_name_width.unwrap_or_else(fit)),
         value: (chars as f32).mul_add(advance, 8.0).max(LANE_VALUE_MIN),
     }
 }

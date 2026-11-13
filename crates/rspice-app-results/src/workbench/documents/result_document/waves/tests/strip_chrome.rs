@@ -231,13 +231,13 @@ fn eight_hues_are_drawn_and_cursor_b_is_none_of_them() {
 }
 
 /// The lanes' time axis and the panes' plot area start on one edge at the
-/// default name column and at a wider one the reader dragged to, so cursor A
+/// default name column and at widths the reader dragged to, so cursor A
 /// crosses them at one x; the bus keeps its whole name.
 #[test]
 fn the_gutter_aligns_lanes_and_panes_at_two_widths() {
     let ctx = themed_context(crate::ui::Theme::default());
     let mut lefts = Vec::new();
-    for width in [None, Some(180.0)] {
+    for width in [None, Some(120.0), Some(180.0)] {
         let mut state = review_strip(true);
         state.results.results.session.lane_name_width = width;
         let output = settled(&ctx, &mut state);
@@ -267,10 +267,44 @@ fn the_gutter_aligns_lanes_and_panes_at_two_widths() {
             "{width:?}: the bus is named whole"
         );
     }
-    let moved = lefts[1] - lefts[0];
+    let moved = lefts[2] - lefts[1];
     assert!(
-        (moved - (180.0 - rspice_results_ui::waves::stack::LANE_NAME_WIDTH)).abs() <= 0.5,
+        (moved - 60.0).abs() <= 0.5,
         "the plot area moves with the name column: {lefts:?}"
+    );
+}
+
+/// The name column opens as wide as the longest name it shows, so a long
+/// hierarchical bus name reads whole where the old fixed column elided it,
+/// and keeps within a quarter of the strip. A width the reader dragged to
+/// still rules, eliding the name again.
+#[test]
+fn the_name_column_opens_as_wide_as_its_longest_name() {
+    use rspice_results_ui::waves::lanes::LaneKey;
+    const LONG: &str = "xtop.xsar_core.result_code";
+    let ctx = themed_context(crate::ui::Theme::default());
+    let mut state = review_strip(true);
+    for layout in state.results.results.session.event_lanes.values_mut() {
+        for bus in &mut layout.user_buses {
+            bus.name = LONG.to_owned();
+        }
+        for key in &mut layout.order {
+            if *key == LaneKey::Bus("code".to_owned()) {
+                *key = LaneKey::Bus(LONG.to_owned());
+            }
+        }
+    }
+    let output = settled(&ctx, &mut state);
+    let name = text_rect(&output, LONG).expect("the bus is named whole");
+    assert!(
+        name.right() <= FRAME.x * 0.25,
+        "the column takes more than a quarter of the strip: {name:?}"
+    );
+    state.results.results.session.lane_name_width = Some(60.0);
+    let output = settled(&ctx, &mut state);
+    assert!(
+        text_rect(&output, LONG).is_none(),
+        "the dragged width is not the reader's"
     );
 }
 

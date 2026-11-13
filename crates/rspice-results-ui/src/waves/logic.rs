@@ -290,6 +290,42 @@ fn paint_gutter(
     elided.then(|| Rect::from_x_y_ranges(name_left..=columns.name_right, row.y_range()))
 }
 
+/// The name column's width that shows every row of `specs` whole: each name
+/// at the indent its row draws it at, after a bus's chevron, with the pad
+/// after it. A bus's members count whether it is open or not, so opening one
+/// does not move the time axis.
+pub fn name_column_fit(ui: &Ui, specs: &[super::lanes::LaneSpec]) -> f32 {
+    use super::lanes::LaneSpec;
+    let font = theme::mono(tokens::FS_MICRO, FontWeight::Regular);
+    let width = |name: &str| {
+        ui.painter()
+            .layout_no_wrap(name.to_owned(), font.clone(), Color32::WHITE)
+            .size()
+            .x
+    };
+    specs
+        .iter()
+        .flat_map(|spec| match spec {
+            LaneSpec::Logic { net, .. } => vec![width(net)],
+            LaneSpec::Bus { label, members, .. } => {
+                let chevron = if members.is_empty() {
+                    0.0
+                } else {
+                    CHEVRON_WIDTH
+                };
+                std::iter::once(chevron + width(label))
+                    .chain(
+                        members
+                            .iter()
+                            .map(|member| MEMBER_INDENT + width(&member.net)),
+                    )
+                    .collect()
+            }
+        })
+        .fold(0.0, f32::max)
+        + 2.0 * GUTTER_PAD
+}
+
 /// The grip on the name column's edge: a strip a few points wide the
 /// reader drags to size the column. Returns the column's new width.
 pub fn name_column_grip(ui: &Ui, rect: Rect, name_width: f32, id: egui::Id) -> Option<f32> {
