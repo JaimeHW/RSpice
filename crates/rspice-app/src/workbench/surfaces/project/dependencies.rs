@@ -305,15 +305,7 @@ fn technology_binding_panel(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
                 pin.stack_name()
             ),
         );
-        property_row(
-            ui,
-            "Publisher authority",
-            &format!(
-                "{} \u{00b7} key {}",
-                pin.publisher_id(),
-                pin.signing_key_id()
-            ),
-        );
+        property_row(ui, "Publisher", pin.publisher_id());
         property_row(
             ui,
             "Package digests",

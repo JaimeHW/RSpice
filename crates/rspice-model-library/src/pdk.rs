@@ -1,10 +1,12 @@
-//! Portable signed-PDK validation vocabulary and publisher trust authority.
+//! Portable PDK technology validation vocabulary.
 //!
 //! Installation and source compilation remain with their consuming services.
 
 use rspice_vocabulary::product::ContentDigest;
 use sha2::{Digest as _, Sha256};
 
+mod authority;
+pub use authority::PdkAdministrativeAuthority;
 pub mod callback;
 pub mod contracts;
 pub mod diff;
@@ -14,14 +16,6 @@ pub use library_config::{DiscoveredFile, LibraryPathEntry};
 pub mod manifest;
 pub mod package;
 pub mod technology_draft;
-mod trust;
-pub use trust::{
-    PdkAdministrativeAuthority, PdkPublisherTrustStore, PdkTrustAuditAction, PdkTrustAuditReceipt,
-    TrustedPdkPublisherKey,
-};
-
-pub const MAX_PDK_TRUST_AUDIT_RECEIPTS: usize = 16_384;
-pub const MAX_PDK_PUBLISHER_KEYS: usize = 4_096;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PdkTechnologyError {
@@ -49,29 +43,6 @@ pub enum PdkTechnologyError {
     LimitExceeded(String),
     #[error("{field} is not valid base64: {detail}")]
     InvalidBase64 { field: String, detail: String },
-    #[error("signature contains {actual} bytes; exactly 64 are required")]
-    InvalidSignatureLength { actual: usize },
-    #[error("publisher '{publisher_id}' key '{key_id}' is not trusted")]
-    UntrustedPublisher {
-        publisher_id: String,
-        key_id: String,
-    },
-    #[error("publisher '{publisher_id}' key '{key_id}' is revoked")]
-    RevokedPublisherKey {
-        publisher_id: String,
-        key_id: String,
-    },
-    #[error("publisher signature verification failed for '{publisher_id}' key '{key_id}'")]
-    InvalidSignature {
-        publisher_id: String,
-        key_id: String,
-    },
-    #[error("invalid publisher trust store: {0}")]
-    InvalidTrustStore(String),
-    #[error("immutable publisher trust-key conflict: {0}")]
-    ImmutableTrustKey(String),
-    #[error("publisher trust audit chain is corrupted: {0}")]
-    TrustAuditCorrupted(String),
     #[error("manifest declares missing artifact '{0}'")]
     MissingArtifact(String),
     #[error("archive contains undeclared artifact '{0}'")]

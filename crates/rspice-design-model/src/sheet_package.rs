@@ -1,57 +1,25 @@
-//! The signed drawing-sheet package contract.
+//! The drawing-sheet preset package: the portable file a project's custom
+//! sheet sizes are exported to and imported from.
 //!
-//! One implementation serves both ends of the ceremony: `rspice-app` imports a
-//! package, and the offline `rspice-sheet-publisher` signs one. Because they
-//! share this code rather than agreeing by convention, "the publisher signed
-//! it" and "the importer will accept it" are the same statement.
-//!
-//! A signature covers exactly the projection built by
-//! [`canonical_package_contract`], prefixed with a domain separator. The
-//! stored digest and the signature bytes themselves sit outside that
-//! projection and so cannot influence what was signed.
+//! A package records the SHA-256 digest of the projection built by
+//! `canonical_package_contract`. Import recomputes it, so a package edited by
+//! hand without its digest, or damaged in transit, is refused before any of
+//! its definitions is reviewed.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
-use base64::{Engine as _, engine::general_purpose::STANDARD};
-use ed25519_dalek::{Signature, Signer as _, SigningKey, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
 use crate::design_management::{
     AuthoredDrawingSheetSize, DrawingSheetBorderTemplate, DrawingSheetPreset,
-    DrawingSheetPresetScope, DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId,
-    DrawingSheetTitleFieldState, MAX_DRAWING_SHEET_PROJECT_PRESETS, RetiredDrawingSheetScale,
+    DrawingSheetPresetScope, DrawingSheetTitleBlockTemplate, MAX_DRAWING_SHEET_PROJECT_PRESETS,
     SchematicSheetFormat,
 };
-
-mod written_frame;
-use written_frame::{WrittenFrame, frame_span};
 
 pub const PACKAGE_SCHEMA: &str = "rspice-sheet-formats";
 pub const PACKAGE_VERSION: u16 = 1;
 pub const DRAWING_SHEET_PACKAGE_MAX_BYTES: usize = 4 * 1024 * 1024;
-const PACKAGE_SIGNATURE_DOMAIN: &[u8] = b"RSPICE\0DRAWING-SHEET-PRESET-PACKAGE\0SCHEMA-1\0";
-
-/// Publisher-trust authority consulted when an imported package claims a
-/// signature.
-///
-/// The application supplies a revocation-aware trust store; the offline
-/// publisher verifies against the single explicit key it was handed. Putting
-/// the authority behind a trait lets this crate own the whole authenticity
-/// rule without owning either trust model.
-pub trait PublisherTrust {
-    /// Verify `signature` over `message` for the named publisher key.
-    ///
-    /// The error is shown to an operator, so it must say why the key was
-    /// rejected: unknown, revoked, malformed, or simply not a match.
-    fn verify_publisher_signature(
-        &self,
-        publisher_id: &str,
-        key_id: &str,
-        message: &[u8],
-        signature: &[u8],
-    ) -> Result<(), String>;
-}
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum DrawingSheetPackageEncoding {
@@ -69,38 +37,6 @@ impl DrawingSheetPackageEncoding {
     }
 }
 
-/// Identity and integrity facts returned after an offline publisher signs a
-/// drawing-sheet package. Private signing material is deliberately absent.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PublishedDrawingSheetPackage {
-    pub encoded: String,
-    pub publisher_id: String,
-    pub signing_key_id: String,
-    pub source_digest_sha256: String,
-    pub verifying_key: [u8; 32],
-    pub preset_count: usize,
-}
-
-/// Verified publisher identity and content facts for a signed package.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DrawingSheetPackageVerification {
-    pub publisher_id: String,
-    pub signing_key_id: String,
-    pub source_digest_sha256: String,
-    pub preset_count: usize,
-    pub organization_preset_count: usize,
-}
-
-/// Structurally validated facts used to bind an offline signing ceremony to
-/// the exact unsigned package reviewed by an operator.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DrawingSheetPackageInspection {
-    pub source_digest_sha256: String,
-    pub preset_count: usize,
-    pub organization_preset_count: usize,
-    pub is_signed: bool,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DrawingSheetPresetPackage {
@@ -113,416 +49,7 @@ pub struct DrawingSheetPresetPackage {
     pub builtin_frame_references: Vec<BuiltinFrameReference>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_metadata: Option<PresetPackageSourceMetadata>,
-    /// Present only when an external organization publisher has signed the
-    /// canonical package contract. RSpice persists public verification keys,
-    /// never private signing material.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub publisher_signature: Option<DrawingSheetPresetPublisherSignature>,
     pub presets: Vec<PortableDrawingSheetPreset>,
-    /// How the package named what the product has since retired. Never
-    /// written: read from the package's own text when it is decoded.
-    #[serde(skip)]
-    retired_spellings: RetiredSpellings,
-}
-
-/// How a package was written where the product has since changed what it
-/// writes.
-///
-/// A preset saved naming a retired title block, the 230 mm `wide` block or
-/// the 130 mm `compact` one, loads on a block the product draws, but its
-/// package's digest, signature, frame-reference manifest and review rows
-/// were all written naming the retired one. A preset saved anchoring,
-/// turning or offsetting its block, as every preset once wrote, loads with
-/// the block upright in the lower right corner, and one declaring a scale,
-/// as every preset also once wrote, loads declaring none, but its package
-/// was sealed over the placement and scale it was written with. Likewise a preset written before
-/// the product gained a title-block field, such as the language code, loads
-/// with that field supplied, and one written with a field since retired
-/// loads without it, but its package was sealed over the fields it was
-/// written with. And a preset written before every sheet took its series'
-/// standard frame loads onto that frame, but its package was sealed over the
-/// frame it was written with: its margins, its plain or organization border,
-/// its zone counts, labels and edges, and its registration and folding
-/// flags. A preset written with an export bleed, as every preset was until
-/// bleed became the print setup's alone, loads with none, but its package was
-/// sealed over the bleed it was written with. Each is checked against what
-/// was written, so changing the product
-/// costs no one a package they already hold, and a package sealed again is
-/// written with today's names, fields and frames throughout.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-struct RetiredSpellings {
-    /// How each preset written with something the product no longer writes
-    /// opened its title block.
-    written_heads: BTreeMap<usize, WrittenTitleBlockHead>,
-    /// The title-block fields each preset was written with, for the presets
-    /// written with another set than the product has today.
-    written_title_fields: BTreeMap<usize, WrittenTitleFields>,
-    /// The frame each preset was written with, for the presets whose frame
-    /// the product writes differently today.
-    written_frames: BTreeMap<usize, WrittenFrame>,
-    /// The export bleed each preset written on today's frame was written
-    /// with, before a format stopped carrying one.
-    written_bleeds: BTreeMap<usize, u64>,
-}
-
-type WrittenTitleFields = BTreeMap<DrawingSheetTitleFieldId, DrawingSheetTitleFieldState>;
-
-/// The retired title blocks a package may name, each with the identity its
-/// review rows gave it.
-const RETIRED_TITLE_BLOCKS: [(&str, &str); 2] =
-    [("wide", "builtin/wide"), ("compact", "builtin/compact")];
-
-/// The keys a title block was written with ahead of its managed template and
-/// its fields, where they differ from what the product writes today.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct WrittenTitleBlockHead {
-    /// The retired block the preset named, and its review identity.
-    retired_template: Option<(&'static str, &'static str)>,
-    /// Those keys and their values, as they were written.
-    written: Vec<u8>,
-}
-
-impl WrittenTitleBlockHead {
-    /// How `title_block`, a preset's title block as written, opened, when
-    /// the product would open it otherwise today: when it names a retired
-    /// block, places the block as the product no longer does or declares a
-    /// scale.
-    fn of(title_block: &serde_json::Value) -> Option<Self> {
-        let template = title_block
-            .get("template")
-            .and_then(serde_json::Value::as_str);
-        let retired_template = RETIRED_TITLE_BLOCKS
-            .into_iter()
-            .find(|(name, _)| template == Some(*name));
-        let retired_keys = ["anchor", "rotation", "offset_x_um", "offset_y_um", "scale"]
-            .into_iter()
-            .any(|key| title_block.get(key).is_some());
-        if retired_template.is_none() && !retired_keys {
-            return None;
-        }
-        // Each key the title block was written with, in the order it was
-        // written in: a value serializes as it was written, the scale by
-        // its own type so its tag stays first.
-        let mut written = Vec::new();
-        for key in [
-            "template",
-            "anchor",
-            "rotation",
-            "offset_x_um",
-            "offset_y_um",
-            "scale",
-        ] {
-            let Some(value) = title_block.get(key) else {
-                continue;
-            };
-            let bytes = if key == "scale" {
-                serde_json::to_vec(
-                    &serde_json::from_value::<RetiredDrawingSheetScale>(value.clone()).ok()?,
-                )
-            } else {
-                serde_json::to_vec(value)
-            }
-            .ok()?;
-            if !written.is_empty() {
-                written.push(b',');
-            }
-            written.extend_from_slice(format!(r#""{key}":"#).as_bytes());
-            written.extend(bytes);
-        }
-        Some(Self {
-            retired_template,
-            written,
-        })
-    }
-}
-
-impl RetiredSpellings {
-    /// The retired names and field sets the package written as `package`
-    /// uses.
-    fn of(package: &serde_json::Value) -> Self {
-        let presets = package
-            .get("presets")
-            .and_then(serde_json::Value::as_array)
-            .map(Vec::as_slice)
-            .unwrap_or_default();
-        let written_heads = presets
-            .iter()
-            .enumerate()
-            .filter_map(|(index, preset)| {
-                WrittenTitleBlockHead::of(preset.pointer("/format/title_block")?)
-                    .map(|head| (index, head))
-            })
-            .collect();
-        let current = DrawingSheetTitleFieldId::ALL
-            .into_iter()
-            .collect::<BTreeSet<_>>();
-        let written_title_fields = presets
-            .iter()
-            .enumerate()
-            .filter_map(|(index, preset)| {
-                // A field set that does not read as fields is refused when
-                // the preset itself is decoded.
-                let written = preset
-                    .pointer("/format/title_block/fields")
-                    .cloned()
-                    .and_then(|fields| serde_json::from_value::<WrittenTitleFields>(fields).ok())?;
-                (written.keys().copied().collect::<BTreeSet<_>>() != current)
-                    .then_some((index, written))
-            })
-            .collect();
-        let written_frames = presets
-            .iter()
-            .enumerate()
-            .filter_map(|(index, preset)| {
-                // A format that does not decode is refused when the preset
-                // itself is decoded.
-                let format = preset.get("format")?;
-                let written = WrittenFrame::of(format)?;
-                let today = serde_json::from_value::<SchematicSheetFormat>(format.clone()).ok()?;
-                (frame_span(&today)? != written.span()).then_some((index, written))
-            })
-            .collect::<BTreeMap<_, _>>();
-        // A preset written on another frame is written again with all of it,
-        // bleed included.
-        let written_bleeds = presets
-            .iter()
-            .enumerate()
-            .filter(|(index, _)| !written_frames.contains_key(index))
-            .filter_map(|(index, preset)| {
-                Some((index, preset.pointer("/format/bleed_um")?.as_u64()?))
-            })
-            .collect();
-        Self {
-            written_heads,
-            written_title_fields,
-            written_frames,
-            written_bleeds,
-        }
-    }
-
-    /// The identity the frame-reference manifest gives the border of the
-    /// preset at `index`.
-    fn border_reference(
-        &self,
-        index: usize,
-        border: DrawingSheetBorderTemplate,
-    ) -> Option<&'static str> {
-        if let Some(frame) = self.written_frames.get(&index) {
-            return frame.border_reference();
-        }
-        match border {
-            DrawingSheetBorderTemplate::Standard => Some("standard"),
-            DrawingSheetBorderTemplate::None => None,
-        }
-    }
-
-    /// The identity the review rows give the border of the preset at
-    /// `index`.
-    fn border_identity(&self, index: usize, border: DrawingSheetBorderTemplate) -> &'static str {
-        if let Some(frame) = self.written_frames.get(&index) {
-            return frame.border_identity();
-        }
-        match border {
-            DrawingSheetBorderTemplate::Standard => "builtin/standard",
-            DrawingSheetBorderTemplate::None => "none",
-        }
-    }
-
-    /// The retired block the preset at `index` was written naming, and its
-    /// review identity.
-    fn retired_template(&self, index: usize) -> Option<(&'static str, &'static str)> {
-        self.written_heads
-            .get(&index)
-            .and_then(|head| head.retired_template)
-    }
-
-    /// The name the frame-reference manifest gives the title block of the
-    /// preset at `index`.
-    fn title_block_reference(
-        &self,
-        index: usize,
-        template: DrawingSheetTitleBlockTemplate,
-    ) -> Option<&'static str> {
-        if let Some((name, _)) = self.retired_template(index) {
-            return Some(name);
-        }
-        match template {
-            DrawingSheetTitleBlockTemplate::Standard => Some("standard"),
-            DrawingSheetTitleBlockTemplate::AsmeY141 => Some("asme-y14-1"),
-            DrawingSheetTitleBlockTemplate::None
-            | DrawingSheetTitleBlockTemplate::OrganizationManaged => None,
-        }
-    }
-
-    /// The name the review rows give the title block of the preset at
-    /// `index`.
-    fn title_block_identity(
-        &self,
-        index: usize,
-        template: DrawingSheetTitleBlockTemplate,
-    ) -> &'static str {
-        if let Some((_, identity)) = self.retired_template(index) {
-            return identity;
-        }
-        match template {
-            DrawingSheetTitleBlockTemplate::Standard => "builtin/standard",
-            DrawingSheetTitleBlockTemplate::AsmeY141 => "builtin/asme-y14-1",
-            DrawingSheetTitleBlockTemplate::OrganizationManaged => "organization-managed",
-            DrawingSheetTitleBlockTemplate::None => "none",
-        }
-    }
-
-    /// `canonical`, the contract `presets` serialize to, as the package was
-    /// written: each preset written with another frame has that frame again,
-    /// each preset written with another field set lists exactly the fields it
-    /// was written with, and each preset written naming a retired block names
-    /// it again.
-    fn respell(&self, canonical: Vec<u8>, presets: &[PortableDrawingSheetPreset]) -> Vec<u8> {
-        let canonical = self.respell_frames(canonical, presets);
-        let canonical = self.respell_title_fields(canonical, presets);
-        self.respell_title_block_heads(canonical, presets)
-    }
-
-    /// `canonical` with each preset's frame as it was written, and the
-    /// export bleed each preset on today's frame was written with ahead of
-    /// its border.
-    ///
-    /// Every preset serializes exactly one frame, and serializes it the same
-    /// way whether alone or within the contract, so the frame of each preset
-    /// in turn is found, in order, as its own serialization.
-    fn respell_frames(
-        &self,
-        canonical: Vec<u8>,
-        presets: &[PortableDrawingSheetPreset],
-    ) -> Vec<u8> {
-        const BORDER: &[u8] = br#""border":"#;
-        if self.written_frames.is_empty() && self.written_bleeds.is_empty() {
-            return canonical;
-        }
-        let mut written = Vec::with_capacity(canonical.len());
-        let mut rest = canonical.as_slice();
-        for (index, preset) in presets.iter().enumerate() {
-            let Some((at, current)) = frame_span(&preset.format)
-                .and_then(|current| Some((written_frame::find(rest, &current)?, current)))
-            else {
-                break;
-            };
-            written.extend_from_slice(&rest[..at]);
-            match (
-                self.written_frames.get(&index),
-                self.written_bleeds.get(&index),
-                written_frame::find(&current, BORDER),
-            ) {
-                (Some(frame), _, _) => written.extend(frame.span()),
-                (None, Some(bleed_um), Some(border)) => {
-                    written.extend_from_slice(&current[..border]);
-                    written.extend(format!(r#""bleed_um":{bleed_um},"#).into_bytes());
-                    written.extend_from_slice(&current[border..]);
-                }
-                _ => written.extend_from_slice(&current),
-            }
-            rest = &rest[at + current.len()..];
-        }
-        written.extend_from_slice(rest);
-        written
-    }
-
-    /// `canonical` with each preset's title-block fields as it was written.
-    ///
-    /// Every preset serializes exactly one field set, and serializes it the
-    /// same way whether alone or within the contract, so the field set of
-    /// each preset in turn is found, in order, as its own serialization.
-    fn respell_title_fields(
-        &self,
-        canonical: Vec<u8>,
-        presets: &[PortableDrawingSheetPreset],
-    ) -> Vec<u8> {
-        if self.written_title_fields.is_empty() {
-            return canonical;
-        }
-        let as_written = |fields: &WrittenTitleFields| {
-            let mut bytes = br#""fields":"#.to_vec();
-            bytes.extend(serde_json::to_vec(fields).unwrap_or_default());
-            bytes
-        };
-        let mut written = Vec::with_capacity(canonical.len());
-        let mut rest = canonical.as_slice();
-        for (index, preset) in presets.iter().enumerate() {
-            let current = as_written(&preset.format.title_block.fields);
-            let Some(at) = rest
-                .windows(current.len())
-                .position(|window| window == current.as_slice())
-            else {
-                break;
-            };
-            written.extend_from_slice(&rest[..at]);
-            match self.written_title_fields.get(&index) {
-                Some(fields) => written.extend(as_written(fields)),
-                None => written.extend_from_slice(&current),
-            }
-            rest = &rest[at + current.len()..];
-        }
-        written.extend_from_slice(rest);
-        written
-    }
-
-    /// `canonical` with each preset's title block opening as it was written:
-    /// the keys ahead of its managed template and fields, naming the retired
-    /// block it named, placing it where it was placed and declaring the scale
-    /// it declared.
-    ///
-    /// Every preset serializes exactly one title block, whose template is its
-    /// first key and whose fields are its last, so the n-th title block in
-    /// the contract is the n-th preset's. A quote within a string is escaped,
-    /// so no value in a preset can read as a title block's opening or as one
-    /// of its keys.
-    fn respell_title_block_heads(
-        &self,
-        canonical: Vec<u8>,
-        presets: &[PortableDrawingSheetPreset],
-    ) -> Vec<u8> {
-        const OPENING: &[u8] = br#""title_block":{"#;
-        const ENDS: [&[u8]; 2] = [br#","managed_template":"#, br#","fields":"#];
-        if self.written_heads.is_empty() {
-            return canonical;
-        }
-        let find = |haystack: &[u8], needle: &[u8]| {
-            haystack
-                .windows(needle.len())
-                .position(|window| window == needle)
-        };
-        let mut written = Vec::with_capacity(canonical.len());
-        let mut rest = canonical.as_slice();
-        for index in 0..presets.len() {
-            let Some(at) = find(rest, OPENING) else {
-                break;
-            };
-            let head_at = at + OPENING.len();
-            let Some(head_len) = ENDS
-                .into_iter()
-                .filter_map(|end| find(&rest[head_at..], end))
-                .min()
-            else {
-                break;
-            };
-            written.extend_from_slice(&rest[..head_at]);
-            match self.written_heads.get(&index) {
-                Some(head) => written.extend_from_slice(&head.written),
-                None => written.extend_from_slice(&rest[head_at..head_at + head_len]),
-            }
-            rest = &rest[head_at + head_len..];
-        }
-        written.extend_from_slice(rest);
-        written
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct DrawingSheetPresetPublisherSignature {
-    pub publisher_id: String,
-    pub signing_key_id: String,
-    pub signature_base64: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -620,9 +147,8 @@ pub fn build_package_with_options(
             .then_with(|| left.name.cmp(&right.name))
             .then_with(|| scope_rank(left.source_scope).cmp(&scope_rank(right.source_scope)))
     });
-    let retired_spellings = RetiredSpellings::default();
     let builtin_frame_references = if include_builtin_frame_references {
-        builtin_frame_references(&presets, &retired_spellings)
+        builtin_frame_references(&presets)
     } else {
         Vec::new()
     };
@@ -635,9 +161,7 @@ pub fn build_package_with_options(
         includes_source_metadata: include_source_metadata,
         builtin_frame_references,
         source_metadata,
-        publisher_signature: None,
         presets,
-        retired_spellings,
     };
     package.source_digest_sha256 = package_digest(&package)?;
     validate_package(&package)?;
@@ -649,17 +173,6 @@ pub fn encode_package_with_format(
     format: DrawingSheetPackageEncoding,
 ) -> Result<String, String> {
     validate_package(package)?;
-    if package
-        .presets
-        .iter()
-        .any(|preset| preset.source_scope == DrawingSheetPresetScope::Organization)
-        && package.publisher_signature.is_none()
-    {
-        return Err(
-            "Organization sheet-format definitions must be signed by external publisher tooling before distribution."
-                .to_owned(),
-        );
-    }
     match format {
         DrawingSheetPackageEncoding::CanonicalSchema1 => serde_json::to_string_pretty(package),
         DrawingSheetPackageEncoding::HumanReviewJson => {
@@ -672,7 +185,7 @@ pub fn encode_package_with_format(
                     exact_dimension_unit: "micrometre".to_owned(),
                 },
                 package: package.clone(),
-                review: human_review_rows(&package.presets, &package.retired_spellings),
+                review: human_review_rows(&package.presets),
             };
             serde_json::to_string_pretty(&document)
         }
@@ -680,16 +193,7 @@ pub fn encode_package_with_format(
     .map_err(|error| format!("Could not encode the sheet-format package: {error}"))
 }
 
-pub fn parse_package(
-    source: &str,
-    trust: &dyn PublisherTrust,
-) -> Result<DrawingSheetPresetPackage, String> {
-    let package = decode_package_without_authenticity(source)?;
-    validate_package_authenticity(&package, trust)?;
-    Ok(package)
-}
-
-fn decode_package_without_authenticity(source: &str) -> Result<DrawingSheetPresetPackage, String> {
+pub fn parse_package(source: &str) -> Result<DrawingSheetPresetPackage, String> {
     if source.len() > DRAWING_SHEET_PACKAGE_MAX_BYTES {
         return Err(format!(
             "The preset package exceeds the {} byte limit.",
@@ -703,192 +207,18 @@ fn decode_package_without_authenticity(source: &str) -> Result<DrawingSheetPrese
         .and_then(serde_json::Value::as_str)
         .is_some()
     {
-        let retired_spellings = value
-            .get("package")
-            .map(RetiredSpellings::of)
-            .unwrap_or_default();
-        let mut document =
+        let document =
             serde_json::from_value::<HumanReviewPackageDocument>(value).map_err(|error| {
                 format!("The human-review package is not valid schema-1 JSON: {error}")
             })?;
-        document.package.retired_spellings = retired_spellings;
         validate_human_review_document(&document)?;
         document.package
     } else {
-        let retired_spellings = RetiredSpellings::of(&value);
-        let mut package = serde_json::from_value::<DrawingSheetPresetPackage>(value)
-            .map_err(|error| format!("The preset package is not valid schema-1 JSON: {error}"))?;
-        package.retired_spellings = retired_spellings;
-        package
+        serde_json::from_value::<DrawingSheetPresetPackage>(value)
+            .map_err(|error| format!("The preset package is not valid schema-1 JSON: {error}"))?
     };
     validate_package(&package)?;
     Ok(package)
-}
-
-/// Inspect a package only after its schema, redundant manifests, embedded
-/// identities, and canonical SHA-256 digest have all validated. This does not
-/// grant publisher trust and deliberately does not verify a claimed signature.
-pub fn inspect_drawing_sheet_package(
-    source: &str,
-) -> Result<DrawingSheetPackageInspection, String> {
-    let package = decode_package_without_authenticity(source)?;
-    Ok(DrawingSheetPackageInspection {
-        source_digest_sha256: package.source_digest_sha256,
-        preset_count: package.presets.len(),
-        organization_preset_count: package
-            .presets
-            .iter()
-            .filter(|preset| preset.source_scope == DrawingSheetPresetScope::Organization)
-            .count(),
-        is_signed: package.publisher_signature.is_some(),
-    })
-}
-
-/// Sign a structurally valid package with the same domain-separated Ed25519
-/// contract used by RSpice's importer.
-///
-/// This is the intentionally small boundary used by the offline publisher
-/// executable. It never persists or logs the supplied private seed. Existing
-/// signatures are rejected so changing publisher identity is always an
-/// explicit, reviewable operation starting from an unsigned source package.
-pub fn publish_organization_drawing_sheet_package(
-    source: &str,
-    private_key_seed: &[u8; 32],
-    publisher_id: &str,
-    signing_key_id: &str,
-    promote_all_presets: bool,
-    output_encoding: DrawingSheetPackageEncoding,
-) -> Result<PublishedDrawingSheetPackage, String> {
-    let mut package = decode_package_without_authenticity(source)?;
-    if package.publisher_signature.is_some() {
-        return Err(
-            "The source package is already signed. Export a new unsigned package before publishing it."
-                .to_owned(),
-        );
-    }
-    // Sealed again, the package is written with today's names throughout.
-    package.retired_spellings = RetiredSpellings::default();
-    if package.includes_builtin_frame_references {
-        package.builtin_frame_references =
-            builtin_frame_references(&package.presets, &package.retired_spellings);
-    }
-    if package.presets.is_empty() {
-        return Err("An empty drawing-sheet package cannot be published.".to_owned());
-    }
-    if package.presets.iter().any(|preset| {
-        matches!(
-            &preset.format.authored_size,
-            AuthoredDrawingSheetSize::Custom { snapshot }
-                if snapshot.source_preset_unavailable
-        )
-    }) {
-        return Err(
-            "A package containing unavailable custom-size definitions cannot be published."
-                .to_owned(),
-        );
-    }
-    if promote_all_presets {
-        for preset in &mut package.presets {
-            preset.source_scope = DrawingSheetPresetScope::Organization;
-        }
-        if package.includes_source_metadata {
-            package.source_metadata = Some(source_metadata(&package.presets));
-        }
-    } else if package
-        .presets
-        .iter()
-        .any(|preset| preset.source_scope != DrawingSheetPresetScope::Organization)
-    {
-        return Err(
-            "Every preset must already have organization scope, or publishing must explicitly promote all presets."
-                .to_owned(),
-        );
-    }
-
-    validate_publisher_identifier("publisher_id", publisher_id)?;
-    validate_publisher_identifier("signing_key_id", signing_key_id)?;
-    package.publisher_signature = Some(DrawingSheetPresetPublisherSignature {
-        publisher_id: publisher_id.to_owned(),
-        signing_key_id: signing_key_id.to_owned(),
-        signature_base64: String::new(),
-    });
-    package.source_digest_sha256 = package_digest(&package)?;
-
-    let signing_key = SigningKey::from_bytes(private_key_seed);
-    let signature = signing_key.sign(&package_signature_message(&package)?);
-    package
-        .publisher_signature
-        .as_mut()
-        .expect("publisher identity was assigned above")
-        .signature_base64 = STANDARD.encode(signature.to_bytes());
-    validate_package(&package)?;
-
-    let encoded = encode_package_with_format(&package, output_encoding)?;
-    let verification =
-        verify_published_drawing_sheet_package(&encoded, &signing_key.verifying_key().to_bytes())?;
-    Ok(PublishedDrawingSheetPackage {
-        encoded,
-        publisher_id: verification.publisher_id,
-        signing_key_id: verification.signing_key_id,
-        source_digest_sha256: verification.source_digest_sha256,
-        verifying_key: signing_key.verifying_key().to_bytes(),
-        preset_count: verification.preset_count,
-    })
-}
-
-/// Verify a signed package against one explicit Ed25519 public key without
-/// consulting mutable application trust state. The publisher CLI uses this
-/// both before reporting success and when independently auditing an artifact.
-pub fn verify_published_drawing_sheet_package(
-    source: &str,
-    verifying_key_bytes: &[u8; 32],
-) -> Result<DrawingSheetPackageVerification, String> {
-    let package = decode_package_without_authenticity(source)?;
-    let publisher = package.publisher_signature.as_ref().ok_or_else(|| {
-        "The drawing-sheet package does not contain a publisher signature.".to_owned()
-    })?;
-    let signature_bytes = STANDARD
-        .decode(&publisher.signature_base64)
-        .map_err(|error| format!("The publisher signature is not valid base64: {error}"))?;
-    let signature_bytes: [u8; 64] = signature_bytes.try_into().map_err(|bytes: Vec<u8>| {
-        format!(
-            "The publisher signature contains {} bytes; exactly 64 are required.",
-            bytes.len()
-        )
-    })?;
-    let verifying_key = VerifyingKey::from_bytes(verifying_key_bytes)
-        .map_err(|error| format!("The publisher public key is invalid: {error}"))?;
-    verifying_key
-        .verify_strict(
-            &package_signature_message(&package)?,
-            &Signature::from_bytes(&signature_bytes),
-        )
-        .map_err(|_| {
-            format!(
-                "The publisher signature is invalid for {}/{}.",
-                publisher.publisher_id, publisher.signing_key_id
-            )
-        })?;
-
-    Ok(DrawingSheetPackageVerification {
-        publisher_id: publisher.publisher_id.clone(),
-        signing_key_id: publisher.signing_key_id.clone(),
-        source_digest_sha256: package.source_digest_sha256.clone(),
-        preset_count: package.presets.len(),
-        organization_preset_count: package
-            .presets
-            .iter()
-            .filter(|preset| preset.source_scope == DrawingSheetPresetScope::Organization)
-            .count(),
-    })
-}
-
-/// Derive the public key that must be provisioned into RSpice's publisher
-/// trust store. The signing key itself is zeroized on drop by ed25519-dalek.
-pub fn drawing_sheet_publisher_public_key(private_key_seed: &[u8; 32]) -> [u8; 32] {
-    SigningKey::from_bytes(private_key_seed)
-        .verifying_key()
-        .to_bytes()
 }
 
 fn validate_package(package: &DrawingSheetPresetPackage) -> Result<(), String> {
@@ -906,8 +236,7 @@ fn validate_package(package: &DrawingSheetPresetPackage) -> Result<(), String> {
             "The built-in frame-reference declaration does not match its manifest.".to_owned(),
         );
     }
-    let expected_references =
-        builtin_frame_references(&package.presets, &package.retired_spellings);
+    let expected_references = builtin_frame_references(&package.presets);
     if package.includes_builtin_frame_references
         && package.builtin_frame_references != expected_references
     {
@@ -923,13 +252,6 @@ fn validate_package(package: &DrawingSheetPresetPackage) -> Result<(), String> {
         && package.source_metadata.as_ref() != Some(&source_metadata(&package.presets))
     {
         return Err("The source metadata does not match the preset definitions.".to_owned());
-    }
-    if let Some(publisher) = &package.publisher_signature {
-        validate_publisher_identifier("publisher_id", &publisher.publisher_id)?;
-        validate_publisher_identifier("signing_key_id", &publisher.signing_key_id)?;
-        if publisher.signature_base64.len() > 128 {
-            return Err("The publisher signature exceeds its encoded size limit.".to_owned());
-        }
     }
     let digest = package_digest(package)?;
     if digest != package.source_digest_sha256 {
@@ -992,61 +314,6 @@ fn validate_package(package: &DrawingSheetPresetPackage) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_package_authenticity(
-    package: &DrawingSheetPresetPackage,
-    trust: &dyn PublisherTrust,
-) -> Result<(), String> {
-    let requires_signature = package
-        .presets
-        .iter()
-        .any(|preset| preset.source_scope == DrawingSheetPresetScope::Organization);
-    let Some(publisher) = &package.publisher_signature else {
-        return if requires_signature {
-            Err(
-                "Organization sheet-format definitions require a publisher signature from a trusted, non-revoked key."
-                    .to_owned(),
-            )
-        } else {
-            Ok(())
-        };
-    };
-    let signature = STANDARD
-        .decode(&publisher.signature_base64)
-        .map_err(|error| format!("The publisher signature is not valid base64: {error}"))?;
-    if signature.len() != 64 {
-        return Err(format!(
-            "The publisher signature contains {} bytes; exactly 64 are required.",
-            signature.len()
-        ));
-    }
-    let message = package_signature_message(package)?;
-    trust
-        .verify_publisher_signature(
-            &publisher.publisher_id,
-            &publisher.signing_key_id,
-            &message,
-            &signature,
-        )
-        .map_err(|error| format!("The publisher signature is not trusted: {error}"))
-}
-
-fn validate_publisher_identifier(field: &str, value: &str) -> Result<(), String> {
-    if value.is_empty()
-        || value.len() > 128
-        || value.trim() != value
-        || !value.bytes().all(|byte| {
-            byte.is_ascii_lowercase()
-                || byte.is_ascii_digit()
-                || matches!(byte, b'-' | b'_' | b'.' | b':' | b'@')
-        })
-    {
-        return Err(format!(
-            "Publisher {field} must contain 1..=128 lowercase ASCII identifier characters."
-        ));
-    }
-    Ok(())
-}
-
 #[derive(Serialize)]
 struct PackageDigestContract<'a> {
     schema: &'a str,
@@ -1055,17 +322,10 @@ struct PackageDigestContract<'a> {
     includes_source_metadata: bool,
     builtin_frame_references: &'a [BuiltinFrameReference],
     source_metadata: &'a Option<PresetPackageSourceMetadata>,
-    publisher_identity: Option<PackagePublisherIdentity<'a>>,
     presets: &'a [PortableDrawingSheetPreset],
 }
 
-#[derive(Serialize)]
-struct PackagePublisherIdentity<'a> {
-    publisher_id: &'a str,
-    signing_key_id: &'a str,
-}
-
-pub fn canonical_package_contract(package: &DrawingSheetPresetPackage) -> Result<Vec<u8>, String> {
+fn canonical_package_contract(package: &DrawingSheetPresetPackage) -> Result<Vec<u8>, String> {
     let contract = PackageDigestContract {
         schema: &package.schema,
         version: package.version,
@@ -1073,41 +333,23 @@ pub fn canonical_package_contract(package: &DrawingSheetPresetPackage) -> Result
         includes_source_metadata: package.includes_source_metadata,
         builtin_frame_references: &package.builtin_frame_references,
         source_metadata: &package.source_metadata,
-        publisher_identity: package.publisher_signature.as_ref().map(|publisher| {
-            PackagePublisherIdentity {
-                publisher_id: &publisher.publisher_id,
-                signing_key_id: &publisher.signing_key_id,
-            }
-        }),
         presets: &package.presets,
     };
-    let canonical = serde_json::to_vec(&contract)
-        .map_err(|error| format!("Could not canonicalize the sheet-format package: {error}"))?;
-    Ok(package
-        .retired_spellings
-        .respell(canonical, &package.presets))
+    serde_json::to_vec(&contract)
+        .map_err(|error| format!("Could not canonicalize the sheet-format package: {error}"))
 }
 
-pub fn package_digest(package: &DrawingSheetPresetPackage) -> Result<String, String> {
+fn package_digest(package: &DrawingSheetPresetPackage) -> Result<String, String> {
     Ok(Sha256::digest(canonical_package_contract(package)?)
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect())
 }
 
-pub fn package_signature_message(package: &DrawingSheetPresetPackage) -> Result<Vec<u8>, String> {
-    let canonical = canonical_package_contract(package)?;
-    let mut message = Vec::with_capacity(PACKAGE_SIGNATURE_DOMAIN.len() + canonical.len());
-    message.extend_from_slice(PACKAGE_SIGNATURE_DOMAIN);
-    message.extend_from_slice(&canonical);
-    Ok(message)
-}
-
 fn scope_rank(scope: DrawingSheetPresetScope) -> u8 {
     match scope {
         DrawingSheetPresetScope::Project => 0,
         DrawingSheetPresetScope::User => 1,
-        DrawingSheetPresetScope::Organization => 2,
     }
 }
 
@@ -1126,21 +368,22 @@ fn source_metadata(presets: &[PortableDrawingSheetPreset]) -> PresetPackageSourc
     }
 }
 
-fn builtin_frame_references(
-    presets: &[PortableDrawingSheetPreset],
-    spellings: &RetiredSpellings,
-) -> Vec<BuiltinFrameReference> {
+fn builtin_frame_references(presets: &[PortableDrawingSheetPreset]) -> Vec<BuiltinFrameReference> {
     let mut references = BTreeSet::new();
-    for (index, preset) in presets.iter().enumerate() {
-        if let Some(identity) = spellings.border_reference(index, preset.format.border) {
+    for preset in presets {
+        if preset.format.border == DrawingSheetBorderTemplate::Standard {
             references.insert(BuiltinFrameReference {
                 kind: "border".to_owned(),
-                identity: identity.to_owned(),
+                identity: "standard".to_owned(),
             });
         }
-        if let Some(identity) =
-            spellings.title_block_reference(index, preset.format.title_block.template)
-        {
+        let title_block = match preset.format.title_block.template {
+            DrawingSheetTitleBlockTemplate::Standard => Some("standard"),
+            DrawingSheetTitleBlockTemplate::AsmeY141 => Some("asme-y14-1"),
+            DrawingSheetTitleBlockTemplate::None
+            | DrawingSheetTitleBlockTemplate::OrganizationManaged => None,
+        };
+        if let Some(identity) = title_block {
             references.insert(BuiltinFrameReference {
                 kind: "title-block".to_owned(),
                 identity: identity.to_owned(),
@@ -1150,23 +393,33 @@ fn builtin_frame_references(
     references.into_iter().collect()
 }
 
-fn human_review_rows(
-    presets: &[PortableDrawingSheetPreset],
-    spellings: &RetiredSpellings,
-) -> Vec<HumanReviewPreset> {
+fn border_identity(border: DrawingSheetBorderTemplate) -> &'static str {
+    match border {
+        DrawingSheetBorderTemplate::Standard => "builtin/standard",
+        DrawingSheetBorderTemplate::None => "none",
+    }
+}
+
+fn title_block_identity(template: DrawingSheetTitleBlockTemplate) -> &'static str {
+    match template {
+        DrawingSheetTitleBlockTemplate::Standard => "builtin/standard",
+        DrawingSheetTitleBlockTemplate::AsmeY141 => "builtin/asme-y14-1",
+        DrawingSheetTitleBlockTemplate::OrganizationManaged => "organization-managed",
+        DrawingSheetTitleBlockTemplate::None => "none",
+    }
+}
+
+fn human_review_rows(presets: &[PortableDrawingSheetPreset]) -> Vec<HumanReviewPreset> {
     presets
         .iter()
-        .enumerate()
-        .map(|(index, preset)| {
-            let mut dependencies = Vec::new();
-            dependencies.push(format!(
-                "border:{}",
-                spellings.border_identity(index, preset.format.border)
-            ));
-            dependencies.push(format!(
-                "title-block:{}",
-                spellings.title_block_identity(index, preset.format.title_block.template)
-            ));
+        .map(|preset| {
+            let dependencies = vec![
+                format!("border:{}", border_identity(preset.format.border)),
+                format!(
+                    "title-block:{}",
+                    title_block_identity(preset.format.title_block.template)
+                ),
+            ];
             HumanReviewPreset {
                 stable_id: preset.stable_id.clone(),
                 name: preset.name.clone(),
@@ -1193,12 +446,7 @@ fn validate_human_review_document(document: &HumanReviewPackageDocument) -> Resu
     {
         return Err("Unsupported human-review sheet-format schema.".to_owned());
     }
-    if document.review
-        != human_review_rows(
-            &document.package.presets,
-            &document.package.retired_spellings,
-        )
-    {
+    if document.review != human_review_rows(&document.package.presets) {
         return Err(
             "The human-review projection does not match the canonical preset definitions."
                 .to_owned(),
@@ -1221,54 +469,9 @@ fn format_millimetres(value_um: u64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use ed25519_dalek::Signer as _;
-
     use crate::sheet_authoring::{StartingFrame, custom_format};
 
     use super::*;
-
-    /// Stand-in for the application's revocation-aware trust store. It
-    /// resolves one key per publisher and refuses revoked keys, which is the
-    /// whole authority the contract consults.
-    #[derive(Clone, Default)]
-    struct PdkPublisherTrustStore {
-        keys: Vec<TrustedPdkPublisherKey>,
-    }
-
-    #[derive(Clone)]
-    struct TrustedPdkPublisherKey {
-        publisher_id: String,
-        key_id: String,
-        verifying_key: [u8; 32],
-        revoked: bool,
-    }
-
-    impl PublisherTrust for PdkPublisherTrustStore {
-        fn verify_publisher_signature(
-            &self,
-            publisher_id: &str,
-            key_id: &str,
-            message: &[u8],
-            signature: &[u8],
-        ) -> Result<(), String> {
-            let key = self
-                .keys
-                .iter()
-                .find(|key| key.publisher_id == publisher_id && key.key_id == key_id)
-                .ok_or_else(|| format!("{publisher_id}/{key_id} is not a trusted publisher key"))?;
-            if key.revoked {
-                return Err(format!("{publisher_id}/{key_id} is revoked"));
-            }
-            let verifying_key = VerifyingKey::from_bytes(&key.verifying_key)
-                .map_err(|error| format!("trusted key is invalid: {error}"))?;
-            let signature: [u8; 64] = signature
-                .try_into()
-                .map_err(|_| "signature is not 64 bytes".to_owned())?;
-            verifying_key
-                .verify_strict(message, &Signature::from_bytes(&signature))
-                .map_err(|_| format!("signature is invalid for {publisher_id}/{key_id}"))
-        }
-    }
 
     fn build_package(
         presets: impl IntoIterator<Item = DrawingSheetPreset>,
@@ -1278,42 +481,6 @@ mod tests {
 
     fn encode_package(package: &DrawingSheetPresetPackage) -> Result<String, String> {
         encode_package_with_format(package, DrawingSheetPackageEncoding::CanonicalSchema1)
-    }
-
-    fn signed_organization_package() -> (
-        DrawingSheetPresetPackage,
-        PdkPublisherTrustStore,
-        SigningKey,
-    ) {
-        let preset = DrawingSheetPreset {
-            id: "organization-panel".to_owned(),
-            name: "Organization panel".to_owned(),
-            scope: DrawingSheetPresetScope::Organization,
-            format: custom_format("Organization panel", 250_000, 400_000, StartingFrame::IsoA)
-                .unwrap(),
-        };
-        let signing_key = SigningKey::from_bytes(&[0x53; 32]);
-        let mut package = build_package([preset]).unwrap();
-        package.publisher_signature = Some(DrawingSheetPresetPublisherSignature {
-            publisher_id: "rspice-test-publisher".to_owned(),
-            signing_key_id: "sheet-formats-2026".to_owned(),
-            signature_base64: String::new(),
-        });
-        package.source_digest_sha256 = package_digest(&package).unwrap();
-        let signature = signing_key.sign(&package_signature_message(&package).unwrap());
-        package
-            .publisher_signature
-            .as_mut()
-            .unwrap()
-            .signature_base64 = STANDARD.encode(signature.to_bytes());
-        let mut trust = PdkPublisherTrustStore::default();
-        trust.keys.push(TrustedPdkPublisherKey {
-            publisher_id: "rspice-test-publisher".to_owned(),
-            key_id: "sheet-formats-2026".to_owned(),
-            verifying_key: signing_key.verifying_key().to_bytes(),
-            revoked: false,
-        });
-        (package, trust, signing_key)
     }
 
     #[test]
@@ -1326,246 +493,34 @@ mod tests {
         };
         let package = build_package([preset]).unwrap();
         let encoded = encode_package(&package).unwrap();
-        let restored = parse_package(&encoded, &PdkPublisherTrustStore::default()).unwrap();
+        let restored = parse_package(&encoded).unwrap();
         assert_eq!(restored.presets[0].portrait_width_um, 250_001);
         assert_eq!(restored.presets[0].portrait_height_um, 400_002);
 
         let tampered = encoded.replace("250001", "250002");
-        assert!(parse_package(&tampered, &PdkPublisherTrustStore::default()).is_err());
+        assert!(parse_package(&tampered).is_err());
     }
 
     #[test]
-    fn offline_publisher_promotes_signs_and_self_verifies_the_import_contract() {
+    fn package_schema_downgrades_and_unknown_fields_are_rejected() {
         let preset = DrawingSheetPreset {
-            id: "publisher-panel".to_owned(),
-            name: "Publisher panel".to_owned(),
+            id: "custom-lab".to_owned(),
+            name: "Lab panel".to_owned(),
             scope: DrawingSheetPresetScope::Project,
-            format: custom_format("Publisher panel", 250_003, 400_007, StartingFrame::IsoA)
-                .unwrap(),
+            format: custom_format("Lab panel", 250_000, 400_000, StartingFrame::IsoA).unwrap(),
         };
-        let unsigned = encode_package(&build_package([preset]).unwrap()).unwrap();
-        let unsigned_inspection = inspect_drawing_sheet_package(&unsigned).unwrap();
-        assert!(!unsigned_inspection.is_signed);
-        assert_eq!(unsigned_inspection.preset_count, 1);
-        assert_eq!(unsigned_inspection.organization_preset_count, 0);
-        let seed = [0x29; 32];
-
-        for encoding in [
-            DrawingSheetPackageEncoding::CanonicalSchema1,
-            DrawingSheetPackageEncoding::HumanReviewJson,
-        ] {
-            let published = publish_organization_drawing_sheet_package(
-                &unsigned,
-                &seed,
-                "acme.eda",
-                "drawing-sheets-2026",
-                true,
-                encoding,
-            )
-            .unwrap();
-            assert_eq!(published.preset_count, 1);
-            assert_eq!(
-                published.verifying_key,
-                drawing_sheet_publisher_public_key(&seed)
-            );
-
-            let verified = verify_published_drawing_sheet_package(
-                &published.encoded,
-                &published.verifying_key,
-            )
-            .unwrap();
-            assert_eq!(verified.publisher_id, "acme.eda");
-            assert_eq!(verified.signing_key_id, "drawing-sheets-2026");
-            assert_eq!(verified.organization_preset_count, 1);
-            assert_eq!(
-                verified.source_digest_sha256,
-                published.source_digest_sha256
-            );
-            let signed_inspection = inspect_drawing_sheet_package(&published.encoded).unwrap();
-            assert!(signed_inspection.is_signed);
-            assert_eq!(
-                signed_inspection.source_digest_sha256,
-                published.source_digest_sha256
-            );
-
-            let mut trust = PdkPublisherTrustStore::default();
-            trust.keys.push(TrustedPdkPublisherKey {
-                publisher_id: verified.publisher_id,
-                key_id: verified.signing_key_id,
-                verifying_key: published.verifying_key,
-                revoked: false,
-            });
-            let imported = parse_package(&published.encoded, &trust).unwrap();
-            assert_eq!(
-                imported.presets[0].source_scope,
-                DrawingSheetPresetScope::Organization
-            );
-        }
-    }
-
-    #[test]
-    fn offline_publisher_rejects_implicit_scope_changes_and_resigning() {
-        let preset = DrawingSheetPreset {
-            id: "publisher-panel".to_owned(),
-            name: "Publisher panel".to_owned(),
-            scope: DrawingSheetPresetScope::Project,
-            format: custom_format("Publisher panel", 250_000, 400_000, StartingFrame::IsoA)
-                .unwrap(),
-        };
-        let unsigned = encode_package(&build_package([preset]).unwrap()).unwrap();
-        let seed = [0x31; 32];
-        let error = publish_organization_drawing_sheet_package(
-            &unsigned,
-            &seed,
-            "acme.eda",
-            "drawing-sheets-2026",
-            false,
-            DrawingSheetPackageEncoding::CanonicalSchema1,
-        )
-        .unwrap_err();
-        assert!(error.contains("explicitly promote"));
-
-        let signed = publish_organization_drawing_sheet_package(
-            &unsigned,
-            &seed,
-            "acme.eda",
-            "drawing-sheets-2026",
-            true,
-            DrawingSheetPackageEncoding::CanonicalSchema1,
-        )
-        .unwrap();
-        let error = publish_organization_drawing_sheet_package(
-            &signed.encoded,
-            &seed,
-            "acme.eda",
-            "drawing-sheets-2027",
-            false,
-            DrawingSheetPackageEncoding::CanonicalSchema1,
-        )
-        .unwrap_err();
-        assert!(error.contains("already signed"));
-    }
-
-    #[test]
-    fn explicit_public_key_verification_detects_content_and_key_tampering() {
-        let preset = DrawingSheetPreset {
-            id: "publisher-panel".to_owned(),
-            name: "Publisher panel".to_owned(),
-            scope: DrawingSheetPresetScope::Project,
-            format: custom_format("Publisher panel", 250_000, 400_000, StartingFrame::IsoA)
-                .unwrap(),
-        };
-        let unsigned = encode_package(&build_package([preset]).unwrap()).unwrap();
-        let published = publish_organization_drawing_sheet_package(
-            &unsigned,
-            &[0x42; 32],
-            "acme.eda",
-            "drawing-sheets-2026",
-            true,
-            DrawingSheetPackageEncoding::CanonicalSchema1,
-        )
-        .unwrap();
-
-        assert!(
-            verify_published_drawing_sheet_package(
-                &published.encoded,
-                &drawing_sheet_publisher_public_key(&[0x43; 32])
-            )
-            .is_err()
-        );
-        let tampered = published.encoded.replace("250000", "250001");
-        assert!(
-            verify_published_drawing_sheet_package(&tampered, &published.verifying_key).is_err()
-        );
-    }
-
-    #[test]
-    fn organization_packages_require_a_current_trusted_publisher_signature() {
-        let (package, trust, _) = signed_organization_package();
-        for format in [
-            DrawingSheetPackageEncoding::CanonicalSchema1,
-            DrawingSheetPackageEncoding::HumanReviewJson,
-        ] {
-            let encoded = encode_package_with_format(&package, format).unwrap();
-            assert_eq!(parse_package(&encoded, &trust).unwrap(), package);
-        }
-
-        let mut revoked = trust.clone();
-        revoked.keys[0].revoked = true;
-        let encoded = encode_package(&package).unwrap();
-        assert!(parse_package(&encoded, &revoked).is_err());
-        assert!(parse_package(&encoded, &PdkPublisherTrustStore::default()).is_err());
-    }
-
-    #[test]
-    fn unsigned_organization_packages_fail_closed() {
-        let (mut package, trust, _) = signed_organization_package();
-        package.publisher_signature = None;
-        package.source_digest_sha256 = package_digest(&package).unwrap();
-        assert!(encode_package(&package).is_err());
-
-        let encoded = serde_json::to_string(&package).unwrap();
-        let error = parse_package(&encoded, &trust).unwrap_err();
-        assert!(error.contains("require a publisher signature"));
-    }
-
-    #[test]
-    fn organization_signature_binds_content_identity_and_domain() {
-        let (package, trust, signing_key) = signed_organization_package();
-
-        let mut content_tampered = package.clone();
-        content_tampered.presets[0].portrait_width_um += 1;
-        let AuthoredDrawingSheetSize::Custom { snapshot } =
-            &mut content_tampered.presets[0].format.authored_size
-        else {
-            panic!("fixture is custom");
-        };
-        snapshot.portrait_width_um += 1;
-        content_tampered.source_digest_sha256 = package_digest(&content_tampered).unwrap();
-        let encoded = serde_json::to_string(&content_tampered).unwrap();
-        assert!(parse_package(&encoded, &trust).is_err());
-
-        let mut identity_tampered = package.clone();
-        identity_tampered
-            .publisher_signature
-            .as_mut()
-            .unwrap()
-            .signing_key_id = "unknown-key".to_owned();
-        identity_tampered.source_digest_sha256 = package_digest(&identity_tampered).unwrap();
-        let encoded = serde_json::to_string(&identity_tampered).unwrap();
-        assert!(parse_package(&encoded, &trust).is_err());
-
-        let mut wrong_domain = package;
-        let signature = signing_key.sign(&canonical_package_contract(&wrong_domain).unwrap());
-        wrong_domain
-            .publisher_signature
-            .as_mut()
-            .unwrap()
-            .signature_base64 = STANDARD.encode(signature.to_bytes());
-        let encoded = serde_json::to_string(&wrong_domain).unwrap();
-        assert!(parse_package(&encoded, &trust).is_err());
-    }
-
-    #[test]
-    fn signed_package_schema_downgrades_and_unknown_fields_are_rejected() {
-        let (package, trust, signing_key) = signed_organization_package();
+        let package = build_package([preset]).unwrap();
         let mut downgraded = package.clone();
         downgraded.version = 0;
         downgraded.source_digest_sha256 = package_digest(&downgraded).unwrap();
-        let signature = signing_key.sign(&package_signature_message(&downgraded).unwrap());
-        downgraded
-            .publisher_signature
-            .as_mut()
-            .unwrap()
-            .signature_base64 = STANDARD.encode(signature.to_bytes());
-        assert!(parse_package(&serde_json::to_string(&downgraded).unwrap(), &trust).is_err());
+        assert!(parse_package(&serde_json::to_string(&downgraded).unwrap()).is_err());
 
         let mut value = serde_json::to_value(package).unwrap();
-        value.as_object_mut().unwrap().insert(
-            "unsigned_override".to_owned(),
-            serde_json::Value::Bool(true),
-        );
-        assert!(parse_package(&serde_json::to_string(&value).unwrap(), &trust).is_err());
+        value
+            .as_object_mut()
+            .unwrap()
+            .insert("unknown_override".to_owned(), serde_json::Value::Bool(true));
+        assert!(parse_package(&serde_json::to_string(&value).unwrap()).is_err());
     }
 
     #[test]
@@ -1632,10 +587,7 @@ mod tests {
                 encoded,
                 encode_package_with_format(&package, format).unwrap()
             );
-            assert_eq!(
-                parse_package(&encoded, &PdkPublisherTrustStore::default()).unwrap(),
-                package
-            );
+            assert_eq!(parse_package(&encoded).unwrap(), package);
         }
     }
 
@@ -1652,142 +604,6 @@ mod tests {
             encode_package_with_format(&package, DrawingSheetPackageEncoding::HumanReviewJson)
                 .unwrap();
         let tampered = encoded.replace("250.001 \u{00d7} 400.002 mm", "250 \u{00d7} 400 mm");
-        assert!(parse_package(&tampered, &PdkPublisherTrustStore::default()).is_err());
+        assert!(parse_package(&tampered).is_err());
     }
-
-    /// `package`, whose one preset is on ISO 7200's block, as a build that
-    /// still offered the retired 230 mm block wrote it had the preset named
-    /// that block: the preset, the frame-reference manifest, the digest and
-    /// any signature all say `wide`.
-    fn written_naming_wide(
-        package: &DrawingSheetPresetPackage,
-        signing_key: Option<&SigningKey>,
-    ) -> serde_json::Value {
-        use sha2::Digest as _;
-        let contract = String::from_utf8(canonical_package_contract(package).unwrap()).unwrap();
-        assert_eq!(
-            contract
-                .matches(r#""title_block":{"template":"standard""#)
-                .count(),
-            1
-        );
-        let contract = contract
-            .replace(
-                r#""title_block":{"template":"standard""#,
-                r#""title_block":{"template":"wide""#,
-            )
-            .replace(
-                r#"{"kind":"title-block","identity":"standard"}"#,
-                r#"{"kind":"title-block","identity":"wide"}"#,
-            );
-        let mut wire = serde_json::to_value(package).unwrap();
-        wire["presets"][0]["format"]["title_block"]["template"] = serde_json::json!("wide");
-        for reference in wire["builtin_frame_references"].as_array_mut().unwrap() {
-            if reference["kind"] == "title-block" {
-                reference["identity"] = serde_json::json!("wide");
-            }
-        }
-        wire["source_digest_sha256"] = serde_json::json!(
-            Sha256::digest(contract.as_bytes())
-                .iter()
-                .map(|byte| format!("{byte:02x}"))
-                .collect::<String>()
-        );
-        if let Some(signing_key) = signing_key {
-            let mut message = PACKAGE_SIGNATURE_DOMAIN.to_vec();
-            message.extend_from_slice(contract.as_bytes());
-            wire["publisher_signature"]["signature_base64"] =
-                serde_json::json!(STANDARD.encode(signing_key.sign(&message).to_bytes()));
-        }
-        wire
-    }
-
-    #[test]
-    fn a_package_written_naming_the_retired_wide_block_still_loads() {
-        let preset = |scope| DrawingSheetPreset {
-            id: "legacy-panel".to_owned(),
-            name: "Legacy panel".to_owned(),
-            scope,
-            format: custom_format("Legacy panel", 420_000, 594_000, StartingFrame::IsoA)
-                .unwrap()
-                .try_update(|draft| {
-                    draft.title_block.template = DrawingSheetTitleBlockTemplate::Standard;
-                })
-                .unwrap(),
-        };
-        let package = build_package([preset(DrawingSheetPresetScope::Project)]).unwrap();
-        let wire = written_naming_wide(&package, None);
-        let source = serde_json::to_string_pretty(&wire).unwrap();
-        let untrusted = PdkPublisherTrustStore::default();
-        let restored = parse_package(&source, &untrusted)
-            .expect("a package naming the retired block loads on ISO 7200's");
-        assert_eq!(
-            restored.presets[0].format.title_block.template,
-            DrawingSheetTitleBlockTemplate::Standard
-        );
-        assert_eq!(restored.presets, package.presets);
-        assert_eq!(
-            inspect_drawing_sheet_package(&source)
-                .unwrap()
-                .source_digest_sha256,
-            wire["source_digest_sha256"].as_str().unwrap()
-        );
-        // The digest it was written with still covers it.
-        let tampered = source.replace("594000", "594001");
-        assert!(parse_package(&tampered, &untrusted).is_err());
-
-        // So does the review form, whose rows were written naming it too.
-        let mut document = serde_json::from_str::<serde_json::Value>(
-            &encode_package_with_format(&package, DrawingSheetPackageEncoding::HumanReviewJson)
-                .unwrap(),
-        )
-        .unwrap();
-        for dependency in document["review"][0]["dependencies"]
-            .as_array_mut()
-            .unwrap()
-        {
-            if dependency == "title-block:builtin/standard" {
-                *dependency = serde_json::json!("title-block:builtin/wide");
-            }
-        }
-        document["package"] = wire;
-        assert!(parse_package(&document.to_string(), &untrusted).is_ok());
-
-        // A signature made over the old name still verifies.
-        let mut organization =
-            build_package([preset(DrawingSheetPresetScope::Organization)]).unwrap();
-        organization.publisher_signature = Some(DrawingSheetPresetPublisherSignature {
-            publisher_id: "rspice-test-publisher".to_owned(),
-            signing_key_id: "sheet-formats-2026".to_owned(),
-            signature_base64: String::new(),
-        });
-        let signing_key = SigningKey::from_bytes(&[0x53; 32]);
-        let signed = written_naming_wide(&organization, Some(&signing_key)).to_string();
-        let mut trust = PdkPublisherTrustStore::default();
-        trust.keys.push(TrustedPdkPublisherKey {
-            publisher_id: "rspice-test-publisher".to_owned(),
-            key_id: "sheet-formats-2026".to_owned(),
-            verifying_key: signing_key.verifying_key().to_bytes(),
-            revoked: false,
-        });
-        assert!(parse_package(&signed, &trust).is_ok());
-        verify_published_drawing_sheet_package(&signed, &signing_key.verifying_key().to_bytes())
-            .unwrap();
-
-        // Sealed again, it is written with today's name throughout.
-        let published = publish_organization_drawing_sheet_package(
-            &source,
-            &[0x29; 32],
-            "acme.eda",
-            "drawing-sheets-2026",
-            true,
-            DrawingSheetPackageEncoding::CanonicalSchema1,
-        )
-        .unwrap();
-        assert!(!published.encoded.contains("\"wide\""));
-    }
-
-    mod before_asme_form;
-    mod field_history;
-    mod frame_history;
 }

@@ -1,14 +1,11 @@
-//! Existing signed-package fixtures shared by runtime and application tests.
+//! PDK technology-package fixtures shared by runtime and application tests.
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
-use ed25519_dalek::{Signer as _, SigningKey};
 use rspice_model_library::pdk::contracts::*;
 use rspice_model_library::pdk::manifest::PdkTechnologyManifest;
-use rspice_model_library::pdk::{
-    PdkAdministrativeAuthority, PdkPublisherTrustStore, TrustedPdkPublisherKey, content_digest,
-};
+use rspice_model_library::pdk::{PdkAdministrativeAuthority, content_digest};
 
-pub fn fixture_archive() -> (Vec<u8>, PdkPublisherTrustStore, PdkAdministrativeAuthority) {
+pub fn fixture_archive() -> (Vec<u8>, PdkAdministrativeAuthority) {
     fixture_archive_with_models(
         br#".lib TT
 .model nmos_demo nmos level=1 vto=0.55
@@ -33,10 +30,7 @@ pub fn fixture_archive() -> (Vec<u8>, PdkPublisherTrustStore, PdkAdministrativeA
 /// The same signed package, with `model_bytes` as its model library. Every
 /// process reads the section of its own name, so the library must declare
 /// `.lib TT` through `.lib FS`.
-pub fn fixture_archive_with_models(
-    model_bytes: Vec<u8>,
-) -> (Vec<u8>, PdkPublisherTrustStore, PdkAdministrativeAuthority) {
-    let signing_key = SigningKey::from_bytes(&[0x42; 32]);
+pub fn fixture_archive_with_models(model_bytes: Vec<u8>) -> (Vec<u8>, PdkAdministrativeAuthority) {
     let callback_bytes = wat::parse_str(
         r#"(module
                 (memory (export "memory") 1 2)
@@ -50,7 +44,6 @@ pub fn fixture_archive_with_models(
         technology_name: "Demo 180 nm".to_owned(),
         revision: "2.3.1".to_owned(),
         publisher_id: "rspice-foundry-demo".to_owned(),
-        signing_key_id: "ceremony-01".to_owned(),
         license_spdx: "LicenseRef-RSpice-Demo-PDK".to_owned(),
         process_node_nm: 180,
         database_unit_meters: 1.0e-9,
@@ -169,7 +162,6 @@ pub fn fixture_archive_with_models(
     let archive = SignedPdkTechnologyArchive {
         schema_version: PDK_TECHNOLOGY_ARCHIVE_SCHEMA_VERSION,
         manifest_base64: STANDARD.encode(&manifest_bytes),
-        signature_base64: STANDARD.encode(signing_key.sign(&manifest_bytes).to_bytes()),
         files: vec![
             PdkTechnologyArchiveFile {
                 path: "models/demo.lib".to_owned(),
@@ -183,16 +175,6 @@ pub fn fixture_archive_with_models(
     };
     (
         serde_json::to_vec(&archive).unwrap(),
-        {
-            let mut trust = PdkPublisherTrustStore::default();
-            trust.keys = vec![TrustedPdkPublisherKey {
-                publisher_id: "rspice-foundry-demo".to_owned(),
-                key_id: "ceremony-01".to_owned(),
-                verifying_key: signing_key.verifying_key().to_bytes(),
-                revoked: false,
-            }];
-            trust
-        },
         PdkAdministrativeAuthority {
             actor_id: "cad-admin@example.com".to_owned(),
             authority_id: "role:pdk-administrator".to_owned(),
@@ -200,8 +182,7 @@ pub fn fixture_archive_with_models(
     )
 }
 
-pub fn fixture_archive_with_veriloga()
--> (Vec<u8>, PdkPublisherTrustStore, PdkAdministrativeAuthority) {
+pub fn fixture_archive_with_veriloga() -> (Vec<u8>, PdkAdministrativeAuthority) {
     fixture_archive_with_veriloga_source(
         br#"`include "parts/resistance.vams"
 module pdk_resistor(p, n);
@@ -214,11 +195,8 @@ endmodule
     )
 }
 
-pub fn fixture_archive_with_veriloga_source(
-    root: &[u8],
-) -> (Vec<u8>, PdkPublisherTrustStore, PdkAdministrativeAuthority) {
-    let (bytes, trust, authority) = fixture_archive();
-    let signing_key = SigningKey::from_bytes(&[0x42; 32]);
+pub fn fixture_archive_with_veriloga_source(root: &[u8]) -> (Vec<u8>, PdkAdministrativeAuthority) {
+    let (bytes, authority) = fixture_archive();
     let mut archive: SignedPdkTechnologyArchive = serde_json::from_slice(&bytes).unwrap();
     let mut manifest: PdkTechnologyManifest =
         serde_json::from_slice(&STANDARD.decode(&archive.manifest_base64).unwrap()).unwrap();
@@ -246,8 +224,7 @@ pub fn fixture_archive_with_veriloga_source(
     }];
     let manifest_bytes = serde_json::to_vec(&manifest).unwrap();
     archive.manifest_base64 = STANDARD.encode(&manifest_bytes);
-    archive.signature_base64 = STANDARD.encode(signing_key.sign(&manifest_bytes).to_bytes());
-    (serde_json::to_vec(&archive).unwrap(), trust, authority)
+    (serde_json::to_vec(&archive).unwrap(), authority)
 }
 
 pub fn fixture_signed_symbol(
@@ -306,16 +283,13 @@ pub fn fixture_signed_symbol(
     )
 }
 
-pub fn fixture_archive_with_symbols()
--> (Vec<u8>, PdkPublisherTrustStore, PdkAdministrativeAuthority) {
-    let (bytes, trust, authority) = fixture_archive();
-    let signing_key = SigningKey::from_bytes(&[0x42; 32]);
+pub fn fixture_archive_with_symbols() -> (Vec<u8>, PdkAdministrativeAuthority) {
+    let (bytes, authority) = fixture_archive();
     let mut archive: SignedPdkTechnologyArchive = serde_json::from_slice(&bytes).unwrap();
     let mut manifest: PdkTechnologyManifest =
         serde_json::from_slice(&STANDARD.decode(&archive.manifest_base64).unwrap()).unwrap();
     manifest.symbol_definitions = vec![fixture_signed_symbol(&manifest)];
     let manifest_bytes = serde_json::to_vec(&manifest).unwrap();
     archive.manifest_base64 = STANDARD.encode(&manifest_bytes);
-    archive.signature_base64 = STANDARD.encode(signing_key.sign(&manifest_bytes).to_bytes());
-    (serde_json::to_vec(&archive).unwrap(), trust, authority)
+    (serde_json::to_vec(&archive).unwrap(), authority)
 }

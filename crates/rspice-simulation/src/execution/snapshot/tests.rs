@@ -882,12 +882,11 @@ fn project_runtime() -> crate::veriloga::PreparedVerilogARuntime {
 }
 
 fn signed_pdk_runtime() -> crate::veriloga::PreparedVerilogARuntime {
-    let (archive, trust, authority) = crate::pdk::test_fixtures::fixture_archive_with_veriloga();
+    let (archive, authority) = crate::pdk::test_fixtures::fixture_archive_with_veriloga();
     let mut registry = crate::pdk::PdkTechnologyRegistry::default();
     registry
         .install_archive_bytes(
             &archive,
-            &trust,
             &authority,
             "Prepare signed PDK runtime snapshot fixture",
         )

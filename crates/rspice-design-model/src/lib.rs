@@ -1,19 +1,11 @@
-//! Durable design-management model and the signed drawing-sheet package
-//! contract built on top of it.
+//! Durable design-management model and the drawing-sheet package contract
+//! built on top of it.
 //!
 //! Everything here is data and rules over data: identities, revisions,
-//! semantic digests, sheet geometry, and the canonical package a publisher
-//! signs. No rendering, no widgets, no engine. `rspice-app` owns the editing
-//! surfaces and re-exports this crate's types from the modules that used to
-//! define them, so application paths are unchanged.
-//!
-//! The crate exists because two very different programs must agree on these
-//! bytes exactly. `rspice-app` imports a signed drawing-sheet package; the
-//! offline `rspice-sheet-publisher` ceremony signs one. Sharing one
-//! implementation is what makes "the publisher signed it" and "the importer
-//! will accept it" the same statement — and it keeps the publisher's trusted
-//! computing base down to serde, SHA-256, and Ed25519 rather than the whole
-//! desktop application.
+//! semantic digests, sheet geometry, and the canonical preset package. No
+//! rendering, no widgets, no engine. `rspice-app` owns the editing surfaces
+//! and re-exports this crate's types from the modules that used to define
+//! them, so application paths are unchanged.
 
 pub mod bus;
 pub mod cell_view;

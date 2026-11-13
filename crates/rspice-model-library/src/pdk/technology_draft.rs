@@ -1,10 +1,10 @@
 //! Persisted PDK technology authoring drafts.
 //!
-//! Installed packages remain immutable and executable only after signature
-//! validation. A draft is an unsigned candidate derived from one exact source
-//! package. It may be temporarily invalid while edited, but it cannot be
-//! exported for signing until the complete candidate manifest passes the same
-//! validation used for installed packages.
+//! Installed packages remain immutable and executable only after archive
+//! validation. A draft is a candidate derived from one exact source package.
+//! It may be temporarily invalid while edited, but it cannot be exported
+//! until the complete candidate manifest passes the same validation used for
+//! installed packages.
 
 use serde::{Deserialize, Serialize};
 
@@ -44,8 +44,8 @@ pub struct UnsignedPdkTechnologyAuthoringBundle {
     pub draft_id: String,
     pub baseline: PdkTechnologyDraftBaseline,
     pub candidate_manifest: PdkTechnologyManifest,
-    /// Exact source-package files retained for an external publisher signing
-    /// step. RSpice never accepts or persists a publisher private key.
+    /// Exact source-package files, so the exported bundle rebuilds the same
+    /// archive.
     pub source_files: Vec<PdkTechnologyArchiveFile>,
 }
 
@@ -110,11 +110,9 @@ impl PdkTechnologyDraft {
             .package_id
             .eq_ignore_ascii_case(&baseline.manifest().package_id)
             || self.manifest.publisher_id != baseline.manifest().publisher_id
-            || self.manifest.signing_key_id != baseline.manifest().signing_key_id
         {
             return Err(PdkTechnologyError::InvalidReference(
-                "technology draft cannot change package lineage or publisher signing identity"
-                    .to_owned(),
+                "technology draft cannot change package lineage or publisher".to_owned(),
             ));
         }
         if self.manifest.revision == self.baseline.binding.revision {

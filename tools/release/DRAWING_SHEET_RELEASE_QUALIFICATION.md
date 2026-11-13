@@ -19,16 +19,16 @@ Retain one immutable qualification record containing:
 - release version, commit, build provenance, binary/WASM digests, and date;
 - operating-system, browser, printer, driver, firmware, paper, and locale
   versions used by every test;
-- the exact authored project and signed organization preset package;
+- the exact authored project and the preset package it imports;
 - command output, generated artifacts, screenshots, spool/job evidence, and
   measured physical results;
 - pass, fail, not-applicable, and blocked dispositions with reviewer identity;
 - every deviation, its approved authority, expiry, and corrective-action link;
 - independent reviewer approval for physical scale, document control, and
-  governed-preset results.
+  preset results.
 
 Screenshots alone are insufficient evidence for dimensions, source identity,
-artifact bytes, signatures, printer acceptance, or accessibility semantics.
+artifact bytes, printer acceptance, or accessibility semantics.
 
 ## Automated release gates
 
@@ -58,7 +58,6 @@ complete clean-commit product CI gates below.
 ```text
 cargo test --locked -p rspice-core --test engine save_directives::
 cargo test --locked -p rspice-app --lib
-cargo test --locked -p rspice-sheet-publisher
 cargo test --locked -p rspice-app --test module_layering
 cargo check --locked -p rspice-app --target wasm32-unknown-unknown
 cargo check --locked -p rspice-app --target x86_64-pc-windows-msvc
@@ -76,7 +75,7 @@ The automated evidence must cover at least:
 - project-default inheritance, per-sheet overrides, transaction rollback,
   undo/redo, stable sheet identity, sheet ordering, and mixed sheet sets;
 - title resolution, revision/document-control fields, Unicode, long values,
-  managed logos, signed presets, trust roots, revocation, and tamper rejection;
+  managed logos, preset packages, and tamper rejection;
 - canvas, preview, PDF/PDF-A, SVG, raster, browser-worker, and native-printer
   parity from the same sealed source and plan;
 - clipping versus extent expansion, crop/registration marks, borders, zones,
@@ -98,7 +97,7 @@ contain:
   reordering;
 - ISO A4 and ANSI Letter sheets, one large-format sheet, portrait and
   landscape orientations, and an exact custom size;
-- project-default, inherited, overridden, and signed organization formats;
+- project-default, inherited, and overridden formats;
 - clockwise and counter-clockwise title-block rotation where supported;
 - every document-control field, long Unicode text, and a managed vector logo;
 - content inside the sheet, exactly on the boundary, and outside every edge;
@@ -128,8 +127,8 @@ On Windows, macOS, and Linux:
    must restore exact bytes.
 5. Reorder and rename sheets, close/reopen the project, and prove setup stays
    bound to stable identity rather than label or ordinal.
-6. Import valid, unknown-key, revoked-key, tampered, stale-schema, duplicate,
-   and oversized preset packages. Only the valid governed package may commit.
+6. Import valid, tampered, stale-schema, duplicate, and oversized preset
+   packages. Only the valid package may commit.
 
 ## Browser qualification
 
@@ -222,7 +221,7 @@ Release approval requires:
 - all applicable automated commands green on clean supported hosts;
 - no unresolved severity-1 or severity-2 sheet/hardcopy defect;
 - signed independent review of the golden project, physical scale, artifact
-  inspection, governed-preset ceremony, and accessibility results;
+  inspection, preset results, and accessibility results;
 - every blocked or not-applicable row explicitly accepted by release authority;
 - no claim for a deferred platform or unqualified printer/browser path.
 

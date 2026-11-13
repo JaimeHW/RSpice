@@ -11,11 +11,8 @@ pub use rspice_model_library::pdk::callback::{
 mod tests {
     use super::*;
     use crate::product::ContentDigest;
-    use crate::state::pdk_config::{
-        PdkAdministrativeAuthority, PdkPublisherTrustStore, PdkTechnologyRegistry,
-    };
+    use crate::state::pdk_config::{PdkAdministrativeAuthority, PdkTechnologyRegistry};
     use base64::{Engine as _, engine::general_purpose::STANDARD};
-    use ed25519_dalek::{Signer as _, SigningKey};
     use rspice_model_library::pdk::callback::PdkCallbackError;
     use rspice_model_library::pdk::content_digest;
     use rspice_model_library::pdk::contracts::PdkTechnologyBinding;
@@ -27,8 +24,8 @@ mod tests {
     fn callback_archive(
         wat_source: &str,
         capabilities: Vec<PdkCallbackCapability>,
-    ) -> (Vec<u8>, PdkPublisherTrustStore, PdkAdministrativeAuthority) {
-        let (bytes, trust, authority) = rspice_simulation::pdk::test_fixtures::fixture_archive();
+    ) -> (Vec<u8>, PdkAdministrativeAuthority) {
+        let (bytes, authority) = rspice_simulation::pdk::test_fixtures::fixture_archive();
         let mut archive: SignedPdkTechnologyArchive = serde_json::from_slice(&bytes).unwrap();
         let mut manifest: rspice_model_library::pdk::manifest::PdkTechnologyManifest =
             serde_json::from_slice(&STANDARD.decode(&archive.manifest_base64).unwrap()).unwrap();
@@ -52,22 +49,16 @@ mod tests {
         file.content_base64 = STANDARD.encode(callback_bytes);
         let manifest_bytes = serde_json::to_vec(&manifest).unwrap();
         archive.manifest_base64 = STANDARD.encode(&manifest_bytes);
-        archive.signature_base64 = STANDARD.encode(
-            SigningKey::from_bytes(&[0x42; 32])
-                .sign(&manifest_bytes)
-                .to_bytes(),
-        );
-        (serde_json::to_vec(&archive).unwrap(), trust, authority)
+        (serde_json::to_vec(&archive).unwrap(), authority)
     }
 
     fn install(
         bytes: &[u8],
-        trust: &PdkPublisherTrustStore,
         authority: &PdkAdministrativeAuthority,
     ) -> (PdkTechnologyRegistry, PdkTechnologyBinding, ContentDigest) {
         let mut registry = PdkTechnologyRegistry::default();
         registry
-            .install_archive_bytes(bytes, trust, authority, "Install callback fixture")
+            .install_archive_bytes(bytes, authority, "Install callback fixture")
             .unwrap();
         let package = registry.validated_packages()[0].clone();
         (registry, package.binding(), package.archive_digest())
@@ -110,14 +101,14 @@ mod tests {
                 i32.const 64
                 local.get $length
                 call $emit))"#;
-        let (bytes, trust, authority) = callback_archive(
+        let (bytes, authority) = callback_archive(
             wat,
             vec![
                 PdkCallbackCapability::ReadProjectParameters,
                 PdkCallbackCapability::WriteDerivedMetadata,
             ],
         );
-        let (registry, binding, archive_digest) = install(&bytes, &trust, &authority);
+        let (registry, binding, archive_digest) = install(&bytes, &authority);
         let input = PdkCallbackExecutionInput {
             project_parameters: BTreeMap::from([("width".to_owned(), "2.5u".to_owned())]),
         };
@@ -145,14 +136,14 @@ mod tests {
             (import "rspice" "project_parameter_len" (func (param i32 i32) (result i32)))
             (memory (export "memory") 1 1)
             (func (export "derive") (result i32) i32.const 0))"#;
-        let (bytes, trust, authority) = callback_archive(wat, Vec::new());
+        let (bytes, authority) = callback_archive(wat, Vec::new());
         let archive: SignedPdkTechnologyArchive = serde_json::from_slice(&bytes).unwrap();
-        rspice_model_library::pdk::package::authenticate_archive(&archive, &trust)
+        rspice_model_library::pdk::package::authenticate_archive(&archive)
             .expect("archive bytes are authentic");
         let mut registry = PdkTechnologyRegistry::default();
         let before = registry.clone();
         let error = registry
-            .install_archive_bytes(&bytes, &trust, &authority, "Reject unauthorized import")
+            .install_archive_bytes(&bytes, &authority, "Reject unauthorized import")
             .unwrap_err();
         assert!(error.to_string().contains("requires signed capability"));
         assert!(registry.archives().is_empty());
@@ -197,14 +188,14 @@ mod tests {
                 i32.const 128
                 i32.const 4
                 call $emit))"#;
-        let (bytes, trust, authority) = callback_archive(
+        let (bytes, authority) = callback_archive(
             wat,
             vec![
                 PdkCallbackCapability::ReadPackage,
                 PdkCallbackCapability::WriteDerivedMetadata,
             ],
         );
-        let (registry, binding, archive_digest) = install(&bytes, &trust, &authority);
+        let (registry, binding, archive_digest) = install(&bytes, &authority);
         let receipt = registry
             .execute_callback_for_binding(
                 &binding,
@@ -222,29 +213,22 @@ mod tests {
 
     #[test]
     fn executable_callback_contract_rejects_schema_downgrade() {
-        let (bytes, trust, authority) = callback_archive(
+        let (bytes, authority) = callback_archive(
             r#"(module
                 (memory (export "memory") 1 1)
                 (func (export "derive") (result i32) i32.const 0))"#,
             Vec::new(),
         );
-        let signing_key = SigningKey::from_bytes(&[0x42; 32]);
         let mut archive: SignedPdkTechnologyArchive = serde_json::from_slice(&bytes).unwrap();
         let mut manifest: rspice_model_library::pdk::manifest::PdkTechnologyManifest =
             serde_json::from_slice(&STANDARD.decode(&archive.manifest_base64).unwrap()).unwrap();
         manifest.schema_version = 2;
         let manifest_bytes = serde_json::to_vec(&manifest).unwrap();
         archive.manifest_base64 = STANDARD.encode(&manifest_bytes);
-        archive.signature_base64 = STANDARD.encode(signing_key.sign(&manifest_bytes).to_bytes());
         let bytes = serde_json::to_vec(&archive).unwrap();
         let mut registry = PdkTechnologyRegistry::default();
         let error = registry
-            .install_archive_bytes(
-                &bytes,
-                &trust,
-                &authority,
-                "Reject callback schema downgrade",
-            )
+            .install_archive_bytes(&bytes, &authority, "Reject callback schema downgrade")
             .unwrap_err();
         assert!(
             error
@@ -260,8 +244,8 @@ mod tests {
             (func (export "derive") (result i32)
                 (loop $again br $again)
                 i32.const 0))"#;
-        let (bytes, trust, authority) = callback_archive(infinite, Vec::new());
-        let (registry, binding, archive_digest) = install(&bytes, &trust, &authority);
+        let (bytes, authority) = callback_archive(infinite, Vec::new());
+        let (registry, binding, archive_digest) = install(&bytes, &authority);
         let error = registry
             .execute_callback_for_binding(
                 &binding,
@@ -275,8 +259,8 @@ mod tests {
         let oversized = r#"(module
             (memory (export "memory") 200 200)
             (func (export "derive") (result i32) i32.const 0))"#;
-        let (bytes, trust, authority) = callback_archive(oversized, Vec::new());
-        let (registry, binding, archive_digest) = install(&bytes, &trust, &authority);
+        let (bytes, authority) = callback_archive(oversized, Vec::new());
+        let (registry, binding, archive_digest) = install(&bytes, &authority);
         let error = registry
             .execute_callback_for_binding(
                 &binding,
@@ -301,9 +285,9 @@ mod tests {
                 call $emit
                 drop
                 i32.const 0))"#;
-        let (bytes, trust, authority) =
+        let (bytes, authority) =
             callback_archive(wat, vec![PdkCallbackCapability::WriteDerivedMetadata]);
-        let (registry, binding, archive_digest) = install(&bytes, &trust, &authority);
+        let (registry, binding, archive_digest) = install(&bytes, &authority);
         let error = registry
             .execute_callback_for_binding(
                 &binding,

@@ -15,11 +15,11 @@ module pdk_resistor(p, n);
     analog I(p,n) <+ (1 + selected) * V(p,n) / r;
 endmodule
 "#;
-    let (archive, trust, authority) =
+    let (archive, authority) =
         crate::state::pdk_config::signed_veriloga_source_test_fixture(source);
     let mut registry = crate::state::pdk_config::PdkTechnologyRegistry::default();
     registry
-        .install_archive_bytes(&archive, &trust, &authority, "Qualify signed mixed runtime")
+        .install_archive_bytes(&archive, &authority, "Qualify signed mixed runtime")
         .unwrap();
     let package = registry.validated_packages()[0].clone();
     let sealed = registry

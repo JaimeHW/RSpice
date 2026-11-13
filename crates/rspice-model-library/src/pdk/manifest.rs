@@ -15,7 +15,6 @@ pub struct PdkTechnologyManifest {
     pub technology_name: String,
     pub revision: String,
     pub publisher_id: String,
-    pub signing_key_id: String,
     pub license_spdx: String,
     pub process_node_nm: u32,
     pub database_unit_meters: f64,
@@ -70,7 +69,6 @@ pub fn validate_manifest(manifest: &PdkTechnologyManifest) -> Result<(), PdkTech
     validate_text("manifest.technology_name", &manifest.technology_name, 256)?;
     validate_version("manifest.revision", &manifest.revision)?;
     validate_identifier("manifest.publisher_id", &manifest.publisher_id)?;
-    validate_identifier("manifest.signing_key_id", &manifest.signing_key_id)?;
     validate_text("manifest.license_spdx", &manifest.license_spdx, 128)?;
     validate_text("manifest.stack_name", &manifest.stack_name, 256)?;
     if manifest.process_node_nm == 0 || manifest.process_node_nm > 1_000_000 {

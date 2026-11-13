@@ -2283,4 +2283,3 @@ pub use asme_y14_1_form::*;
 
 pub(super) mod title_block_wire;
 use title_block_wire::DrawingSheetTitleBlockWire;
-pub(crate) use title_block_wire::RetiredDrawingSheetScale;

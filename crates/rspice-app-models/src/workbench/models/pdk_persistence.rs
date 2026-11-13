@@ -205,11 +205,7 @@ fn finish_browser_pdk_restore(
         Ok(mut restored) => {
             let storage_status = restored.storage_status;
             let restored_saved_configuration = restored.receipt.is_some();
-            let trust_store = restored.config.publisher_trust_store.clone();
-            let validation = restored
-                .config
-                .technology_registry
-                .revalidate_installed(&trust_store);
+            let validation = restored.config.technology_registry.revalidate_installed();
             let mut model_library = parts.model.model_library_manager.clone();
             let model_load = model_library
                 .replace_from_pdk_config(Some(&parts.model.pdk_config), &mut restored.config);
@@ -241,7 +237,7 @@ fn finish_browser_pdk_restore(
                         LogSeverity::Error,
                         LogSource::Studio,
                         format!(
-                            "PDK technology restored from browser storage was not trusted: \
+                            "PDK technology restored from browser storage did not validate: \
                              {error}"
                         ),
                     );

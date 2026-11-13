@@ -31,9 +31,7 @@ browser-qualification = ["rspice-app-services/browser-qualification"]
 # builds keep the default fast paths (parallel), wasm opts out.
 rspice-automation-protocol = { path = "../rspice-automation-protocol", version = "0.1.0" }
 
-# Design-management state authority and the signed drawing-sheet package
-# contract. Shared with the offline `rspice-sheet-publisher` ceremony, which
-# links this crate rather than the GUI.
+# Design-management state authority and the drawing-sheet package contract.
 rspice-design-model = { workspace = true }
 rspice-app-state.workspace = true
 rspice-app-services.workspace = true
@@ -120,10 +118,8 @@ rspice-design = { workspace = true, features = ["symbol-test-observation", "sche
 zip.workspace = true
 ron = { version = "0.12.2", features = ["integer128"] }
 rustyhdf5 = { version = "1.93", default-features = false }
-# The notification centre's tests pin the local zone with `time`, and the
-# drawing-sheet preset tests sign a package with a fixed dalek key.
+# The notification centre's tests pin the local zone with `time`.
 time = { workspace = true }
-ed25519-dalek = { version = "2", default-features = false, features = ["std", "zeroize"] }
 
 # The Model Hub's feature tests and the design shelf's tests verify signed
 # packs with the trust crate the models feature verifies them with.

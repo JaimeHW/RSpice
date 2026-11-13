@@ -4,8 +4,8 @@ Portable device-model definitions and the evidence that travels with them:
 model libraries and the source authority each came from, the content-pinned
 source closure a run executes, process corners, the executable model
 namespace of one run, project-authored model revisions, model-bound symbols,
-qualification and measurement-correlation evidence, and the signed-PDK
-vocabulary with its publisher trust store. `rspice-design`, `rspice-formats`,
+qualification and measurement-correlation evidence, and the PDK technology
+vocabulary. `rspice-design`, `rspice-formats`,
 `rspice-project`, `rspice-simulation` and the project and simulation contract
 crates read the same definitions, so a model's identity is decided once. It
 sits below `rspice-design`, whose model-bound symbols name these definitions.
@@ -26,7 +26,7 @@ winit, wgpu and rfd in its closure.
 | `resolution`, `execution` | `ModelResolutionRecord` provider decisions and `SimulationPlanModelBinding`, a plan's ordered library bindings; `ModelExecutionPlan`, the immutable, content-addressed model namespace of one nominal run, which refuses a contested name instead of falling back to the first definition |
 | `authoring`, `project_revision`, `definition_metadata` | `ProjectModelDefinition`, models a project authors itself; `ProjectModelRevisionDefinition`, which admits a revision only when its source renders and reparses without losing a parameter, section or type; `ModelDefinitionMetadata`, the typed parameters, section inheritance, statistics and temperature behaviour the model editor presents |
 | `technology_binding` | `ProjectTechnologyBinding` and `ProjectSignedTechnologyPin`: a project's model-source attachment and its exact signed-package pin |
-| `pdk` | Signed-PDK archive, manifest and callback contracts; `authenticate_archive`; `PdkPublisherTrustStore` with its hash-chained trust audit; callback receipts, technology-revision diffs, display profiles, library search paths and authoring drafts |
+| `pdk` | Signed-PDK archive, manifest and callback contracts; `authenticate_archive`; callback receipts, technology-revision diffs, display profiles, library search paths and authoring drafts |
 | `qualification`, `correlation`, `validation` | Model qualification and release evidence (golden vectors, desktop and WebAssembly parity, fail-closed promotion); versioned measurement-correlation datasets, alignment, metrics and reviewer evidence; `ModelValidationReceipt` and its integrity digest |
 | `symbol` | Model-bound symbol definitions, parameter forms and retained graphics, stored under the `rspice.symbol.*` metadata keys |
 | `facts` | `ClosureFacts`: facts about a model closure that more than one surface reports, derived in one place |
@@ -51,18 +51,14 @@ winit, wgpu and rfd in its closure.
 - `ModelExecutionPlan::try_new(process, selected_library_corners,
   materialized, records)` for one run's model namespace.
 - `model_library_source_digest(&library)` for a library's source identity.
-- `pdk::package::authenticate_archive(&archive, &trust_store)` for a signed
-  PDK archive.
+- `pdk::package::authenticate_archive(&archive)` for a PDK archive.
 
 ## Signed PDK archive
 
 A publisher ships one JSON `SignedPdkTechnologyArchive`: `schema_version`
 (`PDK_TECHNOLOGY_ARCHIVE_SCHEMA_VERSION`), `manifest_base64`,
-`signature_base64`, and `files`, each a `path` and `content_base64`.
-`authenticate_archive` verifies a strict Ed25519 signature over the exact
-decoded manifest bytes with the key the trust store holds for the manifest's
-`publisher_id` and `signing_key_id`, refusing untrusted and revoked keys. Every
-artifact the manifest declares must be present with its declared size and
+and `files`, each a `path` and `content_base64`. In `authenticate_archive`,
+every artifact the manifest declares must be present with its declared size and
 SHA-256, paths are unique without regard to case, and an undeclared file is
 refused. Manifest schemas from `MINIMUM_PDK_TECHNOLOGY_MANIFEST_SCHEMA_VERSION`
 to `PDK_TECHNOLOGY_MANIFEST_SCHEMA_VERSION` are accepted; size and count bounds

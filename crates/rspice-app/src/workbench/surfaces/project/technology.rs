@@ -500,15 +500,7 @@ pub(in crate::workbench) fn show_technology_attachment_dialog(
                             short_identity(&package.archive_digest().to_string())
                         ),
                     );
-                    property_row(
-                        ui,
-                        "Publisher signature",
-                        &format!(
-                            "{} · key {}",
-                            package.manifest().publisher_id,
-                            package.manifest().signing_key_id
-                        ),
-                    );
+                    property_row(ui, "Publisher", &package.manifest().publisher_id);
                 }
             });
         } else {

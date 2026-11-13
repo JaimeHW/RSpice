@@ -3,7 +3,7 @@
 use super::PdkTechnologyRegistry;
 use rspice_model_library::pdk::display_profile::PdkDisplayProfileRegistry;
 use rspice_model_library::pdk::technology_draft::PdkTechnologyDraft;
-use rspice_model_library::pdk::{DiscoveredFile, LibraryPathEntry, PdkPublisherTrustStore};
+use rspice_model_library::pdk::{DiscoveredFile, LibraryPathEntry};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -34,15 +34,9 @@ pub struct PdkConfig {
 
     /// Signed technology-package revisions, exact active binding, and
     /// append-only administrative receipts. Persisted archives regain no
-    /// runtime authority until revalidated against the current trust store.
+    /// runtime authority until revalidated.
     #[serde(default)]
     pub technology_registry: PdkTechnologyRegistry,
-
-    /// Organization- or administrator-provisioned public publisher keys.
-    /// These are verification keys only; private signing material is never
-    /// accepted or persisted by RSpice.
-    #[serde(default)]
-    pub publisher_trust_store: PdkPublisherTrustStore,
 
     /// Personal-device display overlays. Every immutable revision is bound to
     /// an exact signed technology manifest and has its own hash-chained audit.
@@ -86,7 +80,6 @@ impl Default for PdkConfig {
             max_recent_files: default_max_recent(),
             layout_database_unit: None,
             technology_registry: PdkTechnologyRegistry::default(),
-            publisher_trust_store: PdkPublisherTrustStore::default(),
             display_profile_registry: PdkDisplayProfileRegistry::default(),
             technology_draft: None,
             discovered_files: Vec::new(),

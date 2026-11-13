@@ -278,7 +278,6 @@ pub(super) fn validate_preset_name(
             match clash.scope {
                 DrawingSheetPresetScope::Project => "project",
                 DrawingSheetPresetScope::User => "personal",
-                DrawingSheetPresetScope::Organization => "organization",
             },
             clash.name
         ));
@@ -462,11 +461,9 @@ pub(super) fn unavailable(preset: &DrawingSheetPreset) -> bool {
     )
 }
 
-/// Organization definitions may be redistributed only by publisher tooling
-/// that can produce a trusted signature. The interactive editor deliberately
-/// has no access to private publisher keys.
-pub(super) fn unsigned_exportable(preset: &DrawingSheetPreset) -> bool {
-    !unavailable(preset) && preset.scope != DrawingSheetPresetScope::Organization
+/// A preset whose custom size is unavailable has nothing to export.
+pub(super) fn exportable(preset: &DrawingSheetPreset) -> bool {
+    !unavailable(preset)
 }
 
 #[cfg(test)]
@@ -518,7 +515,7 @@ mod tests {
         let portable = portable_from_preset(&DrawingSheetPreset {
             id: "managed-panel".to_owned(),
             name: "Managed panel".to_owned(),
-            scope: DrawingSheetPresetScope::Organization,
+            scope: DrawingSheetPresetScope::User,
             format: managed_format,
         })
         .unwrap();

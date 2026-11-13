@@ -5,10 +5,10 @@ use rspice_model_library::pdk::display_profile::*;
 use rspice_simulation::pdk::test_fixtures::fixture_archive;
 
 fn fixture() -> (ValidatedPdkTechnologyPackage, PdkAdministrativeAuthority) {
-    let (bytes, trust, authority) = fixture_archive();
+    let (bytes, authority) = fixture_archive();
     let mut registry = super::PdkTechnologyRegistry::default();
     registry
-        .install_archive_bytes(&bytes, &trust, &authority, "install display fixture")
+        .install_archive_bytes(&bytes, &authority, "install display fixture")
         .expect("install");
     (registry.validated_packages()[0].clone(), authority)
 }

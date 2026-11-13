@@ -25,7 +25,6 @@ members = [
     "crates/rspice-engine-adapter",
     "crates/rspice-publication-contract",
     "crates/rspice-publish",
-    "tools/rspice-sheet-publisher",
     "crates/rspice-viewer",
     "crates/rspice-app",
     "crates/rspice-app-runs",

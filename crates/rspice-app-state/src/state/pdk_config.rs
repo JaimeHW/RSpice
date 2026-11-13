@@ -26,8 +26,7 @@ pub use persistence::{
     BrowserPdkConfigReceipt, BrowserPdkConfigRestore, BrowserPdkStorageDurability,
     BrowserPdkStorageStatus, start_browser_pdk_config_load, start_browser_pdk_config_save,
 };
-#[cfg(any(test, feature = "test-support"))]
-pub use rspice_model_library::pdk::PdkPublisherTrustStore;
+pub use rspice_model_library::pdk::PdkAdministrativeAuthority;
 #[cfg(any(test, target_arch = "wasm32"))]
 pub use rspice_model_library::pdk::contracts::MAX_PDK_ARCHIVE_BYTES;
 pub use rspice_model_library::pdk::contracts::{
@@ -45,9 +44,6 @@ pub use rspice_model_library::pdk::display_profile::{
 pub use rspice_model_library::pdk::manifest::PdkTechnologyManifest;
 pub use rspice_model_library::pdk::technology_draft::PdkTechnologyDraft;
 pub use rspice_model_library::pdk::{DiscoveredFile, LibraryPathEntry};
-pub use rspice_model_library::pdk::{
-    PdkAdministrativeAuthority, PdkTrustAuditAction, PdkTrustAuditReceipt, TrustedPdkPublisherKey,
-};
 #[cfg(any(test, feature = "test-support"))]
 pub use rspice_simulation::pdk::PdkTechnologyRegistry;
 #[cfg(any(test, feature = "test-support"))]

@@ -346,13 +346,13 @@ class CiConfigurationTests(unittest.TestCase):
             {package["name"] for package in metadata["packages"] if package["id"] in defaults},
             {"rspice-cli", "rspice-app"},
         )
-        for name in ("rspice-conformance", "rspice-sheet-publisher"):
-            package = next(package for package in metadata["packages"] if package["name"] == name)
-            self.assertEqual(
-                Path(package["manifest_path"]).resolve(),
-                (ROOT / "tools" / name / "Cargo.toml").resolve(),
-            )
-            self.assertFalse((ROOT / "crates" / name).exists())
+        name = "rspice-conformance"
+        package = next(package for package in metadata["packages"] if package["name"] == name)
+        self.assertEqual(
+            Path(package["manifest_path"]).resolve(),
+            (ROOT / "tools" / name / "Cargo.toml").resolve(),
+        )
+        self.assertFalse((ROOT / "crates" / name).exists())
 
     def test_runtime_only_compiler_is_qualified_without_feature_unification(self) -> None:
         workflow = read_text(".github/workflows/ci.yml")
@@ -859,7 +859,6 @@ class CiConfigurationTests(unittest.TestCase):
             "rspice-cloud-domain",
             "rspice-cloud-contract",
             "rspice-cloud-client",
-            "rspice-sheet-publisher",
             "rspice-core",
             "rspice-core-base",
             "rspice-core-netlist",

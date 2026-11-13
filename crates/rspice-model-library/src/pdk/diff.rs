@@ -240,13 +240,6 @@ impl PdkTechnologyRevisionDiff {
         )?;
         scalar_change(
             &mut entries,
-            "signing key ID",
-            &before.signing_key_id,
-            &after.signing_key_id,
-            PdkTechnologyDiffImpact::ReviewRequired,
-        )?;
-        scalar_change(
-            &mut entries,
             "license SPDX",
             &before.license_spdx,
             &after.license_spdx,

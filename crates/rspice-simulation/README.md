@@ -81,7 +81,7 @@ is in the [CLI README](../rspice-cli/README.md).
 | `generated-veriloga-catalog` | Forwards to `rspice-design/generated-veriloga-catalog`, so the generated Verilog-A models can be placed, bound and netlisted. Forwarded from the flags of the same name on `rspice-app` and `rspice-worker` |
 | `wasm-jit` | Enables `rspice-veriloga/wasm-jit`, so project Verilog-A compilation can return a verified WebAssembly JIT module (`WasmJitWorkerArtifact`) to the browser worker |
 | `browser-worker` | Implies `wasm-jit` and enables `rspice-core/veriloga-wasm-jit`. On `wasm32` it builds the worker-side entry points `rspice-worker` dispatches, `runner::run_worker_request_value` and the Verilog-A JIT request functions. Set by `rspice-worker` |
-| `pdk-test-fixtures` | Builds `pdk::test_fixtures`, signed-PDK archives and trust stores for dependent tests, pulling in `ed25519-dalek` and `wat`. Enabled by `rspice-app`'s dev-dependency |
+| `pdk-test-fixtures` | Builds `pdk::test_fixtures`, PDK archives for dependent tests, pulling in `wat`. Enabled by `rspice-app`'s dev-dependency |
 
 ## Testing
 

@@ -36,7 +36,6 @@ pub const PDK_CALLBACK_ABI_VERSION: u32 = 1;
 pub struct SignedPdkTechnologyArchive {
     pub schema_version: u32,
     pub manifest_base64: String,
-    pub signature_base64: String,
     pub files: Vec<PdkTechnologyArchiveFile>,
 }
 

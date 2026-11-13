@@ -33,8 +33,8 @@ use rspice_design_model::sheet_package::{
 use model::{
     ImportResolution, PendingExport, PresetEditorDraft, PresetEditorMode, PresetEditorUnit,
     PresetPackageFormat, PresetTransferState, StartingFrame, TransferMode, all_visible_presets,
-    imported_project_preset, prepare_import_candidates, preset_from_editor, unavailable,
-    unsigned_exportable, validate_preset_name,
+    exportable, imported_project_preset, prepare_import_candidates, preset_from_editor,
+    unavailable, validate_preset_name,
 };
 use render::{EditorBodyAction, LibraryBodyAction, PresetKey, TransferBodyAction};
 
@@ -323,7 +323,6 @@ impl PresetDialogs<'_> {
         let authority_allows_scope = match draft.scope {
             DrawingSheetPresetScope::Project => project_error.is_none(),
             DrawingSheetPresetScope::User => !personal_stale,
-            DrawingSheetPresetScope::Organization => false,
         };
         let primary_enabled = validation.is_ok() && authority_allows_scope && !draft.unavailable;
         let title = if draft.mode == PresetEditorMode::Edit {
@@ -440,9 +439,6 @@ impl PresetDialogs<'_> {
                 self.publish_personal_preset(preset)?;
                 format!("Saved personal custom size '{name}' in Preferences.")
             }
-            DrawingSheetPresetScope::Organization => {
-                return Err("Organization custom sizes are managed and read-only.".to_owned());
-            }
         };
         Ok(message)
     }
@@ -543,11 +539,6 @@ impl PresetDialogs<'_> {
                 preferences.set_drawing_sheet_personal_preferences(personal)?;
                 self.model.preferences = preferences;
             }
-            DrawingSheetPresetScope::Organization => {
-                return Err(
-                    "Organization custom sizes are managed and cannot be deleted.".to_owned(),
-                );
-            }
         }
         self.refresh_preset_authorities();
         Ok(format!("Deleted custom size '{}'.", preset.name))
@@ -559,7 +550,7 @@ impl PresetDialogs<'_> {
             all_visible_presets(&self.model.workspace.content.design_management, &personal);
         let export_ids = visible
             .iter()
-            .filter(|preset| unsigned_exportable(preset))
+            .filter(|preset| exportable(preset))
             .map(transfer_identity)
             .collect();
         let package_name = if mode == TransferMode::Import {
@@ -682,7 +673,7 @@ impl PresetDialogs<'_> {
                     transfer.export_ids.extend(
                         visible
                             .iter()
-                            .filter(|preset| unsigned_exportable(preset))
+                            .filter(|preset| exportable(preset))
                             .map(transfer_identity),
                     );
                 }
@@ -695,7 +686,7 @@ impl PresetDialogs<'_> {
         source: &str,
         visible: &[DrawingSheetPreset],
     ) -> Result<(), String> {
-        let package = parse_package(source, &self.model.pdk_config.publisher_trust_store)?;
+        let package = parse_package(source)?;
         let candidates = prepare_import_candidates(&package, visible)?;
         let transfer = &mut self.dialogs.transfer;
         transfer.reviewed_digest = Some(package.source_digest_sha256);
@@ -708,7 +699,7 @@ impl PresetDialogs<'_> {
         validate_project_authority(self.model, self.dialogs)?;
         self.ensure_personal_fresh()?;
         let transfer = self.dialogs.transfer.clone();
-        let package = parse_package(&transfer.json, &self.model.pdk_config.publisher_trust_store)?;
+        let package = parse_package(&transfer.json)?;
         if transfer.reviewed_digest.as_deref() != Some(package.source_digest_sha256.as_str()) {
             return Err(
                 "The package changed after review. Review the current JSON before importing."
@@ -865,8 +856,7 @@ impl PresetDialogs<'_> {
         let selected = visible
             .iter()
             .filter(|preset| {
-                unsigned_exportable(preset)
-                    && transfer.export_ids.contains(&transfer_identity(preset))
+                exportable(preset) && transfer.export_ids.contains(&transfer_identity(preset))
             })
             .cloned()
             .collect::<Vec<_>>();
@@ -1161,7 +1151,6 @@ fn scope_rank(scope: DrawingSheetPresetScope) -> u8 {
     match scope {
         DrawingSheetPresetScope::Project => 0,
         DrawingSheetPresetScope::User => 1,
-        DrawingSheetPresetScope::Organization => 2,
     }
 }
 

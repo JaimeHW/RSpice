@@ -521,14 +521,12 @@ mod tests {
     #[test]
     fn browser_snapshot_separates_signed_archives_and_round_trips_exact_state() {
         let path = PathBuf::from("/rspice/browser/pdk_config.json");
-        let (archive_bytes, trust, authority) = super::signed_technology_test_fixture();
+        let (archive_bytes, authority) = super::signed_technology_test_fixture();
         let mut config = PdkConfig::default();
-        config.publisher_trust_store = trust;
         config
             .technology_registry
             .install_archive_bytes(
                 &archive_bytes,
-                &config.publisher_trust_store,
                 &authority,
                 "install browser persistence fixture",
             )
@@ -571,28 +569,21 @@ mod tests {
             serde_json::to_vec(&config).unwrap()
         );
         assert!(restored.technology_registry.validated_packages().is_empty());
-        let trust = restored.publisher_trust_store.clone();
         restored
             .technology_registry
-            .revalidate_installed(&trust)
-            .expect("runtime trust is re-established explicitly");
+            .revalidate_installed()
+            .expect("runtime validation is re-established explicitly");
         assert_eq!(restored.technology_registry.validated_packages().len(), 1);
     }
 
     #[test]
     fn browser_snapshot_rejects_tampered_archive_readback() {
         let path = PathBuf::from("/rspice/browser/tamper.json");
-        let (archive_bytes, trust, authority) = super::signed_technology_test_fixture();
+        let (archive_bytes, authority) = super::signed_technology_test_fixture();
         let mut config = PdkConfig::default();
-        config.publisher_trust_store = trust;
         config
             .technology_registry
-            .install_archive_bytes(
-                &archive_bytes,
-                &config.publisher_trust_store,
-                &authority,
-                "install tamper fixture",
-            )
+            .install_archive_bytes(&archive_bytes, &authority, "install tamper fixture")
             .expect("install package");
         let prepared =
             prepare_browser_pdk_snapshot(&path, &config, 1).expect("prepare browser snapshot");
@@ -748,17 +739,11 @@ mod tests {
     fn display_profile_revisions_round_trip_and_rebind_only_after_package_revalidation() {
         let root = unique_temp_dir("display-profile");
         let path = root.join(CONFIG_FILE_NAME);
-        let (bytes, trust, authority) = super::signed_technology_test_fixture();
+        let (bytes, authority) = super::signed_technology_test_fixture();
         let mut config = PdkConfig::default();
-        config.publisher_trust_store = trust;
         config
             .technology_registry
-            .install_archive_bytes(
-                &bytes,
-                &config.publisher_trust_store,
-                &authority,
-                "install persistence fixture",
-            )
+            .install_archive_bytes(&bytes, &authority, "install persistence fixture")
             .expect("install package");
         let package = config.technology_registry.validated_packages()[0].clone();
         config
@@ -787,10 +772,9 @@ mod tests {
             .validate_audit_chain()
             .expect("display audit");
         assert!(loaded.technology_registry.validated_packages().is_empty());
-        let trust = loaded.publisher_trust_store.clone();
         loaded
             .technology_registry
-            .revalidate_installed(&trust)
+            .revalidate_installed()
             .expect("revalidate package");
         let rebound = &loaded.technology_registry.validated_packages()[0];
         assert!(

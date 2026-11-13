@@ -1,16 +1,11 @@
 //! The custom sheet size dialogs over a whole application.
 
-use base64::{Engine as _, engine::general_purpose::STANDARD};
-use ed25519_dalek::{Signer as _, SigningKey};
-
 use rspice_design_model::sheet_authoring::StartingFrame;
 use rspice_design_model::sheet_package::{
-    DrawingSheetPackageEncoding, DrawingSheetPresetPackage, DrawingSheetPresetPublisherSignature,
-    build_package_with_options, encode_package_with_format, package_digest,
-    package_signature_message,
+    DrawingSheetPackageEncoding, DrawingSheetPresetPackage, build_package_with_options,
+    encode_package_with_format,
 };
 
-use crate::state::pdk_config::{PdkPublisherTrustStore, TrustedPdkPublisherKey};
 use crate::state::{
     AuthoredDrawingSheetSize, DesignManagementCatalog, DrawingSheetPreset,
     DrawingSheetPresetImportMappingKind, DrawingSheetPresetImportSkipReason,
@@ -79,39 +74,6 @@ fn build_package(
 
 fn encode_package(package: &DrawingSheetPresetPackage) -> Result<String, String> {
     encode_package_with_format(package, DrawingSheetPackageEncoding::CanonicalSchema1)
-}
-
-/// Sign a package and return the trust store that accepts it, so an
-/// import test can exercise the real application path rather than a
-/// bypass. The signature is produced through the shared contract, so a
-/// change to what gets signed fails this test too.
-fn authenticate_package_for_test(
-    mut package: DrawingSheetPresetPackage,
-) -> (DrawingSheetPresetPackage, PdkPublisherTrustStore) {
-    let signing_key = SigningKey::from_bytes(&[0x53; 32]);
-    package.publisher_signature = Some(DrawingSheetPresetPublisherSignature {
-        publisher_id: "rspice-test-publisher".to_owned(),
-        signing_key_id: "sheet-formats-2026".to_owned(),
-        signature_base64: String::new(),
-    });
-    package.source_digest_sha256 =
-        package_digest(&package).expect("test package contract is canonical");
-    let signature = signing_key.sign(
-        &package_signature_message(&package).expect("test package signature message is canonical"),
-    );
-    package
-        .publisher_signature
-        .as_mut()
-        .expect("test publisher identity is present")
-        .signature_base64 = STANDARD.encode(signature.to_bytes());
-    let mut trust = PdkPublisherTrustStore::default();
-    trust.keys.push(TrustedPdkPublisherKey {
-        publisher_id: "rspice-test-publisher".to_owned(),
-        key_id: "sheet-formats-2026".to_owned(),
-        verifying_key: signing_key.verifying_key().to_bytes(),
-        revoked: false,
-    });
-    (package, trust)
 }
 
 #[test]
@@ -231,7 +193,7 @@ fn drawing_sheet_preset_import_receipt_retains_reviewed_outcomes() {
     let explicitly_skipped = DrawingSheetPreset {
         id: "explicitly-skipped-panel".to_owned(),
         name: "Explicitly skipped panel".to_owned(),
-        scope: DrawingSheetPresetScope::Organization,
+        scope: DrawingSheetPresetScope::User,
         format: model::custom_format(
             "Explicitly skipped panel",
             240_001,
@@ -247,8 +209,6 @@ fn drawing_sheet_preset_import_receipt_retains_reviewed_outcomes() {
         explicitly_skipped.clone(),
     ])
     .unwrap();
-    let (package, trust) = authenticate_package_for_test(package);
-    app.state.model.pdk_config.publisher_trust_store = trust;
     let source = encode_package(&package).unwrap();
 
     assert!(open_custom_sheet_size_library(

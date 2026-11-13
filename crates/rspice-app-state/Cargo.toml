@@ -15,7 +15,6 @@ doctest = false
 # Enabled only through rspice-app's dev-dependency.
 test-support = [
     "dep:base64",
-    "dep:ed25519-dalek",
     "rspice-design/schematic-test-fixtures",
     "rspice-design/symbol-test-observation",
     "rspice-model-library/catalog-test-observation",
@@ -62,14 +61,12 @@ rspice-project = { workspace = true, features = ["document-fingerprint-observati
 rspice-model-library = { workspace = true, features = ["catalog-test-observation"] }
 rspice-design = { workspace = true, features = ["symbol-test-observation", "schematic-test-fixtures", "work-observation"] }
 base64 = "0.23"
-ed25519-dalek = { version = "2", default-features = false, features = ["std", "zeroize"] }
 num-complex = "0.4"
 ron = { version = "0.12.2", features = ["integer128"] }
 wat = "1"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rspice-output = { workspace = true, features = ["durable-file"] }
-ed25519-dalek = { version = "2", default-features = false, features = ["std", "fast", "zeroize"], optional = true }
 env_logger = "0.11"
 getrandom = { workspace = true }
 time = { workspace = true }
@@ -98,7 +95,6 @@ windows-sys = { version = "0.61", features = [
 ] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-ed25519-dalek = { version = "2", default-features = false, features = ["std", "zeroize"], optional = true }
 rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, features = ["veriloga"] }
 wasm-bindgen = "0.2"
 uuid = { version = "1", features = ["v4", "v5", "v7", "js", "serde"] }

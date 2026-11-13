@@ -33,53 +33,43 @@ pub const fn diff_impact_label(impact: PdkTechnologyDiffImpact) -> &'static str 
 #[cfg(any(test, feature = "test-support"))]
 pub mod tests {
     use base64::{Engine as _, engine::general_purpose::STANDARD};
-    use ed25519_dalek::{Signer as _, SigningKey};
 
     #[cfg(test)]
     use super::*;
+    use rspice_model_library::pdk::PdkAdministrativeAuthority;
     #[cfg(test)]
     use rspice_model_library::pdk::contracts::PdkExecutionTarget;
     use rspice_model_library::pdk::contracts::SignedPdkTechnologyArchive;
     use rspice_model_library::pdk::manifest::PdkTechnologyManifest;
-    use rspice_model_library::pdk::{PdkAdministrativeAuthority, PdkPublisherTrustStore};
     use rspice_simulation::pdk::test_fixtures::fixture_archive;
     #[cfg(test)]
     use rspice_simulation::pdk::test_fixtures::fixture_signed_symbol;
     #[cfg(test)]
     use rspice_simulation::pdk::{ValidatedPdkTechnologyPackage, validate_archive_bytes};
 
-    pub fn fixture_revision_archives() -> (
-        Vec<u8>,
-        Vec<u8>,
-        PdkPublisherTrustStore,
-        PdkAdministrativeAuthority,
-    ) {
-        let (baseline, trust, authority) = fixture_archive();
-        let candidate = resign_variant(&baseline, &trust, |manifest| {
+    pub fn fixture_revision_archives() -> (Vec<u8>, Vec<u8>, PdkAdministrativeAuthority) {
+        let (baseline, authority) = fixture_archive();
+        let candidate = revision_variant(&baseline, |manifest| {
             manifest.layers[0].display_rgba = [12, 34, 56, 255];
         });
-        (baseline, candidate, trust, authority)
+        (baseline, candidate, authority)
     }
 
     #[cfg(test)]
     fn pair(
         mutate: impl FnOnce(&mut PdkTechnologyManifest),
     ) -> (ValidatedPdkTechnologyPackage, ValidatedPdkTechnologyPackage) {
-        let (baseline_bytes, trust, _) = fixture_archive();
-        let (_, baseline) =
-            validate_archive_bytes(&baseline_bytes, &trust).expect("baseline package");
-        let candidate_bytes = resign_variant(&baseline_bytes, &trust, mutate);
-        let (_, candidate) =
-            validate_archive_bytes(&candidate_bytes, &trust).expect("candidate package");
+        let (baseline_bytes, _) = fixture_archive();
+        let (_, baseline) = validate_archive_bytes(&baseline_bytes).expect("baseline package");
+        let candidate_bytes = revision_variant(&baseline_bytes, mutate);
+        let (_, candidate) = validate_archive_bytes(&candidate_bytes).expect("candidate package");
         (baseline, candidate)
     }
 
-    fn resign_variant(
+    fn revision_variant(
         archive_bytes: &[u8],
-        _trust: &PdkPublisherTrustStore,
         mutate: impl FnOnce(&mut PdkTechnologyManifest),
     ) -> Vec<u8> {
-        let signing_key = SigningKey::from_bytes(&[0x42; 32]);
         let mut archive: SignedPdkTechnologyArchive =
             serde_json::from_slice(archive_bytes).expect("archive fixture");
         let manifest_bytes = STANDARD
@@ -91,14 +81,13 @@ pub mod tests {
         mutate(&mut manifest);
         let manifest_bytes = serde_json::to_vec(&manifest).expect("candidate manifest");
         archive.manifest_base64 = STANDARD.encode(&manifest_bytes);
-        archive.signature_base64 = STANDARD.encode(signing_key.sign(&manifest_bytes).to_bytes());
         serde_json::to_vec(&archive).expect("candidate archive")
     }
 
     #[test]
     fn identical_validated_package_has_no_changes() {
-        let (bytes, trust, _) = fixture_archive();
-        let (_, package) = validate_archive_bytes(&bytes, &trust).expect("validated package");
+        let (bytes, _) = fixture_archive();
+        let (_, package) = validate_archive_bytes(&bytes).expect("validated package");
         let diff = PdkTechnologyRevisionDiff::between(package.metadata(), package.metadata())
             .expect("diff");
 

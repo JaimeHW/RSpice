@@ -141,10 +141,10 @@ pub use simulate_pages::{SimulationPage, VerificationPage};
 pub use veriloga_receipt::{
     VerilogACompileReceipt, VerilogAInterfaceOutcome, VerilogAPlacementHandoff,
 };
-// The design-management model is a crate of its own so the offline
-// drawing-sheet publisher can link it without linking the GUI. It is
-// re-exported here because it is still the application's state authority and
-// every caller names it through `crate::state`.
+// The design-management model is a crate of its own so the design, project and
+// hardcopy crates share it. It is re-exported here because it is still the
+// application's state authority and every caller names it through
+// `crate::state`.
 pub use rspice_design_model::design_management::*;
 pub use schematic::bulk_edit;
 pub use schematic::named_net;

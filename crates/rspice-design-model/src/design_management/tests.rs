@@ -1441,7 +1441,7 @@ fn durable_sheet_title_rejects_blank_updates_and_migrates_legacy_records() {
 fn import_conflict_resolution_must_match_its_durable_outcome() {
     let source = DrawingSheetPresetImportReference {
         preset_id: "managed-panel".to_owned(),
-        scope: DrawingSheetPresetScope::Organization,
+        scope: DrawingSheetPresetScope::User,
     };
     let target = DrawingSheetPresetImportReference {
         preset_id: "managed-panel-project".to_owned(),

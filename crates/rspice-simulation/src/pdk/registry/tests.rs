@@ -3,8 +3,6 @@
 use super::*;
 use crate::pdk::test_fixtures::*;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
-use ed25519_dalek::{Signer as _, SigningKey};
-use rspice_model_library::pdk::PdkTrustAuditAction;
 use rspice_model_library::pdk::manifest::package_path_to_host_path;
 use rspice_model_library::pdk::manifest::{
     signed_model_virtual_root, validate_manifest, validate_package_path,
@@ -14,7 +12,7 @@ use std::path::PathBuf;
 
 #[test]
 fn schema_five_layer_aliases_and_via_definitions_are_typed_and_cross_validated() {
-    let (bytes, _, _) = fixture_archive();
+    let (bytes, _) = fixture_archive();
     let archive: SignedPdkTechnologyArchive = serde_json::from_slice(&bytes).unwrap();
     let mut manifest: PdkTechnologyManifest =
         serde_json::from_slice(&STANDARD.decode(&archive.manifest_base64).unwrap()).unwrap();
@@ -55,7 +53,7 @@ fn schema_five_layer_aliases_and_via_definitions_are_typed_and_cross_validated()
 
 #[test]
 fn via_connectivity_rejects_cut_or_marker_endpoints() {
-    let (bytes, _, _) = fixture_archive();
+    let (bytes, _) = fixture_archive();
     let archive: SignedPdkTechnologyArchive = serde_json::from_slice(&bytes).unwrap();
     let mut manifest: PdkTechnologyManifest =
         serde_json::from_slice(&STANDARD.decode(&archive.manifest_base64).unwrap()).unwrap();
@@ -74,8 +72,8 @@ fn via_connectivity_rejects_cut_or_marker_endpoints() {
 
 #[test]
 fn signed_symbols_materialize_exact_archive_bound_sources() {
-    let (bytes, trust, _) = fixture_archive_with_symbols();
-    let (_, package) = validate_archive_bytes(&bytes, &trust).expect("signed symbol validates");
+    let (bytes, _) = fixture_archive_with_symbols();
+    let (_, package) = validate_archive_bytes(&bytes).expect("signed symbol validates");
     assert_eq!(package.manifest().symbol_definitions.len(), 1);
     assert_eq!(
         package.manifest().symbol_definitions[0]
@@ -108,8 +106,7 @@ fn signed_symbols_materialize_exact_archive_bound_sources() {
 
 #[test]
 fn signed_symbols_reject_provider_or_artifact_authority_mismatch() {
-    let (bytes, trust, _) = fixture_archive_with_symbols();
-    let signing_key = SigningKey::from_bytes(&[0x42; 32]);
+    let (bytes, _) = fixture_archive_with_symbols();
     let mut archive: SignedPdkTechnologyArchive = serde_json::from_slice(&bytes).unwrap();
     let mut manifest: PdkTechnologyManifest =
         serde_json::from_slice(&STANDARD.decode(&archive.manifest_base64).unwrap()).unwrap();
@@ -123,22 +120,20 @@ fn signed_symbols_reject_provider_or_artifact_authority_mismatch() {
     definition.netlist.model = Some(model.clone());
     let manifest_bytes = serde_json::to_vec(&manifest).unwrap();
     archive.manifest_base64 = STANDARD.encode(&manifest_bytes);
-    archive.signature_base64 = STANDARD.encode(signing_key.sign(&manifest_bytes).to_bytes());
 
     assert!(matches!(
-        validate_archive_bytes(&serde_json::to_vec(&archive).unwrap(), &trust),
+        validate_archive_bytes(&serde_json::to_vec(&archive).unwrap()),
         Err(PdkTechnologyError::InvalidReference(_))
     ));
 }
 
 #[test]
 fn signed_model_sources_materialize_exact_process_sections_and_archive_identity() {
-    let (bytes, trust, authority) = fixture_archive();
+    let (bytes, authority) = fixture_archive();
     let mut registry = PdkTechnologyRegistry::default();
     registry
         .install_archive_bytes(
             &bytes,
-            &trust,
             &authority,
             "Install executable model-source fixture",
         )
@@ -193,15 +188,10 @@ fn signed_model_sources_materialize_exact_process_sections_and_archive_identity(
 
 #[test]
 fn signed_veriloga_closure_compiles_and_retains_exact_archive_authority() {
-    let (bytes, trust, authority) = fixture_archive_with_veriloga();
+    let (bytes, authority) = fixture_archive_with_veriloga();
     let mut registry = PdkTechnologyRegistry::default();
     registry
-        .install_archive_bytes(
-            &bytes,
-            &trust,
-            &authority,
-            "Install signed Verilog-A fixture",
-        )
+        .install_archive_bytes(&bytes, &authority, "Install signed Verilog-A fixture")
         .expect("signed Verilog-A package installs");
     let package = registry.validated_packages()[0].clone();
     let sealed = registry
@@ -242,7 +232,7 @@ fn signed_veriloga_closure_compiles_and_retains_exact_archive_authority() {
 
 #[test]
 fn signed_veriloga_rejects_tampered_or_untyped_dependency_bytes() {
-    let (bytes, trust, _) = fixture_archive_with_veriloga();
+    let (bytes, _) = fixture_archive_with_veriloga();
     let mut tampered: SignedPdkTechnologyArchive = serde_json::from_slice(&bytes).unwrap();
     tampered
         .files
@@ -251,11 +241,10 @@ fn signed_veriloga_rejects_tampered_or_untyped_dependency_bytes() {
         .unwrap()
         .content_base64 = STANDARD.encode(b"`define PDK_RESISTANCE 251.0\n");
     assert!(matches!(
-        validate_archive_bytes(&serde_json::to_vec(&tampered).unwrap(), &trust),
+        validate_archive_bytes(&serde_json::to_vec(&tampered).unwrap()),
         Err(PdkTechnologyError::ArtifactDigestMismatch { .. })
     ));
 
-    let signing_key = SigningKey::from_bytes(&[0x42; 32]);
     let mut untyped: SignedPdkTechnologyArchive = serde_json::from_slice(&bytes).unwrap();
     let mut manifest: PdkTechnologyManifest =
         serde_json::from_slice(&STANDARD.decode(&untyped.manifest_base64).unwrap()).unwrap();
@@ -267,17 +256,15 @@ fn signed_veriloga_rejects_tampered_or_untyped_dependency_bytes() {
         .kind = PdkTechnologyArtifactKind::Documentation;
     let manifest_bytes = serde_json::to_vec(&manifest).unwrap();
     untyped.manifest_base64 = STANDARD.encode(&manifest_bytes);
-    untyped.signature_base64 = STANDARD.encode(signing_key.sign(&manifest_bytes).to_bytes());
     assert!(matches!(
-        validate_archive_bytes(&serde_json::to_vec(&untyped).unwrap(), &trust),
+        validate_archive_bytes(&serde_json::to_vec(&untyped).unwrap()),
         Err(PdkTechnologyError::ModelMaterialization(_))
     ));
 }
 
 #[test]
 fn signed_veriloga_manifest_rejects_alias_collisions_unreachable_sources_and_schema_downgrade() {
-    let (bytes, trust, _) = fixture_archive_with_veriloga();
-    let signing_key = SigningKey::from_bytes(&[0x42; 32]);
+    let (bytes, _) = fixture_archive_with_veriloga();
 
     let mut collision: SignedPdkTechnologyArchive = serde_json::from_slice(&bytes).unwrap();
     let mut manifest: PdkTechnologyManifest =
@@ -289,9 +276,8 @@ fn signed_veriloga_manifest_rejects_alias_collisions_unreachable_sources_and_sch
     manifest.veriloga_sources.push(duplicate);
     let manifest_bytes = serde_json::to_vec(&manifest).unwrap();
     collision.manifest_base64 = STANDARD.encode(&manifest_bytes);
-    collision.signature_base64 = STANDARD.encode(signing_key.sign(&manifest_bytes).to_bytes());
     assert!(matches!(
-        validate_archive_bytes(&serde_json::to_vec(&collision).unwrap(), &trust),
+        validate_archive_bytes(&serde_json::to_vec(&collision).unwrap()),
         Err(PdkTechnologyError::Duplicate(_))
     ));
 
@@ -311,10 +297,9 @@ fn signed_veriloga_manifest_rejects_alias_collisions_unreachable_sources_and_sch
     });
     let manifest_bytes = serde_json::to_vec(&manifest).unwrap();
     unreachable.manifest_base64 = STANDARD.encode(&manifest_bytes);
-    unreachable.signature_base64 = STANDARD.encode(signing_key.sign(&manifest_bytes).to_bytes());
-    authenticate_archive(&unreachable, &trust).expect("archive bytes are authentic");
+    authenticate_archive(&unreachable).expect("archive bytes are authentic");
     assert!(matches!(
-        validate_archive_bytes(&serde_json::to_vec(&unreachable).unwrap(), &trust),
+        validate_archive_bytes(&serde_json::to_vec(&unreachable).unwrap()),
         Err(PdkTechnologyError::ModelMaterialization(_))
     ));
 
@@ -324,17 +309,15 @@ fn signed_veriloga_manifest_rejects_alias_collisions_unreachable_sources_and_sch
     manifest.schema_version = 1;
     let manifest_bytes = serde_json::to_vec(&manifest).unwrap();
     downgraded.manifest_base64 = STANDARD.encode(&manifest_bytes);
-    downgraded.signature_base64 = STANDARD.encode(signing_key.sign(&manifest_bytes).to_bytes());
     assert!(matches!(
-        validate_archive_bytes(&serde_json::to_vec(&downgraded).unwrap(), &trust),
+        validate_archive_bytes(&serde_json::to_vec(&downgraded).unwrap()),
         Err(PdkTechnologyError::InvalidField(_))
     ));
 }
 
 #[test]
 fn signed_model_sections_close_package_relative_dependencies_in_memory() {
-    let (bytes, trust, authority) = fixture_archive();
-    let signing_key = SigningKey::from_bytes(&[0x42; 32]);
+    let (bytes, authority) = fixture_archive();
     let mut archive: SignedPdkTechnologyArchive = serde_json::from_slice(&bytes).unwrap();
     let mut manifest: PdkTechnologyManifest =
         serde_json::from_slice(&STANDARD.decode(&archive.manifest_base64).unwrap()).unwrap();
@@ -360,17 +343,11 @@ fn signed_model_sections_close_package_relative_dependencies_in_memory() {
     });
     let manifest_bytes = serde_json::to_vec(&manifest).unwrap();
     archive.manifest_base64 = STANDARD.encode(&manifest_bytes);
-    archive.signature_base64 = STANDARD.encode(signing_key.sign(&manifest_bytes).to_bytes());
     let signed = serde_json::to_vec(&archive).unwrap();
 
     let mut registry = PdkTechnologyRegistry::default();
     registry
-        .install_archive_bytes(
-            &signed,
-            &trust,
-            &authority,
-            "Install dependency-closed package",
-        )
+        .install_archive_bytes(&signed, &authority, "Install dependency-closed package")
         .expect("package-relative dependency validates");
     let package = registry.validated_packages()[0].clone();
     let sealed = registry
@@ -395,8 +372,7 @@ fn signed_model_sections_close_package_relative_dependencies_in_memory() {
 
 #[test]
 fn signed_model_contract_rejects_external_dependencies_and_missing_reference_process() {
-    let (bytes, trust, _) = fixture_archive();
-    let signing_key = SigningKey::from_bytes(&[0x42; 32]);
+    let (bytes, _) = fixture_archive();
     let mut archive: SignedPdkTechnologyArchive = serde_json::from_slice(&bytes).unwrap();
     let mut manifest: PdkTechnologyManifest =
         serde_json::from_slice(&STANDARD.decode(&archive.manifest_base64).unwrap()).unwrap();
@@ -407,13 +383,12 @@ fn signed_model_contract_rejects_external_dependencies_and_missing_reference_pro
     manifest.artifacts[0].sha256 = content_digest(&external);
     let manifest_bytes = serde_json::to_vec(&manifest).unwrap();
     archive.manifest_base64 = STANDARD.encode(&manifest_bytes);
-    archive.signature_base64 = STANDARD.encode(signing_key.sign(&manifest_bytes).to_bytes());
     assert!(matches!(
-        validate_archive_bytes(&serde_json::to_vec(&archive).unwrap(), &trust),
+        validate_archive_bytes(&serde_json::to_vec(&archive).unwrap()),
         Err(PdkTechnologyError::ModelMaterialization(_))
     ));
 
-    let (bytes, trust, _) = fixture_archive();
+    let (bytes, _) = fixture_archive();
     let mut archive: SignedPdkTechnologyArchive = serde_json::from_slice(&bytes).unwrap();
     let mut manifest: PdkTechnologyManifest =
         serde_json::from_slice(&STANDARD.decode(&archive.manifest_base64).unwrap()).unwrap();
@@ -422,19 +397,18 @@ fn signed_model_contract_rejects_external_dependencies_and_missing_reference_pro
         .retain(|contract| contract.process != PdkModelProcess::Tt);
     let manifest_bytes = serde_json::to_vec(&manifest).unwrap();
     archive.manifest_base64 = STANDARD.encode(&manifest_bytes);
-    archive.signature_base64 = STANDARD.encode(signing_key.sign(&manifest_bytes).to_bytes());
     assert!(matches!(
-        validate_archive_bytes(&serde_json::to_vec(&archive).unwrap(), &trust),
+        validate_archive_bytes(&serde_json::to_vec(&archive).unwrap()),
         Err(PdkTechnologyError::InvalidReference(_))
     ));
 }
 
 #[test]
 fn project_model_sealing_rejects_post_validation_archive_mutation() {
-    let (bytes, trust, authority) = fixture_archive();
+    let (bytes, authority) = fixture_archive();
     let mut registry = PdkTechnologyRegistry::default();
     registry
-        .install_archive_bytes(&bytes, &trust, &authority, "Install exact package")
+        .install_archive_bytes(&bytes, &authority, "Install exact package")
         .expect("install");
     let package = registry.validated_packages()[0].clone();
     registry.archives[0].files[0].content_base64 = STANDARD.encode(b".model attacker nmos level=1");
@@ -446,8 +420,8 @@ fn project_model_sealing_rejects_post_validation_archive_mutation() {
 
 #[test]
 fn signed_archive_verifies_every_exact_artifact_and_contract() {
-    let (bytes, trust, _) = fixture_archive();
-    let (_, package) = validate_archive_bytes(&bytes, &trust).expect("archive validates");
+    let (bytes, _) = fixture_archive();
+    let (_, package) = validate_archive_bytes(&bytes).expect("archive validates");
 
     assert_eq!(package.manifest().package_id, "demo180");
     assert_eq!(package.manifest().layers.len(), 3);
@@ -461,7 +435,7 @@ fn signed_archive_verifies_every_exact_artifact_and_contract() {
 
 #[test]
 fn recognition_and_extraction_contracts_are_typed_complete_and_source_bound() {
-    let (bytes, trust, _) = fixture_archive();
+    let (bytes, _) = fixture_archive();
     let mut archive: SignedPdkTechnologyArchive = serde_json::from_slice(&bytes).unwrap();
     let manifest_bytes = STANDARD.decode(&archive.manifest_base64).unwrap();
     let mut manifest: PdkTechnologyManifest = serde_json::from_slice(&manifest_bytes).unwrap();
@@ -545,12 +519,10 @@ fn recognition_and_extraction_contracts_are_typed_complete_and_source_bound() {
         }],
     }];
 
-    let signing_key = SigningKey::from_bytes(&[0x42; 32]);
     let manifest_bytes = serde_json::to_vec(&manifest).unwrap();
     archive.manifest_base64 = STANDARD.encode(&manifest_bytes);
-    archive.signature_base64 = STANDARD.encode(signing_key.sign(&manifest_bytes).to_bytes());
     let signed = serde_json::to_vec(&archive).unwrap();
-    let (_, package) = validate_archive_bytes(&signed, &trust).expect("typed contracts validate");
+    let (_, package) = validate_archive_bytes(&signed).expect("typed contracts validate");
     assert_eq!(package.manifest().recognition.len(), 1);
     assert_eq!(package.manifest().extraction.len(), 1);
 
@@ -558,9 +530,8 @@ fn recognition_and_extraction_contracts_are_typed_complete_and_source_bound() {
     invalid.recognition[0].terminals[0].purpose = "undeclared".to_owned();
     let invalid_bytes = serde_json::to_vec(&invalid).unwrap();
     archive.manifest_base64 = STANDARD.encode(&invalid_bytes);
-    archive.signature_base64 = STANDARD.encode(signing_key.sign(&invalid_bytes).to_bytes());
     assert!(matches!(
-        validate_archive_bytes(&serde_json::to_vec(&archive).unwrap(), &trust),
+        validate_archive_bytes(&serde_json::to_vec(&archive).unwrap()),
         Err(PdkTechnologyError::InvalidReference(_))
     ));
 
@@ -569,19 +540,18 @@ fn recognition_and_extraction_contracts_are_typed_complete_and_source_bound() {
         "qualification/nmos-layout.json".to_owned();
     let duplicate_bytes = serde_json::to_vec(&duplicate).unwrap();
     archive.manifest_base64 = STANDARD.encode(&duplicate_bytes);
-    archive.signature_base64 = STANDARD.encode(signing_key.sign(&duplicate_bytes).to_bytes());
     assert!(matches!(
-        validate_archive_bytes(&serde_json::to_vec(&archive).unwrap(), &trust),
+        validate_archive_bytes(&serde_json::to_vec(&archive).unwrap()),
         Err(PdkTechnologyError::Duplicate(_))
     ));
 }
 
 #[test]
 fn project_pin_resolves_only_the_exact_currently_trusted_archive() {
-    let (bytes, trust, authority) = fixture_archive();
+    let (bytes, authority) = fixture_archive();
     let mut registry = PdkTechnologyRegistry::default();
     registry
-        .install_archive_bytes(&bytes, &trust, &authority, "Install for project pin")
+        .install_archive_bytes(&bytes, &authority, "Install for project pin")
         .expect("install");
     let package = registry
         .validated_packages()
@@ -598,102 +568,28 @@ fn project_pin_resolves_only_the_exact_currently_trusted_archive() {
         serde_json::from_str(&json).expect("pin deserializes");
     assert_eq!(restored, pin);
 
-    let mut revoked = trust;
-    revoked.keys[0].revoked = true;
-    registry
-        .revalidate_installed(&revoked)
-        .expect_err("revocation invalidates runtime packages");
     assert!(matches!(
-        crate::pdk::validate_project_pin(registry.validated_packages(), &pin),
+        crate::pdk::validate_project_pin(&[], &pin),
         Err(rspice_model_library::TechnologyBindingError::SignedPackageUnavailable { .. })
     ));
 }
 
 #[test]
-fn publisher_key_provision_and_revocation_are_immutable_and_hash_chained() {
-    let (bytes, fixture_trust, authority) = fixture_archive();
-    let key = fixture_trust.keys[0].clone();
-    let mut trust = PdkPublisherTrustStore::default();
-    let provision = trust
-        .provision_key(key.clone(), &authority, "Approve foundry ceremony key")
-        .expect("provision");
-    assert_eq!(provision.action, PdkTrustAuditAction::Provision);
-    assert!(validate_archive_bytes(&bytes, &trust).is_ok());
-
-    let before_duplicate = trust.clone();
-    assert!(matches!(
-        trust.provision_key(key.clone(), &authority, "Duplicate"),
-        Err(PdkTechnologyError::ImmutableTrustKey(_))
-    ));
-    assert_eq!(trust, before_duplicate);
-
-    let revoke = trust
-        .revoke_key(
-            &key.publisher_id,
-            &key.key_id,
-            &authority,
-            "Publisher key retired",
-        )
-        .expect("revoke");
-    assert_eq!(revoke.action, PdkTrustAuditAction::Revoke);
-    assert_eq!(
-        revoke.previous_receipt_digest,
-        Some(provision.receipt_digest)
-    );
-    assert!(matches!(
-        validate_archive_bytes(&bytes, &trust),
-        Err(PdkTechnologyError::RevokedPublisherKey { .. })
-    ));
-    let before_second_revoke = trust.clone();
-    assert!(matches!(
-        trust.revoke_key(&key.publisher_id, &key.key_id, &authority, "Revoke again"),
-        Err(PdkTechnologyError::ImmutableTrustKey(_))
-    ));
-    assert_eq!(trust, before_second_revoke);
-
-    let json = serde_json::to_string(&trust).expect("serialize governed trust");
-    let restored: PdkPublisherTrustStore =
-        serde_json::from_str(&json).expect("deserialize governed trust");
-    restored.validate().expect("restored audit validates");
-
-    let mut tampered = serde_json::to_value(&restored).unwrap();
-    tampered["audit"][0]["reason"] = serde_json::json!("altered");
-    let tampered: PdkPublisherTrustStore = serde_json::from_value(tampered).unwrap();
-    assert!(matches!(
-        tampered.validate(),
-        Err(PdkTechnologyError::TrustAuditCorrupted(_))
-    ));
-}
-
-#[test]
-fn tampered_artifact_signature_and_unknown_key_fail_closed() {
-    let (bytes, trust, _) = fixture_archive();
+fn tampered_artifact_fails_closed() {
+    let (bytes, _) = fixture_archive();
     let mut archive: SignedPdkTechnologyArchive = serde_json::from_slice(&bytes).unwrap();
     archive.files[0].content_base64 = STANDARD.encode(b"tampered");
     let tampered = serde_json::to_vec(&archive).unwrap();
     assert!(matches!(
-        validate_archive_bytes(&tampered, &trust),
+        validate_archive_bytes(&tampered),
         Err(PdkTechnologyError::ArtifactSizeMismatch { .. })
             | Err(PdkTechnologyError::ArtifactDigestMismatch { .. })
-    ));
-
-    let mut signature_tampered: SignedPdkTechnologyArchive =
-        serde_json::from_slice(&bytes).unwrap();
-    signature_tampered.signature_base64 = STANDARD.encode([0_u8; 64]);
-    assert!(matches!(
-        validate_archive_bytes(&serde_json::to_vec(&signature_tampered).unwrap(), &trust),
-        Err(PdkTechnologyError::InvalidSignature { .. })
-    ));
-
-    assert!(matches!(
-        validate_archive_bytes(&bytes, &PdkPublisherTrustStore::default()),
-        Err(PdkTechnologyError::UntrustedPublisher { .. })
     ));
 }
 
 #[test]
 fn network_callbacks_and_incomplete_stream_maps_are_rejected() {
-    let (bytes, trust, _) = fixture_archive();
+    let (bytes, _) = fixture_archive();
     let archive: SignedPdkTechnologyArchive = serde_json::from_slice(&bytes).unwrap();
     let manifest_bytes = STANDARD.decode(&archive.manifest_base64).unwrap();
     let mut manifest: PdkTechnologyManifest = serde_json::from_slice(&manifest_bytes).unwrap();
@@ -711,18 +607,11 @@ fn network_callbacks_and_incomplete_stream_maps_are_rejected() {
         validate_manifest(&manifest),
         Err(PdkTechnologyError::MissingMapping(_))
     ));
-
-    let mut revoked = trust;
-    revoked.keys[0].revoked = true;
-    assert!(matches!(
-        validate_archive_bytes(&bytes, &revoked),
-        Err(PdkTechnologyError::RevokedPublisherKey { .. })
-    ));
 }
 
 #[test]
 fn target_declarations_are_nonempty_and_activation_is_platform_scoped() {
-    let (bytes, trust, authority) = fixture_archive();
+    let (bytes, authority) = fixture_archive();
     let mut archive: SignedPdkTechnologyArchive = serde_json::from_slice(&bytes).unwrap();
     let manifest_bytes = STANDARD.decode(&archive.manifest_base64).unwrap();
     let mut manifest: PdkTechnologyManifest = serde_json::from_slice(&manifest_bytes).unwrap();
@@ -736,17 +625,14 @@ fn target_declarations_are_nonempty_and_activation_is_platform_scoped() {
         PdkExecutionTarget::Desktop => PdkExecutionTarget::WebAssembly,
         PdkExecutionTarget::WebAssembly | PdkExecutionTarget::Mobile => PdkExecutionTarget::Desktop,
     }];
-    let signing_key = SigningKey::from_bytes(&[0x42; 32]);
     let manifest_bytes = serde_json::to_vec(&manifest).unwrap();
     archive.manifest_base64 = STANDARD.encode(&manifest_bytes);
-    archive.signature_base64 = STANDARD.encode(signing_key.sign(&manifest_bytes).to_bytes());
     let restricted_bytes = serde_json::to_vec(&archive).unwrap();
 
     let mut registry = PdkTechnologyRegistry::default();
     registry
         .install_archive_bytes(
             &restricted_bytes,
-            &trust,
             &authority,
             "Install platform-restricted package",
         )
@@ -765,10 +651,10 @@ fn target_declarations_are_nonempty_and_activation_is_platform_scoped() {
 
 #[test]
 fn install_activation_and_rollback_are_hash_chained_and_revalidated() {
-    let (bytes, trust, authority) = fixture_archive();
+    let (bytes, authority) = fixture_archive();
     let mut registry = PdkTechnologyRegistry::default();
     let install = registry
-        .install_archive_bytes(&bytes, &trust, &authority, "Install reviewed package")
+        .install_archive_bytes(&bytes, &authority, "Install reviewed package")
         .expect("install");
     let activate = registry
         .activate(
@@ -790,7 +676,7 @@ fn install_activation_and_rollback_are_hash_chained_and_revalidated() {
     assert!(restored.active_package().is_none());
     assert!(!restored.runtime_ready());
     restored
-        .revalidate_installed(&trust)
+        .revalidate_installed()
         .expect("revalidate persisted archive");
     assert!(restored.active_package().is_some());
 
@@ -804,14 +690,14 @@ fn install_activation_and_rollback_are_hash_chained_and_revalidated() {
 
 #[test]
 fn immutable_revision_and_tampered_audit_fail_before_mutation() {
-    let (bytes, trust, authority) = fixture_archive();
+    let (bytes, authority) = fixture_archive();
     let mut registry = PdkTechnologyRegistry::default();
     registry
-        .install_archive_bytes(&bytes, &trust, &authority, "Install")
+        .install_archive_bytes(&bytes, &authority, "Install")
         .unwrap();
     let before = registry.clone();
     assert!(matches!(
-        registry.install_archive_bytes(&bytes, &trust, &authority, "Install again"),
+        registry.install_archive_bytes(&bytes, &authority, "Install again"),
         Err(PdkTechnologyError::ImmutableRevision(_))
     ));
     assert_eq!(registry, before);
@@ -827,10 +713,10 @@ fn immutable_revision_and_tampered_audit_fail_before_mutation() {
 
 #[test]
 fn recomputed_hashes_cannot_disguise_impossible_transitions_or_wrong_archives() {
-    let (bytes, trust, authority) = fixture_archive();
+    let (bytes, authority) = fixture_archive();
     let mut registry = PdkTechnologyRegistry::default();
     registry
-        .install_archive_bytes(&bytes, &trust, &authority, "Install")
+        .install_archive_bytes(&bytes, &authority, "Install")
         .unwrap();
 
     let target = registry.audit[0].target.clone();
@@ -844,12 +730,12 @@ fn recomputed_hashes_cannot_disguise_impossible_transitions_or_wrong_archives() 
 
     let mut registry = PdkTechnologyRegistry::default();
     registry
-        .install_archive_bytes(&bytes, &trust, &authority, "Install")
+        .install_archive_bytes(&bytes, &authority, "Install")
         .unwrap();
     registry.audit[0].archive_digest = content_digest(b"wrong archive");
     registry.audit[0].receipt_digest = registry.audit[0].calculate_digest().unwrap();
     let errors = registry
-        .revalidate_installed(&trust)
+        .revalidate_installed()
         .expect_err("receipt must bind the installed archive");
     assert!(
         errors
@@ -860,7 +746,7 @@ fn recomputed_hashes_cannot_disguise_impossible_transitions_or_wrong_archives() 
 
 #[test]
 fn unknown_manifest_fields_and_unsafe_paths_are_rejected() {
-    let (bytes, trust, _) = fixture_archive();
+    let (bytes, _) = fixture_archive();
     let archive: SignedPdkTechnologyArchive = serde_json::from_slice(&bytes).unwrap();
     let manifest_bytes = STANDARD.decode(&archive.manifest_base64).unwrap();
     let mut value: serde_json::Value = serde_json::from_slice(&manifest_bytes).unwrap();
@@ -875,5 +761,4 @@ fn unknown_manifest_fields_and_unsafe_paths_are_rejected() {
         validate_package_path("artifact", "../secret"),
         Err(PdkTechnologyError::InvalidField(_))
     ));
-    assert!(trust.validate().is_ok());
 }

@@ -1,13 +1,13 @@
 //! Signed technology a test provisions into the model.
 //!
 //! For tests whose subject requires a successful governed simulation. Tests
-//! for missing, stale, revoked, or tampered authority must not call these
+//! for missing, stale, or tampered authority must not call these
 //! helpers. Keeping them opt-in preserves the production fail-closed default
 //! while avoiding hand-built partial authority in unrelated simulation
 //! fixtures.
 
 use super::Model;
-use crate::state::pdk_config::{PdkAdministrativeAuthority, PdkPublisherTrustStore};
+use crate::state::pdk_config::PdkAdministrativeAuthority;
 
 impl Model {
     /// Provision one fully authenticated model-source and signed-PDK contract
@@ -41,18 +41,12 @@ impl Model {
 
     fn provision_test_project_technology_fixture(
         &mut self,
-        (archive, trust, administrative_authority): (
-            Vec<u8>,
-            PdkPublisherTrustStore,
-            PdkAdministrativeAuthority,
-        ),
+        (archive, administrative_authority): (Vec<u8>, PdkAdministrativeAuthority),
     ) {
-        self.pdk_config.publisher_trust_store = trust.clone();
         self.pdk_config
             .technology_registry
             .install_archive_bytes(
                 &archive,
-                &trust,
                 &administrative_authority,
                 "Install deterministic test technology",
             )

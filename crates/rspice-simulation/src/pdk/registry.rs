@@ -4,14 +4,12 @@
 //! keeps those concepts separate and gives the PDK administration surface a
 //! real authority boundary:
 //!
-//! - the publisher signature covers the exact manifest bytes;
-//! - every packaged artifact is size- and digest-verified;
+//! - the manifest and every packaged artifact are size- and digest-verified;
 //! - layer, purpose, stream-map, connectivity, callback, and platform
 //!   contracts are validated before installation;
 //! - installed revisions are immutable;
 //! - activation and rollback are append-only, hash-chained transactions; and
-//! - deserialized packages are never executable until they are revalidated
-//!   against the current trust store.
+//! - deserialized packages are never executable until they are revalidated.
 
 use super::{
     SealedPdkModelSources, ValidatedPdkTechnologyPackage, validate_archive, validate_archive_bytes,
@@ -21,8 +19,8 @@ use rspice_model_library::pdk::contracts::*;
 use rspice_model_library::pdk::manifest::{PdkTechnologyManifest, validate_version};
 use rspice_model_library::pdk::package::decode_bounded;
 use rspice_model_library::pdk::{
-    PdkAdministrativeAuthority, PdkPublisherTrustStore, PdkTechnologyError, content_digest,
-    validate_identifier, validate_text,
+    PdkAdministrativeAuthority, PdkTechnologyError, content_digest, validate_identifier,
+    validate_text,
 };
 use rspice_vocabulary::product::ContentDigest;
 use serde::{Deserialize, Serialize};
@@ -89,8 +87,8 @@ impl PdkTechnologyAuditReceipt {
 
 /// Persisted signed archives and administrative history.  `validated_packages`
 /// is intentionally runtime-only: loading serialized state cannot restore
-/// trust.  Call `revalidate_installed` with the current trust store before any
-/// package can be activated or consumed.
+/// validation.  Call `revalidate_installed` before any package can be
+/// activated or consumed.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PdkTechnologyRegistry {
@@ -159,21 +157,6 @@ impl PdkTechnologyRegistry {
         &self.archives
     }
 
-    /// Resolve the immutable archive behind an exact currently validated
-    /// package. This is used by the unsigned authoring export to retain source
-    /// artifact bytes without granting the draft executable authority.
-    #[must_use]
-    pub fn archive_for_package(
-        &self,
-        package: &ValidatedPdkTechnologyPackage,
-    ) -> Option<&SignedPdkTechnologyArchive> {
-        self.archives.iter().find(|archive| {
-            serde_json::to_vec(archive)
-                .ok()
-                .is_some_and(|bytes| content_digest(&bytes) == package.archive_digest())
-        })
-    }
-
     /// Remove the signed archive payloads from a persistence clone while
     /// retaining its bindings and audit history. Browser persistence stores
     /// these potentially large immutable payloads in a content-addressed
@@ -185,8 +168,8 @@ impl PdkTechnologyRegistry {
     }
 
     /// Reattach exact signed archive payloads loaded from the browser object
-    /// store. This deliberately restores no runtime trust; the caller must
-    /// run `revalidate_installed` against the current publisher trust store.
+    /// store. This deliberately restores no runtime validation; the caller
+    /// must run `revalidate_installed`.
     pub fn restore_archives_from_browser_persistence(
         &mut self,
         archives: Vec<SignedPdkTechnologyArchive>,
@@ -395,14 +378,13 @@ impl PdkTechnologyRegistry {
     pub fn install_archive_bytes(
         &mut self,
         bytes: &[u8],
-        trust_store: &PdkPublisherTrustStore,
         authority: &PdkAdministrativeAuthority,
         reason: &str,
     ) -> Result<PdkTechnologyAuditReceipt, PdkTechnologyError> {
         authority.validate()?;
         validate_text("reason", reason, 1_024)?;
         self.validate_audit_chain()?;
-        let (archive, package) = validate_archive_bytes(bytes, trust_store)?;
+        let (archive, package) = validate_archive_bytes(bytes)?;
         let binding = package.binding();
         if self.archives.iter().any(|installed| {
             archive_identity(installed).is_ok_and(|candidate| {
@@ -439,17 +421,10 @@ impl PdkTechnologyRegistry {
         Ok(receipt)
     }
 
-    /// Rebuild all runtime trust from the exact persisted archives.  Failure
-    /// publishes neither a partial validated catalog nor executable authority.
-    pub fn revalidate_installed(
-        &mut self,
-        trust_store: &PdkPublisherTrustStore,
-    ) -> Result<usize, Vec<String>> {
-        if let Err(error) = trust_store.validate() {
-            self.validated_packages.clear();
-            self.validation_errors = vec![error.to_string()];
-            return Err(self.validation_errors.clone());
-        }
+    /// Rebuild all runtime validation from the exact persisted archives.
+    /// Failure publishes neither a partial validated catalog nor executable
+    /// authority.
+    pub fn revalidate_installed(&mut self) -> Result<usize, Vec<String>> {
         if let Err(error) = self.validate_audit_chain() {
             self.validated_packages.clear();
             self.validation_errors = vec![error.to_string()];
@@ -458,7 +433,7 @@ impl PdkTechnologyRegistry {
         let mut packages = Vec::with_capacity(self.archives.len());
         let mut errors = Vec::new();
         for (index, archive) in self.archives.iter().enumerate() {
-            match validate_archive(archive, trust_store) {
+            match validate_archive(archive) {
                 Ok(package) => packages.push(package),
                 Err(error) => errors.push(format!("archive[{index}]: {error}")),
             }

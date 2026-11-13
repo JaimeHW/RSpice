@@ -1658,14 +1658,14 @@ fn returning_to_generated_output_is_saved_as_a_project_change() {
 
 #[test]
 fn signed_revision_replacement_requires_exact_diff_evidence_and_retains_it() {
-    let (baseline_bytes, candidate_bytes, trust, authority) =
+    let (baseline_bytes, candidate_bytes, authority) =
         crate::state::pdk_config::signed_technology_diff_test_fixture();
     let mut registry = crate::state::pdk_config::PdkTechnologyRegistry::default();
     registry
-        .install_archive_bytes(&baseline_bytes, &trust, &authority, "install baseline")
+        .install_archive_bytes(&baseline_bytes, &authority, "install baseline")
         .expect("baseline installs");
     registry
-        .install_archive_bytes(&candidate_bytes, &trust, &authority, "install candidate")
+        .install_archive_bytes(&candidate_bytes, &authority, "install candidate")
         .expect("candidate installs");
     let baseline = registry
         .validated_packages()

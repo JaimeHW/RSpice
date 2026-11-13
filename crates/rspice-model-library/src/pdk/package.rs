@@ -1,4 +1,4 @@
-//! Signed-archive authentication and portable package metadata.
+//! Archive validation and portable package metadata.
 //!
 //! Source compilation, callback execution and registry publication belong above
 //! this data boundary and cannot be authorized by deserialized metadata.
@@ -13,9 +13,9 @@ use super::manifest::{
     PdkTechnologyManifest, package_path_to_host_path, signed_model_virtual_root, validate_manifest,
     validate_package_path,
 };
-use super::{PdkPublisherTrustStore, PdkTechnologyError, content_digest};
+use super::{PdkTechnologyError, content_digest};
 
-/// Manifest and artifact identities produced by signed-archive authentication.
+/// Manifest and artifact identities produced by archive validation.
 ///
 /// This record carries no runtime authority. Installation also validates callback
 /// modules and executable source closures. Deserializing this record does not
@@ -68,11 +68,10 @@ impl PdkTechnologyPackageMetadata {
     }
 }
 
-/// Authenticate the exact manifest and every declared artifact, preserving their
+/// Validate the exact manifest and every declared artifact, preserving their
 /// normalized archive identity. Runtime validation remains the installer's duty.
 pub fn authenticate_archive(
     archive: &SignedPdkTechnologyArchive,
-    trust_store: &PdkPublisherTrustStore,
 ) -> Result<PdkTechnologyPackageMetadata, PdkTechnologyError> {
     if archive.schema_version != PDK_TECHNOLOGY_ARCHIVE_SCHEMA_VERSION {
         return Err(PdkTechnologyError::UnsupportedSchema {
@@ -95,14 +94,6 @@ pub fn authenticate_archive(
     let manifest: PdkTechnologyManifest = serde_json::from_slice(&manifest_bytes)
         .map_err(|error| PdkTechnologyError::ManifestParse(error.to_string()))?;
     validate_manifest(&manifest)?;
-
-    let signature_bytes = decode_bounded("signature_base64", &archive.signature_base64, 64)?;
-    trust_store.verify_publisher_signature(
-        &manifest.publisher_id,
-        &manifest.signing_key_id,
-        &manifest_bytes,
-        &signature_bytes,
-    )?;
 
     let mut actual_files = BTreeMap::<String, (usize, ContentDigest)>::new();
     let mut total = 0usize;
@@ -171,8 +162,8 @@ pub fn authenticate_archive(
         manifest,
         manifest_digest: content_digest(&manifest_bytes),
         // JSON envelope whitespace is intentionally not part of package
-        // identity. The signature binds the exact manifest bytes and each
-        // manifest digest binds exact decoded artifact bytes. This digest
+        // identity. The manifest digest binds the exact manifest bytes and
+        // each artifact digest binds exact decoded artifact bytes. This digest
         // binds the complete normalized envelope identically before and after
         // persistence.
         archive_digest,

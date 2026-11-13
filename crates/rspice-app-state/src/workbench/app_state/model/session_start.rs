@@ -12,7 +12,7 @@ impl Model {
     ///
     /// `pdk_config` is the PDK configuration the host read at startup, and
     /// `pdk_load_error` why it could not be read, if it could not. Its
-    /// installed technologies are revalidated against its own trust store, and
+    /// installed technologies are revalidated, and
     /// `restore_catalog` rebuilds the model catalog from it; when that fails,
     /// the session uses the built-in models only. Each of those problems is
     /// recorded in the Console as an error.
@@ -34,10 +34,7 @@ impl Model {
         if let Ok(plan) = sim_setup.stable_analysis_plan() {
             workspace.content.migrate_active_plan_data(plan.id());
         }
-        let trust_store = pdk_config.publisher_trust_store.clone();
-        let _ = pdk_config
-            .technology_registry
-            .revalidate_installed(&trust_store);
+        let _ = pdk_config.technology_registry.revalidate_installed();
         let pdk_validation_errors = pdk_config.technology_registry.validation_errors().to_vec();
         let (model_library_manager, pdk_model_restore_errors) =
             match restore_catalog(&mut pdk_config) {

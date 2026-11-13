@@ -19,7 +19,6 @@ pub struct ProjectSignedTechnologyPin {
     archive_digest: rspice_vocabulary::product::ContentDigest,
     technology_name: String,
     publisher_id: String,
-    signing_key_id: String,
     process_node_nm: u32,
     stack_name: String,
     execution_targets: Vec<crate::pdk::contracts::PdkExecutionTarget>,
@@ -40,7 +39,6 @@ impl ProjectSignedTechnologyPin {
             archive_digest: package.archive_digest(),
             technology_name: manifest.technology_name.clone(),
             publisher_id: manifest.publisher_id.clone(),
-            signing_key_id: manifest.signing_key_id.clone(),
             process_node_nm: manifest.process_node_nm,
             stack_name: manifest.stack_name.clone(),
             execution_targets,
@@ -64,10 +62,6 @@ impl ProjectSignedTechnologyPin {
                 self.technology_name.as_str(),
             ),
             ("signed_package.publisher_id", self.publisher_id.as_str()),
-            (
-                "signed_package.signing_key_id",
-                self.signing_key_id.as_str(),
-            ),
             ("signed_package.stack_name", self.stack_name.as_str()),
         ] {
             validate_technology_text(field, value)?;
@@ -120,11 +114,6 @@ impl ProjectSignedTechnologyPin {
     #[must_use]
     pub fn publisher_id(&self) -> &str {
         &self.publisher_id
-    }
-
-    #[must_use]
-    pub fn signing_key_id(&self) -> &str {
-        &self.signing_key_id
     }
 
     #[must_use]

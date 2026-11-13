@@ -8,7 +8,7 @@ use rspice_model_library::pdk::manifest::{
 use rspice_model_library::pdk::package::{
     PdkTechnologyPackageMetadata, authenticate_archive, decode_bounded,
 };
-use rspice_model_library::pdk::{PdkPublisherTrustStore, PdkTechnologyError, content_digest};
+use rspice_model_library::pdk::{PdkTechnologyError, content_digest};
 use rspice_vocabulary::product::ContentDigest;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -154,7 +154,6 @@ pub struct SealedPdkVerilogABinding {
 
 pub fn validate_archive_bytes(
     bytes: &[u8],
-    trust_store: &PdkPublisherTrustStore,
 ) -> Result<(SignedPdkTechnologyArchive, ValidatedPdkTechnologyPackage), PdkTechnologyError> {
     if bytes.len() > MAX_PDK_ARCHIVE_BYTES {
         return Err(PdkTechnologyError::ArchiveTooLarge {
@@ -164,15 +163,14 @@ pub fn validate_archive_bytes(
     }
     let archive: SignedPdkTechnologyArchive = serde_json::from_slice(bytes)
         .map_err(|error| PdkTechnologyError::ArchiveParse(error.to_string()))?;
-    let package = validate_archive(&archive, trust_store)?;
+    let package = validate_archive(&archive)?;
     Ok((archive, package))
 }
 
 pub fn validate_archive(
     archive: &SignedPdkTechnologyArchive,
-    trust_store: &PdkPublisherTrustStore,
 ) -> Result<ValidatedPdkTechnologyPackage, PdkTechnologyError> {
-    let package = ValidatedPdkTechnologyPackage(authenticate_archive(archive, trust_store)?);
+    let package = ValidatedPdkTechnologyPackage(authenticate_archive(archive)?);
     super::callback::validate_signed_callbacks(archive, &package)
         .map_err(PdkTechnologyError::CallbackValidation)?;
     // Executable model contracts are part of package validation, not a

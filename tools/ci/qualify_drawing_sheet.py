@@ -76,8 +76,6 @@ QUALIFICATION_INPUTS = (
     "crates/rspice-hardcopy-contract/Cargo.toml",
     "crates/rspice-hardcopy/Cargo.toml",
     "crates/rspice-design-model/Cargo.toml",
-    "tools/rspice-sheet-publisher/Cargo.toml",
-    "tools/rspice-sheet-publisher/src",
     PROCEDURE,
     ".github/workflows/drawing-sheet-qualification.yml",
     "tools/ci/qualify_drawing_sheet.py",
@@ -365,7 +363,7 @@ def command_gates(
         ),
         Gate(
             "design-model-drawing-sheet",
-            "Drawing-sheet geometry, preset catalog, and signed package contract",
+            "Drawing-sheet geometry, preset catalog, and preset package contract",
             (
                 "cargo",
                 "test",
@@ -452,36 +450,9 @@ def command_gates(
             133,
         ),
         Gate(
-            "publisher-tests",
-            "Offline governed drawing-sheet publisher tests",
-            (
-                "cargo",
-                "test",
-                "--locked",
-                "-p",
-                "rspice-sheet-publisher",
-                "-j",
-                cargo_jobs,
-            ),
-            9 if host_system == "Windows" else 7,
-        ),
-        Gate(
             "ui-native-check",
             "Native-host UI compile check",
             ("cargo", "check", "--locked", "-p", "rspice-app", "-j", cargo_jobs),
-        ),
-        Gate(
-            "publisher-native-check",
-            "Native-host publisher compile check",
-            (
-                "cargo",
-                "check",
-                "--locked",
-                "-p",
-                "rspice-sheet-publisher",
-                "-j",
-                cargo_jobs,
-            ),
         ),
     ]
     for target in targets:
@@ -502,24 +473,6 @@ def command_gates(
                 ),
             )
         )
-        if target != "wasm32-unknown-unknown":
-            gates.append(
-                Gate(
-                    f"publisher-target-{target}",
-                    f"Publisher compile check for {target}",
-                    (
-                        "cargo",
-                        "check",
-                        "--locked",
-                        "-p",
-                        "rspice-sheet-publisher",
-                        "-j",
-                        cargo_jobs,
-                        "--target",
-                        target,
-                    ),
-                )
-            )
     return gates
 
 

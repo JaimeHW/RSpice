@@ -1,14 +1,11 @@
 # rspice-design-model
 
-The durable design-management model, the signed drawing-sheet package contract
-built on it, and the Library/Cell/View, port, bus and symbol-pin vocabulary the
-rest of the design stack shares. It is data and rules over data, with no
-rendering and no engine, and it depends on no other RSpice crate. It stands
-alone because two programs must agree on these bytes exactly: `rspice-app`
-imports a signed drawing-sheet package and the offline
-[`rspice-sheet-publisher`](../../tools/rspice-sheet-publisher) signs one, so
-"the publisher signed it" and "the importer will accept it" are one
-implementation, and the signing tool links none of the desktop application.
+The durable design-management model, the drawing-sheet package contract built
+on it, and the Library/Cell/View, port, bus and symbol-pin vocabulary the rest
+of the design stack shares. It is data and rules over data, with no rendering
+and no engine, and it depends on no other RSpice crate, so the design,
+project, hardcopy, simulation and application crates share one definition
+without depending on each other.
 
 ## What's in here
 
@@ -22,15 +19,12 @@ implementation, and the signing tool links none of the desktop application.
 | `symbol_pin` | `SymbolElectricalType` and `SymbolPinSide`, shared by authored and model-bound symbols |
 | `design_management` | `DesignManagementCatalog`: schematic sheet catalogs and cross-sheet ports, drawing-sheet formats, presets and lettering metrics, assembly variants, reference annotation, and hierarchy audit receipts. Mutations validate a cloned candidate before committing, and each persisted structure carries its own schema version and explicit `MAX_*` bounds |
 | `sheet_authoring` | `custom_format` and `validate_dimensions`: a custom drawing-sheet format derived from a `StartingFrame`, which decides margins, border and title block |
-| `sheet_package` | The signed drawing-sheet package: build, encode, parse, inspect, publish and verify, with authenticity decided through a `PublisherTrust` authority |
+| `sheet_package` | The drawing-sheet preset package: build, encode and parse, with a content digest that import recomputes |
 
 ## Boundaries
 
 - Schematic documents, connectivity, hierarchy resolution and configuration
   sets belong to [`rspice-design`](../rspice-design).
-- The revocation-aware publisher trust store the importer passes as
-  `PublisherTrust` is `PdkPublisherTrustStore` in
-  [`rspice-model-library`](../rspice-model-library).
 - The drawing-sheet editing surfaces and package import belong to
   [`rspice-app`](../rspice-app); printed and exported sheets are rendered by
   [`rspice-hardcopy`](../rspice-hardcopy).
@@ -46,22 +40,17 @@ implementation, and the signing tool links none of the desktop application.
   whole-catalog transaction.
 - `BusDeclaration::parse` for a declared bus name.
 - `custom_format(name, width_um, height_um, frame)` for a custom sheet.
-- `sheet_package::parse_package` with a `PublisherTrust` to import a package;
-  `inspect_drawing_sheet_package` to read one without asserting trust.
-- `publish_organization_drawing_sheet_package` and
-  `verify_published_drawing_sheet_package`, the two ends of the offline
-  signing ceremony.
+- `sheet_package::build_package_with_options` and `encode_package_with_format`
+  to export presets; `parse_package` to import a package.
 
-## What a signature covers
+## What the digest covers
 
-A drawing-sheet package signature is Ed25519 over a fixed domain separator
-followed by the projection `canonical_package_contract` builds. That projection
-carries the schema, version, builtin-frame references, source metadata, the
-publisher and signing-key identities, and the presets. The stored
-`source_digest_sha256` and the signature bytes sit outside it and cannot
-influence what was signed. `PACKAGE_SCHEMA` is `rspice-sheet-formats`,
-`PACKAGE_VERSION` is 1, and a package is capped at
-`DRAWING_SHEET_PACKAGE_MAX_BYTES` (4 MiB).
+`source_digest_sha256` is SHA-256 over the projection
+`canonical_package_contract` builds: the schema, version, builtin-frame
+references, source metadata and the presets. The stored digest sits outside
+it. Import recomputes the digest and refuses a package that does not match.
+`PACKAGE_SCHEMA` is `rspice-sheet-formats`, `PACKAGE_VERSION` is 1, and a
+package is capped at `DRAWING_SHEET_PACKAGE_MAX_BYTES` (4 MiB).
 
 ## Testing
 

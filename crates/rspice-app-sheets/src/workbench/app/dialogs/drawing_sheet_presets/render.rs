@@ -12,8 +12,8 @@ use crate::ui::widgets::{Button, text_field};
 
 use super::model::{
     ImportCandidate, ImportResolution, PresetEditorDraft, PresetEditorMode, PresetEditorUnit,
-    PresetPackageFormat, PresetTransferState, StartingFrame, TransferMode, format_dimension_um,
-    unavailable, unsigned_exportable,
+    PresetPackageFormat, PresetTransferState, StartingFrame, TransferMode, exportable,
+    format_dimension_um, unavailable,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -561,7 +561,6 @@ fn library_verbs(
     let owner_writable = match preset.scope {
         DrawingSheetPresetScope::Project => project_writable,
         DrawingSheetPresetScope::User => personal_fresh,
-        DrawingSheetPresetScope::Organization => false,
     };
     if Button::new("Rename")
         .compact()
@@ -784,9 +783,6 @@ fn preset_editor_form(
                 }
                 DrawingSheetPresetScope::User => {
                     "Saved in personal Preferences. A project saves its own copy before using it."
-                }
-                DrawingSheetPresetScope::Organization => {
-                    "Organization definitions are managed and read-only."
                 }
             });
         },
@@ -1193,7 +1189,7 @@ fn export_body(
                     for preset in visible {
                         let identity = super::transfer_identity(preset);
                         let mut selected = transfer.export_ids.contains(&identity);
-                        let available = unsigned_exportable(preset);
+                        let available = exportable(preset);
                         let response =
                             ui.add_enabled(available, egui::Checkbox::new(&mut selected, ""));
                         if response.changed() {
@@ -1427,7 +1423,6 @@ fn scope_badge(ui: &mut Ui, scope: DrawingSheetPresetScope) {
     let color = match scope {
         DrawingSheetPresetScope::Project => t.color.accent,
         DrawingSheetPresetScope::User => t.color.ok,
-        DrawingSheetPresetScope::Organization => t.color.text_dim,
     };
     ui.label(
         RichText::new(scope_label(scope))
@@ -1464,7 +1459,6 @@ fn scope_label(scope: DrawingSheetPresetScope) -> &'static str {
     match scope {
         DrawingSheetPresetScope::Project => "Project",
         DrawingSheetPresetScope::User => "Personal",
-        DrawingSheetPresetScope::Organization => "Organization",
     }
 }
 

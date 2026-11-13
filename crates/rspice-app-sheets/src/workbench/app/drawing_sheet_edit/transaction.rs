@@ -827,9 +827,6 @@ fn save_one_off_custom_preset(
             *sheet_format = attach_project_preset(sheet_format, &captured)?;
             Ok(())
         }
-        DrawingSheetPresetScope::Organization => {
-            Err("Organization custom sizes are managed and cannot be created here.".to_owned())
-        }
     }
 }
 
