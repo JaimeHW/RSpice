@@ -1832,7 +1832,6 @@ pub enum HardcopyFailureCode {
     RenderFailure,
     InsufficientMemory,
     DestinationWriteFailed,
-    SourceChanged,
     InternalFailure,
 }
 
