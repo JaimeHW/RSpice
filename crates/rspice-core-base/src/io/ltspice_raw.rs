@@ -1603,6 +1603,37 @@ mod tests {
             .expect("the first plot is within the limit and still parses on its own");
     }
 
+    /// LTspice's own binary transient: `real forward` with no `double`, the
+    /// time as a double and every other column as single precision.
+    #[test]
+    fn single_precision_ltspice_transient_reads_its_float_values() {
+        let rows: [(f64, [f32; 2]); 3] = [
+            (0.0, [0.0, -1.0e-3]),
+            (1.25e-9, [0.333_333_34, 2.5e-7]),
+            (2.0e-9, [-4.75, f32::MIN_POSITIVE]),
+        ];
+        let mut source = b"Title: * ltspice\nDate: Thu Nov 12 09:00:00 2026\nPlotname: Transient Analysis\nFlags: real forward\nNo. Variables: 3\nNo. Points: 3\nOffset: 0.0000000000000000e+000\nCommand: Linear Technology Corporation LTspice\nVariables:\n\t0\ttime\ttime\n\t1\tV(out)\tvoltage\n\t2\tI(R1)\tdevice_current\nBinary:\n".to_vec();
+        for (time, values) in rows {
+            source.extend_from_slice(&time.to_le_bytes());
+            for value in values {
+                source.extend_from_slice(&value.to_le_bytes());
+            }
+        }
+
+        let parsed = parse_raw_reader(&mut Cursor::new(source)).expect("LTspice transient");
+
+        assert_eq!(parsed.header.flags, ["real", "forward"]);
+        assert!(!parsed.header.is_double);
+        assert_eq!(parsed.header.no_points, 3);
+        let time: Vec<f64> = rows.iter().map(|(time, _)| *time).collect();
+        assert_eq!(parsed.waveforms[0].y, time);
+        for column in 0..2 {
+            let expected: Vec<f64> = rows.iter().map(|(_, row)| f64::from(row[column])).collect();
+            assert_eq!(parsed.waveforms[column + 1].x, time);
+            assert_eq!(parsed.waveforms[column + 1].y, expected);
+        }
+    }
+
     #[test]
     fn binary_raw_rejects_nonfinite_values() {
         let mut source = b"Title: binary\nPlotname: Transient Analysis\nFlags: double\nNo. Variables: 2\nNo. Points: 1\nVariables:\n0 time time\n1 V(out) voltage\nBinary:\n".to_vec();
