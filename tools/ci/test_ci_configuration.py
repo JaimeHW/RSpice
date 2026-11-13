@@ -17,16 +17,6 @@ _XYCE_EXCLUSION_FIXTURE = None
 # target both Verilog-A steps of `ci.yml` name; see
 # `CiConfigurationTests.test_veriloga_gated_core_suites_run_on_both_routes`.
 VERILOGA_GATED_CORE_TEST_EXCLUSIONS = {
-    "veriloga_bsim4_oracle": (
-        "pins DC currents against an externally supplied BSIM4.8 Verilog-A "
-        "source. The file is not vendored (no models/veriloga/bsim4.va, and "
-        "RSPICE_BSIM4_VA is unset on hosted runners), so every case returns "
-        "before it measures anything."
-    ),
-    "veriloga_bsim4_ac_oracle": (
-        "the AC arm of the same externally supplied BSIM4.8 source, unavailable "
-        "for the same reason."
-    ),
     "public_paths_snapshot": (
         "holds no test: it only names public paths, so a route would run "
         "nothing. Its Verilog-A paths are compiled by the all-features Clippy "
@@ -46,7 +36,13 @@ VERILOGA_ROUTE_UNGATED_CORE_TEST_FILES = {
             "parser. The shipped application carries the feature."
         ),
     },
-    "veriloga-native": {},
+    "veriloga-native": {
+        "expression_stack_safety": (
+            "sits in the veriloga folder target both routes run, and the "
+            "native feature deepens the same elaboration frames beneath the "
+            "parser."
+        ),
+    },
 }
 
 # The two routes a Verilog-A module can reach the solver through, and the steps

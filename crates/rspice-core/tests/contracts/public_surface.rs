@@ -109,7 +109,7 @@ use rspice_core::analysis::harmonic_balance::{
 // intended callers are the frontends' support tables (the application's
 // analysis feature tables and the CLI capabilities document); today's caller
 // is the core integration suite that runs every cell on a fixture of its
-// family (`tests/capability_refusals.rs`).
+// family (`tests/veriloga/capability_refusals.rs`).
 // The census was 5,677, with no slack.
 // One statement for `.ESAVE` lists: `netlist::EventSaveSelection`, the type of
 // the public `SimulationOptions::xspice_event_trace_save` field, which the

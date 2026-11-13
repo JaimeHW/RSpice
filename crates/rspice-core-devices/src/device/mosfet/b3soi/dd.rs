@@ -2767,7 +2767,7 @@ mod tests {
     /// the derivatives of that charge: central differences of qb give
     /// cbgb -6.264765149e-15, cbdb -1.482517146e-15, cbsb -8.674656963e-15
     /// and cbeb -2.308062309e-15, up to 4.7e-5 from ngspice's cb**. RSpice
-    /// stamps those derivatives (`tests/device_engine_roundtrip.rs` holds
+    /// stamps those derivatives (`tests/veriloga/device_engine_roundtrip.rs` holds
     /// every entry to that standard).
     #[test]
     fn body_charge_matches_ngspice_oracle_at_ramp_bias() {

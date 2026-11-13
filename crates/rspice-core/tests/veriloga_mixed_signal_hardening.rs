@@ -1,6 +1,6 @@
 //! What the mixed Verilog-AMS interleave promises when something goes wrong.
 //!
-//! [`tests/veriloga_mixed_signal_route.rs`] pins what a deck gets when a mixed
+//! [`tests/veriloga/veriloga_mixed_signal_route.rs`] pins what a deck gets when a mixed
 //! module works. This file pins what it gets when one does not, and what the
 //! engine may not do to a working one on the way past.
 //!
@@ -2218,7 +2218,7 @@ fn a_swept_rerun_starts_the_module_from_its_initial_blocks_every_time() {
 /// trace, transition for transition and bit for bit, because a rejected trial
 /// commits nothing.
 ///
-/// `tests/veriloga_mixed_signal_route.rs` pins the neighbouring case, where the
+/// `tests/veriloga/veriloga_mixed_signal_route.rs` pins the neighbouring case, where the
 /// *step controller* rejects timepoints on truncation error. The two are
 /// separate paths: that one rejects an accepted-candidate trial, this one
 /// abandons a Newton evaluation inside one.
